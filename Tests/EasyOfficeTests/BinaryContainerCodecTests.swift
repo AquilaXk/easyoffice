@@ -491,13 +491,40 @@ final class BinaryContainerCodecTests: XCTestCase {
             guard stream.name == "FileHeader" else { return stream }
             var modified = stream.data
             let currentFlags = try BitPacking.readUInt32LE(from: modified, at: 36)
-            try BitPacking.writeUInt32LE(currentFlags | 0x0000_0002, into: &modified, at: 36)
+            try BitPacking.writeUInt32LE(currentFlags | HWP5BinaryCodec.flagEncrypted, into: &modified, at: 36)
             return OLE2StreamEntry(name: stream.name, data: modified)
         }
         let encryptedHwpData = try OLE2ContainerCodec.pack(streams: encryptedStreams)
 
         XCTAssertThrowsError(try HWP5BinaryCodec.decodeDocument(from: encryptedHwpData)) { error in
             XCTAssertEqual(error as? EasyOfficeError, .encryptedDocumentUnsupported(format: .hwp))
+        }
+
+        // [F1] Fail-Closed: Distribution HWP 5.0 (bit 2 = 0x04 in FileHeader properties UInt32 at offset 36)
+        let distributionStreams = try streams.map { stream -> OLE2StreamEntry in
+            guard stream.name == "FileHeader" else { return stream }
+            var modified = stream.data
+            let currentFlags = try BitPacking.readUInt32LE(from: modified, at: 36)
+            try BitPacking.writeUInt32LE(currentFlags | HWP5BinaryCodec.flagDistribution, into: &modified, at: 36)
+            return OLE2StreamEntry(name: stream.name, data: modified)
+        }
+        let distributionHwpData = try OLE2ContainerCodec.pack(streams: distributionStreams)
+
+        XCTAssertThrowsError(try HWP5BinaryCodec.decodeDocument(from: distributionHwpData)) { error in
+            XCTAssertEqual(error as? EasyOfficeError, .encryptedDocumentUnsupported(format: .hwp))
+        }
+
+        // [F2] Fail-Closed: OLE2 cross-stream sector sharing amplification defense
+        var sharedSectorOLE2 = hwpData
+        // Directory Sector 0 starts at file offset 512; Entry 1 is at 512 + 128, Entry 2 is at 512 + 256.
+        // Force Entry 2's startSector (offset + 116) to equal Entry 1's startSector.
+        let entry1StartSector = try BitPacking.readUInt32LE(from: sharedSectorOLE2, at: 512 + 128 + 116)
+        try BitPacking.writeUInt32LE(entry1StartSector, into: &sharedSectorOLE2, at: 512 + 256 + 116)
+        XCTAssertThrowsError(try OLE2ContainerCodec.unpack(from: sharedSectorOLE2)) { error in
+            guard case .corruptedContainer = error as? EasyOfficeError else {
+                XCTFail("Expected corruptedContainer on cross-stream sector sharing, got \(error)")
+                return
+            }
         }
     }
 
@@ -529,7 +556,13 @@ final class BinaryContainerCodecTests: XCTestCase {
             XCTAssertEqual(error as? EasyOfficeError, .corruptedContainer(detail: "Unclosed quote in CSV/TSV stream"))
         }
 
-        // 2. CommonMark Markdown Codec
+        // [F5] Unexpected quote inside an unquoted field must fail closed
+        let unquotedQuoteCSV = Data("A,바\"보\n".utf8)
+        XCTAssertThrowsError(try CSVStateMachineCodec.decodeWorksheet(from: unquotedQuoteCSV, name: "오류")) { error in
+            XCTAssertEqual(error as? EasyOfficeError, .corruptedContainer(detail: "Unexpected quote inside unquoted CSV/TSV field"))
+        }
+
+        // 2. CommonMark Markdown Codec (including [F3] escaped pipe '|' inside table cell)
         let mdDoc = OfficeDocumentModel(
             title: "릴리스 노트",
             format: .md,
@@ -546,7 +579,7 @@ final class BinaryContainerCodecTests: XCTestCase {
                     caption: "성능 지표",
                     rows: [
                         ["항목", "수치"],
-                        ["CRC-32", "단일 패스"]
+                        ["CRC-32 | SHA-256", "단일 패스"]
                     ],
                     hasHeaderRow: true
                 )
@@ -571,15 +604,15 @@ final class BinaryContainerCodecTests: XCTestCase {
         XCTAssertEqual(decodedMD.paragraphs[5].isItalic, true)
         XCTAssertEqual(decodedMD.paragraphs[5].text, "기울임 텍스트 강조")
         XCTAssertEqual(decodedMD.tables.count, 1)
-        XCTAssertEqual(decodedMD.tables[0].rows, [["항목", "수치"], ["CRC-32", "단일 패스"]])
+        XCTAssertEqual(decodedMD.tables[0].rows, [["항목", "수치"], ["CRC-32 | SHA-256", "단일 패스"]])
 
-        // 3. RTF Codec with Korean Unicode \uN? escapes
+        // 3. RTF Codec with Korean Unicode \uN? escapes and [F3] embedded newline (\line) round-trip
         let rtfDoc = OfficeDocumentModel(
             title: "한글 RTF 문서",
             format: .rtf,
             paragraphs: [
                 ParagraphBlock(style: .title, text: "유니코드 이스케이프 검증", isBold: true),
-                ParagraphBlock(style: .body, text: "한글과 ASCII(123) 및 중괄호 \\ { } 이스케이프를 검증합니다.")
+                ParagraphBlock(style: .body, text: "한글과 ASCII(123) 및 중괄호 \\ { }\n두 번째 줄 이스케이프를 검증합니다.")
             ],
             tables: [
                 DocumentTableBlock(caption: "요약표", rows: [["키", "값"], ["언어", "한국어"]])
@@ -594,7 +627,7 @@ final class BinaryContainerCodecTests: XCTestCase {
         XCTAssertEqual(decodedRTF.paragraphs.count, 2)
         XCTAssertEqual(decodedRTF.paragraphs[0].text, "유니코드 이스케이프 검증")
         XCTAssertEqual(decodedRTF.paragraphs[0].isBold, true)
-        XCTAssertEqual(decodedRTF.paragraphs[1].text, "한글과 ASCII(123) 및 중괄호 \\ { } 이스케이프를 검증합니다.")
+        XCTAssertEqual(decodedRTF.paragraphs[1].text, "한글과 ASCII(123) 및 중괄호 \\ { }\n두 번째 줄 이스케이프를 검증합니다.")
         XCTAssertEqual(decodedRTF.tables.count, 1)
         XCTAssertEqual(decodedRTF.tables[0].rows, [["키", "값"], ["언어", "한국어"]])
     }

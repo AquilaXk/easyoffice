@@ -112,11 +112,17 @@ public enum BitPacking {
         data.append(utf16Bytes)
     }
 
-    /// Decodes a length-prefixed UTF-16LE String from `data` and advances `offset`.
-    public static func readLengthPrefixedUTF16LE(from data: Data, offset: inout Int) throws -> String {
+    /// Decodes a length-prefixed UTF-16LE String from `data` within `limit` and advances `offset`.
+    public static func readLengthPrefixedUTF16LE(from data: Data, offset: inout Int, limit: Int? = nil) throws -> String {
+        let upperBound = min(limit ?? data.count, data.count)
+        guard offset >= 0, offset + 4 <= upperBound else {
+            throw EasyOfficeError.corruptedContainer(
+                detail: "UTF-16LE 문자열 길이 필드 범위 초과 (offset: \(offset), limit: \(upperBound))"
+            )
+        }
         let byteLength = Int(try readUInt32LE(from: data, at: offset))
         offset += 4
-        guard byteLength >= 0, byteLength % 2 == 0, offset + byteLength <= data.count else {
+        guard byteLength >= 0, byteLength % 2 == 0, offset + byteLength <= upperBound else {
             throw EasyOfficeError.corruptedContainer(
                 detail: "유효하지 않은 UTF-16LE 문자열 길이 (\(byteLength) bytes)"
             )
@@ -490,6 +496,9 @@ public enum ZipContainerCodec {
                 uncompressedData = compressedSlice
             case .deflate:
                 if uncompressedSize == 0 {
+                    guard compressedSize == 0 else {
+                        throw EasyOfficeError.corruptedContainer(detail: "Deflate 엔트리 '\(path)'의 원본 크기는 0이지만 압축 데이터가 존재합니다.")
+                    }
                     uncompressedData = Data()
                 } else {
                     uncompressedData = try decompressRawDeflate(compressedSlice, expectedSize: uncompressedSize)
@@ -546,14 +555,15 @@ public enum ZipContainerCodec {
     }
 
     private static func decompressRawDeflate(_ input: Data, expectedSize: Int) throws -> Data {
-        var destination = Data(count: expectedSize)
+        let probeCapacity = expectedSize + 1
+        var destination = Data(count: probeCapacity)
         let decodedBytes = input.withUnsafeBytes { srcBuffer -> Int in
             guard let srcBase = srcBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
             return destination.withUnsafeMutableBytes { dstBuffer -> Int in
                 guard let dstBase = dstBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
                 return compression_decode_buffer(
                     dstBase,
-                    expectedSize,
+                    probeCapacity,
                     srcBase,
                     input.count,
                     nil,
@@ -566,7 +576,7 @@ public enum ZipContainerCodec {
                 detail: "Deflate 압축 해제 크기 불일치 (expected: \(expectedSize), actual: \(decodedBytes))"
             )
         }
-        return destination
+        return Data(destination.prefix(expectedSize))
     }
 }
 
@@ -577,19 +587,8 @@ public enum XMLSanitizer {
 
     public static func validateSafeXML(_ xmlString: String) throws {
         let upper = xmlString.uppercased()
-        if upper.contains("<!ENTITY") {
+        if upper.contains("<!ENTITY") || upper.contains("<!DOCTYPE") {
             throw EasyOfficeError.xxeOrExternalEntityDetected
-        }
-        if let doctypeRange = upper.range(of: "<!DOCTYPE") {
-            let tail = upper[doctypeRange.lowerBound...]
-            if let closeBracket = tail.firstIndex(of: ">") {
-                let headerSlice = tail[...closeBracket]
-                if headerSlice.contains("SYSTEM") || headerSlice.contains("PUBLIC") || headerSlice.contains("[") {
-                    throw EasyOfficeError.xxeOrExternalEntityDetected
-                }
-            } else {
-                throw EasyOfficeError.xxeOrExternalEntityDetected
-            }
         }
     }
 
@@ -1575,11 +1574,13 @@ public enum OLE2ContainerCodec {
             }
         }
 
+        var claimedSectors = Set<UInt32>()
         let directoryData = try readSectorChain(
             startSector: firstDirSector,
             fat: fat,
             data: data,
-            totalSectors: totalSectorsInFile
+            totalSectors: totalSectorsInFile,
+            claimedSectors: &claimedSectors
         )
         guard !directoryData.isEmpty else {
             throw EasyOfficeError.corruptedContainer(detail: "OLE2 디렉터리 섹터 체인이 비어 있습니다.")
@@ -1613,7 +1614,8 @@ public enum OLE2ContainerCodec {
                     startSector: startSector,
                     fat: fat,
                     data: data,
-                    totalSectors: totalSectorsInFile
+                    totalSectors: totalSectorsInFile,
+                    claimedSectors: &claimedSectors
                 )
                 guard rawChain.count >= streamSize else {
                     throw EasyOfficeError.corruptedContainer(detail: "OLE2 스트림 '\(name)'의 섹터 체인 길이가 부족합니다.")
@@ -1629,20 +1631,22 @@ public enum OLE2ContainerCodec {
         startSector: UInt32,
         fat: [UInt32],
         data: Data,
-        totalSectors: Int
+        totalSectors: Int,
+        claimedSectors: inout Set<UInt32>
     ) throws -> Data {
         var output = Data()
         var current = startSector
-        var visited = Set<UInt32>()
 
         while current != endOfChain {
-            guard !visited.contains(current) else {
-                throw EasyOfficeError.corruptedContainer(detail: "OLE2 FAT 체인에서 순환 참조(Cycle)가 감지되었습니다.")
+            guard !claimedSectors.contains(current) else {
+                throw EasyOfficeError.corruptedContainer(
+                    detail: "OLE2 sector cycle or cross-stream sector sharing detected"
+                )
             }
             guard current < UInt32(totalSectors), Int(current) < fat.count else {
                 throw EasyOfficeError.corruptedContainer(detail: "OLE2 FAT 체인이 유효하지 않은 섹터(\(current))를 참조합니다.")
             }
-            visited.insert(current)
+            claimedSectors.insert(current)
 
             let fileOffset = (1 + Int(current)) * sectorSize
             let slice = data.subdata(in: (data.startIndex + fileOffset)..<(data.startIndex + fileOffset + sectorSize))
@@ -1801,7 +1805,7 @@ public enum HWP5BinaryCodec {
         }
 
         let flags = try BitPacking.readUInt32LE(from: fileHeader, at: 36)
-        if (flags & flagEncrypted) != 0 {
+        if (flags & (flagEncrypted | flagDistribution)) != 0 {
             throw EasyOfficeError.encryptedDocumentUnsupported(format: .hwp)
         }
 
@@ -1820,11 +1824,11 @@ public enum HWP5BinaryCodec {
                 throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 DocInfo 레코드가 손상되었습니다.")
             }
             var cursor = headerLen
-            title = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor)
-            let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor)
+            title = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor, limit: recordEnd)
+            let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor, limit: recordEnd)
             paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
-            headerText = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor)
-            footerText = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor)
+            headerText = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor, limit: recordEnd)
+            footerText = try BitPacking.readLengthPrefixedUTF16LE(from: docInfo, offset: &cursor, limit: recordEnd)
             if cursor < recordEnd {
                 trackChanges = docInfo[docInfo.startIndex + cursor] != 0
             }
@@ -1854,9 +1858,9 @@ public enum HWP5BinaryCodec {
                     paragraphs.append(prev)
                 }
                 var pCursor = payloadStart
-                let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &pCursor)
-                let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &pCursor)
-                let fontName = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &pCursor)
+                let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &pCursor, limit: payloadEnd)
+                let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &pCursor, limit: payloadEnd)
+                let fontName = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &pCursor, limit: payloadEnd)
                 guard pCursor + 9 <= payloadEnd else {
                     throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
                 }
@@ -1889,7 +1893,7 @@ public enum HWP5BinaryCodec {
 
             case HWP5RecordHeader.tagTableRecord:
                 var tCursor = payloadStart
-                let caption = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &tCursor)
+                let caption = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &tCursor, limit: payloadEnd)
                 guard tCursor + 3 <= payloadEnd else {
                     throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
                 }
@@ -1897,6 +1901,9 @@ public enum HWP5BinaryCodec {
                 tCursor += 1
                 let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
                 tCursor += 2
+                guard rowCount <= (payloadEnd - tCursor) / 2 else {
+                    throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 페이로드 길이를 초과합니다.")
+                }
                 var rows: [[String]] = []
                 rows.reserveCapacity(rowCount)
                 for _ in 0..<rowCount {
@@ -1905,10 +1912,13 @@ public enum HWP5BinaryCodec {
                     }
                     let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
                     tCursor += 2
+                    guard colCount * 4 <= payloadEnd - tCursor else {
+                        throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 페이로드 길이를 초과합니다.")
+                    }
                     var rowCells: [String] = []
                     rowCells.reserveCapacity(colCount)
                     for _ in 0..<colCount {
-                        let cell = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &tCursor)
+                        let cell = try BitPacking.readLengthPrefixedUTF16LE(from: section0, offset: &tCursor, limit: payloadEnd)
                         rowCells.append(cell)
                     }
                     rows.append(rowCells)

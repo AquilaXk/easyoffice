@@ -12,13 +12,18 @@ public enum CSVStateMachineCodec {
         case quoteInQuotedField
     }
 
+    public static let maxExportRows = 10_000
+    public static let maxExportColumns = 1_024
+
     public static func encodeWorksheet(_ sheet: WorksheetModel, delimiter: Character = ",") -> Data {
         var maxRow = -1
         var maxCol = -1
         var parsedCoordinates: [(address: CellAddress, value: String)] = []
 
         for (key, rawValue) in sheet.rawCells where !rawValue.isEmpty {
-            if let addr = try? CellAddress(a1Notation: key) {
+            if let addr = try? CellAddress(a1Notation: key),
+               addr.row < maxExportRows,
+               addr.column < maxExportColumns {
                 maxRow = max(maxRow, addr.row)
                 maxCol = max(maxCol, addr.column)
                 parsedCoordinates.append((addr, rawValue))
@@ -103,7 +108,11 @@ public enum CSVStateMachineCodec {
                 }
 
             case .inUnquotedField:
-                if ch == delimiter {
+                if ch == "\"" {
+                    throw EasyOfficeError.corruptedContainer(
+                        detail: "Unexpected quote inside unquoted CSV/TSV field"
+                    )
+                } else if ch == delimiter {
                     currentRow.append(currentField)
                     currentField = ""
                     state = .startOfField
@@ -337,10 +346,29 @@ public enum CommonMarkCodec {
     }
 
     private static func parsePipeRow(_ line: String) -> [String] {
-        let stripped = line.dropFirst().dropLast()
-        return stripped
-            .split(separator: "|", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\|", with: "|") }
+        let stripped = String(line.dropFirst().dropLast())
+        let chars = Array(stripped)
+        var cells: [String] = []
+        var current = ""
+        var idx = 0
+
+        while idx < chars.count {
+            let ch = chars[idx]
+            if ch == "\\" && idx + 1 < chars.count && chars[idx + 1] == "|" {
+                current.append("|")
+                idx += 2
+                continue
+            }
+            if ch == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+            } else {
+                current.append(ch)
+            }
+            idx += 1
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        return cells
     }
 }
 
@@ -462,6 +490,14 @@ public enum RTFCodec {
                         utf16Units.append(u)
                     }
                     idx += 2
+                    continue
+                }
+                if idx + 5 <= chars.count && String(chars[idx..<(idx + 5)]) == "\\line" {
+                    utf16Units.append(0x0A)
+                    idx += 5
+                    if idx < chars.count && chars[idx] == " " {
+                        idx += 1
+                    }
                     continue
                 }
                 if next == "u" {
