@@ -86,6 +86,114 @@ public enum OfficeModuleKind: String, CaseIterable, Sendable, Codable, Identifia
     }
 }
 
+/// Resolved surface and text token set for Light Lavender or Dark Indigo-Charcoal workspace modes.
+public struct WorkspaceThemePalette: Sendable, Equatable, Hashable {
+    public let background: RGBColorToken
+    public let cardSurface: RGBColorToken
+    public let elevatedSurface: RGBColorToken
+    public let border: RGBColorToken
+    public let primaryText: RGBColorToken
+    public let secondaryText: RGBColorToken
+
+    public init(
+        background: RGBColorToken,
+        cardSurface: RGBColorToken,
+        elevatedSurface: RGBColorToken,
+        border: RGBColorToken,
+        primaryText: RGBColorToken,
+        secondaryText: RGBColorToken
+    ) {
+        self.background = background
+        self.cardSurface = cardSurface
+        self.elevatedSurface = elevatedSurface
+        self.border = border
+        self.primaryText = primaryText
+        self.secondaryText = secondaryText
+    }
+}
+
+/// Workspace appearance mode supporting System, Light Lavender, and Dark Indigo-Charcoal themes.
+public enum WorkspaceThemeMode: String, CaseIterable, Sendable, Codable, Identifiable {
+    case system = "시스템 연동 (System)"
+    case lightLavender = "라이트 라벤더 (Light)"
+    case darkIndigo = "다크 인디고 (Dark)"
+
+    public var id: String { rawValue }
+
+    public func surfacePalette(isSystemDark: Bool) -> WorkspaceThemePalette {
+        let useDark: Bool
+        switch self {
+        case .system:
+            useDark = isSystemDark
+        case .lightLavender:
+            useDark = false
+        case .darkIndigo:
+            useDark = true
+        }
+
+        if useDark {
+            return WorkspaceThemePalette(
+                background: EasyOfficeDesignTokens.darkScaffold,
+                cardSurface: EasyOfficeDesignTokens.darkSurface,
+                elevatedSurface: EasyOfficeDesignTokens.darkElevated,
+                border: EasyOfficeDesignTokens.darkBorder,
+                primaryText: EasyOfficeDesignTokens.darkText,
+                secondaryText: EasyOfficeDesignTokens.darkMuted
+            )
+        } else {
+            return WorkspaceThemePalette(
+                background: EasyOfficeDesignTokens.lightScaffold,
+                cardSurface: EasyOfficeDesignTokens.lightWhite,
+                elevatedSurface: EasyOfficeDesignTokens.lightSubtle,
+                border: EasyOfficeDesignTokens.lightBorder,
+                primaryText: EasyOfficeDesignTokens.inkPrimary,
+                secondaryText: EasyOfficeDesignTokens.inkSecondary
+            )
+        }
+    }
+}
+
+/// Deterministic VoiceOver labels and accessibility hints for macOS workspace elements.
+public enum AccessibilityTokens {
+    public static func tabLabel(
+        fileName: String,
+        module: OfficeModuleKind,
+        isPinned: Bool,
+        isModified: Bool
+    ) -> String {
+        var parts = ["\(module.displayNameKo) 탭", fileName]
+        if isPinned { parts.append("고정됨") }
+        if isModified { parts.append("수정됨") }
+        return parts.joined(separator: ", ")
+    }
+
+    public static let tabHint = "클릭하여 해당 문서 탭을 활성화하거나 보조 클릭으로 분할 보기를 엽니다."
+
+    public static func ribbonCollapseToggleLabel(isCollapsed: Bool) -> String {
+        isCollapsed ? "컨텍스트 리본 펼치기 (Cmd+Opt+R)" : "컨텍스트 리본 접기 (Cmd+Opt+R)"
+    }
+
+    public static let ribbonControlHint = "현재 활성 문서 모듈에 맞는 편집 명령을 실행합니다."
+
+    public static func splitViewPaneLabel(isPrimary: Bool, fileName: String) -> String {
+        isPrimary ? "주 편집 영역: \(fileName)" : "보조 분할 편집 영역: \(fileName)"
+    }
+
+    public static func formulaBarLabel(selectedCell: String) -> String {
+        "시트 수식 입력줄, 선택된 셀 \(selectedCell)"
+    }
+
+    public static let formulaBarHint = "수식이나 값을 입력한 뒤 Enter 또는 적용 버튼을 눌러 셀을 계산합니다."
+
+    public static func slideStageLabel(slideNumber: Int, totalSlides: Int) -> String {
+        "슬라이드 스테이지 캔버스, 전체 \(totalSlides)장 중 \(slideNumber)번 슬라이드"
+    }
+
+    public static func pdfAnnotationToolLabel(toolTitle: String) -> String {
+        "PDF 주석 도구: \(toolTitle)"
+    }
+}
+
 /// Signature Lavender Design System tokens and macOS workspace layout metrics.
 public enum EasyOfficeDesignTokens {
     // MARK: - Signature Brand Lavender Scale ("우리의 결")
@@ -117,6 +225,12 @@ public enum EasyOfficeDesignTokens {
     public static let darkBorder = RGBColorToken(red: 0x2C, green: 0x34, blue: 0x52, hex: "#2C3452")
     public static let darkText = RGBColorToken(red: 0xF8, green: 0xF9, blue: 0xFD, hex: "#F8F9FD")
     public static let darkMuted = RGBColorToken(red: 0x8A, green: 0x94, blue: 0xB8, hex: "#8A94B8")
+
+    // MARK: - Semantic Status Tokens (WCAG 2.1 AA Verified >= 4.5 on White)
+    public static let statusSuccess = RGBColorToken(red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")
+    public static let statusWarning = RGBColorToken(red: 0xB4, green: 0x53, blue: 0x09, hex: "#B45309")
+    public static let statusDanger = RGBColorToken(red: 0xC8, green: 0x1E, blue: 0x1E, hex: "#C81E1E")
+    public static let statusInfo = RGBColorToken(red: 0x4A, green: 0x58, blue: 0xA9, hex: "#4A58A9")
 
     // MARK: - Module Semantic Accents
     public static func accentToken(for module: OfficeModuleKind) -> RGBColorToken {
@@ -159,5 +273,8 @@ public enum EasyOfficeDesignTokens {
         public static let statusBarHeight: CGFloat = 28
         public static let minimumWindowWidth: CGFloat = 1120
         public static let minimumWindowHeight: CGFloat = 740
+        public static let splitPaneMinimumWidth: CGFloat = 420
+        public static let formulaBarHeight: CGFloat = 34
+        public static let slideFilmstripWidth: CGFloat = 210
     }
 }
