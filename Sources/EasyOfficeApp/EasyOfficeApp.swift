@@ -28,6 +28,11 @@ struct EasyOfficeApplication: App {
                 }
                 .keyboardShortcut("0", modifiers: [.command])
 
+                Button("컨텍스트 리본 접기/펼치기") {
+                    viewModel.isRibbonCollapsed.toggle()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+
                 Button("좌측 내비게이터 토글") {
                     viewModel.showLeftNavigator.toggle()
                 }
