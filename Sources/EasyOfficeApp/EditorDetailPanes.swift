@@ -5,6 +5,7 @@ import EasyOfficeCore
 
 /// Rich interactive editor pane for Document (.docx/.odt/.md) and Korean Office (.hwp/.hwpx) modules.
 public struct DocumentEditorDetailPaneView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let document: OfficeDocumentModel
     let isPrimaryPane: Bool
@@ -16,7 +17,7 @@ public struct DocumentEditorDetailPaneView: View {
     }
 
     public var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
         let tocEntries = document.generateTableOfContents()
         let mergedPreview = document.applyingMailMerge(record: [
             "부서명": "플랫폼아키텍처실",
@@ -157,7 +158,9 @@ public struct DocumentEditorDetailPaneView: View {
                     }
                 }
 
-                if let mergedHeading = mergedPreview.paragraphs.first(where: { $0.text != document.paragraphs.first(where: { $0.id == $0.id })?.text }) ?? mergedPreview.paragraphs.dropFirst().first {
+                if let mergedHeading = mergedPreview.paragraphs.first(where: { mergedParagraph in
+                    mergedParagraph.text != document.paragraphs.first(where: { $0.id == mergedParagraph.id })?.text
+                }) {
                     HStack(spacing: 6) {
                         Image(systemName: "envelope.badge.person.crop")
                             .font(.system(size: 11))
@@ -233,6 +236,7 @@ public struct DocumentEditorDetailPaneView: View {
 
 /// Rich interactive editor pane for Sheet (.xlsx/.ods/.csv) with Formula Bar, 77-function badge, Pivot Table summary, and Chart preview.
 public struct SheetEditorDetailPaneView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let sheet: WorksheetModel
     let isPrimaryPane: Bool
@@ -244,7 +248,7 @@ public struct SheetEditorDetailPaneView: View {
     }
 
     public var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
         let pivotSummary: PivotTableSummary? = {
             guard let range = try? CellRange(notation: "A1:D4") else { return nil }
             let config = PivotTableConfiguration(rowFieldColumnIndex: 0, valueFieldColumnIndex: 3, aggregation: .sum)
@@ -410,6 +414,7 @@ public struct SheetEditorDetailPaneView: View {
 
 /// Rich interactive editor pane for Slide (.pptx/.odp) with Filmstrip, Stage Canvas, Smart Alignment Guides badge, and Presenter Mode sheet.
 public struct SlideEditorDetailPaneView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let deck: PresentationDeckModel
 
@@ -419,7 +424,7 @@ public struct SlideEditorDetailPaneView: View {
     }
 
     public var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
         let activeIdx = deck.slides.indices.contains(viewModel.selectedSlideIndex) ? viewModel.selectedSlideIndex : 0
         let currentSlide = deck.slides.indices.contains(activeIdx) ? deck.slides[activeIdx] : nil
         let presenterSession = PresenterSession(deck: deck, currentSlideIndex: activeIdx, elapsedSeconds: 95)
@@ -591,6 +596,7 @@ public struct SlideEditorDetailPaneView: View {
 
 /// Rich interactive editor pane for PDF Studio (.pdf) with Page Thumbnails, Outline Tree, Annotation Toolbar, and Rotate/Convert controls.
 public struct PDFStudioEditorDetailPaneView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let pdf: PDFStudioDocumentModel
     let isPrimaryPane: Bool
@@ -602,7 +608,7 @@ public struct PDFStudioEditorDetailPaneView: View {
     }
 
     public var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         VStack(alignment: .leading, spacing: 14) {
             // PDF Studio Action & Annotation Toolbar

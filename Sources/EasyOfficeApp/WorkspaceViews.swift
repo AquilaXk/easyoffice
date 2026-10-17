@@ -4,6 +4,7 @@ import EasyOfficeDesignSystem
 import EasyOfficeCore
 
 public struct MainWorkspaceWindowView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
 
     public init(viewModel: WorkspaceViewModel) {
@@ -11,7 +12,7 @@ public struct MainWorkspaceWindowView: View {
     }
 
     public var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         VStack(spacing: 0) {
             TopDocumentTabStripView(viewModel: viewModel)
@@ -69,10 +70,11 @@ public struct MainWorkspaceWindowView: View {
 }
 
 struct TopDocumentTabStripView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
 
     var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         HStack(spacing: 8) {
             Button {
@@ -219,11 +221,12 @@ struct TopDocumentTabStripView: View {
 }
 
 struct ContextRibbonBarView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let activeModule: OfficeModuleKind
 
     var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
         let commands = RibbonCategory.actions(for: viewModel.activeRibbonCategory, module: activeModule)
 
         VStack(alignment: .leading, spacing: 6) {
@@ -336,6 +339,14 @@ struct ContextRibbonBarView: View {
             viewModel.isRibbonCollapsed.toggle()
         } else if command.id.hasSuffix("-view-zoom") {
             viewModel.setZoom(100.0)
+        } else if command.id.hasSuffix("-view-split") {
+            if viewModel.splitSecondaryTab != nil {
+                viewModel.enableSplitView(secondaryTabID: nil)
+            } else if let candidate = viewModel.openTabs.first(where: { $0.id != viewModel.activeTabID }) {
+                viewModel.enableSplitView(secondaryTabID: candidate.id)
+            }
+        } else if command.id.hasSuffix("-view-theme") {
+            viewModel.themeMode = (viewModel.themeMode == .darkIndigo) ? .lightLavender : .darkIndigo
         } else if command.id == "pdf-mod-rotate" {
             viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
         } else if command.id == "slide-mod-presenter" {
@@ -345,10 +356,11 @@ struct ContextRibbonBarView: View {
 }
 
 struct HomeHubWorkspaceView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
 
     var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
@@ -519,11 +531,12 @@ struct HomeHubWorkspaceView: View {
 }
 
 struct LeftNavigatorPanelView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let tab: WorkspaceTabItem
 
     var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         VStack(alignment: .leading, spacing: 10) {
             Text("\(tab.moduleKind.shortBadgeTitle) 구조 내비게이터")
@@ -614,11 +627,12 @@ struct CentralEditorCanvasView: View {
 }
 
 struct RightContextualInspectorView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let tab: WorkspaceTabItem
 
     var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         VStack(alignment: .leading, spacing: 12) {
             Text("속성 인스펙터")
@@ -693,11 +707,12 @@ struct RightContextualInspectorView: View {
 }
 
 struct BottomStatusBarView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let tab: WorkspaceTabItem
 
     var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: false)
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         HStack(spacing: 12) {
             Text("\(tab.moduleKind.displayNameKo) · \(tab.format.standardSpecification)")

@@ -64,16 +64,23 @@ final class WorkspaceUIParityTests: XCTestCase {
         XCTAssertEqual(sysLight, lightPalette)
         XCTAssertEqual(sysDark, darkPalette)
 
-        // Deterministic AccessibilityTokens
-        XCTAssertFalse(AccessibilityTokens.tabLabel(fileName: "기획안.docx", module: .document, isPinned: true, isModified: true).isEmpty)
-        XCTAssertTrue(AccessibilityTokens.tabLabel(fileName: "기획안.docx", module: .document, isPinned: true, isModified: true).contains("기획안.docx"))
+        // Deterministic AccessibilityTokens with concrete argument differentiation
+        let pinnedModifiedTabLabel = AccessibilityTokens.tabLabel(fileName: "기획안.docx", module: .document, isPinned: true, isModified: true)
+        let plainTabLabel = AccessibilityTokens.tabLabel(fileName: "기획안.docx", module: .document, isPinned: false, isModified: false)
+        XCTAssertTrue(pinnedModifiedTabLabel.contains("기획안.docx"))
+        XCTAssertNotEqual(pinnedModifiedTabLabel, plainTabLabel)
         XCTAssertFalse(AccessibilityTokens.tabHint.isEmpty)
-        XCTAssertFalse(AccessibilityTokens.ribbonCollapseToggleLabel(isCollapsed: false).isEmpty)
-        XCTAssertFalse(AccessibilityTokens.ribbonCollapseToggleLabel(isCollapsed: true).isEmpty)
-        XCTAssertFalse(AccessibilityTokens.splitViewPaneLabel(isPrimary: true, fileName: "문서A.hwpx").isEmpty)
-        XCTAssertFalse(AccessibilityTokens.formulaBarLabel(selectedCell: "D2").isEmpty)
-        XCTAssertFalse(AccessibilityTokens.slideStageLabel(slideNumber: 1, totalSlides: 5).isEmpty)
-        XCTAssertFalse(AccessibilityTokens.pdfAnnotationToolLabel(toolTitle: "형광펜 하이라이트").isEmpty)
+        let expandedRibbonLabel = AccessibilityTokens.ribbonCollapseToggleLabel(isCollapsed: false)
+        let collapsedRibbonLabel = AccessibilityTokens.ribbonCollapseToggleLabel(isCollapsed: true)
+        XCTAssertNotEqual(expandedRibbonLabel, collapsedRibbonLabel)
+        let primaryPaneLabel = AccessibilityTokens.splitViewPaneLabel(isPrimary: true, fileName: "문서A.hwpx")
+        let secondaryPaneLabel = AccessibilityTokens.splitViewPaneLabel(isPrimary: false, fileName: "문서B.hwpx")
+        XCTAssertTrue(primaryPaneLabel.contains("문서A.hwpx"))
+        XCTAssertTrue(secondaryPaneLabel.contains("문서B.hwpx"))
+        XCTAssertNotEqual(primaryPaneLabel, secondaryPaneLabel)
+        XCTAssertTrue(AccessibilityTokens.formulaBarLabel(selectedCell: "D2").contains("D2"))
+        XCTAssertTrue(AccessibilityTokens.slideStageLabel(slideNumber: 1, totalSlides: 5).contains("5"))
+        XCTAssertTrue(AccessibilityTokens.pdfAnnotationToolLabel(toolTitle: "형광펜 하이라이트").contains("형광펜 하이라이트"))
     }
 
     func testRibbonCategoryAndCommandDescriptorCompleteness() {
@@ -184,16 +191,25 @@ final class WorkspaceUIParityTests: XCTestCase {
         // Duplicate tab
         let countBeforeDup = vm.openTabs.count
         vm.duplicateTab(id: firstID)
+        let duplicatedTabID = vm.activeTabID
         XCTAssertEqual(vm.openTabs.count, countBeforeDup + 1)
-        XCTAssertNotEqual(vm.activeTabID, firstID)
+        XCTAssertNotEqual(duplicatedTabID, firstID)
         XCTAssertTrue(vm.activeTab?.fileName.contains("사본") == true)
 
-        // Split View enable/disable and closing secondary tab cleans up splitSecondaryTabID
+        // Split View enable/disable, activeTabID collision reset, and closeTab cleanup
         vm.activeTabID = firstID
         vm.enableSplitView(secondaryTabID: secondID)
         XCTAssertEqual(vm.splitSecondaryTabID, secondID)
-        vm.enableSplitView(secondaryTabID: nil)
+        vm.activeTabID = secondID
         XCTAssertNil(vm.splitSecondaryTabID)
+
+        if let dupID = duplicatedTabID {
+            vm.activeTabID = firstID
+            vm.enableSplitView(secondaryTabID: dupID)
+            XCTAssertEqual(vm.splitSecondaryTabID, dupID)
+            vm.closeTab(id: dupID)
+            XCTAssertNil(vm.splitSecondaryTabID)
+        }
 
         // Save active tab as custom template
         XCTAssertTrue(vm.customTemplates.isEmpty)

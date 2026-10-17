@@ -546,7 +546,13 @@ public struct WorkspaceHubCatalog: Sendable {
 @Observable
 public final class WorkspaceViewModel {
     public var openTabs: [WorkspaceTabItem]
-    public var activeTabID: UUID?
+    public var activeTabID: UUID? {
+        didSet {
+            if let activeTabID, splitSecondaryTabID == activeTabID {
+                splitSecondaryTabID = nil
+            }
+        }
+    }
     public var splitSecondaryTabID: UUID? = nil
     public var isShowingHomeHub: Bool = false
     public var activeHubSection: HubSection = .home
@@ -605,6 +611,9 @@ public final class WorkspaceViewModel {
         }
         if activeTabID == id {
             activeTabID = openTabs.first?.id
+        }
+        if splitSecondaryTabID == activeTabID {
+            splitSecondaryTabID = nil
         }
         if openTabs.isEmpty {
             isShowingHomeHub = true
