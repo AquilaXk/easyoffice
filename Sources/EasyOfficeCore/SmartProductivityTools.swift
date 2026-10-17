@@ -78,7 +78,7 @@ public enum PDFBinarySerializer {
         }
 
         let rawText = String(decoding: data, as: UTF8.self)
-        guard rawText.contains("obj") || rawText.contains("%%EOF") else {
+        guard rawText.contains("obj") && rawText.contains("%%EOF") else {
             throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 객체(obj) 또는 %%EOF 트레일러가 없습니다.")
         }
 
@@ -96,12 +96,19 @@ public enum PDFBinarySerializer {
                     throw EasyOfficeError.corruptedContainer(detail: "PDF 모델 역직렬화 실패: \(error.localizedDescription)")
                 }
             }
+            if trimmed.contains("/Encrypt") {
+                throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
+            }
         }
 
         // Fallback parser for standard minimal PDF streams without embedded studio metadata
         var pages: [PDFPageDescriptor] = []
+        var sawPageObject = false
         var currentRotate = 0
         for line in lines {
+            if line.contains("/Type /Page") && !line.contains("/Type /Pages") {
+                sawPageObject = true
+            }
             if let rotRange = line.range(of: "/Rotate ") {
                 let after = line[rotRange.upperBound...]
                 let digits = after.prefix(while: { $0.isNumber || $0 == "-" })
@@ -125,7 +132,10 @@ public enum PDFBinarySerializer {
         }
 
         if pages.isEmpty {
-            pages.append(PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: ""))
+            guard sawPageObject else {
+                throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 페이지(/Type /Page) 객체가 없습니다.")
+            }
+            pages.append(PDFPageDescriptor(pageNumber: 1, rotationDegrees: currentRotate, extractedText: ""))
         }
         return PDFStudioDocumentModel(title: "PDF 문서", pages: pages)
     }
@@ -140,12 +150,33 @@ public enum PDFBinarySerializer {
     }
 
     private static func unescapePDFString(_ input: String) -> String {
-        input
-            .replacingOccurrences(of: "\\n", with: "\n")
-            .replacingOccurrences(of: "\\r", with: "\r")
-            .replacingOccurrences(of: "\\)", with: ")")
-            .replacingOccurrences(of: "\\(", with: "(")
-            .replacingOccurrences(of: "\\\\", with: "\\")
+        var result = ""
+        result.reserveCapacity(input.count)
+        var index = input.startIndex
+        while index < input.endIndex {
+            let ch = input[index]
+            if ch == "\\" {
+                let nextIndex = input.index(after: index)
+                guard nextIndex < input.endIndex else {
+                    result.append("\\")
+                    break
+                }
+                let escaped = input[nextIndex]
+                switch escaped {
+                case "n": result.append("\n")
+                case "r": result.append("\r")
+                case "(": result.append("(")
+                case ")": result.append(")")
+                case "\\": result.append("\\")
+                default: result.append(escaped)
+                }
+                index = input.index(after: nextIndex)
+            } else {
+                result.append(ch)
+                index = input.index(after: index)
+            }
+        }
+        return result
     }
 }
 
@@ -227,9 +258,17 @@ public struct BatchConversionReport: Sendable {
 public enum DocumentConversionOrchestrator {
 
     public static func convert(_ request: ConversionJobRequest) throws -> ConversionJobResult {
+        if request.sourceFileName.utf8.contains(0x00) {
+            throw EasyOfficeError.securityViolation(detail: "변환 파일명에 NUL 바이트가 포함되어 있습니다.")
+        }
         let trimmedSourceName = request.sourceFileName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedSourceName.isEmpty else {
             throw EasyOfficeError.unsupportedExtension(request.sourceFileName)
+        }
+        if trimmedSourceName.contains("/")
+            || trimmedSourceName.contains("\\")
+            || trimmedSourceName.contains("..") {
+            throw EasyOfficeError.securityViolation(detail: "변환 원본 파일명에 경로 구분자 또는 상위 디렉터리 참조가 포함되어 있습니다: \(request.sourceFileName)")
         }
 
         let baseName: String
@@ -237,6 +276,9 @@ public enum DocumentConversionOrchestrator {
             baseName = String(trimmedSourceName[..<dotIdx])
         } else {
             baseName = trimmedSourceName
+        }
+        guard !baseName.isEmpty, baseName != "." else {
+            throw EasyOfficeError.unsupportedExtension(request.sourceFileName)
         }
         let outputFileName = "\(baseName).\(request.targetFormat.fileExtension)"
 
@@ -1204,7 +1246,7 @@ public enum LocalSmartDocumentAssistant {
         for raw in components {
             var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             guard cleaned.count >= 2 else { continue }
-            for suffix in ["은", "는", "이", "가", "을", "를", "에", "의", "와", "과", "도", "로", "으로"] {
+            for suffix in ["으로", "은", "는", "이", "가", "을", "를", "에", "의", "와", "과", "도", "로"] {
                 if cleaned.count > suffix.count + 1 && cleaned.hasSuffix(suffix) {
                     cleaned.removeLast(suffix.count)
                     break
@@ -1334,14 +1376,21 @@ public enum DocumentSecurityAuditor {
             do {
                 let entries = try ZipContainerCodec.unpack(from: data)
                 for entry in entries {
-                    if let xmlText = String(data: entry.data, encoding: .utf8) {
-                        do {
-                            try XMLSanitizer.validateSafeXML(xmlText)
-                        } catch {
-                            isSafeFromXXE = false
-                            let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                            issues.append(desc)
-                        }
+                    let lowerPath = entry.path.lowercased()
+                    let isXMLPayload = lowerPath.hasSuffix(".xml")
+                        || lowerPath.hasSuffix(".rels")
+                        || lowerPath.hasSuffix(".hpf")
+                    if isXMLPayload, String(data: entry.data, encoding: .utf8) == nil {
+                        isSafeFromBombAndTraversal = false
+                        issues.append("ZIP 내부 XML 엔트리가 유효한 UTF-8이 아닙니다: \(entry.path)")
+                    }
+                    let lossyText = String(decoding: entry.data, as: UTF8.self)
+                    do {
+                        try XMLSanitizer.validateSafeXML(lossyText)
+                    } catch {
+                        isSafeFromXXE = false
+                        let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        issues.append(desc)
                     }
                 }
             } catch let error as EasyOfficeError {
@@ -1362,8 +1411,22 @@ public enum DocumentSecurityAuditor {
         case .ole2Compound:
             do {
                 let streams = try OLE2ContainerCodec.unpack(from: data)
-                for stream in streams where stream.name == "FileHeader" && stream.data.count >= 40 {
-                    let flags = try BitPacking.readUInt32LE(from: stream.data, at: 36)
+                for stream in streams {
+                    if stream.name == "EncryptionInfo" || stream.name == "EncryptedPackage" {
+                        isUnencrypted = false
+                        let err = EasyOfficeError.encryptedDocumentUnsupported(format: verified.format)
+                        issues.append(err.errorDescription ?? "암호화된 OLE2 컨테이너입니다.")
+                    }
+                }
+                if verified.format == .hwp || verified.format == .hwt {
+                    guard let headerStream = streams.first(where: { $0.name == "FileHeader" }),
+                          headerStream.data.count >= 40,
+                          headerStream.data.starts(with: Data(HWP5BinaryCodec.signatureString.utf8)) else {
+                        isSafeFromBombAndTraversal = false
+                        issues.append("HWP 5.0 FileHeader 스트림이 누락되었거나 손상되었습니다.")
+                        break
+                    }
+                    let flags = try BitPacking.readUInt32LE(from: headerStream.data, at: 36)
                     if (flags & (HWP5BinaryCodec.flagEncrypted | HWP5BinaryCodec.flagDistribution)) != 0 {
                         isUnencrypted = false
                         let err = EasyOfficeError.encryptedDocumentUnsupported(format: verified.format)
@@ -1378,6 +1441,10 @@ public enum DocumentSecurityAuditor {
 
         case .pdfBinary:
             let rawString = String(decoding: data, as: UTF8.self)
+            if !rawString.contains("obj") || !rawString.contains("%%EOF") {
+                isSafeFromBombAndTraversal = false
+                issues.append("PDF 컨테이너에 유효한 객체(obj) 또는 %%EOF 트레일러가 없습니다.")
+            }
             if rawString.contains("/Encrypt") {
                 isUnencrypted = false
                 let err = EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
@@ -1385,14 +1452,17 @@ public enum DocumentSecurityAuditor {
             }
 
         case .rtfText, .plainText:
-            if let text = String(data: data, encoding: .utf8) {
-                do {
-                    try XMLSanitizer.validateSafeXML(text)
-                } catch {
-                    isSafeFromXXE = false
-                    let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    issues.append(desc)
-                }
+            if String(data: data, encoding: .utf8) == nil || data.contains(0x00) {
+                isSafeFromBombAndTraversal = false
+                issues.append("텍스트/RTF 컨테이너에 유효하지 않은 UTF-8 또는 NUL 바이트가 포함되어 있습니다.")
+            }
+            let lossyText = String(decoding: data, as: UTF8.self)
+            do {
+                try XMLSanitizer.validateSafeXML(lossyText)
+            } catch {
+                isSafeFromXXE = false
+                let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                issues.append(desc)
             }
         }
 

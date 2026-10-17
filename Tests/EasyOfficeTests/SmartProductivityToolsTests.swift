@@ -480,5 +480,98 @@ final class SmartProductivityToolsTests: XCTestCase {
         )
         XCTAssertFalse(spoofAudit.isPassed)
         XCTAssertFalse(spoofAudit.isSignatureValid)
+
+        // 6. Non-UTF8 XML inside ZIP container and OLE2 EncryptionInfo stream (F3)
+        let nonUTF8Zip = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "word/document.xml", data: Data([0xFF, 0xFE, 0x3C]), compressionMethod: .store)
+        ])
+        let nonUTF8Audit = DocumentSecurityAuditor.auditContainer(data: nonUTF8Zip, fileName: "nonutf8.docx")
+        XCTAssertFalse(nonUTF8Audit.isPassed)
+        XCTAssertFalse(nonUTF8Audit.isSafeFromBombAndTraversal)
+
+        let encryptedOLE2 = try OLE2ContainerCodec.pack(streams: [
+            OLE2StreamEntry(name: "EncryptionInfo", data: Data([0x04, 0x00, 0x04, 0x00])),
+            OLE2StreamEntry(name: "EncryptedPackage", data: Data(repeating: 0xAA, count: 32))
+        ])
+        let ole2EncAudit = DocumentSecurityAuditor.auditContainer(data: encryptedOLE2, fileName: "locked.doc")
+        XCTAssertFalse(ole2EncAudit.isPassed)
+        XCTAssertFalse(ole2EncAudit.isUnencrypted)
+
+        let missingHeaderHWP = try OLE2ContainerCodec.pack(streams: [
+            OLE2StreamEntry(name: "BodyText/Section0", data: Data([0x01, 0x02]))
+        ])
+        let missingHeaderAudit = DocumentSecurityAuditor.auditContainer(data: missingHeaderHWP, fileName: "broken.hwp")
+        XCTAssertFalse(missingHeaderAudit.isPassed)
+        XCTAssertFalse(missingHeaderAudit.isSafeFromBombAndTraversal)
+    }
+
+    func testPDFFallbackParserEscapeOrderEncryptedAndPathTraversalRegression() throws {
+        // F1: Standard PDF without studio metadata stream + literal backslash-n ("C:\\new\nLine2")
+        let rawMinimalPDF = """
+        %PDF-1.7
+        1 0 obj
+        << /Type /Catalog /Pages 2 0 R >>
+        endobj
+        2 0 obj
+        << /Type /Pages /Count 1 /Kids [3 0 R] >>
+        endobj
+        3 0 obj
+        << /Type /Page /Parent 2 0 R /Rotate 90 >>
+        endobj
+        4 0 obj
+        << /Length 44 >>
+        stream
+        BT /F1 11 Tf 56 780 Td (C:\\\\new\\nLine2) Tj ET
+        endstream
+        endobj
+        %%EOF
+        """
+        let decodedFallback = try PDFBinarySerializer.decode(from: Data(rawMinimalPDF.utf8))
+        XCTAssertEqual(decodedFallback.pages.count, 1)
+        XCTAssertEqual(decodedFallback.pages[0].rotationDegrees, 90)
+        XCTAssertEqual(decodedFallback.pages[0].extractedText, "C:\\new\nLine2")
+
+        // F1: Encrypted PDF must throw encryptedDocumentUnsupported(.pdf)
+        let encryptedPDF = """
+        %PDF-1.7
+        1 0 obj
+        << /Type /Catalog /Encrypt 5 0 R >>
+        endobj
+        %%EOF
+        """
+        XCTAssertThrowsError(try PDFBinarySerializer.decode(from: Data(encryptedPDF.utf8))) { err in
+            XCTAssertEqual(err as? EasyOfficeError, .encryptedDocumentUnsupported(format: .pdf))
+        }
+
+        // F1: Pageless PDF must throw corruptedContainer
+        let pagelessPDF = """
+        %PDF-1.7
+        1 0 obj
+        << /Type /Catalog >>
+        endobj
+        %%EOF
+        """
+        XCTAssertThrowsError(try PDFBinarySerializer.decode(from: Data(pagelessPDF.utf8)))
+
+        // F2: Path traversal in DocumentConversionOrchestrator.convert must throw securityViolation
+        let doc = OfficeDocumentModel(title: "Test", paragraphs: [ParagraphBlock(text: "Body")])
+        let traversalReq = ConversionJobRequest(
+            sourceFileName: "../../etc/passwd.docx",
+            sourceFormat: .docx,
+            targetFormat: .pdf,
+            payload: .document(doc)
+        )
+        XCTAssertThrowsError(try DocumentConversionOrchestrator.convert(traversalReq))
+
+        // F4: Two-character Korean particle "으로" must normalize to the same stem as "은"
+        let stemDoc = OfficeDocumentModel(
+            title: "아키텍처 보고서",
+            paragraphs: [
+                ParagraphBlock(text: "차세대 엔진 기반으로 고속 문서 처리를 달성합니다. 아키텍처 기반은 안전합니다.")
+            ]
+        )
+        let summary = LocalSmartDocumentAssistant.summarize(stemDoc, maxSentences: 1)
+        XCTAssertTrue(summary.keywords.contains("기반"))
+        XCTAssertFalse(summary.keywords.contains("기반으"))
     }
 }
