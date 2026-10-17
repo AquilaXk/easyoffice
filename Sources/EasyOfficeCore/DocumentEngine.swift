@@ -192,8 +192,13 @@ public struct DocumentTableBlock: Sendable, Codable, Equatable, Identifiable {
         guard startRow >= 0, startCol >= 0, rowSpan >= 1, colSpan >= 1, (rowSpan > 1 || colSpan > 1) else {
             return
         }
-        let endRow = startRow + rowSpan
-        let endCol = startCol + colSpan
+        let (endRow, rowOverflow) = startRow.addingReportingOverflow(rowSpan)
+        let (endCol, colOverflow) = startCol.addingReportingOverflow(colSpan)
+        guard !rowOverflow, !colOverflow,
+              endRow <= rows.count,
+              (startRow..<endRow).allSatisfy({ endCol <= rows[$0].count }) else {
+            return
+        }
         cellSpans.removeAll { span in
             let spanEndRow = span.rowIndex + span.rowSpan
             let spanEndCol = span.columnIndex + span.columnSpan

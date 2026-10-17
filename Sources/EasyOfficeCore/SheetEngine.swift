@@ -238,6 +238,11 @@ public enum EvaluatedCellValue: Sendable, Codable, Equatable, CustomStringConver
 
 /// Worksheet model storing raw cell inputs (literals or `=...` formulas) and evaluating deterministically.
 public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
+    /// Maximum output characters permitted for `REPT` to prevent memory exhaustion.
+    public static let maxReptOutputCharacters = 32_767
+    /// Maximum formula evaluation recursion depth before returning `#REF!`.
+    public static let maxFormulaRecursionDepth = 256
+
     public let id: UUID
     public var name: String
     public var rawCells: [String: String] // Keyed by A1 notation
@@ -286,13 +291,19 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     }
 
     public func evaluate(at a1: String) -> EvaluatedCellValue {
-        var visited: Set<String> = []
-        return evaluateInternal(at: a1, visited: &visited)
+        guard let address = try? CellAddress(a1Notation: a1) else {
+            return .error("#REF!")
+        }
+        var visited: Set<PackedCellCoordinate> = []
+        return evaluateInternal(at: address, visited: &visited, depth: 0)
     }
 
     public func evaluate(at packed: PackedCellCoordinate) -> EvaluatedCellValue {
-        let addr = CellAddress(packed: packed)
-        return evaluate(at: addr.a1Notation)
+        guard let address = try? CellAddress(column: packed.column, row: packed.row) else {
+            return .error("#REF!")
+        }
+        var visited: Set<PackedCellCoordinate> = []
+        return evaluateInternal(at: address, visited: &visited, depth: 0)
     }
 
     /// Evaluates and sorts rows within `range` by the zero-based `colOffset` relative to `range`.
@@ -329,22 +340,33 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     }
 
     public func evaluateGrid(in range: CellRange) -> [[EvaluatedCellValue]] {
-        var visited: Set<String> = []
-        return evaluateGridInternal(in: range, visited: &visited)
+        var visited: Set<PackedCellCoordinate> = []
+        return evaluateGridInternal(in: range, visited: &visited, depth: 0)
     }
 
-    private func evaluateGridInternal(in range: CellRange, visited: inout Set<String>) -> [[EvaluatedCellValue]] {
+    private func evaluateGridInternal(
+        in range: CellRange,
+        visited: inout Set<PackedCellCoordinate>,
+        depth: Int
+    ) -> [[EvaluatedCellValue]] {
         let minRow = min(range.start.row, range.end.row)
         let maxRow = max(range.start.row, range.end.row)
         let minCol = min(range.start.column, range.end.column)
         let maxCol = max(range.start.column, range.end.column)
+        let (rowSpan, rOverflow) = (maxRow - minRow).addingReportingOverflow(1)
+        let (colSpan, cOverflow) = (maxCol - minCol).addingReportingOverflow(1)
+        let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
+        guard !rOverflow, !cOverflow, !mulOverflow,
+              totalCells > 0, totalCells <= CellRange.maxExpandedCellCount else {
+            return []
+        }
 
         var grid: [[EvaluatedCellValue]] = []
         for r in minRow...maxRow {
             var rowVals: [EvaluatedCellValue] = []
             for c in minCol...maxCol {
                 if let addr = try? CellAddress(column: c, row: r) {
-                    rowVals.append(evaluateInternal(at: addr.a1Notation, visited: &visited))
+                    rowVals.append(evaluateInternal(at: addr, visited: &visited, depth: depth + 1))
                 }
             }
             grid.append(rowVals)
@@ -352,21 +374,27 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         return grid
     }
 
-    private func evaluateInternal(at a1: String, visited: inout Set<String>) -> EvaluatedCellValue {
-        guard let address = try? CellAddress(a1Notation: a1) else {
+    private func evaluateInternal(
+        at address: CellAddress,
+        visited: inout Set<PackedCellCoordinate>,
+        depth: Int
+    ) -> EvaluatedCellValue {
+        guard depth <= Self.maxFormulaRecursionDepth,
+              visited.count <= Self.maxFormulaRecursionDepth else {
             return .error("#REF!")
         }
-        let key = address.a1Notation
-        if visited.contains(key) {
+        let packed = address.packedCoordinate
+        if visited.contains(packed) {
             return .error("#REF!") // Circular reference detected
         }
+        let key = address.a1Notation
         guard let raw = rawCells[key], !raw.isEmpty else {
             return .empty
         }
 
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("=") else {
-            if let num = Double(trimmed) {
+            if let num = Double(trimmed), num.isFinite {
                 return .number(num)
             }
             if trimmed.caseInsensitiveCompare("TRUE") == .orderedSame {
@@ -378,31 +406,39 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             return .text(raw)
         }
 
-        visited.insert(key)
-        defer { visited.remove(key) }
+        visited.insert(packed)
+        defer { visited.remove(packed) }
 
         let expression = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
-        return evaluateFormulaExpression(expression, visited: &visited)
+        return evaluateFormulaExpression(expression, visited: &visited, depth: depth + 1)
     }
 
-    private func evaluateFormulaExpression(_ expr: String, visited: inout Set<String>) -> EvaluatedCellValue {
+    private func evaluateFormulaExpression(
+        _ expr: String,
+        visited: inout Set<PackedCellCoordinate>,
+        depth: Int
+    ) -> EvaluatedCellValue {
+        guard depth <= Self.maxFormulaRecursionDepth,
+              visited.count <= Self.maxFormulaRecursionDepth else {
+            return .error("#REF!")
+        }
         let trimmed = expr.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .empty }
 
         // Top-level comparison expression (e.g. A1>=10, B1="서울")
-        if let cmpResult = evaluateTopLevelComparison(trimmed, visited: &visited) {
+        if let cmpResult = evaluateTopLevelComparison(trimmed, visited: &visited, depth: depth + 1) {
             return cmpResult
         }
 
         // Binary arithmetic: +, -, *, /
-        if let arithResult = evaluateBinaryArithmetic(trimmed, visited: &visited) {
+        if let arithResult = evaluateBinaryArithmetic(trimmed, visited: &visited, depth: depth + 1) {
             return arithResult
         }
 
         // Parenthesized sub-expression: (expr)
         if trimmed.hasPrefix("(") && trimmed.hasSuffix(")") && Self.matchingCloseIndex(in: trimmed, openAt: trimmed.startIndex) == trimmed.index(before: trimmed.endIndex) {
             let inner = String(trimmed.dropFirst().dropLast())
-            return evaluateFormulaExpression(inner, visited: &visited)
+            return evaluateFormulaExpression(inner, visited: &visited, depth: depth + 1)
         }
 
         // Function call pattern: FUNCNAME(args...) where the closing ')' matches the opening '('
@@ -415,7 +451,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 let innerEnd = trimmed.index(before: trimmed.endIndex)
                 let argString = innerStart <= innerEnd ? String(trimmed[innerStart..<innerEnd]) : ""
                 let args = Self.splitTopLevelArguments(argString)
-                return evaluateFunction(name: funcName, arguments: args, visited: &visited)
+                return evaluateFunction(name: funcName, arguments: args, visited: &visited, depth: depth + 1)
             }
         }
 
@@ -436,12 +472,13 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
         // Numeric literal
         if let number = Double(trimmed) {
+            guard number.isFinite else { return .error("#NUM!") }
             return .number(number)
         }
 
         // Direct cell reference
         if let addr = try? CellAddress(a1Notation: trimmed) {
-            let resolved = evaluateInternal(at: addr.a1Notation, visited: &visited)
+            let resolved = evaluateInternal(at: addr, visited: &visited, depth: depth + 1)
             if case .empty = resolved {
                 return .number(0.0)
             }
@@ -449,6 +486,13 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         }
 
         return .error("#VALUE!")
+    }
+
+    private static func safeInt(_ value: Double) -> Int? {
+        guard value.isFinite, value > Double(Int.min), value < Double(Int.max) else {
+            return nil
+        }
+        return Int(value)
     }
 
     private static func matchingCloseIndex(in text: String, openAt: String.Index) -> String.Index? {
@@ -470,18 +514,22 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         return nil
     }
 
-    private func evaluateTopLevelComparison(_ expr: String, visited: inout Set<String>) -> EvaluatedCellValue? {
+    private func evaluateTopLevelComparison(
+        _ expr: String,
+        visited: inout Set<PackedCellCoordinate>,
+        depth: Int
+    ) -> EvaluatedCellValue? {
         let chars = Array(expr)
-        var depth = 0
+        var parenDepth = 0
         var inQuotes = false
         var i = 0
         while i < chars.count {
             let ch = chars[i]
             if ch == "\"" { inQuotes.toggle() }
             if !inQuotes {
-                if ch == "(" { depth += 1 }
-                else if ch == ")" { depth -= 1 }
-                else if depth == 0 {
+                if ch == "(" { parenDepth += 1 }
+                else if ch == ")" { parenDepth -= 1 }
+                else if parenDepth == 0 {
                     let twoChar = (i + 1 < chars.count) ? String([chars[i], chars[i + 1]]) : ""
                     let op: String?
                     let opLen: Int
@@ -500,9 +548,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                         let leftStr = String(chars[0..<i]).trimmingCharacters(in: .whitespaces)
                         let rightStr = String(chars[(i + opLen)...]).trimmingCharacters(in: .whitespaces)
                         guard !leftStr.isEmpty, !rightStr.isEmpty else { return nil }
-                        let lVal = evaluateFormulaExpression(leftStr, visited: &visited)
+                        let lVal = evaluateFormulaExpression(leftStr, visited: &visited, depth: depth + 1)
                         if case .error = lVal { return lVal }
-                        let rVal = evaluateFormulaExpression(rightStr, visited: &visited)
+                        let rVal = evaluateFormulaExpression(rightStr, visited: &visited, depth: depth + 1)
                         if case .error = rVal { return rVal }
 
                         if let lNum = lVal.numericValue, let rNum = rVal.numericValue {
@@ -535,18 +583,22 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         return nil
     }
 
-    private func evaluateBinaryArithmetic(_ expr: String, visited: inout Set<String>) -> EvaluatedCellValue? {
+    private func evaluateBinaryArithmetic(
+        _ expr: String,
+        visited: inout Set<PackedCellCoordinate>,
+        depth: Int
+    ) -> EvaluatedCellValue? {
         for operators: [Character] in [["+", "-"], ["*", "/"]] {
-            var depth = 0
+            var parenDepth = 0
             var inQuotes = false
             let chars = Array(expr)
             for idx in stride(from: chars.count - 1, through: 0, by: -1) {
                 let ch = chars[idx]
                 if ch == "\"" { inQuotes.toggle() }
                 if inQuotes { continue }
-                if ch == ")" { depth += 1 }
-                else if ch == "(" { depth -= 1 }
-                else if depth == 0 && idx > 0 && operators.contains(ch) {
+                if ch == ")" { parenDepth += 1 }
+                else if ch == "(" { parenDepth -= 1 }
+                else if parenDepth == 0 && idx > 0 && operators.contains(ch) {
                     let lhsStr = String(chars[0..<idx]).trimmingCharacters(in: .whitespaces)
                     let rhsStr = String(chars[(idx + 1)...]).trimmingCharacters(in: .whitespaces)
                     if lhsStr.isEmpty || rhsStr.isEmpty { continue }
@@ -554,23 +606,26 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                         continue // Unary sign, not binary operator
                     }
 
-                    let lhsVal = evaluateFormulaExpression(lhsStr, visited: &visited)
+                    let lhsVal = evaluateFormulaExpression(lhsStr, visited: &visited, depth: depth + 1)
                     if case .error = lhsVal { return lhsVal }
-                    let rhsVal = evaluateFormulaExpression(rhsStr, visited: &visited)
+                    let rhsVal = evaluateFormulaExpression(rhsStr, visited: &visited, depth: depth + 1)
                     if case .error = rhsVal { return rhsVal }
 
                     guard let lNum = lhsVal.numericValue, let rNum = rhsVal.numericValue else {
                         return .error("#VALUE!")
                     }
+                    let result: Double
                     switch ch {
-                    case "+": return .number(lNum + rNum)
-                    case "-": return .number(lNum - rNum)
-                    case "*": return .number(lNum * rNum)
+                    case "+": result = lNum + rNum
+                    case "-": result = lNum - rNum
+                    case "*": result = lNum * rNum
                     case "/":
                         guard rNum != 0.0 else { return .error("#DIV/0!") }
-                        return .number(lNum / rNum)
-                    default: break
+                        result = lNum / rNum
+                    default: return nil
                     }
+                    guard result.isFinite else { return .error("#NUM!") }
+                    return .number(result)
                 }
             }
         }
@@ -582,7 +637,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case failure(String)
     }
 
-    private func evaluateFunction(name: String, arguments: [String], visited: inout Set<String>) -> EvaluatedCellValue {
+    private func evaluateFunction(
+        name: String,
+        arguments: [String],
+        visited: inout Set<PackedCellCoordinate>,
+        depth: Int
+    ) -> EvaluatedCellValue {
         func resolveValues(_ args: [String]) -> FormulaResolutionResult {
             var values: [EvaluatedCellValue] = []
             for arg in args {
@@ -592,12 +652,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                         return .failure("#REF!")
                     }
                     for addr in range.expandedAddresses() {
-                        let v = evaluateInternal(at: addr.a1Notation, visited: &visited)
+                        let v = evaluateInternal(at: addr, visited: &visited, depth: depth + 1)
                         if case let .error(code) = v { return .failure(code) }
                         values.append(v)
                     }
                 } else {
-                    let v = evaluateFormulaExpression(trimmed, visited: &visited)
+                    let v = evaluateFormulaExpression(trimmed, visited: &visited, depth: depth + 1)
                     if case let .error(code) = v { return .failure(code) }
                     values.append(v)
                 }
@@ -607,7 +667,20 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
         func evalSingle(_ index: Int) -> EvaluatedCellValue {
             guard arguments.indices.contains(index) else { return .error("#VALUE!") }
-            return evaluateFormulaExpression(arguments[index], visited: &visited)
+            return evaluateFormulaExpression(arguments[index], visited: &visited, depth: depth + 1)
+        }
+
+        // Propagate any error from non-range scalar arguments for eager functions
+        let lazyOrRefFunctions: Set<String> = [
+            "IF", "IFS", "IFERROR", "SWITCH", "CHOOSE", "ROW", "COLUMN", "SUMIF", "COUNTIF", "AVERAGEIF"
+        ]
+        if !lazyOrRefFunctions.contains(name) {
+            for arg in arguments where !arg.contains(":") {
+                let evaluated = evaluateFormulaExpression(arg, visited: &visited, depth: depth + 1)
+                if case .error = evaluated {
+                    return evaluated
+                }
+            }
         }
 
         switch name {
@@ -663,42 +736,58 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 return .number(Double(count))
             }
         case "ABS":
-            guard arguments.count == 1 else { return .error("#VALUE!") }
-            let val = evalSingle(0)
-            if case .error = val { return val }
-            guard let num = val.numericValue else { return .error("#VALUE!") }
+            guard arguments.count == 1, let num = evalSingle(0).numericValue else { return .error("#VALUE!") }
             return .number(abs(num))
         case "ROUND":
-            guard arguments.count == 2 else { return .error("#VALUE!") }
-            guard let num = evalSingle(0).numericValue, let digits = evalSingle(1).numericValue else {
+            guard arguments.count == 2,
+                  let num = evalSingle(0).numericValue,
+                  let digitsNum = evalSingle(1).numericValue,
+                  let digits = Self.safeInt(digitsNum) else {
                 return .error("#VALUE!")
             }
-            let factor = pow(10.0, Double(Int(digits)))
-            return .number((num * factor).rounded() / factor)
+            let factor = pow(10.0, Double(digits))
+            let result = (num * factor).rounded() / factor
+            guard result.isFinite else { return .error("#NUM!") }
+            return .number(result)
         case "ROUNDUP":
-            guard arguments.count == 2 else { return .error("#VALUE!") }
-            guard let num = evalSingle(0).numericValue, let digits = evalSingle(1).numericValue else {
+            guard arguments.count == 2,
+                  let num = evalSingle(0).numericValue,
+                  let digitsNum = evalSingle(1).numericValue,
+                  let digits = Self.safeInt(digitsNum) else {
                 return .error("#VALUE!")
             }
-            let factor = pow(10.0, Double(Int(digits)))
+            let factor = pow(10.0, Double(digits))
             let scaled = num * factor
-            let rounded = scaled >= 0 ? ceil(scaled) : floor(scaled)
-            return .number(rounded / factor)
+            let rounded = (scaled >= 0 ? ceil(scaled) : floor(scaled)) / factor
+            guard rounded.isFinite else { return .error("#NUM!") }
+            return .number(rounded)
         case "ROUNDDOWN":
-            guard arguments.count == 2 else { return .error("#VALUE!") }
-            guard let num = evalSingle(0).numericValue, let digits = evalSingle(1).numericValue else {
+            guard arguments.count == 2,
+                  let num = evalSingle(0).numericValue,
+                  let digitsNum = evalSingle(1).numericValue,
+                  let digits = Self.safeInt(digitsNum) else {
                 return .error("#VALUE!")
             }
-            let factor = pow(10.0, Double(Int(digits)))
-            return .number(trunc(num * factor) / factor)
+            let factor = pow(10.0, Double(digits))
+            let rounded = trunc(num * factor) / factor
+            guard rounded.isFinite else { return .error("#NUM!") }
+            return .number(rounded)
         case "INT":
-            guard arguments.count == 1, let num = evalSingle(0).numericValue else { return .error("#VALUE!") }
+            guard arguments.count == 1, let num = evalSingle(0).numericValue, num.isFinite else { return .error("#VALUE!") }
             return .number(floor(num))
         case "TRUNC":
             guard (1...2).contains(arguments.count), let num = evalSingle(0).numericValue else { return .error("#VALUE!") }
-            let digits = arguments.count == 2 ? (evalSingle(1).numericValue ?? 0.0) : 0.0
-            let factor = pow(10.0, Double(Int(digits)))
-            return .number(trunc(num * factor) / factor)
+            let digits: Int
+            if arguments.count == 2 {
+                guard let dNum = evalSingle(1).numericValue, let dInt = Self.safeInt(dNum) else { return .error("#VALUE!") }
+                digits = dInt
+            } else {
+                digits = 0
+            }
+            let factor = pow(10.0, Double(digits))
+            let result = trunc(num * factor) / factor
+            guard result.isFinite else { return .error("#NUM!") }
+            return .number(result)
         case "MOD":
             guard arguments.count == 2,
                   let num = evalSingle(0).numericValue,
@@ -713,7 +802,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             guard arguments.count == 2,
                   let base = evalSingle(0).numericValue,
                   let expVal = evalSingle(1).numericValue else { return .error("#VALUE!") }
-            return .number(pow(base, expVal))
+            let result = pow(base, expVal)
+            guard result.isFinite else { return .error("#NUM!") }
+            return .number(result)
         case "PRODUCT":
             switch resolveValues(arguments) {
             case let .failure(err): return .error(err)
@@ -745,58 +836,77 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             return .number(total)
         case "SUMIF":
             guard (2...3).contains(arguments.count) else { return .error("#VALUE!") }
-            guard case let .success(criteriaCells) = resolveValues([arguments[0]]) else { return .error("#REF!") }
-            let targetCells: [EvaluatedCellValue]
-            if arguments.count == 3 {
-                guard case let .success(sumCells) = resolveValues([arguments[2]]),
-                      sumCells.count == criteriaCells.count else { return .error("#VALUE!") }
-                targetCells = sumCells
-            } else {
-                targetCells = criteriaCells
-            }
-            var sum = 0.0
-            for idx in criteriaCells.indices {
-                if matchesCriteria(criteriaCells[idx], criteriaRaw: arguments[1], visited: &visited),
-                   let num = targetCells[idx].numericValue {
-                    sum += num
+            switch resolveValues([arguments[0]]) {
+            case let .failure(err): return .error(err)
+            case let .success(criteriaCells):
+                let targetCells: [EvaluatedCellValue]
+                if arguments.count == 3 {
+                    switch resolveValues([arguments[2]]) {
+                    case let .failure(err): return .error(err)
+                    case let .success(sumCells):
+                        guard sumCells.count == criteriaCells.count else { return .error("#VALUE!") }
+                        targetCells = sumCells
+                    }
+                } else {
+                    targetCells = criteriaCells
                 }
+                var sum = 0.0
+                for idx in criteriaCells.indices {
+                    if matchesCriteria(criteriaCells[idx], criteriaRaw: arguments[1], visited: &visited, depth: depth + 1),
+                       let num = targetCells[idx].numericValue {
+                        sum += num
+                    }
+                }
+                return .number(sum)
             }
-            return .number(sum)
         case "COUNTIF":
             guard arguments.count == 2 else { return .error("#VALUE!") }
-            guard case let .success(criteriaCells) = resolveValues([arguments[0]]) else { return .error("#REF!") }
-            let count = criteriaCells.filter { matchesCriteria($0, criteriaRaw: arguments[1], visited: &visited) }.count
-            return .number(Double(count))
+            switch resolveValues([arguments[0]]) {
+            case let .failure(err): return .error(err)
+            case let .success(criteriaCells):
+                let count = criteriaCells.filter { matchesCriteria($0, criteriaRaw: arguments[1], visited: &visited, depth: depth + 1) }.count
+                return .number(Double(count))
+            }
         case "AVERAGEIF":
             guard (2...3).contains(arguments.count) else { return .error("#VALUE!") }
-            guard case let .success(criteriaCells) = resolveValues([arguments[0]]) else { return .error("#REF!") }
-            let targetCells: [EvaluatedCellValue]
-            if arguments.count == 3 {
-                guard case let .success(avgCells) = resolveValues([arguments[2]]),
-                      avgCells.count == criteriaCells.count else { return .error("#VALUE!") }
-                targetCells = avgCells
-            } else {
-                targetCells = criteriaCells
-            }
-            var matchedNumbers: [Double] = []
-            for idx in criteriaCells.indices {
-                if matchesCriteria(criteriaCells[idx], criteriaRaw: arguments[1], visited: &visited),
-                   let num = targetCells[idx].numericValue {
-                    matchedNumbers.append(num)
+            switch resolveValues([arguments[0]]) {
+            case let .failure(err): return .error(err)
+            case let .success(criteriaCells):
+                let targetCells: [EvaluatedCellValue]
+                if arguments.count == 3 {
+                    switch resolveValues([arguments[2]]) {
+                    case let .failure(err): return .error(err)
+                    case let .success(avgCells):
+                        guard avgCells.count == criteriaCells.count else { return .error("#VALUE!") }
+                        targetCells = avgCells
+                    }
+                } else {
+                    targetCells = criteriaCells
                 }
+                var matchedNumbers: [Double] = []
+                for idx in criteriaCells.indices {
+                    if matchesCriteria(criteriaCells[idx], criteriaRaw: arguments[1], visited: &visited, depth: depth + 1),
+                       let num = targetCells[idx].numericValue {
+                        matchedNumbers.append(num)
+                    }
+                }
+                guard !matchedNumbers.isEmpty else { return .error("#DIV/0!") }
+                return .number(matchedNumbers.reduce(0.0, +) / Double(matchedNumbers.count))
             }
-            guard !matchedNumbers.isEmpty else { return .error("#DIV/0!") }
-            return .number(matchedNumbers.reduce(0.0, +) / Double(matchedNumbers.count))
         case "CEILING":
             guard (1...2).contains(arguments.count), let num = evalSingle(0).numericValue else { return .error("#VALUE!") }
             let sig = arguments.count == 2 ? (evalSingle(1).numericValue ?? 1.0) : 1.0
             guard sig != 0.0 else { return .number(0.0) }
-            return .number(ceil(num / sig) * sig)
+            let result = ceil(num / sig) * sig
+            guard result.isFinite else { return .error("#NUM!") }
+            return .number(result)
         case "FLOOR":
             guard (1...2).contains(arguments.count), let num = evalSingle(0).numericValue else { return .error("#VALUE!") }
             let sig = arguments.count == 2 ? (evalSingle(1).numericValue ?? 1.0) : 1.0
             guard sig != 0.0 else { return .error("#DIV/0!") }
-            return .number(floor(num / sig) * sig)
+            let result = floor(num / sig) * sig
+            guard result.isFinite else { return .error("#NUM!") }
+            return .number(result)
         case "SIGN":
             guard arguments.count == 1, let num = evalSingle(0).numericValue else { return .error("#VALUE!") }
             return .number(num > 0 ? 1.0 : (num < 0 ? -1.0 : 0.0))
@@ -810,7 +920,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             return .number(log10(num))
         case "EXP":
             guard arguments.count == 1, let num = evalSingle(0).numericValue else { return .error("#VALUE!") }
-            return .number(exp(num))
+            let result = exp(num)
+            guard result.isFinite else { return .error("#NUM!") }
+            return .number(result)
 
         // MARK: Statistical
         case "MEDIAN":
@@ -836,7 +948,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 for n in nums { counts[n, default: 0] += 1 }
                 guard let best = nums.max(by: { counts[$0, default: 0] < counts[$1, default: 0] }),
                       (counts[best] ?? 0) > 1 else {
-                    return .number(nums[0])
+                    return .error("#N/A")
                 }
                 return .number(best)
             }
@@ -861,32 +973,39 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 return .number(sqrt(sumSq / Double(nums.count - 1)))
             }
         case "LARGE":
-            guard arguments.count == 2,
-                  case let .success(vals) = resolveValues([arguments[0]]),
-                  let kVal = evalSingle(1).numericValue else { return .error("#VALUE!") }
-            let sortedDesc = vals.compactMap { $0.numericValue }.sorted(by: >)
-            let k = Int(kVal)
-            guard k >= 1, k <= sortedDesc.count else { return .error("#NUM!") }
-            return .number(sortedDesc[k - 1])
+            guard arguments.count == 2 else { return .error("#VALUE!") }
+            switch resolveValues([arguments[0]]) {
+            case let .failure(err): return .error(err)
+            case let .success(vals):
+                guard let kVal = evalSingle(1).numericValue, let k = Self.safeInt(kVal) else { return .error("#VALUE!") }
+                let sortedDesc = vals.compactMap { $0.numericValue }.sorted(by: >)
+                guard k >= 1, k <= sortedDesc.count else { return .error("#NUM!") }
+                return .number(sortedDesc[k - 1])
+            }
         case "SMALL":
-            guard arguments.count == 2,
-                  case let .success(vals) = resolveValues([arguments[0]]),
-                  let kVal = evalSingle(1).numericValue else { return .error("#VALUE!") }
-            let sortedAsc = vals.compactMap { $0.numericValue }.sorted(by: <)
-            let k = Int(kVal)
-            guard k >= 1, k <= sortedAsc.count else { return .error("#NUM!") }
-            return .number(sortedAsc[k - 1])
+            guard arguments.count == 2 else { return .error("#VALUE!") }
+            switch resolveValues([arguments[0]]) {
+            case let .failure(err): return .error(err)
+            case let .success(vals):
+                guard let kVal = evalSingle(1).numericValue, let k = Self.safeInt(kVal) else { return .error("#VALUE!") }
+                let sortedAsc = vals.compactMap { $0.numericValue }.sorted(by: <)
+                guard k >= 1, k <= sortedAsc.count else { return .error("#NUM!") }
+                return .number(sortedAsc[k - 1])
+            }
         case "RANK":
             guard (2...3).contains(arguments.count),
-                  let target = evalSingle(0).numericValue,
-                  case let .success(vals) = resolveValues([arguments[1]]) else { return .error("#VALUE!") }
-            let order = arguments.count == 3 ? Int(evalSingle(2).numericValue ?? 0.0) : 0
-            let nums = vals.compactMap { $0.numericValue }
-            guard nums.contains(target) else { return .error("#N/A") }
-            let rank = order == 0
-                ? 1 + nums.filter { $0 > target }.count
-                : 1 + nums.filter { $0 < target }.count
-            return .number(Double(rank))
+                  let target = evalSingle(0).numericValue else { return .error("#VALUE!") }
+            switch resolveValues([arguments[1]]) {
+            case let .failure(err): return .error(err)
+            case let .success(vals):
+                let order = arguments.count == 3 ? (Self.safeInt(evalSingle(2).numericValue ?? 0.0) ?? 0) : 0
+                let nums = vals.compactMap { $0.numericValue }
+                guard nums.contains(target) else { return .error("#N/A") }
+                let rank = order == 0
+                    ? 1 + nums.filter { $0 > target }.count
+                    : 1 + nums.filter { $0 < target }.count
+                return .number(Double(rank))
+            }
 
         // MARK: Logical
         case "TRUE":
@@ -895,19 +1014,22 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             return .boolean(false)
         case "IF":
             guard (2...3).contains(arguments.count) else { return .error("#VALUE!") }
-            let conditionPassed = evaluateCondition(arguments[0], visited: &visited)
-            if conditionPassed {
-                return evaluateFormulaExpression(arguments[1], visited: &visited)
+            let condVal = evalSingle(0)
+            if case .error = condVal { return condVal }
+            if condVal.booleanValue == true {
+                return evalSingle(1)
             } else if arguments.count == 3 {
-                return evaluateFormulaExpression(arguments[2], visited: &visited)
+                return evalSingle(2)
             } else {
                 return .boolean(false)
             }
         case "IFS":
             guard arguments.count >= 2, arguments.count % 2 == 0 else { return .error("#VALUE!") }
             for i in stride(from: 0, to: arguments.count, by: 2) {
-                if evaluateCondition(arguments[i], visited: &visited) {
-                    return evaluateFormulaExpression(arguments[i + 1], visited: &visited)
+                let condVal = evalSingle(i)
+                if case .error = condVal { return condVal }
+                if condVal.booleanValue == true {
+                    return evalSingle(i + 1)
                 }
             }
             return .error("#N/A")
@@ -953,6 +1075,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             var idx = 1
             while idx + 1 <= pairLimit {
                 let candidate = evalSingle(idx)
+                if case .error = candidate { return candidate }
                 if candidate == target || candidate.description.caseInsensitiveCompare(target.description) == .orderedSame {
                     return evalSingle(idx + 1)
                 }
@@ -967,11 +1090,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case "VLOOKUP":
             guard (3...4).contains(arguments.count),
                   let range = try? CellRange(notation: arguments[1]),
-                  let colIndexVal = evalSingle(2).numericValue else { return .error("#VALUE!") }
+                  let colIndexVal = evalSingle(2).numericValue,
+                  let rawColIdx = Self.safeInt(colIndexVal) else { return .error("#VALUE!") }
             let lookupVal = evalSingle(0)
             let isApprox = arguments.count == 4 ? (evalSingle(3).booleanValue ?? false) : false
-            let grid = evaluateGridInternal(in: range, visited: &visited)
-            let colIdx = Int(colIndexVal) - 1
+            let grid = evaluateGridInternal(in: range, visited: &visited, depth: depth + 1)
+            let colIdx = rawColIdx - 1
             guard let firstRow = grid.first, colIdx >= 0, colIdx < firstRow.count else {
                 return .error("#REF!")
             }
@@ -997,11 +1121,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case "HLOOKUP":
             guard (3...4).contains(arguments.count),
                   let range = try? CellRange(notation: arguments[1]),
-                  let rowIndexVal = evalSingle(2).numericValue else { return .error("#VALUE!") }
+                  let rowIndexVal = evalSingle(2).numericValue,
+                  let rawRowIdx = Self.safeInt(rowIndexVal) else { return .error("#VALUE!") }
             let lookupVal = evalSingle(0)
             let isApprox = arguments.count == 4 ? (evalSingle(3).booleanValue ?? false) : false
-            let grid = evaluateGridInternal(in: range, visited: &visited)
-            let rowIdx = Int(rowIndexVal) - 1
+            let grid = evaluateGridInternal(in: range, visited: &visited, depth: depth + 1)
+            let rowIdx = rawRowIdx - 1
             guard rowIdx >= 0, rowIdx < grid.count, let headerRow = grid.first else {
                 return .error("#REF!")
             }
@@ -1024,29 +1149,34 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             return .error("#N/A")
 
         case "XLOOKUP":
-            guard (3...4).contains(arguments.count),
-                  case let .success(lookupArr) = resolveValues([arguments[1]]),
-                  case let .success(returnArr) = resolveValues([arguments[2]]),
-                  lookupArr.count == returnArr.count else { return .error("#VALUE!") }
-            let lookupVal = evalSingle(0)
-            for idx in lookupArr.indices {
-                if cellValuesEqual(lookupArr[idx], lookupVal) {
-                    return returnArr[idx]
+            guard (3...4).contains(arguments.count) else { return .error("#VALUE!") }
+            switch (resolveValues([arguments[1]]), resolveValues([arguments[2]])) {
+            case (let .failure(err), _), (_, let .failure(err)):
+                return .error(err)
+            case let (.success(lookupArr), .success(returnArr)):
+                guard lookupArr.count == returnArr.count else { return .error("#VALUE!") }
+                let lookupVal = evalSingle(0)
+                for idx in lookupArr.indices {
+                    if cellValuesEqual(lookupArr[idx], lookupVal) {
+                        return returnArr[idx]
+                    }
                 }
+                if arguments.count == 4 {
+                    return evalSingle(3)
+                }
+                return .error("#N/A")
             }
-            if arguments.count == 4 {
-                return evalSingle(3)
-            }
-            return .error("#N/A")
 
         case "INDEX":
             guard (2...3).contains(arguments.count),
                   let range = try? CellRange(notation: arguments[0]),
-                  let rowNumVal = evalSingle(1).numericValue else { return .error("#VALUE!") }
+                  let rowNumVal = evalSingle(1).numericValue,
+                  let rawRowIdx = Self.safeInt(rowNumVal) else { return .error("#VALUE!") }
             let colNumVal = arguments.count == 3 ? (evalSingle(2).numericValue ?? 1.0) : 1.0
-            let grid = evaluateGridInternal(in: range, visited: &visited)
-            let rIdx = Int(rowNumVal) - 1
-            let cIdx = Int(colNumVal) - 1
+            guard let rawColIdx = Self.safeInt(colNumVal) else { return .error("#VALUE!") }
+            let grid = evaluateGridInternal(in: range, visited: &visited, depth: depth + 1)
+            let rIdx = rawRowIdx - 1
+            let cIdx = rawColIdx - 1
             if grid.count == 1, arguments.count == 2, rIdx >= 0, rIdx < grid[0].count {
                 return grid[0][rIdx]
             }
@@ -1056,20 +1186,25 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             return grid[rIdx][cIdx]
 
         case "MATCH":
-            guard (2...3).contains(arguments.count),
-                  case let .success(lookupArr) = resolveValues([arguments[1]]) else { return .error("#VALUE!") }
-            let lookupVal = evalSingle(0)
-            for (idx, item) in lookupArr.enumerated() {
-                if cellValuesEqual(item, lookupVal) {
-                    return .number(Double(idx + 1))
+            guard (2...3).contains(arguments.count) else { return .error("#VALUE!") }
+            switch resolveValues([arguments[1]]) {
+            case let .failure(err): return .error(err)
+            case let .success(lookupArr):
+                let lookupVal = evalSingle(0)
+                for (idx, item) in lookupArr.enumerated() {
+                    if cellValuesEqual(item, lookupVal) {
+                        return .number(Double(idx + 1))
+                    }
                 }
+                return .error("#N/A")
             }
-            return .error("#N/A")
 
         case "CHOOSE":
-            guard arguments.count >= 2, let idxVal = evalSingle(0).numericValue else { return .error("#VALUE!") }
-            let choiceIdx = Int(idxVal)
-            guard choiceIdx >= 1, choiceIdx < arguments.count else { return .error("#VALUE!") }
+            guard arguments.count >= 2 else { return .error("#VALUE!") }
+            let firstArg = evalSingle(0)
+            if case .error = firstArg { return firstArg }
+            guard let idxVal = firstArg.numericValue, let choiceIdx = Self.safeInt(idxVal),
+                  choiceIdx >= 1, choiceIdx < arguments.count else { return .error("#VALUE!") }
             return evalSingle(choiceIdx)
 
         case "ROW":
@@ -1094,23 +1229,41 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case "LEFT":
             guard (1...2).contains(arguments.count) else { return .error("#VALUE!") }
             let text = evalSingle(0).description
-            let count = arguments.count == 2 ? max(0, Int(evalSingle(1).numericValue ?? 1.0)) : 1
+            let count: Int
+            if arguments.count == 2 {
+                guard let cNum = evalSingle(1).numericValue, let cInt = Self.safeInt(cNum), cInt >= 0 else {
+                    return .error("#VALUE!")
+                }
+                count = cInt
+            } else {
+                count = 1
+            }
             return .text(String(text.prefix(count)))
         case "RIGHT":
             guard (1...2).contains(arguments.count) else { return .error("#VALUE!") }
             let text = evalSingle(0).description
-            let count = arguments.count == 2 ? max(0, Int(evalSingle(1).numericValue ?? 1.0)) : 1
+            let count: Int
+            if arguments.count == 2 {
+                guard let cNum = evalSingle(1).numericValue, let cInt = Self.safeInt(cNum), cInt >= 0 else {
+                    return .error("#VALUE!")
+                }
+                count = cInt
+            } else {
+                count = 1
+            }
             return .text(String(text.suffix(count)))
         case "MID":
             guard arguments.count == 3,
                   let startVal = evalSingle(1).numericValue,
-                  let lenVal = evalSingle(2).numericValue else { return .error("#VALUE!") }
-            let startIdx = Int(startVal) - 1
-            let length = Int(lenVal)
-            guard startIdx >= 0, length >= 0 else { return .error("#VALUE!") }
+                  let lenVal = evalSingle(2).numericValue,
+                  let startOneBased = Self.safeInt(startVal),
+                  let length = Self.safeInt(lenVal),
+                  startOneBased >= 1,
+                  length >= 0 else { return .error("#VALUE!") }
+            let startIdx = startOneBased - 1
             let chars = Array(evalSingle(0).description)
             guard startIdx < chars.count else { return .text("") }
-            let endIdx = min(chars.count, startIdx + length)
+            let endIdx = min(chars.count, startIdx + min(length, chars.count - startIdx))
             return .text(String(chars[startIdx..<endIdx]))
         case "LEN":
             guard arguments.count == 1 else { return .error("#VALUE!") }
@@ -1137,8 +1290,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             let replacement = evalSingle(2).description
             guard !target.isEmpty else { return .text(source) }
             if arguments.count == 4, let instNum = evalSingle(3).numericValue {
-                let targetOccurrence = Int(instNum)
-                guard targetOccurrence >= 1 else { return .error("#VALUE!") }
+                guard let targetOccurrence = Self.safeInt(instNum), targetOccurrence >= 1 else { return .error("#VALUE!") }
                 var currentOccurrence = 0
                 var result = ""
                 var searchStart = source.startIndex
@@ -1161,7 +1313,15 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             guard (2...3).contains(arguments.count) else { return .error("#VALUE!") }
             let needle = evalSingle(0).description
             let haystack = evalSingle(1).description
-            let startOffset = arguments.count == 3 ? max(1, Int(evalSingle(2).numericValue ?? 1.0)) - 1 : 0
+            let startOffset: Int
+            if arguments.count == 3 {
+                guard let sNum = evalSingle(2).numericValue, let sInt = Self.safeInt(sNum), sInt >= 1 else {
+                    return .error("#VALUE!")
+                }
+                startOffset = sInt - 1
+            } else {
+                startOffset = 0
+            }
             guard startOffset < haystack.count else { return .error("#VALUE!") }
             let startIdx = haystack.index(haystack.startIndex, offsetBy: startOffset)
             guard let foundRange = haystack.range(of: needle, range: startIdx..<haystack.endIndex) else {
@@ -1170,10 +1330,14 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             let pos = haystack.distance(from: haystack.startIndex, to: foundRange.lowerBound) + 1
             return .number(Double(pos))
         case "REPT":
-            guard arguments.count == 2, let timesVal = evalSingle(1).numericValue else { return .error("#VALUE!") }
-            let count = Int(timesVal)
-            guard count >= 0 else { return .error("#VALUE!") }
-            return .text(String(repeating: evalSingle(0).description, count: count))
+            guard arguments.count == 2,
+                  let timesVal = evalSingle(1).numericValue,
+                  let count = Self.safeInt(timesVal),
+                  count >= 0 else { return .error("#VALUE!") }
+            let str = evalSingle(0).description
+            let (totalChars, overflow) = str.count.multipliedReportingOverflow(by: count)
+            guard !overflow, totalChars <= Self.maxReptOutputCharacters else { return .error("#VALUE!") }
+            return .text(String(repeating: str, count: count))
         case "EXACT":
             guard arguments.count == 2 else { return .error("#VALUE!") }
             return .boolean(evalSingle(0).description == evalSingle(1).description)
@@ -1184,18 +1348,18 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 .replacingOccurrences(of: ",", with: "")
                 .replacingOccurrences(of: "₩", with: "")
                 .replacingOccurrences(of: "$", with: "")
-            guard let num = Double(cleaned) else { return .error("#VALUE!") }
+            guard let num = Double(cleaned), num.isFinite else { return .error("#VALUE!") }
             return .number(num)
         case "TEXT":
             guard arguments.count == 2 else { return .error("#VALUE!") }
             let val = evalSingle(0)
             let pattern = evalSingle(1).description
-            guard let num = val.numericValue else { return .text(val.description) }
+            guard let num = val.numericValue, num.isFinite else { return .text(val.description) }
             if pattern.contains("%") {
                 return .text(String(format: "%.0f%%", num * 100.0))
             } else if let dotIndex = pattern.firstIndex(of: ".") {
                 let decimals = pattern.distance(from: pattern.index(after: dotIndex), to: pattern.endIndex)
-                return .text(String(format: "%.\(max(0, decimals))f", num))
+                return .text(String(format: "%.\(min(10, max(0, decimals)))f", num))
             } else {
                 return .text(String(format: "%.0f", num))
             }
@@ -1210,10 +1374,15 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             let fv = arguments.count >= 4 ? (evalSingle(3).numericValue ?? 0.0) : 0.0
             let type = arguments.count == 5 ? (evalSingle(4).numericValue ?? 0.0) : 0.0
             if rate == 0.0 {
-                return .number(-(pv + fv) / nper)
+                let res = -(pv + fv) / nper
+                guard res.isFinite else { return .error("#NUM!") }
+                return .number(res)
             }
             let factor = pow(1.0 + rate, nper)
-            let payment = -rate * (pv * factor + fv) / ((1.0 + rate * type) * (factor - 1.0))
+            let denom = (1.0 + rate * type) * (factor - 1.0)
+            guard factor.isFinite, denom != 0.0 else { return .error("#NUM!") }
+            let payment = -rate * (pv * factor + fv) / denom
+            guard payment.isFinite else { return .error("#NUM!") }
             return .number(payment)
 
         case "FV":
@@ -1224,10 +1393,13 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             let pv = arguments.count >= 4 ? (evalSingle(3).numericValue ?? 0.0) : 0.0
             let type = arguments.count == 5 ? (evalSingle(4).numericValue ?? 0.0) : 0.0
             if rate == 0.0 {
-                return .number(-(pv + pmt * nper))
+                let res = -(pv + pmt * nper)
+                guard res.isFinite else { return .error("#NUM!") }
+                return .number(res)
             }
             let factor = pow(1.0 + rate, nper)
             let futureVal = -(pv * factor + pmt * (1.0 + rate * type) * (factor - 1.0) / rate)
+            guard futureVal.isFinite else { return .error("#NUM!") }
             return .number(futureVal)
 
         case "PV":
@@ -1238,10 +1410,14 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             let fv = arguments.count >= 4 ? (evalSingle(3).numericValue ?? 0.0) : 0.0
             let type = arguments.count == 5 ? (evalSingle(4).numericValue ?? 0.0) : 0.0
             if rate == 0.0 {
-                return .number(-(fv + pmt * nper))
+                let res = -(fv + pmt * nper)
+                guard res.isFinite else { return .error("#NUM!") }
+                return .number(res)
             }
             let factor = pow(1.0 + rate, nper)
+            guard factor.isFinite, factor != 0.0 else { return .error("#NUM!") }
             let presentVal = -(fv + pmt * (1.0 + rate * type) * (factor - 1.0) / rate) / factor
+            guard presentVal.isFinite else { return .error("#NUM!") }
             return .number(presentVal)
 
         case "NPV":
@@ -1256,16 +1432,20 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 for (idx, cf) in cashFlows.enumerated() {
                     npv += cf / pow(1.0 + rate, Double(idx + 1))
                 }
+                guard npv.isFinite else { return .error("#NUM!") }
                 return .number(npv)
             }
 
         // MARK: Date & Time
         case "DATE":
             guard arguments.count == 3,
-                  let y = evalSingle(0).numericValue,
-                  let m = evalSingle(1).numericValue,
-                  let d = evalSingle(2).numericValue else { return .error("#VALUE!") }
-            guard let date = Self.makeUTCDate(year: Int(y), month: Int(m), day: Int(d)) else {
+                  let yNum = evalSingle(0).numericValue,
+                  let mNum = evalSingle(1).numericValue,
+                  let dNum = evalSingle(2).numericValue,
+                  let y = Self.safeInt(yNum),
+                  let m = Self.safeInt(mNum),
+                  let d = Self.safeInt(dNum) else { return .error("#VALUE!") }
+            guard let date = Self.makeUTCDate(year: y, month: m, day: d) else {
                 return .error("#VALUE!")
             }
             let comps = Self.utcCalendar.dateComponents([.year, .month, .day], from: date)
@@ -1332,8 +1512,13 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         return a.description.caseInsensitiveCompare(b.description) == .orderedSame
     }
 
-    private func matchesCriteria(_ value: EvaluatedCellValue, criteriaRaw: String, visited: inout Set<String>) -> Bool {
-        let critVal = evaluateFormulaExpression(criteriaRaw, visited: &visited)
+    private func matchesCriteria(
+        _ value: EvaluatedCellValue,
+        criteriaRaw: String,
+        visited: inout Set<PackedCellCoordinate>,
+        depth: Int
+    ) -> Bool {
+        let critVal = evaluateFormulaExpression(criteriaRaw, visited: &visited, depth: depth + 1)
         let critStr = critVal.description.trimmingCharacters(in: .whitespaces)
 
         for op in [">=", "<=", "<>", "=", ">", "<"] {
@@ -1365,14 +1550,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             return cellNum == critNum
         }
         return value.description.caseInsensitiveCompare(critStr) == .orderedSame
-    }
-
-    private func evaluateCondition(_ cond: String, visited: inout Set<String>) -> Bool {
-        let evaluated = evaluateFormulaExpression(cond, visited: &visited)
-        if let flag = evaluated.booleanValue {
-            return flag
-        }
-        return false
     }
 
     private static func splitTopLevelArguments(_ input: String) -> [String] {

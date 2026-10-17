@@ -103,36 +103,39 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         pages[index].rotationDegrees = (updated + 360) % 360
     }
 
-    /// Inserts a blank page at the given 0-based index and renumbers all pages sequentially.
+    /// Inserts a blank page at the given 0-based index and renumbers all pages, annotations, and outline targets sequentially.
     public mutating func insertBlankPage(at index: Int) {
+        let previousPageIDs = pages.map(\.id)
         let clampedIndex = max(0, min(index, pages.count))
         let newPage = PDFPageDescriptor(pageNumber: clampedIndex + 1, rotationDegrees: 0, extractedText: "")
         pages.insert(newPage, at: clampedIndex)
         renumberPages()
+        remapAnnotationsAndOutline(previousPageIDs: previousPageIDs)
     }
 
-    /// Deletes the page at the given 0-based index and renumbers remaining pages.
+    /// Deletes the page at the given 0-based index and renumbers remaining pages, annotations, and outline targets.
     public mutating func deletePage(at index: Int) {
         guard pages.indices.contains(index) else { return }
+        let previousPageIDs = pages.map(\.id)
         let removedPageNum = index + 1
         pages.remove(at: index)
         annotations.removeAll { $0.pageNumber == removedPageNum }
-        for i in annotations.indices where annotations[i].pageNumber > removedPageNum {
-            annotations[i].pageNumber -= 1
-        }
         renumberPages()
+        remapAnnotationsAndOutline(previousPageIDs: previousPageIDs)
     }
 
-    /// Reorders a page from `sourceIndex` to `destinationIndex` (0-based) and renumbers all pages.
+    /// Reorders a page from `sourceIndex` to `destinationIndex` (0-based) and synchronizes page numbers, annotations, and outline targets.
     public mutating func reorderPage(from sourceIndex: Int, to destinationIndex: Int) {
         guard pages.indices.contains(sourceIndex),
               destinationIndex >= 0,
               destinationIndex < pages.count else {
             return
         }
+        let previousPageIDs = pages.map(\.id)
         let item = pages.remove(at: sourceIndex)
         pages.insert(item, at: destinationIndex)
         renumberPages()
+        remapAnnotationsAndOutline(previousPageIDs: previousPageIDs)
     }
 
     /// Extracts the specified 1-based page numbers into a new standalone PDF model.
@@ -141,6 +144,7 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         var extractedAnnotations: [PDFAnnotationItem] = []
 
         for requestedPage in oneBasedPageNumbers {
+            guard requestedPage >= 1 else { continue }
             let zeroIdx = requestedPage - 1
             guard pages.indices.contains(zeroIdx) else { continue }
             var pageCopy = pages[zeroIdx]
@@ -217,6 +221,31 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         for idx in pages.indices {
             pages[idx].pageNumber = idx + 1
         }
+    }
+
+    private mutating func remapAnnotationsAndOutline(previousPageIDs: [UUID]) {
+        var pageMap: [Int: Int] = [:]
+        for (oldZeroIdx, id) in previousPageIDs.enumerated() {
+            if let newZeroIdx = pages.firstIndex(where: { $0.id == id }) {
+                pageMap[oldZeroIdx + 1] = newZeroIdx + 1
+            }
+        }
+        for idx in annotations.indices {
+            if let mapped = pageMap[annotations[idx].pageNumber] {
+                annotations[idx].pageNumber = mapped
+            }
+        }
+        outline = outline.map { Self.remapOutlineNode($0, using: pageMap, maxPage: max(1, pages.count)) }
+    }
+
+    private static func remapOutlineNode(_ node: PDFOutlineNode, using pageMap: [Int: Int], maxPage: Int) -> PDFOutlineNode {
+        let mappedTarget = pageMap[node.targetPageNumber] ?? min(max(1, node.targetPageNumber), maxPage)
+        return PDFOutlineNode(
+            id: node.id,
+            title: node.title,
+            targetPageNumber: mappedTarget,
+            children: node.children.map { remapOutlineNode($0, using: pageMap, maxPage: maxPage) }
+        )
     }
 
     /// Converts extracted PDF text streams into an editable `OfficeDocumentModel` (.docx / .hwpx target).
@@ -296,14 +325,20 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         let maxRow = max(range.start.row, range.end.row)
         let minCol = min(range.start.column, range.end.column)
         let maxCol = max(range.start.column, range.end.column)
+        let (rowSpan, rOverflow) = (maxRow - minRow).addingReportingOverflow(1)
+        let (colSpan, cOverflow) = (maxCol - minCol).addingReportingOverflow(1)
+        let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
+        guard !rOverflow, !cOverflow, !mulOverflow,
+              totalCells > 0, totalCells <= CellRange.maxExpandedCellCount else {
+            return PDFStudioDocumentModel(title: sheet.name, pages: [])
+        }
 
         var rowStrings: [String] = []
         for r in minRow...maxRow {
             var cells: [String] = []
             for c in minCol...maxCol {
-                if let addr = try? CellAddress(column: c, row: r) {
-                    cells.append(sheet.evaluate(at: addr.a1Notation).description)
-                }
+                let packed = PackedCellCoordinate(row: r, column: c)
+                cells.append(sheet.evaluate(at: packed).description)
             }
             rowStrings.append(cells.joined(separator: "\t"))
         }

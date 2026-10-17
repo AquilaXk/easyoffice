@@ -29,6 +29,11 @@ final class EditorEnginesParityTests: XCTestCase {
         let c3 = PackedCellCoordinate(row: 1, column: 10)
         XCTAssertLessThan(c1, c2)
         XCTAssertLessThan(c2, c3)
+
+        // Fail-Closed ECMA-376 bounds and range expansion ceiling
+        XCTAssertThrowsError(try CellAddress(a1Notation: "XFE1"))
+        XCTAssertThrowsError(try CellAddress(a1Notation: "A1048577"))
+        XCTAssertThrowsError(try CellRange(notation: "A1:Z10000"))
     }
 
     // MARK: - 2. Spreadsheet 50+ Functions Parity Tests
@@ -110,6 +115,7 @@ final class EditorEnginesParityTests: XCTestCase {
         try sheet.setCell("E5", rawValue: "=RANK(40, A1:A5)")
         try sheet.setCell("E6", rawValue: "=ROUND(VAR(A1:A5), 2)")
         try sheet.setCell("E7", rawValue: "=ROUND(STDEV(A1:A5), 2)")
+        try sheet.setCell("E8", rawValue: "=MODE(B1:B5)")
 
         XCTAssertEqual(sheet.evaluate(at: "E1"), .number(20))
         XCTAssertEqual(sheet.evaluate(at: "E2"), .number(20))
@@ -119,6 +125,8 @@ final class EditorEnginesParityTests: XCTestCase {
         // A1:A5 = [10, 20, 20, 40, 50], mean = 28, sample var = ((324+64+64+144+484)/4) = 1080/4 = 270
         XCTAssertEqual(sheet.evaluate(at: "E6"), .number(270))
         XCTAssertEqual(sheet.evaluate(at: "E7"), .number(16.43))
+        // B1:B5 has all distinct values [1, 2, 3, 4, 5] -> MODE must return #N/A (F1)
+        XCTAssertEqual(sheet.evaluate(at: "E8"), .error("#N/A"))
 
         // Logical
         try sheet.setCell("F1", rawValue: "=AND(A1=10, A5=50)")
@@ -163,6 +171,7 @@ final class EditorEnginesParityTests: XCTestCase {
         try sheet.setCell("M2", rawValue: "330")
         try sheet.setCell("G9", rawValue: "=HLOOKUP(\"Q2\", K1:M2, 2, FALSE)")
 
+        XCTAssertEqual(sheet.evaluate(at: "G1"), .error("#N/A"))
         XCTAssertEqual(sheet.evaluate(at: "G2"), .number(2800))
         XCTAssertEqual(sheet.evaluate(at: "G3"), .number(4200))
         XCTAssertEqual(sheet.evaluate(at: "G4"), .number(2800))
@@ -172,7 +181,7 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(sheet.evaluate(at: "G8"), .number(9))
         XCTAssertEqual(sheet.evaluate(at: "G9"), .number(220))
 
-        // Text Functions
+        // Text Functions & Resource Bounds (F2, F3)
         try sheet.setCell("N1", rawValue: "=LEFT(\"EasyOffice\", 4)")
         try sheet.setCell("N2", rawValue: "=RIGHT(\"EasyOffice\", 6)")
         try sheet.setCell("N3", rawValue: "=MID(\"EasyOffice\", 5, 3)")
@@ -188,6 +197,9 @@ final class EditorEnginesParityTests: XCTestCase {
         try sheet.setCell("N13", rawValue: "=VALUE(\"1,250.5\")")
         try sheet.setCell("N14", rawValue: "=TEXT(12.3, \"0.00\")")
         try sheet.setCell("N15", rawValue: "=CONCATENATE(\"A\", \"-\", \"B\")")
+        try sheet.setCell("N16", rawValue: "=REPT(\"ABCD\", 100000)")
+        try sheet.setCell("N17", rawValue: "=LEFT(A1/0, 2)")
+        try sheet.setCell("N18", rawValue: "=POWER(10, 1000)")
 
         XCTAssertEqual(sheet.evaluate(at: "N1"), .text("Easy"))
         XCTAssertEqual(sheet.evaluate(at: "N2"), .text("Office"))
@@ -204,6 +216,9 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(sheet.evaluate(at: "N13"), .number(1250.5))
         XCTAssertEqual(sheet.evaluate(at: "N14"), .text("12.30"))
         XCTAssertEqual(sheet.evaluate(at: "N15"), .text("A-B"))
+        XCTAssertEqual(sheet.evaluate(at: "N16"), .error("#VALUE!"))
+        XCTAssertEqual(sheet.evaluate(at: "N17"), .error("#DIV/0!"))
+        XCTAssertEqual(sheet.evaluate(at: "N18"), .error("#NUM!"))
 
         // Financial & Date Functions
         try sheet.setCell("P1", rawValue: "=ROUND(PMT(0.05, 10, -1000), 2)")
@@ -226,6 +241,10 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(sheet.evaluate(at: "P7"), .number(10))
         XCTAssertEqual(sheet.evaluate(at: "P8"), .number(17))
         XCTAssertEqual(sheet.evaluate(at: "P9"), .number(16))
+
+        // Direct evaluation via PackedCellCoordinate
+        let p5Coord = try CellAddress(a1Notation: "P5").packedCoordinate
+        XCTAssertEqual(sheet.evaluate(at: p5Coord), .text("2026-10-17"))
     }
 
     // MARK: - 3. Pivot Table, Chart Builder, Conditional Format, Validation, Sort/Filter
@@ -329,6 +348,10 @@ final class EditorEnginesParityTests: XCTestCase {
             borderStyle: .doubleLine
         )
 
+        // Out-of-bounds merge should be rejected (F4)
+        table.mergeCells(startRow: 10, startCol: 0, rowSpan: 2, colSpan: 2)
+        XCTAssertTrue(table.cellSpans.isEmpty)
+
         table.mergeCells(startRow: 0, startCol: 0, rowSpan: 1, colSpan: 2)
         XCTAssertEqual(table.cellSpans.count, 1)
         XCTAssertEqual(table.cellSpans.first?.columnSpan, 2)
@@ -407,7 +430,7 @@ final class EditorEnginesParityTests: XCTestCase {
         let el1 = SlideCanvasElement(title: "배경 박스", x: 100, y: 100, width: 100, height: 80, kind: .rectangleShape, zIndex: 1)
         let el2 = SlideCanvasElement(title: "중간 박스", x: 250, y: 100, width: 100, height: 80, kind: .roundedRectangleShape, zIndex: 2)
         // Moving element placed at x=400 (so gap between el1(100..200) and el2(250..350) is 50, and gap between el2(250..350) and el3(400..500) is 50 -> equal-spacing!)
-        // Also y=100 matches el1.y and el2.y -> element-edge!
+        // Also y=100 matches el1.y and el2.y -> element-edge, while Y gaps are -80 (overlapping on Y), so horizontal equal-spacing must NOT fire (F5)!
         let el3 = SlideCanvasElement(title: "이동 박스", x: 400, y: 100, width: 100, height: 80, kind: .calloutShape, zIndex: 3)
 
         let guides = SnapGuideCalculator.computeGuides(
@@ -418,6 +441,7 @@ final class EditorEnginesParityTests: XCTestCase {
         )
         XCTAssertTrue(guides.contains { $0.reason == "element-edge" && $0.axis == .horizontal })
         XCTAssertTrue(guides.contains { $0.reason == "equal-spacing" && $0.axis == .vertical })
+        XCTAssertFalse(guides.contains { $0.reason == "equal-spacing" && $0.axis == .horizontal })
 
         let centeredEl = SlideCanvasElement(title: "정중앙", x: 380, y: 220, width: 200, height: 100)
         let centerGuides = SnapGuideCalculator.computeGuides(
@@ -472,8 +496,11 @@ final class EditorEnginesParityTests: XCTestCase {
                 PDFPageDescriptor(pageNumber: 1, extractedText: "1페이지 제목\n핵심 요약 1"),
                 PDFPageDescriptor(pageNumber: 2, extractedText: "2페이지 제목\n핵심 요약 2")
             ],
+            annotations: [
+                PDFAnnotationItem(pageNumber: 2, kind: .highlight, content: "2페이지 주석", author: "QA")
+            ],
             outline: [
-                PDFOutlineNode(title: "제1장", targetPageNumber: 1)
+                PDFOutlineNode(title: "제2장", targetPageNumber: 2)
             ]
         )
         let pdf2 = PDFStudioDocumentModel(
@@ -487,14 +514,21 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(pdf1.pages.count, 3)
         XCTAssertEqual(pdf1.pages.map(\.pageNumber), [1, 2, 3])
         XCTAssertEqual(pdf1.pages[1].extractedText, "")
+        // Annotation and outline originally on page 2 must shift to page 3 (F6)
+        XCTAssertEqual(pdf1.annotations.first?.pageNumber, 3)
+        XCTAssertEqual(pdf1.outline.first?.targetPageNumber, 3)
 
         pdf1.deletePage(at: 1)
         XCTAssertEqual(pdf1.pages.count, 2)
         XCTAssertEqual(pdf1.pages.map(\.pageNumber), [1, 2])
+        XCTAssertEqual(pdf1.annotations.first?.pageNumber, 2)
+        XCTAssertEqual(pdf1.outline.first?.targetPageNumber, 2)
 
         pdf1.reorderPage(from: 1, to: 0)
         XCTAssertTrue(pdf1.pages[0].extractedText.contains("2페이지 제목"))
         XCTAssertEqual(pdf1.pages.map(\.pageNumber), [1, 2])
+        XCTAssertEqual(pdf1.annotations.first?.pageNumber, 1)
+        XCTAssertEqual(pdf1.outline.first?.targetPageNumber, 1)
 
         let merged = PDFStudioDocumentModel.merge(documents: [pdf1, pdf2], mergedTitle: "통합 PDF")
         XCTAssertEqual(merged.pages.count, 3)

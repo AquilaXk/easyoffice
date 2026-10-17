@@ -180,7 +180,7 @@ public struct SnapGuideCalculator: Sendable {
 
                 let gap1 = middle.x - first.maxX
                 let gap2 = last.x - middle.maxX
-                if abs(gap1 - gap2) <= tolerancePoints {
+                if gap1 >= 0, gap2 >= 0, abs(gap1 - gap2) <= tolerancePoints {
                     let candidate = AlignmentSnapGuide(axis: .vertical, positionPoints: movingElement.centerX, reason: "equal-spacing")
                     if !guides.contains(candidate) {
                         guides.append(candidate)
@@ -198,7 +198,7 @@ public struct SnapGuideCalculator: Sendable {
 
                 let gap1 = middle.y - first.maxY
                 let gap2 = last.y - middle.maxY
-                if abs(gap1 - gap2) <= tolerancePoints {
+                if gap1 >= 0, gap2 >= 0, abs(gap1 - gap2) <= tolerancePoints {
                     let candidate = AlignmentSnapGuide(axis: .horizontal, positionPoints: movingElement.centerY, reason: "equal-spacing")
                     if !guides.contains(candidate) {
                         guides.append(candidate)

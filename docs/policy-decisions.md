@@ -134,7 +134,7 @@
 - **Decision**:
   1. 스프레드시트 셀 좌표는 `PackedCellCoordinate`(`UInt64`: 상위 32비트 `row`, 하위 32비트 `column`)로 비트패킹하여 문자열 해싱 없이 $O(1)$ 조회 및 행 우선(row-major) 비교를 수행하며, `CellAddress`는 ECMA-376 규격 상한(`maxZeroBasedColumn = 16,383`, `maxZeroBasedRow = 1,048,575`)과 오버플로 검사를 강제합니다.
   2. `CellRange`의 단일 수식 범위 확장은 메모리 고갈 방지를 위해 `maxExpandedCellCount = 100,000` 셀을 상한으로 제한하고 초과 시 `EasyOfficeError.invalidCellRange`를 반환합니다.
-  3. 77종 내장 스프레드시트 함수(수학/삼각 27종, 통계 7종, 논리 10종, 찾기/참조 8종, 텍스트 16종, 재무 4종, 날짜/시간 5종), 피벗 테이블 집계 엔진(`PivotTableEngine`), 문서/HWP 인라인 표 계산식(`evaluateTableFormula`)은 순환 참조 감지 시 즉시 `#REF!`를 반환합니다.
+  3. `WorksheetModel`의 77종 내장 스프레드시트 함수(수학/삼각 27종, 통계 7종, 논리 10종, 찾기/참조 8종, 텍스트 16종, 재무 4종, 날짜/시간 5종) 및 피벗 테이블 집계 엔진(`PivotTableEngine`)은 `PackedCellCoordinate` 방문 집합(`visited: Set<PackedCellCoordinate>`)으로 순환 참조 및 재귀 깊이 상한(`maxFormulaRecursionDepth = 256`) 초과 감지 시 즉시 `#REF!`를 반환하며, 문서/HWP 인라인 표 계산식(`DocumentTableBlock.evaluateTableFormula`)은 방향성(`ABOVE`/`LEFT`) 수치 리터럴만 비재귀적으로 집계하여 `Double?`을 반환합니다.
 - **Why**: 대용량 시트 및 HWP/문서 표 계산 시 문자열 키 할당 오버헤드와 악의적인 전체 시트 범위(`A1:XFD1048576`) 확장에 따른 메모리 폭증을 원천 차단하기 위함입니다.
 - **Trade-offs**: 단일 수식에서 10만 셀을 초과하는 범위 참조는 명시적으로 분할 집계하거나 피벗 엔진을 사용해야 합니다.
 - **Alternatives rejected**:
