@@ -10,6 +10,11 @@ public enum EasyOfficeError: Error, Sendable, Equatable, LocalizedError {
     case invalidCellAddress(String)
     case invalidCellRange(String)
     case formulaSyntaxError(String)
+    case corruptedContainer(detail: String)
+    case securityViolation(detail: String)
+    case encryptedDocumentUnsupported(format: DocumentFormat)
+    case xxeOrExternalEntityDetected
+    case decompressionBombDetected(ratio: Double, maxRatio: Double)
 
     public var errorDescription: String? {
         switch self {
@@ -29,6 +34,16 @@ public enum EasyOfficeError: Error, Sendable, Equatable, LocalizedError {
             return "유효하지 않은 셀 범위입니다: \(range)"
         case let .formulaSyntaxError(detail):
             return "수식 구문 오류: \(detail)"
+        case let .corruptedContainer(detail):
+            return "문서 컨테이너 무결성 검증 실패 (Fail-Closed): \(detail)"
+        case let .securityViolation(detail):
+            return "보안 정책 위반이 감지되어 문서를 차단했습니다 (Fail-Closed): \(detail)"
+        case let .encryptedDocumentUnsupported(format):
+            return "암호화된 문서(\(format.rawValue.uppercased()))는 복호화 키 없이 열 수 없습니다 (Fail-Closed)."
+        case .xxeOrExternalEntityDetected:
+            return "XML 외부 엔티티(XXE) 또는 외부 DTD 선언이 감지되어 파싱을 차단했습니다 (Fail-Closed)."
+        case let .decompressionBombDetected(ratio, maxRatio):
+            return String(format: "비정상적인 압축 해제 비율(%.1fx > 허용 %.1fx)이 감지되어 압축 폭탄(Decompression Bomb) 방어를 위해 차단했습니다.", ratio, maxRatio)
         }
     }
 }
