@@ -277,19 +277,91 @@ final class CommercialParityBenchmarkTests: XCTestCase {
         XCTAssertEqual(decodedRtf.paragraphs.map(\.text), masterDocument.paragraphs.map(\.text))
         XCTAssertEqual(decodedRtf.tables.first?.rows, masterDocument.tables.first?.rows)
 
-        // 8. Verify remaining template & legacy formats (.doc, .hwt, .hwtx, .xls, .ppt, .ppsx, .txt)
-        for remainingFormat in [DocumentFormat.doc, .hwt, .hwtx, .xls, .ppt, .ppsx, .txt] {
+        // 8. Verify remaining template & legacy formats (.doc, .hwt, .hwtx, .xls, .ppt, .ppsx, .txt) with full byte decoding
+        for docLegacyFormat in [DocumentFormat.doc, .hwt] {
             let result = try DocumentConversionOrchestrator.convert(
                 ConversionJobRequest(
                     sourceFileName: "master.docx",
                     sourceFormat: .docx,
-                    targetFormat: remainingFormat,
+                    targetFormat: docLegacyFormat,
                     payload: .document(masterDocument)
                 )
             )
-            XCTAssertEqual(result.verifiedSignature.format, remainingFormat)
-            XCTAssertEqual(result.verifiedSignature.containerFamily, remainingFormat.containerFamily)
+            XCTAssertEqual(result.verifiedSignature.format, docLegacyFormat)
+            XCTAssertEqual(result.verifiedSignature.containerFamily, .ole2Compound)
+            let decodedLegacyDoc = try HWP5BinaryCodec.decodeDocument(from: result.outputBytes)
+            XCTAssertEqual(decodedLegacyDoc.title, masterDocument.title)
+            XCTAssertEqual(decodedLegacyDoc.paragraphs.map(\.text), masterDocument.paragraphs.map(\.text))
         }
+
+        let hwtxResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "master.docx",
+                sourceFormat: .docx,
+                targetFormat: .hwtx,
+                payload: .document(masterDocument)
+            )
+        )
+        XCTAssertEqual(hwtxResult.verifiedSignature.format, .hwtx)
+        let decodedHwtx = try HWPXContainerCodec.decodeDocument(from: hwtxResult.outputBytes)
+        XCTAssertEqual(decodedHwtx.title, masterDocument.title)
+        XCTAssertEqual(decodedHwtx.paragraphs.map(\.text), masterDocument.paragraphs.map(\.text))
+
+        let xlsResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "master.xlsx",
+                sourceFormat: .xlsx,
+                targetFormat: .xls,
+                payload: .sheet(masterSheet)
+            )
+        )
+        XCTAssertEqual(xlsResult.verifiedSignature.format, .xls)
+        let xlsStreams = try OLE2ContainerCodec.unpack(from: xlsResult.outputBytes)
+        let workbookStream = try XCTUnwrap(xlsStreams.first(where: { $0.name == "Workbook" }))
+        let decodedXlsSheet = try CSVStateMachineCodec.decodeWorksheet(from: workbookStream.data, name: masterSheet.name, delimiter: "\t")
+        XCTAssertEqual(decodedXlsSheet.rawValue(at: "A1"), masterSheet.rawValue(at: "A1"))
+        XCTAssertEqual(decodedXlsSheet.rawValue(at: "B2"), masterSheet.rawValue(at: "B2"))
+
+        let pptResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "master.pptx",
+                sourceFormat: .pptx,
+                targetFormat: .ppt,
+                payload: .slide(masterDeck)
+            )
+        )
+        XCTAssertEqual(pptResult.verifiedSignature.format, .ppt)
+        let pptStreams = try OLE2ContainerCodec.unpack(from: pptResult.outputBytes)
+        let pptStream = try XCTUnwrap(pptStreams.first(where: { $0.name == "PowerPoint Document" }))
+        let decodedPptDeck = try OOXMLContainerCodec.decodePresentation(from: pptStream.data)
+        XCTAssertEqual(decodedPptDeck.title, masterDeck.title)
+        XCTAssertEqual(decodedPptDeck.slides.count, masterDeck.slides.count)
+
+        let ppsxResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "master.pptx",
+                sourceFormat: .pptx,
+                targetFormat: .ppsx,
+                payload: .slide(masterDeck)
+            )
+        )
+        XCTAssertEqual(ppsxResult.verifiedSignature.format, .ppsx)
+        let decodedPpsxDeck = try OOXMLContainerCodec.decodePresentation(from: ppsxResult.outputBytes)
+        XCTAssertEqual(decodedPpsxDeck.title, masterDeck.title)
+        XCTAssertEqual(decodedPpsxDeck.slides.map(\.title), masterDeck.slides.map(\.title))
+
+        let txtResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "master.docx",
+                sourceFormat: .docx,
+                targetFormat: .txt,
+                payload: .document(masterDocument)
+            )
+        )
+        XCTAssertEqual(txtResult.verifiedSignature.format, .txt)
+        let decodedTxt = try XCTUnwrap(String(data: txtResult.outputBytes, encoding: .utf8))
+        XCTAssertTrue(decodedTxt.contains(masterDocument.title))
+        XCTAssertTrue(decodedTxt.contains(masterDocument.paragraphs[0].text))
     }
 
     // MARK: - 2. Bit-Level Low-Level Performance Benchmarks
@@ -319,7 +391,38 @@ final class CommercialParityBenchmarkTests: XCTestCase {
         XCTAssertEqual(crcChecksum, crcRepeat)
         XCTAssertLessThan(crcElapsed, .seconds(1))
 
-        // Benchmark B: HWP 5.0 32-bit/64-bit Record Header Pack & Unpack (10,000 headers)
+        // Benchmark B: BitPacking Little-Endian Primitives & UTF-16LE Round-Trip (5,000 records)
+        let bitPackIterations = 5_000
+        var bitPackedData = Data()
+        bitPackedData.reserveCapacity(bitPackIterations * 28)
+        var unpackedChecksum: UInt64 = 0
+        var lastUnpackedText = ""
+
+        let bitPackingElapsed = try clock.measure {
+            for idx in 0..<bitPackIterations {
+                BitPacking.appendUInt16LE(UInt16(idx & 0xFFFF), to: &bitPackedData)
+                BitPacking.appendUInt32LE(UInt32(idx &* 17), to: &bitPackedData)
+                BitPacking.appendUInt64LE(UInt64(idx &* 101), to: &bitPackedData)
+                BitPacking.appendLengthPrefixedUTF16LE("한글비트패킹", to: &bitPackedData)
+            }
+            var offset = 0
+            for _ in 0..<bitPackIterations {
+                let v16 = try BitPacking.readUInt16LE(from: bitPackedData, at: offset)
+                offset += 2
+                let v32 = try BitPacking.readUInt32LE(from: bitPackedData, at: offset)
+                offset += 4
+                let v64 = try BitPacking.readUInt64LE(from: bitPackedData, at: offset)
+                offset += 8
+                let text = try BitPacking.readLengthPrefixedUTF16LE(from: bitPackedData, offset: &offset)
+                unpackedChecksum &+= UInt64(v16) &+ UInt64(v32) &+ v64
+                lastUnpackedText = text
+            }
+        }
+        XCTAssertGreaterThan(unpackedChecksum, 0)
+        XCTAssertEqual(lastUnpackedText, "한글비트패킹")
+        XCTAssertLessThan(bitPackingElapsed, .seconds(1))
+
+        // Benchmark C: HWP 5.0 32-bit/64-bit Record Header Pack & Unpack (10,000 headers)
         let headerCount = 10_000
         var packedHeaderStream = Data()
         packedHeaderStream.reserveCapacity(headerCount * 6)
@@ -358,7 +461,7 @@ final class CommercialParityBenchmarkTests: XCTestCase {
         )
         XCTAssertLessThan(hwpHeaderElapsed, .seconds(1))
 
-        // Benchmark C: PackedCellCoordinate 64-Bit Coordinate Packing, Hashing & Row-Major Sorting (10,000 cells)
+        // Benchmark D: PackedCellCoordinate 64-Bit Coordinate Packing, Hashing & Row-Major Sorting (10,000 cells)
         var coordinates: [PackedCellCoordinate] = []
         coordinates.reserveCapacity(10_000)
         var coordinateSet = Set<PackedCellCoordinate>(minimumCapacity: 10_000)
@@ -391,6 +494,7 @@ final class CommercialParityBenchmarkTests: XCTestCase {
     // MARK: - 3. Dense Spreadsheet Formula & Pivot Engine Benchmark (200 Rows x 5 Columns)
 
     func testSpreadsheetFormulaAndPivotBenchmarkOnDenseGrid() throws {
+        XCTAssertEqual(WorksheetModel.supportedFunctionNames.count, 77)
         let clock = ContinuousClock()
         var sheet = WorksheetModel(name: "전국지사_매출집계_1000셀")
         let regions = ["서울", "부산", "대전", "광주", "판교"]
@@ -551,15 +655,22 @@ final class CommercialParityBenchmarkTests: XCTestCase {
             ConversionJobRequest(sourceFileName: "실적시트.xlsx", sourceFormat: .xlsx, targetFormat: .csv, payload: .sheet(sourceSheet))
         ]
 
-        let batchReport = DocumentConversionOrchestrator.executeBatch(batchJobs)
-        XCTAssertEqual(batchReport.totalJobs, 10)
-        XCTAssertEqual(batchReport.succeededResults.count, 10)
-        XCTAssertTrue(batchReport.failedErrors.isEmpty)
+        let clock = ContinuousClock()
+        var batchReport: BatchConversionReport?
+        let batchElapsed = clock.measure {
+            batchReport = DocumentConversionOrchestrator.executeBatch(batchJobs)
+        }
+        XCTAssertLessThan(batchElapsed, .seconds(1))
+
+        let unwrappedBatchReport = try XCTUnwrap(batchReport)
+        XCTAssertEqual(unwrappedBatchReport.totalJobs, 10)
+        XCTAssertEqual(unwrappedBatchReport.succeededResults.count, 10)
+        XCTAssertTrue(unwrappedBatchReport.failedErrors.isEmpty)
 
         let expectedTargets: [DocumentFormat] = [.docx, .hwpx, .hwp, .odt, .rtf, .md, .pdf, .xlsx, .ods, .csv]
-        XCTAssertEqual(batchReport.succeededResults.map(\.targetFormat), expectedTargets)
+        XCTAssertEqual(unwrappedBatchReport.succeededResults.map(\.targetFormat), expectedTargets)
 
-        for result in batchReport.succeededResults {
+        for result in unwrappedBatchReport.succeededResults {
             XCTAssertFalse(result.outputBytes.isEmpty)
             let audit = DocumentSecurityAuditor.auditContainer(
                 data: result.outputBytes,
@@ -693,10 +804,18 @@ final class CommercialParityBenchmarkTests: XCTestCase {
         XCTAssertEqual(Set(workspace.openTabs.map(\.moduleKind)), Set(OfficeModuleKind.allCases))
         XCTAssertEqual(WorkspaceHubCatalog.builtInTemplates.count, 8)
 
+        workspace.activeHubSection = .pinned
+        XCTAssertEqual(workspace.filteredTabs.count, 3)
+        XCTAssertTrue(workspace.filteredTabs.allSatisfy { $0.isPinned || $0.isFavorite })
+
+        workspace.activeHubSection = .recent
+        XCTAssertEqual(workspace.filteredTabs.count, 5)
+        XCTAssertEqual(workspace.filteredTabs.first?.lastOpenedISO8601, "2026-10-17T09:30:00Z")
+
         for section in HubSection.allCases {
             workspace.activeHubSection = section
             XCTAssertFalse(section.symbolName.isEmpty)
-            _ = workspace.filteredTabs
+            XCTAssertFalse(workspace.filteredTabs.isEmpty)
         }
         workspace.activeHubSection = .home
 
@@ -732,13 +851,15 @@ final class CommercialParityBenchmarkTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(darkPalette.primaryText.contrastRatio(against: darkPalette.background), 4.5)
         }
 
-        // 5. Append paragraph with Track Changes on active Document tab
+        // 5. Append paragraph with Track Changes on active Document tab and persist to workspace.openTabs
         workspace.activeTabID = docTab.id
         workspace.appendParagraphToActiveDocument(
             text: "워크스페이스 통합 시나리오에서 추가된 결론 문단입니다.",
             style: .heading2
         )
-        if case var .document(updatedDoc) = workspace.activeTab?.payload {
+        let docIndex = try XCTUnwrap(workspace.openTabs.firstIndex(where: { $0.id == docTab.id }))
+        var acceptedRevID: UUID?
+        if case var .document(updatedDoc) = workspace.openTabs[docIndex].payload {
             XCTAssertEqual(updatedDoc.paragraphs.last?.text, "워크스페이스 통합 시나리오에서 추가된 결론 문단입니다.")
             let lastID = try XCTUnwrap(updatedDoc.paragraphs.last?.id)
             updatedDoc.recordRevision(
@@ -748,10 +869,17 @@ final class CommercialParityBenchmarkTests: XCTestCase {
                 proposedText: "개정된 최종 결론 문단입니다."
             )
             let revID = try XCTUnwrap(updatedDoc.revisions.last?.id)
+            acceptedRevID = revID
             updatedDoc.acceptRevision(id: revID)
-            XCTAssertEqual(updatedDoc.paragraphs.last?.text, "개정된 최종 결론 문단입니다.")
+            workspace.openTabs[docIndex].payload = .document(updatedDoc)
         } else {
             XCTFail("Expected active tab to hold a document payload")
+        }
+        if case let .document(persistedDoc) = workspace.activeTab?.payload {
+            XCTAssertEqual(persistedDoc.paragraphs.last?.text, "개정된 최종 결론 문단입니다.")
+            XCTAssertFalse(persistedDoc.revisions.contains(where: { $0.id == acceptedRevID }))
+        } else {
+            XCTFail("Expected persisted document payload on activeTab")
         }
 
         // 6. Edit spreadsheet formula via formulaBarDraft on Sheet tab

@@ -95,7 +95,7 @@ flowchart TD
   - `홈 (home)`: 5대 모듈 빠른 새 문서 생성 카드 + 최근/고정 문서 요약
   - `최근 문서 (recent)`: 마지막 열람 시각(`lastOpenedISO8601`) 역순 정렬 문서 목록
   - `고정/즐겨찾기 (pinned)`: 상단 고정(`isPinned`) 및 즐겨찾기(`isFavorite`) 문서 모아보기
-  - `서식 템플릿 (templates)`: 공문서(HWPX), 협조전(HWP), 연간 보고서(DOCX), 표준 제안서(ODT), 예산안(XLSX), KPI 시트(ODS), 제품 발표덱(PPTX), 세미나 덱(ODP), 계약서 검토(PDF) 내장 템플릿 및 사용자 정의 템플릿(`saveActiveTabAsCustomTemplate`)
+  - `서식 템플릿 (templates)`: 공문서(HWPX), 협조전(HWP), 연간 보고서(DOCX), 예산안(XLSX), KPI 시트(ODS), 제품 발표덱(PPTX), 세미나 덱(ODP), 계약서 검토(PDF) 등 8종 내장 템플릿 및 사용자 정의 템플릿(`saveActiveTabAsCustomTemplate`)
   - `일괄 변환 스튜디오 (converter)`: `DocumentConversionOrchestrator` 연동 20종 포맷 일괄 변환 및 매직 시그니처 검증 결과 리포트
   - `스마트 보조 도구 (smartAssistant)`: `LocalSmartDocumentAssistant` 및 `DocumentSecurityAuditor` 기반 오프라인 요약·교정·조치 항목·시트 인사이트·문서 비교·보안 감사 패널
 
@@ -106,4 +106,4 @@ flowchart TD
 - **스플릿 뷰 (Side-by-Side Split View)**:
   - `WorkspaceViewModel.enableSplitView(secondaryTabID:)`를 통해 단일 윈도우에서 서로 다른 두 문서 탭(예: 좌측 `PDF` 참고 자료 + 우측 `HWPX` 공문서, 또는 좌측 `XLSX` 재무 시트 + 우측 `PPTX` 발표덱)을 나란히 열고 동시 편집할 수 있습니다.
 - **VoiceOver 및 키보드 접근성 (`AccessibilityTokens`)**:
-  - 탭 레이블(`tabLabel(fileName:module:isPinned:isModified:)`), 리본 토글 레이블(`ribbonCollapseToggleLabel`), 분할 보기 영역 레이블(`splitViewPaneLabel`), 수식 입력줄 레이블(`formulaBarLabel`), 슬라이드 캔버스 레이블(`slideStageLabel`), PDF 주석 도구 레이블(`pdfAnnotationToolLabel`)을 결정론적으로 제공합니다.
+  - 탭 레이블(`tabLabel(fileName:moduleName:isPinned:isFavorite:)`, `tabSelectHint`, `tabPinLabel`), 리본 토글 레이블(`ribbonCollapseLabel`, `ribbonExpandLabel`), 분할 보기 캔버스 레이블(`splitViewCanvasLabel`), 수식 입력줄 레이블(`formulaBarInputLabel`), 슬라이드 캔버스 레이블(`slideStageLabel`), PDF 주석 도구 모음 레이블(`pdfAnnotationToolbarLabel`)을 결정론적으로 제공합니다.

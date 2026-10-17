@@ -16,12 +16,12 @@ EasyOffice (`v1.0.0`)는 Swift 6, SwiftUI, AppKit 기반으로 설계된 **100% 
   - **OLE2 CFBF 및 HWP 5.0 바이너리 (`OLE2ContainerCodec`, `HWP5BinaryCodec`)**: 512바이트 섹터 할당 테이블(FAT) 및 디렉터리 스트림 파서/빌더, 32비트 비트패킹 `HWP5RecordHeader` (`10-bit tagID | 10-bit level | 12-bit size` + `0xFFF` 확장 길이 헤더) 기반 `.hwp`, `.hwt`, `.doc`, `.xls`, `.ppt` 지원.
   - **PDF 및 정형/마크업 코덱**: `PDFBinarySerializer` (`.pdf` ISO 32000 상호참조 테이블 `xref` 및 트레일러 직렬화/파싱), `CSVStateMachineCodec` (`.csv`, `.tsv` RFC 4180 상태 머신), `CommonMarkCodec` (`.md`), `RTFCodec` (`.rtf` 부호 있는 16비트 `\uN?` 유니코드 이스케이프), UTF-8 평문(`.txt`).
 - **비트 수준 성능 최적화 (Bit-Level Optimizations)**:
-  - `BitPacking` (리틀 엔디언 `UInt16`/`UInt32`/`UInt64` 리더·라이터 및 Zig-Zag Varint 인코딩), 256-엔트리 룩업 테이블 기반 IEEE 802.3 `CRC32Calculator`, `HWP5RecordHeader` 비트필드 연산, 문자열 할당 없는 $O(1)$ 셀 조회 및 순환 참조 검출을 위한 64비트 `PackedCellCoordinate` (`UInt64`: 상위 32비트 `row`, 하위 32비트 `column`).
+  - `BitPacking` (리틀 엔디언 `UInt16`/`UInt32`/`UInt64` 리더·라이터 및 길이 접두 UTF-16LE 인코딩), 256-엔트리 룩업 테이블 기반 IEEE 802.3 `CRC32Calculator`, `HWP5RecordHeader` 비트필드 연산, 문자열 할당 없는 $O(1)$ 셀 조회 및 순환 참조 검출을 위한 64비트 `PackedCellCoordinate` (`UInt64`: 상위 32비트 `row`, 하위 32비트 `column`).
 - **5대 결정론적 에디터 엔진**:
   - **Document & HWP/HWPX (`OfficeDocumentModel`)**: 다중 구역 조판(`PaperSizePreset`, `PageOrientation`), 문단/글자 스타일, 셀 병합 및 인라인 표 수식(`=SUM(ABOVE|LEFT)`, `=AVERAGE(ABOVE|LEFT)`)을 지원하는 `DocumentTableBlock`, 각주(`FootnoteItem`), 변경 내용 추적(`TrackedRevision`), 코멘트 스레드, 자동 목차(`TableOfContentsEntry`), `{{필드}}` 메일 머지.
   - **Sheet (`WorksheetModel`)**: 수학/삼각(27종), 통계(7종), 논리(10종), 찾기/참조(8종), 텍스트(16종), 재무(4종: `PMT`, `FV`, `PV`, `NPV`), 날짜/시간(5종)을 아우르는 **77종 내장 수식 함수**, `PivotTableEngine`, `SheetChartBuilder`, `ConditionalFormatRule`, `DataValidationRule`.
   - **Slide (`PresentationDeckModel`)**: `SlideAspectRatio` (`16:9`, `4:3`, `A4`), `SlideMasterLayout`, `SlideCanvasElement` 레이어(Z-order) 및 정렬/균등 배분, `SnapGuideCalculator` 스마트 정렬 가이드, `SlideTransitionKind`, 듀얼 모니터 `PresenterSession`.
-  - **PDF Studio (`PDFStudioDocumentModel`)**: 고속 벡터 페이지 캔버스, 7종 주석(`PDFAnnotationItem`: 형광펜, 밑줄, 취소선, 스티커 메모, 자유형 펜, 스탬프, 전자 서명), 북마크 트리(`PDFOutlineNode`), 페이지 회전/재배치/분할/병합, 양방향 오피스 ↔ PDF 변환.
+  - **PDF Studio (`PDFStudioDocumentModel`)**: 고속 벡터 페이지 캔버스, 5종 주석(`PDFAnnotationItem`: 형광펜, 밑줄, 스티커 메모, 도장, 전자 서명), 북마크 트리(`PDFOutlineNode`), 페이지 회전/재배치/분할/병합, 양방향 오피스 ↔ PDF 변환.
 - **100% 오프라인 스마트 생산성 도구 및 보안 감사 스튜디오**:
   - **포맷 일괄 변환 스튜디오 (`DocumentConversionOrchestrator`)**: 20종 전체 포맷 간 단건·배치 변환 및 출력 바이트 `FormatDetector.verify` 시그니처 사후 검증.
   - **온디바이스 스마트 문서 보조 도구 (`LocalSmartDocumentAssistant`)**: 외부 네트워크 전송 없이 로컬에서 수행하는 단어 빈도·위치 가중치 기반 핵심 문장 추출 요약(`DocumentSummaryReport`), 문장 길이·피동 표현·중복 수식어 교정 진단(`WritingRefinementSuggestion`), 기한·예산·조치 항목 추출(`ExtractedActionItem`), 시트 Z-Score 이상치(`|z| >= 1.8`) 및 추세 인사이트(`WorksheetInsightReport`), 문단 상한($N \le 2,048$) 동적 계획법 LCS 문서 비교(`DocumentDiffReport`).
@@ -39,7 +39,7 @@ EasyOffice (`v1.0.0`)는 Swift 6, SwiftUI, AppKit 기반으로 설계된 **100% 
 | **HWP (한글)** | `HWP`, `HWPX`, `HWT`, `HWTX` | HWP 5.0 Binary (OLE2 CFBF `FileHeader`/`DocInfo`/`BodyText`), KS X 6101 OWPML (ZIP+XML) | `HWP5BinaryCodec`, `HWP5RecordHeader`, `HWPXContainerCodec`, 공문서 두문/결재란 표 양식, 머리말/꼬리말, 각주, 서식 템플릿, HWP ↔ HWPX/DOCX/PDF 변환 |
 | **Sheet** | `XLSX`, `XLS`, `ODS`, `CSV`, `TSV` | ECMA-376 SpreadsheetML, OLE2 BIFF8, ISO/IEC 26300 ODF Spreadsheet, RFC 4180 CSV/TSV | `PackedCellCoordinate`, 77종 내장 수식 함수, `PivotTableEngine`, `SheetChartBuilder`, `CSVStateMachineCodec`, 다중 정렬, 조건부 서식·유효성 검사 |
 | **Slide** | `PPTX`, `PPT`, `PPSX`, `ODP` | ECMA-376 PresentationML, OLE2 Presentation, ISO/IEC 26300 ODF Presentation | `PresentationDeckModel`, 16:9·4:3·A4 캔버스, `SnapGuideCalculator` 스마트 정렬 가이드, 레이어 순서 제어, 전환 효과, `PresenterSession` 발표자 뷰 |
-| **PDF Studio** | `PDF` | ISO 32000-1 / 32000-2 (`%PDF-1.x` / `%PDF-2.0`) | `PDFBinarySerializer`, `PDFStudioDocumentModel`, 7종 주석·서명, 북마크 트리, 페이지 병합/분할/재배치/회전, 오피스 ↔ PDF 양방향 변환 |
+| **PDF Studio** | `PDF` | ISO 32000-1 / 32000-2 (`%PDF-1.x` / `%PDF-2.0`) | `PDFBinarySerializer`, `PDFStudioDocumentModel`, 5종 주석·서명, 북마크 트리, 페이지 병합/분할/재배치/회전, 오피스 ↔ PDF 양방향 변환 |
 
 ---
 
