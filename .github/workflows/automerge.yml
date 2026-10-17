@@ -1,0 +1,81 @@
+name: Automerge Label
+
+on:
+  pull_request_target:
+    types: [labeled, unlabeled, ready_for_review, closed]
+
+concurrency:
+  group: automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  enable:
+    if: >-
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'automerge') ||
+        (github.event.action == 'ready_for_review' && contains(github.event.pull_request.labels.*.name, 'automerge'))
+      ) &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable squash auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/squash-body.md"
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash \
+            --subject "$PR_TITLE (#$PR_NUMBER)" --body-file "$RUNNER_TEMP/squash-body.md"
+
+  disable:
+    if: >-
+      github.event.action == 'unlabeled' &&
+      github.event.label.name == 'automerge' &&
+      github.event.pull_request.state == 'open' &&
+      github.event.pull_request.auto_merge != null &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Disable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --disable-auto
+
+  close-linked-issues:
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Close issues linked by closing keywords
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          owner="${GITHUB_REPOSITORY%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          # shellcheck disable=SC2016
+          issues=$(gh api graphql \
+            -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){closingIssuesReferences(first:20){nodes{number state repository{nameWithOwner}}}}}}' \
+            -f owner="$owner" -f repo="$repo" -F pr="$PR_NUMBER" \
+            --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[] | select(.state == "OPEN" and .repository.nameWithOwner == env.GITHUB_REPOSITORY) | .number')
+          for issue in $issues; do
+            gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --comment "Resolved by #$PR_NUMBER (merged)."
+          done

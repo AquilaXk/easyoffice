@@ -1,0 +1,46 @@
+name: "결함 보고 (Bug Report)"
+description: "재현 가능한 결함과 수정 완료 조건을 등록합니다 (동일 근본 원인은 1개 이슈로 묶음)."
+title: "[Fix] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        - 같은 근본 원인에서 파생된 증상들은 개별 이슈로 쪼개지 않고 하나의 결함 이슈로 묶습니다.
+        - 버그 수정과 실패 재현 테스트(RED → GREEN)는 동일한 자기완결 PR에서 함께 제출합니다.
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 심각도 (Severity)
+      options:
+        - P0 — 크래시, 데이터 손실, 보안 경계 또는 Fail-Closed 위반
+        - P1 — 핵심 문서 열람/편집/변환/수식 동작 실패
+        - P2 — 부분 기능 오류 또는 우회 경로 존재
+    validations:
+      required: true
+  - type: input
+    id: domain
+    attributes:
+      label: 대상 영역 및 상위 에픽 (Domain & Parent Epic)
+      placeholder: "예) EasyOfficeCore / FormatDetector (Refs #2)"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 조건 및 기대/실제 결과 (Reproduction & Expected vs Actual)
+      placeholder: |
+        - 재현 입력/절차:
+        - 기대 결과:
+        - 실제 결과:
+    validations:
+      required: true
+  - type: textarea
+    id: done_when
+    attributes:
+      label: 완료 조건 및 검증 계획 (Done When & Verification)
+      placeholder: |
+        - [ ] 재현 테스트가 수정 전 실패(RED)하고 수정 후 통과(GREEN)한다.
+        - [ ] 인접 포맷/모듈 회귀 없이 `swift test` 전체가 통과한다.
+    validations:
+      required: true

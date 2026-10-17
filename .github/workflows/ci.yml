@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js for repository hygiene guard
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run repository hygiene & specification guard
+        run: node scripts/check-repo-hygiene.mjs
+
+      - name: Check Swift toolchain version
+        run: swift --version
+
+      - name: Build all Swift targets
+        run: swift build
+
+      - name: Run deterministic test suite
+        run: swift test
+
+      - name: Verify macOS .app bundle packaging
+        run: bash scripts/package-macos-release.sh 0.1.0-ci --verify-only

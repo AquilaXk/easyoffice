@@ -1,0 +1,43 @@
+name: "영역 에픽 (Area Epic)"
+description: "로드맵 하위 영역별 목표, 백로그 Sub-issue 목록, 완료 조건을 관리합니다."
+title: "[Epic] "
+labels: ["epic"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        - 계층 구조는 **Roadmap → 영역별 Epic → 백로그 항목(GitHub sub-issue) → 자기완결 PR**입니다.
+        - 측정 행, 테스트 flake, 코드 리뷰 finding, 소규모 후속 과제는 새 이슈를 만들지 않고 이 에픽 또는 해당 sub-issue의 체크리스트 행으로 추가합니다.
+        - 외부 상용 서비스명을 본문에 언급하지 않고 표준 규격과 도메인 용어로만 작성합니다.
+  - type: input
+    id: area
+    attributes:
+      label: 대상 영역 (Area)
+      placeholder: "예) Core Format Engines, macOS Native Editors, Lavender UI/UX, Smart Tools & Security, Release & Quality"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: 목표 및 배경 (Summary)
+      description: 이 영역 에픽이 달성해야 할 사용자·시스템 가치를 간결하게 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: sub_issues
+    attributes:
+      label: 백로그 항목 및 체크리스트 (Sub-issues & Backlog Checklist)
+      placeholder: |
+        - [ ] 백로그 항목 1
+        - [ ] 백로그 항목 2
+    validations:
+      required: true
+  - type: textarea
+    id: done_when
+    attributes:
+      label: 완료 조건 (Done When)
+      placeholder: |
+        - [ ] 연결된 모든 필수 sub-issue가 닫히고 결정론적 검증 게이트를 통과한다.
+        - [ ] 변경된 정책이 `docs/policy-decisions.md`에 기록되어 있다.
+    validations:
+      required: true

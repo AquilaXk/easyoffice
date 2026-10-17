@@ -1,0 +1,33 @@
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+      - chore
+      - ci
+  categories:
+    - title: "✨ 주요 기능 (Features)"
+      labels:
+        - enhancement
+        - area/document
+        - area/sheet
+        - area/slide
+        - area/pdf
+        - area/hwp
+        - area/ui-ux
+        - area/conversion
+        - area/smart-tools
+    - title: "🐛 결함 수정 (Bug Fixes)"
+      labels:
+        - bug
+    - title: "🔒 보안 및 안정성 (Security & Hardening)"
+      labels:
+        - security
+        - area/security
+    - title: "📦 빌드 및 릴리스 (Build & Release)"
+      labels:
+        - area/release
+    - title: "🔧 기타 개선 (Other Changes)"
+      labels:
+        - "*"

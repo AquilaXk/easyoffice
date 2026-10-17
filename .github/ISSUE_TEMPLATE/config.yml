@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "이슈·PR 운영 및 정책 결정 기준 (docs/policy-decisions.md)"
+    url: "https://github.com/AquilaXk/easyoffice/blob/main/docs/policy-decisions.md"
+    about: "오탈자·단순 설정·린트·소형 유지보수(Class C)와 리뷰 지적·측정 행은 새 이슈를 만들지 않고 PR 직행 또는 기존 Sub-issue 체크리스트를 사용합니다."

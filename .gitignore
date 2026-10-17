@@ -1,0 +1,35 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Swift Package Manager & Xcode build artifacts
+.build/
+.swiftpm/
+DerivedData/
+build/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Release packaging output
+dist/
+release-build/
+*.app/
+*.dmg
+*.pkg
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Local scratch & worktrees
+.worktrees/
+tmp/
+*.log
+*.local.md

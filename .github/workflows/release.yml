@@ -1,0 +1,80 @@
+name: Release macOS Package
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.0)"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    name: Build & Publish macOS Release
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js for repository hygiene guard
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run repository hygiene guard
+        run: node scripts/check-repo-hygiene.mjs
+
+      - name: Run deterministic test suite before packaging
+        run: swift test
+
+      - name: Resolve release version and tag
+        id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF_NAME" == v* ]]; then
+            VERSION="${REF_NAME#v}"
+            TAG="$REF_NAME"
+          else
+            VERSION="${INPUT_VERSION#v}"
+            TAG="v${VERSION}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS .app bundle, .dmg, .zip, and SHA256SUMS.txt
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: bash scripts/package-macos-release.sh "$VERSION"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "dist/EasyOffice-${VERSION}-macos.dmg" \
+              "dist/EasyOffice-${VERSION}-macos.zip" \
+              "dist/SHA256SUMS.txt" \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" \
+              "dist/EasyOffice-${VERSION}-macos.dmg" \
+              "dist/EasyOffice-${VERSION}-macos.zip" \
+              "dist/SHA256SUMS.txt" \
+              --title "EasyOffice v${VERSION} (macOS)" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi
