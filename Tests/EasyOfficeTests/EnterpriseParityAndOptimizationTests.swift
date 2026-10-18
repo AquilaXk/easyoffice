@@ -754,4 +754,157 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     _ = pdf.redactText("CONFIDENTIAL")
     XCTAssertEqual(pdf.watermarkText, "대외비 ████")
   }
+
+  // MARK: - 8. Unary +, Postfix %, ISBLANK Spec Compliance & Multi-Column Worksheet Sort
+
+  @MainActor
+  func testSeventhAuditFormulaUnaryPlusPostfixPercentIsBlankAndMultiColumnSort() throws {
+    var sheet = WorksheetModel(
+      name: "수식연산자및정렬검증",
+      rawCells: [
+        "A1": "100",
+        "A2": "25",
+        "B1": "=\"\"",
+      ]
+    )
+
+    // 1. Unary + operator
+    try sheet.setCell("C1", rawValue: "=+A1 + +25")
+    try sheet.setCell("C2", rawValue: "=+A1+A2")
+    try sheet.setCell("C3", rawValue: "=+100")
+    try sheet.setCell("C4", rawValue: "=+(A1+A2)")
+
+    XCTAssertEqual(sheet.evaluate(at: "C1").numericValue ?? 0.0, 125.0, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "C2").numericValue ?? 0.0, 125.0, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "C3").numericValue ?? 0.0, 100.0, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "C4").numericValue ?? 0.0, 125.0, accuracy: 1e-9)
+
+    // 2. Postfix % operator
+    try sheet.setCell("D1", rawValue: "=15%")
+    try sheet.setCell("D2", rawValue: "=200*15%")
+    try sheet.setCell("D3", rawValue: "=50%+25%")
+    try sheet.setCell("D4", rawValue: "=(80+20)%")
+    try sheet.setCell("D5", rawValue: "=(A1+A2)%")
+
+    XCTAssertEqual(sheet.evaluate(at: "D1").numericValue ?? 0.0, 0.15, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "D2").numericValue ?? 0.0, 30.0, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "D3").numericValue ?? 0.0, 0.75, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "D4").numericValue ?? 0.0, 1.0, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "D5").numericValue ?? 0.0, 1.25, accuracy: 1e-9)
+
+    // 3. ISBLANK ECMA-376 / OpenFormula spec compliance (empty cell -> true, formula "" -> false)
+    try sheet.setCell("E1", rawValue: "=ISBLANK(Z99)")
+    try sheet.setCell("E2", rawValue: "=ISBLANK(B1)")
+    try sheet.setCell("E3", rawValue: "=LEN(B1)")
+
+    XCTAssertEqual(sheet.evaluate(at: "E1"), .boolean(true))
+    XCTAssertEqual(sheet.evaluate(at: "E2"), .boolean(false))
+    XCTAssertEqual(sheet.evaluate(at: "E3"), .number(0.0))
+
+    // 4. Multi-column sortRows(byColumn:ascending:hasHeader:secondaryColumn:secondaryAscending:)
+    var sortSheet = WorksheetModel(
+      name: "다중열정렬",
+      rawCells: [
+        "A1": "부서", "B1": "실적", "C1": "담당자",
+        "A2": "영업", "B2": "100", "C2": "김민준",
+        "A3": "개발", "B3": "250", "C3": "이서연",
+        "A4": "영업", "B4": "300", "C4": "박지호",
+        "A5": "개발", "B5": "400", "C5": "최유진",
+      ]
+    )
+    sortSheet.sortRows(
+      byColumn: 0,
+      ascending: true,
+      hasHeader: true,
+      secondaryColumn: 1,
+      secondaryAscending: false
+    )
+
+    // Header row 1 preserved
+    XCTAssertEqual(sortSheet.rawValue(at: "A1"), "부서")
+    XCTAssertEqual(sortSheet.rawValue(at: "B1"), "실적")
+    XCTAssertEqual(sortSheet.rawValue(at: "C1"), "담당자")
+
+    // Primary ascending ("개발" before "영업"), secondary descending (400 before 250; 300 before 100)
+    XCTAssertEqual(sortSheet.rawValue(at: "A2"), "개발")
+    XCTAssertEqual(sortSheet.evaluate(at: "B2"), .number(400))
+    XCTAssertEqual(sortSheet.rawValue(at: "C2"), "최유진")
+
+    XCTAssertEqual(sortSheet.rawValue(at: "A3"), "개발")
+    XCTAssertEqual(sortSheet.evaluate(at: "B3"), .number(250))
+    XCTAssertEqual(sortSheet.rawValue(at: "C3"), "이서연")
+
+    XCTAssertEqual(sortSheet.rawValue(at: "A4"), "영업")
+    XCTAssertEqual(sortSheet.evaluate(at: "B4"), .number(300))
+    XCTAssertEqual(sortSheet.rawValue(at: "C4"), "박지호")
+
+    XCTAssertEqual(sortSheet.rawValue(at: "A5"), "영업")
+    XCTAssertEqual(sortSheet.evaluate(at: "B5"), .number(100))
+    XCTAssertEqual(sortSheet.rawValue(at: "C5"), "김민준")
+
+    // 5. SlideModel transitionDurationSeconds & autoAdvanceSeconds + .pptx / .odp round-trip
+    var deck = SlideDeckModel(
+      title: "전환시간검증",
+      slides: [
+        SlideModel(
+          title: "슬라이드 1",
+          transitionDurationSeconds: 1.5,
+          autoAdvanceSeconds: 12
+        )
+      ]
+    )
+    deck.slides[0].transitionDurationSeconds = 1.5
+    deck.slides[0].autoAdvanceSeconds = 12
+    let pptxDeck = try OOXMLContainerCodec.decodePresentation(
+      from: try OOXMLContainerCodec.encodePresentation(deck)
+    )
+    let odpDeck = try ODFContainerCodec.decodePresentation(
+      from: try ODFContainerCodec.encodePresentation(deck)
+    )
+    XCTAssertEqual(pptxDeck.slides[0].transitionDurationSeconds, 1.5, accuracy: 1e-6)
+    XCTAssertEqual(pptxDeck.slides[0].autoAdvanceSeconds, 12)
+    XCTAssertEqual(odpDeck.slides[0].transitionDurationSeconds, 1.5, accuracy: 1e-6)
+    XCTAssertEqual(odpDeck.slides[0].autoAdvanceSeconds, 12)
+
+    // 6. Interactive Find & Replace navigation (findMatchCount, findNextMatch, findPreviousMatch, replaceCurrentMatch)
+    let vm = WorkspaceViewModel()
+    let docTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .document }))
+    vm.activeTabID = docTab.id
+    vm.appendParagraphToActiveDocument(text: "첫 번째 검색대상키워드 문단입니다.", style: .body)
+    vm.appendParagraphToActiveDocument(text: "두 번째 검색대상키워드 문단입니다.", style: .body)
+    vm.findQueryDraft = "검색대상키워드"
+    vm.replaceQueryDraft = "치환완료키워드"
+    let initialMatches = vm.findMatchCount
+    XCTAssertEqual(initialMatches, 2)
+    vm.findNextMatch()
+    XCTAssertEqual(vm.currentFindMatchIndex, 1)
+    vm.findPreviousMatch()
+    XCTAssertEqual(vm.currentFindMatchIndex, 2)
+    let replacedSingle = vm.replaceCurrentMatch()
+    XCTAssertEqual(replacedSingle, 1)
+    XCTAssertEqual(vm.findMatchCount, 1)
+
+    // 7. PDFBinarySerializer upper/middle page layout (OFFICIAL STAMP, AcroForm, ELECTRONIC SIGNATURE)
+    let pdfTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .pdf }))
+    vm.activeTabID = pdfTab.id
+    vm.addStampToActivePDFPage(preset: "승인 (APPROVED)")
+    vm.addInkStrokeToActivePDFPage(
+      points: [
+        PDFInkPoint(x: 90, y: 468),
+        PDFInkPoint(x: 150, y: 478),
+        PDFInkPoint(x: 220, y: 464),
+      ]
+    )
+    if case .pdf(let pdfModel) = vm.activeTab?.payload {
+      let encodedPDF = PDFBinarySerializer.encode(pdfModel)
+      let pdfASCII = String(decoding: encodedPDF, as: UTF8.self)
+      XCTAssertTrue(pdfASCII.contains("386 576 160 46 re B"))
+      XCTAssertTrue(pdfASCII.contains("48 452 280 46 re B"))
+      let roundTripPDF = try PDFBinarySerializer.decode(from: encodedPDF)
+      XCTAssertEqual(roundTripPDF.annotations.count, pdfModel.annotations.count)
+      XCTAssertEqual(roundTripPDF.totalInkStrokeCount, pdfModel.totalInkStrokeCount)
+    } else {
+      XCTFail("Expected active PDF tab")
+    }
+  }
 }

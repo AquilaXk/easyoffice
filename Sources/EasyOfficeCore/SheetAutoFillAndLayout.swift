@@ -729,7 +729,166 @@ extension WorksheetModel {
       : ref.formatted(col: nextAxisVal, row: ref.row)
   }
 
-  // MARK: - Enterprise Data Cleansing (Duplicate Removal & Delimiter Split)
+  // MARK: - Enterprise Data Cleansing & Multi-Column Row Sorting
+
+  /// Sorts data rows in the active worksheet by `column` (`ascending`), breaking ties with optional `secondaryColumn` (`secondaryAscending`), and preserving row 0 when `hasHeader` is `true`.
+  public mutating func sortRows(
+    byColumn column: Int,
+    ascending: Bool = true,
+    hasHeader: Bool = true,
+    secondaryColumn: Int? = nil,
+    secondaryAscending: Bool = true
+  ) {
+    guard !cellsByCoordinate.isEmpty,
+      column >= 0,
+      column <= CellAddress.maxZeroBasedColumn
+    else {
+      return
+    }
+    let bounds = detectedDataRange()
+    let minRow = max(0, min(bounds.start.row, bounds.end.row))
+    let maxRow = min(CellAddress.maxZeroBasedRow, max(bounds.start.row, bounds.end.row))
+    let startRow = hasHeader ? (minRow + 1) : minRow
+    guard startRow < maxRow else { return }
+    let (rowCount, overflow) = (maxRow - startRow).addingReportingOverflow(1)
+    guard !overflow, rowCount > 1, rowCount <= CellRange.maxExpandedCellCount else {
+      return
+    }
+
+    let rowIndices = Array(startRow...maxRow)
+    var context = EvaluationContext()
+    var primaryValues: [Int: EvaluatedCellValue] = [:]
+    primaryValues.reserveCapacity(rowCount)
+    var secondaryValues: [Int: EvaluatedCellValue] = [:]
+    let validSecondaryCol: Int? =
+      if let secCol = secondaryColumn, secCol >= 0, secCol <= CellAddress.maxZeroBasedColumn {
+        secCol
+      } else {
+        nil
+      }
+    if validSecondaryCol != nil {
+      secondaryValues.reserveCapacity(rowCount)
+    }
+
+    for r in rowIndices {
+      let pCoord = PackedCellCoordinate(row: r, column: column)
+      primaryValues[r] =
+        cellsByCoordinate[pCoord] != nil
+        ? evaluateInternal(at: pCoord, context: &context, depth: 0)
+        : .empty
+      if let secCol = validSecondaryCol {
+        let sCoord = PackedCellCoordinate(row: r, column: secCol)
+        secondaryValues[r] =
+          cellsByCoordinate[sCoord] != nil
+          ? evaluateInternal(at: sCoord, context: &context, depth: 0)
+          : .empty
+      }
+    }
+
+    let sortedRowIndices = rowIndices.sorted { rA, rB in
+      let vA = primaryValues[rA] ?? .empty
+      let vB = primaryValues[rB] ?? .empty
+      let primaryOrder = Self.compareEvaluatedValuesForSort(vA, vB, ascending: ascending)
+      if primaryOrder != .orderedSame {
+        return primaryOrder == .orderedAscending
+      }
+      if validSecondaryCol != nil {
+        let sA = secondaryValues[rA] ?? .empty
+        let sB = secondaryValues[rB] ?? .empty
+        let secondaryOrder = Self.compareEvaluatedValuesForSort(
+          sA,
+          sB,
+          ascending: secondaryAscending
+        )
+        if secondaryOrder != .orderedSame {
+          return secondaryOrder == .orderedAscending
+        }
+      }
+      return rA < rB
+    }
+
+    guard sortedRowIndices != rowIndices else { return }
+
+    var oldToNewRow: [Int: Int] = [:]
+    oldToNewRow.reserveCapacity(rowCount)
+    for (offset, oldRow) in sortedRowIndices.enumerated() {
+      oldToNewRow[oldRow] = startRow + offset
+    }
+
+    var nextCells: [PackedCellCoordinate: String] = [:]
+    nextCells.reserveCapacity(cellsByCoordinate.count)
+    for (coord, rawVal) in cellsByCoordinate {
+      let targetRow = oldToNewRow[coord.row] ?? coord.row
+      nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = rawVal
+    }
+    cellsByCoordinate = nextCells
+
+    var nextStyles: [PackedCellCoordinate: CellStyle] = [:]
+    nextStyles.reserveCapacity(cellStyles.count)
+    for (coord, style) in cellStyles {
+      let targetRow = oldToNewRow[coord.row] ?? coord.row
+      nextStyles[PackedCellCoordinate(row: targetRow, column: coord.column)] = style
+    }
+    cellStyles = nextStyles
+
+    var nextComments: [PackedCellCoordinate: String] = [:]
+    nextComments.reserveCapacity(sheetComments.count)
+    for (coord, comment) in sheetComments {
+      let targetRow = oldToNewRow[coord.row] ?? coord.row
+      nextComments[PackedCellCoordinate(row: targetRow, column: coord.column)] = comment
+    }
+    sheetComments = nextComments
+
+    var nextRowHeights: [Int: Double] = [:]
+    nextRowHeights.reserveCapacity(rowHeights.count)
+    for (r, height) in rowHeights {
+      let targetRow = oldToNewRow[r] ?? r
+      nextRowHeights[targetRow] = height
+    }
+    rowHeights = nextRowHeights
+
+    compiledASTs.removeAll(keepingCapacity: true)
+    for (coord, rawVal) in cellsByCoordinate where !rawVal.isEmpty {
+      compiledASTs[coord] = Self.compileCellInput(rawVal)
+    }
+  }
+
+  private static func compareEvaluatedValuesForSort(
+    _ lhs: EvaluatedCellValue,
+    _ rhs: EvaluatedCellValue,
+    ascending: Bool
+  ) -> ComparisonResult {
+    if lhs == .empty && rhs == .empty {
+      return .orderedSame
+    }
+    if lhs == .empty {
+      return .orderedDescending
+    }
+    if rhs == .empty {
+      return .orderedAscending
+    }
+    if let lNum = lhs.numericValue, let rNum = rhs.numericValue {
+      if lNum == rNum {
+        return .orderedSame
+      }
+      if ascending {
+        return lNum < rNum ? .orderedAscending : .orderedDescending
+      } else {
+        return lNum > rNum ? .orderedAscending : .orderedDescending
+      }
+    }
+    let lText = lhs.description
+    let rText = rhs.description
+    let cmp = lText.caseInsensitiveCompare(rText)
+    if cmp == .orderedSame {
+      return .orderedSame
+    }
+    if ascending {
+      return cmp
+    } else {
+      return cmp == .orderedAscending ? .orderedDescending : .orderedAscending
+    }
+  }
 
   /// Removes duplicate rows within `range` (or `detectedDataRange()` when `nil`), preserving the first occurrence of each non-empty row signature and returning the number of deleted rows.
   @discardableResult

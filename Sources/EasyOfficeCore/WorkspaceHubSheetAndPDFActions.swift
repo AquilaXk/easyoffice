@@ -8,6 +8,28 @@ public enum PDFStampPreset: String, CaseIterable, Sendable {
   case urgent = "긴급 (URGENT)"
 }
 
+extension PDFAnnotationKind {
+  public static var signatureStamp: PDFAnnotationKind { .signature }
+}
+
+extension PDFFormField {
+  public var fieldName: String {
+    get { name }
+    set { name = newValue }
+  }
+}
+
+extension PDFPageDescriptor {
+  public var title: String {
+    "Page \(pageNumber)"
+  }
+
+  public var bodyText: String {
+    get { extractedText }
+    set { extractedText = newValue }
+  }
+}
+
 extension PDFAnnotationItem {
   public var contents: String {
     get { content }
@@ -621,5 +643,434 @@ extension WorkspaceViewModel {
     openTabs[idx].isModified = true
     lastExecutedCommandSummary =
       resolved.isEmpty ? "PDF 워터마크 해제 완료" : "PDF 워터마크 적용: \(resolved)"
+  }
+
+  public func sortActiveSheetMultiColumn(
+    primaryColumn: Int,
+    ascending: Bool = true,
+    secondaryColumn: Int,
+    secondaryAscending: Bool = true
+  ) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .sheet(var sheet) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    sheet.sortRows(
+      byColumn: primaryColumn,
+      ascending: ascending,
+      hasHeader: true,
+      secondaryColumn: secondaryColumn,
+      secondaryAscending: secondaryAscending
+    )
+    formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
+    openTabs[idx].payload = .sheet(sheet)
+    openTabs[idx].isModified = true
+    let pLabel = CellAddress.columnLabel(for: max(0, primaryColumn))
+    let sLabel = CellAddress.columnLabel(for: max(0, secondaryColumn))
+    lastExecutedCommandSummary =
+      "다중 기준 행 정렬 완료 (1차 \(pLabel)열 \(ascending ? "오름차순" : "내림차순"), 2차 \(sLabel)열 \(secondaryAscending ? "오름차순" : "내림차순"))"
+  }
+
+  // MARK: - Interactive Find & Replace Navigation & Single Replacement
+
+  private func countOccurrences(
+    of needle: String,
+    in haystack: String,
+    caseSensitive: Bool
+  ) -> Int {
+    guard !needle.isEmpty, !haystack.isEmpty else { return 0 }
+    let options: String.CompareOptions = caseSensitive ? [] : [.caseInsensitive]
+    var count = 0
+    var searchStart = haystack.startIndex
+    while searchStart < haystack.endIndex,
+      let range = haystack.range(
+        of: needle,
+        options: options,
+        range: searchStart..<haystack.endIndex
+      )
+    {
+      count += 1
+      if range.isEmpty {
+        searchStart = haystack.index(after: range.lowerBound)
+      } else {
+        searchStart = range.upperBound
+      }
+    }
+    return count
+  }
+
+  public var findMatchCount: Int {
+    let needle = findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !needle.isEmpty, let tab = activeTab else { return 0 }
+    switch tab.payload {
+    case .document(let doc):
+      return doc.paragraphs.reduce(0) { acc, p in
+        acc + countOccurrences(of: needle, in: p.text, caseSensitive: isFindCaseSensitive)
+      }
+    case .sheet(let sheet):
+      return sheet.cellsByCoordinate.keys.sorted().reduce(0) { acc, coord in
+        let raw = sheet.cellsByCoordinate[coord] ?? ""
+        return acc + countOccurrences(of: needle, in: raw, caseSensitive: isFindCaseSensitive)
+      }
+    case .slide(let deck):
+      return deck.slides.reduce(0) { acc, slide in
+        var slideTotal = countOccurrences(
+          of: needle,
+          in: slide.title,
+          caseSensitive: isFindCaseSensitive
+        )
+        for bullet in slide.bulletPoints {
+          slideTotal += countOccurrences(
+            of: needle,
+            in: bullet,
+            caseSensitive: isFindCaseSensitive
+          )
+        }
+        for el in slide.elements {
+          slideTotal += countOccurrences(
+            of: needle,
+            in: el.title,
+            caseSensitive: isFindCaseSensitive
+          )
+          slideTotal += countOccurrences(
+            of: needle,
+            in: el.bodyText,
+            caseSensitive: isFindCaseSensitive
+          )
+        }
+        slideTotal += countOccurrences(
+          of: needle,
+          in: slide.speakerNotes,
+          caseSensitive: isFindCaseSensitive
+        )
+        return acc + slideTotal
+      }
+    case .pdf(let pdf):
+      return pdf.pages.reduce(0) { acc, page in
+        acc
+          + countOccurrences(
+            of: needle,
+            in: page.extractedText,
+            caseSensitive: isFindCaseSensitive
+          )
+      }
+    }
+  }
+
+  private func navigateSelectionToFindMatch(at targetOneBasedIndex: Int) {
+    let needle = findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !needle.isEmpty, targetOneBasedIndex >= 1, let tab = activeTab else { return }
+    var running = 0
+    switch tab.payload {
+    case .document(let doc):
+      for p in doc.paragraphs {
+        let c = countOccurrences(of: needle, in: p.text, caseSensitive: isFindCaseSensitive)
+        running += c
+        if running >= targetOneBasedIndex {
+          selectedParagraphID = p.id
+          return
+        }
+      }
+    case .sheet(let sheet):
+      for coord in sheet.cellsByCoordinate.keys.sorted() {
+        let raw = sheet.cellsByCoordinate[coord] ?? ""
+        let c = countOccurrences(of: needle, in: raw, caseSensitive: isFindCaseSensitive)
+        running += c
+        if running >= targetOneBasedIndex {
+          let a1 = coord.description
+          selectedSheetCell = a1
+          selectedSheetRange = a1
+          formulaBarDraft = raw
+          return
+        }
+      }
+    case .slide(let deck):
+      for (sIdx, slide) in deck.slides.enumerated() {
+        var slideCount = countOccurrences(
+          of: needle,
+          in: slide.title,
+          caseSensitive: isFindCaseSensitive
+        )
+        for bullet in slide.bulletPoints {
+          slideCount += countOccurrences(
+            of: needle,
+            in: bullet,
+            caseSensitive: isFindCaseSensitive
+          )
+        }
+        for el in slide.elements {
+          slideCount += countOccurrences(
+            of: needle,
+            in: el.title,
+            caseSensitive: isFindCaseSensitive
+          )
+          slideCount += countOccurrences(
+            of: needle,
+            in: el.bodyText,
+            caseSensitive: isFindCaseSensitive
+          )
+        }
+        slideCount += countOccurrences(
+          of: needle,
+          in: slide.speakerNotes,
+          caseSensitive: isFindCaseSensitive
+        )
+        running += slideCount
+        if running >= targetOneBasedIndex {
+          selectedSlideIndex = sIdx
+          return
+        }
+      }
+    case .pdf(let pdf):
+      for (pIdx, page) in pdf.pages.enumerated() {
+        let c = countOccurrences(
+          of: needle,
+          in: page.extractedText,
+          caseSensitive: isFindCaseSensitive
+        )
+        running += c
+        if running >= targetOneBasedIndex {
+          selectedPDFPageIndex = pIdx
+          return
+        }
+      }
+    }
+  }
+
+  public func findNextMatch() {
+    let total = findMatchCount
+    guard total > 0 else {
+      currentFindMatchIndex = 0
+      lastExecutedCommandSummary = "일치 항목 없음 (0건)"
+      return
+    }
+    currentFindMatchIndex = (currentFindMatchIndex % total) + 1
+    navigateSelectionToFindMatch(at: currentFindMatchIndex)
+    lastExecutedCommandSummary = "다음 찾기 (\(currentFindMatchIndex)/\(total))"
+  }
+
+  public func findPreviousMatch() {
+    let total = findMatchCount
+    guard total > 0 else {
+      currentFindMatchIndex = 0
+      lastExecutedCommandSummary = "일치 항목 없음 (0건)"
+      return
+    }
+    currentFindMatchIndex = currentFindMatchIndex <= 1 ? total : (currentFindMatchIndex - 1)
+    navigateSelectionToFindMatch(at: currentFindMatchIndex)
+    lastExecutedCommandSummary = "이전 찾기 (\(currentFindMatchIndex)/\(total))"
+  }
+
+  private func replaceTargetOccurrence(
+    in text: inout String,
+    needle: String,
+    replacement: String,
+    caseSensitive: Bool,
+    currentCounter: inout Int,
+    targetOneBasedIndex: Int
+  ) -> Bool {
+    guard !needle.isEmpty, !text.isEmpty else { return false }
+    let options: String.CompareOptions = caseSensitive ? [] : [.caseInsensitive]
+    var searchStart = text.startIndex
+    while searchStart < text.endIndex,
+      let range = text.range(
+        of: needle,
+        options: options,
+        range: searchStart..<text.endIndex
+      )
+    {
+      currentCounter += 1
+      if currentCounter == targetOneBasedIndex {
+        text.replaceSubrange(range, with: replacement)
+        return true
+      }
+      if range.isEmpty {
+        searchStart = text.index(after: range.lowerBound)
+      } else {
+        searchStart = range.upperBound
+      }
+    }
+    return false
+  }
+
+  @discardableResult
+  public func replaceCurrentMatch() -> Int {
+    let needle = findQueryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    let replacement = replaceQueryDraft
+    guard !needle.isEmpty,
+      let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID })
+    else { return 0 }
+    let total = findMatchCount
+    guard total > 0 else {
+      currentFindMatchIndex = 0
+      lastExecutedCommandSummary = "일치 항목 없음 (0건)"
+      return 0
+    }
+    let targetOccurrence =
+      (currentFindMatchIndex >= 1 && currentFindMatchIndex <= total) ? currentFindMatchIndex : 1
+    var counter = 0
+    var didReplace = false
+
+    recordUndoSnapshot(for: activeTabID)
+
+    switch openTabs[idx].payload {
+    case .document(var doc):
+      for pIdx in doc.paragraphs.indices {
+        if replaceTargetOccurrence(
+          in: &doc.paragraphs[pIdx].text,
+          needle: needle,
+          replacement: replacement,
+          caseSensitive: isFindCaseSensitive,
+          currentCounter: &counter,
+          targetOneBasedIndex: targetOccurrence
+        ) {
+          if !doc.paragraphs[pIdx].inlineRuns.isEmpty {
+            var runCounter = 0
+            for rIdx in doc.paragraphs[pIdx].inlineRuns.indices {
+              if replaceTargetOccurrence(
+                in: &doc.paragraphs[pIdx].inlineRuns[rIdx].text,
+                needle: needle,
+                replacement: replacement,
+                caseSensitive: isFindCaseSensitive,
+                currentCounter: &runCounter,
+                targetOneBasedIndex: 1
+              ) {
+                break
+              }
+            }
+          }
+          selectedParagraphID = doc.paragraphs[pIdx].id
+          didReplace = true
+          break
+        }
+      }
+      if didReplace {
+        openTabs[idx].payload = .document(doc)
+      }
+
+    case .sheet(var sheet):
+      for coord in sheet.cellsByCoordinate.keys.sorted() {
+        guard var raw = sheet.cellsByCoordinate[coord] else { continue }
+        if replaceTargetOccurrence(
+          in: &raw,
+          needle: needle,
+          replacement: replacement,
+          caseSensitive: isFindCaseSensitive,
+          currentCounter: &counter,
+          targetOneBasedIndex: targetOccurrence
+        ) {
+          try? sheet.setCell(row: coord.row, column: coord.column, rawValue: raw)
+          let a1 = coord.description
+          selectedSheetCell = a1
+          selectedSheetRange = a1
+          formulaBarDraft = raw
+          didReplace = true
+          break
+        }
+      }
+      if didReplace {
+        openTabs[idx].payload = .sheet(sheet)
+      }
+
+    case .slide(var deck):
+      slideLoop: for sIdx in deck.slides.indices {
+        if replaceTargetOccurrence(
+          in: &deck.slides[sIdx].title,
+          needle: needle,
+          replacement: replacement,
+          caseSensitive: isFindCaseSensitive,
+          currentCounter: &counter,
+          targetOneBasedIndex: targetOccurrence
+        ) {
+          selectedSlideIndex = sIdx
+          didReplace = true
+          break slideLoop
+        }
+        for bIdx in deck.slides[sIdx].bulletPoints.indices {
+          if replaceTargetOccurrence(
+            in: &deck.slides[sIdx].bulletPoints[bIdx],
+            needle: needle,
+            replacement: replacement,
+            caseSensitive: isFindCaseSensitive,
+            currentCounter: &counter,
+            targetOneBasedIndex: targetOccurrence
+          ) {
+            selectedSlideIndex = sIdx
+            didReplace = true
+            break slideLoop
+          }
+        }
+        for eIdx in deck.slides[sIdx].elements.indices {
+          if replaceTargetOccurrence(
+            in: &deck.slides[sIdx].elements[eIdx].title,
+            needle: needle,
+            replacement: replacement,
+            caseSensitive: isFindCaseSensitive,
+            currentCounter: &counter,
+            targetOneBasedIndex: targetOccurrence
+          ) {
+            selectedSlideIndex = sIdx
+            didReplace = true
+            break slideLoop
+          }
+          if replaceTargetOccurrence(
+            in: &deck.slides[sIdx].elements[eIdx].bodyText,
+            needle: needle,
+            replacement: replacement,
+            caseSensitive: isFindCaseSensitive,
+            currentCounter: &counter,
+            targetOneBasedIndex: targetOccurrence
+          ) {
+            selectedSlideIndex = sIdx
+            didReplace = true
+            break slideLoop
+          }
+        }
+        if replaceTargetOccurrence(
+          in: &deck.slides[sIdx].speakerNotes,
+          needle: needle,
+          replacement: replacement,
+          caseSensitive: isFindCaseSensitive,
+          currentCounter: &counter,
+          targetOneBasedIndex: targetOccurrence
+        ) {
+          selectedSlideIndex = sIdx
+          didReplace = true
+          break slideLoop
+        }
+      }
+      if didReplace {
+        openTabs[idx].payload = .slide(deck)
+      }
+
+    case .pdf(var pdf):
+      for pIdx in pdf.pages.indices {
+        if replaceTargetOccurrence(
+          in: &pdf.pages[pIdx].extractedText,
+          needle: needle,
+          replacement: replacement,
+          caseSensitive: isFindCaseSensitive,
+          currentCounter: &counter,
+          targetOneBasedIndex: targetOccurrence
+        ) {
+          selectedPDFPageIndex = pIdx
+          didReplace = true
+          break
+        }
+      }
+      if didReplace {
+        openTabs[idx].payload = .pdf(pdf)
+      }
+    }
+
+    guard didReplace else { return 0 }
+    openTabs[idx].isModified = true
+    lastFindReplaceCount = 1
+    let updatedTotal = findMatchCount
+    currentFindMatchIndex = updatedTotal == 0 ? 0 : min(targetOccurrence, updatedTotal)
+    lastExecutedCommandSummary = "단건 바꾸기 완료 (1건 치환)"
+    return 1
   }
 }

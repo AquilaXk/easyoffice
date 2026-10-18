@@ -211,6 +211,11 @@ public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
     try c.encode(isUnderlined, forKey: .isUnderlined)
   }
 
+  public var body: String {
+    get { bodyText }
+    set { bodyText = newValue }
+  }
+
   public var centerX: Double { x + width / 2.0 }
   public var centerY: Double { y + height / 2.0 }
   public var maxX: Double { x + width }
@@ -348,6 +353,30 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
   public var masterLayout: SlideMasterLayout
   public var transition: SlideTransitionKind
   public var elements: [SlideCanvasElement]
+  public var transitionDurationSeconds: Double {
+    didSet {
+      let clamped = max(
+        0.2,
+        min(5.0, transitionDurationSeconds.isFinite ? transitionDurationSeconds : 0.8)
+      )
+      if transitionDurationSeconds != clamped {
+        transitionDurationSeconds = clamped
+      }
+    }
+  }
+  public var autoAdvanceSeconds: Int? {
+    didSet {
+      let clamped = autoAdvanceSeconds.map { max(1, min(300, $0)) }
+      if autoAdvanceSeconds != clamped {
+        autoAdvanceSeconds = clamped
+      }
+    }
+  }
+
+  public var bodyBullets: [String] {
+    get { bulletPoints }
+    set { bulletPoints = newValue }
+  }
 
   public init(
     id: UUID = UUID(),
@@ -357,7 +386,9 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
     speakerNotes: String = "",
     masterLayout: SlideMasterLayout = .titleAndContent,
     transition: SlideTransitionKind = .fade,
-    elements: [SlideCanvasElement] = []
+    elements: [SlideCanvasElement] = [],
+    transitionDurationSeconds: Double = 0.8,
+    autoAdvanceSeconds: Int? = nil
   ) {
     self.id = id
     self.title = title
@@ -367,6 +398,50 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
     self.masterLayout = masterLayout
     self.transition = transition
     self.elements = elements
+    self.transitionDurationSeconds = max(
+      0.2,
+      min(5.0, transitionDurationSeconds.isFinite ? transitionDurationSeconds : 0.8)
+    )
+    self.autoAdvanceSeconds = autoAdvanceSeconds.map { max(1, min(300, $0)) }
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, title, subtitle, bulletPoints, speakerNotes, masterLayout, transition, elements
+    case transitionDurationSeconds, autoAdvanceSeconds
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+    self.title = try c.decode(String.self, forKey: .title)
+    self.subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
+    self.bulletPoints = try c.decodeIfPresent([String].self, forKey: .bulletPoints) ?? []
+    self.speakerNotes = try c.decodeIfPresent(String.self, forKey: .speakerNotes) ?? ""
+    self.masterLayout =
+      try c.decodeIfPresent(SlideMasterLayout.self, forKey: .masterLayout) ?? .titleAndContent
+    self.transition = try c.decodeIfPresent(SlideTransitionKind.self, forKey: .transition) ?? .fade
+    self.elements = try c.decodeIfPresent([SlideCanvasElement].self, forKey: .elements) ?? []
+    let rawDuration = try c.decodeIfPresent(Double.self, forKey: .transitionDurationSeconds) ?? 0.8
+    self.transitionDurationSeconds = max(
+      0.2,
+      min(5.0, rawDuration.isFinite ? rawDuration : 0.8)
+    )
+    let rawAutoAdvance = try c.decodeIfPresent(Int.self, forKey: .autoAdvanceSeconds)
+    self.autoAdvanceSeconds = rawAutoAdvance.map { max(1, min(300, $0)) }
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(id, forKey: .id)
+    try c.encode(title, forKey: .title)
+    try c.encode(subtitle, forKey: .subtitle)
+    try c.encode(bulletPoints, forKey: .bulletPoints)
+    try c.encode(speakerNotes, forKey: .speakerNotes)
+    try c.encode(masterLayout, forKey: .masterLayout)
+    try c.encode(transition, forKey: .transition)
+    try c.encode(elements, forKey: .elements)
+    try c.encode(transitionDurationSeconds, forKey: .transitionDurationSeconds)
+    try c.encodeIfPresent(autoAdvanceSeconds, forKey: .autoAdvanceSeconds)
   }
 
   /// Moves the target element to the top of the z-order stack.
