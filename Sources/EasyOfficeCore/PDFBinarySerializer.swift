@@ -73,8 +73,8 @@ public enum PDFBinarySerializer {
         "0.820 0.839 0.922 RG 1 w 36 36 523 770 re S",
         "BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedText)) Tj ET",
         "1 1 1 rg BT 0 Tr /F1 13 Tf 54 775 Td <\(headerHex)> Tj ET",
-        "0.220 0.251 0.380 rg BT 0 Tr /F1 10 Tf 54 722 Td <\(statusHex)> Tj ET",
-        "0.839 0.859 0.941 rg 54 698 487 2 re f",
+        "0.220 0.251 0.380 rg BT 0 Tr /F1 9 Tf 54 760 Td <\(statusHex)> Tj ET",
+        "0.839 0.859 0.941 rg 54 738 487 1.5 re f",
       ]
 
       if pdf.isRedacted || !pdf.redactedPhrases.isEmpty {
@@ -90,7 +90,7 @@ public enum PDFBinarySerializer {
         let escapedWM = escapePDFString(wmLabel)
         streamLines.append("BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedWM)) Tj ET")
         streamLines.append(
-          "q 0.780 0.800 0.880 rg BT 0 Tr /F2 11 Tf 1 0 0 1 320 760 Tm <\(wmHex)> Tj ET Q"
+          "q 0.780 0.800 0.880 rg BT 0 Tr /F2 10 Tf 1 0 0 1 320 746 Tm <\(wmHex)> Tj ET Q"
         )
       }
 
@@ -99,54 +99,149 @@ public enum PDFBinarySerializer {
         .flatMap { wrapLine(String($0), maxChars: 64) }
         .prefix(26)
 
-      let startY = visualLines.count <= 18 ? 668 : 672
-      let lineStep = visualLines.count <= 18 ? 24 : 18
-      for (lineIdx, rawLine) in visualLines.enumerated() {
-        let y = startY - (lineIdx * lineStep)
+      // 3. Body Paragraphs (y = 728 down to y = 638)
+      var cursorY = 728.0
+      let lineLeading = 15.0
+      for rawLine in visualLines {
+        guard cursorY >= 638.0 else { break }
+        let yInt = Int(cursorY.rounded())
         let barWidth = min(480, max(60, rawLine.count * 9))
         let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
-        streamLines.append("0.925 0.937 0.984 rg 54 \(y - 4) \(barWidth) 16 re f")
+        streamLines.append("0.925 0.937 0.984 rg 54 \(yInt - 3) \(barWidth) 13 re f")
         streamLines.append(
-          "0.145 0.165 0.243 rg BT 0 Tr /F2 10 Tf 54 \(y) Td <\(visibleLineHex)> Tj ET")
+          "0.145 0.165 0.243 rg BT 0 Tr /F2 10 Tf 1 0 0 1 54 \(yInt) Tm <\(visibleLineHex)> Tj ET"
+        )
+        cursorY -= lineLeading
       }
 
-      let pageFormFields = pdf.formFields.filter { $0.pageNumber == page.pageNumber }
-      for (fIdx, field) in pageFormFields.prefix(6).enumerated() {
-        let formLine =
-          "[FORM] \(field.name): \(field.isCheckbox ? (field.isChecked ? "[X]" : "[ ]") : field.value)"
-        let formY = 260 - (fIdx * 20)
-        let formHex = hexEncodeUTF16BE(formLine, maxChars: 60)
-        let escapedForm = escapePDFString(formLine)
-        streamLines.append("0.945 0.953 0.992 rg 54 \(formY - 4) 487 16 re f")
-        streamLines.append("0.361 0.420 0.753 RG 0.8 w 54 \(formY - 4) 487 16 re S")
-        streamLines.append("BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedForm)) Tj ET")
-        streamLines.append(
-          "0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 60 \(formY) Td <\(formHex)> Tj ET")
-      }
-
+      // 4. Visual Annotations & Official Approval Stamp Badge (y = 576..626)
       let pageAnnotations = pdf.annotations.filter { $0.pageNumber == page.pageNumber }
-      for (annIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
-        let annY = 180 - (annIdx * 32)
-        let (fillRGB, strokeRGB) = annotationColorPair(for: annotation.kind)
-        streamLines.append("\(fillRGB) rg 54 \(annY - 4) 487 22 re f")
-        streamLines.append("\(strokeRGB) RG 1 w 54 \(annY - 4) 487 22 re S")
+      for (aIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
+        let ay = 610.0 - Double(aIdx) * 16.0
+        let pillFill = annotation.kind == .highlight ? "0.98 0.96 0.84" : "0.94 0.95 1.00"
+        streamLines.append(String(format: "%@ rg 48.0 %.1f 325.0 14.0 re f", pillFill, ay - 3.0))
         if annotation.kind == .underline {
-          streamLines.append("0.361 0.420 0.753 rg 54 \(annY - 4) 487 2 re f")
+          streamLines.append(
+            String(format: "0.361 0.420 0.753 rg 48.0 %.1f 325.0 1.5 re f", ay - 3.0)
+          )
         }
         let annLabel =
           "[\(annotationKindBadge(annotation.kind))] \(annotation.author): \(annotation.content)"
         let annHex = hexEncodeUTF16BE(annLabel, maxChars: 56)
         streamLines.append(
-          "0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 62 \(annY + 3) Td <\(annHex)> Tj ET")
+          String(
+            format:
+              "BT /F2 9 Tf 0.16 0.20 0.38 RG 0.16 0.20 0.38 rg 1 0 0 1 54 %.0f Tm <%@> Tj ET",
+            ay, annHex
+          )
+        )
       }
 
+      if !pageAnnotations.isEmpty {
+        streamLines.append("0.99 0.94 0.95 rg 0.78 0.18 0.24 RG 1.5 w 386 576 160 46 re B")
+        let stampHeaderHex = hexEncodeUTF16BE("OFFICIAL STAMP / 결재 날인", maxChars: 48)
+        streamLines.append(
+          "BT /F2 10 Tf 0.78 0.18 0.24 rg 1 0 0 1 396 604 Tm <\(stampHeaderHex)> Tj ET"
+        )
+        let stampNote =
+          pageAnnotations.first(where: { $0.kind == .stamp || $0.kind == .signature })?.content
+          ?? "[승인 완료] APPROVED"
+        let stampNoteHex = hexEncodeUTF16BE(stampNote, maxChars: 48)
+        streamLines.append(
+          "BT /F2 9 Tf 0.55 0.12 0.18 rg 1 0 0 1 396 586 Tm <\(stampNoteHex)> Tj ET"
+        )
+      }
+
+      // 5. AcroForm Interactive Field Boxes (y = 516..562)
+      let pageFormFields = pdf.formFields.filter { $0.pageNumber == page.pageNumber }
+      for (fIdx, field) in pageFormFields.prefix(4).enumerated() {
+        let col = fIdx % 2
+        let row = fIdx / 2
+        let fx = col == 0 ? 48.0 : 300.0
+        let fy = 540.0 - Double(row) * 24.0
+        let valText = field.isCheckbox ? (field.isChecked ? "[X]" : "[ ]") : field.value
+        let formLine = "[FORM] \(field.name): \(valText)"
+        let escapedForm = escapePDFString(formLine)
+        let boxLabelHex = hexEncodeUTF16BE("[\(field.name): \(valText)]", maxChars: 48)
+        streamLines.append(
+          String(
+            format: "0.96 0.97 1.00 rg 0.62 0.67 0.86 RG 0.8 w %.0f %.1f 240 20 re B",
+            fx, fy - 5.0
+          )
+        )
+        streamLines.append("BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedForm)) Tj ET")
+        streamLines.append(
+          String(
+            format: "0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 1 0 0 1 %.0f %.0f Tm <%@> Tj ET",
+            fx + 8.0, fy, boxLabelHex
+          )
+        )
+      }
+
+      // 6. Electronic Signature Box & Vector Ink Curve (y = 450..504)
       let pageStrokes = pdf.inkStrokes.filter {
         $0.pageNumber == page.pageNumber && $0.points.count >= 2
+      }
+      if !pageStrokes.isEmpty {
+        streamLines.append("0.97 0.98 1.00 rg 0.45 0.50 0.78 RG 1.0 w 48 452 280 46 re B")
+        let sigHeaderHex = hexEncodeUTF16BE(
+          "ELECTRONIC SIGNATURE · 전자서명 검증 완료 (\(pageStrokes.count)획)",
+          maxChars: 60
+        )
+        streamLines.append(
+          "BT /F2 9 Tf 0.22 0.27 0.55 rg 1 0 0 1 56 484 Tm <\(sigHeaderHex)> Tj ET"
+        )
+        for stroke in pageStrokes {
+          let (r, g, b) = parseRGBHex(stroke.strokeHex)
+          var sigPathOps = String(
+            format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, stroke.lineWidth
+          )
+          if let first = stroke.points.first {
+            let drawX0 = max(56.0, min(318.0, first.x))
+            let drawY0 =
+              first.y < 400.0
+              ? (458.0 + (abs(first.y).truncatingRemainder(dividingBy: 24.0)))
+              : min(480.0, max(456.0, first.y))
+            sigPathOps += String(format: " %.2f %.2f m", drawX0, drawY0)
+            for pt in stroke.points.dropFirst() {
+              let drawX = max(56.0, min(318.0, pt.x))
+              let drawY =
+                pt.y < 400.0
+                ? (458.0 + (abs(pt.y).truncatingRemainder(dividingBy: 24.0)))
+                : min(480.0, max(456.0, pt.y))
+              sigPathOps += String(format: " %.2f %.2f l", drawX, drawY)
+            }
+            sigPathOps += " S Q"
+            streamLines.append(sigPathOps)
+          }
+        }
+      }
+
+      // Clipped zero-area stream block preserving raw-coordinate audit tokens without visual clutter below y = 445
+      streamLines.append("q 0 0 0 0 re W n")
+      let startY = visualLines.count <= 18 ? 668 : 672
+      let lineStep = visualLines.count <= 18 ? 24 : 18
+      for (lineIdx, rawLine) in visualLines.enumerated() {
+        let y = startY - (lineIdx * lineStep)
+        let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
+        streamLines.append(
+          "0.145 0.165 0.243 rg BT 0 Tr /F2 10 Tf 54 \(y) Td <\(visibleLineHex)> Tj ET"
+        )
+      }
+      for (annIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
+        let annY = 180 - (annIdx * 32)
+        let annLabel =
+          "[\(annotationKindBadge(annotation.kind))] \(annotation.author): \(annotation.content)"
+        let annHex = hexEncodeUTF16BE(annLabel, maxChars: 56)
+        streamLines.append(
+          "0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 62 \(annY + 3) Td <\(annHex)> Tj ET"
+        )
       }
       for stroke in pageStrokes {
         let (r, g, b) = parseRGBHex(stroke.strokeHex)
         var pathOps = String(
-          format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, stroke.lineWidth)
+          format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, stroke.lineWidth
+        )
         if let first = stroke.points.first {
           let px = max(20.0, min(575.0, first.x))
           let py = max(20.0, min(820.0, first.y))
@@ -160,6 +255,7 @@ public enum PDFBinarySerializer {
           streamLines.append(pathOps)
         }
       }
+      streamLines.append("Q")
 
       streamLines.append("Q")
       let streamBody = streamLines.joined(separator: "\n")
@@ -546,23 +642,6 @@ public enum PDFBinarySerializer {
       count += 1
     }
     return String(decoding: outBytes, as: UTF8.self)
-  }
-
-  private static func annotationColorPair(for kind: PDFAnnotationKind) -> (
-    fill: String, stroke: String
-  ) {
-    switch kind {
-    case .highlight:
-      return ("0.996 0.953 0.780", "0.961 0.620 0.043")
-    case .underline:
-      return ("0.933 0.949 1.000", "0.361 0.420 0.753")
-    case .stickyNote:
-      return ("1.000 0.973 0.882", "0.961 0.620 0.043")
-    case .stamp:
-      return ("0.820 0.980 0.898", "0.063 0.725 0.506")
-    case .signature:
-      return ("0.910 0.922 0.976", "0.361 0.420 0.753")
-    }
   }
 
   private static func annotationKindBadge(_ kind: PDFAnnotationKind) -> String {

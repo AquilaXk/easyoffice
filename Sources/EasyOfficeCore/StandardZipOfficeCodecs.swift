@@ -1091,9 +1091,14 @@ public enum OOXMLContainerCodec {
           """
       }.joined(separator: "\n")
 
+      let durationAttr = String(
+        format: "eo:transitionDuration=\"%.2f\"",
+        slide.transitionDurationSeconds
+      )
+      let autoAdvanceAttr = slide.autoAdvanceSeconds.map { " eo:autoAdvance=\"\($0)\"" } ?? ""
       let slideXML = """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" id="\(slide.id.uuidString)" title="\(XMLSanitizer.escape(slide.title))" subtitle="\(XMLSanitizer.escape(slide.subtitle))" layout="\(XMLSanitizer.escape(slide.masterLayout.rawValue))" transition="\(XMLSanitizer.escape(slide.transition.rawValue))">
+        <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:eo="urn:easyoffice:metadata:1.0" id="\(slide.id.uuidString)" title="\(XMLSanitizer.escape(slide.title))" subtitle="\(XMLSanitizer.escape(slide.subtitle))" layout="\(XMLSanitizer.escape(slide.masterLayout.rawValue))" transition="\(XMLSanitizer.escape(slide.transition.rawValue))" \(durationAttr)\(autoAdvanceAttr)>
           <p:notes>\(XMLSanitizer.escape(slide.speakerNotes))</p:notes>
           <p:bullets>
             \(bulletsXML)
@@ -1167,6 +1172,12 @@ public enum OOXMLContainerCodec {
         SlideMasterLayout(rawValue: sldElem.attributes["layout"] ?? "") ?? .titleAndContent
       let transition =
         SlideTransitionKind(rawValue: sldElem.attributes["transition"] ?? "") ?? .fade
+      let transitionDuration =
+        (sldElem.attributes["eo:transitionDuration"] ?? sldElem.attributes["transitionDuration"])
+        .flatMap(Double.init) ?? 0.8
+      let autoAdvance =
+        (sldElem.attributes["eo:autoAdvance"] ?? sldElem.attributes["autoAdvance"])
+        .flatMap(Int.init)
 
       var notes =
         XMLSanitizer.extractElements(named: "p:notes", in: sldElem.innerXML).first.map {
@@ -1185,9 +1196,18 @@ public enum OOXMLContainerCodec {
 
       slides.append(
         SlideModel(
-          id: slideID, title: sTitle, subtitle: sSubtitle, bulletPoints: bullets,
-          speakerNotes: notes, masterLayout: layout, transition: transition, elements: elements
-        ))
+          id: slideID,
+          title: sTitle,
+          subtitle: sSubtitle,
+          bulletPoints: bullets,
+          speakerNotes: notes,
+          masterLayout: layout,
+          transition: transition,
+          elements: elements,
+          transitionDurationSeconds: transitionDuration,
+          autoAdvanceSeconds: autoAdvance
+        )
+      )
     }
 
     return PresentationDeckModel(

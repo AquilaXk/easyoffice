@@ -817,6 +817,10 @@ extension WorksheetModel {
   private func evaluateLogicalFunction(name: String, frame: inout EvalFrame) -> EvaluatedCellValue?
   {
     switch name {
+    case "ISBLANK":
+      guard frame.count == 1 else { return .error("#VALUE!") }
+      let val = frame.rawCellOrArg(0, in: self)
+      return .boolean(val == .empty)
     case "TRUE": return .boolean(true)
     case "FALSE": return .boolean(false)
     case "IF":

@@ -102,8 +102,30 @@ public final class WorkspaceViewModel {
   public var pdfInkLineWidth: Double = 2.4
   public var lastPivotGrandTotal: Double = 0
   public var authorName: String = "표준 문서 작성자"
-  public var findQueryText: String = ""
+  public var findQueryText: String = "" {
+    didSet {
+      if findQueryText != oldValue {
+        currentFindMatchIndex = 0
+      }
+    }
+  }
   public var replaceQueryText: String = ""
+  public var findQueryDraft: String {
+    get { findQueryText }
+    set { findQueryText = newValue }
+  }
+  public var replaceQueryDraft: String {
+    get { replaceQueryText }
+    set { replaceQueryText = newValue }
+  }
+  public var isFindCaseSensitive: Bool = false {
+    didSet {
+      if isFindCaseSensitive != oldValue {
+        currentFindMatchIndex = 0
+      }
+    }
+  }
+  public var currentFindMatchIndex: Int = 0
   public var isFindReplaceBarVisible: Bool = false
   public var isFindReplaceBarPresented: Bool {
     get { isFindReplaceBarVisible }
@@ -125,6 +147,10 @@ public final class WorkspaceViewModel {
   public var goalSeekTargetValueDraft: String = "500"
   public var goalSeekVariableCellDraft: String = "B2"
   public var isSlideSorterViewEnabled: Bool = false
+  public var isSlideGridlinesVisible: Bool = false
+  public var isAdvancedToolbarExpanded: Bool = false
+  public var selectedHomeTemplateCategoryFilter: String = "전체"
+  public var selectedHomeRecentFormatFilter: String = "전체"
   public var pdfRedactionPhraseDraft: String = "기밀"
   public var pdfFormFieldNameDraft: String = "승인자"
   public var pdfFormFieldValueDraft: String = "홍길동"

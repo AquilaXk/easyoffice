@@ -754,11 +754,25 @@ extension WorksheetModel {
       return .number(number)
     }
 
-    // 8. Unary minus on non-literal expression
+    // 8. Unary plus / minus on non-literal expression
+    if trimmed.hasPrefix("+") && trimmed.count > 1 {
+      let inner = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
+      if !inner.isEmpty {
+        return compileExpression(inner)
+      }
+    }
     if trimmed.hasPrefix("-") && trimmed.count > 1 {
       let inner = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
       if !inner.isEmpty {
         return .unaryMinus(compileExpression(inner))
+      }
+    }
+
+    // 9. Postfix percentage operator (expr%)
+    if trimmed.hasSuffix("%") && trimmed.count > 1 && !trimmed.hasPrefix("\"") {
+      let inner = String(trimmed.dropLast()).trimmingCharacters(in: .whitespaces)
+      if !inner.isEmpty {
+        return .binaryOp(op: "/", lhs: compileExpression(inner), rhs: .number(100.0))
       }
     }
 

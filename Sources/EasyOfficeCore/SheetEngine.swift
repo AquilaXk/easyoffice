@@ -534,11 +534,13 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     return result
   }
 
-  /// Evaluates and sorts rows within `range` by the zero-based `colOffset` relative to `range`.
+  /// Evaluates and sorts rows within `range` by the zero-based `colOffset` relative to `range`, breaking ties with optional `secondaryColumnOffset`.
   public func sortedRows(
     in range: CellRange,
     byColumnOffset colOffset: Int,
-    ascending: Bool = true
+    ascending: Bool = true,
+    secondaryColumnOffset: Int? = nil,
+    secondaryAscending: Bool = true
   ) -> [[EvaluatedCellValue]] {
     let rows = evaluateGrid(in: range)
     guard let firstRow = rows.first, colOffset >= 0, colOffset < firstRow.count else {
@@ -548,9 +550,26 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       let a = lhs[colOffset]
       let b = rhs[colOffset]
       if let aNum = a.numericValue, let bNum = b.numericValue {
-        return ascending ? (aNum < bNum) : (aNum > bNum)
+        if aNum != bNum {
+          return ascending ? (aNum < bNum) : (aNum > bNum)
+        }
+      } else if a.description != b.description {
+        return ascending ? (a.description < b.description) : (a.description > b.description)
       }
-      return ascending ? (a.description < b.description) : (a.description > b.description)
+      if let secCol = secondaryColumnOffset, secCol >= 0, secCol < firstRow.count {
+        let sa = lhs[secCol]
+        let sb = rhs[secCol]
+        if let saNum = sa.numericValue, let sbNum = sb.numericValue {
+          if saNum != sbNum {
+            return secondaryAscending ? (saNum < sbNum) : (saNum > sbNum)
+          }
+        } else if sa.description != sb.description {
+          return secondaryAscending
+            ? (sa.description < sb.description)
+            : (sa.description > sb.description)
+        }
+      }
+      return false
     }
   }
 
