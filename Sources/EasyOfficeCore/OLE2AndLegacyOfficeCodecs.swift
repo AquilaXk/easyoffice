@@ -761,15 +761,26 @@ public enum LegacyOLE2OfficeCodec {
         return OfficeDocumentModel(title: "Word 문서", format: .doc, paragraphs: paragraphs)
     }
 
-    // MARK: 2. BIFF8 Spreadsheet (.xls) — BOF / DIMENSIONS / NUMBER / LABEL / EOF
+    // MARK: 2. BIFF8 Spreadsheet (.xls) — BOF / DIMENSIONS / SST / LABELSST / RK / FORMULA / NUMBER / LABEL / EOF
 
-    public static let biff8OpcodeBOF: UInt16 = 0x0809
+    public static let biff8OpcodeFormula: UInt16 = 0x0006
     public static let biff8OpcodeEOF: UInt16 = 0x000A
     public static let biff8OpcodeFilePass: UInt16 = 0x002F
     public static let biff8OpcodeBoundSheet: UInt16 = 0x0085
+    public static let biff8OpcodeSST: UInt16 = 0x00FC
+    public static let biff8OpcodeLabelSST: UInt16 = 0x00FD
     public static let biff8OpcodeDimensions: UInt16 = 0x0200
     public static let biff8OpcodeNumber: UInt16 = 0x0203
     public static let biff8OpcodeLabel: UInt16 = 0x0204
+    public static let biff8OpcodeRK: UInt16 = 0x027E
+    public static let biff8OpcodeBOF: UInt16 = 0x0809
+
+    private static func formatBIFF8Numeric(_ num: Double) -> String {
+        if num.rounded() == num && abs(num) < 1e15 {
+            return String(Int64(num))
+        }
+        return String(num)
+    }
 
     public static func encodeBIFF8Worksheet(_ sheet: WorksheetModel) throws -> Data {
         var stream = Data()
@@ -864,6 +875,8 @@ public enum LegacyOLE2OfficeCodec {
         }
 
         var worksheet = WorksheetModel(name: name)
+        var sstStrings: [String] = []
+        var currentSubstreamType: UInt16 = 0x0010
         var offset = 0
 
         while offset <= workbook.count - 4 {
@@ -876,6 +889,11 @@ public enum LegacyOLE2OfficeCodec {
             }
 
             switch opcode {
+            case biff8OpcodeBOF:
+                if length >= 4 {
+                    currentSubstreamType = try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2)
+                }
+
             case biff8OpcodeFilePass:
                 throw EasyOfficeError.encryptedDocumentUnsupported(format: .xls)
 
@@ -891,6 +909,92 @@ public enum LegacyOLE2OfficeCodec {
                     }
                 }
 
+            case biff8OpcodeSST:
+                guard length >= 8 else {
+                    throw EasyOfficeError.corruptedContainer(detail: "BIFF8 SST 레코드 길이 오류: \(length)")
+                }
+                let uniqueCount = Int(try BitPacking.readUInt32LE(from: workbook, at: payloadStart + 4))
+                var sCursor = payloadStart + 8
+                for _ in 0..<min(max(0, uniqueCount), 65_536) {
+                    guard sCursor + 3 <= payloadEnd else { break }
+                    let charCount = Int(try BitPacking.readUInt16LE(from: workbook, at: sCursor))
+                    let flags = workbook[workbook.startIndex + sCursor + 2]
+                    sCursor += 3
+
+                    var richRunCount = 0
+                    var extRstByteLen = 0
+                    if (flags & 0x08) != 0 {
+                        guard sCursor + 2 <= payloadEnd else { break }
+                        richRunCount = Int(try BitPacking.readUInt16LE(from: workbook, at: sCursor))
+                        sCursor += 2
+                    }
+                    if (flags & 0x04) != 0 {
+                        guard sCursor + 4 <= payloadEnd else { break }
+                        extRstByteLen = Int(try BitPacking.readUInt32LE(from: workbook, at: sCursor))
+                        sCursor += 4
+                    }
+
+                    let decoded: String
+                    if (flags & 0x01) != 0 {
+                        let byteLen = charCount * 2
+                        guard sCursor + byteLen <= payloadEnd else { break }
+                        decoded = try BitPacking.decodeUTF16LE(from: workbook, at: sCursor, byteLength: byteLen)
+                        sCursor += byteLen
+                    } else {
+                        guard sCursor + charCount <= payloadEnd else { break }
+                        let slice = workbook[(workbook.startIndex + sCursor)..<(workbook.startIndex + sCursor + charCount)]
+                        let latin1Units = slice.map { UInt16($0) }
+                        decoded = String(decoding: latin1Units, as: UTF16.self)
+                        sCursor += charCount
+                    }
+                    sstStrings.append(decoded)
+                    sCursor = min(payloadEnd, sCursor + richRunCount * 4 + max(0, extRstByteLen))
+                }
+
+            case biff8OpcodeLabelSST:
+                guard length >= 10 else {
+                    throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABELSST 레코드 길이 오류: \(length)")
+                }
+                let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
+                let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
+                let sstIdx = Int(try BitPacking.readUInt32LE(from: workbook, at: payloadStart + 6))
+                guard sstIdx >= 0, sstIdx < sstStrings.count else {
+                    throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABELSST 인덱스 범위 초과: \(sstIdx)")
+                }
+                try worksheet.setCell(row: row, column: col, rawValue: sstStrings[sstIdx])
+
+            case biff8OpcodeRK:
+                guard length >= 10 else {
+                    throw EasyOfficeError.corruptedContainer(detail: "BIFF8 RK 레코드 길이 오류: \(length)")
+                }
+                let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
+                let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
+                let rkRaw = try BitPacking.readUInt32LE(from: workbook, at: payloadStart + 6)
+                var numVal: Double
+                if (rkRaw & 0x02) != 0 {
+                    let signedInt = Int32(bitPattern: rkRaw) >> 2
+                    numVal = Double(signedInt)
+                } else {
+                    let floatBits = UInt64(rkRaw & ~0x03) << 32
+                    numVal = Double(bitPattern: floatBits)
+                }
+                if (rkRaw & 0x01) != 0 {
+                    numVal /= 100.0
+                }
+                try worksheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(numVal))
+
+            case biff8OpcodeFormula:
+                guard length >= 14 else {
+                    throw EasyOfficeError.corruptedContainer(detail: "BIFF8 FORMULA 레코드 길이 오류: \(length)")
+                }
+                let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
+                let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
+                let bits = try BitPacking.readUInt64LE(from: workbook, at: payloadStart + 6)
+                let num = Double(bitPattern: bits)
+                if num.isFinite {
+                    try worksheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
+                }
+
             case biff8OpcodeNumber:
                 guard length == 14 else {
                     throw EasyOfficeError.corruptedContainer(detail: "BIFF8 NUMBER 레코드 길이 오류: \(length)")
@@ -899,13 +1003,7 @@ public enum LegacyOLE2OfficeCodec {
                 let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
                 let bits = try BitPacking.readUInt64LE(from: workbook, at: payloadStart + 6)
                 let num = Double(bitPattern: bits)
-                let formatted: String
-                if num.rounded() == num && abs(num) < 1e15 {
-                    formatted = String(Int64(num))
-                } else {
-                    formatted = String(num)
-                }
-                try worksheet.setCell(row: row, column: col, rawValue: formatted)
+                try worksheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
 
             case biff8OpcodeLabel:
                 guard length >= 8 else {
@@ -922,7 +1020,9 @@ public enum LegacyOLE2OfficeCodec {
                 try worksheet.setCell(row: row, column: col, rawValue: str)
 
             case biff8OpcodeEOF:
-                return worksheet
+                if currentSubstreamType == 0x0010 || payloadEnd > workbook.count - 4 {
+                    return worksheet
+                }
 
             default:
                 break

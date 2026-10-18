@@ -355,17 +355,17 @@ public enum CommonMarkCodec {
     }
 
     private static func parsePipeRow(_ line: String) -> [String] {
-        let stripped = String(line.dropFirst().dropLast())
-        let chars = Array(stripped)
+        let stripped = line.dropFirst().dropLast()
         var cells: [String] = []
         var current = ""
-        var idx = 0
+        var idx = stripped.startIndex
 
-        while idx < chars.count {
-            let ch = chars[idx]
-            if ch == "\\" && idx + 1 < chars.count && chars[idx + 1] == "|" {
+        while idx < stripped.endIndex {
+            let ch = stripped[idx]
+            let nextIdx = stripped.index(after: idx)
+            if ch == "\\" && nextIdx < stripped.endIndex && stripped[nextIdx] == "|" {
                 current.append("|")
-                idx += 2
+                idx = stripped.index(after: nextIdx)
                 continue
             }
             if ch == "|" {
@@ -374,7 +374,7 @@ public enum CommonMarkCodec {
             } else {
                 current.append(ch)
             }
-            idx += 1
+            idx = nextIdx
         }
         cells.append(current.trimmingCharacters(in: .whitespaces))
         return cells

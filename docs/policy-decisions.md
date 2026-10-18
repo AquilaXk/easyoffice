@@ -239,3 +239,24 @@
 - **Verified by**: `Tests/EasyOfficeTests/SmartProductivityToolsTests.swift`, `Tests/EasyOfficeTests/WorkspaceUIParityTests.swift`, `Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`
 - **Revisit when**: 대용량 이미지 첨부 문서에서 델타(Command Log) 기반 압축 Undo 히스토리를 도입할 때.
 
+---
+
+### 14. 다중 시트 워크북, 셀 서식(`CellStyle`), 런/이미지 직렬화, 외부 표준 `.ods`/BIFF8 `.xls` 위치 기반 파싱 및 무할당(`Zero-Array(String)`) 핫패스 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndLegacyOfficeCodecs.swift`, `Sources/EasyOfficeCore/LocalSmartAssistant.swift`)
+- **Decision**:
+  1. **다중 시트 워크북(`WorksheetSheetPage`), 일급 셀 서식(`CellStyle`) 및 단일 컨텍스트 그리드 일괄 평가(`evaluateGrid`)**:
+     - `WorksheetModel`에 다중 시트 페이지 컬렉션(`additionalSheets`, `activeSheetIndex`, `addSheetPage`, `switchActiveSheet`), 좌표별 셀 서식(`cellStyles: [PackedCellCoordinate: CellStyle]`, `CellNumberFormat`, `CellHorizontalAlignment`), `pageSetup: WorksheetPageSetup`, `sheetComments: [PackedCellCoordinate: String]`, `trackChangesEnabled: Bool`을 도입하여 임의 셀(`E1~F6`) 오염 없이 도메인 상태를 정식 보존합니다.
+     - `evaluateGrid(rows:columns:)`는 단일 `EvaluationContext`를 공유하여 그리드 전체 셀을 $O(V+E)$에 일괄 평가하며, `detectedDataRange()` 및 `detectedNumericRange()`가 실제 점유된 셀 경계를 동적으로 계산합니다.
+  2. **문단 내 부분 런(`DocumentTextRun`)·인라인 이미지(`EmbeddedImageAttachment`) 및 외부 표준 `.ods`/`.xlsx`/`.pptx`/`.xls` 상호운용성**:
+     - `ParagraphBlock.applyRunFormatting`으로 선택 영역 부분 런 서식을 분할·적용하고, `.docx`(`<w:r>`, `word/media/`), `.odt`(`<text:span>`, `Pictures/`), `.hwpx`(`<hp:run>`, `BinData/`)에 런과 이미지를 양방향 직렬화합니다.
+     - `ODFContainerCodec.decodeWorksheet`는 비표준 `address`/`raw` 속성이 없는 외부 표준 `.ods` 파일에 대해 `<table:table-row>` 및 `<table:table-cell>` 행·열 위치(`table:number-rows-repeated`/`table:number-columns-repeated` 최대 1,024 클램프, `table:formula="of:=..."` 정규화)로 모든 셀을 복원하며, `LegacyOLE2OfficeCodec.decodeBIFF8Worksheet`는 `SST`(`0x00FC`)+`LABELSST`(`0x00FD`), `RK`(`0x027E`), `FORMULA`(`0x0006`) 레코드를 디코딩합니다.
+  3. **`Array(String)` (`[Character]`) 힙 할당 제거 및 코어 파일 모듈 분리**:
+     - `SheetEngine.swift`에서 77개 내장 함수를 `SheetBuiltInFunctions.swift`로, `SmartProductivityTools.swift`에서 `LocalSmartDocumentAssistant`를 `LocalSmartAssistant.swift`로 분리하고, `FormulaASTCompiler`, `MID`, `XMLSanitizer.isSelfClosingTag`, `CommonMarkCodec.parsePipeRow`, `splitLongSentenceAtWordBoundary`의 `Array(String)` 할당을 UTF-8 바이트 및 `String.Index` 슬라이싱으로 대체했습니다.
+- **Why**: 외부 표준 `.ods`/`.xls`/`.xlsx`/`.pptx` 문서와의 실질적인 호환성을 보장하고, 수식 컴파일 및 마크다운/문장 분석 핫패스에서 발생하던 16바이트 `Character` 배열 할당을 제거하기 위함입니다.
+- **Trade-offs**: 다중 시트 전환 시 활성 시트 슬롯과 `additionalSheets` 배열 간 스왑이 수행되나, 값 타입 `Dictionary` 포인터 이동만 발생하므로 $O(1)$에 동작합니다.
+- **Alternatives rejected**:
+  - `.ods`에서 자체 `address`/`raw` 속성만 파싱하는 방식: 외부 표준 오피스 도구에서 저장한 `.ods` 파일을 열 때 빈 시트로 열리는 데이터 유실을 유발하므로 기각.
+- **Verified by**: `Tests/EasyOfficeTests/BinaryContainerCodecTests.swift`, `Tests/EasyOfficeTests/EditorEnginesParityTests.swift`
+- **Revisit when**: 시트 간 교차 수식 참조(`Sheet2!A1`) AST 노드를 확장할 때.
+

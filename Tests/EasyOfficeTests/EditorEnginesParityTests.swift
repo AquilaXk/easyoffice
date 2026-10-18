@@ -603,5 +603,125 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(evaluated, .number(Double(1 << 24)))
         XCTAssertLessThan(elapsed, .milliseconds(10))
     }
+
+    // MARK: - 8. Multi-Sheet Tabs, CellStyle Formatting, Batch evaluateGrid, and Inline Run Formatting
+
+    func testMultiSheetSwitchingCellStyleNumberFormatBatchEvaluateGridAndRunSplitting() throws {
+        var sheet = WorksheetModel(name: "본사매출")
+        try sheet.setCell("B2", rawValue: "1250")
+        try sheet.setCell("C2", rawValue: "0.125")
+        try sheet.setCell("D3", rawValue: "=B2*2")
+
+        // 1. Detected ranges
+        let dataRange = sheet.detectedDataRange()
+        XCTAssertEqual(dataRange.start.a1Notation, "B2")
+        XCTAssertEqual(dataRange.end.a1Notation, "D3")
+
+        let numRange = sheet.detectedNumericRange()
+        XCTAssertEqual(numRange.start.a1Notation, "B2")
+        XCTAssertEqual(numRange.end.a1Notation, "D3")
+
+        // 2. CellStyle & CellNumberFormat
+        try sheet.setCellStyle(
+            CellStyle(isBold: true, alignment: .trailing, numberFormat: .currencyKRW, fillHex: "#EEF0FF", textHex: "#5C6BC0"),
+            at: "B2"
+        )
+        try sheet.setCellStyle(
+            CellStyle(alignment: .center, numberFormat: .percentage),
+            at: "C2"
+        )
+        try sheet.setCellStyle(
+            CellStyle(alignment: .trailing, numberFormat: .decimal2),
+            at: "D3"
+        )
+
+        // 3. Single-context batch evaluateGrid(rows:columns:)
+        let preEvaluated = sheet.evaluateGrid(rows: 0...4, columns: 0...4)
+        XCTAssertEqual(preEvaluated[PackedCellCoordinate(row: 1, column: 1)], .number(1250))
+        XCTAssertEqual(preEvaluated[PackedCellCoordinate(row: 2, column: 3)], .number(2500))
+
+        XCTAssertEqual(sheet.formattedDisplayValue(at: try CellAddress(a1Notation: "B2"), using: preEvaluated), "₩1,250")
+        XCTAssertEqual(sheet.formattedDisplayValue(at: try CellAddress(a1Notation: "C2"), using: preEvaluated), "12.5%")
+        XCTAssertEqual(sheet.formattedDisplayValue(at: try CellAddress(a1Notation: "D3"), using: preEvaluated), "2,500.00")
+
+        // 4. Multi-sheet add & switchActiveSheet
+        sheet.addSheetPage(
+            named: "지사매출",
+            initialCells: [PackedCellCoordinate(row: 0, column: 0): "900"]
+        )
+        XCTAssertEqual(sheet.allSheetNames, ["본사매출", "지사매출"])
+        XCTAssertEqual(sheet.activeSheetIndex, 0)
+
+        sheet.switchActiveSheet(to: 1)
+        XCTAssertEqual(sheet.activeSheetIndex, 1)
+        XCTAssertEqual(sheet.name, "지사매출")
+        XCTAssertEqual(sheet.allSheetNames, ["본사매출", "지사매출"])
+        XCTAssertEqual(sheet.evaluate(at: "A1"), .number(900))
+        try sheet.setCell("A2", rawValue: "=A1+100")
+        XCTAssertEqual(sheet.evaluate(at: "A2"), .number(1000))
+
+        sheet.switchActiveSheet(to: 0)
+        XCTAssertEqual(sheet.activeSheetIndex, 0)
+        XCTAssertEqual(sheet.name, "본사매출")
+        XCTAssertEqual(sheet.allSheetNames, ["본사매출", "지사매출"])
+        XCTAssertEqual(sheet.evaluate(at: "D3"), .number(2500))
+        XCTAssertEqual(sheet.cellStyle(at: "B2").numberFormat, .currencyKRW)
+
+        // Codable backward & full round-trip on WorksheetModel
+        let encodedJSON = try JSONEncoder().encode(sheet)
+        let decodedSheet = try JSONDecoder().decode(WorksheetModel.self, from: encodedJSON)
+        XCTAssertEqual(decodedSheet, sheet)
+
+        // 5. ParagraphBlock.effectiveRuns & applyRunFormatting
+        var paragraph = ParagraphBlock(text: "Hello Lavender World")
+        XCTAssertEqual(paragraph.effectiveRuns.count, 1)
+        XCTAssertEqual(paragraph.effectiveRuns.first?.text, "Hello Lavender World")
+
+        let lavenderRange = try XCTUnwrap(paragraph.text.range(of: "Lavender"))
+        paragraph.applyRunFormatting(
+            range: lavenderRange,
+            isBold: true,
+            isUnderlined: true,
+            fontSizePt: 15.0,
+            foregroundHex: "#5C6BC0"
+        )
+        XCTAssertEqual(paragraph.text, "Hello Lavender World")
+        XCTAssertEqual(paragraph.runs.count, 3)
+        XCTAssertEqual(paragraph.runs[0].text, "Hello ")
+        XCTAssertEqual(paragraph.runs[0].isBold, false)
+        XCTAssertEqual(paragraph.runs[1].text, "Lavender")
+        XCTAssertEqual(paragraph.runs[1].isBold, true)
+        XCTAssertEqual(paragraph.runs[1].isUnderlined, true)
+        XCTAssertEqual(paragraph.runs[1].fontSizePt, 15.0)
+        XCTAssertEqual(paragraph.runs[1].foregroundHex, "#5C6BC0")
+        XCTAssertEqual(paragraph.runs[2].text, " World")
+
+        // 6. CellNumberFormat.dateISO overflow safety on huge finite Double (F3)
+        XCTAssertEqual(CellNumberFormat.dateISO.format(.number(1e20)), EvaluatedCellValue.number(1e20).description)
+        XCTAssertEqual(CellNumberFormat.dateISO.format(.number(20261018)), "2026-10-18")
+
+        // 7. ParagraphBlock.runs synchronization across findAndReplace, applyingMailMerge, and ODF encode/decode (F1)
+        var docWithRuns = OfficeDocumentModel(
+            title: "런 동기화 문서",
+            format: .odt,
+            paragraphs: [paragraph]
+        )
+        let (replacedDoc, repCount) = docWithRuns.findAndReplace(search: "Lavender", replacement: "Indigo")
+        XCTAssertEqual(repCount, 1)
+        XCTAssertEqual(replacedDoc.paragraphs[0].text, "Hello Indigo World")
+        XCTAssertEqual(replacedDoc.paragraphs[0].effectiveRuns.map(\.text).joined(), "Hello Indigo World")
+        XCTAssertEqual(replacedDoc.paragraphs[0].runs[1].text, "Indigo")
+        XCTAssertEqual(replacedDoc.paragraphs[0].runs[1].foregroundHex, "#5C6BC0")
+
+        let odtEncoded = try ODFContainerCodec.encodeDocument(replacedDoc)
+        let odtDecoded = try ODFContainerCodec.decodeDocument(from: odtEncoded)
+        XCTAssertEqual(odtDecoded.paragraphs[0].text, "Hello Indigo World")
+
+        docWithRuns.paragraphs[0].text = "직접 수정된 본문 {{부서}}"
+        let mergedDoc = docWithRuns.applyingMailMerge(record: ["부서": "보안팀"])
+        XCTAssertEqual(mergedDoc.paragraphs[0].text, "직접 수정된 본문 보안팀")
+        XCTAssertEqual(mergedDoc.paragraphs[0].effectiveRuns.map(\.text).joined(), "직접 수정된 본문 보안팀")
+    }
 }
+
 
