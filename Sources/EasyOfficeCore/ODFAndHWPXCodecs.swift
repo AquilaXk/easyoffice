@@ -15,6 +15,8 @@ extension XMLDocumentModelMapper {
     ]
     if let fill = style.fillHex { attrs.append("eoFill=\"\(XMLSanitizer.escape(fill))\"") }
     if let text = style.textHex { attrs.append("eoText=\"\(XMLSanitizer.escape(text))\"") }
+    if style.wrapText { attrs.append("eoWrap=\"1\"") }
+    if let dec = style.decimalPlaces { attrs.append("eoDecimals=\"\(dec)\"") }
     return " " + attrs.joined(separator: " ")
   }
 
@@ -23,7 +25,8 @@ extension XMLDocumentModelMapper {
       attributes["eoBold"] != nil || attributes["eoItalic"] != nil
         || attributes["eoUnderline"] != nil || attributes["eoAlign"] != nil
         || attributes["eoNumFmt"] != nil || attributes["eoFill"] != nil
-        || attributes["eoText"] != nil
+        || attributes["eoText"] != nil || attributes["eoWrap"] != nil
+        || attributes["eoDecimals"] != nil
     else {
       return nil
     }
@@ -34,7 +37,9 @@ extension XMLDocumentModelMapper {
       alignment: CellHorizontalAlignment(rawValue: attributes["eoAlign"] ?? "") ?? .leading,
       numberFormat: CellNumberFormat(rawValue: attributes["eoNumFmt"] ?? "") ?? .general,
       fillHex: attributes["eoFill"],
-      textHex: attributes["eoText"]
+      textHex: attributes["eoText"],
+      wrapText: attributes["eoWrap"] == "1",
+      decimalPlaces: attributes["eoDecimals"].flatMap(Int.init)
     )
   }
 

@@ -461,6 +461,75 @@ extension WorksheetModel {
         acc *= Double(i)
       }
       return acc.isFinite ? .number(acc) : .error("#NUM!")
+    case "COMBIN":
+      guard frame.count == 2,
+        let nVal = frame.arg(0, in: self).numericValue,
+        let kVal = frame.arg(1, in: self).numericValue,
+        let n = Self.safeInt(floor(nVal)),
+        let k = Self.safeInt(floor(kVal))
+      else {
+        return .error("#VALUE!")
+      }
+      guard n >= 0, k >= 0, k <= n, n <= 1000 else {
+        return .error("#NUM!")
+      }
+      let r = min(k, n - k)
+      if r == 0 {
+        return .number(1.0)
+      }
+      var res = 1.0
+      for i in 1...r {
+        res = res * Double(n - r + i) / Double(i)
+      }
+      return res.isFinite ? .number(res.rounded()) : .error("#NUM!")
+    case "GCD":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty else { return .error("#VALUE!") }
+        var acc = 0
+        for raw in nums {
+          guard raw >= 0, let v = Self.safeInt(floor(raw)) else { return .error("#NUM!") }
+          var a = acc
+          var b = v
+          while b != 0 {
+            let t = b
+            b = a % b
+            a = t
+          }
+          acc = a
+        }
+        return .number(Double(acc))
+      }
+    case "LCM":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty else { return .error("#VALUE!") }
+        var acc = 1
+        for raw in nums {
+          guard raw >= 0, let v = Self.safeInt(floor(raw)) else { return .error("#NUM!") }
+          if v == 0 || acc == 0 {
+            acc = 0
+            continue
+          }
+          var a = acc
+          var b = v
+          while b != 0 {
+            let t = b
+            b = a % b
+            a = t
+          }
+          let (prod, overflow) = (acc / max(1, a)).multipliedReportingOverflow(by: v)
+          guard !overflow else { return .error("#NUM!") }
+          acc = prod
+        }
+        return .number(Double(acc))
+      }
     default:
       return nil
     }

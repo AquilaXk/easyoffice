@@ -660,6 +660,13 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     try sheet.setCell("N4", rawValue: "=QUOTIENT(17, 0)")
     try sheet.setCell("N5", rawValue: "=REPT(\"AB\", 3)")
     try sheet.setCell("N6", rawValue: "=PI()")
+    try sheet.setCell("N7", rawValue: "=COMBIN(5, 2)")
+    try sheet.setCell("N8", rawValue: "=GCD(24, 36)")
+    try sheet.setCell("N9", rawValue: "=LCM(4, 6)")
+    try sheet.setCell("N10", rawValue: "=CHAR(65)")
+    try sheet.setCell("N11", rawValue: "=CODE(\"A\")")
+    try sheet.setCell("N12", rawValue: "=OFFSET(B2, 999999999, 0)")
+    try sheet.setCell("N13", rawValue: "=WORKDAY(\"2026-10-16\", 500000)")
 
     XCTAssertEqual(sheet.evaluate(at: "N1"), .number(25))
     XCTAssertEqual(sheet.evaluate(at: "N2"), .number(9))
@@ -667,8 +674,15 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     XCTAssertEqual(sheet.evaluate(at: "N4"), .error("#DIV/0!"))
     XCTAssertEqual(sheet.evaluate(at: "N5"), .text("ABABAB"))
     XCTAssertEqual(sheet.evaluate(at: "N6").numericValue ?? 0, Double.pi, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "N7"), .number(10))
+    XCTAssertEqual(sheet.evaluate(at: "N8"), .number(12))
+    XCTAssertEqual(sheet.evaluate(at: "N9"), .number(12))
+    XCTAssertEqual(sheet.evaluate(at: "N10"), .text("A"))
+    XCTAssertEqual(sheet.evaluate(at: "N11"), .number(65))
+    XCTAssertEqual(sheet.evaluate(at: "N12"), .error("#REF!"))
+    XCTAssertEqual(sheet.evaluate(at: "N13"), .error("#NUM!"))
 
-    // 7. CellStyle.wrapText & decimalPlaces formatting
+    // 7. CellStyle.wrapText & decimalPlaces formatting and XLSX/ODS round-trip
     let styleDecimal3 = CellStyle(
       numberFormat: .decimal2,
       wrapText: true,
@@ -689,6 +703,15 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     try sheet.setCell("P1", rawValue: "1234.5")
     try sheet.setCellStyle(styleDecimal3, at: "P1")
     XCTAssertEqual(sheet.formattedDisplayValue(at: try CellAddress(a1Notation: "P1")), "1,234.500")
+
+    let xlsxRoundTrip = try OOXMLContainerCodec.decodeWorksheet(
+      from: try OOXMLContainerCodec.encodeWorksheet(sheet))
+    let odsRoundTrip = try ODFContainerCodec.decodeWorksheet(
+      from: try ODFContainerCodec.encodeWorksheet(sheet))
+    XCTAssertTrue(xlsxRoundTrip.cellStyle(at: "P1").wrapText)
+    XCTAssertEqual(xlsxRoundTrip.cellStyle(at: "P1").decimalPlaces, 3)
+    XCTAssertTrue(odsRoundTrip.cellStyle(at: "P1").wrapText)
+    XCTAssertEqual(odsRoundTrip.cellStyle(at: "P1").decimalPlaces, 3)
 
     // 8. ParagraphBlock letterSpacingPercent & charWidthScalePercent codec round-trip
     let doc = OfficeDocumentModel(
@@ -718,7 +741,7 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
       XCTAssertEqual(decoded.paragraphs.first?.charWidthScalePercent ?? 100.0, 95.0, accuracy: 1e-6)
     }
 
-    // 9. PDFStudioDocumentModel watermarkText & securityInspectionSummary round-trip
+    // 9. PDFStudioDocumentModel watermarkText & securityInspectionSummary round-trip + redaction
     var pdf = PDFStudioDocumentModel.fromDocument(doc)
     pdf.applyWatermark("대외비 CONFIDENTIAL")
     _ = pdf.redactText("테스트")
@@ -728,5 +751,7 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     let pdfBytes = PDFBinarySerializer.encode(pdf)
     let decodedPDF = try PDFBinarySerializer.decode(from: pdfBytes)
     XCTAssertEqual(decodedPDF.watermarkText, "대외비 CONFIDENTIAL")
+    _ = pdf.redactText("CONFIDENTIAL")
+    XCTAssertEqual(pdf.watermarkText, "대외비 ████")
   }
 }
