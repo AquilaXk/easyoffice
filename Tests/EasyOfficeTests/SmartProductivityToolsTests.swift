@@ -744,5 +744,138 @@ final class SmartProductivityToolsTests: XCTestCase {
         XCTAssertFalse(zipXXEAudit.isSafeFromXXE)
         XCTAssertFalse(zipXXEAudit.isSafeFromBombAndTraversal)
     }
+
+    func testPDFMultiPagePaginationAndVisibleContentStreamWithoutSkeletonSlop() throws {
+        // 1. Multi-page Document -> PDF pagination (sections & >12 blocks) with accurate outline targetPageNumber
+        var paragraphs: [ParagraphBlock] = []
+        for idx in 1...28 {
+            let style: ParagraphStyleRole
+            let text: String
+            if idx == 1 {
+                style = .heading1
+                text = "제1장 아키텍처 개요 (Section 1)"
+            } else if idx == 13 {
+                style = .heading1
+                text = "제2장 수식 및 데이터 엔진 (Section 2)"
+            } else if idx == 25 {
+                style = .heading2
+                text = "제3장 보안 및 무결성 검증 (Section 3)"
+            } else {
+                style = .body
+                text = "문단 번호 \(idx): 한국어와 English ASCII 12345 본문 레이아웃이 실제 PDF 스트림에 표시됩니다."
+            }
+            paragraphs.append(ParagraphBlock(style: style, text: text))
+        }
+
+        let multiPageDoc = OfficeDocumentModel(
+            title: "다중 페이지 기술 명세서",
+            format: .docx,
+            headerText: "TECH-SPEC-2026",
+            footerText: "CONFIDENTIAL",
+            paragraphs: paragraphs
+        )
+
+        var pdfFromDoc = PDFStudioDocumentModel.fromDocument(multiPageDoc)
+        XCTAssertEqual(pdfFromDoc.pages.count, 3)
+        XCTAssertTrue(pdfFromDoc.pages[0].extractedText.contains("제1장 아키텍처 개요"))
+        XCTAssertFalse(pdfFromDoc.pages[0].extractedText.contains("제2장 수식 및 데이터 엔진"))
+        XCTAssertTrue(pdfFromDoc.pages[1].extractedText.contains("제2장 수식 및 데이터 엔진"))
+        XCTAssertTrue(pdfFromDoc.pages[2].extractedText.contains("제3장 보안 및 무결성 검증"))
+
+        XCTAssertEqual(pdfFromDoc.outline.count, 3)
+        XCTAssertEqual(pdfFromDoc.outline[0].targetPageNumber, 1)
+        XCTAssertEqual(pdfFromDoc.outline[1].targetPageNumber, 2)
+        XCTAssertEqual(pdfFromDoc.outline[2].targetPageNumber, 3)
+
+        // Multi-section document with <= 12 total paragraphs still splits across sections
+        let multiSectionShortDoc = OfficeDocumentModel(
+            title: "2섹션 보고서",
+            paragraphs: [
+                ParagraphBlock(style: .heading1, text: "1절 요약"),
+                ParagraphBlock(style: .body, text: "1절 본문"),
+                ParagraphBlock(style: .heading1, text: "2절 결론"),
+                ParagraphBlock(style: .body, text: "2절 본문")
+            ],
+            sections: [
+                DocumentSectionLayout(paperSize: .a4, orientation: .portrait),
+                DocumentSectionLayout(paperSize: .a4, orientation: .landscape)
+            ]
+        )
+        let pdfFromMultiSection = PDFStudioDocumentModel.fromDocument(multiSectionShortDoc)
+        XCTAssertEqual(pdfFromMultiSection.pages.count, 2)
+        XCTAssertEqual(pdfFromMultiSection.outline.map(\.targetPageNumber), [1, 2])
+
+        // 2. Multi-page Worksheet -> PDF pagination (25 rows per page, "A1: val | B1: val ...")
+        var sheet = WorksheetModel(name: "대용량원장")
+        for row in 1...60 {
+            try sheet.setCell("A\(row)", rawValue: "항목-\(row)")
+            try sheet.setCell("B\(row)", rawValue: "\(row * 100)")
+        }
+        let pdfFromSheet = PDFStudioDocumentModel.fromWorksheet(sheet)
+        XCTAssertEqual(pdfFromSheet.pages.count, 3)
+        XCTAssertTrue(pdfFromSheet.pages[0].extractedText.contains("A1: 항목-1 | B1: 100"))
+        XCTAssertTrue(pdfFromSheet.pages[0].extractedText.contains("A25: 항목-25 | B25: 2500"))
+        XCTAssertFalse(pdfFromSheet.pages[0].extractedText.contains("A26: 항목-26"))
+        XCTAssertTrue(pdfFromSheet.pages[1].extractedText.contains("A26: 항목-26 | B26: 2600"))
+        XCTAssertTrue(pdfFromSheet.pages[1].extractedText.contains("A50: 항목-50 | B50: 5000"))
+        XCTAssertTrue(pdfFromSheet.pages[2].extractedText.contains("A51: 항목-51 | B51: 5100"))
+        XCTAssertTrue(pdfFromSheet.pages[2].extractedText.contains("A60: 항목-60 | B60: 6000"))
+
+        // 3. Eliminate 4-Bar Skeleton Masquerade & Render Visible Multi-Line Content + Annotations
+        pdfFromDoc.annotations = [
+            PDFAnnotationItem(pageNumber: 1, kind: .highlight, content: "1페이지 중요 하이라이트", author: "QA"),
+            PDFAnnotationItem(pageNumber: 1, kind: .signature, content: "승인 서명 완료", author: "보안책임자"),
+            PDFAnnotationItem(pageNumber: 2, kind: .stamp, content: "검토필", author: "감사팀")
+        ]
+
+        let clock = ContinuousClock()
+        var encoded = Data()
+        let elapsed = clock.measure {
+            encoded = PDFBinarySerializer.encode(pdfFromDoc)
+        }
+        XCTAssertLessThan(elapsed, .milliseconds(50))
+
+        let rawPDF = String(decoding: encoded, as: UTF8.self)
+        // Must NOT contain the old 4 hardcoded skeleton bars
+        XCTAssertFalse(rawPDF.contains("54 654 440 16 re f"))
+        XCTAssertFalse(rawPDF.contains("54 624 487 16 re f"))
+        XCTAssertFalse(rawPDF.contains("54 594 390 16 re f"))
+        XCTAssertFalse(rawPDF.contains("54 564 460 16 re f"))
+
+        // Must contain multi-line visible text operators at y = 668 - (lineIdx * 24)
+        let expectedLine0Hex = "544543482D535045432D32303236" // "TECH-SPEC-2026"
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 10 Tf 54 668 Td <\(expectedLine0Hex)> Tj ET"))
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 10 Tf 54 644 Td <"))
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 10 Tf 54 620 Td <"))
+
+        // Visible annotation callout boxes and text must be rendered in the page stream
+        let expectedHighlightPrefixHex = "5B484947484C494748545D2051413A2031" // "[HIGHLIGHT] QA: 1"
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 9 Tf 62 183 Td <\(expectedHighlightPrefixHex)"))
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 9 Tf 62 151 Td <5B5349474E41545552455D")) // "[SIGNATURE]"
+
+        // Native PDFKit verification & visual page distinctiveness
+        let nativeDoc = try XCTUnwrap(PDFKit.PDFDocument(data: encoded))
+        XCTAssertEqual(nativeDoc.pageCount, 3)
+        let page1Thumb = try XCTUnwrap(nativeDoc.page(at: 0)?.thumbnail(of: CGSize(width: 200, height: 280), for: .mediaBox).tiffRepresentation)
+        let page3Thumb = try XCTUnwrap(nativeDoc.page(at: 2)?.thumbnail(of: CGSize(width: 200, height: 280), for: .mediaBox).tiffRepresentation)
+        XCTAssertGreaterThan(page1Thumb.count, 1024)
+        XCTAssertNotEqual(page1Thumb, page3Thumb)
+
+        // Lossless decoding both with metadata and via 3 Tr stream fallback
+        let decodedWithMeta = try PDFBinarySerializer.decode(from: encoded)
+        XCTAssertEqual(decodedWithMeta.pages.count, 3)
+        XCTAssertEqual(decodedWithMeta.annotations.count, 3)
+        XCTAssertEqual(decodedWithMeta.pages[0].extractedText, pdfFromDoc.pages[0].extractedText)
+
+        let strippedMeta = rawPDF
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("%EasyOfficePDFModelBase64:") }
+            .joined(separator: "\n")
+        let decodedFallback = try PDFBinarySerializer.decode(from: Data(strippedMeta.utf8))
+        XCTAssertEqual(decodedFallback.pages.count, 3)
+        XCTAssertEqual(decodedFallback.pages[0].extractedText, pdfFromDoc.pages[0].extractedText)
+        XCTAssertEqual(decodedFallback.pages[1].extractedText, pdfFromDoc.pages[1].extractedText)
+        XCTAssertEqual(decodedFallback.pages[2].extractedText, pdfFromDoc.pages[2].extractedText)
+    }
 }
 

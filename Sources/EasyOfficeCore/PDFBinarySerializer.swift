@@ -41,21 +41,48 @@ public enum PDFBinarySerializer {
             let escapedText = escapePDFString(page.extractedText)
             let headerHex = hexEncodeASCII("EasyOffice ISO 32000-1 PDF Studio - Page \(page.pageNumber) (\(page.rotationDegrees) deg)")
             let statusHex = hexEncodeASCII("Verified ISO 32000-1 Vector Page | UTF-8 Stream: \(page.extractedText.utf8.count) Bytes | Status: SAFE")
-            let streamBody = [
+            var streamLines: [String] = [
                 "q",
-                "0.969 0.973 0.988 rg 36 460 523 346 re f",
+                "0.969 0.973 0.988 rg 36 36 523 770 re f",
                 "0.361 0.420 0.753 rg 36 756 523 50 re f",
-                "0.820 0.839 0.922 RG 1 w 36 460 523 346 re S",
+                "0.820 0.839 0.922 RG 1 w 36 36 523 770 re S",
                 "BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedText)) Tj ET",
                 "1 1 1 rg BT 0 Tr /F1 13 Tf 54 775 Td <\(headerHex)> Tj ET",
                 "0.220 0.251 0.380 rg BT 0 Tr /F1 10 Tf 54 722 Td <\(statusHex)> Tj ET",
-                "0.839 0.859 0.941 rg 54 698 487 2 re f",
-                "0.890 0.906 0.969 rg 54 654 440 16 re f",
-                "0.890 0.906 0.969 rg 54 624 487 16 re f",
-                "0.890 0.906 0.969 rg 54 594 390 16 re f",
-                "0.890 0.906 0.969 rg 54 564 460 16 re f",
-                "Q"
-            ].joined(separator: "\n")
+                "0.839 0.859 0.941 rg 54 698 487 2 re f"
+            ]
+
+            let contentLines = page.extractedText
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .prefix(18)
+
+            for (lineIdx, rawSub) in contentLines.enumerated() {
+                let rawLine = String(rawSub)
+                let trimmedLine = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedLine.isEmpty else { continue }
+                let y = 668 - (lineIdx * 24)
+                let barWidth = min(480, max(60, rawLine.count * 9))
+                let visibleLineHex = hexEncodeVisibleLine(rawLine, maxChars: 84)
+                streamLines.append("0.925 0.937 0.984 rg 54 \(y - 4) \(barWidth) 16 re f")
+                streamLines.append("0.145 0.165 0.243 rg BT 0 Tr /F1 10 Tf 54 \(y) Td <\(visibleLineHex)> Tj ET")
+            }
+
+            let pageAnnotations = pdf.annotations.filter { $0.pageNumber == page.pageNumber }
+            for (annIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
+                let annY = 180 - (annIdx * 32)
+                let (fillRGB, strokeRGB) = annotationColorPair(for: annotation.kind)
+                streamLines.append("\(fillRGB) rg 54 \(annY - 4) 487 22 re f")
+                streamLines.append("\(strokeRGB) RG 1 w 54 \(annY - 4) 487 22 re S")
+                if annotation.kind == .underline {
+                    streamLines.append("0.361 0.420 0.753 rg 54 \(annY - 4) 487 2 re f")
+                }
+                let annLabel = "[\(annotationKindBadge(annotation.kind))] \(annotation.author): \(annotation.content)"
+                let annHex = hexEncodeVisibleLine(annLabel, maxChars: 76)
+                streamLines.append("0.145 0.165 0.243 rg BT 0 Tr /F1 9 Tf 62 \(annY + 3) Td <\(annHex)> Tj ET")
+            }
+
+            streamLines.append("Q")
+            let streamBody = streamLines.joined(separator: "\n")
             let streamByteCount = streamBody.utf8.count
 
             objectOffsets[pageObjNum] = buffer.count
@@ -311,6 +338,95 @@ public enum PDFBinarySerializer {
             )
         }
         return nodes
+    }
+
+    private static let hangulChoseongRoman = [
+        "g", "kk", "n", "d", "tt", "r", "m", "b", "pp",
+        "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h"
+    ]
+    private static let hangulJungseongRoman = [
+        "a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o",
+        "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu",
+        "eu", "ui", "i"
+    ]
+    private static let hangulJongseongRoman = [
+        "", "k", "k", "ks", "n", "nj", "nh", "t", "l",
+        "lg", "lm", "lb", "ls", "lt", "lp", "lh", "m", "p",
+        "bs", "t", "t", "ng", "t", "t", "k", "t", "p", "t"
+    ]
+
+    private static func hexEncodeVisibleLine(_ input: String, maxChars: Int) -> String {
+        var visible = ""
+        visible.reserveCapacity(min(maxChars, input.count * 2))
+        var charCount = 0
+
+        for scalar in input.unicodeScalars {
+            if charCount >= maxChars { break }
+            let token: String
+            let code = scalar.value
+            if code >= 0x20 && code <= 0x7E {
+                token = String(scalar)
+            } else if code == 0x09 {
+                token = "    "
+            } else if code >= 0xAC00 && code <= 0xD7A3 {
+                let syllableIndex = Int(code - 0xAC00)
+                let choseongIdx = syllableIndex / 588
+                let jungseongIdx = (syllableIndex % 588) / 28
+                let jongseongIdx = syllableIndex % 28
+                let rawSyllable = hangulChoseongRoman[choseongIdx]
+                    + hangulJungseongRoman[jungseongIdx]
+                    + hangulJongseongRoman[jongseongIdx]
+                token = rawSyllable.isEmpty ? "o" : rawSyllable
+            } else if code >= 0x3131 && code <= 0x3163 {
+                token = "kr"
+            } else {
+                switch code {
+                case 0x2013, 0x2014, 0x2212: token = "-"
+                case 0x2018, 0x2019: token = "'"
+                case 0x201C, 0x201D: token = "\""
+                case 0x2022, 0x00B7: token = "*"
+                case 0x2026: token = "..."
+                case 0x00D7: token = "x"
+                case 0x00F7: token = "/"
+                default: token = "?"
+                }
+            }
+            for ch in token {
+                if charCount >= maxChars { break }
+                visible.append(ch)
+                charCount += 1
+            }
+        }
+
+        if visible.isEmpty {
+            visible = " "
+        }
+        return hexEncodeASCII(visible)
+    }
+
+    private static func annotationColorPair(for kind: PDFAnnotationKind) -> (fill: String, stroke: String) {
+        switch kind {
+        case .highlight:
+            return ("0.996 0.953 0.780", "0.961 0.620 0.043")
+        case .underline:
+            return ("0.933 0.949 1.000", "0.361 0.420 0.753")
+        case .stickyNote:
+            return ("1.000 0.973 0.882", "0.961 0.620 0.043")
+        case .stamp:
+            return ("0.820 0.980 0.898", "0.063 0.725 0.506")
+        case .signature:
+            return ("0.910 0.922 0.976", "0.361 0.420 0.753")
+        }
+    }
+
+    private static func annotationKindBadge(_ kind: PDFAnnotationKind) -> String {
+        switch kind {
+        case .highlight: return "HIGHLIGHT"
+        case .underline: return "UNDERLINE"
+        case .stickyNote: return "NOTE"
+        case .stamp: return "STAMP"
+        case .signature: return "SIGNATURE"
+        }
     }
 
     private static func hexEncodeASCII(_ input: String) -> String {
