@@ -1090,7 +1090,7 @@ public struct PDFStudioDetailPaneView: View {
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
 
-          ForEach(["승인", "대외비", "검토필", "긴급"], id: \.self) { preset in
+          ForEach(["승인", "대외비", "검토필", "긴급", "사본"], id: \.self) { preset in
             Button {
               viewModel.addStampToActivePDFPage(preset: preset)
             } label: {
@@ -1308,9 +1308,12 @@ public struct PDFStudioDetailPaneView: View {
                   Image(systemName: "seal.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
-                  Text("[결재 스탬프] \(ann.content)")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                  Text(
+                    ann.content.hasPrefix("[결재 스탬프]")
+                      ? ann.content : "[결재 스탬프] \(ann.content)"
+                  )
+                  .font(.system(size: 11, weight: .bold))
+                  .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)

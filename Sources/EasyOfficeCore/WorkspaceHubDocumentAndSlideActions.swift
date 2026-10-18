@@ -1180,18 +1180,24 @@ extension WorkspaceViewModel {
     else { return }
     let targetSlideIdx =
       slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
-    guard deck.slides.indices.contains(targetSlideIdx),
-      let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID })
-    else { return }
+    guard deck.slides.indices.contains(targetSlideIdx) else { return }
+    var orderedElements = deck.slides[targetSlideIdx].elements.enumerated().sorted {
+      if $0.element.zIndex != $1.element.zIndex {
+        return $0.element.zIndex < $1.element.zIndex
+      }
+      return $0.offset < $1.offset
+    }.map(\.element)
+    guard let eIdx = orderedElements.firstIndex(where: { $0.id == elementID }) else { return }
     let nextIdx =
       bringForward
-      ? min(deck.slides[targetSlideIdx].elements.count - 1, eIdx + 1) : max(0, eIdx - 1)
+      ? min(orderedElements.count - 1, eIdx + 1) : max(0, eIdx - 1)
     guard nextIdx != eIdx else { return }
     recordUndoSnapshot(for: activeTabID)
-    deck.slides[targetSlideIdx].elements.swapAt(eIdx, nextIdx)
-    for i in deck.slides[targetSlideIdx].elements.indices {
-      deck.slides[targetSlideIdx].elements[i].zIndex = i
+    orderedElements.swapAt(eIdx, nextIdx)
+    for i in orderedElements.indices {
+      orderedElements[i].zIndex = i
     }
+    deck.slides[targetSlideIdx].elements = orderedElements
     openTabs[idx].payload = .slide(deck)
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = bringForward ? "슬라이드 개체 앞으로 이동" : "슬라이드 개체 뒤로 이동"

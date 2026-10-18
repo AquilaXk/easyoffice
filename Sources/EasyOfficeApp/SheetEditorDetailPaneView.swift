@@ -787,43 +787,142 @@ public struct SheetEditorDetailPaneView: View {
       }
 
       // Dynamic Spreadsheet Grid with Interactive Column/Row Resize Handles & Auto-Fill Corner Handle
-      ScrollView(.horizontal, showsIndicators: true) {
-        VStack(alignment: .leading, spacing: 4) {
-          columnHeaderRowView(columnLabels: columnLabels, palette: palette)
-
-          if viewModel.isHeaderRowFrozen {
-            sheetRowView(
-              row: 1,
+      let startRow = viewModel.isHeaderRowFrozen ? min(2, maxRow) : 1
+      let visibleRows = (startRow...maxRow).filter {
+        matchingZeroBasedRows.contains($0 - 1)
+      }
+      if viewModel.isFirstColumnFrozen && columnLabels.count > 1 {
+        HStack(alignment: .top, spacing: 6) {
+          VStack(alignment: .leading, spacing: 4) {
+            columnHeaderRowView(
               columnLabels: columnLabels,
-              activeRange: activeRange,
-              evaluatedGrid: evaluatedGrid,
-              condRangeValues: condRangeValues,
-              maxPositiveValue: maxPositiveValue,
+              columnIndices: 0..<1,
+              includeRowHeader: true,
               palette: palette
             )
-            Divider()
+            if viewModel.isHeaderRowFrozen {
+              sheetRowView(
+                row: 1,
+                columnLabels: columnLabels,
+                columnIndices: 0..<1,
+                includeRowHeader: true,
+                activeRange: activeRange,
+                evaluatedGrid: evaluatedGrid,
+                condRangeValues: condRangeValues,
+                maxPositiveValue: maxPositiveValue,
+                palette: palette
+              )
+              Divider()
+            }
+            ScrollView(.vertical, showsIndicators: false) {
+              LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(visibleRows, id: \.self) { row in
+                  sheetRowView(
+                    row: row,
+                    columnLabels: columnLabels,
+                    columnIndices: 0..<1,
+                    includeRowHeader: true,
+                    activeRange: activeRange,
+                    evaluatedGrid: evaluatedGrid,
+                    condRangeValues: condRangeValues,
+                    maxPositiveValue: maxPositiveValue,
+                    palette: palette
+                  )
+                }
+              }
+            }
+            .frame(maxHeight: 420)
           }
 
-          ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 4) {
-              let startRow = viewModel.isHeaderRowFrozen ? min(2, maxRow) : 1
-              let visibleRows = (startRow...maxRow).filter {
-                matchingZeroBasedRows.contains($0 - 1)
-              }
-              ForEach(visibleRows, id: \.self) { row in
+          Divider()
+
+          ScrollView(.horizontal, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 4) {
+              columnHeaderRowView(
+                columnLabels: columnLabels,
+                columnIndices: 1..<columnLabels.count,
+                includeRowHeader: false,
+                palette: palette
+              )
+              if viewModel.isHeaderRowFrozen {
                 sheetRowView(
-                  row: row,
+                  row: 1,
                   columnLabels: columnLabels,
+                  columnIndices: 1..<columnLabels.count,
+                  includeRowHeader: false,
                   activeRange: activeRange,
                   evaluatedGrid: evaluatedGrid,
                   condRangeValues: condRangeValues,
                   maxPositiveValue: maxPositiveValue,
                   palette: palette
                 )
+                Divider()
               }
+              ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                  ForEach(visibleRows, id: \.self) { row in
+                    sheetRowView(
+                      row: row,
+                      columnLabels: columnLabels,
+                      columnIndices: 1..<columnLabels.count,
+                      includeRowHeader: false,
+                      activeRange: activeRange,
+                      evaluatedGrid: evaluatedGrid,
+                      condRangeValues: condRangeValues,
+                      maxPositiveValue: maxPositiveValue,
+                      palette: palette
+                    )
+                  }
+                }
+              }
+              .frame(maxHeight: 420)
             }
           }
-          .frame(maxHeight: 420)
+        }
+      } else {
+        ScrollView(.horizontal, showsIndicators: true) {
+          VStack(alignment: .leading, spacing: 4) {
+            columnHeaderRowView(
+              columnLabels: columnLabels,
+              columnIndices: 0..<columnLabels.count,
+              includeRowHeader: true,
+              palette: palette
+            )
+
+            if viewModel.isHeaderRowFrozen {
+              sheetRowView(
+                row: 1,
+                columnLabels: columnLabels,
+                columnIndices: 0..<columnLabels.count,
+                includeRowHeader: true,
+                activeRange: activeRange,
+                evaluatedGrid: evaluatedGrid,
+                condRangeValues: condRangeValues,
+                maxPositiveValue: maxPositiveValue,
+                palette: palette
+              )
+              Divider()
+            }
+
+            ScrollView(.vertical, showsIndicators: true) {
+              LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(visibleRows, id: \.self) { row in
+                  sheetRowView(
+                    row: row,
+                    columnLabels: columnLabels,
+                    columnIndices: 0..<columnLabels.count,
+                    includeRowHeader: true,
+                    activeRange: activeRange,
+                    evaluatedGrid: evaluatedGrid,
+                    condRangeValues: condRangeValues,
+                    maxPositiveValue: maxPositiveValue,
+                    palette: palette
+                  )
+                }
+              }
+            }
+            .frame(maxHeight: 420)
+          }
         }
       }
 
@@ -983,18 +1082,24 @@ public struct SheetEditorDetailPaneView: View {
   }
 
   @ViewBuilder
-  private func columnHeaderRowView(columnLabels: [String], palette: WorkspaceThemePalette)
-    -> some View
-  {
+  private func columnHeaderRowView(
+    columnLabels: [String],
+    columnIndices: Range<Int>,
+    includeRowHeader: Bool,
+    palette: WorkspaceThemePalette
+  ) -> some View {
     HStack(spacing: 4) {
-      Text("#")
-        .font(.system(size: 10, weight: .bold, design: .monospaced))
-        .foregroundStyle(palette.secondaryText.swiftUIColor)
-        .frame(width: 36, height: 24)
-        .background(palette.elevatedSurface.swiftUIColor)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+      if includeRowHeader {
+        Text("#")
+          .font(.system(size: 10, weight: .bold, design: .monospaced))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+          .frame(width: 36, height: 24)
+          .background(palette.elevatedSurface.swiftUIColor)
+          .clipShape(RoundedRectangle(cornerRadius: 4))
+      }
 
-      ForEach(Array(columnLabels.enumerated()), id: \.offset) { colIdx, colLabel in
+      ForEach(Array(columnIndices), id: \.self) { colIdx in
+        let colLabel = columnLabels[colIdx]
         let colWidth = CGFloat(sheet.columnWidth(at: colIdx))
         ZStack(alignment: .trailing) {
           Text("\(colLabel) (\(Int(colWidth))pt)")
@@ -1032,6 +1137,8 @@ public struct SheetEditorDetailPaneView: View {
   private func sheetRowView(
     row: Int,
     columnLabels: [String],
+    columnIndices: Range<Int>,
+    includeRowHeader: Bool,
     activeRange: CellRange,
     evaluatedGrid: [PackedCellCoordinate: EvaluatedCellValue],
     condRangeValues: [EvaluatedCellValue],
@@ -1046,38 +1153,41 @@ public struct SheetEditorDetailPaneView: View {
     )
 
     HStack(spacing: 4) {
-      // Row Header with Bottom 4pt Drag Resize Handle
-      ZStack(alignment: .bottom) {
-        Text("\(row)")
-          .font(.system(size: 10, weight: .bold, design: .monospaced))
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
-          .frame(width: 36)
-          .frame(minHeight: rowHeightPt)
-          .background(palette.elevatedSurface.swiftUIColor)
-          .overlay(
-            RoundedRectangle(cornerRadius: 4)
-              .stroke(palette.border.swiftUIColor, lineWidth: 1)
-          )
-          .clipShape(RoundedRectangle(cornerRadius: 4))
-
-        if isPrimaryPane {
-          Rectangle()
-            .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.6))
-            .frame(width: 30, height: 4)
-            .gesture(
-              DragGesture(minimumDistance: 1)
-                .onEnded { value in
-                  let baseHeight = sheet.rowHeight(at: zeroRow)
-                  viewModel.updateActiveSheetRowHeight(
-                    row: zeroRow,
-                    height: baseHeight + Double(value.translation.height)
-                  )
-                }
+      if includeRowHeader {
+        // Row Header with Bottom 4pt Drag Resize Handle
+        ZStack(alignment: .bottom) {
+          Text("\(row)")
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .frame(width: 36)
+            .frame(minHeight: rowHeightPt)
+            .background(palette.elevatedSurface.swiftUIColor)
+            .overlay(
+              RoundedRectangle(cornerRadius: 4)
+                .stroke(palette.border.swiftUIColor, lineWidth: 1)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+          if isPrimaryPane {
+            Rectangle()
+              .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.6))
+              .frame(width: 30, height: 4)
+              .gesture(
+                DragGesture(minimumDistance: 1)
+                  .onEnded { value in
+                    let baseHeight = sheet.rowHeight(at: zeroRow)
+                    viewModel.updateActiveSheetRowHeight(
+                      row: zeroRow,
+                      height: baseHeight + Double(value.translation.height)
+                    )
+                  }
+              )
+          }
         }
       }
 
-      ForEach(Array(columnLabels.enumerated()), id: \.offset) { colIdx, col in
+      ForEach(Array(columnIndices), id: \.self) { colIdx in
+        let col = columnLabels[colIdx]
         let coord = PackedCellCoordinate(row: zeroRow, column: colIdx)
         let cellAddress = CellAddress(packed: coord)
         let addr = "\(col)\(row)"

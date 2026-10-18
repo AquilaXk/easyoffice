@@ -627,7 +627,7 @@ public struct DocumentEditorDetailPaneView: View {
           Divider().frame(height: 14)
 
           HStack(spacing: 3) {
-            ForEach([100.0, 115.0, 160.0, 200.0], id: \.self) { pct in
+            ForEach([100.0, 115.0, 150.0, 160.0, 200.0], id: \.self) { pct in
               Button("\(Int(pct))%") {
                 viewModel.setActiveParagraphLineSpacing(pct)
               }

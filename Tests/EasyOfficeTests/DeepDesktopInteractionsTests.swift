@@ -820,9 +820,36 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     }
 
     vm.alignSlideElements(.alignLeft)
+    if case .slide(let deck) = vm.activeTab?.payload {
+      let aligned = try XCTUnwrap(
+        deck.slides[0].elements.first(where: { $0.id == vm.selectedSlideElementID }))
+      XCTAssertEqual(aligned.x, 40.0, accuracy: 0.01)
+    }
+
     vm.alignSlideElements(.alignCenter)
+    if case .slide(let deck) = vm.activeTab?.payload {
+      let aligned = try XCTUnwrap(
+        deck.slides[0].elements.first(where: { $0.id == vm.selectedSlideElementID }))
+      let expectedCenter = (deck.aspectRatio.widthPoints - aligned.width) / 2.0
+      XCTAssertEqual(aligned.x, expectedCenter, accuracy: 0.01)
+    }
+
     vm.alignSlideElements(.alignRight)
+    if case .slide(let deck) = vm.activeTab?.payload {
+      let aligned = try XCTUnwrap(
+        deck.slides[0].elements.first(where: { $0.id == vm.selectedSlideElementID }))
+      let expectedRight = deck.aspectRatio.widthPoints - aligned.width - 40.0
+      XCTAssertEqual(aligned.x, expectedRight, accuracy: 0.01)
+    }
+
     vm.alignSlideElements(.distributeHorizontally)
+    if case .slide(let deck) = vm.activeTab?.payload {
+      let sorted = deck.slides[0].elements.sorted { $0.x < $1.x }
+      XCTAssertGreaterThanOrEqual(sorted.count, 3)
+      let gap1 = sorted[1].x - sorted[0].maxX
+      let gap2 = sorted[2].x - sorted[1].maxX
+      XCTAssertEqual(gap1, gap2, accuracy: 0.01)
+    }
 
     // Move Z-Order and verify strictly monotonic zIndex (0, 1, 2, ...)
     if case .slide(let deckBeforeZ) = vm.activeTab?.payload,

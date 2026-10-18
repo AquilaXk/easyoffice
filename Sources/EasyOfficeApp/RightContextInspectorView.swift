@@ -306,7 +306,7 @@ struct RightContextInspectorView: View {
           .controlSize(.mini)
       }
       HStack(spacing: 4) {
-        ForEach([100.0, 115.0, 160.0, 200.0], id: \.self) { pct in
+        ForEach([100.0, 115.0, 150.0, 160.0, 200.0], id: \.self) { pct in
           Button("\(Int(pct))%") {
             viewModel.setActiveParagraphLineSpacing(pct)
           }
