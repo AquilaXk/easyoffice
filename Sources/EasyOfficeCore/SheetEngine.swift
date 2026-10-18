@@ -20,6 +20,10 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     public var sheetComments: [PackedCellCoordinate: String] = [:]
     /// Merged cell ranges on the active sheet.
     public var mergedRanges: [CellRange] = []
+    /// Custom column widths (in points) keyed by zero-based column index on the active sheet.
+    public var columnWidths: [Int: Double] = [:]
+    /// Custom row heights (in points) keyed by zero-based row index on the active sheet.
+    public var rowHeights: [Int: Double] = [:]
     /// Whether revision tracking is enabled for this worksheet.
     public var trackChangesEnabled: Bool = false
     /// Non-active worksheet pages in the workbook.
@@ -27,7 +31,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     /// Zero-based index of the active sheet among all sheets (`0 ... additionalSheets.count`).
     public var activeSheetIndex: Int = 0
     /// Pre-compiled AST cache keyed by `PackedCellCoordinate`.
-    private var compiledASTs: [PackedCellCoordinate: FormulaAST] = [:]
+    internal var compiledASTs: [PackedCellCoordinate: FormulaAST] = [:]
 
     /// Backward-compatible A1-notation dictionary view over `cellsByCoordinate`.
     public var rawCells: [String: String] {
@@ -95,6 +99,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         pageSetup: WorksheetPageSetup = WorksheetPageSetup(),
         sheetComments: [PackedCellCoordinate: String] = [:],
         mergedRanges: [CellRange] = [],
+        columnWidths: [Int: Double] = [:],
+        rowHeights: [Int: Double] = [:],
         trackChangesEnabled: Bool = false,
         additionalSheets: [WorksheetSheetPage] = [],
         activeSheetIndex: Int = 0
@@ -105,6 +111,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         self.pageSetup = pageSetup
         self.sheetComments = sheetComments
         self.mergedRanges = mergedRanges
+        self.columnWidths = columnWidths
+        self.rowHeights = rowHeights
         self.trackChangesEnabled = trackChangesEnabled
         self.additionalSheets = additionalSheets
         self.activeSheetIndex = activeSheetIndex
@@ -125,6 +133,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         pageSetup: WorksheetPageSetup,
         sheetComments: [PackedCellCoordinate: String],
         mergedRanges: [CellRange],
+        columnWidths: [Int: Double] = [:],
+        rowHeights: [Int: Double] = [:],
         trackChangesEnabled: Bool,
         additionalSheets: [WorksheetSheetPage],
         activeSheetIndex: Int,
@@ -137,6 +147,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         self.pageSetup = pageSetup
         self.sheetComments = sheetComments
         self.mergedRanges = mergedRanges
+        self.columnWidths = columnWidths
+        self.rowHeights = rowHeights
         self.trackChangesEnabled = trackChangesEnabled
         self.additionalSheets = additionalSheets
         self.activeSheetIndex = activeSheetIndex
@@ -156,6 +168,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case pageSetup
         case sheetComments
         case mergedRanges
+        case columnWidths
+        case rowHeights
         case trackChangesEnabled
         case additionalSheets
         case activeSheetIndex
@@ -183,6 +197,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         self.pageSetup = try container.decodeIfPresent(WorksheetPageSetup.self, forKey: .pageSetup) ?? WorksheetPageSetup()
         self.sheetComments = try container.decodeIfPresent([PackedCellCoordinate: String].self, forKey: .sheetComments) ?? [:]
         self.mergedRanges = try container.decodeIfPresent([CellRange].self, forKey: .mergedRanges) ?? []
+        self.columnWidths = try container.decodeIfPresent([Int: Double].self, forKey: .columnWidths) ?? [:]
+        self.rowHeights = try container.decodeIfPresent([Int: Double].self, forKey: .rowHeights) ?? [:]
         self.trackChangesEnabled = try container.decodeIfPresent(Bool.self, forKey: .trackChangesEnabled) ?? false
         self.additionalSheets = try container.decodeIfPresent([WorksheetSheetPage].self, forKey: .additionalSheets) ?? []
         self.activeSheetIndex = try container.decodeIfPresent(Int.self, forKey: .activeSheetIndex) ?? 0
@@ -197,6 +213,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         try container.encode(pageSetup, forKey: .pageSetup)
         try container.encode(sheetComments, forKey: .sheetComments)
         try container.encode(mergedRanges, forKey: .mergedRanges)
+        try container.encode(columnWidths, forKey: .columnWidths)
+        try container.encode(rowHeights, forKey: .rowHeights)
         try container.encode(trackChangesEnabled, forKey: .trackChangesEnabled)
         try container.encode(additionalSheets, forKey: .additionalSheets)
         try container.encode(activeSheetIndex, forKey: .activeSheetIndex)
@@ -210,6 +228,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             lhs.pageSetup == rhs.pageSetup &&
             lhs.sheetComments == rhs.sheetComments &&
             lhs.mergedRanges == rhs.mergedRanges &&
+            lhs.columnWidths == rhs.columnWidths &&
+            lhs.rowHeights == rhs.rowHeights &&
             lhs.trackChangesEnabled == rhs.trackChangesEnabled &&
             lhs.additionalSheets == rhs.additionalSheets &&
             lhs.activeSheetIndex == rhs.activeSheetIndex
@@ -230,12 +250,14 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 cellsByCoordinate: initialCells,
                 cellStyles: [:],
                 sheetComments: [:],
-                mergedRanges: []
+                mergedRanges: [],
+                columnWidths: [:],
+                rowHeights: [:]
             )
         )
     }
 
-    /// Switches the active worksheet tab to `newIndex` (`0 ..< allSheetNames.count`), preserving per-sheet comments, merged ranges, and tab order.
+    /// Switches the active worksheet tab to `newIndex` (`0 ..< allSheetNames.count`), preserving per-sheet comments, merged ranges, custom dimensions, and tab order.
     public mutating func switchActiveSheet(to newIndex: Int) {
         var allPages = additionalSheets
         let currentInsertionIndex = min(max(0, activeSheetIndex), allPages.count)
@@ -244,7 +266,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             cellsByCoordinate: cellsByCoordinate,
             cellStyles: cellStyles,
             sheetComments: sheetComments,
-            mergedRanges: mergedRanges
+            mergedRanges: mergedRanges,
+            columnWidths: columnWidths,
+            rowHeights: rowHeights
         )
         allPages.insert(currentActivePage, at: currentInsertionIndex)
         guard allPages.indices.contains(newIndex), newIndex != currentInsertionIndex else {
@@ -257,6 +281,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         self.cellStyles = targetPage.cellStyles
         self.sheetComments = targetPage.sheetComments
         self.mergedRanges = targetPage.mergedRanges
+        self.columnWidths = targetPage.columnWidths
+        self.rowHeights = targetPage.rowHeights
         self.additionalSheets = allPages
         self.activeSheetIndex = newIndex
 
@@ -276,7 +302,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             cellsByCoordinate: cellsByCoordinate,
             cellStyles: cellStyles,
             sheetComments: sheetComments,
-            mergedRanges: mergedRanges
+            mergedRanges: mergedRanges,
+            columnWidths: columnWidths,
+            rowHeights: rowHeights
         )
         allPages.insert(currentActivePage, at: currentInsertionIndex)
         return allPages
@@ -594,7 +622,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                     cellsByCoordinate: cellsByCoordinate,
                     cellStyles: cellStyles,
                     sheetComments: sheetComments,
-                    mergedRanges: mergedRanges
+                    mergedRanges: mergedRanges,
+                    columnWidths: columnWidths,
+                    rowHeights: rowHeights
                 )
             )
             let targetModel = WorksheetModel(
@@ -605,6 +635,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 pageSetup: pageSetup,
                 sheetComments: targetPage.sheetComments,
                 mergedRanges: targetPage.mergedRanges,
+                columnWidths: targetPage.columnWidths,
+                rowHeights: targetPage.rowHeights,
                 trackChangesEnabled: trackChangesEnabled,
                 additionalSheets: remainingSheets,
                 activeSheetIndex: 0,

@@ -833,4 +833,94 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(wrapped[0].count, 64)
         XCTAssertEqual(wrapped[1].count, 36)
     }
+
+    // MARK: - 9. Spreadsheet Auto-Fill, Formula Reference Shifting, Range Summary, Custom Dimensions & Auto-Filter
+
+    func testSheetAutoFillFormulaShiftingRangeSummaryColumnWidthsAndFilter() throws {
+        // 1. Relative/Absolute ($) formula reference shifting & cross-sheet references
+        let shifted = WorksheetModel.shiftFormulaReferences("=B2+$A$1+$C2+D$2+Sheet2!B2", rowDelta: 2, columnDelta: 1)
+        XCTAssertEqual(shifted, "=C4+$A$1+$C4+E$2+Sheet2!C4")
+        let shiftedFuncLiteral = WorksheetModel.shiftFormulaReferences("=LOG10(A1)+\"B2\"+'Summary Sheet'!A2", rowDelta: 3, columnDelta: 2)
+        XCTAssertEqual(shiftedFuncLiteral, "=LOG10(C4)+\"B2\"+'Summary Sheet'!C5")
+
+        // 2. Downward Auto-Fill: Korean quarter labels, arithmetic progression, and formulas
+        var sheet = WorksheetModel(name: "자동채우기시트")
+        try sheet.setCell("A1", rawValue: "분기")
+        try sheet.setCell("B1", rawValue: "매출액")
+        try sheet.setCell("C1", rawValue: "두배매출")
+        try sheet.setCell("A2", rawValue: "1분기")
+        try sheet.setCell("B2", rawValue: "100")
+        try sheet.setCell("B3", rawValue: "200")
+        try sheet.setCell("C2", rawValue: "=B2*2")
+        try sheet.setCellStyle(CellStyle(isBold: true, numberFormat: .currencyKRW), at: "C2")
+
+        try sheet.autofill(sourceRange: try CellRange(notation: "A2:A2"), targetRange: try CellRange(notation: "A2:A5"))
+        XCTAssertEqual([sheet.rawValue(at: "A3"), sheet.rawValue(at: "A4"), sheet.rawValue(at: "A5")], ["2분기", "3분기", "4분기"])
+
+        try sheet.autofill(sourceRange: try CellRange(notation: "B2:B3"), targetRange: try CellRange(notation: "B2:B5"))
+        XCTAssertEqual([sheet.rawValue(at: "B4"), sheet.rawValue(at: "B5")], ["300", "400"])
+
+        try sheet.autofill(sourceRange: try CellRange(notation: "C2:C2"), targetRange: try CellRange(notation: "C2:C5"))
+        XCTAssertEqual([sheet.rawValue(at: "C3"), sheet.rawValue(at: "C4"), sheet.rawValue(at: "C5")], ["=B3*2", "=B4*2", "=B5*2"])
+        XCTAssertEqual([sheet.evaluate(at: "C3"), sheet.evaluate(at: "C4"), sheet.evaluate(at: "C5")], [.number(400), .number(600), .number(800)])
+        XCTAssertTrue(sheet.cellStyle(at: "C5").isBold)
+        XCTAssertEqual(sheet.cellStyle(at: "C5").numberFormat, .currencyKRW)
+
+        // 3. Rightward Auto-Fill: labels, arithmetic progression, and formulas
+        try sheet.setCell("E1", rawValue: "Q1")
+        try sheet.setCell("E2", rawValue: "10")
+        try sheet.setCell("F2", rawValue: "25")
+        try sheet.setCell("E3", rawValue: "=E2+$B$2")
+
+        try sheet.autofill(sourceRange: try CellRange(notation: "E1:E1"), targetRange: try CellRange(notation: "E1:H1"))
+        XCTAssertEqual([sheet.rawValue(at: "F1"), sheet.rawValue(at: "G1"), sheet.rawValue(at: "H1")], ["Q2", "Q3", "Q4"])
+
+        try sheet.autofill(sourceRange: try CellRange(notation: "E2:F2"), targetRange: try CellRange(notation: "E2:H2"))
+        XCTAssertEqual([sheet.rawValue(at: "G2"), sheet.rawValue(at: "H2")], ["40", "55"])
+
+        try sheet.autofill(sourceRange: try CellRange(notation: "E3:E3"), targetRange: try CellRange(notation: "E3:H3"))
+        XCTAssertEqual([sheet.rawValue(at: "F3"), sheet.rawValue(at: "G3"), sheet.rawValue(at: "H3")], ["=F2+$B$2", "=G2+$B$2", "=H2+$B$2"])
+        XCTAssertEqual(sheet.evaluate(at: "H3"), .number(155))
+
+        // 4. Multi-cell range aggregation summary (summarizeRange) & batch style mutation (updateCellStyleInRange)
+        let summary = sheet.summarizeRange(try CellRange(notation: "A2:C5"))
+        XCTAssertEqual(summary, CellRangeAggregationSummary(cellCount: 12, nonEmptyCount: 12, numericCount: 8, sum: 3000, average: 375, minimum: 100, maximum: 800))
+
+        sheet.updateCellStyleInRange(try CellRange(notation: "A1:C1")) { style in
+            style.isBold = true
+            style.alignment = .center
+            style.fillHex = "#EEF0FF"
+        }
+        XCTAssertTrue(sheet.cellStyle(at: "A1").isBold)
+        XCTAssertEqual(sheet.cellStyle(at: "B1").alignment, .center)
+        XCTAssertEqual(sheet.cellStyle(at: "C1").fillHex, "#EEF0FF")
+
+        // 5. Custom column widths & row heights + clamping + BIFF8 (.xls) and multi-sheet persistence
+        XCTAssertEqual(sheet.columnWidth(at: 0), 112.0)
+        XCTAssertEqual(sheet.rowHeight(at: 0), 30.0)
+        sheet.setColumnWidth(180.0, at: 1)
+        sheet.setColumnWidth(10.0, at: 2)
+        sheet.setColumnWidth(999.0, at: 3)
+        sheet.setRowHeight(44.0, at: 0)
+        sheet.setRowHeight(5.0, at: 1)
+        sheet.setRowHeight(500.0, at: 2)
+        XCTAssertEqual([sheet.columnWidth(at: 1), sheet.columnWidth(at: 2), sheet.columnWidth(at: 3)], [180.0, 48.0, 420.0])
+        XCTAssertEqual([sheet.rowHeight(at: 0), sheet.rowHeight(at: 1), sheet.rowHeight(at: 2)], [44.0, 22.0, 180.0])
+
+        sheet.addSheetPage(named: "보조시트")
+        sheet.switchActiveSheet(to: 1)
+        XCTAssertEqual(sheet.columnWidth(at: 1), 112.0)
+        sheet.setColumnWidth(240.0, at: 1)
+        sheet.switchActiveSheet(to: 0)
+        XCTAssertEqual(sheet.columnWidth(at: 1), 180.0)
+
+        let decodedXls = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(sheet))
+        XCTAssertEqual(decodedXls.columnWidth(at: 1), 180.0)
+        XCTAssertEqual(decodedXls.rowHeight(at: 0), 44.0)
+
+        // 6. Column auto-filter (filterMatchingRowIndices)
+        XCTAssertEqual(sheet.filterMatchingRowIndices(column: 0, query: "   ", maxRow: 4), Set(0...4))
+        XCTAssertEqual(sheet.filterMatchingRowIndices(column: 0, query: "3분기", maxRow: 4), [0, 3])
+        XCTAssertEqual(sheet.filterMatchingRowIndices(column: 2, query: "₩600", maxRow: 4), [0, 3])
+    }
 }

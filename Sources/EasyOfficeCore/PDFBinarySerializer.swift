@@ -97,6 +97,24 @@ public enum PDFBinarySerializer {
                 streamLines.append("0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 62 \(annY + 3) Td <\(annHex)> Tj ET")
             }
 
+            let pageStrokes = pdf.inkStrokes.filter { $0.pageNumber == page.pageNumber && $0.points.count >= 2 }
+            for stroke in pageStrokes {
+                let (r, g, b) = parseRGBHex(stroke.strokeHex)
+                var pathOps = String(format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, stroke.lineWidth)
+                if let first = stroke.points.first {
+                    let px = max(20.0, min(575.0, first.x))
+                    let py = max(20.0, min(820.0, first.y))
+                    pathOps += String(format: " %.2f %.2f m", px, py)
+                    for pt in stroke.points.dropFirst() {
+                        let lx = max(20.0, min(575.0, pt.x))
+                        let ly = max(20.0, min(820.0, pt.y))
+                        pathOps += String(format: " %.2f %.2f l", lx, ly)
+                    }
+                    pathOps += " S Q"
+                    streamLines.append(pathOps)
+                }
+            }
+
             streamLines.append("Q")
             let streamBody = streamLines.joined(separator: "\n")
             let streamByteCount = streamBody.utf8.count
@@ -398,6 +416,19 @@ public enum PDFBinarySerializer {
         case .stamp: return "STAMP"
         case .signature: return "SIGNATURE"
         }
+    }
+
+    private static func parseRGBHex(_ hex: String) -> (Double, Double, Double) {
+        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+        guard cleaned.count == 6, let val = UInt32(cleaned, radix: 16) else {
+            return (0.361, 0.420, 0.753)
+        }
+        return (
+            Double((val >> 16) & 0xFF) / 255.0,
+            Double((val >> 8) & 0xFF) / 255.0,
+            Double(val & 0xFF) / 255.0
+        )
     }
 
     private static func hexEncodeASCII(_ input: String) -> String {

@@ -10,6 +10,8 @@ private struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
     var trackChangesEnabled: Bool
     var additionalSheets: [WorksheetSheetPage]
     var activeSheetIndex: Int
+    var columnWidths: [Int: Double]?
+    var rowHeights: [Int: Double]?
 
     init(from sheet: WorksheetModel) {
         self.cellStyles = sheet.cellStyles
@@ -19,6 +21,8 @@ private struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
         self.trackChangesEnabled = sheet.trackChangesEnabled
         self.additionalSheets = sheet.additionalSheets
         self.activeSheetIndex = sheet.activeSheetIndex
+        self.columnWidths = sheet.columnWidths.isEmpty ? nil : sheet.columnWidths
+        self.rowHeights = sheet.rowHeights.isEmpty ? nil : sheet.rowHeights
     }
 
     func apply(to sheet: inout WorksheetModel) {
@@ -29,6 +33,8 @@ private struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
         sheet.trackChangesEnabled = trackChangesEnabled
         if !additionalSheets.isEmpty { sheet.additionalSheets = additionalSheets }
         sheet.activeSheetIndex = activeSheetIndex
+        if let columnWidths, !columnWidths.isEmpty { sheet.columnWidths = columnWidths }
+        if let rowHeights, !rowHeights.isEmpty { sheet.rowHeights = rowHeights }
     }
 }
 

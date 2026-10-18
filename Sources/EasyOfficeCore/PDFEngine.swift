@@ -72,6 +72,41 @@ public struct PDFPageDescriptor: Sendable, Codable, Equatable, Identifiable {
     }
 }
 
+public struct PDFInkPoint: Sendable, Codable, Equatable {
+    public var x: Double
+    public var y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+}
+
+public struct PDFInkStroke: Sendable, Codable, Equatable, Identifiable {
+    public var id: UUID
+    public var pageNumber: Int
+    public var points: [PDFInkPoint]
+    public var strokeHex: String
+    public var lineWidth: Double
+    public var label: String
+
+    public init(
+        id: UUID = UUID(),
+        pageNumber: Int,
+        points: [PDFInkPoint],
+        strokeHex: String = "#5C6BC0",
+        lineWidth: Double = 2.2,
+        label: String = "자유곡선 전자서명"
+    ) {
+        self.id = id
+        self.pageNumber = max(1, pageNumber)
+        self.points = points
+        self.strokeHex = strokeHex
+        self.lineWidth = max(0.5, min(lineWidth, 12.0))
+        self.label = label
+    }
+}
+
 /// PDF Studio model supporting inspection, annotations, page rotation/extraction, and conversion to editable document model.
 public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable {
     public let id: UUID
@@ -80,6 +115,7 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     public var annotations: [PDFAnnotationItem]
     public var outline: [PDFOutlineNode]
     public var isRedacted: Bool
+    public var inkStrokes: [PDFInkStroke]
 
     public init(
         id: UUID = UUID(),
@@ -87,7 +123,8 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         pages: [PDFPageDescriptor] = [],
         annotations: [PDFAnnotationItem] = [],
         outline: [PDFOutlineNode] = [],
-        isRedacted: Bool = false
+        isRedacted: Bool = false,
+        inkStrokes: [PDFInkStroke] = []
     ) {
         self.id = id
         self.title = title
@@ -95,6 +132,34 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         self.annotations = annotations
         self.outline = outline
         self.isRedacted = isRedacted
+        self.inkStrokes = inkStrokes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, pages, annotations, outline, isRedacted, inkStrokes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.title = try c.decode(String.self, forKey: .title)
+        self.pages = try c.decodeIfPresent([PDFPageDescriptor].self, forKey: .pages) ?? []
+        self.annotations = try c.decodeIfPresent([PDFAnnotationItem].self, forKey: .annotations) ?? []
+        self.outline = try c.decodeIfPresent([PDFOutlineNode].self, forKey: .outline) ?? []
+        self.isRedacted = try c.decodeIfPresent(Bool.self, forKey: .isRedacted) ?? false
+        self.inkStrokes = try c.decodeIfPresent([PDFInkStroke].self, forKey: .inkStrokes) ?? []
+    }
+
+    public mutating func addInkStroke(_ stroke: PDFInkStroke) {
+        inkStrokes.append(stroke)
+    }
+
+    public mutating func clearInkStrokes(onPage pageNumber: Int? = nil) {
+        if let pageNumber {
+            inkStrokes.removeAll { $0.pageNumber == pageNumber }
+        } else {
+            inkStrokes.removeAll()
+        }
     }
 
     public mutating func rotatePage(at index: Int, clockwiseDegrees: Int = 90) {
@@ -120,8 +185,13 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         let removedPageNum = index + 1
         pages.remove(at: index)
         annotations.removeAll { $0.pageNumber == removedPageNum }
+        inkStrokes.removeAll { $0.pageNumber == removedPageNum }
         renumberPages()
         remapAnnotationsAndOutline(previousPageIDs: previousPageIDs)
+    }
+
+    public mutating func removingPage(at index: Int) {
+        deletePage(at: index)
     }
 
     /// Reorders a page from `sourceIndex` to `destinationIndex` (0-based) and synchronizes page numbers, annotations, and outline targets.
@@ -142,6 +212,7 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     public func extractPages(oneBasedPageNumbers: [Int], newTitle: String) -> PDFStudioDocumentModel {
         var extractedPages: [PDFPageDescriptor] = []
         var extractedAnnotations: [PDFAnnotationItem] = []
+        var extractedInkStrokes: [PDFInkStroke] = []
 
         for requestedPage in oneBasedPageNumbers {
             guard requestedPage >= 1 else { continue }
@@ -157,13 +228,23 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
                 annCopy.pageNumber = newPageNumber
                 extractedAnnotations.append(annCopy)
             }
+            for stroke in inkStrokes where stroke.pageNumber == requestedPage {
+                var strokeCopy = stroke
+                strokeCopy.pageNumber = newPageNumber
+                extractedInkStrokes.append(strokeCopy)
+            }
         }
 
         return PDFStudioDocumentModel(
             title: newTitle,
             pages: extractedPages,
-            annotations: extractedAnnotations
+            annotations: extractedAnnotations,
+            inkStrokes: extractedInkStrokes
         )
+    }
+
+    public func extractingPage(at oneBasedPage: Int) -> PDFStudioDocumentModel {
+        extractPages(oneBasedPageNumbers: [oneBasedPage], newTitle: "\(title) (Page \(oneBasedPage))")
     }
 
     /// Splits the document after `splitPage` (1-based) into two independent PDF models.
@@ -177,11 +258,20 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         return (part1, part2)
     }
 
+    public func splitting(afterPage splitPage: Int) -> (firstPart: PDFStudioDocumentModel, secondPart: PDFStudioDocumentModel) {
+        split(atOneBasedPage: splitPage)
+    }
+
+    public func merged(with other: PDFStudioDocumentModel, title: String? = nil) -> PDFStudioDocumentModel {
+        Self.merge(documents: [self, other], mergedTitle: title ?? self.title)
+    }
+
     /// Merges multiple PDF models into a single document with continuous page numbering.
     public static func merge(documents: [PDFStudioDocumentModel], mergedTitle: String) -> PDFStudioDocumentModel {
         var combinedPages: [PDFPageDescriptor] = []
         var combinedAnnotations: [PDFAnnotationItem] = []
         var combinedOutline: [PDFOutlineNode] = []
+        var combinedInkStrokes: [PDFInkStroke] = []
 
         for doc in documents {
             let pageOffset = combinedPages.count
@@ -195,6 +285,11 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
                 copy.pageNumber = ann.pageNumber + pageOffset
                 combinedAnnotations.append(copy)
             }
+            for stroke in doc.inkStrokes {
+                var copy = stroke
+                copy.pageNumber = stroke.pageNumber + pageOffset
+                combinedInkStrokes.append(copy)
+            }
             for node in doc.outline {
                 combinedOutline.append(Self.offsetOutlineNode(node, by: pageOffset))
             }
@@ -204,7 +299,8 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
             title: mergedTitle,
             pages: combinedPages,
             annotations: combinedAnnotations,
-            outline: combinedOutline
+            outline: combinedOutline,
+            inkStrokes: combinedInkStrokes
         )
     }
 
@@ -233,6 +329,11 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         for idx in annotations.indices {
             if let mapped = pageMap[annotations[idx].pageNumber] {
                 annotations[idx].pageNumber = mapped
+            }
+        }
+        for idx in inkStrokes.indices {
+            if let mapped = pageMap[inkStrokes[idx].pageNumber] {
+                inkStrokes[idx].pageNumber = mapped
             }
         }
         outline = outline.map { Self.remapOutlineNode($0, using: pageMap, maxPage: max(1, pages.count)) }

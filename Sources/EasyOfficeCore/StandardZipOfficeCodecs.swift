@@ -315,7 +315,13 @@ internal enum XMLDocumentModelMapper {
         for img in doc.images {
             let safeName = sanitizeMediaFileName(img.fileName)
             let mediaPath = "\(mediaPrefix)\(safeName)"
-            tags.append("<eo:image id=\"\(img.id.uuidString)\" fileName=\"\(XMLSanitizer.escape(safeName))\" path=\"\(XMLSanitizer.escape(mediaPath))\" mime=\"\(XMLSanitizer.escape(img.mimeType))\" w=\"\(img.widthPt)\" h=\"\(img.heightPt)\" caption=\"\(XMLSanitizer.escape(img.caption))\" anchor=\"\(img.anchorParagraphID?.uuidString ?? "")\"/>")
+            tags.append("<eo:image id=\"\(img.id.uuidString)\" fileName=\"\(XMLSanitizer.escape(safeName))\" path=\"\(XMLSanitizer.escape(mediaPath))\" mime=\"\(XMLSanitizer.escape(img.mimeType))\" w=\"\(img.widthPt)\" h=\"\(img.heightPt)\" caption=\"\(XMLSanitizer.escape(img.caption))\" anchor=\"\(img.anchorParagraphID?.uuidString ?? "")\" wrapMode=\"\(XMLSanitizer.escape(img.wrapMode.rawValue))\"/>")
+        }
+        for eq in doc.equations {
+            tags.append("<eo:equation id=\"\(eq.id.uuidString)\" title=\"\(XMLSanitizer.escape(eq.displayTitle))\">\(XMLSanitizer.escape(eq.rawExpression))</eo:equation>")
+        }
+        if let wm = doc.watermarkText, !wm.isEmpty {
+            tags.append("<eo:watermark>\(XMLSanitizer.escape(wm))</eo:watermark>")
         }
         return tags.joined(separator: "\n")
     }
@@ -330,7 +336,9 @@ internal enum XMLDocumentModelMapper {
         revisions: [TrackedRevision],
         comments: [DocumentCommentThread],
         bookmarks: [String: UUID],
-        images: [EmbeddedImageAttachment]
+        images: [EmbeddedImageAttachment],
+        equations: [DocumentEquationBlock],
+        watermarkText: String?
     ) {
         let sections = XMLSanitizer.extractElements(named: "eo:section", in: xml).map { elem in
             DocumentSectionLayout(
@@ -398,13 +406,25 @@ internal enum XMLDocumentModelMapper {
                 mimeType: elem.attributes["mime"] ?? "image/png", imageData: data,
                 widthPt: Double(elem.attributes["w"] ?? "320.0") ?? 320.0,
                 heightPt: Double(elem.attributes["h"] ?? "200.0") ?? 200.0,
-                anchorParagraphID: anchorStr.isEmpty ? nil : UUID(uuidString: anchorStr)
+                anchorParagraphID: anchorStr.isEmpty ? nil : UUID(uuidString: anchorStr),
+                wrapMode: ImageWrapMode(rawValue: elem.attributes["wrapMode"] ?? "") ?? .inline
             )
         }
 
+        let equations = XMLSanitizer.extractElements(named: "eo:equation", in: xml).map { elem in
+            DocumentEquationBlock(
+                id: elem.attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID(),
+                displayTitle: elem.attributes["title"] ?? "수식 블록",
+                rawExpression: XMLSanitizer.unescape(elem.innerXML)
+            )
+        }
+
+        let watermarkText = XMLSanitizer.extractElements(named: "eo:watermark", in: xml).first.map { XMLSanitizer.unescape($0.innerXML) }
+
         return (
             sections: sections.isEmpty ? [DocumentSectionLayout(paperSize: defaultPaperSize)] : sections,
-            footnotes: footnotes, revisions: revisions, comments: comments, bookmarks: bookmarks, images: images
+            footnotes: footnotes, revisions: revisions, comments: comments, bookmarks: bookmarks,
+            images: images, equations: equations, watermarkText: watermarkText
         )
     }
 }
@@ -561,7 +581,8 @@ public enum OOXMLContainerCodec {
             headerText: headerText, footerText: footerText,
             paragraphs: paragraphs, tables: tables, trackChangesEnabled: trackChanges,
             sections: meta.sections, footnotes: meta.footnotes, revisions: meta.revisions,
-            comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images
+            comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images,
+            equations: meta.equations, watermarkText: meta.watermarkText
         )
     }
 
