@@ -880,5 +880,56 @@ final class SmartProductivityToolsTests: XCTestCase {
         XCTAssertEqual(decodedFallback.pages[1].extractedText, pdfFromDoc.pages[1].extractedText)
         XCTAssertEqual(decodedFallback.pages[2].extractedText, pdfFromDoc.pages[2].extractedText)
     }
-}
 
+    func testSlideConversionPreservesElementsAndSpeakerNotesAndPDFLongLineWrapping() throws {
+        let deck = PresentationDeckModel(
+            title: "발표자료 통합 변환",
+            slides: [
+                SlideModel(
+                    title: "1장 전략",
+                    subtitle: "핵심 방향",
+                    bulletPoints: ["항목 A"],
+                    speakerNotes: "발표자 비공개 스크립트 메모",
+                    elements: [
+                        SlideCanvasElement(
+                            title: "아키텍처 박스",
+                            bodyText: "제로 할당 수식 엔진",
+                            x: 20,
+                            y: 30,
+                            width: 200,
+                            height: 80
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let toDocResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "strategy.pptx",
+                sourceFormat: .pptx,
+                targetFormat: .docx,
+                payload: .slide(deck)
+            )
+        )
+        guard case let .document(convertedDoc) = toDocResult.convertedPayload else {
+            XCTFail("Expected .document payload")
+            return
+        }
+        let allTexts = convertedDoc.paragraphs.map(\.text)
+        XCTAssertTrue(allTexts.contains("아키텍처 박스"))
+        XCTAssertTrue(allTexts.contains("제로 할당 수식 엔진"))
+        XCTAssertTrue(allTexts.contains("발표자 비공개 스크립트 메모"))
+
+        // Long line (>64 chars) automatic wrapping in PDFBinarySerializer.encode
+        let part1 = String(repeating: "A", count: 64)
+        let part2 = "BCDEFG"
+        let wrappedPDF = PDFStudioDocumentModel(
+            title: "LongLinePDF",
+            pages: [PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: part1 + part2)]
+        )
+        let encodedLong = PDFBinarySerializer.encode(wrappedPDF)
+        let rawLongPDF = String(decoding: encodedLong, as: UTF8.self)
+        XCTAssertTrue(rawLongPDF.contains("FEFF004200430044004500460047")) // "BCDEFG" wrapped onto second visual line
+    }
+}

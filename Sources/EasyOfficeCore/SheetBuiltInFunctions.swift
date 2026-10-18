@@ -34,11 +34,30 @@ extension WorksheetModel {
                 let item = args[idx]
                 switch item {
                 case let .rangeRef(cellRange):
-                    for addr in cellRange.expandedAddresses() {
-                        let v = sheet.evaluateInternal(at: addr.packedCoordinate, context: &context, depth: depth + 1)
-                        if case let .error(code) = v { return .failure(code) }
-                        values.append(v)
+                    var rangeError: String?
+                    cellRange.forEachCoordinate { coord in
+                        guard rangeError == nil else { return }
+                        let v = sheet.evaluateInternal(at: coord, context: &context, depth: depth + 1)
+                        if case let .error(code) = v {
+                            rangeError = code
+                        } else {
+                            values.append(v)
+                        }
                     }
+                    if let rangeError { return .failure(rangeError) }
+                case let .sheetRangeRef(sheetName, cellRange):
+                    guard sheet.hasSheet(named: sheetName) else { return .failure("#REF!") }
+                    var rangeError: String?
+                    cellRange.forEachCoordinate { coord in
+                        guard rangeError == nil else { return }
+                        let v = sheet.evaluateOnSheet(named: sheetName, at: coord, context: &context, depth: depth + 1)
+                        if case let .error(code) = v {
+                            rangeError = code
+                        } else {
+                            values.append(v)
+                        }
+                    }
+                    if let rangeError { return .failure(rangeError) }
                 case let .error(err):
                     return .failure(err.rawValue)
                 default:
@@ -69,10 +88,14 @@ extension WorksheetModel {
 
         if !Self.lazyOrRefFunctions.contains(name) {
             for (idx, item) in args.enumerated() {
-                if case .rangeRef = item { continue }
-                let evaluated = frame.arg(idx, in: self)
-                if case .error = evaluated {
-                    return evaluated
+                switch item {
+                case .rangeRef, .sheetRangeRef:
+                    continue
+                default:
+                    let evaluated = frame.arg(idx, in: self)
+                    if case .error = evaluated {
+                        return evaluated
+                    }
                 }
             }
         }
@@ -480,9 +503,12 @@ extension WorksheetModel {
                   let range = frame.args[1].asCellRange,
                   let colIndexVal = frame.arg(2, in: self).numericValue,
                   let rawColIdx = Self.safeInt(colIndexVal) else { return .error("#VALUE!") }
+            if let sheetName = frame.args[1].targetSheetName, !hasSheet(named: sheetName) {
+                return .error("#REF!")
+            }
             let lookupVal = frame.arg(0, in: self)
             let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
-            let grid = evaluateGridInternal(in: range, context: &frame.context, depth: frame.depth + 1)
+            let grid = evaluateGridInternal(onSheet: frame.args[1].targetSheetName, in: range, context: &frame.context, depth: frame.depth + 1)
             let colIdx = rawColIdx - 1
             guard let firstRow = grid.first, colIdx >= 0, colIdx < firstRow.count else { return .error("#REF!") }
             for row in grid where Self.cellValuesEqual(row[0], lookupVal) {
@@ -506,9 +532,12 @@ extension WorksheetModel {
                   let range = frame.args[1].asCellRange,
                   let rowIndexVal = frame.arg(2, in: self).numericValue,
                   let rawRowIdx = Self.safeInt(rowIndexVal) else { return .error("#VALUE!") }
+            if let sheetName = frame.args[1].targetSheetName, !hasSheet(named: sheetName) {
+                return .error("#REF!")
+            }
             let lookupVal = frame.arg(0, in: self)
             let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
-            let grid = evaluateGridInternal(in: range, context: &frame.context, depth: frame.depth + 1)
+            let grid = evaluateGridInternal(onSheet: frame.args[1].targetSheetName, in: range, context: &frame.context, depth: frame.depth + 1)
             let rowIdx = rawRowIdx - 1
             guard rowIdx >= 0, rowIdx < grid.count, let headerRow = grid.first else { return .error("#REF!") }
             for col in headerRow.indices where Self.cellValuesEqual(headerRow[col], lookupVal) {
@@ -545,9 +574,12 @@ extension WorksheetModel {
                   let range = frame.args[0].asCellRange,
                   let rowNumVal = frame.arg(1, in: self).numericValue,
                   let rawRowIdx = Self.safeInt(rowNumVal) else { return .error("#VALUE!") }
+            if let sheetName = frame.args[0].targetSheetName, !hasSheet(named: sheetName) {
+                return .error("#REF!")
+            }
             let colNumVal = frame.count == 3 ? (frame.arg(2, in: self).numericValue ?? 1.0) : 1.0
             guard let rawColIdx = Self.safeInt(colNumVal) else { return .error("#VALUE!") }
-            let grid = evaluateGridInternal(in: range, context: &frame.context, depth: frame.depth + 1)
+            let grid = evaluateGridInternal(onSheet: frame.args[0].targetSheetName, in: range, context: &frame.context, depth: frame.depth + 1)
             let rIdx = rawRowIdx - 1
             let cIdx = rawColIdx - 1
             if grid.count == 1, frame.count == 2, rIdx >= 0, rIdx < grid[0].count {
@@ -581,6 +613,12 @@ extension WorksheetModel {
             switch frame.args[0] {
             case let .cellRef(coord): return .number(Double(coord.row + 1))
             case let .rangeRef(range): return .number(Double(range.start.row + 1))
+            case let .sheetCellRef(sheetName, coord):
+                guard hasSheet(named: sheetName) else { return .error("#REF!") }
+                return .number(Double(coord.row + 1))
+            case let .sheetRangeRef(sheetName, range):
+                guard hasSheet(named: sheetName) else { return .error("#REF!") }
+                return .number(Double(range.start.row + 1))
             default: return .error("#REF!")
             }
 
@@ -589,6 +627,12 @@ extension WorksheetModel {
             switch frame.args[0] {
             case let .cellRef(coord): return .number(Double(coord.column + 1))
             case let .rangeRef(range): return .number(Double(range.start.column + 1))
+            case let .sheetCellRef(sheetName, coord):
+                guard hasSheet(named: sheetName) else { return .error("#REF!") }
+                return .number(Double(coord.column + 1))
+            case let .sheetRangeRef(sheetName, range):
+                guard hasSheet(named: sheetName) else { return .error("#REF!") }
+                return .number(Double(range.start.column + 1))
             default: return .error("#REF!")
             }
 
