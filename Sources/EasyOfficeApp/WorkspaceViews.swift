@@ -139,41 +139,47 @@ public struct MainWorkspaceWindowView: View {
     public var body: some View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
-        VStack(spacing: 0) {
-            TopDocumentTabStripView(viewModel: viewModel)
-            Divider()
-
-            if viewModel.isShowingHomeHub || viewModel.activeTab == nil {
-                HomeHubWorkspaceView(viewModel: viewModel)
-            } else if let tab = viewModel.activeTab {
-                ContextRibbonBarView(viewModel: viewModel, activeModule: tab.moduleKind)
+        ZStack {
+            VStack(spacing: 0) {
+                TopDocumentTabStripView(viewModel: viewModel)
                 Divider()
 
-                if viewModel.isFindReplaceBarVisible {
-                    FindAndReplaceBarView(viewModel: viewModel, palette: palette)
+                if viewModel.isShowingHomeHub || viewModel.activeTab == nil {
+                    HomeHubWorkspaceView(viewModel: viewModel)
+                } else if let tab = viewModel.activeTab {
+                    ContextRibbonBarView(viewModel: viewModel, activeModule: tab.moduleKind)
                     Divider()
-                }
 
-                HStack(spacing: 0) {
-                    if viewModel.showLeftNavigator {
-                        LeftNavigatorPanelView(viewModel: viewModel, tab: tab)
-                            .frame(width: EasyOfficeDesignTokens.LayoutMetrics.leftNavigatorWidth)
+                    if viewModel.isFindReplaceBarVisible {
+                        FindAndReplaceBarView(viewModel: viewModel, palette: palette)
                         Divider()
                     }
 
-                    ActiveEditorCanvasRouterView(viewModel: viewModel, tab: tab)
+                    HStack(spacing: 0) {
+                        if viewModel.showLeftNavigator {
+                            LeftNavigatorPanelView(viewModel: viewModel, tab: tab)
+                                .frame(width: EasyOfficeDesignTokens.LayoutMetrics.leftNavigatorWidth)
+                            Divider()
+                        }
 
-                    if viewModel.showRightInspector {
-                        Divider()
-                        RightContextInspectorView(viewModel: viewModel, tab: tab)
-                            .frame(width: EasyOfficeDesignTokens.LayoutMetrics.rightInspectorWidth)
+                        ActiveEditorCanvasRouterView(viewModel: viewModel, tab: tab)
+
+                        if viewModel.showRightInspector {
+                            Divider()
+                            RightContextInspectorView(viewModel: viewModel, tab: tab)
+                                .frame(width: EasyOfficeDesignTokens.LayoutMetrics.rightInspectorWidth)
+                        }
                     }
+                    Divider()
+                    BottomWorkspaceStatusBarView(viewModel: viewModel, tab: tab)
                 }
-                Divider()
-                BottomWorkspaceStatusBarView(viewModel: viewModel, tab: tab)
+            }
+            .background(palette.background.swiftUIColor)
+
+            if viewModel.isFullScreenSlideshowActive {
+                SlideshowFullScreenOverlayView(viewModel: viewModel, palette: palette)
             }
         }
-        .background(palette.background.swiftUIColor)
     }
 }
 

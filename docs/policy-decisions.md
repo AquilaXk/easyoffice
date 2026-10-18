@@ -31,6 +31,13 @@
 11. [전 포맷 라운드트립 패리티·비트 수준 성능 벤치마크 게이트 및 v1.0.0 정식 릴리스 정책 (2026-10-17)](#11-전-포맷-라운드트립-패리티비트-수준-성능-벤치마크-게이트-및-v100-정식-릴리스-정책-2026-10-17)
 12. [Slicing-by-8 CRC-32, 하드웨어 비정렬 워드 적재, 무할당 UTF-8 파서, 표준 컨테이너 호환성 및 AST 캐시·메모이제이션 시트 엔진 정책 (2026-10-18)](#12-slicing-by-8-crc-32-하드웨어-비정렬-워드-적재-무할당-utf-8-파서-표준-컨테이너-호환성-및-ast-캐시메모이제이션-시트-엔진-정책-2026-10-18)
 13. [ISO 32000-1 바이트 정밀 xref/PDFKit 통합, 140종 컨텍스트 리본 전수 라우팅, Undo/Redo 스택 및 네이티브 파일 I/O 정책 (2026-10-18)](#13-iso-32000-1-바이트-정밀-xrefpdfkit-통합-140종-컨텍스트-리본-전수-라우팅-undoredo-스택-및-네이티브-파일-io-정책-2026-10-18)
+14. [다중 시트 워크북, 셀 서식(CellStyle), 런/이미지 직렬화, 외부 표준 .ods/BIFF8 .xls 위치 기반 파싱 및 무할당 핫패스 정책 (2026-10-18)](#14-다중-시트-워크북-셀-서식cellstyle-런이미지-직렬화-외부-표준-odsbiff8-xls-위치-기반-파싱-및-무할당zero-arraystring-핫패스-정책-2026-10-18)
+15. [Zero-Slop 도메인 리본 라우팅, 인라인 편집 Undo Coalescing, 다중 페이지 가시 PDF 렌더링 및 인터랙티브 UI 모듈 분리 정책 (2026-10-18)](#15-zero-slop-도메인-리본-라우팅-인라인-편집-undo-coalescing-다중-페이지-가시-pdf-렌더링-및-인터랙티브-ui-모듈-분리-정책-2026-10-18)
+16. [비파괴적 리본 도메인 변이(Non-Destructive Ribbon Mutations), 5대 모듈 양방향 우측 인스펙터, 60fps 실시간 슬라이드 드래그·1Hz 발표자 타이머 및 전 모듈 < 1,000 LOC 분할 정책 (2026-10-18)](#16-비파괴적-리본-도메인-변이non-destructive-ribbon-mutations-5대-모듈-양방향-우측-인스펙터-60fps-실시간-슬라이드-드래그1hz-발표자-타이머-및-전-모듈--1000-loc-분할-정책-2026-10-18)
+17. [PD-026: AppKit NSTextView UTF-16 부분 선택 런 분할 및 DTP 2단·수식·텍스트 어울림·워터마크 조판 정책 (2026-10-18)](#17-pd-026-appkit-nstextview-utf-16-부분-선택-런-분할-및-dtp-2단수식텍스트-어울림워터마크-조판-정책-2026-10-18)
+18. [PD-027: 스프레드시트 다중 셀 범위 드래그 선택, $ 절대·상대 참조 이동 자동 채우기(Auto-Fill) 엔진 및 가변 행·열 리사이즈 정책 (2026-10-18)](#18-pd-027-스프레드시트-다중-셀-범위-드래그-선택--절대상대-참조-이동-자동-채우기auto-fill-엔진-및-가변-행열-리사이즈-정책-2026-10-18)
+19. [PD-028: 슬라이드 8방향 리사이즈 핸들, 360도 회전 각도 정규화 및 전체화면 발표 스테이지(레이저 포인터·노트 HUD) 정책 (2026-10-18)](#19-pd-028-슬라이드-8방향-리사이즈-핸들-360도-회전-각도-정규화-및-전체화면-발표-스테이지레이저-포인터노트-hud-정책-2026-10-18)
+20. [PD-029: PDF 스튜디오 ISO 32000-1 벡터 잉크 획(m / l / S) 직렬화 및 자유곡선 서명·하이라이트 오버레이 정책 (2026-10-18)](#20-pd-029-pdf-스튜디오-iso-32000-1-벡터-잉크-획m--l--s-직렬화-및-자유곡선-서명하이라이트-오버레이-정책-2026-10-18)
 
 ---
 
@@ -310,4 +317,69 @@
   - 리본 명령 실행 여부를 증명하기 위해 `footerText`나 `speakerNotes`에 임의 텍스트를 덧붙이는 방식: 사용자의 실제 문서 바닥글과 발표자 노트를 훼손하므로 기각.
 - **Verified by**: `Tests/EasyOfficeTests/WorkspaceUIParityTests.swift` (`testThirdAuditZeroSlopInspectorLiveCanvasAndNonDestructiveCommands`)
 - **Revisit when**: 다중 셀 드래그 마키(Marquee) 선택 오버레이를 시트 캔버스에 추가할 때.
+
+---
+
+### 17. PD-026: AppKit NSTextView UTF-16 부분 선택 런 분할 및 DTP 2단·수식·텍스트 어울림·워터마크 조판 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Decision**:
+  1. `SelectableParagraphTextView`(`NSViewRepresentable`)는 선택된 문단에 대해 AppKit `NSTextView` 및 `NSTextViewDelegate.textViewDidChangeSelection(_:)`을 연결하여 커서 드래그 선택 영역(`selectedRange()`)을 UTF-16 오프셋 범위(`selectedParagraphUTF16Range: Range<Int>?`)로 실시간 수집합니다.
+  2. `ParagraphBlock.applyRunFormatting(utf16Range:...)`은 UTF-16 오프셋을 `String.Index(utf16Offset:in:)` 및 `rangeOfComposedCharacterSequences(for:)`로 정렬하여 한글 자모·복합 문자 경계를 안전하게 보존하면서 `DocumentTextRun`을 분할·병합하며, 리본 홈 서식(`-home-bold`/`-home-italic`/`-home-underline`) 및 인라인 런 강조 명령이 선택된 UTF-16 부분 범위를 최우선으로 반영합니다.
+  3. `DocumentEditorDetailPaneView`는 `section.columnCount >= 2`일 때 문단 컬렉션을 좌·우 2단(`HStack` + 수직 `Divider` 컬럼 구분선) DTP 레이아웃으로 배치하고, `DocumentEquationBlock`(`formatMathSymbols` 유니코드 수학 기호 치환), `EmbeddedImageAttachment.wrapMode`(`.inline`, `.squareLeft`, `.squareRight`, `.topAndBottom` 텍스트 어울림 순환), 대각선(`-32°`) `watermarkText` 오버레이를 렌더링합니다.
+- **Why**: 문단 전체 또는 수동 구절 검색에만 의존하던 한계를 넘어 마우스 커서 드래그로 선택한 정확한 부분 구간에 서식을 부여하고, 학술·공문서 조판에 필수적인 2단 컬럼·수식·이미지 어울림·워터마크를 지원하기 위함입니다.
+- **Trade-offs**: 활성 문단에만 `NSTextView`를 마운트하고 비활성 문단은 경량 SwiftUI 뷰로 유지하여 수백 문단 문서에서도 스크롤 성능을 보존합니다.
+- **Alternatives rejected**:
+  - 모든 문단에 개별 `NSTextView` 인스턴스를 상시 생성하는 방식: AppKit 뷰 계층과 `NSTextStorage` 레이아웃 오버헤드가 문단 수에 비례해 증가하므로 선택 문단 집중 마운트 방식을 채택.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testUTF16SubSelectionRunSplittingAndRibbonBoldFormatting`, `testDocumentEquationsImageWrapModeAndWatermark`)
+- **Revisit when**: 인라인 수식 베이스라인 정렬 및 MathML XML 양방향 직렬화를 확장할 때.
+
+---
+
+### 18. PD-027: 스프레드시트 다중 셀 범위 드래그 선택, $ 절대·상대 참조 이동 자동 채우기(Auto-Fill) 엔진 및 가변 행·열 리사이즈 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`)
+- **Decision**:
+  1. `WorkspaceViewModel`은 단일 활성 셀(`selectedSheetCell`)과 함께 다중 셀 선택 범위(`selectedSheetRange`, `selectSheetCellOrRange`, `extendSheetSelection`)를 유지하며, 리본 서식 명령(`sheet-home-bold`/`-italic`/`-underline`)은 `updateCellStyleInRange`를 통해 선택된 사각형 범위 전체에 일괄 적용됩니다.
+  2. `WorksheetModel.autofill(sourceRange:targetRange:)` 및 `shiftFormulaReferences(_:rowDelta:columnDelta:)`는 수식 내 `$` 절대 행·열 고정(`$A$1`, `$A1`, `A$1`)과 상대 참조(`A1`)를 구분하여 오프셋만큼 이동시키고, 2개 이상의 선형 등차수열(`100, 250 -> 400, 550`) 및 후행 정수 라벨(`항목 1 -> 항목 2`)을 자동 외삽합니다.
+  3. `SheetEditorDetailPaneView`는 열 머리글 우측 `4pt` 드래그 핸들(`columnWidths`, `48...420pt`), 행 머리글 하단 `4pt` 드래그 핸들(`rowHeights`, `22...180pt`), 선택 범위 우하단 코너(`◢`) 자동 채우기 드래그 핸들, 열 값 자동 필터(`filterMatchingRowIndices`), 하단 실시간 범위 집계 바(`summarizeRange`: 합계·평균·비어있지 않은 셀 수·수치 셀 수·최소·최대)를 제공합니다.
+- **Why**: 데스크톱 스프레드시트의 핵심 작업 흐름인 다중 셀 블록 서식 지정, 수식/수열 드래그 자동 채우기, 열 너비·행 높이 조절, 즉시 요약 통계 확인을 완결하기 위함입니다.
+- **Trade-offs**: 자동 채우기 대상 범위는 메모리 고갈 방지를 위해 `CellRange.maxExpandedCellCount (100,000)` 상한 내에서만 실행되며, 비연속·역방향 범위는 `EasyOfficeError.invalidCellRange`로 차단(Fail-Closed)됩니다.
+- **Alternatives rejected**:
+  - 정규식 치환으로 수식 내 셀 주소를 이동하는 방식: 문자열 리터럴(`"A1"`)이나 함수명(`LOG10`)을 오탐할 위험이 있어 UTF-8 바이트 경계 파서(`shiftFormulaReferences`)를 채택.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testSheetRangeSelectionAutoFillAndColumnRowResize`)
+- **Revisit when**: 다중 열 복합 조건 필터 및 대각선 양방향 자동 채우기를 추가할 때.
+
+---
+
+### 19. PD-028: 슬라이드 8방향 리사이즈 핸들, 360도 회전 각도 정규화 및 전체화면 발표 스테이지(레이저 포인터·노트 HUD) 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`)
+- **Decision**:
+  1. `SlideModel.resizeElement(id:handle:deltaX:deltaY:stageSize:)`는 8방향 리사이즈 핸들(`SlideResizeHandle`: `NW`, `N`, `NE`, `E`, `SE`, `S`, `SW`, `W`) 드래그 시 반대편 고정 모서리(anchor edge)를 기준으로 최소 크기(`40×24 pt`) 및 스테이지 경계를 클램핑하며, `rotateElement(id:toDegrees:)`는 음수·초과 회전 각도를 `[0, 360)` 범위로 정규화합니다.
+  2. `SlideEditorDetailPaneView`는 선택된 개체 둘레에 8개 방향 리사이즈 핸들과 상단 회전 핸들(`↻`), 등장 애니메이션 배지(`SlideElementAnimation`: `.none`, `.fadeIn`, `.flyInUp`, `.zoomIn`)를 렌더링합니다.
+  3. `SlideshowFullScreenOverlayView`는 `isFullScreenSlideshowActive` 활성 시 메인 워크스페이스 최상단 `ZStack`을 덮는 다크 발표 스테이지를 표시하며, 개체 등장 애니메이션 전환, 마우스/드래그 추적 적색 발광 레이저 포인터(`isLaserPointerEnabled`), 발표자 노트 HUD 드로어, 경과 타이머, `ESC` 즉시 종료를 지원합니다.
+- **Why**: 우측하단 단일 크기 조절만 가능하던 제약을 해소하여 8방향 자유 리사이즈와 각도 회전을 지원하고, 별도 외부 도구 없이 즉시 전체화면 발표와 레이저 포인터 강조를 수행할 수 있게 하기 위함입니다.
+- **Trade-offs**: 좌측/상단 핸들(`NW`, `N`, `W`, `SW`, `NE`) 드래그 시 개체가 최소 너비(`40pt`)·높이(`24pt`) 이하로 줄어들면 반대편 모서리가 밀리지 않도록 이동량(`clampedLeftDX`, `clampedTopDY`)을 고정 클램핑합니다.
+- **Alternatives rejected**:
+  - 좌측/상단 핸들 드래그 시 최소 크기 도달 후에도 `x`/`y` 좌표를 계속 이동시키는 방식: 반대편 고정 모서리가 함께 밀려나는 비정상 이동이 발생하므로 기각.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testSlideResizeHandlesRotationAnimationAndFullScreenSlideshow`)
+- **Revisit when**: 듀얼 디스플레이 분리형 발표자 모니터 윈도우(`NSWindow`) 출력을 추가할 때.
+
+---
+
+### 20. PD-029: PDF 스튜디오 ISO 32000-1 벡터 잉크 획(m / l / S) 직렬화 및 자유곡선 서명·하이라이트 오버레이 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Decision**:
+  1. `PDFStudioDocumentModel`은 페이지별 자유곡선 벡터 잉크 획 컬렉션(`inkStrokes: [PDFInkStroke]`, `PDFInkPoint`)을 보유하며, 페이지 삭제·추출·병합·순서 변경 시 주석(`annotations`)과 동일하게 페이지 번호를 자동 재매핑합니다.
+  2. `PDFBinarySerializer.encode(_:)`는 각 페이지의 `inkStrokes`(`points.count >= 2`)를 ISO 32000-1 그래픽 상태 블록(`q <R> <G> <B> RG <lineWidth> w 1 J 1 j <x0> <y0> m <x1> <y1> l ... S Q`)으로 페이지 콘텐츠 스트림에 직접 직렬화하고, 스튜디오 메타데이터 스트림을 통해 무손실 라운드트립 복원을 보장합니다.
+  3. `PDFInteractiveInkOverlayView`는 PDF 캔버스 상에서 실시간 마우스 드래그(`DragGesture(minimumDistance: 1)`) 궤적을 `Canvas` 벡터 경로로 즉시 미리 보여주고 `.onEnded` 시점에 `addInkStrokeToActivePDFPage`로 커밋하며, 본문 구절 선택 하이라이트(`addHighlightToActivePDFPage`)를 함께 제공합니다.
+- **Why**: 텍스트 스탬프 주석뿐 아니라 실제 마우스/트랙패드 필기 궤적을 표준 PDF 벡터 스트림 연산자(`m`/`l`/`S`)로 영구 보존하여 네이티브 `PDFKit` 및 외부 PDF 뷰어에서도 동일한 자필 서명·검토 획이 표시되도록 하기 위함입니다.
+- **Trade-offs**: 페이지 경계를 벗어나는 극단적 좌표 입력을 방지하기 위해 직렬화 시 점 좌표를 미디어 박스 안전 영역(`x: 20...575`, `y: 20...820`)으로 클램핑합니다.
+- **Alternatives rejected**:
+  - 자유곡선 서명을 래스터 이미지(PNG)로 구워 넣는 방식: 확대 시 픽셀 깨짐이 발생하고 파일 용량이 불필요하게 증가하므로 ISO 32000-1 벡터 경로 연산자(`m`/`l`/`S`) 방식을 채택.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testPDFInkStrokesHighlightAndBinaryRoundTrip`)
+- **Revisit when**: 필압(pressure) 기반 가변 선 굵기 베지어 곡선(`c` 연산자) 스무딩을 추가할 때.
+
 

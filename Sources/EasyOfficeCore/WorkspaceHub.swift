@@ -35,11 +35,17 @@ public final class WorkspaceViewModel {
 
     // Interactive editing, undo/redo, and studio state
     public var selectedParagraphID: UUID? = nil
+    public var selectedParagraphUTF16Range: Range<Int>? = nil
     public var paragraphDraftText: String = ""
     public var inlineRunTargetPhrase: String = ""
+    public var equationDraftText: String = "\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}"
+    public var watermarkDraftText: String = "대외비 (CONFIDENTIAL)"
     public var commentDraftText: String = ""
     public var customTemplateTitleDraft: String = ""
     public var mailMergeFields: [String: String] = ["부서명": "플랫폼아키텍처실", "수신자": "전사 기술위원회"]
+    public var selectedSheetRange: String = "B2:D3"
+    public var sheetAutoFilterColumn: Int = 0
+    public var sheetAutoFilterQuery: String = ""
     public var selectedChartKind: SheetChartKind = .column
     public var isHeaderRowFrozen: Bool = false
     public var mergedSheetRangesByTab: [UUID: [String]] = [:]
@@ -48,8 +54,13 @@ public final class WorkspaceViewModel {
     public var isSnapGuidesEnabled: Bool = true
     public var presenterElapsedSeconds: Int = 95
     public var isPresenterTimerRunning: Bool = false
+    public var isFullScreenSlideshowActive: Bool = false
+    public var isLaserPointerEnabled: Bool = false
     public var selectedSlideElementID: UUID? = nil
     public var activeSnapGuides: [SnapGuideLine] = []
+    public var isPDFInkDrawingModeEnabled: Bool = false
+    public var pdfInkStrokeColorHex: String = "#5C6BC0"
+    public var pdfInkLineWidth: Double = 2.4
     public var lastPivotGrandTotal: Double = 0
     public var authorName: String = "표준 문서 작성자"
     public var findQueryText: String = ""
@@ -346,6 +357,9 @@ public final class WorkspaceViewModel {
         recordUndoSnapshot(for: activeTabID)
         let coord = (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate ?? PackedCellCoordinate(row: 0, column: 0)
         var style = sheet.cellStyle(at: coord); style.numberFormat = format; sheet.setCellStyle(style, at: coord)
+        if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
+            sheet.updateCellStyleInRange(range) { $0.numberFormat = format }
+        }
         openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
         lastExecutedCommandSummary = "셀 숫자 서식 적용: \(format.rawValue)"
     }
@@ -356,8 +370,61 @@ public final class WorkspaceViewModel {
         recordUndoSnapshot(for: activeTabID)
         let coord = (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate ?? PackedCellCoordinate(row: 0, column: 0)
         var style = sheet.cellStyle(at: coord); style.alignment = alignment; sheet.setCellStyle(style, at: coord)
+        if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
+            sheet.updateCellStyleInRange(range) { $0.alignment = alignment }
+        }
         openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
         lastExecutedCommandSummary = "셀 가로 정렬 적용: \(alignment.rawValue)"
+    }
+
+    public func selectSheetCellOrRange(primaryCell: String, rangeNotation: String? = nil) {
+        activeInlineEditTargetKey = nil
+        selectedSheetCell = primaryCell
+        selectedSheetRange = rangeNotation ?? primaryCell
+        if let tab = activeTab, case let .sheet(sheet) = tab.payload {
+            formulaBarDraft = sheet.rawValue(at: primaryCell)
+        } else {
+            formulaBarDraft = ""
+        }
+    }
+
+    public func extendSheetSelection(to endCell: String) {
+        selectedSheetRange = (selectedSheetCell == endCell) ? selectedSheetCell : "\(selectedSheetCell):\(endCell)"
+    }
+
+    public func performAutoFillOnActiveSheet(sourceRangeNotation: String? = nil, targetRangeNotation: String) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .sheet(sheet) = openTabs[idx].payload else { return }
+        let srcStr = sourceRangeNotation ?? selectedSheetRange
+        do {
+            let srcRange = try CellRange(notation: srcStr)
+            let dstRange = try CellRange(notation: targetRangeNotation)
+            try sheet.autofill(sourceRange: srcRange, targetRange: dstRange)
+            recordUndoSnapshot(for: activeTabID)
+            selectedSheetRange = dstRange.a1Range
+            openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true; lastErrorMessage = nil
+            lastExecutedCommandSummary = "시트 자동 채우기 완료 (\(srcRange.a1Range) → \(dstRange.a1Range))"
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    public func updateActiveSheetColumnWidth(column: Int, width: Double) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .sheet(sheet) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "colw:\(activeTabID):\(column)")
+        sheet.setColumnWidth(width, at: column)
+        openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "열 너비 조정 (\(CellAddress.columnLabel(for: max(0, column)))열: \(Int(sheet.columnWidth(at: column)))pt)"
+    }
+
+    public func updateActiveSheetRowHeight(row: Int, height: Double) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .sheet(sheet) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "rowh:\(activeTabID):\(row)")
+        sheet.setRowHeight(height, at: row)
+        openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "행 높이 조정 (\(row + 1)행: \(Int(sheet.rowHeight(at: row)))pt)"
     }
 
     public func setSelectedSheetCellComment(_ comment: String) {
@@ -440,6 +507,11 @@ public final class WorkspaceViewModel {
         lastExecutedCommandSummary = "시트 탭 전환: \(sheet.name)"
     }
 
+    public func updateSelectedParagraphSelection(paragraphID: UUID, utf16Range: Range<Int>?) {
+        selectedParagraphID = paragraphID
+        selectedParagraphUTF16Range = utf16Range
+    }
+
     public func appendParagraphToActiveDocument(text: String, style: ParagraphStyleRole = .body) {
         guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
               case var .document(doc) = openTabs[idx].payload else { return }
@@ -514,6 +586,50 @@ public final class WorkspaceViewModel {
         updateTableCell(tableID: tableID, row: row, column: col, newValue: newValue)
     }
 
+    public func insertEquationIntoActiveDocument(expression: String? = nil, caption: String = "수식 블록") {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .document(doc) = openTabs[idx].payload else { return }
+        let candidate = (expression ?? equationDraftText).trimmingCharacters(in: .whitespacesAndNewlines)
+        let expr = candidate.isEmpty ? "E = mc^2" : candidate
+        recordUndoSnapshot(for: activeTabID)
+        doc.insertEquation(rawExpression: expr, caption: caption)
+        openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "수식 블록 삽입 완료: \(caption)"
+    }
+
+    public func updateDocumentEquation(id: UUID, newExpression: String) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .document(doc) = openTabs[idx].payload,
+              let eqIdx = doc.equations.firstIndex(where: { $0.id == id }),
+              doc.equations[eqIdx].rawExpression != newExpression else { return }
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "eq:\(activeTabID):\(id)")
+        doc.updateEquation(id: id, rawExpression: newExpression)
+        openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "수식 표현식 수정 완료"
+    }
+
+    public func cycleImageWrapMode(imageID: UUID? = nil) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .document(doc) = openTabs[idx].payload, !doc.images.isEmpty else { return }
+        let imgIdx = imageID.flatMap { id in doc.images.firstIndex(where: { $0.id == id }) } ?? 0
+        recordUndoSnapshot(for: activeTabID)
+        let allModes = ImageWrapMode.allCases
+        let next = allModes[((allModes.firstIndex(of: doc.images[imgIdx].wrapMode) ?? 0) + 1) % allModes.count]
+        doc.images[imgIdx].wrapMode = next
+        openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "이미지 배치 모드 전환: \(next.rawValue)"
+    }
+
+    public func setDocumentWatermark(_ text: String? = nil) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .document(doc) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID)
+        let trimmed = (text ?? watermarkDraftText).trimmingCharacters(in: .whitespacesAndNewlines)
+        doc.watermarkText = trimmed.isEmpty ? nil : trimmed
+        openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = trimmed.isEmpty ? "문서 워터마크 해제" : "문서 워터마크 적용: \(trimmed)"
+    }
+
     private static func makeSampleLavenderDiagramPNG(width: Int = 160, height: Int = 48) -> Data {
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
@@ -555,16 +671,13 @@ public final class WorkspaceViewModel {
         let lowerName = fileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let hasExt = lowerName.contains(".")
         if data.count >= 8 && data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
-            guard !hasExt || lowerName.hasSuffix(".png") else { return nil }
-            return "image/png"
+            return (!hasExt || lowerName.hasSuffix(".png")) ? "image/png" : nil
         }
         if data.starts(with: [0xFF, 0xD8, 0xFF]) {
-            guard !hasExt || lowerName.hasSuffix(".jpg") || lowerName.hasSuffix(".jpeg") else { return nil }
-            return "image/jpeg"
+            return (!hasExt || lowerName.hasSuffix(".jpg") || lowerName.hasSuffix(".jpeg")) ? "image/jpeg" : nil
         }
         if data.starts(with: [0x49, 0x49, 0x2A, 0x00]) || data.starts(with: [0x4D, 0x4D, 0x00, 0x2A]) {
-            guard !hasExt || lowerName.hasSuffix(".tif") || lowerName.hasSuffix(".tiff") else { return nil }
-            return "image/tiff"
+            return (!hasExt || lowerName.hasSuffix(".tif") || lowerName.hasSuffix(".tiff")) ? "image/tiff" : nil
         }
         return nil
     }
@@ -574,8 +687,7 @@ public final class WorkspaceViewModel {
               case var .document(doc) = openTabs[idx].payload else { return }
         guard !data.isEmpty, data.count <= Self.maxImageAttachmentBytes,
               let mimeType = Self.detectRasterImageMimeType(data: data, fileName: fileName),
-              let bitmapRep = NSBitmapImageRep(data: data),
-              bitmapRep.pixelsWide > 0, bitmapRep.pixelsHigh > 0 else {
+              let bitmapRep = NSBitmapImageRep(data: data), bitmapRep.pixelsWide > 0, bitmapRep.pixelsHigh > 0 else {
             lastErrorMessage = "유효하지 않은 이미지 시그니처(매직 바이트 불일치)이거나 크기 제한(32MB)을 초과하여 거부되었습니다."
             return
         }
@@ -595,32 +707,36 @@ public final class WorkspaceViewModel {
         }
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
         guard Self.detectRasterImageMimeType(data: data, fileName: url.lastPathComponent) != nil,
-              let bitmapRep = NSBitmapImageRep(data: data),
-              bitmapRep.pixelsWide > 0, bitmapRep.pixelsHigh > 0 else {
+              let bitmapRep = NSBitmapImageRep(data: data), bitmapRep.pixelsWide > 0, bitmapRep.pixelsHigh > 0 else {
             throw EasyOfficeError.corruptedContainer(detail: "유효하지 않은 이미지 파일이거나 매직 바이트와 확장자가 일치하지 않습니다.")
         }
         importImageAttachment(data: data, fileName: url.lastPathComponent, caption: url.deletingPathExtension().lastPathComponent)
     }
 
-    public func applyInlineRunFormattingToActiveParagraph(isBold: Bool = true, isItalic: Bool = false, isUnderlined: Bool = false, textHex: String? = "#5C6BC0", foregroundHex: String? = nil) {
+    public func applyInlineRunFormattingToActiveParagraph(isBold: Bool? = nil, isItalic: Bool? = nil, isUnderlined: Bool? = nil, textHex: String? = nil, foregroundHex: String? = nil) {
         guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
               case var .document(doc) = openTabs[idx].payload, !doc.paragraphs.isEmpty else { return }
         recordUndoSnapshot(for: activeTabID)
         let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
         let resolvedColor = foregroundHex ?? textHex
+        if let utf16Range = selectedParagraphUTF16Range, !utf16Range.isEmpty {
+            doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, foregroundHex: resolvedColor)
+            openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
+            lastExecutedCommandSummary = "선택 구간(\(utf16Range.lowerBound)..<\(utf16Range.upperBound)) 부분 서식 적용"
+            return
+        }
         let baseText = doc.paragraphs[pIdx].text
         let trimmedPhrase = inlineRunTargetPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fbBold = isBold ?? true; let fbItalic = isItalic ?? false; let fbUnder = isUnderlined ?? false; let fbColor = resolvedColor ?? "#5C6BC0"
         if !trimmedPhrase.isEmpty, let matchRange = baseText.range(of: trimmedPhrase) {
-            doc.paragraphs[pIdx].applyRunFormatting(range: matchRange, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, foregroundHex: resolvedColor)
+            doc.paragraphs[pIdx].applyRunFormatting(range: matchRange, isBold: fbBold, isItalic: fbItalic, isUnderlined: fbUnder, foregroundHex: fbColor)
         } else {
             doc.paragraphs[pIdx].runs = []
             let firstWordRange: Range<String.Index> = {
-                if let spaceIdx = baseText.firstIndex(of: " "), spaceIdx < baseText.endIndex {
-                    return baseText.startIndex..<baseText.index(after: spaceIdx)
-                }
+                if let spaceIdx = baseText.firstIndex(of: " "), spaceIdx < baseText.endIndex { return baseText.startIndex..<baseText.index(after: spaceIdx) }
                 return baseText.startIndex..<baseText.endIndex
             }()
-            doc.paragraphs[pIdx].applyRunFormatting(range: firstWordRange, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, foregroundHex: resolvedColor)
+            doc.paragraphs[pIdx].applyRunFormatting(range: firstWordRange, isBold: fbBold, isItalic: fbItalic, isUnderlined: fbUnder, foregroundHex: fbColor)
         }
         openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
         lastExecutedCommandSummary = "인라인 텍스트 런 서식 적용 완료"
@@ -629,11 +745,9 @@ public final class WorkspaceViewModel {
     public func selectSlideElement(id: UUID?) { activeInlineEditTargetKey = nil; selectedSlideElementID = id }
 
     public func moveSlideElement(slideIndex: Int? = nil, elementID: UUID, deltaX: Double, deltaY: Double) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
-        guard deck.slides.indices.contains(targetSlideIdx),
-              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        guard deck.slides.indices.contains(targetSlideIdx), let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
         recordUndoSnapshot(for: activeTabID)
         var elem = deck.slides[targetSlideIdx].elements[eIdx]
         elem.x = max(0.0, min(deck.aspectRatio.widthPoints - elem.width, elem.x + deltaX))
@@ -645,11 +759,9 @@ public final class WorkspaceViewModel {
     }
 
     public func resizeSlideElement(slideIndex: Int? = nil, elementID: UUID, deltaWidth: Double, deltaHeight: Double) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
-        guard deck.slides.indices.contains(targetSlideIdx),
-              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        guard deck.slides.indices.contains(targetSlideIdx), let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
         recordUndoSnapshot(for: activeTabID)
         var elem = deck.slides[targetSlideIdx].elements[eIdx]
         elem.width = max(40.0, min(deck.aspectRatio.widthPoints - elem.x, elem.width + deltaWidth))
@@ -658,12 +770,51 @@ public final class WorkspaceViewModel {
         openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
     }
 
+    public func resizeSlideElementByHandle(slideIndex: Int? = nil, elementID: UUID, handle: SlideResizeHandle, deltaX: Double, deltaY: Double) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
+        let sIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(sIdx), let eIdx = deck.slides[sIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        recordUndoSnapshot(for: activeTabID)
+        deck.slides[sIdx].resizeElement(id: elementID, handle: handle, deltaX: deltaX, deltaY: deltaY, stageSize: deck.aspectRatio.stageSize)
+        let updatedElem = deck.slides[sIdx].elements[eIdx]
+        let siblings = deck.slides[sIdx].elements.enumerated().compactMap { $0 == eIdx ? nil : $1 }
+        activeSnapGuides = SnapGuideCalculator.computeGuides(for: updatedElem, siblings: siblings, aspectRatio: deck.aspectRatio, tolerancePoints: 5.0)
+        openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "슬라이드 개체 핸들 크기 조정 (\(handle.rawValue))"
+    }
+
+    public func rotateSlideElement(slideIndex: Int? = nil, elementID: UUID, toDegrees degrees: Double) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
+        let sIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(sIdx), deck.slides[sIdx].elements.contains(where: { $0.id == elementID }) else { return }
+        recordUndoSnapshot(for: activeTabID)
+        deck.slides[sIdx].rotateElement(id: elementID, toDegrees: degrees)
+        openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "슬라이드 개체 회전 (\(Int(degrees))°)"
+    }
+
+    public func cycleSlideElementAnimation(slideIndex: Int? = nil, elementID: UUID) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
+        let sIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(sIdx), let eIdx = deck.slides[sIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        recordUndoSnapshot(for: activeTabID)
+        let allAnims = SlideElementAnimation.allCases
+        let next = allAnims[((allAnims.firstIndex(of: deck.slides[sIdx].elements[eIdx].animation) ?? 0) + 1) % allAnims.count]
+        deck.slides[sIdx].elements[eIdx].animation = next
+        openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "슬라이드 개체 애니메이션 전환: \(next.rawValue)"
+    }
+
+    public func toggleFullScreenSlideshow() {
+        isFullScreenSlideshowActive.toggle()
+        isPresenterTimerRunning = isFullScreenSlideshowActive
+        lastExecutedCommandSummary = isFullScreenSlideshowActive ? "전체화면 슬라이드쇼 시작" : "전체화면 슬라이드쇼 종료"
+    }
+
     public func moveSlideElementZOrder(slideIndex: Int? = nil, elementID: UUID, bringForward: Bool) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
-        guard deck.slides.indices.contains(targetSlideIdx),
-              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        guard deck.slides.indices.contains(targetSlideIdx), let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
         let nextIdx = bringForward ? min(deck.slides[targetSlideIdx].elements.count - 1, eIdx + 1) : max(0, eIdx - 1)
         guard nextIdx != eIdx else { return }
         recordUndoSnapshot(for: activeTabID)
@@ -673,50 +824,39 @@ public final class WorkspaceViewModel {
     }
 
     public func updateSlideElementText(slideIndex: Int? = nil, elementID: UUID, title: String? = nil, bodyText: String? = nil) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
-        guard deck.slides.indices.contains(targetSlideIdx),
-              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        guard deck.slides.indices.contains(targetSlideIdx), let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
         let existing = deck.slides[targetSlideIdx].elements[eIdx]
         let nextTitle = title ?? existing.title; let nextBody = bodyText ?? existing.bodyText
         guard existing.title != nextTitle || existing.bodyText != nextBody else { return }
         recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "slide-elem-\(activeTabID.uuidString)-\(elementID.uuidString)")
-        deck.slides[targetSlideIdx].elements[eIdx].title = nextTitle
-        deck.slides[targetSlideIdx].elements[eIdx].bodyText = nextBody
+        deck.slides[targetSlideIdx].elements[eIdx].title = nextTitle; deck.slides[targetSlideIdx].elements[eIdx].bodyText = nextBody
         openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
     }
 
     public func updateSlideSpeakerNotes(slideIndex: Int? = nil, notes: String) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
         guard deck.slides.indices.contains(targetSlideIdx), deck.slides[targetSlideIdx].speakerNotes != notes else { return }
         recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "slide-notes-\(activeTabID.uuidString)-\(targetSlideIdx)")
-        deck.slides[targetSlideIdx].speakerNotes = notes
-        openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+        deck.slides[targetSlideIdx].speakerNotes = notes; openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
     }
 
     public func addSlideBulletPoint(slideIndex: Int? = nil, text: String) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
         guard deck.slides.indices.contains(targetSlideIdx) else { return }
         recordUndoSnapshot(for: activeTabID)
-        deck.slides[targetSlideIdx].bulletPoints.append(text)
-        openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+        deck.slides[targetSlideIdx].bulletPoints.append(text); openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
     }
 
     public func updateSlideBulletPoint(slideIndex: Int? = nil, bulletIndex: Int, newText: String) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
-        guard deck.slides.indices.contains(targetSlideIdx),
-              deck.slides[targetSlideIdx].bulletPoints.indices.contains(bulletIndex),
-              deck.slides[targetSlideIdx].bulletPoints[bulletIndex] != newText else { return }
+        guard deck.slides.indices.contains(targetSlideIdx), deck.slides[targetSlideIdx].bulletPoints.indices.contains(bulletIndex), deck.slides[targetSlideIdx].bulletPoints[bulletIndex] != newText else { return }
         recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "slide-bullet-\(activeTabID.uuidString)-\(targetSlideIdx)-\(bulletIndex)")
-        deck.slides[targetSlideIdx].bulletPoints[bulletIndex] = newText
-        openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+        deck.slides[targetSlideIdx].bulletPoints[bulletIndex] = newText; openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
     }
 
     public func advancePresenterSlide() {
@@ -735,42 +875,86 @@ public final class WorkspaceViewModel {
     }
 
     public func rotateActivePDFPage(clockwiseDegrees: Int = 90) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
         recordUndoSnapshot(for: activeTabID)
         let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
-        pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: clockwiseDegrees)
-        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
+        pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: clockwiseDegrees); openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
     }
 
     public func insertBlankPDFPage(afterPage: Int? = nil) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
         recordUndoSnapshot(for: activeTabID)
         let targetAfterPage = afterPage ?? selectedPDFPageNumber
         pdfDoc.insertBlankPage(afterPage: targetAfterPage)
         selectedPDFPageIndex = min(pdfDoc.pages.count - 1, targetAfterPage)
-        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
-        lastExecutedCommandSummary = "빈 PDF 페이지 추가 완료"
+        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true; lastExecutedCommandSummary = "빈 PDF 페이지 추가 완료"
     }
 
     public func deleteActivePDFPage() {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .pdf(pdfDoc) = openTabs[idx].payload, pdfDoc.pages.count > 1 else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .pdf(pdfDoc) = openTabs[idx].payload, pdfDoc.pages.count > 1 else { return }
         recordUndoSnapshot(for: activeTabID)
         let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
         pdfDoc.deletePage(at: targetIndex)
         selectedPDFPageIndex = max(0, min(pdfDoc.pages.count - 1, selectedPDFPageIndex))
-        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
-        lastExecutedCommandSummary = "현재 PDF 페이지 삭제 완료"
+        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true; lastExecutedCommandSummary = "현재 PDF 페이지 삭제 완료"
     }
 
     public func addPDFAnnotation(kind: PDFAnnotationKind, content: String) {
-        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
         recordUndoSnapshot(for: activeTabID)
         let pageNumber = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? pdfDoc.pages[selectedPDFPageIndex].pageNumber : 1
         pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: pageNumber, kind: kind, content: content, author: authorName))
         openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
+    }
+
+    public func addInkStrokeToActivePDFPage(points: [PDFInkPoint], strokeHex: String? = nil, lineWidth: Double? = nil, label: String = "자유곡선 전자서명") {
+        guard !points.isEmpty, let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID)
+        pdfDoc.addInkStroke(pageNumber: selectedPDFPageNumber, points: points, strokeHex: strokeHex ?? pdfInkStrokeColorHex, lineWidth: lineWidth ?? pdfInkLineWidth, label: label)
+        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true; lastExecutedCommandSummary = "PDF 자유곡선 벡터 서명 추가 (\(selectedPDFPageNumber)p)"
+    }
+
+    public func clearInkStrokesOnActivePDFPage() {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID)
+        pdfDoc.clearInkStrokes(onPage: selectedPDFPageNumber)
+        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true; lastExecutedCommandSummary = "PDF 자유곡선 서명 지우기 (\(selectedPDFPageNumber)p)"
+    }
+
+    public func addHighlightToActivePDFPage(selectedText: String) {
+        let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }), case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID)
+        pdfDoc.addAnnotation(pageNumber: selectedPDFPageNumber, kind: .highlight, author: authorName, contents: "하이라이트: \(trimmed)")
+        openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true; lastExecutedCommandSummary = "PDF 선택 텍스트 하이라이트 추가 (\(selectedPDFPageNumber)p)"
+    }
+}
+
+extension ImageWrapMode {
+    public static var inlineWithText: ImageWrapMode { .inline }
+}
+
+extension DocumentEquationBlock {
+    public var caption: String { get { displayTitle } set { displayTitle = newValue } }
+}
+
+extension OfficeDocumentModel {
+    public mutating func insertEquation(rawExpression: String, caption: String = "수식 블록") { addEquation(title: caption, rawExpression: rawExpression) }
+    public mutating func updateEquation(id: UUID, rawExpression: String) {
+        guard let idx = equations.firstIndex(where: { $0.id == id }) else { return }
+        equations[idx].rawExpression = rawExpression
+    }
+}
+
+extension PDFAnnotationItem {
+    public var contents: String { get { content } set { content = newValue } }
+}
+
+extension PDFStudioDocumentModel {
+    public mutating func addInkStroke(pageNumber: Int, points: [PDFInkPoint], strokeHex: String = "#5C6BC0", lineWidth: Double = 2.2, label: String = "자유곡선 전자서명") {
+        addInkStroke(PDFInkStroke(pageNumber: pageNumber, points: points, strokeHex: strokeHex, lineWidth: lineWidth, label: label))
+    }
+    public mutating func addAnnotation(pageNumber: Int, kind: PDFAnnotationKind, author: String = "Workspace User", contents: String) {
+        annotations.append(PDFAnnotationItem(pageNumber: pageNumber, kind: kind, content: contents, author: author))
     }
 }
