@@ -12,11 +12,8 @@ internal enum XMLDocumentModelMapper {
     }
 
     static func isBinaryMediaPath(_ path: String) -> Bool {
-        path.hasPrefix("word/media/") ||
-            path.hasPrefix("Pictures/") ||
-            path.hasPrefix("BinData/") ||
-            path.hasPrefix("ppt/media/") ||
-            path.hasPrefix("xl/media/")
+        path.hasPrefix("word/media/") || path.hasPrefix("Pictures/") || path.hasPrefix("BinData/") ||
+            path.hasPrefix("ppt/media/") || path.hasPrefix("xl/media/")
     }
 
     static func paragraphAttributes(_ p: ParagraphBlock) -> String {
@@ -34,15 +31,9 @@ internal enum XMLDocumentModelMapper {
             "italic=\"\(run.isItalic ? "1" : "0")\"",
             "underline=\"\(run.isUnderlined ? "1" : "0")\""
         ]
-        if let fontName = run.fontName {
-            parts.append("font=\"\(XMLSanitizer.escape(fontName))\"")
-        }
-        if let fontSizePt = run.fontSizePt {
-            parts.append("size=\"\(fontSizePt)\"")
-        }
-        if let fg = run.foregroundHex {
-            parts.append("color=\"\(XMLSanitizer.escape(fg))\"")
-        }
+        if let fontName = run.fontName { parts.append("font=\"\(XMLSanitizer.escape(fontName))\"") }
+        if let fontSizePt = run.fontSizePt { parts.append("size=\"\(fontSizePt)\"") }
+        if let fg = run.foregroundHex { parts.append("color=\"\(XMLSanitizer.escape(fg))\"") }
         return parts.joined(separator: " ")
     }
 
@@ -92,7 +83,6 @@ internal enum XMLDocumentModelMapper {
     }
 
     static func parseRuns(from innerXML: String, childTextTag: String?) -> [DocumentTextRun] {
-        // 1. Check ODF <text:span>
         let odtSpans = XMLSanitizer.extractElements(named: "text:span", in: innerXML)
         if !odtSpans.isEmpty {
             return odtSpans.map { elem in
@@ -109,14 +99,11 @@ internal enum XMLDocumentModelMapper {
             }
         }
 
-        // 2. Check HWPX <hp:run>
         if childTextTag == "hp:t" {
             let hpRuns = XMLSanitizer.extractElements(named: "hp:run", in: innerXML)
             if !hpRuns.isEmpty {
                 return hpRuns.map { elem in
-                    let tText = XMLSanitizer.extractElements(named: "hp:t", in: elem.innerXML)
-                        .map { XMLSanitizer.unescape($0.innerXML) }
-                        .joined()
+                    let tText = XMLSanitizer.extractElements(named: "hp:t", in: elem.innerXML).map { XMLSanitizer.unescape($0.innerXML) }.joined()
                     return DocumentTextRun(
                         id: elem.attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID(),
                         text: tText,
@@ -131,14 +118,11 @@ internal enum XMLDocumentModelMapper {
             }
         }
 
-        // 3. Check OOXML <w:r>
         if childTextTag == "w:t" {
             let wRuns = XMLSanitizer.extractElements(named: "w:r", in: innerXML)
             if !wRuns.isEmpty {
                 return wRuns.map { elem in
-                    let tText = XMLSanitizer.extractElements(named: "w:t", in: elem.innerXML)
-                        .map { XMLSanitizer.unescape($0.innerXML) }
-                        .joined()
+                    let tText = XMLSanitizer.extractElements(named: "w:t", in: elem.innerXML).map { XMLSanitizer.unescape($0.innerXML) }.joined()
                     var isBold = elem.attributes["bold"] == "1"
                     var isItalic = elem.attributes["italic"] == "1"
                     var isUnderlined = elem.attributes["underline"] == "1"
@@ -183,13 +167,8 @@ internal enum XMLDocumentModelMapper {
 
                     return DocumentTextRun(
                         id: elem.attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID(),
-                        text: tText,
-                        isBold: isBold,
-                        isItalic: isItalic,
-                        isUnderlined: isUnderlined,
-                        fontName: fontName,
-                        fontSizePt: fontSizePt,
-                        foregroundHex: foregroundHex
+                        text: tText, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined,
+                        fontName: fontName, fontSizePt: fontSizePt, foregroundHex: foregroundHex
                     )
                 }
             }
@@ -205,20 +184,14 @@ internal enum XMLDocumentModelMapper {
     ) -> ParagraphBlock {
         let id = attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID()
         let parsedRuns = parseRuns(from: innerXML, childTextTag: childTextTag)
-        let hasExplicitRuns = attributes["hasRuns"] == "1" ||
-            parsedRuns.count > 1 ||
-            (parsedRuns.count == 1 && parsedRuns[0].foregroundHex != nil)
+        let hasExplicitRuns = attributes["hasRuns"] == "1" || parsedRuns.count > 1 || (parsedRuns.count == 1 && parsedRuns[0].foregroundHex != nil)
 
         let extractedText: String
         if !parsedRuns.isEmpty {
             extractedText = parsedRuns.map(\.text).joined()
         } else if let childTag = childTextTag {
             let runs = XMLSanitizer.extractElements(named: childTag, in: innerXML)
-            if !runs.isEmpty {
-                extractedText = runs.map { XMLSanitizer.unescape($0.innerXML) }.joined()
-            } else {
-                extractedText = XMLSanitizer.unescape(innerXML)
-            }
+            extractedText = !runs.isEmpty ? runs.map { XMLSanitizer.unescape($0.innerXML) }.joined() : XMLSanitizer.unescape(innerXML)
         } else {
             extractedText = XMLSanitizer.unescape(innerXML)
         }
@@ -239,7 +212,6 @@ internal enum XMLDocumentModelMapper {
             )
         }
 
-        // Standard external WordprocessingML (<w:pPr> / <w:rPr>) fallback
         var style: ParagraphStyleRole = .body
         var alignment: TextAlignmentMode = .justified
         if let pPr = XMLSanitizer.extractElements(named: "w:pPr", in: innerXML).first?.innerXML {
@@ -254,23 +226,14 @@ internal enum XMLDocumentModelMapper {
         }
 
         let firstRun = parsedRuns.first
-        let fontName = firstRun?.fontName ?? "Pretendard"
-        let fontSizePt = firstRun?.fontSizePt ?? 11.0
-        let isBold = parsedRuns.contains(where: \.isBold)
-        let isItalic = parsedRuns.contains(where: \.isItalic)
-        let isUnderlined = parsedRuns.contains(where: \.isUnderlined)
-
         return ParagraphBlock(
-            id: id,
-            style: style,
-            alignment: alignment,
-            text: extractedText,
+            id: id, style: style, alignment: alignment, text: extractedText,
             runs: hasExplicitRuns ? parsedRuns : [],
-            fontName: fontName,
-            fontSizePt: fontSizePt,
-            isBold: isBold,
-            isItalic: isItalic,
-            isUnderlined: isUnderlined,
+            fontName: firstRun?.fontName ?? "Pretendard",
+            fontSizePt: firstRun?.fontSizePt ?? 11.0,
+            isBold: parsedRuns.contains(where: \.isBold),
+            isItalic: parsedRuns.contains(where: \.isItalic),
+            isUnderlined: parsedRuns.contains(where: \.isUnderlined),
             lineSpacingPercent: 160.0
         )
     }
@@ -327,49 +290,32 @@ internal enum XMLDocumentModelMapper {
         }
 
         return DocumentTableBlock(
-            id: id,
-            caption: caption,
-            rows: rows,
-            hasHeaderRow: hasHeader,
-            cellSpans: cellSpans,
-            borderStyle: borderStyle
+            id: id, caption: caption, rows: rows, hasHeaderRow: hasHeader, cellSpans: cellSpans, borderStyle: borderStyle
         )
     }
 
     static func serializeExtendedMetadata(_ doc: OfficeDocumentModel, mediaPrefix: String = "word/media/") -> String {
         var tags: [String] = []
         for sec in doc.sections {
-            tags.append(
-                "<eo:section id=\"\(sec.id.uuidString)\" paperSize=\"\(XMLSanitizer.escape(sec.paperSize.rawValue))\" orientation=\"\(XMLSanitizer.escape(sec.orientation.rawValue))\" cols=\"\(sec.columnCount)\" mt=\"\(sec.marginTopPt)\" mb=\"\(sec.marginBottomPt)\" ml=\"\(sec.marginLeftPt)\" mr=\"\(sec.marginRightPt)\"/>"
-            )
+            tags.append("<eo:section id=\"\(sec.id.uuidString)\" paperSize=\"\(XMLSanitizer.escape(sec.paperSize.rawValue))\" orientation=\"\(XMLSanitizer.escape(sec.orientation.rawValue))\" cols=\"\(sec.columnCount)\" mt=\"\(sec.marginTopPt)\" mb=\"\(sec.marginBottomPt)\" ml=\"\(sec.marginLeftPt)\" mr=\"\(sec.marginRightPt)\"/>")
         }
         for fn in doc.footnotes {
-            tags.append(
-                "<eo:footnote id=\"\(fn.id.uuidString)\" num=\"\(fn.number)\" endnote=\"\(fn.isEndnote ? "1" : "0")\" anchor=\"\(fn.anchorParagraphID.uuidString)\">\(XMLSanitizer.escape(fn.text))</eo:footnote>"
-            )
+            tags.append("<eo:footnote id=\"\(fn.id.uuidString)\" num=\"\(fn.number)\" endnote=\"\(fn.isEndnote ? "1" : "0")\" anchor=\"\(fn.anchorParagraphID.uuidString)\">\(XMLSanitizer.escape(fn.text))</eo:footnote>")
         }
         for rev in doc.revisions {
-            tags.append(
-                "<eo:revision id=\"\(rev.id.uuidString)\" author=\"\(XMLSanitizer.escape(rev.author))\" kind=\"\(XMLSanitizer.escape(rev.kind.rawValue))\" paragraph=\"\(rev.paragraphID.uuidString)\" original=\"\(XMLSanitizer.escape(rev.originalText))\" proposed=\"\(XMLSanitizer.escape(rev.proposedText))\" ts=\"\(XMLSanitizer.escape(rev.timestampISO8601))\"/>"
-            )
+            tags.append("<eo:revision id=\"\(rev.id.uuidString)\" author=\"\(XMLSanitizer.escape(rev.author))\" kind=\"\(XMLSanitizer.escape(rev.kind.rawValue))\" paragraph=\"\(rev.paragraphID.uuidString)\" original=\"\(XMLSanitizer.escape(rev.originalText))\" proposed=\"\(XMLSanitizer.escape(rev.proposedText))\" ts=\"\(XMLSanitizer.escape(rev.timestampISO8601))\"/>")
         }
         for cmt in doc.comments {
             let repliesXML = cmt.replies.map { "<eo:reply>\(XMLSanitizer.escape($0))</eo:reply>" }.joined()
-            tags.append(
-                "<eo:comment id=\"\(cmt.id.uuidString)\" anchor=\"\(cmt.anchorParagraphID.uuidString)\" author=\"\(XMLSanitizer.escape(cmt.author))\" message=\"\(XMLSanitizer.escape(cmt.message))\" resolved=\"\(cmt.isResolved ? "1" : "0")\">\(repliesXML)</eo:comment>"
-            )
+            tags.append("<eo:comment id=\"\(cmt.id.uuidString)\" anchor=\"\(cmt.anchorParagraphID.uuidString)\" author=\"\(XMLSanitizer.escape(cmt.author))\" message=\"\(XMLSanitizer.escape(cmt.message))\" resolved=\"\(cmt.isResolved ? "1" : "0")\">\(repliesXML)</eo:comment>")
         }
         for (name, targetID) in doc.bookmarks.sorted(by: { $0.key < $1.key }) {
-            tags.append(
-                "<eo:bookmark name=\"\(XMLSanitizer.escape(name))\" target=\"\(targetID.uuidString)\"/>"
-            )
+            tags.append("<eo:bookmark name=\"\(XMLSanitizer.escape(name))\" target=\"\(targetID.uuidString)\"/>")
         }
         for img in doc.images {
             let safeName = sanitizeMediaFileName(img.fileName)
             let mediaPath = "\(mediaPrefix)\(safeName)"
-            tags.append(
-                "<eo:image id=\"\(img.id.uuidString)\" fileName=\"\(XMLSanitizer.escape(safeName))\" path=\"\(XMLSanitizer.escape(mediaPath))\" mime=\"\(XMLSanitizer.escape(img.mimeType))\" w=\"\(img.widthPt)\" h=\"\(img.heightPt)\" caption=\"\(XMLSanitizer.escape(img.caption))\" anchor=\"\(img.anchorParagraphID?.uuidString ?? "")\"/>"
-            )
+            tags.append("<eo:image id=\"\(img.id.uuidString)\" fileName=\"\(XMLSanitizer.escape(safeName))\" path=\"\(XMLSanitizer.escape(mediaPath))\" mime=\"\(XMLSanitizer.escape(img.mimeType))\" w=\"\(img.widthPt)\" h=\"\(img.heightPt)\" caption=\"\(XMLSanitizer.escape(img.caption))\" anchor=\"\(img.anchorParagraphID?.uuidString ?? "")\"/>")
         }
         return tags.joined(separator: "\n")
     }
@@ -422,9 +368,7 @@ internal enum XMLDocumentModelMapper {
         }
 
         let comments = XMLSanitizer.extractElements(named: "eo:comment", in: xml).map { elem in
-            let replies = XMLSanitizer.extractElements(named: "eo:reply", in: elem.innerXML).map {
-                XMLSanitizer.unescape($0.innerXML)
-            }
+            let replies = XMLSanitizer.extractElements(named: "eo:reply", in: elem.innerXML).map { XMLSanitizer.unescape($0.innerXML) }
             return DocumentCommentThread(
                 id: elem.attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID(),
                 anchorParagraphID: elem.attributes["anchor"].flatMap(UUID.init(uuidString:)) ?? UUID(),
@@ -446,18 +390,12 @@ internal enum XMLDocumentModelMapper {
         let images = XMLSanitizer.extractElements(named: "eo:image", in: xml).compactMap { elem -> EmbeddedImageAttachment? in
             let fileName = elem.attributes["fileName"] ?? "image.png"
             let path = elem.attributes["path"] ?? ""
-            let data = binaryEntries[path]
-                ?? binaryEntries["word/media/\(fileName)"]
-                ?? binaryEntries["Pictures/\(fileName)"]
-                ?? binaryEntries["BinData/\(fileName)"]
-                ?? Data()
+            let data = binaryEntries[path] ?? binaryEntries["word/media/\(fileName)"] ?? binaryEntries["Pictures/\(fileName)"] ?? binaryEntries["BinData/\(fileName)"] ?? Data()
             let anchorStr = elem.attributes["anchor"] ?? ""
             return EmbeddedImageAttachment(
                 id: elem.attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID(),
-                fileName: fileName,
-                caption: elem.attributes["caption"] ?? "",
-                mimeType: elem.attributes["mime"] ?? "image/png",
-                imageData: data,
+                fileName: fileName, caption: elem.attributes["caption"] ?? "",
+                mimeType: elem.attributes["mime"] ?? "image/png", imageData: data,
                 widthPt: Double(elem.attributes["w"] ?? "320.0") ?? 320.0,
                 heightPt: Double(elem.attributes["h"] ?? "200.0") ?? 200.0,
                 anchorParagraphID: anchorStr.isEmpty ? nil : UUID(uuidString: anchorStr)
@@ -466,191 +404,7 @@ internal enum XMLDocumentModelMapper {
 
         return (
             sections: sections.isEmpty ? [DocumentSectionLayout(paperSize: defaultPaperSize)] : sections,
-            footnotes: footnotes,
-            revisions: revisions,
-            comments: comments,
-            bookmarks: bookmarks,
-            images: images
-        )
-    }
-
-    static func cellStyleAttributes(_ style: CellStyle?) -> String {
-        guard let style, style != CellStyle() else { return "" }
-        var attrs: [String] = [
-            "eoBold=\"\(style.isBold ? "1" : "0")\"",
-            "eoItalic=\"\(style.isItalic ? "1" : "0")\"",
-            "eoUnderline=\"\(style.isUnderlined ? "1" : "0")\"",
-            "eoAlign=\"\(XMLSanitizer.escape(style.alignment.rawValue))\"",
-            "eoNumFmt=\"\(XMLSanitizer.escape(style.numberFormat.rawValue))\""
-        ]
-        if let fill = style.fillHex {
-            attrs.append("eoFill=\"\(XMLSanitizer.escape(fill))\"")
-        }
-        if let text = style.textHex {
-            attrs.append("eoText=\"\(XMLSanitizer.escape(text))\"")
-        }
-        return " " + attrs.joined(separator: " ")
-    }
-
-    static func parseCellStyle(from attributes: [String: String]) -> CellStyle? {
-        guard attributes["eoBold"] != nil ||
-                attributes["eoItalic"] != nil ||
-                attributes["eoUnderline"] != nil ||
-                attributes["eoAlign"] != nil ||
-                attributes["eoNumFmt"] != nil ||
-                attributes["eoFill"] != nil ||
-                attributes["eoText"] != nil else {
-            return nil
-        }
-        return CellStyle(
-            isBold: attributes["eoBold"] == "1",
-            isItalic: attributes["eoItalic"] == "1",
-            isUnderlined: attributes["eoUnderline"] == "1",
-            alignment: CellHorizontalAlignment(rawValue: attributes["eoAlign"] ?? "") ?? .leading,
-            numberFormat: CellNumberFormat(rawValue: attributes["eoNumFmt"] ?? "") ?? .general,
-            fillHex: attributes["eoFill"],
-            textHex: attributes["eoText"]
-        )
-    }
-
-    static func serializeWorksheetMetadata(_ sheet: WorksheetModel) -> String {
-        let ps = sheet.pageSetup
-        var lines: [String] = [
-            "<eo:sheetMeta activeIndex=\"\(sheet.activeSheetIndex)\" trackChanges=\"\(sheet.trackChangesEnabled ? "1" : "0")\" paperSize=\"\(XMLSanitizer.escape(ps.paperSize.rawValue))\" orientation=\"\(XMLSanitizer.escape(ps.orientation.rawValue))\" multiCol=\"\(ps.isMultiColumnPrint ? "1" : "0")\" marginPreset=\"\(XMLSanitizer.escape(ps.marginPresetName))\"/>"
-        ]
-        for coord in sheet.sheetComments.keys.sorted() {
-            if let comment = sheet.sheetComments[coord] {
-                lines.append("<eo:cellComment addr=\"\(XMLSanitizer.escape(coord.description))\" text=\"\(XMLSanitizer.escape(comment))\"/>")
-            }
-        }
-        return lines.joined(separator: "\n  ")
-    }
-
-    static func applyWorksheetMetadata(from xml: String, to sheet: inout WorksheetModel) {
-        if let metaElem = XMLSanitizer.extractElements(named: "eo:sheetMeta", in: xml).first {
-            let attrs = metaElem.attributes
-            sheet.trackChangesEnabled = attrs["trackChanges"] == "1"
-            sheet.pageSetup = WorksheetPageSetup(
-                paperSize: PaperSizePreset(rawValue: attrs["paperSize"] ?? "") ?? .a4,
-                orientation: PageOrientation(rawValue: attrs["orientation"] ?? "") ?? .portrait,
-                isMultiColumnPrint: attrs["multiCol"] == "1",
-                marginPresetName: attrs["marginPreset"] ?? "기본 (Normal)"
-            )
-            if let activeIdx = Int(attrs["activeIndex"] ?? "0") {
-                sheet.switchActiveSheet(to: activeIdx)
-            }
-        }
-        for commentElem in XMLSanitizer.extractElements(named: "eo:cellComment", in: xml) {
-            if let addrStr = commentElem.attributes["addr"],
-               let text = commentElem.attributes["text"],
-               let addr = try? CellAddress(a1Notation: addrStr) {
-                sheet.sheetComments[addr.packedCoordinate] = text
-            }
-        }
-    }
-
-    static func normalizeOpenFormulaExpression(_ rawFormula: String) -> String {
-        var expr = rawFormula.trimmingCharacters(in: .whitespacesAndNewlines)
-        if expr.lowercased().hasPrefix("of:") {
-            expr = String(expr.dropFirst(3))
-        } else if expr.lowercased().hasPrefix("oooc:") {
-            expr = String(expr.dropFirst(5))
-        }
-        if !expr.hasPrefix("=") {
-            expr = "=" + expr
-        }
-        // Normalize OpenFormula bracketed cell references such as [.B1:.C1] -> B1:C1 and [.A1] -> A1
-        // while preserving string literals ("...") and converting unquoted ';' separators to ','.
-        var normalized = ""
-        normalized.reserveCapacity(expr.count)
-        var inQuotes = false
-        var idx = expr.startIndex
-        while idx < expr.endIndex {
-            let ch = expr[idx]
-            if ch == "\"" {
-                inQuotes.toggle()
-                normalized.append(ch)
-                idx = expr.index(after: idx)
-                continue
-            }
-            if !inQuotes {
-                if ch == "[" {
-                    let nextIdx = expr.index(after: idx)
-                    if nextIdx < expr.endIndex, expr[nextIdx] == "." {
-                        idx = expr.index(after: nextIdx)
-                        continue
-                    }
-                } else if ch == ":" {
-                    let nextIdx = expr.index(after: idx)
-                    if nextIdx < expr.endIndex, expr[nextIdx] == "." {
-                        normalized.append(":")
-                        idx = expr.index(after: nextIdx)
-                        continue
-                    }
-                } else if ch == "]" {
-                    idx = expr.index(after: idx)
-                    continue
-                } else if ch == ";" {
-                    normalized.append(",")
-                    idx = expr.index(after: idx)
-                    continue
-                }
-            }
-            normalized.append(ch)
-            idx = expr.index(after: idx)
-        }
-        return normalized
-    }
-
-    static func slideElementAttributes(_ el: SlideCanvasElement) -> String {
-        "id=\"\(el.id.uuidString)\" title=\"\(XMLSanitizer.escape(el.title))\" x=\"\(el.x)\" y=\"\(el.y)\" w=\"\(el.width)\" h=\"\(el.height)\" kind=\"\(XMLSanitizer.escape(el.kind.rawValue))\" zIndex=\"\(el.zIndex)\" rotation=\"\(el.rotationDegrees)\" fillHex=\"\(XMLSanitizer.escape(el.fillHex))\" strokeHex=\"\(XMLSanitizer.escape(el.strokeHex))\" bold=\"\(el.isBold ? "1" : "0")\" italic=\"\(el.isItalic ? "1" : "0")\" underline=\"\(el.isUnderlined ? "1" : "0")\""
-    }
-
-    static func parseSlideElement(attributes: [String: String], innerXML: String) -> SlideCanvasElement {
-        let id = attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID()
-        let cNvPrAttrs = XMLSanitizer.extractElements(named: "p:cNvPr", in: innerXML).first?.attributes
-        let offAttrs = XMLSanitizer.extractElements(named: "a:off", in: innerXML).first?.attributes
-        let extAttrs = XMLSanitizer.extractElements(named: "a:ext", in: innerXML).first?.attributes
-        let rPrAttrs = XMLSanitizer.extractElements(named: "a:rPr", in: innerXML).first?.attributes
-
-        let title = attributes["title"] ?? cNvPrAttrs?["name"] ?? ""
-        let x = Double(attributes["x"] ?? offAttrs?["x"] ?? "0") ?? 0
-        let y = Double(attributes["y"] ?? offAttrs?["y"] ?? "0") ?? 0
-        let width = Double(attributes["w"] ?? extAttrs?["cx"] ?? "100") ?? 100
-        let height = Double(attributes["h"] ?? extAttrs?["cy"] ?? "60") ?? 60
-        let kind = SlideElementKind(rawValue: attributes["kind"] ?? "") ?? .textBox
-        let zIndex = Int(attributes["zIndex"] ?? "0") ?? 0
-        let rotation = Double(attributes["rotation"] ?? "0") ?? 0
-        let fillHex = attributes["fillHex"] ?? "#EEF0FF"
-        let strokeHex = attributes["strokeHex"] ?? "#5C6BC0"
-        let isBold = (attributes["bold"] == "1") || (rPrAttrs?["b"] == "1")
-        let isItalic = (attributes["italic"] == "1") || (rPrAttrs?["i"] == "1")
-        let isUnderlined = (attributes["underline"] == "1") || ((rPrAttrs?["u"] ?? "none") != "none" && rPrAttrs?["u"] != nil)
-
-        let drawingTextRuns = XMLSanitizer.extractElements(named: "a:t", in: innerXML)
-        let bodyText: String
-        if !drawingTextRuns.isEmpty {
-            bodyText = drawingTextRuns.map { XMLSanitizer.unescape($0.innerXML) }.joined()
-        } else {
-            bodyText = XMLSanitizer.unescape(innerXML)
-        }
-
-        return SlideCanvasElement(
-            id: id,
-            title: title,
-            bodyText: bodyText,
-            x: x,
-            y: y,
-            width: width,
-            height: height,
-            kind: kind,
-            zIndex: zIndex,
-            rotationDegrees: rotation,
-            fillHex: fillHex,
-            strokeHex: strokeHex,
-            isBold: isBold,
-            isItalic: isItalic,
-            isUnderlined: isUnderlined
+            footnotes: footnotes, revisions: revisions, comments: comments, bookmarks: bookmarks, images: images
         )
     }
 }
@@ -719,32 +473,28 @@ public enum OOXMLContainerCodec {
                 return "      <w:r \(rAttrs)><w:rPr>\(rPrTags)</w:rPr><w:t xml:space=\"preserve\">\(XMLSanitizer.escape(run.text))</w:t></w:r>"
             }.joined(separator: "\n")
 
-            let pXML = """
+            bodyItems.append("""
                 <w:p \(pAttrs)>
                   <w:pPr><w:pStyle w:val="\(styleVal)"/><w:jc w:val="\(jcVal)"/></w:pPr>
             \(runsXML)
                 </w:p>
-            """
-            bodyItems.append(pXML)
+            """)
         }
 
         for tbl in doc.tables {
             let tAttrs = XMLDocumentModelMapper.tableAttributes(tbl)
             let spansXML = XMLDocumentModelMapper.serializeTableSpans(tbl)
             let rowStrings = tbl.rows.map { row -> String in
-                let cells = row.map { cellText in
-                    "<w:tc><w:p><w:r><w:t>\(XMLSanitizer.escape(cellText))</w:t></w:r></w:p></w:tc>"
-                }.joined()
+                let cells = row.map { "<w:tc><w:p><w:r><w:t>\(XMLSanitizer.escape($0))</w:t></w:r></w:p></w:tc>" }.joined()
                 return "<w:tr>\(cells)</w:tr>"
             }.joined(separator: "\n      ")
 
-            let tblXML = """
+            bodyItems.append("""
                 <w:tbl \(tAttrs)>
                   \(spansXML)
                   \(rowStrings)
                 </w:tbl>
-            """
-            bodyItems.append(tblXML)
+            """)
         }
 
         let documentXML = """
@@ -794,45 +544,24 @@ public enum OOXMLContainerCodec {
 
         let tables = XMLSanitizer.extractElements(named: "w:tbl", in: documentXML).map { tblElem in
             XMLDocumentModelMapper.parseTable(
-                attributes: tblElem.attributes,
-                innerXML: tblElem.innerXML,
-                rowTag: "w:tr",
-                cellTag: "w:tc",
-                cellTextTag: "w:t"
+                attributes: tblElem.attributes, innerXML: tblElem.innerXML,
+                rowTag: "w:tr", cellTag: "w:tc", cellTextTag: "w:t"
             )
         }
 
-        // Strip <w:tbl> blocks before extracting top-level <w:p> so table cell paragraphs are not duplicated
         let bodyWithoutTables = XMLSanitizer.stripElements(named: "w:tbl", from: documentXML)
         let paragraphs = XMLSanitizer.extractElements(named: "w:p", in: bodyWithoutTables).map { pElem in
-            XMLDocumentModelMapper.parseParagraph(
-                attributes: pElem.attributes,
-                innerXML: pElem.innerXML,
-                childTextTag: "w:t"
-            )
+            XMLDocumentModelMapper.parseParagraph(attributes: pElem.attributes, innerXML: pElem.innerXML, childTextTag: "w:t")
         }
 
-        let meta = XMLDocumentModelMapper.parseExtendedMetadata(
-            from: coreXML,
-            defaultPaperSize: paperSize,
-            binaryEntries: binaryEntries
-        )
+        let meta = XMLDocumentModelMapper.parseExtendedMetadata(from: coreXML, defaultPaperSize: paperSize, binaryEntries: binaryEntries)
 
         return OfficeDocumentModel(
-            title: title,
-            format: .docx,
-            paperSize: paperSize,
-            headerText: headerText,
-            footerText: footerText,
-            paragraphs: paragraphs,
-            tables: tables,
-            trackChangesEnabled: trackChanges,
-            sections: meta.sections,
-            footnotes: meta.footnotes,
-            revisions: meta.revisions,
-            comments: meta.comments,
-            bookmarks: meta.bookmarks,
-            images: meta.images
+            title: title, format: .docx, paperSize: paperSize,
+            headerText: headerText, footerText: footerText,
+            paragraphs: paragraphs, tables: tables, trackChangesEnabled: trackChanges,
+            sections: meta.sections, footnotes: meta.footnotes, revisions: meta.revisions,
+            comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images
         )
     }
 
@@ -927,12 +656,19 @@ public enum OOXMLContainerCodec {
                         cellTags.append("      <c r=\"\(XMLSanitizer.escape(a1))\"\(styleAttrs)/>")
                     }
                 }
-                let rowXML = """
+                rowElements.append("""
                     <row r="\(rowNum)">
                 \(cellTags.joined(separator: "\n"))
                     </row>
-                """
-                rowElements.append(rowXML)
+                """)
+            }
+
+            let mergeCellsXML: String
+            if page.mergedRanges.isEmpty {
+                mergeCellsXML = ""
+            } else {
+                let items = page.mergedRanges.map { "    <mergeCell ref=\"\(XMLSanitizer.escape($0.description))\"/>" }.joined(separator: "\n")
+                mergeCellsXML = "\n  <mergeCells count=\"\(page.mergedRanges.count)\">\n\(items)\n  </mergeCells>"
             }
 
             let sheetXML = """
@@ -940,7 +676,7 @@ public enum OOXMLContainerCodec {
             <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
               <sheetData>
             \(rowElements.joined(separator: "\n"))
-              </sheetData>
+              </sheetData>\(mergeCellsXML)
             </worksheet>
             """
             entries.append(ZipContainerEntry(
@@ -966,24 +702,18 @@ public enum OOXMLContainerCodec {
         var sharedStrings: [String] = []
         if let sstXML = entryMap["xl/sharedStrings.xml"] {
             for siElem in XMLSanitizer.extractElements(named: "si", in: sstXML) {
-                let textParts = XMLSanitizer.extractElements(named: "t", in: siElem.innerXML).map {
-                    XMLSanitizer.unescape($0.innerXML)
-                }
+                let textParts = XMLSanitizer.extractElements(named: "t", in: siElem.innerXML).map { XMLSanitizer.unescape($0.innerXML) }
                 sharedStrings.append(textParts.joined())
             }
         }
 
         let workbookXML = entryMap["xl/workbook.xml"] ?? ""
         let sheetTags = XMLSanitizer.extractElements(named: "sheet", in: workbookXML)
-        let sheetDescriptors: [(name: String, path: String)]
-        if sheetTags.isEmpty {
-            sheetDescriptors = [("Sheet1", "xl/worksheets/sheet1.xml")]
-        } else {
-            sheetDescriptors = sheetTags.enumerated().map { idx, elem in
-                let name = elem.attributes["name"] ?? "Sheet\(idx + 1)"
-                return (name, "xl/worksheets/sheet\(idx + 1).xml")
+        let sheetDescriptors: [(name: String, path: String)] = sheetTags.isEmpty
+            ? [("Sheet1", "xl/worksheets/sheet1.xml")]
+            : sheetTags.enumerated().map { idx, elem in
+                (elem.attributes["name"] ?? "Sheet\(idx + 1)", "xl/worksheets/sheet\(idx + 1).xml")
             }
-        }
 
         func decodeSheetPage(name: String, xml: String) throws -> WorksheetModel {
             var pageModel = WorksheetModel(name: name)
@@ -1008,8 +738,7 @@ public enum OOXMLContainerCodec {
                 } else if cellType == "inlineStr" {
                     let tElems = XMLSanitizer.extractElements(named: "t", in: cellElem.innerXML)
                     if !tElems.isEmpty {
-                        let inlineText = tElems.map { XMLSanitizer.unescape($0.innerXML) }.joined()
-                        try pageModel.setCell(addr, rawValue: inlineText)
+                        try pageModel.setCell(addr, rawValue: tElems.map { XMLSanitizer.unescape($0.innerXML) }.joined())
                     } else if let vElem = XMLSanitizer.extractElements(named: "v", in: cellElem.innerXML).first {
                         try pageModel.setCell(addr, rawValue: XMLSanitizer.unescape(vElem.innerXML))
                     }
@@ -1020,8 +749,14 @@ public enum OOXMLContainerCodec {
                         try pageModel.setCell(addr, rawValue: boolStr)
                     }
                 } else if let vElem = XMLSanitizer.extractElements(named: "v", in: cellElem.innerXML).first {
-                    let valText = XMLSanitizer.unescape(vElem.innerXML)
-                    try pageModel.setCell(addr, rawValue: valText)
+                    try pageModel.setCell(addr, rawValue: XMLSanitizer.unescape(vElem.innerXML))
+                }
+            }
+            for mergeElem in XMLSanitizer.extractElements(named: "mergeCell", in: xml) {
+                if let ref = mergeElem.attributes["ref"], let range = try? CellRange(notation: ref) {
+                    if !pageModel.mergedRanges.contains(range) {
+                        pageModel.mergedRanges.append(range)
+                    }
                 }
             }
             return pageModel
@@ -1041,7 +776,9 @@ public enum OOXMLContainerCodec {
                 WorksheetSheetPage(
                     name: page.name,
                     cellsByCoordinate: page.cellsByCoordinate,
-                    cellStyles: page.cellStyles
+                    cellStyles: page.cellStyles,
+                    sheetComments: page.sheetComments,
+                    mergedRanges: page.mergedRanges
                 )
             }
         }
@@ -1073,11 +810,7 @@ public enum OOXMLContainerCodec {
         """
         entries.append(ZipContainerEntry(path: "[Content_Types].xml", data: Data(contentTypesXML.utf8), compressionMethod: .deflate))
 
-        var slideRefs: [String] = []
-        for idx in deck.slides.indices {
-            slideRefs.append("    <p:sldId id=\"\(256 + idx)\" target=\"ppt/slides/slide\(idx + 1).xml\"/>")
-        }
-
+        let slideRefs = deck.slides.indices.map { "    <p:sldId id=\"\(256 + $0)\" target=\"ppt/slides/slide\($0 + 1).xml\"/>" }
         let presentationXML = """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" title="\(XMLSanitizer.escape(deck.title))" aspectRatio="\(XMLSanitizer.escape(deck.aspectRatio.rawValue))">
@@ -1116,33 +849,16 @@ public enum OOXMLContainerCodec {
               </p:cSld>
             </p:sld>
             """
-            entries.append(ZipContainerEntry(
-                path: "ppt/slides/slide\(index + 1).xml",
-                data: Data(slideXML.utf8),
-                compressionMethod: .deflate
-            ))
+            entries.append(ZipContainerEntry(path: "ppt/slides/slide\(index + 1).xml", data: Data(slideXML.utf8), compressionMethod: .deflate))
 
             if !slide.speakerNotes.isEmpty {
                 let notesSlideXML = """
                 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
                 <p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-                  <p:cSld>
-                    <p:spTree>
-                      <p:sp>
-                        <p:txBody>
-                          <a:bodyPr/>
-                          <a:p><a:r><a:t>\(XMLSanitizer.escape(slide.speakerNotes))</a:t></a:r></a:p>
-                        </p:txBody>
-                      </p:sp>
-                    </p:spTree>
-                  </p:cSld>
+                  <p:cSld><p:spTree><p:sp><p:txBody><a:bodyPr/><a:p><a:r><a:t>\(XMLSanitizer.escape(slide.speakerNotes))</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
                 </p:notes>
                 """
-                entries.append(ZipContainerEntry(
-                    path: "ppt/notesSlides/notesSlide\(index + 1).xml",
-                    data: Data(notesSlideXML.utf8),
-                    compressionMethod: .deflate
-                ))
+                entries.append(ZipContainerEntry(path: "ppt/notesSlides/notesSlide\(index + 1).xml", data: Data(notesSlideXML.utf8), compressionMethod: .deflate))
             }
         }
 
@@ -1191,515 +907,11 @@ public enum OOXMLContainerCodec {
             let bullets = XMLSanitizer.extractElements(named: "p:bullet", in: sldElem.innerXML).map { XMLSanitizer.unescape($0.innerXML) }
 
             slides.append(SlideModel(
-                id: slideID,
-                title: sTitle,
-                subtitle: sSubtitle,
-                bulletPoints: bullets,
-                speakerNotes: notes,
-                masterLayout: layout,
-                transition: transition,
-                elements: elements
+                id: slideID, title: sTitle, subtitle: sSubtitle, bulletPoints: bullets,
+                speakerNotes: notes, masterLayout: layout, transition: transition, elements: elements
             ))
         }
 
         return PresentationDeckModel(title: title, aspectRatio: aspectRatio, slides: slides)
-    }
-}
-
-// MARK: - ODF Container Codec (ISO/IEC 26300 ODT, ODS, ODP)
-
-/// ISO/IEC 26300 OpenDocument Format container encoder and decoder (`.odt`, `.ods`, `.odp`).
-public enum ODFContainerCodec {
-    public static let textMimeType = "application/vnd.oasis.opendocument.text"
-    public static let spreadsheetMimeType = "application/vnd.oasis.opendocument.spreadsheet"
-    public static let presentationMimeType = "application/vnd.oasis.opendocument.presentation"
-
-    public static func encodeDocument(_ doc: OfficeDocumentModel) throws -> Data {
-        let pElements = doc.paragraphs.map { p -> String in
-            let pAttrs = XMLDocumentModelMapper.paragraphAttributes(p)
-            if p.runs.isEmpty || p.runs.map(\.text).joined() != p.text {
-                return "<text:p \(pAttrs)>\(XMLSanitizer.escape(p.text))</text:p>"
-            }
-            let spans = p.runs.map { run in
-                "<text:span \(XMLDocumentModelMapper.runAttributes(run))>\(XMLSanitizer.escape(run.text))</text:span>"
-            }.joined()
-            return "<text:p \(pAttrs)>\(spans)</text:p>"
-        }.joined(separator: "\n      ")
-
-        let tblElements = doc.tables.map { tbl in
-            let tAttrs = XMLDocumentModelMapper.tableAttributes(tbl)
-            let spansXML = XMLDocumentModelMapper.serializeTableSpans(tbl)
-            let rowsXML = tbl.rows.map { row in
-                let cells = row.map { "<table:table-cell><text:value>\(XMLSanitizer.escape($0))</text:value></table:table-cell>" }.joined()
-                return "<table:table-row>\(cells)</table:table-row>"
-            }.joined(separator: "\n        ")
-            return "<table:table \(tAttrs)>\n        \(spansXML)\n        \(rowsXML)\n      </table:table>"
-        }.joined(separator: "\n      ")
-
-        let extendedMetaXML = XMLDocumentModelMapper.serializeExtendedMetadata(doc, mediaPrefix: "Pictures/")
-        let contentXML = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:eo="urn:easyoffice:metadata:1.0" title="\(XMLSanitizer.escape(doc.title))" paperSize="\(XMLSanitizer.escape(doc.paperSize.rawValue))" headerText="\(XMLSanitizer.escape(doc.headerText))" footerText="\(XMLSanitizer.escape(doc.footerText))" trackChanges="\(doc.trackChangesEnabled ? "1" : "0")">
-          <office:meta>
-            \(extendedMetaXML)
-          </office:meta>
-          <office:body>
-            <office:text>
-              \(pElements)
-              \(tblElements)
-            </office:text>
-          </office:body>
-        </office:document-content>
-        """
-
-        var entries: [ZipContainerEntry] = [
-            ZipContainerEntry(path: "mimetype", data: Data(textMimeType.utf8), compressionMethod: .store),
-            ZipContainerEntry(path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate)
-        ]
-        for img in doc.images {
-            let safeName = XMLDocumentModelMapper.sanitizeMediaFileName(img.fileName)
-            entries.append(ZipContainerEntry(path: "Pictures/\(safeName)", data: img.imageData, compressionMethod: .store))
-        }
-        return try ZipContainerCodec.pack(entries: entries)
-    }
-
-    public static func decodeDocument(from data: Data) throws -> OfficeDocumentModel {
-        let entries = try ZipContainerCodec.unpack(from: data)
-        guard let mimeEntry = entries.first(where: { $0.path == "mimetype" }),
-              String(data: mimeEntry.data, encoding: .utf8) == textMimeType else {
-            throw EasyOfficeError.corruptedContainer(detail: "ODT 컨테이너의 mimetype 엔트리가 유효하지 않습니다.")
-        }
-        guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
-            throw EasyOfficeError.corruptedContainer(detail: "ODT 컨테이너에 'content.xml'이 누락되었습니다.")
-        }
-        var binaryEntries: [String: Data] = [:]
-        for entry in entries where XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-            binaryEntries[entry.path] = entry.data
-        }
-
-        let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
-        guard let root = XMLSanitizer.extractElements(named: "office:document-content", in: xml).first else {
-            throw EasyOfficeError.corruptedContainer(detail: "ODT 'office:document-content' 루트를 찾을 수 없습니다.")
-        }
-
-        let tables = XMLSanitizer.extractElements(named: "table:table", in: root.innerXML).map { tblElem in
-            XMLDocumentModelMapper.parseTable(
-                attributes: tblElem.attributes,
-                innerXML: tblElem.innerXML,
-                rowTag: "table:table-row",
-                cellTag: "table:table-cell",
-                cellTextTag: "text:value"
-            )
-        }
-
-        let bodyWithoutTables = XMLSanitizer.stripElements(named: "table:table", from: root.innerXML)
-        let paragraphs = XMLSanitizer.extractElements(named: "text:p", in: bodyWithoutTables).map { elem in
-            XMLDocumentModelMapper.parseParagraph(
-                attributes: elem.attributes,
-                innerXML: elem.innerXML,
-                childTextTag: nil
-            )
-        }
-
-        let paperSize = PaperSizePreset(rawValue: root.attributes["paperSize"] ?? "") ?? .a4
-        let meta = XMLDocumentModelMapper.parseExtendedMetadata(
-            from: root.innerXML,
-            defaultPaperSize: paperSize,
-            binaryEntries: binaryEntries
-        )
-
-        return OfficeDocumentModel(
-            title: root.attributes["title"] ?? "제목 없음",
-            format: .odt,
-            paperSize: paperSize,
-            headerText: root.attributes["headerText"] ?? "",
-            footerText: root.attributes["footerText"] ?? "",
-            paragraphs: paragraphs,
-            tables: tables,
-            trackChangesEnabled: root.attributes["trackChanges"] == "1",
-            sections: meta.sections,
-            footnotes: meta.footnotes,
-            revisions: meta.revisions,
-            comments: meta.comments,
-            bookmarks: meta.bookmarks,
-            images: meta.images
-        )
-    }
-
-    public static func encodeWorksheet(_ sheet: WorksheetModel) throws -> Data {
-        let orderedPages = sheet.orderedSheetPages()
-        let tablesXML = orderedPages.map { page -> String in
-            let allCoords = Set(page.cellsByCoordinate.keys).union(page.cellStyles.keys)
-            guard !allCoords.isEmpty else {
-                return "<table:table table:name=\"\(XMLSanitizer.escape(page.name))\"/>"
-            }
-            let maxRow = allCoords.map(\.row).max() ?? 0
-            var rowStrings: [String] = []
-            for r in 0...maxRow {
-                let rowCoords = allCoords.filter { $0.row == r }
-                guard !rowCoords.isEmpty else {
-                    rowStrings.append("        <table:table-row/>")
-                    continue
-                }
-                let maxCol = rowCoords.map(\.column).max() ?? 0
-                var cellStrings: [String] = []
-                for c in 0...maxCol {
-                    let coord = PackedCellCoordinate(row: r, column: c)
-                    let raw = page.cellsByCoordinate[coord] ?? ""
-                    let styleAttrs = XMLDocumentModelMapper.cellStyleAttributes(page.cellStyles[coord])
-                    if raw.isEmpty && styleAttrs.isEmpty {
-                        cellStrings.append("<table:table-cell/>")
-                    } else if raw.hasPrefix("=") {
-                        let escapedRaw = XMLSanitizer.escape(raw)
-                        cellStrings.append("<table:table-cell address=\"\(coord.description)\" raw=\"\(escapedRaw)\" table:formula=\"of:\(escapedRaw)\" office:value-type=\"string\"\(styleAttrs)><text:p>\(escapedRaw)</text:p></table:table-cell>")
-                    } else if !raw.isEmpty, Double(raw)?.isFinite == true {
-                        let escapedRaw = XMLSanitizer.escape(raw)
-                        cellStrings.append("<table:table-cell address=\"\(coord.description)\" raw=\"\(escapedRaw)\" office:value-type=\"float\" office:value=\"\(escapedRaw)\"\(styleAttrs)><text:p>\(escapedRaw)</text:p></table:table-cell>")
-                    } else {
-                        let escapedRaw = XMLSanitizer.escape(raw)
-                        cellStrings.append("<table:table-cell address=\"\(coord.description)\" raw=\"\(escapedRaw)\" office:value-type=\"string\"\(styleAttrs)><text:p>\(escapedRaw)</text:p></table:table-cell>")
-                    }
-                }
-                rowStrings.append("        <table:table-row>\(cellStrings.joined())</table:table-row>")
-            }
-            return """
-                  <table:table table:name="\(XMLSanitizer.escape(page.name))">
-            \(rowStrings.joined(separator: "\n"))
-                  </table:table>
-            """
-        }.joined(separator: "\n")
-
-        let metaXML = XMLDocumentModelMapper.serializeWorksheetMetadata(sheet)
-        let contentXML = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:eo="urn:easyoffice:metadata:1.0">
-          <office:meta>
-            \(metaXML)
-          </office:meta>
-          <office:body>
-            <office:spreadsheet>
-        \(tablesXML)
-            </office:spreadsheet>
-          </office:body>
-        </office:document-content>
-        """
-
-        return try ZipContainerCodec.pack(entries: [
-            ZipContainerEntry(path: "mimetype", data: Data(spreadsheetMimeType.utf8), compressionMethod: .store),
-            ZipContainerEntry(path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate)
-        ])
-    }
-
-    public static func decodeWorksheet(from data: Data) throws -> WorksheetModel {
-        let entries = try ZipContainerCodec.unpack(from: data)
-        guard let mimeEntry = entries.first(where: { $0.path == "mimetype" }),
-              String(data: mimeEntry.data, encoding: .utf8) == spreadsheetMimeType else {
-            throw EasyOfficeError.corruptedContainer(detail: "ODS 컨테이너의 mimetype 엔트리가 유효하지 않습니다.")
-        }
-        guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
-            throw EasyOfficeError.corruptedContainer(detail: "ODS 컨테이너에 'content.xml'이 누락되었습니다.")
-        }
-        let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
-        let tableElems = XMLSanitizer.extractElements(named: "table:table", in: xml)
-
-        func decodeTableElement(_ tableElem: (attributes: [String: String], innerXML: String)) throws -> WorksheetModel {
-            let name = tableElem.attributes["table:name"] ?? "Sheet1"
-            var pageModel = WorksheetModel(name: name)
-            let rowElems = XMLSanitizer.extractElements(named: "table:table-row", in: tableElem.innerXML)
-            if !rowElems.isEmpty {
-                var rowIdx = 0
-                var populatedCellCount = 0
-                for rowElem in rowElems {
-                    let rowRepeat = max(1, min(1024, Int(rowElem.attributes["table:number-rows-repeated"] ?? "1") ?? 1))
-                    var colIdx = 0
-                    let cellElems = XMLSanitizer.extractElements(named: "table:table-cell", in: rowElem.innerXML)
-                    for cellElem in cellElems {
-                        let colRepeat = max(1, min(1024, Int(cellElem.attributes["table:number-columns-repeated"] ?? "1") ?? 1))
-                        let attrs = cellElem.attributes
-                        let resolvedRaw: String
-                        if let rawAttr = attrs["raw"] {
-                            resolvedRaw = rawAttr
-                        } else if let formulaAttr = attrs["table:formula"], !formulaAttr.isEmpty {
-                            resolvedRaw = XMLDocumentModelMapper.normalizeOpenFormulaExpression(formulaAttr)
-                        } else if let valAttr = attrs["office:value"], !valAttr.isEmpty {
-                            resolvedRaw = valAttr
-                        } else if let boolAttr = attrs["office:boolean-value"], !boolAttr.isEmpty {
-                            resolvedRaw = boolAttr.uppercased()
-                        } else {
-                            let textPs = XMLSanitizer.extractElements(named: "text:p", in: cellElem.innerXML)
-                            resolvedRaw = textPs.map { XMLSanitizer.unescape($0.innerXML) }.joined(separator: "\n")
-                        }
-
-                        let parsedStyle = XMLDocumentModelMapper.parseCellStyle(from: attrs)
-                        if resolvedRaw.isEmpty && parsedStyle == nil {
-                            colIdx += colRepeat
-                            continue
-                        }
-
-                        let expansionCount = rowRepeat * colRepeat
-                        guard populatedCellCount + expansionCount <= CellRange.maxExpandedCellCount else {
-                            throw EasyOfficeError.securityViolation(
-                                detail: "ODF(.ods) 반복 셀 확장 개수가 허용 상한(\(CellRange.maxExpandedCellCount)셀)을 초과했습니다."
-                            )
-                        }
-                        populatedCellCount += expansionCount
-
-                        for rOff in 0..<rowRepeat {
-                            for cOff in 0..<colRepeat {
-                                let targetRow = rowIdx + rOff
-                                let targetCol = colIdx + cOff
-                                if !resolvedRaw.isEmpty {
-                                    try pageModel.setCell(row: targetRow, column: targetCol, rawValue: resolvedRaw)
-                                }
-                                if let parsedStyle {
-                                    pageModel.setCellStyle(parsedStyle, at: PackedCellCoordinate(row: targetRow, column: targetCol))
-                                }
-                            }
-                        }
-                        colIdx += colRepeat
-                    }
-                    rowIdx += rowRepeat
-                }
-            } else {
-                for cellElem in XMLSanitizer.extractElements(named: "table:table-cell", in: tableElem.innerXML) {
-                    if let addr = cellElem.attributes["address"], let raw = cellElem.attributes["raw"] {
-                        try pageModel.setCell(addr, rawValue: raw)
-                    }
-                }
-            }
-            return pageModel
-        }
-
-        var decodedPages: [WorksheetModel] = []
-        for tableElem in tableElems {
-            decodedPages.append(try decodeTableElement(tableElem))
-        }
-        var primary = decodedPages.first ?? WorksheetModel(name: "Sheet1")
-        if decodedPages.count > 1 {
-            primary.additionalSheets = decodedPages.dropFirst().map { page in
-                WorksheetSheetPage(
-                    name: page.name,
-                    cellsByCoordinate: page.cellsByCoordinate,
-                    cellStyles: page.cellStyles
-                )
-            }
-        }
-        XMLDocumentModelMapper.applyWorksheetMetadata(from: xml, to: &primary)
-        return primary
-    }
-
-    public static func encodePresentation(_ deck: PresentationDeckModel) throws -> Data {
-        let pagesXML = deck.slides.map { slide -> String in
-            let bullets = slide.bulletPoints.map { "<text:list-item>\(XMLSanitizer.escape($0))</text:list-item>" }.joined()
-            let shapes = slide.elements.map { el in
-                "<draw:frame \(XMLDocumentModelMapper.slideElementAttributes(el))>\(XMLSanitizer.escape(el.bodyText))</draw:frame>"
-            }.joined()
-            return "<draw:page id=\"\(slide.id.uuidString)\" title=\"\(XMLSanitizer.escape(slide.title))\" subtitle=\"\(XMLSanitizer.escape(slide.subtitle))\" notes=\"\(XMLSanitizer.escape(slide.speakerNotes))\" layout=\"\(XMLSanitizer.escape(slide.masterLayout.rawValue))\" transition=\"\(XMLSanitizer.escape(slide.transition.rawValue))\">\(bullets)\(shapes)</draw:page>"
-        }.joined(separator: "\n      ")
-
-        let contentXML = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" title="\(XMLSanitizer.escape(deck.title))" aspectRatio="\(XMLSanitizer.escape(deck.aspectRatio.rawValue))">
-          <office:body>
-            <office:presentation>
-              \(pagesXML)
-            </office:presentation>
-          </office:body>
-        </office:document-content>
-        """
-
-        return try ZipContainerCodec.pack(entries: [
-            ZipContainerEntry(path: "mimetype", data: Data(presentationMimeType.utf8), compressionMethod: .store),
-            ZipContainerEntry(path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate)
-        ])
-    }
-
-    public static func decodePresentation(from data: Data) throws -> PresentationDeckModel {
-        let entries = try ZipContainerCodec.unpack(from: data)
-        guard let mimeEntry = entries.first(where: { $0.path == "mimetype" }),
-              String(data: mimeEntry.data, encoding: .utf8) == presentationMimeType else {
-            throw EasyOfficeError.corruptedContainer(detail: "ODP 컨테이너의 mimetype 엔트리가 유효하지 않습니다.")
-        }
-        guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
-            throw EasyOfficeError.corruptedContainer(detail: "ODP 컨테이너에 'content.xml'이 누락되었습니다.")
-        }
-        let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
-        let root = XMLSanitizer.extractElements(named: "office:document-content", in: xml).first
-        let slides = XMLSanitizer.extractElements(named: "draw:page", in: xml).map { page -> SlideModel in
-            let slideID = page.attributes["id"].flatMap(UUID.init(uuidString:)) ?? UUID()
-            let bullets = XMLSanitizer.extractElements(named: "text:list-item", in: page.innerXML).map { XMLSanitizer.unescape($0.innerXML) }
-            let elements = XMLSanitizer.extractElements(named: "draw:frame", in: page.innerXML).map { frame in
-                XMLDocumentModelMapper.parseSlideElement(attributes: frame.attributes, innerXML: frame.innerXML)
-            }
-            return SlideModel(
-                id: slideID,
-                title: page.attributes["title"] ?? "",
-                subtitle: page.attributes["subtitle"] ?? "",
-                bulletPoints: bullets,
-                speakerNotes: page.attributes["notes"] ?? "",
-                masterLayout: SlideMasterLayout(rawValue: page.attributes["layout"] ?? "") ?? .titleAndContent,
-                transition: SlideTransitionKind(rawValue: page.attributes["transition"] ?? "") ?? .fade,
-                elements: elements
-            )
-        }
-        return PresentationDeckModel(
-            title: root?.attributes["title"] ?? "발표자료",
-            aspectRatio: SlideAspectRatio(rawValue: root?.attributes["aspectRatio"] ?? "") ?? .widescreen16x9,
-            slides: slides
-        )
-    }
-}
-
-// MARK: - HWPX Container Codec (KS X 6101 OWPML)
-
-/// KS X 6101 OWPML (`HWPX`) ZIP-XML container encoder and decoder.
-public enum HWPXContainerCodec {
-    public static let hwpxMimeType = "application/hwp+zip"
-
-    public static func encodeDocument(_ doc: OfficeDocumentModel) throws -> Data {
-        let binManifestItems = doc.images.enumerated().map { idx, img in
-            let safeName = XMLDocumentModelMapper.sanitizeMediaFileName(img.fileName)
-            return "    <opf:item id=\"bindata\(idx)\" href=\"BinData/\(XMLSanitizer.escape(safeName))\" media-type=\"\(XMLSanitizer.escape(img.mimeType))\"/>"
-        }.joined(separator: "\n")
-
-        let contentHPF = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <opf:package xmlns:opf="http://www.idpf.org/2007/opf/" version="1.0">
-          <opf:metadata>
-            <opf:title>\(XMLSanitizer.escape(doc.title))</opf:title>
-          </opf:metadata>
-          <opf:manifest>
-            <opf:item id="header" href="Contents/header.xml" media-type="application/xml"/>
-            <opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/>
-        \(binManifestItems)
-          </opf:manifest>
-        </opf:package>
-        """
-
-        let extendedMetaXML = XMLDocumentModelMapper.serializeExtendedMetadata(doc, mediaPrefix: "BinData/")
-        let headerXML = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <hh:head xmlns:hh="http://www.owpml.org/owpml/2011/head" xmlns:eo="urn:easyoffice:metadata:1.0" paperSize="\(XMLSanitizer.escape(doc.paperSize.rawValue))" headerText="\(XMLSanitizer.escape(doc.headerText))" footerText="\(XMLSanitizer.escape(doc.footerText))" trackChanges="\(doc.trackChangesEnabled ? "1" : "0")">
-          \(extendedMetaXML)
-        </hh:head>
-        """
-
-        let paragraphsXML = doc.paragraphs.map { p in
-            let runsXML = p.effectiveRuns.map { run in
-                "    <hp:run \(XMLDocumentModelMapper.runAttributes(run))><hp:t>\(XMLSanitizer.escape(run.text))</hp:t></hp:run>"
-            }.joined(separator: "\n")
-            return """
-              <hp:p \(XMLDocumentModelMapper.paragraphAttributes(p))>
-            \(runsXML)
-              </hp:p>
-            """
-        }.joined(separator: "\n")
-
-        let tablesXML = doc.tables.map { tbl in
-            let tAttrs = XMLDocumentModelMapper.tableAttributes(tbl)
-            let spansXML = XMLDocumentModelMapper.serializeTableSpans(tbl)
-            let rows = tbl.rows.map { row in
-                let cells = row.map { "<hp:tc><hp:cellText>\(XMLSanitizer.escape($0))</hp:cellText></hp:tc>" }.joined()
-                return "<hp:tr>\(cells)</hp:tr>"
-            }.joined(separator: "\n    ")
-            return """
-              <hp:tbl \(tAttrs)>
-                \(spansXML)
-                \(rows)
-              </hp:tbl>
-            """
-        }.joined(separator: "\n")
-
-        let sectionXML = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <hs:sec xmlns:hs="http://www.owpml.org/owpml/2011/section" xmlns:hp="http://www.owpml.org/owpml/2011/paragraph" xmlns:eo="urn:easyoffice:metadata:1.0">
-        \(paragraphsXML)
-        \(tablesXML)
-        </hs:sec>
-        """
-
-        var entries: [ZipContainerEntry] = [
-            ZipContainerEntry(path: "mimetype", data: Data(hwpxMimeType.utf8), compressionMethod: .store),
-            ZipContainerEntry(path: "Contents/content.hpf", data: Data(contentHPF.utf8), compressionMethod: .deflate),
-            ZipContainerEntry(path: "Contents/header.xml", data: Data(headerXML.utf8), compressionMethod: .deflate),
-            ZipContainerEntry(path: "Contents/section0.xml", data: Data(sectionXML.utf8), compressionMethod: .deflate)
-        ]
-        for img in doc.images {
-            let safeName = XMLDocumentModelMapper.sanitizeMediaFileName(img.fileName)
-            entries.append(ZipContainerEntry(path: "BinData/\(safeName)", data: img.imageData, compressionMethod: .store))
-        }
-        return try ZipContainerCodec.pack(entries: entries)
-    }
-
-    public static func decodeDocument(from data: Data) throws -> OfficeDocumentModel {
-        let entries = try ZipContainerCodec.unpack(from: data)
-        var entryMap: [String: String] = [:]
-        var binaryEntries: [String: Data] = [:]
-        for entry in entries {
-            if XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-                binaryEntries[entry.path] = entry.data
-            } else {
-                entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-            }
-        }
-
-        guard entryMap["mimetype"] == hwpxMimeType else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWPX(KS X 6101) 컨테이너의 mimetype이 'application/hwp+zip'이 아닙니다.")
-        }
-        guard let hpfXML = entryMap["Contents/content.hpf"],
-              let headerXML = entryMap["Contents/header.xml"],
-              let sectionXML = entryMap["Contents/section0.xml"] else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWPX 필수 스트림(content.hpf, header.xml, section0.xml)이 누락되었습니다.")
-        }
-
-        let title = XMLSanitizer.extractElements(named: "opf:title", in: hpfXML).first.map { XMLSanitizer.unescape($0.innerXML) } ?? "제목 없음"
-        let headElem = XMLSanitizer.extractElements(named: "hh:head", in: headerXML).first
-        let headAttrs = headElem?.attributes ?? [:]
-        let paperSize = PaperSizePreset(rawValue: headAttrs["paperSize"] ?? "") ?? .a4
-        let headerText = headAttrs["headerText"] ?? ""
-        let footerText = headAttrs["footerText"] ?? ""
-        let trackChanges = headAttrs["trackChanges"] == "1"
-
-        let tables = XMLSanitizer.extractElements(named: "hp:tbl", in: sectionXML).map { tblElem in
-            XMLDocumentModelMapper.parseTable(
-                attributes: tblElem.attributes,
-                innerXML: tblElem.innerXML,
-                rowTag: "hp:tr",
-                cellTag: "hp:tc",
-                cellTextTag: "hp:cellText"
-            )
-        }
-
-        let sectionWithoutTables = XMLSanitizer.stripElements(named: "hp:tbl", from: sectionXML)
-        let paragraphs = XMLSanitizer.extractElements(named: "hp:p", in: sectionWithoutTables).map { pElem in
-            XMLDocumentModelMapper.parseParagraph(
-                attributes: pElem.attributes,
-                innerXML: pElem.innerXML,
-                childTextTag: "hp:t"
-            )
-        }
-
-        let meta = XMLDocumentModelMapper.parseExtendedMetadata(
-            from: headerXML,
-            defaultPaperSize: paperSize,
-            binaryEntries: binaryEntries
-        )
-
-        return OfficeDocumentModel(
-            title: title,
-            format: .hwpx,
-            paperSize: paperSize,
-            headerText: headerText,
-            footerText: footerText,
-            paragraphs: paragraphs,
-            tables: tables,
-            trackChangesEnabled: trackChanges,
-            sections: meta.sections,
-            footnotes: meta.footnotes,
-            revisions: meta.revisions,
-            comments: meta.comments,
-            bookmarks: meta.bookmarks,
-            images: meta.images
-        )
     }
 }
