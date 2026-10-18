@@ -4,7 +4,390 @@ import EasyOfficeDesignSystem
 import Observation
 import SwiftUI
 
-/// Rich interactive editor pane for Sheet (.xlsx/.ods/.csv) with Formula Bar, multi-cell range selection, Auto-Fill handle (◢), interactive column/row drag resize, column auto-filter, live range aggregation status bar, and dynamic Pivot/Chart cards.
+public typealias SpreadsheetChartKind = SheetChartKind
+
+/// Normalized data point used by `SheetVectorChartCanvasView` across all 7 chart geometries.
+public struct SheetChartRenderPoint: Identifiable, Sendable, Equatable {
+  public let id: Int
+  public let label: String
+  public let value: Double
+  public let normalizedRatio: Double
+
+  public init(id: Int, label: String, value: Double, normalizedRatio: Double) {
+    self.id = id
+    self.label = label
+    self.value = value
+    self.normalizedRatio = normalizedRatio
+  }
+}
+
+/// Multi-geometry vector chart canvas supporting all 7 `SheetChartKind` cases (`.column`, `.stackedColumn`, `.bar`, `.line`, `.area`, `.pie`, `.scatter`).
+public struct SheetVectorChartCanvasView: View {
+  public let chartSpec: SheetChartModel
+  public let palette: WorkspaceThemePalette
+
+  public init(chartSpec: SheetChartModel, palette: WorkspaceThemePalette) {
+    self.chartSpec = chartSpec
+    self.palette = palette
+  }
+
+  private var primaryPoints: [SheetChartRenderPoint] {
+    let rawValues: [Double] = {
+      if let firstSeries = chartSpec.series.first, !firstSeries.values.isEmpty {
+        return firstSeries.values
+      }
+      return [120.0, 180.0, 145.0]
+    }()
+    let maxVal = max(1.0, rawValues.map { abs($0) }.max() ?? 1.0)
+    return rawValues.enumerated().map { idx, val in
+      let categoryLabel =
+        chartSpec.categories.indices.contains(idx)
+        ? chartSpec.categories[idx]
+        : "항목 \(idx + 1)"
+      let ratio = max(0.06, min(1.0, max(0.0, val) / maxVal))
+      return SheetChartRenderPoint(
+        id: idx,
+        label: categoryLabel,
+        value: val,
+        normalizedRatio: ratio
+      )
+    }
+  }
+
+  private var seriesPaletteColors: [Color] {
+    [
+      EasyOfficeDesignTokens.brand700.swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor,
+      EasyOfficeDesignTokens.brand500.swiftUIColor,
+      EasyOfficeDesignTokens.statusInfo.swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .hwp).swiftUIColor,
+    ]
+  }
+
+  public var body: some View {
+    let points = primaryPoints
+    let primaryAccent = EasyOfficeDesignTokens.brand700.swiftUIColor
+
+    VStack(alignment: .leading, spacing: 8) {
+      switch chartSpec.kind {
+      case .column:
+        HStack(alignment: .bottom, spacing: 14) {
+          ForEach(points) { pt in
+            VStack(spacing: 4) {
+              Text(String(format: "%.0f", pt.value))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+
+              RoundedRectangle(cornerRadius: 4)
+                .fill(primaryAccent)
+                .frame(width: 28, height: max(10.0, CGFloat(pt.normalizedRatio) * 86.0))
+
+              Text(pt.label)
+                .font(.system(size: 9))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+          }
+        }
+        .frame(height: 126, alignment: .bottom)
+        .padding(.horizontal, 6)
+
+      case .stackedColumn:
+        let catCount = max(1, points.count)
+        let maxStackSum: Double = {
+          var highest = 1.0
+          for cIdx in 0..<catCount {
+            let sumAtCat = chartSpec.series.reduce(0.0) { acc, s in
+              acc + (s.values.indices.contains(cIdx) ? max(0.0, s.values[cIdx]) : 0.0)
+            }
+            highest = max(highest, sumAtCat)
+          }
+          return highest
+        }()
+
+        HStack(alignment: .bottom, spacing: 14) {
+          ForEach(0..<catCount, id: \.self) { cIdx in
+            let totalVal = chartSpec.series.reduce(0.0) { acc, s in
+              acc + (s.values.indices.contains(cIdx) ? max(0.0, s.values[cIdx]) : 0.0)
+            }
+            let catLabel =
+              chartSpec.categories.indices.contains(cIdx)
+              ? chartSpec.categories[cIdx]
+              : points[cIdx].label
+
+            VStack(spacing: 3) {
+              Text(String(format: "%.0f", totalVal))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+
+              VStack(spacing: 1) {
+                ForEach(Array(chartSpec.series.enumerated()), id: \.offset) { sIdx, series in
+                  let segVal =
+                    series.values.indices.contains(cIdx) ? max(0.0, series.values[cIdx]) : 0.0
+                  let segRatio = max(0.05, min(1.0, segVal / maxStackSum))
+                  RoundedRectangle(cornerRadius: 2)
+                    .fill(seriesPaletteColors[sIdx % seriesPaletteColors.count])
+                    .frame(width: 30, height: max(6.0, CGFloat(segRatio) * 76.0))
+                }
+              }
+
+              Text(catLabel)
+                .font(.system(size: 9))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+          }
+        }
+        .frame(height: 126, alignment: .bottom)
+        .padding(.horizontal, 6)
+
+      case .bar:
+        VStack(alignment: .leading, spacing: 6) {
+          ForEach(points) { pt in
+            HStack(spacing: 8) {
+              Text(pt.label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+                .frame(width: 68, alignment: .leading)
+                .lineLimit(1)
+
+              RoundedRectangle(cornerRadius: 4)
+                .fill(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                .frame(width: max(14.0, CGFloat(pt.normalizedRatio) * 160.0), height: 14)
+
+              Text(String(format: "%.0f", pt.value))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+              Spacer(minLength: 0)
+            }
+          }
+        }
+        .padding(.vertical, 4)
+
+      case .line:
+        VStack(spacing: 4) {
+          Canvas { context, size in
+            guard !points.isEmpty else { return }
+            let plotW = max(1.0, size.width - 24.0)
+            let plotH = max(1.0, size.height - 16.0)
+            var linePath = Path()
+            var vertexLocations: [CGPoint] = []
+
+            for (idx, pt) in points.enumerated() {
+              let xRatio =
+                points.count == 1
+                ? 0.5
+                : Double(idx) / Double(max(1, points.count - 1))
+              let px = 12.0 + CGFloat(xRatio) * plotW
+              let py = 8.0 + (1.0 - CGFloat(pt.normalizedRatio)) * plotH
+              let loc = CGPoint(x: px, y: py)
+              vertexLocations.append(loc)
+              if idx == 0 {
+                linePath.move(to: loc)
+              } else {
+                linePath.addLine(to: loc)
+              }
+            }
+
+            context.stroke(
+              linePath,
+              with: .color(primaryAccent),
+              style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
+            )
+
+            for loc in vertexLocations {
+              let markerRect = CGRect(x: loc.x - 4.0, y: loc.y - 4.0, width: 8.0, height: 8.0)
+              context.fill(Path(ellipseIn: markerRect), with: .color(primaryAccent))
+            }
+          }
+          .frame(height: 98)
+
+          HStack {
+            ForEach(points) { pt in
+              Text("\(pt.label) (\(Int(pt.value)))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .frame(maxWidth: .infinity)
+                .lineLimit(1)
+            }
+          }
+        }
+
+      case .area:
+        VStack(spacing: 4) {
+          Canvas { context, size in
+            guard !points.isEmpty else { return }
+            let plotW = max(1.0, size.width - 24.0)
+            let plotH = max(1.0, size.height - 16.0)
+            let baselineY = 8.0 + plotH
+            var linePath = Path()
+            var areaPath = Path()
+            var vertexLocations: [CGPoint] = []
+
+            for (idx, pt) in points.enumerated() {
+              let xRatio =
+                points.count == 1
+                ? 0.5
+                : Double(idx) / Double(max(1, points.count - 1))
+              let px = 12.0 + CGFloat(xRatio) * plotW
+              let py = 8.0 + (1.0 - CGFloat(pt.normalizedRatio)) * plotH
+              let loc = CGPoint(x: px, y: py)
+              vertexLocations.append(loc)
+              if idx == 0 {
+                linePath.move(to: loc)
+                areaPath.move(to: CGPoint(x: px, y: baselineY))
+                areaPath.addLine(to: loc)
+              } else {
+                linePath.addLine(to: loc)
+                areaPath.addLine(to: loc)
+              }
+            }
+
+            if let lastLoc = vertexLocations.last {
+              areaPath.addLine(to: CGPoint(x: lastLoc.x, y: baselineY))
+              areaPath.closeSubpath()
+            }
+
+            context.fill(areaPath, with: .color(primaryAccent.opacity(0.22)))
+            context.stroke(
+              linePath,
+              with: .color(primaryAccent),
+              style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round)
+            )
+
+            for loc in vertexLocations {
+              let markerRect = CGRect(x: loc.x - 3.5, y: loc.y - 3.5, width: 7.0, height: 7.0)
+              context.fill(Path(ellipseIn: markerRect), with: .color(primaryAccent))
+            }
+          }
+          .frame(height: 98)
+
+          HStack {
+            ForEach(points) { pt in
+              Text("\(pt.label) (\(Int(pt.value)))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .frame(maxWidth: .infinity)
+                .lineLimit(1)
+            }
+          }
+        }
+
+      case .pie:
+        let totalSum = max(1.0, points.reduce(0.0) { $0 + max(0.0, $1.value) })
+        HStack(spacing: 16) {
+          Canvas { context, size in
+            let radius = min(size.width, size.height) * 0.44
+            let center = CGPoint(x: size.width / 2.0, y: size.height / 2.0)
+            var currentAngle = Angle.degrees(-90.0)
+
+            for (idx, pt) in points.enumerated() {
+              let fraction = max(0.0, pt.value) / totalSum
+              let sweepDegrees = fraction * 360.0
+              let startAngle = currentAngle
+              let endAngle = currentAngle + Angle.degrees(sweepDegrees)
+              currentAngle = endAngle
+
+              var path = Path()
+              path.move(to: center)
+              path.addArc(
+                center: center,
+                radius: radius,
+                startAngle: startAngle,
+                endAngle: endAngle,
+                clockwise: false
+              )
+              path.closeSubpath()
+
+              let sliceColor = seriesPaletteColors[idx % seriesPaletteColors.count]
+              context.fill(path, with: .color(sliceColor))
+              context.stroke(path, with: .color(palette.cardSurface.swiftUIColor), lineWidth: 1.5)
+            }
+          }
+          .frame(width: 112, height: 112)
+
+          VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(points.enumerated()), id: \.offset) { idx, pt in
+              let pct = Int(round((max(0.0, pt.value) / totalSum) * 100.0))
+              HStack(spacing: 6) {
+                Circle()
+                  .fill(seriesPaletteColors[idx % seriesPaletteColors.count])
+                  .frame(width: 8, height: 8)
+                Text("\(pt.label): \(Int(pt.value)) (\(pct)%)")
+                  .font(.system(size: 10, design: .monospaced))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                  .lineLimit(1)
+              }
+            }
+          }
+          Spacer(minLength: 0)
+        }
+        .frame(height: 118)
+
+      case .scatter:
+        VStack(spacing: 4) {
+          Canvas { context, size in
+            let leftPad: CGFloat = 18.0
+            let bottomPad: CGFloat = 14.0
+            let plotW = max(1.0, size.width - leftPad - 12.0)
+            let plotH = max(1.0, size.height - bottomPad - 10.0)
+
+            var axesPath = Path()
+            axesPath.move(to: CGPoint(x: leftPad, y: 6.0))
+            axesPath.addLine(to: CGPoint(x: leftPad, y: 6.0 + plotH))
+            axesPath.addLine(to: CGPoint(x: leftPad + plotW, y: 6.0 + plotH))
+            context.stroke(
+              axesPath,
+              with: .color(palette.border.swiftUIColor),
+              lineWidth: 1.2
+            )
+
+            for step in 1...2 {
+              let gy = 6.0 + plotH * (CGFloat(step) / 3.0)
+              var gridLine = Path()
+              gridLine.move(to: CGPoint(x: leftPad, y: gy))
+              gridLine.addLine(to: CGPoint(x: leftPad + plotW, y: gy))
+              context.stroke(
+                gridLine,
+                with: .color(palette.border.swiftUIColor.opacity(0.5)),
+                style: StrokeStyle(lineWidth: 0.8, dash: [3, 3])
+              )
+            }
+
+            for (idx, pt) in points.enumerated() {
+              let xRatio =
+                points.count == 1
+                ? 0.5
+                : Double(idx) / Double(max(1, points.count - 1))
+              let cx = leftPad + CGFloat(xRatio) * plotW
+              let cy = 6.0 + CGFloat(1.0 - pt.normalizedRatio) * plotH
+              let dotRect = CGRect(x: cx - 4.5, y: cy - 4.5, width: 9.0, height: 9.0)
+              let dotColor = seriesPaletteColors[idx % seriesPaletteColors.count]
+              context.fill(Path(ellipseIn: dotRect), with: .color(dotColor))
+            }
+          }
+          .frame(height: 98)
+
+          HStack {
+            ForEach(points) { pt in
+              Text("\(pt.label): \(Int(pt.value))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .frame(maxWidth: .infinity)
+                .lineLimit(1)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Rich interactive editor pane for Sheet (.xlsx/.ods/.csv) with Formula Bar, multi-cell range selection, Auto-Fill handle (◢), interactive column/row drag resize, column auto-filter, Named Ranges / Goal Seek bar, mini sparkline, live range aggregation status bar, and 7-kind vector charts.
 public struct SheetEditorDetailPaneView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Bindable var viewModel: WorkspaceViewModel
@@ -60,6 +443,13 @@ public struct SheetEditorDetailPaneView: View {
       using: evaluatedGrid
     )
     let rangeSummary = sheet.summarizeRange(activeRange, using: evaluatedGrid)
+    let sparklineValues: [Double] = {
+      let inSelection = sheet.sparklineNormalizedValues(for: activeRange, using: evaluatedGrid)
+      if inSelection.count >= 2 {
+        return inSelection
+      }
+      return sheet.sparklineNormalizedValues(for: detectedRange, using: evaluatedGrid)
+    }()
 
     let pivotSummary: PivotTableSummary = {
       let valueColOffset = max(0, detectedRange.end.column - detectedRange.start.column)
@@ -119,7 +509,7 @@ public struct SheetEditorDetailPaneView: View {
     }()
 
     VStack(alignment: .leading, spacing: 12) {
-      // Formula Bar with Active Range Badge & 77-function catalog badge
+      // Formula Bar with Active Range Badge & 92-function catalog badge
       HStack(spacing: 8) {
         Text(viewModel.selectedSheetCell)
           .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -190,7 +580,7 @@ public struct SheetEditorDetailPaneView: View {
       .background(palette.cardSurface.swiftUIColor)
       .clipShape(RoundedRectangle(cornerRadius: 6))
 
-      // Column Auto-Filter Bar & Quick Auto-Fill Controls
+      // Column Auto-Filter Bar, Row/Col Insert/Delete & Mini Sparkline Controls
       if isPrimaryPane {
         HStack(spacing: 8) {
           Label("열 자동 필터", systemImage: "line.3.horizontal.decrease.circle")
@@ -203,12 +593,12 @@ public struct SheetEditorDetailPaneView: View {
             }
           }
           .pickerStyle(.menu)
-          .frame(width: 90)
+          .frame(width: 86)
 
           TextField("열 값 필터...", text: $viewModel.sheetAutoFilterQuery)
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11))
-            .frame(width: 160)
+            .frame(width: 120)
 
           if !viewModel.sheetAutoFilterQuery.isEmpty {
             Button("필터 해제") {
@@ -219,6 +609,32 @@ public struct SheetEditorDetailPaneView: View {
           }
 
           Divider().frame(height: 16)
+
+          HStack(spacing: 4) {
+            Button("+행") {
+              viewModel.insertSheetRowAtSelection()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button("-행") {
+              viewModel.deleteSheetRowAtSelection()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button("+열") {
+              viewModel.insertSheetColumnAtSelection()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button("-열") {
+              viewModel.deleteSheetColumnAtSelection()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+          }
 
           Button {
             let targetNotation = defaultAutoFillTargetNotation(for: activeRange, maxRow: maxRow)
@@ -232,9 +648,110 @@ public struct SheetEditorDetailPaneView: View {
 
           Spacer()
 
+          if sparklineValues.count >= 2 {
+            HStack(spacing: 6) {
+              Text("스파크라인")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+              Canvas { context, size in
+                var path = Path()
+                for (idx, norm) in sparklineValues.enumerated() {
+                  let xRatio = Double(idx) / Double(max(1, sparklineValues.count - 1))
+                  let px = 3.0 + CGFloat(xRatio) * max(1.0, size.width - 6.0)
+                  let py = 3.0 + (1.0 - CGFloat(norm)) * max(1.0, size.height - 6.0)
+                  if idx == 0 {
+                    path.move(to: CGPoint(x: px, y: py))
+                  } else {
+                    path.addLine(to: CGPoint(x: px, y: py))
+                  }
+                }
+                context.stroke(
+                  path,
+                  with: .color(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor),
+                  style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+                )
+              }
+              .frame(width: 72, height: 20)
+              .background(palette.elevatedSurface.swiftUIColor)
+              .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+          }
+
           Text("표시 행: \(matchingZeroBasedRows.count)/\(maxRow)행")
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(palette.cardSurface.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        // Named Ranges & Goal Seek Bar
+        HStack(spacing: 8) {
+          Label("이름 정의 · 목표값 찾기", systemImage: "function")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+
+          TextField("이름 (예: 상반기매출)", text: $viewModel.namedRangeNameDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11))
+            .frame(width: 105)
+
+          TextField("대상 범위 (예: B2:C3)", text: $viewModel.namedRangeTargetDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .frame(width: 95)
+
+          Button("이름 정의") {
+            viewModel.defineNamedRangeOnActiveSheet()
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+
+          if !sheet.namedRanges.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+              HStack(spacing: 4) {
+                ForEach(sheet.namedRanges.keys.sorted(), id: \.self) { nameKey in
+                  let targetVal = sheet.namedRanges[nameKey] ?? ""
+                  Text("\(nameKey)=\(targetVal)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
+                    .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+              }
+            }
+            .frame(maxWidth: 180)
+          }
+
+          Divider().frame(height: 16)
+
+          TextField("수식 셀 (D2)", text: $viewModel.goalSeekTargetCellDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .frame(width: 68)
+
+          TextField("목표값", text: $viewModel.goalSeekTargetValueDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .frame(width: 68)
+
+          TextField("변수 셀 (B2)", text: $viewModel.goalSeekVariableCellDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .frame(width: 68)
+
+          Button("목표값 찾기") {
+            _ = viewModel.runGoalSeekOnActiveSheet()
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .controlSize(.small)
+
+          Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -351,7 +868,7 @@ public struct SheetEditorDetailPaneView: View {
       .background(palette.cardSurface.swiftUIColor)
       .clipShape(RoundedRectangle(cornerRadius: 6))
 
-      // Pivot Table Summary & Visual Vector Chart Preview Cards
+      // Pivot Table Summary & 7-Kind Vector Chart Preview Cards
       HStack(alignment: .top, spacing: 12) {
         VStack(alignment: .leading, spacing: 6) {
           Label(
@@ -384,40 +901,30 @@ public struct SheetEditorDetailPaneView: View {
         .background(palette.cardSurface.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 8))
 
-        let maxVal = max(1.0, chartModel.series.flatMap(\.values).max() ?? 1.0)
         VStack(alignment: .leading, spacing: 8) {
-          Label(
-            "\(chartModel.title) (\(chartModel.kind.rawValue.uppercased()))",
-            systemImage: "chart.bar.xaxis"
-          )
-          .font(.system(size: 11, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          HStack {
+            Label(
+              "\(chartModel.title) (\(chartModel.kind.rawValue.uppercased()))",
+              systemImage: "chart.bar.xaxis"
+            )
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
 
-          ForEach(chartModel.series) { series in
-            VStack(alignment: .leading, spacing: 4) {
-              Text(
-                "• \(series.name): \(series.values.map { String(format: "%.0f", $0) }.joined(separator: ", "))"
-              )
-              .font(.system(size: 11, design: .monospaced))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            Spacer()
 
-              HStack(spacing: 6) {
-                ForEach(Array(series.values.enumerated()), id: \.offset) { vIdx, val in
-                  let ratio = CGFloat(max(0.08, min(1.0, val / maxVal)))
-                  VStack(alignment: .leading, spacing: 2) {
-                    RoundedRectangle(cornerRadius: 3)
-                      .fill(EasyOfficeDesignTokens.brand600.swiftUIColor)
-                      .frame(width: 140 * ratio, height: 8)
-                    if chartModel.categories.indices.contains(vIdx) {
-                      Text("\(chartModel.categories[vIdx]): \(Int(val))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(palette.secondaryText.swiftUIColor)
-                    }
-                  }
+            if isPrimaryPane {
+              Picker("차트 유형", selection: $viewModel.selectedChartKind) {
+                ForEach(SheetChartKind.allCases, id: \.self) { kind in
+                  Text(kind.rawValue.uppercased()).tag(kind)
                 }
               }
+              .pickerStyle(.menu)
+              .controlSize(.small)
+              .frame(width: 140)
             }
           }
+
+          SheetVectorChartCanvasView(chartSpec: chartModel, palette: palette)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

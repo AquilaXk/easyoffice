@@ -39,6 +39,7 @@
 19. [PD-028: 슬라이드 8방향 리사이즈 핸들, 360도 회전 각도 정규화 및 전체화면 발표 스테이지(레이저 포인터·노트 HUD) 정책 (2026-10-18)](#19-pd-028-슬라이드-8방향-리사이즈-핸들-360도-회전-각도-정규화-및-전체화면-발표-스테이지레이저-포인터노트-hud-정책-2026-10-18)
 20. [PD-029: PDF 스튜디오 ISO 32000-1 벡터 잉크 획(m / l / S) 직렬화 및 자유곡선 서명·하이라이트 오버레이 정책 (2026-10-18)](#20-pd-029-pdf-스튜디오-iso-32000-1-벡터-잉크-획m--l--s-직렬화-및-자유곡선-서명하이라이트-오버레이-정책-2026-10-18)
 21. [PD-030 ~ PD-034: 인라인 형광펜/링크·표 구조 편집·이름 정의/목표값 찾기/92종 함수·PDF 비가역 리댁션 및 1D CRC32·따옴표 인식 XML 파서 정책 (2026-10-18)](#21-pd-030--pd-034-인라인-형광펜링크표-구조-편집이름-정의목표값-찾기92종-함수pdf-비가역-리댁션-및-1d-crc32따옴표-인식-xml-파서-정책-2026-10-18)
+22. [PD-032 & PD-035: 7종 벡터 차트·7종 슬라이드 도형/정렬 뷰·NSTextView 문단 스타일/인라인 속성 및 PDF 리댁션/AcroForm/탭 병합 UI 정책 (2026-10-18)](#22-pd-032--pd-035-7종-벡터-차트7종-슬라이드-도형정렬-뷰nstextview-문단-스타일인라인-속성-및-pdf-리댁션acroform탭-병합-ui-정책-2026-10-18)
 
 ---
 
@@ -408,5 +409,23 @@
 - **Verified by**: `Tests/EasyOfficeTests/EnterpriseParityAndOptimizationTests.swift`, `Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`
 - **Revisit when**: 정규식 패턴(주민등록번호·카드번호·이메일 자동 탐지) 일괄 리댁션 프리셋을 추가할 때.
 
+---
 
+### 22. PD-032 & PD-035: 7종 벡터 차트·7종 슬라이드 도형/정렬 뷰·NSTextView 문단 스타일/인라인 속성 및 PDF 리댁션/AcroForm/탭 병합 UI 정책 (2026-10-18)
 
+- **Status**: Implemented (`Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Decision**:
+  1. **PD-032 (7종 `SheetChartKind` 벡터 캔버스·스파크라인 및 7종 `SlideElementKind` 도형·슬라이드 정렬 뷰)**:
+     - `SheetVectorChartCanvasView`는 `SheetChartKind` 7종(`.column`, `.stackedColumn`, `.bar`, `.line`, `.area`, `.pie`, `.scatter`) 각각에 대해 별도의 `Canvas` 기하학(막대, 누적 막대, 수평 막대, 꺾은선+점, 반투명 영역+상단 윤곽선, 원형 호 섹터, 산점도 마커)을 렌더링하고, 조건부 서식 배지 카드에 `sparklineNormalizedValues(for:using:)` 기반 미니 스파크라인 `Canvas`를 함께 표시합니다.
+     - `SlideElementShapeContentView`는 편집 캔버스와 전체화면 슬라이드쇼 오버레이(`SlideshowFullScreenOverlayView`) 양쪽에서 `.ellipseShape`, `.arrowShape`, `.calloutShape`, `.tableGrid`, `.chartEmbed`, `.roundedRectangleShape`, `.rectangleShape`, `.textBox`를 각기 고유한 벡터 도형/격자/미니 차트로 렌더링하며, `isSlideSorterViewEnabled` 토글 시 반응형 `LazyVGrid` 슬라이드 정렬 뷰(추가·복제·순서 이동·삭제)로 전환합니다.
+  2. **PD-035 (문서 NSTextView 문단 스타일/인라인 속성·표/변경추적/미주 UI 및 PDF 리댁션/AcroForm/탭 병합 바인딩)**:
+     - `SelectableParagraphTextView.buildAttributedString(from:)`는 `NSMutableParagraphStyle`(`lineHeightMultiple`, `firstLineHeadIndent`, `headIndent`, `alignment`)과 런별 `.strikethroughStyle`, `.backgroundColor`, `.link`를 적용하고, 비편집 문단 행(`paragraphRow`)에서도 `AttributedString`으로 동일한 인라인 서식을 표시합니다.
+     - 문서 편집기에서 머리글/바닥글을 `resolvePageTokens(in:pageNumber:totalPages:)`로 치환해 표시하고, 표 카드에 `+행`/`-행`/`+열`/`-열` 및 병합 배지를, 변경 추적 카드에 개별 `"승인"`/`"반려"` 버튼을, 각주와 미주 카드를 분리 배치합니다.
+     - 시트 편집기 및 인스펙터에서 다중 셀 병합/해제(`mergeSelectedSheetRange`/`unmergeSelectedSheetRange`), 행/열 삽입·삭제, 이름 정의(`defineSheetNamedRange`), 목표값 찾기(`runGoalSeekOnActiveSheet`)를 직접 실행할 수 있도록 연결합니다.
+     - PDF 스튜디오 툴바 및 인스펙터에 비가역 리댁션(`redactTextInActivePDF`), 페이지 위/아래 순서 이동(`moveActivePDFPage`), 열린 타 PDF 탭 병합(`mergeActivePDFWithTab`), 대화형 AcroForm 양식 필드 추가·편집(`setActivePDFFormFieldValue`) UI를 바인딩합니다.
+- **Why**: 코어 엔진(`PD-030`~`PD-034`)에 구현된 엔터프라이즈 문서·시트·슬라이드·PDF 도메인 모델과 네이티브 데스크톱 UI/인스펙터/리본/캔버스 사이의 표시·조작 간극을 완전히 해소하기 위함입니다.
+- **Trade-offs**: 7종 벡터 차트와 7종 슬라이드 도형을 네이티브 SwiftUI `Canvas`/`Path`로 직접 그리므로 뷰 코드 분량이 증가하지만, 외부 차트 라이브러리에 의존하지 않고도 즉각적인 60fps 렌더링과 슬라이드쇼/편집기 간 100% 시각적 일관성을 확보합니다.
+- **Alternatives rejected**:
+  - 모든 차트 종류를 단일 세로 막대 뷰로만 표시하거나 슬라이드 도형을 모두 사각형 테두리로만 그리는 방식: 도메인 모델의 `kind` 속성이 화면에 반영되지 않아 시각적 피드백이 누락되므로 기각.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift`
+- **Revisit when**: 3D 원근 차트 또는 복합 이중 축(Dual-Axis Combo Chart) 요구사항이 추가될 때.

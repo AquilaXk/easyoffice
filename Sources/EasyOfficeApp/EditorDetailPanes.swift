@@ -17,6 +17,10 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
     public var isUpdatingProgrammatically: Bool = false
     public var lastRenderedRuns: [DocumentTextRun] = []
     public var lastParagraphID: UUID?
+    public var lastAlignment: TextAlignmentMode?
+    public var lastLineSpacingPercent: Double = 0
+    public var lastFirstLineIndentPt: Double = 0
+    public var lastLeftIndentPt: Double = 0
 
     public init(parent: SelectableParagraphTextView) {
       self.parent = parent
@@ -81,9 +85,13 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
     textView.delegate = context.coordinator
 
     context.coordinator.isUpdatingProgrammatically = true
-    textView.textStorage?.setAttributedString(buildAttributedString())
+    textView.textStorage?.setAttributedString(buildAttributedString(from: paragraph))
     context.coordinator.lastRenderedRuns = paragraph.effectiveRuns
     context.coordinator.lastParagraphID = paragraph.id
+    context.coordinator.lastAlignment = paragraph.alignment
+    context.coordinator.lastLineSpacingPercent = paragraph.lineSpacingPercent
+    context.coordinator.lastFirstLineIndentPt = paragraph.firstLineIndentPt
+    context.coordinator.lastLeftIndentPt = paragraph.leftIndentPt
     context.coordinator.isUpdatingProgrammatically = false
 
     scrollView.documentView = textView
@@ -94,23 +102,38 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
     context.coordinator.parent = self
     guard let textView = nsView.documentView as? NSTextView else { return }
     let currentRuns = paragraph.effectiveRuns
+    let paragraphStyleChanged =
+      context.coordinator.lastAlignment != paragraph.alignment
+      || context.coordinator.lastLineSpacingPercent != paragraph.lineSpacingPercent
+      || context.coordinator.lastFirstLineIndentPt != paragraph.firstLineIndentPt
+      || context.coordinator.lastLeftIndentPt != paragraph.leftIndentPt
+
     if context.coordinator.lastParagraphID != paragraph.id
-      || context.coordinator.lastRenderedRuns != currentRuns || textView.string != paragraph.text
+      || context.coordinator.lastRenderedRuns != currentRuns
+      || paragraphStyleChanged
+      || textView.string != paragraph.text
     {
       let previousSelection = textView.selectedRange()
       context.coordinator.isUpdatingProgrammatically = true
-      textView.textStorage?.setAttributedString(buildAttributedString())
+      textView.textStorage?.setAttributedString(buildAttributedString(from: paragraph))
       let utf16Len = (textView.string as NSString).length
       if previousSelection.location + previousSelection.length <= utf16Len {
         textView.setSelectedRange(previousSelection)
       }
       context.coordinator.lastRenderedRuns = currentRuns
       context.coordinator.lastParagraphID = paragraph.id
+      context.coordinator.lastAlignment = paragraph.alignment
+      context.coordinator.lastLineSpacingPercent = paragraph.lineSpacingPercent
+      context.coordinator.lastFirstLineIndentPt = paragraph.firstLineIndentPt
+      context.coordinator.lastLeftIndentPt = paragraph.leftIndentPt
       context.coordinator.isUpdatingProgrammatically = false
     }
   }
 
-  private func buildAttributedString() -> NSAttributedString {
+  public func buildAttributedString(from targetParagraph: ParagraphBlock? = nil)
+    -> NSAttributedString
+  {
+    let para = targetParagraph ?? paragraph
     let result = NSMutableAttributedString()
     let defaultColor = NSColor(
       srgbRed: CGFloat(palette.primaryText.red) / 255.0,
@@ -119,9 +142,31 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       alpha: 1.0
     )
 
-    for run in paragraph.effectiveRuns {
-      let size = CGFloat(run.fontSizePt ?? paragraph.fontSizePt)
-      var font = NSFont.systemFont(ofSize: size, weight: run.isBold ? .bold : .regular)
+    let paraStyle = NSMutableParagraphStyle()
+    let lineSpacingMultiple = max(0.8, para.lineSpacingPercent / 100.0)
+    paraStyle.lineHeightMultiple = CGFloat(lineSpacingMultiple)
+    paraStyle.firstLineHeadIndent = CGFloat(max(0.0, para.firstLineIndentPt))
+    paraStyle.headIndent = CGFloat(max(0.0, para.leftIndentPt))
+    switch para.alignment {
+    case .leading:
+      paraStyle.alignment = .left
+    case .center:
+      paraStyle.alignment = .center
+    case .trailing:
+      paraStyle.alignment = .right
+    case .justified:
+      paraStyle.alignment = .justified
+    }
+
+    for run in para.effectiveRuns {
+      let fontSize = CGFloat(run.fontSizePt ?? para.fontSizePt)
+      let fontFamily = run.fontName ?? para.fontName
+      var font =
+        NSFont(name: fontFamily, size: fontSize)
+        ?? NSFont.systemFont(ofSize: fontSize, weight: run.isBold ? .bold : .regular)
+      if run.isBold {
+        font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+      }
       if run.isItalic {
         font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
       }
@@ -129,8 +174,19 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       var attrs: [NSAttributedString.Key: Any] = [
         .font: font,
         .foregroundColor: fgColor,
+        .paragraphStyle: paraStyle,
       ]
       if run.isUnderlined {
+        attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+      }
+      if run.isStrikethrough {
+        attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+      }
+      if let bgHex = run.backgroundHex, let bgColor = nsColorFromHex(bgHex) {
+        attrs[.backgroundColor] = bgColor
+      }
+      if let link = run.linkURL, !link.isEmpty {
+        attrs[.link] = link
         attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
       }
       result.append(NSAttributedString(string: run.text, attributes: attrs))
@@ -168,11 +224,35 @@ public struct DocumentEditorDetailPaneView: View {
     return nil
   }
 
+  private func swiftUIAlignment(for alignment: TextAlignmentMode) -> Alignment {
+    switch alignment {
+    case .leading, .justified:
+      return .leading
+    case .center:
+      return .center
+    case .trailing:
+      return .trailing
+    }
+  }
+
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
     let tocEntries = document.generateTableOfContents()
     let mailMergePreviewLine = firstMailMergePreviewLine()
     let colCount = document.sections.first?.columnCount ?? 1
+    let totalPages = max(1, document.sections.count)
+    let resolvedHeaderText = OfficeDocumentModel.resolvePageTokens(
+      in: document.headerText,
+      pageNumber: 1,
+      totalPages: totalPages
+    )
+    let resolvedFooterText = OfficeDocumentModel.resolvePageTokens(
+      in: document.footerText,
+      pageNumber: 1,
+      totalPages: totalPages
+    )
+    let footnoteItems = document.footnotes.filter { !$0.isEndnote }
+    let endnoteItems = document.footnotes.filter { $0.isEndnote }
     let watermarkText = (document.watermarkText ?? "").trimmingCharacters(
       in: .whitespacesAndNewlines)
 
@@ -203,7 +283,7 @@ public struct DocumentEditorDetailPaneView: View {
           TextField("강조 구절 (선택)", text: $viewModel.inlineRunTargetPhrase)
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11))
-            .frame(width: 115)
+            .frame(width: 110)
 
           Button {
             viewModel.applyInlineRunFormattingToActiveParagraph(
@@ -213,6 +293,42 @@ public struct DocumentEditorDetailPaneView: View {
             )
           } label: {
             Label("인라인 런 강조", systemImage: "paintbrush.pointed")
+              .font(.system(size: 11, weight: .medium))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+
+          Button {
+            viewModel.toggleHighlightOnActiveParagraph()
+          } label: {
+            Label("형광펜", systemImage: "highlighter")
+              .font(.system(size: 11, weight: .medium))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+
+          Button {
+            viewModel.toggleStrikethroughOnActiveParagraph()
+          } label: {
+            Label("취소선", systemImage: "strikethrough")
+              .font(.system(size: 11, weight: .medium))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+
+          Button {
+            viewModel.insertHyperlinkIntoActiveParagraph()
+          } label: {
+            Label("링크 삽입", systemImage: "link.badge.plus")
+              .font(.system(size: 11, weight: .medium))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+
+          Button {
+            viewModel.insertEndnoteIntoActiveDocument()
+          } label: {
+            Label("미주 추가", systemImage: "text.Append")
               .font(.system(size: 11, weight: .medium))
           }
           .buttonStyle(.bordered)
@@ -239,7 +355,7 @@ public struct DocumentEditorDetailPaneView: View {
           TextField("추가할 문단 내용을 입력하세요...", text: $viewModel.paragraphDraftText)
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11))
-            .frame(width: 175)
+            .frame(width: 155)
 
           Button {
             let trimmed = viewModel.paragraphDraftText.trimmingCharacters(
@@ -262,17 +378,17 @@ public struct DocumentEditorDetailPaneView: View {
         }
       }
 
-      // Equation & Watermark DTP Bar
+      // Equation, Watermark, Link & Paragraph Indent DTP Bar
       if isPrimaryPane {
         HStack(spacing: 8) {
-          Label("수식·워터마크 조판", systemImage: "function")
+          Label("수식·워터마크·들여쓰기", systemImage: "function")
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
 
           TextField("LaTeX 수식 입력 (예: \\sum_{i=1}^{n} x_i)", text: $viewModel.equationDraftText)
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11, design: .monospaced))
-            .frame(maxWidth: 260)
+            .frame(maxWidth: 210)
 
           Button {
             viewModel.insertEquationIntoActiveDocument()
@@ -285,10 +401,29 @@ public struct DocumentEditorDetailPaneView: View {
 
           Divider().frame(height: 16)
 
-          TextField("워터마크 문구 (예: 대외비 · 무단 배포 금지)", text: $viewModel.watermarkDraftText)
+          TextField("링크 URL (https://...)", text: $viewModel.inlineLinkURLDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .frame(maxWidth: 165)
+
+          Button("들여쓰기 +") {
+            viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: 6.0, leftIndentDeltaPt: 12.0)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+
+          Button("내어쓰기 -") {
+            viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: -6.0, leftIndentDeltaPt: -12.0)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+
+          Divider().frame(height: 16)
+
+          TextField("워터마크 문구", text: $viewModel.watermarkDraftText)
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11))
-            .frame(maxWidth: 220)
+            .frame(maxWidth: 170)
 
           Button {
             if !watermarkText.isEmpty
@@ -318,7 +453,7 @@ public struct DocumentEditorDetailPaneView: View {
       ZStack {
         VStack(alignment: .leading, spacing: 14) {
           HStack {
-            Text(document.headerText)
+            Text(resolvedHeaderText)
               .font(.system(size: 11))
               .foregroundStyle(palette.secondaryText.swiftUIColor)
             Spacer()
@@ -442,18 +577,50 @@ public struct DocumentEditorDetailPaneView: View {
             }
           }
 
-          // Editable Tables + Conditional Inline Table Formula Badge
-          ForEach(document.tables) { table in
-            documentTableView(for: table, palette: palette)
+          // Editable Tables + Row/Column Structure Controls + Conditional Inline Table Formula Badge
+          ForEach(Array(document.tables.enumerated()), id: \.element.id) { tIdx, table in
+            documentTableView(for: table, tableIndex: tIdx, palette: palette)
           }
 
-          // Footnotes & Mail Merge Preview Footer
-          if !document.footnotes.isEmpty {
+          // Separate Footnotes & Endnotes Cards
+          if !footnoteItems.isEmpty || !endnoteItems.isEmpty {
             Divider()
-            ForEach(document.footnotes) { note in
-              Text("각주 \(note.number)) \(note.text)")
-                .font(.system(size: 10))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            HStack(alignment: .top, spacing: 12) {
+              if !footnoteItems.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                  Label(
+                    "각주 (Footnotes · \(footnoteItems.count)건)", systemImage: "character.textbox"
+                  )
+                  .font(.system(size: 10, weight: .bold))
+                  .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+                  ForEach(footnoteItems) { note in
+                    Text("각주 \(note.number)) \(note.text)")
+                      .font(.system(size: 10))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+                  }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.elevatedSurface.swiftUIColor)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+              }
+
+              if !endnoteItems.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                  Label("미주 (Endnotes · \(endnoteItems.count)건)", systemImage: "text.quote")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  ForEach(endnoteItems) { note in
+                    Text("미주 \(note.number)) \(note.text)")
+                      .font(.system(size: 10))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+                  }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.elevatedSurface.swiftUIColor)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+              }
             }
           }
 
@@ -475,7 +642,7 @@ public struct DocumentEditorDetailPaneView: View {
           Divider()
           HStack {
             Spacer()
-            Text(document.footerText)
+            Text(resolvedFooterText)
               .font(.system(size: 11))
               .foregroundStyle(palette.secondaryText.swiftUIColor)
             Spacer()
@@ -498,7 +665,7 @@ public struct DocumentEditorDetailPaneView: View {
         }
       }
 
-      // Track Changes & Review Comments Strip
+      // Track Changes (with Accept / Reject actions) & Review Comments Strip
       if !document.revisions.isEmpty || !document.comments.isEmpty {
         HStack(alignment: .top, spacing: 12) {
           if !document.revisions.isEmpty {
@@ -507,9 +674,28 @@ public struct DocumentEditorDetailPaneView: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
               ForEach(document.revisions) { rev in
-                Text("[\(rev.author)] \(rev.originalText) → \(rev.proposedText)")
-                  .font(.system(size: 11))
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
+                HStack(spacing: 8) {
+                  Text("[\(rev.author)] \(rev.originalText) → \(rev.proposedText)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    .lineLimit(2)
+                  Spacer()
+                  if isPrimaryPane {
+                    Button("승인") {
+                      viewModel.acceptDocumentRevision(id: rev.id)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+                    .controlSize(.mini)
+
+                    Button("반려") {
+                      viewModel.rejectDocumentRevision(id: rev.id)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                    .controlSize(.mini)
+                  }
+                }
               }
             }
             .padding(12)
@@ -539,23 +725,80 @@ public struct DocumentEditorDetailPaneView: View {
     }
   }
 
+  private func buildRichParagraphAttributedText(
+    for paragraph: ParagraphBlock,
+    palette: WorkspaceThemePalette
+  ) -> AttributedString {
+    var combined = AttributedString()
+    for run in paragraph.effectiveRuns {
+      let hasLink = !(run.linkURL ?? "").isEmpty
+      let displaySegment = hasLink ? "\(run.text) [🔗]" : run.text
+      var segment = AttributedString(displaySegment)
+      let fontSize = CGFloat(run.fontSizePt ?? paragraph.fontSizePt)
+      var font = Font.system(size: fontSize, weight: run.isBold ? .bold : .regular)
+      if run.isItalic {
+        font = font.italic()
+      }
+      segment.font = font
+      segment.foregroundColor =
+        resolveOptionalHexColor(run.foregroundHex) ?? palette.primaryText.swiftUIColor
+      if let bgHex = run.backgroundHex, let bgColor = resolveOptionalHexColor(bgHex) {
+        segment.backgroundColor = bgColor
+      }
+      if run.isUnderlined || hasLink {
+        segment.underlineStyle = .single
+      }
+      if run.isStrikethrough {
+        segment.strikethroughStyle = .single
+      }
+      combined.append(segment)
+    }
+    return combined
+  }
+
+  @ViewBuilder
+  private func paragraphRow(for paragraph: ParagraphBlock, palette: WorkspaceThemePalette)
+    -> some View
+  {
+    let lineSpacingMultiple = max(0.8, paragraph.lineSpacingPercent / 100.0)
+    Text(buildRichParagraphAttributedText(for: paragraph, palette: palette))
+      .lineSpacing(CGFloat(max(0.0, (lineSpacingMultiple - 1.0) * paragraph.fontSizePt)))
+      .padding(.leading, CGFloat(max(0.0, paragraph.leftIndentPt)))
+      .frame(maxWidth: .infinity, alignment: swiftUIAlignment(for: paragraph.alignment))
+  }
+
   @ViewBuilder
   private func paragraphBlockView(for paragraph: ParagraphBlock, palette: WorkspaceThemePalette)
     -> some View
   {
     let isSelectedParagraph = viewModel.selectedParagraphID == paragraph.id
+    let hasRichRuns =
+      paragraph.runs.count > 1
+      || paragraph.runs.contains {
+        $0.isStrikethrough || $0.backgroundHex != nil || !($0.linkURL ?? "").isEmpty
+      }
+
     VStack(alignment: .leading, spacing: 6) {
       HStack(spacing: 6) {
         Text(paragraph.style.rawValue)
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-        if paragraph.isBold { Text("B").font(.system(size: 9, weight: .bold)) }
-        if paragraph.isItalic { Text("I").font(.system(size: 9, weight: .semibold)).italic() }
+        if paragraph.isBold {
+          Text("B").font(.system(size: 9, weight: .bold))
+        }
+        if paragraph.isItalic {
+          Text("I").font(.system(size: 9, weight: .semibold)).italic()
+        }
         if paragraph.isUnderlined {
           Text("U").font(.system(size: 9, weight: .semibold)).underline()
         }
-        if paragraph.runs.count > 1 {
-          Text("인라인 런 \(paragraph.runs.count)구간")
+        if paragraph.leftIndentPt > 0 || paragraph.firstLineIndentPt > 0 {
+          Text("들여쓰기 \(Int(paragraph.leftIndentPt))pt")
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+        }
+        if hasRichRuns {
+          Text("인라인 런 \(paragraph.effectiveRuns.count)구간")
             .font(.system(size: 9, weight: .semibold))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
@@ -582,52 +825,38 @@ public struct DocumentEditorDetailPaneView: View {
             paragraph: paragraph,
             palette: palette
           )
-          .frame(minHeight: 34, maxHeight: 72)
+          .frame(minHeight: 36, maxHeight: 76)
         } else {
-          TextField(
-            "문단 내용",
-            text: Binding(
-              get: { paragraph.text },
-              set: { newValue in
-                viewModel.updateSelectedParagraphSelection(
-                  paragraphID: paragraph.id, utf16Range: nil)
-                viewModel.updateParagraphText(paragraphID: paragraph.id, newText: newValue)
-              }
-            ),
-            axis: .vertical
-          )
-          .textFieldStyle(.plain)
-          .font(.system(size: paragraph.fontSizePt, weight: paragraph.isBold ? .bold : .regular))
-          .italic(paragraph.isItalic)
-          .underline(paragraph.isUnderlined)
-          .foregroundStyle(palette.primaryText.swiftUIColor)
-          .onTapGesture {
-            viewModel.updateSelectedParagraphSelection(paragraphID: paragraph.id, utf16Range: nil)
-          }
+          paragraphRow(for: paragraph, palette: palette)
+            .contentShape(Rectangle())
+            .onTapGesture {
+              viewModel.updateSelectedParagraphSelection(paragraphID: paragraph.id, utf16Range: nil)
+            }
         }
       } else {
-        Text(paragraph.text)
-          .font(.system(size: paragraph.fontSizePt, weight: paragraph.isBold ? .bold : .regular))
-          .italic(paragraph.isItalic)
-          .underline(paragraph.isUnderlined)
-          .foregroundStyle(palette.primaryText.swiftUIColor)
+        paragraphRow(for: paragraph, palette: palette)
       }
 
-      if paragraph.runs.count > 1 {
+      if hasRichRuns {
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 4) {
-            ForEach(paragraph.runs) { run in
+            ForEach(paragraph.effectiveRuns) { run in
               let runColor =
                 resolveOptionalHexColor(run.foregroundHex)
                 ?? palette.primaryText.swiftUIColor
-              Text(run.text)
+              let bgColor =
+                resolveOptionalHexColor(run.backgroundHex)
+                ?? palette.elevatedSurface.swiftUIColor
+              let hasLink = !(run.linkURL ?? "").isEmpty
+              Text(hasLink ? "\(run.text) [🔗]" : run.text)
                 .font(.system(size: run.fontSizePt ?? 11.0, weight: run.isBold ? .bold : .regular))
                 .italic(run.isItalic)
-                .underline(run.isUnderlined)
+                .underline(run.isUnderlined || hasLink)
+                .strikethrough(run.isStrikethrough)
                 .foregroundStyle(runColor)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(palette.elevatedSurface.swiftUIColor)
+                .background(bgColor)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             }
           }
@@ -742,9 +971,11 @@ public struct DocumentEditorDetailPaneView: View {
   }
 
   @ViewBuilder
-  private func documentTableView(for table: DocumentTableBlock, palette: WorkspaceThemePalette)
-    -> some View
-  {
+  private func documentTableView(
+    for table: DocumentTableBlock,
+    tableIndex: Int,
+    palette: WorkspaceThemePalette
+  ) -> some View {
     let hasExplicitFormulaCell = table.rows.flatMap { $0 }.contains {
       $0.trimmingCharacters(in: .whitespaces).hasPrefix("=")
     }
@@ -752,11 +983,53 @@ public struct DocumentEditorDetailPaneView: View {
     let sumAbove = table.evaluateTableFormula("=SUM(ABOVE)", atRow: table.rowCount, column: lastCol)
 
     VStack(alignment: .leading, spacing: 6) {
-      HStack {
+      HStack(spacing: 8) {
         Text("\(table.caption) (\(table.borderStyle.rawValue))")
           .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(palette.primaryText.swiftUIColor)
+
+        if !table.cellSpans.isEmpty {
+          Text("병합 셀 \(table.cellSpans.count)구간")
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+
         Spacer()
+
+        if isPrimaryPane {
+          HStack(spacing: 4) {
+            Button("+행") {
+              viewModel.insertRowInDocumentTable(tableIndex: tableIndex)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("-행") {
+              viewModel.deleteRowInDocumentTable(tableIndex: tableIndex)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(table.rowCount <= 1)
+
+            Button("+열") {
+              viewModel.insertColumnInDocumentTable(tableIndex: tableIndex)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("-열") {
+              viewModel.deleteColumnInDocumentTable(tableIndex: tableIndex)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(table.columnCount <= 1)
+          }
+        }
+
         if let sumAbove, hasExplicitFormulaCell || sumAbove > 0 {
           Text("표 수식 =SUM(ABOVE): \(Int(sumAbove))")
             .font(.system(size: 10, weight: .bold, design: .monospaced))
@@ -837,4 +1110,8 @@ func resolveOptionalNSColor(_ hex: String?) -> NSColor? {
   let g = CGFloat((rgb >> 8) & 0xFF) / 255.0
   let b = CGFloat(rgb & 0xFF) / 255.0
   return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
+}
+
+func nsColorFromHex(_ hex: String) -> NSColor? {
+  resolveOptionalNSColor(hex)
 }

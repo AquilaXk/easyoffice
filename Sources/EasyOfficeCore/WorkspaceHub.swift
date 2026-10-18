@@ -74,6 +74,17 @@ public final class WorkspaceViewModel {
   public var reviewStatsRefreshCount: Int = 0
   public var lastErrorMessage: String? = nil
   public var lastExecutedCommandSummary: String? = nil
+  public var inlineHighlightColorHex: String = "#FFF59D"
+  public var inlineLinkURLDraft: String = "https://easyoffice.local/reference"
+  public var namedRangeNameDraft: String = "분기매출"
+  public var namedRangeTargetDraft: String = "B2:B4"
+  public var goalSeekTargetCellDraft: String = "B4"
+  public var goalSeekTargetValueDraft: String = "500"
+  public var goalSeekVariableCellDraft: String = "B2"
+  public var isSlideSorterViewEnabled: Bool = false
+  public var pdfRedactionPhraseDraft: String = "기밀"
+  public var pdfFormFieldNameDraft: String = "승인자"
+  public var pdfFormFieldValueDraft: String = "홍길동"
 
   internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
   internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
@@ -580,6 +591,11 @@ public final class WorkspaceViewModel {
     let resolvedRange: String
     if let targetRange, !targetRange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       resolvedRange = targetRange.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    } else if selectedSheetRange.contains(":"),
+      let range = try? CellRange(notation: selectedSheetRange),
+      range.start != range.end
+    {
+      resolvedRange = range.a1Range
     } else if let addr = try? CellAddress(a1Notation: selectedSheetCell),
       let nextAddr = try? CellAddress(
         column: min(CellAddress.maxZeroBasedColumn, addr.column + 1), row: addr.row)
@@ -916,19 +932,32 @@ public final class WorkspaceViewModel {
   }
 
   public func applyInlineRunFormattingToActiveParagraph(
-    isBold: Bool? = nil, isItalic: Bool? = nil, isUnderlined: Bool? = nil, textHex: String? = nil,
-    foregroundHex: String? = nil
+    isBold: Bool? = nil,
+    isItalic: Bool? = nil,
+    isUnderlined: Bool? = nil,
+    isStrikethrough: Bool? = nil,
+    fontSizePt: Double? = nil,
+    foregroundHex: String? = nil,
+    backgroundHex: String? = nil,
+    linkURL: String? = nil
   ) {
     guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload, !doc.paragraphs.isEmpty
     else { return }
     recordUndoSnapshot(for: activeTabID)
     let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
-    let resolvedColor = foregroundHex ?? textHex
     if let utf16Range = selectedParagraphUTF16Range, !utf16Range.isEmpty {
       doc.paragraphs[pIdx].applyRunFormatting(
-        utf16Range: utf16Range, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined,
-        foregroundHex: resolvedColor)
+        utf16Range: utf16Range,
+        isBold: isBold,
+        isItalic: isItalic,
+        isUnderlined: isUnderlined,
+        isStrikethrough: isStrikethrough,
+        fontSizePt: fontSizePt,
+        foregroundHex: foregroundHex,
+        backgroundHex: backgroundHex,
+        linkURL: linkURL
+      )
       openTabs[idx].payload = .document(doc)
       openTabs[idx].isModified = true
       lastExecutedCommandSummary =
@@ -937,16 +966,25 @@ public final class WorkspaceViewModel {
     }
     let baseText = doc.paragraphs[pIdx].text
     let trimmedPhrase = inlineRunTargetPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
-    let fbBold = isBold ?? true
-    let fbItalic = isItalic ?? false
-    let fbUnder = isUnderlined ?? false
-    let fbColor = resolvedColor ?? "#5C6BC0"
+    let hasExplicitExtendedFormatting =
+      (isStrikethrough != nil || fontSizePt != nil || backgroundHex != nil || linkURL != nil)
+    let fbBold: Bool? = isBold ?? (hasExplicitExtendedFormatting ? nil : true)
+    let fbItalic: Bool? = isItalic ?? (hasExplicitExtendedFormatting ? nil : false)
+    let fbUnder: Bool? = isUnderlined ?? (hasExplicitExtendedFormatting ? nil : false)
+    let fbColor: String? = foregroundHex ?? (hasExplicitExtendedFormatting ? nil : "#5C6BC0")
     if !trimmedPhrase.isEmpty, let matchRange = baseText.range(of: trimmedPhrase) {
       doc.paragraphs[pIdx].applyRunFormatting(
-        range: matchRange, isBold: fbBold, isItalic: fbItalic, isUnderlined: fbUnder,
-        foregroundHex: fbColor)
+        range: matchRange,
+        isBold: fbBold,
+        isItalic: fbItalic,
+        isUnderlined: fbUnder,
+        isStrikethrough: isStrikethrough,
+        fontSizePt: fontSizePt,
+        foregroundHex: fbColor,
+        backgroundHex: backgroundHex,
+        linkURL: linkURL
+      )
     } else {
-      doc.paragraphs[pIdx].runs = []
       let firstWordRange: Range<String.Index> = {
         if let spaceIdx = baseText.firstIndex(of: " "), spaceIdx < baseText.endIndex {
           return baseText.startIndex..<baseText.index(after: spaceIdx)
@@ -954,12 +992,34 @@ public final class WorkspaceViewModel {
         return baseText.startIndex..<baseText.endIndex
       }()
       doc.paragraphs[pIdx].applyRunFormatting(
-        range: firstWordRange, isBold: fbBold, isItalic: fbItalic, isUnderlined: fbUnder,
-        foregroundHex: fbColor)
+        range: firstWordRange,
+        isBold: fbBold,
+        isItalic: fbItalic,
+        isUnderlined: fbUnder,
+        isStrikethrough: isStrikethrough,
+        fontSizePt: fontSizePt,
+        foregroundHex: fbColor,
+        backgroundHex: backgroundHex,
+        linkURL: linkURL
+      )
     }
     openTabs[idx].payload = .document(doc)
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = "인라인 텍스트 런 서식 적용 완료"
+  }
+
+  public func applyInlineRunFormattingToActiveParagraph(
+    isBold: Bool? = nil,
+    isItalic: Bool? = nil,
+    isUnderlined: Bool? = nil,
+    textHex: String
+  ) {
+    applyInlineRunFormattingToActiveParagraph(
+      isBold: isBold,
+      isItalic: isItalic,
+      isUnderlined: isUnderlined,
+      foregroundHex: textHex
+    )
   }
 
   public func selectSlideElement(id: UUID?) {

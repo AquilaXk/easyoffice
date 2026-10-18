@@ -213,6 +213,71 @@ struct RightContextInspectorView: View {
           .buttonStyle(.bordered)
           .controlSize(.small)
       }
+
+      Text("인라인 강조 · 취소선 · 하이퍼링크")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 6) {
+        Button("형광펜 강조") { viewModel.toggleHighlightOnActiveParagraph() }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+        Button("취소선") { viewModel.toggleStrikethroughOnActiveParagraph() }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+      }
+      HStack(spacing: 6) {
+        TextField("하이퍼링크 URL", text: $viewModel.inlineLinkURLDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+        Button("링크 삽입") { viewModel.insertHyperlinkIntoActiveParagraph() }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+      }
+
+      Text("문단 들여쓰기 (첫 줄 / 좌측)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 6) {
+        Button("첫 줄 +10pt") {
+          viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: 10, leftIndentDeltaPt: 0)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        Button("좌측 +10pt") {
+          viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: 0, leftIndentDeltaPt: 10)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        Button("초기화") {
+          viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: -144, leftIndentDeltaPt: -144)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+      }
+
+      if !doc.tables.isEmpty {
+        Text("표 행·열 구조 편집")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+        HStack(spacing: 6) {
+          Button("+행") { viewModel.insertRowInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("-행") { viewModel.deleteRowInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("+열") { viewModel.insertColumnInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("-열") { viewModel.deleteColumnInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+      }
+
+      Button("미주(Endnote) 삽입") { viewModel.insertEndnoteIntoActiveDocument() }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     Divider()
@@ -364,6 +429,21 @@ struct RightContextInspectorView: View {
         .buttonStyle(.bordered).controlSize(.mini)
       }
 
+      HStack(spacing: 6) {
+        Button("+행 삽입") { viewModel.insertSheetRowAtSelection() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("-행 삭제") { viewModel.deleteSheetRowAtSelection() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("+열 삽입") { viewModel.insertSheetColumnAtSelection() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("-열 삭제") { viewModel.deleteSheetColumnAtSelection() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
+
       Stepper(
         "자동 필터 기준 열: \(CellAddress.columnLabel(for: max(0, viewModel.sheetAutoFilterColumn)))열",
         value: $viewModel.sheetAutoFilterColumn, in: 0...15
@@ -381,6 +461,45 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
       }
+
+      Divider()
+
+      Text("이름 정의 (Named Range)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 6) {
+        TextField("이름", text: $viewModel.namedRangeNameDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+        TextField("범위 (예: B2:B4)", text: $viewModel.namedRangeTargetDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11, design: .monospaced))
+      }
+      Button("이름 정의 등록") { viewModel.defineNamedRangeOnActiveSheet() }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+
+      Divider()
+
+      Text("목표값 찾기 (Goal Seek)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 4) {
+        TextField("수식 셀", text: $viewModel.goalSeekTargetCellDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 10, design: .monospaced))
+        TextField("목표값", text: $viewModel.goalSeekTargetValueDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 10, design: .monospaced))
+        TextField("변경 셀", text: $viewModel.goalSeekVariableCellDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 10, design: .monospaced))
+      }
+      Button("목표값 찾기 실행") { viewModel.runGoalSeekOnActiveSheet() }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+
+      Divider()
 
       Button("통화/백분율/소수 서식 전환") { viewModel.executeRibbonCommand("sheet-home-style") }
         .buttonStyle(.bordered).controlSize(.small)
@@ -603,6 +722,37 @@ struct RightContextInspectorView: View {
       }
     }
 
+    Divider()
+
+    Toggle("슬라이드 정렬 격자 뷰", isOn: $viewModel.isSlideSorterViewEnabled)
+      .font(.system(size: 11, weight: .semibold))
+
+    VStack(alignment: .leading, spacing: 6) {
+      Text("슬라이드 덱 관리")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 6) {
+        Button("슬라이드 추가") { viewModel.addSlideToActiveDeck() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("복제") { viewModel.duplicateActiveSlide() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("삭제") { viewModel.deleteActiveSlide() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+          .disabled(deck.slides.count <= 1)
+      }
+      HStack(spacing: 6) {
+        Button("위로 이동") { viewModel.moveActiveSlide(offset: -1) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("아래로 이동") { viewModel.moveActiveSlide(offset: 1) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
+    }
+
     Button("스마트 스냅 정렬") { viewModel.executeRibbonCommand("slide-mod-snap") }
       .buttonStyle(.bordered).controlSize(.small)
 
@@ -675,6 +825,48 @@ struct RightContextInspectorView: View {
     Divider()
 
     VStack(alignment: .leading, spacing: 6) {
+      Text("민감 정보 리댁션 (영구 마스킹)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      TextField("마스킹할 구문 입력", text: $viewModel.pdfRedactionPhraseDraft)
+        .textFieldStyle(.roundedBorder)
+        .font(.system(size: 11))
+      Button("민감 구문 영구 리댁션") {
+        viewModel.redactSensitiveTextOnActivePDF()
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
+
+      Divider()
+
+      Text("양식 필드 (AcroForm)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 6) {
+        TextField("필드명", text: $viewModel.pdfFormFieldNameDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+        TextField("기본값", text: $viewModel.pdfFormFieldValueDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+      }
+      HStack(spacing: 6) {
+        Button("텍스트 필드 추가") {
+          viewModel.addFormFieldToActivePDF(isCheckbox: false)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        Button("체크박스 추가") {
+          viewModel.addFormFieldToActivePDF(isCheckbox: true)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+      }
+    }
+
+    Divider()
+
+    VStack(alignment: .leading, spacing: 6) {
       Button("90° 회전") { viewModel.rotateActivePDFPage(clockwiseDegrees: 90) }
         .buttonStyle(.bordered).controlSize(.small)
 
@@ -687,6 +879,19 @@ struct RightContextInspectorView: View {
           .buttonStyle(.bordered).controlSize(.small)
           .disabled(pdf.pages.count <= 1)
       }
+
+      HStack(spacing: 6) {
+        Button("페이지 위로") { viewModel.moveActivePDFPage(offset: -1) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("페이지 아래로") { viewModel.moveActivePDFPage(offset: 1) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
+
+      Button("열린 PDF 탭 병합") { viewModel.mergeActivePDFWithAnotherOpenTab() }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
 
       Button("하이라이트 주석 추가") { viewModel.addPDFAnnotation(kind: .highlight, content: "하이라이트 주석") }
         .buttonStyle(.bordered).controlSize(.small)

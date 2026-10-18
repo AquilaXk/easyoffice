@@ -693,8 +693,36 @@ extension WorkspaceViewModel {
         shapeBlock.runs = [DocumentTextRun(text: "프로세스 블록", isBold: true, foregroundHex: "#5C6BC0")]
         doc.paragraphs.append(shapeBlock)
       case .link:
-        let anchorID = doc.paragraphs.first?.id ?? UUID()
+        let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+        let anchorID = doc.paragraphs.indices.contains(pIdx) ? doc.paragraphs[pIdx].id : UUID()
         doc.bookmarks["책갈피_\(doc.bookmarks.count + 1)"] = anchorID
+        if doc.paragraphs.indices.contains(pIdx) {
+          let trimmedURL = inlineLinkURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+          let resolvedURL =
+            trimmedURL.isEmpty ? "https://easyoffice.local/reference" : trimmedURL
+          if let utf16Range = selectedParagraphUTF16Range, !utf16Range.isEmpty {
+            doc.paragraphs[pIdx].applyRunFormatting(
+              utf16Range: utf16Range,
+              isUnderlined: true,
+              foregroundHex: "#1E88E5",
+              linkURL: resolvedURL
+            )
+          } else {
+            let baseText = doc.paragraphs[pIdx].text
+            let firstWordRange: Range<String.Index> = {
+              if let spaceIdx = baseText.firstIndex(of: " "), spaceIdx < baseText.endIndex {
+                return baseText.startIndex..<baseText.index(after: spaceIdx)
+              }
+              return baseText.startIndex..<baseText.endIndex
+            }()
+            doc.paragraphs[pIdx].applyRunFormatting(
+              range: firstWordRange,
+              isUnderlined: true,
+              foregroundHex: "#1E88E5",
+              linkURL: resolvedURL
+            )
+          }
+        }
       }
       openTabs[idx].payload = .document(doc)
       openTabs[idx].isModified = true
