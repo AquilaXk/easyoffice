@@ -14,7 +14,7 @@ struct HomeHubWorkspaceView: View {
       VStack(alignment: .leading, spacing: 6) {
         Text("EasyOffice")
           .font(.system(size: 18, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+          .foregroundStyle(palette.accentBadgeText.swiftUIColor)
           .padding(.bottom, 8)
 
         ForEach(HubSection.allCases) { section in
@@ -32,12 +32,12 @@ struct HomeHubWorkspaceView: View {
             .padding(.vertical, 7)
             .background(
               selected
-                ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                ? palette.selectedSurface.swiftUIColor
                 : Color.clear
             )
             .foregroundStyle(
               selected
-                ? EasyOfficeDesignTokens.brand800.swiftUIColor
+                ? palette.accentBadgeText.swiftUIColor
                 : palette.primaryText.swiftUIColor
             )
             .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -210,7 +210,7 @@ struct BatchConversionStudioHubView: View {
           systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard"
         )
         .font(.system(size: 15, weight: .bold))
-        .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
         Spacer()
         Picker("목표 포맷", selection: $viewModel.batchTargetFormat) {
           ForEach([DocumentFormat.pdf, .docx, .hwpx, .odt, .xlsx, .csv, .md], id: \.rawValue) {
@@ -315,7 +315,7 @@ struct SmartDocumentAssistantHubView: View {
           "스마트 문서 보조 도구 (요약·가독성·조치항목·시트통계·문서비교·보안감사)", systemImage: "sparkles.rectangle.stack.fill"
         )
         .font(.system(size: 15, weight: .bold))
-        .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
         Spacer()
         Button("개인정보·메타데이터 비식별화") {
           viewModel.scrubActiveTabMetadata()

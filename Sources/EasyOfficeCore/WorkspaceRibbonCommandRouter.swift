@@ -255,6 +255,7 @@ extension WorkspaceViewModel {
 
     case "hwp-mod-manuscript":
       recordUndoSnapshot(for: tabID)
+      isManuscriptGridModeEnabled.toggle()
       if case .document(var doc) = openTabs[idx].payload {
         let stats = doc.computeStatistics()
         doc.recordRevision(
@@ -278,14 +279,21 @@ extension WorkspaceViewModel {
       if case .sheet(var sheet) = openTabs[idx].payload {
         let range = sheet.detectedDataRange()
         let valueCol = max(0, range.end.column - range.start.column)
+        let agg = selectedPivotAggregation
         let summary = PivotTableEngine.compute(
-          from: sheet, range: range, hasHeaderRow: true,
+          from: sheet,
+          range: range,
+          hasHeaderRow: true,
           configuration: PivotTableConfiguration(
-            rowFieldColumnIndex: 0, valueFieldColumnIndex: valueCol, aggregation: .sum))
+            rowFieldColumnIndex: 0,
+            valueFieldColumnIndex: valueCol,
+            aggregation: agg
+          )
+        )
         lastPivotGrandTotal = summary.grandTotal
         var pivotCells: [PackedCellCoordinate: String] = [
           PackedCellCoordinate(row: 0, column: 0): "구분",
-          PackedCellCoordinate(row: 0, column: 1): "집계 값 (SUM)",
+          PackedCellCoordinate(row: 0, column: 1): "집계 값 (\(agg.rawValue.uppercased()))",
         ]
         for (rIdx, rowKey) in summary.rowKeys.enumerated() {
           let rowTotal = summary.rowTotals.indices.contains(rIdx) ? summary.rowTotals[rIdx] : 0.0
@@ -685,13 +693,61 @@ extension WorkspaceViewModel {
           DocumentTableBlock(
             caption: "차트 데이터 테이블",
             rows: [
-              ["지표 구분", "목표치", "실적치"], ["1분기 핵심 지표", "100", "124"], ["2분기 핵심 지표", "150", "182"],
-            ]))
+              ["지표 구분", "목표치", "실적치"],
+              ["1분기 핵심 지표", "100", "124"],
+              ["2분기 핵심 지표", "150", "182"],
+            ]
+          )
+        )
+        let chartPNG = Self.makeSampleDiagramPNG(
+          width: 260,
+          height: 110,
+          accentR: 0x0A,
+          accentG: 0x70,
+          accentB: 0x5A
+        )
+        doc.images.append(
+          EmbeddedImageAttachment(
+            fileName: "chart_diagram_\(doc.images.count + 1).png",
+            caption: "실적 요약 차트 그래픽",
+            mimeType: "image/png",
+            imageData: chartPNG,
+            widthPt: 260.0,
+            heightPt: 110.0,
+            anchorParagraphID: selectedParagraphID ?? doc.paragraphs.last?.id,
+            wrapMode: .inline
+          )
+        )
       case .shape:
         var shapeBlock = ParagraphBlock(
-          style: .quote, alignment: .center, text: "프로세스 블록", isBold: true)
-        shapeBlock.runs = [DocumentTextRun(text: "프로세스 블록", isBold: true, foregroundHex: "#5C6BC0")]
+          style: .quote,
+          alignment: .center,
+          text: "프로세스 블록",
+          isBold: true
+        )
+        shapeBlock.runs = [
+          DocumentTextRun(text: "프로세스 블록", isBold: true, foregroundHex: "#5C6BC0")
+        ]
         doc.paragraphs.append(shapeBlock)
+        let shapePNG = Self.makeSampleDiagramPNG(
+          width: 240,
+          height: 96,
+          accentR: 0x5C,
+          accentG: 0x6B,
+          accentB: 0xC0
+        )
+        doc.images.append(
+          EmbeddedImageAttachment(
+            fileName: "shape_diagram_\(doc.images.count + 1).png",
+            caption: "벡터 다이어그램 도형",
+            mimeType: "image/png",
+            imageData: shapePNG,
+            widthPt: 240.0,
+            heightPt: 96.0,
+            anchorParagraphID: shapeBlock.id,
+            wrapMode: .inline
+          )
+        )
       case .link:
         let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
         let anchorID = doc.paragraphs.indices.contains(pIdx) ? doc.paragraphs[pIdx].id : UUID()
@@ -742,11 +798,13 @@ extension WorkspaceViewModel {
             PackedCellCoordinate(row: 0, column: 1): "값",
           ])
       case .chart:
+        isChartPanelVisible = true
         let allKinds = SheetChartKind.allCases
         if let cIdx = allKinds.firstIndex(of: selectedChartKind) {
           selectedChartKind = allKinds[(cIdx + 1) % allKinds.count]
         }
       case .shape:
+        isChartPanelVisible = true
         var style = sheet.cellStyle(at: coord)
         let alignments = CellHorizontalAlignment.allCases
         let curIdx = alignments.firstIndex(of: style.alignment) ?? 0

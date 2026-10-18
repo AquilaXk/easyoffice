@@ -171,6 +171,78 @@ public struct SlideEditorDetailPaneView: View {
         }
       }
 
+      if isPrimaryPane {
+        HStack(spacing: 8) {
+          Menu {
+            ForEach(SlideDeckTheme.allCases, id: \.rawValue) { theme in
+              Button(theme.rawValue) {
+                viewModel.applyThemeToActiveDeck(theme)
+              }
+            }
+          } label: {
+            Label("테마: \(deck.theme.rawValue)", systemImage: "paintpalette.fill")
+              .font(.system(size: 11, weight: .semibold))
+          }
+          .controlSize(.small)
+
+          Divider().frame(height: 16)
+
+          HStack(spacing: 4) {
+            Button("좌") {
+              viewModel.alignSlideElements(.alignLeft)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button("중") {
+              viewModel.alignSlideElements(.alignCenter)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button("우") {
+              viewModel.alignSlideElements(.alignRight)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button("배분") {
+              viewModel.alignSlideElements(.distributeHorizontally)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+          }
+
+          Divider().frame(height: 16)
+
+          Button {
+            viewModel.duplicateActiveSlideElement()
+          } label: {
+            Label("개체 복제", systemImage: "plus.square.on.square")
+              .font(.system(size: 11, weight: .medium))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .disabled(selectedElement == nil)
+
+          Button {
+            viewModel.deleteActiveSlideElement()
+          } label: {
+            Label("개체 삭제", systemImage: "trash")
+              .font(.system(size: 11, weight: .medium))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .disabled(selectedElement == nil)
+
+          Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(palette.cardSurface.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+      }
+
       if viewModel.isSlideSorterViewEnabled {
         slideSorterGridView(activeIdx: activeIdx, palette: palette)
       } else {
@@ -200,7 +272,7 @@ public struct SlideEditorDetailPaneView: View {
                 )
                 .background(
                   isSelected
-                    ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                    ? palette.selectedSurface.swiftUIColor
                     : palette.cardSurface.swiftUIColor
                 )
                 .overlay(
@@ -460,6 +532,7 @@ public struct SlideEditorDetailPaneView: View {
                     }
                     .rotationEffect(.degrees(element.rotationDegrees))
                     .position(x: centerX, y: centerY)
+                    .zIndex(Double(element.zIndex))
                     .onTapGesture {
                       guard isPrimaryPane else { return }
                       viewModel.selectSlideElement(id: element.id)
@@ -577,9 +650,26 @@ public struct SlideEditorDetailPaneView: View {
               }
 
               Divider()
-              Text("발표자 노트: \(slide.speakerNotes)")
-                .font(.system(size: 11))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
+              HStack(spacing: 8) {
+                Label("발표자 노트", systemImage: "note.text")
+                  .font(.system(size: 11, weight: .semibold))
+                  .foregroundStyle(palette.secondaryText.swiftUIColor)
+                if isPrimaryPane {
+                  TextField(
+                    "발표자 노트를 입력하세요...",
+                    text: Binding(
+                      get: { slide.speakerNotes },
+                      set: { viewModel.updateActiveSlideSpeakerNotes($0) }
+                    )
+                  )
+                  .textFieldStyle(.roundedBorder)
+                  .font(.system(size: 11))
+                } else {
+                  Text(slide.speakerNotes)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                }
+              }
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -599,7 +689,7 @@ public struct SlideEditorDetailPaneView: View {
               "발표자 모니터 · 진행률 \(Int(presenterSession.progressFraction * 100))% · 경과 \(presenterSession.elapsedSeconds)초 (\(viewModel.isPresenterTimerRunning ? "진행 중" : "일시정지"))"
             )
             .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+            .foregroundStyle(palette.accentBadgeText.swiftUIColor)
             Text("현재 노트: \(presenterSession.currentSpeakerNotes)")
               .font(.system(size: 11))
               .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -640,7 +730,7 @@ public struct SlideEditorDetailPaneView: View {
           }
         }
         .padding(12)
-        .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
+        .background(palette.subtleAccentSurface.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
           if viewModel.isPresenterModeActive && viewModel.isPresenterTimerRunning {
@@ -758,7 +848,7 @@ public struct SlideEditorDetailPaneView: View {
           .padding(12)
           .background(
             isSelected
-              ? EasyOfficeDesignTokens.brand100.swiftUIColor
+              ? palette.selectedSurface.swiftUIColor
               : palette.cardSurface.swiftUIColor
           )
           .overlay(
@@ -877,13 +967,14 @@ public struct PDFStudioDetailPaneView: View {
           }
           .buttonStyle(.bordered)
 
-          ForEach([PDFAnnotationKind.highlight, .stickyNote, .signature], id: \.rawValue) { kind in
+          ForEach(PDFAnnotationKind.allCases, id: \.rawValue) { kind in
             Button {
               viewModel.addPDFAnnotation(kind: kind, content: "\(kind.rawValue) 검토 마크")
             } label: {
               Text(kind.rawValue).font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.bordered)
+            .controlSize(.small)
             .accessibilityLabel(
               AccessibilityTokens.pdfAnnotationToolLabel(toolTitle: kind.rawValue))
           }
@@ -987,6 +1078,87 @@ public struct PDFStudioDetailPaneView: View {
               .font(.system(size: 10, weight: .bold))
               .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
           }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(palette.cardSurface.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        // 4-Preset Official Approval Stamp Bar & Interactive Bookmark Bar
+        HStack(spacing: 8) {
+          Label("결재 스탬프", systemImage: "seal.fill")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+
+          ForEach(["승인", "대외비", "검토필", "긴급", "사본"], id: \.self) { preset in
+            Button {
+              viewModel.addStampToActivePDFPage(preset: preset)
+            } label: {
+              Text(preset)
+                .font(.system(size: 11, weight: .bold))
+            }
+            .buttonStyle(.bordered)
+            .tint(
+              preset == "긴급" || preset == "대외비"
+                ? EasyOfficeDesignTokens.statusDanger.swiftUIColor
+                : EasyOfficeDesignTokens.brand700.swiftUIColor
+            )
+            .controlSize(.small)
+          }
+
+          Divider().frame(height: 16)
+
+          Label("책갈피", systemImage: "bookmark.fill")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+
+          TextField("책갈피 제목", text: $viewModel.bookmarkTitleDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11))
+            .frame(width: 140)
+
+          Button("책갈피 추가") {
+            viewModel.addBookmarkToActivePDF()
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .controlSize(.small)
+
+          if !pdf.outline.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+              HStack(spacing: 6) {
+                ForEach(pdf.outline) { node in
+                  HStack(spacing: 4) {
+                    Button {
+                      let targetIdx = max(0, min(pdf.pages.count - 1, node.targetPageNumber - 1))
+                      viewModel.selectedPDFPageIndex = targetIdx
+                    } label: {
+                      Text("\(node.title) (p.\(node.targetPageNumber))")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                      viewModel.removeBookmarkFromActivePDF(id: node.id)
+                    } label: {
+                      Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                    }
+                    .buttonStyle(.plain)
+                  }
+                  .padding(.horizontal, 6)
+                  .padding(.vertical, 3)
+                  .background(palette.selectedSurface.swiftUIColor)
+                  .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+              }
+            }
+            .frame(maxWidth: 260)
+          }
+
+          Spacer()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -1131,11 +1303,33 @@ public struct PDFStudioDetailPaneView: View {
           if !pageAnnotations.isEmpty {
             Divider()
             ForEach(pageAnnotations) { ann in
-              HStack(spacing: 6) {
-                Text("[\(ann.kind.rawValue)]").font(.system(size: 10, weight: .bold))
-                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-                Text(ann.content).font(.system(size: 11)).foregroundStyle(
-                  palette.secondaryText.swiftUIColor)
+              if ann.kind == .stamp {
+                HStack(spacing: 6) {
+                  Image(systemName: "seal.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                  Text(
+                    ann.content.hasPrefix("[결재 스탬프]")
+                      ? ann.content : "[결재 스탬프] \(ann.content)"
+                  )
+                  .font(.system(size: 11, weight: .bold))
+                  .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(palette.subtleAccentSurface.swiftUIColor)
+                .overlay(
+                  RoundedRectangle(cornerRadius: 5)
+                    .stroke(EasyOfficeDesignTokens.statusDanger.swiftUIColor, lineWidth: 1.2)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+              } else {
+                HStack(spacing: 6) {
+                  Text("[\(ann.kind.rawValue)]").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+                  Text(ann.content).font(.system(size: 11)).foregroundStyle(
+                    palette.secondaryText.swiftUIColor)
+                }
               }
             }
           }
