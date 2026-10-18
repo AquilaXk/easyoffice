@@ -1077,29 +1077,47 @@ public enum LocalSmartDocumentAssistant {
         guard chars.count >= 2 else { return text }
         let mid = chars.count / 2
 
-        // Find the whitespace index closest to the midpoint
+        // Prefer a whitespace index closest to the midpoint whose preceding non-whitespace character is not a comma
         var bestSpaceOffset: Int? = nil
+        var fallbackCommaSpaceOffset: Int? = nil
         for delta in 0...mid {
             let left = mid - delta
             if left > 0 && left < chars.count - 1 && chars[left] == " " {
-                bestSpaceOffset = left
-                break
+                if !isPrecededByComma(chars, before: left) {
+                    bestSpaceOffset = left
+                    break
+                } else if fallbackCommaSpaceOffset == nil {
+                    fallbackCommaSpaceOffset = left
+                }
             }
             let right = mid + delta
             if right > 0 && right < chars.count - 1 && chars[right] == " " {
-                bestSpaceOffset = right
-                break
+                if !isPrecededByComma(chars, before: right) {
+                    bestSpaceOffset = right
+                    break
+                } else if fallbackCommaSpaceOffset == nil {
+                    fallbackCommaSpaceOffset = right
+                }
             }
         }
 
-        if let splitAt = bestSpaceOffset {
-            let firstPart = String(chars[0..<splitAt]).trimmingCharacters(in: .whitespaces)
+        if let splitAt = bestSpaceOffset ?? fallbackCommaSpaceOffset {
+            let trimSet = CharacterSet.whitespaces.union(CharacterSet(charactersIn: ","))
+            let firstPart = String(chars[0..<splitAt]).trimmingCharacters(in: trimSet)
             let secondPart = String(chars[(splitAt + 1)...]).trimmingCharacters(in: .whitespaces)
             return "\(firstPart). \(secondPart)"
         }
 
         let midIndex = text.index(text.startIndex, offsetBy: mid)
         return String(text[..<midIndex]) + ". " + String(text[midIndex...])
+    }
+
+    private static func isPrecededByComma(_ chars: [Character], before index: Int) -> Bool {
+        var cursor = index - 1
+        while cursor >= 0 && chars[cursor] == " " {
+            cursor -= 1
+        }
+        return cursor >= 0 && chars[cursor] == ","
     }
 
     private static func tokenizeWords(in text: String) -> [String] {
