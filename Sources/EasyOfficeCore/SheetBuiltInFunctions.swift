@@ -88,6 +88,23 @@ extension WorksheetModel {
           if let err = appendRange(cellRange, onSheet: sheetName, in: sheet, into: &values) {
             return .failure(err)
           }
+        case .functionCall(let fnName, let fnArgs) where fnName == "OFFSET":
+          switch sheet.resolveOffsetRange(args: fnArgs, frame: &self) {
+          case .failure(let err):
+            return .failure(err)
+          case .success(let sheetName, let resolvedRange):
+            if let sheetName {
+              guard sheet.hasSheet(named: sheetName) else { return .failure("#REF!") }
+              if let err = appendRange(resolvedRange, onSheet: sheetName, in: sheet, into: &values)
+              {
+                return .failure(err)
+              }
+            } else {
+              if let err = appendRange(resolvedRange, in: sheet, into: &values) {
+                return .failure(err)
+              }
+            }
+          }
         case .error(let err):
           return .failure(err.rawValue)
         default:
@@ -120,6 +137,8 @@ extension WorksheetModel {
       for (idx, item) in args.enumerated() {
         switch item {
         case .rangeRef, .sheetRangeRef:
+          continue
+        case .functionCall(let fnName, _) where fnName == "OFFSET":
           continue
         case .namedRangeRef(let rangeName):
           guard resolveNamedRange(rangeName) != nil else { return .error("#NAME?") }
@@ -386,6 +405,131 @@ extension WorksheetModel {
       }
       let result = exp(num)
       return result.isFinite ? .number(result) : .error("#NUM!")
+    case "SUMSQ":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        return .number(vals.compactMap(\.numericValue).reduce(0.0) { $0 + $1 * $1 })
+      }
+    case "MROUND":
+      guard frame.count == 2,
+        let num = frame.arg(0, in: self).numericValue,
+        let multiple = frame.arg(1, in: self).numericValue
+      else {
+        return .error("#VALUE!")
+      }
+      if multiple == 0.0 || num == 0.0 {
+        return .number(0.0)
+      }
+      guard (num > 0.0 && multiple > 0.0) || (num < 0.0 && multiple < 0.0) else {
+        return .error("#NUM!")
+      }
+      let result = (num / multiple).rounded() * multiple
+      return result.isFinite ? .number(result) : .error("#NUM!")
+    case "QUOTIENT":
+      guard frame.count == 2,
+        let num = frame.arg(0, in: self).numericValue,
+        let den = frame.arg(1, in: self).numericValue
+      else {
+        return .error("#VALUE!")
+      }
+      guard den != 0.0 else {
+        return .error("#DIV/0!")
+      }
+      return .number(trunc(num / den))
+    case "PI":
+      guard frame.count == 0 else {
+        return .error("#VALUE!")
+      }
+      return .number(Double.pi)
+    case "FACT":
+      guard frame.count == 1,
+        let num = frame.arg(0, in: self).numericValue,
+        let n = Self.safeInt(floor(num))
+      else {
+        return .error("#VALUE!")
+      }
+      guard n >= 0, n <= 170 else {
+        return .error("#NUM!")
+      }
+      if n <= 1 {
+        return .number(1.0)
+      }
+      var acc = 1.0
+      for i in 2...n {
+        acc *= Double(i)
+      }
+      return acc.isFinite ? .number(acc) : .error("#NUM!")
+    case "COMBIN":
+      guard frame.count == 2,
+        let nVal = frame.arg(0, in: self).numericValue,
+        let kVal = frame.arg(1, in: self).numericValue,
+        let n = Self.safeInt(floor(nVal)),
+        let k = Self.safeInt(floor(kVal))
+      else {
+        return .error("#VALUE!")
+      }
+      guard n >= 0, k >= 0, k <= n, n <= 1000 else {
+        return .error("#NUM!")
+      }
+      let r = min(k, n - k)
+      if r == 0 {
+        return .number(1.0)
+      }
+      var res = 1.0
+      for i in 1...r {
+        res = res * Double(n - r + i) / Double(i)
+      }
+      return res.isFinite ? .number(res.rounded()) : .error("#NUM!")
+    case "GCD":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty else { return .error("#VALUE!") }
+        var acc = 0
+        for raw in nums {
+          guard raw >= 0, let v = Self.safeInt(floor(raw)) else { return .error("#NUM!") }
+          var a = acc
+          var b = v
+          while b != 0 {
+            let t = b
+            b = a % b
+            a = t
+          }
+          acc = a
+        }
+        return .number(Double(acc))
+      }
+    case "LCM":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty else { return .error("#VALUE!") }
+        var acc = 1
+        for raw in nums {
+          guard raw >= 0, let v = Self.safeInt(floor(raw)) else { return .error("#NUM!") }
+          if v == 0 || acc == 0 {
+            acc = 0
+            continue
+          }
+          var a = acc
+          var b = v
+          while b != 0 {
+            let t = b
+            b = a % b
+            a = t
+          }
+          let (prod, overflow) = (acc / max(1, a)).multipliedReportingOverflow(by: v)
+          guard !overflow else { return .error("#NUM!") }
+          acc = prod
+        }
+        return .number(Double(acc))
+      }
     default:
       return nil
     }
@@ -473,6 +617,125 @@ extension WorksheetModel {
         let variance = nums.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) } / Double(nums.count - 1)
         return .number(name == "VAR" ? variance : sqrt(variance))
       }
+    case "VARP", "STDEVP":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty else { return .error("#DIV/0!") }
+        let mean = nums.reduce(0.0, +) / Double(nums.count)
+        let variance = nums.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) } / Double(nums.count)
+        return .number(name == "VARP" ? variance : sqrt(variance))
+      }
+    case "AVEDEV":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty else { return .error("#DIV/0!") }
+        let mean = nums.reduce(0.0, +) / Double(nums.count)
+        let avgDev = nums.reduce(0.0) { $0 + abs($1 - mean) } / Double(nums.count)
+        return .number(avgDev)
+      }
+    case "GEOMEAN":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty, nums.allSatisfy({ $0 > 0.0 }) else {
+          return .error("#VALUE!")
+        }
+        let prod = nums.reduce(1.0, *)
+        let result =
+          (prod.isFinite && prod > 0.0)
+          ? pow(prod, 1.0 / Double(nums.count))
+          : exp(nums.reduce(0.0) { $0 + log($1) } / Double(nums.count))
+        return result.isFinite ? .number(result) : .error("#VALUE!")
+      }
+    case "HARMEAN":
+      switch frame.resolve(frame.indices, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let nums = vals.compactMap(\.numericValue)
+        guard !nums.isEmpty, nums.allSatisfy({ $0 > 0.0 }) else {
+          return .error("#VALUE!")
+        }
+        let reciprocalSum = nums.reduce(0.0) { $0 + (1.0 / $1) }
+        guard reciprocalSum > 0.0 else {
+          return .error("#VALUE!")
+        }
+        return .number(Double(nums.count) / reciprocalSum)
+      }
+    case "PERCENTILE":
+      guard frame.count == 2 else { return .error("#VALUE!") }
+      switch frame.resolve(0..<1, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        guard let k = frame.arg(1, in: self).numericValue, k >= 0.0, k <= 1.0 else {
+          return .error("#VALUE!")
+        }
+        let sorted = vals.compactMap(\.numericValue).sorted()
+        guard !sorted.isEmpty else { return .error("#VALUE!") }
+        let pos = k * Double(sorted.count - 1)
+        let lower = Int(floor(pos))
+        let upper = Int(ceil(pos))
+        let interpolated = sorted[lower] + (pos - Double(lower)) * (sorted[upper] - sorted[lower])
+        return .number(interpolated)
+      }
+    case "QUARTILE":
+      guard frame.count == 2 else { return .error("#VALUE!") }
+      switch frame.resolve(0..<1, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        guard let qNum = frame.arg(1, in: self).numericValue,
+          let quart = Self.safeInt(floor(qNum)),
+          (0...4).contains(quart)
+        else {
+          return .error("#VALUE!")
+        }
+        let sorted = vals.compactMap(\.numericValue).sorted()
+        guard !sorted.isEmpty else { return .error("#VALUE!") }
+        let k = Double(quart) * 0.25
+        let pos = k * Double(sorted.count - 1)
+        let lower = Int(floor(pos))
+        let upper = Int(ceil(pos))
+        let interpolated = sorted[lower] + (pos - Double(lower)) * (sorted[upper] - sorted[lower])
+        return .number(interpolated)
+      }
+    case "CORREL", "SLOPE", "INTERCEPT":
+      guard frame.count == 2 else { return .error("#VALUE!") }
+      switch (frame.resolve(0..<1, in: self), frame.resolve(1..<2, in: self)) {
+      case (let .failure(err), _), (_, let .failure(err)):
+        return .error(err)
+      case (.success(let valsY), .success(let valsX)):
+        return Self.computeLinearRegressionMetric(
+          name: name,
+          valsY: valsY,
+          valsX: valsX,
+          forecastX: nil
+        )
+      }
+    case "FORECAST":
+      guard frame.count == 3, let xVal = frame.arg(0, in: self).numericValue else {
+        return .error("#VALUE!")
+      }
+      switch (frame.resolve(1..<2, in: self), frame.resolve(2..<3, in: self)) {
+      case (let .failure(err), _), (_, let .failure(err)):
+        return .error(err)
+      case (.success(let valsY), .success(let valsX)):
+        return Self.computeLinearRegressionMetric(
+          name: "FORECAST",
+          valsY: valsY,
+          valsX: valsX,
+          forecastX: xVal
+        )
+      }
     case "LARGE", "SMALL":
       guard frame.count == 2 else { return .error("#VALUE!") }
       switch frame.resolve(0..<1, in: self) {
@@ -503,6 +766,50 @@ extension WorksheetModel {
     default:
       return nil
     }
+  }
+
+  private static func computeLinearRegressionMetric(
+    name: String,
+    valsY: [EvaluatedCellValue],
+    valsX: [EvaluatedCellValue],
+    forecastX: Double?
+  ) -> EvaluatedCellValue {
+    let yNums = valsY.compactMap(\.numericValue)
+    let xNums = valsX.compactMap(\.numericValue)
+    guard yNums.count == xNums.count, yNums.count >= 2 else {
+      return .error("#DIV/0!")
+    }
+    let n = Double(yNums.count)
+    let meanX = xNums.reduce(0.0, +) / n
+    let meanY = yNums.reduce(0.0, +) / n
+    var sumXY = 0.0
+    var sumX2 = 0.0
+    var sumY2 = 0.0
+    for i in 0..<yNums.count {
+      let dx = xNums[i] - meanX
+      let dy = yNums[i] - meanY
+      sumXY += dx * dy
+      sumX2 += dx * dx
+      sumY2 += dy * dy
+    }
+    if name == "CORREL" {
+      let denom = sqrt(sumX2 * sumY2)
+      guard denom > 0.0 else { return .error("#DIV/0!") }
+      return .number(sumXY / denom)
+    }
+    guard sumX2 > 0.0 else { return .error("#DIV/0!") }
+    let slope = sumXY / sumX2
+    let intercept = meanY - slope * meanX
+    if name == "SLOPE" {
+      return .number(slope)
+    }
+    if name == "INTERCEPT" {
+      return .number(intercept)
+    }
+    if let fx = forecastX {
+      return .number(intercept + slope * fx)
+    }
+    return .error("#VALUE!")
   }
 
   // MARK: - 3. Logical Functions
@@ -583,6 +890,49 @@ extension WorksheetModel {
     return a.description.caseInsensitiveCompare(b.description) == .orderedSame
   }
 
+  internal static func matchesWildcardPattern(text: String, pattern: String) -> Bool {
+    let textChars = Array(text.lowercased())
+    let patChars = Array(pattern.lowercased())
+    var tIdx = 0
+    var pIdx = 0
+    var starPatIdx: Int?
+    var matchTextIdx = 0
+
+    while tIdx < textChars.count {
+      if pIdx < patChars.count && patChars[pIdx] == "~" && (pIdx + 1) < patChars.count {
+        if textChars[tIdx] == patChars[pIdx + 1] {
+          tIdx += 1
+          pIdx += 2
+          continue
+        }
+      } else if pIdx < patChars.count
+        && (patChars[pIdx] == "?" || patChars[pIdx] == textChars[tIdx])
+      {
+        tIdx += 1
+        pIdx += 1
+        continue
+      } else if pIdx < patChars.count && patChars[pIdx] == "*" {
+        starPatIdx = pIdx
+        matchTextIdx = tIdx
+        pIdx += 1
+        continue
+      }
+
+      if let sIdx = starPatIdx {
+        pIdx = sIdx + 1
+        matchTextIdx += 1
+        tIdx = matchTextIdx
+      } else {
+        return false
+      }
+    }
+
+    while pIdx < patChars.count && patChars[pIdx] == "*" {
+      pIdx += 1
+    }
+    return pIdx == patChars.count
+  }
+
   internal static func matchesCriteriaValue(
     _ value: EvaluatedCellValue,
     criteriaValue critVal: EvaluatedCellValue
@@ -602,9 +952,16 @@ extension WorksheetModel {
         default: return false
         }
       } else {
+        if (op == "=" || op == "<>") && (operand.contains("*") || operand.contains("?")) {
+          let matched = matchesWildcardPattern(text: value.description, pattern: operand)
+          return op == "=" ? matched : !matched
+        }
         let cmp = value.description.caseInsensitiveCompare(operand)
         return op == "=" ? (cmp == .orderedSame) : (op == "<>" ? (cmp != .orderedSame) : false)
       }
+    }
+    if critStr.contains("*") || critStr.contains("?") {
+      return matchesWildcardPattern(text: value.description, pattern: critStr)
     }
     if let critNum = critVal.numericValue, let cellNum = value.numericValue {
       return cellNum == critNum

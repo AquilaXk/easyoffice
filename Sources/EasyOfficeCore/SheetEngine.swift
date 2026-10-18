@@ -68,32 +68,36 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
   /// Sorted list of all built-in spreadsheet functions supported by the formula engine.
   public static let supportedFunctionNames: [String] = [
-    "ABS", "AND", "AVERAGE", "AVERAGEIF", "AVERAGEIFS",
-    "CEILING", "CHOOSE", "COLUMN", "COLUMNS", "CONCAT", "CONCATENATE", "COUNT", "COUNTA",
+    "ABS", "AND", "AVEDEV", "AVERAGE", "AVERAGEIF", "AVERAGEIFS",
+    "CEILING", "CHOOSE", "COLUMN", "COLUMNS", "CONCAT", "CONCATENATE", "CORREL", "COUNT", "COUNTA",
     "COUNTBLANK", "COUNTIF", "COUNTIFS",
-    "DATE", "DAY", "DAYS",
-    "EXACT", "EXP",
-    "FALSE", "FIND", "FLOOR", "FV",
-    "HLOOKUP",
-    "IF", "IFERROR", "IFNA", "IFS", "INDEX", "INT", "ISBLANK", "ISERROR", "ISNUMBER", "ISTEXT",
+    "DATE", "DATEDIF", "DAY", "DAYS",
+    "EDATE", "EFFECT", "EOMONTH", "EXACT", "EXP",
+    "FALSE", "FIND", "FLOOR", "FORECAST", "FV",
+    "GEOMEAN",
+    "HARMEAN", "HLOOKUP",
+    "IF", "IFERROR", "IFNA", "IFS", "INDEX", "INT", "INTERCEPT", "IRR", "ISBLANK", "ISERROR",
+    "ISNUMBER", "ISTEXT",
     "LARGE", "LEFT", "LEN", "LN", "LOG10", "LOWER",
-    "MATCH", "MAX", "MAXIFS", "MEDIAN", "MID", "MIN", "MINIFS", "MOD", "MODE", "MONTH",
-    "NOT", "NPV",
-    "OR",
-    "PMT", "POWER", "PRODUCT", "PROPER", "PV",
-    "RANK", "REPLACE", "REPT", "RIGHT", "ROUND", "ROUNDDOWN", "ROUNDUP", "ROW", "ROWS",
-    "SEARCH", "SIGN", "SMALL", "SQRT", "STDEV", "SUBSTITUTE", "SUM", "SUMIF", "SUMIFS",
-    "SUMPRODUCT", "SWITCH",
+    "MATCH", "MAX", "MAXIFS", "MEDIAN", "MID", "MIN", "MINIFS", "MOD", "MODE", "MONTH", "MROUND",
+    "NETWORKDAYS", "NOMINAL", "NOT", "NPER", "NPV",
+    "OFFSET", "OR",
+    "PERCENTILE", "PI", "PMT", "POWER", "PRODUCT", "PROPER", "PV",
+    "QUARTILE", "QUOTIENT",
+    "RANK", "RATE", "REPLACE", "REPT", "RIGHT", "ROUND", "ROUNDDOWN", "ROUNDUP", "ROW", "ROWS",
+    "SEARCH", "SIGN", "SLN", "SLOPE", "SMALL", "SQRT", "STDEV", "STDEVP", "SUBSTITUTE", "SUM",
+    "SUMIF", "SUMIFS", "SUMPRODUCT", "SUMSQ", "SWITCH", "SYD",
     "TEXT", "TEXTJOIN", "TRIM", "TRUE", "TRUNC",
     "UPPER",
-    "VALUE", "VAR", "VLOOKUP",
+    "VALUE", "VAR", "VARP", "VLOOKUP",
+    "WEEKDAY", "WEEKNUM", "WORKDAY",
     "XLOOKUP", "XOR",
     "YEAR",
   ].sorted()
 
   internal static let lazyOrRefFunctions: Set<String> = [
     "IF", "IFS", "IFERROR", "IFNA", "SWITCH", "CHOOSE",
-    "ROW", "COLUMN", "ROWS", "COLUMNS",
+    "OFFSET", "ROW", "COLUMN", "ROWS", "COLUMNS",
     "ISBLANK", "ISERROR", "ISNUMBER", "ISTEXT",
     "SUMIF", "COUNTIF", "AVERAGEIF",
     "SUMIFS", "COUNTIFS", "AVERAGEIFS", "MINIFS", "MAXIFS",
@@ -398,7 +402,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     let coord = address.packedCoordinate
     let val = preEvaluated?[coord] ?? evaluate(at: coord)
     let style = cellStyles[coord] ?? CellStyle()
-    return style.numberFormat.format(val)
+    return style.format(val)
   }
 
   /// Automatically detects the bounding `CellRange` of all non-empty cells in the active sheet (falling back to `A1:D5` if empty).

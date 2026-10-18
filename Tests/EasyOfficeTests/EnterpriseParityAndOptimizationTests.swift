@@ -517,4 +517,241 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     pdf.removeBookmark(id: parentID)
     XCTAssertTrue(pdf.outline.isEmpty)
   }
+
+  // MARK: - 7. 122 Built-In Functions, OFFSET/XLOOKUP/INDEX, Statistical/Financial/Date & CellStyle Decimal Places
+
+  func testSixthAudit122BuiltInFunctionsOffsetXlookupStatisticalFinancialAndDateFunctions() throws {
+    XCTAssertEqual(WorksheetModel.supportedFunctionNames.count, 122)
+    XCTAssertEqual(
+      WorksheetModel.supportedFunctionNames,
+      WorksheetModel.supportedFunctionNames.sorted()
+    )
+
+    var sheet = WorksheetModel(
+      name: "고급수식검증",
+      rawCells: [
+        // 2x2 block at B2:C3 (10, 20 / 30, 40)
+        "B2": "10", "C2": "20",
+        "B3": "30", "C3": "40",
+        // Lookup table in A5:B9 (with duplicate key "서울" at A5 and A8, and sorted keys in D5:E8)
+        "A5": "서울지사", "B5": "100",
+        "A6": "부산지사", "B6": "200",
+        "A7": "대전본부", "B7": "300",
+        "A8": "서울지사", "B8": "400",
+        // Numeric lookup table D5:E8
+        "D5": "10", "E5": "등급D",
+        "D6": "20", "E6": "등급C",
+        "D7": "30", "E7": "등급B",
+        "D8": "40", "E8": "등급A",
+        // Statistical sample X in G1:G4 (1, 2, 3, 4) and Y in H1:H4 (3, 5, 7, 9 -> y = 2x + 1)
+        "G1": "1", "G2": "2", "G3": "3", "G4": "4",
+        "H1": "3", "H2": "5", "H3": "7", "H4": "9",
+        // Cash flows for IRR in J1:J3 (-1000, 600, 600)
+        "J1": "-1000", "J2": "600", "J3": "600",
+      ]
+    )
+
+    // 1. OFFSET scalar, range in SUM, and out-of-bounds #REF!
+    try sheet.setCell("F1", rawValue: "=OFFSET(B2, 1, 1)")
+    try sheet.setCell("F2", rawValue: "=SUM(OFFSET(B2, 0, 0, 2, 2))")
+    try sheet.setCell("F3", rawValue: "=OFFSET(B2, -5, 0)")
+    try sheet.setCell("F4", rawValue: "=OFFSET(B2, 70000, 0)")
+    try sheet.setCell("F5", rawValue: "=SUM(OFFSET(B2, -2, 0, 2, 2))")
+
+    XCTAssertEqual(sheet.evaluate(at: "F1"), .number(40))
+    XCTAssertEqual(sheet.evaluate(at: "F2"), .number(100))
+    XCTAssertEqual(sheet.evaluate(at: "F3"), .error("#REF!"))
+    XCTAssertEqual(sheet.evaluate(at: "F4"), .error("#REF!"))
+    XCTAssertEqual(sheet.evaluate(at: "F5"), .error("#REF!"))
+
+    // 2. XLOOKUP match_mode (-1, 1, 2 wildcard) & search_mode (-1 reverse), plus INDEX 1D row
+    try sheet.setCell("F6", rawValue: "=XLOOKUP(25, D5:D8, E5:E8, \"없음\", -1)")
+    try sheet.setCell("F7", rawValue: "=XLOOKUP(25, D5:D8, E5:E8, \"없음\", 1)")
+    try sheet.setCell("F8", rawValue: "=XLOOKUP(\"*대전*\", A5:A8, B5:B8, \"없음\", 2)")
+    try sheet.setCell("F9", rawValue: "=XLOOKUP(\"서울지사\", A5:A8, B5:B8, \"없음\", 0, -1)")
+    try sheet.setCell("F10", rawValue: "=INDEX(B2:C2, 2)")
+    try sheet.setCell("F11", rawValue: "=INDEX(B2:C2, 0, 2)")
+
+    XCTAssertEqual(sheet.evaluate(at: "F6"), .text("등급C"))
+    XCTAssertEqual(sheet.evaluate(at: "F7"), .text("등급B"))
+    XCTAssertEqual(sheet.evaluate(at: "F8"), .number(300))
+    XCTAssertEqual(sheet.evaluate(at: "F9"), .number(400))
+    XCTAssertEqual(sheet.evaluate(at: "F10"), .number(20))
+    XCTAssertEqual(sheet.evaluate(at: "F11"), .number(20))
+
+    // 3. Statistical functions (PERCENTILE, QUARTILE, STDEVP, VARP, AVEDEV, GEOMEAN, HARMEAN, CORREL, SLOPE, INTERCEPT, FORECAST)
+    try sheet.setCell("K1", rawValue: "=PERCENTILE(B2:C3, 0.5)")
+    try sheet.setCell("K2", rawValue: "=QUARTILE(B2:C3, 1)")
+    try sheet.setCell("K3", rawValue: "=QUARTILE(B2:C3, 3)")
+    try sheet.setCell("K4", rawValue: "=VARP(B2:C3)")
+    try sheet.setCell("K5", rawValue: "=STDEVP(B2:C3)")
+    try sheet.setCell("K6", rawValue: "=AVEDEV(B2:C3)")
+    try sheet.setCell("K7", rawValue: "=GEOMEAN(4, 9)")
+    try sheet.setCell("K8", rawValue: "=HARMEAN(2, 6)")
+    try sheet.setCell("K9", rawValue: "=CORREL(H1:H4, G1:G4)")
+    try sheet.setCell("K10", rawValue: "=SLOPE(H1:H4, G1:G4)")
+    try sheet.setCell("K11", rawValue: "=INTERCEPT(H1:H4, G1:G4)")
+    try sheet.setCell("K12", rawValue: "=FORECAST(5, H1:H4, G1:G4)")
+    try sheet.setCell("K13", rawValue: "=PERCENTILE(B2:C3, 1.5)")
+
+    XCTAssertEqual(sheet.evaluate(at: "K1").numericValue ?? 0, 25.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K2").numericValue ?? 0, 17.5, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K3").numericValue ?? 0, 32.5, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K4").numericValue ?? 0, 125.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K5").numericValue ?? 0, sqrt(125.0), accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K6").numericValue ?? 0, 10.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K7").numericValue ?? 0, 6.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K8").numericValue ?? 0, 3.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K9").numericValue ?? 0, 1.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K10").numericValue ?? 0, 2.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K11").numericValue ?? 0, 1.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K12").numericValue ?? 0, 11.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "K13"), .error("#VALUE!"))
+
+    // 4. Financial functions (IRR, NPER, RATE, EFFECT, NOMINAL, SLN, SYD)
+    try sheet.setCell("L1", rawValue: "=IRR(J1:J3)")
+    try sheet.setCell("L2", rawValue: "=NPER(0.05, -129.50457496545668, 1000)")
+    try sheet.setCell("L3", rawValue: "=RATE(10, -129.50457496545668, 1000)")
+    try sheet.setCell("L4", rawValue: "=EFFECT(0.12, 12)")
+    try sheet.setCell("L5", rawValue: "=NOMINAL(L4, 12)")
+    try sheet.setCell("L6", rawValue: "=SLN(30000, 7500, 10)")
+    try sheet.setCell("L7", rawValue: "=SYD(30000, 7500, 10, 1)")
+
+    // IRR of (-1000, 600, 600): -1000 + 600/(1+r) + 600/(1+r)^2 = 0 -> r ≈ 0.13066238629
+    XCTAssertEqual(sheet.evaluate(at: "L1").numericValue ?? 0, 0.130662386, accuracy: 1e-5)
+    XCTAssertEqual(sheet.evaluate(at: "L2").numericValue ?? 0, 10.0, accuracy: 1e-5)
+    XCTAssertEqual(sheet.evaluate(at: "L3").numericValue ?? 0, 0.05, accuracy: 1e-5)
+    XCTAssertEqual(
+      sheet.evaluate(at: "L4").numericValue ?? 0,
+      pow(1.0 + 0.12 / 12.0, 12.0) - 1.0,
+      accuracy: 1e-7
+    )
+    XCTAssertEqual(sheet.evaluate(at: "L5").numericValue ?? 0, 0.12, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "L6").numericValue ?? 0, 2250.0, accuracy: 1e-6)
+    XCTAssertEqual(sheet.evaluate(at: "L7").numericValue ?? 0, 4090.9090909, accuracy: 1e-5)
+
+    // 5. Date & Time functions (WEEKDAY, WEEKNUM, EDATE, EOMONTH, WORKDAY, NETWORKDAYS, DATEDIF)
+    try sheet.setCell("M1", rawValue: "=WEEKDAY(\"2026-10-19\", 2)")  // Monday -> 1
+    try sheet.setCell("M2", rawValue: "=WEEKDAY(\"2026-10-18\", 1)")  // Sunday -> 1
+    try sheet.setCell("M3", rawValue: "=WEEKNUM(\"2026-01-01\")")
+    try sheet.setCell("M4", rawValue: "=EDATE(\"2026-01-15\", 2)")
+    try sheet.setCell("M5", rawValue: "=EOMONTH(\"2024-01-15\", 1)")  // Leap year Feb 2024 -> 2024-02-29
+    try sheet.setCell("M6", rawValue: "=WORKDAY(\"2026-10-16\", 1)")  // Fri + 1 workday -> Mon 2026-10-19
+    try sheet.setCell("M7", rawValue: "=NETWORKDAYS(\"2026-10-19\", \"2026-10-25\")")
+    try sheet.setCell("M8", rawValue: "=DATEDIF(\"2024-01-15\", \"2026-04-20\", \"Y\")")
+    try sheet.setCell("M9", rawValue: "=DATEDIF(\"2026-01-15\", \"2026-04-15\", \"M\")")
+    try sheet.setCell("M10", rawValue: "=DATEDIF(\"2026-10-01\", \"2026-10-19\", \"D\")")
+
+    XCTAssertEqual(sheet.evaluate(at: "M1"), .number(1))
+    XCTAssertEqual(sheet.evaluate(at: "M2"), .number(1))
+    XCTAssertEqual(sheet.evaluate(at: "M3"), .number(1))
+    XCTAssertEqual(sheet.evaluate(at: "M4"), .text("2026-03-15"))
+    XCTAssertEqual(sheet.evaluate(at: "M5"), .text("2024-02-29"))
+    XCTAssertEqual(sheet.evaluate(at: "M6"), .text("2026-10-19"))
+    XCTAssertEqual(sheet.evaluate(at: "M7"), .number(5))
+    XCTAssertEqual(sheet.evaluate(at: "M8"), .number(2))
+    XCTAssertEqual(sheet.evaluate(at: "M9"), .number(3))
+    XCTAssertEqual(sheet.evaluate(at: "M10"), .number(18))
+
+    // 6. Math & Text functions (SUMSQ, MROUND, QUOTIENT, REPT, PI)
+    try sheet.setCell("N1", rawValue: "=SUMSQ(3, 4)")
+    try sheet.setCell("N2", rawValue: "=MROUND(10, 3)")
+    try sheet.setCell("N3", rawValue: "=QUOTIENT(17, 5)")
+    try sheet.setCell("N4", rawValue: "=QUOTIENT(17, 0)")
+    try sheet.setCell("N5", rawValue: "=REPT(\"AB\", 3)")
+    try sheet.setCell("N6", rawValue: "=PI()")
+    try sheet.setCell("N7", rawValue: "=COMBIN(5, 2)")
+    try sheet.setCell("N8", rawValue: "=GCD(24, 36)")
+    try sheet.setCell("N9", rawValue: "=LCM(4, 6)")
+    try sheet.setCell("N10", rawValue: "=CHAR(65)")
+    try sheet.setCell("N11", rawValue: "=CODE(\"A\")")
+    try sheet.setCell("N12", rawValue: "=OFFSET(B2, 999999999, 0)")
+    try sheet.setCell("N13", rawValue: "=WORKDAY(\"2026-10-16\", 500000)")
+
+    XCTAssertEqual(sheet.evaluate(at: "N1"), .number(25))
+    XCTAssertEqual(sheet.evaluate(at: "N2"), .number(9))
+    XCTAssertEqual(sheet.evaluate(at: "N3"), .number(3))
+    XCTAssertEqual(sheet.evaluate(at: "N4"), .error("#DIV/0!"))
+    XCTAssertEqual(sheet.evaluate(at: "N5"), .text("ABABAB"))
+    XCTAssertEqual(sheet.evaluate(at: "N6").numericValue ?? 0, Double.pi, accuracy: 1e-9)
+    XCTAssertEqual(sheet.evaluate(at: "N7"), .number(10))
+    XCTAssertEqual(sheet.evaluate(at: "N8"), .number(12))
+    XCTAssertEqual(sheet.evaluate(at: "N9"), .number(12))
+    XCTAssertEqual(sheet.evaluate(at: "N10"), .text("A"))
+    XCTAssertEqual(sheet.evaluate(at: "N11"), .number(65))
+    XCTAssertEqual(sheet.evaluate(at: "N12"), .error("#REF!"))
+    XCTAssertEqual(sheet.evaluate(at: "N13"), .error("#NUM!"))
+
+    // 7. CellStyle.wrapText & decimalPlaces formatting and XLSX/ODS round-trip
+    let styleDecimal3 = CellStyle(
+      numberFormat: .decimal2,
+      wrapText: true,
+      decimalPlaces: 3
+    )
+    XCTAssertTrue(styleDecimal3.wrapText)
+    XCTAssertEqual(styleDecimal3.decimalPlaces, 3)
+    XCTAssertEqual(styleDecimal3.formatNumber(1234.5), "1,234.500")
+
+    let styleClamped = CellStyle(
+      numberFormat: .percentage,
+      wrapText: false,
+      decimalPlaces: 99
+    )
+    XCTAssertEqual(styleClamped.decimalPlaces, 6)
+    XCTAssertEqual(styleClamped.formatNumber(0.125), "12.500000%")
+
+    try sheet.setCell("P1", rawValue: "1234.5")
+    try sheet.setCellStyle(styleDecimal3, at: "P1")
+    XCTAssertEqual(sheet.formattedDisplayValue(at: try CellAddress(a1Notation: "P1")), "1,234.500")
+
+    let xlsxRoundTrip = try OOXMLContainerCodec.decodeWorksheet(
+      from: try OOXMLContainerCodec.encodeWorksheet(sheet))
+    let odsRoundTrip = try ODFContainerCodec.decodeWorksheet(
+      from: try ODFContainerCodec.encodeWorksheet(sheet))
+    XCTAssertTrue(xlsxRoundTrip.cellStyle(at: "P1").wrapText)
+    XCTAssertEqual(xlsxRoundTrip.cellStyle(at: "P1").decimalPlaces, 3)
+    XCTAssertTrue(odsRoundTrip.cellStyle(at: "P1").wrapText)
+    XCTAssertEqual(odsRoundTrip.cellStyle(at: "P1").decimalPlaces, 3)
+
+    // 8. ParagraphBlock letterSpacingPercent & charWidthScalePercent codec round-trip
+    let doc = OfficeDocumentModel(
+      title: "자간장평검증",
+      paragraphs: [
+        ParagraphBlock(
+          style: .body,
+          text: "공문서 자간 및 장평 조판 테스트",
+          letterSpacingPercent: -5.0,
+          charWidthScalePercent: 95.0
+        )
+      ]
+    )
+    XCTAssertEqual(doc.paragraphs[0].letterSpacingPercent, -5.0)
+    XCTAssertEqual(doc.paragraphs[0].charWidthScalePercent, 95.0)
+
+    let roundTripDocs: [OfficeDocumentModel] = [
+      try OOXMLContainerCodec.decodeDocument(from: try OOXMLContainerCodec.encodeDocument(doc)),
+      try ODFContainerCodec.decodeDocument(from: try ODFContainerCodec.encodeDocument(doc)),
+      try HWPXContainerCodec.decodeDocument(from: try HWPXContainerCodec.encodeDocument(doc)),
+      try HWP5BinaryCodec.decodeDocument(from: try HWP5BinaryCodec.encodeDocument(doc)),
+      try RTFCodec.decodeDocument(from: RTFCodec.encodeDocument(doc)),
+      try CommonMarkCodec.decodeDocument(from: CommonMarkCodec.encodeDocument(doc)),
+    ]
+    for decoded in roundTripDocs {
+      XCTAssertEqual(decoded.paragraphs.first?.letterSpacingPercent ?? 0.0, -5.0, accuracy: 1e-6)
+      XCTAssertEqual(decoded.paragraphs.first?.charWidthScalePercent ?? 100.0, 95.0, accuracy: 1e-6)
+    }
+
+    // 9. PDFStudioDocumentModel watermarkText & securityInspectionSummary round-trip + redaction
+    var pdf = PDFStudioDocumentModel.fromDocument(doc)
+    pdf.applyWatermark("대외비 CONFIDENTIAL")
+    _ = pdf.redactText("테스트")
+    XCTAssertEqual(pdf.watermarkText, "대외비 CONFIDENTIAL")
+    XCTAssertTrue(pdf.securityInspectionSummary.contains("ISO 32000-1 무결성 검증 완료"))
+    XCTAssertTrue(pdf.securityInspectionSummary.contains("워터마크(대외비 CONFIDENTIAL)"))
+    let pdfBytes = PDFBinarySerializer.encode(pdf)
+    let decodedPDF = try PDFBinarySerializer.decode(from: pdfBytes)
+    XCTAssertEqual(decodedPDF.watermarkText, "대외비 CONFIDENTIAL")
+    _ = pdf.redactText("CONFIDENTIAL")
+    XCTAssertEqual(pdf.watermarkText, "대외비 ████")
+  }
 }

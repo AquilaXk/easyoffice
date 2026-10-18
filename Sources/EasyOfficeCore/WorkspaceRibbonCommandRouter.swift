@@ -130,7 +130,8 @@ extension WorkspaceViewModel {
     if commandID.hasSuffix("-data-fn-browser") || commandID.hasSuffix("-data-fx") {
       recordUndoSnapshot(for: tabID)
       applyDataCommand(at: idx, kind: .functionWizard)
-      lastExecutedCommandSummary = "77종 함수 마법사(AVERAGE) 수식 적용 완료"
+      lastExecutedCommandSummary =
+        "\(WorksheetModel.supportedFunctionNames.count)종 함수 마법사(AVERAGE) 수식 적용 완료"
       return
     }
     if commandID.hasSuffix("-data-sort") {

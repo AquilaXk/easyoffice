@@ -278,6 +278,8 @@ public enum FormulaError: String, Sendable, Codable, Equatable {
   case ref = "#REF!"
   case na = "#N/A"
   case num = "#NUM!"
+
+  public static let divZero: FormulaError = .divByZero
 }
 
 /// Pre-compiled Abstract Syntax Tree (AST) for spreadsheet cell values and formulas.
@@ -329,6 +331,10 @@ public enum EvaluatedCellValue: Sendable, Codable, Equatable, CustomStringConver
   case text(String)
   case boolean(Bool)
   case error(String)  // e.g. #DIV/0!, #VALUE!, #NAME?, #REF!, #N/A, #NUM!
+
+  public static func error(_ formulaError: FormulaError) -> EvaluatedCellValue {
+    .error(formulaError.rawValue)
+  }
 
   public var description: String {
     switch self {
@@ -384,6 +390,12 @@ public enum CellNumberFormat: String, Sendable, Codable, Equatable, CaseIterable
   case percentage
   case scientific
   case dateISO
+
+  public static let decimalTwo: CellNumberFormat = .decimal2
+
+  public func format(_ value: Double) -> String {
+    format(.number(value))
+  }
 
   public func format(_ value: EvaluatedCellValue) -> String {
     guard case .number(let num) = value, num.isFinite else {
@@ -475,6 +487,17 @@ public struct CellStyle: Sendable, Codable, Equatable {
   public var numberFormat: CellNumberFormat
   public var fillHex: String?
   public var textHex: String?
+  public var wrapText: Bool
+  public var decimalPlaces: Int? {
+    didSet {
+      if let dp = decimalPlaces {
+        let clamped = max(0, min(6, dp))
+        if decimalPlaces != clamped {
+          decimalPlaces = clamped
+        }
+      }
+    }
+  }
 
   public init(
     isBold: Bool = false,
@@ -483,7 +506,9 @@ public struct CellStyle: Sendable, Codable, Equatable {
     alignment: CellHorizontalAlignment = .leading,
     numberFormat: CellNumberFormat = .general,
     fillHex: String? = nil,
-    textHex: String? = nil
+    textHex: String? = nil,
+    wrapText: Bool = false,
+    decimalPlaces: Int? = nil
   ) {
     self.isBold = isBold
     self.isItalic = isItalic
@@ -492,6 +517,71 @@ public struct CellStyle: Sendable, Codable, Equatable {
     self.numberFormat = numberFormat
     self.fillHex = fillHex
     self.textHex = textHex
+    self.wrapText = wrapText
+    self.decimalPlaces = decimalPlaces.map { max(0, min(6, $0)) }
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case isBold
+    case isItalic
+    case isUnderlined
+    case alignment
+    case numberFormat
+    case fillHex
+    case textHex
+    case wrapText
+    case decimalPlaces
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.isBold = try container.decodeIfPresent(Bool.self, forKey: .isBold) ?? false
+    self.isItalic = try container.decodeIfPresent(Bool.self, forKey: .isItalic) ?? false
+    self.isUnderlined = try container.decodeIfPresent(Bool.self, forKey: .isUnderlined) ?? false
+    self.alignment =
+      try container.decodeIfPresent(CellHorizontalAlignment.self, forKey: .alignment) ?? .leading
+    self.numberFormat =
+      try container.decodeIfPresent(CellNumberFormat.self, forKey: .numberFormat) ?? .general
+    self.fillHex = try container.decodeIfPresent(String.self, forKey: .fillHex)
+    self.textHex = try container.decodeIfPresent(String.self, forKey: .textHex)
+    self.wrapText = try container.decodeIfPresent(Bool.self, forKey: .wrapText) ?? false
+    self.decimalPlaces =
+      try container.decodeIfPresent(Int.self, forKey: .decimalPlaces).map { max(0, min(6, $0)) }
+  }
+
+  public func formatNumber(_ value: Double) -> String {
+    guard value.isFinite else {
+      return EvaluatedCellValue.number(value).description
+    }
+    guard let dp = decimalPlaces else {
+      return numberFormat.format(.number(value))
+    }
+    let clamped = max(0, min(6, dp))
+    switch numberFormat {
+    case .decimal2, .integer, .thousands:
+      return CellNumberFormat.formatGroupedNumber(value, fractionDigits: clamped)
+    case .currencyKRW:
+      let sign = value < 0 ? "-" : ""
+      return "\(sign)₩\(CellNumberFormat.formatGroupedNumber(abs(value), fractionDigits: clamped))"
+    case .currencyUSD:
+      let sign = value < 0 ? "-" : ""
+      return "\(sign)$\(CellNumberFormat.formatGroupedNumber(abs(value), fractionDigits: clamped))"
+    case .percentage:
+      return String(format: "%.\(clamped)f%%", value * 100.0)
+    case .scientific:
+      return String(format: "%.\(clamped)E", value)
+    case .dateISO:
+      return numberFormat.format(.number(value))
+    case .general:
+      return String(format: "%.\(clamped)f", value)
+    }
+  }
+
+  public func format(_ value: EvaluatedCellValue) -> String {
+    if case .number(let num) = value, num.isFinite {
+      return formatNumber(num)
+    }
+    return numberFormat.format(value)
   }
 }
 
