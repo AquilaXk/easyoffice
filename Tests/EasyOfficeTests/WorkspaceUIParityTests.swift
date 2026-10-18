@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import EasyOfficeDesignSystem
 @testable import EasyOfficeCore
 
@@ -468,7 +469,7 @@ final class WorkspaceUIParityTests: XCTestCase {
             XCTAssertNotEqual(mutatedSheet.pageSetup, initialPageSetup, "Sheet pageSetup must be modified by layout commands")
             XCTAssertFalse(mutatedSheet.sheetComments.isEmpty, "Sheet sheetComments must be populated by link/comment/pivot commands")
             XCTAssertTrue(mutatedSheet.trackChangesEnabled, "Sheet trackChangesEnabled must be toggled on by review-track")
-            XCTAssertEqual(mutatedSheet.additionalSheets.count, 1, "Sheet insert-table must add 1 additional sheet page")
+            XCTAssertEqual(mutatedSheet.additionalSheets.count, 2, "Sheet insert-table and sheet-mod-pivot must add 2 additional sheet pages")
         } else {
             XCTFail("Expected mutated sheet payload")
         }
@@ -684,9 +685,253 @@ final class WorkspaceUIParityTests: XCTestCase {
                 XCTAssertEqual(sortedSheet.rawValue(at: "B6"), "500")
                 XCTAssertEqual(sortedSheet.rawValue(at: "A6"), "알파")
                 XCTAssertEqual(sortedSheet.rawValue(at: "B7"), "=SUM(B2:B6)")
-                XCTAssertEqual(try sortedSheet.evaluate(at: "B7"), .number(1500))
+                XCTAssertEqual(sortedSheet.evaluate(at: "B7"), .number(1500))
+            }
+        }
+    }
+
+    @MainActor
+    func testThirdAuditZeroSlopInspectorLiveCanvasAndNonDestructiveCommands() throws {
+        let vm = WorkspaceViewModel()
+
+        // 1. sheet-review-security & sheet-review-verify preserve sheetComments 100% and sheet-mod-pivot creates a dedicated pivot sheet page
+        let sheetTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet }))
+        vm.activeTabID = sheetTab.id
+        vm.selectedSheetCell = "B2"
+        vm.commentDraftText = "사용자 중요 재무 검토 메모"
+        vm.executeRibbonCommand("sheet-review-comment")
+
+        let b2Coord = try CellAddress(a1Notation: "B2").packedCoordinate
+        if case let .sheet(commentedSheet) = vm.activeTab?.payload {
+            XCTAssertEqual(commentedSheet.sheetComments[b2Coord], "사용자 중요 재무 검토 메모")
+        }
+
+        vm.executeRibbonCommand("sheet-review-security")
+        vm.executeRibbonCommand("sheet-review-verify")
+        if case let .sheet(auditedSheet) = vm.activeTab?.payload {
+            XCTAssertEqual(
+                auditedSheet.sheetComments[b2Coord],
+                "사용자 중요 재무 검토 메모",
+                "sheet-review-security must never wipe user cell comments"
+            )
+            XCTAssertTrue(auditedSheet.trackChangesEnabled)
+        }
+
+        vm.executeRibbonCommand("sheet-mod-pivot")
+        if case let .sheet(pivotedSheet) = vm.activeTab?.payload {
+            XCTAssertEqual(
+                pivotedSheet.sheetComments[b2Coord],
+                "사용자 중요 재무 검토 메모",
+                "sheet-mod-pivot must not overwrite cell comments"
+            )
+            XCTAssertTrue(
+                pivotedSheet.additionalSheets.contains(where: { $0.name.hasPrefix("피벗 요약") }),
+                "sheet-mod-pivot must add a dedicated pivot summary sheet page"
+            )
+        }
+
+        // 2. doc-mod-mailmerge, hwp-mod-manuscript, doc-data-sum, doc-insert-chart, doc-insert-shape preserve footerText
+        let docTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .document }))
+        vm.activeTabID = docTab.id
+        let originalDocFooter: String
+        let initialDocTableCount: Int
+        if case let .document(doc) = vm.activeTab?.payload {
+            originalDocFooter = doc.footerText
+            initialDocTableCount = doc.tables.count
+        } else {
+            XCTFail("Expected document payload")
+            return
+        }
+
+        vm.executeRibbonCommand("doc-mod-mailmerge")
+        vm.executeRibbonCommand("doc-data-sum")
+        vm.executeRibbonCommand("doc-data-fx")
+        vm.executeRibbonCommand("doc-data-sort")
+        vm.executeRibbonCommand("doc-data-validate")
+        vm.executeRibbonCommand("doc-insert-chart")
+        vm.executeRibbonCommand("doc-insert-shape")
+
+        if case let .document(mutatedDoc) = vm.activeTab?.payload {
+            XCTAssertEqual(
+                mutatedDoc.footerText,
+                originalDocFooter,
+                "Document commands must never overwrite doc.footerText"
+            )
+            XCTAssertEqual(mutatedDoc.tables.count, initialDocTableCount + 1)
+            XCTAssertEqual(mutatedDoc.tables.last?.caption, "차트 데이터 테이블")
+            XCTAssertTrue(mutatedDoc.tables[0].rows.contains(where: { $0.first?.hasPrefix("합계") == true }))
+            XCTAssertTrue(mutatedDoc.tables[0].rows.contains(where: { $0.first?.hasPrefix("평균") == true }))
+            let shapePara = try XCTUnwrap(mutatedDoc.paragraphs.last)
+            XCTAssertEqual(shapePara.runs.first?.text, "프로세스 블록")
+            XCTAssertEqual(shapePara.runs.first?.foregroundHex, "#5C6BC0")
+        }
+
+        let hwpTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .hwp }))
+        vm.activeTabID = hwpTab.id
+        let originalHwpFooter: String
+        if case let .document(hwpDoc) = vm.activeTab?.payload {
+            originalHwpFooter = hwpDoc.footerText
+        } else {
+            XCTFail("Expected HWP payload")
+            return
+        }
+        vm.showRightInspector = false
+        vm.executeRibbonCommand("hwp-mod-manuscript")
+        if case let .document(mutatedHwp) = vm.activeTab?.payload {
+            XCTAssertEqual(
+                mutatedHwp.footerText,
+                originalHwpFooter,
+                "hwp-mod-manuscript must never overwrite doc.footerText"
+            )
+            XCTAssertTrue(mutatedHwp.revisions.contains(where: { $0.author == "원고지계산기" }))
+            XCTAssertTrue(vm.showRightInspector)
+        }
+
+        // 3. Slide review/data commands preserve speakerNotes without appending side-channel strings
+        let slideTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .slide }))
+        vm.activeTabID = slideTab.id
+        let originalSpeakerNotes: String
+        if case let .slide(deck) = vm.activeTab?.payload {
+            originalSpeakerNotes = deck.slides[0].speakerNotes
+        } else {
+            XCTFail("Expected slide payload")
+            return
+        }
+        vm.executeRibbonCommand("slide-review-track")
+        vm.executeRibbonCommand("slide-review-comment")
+        vm.executeRibbonCommand("slide-data-autosum")
+        if case let .slide(mutatedDeck) = vm.activeTab?.payload {
+            XCTAssertEqual(
+                mutatedDeck.slides[0].speakerNotes,
+                originalSpeakerNotes,
+                "Slide review/data commands must never pollute speakerNotes"
+            )
+        }
+
+        // 4. pdf-mod-splitmerge on multi-page PDF creates a new split PDF tab without destroying original pages
+        let pdfTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .pdf }))
+        vm.activeTabID = pdfTab.id
+        let tabCountBeforeSplit = vm.openTabs.count
+        vm.selectedPDFPageIndex = 1
+        vm.executeRibbonCommand("pdf-mod-splitmerge")
+        XCTAssertEqual(vm.openTabs.count, tabCountBeforeSplit + 1)
+        let originalPDFTabAfter = try XCTUnwrap(vm.openTabs.first(where: { $0.id == pdfTab.id }))
+        if case let .pdf(origPDF) = originalPDFTabAfter.payload {
+            XCTAssertEqual(origPDF.pages.count, 2, "Original multi-page PDF tab must retain all pages")
+        }
+        let splitPDFTab = try XCTUnwrap(vm.openTabs.last)
+        XCTAssertTrue(splitPDFTab.fileName.contains("_분할_P2.pdf"))
+        if case let .pdf(extractedPDF) = splitPDFTab.payload {
+            XCTAssertEqual(extractedPDF.pages.count, 1)
+        }
+
+        // 5. Substring target phrase inline run splitting & real multi-pixel PNG attachment
+        let freshVM = WorkspaceViewModel()
+        let freshDocTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.moduleKind == .document }))
+        freshVM.activeTabID = freshDocTab.id
+        if case let .document(doc) = freshVM.activeTab?.payload {
+            freshVM.selectedParagraphID = doc.paragraphs[2].id
+        }
+        freshVM.inlineRunTargetPhrase = "시그니처 라벤더 디자인 시스템"
+        freshVM.applyInlineRunFormattingToActiveParagraph(isBold: true, isItalic: true, isUnderlined: true, foregroundHex: "#5C6BC0")
+        if case let .document(styledDoc) = freshVM.activeTab?.payload {
+            let p2 = styledDoc.paragraphs[2]
+            XCTAssertEqual(p2.runs.count, 3)
+            XCTAssertEqual(p2.runs[1].text, "시그니처 라벤더 디자인 시스템")
+            XCTAssertTrue(p2.runs[1].isBold)
+            XCTAssertTrue(p2.runs[1].isItalic)
+            XCTAssertTrue(p2.runs[1].isUnderlined)
+            XCTAssertEqual(p2.runs[1].foregroundHex, "#5C6BC0")
+        }
+
+        freshVM.insertSampleImageAttachment(caption: "멀티픽셀 다이어그램")
+        if case let .document(imgDoc) = freshVM.activeTab?.payload {
+            let attachment = try XCTUnwrap(imgDoc.images.last)
+            XCTAssertGreaterThan(attachment.imageData.count, 100)
+            let decodedImage = try XCTUnwrap(NSImage(data: attachment.imageData))
+            XCTAssertGreaterThanOrEqual(decodedImage.size.width, 16)
+            XCTAssertGreaterThanOrEqual(decodedImage.size.height, 16)
+        }
+
+        // 6. Sheet cell number format, alignment, and merge range helpers
+        let freshSheetTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.moduleKind == .sheet }))
+        freshVM.activeTabID = freshSheetTab.id
+        freshVM.selectedSheetCell = "B2"
+        freshVM.setSelectedSheetCellNumberFormat(.currencyKRW)
+        freshVM.setSelectedSheetCellAlignment(.trailing)
+        freshVM.toggleMergeOnSelectedSheetCell(targetRange: "A1:C1")
+        if case let .sheet(styledSheet) = freshVM.activeTab?.payload {
+            let style = styledSheet.cellStyle(at: "B2")
+            XCTAssertEqual(style.numberFormat, .currencyKRW)
+            XCTAssertEqual(style.alignment, .trailing)
+        }
+        XCTAssertEqual(freshVM.mergedSheetRangesByTab[freshSheetTab.id], ["A1:C1"])
+        freshVM.toggleMergeOnSelectedSheetCell(targetRange: "A1:C1")
+        XCTAssertEqual(freshVM.mergedSheetRangesByTab[freshSheetTab.id], [])
+
+        // 7. Presenter timer gating & advancePresenterSlide no +15s jump
+        let freshSlideTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.moduleKind == .slide }))
+        freshVM.activeTabID = freshSlideTab.id
+        freshVM.presenterElapsedSeconds = 10
+        freshVM.isPresenterTimerRunning = false
+        freshVM.tickPresenterTimer()
+        XCTAssertEqual(freshVM.presenterElapsedSeconds, 10, "Timer must not advance when paused")
+        freshVM.advancePresenterSlide()
+        XCTAssertEqual(freshVM.presenterElapsedSeconds, 10, "advancePresenterSlide must not add 15 seconds")
+        freshVM.isPresenterTimerRunning = true
+        freshVM.tickPresenterTimer()
+        XCTAssertEqual(freshVM.presenterElapsedSeconds, 11, "Timer must advance by 1s when running")
+
+        // 8. Fail-closed image validation, non-destructive summary revision accept, slide-review-track toggle, Z-Order, and additionalSheets search
+        freshVM.activeTabID = freshDocTab.id
+        let countBeforeInvalidImg: Int = {
+            if case let .document(d) = freshVM.activeTab?.payload { return d.images.count }
+            return 0
+        }()
+        freshVM.lastErrorMessage = nil
+        freshVM.importImageAttachment(data: Data([0x00, 0x01, 0x02, 0x03, 0x04]), fileName: "fake.png", caption: "위조 이미지")
+        XCTAssertNotNil(freshVM.lastErrorMessage, "Invalid magic bytes must fail closed with error message")
+        if case var .document(d) = freshVM.activeTab?.payload {
+            XCTAssertEqual(d.images.count, countBeforeInvalidImg)
+            let p0TextBefore = d.paragraphs[0].text
+            d.recordRevision(author: "QA", summary: "문서 요약 리비전")
+            let revID = try XCTUnwrap(d.revisions.last?.id)
+            d.acceptRevision(id: revID)
+            XCTAssertEqual(d.paragraphs[0].text, p0TextBefore, "Accepting a document summary revision must never overwrite paragraph 0")
+        }
+
+        freshVM.activeTabID = freshSlideTab.id
+        freshVM.executeRibbonCommand("slide-review-track")
+        let elemCountAfterFirstTrack: Int = {
+            if case let .slide(deck) = freshVM.activeTab?.payload { return deck.slides[0].elements.count }
+            return 0
+        }()
+        freshVM.executeRibbonCommand("slide-review-track")
+        if case let .slide(deck) = freshVM.activeTab?.payload {
+            XCTAssertEqual(deck.slides[0].elements.count, elemCountAfterFirstTrack, "Repeated slide-review-track must toggle existing badge instead of duplicating shapes")
+            if deck.slides[0].elements.count >= 2 {
+                let firstID = deck.slides[0].elements[0].id
+                freshVM.moveSlideElementZOrder(slideIndex: 0, elementID: firstID, bringForward: true)
+            }
+        }
+        if case let .slide(reorderedDeck) = freshVM.activeTab?.payload, reorderedDeck.slides[0].elements.count >= 2 {
+            XCTAssertNotEqual(reorderedDeck.slides[0].elements[0].id, reorderedDeck.slides[0].elements[1].id)
+        }
+
+        freshVM.activeTabID = freshSheetTab.id
+        freshVM.selectedSheetCell = "C3"
+        freshVM.setSelectedSheetCellComment("인스펙터 셀 메모")
+        freshVM.addWorksheetTab(named: "별첨데이터")
+        if let updatedSheetTab = freshVM.openTabs.first(where: { $0.id == freshSheetTab.id }) {
+            let corpus = updatedSheetTab.searchableCorpus()
+            XCTAssertTrue(corpus.contains("별첨데이터"))
+            if case let .sheet(s) = updatedSheetTab.payload {
+                let c3 = try CellAddress(a1Notation: "C3").packedCoordinate
+                XCTAssertEqual(s.sheetComments[c3], "인스펙터 셀 메모")
             }
         }
     }
 }
+
+
 

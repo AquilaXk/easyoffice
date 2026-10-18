@@ -91,14 +91,18 @@ struct HomeHubWorkspaceView: View {
                         }
                     }
 
-                    HStack {
+                    HStack(spacing: 8) {
                         Text("표준 및 사용자 서식 템플릿 (\(viewModel.allAvailableTemplates.count)종)")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(palette.primaryText.swiftUIColor)
                         Spacer()
+                        TextField("사용자 템플릿 이름 (선택)", text: $viewModel.customTemplateTitleDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11))
+                            .frame(width: 180)
                         Button("현재 탭을 사용자 템플릿으로 저장") {
                             viewModel.saveActiveTabAsCustomTemplate(
-                                title: "사용자 정의 표준 양식",
+                                title: nil,
                                 subtitle: "현재 활성 문서 기반 커스텀 템플릿"
                             )
                         }
