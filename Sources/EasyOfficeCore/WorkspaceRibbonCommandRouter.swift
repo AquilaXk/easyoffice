@@ -198,7 +198,7 @@ extension WorkspaceViewModel {
           {
             var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
             summaryRow[0] = "합계 (=SUM(ABOVE))"
-            summaryRow[lastCol] = String(Int(val))
+            summaryRow[lastCol] = val.isFinite ? String(format: "%.0f", val) : "0"
             doc.tables[0].rows.append(summaryRow)
           }
         } else {
@@ -698,8 +698,10 @@ extension WorkspaceViewModel {
         doc.bookmarks["책갈피_\(doc.bookmarks.count + 1)"] = anchorID
         if doc.paragraphs.indices.contains(pIdx) {
           let trimmedURL = inlineLinkURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-          let resolvedURL =
+          let rawCandidate =
             trimmedURL.isEmpty ? "https://easyoffice.local/reference" : trimmedURL
+          let resolvedURL =
+            Self.sanitizeSafeHyperlinkURL(rawCandidate) ?? "https://easyoffice.local/reference"
           if let utf16Range = selectedParagraphUTF16Range, !utf16Range.isEmpty {
             doc.paragraphs[pIdx].applyRunFormatting(
               utf16Range: utf16Range,
@@ -1017,7 +1019,7 @@ extension WorkspaceViewModel {
             "=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0
         var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
         summaryRow[0] = "합계 (=SUM(ABOVE))"
-        summaryRow[lastCol] = String(Int(sum))
+        summaryRow[lastCol] = sum.isFinite ? String(format: "%.0f", sum) : "0"
         doc.tables[0].rows.append(summaryRow)
       case .functionWizard:
         if doc.tables.isEmpty {

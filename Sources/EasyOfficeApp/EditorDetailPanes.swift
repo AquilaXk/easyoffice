@@ -50,6 +50,29 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
         utf16Range: utf16Range
       )
     }
+
+    public func textView(
+      _ textView: NSTextView,
+      clickedOnLink link: Any,
+      at charIndex: Int
+    ) -> Bool {
+      let rawString: String?
+      if let url = link as? URL {
+        rawString = url.absoluteString
+      } else if let str = link as? String {
+        rawString = str
+      } else {
+        rawString = nil
+      }
+      guard let candidate = rawString,
+        let safeString = WorkspaceViewModel.sanitizeSafeHyperlinkURL(candidate),
+        let safeURL = URL(string: safeString)
+      else {
+        return true
+      }
+      parent.viewModel.lastExecutedCommandSummary = "안전 하이퍼링크 검증 완료: \(safeURL.absoluteString)"
+      return true
+    }
   }
 
   public init(
@@ -185,8 +208,11 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       if let bgHex = run.backgroundHex, let bgColor = nsColorFromHex(bgHex) {
         attrs[.backgroundColor] = bgColor
       }
-      if let link = run.linkURL, !link.isEmpty {
-        attrs[.link] = link
+      if let link = run.linkURL,
+        let safeLink = WorkspaceViewModel.sanitizeSafeHyperlinkURL(link),
+        let safeURL = URL(string: safeLink)
+      {
+        attrs[.link] = safeURL
         attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
       }
       result.append(NSAttributedString(string: run.text, attributes: attrs))
@@ -730,12 +756,25 @@ public struct DocumentEditorDetailPaneView: View {
     palette: WorkspaceThemePalette
   ) -> AttributedString {
     var combined = AttributedString()
+    if paragraph.firstLineIndentPt > 0 {
+      let spaceCount = max(1, min(12, Int(round(paragraph.firstLineIndentPt / 6.0))))
+      combined.append(AttributedString(String(repeating: " ", count: spaceCount)))
+    }
     for run in paragraph.effectiveRuns {
-      let hasLink = !(run.linkURL ?? "").isEmpty
+      let safeLink = run.linkURL.flatMap { WorkspaceViewModel.sanitizeSafeHyperlinkURL($0) }
+      let hasLink = safeLink != nil
       let displaySegment = hasLink ? "\(run.text) [🔗]" : run.text
       var segment = AttributedString(displaySegment)
       let fontSize = CGFloat(run.fontSizePt ?? paragraph.fontSizePt)
-      var font = Font.system(size: fontSize, weight: run.isBold ? .bold : .regular)
+      let fontFamily = (run.fontName ?? paragraph.fontName).trimmingCharacters(
+        in: .whitespacesAndNewlines)
+      var font: Font
+      if !fontFamily.isEmpty && fontFamily != "Pretendard" && fontFamily != "System" {
+        font = Font.custom(fontFamily, size: fontSize)
+        if run.isBold { font = font.weight(.bold) }
+      } else {
+        font = Font.system(size: fontSize, weight: run.isBold ? .bold : .regular)
+      }
       if run.isItalic {
         font = font.italic()
       }
@@ -1031,7 +1070,8 @@ public struct DocumentEditorDetailPaneView: View {
         }
 
         if let sumAbove, hasExplicitFormulaCell || sumAbove > 0 {
-          Text("표 수식 =SUM(ABOVE): \(Int(sumAbove))")
+          let sumFormatted = sumAbove.isFinite ? String(format: "%.0f", sumAbove) : "0"
+          Text("표 수식 =SUM(ABOVE): \(sumFormatted)")
             .font(.system(size: 10, weight: .bold, design: .monospaced))
             .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
             .padding(.horizontal, 6)
@@ -1044,48 +1084,102 @@ public struct DocumentEditorDetailPaneView: View {
       ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIdx, row in
         HStack(spacing: 2) {
           ForEach(Array(row.enumerated()), id: \.offset) { colIdx, cell in
-            if isPrimaryPane {
-              TextField(
-                "",
-                text: Binding(
-                  get: { cell },
-                  set: { updated in
-                    viewModel.updateTableCell(
-                      tableID: table.id,
-                      row: rowIdx,
-                      col: colIdx,
-                      newValue: updated
+            if !table.isCoveredByNonOriginSpan(atRow: rowIdx, column: colIdx) {
+              let span = table.originSpan(atRow: rowIdx, column: colIdx)
+              let borderStyle = table.effectiveBorderStyle(atRow: rowIdx, column: colIdx)
+              let isHeader = rowIdx == 0 && table.hasHeaderRow
+              let cellBg =
+                isHeader
+                ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                : palette.elevatedSurface.swiftUIColor
+              HStack(spacing: 4) {
+                if isPrimaryPane {
+                  TextField(
+                    "",
+                    text: Binding(
+                      get: { cell },
+                      set: { updated in
+                        viewModel.updateTableCell(
+                          tableID: table.id,
+                          row: rowIdx,
+                          col: colIdx,
+                          newValue: updated
+                        )
+                      }
                     )
-                  }
-                )
-              )
-              .textFieldStyle(.plain)
-              .font(.system(size: 12, weight: rowIdx == 0 && table.hasHeaderRow ? .bold : .regular))
-              .foregroundStyle(palette.primaryText.swiftUIColor)
+                  )
+                  .textFieldStyle(.plain)
+                  .font(.system(size: 12, weight: isHeader ? .bold : .regular))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                } else {
+                  Text(cell)
+                    .font(.system(size: 12, weight: isHeader ? .bold : .regular))
+                    .foregroundStyle(palette.primaryText.swiftUIColor)
+                }
+                Spacer(minLength: 0)
+                if let span, span.rowSpan > 1 || span.columnSpan > 1 {
+                  Text("\(span.rowSpan)×\(span.columnSpan)")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
+                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+              }
               .frame(maxWidth: .infinity, alignment: .leading)
+              .layoutPriority(Double(span?.columnSpan ?? 1))
               .padding(6)
-              .background(
-                rowIdx == 0 && table.hasHeaderRow
-                  ? EasyOfficeDesignTokens.brand100.swiftUIColor
-                  : palette.elevatedSurface.swiftUIColor
+              .background(cellBg)
+              .overlay(
+                tableCellBorderOverlay(
+                  style: borderStyle,
+                  color: palette.border.swiftUIColor
+                )
               )
-            } else {
-              Text(cell)
-                .font(
-                  .system(size: 12, weight: rowIdx == 0 && table.hasHeaderRow ? .bold : .regular)
-                )
-                .foregroundStyle(palette.primaryText.swiftUIColor)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(6)
-                .background(
-                  rowIdx == 0 && table.hasHeaderRow
-                    ? EasyOfficeDesignTokens.brand100.swiftUIColor
-                    : palette.elevatedSurface.swiftUIColor
-                )
             }
           }
         }
       }
+    }
+  }
+
+  @ViewBuilder
+  private func tableCellBorderOverlay(style: TableCellBorderStyle, color: Color) -> some View {
+    switch style {
+    case .solid:
+      Rectangle().stroke(color, lineWidth: 1)
+    case .doubleLine:
+      ZStack {
+        Rectangle().stroke(color, lineWidth: 1)
+        Rectangle().inset(by: 2).stroke(color, lineWidth: 1)
+      }
+    case .dashed:
+      Rectangle().stroke(color, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+    case .diagonalDown:
+      GeometryReader { geo in
+        ZStack {
+          Rectangle().stroke(color, lineWidth: 1)
+          Path { p in
+            p.move(to: .zero)
+            p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height))
+          }
+          .stroke(color.opacity(0.65), lineWidth: 1)
+        }
+      }
+    case .diagonalUp:
+      GeometryReader { geo in
+        ZStack {
+          Rectangle().stroke(color, lineWidth: 1)
+          Path { p in
+            p.move(to: CGPoint(x: 0, y: geo.size.height))
+            p.addLine(to: CGPoint(x: geo.size.width, y: 0))
+          }
+          .stroke(color.opacity(0.65), lineWidth: 1)
+        }
+      }
+    case .none:
+      EmptyView()
     }
   }
 }

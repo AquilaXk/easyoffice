@@ -344,7 +344,36 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTFail("Expected updated document payload")
     }
 
-    // Table row/column insert and delete
+    // Verify second invocation of toggleHighlightOnActiveParagraph and toggleStrikethroughOnActiveParagraph genuinely toggles OFF
+    vm.toggleHighlightOnActiveParagraph(colorHex: "#FFF59D")
+    vm.toggleStrikethroughOnActiveParagraph()
+    if case .document(let toggledOffDoc) = vm.activeTab?.payload {
+      let toggledOffPara = try XCTUnwrap(
+        toggledOffDoc.paragraphs.first(where: { $0.id == para.id }))
+      XCTAssertFalse(toggledOffPara.runs.contains(where: { $0.backgroundHex == "#FFF59D" }))
+      XCTAssertFalse(toggledOffPara.runs.contains(where: { $0.isStrikethrough }))
+    }
+
+    // Verify hyperlink scheme allowlist sanitization (HTTPS/HTTP/MAILTO only; reject javascript:, file:, data:)
+    XCTAssertNil(WorkspaceViewModel.sanitizeSafeHyperlinkURL("javascript:alert(1)"))
+    XCTAssertNil(WorkspaceViewModel.sanitizeSafeHyperlinkURL("file:///etc/passwd"))
+    XCTAssertNil(WorkspaceViewModel.sanitizeSafeHyperlinkURL("data:text/html,<script>"))
+    XCTAssertEqual(
+      WorkspaceViewModel.sanitizeSafeHyperlinkURL("https://easyoffice.local/spec"),
+      "https://easyoffice.local/spec"
+    )
+    XCTAssertEqual(
+      WorkspaceViewModel.sanitizeSafeHyperlinkURL("mailto:qa@easyoffice.local"),
+      "mailto:qa@easyoffice.local"
+    )
+    XCTAssertEqual(
+      WorkspaceViewModel.sanitizeSafeHyperlinkURL("easyoffice.local/docs"),
+      "https://easyoffice.local/docs"
+    )
+    vm.insertHyperlinkIntoActiveParagraph(url: "javascript:alert(1)")
+    XCTAssertNotNil(vm.lastErrorMessage)
+
+    // Table row/column insert and delete + span & border style lookup helpers
     let initialRowCount: Int
     let initialColCount: Int
     if case .document(let docBeforeTable) = vm.activeTab?.payload {
@@ -353,6 +382,29 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     } else {
       return XCTFail("Expected document payload")
     }
+
+    var spanTestTable = DocumentTableBlock(
+      rows: [
+        ["구분", "상세", "비고"],
+        ["항목 A", "병합 데이터", "참조"],
+        ["항목 B", "하위 데이터", "정상"],
+      ],
+      cellSpans: [
+        TableCellSpan(
+          rowIndex: 0, columnIndex: 0, rowSpan: 2, columnSpan: 2, borderStyle: .doubleLine)
+      ],
+      borderStyle: .solid
+    )
+    XCTAssertNotNil(spanTestTable.originSpan(atRow: 0, column: 0))
+    XCTAssertFalse(spanTestTable.isCoveredByNonOriginSpan(atRow: 0, column: 0))
+    XCTAssertTrue(spanTestTable.isCoveredByNonOriginSpan(atRow: 0, column: 1))
+    XCTAssertTrue(spanTestTable.isCoveredByNonOriginSpan(atRow: 1, column: 0))
+    XCTAssertTrue(spanTestTable.isCoveredByNonOriginSpan(atRow: 1, column: 1))
+    XCTAssertFalse(spanTestTable.isCoveredByNonOriginSpan(atRow: 1, column: 2))
+    XCTAssertEqual(spanTestTable.effectiveBorderStyle(atRow: 0, column: 0), .doubleLine)
+    XCTAssertEqual(spanTestTable.effectiveBorderStyle(atRow: 1, column: 2), .solid)
+    spanTestTable.insertRow(at: 0, defaultCellText: "신규")
+    XCTAssertNotNil(spanTestTable.originSpan(atRow: 1, column: 0))
 
     vm.insertRowInDocumentTable(tableIndex: 0)
     vm.insertColumnInDocumentTable(tableIndex: 0)
@@ -406,27 +458,42 @@ final class DeepDesktopInteractionsTests: XCTestCase {
 
     // Merge honoring selectedSheetRange = "B2:D3"
     vm.selectSheetCellOrRange(primaryCell: "B2", rangeNotation: "B2:D3")
-    vm.toggleMergeOnSelectedSheetCell()
+    vm.mergeSelectedSheetRange()
     XCTAssertTrue(vm.mergedSheetRanges(for: sheetTab.id).contains("B2:D3"))
-    vm.toggleMergeOnSelectedSheetCell()
+    vm.unmergeSelectedSheetRange()
     XCTAssertFalse(vm.mergedSheetRanges(for: sheetTab.id).contains("B2:D3"))
 
-    // Row & column insert/delete at selection
+    // Row & column insert/delete at selection with intermediate shift assertions
     vm.selectSheetCellOrRange(primaryCell: "B2")
+    let originalB2: String? = {
+      if case .sheet(let s) = vm.activeTab?.payload { return s.rawValue(at: "B2") }
+      return nil
+    }()
+    XCTAssertEqual(originalB2, "120")
+
     vm.insertSheetRowAtSelection()
     if case .sheet(let afterRowInsert) = vm.activeTab?.payload {
       XCTAssertEqual(afterRowInsert.rawValue(at: "A3"), "엔진 최적화")
+      XCTAssertEqual(afterRowInsert.rawValue(at: "B3"), "120")
     }
     vm.deleteSheetRowAtSelection()
     if case .sheet(let afterRowDelete) = vm.activeTab?.payload {
       XCTAssertEqual(afterRowDelete.rawValue(at: "A2"), "엔진 최적화")
+      XCTAssertEqual(afterRowDelete.rawValue(at: "B2"), "120")
     }
 
     vm.insertSheetColumnAtSelection()
+    if case .sheet(let afterColInsert) = vm.activeTab?.payload {
+      XCTAssertEqual(afterColInsert.rawValue(at: "B2"), "")
+      XCTAssertEqual(afterColInsert.rawValue(at: "C2"), "120")
+    }
     vm.deleteSheetColumnAtSelection()
+    if case .sheet(let afterColDelete) = vm.activeTab?.payload {
+      XCTAssertEqual(afterColDelete.rawValue(at: "B2"), "120")
+    }
 
     // Named range definition & formula evaluation
-    vm.defineNamedRangeOnActiveSheet(name: "핵심실적", targetNotation: "B2:C2")
+    vm.defineSheetNamedRange(name: "핵심실적", targetNotation: "B2:C2")
     if case .sheet(let sheetWithNamed) = vm.activeTab?.payload {
       XCTAssertEqual(sheetWithNamed.resolveNamedRange("핵심실적"), "B2:C2")
     }
@@ -495,7 +562,7 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     vm.selectedPDFPageIndex = 0
 
     // Irreversible redaction
-    let redactedPageCount = vm.redactSensitiveTextOnActivePDF(phrase: "매직 바이트")
+    let redactedPageCount = vm.redactTextOnActivePDF(phrase: "매직 바이트")
     XCTAssertGreaterThanOrEqual(redactedPageCount, 1)
     if case .pdf(let pdfAfterRedact) = vm.activeTab?.payload {
       XCTAssertTrue(pdfAfterRedact.isRedacted)
@@ -516,8 +583,8 @@ final class DeepDesktopInteractionsTests: XCTestCase {
 
     let tfID = try XCTUnwrap(textFieldID)
     let cbID = try XCTUnwrap(checkboxID)
-    vm.updatePDFFormField(id: tfID, value: "최현우 수석")
-    vm.updatePDFFormField(id: cbID, isChecked: true)
+    vm.setActivePDFFormFieldValue(id: tfID, value: "최현우 수석")
+    vm.setActivePDFFormFieldValue(id: cbID, isChecked: true)
 
     if case .pdf(let pdfUpdatedFields) = vm.activeTab?.payload {
       let tf = try XCTUnwrap(pdfUpdatedFields.formFields.first(where: { $0.id == tfID }))
@@ -526,10 +593,25 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTAssertTrue(cb.isChecked)
     }
 
-    // Page reorder
+    // Page reorder with page content swap verification
+    let page0BeforeText: String
+    let page1BeforeText: String
+    if case .pdf(let pdfBeforeMove) = vm.activeTab?.payload {
+      page0BeforeText = pdfBeforeMove.pages[0].extractedText
+      page1BeforeText = pdfBeforeMove.pages[1].extractedText
+    } else {
+      return XCTFail("Expected PDF payload before move")
+    }
+
     vm.selectedPDFPageIndex = 0
-    vm.moveActivePDFPage(offset: 1)
+    vm.reorderActivePDFPage(offset: 1)
     XCTAssertEqual(vm.selectedPDFPageIndex, 1)
+    if case .pdf(let pdfAfterMove) = vm.activeTab?.payload {
+      XCTAssertEqual(pdfAfterMove.pages[0].extractedText, page1BeforeText)
+      XCTAssertEqual(pdfAfterMove.pages[1].extractedText, page0BeforeText)
+      XCTAssertEqual(pdfAfterMove.pages[0].pageNumber, 1)
+      XCTAssertEqual(pdfAfterMove.pages[1].pageNumber, 2)
+    }
 
     // Open a second PDF tab and merge into the active PDF tab
     vm.openNewSampleTab(for: .pdf)
@@ -538,7 +620,7 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       if case .pdf(let doc) = vm.activeTab?.payload { return doc.pages.count }
       return 0
     }()
-    vm.mergeActivePDFWithAnotherOpenTab()
+    vm.mergeActivePDFWithTab()
     if case .pdf(let mergedDoc) = vm.activeTab?.payload {
       XCTAssertGreaterThan(mergedDoc.pages.count, countBeforeMerge)
     } else {

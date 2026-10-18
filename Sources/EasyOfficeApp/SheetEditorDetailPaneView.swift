@@ -31,10 +31,19 @@ public struct SheetVectorChartCanvasView: View {
     self.palette = palette
   }
 
+  private static func safeFinite(_ value: Double) -> Double {
+    guard value.isFinite else { return 0.0 }
+    return max(-1.0e15, min(1.0e15, value))
+  }
+
+  private static func formatMetric(_ value: Double) -> String {
+    String(format: "%.0f", safeFinite(value))
+  }
+
   private var primaryPoints: [SheetChartRenderPoint] {
     let rawValues: [Double] = {
       if let firstSeries = chartSpec.series.first, !firstSeries.values.isEmpty {
-        return firstSeries.values
+        return firstSeries.values.map { Self.safeFinite($0) }
       }
       return [120.0, 180.0, 145.0]
     }()
@@ -75,7 +84,7 @@ public struct SheetVectorChartCanvasView: View {
         HStack(alignment: .bottom, spacing: 14) {
           ForEach(points) { pt in
             VStack(spacing: 4) {
-              Text(String(format: "%.0f", pt.value))
+              Text(Self.formatMetric(pt.value))
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
 
@@ -100,7 +109,8 @@ public struct SheetVectorChartCanvasView: View {
           var highest = 1.0
           for cIdx in 0..<catCount {
             let sumAtCat = chartSpec.series.reduce(0.0) { acc, s in
-              acc + (s.values.indices.contains(cIdx) ? max(0.0, s.values[cIdx]) : 0.0)
+              let v = s.values.indices.contains(cIdx) ? Self.safeFinite(s.values[cIdx]) : 0.0
+              return acc + max(0.0, v)
             }
             highest = max(highest, sumAtCat)
           }
@@ -110,7 +120,8 @@ public struct SheetVectorChartCanvasView: View {
         HStack(alignment: .bottom, spacing: 14) {
           ForEach(0..<catCount, id: \.self) { cIdx in
             let totalVal = chartSpec.series.reduce(0.0) { acc, s in
-              acc + (s.values.indices.contains(cIdx) ? max(0.0, s.values[cIdx]) : 0.0)
+              let v = s.values.indices.contains(cIdx) ? Self.safeFinite(s.values[cIdx]) : 0.0
+              return acc + max(0.0, v)
             }
             let catLabel =
               chartSpec.categories.indices.contains(cIdx)
@@ -118,14 +129,16 @@ public struct SheetVectorChartCanvasView: View {
               : points[cIdx].label
 
             VStack(spacing: 3) {
-              Text(String(format: "%.0f", totalVal))
+              Text(Self.formatMetric(totalVal))
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
 
               VStack(spacing: 1) {
                 ForEach(Array(chartSpec.series.enumerated()), id: \.offset) { sIdx, series in
                   let segVal =
-                    series.values.indices.contains(cIdx) ? max(0.0, series.values[cIdx]) : 0.0
+                    series.values.indices.contains(cIdx)
+                    ? max(0.0, Self.safeFinite(series.values[cIdx]))
+                    : 0.0
                   let segRatio = max(0.05, min(1.0, segVal / maxStackSum))
                   RoundedRectangle(cornerRadius: 2)
                     .fill(seriesPaletteColors[sIdx % seriesPaletteColors.count])
@@ -158,7 +171,7 @@ public struct SheetVectorChartCanvasView: View {
                 .fill(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
                 .frame(width: max(14.0, CGFloat(pt.normalizedRatio) * 160.0), height: 14)
 
-              Text(String(format: "%.0f", pt.value))
+              Text(Self.formatMetric(pt.value))
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
 
@@ -168,56 +181,8 @@ public struct SheetVectorChartCanvasView: View {
         }
         .padding(.vertical, 4)
 
-      case .line:
-        VStack(spacing: 4) {
-          Canvas { context, size in
-            guard !points.isEmpty else { return }
-            let plotW = max(1.0, size.width - 24.0)
-            let plotH = max(1.0, size.height - 16.0)
-            var linePath = Path()
-            var vertexLocations: [CGPoint] = []
-
-            for (idx, pt) in points.enumerated() {
-              let xRatio =
-                points.count == 1
-                ? 0.5
-                : Double(idx) / Double(max(1, points.count - 1))
-              let px = 12.0 + CGFloat(xRatio) * plotW
-              let py = 8.0 + (1.0 - CGFloat(pt.normalizedRatio)) * plotH
-              let loc = CGPoint(x: px, y: py)
-              vertexLocations.append(loc)
-              if idx == 0 {
-                linePath.move(to: loc)
-              } else {
-                linePath.addLine(to: loc)
-              }
-            }
-
-            context.stroke(
-              linePath,
-              with: .color(primaryAccent),
-              style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
-            )
-
-            for loc in vertexLocations {
-              let markerRect = CGRect(x: loc.x - 4.0, y: loc.y - 4.0, width: 8.0, height: 8.0)
-              context.fill(Path(ellipseIn: markerRect), with: .color(primaryAccent))
-            }
-          }
-          .frame(height: 98)
-
-          HStack {
-            ForEach(points) { pt in
-              Text("\(pt.label) (\(Int(pt.value)))")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
-                .frame(maxWidth: .infinity)
-                .lineLimit(1)
-            }
-          }
-        }
-
-      case .area:
+      case .line, .area:
+        let fillArea = (chartSpec.kind == .area)
         VStack(spacing: 4) {
           Canvas { context, size in
             guard !points.isEmpty else { return }
@@ -239,28 +204,42 @@ public struct SheetVectorChartCanvasView: View {
               vertexLocations.append(loc)
               if idx == 0 {
                 linePath.move(to: loc)
-                areaPath.move(to: CGPoint(x: px, y: baselineY))
-                areaPath.addLine(to: loc)
+                if fillArea {
+                  areaPath.move(to: CGPoint(x: px, y: baselineY))
+                  areaPath.addLine(to: loc)
+                }
               } else {
                 linePath.addLine(to: loc)
-                areaPath.addLine(to: loc)
+                if fillArea {
+                  areaPath.addLine(to: loc)
+                }
               }
             }
 
-            if let lastLoc = vertexLocations.last {
+            if fillArea, let lastLoc = vertexLocations.last {
               areaPath.addLine(to: CGPoint(x: lastLoc.x, y: baselineY))
               areaPath.closeSubpath()
+              context.fill(areaPath, with: .color(primaryAccent.opacity(0.22)))
             }
 
-            context.fill(areaPath, with: .color(primaryAccent.opacity(0.22)))
             context.stroke(
               linePath,
               with: .color(primaryAccent),
-              style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round)
+              style: StrokeStyle(
+                lineWidth: fillArea ? 2.0 : 2.2,
+                lineCap: .round,
+                lineJoin: .round
+              )
             )
 
+            let markerRadius: CGFloat = fillArea ? 3.5 : 4.0
             for loc in vertexLocations {
-              let markerRect = CGRect(x: loc.x - 3.5, y: loc.y - 3.5, width: 7.0, height: 7.0)
+              let markerRect = CGRect(
+                x: loc.x - markerRadius,
+                y: loc.y - markerRadius,
+                width: markerRadius * 2.0,
+                height: markerRadius * 2.0
+              )
               context.fill(Path(ellipseIn: markerRect), with: .color(primaryAccent))
             }
           }
@@ -268,7 +247,7 @@ public struct SheetVectorChartCanvasView: View {
 
           HStack {
             ForEach(points) { pt in
-              Text("\(pt.label) (\(Int(pt.value)))")
+              Text("\(pt.label) (\(Self.formatMetric(pt.value)))")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
                 .frame(maxWidth: .infinity)
@@ -278,7 +257,8 @@ public struct SheetVectorChartCanvasView: View {
         }
 
       case .pie:
-        let totalSum = max(1.0, points.reduce(0.0) { $0 + max(0.0, $1.value) })
+        let rawSum = points.reduce(0.0) { $0 + max(0.0, Self.safeFinite($1.value)) }
+        let totalSum = (rawSum.isFinite && rawSum > 0.0) ? rawSum : 1.0
         HStack(spacing: 16) {
           Canvas { context, size in
             let radius = min(size.width, size.height) * 0.44
@@ -286,7 +266,7 @@ public struct SheetVectorChartCanvasView: View {
             var currentAngle = Angle.degrees(-90.0)
 
             for (idx, pt) in points.enumerated() {
-              let fraction = max(0.0, pt.value) / totalSum
+              let fraction = max(0.0, min(1.0, max(0.0, Self.safeFinite(pt.value)) / totalSum))
               let sweepDegrees = fraction * 360.0
               let startAngle = currentAngle
               let endAngle = currentAngle + Angle.degrees(sweepDegrees)
@@ -312,12 +292,14 @@ public struct SheetVectorChartCanvasView: View {
 
           VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(points.enumerated()), id: \.offset) { idx, pt in
-              let pct = Int(round((max(0.0, pt.value) / totalSum) * 100.0))
+              let ratioPct = max(
+                0.0, min(100.0, (max(0.0, Self.safeFinite(pt.value)) / totalSum) * 100.0))
+              let pctText = String(format: "%.0f", ratioPct)
               HStack(spacing: 6) {
                 Circle()
                   .fill(seriesPaletteColors[idx % seriesPaletteColors.count])
                   .frame(width: 8, height: 8)
-                Text("\(pt.label): \(Int(pt.value)) (\(pct)%)")
+                Text("\(pt.label): \(Self.formatMetric(pt.value)) (\(pctText)%)")
                   .font(.system(size: 10, design: .monospaced))
                   .foregroundStyle(palette.primaryText.swiftUIColor)
                   .lineLimit(1)
@@ -374,7 +356,7 @@ public struct SheetVectorChartCanvasView: View {
 
           HStack {
             ForEach(points) { pt in
-              Text("\(pt.label): \(Int(pt.value))")
+              Text("\(pt.label): \(Self.formatMetric(pt.value))")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
                 .frame(maxWidth: .infinity)
