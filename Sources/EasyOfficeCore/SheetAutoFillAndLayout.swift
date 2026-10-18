@@ -731,6 +731,23 @@ extension WorksheetModel {
 
   // MARK: - Enterprise Data Cleansing & Multi-Column Row Sorting
 
+  /// Sorts data rows in the active worksheet by `primaryColumn` (`ascending`) and optional `secondaryColumn` (`secondaryAscending`), preserving row 0 when `hasHeader` is `true`.
+  public mutating func sortRows(
+    primaryColumn: Int,
+    ascending: Bool = true,
+    secondaryColumn: Int? = nil,
+    secondaryAscending: Bool = true,
+    hasHeader: Bool = true
+  ) {
+    sortRows(
+      byColumn: primaryColumn,
+      ascending: ascending,
+      hasHeader: hasHeader,
+      secondaryColumn: secondaryColumn,
+      secondaryAscending: secondaryAscending
+    )
+  }
+
   /// Sorts data rows in the active worksheet by `column` (`ascending`), breaking ties with optional `secondaryColumn` (`secondaryAscending`), and preserving row 0 when `hasHeader` is `true`.
   public mutating func sortRows(
     byColumn column: Int,

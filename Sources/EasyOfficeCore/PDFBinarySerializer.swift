@@ -182,10 +182,10 @@ public enum PDFBinarySerializer {
       let pageStrokes = pdf.inkStrokes.filter {
         $0.pageNumber == page.pageNumber && $0.points.count >= 2
       }
-      if !pageStrokes.isEmpty || pdf.totalInkStrokeCount > 0 {
+      if !pageStrokes.isEmpty {
         streamLines.append("0.97 0.98 1.00 rg 0.45 0.50 0.78 RG 1.0 w 48 452 280 46 re B")
         let sigHeaderHex = hexEncodeUTF16BE(
-          "ELECTRONIC SIGNATURE · 전자서명 검증 완료 (\(max(1, pageStrokes.count))획)",
+          "ELECTRONIC SIGNATURE · 전자서명 검증 완료 (\(pageStrokes.count)획)",
           maxChars: 60
         )
         streamLines.append(

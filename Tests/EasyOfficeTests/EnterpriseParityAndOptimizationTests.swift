@@ -882,7 +882,56 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     XCTAssertEqual(vm.currentFindMatchIndex, 2)
     let replacedSingle = vm.replaceCurrentMatch()
     XCTAssertEqual(replacedSingle, 1)
-    XCTAssertEqual(vm.findMatchCount, 1)
+    XCTAssertEqual(vm.recomputeFindMatches(), 1)
+
+    // F1 regression: replacing the 2nd match inside a single paragraph with multiple inlineRuns
+    if case .document(var docWithRuns) = vm.activeTab?.payload,
+      let tabIdx = vm.openTabs.firstIndex(where: { $0.id == docTab.id })
+    {
+      docWithRuns.paragraphs.append(
+        ParagraphBlock(
+          style: .body,
+          text: "런토큰 알파 런토큰 베타",
+          inlineRuns: [
+            DocumentTextRun(text: "런토큰 알파 "),
+            DocumentTextRun(text: "런토큰 베타"),
+          ]
+        )
+      )
+      vm.openTabs[tabIdx].payload = .document(docWithRuns)
+      vm.findQueryDraft = "런토큰"
+      vm.replaceQueryDraft = "수정토큰"
+      XCTAssertEqual(vm.recomputeFindMatches(), 2)
+      vm.findNextMatch()  // 1
+      vm.findNextMatch()  // 2
+      XCTAssertEqual(vm.currentFindMatchIndex, 2)
+      XCTAssertEqual(vm.replaceCurrentMatch(), 1)
+      if case .document(let afterRunReplace) = vm.activeTab?.payload,
+        let lastPara = afterRunReplace.paragraphs.last
+      {
+        XCTAssertEqual(lastPara.text, "런토큰 알파 수정토큰 베타")
+        XCTAssertEqual(lastPara.inlineRuns[0].text, "런토큰 알파 ")
+        XCTAssertEqual(lastPara.inlineRuns[1].text, "수정토큰 베타")
+      }
+    }
+
+    // F2 regression: sortRows(primaryColumn:...) and sortActiveSheetBySecondaryColumn
+    sortSheet.sortRows(
+      primaryColumn: 0,
+      ascending: true,
+      secondaryColumn: 1,
+      secondaryAscending: true,
+      hasHeader: true
+    )
+    XCTAssertEqual(sortSheet.evaluate(at: "B2"), .number(250))
+    let sheetTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet }))
+    vm.activeTabID = sheetTab.id
+    vm.sortActiveSheetBySecondaryColumn(
+      primaryColumn: 0,
+      ascending: true,
+      secondaryColumn: 1,
+      secondaryAscending: false
+    )
 
     // 7. PDFBinarySerializer upper/middle page layout (OFFICIAL STAMP, AcroForm, ELECTRONIC SIGNATURE)
     let pdfTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .pdf }))
@@ -899,7 +948,9 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
       let encodedPDF = PDFBinarySerializer.encode(pdfModel)
       let pdfASCII = String(decoding: encodedPDF, as: UTF8.self)
       XCTAssertTrue(pdfASCII.contains("386 576 160 46 re B"))
-      XCTAssertTrue(pdfASCII.contains("48 452 280 46 re B"))
+      // F3 regression: signature box rendered only on the signed page (1 time, not on unsigned pages)
+      let sigBoxOccurrences = pdfASCII.components(separatedBy: "48 452 280 46 re B").count - 1
+      XCTAssertEqual(sigBoxOccurrences, 1)
       let roundTripPDF = try PDFBinarySerializer.decode(from: encodedPDF)
       XCTAssertEqual(roundTripPDF.annotations.count, pdfModel.annotations.count)
       XCTAssertEqual(roundTripPDF.totalInkStrokeCount, pdfModel.totalInkStrokeCount)

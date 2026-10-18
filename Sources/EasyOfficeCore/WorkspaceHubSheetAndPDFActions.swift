@@ -672,7 +672,32 @@ extension WorkspaceViewModel {
       "다중 기준 행 정렬 완료 (1차 \(pLabel)열 \(ascending ? "오름차순" : "내림차순"), 2차 \(sLabel)열 \(secondaryAscending ? "오름차순" : "내림차순"))"
   }
 
+  public func sortActiveSheetBySecondaryColumn(
+    primaryColumn: Int,
+    ascending: Bool = true,
+    secondaryColumn: Int,
+    secondaryAscending: Bool = true
+  ) {
+    sortActiveSheetMultiColumn(
+      primaryColumn: primaryColumn,
+      ascending: ascending,
+      secondaryColumn: secondaryColumn,
+      secondaryAscending: secondaryAscending
+    )
+  }
+
   // MARK: - Interactive Find & Replace Navigation & Single Replacement
+
+  @discardableResult
+  public func recomputeFindMatches() -> Int {
+    let total = findMatchCount
+    if total == 0 {
+      currentFindMatchIndex = 0
+    } else if currentFindMatchIndex < 1 || currentFindMatchIndex > total {
+      currentFindMatchIndex = 1
+    }
+    return total
+  }
 
   private func countOccurrences(
     of needle: String,
@@ -918,6 +943,7 @@ extension WorkspaceViewModel {
     switch openTabs[idx].payload {
     case .document(var doc):
       for pIdx in doc.paragraphs.indices {
+        let countBeforeParagraph = counter
         if replaceTargetOccurrence(
           in: &doc.paragraphs[pIdx].text,
           needle: needle,
@@ -927,6 +953,7 @@ extension WorkspaceViewModel {
           targetOneBasedIndex: targetOccurrence
         ) {
           if !doc.paragraphs[pIdx].inlineRuns.isEmpty {
+            let localTarget = max(1, targetOccurrence - countBeforeParagraph)
             var runCounter = 0
             for rIdx in doc.paragraphs[pIdx].inlineRuns.indices {
               if replaceTargetOccurrence(
@@ -935,7 +962,7 @@ extension WorkspaceViewModel {
                 replacement: replacement,
                 caseSensitive: isFindCaseSensitive,
                 currentCounter: &runCounter,
-                targetOneBasedIndex: 1
+                targetOneBasedIndex: localTarget
               ) {
                 break
               }
