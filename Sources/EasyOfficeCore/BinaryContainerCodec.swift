@@ -195,8 +195,8 @@ public enum CRC32Calculator {
 
   public static func compute(for data: Data) -> UInt32 {
     var crc: UInt32 = 0xFFFF_FFFF
-    flatSlicingTable.withUnsafeBufferPointer { tablePtr in
-      data.withUnsafeBytes { rawBuffer in
+    flatSlicingTable.withUnsafeBufferPointer { (tablePtr: UnsafeBufferPointer<UInt32>) -> Void in
+      data.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> Void in
         let count = rawBuffer.count
         var offset = 0
         while offset <= count - 8 {
@@ -204,15 +204,17 @@ public enum CRC32Calculator {
             rawBuffer.loadUnaligned(fromByteOffset: offset, as: UInt32.self).littleEndian ^ crc
           let two = rawBuffer.loadUnaligned(fromByteOffset: offset + 4, as: UInt32.self)
             .littleEndian
-          crc =
-            tablePtr[(7 << 8) | Int(one & 0xFF)]
-            ^ tablePtr[(6 << 8) | Int((one >> 8) & 0xFF)]
-            ^ tablePtr[(5 << 8) | Int((one >> 16) & 0xFF)]
-            ^ tablePtr[(4 << 8) | Int((one >> 24) & 0xFF)]
-            ^ tablePtr[(3 << 8) | Int(two & 0xFF)]
-            ^ tablePtr[(2 << 8) | Int((two >> 8) & 0xFF)]
-            ^ tablePtr[(1 << 8) | Int((two >> 16) & 0xFF)]
+          let c0: UInt32 =
+            tablePtr[1792 + Int(one & 0xFF)]
+            ^ tablePtr[1536 + Int((one >> 8) & 0xFF)]
+            ^ tablePtr[1280 + Int((one >> 16) & 0xFF)]
+            ^ tablePtr[1024 + Int((one >> 24) & 0xFF)]
+          let c1: UInt32 =
+            tablePtr[768 + Int(two & 0xFF)]
+            ^ tablePtr[512 + Int((two >> 8) & 0xFF)]
+            ^ tablePtr[256 + Int((two >> 16) & 0xFF)]
             ^ tablePtr[Int((two >> 24) & 0xFF)]
+          crc = c0 ^ c1
           offset += 8
         }
         while offset < count {
