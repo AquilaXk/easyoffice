@@ -96,11 +96,21 @@ public enum BitPacking {
         }
     }
 
-    /// Encodes a Swift String as contiguous little-endian UTF-16 code units in a single bulk buffer copy.
+    /// Encodes a Swift String as contiguous little-endian UTF-16 code units without intermediate array allocation.
     @inlinable
     public static func encodeUTF16LE(_ text: String) -> Data {
-        let units = text.utf16.map { $0.littleEndian }
-        return units.withUnsafeBufferPointer { Data(buffer: $0) }
+        let utf16 = text.utf16
+        let unitCount = utf16.count
+        guard unitCount > 0 else { return Data() }
+        var out = Data(count: unitCount * 2)
+        out.withUnsafeMutableBytes { rawBuf in
+            var byteOffset = 0
+            for unit in utf16 {
+                rawBuf.storeBytes(of: unit.littleEndian, toByteOffset: byteOffset, as: UInt16.self)
+                byteOffset += 2
+            }
+        }
+        return out
     }
 
     /// Encodes a Swift String as UTF-16LE bytes prefixed with a 32-bit byte length.
@@ -114,16 +124,12 @@ public enum BitPacking {
     public static func readLengthPrefixedUTF16LE(from data: Data, offset: inout Int, limit: Int? = nil) throws -> String {
         let upperBound = min(limit ?? data.count, data.count)
         guard offset >= 0, offset <= upperBound - 4 else {
-            throw EasyOfficeError.corruptedContainer(
-                detail: "UTF-16LE 문자열 길이 필드 범위 초과 (offset: \(offset), limit: \(upperBound))"
-            )
+            throw EasyOfficeError.corruptedContainer(detail: "UTF-16LE 문자열 길이 필드 범위 초과 (offset: \(offset), limit: \(upperBound))")
         }
         let byteLength = Int(try readUInt32LE(from: data, at: offset))
         offset += 4
         guard byteLength >= 0, byteLength % 2 == 0, byteLength <= upperBound - offset else {
-            throw EasyOfficeError.corruptedContainer(
-                detail: "유효하지 않은 UTF-16LE 문자열 길이 (\(byteLength) bytes)"
-            )
+            throw EasyOfficeError.corruptedContainer(detail: "유효하지 않은 UTF-16LE 문자열 길이 (\(byteLength) bytes)")
         }
         let text = try decodeUTF16LE(from: data, at: offset, byteLength: byteLength)
         offset += byteLength
@@ -133,9 +139,7 @@ public enum BitPacking {
     /// Decodes raw UTF-16LE bytes of `byteLength` starting at `offset`.
     public static func decodeUTF16LE(from data: Data, at offset: Int, byteLength: Int) throws -> String {
         guard offset >= 0, byteLength >= 0, byteLength % 2 == 0, byteLength <= data.count - offset else {
-            throw EasyOfficeError.corruptedContainer(
-                detail: "UTF-16LE 디코딩 범위 초과 (offset: \(offset), length: \(byteLength))"
-            )
+            throw EasyOfficeError.corruptedContainer(detail: "UTF-16LE 디코딩 범위 초과 (offset: \(offset), length: \(byteLength))")
         }
         let unitCount = byteLength / 2
         if unitCount == 0 { return "" }
@@ -159,11 +163,7 @@ public enum CRC32Calculator {
         for index in 0..<256 {
             var crc = UInt32(index)
             for _ in 0..<8 {
-                if (crc & 1) != 0 {
-                    crc = (crc >> 1) ^ polynomial
-                } else {
-                    crc >>= 1
-                }
+                crc = (crc & 1) != 0 ? ((crc >> 1) ^ polynomial) : (crc >> 1)
             }
             tables[0][index] = crc
         }
@@ -176,9 +176,7 @@ public enum CRC32Calculator {
         return tables
     }()
 
-    public static var lookupTable: [UInt32] {
-        slicingTables[0]
-    }
+    public static var lookupTable: [UInt32] { slicingTables[0] }
 
     public static func compute(for data: Data) -> UInt32 {
         var crc: UInt32 = 0xFFFF_FFFF
@@ -217,6 +215,7 @@ public struct HWP5RecordHeader: Sendable, Equatable {
     public static let tagParaHeader: UInt16 = 66
     public static let tagParaText: UInt16 = 67
     public static let tagTableRecord: UInt16 = 77
+    public static let tagExtendedMetadata: UInt16 = 90
 
     public static let tenBitMask: UInt32 = 0x03FF
     public static let twelveBitMask: UInt32 = 0x0FFF
@@ -234,20 +233,14 @@ public struct HWP5RecordHeader: Sendable, Equatable {
 
     public static func encode(tagID: UInt16, level: UInt16, payloadSize: UInt32) throws -> Data {
         guard UInt32(tagID) <= tenBitMask, UInt32(level) <= tenBitMask else {
-            throw EasyOfficeError.corruptedContainer(
-                detail: "HWP 5.0 레코드 헤더 10-bit 범위 초과 (tagID: \(tagID), level: \(level))"
-            )
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 레코드 헤더 10-bit 범위 초과 (tagID: \(tagID), level: \(level))")
         }
         var output = Data()
         if payloadSize < extendedSizeMarker {
-            let word = (UInt32(tagID) & tenBitMask)
-                | ((UInt32(level) & tenBitMask) << 10)
-                | ((payloadSize & twelveBitMask) << 20)
+            let word = (UInt32(tagID) & tenBitMask) | ((UInt32(level) & tenBitMask) << 10) | ((payloadSize & twelveBitMask) << 20)
             BitPacking.appendUInt32LE(word, to: &output)
         } else {
-            let word = (UInt32(tagID) & tenBitMask)
-                | ((UInt32(level) & tenBitMask) << 10)
-                | (extendedSizeMarker << 20)
+            let word = (UInt32(tagID) & tenBitMask) | ((UInt32(level) & tenBitMask) << 10) | (extendedSizeMarker << 20)
             BitPacking.appendUInt32LE(word, to: &output)
             BitPacking.appendUInt32LE(payloadSize, to: &output)
         }
@@ -569,14 +562,7 @@ public enum ZipContainerCodec {
             guard let srcBase = srcBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
             return destination.withUnsafeMutableBytes { dstBuffer -> Int in
                 guard let dstBase = dstBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-                return compression_encode_buffer(
-                    dstBase,
-                    destinationCapacity,
-                    srcBase,
-                    input.count,
-                    nil,
-                    COMPRESSION_ZLIB
-                )
+                return compression_encode_buffer(dstBase, destinationCapacity, srcBase, input.count, nil, COMPRESSION_ZLIB)
             }
         }
         guard compressedBytes > 0 else {
@@ -593,20 +579,11 @@ public enum ZipContainerCodec {
             guard let srcBase = srcBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
             return destination.withUnsafeMutableBytes { dstBuffer -> Int in
                 guard let dstBase = dstBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-                return compression_decode_buffer(
-                    dstBase,
-                    probeCapacity,
-                    srcBase,
-                    input.count,
-                    nil,
-                    COMPRESSION_ZLIB
-                )
+                return compression_decode_buffer(dstBase, probeCapacity, srcBase, input.count, nil, COMPRESSION_ZLIB)
             }
         }
         guard decodedBytes == expectedSize else {
-            throw EasyOfficeError.corruptedContainer(
-                detail: "Deflate 압축 해제 크기 불일치 (expected: \(expectedSize), actual: \(decodedBytes))"
-            )
+            throw EasyOfficeError.corruptedContainer(detail: "Deflate 압축 해제 크기 불일치 (expected: \(expectedSize), actual: \(decodedBytes))")
         }
         destination.removeSubrange(decodedBytes..<destination.count)
         return destination
@@ -619,10 +596,8 @@ public enum ZipContainerCodec {
         maxRatio: Double = 100.0
     ) throws -> Data {
         if input.isEmpty { return Data() }
-        let ratioLimit = max(4096, Int(Double(input.count) * maxRatio))
-        let ceiling = min(maxOutputBytes, ratioLimit)
+        let ceiling = min(maxOutputBytes, max(4096, Int(Double(input.count) * maxRatio)))
         var capacity = min(max(input.count * 8, 4096), ceiling)
-
         while true {
             let probeCapacity = capacity + 1
             var destination = Data(count: probeCapacity)
@@ -630,14 +605,7 @@ public enum ZipContainerCodec {
                 guard let srcBase = srcBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
                 return destination.withUnsafeMutableBytes { dstBuffer -> Int in
                     guard let dstBase = dstBuffer.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-                    return compression_decode_buffer(
-                        dstBase,
-                        probeCapacity,
-                        srcBase,
-                        input.count,
-                        nil,
-                        COMPRESSION_ZLIB
-                    )
+                    return compression_decode_buffer(dstBase, probeCapacity, srcBase, input.count, nil, COMPRESSION_ZLIB)
                 }
             }
             guard decodedBytes > 0 else {
@@ -672,81 +640,51 @@ public enum XMLSanitizer {
         0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45 // "DOCTYPE"
     )
 
+    private static func scanUnsafeXMLBuffer(_ buffer: UnsafeBufferPointer<UInt8>) throws {
+        let count = buffer.count
+        guard count >= 8 else { return }
+        var idx = 0
+        while idx <= count - 8 {
+            if buffer[idx] == 0x3C && buffer[idx + 1] == 0x21 { // "<!"
+                var kw = idx + 2
+                while kw < count && (buffer[kw] == 0x20 || buffer[kw] == 0x09 || buffer[kw] == 0x0A || buffer[kw] == 0x0D) {
+                    kw += 1
+                }
+                if kw <= count - 6
+                    && (buffer[kw] & 0xDF) == entityAsciiUpper.0
+                    && (buffer[kw + 1] & 0xDF) == entityAsciiUpper.1
+                    && (buffer[kw + 2] & 0xDF) == entityAsciiUpper.2
+                    && (buffer[kw + 3] & 0xDF) == entityAsciiUpper.3
+                    && (buffer[kw + 4] & 0xDF) == entityAsciiUpper.4
+                    && (buffer[kw + 5] & 0xDF) == entityAsciiUpper.5 {
+                    throw EasyOfficeError.xxeOrExternalEntityDetected
+                }
+                if kw <= count - 7
+                    && (buffer[kw] & 0xDF) == doctypeAsciiUpper.0
+                    && (buffer[kw + 1] & 0xDF) == doctypeAsciiUpper.1
+                    && (buffer[kw + 2] & 0xDF) == doctypeAsciiUpper.2
+                    && (buffer[kw + 3] & 0xDF) == doctypeAsciiUpper.3
+                    && (buffer[kw + 4] & 0xDF) == doctypeAsciiUpper.4
+                    && (buffer[kw + 5] & 0xDF) == doctypeAsciiUpper.5
+                    && (buffer[kw + 6] & 0xDF) == doctypeAsciiUpper.6 {
+                    throw EasyOfficeError.xxeOrExternalEntityDetected
+                }
+            }
+            idx += 1
+        }
+    }
+
     /// Scans UTF-8 bytes directly for `<!ENTITY` or `<!DOCTYPE` (case-insensitive) with zero heap allocations.
     public static func validateSafeXMLBytes(_ data: Data) throws {
         try data.withUnsafeBytes { rawBuffer in
-            let count = rawBuffer.count
-            guard count >= 8 else { return }
-            var idx = 0
-            while idx <= count - 8 {
-                if rawBuffer[idx] == 0x3C && rawBuffer[idx + 1] == 0x21 { // "<!"
-                    var kw = idx + 2
-                    while kw < count && (rawBuffer[kw] == 0x20 || rawBuffer[kw] == 0x09 || rawBuffer[kw] == 0x0A || rawBuffer[kw] == 0x0D) {
-                        kw += 1
-                    }
-                    if kw <= count - 6 {
-                        if (rawBuffer[kw] & 0xDF) == entityAsciiUpper.0
-                            && (rawBuffer[kw + 1] & 0xDF) == entityAsciiUpper.1
-                            && (rawBuffer[kw + 2] & 0xDF) == entityAsciiUpper.2
-                            && (rawBuffer[kw + 3] & 0xDF) == entityAsciiUpper.3
-                            && (rawBuffer[kw + 4] & 0xDF) == entityAsciiUpper.4
-                            && (rawBuffer[kw + 5] & 0xDF) == entityAsciiUpper.5 {
-                            throw EasyOfficeError.xxeOrExternalEntityDetected
-                        }
-                    }
-                    if kw <= count - 7 {
-                        if (rawBuffer[kw] & 0xDF) == doctypeAsciiUpper.0
-                            && (rawBuffer[kw + 1] & 0xDF) == doctypeAsciiUpper.1
-                            && (rawBuffer[kw + 2] & 0xDF) == doctypeAsciiUpper.2
-                            && (rawBuffer[kw + 3] & 0xDF) == doctypeAsciiUpper.3
-                            && (rawBuffer[kw + 4] & 0xDF) == doctypeAsciiUpper.4
-                            && (rawBuffer[kw + 5] & 0xDF) == doctypeAsciiUpper.5
-                            && (rawBuffer[kw + 6] & 0xDF) == doctypeAsciiUpper.6 {
-                            throw EasyOfficeError.xxeOrExternalEntityDetected
-                        }
-                    }
-                }
-                idx += 1
-            }
+            try scanUnsafeXMLBuffer(rawBuffer.bindMemory(to: UInt8.self))
         }
     }
 
     public static func validateSafeXML(_ xmlString: String) throws {
         var copy = xmlString
         try copy.withUTF8 { utf8Buffer in
-            let count = utf8Buffer.count
-            guard count >= 8 else { return }
-            var idx = 0
-            while idx <= count - 8 {
-                if utf8Buffer[idx] == 0x3C && utf8Buffer[idx + 1] == 0x21 {
-                    var kw = idx + 2
-                    while kw < count && (utf8Buffer[kw] == 0x20 || utf8Buffer[kw] == 0x09 || utf8Buffer[kw] == 0x0A || utf8Buffer[kw] == 0x0D) {
-                        kw += 1
-                    }
-                    if kw <= count - 6 {
-                        if (utf8Buffer[kw] & 0xDF) == entityAsciiUpper.0
-                            && (utf8Buffer[kw + 1] & 0xDF) == entityAsciiUpper.1
-                            && (utf8Buffer[kw + 2] & 0xDF) == entityAsciiUpper.2
-                            && (utf8Buffer[kw + 3] & 0xDF) == entityAsciiUpper.3
-                            && (utf8Buffer[kw + 4] & 0xDF) == entityAsciiUpper.4
-                            && (utf8Buffer[kw + 5] & 0xDF) == entityAsciiUpper.5 {
-                            throw EasyOfficeError.xxeOrExternalEntityDetected
-                        }
-                    }
-                    if kw <= count - 7 {
-                        if (utf8Buffer[kw] & 0xDF) == doctypeAsciiUpper.0
-                            && (utf8Buffer[kw + 1] & 0xDF) == doctypeAsciiUpper.1
-                            && (utf8Buffer[kw + 2] & 0xDF) == doctypeAsciiUpper.2
-                            && (utf8Buffer[kw + 3] & 0xDF) == doctypeAsciiUpper.3
-                            && (utf8Buffer[kw + 4] & 0xDF) == doctypeAsciiUpper.4
-                            && (utf8Buffer[kw + 5] & 0xDF) == doctypeAsciiUpper.5
-                            && (utf8Buffer[kw + 6] & 0xDF) == doctypeAsciiUpper.6 {
-                            throw EasyOfficeError.xxeOrExternalEntityDetected
-                        }
-                    }
-                }
-                idx += 1
-            }
+            try scanUnsafeXMLBuffer(utf8Buffer)
         }
     }
 
@@ -781,31 +719,51 @@ public enum XMLSanitizer {
         var idx = input.startIndex
         while idx < input.endIndex {
             let ch = input[idx]
-            if ch == "&", let semi = input[idx...].firstIndex(of: ";") {
-                let entity = input[idx...semi]
-                switch entity {
-                case "&quot;":
-                    output.append("\"")
-                    idx = input.index(after: semi)
-                    continue
-                case "&apos;":
-                    output.append("'")
-                    idx = input.index(after: semi)
-                    continue
-                case "&lt;":
-                    output.append("<")
-                    idx = input.index(after: semi)
-                    continue
-                case "&gt;":
-                    output.append(">")
-                    idx = input.index(after: semi)
-                    continue
-                case "&amp;":
-                    output.append("&")
-                    idx = input.index(after: semi)
-                    continue
-                default:
-                    break
+            if ch == "&" {
+                let searchEnd = input.index(idx, offsetBy: 14, limitedBy: input.endIndex) ?? input.endIndex
+                if let semi = input[idx..<searchEnd].firstIndex(of: ";") {
+                    let entity = input[idx...semi]
+                    switch entity {
+                    case "&quot;":
+                        output.append("\"")
+                        idx = input.index(after: semi)
+                        continue
+                    case "&apos;":
+                        output.append("'")
+                        idx = input.index(after: semi)
+                        continue
+                    case "&lt;":
+                        output.append("<")
+                        idx = input.index(after: semi)
+                        continue
+                    case "&gt;":
+                        output.append(">")
+                        idx = input.index(after: semi)
+                        continue
+                    case "&amp;":
+                        output.append("&")
+                        idx = input.index(after: semi)
+                        continue
+                    default:
+                        let bodyStart = input.index(after: idx)
+                        if bodyStart < semi && input[bodyStart] == "#" {
+                            let numStart = input.index(after: bodyStart)
+                            if numStart < semi {
+                                let codePoint: UInt32?
+                                if input[numStart] == "x" || input[numStart] == "X" {
+                                    let hexStart = input.index(after: numStart)
+                                    codePoint = hexStart < semi ? UInt32(input[hexStart..<semi], radix: 16) : nil
+                                } else {
+                                    codePoint = UInt32(input[numStart..<semi], radix: 10)
+                                }
+                                if let cp = codePoint, cp > 0, let scalar = UnicodeScalar(cp) {
+                                    output.unicodeScalars.append(scalar)
+                                    idx = input.index(after: semi)
+                                    continue
+                                }
+                            }
+                        }
+                    }
                 }
             }
             output.append(ch)
