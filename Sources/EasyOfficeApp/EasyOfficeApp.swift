@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import EasyOfficeDesignSystem
 import EasyOfficeCore
 
@@ -15,6 +16,32 @@ struct EasyOfficeApplication: App {
                 )
         }
         .commands {
+            CommandMenu("파일 및 편집") {
+                Button("파일 열기...") {
+                    WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
+                }
+                .keyboardShortcut("o", modifiers: [.command])
+
+                Button("현재 탭 저장...") {
+                    WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
+                }
+                .keyboardShortcut("s", modifiers: [.command])
+                .disabled(viewModel.activeTab == nil)
+
+                Divider()
+
+                Button("실행 취소 (Undo)") {
+                    viewModel.undo()
+                }
+                .keyboardShortcut("z", modifiers: [.command])
+                .disabled(!viewModel.canUndo)
+
+                Button("다시 실행 (Redo)") {
+                    viewModel.redo()
+                }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!viewModel.canRedo)
+            }
             CommandMenu("문서 생성") {
                 ForEach(OfficeModuleKind.allCases) { module in
                     Button("새 \(module.displayNameKo)") {

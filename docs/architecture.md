@@ -36,14 +36,18 @@ EasyOffice/
 │   ├── EasyOfficeCore/                            # 순수 결정론적 오피스 엔진, 코덱 및 스마트 생산성 코어
 │   │   ├── DocumentFormat.swift                   # 20종 지원 포맷 레지스트리 및 ContainerFamily 메타데이터
 │   │   ├── FormatDetector.swift                   # 매직 바이트 시그니처 검증 및 Fail-Closed 가드
-│   │   ├── BinaryContainerCodec.swift             # BitPacking, CRC32Calculator, ZIP/OOXML/ODF/HWPX/OLE2/HWP5 코덱
+│   │   ├── BinaryContainerCodec.swift             # BitPacking, Slicing-by-8 CRC32Calculator, ZipContainerCodec, XMLSanitizer
+│   │   ├── StandardZipOfficeCodecs.swift          # OOXMLContainerCodec, ODFContainerCodec, HWPXContainerCodec
+│   │   ├── OLE2AndLegacyOfficeCodecs.swift        # OLE2ContainerCodec, HWP5BinaryCodec, LegacyOLE2OfficeCodec (.doc/.xls/.ppt)
 │   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
-│   │   ├── DocumentEngine.swift                   # 워드/한글(HWP/HWPX) 문서 모델, 표 수식, 변경 추적, 메일 머지
-│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, 77종 수식 계산기, 피벗 및 차트 엔진
+│   │   ├── DocumentEngine.swift                   # 워드/한글(HWP/HWPX) 문서 모델, 인라인 런, 표 수식, 변경 추적, 메일 머지
+│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, FormulaAST 캐시, 77종 수식 계산기, DAG 메모이제이션
+│   │   ├── SheetAnalyticsAndPivot.swift           # PivotTableEngine, SheetChartBuilder, 조건부 서식 및 유효성 검사
 │   │   ├── SlideEngine.swift                      # 슬라이드/마스터, SnapGuideCalculator, PresenterSession 엔진
 │   │   ├── PDFEngine.swift                        # PDF 주석, 북마크, 페이지 분할/병합, 양방향 변환 엔진
-│   │   ├── SmartProductivityTools.swift           # PDFBinarySerializer, 일괄 변환, 오프라인 보조 도구, 보안 감사기
-│   │   └── WorkspaceHub.swift                     # WorkspaceViewModel, 7대 리본 카탈로그, 템플릿, 전문 검색 엔진
+│   │   ├── PDFBinarySerializer.swift              # ISO 32000-1 바이트 정밀 xref 직렬화 및 macOS PDFKit 브리지
+│   │   ├── SmartProductivityTools.swift           # 일괄 변환 오케스트레이터, 오프라인 스마트 보조 도구, 컨테이너 보안 감사기
+│   │   └── WorkspaceHub.swift                     # WorkspaceViewModel, 140종 리본 라우터, Undo/Redo, 파일 I/O, 전문 검색
 │   └── EasyOfficeApp/                             # macOS 네이티브 SwiftUI + AppKit 애플리케이션
 │       ├── EasyOfficeApp.swift                    # @main 앱 엔트리포인트 및 메뉴바 커맨드
 │       ├── WorkspaceViews.swift                   # 통합 타이틀바, 멀티 탭, 스플릿 뷰, 리본, 홈 허브, 인스펙터

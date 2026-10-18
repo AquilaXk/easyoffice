@@ -278,21 +278,33 @@ final class CommercialParityBenchmarkTests: XCTestCase {
         XCTAssertEqual(decodedRtf.tables.first?.rows, masterDocument.tables.first?.rows)
 
         // 8. Verify remaining template & legacy formats (.doc, .hwt, .hwtx, .xls, .ppt, .ppsx, .txt) with full byte decoding
-        for docLegacyFormat in [DocumentFormat.doc, .hwt] {
-            let result = try DocumentConversionOrchestrator.convert(
-                ConversionJobRequest(
-                    sourceFileName: "master.docx",
-                    sourceFormat: .docx,
-                    targetFormat: docLegacyFormat,
-                    payload: .document(masterDocument)
-                )
+        let docResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "master.docx",
+                sourceFormat: .docx,
+                targetFormat: .doc,
+                payload: .document(masterDocument)
             )
-            XCTAssertEqual(result.verifiedSignature.format, docLegacyFormat)
-            XCTAssertEqual(result.verifiedSignature.containerFamily, .ole2Compound)
-            let decodedLegacyDoc = try HWP5BinaryCodec.decodeDocument(from: result.outputBytes)
-            XCTAssertEqual(decodedLegacyDoc.title, masterDocument.title)
-            XCTAssertEqual(decodedLegacyDoc.paragraphs.map(\.text), masterDocument.paragraphs.map(\.text))
-        }
+        )
+        XCTAssertEqual(docResult.verifiedSignature.format, .doc)
+        XCTAssertEqual(docResult.verifiedSignature.containerFamily, .ole2Compound)
+        let decodedLegacyDoc = try LegacyOLE2OfficeCodec.decodeWordBinary(from: docResult.outputBytes)
+        XCTAssertEqual(decodedLegacyDoc.title, masterDocument.title)
+        XCTAssertEqual(decodedLegacyDoc.paragraphs.map(\.text), masterDocument.paragraphs.map(\.text))
+
+        let hwtResult = try DocumentConversionOrchestrator.convert(
+            ConversionJobRequest(
+                sourceFileName: "master.docx",
+                sourceFormat: .docx,
+                targetFormat: .hwt,
+                payload: .document(masterDocument)
+            )
+        )
+        XCTAssertEqual(hwtResult.verifiedSignature.format, .hwt)
+        XCTAssertEqual(hwtResult.verifiedSignature.containerFamily, .ole2Compound)
+        let decodedHwtDoc = try HWP5BinaryCodec.decodeDocument(from: hwtResult.outputBytes)
+        XCTAssertEqual(decodedHwtDoc.title, masterDocument.title)
+        XCTAssertEqual(decodedHwtDoc.paragraphs.map(\.text), masterDocument.paragraphs.map(\.text))
 
         let hwtxResult = try DocumentConversionOrchestrator.convert(
             ConversionJobRequest(
@@ -316,9 +328,7 @@ final class CommercialParityBenchmarkTests: XCTestCase {
             )
         )
         XCTAssertEqual(xlsResult.verifiedSignature.format, .xls)
-        let xlsStreams = try OLE2ContainerCodec.unpack(from: xlsResult.outputBytes)
-        let workbookStream = try XCTUnwrap(xlsStreams.first(where: { $0.name == "Workbook" }))
-        let decodedXlsSheet = try CSVStateMachineCodec.decodeWorksheet(from: workbookStream.data, name: masterSheet.name, delimiter: "\t")
+        let decodedXlsSheet = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: xlsResult.outputBytes, name: masterSheet.name)
         XCTAssertEqual(decodedXlsSheet.rawValue(at: "A1"), masterSheet.rawValue(at: "A1"))
         XCTAssertEqual(decodedXlsSheet.rawValue(at: "B2"), masterSheet.rawValue(at: "B2"))
 
@@ -331,9 +341,7 @@ final class CommercialParityBenchmarkTests: XCTestCase {
             )
         )
         XCTAssertEqual(pptResult.verifiedSignature.format, .ppt)
-        let pptStreams = try OLE2ContainerCodec.unpack(from: pptResult.outputBytes)
-        let pptStream = try XCTUnwrap(pptStreams.first(where: { $0.name == "PowerPoint Document" }))
-        let decodedPptDeck = try OOXMLContainerCodec.decodePresentation(from: pptStream.data)
+        let decodedPptDeck = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: pptResult.outputBytes)
         XCTAssertEqual(decodedPptDeck.title, masterDeck.title)
         XCTAssertEqual(decodedPptDeck.slides.count, masterDeck.slides.count)
 

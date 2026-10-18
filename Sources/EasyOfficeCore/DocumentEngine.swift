@@ -88,12 +88,42 @@ public enum TextAlignmentMode: String, CaseIterable, Sendable, Codable {
     case justified = "양쪽 정렬"
 }
 
+/// Inline styled text run within a paragraph block.
+public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
+    public let id: UUID
+    public var text: String
+    public var isBold: Bool
+    public var isItalic: Bool
+    public var isUnderlined: Bool
+    public var fontName: String?
+    public var fontSizePt: Double?
+
+    public init(
+        id: UUID = UUID(),
+        text: String,
+        isBold: Bool = false,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        fontName: String? = nil,
+        fontSizePt: Double? = nil
+    ) {
+        self.id = id
+        self.text = text
+        self.isBold = isBold
+        self.isItalic = isItalic
+        self.isUnderlined = isUnderlined
+        self.fontName = fontName
+        self.fontSizePt = fontSizePt
+    }
+}
+
 /// Paragraph block in a rich document or HWP section.
 public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
     public let id: UUID
     public var style: ParagraphStyleRole
     public var alignment: TextAlignmentMode
     public var text: String
+    public var runs: [DocumentTextRun]
     public var fontName: String
     public var fontSizePt: Double
     public var isBold: Bool
@@ -106,6 +136,7 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
         style: ParagraphStyleRole = .body,
         alignment: TextAlignmentMode = .justified,
         text: String,
+        runs: [DocumentTextRun] = [],
         fontName: String = "Pretendard",
         fontSizePt: Double = 11.0,
         isBold: Bool = false,
@@ -117,6 +148,7 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
         self.style = style
         self.alignment = alignment
         self.text = text
+        self.runs = runs
         self.fontName = fontName
         self.fontSizePt = fontSizePt
         self.isBold = isBold
@@ -125,6 +157,8 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
         self.lineSpacingPercent = lineSpacingPercent
     }
 }
+
+public typealias DocumentParagraph = ParagraphBlock
 
 /// Table border style presets including Korean administrative document double-line and diagonal borders.
 public enum TableCellBorderStyle: String, CaseIterable, Sendable, Codable {
@@ -338,7 +372,7 @@ public struct TrackedRevision: Sendable, Codable, Equatable, Identifiable {
         paragraphID: UUID,
         originalText: String,
         proposedText: String,
-        timestampISO8601: String = "2026-10-17T00:00:00Z"
+        timestampISO8601: String = ISO8601DateFormatter().string(from: Date())
     ) {
         self.id = id
         self.author = author
@@ -508,7 +542,8 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         author: String,
         kind: TrackedRevisionKind,
         paragraphID: UUID,
-        proposedText: String
+        proposedText: String,
+        timestampISO8601: String = ISO8601DateFormatter().string(from: Date())
     ) {
         let original = paragraphs.first(where: { $0.id == paragraphID })?.text ?? ""
         if trackChangesEnabled {
@@ -517,7 +552,8 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
                 kind: kind,
                 paragraphID: paragraphID,
                 originalText: original,
-                proposedText: proposedText
+                proposedText: proposedText,
+                timestampISO8601: timestampISO8601
             )
             revisions.append(revision)
         } else {

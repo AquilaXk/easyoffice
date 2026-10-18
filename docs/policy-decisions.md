@@ -30,6 +30,7 @@
 10. [스플릿 뷰(Split-View) 멀티 탭 워크스페이스, 컨텍스트 리본 명령 카탈로그 및 WCAG AA 접근성 정책](#10-스플릿-뷰split-view-멀티-탭-워크스페이스-컨텍스트-리본-명령-카탈로그-및-wcag-aa-접근성-정책)
 11. [전 포맷 라운드트립 패리티·비트 수준 성능 벤치마크 게이트 및 v1.0.0 정식 릴리스 정책 (2026-10-17)](#11-전-포맷-라운드트립-패리티비트-수준-성능-벤치마크-게이트-및-v100-정식-릴리스-정책-2026-10-17)
 12. [Slicing-by-8 CRC-32, 하드웨어 비정렬 워드 적재, 무할당 UTF-8 파서, 표준 컨테이너 호환성 및 AST 캐시·메모이제이션 시트 엔진 정책 (2026-10-18)](#12-slicing-by-8-crc-32-하드웨어-비정렬-워드-적재-무할당-utf-8-파서-표준-컨테이너-호환성-및-ast-캐시메모이제이션-시트-엔진-정책-2026-10-18)
+13. [ISO 32000-1 바이트 정밀 xref/PDFKit 통합, 140종 컨텍스트 리본 전수 라우팅, Undo/Redo 스택 및 네이티브 파일 I/O 정책 (2026-10-18)](#13-iso-32000-1-바이트-정밀-xrefpdfkit-통합-140종-컨텍스트-리본-전수-라우팅-undoredo-스택-및-네이티브-파일-io-정책-2026-10-18)
 
 ---
 
@@ -150,10 +151,10 @@
 
 ### 9. 양방향 포맷 일괄 변환 스튜디오, 오프라인 로컬 스마트 문서 보조 도구 및 메타데이터 비식별화 감사 정책
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SmartProductivityTools.swift`)
+- **Status**: Implemented (`Sources/EasyOfficeCore/SmartProductivityTools.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`)
 - **Decision**:
   1. `DocumentConversionOrchestrator`는 모든 오피스 도메인(`.document`, `.sheet`, `.slide`, `.pdf`)과 20종 포맷(`.docx`, `.odt`, `.hwpx`, `.hwtx`, `.hwp`, `.hwt`, `.doc`, `.rtf`, `.md`, `.txt`, `.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`, `.pptx`, `.ppsx`, `.odp`, `.ppt`, `.pdf`) 간 단건·배치 변환을 수행하며, 변환된 모든 출력 바이트에 대해 반환 전 `FormatDetector.verify(data:fileName:)` 매직 시그니처 검증을 강제합니다.
-  2. `LocalSmartDocumentAssistant`는 외부 클라우드 LLM이나 네트워크 API를 전혀 호출하지 않는 100% 오프라인 결정론적 알고리즘(단어 빈도·위치 가중치 문장 중요도 스코어링 요약, 문장 길이·피동 표현·중복 수식어 교정 진단, 기한·예산·수치·조치 항목 추출, 시트 Z-Score 이상치(`|z| >= 1.8`) 및 추세 분석, 최대 2,048 문단 상한 LCS 동적 계획법 문단 비교)으로 동작합니다.
+  2. `LocalSmartDocumentAssistant`는 외부 클라우드 LLM이나 네트워크 API를 전혀 호출하지 않는 100% 오프라인 결정론적 알고리즘(단어 빈도·위치 가중치 문장 중요도 스코어링 요약, 어절 경계 장문 분할·피동 표현·중복 수식어 교정 진단, 사전 컴파일 정적 정규식 기반 기한·예산·수치·조치 항목 추출, 시트 Z-Score 이상치(`|z| >= 1.8`) 및 추세 분석, 1차원 평탄화 `[Int32]` 버퍼 기반 최대 2,048 문단 상한 LCS 동적 계획법 문단 비교)으로 동작합니다.
   3. `DocumentSecurityAuditor`는 문서 공유 전 머리말/꼬리말 PII 마커 제거, 변경 추적 작성자 `"Redacted"` 익명화, 코멘트 일괄 삭제(`scrubMetadata`)를 수행하고, 외부 컨테이너에 대해 매직 시그니처·ZIP 폭탄·경로 순회·XXE·암호화 여부를 종합 진단(`auditContainer`)합니다.
 - **Why**: 기업·공공·개인 환경에서 민감한 문서를 외부 서버로 전송하지 않고도 로컬에서 즉시 포맷 일괄 변환, 문서 요약·비교·인사이트 도출, 개인정보 비식별화 및 컨테이너 보안 감사를 완결하기 위함입니다.
 - **Trade-offs**: 문단 비교(LCS)는 이차 메모리($O(N \times M)$) 폭증 방지를 위해 비교 대상을 문서당 최대 `2,048` 문단으로 상한 제한합니다.
@@ -217,4 +218,24 @@
   - XML 전체 문자열을 `.uppercased()`로 복제하여 XXE를 검사하는 방식: 수십 MB XML 엔트리에서 불필요한 2배 힙 할당을 유발하여 기각.
 - **Verified by**: `Tests/EasyOfficeTests/BinaryContainerCodecTests.swift`, `Tests/EasyOfficeTests/EditorEnginesParityTests.swift`
 - **Revisit when**: SIMD 벡터화 CSV/XML 스캐너 또는 멀티스레드 백그라운드 수식 재계산 큐를 도입할 때.
+
+---
+
+### 13. ISO 32000-1 바이트 정밀 xref/PDFKit 통합, 140종 컨텍스트 리본 전수 라우팅, Undo/Redo 스택 및 네이티브 파일 I/O 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/EasyOfficeApp.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Decision**:
+  1. **ISO 32000-1 바이트 정밀 `xref` 오프셋 테이블 및 macOS `PDFKit` 브리지 (`PDFBinarySerializer.swift`)**:
+     - 각 간접 객체(`N 0 obj`) 직렬화 직전의 실제 `Data.count` 바이트 오프셋을 기록하여 20바이트 표준 `xref` 엔트리(`%010d 00000 n \n`)와 정확한 `startxref` 위치를 생성하고, 각 `/Type /Page` 객체에 `/Resources << /Font << /F1 ... >> >>` 사전을 포함하여 macOS 네이티브 `PDFKit.PDFDocument(data:)` 및 `PDFView`(`PDFKitRepresentedView`)에서 즉시 렌더링·텍스트 추출이 가능하도록 통합합니다.
+  2. **140종 컨텍스트 리본 전수 라우팅, 값 타입 스냅샷 `Undo/Redo` 스택 및 실제 디스크 파일 I/O**:
+     - `WorkspaceViewModel.executeRibbonCommand(_:)`는 5대 오피스 모듈 × 7대 리본 카테고리의 **140개 전수 명령 ID**를 단 하나의 무동작(no-op) 없이 실제 도메인 모델 변이 및 워크스페이스 액션으로 라우팅합니다.
+     - 탭별 최대 50단계 값 타입(`OpenTabPayload`) 스냅샷 `undoStacks`/`redoStacks`(`undo()`, `redo()`)를 제공하고, `openDocument(data:fileName:fileURL:)`, `loadFromDisk(url:)`, `exportTabData(id:targetFormat:)`, `saveTabToDisk(id:to:targetFormat:)` 및 macOS `NSOpenPanel`/`NSSavePanel`을 통해 20종 포맷의 실제 디스크 열기·저장을 수행합니다.
+  3. **홈 허브 전용 스튜디오 뷰 및 인터랙티브 에디터 캔버스**:
+     - 홈 허브의 `.converter` 섹션에 `BatchConversionStudioHubView`, `.smartAssistant` 섹션에 `SmartDocumentAssistantHubView`를 연결하고, 인라인 문단/표 셀 편집, 동적 스프레드시트 그리드 및 비례 벡터 차트, 16:9 좌표 기반 슬라이드 스테이지 및 점선 스냅 가이드, 네이티브 `PDFKit` 프리뷰를 제공합니다.
+- **Why**: 데모성 하드코딩이나 무응답 리본 버튼을 완전히 배제하고, 실제 파일 열기/편집/실행 취소/저장/변환이 완결되는 프로덕션 데스크톱 오피스 경험을 보장하기 위함입니다.
+- **Trade-offs**: 탭당 최대 50단계의 `OpenTabPayload` 값 스냅샷을 유지하나, Swift 구조체 Copy-on-Write(CoW) 특성 덕분에 변경된 하위 컬렉션만 복사되어 메모리 오버헤드가 최소화됩니다.
+- **Alternatives rejected**:
+  - 근사치(`index * 64`)로 PDF `xref` 오프셋을 기록하는 방식: 표준 PDF 파서 및 `PDFKit`에서 `xref` 복구 경고를 유발하므로 실제 바이트 오프셋 기록 방식으로 교체.
+- **Verified by**: `Tests/EasyOfficeTests/SmartProductivityToolsTests.swift`, `Tests/EasyOfficeTests/WorkspaceUIParityTests.swift`, `Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`
+- **Revisit when**: 대용량 이미지 첨부 문서에서 델타(Command Log) 기반 압축 Undo 히스토리를 도입할 때.
 
