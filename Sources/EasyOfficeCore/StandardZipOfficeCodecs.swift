@@ -547,7 +547,8 @@ public enum OOXMLContainerCodec {
         for coord in sortedCoords {
             guard let raw = sheet.cellsByCoordinate[coord], !raw.isEmpty else { continue }
             rowsMap[coord.row + 1, default: []].append((coord, raw))
-            if !raw.hasPrefix("="), Double(raw) == nil {
+            let isFiniteNumber = (Double(raw)?.isFinite == true)
+            if !raw.hasPrefix("="), !isFiniteNumber {
                 totalStringOccurrences += 1
                 if sharedStringIndex[raw] == nil {
                     sharedStringIndex[raw] = sharedStrings.count
@@ -566,7 +567,7 @@ public enum OOXMLContainerCodec {
                 if raw.hasPrefix("=") {
                     let formulaBody = String(raw.dropFirst())
                     cellTags.append("      <c r=\"\(XMLSanitizer.escape(a1))\" t=\"str\"><f>\(XMLSanitizer.escape(formulaBody))</f></c>")
-                } else if Double(raw) != nil {
+                } else if Double(raw)?.isFinite == true {
                     cellTags.append("      <c r=\"\(XMLSanitizer.escape(a1))\"><v>\(XMLSanitizer.escape(raw))</v></c>")
                 } else if let sstIdx = sharedStringIndex[raw] {
                     cellTags.append("      <c r=\"\(XMLSanitizer.escape(a1))\" t=\"s\"><v>\(sstIdx)</v></c>")

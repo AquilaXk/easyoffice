@@ -533,7 +533,7 @@ public enum RTFCodec {
                         numEnd += 1
                     }
                     if numEnd > numStart {
-                        let signedVal = isNegative ? -rawVal : rawVal
+                        let signedVal = isNegative ? (0 &- rawVal) : rawVal
                         let codeUnit = UInt16(bitPattern: Int16(truncatingIfNeeded: signedVal))
                         utf16Units.append(codeUnit)
                         idx = numEnd

@@ -674,6 +674,9 @@ public enum LegacyOLE2OfficeCodec {
 
             let pCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor))
             cursor += 4
+            guard pCount >= 0, pCount <= (wordStream.count - cursor) / 13 else {
+                throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 문단 개수가 스트림 범위를 초과했습니다.")
+            }
             var paragraphs: [ParagraphBlock] = []
             paragraphs.reserveCapacity(min(pCount, 4096))
             for _ in 0..<pCount {
@@ -705,6 +708,9 @@ public enum LegacyOLE2OfficeCodec {
 
             let tCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor))
             cursor += 4
+            guard tCount >= 0, tCount <= (wordStream.count - cursor) / 7 else {
+                throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 표 개수가 스트림 범위를 초과했습니다.")
+            }
             var tables: [DocumentTableBlock] = []
             tables.reserveCapacity(min(tCount, 1024))
             for _ in 0..<tCount {
@@ -716,10 +722,16 @@ public enum LegacyOLE2OfficeCodec {
                 cursor += 1
                 let rowCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cursor))
                 cursor += 2
+                guard rowCount >= 0, rowCount <= (wordStream.count - cursor) / 2 else {
+                    throw EasyOfficeError.corruptedContainer(detail: "Word 표 행 개수가 스트림 범위를 초과했습니다.")
+                }
                 var rows: [[String]] = []
                 for _ in 0..<rowCount {
                     let colCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cursor))
                     cursor += 2
+                    guard colCount >= 0, colCount <= (wordStream.count - cursor) / 4 else {
+                        throw EasyOfficeError.corruptedContainer(detail: "Word 표 열 개수가 스트림 범위를 초과했습니다.")
+                    }
                     var rowCells: [String] = []
                     for _ in 0..<colCount {
                         rowCells.append(try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor))
@@ -774,6 +786,9 @@ public enum LegacyOLE2OfficeCodec {
 
         // 2. BOUNDSHEET record (0x0085) storing UTF-16LE sheet name
         let nameBytes = BitPacking.encodeUTF16LE(sheet.name)
+        guard 8 + nameBytes.count <= Int(UInt16.max) else {
+            throw EasyOfficeError.corruptedContainer(detail: "BIFF8 시트 이름 길이가 레코드 한도를 초과했습니다.")
+        }
         let boundSheetLen = UInt16(8 + nameBytes.count)
         BitPacking.appendUInt16LE(biff8OpcodeBoundSheet, to: &stream)
         BitPacking.appendUInt16LE(boundSheetLen, to: &stream)
@@ -813,6 +828,9 @@ public enum LegacyOLE2OfficeCodec {
                 BitPacking.appendUInt64LE(num.bitPattern, to: &stream)
             } else {
                 let textUTF16 = BitPacking.encodeUTF16LE(raw)
+                guard 8 + textUTF16.count <= Int(UInt16.max) else {
+                    throw EasyOfficeError.corruptedContainer(detail: "BIFF8 셀 문자열 길이가 16비트 레코드 한도를 초과했습니다.")
+                }
                 let recLen = UInt16(8 + textUTF16.count)
                 BitPacking.appendUInt16LE(biff8OpcodeLabel, to: &stream)
                 BitPacking.appendUInt16LE(recLen, to: &stream)

@@ -948,6 +948,33 @@ final class BinaryContainerCodecTests: XCTestCase {
         XCTAssertEqual(decodedPpt.slides[0].transition, .push)
         XCTAssertEqual(decodedPpt.slides[0].elements.first?.title, "도형 1")
         XCTAssertEqual(decodedPpt.slides[0].elements.first?.bodyText, "본문 텍스트")
+
+        // 5. Regression: RTF \u-2147483648? Int32.min wrapping negation, OOXML Infinity/NaN shared strings, BIFF8 length guard, small repetitive HWP5 stream
+        let rtfIntMinPayload = Data("{\\rtf1\\ansi\\deff0\n{\\info{\\title 테스트}}\n\\pard\\s0 \\u-2147483648?안전파싱\\par\n}".utf8)
+        let decodedRtfIntMin = try RTFCodec.decodeDocument(from: rtfIntMinPayload)
+        XCTAssertTrue(decodedRtfIntMin.paragraphs.first?.text.hasSuffix("안전파싱") == true)
+
+        var infNanSheet = WorksheetModel(name: "SpecialStrings")
+        try infNanSheet.setCell("A1", rawValue: "Infinity")
+        try infNanSheet.setCell("A2", rawValue: "NaN")
+        let infNanXlsx = try OOXMLContainerCodec.encodeWorksheet(infNanSheet)
+        let decodedInfNanSheet = try OOXMLContainerCodec.decodeWorksheet(from: infNanXlsx)
+        XCTAssertEqual(decodedInfNanSheet.rawValue(at: "A1"), "Infinity")
+        XCTAssertEqual(decodedInfNanSheet.rawValue(at: "A2"), "NaN")
+
+        var oversizedBiffSheet = WorksheetModel(name: "Oversized")
+        try oversizedBiffSheet.setCell("A1", rawValue: String(repeating: "가", count: 32_766))
+        XCTAssertThrowsError(try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(oversizedBiffSheet))
+
+        let repetitiveHwpDoc = OfficeDocumentModel(
+            title: "반복문단",
+            format: .hwp,
+            paragraphs: [ParagraphBlock(text: String(repeating: "가", count: 1500))]
+        )
+        let repetitiveHwpBytes = try HWP5BinaryCodec.encodeDocument(repetitiveHwpDoc, compressed: true)
+        let decodedRepetitiveHwp = try HWP5BinaryCodec.decodeDocument(from: repetitiveHwpBytes)
+        XCTAssertEqual(decodedRepetitiveHwp.paragraphs.first?.text.count, 1500)
     }
 }
+
 

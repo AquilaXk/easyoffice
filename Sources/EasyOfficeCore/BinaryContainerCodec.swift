@@ -645,7 +645,7 @@ public enum ZipContainerCodec {
             }
             if decodedBytes <= capacity {
                 let ratio = Double(decodedBytes) / Double(input.count)
-                if ratio > maxRatio {
+                if decodedBytes > maxOutputBytes || (decodedBytes > 4096 && ratio > maxRatio) {
                     throw EasyOfficeError.decompressionBombDetected(ratio: ratio, maxRatio: maxRatio)
                 }
                 destination.removeSubrange(decodedBytes..<destination.count)
