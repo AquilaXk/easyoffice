@@ -192,3 +192,28 @@
   - 일부 대표 포맷(`.docx`, `.xlsx`, `.pdf`)만 샘플링 테스트하고 레거시/서식 포맷(`.hwt`, `.hwtx`, `.doc`, `.xls`, `.ppt`, `.ppsx`, `.odp`) 검증 생략: 실제 공문서 및 서식 배포 시 컨테이너 시그니처 회귀를 놓칠 수 있어 20종 전수 검증을 채택.
 - **Verified by**: `Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`, `node scripts/check-repo-hygiene.mjs`, `bash scripts/package-macos-release.sh 1.0.0`
 - **Revisit when**: 차기 메이저/마이너 릴리스에서 신규 문서 표준 포맷이나 대용량 스트리밍 병렬 코덱을 추가할 때.
+
+---
+
+### 12. Slicing-by-8 CRC-32, 하드웨어 비정렬 워드 적재, 무할당 UTF-8 파서, 표준 컨테이너 호환성 및 AST 캐시·메모이제이션 시트 엔진 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndLegacyOfficeCodecs.swift`, `Sources/EasyOfficeCore/TabularAndMarkupCodec.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAnalyticsAndPivot.swift`)
+- **Decision**:
+  1. **비트 수준 메모리·바이트 처리량 최적화**:
+     - `BitPacking`은 바이트 단위 시프트 루프 대신 `UnsafeRawBufferPointer.loadUnaligned(fromByteOffset:as:)` 및 `storeBytes(of:toByteOffset:as:)` 단일 하드웨어 리틀 엔디언 워드 적재/저장을 사용하며, `CRC32Calculator`는 `8 × 256` 룩업 테이블 기반 **Slicing-by-8** 알고리즘으로 루프당 8바이트씩 처리합니다.
+     - `XMLSanitizer.validateSafeXML`은 전체 문자열 `.uppercased()` 복제 없이 UTF-8 바이트 버퍼에서 직접 대소문자 무시(`byte & 0xDF`) `<!DOCTYPE`/`<!ENTITY` 패턴을 스캔하며, `extractElements`/`stripElements`는 중첩 태그 깊이를 추적하고 작은따옴표(`'`)·큰따옴표(`"`) 속성을 모두 파싱합니다.
+     - `CSVStateMachineCodec`은 `Array(text)`(`Character`당 16바이트 힙 할당)를 제거하고 UTF-8 바이트 버퍼(`Array(text.utf8)`)에서 직접 필드 경계를 슬라이싱하여 디코딩합니다.
+  2. **외부 표준 오피스 컨테이너 양방향 호환성 및 스트림 압축**:
+     - `OOXMLContainerCodec`은 내부 라운드트립 확장 속성과 표준 ECMA-376 요소(`<w:pPr>/<w:rPr>/<w:tblGrid>/<w:tcPr>`, 다중 `<row r="N">` 및 `xl/sharedStrings.xml` 공유 문자열 테이블 `t="s"`, DrawingML `<p:cSld><p:spTree><p:sp>`)를 동시에 지원하며, 본문 문단 추출 전 `<w:tbl>` 영역을 제거하여 표 셀 문단 중복 추출을 방지합니다.
+     - `HWP5BinaryCodec`은 `FileHeader` `flagCompressed (0x01)` 비트를 지원하여 `DocInfo` 및 `BodyText/Section0` 스트림을 Raw Deflate(`COMPRESSION_ZLIB`)로 압축·해제하며, `LegacyOLE2OfficeCodec`은 `.doc`(`FibBase` `0xA5EC`), `.xls`(BIFF8 `BOF`/`DIMENSIONS`/`NUMBER`/`LABEL`/`EOF`), `.ppt`(`RT_Document`/`RT_Slide`/`RT_TextCharsAtom`) 바이너리 레코드 스트림을 직접 직렬화·역직렬화합니다.
+  3. **스프레드시트 64비트 좌표 주 저장소, 사전 컴파일 `FormulaAST` 캐시 및 $O(V+E)$ DAG 메모이제이션**:
+     - `WorksheetModel`의 주 저장소를 `cellsByCoordinate: [PackedCellCoordinate: String]`으로 전환하고 `setCell` 시점에 수식을 1회 파싱하여 `compiledFormulas: [PackedCellCoordinate: FormulaAST]`에 캐싱합니다.
+     - 단일 평가 패스 내에서 `EvaluationContext`(`visited` 순환 감지 + `memo` 결과 캐시)를 공유하고 함수 인자 사전 중복 평가 루프를 제거하여, 다이아몬드 의존성 체인의 시간 복잡도를 지수 시간($O(2^d)$)에서 선형 시간($O(V+E)$)으로 단축합니다.
+- **Why**: 외부 표준 오피스 도구와의 실제 파일 상호운용성을 확보하고, 대용량 컨테이너/CSV/다중 참조 수식 시트에서 발생하던 불필요한 힙 할당과 지수 재평가 병목을 근본적으로 제거하기 위함입니다.
+- **Trade-offs**: `WorksheetModel`에 `compiledFormulas` AST 캐시가 함께 유지되어 셀당 약간의 추가 메모리를 사용하나, 반복 평가 시 문자열 재파싱 비용이 완전히 제거됩니다.
+- **Alternatives rejected**:
+  - 평가 시점마다 원시 수식 문자열을 재토큰화·재파싱하는 방식: 다중 셀 참조 및 차트/피벗 집계 시 CPU 병목을 유발하여 기각.
+  - XML 전체 문자열을 `.uppercased()`로 복제하여 XXE를 검사하는 방식: 수십 MB XML 엔트리에서 불필요한 2배 힙 할당을 유발하여 기각.
+- **Verified by**: `Tests/EasyOfficeTests/BinaryContainerCodecTests.swift`, `Tests/EasyOfficeTests/EditorEnginesParityTests.swift`
+- **Revisit when**: SIMD 벡터화 CSV/XML 스캐너 또는 멀티스레드 백그라운드 수식 재계산 큐를 도입할 때.
+

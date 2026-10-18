@@ -631,4 +631,323 @@ final class BinaryContainerCodecTests: XCTestCase {
         XCTAssertEqual(decodedRTF.tables.count, 1)
         XCTAssertEqual(decodedRTF.tables[0].rows, [["키", "값"], ["언어", "한국어"]])
     }
+
+    func testSlicingBy8CRC32BulkUTF16AndXMLSanitizerUpgrades() throws {
+        // 1. Slicing-by-8 table dimensions (8 slices x 256 entries)
+        XCTAssertEqual(CRC32Calculator.slicingTables.count, 8)
+        XCTAssertTrue(CRC32Calculator.slicingTables.allSatisfy { $0.count == 256 })
+
+        // Verify bit-exactness across empty, <8 byte, 9-byte standard vector, and multi-block payloads
+        XCTAssertEqual(CRC32Calculator.compute(for: Data()), 0x0000_0000)
+        XCTAssertEqual(CRC32Calculator.compute(for: Data("123456789".utf8)), 0xCBF4_3926)
+
+        // 2. Bulk UTF-16LE encoding
+        let text = "한글 UTF-16LE 벌크 인코딩 2026"
+        let encoded = BitPacking.encodeUTF16LE(text)
+        XCTAssertEqual(encoded.count, text.utf16.count * 2)
+        XCTAssertEqual(try BitPacking.decodeUTF16LE(from: encoded, at: 0, byteLength: encoded.count), text)
+
+        // 3. Zero-allocation XXE byte scanner (case-insensitive <!entity and <!DOCTYPE)
+        let lowerEntityBytes = Data("<?xml version='1.0'?><!entity xxe SYSTEM 'file:///etc/passwd'><r/>".utf8)
+        XCTAssertThrowsError(try XMLSanitizer.validateSafeXMLBytes(lowerEntityBytes)) { error in
+            XCTAssertEqual(error as? EasyOfficeError, .xxeOrExternalEntityDetected)
+        }
+
+        // 4. Nested same-tag extraction (<w:tbl> inside <w:tbl>) & single-quoted attributes
+        let nestedXML = "<w:tbl id='outer' mode=\"strict\"><w:tr><w:tc><w:tbl id='inner'><w:tr><w:tc>내부셀</w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl>"
+        let extractedTables = XMLSanitizer.extractElements(named: "w:tbl", in: nestedXML)
+        XCTAssertEqual(extractedTables.count, 1)
+        XCTAssertEqual(extractedTables.first?.attributes["id"], "outer")
+        XCTAssertEqual(extractedTables.first?.attributes["mode"], "strict")
+        XCTAssertTrue(extractedTables.first?.innerXML.contains("<w:tbl id='inner'>") == true)
+
+        let innerTables = XMLSanitizer.extractElements(named: "w:tbl", in: extractedTables[0].innerXML)
+        XCTAssertEqual(innerTables.count, 1)
+        XCTAssertEqual(innerTables.first?.attributes["id"], "inner")
+    }
+
+    func testExternalStandardOOXMLDecodingAndLosslessMetadataRoundTrip() throws {
+        // 1. External standard DOCX where <w:p> has NO custom attributes, only child <w:pPr>/<w:rPr>
+        let externalDocxXML = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:body>
+            <w:p>
+              <w:pPr>
+                <w:pStyle w:val="Heading1"/>
+                <w:jc w:val="center"/>
+              </w:pPr>
+              <w:r>
+                <w:rPr>
+                  <w:rFonts w:ascii="NanumGothic"/>
+                  <w:b/>
+                  <w:i/>
+                  <w:u w:val="single"/>
+                  <w:sz w:val="32"/>
+                </w:rPr>
+                <w:t>외부 표준 </w:t>
+              </w:r>
+              <w:r>
+                <w:t>제목 문단</w:t>
+              </w:r>
+            </w:p>
+            <w:tbl>
+              <w:tr>
+                <w:tc><w:p><w:r><w:t>표 내부 셀 1</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>표 내부 셀 2</w:t></w:r></w:p></w:tc>
+              </w:tr>
+            </w:tbl>
+          </w:body>
+        </w:document>
+        """
+        let externalDocxArchive = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "word/document.xml", data: Data(externalDocxXML.utf8), compressionMethod: .deflate)
+        ])
+        let decodedExternalDoc = try OOXMLContainerCodec.decodeDocument(from: externalDocxArchive)
+        // Table cell <w:p> must NOT be duplicated into top-level body paragraphs!
+        XCTAssertEqual(decodedExternalDoc.paragraphs.count, 1)
+        XCTAssertEqual(decodedExternalDoc.paragraphs[0].style, .heading1)
+        XCTAssertEqual(decodedExternalDoc.paragraphs[0].alignment, .center)
+        XCTAssertEqual(decodedExternalDoc.paragraphs[0].fontName, "NanumGothic")
+        XCTAssertEqual(decodedExternalDoc.paragraphs[0].fontSizePt, 16.0, accuracy: 0.01)
+        XCTAssertTrue(decodedExternalDoc.paragraphs[0].isBold)
+        XCTAssertTrue(decodedExternalDoc.paragraphs[0].isItalic)
+        XCTAssertTrue(decodedExternalDoc.paragraphs[0].isUnderlined)
+        XCTAssertEqual(decodedExternalDoc.paragraphs[0].text, "외부 표준 제목 문단")
+        XCTAssertEqual(decodedExternalDoc.tables.count, 1)
+        XCTAssertEqual(decodedExternalDoc.tables[0].rows, [["표 내부 셀 1", "표 내부 셀 2"]])
+
+        // Lossless round-trip of full OfficeDocumentModel metadata (sections, footnotes, revisions, comments, bookmarks, cellSpans)
+        let pAnchor = ParagraphBlock(style: .heading1, text: "1. 아키텍처 개요")
+        var richTable = DocumentTableBlock(
+            caption: "병합 표",
+            rows: [["A", "B"], ["C", "D"]],
+            hasHeaderRow: true,
+            borderStyle: .doubleLine
+        )
+        richTable.mergeCells(startRow: 0, startCol: 0, rowSpan: 1, colSpan: 2)
+
+        let fullDoc = OfficeDocumentModel(
+            title: "전체 메타데이터 보존 검증",
+            format: .docx,
+            paperSize: .letter,
+            headerText: "머리글",
+            footerText: "바닥글",
+            paragraphs: [pAnchor],
+            tables: [richTable],
+            trackChangesEnabled: true,
+            sections: [
+                DocumentSectionLayout(paperSize: .letter, orientation: .landscape, columnCount: 2, marginTopPt: 40, marginBottomPt: 40, marginLeftPt: 50, marginRightPt: 50)
+            ],
+            footnotes: [
+                FootnoteItem(number: 1, isEndnote: true, anchorParagraphID: pAnchor.id, text: "미주 설명 텍스트")
+            ],
+            revisions: [
+                TrackedRevision(author: "QA", kind: .insertion, paragraphID: pAnchor.id, originalText: "개요", proposedText: "아키텍처 개요")
+            ],
+            comments: [
+                DocumentCommentThread(anchorParagraphID: pAnchor.id, author: "리뷰어", message: "검토 의견", replies: ["반영 완료"], isResolved: true)
+            ],
+            bookmarks: ["sec1": pAnchor.id]
+        )
+        let encodedFullDoc = try OOXMLContainerCodec.encodeDocument(fullDoc)
+        let decodedFullDoc = try OOXMLContainerCodec.decodeDocument(from: encodedFullDoc)
+        XCTAssertEqual(decodedFullDoc.sections, fullDoc.sections)
+        XCTAssertEqual(decodedFullDoc.footnotes, fullDoc.footnotes)
+        XCTAssertEqual(decodedFullDoc.revisions, fullDoc.revisions)
+        XCTAssertEqual(decodedFullDoc.comments, fullDoc.comments)
+        XCTAssertEqual(decodedFullDoc.bookmarks, fullDoc.bookmarks)
+        XCTAssertEqual(decodedFullDoc.tables.first?.borderStyle, .doubleLine)
+        XCTAssertEqual(decodedFullDoc.tables.first?.cellSpans, richTable.cellSpans)
+
+        // 2. External standard XLSX with xl/sharedStrings.xml and multi-row <row r="1">, <row r="2">
+        let sharedStringsXML = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2">
+          <si><t>품목명</t></si>
+          <si><r><t>고성능 </t></r><r><t>워크스테이션</t></r></si>
+        </sst>
+        """
+        let externalSheetXML = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+          <sheetData>
+            <row r="1">
+              <c r="A1" t="s"><v>0</v></c>
+              <c r="B1" t="inlineStr"><is><t>단가</t></is></c>
+            </row>
+            <row r="2">
+              <c r="A2" t="s"><v>1</v></c>
+              <c r="B2"><v>2500</v></c>
+              <c r="C2" t="b"><v>1</v></c>
+            </row>
+          </sheetData>
+        </worksheet>
+        """
+        let externalXlsxArchive = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "xl/sharedStrings.xml", data: Data(sharedStringsXML.utf8), compressionMethod: .deflate),
+            ZipContainerEntry(path: "xl/worksheets/sheet1.xml", data: Data(externalSheetXML.utf8), compressionMethod: .deflate)
+        ])
+        let decodedExternalSheet = try OOXMLContainerCodec.decodeWorksheet(from: externalXlsxArchive)
+        XCTAssertEqual(decodedExternalSheet.rawValue(at: "A1"), "품목명")
+        XCTAssertEqual(decodedExternalSheet.rawValue(at: "B1"), "단가")
+        XCTAssertEqual(decodedExternalSheet.rawValue(at: "A2"), "고성능 워크스테이션")
+        XCTAssertEqual(decodedExternalSheet.evaluate(at: "B2"), .number(2500))
+        XCTAssertEqual(decodedExternalSheet.evaluate(at: "C2"), .boolean(true))
+
+        // Verify encoded XLSX groups rows properly into <row r="1"> and <row r="2"> and includes xl/sharedStrings.xml
+        let reencodedXlsx = try OOXMLContainerCodec.encodeWorksheet(decodedExternalSheet)
+        let reencodedEntries = try ZipContainerCodec.unpack(from: reencodedXlsx)
+        let sheet1Entry = try XCTUnwrap(reencodedEntries.first(where: { $0.path == "xl/worksheets/sheet1.xml" }))
+        let sheet1XMLString = String(decoding: sheet1Entry.data, as: UTF8.self)
+        XCTAssertTrue(sheet1XMLString.contains("<row r=\"1\">"))
+        XCTAssertTrue(sheet1XMLString.contains("<row r=\"2\">"))
+        XCTAssertTrue(reencodedEntries.contains(where: { $0.path == "xl/sharedStrings.xml" }))
+
+        // 3. External standard PPTX DrawingML (<p:cSld><p:spTree><p:sp>...<a:t>)
+        let externalPresXML = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+          <p:sldIdLst>
+            <p:sldId id="256" r:id="rId2"/>
+          </p:sldIdLst>
+        </p:presentation>
+        """
+        let externalSlideXML = """
+        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <p:cSld>
+            <p:spTree>
+              <p:sp>
+                <p:nvSpPr><p:cNvPr id="2" name="Title 1"/></p:nvSpPr>
+                <p:spPr><a:xfrm><a:off x="100" y="50"/><a:ext cx="600" cy="80"/></a:xfrm></p:spPr>
+                <p:txBody><a:p><a:r><a:t>DrawingML 외부 슬라이드 제목</a:t></a:r></a:p></p:txBody>
+              </p:sp>
+            </p:spTree>
+          </p:cSld>
+        </p:sld>
+        """
+        let externalPptxArchive = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "ppt/presentation.xml", data: Data(externalPresXML.utf8), compressionMethod: .deflate),
+            ZipContainerEntry(path: "ppt/slides/slide1.xml", data: Data(externalSlideXML.utf8), compressionMethod: .deflate)
+        ])
+        let decodedExternalDeck = try OOXMLContainerCodec.decodePresentation(from: externalPptxArchive)
+        XCTAssertEqual(decodedExternalDeck.slides.count, 1)
+        XCTAssertEqual(decodedExternalDeck.slides[0].elements.count, 1)
+        XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].title, "Title 1")
+        XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].bodyText, "DrawingML 외부 슬라이드 제목")
+        XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].x, 100)
+        XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].y, 50)
+        XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].width, 600)
+        XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].height, 80)
+    }
+
+    func testHWP5CompressedAndUncompressedAndLegacyOLE2CodecsRoundTrip() throws {
+        // 1. HWP 5.0 Compressed (flagCompressed = 0x01) vs Uncompressed (0x00)
+        let sampleDoc = OfficeDocumentModel(
+            title: "HWP 5.0 압축 스트림 검증",
+            format: .hwp,
+            paragraphs: Array(
+                repeating: ParagraphBlock(style: .body, text: "반복되는 한글 본문 스트림은 RFC 1951 Raw Deflate로 크게 압축됩니다."),
+                count: 15
+            ),
+            tables: [
+                DocumentTableBlock(caption: "압축표", rows: [["구분", "내용"], ["방식", "Deflate"]])
+            ]
+        )
+
+        let compressedHwp = try HWP5BinaryCodec.encodeDocument(sampleDoc, compressed: true)
+        let uncompressedHwp = try HWP5BinaryCodec.encodeDocument(sampleDoc, compressed: false)
+
+        let compStreams = try OLE2ContainerCodec.unpack(from: compressedHwp)
+        let compHeader = try XCTUnwrap(compStreams.first(where: { $0.name == "FileHeader" })?.data)
+        let compFlags = try BitPacking.readUInt32LE(from: compHeader, at: 36)
+        XCTAssertNotEqual(compFlags & HWP5BinaryCodec.flagCompressed, 0)
+
+        let uncompStreams = try OLE2ContainerCodec.unpack(from: uncompressedHwp)
+        let uncompHeader = try XCTUnwrap(uncompStreams.first(where: { $0.name == "FileHeader" })?.data)
+        let uncompFlags = try BitPacking.readUInt32LE(from: uncompHeader, at: 36)
+        XCTAssertEqual(uncompFlags & HWP5BinaryCodec.flagCompressed, 0)
+
+        let compSectionSize = try XCTUnwrap(compStreams.first(where: { $0.name == "BodyText/Section0" })?.data.count)
+        let uncompSectionSize = try XCTUnwrap(uncompStreams.first(where: { $0.name == "BodyText/Section0" })?.data.count)
+        XCTAssertLessThan(compSectionSize, uncompSectionSize)
+
+        let decodedComp = try HWP5BinaryCodec.decodeDocument(from: compressedHwp)
+        let decodedUncomp = try HWP5BinaryCodec.decodeDocument(from: uncompressedHwp)
+        XCTAssertEqual(decodedComp.title, sampleDoc.title)
+        XCTAssertEqual(decodedComp.paragraphs.map(\.text), sampleDoc.paragraphs.map(\.text))
+        XCTAssertEqual(decodedUncomp.paragraphs.map(\.text), sampleDoc.paragraphs.map(\.text))
+
+        // 2. LegacyOLE2OfficeCodec: Word Binary (.doc) FibBase 0xA5EC round-trip
+        let wordBinaryData = try LegacyOLE2OfficeCodec.encodeWordBinary(sampleDoc)
+        let wordStreams = try OLE2ContainerCodec.unpack(from: wordBinaryData)
+        let wordStream = try XCTUnwrap(wordStreams.first(where: { $0.name == "WordDocument" })?.data)
+        XCTAssertEqual(try BitPacking.readUInt16LE(from: wordStream, at: 0), 0xA5EC)
+        XCTAssertEqual(try BitPacking.readUInt16LE(from: wordStream, at: 2), 0x00C1)
+
+        let decodedWordDoc = try LegacyOLE2OfficeCodec.decodeWordBinary(from: wordBinaryData)
+        XCTAssertEqual(decodedWordDoc.title, sampleDoc.title)
+        XCTAssertEqual(decodedWordDoc.format, .doc)
+        XCTAssertEqual(decodedWordDoc.paragraphs.map(\.text), sampleDoc.paragraphs.map(\.text))
+        XCTAssertEqual(decodedWordDoc.tables.first?.rows, sampleDoc.tables.first?.rows)
+
+        // 3. LegacyOLE2OfficeCodec: BIFF8 Worksheet (.xls) BOF/DIMENSIONS/NUMBER/LABEL/EOF round-trip
+        var sheet = WorksheetModel(name: "BIFF8시트")
+        try sheet.setCell("A1", rawValue: "항목")
+        try sheet.setCell("B1", rawValue: "수치")
+        try sheet.setCell("A2", rawValue: "매출")
+        try sheet.setCell("B2", rawValue: "1250.5")
+        try sheet.setCell("B3", rawValue: "=B2*2")
+
+        let biff8Data = try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(sheet)
+        let xlsStreams = try OLE2ContainerCodec.unpack(from: biff8Data)
+        let workbookBytes = try XCTUnwrap(xlsStreams.first(where: { $0.name == "Workbook" })?.data)
+        // First record must be BOF (0x0809)
+        XCTAssertEqual(try BitPacking.readUInt16LE(from: workbookBytes, at: 0), 0x0809)
+
+        let decodedBiff8 = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: biff8Data, name: "BIFF8시트")
+        XCTAssertEqual(decodedBiff8.name, "BIFF8시트")
+        XCTAssertEqual(decodedBiff8.rawValue(at: "A1"), "항목")
+        XCTAssertEqual(decodedBiff8.evaluate(at: "B2"), .number(1250.5))
+        XCTAssertEqual(decodedBiff8.evaluate(at: "B3"), .number(2501.0))
+
+        // 4. LegacyOLE2OfficeCodec: PowerPoint Binary (.ppt) RT_Document / RT_Slide / RT_TextCharsAtom round-trip
+        let pptDeck = PresentationDeckModel(
+            title: "레거시 PPT 발표자료",
+            aspectRatio: .standard4x3,
+            slides: [
+                SlideModel(
+                    title: "1장 바이너리 레코드",
+                    subtitle: "RT_Slide (1006)",
+                    bulletPoints: ["RT_TextCharsAtom (4000)", "UTF-16LE 인코딩"],
+                    speakerNotes: "발표자 노트 보존",
+                    masterLayout: .sectionHeader,
+                    transition: .push,
+                    elements: [
+                        SlideCanvasElement(title: "도형 1", bodyText: "본문 텍스트", x: 40, y: 60, width: 240, height: 90)
+                    ]
+                )
+            ]
+        )
+        let pptBinaryData = try LegacyOLE2OfficeCodec.encodePowerPointBinary(pptDeck)
+        let pptStreams = try OLE2ContainerCodec.unpack(from: pptBinaryData)
+        let pptStream = try XCTUnwrap(pptStreams.first(where: { $0.name == "PowerPoint Document" })?.data)
+        // First record type at offset 2 must be RT_Document (1000)
+        XCTAssertEqual(try BitPacking.readUInt16LE(from: pptStream, at: 2), 1000)
+
+        let decodedPpt = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: pptBinaryData)
+        XCTAssertEqual(decodedPpt.title, "레거시 PPT 발표자료")
+        XCTAssertEqual(decodedPpt.aspectRatio, .standard4x3)
+        XCTAssertEqual(decodedPpt.slides.count, 1)
+        XCTAssertEqual(decodedPpt.slides[0].title, "1장 바이너리 레코드")
+        XCTAssertEqual(decodedPpt.slides[0].subtitle, "RT_Slide (1006)")
+        XCTAssertEqual(decodedPpt.slides[0].bulletPoints, ["RT_TextCharsAtom (4000)", "UTF-16LE 인코딩"])
+        XCTAssertEqual(decodedPpt.slides[0].speakerNotes, "발표자 노트 보존")
+        XCTAssertEqual(decodedPpt.slides[0].masterLayout, .sectionHeader)
+        XCTAssertEqual(decodedPpt.slides[0].transition, .push)
+        XCTAssertEqual(decodedPpt.slides[0].elements.first?.title, "도형 1")
+        XCTAssertEqual(decodedPpt.slides[0].elements.first?.bodyText, "본문 텍스트")
+    }
 }
+
