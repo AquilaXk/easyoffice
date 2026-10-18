@@ -832,6 +832,38 @@ extension WorkspaceViewModel {
       "문단 들여쓰기 조정 (첫 줄 \(Int(doc.paragraphs[pIdx].firstLineIndentPt))pt, 좌측 \(Int(doc.paragraphs[pIdx].leftIndentPt))pt)"
   }
 
+  public func adjustActiveParagraphTypography(
+    letterSpacingDelta: Double = 0.0,
+    charScaleDelta: Double = 0.0,
+    reset: Bool = false
+  ) {
+    guard let tab = activeTab,
+      tab.moduleKind == .document || tab.moduleKind == .hwp,
+      let idx = openTabs.firstIndex(where: { $0.id == tab.id }),
+      case .document(var doc) = openTabs[idx].payload,
+      !doc.paragraphs.isEmpty
+    else { return }
+    let pIdx = min(max(0, selectedParagraphIndex), doc.paragraphs.count - 1)
+    recordUndoSnapshot(for: tab.id)
+    if reset {
+      doc.paragraphs[pIdx].letterSpacingPercent = 0.0
+      doc.paragraphs[pIdx].charWidthScalePercent = 100.0
+    } else {
+      doc.paragraphs[pIdx].letterSpacingPercent = max(
+        -50.0,
+        min(50.0, doc.paragraphs[pIdx].letterSpacingPercent + letterSpacingDelta)
+      )
+      doc.paragraphs[pIdx].charWidthScalePercent = max(
+        50.0,
+        min(200.0, doc.paragraphs[pIdx].charWidthScalePercent + charScaleDelta)
+      )
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary =
+      "문단 자간(\(Int(doc.paragraphs[pIdx].letterSpacingPercent))%) · 장평(\(Int(doc.paragraphs[pIdx].charWidthScalePercent))%) 조판 적용"
+  }
+
   private func mutateActiveDocumentTable(
     tableIndex: Int,
     summary: (DocumentTableBlock) -> String,

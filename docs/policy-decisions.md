@@ -40,6 +40,8 @@
 20. [PD-029: PDF 스튜디오 ISO 32000-1 벡터 잉크 획(m / l / S) 직렬화 및 자유곡선 서명·하이라이트 오버레이 정책 (2026-10-18)](#20-pd-029-pdf-스튜디오-iso-32000-1-벡터-잉크-획m--l--s-직렬화-및-자유곡선-서명하이라이트-오버레이-정책-2026-10-18)
 21. [PD-030 ~ PD-034: 인라인 형광펜/링크·표 구조 편집·이름 정의/목표값 찾기/92종 함수·PDF 비가역 리댁션 및 1D CRC32·따옴표 인식 XML 파서 정책 (2026-10-18)](#21-pd-030--pd-034-인라인-형광펜링크표-구조-편집이름-정의목표값-찾기92종-함수pdf-비가역-리댁션-및-1d-crc32따옴표-인식-xml-파서-정책-2026-10-18)
 22. [PD-032 & PD-035: 7종 벡터 차트·7종 슬라이드 도형/정렬 뷰·NSTextView 문단 스타일/인라인 속성 및 PDF 리댁션/AcroForm/탭 병합 UI 정책 (2026-10-18)](#22-pd-032--pd-035-7종-벡터-차트7종-슬라이드-도형정렬-뷰nstextview-문단-스타일인라인-속성-및-pdf-리댁션acroform탭-병합-ui-정책-2026-10-18)
+23. [PD-037 ~ PD-041: 시맨틱 다크모드 배지 명도 대비, 200자 원고지 격자·문단/표/메일머지 제어, 시트 데이터 막대·첫 열 고정·데이터 정제, 슬라이드 마스터 테마·개체 정렬/배분·단조 Z-Order 및 PDF 결재 도장·계층형 책갈피 정책 (2026-10-18)](#23-pd-037--pd-041-시맨틱-다크모드-배지-명도-대비-200자-원고지-격자문단표메일머지-제어-시트-데이터-막대첫-열-고정데이터-정제-슬라이드-마스터-테마개체-정렬배분단조-z-order-및-pdf-결재-도장계층형-책갈피-정책-2026-10-18)
+24. [PD-040 ~ PD-043: 6차 적대적 감사 기반 다중 그룹 리본·문서/슬라이드 수평 눈금자·무간격 1px 세선 시트 그리드·122종 수식 함수·자간/장평 타이포그래피·16:9 슬라이드/홈 템플릿 미니어처 및 PDF 보안 점검·워터마크 정책 (2026-10-19)](#24-pd-040--pd-043-6차-적대적-감사-기반-다중-그룹-리본문서슬라이드-수평-눈금자무간격-1px-세선-시트-그리드122종-수식-함수자간장평-타이포그래피169-슬라이드홈-템플릿-미니어처-및-pdf-보안-점검워터마크-정책-2026-10-19)
 
 ---
 
@@ -456,4 +458,35 @@
   - `moveSlideElementZOrder`에서 단순 `zIndex += 1` / `zIndex -= 1` 증감만 수행하는 방식: 초기 `zIndex`가 모두 `0`인 다중 개체에서 역전이 발생하지 않거나 중복 `zIndex`가 남으므로 인덱스 재정규화(`0..<count`) 방식을 채택.
 - **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift`
 - **Revisit when**: 슬라이드 수직 균등 배분(`.distributeVertically`) 단축 버튼을 리본 상단에 추가할 때.
+
+---
+
+### 24. PD-040 ~ PD-043: 6차 적대적 감사 기반 다중 그룹 리본·문서/슬라이드 수평 눈금자·무간격 1px 세선 시트 그리드·122종 수식 함수·자간/장평 타이포그래피·16:9 슬라이드/홈 템플릿 미니어처 및 PDF 보안 점검·워터마크 정책 (2026-10-19)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SheetCoordinatesAndAST.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Decision**:
+  1. **PD-040 (다중 그룹 컨텍스트 리본 아키텍처, 문서/슬라이드 수평 눈금자 및 단일 행 무줄바꿈 툴바)**:
+     - 상단 컨텍스트 리본을 수직 구분선(`Divider`)과 하단 그룹 캡션(`편집·실행`, `핵심 리본 도구`, `서식·문서 구조`, `빠른 조판·분석`)을 갖춘 **다중 그룹 리본(`ContextRibbonBarView`)**으로 구조화하고, 모든 툴바·상태 배지에 `.lineLimit(1)` + `.fixedSize(horizontal: true, vertical: false)` 및 수평 `ScrollView`를 적용해 `"A4 (210 × 297 mm)"` 등의 텍스트나 한글 버튼이 세로로 꺾이거나 잘리지 않도록 보장합니다.
+     - 문서/HWP 편집기 상단에 좌우 여백 음영 구간, `0..16 cm` 눈금(mm 보조 눈금 포함), 선택 문단의 첫 줄/왼쪽 들여쓰기 마커(`▽`/`△`)를 표시하는 `24pt` 높이의 `DocumentHorizontalRulerView`를 배치하고, 슬라이드 편집 스테이지 상단에도 `0..960 pt` 수평 좌표 눈금자(`slideStageHorizontalRuler`)를 배치합니다.
+     - 문서 편집기에서 중복 렌더링되던 하단 가로 스크롤 인라인 런 미리보기 행과 디버그용 `선택 구간: 0..<12` / `인라인 런 N구간` 배지를 제거하고, 각주 상단에 표준 `140pt`(`5cm`) 수평 각주 구분선(`각주 구분선 (Footnote Separator)`) 및 다중 구역 문서의 `--- 구역 나눔 (Section Break) ---` 시각 구분선을 표시합니다.
+  2. **PD-041 (무간격 0.5pt 세선 스프레드시트 그리드, 첫 열 고정 통합 수직 스크롤, 조건부 서식 범위 사전 계산 및 122종 수식 함수 확장)**:
+     - 카드형 여백 그리드를 제거하고 `spacing: 0` 및 `0.5pt` 세선 테두리, `2.0pt` 브랜드 액센트(`#3B4890`) 선택 셀 테두리, 우하단 `6×6` 자동 채우기 핸들(`■`), `"A"`·`"B"`·`"C"` 단일 문자 열 머리글(`26pt`), 기본 행 높이 `30pt`(`wrapText` 활성 시 `44pt`)의 정통 스프레드시트 격자로 전환합니다.
+     - `isFirstColumnFrozen == true`일 때 좌우 별도 수직 스크롤 대신 단일 수직 `ScrollView` 내부 `HStack(spacing: 0)`에 고정 열(`# + A열`, `.fixedSize(horizontal: true, vertical: false)`), `2pt` 액센트 고정선, `B..G열` 수평 `ScrollView`를 직결하여 빈 여백(`dead space`)을 0pt로 제거하고 수직 스크롤을 동기화합니다.
+     - `SheetEditorDetailPaneView.body` 당 조건부 서식 대상 범위 평가 배열(`condRangeValues`)을 활성 규칙 존재 시 1회만 사전 계산해 셀당 중복 범위 평가를 제거(`PERF-02`)하고, 시트 상단 바에 1클릭 숫자 서식 버튼(`₩`, `%`, `,`, `.0←`, `.00→`, `줄바꿈`) 및 차트 제목/범위 사용자 정의 입력창을 제공합니다.
+     - `WorksheetModel.supportedFunctionNames`를 **122종**(기존 92종 + 통계·수학·텍스트·날짜·재무·논리·배열 심화 30종)으로 확장합니다.
+  3. **PD-042 (한글 DTP 자간·장평 타이포그래피 엔진 및 NSTextView `.kern`/`.expansion` 실시간 반영)**:
+     - `ParagraphBlock`에 `letterSpacingPercent: Double` (`-50.0...50.0`, 기본 `0.0`) 및 `charWidthScalePercent: Double` (`50.0...200.0`, 기본 `100.0`)을 추가하고, `SelectableParagraphTextView.buildAttributedString(from:)`에서 `.kern`(`fontSizePt * (letterSpacingPercent / 100.0)`)과 `.expansion`(`log(max(0.5, charWidthScalePercent / 100.0))`)을, 비편집 문단 행(`paragraphRow`)에서 `.tracking(kernPt)`을 즉시 적용합니다.
+     - 문서/HWP 빠른 서식 바 및 우측 인스펙터에서 `adjustActiveParagraphTypography(letterSpacingDelta:charScaleDelta:reset:)`(`자간 -5%`, `자간 +5%`, `장평 95%`, `장평 105%`, `기본`)를 1클릭으로 조작할 수 있도록 연결합니다.
+  4. **PD-043 (16:9 슬라이드 미니 썸네일 레일, 홈 허브 시각적 문서 프리뷰 카드, PDF 보안 점검 배지·워터마크 바 및 1Hz 발표자 타이머 프로퍼티화)**:
+     - 슬라이드 편집기 좌측 레일을 `160×90` 16:9 미니 슬라이드 캔버스 카드(`slideMiniatureThumbnailCard`: 마스터 테마 배경, 액센트 상단 바, 슬라이드 번호 배지, 제목/부제 및 개체 미니 도형 프리뷰)로 업그레이드하고, 스테이지 하단의 중복 불릿/개체 텍스트 편집 폼을 제거하여 16:9 스테이지(`360pt`)와 하단 발표자 노트 바의 시각적 집중도를 높입니다.
+     - 홈 허브(`HomeHubAndSmartViews.swift`)의 템플릿 및 최근 문서 카드를 도메인별 실제 문서 축소판(문서 본문 줄, 시트 미니 격자, 슬라이드 16:9 미니 스테이지, PDF 스탬프/페이지, HWP 결재란 격자) 그래픽 프리뷰로 렌더링합니다.
+     - `PDFStudioDetailPaneView`에 `pdf.securityInspectionSummary` 배지와 워터마크 입력/적용 바(`applyWatermarkOnActivePDF()`)를 추가하고, `PDFKitRepresentedView` 높이를 `380pt`로 확장하며 자유곡선 서명 캔버스(`PDFInteractiveInkOverlayView`, `96pt`)를 토글(`isPDFInkOverlayExpanded`)로 접고 펼칠 수 있게 합니다.
+     - `SlideEditorDetailPaneView`와 `SlideshowFullScreenOverlayView`에서 `Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()`를 `body` 내부 인라인 생성 대신 뷰 구조체의 저장 프로퍼티(`private let presenterTimer`)로 분리하여 뷰 재평가 시 타이머 퍼블리셔 재생성을 방지합니다(`PERF-01`).
+- **Why**: 6차 적대적 UI/UX 감사에서 식별된 툴바 줄바꿈·문서 이중 텍스트 표시·시트 카드 간격 및 첫 열 고정 여백·슬라이드 텍스트형 목록·PDF 캔버스 협소함·타이머 재생성 문제를 근본적으로 해결하고 상용 데스크톱 오피스 수준의 조판·그리드·프레젠테이션·PDF 밀도를 완성하기 위함입니다.
+- **Trade-offs**: 눈금자, 미니 캔버스 프리뷰, 다중 그룹 리본 렌더링이 추가되나, SwiftUI `Canvas` 및 사전 계산된 조건부 서식 캐시(`condRangeValuesByRuleID`)를 사용해 런타임 오버헤드를 최소화합니다.
+- **Alternatives rejected**:
+  - 첫 열 고정 시 고정 열과 가변 열을 별도 `ScrollView(.vertical)`로 분리 유지: 스크롤 오프셋 불일치와 우측 빈 여백이 발생하므로 단일 수직 `ScrollView` 내 `HStack(spacing: 0)` 결합 구조로 대체.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testSixthAuditTypographyAdjustmentsQuickNumberFormatsAndPDFWatermarkActions`), `Tests/EasyOfficeTests/WorkspaceUIParityTests.swift`
+- **Revisit when**: 문서 세로 눈금자(Vertical Page Ruler) 및 탭 정지점(Tab Stop) 드래그 마커를 추가할 때.
+
 

@@ -448,10 +448,8 @@ public struct SheetEditorDetailPaneView: View {
       )
     }()
 
-    let condRangeValues: [EvaluatedCellValue] = {
-      guard viewModel.activeConditionalFormatRule != nil else { return [] }
-      return Array(evaluatedGrid.values)
-    }()
+    let condRangeValues: [EvaluatedCellValue] =
+      viewModel.activeConditionalFormatRule != nil ? Array(evaluatedGrid.values) : []
 
     let maxPositiveValue: Double = {
       let maxFound = evaluatedGrid.values.compactMap { val -> Double? in
@@ -463,11 +461,19 @@ public struct SheetEditorDetailPaneView: View {
       return max(1.0, maxFound ?? 1.0)
     }()
 
+    let chartSourceRange: CellRange = {
+      let draft = viewModel.customChartRangeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !draft.isEmpty, let parsed = try? CellRange(notation: draft) {
+        return parsed
+      }
+      return detectedRange
+    }()
+
     let chartModel: SheetChartModel = {
-      let startRow = detectedRange.start.row
-      let endRow = detectedRange.end.row
-      let startCol = detectedRange.start.column
-      let endCol = detectedRange.end.column
+      let startRow = chartSourceRange.start.row
+      let endRow = chartSourceRange.end.row
+      let startCol = chartSourceRange.start.column
+      let endCol = chartSourceRange.end.column
 
       let dataStartRow = min(endRow, startRow + 1)
       let dataEndRow = max(dataStartRow, (endRow - startRow >= 3) ? (endRow - 1) : endRow)
@@ -489,9 +495,12 @@ public struct SheetEditorDetailPaneView: View {
           valueRanges.append((name: seriesName, range: CellRange(start: sStart, end: sEnd)))
         }
       }
+      let customTitle = viewModel.customChartTitleDraft.trimmingCharacters(
+        in: .whitespacesAndNewlines)
+      let resolvedTitle = customTitle.isEmpty ? "\(sheet.name) 데이터 비교" : customTitle
       return SheetChartBuilder.buildChart(
         from: sheet,
-        title: "\(sheet.name) 데이터 비교",
+        title: resolvedTitle,
         kind: viewModel.selectedChartKind,
         categoryRange: categoryRange,
         valueRanges: valueRanges
@@ -505,11 +514,13 @@ public struct SheetEditorDetailPaneView: View {
       return sheet.mergedRanges.map(\.a1Range)
     }()
 
-    VStack(alignment: .leading, spacing: 12) {
-      // Formula Bar with Active Range Badge & 92-function catalog badge
+    VStack(alignment: .leading, spacing: 10) {
+      // Formula Bar with Active Range Badge & 122-function catalog badge
       HStack(spacing: 8) {
         Text(viewModel.selectedSheetCell)
           .font(.system(size: 12, weight: .bold, design: .monospaced))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
           .padding(.horizontal, 8)
           .padding(.vertical, 4)
           .background(palette.selectedSurface.swiftUIColor)
@@ -518,6 +529,8 @@ public struct SheetEditorDetailPaneView: View {
 
         Text("범위: \(viewModel.selectedSheetRange)")
           .font(.system(size: 11, weight: .semibold, design: .monospaced))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
           .padding(.horizontal, 6)
           .padding(.vertical, 3)
           .background(palette.subtleAccentSurface.swiftUIColor)
@@ -526,6 +539,8 @@ public struct SheetEditorDetailPaneView: View {
 
         Text("fx (\(WorksheetModel.supportedFunctionNames.count)종 함수)")
           .font(.system(size: 11, weight: .semibold, design: .monospaced))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
           .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
 
         if isPrimaryPane {
@@ -545,6 +560,8 @@ public struct SheetEditorDetailPaneView: View {
           }
           .buttonStyle(.borderedProminent)
           .tint(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
         } else {
           Text(sheet.rawValue(at: viewModel.selectedSheetCell))
             .font(.system(size: 12, design: .monospaced))
@@ -559,23 +576,31 @@ public struct SheetEditorDetailPaneView: View {
             systemImage: "rectangle.compress.vertical"
           )
           .font(.system(size: 10, weight: .semibold, design: .monospaced))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
           .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
         }
 
         if viewModel.isHeaderRowFrozen {
           Label("1행 고정 활성", systemImage: "pin.fill")
             .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
         }
 
         if viewModel.isFirstColumnFrozen {
           Label("A열 고정 활성", systemImage: "pin.fill")
             .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
         }
 
         Text("결과: \(selectedDisplayResult)")
           .font(.system(size: 12, weight: .bold))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
           .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
       }
       .padding(.horizontal, 12)
@@ -583,166 +608,258 @@ public struct SheetEditorDetailPaneView: View {
       .background(palette.cardSurface.swiftUIColor)
       .clipShape(RoundedRectangle(cornerRadius: 6))
 
-      // Column Auto-Filter Bar, Row/Col Insert/Delete, Data Cleansing & Mini Sparkline Controls
+      // 1-Click Number Formatting (`₩`, `%`, `,`, `.0←`, `.00→`, `줄바꿈`), Auto-Filter, Row/Col Insert/Delete, Data Cleansing & Mini Sparkline Controls
       if isPrimaryPane {
-        HStack(spacing: 8) {
-          Label("열 자동 필터", systemImage: "line.3.horizontal.decrease.circle")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
-
-          Picker("필터 열", selection: $viewModel.sheetAutoFilterColumn) {
-            ForEach(0..<maxCol, id: \.self) { colIdx in
-              Text("\(CellAddress.columnLabel(for: colIdx))열").tag(colIdx)
-            }
-          }
-          .pickerStyle(.menu)
-          .frame(width: 86)
-
-          TextField("열 값 필터...", text: $viewModel.sheetAutoFilterQuery)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 110)
-
-          if !viewModel.sheetAutoFilterQuery.isEmpty {
-            Button("필터 해제") {
-              viewModel.sheetAutoFilterQuery = ""
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-          }
-
-          Divider().frame(height: 16)
-
-          HStack(spacing: 4) {
-            Button("+행") {
-              viewModel.insertSheetRowAtSelection()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button("-행") {
-              viewModel.deleteSheetRowAtSelection()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button("+열") {
-              viewModel.insertSheetColumnAtSelection()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button("-열") {
-              viewModel.deleteSheetColumnAtSelection()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-          }
-
-          Button {
-            let targetNotation = defaultAutoFillTargetNotation(for: activeRange, maxRow: maxRow)
-            viewModel.performAutoFillOnActiveSheet(targetRangeNotation: targetNotation)
-          } label: {
-            Label("자동 채우기 (◢)", systemImage: "arrow.down.right.square.fill")
-              .font(.system(size: 11, weight: .semibold))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button("A열 고정") {
-            viewModel.toggleFirstColumnFrozen()
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button("데이터 막대") {
-            viewModel.toggleSheetDataBars()
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button("중복 제거") {
-            _ = viewModel.removeDuplicatesInActiveSheet()
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button("텍스트 나누기") {
-            _ = viewModel.splitActiveSheetColumnByDelimiter()
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Spacer()
-
-          if sparklineValues.count >= 2 {
-            HStack(spacing: 6) {
-              Text("스파크라인")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-              Canvas { context, size in
-                var path = Path()
-                for (idx, norm) in sparklineValues.enumerated() {
-                  let xRatio = Double(idx) / Double(max(1, sparklineValues.count - 1))
-                  let px = 3.0 + CGFloat(xRatio) * max(1.0, size.width - 6.0)
-                  let py = 3.0 + (1.0 - CGFloat(norm)) * max(1.0, size.height - 6.0)
-                  if idx == 0 {
-                    path.move(to: CGPoint(x: px, y: py))
-                  } else {
-                    path.addLine(to: CGPoint(x: px, y: py))
-                  }
-                }
-                context.stroke(
-                  path,
-                  with: .color(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor),
-                  style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
-                )
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 6) {
+            // 1-Click Quick Number Formatting & Wrap Text Group
+            HStack(spacing: 3) {
+              Button("₩") {
+                viewModel.applyQuickNumberFormatOnSelectedSheetCell(.currencyKRW)
               }
-              .frame(width: 72, height: 20)
-              .background(palette.elevatedSurface.swiftUIColor)
-              .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-          }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .help("원화 통화 서식 (₩)")
 
-          Text("표시 행: \(matchingZeroBasedRows.count)/\(maxRow)행")
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
+              Button("%") {
+                viewModel.applyQuickNumberFormatOnSelectedSheetCell(.percentage)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .help("백분율 서식 (%)")
+
+              Button(",") {
+                viewModel.applyQuickNumberFormatOnSelectedSheetCell(.decimalTwo)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .help("천 단위 구분 및 소수 2자리 (,)")
+
+              Button(".0←") {
+                viewModel.adjustSelectedSheetCellDecimalPlaces(delta: -1)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .help("소수 자릿수 줄이기")
+
+              Button(".00→") {
+                viewModel.adjustSelectedSheetCellDecimalPlaces(delta: 1)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .help("소수 자릿수 늘리기")
+
+              Button("줄바꿈") {
+                viewModel.toggleWrapTextOnSelectedSheetCell()
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .help("셀 내 텍스트 자동 줄바꿈 토글")
+            }
+
+            Divider().frame(height: 16)
+
+            Label("열 필터", systemImage: "line.3.horizontal.decrease.circle")
+              .font(.system(size: 11, weight: .bold))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+
+            Picker("필터 열", selection: $viewModel.sheetAutoFilterColumn) {
+              ForEach(0..<maxCol, id: \.self) { colIdx in
+                Text("\(CellAddress.columnLabel(for: colIdx))열").tag(colIdx)
+              }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 82)
+
+            TextField("열 값 필터...", text: $viewModel.sheetAutoFilterQuery)
+              .textFieldStyle(.roundedBorder)
+              .font(.system(size: 11))
+              .frame(width: 100)
+
+            if !viewModel.sheetAutoFilterQuery.isEmpty {
+              Button("필터 해제") {
+                viewModel.sheetAutoFilterQuery = ""
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+            }
+
+            Divider().frame(height: 16)
+
+            HStack(spacing: 3) {
+              Button("+행") {
+                viewModel.insertSheetRowAtSelection()
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+
+              Button("-행") {
+                viewModel.deleteSheetRowAtSelection()
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+
+              Button("+열") {
+                viewModel.insertSheetColumnAtSelection()
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+
+              Button("-열") {
+                viewModel.deleteSheetColumnAtSelection()
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+            }
+
+            Button {
+              let targetNotation = defaultAutoFillTargetNotation(for: activeRange, maxRow: maxRow)
+              viewModel.performAutoFillOnActiveSheet(targetRangeNotation: targetNotation)
+            } label: {
+              Label("자동 채우기 (■)", systemImage: "arrow.down.right.square.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fixedSize(horizontal: true, vertical: false)
+
+            Button("A열 고정") {
+              viewModel.toggleFirstColumnFrozen()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+
+            Button("데이터 막대") {
+              viewModel.toggleSheetDataBars()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+
+            Button("중복 제거") {
+              _ = viewModel.removeDuplicatesInActiveSheet()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+
+            Button("텍스트 나누기") {
+              _ = viewModel.splitActiveSheetColumnByDelimiter()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+
+            if sparklineValues.count >= 2 {
+              HStack(spacing: 6) {
+                Text("스파크라인")
+                  .font(.system(size: 10, weight: .semibold))
+                  .lineLimit(1)
+                  .fixedSize(horizontal: true, vertical: false)
+                  .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+                Canvas { context, size in
+                  var path = Path()
+                  for (idx, norm) in sparklineValues.enumerated() {
+                    let xRatio = Double(idx) / Double(max(1, sparklineValues.count - 1))
+                    let px = 3.0 + CGFloat(xRatio) * max(1.0, size.width - 6.0)
+                    let py = 3.0 + (1.0 - CGFloat(norm)) * max(1.0, size.height - 6.0)
+                    if idx == 0 {
+                      path.move(to: CGPoint(x: px, y: py))
+                    } else {
+                      path.addLine(to: CGPoint(x: px, y: py))
+                    }
+                  }
+                  context.stroke(
+                    path,
+                    with: .color(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor),
+                    style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+                  )
+                }
+                .frame(width: 68, height: 20)
+                .background(palette.elevatedSurface.swiftUIColor)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+              }
+            }
+
+            Text("표시 행: \(matchingZeroBasedRows.count)/\(maxRow)행")
+              .font(.system(size: 10, design: .monospaced))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+          }
+          .padding(.horizontal, 12)
+          .padding(.vertical, 6)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
         .background(palette.cardSurface.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 6))
 
         // Named Ranges & Goal Seek Bar
-        HStack(spacing: 8) {
-          Label("이름 정의 · 목표값 찾기", systemImage: "function")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 8) {
+            Label("이름 정의 · 목표값 찾기", systemImage: "function")
+              .font(.system(size: 11, weight: .bold))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
 
-          TextField("이름 (예: 상반기매출)", text: $viewModel.namedRangeNameDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 105)
+            TextField("이름 (예: 상반기매출)", text: $viewModel.namedRangeNameDraft)
+              .textFieldStyle(.roundedBorder)
+              .font(.system(size: 11))
+              .frame(width: 105)
 
-          TextField("대상 범위 (예: B2:C3)", text: $viewModel.namedRangeTargetDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11, design: .monospaced))
-            .frame(width: 95)
+            TextField("대상 범위 (예: B2:C3)", text: $viewModel.namedRangeTargetDraft)
+              .textFieldStyle(.roundedBorder)
+              .font(.system(size: 11, design: .monospaced))
+              .frame(width: 95)
 
-          Button("이름 정의") {
-            viewModel.defineNamedRangeOnActiveSheet()
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
+            Button("이름 정의") {
+              viewModel.defineNamedRangeOnActiveSheet()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
 
-          if !sheet.namedRanges.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
+            if !sheet.namedRanges.isEmpty {
               HStack(spacing: 4) {
                 ForEach(sheet.namedRanges.keys.sorted(), id: \.self) { nameKey in
                   let targetVal = sheet.namedRanges[nameKey] ?? ""
                   Text("\(nameKey)=\(targetVal)")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(palette.selectedSurface.swiftUIColor)
@@ -751,71 +868,72 @@ public struct SheetEditorDetailPaneView: View {
                 }
               }
             }
-            .frame(maxWidth: 180)
+
+            Divider().frame(height: 16)
+
+            TextField("수식 셀 (D2)", text: $viewModel.goalSeekTargetCellDraft)
+              .textFieldStyle(.roundedBorder)
+              .font(.system(size: 11, design: .monospaced))
+              .frame(width: 68)
+
+            TextField("목표값", text: $viewModel.goalSeekTargetValueDraft)
+              .textFieldStyle(.roundedBorder)
+              .font(.system(size: 11, design: .monospaced))
+              .frame(width: 68)
+
+            TextField("변수 셀 (B2)", text: $viewModel.goalSeekVariableCellDraft)
+              .textFieldStyle(.roundedBorder)
+              .font(.system(size: 11, design: .monospaced))
+              .frame(width: 68)
+
+            Button("목표값 찾기") {
+              _ = viewModel.runGoalSeekOnActiveSheet()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            .controlSize(.small)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
           }
-
-          Divider().frame(height: 16)
-
-          TextField("수식 셀 (D2)", text: $viewModel.goalSeekTargetCellDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11, design: .monospaced))
-            .frame(width: 68)
-
-          TextField("목표값", text: $viewModel.goalSeekTargetValueDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11, design: .monospaced))
-            .frame(width: 68)
-
-          TextField("변수 셀 (B2)", text: $viewModel.goalSeekVariableCellDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11, design: .monospaced))
-            .frame(width: 68)
-
-          Button("목표값 찾기") {
-            _ = viewModel.runGoalSeekOnActiveSheet()
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
-          .controlSize(.small)
-
-          Spacer()
+          .padding(.horizontal, 12)
+          .padding(.vertical, 6)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
         .background(palette.cardSurface.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 6))
       }
 
-      // Dynamic Spreadsheet Grid with Interactive Column/Row Resize Handles & Auto-Fill Corner Handle
+      // Authentic Zero-Gap (spacing: 0) 1px Hairline Spreadsheet Grid with Unified Vertical Scroll & Pinned Column A
       let startRow = viewModel.isHeaderRowFrozen ? min(2, maxRow) : 1
       let visibleRows = (startRow...maxRow).filter {
         matchingZeroBasedRows.contains($0 - 1)
       }
       if viewModel.isFirstColumnFrozen && columnLabels.count > 1 {
-        HStack(alignment: .top, spacing: 6) {
-          VStack(alignment: .leading, spacing: 4) {
-            columnHeaderRowView(
-              columnLabels: columnLabels,
-              columnIndices: 0..<1,
-              includeRowHeader: true,
-              palette: palette
-            )
-            if viewModel.isHeaderRowFrozen {
-              sheetRowView(
-                row: 1,
+        ScrollView(.vertical, showsIndicators: true) {
+          HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+              columnHeaderRowView(
                 columnLabels: columnLabels,
                 columnIndices: 0..<1,
                 includeRowHeader: true,
-                activeRange: activeRange,
-                evaluatedGrid: evaluatedGrid,
-                condRangeValues: condRangeValues,
-                maxPositiveValue: maxPositiveValue,
                 palette: palette
               )
-              Divider()
-            }
-            ScrollView(.vertical, showsIndicators: false) {
-              LazyVStack(alignment: .leading, spacing: 4) {
+              if viewModel.isHeaderRowFrozen {
+                sheetRowView(
+                  row: 1,
+                  columnLabels: columnLabels,
+                  columnIndices: 0..<1,
+                  includeRowHeader: true,
+                  activeRange: activeRange,
+                  evaluatedGrid: evaluatedGrid,
+                  condRangeValues: condRangeValues,
+                  maxPositiveValue: maxPositiveValue,
+                  palette: palette
+                )
+                Rectangle()
+                  .fill(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .frame(height: 1.5)
+              }
+              LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(visibleRows, id: \.self) { row in
                   sheetRowView(
                     row: row,
@@ -831,35 +949,37 @@ public struct SheetEditorDetailPaneView: View {
                 }
               }
             }
-            .frame(maxHeight: 420)
-          }
+            .fixedSize(horizontal: true, vertical: false)
 
-          Divider()
+            Rectangle()
+              .fill(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .frame(width: 2)
 
-          ScrollView(.horizontal, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 4) {
-              columnHeaderRowView(
-                columnLabels: columnLabels,
-                columnIndices: 1..<columnLabels.count,
-                includeRowHeader: false,
-                palette: palette
-              )
-              if viewModel.isHeaderRowFrozen {
-                sheetRowView(
-                  row: 1,
+            ScrollView(.horizontal, showsIndicators: true) {
+              VStack(alignment: .leading, spacing: 0) {
+                columnHeaderRowView(
                   columnLabels: columnLabels,
                   columnIndices: 1..<columnLabels.count,
                   includeRowHeader: false,
-                  activeRange: activeRange,
-                  evaluatedGrid: evaluatedGrid,
-                  condRangeValues: condRangeValues,
-                  maxPositiveValue: maxPositiveValue,
                   palette: palette
                 )
-                Divider()
-              }
-              ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 4) {
+                if viewModel.isHeaderRowFrozen {
+                  sheetRowView(
+                    row: 1,
+                    columnLabels: columnLabels,
+                    columnIndices: 1..<columnLabels.count,
+                    includeRowHeader: false,
+                    activeRange: activeRange,
+                    evaluatedGrid: evaluatedGrid,
+                    condRangeValues: condRangeValues,
+                    maxPositiveValue: maxPositiveValue,
+                    palette: palette
+                  )
+                  Rectangle()
+                    .fill(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .frame(height: 1.5)
+                }
+                LazyVStack(alignment: .leading, spacing: 0) {
                   ForEach(visibleRows, id: \.self) { row in
                     sheetRowView(
                       row: row,
@@ -875,13 +995,19 @@ public struct SheetEditorDetailPaneView: View {
                   }
                 }
               }
-              .frame(maxHeight: 420)
             }
           }
         }
+        .frame(maxHeight: 420)
+        .background(palette.cardSurface.swiftUIColor)
+        .overlay(
+          RoundedRectangle(cornerRadius: 6)
+            .stroke(palette.border.swiftUIColor, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
       } else {
         ScrollView(.horizontal, showsIndicators: true) {
-          VStack(alignment: .leading, spacing: 4) {
+          VStack(alignment: .leading, spacing: 0) {
             columnHeaderRowView(
               columnLabels: columnLabels,
               columnIndices: 0..<columnLabels.count,
@@ -901,11 +1027,13 @@ public struct SheetEditorDetailPaneView: View {
                 maxPositiveValue: maxPositiveValue,
                 palette: palette
               )
-              Divider()
+              Rectangle()
+                .fill(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .frame(height: 1.5)
             }
 
             ScrollView(.vertical, showsIndicators: true) {
-              LazyVStack(alignment: .leading, spacing: 4) {
+              LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(visibleRows, id: \.self) { row in
                   sheetRowView(
                     row: row,
@@ -921,9 +1049,15 @@ public struct SheetEditorDetailPaneView: View {
                 }
               }
             }
-            .frame(maxHeight: 420)
+            .frame(maxHeight: 390)
           }
         }
+        .background(palette.cardSurface.swiftUIColor)
+        .overlay(
+          RoundedRectangle(cornerRadius: 6)
+            .stroke(palette.border.swiftUIColor, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
       }
 
       // Bottom Worksheet Tab Strip & Live Range Aggregation Status Bar
@@ -939,6 +1073,8 @@ public struct SheetEditorDetailPaneView: View {
                 .font(.system(size: 10))
               Text(sheetName)
                 .font(.system(size: 11, weight: isActiveTab ? .bold : .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
@@ -972,6 +1108,8 @@ public struct SheetEditorDetailPaneView: View {
           } label: {
             Label("시트 추가", systemImage: "plus")
               .font(.system(size: 11, weight: .semibold))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
               .padding(.horizontal, 8)
               .padding(.vertical, 5)
           }
@@ -987,6 +1125,7 @@ public struct SheetEditorDetailPaneView: View {
           "합계: \(String(format: "%.1f", rangeSummary.sum)) | 평균: \(String(format: "%.1f", rangeSummary.average)) | 개수: \(rangeSummary.nonEmptyCount) (수치 \(rangeSummary.numericCount)) | 최소: \(minDisplay) | 최대: \(maxDisplay)"
         )
         .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        .lineLimit(1)
         .foregroundStyle(palette.accentBadgeText.swiftUIColor)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
@@ -1048,17 +1187,28 @@ public struct SheetEditorDetailPaneView: View {
 
         if viewModel.isChartPanelVisible {
           VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 6) {
               Label(
                 "\(chartModel.title) (\(chartModel.kind.rawValue.uppercased()))",
                 systemImage: "chart.bar.xaxis"
               )
               .font(.system(size: 11, weight: .bold))
+              .lineLimit(1)
               .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
 
               Spacer()
 
               if isPrimaryPane {
+                TextField("차트 제목", text: $viewModel.customChartTitleDraft)
+                  .textFieldStyle(.roundedBorder)
+                  .font(.system(size: 10))
+                  .frame(width: 110)
+
+                TextField("범위", text: $viewModel.customChartRangeDraft)
+                  .textFieldStyle(.roundedBorder)
+                  .font(.system(size: 10, design: .monospaced))
+                  .frame(width: 76)
+
                 Picker("차트 유형", selection: $viewModel.selectedChartKind) {
                   ForEach(SheetChartKind.allCases, id: \.self) { kind in
                     Text(kind.rawValue.uppercased()).tag(kind)
@@ -1066,7 +1216,7 @@ public struct SheetEditorDetailPaneView: View {
                 }
                 .pickerStyle(.menu)
                 .controlSize(.small)
-                .frame(width: 140)
+                .frame(width: 120)
               }
             }
 
@@ -1088,35 +1238,38 @@ public struct SheetEditorDetailPaneView: View {
     includeRowHeader: Bool,
     palette: WorkspaceThemePalette
   ) -> some View {
-    HStack(spacing: 4) {
+    HStack(spacing: 0) {
       if includeRowHeader {
         Text("#")
           .font(.system(size: 10, weight: .bold, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-          .frame(width: 36, height: 24)
+          .frame(width: 36, height: 26)
           .background(palette.elevatedSurface.swiftUIColor)
-          .clipShape(RoundedRectangle(cornerRadius: 4))
+          .overlay(
+            Rectangle()
+              .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
+          )
       }
 
       ForEach(Array(columnIndices), id: \.self) { colIdx in
         let colLabel = columnLabels[colIdx]
         let colWidth = CGFloat(sheet.columnWidth(at: colIdx))
         ZStack(alignment: .trailing) {
-          Text("\(colLabel) (\(Int(colWidth))pt)")
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
+          Text(colLabel)
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
             .foregroundStyle(palette.primaryText.swiftUIColor)
-            .frame(width: colWidth, height: 24)
+            .frame(width: colWidth, height: 26)
             .background(palette.elevatedSurface.swiftUIColor)
             .overlay(
-              RoundedRectangle(cornerRadius: 4)
-                .stroke(palette.border.swiftUIColor, lineWidth: 1)
+              Rectangle()
+                .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .help("\(colLabel)열 (너비: \(Int(colWidth))pt)")
 
           if isPrimaryPane {
             Rectangle()
-              .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.6))
-              .frame(width: 4, height: 20)
+              .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.45))
+              .frame(width: 4, height: 22)
               .gesture(
                 DragGesture(minimumDistance: 1)
                   .onEnded { value in
@@ -1146,36 +1299,40 @@ public struct SheetEditorDetailPaneView: View {
     palette: WorkspaceThemePalette
   ) -> some View {
     let zeroRow = row - 1
-    let rowHeightPt = CGFloat(sheet.rowHeight(at: zeroRow))
+    let rawHeight = sheet.rowHeight(at: zeroRow)
+    let hasWrappedCell = columnIndices.contains { colIdx in
+      sheet.cellStyle(at: PackedCellCoordinate(row: zeroRow, column: colIdx)).wrapText
+    }
+    let defaultAdjustedHeight: Double = abs(rawHeight - 46.0) < 0.1 ? 30.0 : rawHeight
+    let rowHeightPt = CGFloat(
+      hasWrappedCell ? max(defaultAdjustedHeight, 44.0) : defaultAdjustedHeight)
     let bottomRightCoord = PackedCellCoordinate(
       row: max(activeRange.start.row, activeRange.end.row),
       column: max(activeRange.start.column, activeRange.end.column)
     )
 
-    HStack(spacing: 4) {
+    HStack(spacing: 0) {
       if includeRowHeader {
         // Row Header with Bottom 4pt Drag Resize Handle
         ZStack(alignment: .bottom) {
           Text("\(row)")
             .font(.system(size: 10, weight: .bold, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-            .frame(width: 36)
-            .frame(minHeight: rowHeightPt)
+            .frame(width: 36, height: rowHeightPt)
             .background(palette.elevatedSurface.swiftUIColor)
             .overlay(
-              RoundedRectangle(cornerRadius: 4)
-                .stroke(palette.border.swiftUIColor, lineWidth: 1)
+              Rectangle()
+                .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 4))
 
           if isPrimaryPane {
             Rectangle()
-              .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.6))
-              .frame(width: 30, height: 4)
+              .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.45))
+              .frame(width: 32, height: 3)
               .gesture(
                 DragGesture(minimumDistance: 1)
                   .onEnded { value in
-                    let baseHeight = sheet.rowHeight(at: zeroRow)
+                    let baseHeight = Double(rowHeightPt)
                     viewModel.updateActiveSheetRowHeight(
                       row: zeroRow,
                       height: baseHeight + Double(value.translation.height)
@@ -1235,7 +1392,7 @@ public struct SheetEditorDetailPaneView: View {
             viewModel.selectSheetCellOrRange(primaryCell: addr)
           }
         } label: {
-          ZStack(alignment: .leading) {
+          ZStack(alignment: frameAlignment) {
             if viewModel.isDataBarsEnabled,
               case .number(let num) = evaluated,
               num.isFinite,
@@ -1245,43 +1402,38 @@ public struct SheetEditorDetailPaneView: View {
                 RoundedRectangle(cornerRadius: 2)
                   .fill(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.18))
                   .frame(
-                    width: CGFloat(min(1.0, num / maxPositiveValue)) * geo.size.width,
+                    width: CGFloat(min(1.0, num / maxPositiveValue)) * max(0, geo.size.width - 4),
                     height: max(4, geo.size.height - 4)
                   )
                   .offset(x: 2, y: 2)
               }
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-              HStack(spacing: 4) {
-                Text(addr)
-                  .font(.system(size: 9, design: .monospaced))
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
-                Spacer(minLength: 2)
-                if hasComment {
-                  Circle()
-                    .fill(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
-                    .frame(width: 6, height: 6)
-                    .help(sheet.sheetComments[coord] ?? "")
-                }
-              }
-              Text(displayValue)
-                .font(.system(size: 12, weight: (cellStyle.isBold || row == 1) ? .bold : .regular))
-                .italic(cellStyle.isItalic)
-                .underline(cellStyle.isUnderlined)
-                .foregroundStyle(
-                  cellTextColor
-                    ?? (isCondHighlighted
-                      ? palette.accentBadgeText.swiftUIColor
-                      : palette.primaryText.swiftUIColor)
-                )
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: frameAlignment)
+            Text(displayValue)
+              .font(.system(size: 12, weight: (cellStyle.isBold || row == 1) ? .bold : .regular))
+              .italic(cellStyle.isItalic)
+              .underline(cellStyle.isUnderlined)
+              .foregroundStyle(
+                cellTextColor
+                  ?? (isCondHighlighted
+                    ? palette.accentBadgeText.swiftUIColor
+                    : palette.primaryText.swiftUIColor)
+              )
+              .lineLimit(cellStyle.wrapText ? 2 : 1)
+              .frame(maxWidth: .infinity, alignment: frameAlignment)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+
+            if hasComment {
+              Circle()
+                .fill(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
+                .frame(width: 6, height: 6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(3)
+                .help(sheet.sheetComments[coord] ?? "")
             }
-            .padding(6)
           }
-          .frame(width: colWidthPt)
-          .frame(minHeight: rowHeightPt, alignment: frameAlignment)
+          .frame(width: colWidthPt, height: rowHeightPt, alignment: frameAlignment)
           .background(
             resolveCellBackground(
               isPrimaryCell: isPrimaryCell,
@@ -1292,8 +1444,8 @@ public struct SheetEditorDetailPaneView: View {
             )
           )
           .overlay(
-            RoundedRectangle(cornerRadius: 4)
-              .stroke(
+            Rectangle()
+              .strokeBorder(
                 resolveCellBorderColor(
                   isPrimaryCell: isPrimaryCell, isInRange: isInRange, palette: palette),
                 lineWidth: resolveCellBorderWidth(
@@ -1305,7 +1457,7 @@ public struct SheetEditorDetailPaneView: View {
               Rectangle()
                 .fill(EasyOfficeDesignTokens.brand700.swiftUIColor)
                 .frame(width: 6, height: 6)
-                .help("자동 채우기 핸들 (◢): 드래그하여 수식·수열 채우기")
+                .help("자동 채우기 핸들 (■): 드래그하여 수식·수열 채우기")
                 .gesture(
                   DragGesture(minimumDistance: 2)
                     .onEnded { value in
@@ -1339,7 +1491,6 @@ public struct SheetEditorDetailPaneView: View {
                 )
             }
           }
-          .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
         .simultaneousGesture(
@@ -1377,14 +1528,12 @@ public struct SheetEditorDetailPaneView: View {
   private func resolveCellBorderColor(
     isPrimaryCell: Bool, isInRange: Bool, palette: WorkspaceThemePalette
   ) -> Color {
-    if isPrimaryCell { return EasyOfficeDesignTokens.brand700.swiftUIColor }
-    if isInRange { return EasyOfficeDesignTokens.brand600.swiftUIColor }
-    return palette.border.swiftUIColor
+    if isPrimaryCell || isInRange { return EasyOfficeDesignTokens.brand700.swiftUIColor }
+    return palette.border.swiftUIColor.opacity(0.65)
   }
 
   private func resolveCellBorderWidth(isPrimaryCell: Bool, isInRange: Bool) -> CGFloat {
-    if isPrimaryCell { return 1.8 }
-    if isInRange { return 1.3 }
-    return 1.0
+    if isPrimaryCell || isInRange { return 2.0 }
+    return 0.5
   }
 }

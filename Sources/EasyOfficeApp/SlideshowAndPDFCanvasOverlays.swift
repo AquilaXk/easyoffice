@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import EasyOfficeCore
 import EasyOfficeDesignSystem
 import Observation
@@ -327,6 +328,7 @@ public struct SlideshowFullScreenOverlayView: View {
   public let palette: WorkspaceThemePalette
   @State private var laserPointerLocation: CGPoint = CGPoint(x: 420, y: 240)
   @State private var isStageAnimatedIn: Bool = false
+  private let presenterTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
   public init(viewModel: WorkspaceViewModel, palette: WorkspaceThemePalette) {
     self.viewModel = viewModel
@@ -544,7 +546,7 @@ public struct SlideshowFullScreenOverlayView: View {
         isStageAnimatedIn = true
       }
     }
-    .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+    .onReceive(presenterTimer) { _ in
       if viewModel.isFullScreenSlideshowActive && viewModel.isPresenterTimerRunning
         && !viewModel.isPresenterModeActive
       {
@@ -750,7 +752,7 @@ public struct PDFInteractiveInkOverlayView: View {
             }
         )
       }
-      .frame(height: 120)
+      .frame(height: 96)
     }
     .padding(10)
     .background(palette.elevatedSurface.swiftUIColor)

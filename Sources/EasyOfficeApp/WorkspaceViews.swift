@@ -398,7 +398,10 @@ struct ContextRibbonBarView: View {
 
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
-    let commands = RibbonCategory.actions(for: viewModel.activeRibbonCategory, module: activeModule)
+    let actions = RibbonCategory.actions(for: viewModel.activeRibbonCategory, module: activeModule)
+    let primaryActions = Array(actions.prefix(2))
+    let secondaryActions = Array(actions.dropFirst(2))
+    let moduleAccent = EasyOfficeDesignTokens.accentToken(for: activeModule).swiftUIColor
 
     VStack(alignment: .leading, spacing: 6) {
       HStack(spacing: 12) {
@@ -463,41 +466,316 @@ struct ContextRibbonBarView: View {
       }
 
       if !viewModel.isRibbonCollapsed {
-        HStack(spacing: 8) {
-          ForEach(commands) { command in
-            Button {
-              viewModel.executeRibbonCommand(command.id)
-            } label: {
-              HStack(spacing: 6) {
-                Image(systemName: command.symbolName)
-                  .font(.system(size: 11))
-                  .foregroundStyle(
-                    EasyOfficeDesignTokens.accentToken(for: activeModule).swiftUIColor)
-                Text(command.title)
-                  .font(.system(size: 11, weight: .medium))
-                  .foregroundStyle(palette.primaryText.swiftUIColor)
-                Text(command.shortcutHint)
-                  .font(.system(size: 9, design: .monospaced))
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(alignment: .bottom, spacing: 10) {
+            ribbonGroupContainer(title: "편집·실행", palette: palette) {
+              HStack(spacing: 5) {
+                ribbonQuickButton(
+                  title: "실행 취소",
+                  symbolName: "arrow.uturn.backward",
+                  accent: moduleAccent,
+                  palette: palette
+                ) {
+                  viewModel.undoActiveTab()
+                }
+                .disabled(!viewModel.canUndo)
+
+                ribbonQuickButton(
+                  title: "다시 실행",
+                  symbolName: "arrow.uturn.forward",
+                  accent: moduleAccent,
+                  palette: palette
+                ) {
+                  viewModel.redoActiveTab()
+                }
+                .disabled(!viewModel.canRedo)
+
+                ribbonQuickButton(
+                  title: "찾기",
+                  symbolName: "magnifyingglass",
+                  accent: moduleAccent,
+                  palette: palette
+                ) {
+                  viewModel.isFindReplaceBarPresented.toggle()
+                }
               }
-              .padding(.horizontal, 10)
-              .padding(.vertical, 5)
-              .background(palette.elevatedSurface.swiftUIColor)
-              .overlay(
-                RoundedRectangle(cornerRadius: 6).stroke(palette.border.swiftUIColor, lineWidth: 1)
-              )
-              .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .buttonStyle(.plain)
-            .accessibilityHint(AccessibilityTokens.ribbonControlHint)
+
+            Divider().frame(height: 36)
+
+            ribbonGroupContainer(title: "핵심 리본 도구", palette: palette) {
+              HStack(spacing: 6) {
+                ForEach(primaryActions) { command in
+                  Button {
+                    viewModel.executeRibbonCommand(command.id)
+                  } label: {
+                    HStack(spacing: 6) {
+                      Image(systemName: command.symbolName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(moduleAccent)
+                      Text(command.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(palette.primaryText.swiftUIColor)
+                      Text(command.shortcutHint)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(palette.selectedSurface.swiftUIColor)
+                    .overlay(
+                      RoundedRectangle(cornerRadius: 6)
+                        .stroke(moduleAccent.opacity(0.45), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                  }
+                  .buttonStyle(.plain)
+                  .fixedSize(horizontal: true, vertical: false)
+                  .accessibilityHint(AccessibilityTokens.ribbonControlHint)
+                }
+              }
+            }
+
+            if !secondaryActions.isEmpty {
+              Divider().frame(height: 36)
+
+              ribbonGroupContainer(title: "서식·문서 구조", palette: palette) {
+                HStack(spacing: 6) {
+                  ForEach(secondaryActions) { command in
+                    Button {
+                      viewModel.executeRibbonCommand(command.id)
+                    } label: {
+                      HStack(spacing: 6) {
+                        Image(systemName: command.symbolName)
+                          .font(.system(size: 11))
+                          .foregroundStyle(moduleAccent)
+                        Text(command.title)
+                          .font(.system(size: 11, weight: .medium))
+                          .foregroundStyle(palette.primaryText.swiftUIColor)
+                        Text(command.shortcutHint)
+                          .font(.system(size: 9, design: .monospaced))
+                          .foregroundStyle(palette.secondaryText.swiftUIColor)
+                      }
+                      .padding(.horizontal, 10)
+                      .padding(.vertical, 5)
+                      .background(palette.elevatedSurface.swiftUIColor)
+                      .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                          .stroke(palette.border.swiftUIColor, lineWidth: 1)
+                      )
+                      .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .accessibilityHint(AccessibilityTokens.ribbonControlHint)
+                  }
+                }
+              }
+            }
+
+            Divider().frame(height: 36)
+
+            ribbonGroupContainer(title: "빠른 조판·분석", palette: palette) {
+              HStack(spacing: 5) {
+                moduleContextualQuickButtons(accent: moduleAccent, palette: palette)
+              }
+            }
           }
-          Spacer()
+          .padding(.vertical, 2)
         }
       }
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 6)
     .background(palette.cardSurface.swiftUIColor)
+  }
+
+  @ViewBuilder
+  private func ribbonGroupContainer<Content: View>(
+    title: String,
+    palette: WorkspaceThemePalette,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    VStack(alignment: .center, spacing: 3) {
+      content()
+      Text(title)
+        .font(.system(size: 9, weight: .medium))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+  }
+
+  private func ribbonQuickButton(
+    title: String,
+    symbolName: String,
+    accent: Color,
+    palette: WorkspaceThemePalette,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      HStack(spacing: 4) {
+        Image(systemName: symbolName)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(accent)
+        Text(title)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(palette.primaryText.swiftUIColor)
+      }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 5)
+      .background(palette.elevatedSurface.swiftUIColor)
+      .overlay(
+        RoundedRectangle(cornerRadius: 5)
+          .stroke(palette.border.swiftUIColor, lineWidth: 1)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 5))
+    }
+    .buttonStyle(.plain)
+    .fixedSize(horizontal: true, vertical: false)
+  }
+
+  @ViewBuilder
+  private func moduleContextualQuickButtons(
+    accent: Color,
+    palette: WorkspaceThemePalette
+  ) -> some View {
+    switch activeModule {
+    case .document, .hwp:
+      ribbonQuickButton(
+        title: "형광펜",
+        symbolName: "highlighter",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.toggleHighlightOnActiveParagraph()
+      }
+      ribbonQuickButton(
+        title: "취소선",
+        symbolName: "strikethrough",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.toggleStrikethroughOnActiveParagraph()
+      }
+      ribbonQuickButton(
+        title: "링크",
+        symbolName: "link",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.insertHyperlinkIntoActiveParagraph()
+      }
+      ribbonQuickButton(
+        title: "자간-",
+        symbolName: "arrow.right.and.line.vertical.and.arrow.left",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.adjustActiveParagraphTypography(letterSpacingDelta: -5.0)
+      }
+      ribbonQuickButton(
+        title: "자간+",
+        symbolName: "arrow.left.and.line.vertical.and.arrow.right",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.adjustActiveParagraphTypography(letterSpacingDelta: 5.0)
+      }
+
+    case .sheet:
+      ribbonQuickButton(
+        title: "₩ 통화",
+        symbolName: "wonsign.circle",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.applyQuickNumberFormatOnSelectedSheetCell(.currencyKRW)
+      }
+      ribbonQuickButton(
+        title: "% 백분율",
+        symbolName: "percent",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.applyQuickNumberFormatOnSelectedSheetCell(.percentage)
+      }
+      ribbonQuickButton(
+        title: "줄바꿈",
+        symbolName: "text.word.spacing",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.toggleWrapTextOnSelectedSheetCell()
+      }
+      ribbonQuickButton(
+        title: "A열 고정",
+        symbolName: "rectangle.split.2x1",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.toggleFirstColumnFrozen()
+      }
+      ribbonQuickButton(
+        title: "데이터 막대",
+        symbolName: "chart.bar.xaxis",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.toggleSheetDataBars()
+      }
+
+    case .slide:
+      ribbonQuickButton(
+        title: "+ 슬라이드",
+        symbolName: "plus.rectangle.on.rectangle",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.addSlideToActiveDeck()
+      }
+      ribbonQuickButton(
+        title: "복제",
+        symbolName: "doc.on.doc",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.duplicateActiveSlide()
+      }
+      ribbonQuickButton(
+        title: "정렬 뷰",
+        symbolName: "square.grid.3x2",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.toggleSlideSorterView()
+      }
+
+    case .pdf:
+      ribbonQuickButton(
+        title: "워터마크",
+        symbolName: "drop.triangle",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.applyWatermarkOnActivePDF()
+      }
+      ribbonQuickButton(
+        title: "리댁션",
+        symbolName: "eye.slash.fill",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.redactSensitiveTextOnActivePDF()
+      }
+      ribbonQuickButton(
+        title: "자유곡선 펜",
+        symbolName: "pencil.tip.crop.circle",
+        accent: accent,
+        palette: palette
+      ) {
+        viewModel.isPDFInkDrawingModeEnabled.toggle()
+      }
+    }
   }
 }
 
@@ -551,187 +829,260 @@ struct FindAndReplaceBarView: View {
   }
 }
 
+private struct PDFOutlineNodeRowView: View {
+  @Bindable var viewModel: WorkspaceViewModel
+  let node: PDFOutlineNode
+  let pageCount: Int
+  let depth: Int
+  let palette: WorkspaceThemePalette
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 6) {
+        Button {
+          let targetIdx = max(0, min(pageCount - 1, node.targetPageNumber - 1))
+          viewModel.selectedPDFPageIndex = targetIdx
+        } label: {
+          Text("\(depth == 0 ? "•" : "◦") \(node.title) (p.\(node.targetPageNumber))")
+            .font(.system(size: 11, weight: depth == 0 ? .medium : .regular))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+
+        Spacer(minLength: 4)
+
+        Button {
+          viewModel.removeBookmarkFromActivePDF(id: node.id)
+        } label: {
+          Image(systemName: "trash")
+            .font(.system(size: 9))
+            .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+        }
+        .buttonStyle(.plain)
+        .help("책갈피 삭제")
+      }
+      .padding(.leading, CGFloat(depth * 12))
+
+      ForEach(node.children) { child in
+        PDFOutlineNodeRowView(
+          viewModel: viewModel,
+          node: child,
+          pageCount: pageCount,
+          depth: depth + 1,
+          palette: palette
+        )
+      }
+    }
+  }
+}
+
 struct LeftNavigatorPanelView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Bindable var viewModel: WorkspaceViewModel
   let tab: WorkspaceTabItem
 
-  private func pdfOutlineNodeRow(
-    _ node: PDFOutlineNode,
-    pdf: PDFStudioDocumentModel,
-    level: Int,
-    palette: WorkspaceThemePalette
-  ) -> AnyView {
-    AnyView(
-      VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 6) {
-          Button {
-            let targetIdx = max(0, min(pdf.pages.count - 1, node.targetPageNumber - 1))
-            viewModel.selectedPDFPageIndex = targetIdx
-          } label: {
-            Text("\(level == 0 ? "•" : "◦") \(node.title) (p.\(node.targetPageNumber))")
-              .font(.system(size: 11, weight: level == 0 ? .medium : .regular))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
-              .lineLimit(1)
-          }
-          .buttonStyle(.plain)
-
-          Spacer(minLength: 4)
-
-          Button {
-            viewModel.removeBookmarkFromActivePDF(id: node.id)
-          } label: {
-            Image(systemName: "trash")
-              .font(.system(size: 9))
-              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
-          }
-          .buttonStyle(.plain)
-          .help("책갈피 삭제")
-        }
-        .padding(.leading, CGFloat(level * 12))
-
-        ForEach(node.children) { child in
-          pdfOutlineNodeRow(child, pdf: pdf, level: level + 1, palette: palette)
-        }
-      }
-    )
-  }
-
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
-    VStack(alignment: .leading, spacing: 10) {
-      Text("\(tab.moduleKind.shortBadgeTitle) 구조 내비게이터")
-        .font(.system(size: 11, weight: .bold))
-        .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-      switch tab.payload {
-      case .document(let doc):
-        ForEach(doc.extractOutline()) { heading in
-          Button {
-            viewModel.selectedParagraphID = heading.id
-          } label: {
-            Text("• \(heading.text)")
-              .font(
-                .system(
-                  size: 12, weight: viewModel.selectedParagraphID == heading.id ? .bold : .medium)
-              )
-              .foregroundStyle(palette.primaryText.swiftUIColor)
-              .lineLimit(2)
-              .multilineTextAlignment(.leading)
-          }
-          .buttonStyle(.plain)
-        }
-      case .sheet(let sheet):
-        let formulaCells = sheet.cellsByCoordinate
-          .filter { $0.value.trimmingCharacters(in: .whitespaces).hasPrefix("=") }
-          .keys.sorted().map { CellAddress(packed: $0).a1Notation }
-
-        Text("워크북 시트 목록 (\(sheet.allSheetNames.count))")
-          .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(palette.primaryText.swiftUIColor)
-
-        ForEach(Array(sheet.allSheetNames.enumerated()), id: \.offset) { idx, sheetName in
-          let isSelectedSheet = idx == sheet.activeSheetIndex
-          Button {
-            viewModel.selectWorksheetTab(index: idx)
-          } label: {
-            HStack(spacing: 6) {
-              Image(systemName: isSelectedSheet ? "tablecells.fill" : "tablecells")
-                .font(.system(size: 10))
-                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
-              Text(sheetName)
-                .font(.system(size: 12, weight: isSelectedSheet ? .bold : .regular))
-                .foregroundStyle(palette.primaryText.swiftUIColor)
-              Spacer()
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(
-              isSelectedSheet ? palette.selectedSurface.swiftUIColor : Color.clear
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-          }
-          .buttonStyle(.plain)
-        }
-
-        Divider()
-        Text("내장 함수 카탈로그: \(WorksheetModel.supportedFunctionNames.count)종")
-          .font(.system(size: 11))
+    ScrollView(.vertical, showsIndicators: false) {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("\(tab.moduleKind.shortBadgeTitle) 구조 내비게이터")
+          .font(.system(size: 11, weight: .bold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        Text("수식 셀 목록 (\(formulaCells.count)개)")
-          .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(palette.primaryText.swiftUIColor)
 
-        if formulaCells.isEmpty {
-          Text("없음")
-            .font(.system(size: 11))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
-        } else {
-          ForEach(formulaCells, id: \.self) { addr in
-            let isSelectedCell = viewModel.selectedSheetCell == addr
+        switch tab.payload {
+        case .document(let doc):
+          ForEach(doc.extractOutline()) { heading in
             Button {
-              viewModel.selectSheetCellOrRange(primaryCell: addr)
+              viewModel.selectedParagraphID = heading.id
+            } label: {
+              Text("• \(heading.text)")
+                .font(
+                  .system(
+                    size: 12, weight: viewModel.selectedParagraphID == heading.id ? .bold : .medium)
+                )
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            }
+            .buttonStyle(.plain)
+          }
+        case .sheet(let sheet):
+          let formulaCells = sheet.cellsByCoordinate
+            .filter { $0.value.trimmingCharacters(in: .whitespaces).hasPrefix("=") }
+            .keys.sorted().map { CellAddress(packed: $0).a1Notation }
+
+          Text("워크북 시트 목록 (\(sheet.allSheetNames.count))")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(palette.primaryText.swiftUIColor)
+
+          ForEach(Array(sheet.allSheetNames.enumerated()), id: \.offset) { idx, sheetName in
+            let isSelectedSheet = idx == sheet.activeSheetIndex
+            Button {
+              viewModel.selectWorksheetTab(index: idx)
             } label: {
               HStack(spacing: 6) {
-                Text(addr)
-                  .font(.system(size: 11, weight: .bold, design: .monospaced))
-                  .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-                Text(sheet.rawValue(at: addr))
-                  .font(.system(size: 10, design: .monospaced))
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
-                  .lineLimit(1)
+                Image(systemName: isSelectedSheet ? "tablecells.fill" : "tablecells")
+                  .font(.system(size: 10))
+                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                Text(sheetName)
+                  .font(.system(size: 12, weight: isSelectedSheet ? .bold : .regular))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
                 Spacer()
               }
               .padding(.horizontal, 6)
               .padding(.vertical, 3)
               .background(
-                isSelectedCell ? palette.selectedSurface.swiftUIColor : Color.clear
+                isSelectedSheet ? palette.selectedSurface.swiftUIColor : Color.clear
               )
               .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             .buttonStyle(.plain)
           }
-        }
-      case .slide(let deck):
-        ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
-          Button {
-            viewModel.selectedSlideIndex = idx
-          } label: {
-            Text("\(idx + 1). \(slide.title)")
-              .font(
-                .system(size: 12, weight: viewModel.selectedSlideIndex == idx ? .bold : .medium)
-              )
-              .foregroundStyle(palette.primaryText.swiftUIColor)
-          }
-          .buttonStyle(.plain)
-        }
-      case .pdf(let pdf):
-        ForEach(Array(pdf.pages.enumerated()), id: \.element.id) { idx, page in
-          Button {
-            viewModel.selectedPDFPageIndex = idx
-          } label: {
-            Text("페이지 \(page.pageNumber) (\(page.rotationDegrees)°)")
-              .font(
-                .system(size: 12, weight: viewModel.selectedPDFPageIndex == idx ? .bold : .medium)
-              )
-              .foregroundStyle(palette.primaryText.swiftUIColor)
-          }
-          .buttonStyle(.plain)
-        }
-        if !pdf.outline.isEmpty {
+
           Divider()
-          Text("PDF 책갈피 트리")
-            .font(.system(size: 10, weight: .bold))
+          Text("내장 함수 카탈로그: \(WorksheetModel.supportedFunctionNames.count)종")
+            .font(.system(size: 11))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-          ForEach(pdf.outline) { node in
-            pdfOutlineNodeRow(node, pdf: pdf, level: 0, palette: palette)
+          Text("수식 셀 목록 (\(formulaCells.count)개)")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(palette.primaryText.swiftUIColor)
+
+          if formulaCells.isEmpty {
+            Text("없음")
+              .font(.system(size: 11))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+          } else {
+            ForEach(formulaCells, id: \.self) { addr in
+              let isSelectedCell = viewModel.selectedSheetCell == addr
+              Button {
+                viewModel.selectSheetCellOrRange(primaryCell: addr)
+              } label: {
+                HStack(spacing: 6) {
+                  Text(addr)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+                  Text(sheet.rawValue(at: addr))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    .lineLimit(1)
+                  Spacer()
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                  isSelectedCell ? palette.selectedSurface.swiftUIColor : Color.clear
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+              }
+              .buttonStyle(.plain)
+            }
+          }
+        case .slide(let deck):
+          let themeFillColor = EasyOfficeDesignTokens.resolveHexColor(
+            deck.deckTheme.primaryFillHex,
+            fallback: palette.elevatedSurface.swiftUIColor
+          )
+          let themeTextColor = EasyOfficeDesignTokens.contrastingTextColor(
+            forFillHex: deck.deckTheme.primaryFillHex
+          )
+          let slideAccent = EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor
+
+          ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
+            let isSelectedSlide = viewModel.selectedSlideIndex == idx
+            Button {
+              viewModel.selectedSlideIndex = idx
+            } label: {
+              VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                  Text("\(idx + 1)")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(isSelectedSlide ? slideAccent : palette.secondaryText.swiftUIColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                  Text("\(idx + 1). \(slide.title)")
+                    .font(.system(size: 10, weight: isSelectedSlide ? .bold : .semibold))
+                    .foregroundStyle(themeTextColor)
+                    .lineLimit(1)
+
+                  Spacer(minLength: 2)
+
+                  Text("\(slide.elements.count)개")
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(themeTextColor.opacity(0.85))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(themeTextColor.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+
+                ForEach(Array(slide.bulletPoints.prefix(2).enumerated()), id: \.offset) {
+                  _, bullet in
+                  HStack(spacing: 4) {
+                    Circle()
+                      .fill(slideAccent)
+                      .frame(width: 4, height: 4)
+                    Text(bullet)
+                      .font(.system(size: 8))
+                      .foregroundStyle(themeTextColor.opacity(0.82))
+                      .lineLimit(1)
+                  }
+                }
+
+                Spacer(minLength: 0)
+              }
+              .padding(8)
+              .frame(maxWidth: .infinity, alignment: .topLeading)
+              .aspectRatio(16.0 / 9.0, contentMode: .fit)
+              .background(themeFillColor)
+              .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                  .stroke(
+                    isSelectedSlide ? slideAccent : palette.border.swiftUIColor,
+                    lineWidth: isSelectedSlide ? 2.0 : 1.0
+                  )
+              )
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+          }
+        case .pdf(let pdf):
+          ForEach(Array(pdf.pages.enumerated()), id: \.element.id) { idx, page in
+            Button {
+              viewModel.selectedPDFPageIndex = idx
+            } label: {
+              Text("페이지 \(page.pageNumber) (\(page.rotationDegrees)°)")
+                .font(
+                  .system(size: 12, weight: viewModel.selectedPDFPageIndex == idx ? .bold : .medium)
+                )
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+            }
+            .buttonStyle(.plain)
+          }
+          if !pdf.outline.isEmpty {
+            Divider()
+            Text("PDF 책갈피 트리")
+              .font(.system(size: 10, weight: .bold))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            ForEach(pdf.outline) { node in
+              PDFOutlineNodeRowView(
+                viewModel: viewModel,
+                node: node,
+                pageCount: pdf.pages.count,
+                depth: 0,
+                palette: palette
+              )
+            }
           }
         }
+        Spacer(minLength: 0)
       }
-      Spacer()
+      .padding(12)
     }
-    .padding(12)
     .background(palette.cardSurface.swiftUIColor)
   }
 }
