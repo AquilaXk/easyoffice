@@ -575,4 +575,33 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(pdfFromSheet.pages.count, 1)
         XCTAssertTrue(pdfFromSheet.pages[0].extractedText.contains("500"))
     }
+
+    // MARK: - 7. FormulaAST Compilation & 25-Level Diamond DAG Memoization Test
+
+    func testDiamondDependencyDAGMemoizationAndFormulaAST() throws {
+        var sheet = WorksheetModel(name: "DAG메모이제이션")
+        try sheet.setCell("A1", rawValue: "1")
+        for level in 2...25 {
+            let prev = "A\(level - 1)"
+            let curr = "A\(level)"
+            try sheet.setCell(curr, rawValue: "=\(prev)+\(prev)")
+        }
+
+        // Verify primary coordinate storage is populated
+        XCTAssertEqual(sheet.cellsByCoordinate.count, 25)
+        let a25Coord = PackedCellCoordinate(row: 24, column: 0)
+        XCTAssertEqual(sheet.cellsByCoordinate[a25Coord], "=A24+A24")
+
+        // Without O(V+E) memoization, 25 levels of A_k = A_{k-1} + A_{k-1} requires 2^24 = 16,777,216 evaluations.
+        // With EvaluationContext.memo, it evaluates in 25 steps (< 10 ms).
+        let clock = ContinuousClock()
+        var evaluated: EvaluatedCellValue = .empty
+        let elapsed = clock.measure {
+            evaluated = sheet.evaluate(at: "A25")
+        }
+
+        XCTAssertEqual(evaluated, .number(Double(1 << 24)))
+        XCTAssertLessThan(elapsed, .milliseconds(10))
+    }
 }
+

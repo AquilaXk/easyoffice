@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - RFC 4180 CSV & TSV State-Machine Codec
 
-/// Single-pass RFC 4180 CSV and TSV state-machine parser and serializer with Fail-Closed quote validation.
+/// Single-pass RFC 4180 CSV and TSV UTF-8 byte state-machine parser and serializer with Fail-Closed quote validation.
 public enum CSVStateMachineCodec {
 
     private enum ParserState {
@@ -18,15 +18,15 @@ public enum CSVStateMachineCodec {
     public static func encodeWorksheet(_ sheet: WorksheetModel, delimiter: Character = ",") -> Data {
         var maxRow = -1
         var maxCol = -1
-        var parsedCoordinates: [(address: CellAddress, value: String)] = []
+        var parsedCoordinates: [(coord: PackedCellCoordinate, value: String)] = []
 
-        for (key, rawValue) in sheet.rawCells where !rawValue.isEmpty {
-            if let addr = try? CellAddress(a1Notation: key),
-               addr.row < maxExportRows,
-               addr.column < maxExportColumns {
-                maxRow = max(maxRow, addr.row)
-                maxCol = max(maxCol, addr.column)
-                parsedCoordinates.append((addr, rawValue))
+        for (coord, rawValue) in sheet.cellsByCoordinate where !rawValue.isEmpty {
+            let r = coord.row
+            let c = coord.column
+            if r >= 0, r < maxExportRows, c >= 0, c < maxExportColumns {
+                maxRow = max(maxRow, r)
+                maxCol = max(maxCol, c)
+                parsedCoordinates.append((coord, rawValue))
             }
         }
 
@@ -39,7 +39,7 @@ public enum CSVStateMachineCodec {
             count: maxRow + 1
         )
         for item in parsedCoordinates {
-            grid[item.address.row][item.address.column] = item.value
+            grid[item.coord.row][item.coord.column] = item.value
         }
 
         let delimiterString = String(delimiter)
@@ -66,8 +66,7 @@ public enum CSVStateMachineCodec {
 
         for (rowIdx, rowFields) in rows.enumerated() {
             for (colIdx, value) in rowFields.enumerated() where !value.isEmpty {
-                let addr = try CellAddress(column: colIdx, row: rowIdx)
-                try worksheet.setCell(addr.a1Notation, rawValue: value)
+                try worksheet.setCell(row: rowIdx, column: colIdx, rawValue: value)
             }
         }
         return worksheet
@@ -76,82 +75,87 @@ public enum CSVStateMachineCodec {
     public static func parseRows(from text: String, delimiter: Character = ",") throws -> [[String]] {
         guard !text.isEmpty else { return [] }
 
+        let bytes = Array(text.utf8)
+        let quote: UInt8 = 0x22
+        let cr: UInt8 = 0x0D
+        let lf: UInt8 = 0x0A
+        let delimByte: UInt8 = delimiter.asciiValue ?? 0x2C
+
         var rows: [[String]] = []
         var currentRow: [String] = []
-        var currentField = ""
+        var quotedBytes: [UInt8] = []
+        var unquotedStartIdx = 0
         var state: ParserState = .startOfField
-
-        let characters = Array(text)
         var idx = 0
+        let count = bytes.count
 
-        while idx < characters.count {
-            let ch = characters[idx]
+        while idx < count {
+            let b = bytes[idx]
 
             switch state {
             case .startOfField:
-                if ch == "\"" {
+                if b == quote {
+                    quotedBytes.removeAll(keepingCapacity: true)
                     state = .inQuotedField
-                } else if ch == delimiter {
-                    currentRow.append(currentField)
-                    currentField = ""
-                } else if ch == "\r\n" || ch == "\n" || ch == "\r" {
-                    if ch == "\r" && idx + 1 < characters.count && characters[idx + 1] == "\n" {
+                } else if b == delimByte {
+                    currentRow.append("")
+                } else if b == cr || b == lf {
+                    if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
                         idx += 1
                     }
-                    currentRow.append(currentField)
+                    currentRow.append("")
                     rows.append(currentRow)
                     currentRow = []
-                    currentField = ""
                 } else {
-                    currentField.append(ch)
+                    unquotedStartIdx = idx
                     state = .inUnquotedField
                 }
 
             case .inUnquotedField:
-                if ch == "\"" {
+                if b == quote {
                     throw EasyOfficeError.corruptedContainer(
                         detail: "Unexpected quote inside unquoted CSV/TSV field"
                     )
-                } else if ch == delimiter {
-                    currentRow.append(currentField)
-                    currentField = ""
+                } else if b == delimByte {
+                    let field = String(decoding: bytes[unquotedStartIdx..<idx], as: UTF8.self)
+                    currentRow.append(field)
                     state = .startOfField
-                } else if ch == "\r\n" || ch == "\n" || ch == "\r" {
-                    if ch == "\r" && idx + 1 < characters.count && characters[idx + 1] == "\n" {
+                } else if b == cr || b == lf {
+                    let field = String(decoding: bytes[unquotedStartIdx..<idx], as: UTF8.self)
+                    if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
                         idx += 1
                     }
-                    currentRow.append(currentField)
+                    currentRow.append(field)
                     rows.append(currentRow)
                     currentRow = []
-                    currentField = ""
                     state = .startOfField
-                } else {
-                    currentField.append(ch)
                 }
 
             case .inQuotedField:
-                if ch == "\"" {
+                if b == quote {
                     state = .quoteInQuotedField
                 } else {
-                    currentField.append(ch)
+                    quotedBytes.append(b)
                 }
 
             case .quoteInQuotedField:
-                if ch == "\"" {
-                    currentField.append("\"")
+                if b == quote {
+                    quotedBytes.append(quote)
                     state = .inQuotedField
-                } else if ch == delimiter {
-                    currentRow.append(currentField)
-                    currentField = ""
+                } else if b == delimByte {
+                    let field = String(decoding: quotedBytes, as: UTF8.self)
+                    currentRow.append(field)
+                    quotedBytes.removeAll(keepingCapacity: true)
                     state = .startOfField
-                } else if ch == "\r\n" || ch == "\n" || ch == "\r" {
-                    if ch == "\r" && idx + 1 < characters.count && characters[idx + 1] == "\n" {
+                } else if b == cr || b == lf {
+                    let field = String(decoding: quotedBytes, as: UTF8.self)
+                    if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
                         idx += 1
                     }
-                    currentRow.append(currentField)
+                    currentRow.append(field)
                     rows.append(currentRow)
                     currentRow = []
-                    currentField = ""
+                    quotedBytes.removeAll(keepingCapacity: true)
                     state = .startOfField
                 } else {
                     throw EasyOfficeError.corruptedContainer(
@@ -166,12 +170,17 @@ public enum CSVStateMachineCodec {
         switch state {
         case .inQuotedField:
             throw EasyOfficeError.corruptedContainer(detail: "Unclosed quote in CSV/TSV stream")
-        case .quoteInQuotedField, .inUnquotedField:
-            currentRow.append(currentField)
+        case .quoteInQuotedField:
+            let field = String(decoding: quotedBytes, as: UTF8.self)
+            currentRow.append(field)
+            rows.append(currentRow)
+        case .inUnquotedField:
+            let field = String(decoding: bytes[unquotedStartIdx..<count], as: UTF8.self)
+            currentRow.append(field)
             rows.append(currentRow)
         case .startOfField:
             if !currentRow.isEmpty {
-                currentRow.append(currentField)
+                currentRow.append("")
                 rows.append(currentRow)
             }
         }
@@ -476,59 +485,66 @@ public enum RTFCodec {
         return output
     }
 
+    /// Unescapes RTF text directly over UTF-16 code units (`[UInt16]`), eliminating per-character `String` allocations.
     public static func unescapeRTFText(_ input: String) -> String {
+        let units = Array(input.utf16)
+        guard !units.isEmpty else { return "" }
+
         var utf16Units: [UInt16] = []
-        let chars = Array(input)
+        utf16Units.reserveCapacity(units.count)
+        let count = units.count
         var idx = 0
 
-        while idx < chars.count {
-            let ch = chars[idx]
-            if ch == "\\" && idx + 1 < chars.count {
-                let next = chars[idx + 1]
-                if next == "\\" || next == "{" || next == "}" {
-                    for u in String(next).utf16 {
-                        utf16Units.append(u)
-                    }
+        while idx < count {
+            let u = units[idx]
+            if u == 0x5C && idx + 1 < count { // '\'
+                let next = units[idx + 1]
+                // Escaped '\', '{', '}'
+                if next == 0x5C || next == 0x7B || next == 0x7D {
+                    utf16Units.append(next)
                     idx += 2
                     continue
                 }
-                if idx + 5 <= chars.count && String(chars[idx..<(idx + 5)]) == "\\line" {
+                // '\line' -> [0x5C, 0x6C, 0x69, 0x6E, 0x65]
+                if idx + 5 <= count &&
+                    units[idx + 1] == 0x6C &&
+                    units[idx + 2] == 0x69 &&
+                    units[idx + 3] == 0x6E &&
+                    units[idx + 4] == 0x65 {
                     utf16Units.append(0x0A)
                     idx += 5
-                    if idx < chars.count && chars[idx] == " " {
+                    if idx < count && units[idx] == 0x20 {
                         idx += 1
                     }
                     continue
                 }
-                if next == "u" {
+                // '\uN?'
+                if next == 0x75 { // 'u'
                     var numStart = idx + 2
                     var isNegative = false
-                    if numStart < chars.count && chars[numStart] == "-" {
+                    if numStart < count && units[numStart] == 0x2D { // '-'
                         isNegative = true
                         numStart += 1
                     }
                     var numEnd = numStart
-                    while numEnd < chars.count && chars[numEnd].isNumber {
+                    var rawVal: Int32 = 0
+                    while numEnd < count && units[numEnd] >= 0x30 && units[numEnd] <= 0x39 {
+                        rawVal = rawVal &* 10 &+ Int32(units[numEnd] - 0x30)
                         numEnd += 1
                     }
                     if numEnd > numStart {
-                        let digitsStr = String(chars[numStart..<numEnd])
-                        if let rawVal = Int32(digitsStr) {
-                            let signedVal = isNegative ? -rawVal : rawVal
-                            let codeUnit = UInt16(bitPattern: Int16(truncatingIfNeeded: signedVal))
-                            utf16Units.append(codeUnit)
-                            idx = numEnd
-                            if idx < chars.count && chars[idx] == "?" {
-                                idx += 1
-                            }
-                            continue
+                        let signedVal = isNegative ? (0 &- rawVal) : rawVal
+                        let codeUnit = UInt16(bitPattern: Int16(truncatingIfNeeded: signedVal))
+                        utf16Units.append(codeUnit)
+                        idx = numEnd
+                        if idx < count && units[idx] == 0x3F { // '?'
+                            idx += 1
                         }
+                        continue
                     }
                 }
             }
-            for u in String(ch).utf16 {
-                utf16Units.append(u)
-            }
+            utf16Units.append(u)
             idx += 1
         }
 
