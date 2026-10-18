@@ -4,6 +4,310 @@ import EasyOfficeDesignSystem
 import Observation
 import SwiftUI
 
+/// Shared multi-geometry renderer for `SlideCanvasElement` supporting all `SlideElementKind` shapes (`.ellipseShape`, `.arrowShape`, `.calloutShape`, `.tableGrid`, `.chartEmbed`, `.roundedRectangleShape`, `.rectangleShape`, `.textBox`).
+public struct SlideElementShapeContentView: View {
+  public let element: SlideCanvasElement
+  public let palette: WorkspaceThemePalette
+  public let isSelected: Bool
+
+  public init(
+    element: SlideCanvasElement,
+    palette: WorkspaceThemePalette,
+    isSelected: Bool = false
+  ) {
+    self.element = element
+    self.palette = palette
+    self.isSelected = isSelected
+  }
+
+  private var fillColor: Color {
+    resolveOptionalHexColor(element.fillHex) ?? EasyOfficeDesignTokens.brand50.swiftUIColor
+  }
+
+  private var strokeColor: Color {
+    if isSelected {
+      return EasyOfficeDesignTokens.brand700.swiftUIColor
+    }
+    return resolveOptionalHexColor(element.strokeHex)
+      ?? EasyOfficeDesignTokens.brand600.swiftUIColor
+  }
+
+  private var strokeLineWidth: CGFloat {
+    isSelected ? 2.5 : 1.6
+  }
+
+  private var tableCellsMatrix: [[String]] {
+    let rawLines = element.bodyText
+      .split(separator: "\n", omittingEmptySubsequences: true)
+      .map(String.init)
+    if !rawLines.isEmpty,
+      rawLines.contains(where: { $0.contains("|") || $0.contains(",") })
+    {
+      return rawLines.prefix(3).map { line in
+        let separator: Character = line.contains("|") ? "|" : ","
+        return line.split(separator: separator, omittingEmptySubsequences: false)
+          .prefix(3)
+          .map { $0.trimmingCharacters(in: .whitespaces) }
+      }
+    }
+    return [
+      ["구분", "목표", "실적"],
+      [element.title, element.bodyText.isEmpty ? "100%" : element.bodyText, "달성"],
+    ]
+  }
+
+  @ViewBuilder
+  private var animationBadgeView: some View {
+    if element.animation != .none {
+      Text("✦ \(element.animation.rawValue)")
+        .font(.system(size: 8, weight: .bold))
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+        .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
+        .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+    }
+  }
+
+  public var body: some View {
+    switch element.kind {
+    case .ellipseShape:
+      ZStack {
+        Ellipse()
+          .fill(fillColor.opacity(0.95))
+        Ellipse()
+          .stroke(strokeColor, lineWidth: strokeLineWidth)
+
+        VStack(spacing: 2) {
+          Text(element.title)
+            .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
+            .italic(element.isItalic)
+            .underline(element.isUnderlined)
+            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .multilineTextAlignment(.center)
+            .lineLimit(1)
+
+          if !element.bodyText.isEmpty {
+            Text(element.bodyText)
+              .font(.system(size: 9, weight: element.isBold ? .semibold : .regular))
+              .italic(element.isItalic)
+              .underline(element.isUnderlined)
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+              .multilineTextAlignment(.center)
+              .lineLimit(2)
+          }
+
+          animationBadgeView
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+      }
+
+    case .arrowShape:
+      ZStack {
+        Canvas { context, size in
+          let w = max(10.0, size.width)
+          let h = max(10.0, size.height)
+          let headLength = min(w * 0.32, 34.0)
+          let shaftRight = max(4.0, w - headLength)
+          let shaftTop = h * 0.24
+          let shaftBottom = h * 0.76
+
+          var path = Path()
+          path.move(to: CGPoint(x: 2.0, y: shaftTop))
+          path.addLine(to: CGPoint(x: shaftRight, y: shaftTop))
+          path.addLine(to: CGPoint(x: shaftRight, y: 2.0))
+          path.addLine(to: CGPoint(x: w - 2.0, y: h * 0.5))
+          path.addLine(to: CGPoint(x: shaftRight, y: h - 2.0))
+          path.addLine(to: CGPoint(x: shaftRight, y: shaftBottom))
+          path.addLine(to: CGPoint(x: 2.0, y: shaftBottom))
+          path.closeSubpath()
+
+          context.fill(path, with: .color(fillColor.opacity(0.95)))
+          context.stroke(path, with: .color(strokeColor), lineWidth: strokeLineWidth)
+        }
+
+        VStack(alignment: .leading, spacing: 1) {
+          Text(element.title)
+            .font(.system(size: 10, weight: .bold))
+            .italic(element.isItalic)
+            .underline(element.isUnderlined)
+            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .lineLimit(1)
+
+          if !element.bodyText.isEmpty {
+            Text(element.bodyText)
+              .font(.system(size: 9))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+              .lineLimit(1)
+          }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 28)
+      }
+
+    case .calloutShape:
+      VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(spacing: 4) {
+            Text("💬 \(element.title)")
+              .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
+              .italic(element.isItalic)
+              .underline(element.isUnderlined)
+              .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+              .lineLimit(1)
+            Spacer(minLength: 2)
+            animationBadgeView
+          }
+
+          Text(element.bodyText)
+            .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
+            .italic(element.isItalic)
+            .underline(element.isUnderlined)
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .lineLimit(2)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(fillColor.opacity(0.96))
+        .overlay(
+          RoundedRectangle(cornerRadius: 8)
+            .stroke(strokeColor, lineWidth: strokeLineWidth)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+        Canvas { context, size in
+          var tail = Path()
+          tail.move(to: CGPoint(x: 16.0, y: 0.0))
+          tail.addLine(to: CGPoint(x: 28.0, y: 0.0))
+          tail.addLine(to: CGPoint(x: 12.0, y: size.height))
+          tail.closeSubpath()
+          context.fill(tail, with: .color(fillColor))
+          context.stroke(tail, with: .color(strokeColor), lineWidth: 1.4)
+        }
+        .frame(height: 9)
+      }
+
+    case .tableGrid:
+      VStack(alignment: .leading, spacing: 3) {
+        HStack {
+          Label(element.title, systemImage: "tablecells")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .lineLimit(1)
+          Spacer(minLength: 2)
+          animationBadgeView
+        }
+
+        VStack(spacing: 1) {
+          ForEach(Array(tableCellsMatrix.enumerated()), id: \.offset) { rIdx, rowCells in
+            HStack(spacing: 1) {
+              ForEach(Array(rowCells.enumerated()), id: \.offset) { _, cellVal in
+                Text(cellVal)
+                  .font(.system(size: 8, weight: rIdx == 0 ? .bold : .regular))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                  .lineLimit(1)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .padding(.horizontal, 4)
+                  .padding(.vertical, 2)
+                  .background(
+                    rIdx == 0
+                      ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                      : palette.cardSurface.swiftUIColor
+                  )
+              }
+            }
+          }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+      }
+      .padding(6)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .background(fillColor.opacity(0.95))
+      .overlay(
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(strokeColor, lineWidth: strokeLineWidth)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+
+    case .chartEmbed:
+      let barRatios: [CGFloat] = [0.45, 0.82, 0.64, 0.95]
+      VStack(alignment: .leading, spacing: 4) {
+        HStack {
+          Label(element.title, systemImage: "chart.bar.fill")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .lineLimit(1)
+          Spacer(minLength: 2)
+          animationBadgeView
+        }
+
+        HStack(alignment: .bottom, spacing: 6) {
+          ForEach(Array(barRatios.enumerated()), id: \.offset) { idx, ratio in
+            RoundedRectangle(cornerRadius: 2)
+              .fill(
+                idx % 2 == 0
+                  ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                  : EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor
+              )
+              .frame(maxWidth: .infinity)
+              .frame(height: max(8.0, 26.0 * ratio))
+          }
+        }
+        .frame(maxHeight: .infinity, alignment: .bottom)
+
+        if !element.bodyText.isEmpty {
+          Text(element.bodyText)
+            .font(.system(size: 8, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .lineLimit(1)
+        }
+      }
+      .padding(7)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .background(fillColor.opacity(0.95))
+      .overlay(
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(strokeColor, lineWidth: strokeLineWidth)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+
+    case .roundedRectangleShape, .rectangleShape, .textBox:
+      let cornerRadius: CGFloat =
+        element.kind == .roundedRectangleShape
+        ? 12.0
+        : (element.kind == .rectangleShape ? 2.0 : 6.0)
+
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 4) {
+          Text(element.title)
+            .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
+            .italic(element.isItalic)
+            .underline(element.isUnderlined)
+            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .lineLimit(1)
+          Spacer(minLength: 2)
+          animationBadgeView
+        }
+        Text(element.bodyText)
+          .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
+          .italic(element.isItalic)
+          .underline(element.isUnderlined)
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+          .lineLimit(2)
+      }
+      .padding(8)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+      .background(fillColor.opacity(0.95))
+      .overlay(
+        RoundedRectangle(cornerRadius: cornerRadius)
+          .stroke(strokeColor, lineWidth: strokeLineWidth)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+  }
+}
+
 /// Full-window dark presentation stage displaying the active slide at 16:9 scale with animated element entrance transitions, live glowing Laser Pointer, speaker notes HUD drawer, elapsed timer, and ESC exit.
 public struct SlideshowFullScreenOverlayView: View {
   @Bindable var viewModel: WorkspaceViewModel
@@ -147,12 +451,6 @@ public struct SlideshowFullScreenOverlayView: View {
                 let elemH = max(50.0, CGFloat(element.height) * scaleY)
                 let centerX = CGFloat(element.centerX) * scaleX
                 let centerY = CGFloat(element.centerY) * scaleY
-                let fillColor =
-                  resolveOptionalHexColor(element.fillHex)
-                  ?? EasyOfficeDesignTokens.brand50.swiftUIColor
-                let strokeColor =
-                  resolveOptionalHexColor(element.strokeHex)
-                  ?? EasyOfficeDesignTokens.brand600.swiftUIColor
                 let entranceScale: CGFloat =
                   (element.animation == .zoomIn && !isStageAnimatedIn) ? 0.72 : 1.0
                 let entranceOffsetY: CGFloat =
@@ -160,22 +458,12 @@ public struct SlideshowFullScreenOverlayView: View {
                 let entranceOpacity: Double =
                   (element.animation != .none && !isStageAnimatedIn) ? 0.15 : 1.0
 
-                VStack(alignment: .leading, spacing: 4) {
-                  Text(element.title)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
-                  Text(element.bodyText)
-                    .font(.system(size: 12))
-                    .foregroundStyle(EasyOfficeDesignTokens.inkSecondary.swiftUIColor)
-                }
-                .padding(12)
-                .frame(width: elemW, height: elemH, alignment: .leading)
-                .background(fillColor)
-                .overlay(
-                  RoundedRectangle(cornerRadius: 8)
-                    .stroke(strokeColor, lineWidth: 2.0)
+                SlideElementShapeContentView(
+                  element: element,
+                  palette: palette,
+                  isSelected: false
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: elemW, height: elemH)
                 .scaleEffect(entranceScale)
                 .offset(y: entranceOffsetY)
                 .opacity(entranceOpacity)

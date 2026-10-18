@@ -286,8 +286,8 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
           isStrikethrough: isStrikethrough ?? run.isStrikethrough,
           fontName: run.fontName, fontSizePt: fontSizePt ?? run.fontSizePt,
           foregroundHex: foregroundHex ?? run.foregroundHex,
-          backgroundHex: backgroundHex ?? run.backgroundHex,
-          linkURL: linkURL ?? run.linkURL
+          backgroundHex: backgroundHex == "" ? nil : (backgroundHex ?? run.backgroundHex),
+          linkURL: linkURL == "" ? nil : (linkURL ?? run.linkURL)
         ))
 
       if runEnd > targetEnd {

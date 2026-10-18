@@ -309,4 +309,322 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     XCTAssertEqual(decodedPDF.inkStrokes.first?.points, points)
     XCTAssertEqual(decodedPDF.inkStrokes.first?.label, "검토자 전자서명 획")
   }
+
+  // MARK: - 6. Document Highlight, Strikethrough, Hyperlink, Indent, Table Row/Col, Revisions & Endnote
+
+  func testDocumentHighlightStrikethroughHyperlinkIndentTableStructureRevisionsAndEndnote() throws {
+    let vm = WorkspaceViewModel()
+    let docTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .document }))
+    vm.activeTabID = docTab.id
+
+    guard case .document(let initialDoc) = vm.activeTab?.payload else {
+      return XCTFail("Expected document payload")
+    }
+    let para = try XCTUnwrap(initialDoc.paragraphs.last)
+    vm.updateSelectedParagraphSelection(paragraphID: para.id, utf16Range: 0..<4)
+
+    vm.toggleHighlightOnActiveParagraph(colorHex: "#FFF59D")
+    vm.toggleStrikethroughOnActiveParagraph()
+    vm.insertHyperlinkIntoActiveParagraph(url: "https://example.org/spec")
+    vm.adjustActiveParagraphIndent(firstLineDeltaPt: 8.0, leftIndentDeltaPt: 16.0)
+    vm.insertEndnoteIntoActiveDocument(content: "참고 표준 미주 1")
+
+    if case .document(let updatedDoc) = vm.activeTab?.payload {
+      let updatedPara = try XCTUnwrap(updatedDoc.paragraphs.first(where: { $0.id == para.id }))
+      XCTAssertEqual(updatedPara.firstLineIndentPt, 8.0, accuracy: 0.01)
+      XCTAssertEqual(updatedPara.leftIndentPt, 16.0, accuracy: 0.01)
+      XCTAssertTrue(updatedPara.runs.contains(where: { $0.backgroundHex == "#FFF59D" }))
+      XCTAssertTrue(updatedPara.runs.contains(where: { $0.isStrikethrough }))
+      XCTAssertTrue(
+        updatedPara.runs.contains(where: { $0.linkURL == "https://example.org/spec" }))
+      XCTAssertTrue(
+        updatedDoc.footnotes.contains(where: { $0.isEndnote && $0.text.contains("참고 표준 미주 1") })
+      )
+    } else {
+      XCTFail("Expected updated document payload")
+    }
+
+    // Verify second invocation of toggleHighlightOnActiveParagraph and toggleStrikethroughOnActiveParagraph genuinely toggles OFF
+    vm.toggleHighlightOnActiveParagraph(colorHex: "#FFF59D")
+    vm.toggleStrikethroughOnActiveParagraph()
+    if case .document(let toggledOffDoc) = vm.activeTab?.payload {
+      let toggledOffPara = try XCTUnwrap(
+        toggledOffDoc.paragraphs.first(where: { $0.id == para.id }))
+      XCTAssertFalse(toggledOffPara.runs.contains(where: { $0.backgroundHex == "#FFF59D" }))
+      XCTAssertFalse(toggledOffPara.runs.contains(where: { $0.isStrikethrough }))
+    }
+
+    // Verify hyperlink scheme allowlist sanitization (HTTPS/HTTP/MAILTO only; reject javascript:, file:, data:)
+    XCTAssertNil(WorkspaceViewModel.sanitizeSafeHyperlinkURL("javascript:alert(1)"))
+    XCTAssertNil(WorkspaceViewModel.sanitizeSafeHyperlinkURL("file:///etc/passwd"))
+    XCTAssertNil(WorkspaceViewModel.sanitizeSafeHyperlinkURL("data:text/html,<script>"))
+    XCTAssertEqual(
+      WorkspaceViewModel.sanitizeSafeHyperlinkURL("https://easyoffice.local/spec"),
+      "https://easyoffice.local/spec"
+    )
+    XCTAssertEqual(
+      WorkspaceViewModel.sanitizeSafeHyperlinkURL("mailto:qa@easyoffice.local"),
+      "mailto:qa@easyoffice.local"
+    )
+    XCTAssertEqual(
+      WorkspaceViewModel.sanitizeSafeHyperlinkURL("easyoffice.local/docs"),
+      "https://easyoffice.local/docs"
+    )
+    vm.insertHyperlinkIntoActiveParagraph(url: "javascript:alert(1)")
+    XCTAssertNotNil(vm.lastErrorMessage)
+
+    // Table row/column insert and delete + span & border style lookup helpers
+    let initialRowCount: Int
+    let initialColCount: Int
+    if case .document(let docBeforeTable) = vm.activeTab?.payload {
+      initialRowCount = docBeforeTable.tables[0].rowCount
+      initialColCount = docBeforeTable.tables[0].columnCount
+    } else {
+      return XCTFail("Expected document payload")
+    }
+
+    var spanTestTable = DocumentTableBlock(
+      rows: [
+        ["구분", "상세", "비고"],
+        ["항목 A", "병합 데이터", "참조"],
+        ["항목 B", "하위 데이터", "정상"],
+      ],
+      cellSpans: [
+        TableCellSpan(
+          rowIndex: 0, columnIndex: 0, rowSpan: 2, columnSpan: 2, borderStyle: .doubleLine)
+      ],
+      borderStyle: .solid
+    )
+    XCTAssertNotNil(spanTestTable.originSpan(atRow: 0, column: 0))
+    XCTAssertFalse(spanTestTable.isCoveredByNonOriginSpan(atRow: 0, column: 0))
+    XCTAssertTrue(spanTestTable.isCoveredByNonOriginSpan(atRow: 0, column: 1))
+    XCTAssertTrue(spanTestTable.isCoveredByNonOriginSpan(atRow: 1, column: 0))
+    XCTAssertTrue(spanTestTable.isCoveredByNonOriginSpan(atRow: 1, column: 1))
+    XCTAssertFalse(spanTestTable.isCoveredByNonOriginSpan(atRow: 1, column: 2))
+    XCTAssertEqual(spanTestTable.effectiveBorderStyle(atRow: 0, column: 0), .doubleLine)
+    XCTAssertEqual(spanTestTable.effectiveBorderStyle(atRow: 1, column: 2), .solid)
+    spanTestTable.insertRow(at: 0, defaultCellText: "신규")
+    XCTAssertNotNil(spanTestTable.originSpan(atRow: 1, column: 0))
+
+    vm.insertRowInDocumentTable(tableIndex: 0)
+    vm.insertColumnInDocumentTable(tableIndex: 0)
+    if case .document(let docAfterInsert) = vm.activeTab?.payload {
+      XCTAssertEqual(docAfterInsert.tables[0].rowCount, initialRowCount + 1)
+      XCTAssertEqual(docAfterInsert.tables[0].columnCount, initialColCount + 1)
+    }
+
+    vm.deleteRowInDocumentTable(tableIndex: 0)
+    vm.deleteColumnInDocumentTable(tableIndex: 0)
+    if case .document(let docAfterDelete) = vm.activeTab?.payload {
+      XCTAssertEqual(docAfterDelete.tables[0].rowCount, initialRowCount)
+      XCTAssertEqual(docAfterDelete.tables[0].columnCount, initialColCount)
+    }
+
+    // Tracked revision accept & reject
+    if case .document(let docWithRev) = vm.activeTab?.payload,
+      let firstRev = docWithRev.revisions.first
+    {
+      vm.acceptDocumentRevision(id: firstRev.id)
+      if case .document(let afterAccept) = vm.activeTab?.payload {
+        XCTAssertFalse(afterAccept.revisions.contains(where: { $0.id == firstRev.id }))
+      }
+    }
+
+    // Record another revision and reject it
+    if case .document(let docForReject) = vm.activeTab?.payload,
+      let firstPara = docForReject.paragraphs.first
+    {
+      let originalText = firstPara.text
+      vm.updateParagraphText(paragraphID: firstPara.id, newText: "임시 수정 제목")
+      if case .document(let docWithPendingRev) = vm.activeTab?.payload,
+        let latestRev = docWithPendingRev.revisions.last
+      {
+        vm.rejectDocumentRevision(id: latestRev.id)
+        if case .document(let afterReject) = vm.activeTab?.payload {
+          let restoredPara = try XCTUnwrap(
+            afterReject.paragraphs.first(where: { $0.id == firstPara.id }))
+          XCTAssertEqual(restoredPara.text, originalText)
+        }
+      }
+    }
+  }
+
+  // MARK: - 7. Sheet Multi-Cell Merge, Row/Col Insert/Delete, Named Ranges & Goal Seek
+
+  func testSheetRangeMergeRowColumnInsertDeleteNamedRangeAndGoalSeek() throws {
+    let vm = WorkspaceViewModel()
+    let sheetTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet }))
+    vm.activeTabID = sheetTab.id
+
+    // Merge honoring selectedSheetRange = "B2:D3"
+    vm.selectSheetCellOrRange(primaryCell: "B2", rangeNotation: "B2:D3")
+    vm.mergeSelectedSheetRange()
+    XCTAssertTrue(vm.mergedSheetRanges(for: sheetTab.id).contains("B2:D3"))
+    vm.unmergeSelectedSheetRange()
+    XCTAssertFalse(vm.mergedSheetRanges(for: sheetTab.id).contains("B2:D3"))
+
+    // Row & column insert/delete at selection with intermediate shift assertions
+    vm.selectSheetCellOrRange(primaryCell: "B2")
+    let originalB2: String? = {
+      if case .sheet(let s) = vm.activeTab?.payload { return s.rawValue(at: "B2") }
+      return nil
+    }()
+    XCTAssertEqual(originalB2, "120")
+
+    vm.insertSheetRowAtSelection()
+    if case .sheet(let afterRowInsert) = vm.activeTab?.payload {
+      XCTAssertEqual(afterRowInsert.rawValue(at: "A3"), "엔진 최적화")
+      XCTAssertEqual(afterRowInsert.rawValue(at: "B3"), "120")
+    }
+    vm.deleteSheetRowAtSelection()
+    if case .sheet(let afterRowDelete) = vm.activeTab?.payload {
+      XCTAssertEqual(afterRowDelete.rawValue(at: "A2"), "엔진 최적화")
+      XCTAssertEqual(afterRowDelete.rawValue(at: "B2"), "120")
+    }
+
+    vm.insertSheetColumnAtSelection()
+    if case .sheet(let afterColInsert) = vm.activeTab?.payload {
+      XCTAssertEqual(afterColInsert.rawValue(at: "B2"), "")
+      XCTAssertEqual(afterColInsert.rawValue(at: "C2"), "120")
+    }
+    vm.deleteSheetColumnAtSelection()
+    if case .sheet(let afterColDelete) = vm.activeTab?.payload {
+      XCTAssertEqual(afterColDelete.rawValue(at: "B2"), "120")
+    }
+
+    // Named range definition & formula evaluation
+    vm.defineSheetNamedRange(name: "핵심실적", targetNotation: "B2:C2")
+    if case .sheet(let sheetWithNamed) = vm.activeTab?.payload {
+      XCTAssertEqual(sheetWithNamed.resolveNamedRange("핵심실적"), "B2:C2")
+    }
+
+    // Goal Seek on D2 (=SUM(B2:C2)) targeting 500 by varying B2 (with C2 = 180 -> B2 should become 320)
+    let solvedB2 = try XCTUnwrap(
+      vm.runGoalSeekOnActiveSheet(
+        targetCell: "D2",
+        targetValue: 500.0,
+        variableCell: "B2"
+      )
+    )
+    XCTAssertEqual(solvedB2, 320.0, accuracy: 0.01)
+    if case .sheet(let afterGoalSeek) = vm.activeTab?.payload {
+      XCTAssertEqual(afterGoalSeek.evaluate(at: "D2").numericValue ?? 0.0, 500.0, accuracy: 0.01)
+    }
+  }
+
+  // MARK: - 8. Slide Deck Add, Duplicate, Move, Delete & Slide Sorter Toggle
+
+  func testSlideDeckAddDuplicateMoveDeleteAndSorterToggle() throws {
+    let vm = WorkspaceViewModel()
+    let slideTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .slide }))
+    vm.activeTabID = slideTab.id
+
+    guard case .slide(let initialDeck) = vm.activeTab?.payload else {
+      return XCTFail("Expected slide deck")
+    }
+    let initialCount = initialDeck.slides.count
+
+    vm.addSlideToActiveDeck(title: "3. 확장 로드맵")
+    if case .slide(let deckAfterAdd) = vm.activeTab?.payload {
+      XCTAssertEqual(deckAfterAdd.slides.count, initialCount + 1)
+      XCTAssertEqual(deckAfterAdd.slides.last?.title, "3. 확장 로드맵")
+    }
+
+    vm.duplicateActiveSlide()
+    if case .slide(let deckAfterDup) = vm.activeTab?.payload {
+      XCTAssertEqual(deckAfterDup.slides.count, initialCount + 2)
+    }
+
+    let indexBeforeMove = vm.selectedSlideIndex
+    if indexBeforeMove > 0 {
+      vm.moveActiveSlide(offset: -1)
+      XCTAssertEqual(vm.selectedSlideIndex, indexBeforeMove - 1)
+    }
+
+    vm.deleteActiveSlide()
+    if case .slide(let deckAfterDelete) = vm.activeTab?.payload {
+      XCTAssertEqual(deckAfterDelete.slides.count, initialCount + 1)
+    }
+
+    XCTAssertFalse(vm.isSlideSorterViewEnabled)
+    vm.toggleSlideSorterView()
+    XCTAssertTrue(vm.isSlideSorterViewEnabled)
+    vm.toggleSlideSorterView()
+    XCTAssertFalse(vm.isSlideSorterViewEnabled)
+  }
+
+  // MARK: - 9. PDF Studio Redaction, AcroForm Fields, Page Reorder & Open Tab Merge
+
+  func testPDFStudioRedactionAcroFormFieldsPageReorderAndOpenTabMerge() throws {
+    let vm = WorkspaceViewModel()
+    let pdfTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .pdf }))
+    vm.activeTabID = pdfTab.id
+    vm.selectedPDFPageIndex = 0
+
+    // Irreversible redaction
+    let redactedPageCount = vm.redactTextOnActivePDF(phrase: "매직 바이트")
+    XCTAssertGreaterThanOrEqual(redactedPageCount, 1)
+    if case .pdf(let pdfAfterRedact) = vm.activeTab?.payload {
+      XCTAssertTrue(pdfAfterRedact.isRedacted)
+      XCTAssertFalse(pdfAfterRedact.pages[0].extractedText.contains("매직 바이트"))
+      XCTAssertTrue(pdfAfterRedact.pages[0].extractedText.contains("████"))
+    }
+
+    // AcroForm field creation & update
+    vm.addFormFieldToActivePDF(name: "검토담당자", value: "박서연", isCheckbox: false)
+    vm.addFormFieldToActivePDF(name: "보안검증완료", value: "승인", isCheckbox: true)
+    var textFieldID: UUID?
+    var checkboxID: UUID?
+    if case .pdf(let pdfWithFields) = vm.activeTab?.payload {
+      XCTAssertEqual(pdfWithFields.formFields.count, 2)
+      textFieldID = pdfWithFields.formFields.first(where: { !$0.isCheckbox })?.id
+      checkboxID = pdfWithFields.formFields.first(where: { $0.isCheckbox })?.id
+    }
+
+    let tfID = try XCTUnwrap(textFieldID)
+    let cbID = try XCTUnwrap(checkboxID)
+    vm.setActivePDFFormFieldValue(id: tfID, value: "최현우 수석")
+    vm.setActivePDFFormFieldValue(id: cbID, isChecked: true)
+
+    if case .pdf(let pdfUpdatedFields) = vm.activeTab?.payload {
+      let tf = try XCTUnwrap(pdfUpdatedFields.formFields.first(where: { $0.id == tfID }))
+      let cb = try XCTUnwrap(pdfUpdatedFields.formFields.first(where: { $0.id == cbID }))
+      XCTAssertEqual(tf.value, "최현우 수석")
+      XCTAssertTrue(cb.isChecked)
+    }
+
+    // Page reorder with page content swap verification
+    let page0BeforeText: String
+    let page1BeforeText: String
+    if case .pdf(let pdfBeforeMove) = vm.activeTab?.payload {
+      page0BeforeText = pdfBeforeMove.pages[0].extractedText
+      page1BeforeText = pdfBeforeMove.pages[1].extractedText
+    } else {
+      return XCTFail("Expected PDF payload before move")
+    }
+
+    vm.selectedPDFPageIndex = 0
+    vm.reorderActivePDFPage(offset: 1)
+    XCTAssertEqual(vm.selectedPDFPageIndex, 1)
+    if case .pdf(let pdfAfterMove) = vm.activeTab?.payload {
+      XCTAssertEqual(pdfAfterMove.pages[0].extractedText, page1BeforeText)
+      XCTAssertEqual(pdfAfterMove.pages[1].extractedText, page0BeforeText)
+      XCTAssertEqual(pdfAfterMove.pages[0].pageNumber, 1)
+      XCTAssertEqual(pdfAfterMove.pages[1].pageNumber, 2)
+    }
+
+    // Open a second PDF tab and merge into the active PDF tab
+    vm.openNewSampleTab(for: .pdf)
+    vm.activeTabID = pdfTab.id
+    let countBeforeMerge: Int = {
+      if case .pdf(let doc) = vm.activeTab?.payload { return doc.pages.count }
+      return 0
+    }()
+    vm.mergeActivePDFWithTab()
+    if case .pdf(let mergedDoc) = vm.activeTab?.payload {
+      XCTAssertGreaterThan(mergedDoc.pages.count, countBeforeMerge)
+    } else {
+      XCTFail("Expected merged PDF payload")
+    }
+  }
 }

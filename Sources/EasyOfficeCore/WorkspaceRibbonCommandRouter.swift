@@ -198,7 +198,7 @@ extension WorkspaceViewModel {
           {
             var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
             summaryRow[0] = "합계 (=SUM(ABOVE))"
-            summaryRow[lastCol] = String(Int(val))
+            summaryRow[lastCol] = val.isFinite ? String(format: "%.0f", val) : "0"
             doc.tables[0].rows.append(summaryRow)
           }
         } else {
@@ -693,8 +693,38 @@ extension WorkspaceViewModel {
         shapeBlock.runs = [DocumentTextRun(text: "프로세스 블록", isBold: true, foregroundHex: "#5C6BC0")]
         doc.paragraphs.append(shapeBlock)
       case .link:
-        let anchorID = doc.paragraphs.first?.id ?? UUID()
+        let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+        let anchorID = doc.paragraphs.indices.contains(pIdx) ? doc.paragraphs[pIdx].id : UUID()
         doc.bookmarks["책갈피_\(doc.bookmarks.count + 1)"] = anchorID
+        if doc.paragraphs.indices.contains(pIdx) {
+          let trimmedURL = inlineLinkURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+          let rawCandidate =
+            trimmedURL.isEmpty ? "https://easyoffice.local/reference" : trimmedURL
+          let resolvedURL =
+            Self.sanitizeSafeHyperlinkURL(rawCandidate) ?? "https://easyoffice.local/reference"
+          if let utf16Range = selectedParagraphUTF16Range, !utf16Range.isEmpty {
+            doc.paragraphs[pIdx].applyRunFormatting(
+              utf16Range: utf16Range,
+              isUnderlined: true,
+              foregroundHex: "#1E88E5",
+              linkURL: resolvedURL
+            )
+          } else {
+            let baseText = doc.paragraphs[pIdx].text
+            let firstWordRange: Range<String.Index> = {
+              if let spaceIdx = baseText.firstIndex(of: " "), spaceIdx < baseText.endIndex {
+                return baseText.startIndex..<baseText.index(after: spaceIdx)
+              }
+              return baseText.startIndex..<baseText.endIndex
+            }()
+            doc.paragraphs[pIdx].applyRunFormatting(
+              range: firstWordRange,
+              isUnderlined: true,
+              foregroundHex: "#1E88E5",
+              linkURL: resolvedURL
+            )
+          }
+        }
       }
       openTabs[idx].payload = .document(doc)
       openTabs[idx].isModified = true
@@ -989,7 +1019,7 @@ extension WorkspaceViewModel {
             "=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0
         var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
         summaryRow[0] = "합계 (=SUM(ABOVE))"
-        summaryRow[lastCol] = String(Int(sum))
+        summaryRow[lastCol] = sum.isFinite ? String(format: "%.0f", sum) : "0"
         doc.tables[0].rows.append(summaryRow)
       case .functionWizard:
         if doc.tables.isEmpty {
