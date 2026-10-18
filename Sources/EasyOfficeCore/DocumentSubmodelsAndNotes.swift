@@ -64,6 +64,23 @@ public struct DocumentTableBlock: Sendable, Codable, Equatable, Identifiable {
   public var columnCount: Int { rows.first?.count ?? 0 }
   public var headers: [String] { rows.first ?? [] }
 
+  public func originSpan(atRow row: Int, column: Int) -> TableCellSpan? {
+    cellSpans.first { $0.rowIndex == row && $0.columnIndex == column }
+  }
+
+  public func isCoveredByNonOriginSpan(atRow row: Int, column: Int) -> Bool {
+    cellSpans.contains { span in
+      let coversRow = row >= span.rowIndex && row < (span.rowIndex + span.rowSpan)
+      let coversCol = column >= span.columnIndex && column < (span.columnIndex + span.columnSpan)
+      let isOrigin = (row == span.rowIndex && column == span.columnIndex)
+      return coversRow && coversCol && !isOrigin
+    }
+  }
+
+  public func effectiveBorderStyle(atRow row: Int, column: Int) -> TableCellBorderStyle {
+    originSpan(atRow: row, column: column)?.borderStyle ?? borderStyle
+  }
+
   /// Inserts a row of `columnCount` cells at `index ?? rows.count` and shifts affected `cellSpans` down by 1.
   public mutating func insertRow(at index: Int? = nil, defaultCellText: String = "") {
     let cols = max(1, columnCount)
