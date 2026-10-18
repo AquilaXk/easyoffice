@@ -1,0 +1,368 @@
+import Foundation
+
+// MARK: - XML Sanitizer (Zero-Allocation XXE Guard & Quote-Aware Nested Element Extractor)
+
+/// Fail-Closed XML sanitizer blocking XXE/external DTD payloads and providing deterministic quote-aware tag boundary parsing and escaping.
+public enum XMLSanitizer {
+
+  private static let entityAsciiUpper: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) = (
+    0x45, 0x4E, 0x54, 0x49, 0x54, 0x59  // "ENTITY"
+  )
+  private static let doctypeAsciiUpper: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) = (
+    0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45  // "DOCTYPE"
+  )
+
+  private static func scanUnsafeXMLBuffer(_ buffer: UnsafeBufferPointer<UInt8>) throws {
+    let count = buffer.count
+    guard count >= 8 else { return }
+    var idx = 0
+    while idx <= count - 8 {
+      if buffer[idx] == 0x3C && buffer[idx + 1] == 0x21 {  // "<!"
+        var kw = idx + 2
+        while kw < count
+          && (buffer[kw] == 0x20 || buffer[kw] == 0x09 || buffer[kw] == 0x0A || buffer[kw] == 0x0D)
+        {
+          kw += 1
+        }
+        if kw <= count - 6
+          && (buffer[kw] & 0xDF) == entityAsciiUpper.0
+          && (buffer[kw + 1] & 0xDF) == entityAsciiUpper.1
+          && (buffer[kw + 2] & 0xDF) == entityAsciiUpper.2
+          && (buffer[kw + 3] & 0xDF) == entityAsciiUpper.3
+          && (buffer[kw + 4] & 0xDF) == entityAsciiUpper.4
+          && (buffer[kw + 5] & 0xDF) == entityAsciiUpper.5
+        {
+          throw EasyOfficeError.xxeOrExternalEntityDetected
+        }
+        if kw <= count - 7
+          && (buffer[kw] & 0xDF) == doctypeAsciiUpper.0
+          && (buffer[kw + 1] & 0xDF) == doctypeAsciiUpper.1
+          && (buffer[kw + 2] & 0xDF) == doctypeAsciiUpper.2
+          && (buffer[kw + 3] & 0xDF) == doctypeAsciiUpper.3
+          && (buffer[kw + 4] & 0xDF) == doctypeAsciiUpper.4
+          && (buffer[kw + 5] & 0xDF) == doctypeAsciiUpper.5
+          && (buffer[kw + 6] & 0xDF) == doctypeAsciiUpper.6
+        {
+          throw EasyOfficeError.xxeOrExternalEntityDetected
+        }
+      }
+      idx += 1
+    }
+  }
+
+  /// Scans UTF-8 bytes directly for `<!ENTITY` or `<!DOCTYPE` (case-insensitive) with zero heap allocations.
+  public static func validateSafeXMLBytes(_ data: Data) throws {
+    try data.withUnsafeBytes { rawBuffer in
+      try scanUnsafeXMLBuffer(rawBuffer.bindMemory(to: UInt8.self))
+    }
+  }
+
+  public static func validateSafeXML(_ xmlString: String) throws {
+    var copy = xmlString
+    try copy.withUTF8 { utf8Buffer in
+      try scanUnsafeXMLBuffer(utf8Buffer)
+    }
+  }
+
+  public static func validateSafeXMLData(_ data: Data) throws -> String {
+    try validateSafeXMLBytes(data)
+    guard let xmlString = String(data: data, encoding: .utf8) else {
+      throw EasyOfficeError.corruptedContainer(detail: "XML 스트림이 유효한 UTF-8 인코딩이 아닙니다.")
+    }
+    return xmlString
+  }
+
+  public static func escape(_ input: String) -> String {
+    var result = ""
+    result.reserveCapacity(input.count)
+    for ch in input {
+      switch ch {
+      case "&": result.append("&amp;")
+      case "<": result.append("&lt;")
+      case ">": result.append("&gt;")
+      case "\"": result.append("&quot;")
+      case "'": result.append("&apos;")
+      default: result.append(ch)
+      }
+    }
+    return result
+  }
+
+  public static func unescape(_ input: String) -> String {
+    guard input.utf8.contains(UInt8(ascii: "&")) else { return input }
+    var output = ""
+    output.reserveCapacity(input.count)
+    var idx = input.startIndex
+    while idx < input.endIndex {
+      let ch = input[idx]
+      if ch == "&" {
+        let searchEnd = input.index(idx, offsetBy: 14, limitedBy: input.endIndex) ?? input.endIndex
+        if let semi = input[idx..<searchEnd].firstIndex(of: ";") {
+          let entity = input[idx...semi]
+          switch entity {
+          case "&quot;":
+            output.append("\"")
+            idx = input.index(after: semi)
+            continue
+          case "&apos;":
+            output.append("'")
+            idx = input.index(after: semi)
+            continue
+          case "&lt;":
+            output.append("<")
+            idx = input.index(after: semi)
+            continue
+          case "&gt;":
+            output.append(">")
+            idx = input.index(after: semi)
+            continue
+          case "&amp;":
+            output.append("&")
+            idx = input.index(after: semi)
+            continue
+          default:
+            let bodyStart = input.index(after: idx)
+            if bodyStart < semi && input[bodyStart] == "#" {
+              let numStart = input.index(after: bodyStart)
+              if numStart < semi {
+                let codePoint: UInt32?
+                if input[numStart] == "x" || input[numStart] == "X" {
+                  let hexStart = input.index(after: numStart)
+                  codePoint = hexStart < semi ? UInt32(input[hexStart..<semi], radix: 16) : nil
+                } else {
+                  codePoint = UInt32(input[numStart..<semi], radix: 10)
+                }
+                if let cp = codePoint, cp > 0, let scalar = UnicodeScalar(cp) {
+                  output.unicodeScalars.append(scalar)
+                  idx = input.index(after: semi)
+                  continue
+                }
+              }
+            }
+          }
+        }
+      }
+      output.append(ch)
+      idx = input.index(after: idx)
+    }
+    return output
+  }
+
+  private static func isTagNameBoundary(_ ch: Character) -> Bool {
+    ch == " " || ch == ">" || ch == "/" || ch == "\t" || ch == "\n" || ch == "\r"
+  }
+
+  /// Scans `xml[start..<xml.endIndex]` for the closing `>` of an opening tag while ignoring `>` characters inside quoted attribute values.
+  private static func findTagClosingBracket(in xml: String, from start: String.Index) -> String
+    .Index?
+  {
+    var cursor = start
+    var activeQuote: Character? = nil
+    while cursor < xml.endIndex {
+      let ch = xml[cursor]
+      if let quote = activeQuote {
+        if ch == quote { activeQuote = nil }
+      } else if ch == "\"" || ch == "'" {
+        activeQuote = ch
+      } else if ch == ">" {
+        return cursor
+      }
+      cursor = xml.index(after: cursor)
+    }
+    return nil
+  }
+
+  /// Zero-allocation reverse UTF-8 scan checking whether an XML tag's attribute slice ends with `/`.
+  @inlinable
+  internal static func isSelfClosingTag(_ segment: Substring) -> Bool {
+    let utf8 = segment.utf8
+    var idx = utf8.endIndex
+    while idx > utf8.startIndex {
+      idx = utf8.index(before: idx)
+      let b = utf8[idx]
+      if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D { continue }
+      return b == 0x2F  // '/'
+    }
+    return false
+  }
+
+  /// Extracts all top-level XML elements matching `<tagName ...>inner</tagName>`, tracking nesting depth for identical child tags.
+  public static func extractElements(named tagName: String, in xml: String) -> [(
+    attributes: [String: String], innerXML: String
+  )] {
+    var results: [(attributes: [String: String], innerXML: String)] = []
+    let openPrefix = "<\(tagName)"
+    let closeTag = "</\(tagName)>"
+    var searchStart = xml.startIndex
+
+    while let openRange = xml.range(of: openPrefix, range: searchStart..<xml.endIndex) {
+      let afterTagName = openRange.upperBound
+      if afterTagName < xml.endIndex {
+        guard isTagNameBoundary(xml[afterTagName]) else {
+          searchStart = afterTagName
+          continue
+        }
+      }
+      guard let tagEndIdx = findTagClosingBracket(in: xml, from: afterTagName) else { break }
+      let afterTagEnd = xml.index(after: tagEndIdx)
+      let attrSlice = xml[afterTagName..<tagEndIdx]
+      let attrs = parseAttributes(from: String(attrSlice))
+
+      if isSelfClosingTag(attrSlice) {
+        results.append((attributes: attrs, innerXML: ""))
+        searchStart = afterTagEnd
+        continue
+      }
+
+      var depth = 1
+      var scanCursor = afterTagEnd
+      var matchedCloseRange: Range<String.Index>?
+
+      while depth > 0 && scanCursor < xml.endIndex {
+        guard let nextClose = xml.range(of: closeTag, range: scanCursor..<xml.endIndex) else {
+          break
+        }
+        if let nextOpen = xml.range(of: openPrefix, range: scanCursor..<nextClose.lowerBound) {
+          let afterNestedName = nextOpen.upperBound
+          if afterNestedName < xml.endIndex && isTagNameBoundary(xml[afterNestedName]) {
+            guard let nestedTagEndIdx = findTagClosingBracket(in: xml, from: afterNestedName) else {
+              break
+            }
+            let nestedAttr = xml[afterNestedName..<nestedTagEndIdx]
+            if !isSelfClosingTag(nestedAttr) { depth += 1 }
+            scanCursor = xml.index(after: nestedTagEndIdx)
+          } else {
+            scanCursor = afterNestedName
+          }
+        } else {
+          depth -= 1
+          if depth == 0 { matchedCloseRange = nextClose } else { scanCursor = nextClose.upperBound }
+        }
+      }
+
+      guard let closeRange = matchedCloseRange else { break }
+      let inner = String(xml[afterTagEnd..<closeRange.lowerBound])
+      results.append((attributes: attrs, innerXML: inner))
+      searchStart = closeRange.upperBound
+    }
+    return results
+  }
+
+  /// Removes all occurrences of `<tagName ...>...</tagName>` (including nested same-tag elements) from `xml`.
+  public static func stripElements(named tagName: String, from xml: String) -> String {
+    let openPrefix = "<\(tagName)"
+    let closeTag = "</\(tagName)>"
+    var output = ""
+    output.reserveCapacity(xml.count)
+    var searchStart = xml.startIndex
+
+    while let openRange = xml.range(of: openPrefix, range: searchStart..<xml.endIndex) {
+      let afterTagName = openRange.upperBound
+      if afterTagName < xml.endIndex && !isTagNameBoundary(xml[afterTagName]) {
+        output.append(contentsOf: xml[searchStart..<afterTagName])
+        searchStart = afterTagName
+        continue
+      }
+      guard let tagEndIdx = findTagClosingBracket(in: xml, from: afterTagName) else { break }
+      let afterTagEnd = xml.index(after: tagEndIdx)
+      output.append(contentsOf: xml[searchStart..<openRange.lowerBound])
+      let attrSegment = xml[afterTagName..<tagEndIdx]
+      if isSelfClosingTag(attrSegment) {
+        searchStart = afterTagEnd
+        continue
+      }
+
+      var depth = 1
+      var scanCursor = afterTagEnd
+      var matchedCloseUpper: String.Index?
+
+      while depth > 0 && scanCursor < xml.endIndex {
+        guard let nextClose = xml.range(of: closeTag, range: scanCursor..<xml.endIndex) else {
+          break
+        }
+        if let nextOpen = xml.range(of: openPrefix, range: scanCursor..<nextClose.lowerBound) {
+          let afterNestedName = nextOpen.upperBound
+          if afterNestedName < xml.endIndex && isTagNameBoundary(xml[afterNestedName]) {
+            guard let nestedTagEndIdx = findTagClosingBracket(in: xml, from: afterNestedName) else {
+              break
+            }
+            let nestedAttr = xml[afterNestedName..<nestedTagEndIdx]
+            if !isSelfClosingTag(nestedAttr) {
+              depth += 1
+            }
+            scanCursor = xml.index(after: nestedTagEndIdx)
+          } else {
+            scanCursor = afterNestedName
+          }
+        } else {
+          depth -= 1
+          if depth == 0 {
+            matchedCloseUpper = nextClose.upperBound
+          } else {
+            scanCursor = nextClose.upperBound
+          }
+        }
+      }
+
+      guard let closeUpper = matchedCloseUpper else {
+        searchStart = xml.endIndex
+        break
+      }
+      searchStart = closeUpper
+    }
+    if searchStart < xml.endIndex {
+      output.append(contentsOf: xml[searchStart..<xml.endIndex])
+    }
+    return output
+  }
+
+  public static func parseAttributes(from rawAttributeSegment: String) -> [String: String] {
+    var attributes: [String: String] = [:]
+    var cursor = rawAttributeSegment.startIndex
+    while cursor < rawAttributeSegment.endIndex {
+      while cursor < rawAttributeSegment.endIndex
+        && (rawAttributeSegment[cursor].isWhitespace || rawAttributeSegment[cursor] == "/")
+      {
+        cursor = rawAttributeSegment.index(after: cursor)
+      }
+      guard cursor < rawAttributeSegment.endIndex else { break }
+
+      let nameStart = cursor
+      while cursor < rawAttributeSegment.endIndex && rawAttributeSegment[cursor] != "="
+        && !rawAttributeSegment[cursor].isWhitespace
+      {
+        cursor = rawAttributeSegment.index(after: cursor)
+      }
+      let key = String(rawAttributeSegment[nameStart..<cursor]).trimmingCharacters(in: .whitespaces)
+      guard !key.isEmpty else { break }
+
+      while cursor < rawAttributeSegment.endIndex && rawAttributeSegment[cursor].isWhitespace {
+        cursor = rawAttributeSegment.index(after: cursor)
+      }
+      guard cursor < rawAttributeSegment.endIndex, rawAttributeSegment[cursor] == "=" else {
+        break
+      }
+      cursor = rawAttributeSegment.index(after: cursor)
+      while cursor < rawAttributeSegment.endIndex && rawAttributeSegment[cursor].isWhitespace {
+        cursor = rawAttributeSegment.index(after: cursor)
+      }
+      guard cursor < rawAttributeSegment.endIndex,
+        rawAttributeSegment[cursor] == "\"" || rawAttributeSegment[cursor] == "'"
+      else {
+        break
+      }
+      let quoteChar = rawAttributeSegment[cursor]
+      cursor = rawAttributeSegment.index(after: cursor)
+      let valueStart = cursor
+      while cursor < rawAttributeSegment.endIndex && rawAttributeSegment[cursor] != quoteChar {
+        cursor = rawAttributeSegment.index(after: cursor)
+      }
+      let rawValue = String(rawAttributeSegment[valueStart..<cursor])
+      attributes[key] = unescape(rawValue)
+      if cursor < rawAttributeSegment.endIndex {
+        cursor = rawAttributeSegment.index(after: cursor)
+      }
+    }
+    return attributes
+  }
+}
