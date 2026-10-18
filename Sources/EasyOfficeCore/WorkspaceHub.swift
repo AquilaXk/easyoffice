@@ -777,10 +777,45 @@ public final class WorkspaceViewModel {
             }
         }
         doc.paragraphs[pIdx].text = newText
-        if !doc.paragraphs[pIdx].inlineRuns.isEmpty {
-            var firstRun = doc.paragraphs[pIdx].inlineRuns[0]
-            firstRun.text = newText
-            doc.paragraphs[pIdx].inlineRuns = [firstRun]
+        if doc.paragraphs[pIdx].inlineRuns.count == 1 {
+            doc.paragraphs[pIdx].inlineRuns[0].text = newText
+        } else if doc.paragraphs[pIdx].inlineRuns.count > 1 {
+            var updatedRuns = doc.paragraphs[pIdx].inlineRuns
+            var remainingStart = newText.startIndex
+            var firstChangedIdx = 0
+            while firstChangedIdx < updatedRuns.count - 1 {
+                let candidate = updatedRuns[firstChangedIdx].text
+                if !candidate.isEmpty, newText[remainingStart...].hasPrefix(candidate) {
+                    remainingStart = newText.index(remainingStart, offsetBy: candidate.count)
+                    firstChangedIdx += 1
+                } else {
+                    break
+                }
+            }
+            var remainingEnd = newText.endIndex
+            var lastChangedIdx = updatedRuns.count - 1
+            while lastChangedIdx > firstChangedIdx {
+                let candidate = updatedRuns[lastChangedIdx].text
+                let remainingCount = newText.distance(from: remainingStart, to: remainingEnd)
+                if !candidate.isEmpty, remainingCount >= candidate.count, newText[remainingStart..<remainingEnd].hasSuffix(candidate) {
+                    remainingEnd = newText.index(remainingEnd, offsetBy: -candidate.count)
+                    lastChangedIdx -= 1
+                } else {
+                    break
+                }
+            }
+            updatedRuns[firstChangedIdx].text = String(newText[remainingStart..<remainingEnd])
+            if firstChangedIdx < lastChangedIdx {
+                for clearIdx in (firstChangedIdx + 1)...lastChangedIdx {
+                    updatedRuns[clearIdx].text = ""
+                }
+                updatedRuns.removeAll(where: { $0.text.isEmpty })
+            }
+            if updatedRuns.isEmpty, var fallback = doc.paragraphs[pIdx].inlineRuns.first {
+                fallback.text = newText
+                updatedRuns = [fallback]
+            }
+            doc.paragraphs[pIdx].inlineRuns = updatedRuns
         }
         openTabs[idx].payload = .document(doc)
         openTabs[idx].isModified = true
@@ -918,10 +953,14 @@ public final class WorkspaceViewModel {
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
         guard deck.slides.indices.contains(targetSlideIdx),
               let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        let existing = deck.slides[targetSlideIdx].elements[eIdx]
+        let nextTitle = title ?? existing.title
+        let nextBody = bodyText ?? existing.bodyText
+        guard existing.title != nextTitle || existing.bodyText != nextBody else { return }
         let targetKey = "slide-elem-\(activeTabID.uuidString)-\(elementID.uuidString)"
         recordUndoSnapshot(for: activeTabID, coalescingTargetKey: targetKey)
-        if let title { deck.slides[targetSlideIdx].elements[eIdx].title = title }
-        if let bodyText { deck.slides[targetSlideIdx].elements[eIdx].bodyText = bodyText }
+        deck.slides[targetSlideIdx].elements[eIdx].title = nextTitle
+        deck.slides[targetSlideIdx].elements[eIdx].bodyText = nextBody
         openTabs[idx].payload = .slide(deck)
         openTabs[idx].isModified = true
     }
@@ -944,7 +983,8 @@ public final class WorkspaceViewModel {
               case var .slide(deck) = openTabs[idx].payload else { return }
         let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
         guard deck.slides.indices.contains(targetSlideIdx),
-              deck.slides[targetSlideIdx].bulletPoints.indices.contains(bulletIndex) else { return }
+              deck.slides[targetSlideIdx].bulletPoints.indices.contains(bulletIndex),
+              deck.slides[targetSlideIdx].bulletPoints[bulletIndex] != newText else { return }
         let targetKey = "slide-bullet-\(activeTabID.uuidString)-\(targetSlideIdx)-\(bulletIndex)"
         recordUndoSnapshot(for: activeTabID, coalescingTargetKey: targetKey)
         deck.slides[targetSlideIdx].bulletPoints[bulletIndex] = newText
@@ -1077,6 +1117,12 @@ public final class WorkspaceViewModel {
 
         case var .pdf(pdfDoc):
             let beforePDF = pdfDoc
+            for pIdx in pdfDoc.pages.indices {
+                replaceOccurrences(in: &pdfDoc.pages[pIdx].extractedText)
+            }
+            for oIdx in pdfDoc.outline.indices {
+                replaceOccurrences(in: &pdfDoc.outline[oIdx].title)
+            }
             for aIdx in pdfDoc.annotations.indices {
                 replaceOccurrences(in: &pdfDoc.annotations[aIdx].content)
             }

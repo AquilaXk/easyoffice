@@ -842,16 +842,19 @@ final class SmartProductivityToolsTests: XCTestCase {
         XCTAssertFalse(rawPDF.contains("54 594 390 16 re f"))
         XCTAssertFalse(rawPDF.contains("54 564 460 16 re f"))
 
-        // Must contain multi-line visible text operators at y = 668 - (lineIdx * 24)
-        let expectedLine0Hex = "544543482D535045432D32303236" // "TECH-SPEC-2026"
-        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 10 Tf 54 668 Td <\(expectedLine0Hex)> Tj ET"))
-        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 10 Tf 54 644 Td <"))
-        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 10 Tf 54 620 Td <"))
+        // Must register ISO 32000-1 Korean CIDFont (/F2 /UniKS-UTF16-H) and render UTF-16BE (<FEFF...>) lines
+        XCTAssertTrue(rawPDF.contains("/F2 << /Type /Font /Subtype /Type0 /BaseFont /AppleSDGothicNeo-Regular /Encoding /UniKS-UTF16-H"))
+        let expectedLine0UTF16BE = "FEFF0054004500430048002D0053005000450043002D0032003000320036" // "TECH-SPEC-2026"
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F2 10 Tf 54 668 Td <\(expectedLine0UTF16BE)> Tj ET"))
+        // Verify genuine Hangul UTF-16BE code units ("제1장 아키텍처 개요": C81C 0031 C7A5 0020 C544 D0A4 D14D CC98 0020 AC1C C694)
+        XCTAssertTrue(rawPDF.contains("C81C0031C7A50020C544D0A4D14DCC980020AC1CC694"))
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F2 10 Tf 54 644 Td <FEFF"))
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F2 10 Tf 54 620 Td <FEFF"))
 
-        // Visible annotation callout boxes and text must be rendered in the page stream
-        let expectedHighlightPrefixHex = "5B484947484C494748545D2051413A2031" // "[HIGHLIGHT] QA: 1"
-        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 9 Tf 62 183 Td <\(expectedHighlightPrefixHex)"))
-        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F1 9 Tf 62 151 Td <5B5349474E41545552455D")) // "[SIGNATURE]"
+        // Visible annotation callout boxes and UTF-16BE text must be rendered in the page stream
+        let expectedHighlightPrefixUTF16BE = "FEFF005B0048004900470048004C0049004700480054005D002000510041003A00200031" // "[HIGHLIGHT] QA: 1"
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F2 9 Tf 62 183 Td <\(expectedHighlightPrefixUTF16BE)"))
+        XCTAssertTrue(rawPDF.contains("BT 0 Tr /F2 9 Tf 62 151 Td <FEFF005B005300490047004E00410054005500520045005D")) // "[SIGNATURE]"
 
         // Native PDFKit verification & visual page distinctiveness
         let nativeDoc = try XCTUnwrap(PDFKit.PDFDocument(data: encoded))

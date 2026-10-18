@@ -624,15 +624,68 @@ final class WorkspaceUIParityTests: XCTestCase {
             XCTAssertTrue(updatedDeck.slides[0].subtitle.contains("통합스튜디오"))
         }
 
-        // PDF Find & Replace
+        // PDF Find & Replace (annotations + page extractedText + outline)
         let frPDFTab = try XCTUnwrap(frVM.openTabs.first(where: { $0.moduleKind == .pdf }))
         frVM.activeTabID = frPDFTab.id
         frVM.findQueryText = "시그니처"
         frVM.replaceQueryText = "헤더바이트"
         let pdfReplaced = frVM.performFindAndReplace()
-        XCTAssertGreaterThan(pdfReplaced, 0)
+        XCTAssertGreaterThan(pdfReplaced, 1)
         if case let .pdf(updatedPDF) = frVM.activeTab?.payload {
             XCTAssertTrue(updatedPDF.annotations.contains(where: { $0.content.contains("헤더바이트") }))
+            XCTAssertTrue(updatedPDF.pages[0].extractedText.contains("헤더바이트"))
+        }
+
+        // Multi-run preservation across inline paragraph edit (F3)
+        frVM.activeTabID = frDocTab.id
+        if case let .document(initialDoc) = frVM.activeTab?.payload {
+            let pID = initialDoc.paragraphs[0].id
+            frVM.selectedParagraphID = pID
+            frVM.applyInlineRunFormattingToActiveParagraph(isBold: true, foregroundHex: "#5C6BC0")
+        }
+        if case let .document(styledDoc) = frVM.activeTab?.payload {
+            let p = styledDoc.paragraphs[0]
+            XCTAssertGreaterThanOrEqual(p.inlineRuns.count, 2)
+            frVM.updateParagraphText(paragraphID: p.id, newText: p.text + " (개정판)")
+        }
+        if case let .document(editedDoc) = frVM.activeTab?.payload {
+            let p = editedDoc.paragraphs[0]
+            XCTAssertEqual(p.inlineRuns.count, 2)
+            XCTAssertEqual(p.inlineRuns.map(\.text).joined(), p.text)
+            XCTAssertEqual(p.inlineRuns[0].foregroundHex, "#5C6BC0")
+            XCTAssertTrue(p.inlineRuns[1].text.hasSuffix("(개정판)"))
+        }
+
+        // Dynamic multi-row sorting across A2:B6 while preserving formula summary row B7 (F2)
+        var multiRowSheet = WorksheetModel(name: "동적정렬검증")
+        try multiRowSheet.setCell("A1", rawValue: "부서")
+        try multiRowSheet.setCell("B1", rawValue: "예산")
+        try multiRowSheet.setCell("A2", rawValue: "알파")
+        try multiRowSheet.setCell("B2", rawValue: "500")
+        try multiRowSheet.setCell("A3", rawValue: "베타")
+        try multiRowSheet.setCell("B3", rawValue: "100")
+        try multiRowSheet.setCell("A4", rawValue: "감마")
+        try multiRowSheet.setCell("B4", rawValue: "400")
+        try multiRowSheet.setCell("A5", rawValue: "델타")
+        try multiRowSheet.setCell("B5", rawValue: "200")
+        try multiRowSheet.setCell("A6", rawValue: "엡실론")
+        try multiRowSheet.setCell("B6", rawValue: "300")
+        try multiRowSheet.setCell("A7", rawValue: "합계")
+        try multiRowSheet.setCell("B7", rawValue: "=SUM(B2:B6)")
+        if let sheetIdx = frVM.openTabs.firstIndex(where: { $0.id == frSheetTab.id }) {
+            frVM.openTabs[sheetIdx].payload = .sheet(multiRowSheet)
+            frVM.activeTabID = frSheetTab.id
+            frVM.selectedSheetCell = "B2"
+            frVM.sheetSortAscending = false // next toggle -> true (ascending)
+            frVM.executeRibbonCommand("sheet-data-sort")
+            if case let .sheet(sortedSheet) = frVM.openTabs[sheetIdx].payload {
+                XCTAssertEqual(sortedSheet.rawValue(at: "B2"), "100")
+                XCTAssertEqual(sortedSheet.rawValue(at: "A2"), "베타")
+                XCTAssertEqual(sortedSheet.rawValue(at: "B6"), "500")
+                XCTAssertEqual(sortedSheet.rawValue(at: "A6"), "알파")
+                XCTAssertEqual(sortedSheet.rawValue(at: "B7"), "=SUM(B2:B6)")
+                XCTAssertEqual(try sortedSheet.evaluate(at: "B7"), .number(1500))
+            }
         }
     }
 }

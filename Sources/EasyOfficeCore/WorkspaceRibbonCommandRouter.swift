@@ -758,24 +758,108 @@ extension WorkspaceViewModel {
                 try? sheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
             case .sort:
                 sheetSortAscending.toggle()
-                if let range = try? CellRange(notation: "A2:C3"),
-                   !sheet.rawValue(at: "B2").isEmpty,
-                   !sheet.rawValue(at: "B3").isEmpty {
-                    let sorted = sheet.sortedRows(in: range, byColumnOffset: 1, ascending: sheetSortAscending)
-                    for (rOffset, rowVals) in sorted.enumerated() {
-                        let targetRow = 2 + rOffset
-                        if rowVals.indices.contains(0) { try? sheet.setCell("A\(targetRow)", rawValue: rowVals[0].description) }
-                        if rowVals.indices.contains(1) { try? sheet.setCell("B\(targetRow)", rawValue: rowVals[1].description) }
-                        if rowVals.indices.contains(2) { try? sheet.setCell("C\(targetRow)", rawValue: rowVals[2].description) }
+                let bounds = sheet.detectedDataRange()
+                let cols = Array(bounds.start.column...bounds.end.column)
+                let primaryMetricCol = min(bounds.end.column, bounds.start.column + 1)
+                let dataCandidateRows = (bounds.start.row...bounds.end.row).filter { r in
+                    let labelRaw = (sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: bounds.start.column)] ?? "")
+                        .trimmingCharacters(in: .whitespaces)
+                    if labelRaw == "합계" || labelRaw == "총계" || labelRaw.uppercased() == "TOTAL" {
+                        return false
                     }
+                    let metricRaw = (sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: primaryMetricCol)] ?? "")
+                        .trimmingCharacters(in: .whitespaces)
+                        .uppercased()
+                    if metricRaw.hasPrefix("=SUM(") || metricRaw.hasPrefix("=AVERAGE(") {
+                        return false
+                    }
+                    return true
+                }
+                let sortableRows: [Int]
+                if dataCandidateRows.count > 1 {
+                    let firstRow = dataCandidateRows[0]
+                    let firstRowHasNumeric = cols.contains(where: { c in
+                        guard let raw = sheet.cellsByCoordinate[PackedCellCoordinate(row: firstRow, column: c)] else { return false }
+                        return Double(raw.trimmingCharacters(in: .whitespaces)) != nil
+                    })
+                    let laterRowHasNumeric = dataCandidateRows.dropFirst().contains(where: { r in
+                        cols.contains(where: { c in
+                            guard let raw = sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: c)] else { return false }
+                            return Double(raw.trimmingCharacters(in: .whitespaces)) != nil
+                        })
+                    })
+                    sortableRows = (!firstRowHasNumeric && laterRowHasNumeric)
+                        ? Array(dataCandidateRows.dropFirst())
+                        : dataCandidateRows
                 } else {
-                    let range = sheet.detectedNumericRange()
-                    let sorted = sheet.sortedRows(in: range, byColumnOffset: 0, ascending: sheetSortAscending)
-                    for (rOffset, rowVals) in sorted.enumerated() {
-                        let targetRowIndex = range.start.row + rOffset
-                        for (cOffset, val) in rowVals.enumerated() {
-                            let coord = PackedCellCoordinate(row: targetRowIndex, column: range.start.column + cOffset)
-                            try? sheet.setCell(CellAddress(packed: coord).a1Notation, rawValue: val.description)
+                    sortableRows = dataCandidateRows
+                }
+                if sortableRows.count >= 2 {
+                    let keyCol: Int = {
+                        if let selAddr = try? CellAddress(a1Notation: selectedSheetCell),
+                           cols.contains(selAddr.column),
+                           sortableRows.contains(where: {
+                               guard let raw = sheet.cellsByCoordinate[PackedCellCoordinate(row: $0, column: selAddr.column)] else { return false }
+                               return !raw.trimmingCharacters(in: .whitespaces).hasPrefix("=")
+                           }) {
+                            return selAddr.column
+                        }
+                        return cols.first(where: { c in
+                            sortableRows.contains(where: { r in
+                                guard let raw = sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: c)] else { return false }
+                                return Double(raw.trimmingCharacters(in: .whitespaces)) != nil
+                            })
+                        }) ?? bounds.start.column
+                    }()
+                    struct SortableRowSnapshot {
+                        let originalRow: Int
+                        let rawCells: [Int: String]
+                        let styles: [Int: CellStyle]
+                        let keyVal: EvaluatedCellValue
+                    }
+                    var snapshots: [SortableRowSnapshot] = []
+                    for r in sortableRows {
+                        var rawMap: [Int: String] = [:]
+                        var styleMap: [Int: CellStyle] = [:]
+                        for c in cols {
+                            let coord = PackedCellCoordinate(row: r, column: c)
+                            if let raw = sheet.cellsByCoordinate[coord], !raw.trimmingCharacters(in: .whitespaces).hasPrefix("=") {
+                                rawMap[c] = raw
+                            }
+                            if let st = sheet.cellStyles[coord] {
+                                styleMap[c] = st
+                            }
+                        }
+                        let keyCoord = PackedCellCoordinate(row: r, column: keyCol)
+                        let keyVal = (try? sheet.evaluate(at: keyCoord)) ?? .empty
+                        snapshots.append(SortableRowSnapshot(originalRow: r, rawCells: rawMap, styles: styleMap, keyVal: keyVal))
+                    }
+                    snapshots.sort { lhs, rhs in
+                        let cmp: Bool
+                        switch (lhs.keyVal, rhs.keyVal) {
+                        case let (.number(a), .number(b)):
+                            cmp = a < b
+                        default:
+                            cmp = lhs.keyVal.description < rhs.keyVal.description
+                        }
+                        return sheetSortAscending ? cmp : !cmp
+                    }
+                    if snapshots.map(\.originalRow) == sortableRows {
+                        sheetSortAscending.toggle()
+                        snapshots.reverse()
+                    }
+                    for (idxOffset, targetRow) in sortableRows.enumerated() {
+                        let snap = snapshots[idxOffset]
+                        for c in cols {
+                            let coord = PackedCellCoordinate(row: targetRow, column: c)
+                            if let existing = sheet.cellsByCoordinate[coord], existing.trimmingCharacters(in: .whitespaces).hasPrefix("=") {
+                                continue
+                            }
+                            let addr = CellAddress(packed: coord).a1Notation
+                            try? sheet.setCell(addr, rawValue: snap.rawCells[c] ?? "")
+                            if let st = snap.styles[c] {
+                                try? sheet.setCellStyle(st, at: addr)
+                            }
                         }
                     }
                 }
@@ -852,9 +936,8 @@ extension WorkspaceViewModel {
     }
 
     public func scrubActiveTabMetadata() {
-        guard let targetIdx = openTabs.firstIndex(where: { $0.id == activeTabID && $0.moduleKind == .document })
-                ?? openTabs.firstIndex(where: { $0.id == activeTabID && $0.moduleKind == .hwp })
-                ?? openTabs.firstIndex(where: { if case .document = $0.payload { return true } else { return false } }),
+        guard let activeTabID,
+              let targetIdx = openTabs.firstIndex(where: { $0.id == activeTabID }),
               case let .document(doc) = openTabs[targetIdx].payload else { return }
         recordUndoSnapshot(for: openTabs[targetIdx].id)
         let (scrubbed, removedCount) = DocumentSecurityAuditor.scrubMetadata(from: doc)

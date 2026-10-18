@@ -76,10 +76,10 @@ struct EasyOfficeApplication: App {
                 }
             }
             CommandMenu("워크스페이스 보기") {
-                Button("홈 허브로 이동") {
+                Button("홈 허브로 이동 (⇧⌘H)") {
                     viewModel.isShowingHomeHub = true
                 }
-                .keyboardShortcut("0", modifiers: [.command])
+                .keyboardShortcut("h", modifiers: [.command, .shift])
 
                 Button("컨텍스트 리본 접기/펼치기") {
                     viewModel.isRibbonCollapsed.toggle()
