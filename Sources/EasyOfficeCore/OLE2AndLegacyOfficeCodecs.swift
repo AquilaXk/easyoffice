@@ -876,6 +876,7 @@ public enum LegacyOLE2OfficeCodec {
 
         var worksheet = WorksheetModel(name: name)
         var sstStrings: [String] = []
+        var currentSubstreamType: UInt16 = 0x0010
         var offset = 0
 
         while offset <= workbook.count - 4 {
@@ -888,6 +889,11 @@ public enum LegacyOLE2OfficeCodec {
             }
 
             switch opcode {
+            case biff8OpcodeBOF:
+                if length >= 4 {
+                    currentSubstreamType = try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2)
+                }
+
             case biff8OpcodeFilePass:
                 throw EasyOfficeError.encryptedDocumentUnsupported(format: .xls)
 
@@ -937,7 +943,8 @@ public enum LegacyOLE2OfficeCodec {
                     } else {
                         guard sCursor + charCount <= payloadEnd else { break }
                         let slice = workbook[(workbook.startIndex + sCursor)..<(workbook.startIndex + sCursor + charCount)]
-                        decoded = String(decoding: slice, as: UTF8.self)
+                        let latin1Units = slice.map { UInt16($0) }
+                        decoded = String(decoding: latin1Units, as: UTF16.self)
                         sCursor += charCount
                     }
                     sstStrings.append(decoded)
@@ -1013,7 +1020,9 @@ public enum LegacyOLE2OfficeCodec {
                 try worksheet.setCell(row: row, column: col, rawValue: str)
 
             case biff8OpcodeEOF:
-                return worksheet
+                if currentSubstreamType == 0x0010 || payloadEnd > workbook.count - 4 {
+                    return worksheet
+                }
 
             default:
                 break

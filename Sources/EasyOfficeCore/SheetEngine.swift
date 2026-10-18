@@ -361,7 +361,9 @@ public enum CellNumberFormat: String, Sendable, Codable, Equatable, CaseIterable
         case .scientific:
             return String(format: "%.2E", num)
         case .dateISO:
-            let intVal = Int(num.rounded())
+            guard let intVal = WorksheetModel.safeInt(num.rounded()) else {
+                return value.description
+            }
             if intVal >= 19000101 && intVal <= 29991231 {
                 let y = intVal / 10000
                 let m = (intVal % 10000) / 100
@@ -381,17 +383,19 @@ public enum CellNumberFormat: String, Sendable, Codable, Equatable, CaseIterable
         let isNegative = value < 0
         let absVal = abs(value)
         let rawFormatted = String(format: "%.\(max(0, fractionDigits))f", absVal)
-        let parts = rawFormatted.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
-        let intDigits = Array(parts.first ?? "0")
-        var grouped: [Character] = []
-        grouped.reserveCapacity(intDigits.count + intDigits.count / 3)
-        for (idx, ch) in intDigits.enumerated() {
-            if idx > 0 && (intDigits.count - idx) % 3 == 0 {
-                grouped.append(",")
+        let parts = rawFormatted.split(separator: ".", omittingEmptySubsequences: false)
+        let intSub = parts.first ?? "0"
+        let utf8Digits = intSub.utf8
+        let digitCount = utf8Digits.count
+        var groupedBytes: [UInt8] = []
+        groupedBytes.reserveCapacity(digitCount + digitCount / 3)
+        for (idx, byte) in utf8Digits.enumerated() {
+            if idx > 0 && (digitCount - idx) % 3 == 0 {
+                groupedBytes.append(0x2C) // ','
             }
-            grouped.append(ch)
+            groupedBytes.append(byte)
         }
-        let groupedInt = String(grouped)
+        let groupedInt = String(decoding: groupedBytes, as: UTF8.self)
         let signPrefix = (isNegative && groupedInt != "0") ? "-" : ""
         if fractionDigits > 0, parts.count > 1 {
             return "\(signPrefix)\(groupedInt).\(parts[1])"

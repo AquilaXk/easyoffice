@@ -560,27 +560,41 @@ internal enum XMLDocumentModelMapper {
             expr = "=" + expr
         }
         // Normalize OpenFormula bracketed cell references such as [.B1:.C1] -> B1:C1 and [.A1] -> A1
+        // while preserving string literals ("...") and converting unquoted ';' separators to ','.
         var normalized = ""
         normalized.reserveCapacity(expr.count)
+        var inQuotes = false
         var idx = expr.startIndex
         while idx < expr.endIndex {
             let ch = expr[idx]
-            if ch == "[" {
-                let nextIdx = expr.index(after: idx)
-                if nextIdx < expr.endIndex, expr[nextIdx] == "." {
-                    idx = expr.index(after: nextIdx)
-                    continue
-                }
-            } else if ch == ":" {
-                let nextIdx = expr.index(after: idx)
-                if nextIdx < expr.endIndex, expr[nextIdx] == "." {
-                    normalized.append(":")
-                    idx = expr.index(after: nextIdx)
-                    continue
-                }
-            } else if ch == "]" {
+            if ch == "\"" {
+                inQuotes.toggle()
+                normalized.append(ch)
                 idx = expr.index(after: idx)
                 continue
+            }
+            if !inQuotes {
+                if ch == "[" {
+                    let nextIdx = expr.index(after: idx)
+                    if nextIdx < expr.endIndex, expr[nextIdx] == "." {
+                        idx = expr.index(after: nextIdx)
+                        continue
+                    }
+                } else if ch == ":" {
+                    let nextIdx = expr.index(after: idx)
+                    if nextIdx < expr.endIndex, expr[nextIdx] == "." {
+                        normalized.append(":")
+                        idx = expr.index(after: nextIdx)
+                        continue
+                    }
+                } else if ch == "]" {
+                    idx = expr.index(after: idx)
+                    continue
+                } else if ch == ";" {
+                    normalized.append(",")
+                    idx = expr.index(after: idx)
+                    continue
+                }
             }
             normalized.append(ch)
             idx = expr.index(after: idx)
@@ -1203,7 +1217,7 @@ public enum ODFContainerCodec {
     public static func encodeDocument(_ doc: OfficeDocumentModel) throws -> Data {
         let pElements = doc.paragraphs.map { p -> String in
             let pAttrs = XMLDocumentModelMapper.paragraphAttributes(p)
-            if p.runs.isEmpty {
+            if p.runs.isEmpty || p.runs.map(\.text).joined() != p.text {
                 return "<text:p \(pAttrs)>\(XMLSanitizer.escape(p.text))</text:p>"
             }
             let spans = p.runs.map { run in
@@ -1394,6 +1408,7 @@ public enum ODFContainerCodec {
             let rowElems = XMLSanitizer.extractElements(named: "table:table-row", in: tableElem.innerXML)
             if !rowElems.isEmpty {
                 var rowIdx = 0
+                var populatedCellCount = 0
                 for rowElem in rowElems {
                     let rowRepeat = max(1, min(1024, Int(rowElem.attributes["table:number-rows-repeated"] ?? "1") ?? 1))
                     var colIdx = 0
@@ -1416,6 +1431,19 @@ public enum ODFContainerCodec {
                         }
 
                         let parsedStyle = XMLDocumentModelMapper.parseCellStyle(from: attrs)
+                        if resolvedRaw.isEmpty && parsedStyle == nil {
+                            colIdx += colRepeat
+                            continue
+                        }
+
+                        let expansionCount = rowRepeat * colRepeat
+                        guard populatedCellCount + expansionCount <= CellRange.maxExpandedCellCount else {
+                            throw EasyOfficeError.securityViolation(
+                                detail: "ODF(.ods) 반복 셀 확장 개수가 허용 상한(\(CellRange.maxExpandedCellCount)셀)을 초과했습니다."
+                            )
+                        }
+                        populatedCellCount += expansionCount
+
                         for rOff in 0..<rowRepeat {
                             for cOff in 0..<colRepeat {
                                 let targetRow = rowIdx + rOff

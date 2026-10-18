@@ -695,6 +695,32 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(paragraph.runs[1].fontSizePt, 15.0)
         XCTAssertEqual(paragraph.runs[1].foregroundHex, "#5C6BC0")
         XCTAssertEqual(paragraph.runs[2].text, " World")
+
+        // 6. CellNumberFormat.dateISO overflow safety on huge finite Double (F3)
+        XCTAssertEqual(CellNumberFormat.dateISO.format(.number(1e20)), EvaluatedCellValue.number(1e20).description)
+        XCTAssertEqual(CellNumberFormat.dateISO.format(.number(20261018)), "2026-10-18")
+
+        // 7. ParagraphBlock.runs synchronization across findAndReplace, applyingMailMerge, and ODF encode/decode (F1)
+        var docWithRuns = OfficeDocumentModel(
+            title: "런 동기화 문서",
+            format: .odt,
+            paragraphs: [paragraph]
+        )
+        let (replacedDoc, repCount) = docWithRuns.findAndReplace(search: "Lavender", replacement: "Indigo")
+        XCTAssertEqual(repCount, 1)
+        XCTAssertEqual(replacedDoc.paragraphs[0].text, "Hello Indigo World")
+        XCTAssertEqual(replacedDoc.paragraphs[0].effectiveRuns.map(\.text).joined(), "Hello Indigo World")
+        XCTAssertEqual(replacedDoc.paragraphs[0].runs[1].text, "Indigo")
+        XCTAssertEqual(replacedDoc.paragraphs[0].runs[1].foregroundHex, "#5C6BC0")
+
+        let odtEncoded = try ODFContainerCodec.encodeDocument(replacedDoc)
+        let odtDecoded = try ODFContainerCodec.decodeDocument(from: odtEncoded)
+        XCTAssertEqual(odtDecoded.paragraphs[0].text, "Hello Indigo World")
+
+        docWithRuns.paragraphs[0].text = "직접 수정된 본문 {{부서}}"
+        let mergedDoc = docWithRuns.applyingMailMerge(record: ["부서": "보안팀"])
+        XCTAssertEqual(mergedDoc.paragraphs[0].text, "직접 수정된 본문 보안팀")
+        XCTAssertEqual(mergedDoc.paragraphs[0].effectiveRuns.map(\.text).joined(), "직접 수정된 본문 보안팀")
     }
 }
 

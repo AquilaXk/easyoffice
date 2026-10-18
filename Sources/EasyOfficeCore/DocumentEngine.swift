@@ -166,9 +166,11 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
         self.lineSpacingPercent = lineSpacingPercent
     }
 
-    /// Returns explicit inline runs when present, or a single synthesized run representing the paragraph's base style.
+    /// Returns explicit inline runs when present and synchronized with `text`, or a single synthesized run representing the paragraph's base style.
     public var effectiveRuns: [DocumentTextRun] {
-        guard runs.isEmpty else { return runs }
+        if !runs.isEmpty, runs.map(\.text).joined() == text {
+            return runs
+        }
         return [
             DocumentTextRun(
                 id: id,
@@ -718,6 +720,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         } else {
             if let idx = paragraphs.firstIndex(where: { $0.id == paragraphID }) {
                 paragraphs[idx].text = proposedText
+                paragraphs[idx].runs.removeAll()
             }
         }
     }
@@ -728,6 +731,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         let revision = revisions.remove(at: revIndex)
         if let pIndex = paragraphs.firstIndex(where: { $0.id == revision.paragraphID }) {
             paragraphs[pIndex].text = revision.proposedText
+            paragraphs[pIndex].runs.removeAll()
         } else if revision.kind == .insertion {
             paragraphs.append(ParagraphBlock(id: revision.paragraphID, text: revision.proposedText))
         }
@@ -739,6 +743,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         let revision = revisions.remove(at: revIndex)
         if let pIndex = paragraphs.firstIndex(where: { $0.id == revision.paragraphID }) {
             paragraphs[pIndex].text = revision.originalText
+            paragraphs[pIndex].runs.removeAll()
         }
     }
 
@@ -752,13 +757,15 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         let options: String.CompareOptions = caseSensitive ? [] : [.caseInsensitive]
         var totalCount = 0
 
-        func replaceAll(in text: String) -> String {
+        func replaceAll(in text: String, countReplacements: Bool = true) -> String {
             var result = ""
             var currentIndex = text.startIndex
             while let range = text.range(of: search, options: options, range: currentIndex..<text.endIndex) {
                 result += text[currentIndex..<range.lowerBound]
                 result += replacement
-                totalCount += 1
+                if countReplacements {
+                    totalCount += 1
+                }
                 currentIndex = range.upperBound
             }
             result += text[currentIndex..<text.endIndex]
@@ -768,14 +775,24 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         var copy = self
         copy.paragraphs = copy.paragraphs.map { block in
             var updated = block
-            updated.text = replaceAll(in: block.text)
+            updated.text = replaceAll(in: block.text, countReplacements: true)
+            if !updated.runs.isEmpty {
+                updated.runs = updated.runs.map { run in
+                    var r = run
+                    r.text = replaceAll(in: run.text, countReplacements: false)
+                    return r
+                }
+                if updated.runs.map(\.text).joined() != updated.text {
+                    updated.runs.removeAll()
+                }
+            }
             return updated
         }
         copy.tables = copy.tables.map { table in
             var updatedTable = table
-            updatedTable.caption = replaceAll(in: table.caption)
+            updatedTable.caption = replaceAll(in: table.caption, countReplacements: true)
             updatedTable.rows = table.rows.map { row in
-                row.map { replaceAll(in: $0) }
+                row.map { replaceAll(in: $0, countReplacements: true) }
             }
             return updatedTable
         }
@@ -800,6 +817,16 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         copy.paragraphs = copy.paragraphs.map { block in
             var updated = block
             updated.text = replacePlaceholders(in: block.text)
+            if !updated.runs.isEmpty {
+                updated.runs = updated.runs.map { run in
+                    var r = run
+                    r.text = replacePlaceholders(in: run.text)
+                    return r
+                }
+                if updated.runs.map(\.text).joined() != updated.text {
+                    updated.runs.removeAll()
+                }
+            }
             return updated
         }
         copy.tables = copy.tables.map { table in

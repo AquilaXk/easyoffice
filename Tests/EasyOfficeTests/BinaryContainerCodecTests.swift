@@ -1216,14 +1216,16 @@ final class BinaryContainerCodecTests: XCTestCase {
         let decodedExternalNotesDeck = try OOXMLContainerCodec.decodePresentation(from: externalPptxWithNotes)
         XCTAssertEqual(decodedExternalNotesDeck.slides.first?.speakerNotes, "표준 notesSlide1.xml 파트에 기록되는 발표자 노트")
 
-        // 2. BIFF8 SST (0x00FC) + LABELSST (0x00FD), RK (0x027E), and FORMULA (0x0006) decoding
+        // 2. BIFF8 Multi-Substream (Workbook Globals 0x0005 EOF -> Worksheet 0x0010 EOF) + 8-bit Latin-1 SST + RK + FORMULA
         var biffStream = Data()
-        // BOF (0x0809, len 16)
+        // Workbook Globals BOF (0x0809, len 16, version 0x0600, substream dt = 0x0005)
         BitPacking.appendUInt16LE(0x0809, to: &biffStream)
         BitPacking.appendUInt16LE(16, to: &biffStream)
-        biffStream.append(Data(repeating: 0, count: 16))
+        BitPacking.appendUInt16LE(0x0600, to: &biffStream)
+        BitPacking.appendUInt16LE(0x0005, to: &biffStream)
+        biffStream.append(Data(repeating: 0, count: 12))
 
-        // SST (0x00FC) with 2 strings: "공유문자열A" (UTF-16LE, flag 0x01) and "ASCII_B" (compressed 8-bit, flag 0x00)
+        // SST (0x00FC) with 2 strings: "공유문자열A" (UTF-16LE, flag 0x01) and "Café_©" (compressed 8-bit Latin-1, flag 0x00)
         var sstPayload = Data()
         BitPacking.appendUInt32LE(2, to: &sstPayload) // cstTotal
         BitPacking.appendUInt32LE(2, to: &sstPayload) // cstUnique
@@ -1231,14 +1233,25 @@ final class BinaryContainerCodecTests: XCTestCase {
         BitPacking.appendUInt16LE(UInt16(str0.utf16.count), to: &sstPayload)
         sstPayload.append(0x01) // UTF-16LE
         sstPayload.append(BitPacking.encodeUTF16LE(str0))
-        let str1 = "ASCII_B"
-        BitPacking.appendUInt16LE(UInt16(str1.utf8.count), to: &sstPayload)
-        sstPayload.append(0x00) // Compressed 8-bit
-        sstPayload.append(Data(str1.utf8))
+        let latin1Bytes: [UInt8] = [0x43, 0x61, 0x66, 0xE9, 0x5F, 0xA9] // "Café_©" in ISO-8859-1
+        BitPacking.appendUInt16LE(UInt16(latin1Bytes.count), to: &sstPayload)
+        sstPayload.append(0x00) // Compressed 8-bit Latin-1
+        sstPayload.append(contentsOf: latin1Bytes)
 
         BitPacking.appendUInt16LE(0x00FC, to: &biffStream)
         BitPacking.appendUInt16LE(UInt16(sstPayload.count), to: &biffStream)
         biffStream.append(sstPayload)
+
+        // Workbook Globals EOF (0x000A, len 0) — decoder must continue past this EOF to the Worksheet substream!
+        BitPacking.appendUInt16LE(0x000A, to: &biffStream)
+        BitPacking.appendUInt16LE(0, to: &biffStream)
+
+        // Worksheet Substream BOF (0x0809, len 16, version 0x0600, substream dt = 0x0010)
+        BitPacking.appendUInt16LE(0x0809, to: &biffStream)
+        BitPacking.appendUInt16LE(16, to: &biffStream)
+        BitPacking.appendUInt16LE(0x0600, to: &biffStream)
+        BitPacking.appendUInt16LE(0x0010, to: &biffStream)
+        biffStream.append(Data(repeating: 0, count: 12))
 
         // LABELSST (0x00FD, len 10) at A1 (row 0, col 0) -> sstIndex 0
         BitPacking.appendUInt16LE(0x00FD, to: &biffStream)
@@ -1280,7 +1293,7 @@ final class BinaryContainerCodecTests: XCTestCase {
         BitPacking.appendUInt16LE(0, to: &biffStream) // xf
         BitPacking.appendUInt64LE(Double(99.5).bitPattern, to: &biffStream)
 
-        // EOF (0x000A, len 0)
+        // Worksheet EOF (0x000A, len 0)
         BitPacking.appendUInt16LE(0x000A, to: &biffStream)
         BitPacking.appendUInt16LE(0, to: &biffStream)
 
@@ -1289,10 +1302,57 @@ final class BinaryContainerCodecTests: XCTestCase {
         ])
         let decodedCustomXls = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: customXlsContainer, name: "SST_RK_Test")
         XCTAssertEqual(decodedCustomXls.rawValue(at: "A1"), "공유문자열A")
-        XCTAssertEqual(decodedCustomXls.rawValue(at: "B1"), "ASCII_B")
+        XCTAssertEqual(decodedCustomXls.rawValue(at: "B1"), "Café_©")
         XCTAssertEqual(decodedCustomXls.evaluate(at: "A2"), .number(750))
         XCTAssertEqual(decodedCustomXls.evaluate(at: "B2"), .number(12.34))
         XCTAssertEqual(decodedCustomXls.evaluate(at: "C2"), .number(99.5))
+
+        // 3. OpenFormula quoted ']' & ';' normalization and ODS cumulative repeated-cell cap
+        let odsQuotedFormulaXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+          <office:body><office:spreadsheet>
+            <table:table table:name="OpenFormulaSheet">
+              <table:table-row>
+                <table:table-cell office:value-type="float" office:value="10"><text:p>10</text:p></table:table-cell>
+                <table:table-cell table:formula="of:=IF([.A1]&gt;5; &quot;[정상]&quot;; &quot;[대기]&quot;)"><text:p>[정상]</text:p></table:table-cell>
+                <table:table-cell table:number-columns-repeated="1024"/>
+              </table:table-row>
+            </table:table>
+          </office:spreadsheet></office:body>
+        </office:document-content>
+        """
+        let odsQuotedData = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "mimetype", data: Data(ODFContainerCodec.spreadsheetMimeType.utf8), compressionMethod: .store),
+            ZipContainerEntry(path: "content.xml", data: Data(odsQuotedFormulaXML.utf8), compressionMethod: .deflate)
+        ])
+        let decodedQuotedODS = try ODFContainerCodec.decodeWorksheet(from: odsQuotedData)
+        XCTAssertEqual(decodedQuotedODS.rawValue(at: "B1"), "=IF(A1>5, \"[정상]\", \"[대기]\")")
+        XCTAssertEqual(decodedQuotedODS.evaluate(at: "B1"), EvaluatedCellValue.text("[정상]"))
+
+        // Malicious .ods with 1024 x 1024 = 1,048,576 non-empty repeated cells must fail closed
+        let odsBombXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0">
+          <office:body><office:spreadsheet>
+            <table:table table:name="BombSheet">
+              <table:table-row table:number-rows-repeated="1024">
+                <table:table-cell table:number-columns-repeated="1024" office:value="1"/>
+              </table:table-row>
+            </table:table>
+          </office:spreadsheet></office:body>
+        </office:document-content>
+        """
+        let odsBombData = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "mimetype", data: Data(ODFContainerCodec.spreadsheetMimeType.utf8), compressionMethod: .store),
+            ZipContainerEntry(path: "content.xml", data: Data(odsBombXML.utf8), compressionMethod: .deflate)
+        ])
+        XCTAssertThrowsError(try ODFContainerCodec.decodeWorksheet(from: odsBombData)) { error in
+            guard case .securityViolation = error as? EasyOfficeError else {
+                XCTFail("Expected securityViolation on ODS cell expansion bomb, got \(error)")
+                return
+            }
+        }
     }
 }
 
