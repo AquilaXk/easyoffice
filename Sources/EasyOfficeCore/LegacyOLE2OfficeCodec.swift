@@ -586,6 +586,11 @@ public enum LegacyOLE2OfficeCodec {
                 BitPacking.appendUInt64LE(el.rotationDegrees.bitPattern, to: &elPayload)
                 BitPacking.appendLengthPrefixedUTF16LE(el.fillHex, to: &elPayload)
                 BitPacking.appendLengthPrefixedUTF16LE(el.strokeHex, to: &elPayload)
+                var styleMask: UInt8 = 0
+                if el.isBold { styleMask |= 0x01 }
+                if el.isItalic { styleMask |= 0x02 }
+                if el.isUnderlined { styleMask |= 0x04 }
+                elPayload.append(styleMask)
                 appendPPTAtom(verAndInstance: 0x0040, recType: pptRecordTextCharsAtom, payload: elPayload, to: &slideChildren)
             }
 
@@ -696,6 +701,15 @@ public enum LegacyOLE2OfficeCodec {
                             let rot = Double(bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor)); elCursor += 8
                             let fillHex = try BitPacking.readLengthPrefixedUTF16LE(from: pptStream, offset: &elCursor, limit: sAtomEnd)
                             let strokeHex = try BitPacking.readLengthPrefixedUTF16LE(from: pptStream, offset: &elCursor, limit: sAtomEnd)
+                            var isBold = false
+                            var isItalic = false
+                            var isUnderlined = false
+                            if elCursor < sAtomEnd {
+                                let styleMask = pptStream[pptStream.startIndex + elCursor]
+                                isBold = (styleMask & 0x01) != 0
+                                isItalic = (styleMask & 0x02) != 0
+                                isUnderlined = (styleMask & 0x04) != 0
+                            }
                             sElements.append(SlideCanvasElement(
                                 title: elTitle,
                                 bodyText: elBody,
@@ -707,7 +721,10 @@ public enum LegacyOLE2OfficeCodec {
                                 zIndex: zIdx,
                                 rotationDegrees: rot,
                                 fillHex: fillHex,
-                                strokeHex: strokeHex
+                                strokeHex: strokeHex,
+                                isBold: isBold,
+                                isItalic: isItalic,
+                                isUnderlined: isUnderlined
                             ))
                         default:
                             break

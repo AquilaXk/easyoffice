@@ -610,6 +610,29 @@ final class LegacyAndMarkupCodecTests: XCTestCase {
         XCTAssertEqual(decodedXls.additionalSheets.first?.name, "보조시트")
         XCTAssertEqual(decodedXls.additionalSheets.first?.sheetComments[PackedCellCoordinate(row: 0, column: 0)], "보조시트 메모")
         XCTAssertEqual(decodedXls.additionalSheets.first?.mergedRanges, [subRange])
+
+        // 5. PowerPoint Binary (.ppt) SlideCanvasElement text style flags (isBold, isItalic, isUnderlined) round-trip
+        let styledElement = SlideCanvasElement(
+            title: "강조 도형",
+            bodyText: "서식 유지 확인",
+            x: 120,
+            y: 160,
+            width: 320,
+            height: 140,
+            kind: .roundedRectangleShape,
+            isBold: true,
+            isItalic: true,
+            isUnderlined: true
+        )
+        let deck = PresentationDeckModel(
+            title: "서식 보존 덱",
+            slides: [SlideModel(title: "1슬라이드", elements: [styledElement])]
+        )
+        let pptBytes = try LegacyOLE2OfficeCodec.encodePowerPointBinary(deck)
+        let decodedPpt = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: pptBytes)
+        XCTAssertEqual(decodedPpt.slides.first?.elements.first?.isBold, true)
+        XCTAssertEqual(decodedPpt.slides.first?.elements.first?.isItalic, true)
+        XCTAssertEqual(decodedPpt.slides.first?.elements.first?.isUnderlined, true)
     }
 
     func testXMLSanitizerNumericEntitiesAndLongUnknownEntityWindow() {

@@ -127,7 +127,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         mergedRanges: [CellRange],
         trackChangesEnabled: Bool,
         additionalSheets: [WorksheetSheetPage],
-        activeSheetIndex: Int
+        activeSheetIndex: Int,
+        precompileAllCells: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -139,8 +140,10 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         self.trackChangesEnabled = trackChangesEnabled
         self.additionalSheets = additionalSheets
         self.activeSheetIndex = activeSheetIndex
-        for (coord, val) in cellsByCoordinate where !val.isEmpty {
-            self.compiledASTs[coord] = Self.compileCellInput(val)
+        if precompileAllCells {
+            for (coord, val) in cellsByCoordinate where !val.isEmpty {
+                self.compiledASTs[coord] = Self.compileCellInput(val)
+            }
         }
     }
 
@@ -581,6 +584,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case let .literalBoolean(flag):
             return .boolean(flag)
         default:
+            let targetSheetUpper = targetPage.name.uppercased()
             var remainingSheets = additionalSheets
             remainingSheets.remove(at: pageIdx)
             remainingSheets.append(
@@ -603,7 +607,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 mergedRanges: targetPage.mergedRanges,
                 trackChangesEnabled: trackChangesEnabled,
                 additionalSheets: remainingSheets,
-                activeSheetIndex: 0
+                activeSheetIndex: 0,
+                precompileAllCells: false
             )
             var subContext = EvaluationContext(
                 visited: [packed],
@@ -612,6 +617,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 crossMemo: context.crossMemo
             )
             let evaluated = targetModel.evaluateAST(ast, context: &subContext, depth: depth + 1)
+            for (subCoord, subVal) in subContext.memo {
+                subContext.crossMemo[CrossSheetCellKey(sheetNameUpper: targetSheetUpper, coord: subCoord)] = subVal
+            }
             context.crossMemo = subContext.crossMemo
             context.crossMemo[key] = evaluated
             return evaluated
@@ -630,14 +638,25 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         if context.visited.contains(packed) {
             return .error("#REF!")
         }
+        let selfSheetUpper = name.uppercased()
         if !context.crossVisited.isEmpty,
-           context.crossVisited.contains(CrossSheetCellKey(sheetNameUpper: name.uppercased(), coord: packed)) {
+           context.crossVisited.contains(CrossSheetCellKey(sheetNameUpper: selfSheetUpper, coord: packed)) {
             return .error("#REF!")
         }
         if let memoized = context.memo[packed] {
             return memoized
         }
-        guard let ast = compiledASTs[packed] else {
+        if !context.crossMemo.isEmpty,
+           let crossCached = context.crossMemo[CrossSheetCellKey(sheetNameUpper: selfSheetUpper, coord: packed)] {
+            context.memo[packed] = crossCached
+            return crossCached
+        }
+        let ast: FormulaAST
+        if let precompiled = compiledASTs[packed] {
+            ast = precompiled
+        } else if let raw = cellsByCoordinate[packed], !raw.isEmpty {
+            ast = Self.compileCellInput(raw)
+        } else {
             return .empty
         }
 
