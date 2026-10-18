@@ -25,7 +25,7 @@
 5. [한글 문서(HWP 5.0 OLE2 / HWPX KS X 6101) 및 OOXML/ODF/PDF 통합 지원](#5-한글-문서hwp-50-ole2--hwpx-ks-x-6101-및-ooxmlodfpdf-통합-지원)
 6. [실무 기준 3계층 이슈 구조(Epic → Sub-issue → PR) 및 GitHub Release 배포 체계](#6-실무-기준-3계층-이슈-구조epic--sub-issue--pr-및-github-release-배포-체계)
 7. [비트 수준 바이너리·컨테이너 코덱(ZIP/OLE2/HWP 5.0/XML/CSV) 및 압축 폭탄·XXE·경로 순회 차단 정책](#7-비트-수준-바이너리컨테이너-코덱zipole2hwp-50xmlcsv-및-압축-폭탄xxe경로-순회-차단-정책)
-8. [64비트 비트패킹 셀 좌표 및 77종 결정론적 수식·피벗·표 계산 엔진 정책](#8-64비트-비트패킹-셀-좌표-및-77종-결정론적-수식피벗표-계산-엔진-정책)
+8. [64비트 비트패킹 셀 좌표 및 92종 결정론적 수식·피벗·표 계산 엔진 정책](#8-64비트-비트패킹-셀-좌표-및-92종-결정론적-수식피벗표-계산-엔진-정책)
 9. [양방향 포맷 일괄 변환 스튜디오, 오프라인 로컬 스마트 문서 보조 도구 및 메타데이터 비식별화 감사 정책](#9-양방향-포맷-일괄-변환-스튜디오-오프라인-로컬-스마트-문서-보조-도구-및-메타데이터-비식별화-감사-정책)
 10. [스플릿 뷰(Split-View) 멀티 탭 워크스페이스, 컨텍스트 리본 명령 카탈로그 및 WCAG AA 접근성 정책](#10-스플릿-뷰split-view-멀티-탭-워크스페이스-컨텍스트-리본-명령-카탈로그-및-wcag-aa-접근성-정책)
 11. [전 포맷 라운드트립 패리티·비트 수준 성능 벤치마크 게이트 및 v1.0.0 정식 릴리스 정책 (2026-10-17)](#11-전-포맷-라운드트립-패리티비트-수준-성능-벤치마크-게이트-및-v100-정식-릴리스-정책-2026-10-17)
@@ -33,11 +33,12 @@
 13. [ISO 32000-1 바이트 정밀 xref/PDFKit 통합, 140종 컨텍스트 리본 전수 라우팅, Undo/Redo 스택 및 네이티브 파일 I/O 정책 (2026-10-18)](#13-iso-32000-1-바이트-정밀-xrefpdfkit-통합-140종-컨텍스트-리본-전수-라우팅-undoredo-스택-및-네이티브-파일-io-정책-2026-10-18)
 14. [다중 시트 워크북, 셀 서식(CellStyle), 런/이미지 직렬화, 외부 표준 .ods/BIFF8 .xls 위치 기반 파싱 및 무할당 핫패스 정책 (2026-10-18)](#14-다중-시트-워크북-셀-서식cellstyle-런이미지-직렬화-외부-표준-odsbiff8-xls-위치-기반-파싱-및-무할당zero-arraystring-핫패스-정책-2026-10-18)
 15. [Zero-Slop 도메인 리본 라우팅, 인라인 편집 Undo Coalescing, 다중 페이지 가시 PDF 렌더링 및 인터랙티브 UI 모듈 분리 정책 (2026-10-18)](#15-zero-slop-도메인-리본-라우팅-인라인-편집-undo-coalescing-다중-페이지-가시-pdf-렌더링-및-인터랙티브-ui-모듈-분리-정책-2026-10-18)
-16. [비파괴적 리본 도메인 변이(Non-Destructive Ribbon Mutations), 5대 모듈 양방향 우측 인스펙터, 60fps 실시간 슬라이드 드래그·1Hz 발표자 타이머 및 전 모듈 < 1,000 LOC 분할 정책 (2026-10-18)](#16-비파괴적-리본-도메인-변이non-destructive-ribbon-mutations-5대-모듈-양방향-우측-인스펙터-60fps-실시간-슬라이드-드래그1hz-발표자-타이머-및-전-모듈--1000-loc-분할-정책-2026-10-18)
+16. [비파괴적 리본 도메인 변이(Non-Destructive Ribbon Mutations), 5대 모듈 양방향 우측 인스펙터, 60fps 실시간 슬라이드 드래그·1Hz 발표자 타이머 및 SRP 기반 도메인 모듈 분할 정책 (2026-10-18)](#16-비파괴적-리본-도메인-변이non-destructive-ribbon-mutations-5대-모듈-양방향-우측-인스펙터-60fps-실시간-슬라이드-드래그1hz-발표자-타이머-및-srp-기반-도메인-모듈-분할-정책-2026-10-18)
 17. [PD-026: AppKit NSTextView UTF-16 부분 선택 런 분할 및 DTP 2단·수식·텍스트 어울림·워터마크 조판 정책 (2026-10-18)](#17-pd-026-appkit-nstextview-utf-16-부분-선택-런-분할-및-dtp-2단수식텍스트-어울림워터마크-조판-정책-2026-10-18)
 18. [PD-027: 스프레드시트 다중 셀 범위 드래그 선택, $ 절대·상대 참조 이동 자동 채우기(Auto-Fill) 엔진 및 가변 행·열 리사이즈 정책 (2026-10-18)](#18-pd-027-스프레드시트-다중-셀-범위-드래그-선택--절대상대-참조-이동-자동-채우기auto-fill-엔진-및-가변-행열-리사이즈-정책-2026-10-18)
 19. [PD-028: 슬라이드 8방향 리사이즈 핸들, 360도 회전 각도 정규화 및 전체화면 발표 스테이지(레이저 포인터·노트 HUD) 정책 (2026-10-18)](#19-pd-028-슬라이드-8방향-리사이즈-핸들-360도-회전-각도-정규화-및-전체화면-발표-스테이지레이저-포인터노트-hud-정책-2026-10-18)
 20. [PD-029: PDF 스튜디오 ISO 32000-1 벡터 잉크 획(m / l / S) 직렬화 및 자유곡선 서명·하이라이트 오버레이 정책 (2026-10-18)](#20-pd-029-pdf-스튜디오-iso-32000-1-벡터-잉크-획m--l--s-직렬화-및-자유곡선-서명하이라이트-오버레이-정책-2026-10-18)
+21. [PD-030 ~ PD-034: 인라인 형광펜/링크·표 구조 편집·이름 정의/목표값 찾기/92종 함수·PDF 비가역 리댁션 및 1D CRC32·따옴표 인식 XML 파서 정책 (2026-10-18)](#21-pd-030--pd-034-인라인-형광펜링크표-구조-편집이름-정의목표값-찾기92종-함수pdf-비가역-리댁션-및-1d-crc32따옴표-인식-xml-파서-정책-2026-10-18)
 
 ---
 
@@ -140,18 +141,18 @@
 
 ---
 
-### 8. 64비트 비트패킹 셀 좌표 및 77종 결정론적 수식·피벗·표 계산 엔진 정책
+### 8. 64비트 비트패킹 셀 좌표 및 92종 결정론적 수식·피벗·표 계산 엔진 정책
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`)
+- **Status**: Implemented (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`)
 - **Decision**:
   1. 스프레드시트 셀 좌표는 `PackedCellCoordinate`(`UInt64`: 상위 32비트 `row`, 하위 32비트 `column`)로 비트패킹하여 문자열 해싱 없이 $O(1)$ 조회 및 행 우선(row-major) 비교를 수행하며, `CellAddress`는 ECMA-376 규격 상한(`maxZeroBasedColumn = 16,383`, `maxZeroBasedRow = 1,048,575`)과 오버플로 검사를 강제합니다.
   2. `CellRange`의 단일 수식 범위 확장은 메모리 고갈 방지를 위해 `maxExpandedCellCount = 100,000` 셀을 상한으로 제한하고 초과 시 `EasyOfficeError.invalidCellRange`를 반환합니다.
-  3. `WorksheetModel`의 77종 내장 스프레드시트 함수(수학/삼각 27종, 통계 7종, 논리 10종, 찾기/참조 8종, 텍스트 16종, 재무 4종, 날짜/시간 5종) 및 피벗 테이블 집계 엔진(`PivotTableEngine`)은 `PackedCellCoordinate` 방문 집합(`visited: Set<PackedCellCoordinate>`)으로 순환 참조 및 재귀 깊이 상한(`maxRecursionDepth = 64`) 초과 감지 시 즉시 `#REF!`를 반환하며, 문서/HWP 인라인 표 계산식(`DocumentTableBlock.evaluateTableFormula`)은 방향성(`ABOVE`/`LEFT`) 수치 리터럴만 비재귀적으로 집계하여 `Double?`을 반환합니다.
+  3. `WorksheetModel`의 92종 내장 스프레드시트 함수(`SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`, `IFNA`, `TEXTJOIN`, `SEARCH`, `REPLACE`, `ISBLANK`, `ISERROR`, `ISNUMBER`, `ISTEXT`, `ROWS`, `COLUMNS` 포함) 및 피벗 테이블 집계 엔진(`PivotTableEngine`)은 `PackedCellCoordinate` 방문 집합(`visited: Set<PackedCellCoordinate>`)으로 순환 참조 및 재귀 깊이 상한 초과 감지 시 즉시 `#REF!`를 반환하며, 문서/HWP 인라인 표 계산식(`DocumentTableBlock.evaluateTableFormula`)은 방향성(`ABOVE`/`LEFT`) 수치 리터럴만 비재귀적으로 집계하여 `Double?`을 반환합니다.
 - **Why**: 대용량 시트 및 HWP/문서 표 계산 시 문자열 키 할당 오버헤드와 악의적인 전체 시트 범위(`A1:XFD1048576`) 확장에 따른 메모리 폭증을 원천 차단하기 위함입니다.
 - **Trade-offs**: 단일 수식에서 10만 셀을 초과하는 범위 참조는 명시적으로 분할 집계하거나 피벗 엔진을 사용해야 합니다.
 - **Alternatives rejected**:
   - 문자열 키(`"A1"`)만을 사용하는 범위 정렬 및 무제한 배열 확장: 대량 셀 연산 시 힙 할당과 OOM 위험이 커 기각.
-- **Verified by**: `Tests/EasyOfficeTests/EditorEnginesParityTests.swift`
+- **Verified by**: `Tests/EasyOfficeTests/EditorEnginesParityTests.swift`, `Tests/EasyOfficeTests/EnterpriseParityAndOptimizationTests.swift`
 - **Revisit when**: 백그라운드 멀티스레드 청크 배열 수식(Dynamic Array Spill) 엔진을 확장할 때.
 
 ---
@@ -193,7 +194,7 @@
 - **Status**: Implemented (`Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`, `scripts/package-macos-release.sh`, `.github/workflows/release.yml`)
 - **Decision**:
   1. `CommercialParityBenchmarkTests`를 통해 지원 대상 **20종 문서·템플릿 포맷 전수**(`.docx`, `.doc`, `.odt`, `.rtf`, `.md`, `.txt`, `.hwp`, `.hwpx`, `.hwt`, `.hwtx`, `.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`, `.pptx`, `.ppt`, `.ppsx`, `.odp`, `.pdf`)에 대한 바이너리/컨테이너 직렬화 → `FormatDetector.verify` 매직 바이트 시그니처 검증 → 역직렬화 → 도메인 구조 복원(문단·표·셀·슬라이드·페이지·유니코드/한글 보존) 엔드투엔드 라운드트립 패리티를 상시 검증합니다.
-  2. 비트 수준 코덱(`CRC32Calculator` 256-entry 룩업 테이블, `HWP5RecordHeader` 32비트 비트패킹 + `0xFFF` 확장 헤더, `BitPacking` 리틀 엔디언 정수 및 길이 접두 UTF-16LE 인코딩, 64비트 `PackedCellCoordinate`), 77종 내장 수식 밀집 그리드 평가 및 `PivotTableEngine` 집계, `DocumentConversionOrchestrator` 배치 변환, `LocalSmartDocumentAssistant` 오프라인 문서 요약·문장 교정·LCS 비교, `DocumentSecurityAuditor` 컨테이너 보안 감사·메타데이터 비식별화가 모두 서브초(sub-second) 예산 내에 결정론적으로 완료됨을 검증 게이트로 강제합니다.
+  2. 비트 수준 코덱(`CRC32Calculator` 1차원 2,048-entry `flatSlicingTable`, `HWP5RecordHeader` 32비트 비트패킹 + `0xFFF` 확장 헤더, `BitPacking` 리틀 엔디언 정수 및 길이 접두 UTF-16LE 인코딩, 64비트 `PackedCellCoordinate`), 92종 내장 수식 밀집 그리드 평가 및 `PivotTableEngine` 집계, `DocumentConversionOrchestrator` 배치 변환, `LocalSmartDocumentAssistant` 오프라인 문서 요약·문장 교정·LCS 비교, `DocumentSecurityAuditor` 컨테이너 보안 감사·메타데이터 비식별화가 모두 서브초(sub-second) 예산 내에 결정론적으로 완료됨을 검증 게이트로 강제합니다.
   3. `v1.0.0` 정식 릴리스는 외부 서버·클라우드 API·원격 LLM·텔레메트리 호출이 전혀 없는 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS 네이티브 아키텍처**를 보장하며, `scripts/package-macos-release.sh`를 통해 `EasyOffice.app`, `.dmg`, `.zip`, `SHA256SUMS.txt`를 결정론적으로 생성·검증합니다.
 - **Why**: 상용 올인원 오피스 수준의 20종 포맷 호환성과 비트 수준 처리 성능, 오프라인 프라이버시 무결성을 추상적 선언이 아닌 실행 가능한 자동화 테스트(`CommercialParityBenchmarkTests`)와 패키징 스크립트로 영구 고정하기 위함입니다.
 - **Trade-offs**: 모든 PR 및 릴리스 빌드마다 20종 포맷 라운드트립과 비트 수준 처리량 벤치마크 스위트가 함께 실행됩니다.
@@ -206,10 +207,10 @@
 
 ### 12. Slicing-by-8 CRC-32, 하드웨어 비정렬 워드 적재, 무할당 UTF-8 파서, 표준 컨테이너 호환성 및 AST 캐시·메모이제이션 시트 엔진 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndLegacyOfficeCodecs.swift`, `Sources/EasyOfficeCore/TabularAndMarkupCodec.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAnalyticsAndPivot.swift`)
+- **Status**: Implemented (`Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/XMLSanitizer.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift`, `Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift`, `Sources/EasyOfficeCore/TabularAndMarkupCodec.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAnalyticsAndPivot.swift`)
 - **Decision**:
   1. **비트 수준 메모리·바이트 처리량 최적화**:
-     - `BitPacking`은 바이트 단위 시프트 루프 대신 `UnsafeRawBufferPointer.loadUnaligned(fromByteOffset:as:)` 및 `storeBytes(of:toByteOffset:as:)` 단일 하드웨어 리틀 엔디언 워드 적재/저장을 사용하며, `CRC32Calculator`는 `8 × 256` 룩업 테이블 기반 **Slicing-by-8** 알고리즘으로 루프당 8바이트씩 처리합니다.
+     - `BitPacking`은 바이트 단위 시프트 루프 대신 `UnsafeRawBufferPointer.loadUnaligned(fromByteOffset:as:)` 및 `storeBytes(of:toByteOffset:as:)` 단일 하드웨어 리틀 엔디언 워드 적재/저장을 사용하며, `CRC32Calculator`는 `8 × 256` 1차원 평탄화 `flatSlicingTable` 기반 **Slicing-by-8** 알고리즘으로 루프당 8바이트씩 처리합니다.
      - `XMLSanitizer.validateSafeXML`은 전체 문자열 `.uppercased()` 복제 없이 UTF-8 바이트 버퍼에서 직접 대소문자 무시(`byte & 0xDF`) `<!DOCTYPE`/`<!ENTITY` 패턴을 스캔하며, `extractElements`/`stripElements`는 중첩 태그 깊이를 추적하고 작은따옴표(`'`)·큰따옴표(`"`) 속성을 모두 파싱합니다.
      - `CSVStateMachineCodec`은 `Array(text)`(`Character`당 16바이트 힙 할당)를 제거하고 UTF-8 바이트 버퍼(`Array(text.utf8)`)에서 직접 필드 경계를 슬라이싱하여 디코딩합니다.
   2. **외부 표준 오피스 컨테이너 양방향 호환성 및 스트림 압축**:
@@ -250,7 +251,7 @@
 
 ### 14. 다중 시트 워크북, 셀 서식(`CellStyle`), 런/이미지 직렬화, 외부 표준 `.ods`/BIFF8 `.xls` 위치 기반 파싱 및 무할당(`Zero-Array(String)`) 핫패스 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndLegacyOfficeCodecs.swift`, `Sources/EasyOfficeCore/LocalSmartAssistant.swift`)
+- **Status**: Implemented (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift`, `Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift`, `Sources/EasyOfficeCore/LocalSmartAssistant.swift`)
 - **Decision**:
   1. **다중 시트 워크북(`WorksheetSheetPage`), 일급 셀 서식(`CellStyle`) 및 단일 컨텍스트 그리드 일괄 평가(`evaluateGrid`)**:
      - `WorksheetModel`에 다중 시트 페이지 컬렉션(`additionalSheets`, `activeSheetIndex`, `addSheetPage`, `switchActiveSheet`), 좌표별 셀 서식(`cellStyles: [PackedCellCoordinate: CellStyle]`, `CellNumberFormat`, `CellHorizontalAlignment`), `pageSetup: WorksheetPageSetup`, `sheetComments: [PackedCellCoordinate: String]`, `trackChangesEnabled: Bool`을 도입하여 임의 셀(`E1~F6`) 오염 없이 도메인 상태를 정식 보존합니다.
@@ -259,7 +260,7 @@
      - `ParagraphBlock.applyRunFormatting`으로 선택 영역 부분 런 서식을 분할·적용하고, `.docx`(`<w:r>`, `word/media/`), `.odt`(`<text:span>`, `Pictures/`), `.hwpx`(`<hp:run>`, `BinData/`)에 런과 이미지를 양방향 직렬화합니다.
      - `ODFContainerCodec.decodeWorksheet`는 비표준 `address`/`raw` 속성이 없는 외부 표준 `.ods` 파일에 대해 `<table:table-row>` 및 `<table:table-cell>` 행·열 위치(`table:number-rows-repeated`/`table:number-columns-repeated` 최대 1,024 클램프, `table:formula="of:=..."` 정규화)로 모든 셀을 복원하며, `LegacyOLE2OfficeCodec.decodeBIFF8Worksheet`는 `SST`(`0x00FC`)+`LABELSST`(`0x00FD`), `RK`(`0x027E`), `FORMULA`(`0x0006`) 레코드를 디코딩합니다.
   3. **`Array(String)` (`[Character]`) 힙 할당 제거 및 코어 파일 모듈 분리**:
-     - `SheetEngine.swift`에서 77개 내장 함수를 `SheetBuiltInFunctions.swift`로, `SmartProductivityTools.swift`에서 `LocalSmartDocumentAssistant`를 `LocalSmartAssistant.swift`로 분리하고, `FormulaASTCompiler`, `MID`, `XMLSanitizer.isSelfClosingTag`, `CommonMarkCodec.parsePipeRow`, `splitLongSentenceAtWordBoundary`의 `Array(String)` 할당을 UTF-8 바이트 및 `String.Index` 슬라이싱으로 대체했습니다.
+     - `SheetEngine.swift`에서 내장 함수를 `SheetBuiltInFunctions.swift` 및 `SheetLookupTextAndFinancialFunctions.swift`로, `SmartProductivityTools.swift`에서 `LocalSmartDocumentAssistant`를 `LocalSmartAssistant.swift`로 분리하고, `FormulaASTCompiler`, `MID`, `XMLSanitizer.isSelfClosingTag`, `CommonMarkCodec.parsePipeRow`, `splitLongSentenceAtWordBoundary`의 `Array(String)` 할당을 UTF-8 바이트 및 `String.Index` 슬라이싱으로 대체했습니다.
 - **Why**: 외부 표준 `.ods`/`.xls`/`.xlsx`/`.pptx` 문서와의 실질적인 호환성을 보장하고, 수식 컴파일 및 마크다운/문장 분석 핫패스에서 발생하던 16바이트 `Character` 배열 할당을 제거하기 위함입니다.
 - **Trade-offs**: 다중 시트 전환 시 활성 시트 슬롯과 `additionalSheets` 배열 간 스왑이 수행되나, 값 타입 `Dictionary` 포인터 이동만 발생하므로 $O(1)$에 동작합니다.
 - **Alternatives rejected**:
@@ -293,7 +294,7 @@
 
 ---
 
-### 16. 비파괴적 리본 도메인 변이(Non-Destructive Ribbon Mutations), 5대 모듈 양방향 우측 인스펙터, 60fps 실시간 슬라이드 드래그·1Hz 발표자 타이머 및 전 모듈 `< 1,000 LOC` 분할 정책 (2026-10-18)
+### 16. 비파괴적 리본 도메인 변이(Non-Destructive Ribbon Mutations), 5대 모듈 양방향 우측 인스펙터, 60fps 실시간 슬라이드 드래그·1Hz 발표자 타이머 및 SRP 기반 도메인 모듈 분할 정책 (2026-10-18)
 
 - **Status**: Implemented (`Sources/EasyOfficeCore/WorkspaceCatalogAndModels.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`)
 - **Decision**:
@@ -309,12 +310,13 @@
      - `applyInlineRunFormattingToActiveParagraph`는 `inlineRunTargetPhrase` 부분 문자열 범위를 계산하여 `[앞 구간, 강조 구절, 뒤 구간]` 다중 `DocumentTextRun`으로 정밀 분할하며, `insertSampleImageAttachment`는 `NSBitmapImageRep`로 실제 `160×48` 라벤더 배너 PNG를 생성하고 `DocumentEditorDetailPaneView`에서 `NSImage(data:)` 비트맵으로 렌더링합니다(`presentOpenImagePanel` 디스크 이미지 불러오기 포함).
      - `SheetEditorDetailPaneView`는 기존의 `24행 × 12열` 하드 캡을 제거하여 임의 좌표 셀을 모두 표시하고, `isHeaderRowFrozen` 활성 시 1행을 수직 스크롤 영역 상단에 고정합니다.
      - `SlideEditorDetailPaneView`는 `@GestureState`로 드래그 중인 개체의 실시간 위치 및 스냅 가이드를 60fps로 반영하고, 발표자 모니터 활성 시 `Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()`로 `tickPresenterTimer(seconds: 1)`를 구동합니다(`advancePresenterSlide()`의 인위적 `+15초` 점프 제거).
-  4. **전 파일 `< 1,000 LOC` 모듈화 분할 및 핫패스 최적화**:
-     - `WorkspaceHub.swift`를 `WorkspaceCatalogAndModels.swift` + `WorkspaceHub.swift` + `WorkspaceRibbonCommandRouter.swift`로, `WorkspaceViews.swift`에서 `RightContextInspectorView.swift`를 분리하여 모든 소스 파일을 1,000줄 미만으로 유지하고, `OpenTabPayload.searchableCorpus()`가 `sheet.rawCells` 전체 사전을 재할당하지 않고 `cellsByCoordinate`와 `additionalSheets`를 직접 순회하도록 최적화했습니다.
-- **Why**: 리본 명령 실행 시 문서 꼬리말·발표자 노트·셀 코멘트가 오염되거나 삭제되는 결함을 근절하고, 우측 인스펙터와 에디터 캔버스의 실시간 조작성을 데스크톱 네이티브 수준으로 끌어올리기 위함입니다.
+  4. **단일 책임 원칙(SRP) 기반 도메인 모듈 분할 및 전수 `xcrun swift-format` 적용 (인위적 줄 수 상한 및 세미콜론 압축 금지)**:
+     - 인위적인 파일 줄 수 제한(`< 1,000 LOC`)으로 인해 한 줄에 세미콜론(`;`)으로 다중 구문을 압축하는 안티패턴을 전면 금지하고, 도메인 책임 단위로 파일을 분리(`XMLSanitizer.swift`, `DocumentSubmodelsAndNotes.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `WorkspaceCatalogAndModels.swift`, `RightContextInspectorView.swift`)한 뒤 `xcrun swift-format format --in-place`로 가독성을 보장합니다.
+- **Why**: 리본 명령 실행 시 문서 꼬리말·발표자 노트·셀 코멘트가 오염되거나 삭제되는 결함을 근절하고, 우측 인스펙터와 에디터 캔버스의 실시간 조작성 및 코드 가독성을 데스크톱 네이티브 수준으로 끌어올리기 위함입니다.
 - **Trade-offs**: 피벗 요약 실행 시 워크북에 `"피벗 요약"` 시트 탭이 추가되나, 원본 시트의 셀이나 코멘트를 훼손하지 않고 구조화된 표로 집계 결과를 보존합니다.
 - **Alternatives rejected**:
   - 리본 명령 실행 여부를 증명하기 위해 `footerText`나 `speakerNotes`에 임의 텍스트를 덧붙이는 방식: 사용자의 실제 문서 바닥글과 발표자 노트를 훼손하므로 기각.
+  - 인위적인 줄 수 상한을 맞추기 위해 세미콜론(`;`)으로 여러 구문을 한 줄에 나열하는 방식: 클린 코드와 가독성을 훼손하므로 기각.
 - **Verified by**: `Tests/EasyOfficeTests/WorkspaceUIParityTests.swift` (`testThirdAuditZeroSlopInspectorLiveCanvasAndNonDestructiveCommands`)
 - **Revisit when**: 다중 셀 드래그 마키(Marquee) 선택 오버레이를 시트 캔버스에 추가할 때.
 
@@ -381,5 +383,30 @@
   - 자유곡선 서명을 래스터 이미지(PNG)로 구워 넣는 방식: 확대 시 픽셀 깨짐이 발생하고 파일 용량이 불필요하게 증가하므로 ISO 32000-1 벡터 경로 연산자(`m`/`l`/`S`) 방식을 채택.
 - **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testPDFInkStrokesHighlightAndBinaryRoundTrip`)
 - **Revisit when**: 필압(pressure) 기반 가변 선 굵기 베지어 곡선(`c` 연산자) 스무딩을 추가할 때.
+
+---
+
+### 21. PD-030 ~ PD-034: 인라인 형광펜/링크·표 구조 편집·이름 정의/목표값 찾기/92종 함수·PDF 비가역 리댁션 및 1D CRC32·따옴표 인식 XML 파서 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/XMLSanitizer.swift`, `Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/DocumentSubmodelsAndNotes.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`)
+- **Decision**:
+  1. **PD-030 (문서 인라인 취소선·형광펜·하이퍼링크·문단 들여쓰기·표 행/열 편집 및 페이지 토큰)**:
+     - `DocumentTextRun`에 `isStrikethrough`, `backgroundHex`, `linkURL`을 추가하고, `ParagraphBlock`에 `firstLineIndentPt`·`leftIndentPt`를 추가하여 `.docx`, `.odt`, `.hwpx`, `.hwp`, `.rtf`, `.md`, `.html` 전 포맷 라운드트립을 지원합니다.
+     - `DocumentTableBlock`에 `insertRow(at:)`, `deleteRow(at:)`, `insertColumn(at:)`, `deleteColumn(at:)`를 구현하고 `cellSpans` 좌표를 자동 이동·클램핑하며, `OfficeDocumentModel.resolvePageTokens(in:pageNumber:totalPages:)`로 `{{PAGE}}` / `{{NUMPAGES}}` 동적 치환을 지원합니다.
+  2. **PD-031 (스프레드시트 이름 정의·행/열 삽입 시 참조 자동 이동·목표값 찾기·92종 내장 함수)**:
+     - `WorksheetModel.namedRanges` 및 미정의 식별자 `#NAME?` 판정을 지원하고, `insertRow`/`deleteRow`/`insertColumn`/`deleteColumn` 수행 시 셀 좌표·병합 범위·수식 참조·`namedRanges` 좌표를 함께 이동시킵니다.
+     - 할선법(Secant Method) 기반 수치 해법 `goalSeek(targetCell:targetValue:variableCell:)`과 `sparklineNormalizedValues(in:)`를 제공하고, `SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`, `IFNA`, `TEXTJOIN`, `SEARCH`, `REPLACE`, `ISBLANK`, `ISERROR`, `ISNUMBER`, `ISTEXT`, `ROWS`, `COLUMNS` 15종을 추가하여 총 92종 내장 함수를 지원합니다(`MATCH` 3번째 인자 `1`/`0`/`-1` 및 `TEXT` 천 단위 구분 기호 `"#,##0"` 포함).
+  3. **PD-033 (PDF 비가역 리댁션 및 AcroForm 양식 필드 직렬화)**:
+     - `PDFStudioDocumentModel.redactText(_:)`는 본문(`extractedText`), 문서 제목(`title`), 주석(`annotations`), 양식 필드(`formFields`), 목차(`outline`)에서 대상 민감 구문을 대소문자 무시로 `"████"`로 영구 치환하며, `redactedPhrases`에는 원문 평문 대신 비가역 마스킹 요약 토큰(`"████ (N자 마스킹)"`)만 기록하여 `%EasyOfficePDFModelBase64` 메타데이터 스트림에도 평문이 절대 남지 않도록 보장합니다.
+     - `PDFBinarySerializer`는 리댁션된 페이지에 불투명 검정 사각형(`0 0 0 rg ... re f`)과 `/Redacted true` 카탈로그 플래그를, 양식 필드에 `[FORM] name: value` 스트림을 기록하고 역직렬화 시 정밀 복원합니다.
+  4. **PD-034 (1차원 평탄화 `CRC32Calculator.flatSlicingTable`, `OLE2ContainerCodec.pack` 단일 버퍼 직렬화, 따옴표 인식 `XMLSanitizer`)**:
+     - `CRC32Calculator.flatSlicingTable`을 2,048 원소 1차원 `[UInt32]` 연속 버퍼로 평탄화하고, `OLE2ContainerCodec.pack`에서 단일 `allStreamsData` 버퍼와 `fatSectors` 사전 예약으로 섹터 루프 할당을 제거하며, `XMLSanitizer.findTagClosingBracket`이 따옴표(`"..."`, `'...'`) 내부의 `>` 문자를 무시하도록 보호합니다.
+- **Why**: 엔터프라이즈 문서 조판, 조건부 다중 집계(`SUMIFS`/`COUNTIFS`)·목표값 찾기·이름 정의, PDF 민감정보 비가역 삭제(CWE-200/CWE-212 방어) 및 저수준 파서 견고성을 완결하기 위함입니다.
+- **Trade-offs**: `redactText(_:)` 수행 후에는 원본 민감 문자열이 메모리와 직렬화 스트림 어디에도 남지 않으므로 Undo 스택을 통하지 않고는 원문을 역산할 수 없습니다(보안 의도에 부합).
+- **Alternatives rejected**:
+  - `redactedPhrases`에 마스킹 대상 원문 평문을 그대로 보관하는 방식: Base64 메타데이터 스트림을 디코딩하면 삭제한 민감 정보가 노출되므로 비가역 마스킹 요약 토큰 방식으로 대체.
+- **Verified by**: `Tests/EasyOfficeTests/EnterpriseParityAndOptimizationTests.swift`, `Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`
+- **Revisit when**: 정규식 패턴(주민등록번호·카드번호·이메일 자동 탐지) 일괄 리댁션 프리셋을 추가할 때.
+
 
 

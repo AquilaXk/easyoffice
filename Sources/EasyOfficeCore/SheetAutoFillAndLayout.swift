@@ -541,6 +541,20 @@ extension WorksheetModel {
       return CellRange(start: startAddr, end: endAddr)
     }
 
+    var nextNamedRanges: [String: String] = [:]
+    for (key, notation) in namedRanges {
+      let shiftedFormula = Self.shiftFormulaReferencesAtAxis(
+        "=" + notation,
+        isRowAxis: isRowAxis,
+        thresholdIndex: index,
+        delta: delta
+      )
+      let shiftedNotation =
+        shiftedFormula.hasPrefix("=") ? String(shiftedFormula.dropFirst()) : shiftedFormula
+      nextNamedRanges[key] = shiftedNotation
+    }
+    namedRanges = nextNamedRanges
+
     compiledASTs.removeAll(keepingCapacity: true)
     for (coord, rawVal) in cellsByCoordinate where !rawVal.isEmpty {
       compiledASTs[coord] = Self.compileCellInput(rawVal)

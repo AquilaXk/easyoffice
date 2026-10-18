@@ -89,9 +89,20 @@ extension XMLDocumentModelMapper {
         let rawRef = XMLSanitizer.unescape(defElem.innerXML).trimmingCharacters(
           in: .whitespacesAndNewlines)
         let cleanedRef = rawRef.replacingOccurrences(of: "$", with: "")
-        let strippedSheet = cleanedRef.split(separator: "!").last.map(String.init) ?? cleanedRef
-        if !strippedSheet.isEmpty {
-          sheet.setNamedRange(name, rangeOrCellNotation: strippedSheet)
+        let finalRef: String
+        if let bangIdx = cleanedRef.firstIndex(of: "!") {
+          let prefixSheet = cleanedRef[..<bangIdx].trimmingCharacters(
+            in: CharacterSet(charactersIn: "'\" "))
+          if prefixSheet.caseInsensitiveCompare(sheet.name) == .orderedSame {
+            finalRef = String(cleanedRef[cleanedRef.index(after: bangIdx)...])
+          } else {
+            finalRef = cleanedRef
+          }
+        } else {
+          finalRef = cleanedRef
+        }
+        if !finalRef.isEmpty {
+          sheet.setNamedRange(name, rangeOrCellNotation: finalRef)
         }
       }
     }

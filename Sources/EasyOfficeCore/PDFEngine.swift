@@ -180,7 +180,7 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     self.formFields = try c.decodeIfPresent([PDFFormField].self, forKey: .formFields) ?? []
   }
 
-  /// Irreversibly scrubs all case-insensitive occurrences of `targetPhrase` across every page's `extractedText`, replacing them with `"████"`.
+  /// Irreversibly scrubs all case-insensitive occurrences of `targetPhrase` across page text, title, annotations, form fields, and outline nodes, replacing them with `"████"`.
   @discardableResult
   public mutating func redactText(_ targetPhrase: String) -> Int {
     let trimmed = targetPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -194,9 +194,40 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         modifiedPages += 1
       }
     }
+    if title.range(of: trimmed, options: [.caseInsensitive]) != nil {
+      title = title.replacingOccurrences(of: trimmed, with: "████", options: [.caseInsensitive])
+    }
+    for idx in annotations.indices {
+      if annotations[idx].content.range(of: trimmed, options: [.caseInsensitive]) != nil {
+        annotations[idx].content = annotations[idx].content.replacingOccurrences(
+          of: trimmed, with: "████", options: [.caseInsensitive])
+      }
+    }
+    for idx in formFields.indices {
+      if formFields[idx].value.range(of: trimmed, options: [.caseInsensitive]) != nil {
+        formFields[idx].value = formFields[idx].value.replacingOccurrences(
+          of: trimmed, with: "████", options: [.caseInsensitive])
+      }
+    }
+    Self.redactOutlineNodes(&outline, target: trimmed)
     isRedacted = true
-    if !redactedPhrases.contains(trimmed) { redactedPhrases.append(trimmed) }
+    let maskedToken = "████ (\(trimmed.count)자 마스킹)"
+    if !redactedPhrases.contains(maskedToken) {
+      redactedPhrases.append(maskedToken)
+    }
     return modifiedPages
+  }
+
+  private static func redactOutlineNodes(_ nodes: inout [PDFOutlineNode], target: String) {
+    for idx in nodes.indices {
+      if nodes[idx].title.range(of: target, options: [.caseInsensitive]) != nil {
+        nodes[idx].title = nodes[idx].title.replacingOccurrences(
+          of: target, with: "████", options: [.caseInsensitive])
+      }
+      if !nodes[idx].children.isEmpty {
+        redactOutlineNodes(&nodes[idx].children, target: target)
+      }
+    }
   }
 
   public mutating func addFormField(_ field: PDFFormField) { formFields.append(field) }

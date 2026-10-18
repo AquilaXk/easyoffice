@@ -239,6 +239,8 @@ public enum PDFBinarySerializer {
 
     var fallbackPages: [PDFPageDescriptor] = []
     var fallbackInvisibleFlags: [Bool] = []
+    var fallbackFormFields: [PDFFormField] = []
+    let isRedactedCatalog = rawText.contains("/Redacted true")
     var sawPageObject = false
     var currentRotate = 0
     var inStream = false
@@ -284,6 +286,20 @@ public enum PDFBinarySerializer {
       {
         let inner = String(line[line.index(after: openParen)..<closeParen])
         let unescaped = unescapePDFString(inner)
+        if unescaped.hasPrefix("[FORM] ") {
+          let remainder = String(unescaped.dropFirst(7))
+          let parts = remainder.components(separatedBy: ": ")
+          let fieldName = parts.first ?? "Field"
+          let fieldVal = parts.count > 1 ? parts.dropFirst().joined(separator: ": ") : ""
+          fallbackFormFields.append(
+            PDFFormField(
+              pageNumber: fallbackPages.count + 1,
+              name: fieldName,
+              value: fieldVal
+            )
+          )
+          continue
+        }
         if inStream {
           currentStreamLines.append(unescaped)
           if line.hasPrefix("BT 3 Tr ") {
@@ -380,7 +396,9 @@ public enum PDFBinarySerializer {
           title: docTitle,
           pages: pages,
           annotations: annotations,
-          outline: outlineNodes
+          outline: outlineNodes,
+          isRedacted: isRedactedCatalog,
+          formFields: fallbackFormFields
         )
       }
     }
@@ -392,7 +410,12 @@ public enum PDFBinarySerializer {
       fallbackPages.append(
         PDFPageDescriptor(pageNumber: 1, rotationDegrees: currentRotate, extractedText: ""))
     }
-    return PDFStudioDocumentModel(title: "PDF 문서", pages: fallbackPages)
+    return PDFStudioDocumentModel(
+      title: "PDF 문서",
+      pages: fallbackPages,
+      isRedacted: isRedactedCatalog,
+      formFields: fallbackFormFields
+    )
   }
 
   private static func extractOutlineNodes(from parent: PDFOutline, in doc: PDFDocument)

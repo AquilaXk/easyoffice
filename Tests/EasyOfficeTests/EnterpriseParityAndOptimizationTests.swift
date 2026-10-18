@@ -264,23 +264,42 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     XCTAssertEqual(table.rows[1], ["매출", "100"])
 
     var pdf = PDFStudioDocumentModel(
-      title: "기밀 계약서",
+      title: "기밀 계약서 (900101-1234567)",
       pages: [
         PDFPageDescriptor(pageNumber: 1, extractedText: "담당자 주민번호 900101-1234567 및 서명란")
+      ],
+      annotations: [
+        PDFAnnotationItem(
+          pageNumber: 1, kind: .stickyNote, content: "검토 메모: 900101-1234567 확인 요망", author: "QA")
+      ],
+      outline: [
+        PDFOutlineNode(title: "부록 900101-1234567", targetPageNumber: 1)
       ]
     )
     let redactedCount = pdf.redactText("900101-1234567")
     XCTAssertGreaterThanOrEqual(redactedCount, 1)
     XCTAssertTrue(pdf.isRedacted)
     XCTAssertFalse(pdf.pages[0].extractedText.contains("900101-1234567"))
+    XCTAssertFalse(pdf.title.contains("900101-1234567"))
+    XCTAssertFalse(pdf.annotations[0].content.contains("900101-1234567"))
+    XCTAssertFalse(pdf.outline[0].title.contains("900101-1234567"))
+    XCTAssertFalse(pdf.redactedPhrases.joined(separator: " ").contains("900101-1234567"))
 
     let field = PDFFormField(
       pageNumber: 1, name: "승인자", value: "홍길동", isCheckbox: false, isChecked: false)
     pdf.addFormField(field)
     let pdfBytes = PDFBinarySerializer.encode(pdf)
+    let rawPDFString = String(decoding: pdfBytes, as: UTF8.self)
+    XCTAssertFalse(rawPDFString.contains("900101-1234567"))
     let decodedPDF = try PDFBinarySerializer.decode(from: pdfBytes)
     XCTAssertTrue(decodedPDF.isRedacted)
+    XCTAssertFalse(decodedPDF.redactedPhrases.joined(separator: " ").contains("900101-1234567"))
     XCTAssertEqual(decodedPDF.formFields.first?.name, "승인자")
     XCTAssertEqual(decodedPDF.formFields.first?.value, "홍길동")
+
+    var shiftSheet = WorksheetModel(name: "Shift")
+    shiftSheet.setNamedRange("TARGET_BLOCK", rangeOrCellNotation: "B2:C3")
+    shiftSheet.insertRow(at: 1)
+    XCTAssertEqual(shiftSheet.namedRanges["TARGET_BLOCK"], "B3:C4")
   }
 }
