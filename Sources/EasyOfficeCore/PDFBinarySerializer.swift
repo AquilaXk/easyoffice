@@ -1,0 +1,296 @@
+import Foundation
+import PDFKit
+
+// MARK: - Deterministic ISO 32000-1 PDF Binary Serializer & Native PDFKit Bridge
+
+/// Deterministic ISO 32000-1 (`%PDF-1.7`) binary serializer and parser with byte-exact `xref` offsets and native `PDFKit` inspection.
+public enum PDFBinarySerializer {
+    private static let modelStreamPrefix = "%EasyOfficePDFModelBase64:"
+
+    public static func encode(_ pdf: PDFStudioDocumentModel) -> Data {
+        var buffer = Data()
+        buffer.reserveCapacity(4096)
+
+        func appendLine(_ line: String) {
+            buffer.append(contentsOf: line.utf8)
+            buffer.append(0x0A)
+        }
+
+        appendLine("%PDF-1.7")
+        appendLine("%\u{00E2}\u{00E3}\u{00CF}\u{00D3}")
+
+        let pageCount = pdf.pages.count
+        let pageObjectNumbers = (0..<pageCount).map { 3 + ($0 * 2) }
+        let kidsRefs = pageObjectNumbers.map { "\($0) 0 R" }.joined(separator: " ")
+
+        var objectOffsets: [Int: Int] = [:]
+
+        objectOffsets[1] = buffer.count
+        appendLine("1 0 obj")
+        appendLine("<< /Type /Catalog /Pages 2 0 R /Title (\(escapePDFString(pdf.title))) /Redacted \(pdf.isRedacted ? "true" : "false") >>")
+        appendLine("endobj")
+
+        objectOffsets[2] = buffer.count
+        appendLine("2 0 obj")
+        appendLine("<< /Type /Pages /Count \(pageCount) /Kids [\(kidsRefs)] >>")
+        appendLine("endobj")
+
+        for (idx, page) in pdf.pages.enumerated() {
+            let pageObjNum = 3 + (idx * 2)
+            let contentObjNum = pageObjNum + 1
+            let escapedText = escapePDFString(page.extractedText)
+            let streamBody = "BT /F1 11 Tf 56 780 Td (\(escapedText)) Tj ET"
+            let streamByteCount = streamBody.utf8.count
+
+            objectOffsets[pageObjNum] = buffer.count
+            appendLine("\(pageObjNum) 0 obj")
+            appendLine("<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents \(contentObjNum) 0 R >>")
+            appendLine("endobj")
+
+            objectOffsets[contentObjNum] = buffer.count
+            appendLine("\(contentObjNum) 0 obj")
+            appendLine("<< /Length \(streamByteCount) >>")
+            appendLine("stream")
+            appendLine(streamBody)
+            appendLine("endstream")
+            appendLine("endobj")
+        }
+
+        let metadataObjNum = 3 + (pageCount * 2)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let jsonBytes = (try? encoder.encode(pdf)) ?? Data("{}".utf8)
+        let b64 = jsonBytes.base64EncodedString()
+        let metadataStream = "\(modelStreamPrefix)\(b64)"
+
+        objectOffsets[metadataObjNum] = buffer.count
+        appendLine("\(metadataObjNum) 0 obj")
+        appendLine("<< /Type /Metadata /Subtype /EasyOfficeStudio /Length \(metadataStream.utf8.count) >>")
+        appendLine("stream")
+        appendLine(metadataStream)
+        appendLine("endstream")
+        appendLine("endobj")
+
+        let totalObjects = metadataObjNum + 1
+        let xrefByteOffset = buffer.count
+        appendLine("xref")
+        appendLine("0 \(totalObjects)")
+        appendLine("0000000000 65535 f ")
+        for objIdx in 1..<totalObjects {
+            let offset = objectOffsets[objIdx] ?? 0
+            appendLine(String(format: "%010d 00000 n ", offset))
+        }
+        appendLine("trailer")
+        appendLine("<< /Size \(totalObjects) /Root 1 0 R >>")
+        appendLine("startxref")
+        appendLine("\(xrefByteOffset)")
+        appendLine("%%EOF")
+
+        return buffer
+    }
+
+    public static func decode(from data: Data) throws -> PDFStudioDocumentModel {
+        let verified = try FormatDetector.verify(data: data, fileName: "document.pdf")
+        guard verified.format == .pdf else {
+            throw EasyOfficeError.signatureMismatch(expected: .pdfBinary, fileName: "document.pdf")
+        }
+
+        let rawText = String(decoding: data, as: UTF8.self)
+        guard rawText.contains("obj") && rawText.contains("%%EOF") else {
+            throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 객체(obj) 또는 %%EOF 트레일러가 없습니다.")
+        }
+
+        let lines = rawText.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(modelStreamPrefix) {
+                let b64 = String(trimmed.dropFirst(modelStreamPrefix.count))
+                guard let decodedBytes = Data(base64Encoded: b64) else {
+                    throw EasyOfficeError.corruptedContainer(detail: "PDF 메타데이터 스트림 Base64 디코딩에 실패했습니다.")
+                }
+                do {
+                    return try JSONDecoder().decode(PDFStudioDocumentModel.self, from: decodedBytes)
+                } catch {
+                    throw EasyOfficeError.corruptedContainer(detail: "PDF 모델 역직렬화 실패: \(error.localizedDescription)")
+                }
+            }
+            if trimmed.contains("/Encrypt") {
+                throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
+            }
+        }
+
+        // Raw stream scanner for minimal synthetic PDF streams
+        var fallbackPages: [PDFPageDescriptor] = []
+        var sawPageObject = false
+        var currentRotate = 0
+        for line in lines {
+            if line.contains("/Type /Page") && !line.contains("/Type /Pages") {
+                sawPageObject = true
+            }
+            if let rotRange = line.range(of: "/Rotate ") {
+                let after = line[rotRange.upperBound...]
+                let digits = after.prefix(while: { $0.isNumber || $0 == "-" })
+                currentRotate = Int(digits) ?? 0
+            }
+            if line.hasPrefix("BT "),
+               let openParen = line.firstIndex(of: "("),
+               let closeParen = line.lastIndex(of: ")"),
+               openParen < closeParen {
+                let inner = String(line[line.index(after: openParen)..<closeParen])
+                let unescaped = unescapePDFString(inner)
+                fallbackPages.append(
+                    PDFPageDescriptor(
+                        pageNumber: fallbackPages.count + 1,
+                        rotationDegrees: currentRotate,
+                        extractedText: unescaped
+                    )
+                )
+                currentRotate = 0
+            }
+        }
+
+        // Native macOS PDFKit inspection for standard PDF documents without embedded studio metadata
+        if let pdfDoc = PDFDocument(data: data) {
+            if pdfDoc.isEncrypted {
+                throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
+            }
+            if pdfDoc.pageCount > 0 {
+                var pages: [PDFPageDescriptor] = []
+                var annotations: [PDFAnnotationItem] = []
+
+                for idx in 0..<pdfDoc.pageCount {
+                    let pdfPage = pdfDoc.page(at: idx)
+                    let fallback = fallbackPages.indices.contains(idx) ? fallbackPages[idx] : nil
+                    let nativeRotation = pdfPage?.rotation ?? 0
+                    let resolvedRotation = nativeRotation != 0 ? nativeRotation : (fallback?.rotationDegrees ?? currentRotate)
+                    let nativeText = pdfPage?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let resolvedText = !nativeText.isEmpty ? nativeText : (fallback?.extractedText ?? "")
+
+                    pages.append(
+                        PDFPageDescriptor(
+                            pageNumber: idx + 1,
+                            rotationDegrees: resolvedRotation,
+                            extractedText: resolvedText
+                        )
+                    )
+
+                    if let pageAnnotations = pdfPage?.annotations {
+                        for ann in pageAnnotations {
+                            let kind: PDFAnnotationKind
+                            let typeName = (ann.type ?? "").lowercased()
+                            if typeName.contains("highlight") {
+                                kind = .highlight
+                            } else if typeName.contains("underline") {
+                                kind = .underline
+                            } else if typeName.contains("stamp") {
+                                kind = .stamp
+                            } else if typeName.contains("sig") || typeName.contains("widget") {
+                                kind = .signature
+                            } else {
+                                kind = .stickyNote
+                            }
+                            let content = ann.contents ?? ""
+                            let author = ann.userName ?? "PDF User"
+                            if !content.isEmpty {
+                                annotations.append(
+                                    PDFAnnotationItem(
+                                        pageNumber: idx + 1,
+                                        kind: kind,
+                                        content: content,
+                                        author: author
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                var outlineNodes: [PDFOutlineNode] = []
+                if let outlineRoot = pdfDoc.outlineRoot {
+                    outlineNodes = extractOutlineNodes(from: outlineRoot, in: pdfDoc)
+                }
+
+                let docTitle = (pdfDoc.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String)
+                    .flatMap { $0.isEmpty ? nil : $0 } ?? "PDF 문서"
+
+                return PDFStudioDocumentModel(
+                    title: docTitle,
+                    pages: pages,
+                    annotations: annotations,
+                    outline: outlineNodes
+                )
+            }
+        }
+
+        if fallbackPages.isEmpty {
+            guard sawPageObject else {
+                throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 페이지(/Type /Page) 객체가 없습니다.")
+            }
+            fallbackPages.append(PDFPageDescriptor(pageNumber: 1, rotationDegrees: currentRotate, extractedText: ""))
+        }
+        return PDFStudioDocumentModel(title: "PDF 문서", pages: fallbackPages)
+    }
+
+    private static func extractOutlineNodes(from parent: PDFOutline, in doc: PDFDocument) -> [PDFOutlineNode] {
+        var nodes: [PDFOutlineNode] = []
+        for idx in 0..<parent.numberOfChildren {
+            guard let child = parent.child(at: idx) else { continue }
+            let title = child.label ?? "책갈피 \(idx + 1)"
+            var targetPageNum = 1
+            if let destPage = child.destination?.page {
+                let pageIdx = doc.index(for: destPage)
+                if pageIdx != NSNotFound && pageIdx >= 0 {
+                    targetPageNum = pageIdx + 1
+                }
+            }
+            let children = extractOutlineNodes(from: child, in: doc)
+            nodes.append(
+                PDFOutlineNode(
+                    title: title,
+                    targetPageNumber: targetPageNum,
+                    children: children
+                )
+            )
+        }
+        return nodes
+    }
+
+    private static func escapePDFString(_ input: String) -> String {
+        input
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "(", with: "\\(")
+            .replacingOccurrences(of: ")", with: "\\)")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    private static func unescapePDFString(_ input: String) -> String {
+        var result = ""
+        result.reserveCapacity(input.count)
+        var index = input.startIndex
+        while index < input.endIndex {
+            let ch = input[index]
+            if ch == "\\" {
+                let nextIndex = input.index(after: index)
+                guard nextIndex < input.endIndex else {
+                    result.append("\\")
+                    break
+                }
+                let escaped = input[nextIndex]
+                switch escaped {
+                case "n": result.append("\n")
+                case "r": result.append("\r")
+                case "(": result.append("(")
+                case ")": result.append(")")
+                case "\\": result.append("\\")
+                default: result.append(escaped)
+                }
+                index = input.index(after: nextIndex)
+            } else {
+                result.append(ch)
+                index = input.index(after: index)
+            }
+        }
+        return result
+    }
+}

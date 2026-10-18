@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import PDFKit
 import Observation
 import EasyOfficeDesignSystem
 import EasyOfficeCore
@@ -19,10 +21,7 @@ public struct DocumentEditorDetailPaneView: View {
     public var body: some View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
         let tocEntries = document.generateTableOfContents()
-        let mergedPreview = document.applyingMailMerge(record: [
-            "부서명": "플랫폼아키텍처실",
-            "수신자": "전사 기술위원회"
-        ])
+        let mergedPreview = document.applyingMailMerge(record: viewModel.mailMergeFields)
 
         VStack(alignment: .leading, spacing: 18) {
             // Top Document Metadata & Quick Actions Banner
@@ -48,11 +47,21 @@ public struct DocumentEditorDetailPaneView: View {
                 Spacer()
 
                 if isPrimaryPane {
+                    TextField("추가할 문단 내용을 입력하세요...", text: $viewModel.paragraphDraftText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11))
+                        .frame(width: 240)
+
                     Button {
+                        let trimmed = viewModel.paragraphDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let textToAppend = trimmed.isEmpty
+                            ? "신규 검토 문단: 표준 규격 호환성 및 레이아웃 무결성 확인 완료."
+                            : trimmed
                         viewModel.appendParagraphToActiveDocument(
-                            text: "신규 검토 문단: 표준 규격 호환성 및 레이아웃 무결성 확인 완료.",
+                            text: textToAppend,
                             style: .body
                         )
+                        viewModel.paragraphDraftText = ""
                     } label: {
                         Label("문단 추가", systemImage: "plus.bubble")
                             .font(.system(size: 11, weight: .semibold))
@@ -69,7 +78,7 @@ public struct DocumentEditorDetailPaneView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(palette.secondaryText.swiftUIColor)
                     Spacer()
-                    Text("단 구성: \(document.sections.first?.columnCount ?? 1)단")
+                    Text("단 구성: \(document.sections.first?.columnCount ?? 1)단 · \(document.sections.first?.orientation.rawValue ?? PageOrientation.portrait.rawValue)")
                         .font(.system(size: 11))
                         .foregroundStyle(palette.secondaryText.swiftUIColor)
                 }
@@ -94,31 +103,63 @@ public struct DocumentEditorDetailPaneView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
 
-                // Document Paragraphs
+                // Editable Document Paragraphs
                 ForEach(document.paragraphs) { paragraph in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(paragraph.style.rawValue)
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                            if paragraph.isBold {
+                                Text("B").font(.system(size: 9, weight: .bold))
+                            }
+                            if paragraph.isItalic {
+                                Text("I").font(.system(size: 9, weight: .semibold)).italic()
+                            }
+                            if paragraph.isUnderlined {
+                                Text("U").font(.system(size: 9, weight: .semibold)).underline()
+                            }
                             Spacer()
                         }
-                        Text(paragraph.text)
+                        if isPrimaryPane {
+                            TextField(
+                                "문단 내용",
+                                text: Binding(
+                                    get: { paragraph.text },
+                                    set: { newValue in
+                                        viewModel.selectedParagraphID = paragraph.id
+                                        viewModel.updateParagraphText(paragraphID: paragraph.id, newText: newValue)
+                                    }
+                                ),
+                                axis: .vertical
+                            )
+                            .textFieldStyle(.plain)
                             .font(.system(size: paragraph.fontSizePt, weight: paragraph.isBold ? .bold : .regular))
                             .foregroundStyle(palette.primaryText.swiftUIColor)
+                        } else {
+                            Text(paragraph.text)
+                                .font(.system(size: paragraph.fontSizePt, weight: paragraph.isBold ? .bold : .regular))
+                                .foregroundStyle(palette.primaryText.swiftUIColor)
+                        }
                     }
+                    .padding(.vertical, 2)
                 }
 
-                // Tables + Inline Table Formula Badge
+                // Editable Tables + Conditional Inline Table Formula Badge
                 ForEach(document.tables) { table in
+                    let hasExplicitFormulaCell = table.rows.flatMap { $0 }.contains {
+                        $0.trimmingCharacters(in: .whitespaces).hasPrefix("=")
+                    }
+                    let lastCol = max(0, table.columnCount - 1)
+                    let sumAbove = table.evaluateTableFormula("=SUM(ABOVE)", atRow: table.rowCount, column: lastCol)
+
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(table.caption)
+                            Text("\(table.caption) (\(table.borderStyle.rawValue))")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(palette.primaryText.swiftUIColor)
                             Spacer()
-                            if let sumAbove = table.evaluateTableFormula("=SUM(ABOVE)", atRow: table.rowCount, column: table.columnCount - 1),
-                               sumAbove > 0 {
+                            if let sumAbove, (hasExplicitFormulaCell || sumAbove > 0) {
                                 Text("표 수식 =SUM(ABOVE): \(Int(sumAbove))")
                                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                                     .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
@@ -131,8 +172,23 @@ public struct DocumentEditorDetailPaneView: View {
 
                         ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIdx, row in
                             HStack(spacing: 2) {
-                                ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                                    Text(cell)
+                                ForEach(Array(row.enumerated()), id: \.offset) { colIdx, cell in
+                                    if isPrimaryPane {
+                                        TextField(
+                                            "",
+                                            text: Binding(
+                                                get: { cell },
+                                                set: { updated in
+                                                    viewModel.updateTableCell(
+                                                        tableID: table.id,
+                                                        row: rowIdx,
+                                                        col: colIdx,
+                                                        newValue: updated
+                                                    )
+                                                }
+                                            )
+                                        )
+                                        .textFieldStyle(.plain)
                                         .font(.system(size: 12, weight: rowIdx == 0 && table.hasHeaderRow ? .bold : .regular))
                                         .foregroundStyle(palette.primaryText.swiftUIColor)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -142,6 +198,18 @@ public struct DocumentEditorDetailPaneView: View {
                                                 ? EasyOfficeDesignTokens.brand100.swiftUIColor
                                                 : palette.elevatedSurface.swiftUIColor
                                         )
+                                    } else {
+                                        Text(cell)
+                                            .font(.system(size: 12, weight: rowIdx == 0 && table.hasHeaderRow ? .bold : .regular))
+                                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(6)
+                                            .background(
+                                                rowIdx == 0 && table.hasHeaderRow
+                                                    ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                                                    : palette.elevatedSurface.swiftUIColor
+                                            )
+                                    }
                                 }
                             }
                         }
@@ -234,7 +302,7 @@ public struct DocumentEditorDetailPaneView: View {
     }
 }
 
-/// Rich interactive editor pane for Sheet (.xlsx/.ods/.csv) with Formula Bar, 77-function badge, Pivot Table summary, and Chart preview.
+/// Rich interactive editor pane for Sheet (.xlsx/.ods/.csv) with Formula Bar, dynamic grid bounds, Pivot Table summary, and visual Chart bars.
 public struct SheetEditorDetailPaneView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
@@ -247,8 +315,23 @@ public struct SheetEditorDetailPaneView: View {
         self.isPrimaryPane = isPrimaryPane
     }
 
+    private var gridBounds: (rows: Int, cols: Int) {
+        var maxRow = 8
+        var maxCol = 6
+        for key in sheet.rawCells.keys {
+            if let addr = try? CellAddress(a1Notation: key) {
+                maxRow = max(maxRow, min(24, addr.row + 1))
+                maxCol = max(maxCol, min(12, addr.column + 1))
+            }
+        }
+        return (maxRow, maxCol)
+    }
+
     public var body: some View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
+        let bounds = gridBounds
+        let columnLabels = (0..<bounds.cols).map { CellAddress.columnLabel(for: $0) }
+
         let pivotSummary: PivotTableSummary? = {
             guard let range = try? CellRange(notation: "A1:D4") else { return nil }
             let config = PivotTableConfiguration(rowFieldColumnIndex: 0, valueFieldColumnIndex: 3, aggregation: .sum)
@@ -263,7 +346,7 @@ public struct SheetEditorDetailPaneView: View {
             return SheetChartBuilder.buildChart(
                 from: sheet,
                 title: "분기별 실적 비교",
-                kind: .column,
+                kind: viewModel.selectedChartKind,
                 categoryRange: catRange,
                 valueRanges: [("1분기", q1Range), ("2분기", q2Range)]
             )
@@ -316,50 +399,60 @@ public struct SheetEditorDetailPaneView: View {
             .background(palette.cardSurface.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            // Spreadsheet Grid
-            VStack(spacing: 4) {
-                ForEach(1...4, id: \.self) { row in
-                    HStack(spacing: 4) {
-                        ForEach(["A", "B", "C", "D"], id: \.self) { col in
-                            let addr = "\(col)\(row)"
-                            let isSelectedCell = viewModel.selectedSheetCell == addr
-                            Button {
-                                viewModel.selectedSheetCell = addr
-                                viewModel.formulaBarDraft = sheet.rawValue(at: addr)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(addr)
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundStyle(palette.secondaryText.swiftUIColor)
-                                    Text(sheet.evaluate(at: addr).description)
-                                        .font(.system(size: 12, weight: row == 1 || row == 4 ? .bold : .regular))
-                                        .foregroundStyle(palette.primaryText.swiftUIColor)
+            // Dynamic Spreadsheet Grid (minimum 8 rows × 6 columns, expanding automatically)
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(spacing: 4) {
+                    ForEach(1...bounds.rows, id: \.self) { row in
+                        HStack(spacing: 4) {
+                            ForEach(columnLabels, id: \.self) { col in
+                                let addr = "\(col)\(row)"
+                                let isSelectedCell = viewModel.selectedSheetCell == addr
+                                let evaluated = sheet.evaluate(at: addr)
+                                let isCondHighlighted = viewModel.activeConditionalFormatRule?.matches(evaluated) ?? false
+
+                                Button {
+                                    viewModel.selectedSheetCell = addr
+                                    viewModel.formulaBarDraft = sheet.rawValue(at: addr)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(addr)
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                                        Text(evaluated.description)
+                                            .font(.system(size: 12, weight: row == 1 || row == 4 ? .bold : .regular))
+                                            .foregroundStyle(
+                                                isCondHighlighted
+                                                    ? EasyOfficeDesignTokens.brand800.swiftUIColor
+                                                    : palette.primaryText.swiftUIColor
+                                            )
+                                            .lineLimit(1)
+                                    }
+                                    .padding(8)
+                                    .frame(minWidth: 105, maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        isSelectedCell
+                                            ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                                            : (isCondHighlighted ? EasyOfficeDesignTokens.brand50.swiftUIColor : palette.cardSurface.swiftUIColor)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .stroke(
+                                                isSelectedCell
+                                                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                                                    : palette.border.swiftUIColor,
+                                                lineWidth: isSelectedCell ? 1.5 : 1.0
+                                            )
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
                                 }
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(
-                                    isSelectedCell
-                                        ? EasyOfficeDesignTokens.brand100.swiftUIColor
-                                        : palette.cardSurface.swiftUIColor
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(
-                                            isSelectedCell
-                                                ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                                                : palette.border.swiftUIColor,
-                                            lineWidth: isSelectedCell ? 1.5 : 1.0
-                                        )
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
 
-            // Pivot Table Summary & Chart Preview Cards
+            // Pivot Table Summary & Visual Vector Chart Preview Cards
             HStack(alignment: .top, spacing: 12) {
                 if let pivot = pivotSummary {
                     VStack(alignment: .leading, spacing: 6) {
@@ -392,14 +485,34 @@ public struct SheetEditorDetailPaneView: View {
                 }
 
                 if let chart = chartModel {
-                    VStack(alignment: .leading, spacing: 6) {
+                    let maxVal = max(1.0, chart.series.flatMap(\.values).max() ?? 1.0)
+                    VStack(alignment: .leading, spacing: 8) {
                         Label("\(chart.title) (\(chart.kind.rawValue.uppercased()))", systemImage: "chart.bar.xaxis")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+
                         ForEach(chart.series) { series in
-                            Text("• \(series.name): \(series.values.map { String(format: "%.0f", $0) }.joined(separator: ", "))")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("• \(series.name): \(series.values.map { String(format: "%.0f", $0) }.joined(separator: ", "))")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+                                HStack(spacing: 6) {
+                                    ForEach(Array(series.values.enumerated()), id: \.offset) { vIdx, val in
+                                        let ratio = CGFloat(max(0.08, min(1.0, val / maxVal)))
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(EasyOfficeDesignTokens.brand600.swiftUIColor)
+                                                .frame(width: 140 * ratio, height: 8)
+                                            if chart.categories.indices.contains(vIdx) {
+                                                Text("\(chart.categories[vIdx]): \(Int(val))")
+                                                    .font(.system(size: 9, design: .monospaced))
+                                                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding(12)
@@ -412,7 +525,7 @@ public struct SheetEditorDetailPaneView: View {
     }
 }
 
-/// Rich interactive editor pane for Slide (.pptx/.odp) with Filmstrip, Stage Canvas, Smart Alignment Guides badge, and Presenter Mode sheet.
+/// Rich interactive editor pane for Slide (.pptx/.odp) with Filmstrip, proportional 16:9 Stage Canvas, visual Snap Guides, and interactive Presenter controls.
 public struct SlideEditorDetailPaneView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
@@ -427,7 +540,11 @@ public struct SlideEditorDetailPaneView: View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
         let activeIdx = deck.slides.indices.contains(viewModel.selectedSlideIndex) ? viewModel.selectedSlideIndex : 0
         let currentSlide = deck.slides.indices.contains(activeIdx) ? deck.slides[activeIdx] : nil
-        let presenterSession = PresenterSession(deck: deck, currentSlideIndex: activeIdx, elapsedSeconds: 95)
+        let presenterSession = PresenterSession(
+            deck: deck,
+            currentSlideIndex: activeIdx,
+            elapsedSeconds: viewModel.presenterElapsedSeconds
+        )
 
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -489,6 +606,15 @@ public struct SlideEditorDetailPaneView: View {
 
                 // Active Slide Stage Canvas
                 if let slide = currentSlide {
+                    let activeGuides: [AlignmentSnapGuide] = {
+                        guard viewModel.isSnapGuidesEnabled, let firstElem = slide.elements.first else { return [] }
+                        return SnapGuideCalculator.computeGuides(
+                            for: firstElem,
+                            siblings: slide.elements,
+                            aspectRatio: deck.aspectRatio
+                        )
+                    }()
+
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Text(slide.masterLayout.rawValue)
@@ -506,55 +632,126 @@ public struct SlideEditorDetailPaneView: View {
                             Spacer()
 
                             if let firstElem = slide.elements.first {
-                                let guides = SnapGuideCalculator.computeGuides(
-                                    for: firstElem,
-                                    siblings: slide.elements,
-                                    aspectRatio: deck.aspectRatio
-                                )
-                                if !guides.isEmpty {
-                                    Label("스마트 정렬 가이드 스냅 활성 (\(guides.count)축)", systemImage: "ruler")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+                                HStack(spacing: 4) {
+                                    Button("◀") {
+                                        viewModel.moveSlideElement(slideIndex: activeIdx, elementID: firstElem.id, deltaX: -20, deltaY: 0)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+
+                                    Button("▶") {
+                                        viewModel.moveSlideElement(slideIndex: activeIdx, elementID: firstElem.id, deltaX: 20, deltaY: 0)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+
+                                    Button("▲") {
+                                        viewModel.moveSlideElement(slideIndex: activeIdx, elementID: firstElem.id, deltaX: 0, deltaY: -20)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+
+                                    Button("▼") {
+                                        viewModel.moveSlideElement(slideIndex: activeIdx, elementID: firstElem.id, deltaX: 0, deltaY: 20)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+
+                                    Button("정중앙 스냅") {
+                                        viewModel.executeRibbonCommand("slide-mod-snap")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
                                 }
+                            }
+
+                            if !activeGuides.isEmpty {
+                                Label("스마트 정렬 가이드 스냅 활성 (\(activeGuides.count)축)", systemImage: "ruler")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
                             }
                         }
 
-                        Text(slide.title)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                        // Proportional 16:9 Stage Canvas with Visual Snap Guides & Positioned Elements
+                        GeometryReader { geo in
+                            let stageW = max(1.0, deck.aspectRatio.widthPoints)
+                            let stageH = max(1.0, deck.aspectRatio.heightPoints)
+                            let scaleX = geo.size.width / stageW
+                            let scaleY = geo.size.height / stageH
 
-                        if !slide.subtitle.isEmpty {
-                            Text(slide.subtitle)
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                        }
+                            ZStack(alignment: .topLeading) {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(palette.elevatedSurface.swiftUIColor)
 
-                        ForEach(slide.bulletPoints, id: \.self) { bullet in
-                            Text("• \(bullet)")
-                                .font(.system(size: 13))
-                                .foregroundStyle(palette.primaryText.swiftUIColor)
-                        }
+                                // Slide Header & Bullet Content Overlay
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(slide.title)
+                                        .font(.system(size: 20, weight: .bold))
+                                        .foregroundStyle(palette.primaryText.swiftUIColor)
 
-                        if !slide.elements.isEmpty {
-                            HStack(spacing: 8) {
+                                    if !slide.subtitle.isEmpty {
+                                        Text(slide.subtitle)
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                                    }
+
+                                    ForEach(slide.bulletPoints, id: \.self) { bullet in
+                                        Text("• \(bullet)")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                                    }
+                                }
+                                .padding(20)
+
+                                // Visual Alignment Snap Guide Dashed Lines
+                                ForEach(Array(activeGuides.enumerated()), id: \.offset) { _, guide in
+                                    Path { path in
+                                        switch guide.axis {
+                                        case .vertical:
+                                            let xPos = CGFloat(guide.positionPoints) * scaleX
+                                            path.move(to: CGPoint(x: xPos, y: 0))
+                                            path.addLine(to: CGPoint(x: xPos, y: geo.size.height))
+                                        case .horizontal:
+                                            let yPos = CGFloat(guide.positionPoints) * scaleY
+                                            path.move(to: CGPoint(x: 0, y: yPos))
+                                            path.addLine(to: CGPoint(x: geo.size.width, y: yPos))
+                                        }
+                                    }
+                                    .stroke(
+                                        EasyOfficeDesignTokens.statusSuccess.swiftUIColor,
+                                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                                    )
+                                }
+
+                                // Positioned Slide Canvas Elements
                                 ForEach(slide.elements) { element in
+                                    let elemW = max(90.0, CGFloat(element.width) * scaleX)
+                                    let elemH = max(50.0, CGFloat(element.height) * scaleY)
+                                    let centerX = CGFloat(element.centerX) * scaleX
+                                    let centerY = CGFloat(element.centerY) * scaleY
+
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(element.title)
                                             .font(.system(size: 11, weight: .bold))
+                                            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
                                         Text(element.bodyText)
                                             .font(.system(size: 10))
                                             .foregroundStyle(palette.secondaryText.swiftUIColor)
+                                            .lineLimit(2)
                                     }
-                                    .padding(10)
-                                    .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
+                                    .padding(8)
+                                    .frame(width: elemW, height: elemH, alignment: .leading)
+                                    .background(EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.95))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .stroke(EasyOfficeDesignTokens.brand600.swiftUIColor, lineWidth: 1)
+                                            .stroke(EasyOfficeDesignTokens.brand600.swiftUIColor, lineWidth: 1.5)
                                     )
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .position(x: centerX, y: centerY)
                                 }
                             }
                         }
+                        .frame(height: 290)
 
                         Divider()
                         Text("발표자 노트: \(slide.speakerNotes)")
@@ -572,7 +769,7 @@ public struct SlideEditorDetailPaneView: View {
             if viewModel.isPresenterModeActive {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("발표자 모니터 · 진행률 \(Int(presenterSession.progressFraction * 100))%")
+                        Text("발표자 모니터 · 진행률 \(Int(presenterSession.progressFraction * 100))% · 경과 \(presenterSession.elapsedSeconds)초")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
                         Text("현재 노트: \(presenterSession.currentSpeakerNotes)")
@@ -585,6 +782,22 @@ public struct SlideEditorDetailPaneView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
                     }
+                    HStack(spacing: 6) {
+                        Button("이전 슬라이드") {
+                            viewModel.previousPresenterSlide()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(activeIdx == 0)
+
+                        Button("다음 슬라이드") {
+                            viewModel.advancePresenterSlide()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                        .disabled(activeIdx + 1 >= deck.slides.count)
+                    }
                 }
                 .padding(12)
                 .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
@@ -594,7 +807,39 @@ public struct SlideEditorDetailPaneView: View {
     }
 }
 
-/// Rich interactive editor pane for PDF Studio (.pdf) with Page Thumbnails, Outline Tree, Annotation Toolbar, and Rotate/Convert controls.
+/// Native AppKit `PDFKit.PDFView` wrapper rendering real ISO 32000-1 bytes generated by `PDFBinarySerializer`.
+public struct PDFKitRepresentedView: NSViewRepresentable {
+    public let pdfData: Data
+    public let currentPageIndex: Int
+    public let zoomFactor: CGFloat
+
+    public init(pdfData: Data, currentPageIndex: Int, zoomFactor: CGFloat = 1.0) {
+        self.pdfData = pdfData
+        self.currentPageIndex = currentPageIndex
+        self.zoomFactor = zoomFactor
+    }
+
+    public func makeNSView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displaysPageBreaks = true
+        pdfView.document = PDFDocument(data: pdfData)
+        return pdfView
+    }
+
+    public func updateNSView(_ pdfView: PDFView, context: Context) {
+        let doc = PDFDocument(data: pdfData)
+        pdfView.document = doc
+        pdfView.scaleFactor = max(0.25, min(4.0, zoomFactor))
+        if let doc, currentPageIndex >= 0, currentPageIndex < doc.pageCount,
+           let page = doc.page(at: currentPageIndex) {
+            pdfView.go(to: page)
+        }
+    }
+}
+
+/// Rich interactive editor pane for PDF Studio (.pdf) with native PDFKit preview, Page Thumbnails, Annotation Toolbar, and Rotate/Convert controls.
 public struct PDFStudioEditorDetailPaneView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
@@ -609,6 +854,7 @@ public struct PDFStudioEditorDetailPaneView: View {
 
     public var body: some View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
+        let serializedPDFBytes = PDFBinarySerializer.encode(pdf)
 
         VStack(alignment: .leading, spacing: 14) {
             // PDF Studio Action & Annotation Toolbar
@@ -633,6 +879,15 @@ public struct PDFStudioEditorDetailPaneView: View {
                         .accessibilityLabel(AccessibilityTokens.pdfAnnotationToolLabel(toolTitle: kind.rawValue))
                     }
 
+                    Button {
+                        viewModel.executeRibbonCommand("pdf-mod-tooffice")
+                    } label: {
+                        Label("DOCX 편집 변환", systemImage: "arrow.right.doc.on.clipboard")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+
                     Spacer()
 
                     Text("주석 \(pdf.annotations.count)건 · 책갈피 \(pdf.outline.count)건")
@@ -642,6 +897,35 @@ public struct PDFStudioEditorDetailPaneView: View {
                 .padding(10)
                 .background(palette.cardSurface.swiftUIColor)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            // Native macOS PDFKit Canvas
+            if !serializedPDFBytes.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Label("네이티브 PDFKit 벡터 뷰어 (ISO 32000-1)", systemImage: "doc.viewfinder.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+                        Spacer()
+                        Text("컨테이너 크기: \(serializedPDFBytes.count) bytes")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    }
+                    PDFKitRepresentedView(
+                        pdfData: serializedPDFBytes,
+                        currentPageIndex: viewModel.selectedPDFPageIndex,
+                        zoomFactor: CGFloat(viewModel.zoomPercent / 100.0)
+                    )
+                    .frame(height: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .padding(12)
+                .background(palette.cardSurface.swiftUIColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(palette.border.swiftUIColor, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
             // PDF Pages List

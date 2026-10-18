@@ -279,4 +279,100 @@ final class WorkspaceUIParityTests: XCTestCase {
             XCTFail("Expected updated PDF payload")
         }
     }
+
+    @MainActor
+    func testAll140RibbonCommandsUndoRedoFileIORoundTripAndCustomTemplatePersistence() throws {
+        let vm = WorkspaceViewModel()
+
+        // 1. Verify all 140 RibbonCommandDescriptor IDs execute deterministically without a single no-op
+        var executedCount = 0
+        for module in OfficeModuleKind.allCases {
+            guard let moduleTab = vm.openTabs.first(where: { $0.moduleKind == module }) else {
+                XCTFail("Missing tab for \(module.rawValue)")
+                return
+            }
+            for category in RibbonCategory.allCases {
+                let actions = RibbonCategory.actions(for: category, module: module)
+                XCTAssertEqual(actions.count, 4)
+                for cmd in actions {
+                    vm.activeTabID = moduleTab.id
+                    vm.lastExecutedCommandSummary = nil
+                    vm.executeRibbonCommand(cmd.id)
+                    XCTAssertNotNil(
+                        vm.lastExecutedCommandSummary,
+                        "Ribbon command \(cmd.id) must update lastExecutedCommandSummary"
+                    )
+                    XCTAssertFalse(
+                        vm.lastExecutedCommandSummary?.isEmpty ?? true,
+                        "Ribbon command \(cmd.id) summary must not be empty"
+                    )
+                    executedCount += 1
+                }
+            }
+        }
+        XCTAssertEqual(executedCount, 140)
+
+        // 2. Verify Undo / Redo across Document, Sheet, Slide, and PDF tabs
+        let freshVM = WorkspaceViewModel()
+        let docTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.moduleKind == .document }))
+        freshVM.activeTabID = docTab.id
+        let originalDocPayload = try XCTUnwrap(freshVM.activeTab?.payload)
+        XCTAssertFalse(freshVM.canUndo)
+
+        freshVM.appendParagraphToActiveDocument(text: "Undo 검증용 신규 문단", style: .body)
+        XCTAssertTrue(freshVM.canUndo)
+        XCTAssertNotEqual(freshVM.activeTab?.payload, originalDocPayload)
+
+        freshVM.undo()
+        XCTAssertEqual(freshVM.activeTab?.payload, originalDocPayload)
+        XCTAssertTrue(freshVM.canRedo)
+
+        freshVM.redo()
+        XCTAssertNotEqual(freshVM.activeTab?.payload, originalDocPayload)
+        if case let .document(restoredDoc) = freshVM.activeTab?.payload {
+            XCTAssertEqual(restoredDoc.paragraphs.last?.text, "Undo 검증용 신규 문단")
+        } else {
+            XCTFail("Expected document payload after redo")
+        }
+
+        // Sheet Undo / Redo + error reporting on invalid cell address
+        let sheetTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.moduleKind == .sheet }))
+        freshVM.activeTabID = sheetTab.id
+        let originalSheetPayload = try XCTUnwrap(freshVM.activeTab?.payload)
+        freshVM.selectedSheetCell = "B2"
+        freshVM.formulaBarDraft = "777"
+        freshVM.applyFormulaBarEdit()
+        XCTAssertTrue(freshVM.canUndo)
+        freshVM.undo()
+        XCTAssertEqual(freshVM.activeTab?.payload, originalSheetPayload)
+        freshVM.redo()
+        if case let .sheet(redoneSheet) = freshVM.activeTab?.payload {
+            XCTAssertEqual(redoneSheet.rawValue(at: "B2"), "777")
+        }
+
+        freshVM.selectedSheetCell = "INVALID_99999999"
+        freshVM.formulaBarDraft = "100"
+        freshVM.applyFormulaBarEdit()
+        XCTAssertNotNil(freshVM.lastErrorMessage)
+
+        // 3. Verify openDocument(data:fileName:) and exportTabData(id:targetFormat:) round-trip
+        let exportedDocxBytes = try freshVM.exportTabData(id: docTab.id, targetFormat: .docx)
+        let openedDocTab = try freshVM.openDocument(data: exportedDocxBytes, fileName: "재열기_문서.docx")
+        XCTAssertEqual(openedDocTab.format, .docx)
+        if case let .document(reopenedDoc) = openedDocTab.payload {
+            XCTAssertEqual(reopenedDoc.paragraphs.last?.text, "Undo 검증용 신규 문단")
+        } else {
+            XCTFail("Expected reopened document payload")
+        }
+
+        // 4. Verify custom template saving preserves modified OpenTabPayload and openTab(from:) restores it
+        freshVM.activeTabID = openedDocTab.id
+        freshVM.saveActiveTabAsCustomTemplate(title: "커스텀_검증_양식", subtitle: "수정된 페이로드 보존 확인")
+        let savedTemplate = try XCTUnwrap(freshVM.customTemplates.first)
+        freshVM.openTab(from: savedTemplate)
+        let restoredFromTemplateTab = try XCTUnwrap(freshVM.activeTab)
+        XCTAssertNotEqual(restoredFromTemplateTab.id, openedDocTab.id)
+        XCTAssertEqual(restoredFromTemplateTab.payload, openedDocTab.payload)
+    }
 }
+

@@ -1,4 +1,5 @@
 import XCTest
+import PDFKit
 @testable import EasyOfficeDesignSystem
 @testable import EasyOfficeCore
 
@@ -574,4 +575,68 @@ final class SmartProductivityToolsTests: XCTestCase {
         XCTAssertTrue(summary.keywords.contains("기반"))
         XCTAssertFalse(summary.keywords.contains("기반으"))
     }
+
+    func testPDFBinarySerializerGeneratesByteExactXrefAndLoadsInNativePDFKit() throws {
+        let model = PDFStudioDocumentModel(
+            title: "ISO 32000-1 XREF & PDFKit 검증",
+            pages: [
+                PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: "Page One Content"),
+                PDFPageDescriptor(pageNumber: 2, rotationDegrees: 90, extractedText: "Page Two Rotated"),
+                PDFPageDescriptor(pageNumber: 3, rotationDegrees: 180, extractedText: "Page Three Summary")
+            ],
+            annotations: [
+                PDFAnnotationItem(pageNumber: 1, kind: .highlight, content: "하이라이트 주석", author: "QA")
+            ],
+            outline: [
+                PDFOutlineNode(title: "1장", targetPageNumber: 1),
+                PDFOutlineNode(title: "2장", targetPageNumber: 2)
+            ]
+        )
+
+        let encoded = PDFBinarySerializer.encode(model)
+        let rawText = String(decoding: encoded, as: UTF8.self)
+
+        // Verify startxref points to the exact byte offset of "xref\n"
+        guard let xrefRange = encoded.range(of: Data("xref\n".utf8)) else {
+            XCTFail("Missing xref table in encoded PDF")
+            return
+        }
+        XCTAssertTrue(
+            rawText.contains("startxref\n\(xrefRange.lowerBound)\n%%EOF"),
+            "startxref must record exact byte offset \(xrefRange.lowerBound)"
+        )
+
+        // Verify Object 1 offset in xref matches actual byte offset of "1 0 obj\n"
+        if let obj1Range = encoded.range(of: Data("1 0 obj\n".utf8)) {
+            let expectedEntry = String(format: "%010d 00000 n ", obj1Range.lowerBound)
+            XCTAssertTrue(rawText.contains(expectedEntry), "xref must contain exact offset entry \(expectedEntry)")
+        } else {
+            XCTFail("Missing 1 0 obj in encoded PDF")
+        }
+
+        // Verify macOS native PDFKit parses the encoded bytes and reports exact page count
+        let nativePDF = PDFKit.PDFDocument(data: encoded)
+        XCTAssertNotNil(nativePDF)
+        XCTAssertEqual(nativePDF?.pageCount, 3)
+
+        // Verify long sentence without commas splits on a whitespace word boundary, never slicing a word in half
+        let wordBoundarySentence = "차세대 네이티브 오피스 워크스페이스는 단일 윈도우 환경에서 다중 포맷 문서를 신속하게 처리하고 높은 보안 무결성과 일관된 사용자 경험을 동시에 보장합니다"
+        let doc = OfficeDocumentModel(
+            title: "장문 공백 경계 분할 검증",
+            paragraphs: [ParagraphBlock(text: wordBoundarySentence)]
+        )
+        let suggestions = LocalSmartDocumentAssistant.analyzeWritingQuality(doc)
+        let splitSuggestion = try XCTUnwrap(suggestions.first(where: { $0.issueKind == "장문 분할 권장" }))
+        XCTAssertTrue(splitSuggestion.suggestedRewrite.contains(". "))
+        // Every word from original sentence must remain intact (ignoring trailing period added at split point)
+        let originalWords = Set(wordBoundarySentence.split(separator: " ").map(String.init))
+        let rewrittenWords = Set(
+            splitSuggestion.suggestedRewrite
+                .replacingOccurrences(of: ". ", with: " ")
+                .split(separator: " ")
+                .map(String.init)
+        )
+        XCTAssertEqual(originalWords, rewrittenWords)
+    }
 }
+
