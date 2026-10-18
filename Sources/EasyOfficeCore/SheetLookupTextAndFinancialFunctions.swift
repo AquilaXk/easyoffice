@@ -53,6 +53,12 @@ extension WorksheetModel {
       return .failure("#VALUE!")
     }
 
+    guard (-65535...65535).contains(rowDelta),
+      (-65535...65535).contains(colDelta)
+    else {
+      return .failure("#REF!")
+    }
+
     let baseRow = min(baseRange.start.row, baseRange.end.row)
     let baseCol = min(baseRange.start.column, baseRange.end.column)
     let targetRow = baseRow + rowDelta
@@ -77,7 +83,7 @@ extension WorksheetModel {
       guard let hNum = hVal.numericValue, let hInt = Self.safeInt(hNum) else {
         return .failure("#VALUE!")
       }
-      guard hInt >= 1 else {
+      guard (1...65536).contains(hInt) else {
         return .failure("#REF!")
       }
       height = hInt
@@ -94,7 +100,7 @@ extension WorksheetModel {
       guard let wNum = wVal.numericValue, let wInt = Self.safeInt(wNum) else {
         return .failure("#VALUE!")
       }
-      guard wInt >= 1 else {
+      guard (1...65536).contains(wInt) else {
         return .failure("#REF!")
       }
       width = wInt
@@ -709,6 +715,28 @@ extension WorksheetModel {
         return .text(CellNumberFormat.formatGroupedNumber(num, fractionDigits: decimals))
       }
       return .text(String(format: "%.\(decimals)f", num))
+    case "CLEAN":
+      guard frame.count == 1 else { return .error("#VALUE!") }
+      let raw = frame.arg(0, in: self).description
+      let cleaned = String(raw.unicodeScalars.filter { $0.value >= 32 })
+      return .text(cleaned)
+    case "CHAR":
+      guard frame.count == 1,
+        let num = frame.arg(0, in: self).numericValue,
+        let code = Self.safeInt(trunc(num)),
+        (1...1_114_111).contains(code),
+        let scalar = UnicodeScalar(code)
+      else {
+        return .error("#VALUE!")
+      }
+      return .text(String(scalar))
+    case "CODE":
+      guard frame.count == 1 else { return .error("#VALUE!") }
+      let str = frame.arg(0, in: self).description
+      guard let scalar = str.unicodeScalars.first else {
+        return .error("#VALUE!")
+      }
+      return .number(Double(scalar.value))
     default:
       return nil
     }
@@ -801,6 +829,7 @@ extension WorksheetModel {
         }
         let guess = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 0.1) : 0.1
         var rate = guess <= -1.0 ? 0.1 : guess
+        var lastResidual = Double.infinity
         for _ in 0..<100 {
           var npv = 0.0
           var dNpv = 0.0
@@ -816,19 +845,23 @@ extension WorksheetModel {
               dNpv -= tDouble * cf / pow(base, tDouble + 1.0)
             }
           }
-          if abs(npv) < 1e-9 {
+          lastResidual = abs(npv)
+          if lastResidual < 1e-9 {
             return .number(rate)
           }
           guard abs(dNpv) > 1e-12, dNpv.isFinite else {
             break
           }
           let nextRate = rate - npv / dNpv
-          if abs(nextRate - rate) < 1e-9 {
+          if abs(nextRate - rate) < 1e-9, lastResidual < 1e-5 {
             return .number(nextRate)
           }
           rate = max(-0.9999, nextRate)
         }
-        return rate.isFinite ? .number(rate) : .error("#NUM!")
+        guard rate.isFinite, lastResidual < 1e-5 else {
+          return .error("#NUM!")
+        }
+        return .number(rate)
       }
 
     case "NPER":
@@ -1081,6 +1114,9 @@ extension WorksheetModel {
       else {
         return .error("#VALUE!")
       }
+      guard abs(days) <= 100_000 else {
+        return .error("#NUM!")
+      }
       var current = startDate
       var remaining = abs(days)
       let step = days >= 0 ? 1 : -1
@@ -1106,6 +1142,11 @@ extension WorksheetModel {
       let isReverse = startDate > endDate
       let fromDate = isReverse ? endDate : startDate
       let toDate = isReverse ? startDate : endDate
+      let daySpan = abs(
+        Self.utcCalendar.dateComponents([.day], from: fromDate, to: toDate).day ?? 0)
+      guard daySpan <= 100_000 else {
+        return .error("#NUM!")
+      }
       var current = fromDate
       var count = 0
       while current <= toDate {
@@ -1198,6 +1239,7 @@ extension WorksheetModel {
   }()
 
   internal static func makeUTCDate(year: Int, month: Int, day: Int) -> Date? {
+    guard (1...9999).contains(year) else { return nil }
     var comps = DateComponents()
     comps.year = year
     comps.month = month

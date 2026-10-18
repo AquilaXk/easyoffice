@@ -238,6 +238,10 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     if title.range(of: trimmed, options: [.caseInsensitive]) != nil {
       title = title.replacingOccurrences(of: trimmed, with: "████", options: [.caseInsensitive])
     }
+    if watermarkText.range(of: trimmed, options: [.caseInsensitive]) != nil {
+      watermarkText = watermarkText.replacingOccurrences(
+        of: trimmed, with: "████", options: [.caseInsensitive])
+    }
     for idx in annotations.indices {
       if annotations[idx].content.range(of: trimmed, options: [.caseInsensitive]) != nil {
         annotations[idx].content = annotations[idx].content.replacingOccurrences(
