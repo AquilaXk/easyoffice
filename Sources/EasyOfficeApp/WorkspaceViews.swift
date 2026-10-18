@@ -1,9 +1,12 @@
 import SwiftUI
 import AppKit
 import PDFKit
+import UniformTypeIdentifiers
 import Observation
 import EasyOfficeDesignSystem
 import EasyOfficeCore
+
+public typealias WorkspaceFilePanelCoordinator = WorkspaceFileDialogPresenter
 
 /// Native macOS file dialog, print panel, and pasteboard presenter for office documents.
 @MainActor
@@ -17,6 +20,26 @@ public enum WorkspaceFileDialogPresenter {
         if panel.runModal() == .OK, let url = panel.url {
             do {
                 _ = try viewModel.loadFromDisk(url: url)
+            } catch {
+                viewModel.lastErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    public static func presentOpenImagePanel(for viewModel: WorkspaceViewModel) {
+        presentOpenImagePanel(viewModel: viewModel)
+    }
+
+    public static func presentOpenImagePanel(viewModel: WorkspaceViewModel) {
+        let panel = NSOpenPanel()
+        panel.title = "본문 첨부 이미지 파일 선택"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.png, .jpeg, .tiff]
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try viewModel.loadImageAttachmentFromDisk(url: url)
             } catch {
                 viewModel.lastErrorMessage = error.localizedDescription
             }
@@ -45,9 +68,7 @@ public enum WorkspaceFileDialogPresenter {
             if let pdfDoc = PDFDocument(data: pdfBytes),
                let printOp = pdfDoc.printOperation(for: .shared, scalingMode: .pageScaleToFit, autoRotate: true) {
                 printOp.jobTitle = activeTab.fileName
-                if NSApp.keyWindow != nil {
-                    printOp.run()
-                }
+                if NSApp.keyWindow != nil { printOp.run() }
             }
             viewModel.lastExecutedCommandSummary = "인쇄 작업 준비 완료: \(activeTab.fileName) (\(pdfBytes.count) bytes)"
         } catch {
@@ -94,19 +115,12 @@ public enum WorkspaceFileDialogPresenter {
     public static func pasteFromPasteboard(viewModel: WorkspaceViewModel) {
         guard let activeTab = viewModel.activeTab,
               let pasted = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !pasted.isEmpty else {
-            return
-        }
+              !pasted.isEmpty else { return }
         switch activeTab.payload {
-        case .document:
-            viewModel.appendParagraphToActiveDocument(text: pasted, style: .body)
-        case .sheet:
-            viewModel.formulaBarDraft = pasted
-            viewModel.applyFormulaBarEdit()
-        case .slide:
-            viewModel.addSlideBulletPoint(slideIndex: viewModel.selectedSlideIndex, text: pasted)
-        case .pdf:
-            viewModel.addPDFAnnotation(kind: .stickyNote, content: pasted)
+        case .document: viewModel.appendParagraphToActiveDocument(text: pasted, style: .body)
+        case .sheet: viewModel.formulaBarDraft = pasted; viewModel.applyFormulaBarEdit()
+        case .slide: viewModel.addSlideBulletPoint(slideIndex: viewModel.selectedSlideIndex, text: pasted)
+        case .pdf: viewModel.addPDFAnnotation(kind: .stickyNote, content: pasted)
         }
         viewModel.lastExecutedCommandSummary = "클립보드 붙여넣기 완료"
     }
@@ -171,89 +185,54 @@ struct TopDocumentTabStripView: View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
         HStack(spacing: 8) {
-            Button {
-                viewModel.isShowingHomeHub.toggle()
-            } label: {
+            Button { viewModel.isShowingHomeHub.toggle() } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "square.grid.2x2.fill")
-                    Text("홈 허브")
-                        .font(.system(size: 12, weight: .semibold))
+                    Text("홈 허브").font(.system(size: 12, weight: .semibold))
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(
-                    viewModel.isShowingHomeHub
-                        ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                        : EasyOfficeDesignTokens.brand100.swiftUIColor
-                )
-                .foregroundStyle(
-                    viewModel.isShowingHomeHub
-                        ? Color.white
-                        : EasyOfficeDesignTokens.brand900.swiftUIColor
-                )
+                .background(viewModel.isShowingHomeHub ? EasyOfficeDesignTokens.brand700.swiftUIColor : EasyOfficeDesignTokens.brand100.swiftUIColor)
+                .foregroundStyle(viewModel.isShowingHomeHub ? Color.white : EasyOfficeDesignTokens.brand900.swiftUIColor)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
 
             HStack(spacing: 4) {
-                Button {
-                    WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
-                } label: {
-                    Label("열기", systemImage: "folder")
-                        .font(.system(size: 11, weight: .medium))
+                Button { WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel) } label: {
+                    Label("열기", systemImage: "folder").font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
 
-                Button {
-                    WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
-                } label: {
-                    Label("저장", systemImage: "square.and.arrow.down")
-                        .font(.system(size: 11, weight: .medium))
+                Button { WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel) } label: {
+                    Label("저장", systemImage: "square.and.arrow.down").font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(viewModel.activeTab == nil)
 
-                Button {
-                    WorkspaceFileDialogPresenter.presentPrintPanel(viewModel: viewModel)
-                } label: {
-                    Label("인쇄 (⌘P)", systemImage: "printer")
-                        .font(.system(size: 11, weight: .medium))
+                Button { WorkspaceFileDialogPresenter.presentPrintPanel(viewModel: viewModel) } label: {
+                    Label("인쇄 (⌘P)", systemImage: "printer").font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(viewModel.activeTab == nil)
 
-                Button {
-                    viewModel.isFindReplaceBarVisible.toggle()
-                } label: {
-                    Label("찾기 (⌘F)", systemImage: "magnifyingglass")
-                        .font(.system(size: 11, weight: .medium))
+                Button { viewModel.isFindReplaceBarVisible.toggle() } label: {
+                    Label("찾기 (⌘F)", systemImage: "magnifyingglass").font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(viewModel.activeTab == nil)
 
-                Button {
-                    viewModel.undo()
-                } label: {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 11, weight: .semibold))
+                Button { viewModel.undo() } label: {
+                    Image(systemName: "arrow.uturn.backward").font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(!viewModel.canUndo)
                 .help("실행 취소 (⌘Z)")
 
-                Button {
-                    viewModel.redo()
-                } label: {
-                    Image(systemName: "arrow.uturn.forward")
-                        .font(.system(size: 11, weight: .semibold))
+                Button { viewModel.redo() } label: {
+                    Image(systemName: "arrow.uturn.forward").font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(!viewModel.canRedo)
                 .help("다시 실행 (⇧⌘Z)")
             }
@@ -294,9 +273,7 @@ struct TopDocumentTabStripView: View {
                                     .frame(width: 6, height: 6)
                             }
 
-                            Button {
-                                viewModel.closeTab(id: tab.id)
-                            } label: {
+                            Button { viewModel.closeTab(id: tab.id) } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -305,11 +282,7 @@ struct TopDocumentTabStripView: View {
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(
-                            isSelected
-                                ? palette.cardSurface.swiftUIColor
-                                : palette.elevatedSurface.swiftUIColor
-                        )
+                        .background(isSelected ? palette.cardSurface.swiftUIColor : palette.elevatedSurface.swiftUIColor)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(
@@ -320,36 +293,19 @@ struct TopDocumentTabStripView: View {
                                 )
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .accessibilityLabel(
-                            AccessibilityTokens.tabLabel(
-                                fileName: tab.fileName,
-                                module: tab.moduleKind,
-                                isPinned: tab.isPinned,
-                                isModified: tab.isModified
-                            )
-                        )
+                        .accessibilityLabel(AccessibilityTokens.tabLabel(fileName: tab.fileName, module: tab.moduleKind, isPinned: tab.isPinned, isModified: tab.isModified))
                         .accessibilityHint(AccessibilityTokens.tabHint)
                         .onTapGesture {
                             viewModel.activeTabID = tab.id
                             viewModel.isShowingHomeHub = false
                         }
                         .contextMenu {
-                            Button(tab.isPinned ? "탭 고정 해제" : "탭 고정") {
-                                viewModel.togglePinTab(id: tab.id)
-                            }
-                            Button(tab.isFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가") {
-                                viewModel.toggleFavoriteTab(id: tab.id)
-                            }
-                            Button("탭 복제") {
-                                viewModel.duplicateTab(id: tab.id)
-                            }
+                            Button(tab.isPinned ? "탭 고정 해제" : "탭 고정") { viewModel.togglePinTab(id: tab.id) }
+                            Button(tab.isFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가") { viewModel.toggleFavoriteTab(id: tab.id) }
+                            Button("탭 복제") { viewModel.duplicateTab(id: tab.id) }
                             if tab.id != viewModel.activeTabID {
                                 Button(viewModel.splitSecondaryTabID == tab.id ? "스플릿 뷰 닫기" : "우측 스플릿 뷰로 열기") {
-                                    if viewModel.splitSecondaryTabID == tab.id {
-                                        viewModel.enableSplitView(secondaryTabID: nil)
-                                    } else {
-                                        viewModel.enableSplitView(secondaryTabID: tab.id)
-                                    }
+                                    viewModel.enableSplitView(secondaryTabID: viewModel.splitSecondaryTabID == tab.id ? nil : tab.id)
                                 }
                             }
                         }
@@ -390,23 +346,13 @@ struct ContextRibbonBarView: View {
             HStack(spacing: 12) {
                 ForEach(RibbonCategory.allCases) { category in
                     let isSelected = viewModel.activeRibbonCategory == category
-                    Button {
-                        viewModel.activeRibbonCategory = category
-                    } label: {
+                    Button { viewModel.activeRibbonCategory = category } label: {
                         Text(category.title(for: activeModule))
                             .font(.system(size: 12, weight: isSelected ? .bold : .medium))
-                            .foregroundStyle(
-                                isSelected
-                                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                                    : palette.secondaryText.swiftUIColor
-                            )
+                            .foregroundStyle(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : palette.secondaryText.swiftUIColor)
                             .padding(.vertical, 4)
                             .padding(.horizontal, 8)
-                            .background(
-                                isSelected
-                                    ? EasyOfficeDesignTokens.brand100.swiftUIColor
-                                    : Color.clear
-                            )
+                            .background(isSelected ? EasyOfficeDesignTokens.brand100.swiftUIColor : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     .buttonStyle(.plain)
@@ -415,38 +361,24 @@ struct ContextRibbonBarView: View {
                 Spacer()
 
                 if viewModel.splitSecondaryTab != nil {
-                    Button {
-                        viewModel.enableSplitView(secondaryTabID: nil)
-                    } label: {
-                        Label("스플릿 해제", systemImage: "rectangle.split.2x1.slash")
-                            .font(.system(size: 11, weight: .semibold))
+                    Button { viewModel.enableSplitView(secondaryTabID: nil) } label: {
+                        Label("스플릿 해제", systemImage: "rectangle.split.2x1.slash").font(.system(size: 11, weight: .semibold))
                     }
                 } else if let candidate = viewModel.openTabs.first(where: { $0.id != viewModel.activeTabID }) {
-                    Button {
-                        viewModel.enableSplitView(secondaryTabID: candidate.id)
-                    } label: {
-                        Label("스플릿 뷰", systemImage: "rectangle.split.2x1")
-                            .font(.system(size: 11))
+                    Button { viewModel.enableSplitView(secondaryTabID: candidate.id) } label: {
+                        Label("스플릿 뷰", systemImage: "rectangle.split.2x1").font(.system(size: 11))
                     }
                 }
 
-                Button {
-                    viewModel.showLeftNavigator.toggle()
-                } label: {
-                    Label("내비게이터", systemImage: "sidebar.left")
-                        .font(.system(size: 11))
+                Button { viewModel.showLeftNavigator.toggle() } label: {
+                    Label("내비게이터", systemImage: "sidebar.left").font(.system(size: 11))
                 }
 
-                Button {
-                    viewModel.showRightInspector.toggle()
-                } label: {
-                    Label("인스펙터", systemImage: "sidebar.right")
-                        .font(.system(size: 11))
+                Button { viewModel.showRightInspector.toggle() } label: {
+                    Label("인스펙터", systemImage: "sidebar.right").font(.system(size: 11))
                 }
 
-                Button {
-                    viewModel.isRibbonCollapsed.toggle()
-                } label: {
+                Button { viewModel.isRibbonCollapsed.toggle() } label: {
                     Image(systemName: viewModel.isRibbonCollapsed ? "chevron.down" : "chevron.up")
                         .font(.system(size: 11, weight: .semibold))
                 }
@@ -456,9 +388,7 @@ struct ContextRibbonBarView: View {
             if !viewModel.isRibbonCollapsed {
                 HStack(spacing: 8) {
                     ForEach(commands) { command in
-                        Button {
-                            viewModel.executeRibbonCommand(command.id)
-                        } label: {
+                        Button { viewModel.executeRibbonCommand(command.id) } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: command.symbolName)
                                     .font(.system(size: 11))
@@ -473,10 +403,7 @@ struct ContextRibbonBarView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(palette.elevatedSurface.swiftUIColor)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(palette.border.swiftUIColor, lineWidth: 1)
-                            )
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.border.swiftUIColor, lineWidth: 1))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
@@ -512,12 +439,10 @@ struct FindAndReplaceBarView: View {
                 .font(.system(size: 11))
                 .frame(width: 180)
 
-            Button("모두 바꾸기") {
-                viewModel.performFindAndReplace()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            Button("모두 바꾸기") { viewModel.performFindAndReplace() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
 
             Text("\(viewModel.lastFindReplaceCount)건 변경됨")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -529,9 +454,7 @@ struct FindAndReplaceBarView: View {
 
             Spacer()
 
-            Button {
-                viewModel.isFindReplaceBarVisible = false
-            } label: {
+            Button { viewModel.isFindReplaceBarVisible = false } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -560,9 +483,7 @@ struct LeftNavigatorPanelView: View {
             switch tab.payload {
             case let .document(doc):
                 ForEach(doc.extractOutline()) { heading in
-                    Button {
-                        viewModel.selectedParagraphID = heading.id
-                    } label: {
+                    Button { viewModel.selectedParagraphID = heading.id } label: {
                         Text("• \(heading.text)")
                             .font(.system(size: 12, weight: viewModel.selectedParagraphID == heading.id ? .bold : .medium))
                             .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -574,9 +495,7 @@ struct LeftNavigatorPanelView: View {
             case let .sheet(sheet):
                 let formulaCells = sheet.cellsByCoordinate
                     .filter { $0.value.trimmingCharacters(in: .whitespaces).hasPrefix("=") }
-                    .keys
-                    .sorted()
-                    .map { CellAddress(packed: $0).a1Notation }
+                    .keys.sorted().map { CellAddress(packed: $0).a1Notation }
 
                 Text("워크북 시트 목록 (\(sheet.allSheetNames.count))")
                     .font(.system(size: 11, weight: .semibold))
@@ -584,9 +503,7 @@ struct LeftNavigatorPanelView: View {
 
                 ForEach(Array(sheet.allSheetNames.enumerated()), id: \.offset) { idx, sheetName in
                     let isSelectedSheet = idx == sheet.activeSheetIndex
-                    Button {
-                        viewModel.selectWorksheetTab(index: idx)
-                    } label: {
+                    Button { viewModel.selectWorksheetTab(index: idx) } label: {
                         HStack(spacing: 6) {
                             Image(systemName: isSelectedSheet ? "tablecells.fill" : "tablecells")
                                 .font(.system(size: 10))
@@ -605,7 +522,6 @@ struct LeftNavigatorPanelView: View {
                 }
 
                 Divider()
-
                 Text("내장 함수 카탈로그: \(WorksheetModel.supportedFunctionNames.count)종")
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -614,9 +530,7 @@ struct LeftNavigatorPanelView: View {
                     .foregroundStyle(palette.secondaryText.swiftUIColor)
             case let .slide(deck):
                 ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
-                    Button {
-                        viewModel.selectedSlideIndex = idx
-                    } label: {
+                    Button { viewModel.selectedSlideIndex = idx } label: {
                         Text("\(idx + 1). \(slide.title)")
                             .font(.system(size: 12, weight: viewModel.selectedSlideIndex == idx ? .bold : .medium))
                             .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -625,9 +539,7 @@ struct LeftNavigatorPanelView: View {
                 }
             case let .pdf(pdf):
                 ForEach(Array(pdf.pages.enumerated()), id: \.element.id) { idx, page in
-                    Button {
-                        viewModel.selectedPDFPageIndex = idx
-                    } label: {
+                    Button { viewModel.selectedPDFPageIndex = idx } label: {
                         Text("페이지 \(page.pageNumber) (\(page.rotationDegrees)°)")
                             .font(.system(size: 12, weight: viewModel.selectedPDFPageIndex == idx ? .bold : .medium))
                             .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -666,11 +578,7 @@ struct ActiveEditorCanvasRouterView: View {
     var body: some View {
         HStack(spacing: 0) {
             EditorCanvasSinglePaneView(viewModel: viewModel, tab: tab, isPrimaryPane: true)
-                .frame(
-                    minWidth: EasyOfficeDesignTokens.LayoutMetrics.splitPaneMinimumWidth,
-                    maxWidth: .infinity,
-                    maxHeight: .infinity
-                )
+                .frame(minWidth: EasyOfficeDesignTokens.LayoutMetrics.splitPaneMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel(AccessibilityTokens.splitViewPaneLabel(isPrimary: true, fileName: tab.fileName))
 
             if let secondaryTab = viewModel.splitSecondaryTab {
@@ -679,11 +587,7 @@ struct ActiveEditorCanvasRouterView: View {
                     .frame(width: 2)
 
                 EditorCanvasSinglePaneView(viewModel: viewModel, tab: secondaryTab, isPrimaryPane: false)
-                    .frame(
-                        minWidth: EasyOfficeDesignTokens.LayoutMetrics.splitPaneMinimumWidth,
-                        maxWidth: .infinity,
-                        maxHeight: .infinity
-                    )
+                    .frame(minWidth: EasyOfficeDesignTokens.LayoutMetrics.splitPaneMinimumWidth, maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityLabel(AccessibilityTokens.splitViewPaneLabel(isPrimary: false, fileName: secondaryTab.fileName))
             }
         }
@@ -713,231 +617,6 @@ struct EditorCanvasSinglePaneView: View {
             }
             .padding(24)
         }
-    }
-}
-
-typealias RightContextualInspectorView = RightContextInspectorView
-
-struct RightContextInspectorView: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Bindable var viewModel: WorkspaceViewModel
-    let tab: WorkspaceTabItem
-
-    var body: some View {
-        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
-
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("속성 인스펙터")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-
-                Text("파일명: \(tab.fileName)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-                Text("규격: \(tab.format.standardSpecification)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-                HStack(spacing: 6) {
-                    Text("작성자:")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(palette.secondaryText.swiftUIColor)
-                    TextField("작성자 이름", text: $viewModel.authorName)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11))
-                }
-
-                Divider()
-
-                switch tab.payload {
-                case let .document(doc):
-                    let stats = doc.computeStatistics()
-                    let modulePrefix = tab.moduleKind == .hwp ? "hwp" : "doc"
-                    Text("문서 통계 및 원고지 검산")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-                    Text("문단 수: \(stats.paragraphCount) · 표: \(stats.tableCount) · 이미지: \(doc.images.count)")
-                        .font(.system(size: 11))
-                    Text("단어 수: \(stats.wordCount)")
-                        .font(.system(size: 11))
-                    Text("글자 수(공백 포함): \(stats.characterCountWithSpaces)")
-                        .font(.system(size: 11))
-                    Text("200자 원고지: \(stats.manuscriptPages200)매")
-                        .font(.system(size: 11))
-                    Text("각주: \(doc.footnotes.count)건 · 변경 추적: \(doc.revisions.count)건")
-                        .font(.system(size: 11))
-                        .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Button("변경 내용 추적 전환") {
-                            viewModel.executeRibbonCommand("\(modulePrefix)-review-track")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("단 나누기 전환") {
-                            viewModel.executeRibbonCommand("\(modulePrefix)-layout-columns")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("용지 방향 전환") {
-                            viewModel.executeRibbonCommand("\(modulePrefix)-layout-orient")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("개인정보/메타데이터 정리") {
-                            viewModel.executeRibbonCommand("\(modulePrefix)-review-security")
-                            viewModel.scrubActiveTabMetadata()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                    }
-
-                case let .sheet(sheet):
-                    let selectedAddr = (try? CellAddress(a1Notation: viewModel.selectedSheetCell))
-                        ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-                    let formattedResult = sheet.formattedDisplayValue(at: selectedAddr)
-
-                    Text("시트 수식 및 검증 속성")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-                    Text("선택된 셀: \(viewModel.selectedSheetCell)")
-                        .font(.system(size: 11, design: .monospaced))
-                    Text("원시 수식: \(sheet.rawValue(at: viewModel.selectedSheetCell))")
-                        .font(.system(size: 11, design: .monospaced))
-                    Text("평가 결과: \(formattedResult)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button("통화/백분율/소수 서식 전환") {
-                            viewModel.executeRibbonCommand("sheet-home-style")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Toggle("머리글 행 고정", isOn: $viewModel.isHeaderRowFrozen)
-                            .font(.system(size: 11, weight: .medium))
-
-                        Button(viewModel.activeConditionalFormatRule == nil ? "조건부 서식 켜기 (>100)" : "조건부 서식 끄기") {
-                            viewModel.executeRibbonCommand("sheet-mod-condfmt")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("시트 추가 (+)") {
-                            viewModel.addWorksheetTab()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .tint(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
-                    }
-
-                case let .slide(deck):
-                    let sIdx = deck.slides.indices.contains(viewModel.selectedSlideIndex) ? viewModel.selectedSlideIndex : 0
-                    let activeSlide = deck.slides.indices.contains(sIdx) ? deck.slides[sIdx] : nil
-                    let targetElementID = viewModel.selectedSlideElementID ?? activeSlide?.elements.first?.id
-
-                    Text("슬라이드 마스터 및 레이아웃")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-                    Text("화면 비율: \(deck.aspectRatio.rawValue)")
-                        .font(.system(size: 11))
-                    Text("총 슬라이드: \(deck.slides.count)장")
-                        .font(.system(size: 11))
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Button("화면 비율 전환") {
-                            viewModel.executeRibbonCommand("slide-layout-size")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("전환 효과 변경") {
-                            viewModel.executeRibbonCommand("slide-mod-transition")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("스마트 스냅 정렬") {
-                            viewModel.executeRibbonCommand("slide-mod-snap")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        if let elementID = targetElementID {
-                            HStack(spacing: 6) {
-                                Button("폭 -20") {
-                                    viewModel.resizeSlideElement(elementID: elementID, deltaWidth: -20, deltaHeight: 0)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-
-                                Button("폭 +20") {
-                                    viewModel.resizeSlideElement(elementID: elementID, deltaWidth: 20, deltaHeight: 0)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-                        }
-                    }
-
-                case let .pdf(pdf):
-                    Text("PDF 스튜디오 속성")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-                    Text("총 페이지: \(pdf.pages.count)p")
-                        .font(.system(size: 11))
-                    Text("주석 항목: \(pdf.annotations.count)건")
-                        .font(.system(size: 11))
-                    Text("책갈피 노드: \(pdf.outline.count)건")
-                        .font(.system(size: 11))
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Button("90° 회전") {
-                            viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("하이라이트 주석 추가") {
-                            viewModel.addPDFAnnotation(kind: .highlight, content: "하이라이트 주석")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("페이지 분할") {
-                            viewModel.executeRibbonCommand("pdf-mod-splitmerge")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-
-                        Button("문서(.docx)로 변환") {
-                            viewModel.executeRibbonCommand("pdf-mod-tooffice")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(14)
-        }
-        .background(palette.cardSurface.swiftUIColor)
     }
 }
 
@@ -976,19 +655,11 @@ struct BottomWorkspaceStatusBarView: View {
 
             Spacer()
 
-            Button("-") {
-                viewModel.setZoom(viewModel.zoomPercent - 25.0)
-            }
-            .buttonStyle(.plain)
-
+            Button("-") { viewModel.setZoom(viewModel.zoomPercent - 25.0) }.buttonStyle(.plain)
             Text("배율: \(Int(viewModel.zoomPercent))%")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-            Button("+") {
-                viewModel.setZoom(viewModel.zoomPercent + 25.0)
-            }
-            .buttonStyle(.plain)
+            Button("+") { viewModel.setZoom(viewModel.zoomPercent + 25.0) }.buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .frame(height: EasyOfficeDesignTokens.LayoutMetrics.statusBarHeight)

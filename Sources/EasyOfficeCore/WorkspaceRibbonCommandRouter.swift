@@ -1,139 +1,6 @@
 import Foundation
 import EasyOfficeDesignSystem
 
-/// Concrete command button descriptor displayed inside a context ribbon bar category.
-public struct RibbonCommandDescriptor: Sendable, Equatable, Identifiable {
-    public let id: String
-    public let title: String
-    public let symbolName: String
-    public let shortcutHint: String
-
-    public init(id: String, title: String, symbolName: String, shortcutHint: String) {
-        self.id = id
-        self.title = title
-        self.symbolName = symbolName
-        self.shortcutHint = shortcutHint
-    }
-}
-
-/// Context-aware ribbon tabs adapting to the active document module.
-public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
-    case home = "홈 (Home)"
-    case insert = "삽입 (Insert)"
-    case layout = "모양/레이아웃 (Layout)"
-    case formulasAndData = "수식·데이터 (Data)"
-    case moduleSpecific = "전용 도구 (Module)"
-    case review = "검토/보안 (Review)"
-    case view = "보기 (View)"
-
-    public var id: String { rawValue }
-
-    public func title(for module: OfficeModuleKind) -> String {
-        switch self {
-        case .home: return "홈"
-        case .insert: return "삽입"
-        case .layout: return "레이아웃"
-        case .formulasAndData: return "수식·데이터"
-        case .moduleSpecific:
-            switch module {
-            case .document: return "참조·메일머지"
-            case .hwp: return "공문서·누름틀"
-            case .sheet: return "피벗·차트"
-            case .slide: return "슬라이드·전환"
-            case .pdf: return "주석·변환"
-            }
-        case .review: return "검토"
-        case .view: return "보기"
-        }
-    }
-
-    /// Returns context-sensitive ribbon commands for a given category and active office module.
-    public static func actions(for category: RibbonCategory, module: OfficeModuleKind) -> [RibbonCommandDescriptor] {
-        switch category {
-        case .home:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-bold", title: "굵게", symbolName: "bold", shortcutHint: "⌘B"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-italic", title: "기울임", symbolName: "italic", shortcutHint: "⌘I"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-underline", title: "밑줄", symbolName: "underline", shortcutHint: "⌘U"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-style", title: "스타일 적용", symbolName: "textformat.size", shortcutHint: "⌥⌘S")
-            ]
-        case .insert:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-table", title: "표 삽입", symbolName: "tablecells", shortcutHint: "⌃⌘T"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-chart", title: "차트 개체", symbolName: "chart.bar.xaxis", shortcutHint: "⌃⌘C"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-shape", title: "도형·다이어그램", symbolName: "square.on.circle", shortcutHint: "⌃⌘S"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-link", title: "책갈피·링크", symbolName: "link", shortcutHint: "⌘K")
-            ]
-        case .layout:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-paper", title: "용지 규격 (A4/Letter)", symbolName: "doc.viewfinder", shortcutHint: "⇧⌘P"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-orientation", title: "용지 방향 전환", symbolName: "rectangle.portrait.rotate", shortcutHint: "⌥⌘O"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-columns", title: "다단 설정", symbolName: "rectangle.split.3x1", shortcutHint: "⌥⌘M"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-margins", title: "여백 프리셋", symbolName: "arrow.up.left.and.down.right.magnifyingglass", shortcutHint: "⌥⌘G")
-            ]
-        case .formulasAndData:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-autosum", title: "자동 합계 (SUM)", symbolName: "sum", shortcutHint: "⇧⌘T"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-fn-browser", title: "77종 함수 마법사", symbolName: "function", shortcutHint: "⇧F3"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-sort", title: "오름차순·내림차순 정렬", symbolName: "arrow.up.arrow.down.square", shortcutHint: "⌥⌘R"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-validation", title: "데이터 유효성 검사", symbolName: "checkmark.shield", shortcutHint: "⌥⌘V")
-            ]
-        case .moduleSpecific:
-            switch module {
-            case .document:
-                return [
-                    RibbonCommandDescriptor(id: "doc-mod-toc", title: "자동 목차 생성", symbolName: "list.Number", shortcutHint: "⌃⌥T"),
-                    RibbonCommandDescriptor(id: "doc-mod-footnote", title: "각주·미주 삽입", symbolName: "text.badge.plus", shortcutHint: "⌥⌘F"),
-                    RibbonCommandDescriptor(id: "doc-mod-mailmerge", title: "메일 머지 치환", symbolName: "envelope.badge.person.crop", shortcutHint: "⌃⌘M"),
-                    RibbonCommandDescriptor(id: "doc-mod-tableformula", title: "표 셀 수식 계산", symbolName: "equal.square", shortcutHint: "⌃⌘=")
-                ]
-            case .hwp:
-                return [
-                    RibbonCommandDescriptor(id: "hwp-mod-header", title: "행정 공문서 두문·결재란", symbolName: "signature", shortcutHint: "⌃⌥H"),
-                    RibbonCommandDescriptor(id: "hwp-mod-field", title: "누름틀 필드 삽입", symbolName: "rectangle.and.pencil.and.ellipsis", shortcutHint: "⌃⌘E"),
-                    RibbonCommandDescriptor(id: "hwp-mod-border", title: "이중선·대각선 테두리", symbolName: "square.grid.3x3.topleft.filled", shortcutHint: "⌃⌘B"),
-                    RibbonCommandDescriptor(id: "hwp-mod-manuscript", title: "200자 원고지 매수 검산", symbolName: "character.book.closed", shortcutHint: "⌃⌘W")
-                ]
-            case .sheet:
-                return [
-                    RibbonCommandDescriptor(id: "sheet-mod-pivot", title: "피벗 테이블 요약", symbolName: "tablecells.badge.ellipsis", shortcutHint: "⌥⌘P"),
-                    RibbonCommandDescriptor(id: "sheet-mod-chart", title: "7종 차트 시각화", symbolName: "chart.pie.fill", shortcutHint: "⌥F1"),
-                    RibbonCommandDescriptor(id: "sheet-mod-condfmt", title: "조건부 서식 규칙", symbolName: "paintbrush.pointed", shortcutHint: "⌃⌘F"),
-                    RibbonCommandDescriptor(id: "sheet-mod-freeze", title: "행·열 틀 고정", symbolName: "lock.rectangle.on.rectangle", shortcutHint: "⌃⌘L")
-                ]
-            case .slide:
-                return [
-                    RibbonCommandDescriptor(id: "slide-mod-master", title: "5대 마스터 레이아웃", symbolName: "rectangle.3.group", shortcutHint: "⇧⌘M"),
-                    RibbonCommandDescriptor(id: "slide-mod-snap", title: "스마트 정렬 가이드", symbolName: "ruler", shortcutHint: "⌘;"),
-                    RibbonCommandDescriptor(id: "slide-mod-transition", title: "화면 전환 효과", symbolName: "sparkles.tv", shortcutHint: "⌥⌘T"),
-                    RibbonCommandDescriptor(id: "slide-mod-presenter", title: "발표자 도구 시작", symbolName: "play.display", shortcutHint: "⌥⌘P")
-                ]
-            case .pdf:
-                return [
-                    RibbonCommandDescriptor(id: "pdf-mod-highlight", title: "형광펜·밑줄 주석", symbolName: "highlighter", shortcutHint: "⌃⌘H"),
-                    RibbonCommandDescriptor(id: "pdf-mod-rotate", title: "페이지 90° 회전", symbolName: "rotate.right", shortcutHint: "⌘R"),
-                    RibbonCommandDescriptor(id: "pdf-mod-splitmerge", title: "페이지 분할·병합", symbolName: "doc.on.doc", shortcutHint: "⇧⌘S"),
-                    RibbonCommandDescriptor(id: "pdf-mod-tooffice", title: "편집 문서(DOCX/HWPX) 변환", symbolName: "arrow.right.doc.on.clipboard", shortcutHint: "⇧⌘E")
-                ]
-            }
-        case .review:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-track", title: "변경 내용 추적", symbolName: "pencil.and.outline", shortcutHint: "⇧⌘E"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-comment", title: "검토 메모 스레드", symbolName: "text.bubble", shortcutHint: "⌥⌘C"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-verify", title: "매직 바이트 보안 검증", symbolName: "lock.shield", shortcutHint: "⌃⌘V"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-stats", title: "문서 통계·글자 수", symbolName: "chart.bar.doc.horizontal", shortcutHint: "⇧⌘I")
-            ]
-        case .view:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-split", title: "좌우 스플릿 뷰", symbolName: "rectangle.split.2x1", shortcutHint: "⌃⌘2"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-ribbon", title: "리본 접기·펼치기", symbolName: "menubar.rectangle", shortcutHint: "⌥⌘R"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-theme", title: "라이트·다크 테마 전환", symbolName: "circle.lefthalf.filled", shortcutHint: "⌃⌥D"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-zoom", title: "100% 실제 배율", symbolName: "1.magnifyingglass", shortcutHint: "⌘0")
-            ]
-        }
-    }
-}
-
 extension WorkspaceViewModel {
 
     // MARK: - Complete 140-Action Context Ribbon Dispatcher
@@ -169,8 +36,7 @@ extension WorkspaceViewModel {
             return
         }
 
-        guard let tabID = activeTab?.id,
-              let idx = openTabs.firstIndex(where: { $0.id == tabID }) else {
+        guard let tabID = activeTab?.id, let idx = openTabs.firstIndex(where: { $0.id == tabID }) else {
             lastExecutedCommandSummary = "활성 탭 없음"
             return
         }
@@ -255,8 +121,7 @@ extension WorkspaceViewModel {
                 let toc = doc.generateTableOfContents()
                 let summaryText = toc.isEmpty ? "[자동 목차] 등록된 제목 스타일 없음" : "[자동 목차] " + toc.map(\.title).joined(separator: " · ")
                 doc.paragraphs.insert(ParagraphBlock(style: .quote, alignment: .leading, text: summaryText, isBold: true), at: 0)
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "자동 목차(TOC) 생성 완료"; return
 
@@ -266,8 +131,7 @@ extension WorkspaceViewModel {
                 let anchorID = doc.paragraphs.last?.id ?? UUID()
                 let nextNum = doc.footnotes.count + 1
                 doc.footnotes.append(FootnoteItem(number: nextNum, anchorParagraphID: anchorID, text: "각주 \(nextNum): 표준 규격 참조 설명"))
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "각주·미주 삽입 완료"; return
 
@@ -275,9 +139,8 @@ extension WorkspaceViewModel {
             recordUndoSnapshot(for: tabID)
             if case var .document(doc) = openTabs[idx].payload {
                 doc = doc.applyingMailMerge(record: mailMergeFields)
-                doc.footerText = "메일 머지 치환 완료 (\(mailMergeFields.count)개 필드)"
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                doc.recordRevision(author: authorName, summary: "메일 머지 필드(\(mailMergeFields.count)개) 일괄 치환")
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "메일 머지 필드 일괄 치환 완료"; return
 
@@ -288,15 +151,13 @@ extension WorkspaceViewModel {
                     let lastCol = max(0, doc.tables[0].columnCount - 1)
                     if let val = doc.tables[0].evaluateTableFormula("=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) {
                         var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
-                        summaryRow[0] = "합계 (=SUM(ABOVE))"
-                        summaryRow[lastCol] = String(Int(val))
+                        summaryRow[0] = "합계 (=SUM(ABOVE))"; summaryRow[lastCol] = String(Int(val))
                         doc.tables[0].rows.append(summaryRow)
                     }
                 } else {
                     doc.headerText = "표준 기술 문서 머리말"
                 }
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "표 셀 수식(=SUM(ABOVE)) 계산 반영 완료"; return
 
@@ -306,8 +167,7 @@ extension WorkspaceViewModel {
                 doc.headerText = "행정기관 표준 공문서 · 문서번호 기안-2026-0201"
                 let banner = ParagraphBlock(style: .officialHeader, alignment: .center, text: "행 정 공 문 서 두 문 · 결 재 란", fontSizePt: 18, isBold: true)
                 doc.paragraphs.insert(banner, at: 0)
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "행정 공문서 두문·결재란 삽입 완료"; return
 
@@ -315,8 +175,7 @@ extension WorkspaceViewModel {
             recordUndoSnapshot(for: tabID)
             if case var .document(doc) = openTabs[idx].payload {
                 doc.paragraphs.append(ParagraphBlock(style: .body, alignment: .justified, text: "누름틀 입력란: {{부서명}} / {{수신자}}"))
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "한글 누름틀 필드 삽입 완료"; return
 
@@ -329,8 +188,7 @@ extension WorkspaceViewModel {
                     let current = doc.tables[0].borderStyle
                     doc.tables[0].borderStyle = (current == .doubleLine) ? .diagonalDown : .doubleLine
                 }
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "이중선·대각선 표 테두리 적용 완료"; return
 
@@ -338,28 +196,37 @@ extension WorkspaceViewModel {
             recordUndoSnapshot(for: tabID)
             if case var .document(doc) = openTabs[idx].payload {
                 let stats = doc.computeStatistics()
-                doc.footerText = "200자 원고지 환산: \(stats.manuscriptPages200)매 (\(stats.characterCountWithSpaces)자)"
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+                doc.recordRevision(author: "원고지계산기", summary: "200자 원고지 환산: \(stats.manuscriptPages200)매 (\(stats.characterCountWithSpaces)자)")
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
+                showRightInspector = true; reviewStatsRefreshCount += 1
+                lastExecutedCommandSummary = "200자 원고지 매수 검산 완료: \(stats.manuscriptPages200)매 (\(stats.characterCountWithSpaces)자)"
+            } else {
+                showRightInspector = true; reviewStatsRefreshCount += 1
+                lastExecutedCommandSummary = "200자 원고지 매수 검산 완료"
             }
-            lastExecutedCommandSummary = "200자 원고지 매수 검산 반영 완료"; return
+            return
 
         case "sheet-mod-pivot":
             recordUndoSnapshot(for: tabID)
             if case var .sheet(sheet) = openTabs[idx].payload {
                 let range = sheet.detectedDataRange()
                 let valueCol = max(0, range.end.column - range.start.column)
-                let summary = PivotTableEngine.compute(
-                    from: sheet,
-                    range: range,
-                    hasHeaderRow: true,
-                    configuration: PivotTableConfiguration(rowFieldColumnIndex: 0, valueFieldColumnIndex: valueCol, aggregation: .sum)
-                )
+                let summary = PivotTableEngine.compute(from: sheet, range: range, hasHeaderRow: true, configuration: PivotTableConfiguration(rowFieldColumnIndex: 0, valueFieldColumnIndex: valueCol, aggregation: .sum))
                 lastPivotGrandTotal = summary.grandTotal
-                let coord = (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate ?? PackedCellCoordinate(row: 0, column: 0)
-                sheet.sheetComments[coord] = "피벗 집계(\(range.a1Range)): \(String(format: "%.0f", summary.grandTotal))"
-                openTabs[idx].payload = .sheet(sheet)
-                openTabs[idx].isModified = true
+                var pivotCells: [PackedCellCoordinate: String] = [
+                    PackedCellCoordinate(row: 0, column: 0): "구분",
+                    PackedCellCoordinate(row: 0, column: 1): "집계 값 (SUM)"
+                ]
+                for (rIdx, rowKey) in summary.rowKeys.enumerated() {
+                    let rowTotal = summary.rowTotals.indices.contains(rIdx) ? summary.rowTotals[rIdx] : 0.0
+                    pivotCells[PackedCellCoordinate(row: rIdx + 1, column: 0)] = rowKey
+                    pivotCells[PackedCellCoordinate(row: rIdx + 1, column: 1)] = String(format: "%.0f", rowTotal)
+                }
+                let totalRow = summary.rowKeys.count + 1
+                pivotCells[PackedCellCoordinate(row: totalRow, column: 0)] = "총계"
+                pivotCells[PackedCellCoordinate(row: totalRow, column: 1)] = String(format: "%.0f", summary.grandTotal)
+                sheet.addSheetPage(named: "피벗 요약", initialCells: pivotCells)
+                openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
                 lastExecutedCommandSummary = "피벗 테이블 요약 집계 완료 (\(range.a1Range), 총계 \(String(format: "%.0f", summary.grandTotal)))"
             } else {
                 lastExecutedCommandSummary = "피벗 테이블 요약 집계 완료"
@@ -388,8 +255,7 @@ extension WorkspaceViewModel {
                 let layouts = SlideMasterLayout.allCases
                 let cur = deck.slides[sIdx].masterLayout
                 deck.slides[sIdx].masterLayout = layouts[((layouts.firstIndex(of: cur) ?? 0) + 1) % layouts.count]
-                openTabs[idx].payload = .slide(deck)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "슬라이드 마스터 레이아웃 순환 적용 완료"; return
 
@@ -403,15 +269,13 @@ extension WorkspaceViewModel {
                 }
                 let eIdx = deck.slides[sIdx].elements.firstIndex(where: { $0.id == selectedSlideElementID }) ?? 0
                 let stage = deck.aspectRatio.stageSize
-                let elemW = deck.slides[sIdx].elements[eIdx].width
-                let elemH = deck.slides[sIdx].elements[eIdx].height
+                let elemW = deck.slides[sIdx].elements[eIdx].width; let elemH = deck.slides[sIdx].elements[eIdx].height
                 deck.slides[sIdx].elements[eIdx].x = (stage.width - elemW) / 2.0
                 deck.slides[sIdx].elements[eIdx].y = (stage.height - elemH) / 2.0
                 let aligned = deck.slides[sIdx].elements[eIdx]
                 let siblings = deck.slides[sIdx].elements.enumerated().compactMap { $0 == eIdx ? nil : $1 }
                 activeSnapGuides = SnapGuideCalculator.computeGuides(for: aligned, siblings: siblings, aspectRatio: deck.aspectRatio, tolerancePoints: 5.0)
-                openTabs[idx].payload = .slide(deck)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "스마트 정렬 가이드 정중앙 스냅 완료"; return
 
@@ -422,8 +286,7 @@ extension WorkspaceViewModel {
                 let transitions = SlideTransitionKind.allCases
                 let cur = deck.slides[sIdx].transition
                 deck.slides[sIdx].transition = transitions[((transitions.firstIndex(of: cur) ?? 0) + 1) % transitions.count]
-                openTabs[idx].payload = .slide(deck)
-                openTabs[idx].isModified = true
+                openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "슬라이드 화면 전환 효과 변경 완료"; return
 
@@ -443,17 +306,18 @@ extension WorkspaceViewModel {
         case "pdf-mod-splitmerge", "pdf-mod-split":
             recordUndoSnapshot(for: tabID)
             if case var .pdf(pdfDoc) = openTabs[idx].payload {
+                let clampedPageNum = min(max(1, selectedPDFPageNumber), max(1, pdfDoc.pages.count))
                 if pdfDoc.pages.count > 1 {
-                    let extracted = pdfDoc.extractPages(oneBasedPageNumbers: [1], newTitle: "\(pdfDoc.title) (1페이지 추출)")
-                    let splitTab = WorkspaceTabItem(fileName: "분할_\(openTabs[idx].fileName)", format: .pdf, isModified: true, payload: .pdf(extracted))
+                    let extracted = pdfDoc.extractPages(oneBasedPageNumbers: [clampedPageNum], newTitle: "\(pdfDoc.title) (\(clampedPageNum)페이지 추출)")
+                    let baseName = openTabs[idx].fileName.replacingOccurrences(of: ".pdf", with: "")
+                    let splitTab = WorkspaceTabItem(fileName: "\(baseName)_분할_P\(clampedPageNum).pdf", format: .pdf, isModified: true, payload: .pdf(extracted))
                     openTabs.append(splitTab)
                 } else {
-                    pdfDoc.insertBlankPage(at: pdfDoc.pages.count)
-                    openTabs[idx].payload = .pdf(pdfDoc)
-                    openTabs[idx].isModified = true
+                    pdfDoc.insertBlankPage(at: clampedPageNum)
+                    openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
                 }
             }
-            lastExecutedCommandSummary = "PDF 페이지 분할·병합 실행 완료"; return
+            lastExecutedCommandSummary = "PDF 페이지(\(selectedPDFPageNumber)p) 분할·병합 실행 완료"; return
 
         case "pdf-mod-tooffice", "pdf-mod-convert":
             if case let .pdf(pdfDoc) = openTabs[idx].payload {
@@ -471,18 +335,19 @@ extension WorkspaceViewModel {
         if commandID.hasSuffix("-review-track") {
             recordUndoSnapshot(for: tabID)
             switch openTabs[idx].payload {
-            case var .document(doc):
-                doc.trackChangesEnabled.toggle(); openTabs[idx].payload = .document(doc)
-            case var .sheet(sheet):
-                sheet.trackChangesEnabled.toggle(); openTabs[idx].payload = .sheet(sheet)
+            case var .document(doc): doc.trackChangesEnabled.toggle(); openTabs[idx].payload = .document(doc)
+            case var .sheet(sheet): sheet.trackChangesEnabled.toggle(); openTabs[idx].payload = .sheet(sheet)
             case var .slide(deck):
                 if !deck.slides.isEmpty {
                     let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                    deck.slides[sIdx].speakerNotes += " [변경추적]"
+                    let offset = Double(deck.slides[sIdx].elements.count) * 12.0
+                    let badge = SlideCanvasElement(title: "변경 내용 추적 활성", bodyText: "슬라이드 변경 이력 추적", x: 200.0 + offset, y: 120.0 + offset, width: 180, height: 70, kind: .calloutShape)
+                    deck.slides[sIdx].elements.append(badge)
+                    selectedSlideElementID = badge.id
                     openTabs[idx].payload = .slide(deck)
                 }
             case var .pdf(pdfDoc):
-                pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: "변경 내용 추적 감사 마크", author: authorName))
+                pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: selectedPDFPageNumber, kind: .stickyNote, content: "변경 내용 추적 감사 마크", author: authorName))
                 openTabs[idx].payload = .pdf(pdfDoc)
             }
             openTabs[idx].isModified = true
@@ -490,21 +355,22 @@ extension WorkspaceViewModel {
         }
         if commandID.hasSuffix("-review-comment") {
             recordUndoSnapshot(for: tabID)
-            let noteText = commentDraftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "검토 의견이 등록되었습니다."
-                : commentDraftText
+            let noteText = commentDraftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "검토 의견이 등록되었습니다." : commentDraftText
             switch openTabs[idx].payload {
             case var .document(doc):
                 let anchorID = doc.paragraphs.first?.id ?? UUID()
                 doc.comments.append(DocumentCommentThread(anchorParagraphID: anchorID, author: authorName, message: noteText))
                 openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
             case var .pdf(pdfDoc):
-                pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: noteText, author: authorName))
+                pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: selectedPDFPageNumber, kind: .stickyNote, content: noteText, author: authorName))
                 openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
             case var .slide(deck):
                 if !deck.slides.isEmpty {
                     let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                    deck.slides[sIdx].speakerNotes += "\n[검토 메모] \(noteText)"
+                    let offset = Double(deck.slides[sIdx].elements.count) * 12.0
+                    let callout = SlideCanvasElement(title: "검토 메모 (\(authorName))", bodyText: noteText, x: 220.0 + offset, y: 140.0 + offset, width: 210, height: 80, kind: .calloutShape)
+                    deck.slides[sIdx].elements.append(callout)
+                    selectedSlideElementID = callout.id
                     openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
                 }
             case var .sheet(sheet):
@@ -519,17 +385,16 @@ extension WorkspaceViewModel {
             lastExecutedCommandSummary = "검토 메모 스레드 등록 완료"; return
         }
         if commandID.hasSuffix("-review-verify") || commandID.hasSuffix("-review-security") {
-            if commandID.hasSuffix("-review-security"), case var .sheet(sheet) = openTabs[idx].payload {
+            if case var .sheet(sheet) = openTabs[idx].payload {
                 recordUndoSnapshot(for: tabID)
-                sheet.sheetComments.removeAll()
-                openTabs[idx].payload = .sheet(sheet)
+                sheet.trackChangesEnabled = true
+                openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
             }
             runSecurityAuditOnActiveTab()
             lastExecutedCommandSummary = "매직 바이트 및 컨테이너 보안 검증 완료"; return
         }
         if commandID.hasSuffix("-review-stats") {
-            showRightInspector = true
-            reviewStatsRefreshCount += 1
+            showRightInspector = true; reviewStatsRefreshCount += 1
             lastExecutedCommandSummary = "문서 통계 및 원고지 매수 인스펙터 갱신 완료"; return
         }
 
@@ -538,9 +403,7 @@ extension WorkspaceViewModel {
 
     // MARK: - Private Command Helpers
 
-    private enum HomeFormattingAction {
-        case bold, italic, underline, styleCycle
-    }
+    private enum HomeFormattingAction { case bold, italic, underline, styleCycle }
 
     private func applyHomeFormatting(at idx: Int, action: HomeFormattingAction) {
         switch openTabs[idx].payload {
@@ -556,8 +419,7 @@ extension WorkspaceViewModel {
                 let cur = doc.paragraphs[pIdx].style
                 doc.paragraphs[pIdx].style = allStyles[((allStyles.firstIndex(of: cur) ?? 0) + 1) % allStyles.count]
             }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
 
         case var .sheet(sheet):
             let coord = (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate ?? PackedCellCoordinate(row: 0, column: 0)
@@ -573,8 +435,7 @@ extension WorkspaceViewModel {
                 style.fillHex = (style.fillHex == nil) ? "#EEF0FF" : nil
             }
             sheet.setCellStyle(style, at: coord)
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
 
         case var .slide(deck):
             guard !deck.slides.isEmpty else { return }
@@ -592,21 +453,17 @@ extension WorkspaceViewModel {
                 let cur = deck.slides[sIdx].masterLayout
                 deck.slides[sIdx].masterLayout = layouts[((layouts.firstIndex(of: cur) ?? 0) + 1) % layouts.count]
             }
-            openTabs[idx].payload = .slide(deck)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
 
         case var .pdf(pdfDoc):
             let pageNum = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? pdfDoc.pages[selectedPDFPageIndex].pageNumber : 1
             let annKind: PDFAnnotationKind = (action == .underline) ? .underline : .highlight
             pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: pageNum, kind: annKind, content: "서식 강조 표시", author: authorName))
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
         }
     }
 
-    private enum InsertActionKind {
-        case table, chart, shape, link
-    }
+    private enum InsertActionKind { case table, chart, shape, link }
 
     private func applyInsertCommand(at idx: Int, kind: InsertActionKind) {
         switch openTabs[idx].payload {
@@ -615,15 +472,16 @@ extension WorkspaceViewModel {
             case .table:
                 doc.tables.append(DocumentTableBlock(caption: "표 \(doc.tables.count + 1). 추가 데이터 표", rows: [["구분", "목표치", "실적치"], ["1분기", "100", "120"], ["2분기", "150", "180"]]))
             case .chart:
-                doc.paragraphs.append(ParagraphBlock(style: .quote, alignment: .leading, text: "[차트 개체: 분기별 핵심 성과 지표 시각화]"))
+                doc.tables.append(DocumentTableBlock(caption: "차트 데이터 테이블", rows: [["지표 구분", "목표치", "실적치"], ["1분기 핵심 지표", "100", "124"], ["2분기 핵심 지표", "150", "182"]]))
             case .shape:
-                doc.paragraphs.append(ParagraphBlock(style: .quote, alignment: .center, text: "[다이어그램 도형: 프로세스 아키텍처 블록]"))
+                var shapeBlock = ParagraphBlock(style: .quote, alignment: .center, text: "프로세스 블록", isBold: true)
+                shapeBlock.runs = [DocumentTextRun(text: "프로세스 블록", isBold: true, foregroundHex: "#5C6BC0")]
+                doc.paragraphs.append(shapeBlock)
             case .link:
                 let anchorID = doc.paragraphs.first?.id ?? UUID()
                 doc.bookmarks["책갈피_\(doc.bookmarks.count + 1)"] = anchorID
             }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
 
         case var .sheet(sheet):
             let coord = (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate ?? PackedCellCoordinate(row: 0, column: 0)
@@ -632,9 +490,7 @@ extension WorkspaceViewModel {
                 sheet.addSheetPage(named: "Sheet\(sheet.allSheetNames.count + 1)", initialCells: [PackedCellCoordinate(row: 0, column: 0): "항목", PackedCellCoordinate(row: 0, column: 1): "값"])
             case .chart:
                 let allKinds = SheetChartKind.allCases
-                if let cIdx = allKinds.firstIndex(of: selectedChartKind) {
-                    selectedChartKind = allKinds[(cIdx + 1) % allKinds.count]
-                }
+                if let cIdx = allKinds.firstIndex(of: selectedChartKind) { selectedChartKind = allKinds[(cIdx + 1) % allKinds.count] }
             case .shape:
                 var style = sheet.cellStyle(at: coord)
                 let alignments = CellHorizontalAlignment.allCases
@@ -645,14 +501,12 @@ extension WorkspaceViewModel {
             case .link:
                 sheet.sheetComments[coord] = "참조 링크 (\(selectedSheetCell))"
             }
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
 
         case var .slide(deck):
             guard !deck.slides.isEmpty else { return }
             let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-            let elementKind: SlideElementKind
-            let title: String
+            let elementKind: SlideElementKind; let title: String
             switch kind {
             case .table: elementKind = .tableGrid; title = "데이터 표 그리드"
             case .chart: elementKind = .chartEmbed; title = "성과 지표 차트"
@@ -663,8 +517,7 @@ extension WorkspaceViewModel {
             let newElem = SlideCanvasElement(title: title, bodyText: "슬라이드 \(sIdx + 1) 추가 개체", x: 240.0 + offsetCount * 16.0, y: 160.0 + offsetCount * 12.0, width: 200, height: 100, kind: elementKind)
             deck.slides[sIdx].elements.append(newElem)
             selectedSlideElementID = newElem.id
-            openTabs[idx].payload = .slide(deck)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
 
         case var .pdf(pdfDoc):
             let pageNum = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? pdfDoc.pages[selectedPDFPageIndex].pageNumber : 1
@@ -673,14 +526,11 @@ extension WorkspaceViewModel {
             } else {
                 pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: pageNum, kind: .stickyNote, content: "삽입 개체 마크", author: authorName))
             }
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
         }
     }
 
-    private enum LayoutActionKind {
-        case paperSize, orientation, columns, margins
-    }
+    private enum LayoutActionKind { case paperSize, orientation, columns, margins }
 
     private func applyLayoutCommand(at idx: Int, kind: LayoutActionKind) {
         switch openTabs[idx].payload {
@@ -701,48 +551,31 @@ extension WorkspaceViewModel {
                 doc.sections[0].marginTopPt = targetMargin; doc.sections[0].marginBottomPt = targetMargin
                 doc.sections[0].marginLeftPt = targetMargin; doc.sections[0].marginRightPt = targetMargin
             }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
 
         case var .slide(deck):
             let ratios = SlideAspectRatio.allCases
             let cur = deck.aspectRatio
             deck.aspectRatio = ratios[((ratios.firstIndex(of: cur) ?? 0) + 1) % ratios.count]
-            openTabs[idx].payload = .slide(deck)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
 
         case var .pdf(pdfDoc):
             let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
-            switch kind {
-            case .orientation, .columns:
-                pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: 90)
-            case .paperSize:
-                pdfDoc.outline.append(PDFOutlineNode(title: "용지규격 프리셋 \(pdfDoc.outline.count + 1)", targetPageNumber: targetIndex + 1))
-            case .margins:
-                pdfDoc.outline.append(PDFOutlineNode(title: "여백 레이아웃 \(pdfDoc.outline.count + 1)", targetPageNumber: targetIndex + 1))
-            }
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
+            pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: 90)
+            openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
 
         case var .sheet(sheet):
             switch kind {
-            case .paperSize:
-                sheet.pageSetup.paperSize = (sheet.pageSetup.paperSize == .a4) ? .letter : .a4
-            case .orientation:
-                sheet.pageSetup.orientation = (sheet.pageSetup.orientation == .portrait) ? .landscape : .portrait
-            case .columns:
-                sheet.pageSetup.isMultiColumnPrint.toggle()
-            case .margins:
-                sheet.pageSetup.marginPresetName = (sheet.pageSetup.marginPresetName == "기본 여백") ? "좁은 여백" : "기본 여백"
+            case .paperSize: sheet.pageSetup.paperSize = (sheet.pageSetup.paperSize == .a4) ? .letter : .a4
+            case .orientation: sheet.pageSetup.orientation = (sheet.pageSetup.orientation == .portrait) ? .landscape : .portrait
+            case .columns: sheet.pageSetup.isMultiColumnPrint.toggle()
+            case .margins: sheet.pageSetup.marginPresetName = (sheet.pageSetup.marginPresetName == "기본 여백") ? "좁은 여백" : "기본 여백"
             }
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
         }
     }
 
-    private enum DataActionKind {
-        case autoSum, functionWizard, sort, validation
-    }
+    private enum DataActionKind { case autoSum, functionWizard, sort, validation }
 
     private func applyDataCommand(at idx: Int, kind: DataActionKind) {
         switch openTabs[idx].payload {
@@ -762,17 +595,10 @@ extension WorkspaceViewModel {
                 let cols = Array(bounds.start.column...bounds.end.column)
                 let primaryMetricCol = min(bounds.end.column, bounds.start.column + 1)
                 let dataCandidateRows = (bounds.start.row...bounds.end.row).filter { r in
-                    let labelRaw = (sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: bounds.start.column)] ?? "")
-                        .trimmingCharacters(in: .whitespaces)
-                    if labelRaw == "합계" || labelRaw == "총계" || labelRaw.uppercased() == "TOTAL" {
-                        return false
-                    }
-                    let metricRaw = (sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: primaryMetricCol)] ?? "")
-                        .trimmingCharacters(in: .whitespaces)
-                        .uppercased()
-                    if metricRaw.hasPrefix("=SUM(") || metricRaw.hasPrefix("=AVERAGE(") {
-                        return false
-                    }
+                    let labelRaw = (sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: bounds.start.column)] ?? "").trimmingCharacters(in: .whitespaces)
+                    if labelRaw == "합계" || labelRaw == "총계" || labelRaw.uppercased() == "TOTAL" { return false }
+                    let metricRaw = (sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: primaryMetricCol)] ?? "").trimmingCharacters(in: .whitespaces).uppercased()
+                    if metricRaw.hasPrefix("=SUM(") || metricRaw.hasPrefix("=AVERAGE(") { return false }
                     return true
                 }
                 let sortableRows: [Int]
@@ -788,9 +614,7 @@ extension WorkspaceViewModel {
                             return Double(raw.trimmingCharacters(in: .whitespaces)) != nil
                         })
                     })
-                    sortableRows = (!firstRowHasNumeric && laterRowHasNumeric)
-                        ? Array(dataCandidateRows.dropFirst())
-                        : dataCandidateRows
+                    sortableRows = (!firstRowHasNumeric && laterRowHasNumeric) ? Array(dataCandidateRows.dropFirst()) : dataCandidateRows
                 } else {
                     sortableRows = dataCandidateRows
                 }
@@ -801,9 +625,7 @@ extension WorkspaceViewModel {
                            sortableRows.contains(where: {
                                guard let raw = sheet.cellsByCoordinate[PackedCellCoordinate(row: $0, column: selAddr.column)] else { return false }
                                return !raw.trimmingCharacters(in: .whitespaces).hasPrefix("=")
-                           }) {
-                            return selAddr.column
-                        }
+                           }) { return selAddr.column }
                         return cols.first(where: { c in
                             sortableRows.contains(where: { r in
                                 guard let raw = sheet.cellsByCoordinate[PackedCellCoordinate(row: r, column: c)] else { return false }
@@ -812,23 +634,15 @@ extension WorkspaceViewModel {
                         }) ?? bounds.start.column
                     }()
                     struct SortableRowSnapshot {
-                        let originalRow: Int
-                        let rawCells: [Int: String]
-                        let styles: [Int: CellStyle]
-                        let keyVal: EvaluatedCellValue
+                        let originalRow: Int; let rawCells: [Int: String]; let styles: [Int: CellStyle]; let keyVal: EvaluatedCellValue
                     }
                     var snapshots: [SortableRowSnapshot] = []
                     for r in sortableRows {
-                        var rawMap: [Int: String] = [:]
-                        var styleMap: [Int: CellStyle] = [:]
+                        var rawMap: [Int: String] = [:]; var styleMap: [Int: CellStyle] = [:]
                         for c in cols {
                             let coord = PackedCellCoordinate(row: r, column: c)
-                            if let raw = sheet.cellsByCoordinate[coord], !raw.trimmingCharacters(in: .whitespaces).hasPrefix("=") {
-                                rawMap[c] = raw
-                            }
-                            if let st = sheet.cellStyles[coord] {
-                                styleMap[c] = st
-                            }
+                            if let raw = sheet.cellsByCoordinate[coord], !raw.trimmingCharacters(in: .whitespaces).hasPrefix("=") { rawMap[c] = raw }
+                            if let st = sheet.cellStyles[coord] { styleMap[c] = st }
                         }
                         let keyCoord = PackedCellCoordinate(row: r, column: keyCol)
                         let keyVal = (try? sheet.evaluate(at: keyCoord)) ?? .empty
@@ -837,29 +651,20 @@ extension WorkspaceViewModel {
                     snapshots.sort { lhs, rhs in
                         let cmp: Bool
                         switch (lhs.keyVal, rhs.keyVal) {
-                        case let (.number(a), .number(b)):
-                            cmp = a < b
-                        default:
-                            cmp = lhs.keyVal.description < rhs.keyVal.description
+                        case let (.number(a), .number(b)): cmp = a < b
+                        default: cmp = lhs.keyVal.description < rhs.keyVal.description
                         }
                         return sheetSortAscending ? cmp : !cmp
                     }
-                    if snapshots.map(\.originalRow) == sortableRows {
-                        sheetSortAscending.toggle()
-                        snapshots.reverse()
-                    }
+                    if snapshots.map(\.originalRow) == sortableRows { sheetSortAscending.toggle(); snapshots.reverse() }
                     for (idxOffset, targetRow) in sortableRows.enumerated() {
                         let snap = snapshots[idxOffset]
                         for c in cols {
                             let coord = PackedCellCoordinate(row: targetRow, column: c)
-                            if let existing = sheet.cellsByCoordinate[coord], existing.trimmingCharacters(in: .whitespaces).hasPrefix("=") {
-                                continue
-                            }
+                            if let existing = sheet.cellsByCoordinate[coord], existing.trimmingCharacters(in: .whitespaces).hasPrefix("=") { continue }
                             let addr = CellAddress(packed: coord).a1Notation
                             try? sheet.setCell(addr, rawValue: snap.rawCells[c] ?? "")
-                            if let st = snap.styles[c] {
-                                try? sheet.setCellStyle(st, at: addr)
-                            }
+                            if let st = snap.styles[c] { try? sheet.setCellStyle(st, at: addr) }
                         }
                     }
                 }
@@ -868,57 +673,162 @@ extension WorkspaceViewModel {
                     ? DataValidationRule(minimumValue: 0, maximumValue: 1_000_000_000, allowedSet: nil)
                     : nil
             }
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
 
         case var .document(doc):
             switch kind {
             case .autoSum:
-                let lastCol = doc.tables.isEmpty ? 0 : max(0, doc.tables[0].columnCount - 1)
-                let sum = doc.tables.isEmpty ? 0.0 : (doc.tables[0].evaluateTableFormula("=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0)
-                doc.footerText = "표 합계 검산: \(Int(sum)) (#\(doc.footerText.count + 1))"
+                if doc.tables.isEmpty { doc.tables.append(DocumentTableBlock(caption: "표 1. 데이터 검산 표", rows: [["항목", "수치"], ["기초값", "100"], ["증분값", "150"]])) }
+                let lastCol = max(0, doc.tables[0].columnCount - 1)
+                let sum = doc.tables[0].evaluateTableFormula("=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0
+                var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
+                summaryRow[0] = "합계 (=SUM(ABOVE))"; summaryRow[lastCol] = String(Int(sum))
+                doc.tables[0].rows.append(summaryRow)
             case .functionWizard:
-                let lastCol = doc.tables.isEmpty ? 0 : max(0, doc.tables[0].columnCount - 1)
-                let avg = doc.tables.isEmpty ? 0.0 : (doc.tables[0].evaluateTableFormula("=AVERAGE(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0)
-                doc.footerText = "표 평균 검산: \(String(format: "%.1f", avg))"
+                if doc.tables.isEmpty { doc.tables.append(DocumentTableBlock(caption: "표 1. 데이터 검산 표", rows: [["항목", "수치"], ["기초값", "100"], ["증분값", "150"]])) }
+                let lastCol = max(0, doc.tables[0].columnCount - 1)
+                let avg = doc.tables[0].evaluateTableFormula("=AVERAGE(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0
+                var avgRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
+                avgRow[0] = "평균 (=AVERAGE(ABOVE))"; avgRow[lastCol] = String(format: "%.1f", avg)
+                doc.tables[0].rows.append(avgRow)
             case .sort:
                 sheetSortAscending.toggle()
                 if !doc.tables.isEmpty, doc.tables[0].rows.count > 2 {
                     let header = doc.tables[0].rows[0]
                     let body = Array(doc.tables[0].rows.dropFirst())
                     let sortedBody = body.sorted { lhs, rhs in
-                        let lVal = lhs.first ?? ""
-                        let rVal = rhs.first ?? ""
+                        let lVal = lhs.first ?? ""; let rVal = rhs.first ?? ""
                         return sheetSortAscending ? (lVal < rVal) : (lVal > rVal)
                     }
                     doc.tables[0].rows = [header] + sortedBody
                 }
-                doc.footerText = "표 데이터 정렬: \(sheetSortAscending ? "오름차순" : "내림차순")"
+                doc.recordRevision(author: authorName, summary: "표 데이터 정렬 (\(sheetSortAscending ? "오름차순" : "내림차순"))")
             case .validation:
                 activeDataValidationRule = (activeDataValidationRule == nil) ? .nonEmptyText : nil
-                doc.footerText = "표 데이터 유효성 검사 규칙 활성"
+                doc.recordRevision(author: authorName, summary: "표 데이터 유효성 검사 규칙 전환")
             }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
 
         case var .slide(deck):
-            activeDataValidationRule = (activeDataValidationRule == nil) ? .nonEmptyText : nil
-            if !deck.slides.isEmpty {
-                let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                deck.slides[sIdx].speakerNotes += " [데이터:\(kind)]"
-                openTabs[idx].payload = .slide(deck)
+            guard !deck.slides.isEmpty else { return }
+            let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+            let offset = Double(deck.slides[sIdx].elements.count) * 14.0
+            switch kind {
+            case .autoSum:
+                let elem = SlideCanvasElement(title: "핵심 지표 합계 (SUM)", bodyText: "누적 실적 합계 요약 블록", x: 180.0 + offset, y: 140.0 + offset, width: 220, height: 96, kind: .chartEmbed)
+                deck.slides[sIdx].elements.append(elem); selectedSlideElementID = elem.id
+            case .functionWizard:
+                let elem = SlideCanvasElement(title: "평균 성장률 (AVERAGE)", bodyText: "지표 평균 분석 카드", x: 180.0 + offset, y: 140.0 + offset, width: 220, height: 96, kind: .chartEmbed)
+                deck.slides[sIdx].elements.append(elem); selectedSlideElementID = elem.id
+            case .sort:
+                sheetSortAscending.toggle()
+                if deck.slides[sIdx].elements.count > 1 {
+                    let beforeIDs = deck.slides[sIdx].elements.map(\.id)
+                    deck.slides[sIdx].elements.sort { lhs, rhs in sheetSortAscending ? (lhs.title < rhs.title) : (lhs.title > rhs.title) }
+                    if deck.slides[sIdx].elements.map(\.id) == beforeIDs { deck.slides[sIdx].elements.reverse() }
+                } else {
+                    let elem = SlideCanvasElement(title: "정렬 요약 표", bodyText: sheetSortAscending ? "오름차순 정렬 기준" : "내림차순 정렬 기준", x: 180.0 + offset, y: 140.0 + offset, width: 220, height: 96, kind: .tableGrid)
+                    deck.slides[sIdx].elements.append(elem); selectedSlideElementID = elem.id
+                }
+            case .validation:
+                activeDataValidationRule = (activeDataValidationRule == nil) ? .nonEmptyText : nil
+                let elem = SlideCanvasElement(title: "데이터 검증 요약", bodyText: "필수 지표 무결성 확인 완료", x: 180.0 + offset, y: 140.0 + offset, width: 220, height: 96, kind: .tableGrid)
+                deck.slides[sIdx].elements.append(elem); selectedSlideElementID = elem.id
             }
-            openTabs[idx].isModified = true
+            openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
 
         case var .pdf(pdfDoc):
             activeDataValidationRule = (activeDataValidationRule == nil) ? .nonEmptyText : nil
-            pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: "데이터 검산(\(kind)) 완료", author: authorName))
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
+            pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: selectedPDFPageNumber, kind: .stickyNote, content: "데이터 검산(\(kind)) 완료", author: authorName))
+            openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
         }
     }
 
-    // MARK: - Batch Conversion & Security Audit Integration
+    // MARK: - Find & Replace, Batch Conversion & Security Audit Integration
+
+    @discardableResult
+    public func performFindAndReplace() -> Int {
+        let query = findQueryText; let replacement = replaceQueryText
+        guard !query.isEmpty, let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }) else {
+            lastFindReplaceCount = 0; return 0
+        }
+
+        var count = 0
+        func replaceOccurrences(in source: inout String) {
+            guard source.contains(query) else { return }
+            let components = source.components(separatedBy: query)
+            let occurrences = max(0, components.count - 1)
+            if occurrences > 0 { count += occurrences; source = components.joined(separator: replacement) }
+        }
+
+        switch openTabs[idx].payload {
+        case var .document(doc):
+            let beforeDoc = doc
+            for pIdx in doc.paragraphs.indices {
+                replaceOccurrences(in: &doc.paragraphs[pIdx].text)
+                for rIdx in doc.paragraphs[pIdx].inlineRuns.indices {
+                    var runText = doc.paragraphs[pIdx].inlineRuns[rIdx].text
+                    if runText.contains(query) {
+                        doc.paragraphs[pIdx].inlineRuns[rIdx].text = runText.replacingOccurrences(of: query, with: replacement)
+                    }
+                }
+            }
+            for tIdx in doc.tables.indices {
+                for rIdx in doc.tables[tIdx].rows.indices {
+                    for cIdx in doc.tables[tIdx].rows[rIdx].indices {
+                        replaceOccurrences(in: &doc.tables[tIdx].rows[rIdx][cIdx])
+                    }
+                }
+            }
+            if doc != beforeDoc {
+                recordUndoSnapshot(for: activeTabID)
+                openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
+            }
+
+        case var .sheet(sheet):
+            let beforeSheet = sheet
+            for coord in Array(sheet.cellsByCoordinate.keys).sorted() {
+                guard var raw = sheet.cellsByCoordinate[coord], !raw.hasPrefix("=") else { continue }
+                let prevCount = count
+                replaceOccurrences(in: &raw)
+                if count > prevCount { try? sheet.setCell(CellAddress(packed: coord).a1Notation, rawValue: raw) }
+            }
+            if sheet != beforeSheet {
+                recordUndoSnapshot(for: activeTabID)
+                openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
+            }
+
+        case var .slide(deck):
+            let beforeDeck = deck
+            for sIdx in deck.slides.indices {
+                replaceOccurrences(in: &deck.slides[sIdx].title)
+                replaceOccurrences(in: &deck.slides[sIdx].subtitle)
+                for bIdx in deck.slides[sIdx].bulletPoints.indices { replaceOccurrences(in: &deck.slides[sIdx].bulletPoints[bIdx]) }
+                for eIdx in deck.slides[sIdx].elements.indices {
+                    replaceOccurrences(in: &deck.slides[sIdx].elements[eIdx].title)
+                    replaceOccurrences(in: &deck.slides[sIdx].elements[eIdx].bodyText)
+                }
+            }
+            if deck != beforeDeck {
+                recordUndoSnapshot(for: activeTabID)
+                openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+            }
+
+        case var .pdf(pdfDoc):
+            let beforePDF = pdfDoc
+            for pIdx in pdfDoc.pages.indices { replaceOccurrences(in: &pdfDoc.pages[pIdx].extractedText) }
+            for oIdx in pdfDoc.outline.indices { replaceOccurrences(in: &pdfDoc.outline[oIdx].title) }
+            for aIdx in pdfDoc.annotations.indices { replaceOccurrences(in: &pdfDoc.annotations[aIdx].content) }
+            if pdfDoc != beforePDF {
+                recordUndoSnapshot(for: activeTabID)
+                openTabs[idx].payload = .pdf(pdfDoc); openTabs[idx].isModified = true
+            }
+        }
+
+        lastFindReplaceCount = count
+        lastExecutedCommandSummary = "찾기 및 바꾸기 완료 (\(count)건 치환)"
+        return count
+    }
 
     public func runBatchConversionForOpenTabs() {
         let jobs = openTabs.map { tab in
@@ -947,4 +857,3 @@ extension WorkspaceViewModel {
         lastExecutedCommandSummary = "개인정보·메타데이터 \(removedCount)건 비식별화 완료"
     }
 }
-

@@ -11,6 +11,7 @@ public struct SlideEditorDetailPaneView: View {
     @Bindable var viewModel: WorkspaceViewModel
     let deck: PresentationDeckModel
     let isPrimaryPane: Bool
+    @GestureState private var activeDragOffset: (elementID: UUID, translation: CGSize)? = nil
 
     public init(viewModel: WorkspaceViewModel, deck: PresentationDeckModel, isPrimaryPane: Bool = true) {
         self.viewModel = viewModel
@@ -46,6 +47,7 @@ public struct SlideEditorDetailPaneView: View {
                 if isPrimaryPane {
                     Button {
                         viewModel.isPresenterModeActive.toggle()
+                        viewModel.isPresenterTimerRunning = viewModel.isPresenterModeActive
                     } label: {
                         Label(
                             viewModel.isPresenterModeActive ? "발표자 도구 닫기" : "발표자 도구 미리보기",
@@ -102,10 +104,15 @@ public struct SlideEditorDetailPaneView: View {
                 // Active Slide Stage Canvas & Inline Editors
                 if let slide = currentSlide {
                     let activeGuides: [AlignmentSnapGuide] = {
-                        guard viewModel.isSnapGuidesEnabled, let activeElem = selectedElement else { return [] }
+                        guard viewModel.isSnapGuidesEnabled, var activeElem = selectedElement else { return [] }
+                        if let drag = activeDragOffset, drag.elementID == activeElem.id {
+                            activeElem.x += Double(drag.translation.width)
+                            activeElem.y += Double(drag.translation.height)
+                        }
+                        let siblings = slide.elements.filter { $0.id != activeElem.id }
                         return SnapGuideCalculator.computeGuides(
                             for: activeElem,
-                            siblings: slide.elements,
+                            siblings: siblings,
                             aspectRatio: deck.aspectRatio
                         )
                     }()
@@ -179,7 +186,7 @@ public struct SlideEditorDetailPaneView: View {
                             }
                         }
 
-                        // Proportional 16:9 Stage Canvas with Visual Snap Guides & Interactive Draggable Elements
+                        // Proportional 16:9 Stage Canvas with Visual Snap Guides & Interactive 60fps Draggable Elements
                         GeometryReader { geo in
                             let stageW = max(1.0, deck.aspectRatio.widthPoints)
                             let stageH = max(1.0, deck.aspectRatio.heightPoints)
@@ -230,13 +237,16 @@ public struct SlideEditorDetailPaneView: View {
                                     )
                                 }
 
-                                // Positioned & Selectable Slide Canvas Elements with DragGesture & Style Rendering
+                                // Positioned & Selectable Slide Canvas Elements with 60fps @GestureState DragGesture & Style Rendering
                                 ForEach(slide.elements) { element in
                                     let isSelectedElem = selectedElement?.id == element.id
+                                    let liveOffset: CGSize = (activeDragOffset?.elementID == element.id)
+                                        ? (activeDragOffset?.translation ?? .zero)
+                                        : .zero
                                     let elemW = max(90.0, CGFloat(element.width) * scaleX)
                                     let elemH = max(50.0, CGFloat(element.height) * scaleY)
-                                    let centerX = CGFloat(element.centerX) * scaleX
-                                    let centerY = CGFloat(element.centerY) * scaleY
+                                    let centerX = CGFloat(element.centerX) * scaleX + liveOffset.width
+                                    let centerY = CGFloat(element.centerY) * scaleY + liveOffset.height
                                     let fillColor = resolveHexColor(element.fillHex, fallback: EasyOfficeDesignTokens.brand50)
                                     let strokeColor = resolveHexColor(element.strokeHex, fallback: EasyOfficeDesignTokens.brand600)
 
@@ -282,6 +292,10 @@ public struct SlideEditorDetailPaneView: View {
                                     }
                                     .gesture(
                                         DragGesture(minimumDistance: 2)
+                                            .updating($activeDragOffset) { value, state, _ in
+                                                guard isPrimaryPane else { return }
+                                                state = (elementID: element.id, translation: value.translation)
+                                            }
                                             .onEnded { value in
                                                 guard isPrimaryPane else { return }
                                                 viewModel.selectSlideElement(id: element.id)
@@ -448,6 +462,11 @@ public struct SlideEditorDetailPaneView: View {
                 .padding(12)
                 .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+                    if viewModel.isPresenterModeActive && viewModel.isPresenterTimerRunning {
+                        viewModel.tickPresenterTimer(seconds: 1)
+                    }
+                }
             }
         }
     }

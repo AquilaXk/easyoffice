@@ -17,14 +17,28 @@ public struct DocumentEditorDetailPaneView: View {
         self.isPrimaryPane = isPrimaryPane
     }
 
+    private func firstMailMergePreviewLine() -> String? {
+        guard !viewModel.mailMergeFields.isEmpty else { return nil }
+        for paragraph in document.paragraphs where paragraph.text.contains("{{") {
+            var replaced = paragraph.text
+            for (key, value) in viewModel.mailMergeFields {
+                replaced = replaced.replacingOccurrences(of: "{{\(key)}}", with: value)
+            }
+            if replaced != paragraph.text {
+                return replaced
+            }
+        }
+        return nil
+    }
+
     public var body: some View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
         let tocEntries = document.generateTableOfContents()
-        let mergedPreview = document.applyingMailMerge(record: viewModel.mailMergeFields)
+        let mailMergePreviewLine = firstMailMergePreviewLine()
 
         VStack(alignment: .leading, spacing: 18) {
             // Top Document Metadata & Quick Actions Banner
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Label(document.paperSize.rawValue, systemImage: "doc.richtext")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
@@ -46,6 +60,11 @@ public struct DocumentEditorDetailPaneView: View {
                 Spacer()
 
                 if isPrimaryPane {
+                    TextField("강조 구절 (선택)", text: $viewModel.inlineRunTargetPhrase)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11))
+                        .frame(width: 120)
+
                     Button {
                         viewModel.applyInlineRunFormattingToActiveParagraph(
                             isBold: true,
@@ -60,9 +79,18 @@ public struct DocumentEditorDetailPaneView: View {
                     .controlSize(.small)
 
                     Button {
-                        viewModel.insertEmbeddedImageIntoActiveDocument()
+                        viewModel.insertSampleImageAttachment()
                     } label: {
-                        Label("이미지 첨부", systemImage: "photo.badge.plus")
+                        Label("샘플 배너 첨부", systemImage: "photo.badge.plus")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        WorkspaceFileDialogPresenter.presentOpenImagePanel(for: viewModel)
+                    } label: {
+                        Label("이미지 파일 열기…", systemImage: "folder.badge.plus")
                             .font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.bordered)
@@ -71,7 +99,7 @@ public struct DocumentEditorDetailPaneView: View {
                     TextField("추가할 문단 내용을 입력하세요...", text: $viewModel.paragraphDraftText)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11))
-                        .frame(width: 220)
+                        .frame(width: 190)
 
                     Button {
                         let trimmed = viewModel.paragraphDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -206,7 +234,7 @@ public struct DocumentEditorDetailPaneView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
 
-                // Embedded Image Attachments Gallery
+                // Embedded Image Attachments Gallery (Real Bitmap Rendering via NSImage)
                 if !document.images.isEmpty {
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
@@ -214,15 +242,28 @@ public struct DocumentEditorDetailPaneView: View {
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
 
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 10)], spacing: 10) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10)], spacing: 10) {
                             ForEach(document.images) { img in
                                 HStack(spacing: 10) {
-                                    Image(systemName: "photo.artframe")
-                                        .font(.system(size: 22))
-                                        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                                        .frame(width: 40, height: 40)
-                                        .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    if let nsImg = NSImage(data: img.imageData) {
+                                        Image(nsImage: nsImg)
+                                            .resizable()
+                                            .interpolation(.high)
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 84, height: 42)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .stroke(palette.border.swiftUIColor, lineWidth: 1)
+                                            )
+                                    } else {
+                                        Image(systemName: "photo.artframe")
+                                            .font(.system(size: 22))
+                                            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                                            .frame(width: 48, height: 42)
+                                            .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(img.fileName)
@@ -333,14 +374,12 @@ public struct DocumentEditorDetailPaneView: View {
                     }
                 }
 
-                if let mergedHeading = mergedPreview.paragraphs.first(where: { mergedParagraph in
-                    mergedParagraph.text != document.paragraphs.first(where: { $0.id == mergedParagraph.id })?.text
-                }) {
+                if let mailMergePreviewLine {
                     HStack(spacing: 6) {
                         Image(systemName: "envelope.badge.person.crop")
                             .font(.system(size: 11))
                             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                        Text("메일 머지 미리보기: \(mergedHeading.text)")
+                        Text("메일 머지 미리보기: \(mailMergePreviewLine)")
                             .font(.system(size: 11))
                             .foregroundStyle(palette.secondaryText.swiftUIColor)
                             .lineLimit(1)
@@ -409,7 +448,7 @@ public struct DocumentEditorDetailPaneView: View {
     }
 }
 
-/// Rich interactive editor pane for Sheet (.xlsx/.ods/.csv) with Formula Bar, single-context batch evaluation, per-cell style rendering, dynamic Pivot/Chart ranges, and bottom sheet tab bar.
+/// Rich interactive editor pane for Sheet (.xlsx/.ods/.csv) with Formula Bar, single-context batch evaluation, per-cell style rendering, sticky frozen header row, dynamic Pivot/Chart ranges, and bottom sheet tab bar.
 public struct SheetEditorDetailPaneView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
@@ -426,8 +465,8 @@ public struct SheetEditorDetailPaneView: View {
         var maxRow = 8
         var maxCol = 6
         for coord in sheet.cellsByCoordinate.keys {
-            maxRow = max(maxRow, min(24, coord.row + 1))
-            maxCol = max(maxCol, min(12, coord.column + 1))
+            maxRow = max(maxRow, coord.row + 1)
+            maxCol = max(maxCol, coord.column + 1)
         }
         return (maxRow, maxCol)
     }
@@ -532,6 +571,12 @@ public struct SheetEditorDetailPaneView: View {
 
                 Spacer()
 
+                if viewModel.isHeaderRowFrozen {
+                    Label("1행 고정 활성", systemImage: "pin.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                }
+
                 Text("결과: \(selectedDisplayResult)")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
@@ -541,92 +586,33 @@ public struct SheetEditorDetailPaneView: View {
             .background(palette.cardSurface.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            // Dynamic Spreadsheet Grid (Single-Context Batch Evaluation + CellStyle rendering)
+            // Dynamic Spreadsheet Grid (Unbounded Viewport + Optional Frozen Header Row 1)
             ScrollView(.horizontal, showsIndicators: true) {
-                VStack(spacing: 4) {
-                    ForEach(1...maxRow, id: \.self) { row in
-                        HStack(spacing: 4) {
-                            ForEach(Array(columnLabels.enumerated()), id: \.offset) { colIdx, col in
-                                let coord = PackedCellCoordinate(row: row - 1, column: colIdx)
-                                let cellAddress = CellAddress(packed: coord)
-                                let addr = "\(col)\(row)"
-                                let isSelectedCell = viewModel.selectedSheetCell == addr
-                                let evaluated = evaluatedGrid[coord] ?? .empty
-                                let displayValue = sheet.formattedDisplayValue(at: cellAddress, using: evaluatedGrid)
-                                let cellStyle = sheet.cellStyle(at: coord)
-                                let hasComment = sheet.sheetComments[coord] != nil
-                                let isCondHighlighted = viewModel.activeConditionalFormatRule?.matches(evaluated) ?? false
-                                let cellFillColor = resolveOptionalHexColor(cellStyle.fillHex)
-                                let cellTextColor = resolveOptionalHexColor(cellStyle.textHex)
-                                let frameAlignment: Alignment = {
-                                    switch cellStyle.alignment {
-                                    case .leading: return .leading
-                                    case .center: return .center
-                                    case .trailing: return .trailing
-                                    }
-                                }()
+                VStack(alignment: .leading, spacing: 4) {
+                    if viewModel.isHeaderRowFrozen {
+                        sheetRowView(
+                            row: 1,
+                            columnLabels: columnLabels,
+                            evaluatedGrid: evaluatedGrid,
+                            palette: palette
+                        )
+                        Divider()
+                    }
 
-                                Button {
-                                    guard isPrimaryPane else { return }
-                                    viewModel.selectedSheetCell = addr
-                                    viewModel.formulaBarDraft = sheet.rawValue(at: coord)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 4) {
-                                            Text(addr)
-                                                .font(.system(size: 9, design: .monospaced))
-                                                .foregroundStyle(palette.secondaryText.swiftUIColor)
-                                            Spacer(minLength: 2)
-                                            if hasComment {
-                                                Circle()
-                                                    .fill(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
-                                                    .frame(width: 6, height: 6)
-                                                    .help(sheet.sheetComments[coord] ?? "")
-                                            }
-                                        }
-                                        Text(displayValue)
-                                            .font(
-                                                .system(
-                                                    size: 12,
-                                                    weight: (cellStyle.isBold || row == 1) ? .bold : .regular
-                                                )
-                                            )
-                                            .italic(cellStyle.isItalic)
-                                            .underline(cellStyle.isUnderlined)
-                                            .foregroundStyle(
-                                                cellTextColor
-                                                    ?? (isCondHighlighted
-                                                        ? EasyOfficeDesignTokens.brand800.swiftUIColor
-                                                        : palette.primaryText.swiftUIColor)
-                                            )
-                                            .lineLimit(1)
-                                            .frame(maxWidth: .infinity, alignment: frameAlignment)
-                                    }
-                                    .padding(8)
-                                    .frame(minWidth: 105, maxWidth: .infinity, alignment: frameAlignment)
-                                    .background(
-                                        isSelectedCell
-                                            ? EasyOfficeDesignTokens.brand100.swiftUIColor
-                                            : (cellFillColor
-                                                ?? (isCondHighlighted
-                                                    ? EasyOfficeDesignTokens.brand50.swiftUIColor
-                                                    : palette.cardSurface.swiftUIColor))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .stroke(
-                                                isSelectedCell
-                                                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                                                    : palette.border.swiftUIColor,
-                                                lineWidth: isSelectedCell ? 1.5 : 1.0
-                                            )
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                                }
-                                .buttonStyle(.plain)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            let startRow = viewModel.isHeaderRowFrozen ? min(2, maxRow) : 1
+                            ForEach(startRow...maxRow, id: \.self) { row in
+                                sheetRowView(
+                                    row: row,
+                                    columnLabels: columnLabels,
+                                    evaluatedGrid: evaluatedGrid,
+                                    palette: palette
+                                )
                             }
                         }
                     }
+                    .frame(maxHeight: 420)
                 }
             }
 
@@ -702,8 +688,7 @@ public struct SheetEditorDetailPaneView: View {
                         .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
                     ForEach(Array(pivotSummary.rowKeys.enumerated()), id: \.offset) { idx, key in
                         HStack {
-                            Text(key)
-                                .font(.system(size: 11))
+                            Text(key).font(.system(size: 11))
                             Spacer()
                             if pivotSummary.rowTotals.indices.contains(idx) {
                                 Text(String(format: "%.0f", pivotSummary.rowTotals[idx]))
@@ -713,8 +698,7 @@ public struct SheetEditorDetailPaneView: View {
                     }
                     Divider()
                     HStack {
-                        Text("총계 (Grand Total)")
-                            .font(.system(size: 11, weight: .bold))
+                        Text("총계 (Grand Total)").font(.system(size: 11, weight: .bold))
                         Spacer()
                         Text(String(format: "%.0f", pivotSummary.grandTotal))
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -760,6 +744,91 @@ public struct SheetEditorDetailPaneView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.cardSurface.swiftUIColor)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sheetRowView(
+        row: Int,
+        columnLabels: [String],
+        evaluatedGrid: [PackedCellCoordinate: EvaluatedCellValue],
+        palette: WorkspaceThemePalette
+    ) -> some View {
+        HStack(spacing: 4) {
+            ForEach(Array(columnLabels.enumerated()), id: \.offset) { colIdx, col in
+                let coord = PackedCellCoordinate(row: row - 1, column: colIdx)
+                let cellAddress = CellAddress(packed: coord)
+                let addr = "\(col)\(row)"
+                let isSelectedCell = viewModel.selectedSheetCell == addr
+                let evaluated = evaluatedGrid[coord] ?? .empty
+                let displayValue = sheet.formattedDisplayValue(at: cellAddress, using: evaluatedGrid)
+                let cellStyle = sheet.cellStyle(at: coord)
+                let hasComment = sheet.sheetComments[coord] != nil
+                let isCondHighlighted = viewModel.activeConditionalFormatRule?.matches(evaluated) ?? false
+                let cellFillColor = resolveOptionalHexColor(cellStyle.fillHex)
+                let cellTextColor = resolveOptionalHexColor(cellStyle.textHex)
+                let frameAlignment: Alignment = {
+                    switch cellStyle.alignment {
+                    case .leading: return .leading
+                    case .center: return .center
+                    case .trailing: return .trailing
+                    }
+                }()
+
+                Button {
+                    guard isPrimaryPane else { return }
+                    viewModel.selectedSheetCell = addr
+                    viewModel.formulaBarDraft = sheet.rawValue(at: coord)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text(addr)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                            Spacer(minLength: 2)
+                            if hasComment {
+                                Circle()
+                                    .fill(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
+                                    .frame(width: 6, height: 6)
+                                    .help(sheet.sheetComments[coord] ?? "")
+                            }
+                        }
+                        Text(displayValue)
+                            .font(.system(size: 12, weight: (cellStyle.isBold || row == 1) ? .bold : .regular))
+                            .italic(cellStyle.isItalic)
+                            .underline(cellStyle.isUnderlined)
+                            .foregroundStyle(
+                                cellTextColor
+                                    ?? (isCondHighlighted
+                                        ? EasyOfficeDesignTokens.brand800.swiftUIColor
+                                        : palette.primaryText.swiftUIColor)
+                            )
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: frameAlignment)
+                    }
+                    .padding(8)
+                    .frame(minWidth: 105, maxWidth: .infinity, alignment: frameAlignment)
+                    .background(
+                        isSelectedCell
+                            ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                            : (cellFillColor
+                                ?? (isCondHighlighted
+                                    ? EasyOfficeDesignTokens.brand50.swiftUIColor
+                                    : palette.cardSurface.swiftUIColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(
+                                isSelectedCell
+                                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                                    : palette.border.swiftUIColor,
+                                lineWidth: isSelectedCell ? 1.5 : 1.0
+                            )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
             }
         }
     }
