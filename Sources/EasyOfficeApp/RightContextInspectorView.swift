@@ -67,7 +67,7 @@ struct RightContextInspectorView: View {
         Text("문서 통계 및 원고지 검산")
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(palette.primaryText.swiftUIColor)
-        Text("문단 수: \(stats.paragraphCount) · 표: \(stats.tableCount) · 이미지: \(doc.images.count)")
+        Text("문단 수: \(stats.paragraphCount) · 표: \(stats.tableCount) · 이미지: \(doc.images.count) · 수식: \(doc.equations.count)")
             .font(.system(size: 11))
         Text("단어 수: \(stats.wordCount) · 글자 수(공백 포함): \(stats.characterCountWithSpaces)")
             .font(.system(size: 11))
@@ -156,6 +156,46 @@ struct RightContextInspectorView: View {
         Divider()
 
         VStack(alignment: .leading, spacing: 6) {
+            Text("수식 블록 삽입")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            HStack(spacing: 6) {
+                TextField("LaTeX / 수식 입력", text: $viewModel.equationDraftText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+                Button("수식 삽입") { viewModel.insertEquationIntoActiveDocument() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+
+            Text("워터마크 적용/해제")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            TextField("워터마크 문구", text: $viewModel.watermarkDraftText)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+            HStack(spacing: 6) {
+                Button("워터마크 적용") { viewModel.setDocumentWatermark(viewModel.watermarkDraftText) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("해제") { viewModel.setDocumentWatermark("") }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+
+            if let firstImage = doc.images.first {
+                Text("이미지 배치: \(firstImage.wrapMode.rawValue)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                Button("이미지 텍스트 배치 전환") { viewModel.cycleImageWrapMode(imageID: firstImage.id) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 6) {
             Button("변경 내용 추적 전환") { viewModel.executeRibbonCommand("\(modulePrefix)-review-track") }
                 .buttonStyle(.bordered).controlSize(.small)
             Button("단 나누기 전환") { viewModel.executeRibbonCommand("\(modulePrefix)-layout-columns") }
@@ -181,17 +221,29 @@ struct RightContextInspectorView: View {
         let formattedResult = sheet.formattedDisplayValue(at: selectedAddr)
         let currentStyle = sheet.cellStyle(at: selectedAddr.packedCoordinate)
         let mergedList = viewModel.mergedSheetRanges(for: tab.id).joined(separator: ", ")
+        let activeRange = (try? CellRange(notation: viewModel.selectedSheetRange))
+            ?? (try? CellRange(notation: viewModel.selectedSheetCell))
+            ?? sheet.detectedNumericRange()
+        let rangeSummary = sheet.summarizeRange(activeRange)
+        let colWidth = sheet.columnWidth(at: selectedAddr.column)
+        let rowHeight = sheet.rowHeight(at: selectedAddr.row)
 
         Text("시트 수식 및 셀 서식 제어")
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(palette.primaryText.swiftUIColor)
-        Text("선택된 셀: \(viewModel.selectedSheetCell)")
+        Text("선택된 셀: \(viewModel.selectedSheetCell) · 선택 범위: \(viewModel.selectedSheetRange)")
             .font(.system(size: 11, design: .monospaced))
         Text("원시 수식: \(sheet.rawValue(at: viewModel.selectedSheetCell))")
             .font(.system(size: 11, design: .monospaced))
         Text("평가 결과: \(formattedResult)")
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        Text("SUM: \(String(format: "%.1f", rangeSummary.sum)) · AVG: \(String(format: "%.1f", rangeSummary.average)) · COUNT: \(rangeSummary.numericCount)/\(rangeSummary.cellCount)")
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+        Text("MIN: \(rangeSummary.minimum.map { String(format: "%.1f", $0) } ?? "-") · MAX: \(rangeSummary.maximum.map { String(format: "%.1f", $0) } ?? "-")")
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
 
         Divider()
 
@@ -230,6 +282,45 @@ struct RightContextInspectorView: View {
         }
 
         VStack(alignment: .leading, spacing: 6) {
+            Button("아래로 3행 자동 채우기") {
+                let minCol = min(activeRange.start.column, activeRange.end.column)
+                let maxCol = max(activeRange.start.column, activeRange.end.column)
+                let minRow = min(activeRange.start.row, activeRange.end.row)
+                let maxRow = max(activeRange.start.row, activeRange.end.row)
+                if let startAddr = try? CellAddress(column: minCol, row: minRow),
+                   let endAddr = try? CellAddress(column: maxCol, row: min(CellAddress.maxZeroBasedRow, maxRow + 3)) {
+                    viewModel.performAutoFillOnActiveSheet(
+                        sourceRangeNotation: activeRange.a1Range,
+                        targetRangeNotation: "\(startAddr.a1Notation):\(endAddr.a1Notation)"
+                    )
+                }
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+
+            HStack(spacing: 6) {
+                Text("열 폭 (\(Int(colWidth))pt):")
+                    .font(.system(size: 10, design: .monospaced))
+                Button("-20pt") { viewModel.updateActiveSheetColumnWidth(column: selectedAddr.column, width: colWidth - 20) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("+20pt") { viewModel.updateActiveSheetColumnWidth(column: selectedAddr.column, width: colWidth + 20) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+            }
+
+            HStack(spacing: 6) {
+                Text("행 높이 (\(Int(rowHeight))pt):")
+                    .font(.system(size: 10, design: .monospaced))
+                Button("-20pt") { viewModel.updateActiveSheetRowHeight(row: selectedAddr.row, height: rowHeight - 20) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("+20pt") { viewModel.updateActiveSheetRowHeight(row: selectedAddr.row, height: rowHeight + 20) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+            }
+
+            Stepper("자동 필터 기준 열: \(CellAddress.columnLabel(for: max(0, viewModel.sheetAutoFilterColumn)))열", value: $viewModel.sheetAutoFilterColumn, in: 0...15)
+                .font(.system(size: 10))
+            TextField("열 자동 필터 검색어", text: $viewModel.sheetAutoFilterQuery)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+
             Button("선택 셀 병합 / 해제") { viewModel.toggleMergeOnSelectedSheetCell() }
                 .buttonStyle(.bordered).controlSize(.small)
 
@@ -371,6 +462,25 @@ struct RightContextInspectorView: View {
             }
 
             HStack(spacing: 6) {
+                Text("회전: \(Int(elem.rotationDegrees))°")
+                    .font(.system(size: 10, design: .monospaced))
+                Button("-15°") { viewModel.rotateSlideElement(slideIndex: sIdx, elementID: elementID, toDegrees: elem.rotationDegrees - 15) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("+15°") { viewModel.rotateSlideElement(slideIndex: sIdx, elementID: elementID, toDegrees: elem.rotationDegrees + 15) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("0° 초기화") { viewModel.rotateSlideElement(slideIndex: sIdx, elementID: elementID, toDegrees: 0) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("애니메이션: \(elem.animation.rawValue)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                Button("애니메이션 전환") { viewModel.cycleSlideElementAnimation(slideIndex: sIdx, elementID: elementID) }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+
+            HStack(spacing: 6) {
                 Button("앞으로") { viewModel.moveSlideElementZOrder(slideIndex: sIdx, elementID: elementID, bringForward: true) }
                     .buttonStyle(.bordered).controlSize(.small)
                 Button("뒤로") { viewModel.moveSlideElementZOrder(slideIndex: sIdx, elementID: elementID, bringForward: false) }
@@ -380,20 +490,63 @@ struct RightContextInspectorView: View {
 
         Button("스마트 스냅 정렬") { viewModel.executeRibbonCommand("slide-mod-snap") }
             .buttonStyle(.bordered).controlSize(.small)
+
+        Button(viewModel.isFullScreenSlideshowActive ? "전체화면 슬라이드쇼 종료" : "전체화면 슬라이드쇼 시작") {
+            viewModel.toggleFullScreenSlideshow()
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
     }
 
     // MARK: - PDF Inspector
 
     @ViewBuilder
     private func pdfInspectorSection(pdf: PDFStudioDocumentModel, palette: WorkspaceThemePalette) -> some View {
+        let activePageStrokes = pdf.inkStrokes.filter { $0.pageNumber == viewModel.selectedPDFPageNumber }
+
         Text("PDF 스튜디오 페이지·주석 제어")
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(palette.primaryText.swiftUIColor)
-        Text("총 페이지: \(pdf.pages.count)p · 주석: \(pdf.annotations.count)건 · 책갈피: \(pdf.outline.count)건")
+        Text("총 페이지: \(pdf.pages.count)p · 주석: \(pdf.annotations.count)건 · 서명 획: \(pdf.inkStrokes.count)건")
             .font(.system(size: 11))
 
         Stepper("대상 페이지: \(viewModel.selectedPDFPageNumber)p", value: $viewModel.selectedPDFPageNumber, in: 1...max(1, pdf.pages.count))
             .font(.system(size: 11, weight: .medium))
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("자유곡선 펜 그리기 모드", isOn: $viewModel.isPDFInkDrawingModeEnabled)
+                .font(.system(size: 11, weight: .semibold))
+
+            HStack(spacing: 6) {
+                Text("펜 색상:")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                ForEach(["#5C6BC0", "#D32F2F", "#1E293B"], id: \.self) { hex in
+                    Button(hex) { viewModel.pdfInkStrokeColorHex = hex }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                }
+            }
+
+            Button("샘플 벡터 서명 획 추가") {
+                viewModel.addInkStrokeToActivePDFPage(points: [
+                    PDFInkPoint(x: 90, y: 140),
+                    PDFInkPoint(x: 145, y: 168),
+                    PDFInkPoint(x: 210, y: 136),
+                    PDFInkPoint(x: 265, y: 162)
+                ])
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+
+            Button("현재 페이지 자유곡선 지우기 (\(activePageStrokes.count)건)") {
+                viewModel.clearInkStrokesOnActivePDFPage()
+            }
+            .buttonStyle(.bordered).controlSize(.small)
+            .disabled(activePageStrokes.isEmpty)
+        }
 
         Divider()
 
