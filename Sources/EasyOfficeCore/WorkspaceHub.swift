@@ -102,7 +102,13 @@ public final class WorkspaceViewModel {
   public var pdfInkLineWidth: Double = 2.4
   public var lastPivotGrandTotal: Double = 0
   public var authorName: String = "표준 문서 작성자"
-  public var findQueryText: String = ""
+  public var findQueryText: String = "" {
+    didSet {
+      if findQueryText != oldValue {
+        currentFindMatchIndex = 0
+      }
+    }
+  }
   public var replaceQueryText: String = ""
   public var findQueryDraft: String {
     get { findQueryText }
@@ -112,7 +118,13 @@ public final class WorkspaceViewModel {
     get { replaceQueryText }
     set { replaceQueryText = newValue }
   }
-  public var isFindCaseSensitive: Bool = false
+  public var isFindCaseSensitive: Bool = false {
+    didSet {
+      if isFindCaseSensitive != oldValue {
+        currentFindMatchIndex = 0
+      }
+    }
+  }
   public var currentFindMatchIndex: Int = 0
   public var isFindReplaceBarVisible: Bool = false
   public var isFindReplaceBarPresented: Bool {

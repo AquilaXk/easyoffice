@@ -691,10 +691,10 @@ extension WorkspaceViewModel {
   @discardableResult
   public func recomputeFindMatches() -> Int {
     let total = findMatchCount
-    if total == 0 {
+    if total == 0 || currentFindMatchIndex < 0 {
       currentFindMatchIndex = 0
-    } else if currentFindMatchIndex < 1 || currentFindMatchIndex > total {
-      currentFindMatchIndex = 1
+    } else if currentFindMatchIndex > total {
+      currentFindMatchIndex = total
     }
     return total
   }

@@ -892,7 +892,7 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
         ParagraphBlock(
           style: .body,
           text: "런토큰 알파 런토큰 베타",
-          inlineRuns: [
+          runs: [
             DocumentTextRun(text: "런토큰 알파 "),
             DocumentTextRun(text: "런토큰 베타"),
           ]
