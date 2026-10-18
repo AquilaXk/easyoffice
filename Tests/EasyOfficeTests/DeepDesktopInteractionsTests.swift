@@ -942,7 +942,7 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTFail("Expected updated document payload")
     }
 
-    // Clamp verification (-50...100 for letterSpacingPercent, 50...200 for charWidthScalePercent)
+    // Clamp verification (-50...50 for letterSpacingPercent, 50...200 for charWidthScalePercent)
     vm.adjustActiveParagraphTypography(letterSpacingDelta: -200.0, charScaleDelta: 500.0)
     if case .document(let clampedDoc) = vm.activeTab?.payload {
       let para = try XCTUnwrap(clampedDoc.paragraphs.first(where: { $0.id == firstPara.id }))
@@ -950,21 +950,38 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTAssertEqual(para.charWidthScalePercent, 200.0, accuracy: 0.01)
     }
 
-    // 2. Quick Sheet Number Format, Decimal Places & Wrap Text actions + 122 supported functions
+    vm.adjustActiveParagraphTypography(letterSpacingDelta: 200.0, charScaleDelta: -500.0)
+    if case .document(let oppositeClampedDoc) = vm.activeTab?.payload {
+      let para = try XCTUnwrap(
+        oppositeClampedDoc.paragraphs.first(where: { $0.id == firstPara.id }))
+      XCTAssertEqual(para.letterSpacingPercent, 50.0, accuracy: 0.01)
+      XCTAssertEqual(para.charWidthScalePercent, 50.0, accuracy: 0.01)
+    }
+
+    vm.adjustActiveParagraphTypography(reset: true)
+    if case .document(let resetDoc) = vm.activeTab?.payload {
+      let para = try XCTUnwrap(resetDoc.paragraphs.first(where: { $0.id == firstPara.id }))
+      XCTAssertEqual(para.letterSpacingPercent, 0.0, accuracy: 0.01)
+      XCTAssertEqual(para.charWidthScalePercent, 100.0, accuracy: 0.01)
+    }
+
+    // 2. Quick Sheet Number Format, Decimal Places & Wrap Text actions (including multi-cell range) + 122 supported functions
     XCTAssertEqual(WorksheetModel.supportedFunctionNames.count, 122)
     let sheetTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet }))
     vm.activeTabID = sheetTab.id
-    vm.selectSheetCellOrRange(primaryCell: "B2")
+    vm.selectSheetCellOrRange(primaryCell: "B2", rangeNotation: "B2:C3")
 
     vm.applyQuickNumberFormatOnSelectedSheetCell(.currencyKRW)
     vm.adjustSelectedSheetCellDecimalPlaces(delta: 2)
     vm.toggleWrapTextOnSelectedSheetCell()
 
     if case .sheet(let updatedSheet) = vm.activeTab?.payload {
-      let style = updatedSheet.cellStyle(at: "B2")
-      XCTAssertEqual(style.numberFormat, .currencyKRW)
-      XCTAssertEqual(style.decimalPlaces, 4)
-      XCTAssertTrue(style.wrapText)
+      for addr in ["B2", "C3"] {
+        let style = updatedSheet.cellStyle(at: addr)
+        XCTAssertEqual(style.numberFormat, .currencyKRW)
+        XCTAssertEqual(style.decimalPlaces, 4)
+        XCTAssertTrue(style.wrapText)
+      }
     } else {
       XCTFail("Expected updated sheet payload")
     }
@@ -972,22 +989,26 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     vm.adjustSelectedSheetCellDecimalPlaces(delta: -1)
     if case .sheet(let updatedSheetAfterDec) = vm.activeTab?.payload {
       XCTAssertEqual(updatedSheetAfterDec.cellStyle(at: "B2").decimalPlaces, 3)
+      XCTAssertEqual(updatedSheetAfterDec.cellStyle(at: "C3").decimalPlaces, 3)
     }
 
-    // 3. PDF Watermark & Security Inspection Summary
+    // 3. PDF Watermark & Security Inspection Summary + Watermark Clear
     let pdfTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .pdf }))
     vm.activeTabID = pdfTab.id
     vm.pdfWatermarkDraft = "대외비 (CONFIDENTIAL)"
     vm.applyWatermarkOnActivePDF()
 
     if case .pdf(let updatedPDF) = vm.activeTab?.payload {
-      XCTAssertFalse(updatedPDF.securityInspectionSummary.isEmpty)
-      XCTAssertTrue(
-        updatedPDF.annotations.contains(where: { $0.content.contains("대외비 (CONFIDENTIAL)") })
-          || updatedPDF.securityInspectionSummary.contains("대외비 (CONFIDENTIAL)")
-      )
+      XCTAssertEqual(updatedPDF.watermarkText, "대외비 (CONFIDENTIAL)")
+      XCTAssertTrue(updatedPDF.securityInspectionSummary.contains("대외비 (CONFIDENTIAL)"))
     } else {
       XCTFail("Expected updated PDF payload")
+    }
+
+    vm.applyWatermarkOnActivePDF(text: "   ")
+    if case .pdf(let clearedPDF) = vm.activeTab?.payload {
+      XCTAssertEqual(clearedPDF.watermarkText, "")
+      XCTAssertTrue(clearedPDF.securityInspectionSummary.contains("워터마크 없음"))
     }
   }
 }

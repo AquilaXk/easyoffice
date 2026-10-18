@@ -448,14 +448,8 @@ public struct SheetEditorDetailPaneView: View {
       )
     }()
 
-    let allGridEvaluatedValues = Array(evaluatedGrid.values)
-    let condRangeValuesByRuleID: [UUID: [EvaluatedCellValue]] = {
-      guard viewModel.activeConditionalFormatRule != nil else { return [:] }
-      return [
-        UUID(uuidString: "00000000-0000-0000-0000-000000000001")!: allGridEvaluatedValues
-      ]
-    }()
-    let condRangeValues = condRangeValuesByRuleID.values.first ?? allGridEvaluatedValues
+    let condRangeValues: [EvaluatedCellValue] =
+      viewModel.activeConditionalFormatRule != nil ? Array(evaluatedGrid.values) : []
 
     let maxPositiveValue: Double = {
       let maxFound = evaluatedGrid.values.compactMap { val -> Double? in
