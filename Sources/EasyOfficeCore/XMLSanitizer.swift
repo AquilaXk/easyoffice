@@ -206,7 +206,7 @@ public enum XMLSanitizer {
       guard let tagEndIdx = findTagClosingBracket(in: xml, from: afterTagName) else { break }
       let afterTagEnd = xml.index(after: tagEndIdx)
       let attrSlice = xml[afterTagName..<tagEndIdx]
-      let attrs = parseAttributes(from: String(attrSlice))
+      let attrs = parseAttributes(from: attrSlice)
 
       if isSelfClosingTag(attrSlice) {
         results.append((attributes: attrs, innerXML: ""))
@@ -316,7 +316,9 @@ public enum XMLSanitizer {
     return output
   }
 
-  public static func parseAttributes(from rawAttributeSegment: String) -> [String: String] {
+  public static func parseAttributes<S: StringProtocol>(from rawAttributeSegment: S) -> [String:
+    String]
+  {
     var attributes: [String: String] = [:]
     var cursor = rawAttributeSegment.startIndex
     while cursor < rawAttributeSegment.endIndex {

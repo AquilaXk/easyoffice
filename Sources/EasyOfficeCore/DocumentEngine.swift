@@ -171,13 +171,16 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
   public var lineSpacingPercent: Double
   public var firstLineIndentPt: Double = 0.0
   public var leftIndentPt: Double = 0.0
+  public var listKind: ParagraphListKind = .none
+  public var listLevel: Int = 0
 
   public init(
     id: UUID = UUID(), style: ParagraphStyleRole = .body, alignment: TextAlignmentMode = .justified,
     text: String, runs: [DocumentTextRun] = [], fontName: String = "Pretendard",
     fontSizePt: Double = 11.0,
     isBold: Bool = false, isItalic: Bool = false, isUnderlined: Bool = false,
-    lineSpacingPercent: Double = 160.0, firstLineIndentPt: Double = 0.0, leftIndentPt: Double = 0.0
+    lineSpacingPercent: Double = 160.0, firstLineIndentPt: Double = 0.0, leftIndentPt: Double = 0.0,
+    listKind: ParagraphListKind = .none, listLevel: Int = 0
   ) {
     self.id = id
     self.style = style
@@ -192,11 +195,14 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
     self.lineSpacingPercent = lineSpacingPercent
     self.firstLineIndentPt = firstLineIndentPt
     self.leftIndentPt = leftIndentPt
+    self.listKind = listKind
+    self.listLevel = max(0, min(3, listLevel))
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, style, alignment, text, runs, fontName, fontSizePt
     case isBold, isItalic, isUnderlined, lineSpacingPercent, firstLineIndentPt, leftIndentPt
+    case listKind, listLevel
   }
 
   public init(from decoder: Decoder) throws {
@@ -215,6 +221,27 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
       try c.decodeIfPresent(Double.self, forKey: .lineSpacingPercent) ?? 160.0
     self.firstLineIndentPt = try c.decodeIfPresent(Double.self, forKey: .firstLineIndentPt) ?? 0.0
     self.leftIndentPt = try c.decodeIfPresent(Double.self, forKey: .leftIndentPt) ?? 0.0
+    self.listKind = try c.decodeIfPresent(ParagraphListKind.self, forKey: .listKind) ?? .none
+    self.listLevel = max(0, min(3, try c.decodeIfPresent(Int.self, forKey: .listLevel) ?? 0))
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(id, forKey: .id)
+    try c.encode(style, forKey: .style)
+    try c.encode(alignment, forKey: .alignment)
+    try c.encode(text, forKey: .text)
+    try c.encode(runs, forKey: .runs)
+    try c.encode(fontName, forKey: .fontName)
+    try c.encode(fontSizePt, forKey: .fontSizePt)
+    try c.encode(isBold, forKey: .isBold)
+    try c.encode(isItalic, forKey: .isItalic)
+    try c.encode(isUnderlined, forKey: .isUnderlined)
+    try c.encode(lineSpacingPercent, forKey: .lineSpacingPercent)
+    try c.encode(firstLineIndentPt, forKey: .firstLineIndentPt)
+    try c.encode(leftIndentPt, forKey: .leftIndentPt)
+    try c.encode(listKind, forKey: .listKind)
+    try c.encode(max(0, min(3, listLevel)), forKey: .listLevel)
   }
 
   /// Returns explicit inline runs when present and synchronized with `text`, or a single synthesized run representing the paragraph's base style.
@@ -426,7 +453,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
     self.watermarkText = try c.decodeIfPresent(String.self, forKey: .watermarkText)
   }
 
-  /// Resolves dynamic header/footer page number tokens (`{{PAGE}}`, `{{NUMPAGES}}`) for the given 1-based page number and total page count.
+  /// Resolves dynamic header/footer page number tokens (`{{PAGE}}`, `{{NUMPAGES}}`, `{{TOTAL}}`) for the given 1-based page number and total page count.
   public static func resolvePageTokens(in text: String, pageNumber: Int = 1, totalPages: Int = 1)
     -> String
   {
@@ -437,6 +464,102 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
       text
       .replacingOccurrences(of: "{{PAGE}}", with: safePage, options: [.caseInsensitive])
       .replacingOccurrences(of: "{{NUMPAGES}}", with: safeTotal, options: [.caseInsensitive])
+      .replacingOccurrences(of: "{{TOTAL}}", with: safeTotal, options: [.caseInsensitive])
+  }
+
+  public func resolvePageTokens(in text: String, pageNumber: Int = 1, totalPages: Int? = nil)
+    -> String
+  {
+    Self.resolvePageTokens(
+      in: text,
+      pageNumber: pageNumber,
+      totalPages: totalPages ?? estimatedPageCount
+    )
+  }
+
+  /// Estimated page count derived from sections, character count, tables, images, and paragraph count.
+  public var estimatedPageCount: Int {
+    let stats = computeStatistics()
+    let chars = stats.characterCountWithSpaces
+    let contentPages = (chars / 1200) + (tables.count / 2) + (images.count / 2) + 1
+    let paragraphPages = paragraphs.isEmpty ? 1 : ((paragraphs.count - 1) / 12) + 1
+    return max(1, max(sections.count, max(contentPages, paragraphPages)))
+  }
+
+  /// Formats the hierarchical prefix for a list paragraph at `index` (bullet, numbered, or Korean official administrative outline).
+  public func formattedListPrefix(forParagraphAt index: Int) -> String? {
+    guard paragraphs.indices.contains(index) else { return nil }
+    let p = paragraphs[index]
+    guard p.listKind != .none else { return nil }
+    let level = max(0, min(3, p.listLevel))
+
+    if p.listKind == .bullet {
+      let bullets = ["•", "◦", "▪", "▫"]
+      return bullets[level]
+    }
+
+    var ordinal = 1
+    var scanIdx = index - 1
+    while scanIdx >= 0 {
+      let prev = paragraphs[scanIdx]
+      guard prev.listKind != .none else { break }
+      let prevLevel = max(0, min(3, prev.listLevel))
+      if prevLevel < level {
+        break
+      }
+      if prevLevel == level {
+        if prev.listKind == p.listKind {
+          ordinal += 1
+        } else {
+          break
+        }
+      }
+      scanIdx -= 1
+    }
+
+    switch p.listKind {
+    case .none, .bullet:
+      return nil
+    case .numbered:
+      switch level {
+      case 0: return "\(ordinal)."
+      case 1: return "\(Self.alphabeticOrdinal(ordinal))."
+      case 2: return "\(Self.romanOrdinal(ordinal))."
+      default: return "(\(ordinal))"
+      }
+    case .koreanOfficial:
+      let hangul = ["가", "나", "다", "라", "마", "바", "사", "아", "자", "차", "카", "타", "파", "하"]
+      let h = hangul[max(0, ordinal - 1) % hangul.count]
+      switch level {
+      case 0: return "\(ordinal)."
+      case 1: return "\(h)."
+      case 2: return "(\(ordinal))"
+      default: return "(\(h))"
+      }
+    }
+  }
+
+  private static func alphabeticOrdinal(_ n: Int) -> String {
+    let clamped = max(1, n)
+    let idx = (clamped - 1) % 26
+    let scalar = UnicodeScalar(UInt8(ascii: "a") + UInt8(idx))
+    return String(Character(scalar))
+  }
+
+  private static func romanOrdinal(_ n: Int) -> String {
+    let values: [(Int, String)] = [
+      (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+      (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+    ]
+    var remaining = max(1, min(n, 399))
+    var result = ""
+    for (val, sym) in values {
+      while remaining >= val {
+        result += sym
+        remaining -= val
+      }
+    }
+    return result
   }
 
   public mutating func addEquation(title: String = "핵심 수식", rawExpression: String) {

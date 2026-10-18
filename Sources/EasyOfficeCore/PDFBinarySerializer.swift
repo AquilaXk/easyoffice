@@ -39,13 +39,16 @@ public enum PDFBinarySerializer {
     let pageCount = pdf.pages.count
     let pageObjectNumbers = (0..<pageCount).map { 3 + ($0 * 2) }
     let kidsRefs = pageObjectNumbers.map { "\($0) 0 R" }.joined(separator: " ")
+    let metadataObjNum = 3 + (pageCount * 2)
+    let outlinesObjNum = pdf.outline.isEmpty ? nil : (metadataObjNum + 1)
+    let outlinesCatalogRef = outlinesObjNum.map { " /Outlines \($0) 0 R" } ?? ""
 
     var objectOffsets: [Int: Int] = [:]
 
     objectOffsets[1] = buffer.count
     appendLine("1 0 obj")
     appendLine(
-      "<< /Type /Catalog /Pages 2 0 R /Title (\(escapePDFString(pdf.title))) /Redacted \(pdf.isRedacted ? "true" : "false") >>"
+      "<< /Type /Catalog /Pages 2 0 R\(outlinesCatalogRef) /Title (\(escapePDFText(pdf.title))) /Redacted \(pdf.isRedacted ? "true" : "false") >>"
     )
     appendLine("endobj")
 
@@ -168,7 +171,6 @@ public enum PDFBinarySerializer {
       appendLine("endobj")
     }
 
-    let metadataObjNum = 3 + (pageCount * 2)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let jsonBytes = (try? encoder.encode(pdf)) ?? Data("{}".utf8)
@@ -184,7 +186,74 @@ public enum PDFBinarySerializer {
     appendLine("endstream")
     appendLine("endobj")
 
-    let totalObjects = metadataObjNum + 1
+    var nextObjId = metadataObjNum + 1
+    if let outlinesObjId = outlinesObjNum {
+      nextObjId = outlinesObjId + 1
+      var outlineEntries: [(objId: Int, dictLine: String)] = []
+
+      func buildOutlineLevel(
+        nodes: [PDFOutlineNode],
+        parentObjId: Int
+      ) -> (firstId: Int, lastId: Int, totalCount: Int) {
+        let siblingIds = nodes.map { _ -> Int in
+          let assigned = nextObjId
+          nextObjId += 1
+          return assigned
+        }
+        var levelTotalCount = nodes.count
+        for (idx, node) in nodes.enumerated() {
+          let myId = siblingIds[idx]
+          let prevPart = idx > 0 ? " /Prev \(siblingIds[idx - 1]) 0 R" : ""
+          let nextPart = (idx + 1 < siblingIds.count) ? " /Next \(siblingIds[idx + 1]) 0 R" : ""
+          let childrenPart: String
+          if !node.children.isEmpty {
+            let childInfo = buildOutlineLevel(nodes: node.children, parentObjId: myId)
+            levelTotalCount += childInfo.totalCount
+            childrenPart =
+              " /First \(childInfo.firstId) 0 R /Last \(childInfo.lastId) 0 R /Count \(childInfo.totalCount)"
+          } else {
+            childrenPart = ""
+          }
+          let destPart: String
+          if pageCount > 0 {
+            let clampedPageIdx = max(0, min(node.targetPageNumber - 1, pageCount - 1))
+            let targetPageObjId = 3 + (clampedPageIdx * 2)
+            destPart = " /Dest [\(targetPageObjId) 0 R /XYZ 0 800 null]"
+          } else {
+            destPart = ""
+          }
+          let titleToken =
+            node.title.utf8.contains(where: { $0 >= 0x80 })
+            ? "<\(hexEncodeUTF16BE(node.title, maxChars: 120))>"
+            : "(\(escapePDFText(node.title)))"
+          let dict =
+            "<< /Title \(titleToken) /Parent \(parentObjId) 0 R\(destPart)\(prevPart)\(nextPart)\(childrenPart) >>"
+          outlineEntries.append((objId: myId, dictLine: dict))
+        }
+        return (
+          siblingIds.first ?? outlinesObjId,
+          siblingIds.last ?? outlinesObjId,
+          levelTotalCount
+        )
+      }
+
+      let rootInfo = buildOutlineLevel(nodes: pdf.outline, parentObjId: outlinesObjId)
+      objectOffsets[outlinesObjId] = buffer.count
+      appendLine("\(outlinesObjId) 0 obj")
+      appendLine(
+        "<< /Type /Outlines /First \(rootInfo.firstId) 0 R /Last \(rootInfo.lastId) 0 R /Count \(rootInfo.totalCount) >>"
+      )
+      appendLine("endobj")
+
+      for entry in outlineEntries.sorted(by: { $0.objId < $1.objId }) {
+        objectOffsets[entry.objId] = buffer.count
+        appendLine("\(entry.objId) 0 obj")
+        appendLine(entry.dictLine)
+        appendLine("endobj")
+      }
+    }
+
+    let totalObjects = nextObjId
     let xrefByteOffset = buffer.count
     appendLine("xref")
     appendLine("0 \(totalObjects)")
@@ -490,8 +559,10 @@ public enum PDFBinarySerializer {
   }
 
   private static func parseRGBHex(_ hex: String) -> (Double, Double, Double) {
-    let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-      .replacingOccurrences(of: "#", with: "")
+    var cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+    if cleaned.hasPrefix("#") {
+      cleaned.removeFirst()
+    }
     guard cleaned.count == 6, let val = UInt32(cleaned, radix: 16) else {
       return (0.361, 0.420, 0.753)
     }
@@ -512,13 +583,55 @@ public enum PDFBinarySerializer {
     return String(decoding: outBytes, as: UTF8.self)
   }
 
+  /// Single-pass UTF-8 byte buffer PDF string literal escaper normalizing newlines to spaces.
+  public static func escapePDFText(_ text: String) -> String {
+    var out: [UInt8] = []
+    out.reserveCapacity(text.utf8.count + 8)
+    for byte in text.utf8 {
+      switch byte {
+      case 0x5C:  // '\'
+        out.append(0x5C)
+        out.append(0x5C)
+      case 0x28:  // '('
+        out.append(0x5C)
+        out.append(0x28)
+      case 0x29:  // ')'
+        out.append(0x5C)
+        out.append(0x29)
+      case 0x0A, 0x0D:  // '\n', '\r'
+        out.append(0x20)
+      default:
+        out.append(byte)
+      }
+    }
+    return String(decoding: out, as: UTF8.self)
+  }
+
   private static func escapePDFString(_ input: String) -> String {
-    input
-      .replacingOccurrences(of: "\\", with: "\\\\")
-      .replacingOccurrences(of: "(", with: "\\(")
-      .replacingOccurrences(of: ")", with: "\\)")
-      .replacingOccurrences(of: "\r", with: "\\r")
-      .replacingOccurrences(of: "\n", with: "\\n")
+    var out: [UInt8] = []
+    out.reserveCapacity(input.utf8.count + 8)
+    for byte in input.utf8 {
+      switch byte {
+      case 0x5C:  // '\'
+        out.append(0x5C)
+        out.append(0x5C)
+      case 0x28:  // '('
+        out.append(0x5C)
+        out.append(0x28)
+      case 0x29:  // ')'
+        out.append(0x5C)
+        out.append(0x29)
+      case 0x0D:  // '\r'
+        out.append(0x5C)
+        out.append(0x72)
+      case 0x0A:  // '\n'
+        out.append(0x5C)
+        out.append(0x6E)
+      default:
+        out.append(byte)
+      }
+    }
+    return String(decoding: out, as: UTF8.self)
   }
 
   private static func unescapePDFString(_ input: String) -> String {

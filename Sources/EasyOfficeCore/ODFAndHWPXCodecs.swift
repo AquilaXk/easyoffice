@@ -591,7 +591,7 @@ public enum ODFContainerCodec {
 
     let contentXML = """
       <?xml version="1.0" encoding="UTF-8"?>
-      <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" title="\(XMLSanitizer.escape(deck.title))" aspectRatio="\(XMLSanitizer.escape(deck.aspectRatio.rawValue))">
+      <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:eo="urn:easyoffice:metadata:1.0" title="\(XMLSanitizer.escape(deck.title))" aspectRatio="\(XMLSanitizer.escape(deck.aspectRatio.rawValue))" eo:deckTheme="\(XMLSanitizer.escape(deck.deckTheme.rawValue))">
         <office:body>
           <office:presentation>
             \(pagesXML)
@@ -641,11 +641,16 @@ public enum ODFContainerCodec {
         elements: elements
       )
     }
+    let deckTheme =
+      SlideDeckTheme(
+        rawValue: root?.attributes["eo:deckTheme"] ?? root?.attributes["deckTheme"] ?? ""
+      ) ?? .signatureLavender
     return PresentationDeckModel(
       title: root?.attributes["title"] ?? "발표자료",
       aspectRatio: SlideAspectRatio(rawValue: root?.attributes["aspectRatio"] ?? "")
         ?? .widescreen16x9,
-      slides: slides
+      slides: slides,
+      deckTheme: deckTheme
     )
   }
 }

@@ -230,6 +230,52 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     }
   }
 
+  public var pageCount: Int { pages.count }
+
+  public var outlineNodes: [PDFOutlineNode] {
+    get { outline }
+    set { outline = newValue }
+  }
+
+  public mutating func addBookmark(title: String, targetPageNumber: Int, parentID: UUID? = nil) {
+    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    let clampedPage = max(1, min(targetPageNumber, max(1, pages.count)))
+    let node = PDFOutlineNode(title: trimmed, targetPageNumber: clampedPage)
+    if let parentID, Self.appendBookmark(node, toParentID: parentID, in: &outline) {
+      return
+    }
+    outline.append(node)
+  }
+
+  private static func appendBookmark(
+    _ child: PDFOutlineNode,
+    toParentID parentID: UUID,
+    in nodes: inout [PDFOutlineNode]
+  ) -> Bool {
+    for idx in nodes.indices {
+      if nodes[idx].id == parentID {
+        nodes[idx].children.append(child)
+        return true
+      }
+      if appendBookmark(child, toParentID: parentID, in: &nodes[idx].children) {
+        return true
+      }
+    }
+    return false
+  }
+
+  public mutating func removeBookmark(id: UUID) {
+    Self.removeBookmarkNode(id: id, from: &outline)
+  }
+
+  private static func removeBookmarkNode(id: UUID, from nodes: inout [PDFOutlineNode]) {
+    nodes.removeAll { $0.id == id }
+    for idx in nodes.indices {
+      removeBookmarkNode(id: id, from: &nodes[idx].children)
+    }
+  }
+
   public mutating func addFormField(_ field: PDFFormField) { formFields.append(field) }
 
   public mutating func updateFormField(id: UUID, value: String? = nil, isChecked: Bool? = nil) {

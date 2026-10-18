@@ -26,6 +26,10 @@ internal enum XMLDocumentModelMapper {
     var indentAttrs = ""
     if p.firstLineIndentPt != 0 { indentAttrs += " firstLineIndent=\"\(p.firstLineIndentPt)\"" }
     if p.leftIndentPt != 0 { indentAttrs += " leftIndent=\"\(p.leftIndentPt)\"" }
+    if p.listKind != .none || p.listLevel != 0 {
+      indentAttrs +=
+        " eo:listKind=\"\(XMLSanitizer.escape(p.listKind.rawValue))\" eo:listLevel=\"\(p.listLevel)\""
+    }
     return
       "id=\"\(p.id.uuidString)\" style=\"\(XMLSanitizer.escape(p.style.rawValue))\" align=\"\(XMLSanitizer.escape(p.alignment.rawValue))\" font=\"\(XMLSanitizer.escape(p.fontName))\" size=\"\(p.fontSizePt)\" bold=\"\(boldAttr)\" italic=\"\(italicAttr)\" underline=\"\(underlineAttr)\" lineSpacing=\"\(p.lineSpacingPercent)\"\(indentAttrs)\(hasRunsAttr)"
   }
@@ -245,6 +249,11 @@ internal enum XMLDocumentModelMapper {
 
     var firstLineIndent = attributes["firstLineIndent"].flatMap(Double.init)
     var leftIndent = attributes["leftIndent"].flatMap(Double.init)
+    var parsedListKind =
+      ParagraphListKind(rawValue: attributes["eo:listKind"] ?? attributes["listKind"] ?? "")
+      ?? .none
+    var parsedListLevel =
+      max(0, min(3, Int(attributes["eo:listLevel"] ?? attributes["listLevel"] ?? "0") ?? 0))
     var pPrStyle: ParagraphStyleRole?
     var pPrAlignment: TextAlignmentMode?
 
@@ -272,6 +281,28 @@ internal enum XMLDocumentModelMapper {
           leftIndent = leftTwips / 20.0
         }
       }
+      if parsedListKind == .none,
+        let numPr = XMLSanitizer.extractElements(named: "w:numPr", in: pPr).first?.innerXML
+      {
+        if let ilvlAttrs = XMLSanitizer.extractElements(named: "w:ilvl", in: numPr).first?
+          .attributes,
+          let ilvlVal = ilvlAttrs["w:val"] ?? ilvlAttrs["val"],
+          let level = Int(ilvlVal)
+        {
+          parsedListLevel = max(0, min(3, level))
+        }
+        if let numIdAttrs = XMLSanitizer.extractElements(named: "w:numId", in: numPr).first?
+          .attributes,
+          let numIdVal = numIdAttrs["w:val"] ?? numIdAttrs["val"]
+        {
+          switch numIdVal {
+          case "1": parsedListKind = .bullet
+          case "2": parsedListKind = .numbered
+          case "3": parsedListKind = .koreanOfficial
+          default: parsedListKind = .bullet
+          }
+        }
+      }
     }
 
     if let styleRaw = attributes["style"] {
@@ -286,7 +317,8 @@ internal enum XMLDocumentModelMapper {
         isBold: attributes["bold"] == "1", isItalic: attributes["italic"] == "1",
         isUnderlined: attributes["underline"] == "1",
         lineSpacingPercent: Double(attributes["lineSpacing"] ?? "160.0") ?? 160.0,
-        firstLineIndentPt: firstLineIndent ?? 0.0, leftIndentPt: leftIndent ?? 0.0
+        firstLineIndentPt: firstLineIndent ?? 0.0, leftIndentPt: leftIndent ?? 0.0,
+        listKind: parsedListKind, listLevel: parsedListLevel
       )
     }
 
@@ -298,7 +330,8 @@ internal enum XMLDocumentModelMapper {
       isBold: parsedRuns.contains(where: \.isBold),
       isItalic: parsedRuns.contains(where: \.isItalic),
       isUnderlined: parsedRuns.contains(where: \.isUnderlined), lineSpacingPercent: 160.0,
-      firstLineIndentPt: firstLineIndent ?? 0.0, leftIndentPt: leftIndent ?? 0.0
+      firstLineIndentPt: firstLineIndent ?? 0.0, leftIndentPt: leftIndent ?? 0.0,
+      listKind: parsedListKind, listLevel: parsedListLevel
     )
   }
 
@@ -558,6 +591,14 @@ public enum OOXMLContainerCodec {
       } else {
         indTag = ""
       }
+      let numPrTag: String
+      if p.listKind != .none {
+        let numId = p.listKind == .bullet ? 1 : (p.listKind == .numbered ? 2 : 3)
+        numPrTag =
+          "<w:numPr><w:ilvl w:val=\"\(p.listLevel)\"/><w:numId w:val=\"\(numId)\"/></w:numPr>"
+      } else {
+        numPrTag = ""
+      }
 
       let runsXML = p.effectiveRuns.map { run -> String in
         let rAttrs = XMLDocumentModelMapper.runAttributes(run)
@@ -585,7 +626,7 @@ public enum OOXMLContainerCodec {
       bodyItems.append(
         """
             <w:p \(pAttrs)>
-              <w:pPr><w:pStyle w:val="\(styleVal)"/><w:jc w:val="\(jcVal)"/>\(indTag)</w:pPr>
+              <w:pPr><w:pStyle w:val="\(styleVal)"/><w:jc w:val="\(jcVal)"/>\(indTag)\(numPrTag)</w:pPr>
         \(runsXML)
             </w:p>
         """)
@@ -997,7 +1038,7 @@ public enum OOXMLContainerCodec {
     }
     let presentationXML = """
       <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-      <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" title="\(XMLSanitizer.escape(deck.title))" aspectRatio="\(XMLSanitizer.escape(deck.aspectRatio.rawValue))">
+      <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:eo="urn:easyoffice:metadata:1.0" title="\(XMLSanitizer.escape(deck.title))" aspectRatio="\(XMLSanitizer.escape(deck.aspectRatio.rawValue))" eo:deckTheme="\(XMLSanitizer.escape(deck.deckTheme.rawValue))">
         <p:sldIdLst>
       \(slideRefs.joined(separator: "\n"))
         </p:sldIdLst>
@@ -1075,6 +1116,10 @@ public enum OOXMLContainerCodec {
     let title = presRoot?.attributes["title"] ?? "발표자료"
     let aspectRatio =
       SlideAspectRatio(rawValue: presRoot?.attributes["aspectRatio"] ?? "") ?? .widescreen16x9
+    let deckTheme =
+      SlideDeckTheme(
+        rawValue: presRoot?.attributes["eo:deckTheme"] ?? presRoot?.attributes["deckTheme"] ?? ""
+      ) ?? .signatureLavender
     let slideRefs = XMLSanitizer.extractElements(named: "p:sldId", in: presentationXML)
 
     var slides: [SlideModel] = []
@@ -1119,6 +1164,7 @@ public enum OOXMLContainerCodec {
         ))
     }
 
-    return PresentationDeckModel(title: title, aspectRatio: aspectRatio, slides: slides)
+    return PresentationDeckModel(
+      title: title, aspectRatio: aspectRatio, slides: slides, deckTheme: deckTheme)
   }
 }

@@ -1,6 +1,14 @@
 import Foundation
 
-// MARK: - Document Tables, Footnotes, Tracked Revisions, Comments, Attachments & Equations
+// MARK: - Document Lists, Tables, Footnotes, Tracked Revisions, Comments, Attachments & Equations
+
+/// Multi-level paragraph list kind including Korean official administrative outline numbering.
+public enum ParagraphListKind: String, Sendable, Codable, Equatable, CaseIterable {
+  case none = "없음"
+  case bullet = "글머리 기호 (•)"
+  case numbered = "번호 매기기 (1. 2. 3.)"
+  case koreanOfficial = "공문서 다단계 개요 (1. → 가. → (1))"
+}
 
 /// Table border style presets including Korean administrative document double-line and diagonal borders.
 public enum TableCellBorderStyle: String, CaseIterable, Sendable, Codable {
