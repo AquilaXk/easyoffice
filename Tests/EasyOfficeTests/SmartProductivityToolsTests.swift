@@ -287,6 +287,11 @@ final class SmartProductivityToolsTests: XCTestCase {
         XCTAssertTrue(kinds.contains("수동태/피동 표현 완화"))
         XCTAssertTrue(kinds.contains("중복 공백/수식어 정리"))
 
+        if let longFix = suggestions.first(where: { $0.issueKind == "장문 분할 권장" }) {
+            XCTAssertEqual(longFix.paragraphID, pLong.id)
+            XCTAssertTrue(longFix.suggestedRewrite.contains(". "))
+            XCTAssertFalse(longFix.suggestedRewrite.contains(",. "))
+        }
         if let passiveFix = suggestions.first(where: { $0.issueKind == "수동태/피동 표현 완화" }) {
             XCTAssertEqual(passiveFix.paragraphID, pPassive.id)
             XCTAssertFalse(passiveFix.suggestedRewrite.contains("되어지"))

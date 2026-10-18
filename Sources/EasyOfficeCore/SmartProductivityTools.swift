@@ -1077,22 +1077,31 @@ public enum LocalSmartDocumentAssistant {
         guard chars.count >= 2 else { return text }
         let mid = chars.count / 2
 
-        // Find the whitespace index closest to the midpoint
+        // Prefer a whitespace index closest to the midpoint that is not immediately preceded by a comma
         var bestSpaceOffset: Int? = nil
+        var fallbackCommaSpaceOffset: Int? = nil
         for delta in 0...mid {
             let left = mid - delta
             if left > 0 && left < chars.count - 1 && chars[left] == " " {
-                bestSpaceOffset = left
-                break
+                if chars[left - 1] != "," {
+                    bestSpaceOffset = left
+                    break
+                } else if fallbackCommaSpaceOffset == nil {
+                    fallbackCommaSpaceOffset = left
+                }
             }
             let right = mid + delta
             if right > 0 && right < chars.count - 1 && chars[right] == " " {
-                bestSpaceOffset = right
-                break
+                if chars[right - 1] != "," {
+                    bestSpaceOffset = right
+                    break
+                } else if fallbackCommaSpaceOffset == nil {
+                    fallbackCommaSpaceOffset = right
+                }
             }
         }
 
-        if let splitAt = bestSpaceOffset {
+        if let splitAt = bestSpaceOffset ?? fallbackCommaSpaceOffset {
             let firstPart = String(chars[0..<splitAt]).trimmingCharacters(in: .whitespaces)
             let secondPart = String(chars[(splitAt + 1)...]).trimmingCharacters(in: .whitespaces)
             return "\(firstPart). \(secondPart)"
