@@ -260,3 +260,26 @@
 - **Verified by**: `Tests/EasyOfficeTests/BinaryContainerCodecTests.swift`, `Tests/EasyOfficeTests/EditorEnginesParityTests.swift`
 - **Revisit when**: 시트 간 교차 수식 참조(`Sheet2!A1`) AST 노드를 확장할 때.
 
+---
+
+### 15. Zero-Slop 도메인 리본 라우팅, 인라인 편집 Undo Coalescing, 다중 페이지 가시 PDF 렌더링 및 인터랙티브 UI 모듈 분리 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`)
+- **Decision**:
+  1. **Zero-Slop 140종 컨텍스트 리본 도메인 변이 (`WorkspaceRibbonCommandRouter.swift`)**:
+     - 스프레드시트(`.sheet`)의 28개 리본 명령에서 기존 `E1~E8`·`F1~F6` 임의 셀 텍스트 오염을 100% 제거하고, `sheet.cellStyles`(`CellStyle`), `sheet.pageSetup`(`WorksheetPageSetup`), `sheet.sheetComments`, `sheet.addSheetPage`, `sheet.trackChangesEnabled`, `sheet.detectedNumericRange()`, `sheet.detectedDataRange()`, `PivotTableEngine.compute` 등 실제 도메인 상태 변이로 전환합니다.
+     - 슬라이드(`.slide`) 홈 서식 명령은 선택 개체의 `isBold`/`isItalic`/`isUnderlined`를 직접 토글하며, `slide-mod-snap`은 개체를 항상 스테이지 정중앙(`(stageWidth - width)/2, (stageHeight - height)/2`)에 정렬한 뒤 `SnapGuideCalculator.computeGuides`로 `activeSnapGuides`를 갱신합니다.
+     - `applyFormulaBarEdit()`는 `activeDataValidationRule`이 활성화된 경우 수식/리터럴 입력값을 사전 검증하여 위반 시 셀 덮어쓰기를 거부하고 `lastErrorMessage`를 설정(Fail-Closed)합니다.
+  2. **인라인 타이핑 Undo Coalescing (`recordUndoSnapshot(for:coalescingTargetKey:)`)**:
+     - 동일 문단(`updateParagraphText`) 또는 동일 표 셀(`updateTableCell`)에서 연속 타이핑 시 편집 타깃 키(`activeInlineEditTargetKey`) 단위로 스냅샷을 병합하여 첫 키 입력 시점에만 1회 Undo 스냅샷을 기록하고, 리본 명령·탭 전환·Undo/Redo 시 타깃 키를 초기화합니다.
+  3. **다중 페이지 PDF 페이지네이션 및 4막대 스켈레톤 제거 (`PDFEngine.swift`, `PDFBinarySerializer.swift`)**:
+     - `PDFStudioDocumentModel.fromDocument` 및 `fromWorksheet`는 페이지당 분량(`28줄` / `1,400자`, 시트 `30행`) 기준으로 다중 페이지(`PDFPageItem`)를 자동 분할하고 목차 아웃라인의 `targetPageNumber`를 실제 페이지 번호에 매핑합니다.
+     - `PDFBinarySerializer.encode`는 정적 4막대 스켈레톤 사각형을 제거하고, 실제 문서 본문의 다중 줄(`0 Tr`) 텍스트 라인과 주석 콜아웃 박스를 페이지에 직접 렌더링합니다.
+  4. **인터랙티브 UI 컨트롤 및 뷰 모듈 분리 (`EasyOfficeApp`)**:
+     - 찾기 및 바꾸기 바(`⌘F`, `performFindAndReplace()`), 인쇄(`⌘P`, `NSPrintOperation`), 클립보드 복사/붙여넣기(`⌘C`/`⌘V`), 하단 다중 시트 탭 바, 인라인 텍스트 런/이미지 첨부 카드, 슬라이드 개체 클릭 선택·`DragGesture` 이동·리사이즈·발표자 실시간 타이머, `PDFKitRepresentedView` `Coordinator` 모델 캐싱을 제공합니다.
+- **Why**: 형식적 상태 변화 통과용 셀 오염(`E1~F6`)과 정적 스켈레톤 PDF 프리뷰를 원천 제거하고, 연속 타이핑 시의 메모리/Undo 오염을 방지하여 실사용 수준의 macOS 오피스 UX를 달성하기 위함입니다.
+- **Trade-offs**: `PDFKitRepresentedView`에서 `Coordinator.lastRenderedModel` 비교를 수행하나, 변경이 없는 뷰 갱신 시 PDF 재직렬화를 완전히 생략하여 UI 반응성을 크게 높입니다.
+- **Alternatives rejected**:
+  - 모든 키 입력마다 전체 `OpenTabPayload`를 `undoStacks`에 push하는 방식: 50자만 입력해도 50단계 Undo 스택이 단일 문단 타이핑으로 가득 차 이전 작업 복원이 불가능해지므로 기각.
+- **Verified by**: `Tests/EasyOfficeTests/SmartProductivityToolsTests.swift`, `Tests/EasyOfficeTests/WorkspaceUIParityTests.swift`
+- **Revisit when**: PDF 내장 TrueType 서브셋 폰트(`/Type0` `/CIDFontType2`) 바이너리 임베딩을 추가할 때.

@@ -28,6 +28,12 @@ struct EasyOfficeApplication: App {
                 .keyboardShortcut("s", modifiers: [.command])
                 .disabled(viewModel.activeTab == nil)
 
+                Button("현재 문서 인쇄 (⌘P)...") {
+                    WorkspaceFileDialogPresenter.presentPrintPanel(viewModel: viewModel)
+                }
+                .keyboardShortcut("p", modifiers: [.command])
+                .disabled(viewModel.activeTab == nil)
+
                 Divider()
 
                 Button("실행 취소 (Undo)") {
@@ -41,6 +47,26 @@ struct EasyOfficeApplication: App {
                 }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!viewModel.canRedo)
+
+                Divider()
+
+                Button("찾기 및 바꾸기 (⌘F)") {
+                    viewModel.isFindReplaceBarVisible.toggle()
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+                .disabled(viewModel.activeTab == nil)
+
+                Button("선택 영역 복사 (⌘C)") {
+                    WorkspaceFileDialogPresenter.copySelectionToPasteboard(viewModel: viewModel)
+                }
+                .keyboardShortcut("c", modifiers: [.command])
+                .disabled(viewModel.activeTab == nil)
+
+                Button("붙여넣기 (⌘V)") {
+                    WorkspaceFileDialogPresenter.pasteFromPasteboard(viewModel: viewModel)
+                }
+                .keyboardShortcut("v", modifiers: [.command])
+                .disabled(viewModel.activeTab == nil)
             }
             CommandMenu("문서 생성") {
                 ForEach(OfficeModuleKind.allCases) { module in

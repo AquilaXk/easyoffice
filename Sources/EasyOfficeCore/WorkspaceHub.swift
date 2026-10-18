@@ -5,17 +5,65 @@ import EasyOfficeDesignSystem
 extension DocumentFormat {
     public var moduleKind: OfficeModuleKind {
         switch self {
-        case .docx, .doc, .odt, .rtf, .md, .txt:
-            return .document
-        case .hwp, .hwpx, .hwt, .hwtx:
-            return .hwp
-        case .xlsx, .xls, .ods, .csv, .tsv:
-            return .sheet
-        case .pptx, .ppt, .ppsx, .odp:
-            return .slide
-        case .pdf:
-            return .pdf
+        case .docx, .doc, .odt, .rtf, .md, .txt: return .document
+        case .hwp, .hwpx, .hwt, .hwtx: return .hwp
+        case .xlsx, .xls, .ods, .csv, .tsv: return .sheet
+        case .pptx, .ppt, .ppsx, .odp: return .slide
+        case .pdf: return .pdf
         }
+    }
+}
+
+extension DataValidationRule {
+    public init(minimumValue: Double? = nil, maximumValue: Double? = nil, allowedSet: [String]? = nil) {
+        if let allowedSet, !allowedSet.isEmpty {
+            self = .allowedList(allowedSet)
+        } else if minimumValue != nil || maximumValue != nil {
+            self = .numberRange(
+                min: minimumValue ?? -Double.greatestFiniteMagnitude,
+                max: maximumValue ?? Double.greatestFiniteMagnitude
+            )
+        } else {
+            self = .nonEmptyText
+        }
+    }
+
+    public func validate(rawValue: String) -> Bool {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("=") { return true }
+        let evaluated: EvaluatedCellValue
+        if trimmed.isEmpty {
+            evaluated = .empty
+        } else if let num = Double(trimmed) {
+            evaluated = .number(num)
+        } else if trimmed.caseInsensitiveCompare("TRUE") == .orderedSame {
+            evaluated = .boolean(true)
+        } else if trimmed.caseInsensitiveCompare("FALSE") == .orderedSame {
+            evaluated = .boolean(false)
+        } else {
+            evaluated = .text(trimmed)
+        }
+        return validate(evaluated)
+    }
+}
+
+extension CellRange {
+    public var a1Range: String {
+        start == end ? start.a1Notation : "\(start.a1Notation):\(end.a1Notation)"
+    }
+}
+
+public typealias SnapGuideLine = AlignmentSnapGuide
+public typealias SheetPageSetup = WorksheetPageSetup
+
+extension SlideAspectRatio {
+    public var stageSize: (width: Double, height: Double) { (widthPoints, heightPoints) }
+}
+
+extension ParagraphBlock {
+    public var inlineRuns: [DocumentTextRun] {
+        get { runs }
+        set { runs = newValue }
     }
 }
 
@@ -42,139 +90,6 @@ public enum HubSection: String, CaseIterable, Sendable, Identifiable {
     }
 }
 
-/// Concrete command button descriptor displayed inside a context ribbon bar category.
-public struct RibbonCommandDescriptor: Sendable, Equatable, Identifiable {
-    public let id: String
-    public let title: String
-    public let symbolName: String
-    public let shortcutHint: String
-
-    public init(id: String, title: String, symbolName: String, shortcutHint: String) {
-        self.id = id
-        self.title = title
-        self.symbolName = symbolName
-        self.shortcutHint = shortcutHint
-    }
-}
-
-/// Context-aware ribbon tabs adapting to the active document module.
-public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
-    case home = "홈 (Home)"
-    case insert = "삽입 (Insert)"
-    case layout = "모양/레이아웃 (Layout)"
-    case formulasAndData = "수식·데이터 (Data)"
-    case moduleSpecific = "전용 도구 (Module)"
-    case review = "검토/보안 (Review)"
-    case view = "보기 (View)"
-
-    public var id: String { rawValue }
-
-    public func title(for module: OfficeModuleKind) -> String {
-        switch self {
-        case .home: return "홈"
-        case .insert: return "삽입"
-        case .layout: return "레이아웃"
-        case .formulasAndData: return "수식·데이터"
-        case .moduleSpecific:
-            switch module {
-            case .document: return "참조·메일머지"
-            case .hwp: return "공문서·누름틀"
-            case .sheet: return "피벗·차트"
-            case .slide: return "슬라이드·전환"
-            case .pdf: return "주석·변환"
-            }
-        case .review: return "검토"
-        case .view: return "보기"
-        }
-    }
-
-    /// Returns context-sensitive ribbon commands for a given category and active office module.
-    public static func actions(for category: RibbonCategory, module: OfficeModuleKind) -> [RibbonCommandDescriptor] {
-        switch category {
-        case .home:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-bold", title: "굵게", symbolName: "bold", shortcutHint: "⌘B"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-italic", title: "기울임", symbolName: "italic", shortcutHint: "⌘I"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-underline", title: "밑줄", symbolName: "underline", shortcutHint: "⌘U"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-home-style", title: "스타일 적용", symbolName: "textformat.size", shortcutHint: "⌥⌘S")
-            ]
-        case .insert:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-table", title: "표 삽입", symbolName: "tablecells", shortcutHint: "⌃⌘T"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-chart", title: "차트 개체", symbolName: "chart.bar.xaxis", shortcutHint: "⌃⌘C"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-shape", title: "도형·다이어그램", symbolName: "square.on.circle", shortcutHint: "⌃⌘S"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-insert-link", title: "책갈피·링크", symbolName: "link", shortcutHint: "⌘K")
-            ]
-        case .layout:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-paper", title: "용지 규격 (A4/Letter)", symbolName: "doc.viewfinder", shortcutHint: "⇧⌘P"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-orientation", title: "용지 방향 전환", symbolName: "rectangle.portrait.rotate", shortcutHint: "⌥⌘O"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-columns", title: "다단 설정", symbolName: "rectangle.split.3x1", shortcutHint: "⌥⌘M"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-layout-margins", title: "여백 프리셋", symbolName: "arrow.up.left.and.down.right.magnifyingglass", shortcutHint: "⌥⌘G")
-            ]
-        case .formulasAndData:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-autosum", title: "자동 합계 (SUM)", symbolName: "sum", shortcutHint: "⇧⌘T"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-fn-browser", title: "77종 함수 마법사", symbolName: "function", shortcutHint: "⇧F3"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-sort", title: "오름차순·내림차순 정렬", symbolName: "arrow.up.arrow.down.square", shortcutHint: "⌥⌘R"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-data-validation", title: "데이터 유효성 검사", symbolName: "checkmark.shield", shortcutHint: "⌥⌘V")
-            ]
-        case .moduleSpecific:
-            switch module {
-            case .document:
-                return [
-                    RibbonCommandDescriptor(id: "doc-mod-toc", title: "자동 목차 생성", symbolName: "list.Number", shortcutHint: "⌃⌥T"),
-                    RibbonCommandDescriptor(id: "doc-mod-footnote", title: "각주·미주 삽입", symbolName: "text.badge.plus", shortcutHint: "⌥⌘F"),
-                    RibbonCommandDescriptor(id: "doc-mod-mailmerge", title: "메일 머지 치환", symbolName: "envelope.badge.person.crop", shortcutHint: "⌃⌘M"),
-                    RibbonCommandDescriptor(id: "doc-mod-tableformula", title: "표 셀 수식 계산", symbolName: "equal.square", shortcutHint: "⌃⌘=")
-                ]
-            case .hwp:
-                return [
-                    RibbonCommandDescriptor(id: "hwp-mod-header", title: "행정 공문서 두문·결재란", symbolName: "signature", shortcutHint: "⌃⌥H"),
-                    RibbonCommandDescriptor(id: "hwp-mod-field", title: "누름틀 필드 삽입", symbolName: "rectangle.and.pencil.and.ellipsis", shortcutHint: "⌃⌘E"),
-                    RibbonCommandDescriptor(id: "hwp-mod-border", title: "이중선·대각선 테두리", symbolName: "square.grid.3x3.topleft.filled", shortcutHint: "⌃⌘B"),
-                    RibbonCommandDescriptor(id: "hwp-mod-manuscript", title: "200자 원고지 매수 검산", symbolName: "character.book.closed", shortcutHint: "⌃⌘W")
-                ]
-            case .sheet:
-                return [
-                    RibbonCommandDescriptor(id: "sheet-mod-pivot", title: "피벗 테이블 요약", symbolName: "tablecells.badge.ellipsis", shortcutHint: "⌥⌘P"),
-                    RibbonCommandDescriptor(id: "sheet-mod-chart", title: "7종 차트 시각화", symbolName: "chart.pie.fill", shortcutHint: "⌥F1"),
-                    RibbonCommandDescriptor(id: "sheet-mod-condfmt", title: "조건부 서식 규칙", symbolName: "paintbrush.pointed", shortcutHint: "⌃⌘F"),
-                    RibbonCommandDescriptor(id: "sheet-mod-freeze", title: "행·열 틀 고정", symbolName: "lock.rectangle.on.rectangle", shortcutHint: "⌃⌘L")
-                ]
-            case .slide:
-                return [
-                    RibbonCommandDescriptor(id: "slide-mod-master", title: "5대 마스터 레이아웃", symbolName: "rectangle.3.group", shortcutHint: "⇧⌘M"),
-                    RibbonCommandDescriptor(id: "slide-mod-snap", title: "스마트 정렬 가이드", symbolName: "ruler", shortcutHint: "⌘;"),
-                    RibbonCommandDescriptor(id: "slide-mod-transition", title: "화면 전환 효과", symbolName: "sparkles.tv", shortcutHint: "⌥⌘T"),
-                    RibbonCommandDescriptor(id: "slide-mod-presenter", title: "발표자 도구 시작", symbolName: "play.display", shortcutHint: "⌥⌘P")
-                ]
-            case .pdf:
-                return [
-                    RibbonCommandDescriptor(id: "pdf-mod-highlight", title: "형광펜·밑줄 주석", symbolName: "highlighter", shortcutHint: "⌃⌘H"),
-                    RibbonCommandDescriptor(id: "pdf-mod-rotate", title: "페이지 90° 회전", symbolName: "rotate.right", shortcutHint: "⌘R"),
-                    RibbonCommandDescriptor(id: "pdf-mod-splitmerge", title: "페이지 분할·병합", symbolName: "doc.on.doc", shortcutHint: "⇧⌘S"),
-                    RibbonCommandDescriptor(id: "pdf-mod-tooffice", title: "편집 문서(DOCX/HWPX) 변환", symbolName: "arrow.right.doc.on.clipboard", shortcutHint: "⇧⌘E")
-                ]
-            }
-        case .review:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-track", title: "변경 내용 추적", symbolName: "pencil.and.outline", shortcutHint: "⇧⌘E"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-comment", title: "검토 메모 스레드", symbolName: "text.bubble", shortcutHint: "⌥⌘C"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-verify", title: "매직 바이트 보안 검증", symbolName: "lock.shield", shortcutHint: "⌃⌘V"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-review-stats", title: "문서 통계·글자 수", symbolName: "chart.bar.doc.horizontal", shortcutHint: "⇧⌘I")
-            ]
-        case .view:
-            return [
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-split", title: "좌우 스플릿 뷰", symbolName: "rectangle.split.2x1", shortcutHint: "⌃⌘2"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-ribbon", title: "리본 접기·펼치기", symbolName: "menubar.rectangle", shortcutHint: "⌥⌘R"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-theme", title: "라이트·다크 테마 전환", symbolName: "circle.lefthalf.filled", shortcutHint: "⌃⌥D"),
-                RibbonCommandDescriptor(id: "\(module.rawValue)-view-zoom", title: "100% 실제 배율", symbolName: "1.magnifyingglass", shortcutHint: "⌘0")
-            ]
-        }
-    }
-}
-
 /// Built-in or user-saved template descriptor available from the Home Hub.
 public struct OfficeTemplateDescriptor: Sendable, Equatable, Identifiable {
     public let id: String
@@ -184,13 +99,7 @@ public struct OfficeTemplateDescriptor: Sendable, Equatable, Identifiable {
     public let moduleKind: OfficeModuleKind
     public let isCustomUserTemplate: Bool
 
-    public init(
-        id: String,
-        title: String,
-        subtitle: String,
-        format: DocumentFormat,
-        isCustomUserTemplate: Bool = false
-    ) {
+    public init(id: String, title: String, subtitle: String, format: DocumentFormat, isCustomUserTemplate: Bool = false) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
@@ -249,26 +158,20 @@ public struct WorkspaceTabItem: Sendable, Equatable, Identifiable {
         var chunks: [String] = [fileName, format.rawValue, format.standardSpecification]
         switch payload {
         case let .document(doc):
-            chunks.append(doc.title)
-            chunks.append(doc.headerText)
-            chunks.append(doc.footerText)
+            chunks.append(contentsOf: [doc.title, doc.headerText, doc.footerText])
             chunks.append(contentsOf: doc.paragraphs.map(\.text))
             chunks.append(contentsOf: doc.tables.flatMap { $0.rows.flatMap { $0 } })
             chunks.append(contentsOf: doc.comments.map(\.message))
         case let .sheet(sheet):
             chunks.append(sheet.name)
             for (addr, raw) in sheet.rawCells {
-                chunks.append("\(addr)=\(raw)")
-                chunks.append(raw)
-                chunks.append(sheet.evaluate(at: addr).description)
+                chunks.append(contentsOf: ["\(addr)=\(raw)", raw, sheet.evaluate(at: addr).description])
             }
         case let .slide(deck):
             chunks.append(deck.title)
             for slide in deck.slides {
-                chunks.append(slide.title)
-                chunks.append(slide.subtitle)
+                chunks.append(contentsOf: [slide.title, slide.subtitle, slide.speakerNotes])
                 chunks.append(contentsOf: slide.bulletPoints)
-                chunks.append(slide.speakerNotes)
             }
         case let .pdf(pdfDoc):
             chunks.append(pdfDoc.title)
@@ -282,54 +185,14 @@ public struct WorkspaceTabItem: Sendable, Equatable, Identifiable {
 /// Central workspace state managing open tabs, templates, and unified full-text search.
 public struct WorkspaceHubCatalog: Sendable {
     public static let builtInTemplates: [OfficeTemplateDescriptor] = [
-        OfficeTemplateDescriptor(
-            id: "tpl-doc-proposal",
-            title: "제품 기획서 및 프로젝트 보고서",
-            subtitle: "목차·표·머리말 스타일이 구성된 표준 워드 문서",
-            format: .docx
-        ),
-        OfficeTemplateDescriptor(
-            id: "tpl-hwp-official",
-            title: "기안문 및 행정 공문서 양식 (HWPX)",
-            subtitle: "결재란·두문·본문·협조란 표준 규격 개방형 한글 문서",
-            format: .hwpx
-        ),
-        OfficeTemplateDescriptor(
-            id: "tpl-hwp-legacy-form",
-            title: "대외 협조문 및 품의서 양식 (HWP 5.0)",
-            subtitle: "OLE2 CFBF 호환 이중선 표·누름틀 포함 한글 양식",
-            format: .hwp
-        ),
-        OfficeTemplateDescriptor(
-            id: "tpl-sheet-finance",
-            title: "예산 집행 및 분기 손익 분석 시트",
-            subtitle: "자동 합계·평균·조건부 달성률 수식이 포함된 시트",
-            format: .xlsx
-        ),
-        OfficeTemplateDescriptor(
-            id: "tpl-sheet-ods-kpi",
-            title: "연간 KPI 지표 및 리소스 산출 시트",
-            subtitle: "ISO/IEC 26300 ODF 표준 피벗·수식 검증 시트",
-            format: .ods
-        ),
-        OfficeTemplateDescriptor(
-            id: "tpl-slide-pitch",
-            title: "16:9 경영 브리핑 & 제품 발표덱",
-            subtitle: "슬라이드 마스터·비교 레이아웃·발표자 노트 구성",
-            format: .pptx
-        ),
-        OfficeTemplateDescriptor(
-            id: "tpl-slide-odp-seminar",
-            title: "기술 세미나 및 아키텍처 리뷰 슬라이드",
-            subtitle: "ODF 프레젠테이션 규격 2단 비교 및 다이어그램 덱",
-            format: .odp
-        ),
-        OfficeTemplateDescriptor(
-            id: "tpl-pdf-review",
-            title: "계약서 및 기술 문서 PDF 검토 스튜디오",
-            subtitle: "형광펜 하이라이트·스티커 메모·전자서명 워크플로",
-            format: .pdf
-        )
+        OfficeTemplateDescriptor(id: "tpl-doc-proposal", title: "제품 기획서 및 프로젝트 보고서", subtitle: "목차·표·머리말 스타일이 구성된 표준 워드 문서", format: .docx),
+        OfficeTemplateDescriptor(id: "tpl-hwp-official", title: "기안문 및 행정 공문서 양식 (HWPX)", subtitle: "결재란·두문·본문·협조란 표준 규격 개방형 한글 문서", format: .hwpx),
+        OfficeTemplateDescriptor(id: "tpl-hwp-legacy-form", title: "대외 협조문 및 품의서 양식 (HWP 5.0)", subtitle: "OLE2 CFBF 호환 이중선 표·누름틀 포함 한글 양식", format: .hwp),
+        OfficeTemplateDescriptor(id: "tpl-sheet-finance", title: "예산 집행 및 분기 손익 분석 시트", subtitle: "자동 합계·평균·조건부 달성률 수식이 포함된 시트", format: .xlsx),
+        OfficeTemplateDescriptor(id: "tpl-sheet-ods-kpi", title: "연간 KPI 지표 및 리소스 산출 시트", subtitle: "ISO/IEC 26300 ODF 표준 피벗·수식 검증 시트", format: .ods),
+        OfficeTemplateDescriptor(id: "tpl-slide-pitch", title: "16:9 경영 브리핑 & 제품 발표덱", subtitle: "슬라이드 마스터·비교 레이아웃·발표자 노트 구성", format: .pptx),
+        OfficeTemplateDescriptor(id: "tpl-slide-odp-seminar", title: "기술 세미나 및 아키텍처 리뷰 슬라이드", subtitle: "ODF 프레젠테이션 규격 2단 비교 및 다이어그램 덱", format: .odp),
+        OfficeTemplateDescriptor(id: "tpl-pdf-review", title: "계약서 및 기술 문서 PDF 검토 스튜디오", subtitle: "형광펜 하이라이트·스티커 메모·전자서명 워크플로", format: .pdf)
     ]
 
     /// Creates a pre-populated sample tab for a given template or module kind.
@@ -358,34 +221,11 @@ public struct WorkspaceHubCatalog: Sendable {
                     )
                 ],
                 trackChangesEnabled: true,
-                footnotes: [
-                    FootnoteItem(number: 1, anchorParagraphID: p3.id, text: "국제 문서 표준(ECMA-376, ISO/IEC 26300, KS X 6101, ISO 32000) 준수.")
-                ],
-                revisions: [
-                    TrackedRevision(
-                        author: "QA 아키텍트",
-                        kind: .formattingChange,
-                        paragraphID: p2.id,
-                        originalText: "1. 핵심 목표",
-                        proposedText: "1. 아키텍처 목표 및 핵심 가치"
-                    )
-                ],
-                comments: [
-                    DocumentCommentThread(
-                        anchorParagraphID: p3.id,
-                        author: "보안 리뷰어",
-                        message: "매직 바이트 컨테이너 검증 규칙이 본문 2절에도 연결되어야 합니다.",
-                        replies: ["반영 완료했습니다."]
-                    )
-                ]
+                footnotes: [FootnoteItem(number: 1, anchorParagraphID: p3.id, text: "국제 문서 표준(ECMA-376, ISO/IEC 26300, KS X 6101, ISO 32000) 준수.")],
+                revisions: [TrackedRevision(author: "QA 아키텍트", kind: .formattingChange, paragraphID: p2.id, originalText: "1. 핵심 목표", proposedText: "1. 아키텍처 목표 및 핵심 가치")],
+                comments: [DocumentCommentThread(anchorParagraphID: p3.id, author: "보안 리뷰어", message: "매직 바이트 컨테이너 검증 규칙이 본문 2절에도 연결되어야 합니다.", replies: ["반영 완료했습니다."])]
             )
-            return WorkspaceTabItem(
-                fileName: "아키텍처_보고서.docx",
-                format: .docx,
-                isPinned: true,
-                lastOpenedISO8601: "2026-10-17T09:30:00Z",
-                payload: .document(doc)
-            )
+            return WorkspaceTabItem(fileName: "아키텍처_보고서.docx", format: .docx, isPinned: true, lastOpenedISO8601: "2026-10-17T09:30:00Z", payload: .document(doc))
 
         case .hwp:
             let pHeader = ParagraphBlock(style: .officialHeader, alignment: .center, text: "업 무 협 조 전", fontSizePt: 18, isBold: true)
@@ -401,50 +241,25 @@ public struct WorkspaceHubCatalog: Sendable {
                 tables: [
                     DocumentTableBlock(
                         caption: "결재란 및 검토 내역",
-                        rows: [
-                            ["구분", "담당", "검토", "승인"],
-                            ["서명", "김지훈", "박서연", "최현우"]
-                        ],
+                        rows: [["구분", "담당", "검토", "승인"], ["서명", "김지훈", "박서연", "최현우"]],
                         borderStyle: .doubleLine
                     )
                 ],
-                footnotes: [
-                    FootnoteItem(number: 1, anchorParagraphID: pBody.id, text: "행정 효율과 협업 촉진에 관한 규정 제7조 참조.")
-                ]
+                footnotes: [FootnoteItem(number: 1, anchorParagraphID: pBody.id, text: "행정 효율과 협업 촉진에 관한 규정 제7조 참조.")]
             )
-            return WorkspaceTabItem(
-                fileName: "업무협조전_공문서.hwpx",
-                format: .hwpx,
-                isPinned: true,
-                lastOpenedISO8601: "2026-10-17T09:20:00Z",
-                payload: .document(hwpDoc)
-            )
+            return WorkspaceTabItem(fileName: "업무협조전_공문서.hwpx", format: .hwpx, isPinned: true, lastOpenedISO8601: "2026-10-17T09:20:00Z", payload: .document(hwpDoc))
 
         case .sheet:
             var sheet = WorksheetModel(name: "2026 분기별 실적")
-            try? sheet.setCell("A1", rawValue: "항목")
-            try? sheet.setCell("B1", rawValue: "1분기")
-            try? sheet.setCell("C1", rawValue: "2분기")
-            try? sheet.setCell("D1", rawValue: "상반기 합계")
-            try? sheet.setCell("A2", rawValue: "엔진 최적화")
-            try? sheet.setCell("B2", rawValue: "120")
-            try? sheet.setCell("C2", rawValue: "180")
-            try? sheet.setCell("D2", rawValue: "=SUM(B2:C2)")
-            try? sheet.setCell("A3", rawValue: "포맷 변환")
-            try? sheet.setCell("B3", rawValue: "95")
-            try? sheet.setCell("C3", rawValue: "145")
-            try? sheet.setCell("D3", rawValue: "=SUM(B3:C3)")
-            try? sheet.setCell("A4", rawValue: "전체 합계")
-            try? sheet.setCell("B4", rawValue: "=SUM(B2:B3)")
-            try? sheet.setCell("C4", rawValue: "=SUM(C2:C3)")
-            try? sheet.setCell("D4", rawValue: "=SUM(D2:D3)")
-            return WorkspaceTabItem(
-                fileName: "분기별_실적_분석.xlsx",
-                format: .xlsx,
-                isPinned: true,
-                lastOpenedISO8601: "2026-10-17T09:15:00Z",
-                payload: .sheet(sheet)
-            )
+            for (addr, val) in [
+                ("A1", "항목"), ("B1", "1분기"), ("C1", "2분기"), ("D1", "상반기 합계"),
+                ("A2", "엔진 최적화"), ("B2", "120"), ("C2", "180"), ("D2", "=SUM(B2:C2)"),
+                ("A3", "포맷 변환"), ("B3", "95"), ("C3", "145"), ("D3", "=SUM(B3:C3)"),
+                ("A4", "전체 합계"), ("B4", "=SUM(B2:B3)"), ("C4", "=SUM(C2:C3)"), ("D4", "=SUM(D2:D3)")
+            ] {
+                try? sheet.setCell(addr, rawValue: val)
+            }
+            return WorkspaceTabItem(fileName: "분기별_실적_분석.xlsx", format: .xlsx, isPinned: true, lastOpenedISO8601: "2026-10-17T09:15:00Z", payload: .sheet(sheet))
 
         case .slide:
             let deck = PresentationDeckModel(
@@ -460,17 +275,7 @@ public struct WorkspaceHubCatalog: Sendable {
                         ],
                         speakerNotes: "오프닝 슬라이드: macOS 네이티브 구동 성능과 HWPX/OOXML/PDF 통합 강조",
                         masterLayout: .titleSlide,
-                        elements: [
-                            SlideCanvasElement(
-                                title: "핵심 가치 배너",
-                                bodyText: "Signature Lavender #5C6BC0",
-                                x: 380,
-                                y: 220,
-                                width: 200,
-                                height: 100,
-                                kind: .roundedRectangleShape
-                            )
-                        ]
+                        elements: [SlideCanvasElement(title: "핵심 가치 배너", bodyText: "Signature Lavender #5C6BC0", x: 380, y: 220, width: 200, height: 100, kind: .roundedRectangleShape)]
                     ),
                     SlideModel(
                         title: "핵심 모듈 구성",
@@ -481,56 +286,26 @@ public struct WorkspaceHubCatalog: Sendable {
                         ],
                         speakerNotes: "두 번째 슬라이드: 보안 및 포맷 호환성 설명",
                         masterLayout: .twoColumnComparison,
-                        elements: [
-                            SlideCanvasElement(
-                                title: "아키텍처 카드",
-                                bodyText: "77종 수식 & 양방향 변환",
-                                x: 380,
-                                y: 220,
-                                width: 200,
-                                height: 100,
-                                kind: .rectangleShape
-                            )
-                        ]
+                        elements: [SlideCanvasElement(title: "아키텍처 카드", bodyText: "77종 수식 & 양방향 변환", x: 380, y: 220, width: 200, height: 100, kind: .rectangleShape)]
                     )
                 ]
             )
-            return WorkspaceTabItem(
-                fileName: "제품_로드맵_발표자료.pptx",
-                format: .pptx,
-                lastOpenedISO8601: "2026-10-17T09:10:00Z",
-                payload: .slide(deck)
-            )
+            return WorkspaceTabItem(fileName: "제품_로드맵_발표자료.pptx", format: .pptx, lastOpenedISO8601: "2026-10-17T09:10:00Z", payload: .slide(deck))
 
         case .pdf:
             let pdf = PDFStudioDocumentModel(
                 title: "표준 보안 아키텍처 가이드",
                 pages: [
-                    PDFPageDescriptor(
-                        pageNumber: 1,
-                        rotationDegrees: 0,
-                        extractedText: "제1장 컨테이너 보안 원칙\n모든 입력 문서는 확장자와 무관하게 매직 바이트 시그니처를 먼저 검증합니다."
-                    ),
-                    PDFPageDescriptor(
-                        pageNumber: 2,
-                        rotationDegrees: 0,
-                        extractedText: "제2장 PDF 양방향 변환\nPDF 페이지의 텍스트 흐름과 표 구조를 분석하여 편집 가능한 문서로 변환합니다."
-                    )
+                    PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: "제1장 컨테이너 보안 원칙\n모든 입력 문서는 확장자와 무관하게 매직 바이트 시그니처를 먼저 검증합니다."),
+                    PDFPageDescriptor(pageNumber: 2, rotationDegrees: 0, extractedText: "제2장 PDF 양방향 변환\nPDF 페이지의 텍스트 흐름과 표 구조를 분석하여 편집 가능한 문서로 변환합니다.")
                 ],
-                annotations: [
-                    PDFAnnotationItem(pageNumber: 1, kind: .highlight, content: "매직 바이트 시그니처 검증 필수", author: "QA")
-                ],
+                annotations: [PDFAnnotationItem(pageNumber: 1, kind: .highlight, content: "매직 바이트 시그니처 검증 필수", author: "QA")],
                 outline: [
                     PDFOutlineNode(title: "제1장 컨테이너 보안 원칙", targetPageNumber: 1),
                     PDFOutlineNode(title: "제2장 PDF 양방향 변환", targetPageNumber: 2)
                 ]
             )
-            return WorkspaceTabItem(
-                fileName: "보안_아키텍처_가이드.pdf",
-                format: .pdf,
-                lastOpenedISO8601: "2026-10-17T09:05:00Z",
-                payload: .pdf(pdf)
-            )
+            return WorkspaceTabItem(fileName: "보안_아키텍처_가이드.pdf", format: .pdf, lastOpenedISO8601: "2026-10-17T09:05:00Z", payload: .pdf(pdf))
         }
     }
 
@@ -538,25 +313,16 @@ public struct WorkspaceHubCatalog: Sendable {
     public static func searchTabs(_ tabs: [WorkspaceTabItem], query: String) -> [WorkspaceTabItem] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return tabs }
-        return tabs.filter { tab in
-            tab.searchableCorpus().localizedCaseInsensitiveContains(trimmed)
-        }
+        return tabs.filter { $0.searchableCorpus().localizedCaseInsensitiveContains(trimmed) }
     }
 
     /// Filters and sorts tabs according to the selected Home Hub section and search query.
-    public static func filterTabs(
-        _ tabs: [WorkspaceTabItem],
-        section: HubSection,
-        query: String
-    ) -> [WorkspaceTabItem] {
+    public static func filterTabs(_ tabs: [WorkspaceTabItem], section: HubSection, query: String) -> [WorkspaceTabItem] {
         let queryFiltered = searchTabs(tabs, query: query)
         switch section {
-        case .pinned:
-            return queryFiltered.filter { $0.isPinned || $0.isFavorite }
-        case .recent:
-            return queryFiltered.sorted { $0.lastOpenedISO8601 > $1.lastOpenedISO8601 }
-        case .home, .templates, .converter, .smartAssistant:
-            return queryFiltered
+        case .pinned: return queryFiltered.filter { $0.isPinned || $0.isFavorite }
+        case .recent: return queryFiltered.sorted { $0.lastOpenedISO8601 > $1.lastOpenedISO8601 }
+        case .home, .templates, .converter, .smartAssistant: return queryFiltered
         }
     }
 }
@@ -570,6 +336,7 @@ public final class WorkspaceViewModel {
     public var openTabs: [WorkspaceTabItem]
     public var activeTabID: UUID? {
         didSet {
+            activeInlineEditTargetKey = nil
             if let activeTabID, splitSecondaryTabID == activeTabID {
                 splitSecondaryTabID = nil
             }
@@ -596,16 +363,22 @@ public final class WorkspaceViewModel {
     public var selectedParagraphID: UUID? = nil
     public var paragraphDraftText: String = ""
     public var commentDraftText: String = ""
-    public var mailMergeFields: [String: String] = [
-        "부서명": "플랫폼아키텍처실",
-        "수신자": "전사 기술위원회"
-    ]
+    public var mailMergeFields: [String: String] = ["부서명": "플랫폼아키텍처실", "수신자": "전사 기술위원회"]
     public var selectedChartKind: SheetChartKind = .column
     public var isHeaderRowFrozen: Bool = false
     public var activeConditionalFormatRule: ConditionalFormatRule? = nil
     public var activeDataValidationRule: DataValidationRule? = nil
     public var isSnapGuidesEnabled: Bool = true
     public var presenterElapsedSeconds: Int = 95
+    public var isPresenterTimerRunning: Bool = false
+    public var selectedSlideElementID: UUID? = nil
+    public var activeSnapGuides: [SnapGuideLine] = []
+    public var lastPivotGrandTotal: Double = 0
+    public var authorName: String = "표준 문서 작성자"
+    public var findQueryText: String = ""
+    public var replaceQueryText: String = ""
+    public var isFindReplaceBarVisible: Bool = false
+    public var lastFindReplaceCount: Int = 0
     public var batchTargetFormat: DocumentFormat = .pdf
     public var lastBatchConversionReport: BatchConversionReport? = nil
     public var lastSecurityAuditReport: SecurityAuditReport? = nil
@@ -614,15 +387,14 @@ public final class WorkspaceViewModel {
     public var lastErrorMessage: String? = nil
     public var lastExecutedCommandSummary: String? = nil
 
-    private var undoStacks: [UUID: [OpenTabPayload]] = [:]
-    private var redoStacks: [UUID: [OpenTabPayload]] = [:]
-    private var customTemplatePayloads: [String: OpenTabPayload] = [:]
-    public private(set) var sheetSortAscending: Bool = false
+    internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
+    internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
+    internal var customTemplatePayloads: [String: OpenTabPayload] = [:]
+    internal var activeInlineEditTargetKey: String? = nil
+    public internal(set) var sheetSortAscending: Bool = false
 
     public init() {
-        let initialTabs = OfficeModuleKind.allCases.map {
-            WorkspaceHubCatalog.instantiateSampleTab(for: $0)
-        }
+        let initialTabs = OfficeModuleKind.allCases.map { WorkspaceHubCatalog.instantiateSampleTab(for: $0) }
         self.openTabs = initialTabs
         self.activeTabID = initialTabs.first?.id
         self.formulaBarDraft = "=SUM(B2:C2)"
@@ -658,8 +430,14 @@ public final class WorkspaceViewModel {
         return !(redoStacks[id]?.isEmpty ?? true)
     }
 
-    private func recordUndoSnapshot(for tabID: UUID) {
+    internal func recordUndoSnapshot(for tabID: UUID, coalescingTargetKey: String? = nil) {
         guard let idx = openTabs.firstIndex(where: { $0.id == tabID }) else { return }
+        if let coalescingTargetKey {
+            if activeInlineEditTargetKey == coalescingTargetKey { return }
+            activeInlineEditTargetKey = coalescingTargetKey
+        } else {
+            activeInlineEditTargetKey = nil
+        }
         var stack = undoStacks[tabID] ?? []
         stack.append(openTabs[idx].payload)
         if stack.count > Self.maxUndoDepth {
@@ -670,12 +448,11 @@ public final class WorkspaceViewModel {
     }
 
     public func undo() {
+        activeInlineEditTargetKey = nil
         guard let tabID = activeTab?.id,
               let idx = openTabs.firstIndex(where: { $0.id == tabID }),
               var stack = undoStacks[tabID],
-              let previousPayload = stack.popLast() else {
-            return
-        }
+              let previousPayload = stack.popLast() else { return }
         undoStacks[tabID] = stack
         var rStack = redoStacks[tabID] ?? []
         rStack.append(openTabs[idx].payload)
@@ -686,12 +463,11 @@ public final class WorkspaceViewModel {
     }
 
     public func redo() {
+        activeInlineEditTargetKey = nil
         guard let tabID = activeTab?.id,
               let idx = openTabs.firstIndex(where: { $0.id == tabID }),
               var rStack = redoStacks[tabID],
-              let nextPayload = rStack.popLast() else {
-            return
-        }
+              let nextPayload = rStack.popLast() else { return }
         redoStacks[tabID] = rStack
         var uStack = undoStacks[tabID] ?? []
         uStack.append(openTabs[idx].payload)
@@ -704,6 +480,7 @@ public final class WorkspaceViewModel {
     // MARK: - Tab & Template Management
 
     public func openNewSampleTab(for module: OfficeModuleKind) {
+        activeInlineEditTargetKey = nil
         var newTab = WorkspaceHubCatalog.instantiateSampleTab(for: module)
         newTab.lastOpenedISO8601 = ISO8601DateFormatter().string(from: Date())
         openTabs.append(newTab)
@@ -712,12 +489,9 @@ public final class WorkspaceViewModel {
     }
 
     public func openTab(from template: OfficeTemplateDescriptor) {
+        activeInlineEditTargetKey = nil
         if let savedPayload = customTemplatePayloads[template.id] {
-            let newTab = WorkspaceTabItem(
-                fileName: "\(template.title).\(template.format.rawValue)",
-                format: template.format,
-                payload: savedPayload
-            )
+            let newTab = WorkspaceTabItem(fileName: "\(template.title).\(template.format.rawValue)", format: template.format, payload: savedPayload)
             openTabs.append(newTab)
             activeTabID = newTab.id
             isShowingHomeHub = false
@@ -745,21 +519,14 @@ public final class WorkspaceViewModel {
     }
 
     public func closeTab(id: UUID) {
+        activeInlineEditTargetKey = nil
         openTabs.removeAll { $0.id == id }
         undoStacks.removeValue(forKey: id)
         redoStacks.removeValue(forKey: id)
-        if splitSecondaryTabID == id {
-            splitSecondaryTabID = nil
-        }
-        if activeTabID == id {
-            activeTabID = openTabs.first?.id
-        }
-        if splitSecondaryTabID == activeTabID {
-            splitSecondaryTabID = nil
-        }
-        if openTabs.isEmpty {
-            isShowingHomeHub = true
-        }
+        if splitSecondaryTabID == id { splitSecondaryTabID = nil }
+        if activeTabID == id { activeTabID = openTabs.first?.id }
+        if splitSecondaryTabID == activeTabID { splitSecondaryTabID = nil }
+        if openTabs.isEmpty { isShowingHomeHub = true }
     }
 
     public func togglePinTab(id: UUID) {
@@ -775,12 +542,9 @@ public final class WorkspaceViewModel {
     public func duplicateTab(id: UUID) {
         guard let source = openTabs.first(where: { $0.id == id }) else { return }
         let ext = source.format.rawValue
-        let baseName: String
-        if source.fileName.lowercased().hasSuffix(".\(ext)") {
-            baseName = String(source.fileName.dropLast(ext.count + 1))
-        } else {
-            baseName = source.fileName
-        }
+        let baseName = source.fileName.lowercased().hasSuffix(".\(ext)")
+            ? String(source.fileName.dropLast(ext.count + 1))
+            : source.fileName
         let duplicated = WorkspaceTabItem(
             fileName: "\(baseName)_사본.\(ext)",
             format: source.format,
@@ -832,68 +596,40 @@ public final class WorkspaceViewModel {
 
         switch format {
         case .docx:
-            var doc = try OOXMLContainerCodec.decodeDocument(from: data)
-            doc.format = format
-            payload = .document(doc)
+            var doc = try OOXMLContainerCodec.decodeDocument(from: data); doc.format = format; payload = .document(doc)
         case .odt:
-            var doc = try ODFContainerCodec.decodeDocument(from: data)
-            doc.format = format
-            payload = .document(doc)
+            var doc = try ODFContainerCodec.decodeDocument(from: data); doc.format = format; payload = .document(doc)
         case .hwpx, .hwtx:
-            var doc = try HWPXContainerCodec.decodeDocument(from: data)
-            doc.format = format
-            payload = .document(doc)
+            var doc = try HWPXContainerCodec.decodeDocument(from: data); doc.format = format; payload = .document(doc)
         case .hwp, .hwt:
-            var doc = try HWP5BinaryCodec.decodeDocument(from: data)
-            doc.format = format
-            payload = .document(doc)
+            var doc = try HWP5BinaryCodec.decodeDocument(from: data); doc.format = format; payload = .document(doc)
         case .doc:
-            var doc = try LegacyOLE2OfficeCodec.decodeWordBinary(from: data)
-            doc.format = format
-            payload = .document(doc)
+            var doc = try LegacyOLE2OfficeCodec.decodeWordBinary(from: data); doc.format = format; payload = .document(doc)
         case .rtf:
-            var doc = try RTFCodec.decodeDocument(from: data)
-            doc.format = format
-            payload = .document(doc)
+            var doc = try RTFCodec.decodeDocument(from: data); doc.format = format; payload = .document(doc)
         case .md, .txt:
-            var doc = try CommonMarkCodec.decodeDocument(from: data, title: fileName)
-            doc.format = format
-            payload = .document(doc)
+            var doc = try CommonMarkCodec.decodeDocument(from: data, title: fileName); doc.format = format; payload = .document(doc)
         case .xlsx:
-            let sheet = try OOXMLContainerCodec.decodeWorksheet(from: data)
-            payload = .sheet(sheet)
+            payload = .sheet(try OOXMLContainerCodec.decodeWorksheet(from: data))
         case .xls:
-            let sheet = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: data, name: fileName)
-            payload = .sheet(sheet)
+            payload = .sheet(try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: data, name: fileName))
         case .ods:
-            let sheet = try ODFContainerCodec.decodeWorksheet(from: data)
-            payload = .sheet(sheet)
+            payload = .sheet(try ODFContainerCodec.decodeWorksheet(from: data))
         case .csv:
-            let sheet = try CSVStateMachineCodec.decodeWorksheet(from: data, name: fileName, delimiter: ",")
-            payload = .sheet(sheet)
+            payload = .sheet(try CSVStateMachineCodec.decodeWorksheet(from: data, name: fileName, delimiter: ","))
         case .tsv:
-            let sheet = try CSVStateMachineCodec.decodeWorksheet(from: data, name: fileName, delimiter: "\t")
-            payload = .sheet(sheet)
+            payload = .sheet(try CSVStateMachineCodec.decodeWorksheet(from: data, name: fileName, delimiter: "\t"))
         case .pptx, .ppsx:
-            let deck = try OOXMLContainerCodec.decodePresentation(from: data)
-            payload = .slide(deck)
+            payload = .slide(try OOXMLContainerCodec.decodePresentation(from: data))
         case .ppt:
-            let deck = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: data)
-            payload = .slide(deck)
+            payload = .slide(try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: data))
         case .odp:
-            let deck = try ODFContainerCodec.decodePresentation(from: data)
-            payload = .slide(deck)
+            payload = .slide(try ODFContainerCodec.decodePresentation(from: data))
         case .pdf:
-            let pdfDoc = try PDFBinarySerializer.decode(from: data)
-            payload = .pdf(pdfDoc)
+            payload = .pdf(try PDFBinarySerializer.decode(from: data))
         }
 
-        let newTab = WorkspaceTabItem(
-            fileName: fileName,
-            format: format,
-            fileURL: fileURL,
-            payload: payload
-        )
+        let newTab = WorkspaceTabItem(fileName: fileName, format: format, fileURL: fileURL, payload: payload)
         openTabs.append(newTab)
         activeTabID = newTab.id
         isShowingHomeHub = false
@@ -913,12 +649,7 @@ public final class WorkspaceViewModel {
         }
         let fmt = targetFormat ?? tab.format
         let safeSourceName = tab.fileName.contains(".") ? tab.fileName : "\(tab.fileName).\(tab.format.fileExtension)"
-        let request = ConversionJobRequest(
-            sourceFileName: safeSourceName,
-            sourceFormat: tab.format,
-            targetFormat: fmt,
-            payload: tab.payload
-        )
+        let request = ConversionJobRequest(sourceFileName: safeSourceName, sourceFormat: tab.format, targetFormat: fmt, payload: tab.payload)
         return try DocumentConversionOrchestrator.convert(request)
     }
 
@@ -946,9 +677,27 @@ public final class WorkspaceViewModel {
     public func applyFormulaBarEdit() {
         guard let activeTabID,
               let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .sheet(sheet) = openTabs[idx].payload else {
-            return
+              case var .sheet(sheet) = openTabs[idx].payload else { return }
+        activeInlineEditTargetKey = nil
+        if let rule = activeDataValidationRule {
+            let trimmed = formulaBarDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isValid: Bool
+            if trimmed.hasPrefix("=") {
+                var probe = sheet
+                if (try? probe.setCell(selectedSheetCell, rawValue: formulaBarDraft)) != nil {
+                    isValid = rule.validate(probe.evaluate(at: selectedSheetCell))
+                } else {
+                    isValid = false
+                }
+            } else {
+                isValid = rule.validate(rawValue: formulaBarDraft)
+            }
+            guard isValid else {
+                lastErrorMessage = "데이터 유효성 검사 실패: 입력값 '\(formulaBarDraft)'이(가) 허용 범위를 벗어났습니다."
+                return
+            }
         }
+
         let previousPayload = openTabs[idx].payload
         do {
             try sheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
@@ -967,12 +716,36 @@ public final class WorkspaceViewModel {
         }
     }
 
+    public func addWorksheetTab(named: String? = nil) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .sheet(sheet) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID)
+        let resolvedName = named ?? "Sheet\(sheet.allSheetNames.count + 1)"
+        sheet.addSheetPage(
+            named: resolvedName,
+            initialCells: [PackedCellCoordinate(row: 0, column: 0): "항목", PackedCellCoordinate(row: 0, column: 1): "값"]
+        )
+        openTabs[idx].payload = .sheet(sheet)
+        openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "새 시트 탭 추가: \(resolvedName)"
+    }
+
+    public func selectWorksheetTab(index: Int) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .sheet(sheet) = openTabs[idx].payload else { return }
+        activeInlineEditTargetKey = nil
+        sheet.switchActiveSheet(to: index)
+        formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
+        openTabs[idx].payload = .sheet(sheet)
+        lastExecutedCommandSummary = "시트 탭 전환: \(sheet.name)"
+    }
+
     public func appendParagraphToActiveDocument(text: String, style: ParagraphStyleRole = .body) {
         guard let activeTabID,
               let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .document(doc) = openTabs[idx].payload else {
-            return
-        }
+              case var .document(doc) = openTabs[idx].payload else { return }
         recordUndoSnapshot(for: activeTabID)
         let block = ParagraphBlock(
             style: style,
@@ -991,66 +764,197 @@ public final class WorkspaceViewModel {
         guard let activeTabID,
               let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
               case var .document(doc) = openTabs[idx].payload,
-              let pIdx = doc.paragraphs.firstIndex(where: { $0.id == paragraphID }) else {
-            return
-        }
+              let pIdx = doc.paragraphs.firstIndex(where: { $0.id == paragraphID }) else { return }
         guard doc.paragraphs[pIdx].text != newText else { return }
-        recordUndoSnapshot(for: activeTabID)
+        let targetKey = "para-\(activeTabID.uuidString)-\(paragraphID.uuidString)"
+        let isFirstStrokeInBurst = (activeInlineEditTargetKey != targetKey)
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: targetKey)
         if doc.trackChangesEnabled {
-            doc.recordRevision(
-                author: "QA",
-                kind: .formattingChange,
-                paragraphID: paragraphID,
-                proposedText: newText
-            )
+            if isFirstStrokeInBurst {
+                doc.recordRevision(author: authorName, kind: .formattingChange, paragraphID: paragraphID, proposedText: newText)
+            } else if let rIdx = doc.revisions.indices.last, doc.revisions[rIdx].paragraphID == paragraphID {
+                doc.revisions[rIdx].proposedText = newText
+            }
         }
         doc.paragraphs[pIdx].text = newText
+        if !doc.paragraphs[pIdx].inlineRuns.isEmpty {
+            var firstRun = doc.paragraphs[pIdx].inlineRuns[0]
+            firstRun.text = newText
+            doc.paragraphs[pIdx].inlineRuns = [firstRun]
+        }
         openTabs[idx].payload = .document(doc)
         openTabs[idx].isModified = true
     }
 
-    public func updateTableCell(tableID: UUID, row: Int, col: Int, newValue: String) {
+    public func updateTableCell(tableID: UUID, row: Int, column: Int, newValue: String) {
         guard let activeTabID,
               let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
               case var .document(doc) = openTabs[idx].payload,
               let tIdx = doc.tables.firstIndex(where: { $0.id == tableID }),
               doc.tables[tIdx].rows.indices.contains(row),
-              doc.tables[tIdx].rows[row].indices.contains(col) else {
-            return
-        }
-        guard doc.tables[tIdx].rows[row][col] != newValue else { return }
-        recordUndoSnapshot(for: activeTabID)
-        doc.tables[tIdx].rows[row][col] = newValue
+              doc.tables[tIdx].rows[row].indices.contains(column) else { return }
+        guard doc.tables[tIdx].rows[row][column] != newValue else { return }
+        let targetKey = "table-\(activeTabID.uuidString)-\(tableID.uuidString)-\(row)-\(column)"
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: targetKey)
+        doc.tables[tIdx].rows[row][column] = newValue
         openTabs[idx].payload = .document(doc)
         openTabs[idx].isModified = true
     }
 
-    public func moveSlideElement(slideIndex: Int, elementID: UUID, deltaX: Double, deltaY: Double) {
+    public func updateTableCell(tableID: UUID, row: Int, col: Int, newValue: String) {
+        updateTableCell(tableID: tableID, row: row, column: col, newValue: newValue)
+    }
+
+    public func insertEmbeddedImageIntoActiveDocument(
+        caption: String = "아키텍처 다이어그램 PNG",
+        widthPt: Double = 320,
+        heightPt: Double = 180
+    ) {
         guard let activeTabID,
               let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .slide(deck) = openTabs[idx].payload,
-              deck.slides.indices.contains(slideIndex),
-              let eIdx = deck.slides[slideIndex].elements.firstIndex(where: { $0.id == elementID }) else {
-            return
+              case var .document(doc) = openTabs[idx].payload else { return }
+        recordUndoSnapshot(for: activeTabID)
+        let pngSignature = Data([
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82
+        ])
+        doc.images.append(
+            EmbeddedImageAttachment(
+                fileName: "image_\(doc.images.count + 1).png",
+                caption: caption,
+                mimeType: "image/png",
+                imageData: pngSignature,
+                widthPt: widthPt,
+                heightPt: heightPt,
+                anchorParagraphID: selectedParagraphID ?? doc.paragraphs.first?.id
+            )
+        )
+        openTabs[idx].payload = .document(doc)
+        openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "임베디드 이미지 첨부 완료: \(caption)"
+    }
+
+    public func applyInlineRunFormattingToActiveParagraph(
+        isBold: Bool = true,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        textHex: String? = "#5C6BC0",
+        foregroundHex: String? = nil
+    ) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .document(doc) = openTabs[idx].payload,
+              !doc.paragraphs.isEmpty else { return }
+        recordUndoSnapshot(for: activeTabID)
+        let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+        let resolvedColor = foregroundHex ?? textHex
+        let baseText = doc.paragraphs[pIdx].text
+        let words = baseText.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+        if words.count == 2 {
+            doc.paragraphs[pIdx].runs = [
+                DocumentTextRun(text: String(words[0]) + " ", isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, foregroundHex: resolvedColor),
+                DocumentTextRun(text: String(words[1]), isBold: doc.paragraphs[pIdx].isBold, isItalic: doc.paragraphs[pIdx].isItalic, isUnderlined: doc.paragraphs[pIdx].isUnderlined)
+            ]
+        } else {
+            doc.paragraphs[pIdx].runs = [
+                DocumentTextRun(text: baseText, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, foregroundHex: resolvedColor)
+            ]
         }
+        openTabs[idx].payload = .document(doc)
+        openTabs[idx].isModified = true
+        lastExecutedCommandSummary = "인라인 텍스트 런 서식 적용 완료"
+    }
+
+    public func selectSlideElement(id: UUID?) {
+        activeInlineEditTargetKey = nil
+        selectedSlideElementID = id
+    }
+
+    public func moveSlideElement(slideIndex: Int? = nil, elementID: UUID, deltaX: Double, deltaY: Double) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .slide(deck) = openTabs[idx].payload else { return }
+        let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(targetSlideIdx),
+              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
         recordUndoSnapshot(for: activeTabID)
         let maxW = deck.aspectRatio.widthPoints
         let maxH = deck.aspectRatio.heightPoints
-        var elem = deck.slides[slideIndex].elements[eIdx]
+        var elem = deck.slides[targetSlideIdx].elements[eIdx]
         elem.x = max(0.0, min(maxW - elem.width, elem.x + deltaX))
         elem.y = max(0.0, min(maxH - elem.height, elem.y + deltaY))
-        deck.slides[slideIndex].elements[eIdx] = elem
+        deck.slides[targetSlideIdx].elements[eIdx] = elem
+        let siblings = deck.slides[targetSlideIdx].elements.enumerated().compactMap { $0 == eIdx ? nil : $1 }
+        activeSnapGuides = SnapGuideCalculator.computeGuides(for: elem, siblings: siblings, aspectRatio: deck.aspectRatio, tolerancePoints: 5.0)
+        openTabs[idx].payload = .slide(deck)
+        openTabs[idx].isModified = true
+    }
+
+    public func resizeSlideElement(slideIndex: Int? = nil, elementID: UUID, deltaWidth: Double, deltaHeight: Double) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .slide(deck) = openTabs[idx].payload else { return }
+        let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(targetSlideIdx),
+              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        recordUndoSnapshot(for: activeTabID)
+        let maxW = deck.aspectRatio.widthPoints
+        let maxH = deck.aspectRatio.heightPoints
+        var elem = deck.slides[targetSlideIdx].elements[eIdx]
+        elem.width = max(40.0, min(maxW - elem.x, elem.width + deltaWidth))
+        elem.height = max(28.0, min(maxH - elem.y, elem.height + deltaHeight))
+        deck.slides[targetSlideIdx].elements[eIdx] = elem
+        openTabs[idx].payload = .slide(deck)
+        openTabs[idx].isModified = true
+    }
+
+    public func updateSlideElementText(slideIndex: Int? = nil, elementID: UUID, title: String? = nil, bodyText: String? = nil) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .slide(deck) = openTabs[idx].payload else { return }
+        let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(targetSlideIdx),
+              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        let targetKey = "slide-elem-\(activeTabID.uuidString)-\(elementID.uuidString)"
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: targetKey)
+        if let title { deck.slides[targetSlideIdx].elements[eIdx].title = title }
+        if let bodyText { deck.slides[targetSlideIdx].elements[eIdx].bodyText = bodyText }
+        openTabs[idx].payload = .slide(deck)
+        openTabs[idx].isModified = true
+    }
+
+    public func addSlideBulletPoint(slideIndex: Int? = nil, text: String) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .slide(deck) = openTabs[idx].payload else { return }
+        let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(targetSlideIdx) else { return }
+        recordUndoSnapshot(for: activeTabID)
+        deck.slides[targetSlideIdx].bulletPoints.append(text)
+        openTabs[idx].payload = .slide(deck)
+        openTabs[idx].isModified = true
+    }
+
+    public func updateSlideBulletPoint(slideIndex: Int? = nil, bulletIndex: Int, newText: String) {
+        guard let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .slide(deck) = openTabs[idx].payload else { return }
+        let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(targetSlideIdx),
+              deck.slides[targetSlideIdx].bulletPoints.indices.contains(bulletIndex) else { return }
+        let targetKey = "slide-bullet-\(activeTabID.uuidString)-\(targetSlideIdx)-\(bulletIndex)"
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: targetKey)
+        deck.slides[targetSlideIdx].bulletPoints[bulletIndex] = newText
         openTabs[idx].payload = .slide(deck)
         openTabs[idx].isModified = true
     }
 
     public func advancePresenterSlide() {
-        guard let activeTab,
-              case let .slide(deck) = activeTab.payload,
-              !deck.slides.isEmpty else { return }
-        if selectedSlideIndex + 1 < deck.slides.count {
-            selectedSlideIndex += 1
-        }
+        guard let activeTab, case let .slide(deck) = activeTab.payload, !deck.slides.isEmpty else { return }
+        if selectedSlideIndex + 1 < deck.slides.count { selectedSlideIndex += 1 }
         presenterElapsedSeconds += 15
     }
 
@@ -1059,12 +963,15 @@ public final class WorkspaceViewModel {
         selectedSlideIndex -= 1
     }
 
+    public func tickPresenterTimer(seconds: Int = 1) {
+        guard seconds > 0 else { return }
+        presenterElapsedSeconds += seconds
+    }
+
     public func rotateActivePDFPage(clockwiseDegrees: Int = 90) {
         guard let activeTabID,
               let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .pdf(pdfDoc) = openTabs[idx].payload else {
-            return
-        }
+              case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
         recordUndoSnapshot(for: activeTabID)
         let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
         pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: clockwiseDegrees)
@@ -1075,913 +982,114 @@ public final class WorkspaceViewModel {
     public func addPDFAnnotation(kind: PDFAnnotationKind, content: String) {
         guard let activeTabID,
               let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-              case var .pdf(pdfDoc) = openTabs[idx].payload else {
-            return
-        }
+              case var .pdf(pdfDoc) = openTabs[idx].payload else { return }
         recordUndoSnapshot(for: activeTabID)
-        let pageNumber = pdfDoc.pages.indices.contains(selectedPDFPageIndex)
-            ? pdfDoc.pages[selectedPDFPageIndex].pageNumber
-            : 1
-        let item = PDFAnnotationItem(
-            pageNumber: pageNumber,
-            kind: kind,
-            content: content,
-            author: "QA"
-        )
-        pdfDoc.annotations.append(item)
+        let pageNumber = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? pdfDoc.pages[selectedPDFPageIndex].pageNumber : 1
+        pdfDoc.annotations.append(PDFAnnotationItem(pageNumber: pageNumber, kind: kind, content: content, author: authorName))
         openTabs[idx].payload = .pdf(pdfDoc)
         openTabs[idx].isModified = true
     }
 
-    // MARK: - Batch Conversion & Security Audit Integration
+    // MARK: - Find & Replace Across Active Tab
 
-    public func runBatchConversionForOpenTabs() {
-        let jobs = openTabs.map { tab in
-            ConversionJobRequest(
-                sourceFileName: tab.fileName,
-                sourceFormat: tab.format,
-                targetFormat: batchTargetFormat,
-                payload: tab.payload
-            )
+    @discardableResult
+    public func performFindAndReplace() -> Int {
+        let query = findQueryText
+        let replacement = replaceQueryText
+        guard !query.isEmpty,
+              let activeTabID,
+              let idx = openTabs.firstIndex(where: { $0.id == activeTabID }) else {
+            lastFindReplaceCount = 0
+            return 0
         }
-        lastBatchConversionReport = DocumentConversionOrchestrator.executeBatch(jobs)
-    }
 
-    public func runSecurityAuditOnActiveTab() {
-        guard let current = activeTab else { return }
-        if let bytes = try? exportTabData(id: current.id, targetFormat: current.format) {
-            lastSecurityAuditReport = DocumentSecurityAuditor.auditContainer(data: bytes, fileName: current.fileName)
-        }
-        reviewStatsRefreshCount += 1
-    }
-
-    public func scrubActiveTabMetadata() {
-        guard let targetIdx = openTabs.firstIndex(where: { $0.id == activeTabID && $0.moduleKind == .document })
-                ?? openTabs.firstIndex(where: { $0.id == activeTabID && $0.moduleKind == .hwp })
-                ?? openTabs.firstIndex(where: { if case .document = $0.payload { return true } else { return false } }),
-              case let .document(doc) = openTabs[targetIdx].payload else {
-            return
-        }
-        recordUndoSnapshot(for: openTabs[targetIdx].id)
-        let (scrubbed, removedCount) = DocumentSecurityAuditor.scrubMetadata(from: doc)
-        openTabs[targetIdx].payload = .document(scrubbed)
-        openTabs[targetIdx].isModified = true
-        lastScrubbedMetadataCount = removedCount
-        lastExecutedCommandSummary = "개인정보·메타데이터 \(removedCount)건 비식별화 완료"
-    }
-
-    // MARK: - Complete 140-Action Context Ribbon Dispatcher
-
-    public func executeRibbonCommand(_ commandID: String) {
-        // 1. View category commands
-        if commandID.hasSuffix("-view-split") {
-            if splitSecondaryTab != nil {
-                enableSplitView(secondaryTabID: nil)
-                lastExecutedCommandSummary = "좌우 스플릿 뷰 해제"
-            } else if let candidate = openTabs.first(where: { $0.id != activeTabID }) {
-                enableSplitView(secondaryTabID: candidate.id)
-                lastExecutedCommandSummary = "좌우 스플릿 뷰 활성: \(candidate.fileName)"
-            } else {
-                lastExecutedCommandSummary = "좌우 스플릿 뷰 단일 탭 유지"
+        var count = 0
+        func replaceOccurrences(in source: inout String) {
+            guard source.contains(query) else { return }
+            let components = source.components(separatedBy: query)
+            let occurrences = max(0, components.count - 1)
+            if occurrences > 0 {
+                count += occurrences
+                source = components.joined(separator: replacement)
             }
-            return
-        }
-        if commandID.hasSuffix("-view-ribbon") {
-            isRibbonCollapsed.toggle()
-            lastExecutedCommandSummary = isRibbonCollapsed ? "컨텍스트 리본 접기 완료" : "컨텍스트 리본 펼치기 완료"
-            return
-        }
-        if commandID.hasSuffix("-view-theme") {
-            themeMode = (themeMode == .darkIndigo) ? .lightLavender : .darkIndigo
-            lastExecutedCommandSummary = "테마 모드 전환: \(themeMode.rawValue)"
-            return
-        }
-        if commandID.hasSuffix("-view-zoom") {
-            setZoom(zoomPercent == 100.0 ? 125.0 : 100.0)
-            lastExecutedCommandSummary = "배율 \(Int(zoomPercent))% 전환 완료"
-            return
         }
 
-        guard let tabID = activeTab?.id,
-              let idx = openTabs.firstIndex(where: { $0.id == tabID }) else {
-            lastExecutedCommandSummary = "활성 탭 없음"
-            return
-        }
-
-        // 2. Home formatting commands
-        if commandID.hasSuffix("-home-bold") {
-            recordUndoSnapshot(for: tabID)
-            applyHomeFormatting(at: idx, action: .bold)
-            lastExecutedCommandSummary = "굵게 서식 전환 완료"
-            return
-        }
-        if commandID.hasSuffix("-home-italic") {
-            recordUndoSnapshot(for: tabID)
-            applyHomeFormatting(at: idx, action: .italic)
-            lastExecutedCommandSummary = "기울임 서식 전환 완료"
-            return
-        }
-        if commandID.hasSuffix("-home-underline") {
-            recordUndoSnapshot(for: tabID)
-            applyHomeFormatting(at: idx, action: .underline)
-            lastExecutedCommandSummary = "밑줄 서식 전환 완료"
-            return
-        }
-        if commandID.hasSuffix("-home-style") {
-            recordUndoSnapshot(for: tabID)
-            applyHomeFormatting(at: idx, action: .styleCycle)
-            lastExecutedCommandSummary = "표준 단락·개체 스타일 순환 적용 완료"
-            return
-        }
-
-        // 3. Insert commands
-        if commandID.hasSuffix("-insert-table") {
-            recordUndoSnapshot(for: tabID)
-            applyInsertCommand(at: idx, kind: .table)
-            lastExecutedCommandSummary = "표 개체 삽입 완료"
-            return
-        }
-        if commandID.hasSuffix("-insert-chart") {
-            recordUndoSnapshot(for: tabID)
-            applyInsertCommand(at: idx, kind: .chart)
-            lastExecutedCommandSummary = "차트 개체 삽입 완료"
-            return
-        }
-        if commandID.hasSuffix("-insert-shape") {
-            recordUndoSnapshot(for: tabID)
-            applyInsertCommand(at: idx, kind: .shape)
-            lastExecutedCommandSummary = "도형·다이어그램 개체 삽입 완료"
-            return
-        }
-        if commandID.hasSuffix("-insert-link") {
-            recordUndoSnapshot(for: tabID)
-            applyInsertCommand(at: idx, kind: .link)
-            lastExecutedCommandSummary = "책갈피·참조 링크 삽입 완료"
-            return
-        }
-
-        // 4. Layout commands
-        if commandID.hasSuffix("-layout-paper") || commandID.hasSuffix("-layout-size") {
-            recordUndoSnapshot(for: tabID)
-            applyLayoutCommand(at: idx, kind: .paperSize)
-            lastExecutedCommandSummary = "용지 및 화면 규격 전환 완료"
-            return
-        }
-        if commandID.hasSuffix("-layout-orientation") || commandID.hasSuffix("-layout-orient") {
-            recordUndoSnapshot(for: tabID)
-            applyLayoutCommand(at: idx, kind: .orientation)
-            lastExecutedCommandSummary = "용지 방향 전환 완료"
-            return
-        }
-        if commandID.hasSuffix("-layout-columns") {
-            recordUndoSnapshot(for: tabID)
-            applyLayoutCommand(at: idx, kind: .columns)
-            lastExecutedCommandSummary = "다단 레이아웃 전환 완료"
-            return
-        }
-        if commandID.hasSuffix("-layout-margins") || commandID.hasSuffix("-layout-margin") {
-            recordUndoSnapshot(for: tabID)
-            applyLayoutCommand(at: idx, kind: .margins)
-            lastExecutedCommandSummary = "여백 프리셋 전환 완료"
-            return
-        }
-
-        // 5. Formulas & Data commands
-        if commandID.hasSuffix("-data-autosum") || commandID.hasSuffix("-data-sum") {
-            recordUndoSnapshot(for: tabID)
-            applyDataCommand(at: idx, kind: .autoSum)
-            lastExecutedCommandSummary = "자동 합계(SUM) 수식 계산 완료"
-            return
-        }
-        if commandID.hasSuffix("-data-fn-browser") || commandID.hasSuffix("-data-fx") {
-            recordUndoSnapshot(for: tabID)
-            applyDataCommand(at: idx, kind: .functionWizard)
-            lastExecutedCommandSummary = "77종 함수 마법사(AVERAGE) 수식 적용 완료"
-            return
-        }
-        if commandID.hasSuffix("-data-sort") {
-            recordUndoSnapshot(for: tabID)
-            applyDataCommand(at: idx, kind: .sort)
-            lastExecutedCommandSummary = "데이터 행 정렬 완료"
-            return
-        }
-        if commandID.hasSuffix("-data-validation") || commandID.hasSuffix("-data-validate") {
-            recordUndoSnapshot(for: tabID)
-            applyDataCommand(at: idx, kind: .validation)
-            lastExecutedCommandSummary = "데이터 유효성 검사 규칙 활성화 완료"
-            return
-        }
-
-        // 6. Module-specific commands
-        switch commandID {
-        case "doc-mod-toc":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                let toc = doc.generateTableOfContents()
-                let summaryText = toc.isEmpty
-                    ? "[자동 목차] 등록된 제목 스타일 없음"
-                    : "[자동 목차] " + toc.map(\.title).joined(separator: " · ")
-                doc.paragraphs.insert(
-                    ParagraphBlock(style: .quote, alignment: .leading, text: summaryText, isBold: true),
-                    at: 0
-                )
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
-            }
-            lastExecutedCommandSummary = "자동 목차(TOC) 생성 완료"
-            return
-
-        case "doc-mod-footnote":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                let anchorID = doc.paragraphs.last?.id ?? UUID()
-                let nextNum = doc.footnotes.count + 1
-                doc.footnotes.append(
-                    FootnoteItem(number: nextNum, anchorParagraphID: anchorID, text: "각주 \(nextNum): 표준 규격 참조 설명")
-                )
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
-            }
-            lastExecutedCommandSummary = "각주·미주 삽입 완료"
-            return
-
-        case "doc-mod-mailmerge", "doc-mod-merge":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                doc = doc.applyingMailMerge(record: mailMergeFields)
-                doc.footerText = "메일 머지 치환 완료 (\(mailMergeFields.count)개 필드)"
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
-            }
-            lastExecutedCommandSummary = "메일 머지 필드 일괄 치환 완료"
-            return
-
-        case "doc-mod-tableformula", "doc-mod-header":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                if !doc.tables.isEmpty {
-                    let lastCol = max(0, doc.tables[0].columnCount - 1)
-                    if let val = doc.tables[0].evaluateTableFormula("=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) {
-                        var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
-                        summaryRow[0] = "합계 (=SUM(ABOVE))"
-                        summaryRow[lastCol] = String(Int(val))
-                        doc.tables[0].rows.append(summaryRow)
+        switch openTabs[idx].payload {
+        case var .document(doc):
+            let beforeDoc = doc
+            for pIdx in doc.paragraphs.indices {
+                replaceOccurrences(in: &doc.paragraphs[pIdx].text)
+                for rIdx in doc.paragraphs[pIdx].inlineRuns.indices {
+                    var runText = doc.paragraphs[pIdx].inlineRuns[rIdx].text
+                    if runText.contains(query) {
+                        runText = runText.replacingOccurrences(of: query, with: replacement)
+                        doc.paragraphs[pIdx].inlineRuns[rIdx].text = runText
                     }
-                } else {
-                    doc.headerText = "표준 기술 문서 머리말"
                 }
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
             }
-            lastExecutedCommandSummary = "표 셀 수식(=SUM(ABOVE)) 계산 반영 완료"
-            return
-
-        case "hwp-mod-header", "hwp-mod-official":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                doc.headerText = "행정기관 표준 공문서 · 문서번호 기안-2026-0201"
-                let banner = ParagraphBlock(
-                    style: .officialHeader,
-                    alignment: .center,
-                    text: "행 정 공 문 서 두 문 · 결 재 란",
-                    fontSizePt: 18,
-                    isBold: true
-                )
-                doc.paragraphs.insert(banner, at: 0)
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
-            }
-            lastExecutedCommandSummary = "행정 공문서 두문·결재란 삽입 완료"
-            return
-
-        case "hwp-mod-field":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                let fieldPara = ParagraphBlock(
-                    style: .body,
-                    alignment: .justified,
-                    text: "누름틀 입력란: {{부서명}} / {{수신자}}"
-                )
-                doc.paragraphs.append(fieldPara)
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
-            }
-            lastExecutedCommandSummary = "한글 누름틀 필드 삽입 완료"
-            return
-
-        case "hwp-mod-border":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                if doc.tables.isEmpty {
-                    doc.tables.append(
-                        DocumentTableBlock(
-                            caption: "결재란 표",
-                            rows: [["담당", "검토", "승인"], ["결재", "결재", "결재"]],
-                            borderStyle: .doubleLine
-                        )
-                    )
-                } else {
-                    let current = doc.tables[0].borderStyle
-                    doc.tables[0].borderStyle = (current == .doubleLine) ? .diagonalDown : .doubleLine
+            for tIdx in doc.tables.indices {
+                for rIdx in doc.tables[tIdx].rows.indices {
+                    for cIdx in doc.tables[tIdx].rows[rIdx].indices {
+                        replaceOccurrences(in: &doc.tables[tIdx].rows[rIdx][cIdx])
+                    }
                 }
+            }
+            if doc != beforeDoc {
+                recordUndoSnapshot(for: activeTabID)
                 openTabs[idx].payload = .document(doc)
                 openTabs[idx].isModified = true
             }
-            lastExecutedCommandSummary = "이중선·대각선 표 테두리 적용 완료"
-            return
 
-        case "hwp-mod-manuscript":
-            recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
-                let stats = doc.computeStatistics()
-                doc.footerText = "200자 원고지 환산: \(stats.manuscriptPages200)매 (\(stats.characterCountWithSpaces)자)"
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+        case var .sheet(sheet):
+            let beforeSheet = sheet
+            for coord in Array(sheet.cellsByCoordinate.keys).sorted() {
+                guard var raw = sheet.cellsByCoordinate[coord], !raw.hasPrefix("=") else { continue }
+                let prevCount = count
+                replaceOccurrences(in: &raw)
+                if count > prevCount {
+                    try? sheet.setCell(CellAddress(packed: coord).a1Notation, rawValue: raw)
+                }
             }
-            lastExecutedCommandSummary = "200자 원고지 매수 검산 반영 완료"
-            return
-
-        case "sheet-mod-pivot":
-            recordUndoSnapshot(for: tabID)
-            if case var .sheet(sheet) = openTabs[idx].payload,
-               let range = try? CellRange(notation: "A1:D4") {
-                let summary = PivotTableEngine.compute(
-                    from: sheet,
-                    range: range,
-                    hasHeaderRow: true,
-                    configuration: PivotTableConfiguration(rowFieldColumnIndex: 0, valueFieldColumnIndex: 3, aggregation: .sum)
-                )
-                try? sheet.setCell("E1", rawValue: "피벗 총계")
-                try? sheet.setCell("E2", rawValue: String(format: "%.0f", summary.grandTotal))
+            if sheet != beforeSheet {
+                recordUndoSnapshot(for: activeTabID)
                 openTabs[idx].payload = .sheet(sheet)
                 openTabs[idx].isModified = true
             }
-            lastExecutedCommandSummary = "피벗 테이블 요약 집계 완료"
-            return
 
-        case "sheet-mod-chart":
-            let allKinds = SheetChartKind.allCases
-            if let currentIdx = allKinds.firstIndex(of: selectedChartKind) {
-                selectedChartKind = allKinds[(currentIdx + 1) % allKinds.count]
+        case var .slide(deck):
+            let beforeDeck = deck
+            for sIdx in deck.slides.indices {
+                replaceOccurrences(in: &deck.slides[sIdx].title)
+                replaceOccurrences(in: &deck.slides[sIdx].subtitle)
+                for bIdx in deck.slides[sIdx].bulletPoints.indices {
+                    replaceOccurrences(in: &deck.slides[sIdx].bulletPoints[bIdx])
+                }
+                for eIdx in deck.slides[sIdx].elements.indices {
+                    replaceOccurrences(in: &deck.slides[sIdx].elements[eIdx].title)
+                    replaceOccurrences(in: &deck.slides[sIdx].elements[eIdx].bodyText)
+                }
             }
-            lastExecutedCommandSummary = "차트 시각화 유형 전환: \(selectedChartKind.rawValue)"
-            return
-
-        case "sheet-mod-condfmt", "sheet-mod-cond":
-            activeConditionalFormatRule = (activeConditionalFormatRule == nil) ? .greaterThan(100.0) : nil
-            lastExecutedCommandSummary = "조건부 서식(>100 강조) 규칙 적용 완료"
-            return
-
-        case "sheet-mod-freeze":
-            isHeaderRowFrozen.toggle()
-            lastExecutedCommandSummary = isHeaderRowFrozen ? "행·열 틀 고정 활성화" : "행·열 틀 고정 해제"
-            return
-
-        case "slide-mod-master":
-            recordUndoSnapshot(for: tabID)
-            if case var .slide(deck) = openTabs[idx].payload, !deck.slides.isEmpty {
-                let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                let layouts = SlideMasterLayout.allCases
-                let cur = deck.slides[sIdx].masterLayout
-                let nextIdx = ((layouts.firstIndex(of: cur) ?? 0) + 1) % layouts.count
-                deck.slides[sIdx].masterLayout = layouts[nextIdx]
+            if deck != beforeDeck {
+                recordUndoSnapshot(for: activeTabID)
                 openTabs[idx].payload = .slide(deck)
                 openTabs[idx].isModified = true
             }
-            lastExecutedCommandSummary = "슬라이드 마스터 레이아웃 순환 적용 완료"
-            return
 
-        case "slide-mod-snap":
-            recordUndoSnapshot(for: tabID)
-            isSnapGuidesEnabled = true
-            if case var .slide(deck) = openTabs[idx].payload, !deck.slides.isEmpty {
-                let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                if !deck.slides[sIdx].elements.isEmpty {
-                    let stageW = deck.aspectRatio.widthPoints
-                    let stageH = deck.aspectRatio.heightPoints
-                    let elemW = deck.slides[sIdx].elements[0].width
-                    let elemH = deck.slides[sIdx].elements[0].height
-                    let targetX = (stageW - elemW) / 2.0
-                    let targetY = (stageH - elemH) / 2.0
-                    if abs(deck.slides[sIdx].elements[0].x - targetX) < 0.5 && abs(deck.slides[sIdx].elements[0].y - targetY) < 0.5 {
-                        deck.slides[sIdx].elements[0].x = targetX + 16.0
-                        deck.slides[sIdx].elements[0].y = targetY + 12.0
-                    } else {
-                        deck.slides[sIdx].elements[0].x = targetX
-                        deck.slides[sIdx].elements[0].y = targetY
-                    }
-                }
-                openTabs[idx].payload = .slide(deck)
-                openTabs[idx].isModified = true
+        case var .pdf(pdfDoc):
+            let beforePDF = pdfDoc
+            for aIdx in pdfDoc.annotations.indices {
+                replaceOccurrences(in: &pdfDoc.annotations[aIdx].content)
             }
-            lastExecutedCommandSummary = "스마트 정렬 가이드 정중앙 스냅 완료"
-            return
-
-        case "slide-mod-transition":
-            recordUndoSnapshot(for: tabID)
-            if case var .slide(deck) = openTabs[idx].payload, !deck.slides.isEmpty {
-                let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                let transitions = SlideTransitionKind.allCases
-                let cur = deck.slides[sIdx].transition
-                let nextIdx = ((transitions.firstIndex(of: cur) ?? 0) + 1) % transitions.count
-                deck.slides[sIdx].transition = transitions[nextIdx]
-                openTabs[idx].payload = .slide(deck)
-                openTabs[idx].isModified = true
-            }
-            lastExecutedCommandSummary = "슬라이드 화면 전환 효과 변경 완료"
-            return
-
-        case "slide-mod-presenter":
-            isPresenterModeActive.toggle()
-            lastExecutedCommandSummary = isPresenterModeActive ? "발표자 도구 시작" : "발표자 도구 닫기"
-            return
-
-        case "pdf-mod-highlight", "pdf-mod-annotate":
-            addPDFAnnotation(kind: .highlight, content: "형광펜 하이라이트 주석")
-            lastExecutedCommandSummary = "PDF 형광펜 주석 추가 완료"
-            return
-
-        case "pdf-mod-rotate":
-            rotateActivePDFPage(clockwiseDegrees: 90)
-            lastExecutedCommandSummary = "PDF 페이지 90° 회전 완료"
-            return
-
-        case "pdf-mod-splitmerge", "pdf-mod-split":
-            recordUndoSnapshot(for: tabID)
-            if case var .pdf(pdfDoc) = openTabs[idx].payload {
-                if pdfDoc.pages.count > 1 {
-                    let extracted = pdfDoc.extractPages(oneBasedPageNumbers: [1], newTitle: "\(pdfDoc.title) (1페이지 추출)")
-                    let splitTab = WorkspaceTabItem(
-                        fileName: "분할_\(openTabs[idx].fileName)",
-                        format: .pdf,
-                        isModified: true,
-                        payload: .pdf(extracted)
-                    )
-                    openTabs.append(splitTab)
-                } else {
-                    pdfDoc.insertBlankPage(at: pdfDoc.pages.count)
-                    openTabs[idx].payload = .pdf(pdfDoc)
-                    openTabs[idx].isModified = true
-                }
-            }
-            lastExecutedCommandSummary = "PDF 페이지 분할·병합 실행 완료"
-            return
-
-        case "pdf-mod-tooffice", "pdf-mod-convert":
-            if case let .pdf(pdfDoc) = openTabs[idx].payload {
-                let editable = pdfDoc.convertToEditableDocument(targetFormat: .docx)
-                let convertedTab = WorkspaceTabItem(
-                    fileName: "\(pdfDoc.title)_변환본.docx",
-                    format: .docx,
-                    isModified: true,
-                    payload: .document(editable)
-                )
-                openTabs.append(convertedTab)
-                activeTabID = convertedTab.id
-            }
-            lastExecutedCommandSummary = "PDF → 편집 문서(DOCX) 변환 완료"
-            return
-
-        default:
-            break
-        }
-
-        // 7. Review & Security commands
-        if commandID.hasSuffix("-review-track") {
-            recordUndoSnapshot(for: tabID)
-            switch openTabs[idx].payload {
-            case var .document(doc):
-                doc.trackChangesEnabled.toggle()
-                openTabs[idx].payload = .document(doc)
-            case var .sheet(sheet):
-                let nextVal = (sheet.rawValue(at: "F2") == "[변경추적:활성]") ? "[변경추적:비활성]" : "[변경추적:활성]"
-                try? sheet.setCell("F2", rawValue: nextVal)
-                openTabs[idx].payload = .sheet(sheet)
-            case var .slide(deck):
-                if !deck.slides.isEmpty {
-                    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                    deck.slides[sIdx].speakerNotes += " [변경추적]"
-                    openTabs[idx].payload = .slide(deck)
-                }
-            case var .pdf(pdfDoc):
-                pdfDoc.annotations.append(
-                    PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: "변경 내용 추적 감사 마크", author: "QA")
-                )
-                openTabs[idx].payload = .pdf(pdfDoc)
-            }
-            openTabs[idx].isModified = true
-            lastExecutedCommandSummary = "변경 내용 추적 상태 전환 완료"
-            return
-        }
-        if commandID.hasSuffix("-review-comment") {
-            recordUndoSnapshot(for: tabID)
-            let noteText = commentDraftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "검토 의견이 등록되었습니다."
-                : commentDraftText
-            switch openTabs[idx].payload {
-            case var .document(doc):
-                let anchorID = doc.paragraphs.first?.id ?? UUID()
-                doc.comments.append(
-                    DocumentCommentThread(anchorParagraphID: anchorID, author: "QA", message: noteText)
-                )
-                openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
-            case var .pdf(pdfDoc):
-                pdfDoc.annotations.append(
-                    PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: noteText, author: "QA")
-                )
+            if pdfDoc != beforePDF {
+                recordUndoSnapshot(for: activeTabID)
                 openTabs[idx].payload = .pdf(pdfDoc)
                 openTabs[idx].isModified = true
-            case var .slide(deck):
-                if !deck.slides.isEmpty {
-                    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                    deck.slides[sIdx].speakerNotes += "\n[검토 메모] \(noteText)"
-                    openTabs[idx].payload = .slide(deck)
-                    openTabs[idx].isModified = true
-                }
-            case var .sheet(sheet):
-                let prev = sheet.rawValue(at: "F1")
-                try? sheet.setCell("F1", rawValue: prev.isEmpty ? "[검토] \(noteText)" : "\(prev) · \(noteText)")
-                openTabs[idx].payload = .sheet(sheet)
-                openTabs[idx].isModified = true
             }
-            lastExecutedCommandSummary = "검토 메모 스레드 등록 완료"
-            return
-        }
-        if commandID.hasSuffix("-review-verify") || commandID.hasSuffix("-review-security") {
-            runSecurityAuditOnActiveTab()
-            lastExecutedCommandSummary = "매직 바이트 및 컨테이너 보안 검증 완료"
-            return
-        }
-        if commandID.hasSuffix("-review-stats") {
-            showRightInspector = true
-            reviewStatsRefreshCount += 1
-            lastExecutedCommandSummary = "문서 통계 및 원고지 매수 인스펙터 갱신 완료"
-            return
         }
 
-        lastExecutedCommandSummary = "명령 실행: \(commandID)"
-    }
-
-    // MARK: - Private Command Helpers
-
-    private enum HomeFormattingAction {
-        case bold
-        case italic
-        case underline
-        case styleCycle
-    }
-
-    private func applyHomeFormatting(at idx: Int, action: HomeFormattingAction) {
-        switch openTabs[idx].payload {
-        case var .document(doc):
-            if doc.paragraphs.isEmpty {
-                doc.paragraphs.append(ParagraphBlock(text: "기본 본문 문단"))
-            }
-            let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
-            switch action {
-            case .bold:
-                doc.paragraphs[pIdx].isBold.toggle()
-            case .italic:
-                doc.paragraphs[pIdx].isItalic.toggle()
-            case .underline:
-                doc.paragraphs[pIdx].isUnderlined.toggle()
-            case .styleCycle:
-                let allStyles = ParagraphStyleRole.allCases
-                let cur = doc.paragraphs[pIdx].style
-                let nextIdx = ((allStyles.firstIndex(of: cur) ?? 0) + 1) % allStyles.count
-                doc.paragraphs[pIdx].style = allStyles[nextIdx]
-            }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
-
-        case var .sheet(sheet):
-            let current = sheet.rawValue(at: selectedSheetCell)
-            if current.isEmpty {
-                try? sheet.setCell(selectedSheetCell, rawValue: "서식적용")
-            }
-            let tag = "[\(selectedSheetCell):\(action)]_\(sheet.rawValue(at: "F3").count + 1)"
-            try? sheet.setCell("F3", rawValue: tag)
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
-
-        case var .slide(deck):
-            guard !deck.slides.isEmpty else { return }
-            let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-            switch action {
-            case .bold, .italic, .underline:
-                if !deck.slides[sIdx].elements.isEmpty {
-                    let currentStroke = deck.slides[sIdx].elements[0].strokeHex
-                    deck.slides[sIdx].elements[0].strokeHex = (currentStroke == "#5C6BC0") ? "#3949AB" : "#5C6BC0"
-                }
-            case .styleCycle:
-                let layouts = SlideMasterLayout.allCases
-                let cur = deck.slides[sIdx].masterLayout
-                let nextIdx = ((layouts.firstIndex(of: cur) ?? 0) + 1) % layouts.count
-                deck.slides[sIdx].masterLayout = layouts[nextIdx]
-            }
-            openTabs[idx].payload = .slide(deck)
-            openTabs[idx].isModified = true
-
-        case var .pdf(pdfDoc):
-            let pageNum = pdfDoc.pages.indices.contains(selectedPDFPageIndex)
-                ? pdfDoc.pages[selectedPDFPageIndex].pageNumber
-                : 1
-            let annKind: PDFAnnotationKind = (action == .underline) ? .underline : .highlight
-            pdfDoc.annotations.append(
-                PDFAnnotationItem(pageNumber: pageNum, kind: annKind, content: "서식 강조 표시", author: "QA")
-            )
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
-        }
-    }
-
-    private enum InsertActionKind {
-        case table
-        case chart
-        case shape
-        case link
-    }
-
-    private func applyInsertCommand(at idx: Int, kind: InsertActionKind) {
-        switch openTabs[idx].payload {
-        case var .document(doc):
-            switch kind {
-            case .table:
-                doc.tables.append(
-                    DocumentTableBlock(
-                        caption: "표 \(doc.tables.count + 1). 추가 데이터 표",
-                        rows: [
-                            ["구분", "목표치", "실적치"],
-                            ["1분기", "100", "120"],
-                            ["2분기", "150", "180"]
-                        ]
-                    )
-                )
-            case .chart:
-                doc.paragraphs.append(
-                    ParagraphBlock(style: .quote, alignment: .leading, text: "[차트 개체: 분기별 핵심 성과 지표 시각화]")
-                )
-            case .shape:
-                doc.paragraphs.append(
-                    ParagraphBlock(style: .quote, alignment: .center, text: "[다이어그램 도형: 프로세스 아키텍처 블록]")
-                )
-            case .link:
-                let anchorID = doc.paragraphs.first?.id ?? UUID()
-                doc.bookmarks["책갈피_\(doc.bookmarks.count + 1)"] = anchorID
-            }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
-
-        case var .sheet(sheet):
-            switch kind {
-            case .table:
-                let nextVal = (Int(sheet.rawValue(at: "E2")) ?? 240) + 10
-                try? sheet.setCell("E1", rawValue: "추가항목")
-                try? sheet.setCell("E2", rawValue: "\(nextVal)")
-            case .chart:
-                let allKinds = SheetChartKind.allCases
-                if let cIdx = allKinds.firstIndex(of: selectedChartKind) {
-                    selectedChartKind = allKinds[(cIdx + 1) % allKinds.count]
-                }
-                try? sheet.setCell("E8", rawValue: "[차트:\(selectedChartKind.rawValue)]")
-            case .shape:
-                let nextCount = sheet.rawValue(at: "E3").count + 1
-                try? sheet.setCell("E3", rawValue: "[도형 콜아웃 #\(nextCount)]")
-            case .link:
-                let nextCount = sheet.rawValue(at: "E4").count + 1
-                try? sheet.setCell("E4", rawValue: "https://standard.example.org/\(nextCount)")
-            }
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
-
-        case var .slide(deck):
-            guard !deck.slides.isEmpty else { return }
-            let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-            let elementKind: SlideElementKind
-            let title: String
-            switch kind {
-            case .table:
-                elementKind = .tableGrid
-                title = "데이터 표 그리드"
-            case .chart:
-                elementKind = .chartEmbed
-                title = "성과 지표 차트"
-            case .shape:
-                elementKind = .roundedRectangleShape
-                title = "아키텍처 도형"
-            case .link:
-                elementKind = .calloutShape
-                title = "참조 링크 콜아웃"
-            }
-            deck.slides[sIdx].elements.append(
-                SlideCanvasElement(
-                    title: title,
-                    bodyText: "슬라이드 \(sIdx + 1) 추가 개체",
-                    x: 380,
-                    y: 220,
-                    width: 200,
-                    height: 100,
-                    kind: elementKind
-                )
-            )
-            openTabs[idx].payload = .slide(deck)
-            openTabs[idx].isModified = true
-
-        case var .pdf(pdfDoc):
-            let pageNum = pdfDoc.pages.indices.contains(selectedPDFPageIndex)
-                ? pdfDoc.pages[selectedPDFPageIndex].pageNumber
-                : 1
-            if kind == .link {
-                pdfDoc.outline.append(
-                    PDFOutlineNode(title: "책갈피 \(pdfDoc.outline.count + 1)", targetPageNumber: pageNum)
-                )
-            } else {
-                pdfDoc.annotations.append(
-                    PDFAnnotationItem(pageNumber: pageNum, kind: .stickyNote, content: "삽입 개체 마크", author: "QA")
-                )
-            }
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
-        }
-    }
-
-    private enum LayoutActionKind {
-        case paperSize
-        case orientation
-        case columns
-        case margins
-    }
-
-    private func applyLayoutCommand(at idx: Int, kind: LayoutActionKind) {
-        switch openTabs[idx].payload {
-        case var .document(doc):
-            if doc.sections.isEmpty {
-                doc.sections = [DocumentSectionLayout(paperSize: doc.paperSize)]
-            }
-            switch kind {
-            case .paperSize:
-                let presets = PaperSizePreset.allCases
-                let cur = doc.paperSize
-                let next = presets[((presets.firstIndex(of: cur) ?? 0) + 1) % presets.count]
-                doc.paperSize = next
-                doc.sections[0].paperSize = next
-            case .orientation:
-                doc.sections[0].orientation = (doc.sections[0].orientation == .portrait) ? .landscape : .portrait
-            case .columns:
-                let nextCols = (doc.sections[0].columnCount % 3) + 1
-                doc.sections[0].columnCount = nextCols
-            case .margins:
-                let isNarrow = doc.sections[0].marginTopPt < 45.0
-                let targetMargin = isNarrow ? 56.7 : 36.0
-                doc.sections[0].marginTopPt = targetMargin
-                doc.sections[0].marginBottomPt = targetMargin
-                doc.sections[0].marginLeftPt = targetMargin
-                doc.sections[0].marginRightPt = targetMargin
-            }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
-
-        case var .slide(deck):
-            let ratios = SlideAspectRatio.allCases
-            let cur = deck.aspectRatio
-            deck.aspectRatio = ratios[((ratios.firstIndex(of: cur) ?? 0) + 1) % ratios.count]
-            openTabs[idx].payload = .slide(deck)
-            openTabs[idx].isModified = true
-
-        case var .pdf(pdfDoc):
-            let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
-            switch kind {
-            case .orientation:
-                pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: 90)
-            case .paperSize:
-                pdfDoc.outline.append(
-                    PDFOutlineNode(title: "용지규격 프리셋 \(pdfDoc.outline.count + 1)", targetPageNumber: targetIndex + 1)
-                )
-            case .columns:
-                pdfDoc.annotations.append(
-                    PDFAnnotationItem(pageNumber: targetIndex + 1, kind: .stickyNote, content: "다단 보기 레이아웃 적용", author: "QA")
-                )
-            case .margins:
-                pdfDoc.annotations.append(
-                    PDFAnnotationItem(pageNumber: targetIndex + 1, kind: .stickyNote, content: "인쇄 여백 프리셋 적용", author: "QA")
-                )
-            }
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
-
-        case var .sheet(sheet):
-            switch kind {
-            case .paperSize:
-                let next = (sheet.rawValue(at: "F4") == "A4") ? "Letter" : "A4"
-                try? sheet.setCell("F4", rawValue: next)
-            case .orientation:
-                let next = (sheet.rawValue(at: "F4") == "가로") ? "세로" : "가로"
-                try? sheet.setCell("F4", rawValue: next)
-            case .columns:
-                isHeaderRowFrozen.toggle()
-                try? sheet.setCell("F4", rawValue: "다단_\(isHeaderRowFrozen)")
-            case .margins:
-                let next = (sheet.rawValue(at: "F4") == "좁게") ? "표준" : "좁게"
-                try? sheet.setCell("F4", rawValue: next)
-            }
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
-        }
-    }
-
-    private enum DataActionKind {
-        case autoSum
-        case functionWizard
-        case sort
-        case validation
-    }
-
-    private func applyDataCommand(at idx: Int, kind: DataActionKind) {
-        switch openTabs[idx].payload {
-        case var .sheet(sheet):
-            switch kind {
-            case .autoSum:
-                formulaBarDraft = "=SUM(B2:C2)"
-                try? sheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
-                let nextCount = sheet.rawValue(at: "E5").count + 1
-                try? sheet.setCell("E5", rawValue: "=SUM(B2:D3)+\(nextCount)")
-            case .functionWizard:
-                formulaBarDraft = "=AVERAGE(B2:C3)"
-                try? sheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
-                try? sheet.setCell("E6", rawValue: "=AVERAGE(B2:C3)")
-            case .sort:
-                sheetSortAscending.toggle()
-                if let range = try? CellRange(notation: "A2:C3") {
-                    let sorted = sheet.sortedRows(in: range, byColumnOffset: 1, ascending: sheetSortAscending)
-                    for (rOffset, rowVals) in sorted.enumerated() {
-                        let targetRow = 2 + rOffset
-                        if rowVals.indices.contains(0) {
-                            try? sheet.setCell("A\(targetRow)", rawValue: rowVals[0].description)
-                        }
-                        if rowVals.indices.contains(1) {
-                            try? sheet.setCell("B\(targetRow)", rawValue: rowVals[1].description)
-                        }
-                        if rowVals.indices.contains(2) {
-                            try? sheet.setCell("C\(targetRow)", rawValue: rowVals[2].description)
-                        }
-                    }
-                }
-                try? sheet.setCell("F6", rawValue: sheetSortAscending ? "정렬:오름차순" : "정렬:내림차순")
-            case .validation:
-                activeDataValidationRule = .numberRange(min: 0.0, max: 100_000.0)
-                let nextCount = sheet.rawValue(at: "E7").count + 1
-                try? sheet.setCell("E7", rawValue: "[유효성검사:#\(nextCount)]")
-            }
-            openTabs[idx].payload = .sheet(sheet)
-            openTabs[idx].isModified = true
-
-        case var .document(doc):
-            switch kind {
-            case .autoSum:
-                let lastCol = doc.tables.isEmpty ? 0 : max(0, doc.tables[0].columnCount - 1)
-                let sum = doc.tables.isEmpty ? 0.0 : (doc.tables[0].evaluateTableFormula("=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0)
-                doc.footerText = "표 합계 검산: \(Int(sum)) (#\(doc.footerText.count + 1))"
-            case .functionWizard:
-                let lastCol = doc.tables.isEmpty ? 0 : max(0, doc.tables[0].columnCount - 1)
-                let avg = doc.tables.isEmpty ? 0.0 : (doc.tables[0].evaluateTableFormula("=AVERAGE(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0)
-                doc.footerText = "표 평균 검산: \(String(format: "%.1f", avg))"
-            case .sort:
-                sheetSortAscending.toggle()
-                if !doc.tables.isEmpty, doc.tables[0].rows.count > 2 {
-                    let header = doc.tables[0].rows[0]
-                    let body = Array(doc.tables[0].rows.dropFirst())
-                    let sortedBody = body.sorted { lhs, rhs in
-                        let lVal = lhs.first ?? ""
-                        let rVal = rhs.first ?? ""
-                        return sheetSortAscending ? (lVal < rVal) : (lVal > rVal)
-                    }
-                    doc.tables[0].rows = [header] + sortedBody
-                }
-                doc.footerText = "표 데이터 정렬: \(sheetSortAscending ? "오름차순" : "내림차순")"
-            case .validation:
-                activeDataValidationRule = .nonEmptyText
-                doc.footerText = "표 데이터 유효성 검사 규칙 활성"
-            }
-            openTabs[idx].payload = .document(doc)
-            openTabs[idx].isModified = true
-
-        case var .slide(deck):
-            activeDataValidationRule = .nonEmptyText
-            if !deck.slides.isEmpty {
-                let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                deck.slides[sIdx].speakerNotes += " [데이터:\(kind)]"
-                openTabs[idx].payload = .slide(deck)
-            }
-            openTabs[idx].isModified = true
-
-        case var .pdf(pdfDoc):
-            activeDataValidationRule = .nonEmptyText
-            pdfDoc.annotations.append(
-                PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: "데이터 검산(\(kind)) 완료", author: "QA")
-            )
-            openTabs[idx].payload = .pdf(pdfDoc)
-            openTabs[idx].isModified = true
-        }
+        lastFindReplaceCount = count
+        lastExecutedCommandSummary = "찾기 및 바꾸기 완료 (\(count)건 치환)"
+        return count
     }
 }
+

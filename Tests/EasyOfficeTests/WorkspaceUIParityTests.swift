@@ -308,6 +308,8 @@ final class WorkspaceUIParityTests: XCTestCase {
                     let beforeValRule = vm.activeDataValidationRule
                     let beforePresenter = vm.isPresenterModeActive
                     let beforeStatsCount = vm.reviewStatsRefreshCount
+                    let beforeSnapGuides = vm.activeSnapGuides
+                    let beforePivotTotal = vm.lastPivotGrandTotal
 
                     vm.lastExecutedCommandSummary = nil
                     vm.executeRibbonCommand(cmd.id)
@@ -334,6 +336,8 @@ final class WorkspaceUIParityTests: XCTestCase {
                         || (vm.activeDataValidationRule != beforeValRule)
                         || (vm.isPresenterModeActive != beforePresenter)
                         || (vm.reviewStatsRefreshCount != beforeStatsCount)
+                        || (vm.activeSnapGuides != beforeSnapGuides)
+                        || (vm.lastPivotGrandTotal != beforePivotTotal)
 
                     XCTAssertTrue(
                         didMutateState,
@@ -421,6 +425,214 @@ final class WorkspaceUIParityTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(convertedPDF.pages.count, 1)
         } else {
             XCTFail("saveTabToDisk with targetFormat .pdf must update tab.payload to .pdf")
+        }
+    }
+
+    @MainActor
+    func testZeroSlopSheetRibbonCommandsDataValidationUndoCoalescingAndFindReplace() throws {
+        // 1. Zero-Slop Sheet Ribbon Verification (No E1~E8 or F1~F6 pollution)
+        let vm = WorkspaceViewModel()
+        let sheetTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet }))
+        vm.activeTabID = sheetTab.id
+
+        let initialPageSetup: SheetPageSetup
+        if case let .sheet(initialSheet) = vm.activeTab?.payload {
+            initialPageSetup = initialSheet.pageSetup
+        } else {
+            XCTFail("Expected sheet payload")
+            return
+        }
+
+        let sheetCommands = RibbonCategory.allCases.flatMap { RibbonCategory.actions(for: $0, module: .sheet) }
+        XCTAssertEqual(sheetCommands.count, 28)
+        for cmd in sheetCommands {
+            vm.executeRibbonCommand(cmd.id)
+        }
+
+        let forbiddenCells = ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "F1", "F2", "F3", "F4", "F5", "F6"]
+        if case let .sheet(mutatedSheet) = vm.activeTab?.payload {
+            for cellAddr in forbiddenCells {
+                XCTAssertEqual(
+                    mutatedSheet.rawValue(at: cellAddr),
+                    "",
+                    "Sheet ribbon commands must never pollute cell \(cellAddr)"
+                )
+                if let parsed = try? CellAddress(a1Notation: cellAddr) {
+                    XCTAssertNil(
+                        mutatedSheet.cellsByCoordinate[parsed.packedCoordinate],
+                        "Cell \(cellAddr) must remain absent from cellsByCoordinate"
+                    )
+                }
+            }
+            XCTAssertFalse(mutatedSheet.cellStyles.isEmpty, "Sheet cellStyles must be populated by formatting commands")
+            XCTAssertNotEqual(mutatedSheet.pageSetup, initialPageSetup, "Sheet pageSetup must be modified by layout commands")
+            XCTAssertFalse(mutatedSheet.sheetComments.isEmpty, "Sheet sheetComments must be populated by link/comment/pivot commands")
+            XCTAssertTrue(mutatedSheet.trackChangesEnabled, "Sheet trackChangesEnabled must be toggled on by review-track")
+            XCTAssertEqual(mutatedSheet.additionalSheets.count, 1, "Sheet insert-table must add 1 additional sheet page")
+        } else {
+            XCTFail("Expected mutated sheet payload")
+        }
+
+        // 2. DataValidationRule Enforcement in applyFormulaBarEdit()
+        let valVM = WorkspaceViewModel()
+        let valSheetTab = try XCTUnwrap(valVM.openTabs.first(where: { $0.moduleKind == .sheet }))
+        valVM.activeTabID = valSheetTab.id
+        valVM.activeDataValidationRule = DataValidationRule(minimumValue: 0, maximumValue: 1000, allowedSet: nil)
+        valVM.selectedSheetCell = "B2"
+        valVM.formulaBarDraft = "-50"
+        valVM.applyFormulaBarEdit()
+
+        let validationError = try XCTUnwrap(valVM.lastErrorMessage)
+        XCTAssertTrue(validationError.contains("유효성"))
+        if case let .sheet(unmodifiedSheet) = valVM.activeTab?.payload {
+            XCTAssertNotEqual(unmodifiedSheet.rawValue(at: "B2"), "-50")
+            XCTAssertEqual(unmodifiedSheet.rawValue(at: "B2"), "120")
+        } else {
+            XCTFail("Expected sheet payload")
+        }
+
+        valVM.formulaBarDraft = "500"
+        valVM.applyFormulaBarEdit()
+        XCTAssertNil(valVM.lastErrorMessage)
+        if case let .sheet(validSheet) = valVM.activeTab?.payload {
+            XCTAssertEqual(validSheet.rawValue(at: "B2"), "500")
+        } else {
+            XCTFail("Expected updated sheet payload")
+        }
+
+        // 3. Undo Coalescing on Inline Keystrokes (updateParagraphText & updateTableCell)
+        let docVM = WorkspaceViewModel()
+        let docTab = try XCTUnwrap(docVM.openTabs.first(where: { $0.moduleKind == .document }))
+        docVM.activeTabID = docTab.id
+        guard case let .document(initialDoc) = docVM.activeTab?.payload,
+              let p0 = initialDoc.paragraphs.first else {
+            XCTFail("Expected initial document paragraph")
+            return
+        }
+        let originalParagraphText = p0.text
+        let initialRevisionCount = initialDoc.revisions.count
+
+        docVM.updateParagraphText(paragraphID: p0.id, newText: "Step 1")
+        docVM.updateParagraphText(paragraphID: p0.id, newText: "Step 2")
+        docVM.updateParagraphText(paragraphID: p0.id, newText: "Step 3")
+
+        if case let .document(burstDoc) = docVM.activeTab?.payload {
+            XCTAssertEqual(burstDoc.paragraphs[0].text, "Step 3")
+            XCTAssertEqual(
+                burstDoc.revisions.count,
+                initialRevisionCount + 1,
+                "3 consecutive keystrokes on the same paragraph must coalesce into 1 revision"
+            )
+            XCTAssertEqual(burstDoc.revisions.last?.proposedText, "Step 3")
+        } else {
+            XCTFail("Expected document payload after keystroke burst")
+        }
+
+        docVM.undo()
+        if case let .document(revertedDoc) = docVM.activeTab?.payload {
+            XCTAssertEqual(
+                revertedDoc.paragraphs[0].text,
+                originalParagraphText,
+                "Single undo() after coalesced keystroke burst must restore original paragraph text"
+            )
+            XCTAssertEqual(revertedDoc.revisions.count, initialRevisionCount)
+        } else {
+            XCTFail("Expected reverted document payload")
+        }
+
+        // 4. Slide Element Formatting & Snap Centering (No +16/+12 offset)
+        let slideVM = WorkspaceViewModel()
+        let slideTab = try XCTUnwrap(slideVM.openTabs.first(where: { $0.moduleKind == .slide }))
+        slideVM.activeTabID = slideTab.id
+
+        slideVM.executeRibbonCommand("slide-home-bold")
+        slideVM.executeRibbonCommand("slide-home-italic")
+        slideVM.executeRibbonCommand("slide-home-underline")
+
+        guard case let .slide(formattedDeck) = slideVM.activeTab?.payload,
+              let elem = formattedDeck.slides.first?.elements.first else {
+            XCTFail("Expected slide canvas element")
+            return
+        }
+        XCTAssertTrue(elem.isBold)
+        XCTAssertTrue(elem.isItalic)
+        XCTAssertTrue(elem.isUnderlined)
+
+        slideVM.moveSlideElement(slideIndex: 0, elementID: elem.id, deltaX: -50, deltaY: -30)
+        slideVM.executeRibbonCommand("slide-mod-snap")
+        slideVM.executeRibbonCommand("slide-mod-snap")
+
+        if case let .slide(snappedDeck) = slideVM.activeTab?.payload,
+           let snappedElem = snappedDeck.slides.first?.elements.first {
+            XCTAssertEqual(snappedElem.x, (960.0 - elem.width) / 2.0, accuracy: 0.001)
+            XCTAssertEqual(snappedElem.y, (540.0 - elem.height) / 2.0, accuracy: 0.001)
+            XCTAssertFalse(slideVM.activeSnapGuides.isEmpty)
+        } else {
+            XCTFail("Expected snapped slide payload")
+        }
+
+        // 5. Find & Replace across .document, .sheet, .slide, and .pdf
+        let frVM = WorkspaceViewModel()
+
+        // Document Find & Replace + Inline Runs + Embedded Image
+        let frDocTab = try XCTUnwrap(frVM.openTabs.first(where: { $0.moduleKind == .document }))
+        frVM.activeTabID = frDocTab.id
+        frVM.applyInlineRunFormattingToActiveParagraph(isBold: true, isItalic: true, isUnderlined: true, textHex: "#5C6BC0")
+        frVM.insertEmbeddedImageIntoActiveDocument(caption: "검증 다이어그램", widthPt: 300, heightPt: 160)
+        frVM.findQueryText = "아키텍처"
+        frVM.replaceQueryText = "플랫폼구조"
+        let docReplaced = frVM.performFindAndReplace()
+        XCTAssertGreaterThan(docReplaced, 0)
+        XCTAssertEqual(frVM.lastFindReplaceCount, docReplaced)
+        if case let .document(updatedDoc) = frVM.activeTab?.payload {
+            XCTAssertTrue(updatedDoc.paragraphs.contains(where: { $0.text.contains("플랫폼구조") }))
+            XCTAssertEqual(updatedDoc.images.count, 1)
+            XCTAssertFalse(updatedDoc.paragraphs[0].inlineRuns.isEmpty)
+        }
+
+        // Sheet Find & Replace + Multi-sheet switching
+        let frSheetTab = try XCTUnwrap(frVM.openTabs.first(where: { $0.moduleKind == .sheet }))
+        frVM.activeTabID = frSheetTab.id
+        frVM.findQueryText = "엔진 최적화"
+        frVM.replaceQueryText = "코어 가속화"
+        let sheetReplaced = frVM.performFindAndReplace()
+        XCTAssertEqual(sheetReplaced, 1)
+        if case let .sheet(updatedSheet) = frVM.activeTab?.payload {
+            XCTAssertEqual(updatedSheet.rawValue(at: "A2"), "코어 가속화")
+        }
+        frVM.addWorksheetTab(named: "하반기 계획")
+        frVM.selectWorksheetTab(index: 1)
+        if case let .sheet(switchedSheet) = frVM.activeTab?.payload {
+            XCTAssertEqual(switchedSheet.activeSheetIndex, 1)
+            XCTAssertEqual(switchedSheet.name, "하반기 계획")
+            XCTAssertEqual(switchedSheet.rawValue(at: "A1"), "항목")
+        }
+        frVM.selectWorksheetTab(index: 0)
+        if case let .sheet(restoredSheet) = frVM.activeTab?.payload {
+            XCTAssertEqual(restoredSheet.activeSheetIndex, 0)
+            XCTAssertEqual(restoredSheet.rawValue(at: "A2"), "코어 가속화")
+        }
+
+        // Slide Find & Replace
+        let frSlideTab = try XCTUnwrap(frVM.openTabs.first(where: { $0.moduleKind == .slide }))
+        frVM.activeTabID = frSlideTab.id
+        frVM.findQueryText = "워크스페이스"
+        frVM.replaceQueryText = "통합스튜디오"
+        let slideReplaced = frVM.performFindAndReplace()
+        XCTAssertGreaterThan(slideReplaced, 0)
+        if case let .slide(updatedDeck) = frVM.activeTab?.payload {
+            XCTAssertTrue(updatedDeck.slides[0].subtitle.contains("통합스튜디오"))
+        }
+
+        // PDF Find & Replace
+        let frPDFTab = try XCTUnwrap(frVM.openTabs.first(where: { $0.moduleKind == .pdf }))
+        frVM.activeTabID = frPDFTab.id
+        frVM.findQueryText = "시그니처"
+        frVM.replaceQueryText = "헤더바이트"
+        let pdfReplaced = frVM.performFindAndReplace()
+        XCTAssertGreaterThan(pdfReplaced, 0)
+        if case let .pdf(updatedPDF) = frVM.activeTab?.payload {
+            XCTAssertTrue(updatedPDF.annotations.contains(where: { $0.content.contains("헤더바이트") }))
         }
     }
 }
