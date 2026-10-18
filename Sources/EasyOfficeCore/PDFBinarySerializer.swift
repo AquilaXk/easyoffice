@@ -139,10 +139,15 @@ public enum PDFBinarySerializer {
             }
         }
 
-        // Raw stream scanner for minimal synthetic PDF streams
+        // Raw stream scanner for minimal synthetic PDF streams and 3 Tr UTF-8 text layers
         var fallbackPages: [PDFPageDescriptor] = []
+        var fallbackInvisibleFlags: [Bool] = []
         var sawPageObject = false
         var currentRotate = 0
+        var inStream = false
+        var currentStreamLines: [String] = []
+        var currentStreamHasInvisibleLayer = false
+
         for line in lines {
             if line.contains("/Type /Page") && !line.contains("/Type /Pages") {
                 sawPageObject = true
@@ -152,20 +157,51 @@ public enum PDFBinarySerializer {
                 let digits = after.prefix(while: { $0.isNumber || $0 == "-" })
                 currentRotate = Int(digits) ?? 0
             }
+            if line == "stream" {
+                inStream = true
+                currentStreamLines.removeAll(keepingCapacity: true)
+                currentStreamHasInvisibleLayer = false
+                continue
+            }
+            if line == "endstream" {
+                if !currentStreamLines.isEmpty {
+                    fallbackPages.append(
+                        PDFPageDescriptor(
+                            pageNumber: fallbackPages.count + 1,
+                            rotationDegrees: currentRotate,
+                            extractedText: currentStreamLines.joined(separator: "\n")
+                        )
+                    )
+                    fallbackInvisibleFlags.append(currentStreamHasInvisibleLayer)
+                    currentRotate = 0
+                }
+                inStream = false
+                currentStreamLines.removeAll(keepingCapacity: true)
+                currentStreamHasInvisibleLayer = false
+                continue
+            }
             if line.hasPrefix("BT "),
                let openParen = line.firstIndex(of: "("),
                let closeParen = line.lastIndex(of: ")"),
                openParen < closeParen {
                 let inner = String(line[line.index(after: openParen)..<closeParen])
                 let unescaped = unescapePDFString(inner)
-                fallbackPages.append(
-                    PDFPageDescriptor(
-                        pageNumber: fallbackPages.count + 1,
-                        rotationDegrees: currentRotate,
-                        extractedText: unescaped
+                if inStream {
+                    currentStreamLines.append(unescaped)
+                    if line.hasPrefix("BT 3 Tr ") {
+                        currentStreamHasInvisibleLayer = true
+                    }
+                } else {
+                    fallbackPages.append(
+                        PDFPageDescriptor(
+                            pageNumber: fallbackPages.count + 1,
+                            rotationDegrees: currentRotate,
+                            extractedText: unescaped
+                        )
                     )
-                )
-                currentRotate = 0
+                    fallbackInvisibleFlags.append(line.hasPrefix("BT 3 Tr "))
+                    currentRotate = 0
+                }
             }
         }
 
@@ -181,11 +217,12 @@ public enum PDFBinarySerializer {
                 for idx in 0..<pdfDoc.pageCount {
                     let pdfPage = pdfDoc.page(at: idx)
                     let fallback = fallbackPages.indices.contains(idx) ? fallbackPages[idx] : nil
+                    let isInvisibleUTF8Layer = fallbackInvisibleFlags.indices.contains(idx) && fallbackInvisibleFlags[idx]
                     let nativeRotation = pdfPage?.rotation ?? 0
                     let resolvedRotation = nativeRotation != 0 ? nativeRotation : (fallback?.rotationDegrees ?? currentRotate)
                     let nativeText = pdfPage?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     let fallbackText = fallback?.extractedText ?? ""
-                    let resolvedText = !fallbackText.isEmpty ? fallbackText : nativeText
+                    let resolvedText = ((isInvisibleUTF8Layer || nativeText.isEmpty) && !fallbackText.isEmpty) ? fallbackText : nativeText
 
                     pages.append(
                         PDFPageDescriptor(

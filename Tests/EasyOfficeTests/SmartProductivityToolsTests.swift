@@ -265,9 +265,17 @@ final class SmartProductivityToolsTests: XCTestCase {
         XCTAssertLessThanOrEqual(summary.compressionRatioPercent, 100.0)
     }
 
-    func testLocalSmartDocumentAssistantWritingQualityDiagnostics() {
+    func testLocalSmartDocumentAssistantWritingQualityDiagnostics() throws {
         let pLong = ParagraphBlock(
             text: "본 프로젝트는 문서 엔진의 파서 무결성을 검증하며, 동시에 스프레드시트 수식 평가기의 연산 속도를 개선하고, 추가적으로 프레젠테이션 캔버스의 정렬 가이드를 정밀하게 보정하여 최종 사용자의 업무 생산성을 극대화하는 것을 목표로 합니다."
+        )
+        // >=80 chars without "하며, "/"하고, "/"고, ", with ", " right at the midpoint so splitLongSentenceAtWordBoundary must skip the comma-preceded space
+        let pCommaMidpoint = ParagraphBlock(
+            text: "차세대 네이티브 오피스 프로그램은 다양한 전자문서 컨테이너 포맷의 무결성 검증,  고속 비트 스트림 압축 해제 연산을 통해 안정적인 데스크톱 편집 환경을 구축합니다."
+        )
+        // >=80 chars where EVERY whitespace is preceded by a comma, exercising fallbackCommaSpaceOffset and trailing comma stripping
+        let pAllCommaSpaces = ParagraphBlock(
+            text: "문서포맷표준호환성검증모듈, 스프레드시트수식계산엔진모듈, 프레젠테이션캔버스정렬가이드모듈, 피디에프스튜디오벡터렌더링모듈, 오프라인스마트문서보조도구모듈을통합제공합니다."
         )
         let pPassive = ParagraphBlock(
             text: "해당 문서는 보안 모듈에 의해 자동으로 검증되어지고 결과 보고서가 즉시 작성되어집니다."
@@ -278,7 +286,7 @@ final class SmartProductivityToolsTests: XCTestCase {
 
         let doc = OfficeDocumentModel(
             title: "문장 교정 테스트",
-            paragraphs: [pLong, pPassive, pRedundant]
+            paragraphs: [pLong, pCommaMidpoint, pAllCommaSpaces, pPassive, pRedundant]
         )
 
         let suggestions = LocalSmartDocumentAssistant.analyzeWritingQuality(doc)
@@ -287,20 +295,26 @@ final class SmartProductivityToolsTests: XCTestCase {
         XCTAssertTrue(kinds.contains("수동태/피동 표현 완화"))
         XCTAssertTrue(kinds.contains("중복 공백/수식어 정리"))
 
-        if let longFix = suggestions.first(where: { $0.issueKind == "장문 분할 권장" }) {
-            XCTAssertEqual(longFix.paragraphID, pLong.id)
-            XCTAssertTrue(longFix.suggestedRewrite.contains(". "))
-            XCTAssertFalse(longFix.suggestedRewrite.contains(",. "))
-        }
-        if let passiveFix = suggestions.first(where: { $0.issueKind == "수동태/피동 표현 완화" }) {
-            XCTAssertEqual(passiveFix.paragraphID, pPassive.id)
-            XCTAssertFalse(passiveFix.suggestedRewrite.contains("되어지"))
-        }
-        if let redundantFix = suggestions.first(where: { $0.issueKind == "중복 공백/수식어 정리" }) {
-            XCTAssertEqual(redundantFix.paragraphID, pRedundant.id)
-            XCTAssertFalse(redundantFix.suggestedRewrite.contains("  "))
-            XCTAssertFalse(redundantFix.suggestedRewrite.contains("매우 매우"))
-        }
+        let longFix = try XCTUnwrap(suggestions.first(where: { $0.paragraphID == pLong.id && $0.issueKind == "장문 분할 권장" }))
+        XCTAssertTrue(longFix.suggestedRewrite.contains(". "))
+        XCTAssertFalse(longFix.suggestedRewrite.contains(",. "))
+
+        let commaMidFix = try XCTUnwrap(suggestions.first(where: { $0.paragraphID == pCommaMidpoint.id && $0.issueKind == "장문 분할 권장" }))
+        XCTAssertTrue(commaMidFix.suggestedRewrite.contains(". "))
+        XCTAssertFalse(commaMidFix.suggestedRewrite.contains(",. "))
+        XCTAssertTrue(commaMidFix.suggestedRewrite.contains("무결성 검증,"))
+
+        let allCommaFix = try XCTUnwrap(suggestions.first(where: { $0.paragraphID == pAllCommaSpaces.id && $0.issueKind == "장문 분할 권장" }))
+        XCTAssertTrue(allCommaFix.suggestedRewrite.contains(". "))
+        XCTAssertFalse(allCommaFix.suggestedRewrite.contains(",. "))
+
+        let passiveFix = try XCTUnwrap(suggestions.first(where: { $0.issueKind == "수동태/피동 표현 완화" }))
+        XCTAssertEqual(passiveFix.paragraphID, pPassive.id)
+        XCTAssertFalse(passiveFix.suggestedRewrite.contains("되어지"))
+
+        let redundantFix = try XCTUnwrap(suggestions.first(where: { $0.paragraphID == pRedundant.id && $0.issueKind == "중복 공백/수식어 정리" }))
+        XCTAssertFalse(redundantFix.suggestedRewrite.contains("  "))
+        XCTAssertFalse(redundantFix.suggestedRewrite.contains("매우 매우"))
     }
 
     func testLocalSmartDocumentAssistantExtractsActionItemsAndEntities() {
@@ -623,6 +637,65 @@ final class SmartProductivityToolsTests: XCTestCase {
         let nativePDF = PDFKit.PDFDocument(data: encoded)
         XCTAssertNotNil(nativePDF)
         XCTAssertEqual(nativePDF?.pageCount, 3)
+
+        // Verify F2: Encoded PDF contains 3 Tr UTF-8 text layer, <headerHex>, and Lavender vector graphics
+        XCTAssertTrue(rawText.contains("BT 3 Tr /F1 1 Tf 0 0 Td (Page One Content) Tj ET"))
+        XCTAssertTrue(rawText.contains("0.361 0.420 0.753 rg 36 756 523 50 re f"))
+        XCTAssertTrue(rawText.contains("BT 0 Tr /F1 13 Tf 54 775 Td <"))
+
+        // Verify F2: Non-metadata PDF with 3 Tr Korean UTF-8 stream restores exact Korean text without badge contamination
+        let koreanModel = PDFStudioDocumentModel(
+            title: "한국어 벡터 스트림 검증",
+            pages: [
+                PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: "첫 번째 페이지 한국어 원문"),
+                PDFPageDescriptor(pageNumber: 2, rotationDegrees: 90, extractedText: "두 번째 페이지 보안 보고서")
+            ]
+        )
+        let koreanRaw = String(decoding: PDFBinarySerializer.encode(koreanModel), as: UTF8.self)
+        let strippedMetadataPDF = koreanRaw
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("%EasyOfficePDFModelBase64:") }
+            .joined(separator: "\n")
+        let decodedWithoutMeta = try PDFBinarySerializer.decode(from: Data(strippedMetadataPDF.utf8))
+        XCTAssertEqual(decodedWithoutMeta.pages.count, 2)
+        XCTAssertEqual(decodedWithoutMeta.pages[0].extractedText, "첫 번째 페이지 한국어 원문")
+        XCTAssertEqual(decodedWithoutMeta.pages[1].extractedText, "두 번째 페이지 보안 보고서")
+
+        // Verify F2: Multi-line BT (...) Tj ET on Page 1 of a standard non-metadata PDF does not shift lines onto Page 2
+        let multiLineStandardPDF = """
+        %PDF-1.7
+        1 0 obj
+        << /Type /Catalog /Pages 2 0 R >>
+        endobj
+        2 0 obj
+        << /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>
+        endobj
+        3 0 obj
+        << /Type /Page /Parent 2 0 R /Contents 4 0 R >>
+        endobj
+        4 0 obj
+        << /Length 75 >>
+        stream
+        BT /F1 11 Tf 56 780 Td (Page1 LineA) Tj ET
+        BT /F1 11 Tf 56 760 Td (Page1 LineB) Tj ET
+        endstream
+        endobj
+        5 0 obj
+        << /Type /Page /Parent 2 0 R /Contents 6 0 R >>
+        endobj
+        6 0 obj
+        << /Length 37 >>
+        stream
+        BT /F1 11 Tf 56 780 Td (Page2 Only) Tj ET
+        endstream
+        endobj
+        %%EOF
+        """
+        let decodedMultiLine = try PDFBinarySerializer.decode(from: Data(multiLineStandardPDF.utf8))
+        XCTAssertEqual(decodedMultiLine.pages.count, 2)
+        XCTAssertTrue(decodedMultiLine.pages[0].extractedText.contains("Page1 LineA"))
+        XCTAssertTrue(decodedMultiLine.pages[0].extractedText.contains("Page1 LineB"))
+        XCTAssertEqual(decodedMultiLine.pages[1].extractedText, "Page2 Only")
 
         // Verify long sentence without commas splits on a whitespace word boundary, never slicing a word in half
         let wordBoundarySentence = "차세대 네이티브 오피스 워크스페이스는 단일 윈도우 환경에서 다중 포맷 문서를 신속하게 처리하고 높은 보안 무결성과 일관된 사용자 경험을 동시에 보장합니다"
