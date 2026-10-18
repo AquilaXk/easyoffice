@@ -88,6 +88,12 @@ public enum TextAlignmentMode: String, CaseIterable, Sendable, Codable {
     case justified = "양쪽 정렬"
 }
 
+/// Shared thread-safe ISO-8601 timestamp helper avoiding repeated formatter object instantiation.
+@inlinable
+public func currentISO8601Timestamp() -> String {
+    Date().ISO8601Format()
+}
+
 /// Inline styled text run within a paragraph block.
 public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
     public let id: UUID
@@ -97,6 +103,7 @@ public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
     public var isUnderlined: Bool
     public var fontName: String?
     public var fontSizePt: Double?
+    public var foregroundHex: String?
 
     public init(
         id: UUID = UUID(),
@@ -105,7 +112,8 @@ public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
         isItalic: Bool = false,
         isUnderlined: Bool = false,
         fontName: String? = nil,
-        fontSizePt: Double? = nil
+        fontSizePt: Double? = nil,
+        foregroundHex: String? = nil
     ) {
         self.id = id
         self.text = text
@@ -114,6 +122,7 @@ public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
         self.isUnderlined = isUnderlined
         self.fontName = fontName
         self.fontSizePt = fontSizePt
+        self.foregroundHex = foregroundHex
     }
 }
 
@@ -155,6 +164,121 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
         self.isItalic = isItalic
         self.isUnderlined = isUnderlined
         self.lineSpacingPercent = lineSpacingPercent
+    }
+
+    /// Returns explicit inline runs when present, or a single synthesized run representing the paragraph's base style.
+    public var effectiveRuns: [DocumentTextRun] {
+        guard runs.isEmpty else { return runs }
+        return [
+            DocumentTextRun(
+                id: id,
+                text: text,
+                isBold: isBold,
+                isItalic: isItalic,
+                isUnderlined: isUnderlined,
+                fontName: fontName,
+                fontSizePt: fontSizePt,
+                foregroundHex: nil
+            )
+        ]
+    }
+
+    /// Splits and updates inline `runs` over `range` within `text` with the specified character attributes.
+    public mutating func applyRunFormatting(
+        range: Range<String.Index>,
+        isBold: Bool? = nil,
+        isItalic: Bool? = nil,
+        isUnderlined: Bool? = nil,
+        fontSizePt: Double? = nil,
+        foregroundHex: String? = nil
+    ) {
+        let targetStart = text.distance(from: text.startIndex, to: range.lowerBound)
+        let targetEnd = text.distance(from: text.startIndex, to: range.upperBound)
+        guard targetStart < targetEnd else { return }
+
+        let sourceRuns = effectiveRuns
+        var splitRuns: [DocumentTextRun] = []
+        var currentOffset = 0
+
+        for run in sourceRuns {
+            let runLen = run.text.count
+            let runStart = currentOffset
+            let runEnd = currentOffset + runLen
+            currentOffset = runEnd
+
+            guard runLen > 0 else { continue }
+            if runEnd <= targetStart || runStart >= targetEnd {
+                splitRuns.append(run)
+                continue
+            }
+
+            if runStart < targetStart {
+                let prefixLen = targetStart - runStart
+                let prefixEndIdx = run.text.index(run.text.startIndex, offsetBy: prefixLen)
+                splitRuns.append(
+                    DocumentTextRun(
+                        text: String(run.text[run.text.startIndex..<prefixEndIdx]),
+                        isBold: run.isBold,
+                        isItalic: run.isItalic,
+                        isUnderlined: run.isUnderlined,
+                        fontName: run.fontName,
+                        fontSizePt: run.fontSizePt,
+                        foregroundHex: run.foregroundHex
+                    )
+                )
+            }
+
+            let overlapStart = max(runStart, targetStart) - runStart
+            let overlapEnd = min(runEnd, targetEnd) - runStart
+            let midStartIdx = run.text.index(run.text.startIndex, offsetBy: overlapStart)
+            let midEndIdx = run.text.index(run.text.startIndex, offsetBy: overlapEnd)
+            splitRuns.append(
+                DocumentTextRun(
+                    text: String(run.text[midStartIdx..<midEndIdx]),
+                    isBold: isBold ?? run.isBold,
+                    isItalic: isItalic ?? run.isItalic,
+                    isUnderlined: isUnderlined ?? run.isUnderlined,
+                    fontName: run.fontName,
+                    fontSizePt: fontSizePt ?? run.fontSizePt,
+                    foregroundHex: foregroundHex ?? run.foregroundHex
+                )
+            )
+
+            if runEnd > targetEnd {
+                let suffixStart = targetEnd - runStart
+                let suffixStartIdx = run.text.index(run.text.startIndex, offsetBy: suffixStart)
+                splitRuns.append(
+                    DocumentTextRun(
+                        text: String(run.text[suffixStartIdx..<run.text.endIndex]),
+                        isBold: run.isBold,
+                        isItalic: run.isItalic,
+                        isUnderlined: run.isUnderlined,
+                        fontName: run.fontName,
+                        fontSizePt: run.fontSizePt,
+                        foregroundHex: run.foregroundHex
+                    )
+                )
+            }
+        }
+
+        // Coalesce adjacent runs that share identical formatting attributes.
+        var coalesced: [DocumentTextRun] = []
+        for run in splitRuns where !run.text.isEmpty {
+            if let last = coalesced.last,
+               last.isBold == run.isBold,
+               last.isItalic == run.isItalic,
+               last.isUnderlined == run.isUnderlined,
+               last.fontName == run.fontName,
+               last.fontSizePt == run.fontSizePt,
+               last.foregroundHex == run.foregroundHex {
+                coalesced[coalesced.count - 1].text += run.text
+            } else {
+                coalesced.append(run)
+            }
+        }
+
+        self.runs = coalesced
+        self.text = coalesced.map(\.text).joined()
     }
 }
 
@@ -372,7 +496,7 @@ public struct TrackedRevision: Sendable, Codable, Equatable, Identifiable {
         paragraphID: UUID,
         originalText: String,
         proposedText: String,
-        timestampISO8601: String = ISO8601DateFormatter().string(from: Date())
+        timestampISO8601: String = currentISO8601Timestamp()
     ) {
         self.id = id
         self.author = author
@@ -423,6 +547,38 @@ public struct TableOfContentsEntry: Sendable, Codable, Equatable {
     }
 }
 
+/// Embedded image attachment stored in a document container (`word/media/`, `Pictures/`, `BinData/`).
+public struct EmbeddedImageAttachment: Sendable, Codable, Equatable, Identifiable {
+    public let id: UUID
+    public var fileName: String
+    public var caption: String
+    public var mimeType: String
+    public var imageData: Data
+    public var widthPt: Double
+    public var heightPt: Double
+    public var anchorParagraphID: UUID?
+
+    public init(
+        id: UUID = UUID(),
+        fileName: String,
+        caption: String = "",
+        mimeType: String = "image/png",
+        imageData: Data,
+        widthPt: Double = 320.0,
+        heightPt: Double = 200.0,
+        anchorParagraphID: UUID? = nil
+    ) {
+        self.id = id
+        self.fileName = fileName
+        self.caption = caption
+        self.mimeType = mimeType
+        self.imageData = imageData
+        self.widthPt = widthPt
+        self.heightPt = heightPt
+        self.anchorParagraphID = anchorParagraphID
+    }
+}
+
 /// Document statistics summary (words, characters, 200-character Korean manuscript pages, tables).
 public struct DocumentStatistics: Sendable, Equatable {
     public let paragraphCount: Int
@@ -449,6 +605,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
     public var revisions: [TrackedRevision]
     public var comments: [DocumentCommentThread]
     public var bookmarks: [String: UUID]
+    public var images: [EmbeddedImageAttachment]
 
     public init(
         id: UUID = UUID(),
@@ -464,7 +621,8 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         footnotes: [FootnoteItem] = [],
         revisions: [TrackedRevision] = [],
         comments: [DocumentCommentThread] = [],
-        bookmarks: [String: UUID] = [:]
+        bookmarks: [String: UUID] = [:],
+        images: [EmbeddedImageAttachment] = []
     ) {
         self.id = id
         self.title = title
@@ -480,6 +638,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         self.revisions = revisions
         self.comments = comments
         self.bookmarks = bookmarks
+        self.images = images
     }
 
     /// Computes live document metrics across all paragraphs and table cells.
@@ -543,7 +702,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
         kind: TrackedRevisionKind,
         paragraphID: UUID,
         proposedText: String,
-        timestampISO8601: String = ISO8601DateFormatter().string(from: Date())
+        timestampISO8601: String = currentISO8601Timestamp()
     ) {
         let original = paragraphs.first(where: { $0.id == paragraphID })?.text ?? ""
         if trackChangesEnabled {

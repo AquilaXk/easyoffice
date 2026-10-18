@@ -975,6 +975,326 @@ final class BinaryContainerCodecTests: XCTestCase {
         let decodedRepetitiveHwp = try HWP5BinaryCodec.decodeDocument(from: repetitiveHwpBytes)
         XCTAssertEqual(decodedRepetitiveHwp.paragraphs.first?.text.count, 1500)
     }
+
+    func testStandardExternalODSInteroperabilityAndMultiSheetXLSXODSRoundTrip() throws {
+        // 1. Standard external .ods XML without custom address/raw attributes
+        let externalODSContentXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+          <office:body>
+            <office:spreadsheet>
+              <table:table table:name="외부표준ODS">
+                <table:table-row>
+                  <table:table-cell office:value-type="float"><text:p>42</text:p></table:table-cell>
+                  <table:table-cell table:formula="of:=A1*2"><text:p>84</text:p></table:table-cell>
+                </table:table-row>
+                <table:table-row>
+                  <table:table-cell office:value-type="string" table:number-columns-repeated="2"><text:p>반복셀</text:p></table:table-cell>
+                  <table:table-cell office:value-type="float"><text:p>100</text:p></table:table-cell>
+                </table:table-row>
+              </table:table>
+            </office:spreadsheet>
+          </office:body>
+        </office:document-content>
+        """
+        let externalODSData = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "mimetype", data: Data(ODFContainerCodec.spreadsheetMimeType.utf8), compressionMethod: .store),
+            ZipContainerEntry(path: "content.xml", data: Data(externalODSContentXML.utf8), compressionMethod: .deflate)
+        ])
+
+        let decodedExternalODS = try ODFContainerCodec.decodeWorksheet(from: externalODSData)
+        XCTAssertEqual(decodedExternalODS.name, "외부표준ODS")
+        XCTAssertEqual(decodedExternalODS.rawValue(at: "A1"), "42")
+        XCTAssertEqual(decodedExternalODS.rawValue(at: "B1"), "=A1*2")
+        XCTAssertEqual(decodedExternalODS.evaluate(at: "B1"), .number(84))
+        XCTAssertEqual(decodedExternalODS.rawValue(at: "A2"), "반복셀")
+        XCTAssertEqual(decodedExternalODS.rawValue(at: "B2"), "반복셀")
+        XCTAssertEqual(decodedExternalODS.evaluate(at: "C2"), .number(100))
+
+        // 2. Multi-sheet + CellStyle + PageSetup round-trip across .xlsx and .ods
+        var multiSheet = WorksheetModel(name: "1분기")
+        try multiSheet.setCell("A1", rawValue: "12500")
+        try multiSheet.setCell("B1", rawValue: "=A1*2")
+        try multiSheet.setCellStyle(
+            CellStyle(
+                isBold: true,
+                isItalic: true,
+                isUnderlined: true,
+                alignment: .trailing,
+                numberFormat: .currencyKRW,
+                fillHex: "#EEF0FF",
+                textHex: "#5C6BC0"
+            ),
+            at: "A1"
+        )
+        multiSheet.pageSetup = WorksheetPageSetup(
+            paperSize: .letter,
+            orientation: .landscape,
+            isMultiColumnPrint: true,
+            marginPresetName: "좁은 여백"
+        )
+        multiSheet.sheetComments[PackedCellCoordinate(row: 0, column: 0)] = "1분기 확정 매출"
+        multiSheet.trackChangesEnabled = true
+
+        let b2Coord = PackedCellCoordinate(row: 1, column: 1)
+        multiSheet.addSheetPage(
+            named: "2분기",
+            initialCells: [
+                PackedCellCoordinate(row: 0, column: 0): "300",
+                b2Coord: "=A1+50"
+            ]
+        )
+
+        let xlsxBytes = try OOXMLContainerCodec.encodeWorksheet(multiSheet)
+        let xlsxEntries = try ZipContainerCodec.unpack(from: xlsxBytes)
+        let xlsxPaths = Set(xlsxEntries.map(\.path))
+        XCTAssertTrue(xlsxPaths.contains("xl/worksheets/sheet1.xml"))
+        XCTAssertTrue(xlsxPaths.contains("xl/worksheets/sheet2.xml"))
+
+        let decodedXlsx = try OOXMLContainerCodec.decodeWorksheet(from: xlsxBytes)
+        XCTAssertEqual(decodedXlsx.name, "1분기")
+        XCTAssertEqual(decodedXlsx.allSheetNames, ["1분기", "2분기"])
+        XCTAssertEqual(decodedXlsx.additionalSheets.count, 1)
+        XCTAssertEqual(decodedXlsx.additionalSheets[0].name, "2분기")
+        XCTAssertEqual(decodedXlsx.additionalSheets[0].cellsByCoordinate[b2Coord], "=A1+50")
+        XCTAssertEqual(decodedXlsx.cellStyle(at: "A1").isBold, true)
+        XCTAssertEqual(decodedXlsx.cellStyle(at: "A1").numberFormat, .currencyKRW)
+        XCTAssertEqual(decodedXlsx.cellStyle(at: "A1").fillHex, "#EEF0FF")
+        XCTAssertEqual(decodedXlsx.cellStyle(at: "A1").textHex, "#5C6BC0")
+        XCTAssertEqual(decodedXlsx.pageSetup, multiSheet.pageSetup)
+        XCTAssertEqual(decodedXlsx.sheetComments[PackedCellCoordinate(row: 0, column: 0)], "1분기 확정 매출")
+        XCTAssertTrue(decodedXlsx.trackChangesEnabled)
+
+        let odsBytes = try ODFContainerCodec.encodeWorksheet(multiSheet)
+        let decodedOds = try ODFContainerCodec.decodeWorksheet(from: odsBytes)
+        XCTAssertEqual(decodedOds.allSheetNames, ["1분기", "2분기"])
+        XCTAssertEqual(decodedOds.additionalSheets.count, 1)
+        XCTAssertEqual(decodedOds.additionalSheets[0].cellsByCoordinate[b2Coord], "=A1+50")
+        XCTAssertEqual(decodedOds.cellStyle(at: "A1"), multiSheet.cellStyle(at: "A1"))
+        XCTAssertEqual(decodedOds.pageSetup, multiSheet.pageSetup)
+    }
+
+    func testDocumentRunsAndEmbeddedImagesRoundTripAcrossDocxOdtHwpx() throws {
+        let styledRuns = [
+            DocumentTextRun(
+                text: "시그니처 ",
+                isBold: true,
+                fontName: "Pretendard",
+                fontSizePt: 14.0,
+                foregroundHex: "#5C6BC0"
+            ),
+            DocumentTextRun(
+                text: "라벤더 오피스",
+                isItalic: true,
+                isUnderlined: true,
+                fontName: "NanumGothic",
+                fontSizePt: 16.0,
+                foregroundHex: "#3949AB"
+            )
+        ]
+        let pWithRuns = ParagraphBlock(
+            style: .body,
+            alignment: .leading,
+            text: "시그니처 라벤더 오피스",
+            runs: styledRuns
+        )
+        let sampleImageBytes = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02, 0x03, 0x04])
+        let attachment = EmbeddedImageAttachment(
+            fileName: "diagram.png",
+            caption: "시스템 아키텍처 다이어그램",
+            mimeType: "image/png",
+            imageData: sampleImageBytes,
+            widthPt: 420.0,
+            heightPt: 260.0
+        )
+
+        let doc = OfficeDocumentModel(
+            title: "리치 런 및 이미지 보존 문서",
+            format: .docx,
+            paragraphs: [pWithRuns],
+            images: [attachment]
+        )
+
+        // 1. DOCX
+        let docxData = try OOXMLContainerCodec.encodeDocument(doc)
+        let docxEntries = try ZipContainerCodec.unpack(from: docxData)
+        XCTAssertTrue(docxEntries.contains(where: { $0.path == "word/media/diagram.png" && $0.data == sampleImageBytes }))
+        let decodedDocx = try OOXMLContainerCodec.decodeDocument(from: docxData)
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs.count, 2)
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs[0].text, "시그니처 ")
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs[0].isBold, true)
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs[0].foregroundHex, "#5C6BC0")
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs[1].text, "라벤더 오피스")
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs[1].isItalic, true)
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs[1].isUnderlined, true)
+        XCTAssertEqual(decodedDocx.paragraphs.first?.runs[1].foregroundHex, "#3949AB")
+        XCTAssertEqual(decodedDocx.images.count, 1)
+        XCTAssertEqual(decodedDocx.images.first?.fileName, "diagram.png")
+        XCTAssertEqual(decodedDocx.images.first?.caption, "시스템 아키텍처 다이어그램")
+        XCTAssertEqual(decodedDocx.images.first?.imageData, sampleImageBytes)
+        XCTAssertEqual(decodedDocx.images.first?.widthPt ?? 0, 420.0, accuracy: 0.01)
+
+        // 2. ODT
+        let odtData = try ODFContainerCodec.encodeDocument(doc)
+        let odtEntries = try ZipContainerCodec.unpack(from: odtData)
+        XCTAssertTrue(odtEntries.contains(where: { $0.path == "Pictures/diagram.png" && $0.data == sampleImageBytes }))
+        let decodedOdt = try ODFContainerCodec.decodeDocument(from: odtData)
+        XCTAssertEqual(decodedOdt.paragraphs.first?.runs.count, 2)
+        XCTAssertEqual(decodedOdt.paragraphs.first?.runs[0].foregroundHex, "#5C6BC0")
+        XCTAssertEqual(decodedOdt.paragraphs.first?.runs[1].isUnderlined, true)
+        XCTAssertEqual(decodedOdt.images.count, 1)
+        XCTAssertEqual(decodedOdt.images.first?.imageData, sampleImageBytes)
+
+        // 3. HWPX
+        let hwpxData = try HWPXContainerCodec.encodeDocument(doc)
+        let hwpxEntries = try ZipContainerCodec.unpack(from: hwpxData)
+        XCTAssertTrue(hwpxEntries.contains(where: { $0.path == "BinData/diagram.png" && $0.data == sampleImageBytes }))
+        let decodedHwpx = try HWPXContainerCodec.decodeDocument(from: hwpxData)
+        XCTAssertEqual(decodedHwpx.paragraphs.first?.runs.count, 2)
+        XCTAssertEqual(decodedHwpx.paragraphs.first?.runs[0].foregroundHex, "#5C6BC0")
+        XCTAssertEqual(decodedHwpx.paragraphs.first?.runs[1].isItalic, true)
+        XCTAssertEqual(decodedHwpx.images.count, 1)
+        XCTAssertEqual(decodedHwpx.images.first?.imageData, sampleImageBytes)
+    }
+
+    func testPPTXNotesSlidesAndSlideElementFormattingAndBIFF8SSTAndRKDecoding() throws {
+        // 1. PPTX notesSlides/notesSlide1.xml emission & SlideCanvasElement formatting round-trip
+        let styledElement = SlideCanvasElement(
+            title: "강조 도형",
+            bodyText: "굵고 기울임 밑줄 텍스트",
+            x: 80,
+            y: 120,
+            width: 300,
+            height: 90,
+            kind: .roundedRectangleShape,
+            isBold: true,
+            isItalic: true,
+            isUnderlined: true
+        )
+        let deck = PresentationDeckModel(
+            title: "발표 노트 검증 덱",
+            slides: [
+                SlideModel(
+                    title: "슬라이드 1",
+                    speakerNotes: "표준 notesSlide1.xml 파트에 기록되는 발표자 노트",
+                    elements: [styledElement]
+                )
+            ]
+        )
+
+        let pptxData = try OOXMLContainerCodec.encodePresentation(deck)
+        let pptxEntries = try ZipContainerCodec.unpack(from: pptxData)
+        let notesEntry = try XCTUnwrap(pptxEntries.first(where: { $0.path == "ppt/notesSlides/notesSlide1.xml" }))
+        let notesXML = String(decoding: notesEntry.data, as: UTF8.self)
+        XCTAssertTrue(notesXML.contains("<p:notes"))
+        XCTAssertTrue(notesXML.contains("표준 notesSlide1.xml 파트에 기록되는 발표자 노트"))
+
+        let decodedDeck = try OOXMLContainerCodec.decodePresentation(from: pptxData)
+        XCTAssertEqual(decodedDeck.slides.first?.speakerNotes, "표준 notesSlide1.xml 파트에 기록되는 발표자 노트")
+        XCTAssertEqual(decodedDeck.slides.first?.elements.first?.isBold, true)
+        XCTAssertEqual(decodedDeck.slides.first?.elements.first?.isItalic, true)
+        XCTAssertEqual(decodedDeck.slides.first?.elements.first?.isUnderlined, true)
+
+        // External PPTX where slide1.xml has NO <p:notes> tag, only ppt/notesSlides/notesSlide1.xml
+        let externalPresXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+          <p:sldIdLst><p:sldId id="256" target="ppt/slides/slide1.xml"/></p:sldIdLst>
+        </p:presentation>
+        """
+        let externalSlideXML = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <p:cSld><p:spTree></p:spTree></p:cSld>
+        </p:sld>
+        """
+        let externalPptxWithNotes = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "ppt/presentation.xml", data: Data(externalPresXML.utf8), compressionMethod: .deflate),
+            ZipContainerEntry(path: "ppt/slides/slide1.xml", data: Data(externalSlideXML.utf8), compressionMethod: .deflate),
+            ZipContainerEntry(path: "ppt/notesSlides/notesSlide1.xml", data: notesEntry.data, compressionMethod: .deflate)
+        ])
+        let decodedExternalNotesDeck = try OOXMLContainerCodec.decodePresentation(from: externalPptxWithNotes)
+        XCTAssertEqual(decodedExternalNotesDeck.slides.first?.speakerNotes, "표준 notesSlide1.xml 파트에 기록되는 발표자 노트")
+
+        // 2. BIFF8 SST (0x00FC) + LABELSST (0x00FD), RK (0x027E), and FORMULA (0x0006) decoding
+        var biffStream = Data()
+        // BOF (0x0809, len 16)
+        BitPacking.appendUInt16LE(0x0809, to: &biffStream)
+        BitPacking.appendUInt16LE(16, to: &biffStream)
+        biffStream.append(Data(repeating: 0, count: 16))
+
+        // SST (0x00FC) with 2 strings: "공유문자열A" (UTF-16LE, flag 0x01) and "ASCII_B" (compressed 8-bit, flag 0x00)
+        var sstPayload = Data()
+        BitPacking.appendUInt32LE(2, to: &sstPayload) // cstTotal
+        BitPacking.appendUInt32LE(2, to: &sstPayload) // cstUnique
+        let str0 = "공유문자열A"
+        BitPacking.appendUInt16LE(UInt16(str0.utf16.count), to: &sstPayload)
+        sstPayload.append(0x01) // UTF-16LE
+        sstPayload.append(BitPacking.encodeUTF16LE(str0))
+        let str1 = "ASCII_B"
+        BitPacking.appendUInt16LE(UInt16(str1.utf8.count), to: &sstPayload)
+        sstPayload.append(0x00) // Compressed 8-bit
+        sstPayload.append(Data(str1.utf8))
+
+        BitPacking.appendUInt16LE(0x00FC, to: &biffStream)
+        BitPacking.appendUInt16LE(UInt16(sstPayload.count), to: &biffStream)
+        biffStream.append(sstPayload)
+
+        // LABELSST (0x00FD, len 10) at A1 (row 0, col 0) -> sstIndex 0
+        BitPacking.appendUInt16LE(0x00FD, to: &biffStream)
+        BitPacking.appendUInt16LE(10, to: &biffStream)
+        BitPacking.appendUInt16LE(0, to: &biffStream) // row 0
+        BitPacking.appendUInt16LE(0, to: &biffStream) // col 0
+        BitPacking.appendUInt16LE(0, to: &biffStream) // xf
+        BitPacking.appendUInt32LE(0, to: &biffStream) // sstIndex 0
+
+        // LABELSST (0x00FD, len 10) at B1 (row 0, col 1) -> sstIndex 1
+        BitPacking.appendUInt16LE(0x00FD, to: &biffStream)
+        BitPacking.appendUInt16LE(10, to: &biffStream)
+        BitPacking.appendUInt16LE(0, to: &biffStream) // row 0
+        BitPacking.appendUInt16LE(1, to: &biffStream) // col 1
+        BitPacking.appendUInt16LE(0, to: &biffStream) // xf
+        BitPacking.appendUInt32LE(1, to: &biffStream) // sstIndex 1
+
+        // RK (0x027E, len 10) at A2 (row 1, col 0): integer 750 -> (750 << 2) | 0x02
+        BitPacking.appendUInt16LE(0x027E, to: &biffStream)
+        BitPacking.appendUInt16LE(10, to: &biffStream)
+        BitPacking.appendUInt16LE(1, to: &biffStream) // row 1
+        BitPacking.appendUInt16LE(0, to: &biffStream) // col 0
+        BitPacking.appendUInt16LE(0, to: &biffStream) // xf
+        BitPacking.appendUInt32LE((750 << 2) | 0x02, to: &biffStream)
+
+        // RK (0x027E, len 10) at B2 (row 1, col 1): integer 1234 / 100 = 12.34 -> (1234 << 2) | 0x03
+        BitPacking.appendUInt16LE(0x027E, to: &biffStream)
+        BitPacking.appendUInt16LE(10, to: &biffStream)
+        BitPacking.appendUInt16LE(1, to: &biffStream) // row 1
+        BitPacking.appendUInt16LE(1, to: &biffStream) // col 1
+        BitPacking.appendUInt16LE(0, to: &biffStream) // xf
+        BitPacking.appendUInt32LE((1234 << 2) | 0x03, to: &biffStream)
+
+        // FORMULA (0x0006, len 14) at C2 (row 1, col 2): IEEE-754 double 99.5
+        BitPacking.appendUInt16LE(0x0006, to: &biffStream)
+        BitPacking.appendUInt16LE(14, to: &biffStream)
+        BitPacking.appendUInt16LE(1, to: &biffStream) // row 1
+        BitPacking.appendUInt16LE(2, to: &biffStream) // col 2
+        BitPacking.appendUInt16LE(0, to: &biffStream) // xf
+        BitPacking.appendUInt64LE(Double(99.5).bitPattern, to: &biffStream)
+
+        // EOF (0x000A, len 0)
+        BitPacking.appendUInt16LE(0x000A, to: &biffStream)
+        BitPacking.appendUInt16LE(0, to: &biffStream)
+
+        let customXlsContainer = try OLE2ContainerCodec.pack(streams: [
+            OLE2StreamEntry(name: "Workbook", data: biffStream)
+        ])
+        let decodedCustomXls = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: customXlsContainer, name: "SST_RK_Test")
+        XCTAssertEqual(decodedCustomXls.rawValue(at: "A1"), "공유문자열A")
+        XCTAssertEqual(decodedCustomXls.rawValue(at: "B1"), "ASCII_B")
+        XCTAssertEqual(decodedCustomXls.evaluate(at: "A2"), .number(750))
+        XCTAssertEqual(decodedCustomXls.evaluate(at: "B2"), .number(12.34))
+        XCTAssertEqual(decodedCustomXls.evaluate(at: "C2"), .number(99.5))
+    }
 }
+
 
 

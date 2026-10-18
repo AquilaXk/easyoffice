@@ -818,6 +818,22 @@ public enum XMLSanitizer {
         ch == " " || ch == ">" || ch == "/" || ch == "\t" || ch == "\n" || ch == "\r"
     }
 
+    /// Zero-allocation reverse UTF-8 scan checking whether an XML tag's attribute slice ends with `/`.
+    @inlinable
+    internal static func isSelfClosingTag(_ segment: Substring) -> Bool {
+        let utf8 = segment.utf8
+        var idx = utf8.endIndex
+        while idx > utf8.startIndex {
+            idx = utf8.index(before: idx)
+            let b = utf8[idx]
+            if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D {
+                continue
+            }
+            return b == 0x2F // '/'
+        }
+        return false
+    }
+
     /// Extracts all top-level XML elements matching `<tagName ...>inner</tagName>`, tracking nesting depth for identical child tags.
     public static func extractElements(named tagName: String, in xml: String) -> [(attributes: [String: String], innerXML: String)] {
         var results: [(attributes: [String: String], innerXML: String)] = []
@@ -836,10 +852,10 @@ public enum XMLSanitizer {
             guard let tagEndRange = xml.range(of: ">", range: afterTagName..<xml.endIndex) else {
                 break
             }
-            let attrSegment = String(xml[afterTagName..<tagEndRange.lowerBound])
-            let attrs = parseAttributes(from: attrSegment)
+            let attrSlice = xml[afterTagName..<tagEndRange.lowerBound]
+            let attrs = parseAttributes(from: String(attrSlice))
 
-            if attrSegment.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/") {
+            if isSelfClosingTag(attrSlice) {
                 results.append((attributes: attrs, innerXML: ""))
                 searchStart = tagEndRange.upperBound
                 continue
@@ -860,7 +876,7 @@ public enum XMLSanitizer {
                             break
                         }
                         let nestedAttr = xml[afterNestedName..<nestedTagEnd.lowerBound]
-                        if !nestedAttr.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/") {
+                        if !isSelfClosingTag(nestedAttr) {
                             depth += 1
                         }
                         scanCursor = nestedTagEnd.upperBound
@@ -907,7 +923,7 @@ public enum XMLSanitizer {
             }
             output.append(contentsOf: xml[searchStart..<openRange.lowerBound])
             let attrSegment = xml[afterTagName..<tagEndRange.lowerBound]
-            if attrSegment.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/") {
+            if isSelfClosingTag(attrSegment) {
                 searchStart = tagEndRange.upperBound
                 continue
             }
@@ -927,7 +943,7 @@ public enum XMLSanitizer {
                             break
                         }
                         let nestedAttr = xml[afterNestedName..<nestedTagEnd.lowerBound]
-                        if !nestedAttr.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/") {
+                        if !isSelfClosingTag(nestedAttr) {
                             depth += 1
                         }
                         scanCursor = nestedTagEnd.upperBound
