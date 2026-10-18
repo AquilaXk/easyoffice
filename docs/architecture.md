@@ -40,18 +40,23 @@ EasyOffice/
 │   │   ├── StandardZipOfficeCodecs.swift          # OOXMLContainerCodec, ODFContainerCodec, HWPXContainerCodec
 │   │   ├── OLE2AndLegacyOfficeCodecs.swift        # OLE2ContainerCodec, HWP5BinaryCodec, LegacyOLE2OfficeCodec (.doc/.xls/.ppt)
 │   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
-│   │   ├── DocumentEngine.swift                   # 워드/한글(HWP/HWPX) 문서 모델, 인라인 런, 표 수식, 변경 추적, 메일 머지
-│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, FormulaAST 캐시, 77종 수식 계산기, DAG 메모이제이션
+│   │   ├── DocumentEngine.swift                   # 워드/한글(HWP/HWPX) 문서 모델, 인라인 런/이미지, 표 수식, 변경 추적, 메일 머지
+│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, FormulaAST, CellStyle, 다중 시트, evaluateGrid
+│   │   ├── SheetBuiltInFunctions.swift            # 77종 스프레드시트 내장 함수 평가기 (수학·통계·논리·참조·텍스트·재무/날짜)
 │   │   ├── SheetAnalyticsAndPivot.swift           # PivotTableEngine, SheetChartBuilder, 조건부 서식 및 유효성 검사
 │   │   ├── SlideEngine.swift                      # 슬라이드/마스터, SnapGuideCalculator, PresenterSession 엔진
-│   │   ├── PDFEngine.swift                        # PDF 주석, 북마크, 페이지 분할/병합, 양방향 변환 엔진
-│   │   ├── PDFBinarySerializer.swift              # ISO 32000-1 바이트 정밀 xref 직렬화 및 macOS PDFKit 브리지
-│   │   ├── SmartProductivityTools.swift           # 일괄 변환 오케스트레이터, 오프라인 스마트 보조 도구, 컨테이너 보안 감사기
-│   │   └── WorkspaceHub.swift                     # WorkspaceViewModel, 140종 리본 라우터, Undo/Redo, 파일 I/O, 전문 검색
+│   │   ├── PDFEngine.swift                        # 다중 페이지 PDF 분할/병합, 주석, 북마크, 양방향 변환 엔진
+│   │   ├── PDFBinarySerializer.swift              # ISO 32000-1 바이트 정밀 xref 직렬화, 다중 줄 가시 스트림 및 PDFKit 브리지
+│   │   ├── SmartProductivityTools.swift           # 일괄 변환 오케스트레이터 및 컨테이너 보안 감사기
+│   │   ├── LocalSmartAssistant.swift              # 100% 오프라인 스마트 문서 보조 도구 (요약, 문장 진단, 액션 추출, LCS 비교)
+│   │   ├── WorkspaceHub.swift                     # WorkspaceViewModel, Undo Coalescing, 파일 I/O, 찾기 및 바꾸기
+│   │   └── WorkspaceRibbonCommandRouter.swift     # 140종 컨텍스트 리본 도메인 명령 라우터 (Zero-Slop 상태 변이)
 │   └── EasyOfficeApp/                             # macOS 네이티브 SwiftUI + AppKit 애플리케이션
-│       ├── EasyOfficeApp.swift                    # @main 앱 엔트리포인트 및 메뉴바 커맨드
-│       ├── WorkspaceViews.swift                   # 통합 타이틀바, 멀티 탭, 스플릿 뷰, 리본, 홈 허브, 인스펙터
-│       └── EditorDetailPanes.swift                # Document/HWP, Sheet, Slide, PDF Studio 인터랙티브 상세 패널
+│       ├── EasyOfficeApp.swift                    # @main 앱 엔트리포인트 및 메뉴바 커맨드 (열기/저장/인쇄/찾기/복사/붙여넣기)
+│       ├── WorkspaceViews.swift                   # 통합 타이틀바, 멀티 탭, 리본, 찾기/바꾸기 바, 스플릿 뷰, 좌/우 인스펙터
+│       ├── HomeHubAndSmartViews.swift             # 홈 허브, 포맷 일괄 변환 스튜디오, 오프라인 스마트 문서 보조 스튜디오
+│       ├── EditorDetailPanes.swift                # Document/HWP 인라인 런/이미지 편집기 및 Sheet 다중 시트/셀 서식 그리드
+│       └── SlideAndPDFDetailPanes.swift           # Slide 드래그/리사이즈 스테이지 및 PDF Studio (PDFKit 메모이제이션 뷰)
 ├── Tests/
 │   └── EasyOfficeTests/                           # 결정론적 단위·보안·UI 패리티 및 벤치마크 검증 스위트
 │       ├── EasyOfficeTests.swift                  # 디자인 토큰, 포맷 카탈로그 및 기본 엔진 검증

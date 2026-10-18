@@ -41,26 +41,53 @@ public enum PDFBinarySerializer {
             let escapedText = escapePDFString(page.extractedText)
             let headerHex = hexEncodeASCII("EasyOffice ISO 32000-1 PDF Studio - Page \(page.pageNumber) (\(page.rotationDegrees) deg)")
             let statusHex = hexEncodeASCII("Verified ISO 32000-1 Vector Page | UTF-8 Stream: \(page.extractedText.utf8.count) Bytes | Status: SAFE")
-            let streamBody = [
+            var streamLines: [String] = [
                 "q",
-                "0.969 0.973 0.988 rg 36 460 523 346 re f",
+                "0.969 0.973 0.988 rg 36 36 523 770 re f",
                 "0.361 0.420 0.753 rg 36 756 523 50 re f",
-                "0.820 0.839 0.922 RG 1 w 36 460 523 346 re S",
+                "0.820 0.839 0.922 RG 1 w 36 36 523 770 re S",
                 "BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedText)) Tj ET",
                 "1 1 1 rg BT 0 Tr /F1 13 Tf 54 775 Td <\(headerHex)> Tj ET",
                 "0.220 0.251 0.380 rg BT 0 Tr /F1 10 Tf 54 722 Td <\(statusHex)> Tj ET",
-                "0.839 0.859 0.941 rg 54 698 487 2 re f",
-                "0.890 0.906 0.969 rg 54 654 440 16 re f",
-                "0.890 0.906 0.969 rg 54 624 487 16 re f",
-                "0.890 0.906 0.969 rg 54 594 390 16 re f",
-                "0.890 0.906 0.969 rg 54 564 460 16 re f",
-                "Q"
-            ].joined(separator: "\n")
+                "0.839 0.859 0.941 rg 54 698 487 2 re f"
+            ]
+
+            let contentLines = page.extractedText
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .prefix(18)
+
+            for (lineIdx, rawSub) in contentLines.enumerated() {
+                let rawLine = String(rawSub)
+                let trimmedLine = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedLine.isEmpty else { continue }
+                let y = 668 - (lineIdx * 24)
+                let barWidth = min(480, max(60, rawLine.count * 9))
+                let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
+                streamLines.append("0.925 0.937 0.984 rg 54 \(y - 4) \(barWidth) 16 re f")
+                streamLines.append("0.145 0.165 0.243 rg BT 0 Tr /F2 10 Tf 54 \(y) Td <\(visibleLineHex)> Tj ET")
+            }
+
+            let pageAnnotations = pdf.annotations.filter { $0.pageNumber == page.pageNumber }
+            for (annIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
+                let annY = 180 - (annIdx * 32)
+                let (fillRGB, strokeRGB) = annotationColorPair(for: annotation.kind)
+                streamLines.append("\(fillRGB) rg 54 \(annY - 4) 487 22 re f")
+                streamLines.append("\(strokeRGB) RG 1 w 54 \(annY - 4) 487 22 re S")
+                if annotation.kind == .underline {
+                    streamLines.append("0.361 0.420 0.753 rg 54 \(annY - 4) 487 2 re f")
+                }
+                let annLabel = "[\(annotationKindBadge(annotation.kind))] \(annotation.author): \(annotation.content)"
+                let annHex = hexEncodeUTF16BE(annLabel, maxChars: 56)
+                streamLines.append("0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 62 \(annY + 3) Td <\(annHex)> Tj ET")
+            }
+
+            streamLines.append("Q")
+            let streamBody = streamLines.joined(separator: "\n")
             let streamByteCount = streamBody.utf8.count
 
             objectOffsets[pageObjNum] = buffer.count
             appendLine("\(pageObjNum) 0 obj")
-            appendLine("<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents \(contentObjNum) 0 R >>")
+            appendLine("<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /AppleSDGothicNeo-Regular /Encoding /UniKS-UTF16-H /DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /AppleSDGothicNeo-Regular /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> >> ] >> >> >> /Contents \(contentObjNum) 0 R >>")
             appendLine("endobj")
 
             objectOffsets[contentObjNum] = buffer.count
@@ -311,6 +338,45 @@ public enum PDFBinarySerializer {
             )
         }
         return nodes
+    }
+
+    private static func hexEncodeUTF16BE(_ input: String, maxChars: Int) -> String {
+        let source = input.isEmpty ? " " : input
+        var hex = "FEFF"
+        hex.reserveCapacity(4 + min(maxChars, source.utf16.count) * 4)
+        var count = 0
+        for unit in source.utf16 {
+            if count >= maxChars { break }
+            let normalized: UInt16 = (unit == 0x0009 || unit < 0x0020) ? 0x0020 : unit
+            hex.append(String(format: "%04X", normalized))
+            count += 1
+        }
+        return hex
+    }
+
+    private static func annotationColorPair(for kind: PDFAnnotationKind) -> (fill: String, stroke: String) {
+        switch kind {
+        case .highlight:
+            return ("0.996 0.953 0.780", "0.961 0.620 0.043")
+        case .underline:
+            return ("0.933 0.949 1.000", "0.361 0.420 0.753")
+        case .stickyNote:
+            return ("1.000 0.973 0.882", "0.961 0.620 0.043")
+        case .stamp:
+            return ("0.820 0.980 0.898", "0.063 0.725 0.506")
+        case .signature:
+            return ("0.910 0.922 0.976", "0.361 0.420 0.753")
+        }
+    }
+
+    private static func annotationKindBadge(_ kind: PDFAnnotationKind) -> String {
+        switch kind {
+        case .highlight: return "HIGHLIGHT"
+        case .underline: return "UNDERLINE"
+        case .stickyNote: return "NOTE"
+        case .stamp: return "STAMP"
+        case .signature: return "SIGNATURE"
+        }
     }
 
     private static func hexEncodeASCII(_ input: String) -> String {
