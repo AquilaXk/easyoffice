@@ -234,6 +234,11 @@ public struct SlideshowFullScreenOverlayView: View {
                 isStageAnimatedIn = true
             }
         }
+        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+            if viewModel.isFullScreenSlideshowActive && viewModel.isPresenterTimerRunning && !viewModel.isPresenterModeActive {
+                viewModel.tickPresenterTimer(seconds: 1)
+            }
+        }
     }
 }
 
@@ -268,10 +273,27 @@ public struct PDFInteractiveInkOverlayView: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
 
+                Text(viewModel.isPDFInkDrawingModeEnabled ? "펜 활성" : "펜 대기")
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        viewModel.isPDFInkDrawingModeEnabled
+                            ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                            : palette.cardSurface.swiftUIColor
+                    )
+                    .foregroundStyle(
+                        viewModel.isPDFInkDrawingModeEnabled
+                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                            : palette.secondaryText.swiftUIColor
+                    )
+                    .clipShape(Capsule())
+
                 ForEach(["#5C6BC0", "#D9383A", "#0A705A"], id: \.self) { hex in
                     let chipColor = resolveOptionalHexColor(hex) ?? EasyOfficeDesignTokens.brand700.swiftUIColor
                     Button {
                         viewModel.pdfInkStrokeColorHex = hex
+                        viewModel.isPDFInkDrawingModeEnabled = true
                     } label: {
                         Circle()
                             .fill(chipColor)
@@ -323,11 +345,17 @@ public struct PDFInteractiveInkOverlayView: View {
 
                 ZStack {
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.28))
+                        .fill(
+                            viewModel.isPDFInkDrawingModeEnabled
+                                ? EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.28)
+                                : palette.cardSurface.swiftUIColor.opacity(0.45)
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(
-                                    EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor.opacity(0.65),
+                                    viewModel.isPDFInkDrawingModeEnabled
+                                        ? EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor.opacity(0.65)
+                                        : palette.border.swiftUIColor,
                                     style: StrokeStyle(lineWidth: 1.2, dash: [5, 3])
                                 )
                         )
@@ -378,6 +406,7 @@ public struct PDFInteractiveInkOverlayView: View {
                 .gesture(
                     DragGesture(minimumDistance: 1)
                         .onChanged { value in
+                            guard viewModel.isPDFInkDrawingModeEnabled else { return }
                             let normX = max(0.0, min(1.0, Double(value.location.x / canvasW)))
                             let normY = max(0.0, min(1.0, Double(1.0 - (value.location.y / canvasH))))
                             let pdfX = 20.0 + normX * 555.0
@@ -385,6 +414,10 @@ public struct PDFInteractiveInkOverlayView: View {
                             activeStrokePoints.append(PDFInkPoint(x: pdfX, y: pdfY))
                         }
                         .onEnded { _ in
+                            guard viewModel.isPDFInkDrawingModeEnabled else {
+                                activeStrokePoints.removeAll(keepingCapacity: true)
+                                return
+                            }
                             if activeStrokePoints.count >= 2 {
                                 viewModel.addInkStrokeToActivePDFPage(
                                     points: activeStrokePoints,

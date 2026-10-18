@@ -562,24 +562,19 @@ public struct SheetEditorDetailPaneView: View {
                     .frame(width: colWidthPt)
                     .frame(minHeight: rowHeightPt, alignment: frameAlignment)
                     .background(
-                        isPrimaryCell
-                            ? EasyOfficeDesignTokens.brand100.swiftUIColor
-                            : (isInRange
-                                ? EasyOfficeDesignTokens.brand50.swiftUIColor
-                                : (cellFillColor
-                                    ?? (isCondHighlighted
-                                        ? EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.6)
-                                        : palette.cardSurface.swiftUIColor)))
+                        resolveCellBackground(
+                            isPrimaryCell: isPrimaryCell,
+                            isInRange: isInRange,
+                            cellFillColor: cellFillColor,
+                            isCondHighlighted: isCondHighlighted,
+                            palette: palette
+                        )
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 4)
                             .stroke(
-                                isPrimaryCell
-                                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                                    : (isInRange
-                                        ? EasyOfficeDesignTokens.brand600.swiftUIColor
-                                        : palette.border.swiftUIColor),
-                                lineWidth: isPrimaryCell ? 1.8 : (isInRange ? 1.3 : 1.0)
+                                resolveCellBorderColor(isPrimaryCell: isPrimaryCell, isInRange: isInRange, palette: palette),
+                                lineWidth: resolveCellBorderWidth(isPrimaryCell: isPrimaryCell, isInRange: isInRange)
                             )
                     )
                     .overlay(alignment: .bottomTrailing) {
@@ -633,5 +628,31 @@ public struct SheetEditorDetailPaneView: View {
                 )
             }
         }
+    }
+
+    private func resolveCellBackground(
+        isPrimaryCell: Bool,
+        isInRange: Bool,
+        cellFillColor: Color?,
+        isCondHighlighted: Bool,
+        palette: WorkspaceThemePalette
+    ) -> Color {
+        if isPrimaryCell { return EasyOfficeDesignTokens.brand100.swiftUIColor }
+        if isInRange { return EasyOfficeDesignTokens.brand50.swiftUIColor }
+        if let cellFillColor { return cellFillColor }
+        if isCondHighlighted { return EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.6) }
+        return palette.cardSurface.swiftUIColor
+    }
+
+    private func resolveCellBorderColor(isPrimaryCell: Bool, isInRange: Bool, palette: WorkspaceThemePalette) -> Color {
+        if isPrimaryCell { return EasyOfficeDesignTokens.brand700.swiftUIColor }
+        if isInRange { return EasyOfficeDesignTokens.brand600.swiftUIColor }
+        return palette.border.swiftUIColor
+    }
+
+    private func resolveCellBorderWidth(isPrimaryCell: Bool, isInRange: Bool) -> CGFloat {
+        if isPrimaryCell { return 1.8 }
+        if isInRange { return 1.3 }
+        return 1.0
     }
 }

@@ -59,6 +59,16 @@ final class DeepDesktopInteractionsTests: XCTestCase {
         } else {
             XCTFail("Expected updated document payload after doc-home-bold")
         }
+
+        // Calling doc-home-bold again on the same UTF-16 subRange must toggle bold off
+        vm.updateSelectedParagraphSelection(paragraphID: targetParagraph.id, utf16Range: subRange)
+        vm.executeRibbonCommand("doc-home-bold")
+        if case let .document(afterSecondToggleDoc) = vm.activeTab?.payload {
+            let p = try XCTUnwrap(afterSecondToggleDoc.paragraphs.first(where: { $0.id == targetParagraph.id }))
+            XCTAssertFalse(p.runs[1].isBold)
+        } else {
+            XCTFail("Expected updated document payload after second doc-home-bold")
+        }
     }
 
     // MARK: - 2. Document Equations, Image Wrap Mode Cycling, and Watermark

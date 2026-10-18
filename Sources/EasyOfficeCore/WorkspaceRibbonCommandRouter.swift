@@ -411,16 +411,43 @@ extension WorkspaceViewModel {
 
     private enum HomeFormattingAction { case bold, italic, underline, styleCycle }
 
+    private static func shouldEnableAttribute(
+        in paragraph: ParagraphBlock,
+        utf16Range: Range<Int>,
+        keyPath: KeyPath<DocumentTextRun, Bool>
+    ) -> Bool {
+        var cursor = 0
+        var foundOverlap = false
+        var allEnabled = true
+        for run in paragraph.effectiveRuns {
+            let len = run.text.utf16.count
+            let runRange = cursor ..< (cursor + len)
+            cursor += len
+            if runRange.overlaps(utf16Range) {
+                foundOverlap = true
+                if !run[keyPath: keyPath] { allEnabled = false }
+            }
+        }
+        return !(foundOverlap && allEnabled)
+    }
+
     private func applyHomeFormatting(at idx: Int, action: HomeFormattingAction) {
         switch openTabs[idx].payload {
         case var .document(doc):
             if doc.paragraphs.isEmpty { doc.paragraphs.append(ParagraphBlock(text: "기본 본문 문단")) }
             let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
             if let utf16Range = selectedParagraphUTF16Range, !utf16Range.isEmpty, action != .styleCycle {
+                let p = doc.paragraphs[pIdx]
                 switch action {
-                case .bold: doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isBold: true)
-                case .italic: doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isItalic: true)
-                case .underline: doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isUnderlined: true)
+                case .bold:
+                    let next = Self.shouldEnableAttribute(in: p, utf16Range: utf16Range, keyPath: \.isBold)
+                    doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isBold: next)
+                case .italic:
+                    let next = Self.shouldEnableAttribute(in: p, utf16Range: utf16Range, keyPath: \.isItalic)
+                    doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isItalic: next)
+                case .underline:
+                    let next = Self.shouldEnableAttribute(in: p, utf16Range: utf16Range, keyPath: \.isUnderlined)
+                    doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isUnderlined: next)
                 case .styleCycle: break
                 }
             } else {
