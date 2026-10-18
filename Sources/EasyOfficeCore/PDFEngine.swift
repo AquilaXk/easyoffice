@@ -282,44 +282,139 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         return PresentationDeckModel(title: title, aspectRatio: .widescreen16x9, slides: slides)
     }
 
-    /// Builds a `PDFStudioDocumentModel` from an `OfficeDocumentModel`.
+    private struct DocumentPaginationBlock {
+        let text: String
+        let paragraphID: UUID?
+    }
+
+    /// Builds a `PDFStudioDocumentModel` from an `OfficeDocumentModel` with multi-page pagination across sections and 12-block chunks.
     public static func fromDocument(_ doc: OfficeDocumentModel) -> PDFStudioDocumentModel {
-        var lines: [String] = []
-        if !doc.headerText.isEmpty {
-            lines.append(doc.headerText)
-        }
+        let maxBlocksPerPage = 12
+        var contentBlocks: [DocumentPaginationBlock] = []
+
         for p in doc.paragraphs {
-            lines.append(p.text)
+            let sublines = p.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            if sublines.count <= 1 {
+                contentBlocks.append(DocumentPaginationBlock(text: p.text, paragraphID: p.id))
+            } else {
+                for (subIdx, subline) in sublines.enumerated() {
+                    contentBlocks.append(
+                        DocumentPaginationBlock(
+                            text: subline,
+                            paragraphID: subIdx == 0 ? p.id : nil
+                        )
+                    )
+                }
+            }
         }
         for table in doc.tables {
             if !table.caption.isEmpty {
-                lines.append(table.caption)
+                contentBlocks.append(DocumentPaginationBlock(text: table.caption, paragraphID: nil))
             }
             for row in table.rows {
-                lines.append(row.joined(separator: " | "))
+                contentBlocks.append(DocumentPaginationBlock(text: row.joined(separator: " | "), paragraphID: nil))
             }
         }
-        if !doc.footerText.isEmpty {
-            lines.append(doc.footerText)
+
+        let sectionCount = max(1, doc.sections.count)
+        var pageChunks: [[DocumentPaginationBlock]] = []
+
+        if sectionCount == 1 && contentBlocks.count <= maxBlocksPerPage {
+            pageChunks = [contentBlocks]
+        } else if sectionCount > 1 {
+            for sectionIdx in 0..<sectionCount {
+                let startIdx = (contentBlocks.count * sectionIdx) / sectionCount
+                let endIdx = (contentBlocks.count * (sectionIdx + 1)) / sectionCount
+                let sectionSlice = Array(contentBlocks[startIdx..<endIdx])
+                if sectionSlice.isEmpty {
+                    pageChunks.append([])
+                } else {
+                    var offset = 0
+                    while offset < sectionSlice.count {
+                        let nextOffset = min(offset + maxBlocksPerPage, sectionSlice.count)
+                        pageChunks.append(Array(sectionSlice[offset..<nextOffset]))
+                        offset = nextOffset
+                    }
+                }
+            }
+        } else {
+            var offset = 0
+            while offset < contentBlocks.count {
+                let nextOffset = min(offset + maxBlocksPerPage, contentBlocks.count)
+                pageChunks.append(Array(contentBlocks[offset..<nextOffset]))
+                offset = nextOffset
+            }
         }
 
-        let page = PDFPageDescriptor(
-            pageNumber: 1,
-            rotationDegrees: 0,
-            extractedText: lines.joined(separator: "\n")
-        )
+        var pages: [PDFPageDescriptor] = []
+        var paragraphPageMap: [UUID: Int] = [:]
+
+        for (idx, chunk) in pageChunks.enumerated() {
+            let pageNum = idx + 1
+            var lines: [String] = []
+            if !doc.headerText.isEmpty {
+                lines.append(doc.headerText)
+            }
+            for block in chunk {
+                lines.append(block.text)
+                if let pid = block.paragraphID, paragraphPageMap[pid] == nil {
+                    paragraphPageMap[pid] = pageNum
+                }
+            }
+            if !doc.footerText.isEmpty {
+                lines.append(doc.footerText)
+            }
+            pages.append(
+                PDFPageDescriptor(
+                    pageNumber: pageNum,
+                    rotationDegrees: 0,
+                    extractedText: lines.joined(separator: "\n")
+                )
+            )
+        }
+
         let outlineNodes = doc.generateTableOfContents().map { entry in
-            PDFOutlineNode(title: entry.title, targetPageNumber: 1)
+            PDFOutlineNode(
+                title: entry.title,
+                targetPageNumber: paragraphPageMap[entry.paragraphID] ?? 1
+            )
         }
 
         return PDFStudioDocumentModel(
             title: doc.title,
-            pages: [page],
+            pages: pages,
             outline: outlineNodes
         )
     }
 
-    /// Builds a `PDFStudioDocumentModel` from a worksheet range.
+    /// Builds a `PDFStudioDocumentModel` from all occupied cells in a `WorksheetModel`, paginating every 25 rows.
+    public static func fromWorksheet(_ worksheet: WorksheetModel) -> PDFStudioDocumentModel {
+        let rowsPerPage = 25
+        var coordsByRow: [Int: [PackedCellCoordinate]] = [:]
+        for (coord, rawVal) in worksheet.cellsByCoordinate where !rawVal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            coordsByRow[coord.row, default: []].append(coord)
+        }
+
+        let sortedRows = coordsByRow.keys.sorted()
+        var rowStrings: [String] = []
+        rowStrings.reserveCapacity(sortedRows.count)
+
+        for rowIdx in sortedRows {
+            guard let rowCoords = coordsByRow[rowIdx]?.sorted(by: { $0.column < $1.column }) else { continue }
+            let formattedCells = rowCoords.map { coord -> String in
+                let addr = CellAddress(packed: coord).a1Notation
+                let val = worksheet.evaluate(at: coord).description
+                return "\(addr): \(val)"
+            }
+            if !formattedCells.isEmpty {
+                rowStrings.append(formattedCells.joined(separator: " | "))
+            }
+        }
+
+        return paginateWorksheetRows(rowStrings, title: worksheet.name, rowsPerPage: rowsPerPage)
+    }
+
+    /// Builds a `PDFStudioDocumentModel` from a worksheet range, paginating every 25 rows.
     public static func fromWorksheet(_ sheet: WorksheetModel, range: CellRange) -> PDFStudioDocumentModel {
         let minRow = min(range.start.row, range.end.row)
         let maxRow = max(range.start.row, range.end.row)
@@ -338,17 +433,42 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
             var cells: [String] = []
             for c in minCol...maxCol {
                 let packed = PackedCellCoordinate(row: r, column: c)
-                cells.append(sheet.evaluate(at: packed).description)
+                let val = sheet.evaluate(at: packed)
+                if val != .empty {
+                    let addr = CellAddress(packed: packed).a1Notation
+                    cells.append("\(addr): \(val.description)")
+                }
             }
-            rowStrings.append(cells.joined(separator: "\t"))
+            if !cells.isEmpty {
+                rowStrings.append(cells.joined(separator: " | "))
+            }
         }
 
-        let page = PDFPageDescriptor(
-            pageNumber: 1,
-            rotationDegrees: 0,
-            extractedText: rowStrings.joined(separator: "\n")
-        )
-        return PDFStudioDocumentModel(title: sheet.name, pages: [page])
+        return paginateWorksheetRows(rowStrings, title: sheet.name, rowsPerPage: 25)
+    }
+
+    private static func paginateWorksheetRows(_ rowStrings: [String], title: String, rowsPerPage: Int) -> PDFStudioDocumentModel {
+        guard !rowStrings.isEmpty else {
+            return PDFStudioDocumentModel(
+                title: title,
+                pages: [PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: "")]
+            )
+        }
+        var pages: [PDFPageDescriptor] = []
+        var offset = 0
+        while offset < rowStrings.count {
+            let nextOffset = min(offset + rowsPerPage, rowStrings.count)
+            let chunk = rowStrings[offset..<nextOffset]
+            pages.append(
+                PDFPageDescriptor(
+                    pageNumber: pages.count + 1,
+                    rotationDegrees: 0,
+                    extractedText: chunk.joined(separator: "\n")
+                )
+            )
+            offset = nextOffset
+        }
+        return PDFStudioDocumentModel(title: title, pages: pages)
     }
 
     /// Builds a `PDFStudioDocumentModel` from a `PresentationDeckModel`.
