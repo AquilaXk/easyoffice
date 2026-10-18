@@ -77,7 +77,7 @@ struct RightContextInspectorView: View {
       .font(.system(size: 11))
     Text("200자 원고지: \(stats.manuscriptPages200)매")
       .font(.system(size: 11, weight: .semibold))
-      .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+      .foregroundStyle(palette.accentBadgeText.swiftUIColor)
     Text("각주: \(doc.footnotes.count)건 · 변경 추적: \(doc.revisions.count)건")
       .font(.system(size: 11))
       .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -254,31 +254,9 @@ struct RightContextInspectorView: View {
         .buttonStyle(.bordered)
         .controlSize(.mini)
       }
-
-      if !doc.tables.isEmpty {
-        Text("표 행·열 구조 편집")
-          .font(.system(size: 10, weight: .semibold))
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          Button("+행") { viewModel.insertRowInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("-행") { viewModel.deleteRowInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("+열") { viewModel.insertColumnInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("-열") { viewModel.deleteColumnInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-        }
-      }
-
-      Button("미주(Endnote) 삽입") { viewModel.insertEndnoteIntoActiveDocument() }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
     }
+
+    documentAdvancedControlsSubSection(doc: doc, palette: palette)
 
     Divider()
 
@@ -295,7 +273,139 @@ struct RightContextInspectorView: View {
       }
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
-      .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+      .tint(palette.primaryAccent.swiftUIColor)
+    }
+  }
+
+  @ViewBuilder
+  private func documentAdvancedControlsSubSection(
+    doc: OfficeDocumentModel,
+    palette: WorkspaceThemePalette
+  ) -> some View {
+    let activeListKind =
+      doc.paragraphs.first(where: { $0.id == viewModel.selectedParagraphID })?.listKind
+      ?? doc.paragraphs.first?.listKind
+      ?? .koreanOfficial
+
+    VStack(alignment: .leading, spacing: 6) {
+      Text("문단 정렬 · 줄간격 · 다단계 목록")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 4) {
+        Button("좌측") { viewModel.setActiveParagraphAlignment(.leading) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("가운데") { viewModel.setActiveParagraphAlignment(.center) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("우측") { viewModel.setActiveParagraphAlignment(.trailing) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("양쪽") { viewModel.setActiveParagraphAlignment(.justified) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
+      HStack(spacing: 4) {
+        ForEach([100.0, 115.0, 160.0, 200.0], id: \.self) { pct in
+          Button("\(Int(pct))%") {
+            viewModel.setActiveParagraphLineSpacing(pct)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        }
+      }
+      HStack(spacing: 4) {
+        Button("글머리") { viewModel.setActiveParagraphListKind(.bullet) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("번호") { viewModel.setActiveParagraphListKind(.numbered) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("공문서(1.가.)") { viewModel.setActiveParagraphListKind(.koreanOfficial) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("해제") { viewModel.setActiveParagraphListKind(.none) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
+      HStack(spacing: 6) {
+        Button("수준 +1") {
+          viewModel.setActiveParagraphListKind(
+            activeListKind == .none ? .koreanOfficial : activeListKind,
+            levelDelta: 1
+          )
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        Button("수준 -1") {
+          viewModel.setActiveParagraphListKind(
+            activeListKind == .none ? .koreanOfficial : activeListKind,
+            levelDelta: -1
+          )
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+      }
+    }
+
+    VStack(alignment: .leading, spacing: 6) {
+      if !doc.tables.isEmpty {
+        Text("표 행·열 및 셀 병합·테두리 편집")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+        HStack(spacing: 6) {
+          Button("+행") { viewModel.insertRowInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("-행") { viewModel.deleteRowInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("+열") { viewModel.insertColumnInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("-열") { viewModel.deleteColumnInDocumentTable() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+        HStack(spacing: 6) {
+          Button("셀 병합") { viewModel.mergeActiveDocumentTableCells() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("셀 분할") { viewModel.splitActiveDocumentTableCell() }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          Button("테두리 전환") {
+            let styles = TableBorderStyle.allCases
+            let cur = doc.tables[0].borderStyle
+            let next = styles[((styles.firstIndex(of: cur) ?? 0) + 1) % styles.count]
+            viewModel.setActiveDocumentTableBorderStyle(next)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        }
+      }
+
+      Text("메일 머지 (누름틀 치환)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 4) {
+        TextField("필드 키", text: $viewModel.mailMergeFieldKeyDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+        TextField("치환 값", text: $viewModel.mailMergeFieldValueDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+        Button("필드 치환") { viewModel.applyMailMergeFieldReplacement() }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+      }
+
+      Toggle("200자 원고지 격자 뷰", isOn: $viewModel.isManuscriptGridModeEnabled)
+        .font(.system(size: 11, weight: .semibold))
+
+      Button("미주(Endnote) 삽입") { viewModel.insertEndnoteIntoActiveDocument() }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
   }
 
@@ -328,7 +438,7 @@ struct RightContextInspectorView: View {
       .font(.system(size: 11, design: .monospaced))
     Text("평가 결과: \(formattedResult)")
       .font(.system(size: 11, weight: .semibold))
-      .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+      .foregroundStyle(palette.accentBadgeText.swiftUIColor)
     Text(
       "SUM: \(String(format: "%.1f", rangeSummary.sum)) · AVG: \(String(format: "%.1f", rangeSummary.average)) · COUNT: \(rangeSummary.numericCount)/\(rangeSummary.cellCount)"
     )
@@ -507,6 +617,41 @@ struct RightContextInspectorView: View {
       Toggle("머리글 행 고정", isOn: $viewModel.isHeaderRowFrozen)
         .font(.system(size: 11, weight: .medium))
 
+      Toggle("첫 열(A열) 틀 고정", isOn: $viewModel.isFirstColumnFrozen)
+        .font(.system(size: 11, weight: .medium))
+
+      Toggle("셀 내 데이터 막대 표시", isOn: $viewModel.isDataBarsEnabled)
+        .font(.system(size: 11, weight: .medium))
+
+      Picker("피벗 집계", selection: $viewModel.selectedPivotAggregation) {
+        ForEach(
+          [
+            PivotAggregationFunction.sum,
+            .average,
+            .count,
+            .min,
+            .max,
+          ],
+          id: \.self
+        ) { fn in
+          Text(fn.rawValue).tag(fn)
+        }
+      }
+      .pickerStyle(.menu)
+      .controlSize(.small)
+
+      Text("데이터 정제 (중복 제거 · 텍스트 나누기)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 6) {
+        Button("중복 행 제거") { viewModel.removeDuplicatesInActiveSheet() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("텍스트 나누기(,)") { viewModel.splitActiveSheetColumnByDelimiter() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
+
       Button(viewModel.activeConditionalFormatRule == nil ? "조건부 서식 켜기 (>100)" : "조건부 서식 끄기") {
         viewModel.executeRibbonCommand("sheet-mod-condfmt")
       }
@@ -536,6 +681,20 @@ struct RightContextInspectorView: View {
       .foregroundStyle(palette.primaryText.swiftUIColor)
     Text("총 슬라이드: \(deck.slides.count)장")
       .font(.system(size: 11))
+
+    Picker(
+      "마스터 테마",
+      selection: Binding(
+        get: { deck.theme },
+        set: { viewModel.applyThemeToActiveDeck($0) }
+      )
+    ) {
+      ForEach(SlideDeckTheme.allCases, id: \.self) { theme in
+        Text(theme.rawValue).tag(theme)
+      }
+    }
+    .pickerStyle(.menu)
+    .controlSize(.small)
 
     Picker(
       "화면 비율",
@@ -720,6 +879,32 @@ struct RightContextInspectorView: View {
         }
         .buttonStyle(.bordered).controlSize(.small)
       }
+
+      Text("개체 정렬 · 배분 · 복제")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 4) {
+        Button("좌측 맞춤") { viewModel.alignSlideElements(.alignLeft) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("가로 중앙") { viewModel.alignSlideElements(.alignCenter) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("우측 맞춤") { viewModel.alignSlideElements(.alignRight) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("가로 배분") { viewModel.alignSlideElements(.distributeHorizontally) }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
+      HStack(spacing: 6) {
+        Button("개체 복제") { viewModel.duplicateActiveSlideElement() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        Button("개체 삭제") { viewModel.deleteActiveSlideElement() }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+      }
     }
 
     Divider()
@@ -861,6 +1046,35 @@ struct RightContextInspectorView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.mini)
+      }
+
+      Divider()
+
+      Text("전자 결재 도장 프리셋 (Official Stamp)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 4) {
+        ForEach(PDFStampPreset.allCases, id: \.self) { preset in
+          Button(preset.rawValue) {
+            viewModel.addStampToActivePDFPage(preset: preset)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        }
+      }
+
+      Text("책갈피 목차 관리 (Bookmark Outline)")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      HStack(spacing: 6) {
+        TextField("책갈피 제목", text: $viewModel.bookmarkTitleDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+        Button("책갈피 추가") {
+          viewModel.addBookmarkToActivePDF()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
       }
     }
 

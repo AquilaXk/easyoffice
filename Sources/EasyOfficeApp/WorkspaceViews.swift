@@ -8,6 +8,12 @@ import UniformTypeIdentifiers
 
 public typealias WorkspaceFilePanelCoordinator = WorkspaceFileDialogPresenter
 
+extension WorkspaceThemePalette {
+  public var primaryAccent: RGBColorToken {
+    EasyOfficeDesignTokens.brand700
+  }
+}
+
 /// Native macOS file dialog, print panel, and pasteboard presenter for office documents.
 @MainActor
 public enum WorkspaceFileDialogPresenter {
@@ -217,10 +223,10 @@ struct TopDocumentTabStripView: View {
         .background(
           viewModel.isShowingHomeHub
             ? EasyOfficeDesignTokens.brand700.swiftUIColor
-            : EasyOfficeDesignTokens.brand100.swiftUIColor
+            : palette.selectedSurface.swiftUIColor
         )
         .foregroundStyle(
-          viewModel.isShowingHomeHub ? Color.white : EasyOfficeDesignTokens.brand900.swiftUIColor
+          viewModel.isShowingHomeHub ? Color.white : palette.accentBadgeText.swiftUIColor
         )
         .clipShape(RoundedRectangle(cornerRadius: 6))
       }
@@ -405,12 +411,12 @@ struct ContextRibbonBarView: View {
               .font(.system(size: 12, weight: isSelected ? .bold : .medium))
               .foregroundStyle(
                 isSelected
-                  ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                  ? palette.accentBadgeText.swiftUIColor
                   : palette.secondaryText.swiftUIColor
               )
               .padding(.vertical, 4)
               .padding(.horizontal, 8)
-              .background(isSelected ? EasyOfficeDesignTokens.brand100.swiftUIColor : Color.clear)
+              .background(isSelected ? palette.selectedSurface.swiftUIColor : Color.clear)
               .clipShape(RoundedRectangle(cornerRadius: 5))
           }
           .buttonStyle(.plain)
@@ -524,8 +530,8 @@ struct FindAndReplaceBarView: View {
         .font(.system(size: 11, weight: .semibold, design: .monospaced))
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
-        .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+        .background(palette.selectedSurface.swiftUIColor)
+        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 4))
 
       Spacer()
@@ -549,6 +555,47 @@ struct LeftNavigatorPanelView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Bindable var viewModel: WorkspaceViewModel
   let tab: WorkspaceTabItem
+
+  private func pdfOutlineNodeRow(
+    _ node: PDFOutlineNode,
+    pdf: PDFStudioDocumentModel,
+    level: Int,
+    palette: WorkspaceThemePalette
+  ) -> AnyView {
+    AnyView(
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 6) {
+          Button {
+            let targetIdx = max(0, min(pdf.pages.count - 1, node.targetPageNumber - 1))
+            viewModel.selectedPDFPageIndex = targetIdx
+          } label: {
+            Text("\(level == 0 ? "•" : "◦") \(node.title) (p.\(node.targetPageNumber))")
+              .font(.system(size: 11, weight: level == 0 ? .medium : .regular))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+              .lineLimit(1)
+          }
+          .buttonStyle(.plain)
+
+          Spacer(minLength: 4)
+
+          Button {
+            viewModel.removeBookmarkFromActivePDF(id: node.id)
+          } label: {
+            Image(systemName: "trash")
+              .font(.system(size: 9))
+              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+          }
+          .buttonStyle(.plain)
+          .help("책갈피 삭제")
+        }
+        .padding(.leading, CGFloat(level * 12))
+
+        ForEach(node.children) { child in
+          pdfOutlineNodeRow(child, pdf: pdf, level: level + 1, palette: palette)
+        }
+      }
+    )
+  }
 
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
@@ -601,7 +648,7 @@ struct LeftNavigatorPanelView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
-              isSelectedSheet ? EasyOfficeDesignTokens.brand100.swiftUIColor : Color.clear
+              isSelectedSheet ? palette.selectedSurface.swiftUIColor : Color.clear
             )
             .clipShape(RoundedRectangle(cornerRadius: 4))
           }
@@ -612,11 +659,40 @@ struct LeftNavigatorPanelView: View {
         Text("내장 함수 카탈로그: \(WorksheetModel.supportedFunctionNames.count)종")
           .font(.system(size: 11))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        Text(
-          "활성 수식 셀 (\(formulaCells.count)개): \(formulaCells.isEmpty ? "없음" : formulaCells.joined(separator: ", "))"
-        )
-        .font(.system(size: 11))
-        .foregroundStyle(palette.secondaryText.swiftUIColor)
+        Text("수식 셀 목록 (\(formulaCells.count)개)")
+          .font(.system(size: 11, weight: .semibold))
+          .foregroundStyle(palette.primaryText.swiftUIColor)
+
+        if formulaCells.isEmpty {
+          Text("없음")
+            .font(.system(size: 11))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+        } else {
+          ForEach(formulaCells, id: \.self) { addr in
+            let isSelectedCell = viewModel.selectedSheetCell == addr
+            Button {
+              viewModel.selectSheetCellOrRange(primaryCell: addr)
+            } label: {
+              HStack(spacing: 6) {
+                Text(addr)
+                  .font(.system(size: 11, weight: .bold, design: .monospaced))
+                  .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+                Text(sheet.rawValue(at: addr))
+                  .font(.system(size: 10, design: .monospaced))
+                  .foregroundStyle(palette.secondaryText.swiftUIColor)
+                  .lineLimit(1)
+                Spacer()
+              }
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(
+                isSelectedCell ? palette.selectedSurface.swiftUIColor : Color.clear
+              )
+              .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+          }
+        }
       case .slide(let deck):
         ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
           Button {
@@ -649,15 +725,7 @@ struct LeftNavigatorPanelView: View {
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
           ForEach(pdf.outline) { node in
-            Button {
-              let targetIdx = max(0, min(pdf.pages.count - 1, node.targetPageNumber - 1))
-              viewModel.selectedPDFPageIndex = targetIdx
-            } label: {
-              Text("• \(node.title) (p.\(node.targetPageNumber))")
-                .font(.system(size: 11))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
-            }
-            .buttonStyle(.plain)
+            pdfOutlineNodeRow(node, pdf: pdf, level: 0, palette: palette)
           }
         }
       }

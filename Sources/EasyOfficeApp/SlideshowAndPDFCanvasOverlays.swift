@@ -21,15 +21,28 @@ public struct SlideElementShapeContentView: View {
   }
 
   private var fillColor: Color {
-    resolveOptionalHexColor(element.fillHex) ?? EasyOfficeDesignTokens.brand50.swiftUIColor
+    EasyOfficeDesignTokens.resolveHexColor(
+      element.fillHex,
+      fallback: EasyOfficeDesignTokens.brand50.swiftUIColor
+    )
   }
 
   private var strokeColor: Color {
     if isSelected {
       return EasyOfficeDesignTokens.brand700.swiftUIColor
     }
-    return resolveOptionalHexColor(element.strokeHex)
-      ?? EasyOfficeDesignTokens.brand600.swiftUIColor
+    return EasyOfficeDesignTokens.resolveHexColor(
+      element.strokeHex,
+      fallback: EasyOfficeDesignTokens.brand600.swiftUIColor
+    )
+  }
+
+  private var elementTextColor: Color {
+    EasyOfficeDesignTokens.contrastingTextColor(forFillHex: element.fillHex)
+  }
+
+  private var elementSecondaryTextColor: Color {
+    elementTextColor.opacity(0.84)
   }
 
   private var strokeLineWidth: CGFloat {
@@ -63,8 +76,8 @@ public struct SlideElementShapeContentView: View {
         .font(.system(size: 8, weight: .bold))
         .padding(.horizontal, 4)
         .padding(.vertical, 1)
-        .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
-        .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+        .background(palette.selectedSurface.swiftUIColor)
+        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 3))
     }
   }
@@ -83,7 +96,7 @@ public struct SlideElementShapeContentView: View {
             .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
             .italic(element.isItalic)
             .underline(element.isUnderlined)
-            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .foregroundStyle(elementTextColor)
             .multilineTextAlignment(.center)
             .lineLimit(1)
 
@@ -92,7 +105,7 @@ public struct SlideElementShapeContentView: View {
               .font(.system(size: 9, weight: element.isBold ? .semibold : .regular))
               .italic(element.isItalic)
               .underline(element.isUnderlined)
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
+              .foregroundStyle(elementSecondaryTextColor)
               .multilineTextAlignment(.center)
               .lineLimit(2)
           }
@@ -132,13 +145,13 @@ public struct SlideElementShapeContentView: View {
             .font(.system(size: 10, weight: .bold))
             .italic(element.isItalic)
             .underline(element.isUnderlined)
-            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .foregroundStyle(elementTextColor)
             .lineLimit(1)
 
           if !element.bodyText.isEmpty {
             Text(element.bodyText)
               .font(.system(size: 9))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
+              .foregroundStyle(elementSecondaryTextColor)
               .lineLimit(1)
           }
         }
@@ -154,7 +167,7 @@ public struct SlideElementShapeContentView: View {
               .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
               .italic(element.isItalic)
               .underline(element.isUnderlined)
-              .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+              .foregroundStyle(elementTextColor)
               .lineLimit(1)
             Spacer(minLength: 2)
             animationBadgeView
@@ -164,7 +177,7 @@ public struct SlideElementShapeContentView: View {
             .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
             .italic(element.isItalic)
             .underline(element.isUnderlined)
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .foregroundStyle(elementSecondaryTextColor)
             .lineLimit(2)
         }
         .padding(8)
@@ -193,7 +206,7 @@ public struct SlideElementShapeContentView: View {
         HStack {
           Label(element.title, systemImage: "tablecells")
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .foregroundStyle(elementTextColor)
             .lineLimit(1)
           Spacer(minLength: 2)
           animationBadgeView
@@ -212,7 +225,7 @@ public struct SlideElementShapeContentView: View {
                   .padding(.vertical, 2)
                   .background(
                     rIdx == 0
-                      ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                      ? palette.selectedSurface.swiftUIColor
                       : palette.cardSurface.swiftUIColor
                   )
               }
@@ -236,7 +249,7 @@ public struct SlideElementShapeContentView: View {
         HStack {
           Label(element.title, systemImage: "chart.bar.fill")
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .foregroundStyle(elementTextColor)
             .lineLimit(1)
           Spacer(minLength: 2)
           animationBadgeView
@@ -259,7 +272,7 @@ public struct SlideElementShapeContentView: View {
         if !element.bodyText.isEmpty {
           Text(element.bodyText)
             .font(.system(size: 8, design: .monospaced))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .foregroundStyle(elementSecondaryTextColor)
             .lineLimit(1)
         }
       }
@@ -284,7 +297,7 @@ public struct SlideElementShapeContentView: View {
             .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
             .italic(element.isItalic)
             .underline(element.isUnderlined)
-            .foregroundStyle(EasyOfficeDesignTokens.brand900.swiftUIColor)
+            .foregroundStyle(elementTextColor)
             .lineLimit(1)
           Spacer(minLength: 2)
           animationBadgeView
@@ -293,7 +306,7 @@ public struct SlideElementShapeContentView: View {
           .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
           .italic(element.isItalic)
           .underline(element.isUnderlined)
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
+          .foregroundStyle(elementSecondaryTextColor)
           .lineLimit(2)
       }
       .padding(8)
@@ -469,6 +482,7 @@ public struct SlideshowFullScreenOverlayView: View {
                 .opacity(entranceOpacity)
                 .rotationEffect(.degrees(element.rotationDegrees))
                 .position(x: centerX, y: centerY)
+                .zIndex(Double(element.zIndex))
               }
 
               if viewModel.isLaserPointerEnabled {
@@ -561,9 +575,10 @@ public struct PDFInteractiveInkOverlayView: View {
   public var body: some View {
     let currentPageNumber = viewModel.selectedPDFPageNumber
     let pageStrokes = pdfDocument.inkStrokes.filter { $0.pageNumber == currentPageNumber }
-    let activeColor =
-      resolveOptionalHexColor(viewModel.pdfInkStrokeColorHex)
-      ?? EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor
+    let activeColor = EasyOfficeDesignTokens.resolveHexColor(
+      viewModel.pdfInkStrokeColorHex,
+      fallback: EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor
+    )
 
     VStack(alignment: .leading, spacing: 8) {
       // Freehand Ink & Quick Highlight Bar
@@ -578,19 +593,21 @@ public struct PDFInteractiveInkOverlayView: View {
           .padding(.vertical, 2)
           .background(
             viewModel.isPDFInkDrawingModeEnabled
-              ? EasyOfficeDesignTokens.brand100.swiftUIColor
+              ? palette.selectedSurface.swiftUIColor
               : palette.cardSurface.swiftUIColor
           )
           .foregroundStyle(
             viewModel.isPDFInkDrawingModeEnabled
-              ? EasyOfficeDesignTokens.brand700.swiftUIColor
+              ? palette.accentBadgeText.swiftUIColor
               : palette.secondaryText.swiftUIColor
           )
           .clipShape(Capsule())
 
         ForEach(["#5C6BC0", "#D9383A", "#0A705A"], id: \.self) { hex in
-          let chipColor =
-            resolveOptionalHexColor(hex) ?? EasyOfficeDesignTokens.brand700.swiftUIColor
+          let chipColor = EasyOfficeDesignTokens.resolveHexColor(
+            hex,
+            fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+          )
           Button {
             viewModel.pdfInkStrokeColorHex = hex
             viewModel.isPDFInkDrawingModeEnabled = true
@@ -647,7 +664,7 @@ public struct PDFInteractiveInkOverlayView: View {
           RoundedRectangle(cornerRadius: 6)
             .fill(
               viewModel.isPDFInkDrawingModeEnabled
-                ? EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.28)
+                ? palette.subtleAccentSurface.swiftUIColor.opacity(0.45)
                 : palette.cardSurface.swiftUIColor.opacity(0.45)
             )
             .overlay(
@@ -673,9 +690,10 @@ public struct PDFInteractiveInkOverlayView: View {
                   path.addLine(to: point)
                 }
               }
-              let strokeColor =
-                resolveOptionalHexColor(stroke.strokeHex)
-                ?? EasyOfficeDesignTokens.brand700.swiftUIColor
+              let strokeColor = EasyOfficeDesignTokens.resolveHexColor(
+                stroke.strokeHex,
+                fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+              )
               context.stroke(
                 path,
                 with: .color(strokeColor),

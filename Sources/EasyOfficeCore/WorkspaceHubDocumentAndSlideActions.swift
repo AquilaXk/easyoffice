@@ -3,6 +3,7 @@ import EasyOfficeDesignSystem
 import Foundation
 
 public typealias FootnoteEntry = FootnoteItem
+public typealias TableBorderStyle = TableCellBorderStyle
 
 extension FootnoteItem {
   public var content: String {
@@ -25,6 +26,28 @@ extension FootnoteItem {
       anchorParagraphID: anchorParagraphID,
       text: content
     )
+  }
+}
+
+extension TableCellSpan {
+  public var row: Int {
+    get { rowIndex }
+    set { rowIndex = newValue }
+  }
+
+  public var column: Int {
+    get { columnIndex }
+    set { columnIndex = newValue }
+  }
+}
+
+extension DocumentTableBlock {
+  public mutating func mergeCells(row: Int, column: Int, rowSpan: Int, columnSpan: Int) {
+    mergeCells(startRow: row, startCol: column, rowSpan: rowSpan, colSpan: columnSpan)
+  }
+
+  public mutating func unmergeCell(row: Int, column: Int) {
+    splitCell(row: row, col: column)
   }
 }
 
@@ -75,44 +98,6 @@ extension OfficeDocumentModel {
   }
 }
 
-extension PDFAnnotationItem {
-  public var contents: String {
-    get { content }
-    set { content = newValue }
-  }
-}
-
-extension PDFStudioDocumentModel {
-  public mutating func addInkStroke(
-    pageNumber: Int,
-    points: [PDFInkPoint],
-    strokeHex: String = "#5C6BC0",
-    lineWidth: Double = 2.2,
-    label: String = "자유곡선 전자서명"
-  ) {
-    addInkStroke(
-      PDFInkStroke(
-        pageNumber: pageNumber,
-        points: points,
-        strokeHex: strokeHex,
-        lineWidth: lineWidth,
-        label: label
-      )
-    )
-  }
-
-  public mutating func addAnnotation(
-    pageNumber: Int,
-    kind: PDFAnnotationKind,
-    author: String = "Workspace User",
-    contents: String
-  ) {
-    annotations.append(
-      PDFAnnotationItem(pageNumber: pageNumber, kind: kind, content: contents, author: author)
-    )
-  }
-}
-
 extension WorkspaceViewModel {
 
   // MARK: - URI Scheme Allowlist Validator
@@ -151,6 +136,139 @@ extension WorkspaceViewModel {
   }
 
   // MARK: - Document & HWP Interactive Actions
+
+  public func toggleManuscriptGridMode() {
+    isManuscriptGridModeEnabled.toggle()
+    lastExecutedCommandSummary =
+      isManuscriptGridModeEnabled ? "200자 원고지 격자 뷰 활성화" : "일반 문서 페이지 뷰 전환"
+  }
+
+  public func applyMailMergeFieldReplacement(key: String? = nil, value: String? = nil) {
+    let k = (key ?? mailMergeFieldKeyDraft).trimmingCharacters(in: .whitespacesAndNewlines)
+    let v = (value ?? mailMergeFieldValueDraft).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !k.isEmpty,
+      let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    mailMergeFields[k] = v
+    let placeholder = "{{\(k)}}"
+    let hadPlaceholder = doc.searchablePlainText().contains(placeholder)
+    doc = doc.applyingMailMerge(record: [k: v])
+    if !hadPlaceholder {
+      let summaryLine = "\(k): \(v)"
+      doc.paragraphs.append(
+        ParagraphBlock(style: .body, alignment: .justified, text: summaryLine)
+      )
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "메일 머지 치환 완료 ({{\(k)}} → \(v))"
+  }
+
+  public func setActiveParagraphAlignment(_ alignment: TextAlignmentMode) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      !doc.paragraphs.isEmpty
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    let targetIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+    doc.paragraphs[targetIdx].alignment = alignment
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "문단 정렬 변경: \(alignment.rawValue)"
+  }
+
+  public func setActiveParagraphLineSpacing(_ percent: Double) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      !doc.paragraphs.isEmpty
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    let targetIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+    let clamped = max(80.0, min(400.0, percent))
+    doc.paragraphs[targetIdx].lineSpacingPercent = clamped
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "문단 줄간격 변경: \(Int(clamped))%"
+  }
+
+  public func setActiveParagraphListKind(_ kind: ParagraphListKind, levelDelta: Int = 0) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      !doc.paragraphs.isEmpty
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    let targetIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+    doc.paragraphs[targetIdx].listKind = kind
+    let nextLevel = max(0, min(3, doc.paragraphs[targetIdx].listLevel + levelDelta))
+    doc.paragraphs[targetIdx].listLevel = nextLevel
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "문단 다단계 목록 설정: \(kind.rawValue) (수준 \(nextLevel + 1))"
+  }
+
+  public func mergeActiveDocumentTableCells(
+    tableIndex: Int = 0,
+    row: Int = 0,
+    column: Int = 0,
+    rowSpan: Int = 1,
+    columnSpan: Int = 2
+  ) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      doc.tables.indices.contains(tableIndex)
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    doc.tables[tableIndex].mergeCells(
+      row: row,
+      column: column,
+      rowSpan: rowSpan,
+      columnSpan: columnSpan
+    )
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "표 셀 병합 완료 (\(row + 1)행 \(column + 1)열, \(rowSpan)×\(columnSpan))"
+  }
+
+  public func splitActiveDocumentTableCell(
+    tableIndex: Int = 0,
+    row: Int? = nil,
+    column: Int? = nil
+  ) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      doc.tables.indices.contains(tableIndex)
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    if let r = row, let c = column {
+      doc.tables[tableIndex].unmergeCell(row: r, column: c)
+    } else if let lastSpan = doc.tables[tableIndex].cellSpans.last {
+      doc.tables[tableIndex].unmergeCell(row: lastSpan.row, column: lastSpan.column)
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "표 병합 셀 분할 완료"
+  }
+
+  public func setActiveDocumentTableBorderStyle(_ style: TableBorderStyle, tableIndex: Int = 0) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      doc.tables.indices.contains(tableIndex)
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    doc.tables[tableIndex].borderStyle = style
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "표 테두리 스타일 변경: \(style.rawValue)"
+  }
 
   public func updateSelectedParagraphSelection(paragraphID: UUID, utf16Range: Range<Int>?) {
     selectedParagraphID = paragraphID
@@ -330,38 +448,49 @@ extension WorkspaceViewModel {
     lastExecutedCommandSummary = trimmed.isEmpty ? "문서 워터마크 해제" : "문서 워터마크 적용: \(trimmed)"
   }
 
-  private static func makeSampleLavenderDiagramPNG(width: Int = 160, height: Int = 48) -> Data {
+  internal static func makeSampleDiagramPNG(
+    width: Int = 160,
+    height: Int = 48,
+    accentR: UInt8 = 0x5C,
+    accentG: UInt8 = 0x6B,
+    accentB: UInt8 = 0xC0
+  ) -> Data {
+    let safeW = max(16, width)
+    let safeH = max(16, height)
     guard
       let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
-        pixelsWide: width,
-        pixelsHigh: height,
+        pixelsWide: safeW,
+        pixelsHigh: safeH,
         bitsPerSample: 8,
         samplesPerPixel: 4,
         hasAlpha: true,
         isPlanar: false,
         colorSpaceName: .deviceRGB,
-        bytesPerRow: width * 4,
+        bytesPerRow: safeW * 4,
         bitsPerPixel: 32
       ),
       let ptr = rep.bitmapData
     else { return Data() }
-    for y in 0..<height {
-      for x in 0..<width {
-        let offset = (y * width + x) * 4
-        let isBorder = x < 2 || x >= width - 2 || y < 2 || y >= height - 2
-        let isBar1 = (x >= 20 && x < 48 && y >= 14 && y < height - 8)
-        let isBar2 = (x >= 64 && x < 92 && y >= 8 && y < height - 8)
-        let isBar3 = (x >= 108 && x < 136 && y >= 18 && y < height - 8)
+    let softR = UInt8(min(255, Int(accentR) + 32))
+    let softG = UInt8(min(255, Int(accentG) + 32))
+    let softB = UInt8(min(255, Int(accentB) + 24))
+    for y in 0..<safeH {
+      for x in 0..<safeW {
+        let offset = (y * safeW + x) * 4
+        let isBorder = x < 2 || x >= safeW - 2 || y < 2 || y >= safeH - 2
+        let isBar1 = (x >= safeW / 8 && x < safeW * 3 / 10 && y >= safeH / 3 && y < safeH - 8)
+        let isBar2 = (x >= safeW * 2 / 5 && x < safeW * 3 / 5 && y >= safeH / 6 && y < safeH - 8)
+        let isBar3 = (x >= safeW * 7 / 10 && x < safeW * 7 / 8 && y >= safeH / 4 && y < safeH - 8)
         if isBorder || isBar2 {
-          ptr[offset] = 92
-          ptr[offset + 1] = 107
-          ptr[offset + 2] = 192
+          ptr[offset] = accentR
+          ptr[offset + 1] = accentG
+          ptr[offset + 2] = accentB
           ptr[offset + 3] = 255
         } else if isBar1 || isBar3 {
-          ptr[offset] = 121
-          ptr[offset + 1] = 134
-          ptr[offset + 2] = 203
+          ptr[offset] = softR
+          ptr[offset + 1] = softG
+          ptr[offset + 2] = softB
           ptr[offset + 3] = 255
         } else {
           ptr[offset] = 238
@@ -372,6 +501,10 @@ extension WorkspaceViewModel {
       }
     }
     return rep.representation(using: .png, properties: [:]) ?? Data()
+  }
+
+  private static func makeSampleLavenderDiagramPNG(width: Int = 160, height: Int = 48) -> Data {
+    makeSampleDiagramPNG(width: width, height: height, accentR: 0x5C, accentG: 0x6B, accentB: 0xC0)
   }
 
   public func insertSampleImageAttachment(
@@ -796,131 +929,101 @@ extension WorkspaceViewModel {
     lastExecutedCommandSummary = "미주 삽입 완료 (#\(nextNumber))"
   }
 
-  // MARK: - Spreadsheet Structural, Named Range & Goal Seek Actions
-
-  private func mutateActiveSheetAtSelection(
-    summary: (CellAddress) -> String,
-    mutation: (inout WorksheetModel, CellAddress) -> Void
-  ) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let addr =
-      (try? CellAddress(a1Notation: selectedSheetCell))
-      ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    mutation(&sheet, addr)
-    formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = summary(addr)
-  }
-
-  public func insertSheetRowAtSelection() {
-    mutateActiveSheetAtSelection(
-      summary: { "시트 행 삽입 완료 (\($0.row + 1)행)" },
-      mutation: { sheet, addr in sheet.insertRow(at: addr.row) }
-    )
-  }
-
-  public func deleteSheetRowAtSelection() {
-    mutateActiveSheetAtSelection(
-      summary: { "시트 행 삭제 완료 (\($0.row + 1)행)" },
-      mutation: { sheet, addr in sheet.deleteRow(at: addr.row) }
-    )
-  }
-
-  public func insertSheetColumnAtSelection() {
-    mutateActiveSheetAtSelection(
-      summary: { "시트 열 삽입 완료 (\(CellAddress.columnLabel(for: $0.column))열)" },
-      mutation: { sheet, addr in sheet.insertColumn(at: addr.column) }
-    )
-  }
-
-  public func deleteSheetColumnAtSelection() {
-    mutateActiveSheetAtSelection(
-      summary: { "시트 열 삭제 완료 (\(CellAddress.columnLabel(for: $0.column))열)" },
-      mutation: { sheet, addr in sheet.deleteColumn(at: addr.column) }
-    )
-  }
-
-  public func defineNamedRangeOnActiveSheet(
-    name: String? = nil,
-    targetNotation: String? = nil
-  ) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    let candidateName = (name ?? namedRangeNameDraft).trimmingCharacters(
-      in: .whitespacesAndNewlines
-    )
-    let resolvedName = candidateName.isEmpty ? "분기매출" : candidateName
-    let candidateTarget = (targetNotation ?? namedRangeTargetDraft).trimmingCharacters(
-      in: .whitespacesAndNewlines
-    )
-    let resolvedTarget = candidateTarget.isEmpty ? selectedSheetRange : candidateTarget
-    recordUndoSnapshot(for: activeTabID)
-    sheet.setNamedRange(resolvedName, rangeOrCellNotation: resolvedTarget)
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "이름 정의 등록 완료: \(resolvedName.uppercased()) = \(resolvedTarget)"
-  }
-
-  public func defineSheetNamedRange(name: String? = nil, targetNotation: String? = nil) {
-    defineNamedRangeOnActiveSheet(name: name, targetNotation: targetNotation)
-  }
-
-  public func mergeSelectedSheetRange() {
-    toggleMergeOnSelectedSheetCell()
-  }
-
-  public func unmergeSelectedSheetRange() {
-    toggleMergeOnSelectedSheetCell()
-  }
-
-  @discardableResult
-  public func runGoalSeekOnActiveSheet(
-    targetCell: String? = nil,
-    targetValue: Double? = nil,
-    variableCell: String? = nil
-  ) -> Double? {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return nil }
-    let rawTCell = (targetCell ?? goalSeekTargetCellDraft).trimmingCharacters(
-      in: .whitespacesAndNewlines
-    )
-    let tCell = rawTCell.isEmpty ? "B4" : rawTCell
-    let tVal =
-      targetValue
-      ?? Double(goalSeekTargetValueDraft.trimmingCharacters(in: .whitespacesAndNewlines))
-      ?? 500.0
-    let rawVCell = (variableCell ?? goalSeekVariableCellDraft).trimmingCharacters(
-      in: .whitespacesAndNewlines
-    )
-    let vCell = rawVCell.isEmpty ? "B2" : rawVCell
-    recordUndoSnapshot(for: activeTabID)
-    if let solved = try? sheet.goalSeek(
-      targetCell: tCell,
-      targetValue: tVal,
-      variableCell: vCell
-    ) {
-      openTabs[idx].payload = .sheet(sheet)
-      openTabs[idx].isModified = true
-      formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
-      lastExecutedCommandSummary =
-        "목표값 찾기 완료: \(vCell) = \(String(format: "%.2f", solved)) (목표 \(tCell) = \(tVal))"
-      return solved
-    } else {
-      lastExecutedCommandSummary = "목표값 찾기 수렴 실패 (\(tCell))"
-      return nil
-    }
-  }
-
   // MARK: - Slide Deck, Element & Sorter View Actions
+
+  public func applyThemeToActiveDeck(_ theme: SlideDeckTheme) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    deck.applyTheme(theme)
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "슬라이드 마스터 테마 적용 (\(theme.rawValue))"
+  }
+
+  public func alignSlideElements(_ alignment: SlideElementAlignment) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    recordUndoSnapshot(for: activeTabID)
+    deck.slides[sIdx].alignElements(
+      alignment,
+      targetID: selectedSlideElementID,
+      stageSize: (deck.aspectRatio.widthPoints, deck.aspectRatio.heightPoints)
+    )
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "슬라이드 개체 정렬 (\(alignment.rawValue))"
+  }
+
+  public func duplicateActiveSlideElement() {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    guard let targetID = selectedSlideElementID ?? deck.slides[sIdx].elements.last?.id else {
+      return
+    }
+    recordUndoSnapshot(for: activeTabID)
+    if let copy = deck.slides[sIdx].duplicateElement(
+      id: targetID,
+      stageSize: (deck.aspectRatio.widthPoints, deck.aspectRatio.heightPoints)
+    ) {
+      selectedSlideElementID = copy.id
+    }
+    for i in deck.slides[sIdx].elements.indices {
+      deck.slides[sIdx].elements[i].zIndex = i
+    }
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "슬라이드 개체 복제 완료"
+  }
+
+  public func deleteActiveSlideElement() {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    guard let targetID = selectedSlideElementID ?? deck.slides[sIdx].elements.last?.id else {
+      return
+    }
+    recordUndoSnapshot(for: activeTabID)
+    deck.slides[sIdx].removeElement(id: targetID)
+    for i in deck.slides[sIdx].elements.indices {
+      deck.slides[sIdx].elements[i].zIndex = i
+    }
+    selectedSlideElementID = deck.slides[sIdx].elements.last?.id
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "슬라이드 개체 삭제 완료"
+  }
+
+  public func updateActiveSlideSpeakerNotes(_ notes: String) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    guard deck.slides[sIdx].speakerNotes != notes else { return }
+    recordUndoSnapshot(
+      for: activeTabID,
+      coalescingTargetKey: "slide-notes-\(activeTabID.uuidString)-\(sIdx)"
+    )
+    deck.slides[sIdx].speakerNotes = notes
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "발표자 노트 갱신 완료"
+  }
 
   public func selectSlideElement(id: UUID?) {
     activeInlineEditTargetKey = nil
@@ -1086,6 +1189,9 @@ extension WorkspaceViewModel {
     guard nextIdx != eIdx else { return }
     recordUndoSnapshot(for: activeTabID)
     deck.slides[targetSlideIdx].elements.swapAt(eIdx, nextIdx)
+    for i in deck.slides[targetSlideIdx].elements.indices {
+      deck.slides[targetSlideIdx].elements[i].zIndex = i
+    }
     openTabs[idx].payload = .slide(deck)
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = bringForward ? "슬라이드 개체 앞으로 이동" : "슬라이드 개체 뒤로 이동"
@@ -1294,279 +1400,5 @@ extension WorkspaceViewModel {
     isSlideSorterViewEnabled.toggle()
     lastExecutedCommandSummary =
       isSlideSorterViewEnabled ? "슬라이드 정렬 격자 뷰 활성화" : "슬라이드 정렬 격자 뷰 해제"
-  }
-
-  // MARK: - PDF Studio Redaction, Form Fields, Page Reordering & Merging
-
-  public func rotateActivePDFPage(clockwiseDegrees: Int = 90) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdfDoc) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
-    pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: clockwiseDegrees)
-    openTabs[idx].payload = .pdf(pdfDoc)
-    openTabs[idx].isModified = true
-  }
-
-  public func insertBlankPDFPage(afterPage: Int? = nil) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdfDoc) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let targetAfterPage = afterPage ?? selectedPDFPageNumber
-    pdfDoc.insertBlankPage(afterPage: targetAfterPage)
-    selectedPDFPageIndex = min(pdfDoc.pages.count - 1, targetAfterPage)
-    openTabs[idx].payload = .pdf(pdfDoc)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "빈 PDF 페이지 추가 완료"
-  }
-
-  public func deleteActivePDFPage() {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdfDoc) = openTabs[idx].payload,
-      pdfDoc.pages.count > 1
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
-    pdfDoc.deletePage(at: targetIndex)
-    selectedPDFPageIndex = max(0, min(pdfDoc.pages.count - 1, selectedPDFPageIndex))
-    openTabs[idx].payload = .pdf(pdfDoc)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "현재 PDF 페이지 삭제 완료"
-  }
-
-  public func addPDFAnnotation(kind: PDFAnnotationKind, content: String) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdfDoc) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let pageNumber =
-      pdfDoc.pages.indices.contains(selectedPDFPageIndex)
-      ? pdfDoc.pages[selectedPDFPageIndex].pageNumber : 1
-    pdfDoc.annotations.append(
-      PDFAnnotationItem(pageNumber: pageNumber, kind: kind, content: content, author: authorName)
-    )
-    openTabs[idx].payload = .pdf(pdfDoc)
-    openTabs[idx].isModified = true
-  }
-
-  public func addInkStrokeToActivePDFPage(
-    points: [PDFInkPoint],
-    strokeHex: String? = nil,
-    lineWidth: Double? = nil,
-    label: String = "자유곡선 전자서명"
-  ) {
-    guard !points.isEmpty,
-      let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdfDoc) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    pdfDoc.addInkStroke(
-      pageNumber: selectedPDFPageNumber,
-      points: points,
-      strokeHex: strokeHex ?? pdfInkStrokeColorHex,
-      lineWidth: lineWidth ?? pdfInkLineWidth,
-      label: label
-    )
-    openTabs[idx].payload = .pdf(pdfDoc)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 자유곡선 벡터 서명 추가 (\(selectedPDFPageNumber)p)"
-  }
-
-  public func clearInkStrokesOnActivePDFPage() {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdfDoc) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    pdfDoc.clearInkStrokes(onPage: selectedPDFPageNumber)
-    openTabs[idx].payload = .pdf(pdfDoc)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 자유곡선 서명 지우기 (\(selectedPDFPageNumber)p)"
-  }
-
-  public func addHighlightToActivePDFPage(selectedText: String) {
-    let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty,
-      let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdfDoc) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    pdfDoc.addAnnotation(
-      pageNumber: selectedPDFPageNumber,
-      kind: .highlight,
-      author: authorName,
-      contents: "하이라이트: \(trimmed)"
-    )
-    openTabs[idx].payload = .pdf(pdfDoc)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 선택 텍스트 하이라이트 추가 (\(selectedPDFPageNumber)p)"
-  }
-
-  @discardableResult
-  public func redactSensitiveTextOnActivePDF(phrase: String? = nil) -> Int {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdf) = openTabs[idx].payload
-    else { return 0 }
-    let candidate = (phrase ?? pdfRedactionPhraseDraft).trimmingCharacters(
-      in: .whitespacesAndNewlines
-    )
-    let resolvedPhrase = candidate.isEmpty ? "기밀" : candidate
-    recordUndoSnapshot(for: activeTabID)
-    let count = pdf.redactText(resolvedPhrase)
-    openTabs[idx].payload = .pdf(pdf)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 민감 구문 리댁션 완료 (\(count)페이지 적용)"
-    return count
-  }
-
-  @discardableResult
-  public func redactTextOnActivePDF(phrase: String? = nil) -> Int {
-    redactSensitiveTextOnActivePDF(phrase: phrase)
-  }
-
-  @discardableResult
-  public func redactTextInActivePDF(phrase: String? = nil) -> Int {
-    redactSensitiveTextOnActivePDF(phrase: phrase)
-  }
-
-  public func addFormFieldToActivePDF(
-    name: String? = nil,
-    value: String? = nil,
-    isCheckbox: Bool = false
-  ) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdf) = openTabs[idx].payload
-    else { return }
-    let candidateName = (name ?? pdfFormFieldNameDraft).trimmingCharacters(
-      in: .whitespacesAndNewlines
-    )
-    let resolvedName = candidateName.isEmpty ? "승인자" : candidateName
-    let resolvedVal = value ?? pdfFormFieldValueDraft
-    recordUndoSnapshot(for: activeTabID)
-    pdf.addFormField(
-      PDFFormField(
-        pageNumber: selectedPDFPageNumber,
-        name: resolvedName,
-        value: resolvedVal,
-        isCheckbox: isCheckbox,
-        isChecked: isCheckbox
-      )
-    )
-    openTabs[idx].payload = .pdf(pdf)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 양식 필드 추가 완료: \(resolvedName)"
-  }
-
-  public func updatePDFFormField(id: UUID, value: String? = nil, isChecked: Bool? = nil) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdf) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(
-      for: activeTabID,
-      coalescingTargetKey: "pdf-field-\(activeTabID.uuidString)-\(id.uuidString)"
-    )
-    pdf.updateFormField(id: id, value: value, isChecked: isChecked)
-    openTabs[idx].payload = .pdf(pdf)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 양식 필드 값 갱신 완료"
-  }
-
-  public func setActivePDFFormFieldValue(id: UUID, value: String? = nil, isChecked: Bool? = nil) {
-    updatePDFFormField(id: id, value: value, isChecked: isChecked)
-  }
-
-  public func moveActivePDFPage(offset: Int) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdf) = openTabs[idx].payload,
-      !pdf.pages.isEmpty
-    else { return }
-    let sourceIndex = max(0, min(pdf.pages.count - 1, selectedPDFPageNumber - 1))
-    let targetIndex = max(0, min(pdf.pages.count - 1, sourceIndex + offset))
-    guard targetIndex != sourceIndex else { return }
-    recordUndoSnapshot(for: activeTabID)
-    pdf.reorderPage(from: sourceIndex, to: targetIndex)
-    selectedPDFPageNumber = targetIndex + 1
-    openTabs[idx].payload = .pdf(pdf)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 페이지 순서 이동 완료 (\(sourceIndex + 1)p → \(targetIndex + 1)p)"
-  }
-
-  public func reorderActivePDFPage(offset: Int) {
-    moveActivePDFPage(offset: offset)
-  }
-
-  public func reorderActivePDFPage(from sourceIndex: Int, to destinationIndex: Int) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdf) = openTabs[idx].payload,
-      !pdf.pages.isEmpty
-    else { return }
-    let clampedSrc = max(0, min(pdf.pages.count - 1, sourceIndex))
-    let clampedDst = max(0, min(pdf.pages.count - 1, destinationIndex))
-    guard clampedSrc != clampedDst else { return }
-    recordUndoSnapshot(for: activeTabID)
-    pdf.reorderPage(from: clampedSrc, to: clampedDst)
-    selectedPDFPageNumber = clampedDst + 1
-    openTabs[idx].payload = .pdf(pdf)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 페이지 순서 이동 완료 (\(clampedSrc + 1)p → \(clampedDst + 1)p)"
-  }
-
-  public func mergeActivePDFWithAnotherOpenTab() {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .pdf(var pdf) = openTabs[idx].payload
-    else { return }
-    let otherPDF: PDFStudioDocumentModel
-    if let otherPDFTab = openTabs.first(where: {
-      if $0.id == activeTabID { return false }
-      if case .pdf = $0.payload { return true }
-      return false
-    }), case .pdf(let foundPDF) = otherPDFTab.payload {
-      otherPDF = foundPDF
-    } else if let otherTab = openTabs.first(where: { $0.id != activeTabID }) {
-      switch otherTab.payload {
-      case .document(let doc):
-        otherPDF = PDFStudioDocumentModel.fromDocument(doc)
-      case .sheet(let sheet):
-        otherPDF = PDFStudioDocumentModel.fromWorksheet(sheet)
-      case .slide(let deck):
-        otherPDF = PDFStudioDocumentModel.fromPresentation(deck)
-      case .pdf(let foundPDF):
-        otherPDF = foundPDF
-      }
-    } else {
-      otherPDF = PDFStudioDocumentModel(
-        title: "\(pdf.title) 부록",
-        pages: [
-          PDFPageDescriptor(
-            pageNumber: 1,
-            rotationDegrees: 0,
-            extractedText: "병합된 추가 부록 페이지"
-          )
-        ]
-      )
-    }
-    recordUndoSnapshot(for: activeTabID)
-    pdf = pdf.merged(with: otherPDF)
-    openTabs[idx].payload = .pdf(pdf)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "열린 탭 PDF 병합 완료 (총 \(pdf.pages.count)p)"
-  }
-
-  public func mergeActivePDFWithTab() {
-    mergeActivePDFWithAnotherOpenTab()
   }
 }

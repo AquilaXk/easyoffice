@@ -627,4 +627,267 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTFail("Expected merged PDF payload")
     }
   }
+
+  // MARK: - 10. Document Paragraph Alignment/Spacing/List, Table Merge/Split/Border, Mail Merge, Manuscript Grid & Vector Insertions
+
+  func testDocumentParagraphFormattingTableMergeMailMergeManuscriptGridAndVectorInsertions() throws
+  {
+    let vm = WorkspaceViewModel()
+    let docTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .document }))
+    vm.activeTabID = docTab.id
+
+    guard case .document(let initialDoc) = vm.activeTab?.payload,
+      let firstPara = initialDoc.paragraphs.first
+    else {
+      return XCTFail("Expected document payload with paragraphs")
+    }
+    vm.updateSelectedParagraphSelection(paragraphID: firstPara.id, utf16Range: nil)
+
+    // Paragraph alignment
+    for align in [
+      TextAlignmentMode.leading, .center, .trailing, .justified,
+    ] {
+      vm.setActiveParagraphAlignment(align)
+      if case .document(let doc) = vm.activeTab?.payload {
+        let p = try XCTUnwrap(doc.paragraphs.first(where: { $0.id == firstPara.id }))
+        XCTAssertEqual(p.alignment, align)
+      }
+    }
+
+    // Line spacing with clamping (80%...400%)
+    vm.setActiveParagraphLineSpacing(200.0)
+    if case .document(let doc) = vm.activeTab?.payload {
+      let p = try XCTUnwrap(doc.paragraphs.first(where: { $0.id == firstPara.id }))
+      XCTAssertEqual(p.lineSpacingPercent, 200.0, accuracy: 0.01)
+    }
+    vm.setActiveParagraphLineSpacing(40.0)
+    if case .document(let doc) = vm.activeTab?.payload {
+      let p = try XCTUnwrap(doc.paragraphs.first(where: { $0.id == firstPara.id }))
+      XCTAssertEqual(p.lineSpacingPercent, 80.0, accuracy: 0.01)
+    }
+
+    // Multi-level list kind & level delta clamping (0...3)
+    vm.setActiveParagraphListKind(.koreanOfficial, levelDelta: 0)
+    vm.setActiveParagraphListKind(.koreanOfficial, levelDelta: 1)
+    if case .document(let doc) = vm.activeTab?.payload {
+      let p = try XCTUnwrap(doc.paragraphs.first(where: { $0.id == firstPara.id }))
+      XCTAssertEqual(p.listKind, .koreanOfficial)
+      XCTAssertEqual(p.listLevel, 1)
+    }
+    vm.setActiveParagraphListKind(.none, levelDelta: -5)
+    if case .document(let doc) = vm.activeTab?.payload {
+      let p = try XCTUnwrap(doc.paragraphs.first(where: { $0.id == firstPara.id }))
+      XCTAssertEqual(p.listKind, .none)
+      XCTAssertEqual(p.listLevel, 0)
+    }
+
+    // Table cell merge, split, and border style
+    vm.mergeActiveDocumentTableCells(tableIndex: 0, row: 0, column: 0, rowSpan: 1, columnSpan: 2)
+    if case .document(let doc) = vm.activeTab?.payload {
+      XCTAssertNotNil(doc.tables[0].originSpan(atRow: 0, column: 0))
+      XCTAssertTrue(doc.tables[0].isCoveredByNonOriginSpan(atRow: 0, column: 1))
+    }
+    vm.splitActiveDocumentTableCell(tableIndex: 0, row: 0, column: 0)
+    if case .document(let doc) = vm.activeTab?.payload {
+      XCTAssertNil(doc.tables[0].originSpan(atRow: 0, column: 0))
+    }
+    vm.setActiveDocumentTableBorderStyle(.doubleLine, tableIndex: 0)
+    if case .document(let doc) = vm.activeTab?.payload {
+      XCTAssertEqual(doc.tables[0].borderStyle, .doubleLine)
+    }
+
+    // Mail merge replacement
+    vm.appendParagraphToActiveDocument(text: "수신 부서: {{수신처}}")
+    vm.applyMailMergeFieldReplacement(key: "수신처", value: "아키텍처위원회")
+    if case .document(let doc) = vm.activeTab?.payload {
+      XCTAssertTrue(doc.searchablePlainText().contains("아키텍처위원회"))
+      XCTAssertFalse(doc.searchablePlainText().contains("{{수신처}}"))
+    }
+
+    // 200-char Manuscript Grid toggle & hwp-mod-manuscript ribbon command
+    XCTAssertFalse(vm.isManuscriptGridModeEnabled)
+    vm.toggleManuscriptGridMode()
+    XCTAssertTrue(vm.isManuscriptGridModeEnabled)
+    vm.toggleManuscriptGridMode()
+    XCTAssertFalse(vm.isManuscriptGridModeEnabled)
+    vm.executeRibbonCommand("hwp-mod-manuscript")
+    XCTAssertTrue(vm.isManuscriptGridModeEnabled)
+
+    // doc-insert-shape and doc-insert-chart attach vector diagram images
+    let imgCountBefore: Int = {
+      if case .document(let doc) = vm.activeTab?.payload { return doc.images.count }
+      return 0
+    }()
+    vm.executeRibbonCommand("doc-insert-shape")
+    vm.executeRibbonCommand("doc-insert-chart")
+    if case .document(let doc) = vm.activeTab?.payload {
+      XCTAssertEqual(doc.images.count, imgCountBefore + 2)
+      XCTAssertTrue(doc.images.contains(where: { $0.caption == "벡터 다이어그램 도형" }))
+      XCTAssertTrue(doc.images.contains(where: { $0.caption == "실적 요약 차트 그래픽" }))
+      for img in doc.images.suffix(2) {
+        XCTAssertTrue(img.imageData.starts(with: [0x89, 0x50, 0x4E, 0x47]))
+        XCTAssertEqual(img.wrapMode, .inline)
+      }
+    }
+  }
+
+  // MARK: - 11. Sheet Duplicate Removal, Delimiter Split, Frozen Column, Data Bars & Pivot Aggregation
+
+  func testSheetDuplicateRemovalDelimiterSplitFrozenColumnDataBarsAndPivotAggregation() throws {
+    let vm = WorkspaceViewModel()
+    let sheetTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet }))
+    vm.activeTabID = sheetTab.id
+
+    // Seed duplicate row and delimited text
+    vm.selectSheetCellOrRange(primaryCell: "A5")
+    vm.formulaBarDraft = "중복항목"
+    vm.commitSheetFormulaBarEdit()
+    vm.selectSheetCellOrRange(primaryCell: "B5")
+    vm.formulaBarDraft = "999"
+    vm.commitSheetFormulaBarEdit()
+
+    vm.selectSheetCellOrRange(primaryCell: "A6")
+    vm.formulaBarDraft = "중복항목"
+    vm.commitSheetFormulaBarEdit()
+    vm.selectSheetCellOrRange(primaryCell: "B6")
+    vm.formulaBarDraft = "999"
+    vm.commitSheetFormulaBarEdit()
+
+    vm.selectSheetCellOrRange(primaryCell: "A5", rangeNotation: "A5:B6")
+    let removedCount = vm.removeDuplicatesInActiveSheet()
+    XCTAssertEqual(removedCount, 1)
+
+    // Delimiter split on column A
+    vm.selectSheetCellOrRange(primaryCell: "A5")
+    vm.formulaBarDraft = "서울,부산,대전"
+    vm.commitSheetFormulaBarEdit()
+    vm.sheetDelimiterDraft = ","
+    let splitRows = vm.splitActiveSheetColumnByDelimiter()
+    XCTAssertGreaterThanOrEqual(splitRows, 1)
+    if case .sheet(let sheet) = vm.activeTab?.payload {
+      XCTAssertEqual(sheet.rawValue(at: "A5"), "서울")
+      XCTAssertEqual(sheet.rawValue(at: "B5"), "부산")
+      XCTAssertEqual(sheet.rawValue(at: "C5"), "대전")
+    }
+
+    // Frozen first column, Data Bars toggle, Pivot aggregation & sheet-insert-shape chart visibility
+    XCTAssertFalse(vm.isFirstColumnFrozen)
+    vm.toggleFirstColumnFrozen()
+    XCTAssertTrue(vm.isFirstColumnFrozen)
+
+    XCTAssertTrue(vm.isDataBarsEnabled)
+    vm.toggleSheetDataBars()
+    XCTAssertFalse(vm.isDataBarsEnabled)
+
+    vm.selectedPivotAggregation = .average
+    XCTAssertEqual(vm.selectedPivotAggregation, .average)
+    vm.executeRibbonCommand("sheet-mod-pivot")
+    XCTAssertGreaterThan(vm.lastPivotGrandTotal, 0)
+
+    vm.isChartPanelVisible = false
+    vm.executeRibbonCommand("sheet-insert-shape")
+    XCTAssertTrue(vm.isChartPanelVisible)
+  }
+
+  // MARK: - 12. Slide Master Theme, Element Alignment, Duplicate/Delete, Speaker Notes & Z-Order Normalization
+
+  func testSlideMasterThemeElementAlignmentDuplicateDeleteSpeakerNotesAndZOrderNormalization()
+    throws
+  {
+    let vm = WorkspaceViewModel()
+    let slideTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .slide }))
+    vm.activeTabID = slideTab.id
+
+    // Apply deck master theme
+    vm.applyThemeToActiveDeck(.corporateNavy)
+    if case .slide(let deck) = vm.activeTab?.payload {
+      XCTAssertEqual(deck.deckTheme, .corporateNavy)
+      for elem in deck.slides[0].elements {
+        XCTAssertEqual(elem.fillHex, SlideDeckTheme.corporateNavy.primaryFillHex)
+        XCTAssertEqual(elem.strokeHex, SlideDeckTheme.corporateNavy.accentBorderHex)
+      }
+    }
+
+    // Duplicate element & align elements
+    let countBeforeDup: Int = {
+      if case .slide(let deck) = vm.activeTab?.payload { return deck.slides[0].elements.count }
+      return 0
+    }()
+    vm.duplicateActiveSlideElement()
+    vm.duplicateActiveSlideElement()
+    if case .slide(let deck) = vm.activeTab?.payload {
+      XCTAssertEqual(deck.slides[0].elements.count, countBeforeDup + 2)
+    }
+
+    vm.alignSlideElements(.alignLeft)
+    vm.alignSlideElements(.alignCenter)
+    vm.alignSlideElements(.alignRight)
+    vm.alignSlideElements(.distributeHorizontally)
+
+    // Move Z-Order and verify strictly monotonic zIndex (0, 1, 2, ...)
+    if case .slide(let deckBeforeZ) = vm.activeTab?.payload,
+      let firstElemID = deckBeforeZ.slides[0].elements.first?.id
+    {
+      vm.moveSlideElementZOrder(slideIndex: 0, elementID: firstElemID, bringForward: true)
+      if case .slide(let deckAfterZ) = vm.activeTab?.payload {
+        for (idx, elem) in deckAfterZ.slides[0].elements.enumerated() {
+          XCTAssertEqual(elem.zIndex, idx, "Expected monotonic zIndex at index \(idx)")
+        }
+      }
+    }
+
+    // Delete active slide element
+    let countBeforeDel: Int = {
+      if case .slide(let deck) = vm.activeTab?.payload { return deck.slides[0].elements.count }
+      return 0
+    }()
+    vm.deleteActiveSlideElement()
+    if case .slide(let deck) = vm.activeTab?.payload {
+      XCTAssertEqual(deck.slides[0].elements.count, countBeforeDel - 1)
+    }
+
+    // Update active slide speaker notes
+    vm.updateActiveSlideSpeakerNotes("핵심 발표자 스크립트 메모")
+    if case .slide(let deck) = vm.activeTab?.payload {
+      XCTAssertEqual(deck.slides[0].speakerNotes, "핵심 발표자 스크립트 메모")
+    }
+  }
+
+  // MARK: - 13. PDF Approval Stamp Presets & Bookmark Outline Lifecycle
+
+  func testPDFApprovalStampPresetsAndBookmarkOutlineLifecycle() throws {
+    let vm = WorkspaceViewModel()
+    let pdfTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .pdf }))
+    vm.activeTabID = pdfTab.id
+    vm.selectedPDFPageIndex = 0
+
+    for preset in [
+      "승인 (APPROVED)", "대외비 (CONFIDENTIAL)", "검토필 (REVIEWED)", "긴급 (URGENT)",
+    ] {
+      vm.addStampToActivePDFPage(preset: preset)
+    }
+
+    if case .pdf(let pdf) = vm.activeTab?.payload {
+      let stamps = pdf.annotations.filter { $0.kind == .stamp }
+      XCTAssertGreaterThanOrEqual(stamps.count, 4)
+      XCTAssertTrue(stamps.contains(where: { $0.content.contains("[결재 스탬프] 승인 (APPROVED)") }))
+      XCTAssertTrue(stamps.contains(where: { $0.content.contains("[결재 스탬프] 긴급 (URGENT)") }))
+    }
+
+    // Add & remove bookmark
+    vm.bookmarkTitleDraft = "1장 아키텍처 개요"
+    vm.addBookmarkToActivePDF()
+    var addedBookmarkID: UUID?
+    if case .pdf(let pdf) = vm.activeTab?.payload {
+      let node = try XCTUnwrap(pdf.outline.last(where: { $0.title == "1장 아키텍처 개요" }))
+      addedBookmarkID = node.id
+      XCTAssertEqual(node.targetPageNumber, 1)
+    }
+
+    let bmID = try XCTUnwrap(addedBookmarkID)
+    vm.removeBookmarkFromActivePDF(id: bmID)
+    if case .pdf(let pdf) = vm.activeTab?.payload {
+      XCTAssertFalse(pdf.outline.contains(where: { $0.id == bmID }))
+    }
+  }
 }

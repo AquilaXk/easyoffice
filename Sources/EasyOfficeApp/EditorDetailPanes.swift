@@ -205,7 +205,7 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       if run.isStrikethrough {
         attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
       }
-      if let bgHex = run.backgroundHex, let bgColor = nsColorFromHex(bgHex) {
+      if let bgHex = run.backgroundHex, let bgColor = resolveOptionalNSColor(bgHex) {
         attrs[.backgroundColor] = bgColor
       }
       if let link = run.linkURL,
@@ -218,6 +218,110 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       result.append(NSAttributedString(string: run.text, attributes: attrs))
     }
     return result
+  }
+}
+
+/// Korean 200-Character Manuscript Grid Paper View (`20×10 = 200자` 원고지 격자 뷰) with traditional reddish-amber borders and inter-row spacing strips.
+public struct HWPManuscriptGridPaperView: View {
+  public let document: OfficeDocumentModel
+  public let palette: WorkspaceThemePalette
+
+  public init(document: OfficeDocumentModel, palette: WorkspaceThemePalette) {
+    self.document = document
+    self.palette = palette
+  }
+
+  private var manuscriptPages: [[String]] {
+    let rawText = document.paragraphs.map(\.text).joined(separator: "\n")
+    var cells: [String] = []
+    for ch in rawText {
+      if ch == "\n" {
+        let remainder = cells.count % 20
+        if remainder != 0 {
+          let padCount = 20 - remainder
+          for _ in 0..<padCount {
+            cells.append(" ")
+          }
+        }
+      } else {
+        cells.append(String(ch))
+      }
+    }
+    if cells.isEmpty {
+      cells = Array(repeating: " ", count: 200)
+    }
+    var pages: [[String]] = []
+    var offset = 0
+    let maxPages = 16
+    while offset < cells.count && pages.count < maxPages {
+      let end = min(cells.count, offset + 200)
+      var slice = Array(cells[offset..<end])
+      if slice.count < 200 {
+        slice.append(contentsOf: Array(repeating: " ", count: 200 - slice.count))
+      }
+      pages.append(slice)
+      offset += 200
+    }
+    return pages
+  }
+
+  public var body: some View {
+    let pages = manuscriptPages
+    let gridStrokeColor = EasyOfficeDesignTokens.resolveHexColor(
+      palette.isDark ? "#D97706" : "#C84B31",
+      fallback: palette.border.swiftUIColor
+    )
+
+    VStack(alignment: .leading, spacing: 18) {
+      ForEach(Array(pages.enumerated()), id: \.offset) { pageIdx, pageCells in
+        VStack(alignment: .leading, spacing: 6) {
+          HStack {
+            Label(
+              "원고지 \(pageIdx + 1)매 / 총 \(pages.count)매 (20×10 = 200자)",
+              systemImage: "squareshape.split.3x3"
+            )
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(gridStrokeColor)
+
+            Spacer()
+
+            Text(document.title)
+              .font(.system(size: 10, weight: .medium))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+          }
+
+          VStack(spacing: 3) {
+            ForEach(0..<10, id: \.self) { rowIdx in
+              HStack(spacing: 0) {
+                ForEach(0..<20, id: \.self) { colIdx in
+                  let cellIdx = rowIdx * 20 + colIdx
+                  let ch = pageCells.indices.contains(cellIdx) ? pageCells[cellIdx] : " "
+                  Text(ch)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(palette.primaryText.swiftUIColor)
+                    .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
+                    .background(palette.cardSurface.swiftUIColor)
+                    .overlay(
+                      Rectangle()
+                        .stroke(gridStrokeColor.opacity(0.65), lineWidth: 0.7)
+                    )
+                }
+              }
+              .overlay(
+                Rectangle()
+                  .stroke(gridStrokeColor, lineWidth: 1.0)
+              )
+            }
+          }
+          .padding(8)
+          .background(palette.elevatedSurface.swiftUIColor)
+          .overlay(
+            RoundedRectangle(cornerRadius: 4)
+              .stroke(gridStrokeColor, lineWidth: 1.6)
+          )
+        }
+      }
+    }
   }
 }
 
@@ -266,7 +370,7 @@ public struct DocumentEditorDetailPaneView: View {
     let tocEntries = document.generateTableOfContents()
     let mailMergePreviewLine = firstMailMergePreviewLine()
     let colCount = document.sections.first?.columnCount ?? 1
-    let totalPages = max(1, document.sections.count)
+    let totalPages = document.estimatedPageCount
     let resolvedHeaderText = OfficeDocumentModel.resolvePageTokens(
       in: document.headerText,
       pageNumber: 1,
@@ -287,10 +391,10 @@ public struct DocumentEditorDetailPaneView: View {
       HStack(spacing: 8) {
         Label(document.paperSize.rawValue, systemImage: "doc.richtext")
           .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+          .foregroundStyle(palette.accentBadgeText.swiftUIColor)
           .padding(.horizontal, 8)
           .padding(.vertical, 4)
-          .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
+          .background(palette.selectedSurface.swiftUIColor)
           .clipShape(RoundedRectangle(cornerRadius: 5))
 
         if document.trackChangesEnabled {
@@ -299,8 +403,22 @@ public struct DocumentEditorDetailPaneView: View {
             .foregroundStyle(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
+            .background(palette.subtleAccentSurface.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+
+        if isPrimaryPane {
+          Button {
+            viewModel.toggleManuscriptGridMode()
+          } label: {
+            Label(
+              viewModel.isManuscriptGridModeEnabled ? "일반 페이지 보기" : "200자 원고지 격자 보기",
+              systemImage: "squareshape.split.3x3"
+            )
+            .font(.system(size: 11, weight: .semibold))
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
         }
 
         Spacer()
@@ -473,9 +591,120 @@ public struct DocumentEditorDetailPaneView: View {
         .padding(.vertical, 6)
         .background(palette.cardSurface.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 6))
+
+        // Paragraph Alignment, Line Spacing, Multi-Level List & Mail Merge Formatting Bar
+        HStack(spacing: 6) {
+          Label("문단·목록·머지", systemImage: "text.alignleft")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+
+          HStack(spacing: 3) {
+            Button("좌") {
+              viewModel.setActiveParagraphAlignment(.leading)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("중") {
+              viewModel.setActiveParagraphAlignment(.center)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("우") {
+              viewModel.setActiveParagraphAlignment(.trailing)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("양쪽") {
+              viewModel.setActiveParagraphAlignment(.justified)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          }
+
+          Divider().frame(height: 14)
+
+          HStack(spacing: 3) {
+            ForEach([100.0, 115.0, 160.0, 200.0], id: \.self) { pct in
+              Button("\(Int(pct))%") {
+                viewModel.setActiveParagraphLineSpacing(pct)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.mini)
+            }
+          }
+
+          Divider().frame(height: 14)
+
+          HStack(spacing: 3) {
+            Button("• 글머리") {
+              viewModel.setActiveParagraphListKind(.bullet)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("1. 번호") {
+              viewModel.setActiveParagraphListKind(.numbered)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("가. 공문서") {
+              viewModel.setActiveParagraphListKind(.koreanOfficial)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("수준 +") {
+              let currentKind =
+                document.paragraphs.first(where: { $0.id == viewModel.selectedParagraphID })?
+                .listKind ?? .numbered
+              let resolvedKind = currentKind == .none ? .numbered : currentKind
+              viewModel.setActiveParagraphListKind(resolvedKind, levelDelta: 1)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("수준 -") {
+              let currentKind =
+                document.paragraphs.first(where: { $0.id == viewModel.selectedParagraphID })?
+                .listKind ?? .numbered
+              viewModel.setActiveParagraphListKind(currentKind, levelDelta: -1)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          }
+
+          Divider().frame(height: 14)
+
+          TextField("머지 키 (수신처)", text: $viewModel.mailMergeFieldKeyDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11))
+            .frame(width: 84)
+
+          TextField("머지 값", text: $viewModel.mailMergeFieldValueDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11))
+            .frame(width: 96)
+
+          Button("메일 머지 치환") {
+            viewModel.applyMailMergeFieldReplacement()
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .controlSize(.small)
+
+          Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(palette.cardSurface.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
       }
 
-      // Page Canvas Card with Diagonal Watermark Overlay & Multi-Column DTP Layout
+      // Page Canvas Card with Diagonal Watermark Overlay & Multi-Column DTP Layout or 200-Char Manuscript Grid
       ZStack {
         VStack(alignment: .leading, spacing: 14) {
           HStack {
@@ -484,58 +713,79 @@ public struct DocumentEditorDetailPaneView: View {
               .foregroundStyle(palette.secondaryText.swiftUIColor)
             Spacer()
             Text(
-              "단 구성: \(colCount)단 · \(document.sections.first?.orientation.rawValue ?? PageOrientation.portrait.rawValue)"
+              "단 구성: \(colCount)단 · \(document.sections.first?.orientation.rawValue ?? PageOrientation.portrait.rawValue) · 총 \(totalPages)쪽"
             )
             .font(.system(size: 11))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
           }
           Divider()
 
-          // Auto Table of Contents Summary Box
-          if !tocEntries.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-              Text("자동 생성 목차 (TOC)")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
-              ForEach(Array(tocEntries.enumerated()), id: \.element.paragraphID) { idx, entry in
-                Text("\(idx + 1). \(entry.title)")
-                  .font(.system(size: 11))
-                  .padding(.leading, CGFloat((entry.level - 1) * 12))
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
-              }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.elevatedSurface.swiftUIColor)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-          }
-
-          // 1-Column or Genuine Side-by-Side 2-Column DTP Page Layout
-          if colCount >= 2 && document.paragraphs.count >= 2 {
-            let midIndex = (document.paragraphs.count + 1) / 2
-            let leftColumnParagraphs = Array(document.paragraphs.prefix(midIndex))
-            let rightColumnParagraphs = Array(document.paragraphs.dropFirst(midIndex))
-
-            HStack(alignment: .top, spacing: 24) {
-              VStack(alignment: .leading, spacing: 12) {
-                ForEach(leftColumnParagraphs) { paragraph in
-                  paragraphBlockView(for: paragraph, palette: palette)
-                }
-              }
-              .frame(maxWidth: .infinity, alignment: .leading)
-
-              Divider()
-
-              VStack(alignment: .leading, spacing: 12) {
-                ForEach(rightColumnParagraphs) { paragraph in
-                  paragraphBlockView(for: paragraph, palette: palette)
-                }
-              }
-              .frame(maxWidth: .infinity, alignment: .leading)
-            }
+          if viewModel.isManuscriptGridModeEnabled {
+            HWPManuscriptGridPaperView(document: document, palette: palette)
           } else {
-            ForEach(document.paragraphs) { paragraph in
-              paragraphBlockView(for: paragraph, palette: palette)
+            // Auto Table of Contents Summary Box
+            if !tocEntries.isEmpty {
+              VStack(alignment: .leading, spacing: 4) {
+                Text("자동 생성 목차 (TOC)")
+                  .font(.system(size: 11, weight: .bold))
+                  .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+                ForEach(Array(tocEntries.enumerated()), id: \.element.paragraphID) { idx, entry in
+                  Button {
+                    viewModel.selectedParagraphID = entry.paragraphID
+                    viewModel.updateSelectedParagraphSelection(
+                      paragraphID: entry.paragraphID,
+                      utf16Range: nil
+                    )
+                  } label: {
+                    HStack(spacing: 4) {
+                      Text("\(idx + 1). \(entry.title)")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.leading, CGFloat((entry.level - 1) * 12))
+                        .foregroundStyle(
+                          viewModel.selectedParagraphID == entry.paragraphID
+                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                            : palette.secondaryText.swiftUIColor
+                        )
+                      Spacer()
+                    }
+                  }
+                  .buttonStyle(.plain)
+                }
+              }
+              .padding(10)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(palette.elevatedSurface.swiftUIColor)
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            // 1-Column or Genuine Side-by-Side 2-Column DTP Page Layout
+            if colCount >= 2 && document.paragraphs.count >= 2 {
+              let midIndex = (document.paragraphs.count + 1) / 2
+              let leftColumnParagraphs = Array(document.paragraphs.enumerated().prefix(midIndex))
+              let rightColumnParagraphs = Array(
+                document.paragraphs.enumerated().dropFirst(midIndex))
+
+              HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 12) {
+                  ForEach(leftColumnParagraphs, id: \.element.id) { idx, paragraph in
+                    paragraphBlockView(for: paragraph, paragraphIndex: idx, palette: palette)
+                  }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                  ForEach(rightColumnParagraphs, id: \.element.id) { idx, paragraph in
+                    paragraphBlockView(for: paragraph, paragraphIndex: idx, palette: palette)
+                  }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+              }
+            } else {
+              ForEach(Array(document.paragraphs.enumerated()), id: \.element.id) { idx, paragraph in
+                paragraphBlockView(for: paragraph, paragraphIndex: idx, palette: palette)
+              }
             }
           }
 
@@ -545,7 +795,7 @@ public struct DocumentEditorDetailPaneView: View {
             VStack(alignment: .leading, spacing: 8) {
               Label("수식 블록 개체 (\(document.equations.count)건)", systemImage: "function")
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+                .foregroundStyle(palette.accentBadgeText.swiftUIColor)
 
               ForEach(document.equations) { eq in
                 VStack(alignment: .leading, spacing: 6) {
@@ -579,7 +829,7 @@ public struct DocumentEditorDetailPaneView: View {
                 .background(palette.elevatedSurface.swiftUIColor)
                 .overlay(
                   RoundedRectangle(cornerRadius: 6)
-                    .stroke(EasyOfficeDesignTokens.brand200.swiftUIColor, lineWidth: 1)
+                    .stroke(palette.border.swiftUIColor, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 6))
               }
@@ -595,7 +845,7 @@ public struct DocumentEditorDetailPaneView: View {
                 systemImage: "photo.on.rectangle.angled"
               )
               .font(.system(size: 11, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+              .foregroundStyle(palette.accentBadgeText.swiftUIColor)
 
               ForEach(document.images) { img in
                 imageWrapCardView(for: img, palette: palette)
@@ -618,7 +868,7 @@ public struct DocumentEditorDetailPaneView: View {
                     "각주 (Footnotes · \(footnoteItems.count)건)", systemImage: "character.textbox"
                   )
                   .font(.system(size: 10, weight: .bold))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+                  .foregroundStyle(palette.accentBadgeText.swiftUIColor)
                   ForEach(footnoteItems) { note in
                     Text("각주 \(note.number)) \(note.text)")
                       .font(.system(size: 10))
@@ -661,7 +911,7 @@ public struct DocumentEditorDetailPaneView: View {
                 .lineLimit(1)
             }
             .padding(8)
-            .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
+            .background(palette.subtleAccentSurface.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 6))
           }
 
@@ -779,10 +1029,19 @@ public struct DocumentEditorDetailPaneView: View {
         font = font.italic()
       }
       segment.font = font
-      segment.foregroundColor =
-        resolveOptionalHexColor(run.foregroundHex) ?? palette.primaryText.swiftUIColor
-      if let bgHex = run.backgroundHex, let bgColor = resolveOptionalHexColor(bgHex) {
-        segment.backgroundColor = bgColor
+      if let fgHex = run.foregroundHex {
+        segment.foregroundColor = EasyOfficeDesignTokens.resolveHexColor(
+          fgHex,
+          fallback: palette.primaryText.swiftUIColor
+        )
+      } else {
+        segment.foregroundColor = palette.primaryText.swiftUIColor
+      }
+      if let bgHex = run.backgroundHex {
+        segment.backgroundColor = EasyOfficeDesignTokens.resolveHexColor(
+          bgHex,
+          fallback: palette.elevatedSurface.swiftUIColor
+        )
       }
       if run.isUnderlined || hasLink {
         segment.underlineStyle = .single
@@ -796,21 +1055,36 @@ public struct DocumentEditorDetailPaneView: View {
   }
 
   @ViewBuilder
-  private func paragraphRow(for paragraph: ParagraphBlock, palette: WorkspaceThemePalette)
-    -> some View
-  {
+  private func paragraphRow(
+    for paragraph: ParagraphBlock,
+    paragraphIndex: Int,
+    palette: WorkspaceThemePalette
+  ) -> some View {
     let lineSpacingMultiple = max(0.8, paragraph.lineSpacingPercent / 100.0)
-    Text(buildRichParagraphAttributedText(for: paragraph, palette: palette))
-      .lineSpacing(CGFloat(max(0.0, (lineSpacingMultiple - 1.0) * paragraph.fontSizePt)))
-      .padding(.leading, CGFloat(max(0.0, paragraph.leftIndentPt)))
-      .frame(maxWidth: .infinity, alignment: swiftUIAlignment(for: paragraph.alignment))
+    let listPrefix = document.formattedListPrefix(forParagraphAt: paragraphIndex)
+    let listIndentPt = paragraph.listKind == .none ? 0.0 : CGFloat(paragraph.listLevel) * 18.0
+
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      if let listPrefix {
+        Text(listPrefix)
+          .font(.system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced))
+          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+      }
+      Text(buildRichParagraphAttributedText(for: paragraph, palette: palette))
+        .lineSpacing(CGFloat(max(0.0, (lineSpacingMultiple - 1.0) * paragraph.fontSizePt)))
+        .frame(maxWidth: .infinity, alignment: swiftUIAlignment(for: paragraph.alignment))
+    }
+    .padding(.leading, CGFloat(max(0.0, paragraph.leftIndentPt)) + listIndentPt)
   }
 
   @ViewBuilder
-  private func paragraphBlockView(for paragraph: ParagraphBlock, palette: WorkspaceThemePalette)
-    -> some View
-  {
+  private func paragraphBlockView(
+    for paragraph: ParagraphBlock,
+    paragraphIndex: Int,
+    palette: WorkspaceThemePalette
+  ) -> some View {
     let isSelectedParagraph = viewModel.selectedParagraphID == paragraph.id
+    let listPrefix = document.formattedListPrefix(forParagraphAt: paragraphIndex)
     let hasRichRuns =
       paragraph.runs.count > 1
       || paragraph.runs.contains {
@@ -822,6 +1096,15 @@ public struct DocumentEditorDetailPaneView: View {
         Text(paragraph.style.rawValue)
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        if let listPrefix {
+          Text("목록 \(listPrefix)")
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(palette.subtleAccentSurface.swiftUIColor)
+            .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
         if paragraph.isBold {
           Text("B").font(.system(size: 9, weight: .bold))
         }
@@ -841,8 +1124,8 @@ public struct DocumentEditorDetailPaneView: View {
             .font(.system(size: 9, weight: .semibold))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
-            .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+            .background(palette.selectedSurface.swiftUIColor)
+            .foregroundStyle(palette.accentBadgeText.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
         if isSelectedParagraph, let r = viewModel.selectedParagraphUTF16Range, !r.isEmpty {
@@ -859,21 +1142,32 @@ public struct DocumentEditorDetailPaneView: View {
 
       if isPrimaryPane {
         if isSelectedParagraph {
-          SelectableParagraphTextView(
-            viewModel: viewModel,
-            paragraph: paragraph,
-            palette: palette
-          )
-          .frame(minHeight: 36, maxHeight: 76)
+          HStack(alignment: .top, spacing: 6) {
+            if let listPrefix {
+              Text(listPrefix)
+                .font(
+                  .system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced)
+                )
+                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .padding(.leading, CGFloat(paragraph.listLevel) * 18.0)
+                .padding(.top, 4)
+            }
+            SelectableParagraphTextView(
+              viewModel: viewModel,
+              paragraph: paragraph,
+              palette: palette
+            )
+            .frame(minHeight: 36, maxHeight: 76)
+          }
         } else {
-          paragraphRow(for: paragraph, palette: palette)
+          paragraphRow(for: paragraph, paragraphIndex: paragraphIndex, palette: palette)
             .contentShape(Rectangle())
             .onTapGesture {
               viewModel.updateSelectedParagraphSelection(paragraphID: paragraph.id, utf16Range: nil)
             }
         }
       } else {
-        paragraphRow(for: paragraph, palette: palette)
+        paragraphRow(for: paragraph, paragraphIndex: paragraphIndex, palette: palette)
       }
 
       if hasRichRuns {
@@ -881,11 +1175,19 @@ public struct DocumentEditorDetailPaneView: View {
           HStack(spacing: 4) {
             ForEach(paragraph.effectiveRuns) { run in
               let runColor =
-                resolveOptionalHexColor(run.foregroundHex)
-                ?? palette.primaryText.swiftUIColor
+                run.foregroundHex.map {
+                  EasyOfficeDesignTokens.resolveHexColor(
+                    $0,
+                    fallback: palette.primaryText.swiftUIColor
+                  )
+                } ?? palette.primaryText.swiftUIColor
               let bgColor =
-                resolveOptionalHexColor(run.backgroundHex)
-                ?? palette.elevatedSurface.swiftUIColor
+                run.backgroundHex.map {
+                  EasyOfficeDesignTokens.resolveHexColor(
+                    $0,
+                    fallback: palette.elevatedSurface.swiftUIColor
+                  )
+                } ?? palette.elevatedSurface.swiftUIColor
               let hasLink = !(run.linkURL ?? "").isEmpty
               Text(hasLink ? "\(run.text) [🔗]" : run.text)
                 .font(.system(size: run.fontSizePt ?? 11.0, weight: run.isBold ? .bold : .regular))
@@ -904,7 +1206,7 @@ public struct DocumentEditorDetailPaneView: View {
     }
     .padding(isSelectedParagraph ? 6 : 2)
     .background(
-      isSelectedParagraph ? EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.6) : Color.clear
+      isSelectedParagraph ? palette.subtleAccentSurface.swiftUIColor : Color.clear
     )
     .clipShape(RoundedRectangle(cornerRadius: 6))
   }
@@ -928,7 +1230,7 @@ public struct DocumentEditorDetailPaneView: View {
           .font(.system(size: 22))
           .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
           .frame(width: 60, height: 48)
-          .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
+          .background(palette.selectedSurface.swiftUIColor)
           .clipShape(RoundedRectangle(cornerRadius: 6))
       }
     }
@@ -942,8 +1244,8 @@ public struct DocumentEditorDetailPaneView: View {
           .font(.system(size: 9, weight: .semibold))
           .padding(.horizontal, 6)
           .padding(.vertical, 2)
-          .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
-          .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+          .background(palette.selectedSurface.swiftUIColor)
+          .foregroundStyle(palette.accentBadgeText.swiftUIColor)
           .clipShape(RoundedRectangle(cornerRadius: 4))
       }
       if !img.caption.isEmpty {
@@ -1032,8 +1334,8 @@ public struct DocumentEditorDetailPaneView: View {
             .font(.system(size: 9, weight: .bold))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(EasyOfficeDesignTokens.brand100.swiftUIColor)
-            .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+            .background(palette.selectedSurface.swiftUIColor)
+            .foregroundStyle(palette.accentBadgeText.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
 
@@ -1041,6 +1343,28 @@ public struct DocumentEditorDetailPaneView: View {
 
         if isPrimaryPane {
           HStack(spacing: 4) {
+            Button("표 병합") {
+              viewModel.mergeActiveDocumentTableCells(tableIndex: tableIndex)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
+            Button("표 분할") {
+              viewModel.splitActiveDocumentTableCell(tableIndex: tableIndex)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+            .disabled(table.cellSpans.isEmpty)
+
+            Button("테두리") {
+              let allStyles = TableCellBorderStyle.allCases
+              let currentIdx = allStyles.firstIndex(of: table.borderStyle) ?? 0
+              let nextStyle = allStyles[(currentIdx + 1) % allStyles.count]
+              viewModel.setActiveDocumentTableBorderStyle(nextStyle, tableIndex: tableIndex)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+
             Button("+행") {
               viewModel.insertRowInDocumentTable(tableIndex: tableIndex)
             }
@@ -1076,7 +1400,7 @@ public struct DocumentEditorDetailPaneView: View {
             .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
+            .background(palette.subtleAccentSurface.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 4))
         }
       }
@@ -1090,7 +1414,7 @@ public struct DocumentEditorDetailPaneView: View {
               let isHeader = rowIdx == 0 && table.hasHeaderRow
               let cellBg =
                 isHeader
-                ? EasyOfficeDesignTokens.brand100.swiftUIColor
+                ? palette.selectedSurface.swiftUIColor
                 : palette.elevatedSurface.swiftUIColor
               HStack(spacing: 4) {
                 if isPrimaryPane {
@@ -1110,11 +1434,19 @@ public struct DocumentEditorDetailPaneView: View {
                   )
                   .textFieldStyle(.plain)
                   .font(.system(size: 12, weight: isHeader ? .bold : .regular))
-                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                  .foregroundStyle(
+                    isHeader
+                      ? palette.accentBadgeText.swiftUIColor
+                      : palette.primaryText.swiftUIColor
+                  )
                 } else {
                   Text(cell)
                     .font(.system(size: 12, weight: isHeader ? .bold : .regular))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
+                    .foregroundStyle(
+                      isHeader
+                        ? palette.accentBadgeText.swiftUIColor
+                        : palette.primaryText.swiftUIColor
+                    )
                 }
                 Spacer(minLength: 0)
                 if let span, span.rowSpan > 1 || span.columnSpan > 1 {
@@ -1122,8 +1454,8 @@ public struct DocumentEditorDetailPaneView: View {
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
-                    .background(EasyOfficeDesignTokens.brand50.swiftUIColor)
-                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .background(palette.subtleAccentSurface.swiftUIColor)
+                    .foregroundStyle(palette.accentBadgeText.swiftUIColor)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
               }
@@ -1184,28 +1516,12 @@ public struct DocumentEditorDetailPaneView: View {
   }
 }
 
-func resolveOptionalHexColor(_ hex: String?) -> Color? {
-  guard let hex else { return nil }
-  let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(
-    of: "#", with: "")
-  guard cleaned.count == 6, let rgb = UInt32(cleaned, radix: 16) else { return nil }
-  let r = UInt8((rgb >> 16) & 0xFF)
-  let g = UInt8((rgb >> 8) & 0xFF)
-  let b = UInt8(rgb & 0xFF)
-  return RGBColorToken(red: r, green: g, blue: b, hex: "#\(cleaned.uppercased())").swiftUIColor
-}
-
 func resolveOptionalNSColor(_ hex: String?) -> NSColor? {
-  guard let hex else { return nil }
-  let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(
-    of: "#", with: "")
-  guard cleaned.count == 6, let rgb = UInt32(cleaned, radix: 16) else { return nil }
-  let r = CGFloat((rgb >> 16) & 0xFF) / 255.0
-  let g = CGFloat((rgb >> 8) & 0xFF) / 255.0
-  let b = CGFloat(rgb & 0xFF) / 255.0
-  return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
-}
-
-func nsColorFromHex(_ hex: String) -> NSColor? {
-  resolveOptionalNSColor(hex)
+  guard let hex, let rgb = EasyOfficeDesignTokens.parseHexRGB(hex) else { return nil }
+  return NSColor(
+    srgbRed: CGFloat(rgb.r) / 255.0,
+    green: CGFloat(rgb.g) / 255.0,
+    blue: CGFloat(rgb.b) / 255.0,
+    alpha: 1.0
+  )
 }
