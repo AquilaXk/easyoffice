@@ -411,6 +411,7 @@ public struct SheetEditorDetailPaneView: View {
                                 let isCondHighlighted = viewModel.activeConditionalFormatRule?.matches(evaluated) ?? false
 
                                 Button {
+                                    guard isPrimaryPane else { return }
                                     viewModel.selectedSheetCell = addr
                                     viewModel.formulaBarDraft = sheet.rawValue(at: addr)
                                 } label: {
@@ -530,10 +531,12 @@ public struct SlideEditorDetailPaneView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
     let deck: PresentationDeckModel
+    let isPrimaryPane: Bool
 
-    public init(viewModel: WorkspaceViewModel, deck: PresentationDeckModel) {
+    public init(viewModel: WorkspaceViewModel, deck: PresentationDeckModel, isPrimaryPane: Bool = true) {
         self.viewModel = viewModel
         self.deck = deck
+        self.isPrimaryPane = isPrimaryPane
     }
 
     public var body: some View {
@@ -552,17 +555,19 @@ public struct SlideEditorDetailPaneView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
                 Spacer()
-                Button {
-                    viewModel.isPresenterModeActive.toggle()
-                } label: {
-                    Label(
-                        viewModel.isPresenterModeActive ? "발표자 도구 닫기" : "발표자 도구 미리보기",
-                        systemImage: "play.display"
-                    )
-                    .font(.system(size: 11, weight: .semibold))
+                if isPrimaryPane {
+                    Button {
+                        viewModel.isPresenterModeActive.toggle()
+                    } label: {
+                        Label(
+                            viewModel.isPresenterModeActive ? "발표자 도구 닫기" : "발표자 도구 미리보기",
+                            systemImage: "play.display"
+                        )
+                        .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
             }
 
             HStack(alignment: .top, spacing: 14) {
@@ -571,6 +576,7 @@ public struct SlideEditorDetailPaneView: View {
                     ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
                         let isSelected = idx == activeIdx
                         Button {
+                            guard isPrimaryPane else { return }
                             viewModel.selectedSlideIndex = idx
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
@@ -631,7 +637,7 @@ public struct SlideEditorDetailPaneView: View {
 
                             Spacer()
 
-                            if let firstElem = slide.elements.first {
+                            if isPrimaryPane, let firstElem = slide.elements.first {
                                 HStack(spacing: 4) {
                                     Button("◀") {
                                         viewModel.moveSlideElement(slideIndex: activeIdx, elementID: firstElem.id, deltaX: -20, deltaY: 0)
@@ -723,12 +729,14 @@ public struct SlideEditorDetailPaneView: View {
                                     )
                                 }
 
-                                // Positioned Slide Canvas Elements
+                                // Positioned Slide Canvas Elements with fillHex, strokeHex, and rotationDegrees
                                 ForEach(slide.elements) { element in
                                     let elemW = max(90.0, CGFloat(element.width) * scaleX)
                                     let elemH = max(50.0, CGFloat(element.height) * scaleY)
                                     let centerX = CGFloat(element.centerX) * scaleX
                                     let centerY = CGFloat(element.centerY) * scaleY
+                                    let fillColor = resolveHexColor(element.fillHex, fallback: EasyOfficeDesignTokens.brand50)
+                                    let strokeColor = resolveHexColor(element.strokeHex, fallback: EasyOfficeDesignTokens.brand600)
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(element.title)
@@ -741,12 +749,13 @@ public struct SlideEditorDetailPaneView: View {
                                     }
                                     .padding(8)
                                     .frame(width: elemW, height: elemH, alignment: .leading)
-                                    .background(EasyOfficeDesignTokens.brand50.swiftUIColor.opacity(0.95))
+                                    .background(fillColor.opacity(0.95))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 6)
-                                            .stroke(EasyOfficeDesignTokens.brand600.swiftUIColor, lineWidth: 1.5)
+                                            .stroke(strokeColor, lineWidth: 1.5)
                                     )
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .rotationEffect(.degrees(element.rotationDegrees))
                                     .position(x: centerX, y: centerY)
                                 }
                             }
@@ -766,7 +775,7 @@ public struct SlideEditorDetailPaneView: View {
                 }
             }
 
-            if viewModel.isPresenterModeActive {
+            if isPrimaryPane, viewModel.isPresenterModeActive {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("발표자 모니터 · 진행률 \(Int(presenterSession.progressFraction * 100))% · 경과 \(presenterSession.elapsedSeconds)초")
@@ -805,6 +814,17 @@ public struct SlideEditorDetailPaneView: View {
             }
         }
     }
+
+    private func resolveHexColor(_ hex: String, fallback: RGBColorToken) -> Color {
+        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        guard cleaned.count == 6, let rgb = UInt32(cleaned, radix: 16) else {
+            return fallback.swiftUIColor
+        }
+        let r = UInt8((rgb >> 16) & 0xFF)
+        let g = UInt8((rgb >> 8) & 0xFF)
+        let b = UInt8(rgb & 0xFF)
+        return RGBColorToken(red: r, green: g, blue: b, hex: "#\(cleaned.uppercased())").swiftUIColor
+    }
 }
 
 /// Native AppKit `PDFKit.PDFView` wrapper rendering real ISO 32000-1 bytes generated by `PDFBinarySerializer`.
@@ -813,26 +833,41 @@ public struct PDFKitRepresentedView: NSViewRepresentable {
     public let currentPageIndex: Int
     public let zoomFactor: CGFloat
 
+    public final class Coordinator {
+        var lastPDFData: Data?
+    }
+
     public init(pdfData: Data, currentPageIndex: Int, zoomFactor: CGFloat = 1.0) {
         self.pdfData = pdfData
         self.currentPageIndex = currentPageIndex
         self.zoomFactor = zoomFactor
     }
 
+    public func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     public func makeNSView(context: Context) -> PDFView {
         let pdfView = PDFView()
-        pdfView.autoScales = true
+        pdfView.autoScales = false
         pdfView.displayMode = .singlePageContinuous
         pdfView.displaysPageBreaks = true
         pdfView.document = PDFDocument(data: pdfData)
+        pdfView.scaleFactor = max(0.25, min(4.0, zoomFactor))
+        context.coordinator.lastPDFData = pdfData
         return pdfView
     }
 
     public func updateNSView(_ pdfView: PDFView, context: Context) {
-        let doc = PDFDocument(data: pdfData)
-        pdfView.document = doc
+        if context.coordinator.lastPDFData != pdfData {
+            pdfView.document = PDFDocument(data: pdfData)
+            context.coordinator.lastPDFData = pdfData
+        }
+        pdfView.autoScales = false
         pdfView.scaleFactor = max(0.25, min(4.0, zoomFactor))
-        if let doc, currentPageIndex >= 0, currentPageIndex < doc.pageCount,
+        if let doc = pdfView.document,
+           currentPageIndex >= 0,
+           currentPageIndex < doc.pageCount,
            let page = doc.page(at: currentPageIndex) {
             pdfView.go(to: page)
         }
@@ -978,6 +1013,7 @@ public struct PDFStudioEditorDetailPaneView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .onTapGesture {
+                    guard isPrimaryPane else { return }
                     viewModel.selectedPDFPageIndex = idx
                 }
             }

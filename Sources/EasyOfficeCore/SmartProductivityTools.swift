@@ -1216,6 +1216,12 @@ public enum DocumentSecurityAuditor {
             verified = try FormatDetector.verify(data: data, fileName: fileName)
         } catch {
             isSignatureValid = false
+            if let officeError = error as? EasyOfficeError, case .corruptedContainer = officeError {
+                isSafeFromBombAndTraversal = false
+            }
+            if (try? XMLSanitizer.validateSafeXMLBytes(data)) == nil {
+                isSafeFromXXE = false
+            }
             let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             issues.append(desc)
             return SecurityAuditReport(
@@ -1239,15 +1245,14 @@ public enum DocumentSecurityAuditor {
                     let isXMLPayload = lowerPath.hasSuffix(".xml")
                         || lowerPath.hasSuffix(".rels")
                         || lowerPath.hasSuffix(".hpf")
-                    if let xmlText = String(data: entry.data, encoding: .utf8) {
-                        do {
-                            try XMLSanitizer.validateSafeXML(xmlText)
-                        } catch {
-                            isSafeFromXXE = false
-                            let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                            issues.append(desc)
-                        }
-                    } else if isXMLPayload {
+                    do {
+                        try XMLSanitizer.validateSafeXMLBytes(entry.data)
+                    } catch {
+                        isSafeFromXXE = false
+                        let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        issues.append(desc)
+                    }
+                    if isXMLPayload, String(data: entry.data, encoding: .utf8) == nil {
                         isSafeFromBombAndTraversal = false
                         issues.append("ZIP 내부 XML 엔트리가 유효한 UTF-8이 아닙니다: \(entry.path)")
                     }
@@ -1324,15 +1329,14 @@ public enum DocumentSecurityAuditor {
             }
 
         case .rtfText, .plainText:
-            if let text = String(data: data, encoding: .utf8), !data.contains(0x00) {
-                do {
-                    try XMLSanitizer.validateSafeXML(text)
-                } catch {
-                    isSafeFromXXE = false
-                    let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    issues.append(desc)
-                }
-            } else {
+            do {
+                try XMLSanitizer.validateSafeXMLBytes(data)
+            } catch {
+                isSafeFromXXE = false
+                let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                issues.append(desc)
+            }
+            if String(data: data, encoding: .utf8) == nil || data.contains(0x00) {
                 isSafeFromBombAndTraversal = false
                 issues.append("텍스트/RTF 컨테이너에 유효하지 않은 UTF-8 또는 NUL 바이트가 포함되어 있습니다.")
             }

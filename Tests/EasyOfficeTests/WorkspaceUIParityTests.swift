@@ -284,7 +284,7 @@ final class WorkspaceUIParityTests: XCTestCase {
     func testAll140RibbonCommandsUndoRedoFileIORoundTripAndCustomTemplatePersistence() throws {
         let vm = WorkspaceViewModel()
 
-        // 1. Verify all 140 RibbonCommandDescriptor IDs execute deterministically without a single no-op
+        // 1. Verify all 140 RibbonCommandDescriptor IDs execute deterministically and mutate domain or workspace state
         var executedCount = 0
         for module in OfficeModuleKind.allCases {
             guard let moduleTab = vm.openTabs.first(where: { $0.moduleKind == module }) else {
@@ -296,15 +296,48 @@ final class WorkspaceUIParityTests: XCTestCase {
                 XCTAssertEqual(actions.count, 4)
                 for cmd in actions {
                     vm.activeTabID = moduleTab.id
+                    let beforePayload = vm.activeTab?.payload
+                    let beforeTabCount = vm.openTabs.count
+                    let beforeTheme = vm.themeMode
+                    let beforeCollapsed = vm.isRibbonCollapsed
+                    let beforeSplit = vm.splitSecondaryTabID
+                    let beforeZoom = vm.zoomPercent
+                    let beforeChartKind = vm.selectedChartKind
+                    let beforeFrozen = vm.isHeaderRowFrozen
+                    let beforeCondRule = vm.activeConditionalFormatRule
+                    let beforeValRule = vm.activeDataValidationRule
+                    let beforePresenter = vm.isPresenterModeActive
+                    let beforeStatsCount = vm.reviewStatsRefreshCount
+
                     vm.lastExecutedCommandSummary = nil
                     vm.executeRibbonCommand(cmd.id)
-                    XCTAssertNotNil(
+
+                    let summary = try XCTUnwrap(
                         vm.lastExecutedCommandSummary,
                         "Ribbon command \(cmd.id) must update lastExecutedCommandSummary"
                     )
+                    XCTAssertFalse(summary.isEmpty, "Ribbon command \(cmd.id) summary must not be empty")
                     XCTAssertFalse(
-                        vm.lastExecutedCommandSummary?.isEmpty ?? true,
-                        "Ribbon command \(cmd.id) summary must not be empty"
+                        summary.hasPrefix("명령 실행:"),
+                        "Ribbon command \(cmd.id) must not fall through to catch-all summary"
+                    )
+
+                    let didMutateState = (vm.activeTab?.payload != beforePayload)
+                        || (vm.openTabs.count != beforeTabCount)
+                        || (vm.themeMode != beforeTheme)
+                        || (vm.isRibbonCollapsed != beforeCollapsed)
+                        || (vm.splitSecondaryTabID != beforeSplit)
+                        || (vm.zoomPercent != beforeZoom)
+                        || (vm.selectedChartKind != beforeChartKind)
+                        || (vm.isHeaderRowFrozen != beforeFrozen)
+                        || (vm.activeConditionalFormatRule != beforeCondRule)
+                        || (vm.activeDataValidationRule != beforeValRule)
+                        || (vm.isPresenterModeActive != beforePresenter)
+                        || (vm.reviewStatsRefreshCount != beforeStatsCount)
+
+                    XCTAssertTrue(
+                        didMutateState,
+                        "Ribbon command \(cmd.id) must produce a concrete domain or view-model state mutation"
                     )
                     executedCount += 1
                 }
@@ -373,6 +406,22 @@ final class WorkspaceUIParityTests: XCTestCase {
         let restoredFromTemplateTab = try XCTUnwrap(freshVM.activeTab)
         XCTAssertNotEqual(restoredFromTemplateTab.id, openedDocTab.id)
         XCTAssertEqual(restoredFromTemplateTab.payload, openedDocTab.payload)
+
+        // 5. Verify scrubActiveTabMetadata() and cross-format saveTabToDisk payload sync (F3, F4)
+        freshVM.activeTabID = restoredFromTemplateTab.id
+        freshVM.scrubActiveTabMetadata()
+        XCTAssertGreaterThan(freshVM.lastScrubbedMetadataCount, 0)
+
+        let tempPDFURL = FileManager.default.temporaryDirectory.appendingPathComponent("easyoffice_f4_sync_\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: tempPDFURL) }
+        try freshVM.saveTabToDisk(id: restoredFromTemplateTab.id, to: tempPDFURL, targetFormat: .pdf)
+        let syncedTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.id == restoredFromTemplateTab.id }))
+        XCTAssertEqual(syncedTab.format, .pdf)
+        if case let .pdf(convertedPDF) = syncedTab.payload {
+            XCTAssertGreaterThanOrEqual(convertedPDF.pages.count, 1)
+        } else {
+            XCTFail("saveTabToDisk with targetFormat .pdf must update tab.payload to .pdf")
+        }
     }
 }
 

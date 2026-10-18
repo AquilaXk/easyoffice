@@ -637,6 +637,34 @@ final class SmartProductivityToolsTests: XCTestCase {
                 .map(String.init)
         )
         XCTAssertEqual(originalWords, rewrittenWords)
+
+        // Verify F1: Encrypted PDF containing studio metadata followed by /Encrypt in trailer is rejected Fail-Closed
+        let encryptedWithMetadata = rawText.replacingOccurrences(
+            of: "trailer\n<<",
+            with: "trailer\n<< /Encrypt 99 0 R"
+        )
+        XCTAssertThrowsError(try PDFBinarySerializer.decode(from: Data(encryptedWithMetadata.utf8))) { error in
+            XCTAssertEqual(error as? EasyOfficeError, .encryptedDocumentUnsupported(format: .pdf))
+        }
+
+        // Verify F1: auditContainer detects XXE even when non-UTF-8 or NUL bytes are present in RTF or ZIP XML entries
+        var craftedMaliciousRTF = Data("{\\rtf1\\ansi <!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>}\0".utf8)
+        craftedMaliciousRTF.append(0xFF)
+        let rtfXXEAudit = DocumentSecurityAuditor.auditContainer(data: craftedMaliciousRTF, fileName: "evil.rtf")
+        XCTAssertFalse(rtfXXEAudit.isPassed)
+        XCTAssertFalse(rtfXXEAudit.isSafeFromXXE)
+        XCTAssertFalse(rtfXXEAudit.isSafeFromBombAndTraversal)
+
+        var maliciousXMLBytes = Data("<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><w:document/>".utf8)
+        maliciousXMLBytes.append(0xFF)
+        let maliciousZip = try ZipContainerCodec.pack(entries: [
+            ZipContainerEntry(path: "[Content_Types].xml", data: Data("<Types/>".utf8), compressionMethod: .store),
+            ZipContainerEntry(path: "word/document.xml", data: maliciousXMLBytes, compressionMethod: .store)
+        ])
+        let zipXXEAudit = DocumentSecurityAuditor.auditContainer(data: maliciousZip, fileName: "evil.docx")
+        XCTAssertFalse(zipXXEAudit.isPassed)
+        XCTAssertFalse(zipXXEAudit.isSafeFromXXE)
+        XCTAssertFalse(zipXXEAudit.isSafeFromBombAndTraversal)
     }
 }
 

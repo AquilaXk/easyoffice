@@ -101,21 +101,25 @@ public enum PDFBinarySerializer {
         }
 
         let lines = rawText.components(separatedBy: .newlines)
+        var metadataBase64Payload: String?
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix(modelStreamPrefix) {
-                let b64 = String(trimmed.dropFirst(modelStreamPrefix.count))
-                guard let decodedBytes = Data(base64Encoded: b64) else {
-                    throw EasyOfficeError.corruptedContainer(detail: "PDF 메타데이터 스트림 Base64 디코딩에 실패했습니다.")
-                }
-                do {
-                    return try JSONDecoder().decode(PDFStudioDocumentModel.self, from: decodedBytes)
-                } catch {
-                    throw EasyOfficeError.corruptedContainer(detail: "PDF 모델 역직렬화 실패: \(error.localizedDescription)")
-                }
+                metadataBase64Payload = String(trimmed.dropFirst(modelStreamPrefix.count))
+                continue
             }
-            if trimmed.contains("/Encrypt") {
+            if !trimmed.hasPrefix("BT "), trimmed.contains("/Encrypt") {
                 throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
+            }
+        }
+        if let b64 = metadataBase64Payload {
+            guard let decodedBytes = Data(base64Encoded: b64) else {
+                throw EasyOfficeError.corruptedContainer(detail: "PDF 메타데이터 스트림 Base64 디코딩에 실패했습니다.")
+            }
+            do {
+                return try JSONDecoder().decode(PDFStudioDocumentModel.self, from: decodedBytes)
+            } catch {
+                throw EasyOfficeError.corruptedContainer(detail: "PDF 모델 역직렬화 실패: \(error.localizedDescription)")
             }
         }
 

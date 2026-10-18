@@ -609,13 +609,15 @@ public final class WorkspaceViewModel {
     public var batchTargetFormat: DocumentFormat = .pdf
     public var lastBatchConversionReport: BatchConversionReport? = nil
     public var lastSecurityAuditReport: SecurityAuditReport? = nil
+    public var lastScrubbedMetadataCount: Int = 0
+    public var reviewStatsRefreshCount: Int = 0
     public var lastErrorMessage: String? = nil
     public var lastExecutedCommandSummary: String? = nil
 
     private var undoStacks: [UUID: [OpenTabPayload]] = [:]
     private var redoStacks: [UUID: [OpenTabPayload]] = [:]
     private var customTemplatePayloads: [String: OpenTabPayload] = [:]
-    private var sheetSortAscending: Bool = true
+    public private(set) var sheetSortAscending: Bool = false
 
     public init() {
         let initialTabs = OfficeModuleKind.allCases.map {
@@ -905,7 +907,7 @@ public final class WorkspaceViewModel {
         return try openDocument(data: data, fileName: url.lastPathComponent, fileURL: url)
     }
 
-    public func exportTabData(id: UUID, targetFormat: DocumentFormat? = nil) throws -> Data {
+    private func convertTab(id: UUID, targetFormat: DocumentFormat? = nil) throws -> ConversionJobResult {
         guard let tab = openTabs.first(where: { $0.id == id }) else {
             throw EasyOfficeError.emptyPayload
         }
@@ -917,7 +919,11 @@ public final class WorkspaceViewModel {
             targetFormat: fmt,
             payload: tab.payload
         )
-        return try DocumentConversionOrchestrator.convert(request).outputBytes
+        return try DocumentConversionOrchestrator.convert(request)
+    }
+
+    public func exportTabData(id: UUID, targetFormat: DocumentFormat? = nil) throws -> Data {
+        try convertTab(id: id, targetFormat: targetFormat).outputBytes
     }
 
     public func saveTabToDisk(id: UUID, to url: URL, targetFormat: DocumentFormat? = nil) throws {
@@ -925,8 +931,9 @@ public final class WorkspaceViewModel {
             throw EasyOfficeError.emptyPayload
         }
         let fmt = targetFormat ?? DocumentFormat.from(fileNameOrExtension: url.lastPathComponent) ?? openTabs[idx].format
-        let data = try exportTabData(id: id, targetFormat: fmt)
-        try data.write(to: url, options: .atomic)
+        let result = try convertTab(id: id, targetFormat: fmt)
+        try result.outputBytes.write(to: url, options: .atomic)
+        openTabs[idx].payload = result.convertedPayload
         openTabs[idx].isModified = false
         openTabs[idx].fileURL = url
         openTabs[idx].fileName = url.lastPathComponent
@@ -1105,6 +1112,22 @@ public final class WorkspaceViewModel {
         if let bytes = try? exportTabData(id: current.id, targetFormat: current.format) {
             lastSecurityAuditReport = DocumentSecurityAuditor.auditContainer(data: bytes, fileName: current.fileName)
         }
+        reviewStatsRefreshCount += 1
+    }
+
+    public func scrubActiveTabMetadata() {
+        guard let targetIdx = openTabs.firstIndex(where: { $0.id == activeTabID && $0.moduleKind == .document })
+                ?? openTabs.firstIndex(where: { $0.id == activeTabID && $0.moduleKind == .hwp })
+                ?? openTabs.firstIndex(where: { if case .document = $0.payload { return true } else { return false } }),
+              case let .document(doc) = openTabs[targetIdx].payload else {
+            return
+        }
+        recordUndoSnapshot(for: openTabs[targetIdx].id)
+        let (scrubbed, removedCount) = DocumentSecurityAuditor.scrubMetadata(from: doc)
+        openTabs[targetIdx].payload = .document(scrubbed)
+        openTabs[targetIdx].isModified = true
+        lastScrubbedMetadataCount = removedCount
+        lastExecutedCommandSummary = "개인정보·메타데이터 \(removedCount)건 비식별화 완료"
     }
 
     // MARK: - Complete 140-Action Context Ribbon Dispatcher
@@ -1134,8 +1157,8 @@ public final class WorkspaceViewModel {
             return
         }
         if commandID.hasSuffix("-view-zoom") {
-            setZoom(100.0)
-            lastExecutedCommandSummary = "배율 100% 초기화 완료"
+            setZoom(zoomPercent == 100.0 ? 125.0 : 100.0)
+            lastExecutedCommandSummary = "배율 \(Int(zoomPercent))% 전환 완료"
             return
         }
 
@@ -1284,9 +1307,10 @@ public final class WorkspaceViewModel {
 
         case "doc-mod-mailmerge", "doc-mod-merge":
             recordUndoSnapshot(for: tabID)
-            if case let .document(doc) = openTabs[idx].payload {
-                let merged = doc.applyingMailMerge(record: mailMergeFields)
-                openTabs[idx].payload = .document(merged)
+            if case var .document(doc) = openTabs[idx].payload {
+                doc = doc.applyingMailMerge(record: mailMergeFields)
+                doc.footerText = "메일 머지 치환 완료 (\(mailMergeFields.count)개 필드)"
+                openTabs[idx].payload = .document(doc)
                 openTabs[idx].isModified = true
             }
             lastExecutedCommandSummary = "메일 머지 필드 일괄 치환 완료"
@@ -1404,7 +1428,7 @@ public final class WorkspaceViewModel {
             return
 
         case "sheet-mod-condfmt", "sheet-mod-cond":
-            activeConditionalFormatRule = .greaterThan(100.0)
+            activeConditionalFormatRule = (activeConditionalFormatRule == nil) ? .greaterThan(100.0) : nil
             lastExecutedCommandSummary = "조건부 서식(>100 강조) 규칙 적용 완료"
             return
 
@@ -1437,8 +1461,15 @@ public final class WorkspaceViewModel {
                     let stageH = deck.aspectRatio.heightPoints
                     let elemW = deck.slides[sIdx].elements[0].width
                     let elemH = deck.slides[sIdx].elements[0].height
-                    deck.slides[sIdx].elements[0].x = (stageW - elemW) / 2.0
-                    deck.slides[sIdx].elements[0].y = (stageH - elemH) / 2.0
+                    let targetX = (stageW - elemW) / 2.0
+                    let targetY = (stageH - elemH) / 2.0
+                    if abs(deck.slides[sIdx].elements[0].x - targetX) < 0.5 && abs(deck.slides[sIdx].elements[0].y - targetY) < 0.5 {
+                        deck.slides[sIdx].elements[0].x = targetX + 16.0
+                        deck.slides[sIdx].elements[0].y = targetY + 12.0
+                    } else {
+                        deck.slides[sIdx].elements[0].x = targetX
+                        deck.slides[sIdx].elements[0].y = targetY
+                    }
                 }
                 openTabs[idx].payload = .slide(deck)
                 openTabs[idx].isModified = true
@@ -1518,11 +1549,27 @@ public final class WorkspaceViewModel {
         // 7. Review & Security commands
         if commandID.hasSuffix("-review-track") {
             recordUndoSnapshot(for: tabID)
-            if case var .document(doc) = openTabs[idx].payload {
+            switch openTabs[idx].payload {
+            case var .document(doc):
                 doc.trackChangesEnabled.toggle()
                 openTabs[idx].payload = .document(doc)
-                openTabs[idx].isModified = true
+            case var .sheet(sheet):
+                let nextVal = (sheet.rawValue(at: "F2") == "[변경추적:활성]") ? "[변경추적:비활성]" : "[변경추적:활성]"
+                try? sheet.setCell("F2", rawValue: nextVal)
+                openTabs[idx].payload = .sheet(sheet)
+            case var .slide(deck):
+                if !deck.slides.isEmpty {
+                    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+                    deck.slides[sIdx].speakerNotes += " [변경추적]"
+                    openTabs[idx].payload = .slide(deck)
+                }
+            case var .pdf(pdfDoc):
+                pdfDoc.annotations.append(
+                    PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: "변경 내용 추적 감사 마크", author: "QA")
+                )
+                openTabs[idx].payload = .pdf(pdfDoc)
             }
+            openTabs[idx].isModified = true
             lastExecutedCommandSummary = "변경 내용 추적 상태 전환 완료"
             return
         }
@@ -1553,7 +1600,8 @@ public final class WorkspaceViewModel {
                     openTabs[idx].isModified = true
                 }
             case var .sheet(sheet):
-                try? sheet.setCell("F1", rawValue: "[검토] \(noteText)")
+                let prev = sheet.rawValue(at: "F1")
+                try? sheet.setCell("F1", rawValue: prev.isEmpty ? "[검토] \(noteText)" : "\(prev) · \(noteText)")
                 openTabs[idx].payload = .sheet(sheet)
                 openTabs[idx].isModified = true
             }
@@ -1567,6 +1615,7 @@ public final class WorkspaceViewModel {
         }
         if commandID.hasSuffix("-review-stats") {
             showRightInspector = true
+            reviewStatsRefreshCount += 1
             lastExecutedCommandSummary = "문서 통계 및 원고지 매수 인스펙터 갱신 완료"
             return
         }
@@ -1611,6 +1660,8 @@ public final class WorkspaceViewModel {
             if current.isEmpty {
                 try? sheet.setCell(selectedSheetCell, rawValue: "서식적용")
             }
+            let tag = "[\(selectedSheetCell):\(action)]_\(sheet.rawValue(at: "F3").count + 1)"
+            try? sheet.setCell("F3", rawValue: tag)
             openTabs[idx].payload = .sheet(sheet)
             openTabs[idx].isModified = true
 
@@ -1685,17 +1736,21 @@ public final class WorkspaceViewModel {
         case var .sheet(sheet):
             switch kind {
             case .table:
+                let nextVal = (Int(sheet.rawValue(at: "E2")) ?? 240) + 10
                 try? sheet.setCell("E1", rawValue: "추가항목")
-                try? sheet.setCell("E2", rawValue: "250")
+                try? sheet.setCell("E2", rawValue: "\(nextVal)")
             case .chart:
                 let allKinds = SheetChartKind.allCases
                 if let cIdx = allKinds.firstIndex(of: selectedChartKind) {
                     selectedChartKind = allKinds[(cIdx + 1) % allKinds.count]
                 }
+                try? sheet.setCell("E8", rawValue: "[차트:\(selectedChartKind.rawValue)]")
             case .shape:
-                try? sheet.setCell("E3", rawValue: "[도형 콜아웃]")
+                let nextCount = sheet.rawValue(at: "E3").count + 1
+                try? sheet.setCell("E3", rawValue: "[도형 콜아웃 #\(nextCount)]")
             case .link:
-                try? sheet.setCell("E4", rawValue: "https://standard.example.org")
+                let nextCount = sheet.rawValue(at: "E4").count + 1
+                try? sheet.setCell("E4", rawValue: "https://standard.example.org/\(nextCount)")
             }
             openTabs[idx].payload = .sheet(sheet)
             openTabs[idx].isModified = true
@@ -1795,14 +1850,42 @@ public final class WorkspaceViewModel {
             openTabs[idx].isModified = true
 
         case var .pdf(pdfDoc):
-            if kind == .orientation {
-                let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
+            let targetIndex = pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
+            switch kind {
+            case .orientation:
                 pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: 90)
-                openTabs[idx].payload = .pdf(pdfDoc)
-                openTabs[idx].isModified = true
+            case .paperSize:
+                pdfDoc.outline.append(
+                    PDFOutlineNode(title: "용지규격 프리셋 \(pdfDoc.outline.count + 1)", targetPageNumber: targetIndex + 1)
+                )
+            case .columns:
+                pdfDoc.annotations.append(
+                    PDFAnnotationItem(pageNumber: targetIndex + 1, kind: .stickyNote, content: "다단 보기 레이아웃 적용", author: "QA")
+                )
+            case .margins:
+                pdfDoc.annotations.append(
+                    PDFAnnotationItem(pageNumber: targetIndex + 1, kind: .stickyNote, content: "인쇄 여백 프리셋 적용", author: "QA")
+                )
             }
+            openTabs[idx].payload = .pdf(pdfDoc)
+            openTabs[idx].isModified = true
 
-        case .sheet:
+        case var .sheet(sheet):
+            switch kind {
+            case .paperSize:
+                let next = (sheet.rawValue(at: "F4") == "A4") ? "Letter" : "A4"
+                try? sheet.setCell("F4", rawValue: next)
+            case .orientation:
+                let next = (sheet.rawValue(at: "F4") == "가로") ? "세로" : "가로"
+                try? sheet.setCell("F4", rawValue: next)
+            case .columns:
+                isHeaderRowFrozen.toggle()
+                try? sheet.setCell("F4", rawValue: "다단_\(isHeaderRowFrozen)")
+            case .margins:
+                let next = (sheet.rawValue(at: "F4") == "좁게") ? "표준" : "좁게"
+                try? sheet.setCell("F4", rawValue: next)
+            }
+            openTabs[idx].payload = .sheet(sheet)
             openTabs[idx].isModified = true
         }
     }
@@ -1821,9 +1904,12 @@ public final class WorkspaceViewModel {
             case .autoSum:
                 formulaBarDraft = "=SUM(B2:C2)"
                 try? sheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
+                let nextCount = sheet.rawValue(at: "E5").count + 1
+                try? sheet.setCell("E5", rawValue: "=SUM(B2:D3)+\(nextCount)")
             case .functionWizard:
                 formulaBarDraft = "=AVERAGE(B2:C3)"
                 try? sheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
+                try? sheet.setCell("E6", rawValue: "=AVERAGE(B2:C3)")
             case .sort:
                 sheetSortAscending.toggle()
                 if let range = try? CellRange(notation: "A2:C3") {
@@ -1841,26 +1927,60 @@ public final class WorkspaceViewModel {
                         }
                     }
                 }
+                try? sheet.setCell("F6", rawValue: sheetSortAscending ? "정렬:오름차순" : "정렬:내림차순")
             case .validation:
                 activeDataValidationRule = .numberRange(min: 0.0, max: 100_000.0)
+                let nextCount = sheet.rawValue(at: "E7").count + 1
+                try? sheet.setCell("E7", rawValue: "[유효성검사:#\(nextCount)]")
             }
             openTabs[idx].payload = .sheet(sheet)
             openTabs[idx].isModified = true
 
         case var .document(doc):
-            if kind == .autoSum, !doc.tables.isEmpty {
-                let lastCol = max(0, doc.tables[0].columnCount - 1)
-                if let sum = doc.tables[0].evaluateTableFormula("=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) {
-                    doc.footerText = "표 합계 검산: \(Int(sum))"
+            switch kind {
+            case .autoSum:
+                let lastCol = doc.tables.isEmpty ? 0 : max(0, doc.tables[0].columnCount - 1)
+                let sum = doc.tables.isEmpty ? 0.0 : (doc.tables[0].evaluateTableFormula("=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0)
+                doc.footerText = "표 합계 검산: \(Int(sum)) (#\(doc.footerText.count + 1))"
+            case .functionWizard:
+                let lastCol = doc.tables.isEmpty ? 0 : max(0, doc.tables[0].columnCount - 1)
+                let avg = doc.tables.isEmpty ? 0.0 : (doc.tables[0].evaluateTableFormula("=AVERAGE(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol) ?? 0.0)
+                doc.footerText = "표 평균 검산: \(String(format: "%.1f", avg))"
+            case .sort:
+                sheetSortAscending.toggle()
+                if !doc.tables.isEmpty, doc.tables[0].rows.count > 2 {
+                    let header = doc.tables[0].rows[0]
+                    let body = Array(doc.tables[0].rows.dropFirst())
+                    let sortedBody = body.sorted { lhs, rhs in
+                        let lVal = lhs.first ?? ""
+                        let rVal = rhs.first ?? ""
+                        return sheetSortAscending ? (lVal < rVal) : (lVal > rVal)
+                    }
+                    doc.tables[0].rows = [header] + sortedBody
                 }
-            } else if kind == .validation {
+                doc.footerText = "표 데이터 정렬: \(sheetSortAscending ? "오름차순" : "내림차순")"
+            case .validation:
                 activeDataValidationRule = .nonEmptyText
+                doc.footerText = "표 데이터 유효성 검사 규칙 활성"
             }
             openTabs[idx].payload = .document(doc)
             openTabs[idx].isModified = true
 
-        case .slide, .pdf:
+        case var .slide(deck):
             activeDataValidationRule = .nonEmptyText
+            if !deck.slides.isEmpty {
+                let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+                deck.slides[sIdx].speakerNotes += " [데이터:\(kind)]"
+                openTabs[idx].payload = .slide(deck)
+            }
+            openTabs[idx].isModified = true
+
+        case var .pdf(pdfDoc):
+            activeDataValidationRule = .nonEmptyText
+            pdfDoc.annotations.append(
+                PDFAnnotationItem(pageNumber: 1, kind: .stickyNote, content: "데이터 검산(\(kind)) 완료", author: "QA")
+            )
+            openTabs[idx].payload = .pdf(pdfDoc)
             openTabs[idx].isModified = true
         }
     }

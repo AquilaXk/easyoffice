@@ -681,24 +681,37 @@ struct SmartDocumentAssistantHubView: View {
 
     var body: some View {
         let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
+        let documentModels: [OfficeDocumentModel] = viewModel.openTabs.compactMap { tab in
+            if case let .document(doc) = tab.payload { return doc }
+            return nil
+        }
         let activeDoc: OfficeDocumentModel? = {
             if let tab = viewModel.activeTab, case let .document(doc) = tab.payload {
                 return doc
             }
+            return documentModels.first
+        }()
+        let activeSheet: WorksheetModel? = {
+            if let tab = viewModel.activeTab, case let .sheet(sheet) = tab.payload {
+                return sheet
+            }
             for tab in viewModel.openTabs {
-                if case let .document(doc) = tab.payload {
-                    return doc
-                }
+                if case let .sheet(sheet) = tab.payload { return sheet }
             }
             return nil
         }()
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("스마트 문서 보조 도구 (요약·가독성·보안 감사)", systemImage: "sparkles.rectangle.stack.fill")
+                Label("스마트 문서 보조 도구 (요약·가독성·조치항목·시트통계·문서비교·보안감사)", systemImage: "sparkles.rectangle.stack.fill")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
                 Spacer()
+                Button("개인정보·메타데이터 비식별화") {
+                    viewModel.scrubActiveTabMetadata()
+                }
+                .buttonStyle(.bordered)
+
                 Button("활성 탭 보안 감사 실행") {
                     viewModel.runSecurityAuditOnActiveTab()
                 }
@@ -708,7 +721,10 @@ struct SmartDocumentAssistantHubView: View {
 
             if let doc = activeDoc {
                 let summary = LocalSmartDocumentAssistant.summarize(doc, maxSentences: 3)
-                Text("대상 문서: \(doc.title) · 예상 읽기 시간 \(summary.estimatedReadingSeconds)초")
+                let suggestions = LocalSmartDocumentAssistant.analyzeWritingQuality(doc)
+                let actionItems = LocalSmartDocumentAssistant.extractActionItemsAndEntities(doc)
+
+                Text("대상 문서: \(doc.title) · 예상 읽기 시간 \(summary.estimatedReadingSeconds)초 · 압축률 \(String(format: "%.0f", summary.compressionRatioPercent))%")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(palette.primaryText.swiftUIColor)
 
@@ -723,19 +739,85 @@ struct SmartDocumentAssistantHubView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
                 }
+
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("문장 가독성 교정 제안 (\(suggestions.count)건)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                        ForEach(suggestions.prefix(2), id: \.paragraphID) { item in
+                            Text("• [\(item.issueKind)] \(item.suggestedRewrite)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("추출된 일정·예산·조치 항목 (\(actionItems.count)건)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                        ForEach(Array(actionItems.prefix(2).enumerated()), id: \.offset) { _, act in
+                            Text("• [\(act.category)] \(act.extractedText)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
-            if let audit = viewModel.lastSecurityAuditReport {
+            HStack(alignment: .top, spacing: 12) {
+                if let sheet = activeSheet, let range = try? CellRange(notation: "B2:D3") {
+                    let insight = LocalSmartDocumentAssistant.analyzeWorksheetInsights(sheet, range: range)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("시트 Z-Score 통계 인사이트 (\(insight.trendClassification))")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                        Text("평균 \(String(format: "%.1f", insight.mean)) · 표준편차 \(String(format: "%.1f", insight.standardDeviation)) · 증감률 \(String(format: "%.1f", insight.growthRatePercent))%")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if documentModels.count >= 2 {
+                    let diff = LocalSmartDocumentAssistant.compareDocuments(
+                        baseline: documentModels[0],
+                        revised: documentModels[1]
+                    )
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("문서 LCS 비교 (Document ↔ HWP)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                        Text("추가 +\(diff.addedCount) · 삭제 -\(diff.removedCount) · 수정 ~\(diff.modifiedCount) · 동일 =\(diff.unchangedCount)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            if viewModel.lastScrubbedMetadataCount > 0 || viewModel.lastSecurityAuditReport != nil {
                 Divider()
                 HStack(spacing: 12) {
-                    Image(systemName: audit.isPassed ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(
-                            audit.isPassed
-                                ? EasyOfficeDesignTokens.statusSuccess.swiftUIColor
-                                : EasyOfficeDesignTokens.statusDanger.swiftUIColor
-                        )
-                    Text("매직 바이트 보안 감사: \(audit.detectedFormat?.rawValue.uppercased() ?? "UNKNOWN") · 통과 여부: \(audit.isPassed ? "안전" : "위험 감지")")
-                        .font(.system(size: 12, weight: .semibold))
+                    if let audit = viewModel.lastSecurityAuditReport {
+                        Image(systemName: audit.isPassed ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(
+                                audit.isPassed
+                                    ? EasyOfficeDesignTokens.statusSuccess.swiftUIColor
+                                    : EasyOfficeDesignTokens.statusDanger.swiftUIColor
+                            )
+                        Text("매직 바이트 보안 감사: \(audit.detectedFormat?.rawValue.uppercased() ?? "UNKNOWN") · 통과 여부: \(audit.isPassed ? "안전" : "위험 감지")")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    if viewModel.lastScrubbedMetadataCount > 0 {
+                        Text("· 비식별화된 개인정보/메타데이터: \(viewModel.lastScrubbedMetadataCount)건")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    }
                 }
             }
         }
@@ -851,7 +933,7 @@ struct CentralEditorCanvasView: View {
                 case let .sheet(sheet):
                     SheetEditorDetailPaneView(viewModel: viewModel, sheet: sheet, isPrimaryPane: isPrimaryPane)
                 case let .slide(deck):
-                    SlideEditorDetailPaneView(viewModel: viewModel, deck: deck)
+                    SlideEditorDetailPaneView(viewModel: viewModel, deck: deck, isPrimaryPane: isPrimaryPane)
                 case let .pdf(pdf):
                     PDFStudioEditorDetailPaneView(viewModel: viewModel, pdf: pdf, isPrimaryPane: isPrimaryPane)
                 }
