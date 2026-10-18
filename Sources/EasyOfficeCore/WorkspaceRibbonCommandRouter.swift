@@ -416,14 +416,23 @@ extension WorkspaceViewModel {
         case var .document(doc):
             if doc.paragraphs.isEmpty { doc.paragraphs.append(ParagraphBlock(text: "기본 본문 문단")) }
             let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
-            switch action {
-            case .bold: doc.paragraphs[pIdx].isBold.toggle()
-            case .italic: doc.paragraphs[pIdx].isItalic.toggle()
-            case .underline: doc.paragraphs[pIdx].isUnderlined.toggle()
-            case .styleCycle:
-                let allStyles = ParagraphStyleRole.allCases
-                let cur = doc.paragraphs[pIdx].style
-                doc.paragraphs[pIdx].style = allStyles[((allStyles.firstIndex(of: cur) ?? 0) + 1) % allStyles.count]
+            if let utf16Range = selectedParagraphUTF16Range, !utf16Range.isEmpty, action != .styleCycle {
+                switch action {
+                case .bold: doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isBold: true)
+                case .italic: doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isItalic: true)
+                case .underline: doc.paragraphs[pIdx].applyRunFormatting(utf16Range: utf16Range, isUnderlined: true)
+                case .styleCycle: break
+                }
+            } else {
+                switch action {
+                case .bold: doc.paragraphs[pIdx].isBold.toggle()
+                case .italic: doc.paragraphs[pIdx].isItalic.toggle()
+                case .underline: doc.paragraphs[pIdx].isUnderlined.toggle()
+                case .styleCycle:
+                    let allStyles = ParagraphStyleRole.allCases
+                    let cur = doc.paragraphs[pIdx].style
+                    doc.paragraphs[pIdx].style = allStyles[((allStyles.firstIndex(of: cur) ?? 0) + 1) % allStyles.count]
+                }
             }
             openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
 
@@ -441,6 +450,18 @@ extension WorkspaceViewModel {
                 style.fillHex = (style.fillHex == nil) ? "#EEF0FF" : nil
             }
             sheet.setCellStyle(style, at: coord)
+            if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
+                sheet.updateCellStyleInRange(range) { cellStyle in
+                    switch action {
+                    case .bold: cellStyle.isBold = style.isBold
+                    case .italic: cellStyle.isItalic = style.isItalic
+                    case .underline: cellStyle.isUnderlined = style.isUnderlined
+                    case .styleCycle:
+                        cellStyle.numberFormat = style.numberFormat
+                        cellStyle.fillHex = style.fillHex
+                    }
+                }
+            }
             openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
 
         case var .slide(deck):
@@ -504,6 +525,12 @@ extension WorkspaceViewModel {
                 style.alignment = alignments[(curIdx + 1) % alignments.count]
                 style.textHex = "#5C6BC0"
                 sheet.setCellStyle(style, at: coord)
+                if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
+                    sheet.updateCellStyleInRange(range) { cellStyle in
+                        cellStyle.alignment = style.alignment
+                        cellStyle.textHex = "#5C6BC0"
+                    }
+                }
             case .link:
                 sheet.sheetComments[coord] = "참조 링크 (\(selectedSheetCell))"
             }
