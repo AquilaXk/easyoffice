@@ -31,7 +31,7 @@ internal enum XMLDocumentModelMapper {
         " eo:listKind=\"\(XMLSanitizer.escape(p.listKind.rawValue))\" eo:listLevel=\"\(p.listLevel)\""
     }
     return
-      "id=\"\(p.id.uuidString)\" style=\"\(XMLSanitizer.escape(p.style.rawValue))\" align=\"\(XMLSanitizer.escape(p.alignment.rawValue))\" font=\"\(XMLSanitizer.escape(p.fontName))\" size=\"\(p.fontSizePt)\" bold=\"\(boldAttr)\" italic=\"\(italicAttr)\" underline=\"\(underlineAttr)\" lineSpacing=\"\(p.lineSpacingPercent)\"\(indentAttrs)\(hasRunsAttr)"
+      "id=\"\(p.id.uuidString)\" style=\"\(XMLSanitizer.escape(p.style.rawValue))\" align=\"\(XMLSanitizer.escape(p.alignment.rawValue))\" font=\"\(XMLSanitizer.escape(p.fontName))\" size=\"\(p.fontSizePt)\" bold=\"\(boldAttr)\" italic=\"\(italicAttr)\" underline=\"\(underlineAttr)\" lineSpacing=\"\(p.lineSpacingPercent)\" eo:letterSpacing=\"\(p.letterSpacingPercent)\" eo:charScale=\"\(p.charWidthScalePercent)\"\(indentAttrs)\(hasRunsAttr)"
   }
 
   static func runAttributes(_ run: DocumentTextRun) -> String {
@@ -249,6 +249,12 @@ internal enum XMLDocumentModelMapper {
 
     var firstLineIndent = attributes["firstLineIndent"].flatMap(Double.init)
     var leftIndent = attributes["leftIndent"].flatMap(Double.init)
+    var parsedLetterSpacing =
+      (attributes["eo:letterSpacing"] ?? attributes["letterSpacing"]
+      ?? attributes["letterSpacingPercent"]).flatMap(Double.init)
+    var parsedCharScale =
+      (attributes["eo:charScale"] ?? attributes["charScale"]
+      ?? attributes["charWidthScalePercent"]).flatMap(Double.init)
     var parsedListKind =
       ParagraphListKind(rawValue: attributes["eo:listKind"] ?? attributes["listKind"] ?? "")
       ?? .none
@@ -279,6 +285,22 @@ internal enum XMLDocumentModelMapper {
           let leftTwips = Double(leftStr)
         {
           leftIndent = leftTwips / 20.0
+        }
+      }
+      if let spacingAttrs = XMLSanitizer.extractElements(named: "w:spacing", in: pPr).first?
+        .attributes
+      {
+        if parsedLetterSpacing == nil,
+          let lsStr = spacingAttrs["eo:letterSpacing"] ?? spacingAttrs["letterSpacing"],
+          let lsVal = Double(lsStr)
+        {
+          parsedLetterSpacing = lsVal
+        }
+        if parsedCharScale == nil,
+          let csStr = spacingAttrs["eo:charScale"] ?? spacingAttrs["charScale"],
+          let csVal = Double(csStr)
+        {
+          parsedCharScale = csVal
         }
       }
       if parsedListKind == .none,
@@ -318,7 +340,9 @@ internal enum XMLDocumentModelMapper {
         isUnderlined: attributes["underline"] == "1",
         lineSpacingPercent: Double(attributes["lineSpacing"] ?? "160.0") ?? 160.0,
         firstLineIndentPt: firstLineIndent ?? 0.0, leftIndentPt: leftIndent ?? 0.0,
-        listKind: parsedListKind, listLevel: parsedListLevel
+        listKind: parsedListKind, listLevel: parsedListLevel,
+        letterSpacingPercent: parsedLetterSpacing ?? 0.0,
+        charWidthScalePercent: parsedCharScale ?? 100.0
       )
     }
 
@@ -331,7 +355,9 @@ internal enum XMLDocumentModelMapper {
       isItalic: parsedRuns.contains(where: \.isItalic),
       isUnderlined: parsedRuns.contains(where: \.isUnderlined), lineSpacingPercent: 160.0,
       firstLineIndentPt: firstLineIndent ?? 0.0, leftIndentPt: leftIndent ?? 0.0,
-      listKind: parsedListKind, listLevel: parsedListLevel
+      listKind: parsedListKind, listLevel: parsedListLevel,
+      letterSpacingPercent: parsedLetterSpacing ?? 0.0,
+      charWidthScalePercent: parsedCharScale ?? 100.0
     )
   }
 

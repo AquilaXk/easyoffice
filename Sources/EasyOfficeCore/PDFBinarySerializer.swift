@@ -84,6 +84,16 @@ public enum PDFBinarySerializer {
         streamLines.append("1 1 1 rg BT 0 Tr /F1 8 Tf 46 745 Td <\(redactAuditHex)> Tj ET")
       }
 
+      if !pdf.watermarkText.isEmpty {
+        let wmLabel = "[WM] \(pdf.watermarkText)"
+        let wmHex = hexEncodeUTF16BE(wmLabel, maxChars: 64)
+        let escapedWM = escapePDFString(wmLabel)
+        streamLines.append("BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedWM)) Tj ET")
+        streamLines.append(
+          "q 0.780 0.800 0.880 rg BT 0 Tr /F2 11 Tf 1 0 0 1 320 760 Tm <\(wmHex)> Tj ET Q"
+        )
+      }
+
       let visualLines = page.extractedText
         .split(separator: "\n", omittingEmptySubsequences: false)
         .flatMap { wrapLine(String($0), maxChars: 64) }
@@ -309,6 +319,7 @@ public enum PDFBinarySerializer {
     var fallbackPages: [PDFPageDescriptor] = []
     var fallbackInvisibleFlags: [Bool] = []
     var fallbackFormFields: [PDFFormField] = []
+    var fallbackWatermarkText = ""
     let isRedactedCatalog = rawText.contains("/Redacted true")
     var sawPageObject = false
     var currentRotate = 0
@@ -355,6 +366,10 @@ public enum PDFBinarySerializer {
       {
         let inner = String(line[line.index(after: openParen)..<closeParen])
         let unescaped = unescapePDFString(inner)
+        if unescaped.hasPrefix("[WM] ") {
+          fallbackWatermarkText = String(unescaped.dropFirst(5))
+          continue
+        }
         if unescaped.hasPrefix("[FORM] ") {
           let remainder = String(unescaped.dropFirst(7))
           let parts = remainder.components(separatedBy: ": ")
@@ -467,7 +482,8 @@ public enum PDFBinarySerializer {
           annotations: annotations,
           outline: outlineNodes,
           isRedacted: isRedactedCatalog,
-          formFields: fallbackFormFields
+          formFields: fallbackFormFields,
+          watermarkText: fallbackWatermarkText
         )
       }
     }
@@ -483,7 +499,8 @@ public enum PDFBinarySerializer {
       title: "PDF 문서",
       pages: fallbackPages,
       isRedacted: isRedactedCatalog,
-      formFields: fallbackFormFields
+      formFields: fallbackFormFields,
+      watermarkText: fallbackWatermarkText
     )
   }
 

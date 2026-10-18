@@ -173,6 +173,8 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
   public var leftIndentPt: Double = 0.0
   public var listKind: ParagraphListKind = .none
   public var listLevel: Int = 0
+  public var letterSpacingPercent: Double = 0.0
+  public var charWidthScalePercent: Double = 100.0
 
   public init(
     id: UUID = UUID(), style: ParagraphStyleRole = .body, alignment: TextAlignmentMode = .justified,
@@ -180,7 +182,8 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
     fontSizePt: Double = 11.0,
     isBold: Bool = false, isItalic: Bool = false, isUnderlined: Bool = false,
     lineSpacingPercent: Double = 160.0, firstLineIndentPt: Double = 0.0, leftIndentPt: Double = 0.0,
-    listKind: ParagraphListKind = .none, listLevel: Int = 0
+    listKind: ParagraphListKind = .none, listLevel: Int = 0,
+    letterSpacingPercent: Double = 0.0, charWidthScalePercent: Double = 100.0
   ) {
     self.id = id
     self.style = style
@@ -197,12 +200,16 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
     self.leftIndentPt = leftIndentPt
     self.listKind = listKind
     self.listLevel = max(0, min(3, listLevel))
+    self.letterSpacingPercent =
+      letterSpacingPercent.isFinite ? max(-50.0, min(50.0, letterSpacingPercent)) : 0.0
+    self.charWidthScalePercent =
+      charWidthScalePercent.isFinite ? max(50.0, min(200.0, charWidthScalePercent)) : 100.0
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, style, alignment, text, runs, fontName, fontSizePt
     case isBold, isItalic, isUnderlined, lineSpacingPercent, firstLineIndentPt, leftIndentPt
-    case listKind, listLevel
+    case listKind, listLevel, letterSpacingPercent, charWidthScalePercent
   }
 
   public init(from decoder: Decoder) throws {
@@ -223,6 +230,14 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
     self.leftIndentPt = try c.decodeIfPresent(Double.self, forKey: .leftIndentPt) ?? 0.0
     self.listKind = try c.decodeIfPresent(ParagraphListKind.self, forKey: .listKind) ?? .none
     self.listLevel = max(0, min(3, try c.decodeIfPresent(Int.self, forKey: .listLevel) ?? 0))
+    let rawLetterSpacing =
+      try c.decodeIfPresent(Double.self, forKey: .letterSpacingPercent) ?? 0.0
+    self.letterSpacingPercent =
+      rawLetterSpacing.isFinite ? max(-50.0, min(50.0, rawLetterSpacing)) : 0.0
+    let rawCharScale =
+      try c.decodeIfPresent(Double.self, forKey: .charWidthScalePercent) ?? 100.0
+    self.charWidthScalePercent =
+      rawCharScale.isFinite ? max(50.0, min(200.0, rawCharScale)) : 100.0
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -242,6 +257,8 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
     try c.encode(leftIndentPt, forKey: .leftIndentPt)
     try c.encode(listKind, forKey: .listKind)
     try c.encode(max(0, min(3, listLevel)), forKey: .listLevel)
+    try c.encode(max(-50.0, min(50.0, letterSpacingPercent)), forKey: .letterSpacingPercent)
+    try c.encode(max(50.0, min(200.0, charWidthScalePercent)), forKey: .charWidthScalePercent)
   }
 
   /// Returns explicit inline runs when present and synchronized with `text`, or a single synthesized run representing the paragraph's base style.

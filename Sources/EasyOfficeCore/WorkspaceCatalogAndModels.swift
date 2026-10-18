@@ -362,7 +362,9 @@ public struct WorkspaceHubCatalog: Sendable {
             masterLayout: .twoColumnComparison,
             elements: [
               SlideCanvasElement(
-                title: "아키텍처 카드", bodyText: "77종 수식 & 양방향 변환", x: 380, y: 220, width: 200,
+                title: "아키텍처 카드",
+                bodyText: "\(WorksheetModel.supportedFunctionNames.count)종 수식 & 양방향 변환", x: 380,
+                y: 220, width: 200,
                 height: 100, kind: .rectangleShape)
             ]
           ),
@@ -516,7 +518,8 @@ public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
           id: "\(module.rawValue)-data-autosum", title: "자동 합계 (SUM)", symbolName: "sum",
           shortcutHint: "⇧⌘T"),
         RibbonCommandDescriptor(
-          id: "\(module.rawValue)-data-fn-browser", title: "77종 함수 마법사", symbolName: "function",
+          id: "\(module.rawValue)-data-fn-browser",
+          title: "\(WorksheetModel.supportedFunctionNames.count)종 함수 마법사", symbolName: "function",
           shortcutHint: "⇧F3"),
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-data-sort", title: "오름차순·내림차순 정렬",

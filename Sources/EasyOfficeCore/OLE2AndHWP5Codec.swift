@@ -80,7 +80,11 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
           ? metaP.firstLineIndentPt : p.firstLineIndentPt,
         leftIndentPt: metaP.leftIndentPt != 0 ? metaP.leftIndentPt : p.leftIndentPt,
         listKind: resolvedListKind,
-        listLevel: resolvedListLevel
+        listLevel: resolvedListLevel,
+        letterSpacingPercent: metaP.letterSpacingPercent != 0.0
+          ? metaP.letterSpacingPercent : p.letterSpacingPercent,
+        charWidthScalePercent: metaP.charWidthScalePercent != 100.0
+          ? metaP.charWidthScalePercent : p.charWidthScalePercent
       )
     }
     for idx in doc.tables.indices where idx < tables.count {
@@ -477,6 +481,12 @@ public enum HWP5BinaryCodec {
       if paragraph.isItalic { styleFlags |= 0x02 }
       if paragraph.isUnderlined { styleFlags |= 0x04 }
       paraHeaderPayload.append(styleFlags)
+      BitPacking.appendUInt32LE(
+        UInt32(bitPattern: Int32((paragraph.letterSpacingPercent * 100.0).rounded())),
+        to: &paraHeaderPayload)
+      BitPacking.appendUInt32LE(
+        UInt32((paragraph.charWidthScalePercent * 100.0).rounded()),
+        to: &paraHeaderPayload)
 
       let headerRec = try HWP5RecordHeader.encode(
         tagID: HWP5RecordHeader.tagParaHeader,
@@ -651,6 +661,17 @@ public enum HWP5BinaryCodec {
         let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
         pCursor += 4
         let styleFlags = section0[section0.startIndex + pCursor]
+        pCursor += 1
+        var letterSpacingPct = 0.0
+        var charWidthScalePct = 100.0
+        if pCursor + 8 <= payloadEnd {
+          let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+          pCursor += 4
+          let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+          pCursor += 4
+          letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
+          charWidthScalePct = Double(charScaleX100) / 100.0
+        }
         pendingParagraph = ParagraphBlock(
           style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
           alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
@@ -660,7 +681,9 @@ public enum HWP5BinaryCodec {
           isBold: (styleFlags & 0x01) != 0,
           isItalic: (styleFlags & 0x02) != 0,
           isUnderlined: (styleFlags & 0x04) != 0,
-          lineSpacingPercent: Double(lineSpacingX100) / 100.0
+          lineSpacingPercent: Double(lineSpacingX100) / 100.0,
+          letterSpacingPercent: letterSpacingPct,
+          charWidthScalePercent: charWidthScalePct
         )
 
       case HWP5RecordHeader.tagParaText:

@@ -512,7 +512,7 @@ final class CommercialParityBenchmarkTests: XCTestCase {
   // MARK: - 3. Dense Spreadsheet Formula & Pivot Engine Benchmark (200 Rows x 5 Columns)
 
   func testSpreadsheetFormulaAndPivotBenchmarkOnDenseGrid() throws {
-    XCTAssertEqual(WorksheetModel.supportedFunctionNames.count, 92)
+    XCTAssertEqual(WorksheetModel.supportedFunctionNames.count, 122)
     let clock = ContinuousClock()
     var sheet = WorksheetModel(name: "전국지사_매출집계_1000셀")
     let regions = ["서울", "부산", "대전", "광주", "판교"]
