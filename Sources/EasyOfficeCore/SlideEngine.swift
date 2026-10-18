@@ -66,6 +66,9 @@ public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
     public var rotationDegrees: Double
     public var fillHex: String
     public var strokeHex: String
+    public var isBold: Bool
+    public var isItalic: Bool
+    public var isUnderlined: Bool
 
     public init(
         id: UUID = UUID(),
@@ -79,7 +82,10 @@ public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
         zIndex: Int = 0,
         rotationDegrees: Double = 0.0,
         fillHex: String = "#EEF0FF",
-        strokeHex: String = "#5C6BC0"
+        strokeHex: String = "#5C6BC0",
+        isBold: Bool = false,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -93,6 +99,9 @@ public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
         self.rotationDegrees = rotationDegrees
         self.fillHex = fillHex
         self.strokeHex = strokeHex
+        self.isBold = isBold
+        self.isItalic = isItalic
+        self.isUnderlined = isUnderlined
     }
 
     public var centerX: Double { x + width / 2.0 }

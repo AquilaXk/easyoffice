@@ -318,6 +318,168 @@ public enum EvaluatedCellValue: Sendable, Codable, Equatable, CustomStringConver
     }
 }
 
+// MARK: - Cell Style, Number Format, Page Setup, and Multi-Sheet Models
+
+/// Display number format applied to a spreadsheet cell.
+public enum CellNumberFormat: String, Sendable, Codable, Equatable, CaseIterable {
+    case general
+    case integer
+    case decimal2
+    case thousands
+    case currencyKRW
+    case currencyUSD
+    case percentage
+    case scientific
+    case dateISO
+
+    public func format(_ value: EvaluatedCellValue) -> String {
+        guard case let .number(num) = value, num.isFinite else {
+            return value.description
+        }
+        switch self {
+        case .general:
+            return value.description
+        case .integer:
+            return Self.formatGroupedNumber(num.rounded(), fractionDigits: 0)
+        case .decimal2:
+            return Self.formatGroupedNumber(num, fractionDigits: 2)
+        case .thousands:
+            let frac = num.rounded() == num ? 0 : 2
+            return Self.formatGroupedNumber(num, fractionDigits: frac)
+        case .currencyKRW:
+            let sign = num < 0 ? "-" : ""
+            return "\(sign)₩\(Self.formatGroupedNumber(abs(num.rounded()), fractionDigits: 0))"
+        case .currencyUSD:
+            let sign = num < 0 ? "-" : ""
+            return "\(sign)$\(Self.formatGroupedNumber(abs(num), fractionDigits: 2))"
+        case .percentage:
+            let pct = num * 100.0
+            if pct.rounded() == pct {
+                return String(format: "%.0f%%", pct)
+            }
+            return String(format: "%.1f%%", pct)
+        case .scientific:
+            return String(format: "%.2E", num)
+        case .dateISO:
+            guard let intVal = WorksheetModel.safeInt(num.rounded()) else {
+                return value.description
+            }
+            if intVal >= 19000101 && intVal <= 29991231 {
+                let y = intVal / 10000
+                let m = (intVal % 10000) / 100
+                let d = intVal % 100
+                return String(format: "%04d-%02d-%02d", y, m, d)
+            }
+            if let baseDate = WorksheetModel.makeUTCDate(year: 1899, month: 12, day: 30),
+               let target = WorksheetModel.utcCalendar.date(byAdding: .day, value: intVal, to: baseDate) {
+                let comps = WorksheetModel.utcCalendar.dateComponents([.year, .month, .day], from: target)
+                return String(format: "%04d-%02d-%02d", comps.year ?? 1970, comps.month ?? 1, comps.day ?? 1)
+            }
+            return value.description
+        }
+    }
+
+    private static func formatGroupedNumber(_ value: Double, fractionDigits: Int) -> String {
+        let isNegative = value < 0
+        let absVal = abs(value)
+        let rawFormatted = String(format: "%.\(max(0, fractionDigits))f", absVal)
+        let parts = rawFormatted.split(separator: ".", omittingEmptySubsequences: false)
+        let intSub = parts.first ?? "0"
+        let utf8Digits = intSub.utf8
+        let digitCount = utf8Digits.count
+        var groupedBytes: [UInt8] = []
+        groupedBytes.reserveCapacity(digitCount + digitCount / 3)
+        for (idx, byte) in utf8Digits.enumerated() {
+            if idx > 0 && (digitCount - idx) % 3 == 0 {
+                groupedBytes.append(0x2C) // ','
+            }
+            groupedBytes.append(byte)
+        }
+        let groupedInt = String(decoding: groupedBytes, as: UTF8.self)
+        let signPrefix = (isNegative && groupedInt != "0") ? "-" : ""
+        if fractionDigits > 0, parts.count > 1 {
+            return "\(signPrefix)\(groupedInt).\(parts[1])"
+        }
+        return "\(signPrefix)\(groupedInt)"
+    }
+}
+
+/// Horizontal text alignment within a spreadsheet cell.
+public enum CellHorizontalAlignment: String, Sendable, Codable, Equatable, CaseIterable {
+    case leading
+    case center
+    case trailing
+}
+
+/// Per-cell visual style and number formatting descriptor.
+public struct CellStyle: Sendable, Codable, Equatable {
+    public var isBold: Bool
+    public var isItalic: Bool
+    public var isUnderlined: Bool
+    public var alignment: CellHorizontalAlignment
+    public var numberFormat: CellNumberFormat
+    public var fillHex: String?
+    public var textHex: String?
+
+    public init(
+        isBold: Bool = false,
+        isItalic: Bool = false,
+        isUnderlined: Bool = false,
+        alignment: CellHorizontalAlignment = .leading,
+        numberFormat: CellNumberFormat = .general,
+        fillHex: String? = nil,
+        textHex: String? = nil
+    ) {
+        self.isBold = isBold
+        self.isItalic = isItalic
+        self.isUnderlined = isUnderlined
+        self.alignment = alignment
+        self.numberFormat = numberFormat
+        self.fillHex = fillHex
+        self.textHex = textHex
+    }
+}
+
+/// Page setup and print/margin configuration for a worksheet.
+public struct WorksheetPageSetup: Sendable, Codable, Equatable {
+    public var paperSize: PaperSizePreset
+    public var orientation: PageOrientation
+    public var isMultiColumnPrint: Bool
+    public var marginPresetName: String
+
+    public init(
+        paperSize: PaperSizePreset = .a4,
+        orientation: PageOrientation = .portrait,
+        isMultiColumnPrint: Bool = false,
+        marginPresetName: String = "기본 (Normal)"
+    ) {
+        self.paperSize = paperSize
+        self.orientation = orientation
+        self.isMultiColumnPrint = isMultiColumnPrint
+        self.marginPresetName = marginPresetName
+    }
+}
+
+/// Additional worksheet page stored within a multi-sheet workbook.
+public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
+    public let id: UUID
+    public var name: String
+    public var cellsByCoordinate: [PackedCellCoordinate: String]
+    public var cellStyles: [PackedCellCoordinate: CellStyle]
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        cellsByCoordinate: [PackedCellCoordinate: String] = [:],
+        cellStyles: [PackedCellCoordinate: CellStyle] = [:]
+    ) {
+        self.id = id
+        self.name = name
+        self.cellsByCoordinate = cellsByCoordinate
+        self.cellStyles = cellStyles
+    }
+}
+
 /// Worksheet model storing cell inputs keyed by `PackedCellCoordinate`, pre-compiling `FormulaAST`,
 /// and evaluating formulas with $O(V + E)$ DAG memoization.
 public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
@@ -330,6 +492,18 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     public var name: String
     /// Primary coordinate-keyed storage (`PackedCellCoordinate -> rawString`).
     public private(set) var cellsByCoordinate: [PackedCellCoordinate: String] = [:]
+    /// Per-cell style and number formatting table for the active sheet.
+    public var cellStyles: [PackedCellCoordinate: CellStyle] = [:]
+    /// Page setup and print configuration for the workbook/worksheet.
+    public var pageSetup: WorksheetPageSetup = WorksheetPageSetup()
+    /// Cell review comments keyed by cell coordinate.
+    public var sheetComments: [PackedCellCoordinate: String] = [:]
+    /// Whether revision tracking is enabled for this worksheet.
+    public var trackChangesEnabled: Bool = false
+    /// Non-active worksheet pages in the workbook.
+    public var additionalSheets: [WorksheetSheetPage] = []
+    /// Zero-based index of the active sheet among all sheets (`0 ... additionalSheets.count`).
+    public var activeSheetIndex: Int = 0
     /// Pre-compiled AST cache keyed by `PackedCellCoordinate`.
     private var compiledASTs: [PackedCellCoordinate: FormulaAST] = [:]
 
@@ -356,6 +530,14 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         }
     }
 
+    /// Ordered list of all sheet names in the workbook, including the active sheet at `activeSheetIndex`.
+    public var allSheetNames: [String] {
+        var names = additionalSheets.map(\.name)
+        let insertionIndex = min(max(0, activeSheetIndex), names.count)
+        names.insert(name, at: insertionIndex)
+        return names
+    }
+
     /// Sorted list of all built-in spreadsheet functions supported by the formula engine.
     public static let supportedFunctionNames: [String] = [
         "ABS", "AND", "AVERAGE", "AVERAGEIF",
@@ -379,13 +561,29 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         "YEAR"
     ].sorted()
 
-    private static let lazyOrRefFunctions: Set<String> = [
+    internal static let lazyOrRefFunctions: Set<String> = [
         "IF", "IFS", "IFERROR", "SWITCH", "CHOOSE", "ROW", "COLUMN", "SUMIF", "COUNTIF", "AVERAGEIF"
     ]
 
-    public init(id: UUID = UUID(), name: String, rawCells: [String: String] = [:]) {
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        rawCells: [String: String] = [:],
+        cellStyles: [PackedCellCoordinate: CellStyle] = [:],
+        pageSetup: WorksheetPageSetup = WorksheetPageSetup(),
+        sheetComments: [PackedCellCoordinate: String] = [:],
+        trackChangesEnabled: Bool = false,
+        additionalSheets: [WorksheetSheetPage] = [],
+        activeSheetIndex: Int = 0
+    ) {
         self.id = id
         self.name = name
+        self.cellStyles = cellStyles
+        self.pageSetup = pageSetup
+        self.sheetComments = sheetComments
+        self.trackChangesEnabled = trackChangesEnabled
+        self.additionalSheets = additionalSheets
+        self.activeSheetIndex = activeSheetIndex
         for (key, val) in rawCells where !val.isEmpty {
             if let addr = try? CellAddress(a1Notation: key) {
                 let coord = addr.packedCoordinate
@@ -400,6 +598,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case name
         case cellsByCoordinate
         case rawCells
+        case cellStyles
+        case pageSetup
+        case sheetComments
+        case trackChangesEnabled
+        case additionalSheets
+        case activeSheetIndex
     }
 
     public init(from decoder: Decoder) throws {
@@ -420,6 +624,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                 }
             }
         }
+        self.cellStyles = try container.decodeIfPresent([PackedCellCoordinate: CellStyle].self, forKey: .cellStyles) ?? [:]
+        self.pageSetup = try container.decodeIfPresent(WorksheetPageSetup.self, forKey: .pageSetup) ?? WorksheetPageSetup()
+        self.sheetComments = try container.decodeIfPresent([PackedCellCoordinate: String].self, forKey: .sheetComments) ?? [:]
+        self.trackChangesEnabled = try container.decodeIfPresent(Bool.self, forKey: .trackChangesEnabled) ?? false
+        self.additionalSheets = try container.decodeIfPresent([WorksheetSheetPage].self, forKey: .additionalSheets) ?? []
+        self.activeSheetIndex = try container.decodeIfPresent(Int.self, forKey: .activeSheetIndex) ?? 0
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -427,10 +637,162 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encode(cellsByCoordinate, forKey: .cellsByCoordinate)
+        try container.encode(cellStyles, forKey: .cellStyles)
+        try container.encode(pageSetup, forKey: .pageSetup)
+        try container.encode(sheetComments, forKey: .sheetComments)
+        try container.encode(trackChangesEnabled, forKey: .trackChangesEnabled)
+        try container.encode(additionalSheets, forKey: .additionalSheets)
+        try container.encode(activeSheetIndex, forKey: .activeSheetIndex)
     }
 
     public static func == (lhs: WorksheetModel, rhs: WorksheetModel) -> Bool {
-        lhs.id == rhs.id && lhs.name == rhs.name && lhs.cellsByCoordinate == rhs.cellsByCoordinate
+        lhs.id == rhs.id &&
+            lhs.name == rhs.name &&
+            lhs.cellsByCoordinate == rhs.cellsByCoordinate &&
+            lhs.cellStyles == rhs.cellStyles &&
+            lhs.pageSetup == rhs.pageSetup &&
+            lhs.sheetComments == rhs.sheetComments &&
+            lhs.trackChangesEnabled == rhs.trackChangesEnabled &&
+            lhs.additionalSheets == rhs.additionalSheets &&
+            lhs.activeSheetIndex == rhs.activeSheetIndex
+    }
+
+    // MARK: - Multi-Sheet Management & Cell Style Helpers
+
+    /// Appends a new sheet tab to the workbook while keeping the current active sheet selected.
+    public mutating func addSheetPage(
+        named sheetName: String,
+        initialCells: [PackedCellCoordinate: String] = [:]
+    ) {
+        let trimmed = sheetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = trimmed.isEmpty ? "Sheet\(allSheetNames.count + 1)" : trimmed
+        additionalSheets.append(
+            WorksheetSheetPage(
+                name: resolvedName,
+                cellsByCoordinate: initialCells,
+                cellStyles: [:]
+            )
+        )
+    }
+
+    /// Switches the active worksheet tab to `newIndex` (`0 ..< allSheetNames.count`), preserving tab order and rebuilding `compiledASTs`.
+    public mutating func switchActiveSheet(to newIndex: Int) {
+        var allPages = additionalSheets
+        let currentInsertionIndex = min(max(0, activeSheetIndex), allPages.count)
+        let currentActivePage = WorksheetSheetPage(
+            name: name,
+            cellsByCoordinate: cellsByCoordinate,
+            cellStyles: cellStyles
+        )
+        allPages.insert(currentActivePage, at: currentInsertionIndex)
+        guard allPages.indices.contains(newIndex), newIndex != currentInsertionIndex else {
+            return
+        }
+
+        let targetPage = allPages.remove(at: newIndex)
+        self.name = targetPage.name
+        self.cellsByCoordinate = targetPage.cellsByCoordinate
+        self.cellStyles = targetPage.cellStyles
+        self.additionalSheets = allPages
+        self.activeSheetIndex = newIndex
+
+        self.compiledASTs.removeAll(keepingCapacity: true)
+        for (coord, rawVal) in self.cellsByCoordinate where !rawVal.isEmpty {
+            self.compiledASTs[coord] = Self.compileCellInput(rawVal)
+        }
+    }
+
+    /// Returns ordered `WorksheetSheetPage` snapshots for all tabs in the workbook.
+    public func orderedSheetPages() -> [WorksheetSheetPage] {
+        var allPages = additionalSheets
+        let currentInsertionIndex = min(max(0, activeSheetIndex), allPages.count)
+        let currentActivePage = WorksheetSheetPage(
+            id: id,
+            name: name,
+            cellsByCoordinate: cellsByCoordinate,
+            cellStyles: cellStyles
+        )
+        allPages.insert(currentActivePage, at: currentInsertionIndex)
+        return allPages
+    }
+
+    public mutating func setCellStyle(_ style: CellStyle, at a1: String) throws {
+        let addr = try CellAddress(a1Notation: a1)
+        setCellStyle(style, at: addr.packedCoordinate)
+    }
+
+    public mutating func setCellStyle(_ style: CellStyle, at coord: PackedCellCoordinate) {
+        if style == CellStyle() {
+            cellStyles.removeValue(forKey: coord)
+        } else {
+            cellStyles[coord] = style
+        }
+    }
+
+    public func cellStyle(at a1: String) -> CellStyle {
+        guard let addr = try? CellAddress(a1Notation: a1) else { return CellStyle() }
+        return cellStyles[addr.packedCoordinate] ?? CellStyle()
+    }
+
+    public func cellStyle(at coord: PackedCellCoordinate) -> CellStyle {
+        cellStyles[coord] ?? CellStyle()
+    }
+
+    /// Formats the evaluated display string for `address`, optionally reading from a pre-evaluated batch grid dictionary.
+    public func formattedDisplayValue(
+        at address: CellAddress,
+        using preEvaluated: [PackedCellCoordinate: EvaluatedCellValue]? = nil
+    ) -> String {
+        let coord = address.packedCoordinate
+        let val = preEvaluated?[coord] ?? evaluate(at: coord)
+        let style = cellStyles[coord] ?? CellStyle()
+        return style.numberFormat.format(val)
+    }
+
+    /// Automatically detects the bounding `CellRange` of all non-empty cells in the active sheet (falling back to `A1:D5` if empty).
+    public func detectedDataRange() -> CellRange {
+        guard !cellsByCoordinate.isEmpty else {
+            let start = (try? CellAddress(column: 0, row: 0)) ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
+            let end = (try? CellAddress(column: 3, row: 4)) ?? start
+            return CellRange(start: start, end: end)
+        }
+        var minRow = Int.max
+        var maxRow = 0
+        var minCol = Int.max
+        var maxCol = 0
+        for coord in cellsByCoordinate.keys {
+            minRow = min(minRow, coord.row)
+            maxRow = max(maxRow, coord.row)
+            minCol = min(minCol, coord.column)
+            maxCol = max(maxCol, coord.column)
+        }
+        let start = (try? CellAddress(column: minCol, row: minRow)) ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
+        let end = (try? CellAddress(column: maxCol, row: maxRow)) ?? start
+        return CellRange(start: start, end: end)
+    }
+
+    /// Automatically detects the bounding `CellRange` of all numeric-valued cells in the active sheet (falling back to `detectedDataRange()`).
+    public func detectedNumericRange() -> CellRange {
+        var context = EvaluationContext()
+        var minRow = Int.max
+        var maxRow = -1
+        var minCol = Int.max
+        var maxCol = -1
+        for coord in cellsByCoordinate.keys {
+            let val = evaluateInternal(at: coord, context: &context, depth: 0)
+            if case .number = val {
+                minRow = min(minRow, coord.row)
+                maxRow = max(maxRow, coord.row)
+                minCol = min(minCol, coord.column)
+                maxCol = max(maxCol, coord.column)
+            }
+        }
+        guard maxRow >= minRow, maxCol >= minCol else {
+            return detectedDataRange()
+        }
+        let start = (try? CellAddress(column: minCol, row: minRow)) ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
+        let end = (try? CellAddress(column: maxCol, row: maxRow)) ?? start
+        return CellRange(start: start, end: end)
     }
 
     public mutating func setCell(_ a1: String, rawValue: String) throws {
@@ -468,7 +830,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
     // MARK: - Evaluation Context & Public Entrypoints
 
-    private struct EvaluationContext {
+    internal struct EvaluationContext {
         var visited: Set<PackedCellCoordinate> = []
         var memo: [PackedCellCoordinate: EvaluatedCellValue] = [:]
     }
@@ -488,6 +850,24 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         }
         var context = EvaluationContext()
         return evaluateInternal(at: packed, context: &context, depth: 0)
+    }
+
+    /// Evaluates an entire rectangular grid of `rows` and `columns` sharing a single `EvaluationContext` memo table.
+    public func evaluateGrid(
+        rows: ClosedRange<Int>,
+        columns: ClosedRange<Int>
+    ) -> [PackedCellCoordinate: EvaluatedCellValue] {
+        var context = EvaluationContext()
+        var result: [PackedCellCoordinate: EvaluatedCellValue] = [:]
+        result.reserveCapacity(min(cellsByCoordinate.count, rows.count * columns.count))
+        for r in rows where r >= 0 && r <= CellAddress.maxZeroBasedRow {
+            for c in columns where c >= 0 && c <= CellAddress.maxZeroBasedColumn {
+                let coord = PackedCellCoordinate(row: r, column: c)
+                guard cellsByCoordinate[coord] != nil else { continue }
+                result[coord] = evaluateInternal(at: coord, context: &context, depth: 0)
+            }
+        }
+        return result
     }
 
     /// Evaluates and sorts rows within `range` by the zero-based `colOffset` relative to `range`.
@@ -528,7 +908,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         return evaluateGridInternal(in: range, context: &context, depth: 0)
     }
 
-    private func evaluateGridInternal(
+    internal func evaluateGridInternal(
         in range: CellRange,
         context: inout EvaluationContext,
         depth: Int
@@ -663,34 +1043,50 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     }
 
     private static func compileTopLevelComparison(_ expr: String) -> FormulaAST? {
-        let chars = Array(expr)
+        let utf8 = expr.utf8
         var parenDepth = 0
         var inQuotes = false
-        var i = 0
-        while i < chars.count {
-            let ch = chars[i]
-            if ch == "\"" { inQuotes.toggle() }
-            if !inQuotes {
-                if ch == "(" { parenDepth += 1 }
-                else if ch == ")" { parenDepth -= 1 }
-                else if parenDepth == 0 {
-                    let twoChar = (i + 1 < chars.count) ? String([chars[i], chars[i + 1]]) : ""
+        var idx = utf8.startIndex
+        while idx < utf8.endIndex {
+            let b = utf8[idx]
+            if b == 0x22 { // '"'
+                inQuotes.toggle()
+            } else if !inQuotes {
+                if b == 0x28 { // '('
+                    parenDepth += 1
+                } else if b == 0x29 { // ')'
+                    parenDepth -= 1
+                } else if parenDepth == 0 {
+                    let nextIdx = utf8.index(after: idx)
+                    let nextByte: UInt8? = nextIdx < utf8.endIndex ? utf8[nextIdx] : nil
                     let op: String?
-                    let opLen: Int
-                    if twoChar == ">=" || twoChar == "<=" || twoChar == "<>" {
-                        op = twoChar
-                        opLen = 2
-                    } else if ch == "=" || ch == ">" || ch == "<" {
-                        op = String(ch)
-                        opLen = 1
+                    let afterOpIdx: String.Index
+                    if b == 0x3E && nextByte == 0x3D { // ">="
+                        op = ">="
+                        afterOpIdx = utf8.index(after: nextIdx)
+                    } else if b == 0x3C && nextByte == 0x3D { // "<="
+                        op = "<="
+                        afterOpIdx = utf8.index(after: nextIdx)
+                    } else if b == 0x3C && nextByte == 0x3E { // "<>"
+                        op = "<>"
+                        afterOpIdx = utf8.index(after: nextIdx)
+                    } else if b == 0x3D { // "="
+                        op = "="
+                        afterOpIdx = nextIdx
+                    } else if b == 0x3E { // ">"
+                        op = ">"
+                        afterOpIdx = nextIdx
+                    } else if b == 0x3C { // "<"
+                        op = "<"
+                        afterOpIdx = nextIdx
                     } else {
                         op = nil
-                        opLen = 0
+                        afterOpIdx = nextIdx
                     }
 
                     if let op {
-                        let leftStr = String(chars[0..<i]).trimmingCharacters(in: .whitespaces)
-                        let rightStr = String(chars[(i + opLen)...]).trimmingCharacters(in: .whitespaces)
+                        let leftStr = String(expr[expr.startIndex..<idx]).trimmingCharacters(in: .whitespaces)
+                        let rightStr = String(expr[afterOpIdx..<expr.endIndex]).trimmingCharacters(in: .whitespaces)
                         guard !leftStr.isEmpty, !rightStr.isEmpty else { return nil }
                         return .comparisonOp(
                             op: op,
@@ -700,31 +1096,47 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
                     }
                 }
             }
-            i += 1
+            idx = utf8.index(after: idx)
         }
         return nil
     }
 
     private static func compileBinaryArithmetic(_ expr: String) -> FormulaAST? {
-        let chars = Array(expr)
-        for operators: [Character] in [["+", "-"], ["*", "/"]] {
+        let utf8 = expr.utf8
+        guard !utf8.isEmpty else { return nil }
+        let operatorPasses: [(UInt8, UInt8)] = [
+            (0x2B, 0x2D), // '+', '-'
+            (0x2A, 0x2F)  // '*', '/'
+        ]
+        for (opA, opB) in operatorPasses {
             var parenDepth = 0
             var inQuotes = false
-            for idx in stride(from: chars.count - 1, through: 0, by: -1) {
-                let ch = chars[idx]
-                if ch == "\"" { inQuotes.toggle() }
+            var idx = utf8.endIndex
+            while idx > utf8.startIndex {
+                idx = utf8.index(before: idx)
+                let b = utf8[idx]
+                if b == 0x22 { // '"'
+                    inQuotes.toggle()
+                    continue
+                }
                 if inQuotes { continue }
-                if ch == ")" { parenDepth += 1 }
-                else if ch == "(" { parenDepth -= 1 }
-                else if parenDepth == 0 && idx > 0 && operators.contains(ch) {
-                    let lhsStr = String(chars[0..<idx]).trimmingCharacters(in: .whitespaces)
-                    let rhsStr = String(chars[(idx + 1)...]).trimmingCharacters(in: .whitespaces)
+                if b == 0x29 { // ')'
+                    parenDepth += 1
+                } else if b == 0x28 { // '('
+                    parenDepth -= 1
+                } else if parenDepth == 0 && idx > utf8.startIndex && (b == opA || b == opB) {
+                    let nextIdx = utf8.index(after: idx)
+                    let lhsStr = String(expr[expr.startIndex..<idx]).trimmingCharacters(in: .whitespaces)
+                    let rhsStr = String(expr[nextIdx..<expr.endIndex]).trimmingCharacters(in: .whitespaces)
                     if lhsStr.isEmpty || rhsStr.isEmpty { continue }
-                    if let prevChar = lhsStr.last, ["+", "-", "*", "/", "(", ",", "=", "<", ">"].contains(prevChar) {
+                    if let prevByte = lhsStr.utf8.last,
+                       prevByte == 0x2B || prevByte == 0x2D || prevByte == 0x2A || prevByte == 0x2F ||
+                       prevByte == 0x28 || prevByte == 0x2C || prevByte == 0x3D || prevByte == 0x3C || prevByte == 0x3E {
                         continue
                     }
+                    let opStr = b == 0x2B ? "+" : (b == 0x2D ? "-" : (b == 0x2A ? "*" : "/"))
                     return .binaryOp(
-                        op: String(ch),
+                        op: opStr,
                         lhs: compileExpression(lhsStr),
                         rhs: compileExpression(rhsStr)
                     )
@@ -736,7 +1148,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
     // MARK: - AST Evaluator with DAG Memoization
 
-    private func evaluateInternal(
+    internal func evaluateInternal(
         at packed: PackedCellCoordinate,
         context: inout EvaluationContext,
         depth: Int
@@ -773,7 +1185,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         }
     }
 
-    private func evaluateAST(
+    internal func evaluateAST(
         _ ast: FormulaAST,
         context: inout EvaluationContext,
         depth: Int
@@ -863,857 +1275,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         }
     }
 
-    // MARK: - Modular Function Dispatch (77 Built-in Functions)
-
-    private enum FormulaResolutionResult {
-        case success([EvaluatedCellValue])
-        case failure(String)
-    }
-
-    private struct EvalFrame {
-        let args: [FormulaAST]
-        var cache: [EvaluatedCellValue?]
-        var context: EvaluationContext
-        let depth: Int
-
-        var count: Int { args.count }
-        var indices: Range<Int> { args.indices }
-
-        mutating func arg(_ index: Int, in sheet: WorksheetModel) -> EvaluatedCellValue {
-            guard args.indices.contains(index) else { return .error("#VALUE!") }
-            if let cached = cache[index] {
-                return cached
-            }
-            let val = sheet.evaluateAST(args[index], context: &context, depth: depth + 1)
-            cache[index] = val
-            return val
-        }
-
-        mutating func resolve(_ range: Range<Int>, in sheet: WorksheetModel) -> FormulaResolutionResult {
-            var values: [EvaluatedCellValue] = []
-            for idx in range {
-                let item = args[idx]
-                switch item {
-                case let .rangeRef(cellRange):
-                    for addr in cellRange.expandedAddresses() {
-                        let v = sheet.evaluateInternal(at: addr.packedCoordinate, context: &context, depth: depth + 1)
-                        if case let .error(code) = v { return .failure(code) }
-                        values.append(v)
-                    }
-                case let .error(err):
-                    return .failure(err.rawValue)
-                default:
-                    let v = arg(idx, in: sheet)
-                    if case let .error(code) = v { return .failure(code) }
-                    values.append(v)
-                }
-            }
-            return .success(values)
-        }
-    }
-
-    private func evaluateFunction(
-        name: String,
-        args: [FormulaAST],
-        context: inout EvaluationContext,
-        depth: Int
-    ) -> EvaluatedCellValue {
-        var takenContext = EvaluationContext()
-        swap(&takenContext, &context)
-        var frame = EvalFrame(
-            args: args,
-            cache: Array<EvaluatedCellValue?>(repeating: nil, count: args.count),
-            context: takenContext,
-            depth: depth
-        )
-        defer { swap(&context, &frame.context) }
-
-        if !Self.lazyOrRefFunctions.contains(name) {
-            for (idx, item) in args.enumerated() {
-                if case .rangeRef = item { continue }
-                let evaluated = frame.arg(idx, in: self)
-                if case .error = evaluated {
-                    return evaluated
-                }
-            }
-        }
-
-        if let res = evaluateMathAndTrigFunction(name: name, frame: &frame) { return res }
-        if let res = evaluateStatisticalFunction(name: name, frame: &frame) { return res }
-        if let res = evaluateLogicalFunction(name: name, frame: &frame) { return res }
-        if let res = evaluateLookupAndRefFunction(name: name, frame: &frame) { return res }
-        if let res = evaluateTextFunction(name: name, frame: &frame) { return res }
-        if let res = evaluateFinancialAndDateFunction(name: name, frame: &frame) { return res }
-
-        return .error("#NAME?")
-    }
-
-    // MARK: - 1. Math & Trig Functions
-
-    private func evaluateMathAndTrigFunction(name: String, frame: inout EvalFrame) -> EvaluatedCellValue? {
-        switch name {
-        case "SUM":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals): return .number(vals.compactMap { $0.numericValue }.reduce(0.0, +))
-            }
-        case "AVERAGE":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let nums = vals.compactMap { $0.numericValue }
-                guard !nums.isEmpty else { return .error("#DIV/0!") }
-                return .number(nums.reduce(0.0, +) / Double(nums.count))
-            }
-        case "MIN":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals): return .number(vals.compactMap { $0.numericValue }.min() ?? 0.0)
-            }
-        case "MAX":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals): return .number(vals.compactMap { $0.numericValue }.max() ?? 0.0)
-            }
-        case "COUNT":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let count = vals.filter { if case .number = $0 { return true }; return false }.count
-                return .number(Double(count))
-            }
-        case "COUNTA":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                return .number(Double(vals.filter { $0 != EvaluatedCellValue.empty }.count))
-            }
-        case "COUNTBLANK":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                return .number(Double(vals.filter { $0 == .empty || $0 == .text("") }.count))
-            }
-        case "ABS":
-            guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            return .number(abs(num))
-        case "ROUND":
-            guard frame.count == 2,
-                  let num = frame.arg(0, in: self).numericValue,
-                  let digitsNum = frame.arg(1, in: self).numericValue,
-                  let digits = Self.safeInt(digitsNum) else { return .error("#VALUE!") }
-            let factor = pow(10.0, Double(digits))
-            let result = (num * factor).rounded() / factor
-            guard result.isFinite else { return .error("#NUM!") }
-            return .number(result)
-        case "ROUNDUP":
-            guard frame.count == 2,
-                  let num = frame.arg(0, in: self).numericValue,
-                  let digitsNum = frame.arg(1, in: self).numericValue,
-                  let digits = Self.safeInt(digitsNum) else { return .error("#VALUE!") }
-            let factor = pow(10.0, Double(digits))
-            let scaled = num * factor
-            let rounded = (scaled >= 0 ? ceil(scaled) : floor(scaled)) / factor
-            guard rounded.isFinite else { return .error("#NUM!") }
-            return .number(rounded)
-        case "ROUNDDOWN":
-            guard frame.count == 2,
-                  let num = frame.arg(0, in: self).numericValue,
-                  let digitsNum = frame.arg(1, in: self).numericValue,
-                  let digits = Self.safeInt(digitsNum) else { return .error("#VALUE!") }
-            let factor = pow(10.0, Double(digits))
-            let rounded = trunc(num * factor) / factor
-            guard rounded.isFinite else { return .error("#NUM!") }
-            return .number(rounded)
-        case "INT":
-            guard frame.count == 1, let num = frame.arg(0, in: self).numericValue, num.isFinite else { return .error("#VALUE!") }
-            return .number(floor(num))
-        case "TRUNC":
-            guard (1...2).contains(frame.count), let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            let digits: Int
-            if frame.count == 2 {
-                guard let dNum = frame.arg(1, in: self).numericValue, let dInt = Self.safeInt(dNum) else { return .error("#VALUE!") }
-                digits = dInt
-            } else {
-                digits = 0
-            }
-            let factor = pow(10.0, Double(digits))
-            let result = trunc(num * factor) / factor
-            guard result.isFinite else { return .error("#NUM!") }
-            return .number(result)
-        case "MOD":
-            guard frame.count == 2,
-                  let num = frame.arg(0, in: self).numericValue,
-                  let divisor = frame.arg(1, in: self).numericValue else { return .error("#VALUE!") }
-            guard divisor != 0.0 else { return .error("#DIV/0!") }
-            return .number(num - divisor * floor(num / divisor))
-        case "SQRT":
-            guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            guard num >= 0.0 else { return .error("#NUM!") }
-            return .number(sqrt(num))
-        case "POWER":
-            guard frame.count == 2,
-                  let base = frame.arg(0, in: self).numericValue,
-                  let expVal = frame.arg(1, in: self).numericValue else { return .error("#VALUE!") }
-            let result = pow(base, expVal)
-            guard result.isFinite else { return .error("#NUM!") }
-            return .number(result)
-        case "PRODUCT":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let nums = vals.compactMap { $0.numericValue }
-                return .number(nums.isEmpty ? 0.0 : nums.reduce(1.0, *))
-            }
-        case "SUMPRODUCT":
-            guard frame.count > 0 else { return .error("#VALUE!") }
-            var vectors: [[Double]] = []
-            for idx in frame.indices {
-                switch frame.resolve(idx..<(idx + 1), in: self) {
-                case let .failure(err): return .error(err)
-                case let .success(vals): vectors.append(vals.map { $0.numericValue ?? 0.0 })
-                }
-            }
-            guard let length = vectors.first?.count, length > 0, vectors.allSatisfy({ $0.count == length }) else {
-                return .error("#VALUE!")
-            }
-            var total = 0.0
-            for i in 0..<length {
-                var rowProd = 1.0
-                for vec in vectors { rowProd *= vec[i] }
-                total += rowProd
-            }
-            return .number(total)
-        case "SUMIF":
-            guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
-            let critVal = frame.arg(1, in: self)
-            switch frame.resolve(0..<1, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(criteriaCells):
-                let targetCells: [EvaluatedCellValue]
-                if frame.count == 3 {
-                    switch frame.resolve(2..<3, in: self) {
-                    case let .failure(err): return .error(err)
-                    case let .success(sumCells):
-                        guard sumCells.count == criteriaCells.count else { return .error("#VALUE!") }
-                        targetCells = sumCells
-                    }
-                } else {
-                    targetCells = criteriaCells
-                }
-                var sum = 0.0
-                for idx in criteriaCells.indices {
-                    if Self.matchesCriteriaValue(criteriaCells[idx], criteriaValue: critVal),
-                       let num = targetCells[idx].numericValue {
-                        sum += num
-                    }
-                }
-                return .number(sum)
-            }
-        case "COUNTIF":
-            guard frame.count == 2 else { return .error("#VALUE!") }
-            let critVal = frame.arg(1, in: self)
-            switch frame.resolve(0..<1, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(criteriaCells):
-                return .number(Double(criteriaCells.filter { Self.matchesCriteriaValue($0, criteriaValue: critVal) }.count))
-            }
-        case "AVERAGEIF":
-            guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
-            let critVal = frame.arg(1, in: self)
-            switch frame.resolve(0..<1, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(criteriaCells):
-                let targetCells: [EvaluatedCellValue]
-                if frame.count == 3 {
-                    switch frame.resolve(2..<3, in: self) {
-                    case let .failure(err): return .error(err)
-                    case let .success(avgCells):
-                        guard avgCells.count == criteriaCells.count else { return .error("#VALUE!") }
-                        targetCells = avgCells
-                    }
-                } else {
-                    targetCells = criteriaCells
-                }
-                var matchedNumbers: [Double] = []
-                for idx in criteriaCells.indices {
-                    if Self.matchesCriteriaValue(criteriaCells[idx], criteriaValue: critVal),
-                       let num = targetCells[idx].numericValue {
-                        matchedNumbers.append(num)
-                    }
-                }
-                guard !matchedNumbers.isEmpty else { return .error("#DIV/0!") }
-                return .number(matchedNumbers.reduce(0.0, +) / Double(matchedNumbers.count))
-            }
-        case "CEILING":
-            guard (1...2).contains(frame.count), let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            let sig = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 1.0) : 1.0
-            guard sig != 0.0 else { return .number(0.0) }
-            let result = ceil(num / sig) * sig
-            guard result.isFinite else { return .error("#NUM!") }
-            return .number(result)
-        case "FLOOR":
-            guard (1...2).contains(frame.count), let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            let sig = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 1.0) : 1.0
-            guard sig != 0.0 else { return .error("#DIV/0!") }
-            let result = floor(num / sig) * sig
-            guard result.isFinite else { return .error("#NUM!") }
-            return .number(result)
-        case "SIGN":
-            guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            return .number(num > 0 ? 1.0 : (num < 0 ? -1.0 : 0.0))
-        case "LN":
-            guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            guard num > 0 else { return .error("#NUM!") }
-            return .number(log(num))
-        case "LOG10":
-            guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            guard num > 0 else { return .error("#NUM!") }
-            return .number(log10(num))
-        case "EXP":
-            guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            let result = exp(num)
-            guard result.isFinite else { return .error("#NUM!") }
-            return .number(result)
-        default:
-            return nil
-        }
-    }
-
-    // MARK: - 2. Statistical Functions
-
-    private func evaluateStatisticalFunction(name: String, frame: inout EvalFrame) -> EvaluatedCellValue? {
-        switch name {
-        case "MEDIAN":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let sorted = vals.compactMap { $0.numericValue }.sorted()
-                guard !sorted.isEmpty else { return .error("#NUM!") }
-                let mid = sorted.count / 2
-                return .number(sorted.count % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0)
-            }
-        case "MODE":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let nums = vals.compactMap { $0.numericValue }
-                guard !nums.isEmpty else { return .error("#N/A") }
-                var counts: [Double: Int] = [:]
-                for n in nums { counts[n, default: 0] += 1 }
-                guard let best = nums.max(by: { counts[$0, default: 0] < counts[$1, default: 0] }),
-                      (counts[best] ?? 0) > 1 else { return .error("#N/A") }
-                return .number(best)
-            }
-        case "VAR":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let nums = vals.compactMap { $0.numericValue }
-                guard nums.count >= 2 else { return .error("#DIV/0!") }
-                let mean = nums.reduce(0.0, +) / Double(nums.count)
-                let sumSq = nums.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) }
-                return .number(sumSq / Double(nums.count - 1))
-            }
-        case "STDEV":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let nums = vals.compactMap { $0.numericValue }
-                guard nums.count >= 2 else { return .error("#DIV/0!") }
-                let mean = nums.reduce(0.0, +) / Double(nums.count)
-                let sumSq = nums.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) }
-                return .number(sqrt(sumSq / Double(nums.count - 1)))
-            }
-        case "LARGE":
-            guard frame.count == 2 else { return .error("#VALUE!") }
-            switch frame.resolve(0..<1, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                guard let kVal = frame.arg(1, in: self).numericValue, let k = Self.safeInt(kVal) else { return .error("#VALUE!") }
-                let sortedDesc = vals.compactMap { $0.numericValue }.sorted(by: >)
-                guard k >= 1, k <= sortedDesc.count else { return .error("#NUM!") }
-                return .number(sortedDesc[k - 1])
-            }
-        case "SMALL":
-            guard frame.count == 2 else { return .error("#VALUE!") }
-            switch frame.resolve(0..<1, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                guard let kVal = frame.arg(1, in: self).numericValue, let k = Self.safeInt(kVal) else { return .error("#VALUE!") }
-                let sortedAsc = vals.compactMap { $0.numericValue }.sorted(by: <)
-                guard k >= 1, k <= sortedAsc.count else { return .error("#NUM!") }
-                return .number(sortedAsc[k - 1])
-            }
-        case "RANK":
-            guard (2...3).contains(frame.count), let target = frame.arg(0, in: self).numericValue else { return .error("#VALUE!") }
-            switch frame.resolve(1..<2, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let order = frame.count == 3 ? (Self.safeInt(frame.arg(2, in: self).numericValue ?? 0.0) ?? 0) : 0
-                let nums = vals.compactMap { $0.numericValue }
-                guard nums.contains(target) else { return .error("#N/A") }
-                let rank = order == 0 ? 1 + nums.filter { $0 > target }.count : 1 + nums.filter { $0 < target }.count
-                return .number(Double(rank))
-            }
-        default:
-            return nil
-        }
-    }
-
-    // MARK: - 3. Logical Functions
-
-    private func evaluateLogicalFunction(name: String, frame: inout EvalFrame) -> EvaluatedCellValue? {
-        switch name {
-        case "TRUE": return .boolean(true)
-        case "FALSE": return .boolean(false)
-        case "IF":
-            guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
-            let condVal = frame.arg(0, in: self)
-            if case .error = condVal { return condVal }
-            if condVal.booleanValue == true { return frame.arg(1, in: self) }
-            return frame.count == 3 ? frame.arg(2, in: self) : .boolean(false)
-        case "IFS":
-            guard frame.count >= 2, frame.count % 2 == 0 else { return .error("#VALUE!") }
-            for i in stride(from: 0, to: frame.count, by: 2) {
-                let condVal = frame.arg(i, in: self)
-                if case .error = condVal { return condVal }
-                if condVal.booleanValue == true { return frame.arg(i + 1, in: self) }
-            }
-            return .error("#N/A")
-        case "AND":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                guard !vals.isEmpty else { return .error("#VALUE!") }
-                return .boolean(vals.allSatisfy { $0.booleanValue == true })
-            }
-        case "OR":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                guard !vals.isEmpty else { return .error("#VALUE!") }
-                return .boolean(vals.contains { $0.booleanValue == true })
-            }
-        case "NOT":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            let v = frame.arg(0, in: self)
-            if case .error = v { return v }
-            return .boolean(!(v.booleanValue ?? false))
-        case "XOR":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                guard !vals.isEmpty else { return .error("#VALUE!") }
-                return .boolean(vals.filter { $0.booleanValue == true }.count % 2 == 1)
-            }
-        case "IFERROR":
-            guard frame.count == 2 else { return .error("#VALUE!") }
-            let primary = frame.arg(0, in: self)
-            if case .error = primary { return frame.arg(1, in: self) }
-            return primary
-        case "SWITCH":
-            guard frame.count >= 3 else { return .error("#VALUE!") }
-            let target = frame.arg(0, in: self)
-            if case .error = target { return target }
-            let pairLimit = frame.count - (frame.count % 2 == 0 ? 1 : 0)
-            var idx = 1
-            while idx + 1 <= pairLimit {
-                let candidate = frame.arg(idx, in: self)
-                if case .error = candidate { return candidate }
-                if candidate == target || candidate.description.caseInsensitiveCompare(target.description) == .orderedSame {
-                    return frame.arg(idx + 1, in: self)
-                }
-                idx += 2
-            }
-            return frame.count % 2 == 0 ? frame.arg(frame.count - 1, in: self) : .error("#N/A")
-        default:
-            return nil
-        }
-    }
-
-    // MARK: - 4. Lookup & Reference Functions
-
-    private func evaluateLookupAndRefFunction(name: String, frame: inout EvalFrame) -> EvaluatedCellValue? {
-        switch name {
-        case "VLOOKUP":
-            guard (3...4).contains(frame.count),
-                  let range = frame.args[1].asCellRange,
-                  let colIndexVal = frame.arg(2, in: self).numericValue,
-                  let rawColIdx = Self.safeInt(colIndexVal) else { return .error("#VALUE!") }
-            let lookupVal = frame.arg(0, in: self)
-            let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
-            let grid = evaluateGridInternal(in: range, context: &frame.context, depth: frame.depth + 1)
-            let colIdx = rawColIdx - 1
-            guard let firstRow = grid.first, colIdx >= 0, colIdx < firstRow.count else { return .error("#REF!") }
-            for row in grid where Self.cellValuesEqual(row[0], lookupVal) {
-                return row[colIdx]
-            }
-            if isApprox, let targetNum = lookupVal.numericValue {
-                var bestRow: [EvaluatedCellValue]?
-                var bestNum = -Double.infinity
-                for row in grid {
-                    if let n = row[0].numericValue, n <= targetNum, n >= bestNum {
-                        bestNum = n
-                        bestRow = row
-                    }
-                }
-                if let bestRow { return bestRow[colIdx] }
-            }
-            return .error("#N/A")
-
-        case "HLOOKUP":
-            guard (3...4).contains(frame.count),
-                  let range = frame.args[1].asCellRange,
-                  let rowIndexVal = frame.arg(2, in: self).numericValue,
-                  let rawRowIdx = Self.safeInt(rowIndexVal) else { return .error("#VALUE!") }
-            let lookupVal = frame.arg(0, in: self)
-            let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
-            let grid = evaluateGridInternal(in: range, context: &frame.context, depth: frame.depth + 1)
-            let rowIdx = rawRowIdx - 1
-            guard rowIdx >= 0, rowIdx < grid.count, let headerRow = grid.first else { return .error("#REF!") }
-            for col in headerRow.indices where Self.cellValuesEqual(headerRow[col], lookupVal) {
-                return grid[rowIdx][col]
-            }
-            if isApprox, let targetNum = lookupVal.numericValue {
-                var bestCol: Int?
-                var bestNum = -Double.infinity
-                for col in headerRow.indices {
-                    if let n = headerRow[col].numericValue, n <= targetNum, n >= bestNum {
-                        bestNum = n
-                        bestCol = col
-                    }
-                }
-                if let bestCol { return grid[rowIdx][bestCol] }
-            }
-            return .error("#N/A")
-
-        case "XLOOKUP":
-            guard (3...4).contains(frame.count) else { return .error("#VALUE!") }
-            switch (frame.resolve(1..<2, in: self), frame.resolve(2..<3, in: self)) {
-            case (let .failure(err), _), (_, let .failure(err)): return .error(err)
-            case let (.success(lookupArr), .success(returnArr)):
-                guard lookupArr.count == returnArr.count else { return .error("#VALUE!") }
-                let lookupVal = frame.arg(0, in: self)
-                for idx in lookupArr.indices where Self.cellValuesEqual(lookupArr[idx], lookupVal) {
-                    return returnArr[idx]
-                }
-                return frame.count == 4 ? frame.arg(3, in: self) : .error("#N/A")
-            }
-
-        case "INDEX":
-            guard (2...3).contains(frame.count),
-                  let range = frame.args[0].asCellRange,
-                  let rowNumVal = frame.arg(1, in: self).numericValue,
-                  let rawRowIdx = Self.safeInt(rowNumVal) else { return .error("#VALUE!") }
-            let colNumVal = frame.count == 3 ? (frame.arg(2, in: self).numericValue ?? 1.0) : 1.0
-            guard let rawColIdx = Self.safeInt(colNumVal) else { return .error("#VALUE!") }
-            let grid = evaluateGridInternal(in: range, context: &frame.context, depth: frame.depth + 1)
-            let rIdx = rawRowIdx - 1
-            let cIdx = rawColIdx - 1
-            if grid.count == 1, frame.count == 2, rIdx >= 0, rIdx < grid[0].count {
-                return grid[0][rIdx]
-            }
-            guard rIdx >= 0, rIdx < grid.count, cIdx >= 0, cIdx < grid[rIdx].count else { return .error("#REF!") }
-            return grid[rIdx][cIdx]
-
-        case "MATCH":
-            guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
-            switch frame.resolve(1..<2, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(lookupArr):
-                let lookupVal = frame.arg(0, in: self)
-                for (idx, item) in lookupArr.enumerated() where Self.cellValuesEqual(item, lookupVal) {
-                    return .number(Double(idx + 1))
-                }
-                return .error("#N/A")
-            }
-
-        case "CHOOSE":
-            guard frame.count >= 2 else { return .error("#VALUE!") }
-            let firstArg = frame.arg(0, in: self)
-            if case .error = firstArg { return firstArg }
-            guard let idxVal = firstArg.numericValue, let choiceIdx = Self.safeInt(idxVal),
-                  choiceIdx >= 1, choiceIdx < frame.count else { return .error("#VALUE!") }
-            return frame.arg(choiceIdx, in: self)
-
-        case "ROW":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            switch frame.args[0] {
-            case let .cellRef(coord): return .number(Double(coord.row + 1))
-            case let .rangeRef(range): return .number(Double(range.start.row + 1))
-            default: return .error("#REF!")
-            }
-
-        case "COLUMN":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            switch frame.args[0] {
-            case let .cellRef(coord): return .number(Double(coord.column + 1))
-            case let .rangeRef(range): return .number(Double(range.start.column + 1))
-            default: return .error("#REF!")
-            }
-
-        default:
-            return nil
-        }
-    }
-
-    // MARK: - 5. Text Functions
-
-    private func evaluateTextFunction(name: String, frame: inout EvalFrame) -> EvaluatedCellValue? {
-        switch name {
-        case "CONCAT", "CONCATENATE":
-            switch frame.resolve(frame.indices, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals): return .text(vals.map { $0.description }.joined())
-            }
-        case "LEFT":
-            guard (1...2).contains(frame.count) else { return .error("#VALUE!") }
-            let text = frame.arg(0, in: self).description
-            let count: Int
-            if frame.count == 2 {
-                guard let cNum = frame.arg(1, in: self).numericValue, let cInt = Self.safeInt(cNum), cInt >= 0 else {
-                    return .error("#VALUE!")
-                }
-                count = cInt
-            } else {
-                count = 1
-            }
-            return .text(String(text.prefix(count)))
-        case "RIGHT":
-            guard (1...2).contains(frame.count) else { return .error("#VALUE!") }
-            let text = frame.arg(0, in: self).description
-            let count: Int
-            if frame.count == 2 {
-                guard let cNum = frame.arg(1, in: self).numericValue, let cInt = Self.safeInt(cNum), cInt >= 0 else {
-                    return .error("#VALUE!")
-                }
-                count = cInt
-            } else {
-                count = 1
-            }
-            return .text(String(text.suffix(count)))
-        case "MID":
-            guard frame.count == 3,
-                  let startVal = frame.arg(1, in: self).numericValue,
-                  let lenVal = frame.arg(2, in: self).numericValue,
-                  let startOneBased = Self.safeInt(startVal),
-                  let length = Self.safeInt(lenVal),
-                  startOneBased >= 1, length >= 0 else { return .error("#VALUE!") }
-            let startIdx = startOneBased - 1
-            let chars = Array(frame.arg(0, in: self).description)
-            guard startIdx < chars.count else { return .text("") }
-            let endIdx = min(chars.count, startIdx + min(length, chars.count - startIdx))
-            return .text(String(chars[startIdx..<endIdx]))
-        case "LEN":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            return .number(Double(frame.arg(0, in: self).description.count))
-        case "LOWER":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            return .text(frame.arg(0, in: self).description.lowercased())
-        case "UPPER":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            return .text(frame.arg(0, in: self).description.uppercased())
-        case "PROPER":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            return .text(frame.arg(0, in: self).description.capitalized)
-        case "TRIM":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            let parts = frame.arg(0, in: self).description
-                .components(separatedBy: .whitespacesAndNewlines)
-                .filter { !$0.isEmpty }
-            return .text(parts.joined(separator: " "))
-        case "SUBSTITUTE":
-            guard (3...4).contains(frame.count) else { return .error("#VALUE!") }
-            let source = frame.arg(0, in: self).description
-            let target = frame.arg(1, in: self).description
-            let replacement = frame.arg(2, in: self).description
-            guard !target.isEmpty else { return .text(source) }
-            if frame.count == 4, let instNum = frame.arg(3, in: self).numericValue {
-                guard let targetOccurrence = Self.safeInt(instNum), targetOccurrence >= 1 else { return .error("#VALUE!") }
-                var currentOccurrence = 0
-                var result = ""
-                var searchStart = source.startIndex
-                while let range = source.range(of: target, range: searchStart..<source.endIndex) {
-                    currentOccurrence += 1
-                    result += source[searchStart..<range.lowerBound]
-                    if currentOccurrence == targetOccurrence {
-                        result += replacement
-                        result += source[range.upperBound..<source.endIndex]
-                        return .text(result)
-                    } else {
-                        result += target
-                    }
-                    searchStart = range.upperBound
-                }
-                return .text(source)
-            }
-            return .text(source.replacingOccurrences(of: target, with: replacement))
-        case "FIND":
-            guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
-            let needle = frame.arg(0, in: self).description
-            let haystack = frame.arg(1, in: self).description
-            let startOffset: Int
-            if frame.count == 3 {
-                guard let sNum = frame.arg(2, in: self).numericValue, let sInt = Self.safeInt(sNum), sInt >= 1 else {
-                    return .error("#VALUE!")
-                }
-                startOffset = sInt - 1
-            } else {
-                startOffset = 0
-            }
-            guard startOffset < haystack.count else { return .error("#VALUE!") }
-            let startIdx = haystack.index(haystack.startIndex, offsetBy: startOffset)
-            guard let foundRange = haystack.range(of: needle, range: startIdx..<haystack.endIndex) else {
-                return .error("#VALUE!")
-            }
-            return .number(Double(haystack.distance(from: haystack.startIndex, to: foundRange.lowerBound) + 1))
-        case "REPT":
-            guard frame.count == 2,
-                  let timesVal = frame.arg(1, in: self).numericValue,
-                  let count = Self.safeInt(timesVal), count >= 0 else { return .error("#VALUE!") }
-            let str = frame.arg(0, in: self).description
-            let (totalChars, overflow) = str.count.multipliedReportingOverflow(by: count)
-            guard !overflow, totalChars <= Self.maxReptOutputCharacters else { return .error("#VALUE!") }
-            return .text(String(repeating: str, count: count))
-        case "EXACT":
-            guard frame.count == 2 else { return .error("#VALUE!") }
-            return .boolean(frame.arg(0, in: self).description == frame.arg(1, in: self).description)
-        case "VALUE":
-            guard frame.count == 1 else { return .error("#VALUE!") }
-            let cleaned = frame.arg(0, in: self).description
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingOccurrences(of: ",", with: "")
-                .replacingOccurrences(of: "₩", with: "")
-                .replacingOccurrences(of: "$", with: "")
-            guard let num = Double(cleaned), num.isFinite else { return .error("#VALUE!") }
-            return .number(num)
-        case "TEXT":
-            guard frame.count == 2 else { return .error("#VALUE!") }
-            let val = frame.arg(0, in: self)
-            let pattern = frame.arg(1, in: self).description
-            guard let num = val.numericValue, num.isFinite else { return .text(val.description) }
-            if pattern.contains("%") {
-                return .text(String(format: "%.0f%%", num * 100.0))
-            } else if let dotIndex = pattern.firstIndex(of: ".") {
-                let decimals = pattern.distance(from: pattern.index(after: dotIndex), to: pattern.endIndex)
-                return .text(String(format: "%.\(min(10, max(0, decimals)))f", num))
-            }
-            return .text(String(format: "%.0f", num))
-        default:
-            return nil
-        }
-    }
-
-    // MARK: - 6. Financial & Date Functions
-
-    private func evaluateFinancialAndDateFunction(name: String, frame: inout EvalFrame) -> EvaluatedCellValue? {
-        switch name {
-        case "PMT":
-            guard (3...5).contains(frame.count),
-                  let rate = frame.arg(0, in: self).numericValue,
-                  let nper = frame.arg(1, in: self).numericValue,
-                  let pv = frame.arg(2, in: self).numericValue,
-                  nper != 0.0 else { return .error("#VALUE!") }
-            let fv = frame.count >= 4 ? (frame.arg(3, in: self).numericValue ?? 0.0) : 0.0
-            let type = frame.count == 5 ? (frame.arg(4, in: self).numericValue ?? 0.0) : 0.0
-            if rate == 0.0 {
-                let res = -(pv + fv) / nper
-                return res.isFinite ? .number(res) : .error("#NUM!")
-            }
-            let factor = pow(1.0 + rate, nper)
-            let denom = (1.0 + rate * type) * (factor - 1.0)
-            guard factor.isFinite, denom != 0.0 else { return .error("#NUM!") }
-            let payment = -rate * (pv * factor + fv) / denom
-            return payment.isFinite ? .number(payment) : .error("#NUM!")
-
-        case "FV":
-            guard (3...5).contains(frame.count),
-                  let rate = frame.arg(0, in: self).numericValue,
-                  let nper = frame.arg(1, in: self).numericValue,
-                  let pmt = frame.arg(2, in: self).numericValue else { return .error("#VALUE!") }
-            let pv = frame.count >= 4 ? (frame.arg(3, in: self).numericValue ?? 0.0) : 0.0
-            let type = frame.count == 5 ? (frame.arg(4, in: self).numericValue ?? 0.0) : 0.0
-            if rate == 0.0 {
-                let res = -(pv + pmt * nper)
-                return res.isFinite ? .number(res) : .error("#NUM!")
-            }
-            let factor = pow(1.0 + rate, nper)
-            let futureVal = -(pv * factor + pmt * (1.0 + rate * type) * (factor - 1.0) / rate)
-            return futureVal.isFinite ? .number(futureVal) : .error("#NUM!")
-
-        case "PV":
-            guard (3...5).contains(frame.count),
-                  let rate = frame.arg(0, in: self).numericValue,
-                  let nper = frame.arg(1, in: self).numericValue,
-                  let pmt = frame.arg(2, in: self).numericValue else { return .error("#VALUE!") }
-            let fv = frame.count >= 4 ? (frame.arg(3, in: self).numericValue ?? 0.0) : 0.0
-            let type = frame.count == 5 ? (frame.arg(4, in: self).numericValue ?? 0.0) : 0.0
-            if rate == 0.0 {
-                let res = -(fv + pmt * nper)
-                return res.isFinite ? .number(res) : .error("#NUM!")
-            }
-            let factor = pow(1.0 + rate, nper)
-            guard factor.isFinite, factor != 0.0 else { return .error("#NUM!") }
-            let presentVal = -(fv + pmt * (1.0 + rate * type) * (factor - 1.0) / rate) / factor
-            return presentVal.isFinite ? .number(presentVal) : .error("#NUM!")
-
-        case "NPV":
-            guard frame.count >= 2, let rate = frame.arg(0, in: self).numericValue, rate != -1.0 else {
-                return .error("#VALUE!")
-            }
-            switch frame.resolve(1..<frame.count, in: self) {
-            case let .failure(err): return .error(err)
-            case let .success(vals):
-                let cashFlows = vals.compactMap { $0.numericValue }
-                var npv = 0.0
-                for (idx, cf) in cashFlows.enumerated() {
-                    npv += cf / pow(1.0 + rate, Double(idx + 1))
-                }
-                return npv.isFinite ? .number(npv) : .error("#NUM!")
-            }
-
-        case "DATE":
-            guard frame.count == 3,
-                  let yNum = frame.arg(0, in: self).numericValue,
-                  let mNum = frame.arg(1, in: self).numericValue,
-                  let dNum = frame.arg(2, in: self).numericValue,
-                  let y = Self.safeInt(yNum), let m = Self.safeInt(mNum), let d = Self.safeInt(dNum),
-                  let date = Self.makeUTCDate(year: y, month: m, day: d) else { return .error("#VALUE!") }
-            let comps = Self.utcCalendar.dateComponents([.year, .month, .day], from: date)
-            return .text(String(format: "%04d-%02d-%02d", comps.year ?? 0, comps.month ?? 1, comps.day ?? 1))
-
-        case "YEAR":
-            guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else { return .error("#VALUE!") }
-            return .number(Double(Self.utcCalendar.component(.year, from: date)))
-
-        case "MONTH":
-            guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else { return .error("#VALUE!") }
-            return .number(Double(Self.utcCalendar.component(.month, from: date)))
-
-        case "DAY":
-            guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else { return .error("#VALUE!") }
-            return .number(Double(Self.utcCalendar.component(.day, from: date)))
-
-        case "DAYS":
-            guard frame.count == 2,
-                  let endDate = Self.parseDateValue(frame.arg(0, in: self)),
-                  let startDate = Self.parseDateValue(frame.arg(1, in: self)) else { return .error("#VALUE!") }
-            return .number(Double(Self.utcCalendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0))
-
-        default:
-            return nil
-        }
-    }
-
-    // MARK: - Helpers
-
-    private static func safeInt(_ value: Double) -> Int? {
-        guard value.isFinite, value > Double(Int.min), value < Double(Int.max) else {
-            return nil
-        }
-        return Int(value)
-    }
+    // MARK: - Parser Helpers
 
     private static func matchingCloseIndex(in text: String, openAt: String.Index) -> String.Index? {
         var depth = 0
@@ -1732,80 +1294,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
             idx = text.index(after: idx)
         }
         return nil
-    }
-
-    private static var utcCalendar: Calendar {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(secondsFromGMT: 0)!
-        return cal
-    }
-
-    private static func makeUTCDate(year: Int, month: Int, day: Int) -> Date? {
-        var comps = DateComponents()
-        comps.year = year
-        comps.month = month
-        comps.day = day
-        comps.hour = 0
-        comps.minute = 0
-        comps.second = 0
-        return utcCalendar.date(from: comps)
-    }
-
-    private static func parseDateValue(_ value: EvaluatedCellValue) -> Date? {
-        let raw = value.description.trimmingCharacters(in: .whitespacesAndNewlines)
-        let separators = CharacterSet(charactersIn: "-/.")
-        let parts = raw.components(separatedBy: separators)
-        if parts.count == 3,
-           let y = Int(parts[0]),
-           let m = Int(parts[1]),
-           let d = Int(parts[2]) {
-            return makeUTCDate(year: y, month: m, day: d)
-        }
-        return nil
-    }
-
-    private static func cellValuesEqual(_ a: EvaluatedCellValue, _ b: EvaluatedCellValue) -> Bool {
-        if let aNum = a.numericValue, let bNum = b.numericValue {
-            return aNum == bNum
-        }
-        return a.description.caseInsensitiveCompare(b.description) == .orderedSame
-    }
-
-    private static func matchesCriteriaValue(
-        _ value: EvaluatedCellValue,
-        criteriaValue critVal: EvaluatedCellValue
-    ) -> Bool {
-        let critStr = critVal.description.trimmingCharacters(in: .whitespaces)
-
-        for op in [">=", "<=", "<>", "=", ">", "<"] {
-            if critStr.hasPrefix(op) {
-                let operand = String(critStr.dropFirst(op.count)).trimmingCharacters(in: .whitespaces)
-                if let targetNum = Double(operand) {
-                    guard let cellNum = value.numericValue else { return op == "<>" }
-                    switch op {
-                    case ">=": return cellNum >= targetNum
-                    case "<=": return cellNum <= targetNum
-                    case "<>": return cellNum != targetNum
-                    case "=":  return cellNum == targetNum
-                    case ">":  return cellNum > targetNum
-                    case "<":  return cellNum < targetNum
-                    default: return false
-                    }
-                } else {
-                    let cmp = value.description.caseInsensitiveCompare(operand)
-                    switch op {
-                    case "=":  return cmp == .orderedSame
-                    case "<>": return cmp != .orderedSame
-                    default:   return false
-                    }
-                }
-            }
-        }
-
-        if let critNum = critVal.numericValue, let cellNum = value.numericValue {
-            return cellNum == critNum
-        }
-        return value.description.caseInsensitiveCompare(critStr) == .orderedSame
     }
 
     private static func splitTopLevelArguments(_ input: String) -> [String] {
