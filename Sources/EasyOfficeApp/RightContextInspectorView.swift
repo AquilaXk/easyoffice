@@ -282,12 +282,57 @@ struct RightContextInspectorView: View {
     doc: OfficeDocumentModel,
     palette: WorkspaceThemePalette
   ) -> some View {
-    let activeListKind =
-      doc.paragraphs.first(where: { $0.id == viewModel.selectedParagraphID })?.listKind
-      ?? doc.paragraphs.first?.listKind
-      ?? .koreanOfficial
+    let activeParagraph: ParagraphBlock? = {
+      guard !doc.paragraphs.isEmpty else { return nil }
+      let pIdx = min(max(0, viewModel.selectedParagraphIndex), doc.paragraphs.count - 1)
+      return doc.paragraphs[pIdx]
+    }()
+    let activeListKind = activeParagraph?.listKind ?? .koreanOfficial
+    let currentLetterSpacing = activeParagraph?.letterSpacingPercent ?? 0.0
+    let currentCharScale = activeParagraph?.charWidthScalePercent ?? 100.0
 
     VStack(alignment: .leading, spacing: 6) {
+      Text("자간 · 장평 정밀 조판")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+      Text(
+        "현재 자간: \(Int(currentLetterSpacing))% · 장평: \(Int(currentCharScale))%"
+      )
+      .font(.system(size: 10, design: .monospaced))
+      .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+
+      HStack(spacing: 4) {
+        Button("자간 -5%") {
+          viewModel.adjustActiveParagraphTypography(letterSpacingDelta: -5.0)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+
+        Button("자간 +5%") {
+          viewModel.adjustActiveParagraphTypography(letterSpacingDelta: 5.0)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+
+        Button("장평 90%") {
+          viewModel.adjustActiveParagraphTypography(charScaleDelta: 90.0 - currentCharScale)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+
+        Button("장평 105%") {
+          viewModel.adjustActiveParagraphTypography(charScaleDelta: 105.0 - currentCharScale)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+
+        Button("조판 초기화") {
+          viewModel.adjustActiveParagraphTypography(reset: true)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+      }
+
       Text("문단 정렬 · 줄간격 · 다단계 목록")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -479,6 +524,34 @@ struct RightContextInspectorView: View {
     }
     .pickerStyle(.segmented)
     .controlSize(.small)
+
+    VStack(alignment: .leading, spacing: 6) {
+      Text(
+        "줄바꿈: \(currentStyle.wrapText ? "켜짐" : "꺼짐") · 소수점: \(currentStyle.decimalPlaces ?? 2)자리"
+      )
+      .font(.system(size: 10, design: .monospaced))
+      .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+      HStack(spacing: 6) {
+        Button("텍스트 줄바꿈 토글") {
+          viewModel.toggleWrapTextOnSelectedSheetCell()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+
+        Button("소수점 -1") {
+          viewModel.adjustSelectedSheetCellDecimalPlaces(delta: -1)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+
+        Button("소수점 +1") {
+          viewModel.adjustSelectedSheetCellDecimalPlaces(delta: 1)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+      }
+    }
 
     VStack(alignment: .leading, spacing: 4) {
       Text("선택 셀 메모 (\(viewModel.selectedSheetCell))")
@@ -1010,6 +1083,38 @@ struct RightContextInspectorView: View {
     Divider()
 
     VStack(alignment: .leading, spacing: 6) {
+      Text("PDF 워터마크 및 보안 상태 점검")
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+      TextField("PDF 워터마크 문구", text: $viewModel.pdfWatermarkDraft)
+        .textFieldStyle(.roundedBorder)
+        .font(.system(size: 11))
+
+      HStack(spacing: 6) {
+        Button("워터마크 적용") {
+          viewModel.applyWatermarkOnActivePDF()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+
+        Button("워터마크 해제") {
+          viewModel.applyWatermarkOnActivePDF(text: "")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+      }
+
+      Text(pdf.securityInspectionSummary)
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(palette.selectedSurface.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+
+      Divider()
+
       Text("민감 정보 리댁션 (영구 마스킹)")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)

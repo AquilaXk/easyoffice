@@ -34,7 +34,46 @@ public final class WorkspaceViewModel {
   public var isPresenterModeActive: Bool = false
 
   // Interactive editing, undo/redo, and studio state
-  public var selectedParagraphID: UUID? = nil
+  private var storedSelectedParagraphIndex: Int = 0
+  public var selectedParagraphID: UUID? = nil {
+    didSet {
+      if let selectedParagraphID,
+        let tab = activeTab,
+        case .document(let doc) = tab.payload,
+        let idx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID })
+      {
+        storedSelectedParagraphIndex = idx
+      }
+    }
+  }
+  public var selectedParagraphIndex: Int {
+    get {
+      if let selectedParagraphID,
+        let tab = activeTab,
+        case .document(let doc) = tab.payload,
+        let idx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID })
+      {
+        return idx
+      }
+      if let tab = activeTab,
+        case .document(let doc) = tab.payload,
+        !doc.paragraphs.isEmpty
+      {
+        return min(max(0, storedSelectedParagraphIndex), doc.paragraphs.count - 1)
+      }
+      return max(0, storedSelectedParagraphIndex)
+    }
+    set {
+      storedSelectedParagraphIndex = max(0, newValue)
+      if let tab = activeTab,
+        case .document(let doc) = tab.payload,
+        !doc.paragraphs.isEmpty
+      {
+        let clamped = min(max(0, newValue), doc.paragraphs.count - 1)
+        selectedParagraphID = doc.paragraphs[clamped].id
+      }
+    }
+  }
   public var selectedParagraphUTF16Range: Range<Int>? = nil
   public var paragraphDraftText: String = ""
   public var inlineRunTargetPhrase: String = ""
@@ -66,6 +105,10 @@ public final class WorkspaceViewModel {
   public var findQueryText: String = ""
   public var replaceQueryText: String = ""
   public var isFindReplaceBarVisible: Bool = false
+  public var isFindReplaceBarPresented: Bool {
+    get { isFindReplaceBarVisible }
+    set { isFindReplaceBarVisible = newValue }
+  }
   public var lastFindReplaceCount: Int = 0
   public var batchTargetFormat: DocumentFormat = .pdf
   public var lastBatchConversionReport: BatchConversionReport? = nil
@@ -95,6 +138,10 @@ public final class WorkspaceViewModel {
   public var selectedPDFStampPreset: String = "승인 (APPROVED)"
   public var bookmarkTitleDraft: String = "핵심 섹션 책갈피"
   public var isChartPanelVisible: Bool = true
+  public var customChartTitleDraft: String = ""
+  public var customChartRangeDraft: String = "A1:D4"
+  public var pdfWatermarkDraft: String = "대외비 CONFIDENTIAL"
+  public var isPDFInkOverlayExpanded: Bool = false
 
   internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
   internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
@@ -198,6 +245,14 @@ public final class WorkspaceViewModel {
     openTabs[idx].payload = nextPayload
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = "다시 실행 완료"
+  }
+
+  public func undoActiveTab() {
+    undo()
+  }
+
+  public func redoActiveTab() {
+    redo()
   }
 
   // MARK: - Tab & Template Management

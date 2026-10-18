@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import EasyOfficeCore
 import EasyOfficeDesignSystem
 import Observation
@@ -12,6 +13,7 @@ public struct SlideEditorDetailPaneView: View {
   let deck: PresentationDeckModel
   let isPrimaryPane: Bool
   @GestureState private var activeDragOffset: (elementID: UUID, translation: CGSize)? = nil
+  private let presenterTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
   public init(
     viewModel: WorkspaceViewModel, deck: PresentationDeckModel, isPrimaryPane: Bool = true
@@ -38,6 +40,169 @@ public struct SlideEditorDetailPaneView: View {
     }
   }
 
+  @ViewBuilder
+  private func slideStageHorizontalRuler(palette: WorkspaceThemePalette) -> some View {
+    let maxPt = Int(deck.aspectRatio.widthPoints)
+    GeometryReader { geo in
+      let width = max(200.0, geo.size.width)
+      ZStack(alignment: .topLeading) {
+        RoundedRectangle(cornerRadius: 4)
+          .fill(palette.elevatedSurface.swiftUIColor)
+
+        Canvas { context, size in
+          let tickColor = palette.secondaryText.swiftUIColor
+          let stepCount = 24
+          for step in 0...stepCount {
+            let ratio = CGFloat(step) / CGFloat(stepCount)
+            let xPos = ratio * size.width
+            let isMajor = (step % 3 == 0)
+            let tickH: CGFloat = isMajor ? 8.0 : 4.0
+            var path = Path()
+            path.move(to: CGPoint(x: xPos, y: size.height - tickH))
+            path.addLine(to: CGPoint(x: xPos, y: size.height))
+            context.stroke(
+              path,
+              with: .color(tickColor.opacity(isMajor ? 0.85 : 0.45)),
+              lineWidth: isMajor ? 1.0 : 0.6
+            )
+          }
+        }
+
+        ForEach([0, 120, 240, 360, 480, 600, 720, 840, maxPt], id: \.self) { ptMark in
+          let ratio = CGFloat(ptMark) / CGFloat(max(1, maxPt))
+          let xPos = min(width - 18.0, max(16.0, ratio * width))
+          Text("\(ptMark)pt")
+            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .position(x: xPos, y: 7)
+        }
+      }
+      .overlay(
+        RoundedRectangle(cornerRadius: 4)
+          .stroke(palette.border.swiftUIColor, lineWidth: 0.8)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+    .frame(height: 20)
+  }
+
+  @ViewBuilder
+  private func slideMiniatureThumbnailCard(
+    slide: SlideModel,
+    index: Int,
+    isSelected: Bool,
+    palette: WorkspaceThemePalette
+  ) -> some View {
+    let themeBg = EasyOfficeDesignTokens.resolveHexColor(
+      deck.deckTheme.primaryFillHex,
+      fallback: palette.elevatedSurface.swiftUIColor
+    )
+    let themeAccent = EasyOfficeDesignTokens.resolveHexColor(
+      deck.deckTheme.accentBorderHex,
+      fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+    )
+    let themeFill = EasyOfficeDesignTokens.resolveHexColor(
+      deck.deckTheme.primaryFillHex,
+      fallback: palette.selectedSurface.swiftUIColor
+    )
+
+    VStack(alignment: .leading, spacing: 5) {
+      // 160x90 Visual 16:9 Miniature Slide Preview
+      ZStack(alignment: .topLeading) {
+        RoundedRectangle(cornerRadius: 6)
+          .fill(themeBg)
+
+        // Mini Accent Header Bar
+        Rectangle()
+          .fill(themeAccent)
+          .frame(height: 4)
+
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(spacing: 4) {
+            Text("\(index + 1)")
+              .font(.system(size: 9, weight: .black, design: .monospaced))
+              .padding(.horizontal, 5)
+              .padding(.vertical, 1)
+              .background(themeAccent)
+              .foregroundStyle(Color.white)
+              .clipShape(RoundedRectangle(cornerRadius: 3))
+
+            Text(slide.title)
+              .font(.system(size: 9, weight: .bold))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .lineLimit(1)
+          }
+
+          if !slide.subtitle.isEmpty {
+            Text(slide.subtitle)
+              .font(.system(size: 7, weight: .medium))
+              .foregroundStyle(themeAccent)
+              .lineLimit(1)
+          }
+
+          Spacer(minLength: 2)
+
+          // Mini Shapes Preview Strip
+          HStack(spacing: 4) {
+            ForEach(slide.elements.prefix(3)) { elem in
+              let elemFill = EasyOfficeDesignTokens.resolveHexColor(
+                elem.fillHex,
+                fallback: themeFill
+              )
+              RoundedRectangle(cornerRadius: 2)
+                .fill(elemFill)
+                .overlay(
+                  RoundedRectangle(cornerRadius: 2)
+                    .stroke(themeAccent.opacity(0.8), lineWidth: 0.7)
+                )
+                .frame(width: 40, height: 18)
+                .overlay(
+                  Text(elem.title)
+                    .font(.system(size: 6, weight: .semibold))
+                    .foregroundStyle(
+                      EasyOfficeDesignTokens.contrastingTextColor(forFillHex: elem.fillHex)
+                    )
+                    .lineLimit(1)
+                    .padding(.horizontal, 2)
+                )
+            }
+          }
+        }
+        .padding(7)
+      }
+      .frame(width: 160, height: 90)
+      .overlay(
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(
+            isSelected
+              ? EasyOfficeDesignTokens.brand700.swiftUIColor
+              : palette.border.swiftUIColor,
+            lineWidth: isSelected ? 2.0 : 1.0
+          )
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+
+      HStack(spacing: 4) {
+        Text(slide.masterLayout.rawValue)
+          .font(.system(size: 9, weight: .semibold))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+          .lineLimit(1)
+        Spacer(minLength: 0)
+        Text("\(slide.elements.count)개체")
+          .font(.system(size: 8, design: .monospaced))
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+      }
+      .frame(width: 160)
+    }
+    .padding(6)
+    .background(
+      isSelected
+        ? palette.selectedSurface.swiftUIColor
+        : palette.cardSurface.swiftUIColor
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+  }
+
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
     let activeIdx =
@@ -59,186 +224,211 @@ public struct SlideEditorDetailPaneView: View {
       isTimerRunning: viewModel.isPresenterTimerRunning
     )
 
-    VStack(alignment: .leading, spacing: 14) {
+    VStack(alignment: .leading, spacing: 12) {
       // Top Slide Deck Management & Sorter / Presenter / Slideshow Bar
-      HStack(spacing: 8) {
-        Label(
-          "\(deck.aspectRatio.rawValue) · 슬라이드 \(deck.slides.count)장",
-          systemImage: "rectangle.on.rectangle.angled"
-        )
-        .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 8) {
+          Label(
+            "\(deck.aspectRatio.rawValue) · 슬라이드 \(deck.slides.count)장",
+            systemImage: "rectangle.on.rectangle.angled"
+          )
+          .font(.system(size: 11, weight: .semibold))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
 
-        if isPrimaryPane {
-          Divider().frame(height: 16)
+          if isPrimaryPane {
+            Divider().frame(height: 16)
 
-          Button {
-            viewModel.addSlideToActiveDeck()
-          } label: {
-            Label("슬라이드 추가", systemImage: "plus.rectangle.on.rectangle")
-              .font(.system(size: 11, weight: .semibold))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button {
-            viewModel.duplicateActiveSlide()
-          } label: {
-            Label("복제", systemImage: "doc.on.doc")
-              .font(.system(size: 11, weight: .medium))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button {
-            viewModel.moveActiveSlide(offset: -1)
-          } label: {
-            Label("위로", systemImage: "arrow.up")
-              .font(.system(size: 11, weight: .medium))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(activeIdx == 0)
-
-          Button {
-            viewModel.moveActiveSlide(offset: 1)
-          } label: {
-            Label("아래로", systemImage: "arrow.down")
-              .font(.system(size: 11, weight: .medium))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(activeIdx + 1 >= deck.slides.count)
-
-          Button {
-            viewModel.deleteActiveSlide()
-          } label: {
-            Label("삭제", systemImage: "trash")
-              .font(.system(size: 11, weight: .medium))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(deck.slides.count <= 1)
-
-          Button {
-            viewModel.toggleSlideSorterView()
-          } label: {
-            Label(
-              viewModel.isSlideSorterViewEnabled ? "슬라이드 편집 뷰" : "슬라이드 정렬 뷰",
-              systemImage: "square.grid.3x2.fill"
-            )
-            .font(.system(size: 11, weight: .semibold))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-        }
-
-        Spacer()
-
-        if isPrimaryPane {
-          if let activeElem = selectedElement {
             Button {
-              viewModel.cycleSlideElementAnimation(elementID: activeElem.id)
+              viewModel.addSlideToActiveDeck()
             } label: {
-              Label("애니메이션: \(activeElem.animation.rawValue)", systemImage: "sparkles")
-                .font(.system(size: 11, weight: .medium))
+              Label("슬라이드 추가", systemImage: "plus.rectangle.on.rectangle")
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-          }
 
-          Button {
-            viewModel.isPresenterModeActive.toggle()
-            viewModel.isPresenterTimerRunning = viewModel.isPresenterModeActive
-          } label: {
-            Label(
-              viewModel.isPresenterModeActive ? "발표자 도구 닫기" : "발표자 도구 미리보기",
-              systemImage: "play.display"
-            )
-            .font(.system(size: 11, weight: .semibold))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
+            Button {
+              viewModel.duplicateActiveSlide()
+            } label: {
+              Label("복제", systemImage: "doc.on.doc")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
 
-          Button {
-            viewModel.toggleFullScreenSlideshow()
-          } label: {
-            Label("슬라이드쇼 시작 (전체화면)", systemImage: "play.tv.fill")
+            Button {
+              viewModel.moveActiveSlide(offset: -1)
+            } label: {
+              Label("위로", systemImage: "arrow.up")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(activeIdx == 0)
+
+            Button {
+              viewModel.moveActiveSlide(offset: 1)
+            } label: {
+              Label("아래로", systemImage: "arrow.down")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(activeIdx + 1 >= deck.slides.count)
+
+            Button {
+              viewModel.deleteActiveSlide()
+            } label: {
+              Label("삭제", systemImage: "trash")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(deck.slides.count <= 1)
+
+            Button {
+              viewModel.toggleSlideSorterView()
+            } label: {
+              Label(
+                viewModel.isSlideSorterViewEnabled ? "슬라이드 편집 뷰" : "슬라이드 정렬 뷰",
+                systemImage: "square.grid.3x2.fill"
+              )
               .font(.system(size: 11, weight: .semibold))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            if let activeElem = selectedElement {
+              Button {
+                viewModel.cycleSlideElementAnimation(elementID: activeElem.id)
+              } label: {
+                Label("애니메이션: \(activeElem.animation.rawValue)", systemImage: "sparkles")
+                  .font(.system(size: 11, weight: .medium))
+                  .lineLimit(1)
+                  .fixedSize(horizontal: true, vertical: false)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+            }
+
+            Button {
+              viewModel.isPresenterModeActive.toggle()
+              viewModel.isPresenterTimerRunning = viewModel.isPresenterModeActive
+            } label: {
+              Label(
+                viewModel.isPresenterModeActive ? "발표자 도구 닫기" : "발표자 도구 미리보기",
+                systemImage: "play.display"
+              )
+              .font(.system(size: 11, weight: .semibold))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button {
+              viewModel.toggleFullScreenSlideshow()
+            } label: {
+              Label("슬라이드쇼 시작 (전체화면)", systemImage: "play.tv.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+            .controlSize(.small)
           }
-          .buttonStyle(.borderedProminent)
-          .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
         }
       }
 
       if isPrimaryPane {
-        HStack(spacing: 8) {
-          Menu {
-            ForEach(SlideDeckTheme.allCases, id: \.rawValue) { theme in
-              Button(theme.rawValue) {
-                viewModel.applyThemeToActiveDeck(theme)
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 8) {
+            Menu {
+              ForEach(SlideDeckTheme.allCases, id: \.rawValue) { theme in
+                Button(theme.rawValue) {
+                  viewModel.applyThemeToActiveDeck(theme)
+                }
               }
+            } label: {
+              Label("테마: \(deck.theme.rawValue)", systemImage: "paintpalette.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
-          } label: {
-            Label("테마: \(deck.theme.rawValue)", systemImage: "paintpalette.fill")
-              .font(.system(size: 11, weight: .semibold))
-          }
-          .controlSize(.small)
+            .controlSize(.small)
 
-          Divider().frame(height: 16)
+            Divider().frame(height: 16)
 
-          HStack(spacing: 4) {
-            Button("좌") {
-              viewModel.alignSlideElements(.alignLeft)
+            HStack(spacing: 4) {
+              Button("좌") {
+                viewModel.alignSlideElements(.alignLeft)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+
+              Button("중") {
+                viewModel.alignSlideElements(.alignCenter)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+
+              Button("우") {
+                viewModel.alignSlideElements(.alignRight)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+
+              Button("배분") {
+                viewModel.alignSlideElements(.distributeHorizontally)
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.small)
+            }
+
+            Divider().frame(height: 16)
+
+            Button {
+              viewModel.duplicateActiveSlideElement()
+            } label: {
+              Label("개체 복제", systemImage: "plus.square.on.square")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .disabled(selectedElement == nil)
 
-            Button("중") {
-              viewModel.alignSlideElements(.alignCenter)
+            Button {
+              viewModel.deleteActiveSlideElement()
+            } label: {
+              Label("개체 삭제", systemImage: "trash")
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-
-            Button("우") {
-              viewModel.alignSlideElements(.alignRight)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button("배분") {
-              viewModel.alignSlideElements(.distributeHorizontally)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .disabled(selectedElement == nil)
           }
-
-          Divider().frame(height: 16)
-
-          Button {
-            viewModel.duplicateActiveSlideElement()
-          } label: {
-            Label("개체 복제", systemImage: "plus.square.on.square")
-              .font(.system(size: 11, weight: .medium))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(selectedElement == nil)
-
-          Button {
-            viewModel.deleteActiveSlideElement()
-          } label: {
-            Label("개체 삭제", systemImage: "trash")
-              .font(.system(size: 11, weight: .medium))
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(selectedElement == nil)
-
-          Spacer()
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
         .background(palette.cardSurface.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 6))
       }
@@ -247,8 +437,8 @@ public struct SlideEditorDetailPaneView: View {
         slideSorterGridView(activeIdx: activeIdx, palette: palette)
       } else {
         HStack(alignment: .top, spacing: 14) {
-          // Slide Filmstrip
-          VStack(alignment: .leading, spacing: 8) {
+          // Visual 16:9 Miniature Slide Thumbnail Rail
+          VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
               let isSelected = idx == activeIdx
               Button {
@@ -256,41 +446,18 @@ public struct SlideEditorDetailPaneView: View {
                 viewModel.selectedSlideIndex = idx
                 viewModel.selectSlideElement(id: slide.elements.first?.id)
               } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                  Text("슬라이드 \(idx + 1) · \(slide.masterLayout.rawValue)")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
-                  Text(slide.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-                    .lineLimit(1)
-                }
-                .padding(10)
-                .frame(
-                  width: EasyOfficeDesignTokens.LayoutMetrics.slideFilmstripWidth,
-                  alignment: .leading
+                slideMiniatureThumbnailCard(
+                  slide: slide,
+                  index: idx,
+                  isSelected: isSelected,
+                  palette: palette
                 )
-                .background(
-                  isSelected
-                    ? palette.selectedSurface.swiftUIColor
-                    : palette.cardSurface.swiftUIColor
-                )
-                .overlay(
-                  RoundedRectangle(cornerRadius: 6)
-                    .stroke(
-                      isSelected
-                        ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                        : palette.border.swiftUIColor,
-                      lineWidth: isSelected ? 1.5 : 1.0
-                    )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 6))
               }
               .buttonStyle(.plain)
             }
           }
 
-          // Active Slide Stage Canvas & Inline Editors
+          // Active Slide Stage Canvas with Horizontal Ruler & Clean Speaker Notes Bar
           if let slide = currentSlide {
             let staticGuides: [AlignmentSnapGuide] = {
               guard viewModel.isSnapGuidesEnabled, let activeElem = selectedElement else {
@@ -304,7 +471,7 @@ public struct SlideEditorDetailPaneView: View {
               )
             }()
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
               HStack {
                 Text(slide.masterLayout.rawValue)
                   .font(.system(size: 10, weight: .bold))
@@ -389,6 +556,9 @@ public struct SlideEditorDetailPaneView: View {
                     .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
                 }
               }
+
+              // Horizontal Slide Stage Ruler (0 .. 960 pt)
+              slideStageHorizontalRuler(palette: palette)
 
               // Proportional 16:9 Stage Canvas with Visual Snap Guides, 7-Kind Shapes, 8-Direction Resize Handles & Rotation Handle (↻)
               GeometryReader { geo in
@@ -559,100 +729,14 @@ public struct SlideEditorDetailPaneView: View {
                   }
                 }
               }
-              .frame(height: 290)
-
-              // Inline Bullet Point & Selected Element Editors
-              if isPrimaryPane {
-                Divider()
-                HStack(alignment: .top, spacing: 16) {
-                  VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                      Text("슬라이드 불릿 편집 (\(slide.bulletPoints.count)개)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-                      Spacer()
-                      Button("불릿 추가") {
-                        viewModel.addSlideBulletPoint(
-                          slideIndex: activeIdx,
-                          text: "새 핵심 발표 항목"
-                        )
-                      }
-                      .buttonStyle(.bordered)
-                      .controlSize(.mini)
-                    }
-
-                    ForEach(Array(slide.bulletPoints.enumerated()), id: \.offset) {
-                      bIdx, bulletText in
-                      HStack(spacing: 4) {
-                        Text("•")
-                          .font(.system(size: 11, weight: .bold))
-                        TextField(
-                          "불릿 항목",
-                          text: Binding(
-                            get: { bulletText },
-                            set: { updated in
-                              viewModel.updateSlideBulletPoint(
-                                slideIndex: activeIdx,
-                                bulletIndex: bIdx,
-                                newText: updated
-                              )
-                            }
-                          )
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11))
-                      }
-                    }
-                  }
-                  .frame(maxWidth: .infinity, alignment: .leading)
-
-                  if let activeElem = selectedElement {
-                    VStack(alignment: .leading, spacing: 6) {
-                      Text("선택된 개체 텍스트 편집 (\(activeElem.kind.rawValue))")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-
-                      TextField(
-                        "개체 제목",
-                        text: Binding(
-                          get: { activeElem.title },
-                          set: { newTitle in
-                            viewModel.updateSlideElementText(
-                              elementID: activeElem.id,
-                              title: newTitle,
-                              bodyText: activeElem.bodyText
-                            )
-                          }
-                        )
-                      )
-                      .textFieldStyle(.roundedBorder)
-                      .font(.system(size: 11, weight: .semibold))
-
-                      TextField(
-                        "개체 본문",
-                        text: Binding(
-                          get: { activeElem.bodyText },
-                          set: { newBody in
-                            viewModel.updateSlideElementText(
-                              elementID: activeElem.id,
-                              title: activeElem.title,
-                              bodyText: newBody
-                            )
-                          }
-                        )
-                      )
-                      .textFieldStyle(.roundedBorder)
-                      .font(.system(size: 11))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                  }
-                }
-              }
+              .frame(height: 360)
 
               Divider()
               HStack(spacing: 8) {
                 Label("발표자 노트", systemImage: "note.text")
                   .font(.system(size: 11, weight: .semibold))
+                  .lineLimit(1)
+                  .fixedSize(horizontal: true, vertical: false)
                   .foregroundStyle(palette.secondaryText.swiftUIColor)
                 if isPrimaryPane {
                   TextField(
@@ -671,7 +755,7 @@ public struct SlideEditorDetailPaneView: View {
                 }
               }
             }
-            .padding(24)
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.cardSurface.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -732,7 +816,7 @@ public struct SlideEditorDetailPaneView: View {
         .padding(12)
         .background(palette.subtleAccentSurface.swiftUIColor)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(presenterTimer) { _ in
           if viewModel.isPresenterModeActive && viewModel.isPresenterTimerRunning {
             viewModel.tickPresenterTimer(seconds: 1)
           }
@@ -952,6 +1036,315 @@ public struct PDFStudioDetailPaneView: View {
     self.isPrimaryPane = isPrimaryPane
   }
 
+  @ViewBuilder
+  private func pdfTopActionToolbar(
+    palette: WorkspaceThemePalette,
+    currentPageStrokeCount: Int
+  ) -> some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 8) {
+        Button {
+          viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
+        } label: {
+          Label("90° 회전", systemImage: "rotate.right")
+            .font(.system(size: 11, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.bordered)
+        .fixedSize(horizontal: true, vertical: false)
+
+        ForEach(PDFAnnotationKind.allCases, id: \.rawValue) { kind in
+          Button {
+            viewModel.addPDFAnnotation(kind: kind, content: "\(kind.rawValue) 검토 마크")
+          } label: {
+            Text(kind.rawValue)
+              .font(.system(size: 11, weight: .medium))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .fixedSize(horizontal: true, vertical: false)
+          .accessibilityLabel(
+            AccessibilityTokens.pdfAnnotationToolLabel(toolTitle: kind.rawValue))
+        }
+
+        Toggle(isOn: $viewModel.isPDFInkDrawingModeEnabled) {
+          Label("자유곡선 펜 그리기", systemImage: "pencil.tip.crop.circle")
+            .font(.system(size: 11, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .toggleStyle(.button)
+        .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+        .fixedSize(horizontal: true, vertical: false)
+
+        Toggle(isOn: $viewModel.isPDFInkOverlayExpanded) {
+          Label("서명 캔버스 펼치기", systemImage: "signature")
+            .font(.system(size: 11, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .toggleStyle(.button)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+
+        Button {
+          viewModel.executeRibbonCommand("pdf-mod-tooffice")
+        } label: {
+          Label("DOCX 편집 변환", systemImage: "arrow.right.doc.on.clipboard")
+            .font(.system(size: 11, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+        .fixedSize(horizontal: true, vertical: false)
+
+        Text(
+          "주석 \(pdf.annotations.count)건 · 벡터 획 \(currentPageStrokeCount)건 · 양식 \(pdf.formFields.count)건"
+        )
+        .font(.system(size: 11))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+      }
+      .padding(10)
+    }
+    .background(palette.cardSurface.swiftUIColor)
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+
+  private var currentPDFSecuritySummary: String {
+    pdf.securityInspectionSummary
+  }
+
+  private func triggerApplyWatermark() {
+    viewModel.applyWatermarkOnActivePDF()
+  }
+
+  @ViewBuilder
+  private func pdfSecurityAndWatermarkBar(palette: WorkspaceThemePalette) -> some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 8) {
+        Label("PDF 보안 점검 & 워터마크", systemImage: "checkmark.shield.fill")
+          .font(.system(size: 11, weight: .bold))
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+
+        Text(currentPDFSecuritySummary)
+          .font(.system(size: 10, weight: .semibold, design: .monospaced))
+          .padding(.horizontal, 8)
+          .padding(.vertical, 3)
+          .background(palette.subtleAccentSurface.swiftUIColor)
+          .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+          .clipShape(RoundedRectangle(cornerRadius: 4))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+
+        Divider().frame(height: 16)
+
+        TextField("워터마크", text: $viewModel.pdfWatermarkDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+          .frame(width: 150)
+
+        Button("워터마크 적용") {
+          triggerApplyWatermark()
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 6)
+    }
+    .background(palette.cardSurface.swiftUIColor)
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+
+  @ViewBuilder
+  private func pdfRedactionAndMergeBar(palette: WorkspaceThemePalette) -> some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 8) {
+        Label("보안 리댁션 · 양식 · 병합", systemImage: "eye.slash.fill")
+          .font(.system(size: 11, weight: .bold))
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+
+        TextField("마스킹 구문", text: $viewModel.pdfRedactionPhraseDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+          .frame(width: 120)
+
+        Button("영구 리댁션") {
+          _ = viewModel.redactSensitiveTextOnActivePDF()
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+
+        Divider().frame(height: 16)
+
+        Button("페이지 위로") {
+          viewModel.moveActivePDFPage(offset: -1)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+        .disabled(viewModel.selectedPDFPageIndex <= 0)
+
+        Button("페이지 아래로") {
+          viewModel.moveActivePDFPage(offset: 1)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+        .disabled(viewModel.selectedPDFPageIndex + 1 >= pdf.pages.count)
+
+        Button("열린 PDF 병합") {
+          viewModel.mergeActivePDFWithAnotherOpenTab()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+
+        Divider().frame(height: 16)
+
+        TextField("필드명", text: $viewModel.pdfFormFieldNameDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+          .frame(width: 90)
+
+        TextField("기본값", text: $viewModel.pdfFormFieldValueDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+          .frame(width: 90)
+
+        Button("양식 필드 추가") {
+          viewModel.addFormFieldToActivePDF()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+
+        Button("체크박스 추가") {
+          viewModel.addFormFieldToActivePDF(isCheckbox: true)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+
+        if pdf.isRedacted {
+          Label("비가역 리댁션 적용됨", systemImage: "lock.shield.fill")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 6)
+    }
+    .background(palette.cardSurface.swiftUIColor)
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+
+  @ViewBuilder
+  private func pdfStampAndBookmarkBar(palette: WorkspaceThemePalette) -> some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      HStack(spacing: 8) {
+        Label("결재 스탬프", systemImage: "seal.fill")
+          .font(.system(size: 11, weight: .bold))
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+
+        ForEach(["승인", "대외비", "검토필", "긴급", "사본"], id: \.self) { preset in
+          Button {
+            viewModel.addStampToActivePDFPage(preset: preset)
+          } label: {
+            Text(preset)
+              .font(.system(size: 11, weight: .bold))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+          }
+          .buttonStyle(.bordered)
+          .tint(
+            preset == "긴급" || preset == "대외비"
+              ? EasyOfficeDesignTokens.statusDanger.swiftUIColor
+              : EasyOfficeDesignTokens.brand700.swiftUIColor
+          )
+          .controlSize(.small)
+          .fixedSize(horizontal: true, vertical: false)
+        }
+
+        Divider().frame(height: 16)
+
+        Label("책갈피", systemImage: "bookmark.fill")
+          .font(.system(size: 11, weight: .bold))
+          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+
+        TextField("책갈피 제목", text: $viewModel.bookmarkTitleDraft)
+          .textFieldStyle(.roundedBorder)
+          .font(.system(size: 11))
+          .frame(width: 140)
+
+        Button("책갈피 추가") {
+          viewModel.addBookmarkToActivePDF()
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: false)
+
+        if !pdf.outline.isEmpty {
+          HStack(spacing: 6) {
+            ForEach(pdf.outline) { node in
+              HStack(spacing: 4) {
+                Button {
+                  let targetIdx = max(0, min(pdf.pages.count - 1, node.targetPageNumber - 1))
+                  viewModel.selectedPDFPageIndex = targetIdx
+                } label: {
+                  Text("\(node.title) (p.\(node.targetPageNumber))")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                  viewModel.removeBookmarkFromActivePDF(id: node.id)
+                } label: {
+                  Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                }
+                .buttonStyle(.plain)
+              }
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(palette.selectedSurface.swiftUIColor)
+              .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+          }
+        }
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 6)
+    }
+    .background(palette.cardSurface.swiftUIColor)
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
     let currentPageNum = viewModel.selectedPDFPageNumber
@@ -959,211 +1352,10 @@ public struct PDFStudioDetailPaneView: View {
 
     VStack(alignment: .leading, spacing: 14) {
       if isPrimaryPane {
-        HStack(spacing: 8) {
-          Button {
-            viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
-          } label: {
-            Label("90° 회전", systemImage: "rotate.right").font(.system(size: 11, weight: .semibold))
-          }
-          .buttonStyle(.bordered)
-
-          ForEach(PDFAnnotationKind.allCases, id: \.rawValue) { kind in
-            Button {
-              viewModel.addPDFAnnotation(kind: kind, content: "\(kind.rawValue) 검토 마크")
-            } label: {
-              Text(kind.rawValue).font(.system(size: 11, weight: .medium))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .accessibilityLabel(
-              AccessibilityTokens.pdfAnnotationToolLabel(toolTitle: kind.rawValue))
-          }
-
-          Toggle(isOn: $viewModel.isPDFInkDrawingModeEnabled) {
-            Label("자유곡선 펜 그리기", systemImage: "pencil.tip.crop.circle").font(
-              .system(size: 11, weight: .semibold))
-          }
-          .toggleStyle(.button)
-          .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-
-          Button {
-            viewModel.executeRibbonCommand("pdf-mod-tooffice")
-          } label: {
-            Label("DOCX 편집 변환", systemImage: "arrow.right.doc.on.clipboard").font(
-              .system(size: 11, weight: .semibold))
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-
-          Spacer()
-
-          Text(
-            "주석 \(pdf.annotations.count)건 · 벡터 획 \(currentPageStrokeCount)건 · 양식 \(pdf.formFields.count)건"
-          )
-          .font(.system(size: 11))
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
-        }
-        .padding(10)
-        .background(palette.cardSurface.swiftUIColor)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-
-        // Redaction, AcroForm Field Creation, Page Reordering & Open PDF Tab Merge Bar
-        HStack(spacing: 8) {
-          Label("보안 리댁션 · 양식 · 병합", systemImage: "eye.slash.fill")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-
-          TextField("마스킹 구문", text: $viewModel.pdfRedactionPhraseDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 120)
-
-          Button("영구 리댁션") {
-            _ = viewModel.redactSensitiveTextOnActivePDF()
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
-          .controlSize(.small)
-
-          Divider().frame(height: 16)
-
-          Button("페이지 위로") {
-            viewModel.moveActivePDFPage(offset: -1)
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(viewModel.selectedPDFPageIndex <= 0)
-
-          Button("페이지 아래로") {
-            viewModel.moveActivePDFPage(offset: 1)
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-          .disabled(viewModel.selectedPDFPageIndex + 1 >= pdf.pages.count)
-
-          Button("열린 PDF 병합") {
-            viewModel.mergeActivePDFWithAnotherOpenTab()
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Divider().frame(height: 16)
-
-          TextField("필드명", text: $viewModel.pdfFormFieldNameDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 90)
-
-          TextField("기본값", text: $viewModel.pdfFormFieldValueDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 90)
-
-          Button("양식 필드 추가") {
-            viewModel.addFormFieldToActivePDF()
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button("체크박스 추가") {
-            viewModel.addFormFieldToActivePDF(isCheckbox: true)
-          }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Spacer()
-
-          if pdf.isRedacted {
-            Label("비가역 리댁션 적용됨", systemImage: "lock.shield.fill")
-              .font(.system(size: 10, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
-          }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(palette.cardSurface.swiftUIColor)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-
-        // 4-Preset Official Approval Stamp Bar & Interactive Bookmark Bar
-        HStack(spacing: 8) {
-          Label("결재 스탬프", systemImage: "seal.fill")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-
-          ForEach(["승인", "대외비", "검토필", "긴급", "사본"], id: \.self) { preset in
-            Button {
-              viewModel.addStampToActivePDFPage(preset: preset)
-            } label: {
-              Text(preset)
-                .font(.system(size: 11, weight: .bold))
-            }
-            .buttonStyle(.bordered)
-            .tint(
-              preset == "긴급" || preset == "대외비"
-                ? EasyOfficeDesignTokens.statusDanger.swiftUIColor
-                : EasyOfficeDesignTokens.brand700.swiftUIColor
-            )
-            .controlSize(.small)
-          }
-
-          Divider().frame(height: 16)
-
-          Label("책갈피", systemImage: "bookmark.fill")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-
-          TextField("책갈피 제목", text: $viewModel.bookmarkTitleDraft)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 140)
-
-          Button("책갈피 추가") {
-            viewModel.addBookmarkToActivePDF()
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
-          .controlSize(.small)
-
-          if !pdf.outline.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-              HStack(spacing: 6) {
-                ForEach(pdf.outline) { node in
-                  HStack(spacing: 4) {
-                    Button {
-                      let targetIdx = max(0, min(pdf.pages.count - 1, node.targetPageNumber - 1))
-                      viewModel.selectedPDFPageIndex = targetIdx
-                    } label: {
-                      Text("\(node.title) (p.\(node.targetPageNumber))")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                      viewModel.removeBookmarkFromActivePDF(id: node.id)
-                    } label: {
-                      Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
-                    }
-                    .buttonStyle(.plain)
-                  }
-                  .padding(.horizontal, 6)
-                  .padding(.vertical, 3)
-                  .background(palette.selectedSurface.swiftUIColor)
-                  .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
-              }
-            }
-            .frame(maxWidth: 260)
-          }
-
-          Spacer()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(palette.cardSurface.swiftUIColor)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        pdfTopActionToolbar(palette: palette, currentPageStrokeCount: currentPageStrokeCount)
+        pdfSecurityAndWatermarkBar(palette: palette)
+        pdfRedactionAndMergeBar(palette: palette)
+        pdfStampAndBookmarkBar(palette: palette)
       }
 
       // Interactive AcroForm Fields Card
@@ -1263,10 +1455,12 @@ public struct PDFStudioDetailPaneView: View {
             pdfDocument: pdf, selectedPageIndex: viewModel.selectedPDFPageIndex,
             zoomFactor: CGFloat(viewModel.zoomPercent / 100.0)
           )
-          .frame(height: 260)
+          .frame(height: 380)
           .clipShape(RoundedRectangle(cornerRadius: 6))
 
-          if isPrimaryPane {
+          if isPrimaryPane
+            && (viewModel.isPDFInkDrawingModeEnabled || viewModel.isPDFInkOverlayExpanded)
+          {
             PDFInteractiveInkOverlayView(viewModel: viewModel, palette: palette, pdfDocument: pdf)
           }
         }

@@ -563,4 +563,67 @@ extension WorkspaceViewModel {
   public func mergeActivePDFWithTab() {
     mergeActivePDFWithAnotherOpenTab()
   }
+
+  public func applyQuickNumberFormatOnSelectedSheetCell(_ format: CellNumberFormat) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .sheet(var sheet) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    var style = sheet.cellStyle(at: selectedSheetCell)
+    style.numberFormat = format
+    if (try? sheet.setCellStyle(style, at: selectedSheetCell)) == nil {
+      sheet.setCellStyle(style, at: PackedCellCoordinate(row: 0, column: 0))
+    }
+    openTabs[idx].payload = .sheet(sheet)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "셀 숫자 서식 적용: \(format.rawValue)"
+  }
+
+  public func adjustSelectedSheetCellDecimalPlaces(delta: Int) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .sheet(var sheet) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    var style = sheet.cellStyle(at: selectedSheetCell)
+    let current = style.decimalPlaces ?? 2
+    style.decimalPlaces = max(0, min(6, current + delta))
+    if (try? sheet.setCellStyle(style, at: selectedSheetCell)) == nil {
+      sheet.setCellStyle(style, at: PackedCellCoordinate(row: 0, column: 0))
+    }
+    openTabs[idx].payload = .sheet(sheet)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "셀 소수점 자릿수 설정: \(style.decimalPlaces ?? 2)자리"
+  }
+
+  public func toggleWrapTextOnSelectedSheetCell() {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .sheet(var sheet) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    var style = sheet.cellStyle(at: selectedSheetCell)
+    style.wrapText.toggle()
+    if (try? sheet.setCellStyle(style, at: selectedSheetCell)) == nil {
+      sheet.setCellStyle(style, at: PackedCellCoordinate(row: 0, column: 0))
+    }
+    openTabs[idx].payload = .sheet(sheet)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "셀 텍스트 줄바꿈 \(style.wrapText ? "활성화" : "해제")"
+  }
+
+  public func applyWatermarkOnActivePDF(text: String? = nil) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .pdf(var pdf) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    let resolved = (text ?? pdfWatermarkDraft).trimmingCharacters(in: .whitespacesAndNewlines)
+    pdf.applyWatermark(resolved)
+    openTabs[idx].payload = .pdf(pdf)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary =
+      resolved.isEmpty ? "PDF 워터마크 해제 완료" : "PDF 워터마크 적용: \(resolved)"
+  }
 }
