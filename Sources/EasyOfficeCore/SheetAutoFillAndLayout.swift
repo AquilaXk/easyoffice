@@ -561,21 +561,311 @@ extension WorksheetModel {
     }
   }
 
+  private struct ParsedCellRef {
+    let col: Int
+    let row: Int
+    let colAnchored: Bool
+    let rowAnchored: Bool
+    let nextIndex: Int
+
+    func formatted(col newCol: Int, row newRow: Int) -> String {
+      let clampedCol = min(max(0, newCol), CellAddress.maxZeroBasedColumn)
+      let clampedRow = min(max(0, newRow), CellAddress.maxZeroBasedRow)
+      return
+        "\(colAnchored ? "$" : "")\(CellAddress.columnLabel(for: clampedCol))\(rowAnchored ? "$" : "")\(clampedRow + 1)"
+    }
+  }
+
+  private static func parseRawCellRef(in bytes: [UInt8], at start: Int) -> ParsedCellRef? {
+    var cursor = start
+    let colAnchored = (cursor < bytes.count && bytes[cursor] == 0x24)
+    if colAnchored { cursor += 1 }
+
+    var letterCount = 0
+    var colValue = 0
+    while cursor < bytes.count && letterCount < 4 {
+      let b = bytes[cursor]
+      let upper = (b >= 0x61 && b <= 0x7A) ? (b - 0x20) : b
+      guard upper >= 0x41 && upper <= 0x5A else { break }
+      letterCount += 1
+      colValue = colValue * 26 + Int(upper - 0x41) + 1
+      cursor += 1
+    }
+    guard letterCount >= 1 && letterCount <= 3 else { return nil }
+
+    let rowAnchored = (cursor < bytes.count && bytes[cursor] == 0x24)
+    if rowAnchored { cursor += 1 }
+
+    var digitCount = 0
+    var rowOneBased = 0
+    while cursor < bytes.count && digitCount < 6 {
+      let b = bytes[cursor]
+      guard b >= 0x30 && b <= 0x39 else { break }
+      digitCount += 1
+      rowOneBased = rowOneBased * 10 + Int(b - 0x30)
+      cursor += 1
+    }
+    guard digitCount >= 1 && digitCount <= 5 else { return nil }
+
+    if cursor < bytes.count {
+      let nextByte = bytes[cursor]
+      if isIdentifierOrDollarByte(nextByte) || nextByte == 0x28 || nextByte == 0x21 {
+        return nil
+      }
+    }
+
+    let zeroBasedCol = colValue - 1
+    let zeroBasedRow = rowOneBased - 1
+    guard zeroBasedCol >= 0, zeroBasedCol <= CellAddress.maxZeroBasedColumn,
+      zeroBasedRow >= 0, zeroBasedRow <= CellAddress.maxZeroBasedRow
+    else {
+      return nil
+    }
+
+    return ParsedCellRef(
+      col: zeroBasedCol,
+      row: zeroBasedRow,
+      colAnchored: colAnchored,
+      rowAnchored: rowAnchored,
+      nextIndex: cursor
+    )
+  }
+
   private static func shiftFormulaReferencesAtAxis(
     _ formula: String,
     isRowAxis: Bool,
     thresholdIndex: Int,
     delta: Int
   ) -> String {
-    let minIdx = delta > 0 ? thresholdIndex : thresholdIndex + 1
-    return shiftFormulaReferences(
-      formula,
-      rowDelta: isRowAxis ? delta : 0,
-      columnDelta: isRowAxis ? 0 : delta,
-      respectAnchors: false,
-      minRow: isRowAxis ? minIdx : nil,
-      minCol: isRowAxis ? nil : minIdx
-    )
+    let bytes = Array(formula.utf8)
+    var outBytes: [UInt8] = []
+    outBytes.reserveCapacity(bytes.count + 16)
+
+    var i = 0
+    while i < bytes.count {
+      let b = bytes[i]
+      if b == 0x22 || b == 0x27 {
+        let quote = b
+        outBytes.append(quote)
+        i += 1
+        while i < bytes.count {
+          let ch = bytes[i]
+          outBytes.append(ch)
+          i += 1
+          if ch == quote {
+            if i < bytes.count && bytes[i] == quote {
+              outBytes.append(bytes[i])
+              i += 1
+            } else {
+              break
+            }
+          }
+        }
+        continue
+      }
+
+      let atBoundary = (i == 0) || !isIdentifierOrDollarByte(bytes[i - 1])
+      if atBoundary, let firstRef = parseRawCellRef(in: bytes, at: i) {
+        let isCrossSheet = (i > 0 && bytes[i - 1] == 0x21)
+        if firstRef.nextIndex < bytes.count,
+          bytes[firstRef.nextIndex] == 0x3A,
+          let secondRef = parseRawCellRef(in: bytes, at: firstRef.nextIndex + 1)
+        {
+          if isCrossSheet {
+            outBytes.append(contentsOf: bytes[i..<secondRef.nextIndex])
+            i = secondRef.nextIndex
+            continue
+          }
+          let shiftedRange = shiftLocalRangeAtAxis(
+            first: firstRef,
+            second: secondRef,
+            isRowAxis: isRowAxis,
+            thresholdIndex: thresholdIndex,
+            delta: delta
+          )
+          outBytes.append(contentsOf: shiftedRange.utf8)
+          i = secondRef.nextIndex
+          continue
+        }
+
+        if isCrossSheet {
+          outBytes.append(contentsOf: bytes[i..<firstRef.nextIndex])
+          i = firstRef.nextIndex
+          continue
+        }
+
+        let shiftedSingle = shiftLocalSingleCellAtAxis(
+          firstRef,
+          isRowAxis: isRowAxis,
+          thresholdIndex: thresholdIndex,
+          delta: delta
+        )
+        outBytes.append(contentsOf: shiftedSingle.utf8)
+        i = firstRef.nextIndex
+        continue
+      }
+
+      outBytes.append(b)
+      i += 1
+    }
+    return String(decoding: outBytes, as: UTF8.self)
+  }
+
+  private static func shiftLocalRangeAtAxis(
+    first: ParsedCellRef,
+    second: ParsedCellRef,
+    isRowAxis: Bool,
+    thresholdIndex: Int,
+    delta: Int
+  ) -> String {
+    let a1 = isRowAxis ? first.row : first.col
+    let a2 = isRowAxis ? second.row : second.col
+    let minAxis = min(a1, a2)
+    let maxAxis = max(a1, a2)
+
+    if delta < 0 {
+      if minAxis == thresholdIndex && maxAxis == thresholdIndex {
+        return "#REF!"
+      }
+      let newMinAxis: Int
+      let newMaxAxis: Int
+      if thresholdIndex >= minAxis && thresholdIndex <= maxAxis {
+        newMinAxis = minAxis > thresholdIndex ? minAxis - 1 : minAxis
+        newMaxAxis = maxAxis - 1
+      } else if maxAxis < thresholdIndex {
+        newMinAxis = minAxis
+        newMaxAxis = maxAxis
+      } else {
+        newMinAxis = max(0, minAxis + delta)
+        newMaxAxis = max(0, maxAxis + delta)
+      }
+      let nextA1 = (a1 <= a2) ? newMinAxis : newMaxAxis
+      let nextA2 = (a1 <= a2) ? newMaxAxis : newMinAxis
+      let startStr =
+        isRowAxis
+        ? first.formatted(col: first.col, row: nextA1)
+        : first.formatted(col: nextA1, row: first.row)
+      let endStr =
+        isRowAxis
+        ? second.formatted(col: second.col, row: nextA2)
+        : second.formatted(col: nextA2, row: second.row)
+      return "\(startStr):\(endStr)"
+    } else {
+      let nextA1 = a1 >= thresholdIndex ? a1 + delta : a1
+      let nextA2 = a2 >= thresholdIndex ? a2 + delta : a2
+      let startStr =
+        isRowAxis
+        ? first.formatted(col: first.col, row: nextA1)
+        : first.formatted(col: nextA1, row: first.row)
+      let endStr =
+        isRowAxis
+        ? second.formatted(col: second.col, row: nextA2)
+        : second.formatted(col: nextA2, row: second.row)
+      return "\(startStr):\(endStr)"
+    }
+  }
+
+  private static func shiftLocalSingleCellAtAxis(
+    _ ref: ParsedCellRef,
+    isRowAxis: Bool,
+    thresholdIndex: Int,
+    delta: Int
+  ) -> String {
+    let axisVal = isRowAxis ? ref.row : ref.col
+    if delta < 0 && axisVal == thresholdIndex {
+      return "#REF!"
+    }
+    let nextAxisVal: Int
+    if delta < 0 && axisVal > thresholdIndex {
+      nextAxisVal = max(0, axisVal + delta)
+    } else if delta > 0 && axisVal >= thresholdIndex {
+      nextAxisVal = axisVal + delta
+    } else {
+      nextAxisVal = axisVal
+    }
+    return isRowAxis
+      ? ref.formatted(col: ref.col, row: nextAxisVal)
+      : ref.formatted(col: nextAxisVal, row: ref.row)
+  }
+
+  // MARK: - Enterprise Data Cleansing (Duplicate Removal & Delimiter Split)
+
+  /// Removes duplicate rows within `range` (or `detectedDataRange()` when `nil`), preserving the first occurrence of each non-empty row signature and returning the number of deleted rows.
+  @discardableResult
+  public mutating func removeDuplicateRows(in range: CellRange? = nil) -> Int {
+    let target = range ?? detectedDataRange()
+    let minRow = min(target.start.row, target.end.row)
+    let maxRow = max(target.start.row, target.end.row)
+    let minCol = min(target.start.column, target.end.column)
+    let maxCol = max(target.start.column, target.end.column)
+    guard minRow <= maxRow, minCol <= maxCol else { return 0 }
+
+    var seenKeys: Set<[String]> = []
+    var duplicateRowsToDelete: [Int] = []
+
+    for r in minRow...maxRow {
+      let key = (minCol...maxCol).map { c in
+        (cellsByCoordinate[PackedCellCoordinate(row: r, column: c)] ?? "")
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+      }
+      if key.allSatisfy(\.isEmpty) {
+        continue
+      }
+      if seenKeys.contains(key) {
+        duplicateRowsToDelete.append(r)
+      } else {
+        seenKeys.insert(key)
+      }
+    }
+
+    for r in duplicateRowsToDelete.sorted(by: >) {
+      deleteRow(at: r)
+    }
+    return duplicateRowsToDelete.count
+  }
+
+  /// Splits text cells in `column` by `delimiter` across adjacent columns to the right and returns the number of split rows.
+  @discardableResult
+  public mutating func splitColumnByDelimiter(
+    column: Int,
+    delimiter: String,
+    maxRow: Int? = nil
+  ) -> Int {
+    guard !delimiter.isEmpty,
+      column >= 0,
+      column <= CellAddress.maxZeroBasedColumn
+    else {
+      return 0
+    }
+    let upperRow = maxRow ?? detectedDataRange().end.row
+    var splitRowCount = 0
+
+    for r in 0...max(0, upperRow) {
+      let coord = PackedCellCoordinate(row: r, column: column)
+      guard let raw = cellsByCoordinate[coord],
+        !raw.hasPrefix("="),
+        raw.contains(delimiter)
+      else {
+        continue
+      }
+      let parts = raw.components(separatedBy: delimiter).map {
+        $0.trimmingCharacters(in: .whitespaces)
+      }
+      guard parts.count > 1 else { continue }
+      for (offset, part) in parts.enumerated()
+      where column + offset <= CellAddress.maxZeroBasedColumn {
+        cellsByCoordinate[PackedCellCoordinate(row: r, column: column + offset)] = part
+      }
+      splitRowCount += 1
+    }
+
+    if splitRowCount > 0 {
+      compiledASTs.removeAll(keepingCapacity: true)
+      for (coord, rawVal) in cellsByCoordinate where !rawVal.isEmpty {
+        compiledASTs[coord] = Self.compileCellInput(rawVal)
+      }
+    }
+    return splitRowCount
   }
 
   // MARK: - Goal Seek Numerical Solver & Sparkline Normalization

@@ -211,7 +211,7 @@ public enum CommonMarkCodec {
   public static func encodeDocument(_ doc: OfficeDocumentModel) -> Data {
     var blocks: [String] = []
 
-    for p in doc.paragraphs {
+    for (pIdx, p) in doc.paragraphs.enumerated() {
       let formattedInline: String
       if !p.runs.isEmpty {
         formattedInline = p.runs.map {
@@ -244,7 +244,16 @@ public enum CommonMarkCodec {
       case .quote:
         blocks.append("> \(p.text)")
       case .body:
-        blocks.append(formattedInline)
+        let indentSpaces = String(repeating: "  ", count: max(0, min(3, p.listLevel)))
+        switch p.listKind {
+        case .none:
+          blocks.append(formattedInline)
+        case .bullet:
+          blocks.append("\(indentSpaces)- \(formattedInline)")
+        case .numbered, .koreanOfficial:
+          let prefix = doc.formattedListPrefix(forParagraphAt: pIdx) ?? "1."
+          blocks.append("\(indentSpaces)\(prefix) \(formattedInline)")
+        }
       }
     }
 
@@ -301,7 +310,10 @@ public enum CommonMarkCodec {
     var pendingCaption = ""
 
     while idx < rawLines.count {
-      let trimmed = rawLines[idx].trimmingCharacters(in: .whitespaces)
+      let rawLine = rawLines[idx]
+      let leadingSpaces = rawLine.prefix(while: { $0 == " " }).count
+      let inferredListLevel = min(3, leadingSpaces / 2)
+      let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
       if trimmed.isEmpty {
         idx += 1
         continue
@@ -390,7 +402,8 @@ public enum CommonMarkCodec {
       } else if trimmed.hasPrefix("> ") {
         paragraphs.append(ParagraphBlock(style: .quote, text: String(trimmed.dropFirst(2))))
       } else {
-        let parsed = parseInline(trimmed)
+        let (listStripped, detectedListKind) = extractMarkdownListPrefix(from: trimmed)
+        let parsed = parseInline(listStripped)
         paragraphs.append(
           ParagraphBlock(
             style: .body,
@@ -398,7 +411,9 @@ public enum CommonMarkCodec {
             runs: parsed.runs,
             isBold: parsed.isBold,
             isItalic: parsed.isItalic,
-            isUnderlined: parsed.isUnderlined
+            isUnderlined: parsed.isUnderlined,
+            listKind: detectedListKind,
+            listLevel: detectedListKind == .none ? 0 : inferredListLevel
           ))
       }
       idx += 1
@@ -411,6 +426,21 @@ public enum CommonMarkCodec {
     )
     extendedEnvelope?.apply(to: &docModel)
     return docModel
+  }
+
+  private static func extractMarkdownListPrefix(from line: String) -> (
+    body: String, kind: ParagraphListKind
+  ) {
+    if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("• ") {
+      return (String(line.dropFirst(2)), .bullet)
+    }
+    if let dotSpaceRange = line.range(of: ". ") {
+      let prefix = line[..<dotSpaceRange.lowerBound]
+      if !prefix.isEmpty && prefix.allSatisfy({ $0.isNumber }) {
+        return (String(line[dotSpaceRange.upperBound...]), .numbered)
+      }
+    }
+    return (line, .none)
   }
 
   private static func formatInline(

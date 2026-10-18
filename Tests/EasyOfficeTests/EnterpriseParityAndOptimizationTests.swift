@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import EasyOfficeCore
+@testable import EasyOfficeDesignSystem
 
 final class EnterpriseParityAndOptimizationTests: XCTestCase {
 
@@ -301,5 +302,151 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     shiftSheet.setNamedRange("TARGET_BLOCK", rangeOrCellNotation: "B2:C3")
     shiftSheet.insertRow(at: 1)
     XCTAssertEqual(shiftSheet.namedRanges["TARGET_BLOCK"], "B3:C4")
+  }
+
+  // MARK: - 6. Cross-Sheet Formula Shift Immunity, Range Shrinking / #REF!, and Data Cleansing
+
+  func testFifthAuditDarkTokensCrossSheetDeleteListsSlideThemesAndPDFOutlines() throws {
+    // F2: Cross-sheet immunity, range endpoint shrinking, and single-cell #REF! on deleteRow / insertRow
+    var sheet = WorksheetModel(
+      name: "Sheet1",
+      rawCells: [
+        "A1": "=Sheet2!B5 + SUM(B2:B5) + B5",
+        "A2": "='Summary Sheet'!A1:B5 + SUM(B5:D5)",
+        "B2": "10",
+        "B3": "20",
+        "B4": "30",
+        "B5": "40",
+      ]
+    )
+
+    // Deleting row 4 (1-based row 5, i.e. B5)
+    sheet.deleteRow(at: 4)
+    XCTAssertEqual(sheet.rawValue(at: "A1"), "=Sheet2!B5 + SUM(B2:B4) + #REF!")
+    XCTAssertEqual(sheet.rawValue(at: "A2"), "='Summary Sheet'!A1:B5 + SUM(#REF!)")
+    XCTAssertEqual(sheet.evaluate(at: "A1"), .error("#REF!"))
+
+    // Inserting row at index 1 (1-based row 2) keeps cross-sheet Sheet2!B5 untouched while shifting local B2:B4 -> B3:B5
+    try sheet.setCell("A3", rawValue: "=Sheet2!B5 + SUM(B2:B4)")
+    sheet.insertRow(at: 1)
+    XCTAssertEqual(sheet.rawValue(at: "A4"), "=Sheet2!B5 + SUM(B3:B5)")
+
+    // Deleting the inserted row at index 1 shifts B3:B5 back to B2:B4
+    sheet.deleteRow(at: 1)
+    XCTAssertEqual(sheet.rawValue(at: "A3"), "=Sheet2!B5 + SUM(B2:B4)")
+
+    // Deleting the start boundary of B2:B4 (index 1, 1-based row 2) shrinks B2:B4 -> B2:B3 (and A3 moves to A2)
+    sheet.deleteRow(at: 1)
+    XCTAssertEqual(sheet.rawValue(at: "A2"), "=Sheet2!B5 + SUM(B2:B3)")
+
+    // Preserve existing Auto-Fill formula shifter contract
+    XCTAssertEqual(
+      WorksheetModel.shiftFormulaReferences(
+        "=B2+$A$1+$C2+D$2+Sheet2!B2", rowDelta: 2, columnDelta: 1),
+      "=C4+$A$1+$C4+E$2+Sheet2!C4"
+    )
+
+    // F6: Enterprise data cleansing — removeDuplicateRows and splitColumnByDelimiter
+    var cleanSheet = WorksheetModel(
+      name: "데이터정제",
+      rawCells: [
+        "A1": "이름", "B1": "부서",
+        "A2": "홍길동", "B2": "개발팀",
+        "A3": "김영희", "B3": "기획팀",
+        "A4": "홍길동", "B4": "개발팀",
+        "A5": "이철수", "B5": "디자인팀",
+        "A6": "김영희", "B6": "기획팀",
+      ]
+    )
+    let removedCount = cleanSheet.removeDuplicateRows()
+    XCTAssertEqual(removedCount, 2)
+    XCTAssertEqual(cleanSheet.rawValue(at: "A2"), "홍길동")
+    XCTAssertEqual(cleanSheet.rawValue(at: "A3"), "김영희")
+    XCTAssertEqual(cleanSheet.rawValue(at: "A4"), "이철수")
+    XCTAssertEqual(cleanSheet.rawValue(at: "A5"), "")
+
+    var splitSheet = WorksheetModel(
+      name: "텍스트나누기",
+      rawCells: [
+        "A1": "홍길동, 개발팀, 서울",
+        "A2": "김영희, 기획팀, 부산",
+      ]
+    )
+    let splitCount = splitSheet.splitColumnByDelimiter(column: 0, delimiter: ",")
+    XCTAssertEqual(splitCount, 2)
+    XCTAssertEqual(splitSheet.rawValue(at: "A1"), "홍길동")
+    XCTAssertEqual(splitSheet.rawValue(at: "B1"), "개발팀")
+    XCTAssertEqual(splitSheet.rawValue(at: "C1"), "서울")
+    XCTAssertEqual(splitSheet.rawValue(at: "A2"), "김영희")
+    XCTAssertEqual(splitSheet.rawValue(at: "B2"), "기획팀")
+    XCTAssertEqual(splitSheet.rawValue(at: "C2"), "부산")
+
+    // F1 & F12: Dark mode surface tokens and relative luminance helper
+    let darkPalette = WorkspaceThemeMode.darkIndigo.surfacePalette(isSystemDark: true)
+    XCTAssertEqual(darkPalette.selectedSurface.hex, "#283152")
+    XCTAssertTrue(EasyOfficeDesignTokens.isLightFill(hex: "#F8F9FF"))
+    XCTAssertFalse(EasyOfficeDesignTokens.isLightFill(hex: "#141724"))
+
+    // F4 & F5: Multilevel list markers and Korean official document list hierarchy (1. -> 가. -> (1) -> (가))
+    let doc = OfficeDocumentModel(
+      title: "공문서 다단계 개요",
+      paragraphs: [
+        ParagraphBlock(text: "대항목", listKind: .koreanOfficial, listLevel: 0),
+        ParagraphBlock(text: "중항목", listKind: .koreanOfficial, listLevel: 1),
+        ParagraphBlock(text: "소항목", listKind: .koreanOfficial, listLevel: 2),
+        ParagraphBlock(text: "세부항목", listKind: .koreanOfficial, listLevel: 3),
+        ParagraphBlock(text: "영문 중항목", listKind: .numbered, listLevel: 1),
+        ParagraphBlock(text: "로마자 소항목", listKind: .numbered, listLevel: 2),
+      ]
+    )
+    XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 0), "1.")
+    XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 1), "가.")
+    XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 2), "(1)")
+    XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 3), "(가)")
+    XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 4), "a.")
+    XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 5), "i.")
+
+    // F7: SlideDeckTheme & SlideModel.alignElements
+    let el1 = SlideCanvasElement(
+      title: "Box1", x: 100, y: 100, width: 80, height: 60, kind: .rectangleShape)
+    let el2 = SlideCanvasElement(
+      title: "Box2", x: 200, y: 140, width: 80, height: 60, kind: .rectangleShape)
+    let el3 = SlideCanvasElement(
+      title: "Box3", x: 500, y: 180, width: 80, height: 60, kind: .rectangleShape)
+    var deck = PresentationDeckModel(
+      title: "테마 및 정렬 검증",
+      slides: [
+        SlideModel(
+          title: "슬라이드 1",
+          elements: [el1, el2, el3]
+        )
+      ]
+    )
+    deck.applyTheme(.corporateNavy)
+    XCTAssertEqual(deck.deckTheme, .corporateNavy)
+    XCTAssertEqual(deck.slides[0].elements[0].fillHex, SlideDeckTheme.corporateNavy.primaryFillHex)
+    deck.slides[0].alignElements(.distributeHorizontally)
+    XCTAssertEqual(deck.slides[0].elements[1].x, 300.0, accuracy: 1e-4)
+
+    // F8: PDFStudioDocumentModel.addBookmark and /Outlines dictionary in PDFBinarySerializer
+    var pdf = PDFStudioDocumentModel(
+      title: "북마크 PDF",
+      pages: [
+        PDFPageDescriptor(pageNumber: 1, extractedText: "1장 본문"),
+        PDFPageDescriptor(pageNumber: 2, extractedText: "2장 본문"),
+      ]
+    )
+    pdf.addBookmark(title: "1장 개요", targetPageNumber: 1)
+    let parentID = try XCTUnwrap(pdf.outline.first?.id)
+    pdf.addBookmark(title: "1.1 세부절", targetPageNumber: 2, parentID: parentID)
+    XCTAssertEqual(pdf.outline.count, 1)
+    XCTAssertEqual(pdf.outline.first?.children.first?.title, "1.1 세부절")
+
+    let pdfBytes = PDFBinarySerializer.encode(pdf)
+    let pdfString = String(decoding: pdfBytes, as: UTF8.self)
+    XCTAssertTrue(pdfString.contains("/Outlines"))
+    let decodedPDF = try PDFBinarySerializer.decode(from: pdfBytes)
+    XCTAssertEqual(decodedPDF.outline.first?.title, "1장 개요")
+    XCTAssertEqual(decodedPDF.outline.first?.children.first?.title, "1.1 세부절")
   }
 }

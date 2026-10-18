@@ -52,11 +52,15 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
     for idx in doc.paragraphs.indices where idx < paragraphs.count {
       let p = doc.paragraphs[idx]
       let metaP = paragraphs[idx]
+      let resolvedListKind = metaP.listKind != .none ? metaP.listKind : p.listKind
+      let resolvedListLevel = metaP.listKind != .none ? metaP.listLevel : p.listLevel
+      let resolvedText =
+        (metaP.listKind != .none && !metaP.text.isEmpty) ? metaP.text : p.text
       doc.paragraphs[idx] = ParagraphBlock(
         id: metaP.id,
         style: p.style,
         alignment: p.alignment,
-        text: p.text,
+        text: resolvedText,
         runs: metaP.runs.isEmpty ? p.runs : metaP.runs,
         fontName: p.fontName,
         fontSizePt: p.fontSizePt,
@@ -66,7 +70,9 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
         lineSpacingPercent: p.lineSpacingPercent,
         firstLineIndentPt: metaP.firstLineIndentPt != 0
           ? metaP.firstLineIndentPt : p.firstLineIndentPt,
-        leftIndentPt: metaP.leftIndentPt != 0 ? metaP.leftIndentPt : p.leftIndentPt
+        leftIndentPt: metaP.leftIndentPt != 0 ? metaP.leftIndentPt : p.leftIndentPt,
+        listKind: resolvedListKind,
+        listLevel: resolvedListLevel
       )
     }
     for idx in doc.tables.indices where idx < tables.count {

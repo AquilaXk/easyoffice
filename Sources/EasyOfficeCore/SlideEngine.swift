@@ -70,6 +70,47 @@ public enum SlideResizeHandle: String, Sendable, Codable, Equatable, CaseIterabl
   case left = "W"
 }
 
+/// Master color theme palette applied across presentation slides and canvas elements.
+public enum SlideDeckTheme: String, Sendable, Codable, Equatable, CaseIterable {
+  case signatureLavender = "시그니처 라벤더"
+  case corporateNavy = "코퍼레이트 네이비"
+  case forestEmerald = "포레스트 에메랄드"
+  case warmAmber = "웜 앰버"
+  case slateMono = "슬레이트 모노"
+
+  public var primaryFillHex: String {
+    switch self {
+    case .signatureLavender: return "#EEF0FF"
+    case .corporateNavy: return "#E8EEF7"
+    case .forestEmerald: return "#E6F4EA"
+    case .warmAmber: return "#FEF3C7"
+    case .slateMono: return "#F1F5F9"
+    }
+  }
+
+  public var accentBorderHex: String {
+    switch self {
+    case .signatureLavender: return "#5C6BC0"
+    case .corporateNavy: return "#1E40AF"
+    case .forestEmerald: return "#047857"
+    case .warmAmber: return "#D97706"
+    case .slateMono: return "#334155"
+    }
+  }
+}
+
+/// Multi-element and stage-relative alignment & distribution commands on a slide canvas.
+public enum SlideElementAlignment: String, Sendable, Codable, Equatable, CaseIterable {
+  case alignLeft = "좌측 맞춤"
+  case alignCenter = "가로 중앙 맞춤"
+  case alignRight = "우측 맞춤"
+  case alignTop = "상단 맞춤"
+  case alignMiddle = "세로 중앙 맞춤"
+  case alignBottom = "하단 맞춤"
+  case distributeHorizontally = "가로 균등 배분"
+  case distributeVertically = "세로 균등 배분"
+}
+
 /// Visual element placed on a slide canvas.
 public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
   public let id: UUID
@@ -400,6 +441,144 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
       dividingBy: 360.0)
     elements[idx].rotationDegrees = normalized
   }
+
+  /// Duplicates an existing canvas element with a 24pt stage-clamped offset and top zIndex.
+  @discardableResult
+  public mutating func duplicateElement(
+    id: UUID,
+    stageSize: (width: Double, height: Double) = (960.0, 540.0)
+  ) -> SlideCanvasElement? {
+    guard let elem = elements.first(where: { $0.id == id }) else { return nil }
+    let maxZ = elements.map(\.zIndex).max() ?? 0
+    let newX = max(0.0, min(stageSize.width - elem.width, elem.x + 24.0))
+    let newY = max(0.0, min(stageSize.height - elem.height, elem.y + 24.0))
+    let copy = SlideCanvasElement(
+      id: UUID(),
+      title: elem.title,
+      bodyText: elem.bodyText,
+      x: newX,
+      y: newY,
+      width: elem.width,
+      height: elem.height,
+      kind: elem.kind,
+      zIndex: maxZ + 1,
+      rotationDegrees: elem.rotationDegrees,
+      animation: elem.animation,
+      fillHex: elem.fillHex,
+      strokeHex: elem.strokeHex,
+      isBold: elem.isBold,
+      isItalic: elem.isItalic,
+      isUnderlined: elem.isUnderlined
+    )
+    elements.append(copy)
+    return copy
+  }
+
+  /// Removes the canvas element with the given `id`.
+  public mutating func removeElement(id: UUID) {
+    elements.removeAll { $0.id == id }
+  }
+
+  /// Aligns or evenly distributes canvas elements relative to the stage or collective bounding box.
+  public mutating func alignElements(
+    _ alignment: SlideElementAlignment,
+    targetID: UUID? = nil,
+    stageSize: (width: Double, height: Double) = (960.0, 540.0)
+  ) {
+    guard !elements.isEmpty else { return }
+
+    switch alignment {
+    case .distributeHorizontally:
+      guard elements.count >= 3 else { return }
+      let sortedIndices = elements.indices.sorted { elements[$0].x < elements[$1].x }
+      let firstX = elements[sortedIndices[0]].x
+      let lastMaxX = elements[sortedIndices[sortedIndices.count - 1]].maxX
+      let totalWidths = sortedIndices.reduce(0.0) { $0 + elements[$1].width }
+      let gap = (lastMaxX - firstX - totalWidths) / Double(sortedIndices.count - 1)
+      var cursorX = firstX
+      for idx in sortedIndices {
+        elements[idx].x = cursorX
+        cursorX += elements[idx].width + gap
+      }
+      return
+
+    case .distributeVertically:
+      guard elements.count >= 3 else { return }
+      let sortedIndices = elements.indices.sorted { elements[$0].y < elements[$1].y }
+      let firstY = elements[sortedIndices[0]].y
+      let lastMaxY = elements[sortedIndices[sortedIndices.count - 1]].maxY
+      let totalHeights = sortedIndices.reduce(0.0) { $0 + elements[$1].height }
+      let gap = (lastMaxY - firstY - totalHeights) / Double(sortedIndices.count - 1)
+      var cursorY = firstY
+      for idx in sortedIndices {
+        elements[idx].y = cursorY
+        cursorY += elements[idx].height + gap
+      }
+      return
+
+    default:
+      break
+    }
+
+    if let targetID, let idx = elements.firstIndex(where: { $0.id == targetID }) {
+      alignSingleElement(at: idx, alignment: alignment, stageSize: stageSize)
+      return
+    }
+
+    if elements.count == 1 {
+      alignSingleElement(at: 0, alignment: alignment, stageSize: stageSize)
+      return
+    }
+
+    let minX = elements.map(\.x).min() ?? 0.0
+    let maxX = elements.map(\.maxX).max() ?? stageSize.width
+    let midX = (minX + maxX) / 2.0
+    let minY = elements.map(\.y).min() ?? 0.0
+    let maxY = elements.map(\.maxY).max() ?? stageSize.height
+    let midY = (minY + maxY) / 2.0
+
+    for idx in elements.indices {
+      switch alignment {
+      case .alignLeft:
+        elements[idx].x = minX
+      case .alignCenter:
+        elements[idx].x = midX - elements[idx].width / 2.0
+      case .alignRight:
+        elements[idx].x = maxX - elements[idx].width
+      case .alignTop:
+        elements[idx].y = minY
+      case .alignMiddle:
+        elements[idx].y = midY - elements[idx].height / 2.0
+      case .alignBottom:
+        elements[idx].y = maxY - elements[idx].height
+      case .distributeHorizontally, .distributeVertically:
+        break
+      }
+    }
+  }
+
+  private mutating func alignSingleElement(
+    at idx: Int,
+    alignment: SlideElementAlignment,
+    stageSize: (width: Double, height: Double)
+  ) {
+    switch alignment {
+    case .alignLeft:
+      elements[idx].x = 40.0
+    case .alignCenter:
+      elements[idx].x = max(0.0, (stageSize.width - elements[idx].width) / 2.0)
+    case .alignRight:
+      elements[idx].x = max(0.0, stageSize.width - elements[idx].width - 40.0)
+    case .alignTop:
+      elements[idx].y = 40.0
+    case .alignMiddle:
+      elements[idx].y = max(0.0, (stageSize.height - elements[idx].height) / 2.0)
+    case .alignBottom:
+      elements[idx].y = max(0.0, stageSize.height - elements[idx].height - 40.0)
+    case .distributeHorizontally, .distributeVertically:
+      break
+    }
+  }
 }
 
 /// Presentation deck model supporting slide ordering, smart alignment guides, and presenter notes.
@@ -408,17 +587,55 @@ public struct PresentationDeckModel: Sendable, Codable, Equatable, Identifiable 
   public var title: String
   public var aspectRatio: SlideAspectRatio
   public var slides: [SlideModel]
+  public var deckTheme: SlideDeckTheme
 
   public init(
     id: UUID = UUID(),
     title: String,
     aspectRatio: SlideAspectRatio = .widescreen16x9,
-    slides: [SlideModel] = []
+    slides: [SlideModel] = [],
+    deckTheme: SlideDeckTheme = .signatureLavender
   ) {
     self.id = id
     self.title = title
     self.aspectRatio = aspectRatio
     self.slides = slides
+    self.deckTheme = deckTheme
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, title, aspectRatio, slides, deckTheme
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+    self.title = try c.decode(String.self, forKey: .title)
+    self.aspectRatio =
+      try c.decodeIfPresent(SlideAspectRatio.self, forKey: .aspectRatio) ?? .widescreen16x9
+    self.slides = try c.decodeIfPresent([SlideModel].self, forKey: .slides) ?? []
+    self.deckTheme =
+      try c.decodeIfPresent(SlideDeckTheme.self, forKey: .deckTheme) ?? .signatureLavender
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(id, forKey: .id)
+    try c.encode(title, forKey: .title)
+    try c.encode(aspectRatio, forKey: .aspectRatio)
+    try c.encode(slides, forKey: .slides)
+    try c.encode(deckTheme, forKey: .deckTheme)
+  }
+
+  /// Applies a master color theme across the presentation deck and all slide canvas elements.
+  public mutating func applyTheme(_ theme: SlideDeckTheme) {
+    self.deckTheme = theme
+    for sIdx in slides.indices {
+      for eIdx in slides[sIdx].elements.indices {
+        slides[sIdx].elements[eIdx].fillHex = theme.primaryFillHex
+        slides[sIdx].elements[eIdx].strokeHex = theme.accentBorderHex
+      }
+    }
   }
 
   public mutating func moveSlide(from sourceIndex: Int, to destinationIndex: Int) {

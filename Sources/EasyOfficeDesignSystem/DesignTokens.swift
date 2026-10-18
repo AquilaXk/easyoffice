@@ -94,6 +94,10 @@ public struct WorkspaceThemePalette: Sendable, Equatable, Hashable {
   public let border: RGBColorToken
   public let primaryText: RGBColorToken
   public let secondaryText: RGBColorToken
+  public let selectedSurface: RGBColorToken
+  public let subtleAccentSurface: RGBColorToken
+  public let accentBadgeText: RGBColorToken
+  public let isDark: Bool
 
   public init(
     background: RGBColorToken,
@@ -101,7 +105,11 @@ public struct WorkspaceThemePalette: Sendable, Equatable, Hashable {
     elevatedSurface: RGBColorToken,
     border: RGBColorToken,
     primaryText: RGBColorToken,
-    secondaryText: RGBColorToken
+    secondaryText: RGBColorToken,
+    selectedSurface: RGBColorToken = EasyOfficeDesignTokens.brand100,
+    subtleAccentSurface: RGBColorToken = EasyOfficeDesignTokens.brand50,
+    accentBadgeText: RGBColorToken = EasyOfficeDesignTokens.brand800,
+    isDark: Bool = false
   ) {
     self.background = background
     self.cardSurface = cardSurface
@@ -109,6 +117,10 @@ public struct WorkspaceThemePalette: Sendable, Equatable, Hashable {
     self.border = border
     self.primaryText = primaryText
     self.secondaryText = secondaryText
+    self.selectedSurface = selectedSurface
+    self.subtleAccentSurface = subtleAccentSurface
+    self.accentBadgeText = accentBadgeText
+    self.isDark = isDark
   }
 }
 
@@ -138,7 +150,11 @@ public enum WorkspaceThemeMode: String, CaseIterable, Sendable, Codable, Identif
         elevatedSurface: EasyOfficeDesignTokens.darkElevated,
         border: EasyOfficeDesignTokens.darkBorder,
         primaryText: EasyOfficeDesignTokens.darkText,
-        secondaryText: EasyOfficeDesignTokens.darkMuted
+        secondaryText: EasyOfficeDesignTokens.darkMuted,
+        selectedSurface: EasyOfficeDesignTokens.darkSelectedSurface,
+        subtleAccentSurface: EasyOfficeDesignTokens.darkSubtleAccentSurface,
+        accentBadgeText: EasyOfficeDesignTokens.brand200,
+        isDark: true
       )
     } else {
       return WorkspaceThemePalette(
@@ -147,7 +163,11 @@ public enum WorkspaceThemeMode: String, CaseIterable, Sendable, Codable, Identif
         elevatedSurface: EasyOfficeDesignTokens.lightSubtle,
         border: EasyOfficeDesignTokens.lightBorder,
         primaryText: EasyOfficeDesignTokens.inkPrimary,
-        secondaryText: EasyOfficeDesignTokens.inkSecondary
+        secondaryText: EasyOfficeDesignTokens.inkSecondary,
+        selectedSurface: EasyOfficeDesignTokens.brand100,
+        subtleAccentSurface: EasyOfficeDesignTokens.brand50,
+        accentBadgeText: EasyOfficeDesignTokens.brand800,
+        isDark: false
       )
     }
   }
@@ -226,6 +246,36 @@ public enum EasyOfficeDesignTokens {
   public static let darkBorder = RGBColorToken(red: 0x2C, green: 0x34, blue: 0x52, hex: "#2C3452")
   public static let darkText = RGBColorToken(red: 0xF8, green: 0xF9, blue: 0xFD, hex: "#F8F9FD")
   public static let darkMuted = RGBColorToken(red: 0x8A, green: 0x94, blue: 0xB8, hex: "#8A94B8")
+  public static let darkSelectedSurface = RGBColorToken(
+    red: 0x28, green: 0x31, blue: 0x52, hex: "#283152")
+  public static let darkSubtleAccentSurface = RGBColorToken(
+    red: 0x1E, green: 0x24, blue: 0x3B, hex: "#1E243B")
+
+  // MARK: - Centralized Hex Color Parsing & WCAG Relative Luminance Helpers
+
+  public static func parseHexRGB(_ hex: String) -> (r: UInt8, g: UInt8, b: UInt8)? {
+    var cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+    if cleaned.hasPrefix("#") {
+      cleaned.removeFirst()
+    }
+    guard cleaned.count == 6, let val = UInt32(cleaned, radix: 16) else {
+      return nil
+    }
+    return (
+      r: UInt8((val >> 16) & 0xFF),
+      g: UInt8((val >> 8) & 0xFF),
+      b: UInt8(val & 0xFF)
+    )
+  }
+
+  public static func relativeLuminance(forHex hex: String) -> Double {
+    guard let rgb = parseHexRGB(hex) else { return 0.9 }
+    return RGBColorToken(red: rgb.r, green: rgb.g, blue: rgb.b, hex: hex).relativeLuminance
+  }
+
+  public static func isLightFill(hex: String) -> Bool {
+    relativeLuminance(forHex: hex) > 0.42
+  }
 
   // MARK: - Semantic Status Tokens (WCAG 2.1 AA Verified >= 4.5 on White)
   public static let statusSuccess = RGBColorToken(
@@ -281,3 +331,30 @@ public enum EasyOfficeDesignTokens {
     public static let slideFilmstripWidth: CGFloat = 210
   }
 }
+
+#if canImport(SwiftUI)
+  extension EasyOfficeDesignTokens {
+    public static func resolveHexColor(
+      _ hex: String?,
+      fallback: Color = EasyOfficeDesignTokens.brand600.swiftUIColor
+    ) -> Color {
+      guard let hex, let rgb = parseHexRGB(hex) else { return fallback }
+      return Color(
+        .sRGB,
+        red: Double(rgb.r) / 255.0,
+        green: Double(rgb.g) / 255.0,
+        blue: Double(rgb.b) / 255.0,
+        opacity: 1.0
+      )
+    }
+
+    public static func contrastingTextColor(forFillHex hex: String?) -> Color {
+      guard let hex, !hex.isEmpty else {
+        return EasyOfficeDesignTokens.inkPrimary.swiftUIColor
+      }
+      return isLightFill(hex: hex)
+        ? EasyOfficeDesignTokens.inkPrimary.swiftUIColor
+        : EasyOfficeDesignTokens.lightWhite.swiftUIColor
+    }
+  }
+#endif
