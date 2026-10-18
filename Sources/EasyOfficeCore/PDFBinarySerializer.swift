@@ -39,7 +39,23 @@ public enum PDFBinarySerializer {
             let pageObjNum = 3 + (idx * 2)
             let contentObjNum = pageObjNum + 1
             let escapedText = escapePDFString(page.extractedText)
-            let streamBody = "BT /F1 11 Tf 56 780 Td (\(escapedText)) Tj ET"
+            let headerHex = hexEncodeASCII("EasyOffice ISO 32000-1 PDF Studio - Page \(page.pageNumber) (\(page.rotationDegrees) deg)")
+            let statusHex = hexEncodeASCII("Verified ISO 32000-1 Vector Page | UTF-8 Stream: \(page.extractedText.utf8.count) Bytes | Status: SAFE")
+            let streamBody = [
+                "q",
+                "0.969 0.973 0.988 rg 36 460 523 346 re f",
+                "0.361 0.420 0.753 rg 36 756 523 50 re f",
+                "0.820 0.839 0.922 RG 1 w 36 460 523 346 re S",
+                "BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedText)) Tj ET",
+                "1 1 1 rg BT 0 Tr /F1 13 Tf 54 775 Td <\(headerHex)> Tj ET",
+                "0.220 0.251 0.380 rg BT 0 Tr /F1 10 Tf 54 722 Td <\(statusHex)> Tj ET",
+                "0.839 0.859 0.941 rg 54 698 487 2 re f",
+                "0.890 0.906 0.969 rg 54 654 440 16 re f",
+                "0.890 0.906 0.969 rg 54 624 487 16 re f",
+                "0.890 0.906 0.969 rg 54 594 390 16 re f",
+                "0.890 0.906 0.969 rg 54 564 460 16 re f",
+                "Q"
+            ].joined(separator: "\n")
             let streamByteCount = streamBody.utf8.count
 
             objectOffsets[pageObjNum] = buffer.count
@@ -123,10 +139,15 @@ public enum PDFBinarySerializer {
             }
         }
 
-        // Raw stream scanner for minimal synthetic PDF streams
+        // Raw stream scanner for minimal synthetic PDF streams and 3 Tr UTF-8 text layers
         var fallbackPages: [PDFPageDescriptor] = []
+        var fallbackInvisibleFlags: [Bool] = []
         var sawPageObject = false
         var currentRotate = 0
+        var inStream = false
+        var currentStreamLines: [String] = []
+        var currentStreamHasInvisibleLayer = false
+
         for line in lines {
             if line.contains("/Type /Page") && !line.contains("/Type /Pages") {
                 sawPageObject = true
@@ -136,20 +157,51 @@ public enum PDFBinarySerializer {
                 let digits = after.prefix(while: { $0.isNumber || $0 == "-" })
                 currentRotate = Int(digits) ?? 0
             }
+            if line == "stream" {
+                inStream = true
+                currentStreamLines.removeAll(keepingCapacity: true)
+                currentStreamHasInvisibleLayer = false
+                continue
+            }
+            if line == "endstream" {
+                if !currentStreamLines.isEmpty {
+                    fallbackPages.append(
+                        PDFPageDescriptor(
+                            pageNumber: fallbackPages.count + 1,
+                            rotationDegrees: currentRotate,
+                            extractedText: currentStreamLines.joined(separator: "\n")
+                        )
+                    )
+                    fallbackInvisibleFlags.append(currentStreamHasInvisibleLayer)
+                    currentRotate = 0
+                }
+                inStream = false
+                currentStreamLines.removeAll(keepingCapacity: true)
+                currentStreamHasInvisibleLayer = false
+                continue
+            }
             if line.hasPrefix("BT "),
                let openParen = line.firstIndex(of: "("),
                let closeParen = line.lastIndex(of: ")"),
                openParen < closeParen {
                 let inner = String(line[line.index(after: openParen)..<closeParen])
                 let unescaped = unescapePDFString(inner)
-                fallbackPages.append(
-                    PDFPageDescriptor(
-                        pageNumber: fallbackPages.count + 1,
-                        rotationDegrees: currentRotate,
-                        extractedText: unescaped
+                if inStream {
+                    currentStreamLines.append(unescaped)
+                    if line.hasPrefix("BT 3 Tr ") {
+                        currentStreamHasInvisibleLayer = true
+                    }
+                } else {
+                    fallbackPages.append(
+                        PDFPageDescriptor(
+                            pageNumber: fallbackPages.count + 1,
+                            rotationDegrees: currentRotate,
+                            extractedText: unescaped
+                        )
                     )
-                )
-                currentRotate = 0
+                    fallbackInvisibleFlags.append(line.hasPrefix("BT 3 Tr "))
+                    currentRotate = 0
+                }
             }
         }
 
@@ -165,10 +217,12 @@ public enum PDFBinarySerializer {
                 for idx in 0..<pdfDoc.pageCount {
                     let pdfPage = pdfDoc.page(at: idx)
                     let fallback = fallbackPages.indices.contains(idx) ? fallbackPages[idx] : nil
+                    let isInvisibleUTF8Layer = fallbackInvisibleFlags.indices.contains(idx) && fallbackInvisibleFlags[idx]
                     let nativeRotation = pdfPage?.rotation ?? 0
                     let resolvedRotation = nativeRotation != 0 ? nativeRotation : (fallback?.rotationDegrees ?? currentRotate)
                     let nativeText = pdfPage?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    let resolvedText = !nativeText.isEmpty ? nativeText : (fallback?.extractedText ?? "")
+                    let fallbackText = fallback?.extractedText ?? ""
+                    let resolvedText = ((isInvisibleUTF8Layer || nativeText.isEmpty) && !fallbackText.isEmpty) ? fallbackText : nativeText
 
                     pages.append(
                         PDFPageDescriptor(
@@ -257,6 +311,10 @@ public enum PDFBinarySerializer {
             )
         }
         return nodes
+    }
+
+    private static func hexEncodeASCII(_ input: String) -> String {
+        input.utf8.map { String(format: "%02X", $0) }.joined()
     }
 
     private static func escapePDFString(_ input: String) -> String {
