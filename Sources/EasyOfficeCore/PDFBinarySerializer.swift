@@ -119,19 +119,19 @@ public enum PDFBinarySerializer {
       for (aIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
         let ay = 610.0 - Double(aIdx) * 16.0
         let pillFill = annotation.kind == .highlight ? "0.98 0.96 0.84" : "0.94 0.95 1.00"
-        streamLines.append(String(format: "%@ rg 48.0 %.1f 325.0 14.0 re f", pillFill, ay - 3.0))
+        streamLines.append(String(format: "%@ rg 48.0 %.1f 328.0 14.0 re f", pillFill, ay - 3.0))
         if annotation.kind == .underline {
           streamLines.append(
-            String(format: "0.361 0.420 0.753 rg 48.0 %.1f 325.0 1.5 re f", ay - 3.0)
+            String(format: "0.361 0.420 0.753 rg 48.0 %.1f 328.0 1.5 re f", ay - 3.0)
           )
         }
         let annLabel =
           "[\(annotationKindBadge(annotation.kind))] \(annotation.author): \(annotation.content)"
-        let annHex = hexEncodeUTF16BE(annLabel, maxChars: 56)
+        let annHex = hexEncodeUTF16BE(annLabel, maxChars: 48)
         streamLines.append(
           String(
             format:
-              "BT /F2 9 Tf 0.16 0.20 0.38 RG 0.16 0.20 0.38 rg 1 0 0 1 54 %.0f Tm <%@> Tj ET",
+              "BT /F2 6.5 Tf 0.16 0.20 0.38 RG 0.16 0.20 0.38 rg 1 0 0 1 52 %.0f Tm <%@> Tj ET",
             ay, annHex
           )
         )
@@ -139,16 +139,16 @@ public enum PDFBinarySerializer {
 
       if !pageAnnotations.isEmpty {
         streamLines.append("0.99 0.94 0.95 rg 0.78 0.18 0.24 RG 1.5 w 386 576 160 46 re B")
-        let stampHeaderHex = hexEncodeUTF16BE("OFFICIAL STAMP / 결재 날인", maxChars: 48)
+        let stampHeaderHex = hexEncodeUTF16BE("결재 날인 · OFFICIAL STAMP", maxChars: 24)
         streamLines.append(
-          "BT /F2 10 Tf 0.78 0.18 0.24 rg 1 0 0 1 396 604 Tm <\(stampHeaderHex)> Tj ET"
+          "BT /F2 6.5 Tf 0.78 0.18 0.24 rg 1 0 0 1 392 604 Tm <\(stampHeaderHex)> Tj ET"
         )
         let stampNote =
           pageAnnotations.first(where: { $0.kind == .stamp || $0.kind == .signature })?.content
           ?? "[승인 완료] APPROVED"
-        let stampNoteHex = hexEncodeUTF16BE(stampNote, maxChars: 48)
+        let stampNoteHex = hexEncodeUTF16BE(stampNote, maxChars: 24)
         streamLines.append(
-          "BT /F2 9 Tf 0.55 0.12 0.18 rg 1 0 0 1 396 586 Tm <\(stampNoteHex)> Tj ET"
+          "BT /F2 6.5 Tf 0.55 0.12 0.18 rg 1 0 0 1 392 586 Tm <\(stampNoteHex)> Tj ET"
         )
       }
 
@@ -162,7 +162,7 @@ public enum PDFBinarySerializer {
         let valText = field.isCheckbox ? (field.isChecked ? "[X]" : "[ ]") : field.value
         let formLine = "[FORM] \(field.name): \(valText)"
         let escapedForm = escapePDFString(formLine)
-        let boxLabelHex = hexEncodeUTF16BE("[\(field.name): \(valText)]", maxChars: 48)
+        let boxLabelHex = hexEncodeUTF16BE("[\(field.name): \(valText)]", maxChars: 26)
         streamLines.append(
           String(
             format: "0.96 0.97 1.00 rg 0.62 0.67 0.86 RG 0.8 w %.0f %.1f 240 20 re B",
@@ -172,7 +172,7 @@ public enum PDFBinarySerializer {
         streamLines.append("BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedForm)) Tj ET")
         streamLines.append(
           String(
-            format: "0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 1 0 0 1 %.0f %.0f Tm <%@> Tj ET",
+            format: "0.145 0.165 0.243 rg BT 0 Tr /F2 8 Tf 1 0 0 1 %.0f %.0f Tm <%@> Tj ET",
             fx + 8.0, fy, boxLabelHex
           )
         )
@@ -185,11 +185,11 @@ public enum PDFBinarySerializer {
       if !pageStrokes.isEmpty {
         streamLines.append("0.97 0.98 1.00 rg 0.45 0.50 0.78 RG 1.0 w 48 452 280 46 re B")
         let sigHeaderHex = hexEncodeUTF16BE(
-          "ELECTRONIC SIGNATURE · 전자서명 검증 완료 (\(pageStrokes.count)획)",
-          maxChars: 60
+          "전자서명 검증 완료 · SIGNATURE (\(pageStrokes.count)획)",
+          maxChars: 30
         )
         streamLines.append(
-          "BT /F2 9 Tf 0.22 0.27 0.55 rg 1 0 0 1 56 484 Tm <\(sigHeaderHex)> Tj ET"
+          "BT /F2 7.5 Tf 0.22 0.27 0.55 rg 1 0 0 1 56 484 Tm <\(sigHeaderHex)> Tj ET"
         )
         for stroke in pageStrokes {
           let (r, g, b) = parseRGBHex(stroke.strokeHex)

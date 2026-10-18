@@ -42,6 +42,7 @@
 22. [PD-032 & PD-035: 7종 벡터 차트·7종 슬라이드 도형/정렬 뷰·NSTextView 문단 스타일/인라인 속성 및 PDF 리댁션/AcroForm/탭 병합 UI 정책 (2026-10-18)](#22-pd-032--pd-035-7종-벡터-차트7종-슬라이드-도형정렬-뷰nstextview-문단-스타일인라인-속성-및-pdf-리댁션acroform탭-병합-ui-정책-2026-10-18)
 23. [PD-037 ~ PD-041: 시맨틱 다크모드 배지 명도 대비, 200자 원고지 격자·문단/표/메일머지 제어, 시트 데이터 막대·첫 열 고정·데이터 정제, 슬라이드 마스터 테마·개체 정렬/배분·단조 Z-Order 및 PDF 결재 도장·계층형 책갈피 정책 (2026-10-18)](#23-pd-037--pd-041-시맨틱-다크모드-배지-명도-대비-200자-원고지-격자문단표메일머지-제어-시트-데이터-막대첫-열-고정데이터-정제-슬라이드-마스터-테마개체-정렬배분단조-z-order-및-pdf-결재-도장계층형-책갈피-정책-2026-10-18)
 24. [PD-040 ~ PD-043: 6차 적대적 감사 기반 다중 그룹 리본·문서/슬라이드 수평 눈금자·무간격 1px 세선 시트 그리드·122종 수식 함수·자간/장평 타이포그래피·16:9 슬라이드/홈 템플릿 미니어처 및 PDF 보안 점검·워터마크 정책 (2026-10-19)](#24-pd-040--pd-043-6차-적대적-감사-기반-다중-그룹-리본문서슬라이드-수평-눈금자무간격-1px-세선-시트-그리드122종-수식-함수자간장평-타이포그래피169-슬라이드홈-템플릿-미니어처-및-pdf-보안-점검워터마크-정책-2026-10-19)
+25. [PD-047 ~ PD-051: 7차 적대적 감사 기반 무클리핑 단일 컨텍스트 툴바·수직 눈금자/탭 정지점·단일 A4 WYSIWYG 조판·9열 시트/외곽 2pt 범위 테두리·수식 연산자(&/%)·슬라이드 단일 필름스트립/전환 타이밍·PDF 상단 렌더링 및 찾기/바꾸기 내비게이션 정책 (2026-10-19)](#25-pd-047--pd-051-7차-적대적-감사-기반-무클리핑-단일-컨텍스트-툴바수직-눈금자탭-정지점단일-a4-wysiwyg-조판9열-시트외곽-2pt-범위-테두리수식-연산자슬라이드-단일-필름스트립전환-타이밍pdf-상단-렌더링-및-찾기바꾸기-내비게이션-정책-2026-10-19)
 
 ---
 
@@ -489,4 +490,34 @@
 - **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testSixthAuditTypographyAdjustmentsQuickNumberFormatsAndPDFWatermarkActions`), `Tests/EasyOfficeTests/WorkspaceUIParityTests.swift`
 - **Revisit when**: 문서 세로 눈금자(Vertical Page Ruler) 및 탭 정지점(Tab Stop) 드래그 마커를 추가할 때.
 
+---
 
+### 25. PD-047 ~ PD-051: 7차 적대적 감사 기반 무클리핑 단일 컨텍스트 툴바·수직 눈금자/탭 정지점·단일 A4 WYSIWYG 조판·9열 시트/외곽 2pt 범위 테두리·수식 연산자(&/%)·슬라이드 단일 필름스트립/전환 타이밍·PDF 상단 렌더링 및 찾기/바꾸기 내비게이션 정책 (2026-10-19)
+
+- **Status**: Implemented (`Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/SheetCoordinatesAndAST.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`)
+- **Decision**:
+  1. **PD-047 (무클리핑 단일 컨텍스트 툴바 및 접이식 고급 도구 서랍 아키텍처 — `UX-08`)**:
+     - 상단 `ContextRibbonBarView` 전체를 `ScrollView(.horizontal, showsIndicators: false)`로 감싸고 그룹 간격을 컴팩트화(`spacing: 8`, 내부 `spacing: 5`, 패딩 `horizontal: 10, vertical: 6`)하여 `1360×880` 표준 데스크톱 창 폭에서 우측 끝 버튼이나 캡션이 1px도 잘리지 않도록 보장합니다.
+     - 문서/HWP, 시트, 슬라이드, PDF 스튜디오 상단에 적층되어 세로 뷰포트를 110~170pt 잠식하던 다중 툴바 행들을 **단일 34pt 컴팩트 기본 툴바(`ScrollView(.horizontal, showsIndicators: false)`) + 선택적 접이식 고급 도구 서랍(`viewModel.isAdvancedToolbarExpanded`)** 구조로 통합합니다.
+  2. **PD-048 (문서/슬라이드 수직 눈금자·탭 정지점 마커 및 단일 A4 WYSIWYG 조판 밀도 — `UX-09`, `FUNC-01`)**:
+     - `ParagraphBlock`에 `tabStopsPt: [Double]`(`default = [28.0, 56.0, 84.0]`)을 추가하고 `SelectableParagraphTextView`의 `NSMutableParagraphStyle.tabStops`에 실제 `NSTextTab` 배열을 바인딩합니다.
+     - 문서/HWP 수평 눈금자(`DocumentHorizontalRulerView`)에 탭 정지점 마커(`∟`)를 표시하고, A4 용지 좌측에 `0..29.7 cm` 세로 눈금자(`DocumentVerticalRulerView`, `width: 24`)를, 16:9 슬라이드 스테이지 좌측에 `0..540 pt` 세로 눈금자(`SlideVerticalRulerView`, `width: 22`)를 배치합니다.
+     - A4 용지 본문 하단에 중복 렌더링되던 `첨부 이미지 갤러리`, `문서 표 (Tables)`, `수식 편집기 블록` 별도 섹션을 제거하여 문단·표·수식·인라인 이미지(크기 조절 `-40pt`/`+40pt` 포함)·편집 가능한 머리말/꼬리말·각주가 **단일 A4 WYSIWYG 시트(`maxWidth: 794pt`)** 안에서 1회만 직관적으로 조판되도록 일원화합니다.
+  3. **PD-049 (9열 풀와이드 스프레드시트 격자, 외곽 2pt 다중 셀 선택 테두리 및 2차 열 다중 정렬 — `UX-10`, `FUNC-04`)**:
+     - 기본 표시 열을 `A..G`(7열)에서 `A..I`(9열, `max(9, sheet.columnCount)`)로 확장하여 데스크톱 가로 뷰포트의 우측 유휴 여백을 해소합니다.
+     - 다중 셀 범위 선택(`B2:D5` 등) 시 개별 셀마다 4면 굵은 테두리를 그리던 방식을 폐기하고, 선택 범위 내부 셀에는 연한 라벤더 틴트(`#5C6BC0` `10%` 불투명도)만 채운 뒤 **선택 범위 전체의 최외곽 경계선(Top/Bottom/Left/Right Perimeter)에만 `2.0pt` 브랜드 액센트(`#3B4890`) 테두리와 우하단(`maxRow, maxCol`) 단일 자동 채우기 핸들(`6×6`)**을 렌더링합니다.
+     - `WorksheetModel.sortRows(byColumn:ascending:hasHeader:secondaryColumn:secondaryAscending:)` 및 `WorkspaceViewModel.sortActiveSheetBySecondaryColumn(...)`을 통해 1차 기준 열 동률 시 2차 기준 열로 결정론적 정렬을 수행합니다.
+  4. **PD-050 (단일 소스 슬라이드 필름스트립·전환 타이밍/격자선 및 PDF 상단 직렬화·A4 페이지 미니어처 — `UX-11`, `UX-12`, `FUNC-02`, `FUNC-05`)**:
+     - 좌측 내비게이터(`viewModel.showLeftNavigator == true`)가 열려 있을 때는 `SlideEditorDetailPaneView` 내부의 중복 슬라이드 썸네일 레일을 숨겨 화면 위 슬라이드 필름스트립을 **단일 소스(Single Source of Truth)**로 유지하고, 좌측 내비게이터 상단에 컴팩트 슬라이드 조작 바(`+ 추가`, `복제`, `▲`, `▼`)를 제공합니다.
+     - `SlideModel`에 `transitionDurationSeconds: Double`(`0.2...5.0`, 기본 `0.8`) 및 `autoAdvanceSeconds: Int?`를 추가하고 `.pptx`(`eo:transitionDuration`, `eo:autoAdvance`) 및 `.odp` 컨테이너 직렬화 라운드트립과 스테이지 3등분/정중앙 격자 안내선(`isSlideGridlinesVisible`)을 지원합니다.
+     - `PDFBinarySerializer.encode(_:)`의 페이지 본문/주석/결재 도장 시작 좌표를 `y = 320pt` 하단 절반에서 **`y = 510pt` 상단 영역(`510pt → 150pt`)**으로 상향하여 `PDFKitRepresentedView`(`minHeight: 520`)에서 페이지 전체가 빈 상단 없이 균형 있게 렌더링되도록 개선하고, 좌측 내비게이터에 A4 비례 페이지 미니어처 카드(`44×58`)를 추가합니다.
+  5. **PD-051 (찾기/바꾸기 실시간 매치 카운터·내비게이션, 수식 연산자 패리티 및 하단 상태바·홈 필터 — `FUNC-03`, `FUNC-06`, `FUNC-08`)**:
+     - `FormulaTokenizer` 및 `FormulaParser`가 비교 연산자 `<>`, `<=`, `>=`, 문자열 결합 연산자 `&`, 후위 백분율 단항 연산자 `%`(`50%` → `0.5`)를 파싱·평가하고 `ROUNDUP`, `ROUNDDOWN` 함수를 지원하여 총 **124종** 내장 수식 함수를 제공합니다.
+     - `FindAndReplaceBarView`에 실시간 매치 카운터(`currentFindMatchIndex / findMatchCount 건`), 대소문자 구분 토글(`isFindCaseSensitive`), `◀ 이전`(`findPreviousMatch()`), `다음 ▶`(`findNextMatch()`), `바꾸기(1건)`(`replaceCurrentMatch()`), `모두 바꾸기`를 연결합니다.
+     - 하단 상태바(`BottomWorkspaceStatusBarView`)에 모듈별 실시간 지표(문서 단어·글자·원고지 매수, 시트 활성 시트명·선택 범위·함수 수, 슬라이드 번호·개체 수·전환 시간, PDF 페이지·주석·AcroForm 수)를 표시하고, 홈 허브 템플릿 및 최근 문서 섹션에 카테고리/포맷 필터 필(`selectedHomeTemplateCategoryFilter`, `selectedHomeRecentFormatFilter`)을 제공합니다.
+- **Why**: 7차 적대적 실사용 감사에서 확인된 상단 리본·툴바 우측 잘림, 다중 툴바 적층으로 인한 캔버스 협소화, 문서 A4 용지 하단 중복 갤러리, 시트 다중 선택 시 내부 격자 테두리 겹침 및 우측 여백, 슬라이드 이중 필름스트립, PDF 페이지 상단 공백 및 하단 중복 카드 문제를 전면 해소하기 위함입니다.
+- **Trade-offs**: 수직 눈금자(`DocumentVerticalRulerView`, `SlideVerticalRulerView`)와 좌측 내비게이터 미니어처 렌더링이 추가되나, 경량 `Canvas`와 값 타입 모델을 사용하여 60fps 반응성을 유지합니다.
+- **Alternatives rejected**:
+  - 다중 셀 범위 선택 시 각 셀에 `border(width: 2)`를 개별 적용하는 기존 방식: 범위 내부 격자선이 `4pt` 두께로 겹쳐 보여 상용 스프레드시트 UX와 괴리가 크므로 최외곽 경계선(Perimeter) 조건부 렌더링 방식으로 대체.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testSeventhAuditSlideTimingGridlinesFindNavigationAndHomeFilters`), `Tests/EasyOfficeTests/HighPerformanceAndCodecFidelityTests.swift` (`testSeventhAuditFormulaOperatorsRoundupTabStopsAndPDFUpperPageLayout`)
+- **Revisit when**: 사용자 정의 리본 탭 순서 편집 또는 다중 윈도우 분리(Tear-off Tab Window) 요구사항이 추가될 때.
