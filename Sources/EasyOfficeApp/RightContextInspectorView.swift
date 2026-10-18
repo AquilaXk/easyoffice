@@ -217,6 +217,18 @@ struct RightContextInspectorView: View {
         .pickerStyle(.segmented)
         .controlSize(.small)
 
+        VStack(alignment: .leading, spacing: 4) {
+            Text("선택 셀 메모 (\(viewModel.selectedSheetCell))")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            TextField("셀 메모 입력", text: Binding(
+                get: { sheet.sheetComments[selectedAddr.packedCoordinate] ?? "" },
+                set: { viewModel.setSelectedSheetCellComment($0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11))
+        }
+
         VStack(alignment: .leading, spacing: 6) {
             Button("선택 셀 병합 / 해제") { viewModel.toggleMergeOnSelectedSheetCell() }
                 .buttonStyle(.bordered).controlSize(.small)
@@ -318,16 +330,50 @@ struct RightContextInspectorView: View {
         Divider()
 
         if let elem = activeElement, let elementID = targetElementID {
-            Text("선택 개체 좌표: (\(Int(elem.x)), \(Int(elem.y))) · \(Int(elem.width))×\(Int(elem.height))")
-                .font(.system(size: 10, design: .monospaced))
+            Text("선택 개체 편집 (\(Int(elem.x)), \(Int(elem.y)) · \(Int(elem.width))×\(Int(elem.height)))")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
 
+            TextField("개체 제목", text: Binding(
+                get: { elem.title },
+                set: { viewModel.updateSlideElementText(slideIndex: sIdx, elementID: elementID, title: $0, bodyText: nil) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11))
+
+            TextField("개체 본문", text: Binding(
+                get: { elem.bodyText },
+                set: { viewModel.updateSlideElementText(slideIndex: sIdx, elementID: elementID, title: nil, bodyText: $0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11))
+
             HStack(spacing: 6) {
-                Button("폭 -20") { viewModel.resizeSlideElement(elementID: elementID, deltaWidth: -20, deltaHeight: 0) }
+                Button("X -10") { viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: -10, deltaY: 0) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("X +10") { viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 10, deltaY: 0) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("Y -10") { viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 0, deltaY: -10) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("Y +10") { viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 0, deltaY: 10) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+            }
+
+            HStack(spacing: 6) {
+                Button("폭 -20") { viewModel.resizeSlideElement(slideIndex: sIdx, elementID: elementID, deltaWidth: -20, deltaHeight: 0) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("폭 +20") { viewModel.resizeSlideElement(slideIndex: sIdx, elementID: elementID, deltaWidth: 20, deltaHeight: 0) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("높이 -20") { viewModel.resizeSlideElement(slideIndex: sIdx, elementID: elementID, deltaWidth: 0, deltaHeight: -20) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+                Button("높이 +20") { viewModel.resizeSlideElement(slideIndex: sIdx, elementID: elementID, deltaWidth: 0, deltaHeight: 20) }
+                    .buttonStyle(.bordered).controlSize(.mini)
+            }
+
+            HStack(spacing: 6) {
+                Button("앞으로") { viewModel.moveSlideElementZOrder(slideIndex: sIdx, elementID: elementID, bringForward: true) }
                     .buttonStyle(.bordered).controlSize(.small)
-                Button("폭 +20") { viewModel.resizeSlideElement(elementID: elementID, deltaWidth: 20, deltaHeight: 0) }
-                    .buttonStyle(.bordered).controlSize(.small)
-                Button("높이 +20") { viewModel.resizeSlideElement(elementID: elementID, deltaWidth: 0, deltaHeight: 20) }
+                Button("뒤로") { viewModel.moveSlideElementZOrder(slideIndex: sIdx, elementID: elementID, bringForward: false) }
                     .buttonStyle(.bordered).controlSize(.small)
             }
         }
@@ -381,6 +427,7 @@ struct RightContextInspectorView: View {
     private func mutateDocument(_ transform: (inout OfficeDocumentModel) -> Void) {
         guard let idx = viewModel.openTabs.firstIndex(where: { $0.id == tab.id }),
               case var .document(doc) = viewModel.openTabs[idx].payload else { return }
+        viewModel.recordUndoSnapshot(for: tab.id, coalescingTargetKey: "inspector-doc-\(tab.id.uuidString)")
         transform(&doc)
         viewModel.openTabs[idx].payload = .document(doc)
         viewModel.openTabs[idx].isModified = true
@@ -389,6 +436,7 @@ struct RightContextInspectorView: View {
     private func mutateSlideDeck(_ transform: (inout PresentationDeckModel) -> Void) {
         guard let idx = viewModel.openTabs.firstIndex(where: { $0.id == tab.id }),
               case var .slide(deck) = viewModel.openTabs[idx].payload else { return }
+        viewModel.recordUndoSnapshot(for: tab.id, coalescingTargetKey: "inspector-slide-\(tab.id.uuidString)")
         transform(&deck)
         viewModel.openTabs[idx].payload = .slide(deck)
         viewModel.openTabs[idx].isModified = true

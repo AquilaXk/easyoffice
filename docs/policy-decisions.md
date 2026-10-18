@@ -292,12 +292,12 @@
 - **Decision**:
   1. **사이드채널 문자열 오염 0건 및 비파괴적 도메인 상태 변이 (`WorkspaceRibbonCommandRouter.swift`)**:
      - 문서(`.document`, `.hwp`)의 메일 머지(`doc-mod-mailmerge`), 원고지 매수 검산(`hwp-mod-manuscript`), 수식·데이터 명령(`-data-autosum`, `-data-fn-browser`, `-data-sort`, `-data-validation`)이 `doc.footerText`를 덮어쓰던 부작용을 제거하고, 표 요약 행 추가(`=SUM(ABOVE)`, `=AVERAGE(ABOVE)`) 및 `doc.recordRevision(...)` 이력 기록으로 비파괴적 변이를 수행합니다.
-     - `doc-insert-chart`/`hwp-insert-chart`는 브래킷 문자열 문단 대신 정식 `DocumentTableBlock` 차트 요약 표를 삽입하고, `doc-insert-shape`/`hwp-insert-shape`는 `.quoteCallout` 스타일 콜아웃 문단을 삽입합니다.
+     - `doc-insert-chart`/`hwp-insert-chart`는 브래킷 문자열 문단 대신 정식 `DocumentTableBlock` 차트 요약 표를 삽입하고, `doc-insert-shape`/`hwp-insert-shape`는 `.quote` 스타일 콜아웃 문단을 삽입합니다.
      - 시트(`.sheet`)의 `sheet-mod-pivot`은 선택 셀 코멘트 오염 대신 전용 워크시트 탭(`"피벗 요약"`, `sheet.addSheetPage`)을 생성·갱신하며, `sheet-review-security`/`-review-verify`에서 사용자 셀 코멘트를 일괄 삭제하던 `sheet.sheetComments.removeAll()`을 제거합니다.
-     - 슬라이드(`.slide`)의 `-review-track`, `-review-comment`, `-data-*`는 `speakerNotes`에 태그 문자열을 덧붙이지 않고 `deck.trackChangesEnabled`, `deck.comments`(`SlideCommentItem`), `SlideCanvasElement`(`.metricHighlight`, `.tableSummary`)를 정식 변이합니다.
+     - 슬라이드(`.slide`)의 `-review-track`, `-review-comment`, `-data-*`는 `speakerNotes`에 태그 문자열을 덧붙이지 않고 `SlideCanvasElement`(`.calloutShape`, `.chartEmbed`, `.tableGrid`)를 정식 변이합니다.
      - PDF(`.pdf`)의 `pdf-mod-splitmerge`는 고정 1페이지가 아닌 현재 선택된 `selectedPDFPageNumber` 페이지를 추출하며, `-home-*` 및 `-layout-*` 명령이 가짜 주석이나 책갈피 노드를 추가하지 않도록 정리합니다.
   2. **5대 모듈 양방향 인터랙티브 우측 컨텍스트 인스펙터 (`RightContextInspectorView.swift`)**:
-     - 문서/HWP(용지 규격·방향 `Picker`, 다단 `Stepper`, 변경 추적 `Toggle`, 머리말/꼬리말 `TextField`), 시트(숫자 표시 형식·가로 정렬 `Picker`, 셀 병합 토글, 머리글 행 고정 `Toggle`), 슬라이드(화면 비율·마스터 레이아웃·전환 효과 `Picker`, 발표자 노트 `TextField`, 개체 리사이즈), PDF(대상 페이지 `Stepper`, 빈 페이지 추가·선택 페이지 삭제·분할 추출)를 양방향 바인딩으로 제어합니다.
+     - 문서/HWP(용지 규격·방향 `Picker`, 다단 `Stepper`, 변경 추적 `Toggle`, 머리말/꼬리말 `TextField`), 시트(숫자 표시 형식·가로 정렬 `Picker`, 셀 메모 `TextField`, 셀 병합 토글, 머리글 행 고정 `Toggle`), 슬라이드(화면 비율·마스터 레이아웃·전환 효과 `Picker`, 발표자 노트 `TextField`, 선택 개체 제목/본문·X/Y/W/H·Z-Order 제어), PDF(대상 페이지 `Stepper`, 빈 페이지 추가·선택 페이지 삭제·분할 추출)를 양방향 바인딩으로 제어합니다.
   3. **부분 구절(`inlineRunTargetPhrase`) 런 분할, 실제 `160×48` 멀티픽셀 PNG 비트맵 렌더링, 무제한 시트 그리드 + 1행 고정(`isHeaderRowFrozen`), 60fps 실시간 슬라이드 드래그(`@GestureState`) 및 1Hz 발표자 타이머**:
      - `applyInlineRunFormattingToActiveParagraph`는 `inlineRunTargetPhrase` 부분 문자열 범위를 계산하여 `[앞 구간, 강조 구절, 뒤 구간]` 다중 `DocumentTextRun`으로 정밀 분할하며, `insertSampleImageAttachment`는 `NSBitmapImageRep`로 실제 `160×48` 라벤더 배너 PNG를 생성하고 `DocumentEditorDetailPaneView`에서 `NSImage(data:)` 비트맵으로 렌더링합니다(`presentOpenImagePanel` 디스크 이미지 불러오기 포함).
      - `SheetEditorDetailPaneView`는 기존의 `24행 × 12열` 하드 캡을 제거하여 임의 좌표 셀을 모두 표시하고, `isHeaderRowFrozen` 활성 시 1행을 수직 스크롤 영역 상단에 고정합니다.

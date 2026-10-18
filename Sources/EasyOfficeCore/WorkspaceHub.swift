@@ -117,7 +117,7 @@ public final class WorkspaceViewModel {
         return !(redoStacks[id]?.isEmpty ?? true)
     }
 
-    internal func recordUndoSnapshot(for tabID: UUID, coalescingTargetKey: String? = nil) {
+    public func recordUndoSnapshot(for tabID: UUID, coalescingTargetKey: String? = nil) {
         guard let idx = openTabs.firstIndex(where: { $0.id == tabID }) else { return }
         if let coalescingTargetKey {
             if activeInlineEditTargetKey == coalescingTargetKey { return }
@@ -360,7 +360,33 @@ public final class WorkspaceViewModel {
         lastExecutedCommandSummary = "셀 가로 정렬 적용: \(alignment.rawValue)"
     }
 
-    public func mergedSheetRanges(for tabID: UUID) -> [String] { mergedSheetRangesByTab[tabID] ?? [] }
+    public func setSelectedSheetCellComment(_ comment: String) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .sheet(sheet) = openTabs[idx].payload else { return }
+        let coord = (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate ?? PackedCellCoordinate(row: 0, column: 0)
+        let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existing = sheet.sheetComments[coord] ?? ""
+        guard existing != trimmed else { return }
+        recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "sheet-comment-\(activeTabID.uuidString)-\(coord.rawValue)")
+        if trimmed.isEmpty {
+            sheet.sheetComments.removeValue(forKey: coord)
+        } else {
+            sheet.sheetComments[coord] = trimmed
+        }
+        openTabs[idx].payload = .sheet(sheet); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = trimmed.isEmpty ? "셀 메모 삭제 완료" : "셀 메모 저장 완료"
+    }
+
+    public func mergedSheetRanges(for tabID: UUID) -> [String] {
+        var combined = mergedSheetRangesByTab[tabID] ?? []
+        if let tab = openTabs.first(where: { $0.id == tabID }), case let .sheet(sheet) = tab.payload {
+            for r in sheet.mergedRanges {
+                let a1 = r.a1Range
+                if !combined.contains(a1) { combined.append(a1) }
+            }
+        }
+        return combined
+    }
 
     public func toggleMergeOnSelectedSheetCell(targetRange: String? = nil) {
         guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
@@ -375,6 +401,9 @@ public final class WorkspaceViewModel {
         } else {
             resolvedRange = "\(selectedSheetCell.uppercased()):\(selectedSheetCell.uppercased())"
         }
+        if let parsedRange = try? CellRange(notation: resolvedRange) {
+            sheet.toggleMergeCells(parsedRange)
+        }
         var ranges = mergedSheetRangesByTab[activeTabID] ?? []
         if let existingIdx = ranges.firstIndex(of: resolvedRange) {
             ranges.remove(at: existingIdx)
@@ -384,9 +413,9 @@ public final class WorkspaceViewModel {
             let topLeftA1 = resolvedRange.components(separatedBy: ":").first ?? selectedSheetCell
             let coord = (try? CellAddress(a1Notation: topLeftA1))?.packedCoordinate ?? PackedCellCoordinate(row: 0, column: 0)
             var style = sheet.cellStyle(at: coord); style.alignment = .center; sheet.setCellStyle(style, at: coord)
-            openTabs[idx].payload = .sheet(sheet)
             lastExecutedCommandSummary = "셀 병합 적용: \(resolvedRange)"
         }
+        openTabs[idx].payload = .sheet(sheet)
         mergedSheetRangesByTab[activeTabID] = ranges
         openTabs[idx].isModified = true
     }
@@ -519,15 +548,40 @@ public final class WorkspaceViewModel {
 
     public func insertEmbeddedImageIntoActiveDocument(caption: String = "아키텍처 다이어그램 이미지", widthPt: Double = 320, heightPt: Double = 180) { insertSampleImageAttachment(caption: caption, widthPt: widthPt, heightPt: heightPt) }
 
+    public static let maxImageAttachmentBytes: Int = 32 * 1024 * 1024
+
+    private static func detectRasterImageMimeType(data: Data, fileName: String) -> String? {
+        guard data.count >= 4, data.count <= maxImageAttachmentBytes else { return nil }
+        let lowerName = fileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hasExt = lowerName.contains(".")
+        if data.count >= 8 && data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+            guard !hasExt || lowerName.hasSuffix(".png") else { return nil }
+            return "image/png"
+        }
+        if data.starts(with: [0xFF, 0xD8, 0xFF]) {
+            guard !hasExt || lowerName.hasSuffix(".jpg") || lowerName.hasSuffix(".jpeg") else { return nil }
+            return "image/jpeg"
+        }
+        if data.starts(with: [0x49, 0x49, 0x2A, 0x00]) || data.starts(with: [0x4D, 0x4D, 0x00, 0x2A]) {
+            guard !hasExt || lowerName.hasSuffix(".tif") || lowerName.hasSuffix(".tiff") else { return nil }
+            return "image/tiff"
+        }
+        return nil
+    }
+
     public func importImageAttachment(data: Data, fileName: String, caption: String = "", widthPt: Double? = nil, heightPt: Double? = nil) {
-        guard !data.isEmpty, let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
               case var .document(doc) = openTabs[idx].payload else { return }
+        guard !data.isEmpty, data.count <= Self.maxImageAttachmentBytes,
+              let mimeType = Self.detectRasterImageMimeType(data: data, fileName: fileName),
+              let bitmapRep = NSBitmapImageRep(data: data),
+              bitmapRep.pixelsWide > 0, bitmapRep.pixelsHigh > 0 else {
+            lastErrorMessage = "유효하지 않은 이미지 시그니처(매직 바이트 불일치)이거나 크기 제한(32MB)을 초과하여 거부되었습니다."
+            return
+        }
         recordUndoSnapshot(for: activeTabID)
-        let nsImg = NSImage(data: data)
-        let resolvedW = widthPt ?? Double(max(64.0, nsImg?.size.width ?? 320.0))
-        let resolvedH = heightPt ?? Double(max(36.0, nsImg?.size.height ?? 180.0))
-        let lowerName = fileName.lowercased()
-        let mimeType = (lowerName.hasSuffix(".jpg") || lowerName.hasSuffix(".jpeg")) ? "image/jpeg" : "image/png"
+        let resolvedW = widthPt ?? Double(max(64, bitmapRep.pixelsWide))
+        let resolvedH = heightPt ?? Double(max(36, bitmapRep.pixelsHigh))
         let resolvedCaption = caption.isEmpty ? fileName : caption
         doc.images.append(EmbeddedImageAttachment(fileName: fileName, caption: resolvedCaption, mimeType: mimeType, imageData: data, widthPt: resolvedW, heightPt: resolvedH, anchorParagraphID: selectedParagraphID ?? doc.paragraphs.first?.id))
         openTabs[idx].payload = .document(doc); openTabs[idx].isModified = true
@@ -535,9 +589,15 @@ public final class WorkspaceViewModel {
     }
 
     public func loadImageAttachmentFromDisk(url: URL) throws {
-        let data = try Data(contentsOf: url)
-        guard !data.isEmpty, NSImage(data: data) != nil else {
-            throw EasyOfficeError.corruptedContainer(detail: "유효하지 않은 이미지 파일입니다.")
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true, let fileSize = values.fileSize, fileSize > 0, fileSize <= Self.maxImageAttachmentBytes else {
+            throw EasyOfficeError.corruptedContainer(detail: "유효한 일반 이미지 파일이 아니거나 크기 제한(32MB)을 초과합니다.")
+        }
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard Self.detectRasterImageMimeType(data: data, fileName: url.lastPathComponent) != nil,
+              let bitmapRep = NSBitmapImageRep(data: data),
+              bitmapRep.pixelsWide > 0, bitmapRep.pixelsHigh > 0 else {
+            throw EasyOfficeError.corruptedContainer(detail: "유효하지 않은 이미지 파일이거나 매직 바이트와 확장자가 일치하지 않습니다.")
         }
         importImageAttachment(data: data, fileName: url.lastPathComponent, caption: url.deletingPathExtension().lastPathComponent)
     }
@@ -596,6 +656,20 @@ public final class WorkspaceViewModel {
         elem.height = max(28.0, min(deck.aspectRatio.heightPoints - elem.y, elem.height + deltaHeight))
         deck.slides[targetSlideIdx].elements[eIdx] = elem
         openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+    }
+
+    public func moveSlideElementZOrder(slideIndex: Int? = nil, elementID: UUID, bringForward: Bool) {
+        guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+              case var .slide(deck) = openTabs[idx].payload else { return }
+        let targetSlideIdx = slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+        guard deck.slides.indices.contains(targetSlideIdx),
+              let eIdx = deck.slides[targetSlideIdx].elements.firstIndex(where: { $0.id == elementID }) else { return }
+        let nextIdx = bringForward ? min(deck.slides[targetSlideIdx].elements.count - 1, eIdx + 1) : max(0, eIdx - 1)
+        guard nextIdx != eIdx else { return }
+        recordUndoSnapshot(for: activeTabID)
+        deck.slides[targetSlideIdx].elements.swapAt(eIdx, nextIdx)
+        openTabs[idx].payload = .slide(deck); openTabs[idx].isModified = true
+        lastExecutedCommandSummary = bringForward ? "슬라이드 개체 앞으로 이동" : "슬라이드 개체 뒤로 이동"
     }
 
     public func updateSlideElementText(slideIndex: Int? = nil, elementID: UUID, title: String? = nil, bodyText: String? = nil) {

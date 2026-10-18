@@ -60,9 +60,7 @@ extension OfficeDocumentModel {
     public static func currentISO8601Timestamp() -> String { EasyOfficeCore.currentISO8601Timestamp() }
 
     public mutating func recordRevision(author: String, summary: String, kind: TrackedRevisionKind = .formattingChange) {
-        let anchorID = paragraphs.first?.id ?? UUID()
-        let original = paragraphs.first?.text ?? title
-        revisions.append(TrackedRevision(author: author, kind: kind, paragraphID: anchorID, originalText: original, proposedText: summary))
+        revisions.append(TrackedRevision(author: author, kind: kind, paragraphID: UUID(), originalText: title, proposedText: summary))
     }
 }
 
@@ -158,8 +156,16 @@ public struct WorkspaceTabItem: Sendable, Equatable, Identifiable {
             chunks.append(contentsOf: doc.comments.map(\.message))
         case let .sheet(sheet):
             chunks.append(sheet.name)
-            for (addr, raw) in sheet.rawCells {
-                chunks.append(contentsOf: ["\(addr)=\(raw)", raw, sheet.evaluate(at: addr).description])
+            for (coord, raw) in sheet.cellsByCoordinate {
+                let addr = CellAddress(packed: coord).a1Notation
+                chunks.append(contentsOf: ["\(addr)=\(raw)", raw, sheet.evaluate(at: coord).description])
+            }
+            for page in sheet.additionalSheets {
+                chunks.append(page.name)
+                for (coord, raw) in page.cellsByCoordinate {
+                    let addr = CellAddress(packed: coord).a1Notation
+                    chunks.append(contentsOf: ["\(addr)=\(raw)", raw])
+                }
             }
         case let .slide(deck):
             chunks.append(deck.title)

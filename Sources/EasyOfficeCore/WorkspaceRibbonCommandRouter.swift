@@ -340,10 +340,16 @@ extension WorkspaceViewModel {
             case var .slide(deck):
                 if !deck.slides.isEmpty {
                     let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-                    let offset = Double(deck.slides[sIdx].elements.count) * 12.0
-                    let badge = SlideCanvasElement(title: "변경 내용 추적 활성", bodyText: "슬라이드 변경 이력 추적", x: 200.0 + offset, y: 120.0 + offset, width: 180, height: 70, kind: .calloutShape)
-                    deck.slides[sIdx].elements.append(badge)
-                    selectedSlideElementID = badge.id
+                    if let existingIdx = deck.slides[sIdx].elements.firstIndex(where: { $0.title.hasPrefix("변경 내용 추적") }) {
+                        let currentTitle = deck.slides[sIdx].elements[existingIdx].title
+                        deck.slides[sIdx].elements[existingIdx].title = (currentTitle == "변경 내용 추적 활성") ? "변경 내용 추적 일시정지" : "변경 내용 추적 활성"
+                        selectedSlideElementID = deck.slides[sIdx].elements[existingIdx].id
+                    } else {
+                        let offset = Double(deck.slides[sIdx].elements.count) * 12.0
+                        let badge = SlideCanvasElement(title: "변경 내용 추적 활성", bodyText: "슬라이드 변경 이력 추적", x: 200.0 + offset, y: 120.0 + offset, width: 180, height: 70, kind: .calloutShape)
+                        deck.slides[sIdx].elements.append(badge)
+                        selectedSlideElementID = badge.id
+                    }
                     openTabs[idx].payload = .slide(deck)
                 }
             case var .pdf(pdfDoc):
@@ -645,7 +651,7 @@ extension WorkspaceViewModel {
                             if let st = sheet.cellStyles[coord] { styleMap[c] = st }
                         }
                         let keyCoord = PackedCellCoordinate(row: r, column: keyCol)
-                        let keyVal = (try? sheet.evaluate(at: keyCoord)) ?? .empty
+                        let keyVal = sheet.evaluate(at: keyCoord)
                         snapshots.append(SortableRowSnapshot(originalRow: r, rawCells: rawMap, styles: styleMap, keyVal: keyVal))
                     }
                     snapshots.sort { lhs, rhs in
@@ -664,7 +670,7 @@ extension WorkspaceViewModel {
                             if let existing = sheet.cellsByCoordinate[coord], existing.trimmingCharacters(in: .whitespaces).hasPrefix("=") { continue }
                             let addr = CellAddress(packed: coord).a1Notation
                             try? sheet.setCell(addr, rawValue: snap.rawCells[c] ?? "")
-                            if let st = snap.styles[c] { try? sheet.setCellStyle(st, at: addr) }
+                            sheet.setCellStyle(snap.styles[c] ?? CellStyle(), at: coord)
                         }
                     }
                 }
@@ -767,7 +773,7 @@ extension WorkspaceViewModel {
             for pIdx in doc.paragraphs.indices {
                 replaceOccurrences(in: &doc.paragraphs[pIdx].text)
                 for rIdx in doc.paragraphs[pIdx].inlineRuns.indices {
-                    var runText = doc.paragraphs[pIdx].inlineRuns[rIdx].text
+                    let runText = doc.paragraphs[pIdx].inlineRuns[rIdx].text
                     if runText.contains(query) {
                         doc.paragraphs[pIdx].inlineRuns[rIdx].text = runText.replacingOccurrences(of: query, with: replacement)
                     }

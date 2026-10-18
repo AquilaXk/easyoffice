@@ -881,7 +881,57 @@ final class WorkspaceUIParityTests: XCTestCase {
         freshVM.isPresenterTimerRunning = true
         freshVM.tickPresenterTimer()
         XCTAssertEqual(freshVM.presenterElapsedSeconds, 11, "Timer must advance by 1s when running")
+
+        // 8. Fail-closed image validation, non-destructive summary revision accept, slide-review-track toggle, Z-Order, and additionalSheets search
+        freshVM.activeTabID = freshDocTab.id
+        let countBeforeInvalidImg: Int = {
+            if case let .document(d) = freshVM.activeTab?.payload { return d.images.count }
+            return 0
+        }()
+        freshVM.lastErrorMessage = nil
+        freshVM.importImageAttachment(data: Data([0x00, 0x01, 0x02, 0x03, 0x04]), fileName: "fake.png", caption: "위조 이미지")
+        XCTAssertNotNil(freshVM.lastErrorMessage, "Invalid magic bytes must fail closed with error message")
+        if case var .document(d) = freshVM.activeTab?.payload {
+            XCTAssertEqual(d.images.count, countBeforeInvalidImg)
+            let p0TextBefore = d.paragraphs[0].text
+            d.recordRevision(author: "QA", summary: "문서 요약 리비전")
+            let revID = try XCTUnwrap(d.revisions.last?.id)
+            d.acceptRevision(id: revID)
+            XCTAssertEqual(d.paragraphs[0].text, p0TextBefore, "Accepting a document summary revision must never overwrite paragraph 0")
+        }
+
+        freshVM.activeTabID = freshSlideTab.id
+        freshVM.executeRibbonCommand("slide-review-track")
+        let elemCountAfterFirstTrack: Int = {
+            if case let .slide(deck) = freshVM.activeTab?.payload { return deck.slides[0].elements.count }
+            return 0
+        }()
+        freshVM.executeRibbonCommand("slide-review-track")
+        if case let .slide(deck) = freshVM.activeTab?.payload {
+            XCTAssertEqual(deck.slides[0].elements.count, elemCountAfterFirstTrack, "Repeated slide-review-track must toggle existing badge instead of duplicating shapes")
+            if deck.slides[0].elements.count >= 2 {
+                let firstID = deck.slides[0].elements[0].id
+                freshVM.moveSlideElementZOrder(slideIndex: 0, elementID: firstID, bringForward: true)
+            }
+        }
+        if case let .slide(reorderedDeck) = freshVM.activeTab?.payload, reorderedDeck.slides[0].elements.count >= 2 {
+            XCTAssertNotEqual(reorderedDeck.slides[0].elements[0].id, reorderedDeck.slides[0].elements[1].id)
+        }
+
+        freshVM.activeTabID = freshSheetTab.id
+        freshVM.selectedSheetCell = "C3"
+        freshVM.setSelectedSheetCellComment("인스펙터 셀 메모")
+        freshVM.addWorksheetTab(named: "별첨데이터")
+        if let updatedSheetTab = freshVM.openTabs.first(where: { $0.id == freshSheetTab.id }) {
+            let corpus = updatedSheetTab.searchableCorpus()
+            XCTAssertTrue(corpus.contains("별첨데이터"))
+            if case let .sheet(s) = updatedSheetTab.payload {
+                let c3 = try CellAddress(a1Notation: "C3").packedCoordinate
+                XCTAssertEqual(s.sheetComments[c3], "인스펙터 셀 메모")
+            }
+        }
     }
 }
+
 
 

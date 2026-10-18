@@ -103,12 +103,8 @@ public struct SlideEditorDetailPaneView: View {
 
                 // Active Slide Stage Canvas & Inline Editors
                 if let slide = currentSlide {
-                    let activeGuides: [AlignmentSnapGuide] = {
-                        guard viewModel.isSnapGuidesEnabled, var activeElem = selectedElement else { return [] }
-                        if let drag = activeDragOffset, drag.elementID == activeElem.id {
-                            activeElem.x += Double(drag.translation.width)
-                            activeElem.y += Double(drag.translation.height)
-                        }
+                    let staticGuides: [AlignmentSnapGuide] = {
+                        guard viewModel.isSnapGuidesEnabled, let activeElem = selectedElement else { return [] }
                         let siblings = slide.elements.filter { $0.id != activeElem.id }
                         return SnapGuideCalculator.computeGuides(
                             for: activeElem,
@@ -179,8 +175,8 @@ public struct SlideEditorDetailPaneView: View {
                                 }
                             }
 
-                            if !activeGuides.isEmpty {
-                                Label("스마트 정렬 가이드 스냅 활성 (\(activeGuides.count)축)", systemImage: "ruler")
+                            if !staticGuides.isEmpty {
+                                Label("스마트 정렬 가이드 스냅 활성 (\(staticGuides.count)축)", systemImage: "ruler")
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
                             }
@@ -192,6 +188,21 @@ public struct SlideEditorDetailPaneView: View {
                             let stageH = max(1.0, deck.aspectRatio.heightPoints)
                             let scaleX = max(0.01, geo.size.width / stageW)
                             let scaleY = max(0.01, geo.size.height / stageH)
+                            let activeGuides: [AlignmentSnapGuide] = {
+                                guard viewModel.isSnapGuidesEnabled else { return [] }
+                                let targetID = activeDragOffset?.elementID ?? selectedElement?.id
+                                guard let targetID, var activeElem = slide.elements.first(where: { $0.id == targetID }) else { return [] }
+                                if let drag = activeDragOffset, drag.elementID == activeElem.id {
+                                    activeElem.x += Double(drag.translation.width / scaleX)
+                                    activeElem.y += Double(drag.translation.height / scaleY)
+                                }
+                                let siblings = slide.elements.filter { $0.id != activeElem.id }
+                                return SnapGuideCalculator.computeGuides(
+                                    for: activeElem,
+                                    siblings: siblings,
+                                    aspectRatio: deck.aspectRatio
+                                )
+                            }()
 
                             ZStack(alignment: .topLeading) {
                                 RoundedRectangle(cornerRadius: 8)

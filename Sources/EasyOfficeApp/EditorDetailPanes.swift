@@ -468,7 +468,7 @@ public struct SheetEditorDetailPaneView: View {
             maxRow = max(maxRow, coord.row + 1)
             maxCol = max(maxCol, coord.column + 1)
         }
-        return (maxRow, maxCol)
+        return (min(128, maxRow), min(26, maxCol))
     }
 
     public var body: some View {
@@ -533,6 +533,13 @@ public struct SheetEditorDetailPaneView: View {
             )
         }()
 
+        let activeMergedList: [String] = {
+            if let tabID = viewModel.activeTabID {
+                return viewModel.mergedSheetRanges(for: tabID)
+            }
+            return sheet.mergedRanges.map(\.a1Range)
+        }()
+
         VStack(alignment: .leading, spacing: 14) {
             // Formula Bar with 77-function catalog badge
             HStack(spacing: 8) {
@@ -570,6 +577,12 @@ public struct SheetEditorDetailPaneView: View {
                 }
 
                 Spacer()
+
+                if !activeMergedList.isEmpty {
+                    Label("병합: \(activeMergedList.joined(separator: ", "))", systemImage: "rectangle.compress.vertical")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                }
 
                 if viewModel.isHeaderRowFrozen {
                     Label("1행 고정 활성", systemImage: "pin.fill")
