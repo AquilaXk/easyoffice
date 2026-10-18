@@ -1209,7 +1209,7 @@ extension WorksheetModel {
     case "ISBLANK":
       guard frame.count == 1 else { return .error("#VALUE!") }
       let val = frame.rawCellOrArg(0, in: self)
-      return .boolean(val == .empty || val == .text(""))
+      return .boolean(val == .empty)
     case "ISERROR":
       guard frame.count == 1 else { return .error("#VALUE!") }
       let val = frame.rawCellOrArg(0, in: self)

@@ -601,8 +601,13 @@ public enum ODFContainerCodec {
       let shapes = slide.elements.map { el in
         "<draw:frame \(XMLDocumentModelMapper.slideElementAttributes(el))>\(XMLSanitizer.escape(el.bodyText))</draw:frame>"
       }.joined()
+      let durationAttr = String(
+        format: "eo:transitionDuration=\"%.2f\"",
+        slide.transitionDurationSeconds
+      )
+      let autoAdvanceAttr = slide.autoAdvanceSeconds.map { " eo:autoAdvance=\"\($0)\"" } ?? ""
       return
-        "<draw:page id=\"\(slide.id.uuidString)\" title=\"\(XMLSanitizer.escape(slide.title))\" subtitle=\"\(XMLSanitizer.escape(slide.subtitle))\" notes=\"\(XMLSanitizer.escape(slide.speakerNotes))\" layout=\"\(XMLSanitizer.escape(slide.masterLayout.rawValue))\" transition=\"\(XMLSanitizer.escape(slide.transition.rawValue))\">\(bullets)\(shapes)</draw:page>"
+        "<draw:page id=\"\(slide.id.uuidString)\" title=\"\(XMLSanitizer.escape(slide.title))\" subtitle=\"\(XMLSanitizer.escape(slide.subtitle))\" notes=\"\(XMLSanitizer.escape(slide.speakerNotes))\" layout=\"\(XMLSanitizer.escape(slide.masterLayout.rawValue))\" transition=\"\(XMLSanitizer.escape(slide.transition.rawValue))\" \(durationAttr)\(autoAdvanceAttr)>\(bullets)\(shapes)</draw:page>"
     }.joined(separator: "\n      ")
 
     let contentXML = """
@@ -647,14 +652,24 @@ public enum ODFContainerCodec {
         XMLDocumentModelMapper.parseSlideElement(
           attributes: frame.attributes, innerXML: frame.innerXML)
       }
+      let transitionDuration =
+        (page.attributes["eo:transitionDuration"] ?? page.attributes["transitionDuration"])
+        .flatMap(Double.init) ?? 0.8
+      let autoAdvance =
+        (page.attributes["eo:autoAdvance"] ?? page.attributes["autoAdvance"])
+        .flatMap(Int.init)
       return SlideModel(
-        id: slideID, title: page.attributes["title"] ?? "",
+        id: slideID,
+        title: page.attributes["title"] ?? "",
         subtitle: page.attributes["subtitle"] ?? "",
-        bulletPoints: bullets, speakerNotes: page.attributes["notes"] ?? "",
+        bulletPoints: bullets,
+        speakerNotes: page.attributes["notes"] ?? "",
         masterLayout: SlideMasterLayout(rawValue: page.attributes["layout"] ?? "")
           ?? .titleAndContent,
         transition: SlideTransitionKind(rawValue: page.attributes["transition"] ?? "") ?? .fade,
-        elements: elements
+        elements: elements,
+        transitionDurationSeconds: transitionDuration,
+        autoAdvanceSeconds: autoAdvance
       )
     }
     let deckTheme =

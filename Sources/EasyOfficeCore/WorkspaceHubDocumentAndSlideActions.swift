@@ -61,7 +61,9 @@ extension SlideModel {
     speakerNotes: String = "",
     masterLayout: SlideMasterLayout = .titleAndContent,
     transition: SlideTransitionKind = .fade,
-    elements: [SlideCanvasElement] = []
+    elements: [SlideCanvasElement] = [],
+    transitionDurationSeconds: Double = 0.8,
+    autoAdvanceSeconds: Int? = nil
   ) {
     self.init(
       id: id,
@@ -71,7 +73,9 @@ extension SlideModel {
       speakerNotes: speakerNotes,
       masterLayout: masterLayout,
       transition: transition,
-      elements: elements
+      elements: elements,
+      transitionDurationSeconds: transitionDurationSeconds,
+      autoAdvanceSeconds: autoAdvanceSeconds
     )
   }
 }
@@ -1393,7 +1397,9 @@ extension WorkspaceViewModel {
       speakerNotes: source.speakerNotes,
       masterLayout: source.masterLayout,
       transition: source.transition,
-      elements: clonedElements
+      elements: clonedElements,
+      transitionDurationSeconds: source.transitionDurationSeconds,
+      autoAdvanceSeconds: source.autoAdvanceSeconds
     )
     deck.slides.insert(duplicated, at: sIdx + 1)
     selectedSlideIndex = sIdx + 1
@@ -1438,5 +1444,46 @@ extension WorkspaceViewModel {
     isSlideSorterViewEnabled.toggle()
     lastExecutedCommandSummary =
       isSlideSorterViewEnabled ? "슬라이드 정렬 격자 뷰 활성화" : "슬라이드 정렬 격자 뷰 해제"
+  }
+
+  public func setActiveSlideTransitionDuration(_ seconds: Double) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    recordUndoSnapshot(for: activeTabID)
+    let clamped = max(0.2, min(5.0, seconds.isFinite ? seconds : 0.8))
+    deck.slides[sIdx].transitionDurationSeconds = clamped
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary =
+      "슬라이드 전환 시간 설정 (\(String(format: "%.1f", deck.slides[sIdx].transitionDurationSeconds))초)"
+  }
+
+  public func setActiveSlideAutoAdvance(seconds: Int?) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    recordUndoSnapshot(for: activeTabID)
+    let clamped = seconds.map { max(1, min(300, $0)) }
+    deck.slides[sIdx].autoAdvanceSeconds = clamped
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    if let adv = deck.slides[sIdx].autoAdvanceSeconds {
+      lastExecutedCommandSummary = "슬라이드 자동 전환 설정 (\(adv)초)"
+    } else {
+      lastExecutedCommandSummary = "슬라이드 자동 전환 해제 (수동 클릭)"
+    }
+  }
+
+  public func toggleSlideGridlines() {
+    isSlideGridlinesVisible.toggle()
+    lastExecutedCommandSummary =
+      isSlideGridlinesVisible ? "슬라이드 스테이지 격자 안내선 표시" : "슬라이드 스테이지 격자 안내선 숨김"
   }
 }
