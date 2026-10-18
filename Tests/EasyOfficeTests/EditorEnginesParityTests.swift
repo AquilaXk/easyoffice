@@ -722,6 +722,115 @@ final class EditorEnginesParityTests: XCTestCase {
         XCTAssertEqual(mergedDoc.paragraphs[0].text, "직접 수정된 본문 보안팀")
         XCTAssertEqual(mergedDoc.paragraphs[0].effectiveRuns.map(\.text).joined(), "직접 수정된 본문 보안팀")
     }
+
+    func testCrossSheetFormulaReferencesMergeCellsAndPDFPresentationWrapping() throws {
+        // 1. Cross-sheet cell & range references, quoted sheet names, VLOOKUP, SUMIF, and cycle detection
+        var workbook = WorksheetModel(name: "요약시트")
+        let a1 = PackedCellCoordinate(row: 0, column: 0)
+        let b1 = PackedCellCoordinate(row: 0, column: 1)
+        let a2 = PackedCellCoordinate(row: 1, column: 0)
+        let b2 = PackedCellCoordinate(row: 1, column: 1)
+
+        workbook.addSheetPage(
+            named: "Sheet2",
+            initialCells: [
+                a1: "10",
+                b1: "25",
+                a2: "30",
+                b2: "45"
+            ]
+        )
+        workbook.addSheetPage(
+            named: "Summary Sheet",
+            initialCells: [
+                a1: "SKU-01",
+                b1: "9900",
+                a2: "SKU-02",
+                b2: "14500"
+            ]
+        )
+
+        try workbook.setCell("A1", rawValue: "=Sheet2!A1 + Sheet2!B2")
+        try workbook.setCell("A2", rawValue: "=SUM(Sheet2!A1:B2)")
+        try workbook.setCell("A3", rawValue: "='Summary Sheet'!B2")
+        try workbook.setCell("A4", rawValue: "SKU-02")
+        try workbook.setCell("A5", rawValue: "=VLOOKUP(A4, 'Summary Sheet'!A1:B2, 2, FALSE)")
+        try workbook.setCell("A6", rawValue: "=SUMIF(Sheet2!A1:A2, \">15\", Sheet2!B1:B2)")
+        try workbook.setCell("A7", rawValue: "=UnknownSheet!A1")
+
+        XCTAssertEqual(workbook.evaluate(at: "A1"), .number(55))
+        XCTAssertEqual(workbook.evaluate(at: "A2"), .number(110))
+        XCTAssertEqual(workbook.evaluate(at: "A3"), .number(14500))
+        XCTAssertEqual(workbook.evaluate(at: "A5"), .number(14500))
+        XCTAssertEqual(workbook.evaluate(at: "A6"), .number(45))
+        XCTAssertEqual(workbook.evaluate(at: "A7"), .error("#REF!"))
+
+        // Cross-sheet cycle detection: Sheet1!C1 -> Sheet2!C1 -> 요약시트!C1
+        let c1 = PackedCellCoordinate(row: 0, column: 2)
+        workbook.additionalSheets[0].cellsByCoordinate[c1] = "=요약시트!C1"
+        try workbook.setCell("C1", rawValue: "=Sheet2!C1")
+        XCTAssertEqual(workbook.evaluate(at: "C1"), .error("#REF!"))
+
+        // 2. Per-sheet sheetComments and mergedRanges + toggleMergeCells / isCellMerged
+        let mergeRange = try CellRange(notation: "D1:E2")
+        XCTAssertFalse(workbook.isCellMerged(PackedCellCoordinate(row: 0, column: 3)))
+        workbook.toggleMergeCells(mergeRange)
+        XCTAssertTrue(workbook.isCellMerged(PackedCellCoordinate(row: 0, column: 3)))
+        XCTAssertTrue(workbook.isCellMerged(PackedCellCoordinate(row: 1, column: 4)))
+        workbook.sheetComments[a1] = "요약시트 코멘트"
+
+        workbook.switchActiveSheet(to: 1) // Switch to Sheet2
+        XCTAssertEqual(workbook.name, "Sheet2")
+        XCTAssertTrue(workbook.mergedRanges.isEmpty)
+        XCTAssertTrue(workbook.sheetComments.isEmpty)
+
+        let sheet2Merge = try CellRange(notation: "A1:B1")
+        workbook.toggleMergeCells(sheet2Merge)
+        workbook.sheetComments[b1] = "Sheet2 코멘트"
+
+        workbook.switchActiveSheet(to: 0) // Switch back to 요약시트
+        XCTAssertEqual(workbook.name, "요약시트")
+        XCTAssertEqual(workbook.mergedRanges, [mergeRange])
+        XCTAssertEqual(workbook.sheetComments[a1], "요약시트 코멘트")
+        XCTAssertEqual(workbook.additionalSheets[0].mergedRanges, [sheet2Merge])
+        XCTAssertEqual(workbook.additionalSheets[0].sheetComments[b1], "Sheet2 코멘트")
+
+        workbook.toggleMergeCells(mergeRange)
+        XCTAssertFalse(workbook.isCellMerged(PackedCellCoordinate(row: 0, column: 3)))
+
+        // 3. CellRange.forEachCoordinate zero-allocation iteration
+        var visitedCoords: [PackedCellCoordinate] = []
+        mergeRange.forEachCoordinate { coord in
+            visitedCoords.append(coord)
+        }
+        XCTAssertEqual(visitedCoords.count, 4)
+
+        // 4. PDFStudioDocumentModel.fromPresentation includes slide.elements and speakerNotes & PDFBinarySerializer.wrapLine
+        let deck = PresentationDeckModel(
+            title: "발표자료 PDF 변환",
+            slides: [
+                SlideModel(
+                    title: "슬라이드 제목",
+                    subtitle: "부제목",
+                    bulletPoints: ["핵심 불릿 1"],
+                    speakerNotes: "발표자 전용 상세 노트",
+                    elements: [
+                        SlideCanvasElement(title: "캔버스 도형 제목", bodyText: "캔버스 도형 본문 텍스트", x: 20, y: 30, width: 200, height: 80)
+                    ]
+                )
+            ]
+        )
+        let pdfFromDeck = PDFStudioDocumentModel.fromPresentation(deck)
+        let pageText = pdfFromDeck.pages.first?.extractedText ?? ""
+        XCTAssertTrue(pageText.contains("슬라이드 제목"))
+        XCTAssertTrue(pageText.contains("캔버스 도형 제목"))
+        XCTAssertTrue(pageText.contains("캔버스 도형 본문 텍스트"))
+        XCTAssertTrue(pageText.contains("발표자 전용 상세 노트"))
+
+        let longLine = String(repeating: "가나다라마바사아자차", count: 10) // 100 chars
+        let wrapped = PDFBinarySerializer.wrapLine(longLine, maxChars: 64)
+        XCTAssertEqual(wrapped.count, 2)
+        XCTAssertEqual(wrapped[0].count, 64)
+        XCTAssertEqual(wrapped[1].count, 36)
+    }
 }
-
-

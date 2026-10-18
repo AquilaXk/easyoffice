@@ -483,6 +483,17 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
                 lines.append(slide.subtitle)
             }
             lines.append(contentsOf: slide.bulletPoints)
+            for element in slide.elements {
+                if !element.title.isEmpty {
+                    lines.append(element.title)
+                }
+                if !element.bodyText.isEmpty {
+                    lines.append(element.bodyText)
+                }
+            }
+            if !slide.speakerNotes.isEmpty {
+                lines.append(slide.speakerNotes)
+            }
             pages.append(
                 PDFPageDescriptor(
                     pageNumber: pageNum,

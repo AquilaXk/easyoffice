@@ -203,6 +203,17 @@ public enum DocumentConversionOrchestrator {
                 for bullet in slide.bulletPoints {
                     paragraphs.append(ParagraphBlock(style: .body, text: bullet))
                 }
+                for element in slide.elements {
+                    if !element.title.isEmpty {
+                        paragraphs.append(ParagraphBlock(style: .heading3, text: element.title, isBold: true))
+                    }
+                    if !element.bodyText.isEmpty {
+                        paragraphs.append(ParagraphBlock(style: .body, text: element.bodyText))
+                    }
+                }
+                if !slide.speakerNotes.isEmpty {
+                    paragraphs.append(ParagraphBlock(style: .quote, text: slide.speakerNotes))
+                }
             }
             return OfficeDocumentModel(
                 title: deck.title,

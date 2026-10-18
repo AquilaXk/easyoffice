@@ -208,7 +208,14 @@ public enum CommonMarkCodec {
         var blocks: [String] = []
 
         for p in doc.paragraphs {
-            let formattedInline = formatInline(text: p.text, isBold: p.isBold, isItalic: p.isItalic)
+            let formattedInline: String
+            if !p.runs.isEmpty {
+                formattedInline = p.runs.map {
+                    formatInline(text: $0.text, isBold: $0.isBold, isItalic: $0.isItalic, isUnderlined: $0.isUnderlined)
+                }.joined()
+            } else {
+                formattedInline = formatInline(text: p.text, isBold: p.isBold, isItalic: p.isItalic, isUnderlined: p.isUnderlined)
+            }
             switch p.style {
             case .title:
                 blocks.append("# \(p.text)")
@@ -241,6 +248,15 @@ public enum CommonMarkCodec {
             blocks.append(tableLines.joined(separator: "\n"))
         }
 
+        for image in doc.images {
+            blocks.append("![\(image.caption)](\(image.fileName))")
+        }
+
+        let extEnvelope = ExtendedDocumentMetadataEnvelope(from: doc)
+        if let extBytes = try? JSONEncoder().encode(extEnvelope), !extBytes.isEmpty {
+            blocks.append("<!-- eo-meta: \(extBytes.base64EncodedString()) -->")
+        }
+
         return Data(blocks.joined(separator: "\n\n").utf8)
     }
 
@@ -254,6 +270,8 @@ public enum CommonMarkCodec {
 
         var paragraphs: [ParagraphBlock] = []
         var tables: [DocumentTableBlock] = []
+        var images: [EmbeddedImageAttachment] = []
+        var extendedEnvelope: ExtendedDocumentMetadataEnvelope?
 
         let rawLines = markdown.components(separatedBy: .newlines)
         var idx = 0
@@ -266,10 +284,32 @@ public enum CommonMarkCodec {
                 continue
             }
 
+            if trimmed.hasPrefix("<!-- eo-meta:") && trimmed.hasSuffix("-->") {
+                let start = trimmed.index(trimmed.startIndex, offsetBy: "<!-- eo-meta:".count)
+                let end = trimmed.index(trimmed.endIndex, offsetBy: -3)
+                let b64 = String(trimmed[start..<end]).trimmingCharacters(in: .whitespaces)
+                if let metaData = Data(base64Encoded: b64) {
+                    extendedEnvelope = try? JSONDecoder().decode(ExtendedDocumentMetadataEnvelope.self, from: metaData)
+                }
+                idx += 1
+                continue
+            }
+
             if trimmed.hasPrefix("<!-- caption:") && trimmed.hasSuffix("-->") {
                 let start = trimmed.index(trimmed.startIndex, offsetBy: "<!-- caption:".count)
                 let end = trimmed.index(trimmed.endIndex, offsetBy: -3)
                 pendingCaption = String(trimmed[start..<end]).trimmingCharacters(in: .whitespaces)
+                idx += 1
+                continue
+            }
+
+            if trimmed.hasPrefix("![") && trimmed.hasSuffix(")"),
+               let midRange = trimmed.range(of: "](") {
+                let capStart = trimmed.index(trimmed.startIndex, offsetBy: 2)
+                let caption = String(trimmed[capStart..<midRange.lowerBound])
+                let fileEnd = trimmed.index(before: trimmed.endIndex)
+                let fileName = String(trimmed[midRange.upperBound..<fileEnd])
+                images.append(EmbeddedImageAttachment(fileName: fileName, caption: caption, imageData: Data()))
                 idx += 1
                 continue
             }
@@ -312,46 +352,60 @@ public enum CommonMarkCodec {
                     style: .body,
                     text: parsed.text,
                     isBold: parsed.isBold,
-                    isItalic: parsed.isItalic
+                    isItalic: parsed.isItalic,
+                    isUnderlined: parsed.isUnderlined
                 ))
             }
             idx += 1
         }
 
         let resolvedTitle = paragraphs.first(where: { $0.style == .title })?.text ?? title
-        return OfficeDocumentModel(
+        var docModel = OfficeDocumentModel(
             title: resolvedTitle,
             format: .md,
             paragraphs: paragraphs,
-            tables: tables
+            tables: tables,
+            images: images
         )
+        extendedEnvelope?.apply(to: &docModel)
+        return docModel
     }
 
-    private static func formatInline(text: String, isBold: Bool, isItalic: Bool) -> String {
+    private static func formatInline(text: String, isBold: Bool, isItalic: Bool, isUnderlined: Bool = false) -> String {
+        var result = text
         if isBold && isItalic {
-            return "***\(text)***"
+            result = "***\(result)***"
         } else if isBold {
-            return "**\(text)**"
+            result = "**\(result)**"
         } else if isItalic {
-            return "*\(text)*"
+            result = "*\(result)*"
         }
-        return text
+        if isUnderlined {
+            result = "<u>\(result)</u>"
+        }
+        return result
     }
 
-    private static func parseInline(_ line: String) -> (text: String, isBold: Bool, isItalic: Bool) {
-        if line.hasPrefix("***") && line.hasSuffix("***") && line.count > 6 {
-            let inner = String(line.dropFirst(3).dropLast(3))
-            return (inner, true, true)
+    private static func parseInline(_ line: String) -> (text: String, isBold: Bool, isItalic: Bool, isUnderlined: Bool) {
+        var working = line
+        var isUnderlined = false
+        if working.hasPrefix("<u>") && working.hasSuffix("</u>") && working.count > 7 {
+            working = String(working.dropFirst(3).dropLast(4))
+            isUnderlined = true
         }
-        if line.hasPrefix("**") && line.hasSuffix("**") && line.count > 4 {
-            let inner = String(line.dropFirst(2).dropLast(2))
-            return (inner, true, false)
+        if working.hasPrefix("***") && working.hasSuffix("***") && working.count > 6 {
+            let inner = String(working.dropFirst(3).dropLast(3))
+            return (inner, true, true, isUnderlined)
         }
-        if line.hasPrefix("*") && line.hasSuffix("*") && line.count > 2 {
-            let inner = String(line.dropFirst(1).dropLast(1))
-            return (inner, false, true)
+        if working.hasPrefix("**") && working.hasSuffix("**") && working.count > 4 {
+            let inner = String(working.dropFirst(2).dropLast(2))
+            return (inner, true, false, isUnderlined)
         }
-        return (line, false, false)
+        if working.hasPrefix("*") && working.hasSuffix("*") && working.count > 2 {
+            let inner = String(working.dropFirst(1).dropLast(1))
+            return (inner, false, true, isUnderlined)
+        }
+        return (working, false, false, isUnderlined)
     }
 
     private static func parsePipeRow(_ line: String) -> [String] {
@@ -391,6 +445,11 @@ public enum RTFCodec {
         lines.append("{\\rtf1\\ansi\\deff0")
         lines.append("{\\info{\\title \(escapeRTFText(doc.title))}}")
 
+        let extEnvelope = ExtendedDocumentMetadataEnvelope(from: doc)
+        if let extBytes = try? JSONEncoder().encode(extEnvelope), !extBytes.isEmpty {
+            lines.append("{\\*\\eometa \(extBytes.base64EncodedString())}")
+        }
+
         for p in doc.paragraphs {
             var controls = "\\pard"
             controls += "\\s\(styleCode(for: p.style))"
@@ -413,6 +472,11 @@ public enum RTFCodec {
             }
         }
 
+        for img in doc.images {
+            let hexPayload = img.imageData.map { String(format: "%02x", $0) }.joined()
+            lines.append("{\\*\\shppict{\\pict\\pngblip \(hexPayload)}}")
+        }
+
         lines.append("}")
         return Data(lines.joined(separator: "\n").utf8)
     }
@@ -429,6 +493,7 @@ public enum RTFCodec {
         var title = "RTF 문서"
         var paragraphs: [ParagraphBlock] = []
         var tablesByCaption: [(caption: String, rows: [[String]])] = []
+        var extendedEnvelope: ExtendedDocumentMetadataEnvelope?
 
         let lines = rawRTF.components(separatedBy: .newlines)
         for rawLine in lines {
@@ -437,6 +502,13 @@ public enum RTFCodec {
                 let start = line.index(line.startIndex, offsetBy: "{\\info{\\title ".count)
                 let end = line.index(line.endIndex, offsetBy: -2)
                 title = unescapeRTFText(String(line[start..<end]))
+            } else if line.hasPrefix("{\\*\\eometa ") && line.hasSuffix("}") {
+                let start = line.index(line.startIndex, offsetBy: "{\\*\\eometa ".count)
+                let end = line.index(before: line.endIndex)
+                let b64 = String(line[start..<end]).trimmingCharacters(in: .whitespaces)
+                if let metaData = Data(base64Encoded: b64) {
+                    extendedEnvelope = try? JSONDecoder().decode(ExtendedDocumentMetadataEnvelope.self, from: metaData)
+                }
             } else if line.hasPrefix("\\pard") && line.hasSuffix("\\par") {
                 if let parsed = parseParagraphLine(line) {
                     paragraphs.append(parsed)
@@ -452,12 +524,14 @@ public enum RTFCodec {
         }
 
         let tables = tablesByCaption.map { DocumentTableBlock(caption: $0.caption, rows: $0.rows, hasHeaderRow: true) }
-        return OfficeDocumentModel(
+        var docModel = OfficeDocumentModel(
             title: title,
             format: .rtf,
             paragraphs: paragraphs,
             tables: tables
         )
+        extendedEnvelope?.apply(to: &docModel)
+        return docModel
     }
 
     public static func escapeRTFText(_ input: String) -> String {

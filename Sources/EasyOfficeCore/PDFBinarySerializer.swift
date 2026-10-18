@@ -7,6 +7,22 @@ import PDFKit
 public enum PDFBinarySerializer {
     private static let modelStreamPrefix = "%EasyOfficePDFModelBase64:"
 
+    private static let hexDigits: [UInt8] = Array("0123456789ABCDEF".utf8)
+
+    public static func wrapLine(_ line: String, maxChars: Int = 64) -> [String] {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let limit = max(1, maxChars)
+        var wrapped: [String] = []
+        var start = trimmed.startIndex
+        while start < trimmed.endIndex {
+            let end = trimmed.index(start, offsetBy: limit, limitedBy: trimmed.endIndex) ?? trimmed.endIndex
+            wrapped.append(String(trimmed[start..<end]))
+            start = end
+        }
+        return wrapped
+    }
+
     public static func encode(_ pdf: PDFStudioDocumentModel) -> Data {
         var buffer = Data()
         buffer.reserveCapacity(4096)
@@ -52,15 +68,15 @@ public enum PDFBinarySerializer {
                 "0.839 0.859 0.941 rg 54 698 487 2 re f"
             ]
 
-            let contentLines = page.extractedText
+            let visualLines = page.extractedText
                 .split(separator: "\n", omittingEmptySubsequences: false)
-                .prefix(18)
+                .flatMap { wrapLine(String($0), maxChars: 64) }
+                .prefix(26)
 
-            for (lineIdx, rawSub) in contentLines.enumerated() {
-                let rawLine = String(rawSub)
-                let trimmedLine = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmedLine.isEmpty else { continue }
-                let y = 668 - (lineIdx * 24)
+            let startY = visualLines.count <= 18 ? 668 : 672
+            let lineStep = visualLines.count <= 18 ? 24 : 18
+            for (lineIdx, rawLine) in visualLines.enumerated() {
+                let y = startY - (lineIdx * lineStep)
                 let barWidth = min(480, max(60, rawLine.count * 9))
                 let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
                 streamLines.append("0.925 0.937 0.984 rg 54 \(y - 4) \(barWidth) 16 re f")
@@ -87,7 +103,7 @@ public enum PDFBinarySerializer {
 
             objectOffsets[pageObjNum] = buffer.count
             appendLine("\(pageObjNum) 0 obj")
-            appendLine("<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /AppleSDGothicNeo-Regular /Encoding /UniKS-UTF16-H /DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /AppleSDGothicNeo-Regular /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> >> ] >> >> >> /Contents \(contentObjNum) 0 R >>")
+            appendLine("<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /AppleSDGothicNeo-Regular /Encoding /UniKS-UTF16-H /DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /AppleSDGothicNeo-Regular /DW 1000 /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> >> ] >> >> >> /Contents \(contentObjNum) 0 R >>")
             appendLine("endobj")
 
             objectOffsets[contentObjNum] = buffer.count
@@ -233,7 +249,8 @@ public enum PDFBinarySerializer {
         }
 
         // Native macOS PDFKit inspection for standard PDF documents without embedded studio metadata
-        if let pdfDoc = PDFDocument(data: data) {
+        let hasValidXrefStructure = rawText.contains("xref") && rawText.contains("startxref") && !fallbackInvisibleFlags.contains(true)
+        if hasValidXrefStructure, let pdfDoc = PDFDocument(data: data) {
             if pdfDoc.isEncrypted {
                 throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
             }
@@ -342,16 +359,20 @@ public enum PDFBinarySerializer {
 
     private static func hexEncodeUTF16BE(_ input: String, maxChars: Int) -> String {
         let source = input.isEmpty ? " " : input
-        var hex = "FEFF"
-        hex.reserveCapacity(4 + min(maxChars, source.utf16.count) * 4)
+        let limit = min(maxChars, source.utf16.count)
+        var outBytes: [UInt8] = [0x46, 0x45, 0x46, 0x46] // "FEFF"
+        outBytes.reserveCapacity(4 + limit * 4)
         var count = 0
         for unit in source.utf16 {
             if count >= maxChars { break }
             let normalized: UInt16 = (unit == 0x0009 || unit < 0x0020) ? 0x0020 : unit
-            hex.append(String(format: "%04X", normalized))
+            outBytes.append(hexDigits[Int((normalized >> 12) & 0x0F)])
+            outBytes.append(hexDigits[Int((normalized >> 8) & 0x0F)])
+            outBytes.append(hexDigits[Int((normalized >> 4) & 0x0F)])
+            outBytes.append(hexDigits[Int(normalized & 0x0F)])
             count += 1
         }
-        return hex
+        return String(decoding: outBytes, as: UTF8.self)
     }
 
     private static func annotationColorPair(for kind: PDFAnnotationKind) -> (fill: String, stroke: String) {
@@ -380,7 +401,13 @@ public enum PDFBinarySerializer {
     }
 
     private static func hexEncodeASCII(_ input: String) -> String {
-        input.utf8.map { String(format: "%02X", $0) }.joined()
+        var outBytes: [UInt8] = []
+        outBytes.reserveCapacity(input.utf8.count * 2)
+        for byte in input.utf8 {
+            outBytes.append(hexDigits[Int((byte >> 4) & 0x0F)])
+            outBytes.append(hexDigits[Int(byte & 0x0F)])
+        }
+        return String(decoding: outBytes, as: UTF8.self)
     }
 
     private static func escapePDFString(_ input: String) -> String {
