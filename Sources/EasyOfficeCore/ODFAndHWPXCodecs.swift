@@ -366,9 +366,20 @@ public enum ODFContainerCodec {
 
     let bodyWithoutTables = XMLSanitizer.stripElements(named: "table:table", from: root.innerXML)
     let paragraphs = XMLSanitizer.extractElements(named: "text:p", in: bodyWithoutTables).map {
-      elem in
-      XMLDocumentModelMapper.parseParagraph(
+      elem -> ParagraphBlock in
+      var parsed = XMLDocumentModelMapper.parseParagraph(
         attributes: elem.attributes, innerXML: elem.innerXML, childTextTag: nil)
+      if let lsStr = elem.attributes["eo:letterSpacing"] ?? elem.attributes["fo:letter-spacing"],
+        let lsVal = Double(lsStr.replacingOccurrences(of: "%", with: ""))
+      {
+        parsed.letterSpacingPercent = max(-50.0, min(50.0, lsVal))
+      }
+      if let csStr = elem.attributes["eo:charScale"] ?? elem.attributes["style:text-scale"],
+        let csVal = Double(csStr.replacingOccurrences(of: "%", with: ""))
+      {
+        parsed.charWidthScalePercent = max(50.0, min(200.0, csVal))
+      }
+      return parsed
     }
 
     let paperSize = PaperSizePreset(rawValue: root.attributes["paperSize"] ?? "") ?? .a4
@@ -789,9 +800,20 @@ public enum HWPXContainerCodec {
 
     let sectionWithoutTables = XMLSanitizer.stripElements(named: "hp:tbl", from: sectionXML)
     let paragraphs = XMLSanitizer.extractElements(named: "hp:p", in: sectionWithoutTables).map {
-      pElem in
-      XMLDocumentModelMapper.parseParagraph(
+      pElem -> ParagraphBlock in
+      var parsed = XMLDocumentModelMapper.parseParagraph(
         attributes: pElem.attributes, innerXML: pElem.innerXML, childTextTag: "hp:t")
+      if let lsStr = pElem.attributes["eo:letterSpacing"] ?? pElem.attributes["spacing"],
+        let lsVal = Double(lsStr.replacingOccurrences(of: "%", with: ""))
+      {
+        parsed.letterSpacingPercent = max(-50.0, min(50.0, lsVal))
+      }
+      if let csStr = pElem.attributes["eo:charScale"] ?? pElem.attributes["ratio"],
+        let csVal = Double(csStr.replacingOccurrences(of: "%", with: ""))
+      {
+        parsed.charWidthScalePercent = max(50.0, min(200.0, csVal))
+      }
+      return parsed
     }
 
     let meta = XMLDocumentModelMapper.parseExtendedMetadata(

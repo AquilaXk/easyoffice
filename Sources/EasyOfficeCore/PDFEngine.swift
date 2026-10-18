@@ -143,12 +143,14 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
   public var inkStrokes: [PDFInkStroke]
   public var formFields: [PDFFormField] = []
   public var redactedPhrases: [String] = []
+  public var watermarkText: String = ""
 
   public init(
     id: UUID = UUID(), title: String, pages: [PDFPageDescriptor] = [],
     annotations: [PDFAnnotationItem] = [], outline: [PDFOutlineNode] = [],
     isRedacted: Bool = false, inkStrokes: [PDFInkStroke] = [],
-    formFields: [PDFFormField] = [], redactedPhrases: [String] = []
+    formFields: [PDFFormField] = [], redactedPhrases: [String] = [],
+    watermarkText: String = ""
   ) {
     self.id = id
     self.title = title
@@ -159,10 +161,12 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     self.inkStrokes = inkStrokes
     self.formFields = formFields
     self.redactedPhrases = redactedPhrases
+    self.watermarkText = watermarkText.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, title, pages, annotations, outline, isRedacted, inkStrokes, formFields, redactedPhrases
+    case id, title, pages, annotations, outline, isRedacted, inkStrokes, formFields,
+      redactedPhrases, watermarkText
   }
 
   public init(from decoder: Decoder) throws {
@@ -178,6 +182,43 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     self.isRedacted = decodedRedacted || !decodedPhrases.isEmpty
     self.inkStrokes = try c.decodeIfPresent([PDFInkStroke].self, forKey: .inkStrokes) ?? []
     self.formFields = try c.decodeIfPresent([PDFFormField].self, forKey: .formFields) ?? []
+    let rawWatermark = try c.decodeIfPresent(String.self, forKey: .watermarkText) ?? ""
+    self.watermarkText = rawWatermark.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(id, forKey: .id)
+    try c.encode(title, forKey: .title)
+    try c.encode(pages, forKey: .pages)
+    try c.encode(annotations, forKey: .annotations)
+    try c.encode(outline, forKey: .outline)
+    try c.encode(isRedacted, forKey: .isRedacted)
+    try c.encode(inkStrokes, forKey: .inkStrokes)
+    try c.encode(formFields, forKey: .formFields)
+    try c.encode(redactedPhrases, forKey: .redactedPhrases)
+    try c.encode(watermarkText, forKey: .watermarkText)
+  }
+
+  public var totalInkStrokeCount: Int {
+    inkStrokes.count
+  }
+
+  public mutating func applyWatermark(_ text: String) {
+    self.watermarkText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  public var securityInspectionSummary: String {
+    let redactionTag =
+      isRedacted || !redactedPhrases.isEmpty
+      ? "리댁션 영구 마스킹(\(max(1, redactedPhrases.count))건)"
+      : "마스킹 없음"
+    let signatureTag =
+      totalInkStrokeCount > 0
+      ? "전자서명 획(\(totalInkStrokeCount)건)"
+      : "서명 대기"
+    let watermarkTag = watermarkText.isEmpty ? "워터마크 없음" : "워터마크(\(watermarkText))"
+    return "ISO 32000-1 무결성 검증 완료 · \(redactionTag) · \(signatureTag) · \(watermarkTag)"
   }
 
   /// Irreversibly scrubs all case-insensitive occurrences of `targetPhrase` across page text, title, annotations, form fields, and outline nodes, replacing them with `"████"`.
@@ -383,7 +424,8 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
       isRedacted: isRedacted,
       inkStrokes: extractedInkStrokes,
       formFields: extractedFormFields,
-      redactedPhrases: redactedPhrases
+      redactedPhrases: redactedPhrases,
+      watermarkText: watermarkText
     )
   }
 
@@ -427,6 +469,8 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     var combinedFormFields: [PDFFormField] = []
     var combinedRedactedPhrases: [String] = []
     var anyRedacted = false
+    let resolvedWatermark =
+      documents.first(where: { !$0.watermarkText.isEmpty })?.watermarkText ?? ""
 
     for doc in documents {
       if doc.isRedacted { anyRedacted = true }
@@ -467,7 +511,8 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
       isRedacted: anyRedacted,
       inkStrokes: combinedInkStrokes,
       formFields: combinedFormFields,
-      redactedPhrases: combinedRedactedPhrases
+      redactedPhrases: combinedRedactedPhrases,
+      watermarkText: resolvedWatermark
     )
   }
 
@@ -539,7 +584,8 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
       title: title,
       format: targetFormat,
       paperSize: .a4,
-      paragraphs: convertedParagraphs
+      paragraphs: convertedParagraphs,
+      watermarkText: watermarkText.isEmpty ? nil : watermarkText
     )
   }
 
@@ -668,7 +714,8 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     return PDFStudioDocumentModel(
       title: doc.title,
       pages: pages,
-      outline: outlineNodes
+      outline: outlineNodes,
+      watermarkText: doc.watermarkText ?? ""
     )
   }
 

@@ -635,6 +635,10 @@ public enum RTFCodec {
       let liTwips = Int((p.leftIndentPt * 20.0).rounded())
       if fiTwips != 0 { controls += "\\fi\(fiTwips)" }
       if liTwips != 0 { controls += "\\li\(liTwips)" }
+      let expndPct = Int(p.letterSpacingPercent.rounded())
+      let scalePct = Int(p.charWidthScalePercent.rounded())
+      if expndPct != 0 { controls += "\\expnd\(expndPct)" }
+      if scalePct != 100 { controls += "\\charscalex\(scalePct)" }
       let hasStrike = p.runs.contains(where: \.isStrikethrough)
       if p.isBold { controls += "\\b" }
       if p.isItalic { controls += "\\i" }
@@ -890,6 +894,8 @@ public enum RTFCodec {
       ] : []
     let firstIndent = Double(extractControlInt("\\fi", in: controlPrefix) ?? 0) / 20.0
     let leftIndent = Double(extractControlInt("\\li", in: controlPrefix) ?? 0) / 20.0
+    let letterSpacing = Double(extractControlInt("\\expnd", in: controlPrefix) ?? 0)
+    let charScale = Double(extractControlInt("\\charscalex", in: controlPrefix) ?? 100)
 
     return ParagraphBlock(
       style: role,
@@ -899,7 +905,9 @@ public enum RTFCodec {
       isItalic: isItalic,
       isUnderlined: isUnderlined,
       firstLineIndentPt: firstIndent,
-      leftIndentPt: leftIndent
+      leftIndentPt: leftIndent,
+      letterSpacingPercent: letterSpacing,
+      charWidthScalePercent: charScale
     )
   }
 

@@ -15,12 +15,138 @@ extension WorksheetModel {
     return nil
   }
 
+  internal enum OffsetResolutionResult {
+    case success(sheetName: String?, range: CellRange)
+    case failure(String)
+  }
+
+  internal func resolveOffsetRange(
+    args: [FormulaAST],
+    frame: inout EvalFrame
+  ) -> OffsetResolutionResult {
+    guard (3...5).contains(args.count) else {
+      return .failure("#VALUE!")
+    }
+    if let sheetName = args[0].targetSheetName, !hasSheet(named: sheetName) {
+      return .failure("#REF!")
+    }
+    if case .namedRangeRef(let rangeName) = args[0], resolveNamedRange(rangeName) == nil {
+      return .failure("#NAME?")
+    }
+    guard let baseRange = extractCellRange(from: args[0]) else {
+      return .failure("#VALUE!")
+    }
+
+    let rVal = evaluateAST(args[1], context: &frame.context, depth: frame.depth + 1)
+    if case .error(let code) = rVal {
+      return .failure(code)
+    }
+    let cVal = evaluateAST(args[2], context: &frame.context, depth: frame.depth + 1)
+    if case .error(let code) = cVal {
+      return .failure(code)
+    }
+    guard let rNum = rVal.numericValue,
+      let rowDelta = Self.safeInt(rNum),
+      let cNum = cVal.numericValue,
+      let colDelta = Self.safeInt(cNum)
+    else {
+      return .failure("#VALUE!")
+    }
+
+    let baseRow = min(baseRange.start.row, baseRange.end.row)
+    let baseCol = min(baseRange.start.column, baseRange.end.column)
+    let targetRow = baseRow + rowDelta
+    let targetCol = baseCol + colDelta
+    guard targetRow >= 0,
+      targetCol >= 0,
+      targetRow <= 65535,
+      targetCol <= 65535,
+      targetCol <= CellAddress.maxZeroBasedColumn
+    else {
+      return .failure("#REF!")
+    }
+
+    let defaultHeight = abs(baseRange.end.row - baseRange.start.row) + 1
+    let defaultWidth = abs(baseRange.end.column - baseRange.start.column) + 1
+    let height: Int
+    if args.count >= 4 {
+      let hVal = evaluateAST(args[3], context: &frame.context, depth: frame.depth + 1)
+      if case .error(let code) = hVal {
+        return .failure(code)
+      }
+      guard let hNum = hVal.numericValue, let hInt = Self.safeInt(hNum) else {
+        return .failure("#VALUE!")
+      }
+      guard hInt >= 1 else {
+        return .failure("#REF!")
+      }
+      height = hInt
+    } else {
+      height = defaultHeight
+    }
+
+    let width: Int
+    if args.count == 5 {
+      let wVal = evaluateAST(args[4], context: &frame.context, depth: frame.depth + 1)
+      if case .error(let code) = wVal {
+        return .failure(code)
+      }
+      guard let wNum = wVal.numericValue, let wInt = Self.safeInt(wNum) else {
+        return .failure("#VALUE!")
+      }
+      guard wInt >= 1 else {
+        return .failure("#REF!")
+      }
+      width = wInt
+    } else {
+      width = defaultWidth
+    }
+
+    let endRow = targetRow + height - 1
+    let endCol = targetCol + width - 1
+    guard endRow >= 0,
+      endCol >= 0,
+      endRow <= 65535,
+      endCol <= 65535,
+      endCol <= CellAddress.maxZeroBasedColumn,
+      height * width <= CellRange.maxExpandedCellCount
+    else {
+      return .failure("#REF!")
+    }
+
+    let startAddr = CellAddress(packed: PackedCellCoordinate(row: targetRow, column: targetCol))
+    let endAddr = CellAddress(packed: PackedCellCoordinate(row: endRow, column: endCol))
+    return .success(
+      sheetName: args[0].targetSheetName,
+      range: CellRange(start: startAddr, end: endAddr)
+    )
+  }
+
   // MARK: - 4. Lookup & Reference Functions
 
   internal func evaluateLookupAndRefFunction(name: String, frame: inout EvalFrame)
     -> EvaluatedCellValue?
   {
     switch name {
+    case "OFFSET":
+      switch resolveOffsetRange(args: frame.args, frame: &frame) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let sheetName, let resolvedRange):
+        let coord = resolvedRange.start.packedCoordinate
+        let val: EvaluatedCellValue
+        if let sheetName {
+          val = evaluateOnSheet(
+            named: sheetName, at: coord, context: &frame.context, depth: frame.depth + 1)
+        } else {
+          val = evaluateInternal(at: coord, context: &frame.context, depth: frame.depth + 1)
+        }
+        if case .empty = val {
+          return .number(0.0)
+        }
+        return val
+      }
+
     case "VLOOKUP":
       guard (3...4).contains(frame.count),
         let range = extractCellRange(from: frame.args[1]),
@@ -90,16 +216,131 @@ extension WorksheetModel {
       return .error("#N/A")
 
     case "XLOOKUP":
-      guard (3...4).contains(frame.count) else { return .error("#VALUE!") }
+      guard (3...6).contains(frame.count) else { return .error("#VALUE!") }
       switch (frame.resolve(1..<2, in: self), frame.resolve(2..<3, in: self)) {
-      case (let .failure(err), _), (_, let .failure(err)): return .error(err)
+      case (let .failure(err), _), (_, let .failure(err)):
+        return .error(err)
       case (.success(let lookupArr), .success(let returnArr)):
-        guard lookupArr.count == returnArr.count else { return .error("#VALUE!") }
-        let lookupVal = frame.arg(0, in: self)
-        for idx in lookupArr.indices where Self.cellValuesEqual(lookupArr[idx], lookupVal) {
-          return returnArr[idx]
+        guard lookupArr.count == returnArr.count, !lookupArr.isEmpty else {
+          return .error("#VALUE!")
         }
-        return frame.count == 4 ? frame.arg(3, in: self) : .error("#N/A")
+        let lookupVal = frame.arg(0, in: self)
+        let matchMode: Int
+        if frame.count >= 5, frame.args[4] != .empty {
+          guard let mmNum = frame.arg(4, in: self).numericValue,
+            let mmInt = Self.safeInt(mmNum),
+            [-1, 0, 1, 2].contains(mmInt)
+          else {
+            return .error("#VALUE!")
+          }
+          matchMode = mmInt
+        } else {
+          matchMode = 0
+        }
+
+        let searchMode: Int
+        if frame.count == 6, frame.args[5] != .empty {
+          guard let smNum = frame.arg(5, in: self).numericValue,
+            let smInt = Self.safeInt(smNum),
+            [-2, -1, 1, 2].contains(smInt)
+          else {
+            return .error("#VALUE!")
+          }
+          searchMode = smInt
+        } else {
+          searchMode = 1
+        }
+
+        let searchIndices: [Int] =
+          searchMode < 0 ? Array(lookupArr.indices.reversed()) : Array(lookupArr.indices)
+
+        if matchMode == 2 {
+          let pattern = lookupVal.description
+          for idx in searchIndices
+          where Self.matchesWildcardPattern(text: lookupArr[idx].description, pattern: pattern)
+            || Self.cellValuesEqual(lookupArr[idx], lookupVal)
+          {
+            return returnArr[idx]
+          }
+        } else {
+          for idx in searchIndices where Self.cellValuesEqual(lookupArr[idx], lookupVal) {
+            return returnArr[idx]
+          }
+          if matchMode == -1 {
+            if let targetNum = lookupVal.numericValue {
+              var bestIdx: Int?
+              var bestNum = -Double.infinity
+              for idx in searchIndices {
+                if let n = lookupArr[idx].numericValue, n < targetNum, n > bestNum {
+                  bestNum = n
+                  bestIdx = idx
+                }
+              }
+              if let bestIdx {
+                return returnArr[bestIdx]
+              }
+            } else {
+              var bestIdx: Int?
+              var bestStr: String?
+              for idx in searchIndices where lookupArr[idx] != .empty {
+                let s = lookupArr[idx].description
+                if s.caseInsensitiveCompare(lookupVal.description) == .orderedAscending {
+                  if let currentBest = bestStr {
+                    if s.caseInsensitiveCompare(currentBest) == .orderedDescending {
+                      bestStr = s
+                      bestIdx = idx
+                    }
+                  } else {
+                    bestStr = s
+                    bestIdx = idx
+                  }
+                }
+              }
+              if let bestIdx {
+                return returnArr[bestIdx]
+              }
+            }
+          } else if matchMode == 1 {
+            if let targetNum = lookupVal.numericValue {
+              var bestIdx: Int?
+              var bestNum = Double.infinity
+              for idx in searchIndices {
+                if let n = lookupArr[idx].numericValue, n > targetNum, n < bestNum {
+                  bestNum = n
+                  bestIdx = idx
+                }
+              }
+              if let bestIdx {
+                return returnArr[bestIdx]
+              }
+            } else {
+              var bestIdx: Int?
+              var bestStr: String?
+              for idx in searchIndices where lookupArr[idx] != .empty {
+                let s = lookupArr[idx].description
+                if s.caseInsensitiveCompare(lookupVal.description) == .orderedDescending {
+                  if let currentBest = bestStr {
+                    if s.caseInsensitiveCompare(currentBest) == .orderedAscending {
+                      bestStr = s
+                      bestIdx = idx
+                    }
+                  } else {
+                    bestStr = s
+                    bestIdx = idx
+                  }
+                }
+              }
+              if let bestIdx {
+                return returnArr[bestIdx]
+              }
+            }
+          }
+        }
+
+        if frame.count >= 4, frame.args[3] != .empty {
+          return frame.arg(3, in: self)
+        }
+        return .error("#N/A")
       }
 
     case "INDEX":
@@ -118,8 +359,20 @@ extension WorksheetModel {
         depth: frame.depth + 1)
       let rIdx = rawRowIdx - 1
       let cIdx = rawColIdx - 1
-      if grid.count == 1, frame.count == 2, rIdx >= 0, rIdx < grid[0].count {
+      if frame.count == 2,
+        range.start.row == range.end.row,
+        range.end.column != range.start.column,
+        grid.count == 1,
+        rIdx >= 0,
+        rIdx < grid[0].count
+      {
         return grid[0][rIdx]
+      }
+      if frame.count == 3, rawRowIdx == 0, !grid.isEmpty, cIdx >= 0, cIdx < grid[0].count {
+        return grid[0][cIdx]
+      }
+      if frame.count == 3, rawColIdx == 0, rIdx >= 0, rIdx < grid.count, !grid[rIdx].isEmpty {
+        return grid[rIdx][0]
       }
       guard rIdx >= 0, rIdx < grid.count, cIdx >= 0, cIdx < grid[rIdx].count else {
         return .error("#REF!")
@@ -534,6 +787,173 @@ extension WorksheetModel {
         return npv.isFinite ? .number(npv) : .error("#NUM!")
       }
 
+    case "IRR":
+      guard (1...2).contains(frame.count) else { return .error("#VALUE!") }
+      switch frame.resolve(0..<1, in: self) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let vals):
+        let cashFlows = vals.compactMap(\.numericValue)
+        guard cashFlows.contains(where: { $0 > 0.0 }),
+          cashFlows.contains(where: { $0 < 0.0 })
+        else {
+          return .error("#NUM!")
+        }
+        let guess = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 0.1) : 0.1
+        var rate = guess <= -1.0 ? 0.1 : guess
+        for _ in 0..<100 {
+          var npv = 0.0
+          var dNpv = 0.0
+          let base = 1.0 + rate
+          guard base > 1e-9 else {
+            rate = 0.05
+            continue
+          }
+          for (t, cf) in cashFlows.enumerated() {
+            let tDouble = Double(t)
+            npv += cf / pow(base, tDouble)
+            if t > 0 {
+              dNpv -= tDouble * cf / pow(base, tDouble + 1.0)
+            }
+          }
+          if abs(npv) < 1e-9 {
+            return .number(rate)
+          }
+          guard abs(dNpv) > 1e-12, dNpv.isFinite else {
+            break
+          }
+          let nextRate = rate - npv / dNpv
+          if abs(nextRate - rate) < 1e-9 {
+            return .number(nextRate)
+          }
+          rate = max(-0.9999, nextRate)
+        }
+        return rate.isFinite ? .number(rate) : .error("#NUM!")
+      }
+
+    case "NPER":
+      guard (3...5).contains(frame.count),
+        let rate = frame.arg(0, in: self).numericValue,
+        let pmt = frame.arg(1, in: self).numericValue,
+        let pv = frame.arg(2, in: self).numericValue
+      else {
+        return .error("#VALUE!")
+      }
+      let fv = frame.count >= 4 ? (frame.arg(3, in: self).numericValue ?? 0.0) : 0.0
+      let type = frame.count == 5 ? (frame.arg(4, in: self).numericValue ?? 0.0) : 0.0
+      if rate == 0.0 {
+        guard pmt != 0.0 else { return .error("#DIV/0!") }
+        let nper = -(pv + fv) / pmt
+        return nper.isFinite ? .number(nper) : .error("#NUM!")
+      }
+      let pmtAdj = pmt * (1.0 + rate * type)
+      let num = pmtAdj - fv * rate
+      let den = pv * rate + pmtAdj
+      guard den != 0.0, (num / den) > 0.0, (1.0 + rate) > 0.0 else {
+        return .error("#NUM!")
+      }
+      let result = log(num / den) / log(1.0 + rate)
+      return result.isFinite ? .number(result) : .error("#NUM!")
+
+    case "RATE":
+      guard (3...6).contains(frame.count),
+        let nper = frame.arg(0, in: self).numericValue,
+        let pmt = frame.arg(1, in: self).numericValue,
+        let pv = frame.arg(2, in: self).numericValue,
+        nper > 0.0
+      else {
+        return .error("#VALUE!")
+      }
+      let fv = frame.count >= 4 ? (frame.arg(3, in: self).numericValue ?? 0.0) : 0.0
+      let type = frame.count >= 5 ? (frame.arg(4, in: self).numericValue ?? 0.0) : 0.0
+      let guess = frame.count == 6 ? (frame.arg(5, in: self).numericValue ?? 0.1) : 0.1
+
+      func evalTVM(_ r: Double) -> Double {
+        if abs(r) < 1e-12 {
+          return pv + pmt * nper + fv
+        }
+        let factor = pow(1.0 + r, nper)
+        return pv * factor + pmt * (1.0 + r * type) * (factor - 1.0) / r + fv
+      }
+
+      var r = guess <= -1.0 ? 0.1 : guess
+      let eps = 1e-7
+      for _ in 0..<100 {
+        let y = evalTVM(r)
+        if abs(y) < 1e-9 {
+          return .number(r)
+        }
+        let dy = (evalTVM(r + eps) - evalTVM(r - eps)) / (2.0 * eps)
+        guard abs(dy) > 1e-12, dy.isFinite else {
+          break
+        }
+        let nextR = r - y / dy
+        if abs(nextR - r) < 1e-9 {
+          return .number(nextR)
+        }
+        r = max(-0.9999, nextR)
+      }
+      if abs(evalTVM(r)) < 1e-5 && r.isFinite {
+        return .number(r)
+      }
+      return .error("#NUM!")
+
+    case "EFFECT":
+      guard frame.count == 2,
+        let nominal = frame.arg(0, in: self).numericValue,
+        let nperyVal = frame.arg(1, in: self).numericValue
+      else {
+        return .error("#VALUE!")
+      }
+      let npery = floor(nperyVal)
+      guard nominal > 0.0, npery >= 1.0 else {
+        return .error("#NUM!")
+      }
+      let result = pow(1.0 + nominal / npery, npery) - 1.0
+      return result.isFinite ? .number(result) : .error("#NUM!")
+
+    case "NOMINAL":
+      guard frame.count == 2,
+        let effect = frame.arg(0, in: self).numericValue,
+        let nperyVal = frame.arg(1, in: self).numericValue
+      else {
+        return .error("#VALUE!")
+      }
+      let npery = floor(nperyVal)
+      guard effect > 0.0, npery >= 1.0 else {
+        return .error("#NUM!")
+      }
+      let result = npery * (pow(1.0 + effect, 1.0 / npery) - 1.0)
+      return result.isFinite ? .number(result) : .error("#NUM!")
+
+    case "SLN":
+      guard frame.count == 3,
+        let cost = frame.arg(0, in: self).numericValue,
+        let salvage = frame.arg(1, in: self).numericValue,
+        let life = frame.arg(2, in: self).numericValue
+      else {
+        return .error("#VALUE!")
+      }
+      guard life != 0.0 else {
+        return .error("#DIV/0!")
+      }
+      return .number((cost - salvage) / life)
+
+    case "SYD":
+      guard frame.count == 4,
+        let cost = frame.arg(0, in: self).numericValue,
+        let salvage = frame.arg(1, in: self).numericValue,
+        let life = frame.arg(2, in: self).numericValue,
+        let per = frame.arg(3, in: self).numericValue
+      else {
+        return .error("#VALUE!")
+      }
+      guard life > 0.0, per > 0.0, per <= life else {
+        return .error("#NUM!")
+      }
+      let result = ((cost - salvage) * (life - per + 1.0) * 2.0) / (life * (life + 1.0))
+      return result.isFinite ? .number(result) : .error("#NUM!")
+
     case "DATE":
       guard frame.count == 3,
         let yNum = frame.arg(0, in: self).numericValue,
@@ -542,9 +962,7 @@ extension WorksheetModel {
         let y = Self.safeInt(yNum), let m = Self.safeInt(mNum), let d = Self.safeInt(dNum),
         let date = Self.makeUTCDate(year: y, month: m, day: d)
       else { return .error("#VALUE!") }
-      let comps = Self.utcCalendar.dateComponents([.year, .month, .day], from: date)
-      return .text(
-        String(format: "%04d-%02d-%02d", comps.year ?? 0, comps.month ?? 1, comps.day ?? 1))
+      return .text(Self.formatUTCDate(date))
 
     case "YEAR":
       guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else {
@@ -571,6 +989,172 @@ extension WorksheetModel {
       else { return .error("#VALUE!") }
       return .number(
         Double(Self.utcCalendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0))
+
+    case "WEEKDAY":
+      guard (1...2).contains(frame.count),
+        let date = Self.parseDateValue(frame.arg(0, in: self))
+      else {
+        return .error("#VALUE!")
+      }
+      let returnType: Int
+      if frame.count == 2 {
+        guard let rtNum = frame.arg(1, in: self).numericValue,
+          let rtInt = Self.safeInt(rtNum)
+        else {
+          return .error("#VALUE!")
+        }
+        returnType = rtInt
+      } else {
+        returnType = 1
+      }
+      let calWeekday = Self.utcCalendar.component(.weekday, from: date)
+      switch returnType {
+      case 1:
+        return .number(Double(calWeekday))
+      case 2:
+        return .number(Double(calWeekday == 1 ? 7 : calWeekday - 1))
+      case 3:
+        return .number(Double(calWeekday == 1 ? 6 : calWeekday - 2))
+      default:
+        return .error("#NUM!")
+      }
+
+    case "WEEKNUM":
+      guard (1...2).contains(frame.count),
+        let date = Self.parseDateValue(frame.arg(0, in: self))
+      else {
+        return .error("#VALUE!")
+      }
+      let returnType: Int
+      if frame.count == 2 {
+        guard let rtNum = frame.arg(1, in: self).numericValue,
+          let rtInt = Self.safeInt(rtNum)
+        else {
+          return .error("#VALUE!")
+        }
+        returnType = rtInt
+      } else {
+        returnType = 1
+      }
+      var cal = Self.utcCalendar
+      cal.firstWeekday = (returnType == 2 || returnType == 21) ? 2 : 1
+      cal.minimumDaysInFirstWeek = 1
+      return .number(Double(cal.component(.weekOfYear, from: date)))
+
+    case "EDATE":
+      guard frame.count == 2,
+        let startDate = Self.parseDateValue(frame.arg(0, in: self)),
+        let mNum = frame.arg(1, in: self).numericValue,
+        let months = Self.safeInt(trunc(mNum)),
+        let targetDate = Self.utcCalendar.date(byAdding: .month, value: months, to: startDate)
+      else {
+        return .error("#VALUE!")
+      }
+      return .text(Self.formatUTCDate(targetDate))
+
+    case "EOMONTH":
+      guard frame.count == 2,
+        let startDate = Self.parseDateValue(frame.arg(0, in: self)),
+        let mNum = frame.arg(1, in: self).numericValue,
+        let months = Self.safeInt(trunc(mNum))
+      else {
+        return .error("#VALUE!")
+      }
+      let startComps = Self.utcCalendar.dateComponents([.year, .month], from: startDate)
+      guard
+        let firstOfStartMonth = Self.makeUTCDate(
+          year: startComps.year ?? 1970, month: startComps.month ?? 1, day: 1),
+        let firstOfNextAfterTarget = Self.utcCalendar.date(
+          byAdding: .month, value: months + 1, to: firstOfStartMonth),
+        let lastDayOfTargetMonth = Self.utcCalendar.date(
+          byAdding: .day, value: -1, to: firstOfNextAfterTarget)
+      else {
+        return .error("#VALUE!")
+      }
+      return .text(Self.formatUTCDate(lastDayOfTargetMonth))
+
+    case "WORKDAY":
+      guard frame.count == 2,
+        let startDate = Self.parseDateValue(frame.arg(0, in: self)),
+        let dNum = frame.arg(1, in: self).numericValue,
+        let days = Self.safeInt(trunc(dNum))
+      else {
+        return .error("#VALUE!")
+      }
+      var current = startDate
+      var remaining = abs(days)
+      let step = days >= 0 ? 1 : -1
+      while remaining > 0 {
+        guard let next = Self.utcCalendar.date(byAdding: .day, value: step, to: current) else {
+          return .error("#VALUE!")
+        }
+        current = next
+        let wd = Self.utcCalendar.component(.weekday, from: current)
+        if wd != 1 && wd != 7 {
+          remaining -= 1
+        }
+      }
+      return .text(Self.formatUTCDate(current))
+
+    case "NETWORKDAYS":
+      guard frame.count == 2,
+        let startDate = Self.parseDateValue(frame.arg(0, in: self)),
+        let endDate = Self.parseDateValue(frame.arg(1, in: self))
+      else {
+        return .error("#VALUE!")
+      }
+      let isReverse = startDate > endDate
+      let fromDate = isReverse ? endDate : startDate
+      let toDate = isReverse ? startDate : endDate
+      var current = fromDate
+      var count = 0
+      while current <= toDate {
+        let wd = Self.utcCalendar.component(.weekday, from: current)
+        if wd != 1 && wd != 7 {
+          count += 1
+        }
+        guard let next = Self.utcCalendar.date(byAdding: .day, value: 1, to: current) else {
+          break
+        }
+        current = next
+      }
+      return .number(Double(isReverse ? -count : count))
+
+    case "DATEDIF":
+      guard frame.count == 3,
+        let startDate = Self.parseDateValue(frame.arg(0, in: self)),
+        let endDate = Self.parseDateValue(frame.arg(1, in: self))
+      else {
+        return .error("#VALUE!")
+      }
+      guard startDate <= endDate else {
+        return .error("#NUM!")
+      }
+      let unit = frame.arg(2, in: self).description.trimmingCharacters(in: .whitespacesAndNewlines)
+        .uppercased()
+      switch unit {
+      case "D":
+        let days = Self.utcCalendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0
+        return .number(Double(days))
+      case "M":
+        let months =
+          Self.utcCalendar.dateComponents([.month], from: startDate, to: endDate).month ?? 0
+        return .number(Double(months))
+      case "Y":
+        let years = Self.utcCalendar.dateComponents([.year], from: startDate, to: endDate).year ?? 0
+        return .number(Double(years))
+      case "YM":
+        let months =
+          Self.utcCalendar.dateComponents([.year, .month], from: startDate, to: endDate).month ?? 0
+        return .number(Double(months))
+      case "MD":
+        let days =
+          Self.utcCalendar.dateComponents([.year, .month, .day], from: startDate, to: endDate).day
+          ?? 0
+        return .number(Double(days))
+      default:
+        return .error("#VALUE!")
+      }
 
     default:
       return nil
@@ -622,6 +1206,11 @@ extension WorksheetModel {
     comps.minute = 0
     comps.second = 0
     return utcCalendar.date(from: comps)
+  }
+
+  internal static func formatUTCDate(_ date: Date) -> String {
+    let comps = utcCalendar.dateComponents([.year, .month, .day], from: date)
+    return String(format: "%04d-%02d-%02d", comps.year ?? 1970, comps.month ?? 1, comps.day ?? 1)
   }
 
   internal static func parseDateValue(_ value: EvaluatedCellValue) -> Date? {
