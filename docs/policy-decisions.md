@@ -429,3 +429,31 @@
   - 모든 차트 종류를 단일 세로 막대 뷰로만 표시하거나 슬라이드 도형을 모두 사각형 테두리로만 그리는 방식: 도메인 모델의 `kind` 속성이 화면에 반영되지 않아 시각적 피드백이 누락되므로 기각.
 - **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift`
 - **Revisit when**: 3D 원근 차트 또는 복합 이중 축(Dual-Axis Combo Chart) 요구사항이 추가될 때.
+
+---
+
+### 23. PD-037 ~ PD-041: 시맨틱 다크모드 배지 명도 대비, 200자 원고지 격자·문단/표/메일머지 제어, 시트 데이터 막대·첫 열 고정·데이터 정제, 슬라이드 마스터 테마·개체 정렬/배분·단조 Z-Order 및 PDF 결재 도장·계층형 책갈피 정책 (2026-10-18)
+
+- **Status**: Implemented (`Sources/EasyOfficeDesignSystem/DesignTokens.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Decision**:
+  1. **PD-037 (시맨틱 다크모드 배지 및 인스펙터 명도 대비 토큰화)**:
+     - `WorkspaceThemePalette`의 `accentBadgeFill` / `accentBadgeText` 시맨틱 토큰을 우측 컨텍스트 인스펙터(`RightContextInspectorView.swift`) 및 상세 편집 패널 전반에 일괄 적용하고, 다크모드 배경 위에서 가독성을 저하시키던 고정 `brand50`·`brand100`·`brand700` 직접 참조를 제거하여 WCAG AA 이상의 명도 대비를 보장합니다.
+  2. **PD-038 (문서/HWP 200자 원고지 20×10 격자 뷰, 문단 정렬·줄간격·다단계 목록, 표 셀 병합/분할/테두리, 메일 머지 치환 및 차트/도형 벡터 그래픽 첨부)**:
+     - `WorkspaceViewModel.isManuscriptGridModeEnabled` 및 `hwp-mod-manuscript` 리본 명령을 통해 문서를 `20열 × 10행` 200자 원고지 격자 뷰로 실시간 전환할 수 있도록 지원합니다.
+     - 우측 인스펙터와 `WorkspaceHubDocumentAndSlideActions.swift`를 통해 문단 정렬(`ParagraphAlignment`), 줄간격(`100%`/`115%`/`160%`/`200%`), 다단계 목록(`ParagraphListKind` + 수준 증감), 표 셀 병합/분할(`mergeActiveDocumentTableCells`/`splitActiveDocumentTableCell`) 및 테두리 스타일(`setActiveDocumentTableBorderStyle`), 메일 머지(`{{KEY}}` 치환 `applyMailMergeFieldReplacement`)를 즉시 제어하며, 문서/HWP에서 `doc-insert-chart`/`doc-insert-shape` 실행 시 표/문단 삽입과 함께 실제 벡터 그래픽 PNG(`EmbeddedImageAttachment`)를 첨부합니다.
+  3. **PD-039 (스프레드시트 셀 내 비례 데이터 막대, 첫 열 고정, 중복 행 제거·구분자 텍스트 나누기, 피벗 집계 함수 선택 및 단일 사본 수식바 검증)**:
+     - `isFirstColumnFrozen`(A열 틀 고정), `isDataBarsEnabled`(`normalizedDataBarRatios` 기반 셀 내 비례 가로 막대 오버레이), `selectedPivotAggregation`(`PivotAggregationFunction`: 합계·평균·개수·최소·최대), `removeDuplicatesInActiveSheet()`, `splitActiveSheetColumnByDelimiter(_:)`를 제공합니다.
+     - `applyFormulaBarEdit()`에서 불필요한 이중 `WorksheetModel` 사본(`var probe = sheet`) 생성을 제거하여 단일 `var updatedSheet = sheet` 사본 위에서 수식/유효성 검증 후 즉시 반영합니다.
+  4. **PD-040 (슬라이드 마스터 테마 4종, 다중 개체 정렬·균등 배분·복제·삭제 및 단조 증가 `zIndex` 정규화)**:
+     - `applyThemeToActiveDeck(_:)`(`SlideDeckTheme.allCases`), `alignSlideElements(_:)`(`.alignLeft`, `.alignCenter`, `.alignRight`, `.distributeHorizontally`), `duplicateActiveSlideElement()`, `deleteActiveSlideElement()`, `updateActiveSlideSpeakerNotes(_:)`를 제공합니다.
+     - `moveSlideElementZOrder(slideIndex:elementID:bringForward:)`는 개체들을 `(zIndex, enumerations offset)` 기준으로 안정 정렬한 뒤 인접 개체와 위치를 교환하고 `0, 1, 2, ...`의 엄격한 단조 증가 `zIndex`를 재할당하여 동일 `zIndex`(예: 모두 `0`) 개체들 사이에서도 1회 클릭으로 즉각적인 레이어 순서 변경이 일어나도록 보장합니다.
+  5. **PD-041 (PDF 전자 결재 도장 4종 프리셋 및 계층형 책갈피 목차 생성·삭제, 도메인 액션 파일 분리)**:
+     - `PDFStampPreset`(`승인 (APPROVED)`, `대외비 (CONFIDENTIAL)`, `검토필 (REVIEWED)`, `긴급 (URGENT)`) 기반 전자 결재 스탬프 주석 추가(`addStampToActivePDFPage`)와 계층형 `PDFOutlineNode` 책갈피 추가·삭제(`addBookmarkToActivePDF`, `removeBookmarkFromActivePDF`)를 지원합니다.
+     - 비대해진 `WorkspaceHubEditorActions.swift`를 삭제하고 도메인 응집도에 따라 `WorkspaceHubDocumentAndSlideActions.swift`(문서·HWP·슬라이드)와 `WorkspaceHubSheetAndPDFActions.swift`(시트·PDF) 2개 파일로 분리했습니다.
+- **Why**: 다크모드 시인성 결함과 슬라이드 동일 `zIndex` 레이어 이동 불능 버그를 해결하고, 코어 엔진에 구현된 원고지 격자·데이터 정제·개체 정렬·결재 스탬프·책갈피 기능을 데스크톱 인스펙터와 리본 전반에 직결하기 위함입니다.
+- **Trade-offs**: 문서 차트/도형 삽입 시 `EmbeddedImageAttachment` PNG 데이터(~1KB)가 함께 추가되나, 인라인 이미지 갤러리와 컨테이너 직렬화(`.docx`/`.odt`/`.hwpx`)에서 시각적 그래픽 개체로 즉시 확인·보존할 수 있습니다.
+- **Alternatives rejected**:
+  - `moveSlideElementZOrder`에서 단순 `zIndex += 1` / `zIndex -= 1` 증감만 수행하는 방식: 초기 `zIndex`가 모두 `0`인 다중 개체에서 역전이 발생하지 않거나 중복 `zIndex`가 남으므로 인덱스 재정규화(`0..<count`) 방식을 채택.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift`
+- **Revisit when**: 슬라이드 수직 균등 배분(`.distributeVertically`) 단축 버튼을 리본 상단에 추가할 때.
+

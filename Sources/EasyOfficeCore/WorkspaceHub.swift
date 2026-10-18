@@ -85,6 +85,16 @@ public final class WorkspaceViewModel {
   public var pdfRedactionPhraseDraft: String = "기밀"
   public var pdfFormFieldNameDraft: String = "승인자"
   public var pdfFormFieldValueDraft: String = "홍길동"
+  public var isManuscriptGridModeEnabled: Bool = false
+  public var mailMergeFieldKeyDraft: String = "수신처"
+  public var mailMergeFieldValueDraft: String = "전략기획본부"
+  public var isFirstColumnFrozen: Bool = false
+  public var isDataBarsEnabled: Bool = true
+  public var selectedPivotAggregation: PivotAggregationFunction = .sum
+  public var sheetDelimiterDraft: String = ","
+  public var selectedPDFStampPreset: String = "승인 (APPROVED)"
+  public var bookmarkTitleDraft: String = "핵심 섹션 책갈피"
+  public var isChartPanelVisible: Bool = true
 
   internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
   internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
@@ -414,40 +424,43 @@ public final class WorkspaceViewModel {
   // MARK: - Interactive Document, Sheet, Slide, and PDF Mutations
 
   public func applyFormulaBarEdit() {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .sheet(let sheet) = openTabs[idx].payload
     else { return }
     activeInlineEditTargetKey = nil
-    if let rule = activeDataValidationRule {
-      let trimmed = formulaBarDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-      let isValid: Bool
-      if trimmed.hasPrefix("=") {
-        var probe = sheet
-        isValid =
-          (try? probe.setCell(selectedSheetCell, rawValue: formulaBarDraft)) != nil
-          ? rule.validate(probe.evaluate(at: selectedSheetCell)) : false
-      } else {
-        isValid = rule.validate(rawValue: formulaBarDraft)
-      }
-      guard isValid else {
-        lastErrorMessage = "데이터 유효성 검사 실패: 입력값 '\(formulaBarDraft)'이(가) 허용 범위를 벗어났습니다."
-        return
-      }
-    }
     let previousPayload = openTabs[idx].payload
+    var updatedSheet = sheet
     do {
-      try sheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
+      try updatedSheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
+      if let rule = activeDataValidationRule {
+        let trimmed = formulaBarDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isValid =
+          trimmed.hasPrefix("=")
+          ? rule.validate(updatedSheet.evaluate(at: selectedSheetCell))
+          : rule.validate(rawValue: formulaBarDraft)
+        guard isValid else {
+          lastErrorMessage = "데이터 유효성 검사 실패: 입력값 '\(formulaBarDraft)'이(가) 허용 범위를 벗어났습니다."
+          return
+        }
+      }
       var stack = undoStacks[activeTabID] ?? []
       stack.append(previousPayload)
-      if stack.count > Self.maxUndoDepth { stack.removeFirst(stack.count - Self.maxUndoDepth) }
+      if stack.count > Self.maxUndoDepth {
+        stack.removeFirst(stack.count - Self.maxUndoDepth)
+      }
       undoStacks[activeTabID] = stack
       redoStacks[activeTabID] = []
-      openTabs[idx].payload = .sheet(sheet)
+      openTabs[idx].payload = .sheet(updatedSheet)
       openTabs[idx].isModified = true
       lastErrorMessage = nil
     } catch {
       lastErrorMessage = error.localizedDescription
     }
+  }
+
+  public func commitSheetFormulaBarEdit() {
+    applyFormulaBarEdit()
   }
 
   public func setSelectedSheetCellNumberFormat(_ format: CellNumberFormat) {
