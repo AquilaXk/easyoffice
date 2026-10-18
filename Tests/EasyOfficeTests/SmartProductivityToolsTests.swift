@@ -932,4 +932,50 @@ final class SmartProductivityToolsTests: XCTestCase {
         let rawLongPDF = String(decoding: encodedLong, as: UTF8.self)
         XCTAssertTrue(rawLongPDF.contains("FEFF004200430044004500460047")) // "BCDEFG" wrapped onto second visual line
     }
+
+    func testPDFInkStrokeVectorPathSerializationAndPageRemapping() throws {
+        var pdf = PDFStudioDocumentModel(
+            title: "벡터 잉크 전자서명 문서",
+            pages: [
+                PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: "1페이지 계약 내용"),
+                PDFPageDescriptor(pageNumber: 2, rotationDegrees: 0, extractedText: "2페이지 서명란")
+            ]
+        )
+        let stroke1 = PDFInkStroke(
+            pageNumber: 1,
+            points: [PDFInkPoint(x: 100, y: 200), PDFInkPoint(x: 150.5, y: 230.25), PDFInkPoint(x: 210, y: 195)],
+            strokeHex: "#5C6BC0",
+            lineWidth: 2.5,
+            label: "1페이지 결재 서명"
+        )
+        let stroke2 = PDFInkStroke(
+            pageNumber: 2,
+            points: [PDFInkPoint(x: 80, y: 120), PDFInkPoint(x: 180, y: 140)],
+            strokeHex: "#D32F2F",
+            lineWidth: 3.0,
+            label: "2페이지 검토 서명"
+        )
+        pdf.addInkStroke(stroke1)
+        pdf.addInkStroke(stroke2)
+
+        let encoded = PDFBinarySerializer.encode(pdf)
+        let rawPDF = String(decoding: encoded, as: UTF8.self)
+        XCTAssertTrue(rawPDF.contains("q 0.361 0.420 0.753 RG 2.50 w 1 J 1 j 100.00 200.00 m 150.50 230.25 l 210.00 195.00 l S Q"))
+        XCTAssertTrue(rawPDF.contains("q 0.827 0.184 0.184 RG 3.00 w 1 J 1 j 80.00 120.00 m 180.00 140.00 l S Q"))
+
+        let nativeDoc = try XCTUnwrap(PDFKit.PDFDocument(data: encoded))
+        XCTAssertEqual(nativeDoc.pageCount, 2)
+        let thumbData = try XCTUnwrap(nativeDoc.page(at: 0)?.thumbnail(of: CGSize(width: 200, height: 280), for: .mediaBox).tiffRepresentation)
+        XCTAssertGreaterThan(thumbData.count, 512)
+
+        let decoded = try PDFBinarySerializer.decode(from: encoded)
+        XCTAssertEqual(decoded.inkStrokes, [stroke1, stroke2])
+
+        let (part1, part2) = decoded.splitting(afterPage: 1)
+        XCTAssertEqual(part1.inkStrokes.count, 1)
+        XCTAssertEqual(part2.inkStrokes.count, 1)
+        XCTAssertEqual(part2.inkStrokes[0].pageNumber, 1)
+        let merged = part1.merged(with: part2)
+        XCTAssertEqual(merged.inkStrokes.map(\.pageNumber), [1, 2])
+    }
 }

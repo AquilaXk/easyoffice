@@ -201,6 +201,9 @@ public enum CSVStateMachineCodec {
 
 // MARK: - CommonMark Markdown + GFM Pipe Table Codec
 
+internal typealias MarkdownEmbeddedMetadata = ExtendedDocumentMetadataEnvelope
+internal typealias RTFEmbeddedMetadata = ExtendedDocumentMetadataEnvelope
+
 /// Bidirectional CommonMark Markdown and GFM pipe table converter for `OfficeDocumentModel`.
 public enum CommonMarkCodec {
 
@@ -252,6 +255,10 @@ public enum CommonMarkCodec {
             blocks.append("![\(image.caption)](\(image.fileName))")
         }
 
+        for eq in doc.equations {
+            blocks.append("$$ \(eq.rawExpression) $$")
+        }
+
         let extEnvelope = ExtendedDocumentMetadataEnvelope(from: doc)
         if let extBytes = try? JSONEncoder().encode(extEnvelope), !extBytes.isEmpty {
             blocks.append("<!-- eo-meta: \(extBytes.base64EncodedString()) -->")
@@ -271,6 +278,7 @@ public enum CommonMarkCodec {
         var paragraphs: [ParagraphBlock] = []
         var tables: [DocumentTableBlock] = []
         var images: [EmbeddedImageAttachment] = []
+        var equations: [DocumentEquationBlock] = []
         var extendedEnvelope: ExtendedDocumentMetadataEnvelope?
 
         let rawLines = markdown.components(separatedBy: .newlines)
@@ -299,6 +307,15 @@ public enum CommonMarkCodec {
                 let start = trimmed.index(trimmed.startIndex, offsetBy: "<!-- caption:".count)
                 let end = trimmed.index(trimmed.endIndex, offsetBy: -3)
                 pendingCaption = String(trimmed[start..<end]).trimmingCharacters(in: .whitespaces)
+                idx += 1
+                continue
+            }
+
+            if trimmed.hasPrefix("$$") && trimmed.hasSuffix("$$") && trimmed.count > 4 {
+                let expr = String(trimmed.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespaces)
+                if !expr.isEmpty {
+                    equations.append(DocumentEquationBlock(rawExpression: expr))
+                }
                 idx += 1
                 continue
             }
@@ -365,7 +382,8 @@ public enum CommonMarkCodec {
             format: .md,
             paragraphs: paragraphs,
             tables: tables,
-            images: images
+            images: images,
+            equations: equations
         )
         extendedEnvelope?.apply(to: &docModel)
         return docModel

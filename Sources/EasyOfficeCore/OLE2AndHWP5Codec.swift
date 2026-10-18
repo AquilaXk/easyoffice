@@ -2,6 +2,8 @@ import Foundation
 
 // MARK: - Extended Document Metadata Envelope (Lossless Round-Trip Support)
 
+internal typealias HWP5ExtendedMetadata = ExtendedDocumentMetadataEnvelope
+
 internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
     var paragraphs: [ParagraphBlock]
     var tables: [DocumentTableBlock]
@@ -11,6 +13,8 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
     var comments: [DocumentCommentThread]
     var bookmarks: [String: UUID]
     var images: [EmbeddedImageAttachment]
+    var equations: [DocumentEquationBlock]
+    var watermarkText: String?
 
     init(from doc: OfficeDocumentModel) {
         self.paragraphs = doc.paragraphs
@@ -21,6 +25,26 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
         self.comments = doc.comments
         self.bookmarks = doc.bookmarks
         self.images = doc.images
+        self.equations = doc.equations
+        self.watermarkText = doc.watermarkText
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case paragraphs, tables, sections, footnotes, revisions, comments, bookmarks, images, equations, watermarkText
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.paragraphs = try c.decodeIfPresent([ParagraphBlock].self, forKey: .paragraphs) ?? []
+        self.tables = try c.decodeIfPresent([DocumentTableBlock].self, forKey: .tables) ?? []
+        self.sections = try c.decodeIfPresent([DocumentSectionLayout].self, forKey: .sections) ?? []
+        self.footnotes = try c.decodeIfPresent([FootnoteItem].self, forKey: .footnotes) ?? []
+        self.revisions = try c.decodeIfPresent([TrackedRevision].self, forKey: .revisions) ?? []
+        self.comments = try c.decodeIfPresent([DocumentCommentThread].self, forKey: .comments) ?? []
+        self.bookmarks = try c.decodeIfPresent([String: UUID].self, forKey: .bookmarks) ?? [:]
+        self.images = try c.decodeIfPresent([EmbeddedImageAttachment].self, forKey: .images) ?? []
+        self.equations = try c.decodeIfPresent([DocumentEquationBlock].self, forKey: .equations) ?? []
+        self.watermarkText = try c.decodeIfPresent(String.self, forKey: .watermarkText)
     }
 
     func apply(to doc: inout OfficeDocumentModel) {
@@ -59,6 +83,8 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
         if !comments.isEmpty { doc.comments = comments }
         if !bookmarks.isEmpty { doc.bookmarks = bookmarks }
         if !images.isEmpty { doc.images = images }
+        if !equations.isEmpty { doc.equations = equations }
+        if let watermarkText, !watermarkText.isEmpty { doc.watermarkText = watermarkText }
     }
 }
 

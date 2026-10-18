@@ -49,6 +49,16 @@ extension XMLDocumentModelMapper {
             for range in page.mergedRanges {
                 lines.append("<eo:mergedRange sheetIdx=\"\(sheetIdx)\" ref=\"\(XMLSanitizer.escape(range.description))\"/>")
             }
+            for col in page.columnWidths.keys.sorted() {
+                if let w = page.columnWidths[col] {
+                    lines.append("<eo:colWidth sheetIdx=\"\(sheetIdx)\" col=\"\(col)\" width=\"\(w)\"/>")
+                }
+            }
+            for row in page.rowHeights.keys.sorted() {
+                if let h = page.rowHeights[row] {
+                    lines.append("<eo:rowHeight sheetIdx=\"\(sheetIdx)\" row=\"\(row)\" height=\"\(h)\"/>")
+                }
+            }
         }
         return lines.joined(separator: "\n  ")
     }
@@ -61,7 +71,7 @@ extension XMLDocumentModelMapper {
             let sheetIdx = Int(commentElem.attributes["sheetIdx"] ?? "0") ?? 0
             if sheetIdx == 0 {
                 sheet.sheetComments[addr.packedCoordinate] = text
-            } else if sheetIdx - 1 < sheet.additionalSheets.count {
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
                 sheet.additionalSheets[sheetIdx - 1].sheetComments[addr.packedCoordinate] = text
             }
         }
@@ -73,10 +83,34 @@ extension XMLDocumentModelMapper {
                 if !sheet.mergedRanges.contains(range) {
                     sheet.mergedRanges.append(range)
                 }
-            } else if sheetIdx - 1 < sheet.additionalSheets.count {
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
                 if !sheet.additionalSheets[sheetIdx - 1].mergedRanges.contains(range) {
                     sheet.additionalSheets[sheetIdx - 1].mergedRanges.append(range)
                 }
+            }
+        }
+        for colElem in XMLSanitizer.extractElements(named: "eo:colWidth", in: xml) {
+            guard let col = Int(colElem.attributes["col"] ?? ""),
+                  col >= 0, col <= CellAddress.maxZeroBasedColumn,
+                  let w = Double(colElem.attributes["width"] ?? ""),
+                  w.isFinite else { continue }
+            let sheetIdx = Int(colElem.attributes["sheetIdx"] ?? "0") ?? 0
+            if sheetIdx == 0 {
+                sheet.setColumnWidth(w, at: col)
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
+                sheet.additionalSheets[sheetIdx - 1].columnWidths[col] = max(48.0, min(w, 420.0))
+            }
+        }
+        for rowElem in XMLSanitizer.extractElements(named: "eo:rowHeight", in: xml) {
+            guard let row = Int(rowElem.attributes["row"] ?? ""),
+                  row >= 0, row <= CellAddress.maxZeroBasedRow,
+                  let h = Double(rowElem.attributes["height"] ?? ""),
+                  h.isFinite else { continue }
+            let sheetIdx = Int(rowElem.attributes["sheetIdx"] ?? "0") ?? 0
+            if sheetIdx == 0 {
+                sheet.setRowHeight(h, at: row)
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
+                sheet.additionalSheets[sheetIdx - 1].rowHeights[row] = max(22.0, min(h, 180.0))
             }
         }
         if let metaElem = XMLSanitizer.extractElements(named: "eo:sheetMeta", in: xml).first {
@@ -146,7 +180,7 @@ extension XMLDocumentModelMapper {
     }
 
     static func slideElementAttributes(_ el: SlideCanvasElement) -> String {
-        "id=\"\(el.id.uuidString)\" title=\"\(XMLSanitizer.escape(el.title))\" x=\"\(el.x)\" y=\"\(el.y)\" w=\"\(el.width)\" h=\"\(el.height)\" kind=\"\(XMLSanitizer.escape(el.kind.rawValue))\" zIndex=\"\(el.zIndex)\" rotation=\"\(el.rotationDegrees)\" fillHex=\"\(XMLSanitizer.escape(el.fillHex))\" strokeHex=\"\(XMLSanitizer.escape(el.strokeHex))\" bold=\"\(el.isBold ? "1" : "0")\" italic=\"\(el.isItalic ? "1" : "0")\" underline=\"\(el.isUnderlined ? "1" : "0")\""
+        "id=\"\(el.id.uuidString)\" title=\"\(XMLSanitizer.escape(el.title))\" x=\"\(el.x)\" y=\"\(el.y)\" w=\"\(el.width)\" h=\"\(el.height)\" kind=\"\(XMLSanitizer.escape(el.kind.rawValue))\" zIndex=\"\(el.zIndex)\" rotation=\"\(el.rotationDegrees)\" anim=\"\(XMLSanitizer.escape(el.animation.rawValue))\" fillHex=\"\(XMLSanitizer.escape(el.fillHex))\" strokeHex=\"\(XMLSanitizer.escape(el.strokeHex))\" bold=\"\(el.isBold ? "1" : "0")\" italic=\"\(el.isItalic ? "1" : "0")\" underline=\"\(el.isUnderlined ? "1" : "0")\""
     }
 
     static func parseSlideElement(attributes: [String: String], innerXML: String) -> SlideCanvasElement {
@@ -164,6 +198,7 @@ extension XMLDocumentModelMapper {
         let kind = SlideElementKind(rawValue: attributes["kind"] ?? "") ?? .textBox
         let zIndex = Int(attributes["zIndex"] ?? "0") ?? 0
         let rotation = Double(attributes["rotation"] ?? "0") ?? 0
+        let animation = SlideElementAnimation(rawValue: attributes["anim"] ?? "") ?? .none
         let fillHex = attributes["fillHex"] ?? "#EEF0FF"
         let strokeHex = attributes["strokeHex"] ?? "#5C6BC0"
         let isBold = (attributes["bold"] == "1") || (rPrAttrs?["b"] == "1")
@@ -177,7 +212,8 @@ extension XMLDocumentModelMapper {
 
         return SlideCanvasElement(
             id: id, title: title, bodyText: bodyText, x: x, y: y, width: width, height: height,
-            kind: kind, zIndex: zIndex, rotationDegrees: rotation, fillHex: fillHex, strokeHex: strokeHex,
+            kind: kind, zIndex: zIndex, rotationDegrees: rotation, animation: animation,
+            fillHex: fillHex, strokeHex: strokeHex,
             isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined
         )
     }
@@ -288,7 +324,9 @@ public enum ODFContainerCodec {
             revisions: meta.revisions,
             comments: meta.comments,
             bookmarks: meta.bookmarks,
-            images: meta.images
+            images: meta.images,
+            equations: meta.equations,
+            watermarkText: meta.watermarkText
         )
     }
 
@@ -644,7 +682,8 @@ public enum HWPXContainerCodec {
             headerText: headerText, footerText: footerText,
             paragraphs: paragraphs, tables: tables, trackChangesEnabled: trackChanges,
             sections: meta.sections, footnotes: meta.footnotes, revisions: meta.revisions,
-            comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images
+            comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images,
+            equations: meta.equations, watermarkText: meta.watermarkText
         )
     }
 }

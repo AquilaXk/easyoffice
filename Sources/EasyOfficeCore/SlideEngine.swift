@@ -52,6 +52,24 @@ public enum SlideElementKind: String, CaseIterable, Sendable, Codable {
     case chartEmbed = "차트 개체"
 }
 
+public enum SlideElementAnimation: String, Sendable, Codable, Equatable, CaseIterable {
+    case none = "없음"
+    case fadeIn = "페이드 인 (Fade In)"
+    case flyInUp = "아래에서 날아오기 (Fly In)"
+    case zoomIn = "확대 등장 (Zoom In)"
+}
+
+public enum SlideResizeHandle: String, Sendable, Codable, Equatable, CaseIterable {
+    case topLeft = "NW"
+    case top = "N"
+    case topRight = "NE"
+    case right = "E"
+    case bottomRight = "SE"
+    case bottom = "S"
+    case bottomLeft = "SW"
+    case left = "W"
+}
+
 /// Visual element placed on a slide canvas.
 public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
     public let id: UUID
@@ -64,6 +82,7 @@ public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
     public var kind: SlideElementKind
     public var zIndex: Int
     public var rotationDegrees: Double
+    public var animation: SlideElementAnimation
     public var fillHex: String
     public var strokeHex: String
     public var isBold: Bool
@@ -81,6 +100,7 @@ public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
         kind: SlideElementKind = .textBox,
         zIndex: Int = 0,
         rotationDegrees: Double = 0.0,
+        animation: SlideElementAnimation = .none,
         fillHex: String = "#EEF0FF",
         strokeHex: String = "#5C6BC0",
         isBold: Bool = false,
@@ -97,11 +117,57 @@ public struct SlideCanvasElement: Sendable, Codable, Equatable, Identifiable {
         self.kind = kind
         self.zIndex = zIndex
         self.rotationDegrees = rotationDegrees
+        self.animation = animation
         self.fillHex = fillHex
         self.strokeHex = strokeHex
         self.isBold = isBold
         self.isItalic = isItalic
         self.isUnderlined = isUnderlined
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, bodyText, x, y, width, height, kind, zIndex
+        case rotationDegrees, animation, fillHex, strokeHex, isBold, isItalic, isUnderlined
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.title = try c.decode(String.self, forKey: .title)
+        self.bodyText = try c.decodeIfPresent(String.self, forKey: .bodyText) ?? ""
+        self.x = try c.decode(Double.self, forKey: .x)
+        self.y = try c.decode(Double.self, forKey: .y)
+        self.width = try c.decode(Double.self, forKey: .width)
+        self.height = try c.decode(Double.self, forKey: .height)
+        self.kind = try c.decodeIfPresent(SlideElementKind.self, forKey: .kind) ?? .textBox
+        self.zIndex = try c.decodeIfPresent(Int.self, forKey: .zIndex) ?? 0
+        self.rotationDegrees = try c.decodeIfPresent(Double.self, forKey: .rotationDegrees) ?? 0.0
+        self.animation = try c.decodeIfPresent(SlideElementAnimation.self, forKey: .animation) ?? .none
+        self.fillHex = try c.decodeIfPresent(String.self, forKey: .fillHex) ?? "#EEF0FF"
+        self.strokeHex = try c.decodeIfPresent(String.self, forKey: .strokeHex) ?? "#5C6BC0"
+        self.isBold = try c.decodeIfPresent(Bool.self, forKey: .isBold) ?? false
+        self.isItalic = try c.decodeIfPresent(Bool.self, forKey: .isItalic) ?? false
+        self.isUnderlined = try c.decodeIfPresent(Bool.self, forKey: .isUnderlined) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(bodyText, forKey: .bodyText)
+        try c.encode(x, forKey: .x)
+        try c.encode(y, forKey: .y)
+        try c.encode(width, forKey: .width)
+        try c.encode(height, forKey: .height)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(zIndex, forKey: .zIndex)
+        try c.encode(rotationDegrees, forKey: .rotationDegrees)
+        try c.encode(animation, forKey: .animation)
+        try c.encode(fillHex, forKey: .fillHex)
+        try c.encode(strokeHex, forKey: .strokeHex)
+        try c.encode(isBold, forKey: .isBold)
+        try c.encode(isItalic, forKey: .isItalic)
+        try c.encode(isUnderlined, forKey: .isUnderlined)
     }
 
     public var centerX: Double { x + width / 2.0 }
@@ -267,6 +333,59 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
         var target = elements.remove(at: idx)
         target.zIndex = minZ - 1
         elements.insert(target, at: 0)
+    }
+
+    public mutating func resizeElement(
+        id: UUID,
+        handle: SlideResizeHandle,
+        deltaX: Double,
+        deltaY: Double,
+        stageSize: (width: Double, height: Double) = (960.0, 540.0)
+    ) {
+        guard deltaX.isFinite, deltaY.isFinite, stageSize.width.isFinite, stageSize.height.isFinite,
+              let idx = elements.firstIndex(where: { $0.id == id }) else { return }
+        var el = elements[idx]
+        let clampedLeftDX = max(-el.x, min(deltaX, el.width - 40.0))
+        let clampedTopDY = max(-el.y, min(deltaY, el.height - 24.0))
+        switch handle {
+        case .topLeft:
+            el.x += clampedLeftDX
+            el.width -= clampedLeftDX
+            el.y += clampedTopDY
+            el.height -= clampedTopDY
+        case .top:
+            el.y += clampedTopDY
+            el.height -= clampedTopDY
+        case .topRight:
+            el.y += clampedTopDY
+            el.height -= clampedTopDY
+            el.width += deltaX
+        case .right:
+            el.width += deltaX
+        case .bottomRight:
+            el.width += deltaX
+            el.height += deltaY
+        case .bottom:
+            el.height += deltaY
+        case .bottomLeft:
+            el.x += clampedLeftDX
+            el.width -= clampedLeftDX
+            el.height += deltaY
+        case .left:
+            el.x += clampedLeftDX
+            el.width -= clampedLeftDX
+        }
+        el.x = max(0.0, min(el.x, max(0.0, stageSize.width - 40.0)))
+        el.y = max(0.0, min(el.y, max(0.0, stageSize.height - 24.0)))
+        el.width = max(40.0, min(el.width, max(40.0, stageSize.width - el.x)))
+        el.height = max(24.0, min(el.height, max(24.0, stageSize.height - el.y)))
+        elements[idx] = el
+    }
+
+    public mutating func rotateElement(id: UUID, toDegrees degrees: Double) {
+        guard degrees.isFinite, let idx = elements.firstIndex(where: { $0.id == id }) else { return }
+        let normalized = ((degrees.truncatingRemainder(dividingBy: 360.0)) + 360.0).truncatingRemainder(dividingBy: 360.0)
+        elements[idx].rotationDegrees = normalized
     }
 }
 
