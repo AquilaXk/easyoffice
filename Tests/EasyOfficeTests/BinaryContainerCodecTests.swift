@@ -841,4 +841,82 @@ final class BinaryContainerCodecTests: XCTestCase {
         XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].width, 600)
         XCTAssertEqual(decodedExternalDeck.slides[0].elements[0].height, 80)
     }
+
+    func testZipCodecsEquationsWatermarkWrapModeColumnWidthsAndSlideRotationAnimationRoundTrip() throws {
+        var doc = OfficeDocumentModel(
+            title: "DTP 수식 및 워터마크 검증",
+            format: .docx,
+            paragraphs: [ParagraphBlock(style: .body, text: "수식과 플로팅 이미지를 포함한 본문입니다.")]
+        )
+        doc.watermarkText = "대외비 (CONFIDENTIAL)"
+        doc.addEquation(title: "에너지 등가식", rawExpression: "E = mc^2 + \\sum_{i=1}^{n} \\alpha_i")
+        doc.images.append(EmbeddedImageAttachment(
+            fileName: "float.png",
+            caption: "우측 어울림 차트",
+            mimeType: "image/png",
+            imageData: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+            widthPt: 180,
+            heightPt: 90,
+            wrapMode: .squareRight
+        ))
+
+        let docxData = try OOXMLContainerCodec.encodeDocument(doc)
+        let decodedDocx = try OOXMLContainerCodec.decodeDocument(from: docxData)
+        XCTAssertEqual(decodedDocx.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedDocx.equations.count, 1)
+        XCTAssertEqual(decodedDocx.equations[0].renderedNotation, "E = mc² + ∑_{i=1}ⁿ αᵢ")
+        XCTAssertEqual(decodedDocx.images.first?.wrapMode, .squareRight)
+
+        let odtData = try ODFContainerCodec.encodeDocument(doc)
+        let decodedOdt = try ODFContainerCodec.decodeDocument(from: odtData)
+        XCTAssertEqual(decodedOdt.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedOdt.equations.count, 1)
+        XCTAssertEqual(decodedOdt.images.first?.wrapMode, .squareRight)
+
+        let hwpxData = try HWPXContainerCodec.encodeDocument(doc)
+        let decodedHwpx = try HWPXContainerCodec.decodeDocument(from: hwpxData)
+        XCTAssertEqual(decodedHwpx.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedHwpx.equations.count, 1)
+        XCTAssertEqual(decodedHwpx.images.first?.wrapMode, .squareRight)
+
+        var sheet = WorksheetModel(name: "레이아웃시트")
+        try sheet.setCell("A1", rawValue: "100")
+        sheet.setColumnWidth(180.0, at: 0)
+        sheet.setRowHeight(44.0, at: 0)
+        let xlsxData = try OOXMLContainerCodec.encodeWorksheet(sheet)
+        let decodedXlsx = try OOXMLContainerCodec.decodeWorksheet(from: xlsxData)
+        XCTAssertEqual(decodedXlsx.columnWidth(at: 0), 180.0)
+        XCTAssertEqual(decodedXlsx.rowHeight(at: 0), 44.0)
+
+        let odsData = try ODFContainerCodec.encodeWorksheet(sheet)
+        let decodedOds = try ODFContainerCodec.decodeWorksheet(from: odsData)
+        XCTAssertEqual(decodedOds.columnWidth(at: 0), 180.0)
+        XCTAssertEqual(decodedOds.rowHeight(at: 0), 44.0)
+
+        var deck = PresentationDeckModel(
+            title: "회전 및 애니메이션 덱",
+            slides: [
+                SlideModel(
+                    title: "슬라이드 1",
+                    elements: [
+                        SlideCanvasElement(
+                            title: "회전 박스",
+                            bodyText: "45도 회전",
+                            x: 120,
+                            y: 90,
+                            width: 240,
+                            height: 100,
+                            rotationDegrees: 45.0,
+                            animation: .zoomIn
+                        )
+                    ]
+                )
+            ]
+        )
+        deck.slides[0].rotateElement(id: deck.slides[0].elements[0].id, toDegrees: 30.0)
+        let pptxData = try OOXMLContainerCodec.encodePresentation(deck)
+        let decodedPptx = try OOXMLContainerCodec.decodePresentation(from: pptxData)
+        XCTAssertEqual(decodedPptx.slides[0].elements[0].rotationDegrees, 30.0)
+        XCTAssertEqual(decodedPptx.slides[0].elements[0].animation, .zoomIn)
+    }
 }

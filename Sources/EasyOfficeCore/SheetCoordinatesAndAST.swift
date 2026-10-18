@@ -508,6 +508,8 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
     public var cellStyles: [PackedCellCoordinate: CellStyle]
     public var sheetComments: [PackedCellCoordinate: String]
     public var mergedRanges: [CellRange]
+    public var columnWidths: [Int: Double]
+    public var rowHeights: [Int: Double]
 
     public init(
         id: UUID = UUID(),
@@ -515,7 +517,9 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
         cellsByCoordinate: [PackedCellCoordinate: String] = [:],
         cellStyles: [PackedCellCoordinate: CellStyle] = [:],
         sheetComments: [PackedCellCoordinate: String] = [:],
-        mergedRanges: [CellRange] = []
+        mergedRanges: [CellRange] = [],
+        columnWidths: [Int: Double] = [:],
+        rowHeights: [Int: Double] = [:]
     ) {
         self.id = id
         self.name = name
@@ -523,6 +527,8 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
         self.cellStyles = cellStyles
         self.sheetComments = sheetComments
         self.mergedRanges = mergedRanges
+        self.columnWidths = columnWidths
+        self.rowHeights = rowHeights
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -532,6 +538,8 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
         case cellStyles
         case sheetComments
         case mergedRanges
+        case columnWidths
+        case rowHeights
     }
 
     public init(from decoder: Decoder) throws {
@@ -542,6 +550,8 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
         self.cellStyles = try container.decodeIfPresent([PackedCellCoordinate: CellStyle].self, forKey: .cellStyles) ?? [:]
         self.sheetComments = try container.decodeIfPresent([PackedCellCoordinate: String].self, forKey: .sheetComments) ?? [:]
         self.mergedRanges = try container.decodeIfPresent([CellRange].self, forKey: .mergedRanges) ?? []
+        self.columnWidths = try container.decodeIfPresent([Int: Double].self, forKey: .columnWidths) ?? [:]
+        self.rowHeights = try container.decodeIfPresent([Int: Double].self, forKey: .rowHeights) ?? [:]
     }
 }
 

@@ -187,15 +187,22 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
 
     /// Splits and updates inline `runs` over `range` within `text` with the specified character attributes.
     public mutating func applyRunFormatting(
-        range: Range<String.Index>,
+        range: Range<String.Index>? = nil,
         isBold: Bool? = nil,
         isItalic: Bool? = nil,
         isUnderlined: Bool? = nil,
         fontSizePt: Double? = nil,
         foregroundHex: String? = nil
     ) {
-        let targetStart = text.distance(from: text.startIndex, to: range.lowerBound)
-        let targetEnd = text.distance(from: text.startIndex, to: range.upperBound)
+        if range == nil {
+            if let isBold { self.isBold = isBold }
+            if let isItalic { self.isItalic = isItalic }
+            if let isUnderlined { self.isUnderlined = isUnderlined }
+            if let fontSizePt { self.fontSizePt = fontSizePt }
+        }
+        let resolvedRange = range ?? (text.startIndex..<text.endIndex)
+        let targetStart = text.distance(from: text.startIndex, to: resolvedRange.lowerBound)
+        let targetEnd = text.distance(from: text.startIndex, to: resolvedRange.upperBound)
         guard targetStart < targetEnd else { return }
 
         let sourceRuns = effectiveRuns
@@ -281,6 +288,25 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
 
         self.runs = coalesced
         self.text = coalesced.map(\.text).joined()
+    }
+
+    public mutating func applyRunFormatting(
+        utf16Range: Range<Int>,
+        isBold: Bool? = nil,
+        isItalic: Bool? = nil,
+        isUnderlined: Bool? = nil,
+        fontSizePt: Double? = nil,
+        foregroundHex: String? = nil
+    ) {
+        let utf16View = text.utf16
+        let clampedLower = max(0, min(utf16Range.lowerBound, utf16View.count))
+        let clampedUpper = max(clampedLower, min(utf16Range.upperBound, utf16View.count))
+        guard clampedLower < clampedUpper else { return }
+        let startIdx = String.Index(utf16Offset: clampedLower, in: text)
+        let endIdx = String.Index(utf16Offset: clampedUpper, in: text)
+        let alignedRange = text.rangeOfComposedCharacterSequences(for: startIdx..<endIdx)
+        guard !alignedRange.isEmpty else { return }
+        applyRunFormatting(range: alignedRange, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, fontSizePt: fontSizePt, foregroundHex: foregroundHex)
     }
 }
 
@@ -549,6 +575,13 @@ public struct TableOfContentsEntry: Sendable, Codable, Equatable {
     }
 }
 
+public enum ImageWrapMode: String, Sendable, Codable, Equatable, CaseIterable {
+    case inline = "글자처럼 취급 (인라인)"
+    case squareLeft = "어울림 (좌측 배치)"
+    case squareRight = "어울림 (우측 배치)"
+    case topAndBottom = "자리 차지 (상하 분리)"
+}
+
 /// Embedded image attachment stored in a document container (`word/media/`, `Pictures/`, `BinData/`).
 public struct EmbeddedImageAttachment: Sendable, Codable, Equatable, Identifiable {
     public let id: UUID
@@ -559,25 +592,65 @@ public struct EmbeddedImageAttachment: Sendable, Codable, Equatable, Identifiabl
     public var widthPt: Double
     public var heightPt: Double
     public var anchorParagraphID: UUID?
+    public var wrapMode: ImageWrapMode
 
     public init(
-        id: UUID = UUID(),
-        fileName: String,
-        caption: String = "",
-        mimeType: String = "image/png",
-        imageData: Data,
-        widthPt: Double = 320.0,
-        heightPt: Double = 200.0,
-        anchorParagraphID: UUID? = nil
+        id: UUID = UUID(), fileName: String, caption: String = "", mimeType: String = "image/png",
+        imageData: Data, widthPt: Double = 320.0, heightPt: Double = 200.0,
+        anchorParagraphID: UUID? = nil, wrapMode: ImageWrapMode = .inline
     ) {
+        self.id = id; self.fileName = fileName; self.caption = caption; self.mimeType = mimeType
+        self.imageData = imageData; self.widthPt = widthPt; self.heightPt = heightPt
+        self.anchorParagraphID = anchorParagraphID; self.wrapMode = wrapMode
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, fileName, caption, mimeType, imageData, widthPt, heightPt, anchorParagraphID, wrapMode
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.fileName = try c.decode(String.self, forKey: .fileName)
+        self.caption = try c.decodeIfPresent(String.self, forKey: .caption) ?? ""
+        self.mimeType = try c.decodeIfPresent(String.self, forKey: .mimeType) ?? "image/png"
+        self.imageData = try c.decodeIfPresent(Data.self, forKey: .imageData) ?? Data()
+        self.widthPt = try c.decodeIfPresent(Double.self, forKey: .widthPt) ?? 320.0
+        self.heightPt = try c.decodeIfPresent(Double.self, forKey: .heightPt) ?? 200.0
+        self.anchorParagraphID = try c.decodeIfPresent(UUID.self, forKey: .anchorParagraphID)
+        self.wrapMode = try c.decodeIfPresent(ImageWrapMode.self, forKey: .wrapMode) ?? .inline
+    }
+}
+
+public struct DocumentEquationBlock: Sendable, Codable, Equatable, Identifiable {
+    public var id: UUID
+    public var displayTitle: String
+    public var rawExpression: String
+
+    public init(id: UUID = UUID(), displayTitle: String = "수식 블록", rawExpression: String) {
         self.id = id
-        self.fileName = fileName
-        self.caption = caption
-        self.mimeType = mimeType
-        self.imageData = imageData
-        self.widthPt = widthPt
-        self.heightPt = heightPt
-        self.anchorParagraphID = anchorParagraphID
+        self.displayTitle = displayTitle
+        self.rawExpression = rawExpression
+    }
+
+    public var renderedNotation: String { Self.formatMathSymbols(rawExpression) }
+
+    public static func formatMathSymbols(_ raw: String) -> String {
+        var s = raw
+        let replacements: [(String, String)] = [
+            ("\\sum", "∑"), ("\\prod", "∏"), ("\\int", "∫"), ("\\sqrt", "√"),
+            ("\\infty", "∞"), ("\\approx", "≈"), ("\\neq", "≠"), ("\\ne", "≠"),
+            ("\\leq", "≤"), ("\\le", "≤"), ("\\geq", "≥"), ("\\ge", "≥"),
+            ("\\pm", "±"), ("\\times", "×"), ("\\div", "÷"), ("\\cdot", "·"),
+            ("\\alpha", "α"), ("\\beta", "β"), ("\\gamma", "γ"), ("\\delta", "δ"),
+            ("\\Delta", "Δ"), ("\\lambda", "λ"), ("\\mu", "μ"), ("\\pi", "π"),
+            ("\\sigma", "σ"), ("\\Sigma", "Σ"), ("\\theta", "θ"), ("\\omega", "ω"),
+            ("^{2}", "²"), ("^{3}", "³"), ("^{n}", "ⁿ"), ("^2", "²"), ("^3", "³"), ("^n", "ⁿ"),
+            ("_{0}", "₀"), ("_{1}", "₁"), ("_{2}", "₂"), ("_{i}", "ᵢ"), ("_{j}", "ⱼ"), ("_{n}", "ₙ"),
+            ("_0", "₀"), ("_1", "₁"), ("_2", "₂"), ("_i", "ᵢ"), ("_j", "ⱼ"), ("_n", "ₙ")
+        ]
+        for (from, to) in replacements { s = s.replacingOccurrences(of: from, with: to) }
+        return s
     }
 }
 
@@ -608,39 +681,81 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
     public var comments: [DocumentCommentThread]
     public var bookmarks: [String: UUID]
     public var images: [EmbeddedImageAttachment]
+    public var equations: [DocumentEquationBlock]
+    public var watermarkText: String?
 
     public init(
-        id: UUID = UUID(),
-        title: String,
-        format: DocumentFormat = .docx,
-        paperSize: PaperSizePreset = .a4,
-        headerText: String = "",
-        footerText: String = "",
-        paragraphs: [ParagraphBlock] = [],
-        tables: [DocumentTableBlock] = [],
-        trackChangesEnabled: Bool = false,
-        sections: [DocumentSectionLayout] = [DocumentSectionLayout()],
-        footnotes: [FootnoteItem] = [],
-        revisions: [TrackedRevision] = [],
-        comments: [DocumentCommentThread] = [],
-        bookmarks: [String: UUID] = [:],
-        images: [EmbeddedImageAttachment] = []
+        id: UUID = UUID(), title: String, format: DocumentFormat = .docx, paperSize: PaperSizePreset = .a4,
+        headerText: String = "", footerText: String = "", paragraphs: [ParagraphBlock] = [],
+        tables: [DocumentTableBlock] = [], trackChangesEnabled: Bool = false,
+        sections: [DocumentSectionLayout] = [DocumentSectionLayout()], footnotes: [FootnoteItem] = [],
+        revisions: [TrackedRevision] = [], comments: [DocumentCommentThread] = [],
+        bookmarks: [String: UUID] = [:], images: [EmbeddedImageAttachment] = [],
+        equations: [DocumentEquationBlock] = [], watermarkText: String? = nil
     ) {
-        self.id = id
-        self.title = title
-        self.format = format
-        self.paperSize = paperSize
-        self.headerText = headerText
-        self.footerText = footerText
-        self.paragraphs = paragraphs
-        self.tables = tables
-        self.trackChangesEnabled = trackChangesEnabled
+        self.id = id; self.title = title; self.format = format; self.paperSize = paperSize
+        self.headerText = headerText; self.footerText = footerText; self.paragraphs = paragraphs
+        self.tables = tables; self.trackChangesEnabled = trackChangesEnabled
         self.sections = sections.isEmpty ? [DocumentSectionLayout(paperSize: paperSize)] : sections
-        self.footnotes = footnotes
-        self.revisions = revisions
-        self.comments = comments
-        self.bookmarks = bookmarks
-        self.images = images
+        self.footnotes = footnotes; self.revisions = revisions; self.comments = comments
+        self.bookmarks = bookmarks; self.images = images; self.equations = equations
+        self.watermarkText = watermarkText
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, format, paperSize, headerText, footerText, paragraphs, tables
+        case trackChangesEnabled, sections, footnotes, revisions, comments, bookmarks, images
+        case equations, watermarkText
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.title = try c.decode(String.self, forKey: .title)
+        self.format = try c.decodeIfPresent(DocumentFormat.self, forKey: .format) ?? .docx
+        let size = try c.decodeIfPresent(PaperSizePreset.self, forKey: .paperSize) ?? .a4
+        self.paperSize = size
+        self.headerText = try c.decodeIfPresent(String.self, forKey: .headerText) ?? ""
+        self.footerText = try c.decodeIfPresent(String.self, forKey: .footerText) ?? ""
+        self.paragraphs = try c.decodeIfPresent([ParagraphBlock].self, forKey: .paragraphs) ?? []
+        self.tables = try c.decodeIfPresent([DocumentTableBlock].self, forKey: .tables) ?? []
+        self.trackChangesEnabled = try c.decodeIfPresent(Bool.self, forKey: .trackChangesEnabled) ?? false
+        let secs = try c.decodeIfPresent([DocumentSectionLayout].self, forKey: .sections) ?? []
+        self.sections = secs.isEmpty ? [DocumentSectionLayout(paperSize: size)] : secs
+        self.footnotes = try c.decodeIfPresent([FootnoteItem].self, forKey: .footnotes) ?? []
+        self.revisions = try c.decodeIfPresent([TrackedRevision].self, forKey: .revisions) ?? []
+        self.comments = try c.decodeIfPresent([DocumentCommentThread].self, forKey: .comments) ?? []
+        self.bookmarks = try c.decodeIfPresent([String: UUID].self, forKey: .bookmarks) ?? [:]
+        self.images = try c.decodeIfPresent([EmbeddedImageAttachment].self, forKey: .images) ?? []
+        self.equations = try c.decodeIfPresent([DocumentEquationBlock].self, forKey: .equations) ?? []
+        self.watermarkText = try c.decodeIfPresent(String.self, forKey: .watermarkText)
+    }
+
+    public mutating func addEquation(title: String = "핵심 수식", rawExpression: String) {
+        let cleaned = rawExpression.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        equations.append(DocumentEquationBlock(displayTitle: title, rawExpression: cleaned))
+    }
+
+    public mutating func updateEquation(id: UUID, title: String, rawExpression: String) {
+        guard let idx = equations.firstIndex(where: { $0.id == id }) else { return }
+        equations[idx].displayTitle = title
+        equations[idx].rawExpression = rawExpression
+    }
+
+    public mutating func removeEquation(id: UUID) {
+        equations.removeAll { $0.id == id }
+    }
+
+    public func searchablePlainText() -> String {
+        var parts: [String] = [title, headerText, footerText]
+        parts.append(contentsOf: paragraphs.map(\.text))
+        parts.append(contentsOf: tables.flatMap { [$0.caption] + $0.rows.flatMap { $0 } })
+        parts.append(contentsOf: equations.map { "\($0.displayTitle) \($0.rawExpression) \($0.renderedNotation)" })
+        if let watermarkText, !watermarkText.isEmpty {
+            parts.append(watermarkText)
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     /// Computes live document metrics across all paragraphs and table cells.

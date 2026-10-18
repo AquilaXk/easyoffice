@@ -643,4 +643,132 @@ final class LegacyAndMarkupCodecTests: XCTestCase {
             "Dec: A가 | Hex: A가 | UnknownLong: &veryLongUnclosedOrCustomEntityNameThatExceeds14Chars; | Named: &<>\"'"
         )
     }
+
+    func testDocumentEquationsImageWrapWatermarkAndUTF16RunSplittingRoundTrip() throws {
+        var para = ParagraphBlock(style: .body, text: "가나다라마바사 아자차카타파하")
+        // Apply formatting over UTF-16 range "다라마" (offset 2..<5)
+        para.applyRunFormatting(
+            utf16Range: 2..<5,
+            isBold: true,
+            isUnderlined: true,
+            fontSizePt: 15.0,
+            foregroundHex: "#5C6BC0"
+        )
+        XCTAssertEqual(para.runs.count, 3)
+        XCTAssertEqual(para.runs[0].text, "가나")
+        XCTAssertFalse(para.runs[0].isBold)
+        XCTAssertEqual(para.runs[1].text, "다라마")
+        XCTAssertTrue(para.runs[1].isBold)
+        XCTAssertTrue(para.runs[1].isUnderlined)
+        XCTAssertEqual(para.runs[1].fontSizePt, 15.0)
+        XCTAssertEqual(para.runs[1].foregroundHex, "#5C6BC0")
+        XCTAssertEqual(para.runs[2].text, "바사 아자차카타파하")
+
+        let wrappedImage = EmbeddedImageAttachment(
+            fileName: "wrap_figure.png",
+            caption: "우측 어울림 배치 그림",
+            imageData: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+            widthPt: 240,
+            heightPt: 160,
+            wrapMode: .squareRight
+        )
+
+        var doc = OfficeDocumentModel(
+            title: "DTP 수식 및 워터마크 검증 문서",
+            format: .hwp,
+            paragraphs: [para],
+            images: [wrappedImage],
+            watermarkText: "대외비 (CONFIDENTIAL)"
+        )
+        doc.addEquation(title: "정규분포 적분", rawExpression: "\\int_0^\\infty e^{-x^2} dx \\approx \\sqrt{\\pi} \\div 2")
+        XCTAssertEqual(doc.equations.count, 1)
+        XCTAssertEqual(doc.equations[0].renderedNotation, "∫₀^∞ e^{-x²} dx ≈ √{π} ÷ 2")
+        XCTAssertTrue(doc.searchablePlainText().contains("대외비 (CONFIDENTIAL)"))
+        XCTAssertTrue(doc.searchablePlainText().contains("∫₀^∞"))
+
+        // 1. HWP 5.0 round-trip
+        let hwpData = try HWP5BinaryCodec.encodeDocument(doc, compressed: true)
+        let decodedHwp = try HWP5BinaryCodec.decodeDocument(from: hwpData)
+        XCTAssertEqual(decodedHwp.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedHwp.equations, doc.equations)
+        XCTAssertEqual(decodedHwp.images.first?.wrapMode, .squareRight)
+        XCTAssertEqual(decodedHwp.paragraphs.first?.runs, para.runs)
+
+        // 2. RTF round-trip
+        let rtfData = RTFCodec.encodeDocument(doc)
+        let decodedRtf = try RTFCodec.decodeDocument(from: rtfData)
+        XCTAssertEqual(decodedRtf.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedRtf.equations, doc.equations)
+        XCTAssertEqual(decodedRtf.images.first?.wrapMode, .squareRight)
+        XCTAssertEqual(decodedRtf.paragraphs.first?.runs, para.runs)
+
+        // 3. CommonMark Markdown round-trip & standalone $$ ... $$ parsing
+        let mdData = CommonMarkCodec.encodeDocument(doc)
+        let mdText = String(decoding: mdData, as: UTF8.self)
+        XCTAssertTrue(mdText.contains("$$ \\int_0^\\infty e^{-x^2} dx \\approx \\sqrt{\\pi} \\div 2 $$"))
+        let decodedMd = try CommonMarkCodec.decodeDocument(from: mdData)
+        XCTAssertEqual(decodedMd.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedMd.equations, doc.equations)
+        XCTAssertEqual(decodedMd.images.first?.wrapMode, .squareRight)
+        XCTAssertEqual(decodedMd.paragraphs.count, 1)
+
+        let rawMathMd = Data("# 수식 노트\n\n$$ \\sum_1^n x_i \\geq \\alpha_0 $$".utf8)
+        let decodedRawMathMd = try CommonMarkCodec.decodeDocument(from: rawMathMd)
+        XCTAssertEqual(decodedRawMathMd.equations.count, 1)
+        XCTAssertEqual(decodedRawMathMd.equations[0].rawExpression, "\\sum_1^n x_i \\geq \\alpha_0")
+        XCTAssertEqual(decodedRawMathMd.equations[0].renderedNotation, "∑₁ⁿ xᵢ ≥ α₀")
+
+        // 4. Slide 8-direction resize handles, rotation normalization, and animation
+        let el = SlideCanvasElement(
+            title: "회전 애니메이션 도형",
+            x: 100,
+            y: 100,
+            width: 200,
+            height: 120,
+            rotationDegrees: 15,
+            animation: .flyInUp
+        )
+        var slide = SlideModel(title: "슬라이드", elements: [el])
+        slide.resizeElement(id: el.id, handle: .topLeft, deltaX: -20, deltaY: -10)
+        XCTAssertEqual(slide.elements[0].x, 80, accuracy: 0.01)
+        XCTAssertEqual(slide.elements[0].y, 90, accuracy: 0.01)
+        XCTAssertEqual(slide.elements[0].width, 220, accuracy: 0.01)
+        XCTAssertEqual(slide.elements[0].height, 130, accuracy: 0.01)
+
+        slide.resizeElement(id: el.id, handle: .bottomRight, deltaX: 30, deltaY: 20)
+        XCTAssertEqual(slide.elements[0].width, 250, accuracy: 0.01)
+        XCTAssertEqual(slide.elements[0].height, 150, accuracy: 0.01)
+
+        slide.rotateElement(id: el.id, toDegrees: -45)
+        XCTAssertEqual(slide.elements[0].rotationDegrees, 315, accuracy: 0.01)
+        XCTAssertEqual(slide.elements[0].animation, .flyInUp)
+
+        // 5. Left/Top handle clamping preserves opposite anchored edge
+        let rightEdgeBefore = slide.elements[0].x + slide.elements[0].width
+        slide.resizeElement(id: el.id, handle: .left, deltaX: 500, deltaY: 0)
+        XCTAssertEqual(slide.elements[0].width, 40, accuracy: 0.01)
+        XCTAssertEqual(slide.elements[0].x + slide.elements[0].width, rightEdgeBefore, accuracy: 0.01)
+
+        // 6. Legacy .doc and .ppt binary round-trip
+        let docBinary = try LegacyOLE2OfficeCodec.encodeWordBinary(doc)
+        let decodedDocBinary = try LegacyOLE2OfficeCodec.decodeWordBinary(from: docBinary)
+        XCTAssertEqual(decodedDocBinary.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedDocBinary.equations, doc.equations)
+        XCTAssertEqual(decodedDocBinary.images.first?.wrapMode, .squareRight)
+
+        let pptDeck = PresentationDeckModel(title: "덱", slides: [slide])
+        let pptBinary = try LegacyOLE2OfficeCodec.encodePowerPointBinary(pptDeck)
+        let decodedPpt = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: pptBinary)
+        XCTAssertEqual(decodedPpt.slides.first?.elements.first?.animation, .flyInUp)
+        XCTAssertEqual(decodedPpt.slides.first?.elements.first?.rotationDegrees ?? 0, 315, accuracy: 0.01)
+
+        // 7. Emoji surrogate pair UTF-16 run splitting & empty range no-op
+        var emojiPara = ParagraphBlock(text: "A📊B")
+        emojiPara.applyRunFormatting(utf16Range: 2..<3, isBold: true)
+        XCTAssertEqual(emojiPara.runs.count, 3)
+        XCTAssertEqual(emojiPara.runs[1].text, "📊")
+        XCTAssertTrue(emojiPara.runs[1].isBold)
+        emojiPara.applyRunFormatting(utf16Range: 1..<1, isItalic: true)
+        XCTAssertFalse(emojiPara.runs[0].isItalic)
+    }
 }
