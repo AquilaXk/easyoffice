@@ -115,7 +115,7 @@ extension WorksheetModel {
         maxRow: Int,
         using preEvaluated: [PackedCellCoordinate: EvaluatedCellValue]? = nil
     ) -> Set<Int> {
-        let clampedMaxRow = max(0, maxRow)
+        let clampedMaxRow = max(0, min(maxRow, min(CellAddress.maxZeroBasedRow, CellRange.maxExpandedCellCount)))
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return Set(0...clampedMaxRow) }
         var result: Set<Int> = [0]
@@ -269,7 +269,8 @@ extension WorksheetModel {
         let isRightward = (srcMinRow == dstMinRow && srcMaxRow == dstMaxRow &&
             dstMinCol >= srcMinCol && dstMinCol <= srcMaxCol + 1 && dstMaxCol > srcMaxCol)
 
-        guard isDownward || isRightward else {
+        let dstCellCount = (dstMaxRow - dstMinRow + 1) * (dstMaxCol - dstMinCol + 1)
+        guard (isDownward || isRightward), dstCellCount <= CellRange.maxExpandedCellCount else {
             throw EasyOfficeError.invalidCellRange("\(sourceRange)->\(targetRange)")
         }
 
@@ -321,7 +322,12 @@ extension WorksheetModel {
             guard !trimmed.hasPrefix("="), let val = Double(trimmed), val.isFinite else { return (false, 0.0, 0.0) }
             nums.append(val)
         }
-        return (true, nums[0], nums[1] - nums[0])
+        let step = nums[1] - nums[0]
+        if nums.count > 2 {
+            let isLinear = (2..<nums.count).allSatisfy { abs((nums[$0] - nums[$0 - 1]) - step) <= 1e-9 }
+            guard isLinear else { return (false, 0.0, 0.0) }
+        }
+        return (true, nums[0], step)
     }
 
     private static func computeAutoFillValue(
@@ -359,10 +365,15 @@ extension WorksheetModel {
         guard let start = lastDigitStart, let end = lastDigitEnd else { return nil }
         let digitStr = String(String.UnicodeScalarView(scalars[start..<end]))
         guard let baseVal = Int(digitStr) else { return nil }
-        let nextVal = max(0, baseVal + delta)
-        let formattedDigits = (digitStr.count > 1 && digitStr.hasPrefix("0"))
-            ? String(format: "%0*d", digitStr.count, nextVal)
-            : String(nextVal)
+        let (sumVal, overflow) = baseVal.addingReportingOverflow(delta)
+        let nextVal = overflow ? (delta >= 0 ? Int.max : 0) : max(0, sumVal)
+        let nextStr = String(nextVal)
+        let formattedDigits: String
+        if digitStr.count > 1 && digitStr.hasPrefix("0") && nextStr.count < digitStr.count {
+            formattedDigits = String(repeating: "0", count: digitStr.count - nextStr.count) + nextStr
+        } else {
+            formattedDigits = nextStr
+        }
         return String(String.UnicodeScalarView(scalars[0..<start])) + formattedDigits + String(String.UnicodeScalarView(scalars[end..<scalars.count]))
     }
 }

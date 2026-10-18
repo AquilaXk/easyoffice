@@ -100,10 +100,32 @@ public struct PDFInkStroke: Sendable, Codable, Equatable, Identifiable {
     ) {
         self.id = id
         self.pageNumber = max(1, pageNumber)
-        self.points = points
+        self.points = points.filter { $0.x.isFinite && $0.y.isFinite }
         self.strokeHex = strokeHex
-        self.lineWidth = max(0.5, min(lineWidth, 12.0))
+        self.lineWidth = lineWidth.isFinite ? max(0.5, min(lineWidth, 12.0)) : 2.2
         self.label = label
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, pageNumber, points, strokeHex, lineWidth, label
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedID = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        let decodedPage = try container.decodeIfPresent(Int.self, forKey: .pageNumber) ?? 1
+        let decodedPoints = try container.decodeIfPresent([PDFInkPoint].self, forKey: .points) ?? []
+        let decodedHex = try container.decodeIfPresent(String.self, forKey: .strokeHex) ?? "#5C6BC0"
+        let decodedWidth = try container.decodeIfPresent(Double.self, forKey: .lineWidth) ?? 2.2
+        let decodedLabel = try container.decodeIfPresent(String.self, forKey: .label) ?? "자유곡선 전자서명"
+        self.init(
+            id: decodedID,
+            pageNumber: decodedPage,
+            points: decodedPoints,
+            strokeHex: decodedHex,
+            lineWidth: decodedWidth,
+            label: decodedLabel
+        )
     }
 }
 

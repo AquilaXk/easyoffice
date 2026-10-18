@@ -342,21 +342,24 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
         deltaY: Double,
         stageSize: (width: Double, height: Double) = (960.0, 540.0)
     ) {
-        guard let idx = elements.firstIndex(where: { $0.id == id }) else { return }
+        guard deltaX.isFinite, deltaY.isFinite, stageSize.width.isFinite, stageSize.height.isFinite,
+              let idx = elements.firstIndex(where: { $0.id == id }) else { return }
         var el = elements[idx]
+        let clampedLeftDX = max(-el.x, min(deltaX, el.width - 40.0))
+        let clampedTopDY = max(-el.y, min(deltaY, el.height - 24.0))
         switch handle {
         case .topLeft:
-            el.x += deltaX
-            el.y += deltaY
-            el.width -= deltaX
-            el.height -= deltaY
+            el.x += clampedLeftDX
+            el.width -= clampedLeftDX
+            el.y += clampedTopDY
+            el.height -= clampedTopDY
         case .top:
-            el.y += deltaY
-            el.height -= deltaY
+            el.y += clampedTopDY
+            el.height -= clampedTopDY
         case .topRight:
-            el.y += deltaY
+            el.y += clampedTopDY
+            el.height -= clampedTopDY
             el.width += deltaX
-            el.height -= deltaY
         case .right:
             el.width += deltaX
         case .bottomRight:
@@ -365,12 +368,12 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
         case .bottom:
             el.height += deltaY
         case .bottomLeft:
-            el.x += deltaX
-            el.width -= deltaX
+            el.x += clampedLeftDX
+            el.width -= clampedLeftDX
             el.height += deltaY
         case .left:
-            el.x += deltaX
-            el.width -= deltaX
+            el.x += clampedLeftDX
+            el.width -= clampedLeftDX
         }
         el.x = max(0.0, min(el.x, max(0.0, stageSize.width - 40.0)))
         el.y = max(0.0, min(el.y, max(0.0, stageSize.height - 24.0)))
@@ -380,7 +383,7 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
     }
 
     public mutating func rotateElement(id: UUID, toDegrees degrees: Double) {
-        guard let idx = elements.firstIndex(where: { $0.id == id }) else { return }
+        guard degrees.isFinite, let idx = elements.firstIndex(where: { $0.id == id }) else { return }
         let normalized = ((degrees.truncatingRemainder(dividingBy: 360.0)) + 360.0).truncatingRemainder(dividingBy: 360.0)
         elements[idx].rotationDegrees = normalized
     }

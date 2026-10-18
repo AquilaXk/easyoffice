@@ -71,7 +71,7 @@ extension XMLDocumentModelMapper {
             let sheetIdx = Int(commentElem.attributes["sheetIdx"] ?? "0") ?? 0
             if sheetIdx == 0 {
                 sheet.sheetComments[addr.packedCoordinate] = text
-            } else if sheetIdx - 1 < sheet.additionalSheets.count {
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
                 sheet.additionalSheets[sheetIdx - 1].sheetComments[addr.packedCoordinate] = text
             }
         }
@@ -83,7 +83,7 @@ extension XMLDocumentModelMapper {
                 if !sheet.mergedRanges.contains(range) {
                     sheet.mergedRanges.append(range)
                 }
-            } else if sheetIdx - 1 < sheet.additionalSheets.count {
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
                 if !sheet.additionalSheets[sheetIdx - 1].mergedRanges.contains(range) {
                     sheet.additionalSheets[sheetIdx - 1].mergedRanges.append(range)
                 }
@@ -91,21 +91,25 @@ extension XMLDocumentModelMapper {
         }
         for colElem in XMLSanitizer.extractElements(named: "eo:colWidth", in: xml) {
             guard let col = Int(colElem.attributes["col"] ?? ""),
-                  let w = Double(colElem.attributes["width"] ?? "") else { continue }
+                  col >= 0, col <= CellAddress.maxZeroBasedColumn,
+                  let w = Double(colElem.attributes["width"] ?? ""),
+                  w.isFinite else { continue }
             let sheetIdx = Int(colElem.attributes["sheetIdx"] ?? "0") ?? 0
             if sheetIdx == 0 {
                 sheet.setColumnWidth(w, at: col)
-            } else if sheetIdx - 1 < sheet.additionalSheets.count {
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
                 sheet.additionalSheets[sheetIdx - 1].columnWidths[col] = max(48.0, min(w, 420.0))
             }
         }
         for rowElem in XMLSanitizer.extractElements(named: "eo:rowHeight", in: xml) {
             guard let row = Int(rowElem.attributes["row"] ?? ""),
-                  let h = Double(rowElem.attributes["height"] ?? "") else { continue }
+                  row >= 0, row <= CellAddress.maxZeroBasedRow,
+                  let h = Double(rowElem.attributes["height"] ?? ""),
+                  h.isFinite else { continue }
             let sheetIdx = Int(rowElem.attributes["sheetIdx"] ?? "0") ?? 0
             if sheetIdx == 0 {
                 sheet.setRowHeight(h, at: row)
-            } else if sheetIdx - 1 < sheet.additionalSheets.count {
+            } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
                 sheet.additionalSheets[sheetIdx - 1].rowHeights[row] = max(22.0, min(h, 180.0))
             }
         }

@@ -301,13 +301,12 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
         let utf16View = text.utf16
         let clampedLower = max(0, min(utf16Range.lowerBound, utf16View.count))
         let clampedUpper = max(clampedLower, min(utf16Range.upperBound, utf16View.count))
-        guard clampedLower < clampedUpper else {
-            applyRunFormatting(range: nil, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, fontSizePt: fontSizePt, foregroundHex: foregroundHex)
-            return
-        }
+        guard clampedLower < clampedUpper else { return }
         let startIdx = String.Index(utf16Offset: clampedLower, in: text)
         let endIdx = String.Index(utf16Offset: clampedUpper, in: text)
-        applyRunFormatting(range: startIdx..<endIdx, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, fontSizePt: fontSizePt, foregroundHex: foregroundHex)
+        let alignedRange = text.rangeOfComposedCharacterSequences(for: startIdx..<endIdx)
+        guard !alignedRange.isEmpty else { return }
+        applyRunFormatting(range: alignedRange, isBold: isBold, isItalic: isItalic, isUnderlined: isUnderlined, fontSizePt: fontSizePt, foregroundHex: foregroundHex)
     }
 }
 

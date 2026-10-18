@@ -33,8 +33,16 @@ private struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
         sheet.trackChangesEnabled = trackChangesEnabled
         if !additionalSheets.isEmpty { sheet.additionalSheets = additionalSheets }
         sheet.activeSheetIndex = activeSheetIndex
-        if let columnWidths, !columnWidths.isEmpty { sheet.columnWidths = columnWidths }
-        if let rowHeights, !rowHeights.isEmpty { sheet.rowHeights = rowHeights }
+        if let columnWidths {
+            for (col, w) in columnWidths where w.isFinite {
+                sheet.setColumnWidth(w, at: col)
+            }
+        }
+        if let rowHeights {
+            for (row, h) in rowHeights where h.isFinite {
+                sheet.setRowHeight(h, at: row)
+            }
+        }
     }
 }
 
@@ -597,6 +605,7 @@ public enum LegacyOLE2OfficeCodec {
                 if el.isItalic { styleMask |= 0x02 }
                 if el.isUnderlined { styleMask |= 0x04 }
                 elPayload.append(styleMask)
+                BitPacking.appendLengthPrefixedUTF16LE(el.animation.rawValue, to: &elPayload)
                 appendPPTAtom(verAndInstance: 0x0040, recType: pptRecordTextCharsAtom, payload: elPayload, to: &slideChildren)
             }
 
@@ -715,6 +724,13 @@ public enum LegacyOLE2OfficeCodec {
                                 isBold = (styleMask & 0x01) != 0
                                 isItalic = (styleMask & 0x02) != 0
                                 isUnderlined = (styleMask & 0x04) != 0
+                                elCursor += 1
+                            }
+                            var animation: SlideElementAnimation = .none
+                            if elCursor + 4 <= sAtomEnd,
+                               let animRaw = try? BitPacking.readLengthPrefixedUTF16LE(from: pptStream, offset: &elCursor, limit: sAtomEnd),
+                               let parsedAnim = SlideElementAnimation(rawValue: animRaw) {
+                                animation = parsedAnim
                             }
                             sElements.append(SlideCanvasElement(
                                 title: elTitle,
@@ -726,6 +742,7 @@ public enum LegacyOLE2OfficeCodec {
                                 kind: SlideElementKind(rawValue: kindRaw) ?? .textBox,
                                 zIndex: zIdx,
                                 rotationDegrees: rot,
+                                animation: animation,
                                 fillHex: fillHex,
                                 strokeHex: strokeHex,
                                 isBold: isBold,

@@ -742,5 +742,33 @@ final class LegacyAndMarkupCodecTests: XCTestCase {
         slide.rotateElement(id: el.id, toDegrees: -45)
         XCTAssertEqual(slide.elements[0].rotationDegrees, 315, accuracy: 0.01)
         XCTAssertEqual(slide.elements[0].animation, .flyInUp)
+
+        // 5. Left/Top handle clamping preserves opposite anchored edge
+        let rightEdgeBefore = slide.elements[0].x + slide.elements[0].width
+        slide.resizeElement(id: el.id, handle: .left, deltaX: 500, deltaY: 0)
+        XCTAssertEqual(slide.elements[0].width, 40, accuracy: 0.01)
+        XCTAssertEqual(slide.elements[0].x + slide.elements[0].width, rightEdgeBefore, accuracy: 0.01)
+
+        // 6. Legacy .doc and .ppt binary round-trip
+        let docBinary = try LegacyOLE2OfficeCodec.encodeWordBinary(doc)
+        let decodedDocBinary = try LegacyOLE2OfficeCodec.decodeWordBinary(from: docBinary)
+        XCTAssertEqual(decodedDocBinary.watermarkText, "대외비 (CONFIDENTIAL)")
+        XCTAssertEqual(decodedDocBinary.equations, doc.equations)
+        XCTAssertEqual(decodedDocBinary.images.first?.wrapMode, .squareRight)
+
+        let pptDeck = PresentationDeckModel(title: "덱", slides: [slide])
+        let pptBinary = try LegacyOLE2OfficeCodec.encodePowerPointBinary(pptDeck)
+        let decodedPpt = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: pptBinary)
+        XCTAssertEqual(decodedPpt.slides.first?.elements.first?.animation, .flyInUp)
+        XCTAssertEqual(decodedPpt.slides.first?.elements.first?.rotationDegrees ?? 0, 315, accuracy: 0.01)
+
+        // 7. Emoji surrogate pair UTF-16 run splitting & empty range no-op
+        var emojiPara = ParagraphBlock(text: "A📊B")
+        emojiPara.applyRunFormatting(utf16Range: 2..<3, isBold: true)
+        XCTAssertEqual(emojiPara.runs.count, 3)
+        XCTAssertEqual(emojiPara.runs[1].text, "📊")
+        XCTAssertTrue(emojiPara.runs[1].isBold)
+        emojiPara.applyRunFormatting(utf16Range: 1..<1, isItalic: true)
+        XCTAssertFalse(emojiPara.runs[0].isItalic)
     }
 }
