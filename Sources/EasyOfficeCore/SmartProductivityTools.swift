@@ -1,186 +1,7 @@
 import Foundation
 
-// MARK: - Deterministic ISO 32000-1 PDF Binary Serializer
-
-/// Deterministic ISO 32000-1 (`%PDF-1.7`) binary serializer and parser preserving pages, rotations, extracted text, annotations, and outlines.
-public enum PDFBinarySerializer {
-    private static let modelStreamPrefix = "%EasyOfficePDFModelBase64:"
-
-    public static func encode(_ pdf: PDFStudioDocumentModel) -> Data {
-        var lines: [String] = []
-        lines.append("%PDF-1.7")
-        lines.append("%\u{00E2}\u{00E3}\u{00CF}\u{00D3}")
-
-        let pageCount = pdf.pages.count
-        let pageObjectNumbers = (0..<pageCount).map { 3 + ($0 * 2) }
-        let kidsRefs = pageObjectNumbers.map { "\($0) 0 R" }.joined(separator: " ")
-
-        lines.append("1 0 obj")
-        lines.append("<< /Type /Catalog /Pages 2 0 R /Title (\(escapePDFString(pdf.title))) /Redacted \(pdf.isRedacted ? "true" : "false") >>")
-        lines.append("endobj")
-
-        lines.append("2 0 obj")
-        lines.append("<< /Type /Pages /Count \(pageCount) /Kids [\(kidsRefs)] >>")
-        lines.append("endobj")
-
-        for (idx, page) in pdf.pages.enumerated() {
-            let pageObjNum = 3 + (idx * 2)
-            let contentObjNum = pageObjNum + 1
-            let escapedText = escapePDFString(page.extractedText)
-            let streamBody = "BT /F1 11 Tf 56 780 Td (\(escapedText)) Tj ET"
-            let streamByteCount = streamBody.utf8.count
-
-            lines.append("\(pageObjNum) 0 obj")
-            lines.append("<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Contents \(contentObjNum) 0 R >>")
-            lines.append("endobj")
-
-            lines.append("\(contentObjNum) 0 obj")
-            lines.append("<< /Length \(streamByteCount) >>")
-            lines.append("stream")
-            lines.append(streamBody)
-            lines.append("endstream")
-            lines.append("endobj")
-        }
-
-        let metadataObjNum = 3 + (pageCount * 2)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        if let jsonBytes = try? encoder.encode(pdf) {
-            let b64 = jsonBytes.base64EncodedString()
-            lines.append("\(metadataObjNum) 0 obj")
-            lines.append("<< /Type /Metadata /Subtype /EasyOfficeStudio /Length \(b64.utf8.count) >>")
-            lines.append("stream")
-            lines.append("\(modelStreamPrefix)\(b64)")
-            lines.append("endstream")
-            lines.append("endobj")
-        }
-
-        let totalObjects = metadataObjNum + 1
-        lines.append("xref")
-        lines.append("0 \(totalObjects)")
-        lines.append("0000000000 65535 f ")
-        for objIdx in 1..<totalObjects {
-            lines.append(String(format: "%010d 00000 n ", objIdx * 64))
-        }
-        lines.append("trailer")
-        lines.append("<< /Size \(totalObjects) /Root 1 0 R >>")
-        lines.append("startxref")
-        lines.append("0")
-        lines.append("%%EOF")
-
-        return Data(lines.joined(separator: "\n").utf8)
-    }
-
-    public static func decode(from data: Data) throws -> PDFStudioDocumentModel {
-        let verified = try FormatDetector.verify(data: data, fileName: "document.pdf")
-        guard verified.format == .pdf else {
-            throw EasyOfficeError.signatureMismatch(expected: .pdfBinary, fileName: "document.pdf")
-        }
-
-        let rawText = String(decoding: data, as: UTF8.self)
-        guard rawText.contains("obj") && rawText.contains("%%EOF") else {
-            throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 객체(obj) 또는 %%EOF 트레일러가 없습니다.")
-        }
-
-        let lines = rawText.components(separatedBy: .newlines)
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix(modelStreamPrefix) {
-                let b64 = String(trimmed.dropFirst(modelStreamPrefix.count))
-                guard let decodedBytes = Data(base64Encoded: b64) else {
-                    throw EasyOfficeError.corruptedContainer(detail: "PDF 메타데이터 스트림 Base64 디코딩에 실패했습니다.")
-                }
-                do {
-                    return try JSONDecoder().decode(PDFStudioDocumentModel.self, from: decodedBytes)
-                } catch {
-                    throw EasyOfficeError.corruptedContainer(detail: "PDF 모델 역직렬화 실패: \(error.localizedDescription)")
-                }
-            }
-            if trimmed.contains("/Encrypt") {
-                throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
-            }
-        }
-
-        // Fallback parser for standard minimal PDF streams without embedded studio metadata
-        var pages: [PDFPageDescriptor] = []
-        var sawPageObject = false
-        var currentRotate = 0
-        for line in lines {
-            if line.contains("/Type /Page") && !line.contains("/Type /Pages") {
-                sawPageObject = true
-            }
-            if let rotRange = line.range(of: "/Rotate ") {
-                let after = line[rotRange.upperBound...]
-                let digits = after.prefix(while: { $0.isNumber || $0 == "-" })
-                currentRotate = Int(digits) ?? 0
-            }
-            if line.hasPrefix("BT "),
-               let openParen = line.firstIndex(of: "("),
-               let closeParen = line.lastIndex(of: ")"),
-               openParen < closeParen {
-                let inner = String(line[line.index(after: openParen)..<closeParen])
-                let unescaped = unescapePDFString(inner)
-                pages.append(
-                    PDFPageDescriptor(
-                        pageNumber: pages.count + 1,
-                        rotationDegrees: currentRotate,
-                        extractedText: unescaped
-                    )
-                )
-                currentRotate = 0
-            }
-        }
-
-        if pages.isEmpty {
-            guard sawPageObject else {
-                throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 페이지(/Type /Page) 객체가 없습니다.")
-            }
-            pages.append(PDFPageDescriptor(pageNumber: 1, rotationDegrees: currentRotate, extractedText: ""))
-        }
-        return PDFStudioDocumentModel(title: "PDF 문서", pages: pages)
-    }
-
-    private static func escapePDFString(_ input: String) -> String {
-        input
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "(", with: "\\(")
-            .replacingOccurrences(of: ")", with: "\\)")
-            .replacingOccurrences(of: "\r", with: "\\r")
-            .replacingOccurrences(of: "\n", with: "\\n")
-    }
-
-    private static func unescapePDFString(_ input: String) -> String {
-        var result = ""
-        result.reserveCapacity(input.count)
-        var index = input.startIndex
-        while index < input.endIndex {
-            let ch = input[index]
-            if ch == "\\" {
-                let nextIndex = input.index(after: index)
-                guard nextIndex < input.endIndex else {
-                    result.append("\\")
-                    break
-                }
-                let escaped = input[nextIndex]
-                switch escaped {
-                case "n": result.append("\n")
-                case "r": result.append("\r")
-                case "(": result.append("(")
-                case ")": result.append(")")
-                case "\\": result.append("\\")
-                default: result.append(escaped)
-                }
-                index = input.index(after: nextIndex)
-            } else {
-                result.append(ch)
-                index = input.index(after: index)
-            }
-        }
-        return result
-    }
-}
-
 // MARK: - A. Bidirectional Format Conversion Studio
+
 
 /// Single format conversion request across any supported office module.
 public struct ConversionJobRequest: Sendable, Equatable, Identifiable {
@@ -502,12 +323,11 @@ public enum DocumentConversionOrchestrator {
     private static func extractGridRows(from sheet: WorksheetModel) -> [[String]] {
         var maxRow = -1
         var maxCol = -1
-        for key in sheet.rawCells.keys {
-            if let addr = try? CellAddress(a1Notation: key),
-               addr.row < CSVStateMachineCodec.maxExportRows,
-               addr.column < CSVStateMachineCodec.maxExportColumns {
-                maxRow = max(maxRow, addr.row)
-                maxCol = max(maxCol, addr.column)
+        for coord in sheet.cellsByCoordinate.keys {
+            if coord.row < CSVStateMachineCodec.maxExportRows,
+               coord.column < CSVStateMachineCodec.maxExportColumns {
+                maxRow = max(maxRow, coord.row)
+                maxCol = max(maxCol, coord.column)
             }
         }
         guard maxRow >= 0, maxCol >= 0 else { return [] }
@@ -528,11 +348,9 @@ public enum DocumentConversionOrchestrator {
     private static func boundingRange(for sheet: WorksheetModel) -> CellRange {
         var maxRow = 0
         var maxCol = 0
-        for key in sheet.rawCells.keys {
-            if let addr = try? CellAddress(a1Notation: key) {
-                maxRow = max(maxRow, min(addr.row, 200))
-                maxCol = max(maxCol, min(addr.column, 50))
-            }
+        for coord in sheet.cellsByCoordinate.keys {
+            maxRow = max(maxRow, min(coord.row, 200))
+            maxCol = max(maxCol, min(coord.column, 50))
         }
         let start = (try? CellAddress(column: 0, row: 0)) ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
         let end = (try? CellAddress(column: maxCol, row: maxRow)) ?? start
@@ -549,8 +367,10 @@ public enum DocumentConversionOrchestrator {
             return try ODFContainerCodec.encodeDocument(doc)
         case .hwpx, .hwtx:
             return try HWPXContainerCodec.encodeDocument(doc)
-        case .hwp, .hwt, .doc:
+        case .hwp, .hwt:
             return try HWP5BinaryCodec.encodeDocument(doc)
+        case .doc:
+            return try LegacyOLE2OfficeCodec.encodeWordBinary(doc)
         case .rtf:
             return RTFCodec.encodeDocument(doc)
         case .md:
@@ -588,10 +408,7 @@ public enum DocumentConversionOrchestrator {
         case .tsv:
             return CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: "\t")
         case .xls:
-            let tsvPayload = CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: "\t")
-            return try OLE2ContainerCodec.pack(streams: [
-                OLE2StreamEntry(name: "Workbook", data: tsvPayload)
-            ])
+            return try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(sheet)
         default:
             throw EasyOfficeError.unsupportedExtension(format.rawValue)
         }
@@ -604,10 +421,7 @@ public enum DocumentConversionOrchestrator {
         case .odp:
             return try ODFContainerCodec.encodePresentation(deck)
         case .ppt:
-            let xmlZip = try OOXMLContainerCodec.encodePresentation(deck)
-            return try OLE2ContainerCodec.pack(streams: [
-                OLE2StreamEntry(name: "PowerPoint Document", data: xmlZip)
-            ])
+            return try LegacyOLE2OfficeCodec.encodePowerPointBinary(deck)
         default:
             throw EasyOfficeError.unsupportedExtension(format.rawValue)
         }
@@ -754,6 +568,23 @@ public struct DocumentDiffReport: Sendable, Codable, Equatable {
 /// 100% offline, deterministic local smart assistant for summarization, writing refinement, entity extraction, sheet insights, and LCS document comparison.
 public enum LocalSmartDocumentAssistant {
     public static let maxDiffParagraphCount = 2_048
+
+    private static let dateRegex = try! NSRegularExpression(
+        pattern: #"(\d{4}-\d{2}-\d{2}|\d{4}년|\d{1,2}월\s*\d{1,2}일|마감|기한|까지\s*완료)"#,
+        options: [.caseInsensitive]
+    )
+    private static let budgetRegex = try! NSRegularExpression(
+        pattern: #"(\d[\d,]*\s*(원|만원|억원|조원|달러|USD|KRW)|예산|비용\s*편성)"#,
+        options: [.caseInsensitive]
+    )
+    private static let metricRegex = try! NSRegularExpression(
+        pattern: #"\d+(\.\d+)?\s*(%|배|건|명|ms|MB|GB|TB|초|페이지)"#,
+        options: [.caseInsensitive]
+    )
+    private static let actionRegex = try! NSRegularExpression(
+        pattern: #"(조치\s*항목|TODO|Action|제출\s*바람|확인\s*필요|검토\s*요망|필수\s*조치|회신\s*바람)"#,
+        options: [.caseInsensitive]
+    )
 
     private static let stopwords: Set<String> = [
         "및", "등", "수", "것", "이", "그", "저", "를", "을", "은", "는", "이", "가",
@@ -915,9 +746,7 @@ public enum LocalSmartDocumentAssistant {
                 } else if splitRewrite.contains("고, ") {
                     splitRewrite = splitRewrite.replacingOccurrences(of: "고, ", with: "습니다. ")
                 } else {
-                    let midOffset = text.count / 2
-                    let midIndex = text.index(text.startIndex, offsetBy: midOffset)
-                    splitRewrite = String(text[..<midIndex]) + ". " + String(text[midIndex...])
+                    splitRewrite = splitLongSentenceAtWordBoundary(text)
                 }
                 suggestions.append(
                     WritingRefinementSuggestion(
@@ -985,7 +814,7 @@ public enum LocalSmartDocumentAssistant {
             guard !text.isEmpty else { continue }
 
             // Category 1: 일정/기한
-            if matchesRegex(in: text, pattern: #"(\d{4}-\d{2}-\d{2}|\d{4}년|\d{1,2}월\s*\d{1,2}일|마감|기한|까지\s*완료)"#) {
+            if matchesRegex(dateRegex, in: text) {
                 results.append(
                     ExtractedActionItem(
                         sourceParagraphID: paragraph.id,
@@ -996,7 +825,7 @@ public enum LocalSmartDocumentAssistant {
             }
 
             // Category 2: 예산/금액
-            if matchesRegex(in: text, pattern: #"(\d[\d,]*\s*(원|만원|억원|조원|달러|USD|KRW)|예산|비용\s*편성)"#) {
+            if matchesRegex(budgetRegex, in: text) {
                 results.append(
                     ExtractedActionItem(
                         sourceParagraphID: paragraph.id,
@@ -1007,7 +836,7 @@ public enum LocalSmartDocumentAssistant {
             }
 
             // Category 3: 핵심 수치
-            if matchesRegex(in: text, pattern: #"\d+(\.\d+)?\s*(%|배|건|명|ms|MB|GB|TB|초|페이지)"#) {
+            if matchesRegex(metricRegex, in: text) {
                 results.append(
                     ExtractedActionItem(
                         sourceParagraphID: paragraph.id,
@@ -1018,7 +847,7 @@ public enum LocalSmartDocumentAssistant {
             }
 
             // Category 4: 조치 항목
-            if matchesRegex(in: text, pattern: #"(조치\s*항목|TODO|Action|제출\s*바람|확인\s*필요|검토\s*요망|필수\s*조치|회신\s*바람)"#) {
+            if matchesRegex(actionRegex, in: text) {
                 results.append(
                     ExtractedActionItem(
                         sourceParagraphID: paragraph.id,
@@ -1120,15 +949,18 @@ public enum LocalSmartDocumentAssistant {
         let m = baseTexts.count
         let n = revTexts.count
 
-        // Build DP matrix of size (m + 1) x (n + 1)
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+        // Build contiguous 1D DP matrix of size (m + 1) * (n + 1)
+        let strideWidth = n + 1
+        var dp = [Int32](repeating: 0, count: (m + 1) * strideWidth)
         if m > 0 && n > 0 {
             for i in stride(from: m - 1, through: 0, by: -1) {
+                let rowOffset = i * strideWidth
+                let nextRowOffset = (i + 1) * strideWidth
                 for j in stride(from: n - 1, through: 0, by: -1) {
                     if baseTexts[i] == revTexts[j] {
-                        dp[i][j] = 1 + dp[i + 1][j + 1]
+                        dp[rowOffset + j] = 1 + dp[nextRowOffset + j + 1]
                     } else {
-                        dp[i][j] = max(dp[i + 1][j], dp[i][j + 1])
+                        dp[rowOffset + j] = max(dp[nextRowOffset + j], dp[rowOffset + j + 1])
                     }
                 }
             }
@@ -1148,7 +980,7 @@ public enum LocalSmartDocumentAssistant {
                 rawOps.append(.unchanged(baseTexts[i]))
                 i += 1
                 j += 1
-            } else if dp[i + 1][j] >= dp[i][j + 1] {
+            } else if dp[(i + 1) * strideWidth + j] >= dp[i * strideWidth + j + 1] {
                 rawOps.append(.removed(baseTexts[i]))
                 i += 1
             } else {
@@ -1240,6 +1072,36 @@ public enum LocalSmartDocumentAssistant {
 
     // MARK: Private Helpers
 
+    private static func splitLongSentenceAtWordBoundary(_ text: String) -> String {
+        let chars = Array(text)
+        guard chars.count >= 2 else { return text }
+        let mid = chars.count / 2
+
+        // Find the whitespace index closest to the midpoint
+        var bestSpaceOffset: Int? = nil
+        for delta in 0...mid {
+            let left = mid - delta
+            if left > 0 && left < chars.count - 1 && chars[left] == " " {
+                bestSpaceOffset = left
+                break
+            }
+            let right = mid + delta
+            if right > 0 && right < chars.count - 1 && chars[right] == " " {
+                bestSpaceOffset = right
+                break
+            }
+        }
+
+        if let splitAt = bestSpaceOffset {
+            let firstPart = String(chars[0..<splitAt]).trimmingCharacters(in: .whitespaces)
+            let secondPart = String(chars[(splitAt + 1)...]).trimmingCharacters(in: .whitespaces)
+            return "\(firstPart). \(secondPart)"
+        }
+
+        let midIndex = text.index(text.startIndex, offsetBy: mid)
+        return String(text[..<midIndex]) + ". " + String(text[midIndex...])
+    }
+
     private static func tokenizeWords(in text: String) -> [String] {
         let components = text.components(separatedBy: CharacterSet.alphanumerics.inverted)
         var tokens: [String] = []
@@ -1259,10 +1121,7 @@ public enum LocalSmartDocumentAssistant {
         return tokens
     }
 
-    private static func matchesRegex(in text: String, pattern: String) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return false
-        }
+    private static func matchesRegex(_ regex: NSRegularExpression, in text: String) -> Bool {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.firstMatch(in: text, options: [], range: range) != nil
     }
@@ -1357,6 +1216,12 @@ public enum DocumentSecurityAuditor {
             verified = try FormatDetector.verify(data: data, fileName: fileName)
         } catch {
             isSignatureValid = false
+            if let officeError = error as? EasyOfficeError, case .corruptedContainer = officeError {
+                isSafeFromBombAndTraversal = false
+            }
+            if (try? XMLSanitizer.validateSafeXMLBytes(data)) == nil {
+                isSafeFromXXE = false
+            }
             let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             issues.append(desc)
             return SecurityAuditReport(
@@ -1380,17 +1245,16 @@ public enum DocumentSecurityAuditor {
                     let isXMLPayload = lowerPath.hasSuffix(".xml")
                         || lowerPath.hasSuffix(".rels")
                         || lowerPath.hasSuffix(".hpf")
-                    if isXMLPayload, String(data: entry.data, encoding: .utf8) == nil {
-                        isSafeFromBombAndTraversal = false
-                        issues.append("ZIP 내부 XML 엔트리가 유효한 UTF-8이 아닙니다: \(entry.path)")
-                    }
-                    let lossyText = String(decoding: entry.data, as: UTF8.self)
                     do {
-                        try XMLSanitizer.validateSafeXML(lossyText)
+                        try XMLSanitizer.validateSafeXMLBytes(entry.data)
                     } catch {
                         isSafeFromXXE = false
                         let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                         issues.append(desc)
+                    }
+                    if isXMLPayload, String(data: entry.data, encoding: .utf8) == nil {
+                        isSafeFromBombAndTraversal = false
+                        issues.append("ZIP 내부 XML 엔트리가 유효한 UTF-8이 아닙니다: \(entry.path)")
                     }
                 }
             } catch let error as EasyOfficeError {
@@ -1432,7 +1296,20 @@ public enum DocumentSecurityAuditor {
                         let err = EasyOfficeError.encryptedDocumentUnsupported(format: verified.format)
                         issues.append(err.errorDescription ?? "암호화된 문서입니다.")
                     }
+                } else if verified.format == .doc {
+                    _ = try LegacyOLE2OfficeCodec.decodeWordBinary(from: data)
+                } else if verified.format == .xls {
+                    _ = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: data)
+                } else if verified.format == .ppt {
+                    _ = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: data)
                 }
+            } catch let error as EasyOfficeError {
+                if case .encryptedDocumentUnsupported = error {
+                    isUnencrypted = false
+                } else {
+                    isSafeFromBombAndTraversal = false
+                }
+                issues.append(error.errorDescription ?? error.localizedDescription)
             } catch {
                 isSafeFromBombAndTraversal = false
                 let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -1452,17 +1329,16 @@ public enum DocumentSecurityAuditor {
             }
 
         case .rtfText, .plainText:
-            if String(data: data, encoding: .utf8) == nil || data.contains(0x00) {
-                isSafeFromBombAndTraversal = false
-                issues.append("텍스트/RTF 컨테이너에 유효하지 않은 UTF-8 또는 NUL 바이트가 포함되어 있습니다.")
-            }
-            let lossyText = String(decoding: data, as: UTF8.self)
             do {
-                try XMLSanitizer.validateSafeXML(lossyText)
+                try XMLSanitizer.validateSafeXMLBytes(data)
             } catch {
                 isSafeFromXXE = false
                 let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 issues.append(desc)
+            }
+            if String(data: data, encoding: .utf8) == nil || data.contains(0x00) {
+                isSafeFromBombAndTraversal = false
+                issues.append("텍스트/RTF 컨테이너에 유효하지 않은 UTF-8 또는 NUL 바이트가 포함되어 있습니다.")
             }
         }
 
@@ -1484,3 +1360,4 @@ public enum DocumentSecurityAuditor {
         )
     }
 }
+

@@ -1,7 +1,42 @@
 import SwiftUI
+import AppKit
 import Observation
 import EasyOfficeDesignSystem
 import EasyOfficeCore
+
+/// Native macOS file dialog presenter for opening and saving office documents.
+@MainActor
+public enum WorkspaceFileDialogPresenter {
+    public static func presentOpenPanel(viewModel: WorkspaceViewModel) {
+        let panel = NSOpenPanel()
+        panel.title = "문서 파일 열기"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                _ = try viewModel.loadFromDisk(url: url)
+            } catch {
+                viewModel.lastErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    public static func presentSavePanel(viewModel: WorkspaceViewModel) {
+        guard let activeTab = viewModel.activeTab else { return }
+        let panel = NSSavePanel()
+        panel.title = "현재 문서 저장"
+        panel.nameFieldStringValue = activeTab.fileName
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try viewModel.saveTabToDisk(id: activeTab.id, to: url)
+            } catch {
+                viewModel.lastErrorMessage = error.localizedDescription
+            }
+        }
+    }
+}
 
 public struct MainWorkspaceWindowView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -100,6 +135,49 @@ struct TopDocumentTabStripView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+
+            HStack(spacing: 4) {
+                Button {
+                    WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
+                } label: {
+                    Label("열기", systemImage: "folder")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button {
+                    WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
+                } label: {
+                    Label("저장", systemImage: "square.and.arrow.down")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(viewModel.activeTab == nil)
+
+                Button {
+                    viewModel.undo()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!viewModel.canUndo)
+                .help("실행 취소 (⌘Z)")
+
+                Button {
+                    viewModel.redo()
+                } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!viewModel.canRedo)
+                .help("다시 실행 (⇧⌘Z)")
+            }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -300,7 +378,7 @@ struct ContextRibbonBarView: View {
                 HStack(spacing: 8) {
                     ForEach(commands) { command in
                         Button {
-                            handleRibbonCommand(command)
+                            viewModel.executeRibbonCommand(command.id)
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: command.symbolName)
@@ -332,26 +410,6 @@ struct ContextRibbonBarView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
         .background(palette.cardSurface.swiftUIColor)
-    }
-
-    private func handleRibbonCommand(_ command: RibbonCommandDescriptor) {
-        if command.id.hasSuffix("-view-ribbon") {
-            viewModel.isRibbonCollapsed.toggle()
-        } else if command.id.hasSuffix("-view-zoom") {
-            viewModel.setZoom(100.0)
-        } else if command.id.hasSuffix("-view-split") {
-            if viewModel.splitSecondaryTab != nil {
-                viewModel.enableSplitView(secondaryTabID: nil)
-            } else if let candidate = viewModel.openTabs.first(where: { $0.id != viewModel.activeTabID }) {
-                viewModel.enableSplitView(secondaryTabID: candidate.id)
-            }
-        } else if command.id.hasSuffix("-view-theme") {
-            viewModel.themeMode = (viewModel.themeMode == .darkIndigo) ? .lightLavender : .darkIndigo
-        } else if command.id == "pdf-mod-rotate" {
-            viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
-        } else if command.id == "slide-mod-presenter" {
-            viewModel.isPresenterModeActive.toggle()
-        }
     }
 }
 
@@ -406,6 +464,12 @@ struct HomeHubWorkspaceView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    if viewModel.activeHubSection == .converter {
+                        BatchConversionStudioHubView(viewModel: viewModel)
+                    } else if viewModel.activeHubSection == .smartAssistant {
+                        SmartDocumentAssistantHubView(viewModel: viewModel)
+                    }
+
                     Text("새 문서 시작하기")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -486,7 +550,7 @@ struct HomeHubWorkspaceView: View {
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .onTapGesture {
-                                viewModel.openNewSampleTab(for: tpl.moduleKind)
+                                viewModel.openTab(from: tpl)
                             }
                         }
                     }
@@ -530,6 +594,243 @@ struct HomeHubWorkspaceView: View {
     }
 }
 
+struct BatchConversionStudioHubView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Bindable var viewModel: WorkspaceViewModel
+
+    var body: some View {
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("포맷 일괄 변환 스튜디오 (Fail-Closed 컨테이너 검증)", systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+                Spacer()
+                Picker("목표 포맷", selection: $viewModel.batchTargetFormat) {
+                    ForEach([DocumentFormat.pdf, .docx, .hwpx, .odt, .xlsx, .csv, .md], id: \.rawValue) { fmt in
+                        Text(fmt.rawValue.uppercased()).tag(fmt)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 140)
+
+                Button("열린 탭 전체 일괄 변환 실행") {
+                    viewModel.runBatchConversionForOpenTabs()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            }
+
+            if let report = viewModel.lastBatchConversionReport {
+                HStack(spacing: 16) {
+                    Text("총 작업: \(report.totalJobs)건")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("성공: \(report.succeededResults.count)건")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+                    Text("실패: \(report.failedErrors.count)건")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(
+                            !report.failedErrors.isEmpty
+                                ? EasyOfficeDesignTokens.statusDanger.swiftUIColor
+                                : palette.secondaryText.swiftUIColor
+                        )
+                }
+
+                ForEach(report.succeededResults) { item in
+                    HStack {
+                        Text(item.sourceFileName)
+                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 10))
+                        Text(item.outputFileName)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        Spacer()
+                        Text("완료 (\(item.outputBytes.count) bytes)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                ForEach(Array(report.failedErrors.enumerated()), id: \.offset) { _, err in
+                    Text("차단됨: \(err.errorDescription)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                }
+            } else {
+                Text("열려 있는 모든 문서 탭을 선택한 표준 포맷(PDF, DOCX, HWPX, ODT, XLSX, CSV, MD)으로 일괄 변환하고 바이트 무결성을 검증합니다.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
+        }
+        .padding(16)
+        .background(palette.cardSurface.swiftUIColor)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(EasyOfficeDesignTokens.brand400.swiftUIColor, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct SmartDocumentAssistantHubView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Bindable var viewModel: WorkspaceViewModel
+
+    var body: some View {
+        let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
+        let documentModels: [OfficeDocumentModel] = viewModel.openTabs.compactMap { tab in
+            if case let .document(doc) = tab.payload { return doc }
+            return nil
+        }
+        let activeDoc: OfficeDocumentModel? = {
+            if let tab = viewModel.activeTab, case let .document(doc) = tab.payload {
+                return doc
+            }
+            return documentModels.first
+        }()
+        let activeSheet: WorksheetModel? = {
+            if let tab = viewModel.activeTab, case let .sheet(sheet) = tab.payload {
+                return sheet
+            }
+            for tab in viewModel.openTabs {
+                if case let .sheet(sheet) = tab.payload { return sheet }
+            }
+            return nil
+        }()
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("스마트 문서 보조 도구 (요약·가독성·조치항목·시트통계·문서비교·보안감사)", systemImage: "sparkles.rectangle.stack.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(EasyOfficeDesignTokens.brand800.swiftUIColor)
+                Spacer()
+                Button("개인정보·메타데이터 비식별화") {
+                    viewModel.scrubActiveTabMetadata()
+                }
+                .buttonStyle(.bordered)
+
+                Button("활성 탭 보안 감사 실행") {
+                    viewModel.runSecurityAuditOnActiveTab()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            }
+
+            if let doc = activeDoc {
+                let summary = LocalSmartDocumentAssistant.summarize(doc, maxSentences: 3)
+                let suggestions = LocalSmartDocumentAssistant.analyzeWritingQuality(doc)
+                let actionItems = LocalSmartDocumentAssistant.extractActionItemsAndEntities(doc)
+
+                Text("대상 문서: \(doc.title) · 예상 읽기 시간 \(summary.estimatedReadingSeconds)초 · 압축률 \(String(format: "%.0f", summary.compressionRatioPercent))%")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.primaryText.swiftUIColor)
+
+                ForEach(summary.keySentences, id: \.self) { sentence in
+                    Text("• \(sentence)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondaryText.swiftUIColor)
+                }
+
+                if !summary.keywords.isEmpty {
+                    Text("핵심 키워드: \(summary.keywords.joined(separator: ", "))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                }
+
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("문장 가독성 교정 제안 (\(suggestions.count)건)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                        ForEach(suggestions.prefix(2), id: \.paragraphID) { item in
+                            Text("• [\(item.issueKind)] \(item.suggestedRewrite)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("추출된 일정·예산·조치 항목 (\(actionItems.count)건)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                        ForEach(Array(actionItems.prefix(2).enumerated()), id: \.offset) { _, act in
+                            Text("• [\(act.category)] \(act.extractedText)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                if let sheet = activeSheet, let range = try? CellRange(notation: "B2:D3") {
+                    let insight = LocalSmartDocumentAssistant.analyzeWorksheetInsights(sheet, range: range)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("시트 Z-Score 통계 인사이트 (\(insight.trendClassification))")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                        Text("평균 \(String(format: "%.1f", insight.mean)) · 표준편차 \(String(format: "%.1f", insight.standardDeviation)) · 증감률 \(String(format: "%.1f", insight.growthRatePercent))%")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if documentModels.count >= 2 {
+                    let diff = LocalSmartDocumentAssistant.compareDocuments(
+                        baseline: documentModels[0],
+                        revised: documentModels[1]
+                    )
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("문서 LCS 비교 (Document ↔ HWP)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                        Text("추가 +\(diff.addedCount) · 삭제 -\(diff.removedCount) · 수정 ~\(diff.modifiedCount) · 동일 =\(diff.unchangedCount)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            if viewModel.lastScrubbedMetadataCount > 0 || viewModel.lastSecurityAuditReport != nil {
+                Divider()
+                HStack(spacing: 12) {
+                    if let audit = viewModel.lastSecurityAuditReport {
+                        Image(systemName: audit.isPassed ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(
+                                audit.isPassed
+                                    ? EasyOfficeDesignTokens.statusSuccess.swiftUIColor
+                                    : EasyOfficeDesignTokens.statusDanger.swiftUIColor
+                            )
+                        Text("매직 바이트 보안 감사: \(audit.detectedFormat?.rawValue.uppercased() ?? "UNKNOWN") · 통과 여부: \(audit.isPassed ? "안전" : "위험 감지")")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    if viewModel.lastScrubbedMetadataCount > 0 {
+                        Text("· 비식별화된 개인정보/메타데이터: \(viewModel.lastScrubbedMetadataCount)건")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(palette.cardSurface.swiftUIColor)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(EasyOfficeDesignTokens.brand400.swiftUIColor, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 struct LeftNavigatorPanelView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var viewModel: WorkspaceViewModel
@@ -546,19 +847,29 @@ struct LeftNavigatorPanelView: View {
             switch tab.payload {
             case let .document(doc):
                 ForEach(doc.extractOutline()) { heading in
-                    Text("• \(heading.text)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-                        .lineLimit(2)
+                    Button {
+                        viewModel.selectedParagraphID = heading.id
+                    } label: {
+                        Text("• \(heading.text)")
+                            .font(.system(size: 12, weight: viewModel.selectedParagraphID == heading.id ? .bold : .medium))
+                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .buttonStyle(.plain)
                 }
             case let .sheet(sheet):
+                let formulaCells = sheet.rawCells
+                    .filter { $0.value.trimmingCharacters(in: .whitespaces).hasPrefix("=") }
+                    .keys
+                    .sorted()
                 Text("시트: \(sheet.name)")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(palette.primaryText.swiftUIColor)
                 Text("내장 함수 카탈로그: \(WorksheetModel.supportedFunctionNames.count)종")
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondaryText.swiftUIColor)
-                Text("활성 수식 셀: D2, D3, B4, C4, D4")
+                Text("활성 수식 셀 (\(formulaCells.count)개): \(formulaCells.isEmpty ? "없음" : formulaCells.joined(separator: ", "))")
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondaryText.swiftUIColor)
             case let .slide(deck):
@@ -589,9 +900,15 @@ struct LeftNavigatorPanelView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(palette.secondaryText.swiftUIColor)
                     ForEach(pdf.outline) { node in
-                        Text("• \(node.title) (p.\(node.targetPageNumber))")
-                            .font(.system(size: 11))
-                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                        Button {
+                            let targetIdx = max(0, min(pdf.pages.count - 1, node.targetPageNumber - 1))
+                            viewModel.selectedPDFPageIndex = targetIdx
+                        } label: {
+                            Text("• \(node.title) (p.\(node.targetPageNumber))")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -616,7 +933,7 @@ struct CentralEditorCanvasView: View {
                 case let .sheet(sheet):
                     SheetEditorDetailPaneView(viewModel: viewModel, sheet: sheet, isPrimaryPane: isPrimaryPane)
                 case let .slide(deck):
-                    SlideEditorDetailPaneView(viewModel: viewModel, deck: deck)
+                    SlideEditorDetailPaneView(viewModel: viewModel, deck: deck, isPrimaryPane: isPrimaryPane)
                 case let .pdf(pdf):
                     PDFStudioEditorDetailPaneView(viewModel: viewModel, pdf: pdf, isPrimaryPane: isPrimaryPane)
                 }
@@ -677,6 +994,11 @@ struct RightContextualInspectorView: View {
                 Text("평가 결과: \(sheet.evaluate(at: viewModel.selectedSheetCell).description)")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                if viewModel.isHeaderRowFrozen {
+                    Text("상단 머리글 행 틀 고정: 활성")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(EasyOfficeDesignTokens.statusInfo.swiftUIColor)
+                }
 
             case let .slide(deck):
                 Text("슬라이드 마스터 및 레이아웃")
@@ -723,6 +1045,18 @@ struct BottomStatusBarView: View {
                 Text("스플릿 뷰: \(secondary.fileName)")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            }
+
+            if let errorMessage = viewModel.lastErrorMessage {
+                Text("오류: \(errorMessage)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                    .lineLimit(1)
+            } else if let summary = viewModel.lastExecutedCommandSummary, !summary.isEmpty {
+                Text(summary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .lineLimit(1)
             }
 
             Spacer()

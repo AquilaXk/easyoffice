@@ -1,5 +1,4 @@
 import Foundation
-import EasyOfficeDesignSystem
 
 /// Binary or text container family for office formats.
 public enum ContainerFamily: String, Sendable, Codable, Equatable {
@@ -45,21 +44,6 @@ public enum DocumentFormat: String, CaseIterable, Sendable, Codable, Identifiabl
     public var id: String { rawValue }
 
     public var fileExtension: String { rawValue }
-
-    public var moduleKind: OfficeModuleKind {
-        switch self {
-        case .docx, .doc, .odt, .rtf, .md, .txt:
-            return .document
-        case .hwp, .hwpx, .hwt, .hwtx:
-            return .hwp
-        case .xlsx, .xls, .ods, .csv, .tsv:
-            return .sheet
-        case .pptx, .ppt, .ppsx, .odp:
-            return .slide
-        case .pdf:
-            return .pdf
-        }
-    }
 
     public var containerFamily: ContainerFamily {
         switch self {

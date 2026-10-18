@@ -279,4 +279,149 @@ final class WorkspaceUIParityTests: XCTestCase {
             XCTFail("Expected updated PDF payload")
         }
     }
+
+    @MainActor
+    func testAll140RibbonCommandsUndoRedoFileIORoundTripAndCustomTemplatePersistence() throws {
+        let vm = WorkspaceViewModel()
+
+        // 1. Verify all 140 RibbonCommandDescriptor IDs execute deterministically and mutate domain or workspace state
+        var executedCount = 0
+        for module in OfficeModuleKind.allCases {
+            guard let moduleTab = vm.openTabs.first(where: { $0.moduleKind == module }) else {
+                XCTFail("Missing tab for \(module.rawValue)")
+                return
+            }
+            for category in RibbonCategory.allCases {
+                let actions = RibbonCategory.actions(for: category, module: module)
+                XCTAssertEqual(actions.count, 4)
+                for cmd in actions {
+                    vm.activeTabID = moduleTab.id
+                    let beforePayload = vm.activeTab?.payload
+                    let beforeTabCount = vm.openTabs.count
+                    let beforeTheme = vm.themeMode
+                    let beforeCollapsed = vm.isRibbonCollapsed
+                    let beforeSplit = vm.splitSecondaryTabID
+                    let beforeZoom = vm.zoomPercent
+                    let beforeChartKind = vm.selectedChartKind
+                    let beforeFrozen = vm.isHeaderRowFrozen
+                    let beforeCondRule = vm.activeConditionalFormatRule
+                    let beforeValRule = vm.activeDataValidationRule
+                    let beforePresenter = vm.isPresenterModeActive
+                    let beforeStatsCount = vm.reviewStatsRefreshCount
+
+                    vm.lastExecutedCommandSummary = nil
+                    vm.executeRibbonCommand(cmd.id)
+
+                    let summary = try XCTUnwrap(
+                        vm.lastExecutedCommandSummary,
+                        "Ribbon command \(cmd.id) must update lastExecutedCommandSummary"
+                    )
+                    XCTAssertFalse(summary.isEmpty, "Ribbon command \(cmd.id) summary must not be empty")
+                    XCTAssertFalse(
+                        summary.hasPrefix("명령 실행:"),
+                        "Ribbon command \(cmd.id) must not fall through to catch-all summary"
+                    )
+
+                    let didMutateState = (vm.activeTab?.payload != beforePayload)
+                        || (vm.openTabs.count != beforeTabCount)
+                        || (vm.themeMode != beforeTheme)
+                        || (vm.isRibbonCollapsed != beforeCollapsed)
+                        || (vm.splitSecondaryTabID != beforeSplit)
+                        || (vm.zoomPercent != beforeZoom)
+                        || (vm.selectedChartKind != beforeChartKind)
+                        || (vm.isHeaderRowFrozen != beforeFrozen)
+                        || (vm.activeConditionalFormatRule != beforeCondRule)
+                        || (vm.activeDataValidationRule != beforeValRule)
+                        || (vm.isPresenterModeActive != beforePresenter)
+                        || (vm.reviewStatsRefreshCount != beforeStatsCount)
+
+                    XCTAssertTrue(
+                        didMutateState,
+                        "Ribbon command \(cmd.id) must produce a concrete domain or view-model state mutation"
+                    )
+                    executedCount += 1
+                }
+            }
+        }
+        XCTAssertEqual(executedCount, 140)
+
+        // 2. Verify Undo / Redo across Document, Sheet, Slide, and PDF tabs
+        let freshVM = WorkspaceViewModel()
+        let docTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.moduleKind == .document }))
+        freshVM.activeTabID = docTab.id
+        let originalDocPayload = try XCTUnwrap(freshVM.activeTab?.payload)
+        XCTAssertFalse(freshVM.canUndo)
+
+        freshVM.appendParagraphToActiveDocument(text: "Undo 검증용 신규 문단", style: .body)
+        XCTAssertTrue(freshVM.canUndo)
+        XCTAssertNotEqual(freshVM.activeTab?.payload, originalDocPayload)
+
+        freshVM.undo()
+        XCTAssertEqual(freshVM.activeTab?.payload, originalDocPayload)
+        XCTAssertTrue(freshVM.canRedo)
+
+        freshVM.redo()
+        XCTAssertNotEqual(freshVM.activeTab?.payload, originalDocPayload)
+        if case let .document(restoredDoc) = freshVM.activeTab?.payload {
+            XCTAssertEqual(restoredDoc.paragraphs.last?.text, "Undo 검증용 신규 문단")
+        } else {
+            XCTFail("Expected document payload after redo")
+        }
+
+        // Sheet Undo / Redo + error reporting on invalid cell address
+        let sheetTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.moduleKind == .sheet }))
+        freshVM.activeTabID = sheetTab.id
+        let originalSheetPayload = try XCTUnwrap(freshVM.activeTab?.payload)
+        freshVM.selectedSheetCell = "B2"
+        freshVM.formulaBarDraft = "777"
+        freshVM.applyFormulaBarEdit()
+        XCTAssertTrue(freshVM.canUndo)
+        freshVM.undo()
+        XCTAssertEqual(freshVM.activeTab?.payload, originalSheetPayload)
+        freshVM.redo()
+        if case let .sheet(redoneSheet) = freshVM.activeTab?.payload {
+            XCTAssertEqual(redoneSheet.rawValue(at: "B2"), "777")
+        }
+
+        freshVM.selectedSheetCell = "INVALID_99999999"
+        freshVM.formulaBarDraft = "100"
+        freshVM.applyFormulaBarEdit()
+        XCTAssertNotNil(freshVM.lastErrorMessage)
+
+        // 3. Verify openDocument(data:fileName:) and exportTabData(id:targetFormat:) round-trip
+        let exportedDocxBytes = try freshVM.exportTabData(id: docTab.id, targetFormat: .docx)
+        let openedDocTab = try freshVM.openDocument(data: exportedDocxBytes, fileName: "재열기_문서.docx")
+        XCTAssertEqual(openedDocTab.format, .docx)
+        if case let .document(reopenedDoc) = openedDocTab.payload {
+            XCTAssertEqual(reopenedDoc.paragraphs.last?.text, "Undo 검증용 신규 문단")
+        } else {
+            XCTFail("Expected reopened document payload")
+        }
+
+        // 4. Verify custom template saving preserves modified OpenTabPayload and openTab(from:) restores it
+        freshVM.activeTabID = openedDocTab.id
+        freshVM.saveActiveTabAsCustomTemplate(title: "커스텀_검증_양식", subtitle: "수정된 페이로드 보존 확인")
+        let savedTemplate = try XCTUnwrap(freshVM.customTemplates.first)
+        freshVM.openTab(from: savedTemplate)
+        let restoredFromTemplateTab = try XCTUnwrap(freshVM.activeTab)
+        XCTAssertNotEqual(restoredFromTemplateTab.id, openedDocTab.id)
+        XCTAssertEqual(restoredFromTemplateTab.payload, openedDocTab.payload)
+
+        // 5. Verify scrubActiveTabMetadata() and cross-format saveTabToDisk payload sync (F3, F4)
+        freshVM.activeTabID = restoredFromTemplateTab.id
+        freshVM.scrubActiveTabMetadata()
+        XCTAssertGreaterThan(freshVM.lastScrubbedMetadataCount, 0)
+
+        let tempPDFURL = FileManager.default.temporaryDirectory.appendingPathComponent("easyoffice_f4_sync_\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: tempPDFURL) }
+        try freshVM.saveTabToDisk(id: restoredFromTemplateTab.id, to: tempPDFURL, targetFormat: .pdf)
+        let syncedTab = try XCTUnwrap(freshVM.openTabs.first(where: { $0.id == restoredFromTemplateTab.id }))
+        XCTAssertEqual(syncedTab.format, .pdf)
+        if case let .pdf(convertedPDF) = syncedTab.payload {
+            XCTAssertGreaterThanOrEqual(convertedPDF.pages.count, 1)
+        } else {
+            XCTFail("saveTabToDisk with targetFormat .pdf must update tab.payload to .pdf")
+        }
+    }
 }
+
