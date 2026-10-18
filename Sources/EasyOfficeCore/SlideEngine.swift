@@ -581,6 +581,8 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
   }
 }
 
+public typealias SlideDeckModel = PresentationDeckModel
+
 /// Presentation deck model supporting slide ordering, smart alignment guides, and presenter notes.
 public struct PresentationDeckModel: Sendable, Codable, Equatable, Identifiable {
   public let id: UUID
@@ -588,6 +590,11 @@ public struct PresentationDeckModel: Sendable, Codable, Equatable, Identifiable 
   public var aspectRatio: SlideAspectRatio
   public var slides: [SlideModel]
   public var deckTheme: SlideDeckTheme
+
+  public var theme: SlideDeckTheme {
+    get { deckTheme }
+    set { deckTheme = newValue }
+  }
 
   public init(
     id: UUID = UUID(),

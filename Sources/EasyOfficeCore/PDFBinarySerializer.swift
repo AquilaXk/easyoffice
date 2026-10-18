@@ -222,8 +222,12 @@ public enum PDFBinarySerializer {
           } else {
             destPart = ""
           }
+          let titleToken =
+            node.title.utf8.contains(where: { $0 >= 0x80 })
+            ? "<\(hexEncodeUTF16BE(node.title, maxChars: 120))>"
+            : "(\(escapePDFText(node.title)))"
           let dict =
-            "<< /Title (\(escapePDFText(node.title))) /Parent \(parentObjId) 0 R\(destPart)\(prevPart)\(nextPart)\(childrenPart) >>"
+            "<< /Title \(titleToken) /Parent \(parentObjId) 0 R\(destPart)\(prevPart)\(nextPart)\(childrenPart) >>"
           outlineEntries.append((objId: myId, dictLine: dict))
         }
         return (

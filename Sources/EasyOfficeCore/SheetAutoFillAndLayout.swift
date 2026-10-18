@@ -174,22 +174,7 @@ extension WorksheetModel {
     while i < bytes.count {
       let b = bytes[i]
       if b == 0x22 || b == 0x27 {
-        let quote = b
-        outBytes.append(quote)
-        i += 1
-        while i < bytes.count {
-          let ch = bytes[i]
-          outBytes.append(ch)
-          i += 1
-          if ch == quote {
-            if i < bytes.count && bytes[i] == quote {
-              outBytes.append(bytes[i])
-              i += 1
-            } else {
-              break
-            }
-          }
-        }
+        i = consumeQuotedLiteral(in: bytes, from: i, into: &outBytes)
         continue
       }
 
@@ -211,6 +196,30 @@ extension WorksheetModel {
     return String(decoding: outBytes, as: UTF8.self)
   }
 
+  private static func consumeQuotedLiteral(
+    in bytes: [UInt8],
+    from start: Int,
+    into outBytes: inout [UInt8]
+  ) -> Int {
+    let quote = bytes[start]
+    outBytes.append(quote)
+    var i = start + 1
+    while i < bytes.count {
+      let ch = bytes[i]
+      outBytes.append(ch)
+      i += 1
+      if ch == quote {
+        if i < bytes.count && bytes[i] == quote {
+          outBytes.append(bytes[i])
+          i += 1
+        } else {
+          break
+        }
+      }
+    }
+    return i
+  }
+
   private static func isIdentifierOrDollarByte(_ b: UInt8) -> Bool {
     (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || (b >= 0x30 && b <= 0x39) || b == 0x5F
       || b == 0x24
@@ -225,64 +234,18 @@ extension WorksheetModel {
     minRow: Int? = nil,
     minCol: Int? = nil
   ) -> (String, Int)? {
-    var cursor = start
-    let colAnchored = (cursor < bytes.count && bytes[cursor] == 0x24)
-    if colAnchored { cursor += 1 }
-
-    var letterCount = 0
-    var colValue = 0
-    while cursor < bytes.count && letterCount < 4 {
-      let b = bytes[cursor]
-      let upper = (b >= 0x61 && b <= 0x7A) ? (b - 0x20) : b
-      guard upper >= 0x41 && upper <= 0x5A else { break }
-      letterCount += 1
-      colValue = colValue * 26 + Int(upper - 0x41) + 1
-      cursor += 1
-    }
-    guard letterCount >= 1 && letterCount <= 3 else { return nil }
-
-    let rowAnchored = (cursor < bytes.count && bytes[cursor] == 0x24)
-    if rowAnchored { cursor += 1 }
-
-    var digitCount = 0
-    var rowOneBased = 0
-    while cursor < bytes.count && digitCount < 6 {
-      let b = bytes[cursor]
-      guard b >= 0x30 && b <= 0x39 else { break }
-      digitCount += 1
-      rowOneBased = rowOneBased * 10 + Int(b - 0x30)
-      cursor += 1
-    }
-    guard digitCount >= 1 && digitCount <= 5 else { return nil }
-
-    if cursor < bytes.count {
-      let nextByte = bytes[cursor]
-      if isIdentifierOrDollarByte(nextByte) || nextByte == 0x28 || nextByte == 0x21 {
-        return nil
-      }
-    }
-
-    let zeroBasedCol = colValue - 1
-    let zeroBasedRow = rowOneBased - 1
-    guard zeroBasedCol >= 0, zeroBasedCol <= CellAddress.maxZeroBasedColumn,
-      zeroBasedRow >= 0, zeroBasedRow <= CellAddress.maxZeroBasedRow
-    else {
-      return nil
-    }
-
+    guard let parsed = parseRawCellRef(in: bytes, at: start) else { return nil }
     let canShiftCol =
-      !(respectAnchors && colAnchored) && (minCol.map { zeroBasedCol >= $0 } ?? true)
+      !(respectAnchors && parsed.colAnchored) && (minCol.map { parsed.col >= $0 } ?? true)
     let canShiftRow =
-      !(respectAnchors && rowAnchored) && (minRow.map { zeroBasedRow >= $0 } ?? true)
+      !(respectAnchors && parsed.rowAnchored) && (minRow.map { parsed.row >= $0 } ?? true)
     let newCol =
       canShiftCol
-      ? min(max(0, zeroBasedCol + columnDelta), CellAddress.maxZeroBasedColumn) : zeroBasedCol
-    let newRowOneBased =
+      ? min(max(0, parsed.col + columnDelta), CellAddress.maxZeroBasedColumn) : parsed.col
+    let newRow =
       canShiftRow
-      ? min(max(1, rowOneBased + rowDelta), CellAddress.maxZeroBasedRow + 1) : rowOneBased
-    let shiftedToken =
-      "\(colAnchored ? "$" : "")\(CellAddress.columnLabel(for: newCol))\(rowAnchored ? "$" : "")\(newRowOneBased)"
-    return (shiftedToken, cursor)
+      ? min(max(0, parsed.row + rowDelta), CellAddress.maxZeroBasedRow) : parsed.row
+    return (parsed.formatted(col: newCol, row: newRow), parsed.nextIndex)
   }
 
   // MARK: - Auto-Fill Handle Engine
@@ -645,22 +608,7 @@ extension WorksheetModel {
     while i < bytes.count {
       let b = bytes[i]
       if b == 0x22 || b == 0x27 {
-        let quote = b
-        outBytes.append(quote)
-        i += 1
-        while i < bytes.count {
-          let ch = bytes[i]
-          outBytes.append(ch)
-          i += 1
-          if ch == quote {
-            if i < bytes.count && bytes[i] == quote {
-              outBytes.append(bytes[i])
-              i += 1
-            } else {
-              break
-            }
-          }
-        }
+        i = consumeQuotedLiteral(in: bytes, from: i, into: &outBytes)
         continue
       }
 
@@ -723,6 +671,8 @@ extension WorksheetModel {
     let minAxis = min(a1, a2)
     let maxAxis = max(a1, a2)
 
+    let nextA1: Int
+    let nextA2: Int
     if delta < 0 {
       if minAxis == thresholdIndex && maxAxis == thresholdIndex {
         return "#REF!"
@@ -739,30 +689,21 @@ extension WorksheetModel {
         newMinAxis = max(0, minAxis + delta)
         newMaxAxis = max(0, maxAxis + delta)
       }
-      let nextA1 = (a1 <= a2) ? newMinAxis : newMaxAxis
-      let nextA2 = (a1 <= a2) ? newMaxAxis : newMinAxis
-      let startStr =
-        isRowAxis
-        ? first.formatted(col: first.col, row: nextA1)
-        : first.formatted(col: nextA1, row: first.row)
-      let endStr =
-        isRowAxis
-        ? second.formatted(col: second.col, row: nextA2)
-        : second.formatted(col: nextA2, row: second.row)
-      return "\(startStr):\(endStr)"
+      nextA1 = (a1 <= a2) ? newMinAxis : newMaxAxis
+      nextA2 = (a1 <= a2) ? newMaxAxis : newMinAxis
     } else {
-      let nextA1 = a1 >= thresholdIndex ? a1 + delta : a1
-      let nextA2 = a2 >= thresholdIndex ? a2 + delta : a2
-      let startStr =
-        isRowAxis
-        ? first.formatted(col: first.col, row: nextA1)
-        : first.formatted(col: nextA1, row: first.row)
-      let endStr =
-        isRowAxis
-        ? second.formatted(col: second.col, row: nextA2)
-        : second.formatted(col: nextA2, row: second.row)
-      return "\(startStr):\(endStr)"
+      nextA1 = a1 >= thresholdIndex ? a1 + delta : a1
+      nextA2 = a2 >= thresholdIndex ? a2 + delta : a2
     }
+    let startStr =
+      isRowAxis
+      ? first.formatted(col: first.col, row: nextA1)
+      : first.formatted(col: nextA1, row: first.row)
+    let endStr =
+      isRowAxis
+      ? second.formatted(col: second.col, row: nextA2)
+      : second.formatted(col: nextA2, row: second.row)
+    return "\(startStr):\(endStr)"
   }
 
   private static func shiftLocalSingleCellAtAxis(
@@ -794,11 +735,19 @@ extension WorksheetModel {
   @discardableResult
   public mutating func removeDuplicateRows(in range: CellRange? = nil) -> Int {
     let target = range ?? detectedDataRange()
-    let minRow = min(target.start.row, target.end.row)
-    let maxRow = max(target.start.row, target.end.row)
-    let minCol = min(target.start.column, target.end.column)
-    let maxCol = max(target.start.column, target.end.column)
+    let minRow = max(0, min(target.start.row, target.end.row))
+    let maxRow = min(CellAddress.maxZeroBasedRow, max(target.start.row, target.end.row))
+    let minCol = max(0, min(target.start.column, target.end.column))
+    let maxCol = min(CellAddress.maxZeroBasedColumn, max(target.start.column, target.end.column))
     guard minRow <= maxRow, minCol <= maxCol else { return 0 }
+    let (rowSpan, rowOverflow) = (maxRow - minRow).addingReportingOverflow(1)
+    let (colSpan, colOverflow) = (maxCol - minCol).addingReportingOverflow(1)
+    let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
+    guard !rowOverflow, !colOverflow, !mulOverflow,
+      totalCells > 0, totalCells <= CellRange.maxExpandedCellCount
+    else {
+      return 0
+    }
 
     var seenKeys: Set<[String]> = []
     var duplicateRowsToDelete: [Int] = []
@@ -837,10 +786,14 @@ extension WorksheetModel {
     else {
       return 0
     }
-    let upperRow = maxRow ?? detectedDataRange().end.row
+    let rawUpperRow = maxRow ?? detectedDataRange().end.row
+    let upperRow = min(
+      max(0, rawUpperRow),
+      min(CellAddress.maxZeroBasedRow, CellRange.maxExpandedCellCount - 1)
+    )
     var splitRowCount = 0
 
-    for r in 0...max(0, upperRow) {
+    for r in 0...upperRow {
       let coord = PackedCellCoordinate(row: r, column: column)
       guard let raw = cellsByCoordinate[coord],
         !raw.hasPrefix("="),

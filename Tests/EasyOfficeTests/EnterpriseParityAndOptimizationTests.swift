@@ -1,3 +1,4 @@
+import PDFKit
 import XCTest
 
 @testable import EasyOfficeCore
@@ -381,13 +382,22 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     XCTAssertEqual(splitSheet.rawValue(at: "B2"), "기획팀")
     XCTAssertEqual(splitSheet.rawValue(at: "C2"), "부산")
 
+    var sparseSheet = WorksheetModel(name: "희소시트")
+    try sparseSheet.setCell("A1", rawValue: "A")
+    try sparseSheet.setCell("XFD1048576", rawValue: "A")
+    XCTAssertEqual(sparseSheet.removeDuplicateRows(), 0)
+    XCTAssertEqual(
+      sparseSheet.splitColumnByDelimiter(column: 0, delimiter: ",", maxRow: 999_999), 0)
+
     // F1 & F12: Dark mode surface tokens and relative luminance helper
     let darkPalette = WorkspaceThemeMode.darkIndigo.surfacePalette(isSystemDark: true)
     XCTAssertEqual(darkPalette.selectedSurface.hex, "#283152")
+    XCTAssertEqual(darkPalette.subtleAccentSurface.hex, "#1E243B")
+    XCTAssertTrue(darkPalette.isDark)
     XCTAssertTrue(EasyOfficeDesignTokens.isLightFill(hex: "#F8F9FF"))
     XCTAssertFalse(EasyOfficeDesignTokens.isLightFill(hex: "#141724"))
 
-    // F4 & F5: Multilevel list markers and Korean official document list hierarchy (1. -> 가. -> (1) -> (가))
+    // F4 & F5: Multilevel list markers and Korean official document list hierarchy (1. -> 가. -> (1) -> (가)) across all 6 codecs
     let doc = OfficeDocumentModel(
       title: "공문서 다단계 개요",
       paragraphs: [
@@ -405,15 +415,51 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 3), "(가)")
     XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 4), "a.")
     XCTAssertEqual(doc.formattedListPrefix(forParagraphAt: 5), "i.")
+    XCTAssertEqual(doc.estimatedPageCount, 1)
+    XCTAssertEqual(
+      OfficeDocumentModel.resolvePageTokens(
+        in: "쪽 {{PAGE}} / {{TOTAL}}", pageNumber: 2, totalPages: 5),
+      "쪽 2 / 5"
+    )
 
-    // F7: SlideDeckTheme & SlideModel.alignElements
+    let docxRT = try OOXMLContainerCodec.decodeDocument(
+      from: try OOXMLContainerCodec.encodeDocument(doc))
+    let odtRT = try ODFContainerCodec.decodeDocument(
+      from: try ODFContainerCodec.encodeDocument(doc))
+    let hwpxRT = try HWPXContainerCodec.decodeDocument(
+      from: try HWPXContainerCodec.encodeDocument(doc))
+    let hwpRT = try HWP5BinaryCodec.decodeDocument(
+      from: try HWP5BinaryCodec.encodeDocument(doc))
+    let rtfRT = try RTFCodec.decodeDocument(from: RTFCodec.encodeDocument(doc))
+    let mdEncoded1 = CommonMarkCodec.encodeDocument(doc)
+    let mdRT = try CommonMarkCodec.decodeDocument(from: mdEncoded1)
+    let mdEncoded2 = CommonMarkCodec.encodeDocument(mdRT)
+    let mdBody1 =
+      String(decoding: mdEncoded1, as: UTF8.self).components(separatedBy: "<!-- eo-meta:").first
+      ?? ""
+    let mdBody2 =
+      String(decoding: mdEncoded2, as: UTF8.self).components(separatedBy: "<!-- eo-meta:").first
+      ?? ""
+    XCTAssertEqual(mdBody1, mdBody2)
+    XCTAssertFalse(mdBody2.contains("가. 가."))
+
+    for roundTripped: OfficeDocumentModel in [docxRT, odtRT, hwpxRT, hwpRT, rtfRT, mdRT] {
+      XCTAssertEqual(roundTripped.paragraphs[1].listKind, .koreanOfficial)
+      XCTAssertEqual(roundTripped.paragraphs[1].listLevel, 1)
+      XCTAssertEqual(roundTripped.paragraphs[1].text, "중항목")
+      XCTAssertEqual(roundTripped.paragraphs[1].effectiveRuns.map(\.text).joined(), "중항목")
+      XCTAssertEqual(roundTripped.formattedListPrefix(forParagraphAt: 1), "가.")
+      XCTAssertEqual(roundTripped.formattedListPrefix(forParagraphAt: 3), "(가)")
+    }
+
+    // F7: SlideDeckTheme & SlideModel.alignElements / duplicateElement / removeElement + PPTX/ODP round-trip
     let el1 = SlideCanvasElement(
       title: "Box1", x: 100, y: 100, width: 80, height: 60, kind: .rectangleShape)
     let el2 = SlideCanvasElement(
       title: "Box2", x: 200, y: 140, width: 80, height: 60, kind: .rectangleShape)
     let el3 = SlideCanvasElement(
       title: "Box3", x: 500, y: 180, width: 80, height: 60, kind: .rectangleShape)
-    var deck = PresentationDeckModel(
+    var deck = SlideDeckModel(
       title: "테마 및 정렬 검증",
       slides: [
         SlideModel(
@@ -423,12 +469,24 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
       ]
     )
     deck.applyTheme(.corporateNavy)
-    XCTAssertEqual(deck.deckTheme, .corporateNavy)
+    XCTAssertEqual(deck.theme, .corporateNavy)
     XCTAssertEqual(deck.slides[0].elements[0].fillHex, SlideDeckTheme.corporateNavy.primaryFillHex)
     deck.slides[0].alignElements(.distributeHorizontally)
     XCTAssertEqual(deck.slides[0].elements[1].x, 300.0, accuracy: 1e-4)
 
-    // F8: PDFStudioDocumentModel.addBookmark and /Outlines dictionary in PDFBinarySerializer
+    let dup = try XCTUnwrap(deck.slides[0].duplicateElement(id: el1.id))
+    XCTAssertEqual(deck.slides[0].elements.count, 4)
+    deck.slides[0].removeElement(id: dup.id)
+    XCTAssertEqual(deck.slides[0].elements.count, 3)
+
+    let pptxDeck = try OOXMLContainerCodec.decodePresentation(
+      from: try OOXMLContainerCodec.encodePresentation(deck))
+    let odpDeck = try ODFContainerCodec.decodePresentation(
+      from: try ODFContainerCodec.encodePresentation(deck))
+    XCTAssertEqual(pptxDeck.deckTheme, .corporateNavy)
+    XCTAssertEqual(odpDeck.deckTheme, .corporateNavy)
+
+    // F8: PDFStudioDocumentModel.addBookmark / removeBookmark and /Outlines dictionary in PDFBinarySerializer + PDFKit outlineRoot
     var pdf = PDFStudioDocumentModel(
       title: "북마크 PDF",
       pages: [
@@ -444,9 +502,19 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
 
     let pdfBytes = PDFBinarySerializer.encode(pdf)
     let pdfString = String(decoding: pdfBytes, as: UTF8.self)
-    XCTAssertTrue(pdfString.contains("/Outlines"))
+    XCTAssertTrue(pdfString.contains("/Type /Outlines"))
+    XCTAssertTrue(pdfString.contains("/Dest ["))
+    let nativePDF = try XCTUnwrap(PDFDocument(data: pdfBytes))
+    let outlineRoot = try XCTUnwrap(nativePDF.outlineRoot)
+    XCTAssertEqual(outlineRoot.numberOfChildren, 1)
+    XCTAssertEqual(outlineRoot.child(at: 0)?.label, "1장 개요")
+    XCTAssertEqual(outlineRoot.child(at: 0)?.child(at: 0)?.label, "1.1 세부절")
+
     let decodedPDF = try PDFBinarySerializer.decode(from: pdfBytes)
     XCTAssertEqual(decodedPDF.outline.first?.title, "1장 개요")
     XCTAssertEqual(decodedPDF.outline.first?.children.first?.title, "1.1 세부절")
+
+    pdf.removeBookmark(id: parentID)
+    XCTAssertTrue(pdf.outline.isEmpty)
   }
 }

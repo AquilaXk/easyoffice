@@ -56,12 +56,20 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
       let resolvedListLevel = metaP.listKind != .none ? metaP.listLevel : p.listLevel
       let resolvedText =
         (metaP.listKind != .none && !metaP.text.isEmpty) ? metaP.text : p.text
+      let resolvedRuns: [DocumentTextRun]
+      if !metaP.runs.isEmpty {
+        resolvedRuns = metaP.runs
+      } else if p.runs.map(\.text).joined() == resolvedText {
+        resolvedRuns = p.runs
+      } else {
+        resolvedRuns = []
+      }
       doc.paragraphs[idx] = ParagraphBlock(
         id: metaP.id,
         style: p.style,
         alignment: p.alignment,
         text: resolvedText,
-        runs: metaP.runs.isEmpty ? p.runs : metaP.runs,
+        runs: resolvedRuns,
         fontName: p.fontName,
         fontSizePt: p.fontSizePt,
         isBold: p.isBold,
