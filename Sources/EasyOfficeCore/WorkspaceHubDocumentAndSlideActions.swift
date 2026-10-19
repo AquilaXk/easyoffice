@@ -1486,4 +1486,50 @@ extension WorkspaceViewModel {
     lastExecutedCommandSummary =
       isSlideGridlinesVisible ? "슬라이드 스테이지 격자 안내선 표시" : "슬라이드 스테이지 격자 안내선 숨김"
   }
+
+  public func setActiveParagraphStyle(_ role: ParagraphStyleRole) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID })
+    else { return }
+
+    let targetMetrics: (fontSizePt: Double, isBold: Bool, isItalic: Bool)
+    switch role {
+    case .title:
+      targetMetrics = (20.0, true, false)
+    case .heading1:
+      targetMetrics = (14.0, true, false)
+    case .heading2:
+      targetMetrics = (12.5, true, false)
+    case .heading3:
+      targetMetrics = (11.5, true, false)
+    case .body:
+      targetMetrics = (11.0, false, false)
+    case .quote:
+      targetMetrics = (11.0, false, true)
+    case .officialHeader:
+      targetMetrics = (16.0, true, false)
+    }
+
+    switch openTabs[idx].payload {
+    case .document(var doc):
+      guard !doc.paragraphs.isEmpty else { return }
+      recordUndoSnapshot(for: activeTabID)
+      let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+      doc.paragraphs[pIdx].style = role
+      doc.paragraphs[pIdx].fontSizePt = targetMetrics.fontSizePt
+      doc.paragraphs[pIdx].isBold = targetMetrics.isBold
+      doc.paragraphs[pIdx].isItalic = targetMetrics.isItalic
+      for rIdx in doc.paragraphs[pIdx].runs.indices {
+        doc.paragraphs[pIdx].runs[rIdx].fontSizePt = targetMetrics.fontSizePt
+        doc.paragraphs[pIdx].runs[rIdx].isBold = targetMetrics.isBold
+        doc.paragraphs[pIdx].runs[rIdx].isItalic = targetMetrics.isItalic
+      }
+      openTabs[idx].payload = .document(doc)
+      openTabs[idx].isModified = true
+      lastExecutedCommandSummary = "문단 스타일 변경: \(role.rawValue)"
+
+    default:
+      break
+    }
+  }
 }

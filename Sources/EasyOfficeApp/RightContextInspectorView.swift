@@ -713,7 +713,7 @@ struct RightContextInspectorView: View {
       .pickerStyle(.menu)
       .controlSize(.small)
 
-      Text("데이터 정제 (중복 제거 · 텍스트 나누기)")
+      Text("데이터 정제 (중복 제거 · 텍스트 나누기 · 다중 정렬)")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 6) {
@@ -724,6 +724,16 @@ struct RightContextInspectorView: View {
           .buttonStyle(.bordered)
           .controlSize(.mini)
       }
+      Button("다중 기준 정렬 (A열↑ · B열↓)") {
+        viewModel.sortActiveSheetBySecondaryColumn(
+          primaryColumn: 0,
+          ascending: true,
+          secondaryColumn: 1,
+          secondaryAscending: false
+        )
+      }
+      .buttonStyle(.bordered)
+      .controlSize(.small)
 
       Button(viewModel.activeConditionalFormatRule == nil ? "조건부 서식 켜기 (>100)" : "조건부 서식 끄기") {
         viewModel.executeRibbonCommand("sheet-mod-condfmt")
@@ -819,6 +829,44 @@ struct RightContextInspectorView: View {
       }
       .pickerStyle(.menu)
       .controlSize(.small)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text(
+          "전환 시간: \(String(format: "%.1f", slide.transitionDurationSeconds))초 · 자동 전환: \(slide.autoAdvanceSeconds.map { "\($0)초" } ?? "수동")"
+        )
+        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+        HStack(spacing: 4) {
+          ForEach([0.4, 0.8, 1.5, 2.5], id: \.self) { sec in
+            Button("\(String(format: "%.1f", sec))초") {
+              viewModel.setActiveSlideTransitionDuration(sec)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+          }
+        }
+
+        HStack(spacing: 4) {
+          Button("수동") {
+            viewModel.setActiveSlideAutoAdvance(seconds: nil)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+
+          Button("5초") {
+            viewModel.setActiveSlideAutoAdvance(seconds: 5)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+
+          Button("10초") {
+            viewModel.setActiveSlideAutoAdvance(seconds: 10)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        }
+      }
 
       VStack(alignment: .leading, spacing: 4) {
         Text("발표자 노트")
@@ -984,6 +1032,15 @@ struct RightContextInspectorView: View {
 
     Toggle("슬라이드 정렬 격자 뷰", isOn: $viewModel.isSlideSorterViewEnabled)
       .font(.system(size: 11, weight: .semibold))
+
+    Toggle(
+      "스테이지 격자 안내선",
+      isOn: Binding(
+        get: { viewModel.isSlideGridlinesVisible },
+        set: { _ in viewModel.toggleSlideGridlines() }
+      )
+    )
+    .font(.system(size: 11, weight: .semibold))
 
     VStack(alignment: .leading, spacing: 6) {
       Text("슬라이드 덱 관리")
