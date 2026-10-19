@@ -91,26 +91,90 @@ struct HomeHubWorkspaceView: View {
             }
           }
 
-          HStack(spacing: 8) {
-            Text("표준 및 사용자 서식 템플릿 (\(viewModel.allAvailableTemplates.count)종)")
+          let filteredTemplates = viewModel.allAvailableTemplates.filter { tpl in
+            switch viewModel.selectedHomeTemplateCategoryFilter {
+            case "문서·한글":
+              return tpl.moduleKind == .document || tpl.moduleKind == .hwp
+            case "시트":
+              return tpl.moduleKind == .sheet
+            case "슬라이드":
+              return tpl.moduleKind == .slide
+            case "PDF":
+              return tpl.moduleKind == .pdf
+            default:
+              return true
+            }
+          }
+
+          let filteredRecentTabs = viewModel.filteredTabs.filter { tab in
+            switch viewModel.selectedHomeRecentFormatFilter {
+            case "DOCX/HWP":
+              return tab.moduleKind == .document || tab.moduleKind == .hwp
+            case "XLSX":
+              return tab.moduleKind == .sheet
+            case "PPTX":
+              return tab.moduleKind == .slide
+            case "PDF":
+              return tab.moduleKind == .pdf
+            default:
+              return true
+            }
+          }
+
+          VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+              Text(
+                "표준 및 사용자 서식 템플릿 (\(filteredTemplates.count) / \(viewModel.allAvailableTemplates.count)종)"
+              )
               .font(.system(size: 15, weight: .bold))
               .foregroundStyle(palette.primaryText.swiftUIColor)
-            Spacer()
-            TextField("사용자 템플릿 이름 (선택)", text: $viewModel.customTemplateTitleDraft)
-              .textFieldStyle(.roundedBorder)
-              .font(.system(size: 11))
-              .frame(width: 180)
-            Button("현재 탭을 사용자 템플릿으로 저장") {
-              viewModel.saveActiveTabAsCustomTemplate(
-                title: nil,
-                subtitle: "현재 활성 문서 기반 커스텀 템플릿"
-              )
+              Spacer()
+              TextField("사용자 템플릿 이름 (선택)", text: $viewModel.customTemplateTitleDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+                .frame(width: 180)
+              Button("현재 탭을 사용자 템플릿으로 저장") {
+                viewModel.saveActiveTabAsCustomTemplate(
+                  title: nil,
+                  subtitle: "현재 활성 문서 기반 커스텀 템플릿"
+                )
+              }
+              .font(.system(size: 11, weight: .semibold))
             }
-            .font(.system(size: 11, weight: .semibold))
+
+            HStack(spacing: 6) {
+              ForEach(["전체", "문서·한글", "시트", "슬라이드", "PDF"], id: \.self) { cat in
+                let isSelected = viewModel.selectedHomeTemplateCategoryFilter == cat
+                Button {
+                  viewModel.selectedHomeTemplateCategoryFilter = cat
+                } label: {
+                  Text(cat)
+                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                      isSelected
+                        ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                        : palette.cardSurface.swiftUIColor
+                    )
+                    .foregroundStyle(
+                      isSelected
+                        ? Color.white
+                        : palette.primaryText.swiftUIColor
+                    )
+                    .overlay(
+                      RoundedRectangle(cornerRadius: 5)
+                        .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+              }
+            }
           }
 
           LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
-            ForEach(viewModel.allAvailableTemplates) { tpl in
+            ForEach(filteredTemplates) { tpl in
               VStack(alignment: .leading, spacing: 8) {
                 TemplateMiniaturePreviewHeader(
                   module: tpl.moduleKind,
@@ -159,12 +223,44 @@ struct HomeHubWorkspaceView: View {
             }
           }
 
-          Text("\(viewModel.activeHubSection.rawValue) · 문서 목록 (\(viewModel.filteredTabs.count)건)")
-            .font(.system(size: 15, weight: .bold))
-            .foregroundStyle(palette.primaryText.swiftUIColor)
+          HStack(spacing: 8) {
+            Text("\(viewModel.activeHubSection.rawValue) · 문서 목록 (\(filteredRecentTabs.count)건)")
+              .font(.system(size: 15, weight: .bold))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+            Spacer()
+            HStack(spacing: 6) {
+              ForEach(["전체", "DOCX/HWP", "XLSX", "PPTX", "PDF"], id: \.self) { fmt in
+                let isSelected = viewModel.selectedHomeRecentFormatFilter == fmt
+                Button {
+                  viewModel.selectedHomeRecentFormatFilter = fmt
+                } label: {
+                  Text(fmt)
+                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                      isSelected
+                        ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                        : palette.cardSurface.swiftUIColor
+                    )
+                    .foregroundStyle(
+                      isSelected
+                        ? Color.white
+                        : palette.primaryText.swiftUIColor
+                    )
+                    .overlay(
+                      RoundedRectangle(cornerRadius: 5)
+                        .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+              }
+            }
+          }
 
           VStack(spacing: 8) {
-            ForEach(viewModel.filteredTabs) { tab in
+            ForEach(filteredRecentTabs) { tab in
               let moduleAccent = EasyOfficeDesignTokens.accentToken(for: tab.moduleKind)
                 .swiftUIColor
               HStack(spacing: 10) {

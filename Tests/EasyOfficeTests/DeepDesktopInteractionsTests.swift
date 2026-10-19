@@ -1011,4 +1011,187 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTAssertTrue(clearedPDF.securityInspectionSummary.contains("워터마크 없음"))
     }
   }
+
+  // MARK: - 15. 7th Audit Slide Timing/Gridlines, Interactive Find/Replace Navigation, Multi-Column Sort & Home Filters
+
+  func testSeventhAuditSlideTimingGridlinesFindNavigationAndHomeFilters() throws {
+    let vm = WorkspaceViewModel()
+
+    // 1. Slide Transition Duration, Auto-Advance & Gridlines Toggle
+    let slideTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .slide }))
+    vm.activeTabID = slideTab.id
+    vm.selectedSlideIndex = 0
+
+    XCTAssertFalse(vm.isSlideGridlinesVisible)
+    vm.toggleSlideGridlines()
+    XCTAssertTrue(vm.isSlideGridlinesVisible)
+
+    vm.setActiveSlideTransitionDuration(1.5)
+    vm.setActiveSlideAutoAdvance(seconds: 10)
+    if case .slide(let deck) = vm.activeTab?.payload {
+      XCTAssertEqual(deck.slides[0].transitionDurationSeconds, 1.5, accuracy: 0.01)
+      XCTAssertEqual(deck.slides[0].autoAdvanceSeconds, 10)
+    } else {
+      XCTFail("Expected slide payload")
+    }
+
+    vm.setActiveSlideAutoAdvance(seconds: nil)
+    if case .slide(let deckAfterManual) = vm.activeTab?.payload {
+      XCTAssertNil(deckAfterManual.slides[0].autoAdvanceSeconds)
+    }
+
+    // 2. Interactive Find Match Counter, Next/Previous Match & Single-Match Replace across Document, Sheet, Slide, and PDF
+    let docTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .document }))
+    vm.activeTabID = docTab.id
+    vm.appendParagraphToActiveDocument(text: "EasyOffice 표준 문서 검토 및 EasyOffice 아키텍처 검증")
+    vm.findQueryText = "EasyOffice"
+    vm.replaceQueryText = "NextOffice"
+    vm.isFindCaseSensitive = true
+    vm.recomputeFindMatches()
+    let initialDocMatches = vm.findMatchCount
+    XCTAssertGreaterThanOrEqual(initialDocMatches, 2)
+    XCTAssertEqual(vm.currentFindMatchIndex, 0)
+
+    vm.findNextMatch()
+    XCTAssertEqual(vm.currentFindMatchIndex, 1)
+    vm.findNextMatch()
+    XCTAssertEqual(vm.currentFindMatchIndex, 2)
+    vm.findPreviousMatch()
+    XCTAssertEqual(vm.currentFindMatchIndex, 1)
+
+    let replacedSingle = vm.replaceCurrentMatch()
+    XCTAssertEqual(replacedSingle, 1)
+    XCTAssertEqual(vm.findMatchCount, initialDocMatches - 1)
+
+    // Sheet find & single-match replace
+    let sheetTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet }))
+    vm.activeTabID = sheetTab.id
+    if let sIdx = vm.openTabs.firstIndex(where: { $0.id == sheetTab.id }),
+      case .sheet(var sheetModel) = vm.openTabs[sIdx].payload
+    {
+      try sheetModel.setCell("B2", rawValue: "검증항목_ALPHA")
+      vm.openTabs[sIdx].payload = .sheet(sheetModel)
+    }
+    vm.findQueryText = "ALPHA"
+    vm.replaceQueryText = "BETA"
+    vm.recomputeFindMatches()
+    XCTAssertGreaterThanOrEqual(vm.findMatchCount, 1)
+    XCTAssertEqual(vm.replaceCurrentMatch(), 1)
+
+    // Slide find & single-match replace
+    vm.activeTabID = slideTab.id
+    vm.addSlideBulletPoint(slideIndex: 0, text: "프레젠테이션 핵심 키워드 GAMMA")
+    vm.findQueryText = "GAMMA"
+    vm.replaceQueryText = "DELTA"
+    vm.recomputeFindMatches()
+    XCTAssertEqual(vm.findMatchCount, 1)
+    XCTAssertEqual(vm.replaceCurrentMatch(), 1)
+    if case .slide(let updatedDeck) = vm.activeTab?.payload {
+      XCTAssertTrue(updatedDeck.slides[0].bulletPoints.contains(where: { $0.contains("DELTA") }))
+    }
+
+    // PDF find match counting
+    let pdfTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .pdf }))
+    vm.activeTabID = pdfTab.id
+    if case .pdf(let pdfDoc) = vm.activeTab?.payload,
+      let firstToken = pdfDoc.pages.first?.extractedText.split(separator: " ").first
+    {
+      vm.findQueryText = String(firstToken)
+      vm.recomputeFindMatches()
+      XCTAssertGreaterThanOrEqual(vm.findMatchCount, 1)
+    }
+
+    // 3. Sheet Multi-Column Secondary Sort (`sortActiveSheetBySecondaryColumn`)
+    vm.activeTabID = sheetTab.id
+    if let sIdx = vm.openTabs.firstIndex(where: { $0.id == sheetTab.id }),
+      case .sheet(var sheetModel) = vm.openTabs[sIdx].payload
+    {
+      try sheetModel.setCell("G1", rawValue: "그룹")
+      try sheetModel.setCell("H1", rawValue: "점수")
+      try sheetModel.setCell("G2", rawValue: "그룹B")
+      try sheetModel.setCell("H2", rawValue: "10")
+      try sheetModel.setCell("G3", rawValue: "그룹A")
+      try sheetModel.setCell("H3", rawValue: "20")
+      try sheetModel.setCell("G4", rawValue: "그룹A")
+      try sheetModel.setCell("H4", rawValue: "90")
+      vm.openTabs[sIdx].payload = .sheet(sheetModel)
+    }
+    vm.sortActiveSheetBySecondaryColumn(
+      primaryColumn: 6,
+      ascending: true,
+      secondaryColumn: 7,
+      secondaryAscending: false
+    )
+    if case .sheet(let sortedSheet) = vm.activeTab?.payload {
+      XCTAssertEqual(sortedSheet.rawValue(at: "G2"), "그룹A")
+      XCTAssertEqual(sortedSheet.rawValue(at: "H2"), "90")
+      XCTAssertEqual(sortedSheet.rawValue(at: "G3"), "그룹A")
+      XCTAssertEqual(sortedSheet.rawValue(at: "H3"), "20")
+      XCTAssertEqual(sortedSheet.rawValue(at: "G4"), "그룹B")
+      XCTAssertEqual(sortedSheet.rawValue(at: "H4"), "10")
+      XCTAssertTrue(vm.lastExecutedCommandSummary?.contains("다중 기준 행 정렬 완료") == true)
+    } else {
+      XCTFail("Expected sorted sheet payload")
+    }
+
+    // 4. Advanced Toolbar Drawer & Home Hub Category/Format Filter States
+    XCTAssertFalse(vm.isAdvancedToolbarExpanded)
+    vm.isAdvancedToolbarExpanded.toggle()
+    XCTAssertTrue(vm.isAdvancedToolbarExpanded)
+
+    XCTAssertEqual(vm.selectedHomeTemplateCategoryFilter, "전체")
+    vm.selectedHomeTemplateCategoryFilter = "슬라이드"
+    XCTAssertEqual(vm.selectedHomeTemplateCategoryFilter, "슬라이드")
+
+    XCTAssertEqual(vm.selectedHomeRecentFormatFilter, "전체")
+    vm.selectedHomeRecentFormatFilter = "PDF"
+    XCTAssertEqual(vm.selectedHomeRecentFormatFilter, "PDF")
+
+    // 5. Paragraph Style Switching with Inline Runs & HWP Tab Support
+    vm.activeTabID = vm.openTabs.first(where: { $0.moduleKind == .document })?.id
+    vm.toggleHighlightOnActiveParagraph(colorHex: "#FFF59D")
+    vm.setActiveParagraphStyle(.quote)
+    if case .document(let quoteDoc) = vm.activeTab?.payload {
+      let pIdx = quoteDoc.paragraphs.firstIndex(where: { $0.id == vm.selectedParagraphID }) ?? 0
+      XCTAssertEqual(quoteDoc.paragraphs[pIdx].style, .quote)
+      XCTAssertEqual(quoteDoc.paragraphs[pIdx].fontSizePt, 11.0, accuracy: 0.001)
+      XCTAssertFalse(quoteDoc.paragraphs[pIdx].isBold)
+      XCTAssertTrue(quoteDoc.paragraphs[pIdx].isItalic)
+      XCTAssertTrue(
+        quoteDoc.paragraphs[pIdx].effectiveRuns.allSatisfy {
+          $0.isItalic && !$0.isBold && abs(($0.fontSizePt ?? 0.0) - 11.0) < 0.001
+        }
+      )
+    } else {
+      XCTFail("Expected document payload after .quote style")
+    }
+
+    vm.setActiveParagraphStyle(.title)
+    if case .document(let titleDoc) = vm.activeTab?.payload {
+      let pIdx = titleDoc.paragraphs.firstIndex(where: { $0.id == vm.selectedParagraphID }) ?? 0
+      XCTAssertEqual(titleDoc.paragraphs[pIdx].style, .title)
+      XCTAssertEqual(titleDoc.paragraphs[pIdx].fontSizePt, 20.0, accuracy: 0.001)
+      XCTAssertTrue(titleDoc.paragraphs[pIdx].isBold)
+      XCTAssertFalse(titleDoc.paragraphs[pIdx].isItalic)
+      XCTAssertTrue(
+        titleDoc.paragraphs[pIdx].effectiveRuns.allSatisfy {
+          $0.isBold && !$0.isItalic && abs(($0.fontSizePt ?? 0.0) - 20.0) < 0.001
+        }
+      )
+    } else {
+      XCTFail("Expected document payload after .title style")
+    }
+
+    vm.activeTabID = vm.openTabs.first(where: { $0.moduleKind == .hwp })?.id
+    vm.setActiveParagraphStyle(.heading1)
+    if case .document(let hwpDoc) = vm.activeTab?.payload {
+      let pIdx = hwpDoc.paragraphs.firstIndex(where: { $0.id == vm.selectedParagraphID }) ?? 0
+      XCTAssertEqual(hwpDoc.paragraphs[pIdx].style, .heading1)
+      XCTAssertEqual(hwpDoc.paragraphs[pIdx].fontSizePt, 14.0, accuracy: 0.001)
+      XCTAssertTrue(hwpDoc.paragraphs[pIdx].isBold)
+      XCTAssertFalse(hwpDoc.paragraphs[pIdx].isItalic)
+    } else {
+      XCTFail("Expected HWP payload after .heading1 style")
+    }
+  }
 }
