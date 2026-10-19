@@ -1355,7 +1355,7 @@ public struct SheetEditorDetailPaneView: View {
   ) -> some View {
     let zeroRow = row - 1
     let rawHeight = sheet.rowHeight(at: zeroRow)
-    let hasWrappedCell = columnIndices.contains { colIdx in
+    let hasWrappedCell = (0..<columnLabels.count).contains { colIdx in
       sheet.cellStyle(at: PackedCellCoordinate(row: zeroRow, column: colIdx)).wrapText
     }
     let defaultAdjustedHeight: Double = abs(rawHeight - 46.0) < 0.1 ? 30.0 : rawHeight
@@ -1404,11 +1404,10 @@ public struct SheetEditorDetailPaneView: View {
         let addr = "\(col)\(row)"
         let isPrimaryCell = viewModel.selectedSheetCell == addr
         let isInRange = activeRange.contains(coord)
-        let isSelectedOrInRange = isPrimaryCell || isInRange
-        let isSelectionTopEdge = isSelectedOrInRange && (zeroRow == selMinRow)
-        let isSelectionBottomEdge = isSelectedOrInRange && (zeroRow == selMaxRow)
-        let isSelectionLeadingEdge = isSelectedOrInRange && (colIdx == selMinCol)
-        let isSelectionTrailingEdge = isSelectedOrInRange && (colIdx == selMaxCol)
+        let isSelectionTopEdge = isInRange && (zeroRow == selMinRow)
+        let isSelectionBottomEdge = isInRange && (zeroRow == selMaxRow)
+        let isSelectionLeadingEdge = isInRange && (colIdx == selMinCol)
+        let isSelectionTrailingEdge = isInRange && (colIdx == selMaxCol)
 
         gridCellView(
           row: row,

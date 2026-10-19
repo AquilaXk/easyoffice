@@ -348,46 +348,7 @@ extension WorkspaceThemePalette {
   }
 }
 
-extension WorkspaceViewModel {
-  public func setActiveParagraphStyle(_ role: ParagraphStyleRole) {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .document(var doc) = openTabs[idx].payload,
-      !doc.paragraphs.isEmpty
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
-    doc.paragraphs[pIdx].style = role
-    switch role {
-    case .title:
-      doc.paragraphs[pIdx].fontSizePt = 20.0
-      doc.paragraphs[pIdx].isBold = true
-    case .heading1:
-      doc.paragraphs[pIdx].fontSizePt = 14.0
-      doc.paragraphs[pIdx].isBold = true
-    case .heading2:
-      doc.paragraphs[pIdx].fontSizePt = 12.5
-      doc.paragraphs[pIdx].isBold = true
-    case .heading3:
-      doc.paragraphs[pIdx].fontSizePt = 11.5
-      doc.paragraphs[pIdx].isBold = true
-    case .body:
-      doc.paragraphs[pIdx].fontSizePt = 11.0
-      doc.paragraphs[pIdx].isBold = false
-    case .quote:
-      doc.paragraphs[pIdx].fontSizePt = 11.0
-      doc.paragraphs[pIdx].isItalic = true
-    case .officialHeader:
-      doc.paragraphs[pIdx].fontSizePt = 16.0
-      doc.paragraphs[pIdx].isBold = true
-    }
-    openTabs[idx].payload = .document(doc)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "문단 스타일 변경: \(role.rawValue)"
-  }
-}
-
-/// Vertical page ruler (`width: 22`, `0..22 cm`) displaying top/bottom margin shaded zones (`height: 22`), 1cm major ticks (`1..22`) with monospaced `8pt` numeral labels, and `0.5cm` minor ticks along the right border.
+/// Vertical page ruler (`width: 22`, `0..24 cm`) displaying top/bottom margin shaded zones (`height: 22`), `0` origin marker, 1cm major ticks (`1..24`) with monospaced `8pt` numeral labels, and `0.5cm` minor ticks along the right border.
 public struct DocumentVerticalRulerView: View {
   public let palette: WorkspaceThemePalette
 
@@ -397,25 +358,32 @@ public struct DocumentVerticalRulerView: View {
 
   public var body: some View {
     VStack(spacing: 0) {
-      // Top Margin Shaded Zone (height: 22)
-      Rectangle()
-        .fill(palette.elevatedSurface.swiftUIColor)
-        .frame(width: 22, height: 22)
-        .overlay(alignment: .bottom) {
-          Rectangle()
-            .fill(palette.hairlineBorder.swiftUIColor)
-            .frame(height: 0.8)
-        }
+      // Top Margin Shaded Zone (height: 22) with 0cm Origin Marker
+      ZStack(alignment: .bottomTrailing) {
+        Rectangle()
+          .fill(palette.elevatedSurface.swiftUIColor)
+          .frame(width: 22, height: 22)
 
-      // 1cm Major Ticks (1..22) & 0.5cm Minor Ticks along the right border
-      ForEach(1...22, id: \.self) { cm in
+        Text("0")
+          .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+          .frame(width: 15, alignment: .center)
+          .offset(x: -5, y: -2)
+
+        Rectangle()
+          .fill(palette.hairlineBorder.swiftUIColor)
+          .frame(height: 0.8)
+      }
+
+      // 1cm Major Ticks (1..24) & 0.5cm Minor Ticks along the right border
+      ForEach(1...24, id: \.self) { cm in
         ZStack(alignment: .topTrailing) {
           // 1cm Major Tick at Top
           Rectangle()
             .fill(palette.secondaryText.swiftUIColor.opacity(0.75))
             .frame(width: 6, height: 0.9)
 
-          // Numeral Label (1..22)
+          // Numeral Label (1..24)
           Text("\(cm)")
             .font(.system(size: 8, weight: .semibold, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -426,9 +394,9 @@ public struct DocumentVerticalRulerView: View {
           Rectangle()
             .fill(palette.hairlineBorder.swiftUIColor)
             .frame(width: 3.5, height: 0.7)
-            .offset(y: 9)
+            .offset(y: 8)
         }
-        .frame(width: 22, height: 18)
+        .frame(width: 22, height: 16.5)
       }
 
       // Bottom Margin Shaded Zone (height: 22)

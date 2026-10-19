@@ -1146,5 +1146,52 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     XCTAssertEqual(vm.selectedHomeRecentFormatFilter, "전체")
     vm.selectedHomeRecentFormatFilter = "PDF"
     XCTAssertEqual(vm.selectedHomeRecentFormatFilter, "PDF")
+
+    // 5. Paragraph Style Switching with Inline Runs & HWP Tab Support
+    vm.activeTabID = vm.openTabs.first(where: { $0.moduleKind == .document })?.id
+    vm.toggleHighlightOnActiveParagraph(colorHex: "#FFF59D")
+    vm.setActiveParagraphStyle(.quote)
+    if case .document(let quoteDoc) = vm.activeTab?.payload {
+      let pIdx = quoteDoc.paragraphs.firstIndex(where: { $0.id == vm.selectedParagraphID }) ?? 0
+      XCTAssertEqual(quoteDoc.paragraphs[pIdx].style, .quote)
+      XCTAssertEqual(quoteDoc.paragraphs[pIdx].fontSizePt, 11.0, accuracy: 0.001)
+      XCTAssertFalse(quoteDoc.paragraphs[pIdx].isBold)
+      XCTAssertTrue(quoteDoc.paragraphs[pIdx].isItalic)
+      XCTAssertTrue(
+        quoteDoc.paragraphs[pIdx].effectiveRuns.allSatisfy {
+          $0.isItalic && !$0.isBold && abs(($0.fontSizePt ?? 0.0) - 11.0) < 0.001
+        }
+      )
+    } else {
+      XCTFail("Expected document payload after .quote style")
+    }
+
+    vm.setActiveParagraphStyle(.title)
+    if case .document(let titleDoc) = vm.activeTab?.payload {
+      let pIdx = titleDoc.paragraphs.firstIndex(where: { $0.id == vm.selectedParagraphID }) ?? 0
+      XCTAssertEqual(titleDoc.paragraphs[pIdx].style, .title)
+      XCTAssertEqual(titleDoc.paragraphs[pIdx].fontSizePt, 20.0, accuracy: 0.001)
+      XCTAssertTrue(titleDoc.paragraphs[pIdx].isBold)
+      XCTAssertFalse(titleDoc.paragraphs[pIdx].isItalic)
+      XCTAssertTrue(
+        titleDoc.paragraphs[pIdx].effectiveRuns.allSatisfy {
+          $0.isBold && !$0.isItalic && abs(($0.fontSizePt ?? 0.0) - 20.0) < 0.001
+        }
+      )
+    } else {
+      XCTFail("Expected document payload after .title style")
+    }
+
+    vm.activeTabID = vm.openTabs.first(where: { $0.moduleKind == .hwp })?.id
+    vm.setActiveParagraphStyle(.heading1)
+    if case .document(let hwpDoc) = vm.activeTab?.payload {
+      let pIdx = hwpDoc.paragraphs.firstIndex(where: { $0.id == vm.selectedParagraphID }) ?? 0
+      XCTAssertEqual(hwpDoc.paragraphs[pIdx].style, .heading1)
+      XCTAssertEqual(hwpDoc.paragraphs[pIdx].fontSizePt, 14.0, accuracy: 0.001)
+      XCTAssertTrue(hwpDoc.paragraphs[pIdx].isBold)
+      XCTAssertFalse(hwpDoc.paragraphs[pIdx].isItalic)
+    } else {
+      XCTFail("Expected HWP payload after .heading1 style")
+    }
   }
 }
