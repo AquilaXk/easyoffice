@@ -505,12 +505,12 @@ struct RightContextInspectorView: View {
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(palette.accentBadgeText.swiftUIColor)
       Text(
-        "SUM \(String(format: "%.1f", rangeSummary.sum)) · AVG \(String(format: "%.1f", rangeSummary.average)) · COUNT \(rangeSummary.numericCount)/\(rangeSummary.cellCount)"
+        "합계 \(String(format: "%.1f", rangeSummary.sum)) · 평균 \(String(format: "%.1f", rangeSummary.average)) · 개수 \(rangeSummary.numericCount)/\(rangeSummary.cellCount)"
       )
       .font(.system(size: 10, design: .monospaced))
       .foregroundStyle(palette.secondaryText.swiftUIColor)
       Text(
-        "MIN \(rangeSummary.minimum.map { String(format: "%.1f", $0) } ?? "-") · MAX \(rangeSummary.maximum.map { String(format: "%.1f", $0) } ?? "-")"
+        "최소 \(rangeSummary.minimum.map { String(format: "%.1f", $0) } ?? "-") · 최대 \(rangeSummary.maximum.map { String(format: "%.1f", $0) } ?? "-")"
       )
       .font(.system(size: 10, design: .monospaced))
       .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -519,24 +519,24 @@ struct RightContextInspectorView: View {
 
       HStack(spacing: 12) {
         FlatToolbarMenu(
-          title: "형식: \(currentStyle.numberFormat.rawValue)",
+          title: "형식: \(currentStyle.numberFormat.displayTitle)",
           systemImage: "number",
           palette: palette
         ) {
           ForEach(CellNumberFormat.allCases, id: \.self) { fmt in
-            Button(fmt.rawValue) {
+            Button(fmt.displayTitle) {
               viewModel.setSelectedSheetCellNumberFormat(fmt)
             }
           }
         }
 
         FlatToolbarMenu(
-          title: "정렬: \(currentStyle.alignment.rawValue)",
+          title: "정렬: \(currentStyle.alignment.displayTitle)",
           systemImage: "text.alignleft",
           palette: palette
         ) {
           ForEach(CellHorizontalAlignment.allCases, id: \.self) { align in
-            Button(align.rawValue) {
+            Button(align.displayTitle) {
               viewModel.setSelectedSheetCellAlignment(align)
             }
           }

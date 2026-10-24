@@ -18,15 +18,13 @@ public enum CSVStateMachineCodec {
   public static func encodeWorksheet(_ sheet: WorksheetModel, delimiter: Character = ",") -> Data {
     var maxRow = -1
     var maxCol = -1
-    var parsedCoordinates: [(coord: PackedCellCoordinate, value: String)] = []
 
     for (coord, rawValue) in sheet.cellsByCoordinate where !rawValue.isEmpty {
       let r = coord.row
       let c = coord.column
       if r >= 0, r < maxExportRows, c >= 0, c < maxExportColumns {
-        maxRow = max(maxRow, r)
-        maxCol = max(maxCol, c)
-        parsedCoordinates.append((coord, rawValue))
+        if r > maxRow { maxRow = r }
+        if c > maxCol { maxCol = c }
       }
     }
 
@@ -34,19 +32,23 @@ public enum CSVStateMachineCodec {
       return Data()
     }
 
-    var grid = Array(
-      repeating: Array(repeating: "", count: maxCol + 1),
-      count: maxRow + 1
-    )
-    for item in parsedCoordinates {
-      grid[item.coord.row][item.coord.column] = item.value
+    var out = ""
+    out.reserveCapacity((maxRow + 1) * (maxCol + 1) * 4)
+    for r in 0...maxRow {
+      if r > 0 {
+        out.append("\r\n")
+      }
+      for c in 0...maxCol {
+        if c > 0 {
+          out.append(delimiter)
+        }
+        let coord = PackedCellCoordinate(row: r, column: c)
+        if let val = sheet.cellsByCoordinate[coord], !val.isEmpty {
+          out.append(serializeField(val, delimiter: delimiter))
+        }
+      }
     }
-
-    let delimiterString = String(delimiter)
-    let lines = grid.map { row -> String in
-      row.map { serializeField($0, delimiter: delimiter) }.joined(separator: delimiterString)
-    }
-    return Data(lines.joined(separator: "\r\n").utf8)
+    return Data(out.utf8)
   }
 
   public static func decodeWorksheet(

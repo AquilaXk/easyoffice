@@ -470,24 +470,165 @@ public struct DocumentEquationBlock: Sendable, Codable, Equatable, Identifiable 
     self.rawExpression = rawExpression
   }
 
+  public init(id: UUID = UUID(), displayTitle: String = "수식 블록", latexSource: String) {
+    self.id = id
+    self.displayTitle = displayTitle
+    self.rawExpression = latexSource
+  }
+
+  public var latexSource: String {
+    get { rawExpression }
+    set { rawExpression = newValue }
+  }
+
   public var renderedNotation: String { Self.formatMathSymbols(rawExpression) }
+
+  public var displayText: String { renderedNotation }
+
+  private static let subscriptTable: [Character: Character] = [
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+    "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+    "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+    "a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ",
+    "k": "ₖ", "l": "ₗ", "m": "ₘ", "n": "ₙ", "o": "ₒ",
+    "p": "ₚ", "r": "ᵣ", "s": "ₛ", "t": "ₜ", "u": "ᵤ",
+    "v": "ᵥ", "x": "ₓ",
+  ]
+
+  private static let superscriptTable: [Character: Character] = [
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+    "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+    "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+    "a": "ᵃ", "b": "ᵇ", "c": "ᶜ", "d": "ᵈ", "e": "ᵉ",
+    "f": "ᶠ", "g": "ᵍ", "h": "ʰ", "i": "ⁱ", "j": "ʲ",
+    "k": "ᵏ", "l": "ˡ", "m": "ᵐ", "n": "ⁿ", "o": "ᵒ",
+    "p": "ᵖ", "r": "ʳ", "s": "ˢ", "t": "ᵗ", "u": "ᵘ",
+    "v": "ᵛ", "w": "ʷ", "x": "ˣ", "y": "ʸ", "z": "ᶻ",
+  ]
 
   public static func formatMathSymbols(_ raw: String) -> String {
     var s = raw
     let replacements: [(String, String)] = [
-      ("\\sum", "∑"), ("\\prod", "∏"), ("\\int", "∫"), ("\\sqrt", "√"),
-      ("\\infty", "∞"), ("\\approx", "≈"), ("\\neq", "≠"), ("\\ne", "≠"),
-      ("\\leq", "≤"), ("\\le", "≤"), ("\\geq", "≥"), ("\\ge", "≥"),
-      ("\\pm", "±"), ("\\times", "×"), ("\\div", "÷"), ("\\cdot", "·"),
-      ("\\alpha", "α"), ("\\beta", "β"), ("\\gamma", "γ"), ("\\delta", "δ"),
-      ("\\Delta", "Δ"), ("\\lambda", "λ"), ("\\mu", "μ"), ("\\pi", "π"),
-      ("\\sigma", "σ"), ("\\Sigma", "Σ"), ("\\theta", "θ"), ("\\omega", "ω"),
-      ("^{2}", "²"), ("^{3}", "³"), ("^{n}", "ⁿ"), ("^2", "²"), ("^3", "³"), ("^n", "ⁿ"),
-      ("_{0}", "₀"), ("_{1}", "₁"), ("_{2}", "₂"), ("_{i}", "ᵢ"), ("_{j}", "ⱼ"), ("_{n}", "ₙ"),
-      ("_0", "₀"), ("_1", "₁"), ("_2", "₂"), ("_i", "ᵢ"), ("_j", "ⱼ"), ("_n", "ₙ"),
+      ("\\partial", "∂"), ("\\approx", "≈"), ("\\infty", "∞"), ("\\nabla", "∇"),
+      ("\\equiv", "≡"), ("\\times", "×"), ("\\alpha", "α"), ("\\gamma", "γ"),
+      ("\\delta", "δ"), ("\\Delta", "Δ"), ("\\lambda", "λ"), ("\\sigma", "σ"),
+      ("\\Sigma", "Σ"), ("\\theta", "θ"), ("\\omega", "ω"), ("\\prod", "∏"),
+      ("\\cdot", "·"), ("\\beta", "β"), ("\\sum", "∑"), ("\\int", "∫"),
+      ("\\neq", "≠"), ("\\leq", "≤"), ("\\geq", "≥"), ("\\div", "÷"),
+      ("\\ne", "≠"), ("\\le", "≤"), ("\\ge", "≥"), ("\\pm", "±"),
+      ("\\mu", "μ"), ("\\pi", "π"),
     ]
-    for (from, to) in replacements { s = s.replacingOccurrences(of: from, with: to) }
-    return s
+    for (from, to) in replacements {
+      s = s.replacingOccurrences(of: from, with: to)
+    }
+
+    while let sqrtRange = s.range(of: "\\sqrt{") {
+      let openBrace = s.index(before: sqrtRange.upperBound)
+      guard let (inner, afterClose) = extractBracedGroup(in: s, from: openBrace) else { break }
+      let formattedInner = formatMathSymbols(inner).trimmingCharacters(in: .whitespaces)
+      let replacement = formattedInner.count <= 1 ? "√\(formattedInner)" : "√(\(formattedInner))"
+      s.replaceSubrange(sqrtRange.lowerBound..<afterClose, with: replacement)
+    }
+    s = s.replacingOccurrences(of: "\\sqrt", with: "√")
+
+    while let fracRange = s.range(of: "\\frac{") {
+      let firstOpen = s.index(before: fracRange.upperBound)
+      guard let (rawNum, afterFirst) = extractBracedGroup(in: s, from: firstOpen) else { break }
+      var secondOpen = afterFirst
+      while secondOpen < s.endIndex && s[secondOpen].isWhitespace {
+        secondOpen = s.index(after: secondOpen)
+      }
+      guard secondOpen < s.endIndex, s[secondOpen] == "{",
+        let (rawDen, afterSecond) = extractBracedGroup(in: s, from: secondOpen)
+      else { break }
+      let num = formatMathSymbols(rawNum).trimmingCharacters(in: .whitespaces)
+      let den = formatMathSymbols(rawDen).trimmingCharacters(in: .whitespaces)
+      let formattedNum = hasTopLevelAdditiveOperator(num) ? "(\(num))" : num
+      let formattedDen = hasTopLevelAdditiveOperator(den) ? "(\(den))" : den
+      s.replaceSubrange(fracRange.lowerBound..<afterSecond, with: "\(formattedNum) / \(formattedDen)")
+    }
+
+    var out = ""
+    out.reserveCapacity(s.count)
+    var idx = s.startIndex
+    while idx < s.endIndex {
+      let ch = s[idx]
+      if ch == "^" || ch == "_" {
+        let isSuper = (ch == "^")
+        let table = isSuper ? superscriptTable : subscriptTable
+        let nextIdx = s.index(after: idx)
+        if nextIdx < s.endIndex {
+          if s[nextIdx] == "{", let (inner, afterClose) = extractBracedGroup(in: s, from: nextIdx) {
+            let cleanedInner = inner.filter { $0 != "{" && $0 != "}" && $0 != (isSuper ? "^" : "_") }
+            var mapped = ""
+            var allMapped = !cleanedInner.isEmpty
+            for c in cleanedInner {
+              if let m = table[c] {
+                mapped.append(m)
+              } else {
+                allMapped = false
+                break
+              }
+            }
+            if allMapped {
+              out.append(mapped)
+            } else {
+              out.append(ch)
+              out.append(formatMathSymbols(inner))
+            }
+            idx = afterClose
+            continue
+          } else if let mappedChar = table[s[nextIdx]] {
+            out.append(mappedChar)
+            idx = s.index(after: nextIdx)
+            continue
+          }
+        }
+      }
+      if ch != "{" && ch != "}" {
+        out.append(ch)
+      }
+      idx = s.index(after: idx)
+    }
+    return out
+  }
+
+  private static func extractBracedGroup(
+    in text: String,
+    from openBraceIndex: String.Index
+  ) -> (content: String, afterCloseIndex: String.Index)? {
+    guard openBraceIndex < text.endIndex, text[openBraceIndex] == "{" else { return nil }
+    var depth = 0
+    var cursor = openBraceIndex
+    let contentStart = text.index(after: openBraceIndex)
+    while cursor < text.endIndex {
+      let ch = text[cursor]
+      if ch == "{" {
+        depth += 1
+      } else if ch == "}" {
+        depth -= 1
+        if depth == 0 {
+          let afterClose = text.index(after: cursor)
+          return (String(text[contentStart..<cursor]), afterClose)
+        }
+      }
+      cursor = text.index(after: cursor)
+    }
+    return nil
+  }
+
+  private static func hasTopLevelAdditiveOperator(_ term: String) -> Bool {
+    var depth = 0
+    for (idx, ch) in term.enumerated() {
+      if ch == "(" || ch == "[" || ch == "{" {
+        depth += 1
+      } else if ch == ")" || ch == "]" || ch == "}" {
+        depth = max(0, depth - 1)
+      } else if depth == 0 && idx > 0 && (ch == "+" || ch == "-" || ch == "±") {
+        return true
+      }
+    }
+    return false
   }
 }
 

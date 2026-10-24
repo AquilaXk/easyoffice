@@ -190,6 +190,9 @@ const FORBIDDEN_UI_GATE_PHRASES = [
   "시그니처 라벤더 디자인 시스템과 올인원 문서 워크스페이스",
   "122종 함수 마법사",
   "매직 바이트 보안 검증",
+  "Rich Page Layout Engine",
+  "Virtualized A1 Formula Grid",
+  "Stage Canvas & Vector PDF Studio",
 ];
 
 const webuiCssPath = path.join(ROOT, "crates/easyoffice-app/ui/styles.css");
