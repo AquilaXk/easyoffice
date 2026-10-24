@@ -146,11 +146,15 @@ impl LegacyOle2Codec {
         if fc_mac + 4 <= doc_stream.data.len()
             && read_u32_le(&doc_stream.data, fc_mac)? == Self::DOC_TRAILER_MAGIC
         {
-            if let Ok(payload) = Self::parse_compact_doc_trailer(&doc_stream.data, fc_mac + 4) {
-                return Ok(payload);
+            match Self::parse_compact_doc_trailer(&doc_stream.data, fc_mac + 4) {
+                Ok(payload) => return Ok(payload),
+                Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
+                Err(_) => {}
             }
-            if let Ok(payload) = Self::parse_extended_doc_trailer(&doc_stream.data, fc_mac + 4) {
-                return Ok(payload);
+            match Self::parse_extended_doc_trailer(&doc_stream.data, fc_mac + 4) {
+                Ok(payload) => return Ok(payload),
+                Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
+                Err(_) => {}
             }
         }
 
@@ -243,6 +247,11 @@ impl LegacyOle2Codec {
         cursor += 1;
         let p_count = read_u32_le(data, cursor)? as usize;
         cursor += 4;
+        if p_count > 4096 || p_count.saturating_mul(4) > limit.saturating_sub(cursor) {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "DOC 확장 문단 개수가 보안 상한을 초과했습니다.".to_string(),
+            ));
+        }
         let mut paragraphs = Vec::with_capacity(p_count.min(4096));
         for _ in 0..p_count {
             let _style = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
@@ -312,6 +321,17 @@ impl LegacyOle2Codec {
                         let r_count = read_u32_le(data, cursor)? as usize;
                         let c_count = read_u32_le(data, cursor + 4)? as usize;
                         cursor += 8;
+                        if r_count == 0
+                            || c_count == 0
+                            || r_count > 4096
+                            || c_count > 256
+                            || r_count.saturating_mul(c_count).saturating_mul(4)
+                                > limit.saturating_sub(cursor)
+                        {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "DOC 확장 표 행·열 개수가 보안 상한을 초과했습니다.".to_string(),
+                            ));
+                        }
                         let mut rows = Vec::with_capacity(r_count.min(256));
                         for _ in 0..r_count {
                             let mut row = Vec::with_capacity(c_count.min(256));

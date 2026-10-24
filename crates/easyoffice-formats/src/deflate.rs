@@ -224,7 +224,10 @@ fn check_budget(
     }
     if input_len > 0
         && new_len > 4096
-        && (new_len / input_len.max(1)) > (ZipSecurityGuard::MAX_COMPRESSION_RATIO as usize)
+        && new_len
+            > input_len
+                .max(1)
+                .saturating_mul(ZipSecurityGuard::MAX_COMPRESSION_RATIO as usize)
     {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
             "DEFLATE 압축 해제 비율({}x)이 보안 상한({}x)을 초과했습니다.",
@@ -465,8 +468,10 @@ pub fn inflate_auto(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
             && (b1 & 0x20) == 0
             && ((u16::from(b0) * 256 + u16::from(b1)).is_multiple_of(31));
         if is_zlib_header {
-            if let Ok(decoded) = inflate_raw(&input[2..], max_output_bytes) {
-                return Ok(decoded);
+            match inflate_raw(&input[2..], max_output_bytes) {
+                Ok(decoded) => return Ok(decoded),
+                Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
+                Err(_) => {}
             }
         }
     }

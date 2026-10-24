@@ -253,11 +253,6 @@ final class EasyOfficeTests: XCTestCase {
       XCTAssertFalse(badge.isEmpty, "shortSpecificationBadge must not be empty for \(format)")
       XCTAssertLessThanOrEqual(
         badge.count,
-        20,
-        "shortSpecificationBadge (\(badge)) exceeded 20 chars for \(format)"
-      )
-      XCTAssertLessThanOrEqual(
-        badge.count,
         14,
         "shortSpecificationBadge (\(badge)) exceeded 14 chars for \(format)"
       )

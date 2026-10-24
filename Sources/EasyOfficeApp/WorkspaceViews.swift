@@ -1266,9 +1266,6 @@ struct ContextRibbonBarView: View {
           palette: palette
         ) {
           viewModel.executeRibbonCommand("doc-mod-footnote")
-          viewModel.executeRibbonCommand(
-            activeModule == .hwp ? "hwp-insert-footnote" : "doc-insert-footnote"
-          )
         }
         ribbonQuickButton(
           title: "자간-",
@@ -1983,24 +1980,55 @@ struct ActiveEditorCanvasRouterView: View {
 typealias CentralEditorCanvasView = EditorCanvasSinglePaneView
 
 struct EditorCanvasSinglePaneView: View {
+  @Environment(\.colorScheme) private var colorScheme
   @Bindable var viewModel: WorkspaceViewModel
   let tab: WorkspaceTabItem
   var isPrimaryPane: Bool = true
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      switch tab.payload {
-      case .document(let doc):
-        DocumentEditorDetailPaneView(
-          viewModel: viewModel, document: doc, isPrimaryPane: isPrimaryPane)
-      case .sheet(let sheet):
-        SheetEditorDetailPaneView(
-          viewModel: viewModel, sheet: sheet, isPrimaryPane: isPrimaryPane)
-      case .slide(let deck):
-        SlideEditorDetailPaneView(viewModel: viewModel, deck: deck, isPrimaryPane: isPrimaryPane)
-      case .pdf(let pdf):
-        PDFStudioDetailPaneView(viewModel: viewModel, pdf: pdf, isPrimaryPane: isPrimaryPane)
+    let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
+    let isReadOnly = viewModel.workspaceViewMode == .readOnlyView
+
+    VStack(alignment: .leading, spacing: 6) {
+      if viewModel.workspaceViewMode != .editView {
+        HStack(spacing: 6) {
+          Image(systemName: viewModel.workspaceViewMode.symbolName)
+            .font(.system(size: 11, weight: .semibold))
+          Text(
+            isReadOnly
+              ? "읽기 전용 모드 · 문서 수정이 잠겨 있습니다"
+              : "윤곽 보기 모드 · 문단 계층 및 개요 중심 표시"
+          )
+          .font(.system(size: 11, weight: .semibold))
+          Spacer()
+          Button("편집 전환") {
+            viewModel.setWorkspaceViewMode(.editView)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(palette.elevatedSurface.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
       }
+
+      Group {
+        switch tab.payload {
+        case .document(let doc):
+          DocumentEditorDetailPaneView(
+            viewModel: viewModel, document: doc, isPrimaryPane: isPrimaryPane)
+        case .sheet(let sheet):
+          SheetEditorDetailPaneView(
+            viewModel: viewModel, sheet: sheet, isPrimaryPane: isPrimaryPane)
+        case .slide(let deck):
+          SlideEditorDetailPaneView(
+            viewModel: viewModel, deck: deck, isPrimaryPane: isPrimaryPane)
+        case .pdf(let pdf):
+          PDFStudioDetailPaneView(viewModel: viewModel, pdf: pdf, isPrimaryPane: isPrimaryPane)
+        }
+      }
+      .disabled(isReadOnly)
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 10)

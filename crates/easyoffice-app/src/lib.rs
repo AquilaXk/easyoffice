@@ -438,7 +438,7 @@ impl EasyOfficeIpcRouter {
             dst_fmt.container_family().as_str(),
             dst_fmt.standard_specification(),
             decoded.paragraphs.len(),
-            decoded.title.replace('"', "\\\"")
+            Self::escape_json_str(&decoded.title)
         ))
     }
 
@@ -469,16 +469,34 @@ impl EasyOfficeIpcRouter {
             .map(|c| {
                 format!(
                     "{{\"id\":\"{}\",\"title\":\"{}\",\"shortcut\":\"{}\",\"category\":\"{}\"}}",
-                    c.id, c.title, c.shortcut, category_label
+                    Self::escape_json_str(&c.id),
+                    Self::escape_json_str(c.title),
+                    Self::escape_json_str(c.shortcut),
+                    Self::escape_json_str(category_label)
                 )
             })
             .collect();
         Ok(format!(
             "{{\"module\":\"{:?}\",\"category\":\"{}\",\"commands\":[{}]}}",
             module,
-            cat_str.trim(),
+            Self::escape_json_str(cat_str.trim()),
             items.join(",")
         ))
+    }
+
+    fn escape_json_str(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for ch in s.chars() {
+            match ch {
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c => out.push(c),
+            }
+        }
+        out
     }
 
     fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {

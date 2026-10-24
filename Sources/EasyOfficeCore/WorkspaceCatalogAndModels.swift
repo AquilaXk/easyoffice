@@ -77,35 +77,11 @@ public enum InspectorSubTab: String, CaseIterable, Sendable, Codable, Identifiab
 }
 
 extension WorkspaceViewModel {
-  private static var workspaceViewModeStorage: [ObjectIdentifier: WorkspaceViewMode] = [:]
-  private static var activeInspectorSubTabStorage: [ObjectIdentifier: InspectorSubTab] = [:]
-
-  public var workspaceViewMode: WorkspaceViewMode {
-    get {
-      access(keyPath: \.workspaceViewMode)
-      return Self.workspaceViewModeStorage[ObjectIdentifier(self)] ?? .editView
-    }
-    set {
-      withMutation(keyPath: \.workspaceViewMode) {
-        Self.workspaceViewModeStorage[ObjectIdentifier(self)] = newValue
-      }
-    }
-  }
-
-  public var activeInspectorSubTab: InspectorSubTab {
-    get {
-      access(keyPath: \.activeInspectorSubTab)
-      return Self.activeInspectorSubTabStorage[ObjectIdentifier(self)] ?? .propertiesAndLayout
-    }
-    set {
-      withMutation(keyPath: \.activeInspectorSubTab) {
-        Self.activeInspectorSubTabStorage[ObjectIdentifier(self)] = newValue
-      }
-    }
-  }
-
   public func setWorkspaceViewMode(_ mode: WorkspaceViewMode) {
     workspaceViewMode = mode
+    if mode == .outlineView {
+      showLeftNavigator = true
+    }
     lastExecutedCommandSummary = "\(mode.rawValue) 모드로 전환했습니다."
   }
 

@@ -678,6 +678,17 @@ impl Hwp5Codec {
                 let row_count = read_u32_le(data, cur)? as usize;
                 let col_count = read_u32_le(data, cur + 4)? as usize;
                 cur += 8;
+                if row_count == 0
+                    || col_count == 0
+                    || row_count > 4096
+                    || col_count > 256
+                    || row_count.saturating_mul(col_count).saturating_mul(4)
+                        > end.saturating_sub(cur)
+                {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "HWP 5.0 표 행·열 개수가 보안 상한을 초과했습니다.".to_string(),
+                    ));
+                }
                 let mut rows = Vec::with_capacity(row_count.min(256));
                 let mut ok = true;
                 for _ in 0..row_count {

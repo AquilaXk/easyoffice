@@ -57,6 +57,15 @@ fn test_deflate_bomb_budget_refusal() {
     let err =
         inflate_raw(&compressed, 1024).expect_err("must reject when exceeding max_output_bytes");
     assert!(matches!(err, EasyOfficeError::ResourceBudgetExceeded(_)));
+
+    let mut zlib_bomb = vec![0x78, 0x9C];
+    zlib_bomb.extend_from_slice(&compressed);
+    let zlib_err = inflate_auto(&zlib_bomb, 1024)
+        .expect_err("zlib-wrapped bomb must return ResourceBudgetExceeded");
+    assert!(matches!(
+        zlib_err,
+        EasyOfficeError::ResourceBudgetExceeded(_)
+    ));
 }
 
 #[test]
@@ -76,6 +85,9 @@ fn test_zip_pack_deflate_and_format_detector_on_compressed_hwtx_and_ppsx() {
     assert_eq!(unpacked.len(), 2);
     assert_eq!(unpacked[1].data, entries[1].data);
 
+    let detected_no_hint =
+        FormatDetector::detect(&zip_bytes, None).expect("detect compressed hwtx without hint");
+    assert_eq!(detected_no_hint, DocumentFormat::Hwtx);
     let detected = FormatDetector::detect(&zip_bytes, Some("official_form.hwtx"))
         .expect("detect compressed hwtx");
     assert_eq!(detected, DocumentFormat::Hwtx);
@@ -93,6 +105,10 @@ fn test_zip_pack_deflate_and_format_detector_on_compressed_hwtx_and_ppsx() {
         ),
     ];
     let ppsx_zip = ZipArchiveCodec::pack_deflate(&ppsx_entries).expect("pack ppsx deflate");
+    assert_eq!(
+        FormatDetector::detect(&ppsx_zip, None).unwrap(),
+        DocumentFormat::Ppsx
+    );
     assert_eq!(
         FormatDetector::detect(&ppsx_zip, Some("deck.ppsx")).unwrap(),
         DocumentFormat::Ppsx
@@ -287,4 +303,28 @@ fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
     let ppt_bytes = LegacyOle2Codec::pack_ppt(&base_ppt).unwrap();
     let unpacked_ppt = LegacyOle2Codec::unpack_ppt(&ppt_bytes).unwrap();
     assert_eq!(unpacked_ppt, base_ppt);
+
+    let mut bad_tbl_doc = vec![0u8; 64];
+    bad_tbl_doc[0..2].copy_from_slice(&LegacyOle2Codec::DOC_FIB_MAGIC.to_le_bytes());
+    bad_tbl_doc[2..4].copy_from_slice(&LegacyOle2Codec::DOC_FIB_VERSION.to_le_bytes());
+    bad_tbl_doc[24..28].copy_from_slice(&64u32.to_le_bytes());
+    bad_tbl_doc[28..32].copy_from_slice(&64u32.to_le_bytes());
+    bad_tbl_doc.extend_from_slice(&LegacyOle2Codec::DOC_FIB_MARKER.to_le_bytes());
+    bad_tbl_doc.extend_from_slice(&encode_u16_prefixed("제목"));
+    bad_tbl_doc.extend_from_slice(&encode_u16_prefixed("A4"));
+    bad_tbl_doc.extend_from_slice(&encode_u16_prefixed(""));
+    bad_tbl_doc.extend_from_slice(&encode_u16_prefixed(""));
+    bad_tbl_doc.push(0);
+    bad_tbl_doc.extend_from_slice(&0u32.to_le_bytes());
+    bad_tbl_doc.extend_from_slice(&1u32.to_le_bytes());
+    bad_tbl_doc.extend_from_slice(&encode_u16_prefixed("표"));
+    bad_tbl_doc.push(1);
+    bad_tbl_doc.extend_from_slice(&0xFFFF_0001u32.to_le_bytes());
+    bad_tbl_doc.extend_from_slice(&0u32.to_le_bytes());
+    let bad_doc_stream =
+        Ole2ContainerCodec::pack(&[(["Wor", "dDocument"].concat(), bad_tbl_doc)]).unwrap();
+    assert!(matches!(
+        LegacyOle2Codec::unpack_doc(&bad_doc_stream),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
 }

@@ -100,7 +100,7 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
 
     let textView = NSTextView()
     textView.isRichText = true
-    textView.isEditable = true
+    textView.isEditable = viewModel.workspaceViewMode != .readOnlyView
     textView.isSelectable = true
     textView.drawsBackground = false
     textView.isVerticallyResizable = true
@@ -128,6 +128,10 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
   public func updateNSView(_ nsView: NSScrollView, context: Context) {
     context.coordinator.parent = self
     guard let textView = nsView.documentView as? NSTextView else { return }
+    let shouldBeEditable = viewModel.workspaceViewMode != .readOnlyView
+    if textView.isEditable != shouldBeEditable {
+      textView.isEditable = shouldBeEditable
+    }
     let currentRuns = paragraph.effectiveRuns
     let paragraphStyleChanged =
       context.coordinator.lastAlignment != paragraph.alignment

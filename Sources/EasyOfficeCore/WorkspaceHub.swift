@@ -35,6 +35,8 @@ public final class WorkspaceViewModel {
   public var selectedPDFPageIndex: Int = 0
   public var formulaBarDraft: String = ""
   public var isPresenterModeActive: Bool = false
+  public var workspaceViewMode: WorkspaceViewMode = .editView
+  public var activeInspectorSubTab: InspectorSubTab = .propertiesAndLayout
 
   // Interactive editing, undo/redo, and studio state
   private var storedSelectedParagraphIndex: Int = 0

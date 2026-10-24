@@ -62,7 +62,7 @@
       { id: "doc-rev-track", title: "변경 내용 추적", group: "검토·교정" },
       { id: "doc-rev-accept", title: "변경 승인", group: "검토·교정" },
       { id: "doc-rev-comment", title: "메모 추가", group: "검토·교정" },
-      { id: "hwp-rev- inspect", title: "공문서 표기 점검", group: "검토·교정" }
+      { id: "hwp-rev-inspect", title: "공문서 표기 점검", group: "검토·교정" }
     ],
     view: [
       { id: "doc-view-page", title: "쪽 윤곽 보기", group: "화면 보기" },
@@ -216,7 +216,15 @@
     });
   });
 
-  const ribbonReadout = document.getElementById("ribbon-status-readout");
+  function escapeHtml(raw) {
+    return String(raw == null ? "" : raw)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   const ribbonToolsContainer = document.getElementById("ribbon-tools");
 
   function bindRibbonToolButtons() {
@@ -236,6 +244,7 @@
           return;
         }
         const res = await EasyOfficeIPC.invoke("execute_ribbon_command", cmdId);
+        const ribbonReadout = document.getElementById("ribbon-status-readout");
         if (ribbonReadout && res && res.summary) {
           ribbonReadout.textContent = res.summary;
         }
@@ -267,7 +276,7 @@
 
     if (!ribbonToolsContainer) return;
     const buttonsHtml = tools.map(function (t) {
-      return '<button class="tool-btn" data-ribbon-cmd="' + t.id + '">' + t.title + "</button>";
+      return '<button class="tool-btn" data-ribbon-cmd="' + escapeHtml(t.id) + '">' + escapeHtml(t.title) + "</button>";
     }).join("");
 
     ribbonToolsContainer.innerHTML =
@@ -282,7 +291,7 @@
       "</div>" +
       '<div class="tool-group">' +
         '<span class="group-label">실행 상태</span>' +
-        '<span id="ribbon-status-readout" class="ribbon-readout">카테고리: ' + activeRibbonCategory + "</span>" +
+        '<span id="ribbon-status-readout" class="ribbon-readout">카테고리: ' + escapeHtml(activeRibbonCategory) + "</span>" +
       "</div>";
 
     bindRibbonToolButtons();
@@ -379,7 +388,7 @@
       const chars = Array.from(rawText);
       let html = "";
       for (let i = 0; i < 200; i++) {
-        const ch = chars[i] ? chars[i] : "";
+        const ch = chars[i] ? escapeHtml(chars[i]) : "";
         html += '<div class="manuscript-cell">' + ch + "</div>";
       }
       manuscriptGridView.innerHTML = html;
@@ -398,7 +407,7 @@
     const res = await EasyOfficeIPC.invoke("run_smart_assistant", text);
     if (smartOutput && res) {
       smartOutput.innerHTML =
-        '<div class="smart-stat-line">단어 ' + res.wordCount + "개 · 예상 읽기 " + res.readingTimeSeconds + "초 · 실행항목 " + res.actionItemCount + "건</div>" +
+        '<div class="smart-stat-line">단어 ' + Number(res.wordCount) + "개 · 예상 읽기 " + Number(res.readingTimeSeconds) + "초 · 실행항목 " + Number(res.actionItemCount) + "건</div>" +
         '<p class="smart-desc">핵심 문장 요약 및 문단 가독성 진단이 완료되었습니다.</p>';
     }
   }
@@ -409,8 +418,8 @@
     const res = await EasyOfficeIPC.invoke("scrub_pii", sample);
     if (smartOutput && res) {
       smartOutput.innerHTML =
-        '<div class="smart-stat-line">개인정보 마스킹 완료 (' + res.totalMasked + "건 보호됨)</div>" +
-        '<p class="smart-desc">' + res.scrubbedText + "</p>";
+        '<div class="smart-stat-line">개인정보 마스킹 완료 (' + Number(res.totalMasked) + "건 보호됨)</div>" +
+        '<p class="smart-desc">' + escapeHtml(res.scrubbedText) + "</p>";
     }
   }
 
@@ -638,6 +647,7 @@
   function toggleTheme() {
     const isDark = document.body.classList.toggle("theme-dark");
     document.body.classList.toggle("theme-light", !isDark);
+    document.body.setAttribute("data-theme", isDark ? "dark" : "light");
     if (themeBtn) themeBtn.textContent = isDark ? "라이트 모드" : "다크 모드";
   }
   if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
