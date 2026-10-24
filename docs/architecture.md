@@ -103,12 +103,13 @@ macOS와 Windows 양대 데스크톱 환경에서 동일한 문서 포맷 검증
 2. **`crates/easyoffice-sheet` (64-bit 패킹 좌표·재귀 하강 수식 파서·$O(V+E)$ 평가기)**:
    - `PackedCellCoordinate`는 `(row: 32bit, col: 32bit)`를 단일 `u64`에 패킹하고(`MAX_ROWS = 1,000,000`, `MAX_COLS = 16,384`), `CellRange::expand`는 단일 범위 확장 상한(`100,000`셀)을 강제합니다.
    - 단항 `+`/`-`, 후위 `%`, 산술·비교·문자열 결합(`&`) 연산자, 순환 참조 탐지(`FormulaError::Cycle`) 및 재귀 상한(`MAX_RECURSION_DEPTH = 64`), ECMA-376 호환 `ISBLANK`·`SUM`·`AVERAGE`·`IF`·`IFERROR`·`SQRT`·`POWER`·`MOD`·`CONCAT`·`VLOOKUP`·`INDEX`·`MATCH`·`NPV`·`STDEV`·`MEDIAN` 등 내장 함수와 `PivotTableSummary` 집계를 제공합니다.
-3. **`crates/easyoffice-layout` (시그니처 라벤더 토큰·문서/공문서/슬라이드/PDF 레이아웃)**:
-   - `SignatureLavenderPalette`(`#5C6BC0` Primary Accent, `#F7F8FC` Light Canvas, `#141724` Dark Canvas)와 플랫폼 렌더러 식별자(`MacOsWkWebView` / `WindowsWebView2`)를 정의합니다.
-   - `DocumentPageLayout`(A4 가로/세로 스왑, 1~4단 다단 폭 계산, 200자 원고지 그리드, KS X 6101 행정 공문서 헤더 및 결재란), `SlideStageLayout`(`840 × 472.5 pt` 16:9 스테이지 및 상단 본문·하단 오브젝트 비겹침 영역 `y >= 240pt`), `PdfStudioLayout`(`y = 804..452` 가시 좌표 및 결재 날인 박스)을 계산합니다.
-4. **`crates/easyoffice-app` (Tauri v2 IPC 라우터·CLI 자체 검증·WebUI 셸)**:
-   - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `compute_layout`, `audit_security` 명령을 결정론적 JSON 페이로드로 라우팅하며, `cargo run -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식을 자체 검증합니다.
-   - `tauri.conf.json`은 macOS(`.app`, `.dmg` — `WKWebView`)와 Windows(`.msi`, `.nsis` — `WebView2` `downloadBootstrapper`) 번들 타겟을 정의하고, `ui/{index.html,styles.css,app.js}`는 `Cmd`/`Ctrl` 단축키 자동 매핑과 한글 두벌식 IME 조합(`compositionstart`/`compositionupdate`/`compositionend`) 무결성을 지원합니다.
+3. **`crates/easyoffice-layout` (시그니처 라벤더 토큰·5대 모듈 도메인 엔진·조판 레이아웃)**:
+   - `SignatureLavenderPalette`(`#5C6BC0` Primary Accent, `#F7F8FC` Light Canvas, `#141724` Dark Canvas), 플랫폼 렌더러 식별자(`MacOsWkWebView` / `WindowsWebView2`), 리본 레이아웃 모드(`RibbonLayoutStyle { StandardOffice, HangulHwp }`), 모듈별 자동 개체 도구 배지(`ContextualObjectToolKind`)를 정의합니다.
+   - `DocumentPageLayout`(A4 가로/세로 스왑, 1~4단 다단 폭 계산, 200자 원고지 그리드, KS X 6101 행정 공문서 헤더 및 결재란), `DocumentDomainEngine`(병합 표 모델 `DocumentTableModel` 및 `=SUM(ABOVE)`·`=AVERAGE(LEFT)` 표 수식, 변경 내용 추적 `RevisionRecord`, 각주·미주 `FootnoteEntry`, 1~3단계 자동 목차 생성, `{{필드}}` 메일 머지), `SlideDomainEngine`(5종 마스터 레이아웃, 전환 타이밍, 발표자 레이저 포인터·자유곡선 펜 `PresenterSessionState`), `PdfDomainEngine`(90도 페이지 회전, 페이지 분할·병합, 결재 스탬프, 워터마크, AcroForm 위젯)을 제공합니다.
+4. **`crates/easyoffice-app` (Tauri v2 IPC 라우터·140종 리본 라우터·오프라인 스마트 보조·C-ABI FFI·WebUI 셸)**:
+   - `RibbonCommandRouter`가 7개 카테고리 × 20개 명령(`140`종) 카탈로그와 64단계 `UndoRedoStack`을 제공하며, `LocalSmartAssistant`(TF 가중 핵심 문장 요약, 문장 진단, 액션 아이템 추출, LCS 문서 비교) 및 `DocumentSecurityAuditor`(주민등록번호·휴대전화·이메일 PII 마스킹 및 메타데이터 제거), C-ABI 브리지(`easyoffice_ffi_version`, `easyoffice_ffi_dispatch_json`, `easyoffice_ffi_free_string`)를 내장합니다.
+   - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `compute_layout`, `audit_security`, `execute_ribbon_command`, `switch_ribbon_style`, `run_smart_assistant`, `scrub_pii` 명령을 라우팅하며, `cargo run -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식을 자체 검증합니다.
+   - `tauri.conf.json`은 macOS(`.app`, `.dmg` — `WKWebView`)와 Windows(`.msi`, `.nsis` — `WebView2` `downloadBootstrapper`) 번들 타겟을 정의하고, `ui/{index.html,styles.css,app.js}`는 `표준 리본 ↔ 한글 쪽·편집 리본` 전환, 컨텍스트 개체 도구 배지, `Cmd`/`Ctrl` 단축키 자동 매핑, 한글 두벌식 IME 조합(`compositionstart`/`compositionupdate`/`compositionend`) 무결성을 지원합니다.
 
 ---
 
@@ -128,10 +129,10 @@ macOS와 Windows 양대 데스크톱 환경에서 동일한 문서 포맷 검증
 
 ---
 
-## 4. macOS 릴리스 패키징 파이프라인 (`scripts/package-macos-release.sh`)
+## 4. macOS 및 Windows 릴리스 패키징 파이프라인 (`scripts/package-macos-release.sh`, `.github/workflows/release.yml`)
 
-GitHub Release 발행 시 `scripts/package-macos-release.sh`는 다음 단계를 결정론적으로 수행합니다:
-1. `swift build -c release`로 최적화된 네이티브 실행 바이너리를 컴파일합니다.
+GitHub Release 발행 시 macOS(`release-macos`)와 Windows(`build-windows-release`) 병렬 파이프라인이 다음 단계를 결정론적으로 수행합니다:
+1. `swift build -c release` 및 `cargo build --workspace --release`로 최적화된 네이티브 실행 바이너리를 컴파일합니다.
 2. 표준 macOS 애플리케이션 번들 구조(`EasyOffice.app/Contents/{MacOS,Resources,Info.plist,PkgInfo}`)를 생성하고 문서 확장자 연결(`CFBundleDocumentTypes`: `docx`, `xlsx`, `pptx`, `hwp`, `hwpx`, `pdf`, `odt`, `ods`, `odp`, `csv`, `md`, `txt`) 및 고해상도 Retina 속성(`NSHighResolutionCapable`)을 주입합니다.
 3. 로컬 코드 서명(`codesign --force --deep --sign -` 또는 Developer ID 인증서) 및 번들 구조 검증을 수행합니다.
-4. `hdiutil create`와 `ditto -c -k`를 사용하여 배포용 디스크 이미지(`EasyOffice-<version>-macos.dmg`), 압축 아카이브(`EasyOffice-<version>-macos.zip`), 그리고 `shasum -a 256` 기반의 `SHA256SUMS.txt`를 생성하여 GitHub Release 자산으로 업로드합니다.
+4. macOS 배포용 디스크 이미지(`EasyOffice-<version>-macos.dmg`)·압축 아카이브(`EasyOffice-<version>-macos.zip`)·`SHA256SUMS.txt`와 Windows x64 배포 아카이브(`EasyOffice-<version>-windows-x64.zip`)·`SHA256SUMS-windows-x64.txt`를 생성하여 GitHub Release 자산으로 함께 업로드합니다.

@@ -464,6 +464,33 @@ public struct RibbonCommandDescriptor: Sendable, Equatable, Identifiable {
   }
 }
 
+public typealias WorkspaceRibbonCategory = RibbonCategory
+
+/// Ribbon layout style supporting both global standard office and Korean HWP page/manuscript modes.
+public enum RibbonLayoutStyle: String, CaseIterable, Sendable, Identifiable {
+  case standardOffice = "표준 오피스"
+  case hangulHwp = "한글(HWP) 쪽·편집"
+
+  public var id: String { rawValue }
+
+  public func displayTitle(for category: WorkspaceRibbonCategory) -> String {
+    switch self {
+    case .standardOffice:
+      return category.rawValue
+    case .hangulHwp:
+      switch category {
+      case .home: return "편집"
+      case .insert: return "입력"
+      case .layout: return "쪽·원고지"
+      case .formulasAndData: return "표·개체"
+      case .moduleSpecific: return "시트·차트"
+      case .review: return "보안·도구"
+      case .view: return "보기"
+      }
+    }
+  }
+}
+
 /// Context-aware ribbon tabs adapting to the active document module.
 public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
   case home = "홈 (Home)"
