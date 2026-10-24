@@ -545,8 +545,15 @@
     if (notesInput) notesInput.value = slide.notes;
     if (transSelect) transSelect.value = slide.transition;
     if (metaStatus) {
+      const transitionLabelMap = {
+        fade: "페이드",
+        push: "밀어내기",
+        zoom: "확대",
+        none: "없음",
+      };
+      const transitionLabel = transitionLabelMap[slide.transition] || slide.transition;
       metaStatus.textContent =
-        "슬라이드 " + (idx + 1) + " / " + SLIDE_DECK_STATE.length + " · 전환: " + slide.transition;
+        "슬라이드 " + (idx + 1) + " / " + SLIDE_DECK_STATE.length + " · 전환: " + transitionLabel;
     }
 
     const thumbList = document.getElementById("slide-thumb-list");
@@ -636,7 +643,8 @@
 
   async function runBenchmarkAction() {
     const res = await invokeIpc("run_engine_benchmark", "5");
-    const box = document.getElementById("bench-result-box");
+    const box =
+      document.getElementById("bench-Summary") || document.getElementById("bench-result-box");
     const fb = document.getElementById("status-command-feedback");
     if (res && Array.isArray(res.suites)) {
       const summary = res.suites
@@ -900,7 +908,8 @@
 
   function setupSmartAndSecurityHandlers() {
     const editor = document.getElementById("doc-editor");
-    const imeBadge = document.getElementById("ime-indicator");
+    const imeBadge =
+      document.getElementById("ime-badge") || document.getElementById("ime-indicator");
     if (editor) {
       editor.addEventListener("compositionstart", () => {
         isImeComposing = true;
@@ -990,24 +999,28 @@
   }
 
   function computeDocTableSummary() {
-    const rows = document.querySelectorAll("#doc-table-body tr");
-    let sum25 = 0;
-    let sum26 = 0;
-    rows.forEach((tr) => {
-      const cells = tr.querySelectorAll("td");
-      if (cells.length < 3) return;
-      const v25 = Number.parseFloat((cells[1].textContent || "").replaceAll(",", ""));
-      const v26 = Number.parseFloat((cells[2].textContent || "").replaceAll(",", ""));
-      if (!Number.isNaN(v25)) sum25 += v25;
-      if (!Number.isNaN(v26)) sum26 += v26;
+    const numCells = document.querySelectorAll(
+      "#doc-table-body tr:not(#doc-table-sum-row) [data-doc-num]"
+    );
+    let total = 0;
+    numCells.forEach((cell) => {
+      const raw = (cell.dataset.docNum || cell.textContent || "0").replaceAll(",", "");
+      const val = Number.parseFloat(raw);
+      if (!Number.isNaN(val)) {
+        total += val;
+      }
     });
-    const fb = document.getElementById("status-command-feedback");
-    if (fb && rows.length > 0) {
-      fb.textContent =
-        "표 수식 검산 완료 · 2025년 평균 " +
-        (sum25 / rows.length).toFixed(1) +
-        " / 2026년 목표 평균 " +
-        (sum26 / rows.length).toFixed(1);
+    const sumCell = document.getElementById("doc-table-sum-cell");
+    if (sumCell) {
+      sumCell.textContent = String(total);
+      sumCell.dataset.docNum = String(total);
+    }
+    const statusEl =
+      document.getElementById("doc-table-summary") ||
+      document.getElementById("status-message") ||
+      document.getElementById("status-command-feedback");
+    if (statusEl) {
+      statusEl.textContent = "표 =SUM(ABOVE) 합계: " + total + "백만원";
     }
   }
 
@@ -1017,23 +1030,28 @@
     if (addRowBtn && tbody) {
       addRowBtn.addEventListener("click", () => {
         const tr = document.createElement("tr");
-        const idx = tbody.querySelectorAll("tr").length + 1;
         tr.innerHTML =
-          '<td contenteditable="true">신규 성과 지표 #' +
-          idx +
-          '</td><td contenteditable="true">100.0</td><td contenteditable="true">120.0</td><td contenteditable="true">+20.0%</td>';
-        tbody.appendChild(tr);
+          '<td>신규 사업부</td><td>담당 연구원</td><td data-doc-num="150">150</td>';
+        const sumRow = document.getElementById("doc-table-sum-row");
+        if (sumRow) {
+          sumRow.before(tr);
+        } else {
+          tbody.appendChild(tr);
+        }
+        computeDocTableSummary();
         computeSmartStats();
       });
     }
     const mergeBtn = document.getElementById("btn-doc-merge-toggle");
     if (mergeBtn && tbody) {
       mergeBtn.addEventListener("click", () => {
-        const firstTd = tbody.querySelector("tr td");
-        if (!firstTd) return;
-        const isMerged = firstTd.colSpan > 1;
-        firstTd.colSpan = isMerged ? 1 : 2;
-        mergeBtn.textContent = isMerged ? "첫 행 요약 병합" : "셀 병합 해제";
+        const sumRow = document.getElementById("doc-table-sum-row");
+        const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
+        if (cells.length < 2) return;
+        const isMerged = cells[0].colSpan > 1;
+        cells[0].colSpan = isMerged ? 1 : 2;
+        cells[1].hidden = !isMerged;
+        mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
       });
     }
     const evalDocBtn = document.getElementById("btn-doc-eval-table");
@@ -1057,7 +1075,7 @@
         const newTab = document.createElement("button");
         newTab.className = "sheet-tab-btn";
         newTab.dataset.sheetTab = "Sheet" + count;
-        newTab.textContent = "Sheet" + count;
+        newTab.textContent = "시트 " + count;
         addSheetBtn.before(newTab);
         sheetTabBar.querySelectorAll(".sheet-tab-btn").forEach((b) => b.classList.remove("active"));
         newTab.classList.add("active");

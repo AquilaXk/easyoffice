@@ -121,7 +121,7 @@
                     <th>집행액(백만원)</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody id="doc-table-body">
                   <tr>
                     <td>기획조정실</td>
                     <td>이수현 수석연구원</td>
@@ -317,7 +317,7 @@
               </table>
               <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
                 <button class="sheet-tab-btn active" data-sheet-tab="Sheet1">2026 분기별 실적</button>
-                <button class="sheet-tab-btn" data-sheet-tab="Sheet2">부문별 요약(Sheet2)</button>
+                <button class="sheet-tab-btn" data-sheet-tab="Sheet2">부문별 요약</button>
                 <button id="btn-add-sheet-tab" class="sheet-tab-btn">+ 시트 추가</button>
               </div>
             </div>
@@ -328,10 +328,10 @@
               <button id="btn-add-slide" class="secondary-btn">+ 슬라이드 추가</button>
               <label for="slide-transition-select">화면 전환</label>
               <select id="slide-transition-select" class="cmd-input" style="width:150px;margin:0;padding:4px 8px">
-                <option value="none">없음 (None)</option>
-                <option value="fade" selected>페이드 (Fade)</option>
-                <option value="push">밀어내기 (Push)</option>
-                <option value="zoom">확대/축소 (Zoom)</option>
+                <option value="none">없음</option>
+                <option value="fade" selected>페이드</option>
+                <option value="push">밀어내기</option>
+                <option value="zoom">확대</option>
               </select>
               <button id="btn-slide-laser" class="secondary-btn">레이저 포인터: 끔</button>
               <span id="slide-meta-status" class="formula-result">슬라이드 1 / 3 · 전환: 페이드</span>
@@ -370,10 +370,10 @@
               <button id="btn-pdf-rotate" class="secondary-btn">↻ 90° 회전</button>
               <label for="pdf-stamp-select">결재 스탬프</label>
               <select id="pdf-stamp-select" class="cmd-input" style="width:140px;margin:0;padding:4px 8px">
-                <option value="APPROVED" selected>APPROVED</option>
-                <option value="CONFIDENTIAL">CONFIDENTIAL</option>
-                <option value="DRAFT">DRAFT</option>
-                <option value="FINAL">FINAL</option>
+                <option value="APPROVED" selected>승인 완료</option>
+                <option value="CONFIDENTIAL">대외비</option>
+                <option value="DRAFT">초안</option>
+                <option value="FINAL">최종본</option>
               </select>
               <input
                 id="pdf-watermark-input"

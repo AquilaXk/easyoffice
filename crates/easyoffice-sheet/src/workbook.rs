@@ -274,8 +274,7 @@ impl SheetEngine {
         let initial_guess = self.evaluate_cell(variable_cell).as_number().unwrap_or(0.0);
 
         let eval_at = |sheet: &mut SheetEngine, x: f64| -> Option<f64> {
-            sheet.compiled_asts.remove(&var_coord);
-            sheet.cells.insert(var_coord, format!("{x}"));
+            sheet.set_coord_number(var_coord, x);
             sheet
                 .evaluate_cell(target_cell)
                 .as_number()
@@ -308,8 +307,7 @@ impl SheetEngine {
                 } else {
                     x1
                 };
-                self.compiled_asts.remove(&var_coord);
-                self.cells.insert(var_coord, format!("{rounded}"));
+                self.set_coord_number(var_coord, rounded);
                 return Ok(rounded);
             }
 
@@ -346,8 +344,7 @@ impl SheetEngine {
             } else {
                 x1
             };
-            self.compiled_asts.remove(&var_coord);
-            self.cells.insert(var_coord, format!("{rounded}"));
+            self.set_coord_number(var_coord, rounded);
             return Ok(rounded);
         }
 
@@ -880,6 +877,42 @@ mod tests {
         assert_eq!(
             sheet.evaluate_formula_str("=ROUND(AVERAGE(A1:F10), 2)"),
             EvaluatedCellValue::Number(57.59)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=PRODUCT(A1:E1)"),
+            EvaluatedCellValue::Number(10.0 * 11.0 * 12.0 * 13.0 * 14.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=SUMPRODUCT(A1:C2, D1:F2)"),
+            EvaluatedCellValue::Number(
+                10.0 * 13.0 + 11.0 * 14.0 + 12.0 * 15.0 + 20.0 * 23.0 + 21.0 * 24.0 + 22.0 * 25.0
+            )
+        );
+        let sumif_2arg = sheet.evaluate_formula_str("=SUMIF(A1:F10, \">=60\")");
+        let sumif_3arg = sheet.evaluate_formula_str("=SUMIF(A1:F10, \">=60\", A1:F10)");
+        assert_eq!(sumif_2arg, sumif_3arg);
+        assert_eq!(sumif_2arg, EvaluatedCellValue::Number(2475.0));
+
+        let avgif_2arg = sheet.evaluate_formula_str("=AVERAGEIF(A1:F10, \">=60\")");
+        let avgif_3arg = sheet.evaluate_formula_str("=AVERAGEIF(A1:F10, \">=60\", A1:F10)");
+        assert_eq!(avgif_2arg, avgif_3arg);
+        assert_eq!(avgif_2arg, EvaluatedCellValue::Number(82.5));
+
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNTIF(A1:F10, \">=60\")"),
+            EvaluatedCellValue::Number(30.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNTIFS(A1:F10, \">=60\", A1:F10, \"<80\")"),
+            EvaluatedCellValue::Number(12.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=SUMIFS(A1:F10, A1:F10, \">=60\", A1:F10, \"<80\")"),
+            EvaluatedCellValue::Number(810.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=AVERAGEIFS(A1:F10, A1:F10, \">=60\", A1:F10, \"<80\")"),
+            EvaluatedCellValue::Number(67.5)
         );
 
         let huge_range = CellRange {

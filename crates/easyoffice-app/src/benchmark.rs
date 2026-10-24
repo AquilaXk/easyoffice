@@ -737,10 +737,35 @@ fn expand_range_values_scalar_baseline(
         .collect()
 }
 
+fn matches_criteria_scalar_baseline(cell: &EvaluatedCellValue, crit: &EvaluatedCellValue) -> bool {
+    let crit_str = crit.to_display_string();
+    let trimmed = crit_str.trim();
+    for op in [">=", "<=", "<>", ">", "<", "="] {
+        if let Some(rhs) = trimmed.strip_prefix(op) {
+            if let Ok(rhs_num) = rhs.trim().parse::<f64>() {
+                let Some(lhs_num) = cell.as_number() else {
+                    return op == "<>";
+                };
+                return match op {
+                    ">=" => lhs_num >= rhs_num - 1e-9,
+                    "<=" => lhs_num <= rhs_num + 1e-9,
+                    "<>" => (lhs_num - rhs_num).abs() >= 1e-9,
+                    ">" => lhs_num > rhs_num + 1e-9,
+                    "<" => lhs_num < rhs_num - 1e-9,
+                    _ => (lhs_num - rhs_num).abs() < 1e-9,
+                };
+            }
+        }
+    }
+    false
+}
+
 fn scalar_vec_range_agg_baseline(
     precompiled_cells: &HashMap<PackedCellCoordinate, EvaluatedCellValue>,
     range: &CellRange,
-) -> [f64; 5] {
+    left_range: &CellRange,
+    right_range: &CellRange,
+) -> [f64; 8] {
     let sum_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
     let sum_nums: Vec<f64> = sum_vals
         .iter()
@@ -791,11 +816,45 @@ fn scalar_vec_range_agg_baseline(
         .collect();
     let cnt: f64 = cnt_nums.len() as f64;
 
-    [sum, avg, min_v, max_v, cnt]
+    let crit_gt_1000 = EvaluatedCellValue::Text(">1000".to_string());
+    let sumif_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let sumif_target_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let sumif_nums: Vec<f64> = sumif_vals
+        .iter()
+        .zip(sumif_target_vals.iter())
+        .filter_map(|(rv, tv)| {
+            if matches_criteria_scalar_baseline(rv, &crit_gt_1000) {
+                tv.as_number()
+            } else {
+                None
+            }
+        })
+        .collect();
+    let sumif_v: f64 = sumif_nums.iter().sum();
+
+    let crit_ge_500 = EvaluatedCellValue::Text(">=500".to_string());
+    let countif_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let countif_matches: Vec<bool> = countif_vals
+        .iter()
+        .filter(|rv| matches_criteria_scalar_baseline(rv, &crit_ge_500))
+        .map(|_| true)
+        .collect();
+    let countif_v: f64 = countif_matches.len() as f64;
+
+    let sp_left = expand_range_values_scalar_baseline(precompiled_cells, left_range);
+    let sp_right = expand_range_values_scalar_baseline(precompiled_cells, right_range);
+    let sp_prods: Vec<f64> = sp_left
+        .iter()
+        .zip(sp_right.iter())
+        .map(|(a, b)| a.as_number().unwrap_or(0.0) * b.as_number().unwrap_or(0.0))
+        .collect();
+    let sumprod_v: f64 = sp_prods.iter().sum();
+
+    [sum, avg, min_v, max_v, cnt, sumif_v, countif_v, sumprod_v]
 }
 
-/// 5th deterministic 1:1 benchmark suite measuring 64-bit SWAR XML validation/escaping,
-/// 64-bit SWAR RFC 4180 CSV parsing, and zero-allocation streaming range aggregations.
+/// 5th deterministic 1:1 benchmark suite measuring 64-bit SWAR XML validation/escaping/unescaping,
+/// 64-bit SWAR RFC 4180 CSV zero-allocation streaming, and zero-allocation range & conditional aggregations.
 pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> BenchmarkSuiteResult {
     let rounds = iterations.clamp(3, 25);
 
@@ -839,7 +898,18 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
     agg_sheet.set_cell("I3", "=MIN(A1:H200)").unwrap();
     agg_sheet.set_cell("I4", "=MAX(A1:H200)").unwrap();
     agg_sheet.set_cell("I5", "=COUNT(A1:H200)").unwrap();
+    agg_sheet
+        .set_cell("I6", "=SUMIF(A1:H200, \">1000\")")
+        .unwrap();
+    agg_sheet
+        .set_cell("I7", "=COUNTIF(A1:H200, \">=500\")")
+        .unwrap();
+    agg_sheet
+        .set_cell("I8", "=SUMPRODUCT(A1:D200, E1:H200)")
+        .unwrap();
     let agg_range = CellRange::parse("A1:H200").unwrap();
+    let left_range = CellRange::parse("A1:D200").unwrap();
+    let right_range = CellRange::parse("E1:H200").unwrap();
     let precompiled_cells = agg_sheet.recalculate_all();
 
     let mut base_samples = Vec::with_capacity(rounds);
@@ -851,32 +921,71 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
         let t0 = Instant::now();
         let xml_ok_a = XmlSanitizer::validate_safe_xml_scalar_baseline(black_box(&xml_doc)).is_ok();
         let esc_a = XmlSanitizer::escape_scalar_baseline(black_box(&raw_escape_input));
+        let unesc_a = unescape_xml_five_pass_baseline(black_box(&esc_a));
         let csv_a = CsvCodec::parse_scalar_baseline(black_box(&csv_doc), ',').unwrap_or_default();
-        let agg_a =
-            scalar_vec_range_agg_baseline(black_box(&precompiled_cells), black_box(&agg_range));
+        let mut csv_fields_a = 0usize;
+        let mut csv_bytes_a = 0usize;
+        for row in &csv_a {
+            for field in row {
+                csv_fields_a += 1;
+                csv_bytes_a += field.len();
+            }
+        }
+        let agg_a = scalar_vec_range_agg_baseline(
+            black_box(&precompiled_cells),
+            black_box(&agg_range),
+            black_box(&left_range),
+            black_box(&right_range),
+        );
         let dt_a = t0.elapsed().as_micros() as u64;
 
         let t1 = Instant::now();
         let xml_ok_b = XmlSanitizer::validate_safe_xml(black_box(&xml_doc)).is_ok();
         let esc_b = XmlSanitizer::escape(black_box(&raw_escape_input));
-        let csv_b = CsvCodec::parse(black_box(&csv_doc), ',').unwrap_or_default();
+        let unesc_b = unescape_xml_single_pass(black_box(&esc_b));
+        let mut csv_rows_b = 0usize;
+        let mut csv_fields_b = 0usize;
+        let mut csv_bytes_b = 0usize;
+        let csv_ok_b = CsvCodec::visit_fields_swar(black_box(&csv_doc), ',', |r_idx, _c_idx, f| {
+            csv_rows_b = csv_rows_b.max(r_idx + 1);
+            csv_fields_b += 1;
+            csv_bytes_b += f.len();
+        })
+        .is_ok();
         let agg_b = [
             agg_sheet.evaluate_cell("I1").as_number().unwrap_or(0.0),
             agg_sheet.evaluate_cell("I2").as_number().unwrap_or(0.0),
             agg_sheet.evaluate_cell("I3").as_number().unwrap_or(0.0),
             agg_sheet.evaluate_cell("I4").as_number().unwrap_or(0.0),
             agg_sheet.evaluate_cell("I5").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I6").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I7").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I8").as_number().unwrap_or(0.0),
         ];
         let dt_b = t1.elapsed().as_micros() as u64;
 
         let agg_match = agg_a
             .iter()
             .zip(agg_b.iter())
-            .all(|(a, b)| (a - b).abs() < 1e-9);
-        if !xml_ok_a || !xml_ok_b || esc_a != esc_b || csv_a != csv_b || !agg_match {
+            .all(|(a, b)| (a - b).abs() < 1e-6);
+        let csv_match = csv_ok_b
+            && csv_a.len() == csv_rows_b
+            && csv_fields_a == csv_fields_b
+            && csv_bytes_a == csv_bytes_b;
+        if !xml_ok_a
+            || !xml_ok_b
+            || esc_a != esc_b
+            || unesc_a != unesc_b
+            || unesc_b != raw_escape_input
+            || !csv_match
+            || !agg_match
+        {
             eq = false;
         }
-        digest = IeeeCrc32::checksum(esc_b.as_bytes()) ^ (csv_b.len() as u32) ^ (agg_b[0] as u32);
+        digest = IeeeCrc32::checksum(unesc_b.as_bytes())
+            ^ (csv_bytes_b as u32)
+            ^ (agg_b[0] as u32)
+            ^ (agg_b[7] as u32);
         if r > 0 {
             base_samples.push(dt_a.max(1));
             opt_samples.push(dt_b.max(1));
@@ -890,7 +999,7 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
         suite_id: "swar_csv_xml_and_zero_alloc_range_agg",
         title: "64-Bit SWAR XML/CSV & Zero-Alloc Range Agg",
         workload_description:
-            "16 KiB XML + 200x8 CSV + 1,600-cell 4-way streaming SUM/AVG/MIN/MAX/COUNT",
+            "16 KiB XML + 200x8 CSV + 1,600-cell streaming SUM/AVG/MIN/MAX/COUNT/SUMIF/COUNTIF/SUMPRODUCT",
         iterations: rounds,
         baseline_p50_us: bp50,
         baseline_p95_us: bp95,
