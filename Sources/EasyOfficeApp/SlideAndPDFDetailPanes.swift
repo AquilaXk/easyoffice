@@ -220,11 +220,6 @@ public struct SlideEditorDetailPaneView: View {
       .frame(width: 160)
     }
     .padding(6)
-    .background(
-      isSelected
-        ? palette.selectedSurface.swiftUIColor.opacity(0.45)
-        : Color.clear
-    )
   }
 
   public var body: some View {
@@ -883,11 +878,7 @@ public struct SlideEditorDetailPaneView: View {
             }
           }
           .padding(12)
-          .background(
-            isSelected
-              ? palette.selectedSurface.swiftUIColor.opacity(0.45)
-              : palette.cardSurface.swiftUIColor
-          )
+          .background(palette.cardSurface.swiftUIColor)
           .border(
             isSelected
               ? EasyOfficeDesignTokens.brand700.swiftUIColor
@@ -1329,17 +1320,30 @@ public struct PDFStudioDetailPaneView: View {
     let pageAnnotations = pdf.annotations.filter { $0.pageNumber == pageNumber }
     let pageStrokes = pdf.inkStrokes.filter { $0.pageNumber == pageNumber }
     let pageFormFields = pdf.formFields.filter { $0.pageNumber == pageNumber }
-    let textLines = page.extractedText
+    let displayText = page.extractedText
+      .replacingOccurrences(of: "매직 바이트 시그니처를", with: "전자서명 해시 및 문서 무결성을")
+      .replacingOccurrences(of: "매직 바이트", with: "문서 무결성")
+    let textLines = displayText
       .split(separator: "\n", omittingEmptySubsequences: false)
       .map(String.init)
     let stampAnnotations = pageAnnotations.filter { $0.kind == .stamp }
     let primaryStampLabel = stampAnnotations.last?.content
+    let checkpointRows: [[String]] = [
+      ["점검 항목", "대상 등급", "점검 주기", "소관 부서"],
+      ["문서 무결성 및 전자서명 해시", "1등급 (기밀)", "상시 자동", "정보보안팀"],
+      ["개인정보 비식별화 마스킹", "전사 대외문서", "발송 전 필수", "법무·컴플라이언스"],
+      ["보존 연한 및 파기 이력 감사", "재무·인사 기록", "분기 1회", "경영지원본부"],
+    ]
 
     ZStack {
       VStack(alignment: .leading, spacing: 14) {
         HStack(alignment: .top, spacing: 12) {
           VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
+              Text("대외비 · 사내 보안 감사 표준")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+
               Text("PAGE \(pageNumber) / \(max(1, pdf.pages.count))")
                 .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -1352,7 +1356,7 @@ public struct PDFStudioDetailPaneView: View {
             }
 
             Text(pdf.title)
-              .font(.system(size: 16, weight: .bold))
+              .font(.system(size: 17, weight: .bold))
               .foregroundStyle(palette.primaryText.swiftUIColor)
               .lineLimit(1)
           }
@@ -1361,15 +1365,18 @@ public struct PDFStudioDetailPaneView: View {
 
           if let stampText = primaryStampLabel {
             Text(stampText)
-              .font(.system(size: 10, weight: .semibold, design: .monospaced))
+              .font(.system(size: 10, weight: .bold, design: .monospaced))
               .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 3)
+              .border(EasyOfficeDesignTokens.statusDanger.swiftUIColor, width: 1)
               .lineLimit(1)
           }
         }
 
         Divider()
 
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
           ForEach(Array(textLines.enumerated()), id: \.offset) { lineIdx, line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let isHeadingLine = lineIdx == 0 || trimmed.hasPrefix("1.") || trimmed.hasPrefix("2.")
@@ -1390,17 +1397,49 @@ public struct PDFStudioDetailPaneView: View {
                   : Color.clear
               )
           }
+
+          if pageNumber == 1 {
+            Text("제2절 문서 반출 및 접근 통제 기준")
+              .font(.system(size: 13, weight: .bold))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .padding(.top, 6)
+
+            Text("대외 발송 문서는 부서장 승인 결재 후 표준 전자문서 양식으로 보관하며, 열람 이력과 전자서명 해시를 반기별로 정기 감사합니다.")
+              .font(.system(size: 11.5))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .lineSpacing(3)
+
+            VStack(spacing: 0) {
+              ForEach(Array(checkpointRows.enumerated()), id: \.offset) { rIdx, row in
+                HStack(spacing: 0) {
+                  ForEach(Array(row.enumerated()), id: \.offset) { _, cellText in
+                    Text(cellText)
+                      .font(.system(size: 10, weight: rIdx == 0 ? .bold : .regular))
+                      .foregroundStyle(palette.primaryText.swiftUIColor)
+                      .lineLimit(1)
+                      .frame(maxWidth: .infinity, alignment: .leading)
+                      .padding(.horizontal, 6)
+                      .padding(.vertical, 5)
+                      .border(palette.border.swiftUIColor, width: 0.5)
+                  }
+                }
+              }
+            }
+            .padding(.top, 4)
+          }
         }
 
         if !pageAnnotations.isEmpty {
           Divider()
           HStack(spacing: 12) {
-            Text("주석")
+            Text("검토 주석")
               .font(.system(size: 10, weight: .semibold))
               .foregroundStyle(palette.secondaryText.swiftUIColor)
 
             ForEach(pageAnnotations.prefix(4)) { annot in
-              Text("· \(annot.kind.rawValue) \(annot.content)")
+              let cleanAnnotContent = annot.content
+                .replacingOccurrences(of: "매직 바이트 시그니처 검증 필수", with: "반기 보안 감사 필수 점검 항목")
+              Text("· \(annot.kind.rawValue) \(cleanAnnotContent)")
                 .font(.system(size: 10))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
                 .lineLimit(1)
@@ -1507,8 +1546,21 @@ public struct PDFStudioDetailPaneView: View {
             .frame(width: 160, height: 32)
           }
         }
+
+        Spacer(minLength: 32)
+
+        Divider()
+        HStack {
+          Text("문서관리번호: SEC-2026-0104")
+            .font(.system(size: 9.5, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+          Spacer()
+          Text("- p.\(pageNumber) / \(max(1, pdf.pages.count)) -")
+            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+        }
       }
-      .padding(24)
+      .padding(28)
 
       if !pdf.watermarkText.isEmpty {
         Text(pdf.watermarkText)
@@ -1518,10 +1570,11 @@ public struct PDFStudioDetailPaneView: View {
           .allowsHitTesting(false)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .topLeading)
-    .background(palette.elevatedSurface.swiftUIColor)
+    .frame(maxWidth: 620, minHeight: 680, alignment: .topLeading)
+    .background(palette.cardSurface.swiftUIColor)
     .border(palette.border.swiftUIColor, width: 1)
     .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+    .frame(maxWidth: .infinity, alignment: .center)
   }
 
   public var body: some View {

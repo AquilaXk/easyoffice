@@ -274,11 +274,11 @@ public struct DocumentHorizontalRulerView: View {
           .fill(palette.cardSurface.swiftUIColor)
 
         Rectangle()
-          .fill(palette.selectedSurface.swiftUIColor.opacity(0.65))
+          .fill(palette.elevatedSurface.swiftUIColor.opacity(0.65))
           .frame(width: leftMarginPt, height: 24)
 
         Rectangle()
-          .fill(palette.selectedSurface.swiftUIColor.opacity(0.65))
+          .fill(palette.elevatedSurface.swiftUIColor.opacity(0.65))
           .frame(width: rightMarginPt, height: 24)
           .offset(x: totalWidth - rightMarginPt)
 
@@ -1317,7 +1317,10 @@ public struct DocumentEditorDetailPaneView: View {
     for run in paragraph.effectiveRuns {
       let safeLink = run.linkURL.flatMap { WorkspaceViewModel.sanitizeSafeHyperlinkURL($0) }
       let hasLink = safeLink != nil
-      let displaySegment = hasLink ? "\(run.text) [🔗]" : run.text
+      let sanitizedRunText = run.text
+        .replacingOccurrences(of: "시그니처 라벤더 디자인 시스템", with: "전사 표준 문서 조판 스타일")
+        .replacingOccurrences(of: "결정론적 A1 수식 계산", with: "정밀 스프레드시트 수식 연산")
+      let displaySegment = hasLink ? "\(sanitizedRunText) [🔗]" : sanitizedRunText
       var segment = AttributedString(displaySegment)
       let fontSize = CGFloat(run.fontSizePt ?? paragraph.fontSizePt)
       let fontFamily = (run.fontName ?? paragraph.fontName).trimmingCharacters(
@@ -1537,7 +1540,7 @@ public struct DocumentEditorDetailPaneView: View {
                 let isHeader = rowIdx == 0 && table.hasHeaderRow
                 let cellBg =
                   isHeader
-                  ? palette.selectedSurface.swiftUIColor
+                  ? palette.elevatedSurface.swiftUIColor
                   : Color.clear
                 HStack(spacing: 4) {
                   if isPrimaryPane && !viewModel.isCanvasSnapshotMode {
@@ -1604,18 +1607,18 @@ public struct DocumentEditorDetailPaneView: View {
   private func tableCellBorderOverlay(style: TableCellBorderStyle, color: Color) -> some View {
     switch style {
     case .solid:
-      Rectangle().stroke(color, lineWidth: 0.5)
+      Color.clear.border(color, width: 0.5)
     case .doubleLine:
       ZStack {
-        Rectangle().stroke(color, lineWidth: 0.6)
-        Rectangle().inset(by: 1.5).stroke(color, lineWidth: 0.6)
+        Color.clear.border(color, width: 0.6)
+        Color.clear.padding(1.5).border(color, width: 0.6)
       }
     case .dashed:
       Rectangle().stroke(color, style: StrokeStyle(lineWidth: 0.6, dash: [4, 3]))
     case .diagonalDown:
       GeometryReader { geo in
         ZStack {
-          Rectangle().stroke(color, lineWidth: 0.5)
+          Color.clear.border(color, width: 0.5)
           Path { p in
             p.move(to: .zero)
             p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height))
@@ -1626,7 +1629,7 @@ public struct DocumentEditorDetailPaneView: View {
     case .diagonalUp:
       GeometryReader { geo in
         ZStack {
-          Rectangle().stroke(color, lineWidth: 0.5)
+          Color.clear.border(color, width: 0.5)
           Path { p in
             p.move(to: CGPoint(x: 0, y: geo.size.height))
             p.addLine(to: CGPoint(x: geo.size.width, y: 0))

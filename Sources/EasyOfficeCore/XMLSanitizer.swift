@@ -12,11 +12,30 @@ public enum XMLSanitizer {
     0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45  // "DOCTYPE"
   )
 
+  private static let swarLoMask: UInt64 = 0x0101_0101_0101_0101
+  private static let swarHiMask: UInt64 = 0x8080_8080_8080_8080
+
+  @inline(__always)
+  private static func hasZeroByte(_ word: UInt64) -> Bool {
+    ((word &- swarLoMask) & ~word & swarHiMask) != 0
+  }
+
+  @inline(__always)
+  private static func broadcastByte(_ byte: UInt8) -> UInt64 {
+    UInt64(byte) &* swarLoMask
+  }
+
   private static func scanUnsafeXMLBuffer(_ buffer: UnsafeBufferPointer<UInt8>) throws {
     let count = buffer.count
-    guard count >= 8 else { return }
+    guard count >= 8, let base = buffer.baseAddress else { return }
+    let ltMask = broadcastByte(0x3C)  // '<'
     var idx = 0
     while idx <= count - 8 {
+      let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
+      if !hasZeroByte(word ^ ltMask) {
+        idx += 8
+        continue
+      }
       if buffer[idx] == 0x3C && buffer[idx + 1] == 0x21 {  // "<!"
         var kw = idx + 2
         while kw < count
@@ -73,19 +92,82 @@ public enum XMLSanitizer {
   }
 
   public static func escape(_ input: String) -> String {
-    var result = ""
-    result.reserveCapacity(input.count)
-    for ch in input {
-      switch ch {
-      case "&": result.append("&amp;")
-      case "<": result.append("&lt;")
-      case ">": result.append("&gt;")
-      case "\"": result.append("&quot;")
-      case "'": result.append("&apos;")
-      default: result.append(ch)
+    guard !input.isEmpty else { return input }
+    var copy = input
+    return copy.withUTF8 { buf in
+      let count = buf.count
+      guard let base = buf.baseAddress else { return input }
+      let ampMask = broadcastByte(0x26)   // '&'
+      let ltMask = broadcastByte(0x3C)    // '<'
+      let gtMask = broadcastByte(0x3E)    // '>'
+      let quotMask = broadcastByte(0x22)  // '"'
+      let aposMask = broadcastByte(0x27)  // '\''
+
+      var idx = 0
+      var spanStart = 0
+      var out: [UInt8] = []
+
+      while idx + 8 <= count {
+        let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
+        let hasSpecial =
+          hasZeroByte(word ^ ampMask)
+          || hasZeroByte(word ^ ltMask)
+          || hasZeroByte(word ^ gtMask)
+          || hasZeroByte(word ^ quotMask)
+          || hasZeroByte(word ^ aposMask)
+        if !hasSpecial {
+          idx += 8
+          continue
+        }
+        let b = buf[idx]
+        if b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
+          if out.isEmpty {
+            out.reserveCapacity(count + 16)
+          }
+          if spanStart < idx {
+            out.append(contentsOf: buf[spanStart..<idx])
+          }
+          appendEscapedEntity(for: b, into: &out)
+          spanStart = idx + 1
+        }
+        idx += 1
       }
+
+      while idx < count {
+        let b = buf[idx]
+        if b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
+          if out.isEmpty {
+            out.reserveCapacity(count + 16)
+          }
+          if spanStart < idx {
+            out.append(contentsOf: buf[spanStart..<idx])
+          }
+          appendEscapedEntity(for: b, into: &out)
+          spanStart = idx + 1
+        }
+        idx += 1
+      }
+
+      if spanStart == 0 {
+        return input
+      }
+      if spanStart < count {
+        out.append(contentsOf: buf[spanStart..<count])
+      }
+      return String(decoding: out, as: UTF8.self)
     }
-    return result
+  }
+
+  @inline(__always)
+  private static func appendEscapedEntity(for byte: UInt8, into out: inout [UInt8]) {
+    switch byte {
+    case 0x26: out.append(contentsOf: [0x26, 0x61, 0x6D, 0x70, 0x3B])         // &amp;
+    case 0x3C: out.append(contentsOf: [0x26, 0x6C, 0x74, 0x3B])               // &lt;
+    case 0x3E: out.append(contentsOf: [0x26, 0x67, 0x74, 0x3B])               // &gt;
+    case 0x22: out.append(contentsOf: [0x26, 0x71, 0x75, 0x6F, 0x74, 0x3B])   // &quot;
+    case 0x27: out.append(contentsOf: [0x26, 0x61, 0x70, 0x6F, 0x73, 0x3B])   // &apos;
+    default: out.append(byte)
+    }
   }
 
   public static func unescape(_ input: String) -> String {
