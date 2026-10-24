@@ -192,9 +192,9 @@ const webuiCssPath = path.join(ROOT, "crates/easyoffice-app/ui/styles.css");
 if (fs.existsSync(webuiCssPath)) {
   const cssContent = fs.readFileSync(webuiCssPath, "utf8");
   const cssBoxMatches = cssContent.match(/border:|border-radius:|box-shadow:/g) || [];
-  if (cssBoxMatches.length > 24) {
+  if (cssBoxMatches.length > 22) {
     errors.push(
-      `WebUI styles.css over-boxing guard failed: found ${cssBoxMatches.length} matches of border:/border-radius:/box-shadow: (max 24)`
+      `WebUI styles.css over-boxing guard failed: found ${cssBoxMatches.length} matches of border:/border-radius:/box-shadow: (max 22)`
     );
   }
 }
@@ -216,28 +216,33 @@ if (fs.existsSync(swiftAppDir)) {
     .readdirSync(swiftAppDir)
     .filter((name) => name.endsWith(".swift"))
     .map((name) => path.join(swiftAppDir, name));
+  let swiftBoxPrimCount = 0;
   let swiftBoxCount = 0;
-  let swiftPhraseHits = [];
   for (const sf of swiftFiles) {
     const sfText = fs.readFileSync(sf, "utf8");
-    const matches = sfText.match(/RoundedRectangle|\.stroke\(|\.background\(/g) || [];
-    swiftBoxCount += matches.length;
+    const primMatches =
+      sfText.match(
+        /buttonStyle\(\.bordered|LavenderTextFieldPill|LavenderMenuPill|LavenderActionPill|RoundedRectangle|Capsule|strokeBorder|\.stroke\(/g
+      ) || [];
+    const bgMatches = sfText.match(/RoundedRectangle|\.stroke\(|\.background\(/g) || [];
+    swiftBoxPrimCount += primMatches.length;
+    swiftBoxCount += bgMatches.length;
     const sfRel = path.relative(ROOT, sf).replaceAll("\\", "/");
     for (const phrase of FORBIDDEN_UI_GATE_PHRASES) {
       if (sfText.includes(phrase)) {
-        swiftPhraseHits.push(`${sfRel}: "${phrase}"`);
+        errors.push(`Forbidden internal gate/spec copy "${phrase}" detected in ${sfRel}`);
       }
     }
   }
-  if (process.env.ENFORCE_SWIFT_SLOP_COUNT === "1" || (swiftBoxCount <= 220 && swiftPhraseHits.length === 0)) {
-    if (swiftBoxCount > 220) {
-      errors.push(
-        `Swift EasyOfficeApp over-boxing guard failed: found ${swiftBoxCount} matches of RoundedRectangle/.stroke(/.background( (max 220)`
-      );
-    }
-    for (const hit of swiftPhraseHits) {
-      errors.push(`Forbidden internal gate/spec copy detected in ${hit}`);
-    }
+  if (swiftBoxPrimCount > 40) {
+    errors.push(
+      `Swift EasyOfficeApp box-primitive guard failed: found ${swiftBoxPrimCount} matches of bordered/pill/RoundedRectangle/Capsule/stroke (max 40)`
+    );
+  }
+  if (swiftBoxCount > 120) {
+    errors.push(
+      `Swift EasyOfficeApp over-boxing guard failed: found ${swiftBoxCount} matches of RoundedRectangle/.stroke(/.background( (max 120)`
+    );
   }
 }
 

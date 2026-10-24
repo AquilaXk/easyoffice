@@ -611,13 +611,14 @@
   2. **`crates/easyoffice-sheet` 제로할당 토크나이저·사전 컴파일 AST·비트셋 DAG 평가기 및 16비트 `sheet_id` 충돌 해소 (`parser.rs`, `lib.rs`, `workbook.rs`)**:
      - `tokenize_formula`에서 `Vec<char>` 할당을 제거하고 UTF-8 바이트 슬라이스 스캐너로 전환하며, `SheetEngine::set_cell` 시점에 `compiled_asts`로 AST를 1회 사전 컴파일합니다.
      - `EvalContext`의 방문 집합과 메모이제이션 키를 문자열 대신 `PackedWorkbookCoord(u64)`(`(sheet_id << 48) | ((row & 0xFF_FFFF) << 24) | (col & 0xFF_FFFF)`)와 1,024셀 인라인 비트셋 `VisitingTracker`(`bits: [u64; 16]`, `stack: [u64; 66]`)로 교체하고, `WorkbookEngine::add_sheet`에서 16비트 FNV-1a 폴딩 `sheet_id` 충돌 시 비충돌 ID로 결정론적 재할당(`set_sheet_id`)하여 거짓 `#CYCLE!`을 원천 방지합니다(500셀 × 4회 재계산 시 공유 `HashMap` 메모이제이션 베이스라인 대비 `878µs -> 308µs`, `2.85x` 가속).
-  3. **결정론적 1:1 공정 벤치마크 하니스, Tauri 2.x WebUI 탈박스(De-Slop) 평면 디자인 및 저장소 위생 가드 (`crates/easyoffice-app/src/{benchmark.rs,lib.rs,ffi.rs}`, `crates/easyoffice-app/ui/*`, `scripts/check-repo-hygiene.mjs`)**:
+  3. **결정론적 1:1 공정 벤치마크 하니스, Tauri 2.x WebUI 및 macOS SwiftUI 탈박스(Zero-Box De-Slop) 평면 디자인과 저장소 위생 가드 (`crates/easyoffice-app/src/{benchmark.rs,lib.rs,ffi.rs}`, `crates/easyoffice-app/ui/*`, `Sources/EasyOfficeApp/*.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `scripts/check-repo-hygiene.mjs`)**:
      - `crates/easyoffice-app/src/benchmark.rs`에서 모든 베이스라인과 최적화 경로가 동일한 작업량과 알고리즘 복잡도($O(N)$ vs $O(N)$)로 경쟁하도록 구성하고 `--self-test` 실행 시 4대 스위트 동등성(`all_equivalent == true`)과 `p50` 배속 요약을 검증합니다.
-     - Tauri WebUI(`index.html`, `styles.css`, `app.js`)에서 140개 정본 리본 명령 ID 동기화, `#btn-smart-diagnose`(`run_smart_assistant`) 연결, `⌘K`/`Ctrl+K` 명령 팔레트 단축키 복원, `#btn-scrub-pii` 실행 시 `#hwp-manuscript-preview` 보존을 완결하고, 카드-인-카드 테두리/반경(`border:|border-radius:|box-shadow:` 47개 → 18개) 및 내부 게이트 문구를 제거한 뒤 `scripts/check-repo-hygiene.mjs`에 구조적 가드로 고정합니다.
-- **Why**: 외부 크레이트나 `unsafe` 코드 없이 순수 Rust `std` 비트·워드 연산과 캐시 친화적 자료구조만으로 컨테이너 압축·해제, 문자열·XML 파싱, 스프레드시트 재계산 성능을 공정하게 가속하고, Tauri 2.x 데스크톱 WebUI의 기능 무결성과 평면 오피스 디자인 일관성을 보장하기 위함입니다.
+     - Tauri WebUI(`index.html`, `styles.css`, `app.js`)에서 140개 정본 리본 명령 ID 동기화, `#btn-smart-diagnose`(`run_smart_assistant`) 연결, `⌘K`/`Ctrl+K` 명령 팔레트 단축키 복원, `#btn-scrub-pii` 실행 시 `#hwp-manuscript-preview` 보존을 완결하고, 카드-인-카드 테두리/반경(`border:|border-radius:|box-shadow:` 47개 → 18개) 및 내부 게이트 문구를 제거합니다.
+     - macOS SwiftUI(`Sources/EasyOfficeApp/*.swift`)에서 버튼·입력창·메뉴·단락·표·인스펙터 행을 감싸던 알약·카드 테두리 프리미티브를 `617`개에서 `27`개(`-95.6%`)로 감축하고, `FlatToolbarMenu`·`FlatUnderlineTextField`·`FlatToggleControl`·`FlatStepperControl`과 `1pt` 구분선 기반 평면 오피스 레이아웃으로 재설계하며, 시트 데이터 막대 기본 비활성화(`isDataBarsEnabled = false`)·하단 피벗/차트 분석 서랍 기본 숨김(`showAnalyticsDrawer = false`)·`closeOtherTabs(keeping:)` 고정 탭 보존을 적용한 뒤 `scripts/check-repo-hygiene.mjs`에 구조적 상한 가드로 고정합니다.
+- **Why**: 외부 크레이트나 `unsafe` 코드 없이 순수 Rust `std` 비트·워드 연산과 캐시 친화적 자료구조만으로 컨테이너 압축·해제, 문자열·XML 파싱, 스프레드시트 재계산 성능을 공정하게 가속하고, macOS SwiftUI와 Tauri 2.x 데스크톱 WebUI 양쪽에서 중첩 박스와 내부 게이트 문구를 제거한 평면 상용 오피스 디자인 일관성을 보장하기 위함입니다.
 - **Trade-offs**: 벤치마크 전용 스칼라·비컴파일 베이스라인 함수를 `benchmark.rs` 내에 분리 유지해야 하나, 프로덕션 `easyoffice-sheet` 코어를 오염시키지 않으면서 `run_self_test()`에서 매 실행마다 최적화 경로와 베이스라인 경로의 출력 일치(`eq=true`)를 결정론적으로 증명합니다.
 - **Alternatives rejected**:
   - 플랫폼 종속 SIMD 인트린직(`std::arch`) 및 `unsafe` 포인터 캐스팅 사용은 메모리 안전성 불변식과 크로스플랫폼 이식성을 해치므로 안전한 `u64` SWAR 및 컴파일 타임 LUT 방식으로 구현.
-- **Verified by**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run --release -p easyoffice-app -- --self-test`, `node scripts/check-repo-hygiene.mjs`
+- **Verified by**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run --release -p easyoffice-app -- --self-test`, `swift test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 멀티코어 워커 스레드 풀 기반 대규모 워크북 병렬 재계산 스케줄러를 도입할 때.
 

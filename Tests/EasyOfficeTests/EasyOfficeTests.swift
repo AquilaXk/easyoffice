@@ -428,10 +428,17 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertTrue(statusSummary.contains("최대"), "Expected 최대 in \(statusSummary)")
 
     XCTAssertGreaterThanOrEqual(vm.openTabs.count, 3)
-    let keptTabID = try XCTUnwrap(vm.activeTabID)
-    vm.closeOtherTabs(keeping: keptTabID)
-    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == keptTabID }))
-    XCTAssertTrue(vm.openTabs.allSatisfy { $0.id == keptTabID || $0.isPinned })
+    vm.openTabs[0].isPinned = true
+    let pinnedTabID = vm.openTabs[0].id
+    let secondTabID = vm.openTabs[1].id
+    for i in 1..<vm.openTabs.count {
+      vm.openTabs[i].isPinned = false
+    }
+    vm.closeOtherTabs(keeping: secondTabID)
+    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == pinnedTabID }))
+    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == secondTabID }))
+    XCTAssertEqual(vm.activeTabID, secondTabID)
+    XCTAssertTrue(vm.openTabs.allSatisfy { $0.id == secondTabID || $0.isPinned })
 
     vm.openNewSampleTab(for: .document)
     vm.setDocumentHorizontalPadding(8.0)

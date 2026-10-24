@@ -205,7 +205,11 @@ public final class WorkspaceViewModel {
   public var mailMergeFieldKeyDraft: String = "수신처"
   public var mailMergeFieldValueDraft: String = "전략기획본부"
   public var isFirstColumnFrozen: Bool = false
-  public var isDataBarsEnabled: Bool = true
+  public var isDataBarsEnabled: Bool = false
+  public var showSheetDataBars: Bool {
+    get { isDataBarsEnabled }
+    set { isDataBarsEnabled = newValue }
+  }
   public var selectedPivotAggregation: PivotAggregationFunction = .sum
   public var sheetDelimiterDraft: String = ","
   public var selectedPDFStampPreset: String = "승인 (APPROVED)"
@@ -435,15 +439,15 @@ public final class WorkspaceViewModel {
 
   public func closeOtherTabs(keeping id: UUID) {
     activeInlineEditTargetKey = nil
-    let removedIDs = openTabs.filter { $0.id != id }.map(\.id)
-    openTabs.removeAll { $0.id != id }
+    let removedIDs = openTabs.filter { $0.id != id && !$0.isPinned }.map(\.id)
+    openTabs.removeAll { $0.id != id && !$0.isPinned }
     for removedID in removedIDs {
       undoStacks.removeValue(forKey: removedID)
       redoStacks.removeValue(forKey: removedID)
       mergedSheetRangesByTab.removeValue(forKey: removedID)
     }
     splitSecondaryTabID = nil
-    activeTabID = openTabs.first?.id
+    activeTabID = openTabs.contains(where: { $0.id == id }) ? id : openTabs.first?.id
     if openTabs.isEmpty { isShowingHomeHub = true }
     lastExecutedCommandSummary = "다른 탭 닫기 완료"
   }

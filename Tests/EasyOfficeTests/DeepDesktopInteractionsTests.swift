@@ -775,6 +775,8 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     vm.toggleFirstColumnFrozen()
     XCTAssertTrue(vm.isFirstColumnFrozen)
 
+    XCTAssertFalse(vm.isDataBarsEnabled)
+    vm.toggleSheetDataBars()
     XCTAssertTrue(vm.isDataBarsEnabled)
     vm.toggleSheetDataBars()
     XCTAssertFalse(vm.isDataBarsEnabled)
