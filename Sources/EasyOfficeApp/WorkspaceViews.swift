@@ -818,7 +818,7 @@ struct TopDocumentTabStripView: View {
               }
               .buttonStyle(.plain)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 7)
             .padding(.vertical, 5)
             .background(
               isSelected ? palette.cardSurface.swiftUIColor : palette.elevatedSurface.swiftUIColor
@@ -834,6 +834,7 @@ struct TopDocumentTabStripView: View {
                 )
             )
             .clipShape(RoundedRectangle(cornerRadius: 6))
+            .fixedSize(horizontal: true, vertical: false)
             .accessibilityLabel(
               AccessibilityTokens.tabLabel(
                 fileName: tab.fileName, module: tab.moduleKind, isPinned: tab.isPinned,
@@ -897,7 +898,7 @@ struct TopDocumentTabStripView: View {
         placeholder: "명령·본문 통합 검색",
         text: $viewModel.searchQuery,
         symbolName: "magnifyingglass",
-        width: 170,
+        width: 132,
         palette: palette,
         isSnapshotMode: viewModel.isCanvasSnapshotMode
       )
@@ -1222,45 +1223,99 @@ struct ContextRibbonBarView: View {
   ) -> some View {
     switch activeModule {
     case .document, .hwp:
-      ribbonQuickButton(
-        title: "형광펜",
-        symbolName: "highlighter",
-        accent: accent,
-        palette: palette
-      ) {
-        viewModel.toggleHighlightOnActiveParagraph()
-      }
-      ribbonQuickButton(
-        title: "취소선",
-        symbolName: "strikethrough",
-        accent: accent,
-        palette: palette
-      ) {
-        viewModel.toggleStrikethroughOnActiveParagraph()
-      }
-      ribbonQuickButton(
-        title: "링크",
-        symbolName: "link",
-        accent: accent,
-        palette: palette
-      ) {
-        viewModel.insertHyperlinkIntoActiveParagraph()
-      }
-      ribbonQuickButton(
-        title: "자간-",
-        symbolName: "arrow.right.and.line.vertical.and.arrow.left",
-        accent: accent,
-        palette: palette
-      ) {
-        viewModel.adjustActiveParagraphTypography(letterSpacingDelta: -5.0)
-      }
-      ribbonQuickButton(
-        title: "자간+",
-        symbolName: "arrow.left.and.line.vertical.and.arrow.right",
-        accent: accent,
-        palette: palette
-      ) {
-        viewModel.adjustActiveParagraphTypography(letterSpacingDelta: 5.0)
+      if viewModel.ribbonLayoutStyle == .hangulHwp {
+        ribbonQuickButton(
+          title: "200자 원고지",
+          symbolName: "square.grid.3x3",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.toggleManuscriptGridMode()
+        }
+        ribbonQuickButton(
+          title: "다단 전환",
+          symbolName: "rectangle.split.2x1",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.cycleActiveDocumentColumnCount()
+        }
+        ribbonQuickButton(
+          title: "각주 삽입",
+          symbolName: "text.badge.plus",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.executeRibbonCommand("doc-mod-footnote")
+          viewModel.executeRibbonCommand(
+            activeModule == .hwp ? "hwp-insert-footnote" : "doc-insert-footnote"
+          )
+        }
+        ribbonQuickButton(
+          title: "자간-",
+          symbolName: "arrow.right.and.line.vertical.and.arrow.left",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.adjustActiveParagraphTypography(letterSpacingDelta: -5.0)
+        }
+        ribbonQuickButton(
+          title: "자간+",
+          symbolName: "arrow.left.and.line.vertical.and.arrow.right",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.adjustActiveParagraphTypography(letterSpacingDelta: 5.0)
+        }
+        ribbonQuickButton(
+          title: "누름틀 치환",
+          symbolName: "wand.and.stars",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.applyMailMergePlaceholdersToActiveDocument()
+        }
+      } else {
+        ribbonQuickButton(
+          title: "형광펜",
+          symbolName: "highlighter",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.toggleHighlightOnActiveParagraph()
+        }
+        ribbonQuickButton(
+          title: "취소선",
+          symbolName: "strikethrough",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.toggleStrikethroughOnActiveParagraph()
+        }
+        ribbonQuickButton(
+          title: "링크",
+          symbolName: "link",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.insertHyperlinkIntoActiveParagraph()
+        }
+        ribbonQuickButton(
+          title: "자간-",
+          symbolName: "arrow.right.and.line.vertical.and.arrow.left",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.adjustActiveParagraphTypography(letterSpacingDelta: -5.0)
+        }
+        ribbonQuickButton(
+          title: "자간+",
+          symbolName: "arrow.left.and.line.vertical.and.arrow.right",
+          accent: accent,
+          palette: palette
+        ) {
+          viewModel.adjustActiveParagraphTypography(letterSpacingDelta: 5.0)
+        }
       }
 
     case .sheet:
@@ -1951,7 +2006,7 @@ struct BottomWorkspaceStatusBarView: View {
         isSnapshotMode: viewModel.isCanvasSnapshotMode
       ) {
         HStack(spacing: 10) {
-          Text("\(tab.moduleKind.displayNameKo) · \(tab.format.standardSpecification)")
+          Text("\(tab.moduleKind.displayNameKo) · \(tab.format.shortSpecificationBadge)")
             .font(.system(size: 11))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
             .fixedSize(horizontal: true, vertical: false)
@@ -2046,26 +2101,68 @@ struct BottomWorkspaceStatusBarView: View {
 
       Spacer(minLength: 8)
 
-      HStack(spacing: 6) {
+      HStack(spacing: 4) {
+        ForEach(WorkspaceViewMode.allCases) { mode in
+          let isSelectedMode = viewModel.workspaceViewMode == mode
+          Button {
+            viewModel.setWorkspaceViewMode(mode)
+          } label: {
+            HStack(spacing: 3) {
+              Image(systemName: mode.symbolName)
+                .font(.system(size: 9, weight: .semibold))
+              Text(mode.rawValue)
+                .font(.system(size: 9, weight: isSelectedMode ? .bold : .medium))
+            }
+            .foregroundStyle(
+              isSelectedMode
+                ? Color.white
+                : palette.secondaryText.swiftUIColor
+            )
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+              isSelectedMode
+                ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                : palette.elevatedSurface.swiftUIColor
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+          }
+          .buttonStyle(.plain)
+          .help(mode.rawValue)
+        }
+
+        Divider().frame(height: 14)
+
         Button("-") { viewModel.setZoom(viewModel.zoomPercent - 25.0) }.buttonStyle(.plain)
         Text("배율: \(Int(viewModel.zoomPercent))%")
           .font(.system(size: 11, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         Button("+") { viewModel.setZoom(viewModel.zoomPercent + 25.0) }.buttonStyle(.plain)
 
-        Button {
-          viewModel.setZoom(100.0)
-        } label: {
-          Text("100%")
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(palette.selectedSurface.swiftUIColor)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+        ForEach([75, 100, 125], id: \.self) { preset in
+          let isCurrentZoom = Int(viewModel.zoomPercent) == preset
+          Button {
+            viewModel.applyQuickZoomPreset(Double(preset))
+          } label: {
+            Text("\(preset)%")
+              .font(.system(size: 10, weight: isCurrentZoom ? .bold : .medium, design: .monospaced))
+              .foregroundStyle(
+                isCurrentZoom
+                  ? palette.accentBadgeText.swiftUIColor
+                  : palette.secondaryText.swiftUIColor
+              )
+              .padding(.horizontal, 5)
+              .padding(.vertical, 2)
+              .background(
+                isCurrentZoom
+                  ? palette.selectedSurface.swiftUIColor
+                  : palette.elevatedSurface.swiftUIColor
+              )
+              .clipShape(RoundedRectangle(cornerRadius: 4))
+          }
+          .buttonStyle(.plain)
+          .help("\(preset)% 배율 프리셋")
         }
-        .buttonStyle(.plain)
-        .help("100% 배율로 초기화")
       }
       .fixedSize(horizontal: true, vertical: false)
     }

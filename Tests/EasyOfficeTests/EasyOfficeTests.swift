@@ -225,4 +225,97 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(hwpMatches.count, 1)
     XCTAssertEqual(hwpMatches.first?.moduleKind, .hwp)
   }
+
+  @MainActor
+  func testTenthAuditFrontendDeSlopAndWorkspaceModes() {
+    XCTAssertEqual(
+      WorkspaceViewMode.allCases,
+      [.editView, .outlineView, .readOnlyView]
+    )
+    for mode in WorkspaceViewMode.allCases {
+      XCTAssertFalse(mode.rawValue.isEmpty)
+      XCTAssertFalse(mode.symbolName.isEmpty)
+      XCTAssertEqual(mode.id, mode.rawValue)
+    }
+
+    XCTAssertEqual(
+      InspectorSubTab.allCases,
+      [.propertiesAndLayout, .formattingAndTools]
+    )
+    for subTab in InspectorSubTab.allCases {
+      XCTAssertFalse(subTab.rawValue.isEmpty)
+      XCTAssertEqual(subTab.id, subTab.rawValue)
+    }
+
+    XCTAssertEqual(DocumentFormat.allCases.count, 20)
+    for format in DocumentFormat.allCases {
+      let badge = format.shortSpecificationBadge
+      XCTAssertFalse(badge.isEmpty, "shortSpecificationBadge must not be empty for \(format)")
+      XCTAssertLessThanOrEqual(
+        badge.count,
+        20,
+        "shortSpecificationBadge (\(badge)) exceeded 20 chars for \(format)"
+      )
+      XCTAssertLessThanOrEqual(
+        badge.count,
+        14,
+        "shortSpecificationBadge (\(badge)) exceeded 14 chars for \(format)"
+      )
+    }
+
+    XCTAssertEqual(OfficeModuleKind.allCases.count, 5)
+    for module in OfficeModuleKind.allCases {
+      XCTAssertFalse(module.quickLauncherCardTitleKo.isEmpty)
+      XCTAssertFalse(module.quickLauncherFormatBadge.isEmpty)
+    }
+
+    let viewModel = WorkspaceViewModel()
+    XCTAssertEqual(viewModel.workspaceViewMode, .editView)
+    XCTAssertEqual(viewModel.activeInspectorSubTab, .propertiesAndLayout)
+
+    viewModel.setWorkspaceViewMode(.outlineView)
+    XCTAssertEqual(viewModel.workspaceViewMode, .outlineView)
+    XCTAssertEqual(viewModel.lastExecutedCommandSummary, "윤곽 보기 모드로 전환했습니다.")
+
+    viewModel.setWorkspaceViewMode(.readOnlyView)
+    XCTAssertEqual(viewModel.workspaceViewMode, .readOnlyView)
+    XCTAssertEqual(viewModel.lastExecutedCommandSummary, "읽기 전용 모드로 전환했습니다.")
+
+    viewModel.setWorkspaceViewMode(.editView)
+    XCTAssertEqual(viewModel.workspaceViewMode, .editView)
+
+    viewModel.activeInspectorSubTab = .formattingAndTools
+    XCTAssertEqual(viewModel.activeInspectorSubTab, .formattingAndTools)
+    viewModel.activeInspectorSubTab = .propertiesAndLayout
+    XCTAssertEqual(viewModel.activeInspectorSubTab, .propertiesAndLayout)
+
+    viewModel.applyQuickZoomPreset(125.0)
+    XCTAssertEqual(viewModel.zoomPercent, 125.0)
+    XCTAssertEqual(viewModel.lastExecutedCommandSummary, "화면 배율 125% 적용")
+
+    viewModel.applyQuickZoomPreset(75.0)
+    XCTAssertEqual(viewModel.zoomPercent, 75.0)
+
+    viewModel.openNewSampleTab(for: .hwp)
+    viewModel.ribbonLayoutStyle = .hangulHwp
+    XCTAssertEqual(RibbonCategory.allCases.count, 7)
+    for category in RibbonCategory.allCases {
+      let actions = RibbonCategory.actions(for: category, module: .hwp)
+      XCTAssertFalse(actions.isEmpty, "Category \(category) must keep actions in .hangulHwp style")
+    }
+
+    let initialManuscriptMode = viewModel.isManuscriptGridModeEnabled
+    viewModel.toggleManuscriptGridMode()
+    XCTAssertEqual(viewModel.isManuscriptGridModeEnabled, !initialManuscriptMode)
+
+    viewModel.cycleActiveDocumentColumnCount()
+    viewModel.executeRibbonCommand("doc-mod-footnote")
+    if let activeTab = viewModel.activeTab, case .document(let doc) = activeTab.payload {
+      XCTAssertEqual(doc.sections.first?.columnCount, 2)
+      XCTAssertFalse(doc.footnotes.isEmpty)
+    } else {
+      XCTFail("Expected active HWP document payload")
+    }
+  }
 }
+
