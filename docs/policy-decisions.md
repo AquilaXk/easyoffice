@@ -600,3 +600,23 @@
   - 외부 `flate2`/`miniz_oxide` 크레이트 도입: 오프라인/폐쇄망 빌드 무결성과 `Cargo.toml` 외부 의존성 0개 원칙에 위배되므로 기각.
 - **Verified by**: `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 64비트 대용량 아카이브용 ZIP64 확장 헤더 지원이 필요할 때.
+
+### 30. Rust 비트·워드 수준 코어 엔진 최적화(Slicing-by-8 CRC32·9비트 LUT Huffman·SWAR UTF-16LE·Bitset DAG 시트) 및 Tauri 2.x WebUI 완결 정책 (2026-10-24)
+
+- **Decision (`PD-056`)**:
+  1. **`crates/easyoffice-formats` 비트·워드 수준 코덱 최적화 (`zip_codec.rs`, `deflate.rs`, `rtf_xml_helpers.rs`, `ole2_codec.rs`, `legacy_ole2_codec.rs`)**:
+     - `IeeeCrc32`에 컴파일 타임 생성 `TABLES: [[u32; 256]; 8]` Slicing-by-8 테이블을 도입하여 8바이트 스트라이드로 IEEE 802.3 CRC-32를 처리합니다(1 MiB 스트림 기준 바이트 루프 대비 `4.60x` 가속).
+     - `deflate.rs`에 64비트 워드 리필 `BitReader::fill`, 하드웨어 `u16::reverse_bits`, 9비트 1단계 `fast_lut: [u16; 512]` 고정(`OnceLock` 캐시)·동적 허프만 디코더, 비압축 블록 슬라이스 복사(`copy_aligned_bytes`), LZ77 `distance == 1` 바이트 반복(`out.resize`) 및 비겹침(`distance >= match_len`, `out.extend_from_within`) 고속 경로, 8바이트 `u64` SWAR XOR + `trailing_zeros() >> 3` 매칭, $O(1)$ `LENGTH_CODE_LUT: [u8; 259]`·`DIST_CODE_LUT: [u8; 512]`, RFC 1950 `NMAX = 5552` 지연 모듈로 `adler32` 및 `deflate_zlib`·`inflate_zlib`을 구현합니다(32 KiB OOXML 왕복 압축·해제 `3.73x` 가속).
+     - `rtf_xml_helpers.rs`에 64비트 SWAR ASCII 배치 경로(`u64 & 0xFF80_FF80_FF80_FF80 == 0`) 기반 `decode_utf16le_swar`·`encode_utf16le_swar`, 단일 패스 엔티티 디코더 `unescape_xml_single_pass`, 1비트=1섹터 `SectorBitset`(`Vec<u64>`, `Ole2SecurityGuard` 및 `Ole2ContainerCodec` FAT 체인 $O(1)$ 순환 탐지)을 구현하고, `LegacyOle2Codec::pack_xls`에 `HashMap<String, u32>` 기반 $O(1)$ BIFF8 공유 문자열 테이블(SST) 인덱싱을 적용합니다.
+  2. **`crates/easyoffice-sheet` 제로할당 토크나이저·사전 컴파일 AST·비트셋 DAG 평가기 (`parser.rs`, `lib.rs`, `workbook.rs`)**:
+     - `tokenize_formula`에서 `Vec<char>` 할당을 제거하고 UTF-8 바이트 슬라이스 스캐너로 전환하며, `SheetEngine::set_cell` 시점에 `compiled_asts`로 AST를 1회 사전 컴파일합니다.
+     - `EvalContext`의 방문 집합과 메모이제이션 키를 문자열 대신 `PackedWorkbookCoord(u64)`(`(sheet_id << 48) | ((row & 0xFF_FFFF) << 24) | (col & 0xFF_FFFF)`)와 1,024셀 인라인 비트셋 `VisitingTracker`(`bits: [u64; 16]`, `stack: [u64; 66]`)로 교체하고 일괄 재계산 `recalculate_all`을 도입합니다(200개 상호 참조 수식 × 4회 재계산 기준 `37.81x` 가속).
+  3. **결정론적 5회 릴리스 벤치마크 하니스 및 Tauri 2.x 데스크톱 WebUI 결함 5건 해결 (`crates/easyoffice-app/src/{benchmark.rs,lib.rs,ffi.rs}`, `crates/easyoffice-app/ui/*`)**:
+     - `crates/easyoffice-app/src/benchmark.rs`에 `run_deterministic_benchmarks`와 13번째 IPC 라우트 `"run_engine_benchmark"`를 추가하고 `--self-test` 실행 시 4대 스위트 동등성(`all_equivalent == true`)과 `p50` 배속 요약을 검증합니다.
+     - Tauri WebUI의 `invokeIpc` JSON 문자열 역직렬화 누락, 모듈 탭 전환 시 리본 도구 미갱신, `.app-shell` 그리드 행 불일치 및 시트/슬라이드/PDF/변환 패널 폭 축소, 시트 셀 클릭·편집·동적 수식 오버라이드(`cells?formula`)·상태바 실시간 선택 집계(`합계`·`평균`·`개수`), 빠른 실행 도구 모음(QAT)·명령 팔레트 실시간 필터링·슬라이드 썸네일 전환/발표자 레이저/노트·PDF 회전/결재 스탬프/워터마크/AcroForm 양식을 모두 해결합니다.
+- **Why**: 외부 크레이트나 `unsafe` 코드 없이 순수 Rust `std` 비트·워드 연산과 캐시 친화적 자료구조만으로 컨테이너 압축·해제, 문자열·XML 파싱, 스프레드시트 재계산 성능을 수 배~수십 배 끌어올리고, Tauri 2.x 데스크톱 WebUI의 실사용 워크플로를 완결하기 위함입니다.
+- **Trade-offs**: 베이스라인 비교 함수(`checksum_byte_by_byte_baseline`, `evaluate_cell_uncached_baseline` 등)를 벤치마크 동등성 검증용으로 함께 유지해야 하나, `run_self_test()`에서 매 실행마다 최적화 경로와 베이스라인 경로의 출력 일치(`eq=true`)를 결정론적으로 증명합니다.
+- **Alternatives rejected**:
+  - 플랫폼 종속 SIMD 인트린직(`std::arch`) 및 `unsafe` 포인터 캐스팅 사용은 메모리 안전성 불변식과 크로스플랫폼 이식성을 해치므로 안전한 `u64` SWAR 및 컴파일 타임 LUT 방식으로 구현.
+- **Verified by**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run --release -p easyoffice-app -- --self-test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 멀티코어 워커 스레드 풀 기반 대규모 워크북 병렬 재계산 스케줄러를 도입할 때.

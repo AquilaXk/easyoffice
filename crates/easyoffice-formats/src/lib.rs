@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt;
 
 pub mod converter;
@@ -6,7 +5,7 @@ pub mod deflate;
 mod legacy_ole2_codec;
 pub mod office_codecs;
 pub mod ole2_codec;
-mod rtf_xml_helpers;
+pub mod rtf_xml_helpers;
 pub mod text_pdf_codecs;
 pub mod zip_codec;
 
@@ -14,6 +13,10 @@ pub use converter::*;
 pub use deflate::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
+pub use rtf_xml_helpers::{
+    decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_swar,
+    unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload, SectorBitset,
+};
 pub use text_pdf_codecs::*;
 pub use zip_codec::*;
 
@@ -642,95 +645,6 @@ impl Ole2SecurityGuard {
     pub const HWP5_FLAG_COMPRESSED: u32 = 0x01;
     pub const HWP5_FLAG_ENCRYPTED: u32 = 0x02;
     pub const HWP5_FLAG_DISTRIBUTION: u32 = 0x04;
-
-    pub fn validate_sector_chain(
-        container_bytes: &[u8],
-        fat: &[u32],
-        start_sector: u32,
-    ) -> Result<Vec<u32>, EasyOfficeError> {
-        if container_bytes.len() < Self::SECTOR_SIZE * 2
-            || !container_bytes.len().is_multiple_of(Self::SECTOR_SIZE)
-        {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "OLE2 컨테이너 크기가 512바이트 섹터 배수가 아닙니다.".to_string(),
-            ));
-        }
-        if !container_bytes.starts_with(&FormatDetector::OLE2_MAGIC) {
-            return Err(EasyOfficeError::SignatureMismatch {
-                expected: ContainerFamily::Ole2Cfbf,
-                detail: "OLE2 CFBF 헤더 시그니처 불일치".to_string(),
-            });
-        }
-
-        let fat_sector_count = u32::from_le_bytes([
-            container_bytes[44],
-            container_bytes[45],
-            container_bytes[46],
-            container_bytes[47],
-        ]) as usize;
-        if fat_sector_count == 0 || fat_sector_count > Self::MAX_FAT_SECTORS {
-            return Err(EasyOfficeError::SecurityViolation(format!(
-                "OLE2 DIFAT 섹터 개수({fat_sector_count})가 허용 범위(1..={})를 벗어났습니다.",
-                Self::MAX_FAT_SECTORS
-            )));
-        }
-
-        let total_sectors = (container_bytes.len() / Self::SECTOR_SIZE) - 1;
-        let mut visited: HashSet<u32> = HashSet::new();
-        let mut chain: Vec<u32> = Vec::new();
-        let mut current = start_sector;
-
-        while current != Self::END_OF_CHAIN {
-            if !visited.insert(current) {
-                return Err(EasyOfficeError::SecurityViolation(format!(
-                    "OLE2 FAT 섹터 체인 순환 루프가 감지되었습니다 (sector: {current})."
-                )));
-            }
-            let idx = current as usize;
-            if idx >= total_sectors || idx >= fat.len() {
-                return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "OLE2 FAT 체인이 유효하지 않은 섹터({current})를 참조합니다."
-                )));
-            }
-            chain.push(current);
-            current = fat[idx];
-        }
-
-        Ok(chain)
-    }
-
-    pub fn validate_hwp5_file_header(header_bytes: &[u8]) -> Result<u32, EasyOfficeError> {
-        if header_bytes.len() < Self::HWP5_FILE_HEADER_LEN {
-            return Err(EasyOfficeError::CorruptedContainer(format!(
-                "HWP 5.0 FileHeader 길이({})가 256바이트보다 작습니다.",
-                header_bytes.len()
-            )));
-        }
-        if !header_bytes.starts_with(Self::HWP5_SIGNATURE) {
-            return Err(EasyOfficeError::SignatureMismatch {
-                expected: ContainerFamily::Ole2Cfbf,
-                detail: "HWP 5.0 'HWP Document File' 시그니처가 없습니다.".to_string(),
-            });
-        }
-        let version = u32::from_le_bytes([
-            header_bytes[32],
-            header_bytes[33],
-            header_bytes[34],
-            header_bytes[35],
-        ]);
-        let flags = u32::from_le_bytes([
-            header_bytes[36],
-            header_bytes[37],
-            header_bytes[38],
-            header_bytes[39],
-        ]);
-        if (flags & Self::HWP5_FLAG_ENCRYPTED) != 0 || (flags & Self::HWP5_FLAG_DISTRIBUTION) != 0 {
-            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
-                DocumentFormat::Hwp,
-            ));
-        }
-        Ok(version)
-    }
 }
 
 /// Zero-allocation XML sanitizer blocking XXE / DTD declarations and escaping XML entities.
@@ -776,12 +690,9 @@ impl XmlSanitizer {
         out
     }
 
+    #[inline]
     pub fn unescape(text: &str) -> String {
-        text.replace("&quot;", "\"")
-            .replace("&apos;", "'")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
+        unescape_xml_single_pass(text)
     }
 }
 

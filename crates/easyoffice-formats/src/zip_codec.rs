@@ -3,14 +3,14 @@ use crate::{
     ZipSecurityPolicy,
 };
 
-/// IEEE 802.3 CRC-32 (`0xEDB88320` reflected polynomial) checksum calculator.
+/// IEEE 802.3 CRC-32 (`0xEDB88320` reflected polynomial) Slicing-by-8 checksum calculator.
 pub struct IeeeCrc32;
 
 impl IeeeCrc32 {
     pub const POLYNOMIAL: u32 = 0xEDB8_8320;
 
-    const TABLE: [u32; 256] = {
-        let mut table = [0u32; 256];
+    pub const TABLES: [[u32; 256]; 8] = {
+        let mut tables = [[0u32; 256]; 8];
         let mut i = 0usize;
         while i < 256 {
             let mut crc = i as u32;
@@ -23,18 +23,63 @@ impl IeeeCrc32 {
                 }
                 bit += 1;
             }
-            table[i] = crc;
+            tables[0][i] = crc;
             i += 1;
         }
-        table
+        let mut t = 1usize;
+        while t < 8 {
+            let mut j = 0usize;
+            while j < 256 {
+                let prev = tables[t - 1][j];
+                tables[t][j] = (prev >> 8) ^ tables[0][(prev & 0xFF) as usize];
+                j += 1;
+            }
+            t += 1;
+        }
+        tables
     };
 
     #[inline]
     pub fn checksum(bytes: &[u8]) -> u32 {
         let mut crc: u32 = 0xFFFF_FFFF;
+        let mut offset = 0usize;
+        while offset + 8 <= bytes.len() {
+            let one = u32::from_le_bytes([
+                bytes[offset],
+                bytes[offset + 1],
+                bytes[offset + 2],
+                bytes[offset + 3],
+            ]) ^ crc;
+            let two = u32::from_le_bytes([
+                bytes[offset + 4],
+                bytes[offset + 5],
+                bytes[offset + 6],
+                bytes[offset + 7],
+            ]);
+            crc = Self::TABLES[7][(one & 0xFF) as usize]
+                ^ Self::TABLES[6][((one >> 8) & 0xFF) as usize]
+                ^ Self::TABLES[5][((one >> 16) & 0xFF) as usize]
+                ^ Self::TABLES[4][(one >> 24) as usize]
+                ^ Self::TABLES[3][(two & 0xFF) as usize]
+                ^ Self::TABLES[2][((two >> 8) & 0xFF) as usize]
+                ^ Self::TABLES[1][((two >> 16) & 0xFF) as usize]
+                ^ Self::TABLES[0][(two >> 24) as usize];
+            offset += 8;
+        }
+        while offset < bytes.len() {
+            let idx = ((crc ^ (bytes[offset] as u32)) & 0xFF) as usize;
+            crc = (crc >> 8) ^ Self::TABLES[0][idx];
+            offset += 1;
+        }
+        !crc
+    }
+
+    #[inline]
+    pub fn checksum_byte_by_byte_baseline(bytes: &[u8]) -> u32 {
+        let mut crc: u32 = 0xFFFF_FFFF;
         for &b in bytes {
             let idx = ((crc ^ (b as u32)) & 0xFF) as usize;
-            crc = (crc >> 8) ^ Self::TABLE[idx];
+            crc = (crc >> 8) ^ Self::TABLES[0][idx];
         }
         !crc
     }
