@@ -560,7 +560,6 @@ fn find_dist_code(dist: usize) -> usize {
 /// Compresses `input` into a deterministic RFC 1951 raw DEFLATE bitstream using Fixed Huffman + LZ77 sliding window.
 pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
     let mut writer = BitWriter::with_capacity(input.len() / 2 + 16);
-    // Final block (BFINAL = 1), Fixed Huffman (BTYPE = 01)
     writer.write_bits_lsb(1, 1);
     writer.write_bits_lsb(1, 2);
 
@@ -661,22 +660,18 @@ mod tests {
         let decompressed = inflate_raw(&compressed, 1024 * 1024).unwrap();
         assert_eq!(decompressed, xml);
 
-        // Stored block (BTYPE = 00, BFINAL = 1): header 0x01, LEN = 5, NLEN = !5
         let stored_stream = [0x01u8, 0x05, 0x00, 0xFA, 0xFF, b'H', b'e', b'l', b'l', b'o'];
         assert_eq!(inflate_raw(&stored_stream, 1024).unwrap(), b"Hello");
 
-        // Zlib wrapper (0x78 0x9C) + raw deflate
         let mut zlib_wrapped = vec![0x78, 0x9C];
         zlib_wrapped.extend_from_slice(&compressed);
         assert_eq!(inflate_auto(&zlib_wrapped, 1024 * 1024).unwrap(), xml);
 
-        // Invalid BTYPE = 11 (0b111 = 0x07) -> CorruptedContainer
         assert!(matches!(
             inflate_raw(&[0x07], 1024),
             Err(EasyOfficeError::CorruptedContainer(_))
         ));
 
-        // ResourceBudgetExceeded on small max_output_bytes
         assert!(matches!(
             inflate_raw(&compressed, 16),
             Err(EasyOfficeError::ResourceBudgetExceeded(_))

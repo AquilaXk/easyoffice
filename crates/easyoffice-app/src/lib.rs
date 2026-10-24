@@ -347,7 +347,6 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    /// Payload format: `<src_ext>-><dst_ext>|<title>|<body_text>` or `<src_ext>|<dst_ext>|<title>|<body_text>`
     fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
         let parts: Vec<&str> = payload.split('|').collect();
         let (src_ext, dst_ext, title, body) = if let Some(first) = parts.first() {
@@ -443,7 +442,6 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    /// Payload format: `<module>|<category>` (e.g. `DOC|home`, `HWP|layout`, `SHEET|module`)
     fn handle_get_ribbon_category_commands(payload: &str) -> Result<String, EasyOfficeError> {
         let (mod_str, cat_str) = payload.split_once('|').unwrap_or(("DOC", payload.trim()));
         let module = match mod_str.trim().to_ascii_uppercase().as_str() {
@@ -526,7 +524,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // Verify RFC 1951 DEFLATE & HWP 5.0 compressed stream round-trip
     let raw_deflate_input = "EasyOffice RFC 1951 DEFLATE Self-Test Vector ".repeat(16);
     let deflated = deflate_raw(raw_deflate_input.as_bytes());
     let inflated = inflate_raw(&deflated, 65_536)?;

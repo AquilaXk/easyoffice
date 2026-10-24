@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body class="theme-light" data-active-module="DOC">
-  <!-- Top Bar: Window Title, Multi-Document Tab Strip, Ribbon Layout Toggle & Theme Switch -->
   <header class="topbar" role="banner">
     <div class="brand-cluster">
       <span class="brand-mark" aria-hidden="true">EO</span>
@@ -59,7 +58,6 @@
     </div>
   </header>
 
-  <!-- Contextual 7-Category Ribbon Toolbar -->
   <section class="ribbon-bar" aria-label="컨텍스트 리본 툴바">
     <div class="ribbon-categories" id="ribbon-categories" role="tablist">
       <button class="ribbon-cat active" data-cat="home" role="tab" aria-selected="true">홈</button>
@@ -98,7 +96,6 @@
     </div>
   </section>
 
-  <!-- Recent Documents Filter Bar -->
   <section class="filter-bar" aria-label="포맷별 최근 문서 필터">
     <span class="filter-title">최근 문서 필터</span>
     <div class="filter-chips" id="format-filter-chips">
@@ -113,9 +110,7 @@
     <span id="filter-status" class="filter-status">표시 중: 전체 표준 오피스 문서 포맷</span>
   </section>
 
-  <!-- 3-Column Workspace Grid: Left Navigator (240px) | Center Canvas (1fr) | Right Inspector (280px) -->
   <main class="workspace-grid">
-    <!-- Left Sidebar (240px) -->
     <aside class="sidebar-left" aria-label="문서 탐색기 및 개요">
       <div class="panel-section">
         <h2 class="panel-heading">문서 개요 · 북마크</h2>
@@ -141,9 +136,7 @@
       </div>
     </aside>
 
-    <!-- Center Editor Canvas (1fr) -->
     <section class="editor-stage" id="editor-stage" aria-label="편집 캔버스">
-      <!-- 1. Document / HWP Editor Pane -->
       <article id="pane-doc" class="module-pane active">
         <div class="paper-sheet" id="doc-paper">
           <div class="official-banner" id="official-header-banner">
@@ -159,7 +152,6 @@
             <p>2. 표 편집기와 200자 원고지 보기를 통해 보고서와 공문서를 정확한 레이아웃으로 작성할 수 있습니다. TODO: 보안 감사 결재선 검토를 완료합니다.</p>
           </div>
 
-          <!-- Interactive Document Table & 200-Cell Manuscript Paper Controls -->
           <div class="doc-table-section" aria-label="표 도구 및 원고지">
             <div class="doc-table-toolbar">
               <span class="group-label">표 도구</span>
@@ -200,7 +192,6 @@
         </div>
       </article>
 
-      <!-- 2. Sheet Spreadsheet Pane -->
       <article id="pane-sheet" class="module-pane">
         <div class="formula-bar">
           <span class="cell-ref" id="active-cell-ref">C1</span>
@@ -246,7 +237,6 @@
         </div>
       </article>
 
-      <!-- 3. Slide Presentation Pane -->
       <article id="pane-slide" class="module-pane">
         <div class="slide-canvas" id="slide-canvas">
           <div class="slide-upper-zone">
@@ -275,7 +265,6 @@
         </div>
       </article>
 
-      <!-- 4. PDF Studio Pane -->
       <article id="pane-pdf" class="module-pane">
         <div class="pdf-page" id="pdf-page">
           <div class="pdf-watermark">CONFIDENTIAL</div>
@@ -293,7 +282,6 @@
         </div>
       </article>
 
-      <!-- 5. 20-Format Batch Conversion Studio Pane -->
       <article id="pane-converter" class="module-pane">
         <div class="paper-sheet converter-sheet">
           <h2 class="doc-h1">포맷 일괄 변환 스튜디오</h2>
@@ -366,7 +354,6 @@
       </article>
     </section>
 
-    <!-- Right Inspector Sidebar (280px) -->
     <aside class="sidebar-right" aria-label="속성 인스펙터 및 문서 보조 도구">
       <div class="panel-section">
         <h2 class="panel-heading">문서 속성 인스펙터</h2>
@@ -386,7 +373,6 @@
     </aside>
   </main>
 
-  <!-- Status Bar with Interactive View Mode & Quick Zoom Controls -->
   <footer class="statusbar" role="contentinfo">
     <span id="status-left">준비 완료 · 연간 아키텍처 보고서</span>
     <span id="status-center">보안·개인정보 점검 완료</span>
@@ -405,7 +391,6 @@
     </div>
   </footer>
 
-  <!-- Command Palette Modal (Ctrl+K / Cmd+K) -->
   <div id="cmd-modal" class="cmd-modal hidden" role="dialog" aria-modal="true" aria-label="빠른 명령 팔레트">
     <div class="cmd-dialog">
       <input id="cmd-search-input" type="text" placeholder="명령 검색 (예: 다크 모드, 시트 전환, 원고지, 포맷 일괄 변환, 개인정보 마스킹)..." />

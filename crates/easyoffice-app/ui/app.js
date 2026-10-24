@@ -175,7 +175,6 @@
   if (osBadge) osBadge.textContent = isMac ? "macOS ⌘" : "Windows/Linux Ctrl";
   if (kbdHint) kbdHint.textContent = shortcutLabel + "K";
 
-  // 1. Top Document Tabs & Module Switching
   const tabs = document.querySelectorAll(".doc-tab");
   const panes = document.querySelectorAll(".module-pane");
   const inspModule = document.getElementById("insp-module");
@@ -217,7 +216,6 @@
     });
   });
 
-  // 2. Contextual 7-Category Ribbon Toolbar (All 7 categories interactive)
   const ribbonReadout = document.getElementById("ribbon-status-readout");
   const ribbonToolsContainer = document.getElementById("ribbon-tools");
 
@@ -320,7 +318,6 @@
     });
   }
 
-  // 3. Interactive Document Table & 200-Cell Manuscript Grid
   const docTableBody = document.getElementById("doc-table-body");
   const addRowBtn = document.getElementById("btn-doc-add-row");
   const mergeCellsBtn = document.getElementById("btn-doc-merge-cells");
@@ -393,7 +390,6 @@
     toggleManuscriptBtn.addEventListener("click", toggleManuscriptGrid);
   }
 
-  // 4. Smart Assistant & PII Scrubbing
   const smartOutput = document.getElementById("smart-assistant-output");
 
   async function runSmartSummary() {
@@ -418,7 +414,6 @@
     }
   }
 
-  // 5. Recent Documents Format Filter Bar
   const chips = document.querySelectorAll("#format-filter-chips .chip");
   const recentItems = document.querySelectorAll("#recent-doc-list li");
   const filterStatus = document.getElementById("filter-status");
@@ -441,7 +436,6 @@
     });
   });
 
-  // 6. Korean IME Composition Guard
   const editableSurfaces = document.querySelectorAll('[contenteditable="true"], input, textarea');
   const inspIme = document.getElementById("insp-ime");
 
@@ -456,7 +450,6 @@
     });
   });
 
-  // 7. Multi-Sheet Tab Bar & Cross-Sheet Formula Evaluation
   const sheetStore = {
     Sheet1: { A1: "1200", B1: "850", C1: "2050", D1: "정상", A2: "450", B2: "550", C2: "1000", D2: "검토완료", A3: "합계", B3: "1400", C3: "3050", D3: "승인" },
     Sheet2: { A1: "100", B1: "250", C1: "350", D1: "보조시트", A2: "300", B2: "400", C2: "700", D2: "정상", A3: "합계", B3: "650", C3: "1050", D3: "완료" }
@@ -569,7 +562,6 @@
     });
   }
 
-  // 8. 20-Format Batch Conversion Studio (#pane-converter)
   const convertBtn = document.getElementById("btn-run-format-convert");
   if (convertBtn) {
     convertBtn.addEventListener("click", async function () {
@@ -600,7 +592,6 @@
     });
   }
 
-  // 9. Status Bar Interactive View Mode & Quick Zoom Controls
   const statusRight = document.getElementById("status-right");
   const editorStage = document.getElementById("editor-stage");
 
@@ -643,7 +634,6 @@
     });
   });
 
-  // 10. Theme Toggle & Command Palette
   const themeBtn = document.getElementById("theme-toggle");
   function toggleTheme() {
     const isDark = document.body.classList.toggle("theme-dark");

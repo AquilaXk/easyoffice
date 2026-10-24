@@ -19,14 +19,12 @@ fn test_rfc1951_stored_fixed_dynamic_and_zlib_roundtrip() {
     let restored = inflate_raw(&compressed, 1024 * 1024).expect("inflate_raw should succeed");
     assert_eq!(restored, original.as_bytes());
 
-    // RFC 1950 zlib header (0x78 0x9C) auto-detection
     let mut zlib_wrapped = vec![0x78, 0x9C];
     zlib_wrapped.extend_from_slice(&compressed);
     let restored_zlib =
         inflate_auto(&zlib_wrapped, 1024 * 1024).expect("inflate_auto should strip zlib header");
     assert_eq!(restored_zlib, original.as_bytes());
 
-    // Real dynamic Huffman (BTYPE=10) stream produced by standard zlib (wbits=-15, level=9)
     let dynamic_sample: &[u8] = &[
         165, 214, 175, 78, 3, 65, 28, 196, 241, 87, 217, 244, 5, 232, 204, 244, 127, 142, 62, 13,
         6, 87, 65, 82, 91, 81, 81, 130, 1, 81, 130, 104, 72, 5, 2, 129, 66, 144, 190, 211, 221,
@@ -82,7 +80,6 @@ fn test_zip_pack_deflate_and_format_detector_on_compressed_hwtx_and_ppsx() {
         .expect("detect compressed hwtx");
     assert_eq!(detected, DocumentFormat::Hwtx);
 
-    // Deflate-compressed .ppsx detection
     let ppsx_entries = vec![
         ZipEntry::new(
             "[Content_Types].xml",
@@ -131,12 +128,10 @@ fn test_hwp5_compressed_streams_and_swift_extended_records_parity() {
     let restored = Hwp5Codec::unpack(&compressed_hwp).expect("unpack compressed HWP 5.0");
     assert_eq!(restored, doc);
 
-    // Construct a Swift-style extended HWP 5.0 container (4 strings + 1 byte in DocInfo,
-    // extended ParaHeader with 3 strings + 9 bytes, and Table with caption + hasHeader + u16 rows/cols)
     let mut fh = vec![0u8; 256];
     fh[..17].copy_from_slice(b"HWP Document File");
     fh[32..36].copy_from_slice(&[0, 3, 0, 5]);
-    fh[36..40].copy_from_slice(&1u32.to_le_bytes()); // compressed flag = 0x01
+    fh[36..40].copy_from_slice(&1u32.to_le_bytes());
 
     let encode_u16_str = |s: &str| -> Vec<u8> {
         let mut v = Vec::new();
@@ -151,7 +146,7 @@ fn test_hwp5_compressed_streams_and_swift_extended_records_parity() {
     doc_props.extend_from_slice(&encode_u16_str("A4"));
     doc_props.extend_from_slice(&encode_u16_str("머리말-01"));
     doc_props.extend_from_slice(&encode_u16_str("꼬리말-01"));
-    doc_props.push(1); // trackChanges
+    doc_props.push(1);
     let mut doc_info =
         Hwp5Codec::encode_record_header(Hwp5Codec::HWPTAG_DOCUMENT_PROPERTIES, 0, doc_props.len());
     doc_info.extend_from_slice(&doc_props);
@@ -163,7 +158,7 @@ fn test_hwp5_compressed_streams_and_swift_extended_records_parity() {
     p_hdr.extend_from_slice(&encode_u16_str("함초롬바탕"));
     p_hdr.extend_from_slice(&1100u32.to_le_bytes());
     p_hdr.extend_from_slice(&16000u32.to_le_bytes());
-    p_hdr.push(0x01); // bold
+    p_hdr.push(0x01);
     sec0.extend_from_slice(&Hwp5Codec::encode_record_header(
         Hwp5Codec::HWPTAG_PARA_HEADER,
         0,
@@ -184,7 +179,7 @@ fn test_hwp5_compressed_streams_and_swift_extended_records_parity() {
 
     let mut tbl = Vec::new();
     tbl.extend_from_slice(&encode_u16_str("표 1"));
-    tbl.push(1); // hasHeader
+    tbl.push(1);
     tbl.extend_from_slice(&1u16.to_le_bytes());
     tbl.extend_from_slice(&2u16.to_le_bytes());
     tbl.extend_from_slice(&encode_u16_str("열A"));
@@ -224,7 +219,6 @@ fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
         out
     };
 
-    // 1. Swift-packed .doc with extended trailer
     let body_utf16 = encode_u16_raw("첫 문단\r둘째 문단");
     let fc_min = 64u32;
     let fc_mac = fc_min + (body_utf16.len() as u32);
@@ -239,14 +233,14 @@ fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
     doc_stream.extend_from_slice(&encode_u16_prefixed("A4"));
     doc_stream.extend_from_slice(&encode_u16_prefixed("머리말"));
     doc_stream.extend_from_slice(&encode_u16_prefixed("꼬리말"));
-    doc_stream.push(0); // trackChanges
-    doc_stream.extend_from_slice(&1u32.to_le_bytes()); // 1 paragraph
+    doc_stream.push(0);
+    doc_stream.extend_from_slice(&1u32.to_le_bytes());
     doc_stream.extend_from_slice(&encode_u16_prefixed("본문"));
     doc_stream.extend_from_slice(&encode_u16_prefixed("양쪽"));
     doc_stream.extend_from_slice(&encode_u16_prefixed("본고딕"));
-    doc_stream.extend_from_slice(&[0u8; 9]); // 9-byte metrics
+    doc_stream.extend_from_slice(&[0u8; 9]);
     doc_stream.extend_from_slice(&encode_u16_prefixed("확장 트레일러 문단"));
-    doc_stream.extend_from_slice(&0u32.to_le_bytes()); // 0 tables
+    doc_stream.extend_from_slice(&0u32.to_le_bytes());
 
     let doc_container =
         Ole2ContainerCodec::pack(&[(["Wor", "dDocument"].concat(), doc_stream)]).unwrap();
@@ -257,7 +251,6 @@ fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
         vec!["확장 트레일러 문단".to_string()]
     );
 
-    // 2. Swift-packed .xls with BIFF8_FORMULA containing raw UTF-16LE formula at offset 16
     let mut wb = Vec::new();
     wb.extend_from_slice(&LegacyOle2Codec::BIFF8_BOF.to_le_bytes());
     wb.extend_from_slice(&16u16.to_le_bytes());
@@ -267,11 +260,11 @@ fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
     let f_len = (16 + formula_utf16.len()) as u16;
     wb.extend_from_slice(&LegacyOle2Codec::BIFF8_FORMULA.to_le_bytes());
     wb.extend_from_slice(&f_len.to_le_bytes());
-    wb.extend_from_slice(&2u16.to_le_bytes()); // row 2
-    wb.extend_from_slice(&1u16.to_le_bytes()); // col 1
-    wb.extend_from_slice(&0u16.to_le_bytes()); // xf
+    wb.extend_from_slice(&2u16.to_le_bytes());
+    wb.extend_from_slice(&1u16.to_le_bytes());
+    wb.extend_from_slice(&0u16.to_le_bytes());
     wb.extend_from_slice(&42.0f64.to_bits().to_le_bytes());
-    wb.extend_from_slice(&0u16.to_le_bytes()); // options = 0 (Swift format)
+    wb.extend_from_slice(&0u16.to_le_bytes());
     wb.extend_from_slice(&formula_utf16);
 
     wb.extend_from_slice(&LegacyOle2Codec::BIFF8_EOF.to_le_bytes());
@@ -281,7 +274,6 @@ fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
     let unpacked_xls = LegacyOle2Codec::unpack_xls(&xls_container).expect("unpack Swift .xls");
     assert_eq!(unpacked_xls.cells, vec![(2, 1, "=SUM(A1:A5)".to_string())]);
 
-    // 3. Swift-packed .ppt with odd-byte-length binary canvas atom (ver_inst = 0x0040)
     let base_ppt = LegacyPptPayload {
         title: "교차발표".to_string(),
         slides: vec![LegacyPptSlide {

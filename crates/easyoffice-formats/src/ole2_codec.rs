@@ -669,7 +669,8 @@ impl Hwp5Codec {
         }
         let mut cur = start;
         if read_len_prefixed_utf16le(data, &mut cur, end).is_ok() && cur < end {
-            cur += 1; // has_header
+            let _has_header = data[cur] != 0;
+            cur += 1;
             if let Some(rows) = Self::try_parse_u16_rows(data, cur, end) {
                 return Ok(rows);
             }

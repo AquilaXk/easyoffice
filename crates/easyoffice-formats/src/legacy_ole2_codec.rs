@@ -220,6 +220,10 @@ impl LegacyOle2Codec {
         })
     }
 
+    const DOC_PARA_METRICS_COMPACT_LEN: usize = 9;
+    const DOC_PARA_METRICS_EXTENDED_LEN: usize = 17;
+    const PPT_INST_CANVAS_ELEMENT: u16 = 0x0040;
+
     fn parse_extended_doc_trailer(
         data: &[u8],
         start: usize,
@@ -235,7 +239,8 @@ impl LegacyOle2Codec {
                 "DOC 확장 트레일러 헤더 절단".to_string(),
             ));
         }
-        cursor += 1; // track_changes
+        let _track_changes = data[cursor] != 0;
+        cursor += 1;
         let p_count = read_u32_le(data, cursor)? as usize;
         cursor += 4;
         let mut paragraphs = Vec::with_capacity(p_count.min(4096));
@@ -243,18 +248,17 @@ impl LegacyOle2Codec {
             let _style = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
             let _align = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
             let _font = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
-            if cursor + 9 > limit {
+            if cursor + Self::DOC_PARA_METRICS_COMPACT_LEN > limit {
                 return Err(EasyOfficeError::CorruptedContainer(
                     "DOC 확장 문단 속성 절단".to_string(),
                 ));
             }
-            // Try 9-byte (fontSizePt/fontSizeX100 + lineSpacingX100 + flags) or 17-byte (+ letterSpacing + charWidthScale)
             let saved = cursor;
-            cursor = saved + 9;
+            cursor = saved + Self::DOC_PARA_METRICS_COMPACT_LEN;
             if let Ok(txt) = read_len_prefixed_utf16le(data, &mut cursor, limit) {
                 paragraphs.push(txt);
             } else {
-                cursor = saved + 17;
+                cursor = saved + Self::DOC_PARA_METRICS_EXTENDED_LEN;
                 let txt = read_len_prefixed_utf16le(data, &mut cursor, limit)?;
                 paragraphs.push(txt);
             }
@@ -268,9 +272,9 @@ impl LegacyOle2Codec {
                 if cursor >= limit {
                     break;
                 }
-                cursor += 1; // has_header
+                let _has_header = data[cursor] != 0;
+                cursor += 1;
                 let saved_tbl = cursor;
-                // Try u16 rows + per-row u16 cols (Swift LegacyOLE2OfficeCodec)
                 let mut parsed_tbl = None;
                 if cursor + 2 <= limit {
                     let r_count = read_u16_le(data, cursor)? as usize;
@@ -708,17 +712,15 @@ impl LegacyOle2Codec {
                             s_theme = th.to_string();
                             s_transition = tr.to_string();
                         }
-                    } else if s_type == Self::RT_TEXT_CHARS_ATOM {
-                        if s_ver == 0x0040 {
-                            // Binary canvas element atom (contains 1-byte styleMask); skip UTF-16LE decode
-                        } else {
-                            let txt = decode_utf16le(&ppt_stream.data[a_start..a_end])?;
-                            match s_ver {
-                                0x0000 => s_title = txt,
-                                0x0020 => s_notes = txt,
-                                0x0030 => s_bullets.push(txt),
-                                _ => {}
-                            }
+                    } else if s_type == Self::RT_TEXT_CHARS_ATOM
+                        && s_ver != Self::PPT_INST_CANVAS_ELEMENT
+                    {
+                        let txt = decode_utf16le(&ppt_stream.data[a_start..a_end])?;
+                        match s_ver {
+                            0x0000 => s_title = txt,
+                            0x0020 => s_notes = txt,
+                            0x0030 => s_bullets.push(txt),
+                            _ => {}
                         }
                     }
                     s_cur = a_end;
