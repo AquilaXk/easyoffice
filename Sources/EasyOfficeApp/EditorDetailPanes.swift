@@ -787,7 +787,7 @@ public struct DocumentEditorDetailPaneView: View {
             }
 
             LavenderMenuPill(
-              title: "줄간격 \(Int(selectedParagraph?.lineSpacingPercent ?? 160))%",
+              title: "줄 \(Int(selectedParagraph?.lineSpacingPercent ?? 160))%",
               symbolName: "arrow.up.and.down.text.horizontal",
               palette: palette,
               isSnapshotMode: viewModel.isCanvasSnapshotMode
@@ -830,7 +830,7 @@ public struct DocumentEditorDetailPaneView: View {
             }
 
             LavenderMenuPill(
-              title: "다단 (\(colCount)단)",
+              title: "\(colCount)단",
               symbolName: "rectangle.split.2x1",
               palette: palette,
               isSnapshotMode: viewModel.isCanvasSnapshotMode
@@ -854,7 +854,7 @@ public struct DocumentEditorDetailPaneView: View {
             }
 
             LavenderMenuPill(
-              title: "용지 (\(isLandscape ? "가로" : "세로"))",
+              title: isLandscape ? "가로" : "세로",
               symbolName: isLandscape ? "rectangle.portrait.rotate" : "doc.richtext",
               palette: palette,
               isSnapshotMode: viewModel.isCanvasSnapshotMode
@@ -931,7 +931,7 @@ public struct DocumentEditorDetailPaneView: View {
             Button(
               viewModel.isManuscriptGridModeEnabled
                 ? "일반 용지"
-                : (isSplitActive ? "원고지" : "200자 원고지")
+                : "원고지"
             ) {
               viewModel.toggleManuscriptGridMode()
             }
@@ -943,7 +943,7 @@ public struct DocumentEditorDetailPaneView: View {
             Button(
               viewModel.isAdvancedToolbarExpanded
                 ? "고급 ▲"
-                : (isSplitActive ? "고급 ▼" : "고급 도구 ▼")
+                : "고급 ▼"
             ) {
               viewModel.isAdvancedToolbarExpanded.toggle()
             }
@@ -1927,7 +1927,8 @@ public struct DocumentEditorDetailPaneView: View {
                           ? palette.accentBadgeText.swiftUIColor
                           : palette.primaryText.swiftUIColor
                       )
-                      .lineLimit(1)
+                      .lineLimit(2)
+                      .fixedSize(horizontal: false, vertical: true)
                   }
                   Spacer(minLength: 0)
                   if let span, span.rowSpan > 1 || span.columnSpan > 1 {
@@ -1940,7 +1941,8 @@ public struct DocumentEditorDetailPaneView: View {
                       .clipShape(RoundedRectangle(cornerRadius: 3))
                   }
                 }
-                .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 22, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+                .padding(.vertical, 2)
                 .layoutPriority(Double(span?.columnSpan ?? 1))
                 .padding(.horizontal, 6)
                 .background(cellBg)
