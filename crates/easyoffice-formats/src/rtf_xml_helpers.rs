@@ -299,24 +299,40 @@ pub fn encode_utf16le_swar(text: &str) -> Vec<u8> {
     out
 }
 
-/// Single-pass XML entity unescaper with `&`-absence fast path and numeric entity decoding.
+#[inline]
+const fn is_xml10_valid_char(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x09 | 0x0A | 0x0D | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
+    )
+}
+
 #[inline]
 pub fn unescape_xml_single_pass(text: &str) -> String {
-    if !text.contains('&') {
+    let bytes = text.as_bytes();
+    let Some(mut amp_pos) = crate::XmlSanitizer::find_byte_swar(bytes, 0, b'&') else {
         return text.to_string();
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(amp_pos) = rest.find('&') {
-        out.push_str(&rest[..amp_pos]);
-        let after_amp = &rest[amp_pos + 1..];
-        if let Some(semi_offset) = after_amp
-            .as_bytes()
-            .iter()
-            .take(12)
-            .position(|&b| b == b';')
-        {
-            let entity = &after_amp[..semi_offset];
+    };
+    let mut out = String::with_capacity(bytes.len());
+    let mut pos = 0usize;
+    loop {
+        if amp_pos > pos {
+            out.push_str(&text[pos..amp_pos]);
+        }
+        let after_idx = amp_pos + 1;
+        let scan_end = (after_idx + 12).min(bytes.len());
+        let mut semi_pos = None;
+        let mut i = after_idx;
+        while i < scan_end {
+            if bytes[i] == b';' {
+                semi_pos = Some(i);
+                break;
+            }
+            i += 1;
+        }
+        if let Some(semi) = semi_pos {
+            let entity = &text[after_idx..semi];
             let decoded = match entity {
                 "quot" => Some('"'),
                 "apos" => Some('\''),
@@ -327,22 +343,35 @@ pub fn unescape_xml_single_pass(text: &str) -> String {
                     u32::from_str_radix(&entity[2..], 16)
                         .ok()
                         .and_then(char::from_u32)
+                        .filter(|&c| is_xml10_valid_char(c))
                 }
-                _ if entity.starts_with('#') => {
-                    entity[1..].parse::<u32>().ok().and_then(char::from_u32)
-                }
+                _ if entity.starts_with('#') => entity[1..]
+                    .parse::<u32>()
+                    .ok()
+                    .and_then(char::from_u32)
+                    .filter(|&c| is_xml10_valid_char(c)),
                 _ => None,
             };
             if let Some(ch) = decoded {
                 out.push(ch);
-                rest = &after_amp[semi_offset + 1..];
-                continue;
+                pos = semi + 1;
+                if let Some(next_amp) = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'&') {
+                    amp_pos = next_amp;
+                    continue;
+                }
+                break;
             }
         }
         out.push('&');
-        rest = after_amp;
+        pos = after_idx;
+        let Some(next_amp) = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'&') else {
+            break;
+        };
+        amp_pos = next_amp;
     }
-    out.push_str(rest);
+    if pos < bytes.len() {
+        out.push_str(&text[pos..]);
+    }
     out
 }
 

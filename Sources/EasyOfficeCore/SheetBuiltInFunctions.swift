@@ -46,75 +46,187 @@ extension WorksheetModel {
       }
     }
 
-    private mutating func appendRange(
-      _ cellRange: CellRange,
-      onSheet sheetName: String? = nil,
-      in sheet: WorksheetModel,
-      into values: inout [EvaluatedCellValue]
-    ) -> String? {
-      var rangeError: String?
-      cellRange.forEachCoordinate { coord in
-        guard rangeError == nil else { return }
-        let v =
-          sheetName.map {
-            sheet.evaluateOnSheet(named: $0, at: coord, context: &context, depth: depth + 1)
-          } ?? sheet.evaluateInternal(at: coord, context: &context, depth: depth + 1)
-        if case .error(let code) = v { rangeError = code } else { values.append(v) }
-      }
-      return rangeError
-    }
-
     mutating func resolve(_ range: Range<Int>, in sheet: WorksheetModel) -> FormulaResolutionResult
     {
       var values: [EvaluatedCellValue] = []
+      if let err = forEachResolvedCell(in: range, sheet: sheet, { values.append($0) }) {
+        return .failure(err)
+      }
+      return .success(values)
+    }
+
+    private mutating func streamRangeCells(
+      _ cellRange: CellRange,
+      onSheet sheetName: String? = nil,
+      in sheet: WorksheetModel,
+      _ body: (EvaluatedCellValue) -> Void
+    ) -> String? {
+      let minRow = min(cellRange.start.row, cellRange.end.row)
+      let maxRow = max(cellRange.start.row, cellRange.end.row)
+      let minCol = min(cellRange.start.column, cellRange.end.column)
+      let maxCol = max(cellRange.start.column, cellRange.end.column)
+      let count = (maxRow - minRow + 1) * (maxCol - minCol + 1)
+      guard count > 0 else { return nil }
+      guard count <= CellRange.maxExpandedCellCount else { return "#REF!" }
+      for r in minRow...maxRow {
+        for c in minCol...maxCol {
+          let coord = PackedCellCoordinate(row: r, column: c)
+          let v =
+            sheetName.map {
+              sheet.evaluateOnSheet(named: $0, at: coord, context: &context, depth: depth + 1)
+            } ?? sheet.evaluateInternal(at: coord, context: &context, depth: depth + 1)
+          if case .error(let code) = v { return code }
+          body(v)
+        }
+      }
+      return nil
+    }
+
+    mutating func forEachResolvedCell(
+      in range: Range<Int>,
+      sheet: WorksheetModel,
+      _ body: (EvaluatedCellValue) -> Void
+    ) -> String? {
       for idx in range {
         switch args[idx] {
         case .rangeRef(let cellRange):
-          if let err = appendRange(cellRange, in: sheet, into: &values) { return .failure(err) }
+          if let err = streamRangeCells(cellRange, in: sheet, body) { return err }
         case .namedRangeRef(let rangeName):
-          guard let notation = sheet.resolveNamedRange(rangeName) else { return .failure("#NAME?") }
+          guard let notation = sheet.resolveNamedRange(rangeName) else { return "#NAME?" }
           if let cellRange = try? CellRange(notation: notation) {
-            if let err = appendRange(cellRange, in: sheet, into: &values) { return .failure(err) }
+            if let err = streamRangeCells(cellRange, in: sheet, body) { return err }
           } else if let addr = try? CellAddress(a1Notation: notation) {
             let v = sheet.evaluateInternal(
               at: addr.packedCoordinate, context: &context, depth: depth + 1)
-            if case .error(let code) = v { return .failure(code) }
-            values.append(v)
+            if case .error(let code) = v { return code }
+            body(v)
           } else {
-            return .failure("#REF!")
+            return "#REF!"
           }
         case .sheetRangeRef(let sheetName, let cellRange):
-          guard sheet.hasSheet(named: sheetName) else { return .failure("#REF!") }
-          if let err = appendRange(cellRange, onSheet: sheetName, in: sheet, into: &values) {
-            return .failure(err)
+          guard sheet.hasSheet(named: sheetName) else { return "#REF!" }
+          if let err = streamRangeCells(cellRange, onSheet: sheetName, in: sheet, body) {
+            return err
           }
         case .functionCall(let fnName, let fnArgs) where fnName == "OFFSET":
           switch sheet.resolveOffsetRange(args: fnArgs, frame: &self) {
           case .failure(let err):
-            return .failure(err)
+            return err
           case .success(let sheetName, let resolvedRange):
             if let sheetName {
-              guard sheet.hasSheet(named: sheetName) else { return .failure("#REF!") }
-              if let err = appendRange(resolvedRange, onSheet: sheetName, in: sheet, into: &values)
-              {
-                return .failure(err)
+              guard sheet.hasSheet(named: sheetName) else { return "#REF!" }
+              if let err = streamRangeCells(resolvedRange, onSheet: sheetName, in: sheet, body) {
+                return err
               }
             } else {
-              if let err = appendRange(resolvedRange, in: sheet, into: &values) {
-                return .failure(err)
+              if let err = streamRangeCells(resolvedRange, in: sheet, body) {
+                return err
               }
             }
           }
         case .error(let err):
-          return .failure(err.rawValue)
+          return err.rawValue
         default:
           let v = arg(idx, in: sheet)
-          if case .error(let code) = v { return .failure(code) }
-          values.append(v)
+          if case .error(let code) = v { return code }
+          body(v)
         }
       }
-      return .success(values)
+      return nil
     }
+
+    internal struct NumericStreamStats {
+      let sum: Double
+      let product: Double
+      let minVal: Double?
+      let maxVal: Double?
+      let numericCount: Int
+    }
+
+    internal struct CountStreamStats {
+      let numberOnlyCount: Int
+      let nonEmptyCount: Int
+      let blankCount: Int
+    }
+
+    mutating func streamNumericStats(in sheet: WorksheetModel) -> Result<NumericStreamStats, ErrorCode>
+    {
+      var s0 = 0.0
+      var s1 = 0.0
+      var s2 = 0.0
+      var s3 = 0.0
+      var product = 1.0
+      var minVal: Double?
+      var maxVal: Double?
+      var numericCount = 0
+
+      if let err = forEachResolvedCell(
+        in: indices,
+        sheet: sheet,
+        { item in
+          if let v = item.numericValue {
+            switch numericCount & 3 {
+            case 0: s0 += v
+            case 1: s1 += v
+            case 2: s2 += v
+            default: s3 += v
+            }
+            product *= v
+            minVal = minVal.map { min($0, v) } ?? v
+            maxVal = maxVal.map { max($0, v) } ?? v
+            numericCount += 1
+          }
+        }
+      ) {
+        return .failure(ErrorCode(code: err))
+      }
+
+      return .success(
+        NumericStreamStats(
+          sum: (s0 + s1) + (s2 + s3),
+          product: numericCount == 0 ? 0.0 : product,
+          minVal: minVal,
+          maxVal: maxVal,
+          numericCount: numericCount
+        )
+      )
+    }
+
+    mutating func streamCountStats(in sheet: WorksheetModel) -> Result<CountStreamStats, ErrorCode> {
+      var numberOnlyCount = 0
+      var nonEmptyCount = 0
+      var blankCount = 0
+
+      if let err = forEachResolvedCell(
+        in: indices,
+        sheet: sheet,
+        { item in
+          if case .number = item {
+            numberOnlyCount += 1
+          }
+          if item != .empty {
+            nonEmptyCount += 1
+          }
+          if item == .empty || item == .text("") {
+            blankCount += 1
+          }
+        }
+      ) {
+        return .failure(ErrorCode(code: err))
+      }
+
+      return .success(
+        CountStreamStats(
+          numberOnlyCount: numberOnlyCount,
+          nonEmptyCount: nonEmptyCount,
+          blankCount: blankCount
+        )
+      )
+    }
+  }
+
+  internal struct ErrorCode: Error {
+    let code: String
   }
 
   internal func evaluateFunction(
@@ -163,116 +275,46 @@ extension WorksheetModel {
 
   // MARK: - 1. Math & Trig Functions
 
-  @inline(__always)
-  private static func unrolledSumAndCount(_ vals: [EvaluatedCellValue]) -> (sum: Double, count: Int)
-  {
-    let total = vals.count
-    var s0 = 0.0
-    var s1 = 0.0
-    var s2 = 0.0
-    var s3 = 0.0
-    var numericCount = 0
-    var i = 0
-    while i + 4 <= total {
-      if let v0 = vals[i].numericValue {
-        s0 += v0
-        numericCount += 1
-      }
-      if let v1 = vals[i + 1].numericValue {
-        s1 += v1
-        numericCount += 1
-      }
-      if let v2 = vals[i + 2].numericValue {
-        s2 += v2
-        numericCount += 1
-      }
-      if let v3 = vals[i + 3].numericValue {
-        s3 += v3
-        numericCount += 1
-      }
-      i += 4
-    }
-    while i < total {
-      if let v = vals[i].numericValue {
-        s0 += v
-        numericCount += 1
-      }
-      i += 1
-    }
-    return ((s0 + s1) + (s2 + s3), numericCount)
-  }
-
   private func evaluateMathAndTrigFunction(name: String, frame: inout EvalFrame)
     -> EvaluatedCellValue?
   {
     switch name {
     case "SUM":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        return .number(Self.unrolledSumAndCount(vals).sum)
+      switch frame.streamNumericStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.sum)
       }
     case "AVERAGE":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        let (sum, count) = Self.unrolledSumAndCount(vals)
-        guard count > 0 else { return .error("#DIV/0!") }
-        return .number(sum / Double(count))
+      switch frame.streamNumericStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let stats):
+        guard stats.numericCount > 0 else { return .error("#DIV/0!") }
+        return .number(stats.sum / Double(stats.numericCount))
       }
     case "MIN":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        var minVal: Double?
-        for item in vals {
-          if let v = item.numericValue {
-            minVal = minVal.map { min($0, v) } ?? v
-          }
-        }
-        return .number(minVal ?? 0.0)
+      switch frame.streamNumericStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.minVal ?? 0.0)
       }
     case "MAX":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        var maxVal: Double?
-        for item in vals {
-          if let v = item.numericValue {
-            maxVal = maxVal.map { max($0, v) } ?? v
-          }
-        }
-        return .number(maxVal ?? 0.0)
+      switch frame.streamNumericStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.maxVal ?? 0.0)
       }
     case "COUNT":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        var count = 0
-        for item in vals {
-          if case .number = item { count += 1 }
-        }
-        return .number(Double(count))
+      switch frame.streamCountStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let counts): return .number(Double(counts.numberOnlyCount))
       }
     case "COUNTA":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        var count = 0
-        for item in vals where item != .empty {
-          count += 1
-        }
-        return .number(Double(count))
+      switch frame.streamCountStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let counts): return .number(Double(counts.nonEmptyCount))
       }
     case "COUNTBLANK":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        var count = 0
-        for item in vals where item == .empty || item == .text("") {
-          count += 1
-        }
-        return .number(Double(count))
+      switch frame.streamCountStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let counts): return .number(Double(counts.blankCount))
       }
     case "ABS":
       guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else {
@@ -338,11 +380,9 @@ extension WorksheetModel {
       let result = pow(base, expVal)
       return result.isFinite ? .number(result) : .error("#NUM!")
     case "PRODUCT":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        let nums = vals.compactMap(\.numericValue)
-        return .number(nums.isEmpty ? 0.0 : nums.reduce(1.0, *))
+      switch frame.streamNumericStats(in: self) {
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.product)
       }
     case "SUMPRODUCT":
       guard frame.count > 0 else { return .error("#VALUE!") }

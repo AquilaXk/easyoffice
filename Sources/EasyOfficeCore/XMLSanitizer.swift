@@ -183,63 +183,168 @@ public enum XMLSanitizer {
   }
 
   public static func unescape(_ input: String) -> String {
-    guard input.utf8.contains(UInt8(ascii: "&")) else { return input }
-    var output = ""
-    output.reserveCapacity(input.count)
-    var idx = input.startIndex
-    while idx < input.endIndex {
-      let ch = input[idx]
-      if ch == "&" {
-        let searchEnd = input.index(idx, offsetBy: 14, limitedBy: input.endIndex) ?? input.endIndex
-        if let semi = input[idx..<searchEnd].firstIndex(of: ";") {
-          let entity = input[idx...semi]
-          switch entity {
-          case "&quot;":
-            output.append("\"")
-            idx = input.index(after: semi)
-            continue
-          case "&apos;":
-            output.append("'")
-            idx = input.index(after: semi)
-            continue
-          case "&lt;":
-            output.append("<")
-            idx = input.index(after: semi)
-            continue
-          case "&gt;":
-            output.append(">")
-            idx = input.index(after: semi)
-            continue
-          case "&amp;":
-            output.append("&")
-            idx = input.index(after: semi)
-            continue
-          default:
-            let bodyStart = input.index(after: idx)
-            if bodyStart < semi && input[bodyStart] == "#" {
-              let numStart = input.index(after: bodyStart)
-              if numStart < semi {
-                let codePoint: UInt32?
-                if input[numStart] == "x" || input[numStart] == "X" {
-                  let hexStart = input.index(after: numStart)
-                  codePoint = hexStart < semi ? UInt32(input[hexStart..<semi], radix: 16) : nil
-                } else {
-                  codePoint = UInt32(input[numStart..<semi], radix: 10)
-                }
-                if let cp = codePoint, cp > 0, let scalar = UnicodeScalar(cp) {
-                  output.unicodeScalars.append(scalar)
-                  idx = input.index(after: semi)
-                  continue
-                }
-              }
-            }
+    guard !input.isEmpty else { return input }
+    var copy = input
+    return copy.withUTF8 { buf in
+      let count = buf.count
+      guard let base = buf.baseAddress else { return input }
+      let ampMask = broadcastByte(UInt8(ascii: "&"))
+      var idx = 0
+      var spanStart = 0
+      var out: [UInt8] = []
+
+      while idx + 8 <= count {
+        let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
+        let matchBits = zeroByteMask(word ^ ampMask)
+        if matchBits == 0 {
+          idx += 8
+          continue
+        }
+        idx += matchBits.trailingZeroBitCount >> 3
+        if let (scalar, afterSemi) = decodeXMLEntityScalar(in: buf, at: idx, count: count) {
+          if out.isEmpty {
+            out.reserveCapacity(count)
           }
+          if spanStart < idx {
+            out.append(contentsOf: buf[spanStart..<idx])
+          }
+          appendUnicodeScalarUTF8(scalar, into: &out)
+          idx = afterSemi
+          spanStart = idx
+        } else {
+          idx += 1
         }
       }
-      output.append(ch)
-      idx = input.index(after: idx)
+
+      while idx < count {
+        if buf[idx] == 0x26,
+          let (scalar, afterSemi) = decodeXMLEntityScalar(in: buf, at: idx, count: count)
+        {
+          if out.isEmpty {
+            out.reserveCapacity(count)
+          }
+          if spanStart < idx {
+            out.append(contentsOf: buf[spanStart..<idx])
+          }
+          appendUnicodeScalarUTF8(scalar, into: &out)
+          idx = afterSemi
+          spanStart = idx
+        } else {
+          idx += 1
+        }
+      }
+
+      if spanStart == 0 {
+        return input
+      }
+      if spanStart < count {
+        out.append(contentsOf: buf[spanStart..<count])
+      }
+      return String(decoding: out, as: UTF8.self)
     }
-    return output
+  }
+
+  @inline(__always)
+  private static func appendUnicodeScalarUTF8(_ scalar: UnicodeScalar, into out: inout [UInt8]) {
+    if scalar.value < 0x80 {
+      out.append(UInt8(truncatingIfNeeded: scalar.value))
+    } else {
+      UTF8.encode(scalar) { out.append($0) }
+    }
+  }
+
+  @inline(__always)
+  private static func decodeXMLEntityScalar(
+    in buf: UnsafeBufferPointer<UInt8>,
+    at ampIndex: Int,
+    count: Int
+  ) -> (scalar: UnicodeScalar, afterSemi: Int)? {
+    let searchLimit = min(count, ampIndex + 14)
+    let bodyStart = ampIndex + 1
+    guard bodyStart < searchLimit else { return nil }
+
+    var semiIdx = -1
+    var probe = bodyStart
+    while probe < searchLimit {
+      let b = buf[probe]
+      if b == 0x3B {
+        semiIdx = probe
+        break
+      }
+      if b == 0x26 || b <= 0x20 {
+        return nil
+      }
+      probe += 1
+    }
+    guard semiIdx > bodyStart else { return nil }
+    let bodyLen = semiIdx - bodyStart
+
+    if buf[bodyStart] == 0x23 {
+      let numStart = bodyStart + 1
+      guard numStart < semiIdx else { return nil }
+      var codePoint: UInt32 = 0
+      if buf[numStart] == 0x78 || buf[numStart] == 0x58 {
+        let hexStart = numStart + 1
+        guard hexStart < semiIdx else { return nil }
+        for k in hexStart..<semiIdx {
+          let b = buf[k]
+          let digit: UInt32
+          if b >= 0x30 && b <= 0x39 {
+            digit = UInt32(b - 0x30)
+          } else if b >= 0x41 && b <= 0x46 {
+            digit = UInt32(b - 0x41 + 10)
+          } else if b >= 0x61 && b <= 0x66 {
+            digit = UInt32(b - 0x61 + 10)
+          } else {
+            return nil
+          }
+          codePoint = (codePoint << 4) | digit
+          if codePoint > 0x10FFFF { return nil }
+        }
+      } else {
+        for k in numStart..<semiIdx {
+          let b = buf[k]
+          guard b >= 0x30 && b <= 0x39 else { return nil }
+          codePoint = codePoint * 10 + UInt32(b - 0x30)
+          if codePoint > 0x10FFFF { return nil }
+        }
+      }
+      let isXml10Valid =
+        codePoint == 0x09 || codePoint == 0x0A || codePoint == 0x0D
+        || (0x20...0xD7FF).contains(codePoint)
+        || (0xE000...0xFFFD).contains(codePoint)
+        || (0x10000...0x10FFFF).contains(codePoint)
+      guard isXml10Valid, let scalar = UnicodeScalar(codePoint) else { return nil }
+      return (scalar, semiIdx + 1)
+    }
+
+    switch bodyLen {
+    case 2:
+      if buf[bodyStart] == 0x6C && buf[bodyStart + 1] == 0x74 {
+        return (UnicodeScalar(0x3C), semiIdx + 1)
+      }
+      if buf[bodyStart] == 0x67 && buf[bodyStart + 1] == 0x74 {
+        return (UnicodeScalar(0x3E), semiIdx + 1)
+      }
+    case 3:
+      if buf[bodyStart] == 0x61 && buf[bodyStart + 1] == 0x6D && buf[bodyStart + 2] == 0x70 {
+        return (UnicodeScalar(0x26), semiIdx + 1)
+      }
+    case 4:
+      if buf[bodyStart] == 0x71 && buf[bodyStart + 1] == 0x75 && buf[bodyStart + 2] == 0x6F
+        && buf[bodyStart + 3] == 0x74
+      {
+        return (UnicodeScalar(0x22), semiIdx + 1)
+      }
+      if buf[bodyStart] == 0x61 && buf[bodyStart + 1] == 0x70 && buf[bodyStart + 2] == 0x6F
+        && buf[bodyStart + 3] == 0x73
+      {
+        return (UnicodeScalar(0x27), semiIdx + 1)
+      }
+    default:
+      break
+    }
+    return nil
   }
 
   private static func isTagNameBoundary(_ ch: Character) -> Bool {

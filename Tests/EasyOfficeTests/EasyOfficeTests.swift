@@ -550,4 +550,120 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(duplicated.x, 624.0, accuracy: 0.01)
     XCTAssertEqual(duplicated.y, 255.0, accuracy: 0.01)
   }
+
+  func testTypographicMathFormatterAndInspectorLocalizationAndStreamingAggregations() throws {
+    let sumEq = DocumentEquationBlock(latexSource: "\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}")
+    XCTAssertEqual(sumEq.displayText, "∑ₖ₌₁ⁿ k = n(n+1) / 2")
+
+    let gaussEq = DocumentEquationBlock(
+      latexSource: "\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}"
+    )
+    XCTAssertEqual(gaussEq.displayText, "∫₀^∞ e⁻ˣ² dx = √π / 2")
+
+    let pdeEq = DocumentEquationBlock(
+      latexSource: "\\partial f = \\nabla \\cdot F \\equiv \\frac{a + b}{\\sqrt{x + 1}}"
+    )
+    XCTAssertEqual(pdeEq.displayText, "∂ f = ∇ · F ≡ (a + b) / √(x + 1)")
+
+    let docTab = WorkspaceHubCatalog.instantiateSampleTab(for: .document)
+    if case .document(let doc) = docTab.payload {
+      XCTAssertEqual(doc.headerText, "2026 전사 표준 문서 관리 지침")
+      XCTAssertEqual(doc.revisions.first?.author, "기획조정실")
+      let table = try XCTUnwrap(doc.tables.first)
+      XCTAssertEqual(table.caption, "표 1. 부문별 문서 표준화 및 업무 효율화 핵심 지표")
+      XCTAssertEqual(
+        table.rows[0],
+        ["소관 부문", "적용 표준 양식", "주요 추진 과제", "목표 달성률(%)"]
+      )
+      XCTAssertEqual(
+        table.rows[1],
+        ["경영기획실", "DOCX, HWP, HWPX", "전사 보고서 및 기안문 양식 단일화", "98"]
+      )
+      XCTAssertEqual(
+        table.rows[2],
+        ["재무회계팀", "XLSX, ODS, CSV", "분기별 예산·결산 수식 자동화", "96"]
+      )
+      XCTAssertEqual(
+        table.rows[3],
+        ["법무·보안팀", "PPTX, ODP, PDF", "대외 발송 문서 전자결재 및 보존", "100"]
+      )
+    } else {
+      XCTFail("Expected sample document payload")
+    }
+
+    let pdfTab = WorkspaceHubCatalog.instantiateSampleTab(for: .pdf)
+    if case .pdf(let pdf) = pdfTab.payload {
+      XCTAssertEqual(pdf.annotations.first?.author, "정보보안팀")
+      XCTAssertEqual(pdf.pages[0].title, "제1장 컨테이너 보안 원칙")
+      XCTAssertEqual(pdf.pages[1].title, "제2장 PDF 양방향 변환")
+    } else {
+      XCTFail("Expected sample PDF payload")
+    }
+
+    let emptyPage = PDFPageDescriptor(pageNumber: 3, rotationDegrees: 0, extractedText: "   \n  ")
+    XCTAssertEqual(emptyPage.title, "제3쪽")
+
+    XCTAssertEqual(SheetNumberFormat.general.displayTitle, "일반")
+    XCTAssertEqual(SheetNumberFormat.integer.displayTitle, "정수")
+    XCTAssertEqual(SheetNumberFormat.decimal2.displayTitle, "소수점 2자리")
+    XCTAssertEqual(SheetNumberFormat.thousands.displayTitle, "천 단위 구분")
+    XCTAssertEqual(SheetNumberFormat.currencyKRW.displayTitle, "통화 (₩)")
+    XCTAssertEqual(SheetNumberFormat.currencyUSD.displayTitle, "통화 ($)")
+    XCTAssertEqual(SheetNumberFormat.percentage.displayTitle, "백분율 (%)")
+    XCTAssertEqual(SheetNumberFormat.scientific.displayTitle, "지수 표기")
+    XCTAssertEqual(SheetNumberFormat.dateISO.displayTitle, "날짜 (ISO)")
+    XCTAssertEqual(SheetNumberFormat.currencyKRW.rawValue, "currencyKRW")
+
+    XCTAssertEqual(SheetHorizontalAlignment.leading.displayTitle, "왼쪽 정렬")
+    XCTAssertEqual(SheetHorizontalAlignment.center.displayTitle, "가운데 정렬")
+    XCTAssertEqual(SheetHorizontalAlignment.trailing.displayTitle, "오른쪽 정렬")
+    XCTAssertEqual(SheetHorizontalAlignment.center.rawValue, "center")
+
+    let numericXml = "긴안전텍스트구간_0123456789_ABCDEFGHIJ &#65;&#x42;&#xAC00; &amp; &lt;끝&gt;"
+    XCTAssertEqual(
+      XMLSanitizer.unescape(numericXml),
+      "긴안전텍스트구간_0123456789_ABCDEFGHIJ AB가 & <끝>"
+    )
+    XCTAssertEqual(
+      XMLSanitizer.unescape("A&#0;&#x01;&#xFFFE;&#65;B"),
+      "A&#0;&#x01;&#xFFFE;AB"
+    )
+
+    var deepMath = "x"
+    for _ in 0..<24 {
+      deepMath = "\\sqrt{\(deepMath)}"
+    }
+    let deepFormatted = DocumentEquationBlock.formatMathSymbols(deepMath)
+    XCTAssertTrue(deepFormatted.hasPrefix("√("))
+
+    var sheet = WorksheetModel(name: "스트리밍집계")
+    try sheet.setCell("A1", rawValue: "2")
+    try sheet.setCell("A2", rawValue: "3")
+    try sheet.setCell("A3", rawValue: "4")
+    try sheet.setCell("A4", rawValue: "텍스트")
+    try sheet.setCell("B1", rawValue: "=PRODUCT(A1:A5)")
+    try sheet.setCell("B2", rawValue: "=COUNTA(A1:A5)")
+    try sheet.setCell("B3", rawValue: "=COUNTBLANK(A1:A5)")
+    XCTAssertEqual(sheet.evaluate(at: "B1"), .number(24.0))
+    XCTAssertEqual(sheet.evaluate(at: "B2"), .number(4.0))
+    XCTAssertEqual(sheet.evaluate(at: "B3"), .number(1.0))
+
+    let oversizedRange = try CellRange(
+      start: CellAddress(column: 0, row: 0),
+      end: CellAddress(column: 500, row: 500)
+    )
+    var evalFrame = WorksheetModel.EvalFrame(
+      args: [.rangeRef(oversizedRange)],
+      cache: [nil],
+      context: WorksheetModel.EvaluationContext(),
+      depth: 0
+    )
+    let oversizedErr = evalFrame.forEachResolvedCell(in: 0..<1, sheet: sheet, { _ in })
+    XCTAssertEqual(oversizedErr, "#REF!")
+
+    let csvBytes = CSVStateMachineCodec.encodeWorksheet(sheet)
+    let decodedSheet = try CSVStateMachineCodec.decodeWorksheet(from: csvBytes, name: "복원시트")
+    XCTAssertEqual(decodedSheet.rawValue(at: "A1"), "2")
+    XCTAssertEqual(decodedSheet.rawValue(at: "A4"), "텍스트")
+  }
 }

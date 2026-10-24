@@ -4,6 +4,8 @@ use crate::{
     SheetEngine,
 };
 
+type StreamingRangeSpec<'a> = (Option<&'a str>, u32, u32, usize, usize, bool);
+
 /// Canonical 122 built-in spreadsheet functions across 8 standard categories:
 /// Math & Trig (27), Statistical (22), Logical (10), Lookup & Reference (12),
 /// Text (21), Date & Time (10), Financial (11), and Information (9).
@@ -203,6 +205,53 @@ impl SheetEngine {
         }
     }
 
+    fn extract_streaming_range<'b>(
+        &self,
+        expr: &'b Expr,
+    ) -> Result<Option<StreamingRangeSpec<'b>>, FormulaError> {
+        let Some((sheet_opt, range, transposed)) = self.extract_range_and_sheet(expr) else {
+            return Ok(None);
+        };
+        if range.cell_count() > CellRange::MAX_EXPANDED_CELLS {
+            return Err(FormulaError::Ref);
+        }
+        let min_r = range.start.row().min(range.end.row());
+        let max_r = range.start.row().max(range.end.row());
+        let min_c = range.start.col().min(range.end.col());
+        let max_c = range.start.col().max(range.end.col());
+        let phys_rows = (max_r - min_r + 1) as usize;
+        let phys_cols = (max_c - min_c + 1) as usize;
+        let (rows, cols) = if transposed {
+            (phys_cols, phys_rows)
+        } else {
+            (phys_rows, phys_cols)
+        };
+        Ok(Some((sheet_opt, min_r, min_c, rows, cols, transposed)))
+    }
+
+    #[inline]
+    fn eval_streaming_cell(
+        &self,
+        spec: StreamingRangeSpec<'_>,
+        dr: usize,
+        dc: usize,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        let (sheet_opt, min_r, min_c, _rows, _cols, transposed) = spec;
+        let (r, c) = if transposed {
+            (min_r + dc as u32, min_c + dr as u32)
+        } else {
+            (min_r + dr as u32, min_c + dc as u32)
+        };
+        let coord = PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
+        let v = self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1);
+        if let EvaluatedCellValue::Error(e) = v {
+            return Err(e);
+        }
+        Ok(v)
+    }
+
     pub(crate) fn eval_range_vec(
         &self,
         expr: &Expr,
@@ -210,11 +259,14 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<Vec<EvaluatedCellValue>, FormulaError> {
         if let Some((sheet_opt, range, transposed)) = self.extract_range_and_sheet(expr) {
+            if range.cell_count() > CellRange::MAX_EXPANDED_CELLS {
+                return Err(FormulaError::Ref);
+            }
             let min_r = range.start.row().min(range.end.row());
             let max_r = range.start.row().max(range.end.row());
             let min_c = range.start.col().min(range.end.col());
             let max_c = range.start.col().max(range.end.col());
-            let mut out = Vec::new();
+            let mut out = Vec::with_capacity(range.cell_count());
             if transposed {
                 for c in min_c..=max_c {
                     for r in min_r..=max_r {
@@ -245,7 +297,384 @@ impl SheetEngine {
             Ok(vec![self.eval_arg_val(expr, ctx, depth)?])
         }
     }
+}
 
+#[derive(Clone, Copy)]
+enum CritNumOp {
+    Ge,
+    Le,
+    Ne,
+    Gt,
+    Lt,
+    Eq,
+}
+
+enum CompiledCriteria<'a> {
+    Number(f64),
+    NumericCmp(CritNumOp, f64),
+    Fallback(&'a EvaluatedCellValue),
+}
+
+impl<'a> CompiledCriteria<'a> {
+    #[inline]
+    fn compile(crit: &'a EvaluatedCellValue) -> Self {
+        match crit {
+            EvaluatedCellValue::Number(cn) => Self::Number(*cn),
+            EvaluatedCellValue::Text(s) => {
+                let trimmed = s.trim();
+                for (op_str, op_kind) in [
+                    (">=", CritNumOp::Ge),
+                    ("<=", CritNumOp::Le),
+                    ("<>", CritNumOp::Ne),
+                    (">", CritNumOp::Gt),
+                    ("<", CritNumOp::Lt),
+                    ("=", CritNumOp::Eq),
+                ] {
+                    if let Some(rhs) = trimmed.strip_prefix(op_str) {
+                        if let Ok(rhs_num) = rhs.trim().parse::<f64>() {
+                            return Self::NumericCmp(op_kind, rhs_num);
+                        }
+                        return Self::Fallback(crit);
+                    }
+                }
+                if let Ok(rhs_num) = trimmed.parse::<f64>() {
+                    return Self::Number(rhs_num);
+                }
+                Self::Fallback(crit)
+            }
+            _ => Self::Fallback(crit),
+        }
+    }
+
+    #[inline]
+    fn matches(&self, cell: &EvaluatedCellValue) -> bool {
+        match *self {
+            Self::Number(cn) => cell.as_number().is_some_and(|v| (v - cn).abs() < 1e-9),
+            Self::NumericCmp(op, rhs_num) => {
+                let Some(lhs_num) = cell.as_number() else {
+                    return matches!(op, CritNumOp::Ne);
+                };
+                match op {
+                    CritNumOp::Ge => lhs_num >= rhs_num - 1e-9,
+                    CritNumOp::Le => lhs_num <= rhs_num + 1e-9,
+                    CritNumOp::Ne => (lhs_num - rhs_num).abs() >= 1e-9,
+                    CritNumOp::Gt => lhs_num > rhs_num + 1e-9,
+                    CritNumOp::Lt => lhs_num < rhs_num - 1e-9,
+                    CritNumOp::Eq => (lhs_num - rhs_num).abs() < 1e-9,
+                }
+            }
+            Self::Fallback(crit) => matches_criteria(cell, crit),
+        }
+    }
+}
+
+impl SheetEngine {
+    fn eval_sumproduct_streaming(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.is_empty() {
+            return Err(FormulaError::Value);
+        }
+        let Some(first_spec) = self.extract_streaming_range(&args[0])? else {
+            let mut prod = 1.0f64;
+            for arg in args {
+                if self.extract_streaming_range(arg)?.is_some() {
+                    return Err(FormulaError::Value);
+                }
+                prod *= self
+                    .eval_arg_val(arg, ctx, depth)?
+                    .as_number()
+                    .unwrap_or(0.0);
+            }
+            return Ok(EvaluatedCellValue::Number(prod));
+        };
+        let (_, _, _, r_count, c_count, _) = first_spec;
+        if args.len() == 2 {
+            if let Some(second_spec) = self.extract_streaming_range(&args[1])? {
+                if second_spec.3 != r_count || second_spec.4 != c_count {
+                    return Err(FormulaError::Value);
+                }
+                let mut acc0 = 0.0f64;
+                let mut acc1 = 0.0f64;
+                let mut acc2 = 0.0f64;
+                let mut acc3 = 0.0f64;
+                let mut lane = 0usize;
+                for dr in 0..r_count {
+                    for dc in 0..c_count {
+                        let a = self
+                            .eval_streaming_cell(first_spec, dr, dc, ctx, depth)?
+                            .as_number()
+                            .unwrap_or(0.0);
+                        let b = self
+                            .eval_streaming_cell(second_spec, dr, dc, ctx, depth)?
+                            .as_number()
+                            .unwrap_or(0.0);
+                        let p = a * b;
+                        match lane & 3 {
+                            0 => acc0 += p,
+                            1 => acc1 += p,
+                            2 => acc2 += p,
+                            _ => acc3 += p,
+                        }
+                        lane += 1;
+                    }
+                }
+                return Ok(EvaluatedCellValue::Number((acc0 + acc1) + (acc2 + acc3)));
+            }
+        }
+        for arg in &args[1..] {
+            let Some((_, _, _, r, c, _)) = self.extract_streaming_range(arg)? else {
+                if r_count != 1 || c_count != 1 {
+                    return Err(FormulaError::Value);
+                }
+                continue;
+            };
+            if r != r_count || c != c_count {
+                return Err(FormulaError::Value);
+            }
+        }
+        let mut sum = 0.0f64;
+        for dr in 0..r_count {
+            for dc in 0..c_count {
+                let mut row_prod = 1.0f64;
+                for arg in args {
+                    let v = if let Some(sp) = self.extract_streaming_range(arg)? {
+                        self.eval_streaming_cell(sp, dr, dc, ctx, depth)?
+                    } else {
+                        self.eval_arg_val(arg, ctx, depth)?
+                    };
+                    row_prod *= v.as_number().unwrap_or(0.0);
+                }
+                sum += row_prod;
+            }
+        }
+        Ok(EvaluatedCellValue::Number(sum))
+    }
+
+    fn eval_single_criteria_streaming(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if name == "COUNTIF" {
+            if args.len() != 2 {
+                return Err(FormulaError::Value);
+            }
+            let Some(range_spec) = self.extract_streaming_range(&args[0])? else {
+                let val = self.eval_arg_val(&args[0], ctx, depth)?;
+                let crit = self.eval_arg_val(&args[1], ctx, depth)?;
+                return Ok(EvaluatedCellValue::Number(
+                    if matches_criteria(&val, &crit) {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                ));
+            };
+            let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
+            let compiled_crit = CompiledCriteria::compile(&crit_val);
+            let (_, _, _, r_count, c_count, _) = range_spec;
+            let mut cnt = 0usize;
+            for dr in 0..r_count {
+                for dc in 0..c_count {
+                    let val = self.eval_streaming_cell(range_spec, dr, dc, ctx, depth)?;
+                    if compiled_crit.matches(&val) {
+                        cnt += 1;
+                    }
+                }
+            }
+            return Ok(EvaluatedCellValue::Number(cnt as f64));
+        }
+
+        if args.len() < 2 || args.len() > 3 {
+            return Err(FormulaError::Value);
+        }
+        let Some(range_spec) = self.extract_streaming_range(&args[0])? else {
+            return Err(FormulaError::Value);
+        };
+        let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
+        let compiled_crit = CompiledCriteria::compile(&crit_val);
+        let (_, _, _, r_count, c_count, _) = range_spec;
+        let target_spec = if args.len() == 3 {
+            let Some(ts) = self.extract_streaming_range(&args[2])? else {
+                return Err(FormulaError::Value);
+            };
+            if ts.3 != r_count || ts.4 != c_count {
+                return Err(FormulaError::Value);
+            }
+            Some(ts)
+        } else {
+            None
+        };
+
+        let mut sum = 0.0f64;
+        let mut count = 0usize;
+        for dr in 0..r_count {
+            for dc in 0..c_count {
+                let val = self.eval_streaming_cell(range_spec, dr, dc, ctx, depth)?;
+                if compiled_crit.matches(&val) {
+                    let num_opt = if let Some(ts) = target_spec {
+                        self.eval_streaming_cell(ts, dr, dc, ctx, depth)?
+                            .as_number()
+                    } else {
+                        val.as_number()
+                    };
+                    if let Some(n) = num_opt {
+                        sum += n;
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        if name == "AVERAGEIF" {
+            if count == 0 {
+                return Err(FormulaError::DivByZero);
+            }
+            Ok(EvaluatedCellValue::Number(sum / (count as f64)))
+        } else {
+            Ok(EvaluatedCellValue::Number(sum))
+        }
+    }
+
+    fn eval_multi_criteria_streaming(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if name == "COUNTIFS" {
+            if args.len() < 2 || !args.len().is_multiple_of(2) {
+                return Err(FormulaError::Value);
+            }
+            if args.len() > 16 {
+                let first_vals = self.eval_range_vec(&args[0], ctx, depth)?;
+                let mask = self.eval_multi_criteria(args, first_vals.len(), ctx, depth)?;
+                return Ok(EvaluatedCellValue::Number(
+                    mask.into_iter().filter(|m| *m).count() as f64,
+                ));
+            }
+            let Some(first_spec) = self.extract_streaming_range(&args[0])? else {
+                return Err(FormulaError::Value);
+            };
+            let (_, _, _, r_count, c_count, _) = first_spec;
+            let pair_count = args.len() / 2;
+            let mut specs: [Option<StreamingRangeSpec<'_>>; 8] = [None; 8];
+            let mut crit_vals: [EvaluatedCellValue; 8] =
+                std::array::from_fn(|_| EvaluatedCellValue::Empty);
+            for (idx, pair) in args.chunks(2).enumerate() {
+                let Some(sp) = self.extract_streaming_range(&pair[0])? else {
+                    return Err(FormulaError::Value);
+                };
+                if sp.3 != r_count || sp.4 != c_count {
+                    return Err(FormulaError::Value);
+                }
+                specs[idx] = Some(sp);
+                crit_vals[idx] = self.eval_arg_val(&pair[1], ctx, depth)?;
+            }
+            let compiled_crits: [CompiledCriteria<'_>; 8] =
+                std::array::from_fn(|i| CompiledCriteria::compile(&crit_vals[i]));
+            let mut cnt = 0usize;
+            for dr in 0..r_count {
+                'cell_loop: for dc in 0..c_count {
+                    for idx in 0..pair_count {
+                        let sp = specs[idx].unwrap();
+                        let val = self.eval_streaming_cell(sp, dr, dc, ctx, depth)?;
+                        if !compiled_crits[idx].matches(&val) {
+                            continue 'cell_loop;
+                        }
+                    }
+                    cnt += 1;
+                }
+            }
+            return Ok(EvaluatedCellValue::Number(cnt as f64));
+        }
+
+        if args.len() < 3 || args.len().is_multiple_of(2) {
+            return Err(FormulaError::Value);
+        }
+        let Some(target_spec) = self.extract_streaming_range(&args[0])? else {
+            return Err(FormulaError::Value);
+        };
+        let (_, _, _, r_count, c_count, _) = target_spec;
+        let crit_args = &args[1..];
+        let pair_count = crit_args.len() / 2;
+        if pair_count > 8 {
+            let target_vals = self.eval_range_vec(&args[0], ctx, depth)?;
+            let mask = self.eval_multi_criteria(crit_args, target_vals.len(), ctx, depth)?;
+            let mut sum = 0.0f64;
+            let mut count = 0usize;
+            for (tv, m) in target_vals.into_iter().zip(mask) {
+                if m {
+                    if let Some(n) = tv.as_number() {
+                        sum += n;
+                        count += 1;
+                    }
+                }
+            }
+            return if name == "AVERAGEIFS" {
+                if count == 0 {
+                    Err(FormulaError::DivByZero)
+                } else {
+                    Ok(EvaluatedCellValue::Number(sum / (count as f64)))
+                }
+            } else {
+                Ok(EvaluatedCellValue::Number(sum))
+            };
+        }
+        let mut specs: [Option<StreamingRangeSpec<'_>>; 8] = [None; 8];
+        let mut crit_vals: [EvaluatedCellValue; 8] =
+            std::array::from_fn(|_| EvaluatedCellValue::Empty);
+        for (idx, pair) in crit_args.chunks(2).enumerate() {
+            let Some(sp) = self.extract_streaming_range(&pair[0])? else {
+                return Err(FormulaError::Value);
+            };
+            if sp.3 != r_count || sp.4 != c_count {
+                return Err(FormulaError::Value);
+            }
+            specs[idx] = Some(sp);
+            crit_vals[idx] = self.eval_arg_val(&pair[1], ctx, depth)?;
+        }
+        let compiled_crits: [CompiledCriteria<'_>; 8] =
+            std::array::from_fn(|i| CompiledCriteria::compile(&crit_vals[i]));
+
+        let mut sum = 0.0f64;
+        let mut count = 0usize;
+        for dr in 0..r_count {
+            'sumifs_cell: for dc in 0..c_count {
+                for idx in 0..pair_count {
+                    let sp = specs[idx].unwrap();
+                    let val = self.eval_streaming_cell(sp, dr, dc, ctx, depth)?;
+                    if !compiled_crits[idx].matches(&val) {
+                        continue 'sumifs_cell;
+                    }
+                }
+                let tv = self.eval_streaming_cell(target_spec, dr, dc, ctx, depth)?;
+                if let Some(n) = tv.as_number() {
+                    sum += n;
+                    count += 1;
+                }
+            }
+        }
+
+        if name == "AVERAGEIFS" {
+            if count == 0 {
+                return Err(FormulaError::DivByZero);
+            }
+            Ok(EvaluatedCellValue::Number(sum / (count as f64)))
+        } else {
+            Ok(EvaluatedCellValue::Number(sum))
+        }
+    }
+}
+
+impl SheetEngine {
     fn eval_func_inner(
         &self,
         name: &str,
@@ -254,79 +683,10 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         match name {
-            // --- Math & Trig (27) ---
-            "SUM" => self.eval_streaming_range_agg_ctx(name, args, ctx, depth),
-            "PRODUCT" => {
-                let vals = self.expand_args_ctx(args, ctx, depth)?;
-                let nums: Vec<f64> = vals
-                    .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
-                    .collect();
-                let prod = if nums.is_empty() {
-                    0.0
-                } else {
-                    nums.into_iter().product()
-                };
-                Ok(EvaluatedCellValue::Number(prod))
-            }
-            "SUMPRODUCT" => {
-                if args.is_empty() {
-                    return Err(FormulaError::Value);
-                }
-                let mut arrays = Vec::with_capacity(args.len());
-                for arg in args {
-                    arrays.push(self.eval_range_vec(arg, ctx, depth)?);
-                }
-                let len = arrays[0].len();
-                if arrays.iter().any(|a| a.len() != len) {
-                    return Err(FormulaError::Value);
-                }
-                let mut sum = 0.0;
-                for i in 0..len {
-                    let mut row_prod = 1.0;
-                    for arr in &arrays {
-                        row_prod *= arr[i].as_number().unwrap_or(0.0);
-                    }
-                    sum += row_prod;
-                }
-                Ok(EvaluatedCellValue::Number(sum))
-            }
-            "SUMIF" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let range_vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let crit = self.eval_arg_val(&args[1], ctx, depth)?;
-                let sum_vals = if args.len() == 3 {
-                    self.eval_range_vec(&args[2], ctx, depth)?
-                } else {
-                    range_vals.clone()
-                };
-                if range_vals.len() != sum_vals.len() {
-                    return Err(FormulaError::Value);
-                }
-                let sum: f64 = range_vals
-                    .iter()
-                    .zip(sum_vals.iter())
-                    .filter(|(rv, _)| matches_criteria(rv, &crit))
-                    .filter_map(|(_, sv)| sv.as_number())
-                    .sum();
-                Ok(EvaluatedCellValue::Number(sum))
-            }
-            "SUMIFS" => {
-                if args.len() < 3 || args.len().is_multiple_of(2) {
-                    return Err(FormulaError::Value);
-                }
-                let sum_vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let mask = self.eval_multi_criteria(&args[1..], sum_vals.len(), ctx, depth)?;
-                let sum: f64 = sum_vals
-                    .iter()
-                    .zip(mask)
-                    .filter(|(_, m)| *m)
-                    .filter_map(|(v, _)| v.as_number())
-                    .sum();
-                Ok(EvaluatedCellValue::Number(sum))
-            }
+            "SUM" | "PRODUCT" => self.eval_streaming_range_agg_ctx(name, args, ctx, depth),
+            "SUMPRODUCT" => self.eval_sumproduct_streaming(args, ctx, depth),
+            "SUMIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
+            "SUMIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
             "ABS" => {
                 if args.len() != 1 {
                     return Err(FormulaError::Value);
@@ -530,74 +890,13 @@ impl SheetEngine {
                 }
                 Ok(EvaluatedCellValue::Number(sum / (count as f64)))
             }
-            "AVERAGEIF" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let range_vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let crit = self.eval_arg_val(&args[1], ctx, depth)?;
-                let avg_vals = if args.len() == 3 {
-                    self.eval_range_vec(&args[2], ctx, depth)?
-                } else {
-                    range_vals.clone()
-                };
-                if range_vals.len() != avg_vals.len() {
-                    return Err(FormulaError::Value);
-                }
-                let nums: Vec<f64> = range_vals
-                    .iter()
-                    .zip(avg_vals.iter())
-                    .filter(|(rv, _)| matches_criteria(rv, &crit))
-                    .filter_map(|(_, av)| av.as_number())
-                    .collect();
-                if nums.is_empty() {
-                    return Err(FormulaError::DivByZero);
-                }
-                Ok(EvaluatedCellValue::Number(
-                    nums.iter().sum::<f64>() / (nums.len() as f64),
-                ))
-            }
-            "AVERAGEIFS" => {
-                if args.len() < 3 || args.len().is_multiple_of(2) {
-                    return Err(FormulaError::Value);
-                }
-                let avg_vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let mask = self.eval_multi_criteria(&args[1..], avg_vals.len(), ctx, depth)?;
-                let nums: Vec<f64> = avg_vals
-                    .iter()
-                    .zip(mask)
-                    .filter(|(_, m)| *m)
-                    .filter_map(|(v, _)| v.as_number())
-                    .collect();
-                if nums.is_empty() {
-                    return Err(FormulaError::DivByZero);
-                }
-                Ok(EvaluatedCellValue::Number(
-                    nums.iter().sum::<f64>() / (nums.len() as f64),
-                ))
-            }
+            "AVERAGEIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
+            "AVERAGEIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
             "SMALL" | "LARGE" | "RANK" | "PERCENTILE" | "QUARTILE" => {
                 self.eval_stat_order(name, args, ctx, depth)
             }
-            "COUNTIF" => {
-                if args.len() != 2 {
-                    return Err(FormulaError::Value);
-                }
-                let vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let crit = self.eval_arg_val(&args[1], ctx, depth)?;
-                let cnt = vals.iter().filter(|v| matches_criteria(v, &crit)).count();
-                Ok(EvaluatedCellValue::Number(cnt as f64))
-            }
-            "COUNTIFS" => {
-                if args.len() < 2 || !args.len().is_multiple_of(2) {
-                    return Err(FormulaError::Value);
-                }
-                let first_vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let mask = self.eval_multi_criteria(args, first_vals.len(), ctx, depth)?;
-                Ok(EvaluatedCellValue::Number(
-                    mask.into_iter().filter(|m| *m).count() as f64,
-                ))
-            }
+            "COUNTIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
+            "COUNTIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
 
             // --- Logical (10 + FALSE) ---
             "IF" | "IFS" | "AND" | "OR" | "XOR" | "NOT" | "IFERROR" | "IFNA" | "SWITCH"
