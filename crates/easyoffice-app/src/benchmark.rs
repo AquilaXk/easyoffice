@@ -853,8 +853,6 @@ fn scalar_vec_range_agg_baseline(
     [sum, avg, min_v, max_v, cnt, sumif_v, countif_v, sumprod_v]
 }
 
-/// 5th deterministic 1:1 benchmark suite measuring 64-bit SWAR XML validation/escaping/unescaping,
-/// 64-bit SWAR RFC 4180 CSV zero-allocation streaming, and zero-allocation range & conditional aggregations.
 pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> BenchmarkSuiteResult {
     let rounds = iterations.clamp(3, 25);
 

@@ -299,7 +299,6 @@ pub fn encode_utf16le_swar(text: &str) -> Vec<u8> {
     out
 }
 
-/// Single-pass XML entity unescaper with 64-bit SWAR `&` scanning and numeric entity decoding.
 #[inline]
 pub fn unescape_xml_single_pass(text: &str) -> String {
     let bytes = text.as_bytes();

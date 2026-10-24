@@ -683,7 +683,6 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         match name {
-            // --- Math & Trig (27) ---
             "SUM" | "PRODUCT" => self.eval_streaming_range_agg_ctx(name, args, ctx, depth),
             "SUMPRODUCT" => self.eval_sumproduct_streaming(args, ctx, depth),
             "SUMIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
