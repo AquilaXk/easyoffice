@@ -542,3 +542,24 @@
   - `PDFKitRepresentedView`나 `NSScrollView`에 타이머 지연을 추가하여 스냅샷 백지 현상을 우회하려는 시도: 비결정론적 플레이키니스를 유발하고 근본 원인을 해결하지 못하므로 배제.
 - **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testEighthAuditFindReplaceSyncSheetRulesPersistencePPTThemeRoundTripAndSnapshotMode`)
 - **Revisit when**: 외부 플러그인 기반 서드파티 렌더러 확장 인터페이스를 도입할 때.
+
+### 27. Mac·Windows 크로스플랫폼 Rust 멀티 크레이트 코어 엔진(`crates/easyoffice-*`) 및 Tauri v2 데스크톱 아키텍처 정책 (2026-10-24)
+
+- **Decision (`PD-053`)**:
+  1. **무외부의존 순수 Rust 멀티 크레이트 워크스페이스(`Cargo.toml`, `crates/easyoffice-*`)**:
+     - macOS와 Windows 양대 데스크톱 플랫폼에서 20종 표준 오피스 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 경계를 단일 코드베이스로 공유하기 위해 루트 `Cargo.toml`(`resolver = "2"`, `edition = "2021"`, 외부 크레이트 의존성 `0`개) 아래 4개의 전문 크레이트를 구성합니다.
+     - `crates/easyoffice-formats`: 20종 `DocumentFormat` 및 `ContainerFamily` 메타데이터, 매직 바이트 시그니처 검증(`FormatDetector::detect`, `MAX_PAYLOAD_BYTES = 512 MiB`), `ZipSecurityGuard`(`4,096` 엔트리, 단일 `128 MiB`, 총합 `512 MiB`, `100:1` 압축비, `..`/선행 슬래시/NUL/Windows 드라이브 문자 경로 순회 차단), `Ole2SecurityGuard`(`512`바이트 섹터 정렬, `MAX_FAT_SECTORS = 109`, `HashSet<u32>` 기반 FAT 순환 체인 차단, HWP 5.0 `FileHeader` `0x02`/`0x04` 암호화·배포용 문서 차단), `XmlSanitizer`(`<!ENTITY` 및 외부 DTD `SYSTEM`/`PUBLIC`/`[` 차단), `CsvCodec`(RFC 4180 상태 기계), `CommonMarkCodec`, `PdfSerializer`(`%PDF-1.4` 바이트 오프셋 `xref` 직렬화)를 제공합니다.
+     - `crates/easyoffice-sheet`: 64비트 패킹 셀 좌표 `PackedCellCoordinate`(`row: 32bit, col: 32bit`, `MAX_ROWS = 1,000,000`, `MAX_COLS = 16,384`), 단일 범위 확장 상한(`MAX_EXPANDED_CELL_COUNT = 100,000`), 단항 `+`/`-`·후위 `%`·산술·비교·문자열 결합(`&`) 연산자 파서, 순환 참조 탐지(`FormulaError::Cycle`) 및 재귀 상한(`MAX_RECURSION_DEPTH = 64`), ECMA-376 호환 `ISBLANK`를 포함한 핵심 내장 함수(`SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `IF`, `IFERROR`, `ISBLANK`, `ROUND`, `ABS`, `SQRT`, `POWER`, `MOD`, `VLOOKUP`, `INDEX`, `MATCH`, `LEN`, `CONCAT`, `NPV`, `STDEV`, `MEDIAN`), `PivotTableSummary` 집계를 제공합니다.
+     - `crates/easyoffice-layout`: 시그니처 라벤더 팔레트(`#5C6BC0`, `#F7F8FC`, `#141724`), `DocumentPageLayout`(A4 가로/세로 스왑, 1~4단 다단 폭 계산, 200자 원고지 그리드, KS X 6101 행정 공문서 헤더 및 결재란), `SlideStageLayout`(`840.0 × 472.5 pt` 16:9 스테이지 및 상단 본문·하단 오브젝트 비겹침 영역 `y >= 240.0 pt`), `PdfStudioLayout`(`y = 804.0..452.0` 가시 좌표 및 결재 날인 박스)을 제공합니다.
+  2. **Tauri v2 크로스플랫폼 데스크톱 IPC 라우터 및 WebUI(`crates/easyoffice-app`)**:
+     - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `compute_layout`, `audit_security` 명령을 처리하고, `cargo run -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식을 1초 내에 검증합니다.
+     - `crates/easyoffice-app/tauri.conf.json`은 macOS(`.app`, `.dmg` — `WKWebView`)와 Windows(`.msi`, `.nsis` — `WebView2` `downloadBootstrapper`) 번들 설정을 정의하고, `crates/easyoffice-app/ui/{index.html,styles.css,app.js}`는 시그니처 라벤더 다크/라이트 워크스페이스, 플랫폼별 단축키(`Cmd` vs `Ctrl`) 자동 매핑, 한국어 두벌식 IME 조합(`compositionstart`/`compositionupdate`/`compositionend`) 무결성을 제공합니다.
+  3. **문서/HWP 2차 포맷 바 다단·용지 방향 변경 시 실행 취소(`Undo`) 스냅샷 누락 보완 (`Sources/EasyOfficeApp/EditorDetailPanes.swift`)**:
+     - 문서 및 HWP/HWPX 에디터 2차 포맷 바의 `다단 구성`(`1단`~`3단`)과 `용지 (세로/가로)` 메뉴 액션에서 페이로드 갱신 직전에 `viewModel.recordUndoSnapshot(for: tabID)`를 호출하여 인스펙터·리본과 동일한 실행 취소/다시 실행 무결성을 보장합니다.
+- **Why**: macOS 네이티브 Swift 엔진의 도메인 모델과 보안 상한을 Windows(`WebView2`)와 macOS(`WKWebView`) 공통 Rust 코어로 이식하여 크로스플랫폼 일관성을 확립하고, 오프라인/폐쇄망 빌드 환경에서도 즉시 컴파일·검증되도록 하기 위함입니다.
+- **Trade-offs**: Swift 코어(`Sources/EasyOfficeCore`)와 Rust 워크스페이스(`crates/easyoffice-*`) 양쪽의 상한 상수와 보안 불변식을 동기화해야 하나, `check-repo-hygiene.mjs`와 CI `verify` 잡(`cargo test --workspace` + `--self-test`)이 두 계층을 함께 검증합니다.
+- **Alternatives rejected**:
+  - 수십 개의 서드파티 크레이트에 의존하는 방식: 오프라인/샌드박스 환경에서 네트워크 크레이트 다운로드 실패 위험과 공급망 공격 표면을 넓히므로 `std` 기반 결정론적 구현으로 채택.
+- **Verified by**: `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: Windows 네이티브 코드 서명(Authenticode) 및 MSIX 스토어 배포 파이프라인을 추가할 때.
+
