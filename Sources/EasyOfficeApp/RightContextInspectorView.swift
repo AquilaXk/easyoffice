@@ -10,6 +10,25 @@ struct RightContextInspectorView: View {
   @Bindable var viewModel: WorkspaceViewModel
   let tab: WorkspaceTabItem
 
+  @ViewBuilder
+  private func inspectorButton(
+    _ title: String,
+    isProminent: Bool = false,
+    palette: WorkspaceThemePalette,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Text(title)
+        .font(.system(size: 10.5, weight: isProminent ? .semibold : .medium))
+        .foregroundStyle(
+          isProminent
+            ? EasyOfficeDesignTokens.brand600.swiftUIColor
+            : palette.primaryText.swiftUIColor
+        )
+    }
+    .buttonStyle(.plain)
+  }
+
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
@@ -18,25 +37,21 @@ struct RightContextInspectorView: View {
       showsIndicators: false,
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
-      VStack(alignment: .leading, spacing: 9) {
+      VStack(alignment: .leading, spacing: 12) {
         Text("속성 인스펙터")
           .font(.system(size: 12, weight: .bold))
           .foregroundStyle(palette.primaryText.swiftUIColor)
 
-        Text("파일명: \(tab.fileName)")
-          .font(.system(size: 11))
-          .foregroundStyle(palette.primaryText.swiftUIColor)
-          .lineLimit(1)
-        Text("규격: \(tab.format.shortSpecificationBadge)")
-          .font(.system(size: 11))
+        Text(tab.fileName)
+          .font(.system(size: 11, weight: .medium))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
           .lineLimit(1)
 
         HStack(spacing: 6) {
-          Text("작성자:")
+          Text("작성자")
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "작성자 이름",
             text: $viewModel.authorName,
             width: nil,
@@ -45,25 +60,31 @@ struct RightContextInspectorView: View {
           )
         }
 
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
           ForEach(InspectorSubTab.allCases) { subTab in
             let isSelected = viewModel.activeInspectorSubTab == subTab
             Button {
               viewModel.activeInspectorSubTab = subTab
             } label: {
-              Text(subTab.rawValue)
-                .font(.system(size: 10.5, weight: isSelected ? .bold : .medium))
-                .foregroundStyle(
-                  isSelected ? Color.white : palette.primaryText.swiftUIColor
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .background(
-                  isSelected
-                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                    : palette.elevatedSurface.swiftUIColor
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+              VStack(spacing: 4) {
+                Text(subTab.rawValue)
+                  .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                  .foregroundStyle(
+                    isSelected
+                      ? palette.primaryText.swiftUIColor
+                      : palette.secondaryText.swiftUIColor
+                  )
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 4)
+
+                Rectangle()
+                  .fill(
+                    isSelected
+                      ? EasyOfficeDesignTokens.brand600.swiftUIColor
+                      : Color.clear
+                  )
+                  .frame(height: 2)
+              }
             }
             .buttonStyle(.plain)
           }
@@ -89,8 +110,6 @@ struct RightContextInspectorView: View {
     .background(palette.cardSurface.swiftUIColor)
   }
 
-  // MARK: - Document & HWP Inspector
-
   @ViewBuilder
   private func documentInspectorSection(doc: OfficeDocumentModel, palette: WorkspaceThemePalette)
     -> some View
@@ -103,30 +122,30 @@ struct RightContextInspectorView: View {
     let shortOrientLabel = currentOrientation == .portrait ? "세로" : "가로"
 
     if viewModel.activeInspectorSubTab == .propertiesAndLayout {
-      Text("문서 통계 및 원고지 검산")
+      Text("문서 통계")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
       Text(
-        "문단: \(stats.paragraphCount) · 표: \(stats.tableCount) · 이미지: \(doc.images.count) · 수식: \(doc.equations.count)"
+        "문단 \(stats.paragraphCount) · 표 \(stats.tableCount) · 이미지 \(doc.images.count) · 수식 \(doc.equations.count)"
       )
       .font(.system(size: 11))
-      Text("단어: \(stats.wordCount) · 글자(공백 포함): \(stats.characterCountWithSpaces)")
+      Text("단어 \(stats.wordCount) · 글자(공백 포함) \(stats.characterCountWithSpaces)")
         .font(.system(size: 11))
-      Text("200자 원고지: \(stats.manuscriptPages200)매")
+      Text("200자 원고지 \(stats.manuscriptPages200)매")
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-      Text("각주: \(doc.footnotes.count)건 · 변경 추적: \(doc.revisions.count)건")
+      Text("각주 \(doc.footnotes.count)건 · 변경 추적 \(doc.revisions.count)건")
         .font(.system(size: 11))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
 
       Divider()
 
-      Text("레이아웃 및 구역 제어")
+      Text("레이아웃 및 구역")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
 
-      HStack(spacing: 6) {
-        LavenderMenuPill(
+      HStack(spacing: 12) {
+        FlatToolbarMenu(
           title: "용지: \(shortPaperLabel)",
           systemImage: "doc.plaintext",
           palette: palette
@@ -142,7 +161,7 @@ struct RightContextInspectorView: View {
           }
         }
 
-        LavenderMenuPill(
+        FlatToolbarMenu(
           title: "방향: \(shortOrientLabel)",
           systemImage: "rectangle.portrait.rotate",
           palette: palette
@@ -160,7 +179,7 @@ struct RightContextInspectorView: View {
         }
       }
 
-      LavenderStepperPill(
+      FlatStepperControl(
         label: "다단 열 수: \(currentColumns)단",
         value: Binding(
           get: { currentColumns },
@@ -175,7 +194,7 @@ struct RightContextInspectorView: View {
         palette: palette
       )
 
-      LavenderTogglePill(
+      FlatToggleControl(
         title: "변경 내용 추적",
         systemImage: "checkmark.bubble",
         isOn: Binding(
@@ -185,18 +204,18 @@ struct RightContextInspectorView: View {
         palette: palette
       )
 
-      LavenderTogglePill(
+      FlatToggleControl(
         title: "200자 원고지 격자 뷰",
         systemImage: "squareshape.split.3x3",
         isOn: $viewModel.isManuscriptGridModeEnabled,
         palette: palette
       )
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: 6) {
         Text("머리말 / 꼬리말")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "머리말 텍스트",
           text: Binding(
             get: { doc.headerText },
@@ -207,7 +226,7 @@ struct RightContextInspectorView: View {
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "꼬리말 텍스트",
           text: Binding(
             get: { doc.footerText },
@@ -221,30 +240,30 @@ struct RightContextInspectorView: View {
 
       Divider()
 
-      VStack(alignment: .leading, spacing: 5) {
-        HStack(spacing: 6) {
-          Button("변경 내용 추적 전환") { viewModel.executeRibbonCommand("\(modulePrefix)-review-track") }
-            .buttonStyle(.bordered).controlSize(.mini)
-          Button("단 나누기 전환") { viewModel.executeRibbonCommand("\(modulePrefix)-layout-columns") }
-            .buttonStyle(.bordered).controlSize(.mini)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 12) {
+          inspectorButton("변경 추적 전환", palette: palette) {
+            viewModel.executeRibbonCommand("\(modulePrefix)-review-track")
+          }
+          inspectorButton("단 나누기 전환", palette: palette) {
+            viewModel.executeRibbonCommand("\(modulePrefix)-layout-columns")
+          }
         }
-        Button("용지 방향 전환") { viewModel.executeRibbonCommand("\(modulePrefix)-layout-orient") }
-          .buttonStyle(.bordered).controlSize(.small)
-        Button("개인정보/메타데이터 정리") {
+        inspectorButton("용지 방향 전환", palette: palette) {
+          viewModel.executeRibbonCommand("\(modulePrefix)-layout-orient")
+        }
+        inspectorButton("개인정보·메타데이터 정리", isProminent: true, palette: palette) {
           viewModel.executeRibbonCommand("\(modulePrefix)-review-security")
           viewModel.scrubActiveTabMetadata()
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .tint(palette.primaryAccent.swiftUIColor)
       }
     } else {
-      VStack(alignment: .leading, spacing: 6) {
+      VStack(alignment: .leading, spacing: 8) {
         Text("수식 블록 삽입")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          LavenderTextFieldPill(
+        HStack(spacing: 8) {
+          FlatUnderlineTextField(
             placeholder: "LaTeX / 수식 입력",
             text: $viewModel.equationDraftText,
             width: nil,
@@ -252,87 +271,83 @@ struct RightContextInspectorView: View {
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          Button("수식 삽입") { viewModel.insertEquationIntoActiveDocument() }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+          inspectorButton("삽입", isProminent: true, palette: palette) {
+            viewModel.insertEquationIntoActiveDocument()
+          }
         }
 
-        Text("워터마크 적용/해제")
+        Text("워터마크")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          LavenderTextFieldPill(
+        HStack(spacing: 8) {
+          FlatUnderlineTextField(
             placeholder: "워터마크 문구",
             text: $viewModel.watermarkDraftText,
             width: nil,
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          Button("적용") { viewModel.setDocumentWatermark(viewModel.watermarkDraftText) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("해제") { viewModel.setDocumentWatermark("") }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+          inspectorButton("적용", isProminent: true, palette: palette) {
+            viewModel.setDocumentWatermark(viewModel.watermarkDraftText)
+          }
+          inspectorButton("해제", palette: palette) {
+            viewModel.setDocumentWatermark("")
+          }
         }
 
         if let firstImage = doc.images.first {
           Text("이미지 배치: \(firstImage.wrapMode.rawValue)")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-          Button("이미지 텍스트 배치 전환") { viewModel.cycleImageWrapMode(imageID: firstImage.id) }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+          inspectorButton("이미지 텍스트 배치 전환", palette: palette) {
+            viewModel.cycleImageWrapMode(imageID: firstImage.id)
+          }
         }
 
         Text("인라인 강조 · 취소선 · 하이퍼링크")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          Button("형광펜 강조") { viewModel.toggleHighlightOnActiveParagraph() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("취소선") { viewModel.toggleStrikethroughOnActiveParagraph() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("미주 삽입") { viewModel.insertEndnoteIntoActiveDocument() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("형광펜 강조", palette: palette) {
+            viewModel.toggleHighlightOnActiveParagraph()
+          }
+          inspectorButton("취소선", palette: palette) {
+            viewModel.toggleStrikethroughOnActiveParagraph()
+          }
+          inspectorButton("미주 삽입", palette: palette) {
+            viewModel.insertEndnoteIntoActiveDocument()
+          }
         }
-        HStack(spacing: 6) {
-          LavenderTextFieldPill(
+        HStack(spacing: 8) {
+          FlatUnderlineTextField(
             placeholder: "하이퍼링크 URL",
             text: $viewModel.inlineLinkURLDraft,
             width: nil,
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          Button("링크 삽입") { viewModel.insertHyperlinkIntoActiveParagraph() }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+          inspectorButton("링크 삽입", isProminent: true, palette: palette) {
+            viewModel.insertHyperlinkIntoActiveParagraph()
+          }
         }
 
         Text("문단 들여쓰기 (첫 줄 / 좌측)")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          Button("첫 줄 +10pt") {
+        HStack(spacing: 10) {
+          inspectorButton("첫 줄 +10pt", palette: palette) {
             viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: 10, leftIndentDeltaPt: 0)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-          Button("좌측 +10pt") {
+          inspectorButton("좌측 +10pt", palette: palette) {
             viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: 0, leftIndentDeltaPt: 10)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-          Button("초기화") {
+          inspectorButton("초기화", palette: palette) {
             viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: -144, leftIndentDeltaPt: -144)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
         }
       }
+
+      Divider()
 
       documentAdvancedControlsSubSection(doc: doc, palette: palette)
     }
@@ -352,146 +367,102 @@ struct RightContextInspectorView: View {
     let currentLetterSpacing = activeParagraph?.letterSpacingPercent ?? 0.0
     let currentCharScale = activeParagraph?.charWidthScalePercent ?? 100.0
 
-    VStack(alignment: .leading, spacing: 5) {
-      Text("자간 · 장평 정밀 조판 (\(Int(currentLetterSpacing))% / \(Int(currentCharScale))%)")
+    VStack(alignment: .leading, spacing: 8) {
+      Text("자간 · 장평 (\(Int(currentLetterSpacing))% / \(Int(currentCharScale))%)")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-      HStack(spacing: 4) {
-        Button("자간-5%") {
+      HStack(spacing: 8) {
+        inspectorButton("자간-5%", palette: palette) {
           viewModel.adjustActiveParagraphTypography(letterSpacingDelta: -5.0)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
-
-        Button("자간+5%") {
+        inspectorButton("자간+5%", palette: palette) {
           viewModel.adjustActiveParagraphTypography(letterSpacingDelta: 5.0)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
-
-        Button("장평90%") {
+        inspectorButton("장평90%", palette: palette) {
           viewModel.adjustActiveParagraphTypography(charScaleDelta: 90.0 - currentCharScale)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
-
-        Button("장평105%") {
+        inspectorButton("장평105%", palette: palette) {
           viewModel.adjustActiveParagraphTypography(charScaleDelta: 105.0 - currentCharScale)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
-
-        Button("초기화") {
+        inspectorButton("초기화", palette: palette) {
           viewModel.adjustActiveParagraphTypography(reset: true)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
       }
 
       Text("문단 정렬 · 줄간격 · 다단계 목록")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
-      HStack(spacing: 4) {
-        Button("좌측") { viewModel.setActiveParagraphAlignment(.leading) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-        Button("가운데") { viewModel.setActiveParagraphAlignment(.center) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-        Button("우측") { viewModel.setActiveParagraphAlignment(.trailing) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-        Button("양쪽") { viewModel.setActiveParagraphAlignment(.justified) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
+      HStack(spacing: 10) {
+        inspectorButton("좌측", palette: palette) { viewModel.setActiveParagraphAlignment(.leading) }
+        inspectorButton("가운데", palette: palette) { viewModel.setActiveParagraphAlignment(.center) }
+        inspectorButton("우측", palette: palette) { viewModel.setActiveParagraphAlignment(.trailing) }
+        inspectorButton("양쪽", palette: palette) { viewModel.setActiveParagraphAlignment(.justified) }
       }
-      HStack(spacing: 4) {
+      HStack(spacing: 8) {
         ForEach([100.0, 115.0, 150.0, 160.0, 200.0], id: \.self) { pct in
-          Button("\(Int(pct))%") {
+          inspectorButton("\(Int(pct))%", palette: palette) {
             viewModel.setActiveParagraphLineSpacing(pct)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
         }
       }
-      HStack(spacing: 4) {
-        Button("글머리") { viewModel.setActiveParagraphListKind(.bullet) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-        Button("번호") { viewModel.setActiveParagraphListKind(.numbered) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-        Button("공문서") { viewModel.setActiveParagraphListKind(.koreanOfficial) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-        Button("해제") { viewModel.setActiveParagraphListKind(.none) }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-        Button("수준+1") {
+      HStack(spacing: 8) {
+        inspectorButton("글머리", palette: palette) { viewModel.setActiveParagraphListKind(.bullet) }
+        inspectorButton("번호", palette: palette) { viewModel.setActiveParagraphListKind(.numbered) }
+        inspectorButton("공문서", palette: palette) {
+          viewModel.setActiveParagraphListKind(.koreanOfficial)
+        }
+        inspectorButton("해제", palette: palette) { viewModel.setActiveParagraphListKind(.none) }
+        inspectorButton("수준+1", palette: palette) {
           viewModel.setActiveParagraphListKind(
             activeListKind == .none ? .koreanOfficial : activeListKind,
             levelDelta: 1
           )
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
       }
     }
 
-    VStack(alignment: .leading, spacing: 5) {
+    Divider()
+
+    VStack(alignment: .leading, spacing: 8) {
       if !doc.tables.isEmpty {
-        Text("표 행·열 및 셀 병합·테두리 편집")
+        Text("표 행·열 및 셀 편집")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 4) {
-          Button("+행") { viewModel.insertRowInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("-행") { viewModel.deleteRowInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("+열") { viewModel.insertColumnInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("-열") { viewModel.deleteColumnInDocumentTable() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("병합") { viewModel.mergeActiveDocumentTableCells() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("분할") { viewModel.splitActiveDocumentTableCell() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 8) {
+          inspectorButton("+행", palette: palette) { viewModel.insertRowInDocumentTable() }
+          inspectorButton("-행", palette: palette) { viewModel.deleteRowInDocumentTable() }
+          inspectorButton("+열", palette: palette) { viewModel.insertColumnInDocumentTable() }
+          inspectorButton("-열", palette: palette) { viewModel.deleteColumnInDocumentTable() }
+          inspectorButton("병합", palette: palette) { viewModel.mergeActiveDocumentTableCells() }
+          inspectorButton("분할", palette: palette) { viewModel.splitActiveDocumentTableCell() }
         }
       }
 
       Text("메일 머지 (누름틀 치환)")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
-      HStack(spacing: 4) {
-        LavenderTextFieldPill(
+      HStack(spacing: 6) {
+        FlatUnderlineTextField(
           placeholder: "필드 키",
           text: $viewModel.mailMergeFieldKeyDraft,
           width: 68,
           palette: palette,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "치환 값",
           text: $viewModel.mailMergeFieldValueDraft,
           width: 68,
           palette: palette,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
-        Button("필드 치환") { viewModel.applyMailMergeFieldReplacement() }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
+        inspectorButton("치환", isProminent: true, palette: palette) {
+          viewModel.applyMailMergeFieldReplacement()
+        }
       }
     }
   }
-
-  // MARK: - Sheet Inspector
 
   @ViewBuilder
   private func sheetInspectorSection(sheet: WorksheetModel, palette: WorkspaceThemePalette)
@@ -512,31 +483,31 @@ struct RightContextInspectorView: View {
     let rowHeight = sheet.rowHeight(at: selectedAddr.row)
 
     if viewModel.activeInspectorSubTab == .propertiesAndLayout {
-      Text("시트 수식 및 셀 서식 제어")
+      Text("시트 수식 및 셀 서식")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
-      Text("선택된 셀: \(viewModel.selectedSheetCell) · 선택 범위: \(viewModel.selectedSheetRange)")
+      Text("선택 셀 \(viewModel.selectedSheetCell) · 범위 \(viewModel.selectedSheetRange)")
         .font(.system(size: 11, design: .monospaced))
-      Text("원시 수식: \(sheet.rawValue(at: viewModel.selectedSheetCell))")
+      Text("수식 \(sheet.rawValue(at: viewModel.selectedSheetCell))")
         .font(.system(size: 11, design: .monospaced))
-      Text("평가 결과: \(formattedResult)")
+      Text("결과 \(formattedResult)")
         .font(.system(size: 11, weight: .semibold))
         .foregroundStyle(palette.accentBadgeText.swiftUIColor)
       Text(
-        "SUM: \(String(format: "%.1f", rangeSummary.sum)) · AVG: \(String(format: "%.1f", rangeSummary.average)) · COUNT: \(rangeSummary.numericCount)/\(rangeSummary.cellCount)"
+        "SUM \(String(format: "%.1f", rangeSummary.sum)) · AVG \(String(format: "%.1f", rangeSummary.average)) · COUNT \(rangeSummary.numericCount)/\(rangeSummary.cellCount)"
       )
       .font(.system(size: 10, design: .monospaced))
       .foregroundStyle(palette.secondaryText.swiftUIColor)
       Text(
-        "MIN: \(rangeSummary.minimum.map { String(format: "%.1f", $0) } ?? "-") · MAX: \(rangeSummary.maximum.map { String(format: "%.1f", $0) } ?? "-")"
+        "MIN \(rangeSummary.minimum.map { String(format: "%.1f", $0) } ?? "-") · MAX \(rangeSummary.maximum.map { String(format: "%.1f", $0) } ?? "-")"
       )
       .font(.system(size: 10, design: .monospaced))
       .foregroundStyle(palette.secondaryText.swiftUIColor)
 
       Divider()
 
-      HStack(spacing: 6) {
-        LavenderMenuPill(
+      HStack(spacing: 12) {
+        FlatToolbarMenu(
           title: "형식: \(currentStyle.numberFormat.rawValue)",
           systemImage: "number",
           palette: palette
@@ -548,7 +519,7 @@ struct RightContextInspectorView: View {
           }
         }
 
-        LavenderMenuPill(
+        FlatToolbarMenu(
           title: "정렬: \(currentStyle.alignment.rawValue)",
           systemImage: "text.alignleft",
           palette: palette
@@ -563,110 +534,91 @@ struct RightContextInspectorView: View {
 
       VStack(alignment: .leading, spacing: 6) {
         Text(
-          "줄바꿈: \(currentStyle.wrapText ? "켜짐" : "꺼짐") · 소수점: \(currentStyle.decimalPlaces ?? 2)자리"
+          "줄바꿈 \(currentStyle.wrapText ? "켜짐" : "꺼짐") · 소수점 \(currentStyle.decimalPlaces ?? 2)자리"
         )
         .font(.system(size: 10, design: .monospaced))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-        HStack(spacing: 6) {
-          Button("줄바꿈 토글") {
+        HStack(spacing: 10) {
+          inspectorButton("줄바꿈 전환", palette: palette) {
             viewModel.toggleWrapTextOnSelectedSheetCell()
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-
-          Button("소수점 -1") {
+          inspectorButton("소수점 -1", palette: palette) {
             viewModel.adjustSelectedSheetCellDecimalPlaces(delta: -1)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-
-          Button("소수점 +1") {
+          inspectorButton("소수점 +1", palette: palette) {
             viewModel.adjustSelectedSheetCellDecimalPlaces(delta: 1)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
         }
       }
 
-      VStack(alignment: .leading, spacing: 6) {
-        HStack(spacing: 6) {
-          Text("열 폭 (\(Int(colWidth))pt):")
+      Divider()
+
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          Text("열 폭 (\(Int(colWidth))pt)")
             .font(.system(size: 10, design: .monospaced))
-          Button("-20pt") {
+          inspectorButton("-20pt", palette: palette) {
             viewModel.updateActiveSheetColumnWidth(column: selectedAddr.column, width: colWidth - 20)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("+20pt") {
+          inspectorButton("+20pt", palette: palette) {
             viewModel.updateActiveSheetColumnWidth(column: selectedAddr.column, width: colWidth + 20)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
         }
 
-        HStack(spacing: 6) {
-          Text("행 높이 (\(Int(rowHeight))pt):")
+        HStack(spacing: 8) {
+          Text("행 높이 (\(Int(rowHeight))pt)")
             .font(.system(size: 10, design: .monospaced))
-          Button("-20pt") {
+          inspectorButton("-20pt", palette: palette) {
             viewModel.updateActiveSheetRowHeight(row: selectedAddr.row, height: rowHeight - 20)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("+20pt") {
+          inspectorButton("+20pt", palette: palette) {
             viewModel.updateActiveSheetRowHeight(row: selectedAddr.row, height: rowHeight + 20)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
         }
 
-        HStack(spacing: 4) {
-          Button("+행") { viewModel.insertSheetRowAtSelection() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("-행") { viewModel.deleteSheetRowAtSelection() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("+열") { viewModel.insertSheetColumnAtSelection() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("-열") { viewModel.deleteSheetColumnAtSelection() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("+행", palette: palette) { viewModel.insertSheetRowAtSelection() }
+          inspectorButton("-행", palette: palette) { viewModel.deleteSheetRowAtSelection() }
+          inspectorButton("+열", palette: palette) { viewModel.insertSheetColumnAtSelection() }
+          inspectorButton("-열", palette: palette) { viewModel.deleteSheetColumnAtSelection() }
         }
 
-        LavenderTogglePill(
+        FlatToggleControl(
           title: "머리글 행 고정",
           systemImage: "pin.fill",
           isOn: $viewModel.isHeaderRowFrozen,
           palette: palette
         )
 
-        LavenderTogglePill(
+        FlatToggleControl(
           title: "첫 열(A열) 틀 고정",
           systemImage: "pin.fill",
           isOn: $viewModel.isFirstColumnFrozen,
           palette: palette
         )
 
-        LavenderTogglePill(
+        FlatToggleControl(
           title: "셀 내 데이터 막대 표시",
           systemImage: "chart.bar.fill",
           isOn: $viewModel.isDataBarsEnabled,
           palette: palette
         )
 
-        Button("시트 추가 (+)") { viewModel.addWorksheetTab() }
-          .buttonStyle(.borderedProminent)
-          .controlSize(.small)
-          .tint(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+        inspectorButton("시트 추가 (+)", isProminent: true, palette: palette) {
+          viewModel.addWorksheetTab()
+        }
       }
     } else {
       Text("시트 고급 분석 및 데이터 정제")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
 
-      VStack(alignment: .leading, spacing: 4) {
+      VStack(alignment: .leading, spacing: 6) {
         Text("선택 셀 메모 (\(viewModel.selectedSheetCell))")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "셀 메모 입력",
           text: Binding(
             get: { sheet.sheetComments[selectedAddr.packedCoordinate] ?? "" },
@@ -678,8 +630,8 @@ struct RightContextInspectorView: View {
         )
       }
 
-      VStack(alignment: .leading, spacing: 6) {
-        Button("아래로 3행 자동 채우기") {
+      VStack(alignment: .leading, spacing: 8) {
+        inspectorButton("아래로 3행 자동 채우기", palette: palette) {
           let minCol = min(activeRange.start.column, activeRange.end.column)
           let maxCol = max(activeRange.start.column, activeRange.end.column)
           let minRow = min(activeRange.start.row, activeRange.end.row)
@@ -694,15 +646,14 @@ struct RightContextInspectorView: View {
             )
           }
         }
-        .buttonStyle(.bordered).controlSize(.small)
 
-        LavenderStepperPill(
+        FlatStepperControl(
           label: "자동 필터 열: \(CellAddress.columnLabel(for: max(0, viewModel.sheetAutoFilterColumn)))열",
           value: $viewModel.sheetAutoFilterColumn,
           range: 0...15,
           palette: palette
         )
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "열 자동 필터 검색어",
           text: $viewModel.sheetAutoFilterQuery,
           width: nil,
@@ -710,8 +661,9 @@ struct RightContextInspectorView: View {
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        Button("선택 셀 병합 / 해제") { viewModel.toggleMergeOnSelectedSheetCell() }
-          .buttonStyle(.bordered).controlSize(.small)
+        inspectorButton("선택 셀 병합 / 해제", palette: palette) {
+          viewModel.toggleMergeOnSelectedSheetCell()
+        }
 
         if !mergedList.isEmpty {
           Text("병합 범위: \(mergedList)")
@@ -725,14 +677,14 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 6) {
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "이름",
             text: $viewModel.namedRangeNameDraft,
             width: 78,
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "범위 (예: B2:B4)",
             text: $viewModel.namedRangeTargetDraft,
             width: 96,
@@ -741,17 +693,17 @@ struct RightContextInspectorView: View {
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
         }
-        Button("이름 정의 등록") { viewModel.defineNamedRangeOnActiveSheet() }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
+        inspectorButton("이름 정의 등록", isProminent: true, palette: palette) {
+          viewModel.defineNamedRangeOnActiveSheet()
+        }
 
         Divider()
 
         Text("목표값 찾기 (Goal Seek)")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 4) {
-          LavenderTextFieldPill(
+        HStack(spacing: 6) {
+          FlatUnderlineTextField(
             placeholder: "수식 셀",
             text: $viewModel.goalSeekTargetCellDraft,
             width: 56,
@@ -759,7 +711,7 @@ struct RightContextInspectorView: View {
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "목표값",
             text: $viewModel.goalSeekTargetValueDraft,
             width: 56,
@@ -767,7 +719,7 @@ struct RightContextInspectorView: View {
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "변경 셀",
             text: $viewModel.goalSeekVariableCellDraft,
             width: 56,
@@ -776,16 +728,17 @@ struct RightContextInspectorView: View {
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
         }
-        Button("목표값 찾기 실행") { viewModel.runGoalSeekOnActiveSheet() }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
+        inspectorButton("목표값 찾기 실행", isProminent: true, palette: palette) {
+          viewModel.runGoalSeekOnActiveSheet()
+        }
 
         Divider()
 
-        Button("통화/백분율/소수 서식 전환") { viewModel.executeRibbonCommand("sheet-home-style") }
-          .buttonStyle(.bordered).controlSize(.small)
+        inspectorButton("통화/백분율/소수 서식 전환", palette: palette) {
+          viewModel.executeRibbonCommand("sheet-home-style")
+        }
 
-        LavenderMenuPill(
+        FlatToolbarMenu(
           title: "피벗 집계: \(viewModel.selectedPivotAggregation.rawValue)",
           systemImage: "function",
           palette: palette
@@ -806,18 +759,18 @@ struct RightContextInspectorView: View {
           }
         }
 
-        Text("데이터 정제 (중복 제거 · 텍스트 나누기 · 다중 정렬)")
+        Text("데이터 정제")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          Button("중복 행 제거") { viewModel.removeDuplicatesInActiveSheet() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("텍스트 나누기(,)") { viewModel.splitActiveSheetColumnByDelimiter() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("중복 행 제거", palette: palette) {
+            viewModel.removeDuplicatesInActiveSheet()
+          }
+          inspectorButton("텍스트 나누기(,)", palette: palette) {
+            viewModel.splitActiveSheetColumnByDelimiter()
+          }
         }
-        Button("다중 기준 정렬 (A열↑ · B열↓)") {
+        inspectorButton("다중 기준 정렬 (A열↑ · B열↓)", palette: palette) {
           viewModel.sortActiveSheetBySecondaryColumn(
             primaryColumn: 0,
             ascending: true,
@@ -825,18 +778,16 @@ struct RightContextInspectorView: View {
             secondaryAscending: false
           )
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
 
-        Button(viewModel.activeConditionalFormatRule == nil ? "조건부 서식 켜기 (>100)" : "조건부 서식 끄기") {
+        inspectorButton(
+          viewModel.activeConditionalFormatRule == nil ? "조건부 서식 켜기 (>100)" : "조건부 서식 끄기",
+          palette: palette
+        ) {
           viewModel.executeRibbonCommand("sheet-mod-condfmt")
         }
-        .buttonStyle(.bordered).controlSize(.small)
       }
     }
   }
-
-  // MARK: - Slide Inspector
 
   @ViewBuilder
   private func slideInspectorSection(deck: PresentationDeckModel, palette: WorkspaceThemePalette)
@@ -852,10 +803,10 @@ struct RightContextInspectorView: View {
       Text("슬라이드 마스터 및 개체 제어")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
-      Text("총 슬라이드: \(deck.slides.count)장")
+      Text("총 슬라이드 \(deck.slides.count)장")
         .font(.system(size: 11))
 
-      LavenderMenuPill(
+      FlatToolbarMenu(
         title: "테마: \(deck.theme.rawValue)",
         systemImage: "paintpalette",
         palette: palette
@@ -868,7 +819,7 @@ struct RightContextInspectorView: View {
       }
 
       if let slide = activeSlide {
-        LavenderMenuPill(
+        FlatToolbarMenu(
           title: "레이아웃: \(slide.masterLayout.rawValue)",
           systemImage: "rectangle.3.group",
           palette: palette
@@ -882,9 +833,10 @@ struct RightContextInspectorView: View {
           }
         }
 
-        let shortTransLabel = slide.transition.rawValue.components(separatedBy: " ").first ?? slide.transition.rawValue
-        HStack(spacing: 6) {
-          LavenderMenuPill(
+        let shortTransLabel =
+          slide.transition.rawValue.components(separatedBy: " ").first ?? slide.transition.rawValue
+        HStack(spacing: 12) {
+          FlatToolbarMenu(
             title: "비율: \(deck.aspectRatio == .widescreen16x9 ? "16:9" : "4:3")",
             systemImage: "aspectratio",
             palette: palette
@@ -896,7 +848,7 @@ struct RightContextInspectorView: View {
             }
           }
 
-          LavenderMenuPill(
+          FlatToolbarMenu(
             title: "전환: \(shortTransLabel)",
             systemImage: "sparkles.rectangle.stack",
             palette: palette
@@ -911,49 +863,39 @@ struct RightContextInspectorView: View {
           }
         }
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
           Text(
-            "전환 시간: \(String(format: "%.1f", slide.transitionDurationSeconds))초 · 자동 전환: \(slide.autoAdvanceSeconds.map { "\($0)초" } ?? "수동")"
+            "전환 시간 \(String(format: "%.1f", slide.transitionDurationSeconds))초 · 자동 전환 \(slide.autoAdvanceSeconds.map { "\($0)초" } ?? "수동")"
           )
           .font(.system(size: 10, weight: .semibold, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-          HStack(spacing: 4) {
+          HStack(spacing: 10) {
             ForEach([0.4, 0.8, 1.5, 2.5], id: \.self) { sec in
-              Button("\(String(format: "%.1f", sec))초") {
+              inspectorButton("\(String(format: "%.1f", sec))초", palette: palette) {
                 viewModel.setActiveSlideTransitionDuration(sec)
               }
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
             }
           }
 
-          HStack(spacing: 4) {
-            Button("수동") {
+          HStack(spacing: 10) {
+            inspectorButton("수동", palette: palette) {
               viewModel.setActiveSlideAutoAdvance(seconds: nil)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-
-            Button("5초") {
+            inspectorButton("5초", palette: palette) {
               viewModel.setActiveSlideAutoAdvance(seconds: 5)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-
-            Button("10초") {
+            inspectorButton("10초", palette: palette) {
               viewModel.setActiveSlideAutoAdvance(seconds: 10)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
           }
         }
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
           Text("발표자 노트")
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "발표자 노트 입력",
             text: Binding(
               get: { slide.speakerNotes },
@@ -968,14 +910,14 @@ struct RightContextInspectorView: View {
 
       Divider()
 
-      LavenderTogglePill(
+      FlatToggleControl(
         title: "슬라이드 정렬 격자 뷰",
         systemImage: "square.grid.3x2.fill",
         isOn: $viewModel.isSlideSorterViewEnabled,
         palette: palette
       )
 
-      LavenderTogglePill(
+      FlatToggleControl(
         title: "스테이지 격자 안내선",
         systemImage: "grid",
         isOn: Binding(
@@ -985,49 +927,40 @@ struct RightContextInspectorView: View {
         palette: palette
       )
 
-      VStack(alignment: .leading, spacing: 6) {
+      VStack(alignment: .leading, spacing: 8) {
         Text("슬라이드 덱 관리")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          Button("슬라이드 추가") { viewModel.addSlideToActiveDeck() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("복제") { viewModel.duplicateActiveSlide() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("삭제") { viewModel.deleteActiveSlide() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("슬라이드 추가", palette: palette) { viewModel.addSlideToActiveDeck() }
+          inspectorButton("복제", palette: palette) { viewModel.duplicateActiveSlide() }
+          inspectorButton("삭제", palette: palette) { viewModel.deleteActiveSlide() }
             .disabled(deck.slides.count <= 1)
         }
-        HStack(spacing: 6) {
-          Button("위로 이동") { viewModel.moveActiveSlide(offset: -1) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("아래로 이동") { viewModel.moveActiveSlide(offset: 1) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("위로 이동", palette: palette) { viewModel.moveActiveSlide(offset: -1) }
+          inspectorButton("아래로 이동", palette: palette) { viewModel.moveActiveSlide(offset: 1) }
         }
       }
 
-      Button(viewModel.isFullScreenSlideshowActive ? "전체화면 슬라이드쇼 종료" : "전체화면 슬라이드쇼 시작") {
+      inspectorButton(
+        viewModel.isFullScreenSlideshowActive ? "전체화면 슬라이드쇼 종료" : "전체화면 슬라이드쇼 시작",
+        isProminent: true,
+        palette: palette
+      ) {
         viewModel.toggleFullScreenSlideshow()
       }
-      .buttonStyle(.borderedProminent)
-      .controlSize(.small)
-      .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
     } else {
-      Text("선택 개체 조판 및 정렬 제어")
+      Text("선택 개체 조판 및 정렬")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
 
       if let elem = activeElement, let elementID = targetElementID {
-        Text("선택 개체 편집 (\(Int(elem.x)), \(Int(elem.y)) · \(Int(elem.width))×\(Int(elem.height)))")
+        Text("선택 개체 (\(Int(elem.x)), \(Int(elem.y)) · \(Int(elem.width))×\(Int(elem.height)))")
           .font(.system(size: 10, weight: .semibold, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "개체 제목",
           text: Binding(
             get: { elem.title },
@@ -1041,7 +974,7 @@ struct RightContextInspectorView: View {
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "개체 본문",
           text: Binding(
             get: { elem.bodyText },
@@ -1055,125 +988,100 @@ struct RightContextInspectorView: View {
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        HStack(spacing: 6) {
-          Button("X -10") {
+        HStack(spacing: 10) {
+          inspectorButton("X -10", palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: -10, deltaY: 0)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("X +10") {
+          inspectorButton("X +10", palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 10, deltaY: 0)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("Y -10") {
+          inspectorButton("Y -10", palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 0, deltaY: -10)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("Y +10") {
+          inspectorButton("Y +10", palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 0, deltaY: 10)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
         }
 
-        HStack(spacing: 6) {
-          Button("폭 -20") {
+        HStack(spacing: 10) {
+          inspectorButton("폭 -20", palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: -20, deltaHeight: 0)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("폭 +20") {
+          inspectorButton("폭 +20", palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: 20, deltaHeight: 0)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("높이 -20") {
+          inspectorButton("높이 -20", palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: 0, deltaHeight: -20)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("높이 +20") {
+          inspectorButton("높이 +20", palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: 0, deltaHeight: 20)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
         }
 
-        HStack(spacing: 6) {
-          Text("회전: \(Int(elem.rotationDegrees))°")
+        HStack(spacing: 8) {
+          Text("회전 \(Int(elem.rotationDegrees))°")
             .font(.system(size: 10, design: .monospaced))
-          Button("-15°") {
+          inspectorButton("-15°", palette: palette) {
             viewModel.rotateSlideElement(
               slideIndex: sIdx, elementID: elementID, toDegrees: elem.rotationDegrees - 15)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("+15°") {
+          inspectorButton("+15°", palette: palette) {
             viewModel.rotateSlideElement(
               slideIndex: sIdx, elementID: elementID, toDegrees: elem.rotationDegrees + 15)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("0° 초기화") {
+          inspectorButton("0° 초기화", palette: palette) {
             viewModel.rotateSlideElement(slideIndex: sIdx, elementID: elementID, toDegrees: 0)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
         }
 
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
           Text("애니메이션: \(elem.animation.rawValue)")
             .font(.system(size: 10))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-          Button("애니메이션 전환") {
+          inspectorButton("애니메이션 전환", palette: palette) {
             viewModel.cycleSlideElementAnimation(slideIndex: sIdx, elementID: elementID)
           }
-          .buttonStyle(.bordered).controlSize(.small)
         }
 
-        HStack(spacing: 6) {
-          Button("앞으로") {
+        HStack(spacing: 10) {
+          inspectorButton("앞으로", palette: palette) {
             viewModel.moveSlideElementZOrder(
               slideIndex: sIdx, elementID: elementID, bringForward: true)
           }
-          .buttonStyle(.bordered).controlSize(.small)
-          Button("뒤로") {
+          inspectorButton("뒤로", palette: palette) {
             viewModel.moveSlideElementZOrder(
               slideIndex: sIdx, elementID: elementID, bringForward: false)
           }
-          .buttonStyle(.bordered).controlSize(.small)
         }
 
         Text("개체 정렬 · 배분 · 복제")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 4) {
-          Button("좌측 맞춤") { viewModel.alignSlideElements(.alignLeft) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("가로 중앙") { viewModel.alignSlideElements(.alignCenter) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("우측 맞춤") { viewModel.alignSlideElements(.alignRight) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("가로 배분") { viewModel.alignSlideElements(.distributeHorizontally) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 8) {
+          inspectorButton("좌측", palette: palette) { viewModel.alignSlideElements(.alignLeft) }
+          inspectorButton("중앙", palette: palette) { viewModel.alignSlideElements(.alignCenter) }
+          inspectorButton("우측", palette: palette) { viewModel.alignSlideElements(.alignRight) }
+          inspectorButton("배분", palette: palette) {
+            viewModel.alignSlideElements(.distributeHorizontally)
+          }
         }
-        HStack(spacing: 6) {
-          Button("개체 복제") { viewModel.duplicateActiveSlideElement() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("개체 삭제") { viewModel.deleteActiveSlideElement() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("개체 복제", palette: palette) { viewModel.duplicateActiveSlideElement() }
+          inspectorButton("개체 삭제", palette: palette) { viewModel.deleteActiveSlideElement() }
         }
       }
 
       Divider()
 
-      Button("스마트 스냅 정렬") { viewModel.executeRibbonCommand("slide-mod-snap") }
-        .buttonStyle(.bordered).controlSize(.small)
+      inspectorButton("스마트 스냅 정렬", isProminent: true, palette: palette) {
+        viewModel.executeRibbonCommand("slide-mod-snap")
+      }
     }
   }
-
-  // MARK: - PDF Inspector
 
   @ViewBuilder
   private func pdfInspectorSection(pdf: PDFStudioDocumentModel, palette: WorkspaceThemePalette)
@@ -1184,15 +1092,15 @@ struct RightContextInspectorView: View {
     }
 
     if viewModel.activeInspectorSubTab == .propertiesAndLayout {
-      Text("PDF 스튜디오 페이지·주석 제어")
+      Text("PDF 페이지·주석 제어")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
       Text(
-        "총 페이지: \(pdf.pages.count)p · 주석: \(pdf.annotations.count)건 · 서명 획: \(pdf.inkStrokes.count)건"
+        "총 페이지 \(pdf.pages.count)p · 주석 \(pdf.annotations.count)건 · 서명 획 \(pdf.inkStrokes.count)건"
       )
       .font(.system(size: 11))
 
-      LavenderStepperPill(
+      FlatStepperControl(
         label: "대상 페이지: \(viewModel.selectedPDFPageNumber)p",
         value: $viewModel.selectedPDFPageNumber,
         range: 1...max(1, pdf.pages.count),
@@ -1201,135 +1109,114 @@ struct RightContextInspectorView: View {
 
       Divider()
 
-      VStack(alignment: .leading, spacing: 6) {
-        HStack(spacing: 6) {
-          Button("90° 회전") { viewModel.rotateActivePDFPage(clockwiseDegrees: 90) }
-            .buttonStyle(.bordered).controlSize(.mini)
-
-          Button("하이라이트 주석") { viewModel.addPDFAnnotation(kind: .highlight, content: "하이라이트 주석") }
-            .buttonStyle(.bordered).controlSize(.mini)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 10) {
+          inspectorButton("90° 회전", palette: palette) {
+            viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
+          }
+          inspectorButton("하이라이트 주석", palette: palette) {
+            viewModel.addPDFAnnotation(kind: .highlight, content: "하이라이트 주석")
+          }
         }
 
-        HStack(spacing: 6) {
-          Button("빈 페이지 추가") {
+        HStack(spacing: 10) {
+          inspectorButton("빈 페이지 추가", palette: palette) {
             viewModel.insertBlankPDFPage(afterPage: viewModel.selectedPDFPageNumber)
           }
-          .buttonStyle(.bordered).controlSize(.mini)
-          Button("페이지 삭제") { viewModel.deleteActivePDFPage() }
-            .buttonStyle(.bordered).controlSize(.mini)
-            .disabled(pdf.pages.count <= 1)
+          inspectorButton("페이지 삭제", palette: palette) {
+            viewModel.deleteActivePDFPage()
+          }
+          .disabled(pdf.pages.count <= 1)
         }
 
-        HStack(spacing: 6) {
-          Button("페이지 위로") { viewModel.moveActivePDFPage(offset: -1) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("페이지 아래로") { viewModel.moveActivePDFPage(offset: 1) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("페이지 위로", palette: palette) { viewModel.moveActivePDFPage(offset: -1) }
+          inspectorButton("페이지 아래로", palette: palette) { viewModel.moveActivePDFPage(offset: 1) }
         }
 
-        HStack(spacing: 6) {
-          Button("PDF 탭 병합") { viewModel.mergeActivePDFWithAnotherOpenTab() }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-
-          Button("페이지 분할 (\(viewModel.selectedPDFPageNumber)p)") {
+        HStack(spacing: 10) {
+          inspectorButton("PDF 탭 병합", palette: palette) {
+            viewModel.mergeActivePDFWithAnotherOpenTab()
+          }
+          inspectorButton("페이지 분할 (\(viewModel.selectedPDFPageNumber)p)", palette: palette) {
             viewModel.executeRibbonCommand("pdf-mod-splitmerge")
           }
-          .buttonStyle(.bordered).controlSize(.mini)
         }
 
-        Button("문서(.docx)로 변환") { viewModel.executeRibbonCommand("pdf-mod-tooffice") }
-          .buttonStyle(.borderedProminent)
-          .controlSize(.small)
-          .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+        inspectorButton("문서(.docx)로 변환", isProminent: true, palette: palette) {
+          viewModel.executeRibbonCommand("pdf-mod-tooffice")
+        }
       }
 
       Divider()
 
-      VStack(alignment: .leading, spacing: 6) {
-        Text("전자 결재 도장 프리셋 (Official Stamp)")
+      VStack(alignment: .leading, spacing: 8) {
+        Text("전자 결재 스탬프")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          Button("승인") { viewModel.addStampToActivePDFPage(preset: .approved) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("대외비") { viewModel.addStampToActivePDFPage(preset: .confidential) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-        }
-        HStack(spacing: 6) {
-          Button("검토필") { viewModel.addStampToActivePDFPage(preset: .reviewed) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-          Button("긴급") { viewModel.addStampToActivePDFPage(preset: .urgent) }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+        HStack(spacing: 10) {
+          inspectorButton("승인", palette: palette) {
+            viewModel.addStampToActivePDFPage(preset: .approved)
+          }
+          inspectorButton("대외비", palette: palette) {
+            viewModel.addStampToActivePDFPage(preset: .confidential)
+          }
+          inspectorButton("검토필", palette: palette) {
+            viewModel.addStampToActivePDFPage(preset: .reviewed)
+          }
+          inspectorButton("긴급", palette: palette) {
+            viewModel.addStampToActivePDFPage(preset: .urgent)
+          }
         }
 
         Divider()
 
-        Text("PDF 워터마크 및 보안 상태 점검")
+        Text("워터마크")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-        LavenderTextFieldPill(
-          placeholder: "PDF 워터마크 문구",
+        FlatUnderlineTextField(
+          placeholder: "워터마크 문구",
           text: $viewModel.pdfWatermarkDraft,
           width: nil,
           palette: palette,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        HStack(spacing: 6) {
-          Button("워터마크 적용") {
+        HStack(spacing: 10) {
+          inspectorButton("워터마크 적용", isProminent: true, palette: palette) {
             viewModel.applyWatermarkOnActivePDF()
           }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-
-          Button("워터마크 해제") {
+          inspectorButton("워터마크 해제", palette: palette) {
             viewModel.applyWatermarkOnActivePDF(text: "")
           }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
         }
-
-        Text(pdf.securityInspectionSummary)
-          .font(.system(size: 10, weight: .medium))
-          .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-          .padding(.horizontal, 6)
-          .padding(.vertical, 3)
-          .background(palette.selectedSurface.swiftUIColor)
-          .clipShape(RoundedRectangle(cornerRadius: 4))
       }
     } else {
-      Text("PDF 서명·리댁션·양식 제어")
+      Text("PDF 서명·마스킹·양식")
         .font(.system(size: 11, weight: .bold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
 
-      VStack(alignment: .leading, spacing: 6) {
-        LavenderTogglePill(
+      VStack(alignment: .leading, spacing: 8) {
+        FlatToggleControl(
           title: "자유곡선 펜 그리기 모드",
           systemImage: "scribble.variable",
           isOn: $viewModel.isPDFInkDrawingModeEnabled,
           palette: palette
         )
 
-        HStack(spacing: 6) {
-          Text("펜 색상:")
+        HStack(spacing: 8) {
+          Text("펜 색상")
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
           ForEach(["#5C6BC0", "#D32F2F", "#1E293B"], id: \.self) { hex in
-            Button(hex) { viewModel.pdfInkStrokeColorHex = hex }
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
+            inspectorButton(hex, palette: palette) {
+              viewModel.pdfInkStrokeColorHex = hex
+            }
           }
         }
 
-        Button("샘플 벡터 서명 획 추가") {
+        inspectorButton("샘플 벡터 서명 획 추가", palette: palette) {
           viewModel.addInkStrokeToActivePDFPage(points: [
             PDFInkPoint(x: 90, y: 140),
             PDFInkPoint(x: 145, y: 168),
@@ -1337,48 +1224,44 @@ struct RightContextInspectorView: View {
             PDFInkPoint(x: 265, y: 162),
           ])
         }
-        .buttonStyle(.bordered).controlSize(.small)
 
-        Button("현재 페이지 자유곡선 지우기 (\(activePageStrokes.count)건)") {
+        inspectorButton("현재 페이지 자유곡선 지우기 (\(activePageStrokes.count)건)", palette: palette) {
           viewModel.clearInkStrokesOnActivePDFPage()
         }
-        .buttonStyle(.bordered).controlSize(.small)
         .disabled(activePageStrokes.isEmpty)
       }
 
       Divider()
 
-      VStack(alignment: .leading, spacing: 6) {
-        Text("민감 정보 리댁션 (영구 마스킹)")
+      VStack(alignment: .leading, spacing: 8) {
+        Text("민감 정보 영구 마스킹")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "마스킹할 구문 입력",
           text: $viewModel.pdfRedactionPhraseDraft,
           width: nil,
           palette: palette,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
-        Button("민감 구문 영구 리댁션") {
+        inspectorButton("영구 마스킹 실행", isProminent: true, palette: palette) {
           viewModel.redactSensitiveTextOnActivePDF()
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
 
         Divider()
 
-        Text("양식 필드 (AcroForm)")
+        Text("양식 필드")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 6) {
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "필드명",
             text: $viewModel.pdfFormFieldNameDraft,
             width: 78,
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          LavenderTextFieldPill(
+          FlatUnderlineTextField(
             placeholder: "기본값",
             text: $viewModel.pdfFormFieldValueDraft,
             width: 78,
@@ -1386,37 +1269,31 @@ struct RightContextInspectorView: View {
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
         }
-        HStack(spacing: 6) {
-          Button("텍스트 필드 추가") {
+        HStack(spacing: 10) {
+          inspectorButton("텍스트 필드 추가", palette: palette) {
             viewModel.addFormFieldToActivePDF(isCheckbox: false)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
-          Button("체크박스 추가") {
+          inspectorButton("체크박스 추가", palette: palette) {
             viewModel.addFormFieldToActivePDF(isCheckbox: true)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
         }
 
         Divider()
 
-        Text("책갈피 목차 관리 (Bookmark Outline)")
+        Text("책갈피 목차 관리")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        HStack(spacing: 6) {
-          LavenderTextFieldPill(
+        HStack(spacing: 8) {
+          FlatUnderlineTextField(
             placeholder: "책갈피 제목",
             text: $viewModel.bookmarkTitleDraft,
             width: nil,
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          Button("책갈피 추가") {
+          inspectorButton("추가", isProminent: true, palette: palette) {
             viewModel.addBookmarkToActivePDF()
           }
-          .buttonStyle(.bordered)
-          .controlSize(.small)
         }
       }
     }

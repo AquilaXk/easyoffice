@@ -449,7 +449,7 @@ public struct WorkspaceHubCatalog: Sendable {
             masterLayout: .titleSlide,
             elements: [
               SlideCanvasElement(
-                title: "핵심 가치 배너", bodyText: "Signature Lavender #5C6BC0", x: 380, y: 245,
+                title: "핵심 가치 배너", bodyText: "문서 · 시트 · 슬라이드 · PDF 통합 편집 환경", x: 380, y: 245,
                 width: 240, height: 155, kind: .roundedRectangleShape)
             ]
           ),
