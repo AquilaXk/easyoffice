@@ -28,15 +28,18 @@ public enum XMLSanitizer {
   private static func scanUnsafeXMLBuffer(_ buffer: UnsafeBufferPointer<UInt8>) throws {
     let count = buffer.count
     guard count >= 8, let base = buffer.baseAddress else { return }
-    let ltMask = broadcastByte(0x3C)  // '<'
+    let ltMask = broadcastByte(UInt8(ascii: "<"))
     var idx = 0
     while idx <= count - 8 {
       let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
-      if !hasZeroByte(word ^ ltMask) {
+      let diff = word ^ ltMask
+      let matchBits = (diff &- swarLoMask) & ~diff & swarHiMask
+      if matchBits == 0 {
         idx += 8
         continue
       }
-      if buffer[idx] == 0x3C && buffer[idx + 1] == 0x21 {  // "<!"
+      idx += matchBits.trailingZeroBitCount >> 3
+      if idx + 1 < count && buffer[idx] == UInt8(ascii: "<") && buffer[idx + 1] == UInt8(ascii: "!") {
         var kw = idx + 2
         while kw < count
           && (buffer[kw] == 0x20 || buffer[kw] == 0x09 || buffer[kw] == 0x0A || buffer[kw] == 0x0D)
@@ -97,11 +100,11 @@ public enum XMLSanitizer {
     return copy.withUTF8 { buf in
       let count = buf.count
       guard let base = buf.baseAddress else { return input }
-      let ampMask = broadcastByte(0x26)   // '&'
-      let ltMask = broadcastByte(0x3C)    // '<'
-      let gtMask = broadcastByte(0x3E)    // '>'
-      let quotMask = broadcastByte(0x22)  // '"'
-      let aposMask = broadcastByte(0x27)  // '\''
+      let ampMask = broadcastByte(UInt8(ascii: "&"))
+      let ltMask = broadcastByte(UInt8(ascii: "<"))
+      let gtMask = broadcastByte(UInt8(ascii: ">"))
+      let quotMask = broadcastByte(UInt8(ascii: "\""))
+      let aposMask = broadcastByte(UInt8(ascii: "'"))
 
       var idx = 0
       var spanStart = 0
@@ -158,14 +161,20 @@ public enum XMLSanitizer {
     }
   }
 
+  private static let ampEntityBytes = Array("&amp;".utf8)
+  private static let ltEntityBytes = Array("&lt;".utf8)
+  private static let gtEntityBytes = Array("&gt;".utf8)
+  private static let quotEntityBytes = Array("&quot;".utf8)
+  private static let aposEntityBytes = Array("&apos;".utf8)
+
   @inline(__always)
   private static func appendEscapedEntity(for byte: UInt8, into out: inout [UInt8]) {
     switch byte {
-    case 0x26: out.append(contentsOf: [0x26, 0x61, 0x6D, 0x70, 0x3B])         // &amp;
-    case 0x3C: out.append(contentsOf: [0x26, 0x6C, 0x74, 0x3B])               // &lt;
-    case 0x3E: out.append(contentsOf: [0x26, 0x67, 0x74, 0x3B])               // &gt;
-    case 0x22: out.append(contentsOf: [0x26, 0x71, 0x75, 0x6F, 0x74, 0x3B])   // &quot;
-    case 0x27: out.append(contentsOf: [0x26, 0x61, 0x70, 0x6F, 0x73, 0x3B])   // &apos;
+    case UInt8(ascii: "&"): out.append(contentsOf: ampEntityBytes)
+    case UInt8(ascii: "<"): out.append(contentsOf: ltEntityBytes)
+    case UInt8(ascii: ">"): out.append(contentsOf: gtEntityBytes)
+    case UInt8(ascii: "\""): out.append(contentsOf: quotEntityBytes)
+    case UInt8(ascii: "'"): out.append(contentsOf: aposEntityBytes)
     default: out.append(byte)
     }
   }

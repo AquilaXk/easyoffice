@@ -837,7 +837,7 @@ mod tests {
         for r in 1..=10u32 {
             for c in 0..6u32 {
                 if r == 5 && c == 2 {
-                    continue; // leave C5 empty
+                    continue;
                 }
                 let coord = PackedCellCoordinate::new(r - 1, c).unwrap().to_a1();
                 sheet
