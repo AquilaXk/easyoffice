@@ -1549,7 +1549,6 @@ public struct SheetEditorDetailPaneView: View {
 
     HStack(spacing: 0) {
       if includeRowHeader {
-        // Row Header with Bottom 4pt Drag Resize Handle & Active Row Highlight
         ZStack(alignment: .bottom) {
           Text("\(row)")
             .font(.system(size: 10, weight: .bold, design: .monospaced))

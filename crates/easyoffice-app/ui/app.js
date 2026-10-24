@@ -1,4 +1,3 @@
-// EasyOffice Cross-Platform Desktop Workspace Controller (Tauri v2 + Pure Rust Core)
 (function () {
   "use strict";
 
@@ -668,7 +667,6 @@
     updateSheetSelectionAndAggregates("C1");
     renderSlideDeck(0);
 
-    // Quick Access Toolbar actions
     const qatSave = document.getElementById("qat-save");
     if (qatSave) {
       qatSave.addEventListener("click", () => {
@@ -739,7 +737,6 @@
       });
     }
 
-    // Sheet interactive cells & formula bar
     document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
       td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
       td.addEventListener("input", () => {
@@ -789,7 +786,6 @@
       });
     }
 
-    // Slide Studio interactive controls
     const btnAddSlide = document.getElementById("btn-add-slide");
     if (btnAddSlide) {
       btnAddSlide.addEventListener("click", () => {
@@ -826,7 +822,6 @@
       });
     }
 
-    // PDF Studio interactive controls
     const btnPdfRotate = document.getElementById("btn-pdf-rotate");
     if (btnPdfRotate) {
       btnPdfRotate.addEventListener("click", () => {

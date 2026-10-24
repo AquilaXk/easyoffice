@@ -1616,7 +1616,6 @@ public struct PDFStudioDetailPaneView: View {
           }
         }
 
-        // Active Page Interactive AcroForm Fields
         if !pageFormFields.isEmpty {
           VStack(alignment: .leading, spacing: 5) {
             Text("AcroForm 전자 양식 필드 (\(pageFormFields.count)필드)")

@@ -315,14 +315,12 @@ final class EasyOfficeTests: XCTestCase {
 
   @MainActor
   func testEleventhAuditBitLevelPerformanceAndCommercialUXParity() throws {
-    // 1. Adler-32 NMAX=5552 deferred modulo calculator (RFC 1950 ground-truth vector "Wikipedia" -> 0x11E60398)
     XCTAssertEqual(Adler32Calculator.nmax, 5_552)
     XCTAssertEqual(Adler32Calculator.modulo, 65_521)
     XCTAssertEqual(Adler32Calculator.compute(for: Data()), 1)
     let wikiData = Data("Wikipedia".utf8)
     XCTAssertEqual(Adler32Calculator.compute(for: wikiData), 0x11E6_0398)
 
-    // Verify multi-NMAX chunk (> 11,104 bytes) against independent byte-by-byte RFC 1950 reference oracle
     var largePayload = Data(count: 12_345)
     for i in 0..<largePayload.count {
       largePayload[i] = UInt8((i &* 73 &+ 19) & 0xFF)
@@ -350,7 +348,6 @@ final class EasyOfficeTests: XCTestCase {
       Adler32Calculator.verifyZlibTrailer(in: fakeZlibStream, decompressed: wikiData)
     )
 
-    // 2. SWAR 8-byte UInt64 ASCII UTF-16LE fast path + mixed Korean/ASCII fallback
     let asciiSample = "Root Entry/Workbook/Section0/BodyText_2026_Commercial_FastPath"
     var asciiUTF16LE = Data()
     for scalar in asciiSample.utf16 {
@@ -377,7 +374,6 @@ final class EasyOfficeTests: XCTestCase {
     )
     XCTAssertEqual(decodedMixed, mixedSample)
 
-    // 3. OLE2SectorTable compact UInt64 bitset chain traversal and cycle refusal
     let validSectorTable = OLE2SectorTable(entries: [
       1, 2, 3, OLE2SectorTable.endOfChain,
     ])
@@ -394,7 +390,6 @@ final class EasyOfficeTests: XCTestCase {
       }
     }
 
-    // 4. FastCellBitset 1,024-cell inline bitset & zero-clone cross-sheet formula evaluation
     var cellBits = FastCellBitset()
     let c0 = PackedCellCoordinate(row: 0, column: 0)
     let cMaxInline = PackedCellCoordinate(row: 63, column: 15)
@@ -423,7 +418,6 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(sheet1.evaluate(at: "A1"), .number(550))
     XCTAssertEqual(sheet1.evaluate(at: "B1"), .error("#REF!"))
 
-    // 5. WorkspaceViewModel.sheetSelectionStatusSummary live numeric aggregation
     let vm = WorkspaceViewModel()
     vm.openNewSampleTab(for: .sheet)
     vm.selectSheetCellOrRange(primaryCell: "B2", rangeNotation: "B2:D2")
@@ -433,14 +427,12 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertTrue(statusSummary.contains("개수"), "Expected 개수 in \(statusSummary)")
     XCTAssertTrue(statusSummary.contains("최대"), "Expected 최대 in \(statusSummary)")
 
-    // 6. WorkspaceViewModel.closeOtherTabs(keeping:)
     XCTAssertGreaterThanOrEqual(vm.openTabs.count, 3)
     let keptTabID = try XCTUnwrap(vm.activeTabID)
     vm.closeOtherTabs(keeping: keptTabID)
     XCTAssertTrue(vm.openTabs.contains(where: { $0.id == keptTabID }))
     XCTAssertTrue(vm.openTabs.allSatisfy { $0.id == keptTabID || $0.isPinned })
 
-    // 7. Interactive ruler padding clamping & outline level promote/demote
     vm.openNewSampleTab(for: .document)
     vm.setDocumentHorizontalPadding(8.0)
     XCTAssertEqual(vm.documentHorizontalPadding, 24.0, accuracy: 1e-6)
@@ -465,7 +457,6 @@ final class EasyOfficeTests: XCTestCase {
       XCTFail("Expected active document tab")
     }
 
-    // 8. On-page AcroForm field value creation & update on PDF tab
     vm.openNewSampleTab(for: .pdf)
     vm.updatePDFFormFieldValue(fieldName: "승인자 성명", value: "김민수")
     if case .pdf(let pdfAfterCreate) = vm.activeTab?.payload {

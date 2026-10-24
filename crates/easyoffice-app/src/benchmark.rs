@@ -148,7 +148,6 @@ fn lz77_byte_scan_baseline(input: &[u8]) -> u32 {
 pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport {
     let rounds = iterations.clamp(3, 25);
 
-    // 1. CRC-32 Slicing-by-8 (64 KiB * 16 passes = 1 MiB per round)
     let mut crc_payload = Vec::with_capacity(65_536);
     while crc_payload.len() < 65_536 {
         crc_payload.extend_from_slice(
@@ -187,7 +186,6 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         }
     }
 
-    // 2. DEFLATE + Adler-32 Zlib Round-Trip (32 KiB OOXML document stream)
     let mut ooxml_payload = Vec::with_capacity(32_768);
     while ooxml_payload.len() < 32_768 {
         ooxml_payload.extend_from_slice(
@@ -226,7 +224,6 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         }
     }
 
-    // 3. SWAR UTF-16LE + Single-Pass XML Entity Unescape (16 KiB bilingual stream)
     let sample_text =
         "EasyOffice Desktop Suite 행정안전부 표준 전자문서 호환성 검증 A&B <C> \"D\" 'E' "
             .repeat(220);
@@ -259,7 +256,6 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         }
     }
 
-    // 4. Sheet Formula Engine (200 interdependent cells across 4 recalculation passes)
     let mut sheet = SheetEngine::new("BenchSheet");
     let mut coords = Vec::with_capacity(200);
     for r in 1..=50 {

@@ -379,7 +379,6 @@ impl LegacyOle2Codec {
         stream.extend_from_slice(&(payload.sheet_name.encode_utf16().count() as u16).to_le_bytes());
         stream.extend_from_slice(&sheet_name_utf16);
 
-        // Collect SST strings for non-numeric, non-formula text cells in O(1) via HashMap
         let mut sst_strings: Vec<String> = Vec::new();
         let mut sst_index_map: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();

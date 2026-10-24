@@ -314,7 +314,6 @@ public struct DocumentHorizontalRulerView: View {
           }
         }
 
-        // Interactive Indent & Margin Markers (▽ First-Line Indent, △ Left Margin/Indent, ▽ Right Margin)
         Text("▽")
           .font(.system(size: 9, weight: .bold))
           .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
