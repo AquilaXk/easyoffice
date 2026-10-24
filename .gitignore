@@ -4,9 +4,10 @@
 .LSOverride
 ._*
 
-# Swift Package Manager & Xcode build artifacts
+# Swift Package Manager, Rust Cargo & Xcode build artifacts
 .build/
 .swiftpm/
+/target/
 DerivedData/
 build/
 *.xcodeproj/project.xcworkspace/

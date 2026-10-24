@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EasyOffice",
+  "version": "1.0.0",
+  "identifier": "com.easyoffice.desktop",
+  "build": {
+    "frontendDist": "./ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "EasyOffice — Cross-Platform All-in-One Office Suite",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1120,
+        "minHeight": 740,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "msi", "nsis"],
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": null
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "language": ["ko-KR", "en-US"]
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Korean", "English"]
+      }
+    }
+  }
+}

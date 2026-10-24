@@ -65,6 +65,12 @@ EasyOffice/
 │       ├── SmartProductivityToolsTests.swift      # 일괄 변환, 오프라인 스마트 보조 도구 및 보안 감사기 검증
 │       ├── WorkspaceUIParityTests.swift           # 스플릿 뷰, 7x5 리본 매트릭스, WCAG AA 및 접근성 검증
 │       └── CommercialParityBenchmarkTests.swift   # 20종 포맷 라운드트립 매트릭스 및 비트 수준 처리량 벤치마크
+├── Cargo.toml                                     # Rust 멀티 크레이트 워크스페이스 매니페스트 (macOS / Windows 공통 코어)
+├── crates/
+│   ├── easyoffice-formats/                        # 20종 포맷 시그니처 검증, ZIP/OLE2/HWP5/XML 보안 가드, CSV/MD/PDF 코덱
+│   ├── easyoffice-sheet/                          # 64-bit 패킹 셀 좌표, 순환 참조 탐지 수식 파서/평가기, 피벗 요약 엔진
+│   ├── easyoffice-layout/                         # 시그니처 라벤더 토큰, A4 다단/원고지, KS X 6101 공문서, 슬라이드/PDF 레이아웃
+│   └── easyoffice-app/                            # Tauri v2 IPC 라우터, 크로스플랫폼 번들 설정(tauri.conf.json), WebUI(ui/)
 ├── scripts/
 │   ├── check-repo-hygiene.mjs                     # 외부 서비스명·AI 흔적·필수 문서 무결성 가드
 │   └── package-macos-release.sh                   # EasyOffice.app / .dmg / .zip / SHA256SUMS 생성기
@@ -78,14 +84,35 @@ EasyOffice/
     ├── PULL_REQUEST_TEMPLATE.md                   # 자기완결 PR 표준 템플릿
     ├── ISSUE_TEMPLATE/                            # Epic / Task / Bug 이슈 폼 템플릿
     └── workflows/
-        ├── ci.yml                                 # 위생 가드 + macOS 빌드 + 테스트 게이트 (verify)
+        ├── ci.yml                                 # 위생 가드 + macOS Swift/Rust 빌드 + 테스트 게이트 (verify)
         ├── automerge.yml                          # automerge 라벨 기반 스쿼시 병합 및 이슈 자동 종료
         └── release.yml                            # 태그 기반 macOS .app/.dmg/.zip GitHub Release 발행
 ```
 
 ---
 
-## 2. 보안 및 Fail-Closed 경계 (Security Boundaries)
+## 2. Mac·Windows 크로스플랫폼 Rust 멀티 크레이트 코어 및 Tauri v2 데스크톱 아키텍처
+
+macOS와 Windows 양대 데스크톱 환경에서 동일한 문서 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 불변식을 공유하기 위해 외부 런타임 의존성이 없는 순수 Rust 표준 라이브러리(`std`) 기반 4개 워크스페이스 크레이트와 Tauri v2 데스크톱 셸 계층을 함께 제공합니다.
+
+1. **`crates/easyoffice-formats` (20종 포맷 레지스트리·컨테이너 보안 가드·직렬화 코덱)**:
+   - 20종 `DocumentFormat` 및 `ContainerFamily` 메타데이터, 확장자-매직 바이트(`PK\x03\x04`, `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1`, `%PDF-`, `{\rtf1`, UTF-8) 교차 검증(`FormatDetector::detect`, 최대 입력 `512 MiB`)을 수행합니다.
+   - `ZipSecurityGuard::validate_archive_entries`는 엔트리 수(`4,096`), 단일 엔트리(`128 MiB`), 전체 해제 용량(`512 MiB`), 압축비(`100:1`), 경로 순회(`..`, 선행 `/`, `\`, NUL 바이트, Windows 드라이브 문자 `C:`)를 검증합니다.
+   - `Ole2SecurityGuard`는 512바이트 섹터 정렬, DIFAT 헤더 상한(`109`), `HashSet<u32>` 기반 FAT 체인 순환 참조 탐지, HWP 5.0 `FileHeader` 암호화(`0x02`)·배포용 문서(`0x04`) 비트 차단을 수행합니다.
+   - `XmlSanitizer`(`<!ENTITY` 및 외부 DTD `SYSTEM`/`PUBLIC`/`[` 차단), `CsvCodec`(RFC 4180 상태 기계), `CommonMarkCodec`, `PdfSerializer`(`%PDF-1.4` 바이트 오프셋 `xref` 직렬화)를 포함합니다.
+2. **`crates/easyoffice-sheet` (64-bit 패킹 좌표·재귀 하강 수식 파서·$O(V+E)$ 평가기)**:
+   - `PackedCellCoordinate`는 `(row: 32bit, col: 32bit)`를 단일 `u64`에 패킹하고(`MAX_ROWS = 1,000,000`, `MAX_COLS = 16,384`), `CellRange::expand`는 단일 범위 확장 상한(`100,000`셀)을 강제합니다.
+   - 단항 `+`/`-`, 후위 `%`, 산술·비교·문자열 결합(`&`) 연산자, 순환 참조 탐지(`FormulaError::Cycle`) 및 재귀 상한(`MAX_RECURSION_DEPTH = 64`), ECMA-376 호환 `ISBLANK`·`SUM`·`AVERAGE`·`IF`·`IFERROR`·`SQRT`·`POWER`·`MOD`·`CONCAT`·`VLOOKUP`·`INDEX`·`MATCH`·`NPV`·`STDEV`·`MEDIAN` 등 내장 함수와 `PivotTableSummary` 집계를 제공합니다.
+3. **`crates/easyoffice-layout` (시그니처 라벤더 토큰·문서/공문서/슬라이드/PDF 레이아웃)**:
+   - `SignatureLavenderPalette`(`#5C6BC0` Primary Accent, `#F7F8FC` Light Canvas, `#141724` Dark Canvas)와 플랫폼 렌더러 식별자(`MacOsWkWebView` / `WindowsWebView2`)를 정의합니다.
+   - `DocumentPageLayout`(A4 가로/세로 스왑, 1~4단 다단 폭 계산, 200자 원고지 그리드, KS X 6101 행정 공문서 헤더 및 결재란), `SlideStageLayout`(`840 × 472.5 pt` 16:9 스테이지 및 상단 본문·하단 오브젝트 비겹침 영역 `y >= 240pt`), `PdfStudioLayout`(`y = 804..452` 가시 좌표 및 결재 날인 박스)을 계산합니다.
+4. **`crates/easyoffice-app` (Tauri v2 IPC 라우터·CLI 자체 검증·WebUI 셸)**:
+   - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `compute_layout`, `audit_security` 명령을 결정론적 JSON 페이로드로 라우팅하며, `cargo run -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식을 자체 검증합니다.
+   - `tauri.conf.json`은 macOS(`.app`, `.dmg` — `WKWebView`)와 Windows(`.msi`, `.nsis` — `WebView2` `downloadBootstrapper`) 번들 타겟을 정의하고, `ui/{index.html,styles.css,app.js}`는 `Cmd`/`Ctrl` 단축키 자동 매핑과 한글 두벌식 IME 조합(`compositionstart`/`compositionupdate`/`compositionend`) 무결성을 지원합니다.
+
+---
+
+## 3. 보안 및 Fail-Closed 경계 (Security Boundaries)
 
 1. **입구 시그니처 검증 (`FormatDetector`)**:
    - 모든 파일 입력은 확장자와 무관하게 바이트 헤더(`PK\x03\x04`, `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1`, `%PDF-`, UTF-8 유효성)를 대조합니다.
@@ -101,7 +128,7 @@ EasyOffice/
 
 ---
 
-## 3. macOS 릴리스 패키징 파이프라인 (`scripts/package-macos-release.sh`)
+## 4. macOS 릴리스 패키징 파이프라인 (`scripts/package-macos-release.sh`)
 
 GitHub Release 발행 시 `scripts/package-macos-release.sh`는 다음 단계를 결정론적으로 수행합니다:
 1. `swift build -c release`로 최적화된 네이티브 실행 바이너리를 컴파일합니다.

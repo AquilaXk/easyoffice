@@ -845,6 +845,7 @@ public struct DocumentEditorDetailPaneView: View {
                       d.sections = [DocumentSectionLayout(paperSize: d.paperSize)]
                     }
                     d.sections[0].columnCount = cols
+                    viewModel.recordUndoSnapshot(for: tabID)
                     viewModel.openTabs[idx].payload = .document(d)
                     viewModel.openTabs[idx].isModified = true
                   }
@@ -867,6 +868,7 @@ public struct DocumentEditorDetailPaneView: View {
                     d.sections = [DocumentSectionLayout(paperSize: d.paperSize)]
                   }
                   d.sections[0].orientation = .portrait
+                  viewModel.recordUndoSnapshot(for: tabID)
                   viewModel.openTabs[idx].payload = .document(d)
                   viewModel.openTabs[idx].isModified = true
                 }
@@ -880,6 +882,7 @@ public struct DocumentEditorDetailPaneView: View {
                     d.sections = [DocumentSectionLayout(paperSize: d.paperSize)]
                   }
                   d.sections[0].orientation = .landscape
+                  viewModel.recordUndoSnapshot(for: tabID)
                   viewModel.openTabs[idx].payload = .document(d)
                   viewModel.openTabs[idx].isModified = true
                 }

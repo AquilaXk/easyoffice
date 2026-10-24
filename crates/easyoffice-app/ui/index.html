@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EasyOffice — Cross-Platform All-in-One Office Suite</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body data-theme="light">
+  <div class="workspace-shell">
+    <header class="top-titlebar" role="banner">
+      <div class="qat-group" aria-label="빠른 실행 도구 모음">
+        <button id="btn-home-hub" class="pill-btn active" type="button">홈 허브</button>
+        <button id="btn-undo" class="pill-btn" type="button" title="실행 취소">실행 취소</button>
+        <button id="btn-redo" class="pill-btn" type="button" title="다시 실행">다시 실행</button>
+        <button id="btn-save" class="pill-btn" type="button" title="저장">저장</button>
+      </div>
+
+      <nav id="tab-strip" class="tab-strip" aria-label="열린 문서 탭">
+        <button class="doc-tab active" data-module="document" type="button">
+          <span class="badge badge-doc">DOC</span>
+          <span>연간_아키텍처_보고서.docx</span>
+        </button>
+        <button class="doc-tab" data-module="hwp" type="button">
+          <span class="badge badge-hwp">HWP</span>
+          <span>행정_표준_기안문.hwpx</span>
+        </button>
+        <button class="doc-tab" data-module="sheet" type="button">
+          <span class="badge badge-sheet">SHEET</span>
+          <span>분기_예산_시트.xlsx</span>
+        </button>
+        <button class="doc-tab" data-module="slide" type="button">
+          <span class="badge badge-slide">SLIDE</span>
+          <span>제품_전략_발표덱.pptx</span>
+        </button>
+        <button class="doc-tab" data-module="pdf" type="button">
+          <span class="badge badge-pdf">PDF</span>
+          <span>보안_감사_인증서.pdf</span>
+        </button>
+        <button id="btn-new-tab" class="pill-btn new-tab-btn" type="button" aria-label="새 문서 탭 추가">+</button>
+      </nav>
+
+      <div class="titlebar-actions">
+        <div class="search-capsule">
+          <input id="global-search-input" type="search" placeholder="통합 문서·명령 검색" aria-label="통합 검색" />
+          <span id="shortcut-hint" class="shortcut-badge">Cmd+F</span>
+        </div>
+        <button id="btn-theme-toggle" class="pill-btn" type="button">다크 모드</button>
+      </div>
+    </header>
+
+    <section class="context-ribbon" aria-label="컨텍스트 리본">
+      <div class="ribbon-categories" role="tablist">
+        <button class="ribbon-cat active" data-cat="home" type="button">홈</button>
+        <button class="ribbon-cat" data-cat="insert" type="button">삽입</button>
+        <button class="ribbon-cat" data-cat="layout" type="button">레이아웃</button>
+        <button class="ribbon-cat" data-cat="formulas" type="button">수식·데이터</button>
+        <button class="ribbon-cat" data-cat="module" type="button">모듈 전용</button>
+        <button class="ribbon-cat" data-cat="review" type="button">검토·보안</button>
+        <button class="ribbon-cat" data-cat="view" type="button">보기·창</button>
+      </div>
+      <div id="ribbon-command-strip" class="ribbon-commands">
+        <button class="cmd-btn" data-cmd="bold" type="button">굵게</button>
+        <button class="cmd-btn" data-cmd="italic" type="button">기울임</button>
+        <button class="cmd-btn" data-cmd="columns-2" type="button">2단 조판</button>
+        <button class="cmd-btn" data-cmd="manuscript-grid" type="button">200자 원고지</button>
+        <button class="cmd-btn" data-cmd="batch-converter" type="button">일괄 변환</button>
+        <button class="cmd-btn" data-cmd="smart-assistant" type="button">스마트 보조 도구</button>
+        <button class="cmd-btn" data-cmd="security-audit" type="button">보안 감사</button>
+      </div>
+    </section>
+
+    <main class="main-stage">
+      <aside id="left-navigator" class="left-navigator" aria-label="좌측 구조 내비게이터">
+        <h2 class="pane-heading">문서 구조 및 필터</h2>
+        <div class="recent-filter-bar" role="group" aria-label="포맷 필터">
+          <button class="filter-chip active" data-filter="전체" type="button">전체</button>
+          <button class="filter-chip" data-filter="DOCX" type="button">DOCX</button>
+          <button class="filter-chip" data-filter="HWP/HWPX" type="button">HWP/HWPX</button>
+          <button class="filter-chip" data-filter="XLSX" type="button">XLSX</button>
+          <button class="filter-chip" data-filter="PPTX" type="button">PPTX</button>
+          <button class="filter-chip" data-filter="PDF" type="button">PDF</button>
+          <button class="filter-chip" data-filter="ODF" type="button">ODF</button>
+        </div>
+        <ul id="outline-list" class="outline-list">
+          <li>1. 시스템 개요 (OOXML / ODF / HWPX)</li>
+          <li>2. Fail-Closed 컨테이너 보안 경계</li>
+          <li>3. 결정론적 수식 및 피벗 엔진</li>
+          <li>4. ISO 32000 PDF 스튜디오</li>
+        </ul>
+      </aside>
+
+      <section id="editor-canvas" class="editor-canvas" aria-label="중앙 편집 캔버스">
+        <div class="editor-toolbar">
+          <span id="active-module-title" class="module-indicator">문서 및 HWP/HWPX 조판 편집기</span>
+          <span id="ime-status-pill" class="ime-pill">IME 대기 (UTF-8)</span>
+        </div>
+
+        <article id="document-surface" class="a4-sheet" contenteditable="true" spellcheck="false">
+          <h1>EasyOffice 크로스플랫폼 올인원 오피스</h1>
+          <p>OOXML (ECMA-376), ODF (ISO/IEC 26300), HWP 5.0 Binary (OLE2 CFBF), HWPX (KS X 6101 OWPML), PDF (ISO 32000), RFC 4180 CSV, CommonMark Markdown 표준을 단일 워크스페이스에서 처리합니다.</p>
+        </article>
+      </section>
+
+      <aside id="right-inspector" class="right-inspector" aria-label="우측 세부 속성 인스펙터">
+        <h2 class="pane-heading">세부 속성 및 보안 감사</h2>
+        <div class="inspector-group">
+          <label>용지 규격</label>
+          <div class="inspector-value">A4 (595 × 842 pt)</div>
+        </div>
+        <div class="inspector-group">
+          <label>자간 / 장평</label>
+          <div class="inspector-value">자간 0% · 장평 100%</div>
+        </div>
+        <div class="inspector-group">
+          <label>컨테이너 보안 상태</label>
+          <div id="security-status-box" class="inspector-value status-safe">Fail-Closed 검증 통과 (ZIP / OLE2 / XML SAFE)</div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="bottom-statusbar" role="contentinfo">
+      <div class="status-left">
+        <span id="platform-badge" class="status-item">플랫폼 감지 중...</span>
+        <span id="format-spec-badge" class="status-item">OOXML (ECMA-376)</span>
+      </div>
+      <div class="status-right">
+        <span id="zoom-readout" class="status-item">100%</span>
+      </div>
+    </footer>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>
