@@ -274,11 +274,11 @@ public struct DocumentHorizontalRulerView: View {
           .fill(palette.cardSurface.swiftUIColor)
 
         Rectangle()
-          .fill(palette.selectedSurface.swiftUIColor.opacity(0.65))
+          .fill(palette.elevatedSurface.swiftUIColor.opacity(0.65))
           .frame(width: leftMarginPt, height: 24)
 
         Rectangle()
-          .fill(palette.selectedSurface.swiftUIColor.opacity(0.65))
+          .fill(palette.elevatedSurface.swiftUIColor.opacity(0.65))
           .frame(width: rightMarginPt, height: 24)
           .offset(x: totalWidth - rightMarginPt)
 
@@ -1537,7 +1537,7 @@ public struct DocumentEditorDetailPaneView: View {
                 let isHeader = rowIdx == 0 && table.hasHeaderRow
                 let cellBg =
                   isHeader
-                  ? palette.selectedSurface.swiftUIColor
+                  ? palette.elevatedSurface.swiftUIColor
                   : Color.clear
                 HStack(spacing: 4) {
                   if isPrimaryPane && !viewModel.isCanvasSnapshotMode {
@@ -1604,32 +1604,26 @@ public struct DocumentEditorDetailPaneView: View {
   private func tableCellBorderOverlay(style: TableCellBorderStyle, color: Color) -> some View {
     switch style {
     case .solid:
-      Rectangle().stroke(color, lineWidth: 0.5)
+      Color.clear.border(color, width: 0.5)
     case .doubleLine:
       ZStack {
-        Rectangle().stroke(color, lineWidth: 0.6)
-        Rectangle().inset(by: 1.5).stroke(color, lineWidth: 0.6)
+        Color.clear.border(color, width: 0.6)
+        Color.clear.padding(1.5).border(color, width: 0.6)
       }
     case .dashed:
-      Rectangle().stroke(color, style: StrokeStyle(lineWidth: 0.6, dash: [4, 3]))
-    case .diagonalDown:
+      Color.clear.border(color.opacity(0.55), width: 0.6)
+    case .diagonalDown, .diagonalUp:
       GeometryReader { geo in
         ZStack {
-          Rectangle().stroke(color, lineWidth: 0.5)
+          Color.clear.border(color, width: 0.5)
           Path { p in
-            p.move(to: .zero)
-            p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height))
-          }
-          .stroke(color.opacity(0.65), lineWidth: 0.6)
-        }
-      }
-    case .diagonalUp:
-      GeometryReader { geo in
-        ZStack {
-          Rectangle().stroke(color, lineWidth: 0.5)
-          Path { p in
-            p.move(to: CGPoint(x: 0, y: geo.size.height))
-            p.addLine(to: CGPoint(x: geo.size.width, y: 0))
+            if style == .diagonalDown {
+              p.move(to: .zero)
+              p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height))
+            } else {
+              p.move(to: CGPoint(x: 0, y: geo.size.height))
+              p.addLine(to: CGPoint(x: geo.size.width, y: 0))
+            }
           }
           .stroke(color.opacity(0.65), lineWidth: 0.6)
         }

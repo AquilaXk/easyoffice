@@ -849,7 +849,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
 
     let bench_report = run_deterministic_benchmarks(5);
-    if !bench_report.all_equivalent || bench_report.suites.len() != 4 {
+    if !bench_report.all_equivalent || bench_report.suites.len() != 5 {
         return Err(EasyOfficeError::CorruptedContainer(
             "엔진 저수준 최적화 벤치마크 동등성 검증 실패".to_string(),
         ));

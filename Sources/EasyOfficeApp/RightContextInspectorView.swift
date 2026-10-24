@@ -18,13 +18,26 @@ struct RightContextInspectorView: View {
     action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      Text(title)
-        .font(.system(size: 10.5, weight: isProminent ? .semibold : .medium))
-        .foregroundStyle(
-          isProminent
-            ? EasyOfficeDesignTokens.brand600.swiftUIColor
-            : palette.primaryText.swiftUIColor
-        )
+      HStack(spacing: 4) {
+        Text(title)
+          .font(.system(size: 10.5, weight: isProminent ? .semibold : .medium))
+          .foregroundStyle(
+            isProminent
+              ? EasyOfficeDesignTokens.brand600.swiftUIColor
+              : palette.primaryText.swiftUIColor
+          )
+          .lineLimit(1)
+        Spacer(minLength: 2)
+        Image(systemName: "chevron.right")
+          .font(.system(size: 8.5, weight: .semibold))
+          .foregroundStyle(
+            isProminent
+              ? EasyOfficeDesignTokens.brand600.swiftUIColor
+              : palette.secondaryText.swiftUIColor.opacity(0.6)
+          )
+      }
+      .padding(.vertical, 3)
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
   }
@@ -240,14 +253,12 @@ struct RightContextInspectorView: View {
 
       Divider()
 
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 12) {
-          inspectorButton("변경 추적 전환", palette: palette) {
-            viewModel.executeRibbonCommand("\(modulePrefix)-review-track")
-          }
-          inspectorButton("단 나누기 전환", palette: palette) {
-            viewModel.executeRibbonCommand("\(modulePrefix)-layout-columns")
-          }
+      VStack(alignment: .leading, spacing: 6) {
+        inspectorButton("변경 추적 전환", palette: palette) {
+          viewModel.executeRibbonCommand("\(modulePrefix)-review-track")
+        }
+        inspectorButton("단 나누기 전환", palette: palette) {
+          viewModel.executeRibbonCommand("\(modulePrefix)-layout-columns")
         }
         inspectorButton("용지 방향 전환", palette: palette) {
           viewModel.executeRibbonCommand("\(modulePrefix)-layout-orient")

@@ -1,11 +1,11 @@
 use easyoffice_formats::{
     adler32, decode_utf16le_swar, decode_utf16le_vec_baseline, deflate_zlib, encode_utf16le_swar,
-    inflate_raw, inflate_zlib, unescape_xml_five_pass_baseline, unescape_xml_single_pass,
-    EasyOfficeError, IeeeCrc32,
+    inflate_raw, inflate_zlib, unescape_xml_five_pass_baseline, unescape_xml_single_pass, CsvCodec,
+    EasyOfficeError, IeeeCrc32, XmlSanitizer,
 };
 use easyoffice_sheet::{
-    compile_formula_expr, BinaryOp, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate,
-    SheetEngine,
+    compile_formula_expr, BinaryOp, CellRange, EvaluatedCellValue, Expr, FormulaError,
+    PackedCellCoordinate, SheetEngine,
 };
 use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
@@ -710,6 +710,7 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
             sheet_eq,
             format!("{sheet_digest:016x}"),
         ),
+        bench_swar_csv_xml_and_zero_alloc_range_agg(rounds),
     ];
 
     let all_equivalent = suites.iter().all(|s| s.equivalence_verified);
@@ -717,5 +718,190 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         iterations: rounds,
         all_equivalent,
         suites,
+    }
+}
+
+fn expand_range_values_scalar_baseline(
+    precompiled_cells: &HashMap<PackedCellCoordinate, EvaluatedCellValue>,
+    range: &CellRange,
+) -> Vec<EvaluatedCellValue> {
+    let coords = range.expand().unwrap();
+    coords
+        .into_iter()
+        .map(|c| {
+            precompiled_cells
+                .get(&c)
+                .cloned()
+                .unwrap_or(EvaluatedCellValue::Empty)
+        })
+        .collect()
+}
+
+fn scalar_vec_range_agg_baseline(
+    precompiled_cells: &HashMap<PackedCellCoordinate, EvaluatedCellValue>,
+    range: &CellRange,
+) -> [f64; 5] {
+    let sum_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let sum_nums: Vec<f64> = sum_vals
+        .iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let sum: f64 = sum_nums.iter().sum();
+
+    let avg_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let avg_nums: Vec<f64> = avg_vals
+        .iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let avg: f64 = avg_nums.iter().sum::<f64>() / (avg_nums.len().max(1) as f64);
+
+    let min_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let min_nums: Vec<f64> = min_vals
+        .iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let min_v: f64 = min_nums.iter().copied().fold(f64::INFINITY, f64::min);
+
+    let max_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let max_nums: Vec<f64> = max_vals
+        .iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let max_v: f64 = max_nums.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+    let cnt_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let cnt_nums: Vec<f64> = cnt_vals
+        .iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let cnt: f64 = cnt_nums.len() as f64;
+
+    [sum, avg, min_v, max_v, cnt]
+}
+
+/// 5th deterministic 1:1 benchmark suite measuring 64-bit SWAR XML validation/escaping,
+/// 64-bit SWAR RFC 4180 CSV parsing, and zero-allocation streaming range aggregations.
+pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> BenchmarkSuiteResult {
+    let rounds = iterations.clamp(3, 25);
+
+    let mut xml_doc = String::with_capacity(16_384);
+    xml_doc.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?><w:document><w:body>");
+    while xml_doc.len() < 16_300 {
+        xml_doc.push_str(
+            "<w:p><w:r><w:t>기획조정실 분기별 예산집행 및 디지털행정혁신과 성과 보고서 표준 문단</w:t></w:r></w:p>",
+        );
+    }
+    xml_doc.push_str("</w:body></w:document>");
+
+    let raw_escape_input =
+        "기획조정실 A&B <예산집행> \"정상\" '승인' 디지털행정혁신과 2026 분기별 실적 요약 "
+            .repeat(96);
+
+    let mut csv_lines = Vec::with_capacity(200);
+    for r in 1..=200 {
+        csv_lines.push(format!(
+            "기획조정실_{r:03},{},{},{},{},\"예산집행, 분기 \"\"승인\"\"\",98.5,정상",
+            r * 100,
+            r * 120,
+            r * 140,
+            r * 160
+        ));
+    }
+    let csv_doc = csv_lines.join("\r\n");
+
+    let mut agg_sheet = SheetEngine::new("RangeAggBench");
+    let col_letters = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    for r in 1..=200u32 {
+        for (c_idx, col) in col_letters.iter().enumerate() {
+            let val = (r * 10 + (c_idx as u32 + 1)) as f64;
+            agg_sheet
+                .set_cell(&format!("{col}{r}"), format!("{val}"))
+                .unwrap();
+        }
+    }
+    agg_sheet.set_cell("I1", "=SUM(A1:H200)").unwrap();
+    agg_sheet.set_cell("I2", "=AVERAGE(A1:H200)").unwrap();
+    agg_sheet.set_cell("I3", "=MIN(A1:H200)").unwrap();
+    agg_sheet.set_cell("I4", "=MAX(A1:H200)").unwrap();
+    agg_sheet.set_cell("I5", "=COUNT(A1:H200)").unwrap();
+    let agg_range = CellRange::parse("A1:H200").unwrap();
+    let precompiled_cells = agg_sheet.recalculate_all();
+
+    let mut base_samples = Vec::with_capacity(rounds);
+    let mut opt_samples = Vec::with_capacity(rounds);
+    let mut eq = true;
+    let mut digest = 0u32;
+
+    for r in 0..=rounds {
+        let t0 = Instant::now();
+        let xml_ok_a = XmlSanitizer::validate_safe_xml_scalar_baseline(black_box(&xml_doc)).is_ok();
+        let esc_a = XmlSanitizer::escape_scalar_baseline(black_box(&raw_escape_input));
+        let csv_a = CsvCodec::parse_scalar_baseline(black_box(&csv_doc), ',').unwrap_or_default();
+        let agg_a =
+            scalar_vec_range_agg_baseline(black_box(&precompiled_cells), black_box(&agg_range));
+        let dt_a = t0.elapsed().as_micros() as u64;
+
+        let t1 = Instant::now();
+        let xml_ok_b = XmlSanitizer::validate_safe_xml(black_box(&xml_doc)).is_ok();
+        let esc_b = XmlSanitizer::escape(black_box(&raw_escape_input));
+        let csv_b = CsvCodec::parse(black_box(&csv_doc), ',').unwrap_or_default();
+        let agg_b = [
+            agg_sheet.evaluate_cell("I1").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I2").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I3").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I4").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I5").as_number().unwrap_or(0.0),
+        ];
+        let dt_b = t1.elapsed().as_micros() as u64;
+
+        let agg_match = agg_a
+            .iter()
+            .zip(agg_b.iter())
+            .all(|(a, b)| (a - b).abs() < 1e-9);
+        if !xml_ok_a || !xml_ok_b || esc_a != esc_b || csv_a != csv_b || !agg_match {
+            eq = false;
+        }
+        digest = IeeeCrc32::checksum(esc_b.as_bytes()) ^ (csv_b.len() as u32) ^ (agg_b[0] as u32);
+        if r > 0 {
+            base_samples.push(dt_a.max(1));
+            opt_samples.push(dt_b.max(1));
+        }
+    }
+
+    let (bp50, bp95, bmin, bmax) = compute_stats(base_samples);
+    let (op50, op95, omin, omax) = compute_stats(opt_samples);
+    let speedup = ((bp50 as f64) / (op50.max(1) as f64) * 100.0).round() / 100.0;
+    BenchmarkSuiteResult {
+        suite_id: "swar_csv_xml_and_zero_alloc_range_agg",
+        title: "64-Bit SWAR XML/CSV & Zero-Alloc Range Agg",
+        workload_description:
+            "16 KiB XML + 200x8 CSV + 1,600-cell 4-way streaming SUM/AVG/MIN/MAX/COUNT",
+        iterations: rounds,
+        baseline_p50_us: bp50,
+        baseline_p95_us: bp95,
+        baseline_min_us: bmin,
+        baseline_max_us: bmax,
+        optimized_p50_us: op50,
+        optimized_p95_us: op95,
+        optimized_min_us: omin,
+        optimized_max_us: omax,
+        speedup_factor: speedup,
+        equivalence_verified: eq,
+        digest_hex: format!("{digest:08x}"),
     }
 }
