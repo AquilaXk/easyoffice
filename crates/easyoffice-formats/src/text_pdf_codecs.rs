@@ -143,8 +143,7 @@ impl CsvCodec {
                 let term = bytes[end_pos];
                 if term == b'"' {
                     return Err(EasyOfficeError::CorruptedContainer(
-                        "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다."
-                            .to_string(),
+                        "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다.".to_string(),
                     ));
                 } else if term == delim_b {
                     current_row.push(String::from(&input[pos..end_pos]));
@@ -764,4 +763,3 @@ mod tests {
         assert!(CsvCodec::parse("unquoted\"quote,val", ',').is_err());
     }
 }
-

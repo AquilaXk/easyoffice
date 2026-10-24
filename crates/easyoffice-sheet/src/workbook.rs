@@ -129,7 +129,10 @@ impl SheetEngine {
         for (&coord, raw) in &self.cells {
             let r = coord.row();
             if r >= start_row && r <= end_row {
-                row_map.entry(r).or_default().push((coord.col(), raw.clone()));
+                row_map
+                    .entry(r)
+                    .or_default()
+                    .push((coord.col(), raw.clone()));
             }
         }
 
@@ -443,7 +446,12 @@ impl ChartSeriesBuilder {
         let mut values = Vec::with_capacity(value_coords.len());
         for (&lc, &vc) in label_coords.iter().zip(value_coords.iter()) {
             labels.push(sheet.eval_coord_ctx(lc, &mut ctx, 0).to_display_string());
-            values.push(sheet.eval_coord_ctx(vc, &mut ctx, 0).as_number().unwrap_or(0.0));
+            values.push(
+                sheet
+                    .eval_coord_ctx(vc, &mut ctx, 0)
+                    .as_number()
+                    .unwrap_or(0.0),
+            );
         }
 
         let min_value = values.iter().copied().fold(f64::INFINITY, f64::min);

@@ -852,10 +852,8 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
         let xml_ok_a = XmlSanitizer::validate_safe_xml_scalar_baseline(black_box(&xml_doc)).is_ok();
         let esc_a = XmlSanitizer::escape_scalar_baseline(black_box(&raw_escape_input));
         let csv_a = CsvCodec::parse_scalar_baseline(black_box(&csv_doc), ',').unwrap_or_default();
-        let agg_a = scalar_vec_range_agg_baseline(
-            black_box(&precompiled_cells),
-            black_box(&agg_range),
-        );
+        let agg_a =
+            scalar_vec_range_agg_baseline(black_box(&precompiled_cells), black_box(&agg_range));
         let dt_a = t0.elapsed().as_micros() as u64;
 
         let t1 = Instant::now();
@@ -878,8 +876,7 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
         if !xml_ok_a || !xml_ok_b || esc_a != esc_b || csv_a != csv_b || !agg_match {
             eq = false;
         }
-        digest =
-            IeeeCrc32::checksum(esc_b.as_bytes()) ^ (csv_b.len() as u32) ^ (agg_b[0] as u32);
+        digest = IeeeCrc32::checksum(esc_b.as_bytes()) ^ (csv_b.len() as u32) ^ (agg_b[0] as u32);
         if r > 0 {
             base_samples.push(dt_a.max(1));
             opt_samples.push(dt_b.max(1));
@@ -892,7 +889,8 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
     BenchmarkSuiteResult {
         suite_id: "swar_csv_xml_and_zero_alloc_range_agg",
         title: "64-Bit SWAR XML/CSV & Zero-Alloc Range Agg",
-        workload_description: "16 KiB XML + 200x8 CSV + 1,600-cell 4-way streaming SUM/AVG/MIN/MAX/COUNT",
+        workload_description:
+            "16 KiB XML + 200x8 CSV + 1,600-cell 4-way streaming SUM/AVG/MIN/MAX/COUNT",
         iterations: rounds,
         baseline_p50_us: bp50,
         baseline_p95_us: bp95,

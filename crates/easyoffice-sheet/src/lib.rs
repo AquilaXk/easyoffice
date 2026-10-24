@@ -922,22 +922,10 @@ impl SheetEngine {
                                 .map_err(|_| FormulaError::Ref)?;
                             let c3 = PackedCellCoordinate::new(r, c + 3)
                                 .map_err(|_| FormulaError::Ref)?;
-                            fold_cell(
-                                self.eval_sheet_coord(Some(sheet), c0, ctx, depth + 1),
-                                0,
-                            )?;
-                            fold_cell(
-                                self.eval_sheet_coord(Some(sheet), c1, ctx, depth + 1),
-                                1,
-                            )?;
-                            fold_cell(
-                                self.eval_sheet_coord(Some(sheet), c2, ctx, depth + 1),
-                                2,
-                            )?;
-                            fold_cell(
-                                self.eval_sheet_coord(Some(sheet), c3, ctx, depth + 1),
-                                3,
-                            )?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c0, ctx, depth + 1), 0)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c1, ctx, depth + 1), 1)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c2, ctx, depth + 1), 2)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c3, ctx, depth + 1), 3)?;
                             c += 4;
                         }
                         while c <= max_c {
