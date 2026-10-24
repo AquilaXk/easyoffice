@@ -653,6 +653,149 @@ struct BatchConversionStudioHubView: View {
           }
         }
       }
+
+      batchPipelineSummarySection(palette: palette)
+    }
+  }
+
+  private var targetStandardDescription: String {
+    switch viewModel.batchTargetFormat {
+    case .pdf:
+      return "PDF 1.7 (ISO 32000-1)"
+    case .docx, .xlsx, .pptx, .ppsx:
+      return "OOXML (ECMA-376)"
+    case .hwpx, .hwtx:
+      return "OWPML (KS X 6101)"
+    case .hwp, .hwt:
+      return "HWP 5.0 Binary (OLE2 CFBF)"
+    case .odt, .ods, .odp:
+      return "ODF 1.3 (ISO/IEC 26300)"
+    case .doc, .xls, .ppt:
+      return "OLE2 Compound Binary (CFBF)"
+    case .csv, .tsv:
+      return "RFC 4180 Tabular Stream"
+    case .md, .txt, .rtf:
+      return "CommonMark / Rich Text Stream"
+    }
+  }
+
+  @ViewBuilder
+  private func batchPipelineSummarySection(palette: WorkspaceThemePalette) -> some View {
+    let report = viewModel.lastBatchConversionReport
+    let totalOutputBytes = report?.succeededResults.reduce(0) { $0 + $1.outputBytes.count } ?? 0
+    let jobCount = report?.totalJobs ?? viewModel.openTabs.count
+    let succeededCount = report?.succeededResults.count ?? 0
+    let statusLabel = succeededCount > 0 ? "검증 완료" : "대기 중"
+    let statusColor =
+      succeededCount > 0
+      ? EasyOfficeDesignTokens.statusSuccess.swiftUIColor
+      : palette.secondaryText.swiftUIColor
+    let familyRows: [(title: String, detail: String)] = [
+      ("문서/공문서 조판", "DOCX · HWP · HWPX · ODT 단락·표·각주 보존"),
+      ("스프레드시트 수식 평가", "XLSX · ODS · CSV 수식 재계산 및 서식 매핑"),
+      ("프레젠테이션 16:9 벡터 스테이지", "PPTX · ODP 마스터 레이아웃 및 도형 좌표 보존"),
+      ("PDF 바이너리 XREF 테이블", "PDF 1.7 카탈로그·페이지 트리·주석 스트림 직렬화"),
+    ]
+
+    VStack(alignment: .leading, spacing: 12) {
+      Rectangle()
+        .fill(palette.border.swiftUIColor)
+        .frame(height: 1)
+        .padding(.top, 6)
+
+      HStack(alignment: .top, spacing: 24) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("변환 파이프라인 및 보존 규격")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(palette.primaryText.swiftUIColor)
+
+          HStack {
+            Text("목표 표준 규격")
+              .font(.system(size: 11.5))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            Spacer()
+            Text(targetStandardDescription)
+              .font(.system(size: 11, weight: .semibold, design: .monospaced))
+              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          }
+
+          Rectangle()
+            .fill(palette.border.swiftUIColor)
+            .frame(height: 1)
+
+          HStack {
+            Text("조판 보존 정책")
+              .font(.system(size: 11.5))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            Spacer()
+            Text("원본 여백·폰트 메트릭·표 격자 보존")
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+          }
+
+          Rectangle()
+            .fill(palette.border.swiftUIColor)
+            .frame(height: 1)
+
+          HStack {
+            Text("보안 및 무결성")
+              .font(.system(size: 11.5))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            Spacer()
+            Text("문서 시그니처 사전 검증 · 바이트 크기 및 XREF 오프셋 무결성 확인")
+              .font(.system(size: 11))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .lineLimit(1)
+          }
+
+          Rectangle()
+            .fill(palette.border.swiftUIColor)
+            .frame(height: 1)
+
+          HStack {
+            Text("누적 출력 현황")
+              .font(.system(size: 11.5))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            Spacer()
+            Text("대상 \(jobCount)건 · 완료 \(succeededCount)건 · 총 출력 용량: \(totalOutputBytes) B")
+              .font(.system(size: 11, weight: .semibold, design: .monospaced))
+              .foregroundStyle(statusColor)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        Rectangle()
+          .fill(palette.border.swiftUIColor)
+          .frame(width: 1, height: 132)
+
+        VStack(alignment: .leading, spacing: 8) {
+          Text("포맷 패밀리별 변환 검증 현황")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(palette.primaryText.swiftUIColor)
+
+          ForEach(Array(familyRows.enumerated()), id: \.offset) { idx, row in
+            HStack(spacing: 10) {
+              Text(row.title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+              Text(row.detail)
+                .font(.system(size: 10.5))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .lineLimit(1)
+              Spacer()
+              Text(statusLabel)
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(statusColor)
+            }
+            if idx < familyRows.count - 1 {
+              Rectangle()
+                .fill(palette.border.swiftUIColor)
+                .frame(height: 1)
+            }
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
     }
   }
 }

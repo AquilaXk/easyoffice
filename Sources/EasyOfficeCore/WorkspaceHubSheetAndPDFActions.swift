@@ -21,7 +21,13 @@ extension PDFFormField {
 
 extension PDFPageDescriptor {
   public var title: String {
-    "Page \(pageNumber)"
+    for rawLine in extractedText.split(whereSeparator: \.isNewline) {
+      let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        return String(trimmed.prefix(24))
+      }
+    }
+    return "제\(pageNumber)쪽"
   }
 
   public var bodyText: String {

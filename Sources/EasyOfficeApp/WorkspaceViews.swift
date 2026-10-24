@@ -1968,7 +1968,7 @@ public struct LeftNavigatorPanelView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 3) {
-                  Text("P.\(page.pageNumber) · \(page.title)")
+                  Text("\(page.pageNumber)쪽 · \(page.title)")
                     .font(.system(size: 11, weight: isSelectedPage ? .bold : .semibold))
                     .foregroundStyle(
                       isSelectedPage ? pdfAccent : palette.primaryText.swiftUIColor

@@ -380,6 +380,8 @@ public enum EvaluatedCellValue: Sendable, Codable, Equatable, CustomStringConver
 // MARK: - Cell Style, Number Format, Page Setup, and Multi-Sheet Models
 
 /// Display number format applied to a spreadsheet cell.
+public typealias SheetNumberFormat = CellNumberFormat
+
 public enum CellNumberFormat: String, Sendable, Codable, Equatable, CaseIterable {
   case general
   case integer
@@ -392,6 +394,20 @@ public enum CellNumberFormat: String, Sendable, Codable, Equatable, CaseIterable
   case dateISO
 
   public static let decimalTwo: CellNumberFormat = .decimal2
+
+  public var displayTitle: String {
+    switch self {
+    case .general: return "일반"
+    case .integer: return "정수"
+    case .decimal2: return "소수점 2자리"
+    case .thousands: return "천 단위 구분"
+    case .currencyKRW: return "통화 (₩)"
+    case .currencyUSD: return "통화 ($)"
+    case .percentage: return "백분율 (%)"
+    case .scientific: return "지수 표기"
+    case .dateISO: return "날짜 (ISO)"
+    }
+  }
 
   public func format(_ value: Double) -> String {
     format(.number(value))
@@ -472,10 +488,20 @@ public enum CellNumberFormat: String, Sendable, Codable, Equatable, CaseIterable
 }
 
 /// Horizontal text alignment within a spreadsheet cell.
+public typealias SheetHorizontalAlignment = CellHorizontalAlignment
+
 public enum CellHorizontalAlignment: String, Sendable, Codable, Equatable, CaseIterable {
   case leading
   case center
   case trailing
+
+  public var displayTitle: String {
+    switch self {
+    case .leading: return "왼쪽 정렬"
+    case .center: return "가운데 정렬"
+    case .trailing: return "오른쪽 정렬"
+    }
+  }
 }
 
 /// Per-cell visual style and number formatting descriptor.
