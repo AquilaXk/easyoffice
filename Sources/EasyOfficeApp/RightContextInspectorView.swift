@@ -616,17 +616,17 @@ struct RightContextInspectorView: View {
           .buttonStyle(.bordered).controlSize(.mini)
         }
 
-        HStack(spacing: 6) {
-          Button("+행 삽입") { viewModel.insertSheetRowAtSelection() }
+        HStack(spacing: 4) {
+          Button("+행") { viewModel.insertSheetRowAtSelection() }
             .buttonStyle(.bordered)
             .controlSize(.mini)
-          Button("-행 삭제") { viewModel.deleteSheetRowAtSelection() }
+          Button("-행") { viewModel.deleteSheetRowAtSelection() }
             .buttonStyle(.bordered)
             .controlSize(.mini)
-          Button("+열 삽입") { viewModel.insertSheetColumnAtSelection() }
+          Button("+열") { viewModel.insertSheetColumnAtSelection() }
             .buttonStyle(.bordered)
             .controlSize(.mini)
-          Button("-열 삭제") { viewModel.deleteSheetColumnAtSelection() }
+          Button("-열") { viewModel.deleteSheetColumnAtSelection() }
             .buttonStyle(.bordered)
             .controlSize(.mini)
         }
@@ -882,6 +882,7 @@ struct RightContextInspectorView: View {
           }
         }
 
+        let shortTransLabel = slide.transition.rawValue.components(separatedBy: " ").first ?? slide.transition.rawValue
         HStack(spacing: 6) {
           LavenderMenuPill(
             title: "비율: \(deck.aspectRatio == .widescreen16x9 ? "16:9" : "4:3")",
@@ -896,7 +897,7 @@ struct RightContextInspectorView: View {
           }
 
           LavenderMenuPill(
-            title: "전환: \(slide.transition.rawValue)",
+            title: "전환: \(shortTransLabel)",
             systemImage: "sparkles.rectangle.stack",
             palette: palette
           ) {
@@ -1203,19 +1204,19 @@ struct RightContextInspectorView: View {
       VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 6) {
           Button("90° 회전") { viewModel.rotateActivePDFPage(clockwiseDegrees: 90) }
-            .buttonStyle(.bordered).controlSize(.small)
+            .buttonStyle(.bordered).controlSize(.mini)
 
-          Button("하이라이트 주석 추가") { viewModel.addPDFAnnotation(kind: .highlight, content: "하이라이트 주석") }
-            .buttonStyle(.bordered).controlSize(.small)
+          Button("하이라이트 주석") { viewModel.addPDFAnnotation(kind: .highlight, content: "하이라이트 주석") }
+            .buttonStyle(.bordered).controlSize(.mini)
         }
 
         HStack(spacing: 6) {
           Button("빈 페이지 추가") {
             viewModel.insertBlankPDFPage(afterPage: viewModel.selectedPDFPageNumber)
           }
-          .buttonStyle(.bordered).controlSize(.small)
-          Button("선택 페이지 삭제") { viewModel.deleteActivePDFPage() }
-            .buttonStyle(.bordered).controlSize(.small)
+          .buttonStyle(.bordered).controlSize(.mini)
+          Button("페이지 삭제") { viewModel.deleteActivePDFPage() }
+            .buttonStyle(.bordered).controlSize(.mini)
             .disabled(pdf.pages.count <= 1)
         }
 
@@ -1229,14 +1230,14 @@ struct RightContextInspectorView: View {
         }
 
         HStack(spacing: 6) {
-          Button("열린 PDF 탭 병합") { viewModel.mergeActivePDFWithAnotherOpenTab() }
+          Button("PDF 탭 병합") { viewModel.mergeActivePDFWithAnotherOpenTab() }
             .buttonStyle(.bordered)
-            .controlSize(.small)
+            .controlSize(.mini)
 
-          Button("페이지 분할 (\(viewModel.selectedPDFPageNumber)p 추출)") {
+          Button("페이지 분할 (\(viewModel.selectedPDFPageNumber)p)") {
             viewModel.executeRibbonCommand("pdf-mod-splitmerge")
           }
-          .buttonStyle(.bordered).controlSize(.small)
+          .buttonStyle(.bordered).controlSize(.mini)
         }
 
         Button("문서(.docx)로 변환") { viewModel.executeRibbonCommand("pdf-mod-tooffice") }

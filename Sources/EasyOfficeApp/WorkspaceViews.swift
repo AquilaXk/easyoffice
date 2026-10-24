@@ -84,17 +84,23 @@ struct AdaptiveScrollContainer<Content: View>: View {
   var body: some View {
     if effectiveSnapshotMode {
       if axes == .horizontal {
-        HStack(spacing: 0) {
-          content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
+        content()
+          .hidden()
+          .frame(width: 0)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .overlay(alignment: .leading) {
+            HStack(spacing: 0) {
+              content()
+            }
+          }
+          .clipped()
       } else {
         GeometryReader { geo in
           VStack(alignment: .leading, spacing: 0) {
             content()
           }
           .frame(width: geo.size.width, alignment: .topLeading)
+          .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
@@ -798,8 +804,14 @@ struct TopDocumentTabStripView: View {
                 .foregroundStyle(accent.swiftUIColor)
                 .clipShape(RoundedRectangle(cornerRadius: 4))
 
-              Text(tab.fileName)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+              let shortTabTitle: String = {
+                if let dotIdx = tab.fileName.lastIndex(of: "."), dotIdx > tab.fileName.startIndex {
+                  return String(tab.fileName[..<dotIdx])
+                }
+                return tab.fileName
+              }()
+              Text(shortTabTitle)
+                .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
                 .lineLimit(1)
 
@@ -818,8 +830,8 @@ struct TopDocumentTabStripView: View {
               }
               .buttonStyle(.plain)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
             .background(
               isSelected ? palette.cardSurface.swiftUIColor : palette.elevatedSurface.swiftUIColor
             )
@@ -881,8 +893,15 @@ struct TopDocumentTabStripView: View {
 
       Spacer(minLength: 6)
 
+      let shortThemeTitle: String = {
+        switch viewModel.themeMode {
+        case .lightLavender: return "라이트"
+        case .darkIndigo: return "다크"
+        case .system: return "시스템"
+        }
+      }()
       LavenderMenuPill(
-        title: viewModel.themeMode.rawValue,
+        title: shortThemeTitle,
         symbolName: "paintpalette",
         palette: palette,
         isSnapshotMode: viewModel.isCanvasSnapshotMode
@@ -895,10 +914,10 @@ struct TopDocumentTabStripView: View {
       }
 
       LavenderTextFieldPill(
-        placeholder: "명령·본문 통합 검색",
+        placeholder: "통합 검색",
         text: $viewModel.searchQuery,
         symbolName: "magnifyingglass",
-        width: 132,
+        width: 102,
         palette: palette,
         isSnapshotMode: viewModel.isCanvasSnapshotMode
       )
