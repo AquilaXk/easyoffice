@@ -581,4 +581,22 @@
 - **Verified by**: `cargo test -p easyoffice-layout -p easyoffice-app`, `cargo run -p easyoffice-app -- --self-test`, `swift test --filter testNinthAudit`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 사용자 정의 리본 단축키 프로필 내보내기/가져오기 기능을 추가할 때.
 
+### 29. 순수 Rust RFC 1951 DEFLATE·HWP 5.0 압축 스트림 코덱, Swift/Rust 교차 엔진 바이너리 호환성 및 Tauri WebUI 7탭 리본·일괄 변환 스튜디오 정책 (2026-10-24)
 
+- **Decision (`PD-055`)**:
+  1. **순수 Rust `std` RFC 1951 DEFLATE 압축·해제 엔진 및 PKZIP `METHOD_DEFLATE (8)` 통합 (`crates/easyoffice-formats/src/{deflate.rs,zip_codec.rs,lib.rs}`)**:
+     - 외부 크레이트 의존성이나 `unsafe` 블록 없이 `crates/easyoffice-formats/src/deflate.rs`에 RFC 1951 비압축(`BTYPE=00`)·고정 허프만(`BTYPE=01`)·동적 허프만(`BTYPE=10`) 인플레이터(`inflate_raw`), RFC 1950 2바이트 zlib 래퍼 자동 감지 인플레이터(`inflate_auto`), LZ77 슬라이딩 윈도 + 고정 허프만 디플레이터(`deflate_raw`)를 구현합니다.
+     - 단일 엔트리 해제 예산(`MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES = 128 MiB`) 또는 누적 해제 예산(`MAX_TOTAL_UNCOMPRESSED_BYTES = 512 MiB`)을 초과하는 스트림은 즉시 `EasyOfficeError::ResourceBudgetExceeded`로 거부(Fail-Closed)합니다.
+     - `ZipArchiveCodec`은 `pack_deflate`와 `unpack`에서 `METHOD_STORE (0)` 및 `METHOD_DEFLATE (8)`을 모두 처리하고 원본 바이트에 대한 IEEE 802.3 CRC-32를 검증하며, `FormatDetector::detect`는 Deflate 압축된 `.hwtx`(`Contents/header.xml` `isTemplate="1"`)와 `.ppsx`(`presentationml.slideshow` / `slideshow="1"`) 아카이브를 압축 해제하여 정확히 식별합니다.
+  2. **HWP 5.0 압축 스트림(`flags = 0x01`) 및 Swift/Rust 교차 엔진 OLE2 바이너리 호환성 (`crates/easyoffice-formats/src/{ole2_codec.rs,legacy_ole2_codec.rs}`)**:
+     - `Hwp5Codec::pack_compressed`는 `FileHeader` 오프셋 36의 `flags = 0x01` 비트를 설정하고 `DocInfo`와 `BodyText/Section0` 스트림을 `deflate_raw`로 압축하며, `Hwp5Codec::unpack`은 `flags & 0x01 != 0`일 때 `inflate_auto`로 스트림을 복원합니다.
+     - Swift 코어(`OLE2AndHWP5Codec.swift`, `LegacyOLE2OfficeCodec.swift`)가 생성한 확장 HWP 5.0 레코드(`HWPTAG_DOCUMENT_PROPERTIES = 16`, `HWPTAG_PARA_HEADER = 66`, `HWPTAG_TABLE = 77`) 및 레거시 OLE2 컨테이너(`.doc` 확장 트레일러, `.xls` `BIFF8_FORMULA` 오프셋 16 UTF-16LE 수식, `.ppt` `0x0040` 바이너리 캔버스 아톰)를 손실 없이 디코딩합니다.
+  3. **Tauri v2 데스크톱 WebUI 실사용 마이크로카피 정화, 7개 리본 카테고리 도구 전환 및 20종 포맷 일괄 변환 스튜디오 (`crates/easyoffice-app/src/lib.rs`, `crates/easyoffice-app/ui/*`)**:
+     - `EasyOfficeIpcRouter::dispatch`에 `convert_document_format`, `get_ribbon_category_commands`, `evaluate_workbook_formula`를 추가합니다.
+     - WebUI(`index.html`, `styles.css`, `app.js`)에서 내부 엔지니어링 지표를 제거하고, 7개 리본 카테고리(`홈`, `삽입`, `레이아웃`, `모듈 도구`, `검토`, `보기`, `생산성·보안`) 동적 도구 전환, 문서 표 편집기(`+행 추가`, `셀 병합 토글`, `=SUM(ABOVE)`) 및 200자 원고지 격자 뷰, 다중 시트 탭 바(`Sheet1`, `Sheet2`, `+ 시트 추가`, `=Sheet2!A1+50`), 20종 포맷 일괄 변환 스튜디오(`#pane-converter`), 하단 상태바 보기 모드(`편집`/`열람`/`발표`) 및 빠른 배율(`80%`/`100%`/`125%`) 컨트롤을 연결합니다.
+- **Why**: 상용 오피스 도구와 HWP 5.0이 기본 생성하는 RFC 1951 Deflate 압축 컨테이너와 Swift/Rust 양대 엔진 간 바이너리 호환성을 완비하고, Tauri 데스크톱 UI의 모든 리본 카테고리와 표·원고지·다중 시트·일괄 변환 워크플로를 실제 동작하도록 완성하기 위함입니다.
+- **Trade-offs**: 순수 Rust `std`로 허프만 트리와 LZ77 매처를 직접 유지 관리해야 하나, 외부 크레이트 0개 원칙을 지키면서 약 550줄의 간결한 모듈(`deflate.rs`)로 3가지 RFC 1951 블록 타입과 압축 폭탄 방어를 모두 충족합니다.
+- **Alternatives rejected**:
+  - 외부 `flate2`/`miniz_oxide` 크레이트 도입: 오프라인/폐쇄망 빌드 무결성과 `Cargo.toml` 외부 의존성 0개 원칙에 위배되므로 기각.
+- **Verified by**: `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 64비트 대용량 아카이브용 ZIP64 확장 헤더 지원이 필요할 때.

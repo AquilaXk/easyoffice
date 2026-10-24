@@ -95,21 +95,22 @@ EasyOffice/
 
 macOS와 Windows 양대 데스크톱 환경에서 동일한 문서 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 불변식을 공유하기 위해 외부 런타임 의존성이 없는 순수 Rust 표준 라이브러리(`std`) 기반 4개 워크스페이스 크레이트와 Tauri v2 데스크톱 셸 계층을 함께 제공합니다.
 
-1. **`crates/easyoffice-formats` (20종 포맷 레지스트리·컨테이너 보안 가드·직렬화 코덱)**:
+1. **`crates/easyoffice-formats` (20종 포맷 레지스트리·RFC 1951 DEFLATE·컨테이너 보안 가드·직렬화 코덱)**:
    - 20종 `DocumentFormat` 및 `ContainerFamily` 메타데이터, 확장자-매직 바이트(`PK\x03\x04`, `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1`, `%PDF-`, `{\rtf1`, UTF-8) 교차 검증(`FormatDetector::detect`, 최대 입력 `512 MiB`)을 수행합니다.
+   - 순수 Rust `deflate` 모듈(`inflate_raw`, `inflate_auto`, `deflate_raw`)이 RFC 1951 비압축(`BTYPE=00`)·고정 허프만(`BTYPE=01`)·동적 허프만(`BTYPE=10`) 블록과 RFC 1950 2바이트 zlib 래퍼를 처리하며, `ZipArchiveCodec`은 `METHOD_STORE (0)`와 `METHOD_DEFLATE (8)` 압축/복원 및 IEEE 802.3 CRC-32 검증을 지원합니다.
    - `ZipSecurityGuard::validate_archive_entries`는 엔트리 수(`4,096`), 단일 엔트리(`128 MiB`), 전체 해제 용량(`512 MiB`), 압축비(`100:1`), 경로 순회(`..`, 선행 `/`, `\`, NUL 바이트, Windows 드라이브 문자 `C:`)를 검증합니다.
-   - `Ole2SecurityGuard`는 512바이트 섹터 정렬, DIFAT 헤더 상한(`109`), `HashSet<u32>` 기반 FAT 체인 순환 참조 탐지, HWP 5.0 `FileHeader` 암호화(`0x02`)·배포용 문서(`0x04`) 비트 차단을 수행합니다.
+   - `Ole2SecurityGuard`는 512바이트 섹터 정렬, DIFAT 헤더 상한(`109`), `HashSet<u32>` 기반 FAT 체인 순환 참조 탐지, HWP 5.0 `FileHeader` 암호화(`0x02`)·배포용 문서(`0x04`) 비트 차단을 수행합니다. `Hwp5Codec`은 압축 플래그(`0x01`)가 설정된 `DocInfo`·`BodyText/Section0` 스트림 압축(`pack_compressed`)·복원(`unpack`)과 Swift 코어 확장 레코드 호환성을 지원하며, `LegacyOle2Codec`은 `.doc`·`.xls`·`.ppt` 교차 엔진 바이너리 호환성을 보장합니다.
    - `XmlSanitizer`(`<!ENTITY` 및 외부 DTD `SYSTEM`/`PUBLIC`/`[` 차단), `CsvCodec`(RFC 4180 상태 기계), `CommonMarkCodec`, `PdfSerializer`(`%PDF-1.4` 바이트 오프셋 `xref` 직렬화)를 포함합니다.
 2. **`crates/easyoffice-sheet` (64-bit 패킹 좌표·재귀 하강 수식 파서·$O(V+E)$ 평가기)**:
    - `PackedCellCoordinate`는 `(row: 32bit, col: 32bit)`를 단일 `u64`에 패킹하고(`MAX_ROWS = 1,000,000`, `MAX_COLS = 16,384`), `CellRange::expand`는 단일 범위 확장 상한(`100,000`셀)을 강제합니다.
-   - 단항 `+`/`-`, 후위 `%`, 산술·비교·문자열 결합(`&`) 연산자, 순환 참조 탐지(`FormulaError::Cycle`) 및 재귀 상한(`MAX_RECURSION_DEPTH = 64`), ECMA-376 호환 `ISBLANK`·`SUM`·`AVERAGE`·`IF`·`IFERROR`·`SQRT`·`POWER`·`MOD`·`CONCAT`·`VLOOKUP`·`INDEX`·`MATCH`·`NPV`·`STDEV`·`MEDIAN` 등 내장 함수와 `PivotTableSummary` 집계를 제공합니다.
+   - 단항 `+`/`-`, 후위 `%`, 산술·비교·문자열 결합(`&`) 연산자, 순환 참조 탐지(`FormulaError::Cycle`) 및 재귀 상한(`MAX_RECURSION_DEPTH = 64`), ECMA-376 호환 `ISBLANK`·`SUM`·`AVERAGE`·`IF`·`IFERROR`·`SQRT`·`POWER`·`MOD`·`CONCAT`·`VLOOKUP`·`INDEX`·`MATCH`·`NPV`·`STDEV`·`MEDIAN` 등 122종 내장 함수와 다중 시트 워크북(`WorkbookEngine` `Sheet2!A1`) 참조 및 `PivotTableSummary` 집계를 제공합니다.
 3. **`crates/easyoffice-layout` (시그니처 라벤더 토큰·5대 모듈 도메인 엔진·조판 레이아웃)**:
    - `SignatureLavenderPalette`(`#5C6BC0` Primary Accent, `#F7F8FC` Light Canvas, `#141724` Dark Canvas), 플랫폼 렌더러 식별자(`MacOsWkWebView` / `WindowsWebView2`), 리본 레이아웃 모드(`RibbonLayoutStyle { StandardOffice, HangulHwp }`), 모듈별 자동 개체 도구 배지(`ContextualObjectToolKind`)를 정의합니다.
    - `DocumentPageLayout`(A4 가로/세로 스왑, 1~4단 다단 폭 계산, 200자 원고지 그리드, KS X 6101 행정 공문서 헤더 및 결재란), `DocumentDomainEngine`(병합 표 모델 `DocumentTableModel` 및 `=SUM(ABOVE)`·`=AVERAGE(LEFT)` 표 수식, 변경 내용 추적 `RevisionRecord`, 각주·미주 `FootnoteEntry`, 1~3단계 자동 목차 생성, `{{필드}}` 메일 머지), `SlideDomainEngine`(5종 마스터 레이아웃, 전환 타이밍, 발표자 레이저 포인터·자유곡선 펜 `PresenterSessionState`), `PdfDomainEngine`(90도 페이지 회전, 페이지 분할·병합, 결재 스탬프, 워터마크, AcroForm 위젯)을 제공합니다.
 4. **`crates/easyoffice-app` (Tauri v2 IPC 라우터·140종 리본 라우터·오프라인 스마트 보조·C-ABI FFI·WebUI 셸)**:
    - `RibbonCommandRouter`가 7개 카테고리 × 20개 명령(`140`종) 카탈로그와 64단계 `UndoRedoStack`을 제공하며, `LocalSmartAssistant`(TF 가중 핵심 문장 요약, 문장 진단, 액션 아이템 추출, LCS 문서 비교) 및 `DocumentSecurityAuditor`(주민등록번호·휴대전화·이메일 PII 마스킹 및 메타데이터 제거), C-ABI 브리지(`easyoffice_ffi_version`, `easyoffice_ffi_dispatch_json`, `easyoffice_ffi_free_string`)를 내장합니다.
-   - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `compute_layout`, `audit_security`, `execute_ribbon_command`, `switch_ribbon_style`, `run_smart_assistant`, `scrub_pii` 명령을 라우팅하며, `cargo run -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식을 자체 검증합니다.
-   - `tauri.conf.json`은 macOS(`.app`, `.dmg` — `WKWebView`)와 Windows(`.msi`, `.nsis` — `WebView2` `downloadBootstrapper`) 번들 타겟을 정의하고, `ui/{index.html,styles.css,app.js}`는 `표준 리본 ↔ 한글 쪽·편집 리본` 전환, 컨텍스트 개체 도구 배지, `Cmd`/`Ctrl` 단축키 자동 매핑, 한글 두벌식 IME 조합(`compositionstart`/`compositionupdate`/`compositionend`) 무결성을 지원합니다.
+   - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `evaluate_workbook_formula`, `compute_layout`, `audit_security`, `execute_ribbon_command`, `switch_ribbon_style`, `run_smart_assistant`, `scrub_pii`, `convert_document_format`, `get_ribbon_category_commands` 명령을 라우팅하며, `cargo run -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식을 자체 검증합니다.
+   - `tauri.conf.json`은 macOS(`.app`, `.dmg` — `WKWebView`)와 Windows(`.msi`, `.nsis` — `WebView2` `downloadBootstrapper`) 번들 타겟을 정의하고, `ui/{index.html,styles.css,app.js}`는 7개 리본 카테고리별 도구 전환, 문서 표 편집(`+행 추가`·`셀 병합 토글`·`=SUM(ABOVE)`) 및 200자 원고지 격자 뷰, 다중 시트 탭 바(`Sheet1`·`Sheet2`·`+ 시트 추가`), 20종 포맷 일괄 변환 스튜디오(`#pane-converter`), 하단 상태바 보기 모드·배율 조정, 한글 두벌식 IME 조합(`compositionstart`/`compositionend`) 무결성을 지원합니다.
 
 ---
 

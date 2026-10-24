@@ -48,6 +48,8 @@ pub struct ZipArchiveEntry {
     pub crc32: u32,
 }
 
+pub type ZipEntry = ZipArchiveEntry;
+
 impl ZipArchiveEntry {
     pub fn new(path: impl Into<String>, data: Vec<u8>) -> Self {
         let crc32 = IeeeCrc32::checksum(&data);
@@ -56,6 +58,47 @@ impl ZipArchiveEntry {
             data,
             crc32,
         }
+    }
+}
+
+pub trait AsZipEntry {
+    fn entry_path(&self) -> &str;
+    fn entry_data(&self) -> &[u8];
+}
+
+impl AsZipEntry for ZipArchiveEntry {
+    fn entry_path(&self) -> &str {
+        &self.path
+    }
+    fn entry_data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl AsZipEntry for (String, Vec<u8>) {
+    fn entry_path(&self) -> &str {
+        &self.0
+    }
+    fn entry_data(&self) -> &[u8] {
+        &self.1
+    }
+}
+
+impl AsZipEntry for (&str, &[u8]) {
+    fn entry_path(&self) -> &str {
+        self.0
+    }
+    fn entry_data(&self) -> &[u8] {
+        self.1
+    }
+}
+
+impl AsZipEntry for (&str, Vec<u8>) {
+    fn entry_path(&self) -> &str {
+        self.0
+    }
+    fn entry_data(&self) -> &[u8] {
+        &self.1
     }
 }
 
@@ -68,8 +111,25 @@ impl ZipArchiveCodec {
     pub const END_OF_CENTRAL_DIR_SIG: u32 = 0x0605_4B50;
     pub const VERSION_NEEDED: u16 = 20;
     pub const METHOD_STORE: u16 = 0;
+    pub const METHOD_DEFLATE: u16 = 8;
+
+    #[inline]
+    pub fn crc32(bytes: &[u8]) -> u32 {
+        IeeeCrc32::checksum(bytes)
+    }
 
     pub fn pack(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_internal(entries, false)
+    }
+
+    pub fn pack_deflate<E: AsZipEntry>(entries: &[E]) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_internal(entries, true)
+    }
+
+    fn pack_internal<E: AsZipEntry>(
+        entries: &[E],
+        use_deflate: bool,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         if entries.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
         }
@@ -82,8 +142,9 @@ impl ZipArchiveCodec {
         let policy = ZipSecurityPolicy::default();
         let descriptors: Vec<ZipEntryDescriptor> = entries
             .iter()
-            .map(|(path, data)| {
-                ZipEntryDescriptor::new(path.clone(), data.len() as u64, data.len() as u64, false)
+            .map(|e| {
+                let len = e.entry_data().len() as u64;
+                ZipEntryDescriptor::new(e.entry_path().to_string(), len, len, false)
             })
             .collect();
         ZipSecurityGuard::validate_archive(&descriptors, &policy)?;
@@ -91,7 +152,9 @@ impl ZipArchiveCodec {
         let mut out: Vec<u8> = Vec::with_capacity(1024);
         let mut central_dir: Vec<u8> = Vec::with_capacity(entries.len() * 64);
 
-        for (path, data) in entries {
+        for entry in entries {
+            let path = entry.entry_path();
+            let data = entry.entry_data();
             ZipSecurityGuard::validate_entry_path(path)?;
             let path_bytes = path.as_bytes();
             if path_bytes.len() > u16::MAX as usize {
@@ -107,36 +170,49 @@ impl ZipArchiveCodec {
             }
 
             let local_header_offset = out.len() as u32;
-            let crc = IeeeCrc32::checksum(data);
-            let size_u32 = data.len() as u32;
+            let crc = Self::crc32(data);
+            let uncomp_size_u32 = data.len() as u32;
             let name_len = path_bytes.len() as u16;
+
+            let (method, compressed_payload): (u16, std::borrow::Cow<'_, [u8]>) =
+                if use_deflate && !data.is_empty() {
+                    let deflated = crate::deflate::deflate_raw(data);
+                    if deflated.len() < data.len() {
+                        (Self::METHOD_DEFLATE, std::borrow::Cow::Owned(deflated))
+                    } else {
+                        (Self::METHOD_STORE, std::borrow::Cow::Borrowed(data))
+                    }
+                } else {
+                    (Self::METHOD_STORE, std::borrow::Cow::Borrowed(data))
+                };
+            let comp_size_u32 = compressed_payload.len() as u32;
 
             // Local File Header (30 bytes + file name)
             out.extend_from_slice(&Self::LOCAL_FILE_HEADER_SIG.to_le_bytes());
             out.extend_from_slice(&Self::VERSION_NEEDED.to_le_bytes());
             out.extend_from_slice(&0u16.to_le_bytes()); // general purpose bit flag
-            out.extend_from_slice(&Self::METHOD_STORE.to_le_bytes());
+            out.extend_from_slice(&method.to_le_bytes());
             out.extend_from_slice(&0u16.to_le_bytes()); // mod time
             out.extend_from_slice(&0x0021u16.to_le_bytes()); // mod date
             out.extend_from_slice(&crc.to_le_bytes());
-            out.extend_from_slice(&size_u32.to_le_bytes());
-            out.extend_from_slice(&size_u32.to_le_bytes());
+            out.extend_from_slice(&comp_size_u32.to_le_bytes());
+            out.extend_from_slice(&uncomp_size_u32.to_le_bytes());
             out.extend_from_slice(&name_len.to_le_bytes());
             out.extend_from_slice(&0u16.to_le_bytes()); // extra field length
             out.extend_from_slice(path_bytes);
-            out.extend_from_slice(data);
+            out.extend_from_slice(&compressed_payload);
 
             // Central Directory Header (46 bytes + file name)
             central_dir.extend_from_slice(&Self::CENTRAL_DIR_HEADER_SIG.to_le_bytes());
             central_dir.extend_from_slice(&Self::VERSION_NEEDED.to_le_bytes());
             central_dir.extend_from_slice(&Self::VERSION_NEEDED.to_le_bytes());
             central_dir.extend_from_slice(&0u16.to_le_bytes()); // flags
-            central_dir.extend_from_slice(&Self::METHOD_STORE.to_le_bytes());
+            central_dir.extend_from_slice(&method.to_le_bytes());
             central_dir.extend_from_slice(&0u16.to_le_bytes()); // mod time
             central_dir.extend_from_slice(&0x0021u16.to_le_bytes()); // mod date
             central_dir.extend_from_slice(&crc.to_le_bytes());
-            central_dir.extend_from_slice(&size_u32.to_le_bytes());
-            central_dir.extend_from_slice(&size_u32.to_le_bytes());
+            central_dir.extend_from_slice(&comp_size_u32.to_le_bytes());
+            central_dir.extend_from_slice(&uncomp_size_u32.to_le_bytes());
             central_dir.extend_from_slice(&name_len.to_le_bytes());
             central_dir.extend_from_slice(&0u16.to_le_bytes()); // extra len
             central_dir.extend_from_slice(&0u16.to_le_bytes()); // comment len
@@ -276,13 +352,15 @@ impl ZipArchiveCodec {
         ZipSecurityGuard::validate_archive(&descriptors, policy)?;
 
         let mut extracted: Vec<ZipArchiveEntry> = Vec::with_capacity(raw_records.len());
+        let mut total_uncompressed: u64 = 0;
+
         for (path, method, expected_crc, comp_size, uncomp_size, local_offset) in raw_records {
-            if method != Self::METHOD_STORE {
+            if method != Self::METHOD_STORE && method != Self::METHOD_DEFLATE {
                 return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "지원하지 않는 ZIP 압축 방식({method})입니다 (Store=0 전용)."
+                    "지원하지 않는 ZIP 압축 방식({method})입니다 (Store=0, Deflate=8 전용)."
                 )));
             }
-            if comp_size != uncomp_size {
+            if method == Self::METHOD_STORE && comp_size != uncomp_size {
                 return Err(EasyOfficeError::CorruptedContainer(format!(
                     "Store 엔트리({path})의 압축 크기({comp_size})와 원본 크기({uncomp_size})가 일치하지 않습니다."
                 )));
@@ -317,8 +395,32 @@ impl ZipArchiveCodec {
                 )));
             }
 
-            let payload = bytes[data_start..data_end].to_vec();
-            let actual_crc = IeeeCrc32::checksum(&payload);
+            let compressed_slice = &bytes[data_start..data_end];
+            let payload = if method == Self::METHOD_STORE {
+                compressed_slice.to_vec()
+            } else {
+                let decompressed = crate::deflate::inflate_raw(
+                    compressed_slice,
+                    policy.max_single_entry_uncompressed_bytes as usize,
+                )?;
+                if decompressed.len() != uncomp_size {
+                    return Err(EasyOfficeError::CorruptedContainer(format!(
+                        "Deflate 엔트리({path}) 복원 크기 불일치 (expected: {uncomp_size}, actual: {})",
+                        decompressed.len()
+                    )));
+                }
+                decompressed
+            };
+
+            total_uncompressed = total_uncompressed.saturating_add(payload.len() as u64);
+            if total_uncompressed > policy.max_total_uncompressed_bytes {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "ZIP 누적 복원 크기({total_uncompressed})가 한도({})를 초과했습니다.",
+                    policy.max_total_uncompressed_bytes
+                )));
+            }
+
+            let actual_crc = Self::crc32(&payload);
             if actual_crc != expected_crc {
                 return Err(EasyOfficeError::CorruptedContainer(format!(
                     "ZIP 엔트리({path}) CRC-32 체크섬 불일치 (expected: {expected_crc:#010x}, actual: {actual_crc:#010x})"

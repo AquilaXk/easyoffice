@@ -66,8 +66,8 @@ struct HomeHubWorkspaceView: View {
             SmartDocumentAssistantHubView(viewModel: viewModel)
 
           case .home, .recent, .pinned, .templates:
-            if viewModel.activeHubSection == .home {
-              Text("새 문서 시작하기")
+            VStack(alignment: .leading, spacing: 10) {
+              Text("새 문서 빠른 시작 (5대 포맷 런처)")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
 
@@ -77,15 +77,39 @@ struct HomeHubWorkspaceView: View {
                   Button {
                     viewModel.openNewSampleTab(for: module)
                   } label: {
-                    VStack(alignment: .leading, spacing: 8) {
-                      Image(systemName: module.systemSymbolName)
-                        .font(.system(size: 22))
-                        .foregroundStyle(accent.swiftUIColor)
-                      Text(module.displayNameKo)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
+                    VStack(alignment: .leading, spacing: 0) {
+                      Rectangle()
+                        .fill(accent.swiftUIColor)
+                        .frame(height: 4)
+
+                      VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                          Image(systemName: module.systemSymbolName)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(accent.swiftUIColor)
+                          Spacer(minLength: 4)
+                          Text(module.quickLauncherFormatBadge)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(accent.swiftUIColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(accent.swiftUIColor.opacity(0.14))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                          Text(module.quickLauncherCardTitleKo)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                            .lineLimit(1)
+                          Text(module.displayNameKo)
+                            .font(.system(size: 11))
+                            .foregroundStyle(palette.secondaryText.swiftUIColor)
+                            .lineLimit(1)
+                        }
+                      }
+                      .padding(12)
                     }
-                    .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(palette.cardSurface.swiftUIColor)
                     .overlay(
@@ -619,8 +643,7 @@ struct BatchConversionStudioHubView: View {
           palette: palette,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         ) {
-          ForEach([DocumentFormat.pdf, .docx, .hwpx, .odt, .xlsx, .csv, .md], id: \.rawValue) {
-            fmt in
+          ForEach(DocumentFormat.allCases, id: \.rawValue) { fmt in
             Button(fmt.rawValue.uppercased()) {
               viewModel.batchTargetFormat = fmt
             }

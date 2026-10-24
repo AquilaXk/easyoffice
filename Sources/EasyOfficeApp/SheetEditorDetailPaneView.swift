@@ -803,7 +803,7 @@ public struct SheetEditorDetailPaneView: View {
                 let targetNotation = defaultAutoFillTargetNotation(for: activeRange, maxRow: maxRow)
                 viewModel.performAutoFillOnActiveSheet(targetRangeNotation: targetNotation)
               } label: {
-                Label("자동 채우기 (■)", systemImage: "arrow.down.right.square.fill")
+                Text("자동채우기")
                   .font(.system(size: 11, weight: .semibold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
@@ -840,7 +840,7 @@ public struct SheetEditorDetailPaneView: View {
                 }
               }
 
-              Button(viewModel.isAdvancedToolbarExpanded ? "고급 접기 ▲" : "이름·목표값 ▼") {
+              Button(viewModel.isAdvancedToolbarExpanded ? "고급 ▲" : "고급 ▼") {
                 viewModel.isAdvancedToolbarExpanded.toggle()
               }
               .buttonStyle(.bordered)
@@ -880,7 +880,7 @@ public struct SheetEditorDetailPaneView: View {
                 }
               }
 
-              Text("표시: \(matchingZeroBasedRows.count)/\(maxRow)행")
+              Text("\(matchingZeroBasedRows.count)/\(maxRow)행")
                 .font(.system(size: 10, design: .monospaced))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)

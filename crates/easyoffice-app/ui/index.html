@@ -3,212 +3,410 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EasyOffice — Cross-Platform All-in-One Office Suite</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <title>EasyOffice — 통합 오피스 스위트</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
-<body data-theme="light">
-  <div class="workspace-shell">
-    <header class="top-titlebar" role="banner">
-      <div class="qat-group" aria-label="빠른 실행 도구 모음">
-        <button id="btn-home-hub" class="pill-btn" data-module="home" type="button">홈</button>
-        <button id="btn-undo" class="pill-btn" type="button" title="실행 취소">실행 취소</button>
-        <button id="btn-redo" class="pill-btn" type="button" title="다시 실행">다시 실행</button>
-        <button id="btn-save" class="pill-btn" type="button" title="저장">저장</button>
-      </div>
+<body class="theme-light" data-active-module="DOC">
+  <header class="topbar" role="banner">
+    <div class="brand-cluster">
+      <span class="brand-mark" aria-hidden="true">EO</span>
+      <span class="brand-title">EasyOffice</span>
+      <span id="os-shortcut-badge" class="os-badge" title="단축키 체계">Ctrl / ⌘</span>
+    </div>
 
-      <nav id="tab-strip" class="tab-strip" aria-label="열린 문서 탭">
-        <button class="doc-tab active" data-module="document" type="button">
-          <span class="badge badge-doc">DOC</span>
-          <span>연간_아키텍처_보고서.docx</span>
-        </button>
-        <button class="doc-tab" data-module="hwp" type="button">
-          <span class="badge badge-hwp">HWP</span>
-          <span>행정_표준_기안문.hwpx</span>
-        </button>
-        <button class="doc-tab" data-module="sheet" type="button">
-          <span class="badge badge-sheet">SHEET</span>
-          <span>분기_예산_시트.xlsx</span>
-        </button>
-        <button class="doc-tab" data-module="slide" type="button">
-          <span class="badge badge-slide">SLIDE</span>
-          <span>제품_전략_발표덱.pptx</span>
-        </button>
-        <button class="doc-tab" data-module="pdf" type="button">
-          <span class="badge badge-pdf">PDF</span>
-          <span>보안_감사_인증서.pdf</span>
-        </button>
-        <button class="doc-tab" data-module="converter" type="button">
-          <span class="badge badge-doc">CONV</span>
-          <span>일괄 변환</span>
-        </button>
-        <button class="doc-tab" data-module="smart" type="button">
-          <span class="badge badge-hwp">SMART</span>
-          <span>스마트 보조</span>
-        </button>
-        <button id="btn-new-tab" class="pill-btn new-tab-btn" type="button" aria-label="새 문서 탭 추가">+</button>
-      </nav>
+    <nav class="tab-strip" aria-label="열린 문서 탭" id="document-tabs">
+      <button class="doc-tab active" data-module="DOC" data-target="pane-doc" title="연간_아키텍처_보고서.docx">
+        <span class="tab-pin" aria-label="고정됨">📌</span>
+        <span class="tab-dot dot-doc"></span>
+        <span class="tab-label">연간_아키텍처_보고서.docx</span>
+        <span class="tab-star" aria-label="즐겨찾기">★</span>
+      </button>
+      <button class="doc-tab" data-module="HWP" data-target="pane-doc" title="행정_표준_기안문.hwpx">
+        <span class="tab-pin" aria-label="고정됨">📌</span>
+        <span class="tab-dot dot-hwp"></span>
+        <span class="tab-label">행정_표준_기안문.hwpx</span>
+      </button>
+      <button class="doc-tab" data-module="SHEET" data-target="pane-sheet" title="분기_예산_시트.xlsx">
+        <span class="tab-dot dot-sheet"></span>
+        <span class="tab-label">분기_예산_시트.xlsx</span>
+        <span class="tab-star" aria-label="즐겨찾기">★</span>
+      </button>
+      <button class="doc-tab" data-module="SLIDE" data-target="pane-slide" title="제품_전략_발표덱.pptx">
+        <span class="tab-dot dot-slide"></span>
+        <span class="tab-label">제품_전략_발표덱.pptx</span>
+      </button>
+      <button class="doc-tab" data-module="PDF" data-target="pane-pdf" title="보안_감사_인증서.pdf">
+        <span class="tab-dot dot-pdf"></span>
+        <span class="tab-label">보안_감사_인증서.pdf</span>
+        <span class="tab-star" aria-label="즐겨찾기">★</span>
+      </button>
+      <button class="doc-tab" data-module="DOC" data-target="pane-converter" title="포맷 일괄 변환 스튜디오">
+        <span class="tab-dot dot-doc"></span>
+        <span class="tab-label">포맷 일괄 변환</span>
+      </button>
+    </nav>
 
-      <div class="titlebar-actions">
-        <span id="contextual-object-badge" class="context-object-pill">표·개체 도구</span>
-        <button id="btn-ribbon-style-toggle" class="pill-btn" type="button" title="표준 리본 ↔ 한글 쪽·편집 리본 전환">표준 리본</button>
-        <div class="search-capsule">
-          <input id="global-search-input" type="search" placeholder="통합 문서·명령 검색" aria-label="통합 검색" />
-          <span id="shortcut-hint" class="shortcut-badge">Cmd+F</span>
-        </div>
-        <button id="btn-theme-toggle" class="pill-btn" type="button">다크 모드</button>
-      </div>
-    </header>
+    <div class="topbar-actions">
+      <select id="ribbon-style-select" class="ribbon-select" aria-label="리본 스타일 선택">
+        <option value="standard_office">표준 오피스</option>
+        <option value="hangul_hwp">한글(HWP) 스타일</option>
+      </select>
+      <button id="cmd-palette-trigger" class="action-pill" title="명령 팔레트 열기 (Ctrl+K / ⌘K)">
+        명령 검색 <kbd id="kbd-hint">⌘K</kbd>
+      </button>
+      <button id="theme-toggle" class="action-pill" aria-label="다크 모드 전환">다크 모드</button>
+    </div>
+  </header>
 
-    <section class="context-ribbon" aria-label="컨텍스트 리본">
-      <div id="ribbon-category-bar" class="ribbon-categories" role="tablist">
-        <button class="ribbon-cat active" data-cat="home" data-idx="0" type="button">홈</button>
-        <button class="ribbon-cat" data-cat="insert" data-idx="1" type="button">삽입</button>
-        <button class="ribbon-cat" data-cat="layout" data-idx="2" type="button">레이아웃</button>
-        <button class="ribbon-cat" data-cat="formulas" data-idx="3" type="button">수식·데이터</button>
-        <button class="ribbon-cat" data-cat="module" data-idx="4" type="button">모듈 전용</button>
-        <button class="ribbon-cat" data-cat="review" data-idx="5" type="button">검토·보안</button>
-        <button class="ribbon-cat" data-cat="view" data-idx="6" type="button">보기·창</button>
-      </div>
-      <div id="ribbon-command-strip" class="ribbon-commands">
-        <button class="cmd-btn" data-cmd="document-home-bold" type="button">굵게</button>
-        <button class="cmd-btn" data-cmd="document-home-italic" type="button">기울임</button>
-        <button class="cmd-btn" data-cmd="document-layout-columns" type="button">2단 조판</button>
-        <button class="cmd-btn" data-cmd="hwp-mod-manuscript" type="button">200자 원고지</button>
-        <button class="cmd-btn" data-cmd="hwp-mod-header" type="button">KS X 6101 결재란</button>
-        <button class="cmd-btn" data-cmd="sheet-mod-pivot" type="button">피벗 요약</button>
-        <button class="cmd-btn" data-cmd="slide-mod-presenter" type="button">발표자 레이저</button>
-        <button class="cmd-btn" data-cmd="pdf-mod-rotate" type="button">PDF 스탬프·워터마크</button>
-        <button class="cmd-btn" data-cmd="document-review-verify" type="button">보안·PII 감사</button>
-      </div>
-    </section>
+  <section class="ribbon-bar" aria-label="컨텍스트 리본 툴바">
+    <div class="ribbon-categories" id="ribbon-categories" role="tablist">
+      <button class="ribbon-cat active" data-cat="home" role="tab" aria-selected="true">홈</button>
+      <button class="ribbon-cat" data-cat="insert" role="tab" aria-selected="false">삽입</button>
+      <button class="ribbon-cat" data-cat="layout" role="tab" aria-selected="false">레이아웃</button>
+      <button class="ribbon-cat" data-cat="module" role="tab" aria-selected="false">모듈 도구</button>
+      <button class="ribbon-cat" data-cat="review" role="tab" aria-selected="false">검토</button>
+      <button class="ribbon-cat" data-cat="view" role="tab" aria-selected="false">보기</button>
+      <button class="ribbon-cat" data-cat="productivity" role="tab" aria-selected="false">생산성·보안</button>
+      <span id="contextual-object-badge" class="contextual-badge">표·개체 도구</span>
+    </div>
 
-    <main class="main-stage">
-      <aside id="left-navigator" class="left-navigator" aria-label="좌측 구조 내비게이터">
-        <h2 class="pane-heading">문서 구조 및 필터</h2>
-        <div class="recent-filter-bar" role="group" aria-label="포맷 필터">
-          <button class="filter-chip active" data-filter="전체" type="button">전체</button>
-          <button class="filter-chip" data-filter="DOCX" type="button">DOCX</button>
-          <button class="filter-chip" data-filter="HWP/HWPX" type="button">HWP/HWPX</button>
-          <button class="filter-chip" data-filter="XLSX" type="button">XLSX</button>
-          <button class="filter-chip" data-filter="PPTX" type="button">PPTX</button>
-          <button class="filter-chip" data-filter="PDF" type="button">PDF</button>
-          <button class="filter-chip" data-filter="ODF" type="button">ODF</button>
-        </div>
-        <ul id="outline-list" class="outline-list">
-          <li>1. 시스템 개요 (OOXML / ODF / HWPX)</li>
-          <li>2. Fail-Closed 컨테이너 보안 경계</li>
-          <li>3. 결정론적 수식 및 피벗 엔진</li>
-          <li>4. ISO 32000 PDF 스튜디오</li>
+    <div class="ribbon-tools" id="ribbon-tools">
+      <div class="tool-group">
+        <span class="group-label">단락·서식</span>
+        <button class="tool-btn" data-ribbon-cmd="doc-home-bold">굵게</button>
+        <button class="tool-btn" data-ribbon-cmd="doc-home-style">단락 스타일</button>
+        <button class="tool-btn" data-ribbon-cmd="doc-ins-table">표 삽입</button>
+      </div>
+      <div class="tool-group">
+        <span class="group-label">문서 도구</span>
+        <button class="tool-btn" data-ribbon-cmd="doc-mod-toc">목차 생성</button>
+        <button class="tool-btn" data-ribbon-cmd="hwp-mod-official">행정 공문서 헤더</button>
+        <button class="tool-btn" data-ribbon-cmd="hwp-mod-manuscript">200자 원고지</button>
+      </div>
+      <div class="tool-group">
+        <span class="group-label">검토·보안</span>
+        <button class="tool-btn" data-ribbon-cmd="doc-rev-track">변경 내용 추적</button>
+        <button class="tool-btn" id="btn-run-smart-summary">문서 요약·진단</button>
+        <button class="tool-btn" id="btn-run-pii-scrub">개인정보 마스킹</button>
+      </div>
+      <div class="tool-group">
+        <span class="group-label">실행 상태</span>
+        <span id="ribbon-status-readout" class="ribbon-readout">준비됨 · 단축키 지원</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="filter-bar" aria-label="포맷별 최근 문서 필터">
+    <span class="filter-title">최근 문서 필터</span>
+    <div class="filter-chips" id="format-filter-chips">
+      <button class="chip active" data-filter="ALL">전체 (20종)</button>
+      <button class="chip" data-filter="DOCX">DOCX / DOC</button>
+      <button class="chip" data-filter="HWP">HWP / HWPX</button>
+      <button class="chip" data-filter="XLSX">XLSX / XLS</button>
+      <button class="chip" data-filter="PPTX">PPTX / PPT</button>
+      <button class="chip" data-filter="PDF">PDF</button>
+      <button class="chip" data-filter="ODF">ODT / ODS / ODP</button>
+    </div>
+    <span id="filter-status" class="filter-status">표시 중: 전체 표준 오피스 문서 포맷</span>
+  </section>
+
+  <main class="workspace-grid">
+    <aside class="sidebar-left" aria-label="문서 탐색기 및 개요">
+      <div class="panel-section">
+        <h2 class="panel-heading">문서 개요 · 북마크</h2>
+        <ul class="outline-list" id="outline-list">
+          <li class="outline-item active">1. 문서 호환성 개요</li>
+          <li class="outline-item">2. 컨테이너 무결성 및 검증</li>
+          <li class="outline-item">3. 스프레드시트 수식 및 집계</li>
+          <li class="outline-item">4. 시그니처 라벤더 디자인 토큰</li>
         </ul>
-      </aside>
+      </div>
 
-      <section id="editor-canvas" class="editor-canvas" aria-label="중앙 편집 캔버스">
-        <div class="editor-toolbar">
-          <span id="active-module-title" class="module-indicator">문서 및 HWP/HWPX 조판 편집기</span>
-          <span id="ime-status-pill" class="ime-pill">IME 대기 (UTF-8)</span>
-        </div>
+      <div class="panel-section">
+        <h2 class="panel-heading">열린 문서 목록</h2>
+        <ul class="recent-list" id="recent-doc-list">
+          <li data-fmt="DOCX">연간_아키텍처_보고서.docx</li>
+          <li data-fmt="HWP">행정_표준_기안문.hwpx</li>
+          <li data-fmt="HWP">기관_공문서_초안.hwp</li>
+          <li data-fmt="XLSX">분기_예산_시트.xlsx</li>
+          <li data-fmt="PPTX">제품_전략_발표덱.pptx</li>
+          <li data-fmt="PDF">보안_감사_인증서.pdf</li>
+          <li data-fmt="ODF">국제표준_문서.odt</li>
+        </ul>
+      </div>
+    </aside>
 
-        <div id="pane-document" class="module-pane active">
-          <div id="ksx6101-approval-banner" class="approval-banner">
-            <div class="approval-title">행정 표준 기안문 (KS X 6101 OWPML / HWP 5.0 호환)</div>
-            <div class="approval-grid">
-              <div class="approval-cell">기안<br/><strong>홍길동</strong></div>
-              <div class="approval-cell">검토<br/><strong>박서연</strong></div>
-              <div class="approval-cell">협조<br/><strong>최현우</strong></div>
-              <div class="approval-cell">결재<br/><strong>승인완료</strong></div>
+    <section class="editor-stage" id="editor-stage" aria-label="편집 캔버스">
+      <article id="pane-doc" class="module-pane active">
+        <div class="paper-sheet" id="doc-paper">
+          <div class="official-banner" id="official-header-banner">
+            <span class="agency-title">행정안전부 디지털정부실</span>
+            <span class="doc-num">문서번호: 고시 제2026-42호 · 공공 누리 표준</span>
+          </div>
+          <h1 class="doc-h1" contenteditable="true" id="doc-title-input">
+            연간 아키텍처 보고서
+          </h1>
+          <p class="doc-meta">글꼴: 본고딕 11pt · 줄간격 160% · 용지: A4 세로</p>
+          <div id="doc-editor-surface" class="doc-surface" contenteditable="true" spellcheck="false">
+            <p>1. 본 문서는 OOXML(DOCX, XLSX, PPTX), HWP 5.0 및 HWPX(KS X 6101), ODF(ODT, ODS, ODP), PDF 문서 포맷의 양방향 편집과 일괄 변환을 지원합니다.</p>
+            <p>2. 표 편집기와 200자 원고지 보기를 통해 보고서와 공문서를 정확한 레이아웃으로 작성할 수 있습니다. TODO: 보안 감사 결재선 검토를 완료합니다.</p>
+          </div>
+
+          <div class="doc-table-section" aria-label="표 도구 및 원고지">
+            <div class="doc-table-toolbar">
+              <span class="group-label">표 도구</span>
+              <button class="action-pill" id="btn-doc-add-row" type="button">+행 추가</button>
+              <button class="action-pill" id="btn-doc-merge-cells" type="button">셀 병합 토글</button>
+              <button class="action-pill" id="btn-doc-eval-table-sum" type="button">표 수식 =SUM(ABOVE) 계산</button>
+              <button class="action-pill" id="btn-doc-toggle-manuscript" type="button">200자 원고지 격자 뷰</button>
             </div>
+            <table class="doc-table" id="doc-table">
+              <thead>
+                <tr>
+                  <th>항목</th>
+                  <th>집행액</th>
+                  <th>비고</th>
+                </tr>
+              </thead>
+              <tbody id="doc-table-body">
+                <tr>
+                  <td contenteditable="true">문서 코어 모듈</td>
+                  <td contenteditable="true" data-role="num">1200</td>
+                  <td contenteditable="true">1분기</td>
+                </tr>
+                <tr>
+                  <td contenteditable="true">시트 수식 모듈</td>
+                  <td contenteditable="true" data-role="num">850</td>
+                  <td contenteditable="true">2분기</td>
+                </tr>
+                <tr class="table-sum-row">
+                  <td>합계</td>
+                  <td id="doc-table-sum-cell" contenteditable="true">=SUM(ABOVE)</td>
+                  <td id="doc-table-merge-target">자동 합산</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div id="manuscript-grid-view" class="manuscript-grid hidden" aria-label="200자 원고지 격자"></div>
           </div>
-
-          <article id="document-surface" class="a4-sheet" contenteditable="true" spellcheck="false">
-            <h1>EasyOffice 크로스플랫폼 올인원 오피스</h1>
-            <p>OOXML (ECMA-376), ODF (ISO/IEC 26300), HWP 5.0 Binary (OLE2 CFBF), HWPX (KS X 6101 OWPML), PDF (ISO 32000), RFC 4180 CSV, CommonMark Markdown 표준을 단일 워크스페이스에서 처리합니다.</p>
-          </article>
-
-          <div id="manuscript-grid-container" class="manuscript-grid hidden" aria-label="200자 원고지 격자"></div>
         </div>
+      </article>
 
-        <div id="pane-sheet" class="module-pane hidden">
-          <div class="formula-bar">
-            <span class="cell-addr-pill" id="sheet-active-cell">C1</span>
-            <input id="sheet-formula-input" type="text" value="=SUM(A1:B2)" aria-label="수식 입력줄" />
-            <button id="btn-eval-formula" class="pill-btn active" type="button">계산 실행</button>
-            <span id="sheet-eval-result" class="formula-result">결과: 1300</span>
-          </div>
-          <table class="sheet-grid">
+      <article id="pane-sheet" class="module-pane">
+        <div class="formula-bar">
+          <span class="cell-ref" id="active-cell-ref">C1</span>
+          <span class="fx-badge">fx</span>
+          <input id="formula-input" type="text" value="=SUM(A1:B1)" aria-label="수식 입력줄" />
+          <button id="eval-formula-btn" class="action-pill">계산</button>
+        </div>
+        <div class="sheet-table-wrap">
+          <table class="sheet-grid" aria-label="스프레드시트 그리드">
             <thead>
               <tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th></tr>
             </thead>
-            <tbody>
-              <tr><th>1</th><td>100</td><td>200</td><td id="cell-c1">1300</td><td>=200*15% → 30</td></tr>
-              <tr><th>2</th><td>400</td><td>600</td><td>=VLOOKUP("코어",A1:B2,2,0)</td><td>피벗 합계: 1300</td></tr>
+            <tbody id="sheet-grid-body">
+              <tr>
+                <th>1</th>
+                <td contenteditable="true" data-cell="A1">1200</td>
+                <td contenteditable="true" data-cell="B1">850</td>
+                <td contenteditable="true" data-cell="C1" class="formula-cell">2050</td>
+                <td contenteditable="true" data-cell="D1">정상</td>
+              </tr>
+              <tr>
+                <th>2</th>
+                <td contenteditable="true" data-cell="A2">450</td>
+                <td contenteditable="true" data-cell="B2">550</td>
+                <td contenteditable="true" data-cell="C2">1000</td>
+                <td contenteditable="true" data-cell="D2">검토완료</td>
+              </tr>
+              <tr>
+                <th>3</th>
+                <td contenteditable="true" data-cell="A3">합계</td>
+                <td contenteditable="true" data-cell="B3">1400</td>
+                <td contenteditable="true" data-cell="C3">3050</td>
+                <td contenteditable="true" data-cell="D3">승인</td>
+              </tr>
             </tbody>
           </table>
         </div>
+        <div class="sheet-tab-bar" id="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
+          <button class="sheet-tab active" data-sheet="Sheet1" role="tab" aria-selected="true">Sheet1</button>
+          <button class="sheet-tab" data-sheet="Sheet2" role="tab" aria-selected="false">Sheet2</button>
+          <button class="sheet-tab-add" id="btn-add-sheet" type="button" title="새 시트 추가">+ 시트 추가</button>
+          <span class="sheet-tab-hint" id="sheet-tab-status">활성 시트: Sheet1 · 교차 참조(=Sheet2!A1+50) 지원</span>
+        </div>
+      </article>
 
-        <div id="pane-slide" class="module-pane hidden">
-          <div id="slide-stage" class="slide-stage">
-            <div class="slide-upper-zone">
-              <h2>EasyOffice 16:9 와이드 프레젠테이션 스테이지</h2>
-              <p>상단 본문 영역 (y &le; 215pt) · 하단 비겹침 오브젝트 영역 (y &ge; 240pt)</p>
+      <article id="pane-slide" class="module-pane">
+        <div class="slide-canvas" id="slide-canvas">
+          <div class="slide-upper-zone">
+            <span class="slide-kicker">EASYOFFICE DECK STUDIO</span>
+            <h2 class="slide-title" contenteditable="true">제품 전략 및 문서 호환성 로드맵</h2>
+            <ul class="slide-bullets">
+              <li>단일 워크스페이스 기반 문서·시트·슬라이드·PDF 통합 편집</li>
+              <li>표준 문서 포맷 20종 양방향 변환 및 레이아웃 보존</li>
+              <li>발표자 노트·레이저 포인터·형광펜 주석 도구 제공</li>
+            </ul>
+          </div>
+          <div class="slide-lower-zone" aria-label="슬라이드 하단 카드 영역">
+            <div class="slide-card">
+              <strong>문서 호환성</strong>
+              <span>20종 표준 포맷 지원</span>
             </div>
-            <div class="slide-lower-zone">
-              <div class="slide-card">아키텍처 요약 카드</div>
-              <div class="slide-card">보안 감사 지표</div>
+            <div class="slide-card">
+              <strong>시트 계산</strong>
+              <span>122종 내장 수식 함수</span>
             </div>
-            <div id="laser-dot" class="laser-dot hidden"></div>
+            <div class="slide-card">
+              <strong>발표자 도구</strong>
+              <span>레이저 포인터 · 형광펜</span>
+            </div>
           </div>
         </div>
+      </article>
 
-        <div id="pane-pdf" class="module-pane hidden">
-          <div class="pdf-page-sheet">
-            <div id="pdf-watermark-layer" class="pdf-watermark">CONFIDENTIAL · 대외비</div>
-            <div class="pdf-header-box">ISO 32000-1 PDF 스튜디오 (y = 804..452 가시 좌표계)</div>
-            <div id="pdf-stamp-box" class="pdf-stamp-box">APPROVED · 결재완료 (2026-10-24)</div>
-            <p class="pdf-body-copy">바이트 정밀 xref 테이블, AcroForm 위젯, 자유곡선 주석 및 페이지 분할·병합을 지원합니다.</p>
+      <article id="pane-pdf" class="module-pane">
+        <div class="pdf-page" id="pdf-page">
+          <div class="pdf-watermark">CONFIDENTIAL</div>
+          <div class="pdf-header-zone">
+            <h3>ISO 32000 PDF 문서 검토 및 스탬프 스튜디오</h3>
+            <p>전자결재 스탬프, 텍스트 하이라이트, 메모 주석, 페이지 회전·병합·분할을 지원합니다.</p>
           </div>
-        </div>
-
-        <div id="pane-smart" class="module-pane hidden">
-          <div class="smart-panel">
-            <h3>오프라인 스마트 문서 보조 및 PII 개인정보 비식별화</h3>
-            <textarea id="smart-input-text" rows="4">담당자 주민번호 900101-1234567, 연락처 010-1234-5678, 이메일 audit@easyoffice.local. TODO: 10월 30일 기한까지 보안 결재 완료.</textarea>
-            <div class="smart-actions">
-              <button id="btn-run-summary" class="pill-btn active" type="button">TF 요약·액션 추출</button>
-              <button id="btn-run-pii-scrub" class="pill-btn" type="button">PII 마스킹 실행</button>
+          <div class="pdf-upper-middle-zone">
+            <div class="pdf-stamp-box" id="pdf-stamp-box">APPROVED · 결재 완료</div>
+            <div class="pdf-annot-note">
+              <strong>검토 메모</strong>
+              <p>문서 포맷 호환성 및 개인정보 보호 점검 기준을 충족합니다.</p>
             </div>
-            <pre id="smart-output-box" class="smart-output">오프라인 스마트 보조 준비 완료 (외부 네트워크 전송 0건)</pre>
           </div>
         </div>
-      </section>
+      </article>
 
-      <aside id="right-inspector" class="right-inspector" aria-label="우측 세부 속성 인스펙터">
-        <h2 class="pane-heading">세부 속성 및 보안 감사</h2>
-        <div class="inspector-group">
-          <label>용지 규격 및 리본 모드</label>
-          <div id="inspector-ribbon-mode" class="inspector-value">A4 (595 × 842 pt) · 표준 오피스</div>
+      <article id="pane-converter" class="module-pane">
+        <div class="paper-sheet converter-sheet">
+          <h2 class="doc-h1">포맷 일괄 변환 스튜디오</h2>
+          <p class="doc-meta">문서·시트·슬라이드·공문서·개방형 표준 포맷 20종 간 양방향 무손실 변환</p>
+          <div class="converter-controls">
+            <label class="converter-field">
+              <span class="prop-key">원본 포맷</span>
+              <select id="conv-source-fmt" class="ribbon-select">
+                <option value="docx" selected>DOCX (.docx)</option>
+                <option value="dotx">DOTX (.dotx)</option>
+                <option value="doc">DOC (.doc)</option>
+                <option value="hwpx">HWPX (.hwpx)</option>
+                <option value="hwtx">HWTX (.hwtx)</option>
+                <option value="hwp">HWP 5.0 (.hwp)</option>
+                <option value="hwt">HWT (.hwt)</option>
+                <option value="odt">ODT (.odt)</option>
+                <option value="xlsx">XLSX (.xlsx)</option>
+                <option value="xltx">XLTX (.xltx)</option>
+                <option value="xls">XLS (.xls)</option>
+                <option value="ods">ODS (.ods)</option>
+                <option value="csv">CSV (.csv)</option>
+                <option value="pptx">PPTX (.pptx)</option>
+                <option value="potx">POTX (.potx)</option>
+                <option value="ppsx">PPSX (.ppsx)</option>
+                <option value="ppt">PPT (.ppt)</option>
+                <option value="odp">ODP (.odp)</option>
+                <option value="pdf">PDF (.pdf)</option>
+                <option value="md">Markdown (.md)</option>
+              </select>
+            </label>
+            <label class="converter-field">
+              <span class="prop-key">대상 포맷</span>
+              <select id="conv-target-fmt" class="ribbon-select">
+                <option value="hwpx" selected>HWPX (.hwpx)</option>
+                <option value="hwp">HWP 5.0 (.hwp)</option>
+                <option value="docx">DOCX (.docx)</option>
+                <option value="dotx">DOTX (.dotx)</option>
+                <option value="doc">DOC (.doc)</option>
+                <option value="hwtx">HWTX (.hwtx)</option>
+                <option value="hwt">HWT (.hwt)</option>
+                <option value="odt">ODT (.odt)</option>
+                <option value="xlsx">XLSX (.xlsx)</option>
+                <option value="xltx">XLTX (.xltx)</option>
+                <option value="xls">XLS (.xls)</option>
+                <option value="ods">ODS (.ods)</option>
+                <option value="csv">CSV (.csv)</option>
+                <option value="pptx">PPTX (.pptx)</option>
+                <option value="potx">POTX (.potx)</option>
+                <option value="ppsx">PPSX (.ppsx)</option>
+                <option value="ppt">PPT (.ppt)</option>
+                <option value="odp">ODP (.odp)</option>
+                <option value="pdf">PDF (.pdf)</option>
+                <option value="md">Markdown (.md)</option>
+              </select>
+            </label>
+            <button id="btn-run-format-convert" class="action-pill" type="button">일괄 변환 실행</button>
+          </div>
+          <label class="converter-field">
+            <span class="prop-key">변환할 문서 본문</span>
+            <textarea id="conv-input-body" class="converter-textarea" rows="4">1. 연간 아키텍처 보고서 본문입니다.
+2. 표준 문서 컨테이너 간 문단·표·메타데이터를 보존합니다.</textarea>
+          </label>
+          <div class="converter-result-card" id="conv-result-card">
+            <div class="prop-row"><span class="prop-key">변환 상태</span><span class="prop-val" id="conv-status-val">대기 중</span></div>
+            <div class="prop-row"><span class="prop-key">컨테이너 규격</span><span class="prop-val" id="conv-spec-val">KS X 6101 OWPML</span></div>
+            <div class="prop-row"><span class="prop-key">바이트 크기</span><span class="prop-val" id="conv-bytes-val">-</span></div>
+            <div class="prop-row"><span class="prop-key">복원 검증</span><span class="prop-val" id="conv-preview-val">문단 2개 · 무결성 확인</span></div>
+          </div>
         </div>
-        <div class="inspector-group">
-          <label>자간 / 장평</label>
-          <div class="inspector-value">자간 0% · 장평 100%</div>
-        </div>
-        <div class="inspector-group">
-          <label>컨테이너 보안 상태</label>
-          <div id="security-status-box" class="inspector-value status-safe">Fail-Closed 검증 통과 (ZIP / OLE2 / XML SAFE)</div>
-        </div>
-      </aside>
-    </main>
+      </article>
+    </section>
 
-    <footer class="bottom-statusbar" role="contentinfo">
-      <div class="status-left">
-        <span id="platform-badge" class="status-item">플랫폼 감지 중...</span>
-        <span id="format-spec-badge" class="status-item">OOXML (ECMA-376)</span>
-        <span id="command-log-badge" class="status-item">리본 카탈로그 140종 준비</span>
+    <aside class="sidebar-right" aria-label="속성 인스펙터 및 문서 보조 도구">
+      <div class="panel-section">
+        <h2 class="panel-heading">문서 속성 인스펙터</h2>
+        <div class="prop-row"><span class="prop-key">활성 모듈</span><span class="prop-val" id="insp-module">DOC (문서)</span></div>
+        <div class="prop-row"><span class="prop-key">표준 규격</span><span class="prop-val" id="insp-spec">ECMA-376 OOXML</span></div>
+        <div class="prop-row"><span class="prop-key">보안 점검</span><span class="prop-val status-ok" id="insp-sec">정상 (검증 완료)</span></div>
+        <div class="prop-row"><span class="prop-key">입력기 상태</span><span class="prop-val" id="insp-ime">한국어 입력 준비</span></div>
       </div>
-      <div class="status-right">
-        <span id="zoom-readout" class="status-item">100%</span>
+
+      <div class="panel-section">
+        <h2 class="panel-heading">문서 요약 · 개인정보 점검</h2>
+        <div class="smart-box" id="smart-assistant-output">
+          <div class="smart-stat-line">핵심 요약 및 문장 진단 대기 중</div>
+          <p class="smart-desc">상단 리본의 [문서 요약·진단] 또는 [개인정보 마스킹] 도구를 실행하면 결과가 이곳에 표시됩니다.</p>
+        </div>
       </div>
-    </footer>
+    </aside>
+  </main>
+
+  <footer class="statusbar" role="contentinfo">
+    <span id="status-left">준비 완료 · 연간 아키텍처 보고서</span>
+    <span id="status-center">보안·개인정보 점검 완료</span>
+    <div class="status-controls">
+      <div class="status-btn-group" id="status-view-modes" role="group" aria-label="보기 모드 전환">
+        <button class="status-chip active" data-view-mode="edit" type="button">편집</button>
+        <button class="status-chip" data-view-mode="read" type="button">열람</button>
+        <button class="status-chip" data-view-mode="present" type="button">발표</button>
+      </div>
+      <div class="status-btn-group" id="status-zoom-controls" role="group" aria-label="화면 배율 조정">
+        <button class="status-chip" data-zoom="80" type="button">80%</button>
+        <button class="status-chip active" data-zoom="100" type="button">100%</button>
+        <button class="status-chip" data-zoom="125" type="button">125%</button>
+      </div>
+      <span id="status-right">페이지 보기 · 100%</span>
+    </div>
+  </footer>
+
+  <div id="cmd-modal" class="cmd-modal hidden" role="dialog" aria-modal="true" aria-label="빠른 명령 팔레트">
+    <div class="cmd-dialog">
+      <input id="cmd-search-input" type="text" placeholder="명령 검색 (예: 다크 모드, 시트 전환, 원고지, 포맷 일괄 변환, 개인정보 마스킹)..." />
+      <ul id="cmd-results" class="cmd-results">
+        <li data-cmd="switch-doc">문서(DOCX/HWPX) 편집기로 전환</li>
+        <li data-cmd="switch-sheet">시트(XLSX/ODS) 수식 편집기로 전환</li>
+        <li data-cmd="switch-slide">슬라이드(PPTX/ODP) 프레젠테이션으로 전환</li>
+        <li data-cmd="switch-pdf">PDF 스튜디오로 전환</li>
+        <li data-cmd="switch-converter">포맷 일괄 변환 스튜디오 열기</li>
+        <li data-cmd="toggle-hwp-ribbon">한글(HWP) / 표준 오피스 리본 전환</li>
+        <li data-cmd="scrub-pii">주민번호·전화번호·이메일 개인정보 마스킹</li>
+        <li data-cmd="toggle-theme">라이트 / 다크 테마 즉시 전환</li>
+      </ul>
+    </div>
   </div>
-  <script src="./app.js"></script>
+
+  <script src="app.js"></script>
 </body>
 </html>

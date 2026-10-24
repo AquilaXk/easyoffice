@@ -1,5 +1,6 @@
 use easyoffice_formats::{
-    CommonMarkCodec, CsvCodec, DocumentFormat, EasyOfficeError, FormatDetector, Ole2SecurityGuard,
+    deflate_raw, inflate_raw, CommonMarkCodec, CsvCodec, DocumentFormat, EasyOfficeError,
+    FormatDetector, Hwp5Codec, Hwp5DocumentPayload, Hwp5ParagraphRecord, Ole2SecurityGuard,
     PdfDocumentModel, PdfPageModel, PdfSerializer, UniversalDocumentModel,
     UniversalFormatConverter, XmlSanitizer, ZipEntryDescriptor, ZipSecurityGuard,
     ZipSecurityPolicy,
@@ -44,13 +45,16 @@ impl EasyOfficeIpcRouter {
         match command {
             "get_workspace_bootstrap" => Self::handle_workspace_bootstrap(),
             "detect_format" => Self::handle_detect_format(payload),
-            "evaluate_sheet" => Self::handle_evaluate_sheet(payload),
+            "evaluate_sheet" | "evaluate_sheet_formula" => Self::handle_evaluate_sheet(payload),
+            "evaluate_workbook_formula" => Self::handle_evaluate_workbook_formula(payload),
             "compute_layout" => Self::handle_compute_layout(payload),
             "audit_security" => Self::handle_audit_security(payload),
             "execute_ribbon_command" => Self::handle_execute_ribbon_command(payload),
             "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
             "run_smart_assistant" => Self::handle_run_smart_assistant(payload),
             "scrub_pii" => Self::handle_scrub_pii(payload),
+            "convert_document_format" => Self::handle_convert_document_format(payload),
+            "get_ribbon_category_commands" => Self::handle_get_ribbon_category_commands(payload),
             other => Err(EasyOfficeError::InvalidArgument(format!(
                 "알 수 없는 Tauri IPC 명령입니다: {other}"
             ))),
@@ -322,6 +326,179 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
+    fn handle_evaluate_workbook_formula(payload: &str) -> Result<String, EasyOfficeError> {
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet("Sheet1");
+        wb.add_sheet("Sheet2");
+        wb.set_cell("Sheet2", "A1", "100")?;
+        wb.set_cell("Sheet1", "A1", "1200")?;
+        wb.set_cell("Sheet1", "B1", "850")?;
+        let expr = if payload.trim().is_empty() {
+            "=Sheet2!A1+50"
+        } else {
+            payload.trim()
+        };
+        wb.set_cell("Sheet1", "C1", expr)?;
+        let val = wb.evaluate_cell("Sheet1", "C1");
+        Ok(format!(
+            "{{\"sheet\":\"Sheet1\",\"formula\":\"{}\",\"value\":\"{}\"}}",
+            expr,
+            val.to_display_string()
+        ))
+    }
+
+    fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
+        let parts: Vec<&str> = payload.split('|').collect();
+        let (src_ext, dst_ext, title, body) = if let Some(first) = parts.first() {
+            if let Some((s, d)) = first.split_once("->") {
+                (
+                    s.trim(),
+                    d.trim(),
+                    parts.get(1).copied().unwrap_or("변환_문서").trim(),
+                    parts.get(2).copied().unwrap_or("본문 텍스트").trim(),
+                )
+            } else if parts.len() >= 2 {
+                (
+                    parts[0].trim(),
+                    parts[1].trim(),
+                    parts.get(2).copied().unwrap_or("변환_문서").trim(),
+                    parts.get(3).copied().unwrap_or("본문 텍스트").trim(),
+                )
+            } else {
+                ("docx", "hwpx", "변환_문서", "본문 텍스트")
+            }
+        } else {
+            ("docx", "hwpx", "변환_문서", "본문 텍스트")
+        };
+
+        let src_fmt = DocumentFormat::from_extension(src_ext).ok_or_else(|| {
+            EasyOfficeError::InvalidArgument(format!("지원하지 않는 원본 포맷: {src_ext}"))
+        })?;
+        let dst_fmt = DocumentFormat::from_extension(dst_ext).ok_or_else(|| {
+            EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
+        })?;
+
+        let mut paragraphs: Vec<String> = body
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        if paragraphs.is_empty() {
+            paragraphs.push(title.to_string());
+        }
+
+        let model = UniversalDocumentModel {
+            title: title.to_string(),
+            paragraphs,
+            tables: vec![vec![
+                vec!["항목".to_string(), "값".to_string()],
+                vec!["원본포맷".to_string(), src_fmt.extension().to_string()],
+            ]],
+            sheet_cells: vec![
+                (0, 0, title.to_string()),
+                (0, 1, "100".to_string()),
+                (1, 1, "=B1*2".to_string()),
+            ],
+            slides: vec![(
+                title.to_string(),
+                vec![body.to_string()],
+                "발표자 노트".to_string(),
+            )],
+            official_agency: Some("행정안전부".to_string()),
+        };
+
+        let src_bytes = UniversalFormatConverter::encode(&model, src_fmt)?;
+        let dst_bytes =
+            UniversalFormatConverter::convert(&src_bytes, Some(src_fmt.extension()), dst_fmt)?;
+        let (detected_dst, decoded) =
+            UniversalFormatConverter::decode(&dst_bytes, Some(dst_fmt.extension()))?;
+
+        Ok(format!(
+            concat!(
+                "{{",
+                "\"sourceFormat\":\"{}\",",
+                "\"targetFormat\":\"{}\",",
+                "\"sourceBytes\":{},",
+                "\"outputBytes\":{},",
+                "\"targetBytes\":{},",
+                "\"detectedTarget\":\"{}\",",
+                "\"containerFamily\":\"{}\",",
+                "\"specification\":\"{}\",",
+                "\"paragraphCount\":{},",
+                "\"title\":\"{}\",",
+                "\"status\":\"OK\"",
+                "}}"
+            ),
+            src_fmt.extension(),
+            dst_fmt.extension(),
+            src_bytes.len(),
+            dst_bytes.len(),
+            dst_bytes.len(),
+            detected_dst.extension(),
+            dst_fmt.container_family().as_str(),
+            dst_fmt.standard_specification(),
+            decoded.paragraphs.len(),
+            Self::escape_json_str(&decoded.title)
+        ))
+    }
+
+    fn handle_get_ribbon_category_commands(payload: &str) -> Result<String, EasyOfficeError> {
+        let (mod_str, cat_str) = payload.split_once('|').unwrap_or(("DOC", payload.trim()));
+        let module = match mod_str.trim().to_ascii_uppercase().as_str() {
+            "HWP" | "HWPX" => OfficeModuleKind::Hwp,
+            "SHEET" | "XLSX" | "XLS" => OfficeModuleKind::Sheet,
+            "SLIDE" | "PPTX" | "PPT" => OfficeModuleKind::Slide,
+            "PDF" => OfficeModuleKind::Pdf,
+            _ => OfficeModuleKind::Document,
+        };
+        let (category_key, category_label) = match cat_str.trim().to_ascii_lowercase().as_str() {
+            "home" | "홈" => ("home", "홈"),
+            "insert" | "삽입" => ("insert", "삽입"),
+            "layout" | "레이아웃" | "쪽·원고지" => ("layout", "레이아웃"),
+            "formulas" | "formulasanddata" | "수식·데이터" | "productivity" | "생산성·보안" => {
+                ("formulasAndData", "수식·데이터")
+            }
+            "module" | "modulespecific" | "모듈 전용" => ("moduleSpecific", "모듈 전용"),
+            "review" | "검토" => ("review", "검토"),
+            "view" | "보기" => ("view", "보기"),
+            _ => ("home", "홈"),
+        };
+        let items: Vec<String> = RibbonCommandRouter::all_commands()
+            .into_iter()
+            .filter(|c| c.module == module && c.category_key == category_key)
+            .map(|c| {
+                format!(
+                    "{{\"id\":\"{}\",\"title\":\"{}\",\"shortcut\":\"{}\",\"category\":\"{}\"}}",
+                    Self::escape_json_str(&c.id),
+                    Self::escape_json_str(c.title),
+                    Self::escape_json_str(c.shortcut),
+                    Self::escape_json_str(category_label)
+                )
+            })
+            .collect();
+        Ok(format!(
+            "{{\"module\":\"{:?}\",\"category\":\"{}\",\"commands\":[{}]}}",
+            module,
+            Self::escape_json_str(cat_str.trim()),
+            items.join(",")
+        ))
+    }
+
+    fn escape_json_str(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for ch in s.chars() {
+            match ch {
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
     fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
         let cleaned: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
         if !cleaned.len().is_multiple_of(2) {
@@ -362,6 +539,33 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     if detected_docx != DocumentFormat::Docx {
         return Err(EasyOfficeError::CorruptedContainer(
             "DOCX 포맷 감지 실패".to_string(),
+        ));
+    }
+
+    let raw_deflate_input = "EasyOffice RFC 1951 DEFLATE Self-Test Vector ".repeat(16);
+    let deflated = deflate_raw(raw_deflate_input.as_bytes());
+    let inflated = inflate_raw(&deflated, 65_536)?;
+    if inflated != raw_deflate_input.as_bytes() {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "RFC 1951 DEFLATE 라운드트립 불일치".to_string(),
+        ));
+    }
+    let hwp_compressed_payload = Hwp5DocumentPayload {
+        version: (5, 0, 3, 0),
+        is_template: false,
+        agency_name: "행정안전부".to_string(),
+        document_number: "제2026-55호".to_string(),
+        paragraphs: vec![Hwp5ParagraphRecord {
+            text: "HWP 5.0 압축 스트림 검증".to_string(),
+            style_name: "본문".to_string(),
+            is_official_header: false,
+        }],
+        table_cells: vec![vec!["항목".to_string(), "통과".to_string()]],
+    };
+    let packed_comp_hwp = Hwp5Codec::pack_compressed(&hwp_compressed_payload)?;
+    if Hwp5Codec::unpack(&packed_comp_hwp)? != hwp_compressed_payload {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "HWP 5.0 압축 스트림(flags=0x01) 라운드트립 불일치".to_string(),
         ));
     }
 
@@ -516,7 +720,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // Verify 140 ribbon commands, RibbonLayoutStyle, and ContextualObjectToolKind
     let all_ribbon = RibbonCommandRouter::all_commands();
     if all_ribbon.len() != 140 {
         return Err(EasyOfficeError::InvalidArgument(format!(
@@ -540,7 +743,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // Verify DocumentDomainEngine, SlideDomainEngine, PdfDomainEngine
     let tbl = DocumentTableModel::new(vec![
         vec!["100".to_string()],
         vec!["250".to_string()],
@@ -573,7 +775,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // Verify LocalSmartAssistant, DocumentSecurityAuditor, and C-ABI FFI
     let pii_res =
         DocumentSecurityAuditor::scan_and_scrub_pii("900101-1234567 010-1234-5678 a@b.kr");
     if pii_res.total_masked_count() != 3 {
@@ -585,6 +786,24 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     if !ffi_json.contains("쪽·원고지") {
         return Err(EasyOfficeError::InvalidArgument(
             "C-ABI FFI 라운드트립 검증 실패".to_string(),
+        ));
+    }
+
+    let conv_json = EasyOfficeIpcRouter::dispatch(
+        "convert_document_format",
+        "docx->hwpx|기관보고서|1. 개요\n2. 세부 계획",
+    )?;
+    if !conv_json.contains("\"targetFormat\":\"hwpx\"") || !conv_json.contains("\"status\":\"OK\"")
+    {
+        return Err(EasyOfficeError::InvalidArgument(
+            "IPC 포맷 변환 검증 실패".to_string(),
+        ));
+    }
+    let cat_cmds_json =
+        EasyOfficeIpcRouter::dispatch("get_ribbon_category_commands", "HWP|module")?;
+    if !cat_cmds_json.contains("hwp-mod-header") || !cat_cmds_json.contains("hwp-mod-manuscript") {
+        return Err(EasyOfficeError::InvalidArgument(
+            "IPC 리본 카테고리 명령 조회 검증 실패".to_string(),
         ));
     }
 
@@ -609,7 +828,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
 
     Ok(format!(
-        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=9)",
+        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=12)",
         DesktopPlatform::current().os_label()
     ))
 }
@@ -633,6 +852,22 @@ mod tests {
                 .unwrap();
         assert!(sheet_res.contains("\"value\":\"400\""));
         assert!(sheet_res.contains("\"conditionalMatch\":true"));
+
+        let wb_res =
+            EasyOfficeIpcRouter::dispatch("evaluate_workbook_formula", "=Sheet2!A1+50").unwrap();
+        assert!(wb_res.contains("\"value\":\"150\""));
+
+        let conv_res = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            "docx->hwpx|연간계획서|1. 추진 배경\n2. 실행 계획",
+        )
+        .unwrap();
+        assert!(conv_res.contains("\"targetFormat\":\"hwpx\""));
+        assert!(conv_res.contains("\"status\":\"OK\""));
+
+        let cat_res =
+            EasyOfficeIpcRouter::dispatch("get_ribbon_category_commands", "HWP|module").unwrap();
+        assert!(cat_res.contains("hwp-mod-manuscript"));
 
         let layout_res = EasyOfficeIpcRouter::dispatch("compute_layout", "landscape").unwrap();
         assert!(layout_res.contains("\"widthPt\":842.0"));

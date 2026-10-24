@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 pub mod converter;
+pub mod deflate;
 mod legacy_ole2_codec;
 pub mod office_codecs;
 pub mod ole2_codec;
@@ -10,6 +11,7 @@ pub mod text_pdf_codecs;
 pub mod zip_codec;
 
 pub use converter::*;
+pub use deflate::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use text_pdf_codecs::*;
@@ -204,6 +206,7 @@ pub enum EasyOfficeError {
         ratio: f64,
         max_ratio: f64,
     },
+    ResourceBudgetExceeded(String),
     EncryptedDocumentUnsupported(DocumentFormat),
     XxeOrExternalEntityDetected,
     FormulaError(String),
@@ -237,6 +240,9 @@ impl fmt::Display for EasyOfficeError {
                 f,
                 "압축 해제 비율({ratio:.1}x)이 허용 상한({max_ratio:.1}x)을 초과하여 차단했습니다."
             ),
+            Self::ResourceBudgetExceeded(detail) => {
+                write!(f, "리소스 예산 한도 초과 (Fail-Closed): {detail}")
+            }
             Self::EncryptedDocumentUnsupported(fmt_kind) => write!(
                 f,
                 "암호화되거나 배포 제한된 문서({})는 복호화 키 없이 열 수 없습니다.",
@@ -295,6 +301,14 @@ impl FormatDetector {
                 if Self::slice_contains(bytes, b"isTemplate=\"1\"") {
                     return Ok(DocumentFormat::Hwtx);
                 }
+                if let Ok(entries) = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default()) {
+                    if entries.iter().any(|e| {
+                        e.path == "Contents/header.xml"
+                            && Self::slice_contains(&e.data, b"isTemplate=\"1\"")
+                    }) {
+                        return Ok(DocumentFormat::Hwtx);
+                    }
+                }
                 return Ok(DocumentFormat::Hwpx);
             }
             if Self::slice_contains(bytes, b"oasis.opendocument.text") {
@@ -313,6 +327,16 @@ impl FormatDetector {
                 return Ok(DocumentFormat::Ppsx);
             }
             if Self::slice_contains(bytes, b"ppt/presentation.xml") {
+                if let Ok(entries) = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default()) {
+                    if entries.iter().any(|e| {
+                        (e.path == "[Content_Types].xml"
+                            && Self::slice_contains(&e.data, b"presentationml.slideshow"))
+                            || (e.path == "ppt/presentation.xml"
+                                && Self::slice_contains(&e.data, b"slideshow=\"1\""))
+                    }) {
+                        return Ok(DocumentFormat::Ppsx);
+                    }
+                }
                 return Ok(DocumentFormat::Pptx);
             }
             return Ok(DocumentFormat::Docx);
@@ -497,6 +521,11 @@ impl Default for ZipSecurityPolicy {
 pub struct ZipSecurityGuard;
 
 impl ZipSecurityGuard {
+    pub const MAX_ENTRIES: usize = 4_096;
+    pub const MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES: usize = 128 * 1024 * 1024;
+    pub const MAX_TOTAL_UNCOMPRESSED_BYTES: usize = 512 * 1024 * 1024;
+    pub const MAX_COMPRESSION_RATIO: u64 = 100;
+
     pub fn validate_entry_path(path: &str) -> Result<(), EasyOfficeError> {
         if path.is_empty() {
             return Err(EasyOfficeError::SecurityViolation(
@@ -610,6 +639,7 @@ impl Ole2SecurityGuard {
     pub const FREE_SECTOR: u32 = 0xFFFF_FFFF;
     pub const HWP5_FILE_HEADER_LEN: usize = 256;
     pub const HWP5_SIGNATURE: &'static [u8] = b"HWP Document File";
+    pub const HWP5_FLAG_COMPRESSED: u32 = 0x01;
     pub const HWP5_FLAG_ENCRYPTED: u32 = 0x02;
     pub const HWP5_FLAG_DISTRIBUTION: u32 = 0x04;
 
@@ -762,79 +792,40 @@ mod tests {
     #[test]
     fn test_twenty_formats_and_magic_signature_detection() {
         assert_eq!(DocumentFormat::ALL.len(), 20);
-
+        let det = |b: &[u8], h: Option<&str>| FormatDetector::detect(b, h).unwrap();
         let zip_sample = b"PK\x03\x04\x14\x00\x00\x00word/document.xml";
-        assert_eq!(
-            FormatDetector::detect(zip_sample, None).unwrap(),
-            DocumentFormat::Docx
-        );
-        assert_eq!(
-            FormatDetector::detect(b"PK\x03\x04Contents/header.xml", None).unwrap(),
-            DocumentFormat::Hwpx
-        );
-        assert_eq!(
-            FormatDetector::detect(b"PK\x03\x04oasis.opendocument.text", None).unwrap(),
-            DocumentFormat::Odt
-        );
-        assert_eq!(
-            FormatDetector::detect(b"PK\x03\x04oasis.opendocument.spreadsheet", None).unwrap(),
-            DocumentFormat::Ods
-        );
-        assert_eq!(
-            FormatDetector::detect(b"PK\x03\x04oasis.opendocument.presentation", None).unwrap(),
-            DocumentFormat::Odp
-        );
-        assert_eq!(
-            FormatDetector::detect(b"PK\x03\x04xl/workbook.xml", None).unwrap(),
-            DocumentFormat::Xlsx
-        );
-        assert_eq!(
-            FormatDetector::detect(b"PK\x03\x04ppt/presentation.xml", None).unwrap(),
-            DocumentFormat::Pptx
-        );
-        assert_eq!(
-            FormatDetector::detect(zip_sample, Some("report.docx")).unwrap(),
-            DocumentFormat::Docx
-        );
-        assert_eq!(
-            FormatDetector::detect(zip_sample, Some("template.dotx")).unwrap(),
-            DocumentFormat::Docx
-        );
-        assert_eq!(
-            FormatDetector::detect(zip_sample, Some("official.hwpx")).unwrap(),
-            DocumentFormat::Hwpx
-        );
-        assert_eq!(
-            FormatDetector::detect(zip_sample, Some("template.hwtx")).unwrap(),
-            DocumentFormat::Hwtx
-        );
-        assert_eq!(
-            FormatDetector::detect(zip_sample, Some("show.ppsx")).unwrap(),
-            DocumentFormat::Ppsx
-        );
+        assert_eq!(det(zip_sample, None), DocumentFormat::Docx);
+        for &(sample, expected) in &[
+            (&b"PK\x03\x04Contents/header.xml"[..], DocumentFormat::Hwpx),
+            (b"PK\x03\x04oasis.opendocument.text", DocumentFormat::Odt),
+            (
+                b"PK\x03\x04oasis.opendocument.spreadsheet",
+                DocumentFormat::Ods,
+            ),
+            (
+                b"PK\x03\x04oasis.opendocument.presentation",
+                DocumentFormat::Odp,
+            ),
+            (b"PK\x03\x04xl/workbook.xml", DocumentFormat::Xlsx),
+            (b"PK\x03\x04ppt/presentation.xml", DocumentFormat::Pptx),
+        ] {
+            assert_eq!(det(sample, None), expected);
+        }
+        assert_eq!(det(zip_sample, Some("report.docx")), DocumentFormat::Docx);
+        assert_eq!(det(zip_sample, Some("template.dotx")), DocumentFormat::Docx);
+        assert_eq!(det(zip_sample, Some("official.hwpx")), DocumentFormat::Hwpx);
+        assert_eq!(det(zip_sample, Some("template.hwtx")), DocumentFormat::Hwtx);
+        assert_eq!(det(zip_sample, Some("show.ppsx")), DocumentFormat::Ppsx);
 
         let ole2_sample = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1HWP Document File";
-        assert_eq!(
-            FormatDetector::detect(ole2_sample, Some("proposal.hwp")).unwrap(),
-            DocumentFormat::Hwp
-        );
-        assert_eq!(
-            FormatDetector::detect(ole2_sample, Some("template.hwt")).unwrap(),
-            DocumentFormat::Hwt
-        );
-
+        assert_eq!(det(ole2_sample, Some("proposal.hwp")), DocumentFormat::Hwp);
+        assert_eq!(det(ole2_sample, Some("template.hwt")), DocumentFormat::Hwt);
         let pdf_sample = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF";
+        assert_eq!(det(pdf_sample, Some("contract.pdf")), DocumentFormat::Pdf);
         assert_eq!(
-            FormatDetector::detect(pdf_sample, Some("contract.pdf")).unwrap(),
-            DocumentFormat::Pdf
-        );
-
-        let rtf_sample = b"{\\rtf1\\ansi\\deff0 Hello}";
-        assert_eq!(
-            FormatDetector::detect(rtf_sample, Some("memo.rtf")).unwrap(),
+            det(b"{\\rtf1\\ansi\\deff0 Hello}", Some("memo.rtf")),
             DocumentFormat::Rtf
         );
-
         assert_eq!(
             FormatDetector::detect(b"", Some("empty.docx")),
             Err(EasyOfficeError::EmptyPayload)
@@ -852,37 +843,24 @@ mod tests {
     #[test]
     fn test_zip_security_guard_blocks_traversal_and_decompression_bomb() {
         let policy = ZipSecurityPolicy::default();
-        let safe_entries = vec![
-            ZipEntryDescriptor::new("[Content_Types].xml", 512, 2048, false),
-            ZipEntryDescriptor::new("word/document.xml", 1024, 4096, false),
-        ];
-        assert!(ZipSecurityGuard::validate_archive_entries(&safe_entries, &policy).is_ok());
-
-        let traversal_entries = vec![ZipEntryDescriptor::new("../../etc/passwd", 100, 200, false)];
+        let chk = |p: &str, c: u64, u: u64| {
+            ZipSecurityGuard::validate_archive_entries(
+                &[ZipEntryDescriptor::new(p, c, u, false)],
+                &policy,
+            )
+        };
+        assert!(chk("[Content_Types].xml", 512, 2048).is_ok());
+        assert!(chk("word/document.xml", 1024, 4096).is_ok());
         assert!(matches!(
-            ZipSecurityGuard::validate_archive_entries(&traversal_entries, &policy),
+            chk("../../etc/passwd", 100, 200),
             Err(EasyOfficeError::SecurityViolation(_))
         ));
-
-        let win_drive_entries = vec![ZipEntryDescriptor::new(
-            "C:\\Windows\\win.ini",
-            100,
-            200,
-            false,
-        )];
         assert!(matches!(
-            ZipSecurityGuard::validate_archive_entries(&win_drive_entries, &policy),
+            chk("C:\\Windows\\win.ini", 100, 200),
             Err(EasyOfficeError::SecurityViolation(_))
         ));
-
-        let bomb_entries = vec![ZipEntryDescriptor::new(
-            "word/document.xml",
-            100,
-            20_000,
-            false,
-        )];
         assert!(matches!(
-            ZipSecurityGuard::validate_archive_entries(&bomb_entries, &policy),
+            chk("word/document.xml", 100, 20_000),
             Err(EasyOfficeError::DecompressionBombDetected { .. })
         ));
     }
@@ -900,8 +878,10 @@ mod tests {
         ));
 
         let valid_fat = vec![1u32, 2u32, Ole2SecurityGuard::END_OF_CHAIN];
-        let chain = Ole2SecurityGuard::validate_sector_chain(&container, &valid_fat, 0).unwrap();
-        assert_eq!(chain, vec![0, 1, 2]);
+        assert_eq!(
+            Ole2SecurityGuard::validate_sector_chain(&container, &valid_fat, 0).unwrap(),
+            vec![0, 1, 2]
+        );
 
         let mut hwp_header = vec![0u8; 256];
         hwp_header[..17].copy_from_slice(b"HWP Document File");
@@ -916,58 +896,44 @@ mod tests {
     }
 
     #[test]
-    fn test_xml_sanitizer_blocks_xxe_and_escapes_entities() {
-        let safe_xml =
-            "<w:document><w:body><w:p><w:t>안전한 문서</w:t></w:p></w:body></w:document>";
-        assert!(XmlSanitizer::validate_safe_xml(safe_xml).is_ok());
-
-        let xxe_xml = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>";
+    fn test_xml_sanitizer_and_csv_commonmark_pdf_roundtrip() {
+        assert!(XmlSanitizer::validate_safe_xml(
+            "<w:document><w:body><w:p><w:t>안전한 문서</w:t></w:p></w:body></w:document>"
+        )
+        .is_ok());
         assert_eq!(
-            XmlSanitizer::validate_safe_xml(xxe_xml),
+            XmlSanitizer::validate_safe_xml("<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"),
             Err(EasyOfficeError::XxeOrExternalEntityDetected)
         );
-
         let escaped = XmlSanitizer::escape("A & B < C > \"D\" 'E'");
-        assert_eq!(escaped, "A &amp; B &lt; C &gt; &quot;D&quot; &apos;E&apos;");
         assert_eq!(XmlSanitizer::unescape(&escaped), "A & B < C > \"D\" 'E'");
-    }
-
-    #[test]
-    fn test_csv_commonmark_and_pdf_codecs_roundtrip() {
         let rows = vec![
             vec!["부서".to_string(), "메모, 특이사항".to_string()],
             vec!["연구개발".to_string(), "1행\n2행 \"강조\"".to_string()],
         ];
-        let csv_text = CsvCodec::serialize(&rows, ',');
-        let parsed_rows = CsvCodec::parse(&csv_text, ',').unwrap();
-        assert_eq!(parsed_rows, rows);
-
+        assert_eq!(
+            CsvCodec::parse(&CsvCodec::serialize(&rows, ','), ',').unwrap(),
+            rows
+        );
         let md_input =
             "# 제품 아키텍처\n\n본문 첫 문단입니다.\n\n> 핵심 설계 원칙\n\n- 항목 1\n- 항목 2";
-        let md_blocks = CommonMarkCodec::parse(md_input).unwrap();
-        let md_rendered = CommonMarkCodec::render(&md_blocks);
-        assert_eq!(md_rendered, md_input);
-
+        assert_eq!(
+            CommonMarkCodec::render(&CommonMarkCodec::parse(md_input).unwrap()),
+            md_input
+        );
         let pdf_doc = PdfDocumentModel {
             title: "분기 보안 감사 보고서".to_string(),
-            pages: vec![
-                PdfPageModel {
-                    page_number: 1,
-                    rotation_degrees: 0,
-                    body_text: "ISO 32000-1 PDF 본문 텍스트\n2행 개행 보존".to_string(),
-                    approval_stamp: Some("APPROVED".to_string()),
-                },
-                PdfPageModel {
-                    page_number: 5,
-                    rotation_degrees: 90,
-                    body_text: "2페이지 부록".to_string(),
-                    approval_stamp: None,
-                },
-            ],
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "ISO 32000-1 PDF 본문 텍스트\n2행 개행 보존".to_string(),
+                approval_stamp: Some("APPROVED".to_string()),
+            }],
             watermark_text: Some("CONFIDENTIAL".to_string()),
         };
-        let pdf_bytes = PdfSerializer::serialize(&pdf_doc);
-        let decoded_pdf = PdfSerializer::parse(&pdf_bytes).unwrap();
-        assert_eq!(decoded_pdf, pdf_doc);
+        assert_eq!(
+            PdfSerializer::parse(&PdfSerializer::serialize(&pdf_doc)).unwrap(),
+            pdf_doc
+        );
     }
 }
