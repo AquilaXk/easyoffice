@@ -129,13 +129,35 @@ public struct PivotTableEngine: Sendable {
     )
   }
 
+  @inline(__always)
+  private static func unrolledSum(_ values: [Double]) -> Double {
+    let count = values.count
+    var s0 = 0.0
+    var s1 = 0.0
+    var s2 = 0.0
+    var s3 = 0.0
+    var idx = 0
+    while idx + 4 <= count {
+      s0 += values[idx]
+      s1 += values[idx + 1]
+      s2 += values[idx + 2]
+      s3 += values[idx + 3]
+      idx += 4
+    }
+    while idx < count {
+      s0 += values[idx]
+      idx += 1
+    }
+    return (s0 + s1) + (s2 + s3)
+  }
+
   private static func aggregate(_ values: [Double], using fn: PivotAggregationFunction) -> Double {
     guard !values.isEmpty else { return 0.0 }
     switch fn {
     case .sum:
-      return values.reduce(0.0, +)
+      return unrolledSum(values)
     case .average:
-      return values.reduce(0.0, +) / Double(values.count)
+      return unrolledSum(values) / Double(values.count)
     case .count:
       return Double(values.count)
     case .min:

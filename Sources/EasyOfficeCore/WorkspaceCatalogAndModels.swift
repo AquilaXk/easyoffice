@@ -386,7 +386,7 @@ public struct WorkspaceHubCatalog: Sendable {
         comments: [
           DocumentCommentThread(
             anchorParagraphID: p3.id, author: "보안 리뷰어",
-            message: "매직 바이트 컨테이너 검증 규칙이 본문 2절에도 연결되어야 합니다.", replies: ["반영 완료했습니다."])
+            message: "표준 문서 서식 기준이 본문 2절 실행 계획과 일관되게 연결되어야 합니다.", replies: ["반영 완료했습니다."])
         ]
       )
       return WorkspaceTabItem(
@@ -442,29 +442,29 @@ public struct WorkspaceHubCatalog: Sendable {
         aspectRatio: .widescreen16x9,
         slides: [
           SlideModel(
-            title: "EasyOffice for macOS",
-            subtitle: "시그니처 라벤더 디자인 시스템과 올인원 문서 워크스페이스",
-            bulletPoints: ["단일 멀티 탭 윈도우에서 5대 오피스 포맷 즉시 편집", "컨텍스트 리본과 우측 인스펙터 결합으로 세로 편집 공간 극대화"],
-            speakerNotes: "오프닝 슬라이드: macOS 네이티브 구동 성능과 HWPX/OOXML/PDF 통합 강조",
+            title: "2026 상반기 전략 로드맵",
+            subtitle: "전사 문서 워크스페이스 표준화 및 분기별 실행 과제",
+            bulletPoints: ["부서 간 표준 양식 단일화 및 결재 리드타임 35% 단축", "분기별 핵심 성과 지표(KPI) 실시간 시트 연동 체계 구축"],
+            speakerNotes: "오프닝 슬라이드: 상반기 전사 문서 표준화 목표 및 분기별 KPI 공유",
             masterLayout: .titleSlide,
             elements: [
               SlideCanvasElement(
-                title: "핵심 가치 배너", bodyText: "문서 · 시트 · 슬라이드 · PDF 통합 편집 환경", x: 380, y: 245,
-                width: 240, height: 155, kind: .roundedRectangleShape)
+                title: "1분기 핵심 과제", bodyText: "표준 문서 양식 배포 및 전 부서 파일럿 전환 완료", x: 340, y: 255,
+                width: 260, height: 150, kind: .roundedRectangleShape)
             ]
           ),
           SlideModel(
-            title: "핵심 모듈 구성",
-            subtitle: "Document · HWP/HWPX · Sheet · Slide · PDF Studio",
-            bulletPoints: ["매직 바이트 기반 Fail-Closed 보안 컨테이너 검증", "결정론적 A1 수식 연산 및 PDF 양방향 변환"],
-            speakerNotes: "두 번째 슬라이드: 보안 및 포맷 호환성 설명",
+            title: "핵심 실행 모듈 및 거버넌스",
+            subtitle: "문서 · 공문서 · 시트 · 프레젠테이션 · PDF 아카이빙",
+            bulletPoints: ["표준 컨테이너 무결성 점검 및 부서별 권한 통제", "정밀 수식 집계 자동화 및 보존용 PDF 일괄 변환"],
+            speakerNotes: "두 번째 슬라이드: 부서별 실행 모듈 및 보안 거버넌스 설명",
             masterLayout: .twoColumnComparison,
             elements: [
               SlideCanvasElement(
-                title: "아키텍처 카드",
-                bodyText: "\(WorksheetModel.supportedFunctionNames.count)종 수식 & 양방향 변환", x: 380,
-                y: 245, width: 240,
-                height: 155, kind: .rectangleShape)
+                title: "거버넌스 요약",
+                bodyText: "부서별 문서 표준 준수율 및 보존 이관 지표", x: 340,
+                y: 255, width: 260,
+                height: 150, kind: .rectangleShape)
             ]
           ),
         ]
@@ -676,7 +676,7 @@ public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
           shortcutHint: "⇧⌘T"),
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-data-fn-browser",
-          title: "\(WorksheetModel.supportedFunctionNames.count)종 함수 마법사", symbolName: "function",
+          title: "함수 마법사", symbolName: "function",
           shortcutHint: "⇧F3"),
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-data-sort", title: "오름차순·내림차순 정렬",
@@ -770,7 +770,7 @@ public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
           id: "\(module.rawValue)-review-comment", title: "검토 메모 스레드", symbolName: "text.bubble",
           shortcutHint: "⌥⌘C"),
         RibbonCommandDescriptor(
-          id: "\(module.rawValue)-review-verify", title: "매직 바이트 보안 검증", symbolName: "lock.shield",
+          id: "\(module.rawValue)-review-verify", title: "문서 무결성 점검", symbolName: "lock.shield",
           shortcutHint: "⌃⌘V"),
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-review-stats", title: "문서 통계·글자 수",

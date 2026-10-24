@@ -486,6 +486,68 @@ final class EasyOfficeTests: XCTestCase {
       )
     }
   }
+
+  func testSWARXmlCsvScannerAndUnrolledSheetAggregations() throws {
+    let cleanLongText =
+      "2026년도 상반기 전사 표준 문서 워크플로 및 분기별 핵심 성과 지표(KPI) 정밀 점검 보고서 본문입니다."
+    XCTAssertEqual(XMLSanitizer.escape(cleanLongText), cleanLongText)
+
+    let mixedXmlInput =
+      "표준화 구간 A0123456789_B0123456789 <태그 attr=\"값\" single='단일'> & 후속 문자열 구간 C0123456789"
+    let escapedXml = XMLSanitizer.escape(mixedXmlInput)
+    XCTAssertEqual(
+      escapedXml,
+      "표준화 구간 A0123456789_B0123456789 &lt;태그 attr=&quot;값&quot; single=&apos;단일&apos;&gt; &amp; 후속 문자열 구간 C0123456789"
+    )
+    XCTAssertEqual(XMLSanitizer.unescape(escapedXml), mixedXmlInput)
+
+    let xxePayload = String(repeating: "A", count: 64) + "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>"
+    XCTAssertThrowsError(try XMLSanitizer.validateSafeXML(xxePayload))
+
+    let csvInput =
+      "부서명_코드_식별자_긴문자열_구간_0123456789,2026_1분기_실적_집계_구간_ABCDEFGHIJ,\"인용,포함,필드\",450\r\n"
+      + "재무기획본부_표준양식_전환_구간_9876543210,2026_2분기_실적_집계_구간_KLMNOPQRST,\"인용\"\"내부따옴표\",550"
+    let parsedRows = try CSVStateMachineCodec.parseRows(from: csvInput)
+    XCTAssertEqual(parsedRows.count, 2)
+    XCTAssertEqual(parsedRows[0].count, 4)
+    XCTAssertEqual(parsedRows[0][2], "인용,포함,필드")
+    XCTAssertEqual(parsedRows[1][2], "인용\"내부따옴표")
+    XCTAssertEqual(parsedRows[1][3], "550")
+
+    var sheet = WorksheetModel(name: "집계검증")
+    for idx in 1...10 {
+      try sheet.setCell("A\(idx)", rawValue: "\(idx * 10)")
+    }
+    try sheet.setCell("B1", rawValue: "=SUM(A1:A10)")
+    try sheet.setCell("B2", rawValue: "=AVERAGE(A1:A10)")
+    try sheet.setCell("B3", rawValue: "=MIN(A1:A10)")
+    try sheet.setCell("B4", rawValue: "=MAX(A1:A10)")
+    try sheet.setCell("B5", rawValue: "=COUNT(A1:A10)")
+
+    XCTAssertEqual(try sheet.evaluate(at: "B1"), .number(550.0))
+    XCTAssertEqual(try sheet.evaluate(at: "B2"), .number(55.0))
+    XCTAssertEqual(try sheet.evaluate(at: "B3"), .number(10.0))
+    XCTAssertEqual(try sheet.evaluate(at: "B4"), .number(100.0))
+    XCTAssertEqual(try sheet.evaluate(at: "B5"), .number(10.0))
+
+    var slide = SlideModel(
+      title: "2026 상반기 전략 로드맵",
+      elements: [
+        SlideCanvasElement(
+          title: "1분기 핵심 과제",
+          bodyText: "표준 문서 양식 배포",
+          x: 340,
+          y: 255,
+          width: 260,
+          height: 150,
+          kind: .roundedRectangleShape
+        )
+      ]
+    )
+    let firstElemID = slide.elements[0].id
+    let duplicated = try XCTUnwrap(slide.duplicateElement(id: firstElemID))
+    XCTAssertEqual(duplicated.title, "2분기 실행 지표")
+    XCTAssertEqual(duplicated.x, 624.0, accuracy: 0.01)
+    XCTAssertEqual(duplicated.y, 255.0, accuracy: 0.01)
+  }
 }
-
-

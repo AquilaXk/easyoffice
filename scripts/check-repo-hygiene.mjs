@@ -186,6 +186,10 @@ const FORBIDDEN_UI_GATE_PHRASES = [
   "내장 함수 카탈로그: 122종",
   "ISO 32000-1 무결성 검증",
   "doc-mod- DropCap",
+  "EasyOffice for macOS",
+  "시그니처 라벤더 디자인 시스템과 올인원 문서 워크스페이스",
+  "122종 함수 마법사",
+  "매직 바이트 보안 검증",
 ];
 
 const webuiCssPath = path.join(ROOT, "crates/easyoffice-app/ui/styles.css");
@@ -234,9 +238,9 @@ if (fs.existsSync(swiftAppDir)) {
       }
     }
   }
-  if (swiftBoxPrimCount > 40) {
+  if (swiftBoxPrimCount > 16) {
     errors.push(
-      `Swift EasyOfficeApp box-primitive guard failed: found ${swiftBoxPrimCount} matches of bordered/pill/RoundedRectangle/Capsule/stroke (max 40)`
+      `Swift EasyOfficeApp box-primitive guard failed: found ${swiftBoxPrimCount} matches of bordered/pill/RoundedRectangle/Capsule/stroke (max 16)`
     );
   }
   if (swiftBoxCount > 120) {

@@ -163,6 +163,45 @@ extension WorksheetModel {
 
   // MARK: - 1. Math & Trig Functions
 
+  @inline(__always)
+  private static func unrolledSumAndCount(_ vals: [EvaluatedCellValue]) -> (sum: Double, count: Int)
+  {
+    let total = vals.count
+    var s0 = 0.0
+    var s1 = 0.0
+    var s2 = 0.0
+    var s3 = 0.0
+    var numericCount = 0
+    var i = 0
+    while i + 4 <= total {
+      if let v0 = vals[i].numericValue {
+        s0 += v0
+        numericCount += 1
+      }
+      if let v1 = vals[i + 1].numericValue {
+        s1 += v1
+        numericCount += 1
+      }
+      if let v2 = vals[i + 2].numericValue {
+        s2 += v2
+        numericCount += 1
+      }
+      if let v3 = vals[i + 3].numericValue {
+        s3 += v3
+        numericCount += 1
+      }
+      i += 4
+    }
+    while i < total {
+      if let v = vals[i].numericValue {
+        s0 += v
+        numericCount += 1
+      }
+      i += 1
+    }
+    return ((s0 + s1) + (s2 + s3), numericCount)
+  }
+
   private func evaluateMathAndTrigFunction(name: String, frame: inout EvalFrame)
     -> EvaluatedCellValue?
   {
@@ -170,47 +209,70 @@ extension WorksheetModel {
     case "SUM":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
-      case .success(let vals): return .number(vals.compactMap(\.numericValue).reduce(0.0, +))
+      case .success(let vals):
+        return .number(Self.unrolledSumAndCount(vals).sum)
       }
     case "AVERAGE":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
       case .success(let vals):
-        let nums = vals.compactMap(\.numericValue)
-        guard !nums.isEmpty else { return .error("#DIV/0!") }
-        return .number(nums.reduce(0.0, +) / Double(nums.count))
+        let (sum, count) = Self.unrolledSumAndCount(vals)
+        guard count > 0 else { return .error("#DIV/0!") }
+        return .number(sum / Double(count))
       }
     case "MIN":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
-      case .success(let vals): return .number(vals.compactMap(\.numericValue).min() ?? 0.0)
+      case .success(let vals):
+        var minVal: Double?
+        for item in vals {
+          if let v = item.numericValue {
+            minVal = minVal.map { min($0, v) } ?? v
+          }
+        }
+        return .number(minVal ?? 0.0)
       }
     case "MAX":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
-      case .success(let vals): return .number(vals.compactMap(\.numericValue).max() ?? 0.0)
+      case .success(let vals):
+        var maxVal: Double?
+        for item in vals {
+          if let v = item.numericValue {
+            maxVal = maxVal.map { max($0, v) } ?? v
+          }
+        }
+        return .number(maxVal ?? 0.0)
       }
     case "COUNT":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
       case .success(let vals):
-        return .number(
-          Double(
-            vals.filter {
-              if case .number = $0 { return true }
-              return false
-            }.count))
+        var count = 0
+        for item in vals {
+          if case .number = item { count += 1 }
+        }
+        return .number(Double(count))
       }
     case "COUNTA":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
-      case .success(let vals): return .number(Double(vals.filter { $0 != .empty }.count))
+      case .success(let vals):
+        var count = 0
+        for item in vals where item != .empty {
+          count += 1
+        }
+        return .number(Double(count))
       }
     case "COUNTBLANK":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
       case .success(let vals):
-        return .number(Double(vals.filter { $0 == .empty || $0 == .text("") }.count))
+        var count = 0
+        for item in vals where item == .empty || item == .text("") {
+          count += 1
+        }
+        return .number(Double(count))
       }
     case "ABS":
       guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else {

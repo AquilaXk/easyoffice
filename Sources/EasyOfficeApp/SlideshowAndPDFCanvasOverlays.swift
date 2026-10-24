@@ -161,8 +161,9 @@ public struct SlideElementShapeContentView: View {
         Rectangle()
           .fill(strokeColor)
           .frame(width: 2.5)
+          .padding(.vertical, 2)
 
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
           HStack(spacing: 4) {
             Text(element.title)
               .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
@@ -182,10 +183,14 @@ public struct SlideElementShapeContentView: View {
             .lineLimit(2)
         }
       }
-      .padding(.vertical, 4)
-      .padding(.horizontal, 6)
+      .padding(.vertical, 8)
+      .padding(.horizontal, 10)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
+      .background(Color(red: 0.97, green: 0.98, blue: 0.99))
+      .border(
+        isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : palette.border.swiftUIColor,
+        width: isSelected ? 1.5 : 0.8
+      )
 
     case .tableGrid:
       VStack(alignment: .leading, spacing: 3) {
@@ -211,7 +216,7 @@ public struct SlideElementShapeContentView: View {
                   .padding(.vertical, 2)
                   .background(
                     rIdx == 0
-                      ? palette.selectedSurface.swiftUIColor
+                      ? palette.elevatedSurface.swiftUIColor
                       : palette.cardSurface.swiftUIColor
                   )
               }
@@ -266,8 +271,9 @@ public struct SlideElementShapeContentView: View {
         Rectangle()
           .fill(strokeColor)
           .frame(width: 2)
+          .padding(.vertical, 2)
 
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
           HStack(spacing: 4) {
             Text(element.title)
               .font(.system(size: 11.5, weight: element.isBold ? .heavy : .bold))
@@ -286,10 +292,14 @@ public struct SlideElementShapeContentView: View {
             .lineLimit(2)
         }
       }
-      .padding(.vertical, 4)
-      .padding(.horizontal, 6)
+      .padding(.vertical, 8)
+      .padding(.horizontal, 10)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-      .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
+      .background(Color(red: 0.97, green: 0.98, blue: 0.99))
+      .border(
+        isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : palette.border.swiftUIColor,
+        width: isSelected ? 1.5 : 0.8
+      )
     }
   }
 }

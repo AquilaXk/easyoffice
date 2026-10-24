@@ -358,9 +358,6 @@ struct FlatToggleControl: View {
       }
       .padding(.horizontal, 6)
       .padding(.vertical, 3)
-      .background(
-        isOn ? palette.selectedSurface.swiftUIColor : Color.clear
-      )
     }
     .buttonStyle(.plain)
     .fixedSize(horizontal: true, vertical: false)
@@ -787,18 +784,7 @@ struct TopDocumentTabStripView: View {
                 .fill(accent.swiftUIColor)
                 .frame(width: 6, height: 6)
 
-              let shortTabTitle: String = {
-                if let dotIdx = tab.fileName.lastIndex(of: "."), dotIdx > tab.fileName.startIndex {
-                  let stem = String(tab.fileName[..<dotIdx])
-                  let ext = String(tab.fileName[dotIdx...])
-                  if stem.count > 7 {
-                    return "\(stem.prefix(6))…\(ext)"
-                  }
-                  return "\(stem)\(ext)"
-                }
-                return tab.fileName
-              }()
-              Text(shortTabTitle)
+              Text(tab.fileName)
                 .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(
                   isSelected
@@ -806,6 +792,8 @@ struct TopDocumentTabStripView: View {
                     : palette.secondaryText.swiftUIColor
                 )
                 .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 188, alignment: .leading)
 
               if tab.isModified {
                 Circle()
@@ -1775,7 +1763,16 @@ public struct LeftNavigatorPanelView: View {
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
       VStack(alignment: .leading, spacing: 10) {
-        Text("\(tab.moduleKind.shortBadgeTitle) 탐색")
+        let navigatorHeaderTitle: String = {
+          switch tab.moduleKind {
+          case .document: return "문서 탐색"
+          case .hwp: return "한글 문서 탐색"
+          case .sheet: return "시트 탐색"
+          case .slide: return "슬라이드 탐색"
+          case .pdf: return "PDF 탐색"
+          }
+        }()
+        Text(navigatorHeaderTitle)
           .font(.system(size: 11, weight: .bold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
 
@@ -1813,6 +1810,7 @@ public struct LeftNavigatorPanelView: View {
 
           ForEach(Array(sheet.allSheetNames.enumerated()), id: \.offset) { idx, sheetName in
             let isSelectedSheet = idx == sheet.activeSheetIndex
+            let displaySheetName = sheetName == "검증집계시트" ? "분기별 집계" : sheetName
             Button {
               viewModel.selectWorksheetTab(index: idx)
             } label: {
@@ -1820,7 +1818,7 @@ public struct LeftNavigatorPanelView: View {
                 Image(systemName: isSelectedSheet ? "tablecells.fill" : "tablecells")
                   .font(.system(size: 10))
                   .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
-                Text(sheetName)
+                Text(displaySheetName)
                   .font(.system(size: 12, weight: isSelectedSheet ? .bold : .regular))
                   .foregroundStyle(
                     isSelectedSheet

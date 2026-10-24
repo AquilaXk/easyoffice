@@ -622,3 +622,23 @@
 - **Verified by**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run --release -p easyoffice-app -- --self-test`, `swift test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 멀티코어 워커 스레드 풀 기반 대규모 워크북 병렬 재계산 스케줄러를 도입할 때.
 
+### 31. 64비트 SWAR XML·CSV 바이트 스캐너, 무할당 스트리밍 시트 범위 집계 및 데스크톱 워크스페이스 UI/UX 무결성 완결 정책 (2026-10-24)
+
+- **Decision (`PD-057`)**:
+  1. **`Sources/EasyOfficeCore` 64비트 SWAR 바이트 스캐너 및 4-Way 언롤 시트 집계 (`XMLSanitizer.swift`, `TabularAndMarkupCodec.swift`, `SheetBuiltInFunctions.swift`, `SheetAnalyticsAndPivot.swift`)**
+     - `XMLSanitizer.scanUnsafeXMLBuffer`와 `XMLSanitizer.escape`에서 64비트 워드(`UInt64`) 단위 SWAR 제로바이트 마스크(`0x0101_0101_0101_0101`, `0x8080_8080_8080_8080`)로 안전 구간을 8바이트씩 건너뛰고 메타문자가 없는 입력은 무할당으로 즉시 반환하며, 이스케이프 대상이 있는 경우에만 연속 슬라이스 단위로 복사합니다.
+     - `CSVStateMachineCodec.parseRows`에서 `Array(text.utf8)` 전체 복사를 제거하고 `withUTF8` 연속 버퍼 위에서 비인용 필드 내부를 64비트 SWAR 워드 단위로 스캔하여 구분자, 따옴표, 개행 바이트가 없는 8바이트 구간을 한 번에 전진시킵니다.
+     - `WorksheetModel.evaluateMathAndTrigFunction`(`SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`)과 `PivotTableEngine.aggregate`에서 중간 `compactMap`·`filter` 배열 할당을 제거하고 4-way 루프 언롤링(`s0, s1, s2, s3`) 단일 패스 스트리밍 누산으로 교체합니다.
+  2. **macOS SwiftUI 워크스페이스 12차 적대적 시각 감사 결함 전수 해소 및 상한 가드 강화 (`Sources/EasyOfficeApp/*.swift`, `Sources/EasyOfficeCore/{WorkspaceCatalogAndModels.swift,SlideEngine.swift}`, `scripts/check-repo-hygiene.mjs`)**
+     - 상단 문서 탭 바(`TopDocumentTabStripView`)의 6글자 강제 절단(`shortTabTitle`)을 제거하고 전체 파일명을 `.truncationMode(.middle)`과 최대 너비 `188pt`로 표시합니다.
+     - 좌측 탐색기 헤더의 한영 혼용 배지(`DOC 탐색` 등)를 순수 한국어 명칭(`문서 탐색`, `한글 문서 탐색`, `시트 탐색`, `슬라이드 탐색`, `PDF 탐색`)으로 통일하고, 토글·시트 버튼·표 헤더·눈금자·슬라이드 썸네일의 보라색 박스 배경(`selectedSurface`)을 제거합니다.
+     - 시트 뷰포트(`SheetEditorDetailPaneView`) 기본 그리드 범위를 `22행 × 10열(A..J)`로 확장하여 캔버스 하단 공백을 제거하고, 단일 셀 선택 시 수식 입력줄의 중복 주소 표기를 숨기며, 내부 테스트용 탭 이름(`검증집계시트`)을 실무 명칭(`분기별 집계`)으로 표시합니다.
+     - 슬라이드 캔버스 도형(`SlideshowAndPDFCanvasOverlays`)의 좌측 강조선이 외곽 테두리와 겹치지 않도록 내부 패딩 안쪽으로 배치하고, `SlideModel.duplicateElement` 실행 시 수평 여유 공간이 있으면 2열 나란히 배치(`elem.x + elem.width + 24pt`)하며 기본 과제 카드를 `2분기 실행 지표`로 분화합니다.
+     - PDF 스튜디오(`SlideAndPDFDetailPanes`)의 가로형 단문 박스를 A4 세로형 문서 용지(`maxWidth: 620, minHeight: 680`, 상단 문서 분류 헤더, 제1절·제2절 본문 및 4행 점검 기준 요약표, 하단 문서관리번호·쪽 번호 푸터)로 재설계하고, 우측 인스펙터(`RightContextInspectorView`) 하단 실행 버튼을 수직 행 구조와 우측 셰브론(`chevron.right`) 어포던스로 정렬합니다.
+     - `Sources/EasyOfficeApp/*.swift` 전체의 박스·스트로크 프리미티브 수를 `16`개 이하로 감축하고 `scripts/check-repo-hygiene.mjs`의 상한을 `40`에서 `16`으로 낮추며 자기홍보·게이트 문구 차단 목록을 확장합니다.
+- **Why**: XML·CSV 바이트 파서와 시트 범위 집계의 불필요한 중간 배열 할당 및 바이트별 분기를 줄이고, macOS 네이티브 워크스페이스 5대 화면의 잔여 시각 결함과 자기홍보 문구를 제거하기 위함입니다.
+- **Trade-offs**: 64비트 SWAR 루프와 8바이트 미만 꼬리(tail) 루프를 함께 유지해야 하나, 분기 예측 실패와 힙 할당을 줄이면서 모든 경계 길이에 대해 바이트 단위 정확성을 보존합니다.
+- **Alternatives rejected**:
+  - `Foundation.XMLParser`나 정규식 기반 치환 도입은 전체 문자열 복사와 객채 할당 비용이 크므로 기각.
+- **Verified by**: `swift test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 대용량 CSV·XML 스트림의 멀티스레드 청크 분할 파서를 도입할 때.

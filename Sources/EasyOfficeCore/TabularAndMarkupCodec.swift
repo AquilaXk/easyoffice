@@ -72,120 +72,157 @@ public enum CSVStateMachineCodec {
     return worksheet
   }
 
+  private static let swarLoMask: UInt64 = 0x0101_0101_0101_0101
+  private static let swarHiMask: UInt64 = 0x8080_8080_8080_8080
+
+  @inline(__always)
+  private static func hasZeroByte(_ word: UInt64) -> Bool {
+    ((word &- swarLoMask) & ~word & swarHiMask) != 0
+  }
+
+  @inline(__always)
+  private static func broadcastByte(_ byte: UInt8) -> UInt64 {
+    UInt64(byte) &* swarLoMask
+  }
+
   public static func parseRows(from text: String, delimiter: Character = ",") throws -> [[String]] {
     guard !text.isEmpty else { return [] }
 
-    let bytes = Array(text.utf8)
-    let quote: UInt8 = 0x22
-    let cr: UInt8 = 0x0D
-    let lf: UInt8 = 0x0A
-    let delimByte: UInt8 = delimiter.asciiValue ?? 0x2C
+    var copy = text
+    return try copy.withUTF8 { bytes in
+      let quote: UInt8 = 0x22
+      let cr: UInt8 = 0x0D
+      let lf: UInt8 = 0x0A
+      let delimByte: UInt8 = delimiter.asciiValue ?? 0x2C
+      let quoteMask = broadcastByte(quote)
+      let crMask = broadcastByte(cr)
+      let lfMask = broadcastByte(lf)
+      let delimMask = broadcastByte(delimByte)
 
-    var rows: [[String]] = []
-    var currentRow: [String] = []
-    var quotedBytes: [UInt8] = []
-    var unquotedStartIdx = 0
-    var state: ParserState = .startOfField
-    var idx = 0
-    let count = bytes.count
+      var rows: [[String]] = []
+      var currentRow: [String] = []
+      var quotedBytes: [UInt8] = []
+      var unquotedStartIdx = 0
+      var state: ParserState = .startOfField
+      var idx = 0
+      let count = bytes.count
+      let baseAddress = bytes.baseAddress
 
-    while idx < count {
-      let b = bytes[idx]
+      while idx < count {
+        if state == .inUnquotedField, let base = baseAddress {
+          while idx + 8 <= count {
+            let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
+            let hitSpecial =
+              hasZeroByte(word ^ delimMask)
+              || hasZeroByte(word ^ quoteMask)
+              || hasZeroByte(word ^ crMask)
+              || hasZeroByte(word ^ lfMask)
+            if !hitSpecial {
+              idx += 8
+            } else {
+              break
+            }
+          }
+          if idx >= count { break }
+        }
+
+        let b = bytes[idx]
+
+        switch state {
+        case .startOfField:
+          if b == quote {
+            quotedBytes.removeAll(keepingCapacity: true)
+            state = .inQuotedField
+          } else if b == delimByte {
+            currentRow.append("")
+          } else if b == cr || b == lf {
+            if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
+              idx += 1
+            }
+            currentRow.append("")
+            rows.append(currentRow)
+            currentRow = []
+          } else {
+            unquotedStartIdx = idx
+            state = .inUnquotedField
+          }
+
+        case .inUnquotedField:
+          if b == quote {
+            throw EasyOfficeError.corruptedContainer(
+              detail: "Unexpected quote inside unquoted CSV/TSV field"
+            )
+          } else if b == delimByte {
+            let field = String(decoding: bytes[unquotedStartIdx..<idx], as: UTF8.self)
+            currentRow.append(field)
+            state = .startOfField
+          } else if b == cr || b == lf {
+            let field = String(decoding: bytes[unquotedStartIdx..<idx], as: UTF8.self)
+            if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
+              idx += 1
+            }
+            currentRow.append(field)
+            rows.append(currentRow)
+            currentRow = []
+            state = .startOfField
+          }
+
+        case .inQuotedField:
+          if b == quote {
+            state = .quoteInQuotedField
+          } else {
+            quotedBytes.append(b)
+          }
+
+        case .quoteInQuotedField:
+          if b == quote {
+            quotedBytes.append(quote)
+            state = .inQuotedField
+          } else if b == delimByte {
+            let field = String(decoding: quotedBytes, as: UTF8.self)
+            currentRow.append(field)
+            quotedBytes.removeAll(keepingCapacity: true)
+            state = .startOfField
+          } else if b == cr || b == lf {
+            let field = String(decoding: quotedBytes, as: UTF8.self)
+            if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
+              idx += 1
+            }
+            currentRow.append(field)
+            rows.append(currentRow)
+            currentRow = []
+            quotedBytes.removeAll(keepingCapacity: true)
+            state = .startOfField
+          } else {
+            throw EasyOfficeError.corruptedContainer(
+              detail: "CSV/TSV 따옴표 필드 종료 후 잘못된 문자가 발견되었습니다."
+            )
+          }
+        }
+
+        idx += 1
+      }
 
       switch state {
-      case .startOfField:
-        if b == quote {
-          quotedBytes.removeAll(keepingCapacity: true)
-          state = .inQuotedField
-        } else if b == delimByte {
-          currentRow.append("")
-        } else if b == cr || b == lf {
-          if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
-            idx += 1
-          }
-          currentRow.append("")
-          rows.append(currentRow)
-          currentRow = []
-        } else {
-          unquotedStartIdx = idx
-          state = .inUnquotedField
-        }
-
-      case .inUnquotedField:
-        if b == quote {
-          throw EasyOfficeError.corruptedContainer(
-            detail: "Unexpected quote inside unquoted CSV/TSV field"
-          )
-        } else if b == delimByte {
-          let field = String(decoding: bytes[unquotedStartIdx..<idx], as: UTF8.self)
-          currentRow.append(field)
-          state = .startOfField
-        } else if b == cr || b == lf {
-          let field = String(decoding: bytes[unquotedStartIdx..<idx], as: UTF8.self)
-          if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
-            idx += 1
-          }
-          currentRow.append(field)
-          rows.append(currentRow)
-          currentRow = []
-          state = .startOfField
-        }
-
       case .inQuotedField:
-        if b == quote {
-          state = .quoteInQuotedField
-        } else {
-          quotedBytes.append(b)
-        }
-
+        throw EasyOfficeError.corruptedContainer(detail: "Unclosed quote in CSV/TSV stream")
       case .quoteInQuotedField:
-        if b == quote {
-          quotedBytes.append(quote)
-          state = .inQuotedField
-        } else if b == delimByte {
-          let field = String(decoding: quotedBytes, as: UTF8.self)
-          currentRow.append(field)
-          quotedBytes.removeAll(keepingCapacity: true)
-          state = .startOfField
-        } else if b == cr || b == lf {
-          let field = String(decoding: quotedBytes, as: UTF8.self)
-          if b == cr && idx + 1 < count && bytes[idx + 1] == lf {
-            idx += 1
-          }
-          currentRow.append(field)
+        let field = String(decoding: quotedBytes, as: UTF8.self)
+        currentRow.append(field)
+        rows.append(currentRow)
+      case .inUnquotedField:
+        let field = String(decoding: bytes[unquotedStartIdx..<count], as: UTF8.self)
+        currentRow.append(field)
+        rows.append(currentRow)
+      case .startOfField:
+        if !currentRow.isEmpty {
+          currentRow.append("")
           rows.append(currentRow)
-          currentRow = []
-          quotedBytes.removeAll(keepingCapacity: true)
-          state = .startOfField
-        } else {
-          throw EasyOfficeError.corruptedContainer(
-            detail: "CSV/TSV 따옴표 필드 종료 후 잘못된 문자가 발견되었습니다."
-          )
         }
       }
 
-      idx += 1
+      return rows
     }
-
-    switch state {
-    case .inQuotedField:
-      throw EasyOfficeError.corruptedContainer(detail: "Unclosed quote in CSV/TSV stream")
-    case .quoteInQuotedField:
-      let field = String(decoding: quotedBytes, as: UTF8.self)
-      currentRow.append(field)
-      rows.append(currentRow)
-    case .inUnquotedField:
-      let field = String(decoding: bytes[unquotedStartIdx..<count], as: UTF8.self)
-      currentRow.append(field)
-      rows.append(currentRow)
-    case .startOfField:
-      if !currentRow.isEmpty {
-        currentRow.append("")
-        rows.append(currentRow)
-      }
-    }
-
-    return rows
   }
 
   private static func serializeField(_ field: String, delimiter: Character) -> String {
