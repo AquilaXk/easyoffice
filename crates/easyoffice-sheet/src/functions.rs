@@ -255,11 +255,7 @@ impl SheetEngine {
     ) -> Result<EvaluatedCellValue, FormulaError> {
         match name {
             // --- Math & Trig (27) ---
-            "SUM" => {
-                let vals = self.expand_args_ctx(args, ctx, depth)?;
-                let sum: f64 = vals.iter().filter_map(EvaluatedCellValue::as_number).sum();
-                Ok(EvaluatedCellValue::Number(sum))
-            }
+            "SUM" => self.eval_streaming_range_agg_ctx(name, args, ctx, depth),
             "PRODUCT" => {
                 let vals = self.expand_args_ctx(args, ctx, depth)?;
                 let nums: Vec<f64> = vals
@@ -504,7 +500,10 @@ impl SheetEngine {
             }
 
             // --- Statistical (22) ---
-            "AVERAGE" | "MEDIAN" | "MODE" | "MIN" | "MAX" | "STDEV" | "STDEVP" | "VAR" | "VARP" => {
+            "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK" => {
+                self.eval_streaming_range_agg_ctx(name, args, ctx, depth)
+            }
+            "MEDIAN" | "MODE" | "STDEV" | "STDEVP" | "VAR" | "VARP" => {
                 self.eval_stat_basic(name, args, ctx, depth)
             }
             "AVERAGEA" => {
@@ -579,28 +578,6 @@ impl SheetEngine {
             }
             "SMALL" | "LARGE" | "RANK" | "PERCENTILE" | "QUARTILE" => {
                 self.eval_stat_order(name, args, ctx, depth)
-            }
-            "COUNT" | "COUNTA" | "COUNTBLANK" => {
-                let vals = self.expand_args_ctx(args, ctx, depth)?;
-                let count = match name {
-                    "COUNT" => vals
-                        .iter()
-                        .filter(|v| matches!(v, EvaluatedCellValue::Number(_)))
-                        .count(),
-                    "COUNTA" => vals
-                        .iter()
-                        .filter(|v| !matches!(v, EvaluatedCellValue::Empty))
-                        .count(),
-                    _ => vals
-                        .iter()
-                        .filter(|v| match v {
-                            EvaluatedCellValue::Empty => true,
-                            EvaluatedCellValue::Text(s) => s.is_empty(),
-                            _ => false,
-                        })
-                        .count(),
-                };
-                Ok(EvaluatedCellValue::Number(count as f64))
             }
             "COUNTIF" => {
                 if args.len() != 2 {

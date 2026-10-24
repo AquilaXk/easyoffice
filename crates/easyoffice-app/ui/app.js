@@ -165,7 +165,7 @@
   let activeModule = "DOC";
   let activeRibbonStyle = "standard";
   let activeRibbonCategory = "home";
-  let activeSheetCellRef = "C1";
+  let activeSheetCellRef = "F2";
   let activeSlideIndex = 0;
   let slideLaserActive = false;
   let pdfRotationDeg = 0;
@@ -256,6 +256,7 @@
         { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
         { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 50, optimizedP50Us: 29, speedupFactor: 1.72 },
         { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 878, optimizedP50Us: 308, speedupFactor: 2.85 },
+        { suiteId: "swar_csv_xml_and_zero_alloc_range_agg", baselineP50Us: 640, optimizedP50Us: 195, speedupFactor: 3.28 },
       ],
     }),
     run_smart_assistant: (payload) => localSmartAssistant(payload),
@@ -282,8 +283,8 @@
   };
 
   async function invokeIpc(command, payload) {
-    if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
-      const raw = await window.__TAURI_INTERNALS__.invoke(command, { payload });
+    if (globalThis.__TAURI_INTERNALS__ && typeof globalThis.__TAURI_INTERNALS__.invoke === "function") {
+      const raw = await globalThis.__TAURI_INTERNALS__.invoke(command, { payload });
       return typeof raw === "string" ? JSON.parse(raw) : raw;
     }
     const handler = MOCK_IPC_HANDLERS[command];
@@ -295,25 +296,41 @@
     document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
       const ref = td.dataset.cell;
       const formula = td.dataset.formula;
-      map[ref] = formula || (td.textContent || "").trim();
+      const rawText = (td.textContent || "").replaceAll(",", "").trim();
+      map[ref] = formula || rawText;
     });
     return map;
   }
 
+  function parseCellRefParts(ref) {
+    const m = /^([A-Z]+)(\d+)$/.exec(String(ref || "").toUpperCase());
+    if (!m) return { col: 65, row: 1 };
+    return { col: m[1].codePointAt(0), row: Number(m[2]) };
+  }
+
   function collectRangeNumericValues(startRef, endRef, cellValues) {
-    const c1 = startRef.codePointAt(0);
-    const r1 = Number(startRef.slice(1));
-    const c2 = endRef.codePointAt(0);
-    const r2 = Number(endRef.slice(1));
+    const p1 = parseCellRefParts(startRef);
+    const p2 = parseCellRefParts(endRef);
     const nums = [];
-    for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
-      for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+    for (let c = Math.min(p1.col, p2.col); c <= Math.max(p1.col, p2.col); c++) {
+      for (let r = Math.min(p1.row, p2.row); r <= Math.max(p1.row, p2.row); r++) {
         const ref = String.fromCodePoint(c) + r;
-        const v = Number(cellValues[ref]);
-        if (Number.isFinite(v)) nums.push(v);
+        const raw = String(cellValues[ref] ?? "").replaceAll(",", "").trim();
+        const v = Number(raw);
+        if (raw !== "" && Number.isFinite(v)) nums.push(v);
       }
     }
     return nums;
+  }
+
+  function evaluateRangeFunction(fnName, vals) {
+    if (fnName === "COUNT") return String(vals.length);
+    if (vals.length === 0) return "0";
+    if (fnName === "MAX") return String(Math.max(...vals));
+    if (fnName === "MIN") return String(Math.min(...vals));
+    const total = vals.reduce((acc, v) => acc + v, 0);
+    if (fnName === "SUM") return String(Math.round(total * 100) / 100);
+    return String(Math.round((total / vals.length) * 100) / 100);
   }
 
   function evaluateBinaryOpString(exprText) {
@@ -334,30 +351,24 @@
   function evaluateFormulaExpression(exprStr, cellValues) {
     const clean = String(exprStr || "").trim();
     if (!clean.startsWith("=")) {
-      const n = Number(clean);
-      return Number.isFinite(n) && clean !== "" ? String(n) : clean;
+      const normalized = clean.replaceAll(",", "");
+      const n = Number(normalized);
+      return Number.isFinite(n) && normalized !== "" ? String(n) : clean;
     }
     const body = clean.slice(1).trim().toUpperCase();
-    const sumMatch = /^SUM\(([A-D][1-4]):([A-D][1-4])\)$/.exec(body);
-    if (sumMatch) {
-      const vals = collectRangeNumericValues(sumMatch[1], sumMatch[2], cellValues);
-      const total = vals.reduce((acc, v) => acc + v, 0);
-      return String(Math.round(total * 100) / 100);
-    }
-    const avgMatch = /^AVERAGE\(([A-D][1-4]):([A-D][1-4])\)$/.exec(body);
-    if (avgMatch) {
-      const vals = collectRangeNumericValues(avgMatch[1], avgMatch[2], cellValues);
-      if (vals.length === 0) return "0";
-      const total = vals.reduce((acc, v) => acc + v, 0);
-      return String(Math.round((total / vals.length) * 100) / 100);
+    const rangeMatch = /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT)\(([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(body);
+    if (rangeMatch) {
+      const vals = collectRangeNumericValues(rangeMatch[2], rangeMatch[3], cellValues);
+      return evaluateRangeFunction(rangeMatch[1], vals);
     }
     if (body.includes("SHEET2!A1")) {
       const crossResult = evaluateBinaryOpString(body.replaceAll("SHEET2!A1", "100"));
       if (crossResult !== null) return crossResult;
     }
-    const substituted = body.replace(/\b([A-D][1-4])\b/g, (_, ref) => {
-      const v = Number(cellValues[ref]);
-      return Number.isFinite(v) ? String(v) : "0";
+    const substituted = body.replaceAll(/\b([A-Z]+\d+)\b/g, (_, ref) => {
+      const raw = String(cellValues[ref] ?? "").replaceAll(",", "").trim();
+      const v = Number(raw);
+      return raw !== "" && Number.isFinite(v) ? String(v) : "0";
     });
     const arithResult = evaluateBinaryOpString(substituted);
     return arithResult ?? clean;
@@ -383,14 +394,16 @@
         }
       });
     }
-    const q = (queryPart || "C1").trim();
+    const q = (queryPart || "F2").trim();
     return q.startsWith("=") ? evaluateFormulaExpression(q, values) : (values[q] ?? "");
   }
 
   function updateSheetSelectionAndAggregates(cellRef) {
     activeSheetCellRef = cellRef;
-    const colLetter = cellRef.charAt(0);
-    const rowNumber = cellRef.slice(1);
+    const colMatch = /^[A-Z]+/.exec(cellRef);
+    const rowMatch = /\d+$/.exec(cellRef);
+    const colLetter = colMatch ? colMatch[0] : cellRef.charAt(0);
+    const rowNumber = rowMatch ? rowMatch[0] : cellRef.slice(1);
 
     document.querySelectorAll("#pane-sheet th[data-col]").forEach((th) => {
       th.classList.toggle("active-axis", th.dataset.col === colLetter);
@@ -962,6 +975,80 @@
     }
   }
 
+  function computeDocTableSummary() {
+    const rows = document.querySelectorAll("#doc-table-body tr");
+    let sum25 = 0;
+    let sum26 = 0;
+    rows.forEach((tr) => {
+      const cells = tr.querySelectorAll("td");
+      if (cells.length < 3) return;
+      const v25 = Number.parseFloat((cells[1].textContent || "").replaceAll(",", ""));
+      const v26 = Number.parseFloat((cells[2].textContent || "").replaceAll(",", ""));
+      if (!Number.isNaN(v25)) sum25 += v25;
+      if (!Number.isNaN(v26)) sum26 += v26;
+    });
+    const fb = document.getElementById("status-command-feedback");
+    if (fb && rows.length > 0) {
+      fb.textContent =
+        "표 수식 검산 완료 · 2025년 평균 " +
+        (sum25 / rows.length).toFixed(1) +
+        " / 2026년 목표 평균 " +
+        (sum26 / rows.length).toFixed(1);
+    }
+  }
+
+  function setupDocTableAndSheetTabHandlers() {
+    const addRowBtn = document.getElementById("btn-doc-add-row");
+    const tbody = document.getElementById("doc-table-body");
+    if (addRowBtn && tbody) {
+      addRowBtn.addEventListener("click", () => {
+        const tr = document.createElement("tr");
+        const idx = tbody.querySelectorAll("tr").length + 1;
+        tr.innerHTML =
+          '<td contenteditable="true">신규 성과 지표 #' +
+          idx +
+          '</td><td contenteditable="true">100.0</td><td contenteditable="true">120.0</td><td contenteditable="true">+20.0%</td>';
+        tbody.appendChild(tr);
+        computeSmartStats();
+      });
+    }
+    const mergeBtn = document.getElementById("btn-doc-merge-toggle");
+    if (mergeBtn && tbody) {
+      mergeBtn.addEventListener("click", () => {
+        const firstTd = tbody.querySelector("tr td");
+        if (!firstTd) return;
+        const isMerged = firstTd.colSpan > 1;
+        firstTd.colSpan = isMerged ? 1 : 2;
+        mergeBtn.textContent = isMerged ? "첫 행 요약 병합" : "셀 병합 해제";
+      });
+    }
+    const evalDocBtn = document.getElementById("btn-doc-eval-table");
+    if (evalDocBtn) {
+      evalDocBtn.addEventListener("click", computeDocTableSummary);
+    }
+
+    const sheetTabBar = document.getElementById("sheet-tab-bar");
+    const addSheetBtn = document.getElementById("btn-add-sheet-tab");
+    if (sheetTabBar) {
+      sheetTabBar.addEventListener("click", (e) => {
+        const btn = e.target.closest(".sheet-tab-btn");
+        if (!btn) return;
+        sheetTabBar.querySelectorAll(".sheet-tab-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+      });
+    }
+    if (addSheetBtn && sheetTabBar) {
+      addSheetBtn.addEventListener("click", () => {
+        const count = sheetTabBar.querySelectorAll(".sheet-tab-btn").length + 1;
+        const newTab = document.createElement("button");
+        newTab.className = "sheet-tab-btn";
+        newTab.dataset.sheetTab = "Sheet" + count;
+        newTab.textContent = "Sheet" + count;
+        sheetTabBar.insertBefore(newTab, addSheetBtn);
+      });
+    }
+  }
+
   function togglePaletteModal(modal, cmdSearchInput) {
     if (!modal) return;
     if (modal.open && typeof modal.close === "function") {
@@ -997,7 +1084,7 @@
       });
     }
 
-    window.addEventListener("keydown", (e) => {
+    globalThis.addEventListener("keydown", (e) => {
       if (e.isComposing || isImeComposing) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -1012,9 +1099,10 @@
     const boot = await invokeIpc("get_workspace_bootstrap", "");
     setupTabsAndRibbonChrome(boot);
     void renderRibbonCategoryTools("home");
-    updateSheetSelectionAndAggregates("C1");
+    updateSheetSelectionAndAggregates("F2");
     renderSlideDeck(0);
     setupQatAndRibbonActions();
+    setupDocTableAndSheetTabHandlers();
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();

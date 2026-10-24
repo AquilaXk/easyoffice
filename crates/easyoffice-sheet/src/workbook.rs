@@ -123,28 +123,28 @@ impl SheetEngine {
             cells: Vec<(u32, String)>,
         }
 
-        let mut rows_data: Vec<RowEntry> = Vec::with_capacity((end_row - start_row + 1) as usize);
+        let row_span = (end_row - start_row + 1) as usize;
+        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
+        let mut row_map: HashMap<u32, Vec<(u32, String)>> = HashMap::with_capacity(row_span);
+        for (&coord, raw) in &self.cells {
+            let r = coord.row();
+            if r >= start_row && r <= end_row {
+                row_map.entry(r).or_default().push((coord.col(), raw.clone()));
+            }
+        }
+
+        let mut rows_data: Vec<RowEntry> = Vec::with_capacity(row_span);
         for r in start_row..=end_row {
             let p_coord = PackedCellCoordinate::new(r, primary_col)?;
-            let primary_val = self.evaluate_cell(&p_coord.to_a1());
+            let primary_val = self.eval_coord_ctx(p_coord, &mut ctx, 0);
             let secondary_val = if let Some(sc) = secondary_col {
                 let s_coord = PackedCellCoordinate::new(r, sc)?;
-                Some(self.evaluate_cell(&s_coord.to_a1()))
+                Some(self.eval_coord_ctx(s_coord, &mut ctx, 0))
             } else {
                 None
             };
-            let mut row_cells: Vec<(u32, String)> = self
-                .cells
-                .iter()
-                .filter_map(|(coord, raw)| {
-                    if coord.row() == r {
-                        Some((coord.col(), raw.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            row_cells.sort_by_key(|(c, _)| *c);
+            let mut row_cells = row_map.remove(&r).unwrap_or_default();
+            row_cells.sort_unstable_by_key(|(c, _)| *c);
             rows_data.push(RowEntry {
                 primary_val,
                 secondary_val,
@@ -197,29 +197,26 @@ impl SheetEngine {
         let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
         let mut all_values: Vec<f64> = Vec::new();
 
-        for r_off in start_row_idx..row_count {
-            if row_field_col_offset >= col_count || value_field_col_offset >= col_count {
-                continue;
-            }
-            let key_coord = PackedCellCoordinate::new(
-                min_r + r_off as u32,
-                min_c + row_field_col_offset as u32,
-            );
-            let val_coord = PackedCellCoordinate::new(
-                min_r + r_off as u32,
-                min_c + value_field_col_offset as u32,
-            );
-            if let (Ok(kc), Ok(vc)) = (key_coord, val_coord) {
-                let key_str = self.eval_coord_ctx(kc, &mut ctx, 0).to_display_string();
-                if key_str.is_empty() {
-                    continue;
-                }
-                if !row_keys.contains(&key_str) {
-                    row_keys.push(key_str.clone());
-                }
-                if let Some(num) = self.eval_coord_ctx(vc, &mut ctx, 0).as_number() {
-                    buckets.entry(key_str).or_default().push(num);
-                    all_values.push(num);
+        if row_field_col_offset < col_count && value_field_col_offset < col_count {
+            let key_col = min_c + row_field_col_offset as u32;
+            let val_col = min_c + value_field_col_offset as u32;
+            for r_off in start_row_idx..row_count {
+                let row_idx = min_r + r_off as u32;
+                if let (Ok(kc), Ok(vc)) = (
+                    PackedCellCoordinate::new(row_idx, key_col),
+                    PackedCellCoordinate::new(row_idx, val_col),
+                ) {
+                    let key_str = self.eval_coord_ctx(kc, &mut ctx, 0).to_display_string();
+                    if key_str.is_empty() {
+                        continue;
+                    }
+                    if !row_keys.contains(&key_str) {
+                        row_keys.push(key_str.clone());
+                    }
+                    if let Some(num) = self.eval_coord_ctx(vc, &mut ctx, 0).as_number() {
+                        buckets.entry(key_str).or_default().push(num);
+                        all_values.push(num);
+                    }
                 }
             }
         }
@@ -441,11 +438,12 @@ impl ChartSeriesBuilder {
             ));
         }
 
+        let mut ctx = EvalContext::standalone_id(sheet.resolved_sheet_id());
         let mut labels = Vec::with_capacity(label_coords.len());
         let mut values = Vec::with_capacity(value_coords.len());
-        for (lc, vc) in label_coords.iter().zip(value_coords.iter()) {
-            labels.push(sheet.evaluate_cell(&lc.to_a1()).to_display_string());
-            values.push(sheet.evaluate_cell(&vc.to_a1()).as_number().unwrap_or(0.0));
+        for (&lc, &vc) in label_coords.iter().zip(value_coords.iter()) {
+            labels.push(sheet.eval_coord_ctx(lc, &mut ctx, 0).to_display_string());
+            values.push(sheet.eval_coord_ctx(vc, &mut ctx, 0).as_number().unwrap_or(0.0));
         }
 
         let min_value = values.iter().copied().fold(f64::INFINITY, f64::min);
@@ -831,5 +829,56 @@ mod tests {
             wb.evaluate_cell(&sheet_a, "A1"),
             EvaluatedCellValue::Number(50.0)
         );
+    }
+
+    #[test]
+    fn test_zero_alloc_streaming_range_aggregations_and_budget_guard() {
+        let mut sheet = SheetEngine::new("Sheet1");
+        for r in 1..=10u32 {
+            for c in 0..6u32 {
+                if r == 5 && c == 2 {
+                    continue; // leave C5 empty
+                }
+                let coord = PackedCellCoordinate::new(r - 1, c).unwrap().to_a1();
+                sheet
+                    .set_cell(&coord, ((r as i64) * 10 + (c as i64)).to_string())
+                    .unwrap();
+            }
+        }
+        assert_eq!(
+            sheet.evaluate_formula_str("=SUM(A1:F10, 100)"),
+            EvaluatedCellValue::Number(3498.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNT(A1:F10)"),
+            EvaluatedCellValue::Number(59.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNTA(A1:F10)"),
+            EvaluatedCellValue::Number(59.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNTBLANK(A1:F10)"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=MIN(A1:F10)"),
+            EvaluatedCellValue::Number(10.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=MAX(A1:F10)"),
+            EvaluatedCellValue::Number(105.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=ROUND(AVERAGE(A1:F10), 2)"),
+            EvaluatedCellValue::Number(57.59)
+        );
+
+        let huge_range = CellRange {
+            start: PackedCellCoordinate::new(1, 1).unwrap(),
+            end: PackedCellCoordinate::new(1000, 1000).unwrap(),
+        };
+        assert!(huge_range.cell_count() > CellRange::MAX_EXPANDED_CELLS);
+        assert!(huge_range.expand().is_err());
     }
 }

@@ -1,6 +1,6 @@
-use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
+use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector, XmlSanitizer};
 
-/// RFC 4180 state-machine CSV / TSV parser and serializer.
+/// RFC 4180 64-bit SWAR byte-slice and state-machine CSV / TSV parser and serializer.
 pub struct CsvCodec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,7 +12,168 @@ enum CsvParseState {
 }
 
 impl CsvCodec {
+    pub const MAX_ROWS: usize = 1_000_000;
+    pub const MAX_COLS: usize = 16_384;
+
+    #[inline]
+    fn find_csv_unquoted_special_swar(bytes: &[u8], start: usize, delim_b: u8) -> usize {
+        const LO: u64 = 0x0101_0101_0101_0101;
+        const HI: u64 = 0x8080_8080_8080_8080;
+        let splat_delim = (delim_b as u64).wrapping_mul(LO);
+        let splat_quote = (b'"' as u64) * LO;
+        let splat_lf = (b'\n' as u64) * LO;
+        let splat_cr = (b'\r' as u64) * LO;
+        let mut idx = start;
+        while idx + 8 <= bytes.len() {
+            let word = u64::from_le_bytes(bytes[idx..idx + 8].try_into().unwrap());
+            let d0 = word ^ splat_delim;
+            let d1 = word ^ splat_quote;
+            let d2 = word ^ splat_lf;
+            let d3 = word ^ splat_cr;
+            let m0 = d0.wrapping_sub(LO) & !d0;
+            let m1 = d1.wrapping_sub(LO) & !d1;
+            let m2 = d2.wrapping_sub(LO) & !d2;
+            let m3 = d3.wrapping_sub(LO) & !d3;
+            let mask = (m0 | m1 | m2 | m3) & HI;
+            if mask != 0 {
+                return idx + ((mask.trailing_zeros() >> 3) as usize);
+            }
+            idx += 8;
+        }
+        while idx < bytes.len() {
+            let b = bytes[idx];
+            if b == delim_b || b == b'"' || b == b'\n' || b == b'\r' {
+                return idx;
+            }
+            idx += 1;
+        }
+        bytes.len()
+    }
+
     pub fn parse(input: &str, delimiter: char) -> Result<Vec<Vec<String>>, EasyOfficeError> {
+        if input.is_empty() {
+            return Ok(Vec::new());
+        }
+        if delimiter.is_ascii() {
+            Self::parse_swar_ascii(input, delimiter as u8)
+        } else {
+            Self::parse_scalar_baseline(input, delimiter)
+        }
+    }
+
+    fn parse_swar_ascii(input: &str, delim_b: u8) -> Result<Vec<Vec<String>>, EasyOfficeError> {
+        let bytes = input.as_bytes();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut current_row: Vec<String> = Vec::new();
+        let mut current_field = String::new();
+        let mut pos = 0usize;
+        let mut trailing_delim = false;
+
+        while pos < bytes.len() {
+            if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                ));
+            }
+            let b = bytes[pos];
+            if b == b'"' {
+                trailing_delim = false;
+                current_field.clear();
+                pos += 1;
+                loop {
+                    let Some(q_pos) = XmlSanitizer::find_byte_swar(bytes, pos, b'"') else {
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
+                        ));
+                    };
+                    if q_pos > pos {
+                        current_field.push_str(&input[pos..q_pos]);
+                    }
+                    pos = q_pos + 1;
+                    if pos >= bytes.len() {
+                        current_row.push(std::mem::take(&mut current_field));
+                        rows.push(std::mem::take(&mut current_row));
+                        break;
+                    }
+                    let next_b = bytes[pos];
+                    if next_b == b'"' {
+                        current_field.push('"');
+                        pos += 1;
+                    } else if next_b == delim_b {
+                        current_row.push(std::mem::take(&mut current_field));
+                        pos += 1;
+                        trailing_delim = true;
+                        break;
+                    } else if next_b == b'\r' || next_b == b'\n' {
+                        if next_b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
+                            pos += 2;
+                        } else {
+                            pos += 1;
+                        }
+                        current_row.push(std::mem::take(&mut current_field));
+                        rows.push(std::mem::take(&mut current_row));
+                        break;
+                    } else {
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
+                        ));
+                    }
+                }
+            } else if b == delim_b {
+                current_row.push(String::new());
+                pos += 1;
+                trailing_delim = true;
+            } else if b == b'\r' || b == b'\n' {
+                if b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
+                    pos += 2;
+                } else {
+                    pos += 1;
+                }
+                current_row.push(String::new());
+                rows.push(std::mem::take(&mut current_row));
+                trailing_delim = false;
+            } else {
+                trailing_delim = false;
+                let end_pos = Self::find_csv_unquoted_special_swar(bytes, pos, delim_b);
+                if end_pos == bytes.len() {
+                    current_row.push(String::from(&input[pos..end_pos]));
+                    rows.push(std::mem::take(&mut current_row));
+                    break;
+                }
+                let term = bytes[end_pos];
+                if term == b'"' {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다."
+                            .to_string(),
+                    ));
+                } else if term == delim_b {
+                    current_row.push(String::from(&input[pos..end_pos]));
+                    pos = end_pos + 1;
+                    trailing_delim = true;
+                } else {
+                    current_row.push(String::from(&input[pos..end_pos]));
+                    rows.push(std::mem::take(&mut current_row));
+                    if term == b'\r' && end_pos + 1 < bytes.len() && bytes[end_pos + 1] == b'\n' {
+                        pos = end_pos + 2;
+                    } else {
+                        pos = end_pos + 1;
+                    }
+                }
+            }
+        }
+
+        if trailing_delim && !current_row.is_empty() {
+            current_row.push(String::new());
+            rows.push(current_row);
+        }
+
+        Ok(rows)
+    }
+
+    pub fn parse_scalar_baseline(
+        input: &str,
+        delimiter: char,
+    ) -> Result<Vec<Vec<String>>, EasyOfficeError> {
         if input.is_empty() {
             return Ok(Vec::new());
         }
@@ -561,3 +722,46 @@ impl PdfSerializer {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_swar_csv_parser_large_rows_escaped_quotes_crlf_lf_and_korean_utf8() {
+        let mut table = Vec::with_capacity(64);
+        for r in 0..64 {
+            table.push(vec![
+                format!("기획조정실_{r:03}"),
+                format!("\"예산집행, 1분기 \"\"승인\"\" ({r})\""),
+                format!("{}", (r + 1) * 1250),
+                format!("\"다중행 메모 1행\n2행 상세내역 {r}\""),
+                "디지털행정혁신과".to_string(),
+                String::new(),
+            ]);
+        }
+
+        let crlf_csv = table
+            .iter()
+            .map(|row| row.join(","))
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        let lf_csv = crlf_csv.replace("\r\n", "\n");
+
+        let parsed_crlf = CsvCodec::parse(&crlf_csv, ',').unwrap();
+        let baseline_crlf = CsvCodec::parse_scalar_baseline(&crlf_csv, ',').unwrap();
+        let parsed_lf = CsvCodec::parse(&lf_csv, ',').unwrap();
+
+        assert_eq!(parsed_crlf.len(), 64);
+        assert_eq!(parsed_crlf, baseline_crlf);
+        assert_eq!(parsed_lf, baseline_crlf);
+        assert_eq!(parsed_crlf[0][0], "기획조정실_000");
+        assert_eq!(parsed_crlf[0][1], "예산집행, 1분기 \"승인\" (0)");
+        assert_eq!(parsed_crlf[0][3], "다중행 메모 1행\n2행 상세내역 0");
+        assert_eq!(parsed_crlf[0][5], "");
+
+        assert!(CsvCodec::parse("\"unclosed quote", ',').is_err());
+        assert!(CsvCodec::parse("unquoted\"quote,val", ',').is_err());
+    }
+}
+
