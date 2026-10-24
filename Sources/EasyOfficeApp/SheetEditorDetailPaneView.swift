@@ -318,25 +318,20 @@ public struct SheetVectorChartCanvasView: View {
             let plotW = max(1.0, size.width - leftPad - 12.0)
             let plotH = max(1.0, size.height - bottomPad - 10.0)
 
-            var axesPath = Path()
-            axesPath.move(to: CGPoint(x: leftPad, y: 6.0))
-            axesPath.addLine(to: CGPoint(x: leftPad, y: 6.0 + plotH))
-            axesPath.addLine(to: CGPoint(x: leftPad + plotW, y: 6.0 + plotH))
-            context.stroke(
-              axesPath,
-              with: .color(palette.border.swiftUIColor),
-              lineWidth: 1.2
+            context.fill(
+              Path(CGRect(x: leftPad, y: 6.0, width: 1.2, height: plotH)),
+              with: .color(palette.border.swiftUIColor)
+            )
+            context.fill(
+              Path(CGRect(x: leftPad, y: 6.0 + plotH, width: plotW, height: 1.2)),
+              with: .color(palette.border.swiftUIColor)
             )
 
             for step in 1...2 {
               let gy = 6.0 + plotH * (CGFloat(step) / 3.0)
-              var gridLine = Path()
-              gridLine.move(to: CGPoint(x: leftPad, y: gy))
-              gridLine.addLine(to: CGPoint(x: leftPad + plotW, y: gy))
-              context.stroke(
-                gridLine,
-                with: .color(palette.border.swiftUIColor.opacity(0.5)),
-                style: StrokeStyle(lineWidth: 0.8, dash: [3, 3])
+              context.fill(
+                Path(CGRect(x: leftPad, y: gy, width: plotW, height: 0.8)),
+                with: .color(palette.border.swiftUIColor.opacity(0.5))
               )
             }
 
@@ -400,14 +395,13 @@ public struct SheetEditorDetailPaneView: View {
         .foregroundStyle(isActive ? activeColor : palette.primaryText.swiftUIColor)
         .padding(.horizontal, 5)
         .padding(.vertical, 3)
-        .background(isActive ? activeColor.opacity(0.14) : Color.clear)
     }
     .buttonStyle(.plain)
   }
 
   private func gridBounds(for sheet: WorksheetModel) -> (rows: Int, cols: Int) {
-    var maxRow = 10
-    var maxCol = 9
+    var maxRow = 22
+    var maxCol = 10
     for coord in sheet.cellsByCoordinate.keys {
       maxRow = max(maxRow, coord.row + 1)
       maxCol = max(maxCol, coord.column + 1)
@@ -568,11 +562,15 @@ public struct SheetEditorDetailPaneView: View {
               .fixedSize(horizontal: true, vertical: false)
               .foregroundStyle(palette.primaryText.swiftUIColor)
 
-            Text(viewModel.selectedSheetRange)
-              .font(.system(size: 11, weight: .medium, design: .monospaced))
-              .lineLimit(1)
-              .fixedSize(horizontal: true, vertical: false)
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            if !viewModel.selectedSheetRange.isEmpty
+              && viewModel.selectedSheetRange != viewModel.selectedSheetCell
+            {
+              Text(viewModel.selectedSheetRange)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
 
             Divider().frame(height: 14)
 
@@ -1185,7 +1183,6 @@ public struct SheetEditorDetailPaneView: View {
         HStack(spacing: 0) {
           ForEach(Array(sheet.allSheetNames.enumerated()), id: \.offset) { idx, rawSheetName in
             let isActiveTab = idx == sheet.activeSheetIndex
-            let displaySheetName = rawSheetName == "검증집계시트" ? "요약 시트" : rawSheetName
             Button {
               guard isPrimaryPane else { return }
               viewModel.selectWorksheetTab(index: idx)
@@ -1193,7 +1190,7 @@ public struct SheetEditorDetailPaneView: View {
               HStack(spacing: 5) {
                 Image(systemName: "tablecells")
                   .font(.system(size: 10))
-                Text(displaySheetName)
+                Text(rawSheetName)
                   .font(.system(size: 11, weight: isActiveTab ? .bold : .medium))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
@@ -1399,10 +1396,7 @@ public struct SheetEditorDetailPaneView: View {
           .foregroundStyle(palette.secondaryText.swiftUIColor)
           .frame(width: 36, height: 26)
           .background(palette.elevatedSurface.swiftUIColor)
-          .overlay(
-            Rectangle()
-              .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
-          )
+          .border(palette.border.swiftUIColor.opacity(0.65), width: 0.5)
       }
 
       ForEach(Array(columnIndices), id: \.self) { colIdx in
@@ -1422,10 +1416,7 @@ public struct SheetEditorDetailPaneView: View {
                 ? palette.primaryAccent.swiftUIColor.opacity(0.20)
                 : palette.elevatedSurface.swiftUIColor
             )
-            .overlay(
-              Rectangle()
-                .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
-            )
+            .border(palette.border.swiftUIColor.opacity(0.65), width: 0.5)
             .overlay(alignment: .bottom) {
               if isColSelected {
                 Rectangle()
@@ -1496,10 +1487,7 @@ public struct SheetEditorDetailPaneView: View {
                 ? palette.primaryAccent.swiftUIColor.opacity(0.20)
                 : palette.elevatedSurface.swiftUIColor
             )
-            .overlay(
-              Rectangle()
-                .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
-            )
+            .border(palette.border.swiftUIColor.opacity(0.65), width: 0.5)
             .overlay(alignment: .trailing) {
               if isRowSelected {
                 Rectangle()
@@ -1699,14 +1687,11 @@ public struct SheetEditorDetailPaneView: View {
           palette: palette
         )
       )
-      .overlay(
-        Rectangle()
-          .strokeBorder(
-            matchingMergedRange != nil
-              ? palette.primaryAccent.swiftUIColor.opacity(0.55)
-              : palette.border.swiftUIColor.opacity(0.65),
-            lineWidth: matchingMergedRange != nil ? 1.0 : 0.5
-          )
+      .border(
+        matchingMergedRange != nil
+          ? palette.primaryAccent.swiftUIColor.opacity(0.55)
+          : palette.border.swiftUIColor.opacity(0.65),
+        width: matchingMergedRange != nil ? 1.0 : 0.5
       )
       .overlay(alignment: .top) {
         if isSelectionTopEdge {

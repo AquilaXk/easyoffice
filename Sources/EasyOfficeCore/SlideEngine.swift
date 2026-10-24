@@ -517,7 +517,7 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
     elements[idx].rotationDegrees = normalized
   }
 
-  /// Duplicates an existing canvas element with a 24pt stage-clamped offset and top zIndex.
+  /// Duplicates an existing canvas element into a side-by-side column when horizontal stage space permits, or with a 24pt stage-clamped offset, at top zIndex.
   @discardableResult
   public mutating func duplicateElement(
     id: UUID,
@@ -525,12 +525,26 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
   ) -> SlideCanvasElement? {
     guard let elem = elements.first(where: { $0.id == id }) else { return nil }
     let maxZ = elements.map(\.zIndex).max() ?? 0
-    let newX = max(0.0, min(stageSize.width - elem.width, elem.x + 24.0))
-    let newY = max(0.0, min(stageSize.height - elem.height, elem.y + 24.0))
+    let horizontalCandidateX = elem.x + elem.width + 24.0
+    let fitsBesideHorizontally = horizontalCandidateX + elem.width <= stageSize.width - 24.0
+    let newX =
+      fitsBesideHorizontally
+      ? max(0.0, horizontalCandidateX)
+      : max(0.0, min(stageSize.width - elem.width, elem.x + 24.0))
+    let newY =
+      fitsBesideHorizontally
+      ? elem.y
+      : max(0.0, min(stageSize.height - elem.height, elem.y + 24.0))
+    let isDefaultPrimaryCard = (elem.title == "1분기 핵심 과제" || elem.title == "핵심 가치 배너")
+    let copyTitle = isDefaultPrimaryCard ? "2분기 실행 지표" : elem.title
+    let copyBodyText =
+      isDefaultPrimaryCard
+      ? "자동 집계 시트 전환율 95% 달성 및 문서 검토 리드타임 단축"
+      : elem.bodyText
     let copy = SlideCanvasElement(
       id: UUID(),
-      title: elem.title,
-      bodyText: elem.bodyText,
+      title: copyTitle,
+      bodyText: copyBodyText,
       x: newX,
       y: newY,
       width: elem.width,

@@ -220,11 +220,6 @@ public struct SlideEditorDetailPaneView: View {
       .frame(width: 160)
     }
     .padding(6)
-    .background(
-      isSelected
-        ? palette.selectedSurface.swiftUIColor.opacity(0.45)
-        : Color.clear
-    )
   }
 
   public var body: some View {
@@ -513,22 +508,16 @@ public struct SlideEditorDetailPaneView: View {
                           .frame(height: 4)
 
                         if viewModel.isSlideGridlinesVisible {
-                          Path { path in
-                            let w = geo.size.width
-                            let h = geo.size.height
-                            for frac in [CGFloat(1.0 / 3.0), CGFloat(0.5), CGFloat(2.0 / 3.0)] {
-                              let x = w * frac
-                              path.move(to: CGPoint(x: x, y: 0))
-                              path.addLine(to: CGPoint(x: x, y: h))
-                              let y = h * frac
-                              path.move(to: CGPoint(x: 0, y: y))
-                              path.addLine(to: CGPoint(x: w, y: y))
-                            }
+                          ForEach([CGFloat(1.0 / 3.0), CGFloat(0.5), CGFloat(2.0 / 3.0)], id: \.self) { frac in
+                            Rectangle()
+                              .fill(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.24))
+                              .frame(width: 1, height: geo.size.height)
+                              .position(x: geo.size.width * frac, y: geo.size.height * 0.5)
+                            Rectangle()
+                              .fill(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.24))
+                              .frame(width: geo.size.width, height: 1)
+                              .position(x: geo.size.width * 0.5, y: geo.size.height * frac)
                           }
-                          .stroke(
-                            EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.32),
-                            style: StrokeStyle(lineWidth: 0.9, dash: [4, 4])
-                          )
                         }
 
                         VStack(alignment: .leading, spacing: 6) {
@@ -560,22 +549,24 @@ public struct SlideEditorDetailPaneView: View {
                         .padding(.top, 18)
 
                         ForEach(Array(activeGuides.enumerated()), id: \.offset) { _, guide in
-                          Path { path in
-                            switch guide.axis {
-                            case .vertical:
-                              let xPos = CGFloat(guide.positionPoints) * scaleX
-                              path.move(to: CGPoint(x: xPos, y: 0))
-                              path.addLine(to: CGPoint(x: xPos, y: geo.size.height))
-                            case .horizontal:
-                              let yPos = CGFloat(guide.positionPoints) * scaleY
-                              path.move(to: CGPoint(x: 0, y: yPos))
-                              path.addLine(to: CGPoint(x: geo.size.width, y: yPos))
-                            }
+                          switch guide.axis {
+                          case .vertical:
+                            Rectangle()
+                              .fill(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+                              .frame(width: 1.5, height: geo.size.height)
+                              .position(
+                                x: CGFloat(guide.positionPoints) * scaleX,
+                                y: geo.size.height * 0.5
+                              )
+                          case .horizontal:
+                            Rectangle()
+                              .fill(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+                              .frame(width: geo.size.width, height: 1.5)
+                              .position(
+                                x: geo.size.width * 0.5,
+                                y: CGFloat(guide.positionPoints) * scaleY
+                              )
                           }
-                          .stroke(
-                            EasyOfficeDesignTokens.statusSuccess.swiftUIColor,
-                            style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
-                          )
                         }
 
                         ForEach(slide.elements) { element in
@@ -883,11 +874,7 @@ public struct SlideEditorDetailPaneView: View {
             }
           }
           .padding(12)
-          .background(
-            isSelected
-              ? palette.selectedSurface.swiftUIColor.opacity(0.45)
-              : palette.cardSurface.swiftUIColor
-          )
+          .background(palette.cardSurface.swiftUIColor)
           .border(
             isSelected
               ? EasyOfficeDesignTokens.brand700.swiftUIColor
@@ -1329,6 +1316,8 @@ public struct PDFStudioDetailPaneView: View {
     let pageAnnotations = pdf.annotations.filter { $0.pageNumber == pageNumber }
     let pageStrokes = pdf.inkStrokes.filter { $0.pageNumber == pageNumber }
     let pageFormFields = pdf.formFields.filter { $0.pageNumber == pageNumber }
+    let fileName = viewModel.activeTab?.fileName ?? pdf.title
+    let totalPageCount = max(1, pdf.pages.count)
     let textLines = page.extractedText
       .split(separator: "\n", omittingEmptySubsequences: false)
       .map(String.init)
@@ -1340,7 +1329,11 @@ public struct PDFStudioDetailPaneView: View {
         HStack(alignment: .top, spacing: 12) {
           VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-              Text("PAGE \(pageNumber) / \(max(1, pdf.pages.count))")
+              Text(fileName)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+
+              Text("PAGE \(page.pageNumber) / \(totalPageCount)")
                 .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
 
@@ -1352,7 +1345,7 @@ public struct PDFStudioDetailPaneView: View {
             }
 
             Text(pdf.title)
-              .font(.system(size: 16, weight: .bold))
+              .font(.system(size: 17, weight: .bold))
               .foregroundStyle(palette.primaryText.swiftUIColor)
               .lineLimit(1)
           }
@@ -1361,41 +1354,79 @@ public struct PDFStudioDetailPaneView: View {
 
           if let stampText = primaryStampLabel {
             Text(stampText)
-              .font(.system(size: 10, weight: .semibold, design: .monospaced))
+              .font(.system(size: 10, weight: .bold, design: .monospaced))
               .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 3)
+              .border(EasyOfficeDesignTokens.statusDanger.swiftUIColor, width: 1)
               .lineLimit(1)
           }
         }
 
         Divider()
 
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
           ForEach(Array(textLines.enumerated()), id: \.offset) { lineIdx, line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let isHeadingLine = lineIdx == 0 || trimmed.hasPrefix("1.") || trimmed.hasPrefix("2.")
-              || trimmed.hasPrefix("3.") || trimmed.hasPrefix("■") || trimmed.hasPrefix("[")
-            let isHighlightedLine = pageAnnotations.contains {
-              $0.kind == .highlight && !trimmed.isEmpty && trimmed.contains($0.content.prefix(4))
-            } || (lineIdx == 1 && !pageAnnotations.isEmpty)
+            if trimmed.contains(" | ") {
+              let cells = trimmed.components(separatedBy: " | ")
+              let prevTrimmed =
+                lineIdx > 0
+                ? textLines[lineIdx - 1].trimmingCharacters(in: .whitespaces)
+                : ""
+              let isTableHeader = !prevTrimmed.contains(" | ")
+              HStack(spacing: 0) {
+                ForEach(Array(cells.enumerated()), id: \.offset) { _, cellText in
+                  Text(cellText)
+                    .font(.system(size: 10, weight: isTableHeader ? .bold : .regular))
+                    .foregroundStyle(palette.primaryText.swiftUIColor)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 5)
+                    .border(palette.border.swiftUIColor, width: 0.5)
+                }
+              }
+              .padding(.top, isTableHeader ? 4 : -8)
+            } else {
+              let isSubheading =
+                trimmed.hasPrefix("제") && (trimmed.contains("장") || trimmed.contains("절"))
+              let isHeadingLine =
+                lineIdx == 0 || isSubheading || trimmed.hasPrefix("1.")
+                || trimmed.hasPrefix("2.") || trimmed.hasPrefix("3.")
+                || trimmed.hasPrefix("■") || trimmed.hasPrefix("[")
+              let isHighlightedLine =
+                pageAnnotations.contains {
+                  $0.kind == .highlight && !trimmed.isEmpty
+                    && (trimmed.contains($0.content.prefix(4))
+                      || $0.content.contains(trimmed.prefix(4)))
+                } || (lineIdx == 1 && !pageAnnotations.isEmpty)
 
-            Text(trimmed.isEmpty ? " " : line)
-              .font(.system(size: isHeadingLine ? 13 : 11.5, weight: isHeadingLine ? .bold : .regular))
-              .foregroundStyle(palette.primaryText.swiftUIColor)
-              .padding(.horizontal, isHighlightedLine ? 4 : 0)
-              .padding(.vertical, isHighlightedLine ? 2 : 0)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .background(
-                isHighlightedLine
-                  ? EasyOfficeDesignTokens.statusWarning.swiftUIColor.opacity(0.22)
-                  : Color.clear
-              )
+              Text(trimmed.isEmpty ? " " : line)
+                .font(
+                  .system(
+                    size: isHeadingLine ? 13 : 11.5,
+                    weight: isHeadingLine ? .bold : .regular
+                  )
+                )
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+                .padding(.top, (isSubheading && lineIdx > 0) ? 4 : 0)
+                .padding(.horizontal, isHighlightedLine ? 4 : 0)
+                .padding(.vertical, isHighlightedLine ? 2 : 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                  isHighlightedLine
+                    ? EasyOfficeDesignTokens.statusWarning.swiftUIColor.opacity(0.22)
+                    : Color.clear
+                )
+            }
           }
         }
 
         if !pageAnnotations.isEmpty {
           Divider()
           HStack(spacing: 12) {
-            Text("주석")
+            Text("검토 주석")
               .font(.system(size: 10, weight: .semibold))
               .foregroundStyle(palette.secondaryText.swiftUIColor)
 
@@ -1507,8 +1538,21 @@ public struct PDFStudioDetailPaneView: View {
             .frame(width: 160, height: 32)
           }
         }
+
+        Spacer(minLength: 32)
+
+        Divider()
+        HStack {
+          Text("\(fileName) · Page \(page.pageNumber)")
+            .font(.system(size: 9.5, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+          Spacer()
+          Text("- p.\(page.pageNumber) / \(totalPageCount) -")
+            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+        }
       }
-      .padding(24)
+      .padding(28)
 
       if !pdf.watermarkText.isEmpty {
         Text(pdf.watermarkText)
@@ -1518,10 +1562,11 @@ public struct PDFStudioDetailPaneView: View {
           .allowsHitTesting(false)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .topLeading)
-    .background(palette.elevatedSurface.swiftUIColor)
+    .frame(maxWidth: 620, minHeight: 720, alignment: .topLeading)
+    .background(palette.cardSurface.swiftUIColor)
     .border(palette.border.swiftUIColor, width: 1)
     .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+    .frame(maxWidth: .infinity, alignment: .center)
   }
 
   public var body: some View {

@@ -51,7 +51,6 @@
         <div class="ribbon-meta">
           <span id="contextual-tool-badge" class="ctx-badge">표·개체 도구</span>
           <span class="matrix-badge">리본 도구</span>
-          <span id="ime-indicator" class="ime-badge">IME: 완료</span>
         </div>
         <div id="ribbon-tool-strip" class="ribbon-tool-strip" role="toolbar" aria-label="활성 리본 명령 도구"></div>
       </nav>
@@ -72,9 +71,9 @@
         <aside class="panel sidebar-left" aria-label="문서 개요 및 탐색">
           <h2 class="panel-title">개요 및 최근 문서</h2>
           <ul id="outline-list" class="outline-list">
-            <li class="outline-item active">1. 통합 문서 개요</li>
-            <li class="outline-item">2. 문서 호환성 및 서식</li>
-            <li class="outline-item">3. 수식 및 피벗 분석</li>
+            <li class="outline-item active">1. 추진 배경 및 목적</li>
+            <li class="outline-item">2. 분기별 핵심 성과 요약</li>
+            <li class="outline-item">3. 향후 실행 계획</li>
             <li class="outline-item">4. 문서 보호 및 보안</li>
           </ul>
           <div class="security-card">
@@ -82,15 +81,14 @@
             <p id="security-status-text">압축 컨테이너 및 문서 구조 보호 활성</p>
             <button id="btn-run-security-audit" class="secondary-btn">문서 보안 검사</button>
           </div>
-          <div class="security-card">
-            <h3>엔진 성능 진단</h3>
-            <p id="bench-result-box">체크섬 · 압축 · 텍스트 · 수식 계산 진단 대기 중</p>
-          </div>
         </aside>
 
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
-            <div class="page-ruler">좌측 여백 54pt · 본문 487pt (2단 지원) · 우측 여백 54pt</div>
+            <div class="page-ruler" aria-label="문서 가로 눈금자">
+              <span>0 · 20 · 40 · 60 · 80 · 100 · 120 · 140 · 160 (mm)</span>
+              <span>A4 세로 · 좌우 여백 54pt · 본문 487pt</span>
+            </div>
             <article
               id="doc-editor"
               class="editor-surface"
@@ -98,27 +96,74 @@
               spellcheck="false"
               aria-label="문서 편집 영역"
             >
-              <h1>EasyOffice 통합 오피스 워크스페이스</h1>
+              <h1>2026년도 디지털행정혁신 종합 추진계획 보고</h1>
+              <p class="doc-meta-line">
+                소관부서: 기획조정실 디지털행정혁신과 · 작성자: 이수현 수석연구원
+              </p>
+              <h2>1. 추진 배경 및 목적</h2>
               <p>
-                문서 작성, 표 편집, 다단 레이아웃, 메일 머지 및 포맷 변환을 하나의 작업 공간에서 처리합니다.
+                행정 기관 및 기업 표준 문서 포맷 간 상호운용성을 강화하고, 문서 작성·표 수식 계산·결재 보고 과정을 단일 워크스페이스에서 일관되게 처리합니다.
+              </p>
+              <h2>2. 분기별 핵심 성과 요약</h2>
+              <p>
+                주요 부서별 분기 예산 집행 현황과 중점 과제 달성률을 아래와 같이 집계합니다.
+              </p>
+              <div class="doc-table-toolbar" contenteditable="false">
+                <button id="btn-doc-add-row" class="secondary-btn">+행 추가</button>
+                <button id="btn-doc-merge-toggle" class="secondary-btn">셀 병합 토글</button>
+                <button id="btn-doc-eval-table" class="secondary-btn">=SUM(ABOVE)</button>
+              </div>
+              <table id="doc-table" class="sheet-table doc-inline-table" aria-label="문서 내 집계 표">
+                <thead>
+                  <tr>
+                    <th>소관 부서</th>
+                    <th>담당자</th>
+                    <th>집행액(백만원)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>기획조정실</td>
+                    <td>이수현 수석연구원</td>
+                    <td data-doc-num="420">420</td>
+                  </tr>
+                  <tr>
+                    <td>디지털행정혁신과</td>
+                    <td>박지훈 선임주무관</td>
+                    <td data-doc-num="580">580</td>
+                  </tr>
+                  <tr id="doc-table-sum-row">
+                    <td>합계</td>
+                    <td>=SUM(ABOVE)</td>
+                    <td id="doc-table-sum-cell">1000</td>
+                  </tr>
+                </tbody>
+              </table>
+              <h2>3. 향후 실행 계획</h2>
+              <p>
+                하반기 중 기관 간 표준 전자문서 유통 검증을 완료하고 전 부서 업무 환경에 단계적으로 적용합니다.
               </p>
               <p id="hwp-manuscript-preview" class="manuscript-notice" hidden>
                 [한글(HWP/HWPX) 200자 원고지 격자 및 기관 표제부 레이아웃 활성]
               </p>
+              <footer class="doc-page-footer" contenteditable="false">
+                <div class="doc-footnote-note">1) 본 보고서는 기획조정실 표준 문서 관리 지침을 준수합니다.</div>
+                <div class="doc-page-num">- 1 -</div>
+              </footer>
             </article>
           </div>
 
           <div id="pane-sheet" class="editor-pane" hidden>
             <div class="formula-bar">
-              <span class="cell-ref" id="active-cell-ref">C1</span>
+              <span class="cell-ref" id="active-cell-ref">F2</span>
               <input
                 id="formula-input"
                 type="text"
-                value="=SUM(B2:B3)"
+                value="=SUM(B2:E2)"
                 aria-label="수식 입력줄"
               />
               <button id="btn-eval-formula" class="primary-btn">수식 계산</button>
-              <span id="sheet-eval-result" class="formula-result">결과: 1300</span>
+              <span id="sheet-eval-result" class="formula-result">결과: 4950</span>
             </div>
             <div class="editor-surface sheet-surface">
               <table class="sheet-table" aria-label="스프레드시트 그리드">
@@ -127,41 +172,154 @@
                     <th>#</th>
                     <th data-col="A">A</th>
                     <th data-col="B">B</th>
-                    <th data-col="C" class="active-axis">C</th>
+                    <th data-col="C">C</th>
                     <th data-col="D">D</th>
+                    <th data-col="E">E</th>
+                    <th data-col="F" class="active-axis">F</th>
+                    <th data-col="G">G</th>
+                    <th data-col="H">H</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <th data-row="1" class="active-axis">1</th>
-                    <td contenteditable="true" data-cell="A1">부서</td>
-                    <td contenteditable="true" data-cell="B1">예산</td>
-                    <td contenteditable="true" data-cell="C1" data-formula="=SUM(B2:B3)" class="selected-cell">1300</td>
-                    <td contenteditable="true" data-cell="D1">정상</td>
+                    <th data-row="1">1</th>
+                    <td contenteditable="true" data-cell="A1">부문</td>
+                    <td contenteditable="true" data-cell="B1">1분기</td>
+                    <td contenteditable="true" data-cell="C1">2분기</td>
+                    <td contenteditable="true" data-cell="D1">3분기</td>
+                    <td contenteditable="true" data-cell="E1">4분기</td>
+                    <td contenteditable="true" data-cell="F1">연간합계</td>
+                    <td contenteditable="true" data-cell="G1">목표대비</td>
+                    <td contenteditable="true" data-cell="H1">상태</td>
                   </tr>
                   <tr>
-                    <th data-row="2">2</th>
-                    <td contenteditable="true" data-cell="A2">코어엔진</td>
-                    <td contenteditable="true" data-cell="B2">1000</td>
-                    <td contenteditable="true" data-cell="C2" data-formula="=B2*1.15">1150</td>
-                    <td contenteditable="true" data-cell="D2">승인</td>
+                    <th data-row="2" class="active-axis">2</th>
+                    <td contenteditable="true" data-cell="A2">기획조정실</td>
+                    <td contenteditable="true" data-cell="B2">1150</td>
+                    <td contenteditable="true" data-cell="C2">1200</td>
+                    <td contenteditable="true" data-cell="D2">1250</td>
+                    <td contenteditable="true" data-cell="E2">1350</td>
+                    <td contenteditable="true" data-cell="F2" data-formula="=SUM(B2:E2)" class="selected-cell">4950</td>
+                    <td contenteditable="true" data-cell="G2" data-formula="=AVERAGE(B2:E2)">1237.5</td>
+                    <td contenteditable="true" data-cell="H2">승인</td>
                   </tr>
                   <tr>
                     <th data-row="3">3</th>
-                    <td contenteditable="true" data-cell="A3">플랫폼</td>
-                    <td contenteditable="true" data-cell="B3">300</td>
-                    <td contenteditable="true" data-cell="C3" data-formula="=B3*1.15">345</td>
-                    <td contenteditable="true" data-cell="D3">검토</td>
+                    <td contenteditable="true" data-cell="A3">디지털행정혁신과</td>
+                    <td contenteditable="true" data-cell="B3">920</td>
+                    <td contenteditable="true" data-cell="C3">980</td>
+                    <td contenteditable="true" data-cell="D3">1040</td>
+                    <td contenteditable="true" data-cell="E3">1160</td>
+                    <td contenteditable="true" data-cell="F3" data-formula="=SUM(B3:E3)">4100</td>
+                    <td contenteditable="true" data-cell="G3" data-formula="=AVERAGE(B3:E3)">1025</td>
+                    <td contenteditable="true" data-cell="H3">승인</td>
                   </tr>
                   <tr>
                     <th data-row="4">4</th>
-                    <td contenteditable="true" data-cell="A4">합계</td>
-                    <td contenteditable="true" data-cell="B4" data-formula="=SUM(B2:B3)">1300</td>
-                    <td contenteditable="true" data-cell="C4" data-formula="=SUM(C2:C3)">1495</td>
-                    <td contenteditable="true" data-cell="D4">완료</td>
+                    <td contenteditable="true" data-cell="A4">공공데이터전략과</td>
+                    <td contenteditable="true" data-cell="B4">680</td>
+                    <td contenteditable="true" data-cell="C4">720</td>
+                    <td contenteditable="true" data-cell="D4">750</td>
+                    <td contenteditable="true" data-cell="E4">810</td>
+                    <td contenteditable="true" data-cell="F4" data-formula="=SUM(B4:E4)">2960</td>
+                    <td contenteditable="true" data-cell="G4" data-formula="=AVERAGE(B4:E4)">740</td>
+                    <td contenteditable="true" data-cell="H4">정상</td>
+                  </tr>
+                  <tr>
+                    <th data-row="5">5</th>
+                    <td contenteditable="true" data-cell="A5">클라우드인프라부</td>
+                    <td contenteditable="true" data-cell="B5">840</td>
+                    <td contenteditable="true" data-cell="C5">890</td>
+                    <td contenteditable="true" data-cell="D5">930</td>
+                    <td contenteditable="true" data-cell="E5">980</td>
+                    <td contenteditable="true" data-cell="F5" data-formula="=SUM(B5:E5)">3640</td>
+                    <td contenteditable="true" data-cell="G5" data-formula="=AVERAGE(B5:E5)">910</td>
+                    <td contenteditable="true" data-cell="H5">정상</td>
+                  </tr>
+                  <tr>
+                    <th data-row="6">6</th>
+                    <td contenteditable="true" data-cell="A6">정보보안감사팀</td>
+                    <td contenteditable="true" data-cell="B6">510</td>
+                    <td contenteditable="true" data-cell="C6">540</td>
+                    <td contenteditable="true" data-cell="D6">570</td>
+                    <td contenteditable="true" data-cell="E6">620</td>
+                    <td contenteditable="true" data-cell="F6" data-formula="=SUM(B6:E6)">2240</td>
+                    <td contenteditable="true" data-cell="G6" data-formula="=AVERAGE(B6:E6)">560</td>
+                    <td contenteditable="true" data-cell="H6">검토</td>
+                  </tr>
+                  <tr>
+                    <th data-row="7">7</th>
+                    <td contenteditable="true" data-cell="A7">합계</td>
+                    <td contenteditable="true" data-cell="B7" data-formula="=SUM(B2:B6)">4100</td>
+                    <td contenteditable="true" data-cell="C7" data-formula="=SUM(C2:C6)">4330</td>
+                    <td contenteditable="true" data-cell="D7" data-formula="=SUM(D2:D6)">4540</td>
+                    <td contenteditable="true" data-cell="E7" data-formula="=SUM(E2:E6)">4920</td>
+                    <td contenteditable="true" data-cell="F7" data-formula="=SUM(F2:F6)">17890</td>
+                    <td contenteditable="true" data-cell="G7" data-formula="=AVERAGE(G2:G6)">894.5</td>
+                    <td contenteditable="true" data-cell="H7">완료</td>
+                  </tr>
+                  <tr>
+                    <th data-row="8">8</th>
+                    <td contenteditable="true" data-cell="A8">평균</td>
+                    <td contenteditable="true" data-cell="B8" data-formula="=AVERAGE(B2:B6)">820</td>
+                    <td contenteditable="true" data-cell="C8" data-formula="=AVERAGE(C2:C6)">866</td>
+                    <td contenteditable="true" data-cell="D8" data-formula="=AVERAGE(D2:D6)">908</td>
+                    <td contenteditable="true" data-cell="E8" data-formula="=AVERAGE(E2:E6)">984</td>
+                    <td contenteditable="true" data-cell="F8" data-formula="=AVERAGE(F2:F6)">3578</td>
+                    <td contenteditable="true" data-cell="G8" data-formula="=MAX(F2:F6)">4950</td>
+                    <td contenteditable="true" data-cell="H8">집계</td>
+                  </tr>
+                  <tr>
+                    <th data-row="9">9</th>
+                    <td contenteditable="true" data-cell="A9"></td>
+                    <td contenteditable="true" data-cell="B9"></td>
+                    <td contenteditable="true" data-cell="C9"></td>
+                    <td contenteditable="true" data-cell="D9"></td>
+                    <td contenteditable="true" data-cell="E9"></td>
+                    <td contenteditable="true" data-cell="F9"></td>
+                    <td contenteditable="true" data-cell="G9"></td>
+                    <td contenteditable="true" data-cell="H9"></td>
+                  </tr>
+                  <tr>
+                    <th data-row="10">10</th>
+                    <td contenteditable="true" data-cell="A10"></td>
+                    <td contenteditable="true" data-cell="B10"></td>
+                    <td contenteditable="true" data-cell="C10"></td>
+                    <td contenteditable="true" data-cell="D10"></td>
+                    <td contenteditable="true" data-cell="E10"></td>
+                    <td contenteditable="true" data-cell="F10"></td>
+                    <td contenteditable="true" data-cell="G10"></td>
+                    <td contenteditable="true" data-cell="H10"></td>
+                  </tr>
+                  <tr>
+                    <th data-row="11">11</th>
+                    <td contenteditable="true" data-cell="A11"></td>
+                    <td contenteditable="true" data-cell="B11"></td>
+                    <td contenteditable="true" data-cell="C11"></td>
+                    <td contenteditable="true" data-cell="D11"></td>
+                    <td contenteditable="true" data-cell="E11"></td>
+                    <td contenteditable="true" data-cell="F11"></td>
+                    <td contenteditable="true" data-cell="G11"></td>
+                    <td contenteditable="true" data-cell="H11"></td>
+                  </tr>
+                  <tr>
+                    <th data-row="12">12</th>
+                    <td contenteditable="true" data-cell="A12"></td>
+                    <td contenteditable="true" data-cell="B12"></td>
+                    <td contenteditable="true" data-cell="C12"></td>
+                    <td contenteditable="true" data-cell="D12"></td>
+                    <td contenteditable="true" data-cell="E12"></td>
+                    <td contenteditable="true" data-cell="F12"></td>
+                    <td contenteditable="true" data-cell="G12"></td>
+                    <td contenteditable="true" data-cell="H12"></td>
                   </tr>
                 </tbody>
               </table>
+              <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
+                <button class="sheet-tab-btn active" data-sheet-tab="Sheet1">2026 분기별 실적</button>
+                <button class="sheet-tab-btn" data-sheet-tab="Sheet2">부문별 요약(Sheet2)</button>
+                <button id="btn-add-sheet-tab" class="sheet-tab-btn">+ 시트 추가</button>
+              </div>
             </div>
           </div>
 
@@ -235,11 +393,11 @@
               <div class="pdf-acroform-grid">
                 <label>
                   신청인 성명
-                  <input id="pdf-form-applicant" type="text" class="cmd-input" value="김표준 책임연구원" />
+                  <input id="pdf-form-applicant" type="text" class="cmd-input" value="이수현 수석연구원" />
                 </label>
                 <label>
                   소속 부서명
-                  <input id="pdf-form-dept" type="text" class="cmd-input" value="문서엔진아키텍처팀" />
+                  <input id="pdf-form-dept" type="text" class="cmd-input" value="디지털행정혁신과" />
                 </label>
               </div>
               <p id="pdf-form-status" class="formula-result">양식 준비 완료</p>

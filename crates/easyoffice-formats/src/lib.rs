@@ -647,11 +647,84 @@ impl Ole2SecurityGuard {
     pub const HWP5_FLAG_DISTRIBUTION: u32 = 0x04;
 }
 
-/// Zero-allocation XML sanitizer blocking XXE / DTD declarations and escaping XML entities.
+/// Zero-allocation 64-bit SWAR XML sanitizer blocking XXE / DTD declarations and escaping XML entities.
 pub struct XmlSanitizer;
 
 impl XmlSanitizer {
+    #[inline]
+    pub const fn has_zero_byte(v: u64) -> bool {
+        (v.wrapping_sub(0x0101_0101_0101_0101) & !v & 0x8080_8080_8080_8080) != 0
+    }
+
+    #[inline]
+    pub fn find_byte_swar(bytes: &[u8], start: usize, target: u8) -> Option<usize> {
+        const LO: u64 = 0x0101_0101_0101_0101;
+        const HI: u64 = 0x8080_8080_8080_8080;
+        let splat = (target as u64).wrapping_mul(LO);
+        let mut idx = start;
+        while idx + 8 <= bytes.len() {
+            let word = u64::from_le_bytes(bytes[idx..idx + 8].try_into().unwrap());
+            let diff = word ^ splat;
+            let mask = diff.wrapping_sub(LO) & !diff & HI;
+            if mask != 0 {
+                return Some(idx + ((mask.trailing_zeros() >> 3) as usize));
+            }
+            idx += 8;
+        }
+        while idx < bytes.len() {
+            if bytes[idx] == target {
+                return Some(idx);
+            }
+            idx += 1;
+        }
+        None
+    }
+
+    #[inline]
+    fn xml_escape_mask(word: u64) -> u64 {
+        const LO: u64 = 0x0101_0101_0101_0101;
+        const HI: u64 = 0x8080_8080_8080_8080;
+        let d_amp = word ^ (0x26u64 * LO);
+        let d_lt = word ^ (0x3Cu64 * LO);
+        let d_gt = word ^ (0x3Eu64 * LO);
+        let d_quot = word ^ (0x22u64 * LO);
+        let d_apos = word ^ (0x27u64 * LO);
+        let m_amp = d_amp.wrapping_sub(LO) & !d_amp;
+        let m_lt = d_lt.wrapping_sub(LO) & !d_lt;
+        let m_gt = d_gt.wrapping_sub(LO) & !d_gt;
+        let m_quot = d_quot.wrapping_sub(LO) & !d_quot;
+        let m_apos = d_apos.wrapping_sub(LO) & !d_apos;
+        (m_amp | m_lt | m_gt | m_quot | m_apos) & HI
+    }
+
     pub fn validate_safe_xml(xml: &str) -> Result<(), EasyOfficeError> {
+        let bytes = xml.as_bytes();
+        if bytes.len() < 8 {
+            return Ok(());
+        }
+        let mut cursor = 0usize;
+        while let Some(lt_idx) = Self::find_byte_swar(bytes, cursor, b'<') {
+            if lt_idx + 8 > bytes.len() {
+                break;
+            }
+            if bytes[lt_idx + 1] == b'!' {
+                let mut kw = lt_idx + 2;
+                while kw < bytes.len() && bytes[kw].is_ascii_whitespace() {
+                    kw += 1;
+                }
+                if kw + 6 <= bytes.len() && bytes[kw..kw + 6].eq_ignore_ascii_case(b"ENTITY") {
+                    return Err(EasyOfficeError::XxeOrExternalEntityDetected);
+                }
+                if kw + 7 <= bytes.len() && bytes[kw..kw + 7].eq_ignore_ascii_case(b"DOCTYPE") {
+                    return Err(EasyOfficeError::XxeOrExternalEntityDetected);
+                }
+            }
+            cursor = lt_idx + 1;
+        }
+        Ok(())
+    }
+
+    pub fn validate_safe_xml_scalar_baseline(xml: &str) -> Result<(), EasyOfficeError> {
         let bytes = xml.as_bytes();
         if bytes.len() < 8 {
             return Ok(());
@@ -676,6 +749,60 @@ impl XmlSanitizer {
     }
 
     pub fn escape(text: &str) -> String {
+        let bytes = text.as_bytes();
+        let mut out = String::with_capacity(bytes.len() + 16);
+        let mut last = 0usize;
+        let mut idx = 0usize;
+
+        while idx + 8 <= bytes.len() {
+            let word = u64::from_le_bytes(bytes[idx..idx + 8].try_into().unwrap());
+            let mask = Self::xml_escape_mask(word);
+            if mask == 0 {
+                idx += 8;
+            } else {
+                let hit = idx + ((mask.trailing_zeros() >> 3) as usize);
+                if hit > last {
+                    out.push_str(&text[last..hit]);
+                }
+                match bytes[hit] {
+                    b'&' => out.push_str("&amp;"),
+                    b'<' => out.push_str("&lt;"),
+                    b'>' => out.push_str("&gt;"),
+                    b'"' => out.push_str("&quot;"),
+                    b'\'' => out.push_str("&apos;"),
+                    _ => unreachable!(),
+                }
+                idx = hit + 1;
+                last = idx;
+            }
+        }
+
+        while idx < bytes.len() {
+            let rep = match bytes[idx] {
+                b'&' => Some("&amp;"),
+                b'<' => Some("&lt;"),
+                b'>' => Some("&gt;"),
+                b'"' => Some("&quot;"),
+                b'\'' => Some("&apos;"),
+                _ => None,
+            };
+            if let Some(entity) = rep {
+                if idx > last {
+                    out.push_str(&text[last..idx]);
+                }
+                out.push_str(entity);
+                last = idx + 1;
+            }
+            idx += 1;
+        }
+
+        if last < bytes.len() {
+            out.push_str(&text[last..]);
+        }
+        out
+    }
+
+    pub fn escape_scalar_baseline(text: &str) -> String {
         let mut out = String::with_capacity(text.len());
         for ch in text.chars() {
             match ch {

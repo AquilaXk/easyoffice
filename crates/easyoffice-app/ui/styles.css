@@ -367,10 +367,14 @@ button {
 }
 
 .page-ruler {
-  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+  max-width: 760px;
+  margin: 0 auto 8px;
+  padding: 2px 28px;
+  font-size: 10px;
   color: var(--eo-text-muted);
-  margin-bottom: 8px;
-  text-align: center;
+  border-bottom: 1px solid var(--eo-border);
 }
 
 .editor-surface {
@@ -382,6 +386,34 @@ button {
   border: 1px solid var(--eo-border);
   border-radius: 6px;
   line-height: 1.65;
+}
+
+.doc-meta-line {
+  font-size: 12px;
+  color: var(--eo-text-muted);
+  margin: 4px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--eo-border);
+}
+
+.doc-table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 6px;
+}
+
+.doc-inline-table {
+  margin-bottom: 12px;
+}
+
+.doc-page-footer {
+  margin-top: 18px;
+  padding-top: 8px;
+  border-top: 1px solid var(--eo-border);
+  text-align: center;
+  font-size: 11px;
+  color: var(--eo-text-muted);
 }
 
 .sheet-surface,
@@ -434,20 +466,24 @@ button {
   color: var(--eo-text);
 }
 
-.sheet-table {
+.sheet-table,
+.doc-inline-table {
   width: 100%;
   border-collapse: collapse;
   background: var(--eo-surface);
 }
 
 .sheet-table th,
-.sheet-table td {
+.sheet-table td,
+.doc-inline-table th,
+.doc-inline-table td {
   border: 1px solid var(--eo-border);
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: 7px 9px;
+  font-size: 12px;
 }
 
-.sheet-table th {
+.sheet-table th,
+.doc-inline-table th {
   background: var(--eo-surface-elevated);
   color: var(--eo-text-muted);
   text-align: center;
@@ -463,6 +499,28 @@ button {
   outline: 2px solid var(--eo-primary);
   outline-offset: -2px;
   background: var(--eo-primary-soft);
+}
+
+.sheet-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--eo-border);
+}
+
+.sheet-tab-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--eo-text-muted);
+  border-bottom: 2px solid transparent;
+}
+
+.sheet-tab-btn.active {
+  color: var(--eo-accent-sheet);
+  border-bottom-color: var(--eo-accent-sheet);
+  font-weight: 600;
 }
 
 .slide-workspace {

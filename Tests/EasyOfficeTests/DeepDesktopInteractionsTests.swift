@@ -562,11 +562,11 @@ final class DeepDesktopInteractionsTests: XCTestCase {
     vm.selectedPDFPageIndex = 0
 
     // Irreversible redaction
-    let redactedPageCount = vm.redactTextOnActivePDF(phrase: "매직 바이트")
+    let redactedPageCount = vm.redactTextOnActivePDF(phrase: "전자서명 해시")
     XCTAssertGreaterThanOrEqual(redactedPageCount, 1)
     if case .pdf(let pdfAfterRedact) = vm.activeTab?.payload {
       XCTAssertTrue(pdfAfterRedact.isRedacted)
-      XCTAssertFalse(pdfAfterRedact.pages[0].extractedText.contains("매직 바이트"))
+      XCTAssertFalse(pdfAfterRedact.pages[0].extractedText.contains("전자서명 해시"))
       XCTAssertTrue(pdfAfterRedact.pages[0].extractedText.contains("████"))
     }
 

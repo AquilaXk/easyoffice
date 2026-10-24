@@ -172,7 +172,7 @@ final class WorkspaceUIParityTests: XCTestCase {
     XCTAssertEqual(notesMatches.map(\.id), [tabSlide.id])
 
     let pdfAnnotationMatches = WorkspaceHubCatalog.filterTabs(
-      tabs, section: .home, query: "매직 바이트 시그니처 검증 필수")
+      tabs, section: .home, query: "반기 보안 감사 필수 점검 항목")
     XCTAssertEqual(pdfAnnotationMatches.map(\.id), [tabPDF.id])
   }
 
@@ -662,13 +662,13 @@ final class WorkspaceUIParityTests: XCTestCase {
     // PDF Find & Replace (annotations + page extractedText + outline)
     let frPDFTab = try XCTUnwrap(frVM.openTabs.first(where: { $0.moduleKind == .pdf }))
     frVM.activeTabID = frPDFTab.id
-    frVM.findQueryText = "시그니처"
-    frVM.replaceQueryText = "헤더바이트"
+    frVM.findQueryText = "점검"
+    frVM.replaceQueryText = "감사점검"
     let pdfReplaced = frVM.performFindAndReplace()
     XCTAssertGreaterThan(pdfReplaced, 1)
     if case .pdf(let updatedPDF) = frVM.activeTab?.payload {
-      XCTAssertTrue(updatedPDF.annotations.contains(where: { $0.content.contains("헤더바이트") }))
-      XCTAssertTrue(updatedPDF.pages[0].extractedText.contains("헤더바이트"))
+      XCTAssertTrue(updatedPDF.annotations.contains(where: { $0.content.contains("감사점검") }))
+      XCTAssertTrue(updatedPDF.pages[0].extractedText.contains("감사점검"))
     }
 
     // Multi-run preservation across inline paragraph edit (F3)
@@ -868,13 +868,13 @@ final class WorkspaceUIParityTests: XCTestCase {
     if case .document(let doc) = freshVM.activeTab?.payload {
       freshVM.selectedParagraphID = doc.paragraphs[2].id
     }
-    freshVM.inlineRunTargetPhrase = "시그니처 라벤더 디자인 시스템"
+    freshVM.inlineRunTargetPhrase = "전사 표준 문서 조판 스타일"
     freshVM.applyInlineRunFormattingToActiveParagraph(
       isBold: true, isItalic: true, isUnderlined: true, foregroundHex: "#5C6BC0")
     if case .document(let styledDoc) = freshVM.activeTab?.payload {
       let p2 = styledDoc.paragraphs[2]
       XCTAssertEqual(p2.runs.count, 3)
-      XCTAssertEqual(p2.runs[1].text, "시그니처 라벤더 디자인 시스템")
+      XCTAssertEqual(p2.runs[1].text, "전사 표준 문서 조판 스타일")
       XCTAssertTrue(p2.runs[1].isBold)
       XCTAssertTrue(p2.runs[1].isItalic)
       XCTAssertTrue(p2.runs[1].isUnderlined)

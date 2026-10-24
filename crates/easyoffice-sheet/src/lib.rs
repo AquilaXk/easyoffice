@@ -132,6 +132,13 @@ pub struct CellRange {
 
 impl CellRange {
     pub const MAX_EXPANDED_CELL_COUNT: usize = 100_000;
+    pub const MAX_EXPANDED_CELLS: usize = Self::MAX_EXPANDED_CELL_COUNT;
+
+    #[inline]
+    pub fn cell_count(&self) -> usize {
+        let (rows, cols) = self.dimensions();
+        rows.saturating_mul(cols)
+    }
 
     pub fn new(
         start: PackedCellCoordinate,
@@ -456,6 +463,30 @@ impl SheetEngine {
         }
     }
 
+    fn compile_cell_entry(raw: &str) -> Option<Result<Expr, FormulaError>> {
+        let trimmed = raw.trim();
+        if let Some(formula_body) = trimmed.strip_prefix('=') {
+            let expr_src = formula_body.trim();
+            if expr_src.is_empty() {
+                None
+            } else {
+                Some(compile_formula_expr(expr_src))
+            }
+        } else if let Ok(num) = trimmed.parse::<f64>() {
+            if num.is_finite() {
+                Some(Ok(Expr::Number(num)))
+            } else {
+                Some(Err(FormulaError::Num))
+            }
+        } else if trimmed.eq_ignore_ascii_case("TRUE") {
+            Some(Ok(Expr::Boolean(true)))
+        } else if trimmed.eq_ignore_ascii_case("FALSE") {
+            Some(Ok(Expr::Boolean(false)))
+        } else {
+            None
+        }
+    }
+
     pub fn set_cell(
         &mut self,
         a1: &str,
@@ -467,15 +498,8 @@ impl SheetEngine {
             self.cells.remove(&coord);
             self.compiled_asts.remove(&coord);
         } else {
-            let trimmed = val.trim();
-            if let Some(formula_body) = trimmed.strip_prefix('=') {
-                let expr_src = formula_body.trim();
-                if !expr_src.is_empty() {
-                    self.compiled_asts
-                        .insert(coord, compile_formula_expr(expr_src));
-                } else {
-                    self.compiled_asts.remove(&coord);
-                }
+            if let Some(compiled) = Self::compile_cell_entry(&val) {
+                self.compiled_asts.insert(coord, compiled);
             } else {
                 self.compiled_asts.remove(&coord);
             }
@@ -490,13 +514,8 @@ impl SheetEngine {
         }
         self.compiled_asts.clear();
         for (&coord, raw) in &self.cells {
-            let trimmed = raw.trim();
-            if let Some(formula_body) = trimmed.strip_prefix('=') {
-                let expr_src = formula_body.trim();
-                if !expr_src.is_empty() {
-                    self.compiled_asts
-                        .insert(coord, compile_formula_expr(expr_src));
-                }
+            if let Some(compiled) = Self::compile_cell_entry(raw) {
+                self.compiled_asts.insert(coord, compiled);
             }
         }
     }
@@ -518,17 +537,10 @@ impl SheetEngine {
     /// using pre-compiled ASTs and the inline `VisitingTracker` bitset.
     pub fn recalculate_all(&self) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
-        ctx.memo.reserve(self.cells.len());
-        for &coord in self.cells.keys() {
-            self.eval_coord_ctx(coord, &mut ctx, 0);
-        }
-        let sid = self.resolved_sheet_id();
         let mut results = HashMap::with_capacity(self.cells.len());
         for &coord in self.cells.keys() {
-            let key = PackedWorkbookCoord::new(sid, coord);
-            if let Some(val) = ctx.memo.get(&key) {
-                results.insert(coord, val.clone());
-            }
+            let val = self.eval_coord_ctx(coord, &mut ctx, 0);
+            results.insert(coord, val);
         }
         results
     }
@@ -571,6 +583,24 @@ impl SheetEngine {
         if depth > Self::MAX_RECURSION_DEPTH {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
+        let Some(compiled) = self.compiled_asts.get(&coord) else {
+            return match self.cells.get(&coord) {
+                None => EvaluatedCellValue::Empty,
+                Some(raw) => {
+                    if raw.trim() == "=" {
+                        EvaluatedCellValue::Empty
+                    } else {
+                        EvaluatedCellValue::Text(raw.clone())
+                    }
+                }
+            };
+        };
+        match compiled {
+            Ok(Expr::Number(n)) => return EvaluatedCellValue::Number(*n),
+            Ok(Expr::Boolean(b)) => return EvaluatedCellValue::Boolean(*b),
+            Err(e) => return EvaluatedCellValue::Error(*e),
+            Ok(_) => {}
+        }
 
         let sid = self.resolved_sheet_id();
         let key = PackedWorkbookCoord::new(sid, coord);
@@ -581,16 +611,9 @@ impl SheetEngine {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
 
-        let result = if let Some(compiled) = self.compiled_asts.get(&coord) {
-            match compiled {
-                Ok(expr) => self.eval_expr_ctx(expr, ctx, depth + 1),
-                Err(e) => EvaluatedCellValue::Error(*e),
-            }
-        } else {
-            match self.cells.get(&coord) {
-                None => EvaluatedCellValue::Empty,
-                Some(raw) => self.eval_raw_string_ctx(raw, ctx, depth + 1),
-            }
+        let result = match compiled {
+            Ok(expr) => self.eval_expr_ctx(expr, ctx, depth + 1),
+            Err(e) => EvaluatedCellValue::Error(*e),
         };
 
         ctx.visiting.remove(sid, coord);
@@ -770,7 +793,173 @@ impl SheetEngine {
                     }
                 }
             }
-            Expr::FuncCall { name, args } => self.eval_func_ctx(name, args, ctx, depth + 1),
+            Expr::FuncCall { name, args } => match name.as_str() {
+                "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK" => {
+                    match self.eval_streaming_range_agg_ctx(name, args, ctx, depth + 1) {
+                        Ok(v) => v,
+                        Err(e) => EvaluatedCellValue::Error(e),
+                    }
+                }
+                _ => self.eval_func_ctx(name, args, ctx, depth + 1),
+            },
+        }
+    }
+
+    pub(crate) fn eval_streaming_range_agg_ctx(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        let mut acc0 = 0.0f64;
+        let mut acc1 = 0.0f64;
+        let mut acc2 = 0.0f64;
+        let mut acc3 = 0.0f64;
+        let mut num_count = 0usize;
+        let mut item_count = 0usize;
+        let mut min_val: Option<f64> = None;
+        let mut max_val: Option<f64> = None;
+
+        let mut fold_cell = |v: EvaluatedCellValue, lane: usize| -> Result<(), FormulaError> {
+            if let EvaluatedCellValue::Error(e) = v {
+                return Err(e);
+            }
+            match name {
+                "SUM" | "AVERAGE" | "AVG" => {
+                    if let Some(n) = v.as_number() {
+                        num_count += 1;
+                        match lane & 3 {
+                            0 => acc0 += n,
+                            1 => acc1 += n,
+                            2 => acc2 += n,
+                            _ => acc3 += n,
+                        }
+                    }
+                }
+                "MIN" => {
+                    if let Some(n) = v.as_number() {
+                        min_val = Some(min_val.map_or(n, |m| m.min(n)));
+                    }
+                }
+                "MAX" => {
+                    if let Some(n) = v.as_number() {
+                        max_val = Some(max_val.map_or(n, |m| m.max(n)));
+                    }
+                }
+                "COUNT" => {
+                    if matches!(v, EvaluatedCellValue::Number(_)) {
+                        item_count += 1;
+                    }
+                }
+                "COUNTA" => {
+                    if !matches!(v, EvaluatedCellValue::Empty) {
+                        item_count += 1;
+                    }
+                }
+                "COUNTBLANK"
+                    if matches!(v, EvaluatedCellValue::Empty)
+                        || matches!(&v, EvaluatedCellValue::Text(s) if s.is_empty()) =>
+                {
+                    item_count += 1;
+                }
+                _ => {}
+            }
+            Ok(())
+        };
+
+        for arg in args {
+            match arg {
+                Expr::Range(range) => {
+                    if range.cell_count() > CellRange::MAX_EXPANDED_CELLS {
+                        return Err(FormulaError::Ref);
+                    }
+                    let min_r = range.start.row().min(range.end.row());
+                    let max_r = range.start.row().max(range.end.row());
+                    let min_c = range.start.col().min(range.end.col());
+                    let max_c = range.start.col().max(range.end.col());
+                    for r in min_r..=max_r {
+                        let mut c = min_c;
+                        while c + 3 <= max_c {
+                            let c0 =
+                                PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
+                            let c1 = PackedCellCoordinate::new(r, c + 1)
+                                .map_err(|_| FormulaError::Ref)?;
+                            let c2 = PackedCellCoordinate::new(r, c + 2)
+                                .map_err(|_| FormulaError::Ref)?;
+                            let c3 = PackedCellCoordinate::new(r, c + 3)
+                                .map_err(|_| FormulaError::Ref)?;
+                            fold_cell(self.eval_coord_ctx(c0, ctx, depth + 1), 0)?;
+                            fold_cell(self.eval_coord_ctx(c1, ctx, depth + 1), 1)?;
+                            fold_cell(self.eval_coord_ctx(c2, ctx, depth + 1), 2)?;
+                            fold_cell(self.eval_coord_ctx(c3, ctx, depth + 1), 3)?;
+                            c += 4;
+                        }
+                        while c <= max_c {
+                            let coord =
+                                PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
+                            fold_cell(self.eval_coord_ctx(coord, ctx, depth + 1), 0)?;
+                            c += 1;
+                        }
+                    }
+                }
+                Expr::SheetRange { sheet, range } => {
+                    if range.cell_count() > CellRange::MAX_EXPANDED_CELLS {
+                        return Err(FormulaError::Ref);
+                    }
+                    let min_r = range.start.row().min(range.end.row());
+                    let max_r = range.start.row().max(range.end.row());
+                    let min_c = range.start.col().min(range.end.col());
+                    let max_c = range.start.col().max(range.end.col());
+                    for r in min_r..=max_r {
+                        let mut c = min_c;
+                        while c + 3 <= max_c {
+                            let c0 =
+                                PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
+                            let c1 = PackedCellCoordinate::new(r, c + 1)
+                                .map_err(|_| FormulaError::Ref)?;
+                            let c2 = PackedCellCoordinate::new(r, c + 2)
+                                .map_err(|_| FormulaError::Ref)?;
+                            let c3 = PackedCellCoordinate::new(r, c + 3)
+                                .map_err(|_| FormulaError::Ref)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c0, ctx, depth + 1), 0)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c1, ctx, depth + 1), 1)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c2, ctx, depth + 1), 2)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c3, ctx, depth + 1), 3)?;
+                            c += 4;
+                        }
+                        while c <= max_c {
+                            let coord =
+                                PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
+                            fold_cell(
+                                self.eval_sheet_coord(Some(sheet), coord, ctx, depth + 1),
+                                0,
+                            )?;
+                            c += 1;
+                        }
+                    }
+                }
+                _ => {
+                    let v = self.eval_expr_ctx(arg, ctx, depth + 1);
+                    fold_cell(v, 0)?;
+                }
+            }
+        }
+
+        let total_sum = (acc0 + acc1) + (acc2 + acc3);
+        match name {
+            "SUM" => Ok(EvaluatedCellValue::Number(total_sum)),
+            "AVERAGE" | "AVG" => {
+                if num_count == 0 {
+                    Err(FormulaError::DivByZero)
+                } else {
+                    Ok(EvaluatedCellValue::Number(total_sum / (num_count as f64)))
+                }
+            }
+            "MIN" => Ok(EvaluatedCellValue::Number(min_val.unwrap_or(0.0))),
+            "MAX" => Ok(EvaluatedCellValue::Number(max_val.unwrap_or(0.0))),
+            "COUNT" | "COUNTA" | "COUNTBLANK" => Ok(EvaluatedCellValue::Number(item_count as f64)),
+            _ => Err(FormulaError::Name),
         }
     }
 
