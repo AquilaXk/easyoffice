@@ -66,7 +66,8 @@ extension WorksheetModel {
       let minCol = min(cellRange.start.column, cellRange.end.column)
       let maxCol = max(cellRange.start.column, cellRange.end.column)
       let count = (maxRow - minRow + 1) * (maxCol - minCol + 1)
-      guard count > 0, count <= CellRange.maxExpandedCellCount else { return nil }
+      guard count > 0 else { return nil }
+      guard count <= CellRange.maxExpandedCellCount else { return "#REF!" }
       for r in minRow...maxRow {
         for c in minCol...maxCol {
           let coord = PackedCellCoordinate(row: r, column: c)

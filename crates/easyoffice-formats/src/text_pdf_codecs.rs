@@ -886,5 +886,9 @@ mod tests {
         assert_eq!(visited_rows, parsed_crlf);
         assert_eq!(visited_owned, 64);
         assert_eq!(visited_borrowed, 64 * 5);
+        assert_eq!(
+            crate::rtf_xml_helpers::unescape_xml_single_pass("A&#0;&#x01;&#xFFFE;&#65;B"),
+            "A&#0;&#x01;&#xFFFE;AB"
+        );
     }
 }

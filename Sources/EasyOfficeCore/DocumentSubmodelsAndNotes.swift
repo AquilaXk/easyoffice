@@ -506,7 +506,14 @@ public struct DocumentEquationBlock: Sendable, Codable, Equatable, Identifiable 
     "v": "ᵛ", "w": "ʷ", "x": "ˣ", "y": "ʸ", "z": "ᶻ",
   ]
 
+  private static let maxMathNestingDepth = 16
+  private static let maxMathMacroIterations = 64
+
   public static func formatMathSymbols(_ raw: String) -> String {
+    formatMathSymbolsBounded(raw, depth: 0)
+  }
+
+  private static func formatMathSymbolsBounded(_ raw: String, depth: Int) -> String {
     var s = raw
     let replacements: [(String, String)] = [
       ("\\partial", "∂"), ("\\approx", "≈"), ("\\infty", "∞"), ("\\nabla", "∇"),
@@ -522,16 +529,25 @@ public struct DocumentEquationBlock: Sendable, Codable, Equatable, Identifiable 
       s = s.replacingOccurrences(of: from, with: to)
     }
 
-    while let sqrtRange = s.range(of: "\\sqrt{") {
+    guard depth < maxMathNestingDepth else {
+      return s.replacingOccurrences(of: "\\sqrt", with: "√")
+    }
+
+    var sqrtIter = 0
+    while sqrtIter < maxMathMacroIterations, let sqrtRange = s.range(of: "\\sqrt{") {
+      sqrtIter += 1
       let openBrace = s.index(before: sqrtRange.upperBound)
       guard let (inner, afterClose) = extractBracedGroup(in: s, from: openBrace) else { break }
-      let formattedInner = formatMathSymbols(inner).trimmingCharacters(in: .whitespaces)
+      let formattedInner =
+        formatMathSymbolsBounded(inner, depth: depth + 1).trimmingCharacters(in: .whitespaces)
       let replacement = formattedInner.count <= 1 ? "√\(formattedInner)" : "√(\(formattedInner))"
       s.replaceSubrange(sqrtRange.lowerBound..<afterClose, with: replacement)
     }
     s = s.replacingOccurrences(of: "\\sqrt", with: "√")
 
-    while let fracRange = s.range(of: "\\frac{") {
+    var fracIter = 0
+    while fracIter < maxMathMacroIterations, let fracRange = s.range(of: "\\frac{") {
+      fracIter += 1
       let firstOpen = s.index(before: fracRange.upperBound)
       guard let (rawNum, afterFirst) = extractBracedGroup(in: s, from: firstOpen) else { break }
       var secondOpen = afterFirst
@@ -541,8 +557,10 @@ public struct DocumentEquationBlock: Sendable, Codable, Equatable, Identifiable 
       guard secondOpen < s.endIndex, s[secondOpen] == "{",
         let (rawDen, afterSecond) = extractBracedGroup(in: s, from: secondOpen)
       else { break }
-      let num = formatMathSymbols(rawNum).trimmingCharacters(in: .whitespaces)
-      let den = formatMathSymbols(rawDen).trimmingCharacters(in: .whitespaces)
+      let num =
+        formatMathSymbolsBounded(rawNum, depth: depth + 1).trimmingCharacters(in: .whitespaces)
+      let den =
+        formatMathSymbolsBounded(rawDen, depth: depth + 1).trimmingCharacters(in: .whitespaces)
       let formattedNum = hasTopLevelAdditiveOperator(num) ? "(\(num))" : num
       let formattedDen = hasTopLevelAdditiveOperator(den) ? "(\(den))" : den
       s.replaceSubrange(fracRange.lowerBound..<afterSecond, with: "\(formattedNum) / \(formattedDen)")
@@ -574,7 +592,7 @@ public struct DocumentEquationBlock: Sendable, Codable, Equatable, Identifiable 
               out.append(mapped)
             } else {
               out.append(ch)
-              out.append(formatMathSymbols(inner))
+              out.append(formatMathSymbolsBounded(inner, depth: depth + 1))
             }
             idx = afterClose
             continue

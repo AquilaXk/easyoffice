@@ -309,7 +309,12 @@ public enum XMLSanitizer {
           if codePoint > 0x10FFFF { return nil }
         }
       }
-      guard codePoint > 0, let scalar = UnicodeScalar(codePoint) else { return nil }
+      let isXml10Valid =
+        codePoint == 0x09 || codePoint == 0x0A || codePoint == 0x0D
+        || (0x20...0xD7FF).contains(codePoint)
+        || (0xE000...0xFFFD).contains(codePoint)
+        || (0x10000...0x10FFFF).contains(codePoint)
+      guard isXml10Valid, let scalar = UnicodeScalar(codePoint) else { return nil }
       return (scalar, semiIdx + 1)
     }
 

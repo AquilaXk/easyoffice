@@ -300,6 +300,15 @@ pub fn encode_utf16le_swar(text: &str) -> Vec<u8> {
 }
 
 #[inline]
+const fn is_xml10_valid_char(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x09 | 0x0A | 0x0D | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
+    )
+}
+
+#[inline]
 pub fn unescape_xml_single_pass(text: &str) -> String {
     let bytes = text.as_bytes();
     let Some(mut amp_pos) = crate::XmlSanitizer::find_byte_swar(bytes, 0, b'&') else {
@@ -334,10 +343,13 @@ pub fn unescape_xml_single_pass(text: &str) -> String {
                     u32::from_str_radix(&entity[2..], 16)
                         .ok()
                         .and_then(char::from_u32)
+                        .filter(|&c| is_xml10_valid_char(c))
                 }
-                _ if entity.starts_with('#') => {
-                    entity[1..].parse::<u32>().ok().and_then(char::from_u32)
-                }
+                _ if entity.starts_with('#') => entity[1..]
+                    .parse::<u32>()
+                    .ok()
+                    .and_then(char::from_u32)
+                    .filter(|&c| is_xml10_valid_char(c)),
                 _ => None,
             };
             if let Some(ch) = decoded {

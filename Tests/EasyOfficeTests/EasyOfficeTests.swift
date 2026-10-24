@@ -624,6 +624,17 @@ final class EasyOfficeTests: XCTestCase {
       XMLSanitizer.unescape(numericXml),
       "긴안전텍스트구간_0123456789_ABCDEFGHIJ AB가 & <끝>"
     )
+    XCTAssertEqual(
+      XMLSanitizer.unescape("A&#0;&#x01;&#xFFFE;&#65;B"),
+      "A&#0;&#x01;&#xFFFE;AB"
+    )
+
+    var deepMath = "x"
+    for _ in 0..<24 {
+      deepMath = "\\sqrt{\(deepMath)}"
+    }
+    let deepFormatted = DocumentEquationBlock.formatMathSymbols(deepMath)
+    XCTAssertTrue(deepFormatted.hasPrefix("√("))
 
     var sheet = WorksheetModel(name: "스트리밍집계")
     try sheet.setCell("A1", rawValue: "2")
@@ -636,6 +647,19 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(sheet.evaluate(at: "B1"), .number(24.0))
     XCTAssertEqual(sheet.evaluate(at: "B2"), .number(4.0))
     XCTAssertEqual(sheet.evaluate(at: "B3"), .number(1.0))
+
+    let oversizedRange = try CellRange(
+      start: CellAddress(column: 0, row: 0),
+      end: CellAddress(column: 500, row: 500)
+    )
+    var evalFrame = WorksheetModel.EvalFrame(
+      args: [.rangeRef(oversizedRange)],
+      cache: [nil],
+      context: WorksheetModel.EvaluationContext(),
+      depth: 0
+    )
+    let oversizedErr = evalFrame.forEachResolvedCell(in: 0..<1, sheet: sheet, { _ in })
+    XCTAssertEqual(oversizedErr, "#REF!")
 
     let csvBytes = CSVStateMachineCodec.encodeWorksheet(sheet)
     let decodedSheet = try CSVStateMachineCodec.decodeWorksheet(from: csvBytes, name: "복원시트")
