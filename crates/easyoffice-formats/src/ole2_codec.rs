@@ -303,6 +303,8 @@ pub struct Hwp5DocumentPayload {
     pub table_cells: Vec<Vec<String>>,
 }
 
+pub type DocumentCodecPayload = Hwp5DocumentPayload;
+
 /// HWP 5.0 (`.hwp`) and HWT (`.hwt`) OLE2 container codec using 32-bit HWP record headers.
 pub struct Hwp5Codec;
 
@@ -310,6 +312,7 @@ impl Hwp5Codec {
     pub const HWPTAG_DOCUMENT_PROPERTIES: u16 = 16;
     pub const HWPTAG_PARA_HEADER: u16 = 66;
     pub const HWPTAG_PARA_TEXT: u16 = 67;
+    pub const HWPTAG_TABLE: u16 = 77;
     pub const HWPTAG_TABLE_RECORD: u16 = 77;
     pub const HWT_TEMPLATE_MARKER: &'static [u8; 12] = b"HWT_TEMPLATE";
 
@@ -345,14 +348,29 @@ impl Hwp5Codec {
     }
 
     pub fn pack(payload: &Hwp5DocumentPayload) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_with_compression(payload, false)
+    }
+
+    pub fn pack_compressed(payload: &Hwp5DocumentPayload) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_with_compression(payload, true)
+    }
+
+    fn pack_with_compression(
+        payload: &Hwp5DocumentPayload,
+        compressed: bool,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         let mut file_header = vec![0u8; Ole2SecurityGuard::HWP5_FILE_HEADER_LEN];
         file_header[..17].copy_from_slice(b"HWP Document File");
         file_header[32] = payload.version.3;
         file_header[33] = payload.version.2;
         file_header[34] = payload.version.1;
         file_header[35] = payload.version.0;
-        // Flags at 36..40: 0x00 normal unencrypted
-        write_u32_le(&mut file_header, 36, 0x0000_0000);
+        let flags = if compressed {
+            Ole2SecurityGuard::HWP5_FLAG_COMPRESSED
+        } else {
+            0x0000_0000
+        };
+        write_u32_le(&mut file_header, 36, flags);
         if payload.is_template {
             file_header[40..52].copy_from_slice(Self::HWT_TEMPLATE_MARKER);
         }
@@ -402,10 +420,19 @@ impl Hwp5Codec {
             section0.extend_from_slice(&tbl_buf);
         }
 
+        let (final_doc_info, final_section0) = if compressed {
+            (
+                crate::deflate::deflate_raw(&doc_info_stream),
+                crate::deflate::deflate_raw(&section0),
+            )
+        } else {
+            (doc_info_stream, section0)
+        };
+
         Ole2ContainerCodec::pack(&[
             ("FileHeader".to_string(), file_header),
-            ("DocInfo".to_string(), doc_info_stream),
-            ("BodyText/Section0".to_string(), section0),
+            ("DocInfo".to_string(), final_doc_info),
+            ("BodyText/Section0".to_string(), final_section0),
         ])
     }
 
@@ -427,31 +454,50 @@ impl Hwp5Codec {
             ((raw_ver >> 8) & 0xFF) as u8,
             (raw_ver & 0xFF) as u8,
         );
+        let flags = read_u32_le(&file_header.data, 36)?;
+        let is_compressed = (flags & Ole2SecurityGuard::HWP5_FLAG_COMPRESSED) != 0;
         let is_template =
             file_header.data.len() >= 52 && &file_header.data[40..52] == Self::HWT_TEMPLATE_MARKER;
 
         let mut agency_name = String::new();
         let mut document_number = String::new();
         if let Some(doc_info) = streams.iter().find(|s| s.name == "DocInfo") {
-            let mut offset = 0usize;
-            while offset < doc_info.data.len() {
-                let (tag_id, _level, size, hdr_len) =
-                    Self::decode_record_header(&doc_info.data, offset)?;
-                let start = offset + hdr_len;
-                let end = start.checked_add(size).ok_or_else(|| {
-                    EasyOfficeError::CorruptedContainer("HWP DocInfo 레코드 오버플로".to_string())
-                })?;
-                if end > doc_info.data.len() {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "HWP DocInfo 레코드 경계 초과".to_string(),
-                    ));
+            if !doc_info.data.is_empty() {
+                let doc_info_bytes: std::borrow::Cow<'_, [u8]> = if is_compressed {
+                    std::borrow::Cow::Owned(crate::deflate::inflate_auto(
+                        &doc_info.data,
+                        crate::ZipSecurityGuard::MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
+                    )?)
+                } else {
+                    std::borrow::Cow::Borrowed(&doc_info.data)
+                };
+
+                let mut offset = 0usize;
+                while offset < doc_info_bytes.len() {
+                    let (tag_id, _level, size, hdr_len) =
+                        Self::decode_record_header(&doc_info_bytes, offset)?;
+                    let start = offset + hdr_len;
+                    let end = start.checked_add(size).ok_or_else(|| {
+                        EasyOfficeError::CorruptedContainer(
+                            "HWP DocInfo 레코드 오버플로".to_string(),
+                        )
+                    })?;
+                    if end > doc_info_bytes.len() {
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "HWP DocInfo 레코드 경계 초과".to_string(),
+                        ));
+                    }
+                    if tag_id == Self::HWPTAG_DOCUMENT_PROPERTIES {
+                        Self::parse_doc_properties(
+                            &doc_info_bytes,
+                            start,
+                            end,
+                            &mut agency_name,
+                            &mut document_number,
+                        )?;
+                    }
+                    offset = end;
                 }
-                if tag_id == Self::HWPTAG_DOCUMENT_PROPERTIES {
-                    let mut cursor = start;
-                    agency_name = read_len_prefixed_utf16le(&doc_info.data, &mut cursor, end)?;
-                    document_number = read_len_prefixed_utf16le(&doc_info.data, &mut cursor, end)?;
-                }
-                offset = end;
             }
         }
 
@@ -464,19 +510,28 @@ impl Hwp5Codec {
                 )
             })?;
 
+        let section0_bytes: std::borrow::Cow<'_, [u8]> = if is_compressed {
+            std::borrow::Cow::Owned(crate::deflate::inflate_auto(
+                &section0.data,
+                crate::ZipSecurityGuard::MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
+            )?)
+        } else {
+            std::borrow::Cow::Borrowed(&section0.data)
+        };
+
         let mut paragraphs: Vec<Hwp5ParagraphRecord> = Vec::new();
         let mut table_cells: Vec<Vec<String>> = Vec::new();
         let mut pending_meta: Option<(String, bool)> = None;
         let mut offset = 0usize;
 
-        while offset < section0.data.len() {
+        while offset < section0_bytes.len() {
             let (tag_id, _level, size, hdr_len) =
-                Self::decode_record_header(&section0.data, offset)?;
+                Self::decode_record_header(&section0_bytes, offset)?;
             let start = offset + hdr_len;
             let end = start.checked_add(size).ok_or_else(|| {
                 EasyOfficeError::CorruptedContainer("HWP Section0 레코드 오버플로".to_string())
             })?;
-            if end > section0.data.len() {
+            if end > section0_bytes.len() {
                 return Err(EasyOfficeError::CorruptedContainer(
                     "HWP Section0 레코드 경계 초과".to_string(),
                 ));
@@ -484,13 +539,10 @@ impl Hwp5Codec {
 
             match tag_id {
                 Self::HWPTAG_PARA_HEADER => {
-                    let mut cursor = start;
-                    let style = read_len_prefixed_utf16le(&section0.data, &mut cursor, end)?;
-                    let is_official = cursor < end && section0.data[cursor] != 0;
-                    pending_meta = Some((style, is_official));
+                    pending_meta = Some(Self::parse_para_header(&section0_bytes, start, end)?);
                 }
                 Self::HWPTAG_PARA_TEXT => {
-                    let text = decode_utf16le(&section0.data[start..end])?;
+                    let text = decode_utf16le(&section0_bytes[start..end])?;
                     let (style_name, is_official_header) = pending_meta
                         .take()
                         .unwrap_or_else(|| ("본문".to_string(), false));
@@ -501,18 +553,8 @@ impl Hwp5Codec {
                     });
                 }
                 Self::HWPTAG_TABLE_RECORD => {
-                    let mut cursor = start;
-                    let row_count = read_u16_le(&section0.data, cursor)? as usize;
-                    cursor += 2;
-                    for _ in 0..row_count {
-                        let col_count = read_u16_le(&section0.data, cursor)? as usize;
-                        cursor += 2;
-                        let mut row = Vec::with_capacity(col_count.min(256));
-                        for _ in 0..col_count {
-                            row.push(read_len_prefixed_utf16le(&section0.data, &mut cursor, end)?);
-                        }
-                        table_cells.push(row);
-                    }
+                    let parsed_rows = Self::parse_table_record(&section0_bytes, start, end)?;
+                    table_cells.extend(parsed_rows);
                 }
                 _ => {}
             }
@@ -527,6 +569,158 @@ impl Hwp5Codec {
             paragraphs,
             table_cells,
         })
+    }
+
+    fn parse_doc_properties(
+        data: &[u8],
+        start: usize,
+        end: usize,
+        agency_name: &mut String,
+        document_number: &mut String,
+    ) -> Result<(), EasyOfficeError> {
+        let mut cursor = start;
+        if let Ok(s1) = read_len_prefixed_utf16le(data, &mut cursor, end) {
+            if let Ok(s2) = read_len_prefixed_utf16le(data, &mut cursor, end) {
+                if cursor == end {
+                    *agency_name = s1;
+                    *document_number = s2;
+                    return Ok(());
+                }
+                if let Ok(s3) = read_len_prefixed_utf16le(data, &mut cursor, end) {
+                    if read_len_prefixed_utf16le(data, &mut cursor, end).is_ok() && cursor < end {
+                        *agency_name = s1;
+                        *document_number = if !s3.is_empty() { s3 } else { s2 };
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        let slice = &data[start..end];
+        if slice.len() >= 4 {
+            let n = read_u32_le(slice, 0)? as usize;
+            if 4 + n == slice.len() && n.is_multiple_of(2) {
+                *agency_name = decode_utf16le(&slice[4..])?;
+                return Ok(());
+            }
+            if 4 + n * 2 <= slice.len() {
+                *agency_name = decode_utf16le(&slice[4..4 + n * 2])?;
+                return Ok(());
+            }
+        }
+        if slice.len().is_multiple_of(2) {
+            *agency_name = decode_utf16le(slice)?;
+        }
+        Ok(())
+    }
+
+    fn parse_para_header(
+        data: &[u8],
+        start: usize,
+        end: usize,
+    ) -> Result<(String, bool), EasyOfficeError> {
+        if end - start == 4 {
+            return Ok(("본문".to_string(), data[start + 1] != 0));
+        }
+        let mut cursor = start;
+        if let Ok(style) = read_len_prefixed_utf16le(data, &mut cursor, end) {
+            if cursor + 1 == end {
+                return Ok((style, data[cursor] != 0));
+            }
+            if read_len_prefixed_utf16le(data, &mut cursor, end).is_ok()
+                && read_len_prefixed_utf16le(data, &mut cursor, end).is_ok()
+                && cursor + 9 <= end
+            {
+                let flags_or_bold = data[cursor + 8];
+                let is_official =
+                    (flags_or_bold & 0x01) != 0 || style.contains("표제") || style.contains("제목");
+                return Ok((style, is_official));
+            }
+        }
+        Ok(("본문".to_string(), false))
+    }
+
+    fn try_parse_u16_rows(data: &[u8], start: usize, end: usize) -> Option<Vec<Vec<String>>> {
+        if start + 2 > end {
+            return None;
+        }
+        let mut cur = start;
+        let row_count = read_u16_le(data, cur).ok()? as usize;
+        cur += 2;
+        let mut rows = Vec::with_capacity(row_count.min(256));
+        for _ in 0..row_count {
+            let col_count = read_u16_le(data, cur).ok()? as usize;
+            cur += 2;
+            let mut row = Vec::with_capacity(col_count.min(256));
+            for _ in 0..col_count {
+                row.push(read_len_prefixed_utf16le(data, &mut cur, end).ok()?);
+            }
+            rows.push(row);
+        }
+        (cur == end).then_some(rows)
+    }
+
+    fn parse_table_record(
+        data: &[u8],
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<Vec<String>>, EasyOfficeError> {
+        if let Some(rows) = Self::try_parse_u16_rows(data, start, end) {
+            return Ok(rows);
+        }
+        let mut cur = start;
+        if read_len_prefixed_utf16le(data, &mut cur, end).is_ok() && cur < end {
+            let _has_header = data[cur] != 0;
+            cur += 1;
+            if let Some(rows) = Self::try_parse_u16_rows(data, cur, end) {
+                return Ok(rows);
+            }
+            if cur + 8 <= end {
+                let row_count = read_u32_le(data, cur)? as usize;
+                let col_count = read_u32_le(data, cur + 4)? as usize;
+                cur += 8;
+                if row_count == 0
+                    || col_count == 0
+                    || row_count > 4096
+                    || col_count > 256
+                    || row_count.saturating_mul(col_count).saturating_mul(4)
+                        > end.saturating_sub(cur)
+                {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "HWP 5.0 표 행·열 개수가 보안 상한을 초과했습니다.".to_string(),
+                    ));
+                }
+                let mut rows = Vec::with_capacity(row_count.min(256));
+                let mut ok = true;
+                for _ in 0..row_count {
+                    let mut row = Vec::with_capacity(col_count.min(256));
+                    for _ in 0..col_count {
+                        if let Ok(cell) = read_len_prefixed_utf16le(data, &mut cur, end) {
+                            row.push(cell);
+                        } else {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if !ok {
+                        break;
+                    }
+                    rows.push(row);
+                }
+                if ok && cur == end {
+                    return Ok(rows);
+                }
+            }
+        }
+        if start + 4 <= end && (end - (start + 4)).is_multiple_of(2) {
+            let txt = decode_utf16le(&data[start + 4..end])?;
+            return Ok(txt
+                .split('\n')
+                .map(|r| r.split('\t').map(ToString::to_string).collect())
+                .collect());
+        }
+        Err(EasyOfficeError::CorruptedContainer(
+            "HWP 5.0 표 레코드(HWPTAG_TABLE) 구조가 손상되었습니다.".to_string(),
+        ))
     }
 }
 

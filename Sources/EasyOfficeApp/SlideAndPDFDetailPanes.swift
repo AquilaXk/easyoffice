@@ -307,7 +307,7 @@ public struct SlideEditorDetailPaneView: View {
           showsIndicators: false,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         ) {
-          HStack(spacing: 5) {
+          HStack(spacing: 4) {
             Text("16:9 · \(deck.slides.count)장")
               .font(.system(size: 10, weight: .bold, design: .monospaced))
               .lineLimit(1)
@@ -412,7 +412,7 @@ public struct SlideEditorDetailPaneView: View {
               }
 
               LavenderMenuPill(
-                title: "정렬·배분",
+                title: "정렬",
                 systemImage: "align.horizontal.center",
                 palette: palette
               ) {
@@ -446,7 +446,7 @@ public struct SlideEditorDetailPaneView: View {
               .controlSize(.mini)
               .fixedSize(horizontal: true, vertical: false)
 
-              Button(viewModel.isPresenterModeActive ? "발표자 닫기" : "발표자 도구") {
+              Button(viewModel.isPresenterModeActive ? "발표자 닫기" : "발표자") {
                 viewModel.isPresenterModeActive.toggle()
                 viewModel.isPresenterTimerRunning = viewModel.isPresenterModeActive
               }
@@ -457,7 +457,7 @@ public struct SlideEditorDetailPaneView: View {
               Button {
                 viewModel.toggleFullScreenSlideshow()
               } label: {
-                Label("슬라이드쇼 ▶", systemImage: "play.tv.fill")
+                Text("쇼 시작 ▶")
                   .font(.system(size: 10.5, weight: .semibold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)

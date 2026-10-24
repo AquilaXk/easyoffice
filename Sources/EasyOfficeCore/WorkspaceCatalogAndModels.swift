@@ -11,7 +11,106 @@ extension DocumentFormat {
     case .pdf: return .pdf
     }
   }
+
+  public var shortSpecificationBadge: String {
+    switch self {
+    case .docx: return "ECMA-376 DOCX"
+    case .xlsx: return "ECMA-376 XLSX"
+    case .pptx, .ppsx: return "ECMA-376 PPTX"
+    case .hwp, .hwt: return "HWP 5.0 (OLE2)"
+    case .hwpx, .hwtx: return "KS X 6101 HWPX"
+    case .pdf: return "ISO 32000 PDF"
+    case .odt, .ods, .odp: return "ISO 26300 ODF"
+    case .doc, .xls, .ppt: return "OLE2 Legacy"
+    case .rtf: return "RTF 1.9.1"
+    case .csv: return "RFC 4180 CSV"
+    case .tsv: return "UTF-8 TSV"
+    case .md: return "CommonMark MD"
+    case .txt: return "UTF-8 TXT"
+    }
+  }
 }
+
+extension OfficeModuleKind {
+  public var quickLauncherCardTitleKo: String {
+    switch self {
+    case .document: return "새 문서 작성"
+    case .hwp: return "새 한글 공문서"
+    case .sheet: return "새 시트 통합문서"
+    case .slide: return "새 슬라이드 발표"
+    case .pdf: return "새 PDF 스튜디오"
+    }
+  }
+
+  public var quickLauncherFormatBadge: String {
+    switch self {
+    case .document: return "DOCX · ODT"
+    case .hwp: return "HWPX · HWP"
+    case .sheet: return "XLSX · CSV"
+    case .slide: return "PPTX · ODP"
+    case .pdf: return "PDF · 주석"
+    }
+  }
+}
+
+public enum WorkspaceViewMode: String, CaseIterable, Sendable, Codable, Identifiable {
+  case editView = "편집 보기"
+  case outlineView = "윤곽 보기"
+  case readOnlyView = "읽기 전용"
+
+  public var id: String { rawValue }
+
+  public var symbolName: String {
+    switch self {
+    case .editView: return "pencil.and.outline"
+    case .outlineView: return "square.text.square"
+    case .readOnlyView: return "book"
+    }
+  }
+}
+
+public enum InspectorSubTab: String, CaseIterable, Sendable, Codable, Identifiable {
+  case propertiesAndLayout = "속성·레이아웃"
+  case formattingAndTools = "조판·고급"
+
+  public var id: String { rawValue }
+}
+
+extension WorkspaceViewModel {
+  public func setWorkspaceViewMode(_ mode: WorkspaceViewMode) {
+    workspaceViewMode = mode
+    if mode == .outlineView {
+      showLeftNavigator = true
+    }
+    lastExecutedCommandSummary = "\(mode.rawValue) 모드로 전환했습니다."
+  }
+
+  public func applyQuickZoomPreset(_ percent: Double) {
+    setZoom(percent)
+    lastExecutedCommandSummary = "화면 배율 \(Int(percent))% 적용"
+  }
+
+  public func cycleActiveDocumentColumnCount() {
+    guard let tabID = activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == tabID }),
+      case .document(var doc) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: tabID)
+    if doc.sections.isEmpty {
+      doc.sections = [DocumentSectionLayout(paperSize: doc.paperSize)]
+    }
+    let nextCols = (doc.sections[0].columnCount % 3) + 1
+    doc.sections[0].columnCount = nextCols
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "다단 설정 전환: \(nextCols)단"
+  }
+
+  public func applyMailMergePlaceholdersToActiveDocument() {
+    applyMailMergeFieldReplacement()
+  }
+}
+
 
 extension DataValidationRule {
   public init(minimumValue: Double? = nil, maximumValue: Double? = nil, allowedSet: [String]? = nil)
