@@ -740,7 +740,7 @@ final class LegacyAndMarkupCodecTests: XCTestCase {
     doc.addEquation(
       title: "정규분포 적분", rawExpression: "\\int_0^\\infty e^{-x^2} dx \\approx \\sqrt{\\pi} \\div 2")
     XCTAssertEqual(doc.equations.count, 1)
-    XCTAssertEqual(doc.equations[0].renderedNotation, "∫₀^∞ e^{-x²} dx ≈ √{π} ÷ 2")
+    XCTAssertEqual(doc.equations[0].renderedNotation, "∫₀^∞ e⁻ˣ² dx ≈ √π ÷ 2")
     XCTAssertTrue(doc.searchablePlainText().contains("대외비 (CONFIDENTIAL)"))
     XCTAssertTrue(doc.searchablePlainText().contains("∫₀^∞"))
 

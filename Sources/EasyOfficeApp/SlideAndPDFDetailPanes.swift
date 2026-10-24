@@ -1333,7 +1333,7 @@ public struct PDFStudioDetailPaneView: View {
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
 
-              Text("PAGE \(page.pageNumber) / \(totalPageCount)")
+              Text("제\(page.pageNumber)쪽 / 전체 \(totalPageCount)쪽")
                 .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
 
@@ -1543,11 +1543,11 @@ public struct PDFStudioDetailPaneView: View {
 
         Divider()
         HStack {
-          Text("\(fileName) · Page \(page.pageNumber)")
+          Text("\(fileName) · 제\(page.pageNumber)쪽")
             .font(.system(size: 9.5, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
           Spacer()
-          Text("- p.\(page.pageNumber) / \(totalPageCount) -")
+          Text("- \(page.pageNumber) / \(totalPageCount) -")
             .font(.system(size: 9.5, weight: .medium, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
         }

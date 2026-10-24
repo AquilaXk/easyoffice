@@ -358,17 +358,17 @@ public struct WorkspaceHubCatalog: Sendable {
         title: "2026 프로젝트 아키텍처 보고서",
         format: .docx,
         paperSize: .a4,
-        headerText: "EasyOffice 기술 문서 표준",
+        headerText: "2026 전사 표준 문서 관리 지침",
         footerText: "- 1 -",
         paragraphs: [p1, p2, p3],
         tables: [
           DocumentTableBlock(
-            caption: "표 1. 모듈별 지원 규격 및 목표 성능(ms)",
+            caption: "표 1. 부문별 문서 표준화 및 업무 효율화 핵심 지표",
             rows: [
-              ["모듈", "대표 포맷", "렌더링 엔진", "목표 지연(ms)"],
-              ["Document / HWP", "DOCX, HWP, HWPX, ODT", "Rich Page Layout Engine", "12"],
-              ["Sheet", "XLSX, ODS, CSV", "Virtualized A1 Formula Grid", "8"],
-              ["Slide & PDF", "PPTX, ODP, PDF", "Stage Canvas & Vector PDF Studio", "15"],
+              ["소관 부문", "적용 표준 양식", "주요 추진 과제", "목표 달성률(%)"],
+              ["경영기획실", "DOCX, HWP, HWPX", "전사 보고서 및 기안문 양식 단일화", "98"],
+              ["재무회계팀", "XLSX, ODS, CSV", "분기별 예산·결산 수식 자동화", "96"],
+              ["법무·보안팀", "PPTX, ODP, PDF", "대외 발송 문서 전자결재 및 보존", "100"],
             ]
           )
         ],
@@ -380,7 +380,7 @@ public struct WorkspaceHubCatalog: Sendable {
         ],
         revisions: [
           TrackedRevision(
-            author: "QA 아키텍트", kind: .formattingChange, paragraphID: p2.id,
+            author: "기획조정실", kind: .formattingChange, paragraphID: p2.id,
             originalText: "1. 핵심 목표", proposedText: "1. 아키텍처 목표 및 핵심 가치")
         ],
         comments: [
@@ -495,7 +495,7 @@ public struct WorkspaceHubCatalog: Sendable {
         ],
         annotations: [
           PDFAnnotationItem(
-            pageNumber: 1, kind: .highlight, content: "반기 보안 감사 필수 점검 항목", author: "QA")
+            pageNumber: 1, kind: .highlight, content: "반기 보안 감사 필수 점검 항목", author: "정보보안팀")
         ],
         outline: [
           PDFOutlineNode(title: "제1장 컨테이너 보안 원칙", targetPageNumber: 1),

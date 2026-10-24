@@ -1449,7 +1449,7 @@ public struct DocumentEditorDetailPaneView: View {
   ) -> some View {
     HStack(spacing: 10) {
       Spacer(minLength: 0)
-      Text(eq.renderedNotation)
+      Text(eq.displayText)
         .font(.system(size: 14, weight: .regular, design: .serif))
         .lineLimit(1)
         .foregroundStyle(palette.primaryText.swiftUIColor)

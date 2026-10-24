@@ -642,3 +642,23 @@
   - `Foundation.XMLParser`나 정규식 기반 치환 도입은 전체 문자열 복사와 객채 할당 비용이 크므로 기각.
 - **Verified by**: `swift test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 대용량 CSV·XML 스트림의 멀티스레드 청크 분할 파서를 도입할 때.
+
+### 32. 무할당 조건부 범위 집계·64비트 SWAR XML 언이스케이프 및 데스크톱 수식 조판·인스펙터 현지화 완결 정책 (2026-10-25)
+
+- **Decision (`PD-058`)**:
+  1. **무할당 스트리밍 시트 범위 집계 및 64비트 SWAR XML 언이스케이프 (`SheetBuiltInFunctions.swift`, `XMLSanitizer.swift`, `TabularAndMarkupCodec.swift`)**
+     - `EvalFrame`에 `streamNumericStats(in:)`와 `streamCountStats(in:)`를 도입하여 `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `PRODUCT` 계산 시 `[EvaluatedCellValue]`와 `[Double]` 배열 할당 없이 행·열 좌표를 직접 순회하고 4-way 루프 언롤 누산기(`s0, s1, s2, s3`)로 합계를 계산합니다.
+     - `XMLSanitizer.unescape`는 `withUTF8` 연속 바이트 버퍼에서 64비트 SWAR 제로바이트 마스크(`zeroByteMask(word ^ ampMask)`)로 `&` 바이트를 8바이트 단위로 탐지하고, 엔티티가 없는 구간을 슬라이스 단위로 일괄 복사하며 `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&#...;`, `&#x...;`를 바이트 수준에서 디코딩합니다.
+     - `CSVStateMachineCodec.encodeWorksheet`는 2차원 문자열 그리드(`[[String]]`)와 행 배열(`[String]`) 할당을 제거하고 사전 예약된 단일 문자열 버퍼에 직접 직렬화합니다.
+  2. **수식 조판 파서, 샘플 문서 실무 표, 시트 인스펙터 한국어 표시명 및 일괄 변환 파이프라인 요약 (`DocumentSubmodelsAndNotes.swift`, `WorkspaceCatalogAndModels.swift`, `SheetCoordinatesAndAST.swift`, `WorkspaceHubSheetAndPDFActions.swift`, `RightContextInspectorView.swift`, `WorkspaceViews.swift`, `SlideAndPDFDetailPanes.swift`, `HomeHubAndSmartViews.swift`, `scripts/check-repo-hygiene.mjs`)**
+     - `DocumentEquationBlock.formatMathSymbols`는 중첩 중괄호 파서를 통해 `\frac{num}{den}`, `\sqrt{...}`, `_{...}`, `^{...}`를 유니코드 분수·근호·첨자 표기로 변환하여 원시 LaTeX 토큰이 화면에 노출되지 않도록 합니다.
+     - 샘플 `.docx` 문서의 내부 엔진 지연시간 표를 전사 부문별 문서 표준화 지표 표로 교체하고, 머리말과 리비전·주석 작성자 명칭을 실무 부서명으로 정리하며, 내부 엔진 용어를 `scripts/check-repo-hygiene.mjs` 차단 목록에 등록합니다.
+     - `CellNumberFormat`과 `CellHorizontalAlignment`는 직렬화 호환을 위해 `rawValue`를 유지하면서 한국어 `displayTitle`을 제공하고, 우측 인스펙터의 범위 통계(`합계 · 평균 · 개수`, `최소 · 최대`)와 PDF 쪽 번호·제목 추출(`제N쪽`, 본문 첫 줄 제목 추출)을 한국어 기준으로 통일합니다.
+     - `BatchConversionStudioHubView` 하단에 `1pt` 구분선 기반 2단 요약 영역(`변환 파이프라인 및 보존 규격`, `포맷 패밀리별 변환 검증 현황`)을 추가하여 테두리 박스 추가 없이 변환 규격과 출력 용량 정보를 표시합니다.
+- **Why**: 범위 수식 평가와 XML·CSV 직렬화 경로의 중간 힙 할당을 제거하고, macOS 워크스페이스 전 화면에서 원시 LaTeX 구문, 영문 enum 식별자, 내부 엔진 용어를 제거하기 위함입니다.
+- **Trade-offs**: 수식 조판 파서가 중첩 중괄호 깊이를 직접 추적해야 하나, 외부 수식 렌더링 의존성 없이 선형 시간 안에 깔끔한 유니코드 조판 결과를 생성합니다.
+- **Alternatives rejected**:
+  - 뷰 레이어에서 문자열 치환으로 샘플 데이터를 가리는 방식은 데이터 모델과 화면 표시의 일관성을 해치므로 기각.
+- **Verified by**: `swift test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 다중 행 행렬(`\begin{matrix}`) 수식 블록 조판을 추가할 때.
+

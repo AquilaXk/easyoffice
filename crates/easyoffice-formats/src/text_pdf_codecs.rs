@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector, XmlSanitizer};
 
 /// RFC 4180 64-bit SWAR byte-slice and state-machine CSV / TSV parser and serializer.
@@ -50,6 +52,194 @@ impl CsvCodec {
         bytes.len()
     }
 
+    pub fn visit_fields_swar<'a, F>(
+        input: &'a str,
+        delimiter: char,
+        mut on_field: F,
+    ) -> Result<(usize, usize), EasyOfficeError>
+    where
+        F: FnMut(usize, usize, Cow<'a, str>),
+    {
+        if input.is_empty() {
+            return Ok((0, 0));
+        }
+        if !delimiter.is_ascii() {
+            let rows = Self::parse_scalar_baseline(input, delimiter)?;
+            let row_count = rows.len();
+            let mut max_c = 0usize;
+            for (r, row) in rows.into_iter().enumerate() {
+                max_c = max_c.max(row.len());
+                for (c, cell) in row.into_iter().enumerate() {
+                    on_field(r, c, Cow::Owned(cell));
+                }
+            }
+            return Ok((row_count, max_c));
+        }
+
+        let delim_b = delimiter as u8;
+        let bytes = input.as_bytes();
+        let mut row_idx = 0usize;
+        let mut col_idx = 0usize;
+        let mut max_cols = 0usize;
+        let mut pos = 0usize;
+        let mut trailing_delim = false;
+
+        while pos < bytes.len() {
+            if col_idx >= Self::MAX_COLS || row_idx >= Self::MAX_ROWS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                ));
+            }
+            let b = bytes[pos];
+            if b == b'"' {
+                trailing_delim = false;
+                pos += 1;
+                let first_start = pos;
+                let Some(first_q) = XmlSanitizer::find_byte_swar(bytes, pos, b'"') else {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
+                    ));
+                };
+                let field_cow = if first_q + 1 < bytes.len() && bytes[first_q + 1] == b'"' {
+                    let mut owned = String::with_capacity(32);
+                    if first_q > first_start {
+                        owned.push_str(&input[first_start..first_q]);
+                    }
+                    owned.push('"');
+                    pos = first_q + 2;
+                    loop {
+                        let Some(q_pos) = XmlSanitizer::find_byte_swar(bytes, pos, b'"') else {
+                            return Err(EasyOfficeError::CorruptedContainer(
+                                "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
+                            ));
+                        };
+                        if q_pos > pos {
+                            owned.push_str(&input[pos..q_pos]);
+                        }
+                        pos = q_pos + 1;
+                        if pos < bytes.len() && bytes[pos] == b'"' {
+                            owned.push('"');
+                            pos += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    std::borrow::Cow::Owned(owned)
+                } else {
+                    pos = first_q + 1;
+                    std::borrow::Cow::Borrowed(&input[first_start..first_q])
+                };
+
+                if pos >= bytes.len() {
+                    on_field(row_idx, col_idx, field_cow);
+                    col_idx += 1;
+                    max_cols = max_cols.max(col_idx);
+                    row_idx += 1;
+                    col_idx = 0;
+                    break;
+                }
+                let next_b = bytes[pos];
+                if next_b == delim_b {
+                    on_field(row_idx, col_idx, field_cow);
+                    col_idx += 1;
+                    pos += 1;
+                    trailing_delim = true;
+                } else if next_b == b'\r' || next_b == b'\n' {
+                    if next_b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
+                        pos += 2;
+                    } else {
+                        pos += 1;
+                    }
+                    on_field(row_idx, col_idx, field_cow);
+                    col_idx += 1;
+                    max_cols = max_cols.max(col_idx);
+                    row_idx += 1;
+                    col_idx = 0;
+                } else {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
+                    ));
+                }
+            } else if b == delim_b {
+                on_field(row_idx, col_idx, std::borrow::Cow::Borrowed(""));
+                col_idx += 1;
+                pos += 1;
+                trailing_delim = true;
+            } else if b == b'\r' || b == b'\n' {
+                if b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
+                    pos += 2;
+                } else {
+                    pos += 1;
+                }
+                on_field(row_idx, col_idx, std::borrow::Cow::Borrowed(""));
+                col_idx += 1;
+                max_cols = max_cols.max(col_idx);
+                row_idx += 1;
+                col_idx = 0;
+                trailing_delim = false;
+            } else {
+                trailing_delim = false;
+                let end_pos = Self::find_csv_unquoted_special_swar(bytes, pos, delim_b);
+                if end_pos == bytes.len() {
+                    on_field(
+                        row_idx,
+                        col_idx,
+                        std::borrow::Cow::Borrowed(&input[pos..end_pos]),
+                    );
+                    col_idx += 1;
+                    max_cols = max_cols.max(col_idx);
+                    row_idx += 1;
+                    col_idx = 0;
+                    break;
+                }
+                let term = bytes[end_pos];
+                if term == b'"' {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다.".to_string(),
+                    ));
+                } else if term == delim_b {
+                    on_field(
+                        row_idx,
+                        col_idx,
+                        std::borrow::Cow::Borrowed(&input[pos..end_pos]),
+                    );
+                    col_idx += 1;
+                    pos = end_pos + 1;
+                    trailing_delim = true;
+                } else {
+                    on_field(
+                        row_idx,
+                        col_idx,
+                        std::borrow::Cow::Borrowed(&input[pos..end_pos]),
+                    );
+                    col_idx += 1;
+                    max_cols = max_cols.max(col_idx);
+                    row_idx += 1;
+                    col_idx = 0;
+                    if term == b'\r' && end_pos + 1 < bytes.len() && bytes[end_pos + 1] == b'\n' {
+                        pos = end_pos + 2;
+                    } else {
+                        pos = end_pos + 1;
+                    }
+                }
+            }
+        }
+
+        if trailing_delim && col_idx > 0 {
+            if col_idx >= Self::MAX_COLS || row_idx >= Self::MAX_ROWS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                ));
+            }
+            on_field(row_idx, col_idx, std::borrow::Cow::Borrowed(""));
+            col_idx += 1;
+            max_cols = max_cols.max(col_idx);
+            row_idx += 1;
+        }
+
+        Ok((row_idx, max_cols))
+    }
+
     pub fn parse(input: &str, delimiter: char) -> Result<Vec<Vec<String>>, EasyOfficeError> {
         if input.is_empty() {
             return Ok(Vec::new());
@@ -62,110 +252,13 @@ impl CsvCodec {
     }
 
     fn parse_swar_ascii(input: &str, delim_b: u8) -> Result<Vec<Vec<String>>, EasyOfficeError> {
-        let bytes = input.as_bytes();
         let mut rows: Vec<Vec<String>> = Vec::new();
-        let mut current_row: Vec<String> = Vec::new();
-        let mut current_field = String::new();
-        let mut pos = 0usize;
-        let mut trailing_delim = false;
-
-        while pos < bytes.len() {
-            if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
-                ));
+        Self::visit_fields_swar(input, delim_b as char, |r, _c, field| {
+            while rows.len() <= r {
+                rows.push(Vec::new());
             }
-            let b = bytes[pos];
-            if b == b'"' {
-                trailing_delim = false;
-                current_field.clear();
-                pos += 1;
-                loop {
-                    let Some(q_pos) = XmlSanitizer::find_byte_swar(bytes, pos, b'"') else {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
-                        ));
-                    };
-                    if q_pos > pos {
-                        current_field.push_str(&input[pos..q_pos]);
-                    }
-                    pos = q_pos + 1;
-                    if pos >= bytes.len() {
-                        current_row.push(std::mem::take(&mut current_field));
-                        rows.push(std::mem::take(&mut current_row));
-                        break;
-                    }
-                    let next_b = bytes[pos];
-                    if next_b == b'"' {
-                        current_field.push('"');
-                        pos += 1;
-                    } else if next_b == delim_b {
-                        current_row.push(std::mem::take(&mut current_field));
-                        pos += 1;
-                        trailing_delim = true;
-                        break;
-                    } else if next_b == b'\r' || next_b == b'\n' {
-                        if next_b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
-                            pos += 2;
-                        } else {
-                            pos += 1;
-                        }
-                        current_row.push(std::mem::take(&mut current_field));
-                        rows.push(std::mem::take(&mut current_row));
-                        break;
-                    } else {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
-                        ));
-                    }
-                }
-            } else if b == delim_b {
-                current_row.push(String::new());
-                pos += 1;
-                trailing_delim = true;
-            } else if b == b'\r' || b == b'\n' {
-                if b == b'\r' && pos + 1 < bytes.len() && bytes[pos + 1] == b'\n' {
-                    pos += 2;
-                } else {
-                    pos += 1;
-                }
-                current_row.push(String::new());
-                rows.push(std::mem::take(&mut current_row));
-                trailing_delim = false;
-            } else {
-                trailing_delim = false;
-                let end_pos = Self::find_csv_unquoted_special_swar(bytes, pos, delim_b);
-                if end_pos == bytes.len() {
-                    current_row.push(String::from(&input[pos..end_pos]));
-                    rows.push(std::mem::take(&mut current_row));
-                    break;
-                }
-                let term = bytes[end_pos];
-                if term == b'"' {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다.".to_string(),
-                    ));
-                } else if term == delim_b {
-                    current_row.push(String::from(&input[pos..end_pos]));
-                    pos = end_pos + 1;
-                    trailing_delim = true;
-                } else {
-                    current_row.push(String::from(&input[pos..end_pos]));
-                    rows.push(std::mem::take(&mut current_row));
-                    if term == b'\r' && end_pos + 1 < bytes.len() && bytes[end_pos + 1] == b'\n' {
-                        pos = end_pos + 2;
-                    } else {
-                        pos = end_pos + 1;
-                    }
-                }
-            }
-        }
-
-        if trailing_delim && !current_row.is_empty() {
-            current_row.push(String::new());
-            rows.push(current_row);
-        }
-
+            rows[r].push(field.into_owned());
+        })?;
         Ok(rows)
     }
 
@@ -274,28 +367,42 @@ impl CsvCodec {
     }
 
     pub fn serialize(rows: &[Vec<String>], delimiter: char) -> String {
-        let delim_str = delimiter.to_string();
-        rows.iter()
-            .map(|row| {
-                row.iter()
-                    .map(|field| Self::serialize_field(field, delimiter))
-                    .collect::<Vec<_>>()
-                    .join(&delim_str)
-            })
-            .collect::<Vec<_>>()
-            .join("\r\n")
+        let total_bytes: usize = rows
+            .iter()
+            .map(|r| r.iter().map(|f| f.len() + 2).sum::<usize>() + 2)
+            .sum();
+        let mut out = String::with_capacity(total_bytes);
+        for (r_idx, row) in rows.iter().enumerate() {
+            if r_idx > 0 {
+                out.push_str("\r\n");
+            }
+            for (c_idx, field) in row.iter().enumerate() {
+                if c_idx > 0 {
+                    out.push(delimiter);
+                }
+                Self::write_serialized_field(&mut out, field, delimiter);
+            }
+        }
+        out
     }
 
-    fn serialize_field(field: &str, delimiter: char) -> String {
+    fn write_serialized_field(out: &mut String, field: &str, delimiter: char) {
         if field.contains(delimiter)
             || field.contains('"')
             || field.contains('\n')
             || field.contains('\r')
         {
-            let escaped = field.replace('"', "\"\"");
-            format!("\"{escaped}\"")
+            out.push('"');
+            for ch in field.chars() {
+                if ch == '"' {
+                    out.push_str("\"\"");
+                } else {
+                    out.push(ch);
+                }
+            }
+            out.push('"');
         } else {
-            field.to_string()
+            out.push_str(field);
         }
     }
 }
@@ -761,5 +868,27 @@ mod tests {
 
         assert!(CsvCodec::parse("\"unclosed quote", ',').is_err());
         assert!(CsvCodec::parse("unquoted\"quote,val", ',').is_err());
+
+        let mut visited_borrowed = 0usize;
+        let mut visited_owned = 0usize;
+        let mut visited_rows = vec![Vec::<String>::new()];
+        CsvCodec::visit_fields_swar(&crlf_csv, ',', |r_idx, _c_idx, field| {
+            while visited_rows.len() <= r_idx {
+                visited_rows.push(Vec::new());
+            }
+            match &field {
+                Cow::Borrowed(_) => visited_borrowed += 1,
+                Cow::Owned(_) => visited_owned += 1,
+            }
+            visited_rows[r_idx].push(field.into_owned());
+        })
+        .unwrap();
+        assert_eq!(visited_rows, parsed_crlf);
+        assert_eq!(visited_owned, 64);
+        assert_eq!(visited_borrowed, 64 * 5);
+        assert_eq!(
+            crate::rtf_xml_helpers::unescape_xml_single_pass("A&#0;&#x01;&#xFFFE;&#65;B"),
+            "A&#0;&#x01;&#xFFFE;AB"
+        );
     }
 }

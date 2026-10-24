@@ -424,12 +424,15 @@ pub struct SheetEngine {
     pub(crate) sheet_id: u16,
     pub(crate) cells: HashMap<PackedCellCoordinate, String>,
     pub(crate) compiled_asts: HashMap<PackedCellCoordinate, Result<Expr, FormulaError>>,
+    pub(crate) dense_numbers: Vec<f64>,
     pub conditional_rules: Vec<ConditionalFormatRule>,
     pub validation_rule: Option<DataValidationRule>,
 }
 
 impl SheetEngine {
     pub const MAX_RECURSION_DEPTH: usize = 64;
+    const DENSE_ROWS: usize = 256;
+    const DENSE_COLS: usize = 16;
 
     pub fn new(name: impl Into<String>) -> Self {
         let name_str = name.into();
@@ -439,6 +442,7 @@ impl SheetEngine {
             sheet_id,
             cells: HashMap::new(),
             compiled_asts: HashMap::new(),
+            dense_numbers: Vec::new(),
             conditional_rules: Vec::new(),
             validation_rule: None,
         }
@@ -487,6 +491,27 @@ impl SheetEngine {
         }
     }
 
+    #[inline]
+    fn update_dense_number(
+        &mut self,
+        coord: PackedCellCoordinate,
+        compiled: Option<&Result<Expr, FormulaError>>,
+    ) {
+        let r = coord.row() as usize;
+        let c = coord.col() as usize;
+        if r < Self::DENSE_ROWS && c < Self::DENSE_COLS {
+            let idx = (r << 4) | c;
+            if let Some(Ok(Expr::Number(n))) = compiled {
+                if self.dense_numbers.is_empty() {
+                    self.dense_numbers = vec![f64::NAN; Self::DENSE_ROWS * Self::DENSE_COLS];
+                }
+                self.dense_numbers[idx] = *n;
+            } else if !self.dense_numbers.is_empty() {
+                self.dense_numbers[idx] = f64::NAN;
+            }
+        }
+    }
+
     pub fn set_cell(
         &mut self,
         a1: &str,
@@ -497,9 +522,12 @@ impl SheetEngine {
         if val.is_empty() {
             self.cells.remove(&coord);
             self.compiled_asts.remove(&coord);
+            self.update_dense_number(coord, None);
         } else {
-            if let Some(compiled) = Self::compile_cell_entry(&val) {
-                self.compiled_asts.insert(coord, compiled);
+            let compiled = Self::compile_cell_entry(&val);
+            self.update_dense_number(coord, compiled.as_ref());
+            if let Some(comp) = compiled {
+                self.compiled_asts.insert(coord, comp);
             } else {
                 self.compiled_asts.remove(&coord);
             }
@@ -508,14 +536,29 @@ impl SheetEngine {
         Ok(())
     }
 
+    #[inline]
+    pub(crate) fn set_coord_number(&mut self, coord: PackedCellCoordinate, num: f64) {
+        let comp = Ok(Expr::Number(num));
+        self.update_dense_number(coord, Some(&comp));
+        self.compiled_asts.insert(coord, comp);
+        self.cells.insert(coord, format!("{num}"));
+    }
+
     pub(crate) fn rebuild_compiled_asts(&mut self) {
         if self.sheet_id == 0 {
             self.sheet_id = compute_sheet_id(&self.name);
         }
         self.compiled_asts.clear();
-        for (&coord, raw) in &self.cells {
-            if let Some(compiled) = Self::compile_cell_entry(raw) {
-                self.compiled_asts.insert(coord, compiled);
+        self.dense_numbers.clear();
+        let coords_and_compiled: Vec<(PackedCellCoordinate, Option<Result<Expr, FormulaError>>)> =
+            self.cells
+                .iter()
+                .map(|(&coord, raw)| (coord, Self::compile_cell_entry(raw)))
+                .collect();
+        for (coord, compiled) in coords_and_compiled {
+            self.update_dense_number(coord, compiled.as_ref());
+            if let Some(comp) = compiled {
+                self.compiled_asts.insert(coord, comp);
             }
         }
     }
@@ -550,6 +593,7 @@ impl SheetEngine {
         self.eval_raw_string_ctx(formula, &mut ctx, 0)
     }
 
+    #[inline]
     pub(crate) fn eval_sheet_coord(
         &self,
         sheet_opt: Option<&str>,
@@ -574,6 +618,7 @@ impl SheetEngine {
         }
     }
 
+    #[inline]
     pub(crate) fn eval_coord_ctx(
         &self,
         coord: PackedCellCoordinate,
@@ -582,6 +627,15 @@ impl SheetEngine {
     ) -> EvaluatedCellValue {
         if depth > Self::MAX_RECURSION_DEPTH {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
+        }
+        let r = coord.row() as usize;
+        let c = coord.col() as usize;
+        if r < Self::DENSE_ROWS && c < Self::DENSE_COLS {
+            if let Some(&n) = self.dense_numbers.get((r << 4) | c) {
+                if !n.is_nan() {
+                    return EvaluatedCellValue::Number(n);
+                }
+            }
         }
         let Some(compiled) = self.compiled_asts.get(&coord) else {
             return match self.cells.get(&coord) {
@@ -794,7 +848,8 @@ impl SheetEngine {
                 }
             }
             Expr::FuncCall { name, args } => match name.as_str() {
-                "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK" => {
+                "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK"
+                | "PRODUCT" => {
                     match self.eval_streaming_range_agg_ctx(name, args, ctx, depth + 1) {
                         Ok(v) => v,
                         Err(e) => EvaluatedCellValue::Error(e),
@@ -816,6 +871,10 @@ impl SheetEngine {
         let mut acc1 = 0.0f64;
         let mut acc2 = 0.0f64;
         let mut acc3 = 0.0f64;
+        let mut p0 = 1.0f64;
+        let mut p1 = 1.0f64;
+        let mut p2 = 1.0f64;
+        let mut p3 = 1.0f64;
         let mut num_count = 0usize;
         let mut item_count = 0usize;
         let mut min_val: Option<f64> = None;
@@ -834,6 +893,17 @@ impl SheetEngine {
                             1 => acc1 += n,
                             2 => acc2 += n,
                             _ => acc3 += n,
+                        }
+                    }
+                }
+                "PRODUCT" => {
+                    if let Some(n) = v.as_number() {
+                        num_count += 1;
+                        match lane & 3 {
+                            0 => p0 *= n,
+                            1 => p1 *= n,
+                            2 => p2 *= n,
+                            _ => p3 *= n,
                         }
                     }
                 }
@@ -949,6 +1019,11 @@ impl SheetEngine {
         let total_sum = (acc0 + acc1) + (acc2 + acc3);
         match name {
             "SUM" => Ok(EvaluatedCellValue::Number(total_sum)),
+            "PRODUCT" => Ok(EvaluatedCellValue::Number(if num_count == 0 {
+                0.0
+            } else {
+                (p0 * p1) * (p2 * p3)
+            })),
             "AVERAGE" | "AVG" => {
                 if num_count == 0 {
                     Err(FormulaError::DivByZero)

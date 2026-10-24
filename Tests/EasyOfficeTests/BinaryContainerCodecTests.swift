@@ -923,7 +923,7 @@ final class BinaryContainerCodecTests: XCTestCase {
     let decodedDocx = try OOXMLContainerCodec.decodeDocument(from: docxData)
     XCTAssertEqual(decodedDocx.watermarkText, "대외비 (CONFIDENTIAL)")
     XCTAssertEqual(decodedDocx.equations.count, 1)
-    XCTAssertEqual(decodedDocx.equations[0].renderedNotation, "E = mc² + ∑_{i=1}ⁿ αᵢ")
+    XCTAssertEqual(decodedDocx.equations[0].renderedNotation, "E = mc² + ∑ᵢ₌₁ⁿ αᵢ")
     XCTAssertEqual(decodedDocx.images.first?.wrapMode, .squareRight)
 
     let odtData = try ODFContainerCodec.encodeDocument(doc)
