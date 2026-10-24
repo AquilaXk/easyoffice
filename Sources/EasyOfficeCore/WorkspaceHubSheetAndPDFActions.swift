@@ -1115,5 +1115,77 @@ extension WorkspaceViewModel {
     activeDataValidationRule = rule
     persistSheetRulesToActiveTab()
   }
+
+  public var sheetSelectionStatusSummary: String {
+    guard let tab = activeTab, case .sheet(let sheet) = tab.payload else {
+      return "선택 셀: 0개"
+    }
+    let originAddress = CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
+    let fallbackRange =
+      (try? CellRange(notation: selectedSheetCell))
+      ?? CellRange(start: originAddress, end: originAddress)
+    let parsedRange = (try? CellRange(notation: selectedSheetRange)) ?? fallbackRange
+    var summary = sheet.summarizeRange(parsedRange)
+    if summary.numericCount == 0, parsedRange.start == parsedRange.end {
+      let detected = sheet.summarizeRange(sheet.detectedNumericRange())
+      if detected.numericCount > 0 {
+        summary = detected
+      }
+    }
+    if summary.numericCount > 0 {
+      let sumText = Self.formatSheetStatusMetric(summary.sum)
+      let avgText = Self.formatSheetStatusMetric(summary.average)
+      let maxText = Self.formatSheetStatusMetric(summary.maximum ?? 0)
+      return
+        "합계: \(sumText) · 평균: \(avgText) · 개수: \(summary.numericCount) · 최대: \(maxText)"
+    }
+    let raw = sheet.rawValue(at: parsedRange.start.a1Notation)
+    if parsedRange.start == parsedRange.end, !raw.isEmpty {
+      return "선택 셀: 1개 · 값: \(raw)"
+    }
+    return "선택 셀: \(summary.cellCount)개 · 입력: \(summary.nonEmptyCount)개"
+  }
+
+  private static func formatSheetStatusMetric(_ value: Double) -> String {
+    guard value.isFinite else { return "0" }
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.numberStyle = .decimal
+    if abs(value.rounded() - value) < 1e-6 {
+      formatter.maximumFractionDigits = 0
+      return formatter.string(from: NSNumber(value: value.rounded())) ?? "\(Int(value.rounded()))"
+    }
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = 2
+    return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+  }
+
+  public func updatePDFFormFieldValue(fieldName: String, value: String) {
+    let trimmedName = fieldName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedName.isEmpty,
+      let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .pdf(var pdf) = openTabs[idx].payload
+    else { return }
+    if let existing = pdf.formFields.first(where: { $0.name == trimmedName }) {
+      updatePDFFormField(id: existing.id, value: value)
+      return
+    }
+    recordUndoSnapshot(for: activeTabID)
+    let pageNumber = max(1, selectedPDFPageIndex + 1)
+    pdf.addFormField(
+      PDFFormField(
+        pageNumber: pageNumber,
+        name: trimmedName,
+        value: value,
+        isCheckbox: false,
+        isChecked: false
+      )
+    )
+    openTabs[idx].payload = .pdf(pdf)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "PDF 양식 필드 입력 (\(trimmedName) = \(value))"
+  }
 }
+
 

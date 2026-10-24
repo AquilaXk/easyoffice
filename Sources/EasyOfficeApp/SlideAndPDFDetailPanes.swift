@@ -31,7 +31,7 @@ public struct SlideVerticalRulerView: View {
             let ratio = CGFloat(step) / CGFloat(stepCount)
             let yPos = ratio * size.height
             let isMajor = (step % 4 == 0)
-            let tickW: CGFloat = isMajor ? 7.0 : 3.5
+            let tickW: CGFloat = isMajor ? 4.0 : 2.2
             var path = Path()
             path.move(to: CGPoint(x: size.width - tickW, y: yPos))
             path.addLine(to: CGPoint(x: size.width, y: yPos))
@@ -45,10 +45,12 @@ public struct SlideVerticalRulerView: View {
 
         ForEach([0, 135, 270, 405, maxPt], id: \.self) { ptMark in
           let ratio = CGFloat(ptMark) / CGFloat(maxPt)
-          let yPos = min(height - 10.0, max(10.0, ratio * height))
+          let yPos = min(height - 9.0, max(9.0, ratio * height))
           Text("\(ptMark)")
-            .font(.system(size: 7, weight: .semibold, design: .monospaced))
+            .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .padding(.horizontal, 1.5)
+            .background(palette.elevatedSurface.swiftUIColor)
             .position(x: 9, y: yPos)
         }
       }
@@ -58,7 +60,7 @@ public struct SlideVerticalRulerView: View {
       )
       .clipShape(RoundedRectangle(cornerRadius: 4))
     }
-    .frame(width: 22)
+    .frame(width: 24)
   }
 }
 
@@ -1128,6 +1130,7 @@ public struct PDFStudioDetailPaneView: View {
   @Bindable var viewModel: WorkspaceViewModel
   let pdf: PDFStudioDocumentModel
   let isPrimaryPane: Bool
+  @State private var showRawPDFKitView: Bool = false
 
   public init(
     viewModel: WorkspaceViewModel, pdf: PDFStudioDocumentModel, isPrimaryPane: Bool = true
@@ -1613,7 +1616,7 @@ public struct PDFStudioDetailPaneView: View {
           }
         }
 
-        // Active Page AcroForm Fields Preview
+        // Active Page Interactive AcroForm Fields
         if !pageFormFields.isEmpty {
           VStack(alignment: .leading, spacing: 5) {
             Text("AcroForm 전자 양식 필드 (\(pageFormFields.count)필드)")
@@ -1623,17 +1626,52 @@ public struct PDFStudioDetailPaneView: View {
             HStack(spacing: 8) {
               ForEach(pageFormFields.prefix(4)) { field in
                 HStack(spacing: 5) {
-                  Image(
-                    systemName: field.isCheckbox
-                      ? (field.isChecked ? "checkmark.square.fill" : "square")
-                      : "character.textbox"
-                  )
-                  .font(.system(size: 10, weight: .bold))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                  Text("\(field.name): \(field.isCheckbox ? (field.isChecked ? "예" : "아니오") : field.value)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-                    .lineLimit(1)
+                  if field.isCheckbox {
+                    Button {
+                      viewModel.updatePDFFormField(id: field.id, isChecked: !field.isChecked)
+                    } label: {
+                      HStack(spacing: 4) {
+                        Image(
+                          systemName: field.isChecked ? "checkmark.square.fill" : "square"
+                        )
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                        Text("\(field.name): \(field.isChecked ? "예" : "아니오")")
+                          .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                          .foregroundStyle(palette.primaryText.swiftUIColor)
+                          .lineLimit(1)
+                      }
+                    }
+                    .buttonStyle(.plain)
+                  } else {
+                    Image(systemName: "character.textbox")
+                      .font(.system(size: 10, weight: .bold))
+                      .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    Text("\(field.name):")
+                      .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+                      .lineLimit(1)
+                    if viewModel.isCanvasSnapshotMode {
+                      Text(field.value)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(palette.primaryText.swiftUIColor)
+                        .lineLimit(1)
+                    } else {
+                      TextField(
+                        "입력값",
+                        text: Binding(
+                          get: { field.value },
+                          set: { updated in
+                            viewModel.updatePDFFormField(id: field.id, value: updated)
+                          }
+                        )
+                      )
+                      .textFieldStyle(.plain)
+                      .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                      .foregroundStyle(palette.primaryText.swiftUIColor)
+                      .frame(width: 96)
+                    }
+                  }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -1830,7 +1868,7 @@ public struct PDFStudioDetailPaneView: View {
 
         if !pdf.pages.isEmpty {
           VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 8) {
               Label(
                 "네이티브 PDFKit 벡터 뷰어 (ISO 32000-1 · CoreText CJK 서브셋)",
                 systemImage: "doc.viewfinder.fill"
@@ -1841,23 +1879,28 @@ public struct PDFStudioDetailPaneView: View {
               Text("페이지 수: \(pdf.pages.count)p · 총 벡터 획: \(pdf.inkStrokes.count)건")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
+              if !viewModel.isCanvasSnapshotMode {
+                Button(showRawPDFKitView ? "표준 용지 뷰로 전환" : "원본 PDFKit 뷰 전환") {
+                  showRawPDFKitView.toggle()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+              }
             }
 
-            if let page = activePage {
-              pdfNativePageSheetView(
-                page: page,
-                pageNumber: currentPageNum,
-                palette: palette
-              )
-            }
-
-            if !viewModel.isCanvasSnapshotMode {
+            if showRawPDFKitView && !viewModel.isCanvasSnapshotMode {
               PDFKitRepresentedView(
                 pdfDocument: pdf, selectedPageIndex: viewModel.selectedPDFPageIndex,
                 zoomFactor: CGFloat(viewModel.zoomPercent / 100.0)
               )
               .frame(minHeight: 360, maxHeight: .infinity)
               .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else if let page = activePage {
+              pdfNativePageSheetView(
+                page: page,
+                pageNumber: currentPageNum,
+                palette: palette
+              )
             }
 
             if isPrimaryPane

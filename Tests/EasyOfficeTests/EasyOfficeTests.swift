@@ -312,5 +312,182 @@ final class EasyOfficeTests: XCTestCase {
       XCTFail("Expected active HWP document payload")
     }
   }
+
+  @MainActor
+  func testEleventhAuditBitLevelPerformanceAndCommercialUXParity() throws {
+    // 1. Adler-32 NMAX=5552 deferred modulo calculator (RFC 1950 ground-truth vector "Wikipedia" -> 0x11E60398)
+    XCTAssertEqual(Adler32Calculator.nmax, 5_552)
+    XCTAssertEqual(Adler32Calculator.modulo, 65_521)
+    XCTAssertEqual(Adler32Calculator.compute(for: Data()), 1)
+    let wikiData = Data("Wikipedia".utf8)
+    XCTAssertEqual(Adler32Calculator.compute(for: wikiData), 0x11E6_0398)
+
+    // Verify multi-NMAX chunk (> 11,104 bytes) against independent byte-by-byte RFC 1950 reference oracle
+    var largePayload = Data(count: 12_345)
+    for i in 0..<largePayload.count {
+      largePayload[i] = UInt8((i &* 73 &+ 19) & 0xFF)
+    }
+    var refS1: UInt32 = 1
+    var refS2: UInt32 = 0
+    for byte in largePayload {
+      refS1 = (refS1 + UInt32(byte)) % 65_521
+      refS2 = (refS2 + refS1) % 65_521
+    }
+    let expectedLargeAdler = (refS2 << 16) | refS1
+    XCTAssertEqual(Adler32Calculator.compute(for: largePayload), expectedLargeAdler)
+
+    var fakeZlibStream = Data([0x78, 0x9C, 0x01, 0x02])
+    let wikiAdler = Adler32Calculator.compute(for: wikiData)
+    fakeZlibStream.append(UInt8((wikiAdler >> 24) & 0xFF))
+    fakeZlibStream.append(UInt8((wikiAdler >> 16) & 0xFF))
+    fakeZlibStream.append(UInt8((wikiAdler >> 8) & 0xFF))
+    fakeZlibStream.append(UInt8(wikiAdler & 0xFF))
+    XCTAssertTrue(
+      Adler32Calculator.verifyZlibTrailer(in: fakeZlibStream, decompressed: wikiData)
+    )
+    fakeZlibStream[fakeZlibStream.count - 1] ^= 0xFF
+    XCTAssertFalse(
+      Adler32Calculator.verifyZlibTrailer(in: fakeZlibStream, decompressed: wikiData)
+    )
+
+    // 2. SWAR 8-byte UInt64 ASCII UTF-16LE fast path + mixed Korean/ASCII fallback
+    let asciiSample = "Root Entry/Workbook/Section0/BodyText_2026_Commercial_FastPath"
+    var asciiUTF16LE = Data()
+    for scalar in asciiSample.utf16 {
+      asciiUTF16LE.append(UInt8(scalar & 0xFF))
+      asciiUTF16LE.append(UInt8((scalar >> 8) & 0xFF))
+    }
+    let decodedASCII = try BinaryContainerCodec.decodeUTF16LE(
+      from: asciiUTF16LE,
+      at: 0,
+      byteLength: asciiUTF16LE.count
+    )
+    XCTAssertEqual(decodedASCII, asciiSample)
+
+    let mixedSample = "EasyOffice 2026 표준 오피스 문서 — 한글·영문 혼합 테스트"
+    var mixedUTF16LE = Data()
+    for scalar in mixedSample.utf16 {
+      mixedUTF16LE.append(UInt8(scalar & 0xFF))
+      mixedUTF16LE.append(UInt8((scalar >> 8) & 0xFF))
+    }
+    let decodedMixed = try BinaryContainerCodec.decodeUTF16LE(
+      from: mixedUTF16LE,
+      at: 0,
+      byteLength: mixedUTF16LE.count
+    )
+    XCTAssertEqual(decodedMixed, mixedSample)
+
+    // 3. OLE2SectorTable compact UInt64 bitset chain traversal and cycle refusal
+    let validSectorTable = OLE2SectorTable(entries: [
+      1, 2, 3, OLE2SectorTable.endOfChain,
+    ])
+    let validChain = try validSectorTable.chain(startingAt: 0, maxSectors: 16)
+    XCTAssertEqual(validChain, [0, 1, 2, 3])
+
+    let cyclicSectorTable = OLE2SectorTable(entries: [
+      1, 2, 0, OLE2SectorTable.endOfChain,
+    ])
+    XCTAssertThrowsError(try cyclicSectorTable.chain(startingAt: 0, maxSectors: 16)) { error in
+      guard case EasyOfficeError.corruptedContainer = error else {
+        XCTFail("Expected corruptedContainer on cyclic FAT chain, got \(error)")
+        return
+      }
+    }
+
+    // 4. FastCellBitset 1,024-cell inline bitset & zero-clone cross-sheet formula evaluation
+    var cellBits = FastCellBitset()
+    let c0 = PackedCellCoordinate(row: 0, column: 0)
+    let cMaxInline = PackedCellCoordinate(row: 63, column: 15)
+    let cOutOfInline = PackedCellCoordinate(row: 64, column: 0)
+    XCTAssertFalse(cellBits.contains(c0))
+    XCTAssertTrue(cellBits.insert(c0))
+    XCTAssertTrue(cellBits.contains(c0))
+    XCTAssertTrue(cellBits.insert(cMaxInline))
+    XCTAssertTrue(cellBits.contains(cMaxInline))
+    XCTAssertFalse(cellBits.insert(cOutOfInline))
+    XCTAssertFalse(cellBits.contains(cOutOfInline))
+    cellBits.remove(c0)
+    XCTAssertFalse(cellBits.contains(c0))
+
+    var sheet1 = WorksheetModel(name: "Sheet1")
+    sheet1.addSheetPage(
+      named: "Sheet2",
+      initialCells: [
+        PackedCellCoordinate(row: 0, column: 0): "250",
+        PackedCellCoordinate(row: 1, column: 0): "=A1*2",
+      ]
+    )
+    try sheet1.setCell("A1", rawValue: "=Sheet2!A2+50")
+    try sheet1.setCell("B1", rawValue: "=C1")
+    try sheet1.setCell("C1", rawValue: "=B1")
+    XCTAssertEqual(sheet1.evaluate(at: "A1"), .number(550))
+    XCTAssertEqual(sheet1.evaluate(at: "B1"), .error("#REF!"))
+
+    // 5. WorkspaceViewModel.sheetSelectionStatusSummary live numeric aggregation
+    let vm = WorkspaceViewModel()
+    vm.openNewSampleTab(for: .sheet)
+    vm.selectSheetCellOrRange(primaryCell: "B2", rangeNotation: "B2:D2")
+    let statusSummary = vm.sheetSelectionStatusSummary
+    XCTAssertTrue(statusSummary.contains("합계"), "Expected 합계 in \(statusSummary)")
+    XCTAssertTrue(statusSummary.contains("평균"), "Expected 평균 in \(statusSummary)")
+    XCTAssertTrue(statusSummary.contains("개수"), "Expected 개수 in \(statusSummary)")
+    XCTAssertTrue(statusSummary.contains("최대"), "Expected 최대 in \(statusSummary)")
+
+    // 6. WorkspaceViewModel.closeOtherTabs(keeping:)
+    XCTAssertGreaterThanOrEqual(vm.openTabs.count, 3)
+    let keptTabID = try XCTUnwrap(vm.activeTabID)
+    vm.closeOtherTabs(keeping: keptTabID)
+    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == keptTabID }))
+    XCTAssertTrue(vm.openTabs.allSatisfy { $0.id == keptTabID || $0.isPinned })
+
+    // 7. Interactive ruler padding clamping & outline level promote/demote
+    vm.openNewSampleTab(for: .document)
+    vm.setDocumentHorizontalPadding(8.0)
+    XCTAssertEqual(vm.documentHorizontalPadding, 24.0, accuracy: 1e-6)
+    vm.setDocumentHorizontalPadding(64.0)
+    XCTAssertEqual(vm.documentHorizontalPadding, 64.0, accuracy: 1e-6)
+    vm.setDocumentHorizontalPadding(200.0)
+    XCTAssertEqual(vm.documentHorizontalPadding, 96.0, accuracy: 1e-6)
+
+    if let docTab = vm.activeTab, case .document(let doc) = docTab.payload,
+      let firstPara = doc.paragraphs.first
+    {
+      XCTAssertEqual(firstPara.style, .title)
+      vm.promoteOrDemoteParagraphOutlineLevel(paragraphID: firstPara.id, delta: 1)
+      if case .document(let updatedDoc) = vm.activeTab?.payload {
+        XCTAssertEqual(updatedDoc.paragraphs.first?.style, .heading1)
+      }
+      vm.promoteOrDemoteParagraphOutlineLevel(paragraphID: firstPara.id, delta: -1)
+      if case .document(let restoredDoc) = vm.activeTab?.payload {
+        XCTAssertEqual(restoredDoc.paragraphs.first?.style, .title)
+      }
+    } else {
+      XCTFail("Expected active document tab")
+    }
+
+    // 8. On-page AcroForm field value creation & update on PDF tab
+    vm.openNewSampleTab(for: .pdf)
+    vm.updatePDFFormFieldValue(fieldName: "승인자 성명", value: "김민수")
+    if case .pdf(let pdfAfterCreate) = vm.activeTab?.payload {
+      XCTAssertEqual(
+        pdfAfterCreate.formFields.first(where: { $0.name == "승인자 성명" })?.value,
+        "김민수"
+      )
+    } else {
+      XCTFail("Expected active PDF tab")
+    }
+    vm.updatePDFFormFieldValue(fieldName: "승인자 성명", value: "이서연")
+    if case .pdf(let pdfAfterUpdate) = vm.activeTab?.payload {
+      XCTAssertEqual(
+        pdfAfterUpdate.formFields.filter { $0.name == "승인자 성명" }.count,
+        1
+      )
+      XCTAssertEqual(
+        pdfAfterUpdate.formFields.first(where: { $0.name == "승인자 성명" })?.value,
+        "이서연"
+      )
+    }
+  }
 }
+
 

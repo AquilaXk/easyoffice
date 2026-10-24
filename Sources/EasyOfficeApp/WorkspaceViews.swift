@@ -806,7 +806,12 @@ struct TopDocumentTabStripView: View {
 
               let shortTabTitle: String = {
                 if let dotIdx = tab.fileName.lastIndex(of: "."), dotIdx > tab.fileName.startIndex {
-                  return String(tab.fileName[..<dotIdx])
+                  let stem = String(tab.fileName[..<dotIdx])
+                  let ext = String(tab.fileName[dotIdx...])
+                  if stem.count > 7 {
+                    return "\(stem.prefix(6))…\(ext)"
+                  }
+                  return "\(stem)\(ext)"
                 }
                 return tab.fileName
               }()
@@ -869,11 +874,16 @@ struct TopDocumentTabStripView: View {
                     secondaryTabID: viewModel.splitSecondaryTabID == tab.id ? nil : tab.id)
                 }
               }
+              Divider()
+              if viewModel.openTabs.count > 1 {
+                Button("다른 탭 닫기") { viewModel.closeOtherTabs(keeping: tab.id) }
+              }
+              Button("탭 닫기", role: .destructive) { viewModel.closeTab(id: tab.id) }
             }
           }
 
           Button {
-            viewModel.openNewSampleTab(for: .document)
+            viewModel.openNewSampleTab(for: viewModel.activeTab?.moduleKind ?? .document)
           } label: {
             Image(systemName: "plus")
               .font(.system(size: 10, weight: .bold))
@@ -887,7 +897,14 @@ struct TopDocumentTabStripView: View {
               .clipShape(RoundedRectangle(cornerRadius: 5))
           }
           .buttonStyle(.plain)
-          .help("새 문서 탭 생성")
+          .help("현재 모듈 새 문서 탭 생성 (우클릭으로 형식 선택)")
+          .contextMenu {
+            Button("새 문서 (.docx)") { viewModel.openNewSampleTab(for: .document) }
+            Button("새 한글 문서 (.hwpx)") { viewModel.openNewSampleTab(for: .hwp) }
+            Button("새 스프레드시트 (.xlsx)") { viewModel.openNewSampleTab(for: .sheet) }
+            Button("새 프레젠테이션 (.pptx)") { viewModel.openNewSampleTab(for: .slide) }
+            Button("새 PDF 문서 (.pdf)") { viewModel.openNewSampleTab(for: .pdf) }
+          }
         }
       }
 
@@ -1095,7 +1112,8 @@ struct ContextRibbonBarView: View {
                   title: "찾기",
                   symbolName: "magnifyingglass",
                   accent: moduleAccent,
-                  palette: palette
+                  palette: palette,
+                  isActive: viewModel.isFindReplaceBarPresented
                 ) {
                   viewModel.isFindReplaceBarPresented.toggle()
                 }
@@ -1107,26 +1125,34 @@ struct ContextRibbonBarView: View {
             ribbonGroupContainer(title: "핵심 리본 도구", palette: palette) {
               HStack(spacing: 5) {
                 ForEach(primaryActions) { command in
+                  let isCommandOn = isRibbonCommandActive(command.id)
                   Button {
                     viewModel.executeRibbonCommand(command.id)
                   } label: {
                     HStack(spacing: 5) {
                       Image(systemName: command.symbolName)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(moduleAccent)
+                        .foregroundStyle(isCommandOn ? moduleAccent : moduleAccent.opacity(0.9))
                       Text(command.title)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
+                        .font(.system(size: 11, weight: isCommandOn ? .bold : .semibold))
+                        .foregroundStyle(
+                          isCommandOn ? moduleAccent : palette.primaryText.swiftUIColor)
                       Text(command.shortcutHint)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(palette.secondaryText.swiftUIColor)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(palette.selectedSurface.swiftUIColor)
+                    .background(
+                      isCommandOn
+                        ? moduleAccent.opacity(0.18) : palette.selectedSurface.swiftUIColor
+                    )
                     .overlay(
                       RoundedRectangle(cornerRadius: 6)
-                        .stroke(moduleAccent.opacity(0.45), lineWidth: 1)
+                        .stroke(
+                          isCommandOn ? moduleAccent : moduleAccent.opacity(0.45),
+                          lineWidth: isCommandOn ? 1.5 : 1.0
+                        )
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                   }
@@ -1143,6 +1169,7 @@ struct ContextRibbonBarView: View {
               ribbonGroupContainer(title: "서식·문서 구조", palette: palette) {
                 HStack(spacing: 5) {
                   ForEach(secondaryActions) { command in
+                    let isCommandOn = isRibbonCommandActive(command.id)
                     Button {
                       viewModel.executeRibbonCommand(command.id)
                     } label: {
@@ -1151,18 +1178,25 @@ struct ContextRibbonBarView: View {
                           .font(.system(size: 11))
                           .foregroundStyle(moduleAccent)
                         Text(command.title)
-                          .font(.system(size: 11, weight: .medium))
-                          .foregroundStyle(palette.primaryText.swiftUIColor)
+                          .font(.system(size: 11, weight: isCommandOn ? .bold : .medium))
+                          .foregroundStyle(
+                            isCommandOn ? moduleAccent : palette.primaryText.swiftUIColor)
                         Text(command.shortcutHint)
                           .font(.system(size: 9, design: .monospaced))
                           .foregroundStyle(palette.secondaryText.swiftUIColor)
                       }
                       .padding(.horizontal, 8)
                       .padding(.vertical, 5)
-                      .background(palette.elevatedSurface.swiftUIColor)
+                      .background(
+                        isCommandOn
+                          ? moduleAccent.opacity(0.18) : palette.elevatedSurface.swiftUIColor
+                      )
                       .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                          .stroke(palette.border.swiftUIColor, lineWidth: 1)
+                          .stroke(
+                            isCommandOn ? moduleAccent : palette.border.swiftUIColor,
+                            lineWidth: isCommandOn ? 1.5 : 1.0
+                          )
                       )
                       .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
@@ -1191,6 +1225,62 @@ struct ContextRibbonBarView: View {
     .background(palette.cardSurface.swiftUIColor)
   }
 
+  private func isRibbonCommandActive(_ commandID: String) -> Bool {
+    if commandID.hasSuffix("-view-split") {
+      return viewModel.splitSecondaryTab != nil
+    }
+    if commandID.hasSuffix("-view-theme") {
+      return viewModel.themeMode == .darkIndigo
+    }
+    if commandID.hasSuffix("-view-zoom") {
+      return viewModel.zoomPercent > 100.0
+    }
+    guard let tab = viewModel.activeTab else { return false }
+    switch tab.payload {
+    case .document(let doc):
+      let activeParagraph =
+        doc.paragraphs.first(where: { $0.id == viewModel.selectedParagraphID })
+        ?? doc.paragraphs.first
+      if commandID.hasSuffix("-home-bold") { return activeParagraph?.isBold == true }
+      if commandID.hasSuffix("-home-italic") { return activeParagraph?.isItalic == true }
+      if commandID.hasSuffix("-home-underline") { return activeParagraph?.isUnderlined == true }
+      if commandID.hasSuffix("-layout-columns") {
+        return (doc.sections.first?.columnCount ?? 1) > 1
+      }
+      if commandID.hasSuffix("-layout-orientation") || commandID.hasSuffix("-layout-orient") {
+        return doc.sections.first?.orientation == .landscape
+      }
+      if commandID == "doc-rev-track" { return doc.trackChangesEnabled }
+      return false
+    case .sheet(let sheet):
+      let style = sheet.cellStyle(at: viewModel.selectedSheetCell)
+      if commandID.hasSuffix("-home-bold") { return style.isBold }
+      if commandID.hasSuffix("-home-italic") { return style.isItalic }
+      if commandID.hasSuffix("-home-underline") { return style.isUnderlined }
+      if commandID == "sheet-mod-freeze" {
+        return viewModel.isHeaderRowFrozen || viewModel.isFirstColumnFrozen
+      }
+      if commandID == "sheet-mod-filter" { return !viewModel.sheetAutoFilterQuery.isEmpty }
+      return false
+    case .slide(let deck):
+      let curSlide =
+        deck.slides.indices.contains(viewModel.selectedSlideIndex)
+        ? deck.slides[viewModel.selectedSlideIndex] : deck.slides.first
+      let curEl =
+        curSlide?.elements.first(where: { $0.id == viewModel.selectedSlideElementID })
+        ?? curSlide?.elements.first
+      if commandID.hasSuffix("-home-bold") { return curEl?.isBold == true }
+      if commandID.hasSuffix("-home-italic") { return curEl?.isItalic == true }
+      if commandID.hasSuffix("-home-underline") { return curEl?.isUnderlined == true }
+      return false
+    case .pdf(let pdf):
+      if commandID.hasSuffix("-home-underline") {
+        return pdf.annotations.contains(where: { $0.kind == .underline })
+      }
+      return false
+    }
+  }
+
   @ViewBuilder
   private func ribbonGroupContainer<Content: View>(
     title: String,
@@ -1211,6 +1301,7 @@ struct ContextRibbonBarView: View {
     symbolName: String,
     accent: Color,
     palette: WorkspaceThemePalette,
+    isActive: Bool = false,
     action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
@@ -1219,15 +1310,18 @@ struct ContextRibbonBarView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(accent)
         Text(title)
-          .font(.system(size: 11, weight: .medium))
-          .foregroundStyle(palette.primaryText.swiftUIColor)
+          .font(.system(size: 11, weight: isActive ? .bold : .medium))
+          .foregroundStyle(isActive ? accent : palette.primaryText.swiftUIColor)
       }
       .padding(.horizontal, 8)
       .padding(.vertical, 5)
-      .background(palette.elevatedSurface.swiftUIColor)
+      .background(isActive ? accent.opacity(0.18) : palette.elevatedSurface.swiftUIColor)
       .overlay(
         RoundedRectangle(cornerRadius: 5)
-          .stroke(palette.border.swiftUIColor, lineWidth: 1)
+          .stroke(
+            isActive ? accent : palette.border.swiftUIColor,
+            lineWidth: isActive ? 1.5 : 1.0
+          )
       )
       .clipShape(RoundedRectangle(cornerRadius: 5))
     }
@@ -1242,12 +1336,20 @@ struct ContextRibbonBarView: View {
   ) -> some View {
     switch activeModule {
     case .document, .hwp:
+      let activeDoc: OfficeDocumentModel? = {
+        if case .document(let d) = viewModel.activeTab?.payload { return d }
+        return nil
+      }()
+      let activePara =
+        activeDoc?.paragraphs.first(where: { $0.id == viewModel.selectedParagraphID })
+        ?? activeDoc?.paragraphs.first
       if viewModel.ribbonLayoutStyle == .hangulHwp {
         ribbonQuickButton(
           title: "200자 원고지",
           symbolName: "square.grid.3x3",
           accent: accent,
-          palette: palette
+          palette: palette,
+          isActive: viewModel.isManuscriptGridModeEnabled
         ) {
           viewModel.toggleManuscriptGridMode()
         }
@@ -1255,7 +1357,8 @@ struct ContextRibbonBarView: View {
           title: "다단 전환",
           symbolName: "rectangle.split.2x1",
           accent: accent,
-          palette: palette
+          palette: palette,
+          isActive: (activeDoc?.sections.first?.columnCount ?? 1) > 1
         ) {
           viewModel.cycleActiveDocumentColumnCount()
         }
@@ -1296,7 +1399,9 @@ struct ContextRibbonBarView: View {
           title: "형광펜",
           symbolName: "highlighter",
           accent: accent,
-          palette: palette
+          palette: palette,
+          isActive: activePara?.inlineRuns.contains(where: { !($0.backgroundHex ?? "").isEmpty })
+            == true
         ) {
           viewModel.toggleHighlightOnActiveParagraph()
         }
@@ -1304,7 +1409,8 @@ struct ContextRibbonBarView: View {
           title: "취소선",
           symbolName: "strikethrough",
           accent: accent,
-          palette: palette
+          palette: palette,
+          isActive: activePara?.inlineRuns.contains(where: \.isStrikethrough) == true
         ) {
           viewModel.toggleStrikethroughOnActiveParagraph()
         }
@@ -1335,11 +1441,17 @@ struct ContextRibbonBarView: View {
       }
 
     case .sheet:
+      let activeSheet: WorksheetModel? = {
+        if case .sheet(let s) = viewModel.activeTab?.payload { return s }
+        return nil
+      }()
+      let activeStyle = activeSheet?.cellStyle(at: viewModel.selectedSheetCell)
       ribbonQuickButton(
         title: "₩ 통화",
         symbolName: "wonsign.circle",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: activeStyle?.numberFormat == .currencyKRW
       ) {
         viewModel.applyQuickNumberFormatOnSelectedSheetCell(.currencyKRW)
       }
@@ -1347,7 +1459,8 @@ struct ContextRibbonBarView: View {
         title: "% 백분율",
         symbolName: "percent",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: activeStyle?.numberFormat == .percentage
       ) {
         viewModel.applyQuickNumberFormatOnSelectedSheetCell(.percentage)
       }
@@ -1355,7 +1468,8 @@ struct ContextRibbonBarView: View {
         title: "줄바꿈",
         symbolName: "text.word.spacing",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: activeStyle?.wrapText == true
       ) {
         viewModel.toggleWrapTextOnSelectedSheetCell()
       }
@@ -1363,7 +1477,8 @@ struct ContextRibbonBarView: View {
         title: "A열 고정",
         symbolName: "rectangle.split.2x1",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: viewModel.isFirstColumnFrozen
       ) {
         viewModel.toggleFirstColumnFrozen()
       }
@@ -1371,7 +1486,8 @@ struct ContextRibbonBarView: View {
         title: "데이터 막대",
         symbolName: "chart.bar.xaxis",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: viewModel.isDataBarsEnabled
       ) {
         viewModel.toggleSheetDataBars()
       }
@@ -1397,17 +1513,23 @@ struct ContextRibbonBarView: View {
         title: "정렬 뷰",
         symbolName: "square.grid.3x2",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: viewModel.isSlideSorterViewEnabled
       ) {
         viewModel.toggleSlideSorterView()
       }
 
     case .pdf:
+      let activePDF: PDFStudioDocumentModel? = {
+        if case .pdf(let p) = viewModel.activeTab?.payload { return p }
+        return nil
+      }()
       ribbonQuickButton(
         title: "워터마크",
         symbolName: "drop.triangle",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: !(activePDF?.watermarkText.isEmpty ?? true)
       ) {
         viewModel.applyWatermarkOnActivePDF()
       }
@@ -1423,7 +1545,8 @@ struct ContextRibbonBarView: View {
         title: "자유곡선 펜",
         symbolName: "pencil.tip.crop.circle",
         accent: accent,
-        palette: palette
+        palette: palette,
+        isActive: viewModel.isPDFInkDrawingModeEnabled
       ) {
         viewModel.isPDFInkDrawingModeEnabled.toggle()
       }
@@ -2075,7 +2198,7 @@ struct BottomWorkspaceStatusBarView: View {
 
           case .sheet:
             Text(
-              "시트 \(viewModel.activeSheetPageIndex + 1)/\(max(1, viewModel.activeWorkbookSheetNames.count)) · 범위 \(viewModel.selectedSheetRange) · 수식 \(WorksheetModel.supportedFunctionNames.count)종"
+              "시트 \(viewModel.activeSheetPageIndex + 1)/\(max(1, viewModel.activeWorkbookSheetNames.count)) · \(viewModel.selectedSheetRange) · \(viewModel.sheetSelectionStatusSummary)"
             )
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .foregroundStyle(palette.primaryText.swiftUIColor)
