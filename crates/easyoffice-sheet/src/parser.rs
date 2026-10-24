@@ -27,7 +27,7 @@ pub(crate) enum Token {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Expr {
+pub enum Expr {
     Number(f64),
     Text(String),
     Boolean(bool),
@@ -57,7 +57,7 @@ pub(crate) enum Expr {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BinaryOp {
+pub enum BinaryOp {
     Add,
     Sub,
     Mul,
@@ -523,7 +523,7 @@ impl Parser {
     }
 }
 
-pub(crate) fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
+pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
     let tokens = tokenize_formula(expr_src)?;
     let mut parser = Parser::new(tokens);
     let expr = parser.parse_expression()?;
@@ -670,10 +670,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(sheet.evaluate_cell("A3"), EvaluatedCellValue::Number(130.0));
-        assert_eq!(
-            sheet.evaluate_cell_uncached_baseline("D1"),
-            sheet.evaluate_cell("D1")
-        );
         let all = sheet.recalculate_all();
         assert_eq!(
             all.get(&PackedCellCoordinate::parse_a1("D1").unwrap()),

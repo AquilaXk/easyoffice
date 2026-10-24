@@ -2,21 +2,30 @@
   "use strict";
 
   const MODULE_ACCENTS = {
-    DOC: "#5C6BC0",
-    HWP: "#2563EB",
-    SHEET: "#10B981",
-    SLIDE: "#D97706",
-    PDF: "#DC2626",
-    CONV: "#5C6BC0",
+    DOC: "var(--eo-accent-doc)",
+    HWP: "var(--eo-accent-hwp)",
+    SHEET: "var(--eo-accent-sheet)",
+    SLIDE: "var(--eo-accent-slide)",
+    PDF: "var(--eo-accent-pdf)",
+    CONV: "var(--eo-primary)",
+  };
+
+  const MODULE_LABELS = {
+    DOC: "문서 (DOCX)",
+    HWP: "한글 (HWP/HWPX)",
+    SHEET: "시트 (XLSX)",
+    SLIDE: "슬라이드 (PPTX)",
+    PDF: "PDF 스튜디오",
+    CONV: "일괄 변환기",
   };
 
   const MODULE_SPECS = {
-    DOC: "ECMA-376 WordprocessingML (.docx/.dotx) · RTF 1.9.1",
-    HWP: "KS X 6101 OWPML (.hwpx/.hwtx) & OLE2 HWP 5.0 (.hwp/.hwt)",
-    SHEET: "ECMA-376 SpreadsheetML (.xlsx) · BIFF8 (.xls) · 122 Functions",
-    SLIDE: "ECMA-376 PresentationML (.pptx/.ppsx) · 16:9 (960×540pt)",
-    PDF: "ISO 32000-1 Portable Document Format (.pdf)",
-    CONV: "20종 포맷 상호 변환 (DOCX/HWP/HWPX/ODF/XLSX/PPTX/PDF/RTF/MD/HTML)",
+    DOC: "워드프로세서 문서 (.docx / .dotx / .rtf)",
+    HWP: "한글 문서 (.hwpx / .hwtx / .hwp / .hwt)",
+    SHEET: "스프레드시트 통합 문서 (.xlsx / .xls / .ods)",
+    SLIDE: "프레젠테이션 슬라이드 (.pptx / .ppsx / .odp)",
+    PDF: "PDF 문서 검토 및 양식 (.pdf)",
+    CONV: "통합 문서 포맷 상호 변환",
   };
 
   const CONTEXTUAL_TOOL_BADGES = {
@@ -25,7 +34,7 @@
     SHEET: "수식·피벗 분석",
     SLIDE: "도형·애니메이션 스테이지",
     PDF: "PDF 주석·양식·결재",
-    CONV: "20종 포맷 일괄 변환",
+    CONV: "포맷 일괄 변환",
   };
 
   const RIBBON_STYLE_LABELS = {
@@ -33,167 +42,121 @@
     hangul: ["파일·편집", "보기", "쪽·원고지", "입력·누름틀", "서식·스타일", "표·개체", "생산성·보안"],
   };
 
-  const RIBBON_CATEGORY_TOOLS = {
-    DOC: {
-      home: [
-        { id: "doc-home-bold", title: "굵게", shortcut: "⌘B" },
-        { id: "doc-home-italic", title: "기울임꼴", shortcut: "⌘I" },
-        { id: "doc-home-h1", title: "제목 1 스타일", shortcut: "⌥⌘1" },
-        { id: "doc-home-find", title: "찾기 및 바꾸기", shortcut: "⌘F" },
-      ],
-      insert: [
-        { id: "doc-ins-table", title: "표 삽입", shortcut: "⌃⌥T" },
-        { id: "doc-ins-footnote", title: "각주 삽입", shortcut: "⌥⌘F" },
-        { id: "doc-ins-endnote", title: "미주 삽입", shortcut: "⌥⌘E" },
-        { id: "doc-ins-bookmark", title: "책갈피 삽입", shortcut: "⇧⌘F5" },
-      ],
-      layout: [
-        { id: "doc-lay-columns", title: "다단 설정(1~3단)", shortcut: "⌥⌘C" },
-        { id: "doc-lay-orientation", title: "용지 방향 전환", shortcut: "⌥⌘O" },
-      ],
-      formulasAndData: [
-        { id: "doc-dat-tblsum", title: "표 =SUM(ABOVE)", shortcut: "⌥=" },
-        { id: "doc-dat-mailmerge", title: "메일 머지 치환", shortcut: "⇧⌘M" },
-      ],
-      moduleSpecific: [
-        { id: "doc-mod-toc", title: "자동 목차(TOC) 갱신", shortcut: "⌥⌘U" },
-        { id: "doc-mod- DropCap", title: "문단 첫 글자 장식", shortcut: "⌥⌘D" },
-      ],
-      review: [
-        { id: "doc-rev-track", title: "변경 내용 추적", shortcut: "⇧⌘E" },
-        { id: "doc-rev-pii", title: "개인정보(PII) 마스킹", shortcut: "⇧⌘P" },
-      ],
-      view: [
-        { id: "doc-view-outline", title: "개요 및 책갈피 창", shortcut: "⌥⌘1" },
-        { id: "doc-view-dark", title: "다크 모드 전환", shortcut: "⌃⌥D" },
-      ],
-    },
-    HWP: {
-      home: [
-        { id: "hwp-home-batang", title: "바탕글 스타일", shortcut: "⌃0" },
-        { id: "hwp-home-char", title: "글자 모양", shortcut: "⌥L" },
-        { id: "hwp-home-para", title: "문단 모양", shortcut: "⌥T" },
-      ],
-      insert: [
-        { id: "hwp-ins-table", title: "표 만들기", shortcut: "⌃N,T" },
-        { id: "hwp-ins-field", title: "누름틀 삽입", shortcut: "⌃K,E" },
-      ],
-      layout: [
-        { id: "hwp-lay-page", title: "편집 용지 설정", shortcut: "F7" },
-        { id: "hwp-lay-multi", title: "다단 설정", shortcut: "⌥W" },
-      ],
-      formulasAndData: [
-        { id: "hwp-dat-blocksum", title: "블록 계산식(합계/평균)", shortcut: "⇧⌘S" },
-        { id: "hwp-dat-pii", title: "공문서 PII 마스킹", shortcut: "⇧⌘P" },
-      ],
-      moduleSpecific: [
-        { id: "hwp-mod-header", title: "기관 표제부·결재란", shortcut: "⌃K,H" },
-        { id: "hwp-mod-manuscript", title: "200자 원고지(20×10) 보기", shortcut: "⌥⌘M" },
-      ],
-      review: [
-        { id: "hwp-rev-dist", title: "배포용 문서 검사", shortcut: "⌥⌘S" },
-      ],
-      view: [
-        { id: "hwp-view-grid", title: "원고지 격자선 표시", shortcut: "⌃G,M" },
-      ],
-    },
-    SHEET: {
-      home: [
-        { id: "sheet-home-currency", title: "통화 서식(₩)", shortcut: "⌃$" },
-        { id: "sheet-home-percent", title: "백분율 서식(%)", shortcut: "⌃%" },
-      ],
-      insert: [
-        { id: "sheet-ins-pivot", title: "피벗 테이블 생성", shortcut: "⌥N,V" },
-        { id: "sheet-ins-chart", title: "차트(막대/선/원형)", shortcut: "⌥F1" },
-      ],
-      layout: [
-        { id: "sheet-lay-freeze", title: "틀 고정", shortcut: "⌥W,F" },
-      ],
-      formulasAndData: [
-        { id: "sheet-dat-autosum", title: "자동 합계(SUM)", shortcut: "⌥=" },
-        { id: "sheet-dat-xlookup", title: "XLOOKUP 마법사", shortcut: "⇧F3" },
-        { id: "sheet-dat-sort", title: "다중 열 정렬", shortcut: "⌥D,S" },
-        { id: "sheet-dat-validation", title: "데이터 유효성 검사", shortcut: "⌥D,L" },
-      ],
-      moduleSpecific: [
-        { id: "sheet-mod-goalseek", title: "목표값 찾기(Goal Seek)", shortcut: "⌥A,W,G" },
-        { id: "sheet-mod-crosssheet", title: "다중 시트 참조(=Sheet2!A1)", shortcut: "⌃`" },
-      ],
-      review: [
-        { id: "sheet-rev-cycle", title: "순환 참조(#CYCLE!) 검사", shortcut: "⌥M,P" },
-      ],
-      view: [
-        { id: "sheet-view-formulas", title: "수식 표시 전환", shortcut: "⌃`" },
-      ],
-    },
-    SLIDE: {
-      home: [
-        { id: "slide-home-new", title: "새 슬라이드(16:9)", shortcut: "⌘M" },
-      ],
-      insert: [
-        { id: "slide-ins-shape", title: "비겹침 하단 도형(Y≥158pt)", shortcut: "⌃⌥S" },
-      ],
-      layout: [
-        { id: "slide-lay-theme", title: "시그니처 라벤더 테마", shortcut: "⌥G,H" },
-      ],
-      formulasAndData: [
-        { id: "slide-dat-notes", title: "발표자 노트 요약", shortcut: "⌥⌘N" },
-      ],
-      moduleSpecific: [
-        { id: "slide-mod-laser", title: "레이저 포인터 및 펜 주석", shortcut: "⌘L" },
-        { id: "slide-mod-timer", title: "발표자 타이머 시작", shortcut: "⌥F5" },
-      ],
-      review: [
-        { id: "slide-rev-overlap", title: "하단 영역 겹침 검사", shortcut: "⌥⌘V" },
-      ],
-      view: [
-        { id: "slide-view-stage", title: "16:9 스테이지 맞춤", shortcut: "⌘0" },
-      ],
-    },
-    PDF: {
-      home: [
-        { id: "pdf-home-rotate", title: "페이지 90° 회전", shortcut: "⌘R" },
-      ],
-      insert: [
-        { id: "pdf-ins-stamp", title: "결재 스탬프(APPROVED)", shortcut: "⇧⌘A" },
-        { id: "pdf-ins-watermark", title: "기밀 워터마크 삽입", shortcut: "⇧⌘W" },
-      ],
-      layout: [
-        { id: "pdf-lay-viewport", title: "가시 영역(Y:100..760pt) 정렬", shortcut: "⌥⌘L" },
-      ],
-      formulasAndData: [
-        { id: "pdf-dat-form", title: "AcroForm 양식 채우기", shortcut: "⇧⌘F" },
-      ],
-      moduleSpecific: [
-        { id: "pdf-mod-merge", title: "PDF 페이지 병합", shortcut: "⇧⌘J" },
-        { id: "pdf-mod-split", title: "PDF 페이지 분할 추출", shortcut: "⇧⌘X" },
-      ],
-      review: [
-        { id: "pdf-rev-pii", title: "PDF 개인정보 비식별화", shortcut: "⇧⌘P" },
-      ],
-      view: [
-        { id: "pdf-view-fit", title: "한 페이지 맞춤 보기", shortcut: "⌘0" },
-      ],
-    },
+  const COMMON_CATEGORY_SPECS = {
+    home: [
+      { suffix: "home-bold", title: "굵게", shortcut: "⌘B" },
+      { suffix: "home-italic", title: "기울임", shortcut: "⌘I" },
+      { suffix: "home-underline", title: "밑줄", shortcut: "⌘U" },
+      { suffix: "home-style", title: "스타일 적용", shortcut: "⌥⌘S" },
+    ],
+    insert: [
+      { suffix: "insert-table", title: "표 삽입", shortcut: "⌃⌘T" },
+      { suffix: "insert-chart", title: "차트 개체", shortcut: "⌃⌘C" },
+      { suffix: "insert-shape", title: "도형·다이어그램", shortcut: "⌃⌘S" },
+      { suffix: "insert-link", title: "책갈피·링크", shortcut: "⌘K" },
+    ],
+    layout: [
+      { suffix: "layout-paper", title: "용지 규격 (A4/Letter)", shortcut: "⇧⌘P" },
+      { suffix: "layout-orientation", title: "용지 방향 전환", shortcut: "⌥⌘O" },
+      { suffix: "layout-columns", title: "다단 설정", shortcut: "⌥⌘M" },
+      { suffix: "layout-margins", title: "여백 프리셋", shortcut: "⌥⌘G" },
+    ],
+    formulasAndData: [
+      { suffix: "data-autosum", title: "자동 합계 (SUM)", shortcut: "⇧⌘T" },
+      { suffix: "data-fn-browser", title: "함수 마법사", shortcut: "⇧F3" },
+      { suffix: "data-sort", title: "오름차순·내림차순 정렬", shortcut: "⌥⌘R" },
+      { suffix: "data-validation", title: "데이터 유효성 검사", shortcut: "⌥⌘V" },
+    ],
+    review: [
+      { suffix: "review-track", title: "변경 내용 추적", shortcut: "⇧⌘E" },
+      { suffix: "review-comment", title: "검토 메모 스레드", shortcut: "⌥⌘C" },
+      { suffix: "review-verify", title: "문서 구조 보안 검사", shortcut: "⌃⌘V" },
+      { suffix: "review-stats", title: "문서 통계·글자 수", shortcut: "⇧⌘I" },
+    ],
+    view: [
+      { suffix: "view-split", title: "좌우 스플릿 뷰", shortcut: "⌃⌘2" },
+      { suffix: "view-ribbon", title: "리본 접기·펼치기", shortcut: "⌥⌘R" },
+      { suffix: "view-theme", title: "라이트·다크 테마 전환", shortcut: "⌃⌥D" },
+      { suffix: "view-zoom", title: "100% 실제 배율", shortcut: "⌘0" },
+    ],
   };
+
+  const MODULE_SPECIFIC_SPECS = {
+    DOC: [
+      { id: "doc-mod-toc", title: "자동 목차 생성", shortcut: "⌃⌥T" },
+      { id: "doc-mod-footnote", title: "각주·미주 삽입", shortcut: "⌥⌘F" },
+      { id: "doc-mod-mailmerge", title: "메일 머지 치환", shortcut: "⌃⌘M" },
+      { id: "doc-mod-tableformula", title: "표 셀 수식 계산", shortcut: "⌃⌘=" },
+    ],
+    HWP: [
+      { id: "hwp-mod-header", title: "행정 공문서 두문·결재란", shortcut: "⌃⌥H" },
+      { id: "hwp-mod-field", title: "누름틀 필드 삽입", shortcut: "⌃⌘E" },
+      { id: "hwp-mod-border", title: "이중선·대각선 테두리", shortcut: "⌃⌘B" },
+      { id: "hwp-mod-manuscript", title: "200자 원고지 매수 검산", shortcut: "⌃⌘W" },
+    ],
+    SHEET: [
+      { id: "sheet-mod-pivot", title: "피벗 테이블 요약", shortcut: "⌥⌘P" },
+      { id: "sheet-mod-chart", title: "차트 시각화", shortcut: "⌥F1" },
+      { id: "sheet-mod-condfmt", title: "조건부 서식 규칙", shortcut: "⌃⌘F" },
+      { id: "sheet-mod-freeze", title: "행·열 틀 고정", shortcut: "⌃⌘L" },
+    ],
+    SLIDE: [
+      { id: "slide-mod-master", title: "마스터 레이아웃", shortcut: "⇧⌘M" },
+      { id: "slide-mod-snap", title: "스마트 정렬 가이드", shortcut: "⌘;" },
+      { id: "slide-mod-transition", title: "화면 전환 효과", shortcut: "⌥⌘T" },
+      { id: "slide-mod-presenter", title: "발표자 도구 시작", shortcut: "⌥⌘P" },
+    ],
+    PDF: [
+      { id: "pdf-mod-highlight", title: "형광펜·밑줄 주석", shortcut: "⌃⌘H" },
+      { id: "pdf-mod-rotate", title: "페이지 90° 회전", shortcut: "⌘R" },
+      { id: "pdf-mod-splitmerge", title: "페이지 분할·병합", shortcut: "⇧⌘S" },
+      { id: "pdf-mod-tooffice", title: "편집 문서 변환", shortcut: "⇧⌘E" },
+    ],
+  };
+
+  function buildRibbonCatalog() {
+    const prefixes = {
+      DOC: "document",
+      HWP: "hwp",
+      SHEET: "sheet",
+      SLIDE: "slide",
+      PDF: "pdf",
+    };
+    const catalog = {};
+    Object.keys(prefixes).forEach((modKey) => {
+      const prefix = prefixes[modKey];
+      catalog[modKey] = {};
+      Object.keys(COMMON_CATEGORY_SPECS).forEach((catKey) => {
+        catalog[modKey][catKey] = COMMON_CATEGORY_SPECS[catKey].map((item) => ({
+          id: prefix + "-" + item.suffix,
+          title: item.title,
+          shortcut: item.shortcut,
+        }));
+      });
+      catalog[modKey].moduleSpecific = MODULE_SPECIFIC_SPECS[modKey].slice();
+    });
+    return catalog;
+  }
+
+  const RIBBON_CATEGORY_TOOLS = buildRibbonCatalog();
 
   const SLIDE_DECK_STATE = [
     {
-      title: "제품 전략 및 아키텍처 발표 덱 (16:9 · 960×540pt)",
-      lower: "비겹침(Non-Overlapping) 하단 요소 배치 영역 (Y ≥ 158pt 보장)",
-      notes: "핵심 메시지: 단일 바이너리 내 20종 문서 포맷과 122종 수식 함수를 결정론적으로 처리합니다.",
+      title: "연간 제품 전략 발표 자료 (16:9 와이드)",
+      lower: "핵심 지표 및 요약 다이어그램 영역",
+      notes: "핵심 메시지: 주요 문서 포맷 호환성과 수식 계산 결과를 요약하여 전달합니다.",
       transition: "fade",
     },
     {
-      title: "20종 문서 포맷 매직 시그니처 및 무손실 상호 변환",
-      lower: "DOCX · HWP 5.0 · HWPX · ODF · XLSX · PPTX · PDF · RTF · CSV · CommonMark",
-      notes: "확장자 위변조를 100% 차단하고 컨테이너 시그니처와 스트림 마커를 교차 검증합니다.",
+      title: "문서 포맷 호환성 및 일괄 변환 흐름",
+      lower: "DOCX · HWP 5.0 · HWPX · ODF · XLSX · PPTX · PDF · RTF · CSV · Markdown",
+      notes: "다양한 문서 포맷 간 서식과 표 구조를 유지하며 상호 변환합니다.",
       transition: "push",
     },
     {
-      title: "저수준 비트·워드 최적화 (Slicing-by-8 · 9비트 LUT · SWAR)",
-      lower: "CRC-32 8바이트 병렬 · DEFLATE 9비트 1단 조회 · UTF-16LE 64비트 SWAR · Bitset DAG",
-      notes: "외부 크레이트 의존 없이 순수 Rust 표준 라이브러리만으로 상용급 처리 속도를 달성합니다.",
+      title: "대용량 문서 및 다중 시트 처리 성능 요약",
+      lower: "빠른 문서 열기 · 수식 재계산 · 피벗 집계 · PDF 출력",
+      notes: "대용량 스프레드시트와 프레젠테이션 문서를 지연 없이 편집합니다.",
       transition: "zoom",
     },
   ];
@@ -207,6 +170,51 @@
   let slideLaserActive = false;
   let pdfRotationDeg = 0;
 
+  function localScrubPii(rawText) {
+    const text = String(rawText || "");
+    let residentCount = 0;
+    let phoneCount = 0;
+    let emailCount = 0;
+    const scrubbedText = text
+      .replace(/\b\d{6}-[1-4]\d{6}\b/g, () => {
+        residentCount += 1;
+        return "******-*******";
+      })
+      .replace(/\b01[016789]-\d{3,4}-\d{4}\b/g, () => {
+        phoneCount += 1;
+        return "010-****-****";
+      })
+      .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, () => {
+        emailCount += 1;
+        return "***@***.***";
+      });
+    return {
+      scrubbedText,
+      maskedResidentIds: residentCount,
+      maskedPhoneNumbers: phoneCount,
+      maskedEmails: emailCount,
+      totalMasked: residentCount + phoneCount + emailCount,
+    };
+  }
+
+  function localSmartAssistant(rawText) {
+    const text = String(rawText || "").trim();
+    const chars = Array.from(text).length;
+    const words = text ? text.split(/\s+/).length : 0;
+    const sentences = text ? text.split(/[.!?。]+/).filter((s) => s.trim().length > 0).length : 0;
+    const readingTimeSeconds = Math.max(1, Math.ceil((words / 200) * 60));
+    const lines = text ? text.split(/\n+/).filter((l) => l.trim().length > 0) : [];
+    return {
+      summaryCount: Math.min(2, lines.length),
+      charCount: chars,
+      wordCount: words,
+      sentenceCount: sentences,
+      readingTimeSeconds,
+      actionItemCount: 0,
+      suggestionCount: 0,
+    };
+  }
+
   async function invokeIpc(command, payload) {
     if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
       const raw = await window.__TAURI_INTERNALS__.invoke(command, { payload });
@@ -218,11 +226,11 @@
         shortcutModifier: navigator.platform.includes("Mac") ? "⌘" : "Ctrl",
         recentFormatFilters: ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
         openTabs: [
-          { id: "tab-doc", title: "연간_아키텍처_보고서.docx", module: "DOC", isPinned: true },
+          { id: "tab-doc", title: "연간_업무_보고서.docx", module: "DOC", isPinned: true },
           { id: "tab-hwp", title: "행정_표준_기안문.hwpx", module: "HWP", isPinned: true },
           { id: "tab-sheet", title: "분기_예산_시트.xlsx", module: "SHEET", isPinned: false },
-          { id: "tab-slide", title: "제품_전략_발표덱.pptx", module: "SLIDE", isPinned: false },
-          { id: "tab-pdf", title: "보안_감사_인증서.pdf", module: "PDF", isPinned: false },
+          { id: "tab-slide", title: "제품_전략_발표자료.pptx", module: "SLIDE", isPinned: false },
+          { id: "tab-pdf", title: "검토_승인_문서.pdf", module: "PDF", isPinned: false },
         ],
       };
     }
@@ -241,7 +249,7 @@
         sourceBytes: 1842,
         outputBytes: 2048,
         detectedTarget: dst,
-        specification: MODULE_SPECS[dst.toUpperCase()] || "표준 컨테이너 규격",
+        specification: MODULE_SPECS[dst.toUpperCase()] || "문서 포맷",
         status: "OK",
       };
     }
@@ -251,12 +259,18 @@
         iterations: 5,
         allEquivalent: true,
         suites: [
-          { suiteId: "crc32_slicing_by_8", baselineP50Us: 1520, optimizedP50Us: 245, speedupFactor: 6.2 },
-          { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 1180, optimizedP50Us: 410, speedupFactor: 2.88 },
-          { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 320, optimizedP50Us: 95, speedupFactor: 3.37 },
-          { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 2840, optimizedP50Us: 310, speedupFactor: 9.16 },
+          { suiteId: "crc32_slicing_by_8", baselineP50Us: 2068, optimizedP50Us: 464, speedupFactor: 4.46 },
+          { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
+          { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 50, optimizedP50Us: 29, speedupFactor: 1.72 },
+          { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 878, optimizedP50Us: 308, speedupFactor: 2.85 },
         ],
       };
+    }
+    if (command === "run_smart_assistant") {
+      return localSmartAssistant(payload);
+    }
+    if (command === "scrub_pii") {
+      return localScrubPii(payload);
     }
     if (command === "evaluate_workbook_formula") {
       const expr = String(payload || "").split("?").pop() || "=Sheet2!A1+50";
@@ -278,7 +292,7 @@
     if (command === "execute_ribbon_command") {
       return {
         commandId: payload,
-        summary: "명령 실행 완료: " + payload,
+        summary: "명령 실행 완료 (" + payload + ")",
         contextualBadge: CONTEXTUAL_TOOL_BADGES[activeModule] || "표·개체 도구",
       };
     }
@@ -442,17 +456,17 @@
 
   function applyModuleAccent(mod) {
     activeModule = mod;
-    const hex = MODULE_ACCENTS[mod] || "#5C6BC0";
-    document.documentElement.style.setProperty("--eo-module-active", hex);
+    const accent = MODULE_ACCENTS[mod] || "var(--eo-primary)";
+    document.documentElement.style.setProperty("--eo-module-active", accent);
     const swatch = document.getElementById("module-swatch");
     const label = document.getElementById("module-accent-label");
-    if (swatch) swatch.style.background = hex;
-    if (label) label.textContent = "Module Accent: " + mod + " (" + hex + ")";
+    if (swatch) swatch.style.background = accent;
+    if (label) label.textContent = "모듈 색상: " + (MODULE_LABELS[mod] || mod);
 
     const statusMod = document.getElementById("status-module");
     const statusSpec = document.getElementById("status-format-spec");
-    if (statusMod) statusMod.textContent = "모듈: " + mod;
-    if (statusSpec) statusSpec.textContent = "규격: " + (MODULE_SPECS[mod] || "");
+    if (statusMod) statusMod.textContent = "모듈: " + (MODULE_LABELS[mod] || mod);
+    if (statusSpec) statusSpec.textContent = "포맷: " + (MODULE_SPECS[mod] || "");
 
     const ctxBadge = document.getElementById("contextual-tool-badge");
     if (ctxBadge) ctxBadge.textContent = CONTEXTUAL_TOOL_BADGES[mod] || "표·개체 도구";
@@ -492,11 +506,12 @@
     if (!strip) return;
     const modKey = activeModule === "CONV" ? "DOC" : activeModule;
     const res = await invokeIpc("get_ribbon_category_commands", modKey + "|" + activeRibbonCategory);
-    const cmds = (res && res.commands) || [];
+    const cmds = (res && Array.isArray(res.commands) && res.commands) || [];
     strip.innerHTML = "";
     cmds.forEach((cmd) => {
       const btn = document.createElement("button");
       btn.className = "ribbon-tool-btn";
+      btn.dataset.commandId = cmd.id;
       btn.innerHTML =
         "<span>" + cmd.title + "</span> <small>(" + (cmd.shortcut || "") + ")</small>";
       btn.addEventListener("click", async () => {
@@ -540,13 +555,27 @@
     }
   }
 
-  function computeSmartStats() {
+  function extractEditableDocumentText() {
     const editor = document.getElementById("doc-editor");
+    if (!editor) return "";
+    const blocks = editor.querySelectorAll(
+      ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
+    );
+    if (blocks.length > 0) {
+      return Array.from(blocks)
+        .map((el) => (el.textContent || "").trim())
+        .filter((t) => t.length > 0)
+        .join("\n");
+    }
+    return (editor.innerText || "").trim();
+  }
+
+  function computeSmartStats() {
     const statsEl = document.getElementById("smart-stats");
-    if (!editor || !statsEl) return;
-    const text = editor.innerText || "";
-    const chars = Array.from(text.trim()).length;
-    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    if (!statsEl) return;
+    const text = extractEditableDocumentText();
+    const chars = Array.from(text).length;
+    const words = text ? text.split(/\s+/).length : 0;
     const secs = Math.max(1, Math.ceil((words / 220) * 60));
     statsEl.textContent = "문자: " + chars + " · 단어: " + words + " · 읽기 시간: " + secs + "초";
   }
@@ -571,7 +600,7 @@
     allItems.push({
       id: "bench-run",
       module: activeModule,
-      label: "[PERF] 저수준 비트 최적화 5회 벤치마크 실행 (Slicing-by-8 / 9-bit LUT / SWAR)",
+      label: "[성능] 문서 엔진 성능 진단 실행",
     });
 
     listEl.innerHTML = "";
@@ -603,13 +632,13 @@
     const fb = document.getElementById("status-command-feedback");
     if (res && Array.isArray(res.suites)) {
       const summary = res.suites
-        .map((s) => s.suiteId + ": " + s.baselineP50Us + "µs→" + s.optimizedP50Us + "µs (" + s.speedupFactor + "x)")
-        .join(" | ");
+        .map((s) => s.suiteId + " " + s.baselineP50Us + "µs→" + s.optimizedP50Us + "µs (" + s.speedupFactor + "x)")
+        .join(" · ");
       if (box) {
-        box.textContent = "5회 p50 검증 완료 (동등성=" + res.allEquivalent + "): " + summary;
+        box.textContent = "성능 진단 완료 (" + (res.allEquivalent ? "결과 일치" : "불일치") + ") · " + summary;
       }
       if (fb) {
-        fb.textContent = "벤치마크 완료 · " + summary;
+        fb.textContent = "성능 진단 완료 · " + summary;
       }
     }
   }
@@ -628,7 +657,7 @@
         const btn = document.createElement("button");
         btn.className = "tab-pill" + (idx === 0 ? " active" : "");
         btn.dataset.module = t.module;
-        btn.textContent = (t.isPinned ? "📌 " : "") + t.title;
+        btn.textContent = t.title;
         btn.addEventListener("click", () => activatePane(t.module));
         tabStrip.appendChild(btn);
       });
@@ -671,21 +700,21 @@
     if (qatSave) {
       qatSave.addEventListener("click", () => {
         const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "빠른 저장 완료 (" + activeModule + " 컨테이너 무결성 확인)";
+        if (fb) fb.textContent = "문서 저장 완료 (" + activeModule + ")";
       });
     }
     const qatUndo = document.getElementById("qat-undo");
     if (qatUndo) {
       qatUndo.addEventListener("click", () => {
         const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "실행 취소 (Undo 스택 복원)";
+        if (fb) fb.textContent = "실행 취소 완료";
       });
     }
     const qatRedo = document.getElementById("qat-redo");
     if (qatRedo) {
       qatRedo.addEventListener("click", () => {
         const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "다시 실행 (Redo 스택 복원)";
+        if (fb) fb.textContent = "다시 실행 완료";
       });
     }
     const btnBench = document.getElementById("btn-run-benchmark");
@@ -712,8 +741,7 @@
       btnConvert.addEventListener("click", async () => {
         const src = document.getElementById("conv-src-fmt").value;
         const dst = document.getElementById("conv-dst-fmt").value;
-        const editor = document.getElementById("doc-editor");
-        const body = editor ? (editor.innerText || "").trim() : "본문 텍스트";
+        const body = extractEditableDocumentText() || "본문 텍스트";
         const res = await invokeIpc(
           "convert_document_format",
           src + "->" + dst + "|통합_변환_문서|" + body
@@ -731,7 +759,7 @@
             res.targetFormat.toUpperCase() +
             " (" +
             res.outputBytes +
-            "B) · 감지 규격: " +
+            "B) · " +
             res.specification;
         }
       });
@@ -791,8 +819,8 @@
       btnAddSlide.addEventListener("click", () => {
         const nextNum = SLIDE_DECK_STATE.length + 1;
         SLIDE_DECK_STATE.push({
-          title: "신규 전략 슬라이드 #" + nextNum + " (16:9 · 960×540pt)",
-          lower: "하단 비겹침 레이아웃 영역 (Y ≥ 158pt)",
+          title: "새 슬라이드 #" + nextNum + " (16:9 와이드)",
+          lower: "핵심 요약 및 다이어그램 영역",
           notes: "발표자 노트를 입력하세요.",
           transition: "fade",
         });
@@ -845,7 +873,7 @@
         if (wmLayer && wmInput) wmLayer.textContent = wmInput.value;
         if (formStatus && appInput && deptInput) {
           formStatus.textContent =
-            "AcroForm 반영 완료 · 신청인: " +
+            "양식 반영 완료 · 신청인: " +
             appInput.value +
             " / 부서: " +
             deptInput.value +
@@ -884,26 +912,79 @@
       computeSmartStats();
     }
 
+    const diagnoseBtn = document.getElementById("btn-smart-diagnose");
+    if (diagnoseBtn) {
+      diagnoseBtn.addEventListener("click", async () => {
+        const bodyText = extractEditableDocumentText();
+        const res = await invokeIpc("run_smart_assistant", bodyText);
+        const statsEl = document.getElementById("smart-stats");
+        const fb = document.getElementById("status-command-feedback");
+        if (statsEl && res) {
+          statsEl.textContent =
+            "문자: " +
+            res.charCount +
+            " · 단어: " +
+            res.wordCount +
+            " · 문장: " +
+            res.sentenceCount +
+            " · 읽기: " +
+            res.readingTimeSeconds +
+            "초 · 요약: " +
+            res.summaryCount +
+            "건";
+        }
+        if (fb && res) {
+          fb.textContent =
+            "문장 진단 완료 · 요약 " +
+            res.summaryCount +
+            "건 · 실행 항목 " +
+            res.actionItemCount +
+            "건 · 교정 제안 " +
+            res.suggestionCount +
+            "건";
+        }
+      });
+    }
+
     const auditBtn = document.getElementById("btn-run-security-audit");
     if (auditBtn) {
       auditBtn.addEventListener("click", async () => {
         const res = await invokeIpc("audit_security", "word/document.xml,512,2048,false|<doc>ok</doc>");
         const txt = document.getElementById("security-status-text");
-        if (txt) txt.textContent = "검증 완료: " + res.status + " (XXE/ZIP 통과)";
+        if (txt && res) txt.textContent = "문서 보안 검사 완료: " + res.status;
       });
     }
 
     const piiBtn = document.getElementById("btn-scrub-pii");
     if (piiBtn) {
-      piiBtn.addEventListener("click", () => {
+      piiBtn.addEventListener("click", async () => {
         const editorEl = document.getElementById("doc-editor");
         const piiOut = document.getElementById("pii-result-text");
         if (!editorEl || !piiOut) return;
-        const masked = (editorEl.innerText || "")
-          .replace(/\b\d{6}-[1-4]\d{6}\b/g, "******-*******")
-          .replace(/\b01[016789]-\d{3,4}-\d{4}\b/g, "010-****-****");
-        editorEl.innerText = masked;
-        piiOut.textContent = "주민번호/전화번호/이메일 마스킹 완료";
+        const blocks = editorEl.querySelectorAll(
+          ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
+        );
+        let totalMasked = 0;
+        if (blocks.length > 0) {
+          for (const node of blocks) {
+            const res = await invokeIpc("scrub_pii", node.textContent || "");
+            if (res && typeof res.scrubbedText === "string") {
+              node.textContent = res.scrubbedText;
+              totalMasked += Number(res.totalMasked || 0);
+            }
+          }
+        } else {
+          const res = await invokeIpc("scrub_pii", editorEl.textContent || "");
+          if (res && typeof res.scrubbedText === "string") {
+            editorEl.textContent = res.scrubbedText;
+            totalMasked += Number(res.totalMasked || 0);
+          }
+        }
+        piiOut.textContent =
+          totalMasked > 0
+            ? "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료"
+            : "주민번호·전화번호·이메일 스캔 완료 (감지 0건)";
+        computeSmartStats();
       });
     }
 
@@ -927,6 +1008,23 @@
         if (typeof modal.close === "function") modal.close();
       });
     }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.isComposing || isImeComposing || e.keyCode === 229) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (!modal) return;
+        if (modal.open && typeof modal.close === "function") {
+          modal.close();
+        } else if (typeof modal.showModal === "function") {
+          renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
+          modal.showModal();
+          if (cmdSearchInput) cmdSearchInput.focus();
+        }
+      } else if (e.key === "Escape" && modal && modal.open && typeof modal.close === "function") {
+        modal.close();
+      }
+    });
   }
 
   document.addEventListener("DOMContentLoaded", initWorkspace);

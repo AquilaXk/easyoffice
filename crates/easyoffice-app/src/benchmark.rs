@@ -1,8 +1,13 @@
 use easyoffice_formats::{
     adler32, decode_utf16le_swar, decode_utf16le_vec_baseline, deflate_zlib, encode_utf16le_swar,
-    inflate_zlib, unescape_xml_five_pass_baseline, unescape_xml_single_pass, IeeeCrc32,
+    inflate_raw, inflate_zlib, unescape_xml_five_pass_baseline, unescape_xml_single_pass,
+    EasyOfficeError, IeeeCrc32,
 };
-use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
+use easyoffice_sheet::{
+    compile_formula_expr, BinaryOp, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate,
+    SheetEngine,
+};
+use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -101,47 +106,385 @@ fn adler32_byte_by_byte_baseline(bytes: &[u8]) -> u32 {
     (s2 << 16) | s1
 }
 
-fn lz77_byte_scan_baseline(input: &[u8]) -> u32 {
+const BASE_LEN_BASE: [u16; 29] = [
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
+];
+const BASE_LEN_EXTRA: [u8; 29] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+];
+const BASE_DIST_BASE: [u16; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+];
+const BASE_DIST_EXTRA: [u8; 30] = [
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
+];
+
+fn write_bits_scalar(out: &mut Vec<u8>, bit_buf: &mut u32, bit_count: &mut u32, val: u32, n: u32) {
+    for i in 0..n {
+        let bit = (val >> i) & 1;
+        *bit_buf |= bit << *bit_count;
+        *bit_count += 1;
+        if *bit_count == 8 {
+            out.push(*bit_buf as u8);
+            *bit_buf = 0;
+            *bit_count = 0;
+        }
+    }
+}
+
+fn write_huffman_scalar(
+    out: &mut Vec<u8>,
+    bit_buf: &mut u32,
+    bit_count: &mut u32,
+    code: u16,
+    len: u8,
+) {
+    let mut rev = 0u32;
+    for i in 0..len {
+        rev = (rev << 1) | u32::from((code >> i) & 1);
+    }
+    write_bits_scalar(out, bit_buf, bit_count, rev, u32::from(len));
+}
+
+fn write_fixed_sym_scalar(out: &mut Vec<u8>, bit_buf: &mut u32, bit_count: &mut u32, sym: u16) {
+    match sym {
+        0..=143 => write_huffman_scalar(out, bit_buf, bit_count, 0x30 + sym, 8),
+        144..=255 => write_huffman_scalar(out, bit_buf, bit_count, 0x190 + (sym - 144), 9),
+        256..=279 => write_huffman_scalar(out, bit_buf, bit_count, sym - 256, 7),
+        280..=287 => write_huffman_scalar(out, bit_buf, bit_count, 0xC0 + (sym - 280), 8),
+        _ => {}
+    }
+}
+
+fn deflate_zlib_scalar_baseline(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len() / 2 + 24);
+    out.extend_from_slice(&[0x78, 0x9C]);
+    let mut bit_buf = 0u32;
+    let mut bit_count = 0u32;
+    write_bits_scalar(&mut out, &mut bit_buf, &mut bit_count, 1, 1);
+    write_bits_scalar(&mut out, &mut bit_buf, &mut bit_count, 1, 2);
+
     let mut head = [-1i32; 4096];
     let mut prev = vec![-1i32; input.len()];
     let mut pos = 0usize;
-    let mut match_acc = 0u32;
 
-    while pos + 3 <= input.len() {
-        let h = (((input[pos] as usize) << 8)
-            ^ ((input[pos + 1] as usize) << 4)
-            ^ (input[pos + 2] as usize))
-            & 4095;
-        let mut cand = head[h];
-        prev[pos] = cand;
-        head[h] = pos as i32;
-        let max_len = (input.len() - pos).min(258);
-        let min_pos = pos.saturating_sub(32_768);
-        let mut best = 0usize;
-        let mut steps = 0usize;
-        while cand >= (min_pos as i32) && steps < 64 {
-            let c = cand as usize;
-            let mut m = 0usize;
-            while m < max_len && input[c + m] == input[pos + m] {
-                m += 1;
+    while pos < input.len() {
+        let mut best_len = 0usize;
+        let mut best_dist = 0usize;
+        if pos + 3 <= input.len() {
+            let h = (((input[pos] as usize) << 8)
+                ^ ((input[pos + 1] as usize) << 4)
+                ^ (input[pos + 2] as usize))
+                & 4095;
+            let mut cand = head[h];
+            prev[pos] = cand;
+            head[h] = pos as i32;
+            let max_len = (input.len() - pos).min(258);
+            let min_pos = pos.saturating_sub(32_768);
+            let mut steps = 0usize;
+            while cand >= (min_pos as i32) && steps < 64 {
+                let c_pos = cand as usize;
+                let dist = pos - c_pos;
+                if dist > 0 && dist <= 32_768 {
+                    let mut m_len = 0usize;
+                    while m_len < max_len && input[c_pos + m_len] == input[pos + m_len] {
+                        m_len += 1;
+                    }
+                    if m_len >= 3 && m_len > best_len {
+                        best_len = m_len;
+                        best_dist = dist;
+                        if best_len == max_len {
+                            break;
+                        }
+                    }
+                }
+                cand = prev[c_pos];
+                steps += 1;
             }
-            if m >= 3 && m > best {
-                best = m;
-                if best == max_len {
-                    break;
+        }
+
+        if best_len >= 3 {
+            let mut l_idx = 0usize;
+            if best_len == 258 {
+                l_idx = 28;
+            } else {
+                while l_idx + 1 < 28 && (BASE_LEN_BASE[l_idx + 1] as usize) <= best_len {
+                    l_idx += 1;
                 }
             }
-            cand = prev[c];
-            steps += 1;
-        }
-        if best >= 3 {
-            match_acc = match_acc.wrapping_add(best as u32);
-            pos += best;
+            write_fixed_sym_scalar(&mut out, &mut bit_buf, &mut bit_count, 257 + (l_idx as u16));
+            let l_extra = u32::from(BASE_LEN_EXTRA[l_idx]);
+            if l_extra > 0 {
+                write_bits_scalar(
+                    &mut out,
+                    &mut bit_buf,
+                    &mut bit_count,
+                    (best_len - (BASE_LEN_BASE[l_idx] as usize)) as u32,
+                    l_extra,
+                );
+            }
+
+            let mut d_idx = 0usize;
+            while d_idx + 1 < 30 && (BASE_DIST_BASE[d_idx + 1] as usize) <= best_dist {
+                d_idx += 1;
+            }
+            write_huffman_scalar(&mut out, &mut bit_buf, &mut bit_count, d_idx as u16, 5);
+            let d_extra = u32::from(BASE_DIST_EXTRA[d_idx]);
+            if d_extra > 0 {
+                write_bits_scalar(
+                    &mut out,
+                    &mut bit_buf,
+                    &mut bit_count,
+                    (best_dist - (BASE_DIST_BASE[d_idx] as usize)) as u32,
+                    d_extra,
+                );
+            }
+
+            for step in 1..best_len {
+                let adv = pos + step;
+                if adv + 3 <= input.len() {
+                    let h = (((input[adv] as usize) << 8)
+                        ^ ((input[adv + 1] as usize) << 4)
+                        ^ (input[adv + 2] as usize))
+                        & 4095;
+                    prev[adv] = head[h];
+                    head[h] = adv as i32;
+                }
+            }
+            pos += best_len;
         } else {
+            write_fixed_sym_scalar(
+                &mut out,
+                &mut bit_buf,
+                &mut bit_count,
+                u16::from(input[pos]),
+            );
             pos += 1;
         }
     }
-    match_acc ^ adler32_byte_by_byte_baseline(input)
+
+    write_fixed_sym_scalar(&mut out, &mut bit_buf, &mut bit_count, 256);
+    if bit_count > 0 {
+        out.push((bit_buf & 0xFF) as u8);
+    }
+    let checksum = adler32_byte_by_byte_baseline(input);
+    out.extend_from_slice(&checksum.to_be_bytes());
+    out
+}
+
+fn inflate_zlib_scalar_baseline(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<Vec<u8>, EasyOfficeError> {
+    if input.len() < 6 {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "zlib 스트림 길이 부족".to_string(),
+        ));
+    }
+    let decoded = inflate_raw(&input[2..input.len() - 4], max_output_bytes)?;
+    let expected = u32::from_be_bytes(input[input.len() - 4..].try_into().unwrap());
+    let actual = adler32_byte_by_byte_baseline(&decoded);
+    if expected != actual {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "Adler-32 불일치".to_string(),
+        ));
+    }
+    Ok(decoded)
+}
+
+fn eval_cell_uncompiled_baseline(
+    sheet: &SheetEngine,
+    coord: PackedCellCoordinate,
+    memo: &mut HashMap<(String, PackedCellCoordinate), EvaluatedCellValue>,
+    visiting: &mut HashSet<(String, PackedCellCoordinate)>,
+    depth: usize,
+) -> EvaluatedCellValue {
+    if depth > SheetEngine::MAX_RECURSION_DEPTH {
+        return EvaluatedCellValue::Error(FormulaError::Cycle);
+    }
+    let key = (sheet.name.to_ascii_lowercase(), coord);
+    if let Some(cached) = memo.get(&key) {
+        return cached.clone();
+    }
+    if !visiting.insert(key.clone()) {
+        return EvaluatedCellValue::Error(FormulaError::Cycle);
+    }
+    let res = match sheet.raw_cells().get(&coord) {
+        None => EvaluatedCellValue::Empty,
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if let Some(formula_body) = trimmed.strip_prefix('=') {
+                let expr_src = formula_body.trim();
+                if expr_src.is_empty() {
+                    EvaluatedCellValue::Empty
+                } else {
+                    match compile_formula_expr(expr_src) {
+                        Ok(expr) => {
+                            eval_expr_uncompiled_baseline(sheet, &expr, memo, visiting, depth + 1)
+                        }
+                        Err(e) => EvaluatedCellValue::Error(e),
+                    }
+                }
+            } else if let Ok(num) = trimmed.parse::<f64>() {
+                if num.is_finite() {
+                    EvaluatedCellValue::Number(num)
+                } else {
+                    EvaluatedCellValue::Error(FormulaError::Num)
+                }
+            } else if trimmed.eq_ignore_ascii_case("TRUE") {
+                EvaluatedCellValue::Boolean(true)
+            } else if trimmed.eq_ignore_ascii_case("FALSE") {
+                EvaluatedCellValue::Boolean(false)
+            } else {
+                EvaluatedCellValue::Text(raw.clone())
+            }
+        }
+    };
+    visiting.remove(&key);
+    memo.insert(key, res.clone());
+    res
+}
+
+fn eval_expr_uncompiled_baseline(
+    sheet: &SheetEngine,
+    expr: &Expr,
+    memo: &mut HashMap<(String, PackedCellCoordinate), EvaluatedCellValue>,
+    visiting: &mut HashSet<(String, PackedCellCoordinate)>,
+    depth: usize,
+) -> EvaluatedCellValue {
+    if depth > SheetEngine::MAX_RECURSION_DEPTH {
+        return EvaluatedCellValue::Error(FormulaError::Cycle);
+    }
+    match expr {
+        Expr::Number(n) => EvaluatedCellValue::Number(*n),
+        Expr::Text(s) => EvaluatedCellValue::Text(s.clone()),
+        Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
+        Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
+        Expr::Cell(coord) => {
+            eval_cell_uncompiled_baseline(sheet, *coord, memo, visiting, depth + 1)
+        }
+        Expr::UnaryPlus(inner) => {
+            eval_expr_uncompiled_baseline(sheet, inner, memo, visiting, depth + 1)
+        }
+        Expr::UnaryMinus(inner) => {
+            match eval_expr_uncompiled_baseline(sheet, inner, memo, visiting, depth + 1).as_number()
+            {
+                Some(n) => EvaluatedCellValue::Number(-n),
+                None => EvaluatedCellValue::Error(FormulaError::Value),
+            }
+        }
+        Expr::PostfixPercent(inner) => {
+            match eval_expr_uncompiled_baseline(sheet, inner, memo, visiting, depth + 1).as_number()
+            {
+                Some(n) => EvaluatedCellValue::Number(n / 100.0),
+                None => EvaluatedCellValue::Error(FormulaError::Value),
+            }
+        }
+        Expr::Binary { op, lhs, rhs } => {
+            let lv = eval_expr_uncompiled_baseline(sheet, lhs, memo, visiting, depth + 1);
+            if let EvaluatedCellValue::Error(e) = lv {
+                return EvaluatedCellValue::Error(e);
+            }
+            let rv = eval_expr_uncompiled_baseline(sheet, rhs, memo, visiting, depth + 1);
+            if let EvaluatedCellValue::Error(e) = rv {
+                return EvaluatedCellValue::Error(e);
+            }
+            let ln = lv.as_number().unwrap_or(0.0);
+            let rn = rv.as_number().unwrap_or(0.0);
+            match op {
+                BinaryOp::Add => EvaluatedCellValue::Number(ln + rn),
+                BinaryOp::Sub => EvaluatedCellValue::Number(ln - rn),
+                BinaryOp::Mul => EvaluatedCellValue::Number(ln * rn),
+                BinaryOp::Div => {
+                    if rn == 0.0 {
+                        EvaluatedCellValue::Error(FormulaError::DivByZero)
+                    } else {
+                        EvaluatedCellValue::Number(ln / rn)
+                    }
+                }
+                BinaryOp::Pow => EvaluatedCellValue::Number(ln.powf(rn)),
+                BinaryOp::Gt => EvaluatedCellValue::Boolean(ln > rn),
+                BinaryOp::Ge => EvaluatedCellValue::Boolean(ln >= rn),
+                BinaryOp::Lt => EvaluatedCellValue::Boolean(ln < rn),
+                BinaryOp::Le => EvaluatedCellValue::Boolean(ln <= rn),
+                BinaryOp::Eq => EvaluatedCellValue::Boolean((ln - rn).abs() < 1e-12),
+                BinaryOp::Ne => EvaluatedCellValue::Boolean((ln - rn).abs() >= 1e-12),
+                BinaryOp::Concat => EvaluatedCellValue::Text(format!(
+                    "{}{}",
+                    lv.to_display_string(),
+                    rv.to_display_string()
+                )),
+            }
+        }
+        Expr::FuncCall { name, args } => {
+            if name == "IF" && args.len() >= 2 {
+                let cond =
+                    eval_expr_uncompiled_baseline(sheet, &args[0], memo, visiting, depth + 1)
+                        .as_bool()
+                        .unwrap_or(false);
+                if cond {
+                    eval_expr_uncompiled_baseline(sheet, &args[1], memo, visiting, depth + 1)
+                } else if args.len() >= 3 {
+                    eval_expr_uncompiled_baseline(sheet, &args[2], memo, visiting, depth + 1)
+                } else {
+                    EvaluatedCellValue::Boolean(false)
+                }
+            } else if name == "SUM" {
+                let mut sum = 0.0;
+                for arg in args {
+                    if let Expr::Range(r) = arg {
+                        if let Ok(coords) = r.expand() {
+                            for c in coords {
+                                if let Some(n) = eval_cell_uncompiled_baseline(
+                                    sheet,
+                                    c,
+                                    memo,
+                                    visiting,
+                                    depth + 1,
+                                )
+                                .as_number()
+                                {
+                                    sum += n;
+                                }
+                            }
+                        }
+                    } else if let Some(n) =
+                        eval_expr_uncompiled_baseline(sheet, arg, memo, visiting, depth + 1)
+                            .as_number()
+                    {
+                        sum += n;
+                    }
+                }
+                EvaluatedCellValue::Number(sum)
+            } else {
+                EvaluatedCellValue::Empty
+            }
+        }
+        _ => EvaluatedCellValue::Error(FormulaError::Value),
+    }
+}
+
+fn recalculate_all_uncompiled_baseline(
+    sheet: &SheetEngine,
+) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
+    let n = sheet.raw_cells().len();
+    let mut memo: HashMap<(String, PackedCellCoordinate), EvaluatedCellValue> =
+        HashMap::with_capacity(n);
+    let mut visiting: HashSet<(String, PackedCellCoordinate)> = HashSet::new();
+    for &coord in sheet.raw_cells().keys() {
+        eval_cell_uncompiled_baseline(sheet, coord, &mut memo, &mut visiting, 0);
+    }
+    let key_prefix = sheet.name.to_ascii_lowercase();
+    let mut results = HashMap::with_capacity(n);
+    for &coord in sheet.raw_cells().keys() {
+        if let Some(val) = memo.get(&(key_prefix.clone(), coord)) {
+            results.insert(coord, val.clone());
+        }
+    }
+    results
 }
 
 /// Runs all 4 deterministic benchmarks across `iterations` interleaved A/B rounds.
@@ -201,23 +544,20 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
 
     for r in 0..=rounds {
         let t0 = Instant::now();
-        let base_scan = lz77_byte_scan_baseline(black_box(&ooxml_payload));
-        let zlib_bytes_a = deflate_zlib(black_box(&ooxml_payload));
-        let dec_a = inflate_zlib(black_box(&zlib_bytes_a), 65_536).unwrap_or_default();
-        let adler_a = adler32_byte_by_byte_baseline(black_box(&dec_a));
+        let zlib_bytes_a = deflate_zlib_scalar_baseline(black_box(&ooxml_payload));
+        let dec_a =
+            inflate_zlib_scalar_baseline(black_box(&zlib_bytes_a), 65_536).unwrap_or_default();
         let dt_a = t0.elapsed().as_micros() as u64;
 
         let t1 = Instant::now();
         let zlib_bytes_b = deflate_zlib(black_box(&ooxml_payload));
         let dec_b = inflate_zlib(black_box(&zlib_bytes_b), 65_536).unwrap_or_default();
-        let adler_b = adler32(black_box(&dec_b));
         let dt_b = t1.elapsed().as_micros() as u64;
 
-        if dec_a != ooxml_payload || dec_b != ooxml_payload || adler_a != adler_b || base_scan == 0
-        {
+        if zlib_bytes_a != zlib_bytes_b || dec_a != ooxml_payload || dec_b != ooxml_payload {
             def_eq = false;
         }
-        def_digest = adler_b;
+        def_digest = adler32(&dec_b);
         if r > 0 {
             def_base_samples.push(dt_a.max(1));
             def_opt_samples.push(dt_b.max(1));
@@ -271,6 +611,7 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         }
     }
 
+    let target_coord = coords.last().unwrap().0;
     let mut sheet_base_samples = Vec::with_capacity(rounds);
     let mut sheet_opt_samples = Vec::with_capacity(rounds);
     let mut sheet_eq = true;
@@ -280,8 +621,9 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         let t0 = Instant::now();
         let mut last_a = EvaluatedCellValue::Empty;
         for _ in 0..4 {
-            for (_, a1) in &coords {
-                last_a = sheet.evaluate_cell_uncached_baseline(black_box(a1));
+            let map_a = recalculate_all_uncompiled_baseline(black_box(&sheet));
+            if let Some(v) = map_a.get(&target_coord) {
+                last_a = v.clone();
             }
         }
         let dt_a = t0.elapsed().as_micros() as u64;
@@ -289,8 +631,8 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         let t1 = Instant::now();
         let mut last_b = EvaluatedCellValue::Empty;
         for _ in 0..4 {
-            let map = sheet.recalculate_all();
-            if let Some(v) = map.get(&coords.last().unwrap().0) {
+            let map_b = black_box(&sheet).recalculate_all();
+            if let Some(v) = map_b.get(&target_coord) {
                 last_b = v.clone();
             }
         }

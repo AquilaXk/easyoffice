@@ -1,5 +1,5 @@
 use easyoffice_formats::EasyOfficeError;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 
 pub mod functions;
@@ -9,8 +9,9 @@ mod parser;
 pub mod workbook;
 
 pub use functions::*;
-pub(crate) use parser::*;
-pub use parser::{compute_sheet_id, PackedWorkbookCoord, VisitingTracker};
+pub use parser::{
+    compile_formula_expr, compute_sheet_id, BinaryOp, Expr, PackedWorkbookCoord, VisitingTracker,
+};
 pub use workbook::*;
 
 /// Bit-packed 64-bit spreadsheet cell coordinate (`row` in upper 32 bits, `col` in lower 32 bits).
@@ -387,8 +388,6 @@ pub(crate) struct EvalContext<'a> {
     pub workbook: Option<&'a WorkbookEngine>,
     pub visiting: VisitingTracker,
     pub memo: HashMap<PackedWorkbookCoord, EvaluatedCellValue>,
-    pub use_legacy_baseline: bool,
-    pub legacy_visiting: HashSet<(String, PackedCellCoordinate)>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -398,30 +397,15 @@ impl<'a> EvalContext<'a> {
             workbook: None,
             visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
-            use_legacy_baseline: false,
-            legacy_visiting: HashSet::new(),
         }
     }
 
     #[inline]
-    pub fn standalone_legacy_baseline(sheet_name: &str) -> Self {
-        Self {
-            workbook: None,
-            visiting: VisitingTracker::new(compute_sheet_id(sheet_name)),
-            memo: HashMap::new(),
-            use_legacy_baseline: true,
-            legacy_visiting: HashSet::new(),
-        }
-    }
-
-    #[inline]
-    pub fn with_workbook(workbook: &'a WorkbookEngine, sheet_name: &str) -> Self {
+    pub fn with_workbook(workbook: &'a WorkbookEngine, sheet_id: u16) -> Self {
         Self {
             workbook: Some(workbook),
-            visiting: VisitingTracker::new(compute_sheet_id(sheet_name)),
+            visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
-            use_legacy_baseline: false,
-            legacy_visiting: HashSet::new(),
         }
     }
 }
@@ -451,6 +435,16 @@ impl SheetEngine {
             conditional_rules: Vec::new(),
             validation_rule: None,
         }
+    }
+
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+        self.sheet_id = compute_sheet_id(&self.name);
+    }
+
+    #[inline]
+    pub fn raw_cells(&self) -> &HashMap<PackedCellCoordinate, String> {
+        &self.cells
     }
 
     #[inline]
@@ -491,7 +485,9 @@ impl SheetEngine {
     }
 
     pub(crate) fn rebuild_compiled_asts(&mut self) {
-        self.sheet_id = compute_sheet_id(&self.name);
+        if self.sheet_id == 0 {
+            self.sheet_id = compute_sheet_id(&self.name);
+        }
         self.compiled_asts.clear();
         for (&coord, raw) in &self.cells {
             let trimmed = raw.trim();
@@ -515,16 +511,6 @@ impl SheetEngine {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         };
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
-        self.eval_coord_ctx(coord, &mut ctx, 0)
-    }
-
-    /// Evaluates a single cell using the legacy uncached baseline (`HashSet<(String, PackedCellCoordinate)>`
-    /// cycle tracking + per-evaluation formula tokenization and AST parsing).
-    pub fn evaluate_cell_uncached_baseline(&self, a1: &str) -> EvaluatedCellValue {
-        let Ok(coord) = PackedCellCoordinate::parse_a1(a1) else {
-            return EvaluatedCellValue::Error(FormulaError::Ref);
-        };
-        let mut ctx = EvalContext::standalone_legacy_baseline(&self.name);
         self.eval_coord_ctx(coord, &mut ctx, 0)
     }
 
@@ -584,35 +570,6 @@ impl SheetEngine {
     ) -> EvaluatedCellValue {
         if depth > Self::MAX_RECURSION_DEPTH {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
-        }
-        if ctx.use_legacy_baseline {
-            let legacy_key = (self.name.to_ascii_lowercase(), coord);
-            if !ctx.legacy_visiting.insert(legacy_key.clone()) {
-                return EvaluatedCellValue::Error(FormulaError::Cycle);
-            }
-            let res = match self.cells.get(&coord) {
-                None => EvaluatedCellValue::Empty,
-                Some(raw) => {
-                    let trimmed = raw.trim();
-                    if let Some(formula_body) = trimmed.strip_prefix('=') {
-                        let expr_src = formula_body.trim();
-                        if expr_src.is_empty() {
-                            EvaluatedCellValue::Empty
-                        } else {
-                            let chars: Vec<char> = expr_src.chars().collect();
-                            let rebuilt: String = chars.into_iter().collect();
-                            match compile_formula_expr(&rebuilt) {
-                                Ok(expr) => self.eval_expr_ctx(&expr, ctx, depth + 1),
-                                Err(e) => EvaluatedCellValue::Error(e),
-                            }
-                        }
-                    } else {
-                        self.eval_raw_string_ctx(raw, ctx, depth + 1)
-                    }
-                }
-            };
-            ctx.legacy_visiting.remove(&legacy_key);
-            return res;
         }
 
         let sid = self.resolved_sheet_id();

@@ -27,7 +27,14 @@ impl WorkbookEngine {
         {
             return &mut self.sheets[pos];
         }
-        self.sheets.push(SheetEngine::new(name_str));
+        let mut engine = SheetEngine::new(name_str);
+        while engine.sheet_id == 0 || self.sheets.iter().any(|s| s.sheet_id == engine.sheet_id) {
+            engine.sheet_id = engine.sheet_id.wrapping_add(1);
+            if engine.sheet_id == 0 {
+                engine.sheet_id = 1;
+            }
+        }
+        self.sheets.push(engine);
         self.sheets.last_mut().unwrap()
     }
 
@@ -72,7 +79,7 @@ impl WorkbookEngine {
         let Ok(coord) = PackedCellCoordinate::parse_a1(a1) else {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         };
-        let mut ctx = EvalContext::with_workbook(self, &sheet.name);
+        let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
         sheet.eval_coord_ctx(coord, &mut ctx, 0)
     }
 }
@@ -789,5 +796,40 @@ mod tests {
         .unwrap();
         assert_eq!(chart.points.len(), 3);
         assert!((chart.points[2].normalized_y - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_workbook_sheet_id_collision_resolution_without_false_cycle() {
+        let mut seen: HashMap<u16, String> = HashMap::new();
+        let mut pair: Option<(String, String)> = None;
+        for idx in 0..2000u32 {
+            let candidate = format!("Sheet_{idx}");
+            let h = crate::compute_sheet_id(&candidate);
+            if let Some(prev) = seen.insert(h, candidate.clone()) {
+                pair = Some((prev, candidate));
+                break;
+            }
+        }
+        let (sheet_a, sheet_b) = pair.expect("16-bit FNV-1a collision pair found");
+        assert_eq!(
+            crate::compute_sheet_id(&sheet_a),
+            crate::compute_sheet_id(&sheet_b)
+        );
+
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet(&sheet_a);
+        wb.add_sheet(&sheet_b);
+        assert_ne!(
+            wb.sheet(&sheet_a).unwrap().resolved_sheet_id(),
+            wb.sheet(&sheet_b).unwrap().resolved_sheet_id()
+        );
+
+        wb.set_cell(&sheet_b, "A1", "42").unwrap();
+        wb.set_cell(&sheet_a, "A1", format!("={sheet_b}!A1 + 8"))
+            .unwrap();
+        assert_eq!(
+            wb.evaluate_cell(&sheet_a, "A1"),
+            EvaluatedCellValue::Number(50.0)
+        );
     }
 }

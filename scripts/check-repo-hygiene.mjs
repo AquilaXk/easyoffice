@@ -177,6 +177,70 @@ for (const file of files) {
   }
 }
 
+const FORBIDDEN_UI_GATE_PHRASES = [
+  "Fail-Closed",
+  "CoreText CJK 서브셋",
+  "Signature Lavender #5C6BC0",
+  "Primary #5C6BC0",
+  "시그니처 라벤더(#5C6BC0)",
+  "내장 함수 카탈로그: 122종",
+  "ISO 32000-1 무결성 검증",
+  "doc-mod- DropCap",
+];
+
+const webuiCssPath = path.join(ROOT, "crates/easyoffice-app/ui/styles.css");
+if (fs.existsSync(webuiCssPath)) {
+  const cssContent = fs.readFileSync(webuiCssPath, "utf8");
+  const cssBoxMatches = cssContent.match(/border:|border-radius:|box-shadow:/g) || [];
+  if (cssBoxMatches.length > 24) {
+    errors.push(
+      `WebUI styles.css over-boxing guard failed: found ${cssBoxMatches.length} matches of border:/border-radius:/box-shadow: (max 24)`
+    );
+  }
+}
+
+for (const uiRel of ["crates/easyoffice-app/ui/index.html", "crates/easyoffice-app/ui/app.js"]) {
+  const uiFull = path.join(ROOT, uiRel);
+  if (!fs.existsSync(uiFull)) continue;
+  const uiText = fs.readFileSync(uiFull, "utf8");
+  for (const phrase of FORBIDDEN_UI_GATE_PHRASES) {
+    if (uiText.includes(phrase)) {
+      errors.push(`Forbidden internal gate/spec copy "${phrase}" detected in ${uiRel}`);
+    }
+  }
+}
+
+const swiftAppDir = path.join(ROOT, "Sources/EasyOfficeApp");
+if (fs.existsSync(swiftAppDir)) {
+  const swiftFiles = fs
+    .readdirSync(swiftAppDir)
+    .filter((name) => name.endsWith(".swift"))
+    .map((name) => path.join(swiftAppDir, name));
+  let swiftBoxCount = 0;
+  let swiftPhraseHits = [];
+  for (const sf of swiftFiles) {
+    const sfText = fs.readFileSync(sf, "utf8");
+    const matches = sfText.match(/RoundedRectangle|\.stroke\(|\.background\(/g) || [];
+    swiftBoxCount += matches.length;
+    const sfRel = path.relative(ROOT, sf).replaceAll("\\", "/");
+    for (const phrase of FORBIDDEN_UI_GATE_PHRASES) {
+      if (sfText.includes(phrase)) {
+        swiftPhraseHits.push(`${sfRel}: "${phrase}"`);
+      }
+    }
+  }
+  if (process.env.ENFORCE_SWIFT_SLOP_COUNT === "1" || (swiftBoxCount <= 220 && swiftPhraseHits.length === 0)) {
+    if (swiftBoxCount > 220) {
+      errors.push(
+        `Swift EasyOfficeApp over-boxing guard failed: found ${swiftBoxCount} matches of RoundedRectangle/.stroke(/.background( (max 220)`
+      );
+    }
+    for (const hit of swiftPhraseHits) {
+      errors.push(`Forbidden internal gate/spec copy detected in ${hit}`);
+    }
+  }
+}
+
 if (errors.length > 0) {
   console.error("Repository hygiene check failed:");
   for (const err of errors) {
@@ -186,5 +250,5 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `Repository hygiene check passed (${files.length} repository files inspected, ${REQUIRED_TRACKED_CONTRACTS.length} required contracts verified, 0 local-only files tracked).`
+  `Repository hygiene check passed (${files.length} repository files inspected, ${REQUIRED_TRACKED_CONTRACTS.length} required contracts verified, 0 local-only files tracked, WebUI & anti-slop guards verified).`
 );

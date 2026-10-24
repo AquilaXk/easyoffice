@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EasyOffice — Signature Lavender Desktop Suite</title>
+    <title>EasyOffice — 통합 오피스 워크스페이스</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -17,8 +17,8 @@
             <button id="qat-save" class="qat-btn" title="문서 저장 (⌘S)">저장</button>
             <button id="qat-undo" class="qat-btn" title="실행 취소 (⌘Z)">실행 취소</button>
             <button id="qat-redo" class="qat-btn" title="다시 실행 (⇧⌘Z)">다시 실행</button>
-            <button id="btn-run-benchmark" class="qat-btn qat-accent" title="엔진 비트 최적화 벤치마크 실행">
-              ⚡ 벤치마크
+            <button id="btn-run-benchmark" class="qat-btn qat-accent" title="문서 처리 성능 진단 실행">
+              성능 진단
             </button>
           </div>
         </div>
@@ -50,7 +50,7 @@
         </div>
         <div class="ribbon-meta">
           <span id="contextual-tool-badge" class="ctx-badge">표·개체 도구</span>
-          <span class="matrix-badge">5×7 Matrix · 140 Commands</span>
+          <span class="matrix-badge">리본 도구</span>
           <span id="ime-indicator" class="ime-badge">IME: 완료</span>
         </div>
         <div id="ribbon-tool-strip" class="ribbon-tool-strip" role="toolbar" aria-label="활성 리본 명령 도구"></div>
@@ -72,25 +72,25 @@
         <aside class="panel sidebar-left" aria-label="문서 개요 및 탐색">
           <h2 class="panel-title">개요 및 최근 문서</h2>
           <ul id="outline-list" class="outline-list">
-            <li class="outline-item active">1. 통합 아키텍처 개요</li>
-            <li class="outline-item">2. 20종 포맷 시그니처 검증</li>
-            <li class="outline-item">3. 122종 수식 및 피벗 엔진</li>
-            <li class="outline-item">4. Fail-Closed 보안 경계</li>
+            <li class="outline-item active">1. 통합 문서 개요</li>
+            <li class="outline-item">2. 문서 호환성 및 서식</li>
+            <li class="outline-item">3. 수식 및 피벗 분석</li>
+            <li class="outline-item">4. 문서 보호 및 보안</li>
           </ul>
           <div class="security-card">
-            <h3>보안 게이트 상태</h3>
-            <p id="security-status-text">ZIP/OLE2/XXE 방어 활성 (100x 상한)</p>
-            <button id="btn-run-security-audit" class="secondary-btn">보안 감사 실행</button>
+            <h3>문서 보안 상태</h3>
+            <p id="security-status-text">압축 컨테이너 및 문서 구조 보호 활성</p>
+            <button id="btn-run-security-audit" class="secondary-btn">문서 보안 검사</button>
           </div>
           <div class="security-card">
-            <h3>저수준 최적화 벤치마크</h3>
-            <p id="bench-result-box">Slicing-by-8 CRC32 · 9비트 LUT Huffman · SWAR UTF-16LE · Bitset DAG 대기 중</p>
+            <h3>엔진 성능 진단</h3>
+            <p id="bench-result-box">체크섬 · 압축 · 텍스트 · 수식 계산 진단 대기 중</p>
           </div>
         </aside>
 
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
-            <div class="page-ruler">0pt · 좌측 여백 54pt · 본문 487pt (2단 지원) · 우측 여백 54pt · 595pt</div>
+            <div class="page-ruler">좌측 여백 54pt · 본문 487pt (2단 지원) · 우측 여백 54pt</div>
             <article
               id="doc-editor"
               class="editor-surface"
@@ -98,13 +98,12 @@
               spellcheck="false"
               aria-label="문서 편집 영역"
             >
-              <h1>EasyOffice 크로스플랫폼 통합 오피스 스위트</h1>
+              <h1>EasyOffice 통합 오피스 워크스페이스</h1>
               <p>
-                시그니처 라벤더(#5C6BC0) 디자인 토큰과 순수 Rust 코어 엔진을 기반으로 macOS,
-                Windows, Linux 데스크톱 환경에서 동일한 문서 호환성과 Fail-Closed 보안을 제공합니다.
+                문서 작성, 표 편집, 다단 레이아웃, 메일 머지 및 포맷 변환을 하나의 작업 공간에서 처리합니다.
               </p>
               <p id="hwp-manuscript-preview" class="manuscript-notice" hidden>
-                [한글(HWP/HWPX) 200자 원고지 20×10 격자 및 기관 표제부 레이아웃 활성]
+                [한글(HWP/HWPX) 200자 원고지 격자 및 기관 표제부 레이아웃 활성]
               </p>
             </article>
           </div>
@@ -181,17 +180,17 @@
             </div>
             <div class="slide-workspace">
               <div id="slide-thumb-list" class="slide-thumb-list" role="listbox" aria-label="슬라이드 목록">
-                <button class="slide-thumb active" data-slide-idx="0">1. 아키텍처 개요</button>
-                <button class="slide-thumb" data-slide-idx="1">2. 20종 포맷 행렬</button>
-                <button class="slide-thumb" data-slide-idx="2">3. 비트 수준 최적화</button>
+                <button class="slide-thumb active" data-slide-idx="0">1. 발표 개요</button>
+                <button class="slide-thumb" data-slide-idx="1">2. 포맷 호환성</button>
+                <button class="slide-thumb" data-slide-idx="2">3. 성능 요약</button>
               </div>
               <div class="slide-main-col">
                 <div class="slide-stage" id="slide-stage-box">
                   <div class="slide-title-zone" id="slide-title-zone" contenteditable="true">
-                    <h2>제품 전략 및 아키텍처 발표 덱 (16:9 · 960×540pt)</h2>
+                    <h2>연간 제품 전략 발표 자료 (16:9 와이드)</h2>
                   </div>
                   <div class="slide-lower-zone" id="slide-lower-zone" contenteditable="true">
-                    <p>비겹침(Non-Overlapping) 하단 요소 배치 영역 (Y ≥ 158pt 보장)</p>
+                    <p>핵심 지표 및 요약 다이어그램 영역</p>
                   </div>
                   <span id="slide-laser-dot" class="slide-laser-dot" hidden></span>
                 </div>
@@ -201,7 +200,7 @@
                     id="slide-presenter-notes"
                     type="text"
                     class="cmd-input"
-                    value="핵심 메시지: 단일 바이너리 내 20종 문서 포맷과 122종 수식 함수를 결정론적으로 처리합니다."
+                    value="핵심 메시지: 주요 문서 포맷 호환성과 수식 계산 결과를 요약하여 전달합니다."
                   />
                 </div>
               </div>
@@ -231,8 +230,8 @@
             <div class="pdf-page-card" id="pdf-page-card">
               <div class="pdf-stamp" id="pdf-stamp-badge">APPROVED</div>
               <div class="pdf-watermark" id="pdf-watermark-layer">CONFIDENTIAL · EASYOFFICE</div>
-              <h3>ISO 32000-1 PDF 스튜디오 (가시 영역 Y: 100pt..760pt)</h3>
-              <p>페이지 회전, 결재 스탬프, 워터마크, AcroForm 양식 필드 및 주석 검증</p>
+              <h3>PDF 스튜디오 문서 검토 및 결재</h3>
+              <p>페이지 회전, 결재 스탬프, 워터마크, 양식 필드 및 주석 편집</p>
               <div class="pdf-acroform-grid">
                 <label>
                   신청인 성명
@@ -243,51 +242,49 @@
                   <input id="pdf-form-dept" type="text" class="cmd-input" value="문서엔진아키텍처팀" />
                 </label>
               </div>
-              <p id="pdf-form-status" class="formula-result">AcroForm 양식 준비 완료</p>
+              <p id="pdf-form-status" class="formula-result">양식 준비 완료</p>
             </div>
           </div>
 
           <div id="pane-converter" class="editor-pane" hidden>
             <div class="editor-surface converter-surface">
-              <h2>20종 문서 포맷 무손실 상호 변환기 (Universal Format Converter)</h2>
+              <h2>통합 문서 포맷 변환기</h2>
               <p>
-                OOXML(DOCX/XLSX/PPTX), 한글(HWP 5.0/HWPX/HWT/HWTX), ODF(ODT/ODS/ODP),
-                레거시 OLE2(DOC/XLS/PPT), PDF, RTF, CSV/TSV, CommonMark, HTML, TXT 간 즉시 변환합니다.
+                DOCX, HWP/HWPX, ODF, XLSX, PPTX, PDF, RTF, CSV, Markdown, HTML, TXT 간 문서를 변환합니다.
               </p>
               <div class="formula-bar">
                 <label for="conv-src-fmt">원본</label>
                 <select id="conv-src-fmt" aria-label="원본 포맷">
-                  <option value="docx" selected>DOCX (ECMA-376)</option>
-                  <option value="hwpx">HWPX (KS X 6101)</option>
-                  <option value="hwp">HWP 5.0 (OLE2 + zlib)</option>
-                  <option value="odt">ODT (ISO/IEC 26300)</option>
-                  <option value="xlsx">XLSX (SpreadsheetML)</option>
-                  <option value="xls">XLS (BIFF8 OLE2)</option>
-                  <option value="pptx">PPTX (PresentationML)</option>
-                  <option value="pdf">PDF (ISO 32000-1)</option>
-                  <option value="rtf">RTF 1.9.1</option>
-                  <option value="md">CommonMark (.md)</option>
-                  <option value="html">HTML5 (.html)</option>
-                  <option value="csv">RFC 4180 CSV</option>
+                  <option value="docx" selected>DOCX</option>
+                  <option value="hwpx">HWPX</option>
+                  <option value="hwp">HWP 5.0</option>
+                  <option value="odt">ODT</option>
+                  <option value="xlsx">XLSX</option>
+                  <option value="xls">XLS</option>
+                  <option value="pptx">PPTX</option>
+                  <option value="pdf">PDF</option>
+                  <option value="rtf">RTF</option>
+                  <option value="md">Markdown (.md)</option>
+                  <option value="html">HTML (.html)</option>
+                  <option value="csv">CSV (.csv)</option>
                 </select>
                 <span>→</span>
                 <label for="conv-dst-fmt">대상</label>
                 <select id="conv-dst-fmt" aria-label="대상 포맷">
-                  <option value="hwpx" selected>HWPX (KS X 6101)</option>
-                  <option value="hwp">HWP 5.0 (OLE2 + zlib)</option>
-                  <option value="docx">DOCX (ECMA-376)</option>
-                  <option value="odt">ODT (ISO/IEC 26300)</option>
-                  <option value="pdf">PDF (ISO 32000-1)</option>
-                  <option value="rtf">RTF 1.9.1</option>
-                  <option value="md">CommonMark (.md)</option>
-                  <option value="html">HTML5 (.html)</option>
-                  <option value="txt">UTF-8 TXT</option>
+                  <option value="hwpx" selected>HWPX</option>
+                  <option value="hwp">HWP 5.0</option>
+                  <option value="docx">DOCX</option>
+                  <option value="odt">ODT</option>
+                  <option value="pdf">PDF</option>
+                  <option value="rtf">RTF</option>
+                  <option value="md">Markdown (.md)</option>
+                  <option value="html">HTML (.html)</option>
+                  <option value="txt">TXT (.txt)</option>
                 </select>
                 <button id="btn-run-convert" class="primary-btn">즉시 변환 검증</button>
               </div>
               <div id="conv-result-box" class="security-card">
-                원본/대상 포맷을 선택한 뒤 [즉시 변환 검증]을 누르면 Rust 코어 코덱이 바이트 시그니처와
-                구조 무결성을 검증합니다.
+                원본과 대상 포맷을 선택한 뒤 [즉시 변환 검증]을 누르면 문서 변환 결과를 확인합니다.
               </div>
             </div>
           </div>
@@ -296,14 +293,14 @@
         <aside class="panel inspector-right" aria-label="속성 인스펙터 및 스마트 보조 도구">
           <h2 class="panel-title">인스펙터 &amp; 스마트 도구</h2>
           <div class="inspector-section">
-            <h3>디자인 토큰</h3>
+            <h3>테마 색상</h3>
             <div class="token-row">
-              <span class="swatch" style="background: #5c6bc0"></span>
-              <span>Primary #5C6BC0</span>
+              <span class="swatch" style="background: var(--eo-primary)"></span>
+              <span>기본 강조색</span>
             </div>
             <div class="token-row">
-              <span class="swatch" id="module-swatch" style="background: #5c6bc0"></span>
-              <span id="module-accent-label">Module Accent: DOC</span>
+              <span class="swatch" id="module-swatch" style="background: var(--eo-module-active)"></span>
+              <span id="module-accent-label">모듈 색상: 문서</span>
             </div>
           </div>
 
@@ -314,7 +311,7 @@
           </div>
 
           <div class="inspector-section">
-            <h3>PII 개인정보 마스킹</h3>
+            <h3>개인정보 보호</h3>
             <button id="btn-scrub-pii" class="secondary-btn">개인정보 스캔/마스킹</button>
             <p id="pii-result-text">감지된 개인정보 없음</p>
           </div>
@@ -323,9 +320,9 @@
 
       <footer class="statusbar" role="contentinfo">
         <span id="status-module">모듈: 문서 (DOCX)</span>
-        <span id="status-format-spec">규격: ECMA-376 WordprocessingML</span>
+        <span id="status-format-spec">포맷: DOCX 문서</span>
         <span id="status-sheet-agg">선택 집계 · 합계 1,300 · 평균 650 · 개수 2 · 최대 1,000</span>
-        <span id="status-command-feedback">준비 완료 · 20종 포맷 · 122종 수식 함수</span>
+        <span id="status-command-feedback">준비 완료</span>
       </footer>
     </div>
 
@@ -335,7 +332,7 @@
           id="cmd-search-input"
           type="text"
           class="cmd-input"
-          placeholder="140개 리본 명령 또는 기능 검색 (예: 원고지, 피벗, 목표값, PDF, 벤치마크)..."
+          placeholder="명령 또는 기능 검색 (예: 원고지, 피벗, 목표값, PDF, 변환)..."
         />
         <ul id="cmd-palette-list" class="cmd-list"></ul>
         <button id="btn-close-palette" class="secondary-btn">닫기 (Esc)</button>

@@ -148,6 +148,11 @@ impl<'a> BitReader<'a> {
         self.bit_count -= discard;
     }
 
+    #[inline]
+    fn byte_pos(&self) -> usize {
+        self.byte_pos - (self.bit_count / 8) as usize
+    }
+
     fn read_aligned_u16_le(&mut self) -> Result<u16, EasyOfficeError> {
         let lo = self.read_bits(8)? as u16;
         let hi = self.read_bits(8)? as u16;
@@ -516,8 +521,10 @@ fn decode_huffman_block(
     Ok(())
 }
 
-/// Decompresses an RFC 1951 raw DEFLATE bitstream with Fail-Closed output budget enforcement.
-pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
+fn inflate_raw_with_consumed(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<(Vec<u8>, usize), EasyOfficeError> {
     if input.is_empty() {
         return Err(EasyOfficeError::CorruptedContainer(
             "비어 있는 DEFLATE 스트림입니다.".to_string(),
@@ -573,11 +580,17 @@ pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Eas
         }
 
         if bfinal != 0 {
+            reader.align_to_byte();
             break;
         }
     }
 
-    Ok(out)
+    Ok((out, reader.byte_pos()))
+}
+
+/// Decompresses an RFC 1951 raw DEFLATE bitstream with Fail-Closed output budget enforcement.
+pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
+    inflate_raw_with_consumed(input, max_output_bytes).map(|(out, _)| out)
 }
 
 /// Computes the RFC 1950 Adler-32 checksum using `NMAX = 5552` deferred modulo reduction.
@@ -648,15 +661,20 @@ pub fn inflate_zlib(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
 /// Decompresses either a raw RFC 1951 DEFLATE stream or an RFC 1950 zlib-wrapped DEFLATE stream.
 pub fn inflate_auto(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
     if is_valid_zlib_header(input) {
-        if input.len() >= 6 {
-            match inflate_zlib(input, max_output_bytes) {
-                Ok(decoded) => return Ok(decoded),
-                Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
-                Err(_) => {}
+        match inflate_raw_with_consumed(&input[2..], max_output_bytes) {
+            Ok((decoded, consumed)) => {
+                let rem = &input[2 + consumed..];
+                if rem.len() >= 4 {
+                    let expected = u32::from_be_bytes([rem[0], rem[1], rem[2], rem[3]]);
+                    let actual = adler32(&decoded);
+                    if expected != actual {
+                        return Err(EasyOfficeError::CorruptedContainer(format!(
+                            "RFC 1950 Adler-32 체크섬 불일치 (expected: {expected:#010x}, actual: {actual:#010x})"
+                        )));
+                    }
+                }
+                return Ok(decoded);
             }
-        }
-        match inflate_raw(&input[2..], max_output_bytes) {
-            Ok(decoded) => return Ok(decoded),
             Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
             Err(_) => {}
         }
@@ -878,6 +896,10 @@ mod tests {
         bad_zlib[last_idx] ^= 0xFF;
         assert!(matches!(
             inflate_zlib(&bad_zlib, 1024 * 1024),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
+        assert!(matches!(
+            inflate_auto(&bad_zlib, 1024 * 1024),
             Err(EasyOfficeError::CorruptedContainer(_))
         ));
 
