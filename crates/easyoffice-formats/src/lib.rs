@@ -1,6 +1,20 @@
 use std::collections::HashSet;
 use std::fmt;
 
+pub mod converter;
+mod legacy_ole2_codec;
+pub mod office_codecs;
+pub mod ole2_codec;
+mod rtf_xml_helpers;
+pub mod text_pdf_codecs;
+pub mod zip_codec;
+
+pub use converter::*;
+pub use office_codecs::*;
+pub use ole2_codec::*;
+pub use text_pdf_codecs::*;
+pub use zip_codec::*;
+
 /// Container technology family for supported document formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContainerFamily {
@@ -199,7 +213,9 @@ pub enum EasyOfficeError {
 impl fmt::Display for EasyOfficeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyPayload => write!(f, "파일 데이터가 비어 있어 열 수 없습니다 (Fail-Closed)."),
+            Self::EmptyPayload => {
+                write!(f, "파일 데이터가 비어 있어 열 수 없습니다 (Fail-Closed).")
+            }
             Self::PayloadTooLarge { actual, max } => write!(
                 f,
                 "파일 크기({actual} bytes)가 최대 허용 한도({max} bytes)를 초과했습니다."
@@ -276,6 +292,9 @@ impl FormatDetector {
             if Self::slice_contains(bytes, b"Contents/header.xml")
                 || Self::slice_contains(bytes, b"version.xml")
             {
+                if Self::slice_contains(bytes, b"isTemplate=\"1\"") {
+                    return Ok(DocumentFormat::Hwtx);
+                }
                 return Ok(DocumentFormat::Hwpx);
             }
             if Self::slice_contains(bytes, b"oasis.opendocument.text") {
@@ -290,6 +309,9 @@ impl FormatDetector {
             if Self::slice_contains(bytes, b"xl/workbook.xml") {
                 return Ok(DocumentFormat::Xlsx);
             }
+            if Self::slice_contains(bytes, b"presentationml.slideshow") {
+                return Ok(DocumentFormat::Ppsx);
+            }
             if Self::slice_contains(bytes, b"ppt/presentation.xml") {
                 return Ok(DocumentFormat::Pptx);
             }
@@ -297,8 +319,21 @@ impl FormatDetector {
         }
 
         if bytes.starts_with(&Self::OLE2_MAGIC) {
+            if Self::slice_contains(bytes, b"HWT_TEMPLATE") {
+                return Ok(DocumentFormat::Hwt);
+            }
             if Self::slice_contains(bytes, b"HWP Document File") {
                 return Ok(DocumentFormat::Hwp);
+            }
+            let xls_utf16 = [
+                b'W', 0, b'o', 0, b'r', 0, b'k', 0, b'b', 0, b'o', 0, b'o', 0, b'k', 0,
+            ];
+            if Self::slice_contains(bytes, &xls_utf16) {
+                return Ok(DocumentFormat::Xls);
+            }
+            let ppt_utf16 = [b'P', 0, b'o', 0, b'w', 0, b'e', 0, b'r', 0];
+            if Self::slice_contains(bytes, &ppt_utf16) {
+                return Ok(DocumentFormat::Ppt);
             }
             return Ok(DocumentFormat::Doc);
         }
@@ -313,6 +348,18 @@ impl FormatDetector {
         }
 
         Self::validate_utf8_without_nul(bytes, "plain-text")?;
+        if bytes.starts_with(b"# ") || bytes.starts_with(b"## ") {
+            return Ok(DocumentFormat::Markdown);
+        }
+        if let Some(first_line_end) = bytes.iter().position(|&b| b == b'\n') {
+            let first_line = &bytes[..first_line_end];
+            if first_line.contains(&b'\t') {
+                return Ok(DocumentFormat::Tsv);
+            }
+            if first_line.contains(&b',') && bytes.contains(&b'\r') {
+                return Ok(DocumentFormat::Csv);
+            }
+        }
         Ok(DocumentFormat::Txt)
     }
 
@@ -326,7 +373,10 @@ impl FormatDetector {
                 if !bytes.starts_with(&Self::ZIP_MAGIC) {
                     return Err(EasyOfficeError::SignatureMismatch {
                         expected: family,
-                        detail: format!("파일 확장자 .{}에 ZIP(PK\\x03\\x04) 헤더가 없습니다.", format.extension()),
+                        detail: format!(
+                            "파일 확장자 .{}에 ZIP(PK\\x03\\x04) 헤더가 없습니다.",
+                            format.extension()
+                        ),
                     });
                 }
             }
@@ -334,7 +384,10 @@ impl FormatDetector {
                 if !bytes.starts_with(&Self::OLE2_MAGIC) {
                     return Err(EasyOfficeError::SignatureMismatch {
                         expected: family,
-                        detail: format!("파일 확장자 .{}에 OLE2 CFBF 헤더가 없습니다.", format.extension()),
+                        detail: format!(
+                            "파일 확장자 .{}에 OLE2 CFBF 헤더가 없습니다.",
+                            format.extension()
+                        ),
                     });
                 }
             }
@@ -362,7 +415,9 @@ impl FormatDetector {
                     {
                         return Err(EasyOfficeError::SignatureMismatch {
                             expected: family,
-                            detail: "텍스트 확장자에 바이너리 컨테이너 시그니처가 포함되어 있습니다.".to_string(),
+                            detail:
+                                "텍스트 확장자에 바이너리 컨테이너 시그니처가 포함되어 있습니다."
+                                    .to_string(),
                         });
                     }
                     Self::validate_utf8_without_nul(bytes, format.extension())?;
@@ -378,9 +433,9 @@ impl FormatDetector {
                 "{label} 스트림에 NUL(0x00) 바이트가 포함되어 있습니다."
             )));
         }
-        std::str::from_utf8(bytes)
-            .map(|_| ())
-            .map_err(|_| EasyOfficeError::InvalidUtf8(format!("{label} 스트림이 유효한 UTF-8이 아닙니다.")))
+        std::str::from_utf8(bytes).map(|_| ()).map_err(|_| {
+            EasyOfficeError::InvalidUtf8(format!("{label} 스트림이 유효한 UTF-8이 아닙니다."))
+        })
     }
 
     fn slice_contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -473,6 +528,13 @@ impl ZipSecurityGuard {
         Ok(())
     }
 
+    pub fn validate_archive(
+        entries: &[ZipEntryDescriptor],
+        policy: &ZipSecurityPolicy,
+    ) -> Result<(), EasyOfficeError> {
+        Self::validate_archive_entries(entries, policy)
+    }
+
     pub fn validate_archive_entries(
         entries: &[ZipEntryDescriptor],
         policy: &ZipSecurityPolicy,
@@ -497,15 +559,14 @@ impl ZipSecurityGuard {
 
             if entry.uncompressed_size > policy.max_single_entry_uncompressed_bytes {
                 return Err(EasyOfficeError::DecompressionBombDetected {
-                    ratio: entry.uncompressed_size as f64
-                        / (entry.compressed_size.max(1) as f64),
+                    ratio: entry.uncompressed_size as f64 / (entry.compressed_size.max(1) as f64),
                     max_ratio: policy.max_compression_ratio,
                 });
             }
 
             total_uncompressed = total_uncompressed
                 .checked_add(entry.uncompressed_size)
-                .ok_or_else(|| EasyOfficeError::DecompressionBombDetected {
+                .ok_or(EasyOfficeError::DecompressionBombDetected {
                     ratio: f64::INFINITY,
                     max_ratio: policy.max_compression_ratio,
                 })?;
@@ -558,7 +619,7 @@ impl Ole2SecurityGuard {
         start_sector: u32,
     ) -> Result<Vec<u32>, EasyOfficeError> {
         if container_bytes.len() < Self::SECTOR_SIZE * 2
-            || container_bytes.len() % Self::SECTOR_SIZE != 0
+            || !container_bytes.len().is_multiple_of(Self::SECTOR_SIZE)
         {
             return Err(EasyOfficeError::CorruptedContainer(
                 "OLE2 컨테이너 크기가 512바이트 섹터 배수가 아닙니다.".to_string(),
@@ -633,9 +694,7 @@ impl Ole2SecurityGuard {
             header_bytes[38],
             header_bytes[39],
         ]);
-        if (flags & Self::HWP5_FLAG_ENCRYPTED) != 0
-            || (flags & Self::HWP5_FLAG_DISTRIBUTION) != 0
-        {
+        if (flags & Self::HWP5_FLAG_ENCRYPTED) != 0 || (flags & Self::HWP5_FLAG_DISTRIBUTION) != 0 {
             return Err(EasyOfficeError::EncryptedDocumentUnsupported(
                 DocumentFormat::Hwp,
             ));
@@ -693,566 +752,6 @@ impl XmlSanitizer {
             .replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&amp;", "&")
-    }
-}
-
-/// RFC 4180 state-machine CSV / TSV parser and serializer.
-pub struct CsvCodec;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CsvParseState {
-    StartOfField,
-    InUnquotedField,
-    InQuotedField,
-    QuoteInQuotedField,
-}
-
-impl CsvCodec {
-    pub fn parse(input: &str, delimiter: char) -> Result<Vec<Vec<String>>, EasyOfficeError> {
-        if input.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut rows: Vec<Vec<String>> = Vec::new();
-        let mut current_row: Vec<String> = Vec::new();
-        let mut current_field = String::new();
-        let mut state = CsvParseState::StartOfField;
-        let mut chars = input.chars().peekable();
-
-        while let Some(ch) = chars.next() {
-            match state {
-                CsvParseState::StartOfField => {
-                    if ch == '"' {
-                        current_field.clear();
-                        state = CsvParseState::InQuotedField;
-                    } else if ch == delimiter {
-                        current_row.push(String::new());
-                    } else if ch == '\r' || ch == '\n' {
-                        if ch == '\r' && chars.peek() == Some(&'\n') {
-                            chars.next();
-                        }
-                        current_row.push(String::new());
-                        rows.push(std::mem::take(&mut current_row));
-                    } else {
-                        current_field.clear();
-                        current_field.push(ch);
-                        state = CsvParseState::InUnquotedField;
-                    }
-                }
-                CsvParseState::InUnquotedField => {
-                    if ch == '"' {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "비따옴표 CSV 필드 내부에 예기치 않은 따옴표가 발견되었습니다.".to_string(),
-                        ));
-                    } else if ch == delimiter {
-                        current_row.push(std::mem::take(&mut current_field));
-                        state = CsvParseState::StartOfField;
-                    } else if ch == '\r' || ch == '\n' {
-                        if ch == '\r' && chars.peek() == Some(&'\n') {
-                            chars.next();
-                        }
-                        current_row.push(std::mem::take(&mut current_field));
-                        rows.push(std::mem::take(&mut current_row));
-                        state = CsvParseState::StartOfField;
-                    } else {
-                        current_field.push(ch);
-                    }
-                }
-                CsvParseState::InQuotedField => {
-                    if ch == '"' {
-                        state = CsvParseState::QuoteInQuotedField;
-                    } else {
-                        current_field.push(ch);
-                    }
-                }
-                CsvParseState::QuoteInQuotedField => {
-                    if ch == '"' {
-                        current_field.push('"');
-                        state = CsvParseState::InQuotedField;
-                    } else if ch == delimiter {
-                        current_row.push(std::mem::take(&mut current_field));
-                        state = CsvParseState::StartOfField;
-                    } else if ch == '\r' || ch == '\n' {
-                        if ch == '\r' && chars.peek() == Some(&'\n') {
-                            chars.next();
-                        }
-                        current_row.push(std::mem::take(&mut current_field));
-                        rows.push(std::mem::take(&mut current_row));
-                        state = CsvParseState::StartOfField;
-                    } else {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "따옴표 CSV 필드 닫힘 이후 잘못된 문자가 발견되었습니다.".to_string(),
-                        ));
-                    }
-                }
-            }
-        }
-
-        match state {
-            CsvParseState::InQuotedField => {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "닫히지 않은 따옴표 CSV 필드가 있습니다.".to_string(),
-                ));
-            }
-            CsvParseState::QuoteInQuotedField | CsvParseState::InUnquotedField => {
-                current_row.push(current_field);
-                rows.push(current_row);
-            }
-            CsvParseState::StartOfField => {
-                if !current_row.is_empty() {
-                    current_row.push(String::new());
-                    rows.push(current_row);
-                }
-            }
-        }
-
-        Ok(rows)
-    }
-
-    pub fn serialize(rows: &[Vec<String>], delimiter: char) -> String {
-        let delim_str = delimiter.to_string();
-        rows.iter()
-            .map(|row| {
-                row.iter()
-                    .map(|field| Self::serialize_field(field, delimiter))
-                    .collect::<Vec<_>>()
-                    .join(&delim_str)
-            })
-            .collect::<Vec<_>>()
-            .join("\r\n")
-    }
-
-    fn serialize_field(field: &str, delimiter: char) -> String {
-        if field.contains(delimiter)
-            || field.contains('"')
-            || field.contains('\n')
-            || field.contains('\r')
-        {
-            let escaped = field.replace('"', "\"\"");
-            format!("\"{escaped}\"")
-        } else {
-            field.to_string()
-        }
-    }
-}
-
-/// Block element inside a CommonMark Markdown document.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MarkdownBlock {
-    Heading { level: u8, text: String },
-    Paragraph(String),
-    BlockQuote(String),
-    BulletList(Vec<String>),
-    NumberedList(Vec<String>),
-}
-
-/// CommonMark Markdown parser and serializer.
-pub struct CommonMarkCodec;
-
-impl CommonMarkCodec {
-    pub fn parse(markdown: &str) -> Result<Vec<MarkdownBlock>, EasyOfficeError> {
-        if markdown.as_bytes().contains(&0) {
-            return Err(EasyOfficeError::InvalidUtf8(
-                "Markdown 스트림에 NUL 바이트가 포함되어 있습니다.".to_string(),
-            ));
-        }
-
-        let mut blocks: Vec<MarkdownBlock> = Vec::new();
-        let mut bullet_acc: Vec<String> = Vec::new();
-        let mut numbered_acc: Vec<String> = Vec::new();
-
-        let flush_lists = |blocks: &mut Vec<MarkdownBlock>,
-                           bullet_acc: &mut Vec<String>,
-                           numbered_acc: &mut Vec<String>| {
-            if !bullet_acc.is_empty() {
-                blocks.push(MarkdownBlock::BulletList(std::mem::take(bullet_acc)));
-            }
-            if !numbered_acc.is_empty() {
-                blocks.push(MarkdownBlock::NumberedList(std::mem::take(numbered_acc)));
-            }
-        };
-
-        for raw_line in markdown.lines() {
-            let trimmed = raw_line.trim();
-            if trimmed.is_empty() {
-                flush_lists(&mut blocks, &mut bullet_acc, &mut numbered_acc);
-                continue;
-            }
-
-            if let Some(rest) = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "))
-            {
-                if !numbered_acc.is_empty() {
-                    blocks.push(MarkdownBlock::NumberedList(std::mem::take(
-                        &mut numbered_acc,
-                    )));
-                }
-                bullet_acc.push(rest.trim().to_string());
-                continue;
-            }
-
-            if let Some(dot_idx) = trimmed.find(". ") {
-                let prefix = &trimmed[..dot_idx];
-                if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
-                    if !bullet_acc.is_empty() {
-                        blocks.push(MarkdownBlock::BulletList(std::mem::take(&mut bullet_acc)));
-                    }
-                    numbered_acc.push(trimmed[dot_idx + 2..].trim().to_string());
-                    continue;
-                }
-            }
-
-            flush_lists(&mut blocks, &mut bullet_acc, &mut numbered_acc);
-
-            if let Some(h4) = trimmed.strip_prefix("#### ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 4,
-                    text: h4.trim().to_string(),
-                });
-            } else if let Some(h3) = trimmed.strip_prefix("### ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 3,
-                    text: h3.trim().to_string(),
-                });
-            } else if let Some(h2) = trimmed.strip_prefix("## ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 2,
-                    text: h2.trim().to_string(),
-                });
-            } else if let Some(h1) = trimmed.strip_prefix("# ") {
-                blocks.push(MarkdownBlock::Heading {
-                    level: 1,
-                    text: h1.trim().to_string(),
-                });
-            } else if let Some(quote) = trimmed.strip_prefix("> ") {
-                blocks.push(MarkdownBlock::BlockQuote(quote.trim().to_string()));
-            } else {
-                blocks.push(MarkdownBlock::Paragraph(trimmed.to_string()));
-            }
-        }
-
-        flush_lists(&mut blocks, &mut bullet_acc, &mut numbered_acc);
-        Ok(blocks)
-    }
-
-    pub fn render(blocks: &[MarkdownBlock]) -> String {
-        let mut rendered: Vec<String> = Vec::with_capacity(blocks.len());
-        for block in blocks {
-            match block {
-                MarkdownBlock::Heading { level, text } => {
-                    let hashes = "#".repeat((*level).clamp(1, 6) as usize);
-                    rendered.push(format!("{hashes} {text}"));
-                }
-                MarkdownBlock::Paragraph(text) => rendered.push(text.clone()),
-                MarkdownBlock::BlockQuote(text) => rendered.push(format!("> {text}")),
-                MarkdownBlock::BulletList(items) => {
-                    let lines = items
-                        .iter()
-                        .map(|item| format!("- {item}"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    rendered.push(lines);
-                }
-                MarkdownBlock::NumberedList(items) => {
-                    let lines = items
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, item)| format!("{}. {item}", idx + 1))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    rendered.push(lines);
-                }
-            }
-        }
-        rendered.join("\n\n")
-    }
-}
-
-/// Page model for ISO 32000-1 PDF serialization and parsing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PdfPageModel {
-    pub page_number: usize,
-    pub rotation_degrees: i32,
-    pub body_text: String,
-    pub approval_stamp: Option<String>,
-}
-
-/// Document model for ISO 32000-1 PDF serialization and parsing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PdfDocumentModel {
-    pub title: String,
-    pub pages: Vec<PdfPageModel>,
-    pub watermark_text: Option<String>,
-}
-
-/// ISO 32000-1 (`%PDF-1.4`) binary serializer and parser with byte-accurate `xref` table.
-pub struct PdfSerializer;
-
-impl PdfSerializer {
-    pub fn serialize(doc: &PdfDocumentModel) -> Vec<u8> {
-        let mut out: Vec<u8> = Vec::with_capacity(2048);
-        let push_line = |buf: &mut Vec<u8>, line: &str| {
-            buf.extend_from_slice(line.as_bytes());
-            buf.push(b'\n');
-        };
-
-        push_line(&mut out, "%PDF-1.4");
-
-        let effective_pages: Vec<PdfPageModel> = if doc.pages.is_empty() {
-            vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: String::new(),
-                approval_stamp: None,
-            }]
-        } else {
-            doc.pages.clone()
-        };
-        let page_count = effective_pages.len();
-        let page_obj_ids: Vec<usize> = (0..page_count).map(|i| 3 + i * 2).collect();
-        let kids_refs = page_obj_ids
-            .iter()
-            .map(|id| format!("{id} 0 R"))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let total_objects = 3 + page_count * 2;
-        let mut offsets: Vec<usize> = vec![0; total_objects];
-
-        offsets[1] = out.len();
-        push_line(&mut out, "1 0 obj");
-        push_line(
-            &mut out,
-            &format!(
-                "<< /Type /Catalog /Pages 2 0 R /Title ({}) >>",
-                Self::escape_pdf_text(&doc.title)
-            ),
-        );
-        push_line(&mut out, "endobj");
-
-        offsets[2] = out.len();
-        push_line(&mut out, "2 0 obj");
-        push_line(
-            &mut out,
-            &format!("<< /Type /Pages /Count {page_count} /Kids [{kids_refs}] >>"),
-        );
-        push_line(&mut out, "endobj");
-
-        for (idx, page) in effective_pages.iter().enumerate() {
-            let page_obj = 3 + idx * 2;
-            let content_obj = page_obj + 1;
-
-            let mut stream_lines: Vec<String> = Vec::new();
-            stream_lines.push(format!(
-                "BT /F1 12 Tf 54 780 Td ({}) Tj ET",
-                Self::escape_pdf_text(&page.body_text)
-            ));
-            if let Some(stamp) = &page.approval_stamp {
-                stream_lines.push(format!(
-                    "BT /F1 10 Tf 386 604 Td ([STAMP] {}) Tj ET",
-                    Self::escape_pdf_text(stamp)
-                ));
-            }
-            if let Some(wm) = &doc.watermark_text {
-                stream_lines.push(format!(
-                    "BT /F1 10 Tf 320 746 Td ([WM] {}) Tj ET",
-                    Self::escape_pdf_text(wm)
-                ));
-            }
-            let stream_body = stream_lines.join("\n");
-
-            offsets[page_obj] = out.len();
-            push_line(&mut out, &format!("{page_obj} 0 obj"));
-            push_line(
-                &mut out,
-                &format!(
-                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents {content_obj} 0 R >>",
-                    page.page_number, page.rotation_degrees
-                ),
-            );
-            push_line(&mut out, "endobj");
-
-            offsets[content_obj] = out.len();
-            push_line(&mut out, &format!("{content_obj} 0 obj"));
-            push_line(&mut out, &format!("<< /Length {} >>", stream_body.len()));
-            push_line(&mut out, "stream");
-            push_line(&mut out, &stream_body);
-            push_line(&mut out, "endstream");
-            push_line(&mut out, "endobj");
-        }
-
-        let xref_offset = out.len();
-        push_line(&mut out, "xref");
-        push_line(&mut out, &format!("0 {total_objects}"));
-        push_line(&mut out, "0000000000 65535 f ");
-        for offset in offsets.iter().skip(1) {
-            push_line(&mut out, &format!("{offset:010} 00000 n "));
-        }
-        push_line(&mut out, "trailer");
-        push_line(
-            &mut out,
-            &format!("<< /Size {total_objects} /Root 1 0 R >>"),
-        );
-        push_line(&mut out, "startxref");
-        push_line(&mut out, &xref_offset.to_string());
-        push_line(&mut out, "%%EOF");
-
-        out
-    }
-
-    pub fn parse(bytes: &[u8]) -> Result<PdfDocumentModel, EasyOfficeError> {
-        let detected = FormatDetector::detect(bytes, Some("pdf"))?;
-        if detected != DocumentFormat::Pdf {
-            return Err(EasyOfficeError::SignatureMismatch {
-                expected: ContainerFamily::PdfIso32000,
-                detail: "유효한 PDF 시그니처가 아닙니다.".to_string(),
-            });
-        }
-        let raw = String::from_utf8_lossy(bytes);
-        if !raw.contains("xref") || !raw.contains("%%EOF") {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "PDF xref 테이블 또는 %%EOF 트레일러가 누락되었습니다.".to_string(),
-            ));
-        }
-        if raw.contains("/Encrypt") {
-            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
-                DocumentFormat::Pdf,
-            ));
-        }
-
-        let mut title = String::from("PDF 문서");
-        let mut watermark_text: Option<String> = None;
-        let mut pages: Vec<PdfPageModel> = Vec::new();
-        let mut current_page_number: Option<usize> = None;
-        let mut current_rotation = 0;
-        let mut current_body = String::new();
-        let mut current_stamp: Option<String> = None;
-        let mut in_stream = false;
-
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.contains("/Type /Catalog") {
-                if let Some(t) = Self::extract_paren_token(trimmed, "/Title (") {
-                    title = Self::unescape_pdf_text(&t);
-                }
-            }
-            if trimmed.contains("/Type /Page") && !trimmed.contains("/Type /Pages") {
-                if let Some(pn_idx) = trimmed.find("/PageNumber ") {
-                    let after = &trimmed[pn_idx + 12..];
-                    let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-                    current_page_number = num_str.parse::<usize>().ok();
-                }
-                if let Some(rot_idx) = trimmed.find("/Rotate ") {
-                    let after = &trimmed[rot_idx + 8..];
-                    let num_str: String = after
-                        .chars()
-                        .take_while(|c| c.is_ascii_digit() || *c == '-')
-                        .collect();
-                    current_rotation = num_str.parse::<i32>().unwrap_or(0);
-                }
-            }
-            if trimmed == "stream" {
-                in_stream = true;
-                current_body.clear();
-                current_stamp = None;
-                continue;
-            }
-            if trimmed == "endstream" {
-                if in_stream {
-                    pages.push(PdfPageModel {
-                        page_number: current_page_number.take().unwrap_or(pages.len() + 1),
-                        rotation_degrees: current_rotation,
-                        body_text: current_body.clone(),
-                        approval_stamp: current_stamp.take(),
-                    });
-                    current_rotation = 0;
-                    in_stream = false;
-                }
-                continue;
-            }
-            if in_stream && trimmed.starts_with("BT ") {
-                if let (Some(open), Some(close)) = (trimmed.find('('), trimmed.rfind(')')) {
-                    if open < close {
-                        let content = Self::unescape_pdf_text(&trimmed[open + 1..close]);
-                        if let Some(wm) = content.strip_prefix("[WM] ") {
-                            watermark_text = Some(wm.to_string());
-                        } else if let Some(stamp) = content.strip_prefix("[STAMP] ") {
-                            current_stamp = Some(stamp.to_string());
-                        } else {
-                            if !current_body.is_empty() {
-                                current_body.push('\n');
-                            }
-                            current_body.push_str(&content);
-                        }
-                    }
-                }
-            }
-        }
-
-        if pages.is_empty() {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "PDF 페이지 스트림을 찾을 수 없습니다.".to_string(),
-            ));
-        }
-
-        Ok(PdfDocumentModel {
-            title,
-            pages,
-            watermark_text,
-        })
-    }
-
-    fn extract_paren_token(line: &str, prefix: &str) -> Option<String> {
-        let start = line.find(prefix)? + prefix.len();
-        let rest = &line[start..];
-        let mut out = String::new();
-        let mut chars = rest.chars();
-        while let Some(c) = chars.next() {
-            if c == '\\' {
-                out.push('\\');
-                if let Some(next) = chars.next() {
-                    out.push(next);
-                }
-            } else if c == ')' {
-                return Some(out);
-            } else {
-                out.push(c);
-            }
-        }
-        None
-    }
-
-    pub fn escape_pdf_text(text: &str) -> String {
-        let mut out = String::with_capacity(text.len() + 8);
-        for ch in text.chars() {
-            match ch {
-                '\\' => out.push_str("\\\\"),
-                '(' => out.push_str("\\("),
-                ')' => out.push_str("\\)"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                _ => out.push(ch),
-            }
-        }
-        out
-    }
-
-    pub fn unescape_pdf_text(text: &str) -> String {
-        let mut out = String::with_capacity(text.len());
-        let mut chars = text.chars();
-        while let Some(ch) = chars.next() {
-            if ch == '\\' {
-                match chars.next() {
-                    Some('n') => out.push('\n'),
-                    Some('r') => out.push('\r'),
-                    Some(escaped) => out.push(escaped),
-                    None => out.push('\\'),
-                }
-            } else {
-                out.push(ch);
-            }
-        }
-        out
     }
 }
 
@@ -1365,8 +864,12 @@ mod tests {
             Err(EasyOfficeError::SecurityViolation(_))
         ));
 
-        let win_drive_entries =
-            vec![ZipEntryDescriptor::new("C:\\Windows\\win.ini", 100, 200, false)];
+        let win_drive_entries = vec![ZipEntryDescriptor::new(
+            "C:\\Windows\\win.ini",
+            100,
+            200,
+            false,
+        )];
         assert!(matches!(
             ZipSecurityGuard::validate_archive_entries(&win_drive_entries, &policy),
             Err(EasyOfficeError::SecurityViolation(_))
@@ -1414,7 +917,8 @@ mod tests {
 
     #[test]
     fn test_xml_sanitizer_blocks_xxe_and_escapes_entities() {
-        let safe_xml = "<w:document><w:body><w:p><w:t>안전한 문서</w:t></w:p></w:body></w:document>";
+        let safe_xml =
+            "<w:document><w:body><w:p><w:t>안전한 문서</w:t></w:p></w:body></w:document>";
         assert!(XmlSanitizer::validate_safe_xml(safe_xml).is_ok());
 
         let xxe_xml = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>";
@@ -1432,16 +936,14 @@ mod tests {
     fn test_csv_commonmark_and_pdf_codecs_roundtrip() {
         let rows = vec![
             vec!["부서".to_string(), "메모, 특이사항".to_string()],
-            vec![
-                "연구개발".to_string(),
-                "1행\n2행 \"강조\"".to_string(),
-            ],
+            vec!["연구개발".to_string(), "1행\n2행 \"강조\"".to_string()],
         ];
         let csv_text = CsvCodec::serialize(&rows, ',');
         let parsed_rows = CsvCodec::parse(&csv_text, ',').unwrap();
         assert_eq!(parsed_rows, rows);
 
-        let md_input = "# 제품 아키텍처\n\n본문 첫 문단입니다.\n\n> 핵심 설계 원칙\n\n- 항목 1\n- 항목 2";
+        let md_input =
+            "# 제품 아키텍처\n\n본문 첫 문단입니다.\n\n> 핵심 설계 원칙\n\n- 항목 1\n- 항목 2";
         let md_blocks = CommonMarkCodec::parse(md_input).unwrap();
         let md_rendered = CommonMarkCodec::render(&md_blocks);
         assert_eq!(md_rendered, md_input);

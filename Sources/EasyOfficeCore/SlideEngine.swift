@@ -564,11 +564,17 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
 
     switch alignment {
     case .distributeHorizontally:
-      guard elements.count >= 3 else { return }
+      guard elements.count >= 2 else { return }
       let sortedIndices = elements.indices.sorted { elements[$0].x < elements[$1].x }
+      let totalWidths = sortedIndices.reduce(0.0) { $0 + elements[$1].width }
+      if elements.count == 2 {
+        let gap = max(24.0, (stageSize.width - totalWidths) / 3.0)
+        elements[sortedIndices[0]].x = gap
+        elements[sortedIndices[1]].x = gap + elements[sortedIndices[0]].width + gap
+        return
+      }
       let firstX = elements[sortedIndices[0]].x
       let lastMaxX = elements[sortedIndices[sortedIndices.count - 1]].maxX
-      let totalWidths = sortedIndices.reduce(0.0) { $0 + elements[$1].width }
       let gap = (lastMaxX - firstX - totalWidths) / Double(sortedIndices.count - 1)
       var cursorX = firstX
       for idx in sortedIndices {
@@ -578,11 +584,19 @@ public struct SlideModel: Sendable, Codable, Equatable, Identifiable {
       return
 
     case .distributeVertically:
-      guard elements.count >= 3 else { return }
+      guard elements.count >= 2 else { return }
       let sortedIndices = elements.indices.sorted { elements[$0].y < elements[$1].y }
+      let totalHeights = sortedIndices.reduce(0.0) { $0 + elements[$1].height }
+      if elements.count == 2 {
+        let lowerStageTop = 240.0
+        let availableHeight = max(totalHeights + 24.0, stageSize.height - lowerStageTop)
+        let gap = max(16.0, (availableHeight - totalHeights) / 3.0)
+        elements[sortedIndices[0]].y = lowerStageTop + gap
+        elements[sortedIndices[1]].y = lowerStageTop + gap + elements[sortedIndices[0]].height + gap
+        return
+      }
       let firstY = elements[sortedIndices[0]].y
       let lastMaxY = elements[sortedIndices[sortedIndices.count - 1]].maxY
-      let totalHeights = sortedIndices.reduce(0.0) { $0 + elements[$1].height }
       let gap = (lastMaxY - firstY - totalHeights) / Double(sortedIndices.count - 1)
       var cursorY = firstY
       for idx in sortedIndices {

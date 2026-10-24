@@ -41,9 +41,13 @@ body {
   overflow: hidden;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .workspace-shell {
   display: grid;
-  grid-template-rows: 40px 72px 1fr 28px;
+  grid-template-rows: 42px 74px 1fr 28px;
   height: 100vh;
 }
 
@@ -92,6 +96,17 @@ body {
   background: var(--brand-700);
   color: #FFFFFF;
   border-color: var(--brand-800);
+}
+
+.context-object-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: var(--brand-100);
+  color: var(--brand-800);
+  border: 1px solid var(--brand-200);
+  white-space: nowrap;
 }
 
 .badge {
@@ -209,14 +224,179 @@ body {
   font-size: 12px;
 }
 
-.a4-sheet {
-  width: 595px;
-  min-height: 760px;
+.module-pane {
+  width: 100%;
+  max-width: 720px;
+}
+
+.approval-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  margin-bottom: 10px;
   background: var(--surface-bg);
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  padding: 48px;
+  font-size: 11px;
+}
+
+.approval-grid {
+  display: flex;
+  gap: 6px;
+}
+
+.approval-cell {
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  text-align: center;
+  border-radius: 4px;
+}
+
+.a4-sheet {
+  width: 100%;
+  min-height: 420px;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 36px;
   line-height: 1.6;
+}
+
+.manuscript-grid {
+  display: grid;
+  grid-template-columns: repeat(20, 1fr);
+  gap: 2px;
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--surface-bg);
+  border: 1px solid var(--accent-hwp);
+  border-radius: 6px;
+}
+
+.manuscript-cell {
+  height: 22px;
+  border: 1px solid var(--border-color);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.formula-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.formula-bar input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-bg);
+  color: var(--text-primary);
+}
+
+.sheet-grid {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-bg);
+  font-size: 12px;
+}
+
+.sheet-grid th,
+.sheet-grid td {
+  border: 1px solid var(--border-color);
+  padding: 6px 10px;
+}
+
+.slide-stage {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  background: var(--surface-bg);
+  border: 2px solid var(--accent-slide);
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.slide-lower-zone {
+  display: flex;
+  gap: 12px;
+}
+
+.slide-card {
+  flex: 1;
+  padding: 18px;
+  background: var(--elevated-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.laser-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #D9383A;
+  pointer-events: none;
+}
+
+.pdf-page-sheet {
+  position: relative;
+  padding: 28px;
+  background: var(--surface-bg);
+  border: 1px solid var(--accent-pdf);
+  border-radius: 6px;
+}
+
+.pdf-stamp-box {
+  display: inline-block;
+  margin: 12px 0;
+  padding: 6px 12px;
+  border: 2px solid var(--accent-pdf);
+  color: var(--accent-pdf);
+  font-weight: 700;
+  border-radius: 4px;
+}
+
+.pdf-watermark {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.smart-panel {
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.smart-panel textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--elevated-bg);
+  color: var(--text-primary);
+}
+
+.smart-output {
+  padding: 10px;
+  background: var(--elevated-bg);
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 .inspector-group {

@@ -1,5 +1,8 @@
 use easyoffice_formats::EasyOfficeError;
 
+pub mod domain;
+pub use domain::*;
+
 /// Target desktop WebView host platform for Tauri v2 cross-platform shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopPlatform {
@@ -312,9 +315,10 @@ impl SlideStageLayout {
     /// Clamps a canvas element into the lower non-overlapping object zone (`y >= 240.0 pt`).
     pub fn clamp_element_to_lower_stage(&self, rect: LayoutRect) -> LayoutRect {
         let clamped_w = rect.width.clamp(40.0, self.stage_width_pt - 48.0);
-        let clamped_h = rect
-            .height
-            .clamp(32.0, self.stage_height_pt - self.lower_element_zone_min_y - 16.0);
+        let clamped_h = rect.height.clamp(
+            32.0,
+            self.stage_height_pt - self.lower_element_zone_min_y - 16.0,
+        );
         let clamped_x = rect.x.clamp(24.0, self.stage_width_pt - clamped_w - 24.0);
         let clamped_y = rect.y.clamp(
             self.lower_element_zone_min_y,
@@ -466,5 +470,136 @@ mod tests {
         let pdf_layout = PdfStudioLayout::compute("APPROVED");
         assert!(pdf_layout.is_within_upper_middle_viewport());
         assert_eq!(pdf_layout.stamp_label, "APPROVED");
+    }
+
+    #[test]
+    fn test_five_module_domain_engines_and_ribbon_layout_styles() {
+        use easyoffice_formats::{PdfDocumentModel, PdfPageModel};
+        use std::collections::HashMap;
+
+        let std_style = RibbonLayoutStyle::StandardOffice;
+        let hwp_style = RibbonLayoutStyle::HangulHwp;
+        assert_eq!(std_style.category_titles()[0], "홈");
+        assert_eq!(hwp_style.category_titles()[0], "편집");
+        assert_eq!(hwp_style.category_titles()[2], "쪽·원고지");
+        assert_eq!(std_style.toggle(), hwp_style);
+
+        assert_eq!(
+            ContextualObjectToolKind::for_module(OfficeModuleKind::Document).badge_title(),
+            "표·개체 도구"
+        );
+        assert_eq!(
+            ContextualObjectToolKind::for_module(OfficeModuleKind::Sheet).badge_title(),
+            "수식·피벗 분석"
+        );
+        assert_eq!(
+            ContextualObjectToolKind::for_module(OfficeModuleKind::Slide).badge_title(),
+            "발표자·레이저 도구"
+        );
+        assert_eq!(
+            ContextualObjectToolKind::for_module(OfficeModuleKind::Pdf).badge_title(),
+            "전자결재·주석 도구"
+        );
+
+        let mut table = DocumentTableModel::new(vec![
+            vec![
+                "120".to_string(),
+                "80".to_string(),
+                "=SUM(LEFT)".to_string(),
+            ],
+            vec![
+                "180".to_string(),
+                "120".to_string(),
+                "=AVERAGE(LEFT)".to_string(),
+            ],
+            vec![
+                "=SUM(ABOVE)".to_string(),
+                "=COUNT(ABOVE)".to_string(),
+                "0".to_string(),
+            ],
+        ]);
+        assert!((table.evaluate_cell_formula(2, 0).unwrap() - 300.0).abs() < 1e-6);
+        assert!((table.evaluate_cell_formula(2, 1).unwrap() - 2.0).abs() < 1e-6);
+        assert!((table.evaluate_cell_formula(0, 2).unwrap() - 200.0).abs() < 1e-6);
+        assert!((table.evaluate_cell_formula(1, 2).unwrap() - 150.0).abs() < 1e-6);
+
+        table.merge_cells(0, 0, 2, 2).unwrap();
+        assert!(table.is_covered_by_span(0, 1));
+        assert!(table.is_covered_by_span(1, 1));
+        assert!(!table.is_covered_by_span(0, 0));
+
+        table.insert_row(0, "0").unwrap();
+        table.insert_column(0, "0").unwrap();
+        assert_eq!(table.row_count(), 4);
+        assert_eq!(table.col_count(), 4);
+
+        let mut doc_engine = DocumentDomainEngine::new();
+        doc_engine.record_revision("rev-1", "작성자", "insert", "문단 추가");
+        doc_engine.record_revision("rev-2", "검토자", "delete", "오타 삭제");
+        assert!(doc_engine.accept_revision("rev-1"));
+        assert!(doc_engine.reject_revision("rev-2"));
+        assert_eq!(doc_engine.revisions[0].accepted, Some(true));
+        assert_eq!(doc_engine.revisions[1].accepted, Some(false));
+
+        let fn_entry = doc_engine.add_footnote("표준 규격", "KS X 6101 OWPML", false);
+        assert_eq!(fn_entry.number, 1);
+
+        doc_engine.headings = vec![
+            (1, "아키텍처 개요".to_string()),
+            (2, "보안 경계".to_string()),
+            (3, "ZIP 가드".to_string()),
+        ];
+        let toc = doc_engine.generate_toc();
+        assert_eq!(toc.len(), 3);
+        assert_eq!(toc[0], "1. 아키텍처 개요");
+        assert_eq!(toc[1], "  1.1. 보안 경계");
+        assert_eq!(toc[2], "    1.1.1. ZIP 가드");
+
+        let mut rec = HashMap::new();
+        rec.insert("부서".to_string(), "보안아키텍처팀".to_string());
+        let merged_mail = DocumentDomainEngine::render_mail_merge("수신: {{부서}}", &[rec]);
+        assert_eq!(merged_mail, vec!["수신: 보안아키텍처팀".to_string()]);
+
+        let mut slide_engine = SlideDomainEngine::default();
+        assert_eq!(slide_engine.master_layout.title(), "제목 및 본문");
+        slide_engine.presenter.move_laser_pointer(420.0, 236.0);
+        slide_engine.presenter.append_ink_point(100.0, 200.0);
+        slide_engine.presenter.append_ink_point(150.0, 240.0);
+        assert_eq!(slide_engine.presenter.laser_pointer, Some((420.0, 236.0)));
+        assert_eq!(slide_engine.presenter.ink_strokes[0].len(), 2);
+        slide_engine.presenter.clear_ink();
+        assert!(slide_engine.presenter.ink_strokes.is_empty());
+
+        let base_pdf = PdfDocumentModel {
+            title: "DocA".to_string(),
+            pages: vec![
+                PdfPageModel {
+                    page_number: 1,
+                    rotation_degrees: 0,
+                    body_text: "Page 1".to_string(),
+                    approval_stamp: None,
+                },
+                PdfPageModel {
+                    page_number: 2,
+                    rotation_degrees: 0,
+                    body_text: "Page 2".to_string(),
+                    approval_stamp: None,
+                },
+            ],
+            watermark_text: None,
+        };
+        let mut pdf_engine = PdfDomainEngine::new(base_pdf.clone());
+        assert_eq!(pdf_engine.rotate_page(0, 90).unwrap(), 90);
+        let split_doc = pdf_engine.split_range(0, 0).unwrap();
+        assert_eq!(split_doc.pages.len(), 1);
+        let merged_doc = PdfDomainEngine::merge_documents(&base_pdf, &split_doc);
+        assert_eq!(merged_doc.pages.len(), 3);
+        let stamp = pdf_engine.add_stamp("APPROVED", "감사관", "2026-10-24");
+        assert_eq!(stamp.label, "APPROVED");
+        pdf_engine.set_watermark("CONFIDENTIAL", 0.35, -35.0);
+        assert_eq!(
+            pdf_engine.document.watermark_text.as_deref(),
+            Some("CONFIDENTIAL")
+        );
     }
 }

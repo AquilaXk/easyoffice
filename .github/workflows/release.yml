@@ -74,7 +74,83 @@ jobs:
               "dist/EasyOffice-${VERSION}-macos.dmg" \
               "dist/EasyOffice-${VERSION}-macos.zip" \
               "dist/SHA256SUMS.txt" \
-              --title "EasyOffice v${VERSION} (macOS)" \
+              --title "EasyOffice v${VERSION} (macOS & Windows)" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
+  build-windows-release:
+    name: Build & Publish Windows x64 Release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js for repository hygiene guard
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run repository hygiene guard
+        run: node scripts/check-repo-hygiene.mjs
+
+      - name: Run Rust workspace test suite and self-test
+        run: |
+          cargo test --workspace
+          cargo run -p easyoffice-app -- --self-test
+
+      - name: Build optimized Rust release binaries
+        run: cargo build --workspace --release
+
+      - name: Resolve release version and tag
+        id: meta
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF_NAME" == v* ]]; then
+            VERSION="${REF_NAME#v}"
+            TAG="$REF_NAME"
+          else
+            VERSION="${INPUT_VERSION#v}"
+            TAG="v${VERSION}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Package EasyOffice Windows x64 archive and SHA-256 checksum
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p dist/windows-stage/ui
+          cp target/release/easyoffice-app.exe dist/windows-stage/
+          cp -R crates/easyoffice-app/ui/* dist/windows-stage/ui/
+          cp crates/easyoffice-app/tauri.conf.json dist/windows-stage/
+          powershell -NoProfile -Command "Compress-Archive -Path 'dist/windows-stage/*' -DestinationPath 'dist/EasyOffice-${VERSION}-windows-x64.zip' -Force"
+          sha256sum "dist/EasyOffice-${VERSION}-windows-x64.zip" > "dist/SHA256SUMS-windows-x64.txt"
+
+      - name: Upload Windows x64 package to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "dist/EasyOffice-${VERSION}-windows-x64.zip" \
+              "dist/SHA256SUMS-windows-x64.txt" \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" \
+              "dist/EasyOffice-${VERSION}-windows-x64.zip" \
+              "dist/SHA256SUMS-windows-x64.txt" \
+              --title "EasyOffice v${VERSION} (macOS & Windows)" \
               --generate-notes \
               --repo "$GITHUB_REPOSITORY"
           fi
