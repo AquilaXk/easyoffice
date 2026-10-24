@@ -1810,7 +1810,6 @@ public struct LeftNavigatorPanelView: View {
 
           ForEach(Array(sheet.allSheetNames.enumerated()), id: \.offset) { idx, sheetName in
             let isSelectedSheet = idx == sheet.activeSheetIndex
-            let displaySheetName = sheetName == "검증집계시트" ? "분기별 집계" : sheetName
             Button {
               viewModel.selectWorksheetTab(index: idx)
             } label: {
@@ -1818,7 +1817,7 @@ public struct LeftNavigatorPanelView: View {
                 Image(systemName: isSelectedSheet ? "tablecells.fill" : "tablecells")
                   .font(.system(size: 10))
                   .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
-                Text(displaySheetName)
+                Text(sheetName)
                   .font(.system(size: 12, weight: isSelectedSheet ? .bold : .regular))
                   .foregroundStyle(
                     isSelectedSheet

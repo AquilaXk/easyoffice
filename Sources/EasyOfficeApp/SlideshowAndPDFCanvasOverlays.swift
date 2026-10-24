@@ -634,9 +634,21 @@ public struct PDFInteractiveInkOverlayView: View {
             )
 
           Canvas { context, size in
-            for stroke in pageStrokes where stroke.points.count >= 2 {
+            var strokeList: [(points: [PDFInkPoint], color: Color, width: Double)] =
+              pageStrokes.compactMap { stroke in
+                guard stroke.points.count >= 2 else { return nil }
+                let strokeColor = EasyOfficeDesignTokens.resolveHexColor(
+                  stroke.strokeHex,
+                  fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+                )
+                return (stroke.points, strokeColor, stroke.lineWidth)
+              }
+            if activeStrokePoints.count >= 2 {
+              strokeList.append((activeStrokePoints, activeColor, viewModel.pdfInkLineWidth))
+            }
+            for item in strokeList {
               var path = Path()
-              for (ptIdx, pt) in stroke.points.enumerated() {
+              for (ptIdx, pt) in item.points.enumerated() {
                 let vx = CGFloat((pt.x - 20.0) / 555.0) * size.width
                 let vy = size.height - (CGFloat((pt.y - 20.0) / 800.0) * size.height)
                 let point = CGPoint(x: max(0, min(size.width, vx)), y: max(0, min(size.height, vy)))
@@ -646,35 +658,11 @@ public struct PDFInteractiveInkOverlayView: View {
                   path.addLine(to: point)
                 }
               }
-              let strokeColor = EasyOfficeDesignTokens.resolveHexColor(
-                stroke.strokeHex,
-                fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
-              )
               context.stroke(
                 path,
-                with: .color(strokeColor),
+                with: .color(item.color),
                 style: StrokeStyle(
-                  lineWidth: CGFloat(stroke.lineWidth), lineCap: .round, lineJoin: .round)
-              )
-            }
-
-            if activeStrokePoints.count >= 2 {
-              var livePath = Path()
-              for (ptIdx, pt) in activeStrokePoints.enumerated() {
-                let vx = CGFloat((pt.x - 20.0) / 555.0) * size.width
-                let vy = size.height - (CGFloat((pt.y - 20.0) / 800.0) * size.height)
-                let point = CGPoint(x: max(0, min(size.width, vx)), y: max(0, min(size.height, vy)))
-                if ptIdx == 0 {
-                  livePath.move(to: point)
-                } else {
-                  livePath.addLine(to: point)
-                }
-              }
-              context.stroke(
-                livePath,
-                with: .color(activeColor),
-                style: StrokeStyle(
-                  lineWidth: CGFloat(viewModel.pdfInkLineWidth), lineCap: .round, lineJoin: .round)
+                  lineWidth: CGFloat(item.width), lineCap: .round, lineJoin: .round)
               )
             }
           }

@@ -1317,10 +1317,7 @@ public struct DocumentEditorDetailPaneView: View {
     for run in paragraph.effectiveRuns {
       let safeLink = run.linkURL.flatMap { WorkspaceViewModel.sanitizeSafeHyperlinkURL($0) }
       let hasLink = safeLink != nil
-      let sanitizedRunText = run.text
-        .replacingOccurrences(of: "시그니처 라벤더 디자인 시스템", with: "전사 표준 문서 조판 스타일")
-        .replacingOccurrences(of: "결정론적 A1 수식 계산", with: "정밀 스프레드시트 수식 연산")
-      let displaySegment = hasLink ? "\(sanitizedRunText) [🔗]" : sanitizedRunText
+      let displaySegment = hasLink ? "\(run.text) [🔗]" : run.text
       var segment = AttributedString(displaySegment)
       let fontSize = CGFloat(run.fontSizePt ?? paragraph.fontSizePt)
       let fontFamily = (run.fontName ?? paragraph.fontName).trimmingCharacters(
@@ -1614,25 +1611,19 @@ public struct DocumentEditorDetailPaneView: View {
         Color.clear.padding(1.5).border(color, width: 0.6)
       }
     case .dashed:
-      Rectangle().stroke(color, style: StrokeStyle(lineWidth: 0.6, dash: [4, 3]))
-    case .diagonalDown:
+      Color.clear.border(color.opacity(0.55), width: 0.6)
+    case .diagonalDown, .diagonalUp:
       GeometryReader { geo in
         ZStack {
           Color.clear.border(color, width: 0.5)
           Path { p in
-            p.move(to: .zero)
-            p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height))
-          }
-          .stroke(color.opacity(0.65), lineWidth: 0.6)
-        }
-      }
-    case .diagonalUp:
-      GeometryReader { geo in
-        ZStack {
-          Color.clear.border(color, width: 0.5)
-          Path { p in
-            p.move(to: CGPoint(x: 0, y: geo.size.height))
-            p.addLine(to: CGPoint(x: geo.size.width, y: 0))
+            if style == .diagonalDown {
+              p.move(to: .zero)
+              p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height))
+            } else {
+              p.move(to: CGPoint(x: 0, y: geo.size.height))
+              p.addLine(to: CGPoint(x: geo.size.width, y: 0))
+            }
           }
           .stroke(color.opacity(0.65), lineWidth: 0.6)
         }

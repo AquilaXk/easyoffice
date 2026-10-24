@@ -12,16 +12,21 @@ public enum XMLSanitizer {
     0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45  // "DOCTYPE"
   )
 
-  private static let swarLoMask: UInt64 = 0x0101_0101_0101_0101
-  private static let swarHiMask: UInt64 = 0x8080_8080_8080_8080
+  static let swarLoMask: UInt64 = 0x0101_0101_0101_0101
+  static let swarHiMask: UInt64 = 0x8080_8080_8080_8080
 
   @inline(__always)
-  private static func hasZeroByte(_ word: UInt64) -> Bool {
-    ((word &- swarLoMask) & ~word & swarHiMask) != 0
+  static func zeroByteMask(_ word: UInt64) -> UInt64 {
+    (word &- swarLoMask) & ~word & swarHiMask
   }
 
   @inline(__always)
-  private static func broadcastByte(_ byte: UInt8) -> UInt64 {
+  static func hasZeroByte(_ word: UInt64) -> Bool {
+    zeroByteMask(word) != 0
+  }
+
+  @inline(__always)
+  static func broadcastByte(_ byte: UInt8) -> UInt64 {
     UInt64(byte) &* swarLoMask
   }
 
@@ -32,8 +37,7 @@ public enum XMLSanitizer {
     var idx = 0
     while idx <= count - 8 {
       let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
-      let diff = word ^ ltMask
-      let matchBits = (diff &- swarLoMask) & ~diff & swarHiMask
+      let matchBits = zeroByteMask(word ^ ltMask)
       if matchBits == 0 {
         idx += 8
         continue
@@ -112,28 +116,27 @@ public enum XMLSanitizer {
 
       while idx + 8 <= count {
         let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
-        let hasSpecial =
-          hasZeroByte(word ^ ampMask)
-          || hasZeroByte(word ^ ltMask)
-          || hasZeroByte(word ^ gtMask)
-          || hasZeroByte(word ^ quotMask)
-          || hasZeroByte(word ^ aposMask)
-        if !hasSpecial {
+        let matchBits =
+          zeroByteMask(word ^ ampMask)
+          | zeroByteMask(word ^ ltMask)
+          | zeroByteMask(word ^ gtMask)
+          | zeroByteMask(word ^ quotMask)
+          | zeroByteMask(word ^ aposMask)
+        if matchBits == 0 {
           idx += 8
           continue
         }
+        idx += matchBits.trailingZeroBitCount >> 3
         let b = buf[idx]
-        if b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
-          if out.isEmpty {
-            out.reserveCapacity(count + 16)
-          }
-          if spanStart < idx {
-            out.append(contentsOf: buf[spanStart..<idx])
-          }
-          appendEscapedEntity(for: b, into: &out)
-          spanStart = idx + 1
+        if out.isEmpty {
+          out.reserveCapacity(count + 16)
         }
+        if spanStart < idx {
+          out.append(contentsOf: buf[spanStart..<idx])
+        }
+        appendEscapedEntity(for: b, into: &out)
         idx += 1
+        spanStart = idx
       }
 
       while idx < count {

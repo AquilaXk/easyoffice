@@ -722,47 +722,75 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
 }
 
 fn expand_range_values_scalar_baseline(
-    sheet: &SheetEngine,
+    precompiled_cells: &HashMap<PackedCellCoordinate, EvaluatedCellValue>,
     range: &CellRange,
 ) -> Vec<EvaluatedCellValue> {
     let coords = range.expand().unwrap();
-    let mut vals: Vec<EvaluatedCellValue> = Vec::with_capacity(coords.len());
-    for c in coords {
-        let a1 = c.to_a1();
-        let v = match sheet.get_raw_cell(&a1) {
-            None => EvaluatedCellValue::Empty,
-            Some(raw) => match raw.trim().parse::<f64>() {
-                Ok(n) => EvaluatedCellValue::Number(n),
-                Err(_) => EvaluatedCellValue::Text(raw.to_string()),
-            },
-        };
-        vals.push(v);
-    }
-    vals
+    coords
+        .into_iter()
+        .map(|c| {
+            precompiled_cells
+                .get(&c)
+                .cloned()
+                .unwrap_or(EvaluatedCellValue::Empty)
+        })
+        .collect()
 }
 
-fn scalar_vec_range_agg_baseline(sheet: &SheetEngine, range: &CellRange) -> [f64; 5] {
-    let sum: f64 = expand_range_values_scalar_baseline(sheet, range)
+fn scalar_vec_range_agg_baseline(
+    precompiled_cells: &HashMap<PackedCellCoordinate, EvaluatedCellValue>,
+    range: &CellRange,
+) -> [f64; 5] {
+    let sum_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let sum_nums: Vec<f64> = sum_vals
         .iter()
-        .filter_map(EvaluatedCellValue::as_number)
-        .sum();
-    let avg_vals: Vec<f64> = expand_range_values_scalar_baseline(sheet, range)
-        .iter()
-        .filter_map(EvaluatedCellValue::as_number)
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
         .collect();
-    let avg: f64 = avg_vals.iter().sum::<f64>() / (avg_vals.len().max(1) as f64);
-    let min_v: f64 = expand_range_values_scalar_baseline(sheet, range)
+    let sum: f64 = sum_nums.iter().sum();
+
+    let avg_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let avg_nums: Vec<f64> = avg_vals
         .iter()
-        .filter_map(EvaluatedCellValue::as_number)
-        .fold(f64::INFINITY, f64::min);
-    let max_v: f64 = expand_range_values_scalar_baseline(sheet, range)
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let avg: f64 = avg_nums.iter().sum::<f64>() / (avg_nums.len().max(1) as f64);
+
+    let min_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let min_nums: Vec<f64> = min_vals
         .iter()
-        .filter_map(EvaluatedCellValue::as_number)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let cnt: f64 = expand_range_values_scalar_baseline(sheet, range)
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let min_v: f64 = min_nums.iter().copied().fold(f64::INFINITY, f64::min);
+
+    let max_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let max_nums: Vec<f64> = max_vals
         .iter()
-        .filter(|v| matches!(v, EvaluatedCellValue::Number(_)))
-        .count() as f64;
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let max_v: f64 = max_nums.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
+    let cnt_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let cnt_nums: Vec<f64> = cnt_vals
+        .iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let cnt: f64 = cnt_nums.len() as f64;
+
     [sum, avg, min_v, max_v, cnt]
 }
 
@@ -812,6 +840,7 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
     agg_sheet.set_cell("I4", "=MAX(A1:H200)").unwrap();
     agg_sheet.set_cell("I5", "=COUNT(A1:H200)").unwrap();
     let agg_range = CellRange::parse("A1:H200").unwrap();
+    let precompiled_cells = agg_sheet.recalculate_all();
 
     let mut base_samples = Vec::with_capacity(rounds);
     let mut opt_samples = Vec::with_capacity(rounds);
@@ -823,7 +852,10 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
         let xml_ok_a = XmlSanitizer::validate_safe_xml_scalar_baseline(black_box(&xml_doc)).is_ok();
         let esc_a = XmlSanitizer::escape_scalar_baseline(black_box(&raw_escape_input));
         let csv_a = CsvCodec::parse_scalar_baseline(black_box(&csv_doc), ',').unwrap_or_default();
-        let agg_a = scalar_vec_range_agg_baseline(black_box(&agg_sheet), black_box(&agg_range));
+        let agg_a = scalar_vec_range_agg_baseline(
+            black_box(&precompiled_cells),
+            black_box(&agg_range),
+        );
         let dt_a = t0.elapsed().as_micros() as u64;
 
         let t1 = Instant::now();

@@ -524,11 +524,11 @@ final class EasyOfficeTests: XCTestCase {
     try sheet.setCell("B4", rawValue: "=MAX(A1:A10)")
     try sheet.setCell("B5", rawValue: "=COUNT(A1:A10)")
 
-    XCTAssertEqual(try sheet.evaluate(at: "B1"), .number(550.0))
-    XCTAssertEqual(try sheet.evaluate(at: "B2"), .number(55.0))
-    XCTAssertEqual(try sheet.evaluate(at: "B3"), .number(10.0))
-    XCTAssertEqual(try sheet.evaluate(at: "B4"), .number(100.0))
-    XCTAssertEqual(try sheet.evaluate(at: "B5"), .number(10.0))
+    XCTAssertEqual(sheet.evaluate(at: "B1"), .number(550.0))
+    XCTAssertEqual(sheet.evaluate(at: "B2"), .number(55.0))
+    XCTAssertEqual(sheet.evaluate(at: "B3"), .number(10.0))
+    XCTAssertEqual(sheet.evaluate(at: "B4"), .number(100.0))
+    XCTAssertEqual(sheet.evaluate(at: "B5"), .number(10.0))
 
     var slide = SlideModel(
       title: "2026 상반기 전략 로드맵",

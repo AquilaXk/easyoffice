@@ -353,7 +353,7 @@ public struct WorkspaceHubCatalog: Sendable {
       let p3 = ParagraphBlock(
         style: .body, alignment: .justified,
         text:
-          "단일 멀티 탭 윈도우에서 문서, 시트, 슬라이드, 한글(HWP/HWPX), PDF를 즉각 열람·편집하고 시그니처 라벤더 디자인 시스템을 일관되게 제공합니다.")
+          "단일 멀티 탭 윈도우에서 문서, 시트, 슬라이드, 한글(HWP/HWPX), PDF를 즉각 열람·편집하고 전사 표준 문서 조판 스타일을 일관되게 제공합니다.")
       let doc = OfficeDocumentModel(
         title: "2026 프로젝트 아키텍처 보고서",
         format: .docx,
@@ -479,14 +479,23 @@ public struct WorkspaceHubCatalog: Sendable {
         pages: [
           PDFPageDescriptor(
             pageNumber: 1, rotationDegrees: 0,
-            extractedText: "제1장 컨테이너 보안 원칙\n모든 입력 문서는 확장자와 무관하게 매직 바이트 시그니처를 먼저 검증합니다."),
+            extractedText: """
+              제1장 컨테이너 보안 원칙
+              모든 입력 문서는 확장자와 무관하게 전자서명 해시 및 문서 무결성을 먼저 검증합니다.
+              제2절 문서 반출 및 접근 통제 기준
+              대외 발송 문서는 부서장 승인 결재 후 표준 전자문서 양식으로 보관하며, 열람 이력과 전자서명 해시를 반기별로 정기 감사합니다.
+              점검 항목 | 대상 등급 | 점검 주기 | 소관 부서
+              문서 무결성 및 전자서명 해시 | 1등급 (기밀) | 상시 자동 | 정보보안팀
+              개인정보 비식별화 마스킹 | 전사 대외문서 | 발송 전 필수 | 법무·컴플라이언스
+              보존 연한 및 파기 이력 감사 | 재무·인사 기록 | 분기 1회 | 경영지원본부
+              """),
           PDFPageDescriptor(
             pageNumber: 2, rotationDegrees: 0,
             extractedText: "제2장 PDF 양방향 변환\nPDF 페이지의 텍스트 흐름과 표 구조를 분석하여 편집 가능한 문서로 변환합니다."),
         ],
         annotations: [
           PDFAnnotationItem(
-            pageNumber: 1, kind: .highlight, content: "매직 바이트 시그니처 검증 필수", author: "QA")
+            pageNumber: 1, kind: .highlight, content: "반기 보안 감사 필수 점검 항목", author: "QA")
         ],
         outline: [
           PDFOutlineNode(title: "제1장 컨테이너 보안 원칙", targetPageNumber: 1),

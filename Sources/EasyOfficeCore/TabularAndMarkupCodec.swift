@@ -72,19 +72,6 @@ public enum CSVStateMachineCodec {
     return worksheet
   }
 
-  private static let swarLoMask: UInt64 = 0x0101_0101_0101_0101
-  private static let swarHiMask: UInt64 = 0x8080_8080_8080_8080
-
-  @inline(__always)
-  private static func hasZeroByte(_ word: UInt64) -> Bool {
-    ((word &- swarLoMask) & ~word & swarHiMask) != 0
-  }
-
-  @inline(__always)
-  private static func broadcastByte(_ byte: UInt8) -> UInt64 {
-    UInt64(byte) &* swarLoMask
-  }
-
   public static func parseRows(from text: String, delimiter: Character = ",") throws -> [[String]] {
     guard !text.isEmpty else { return [] }
 
@@ -94,10 +81,10 @@ public enum CSVStateMachineCodec {
       let cr: UInt8 = 0x0D
       let lf: UInt8 = 0x0A
       let delimByte: UInt8 = delimiter.asciiValue ?? 0x2C
-      let quoteMask = broadcastByte(quote)
-      let crMask = broadcastByte(cr)
-      let lfMask = broadcastByte(lf)
-      let delimMask = broadcastByte(delimByte)
+      let quoteMask = XMLSanitizer.broadcastByte(quote)
+      let crMask = XMLSanitizer.broadcastByte(cr)
+      let lfMask = XMLSanitizer.broadcastByte(lf)
+      let delimMask = XMLSanitizer.broadcastByte(delimByte)
 
       var rows: [[String]] = []
       var currentRow: [String] = []
@@ -112,14 +99,15 @@ public enum CSVStateMachineCodec {
         if state == .inUnquotedField, let base = baseAddress {
           while idx + 8 <= count {
             let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
-            let hitSpecial =
-              hasZeroByte(word ^ delimMask)
-              || hasZeroByte(word ^ quoteMask)
-              || hasZeroByte(word ^ crMask)
-              || hasZeroByte(word ^ lfMask)
-            if !hitSpecial {
+            let matchBits =
+              XMLSanitizer.zeroByteMask(word ^ delimMask)
+              | XMLSanitizer.zeroByteMask(word ^ quoteMask)
+              | XMLSanitizer.zeroByteMask(word ^ crMask)
+              | XMLSanitizer.zeroByteMask(word ^ lfMask)
+            if matchBits == 0 {
               idx += 8
             } else {
+              idx += matchBits.trailingZeroBitCount >> 3
               break
             }
           }

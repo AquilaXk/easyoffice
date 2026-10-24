@@ -334,11 +334,26 @@
   }
 
   function evaluateBinaryOpString(exprText) {
-    const m = /^([0-9.]+)\s*([+\-*/])\s*([0-9.]+)$/.exec(exprText);
-    if (!m) return null;
-    const a = Number(m[1]);
-    const b = Number(m[3]);
-    const op = m[2];
+    const src = String(exprText || "").trim();
+    let opIdx = -1;
+    let op = "";
+    for (let i = 1; i < src.length - 1; i++) {
+      const ch = src[i];
+      if (ch === "+" || ch === "-" || ch === "*" || ch === "/") {
+        opIdx = i;
+        op = ch;
+        break;
+      }
+    }
+    if (opIdx < 1) return null;
+    const lhs = src.slice(0, opIdx).trim();
+    const rhs = src.slice(opIdx + 1).trim();
+    if (!lhs || !rhs) return null;
+    const a = Number.parseFloat(lhs);
+    const b = Number.parseFloat(rhs);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || Number(lhs) !== a || Number(rhs) !== b) {
+      return null;
+    }
     if (op === "/" && b === 0) return "#DIV/0!";
     let res = 0;
     if (op === "+") res = a + b;
@@ -400,10 +415,9 @@
 
   function updateSheetSelectionAndAggregates(cellRef) {
     activeSheetCellRef = cellRef;
-    const colMatch = /^[A-Z]+/.exec(cellRef);
-    const rowMatch = /\d+$/.exec(cellRef);
-    const colLetter = colMatch ? colMatch[0] : cellRef.charAt(0);
-    const rowNumber = rowMatch ? rowMatch[0] : cellRef.slice(1);
+    const parsedRef = /^([A-Z]+)(\d+)$/.exec(String(cellRef || "").trim().toUpperCase());
+    const colLetter = parsedRef ? parsedRef[1] : cellRef.charAt(0);
+    const rowNumber = parsedRef ? parsedRef[2] : cellRef.slice(1);
 
     document.querySelectorAll("#pane-sheet th[data-col]").forEach((th) => {
       th.classList.toggle("active-axis", th.dataset.col === colLetter);
@@ -1032,19 +1046,21 @@
     if (sheetTabBar) {
       sheetTabBar.addEventListener("click", (e) => {
         const btn = e.target.closest(".sheet-tab-btn");
-        if (!btn) return;
+        if (!btn || btn.id === "btn-add-sheet-tab") return;
         sheetTabBar.querySelectorAll(".sheet-tab-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
       });
     }
     if (addSheetBtn && sheetTabBar) {
       addSheetBtn.addEventListener("click", () => {
-        const count = sheetTabBar.querySelectorAll(".sheet-tab-btn").length + 1;
+        const count = sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").length + 1;
         const newTab = document.createElement("button");
         newTab.className = "sheet-tab-btn";
         newTab.dataset.sheetTab = "Sheet" + count;
         newTab.textContent = "Sheet" + count;
-        sheetTabBar.insertBefore(newTab, addSheetBtn);
+        addSheetBtn.before(newTab);
+        sheetTabBar.querySelectorAll(".sheet-tab-btn").forEach((b) => b.classList.remove("active"));
+        newTab.classList.add("active");
       });
     }
   }

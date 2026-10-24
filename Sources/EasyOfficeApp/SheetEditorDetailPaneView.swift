@@ -1183,7 +1183,6 @@ public struct SheetEditorDetailPaneView: View {
         HStack(spacing: 0) {
           ForEach(Array(sheet.allSheetNames.enumerated()), id: \.offset) { idx, rawSheetName in
             let isActiveTab = idx == sheet.activeSheetIndex
-            let displaySheetName = rawSheetName == "검증집계시트" ? "분기별 집계" : rawSheetName
             Button {
               guard isPrimaryPane else { return }
               viewModel.selectWorksheetTab(index: idx)
@@ -1191,7 +1190,7 @@ public struct SheetEditorDetailPaneView: View {
               HStack(spacing: 5) {
                 Image(systemName: "tablecells")
                   .font(.system(size: 10))
-                Text(displaySheetName)
+                Text(rawSheetName)
                   .font(.system(size: 11, weight: isActiveTab ? .bold : .medium))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
