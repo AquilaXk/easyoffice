@@ -140,7 +140,7 @@ public enum BitPacking {
     return text
   }
 
-  /// Decodes raw UTF-16LE bytes of `byteLength` starting at `offset`.
+  /// Decodes raw UTF-16LE bytes of `byteLength` starting at `offset` using a 64-bit SWAR ASCII fast path (`0xFF80_FF80_FF80_FF80`).
   public static func decodeUTF16LE(from data: Data, at offset: Int, byteLength: Int) throws
     -> String
   {
@@ -152,6 +152,56 @@ public enum BitPacking {
     let unitCount = byteLength / 2
     if unitCount == 0 { return "" }
     return data.withUnsafeBytes { rawBuffer in
+      var isPureASCII = true
+      var scanCursor = 0
+      while scanCursor <= byteLength - 8 {
+        let word =
+          rawBuffer.loadUnaligned(fromByteOffset: offset + scanCursor, as: UInt64.self)
+          .littleEndian
+        if (word & 0xFF80_FF80_FF80_FF80) != 0 {
+          isPureASCII = false
+          break
+        }
+        scanCursor += 8
+      }
+      if isPureASCII {
+        while scanCursor < byteLength {
+          let unit =
+            rawBuffer.loadUnaligned(fromByteOffset: offset + scanCursor, as: UInt16.self)
+            .littleEndian
+          if (unit & 0xFF80) != 0 {
+            isPureASCII = false
+            break
+          }
+          scanCursor += 2
+        }
+      }
+      if isPureASCII {
+        var asciiBytes = [UInt8](repeating: 0, count: unitCount)
+        var srcOffset = 0
+        var dstIdx = 0
+        while srcOffset <= byteLength - 8 {
+          let word =
+            rawBuffer.loadUnaligned(fromByteOffset: offset + srcOffset, as: UInt64.self)
+            .littleEndian
+          asciiBytes[dstIdx] = UInt8(truncatingIfNeeded: word)
+          asciiBytes[dstIdx + 1] = UInt8(truncatingIfNeeded: word >> 16)
+          asciiBytes[dstIdx + 2] = UInt8(truncatingIfNeeded: word >> 32)
+          asciiBytes[dstIdx + 3] = UInt8(truncatingIfNeeded: word >> 48)
+          srcOffset += 8
+          dstIdx += 4
+        }
+        while srcOffset < byteLength {
+          let unit =
+            rawBuffer.loadUnaligned(fromByteOffset: offset + srcOffset, as: UInt16.self)
+            .littleEndian
+          asciiBytes[dstIdx] = UInt8(truncatingIfNeeded: unit)
+          srcOffset += 2
+          dstIdx += 1
+        }
+        return String(decoding: asciiBytes, as: UTF8.self)
+      }
+
       var units = [UInt16](repeating: 0, count: unitCount)
       for idx in 0..<unitCount {
         units[idx] =
@@ -159,6 +209,68 @@ public enum BitPacking {
       }
       return String(decoding: units, as: UTF16.self)
     }
+  }
+}
+
+public typealias BinaryContainerCodec = BitPacking
+
+/// RFC 1950 Adler-32 checksum calculator with `NMAX = 5,552` deferred modulo reduction.
+public enum Adler32Calculator {
+  public static let modulo: UInt32 = 65_521
+  public static let nmax: Int = 5_552
+
+  public static func compute(for data: Data) -> UInt32 {
+    var s1: UInt32 = 1
+    var s2: UInt32 = 0
+    data.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> Void in
+      let count = rawBuffer.count
+      var offset = 0
+      while offset < count {
+        let chunkEnd = min(count, offset + nmax)
+        while offset <= chunkEnd - 8 {
+          s1 &+= UInt32(rawBuffer[offset])
+          s2 &+= s1
+          s1 &+= UInt32(rawBuffer[offset + 1])
+          s2 &+= s1
+          s1 &+= UInt32(rawBuffer[offset + 2])
+          s2 &+= s1
+          s1 &+= UInt32(rawBuffer[offset + 3])
+          s2 &+= s1
+          s1 &+= UInt32(rawBuffer[offset + 4])
+          s2 &+= s1
+          s1 &+= UInt32(rawBuffer[offset + 5])
+          s2 &+= s1
+          s1 &+= UInt32(rawBuffer[offset + 6])
+          s2 &+= s1
+          s1 &+= UInt32(rawBuffer[offset + 7])
+          s2 &+= s1
+          offset += 8
+        }
+        while offset < chunkEnd {
+          s1 &+= UInt32(rawBuffer[offset])
+          s2 &+= s1
+          offset += 1
+        }
+        s1 %= modulo
+        s2 %= modulo
+      }
+    }
+    return (s2 << 16) | s1
+  }
+
+  public static func verifyZlibTrailer(in zlibData: Data, decompressed: Data) -> Bool {
+    guard zlibData.count >= 6 else { return false }
+    let base = zlibData.startIndex
+    let cmf = UInt16(zlibData[base])
+    let flg = UInt16(zlibData[base + 1])
+    guard (cmf & 0x0F) == 8, ((cmf << 8) | flg) % 31 == 0 else { return false }
+    let trailerBase = base + zlibData.count - 4
+    let b0 = UInt32(zlibData[trailerBase])
+    let b1 = UInt32(zlibData[trailerBase + 1])
+    let b2 = UInt32(zlibData[trailerBase + 2])
+    let b3 = UInt32(zlibData[trailerBase + 3])
+    let expectedAdler = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+    return expectedAdler == compute(for: decompressed)
   }
 }
 

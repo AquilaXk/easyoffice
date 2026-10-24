@@ -375,6 +375,7 @@ public struct SheetEditorDetailPaneView: View {
   @Bindable var viewModel: WorkspaceViewModel
   let sheet: WorksheetModel
   let isPrimaryPane: Bool
+  @State private var inlineEditingCoord: PackedCellCoordinate? = nil
 
   public init(viewModel: WorkspaceViewModel, sheet: WorksheetModel, isPrimaryPane: Bool = true) {
     self.viewModel = viewModel
@@ -1015,6 +1016,7 @@ public struct SheetEditorDetailPaneView: View {
                   columnLabels: columnLabels,
                   columnIndices: 0..<1,
                   includeRowHeader: true,
+                  activeRange: activeRange,
                   palette: palette
                 )
                 if viewModel.isHeaderRowFrozen {
@@ -1083,6 +1085,7 @@ public struct SheetEditorDetailPaneView: View {
                     columnLabels: columnLabels,
                     columnIndices: 1..<columnLabels.count,
                     includeRowHeader: false,
+                    activeRange: activeRange,
                     palette: palette
                   )
                   if viewModel.isHeaderRowFrozen {
@@ -1158,6 +1161,7 @@ public struct SheetEditorDetailPaneView: View {
                 columnLabels: columnLabels,
                 columnIndices: 0..<columnLabels.count,
                 includeRowHeader: true,
+                activeRange: activeRange,
                 palette: palette
               )
 
@@ -1448,8 +1452,12 @@ public struct SheetEditorDetailPaneView: View {
     columnLabels: [String],
     columnIndices: Range<Int>,
     includeRowHeader: Bool,
+    activeRange: CellRange,
     palette: WorkspaceThemePalette
   ) -> some View {
+    let selMinCol = min(activeRange.start.column, activeRange.end.column)
+    let selMaxCol = max(activeRange.start.column, activeRange.end.column)
+
     HStack(spacing: 0) {
       if includeRowHeader {
         Text("#")
@@ -1466,16 +1474,31 @@ public struct SheetEditorDetailPaneView: View {
       ForEach(Array(columnIndices), id: \.self) { colIdx in
         let colLabel = columnLabels[colIdx]
         let colWidth = CGFloat(sheet.columnWidth(at: colIdx))
+        let isColSelected = (colIdx >= selMinCol && colIdx <= selMaxCol)
         ZStack(alignment: .trailing) {
           Text(colLabel)
             .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .foregroundStyle(palette.primaryText.swiftUIColor)
+            .foregroundStyle(
+              isColSelected
+                ? palette.primaryAccent.swiftUIColor : palette.primaryText.swiftUIColor
+            )
             .frame(width: colWidth, height: 26)
-            .background(palette.elevatedSurface.swiftUIColor)
+            .background(
+              isColSelected
+                ? palette.primaryAccent.swiftUIColor.opacity(0.20)
+                : palette.elevatedSurface.swiftUIColor
+            )
             .overlay(
               Rectangle()
                 .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
             )
+            .overlay(alignment: .bottom) {
+              if isColSelected {
+                Rectangle()
+                  .fill(palette.primaryAccent.swiftUIColor)
+                  .frame(height: 2)
+              }
+            }
             .help("\(colLabel)열 (너비: \(Int(colWidth))pt)")
 
           if isPrimaryPane {
@@ -1522,20 +1545,35 @@ public struct SheetEditorDetailPaneView: View {
     let selMaxRow = max(activeRange.start.row, activeRange.end.row)
     let selMinCol = min(activeRange.start.column, activeRange.end.column)
     let selMaxCol = max(activeRange.start.column, activeRange.end.column)
+    let isRowSelected = (zeroRow >= selMinRow && zeroRow <= selMaxRow)
 
     HStack(spacing: 0) {
       if includeRowHeader {
-        // Row Header with Bottom 4pt Drag Resize Handle
+        // Row Header with Bottom 4pt Drag Resize Handle & Active Row Highlight
         ZStack(alignment: .bottom) {
           Text("\(row)")
             .font(.system(size: 10, weight: .bold, design: .monospaced))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .foregroundStyle(
+              isRowSelected
+                ? palette.primaryAccent.swiftUIColor : palette.secondaryText.swiftUIColor
+            )
             .frame(width: 36, height: rowHeightPt)
-            .background(palette.elevatedSurface.swiftUIColor)
+            .background(
+              isRowSelected
+                ? palette.primaryAccent.swiftUIColor.opacity(0.20)
+                : palette.elevatedSurface.swiftUIColor
+            )
             .overlay(
               Rectangle()
                 .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
             )
+            .overlay(alignment: .trailing) {
+              if isRowSelected {
+                Rectangle()
+                  .fill(palette.primaryAccent.swiftUIColor)
+                  .frame(width: 2)
+              }
+            }
 
           if isPrimaryPane {
             Rectangle()
@@ -1615,6 +1653,9 @@ public struct SheetEditorDetailPaneView: View {
     let displayValue = sheet.formattedDisplayValue(at: cellAddress, using: evaluatedGrid)
     let cellStyle = sheet.cellStyle(at: coord)
     let hasComment = sheet.sheetComments[coord] != nil
+    let matchingMergedRange = sheet.mergedRanges.first(where: { $0.contains(coord) })
+    let isMergedAnchor = matchingMergedRange?.start == cellAddress
+    let isInlineEditing = isPrimaryPane && (inlineEditingCoord == coord)
     let isCondHighlighted =
       viewModel.activeConditionalFormatRule?.matches(
         evaluated,
@@ -1645,6 +1686,9 @@ public struct SheetEditorDetailPaneView: View {
 
     Button {
       guard isPrimaryPane else { return }
+      if inlineEditingCoord != coord {
+        inlineEditingCoord = nil
+      }
       if NSEvent.modifierFlags.contains(.shift) {
         viewModel.extendSheetSelection(to: addr)
       } else {
@@ -1668,20 +1712,44 @@ public struct SheetEditorDetailPaneView: View {
           }
         }
 
-        Text(displayValue)
-          .font(.system(size: 12, weight: (cellStyle.isBold || row == 1) ? .bold : .regular))
-          .italic(cellStyle.isItalic)
-          .underline(cellStyle.isUnderlined)
-          .foregroundStyle(
-            cellTextColor
-              ?? (isCondHighlighted
-                ? palette.accentBadgeText.swiftUIColor
-                : palette.primaryText.swiftUIColor)
-          )
-          .lineLimit(cellStyle.wrapText ? 2 : 1)
-          .frame(maxWidth: .infinity, alignment: frameAlignment)
-          .padding(.horizontal, 6)
-          .padding(.vertical, 3)
+        if isInlineEditing {
+          TextField("셀 값 입력", text: $viewModel.formulaBarDraft)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .foregroundStyle(palette.primaryText.swiftUIColor)
+            .padding(.horizontal, 6)
+            .onSubmit {
+              viewModel.applyFormulaBarEdit()
+              inlineEditingCoord = nil
+            }
+        } else {
+          Text(displayValue)
+            .font(.system(size: 12, weight: (cellStyle.isBold || row == 1) ? .bold : .regular))
+            .italic(cellStyle.isItalic)
+            .underline(cellStyle.isUnderlined)
+            .foregroundStyle(
+              cellTextColor
+                ?? (isCondHighlighted
+                  ? palette.accentBadgeText.swiftUIColor
+                  : palette.primaryText.swiftUIColor)
+            )
+            .lineLimit(cellStyle.wrapText ? 2 : 1)
+            .frame(maxWidth: .infinity, alignment: frameAlignment)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+        }
+
+        if isMergedAnchor {
+          Text("병합")
+            .font(.system(size: 7.5, weight: .bold))
+            .padding(.horizontal, 3)
+            .padding(.vertical, 0.5)
+            .background(palette.primaryAccent.swiftUIColor.opacity(0.18))
+            .foregroundStyle(palette.primaryAccent.swiftUIColor)
+            .clipShape(RoundedRectangle(cornerRadius: 2))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(2)
+        }
 
         if hasComment {
           Circle()
@@ -1704,7 +1772,12 @@ public struct SheetEditorDetailPaneView: View {
       )
       .overlay(
         Rectangle()
-          .strokeBorder(palette.border.swiftUIColor.opacity(0.65), lineWidth: 0.5)
+          .strokeBorder(
+            matchingMergedRange != nil
+              ? palette.primaryAccent.swiftUIColor.opacity(0.55)
+              : palette.border.swiftUIColor.opacity(0.65),
+            lineWidth: matchingMergedRange != nil ? 1.0 : 0.5
+          )
       )
       .overlay(alignment: .top) {
         if isSelectionTopEdge {
@@ -1775,6 +1848,14 @@ public struct SheetEditorDetailPaneView: View {
       }
     }
     .buttonStyle(.plain)
+    .simultaneousGesture(
+      TapGesture(count: 2)
+        .onEnded {
+          guard isPrimaryPane else { return }
+          viewModel.selectSheetCellOrRange(primaryCell: addr)
+          inlineEditingCoord = coord
+        }
+    )
     .simultaneousGesture(
       DragGesture(minimumDistance: 12)
         .onEnded { value in

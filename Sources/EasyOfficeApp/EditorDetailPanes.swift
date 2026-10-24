@@ -243,20 +243,24 @@ public struct DocumentHorizontalRulerView: View {
   public let document: OfficeDocumentModel
   public let selectedParagraph: ParagraphBlock?
   public let palette: WorkspaceThemePalette
+  public var viewModel: WorkspaceViewModel?
 
   public init(
     document: OfficeDocumentModel,
     selectedParagraph: ParagraphBlock?,
-    palette: WorkspaceThemePalette
+    palette: WorkspaceThemePalette,
+    viewModel: WorkspaceViewModel? = nil
   ) {
     self.document = document
     self.selectedParagraph = selectedParagraph
     self.palette = palette
+    self.viewModel = viewModel
   }
 
   public var body: some View {
-    let leftMarginPt: CGFloat = 54.0
-    let rightMarginPt: CGFloat = 54.0
+    let customPadding = viewModel?.documentHorizontalPadding ?? 28.0
+    let leftMarginPt: CGFloat = max(24.0, min(96.0, CGFloat(customPadding + 26.0)))
+    let rightMarginPt: CGFloat = leftMarginPt
     let firstLineOffsetPt = CGFloat(selectedParagraph?.firstLineIndentPt ?? 0.0)
     let leftIndentOffsetPt = CGFloat(selectedParagraph?.leftIndentPt ?? 0.0)
 
@@ -310,7 +314,7 @@ public struct DocumentHorizontalRulerView: View {
           }
         }
 
-        // Visual Indent Markers (▽ First-Line Indent & △ Left Indent)
+        // Interactive Indent & Margin Markers (▽ First-Line Indent, △ Left Margin/Indent, ▽ Right Margin)
         Text("▽")
           .font(.system(size: 9, weight: .bold))
           .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
@@ -319,7 +323,18 @@ public struct DocumentHorizontalRulerView: View {
               totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt + firstLineOffsetPt),
             y: 5
           )
-          .help("첫 줄 들여쓰기 (\(Int(selectedParagraph?.firstLineIndentPt ?? 0))pt)")
+          .gesture(
+            DragGesture(minimumDistance: 2)
+              .onChanged { drag in
+                let newPadding = max(16.0, min(96.0, Double(drag.location.x) - 26.0))
+                viewModel?.setDocumentHorizontalPadding(newPadding)
+              }
+          )
+          .onTapGesture {
+            let nextPadding = customPadding >= 56.0 ? 28.0 : (customPadding + 14.0)
+            viewModel?.setDocumentHorizontalPadding(nextPadding)
+          }
+          .help("첫 줄 들여쓰기 · 드래그 또는 클릭하여 여백 조절 (\(Int(customPadding))pt)")
 
         Text("△")
           .font(.system(size: 9, weight: .bold))
@@ -328,12 +343,30 @@ public struct DocumentHorizontalRulerView: View {
             x: min(totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt),
             y: 19
           )
-          .help("왼쪽 들여쓰기 (\(Int(selectedParagraph?.leftIndentPt ?? 0))pt)")
+          .gesture(
+            DragGesture(minimumDistance: 2)
+              .onChanged { drag in
+                let newPadding = max(16.0, min(96.0, Double(drag.location.x) - 26.0))
+                viewModel?.setDocumentHorizontalPadding(newPadding)
+              }
+          )
+          .onTapGesture {
+            let nextPadding = customPadding >= 56.0 ? 28.0 : (customPadding + 14.0)
+            viewModel?.setDocumentHorizontalPadding(nextPadding)
+          }
+          .help("왼쪽 여백·들여쓰기 마커 (\(Int(customPadding))pt)")
 
         Text("▽")
           .font(.system(size: 9, weight: .bold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
           .position(x: totalWidth - rightMarginPt, y: 19)
+          .gesture(
+            DragGesture(minimumDistance: 2)
+              .onChanged { drag in
+                let distFromRight = max(24.0, min(96.0, Double(totalWidth - drag.location.x)))
+                viewModel?.setDocumentHorizontalPadding(max(16.0, distFromRight - 26.0))
+              }
+          )
           .help("오른쪽 여백 경계 (\(Int(rightMarginPt))pt)")
       }
       .overlay(
@@ -1146,7 +1179,8 @@ public struct DocumentEditorDetailPaneView: View {
             DocumentHorizontalRulerView(
               document: document,
               selectedParagraph: selectedParagraph,
-              palette: palette
+              palette: palette,
+              viewModel: viewModel
             )
             .frame(maxWidth: paperMaxWidth)
           }
@@ -1186,6 +1220,9 @@ public struct DocumentEditorDetailPaneView: View {
                 if viewModel.isManuscriptGridModeEnabled {
                   HWPManuscriptGridPaperView(document: document, palette: palette)
                 } else {
+                  if viewModel.workspaceViewMode == .outlineView {
+                    documentOutlineTreePanel(palette: palette)
+                  }
                   // Compact Auto Table of Contents Card
                   if !tocEntries.isEmpty {
                     HStack(spacing: 10) {
@@ -1398,7 +1435,7 @@ public struct DocumentEditorDetailPaneView: View {
                   Spacer()
                 }
               }
-              .padding(.horizontal, 28)
+              .padding(.horizontal, CGFloat(viewModel.documentHorizontalPadding))
               .padding(.vertical, 16)
               .background(palette.cardSurface.swiftUIColor)
               .overlay(
@@ -2001,6 +2038,135 @@ public struct DocumentEditorDetailPaneView: View {
     case .none:
       EmptyView()
     }
+  }
+
+  private func documentOutlineTreePanel(palette: WorkspaceThemePalette) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 8) {
+        Image(systemName: "list.bullet.indent")
+          .font(.system(size: 11, weight: .bold))
+          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        Text("문서 윤곽(Outline) 계층 구조")
+          .font(.system(size: 11, weight: .bold))
+          .foregroundStyle(palette.primaryText.swiftUIColor)
+        Spacer()
+        Button("모두 펼치기") {
+          viewModel.collapsedOutlineParagraphIDs.removeAll()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+        Button("모두 접기") {
+          let headingIDs = document.paragraphs
+            .filter { $0.style == .heading1 || $0.style == .heading2 }
+            .map(\.id)
+          viewModel.collapsedOutlineParagraphIDs = Set(headingIDs)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+      }
+
+      ForEach(Array(document.paragraphs.enumerated()), id: \.element.id) { idx, p in
+        let isHeading = (p.style == .heading1 || p.style == .heading2)
+        let isCollapsed = viewModel.collapsedOutlineParagraphIDs.contains(p.id)
+        let levelIndent: CGFloat = {
+          switch p.style {
+          case .title, .officialHeader: return 0
+          case .heading1: return 4
+          case .heading2: return 14
+          case .heading3: return 22
+          case .body: return 28
+          case .quote: return 36
+          }
+        }()
+        let levelBadge: String = {
+          switch p.style {
+          case .title: return "표제"
+          case .officialHeader: return "두문"
+          case .heading1: return "수준 1"
+          case .heading2: return "수준 2"
+          case .heading3: return "수준 3"
+          case .body: return "본문"
+          case .quote: return "인용"
+          }
+        }()
+
+        HStack(spacing: 6) {
+          Spacer().frame(width: levelIndent)
+          if isHeading {
+            Button {
+              if isCollapsed {
+                viewModel.collapsedOutlineParagraphIDs.remove(p.id)
+              } else {
+                viewModel.collapsedOutlineParagraphIDs.insert(p.id)
+              }
+            } label: {
+              Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .frame(width: 14, height: 14)
+            }
+            .buttonStyle(.plain)
+          } else {
+            Circle()
+              .fill(palette.secondaryText.swiftUIColor.opacity(0.6))
+              .frame(width: 5, height: 5)
+              .padding(.horizontal, 4.5)
+          }
+
+          Text(levelBadge)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(
+              isHeading
+                ? EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.16)
+                : palette.selectedSurface.swiftUIColor
+            )
+            .foregroundStyle(
+              isHeading
+                ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                : palette.secondaryText.swiftUIColor
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+          Button {
+            viewModel.selectedParagraphID = p.id
+          } label: {
+            Text(p.text.isEmpty ? "(빈 단락 \(idx + 1))" : p.text)
+              .font(.system(size: 10.5, weight: isHeading ? .semibold : .regular))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .lineLimit(1)
+          }
+          .buttonStyle(.plain)
+
+          Spacer(minLength: 4)
+
+          Text("\(p.text.count)자")
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+          Button("◀ 승격") {
+            viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: -1)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+
+          Button("강등 ▶") {
+            viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: 1)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.mini)
+        }
+        .padding(.vertical, 2)
+      }
+    }
+    .padding(10)
+    .background(palette.elevatedSurface.swiftUIColor)
+    .overlay(
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(EasyOfficeDesignTokens.brand500.swiftUIColor.opacity(0.45), lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 6))
   }
 }
 

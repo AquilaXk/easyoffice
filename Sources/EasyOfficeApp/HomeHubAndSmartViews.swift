@@ -674,15 +674,30 @@ struct BatchConversionStudioHubView: View {
         }
 
         ForEach(report.succeededResults) { item in
-          HStack {
+          let srcExt =
+            item.sourceFileName.split(separator: ".").last.map { String($0).uppercased() } ?? "DOC"
+          let dstExt = item.targetFormat.rawValue.uppercased()
+          HStack(spacing: 8) {
+            Text("\(srcExt) → \(dstExt)")
+              .font(.system(size: 10, weight: .bold, design: .monospaced))
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.16))
+              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .clipShape(RoundedRectangle(cornerRadius: 4))
+
             Text(item.sourceFileName)
               .font(.system(size: 12, weight: .medium))
             Image(systemName: "arrow.right")
               .font(.system(size: 10))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
             Text(item.outputFileName)
               .font(.system(size: 11, weight: .bold, design: .monospaced))
+            Text(item.targetFormat.shortSpecificationBadge)
+              .font(.system(size: 9.5, design: .monospaced))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
             Spacer()
-            Text("완료 (\(item.outputBytes.count) bytes)")
+            Text("검증 완료 (\(item.outputBytes.count) bytes)")
               .font(.system(size: 11, design: .monospaced))
               .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
           }
@@ -695,11 +710,33 @@ struct BatchConversionStudioHubView: View {
             .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
         }
       } else {
-        Text(
-          "열려 있는 모든 문서 탭을 선택한 표준 포맷(PDF, DOCX, HWPX, ODT, XLSX, CSV, MD)으로 일괄 변환하고 바이트 무결성을 검증합니다."
-        )
-        .font(.system(size: 12))
-        .foregroundStyle(palette.secondaryText.swiftUIColor)
+        VStack(alignment: .leading, spacing: 6) {
+          Text(
+            "열려 있는 모든 문서 탭(\(viewModel.openTabs.count)건)을 선택한 표준 포맷(PDF, DOCX, HWPX, ODT, XLSX, CSV, MD)으로 일괄 변환하고 바이트 무결성을 검증합니다."
+          )
+          .font(.system(size: 12))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+          HStack(spacing: 8) {
+            ForEach(viewModel.openTabs) { tab in
+              let srcExt = tab.format.rawValue.uppercased()
+              let dstExt = viewModel.batchTargetFormat.rawValue.uppercased()
+              HStack(spacing: 4) {
+                Text("\(srcExt)→\(dstExt)")
+                  .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                Text(tab.fileName)
+                  .font(.system(size: 10.5))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                  .lineLimit(1)
+              }
+              .padding(.horizontal, 8)
+              .padding(.vertical, 4)
+              .background(palette.elevatedSurface.swiftUIColor)
+              .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+          }
+        }
       }
     }
     .padding(16)
