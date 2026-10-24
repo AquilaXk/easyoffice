@@ -1,0 +1,8 @@
+[package]
+name = "easyoffice-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+easyoffice-formats = { path = "../easyoffice-formats" }

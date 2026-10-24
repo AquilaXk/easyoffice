@@ -1,0 +1,18 @@
+[package]
+name = "easyoffice-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "easyoffice_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "easyoffice-app"
+path = "src/main.rs"
+
+[dependencies]
+easyoffice-formats = { path = "../easyoffice-formats" }
+easyoffice-sheet = { path = "../easyoffice-sheet" }
+easyoffice-layout = { path = "../easyoffice-layout" }

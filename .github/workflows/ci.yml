@@ -34,6 +34,15 @@ jobs:
       - name: Check Swift toolchain version
         run: swift --version
 
+      - name: Check Rust toolchain version
+        run: cargo --version && rustc --version
+
+      - name: Run Rust cross-platform workspace test suite
+        run: cargo test --workspace
+
+      - name: Run Rust Tauri v2 desktop host self-test
+        run: cargo run -p easyoffice-app -- --self-test
+
       - name: Build all Swift targets
         run: swift build
 

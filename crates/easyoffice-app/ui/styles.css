@@ -1,0 +1,247 @@
+:root {
+  --brand-50: #F8F9FF;
+  --brand-100: #F0F2FE;
+  --brand-200: #E2E5FD;
+  --brand-700: #5C6BC0;
+  --brand-800: #4A58A9;
+  --brand-900: #3B4890;
+  --scaffold-bg: #F7F8FC;
+  --surface-bg: #FFFFFF;
+  --elevated-bg: #F0F2F7;
+  --border-color: #E1E4EE;
+  --text-primary: #1F2340;
+  --text-secondary: #4D536B;
+  --accent-doc: #5C6BC0;
+  --accent-hwp: #6E56CF;
+  --accent-sheet: #0A705A;
+  --accent-slide: #D96B27;
+  --accent-pdf: #D9383A;
+}
+
+body[data-theme="dark"] {
+  --scaffold-bg: #141724;
+  --surface-bg: #1B2032;
+  --elevated-bg: #242B42;
+  --border-color: #2C3452;
+  --text-primary: #F8F9FD;
+  --text-secondary: #8A94B8;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+  background-color: var(--scaffold-bg);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.workspace-shell {
+  display: grid;
+  grid-template-rows: 40px 72px 1fr 28px;
+  height: 100vh;
+}
+
+.top-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--surface-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.qat-group,
+.tab-strip,
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-strip {
+  flex: 1;
+  overflow-x: auto;
+}
+
+.pill-btn,
+.doc-tab,
+.ribbon-cat,
+.cmd-btn,
+.filter-chip {
+  border: 1px solid var(--border-color);
+  background: var(--elevated-bg);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pill-btn.active,
+.doc-tab.active,
+.ribbon-cat.active,
+.filter-chip.active {
+  background: var(--brand-700);
+  color: #FFFFFF;
+  border-color: var(--brand-800);
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 4px;
+  color: #FFFFFF;
+}
+
+.badge-doc { background: var(--accent-doc); }
+.badge-hwp { background: var(--accent-hwp); }
+.badge-sheet { background: var(--accent-sheet); }
+.badge-slide { background: var(--accent-slide); }
+.badge-pdf { background: var(--accent-pdf); }
+
+.search-capsule {
+  display: flex;
+  align-items: center;
+  background: var(--elevated-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.search-capsule input {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.shortcut-badge {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: 6px;
+}
+
+.context-ribbon {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ribbon-categories,
+.ribbon-commands {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.main-stage {
+  display: grid;
+  grid-template-columns: 224px 1fr 268px;
+  overflow: hidden;
+}
+
+.left-navigator,
+.right-inspector {
+  background: var(--surface-bg);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.left-navigator {
+  border-right: 1px solid var(--border-color);
+}
+
+.right-inspector {
+  border-left: 1px solid var(--border-color);
+}
+
+.pane-heading {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.recent-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.outline-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.editor-canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.editor-toolbar {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.a4-sheet {
+  width: 595px;
+  min-height: 760px;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 48px;
+  line-height: 1.6;
+}
+
+.inspector-group {
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.inspector-group label {
+  display: block;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.status-safe {
+  color: var(--accent-sheet);
+  font-weight: 600;
+}
+
+.bottom-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--surface-bg);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
