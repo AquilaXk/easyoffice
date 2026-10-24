@@ -11,7 +11,7 @@ struct HomeHubWorkspaceView: View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
     HStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 6) {
+      VStack(alignment: .leading, spacing: 4) {
         Text("EasyOffice")
           .font(.system(size: 18, weight: .bold))
           .foregroundStyle(palette.accentBadgeText.swiftUIColor)
@@ -23,16 +23,19 @@ struct HomeHubWorkspaceView: View {
             viewModel.activeHubSection = section
           } label: {
             HStack(spacing: 10) {
+              Rectangle()
+                .fill(selected ? EasyOfficeDesignTokens.brand600.swiftUIColor : Color.clear)
+                .frame(width: 2.5, height: 16)
               Image(systemName: section.symbolName)
               Text(section.rawValue)
                 .font(.system(size: 13, weight: selected ? .semibold : .regular))
               Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
             .background(
               selected
-                ? palette.selectedSurface.swiftUIColor
+                ? palette.selectedSurface.swiftUIColor.opacity(0.45)
                 : Color.clear
             )
             .foregroundStyle(
@@ -40,7 +43,6 @@ struct HomeHubWorkspaceView: View {
                 ? palette.accentBadgeText.swiftUIColor
                 : palette.primaryText.swiftUIColor
             )
-            .clipShape(RoundedRectangle(cornerRadius: 6))
           }
           .buttonStyle(.plain)
         }
@@ -67,7 +69,7 @@ struct HomeHubWorkspaceView: View {
 
           case .home, .recent, .pinned, .templates:
             VStack(alignment: .leading, spacing: 10) {
-              Text("새 문서 빠른 시작 (5대 포맷 런처)")
+              Text("새 문서 만들기")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
 
@@ -80,7 +82,7 @@ struct HomeHubWorkspaceView: View {
                     VStack(alignment: .leading, spacing: 0) {
                       Rectangle()
                         .fill(accent.swiftUIColor)
-                        .frame(height: 4)
+                        .frame(height: 3)
 
                       VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -89,12 +91,8 @@ struct HomeHubWorkspaceView: View {
                             .foregroundStyle(accent.swiftUIColor)
                           Spacer(minLength: 4)
                           Text(module.quickLauncherFormatBadge)
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                             .foregroundStyle(accent.swiftUIColor)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(accent.swiftUIColor.opacity(0.14))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
@@ -112,11 +110,7 @@ struct HomeHubWorkspaceView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(palette.cardSurface.swiftUIColor)
-                    .overlay(
-                      RoundedRectangle(cornerRadius: 10)
-                        .stroke(palette.border.swiftUIColor, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .border(palette.border.swiftUIColor, width: 1)
                   }
                   .buttonStyle(.plain)
                 }
@@ -139,15 +133,17 @@ struct HomeHubWorkspaceView: View {
             }
 
             if viewModel.activeHubSection == .home || viewModel.activeHubSection == .templates {
+              Divider()
+
               VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+                HStack(spacing: 12) {
                   Text(
-                    "표준 및 사용자 서식 템플릿 (\(filteredTemplates.count) / \(viewModel.allAvailableTemplates.count)종)"
+                    "서식 템플릿 (\(filteredTemplates.count) / \(viewModel.allAvailableTemplates.count))"
                   )
                   .font(.system(size: 15, weight: .bold))
                   .foregroundStyle(palette.primaryText.swiftUIColor)
                   Spacer()
-                  LavenderTextFieldPill(
+                  FlatUnderlineTextField(
                     placeholder: "사용자 템플릿 이름 (선택)",
                     text: $viewModel.customTemplateTitleDraft,
                     symbolName: "doc.badge.plus",
@@ -155,40 +151,39 @@ struct HomeHubWorkspaceView: View {
                     palette: palette,
                     isSnapshotMode: viewModel.isCanvasSnapshotMode
                   )
-                  Button("현재 탭을 사용자 템플릿으로 저장") {
+                  Button("현재 탭을 템플릿으로 저장") {
                     viewModel.saveActiveTabAsCustomTemplate(
                       title: nil,
                       subtitle: "현재 활성 문서 기반 커스텀 템플릿"
                     )
                   }
+                  .buttonStyle(.plain)
                   .font(.system(size: 11, weight: .semibold))
+                  .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
                 }
 
-                HStack(spacing: 6) {
+                HStack(spacing: 14) {
                   ForEach(["전체", "문서·한글", "시트", "슬라이드", "PDF"], id: \.self) { cat in
                     let isSelected = viewModel.selectedHomeTemplateCategoryFilter == cat
                     Button {
                       viewModel.selectedHomeTemplateCategoryFilter = cat
                     } label: {
-                      Text(cat)
-                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                          isSelected
-                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                            : palette.cardSurface.swiftUIColor
-                        )
-                        .foregroundStyle(
-                          isSelected
-                            ? Color.white
-                            : palette.primaryText.swiftUIColor
-                        )
-                        .overlay(
-                          RoundedRectangle(cornerRadius: 5)
-                            .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                      VStack(spacing: 4) {
+                        Text(cat)
+                          .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
+                          .foregroundStyle(
+                            isSelected
+                              ? palette.primaryText.swiftUIColor
+                              : palette.secondaryText.swiftUIColor
+                          )
+                        Rectangle()
+                          .fill(
+                            isSelected
+                              ? EasyOfficeDesignTokens.brand600.swiftUIColor
+                              : Color.clear
+                          )
+                          .frame(width: 28, height: 2)
+                      }
                     }
                     .buttonStyle(.plain)
                   }
@@ -206,16 +201,10 @@ struct HomeHubWorkspaceView: View {
 
                     HStack {
                       Text(tpl.format.rawValue.uppercased())
-                        .font(.system(size: 10, weight: .bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                          EasyOfficeDesignTokens.softBadgeToken(for: tpl.moduleKind).swiftUIColor
-                        )
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(
                           EasyOfficeDesignTokens.accentToken(for: tpl.moduleKind).swiftUIColor
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
                       if tpl.isCustomUserTemplate {
                         Text("사용자 템플릿")
                           .font(.system(size: 9, weight: .bold))
@@ -234,11 +223,7 @@ struct HomeHubWorkspaceView: View {
                   .padding(12)
                   .frame(maxWidth: .infinity, alignment: .leading)
                   .background(palette.cardSurface.swiftUIColor)
-                  .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                      .stroke(palette.border.swiftUIColor, lineWidth: 1)
-                  )
-                  .clipShape(RoundedRectangle(cornerRadius: 8))
+                  .border(palette.border.swiftUIColor, width: 1)
                   .onTapGesture {
                     viewModel.openTab(from: tpl)
                   }
@@ -252,12 +237,14 @@ struct HomeHubWorkspaceView: View {
             {
               let filteredRecentTabs = viewModel.filteredHomeRecentTabs
 
-              HStack(spacing: 8) {
-                Text("\(viewModel.activeHubSection.rawValue) · 문서 목록 (\(filteredRecentTabs.count)건)")
+              Divider()
+
+              HStack(spacing: 12) {
+                Text("\(viewModel.activeHubSection.rawValue) (\(filteredRecentTabs.count))")
                   .font(.system(size: 15, weight: .bold))
                   .foregroundStyle(palette.primaryText.swiftUIColor)
                 Spacer()
-                HStack(spacing: 6) {
+                HStack(spacing: 12) {
                   ForEach(
                     ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
                     id: \.self
@@ -269,159 +256,115 @@ struct HomeHubWorkspaceView: View {
                     Button {
                       viewModel.selectedHomeRecentFormatFilter = fmt
                     } label: {
-                      Text(fmt)
-                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                          isSelected
-                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                            : palette.cardSurface.swiftUIColor
-                        )
-                        .foregroundStyle(
-                          isSelected
-                            ? Color.white
-                            : palette.primaryText.swiftUIColor
-                        )
-                        .overlay(
-                          RoundedRectangle(cornerRadius: 5)
-                            .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                      VStack(spacing: 3) {
+                        Text(fmt)
+                          .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                          .foregroundStyle(
+                            isSelected
+                              ? palette.primaryText.swiftUIColor
+                              : palette.secondaryText.swiftUIColor
+                          )
+                        Rectangle()
+                          .fill(
+                            isSelected
+                              ? EasyOfficeDesignTokens.brand600.swiftUIColor
+                              : Color.clear
+                          )
+                          .frame(width: 24, height: 2)
+                      }
                     }
                     .buttonStyle(.plain)
                   }
                 }
               }
 
-              VStack(spacing: 8) {
+              VStack(spacing: 0) {
                 ForEach(filteredRecentTabs) { tab in
                   let moduleAccent = EasyOfficeDesignTokens.accentToken(for: tab.moduleKind)
                     .swiftUIColor
-                  HStack(spacing: 10) {
-                    Image(systemName: tab.moduleKind.systemSymbolName)
-                      .font(.system(size: 14, weight: .semibold))
-                      .foregroundStyle(moduleAccent)
-                      .frame(width: 22)
+                  VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                      Image(systemName: tab.moduleKind.systemSymbolName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(moduleAccent)
+                        .frame(width: 20)
 
-                    Text(tab.moduleKind.shortBadgeTitle)
-                      .font(.system(size: 10, weight: .bold))
-                      .padding(.horizontal, 6)
-                      .padding(.vertical, 3)
-                      .background(
-                        EasyOfficeDesignTokens.softBadgeToken(for: tab.moduleKind).swiftUIColor
-                      )
-                      .foregroundStyle(moduleAccent)
-                      .clipShape(RoundedRectangle(cornerRadius: 4))
+                      Text(tab.moduleKind.shortBadgeTitle)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(moduleAccent)
+                        .frame(width: 44, alignment: .leading)
 
-                    Text(tab.format.rawValue.uppercased())
-                      .font(.system(size: 9, weight: .bold, design: .monospaced))
-                      .padding(.horizontal, 5)
-                      .padding(.vertical, 2)
-                      .background(palette.elevatedSurface.swiftUIColor)
-                      .foregroundStyle(palette.secondaryText.swiftUIColor)
-                      .clipShape(RoundedRectangle(cornerRadius: 4))
+                      Text(tab.format.rawValue.uppercased())
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(palette.secondaryText.swiftUIColor)
+                        .frame(width: 44, alignment: .leading)
 
-                    Text(tab.fileName)
-                      .font(.system(size: 13, weight: .medium))
-                      .foregroundStyle(palette.primaryText.swiftUIColor)
+                      Text(tab.fileName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(palette.primaryText.swiftUIColor)
 
-                    Text(tab.isModified ? "수정됨" : "정상")
-                      .font(.system(size: 10, weight: .semibold))
-                      .padding(.horizontal, 6)
-                      .padding(.vertical, 2)
-                      .background(
-                        (tab.isModified
-                          ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                          : EasyOfficeDesignTokens.statusSuccess.swiftUIColor).opacity(0.14)
-                      )
-                      .foregroundStyle(
-                        tab.isModified
-                          ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                          : EasyOfficeDesignTokens.statusSuccess.swiftUIColor
-                      )
-                      .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                    Spacer()
-
-                    Text(tab.lastOpenedISO8601)
-                      .font(.system(size: 10, weight: .medium, design: .monospaced))
-                      .foregroundStyle(palette.secondaryText.swiftUIColor)
-                      .padding(.horizontal, 6)
-                      .padding(.vertical, 2)
-                      .background(palette.elevatedSurface.swiftUIColor)
-                      .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                    Text(tab.format.standardSpecification)
-                      .font(.system(size: 11))
-                      .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-                    Button {
-                      viewModel.toggleFavoriteTab(id: tab.id)
-                    } label: {
-                      Image(systemName: tab.isFavorite ? "star.fill" : "star")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(
-                          tab.isFavorite
-                            ? EasyOfficeDesignTokens.statusWarning.swiftUIColor
-                            : palette.secondaryText.swiftUIColor
-                        )
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .background(
-                          tab.isFavorite
-                            ? palette.selectedSurface.swiftUIColor
-                            : palette.elevatedSurface.swiftUIColor
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
-                    .help(tab.isFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가")
-
-                    Button {
-                      viewModel.togglePinTab(id: tab.id)
-                    } label: {
-                      Image(systemName: tab.isPinned ? "pin.fill" : "pin")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(
-                          tab.isPinned
-                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                            : palette.secondaryText.swiftUIColor
-                        )
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .background(
-                          tab.isPinned
-                            ? palette.selectedSurface.swiftUIColor
-                            : palette.elevatedSurface.swiftUIColor
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
-                    .help(tab.isPinned ? "고정 해제" : "고정")
-
-                    Button("스플릿 뷰로 열기") {
-                      if viewModel.activeTabID == tab.id,
-                        let other = viewModel.openTabs.first(where: { $0.id != tab.id })
-                      {
-                        viewModel.activeTabID = other.id
+                      if tab.isModified {
+                        Text("수정됨")
+                          .font(.system(size: 10, weight: .semibold))
+                          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
                       }
-                      viewModel.enableSplitView(secondaryTabID: tab.id)
+
+                      Spacer()
+
+                      Text(tab.lastOpenedISO8601)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+                      Button {
+                        viewModel.toggleFavoriteTab(id: tab.id)
+                      } label: {
+                        Image(systemName: tab.isFavorite ? "star.fill" : "star")
+                          .font(.system(size: 11, weight: .semibold))
+                          .foregroundStyle(
+                            tab.isFavorite
+                              ? EasyOfficeDesignTokens.statusWarning.swiftUIColor
+                              : palette.secondaryText.swiftUIColor
+                          )
+                      }
+                      .buttonStyle(.plain)
+                      .help(tab.isFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가")
+
+                      Button {
+                        viewModel.togglePinTab(id: tab.id)
+                      } label: {
+                        Image(systemName: tab.isPinned ? "pin.fill" : "pin")
+                          .font(.system(size: 11, weight: .semibold))
+                          .foregroundStyle(
+                            tab.isPinned
+                              ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                              : palette.secondaryText.swiftUIColor
+                          )
+                      }
+                      .buttonStyle(.plain)
+                      .help(tab.isPinned ? "고정 해제" : "고정")
+
+                      Button("스플릿 뷰") {
+                        if viewModel.activeTabID == tab.id,
+                          let other = viewModel.openTabs.first(where: { $0.id != tab.id })
+                        {
+                          viewModel.activeTabID = other.id
+                        }
+                        viewModel.enableSplitView(secondaryTabID: tab.id)
+                        viewModel.isShowingHomeHub = false
+                      }
+                      .buttonStyle(.plain)
+                      .font(.system(size: 11, weight: .medium))
+                      .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 4)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                      viewModel.activeTabID = tab.id
                       viewModel.isShowingHomeHub = false
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                  }
-                  .padding(12)
-                  .background(palette.cardSurface.swiftUIColor)
-                  .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                      .stroke(palette.border.swiftUIColor, lineWidth: 1)
-                  )
-                  .clipShape(RoundedRectangle(cornerRadius: 8))
-                  .onTapGesture {
-                    viewModel.activeTabID = tab.id
-                    viewModel.isShowingHomeHub = false
+
+                    Divider()
                   }
                 }
               }
@@ -445,23 +388,23 @@ private struct TemplateMiniaturePreviewHeader: View {
     let accent = EasyOfficeDesignTokens.accentToken(for: module).swiftUIColor
 
     ZStack(alignment: .topTrailing) {
-      RoundedRectangle(cornerRadius: 6)
+      Rectangle()
         .fill(palette.elevatedSurface.swiftUIColor)
 
       HStack(spacing: 10) {
         switch module {
         case .document:
           VStack(alignment: .leading, spacing: 3) {
-            RoundedRectangle(cornerRadius: 2)
+            Rectangle()
               .fill(accent)
-              .frame(width: 44, height: 5)
-            RoundedRectangle(cornerRadius: 1)
+              .frame(width: 44, height: 4)
+            Rectangle()
               .fill(palette.secondaryText.swiftUIColor.opacity(0.45))
               .frame(width: 56, height: 2.5)
-            RoundedRectangle(cornerRadius: 1)
+            Rectangle()
               .fill(palette.secondaryText.swiftUIColor.opacity(0.35))
               .frame(width: 48, height: 2.5)
-            RoundedRectangle(cornerRadius: 1)
+            Rectangle()
               .fill(palette.secondaryText.swiftUIColor.opacity(0.30))
               .frame(width: 52, height: 2.5)
             HStack(spacing: 2) {
@@ -471,10 +414,7 @@ private struct TemplateMiniaturePreviewHeader: View {
           }
           .padding(6)
           .background(palette.cardSurface.swiftUIColor)
-          .overlay(
-            RoundedRectangle(cornerRadius: 4)
-              .stroke(palette.border.swiftUIColor, lineWidth: 1)
-          )
+          .border(palette.border.swiftUIColor, width: 1)
 
         case .hwp:
           VStack(alignment: .leading, spacing: 3) {
@@ -486,29 +426,26 @@ private struct TemplateMiniaturePreviewHeader: View {
               HStack(spacing: 1) {
                 ForEach(0..<3, id: \.self) { _ in
                   Rectangle()
-                    .stroke(accent.opacity(0.65), lineWidth: 0.7)
+                    .fill(accent.opacity(0.25))
                     .frame(width: 8, height: 8)
                 }
               }
             }
             HStack(spacing: 2) {
               ForEach(0..<6, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 1)
-                  .stroke(Color(red: 0.85, green: 0.28, blue: 0.22).opacity(0.55), lineWidth: 0.7)
+                Rectangle()
+                  .fill(Color(red: 0.85, green: 0.28, blue: 0.22).opacity(0.35))
                   .frame(width: 7, height: 7)
               }
             }
-            RoundedRectangle(cornerRadius: 1)
+            Rectangle()
               .fill(palette.secondaryText.swiftUIColor.opacity(0.35))
               .frame(width: 50, height: 2.5)
           }
           .padding(6)
           .frame(width: 76)
           .background(palette.cardSurface.swiftUIColor)
-          .overlay(
-            RoundedRectangle(cornerRadius: 4)
-              .stroke(accent.opacity(0.5), lineWidth: 1)
-          )
+          .border(accent.opacity(0.5), width: 1)
 
         case .sheet:
           HStack(spacing: 8) {
@@ -519,36 +456,31 @@ private struct TemplateMiniaturePreviewHeader: View {
                     Rectangle()
                       .fill(row == 0 ? accent.opacity(0.35) : palette.cardSurface.swiftUIColor)
                       .frame(width: 11, height: 8)
-                      .overlay(
-                        Rectangle()
-                          .stroke(accent.opacity(0.35), lineWidth: 0.5)
-                      )
+                      .border(accent.opacity(0.35), width: 0.5)
                   }
                 }
               }
             }
             HStack(alignment: .bottom, spacing: 3) {
-              RoundedRectangle(cornerRadius: 1.5).fill(accent.opacity(0.55)).frame(
-                width: 5, height: 14)
-              RoundedRectangle(cornerRadius: 1.5).fill(accent).frame(width: 5, height: 26)
-              RoundedRectangle(cornerRadius: 1.5).fill(accent.opacity(0.75)).frame(
-                width: 5, height: 20)
+              Rectangle().fill(accent.opacity(0.55)).frame(width: 5, height: 14)
+              Rectangle().fill(accent).frame(width: 5, height: 26)
+              Rectangle().fill(accent.opacity(0.75)).frame(width: 5, height: 20)
             }
           }
           .padding(6)
           .background(palette.cardSurface.swiftUIColor)
-          .clipShape(RoundedRectangle(cornerRadius: 4))
+          .border(palette.border.swiftUIColor, width: 1)
 
         case .slide:
           VStack(alignment: .leading, spacing: 4) {
-            RoundedRectangle(cornerRadius: 2)
+            Rectangle()
               .fill(accent)
-              .frame(width: 68, height: 7)
+              .frame(width: 68, height: 6)
             HStack(spacing: 4) {
-              RoundedRectangle(cornerRadius: 2)
+              Rectangle()
                 .fill(accent.opacity(0.25))
                 .frame(width: 32, height: 18)
-              RoundedRectangle(cornerRadius: 2)
+              Rectangle()
                 .fill(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.25))
                 .frame(width: 32, height: 18)
             }
@@ -556,46 +488,24 @@ private struct TemplateMiniaturePreviewHeader: View {
           .padding(6)
           .aspectRatio(16.0 / 9.0, contentMode: .fit)
           .background(palette.cardSurface.swiftUIColor)
-          .overlay(
-            RoundedRectangle(cornerRadius: 4)
-              .stroke(accent.opacity(0.55), lineWidth: 1)
-          )
+          .border(accent.opacity(0.55), width: 1)
 
         case .pdf:
           VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-              Text("APPROVED")
-                .font(.system(size: 6, weight: .black, design: .monospaced))
-                .foregroundStyle(accent)
-                .padding(.horizontal, 3)
-                .padding(.vertical, 1)
-                .overlay(
-                  RoundedRectangle(cornerRadius: 2)
-                    .stroke(accent, lineWidth: 0.8)
-                )
-              Spacer(minLength: 2)
-            }
-            RoundedRectangle(cornerRadius: 1.5)
+            Text("APPROVED")
+              .font(.system(size: 6, weight: .black, design: .monospaced))
+              .foregroundStyle(accent)
+            Rectangle()
               .fill(Color.yellow.opacity(0.55))
               .frame(width: 48, height: 4)
-            Path { path in
-              path.move(to: CGPoint(x: 2, y: 8))
-              path.addCurve(
-                to: CGPoint(x: 46, y: 4),
-                control1: CGPoint(x: 16, y: 0),
-                control2: CGPoint(x: 30, y: 12)
-              )
-            }
-            .stroke(EasyOfficeDesignTokens.brand700.swiftUIColor, lineWidth: 1.4)
-            .frame(width: 50, height: 10)
+            Rectangle()
+              .fill(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.55))
+              .frame(width: 46, height: 2)
           }
           .padding(6)
-          .frame(width: 72)
+          .frame(width: 72, alignment: .leading)
           .background(palette.cardSurface.swiftUIColor)
-          .overlay(
-            RoundedRectangle(cornerRadius: 4)
-              .stroke(accent.opacity(0.45), lineWidth: 1)
-          )
+          .border(accent.opacity(0.45), width: 1)
         }
 
         Spacer(minLength: 0)
@@ -606,18 +516,10 @@ private struct TemplateMiniaturePreviewHeader: View {
       Text(formatBadge)
         .font(.system(size: 8, weight: .bold, design: .monospaced))
         .foregroundStyle(accent)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
-        .background(palette.cardSurface.swiftUIColor.opacity(0.9))
-        .clipShape(RoundedRectangle(cornerRadius: 3))
         .padding(6)
     }
     .frame(height: 58)
-    .overlay(
-      RoundedRectangle(cornerRadius: 6)
-        .stroke(palette.border.swiftUIColor, lineWidth: 1)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .border(palette.border.swiftUIColor, width: 1)
   }
 }
 
@@ -628,16 +530,18 @@ struct BatchConversionStudioHubView: View {
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(spacing: 14) {
         Label(
-          "포맷 일괄 변환 스튜디오 (Fail-Closed 컨테이너 검증)",
+          "포맷 일괄 변환",
           systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard"
         )
-        .font(.system(size: 15, weight: .bold))
-        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+        .font(.system(size: 16, weight: .bold))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
+
         Spacer()
-        LavenderMenuPill(
+
+        FlatToolbarMenu(
           title: "목표 포맷: \(viewModel.batchTargetFormat.rawValue.uppercased())",
           symbolName: "doc.badge.gearshape",
           palette: palette,
@@ -650,21 +554,24 @@ struct BatchConversionStudioHubView: View {
           }
         }
 
-        Button("열린 탭 전체 일괄 변환 실행") {
+        Button("열린 탭 전체 변환 실행") {
           viewModel.runBatchConversionForOpenTabs()
         }
-        .buttonStyle(.borderedProminent)
-        .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        .buttonStyle(.plain)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
       }
+
+      Divider()
 
       if let report = viewModel.lastBatchConversionReport {
         HStack(spacing: 16) {
-          Text("총 작업: \(report.totalJobs)건")
+          Text("총 작업 \(report.totalJobs)건")
             .font(.system(size: 12, weight: .semibold))
-          Text("성공: \(report.succeededResults.count)건")
+          Text("성공 \(report.succeededResults.count)건")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
-          Text("실패: \(report.failedErrors.count)건")
+          Text("실패 \(report.failedErrors.count)건")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(
               !report.failedErrors.isEmpty
@@ -673,42 +580,80 @@ struct BatchConversionStudioHubView: View {
             )
         }
 
-        ForEach(report.succeededResults) { item in
-          HStack {
-            Text(item.sourceFileName)
-              .font(.system(size: 12, weight: .medium))
-            Image(systemName: "arrow.right")
-              .font(.system(size: 10))
-            Text(item.outputFileName)
-              .font(.system(size: 11, weight: .bold, design: .monospaced))
-            Spacer()
-            Text("완료 (\(item.outputBytes.count) bytes)")
-              .font(.system(size: 11, design: .monospaced))
-              .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+        Divider()
+
+        VStack(spacing: 0) {
+          ForEach(report.succeededResults) { item in
+            let srcExt =
+              item.sourceFileName.split(separator: ".").last.map { String($0).uppercased() }
+              ?? "DOC"
+            let dstExt = item.targetFormat.rawValue.uppercased()
+            VStack(spacing: 0) {
+              HStack(spacing: 12) {
+                Text("\(srcExt) → \(dstExt)")
+                  .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .frame(width: 96, alignment: .leading)
+
+                Text(item.sourceFileName)
+                  .font(.system(size: 12, weight: .medium))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                Image(systemName: "arrow.right")
+                  .font(.system(size: 10))
+                  .foregroundStyle(palette.secondaryText.swiftUIColor)
+                Text(item.outputFileName)
+                  .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                Spacer()
+                Text("완료 · \(item.outputBytes.count) B")
+                  .font(.system(size: 11, design: .monospaced))
+                  .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+              }
+              .padding(.vertical, 8)
+
+              Divider()
+            }
           }
-          .padding(.vertical, 4)
         }
 
         ForEach(Array(report.failedErrors.enumerated()), id: \.offset) { _, err in
-          Text("차단됨: \(err.errorDescription)")
+          Text("거부됨: \(err.errorDescription)")
             .font(.system(size: 11))
             .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
         }
       } else {
-        Text(
-          "열려 있는 모든 문서 탭을 선택한 표준 포맷(PDF, DOCX, HWPX, ODT, XLSX, CSV, MD)으로 일괄 변환하고 바이트 무결성을 검증합니다."
-        )
-        .font(.system(size: 12))
-        .foregroundStyle(palette.secondaryText.swiftUIColor)
+        VStack(alignment: .leading, spacing: 8) {
+          Text(
+            "열려 있는 모든 문서 탭(\(viewModel.openTabs.count)건)을 선택한 포맷으로 일괄 변환합니다."
+          )
+          .font(.system(size: 12))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+          VStack(spacing: 0) {
+            ForEach(viewModel.openTabs) { tab in
+              let srcExt = tab.format.rawValue.uppercased()
+              let dstExt = viewModel.batchTargetFormat.rawValue.uppercased()
+              VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                  Text("\(srcExt) → \(dstExt)")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .frame(width: 96, alignment: .leading)
+                  Text(tab.fileName)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.primaryText.swiftUIColor)
+                    .lineLimit(1)
+                  Spacer()
+                }
+                .padding(.vertical, 7)
+
+                Divider()
+              }
+            }
+          }
+        }
       }
     }
-    .padding(16)
-    .background(palette.cardSurface.swiftUIColor)
-    .overlay(
-      RoundedRectangle(cornerRadius: 10)
-        .stroke(EasyOfficeDesignTokens.brand400.swiftUIColor, lineWidth: 1)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 10))
   }
 }
 
@@ -801,25 +746,31 @@ struct SmartDocumentAssistantHubView: View {
       return nil
     }()
 
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(spacing: 14) {
         Label(
-          "스마트 문서 보조 도구 (요약·가독성·조치항목·시트통계·문서비교·보안감사)", systemImage: "sparkles.rectangle.stack.fill"
+          "스마트 문서 보조 도구",
+          systemImage: "sparkles.rectangle.stack.fill"
         )
-        .font(.system(size: 15, weight: .bold))
-        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+        .font(.system(size: 16, weight: .bold))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
         Spacer()
-        Button("개인정보·메타데이터 비식별화") {
+        Button("개인정보·메타데이터 정리") {
           viewModel.scrubActiveTabMetadata()
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
 
-        Button("활성 탭 보안 감사 실행") {
+        Button("보안 감사 실행") {
           viewModel.runSecurityAuditOnActiveTab()
         }
-        .buttonStyle(.borderedProminent)
-        .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        .buttonStyle(.plain)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
       }
+
+      Divider()
 
       if let doc = activeDoc {
         let analysis = SmartAssistantAnalysisMemoizer.analyzeDocument(doc)
@@ -828,7 +779,7 @@ struct SmartDocumentAssistantHubView: View {
         let actionItems = analysis.actionItems
 
         Text(
-          "대상 문서: \(doc.title) · 예상 읽기 시간 \(summary.estimatedReadingSeconds)초 · 압축률 \(String(format: "%.0f", summary.compressionRatioPercent))%"
+          "\(doc.title) · 예상 읽기 시간 \(summary.estimatedReadingSeconds)초 · 요약 비율 \(String(format: "%.0f", summary.compressionRatioPercent))%"
         )
         .font(.system(size: 12, weight: .semibold))
         .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -845,7 +796,9 @@ struct SmartDocumentAssistantHubView: View {
             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
         }
 
-        HStack(alignment: .top, spacing: 12) {
+        Divider()
+
+        HStack(alignment: .top, spacing: 16) {
           VStack(alignment: .leading, spacing: 4) {
             Text("문장 가독성 교정 제안 (\(suggestions.count)건)")
               .font(.system(size: 11, weight: .bold))
@@ -874,11 +827,13 @@ struct SmartDocumentAssistantHubView: View {
         }
       }
 
-      HStack(alignment: .top, spacing: 12) {
+      Divider()
+
+      HStack(alignment: .top, spacing: 16) {
         if let sheet = activeSheet {
           let insight = SmartAssistantAnalysisMemoizer.analyzeSheet(sheet)
           VStack(alignment: .leading, spacing: 4) {
-            Text("시트 Z-Score 통계 인사이트 (\(insight.trendClassification))")
+            Text("시트 통계 요약 (\(insight.trendClassification))")
               .font(.system(size: 11, weight: .bold))
               .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
             Text(
@@ -896,7 +851,7 @@ struct SmartDocumentAssistantHubView: View {
             revised: documentModels[1]
           )
           VStack(alignment: .leading, spacing: 4) {
-            Text("문서 LCS 비교 (Document ↔ HWP)")
+            Text("문서 비교")
               .font(.system(size: 11, weight: .bold))
               .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
             Text(
@@ -922,24 +877,17 @@ struct SmartDocumentAssistantHubView: View {
                 : EasyOfficeDesignTokens.statusDanger.swiftUIColor
             )
             Text(
-              "매직 바이트 보안 감사: \(audit.detectedFormat?.rawValue.uppercased() ?? "UNKNOWN") · 통과 여부: \(audit.isPassed ? "안전" : "위험 감지")"
+              "파일 무결성 점검: \(audit.detectedFormat?.rawValue.uppercased() ?? "UNKNOWN") · \(audit.isPassed ? "안전" : "위험 감지")"
             )
             .font(.system(size: 12, weight: .semibold))
           }
           if viewModel.lastScrubbedMetadataCount > 0 {
-            Text("· 비식별화된 개인정보/메타데이터: \(viewModel.lastScrubbedMetadataCount)건")
+            Text("· 정리된 메타데이터 \(viewModel.lastScrubbedMetadataCount)건")
               .font(.system(size: 11, weight: .medium))
               .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
           }
         }
       }
     }
-    .padding(16)
-    .background(palette.cardSurface.swiftUIColor)
-    .overlay(
-      RoundedRectangle(cornerRadius: 10)
-        .stroke(EasyOfficeDesignTokens.brand400.swiftUIColor, lineWidth: 1)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 10))
   }
 }

@@ -205,7 +205,11 @@ public final class WorkspaceViewModel {
   public var mailMergeFieldKeyDraft: String = "수신처"
   public var mailMergeFieldValueDraft: String = "전략기획본부"
   public var isFirstColumnFrozen: Bool = false
-  public var isDataBarsEnabled: Bool = true
+  public var isDataBarsEnabled: Bool = false
+  public var showSheetDataBars: Bool {
+    get { isDataBarsEnabled }
+    set { isDataBarsEnabled = newValue }
+  }
   public var selectedPivotAggregation: PivotAggregationFunction = .sum
   public var sheetDelimiterDraft: String = ","
   public var selectedPDFStampPreset: String = "승인 (APPROVED)"
@@ -215,6 +219,8 @@ public final class WorkspaceViewModel {
   public var customChartRangeDraft: String = "A1:D4"
   public var pdfWatermarkDraft: String = "대외비 CONFIDENTIAL"
   public var isPDFInkOverlayExpanded: Bool = false
+  public var documentHorizontalPadding: Double = 28.0
+  public var collapsedOutlineParagraphIDs: Set<UUID> = []
 
   internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
   internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
@@ -429,6 +435,63 @@ public final class WorkspaceViewModel {
     if activeTabID == id { activeTabID = openTabs.first?.id }
     if splitSecondaryTabID == activeTabID { splitSecondaryTabID = nil }
     if openTabs.isEmpty { isShowingHomeHub = true }
+  }
+
+  public func closeOtherTabs(keeping id: UUID) {
+    activeInlineEditTargetKey = nil
+    let removedIDs = openTabs.filter { $0.id != id && !$0.isPinned }.map(\.id)
+    openTabs.removeAll { $0.id != id && !$0.isPinned }
+    for removedID in removedIDs {
+      undoStacks.removeValue(forKey: removedID)
+      redoStacks.removeValue(forKey: removedID)
+      mergedSheetRangesByTab.removeValue(forKey: removedID)
+    }
+    splitSecondaryTabID = nil
+    activeTabID = openTabs.contains(where: { $0.id == id }) ? id : openTabs.first?.id
+    if openTabs.isEmpty { isShowingHomeHub = true }
+    lastExecutedCommandSummary = "다른 탭 닫기 완료"
+  }
+
+  public func setDocumentHorizontalPadding(_ padding: Double) {
+    guard padding.isFinite else { return }
+    documentHorizontalPadding = min(96.0, max(24.0, padding))
+    lastExecutedCommandSummary = "문서 좌우 여백 조절: \(Int(documentHorizontalPadding))pt"
+  }
+
+  public func promoteOrDemoteParagraphOutlineLevel(paragraphID: UUID, delta: Int) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      let pIdx = doc.paragraphs.firstIndex(where: { $0.id == paragraphID })
+    else { return }
+    let hierarchy: [ParagraphStyleRole] = [.title, .heading1, .heading2, .heading3, .body]
+    let currentRole = doc.paragraphs[pIdx].style
+    let currentPos = hierarchy.firstIndex(of: currentRole) ?? (hierarchy.count - 1)
+    let nextPos = min(max(0, currentPos + delta), hierarchy.count - 1)
+    let nextRole = hierarchy[nextPos]
+    recordUndoSnapshot(for: activeTabID)
+    doc.paragraphs[pIdx].style = nextRole
+    switch nextRole {
+    case .title:
+      doc.paragraphs[pIdx].fontSizePt = 20
+      doc.paragraphs[pIdx].isBold = true
+    case .heading1:
+      doc.paragraphs[pIdx].fontSizePt = 15
+      doc.paragraphs[pIdx].isBold = true
+    case .heading2:
+      doc.paragraphs[pIdx].fontSizePt = 13
+      doc.paragraphs[pIdx].isBold = true
+    case .heading3:
+      doc.paragraphs[pIdx].fontSizePt = 12
+      doc.paragraphs[pIdx].isBold = true
+    case .body, .quote, .officialHeader:
+      doc.paragraphs[pIdx].fontSizePt = 11
+      doc.paragraphs[pIdx].isBold = false
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    selectedParagraphID = paragraphID
+    lastExecutedCommandSummary = "윤곽 수준 변경: \(nextRole.rawValue)"
   }
 
   public func togglePinTab(id: UUID) {

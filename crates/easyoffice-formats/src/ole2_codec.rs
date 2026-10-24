@@ -1,5 +1,5 @@
+pub(crate) use crate::rtf_xml_helpers::*;
 use crate::{ContainerFamily, EasyOfficeError, FormatDetector, Ole2SecurityGuard};
-use std::collections::HashSet;
 
 /// Named stream inside an OLE2 Compound File Binary Format (CFBF) container.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,7 +199,11 @@ impl Ole2ContainerCodec {
 
         let entry_count = dir_bytes.len() / Self::DIR_ENTRY_SIZE;
         let mut streams: Vec<Ole2StreamEntry> = Vec::new();
-        let mut claimed_sectors: HashSet<u32> = dir_chain.into_iter().collect();
+        let total_sectors = (bytes.len() / Self::SECTOR_SIZE).saturating_sub(1);
+        let mut claimed_sectors = SectorBitset::with_capacity(total_sectors);
+        for &sec in &dir_chain {
+            claimed_sectors.insert(sec);
+        }
 
         for idx in 0..entry_count {
             let base = idx * Self::DIR_ENTRY_SIZE;
@@ -726,118 +730,6 @@ impl Hwp5Codec {
 
 pub use crate::legacy_ole2_codec::*;
 
-pub(crate) fn encode_utf16le(text: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len() * 2);
-    for u in text.encode_utf16() {
-        out.extend_from_slice(&u.to_le_bytes());
-    }
-    out
-}
-
-pub(crate) fn decode_utf16le(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-    if !bytes.len().is_multiple_of(2) {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "UTF-16LE 바이트 길이가 짝수가 아닙니다.".to_string(),
-        ));
-    }
-    let units: Vec<u16> = bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
-        .collect();
-    String::from_utf16(&units).map_err(|_| {
-        EasyOfficeError::InvalidUtf8("유효하지 않은 UTF-16LE 시퀀스입니다.".to_string())
-    })
-}
-
-pub(crate) fn append_len_prefixed_utf16le(buf: &mut Vec<u8>, text: &str) {
-    let bytes = encode_utf16le(text);
-    buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&bytes);
-}
-
-pub(crate) fn read_len_prefixed_utf16le(
-    bytes: &[u8],
-    cursor: &mut usize,
-    limit: usize,
-) -> Result<String, EasyOfficeError> {
-    if *cursor + 4 > limit {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "UTF-16LE 길이 프리픽스 읽기 범위 초과".to_string(),
-        ));
-    }
-    let byte_len = read_u32_le(bytes, *cursor)? as usize;
-    *cursor += 4;
-    if !byte_len.is_multiple_of(2) || *cursor + byte_len > limit {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "UTF-16LE 문자열 페이로드 범위 초과".to_string(),
-        ));
-    }
-    let s = decode_utf16le(&bytes[*cursor..*cursor + byte_len])?;
-    *cursor += byte_len;
-    Ok(s)
-}
-
-#[inline]
-pub(crate) fn write_u16_le(buf: &mut [u8], offset: usize, val: u16) {
-    buf[offset..offset + 2].copy_from_slice(&val.to_le_bytes());
-}
-
-#[inline]
-pub(crate) fn write_u32_le(buf: &mut [u8], offset: usize, val: u32) {
-    buf[offset..offset + 4].copy_from_slice(&val.to_le_bytes());
-}
-
-#[inline]
-pub(crate) fn write_u64_le(buf: &mut [u8], offset: usize, val: u64) {
-    buf[offset..offset + 8].copy_from_slice(&val.to_le_bytes());
-}
-
-#[inline]
-pub(crate) fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, EasyOfficeError> {
-    if offset + 2 > bytes.len() {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "OLE2 u16 읽기 범위 초과".to_string(),
-        ));
-    }
-    Ok(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
-}
-
-#[inline]
-pub(crate) fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, EasyOfficeError> {
-    if offset + 4 > bytes.len() {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "OLE2 u32 읽기 범위 초과".to_string(),
-        ));
-    }
-    Ok(u32::from_le_bytes([
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    ]))
-}
-
-#[inline]
-pub(crate) fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, EasyOfficeError> {
-    if offset + 8 > bytes.len() {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "OLE2 u64 읽기 범위 초과".to_string(),
-        ));
-    }
-    Ok(u64::from_le_bytes([
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-        bytes[offset + 4],
-        bytes[offset + 5],
-        bytes[offset + 6],
-        bytes[offset + 7],
-    ]))
-}
-
 impl Ole2SecurityGuard {
     pub fn validate_header_and_fat(container_bytes: &[u8]) -> Result<Vec<u32>, EasyOfficeError> {
         if container_bytes.len() < Self::SECTOR_SIZE * 2
@@ -887,6 +779,80 @@ impl Ole2SecurityGuard {
         let first_dir_sector = read_u32_le(container_bytes, 48)?;
         Self::validate_sector_chain(container_bytes, &fat, first_dir_sector)?;
         Ok(fat)
+    }
+
+    pub fn validate_sector_chain(
+        container_bytes: &[u8],
+        fat: &[u32],
+        start_sector: u32,
+    ) -> Result<Vec<u32>, EasyOfficeError> {
+        if container_bytes.len() < Self::SECTOR_SIZE * 2
+            || !container_bytes.len().is_multiple_of(Self::SECTOR_SIZE)
+        {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "OLE2 컨테이너 크기가 512바이트 섹터 배수가 아닙니다.".to_string(),
+            ));
+        }
+        if !container_bytes.starts_with(&FormatDetector::OLE2_MAGIC) {
+            return Err(EasyOfficeError::SignatureMismatch {
+                expected: ContainerFamily::Ole2Cfbf,
+                detail: "OLE2 CFBF 헤더 시그니처 불일치".to_string(),
+            });
+        }
+
+        let fat_sector_count = read_u32_le(container_bytes, 44)? as usize;
+        if fat_sector_count == 0 || fat_sector_count > Self::MAX_FAT_SECTORS {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "OLE2 DIFAT 섹터 개수({fat_sector_count})가 허용 범위(1..={})를 벗어났습니다.",
+                Self::MAX_FAT_SECTORS
+            )));
+        }
+
+        let total_sectors = (container_bytes.len() / Self::SECTOR_SIZE) - 1;
+        let mut visited = SectorBitset::with_capacity(total_sectors);
+        let mut chain: Vec<u32> = Vec::new();
+        let mut current = start_sector;
+
+        while current != Self::END_OF_CHAIN {
+            let idx = current as usize;
+            if idx >= total_sectors || idx >= fat.len() {
+                return Err(EasyOfficeError::CorruptedContainer(format!(
+                    "OLE2 FAT 체인이 유효하지 않은 섹터({current})를 참조합니다."
+                )));
+            }
+            if !visited.insert(current) {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "OLE2 FAT 섹터 체인 순환 루프가 감지되었습니다 (sector: {current})."
+                )));
+            }
+            chain.push(current);
+            current = fat[idx];
+        }
+
+        Ok(chain)
+    }
+
+    pub fn validate_hwp5_file_header(header_bytes: &[u8]) -> Result<u32, EasyOfficeError> {
+        if header_bytes.len() < Self::HWP5_FILE_HEADER_LEN {
+            return Err(EasyOfficeError::CorruptedContainer(format!(
+                "HWP 5.0 FileHeader 길이({})가 256바이트보다 작습니다.",
+                header_bytes.len()
+            )));
+        }
+        if !header_bytes.starts_with(Self::HWP5_SIGNATURE) {
+            return Err(EasyOfficeError::SignatureMismatch {
+                expected: ContainerFamily::Ole2Cfbf,
+                detail: "HWP 5.0 'HWP Document File' 시그니처가 없습니다.".to_string(),
+            });
+        }
+        let version = read_u32_le(header_bytes, 32)?;
+        let flags = read_u32_le(header_bytes, 36)?;
+        if (flags & Self::HWP5_FLAG_ENCRYPTED) != 0 || (flags & Self::HWP5_FLAG_DISTRIBUTION) != 0 {
+            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                crate::DocumentFormat::Hwp,
+            ));
+        }
+        Ok(version)
     }
 }
 

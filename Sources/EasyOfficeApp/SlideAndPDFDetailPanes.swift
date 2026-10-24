@@ -21,7 +21,7 @@ public struct SlideVerticalRulerView: View {
     GeometryReader { geo in
       let height = max(160.0, geo.size.height)
       ZStack(alignment: .topLeading) {
-        RoundedRectangle(cornerRadius: 4)
+        Rectangle()
           .fill(palette.elevatedSurface.swiftUIColor)
 
         Canvas { context, size in
@@ -31,7 +31,7 @@ public struct SlideVerticalRulerView: View {
             let ratio = CGFloat(step) / CGFloat(stepCount)
             let yPos = ratio * size.height
             let isMajor = (step % 4 == 0)
-            let tickW: CGFloat = isMajor ? 7.0 : 3.5
+            let tickW: CGFloat = isMajor ? 4.0 : 2.2
             var path = Path()
             path.move(to: CGPoint(x: size.width - tickW, y: yPos))
             path.addLine(to: CGPoint(x: size.width, y: yPos))
@@ -45,20 +45,18 @@ public struct SlideVerticalRulerView: View {
 
         ForEach([0, 135, 270, 405, maxPt], id: \.self) { ptMark in
           let ratio = CGFloat(ptMark) / CGFloat(maxPt)
-          let yPos = min(height - 10.0, max(10.0, ratio * height))
+          let yPos = min(height - 9.0, max(9.0, ratio * height))
           Text("\(ptMark)")
-            .font(.system(size: 7, weight: .semibold, design: .monospaced))
+            .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .padding(.horizontal, 1.5)
+            .background(palette.elevatedSurface.swiftUIColor)
             .position(x: 9, y: yPos)
         }
       }
-      .overlay(
-        RoundedRectangle(cornerRadius: 4)
-          .stroke(palette.border.swiftUIColor, lineWidth: 0.8)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 4))
+      .border(palette.border.swiftUIColor, width: 0.8)
     }
-    .frame(width: 22)
+    .frame(width: 24)
   }
 }
 
@@ -117,7 +115,7 @@ public struct SlideEditorDetailPaneView: View {
     GeometryReader { geo in
       let width = max(200.0, geo.size.width)
       ZStack(alignment: .topLeading) {
-        RoundedRectangle(cornerRadius: 4)
+        Rectangle()
           .fill(palette.elevatedSurface.swiftUIColor)
 
         Canvas { context, size in
@@ -148,11 +146,7 @@ public struct SlideEditorDetailPaneView: View {
             .position(x: xPos, y: 7)
         }
       }
-      .overlay(
-        RoundedRectangle(cornerRadius: 4)
-          .stroke(palette.border.swiftUIColor, lineWidth: 0.8)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 4))
+      .border(palette.border.swiftUIColor, width: 0.8)
     }
     .frame(height: 20)
   }
@@ -172,31 +166,21 @@ public struct SlideEditorDetailPaneView: View {
       deck.deckTheme.accentBorderHex,
       fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
     )
-    let themeFill = EasyOfficeDesignTokens.resolveHexColor(
-      deck.deckTheme.primaryFillHex,
-      fallback: palette.selectedSurface.swiftUIColor
-    )
 
     VStack(alignment: .leading, spacing: 5) {
-      // 160x90 Visual 16:9 Miniature Slide Preview
       ZStack(alignment: .topLeading) {
-        RoundedRectangle(cornerRadius: 6)
+        Rectangle()
           .fill(themeBg)
 
-        // Mini Accent Header Bar
         Rectangle()
           .fill(themeAccent)
-          .frame(height: 4)
+          .frame(height: 3)
 
         VStack(alignment: .leading, spacing: 3) {
           HStack(spacing: 4) {
             Text("\(index + 1)")
-              .font(.system(size: 9, weight: .black, design: .monospaced))
-              .padding(.horizontal, 5)
-              .padding(.vertical, 1)
-              .background(themeAccent)
-              .foregroundStyle(Color.white)
-              .clipShape(RoundedRectangle(cornerRadius: 3))
+              .font(.system(size: 9, weight: .bold, design: .monospaced))
+              .foregroundStyle(themeAccent)
 
             Text(slide.title)
               .font(.system(size: 9, weight: .bold))
@@ -212,46 +196,16 @@ public struct SlideEditorDetailPaneView: View {
           }
 
           Spacer(minLength: 2)
-
-          // Mini Shapes Preview Strip
-          HStack(spacing: 4) {
-            ForEach(slide.elements.prefix(3)) { elem in
-              let elemFill = EasyOfficeDesignTokens.resolveHexColor(
-                elem.fillHex,
-                fallback: themeFill
-              )
-              RoundedRectangle(cornerRadius: 2)
-                .fill(elemFill)
-                .overlay(
-                  RoundedRectangle(cornerRadius: 2)
-                    .stroke(themeAccent.opacity(0.8), lineWidth: 0.7)
-                )
-                .frame(width: 40, height: 18)
-                .overlay(
-                  Text(elem.title)
-                    .font(.system(size: 6, weight: .semibold))
-                    .foregroundStyle(
-                      EasyOfficeDesignTokens.contrastingTextColor(forFillHex: elem.fillHex)
-                    )
-                    .lineLimit(1)
-                    .padding(.horizontal, 2)
-                )
-            }
-          }
         }
         .padding(7)
       }
       .frame(width: 160, height: 90)
-      .overlay(
-        RoundedRectangle(cornerRadius: 6)
-          .stroke(
-            isSelected
-              ? EasyOfficeDesignTokens.brand700.swiftUIColor
-              : palette.border.swiftUIColor,
-            lineWidth: isSelected ? 2.0 : 1.0
-          )
+      .border(
+        isSelected
+          ? EasyOfficeDesignTokens.brand700.swiftUIColor
+          : palette.border.swiftUIColor,
+        width: isSelected ? 2.0 : 1.0
       )
-      .clipShape(RoundedRectangle(cornerRadius: 6))
 
       HStack(spacing: 4) {
         Text(slide.masterLayout.rawValue)
@@ -268,10 +222,9 @@ public struct SlideEditorDetailPaneView: View {
     .padding(6)
     .background(
       isSelected
-        ? palette.selectedSurface.swiftUIColor
-        : palette.cardSurface.swiftUIColor
+        ? palette.selectedSurface.swiftUIColor.opacity(0.45)
+        : Color.clear
     )
-    .clipShape(RoundedRectangle(cornerRadius: 8))
   }
 
   public var body: some View {
@@ -300,51 +253,50 @@ public struct SlideEditorDetailPaneView: View {
       showsIndicators: true,
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
-      VStack(alignment: .leading, spacing: 10) {
-        // Single Consolidated Non-Clipping Slide Context Toolbar (`UX-08`)
+      VStack(alignment: .leading, spacing: 0) {
         AdaptiveScrollContainer(
           axes: .horizontal,
           showsIndicators: false,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         ) {
-          HStack(spacing: 4) {
+          HStack(spacing: 12) {
             Text("16:9 · \(deck.slides.count)장")
-              .font(.system(size: 10, weight: .bold, design: .monospaced))
+              .font(.system(size: 11, weight: .semibold, design: .monospaced))
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 3)
-              .background(palette.selectedSurface.swiftUIColor)
               .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
-              .clipShape(RoundedRectangle(cornerRadius: 4))
 
             if isPrimaryPane {
+              Divider().frame(height: 14)
+
               Button {
                 viewModel.addSlideToActiveDeck()
               } label: {
                 Text("+ 슬라이드")
-                  .font(.system(size: 10.5, weight: .semibold))
+                  .font(.system(size: 11, weight: .semibold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
+                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
               }
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
+              .buttonStyle(.plain)
               .fixedSize(horizontal: true, vertical: false)
 
               Button {
                 viewModel.duplicateActiveSlide()
               } label: {
                 Text("복제")
-                  .font(.system(size: 10.5, weight: .medium))
+                  .font(.system(size: 11, weight: .medium))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
               }
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
+              .buttonStyle(.plain)
               .fixedSize(horizontal: true, vertical: false)
 
+              Divider().frame(height: 14)
+
               if let slide = currentSlide {
-                LavenderMenuPill(
+                FlatToolbarMenu(
                   title: "레이아웃: \(slide.masterLayout.rawValue)",
                   systemImage: "rectangle.3.group",
                   palette: palette
@@ -359,7 +311,7 @@ public struct SlideEditorDetailPaneView: View {
                 }
               }
 
-              LavenderMenuPill(
+              FlatToolbarMenu(
                 title: "테마: \(deck.theme.rawValue)",
                 systemImage: "paintpalette",
                 palette: palette
@@ -372,7 +324,7 @@ public struct SlideEditorDetailPaneView: View {
               }
 
               if let slide = currentSlide {
-                LavenderMenuPill(
+                FlatToolbarMenu(
                   title: "전환 (\(String(format: "%.1f", slide.transitionDurationSeconds))s)",
                   systemImage: "sparkles.rectangle.stack",
                   palette: palette
@@ -411,7 +363,7 @@ public struct SlideEditorDetailPaneView: View {
                 }
               }
 
-              LavenderMenuPill(
+              FlatToolbarMenu(
                 title: "정렬",
                 systemImage: "align.horizontal.center",
                 palette: palette
@@ -432,496 +384,400 @@ public struct SlideEditorDetailPaneView: View {
                 .disabled(selectedElement == nil)
               }
 
+              Divider().frame(height: 14)
+
               Button(viewModel.isSlideGridlinesVisible ? "격자 숨김" : "격자선") {
                 viewModel.toggleSlideGridlines()
               }
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
               .fixedSize(horizontal: true, vertical: false)
 
               Button(viewModel.isSlideSorterViewEnabled ? "편집 뷰" : "정렬 뷰") {
                 viewModel.toggleSlideSorterView()
               }
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
               .fixedSize(horizontal: true, vertical: false)
 
               Button(viewModel.isPresenterModeActive ? "발표자 닫기" : "발표자") {
                 viewModel.isPresenterModeActive.toggle()
                 viewModel.isPresenterTimerRunning = viewModel.isPresenterModeActive
               }
-              .buttonStyle(.bordered)
-              .controlSize(.mini)
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
               .fixedSize(horizontal: true, vertical: false)
+
+              Divider().frame(height: 14)
 
               Button {
                 viewModel.toggleFullScreenSlideshow()
               } label: {
                 Text("쇼 시작 ▶")
-                  .font(.system(size: 10.5, weight: .semibold))
+                  .font(.system(size: 11, weight: .semibold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
+                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
               }
-              .buttonStyle(.borderedProminent)
-              .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
-              .controlSize(.mini)
+              .buttonStyle(.plain)
               .fixedSize(horizontal: true, vertical: false)
             }
           }
-          .padding(.horizontal, 10)
-          .padding(.vertical, 5)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 6)
         }
-        .frame(height: 34)
-        .background(palette.cardSurface.swiftUIColor)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(height: 32)
+        .background(palette.elevatedSurface.swiftUIColor)
 
-      if viewModel.isSlideSorterViewEnabled {
-        slideSorterGridView(activeIdx: activeIdx, palette: palette)
-      } else {
-        HStack(alignment: .top, spacing: 14) {
-          // Single-source Slide Filmstrip: only render internal rail when LeftStructureNavigatorView is hidden (`UX-11`)
-          if !viewModel.showLeftNavigator {
-            VStack(alignment: .leading, spacing: 10) {
-              ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
-                let isSelected = idx == activeIdx
-                Button {
-                  guard isPrimaryPane else { return }
-                  viewModel.selectedSlideIndex = idx
-                  viewModel.selectSlideElement(id: slide.elements.first?.id)
-                } label: {
-                  slideMiniatureThumbnailCard(
-                    slide: slide,
-                    index: idx,
-                    isSelected: isSelected,
-                    palette: palette
-                  )
-                }
-                .buttonStyle(.plain)
-              }
-            }
-          }
+        Divider()
 
-          // Active Slide Stage Canvas with Horizontal + Vertical Rulers & Clean Speaker Notes Bar
-          if let slide = currentSlide {
-            let staticGuides: [AlignmentSnapGuide] = {
-              guard viewModel.isSnapGuidesEnabled, let activeElem = selectedElement else {
-                return []
-              }
-              let siblings = slide.elements.filter { $0.id != activeElem.id }
-              return SnapGuideCalculator.computeGuides(
-                for: activeElem,
-                siblings: siblings,
-                aspectRatio: deck.aspectRatio
-              )
-            }()
-
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text(slide.masterLayout.rawValue)
-                  .font(.system(size: 10, weight: .bold))
-                  .padding(.horizontal, 6)
-                  .padding(.vertical, 2)
-                  .background(EasyOfficeDesignTokens.softBadgeToken(for: .slide).swiftUIColor)
-                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
-                  .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                Text(
-                  "전환: \(slide.transition.rawValue) · \(String(format: "%.1f", slide.transitionDurationSeconds))s"
-                )
-                .font(.system(size: 10))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-                Spacer()
-
-                if isPrimaryPane, let activeElem = selectedElement {
-                  HStack(spacing: 4) {
-                    Button("◀") {
-                      viewModel.moveSlideElement(
-                        slideIndex: activeIdx,
-                        elementID: activeElem.id,
-                        deltaX: -20,
-                        deltaY: 0
-                      )
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-
-                    Button("▶") {
-                      viewModel.moveSlideElement(
-                        slideIndex: activeIdx,
-                        elementID: activeElem.id,
-                        deltaX: 20,
-                        deltaY: 0
-                      )
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-
-                    Button("▲") {
-                      viewModel.moveSlideElement(
-                        slideIndex: activeIdx,
-                        elementID: activeElem.id,
-                        deltaX: 0,
-                        deltaY: -20
-                      )
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-
-                    Button("▼") {
-                      viewModel.moveSlideElement(
-                        slideIndex: activeIdx,
-                        elementID: activeElem.id,
-                        deltaX: 0,
-                        deltaY: 20
-                      )
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-
-                    Button("↻ +15°") {
-                      viewModel.rotateSlideElement(
-                        elementID: activeElem.id,
-                        toDegrees: activeElem.rotationDegrees + 15.0
-                      )
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-
-                    Button("정중앙 스냅") {
-                      viewModel.executeRibbonCommand("slide-mod-snap")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                  }
-                }
-
-                if !staticGuides.isEmpty {
-                  Label("스마트 정렬 가이드 스냅 활성 (\(staticGuides.count)축)", systemImage: "ruler")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
-                }
-              }
-
-              // Horizontal Slide Stage Ruler (0 .. 960 pt) aligned to the stage canvas
-              HStack(spacing: 6) {
-                Color.clear.frame(width: 22, height: 20)
-                slideStageHorizontalRuler(palette: palette)
-              }
-
-              // Vertical Ruler (0 .. 540 pt) + Proportional 16:9 Stage Canvas (`UX-09`, `FUNC-02`)
-              HStack(alignment: .top, spacing: 6) {
-                SlideVerticalRulerView(
-                  maxHeightPoints: deck.aspectRatio.heightPoints,
-                  palette: palette
-                )
-                .frame(width: 22, height: 360)
-
-                GeometryReader { geo in
-                  let stageW = max(1.0, deck.aspectRatio.widthPoints)
-                  let stageH = max(1.0, deck.aspectRatio.heightPoints)
-                  let scaleX = max(0.01, geo.size.width / stageW)
-                  let scaleY = max(0.01, geo.size.height / stageH)
-                  let activeGuides: [AlignmentSnapGuide] = {
-                    guard viewModel.isSnapGuidesEnabled else { return [] }
-                    let targetID = activeDragOffset?.elementID ?? selectedElement?.id
-                    guard let targetID,
-                      var activeElem = slide.elements.first(where: { $0.id == targetID })
-                    else { return [] }
-                    if let drag = activeDragOffset, drag.elementID == activeElem.id {
-                      activeElem.x += Double(drag.translation.width / scaleX)
-                      activeElem.y += Double(drag.translation.height / scaleY)
-                    }
-                    let siblings = slide.elements.filter { $0.id != activeElem.id }
-                    return SnapGuideCalculator.computeGuides(
-                      for: activeElem,
-                      siblings: siblings,
-                      aspectRatio: deck.aspectRatio
+        if viewModel.isSlideSorterViewEnabled {
+          slideSorterGridView(activeIdx: activeIdx, palette: palette)
+        } else {
+          HStack(alignment: .top, spacing: 14) {
+            if !viewModel.showLeftNavigator {
+              VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(deck.slides.enumerated()), id: \.element.id) { idx, slide in
+                  let isSelected = idx == activeIdx
+                  Button {
+                    guard isPrimaryPane else { return }
+                    viewModel.selectedSlideIndex = idx
+                    viewModel.selectSlideElement(id: slide.elements.first?.id)
+                  } label: {
+                    slideMiniatureThumbnailCard(
+                      slide: slide,
+                      index: idx,
+                      isSelected: isSelected,
+                      palette: palette
                     )
-                  }()
+                  }
+                  .buttonStyle(.plain)
+                }
+              }
+              .padding(.leading, 12)
+              .padding(.top, 12)
+            }
 
-                  ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 8)
-                      .fill(palette.elevatedSurface.swiftUIColor)
+            if let slide = currentSlide {
+              VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                  HStack(spacing: 6) {
+                    Color.clear.frame(width: 22, height: 20)
+                    slideStageHorizontalRuler(palette: palette)
+                  }
 
-                    // Top Deck Theme Accent Strip
-                    Rectangle()
-                      .fill(
-                        EasyOfficeDesignTokens.resolveHexColor(
-                          deck.deckTheme.accentBorderHex,
-                          fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
-                        )
-                      )
-                      .frame(height: 5)
+                  HStack(alignment: .top, spacing: 6) {
+                    SlideVerticalRulerView(
+                      maxHeightPoints: deck.aspectRatio.heightPoints,
+                      palette: palette
+                    )
+                    .frame(width: 22, height: 360)
 
-                    // Optional Rule-of-Thirds & Center Crosshair Gridlines (`FUNC-02`)
-                    if viewModel.isSlideGridlinesVisible {
-                      Path { path in
-                        let w = geo.size.width
-                        let h = geo.size.height
-                        for frac in [CGFloat(1.0 / 3.0), CGFloat(0.5), CGFloat(2.0 / 3.0)] {
-                          let x = w * frac
-                          path.move(to: CGPoint(x: x, y: 0))
-                          path.addLine(to: CGPoint(x: x, y: h))
-                          let y = h * frac
-                          path.move(to: CGPoint(x: 0, y: y))
-                          path.addLine(to: CGPoint(x: w, y: y))
+                    GeometryReader { geo in
+                      let stageW = max(1.0, deck.aspectRatio.widthPoints)
+                      let stageH = max(1.0, deck.aspectRatio.heightPoints)
+                      let scaleX = max(0.01, geo.size.width / stageW)
+                      let scaleY = max(0.01, geo.size.height / stageH)
+                      let activeGuides: [AlignmentSnapGuide] = {
+                        guard viewModel.isSnapGuidesEnabled else { return [] }
+                        let targetID = activeDragOffset?.elementID ?? selectedElement?.id
+                        guard let targetID,
+                          var activeElem = slide.elements.first(where: { $0.id == targetID })
+                        else { return [] }
+                        if let drag = activeDragOffset, drag.elementID == activeElem.id {
+                          activeElem.x += Double(drag.translation.width / scaleX)
+                          activeElem.y += Double(drag.translation.height / scaleY)
                         }
-                      }
-                      .stroke(
-                        EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.32),
-                        style: StrokeStyle(lineWidth: 0.9, dash: [4, 4])
-                      )
-                    }
+                        let siblings = slide.elements.filter { $0.id != activeElem.id }
+                        return SnapGuideCalculator.computeGuides(
+                          for: activeElem,
+                          siblings: siblings,
+                          aspectRatio: deck.aspectRatio
+                        )
+                      }()
 
-                    // Slide Header & Bullet Content Overlay (Upper Stage Zone y: 0..220pt)
-                    VStack(alignment: .leading, spacing: 6) {
-                      Text(slide.title)
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(palette.primaryText.swiftUIColor)
-                        .lineLimit(1)
+                      ZStack(alignment: .topLeading) {
+                        Rectangle()
+                          .fill(palette.elevatedSurface.swiftUIColor)
 
-                      if !slide.subtitle.isEmpty {
-                        Text(slide.subtitle)
-                          .font(.system(size: 13, weight: .medium))
-                          .foregroundStyle(
+                        Rectangle()
+                          .fill(
                             EasyOfficeDesignTokens.resolveHexColor(
                               deck.deckTheme.accentBorderHex,
                               fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
                             )
                           )
-                          .lineLimit(1)
-                      }
+                          .frame(height: 4)
 
-                      ForEach(slide.bulletPoints, id: \.self) { bullet in
-                        Text("• \(bullet)")
-                          .font(.system(size: 12))
-                          .foregroundStyle(palette.primaryText.swiftUIColor)
-                          .lineLimit(1)
-                      }
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.top, 18)
-
-                    // Visual Alignment Snap Guide Dashed Lines
-                    ForEach(Array(activeGuides.enumerated()), id: \.offset) { _, guide in
-                      Path { path in
-                        switch guide.axis {
-                        case .vertical:
-                          let xPos = CGFloat(guide.positionPoints) * scaleX
-                          path.move(to: CGPoint(x: xPos, y: 0))
-                          path.addLine(to: CGPoint(x: xPos, y: geo.size.height))
-                        case .horizontal:
-                          let yPos = CGFloat(guide.positionPoints) * scaleY
-                          path.move(to: CGPoint(x: 0, y: yPos))
-                          path.addLine(to: CGPoint(x: geo.size.width, y: yPos))
+                        if viewModel.isSlideGridlinesVisible {
+                          Path { path in
+                            let w = geo.size.width
+                            let h = geo.size.height
+                            for frac in [CGFloat(1.0 / 3.0), CGFloat(0.5), CGFloat(2.0 / 3.0)] {
+                              let x = w * frac
+                              path.move(to: CGPoint(x: x, y: 0))
+                              path.addLine(to: CGPoint(x: x, y: h))
+                              let y = h * frac
+                              path.move(to: CGPoint(x: 0, y: y))
+                              path.addLine(to: CGPoint(x: w, y: y))
+                            }
+                          }
+                          .stroke(
+                            EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.32),
+                            style: StrokeStyle(lineWidth: 0.9, dash: [4, 4])
+                          )
                         }
-                      }
-                      .stroke(
-                        EasyOfficeDesignTokens.statusSuccess.swiftUIColor,
-                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
-                      )
-                    }
 
-                    // Positioned & Selectable Slide Canvas Elements with 7-Kind Shapes, 8 Resize Handles & Top Rotation Handle
-                    ForEach(slide.elements) { element in
-                      let isSelectedElem = selectedElement?.id == element.id
-                      let liveOffset: CGSize =
-                        (activeDragOffset?.elementID == element.id)
-                        ? (activeDragOffset?.translation ?? .zero)
-                        : .zero
-                      let elemW = max(90.0, CGFloat(element.width) * scaleX)
-                      let elemH = max(50.0, CGFloat(element.height) * scaleY)
-                      let centerX = CGFloat(element.centerX) * scaleX + liveOffset.width
-                      let centerY = CGFloat(element.centerY) * scaleY + liveOffset.height
+                        VStack(alignment: .leading, spacing: 6) {
+                          Text(slide.title)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(palette.primaryText.swiftUIColor)
+                            .lineLimit(1)
 
-                      ZStack {
-                        SlideElementShapeContentView(
-                          element: element,
-                          palette: palette,
-                          isSelected: isSelectedElem
-                        )
-                        .frame(width: elemW, height: elemH)
-
-                        if isPrimaryPane && isSelectedElem {
-                          // 8 Directional Resize Handles (SlideResizeHandle.allCases)
-                          ForEach(SlideResizeHandle.allCases, id: \.rawValue) { handle in
-                            let offset = handleOffset(for: handle, width: elemW, height: elemH)
-                            Circle()
-                              .fill(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                              .frame(width: 8, height: 8)
-                              .overlay(Circle().stroke(Color.white, lineWidth: 1))
-                              .offset(offset)
-                              .help("리사이즈 핸들 (\(handle.rawValue))")
-                              .gesture(
-                                DragGesture(minimumDistance: 1)
-                                  .onEnded { value in
-                                    let dX = Double(value.translation.width / scaleX)
-                                    let dY = Double(value.translation.height / scaleY)
-                                    viewModel.resizeSlideElementByHandle(
-                                      elementID: element.id,
-                                      handle: handle,
-                                      deltaX: dX,
-                                      deltaY: dY
-                                    )
-                                  }
+                          if !slide.subtitle.isEmpty {
+                            Text(slide.subtitle)
+                              .font(.system(size: 13, weight: .medium))
+                              .foregroundStyle(
+                                EasyOfficeDesignTokens.resolveHexColor(
+                                  deck.deckTheme.accentBorderHex,
+                                  fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+                                )
                               )
+                              .lineLimit(1)
                           }
 
-                          // Top Rotation Handle (↻)
-                          Text("↻")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.white)
-                            .frame(width: 16, height: 16)
-                            .background(
-                              EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor
-                            )
-                            .clipShape(Circle())
-                            .offset(x: 0, y: -(elemH / 2.0) - 14.0)
-                            .help("회전 핸들 (↻): 드래그하거나 클릭하여 개체 회전")
-                            .onTapGesture {
-                              viewModel.rotateSlideElement(
-                                elementID: element.id,
-                                toDegrees: element.rotationDegrees + 15.0
-                              )
+                          ForEach(slide.bulletPoints, id: \.self) { bullet in
+                            Text("• \(bullet)")
+                              .font(.system(size: 12))
+                              .foregroundStyle(palette.primaryText.swiftUIColor)
+                              .lineLimit(1)
+                          }
+                        }
+                        .padding(.horizontal, 22)
+                        .padding(.top, 18)
+
+                        ForEach(Array(activeGuides.enumerated()), id: \.offset) { _, guide in
+                          Path { path in
+                            switch guide.axis {
+                            case .vertical:
+                              let xPos = CGFloat(guide.positionPoints) * scaleX
+                              path.move(to: CGPoint(x: xPos, y: 0))
+                              path.addLine(to: CGPoint(x: xPos, y: geo.size.height))
+                            case .horizontal:
+                              let yPos = CGFloat(guide.positionPoints) * scaleY
+                              path.move(to: CGPoint(x: 0, y: yPos))
+                              path.addLine(to: CGPoint(x: geo.size.width, y: yPos))
                             }
-                            .gesture(
-                              DragGesture(minimumDistance: 1)
-                                .onEnded { value in
-                                  let angleDelta = Double(value.translation.width) * 0.5
+                          }
+                          .stroke(
+                            EasyOfficeDesignTokens.statusSuccess.swiftUIColor,
+                            style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                          )
+                        }
+
+                        ForEach(slide.elements) { element in
+                          let isSelectedElem = selectedElement?.id == element.id
+                          let liveOffset: CGSize =
+                            (activeDragOffset?.elementID == element.id)
+                            ? (activeDragOffset?.translation ?? .zero)
+                            : .zero
+                          let elemW = max(90.0, CGFloat(element.width) * scaleX)
+                          let elemH = max(50.0, CGFloat(element.height) * scaleY)
+                          let centerX = CGFloat(element.centerX) * scaleX + liveOffset.width
+                          let centerY = CGFloat(element.centerY) * scaleY + liveOffset.height
+
+                          ZStack {
+                            SlideElementShapeContentView(
+                              element: element,
+                              palette: palette,
+                              isSelected: isSelectedElem
+                            )
+                            .frame(width: elemW, height: elemH)
+
+                            if isPrimaryPane && isSelectedElem {
+                              ForEach(SlideResizeHandle.allCases, id: \.rawValue) { handle in
+                                let offset = handleOffset(for: handle, width: elemW, height: elemH)
+                                Circle()
+                                  .fill(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                                  .frame(width: 8, height: 8)
+                                  .offset(offset)
+                                  .help("리사이즈 핸들 (\(handle.rawValue))")
+                                  .gesture(
+                                    DragGesture(minimumDistance: 1)
+                                      .onEnded { value in
+                                        let dX = Double(value.translation.width / scaleX)
+                                        let dY = Double(value.translation.height / scaleY)
+                                        viewModel.resizeSlideElementByHandle(
+                                          elementID: element.id,
+                                          handle: handle,
+                                          deltaX: dX,
+                                          deltaY: dY
+                                        )
+                                      }
+                                  )
+                              }
+
+                              Text("↻")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Color.white)
+                                .frame(width: 16, height: 16)
+                                .background(
+                                  EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor
+                                )
+                                .clipShape(Circle())
+                                .offset(x: 0, y: -(elemH / 2.0) - 14.0)
+                                .help("회전 핸들 (↻)")
+                                .onTapGesture {
                                   viewModel.rotateSlideElement(
                                     elementID: element.id,
-                                    toDegrees: element.rotationDegrees + angleDelta
+                                    toDegrees: element.rotationDegrees + 15.0
                                   )
                                 }
-                            )
-                        }
-                      }
-                      .rotationEffect(.degrees(element.rotationDegrees))
-                      .position(x: centerX, y: centerY)
-                      .zIndex(Double(element.zIndex))
-                      .onTapGesture {
-                        guard isPrimaryPane else { return }
-                        viewModel.selectSlideElement(id: element.id)
-                      }
-                      .gesture(
-                        DragGesture(minimumDistance: 2)
-                          .updating($activeDragOffset) { value, state, _ in
-                            guard isPrimaryPane else { return }
-                            state = (elementID: element.id, translation: value.translation)
+                                .gesture(
+                                  DragGesture(minimumDistance: 1)
+                                    .onEnded { value in
+                                      let angleDelta = Double(value.translation.width) * 0.5
+                                      viewModel.rotateSlideElement(
+                                        elementID: element.id,
+                                        toDegrees: element.rotationDegrees + angleDelta
+                                      )
+                                    }
+                                )
+                            }
                           }
-                          .onEnded { value in
+                          .rotationEffect(.degrees(element.rotationDegrees))
+                          .position(x: centerX, y: centerY)
+                          .zIndex(Double(element.zIndex))
+                          .onTapGesture {
                             guard isPrimaryPane else { return }
                             viewModel.selectSlideElement(id: element.id)
-                            let dX = Double(value.translation.width / scaleX)
-                            let dY = Double(value.translation.height / scaleY)
-                            viewModel.moveSlideElement(
-                              slideIndex: activeIdx,
-                              elementID: element.id,
-                              deltaX: dX,
-                              deltaY: dY
-                            )
                           }
-                      )
+                          .gesture(
+                            DragGesture(minimumDistance: 2)
+                              .updating($activeDragOffset) { value, state, _ in
+                                guard isPrimaryPane else { return }
+                                state = (elementID: element.id, translation: value.translation)
+                              }
+                              .onEnded { value in
+                                guard isPrimaryPane else { return }
+                                viewModel.selectSlideElement(id: element.id)
+                                let dX = Double(value.translation.width / scaleX)
+                                let dY = Double(value.translation.height / scaleY)
+                                viewModel.moveSlideElement(
+                                  slideIndex: activeIdx,
+                                  elementID: element.id,
+                                  deltaX: dX,
+                                  deltaY: dY
+                                )
+                              }
+                          )
+                        }
+                      }
+                      .border(palette.border.swiftUIColor, width: 1)
+                      .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
                     }
+                    .frame(height: 360)
                   }
-                  .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                .frame(height: 360)
-              }
+                .padding(16)
 
-              Divider()
-              HStack(spacing: 8) {
-                Label("발표자 노트", systemImage: "note.text")
-                  .font(.system(size: 11, weight: .semibold))
-                  .lineLimit(1)
-                  .fixedSize(horizontal: true, vertical: false)
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
-                if isPrimaryPane {
-                  LavenderTextFieldPill(
-                    placeholder: "발표자 노트를 입력하세요...",
-                    text: Binding(
-                      get: { slide.speakerNotes },
-                      set: { viewModel.updateActiveSlideSpeakerNotes($0) }
-                    ),
-                    width: nil,
-                    palette: palette,
-                    isSnapshotMode: viewModel.isCanvasSnapshotMode
-                  )
-                } else {
-                  Text(slide.speakerNotes)
-                    .font(.system(size: 11))
+                Divider()
+
+                HStack(spacing: 8) {
+                  Label("발표자 노트", systemImage: "note.text")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(palette.secondaryText.swiftUIColor)
+                  if isPrimaryPane {
+                    FlatUnderlineTextField(
+                      placeholder: "발표자 노트를 입력하세요...",
+                      text: Binding(
+                        get: { slide.speakerNotes },
+                        set: { viewModel.updateActiveSlideSpeakerNotes($0) }
+                      ),
+                      width: nil,
+                      palette: palette,
+                      isSnapshotMode: viewModel.isCanvasSnapshotMode
+                    )
+                  } else {
+                    Text(slide.speakerNotes)
+                      .font(.system(size: 11))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+                  }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(palette.elevatedSurface.swiftUIColor)
               }
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(palette.background.swiftUIColor)
+              .accessibilityLabel(
+                AccessibilityTokens.slideStageLabel(
+                  slideNumber: activeIdx + 1, totalSlides: deck.slides.count))
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.cardSurface.swiftUIColor)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .accessibilityLabel(
-              AccessibilityTokens.slideStageLabel(
-                slideNumber: activeIdx + 1, totalSlides: deck.slides.count))
           }
         }
-      }
 
-      if isPrimaryPane, viewModel.isPresenterModeActive {
-        HStack(spacing: 16) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text(
-              "발표자 모니터 · 진행률 \(Int(presenterSession.progressFraction * 100))% · 경과 \(presenterSession.elapsedSeconds)초 (\(viewModel.isPresenterTimerRunning ? "진행 중" : "일시정지"))"
-            )
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-            Text("현재 노트: \(presenterSession.currentSpeakerNotes)")
-              .font(.system(size: 11))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
-          }
-          Spacer()
-          if let nextSlide = presenterSession.nextSlide {
-            Text("다음 슬라이드: \(nextSlide.title)")
+        if isPrimaryPane, viewModel.isPresenterModeActive {
+          Divider()
+          HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(
+                "발표자 모니터 · 진행률 \(Int(presenterSession.progressFraction * 100))% · 경과 \(presenterSession.elapsedSeconds)초 (\(viewModel.isPresenterTimerRunning ? "진행 중" : "일시정지"))"
+              )
+              .font(.system(size: 11, weight: .bold))
+              .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+              Text("현재 노트: \(presenterSession.currentSpeakerNotes)")
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
+            Spacer()
+            if let nextSlide = presenterSession.nextSlide {
+              Text("다음 슬라이드: \(nextSlide.title)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            }
+            HStack(spacing: 10) {
+              Button(viewModel.isPresenterTimerRunning ? "타이머 일시정지" : "타이머 시작") {
+                viewModel.isPresenterTimerRunning.toggle()
+              }
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+
+              Button("+10초") {
+                viewModel.tickPresenterTimer(seconds: 10)
+              }
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+
+              Button("이전 슬라이드") {
+                viewModel.previousPresenterSlide()
+              }
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+              .disabled(activeIdx == 0)
+
+              Button("다음 슬라이드") {
+                viewModel.advancePresenterSlide()
+              }
+              .buttonStyle(.plain)
               .font(.system(size: 11, weight: .semibold))
               .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .disabled(activeIdx + 1 >= deck.slides.count)
+            }
           }
-          HStack(spacing: 6) {
-            Button(viewModel.isPresenterTimerRunning ? "타이머 일시정지" : "타이머 시작") {
-              viewModel.isPresenterTimerRunning.toggle()
+          .padding(12)
+          .background(palette.subtleAccentSurface.swiftUIColor)
+          .onReceive(presenterTimer) { _ in
+            if viewModel.isPresenterModeActive && viewModel.isPresenterTimerRunning {
+              viewModel.tickPresenterTimer(seconds: 1)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button("+10초") {
-              viewModel.tickPresenterTimer(seconds: 10)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Button("이전 슬라이드") {
-              viewModel.previousPresenterSlide()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(activeIdx == 0)
-
-            Button("다음 슬라이드") {
-              viewModel.advancePresenterSlide()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
-            .disabled(activeIdx + 1 >= deck.slides.count)
           }
         }
-        .padding(12)
-        .background(palette.subtleAccentSurface.swiftUIColor)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .onReceive(presenterTimer) { _ in
-          if viewModel.isPresenterModeActive && viewModel.isPresenterTimerRunning {
-            viewModel.tickPresenterTimer(seconds: 1)
-          }
-        }
-      }
       }
     }
   }
@@ -931,13 +787,13 @@ public struct SlideEditorDetailPaneView: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack {
         Label(
-          "슬라이드 정렬 뷰 (Slide Sorter · \(deck.slides.count)장)",
+          "슬라이드 정렬 뷰 (\(deck.slides.count)장)",
           systemImage: "square.grid.3x2.fill"
         )
         .font(.system(size: 12, weight: .bold))
         .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
         Spacer()
-        Text("카드를 클릭하여 슬라이드를 선택하거나 순서를 재배열합니다.")
+        Text("슬라이드를 선택하거나 순서를 재배열합니다.")
           .font(.system(size: 11))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
       }
@@ -949,11 +805,7 @@ public struct SlideEditorDetailPaneView: View {
             HStack {
               Text("#\(idx + 1)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(EasyOfficeDesignTokens.softBadgeToken(for: .slide).swiftUIColor)
                 .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
 
               Text(slide.transition.rawValue)
                 .font(.system(size: 9, weight: .semibold))
@@ -966,7 +818,6 @@ public struct SlideEditorDetailPaneView: View {
                 .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
             }
 
-            // 16:9 Miniature Card Stage Preview
             VStack(alignment: .leading, spacing: 4) {
               Text(slide.title)
                 .font(.system(size: 12, weight: .bold))
@@ -991,24 +842,24 @@ public struct SlideEditorDetailPaneView: View {
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 108, maxHeight: 108, alignment: .topLeading)
             .background(palette.elevatedSurface.swiftUIColor)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .border(palette.border.swiftUIColor, width: 0.8)
 
             if isPrimaryPane {
-              HStack(spacing: 4) {
+              HStack(spacing: 8) {
                 Button("◀") {
                   viewModel.selectedSlideIndex = idx
                   viewModel.moveActiveSlide(offset: -1)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .semibold))
                 .disabled(idx == 0)
 
                 Button("▶") {
                   viewModel.selectedSlideIndex = idx
                   viewModel.moveActiveSlide(offset: 1)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .semibold))
                 .disabled(idx + 1 >= deck.slides.count)
 
                 Spacer()
@@ -1017,15 +868,16 @@ public struct SlideEditorDetailPaneView: View {
                   viewModel.selectedSlideIndex = idx
                   viewModel.duplicateActiveSlide()
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .medium))
 
                 Button("삭제") {
                   viewModel.selectedSlideIndex = idx
                   viewModel.deleteActiveSlide()
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
+                .buttonStyle(.plain)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
                 .disabled(deck.slides.count <= 1)
               }
             }
@@ -1033,19 +885,15 @@ public struct SlideEditorDetailPaneView: View {
           .padding(12)
           .background(
             isSelected
-              ? palette.selectedSurface.swiftUIColor
+              ? palette.selectedSurface.swiftUIColor.opacity(0.45)
               : palette.cardSurface.swiftUIColor
           )
-          .overlay(
-            RoundedRectangle(cornerRadius: 8)
-              .stroke(
-                isSelected
-                  ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                  : palette.border.swiftUIColor,
-                lineWidth: isSelected ? 2.0 : 1.0
-              )
+          .border(
+            isSelected
+              ? EasyOfficeDesignTokens.brand700.swiftUIColor
+              : palette.border.swiftUIColor,
+            width: isSelected ? 2.0 : 1.0
           )
-          .clipShape(RoundedRectangle(cornerRadius: 8))
           .contentShape(Rectangle())
           .onTapGesture {
             guard isPrimaryPane else { return }
@@ -1056,8 +904,7 @@ public struct SlideEditorDetailPaneView: View {
       }
     }
     .padding(16)
-    .background(palette.cardSurface.swiftUIColor)
-    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .background(palette.background.swiftUIColor)
   }
 }
 
@@ -1128,6 +975,7 @@ public struct PDFStudioDetailPaneView: View {
   @Bindable var viewModel: WorkspaceViewModel
   let pdf: PDFStudioDocumentModel
   let isPrimaryPane: Bool
+  @State private var showRawPDFKitView: Bool = false
 
   public init(
     viewModel: WorkspaceViewModel, pdf: PDFStudioDocumentModel, isPrimaryPane: Bool = true
@@ -1148,17 +996,18 @@ public struct PDFStudioDetailPaneView: View {
       showsIndicators: false,
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
-      HStack(spacing: 6) {
-        HStack(spacing: 4) {
+      HStack(spacing: 12) {
+        HStack(spacing: 6) {
           Button("◀") {
             viewModel.selectedPDFPageIndex = max(0, viewModel.selectedPDFPageIndex - 1)
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
+          .buttonStyle(.plain)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
           .disabled(viewModel.selectedPDFPageIndex <= 0)
 
           Text("\(currentPageNum) / \(max(1, pdf.pages.count))")
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
             .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
@@ -1169,26 +1018,27 @@ public struct PDFStudioDetailPaneView: View {
               viewModel.selectedPDFPageIndex + 1
             )
           }
-          .buttonStyle(.bordered)
-          .controlSize(.mini)
+          .buttonStyle(.plain)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
           .disabled(viewModel.selectedPDFPageIndex + 1 >= pdf.pages.count)
         }
 
-        Divider().frame(height: 16)
+        Divider().frame(height: 14)
 
         Button {
           viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
         } label: {
           Label("90° 회전", systemImage: "rotate.right")
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: 11, weight: .medium))
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(palette.primaryText.swiftUIColor)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
 
-        LavenderMenuPill(
+        FlatToolbarMenu(
           title: "주석 도구 (\(pdf.annotations.count))",
           systemImage: "highlighter",
           palette: palette
@@ -1200,7 +1050,7 @@ public struct PDFStudioDetailPaneView: View {
           }
         }
 
-        LavenderMenuPill(
+        FlatToolbarMenu(
           title: "결재 스탬프",
           systemImage: "seal.fill",
           palette: palette
@@ -1212,12 +1062,14 @@ public struct PDFStudioDetailPaneView: View {
           }
         }
 
-        LavenderTogglePill(
+        FlatToggleControl(
           title: "전자서명 그리기",
           systemImage: "signature",
           isOn: $viewModel.isPDFInkDrawingModeEnabled,
           palette: palette
         )
+
+        Divider().frame(height: 14)
 
         Button {
           viewModel.executeRibbonCommand("pdf-mod-tooffice")
@@ -1226,39 +1078,34 @@ public struct PDFStudioDetailPaneView: View {
             .font(.system(size: 11, weight: .semibold))
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+        .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
 
-        Text("ISO 32000-1 검증됨")
-          .font(.system(size: 10, weight: .semibold, design: .monospaced))
-          .padding(.horizontal, 6)
-          .padding(.vertical, 2)
-          .background(palette.subtleAccentSurface.swiftUIColor)
-          .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-          .clipShape(RoundedRectangle(cornerRadius: 4))
-          .lineLimit(1)
+        if !viewModel.isCanvasSnapshotMode {
+          Button(showRawPDFKitView ? "용지 뷰" : "PDFKit 뷰") {
+            showRawPDFKitView.toggle()
+          }
+          .buttonStyle(.plain)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
           .fixedSize(horizontal: true, vertical: false)
+        }
 
         Button(viewModel.isAdvancedToolbarExpanded ? "양식·보안 접기 ▲" : "양식·보안 도구 ▼") {
           viewModel.isAdvancedToolbarExpanded.toggle()
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
       }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 4)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 6)
     }
-    .frame(height: 34)
-    .background(palette.cardSurface.swiftUIColor)
-    .clipShape(RoundedRectangle(cornerRadius: 6))
-  }
-
-  private var currentPDFSecuritySummary: String {
-    pdf.securityInspectionSummary
+    .frame(height: 32)
+    .background(palette.elevatedSurface.swiftUIColor)
   }
 
   private func triggerApplyWatermark() {
@@ -1272,46 +1119,33 @@ public struct PDFStudioDetailPaneView: View {
       showsIndicators: false,
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
-      HStack(spacing: 8) {
-        Label("PDF 보안 점검 & 워터마크", systemImage: "checkmark.shield.fill")
-          .font(.system(size: 11, weight: .bold))
+      HStack(spacing: 12) {
+        Label("워터마크", systemImage: "checkmark.shield.fill")
+          .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
-        Text(currentPDFSecuritySummary)
-          .font(.system(size: 10, weight: .semibold, design: .monospaced))
-          .padding(.horizontal, 8)
-          .padding(.vertical, 3)
-          .background(palette.subtleAccentSurface.swiftUIColor)
-          .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-          .clipShape(RoundedRectangle(cornerRadius: 4))
-          .lineLimit(1)
-          .fixedSize(horizontal: true, vertical: false)
-
-        Divider().frame(height: 16)
-
-        LavenderTextFieldPill(
-          placeholder: "워터마크",
+        FlatUnderlineTextField(
+          placeholder: "워터마크 문구",
           text: $viewModel.pdfWatermarkDraft,
           width: 150,
           palette: palette,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        Button("워터마크 적용") {
+        Button("적용") {
           triggerApplyWatermark()
         }
-        .buttonStyle(.borderedProminent)
-        .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
       }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 6)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 5)
     }
-    .background(palette.cardSurface.swiftUIColor)
-    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .background(palette.elevatedSurface.swiftUIColor)
   }
 
   @ViewBuilder
@@ -1321,14 +1155,14 @@ public struct PDFStudioDetailPaneView: View {
       showsIndicators: false,
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
-      HStack(spacing: 8) {
-        Label("보안 리댁션 · 양식 · 병합", systemImage: "eye.slash.fill")
-          .font(.system(size: 11, weight: .bold))
+      HStack(spacing: 12) {
+        Label("보안 마스킹 · 양식 · 병합", systemImage: "eye.slash.fill")
+          .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "마스킹 구문",
           text: $viewModel.pdfRedactionPhraseDraft,
           width: 120,
@@ -1336,42 +1170,45 @@ public struct PDFStudioDetailPaneView: View {
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        Button("영구 리댁션") {
+        Button("영구 마스킹") {
           _ = viewModel.redactSensitiveTextOnActivePDF()
         }
-        .buttonStyle(.borderedProminent)
-        .tint(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
-        Divider().frame(height: 16)
+        Divider().frame(height: 14)
 
         Button("페이지 위로") {
           viewModel.moveActivePDFPage(offset: -1)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
         .disabled(viewModel.selectedPDFPageIndex <= 0)
 
         Button("페이지 아래로") {
           viewModel.moveActivePDFPage(offset: 1)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
         .disabled(viewModel.selectedPDFPageIndex + 1 >= pdf.pages.count)
 
         Button("열린 PDF 병합") {
           viewModel.mergeActivePDFWithAnotherOpenTab()
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
-        Divider().frame(height: 16)
+        Divider().frame(height: 14)
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "필드명",
           text: $viewModel.pdfFormFieldNameDraft,
           width: 95,
@@ -1379,7 +1216,7 @@ public struct PDFStudioDetailPaneView: View {
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "기본값",
           text: $viewModel.pdfFormFieldValueDraft,
           width: 95,
@@ -1390,30 +1227,31 @@ public struct PDFStudioDetailPaneView: View {
         Button("양식 필드 추가") {
           viewModel.addFormFieldToActivePDF()
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
         Button("체크박스 추가") {
           viewModel.addFormFieldToActivePDF(isCheckbox: true)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
         if pdf.isRedacted {
-          Label("비가역 리댁션 적용됨", systemImage: "lock.shield.fill")
-            .font(.system(size: 10, weight: .bold))
+          Text("마스킹 적용됨")
+            .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
         }
       }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 6)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 5)
     }
-    .background(palette.cardSurface.swiftUIColor)
-    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .background(palette.elevatedSurface.swiftUIColor)
   }
 
   @ViewBuilder
@@ -1423,14 +1261,14 @@ public struct PDFStudioDetailPaneView: View {
       showsIndicators: false,
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
-      HStack(spacing: 8) {
+      HStack(spacing: 12) {
         Label("책갈피", systemImage: "bookmark.fill")
-          .font(.system(size: 11, weight: .bold))
+          .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "책갈피 제목",
           text: $viewModel.bookmarkTitleDraft,
           width: 140,
@@ -1441,13 +1279,14 @@ public struct PDFStudioDetailPaneView: View {
         Button("책갈피 추가") {
           viewModel.addBookmarkToActivePDF()
         }
-        .buttonStyle(.borderedProminent)
-        .tint(EasyOfficeDesignTokens.brand700.swiftUIColor)
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
         if !pdf.outline.isEmpty {
-          HStack(spacing: 6) {
+          Divider().frame(height: 14)
+          HStack(spacing: 10) {
             ForEach(pdf.outline) { node in
               HStack(spacing: 4) {
                 Button {
@@ -1455,8 +1294,8 @@ public struct PDFStudioDetailPaneView: View {
                   viewModel.selectedPDFPageIndex = targetIdx
                 } label: {
                   Text("\(node.title) (p.\(node.targetPageNumber))")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(palette.primaryText.swiftUIColor)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 }
@@ -1465,25 +1304,20 @@ public struct PDFStudioDetailPaneView: View {
                 Button {
                   viewModel.removeBookmarkFromActivePDF(id: node.id)
                 } label: {
-                  Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                  Image(systemName: "xmark")
+                    .font(.system(size: 9))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
                 }
                 .buttonStyle(.plain)
               }
-              .padding(.horizontal, 6)
-              .padding(.vertical, 3)
-              .background(palette.selectedSurface.swiftUIColor)
-              .clipShape(RoundedRectangle(cornerRadius: 4))
             }
           }
         }
       }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 6)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 5)
     }
-    .background(palette.cardSurface.swiftUIColor)
-    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .background(palette.elevatedSurface.swiftUIColor)
   }
 
   @ViewBuilder
@@ -1499,29 +1333,20 @@ public struct PDFStudioDetailPaneView: View {
       .split(separator: "\n", omittingEmptySubsequences: false)
       .map(String.init)
     let stampAnnotations = pageAnnotations.filter { $0.kind == .stamp }
-    let primaryStampLabel = stampAnnotations.last?.content ?? "APPROVED · 결재완료"
+    let primaryStampLabel = stampAnnotations.last?.content
 
     ZStack {
-      VStack(alignment: .leading, spacing: 12) {
-        // Top Official PDF Page Header & Electronic Approval Stamp Box
+      VStack(alignment: .leading, spacing: 14) {
         HStack(alignment: .top, spacing: 12) {
           VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-              Text("ISO 32000-1 STANDARD PDF")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(EasyOfficeDesignTokens.softBadgeToken(for: .pdf).swiftUIColor)
-                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-
-              Text("PAGE \(pageNumber) OF \(max(1, pdf.pages.count))")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
+            HStack(spacing: 8) {
+              Text("PAGE \(pageNumber) / \(max(1, pdf.pages.count))")
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
 
               if page.rotationDegrees != 0 {
                 Text("회전 \(page.rotationDegrees)°")
-                  .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                  .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                   .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
               }
             }
@@ -1534,29 +1359,16 @@ public struct PDFStudioDetailPaneView: View {
 
           Spacer()
 
-          // Official Approval Stamp Seal Box
-          VStack(spacing: 2) {
-            Text("전자결재 승인인")
-              .font(.system(size: 8, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
-            Text(primaryStampLabel)
-              .font(.system(size: 10, weight: .heavy, design: .monospaced))
+          if let stampText = primaryStampLabel {
+            Text(stampText)
+              .font(.system(size: 10, weight: .semibold, design: .monospaced))
               .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
               .lineLimit(1)
           }
-          .padding(.horizontal, 10)
-          .padding(.vertical, 6)
-          .background(EasyOfficeDesignTokens.statusDanger.swiftUIColor.opacity(0.08))
-          .overlay(
-            RoundedRectangle(cornerRadius: 5)
-              .stroke(EasyOfficeDesignTokens.statusDanger.swiftUIColor, lineWidth: 1.5)
-          )
-          .clipShape(RoundedRectangle(cornerRadius: 5))
         }
 
         Divider()
 
-        // Extracted Document Paragraphs & Highlight Overlay
         VStack(alignment: .leading, spacing: 7) {
           ForEach(Array(textLines.enumerated()), id: \.offset) { lineIdx, line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -1569,113 +1381,102 @@ public struct PDFStudioDetailPaneView: View {
             Text(trimmed.isEmpty ? " " : line)
               .font(.system(size: isHeadingLine ? 13 : 11.5, weight: isHeadingLine ? .bold : .regular))
               .foregroundStyle(palette.primaryText.swiftUIColor)
-              .padding(.horizontal, isHighlightedLine ? 6 : 0)
-              .padding(.vertical, isHighlightedLine ? 3 : 0)
+              .padding(.horizontal, isHighlightedLine ? 4 : 0)
+              .padding(.vertical, isHighlightedLine ? 2 : 0)
               .frame(maxWidth: .infinity, alignment: .leading)
               .background(
                 isHighlightedLine
-                  ? EasyOfficeDesignTokens.statusWarning.swiftUIColor.opacity(0.24)
+                  ? EasyOfficeDesignTokens.statusWarning.swiftUIColor.opacity(0.22)
                   : Color.clear
               )
-              .clipShape(RoundedRectangle(cornerRadius: 4))
           }
         }
 
-        // Active Page Annotations Strip
         if !pageAnnotations.isEmpty {
-          VStack(alignment: .leading, spacing: 5) {
-            Text("페이지 주석 및 검토 마크 (\(pageAnnotations.count)건)")
-              .font(.system(size: 10, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-
-            AdaptiveScrollContainer(
-              axes: .horizontal,
-              showsIndicators: false,
-              isSnapshotMode: viewModel.isCanvasSnapshotMode
-            ) {
-              HStack(spacing: 6) {
-                ForEach(pageAnnotations) { annot in
-                  HStack(spacing: 4) {
-                    Image(systemName: "highlighter")
-                      .font(.system(size: 9, weight: .bold))
-                    Text("[\(annot.kind.rawValue)] \(annot.content)")
-                      .font(.system(size: 10, weight: .medium))
-                      .lineLimit(1)
-                  }
-                  .padding(.horizontal, 8)
-                  .padding(.vertical, 4)
-                  .background(palette.selectedSurface.swiftUIColor)
-                  .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-                  .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
-              }
-            }
-          }
-        }
-
-        // Active Page AcroForm Fields Preview
-        if !pageFormFields.isEmpty {
-          VStack(alignment: .leading, spacing: 5) {
-            Text("AcroForm 전자 양식 필드 (\(pageFormFields.count)필드)")
-              .font(.system(size: 10, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-
-            HStack(spacing: 8) {
-              ForEach(pageFormFields.prefix(4)) { field in
-                HStack(spacing: 5) {
-                  Image(
-                    systemName: field.isCheckbox
-                      ? (field.isChecked ? "checkmark.square.fill" : "square")
-                      : "character.textbox"
-                  )
-                  .font(.system(size: 10, weight: .bold))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                  Text("\(field.name): \(field.isCheckbox ? (field.isChecked ? "예" : "아니오") : field.value)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-                    .lineLimit(1)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(palette.cardSurface.swiftUIColor)
-                .overlay(
-                  RoundedRectangle(cornerRadius: 4)
-                    .stroke(palette.border.swiftUIColor, lineWidth: 0.8)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-              }
-            }
-          }
-        }
-
-        // Vector Signature & Freehand Ink Verification Box
-        HStack(spacing: 12) {
-          VStack(alignment: .leading, spacing: 3) {
-            Text("전자서명 및 벡터 잉크 검증 영역")
-              .font(.system(size: 10, weight: .bold))
+          Divider()
+          HStack(spacing: 12) {
+            Text("주석")
+              .font(.system(size: 10, weight: .semibold))
               .foregroundStyle(palette.secondaryText.swiftUIColor)
-            Text("현재 페이지 벡터 획: \(pageStrokes.count)건 · 무결성 검증 정상")
-              .font(.system(size: 9.5, design: .monospaced))
-              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+
+            ForEach(pageAnnotations.prefix(4)) { annot in
+              Text("· \(annot.kind.rawValue) \(annot.content)")
+                .font(.system(size: 10))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .lineLimit(1)
+            }
           }
+        }
 
-          Spacer()
+        if !pageFormFields.isEmpty {
+          Divider()
+          HStack(spacing: 16) {
+            ForEach(pageFormFields.prefix(4)) { field in
+              HStack(spacing: 6) {
+                if field.isCheckbox {
+                  Button {
+                    viewModel.updatePDFFormField(id: field.id, isChecked: !field.isChecked)
+                  } label: {
+                    HStack(spacing: 4) {
+                      Image(
+                        systemName: field.isChecked ? "checkmark.square.fill" : "square"
+                      )
+                      .font(.system(size: 10, weight: .semibold))
+                      .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                      Text("\(field.name) (\(field.isChecked ? "예" : "아니오"))")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.primaryText.swiftUIColor)
+                        .lineLimit(1)
+                    }
+                  }
+                  .buttonStyle(.plain)
+                } else {
+                  Text("\(field.name)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    .lineLimit(1)
 
-          Canvas { context, size in
-            if pageStrokes.isEmpty {
-              var baseline = Path()
-              baseline.move(to: CGPoint(x: 8, y: size.height * 0.65))
-              baseline.addCurve(
-                to: CGPoint(x: size.width - 8, y: size.height * 0.45),
-                control1: CGPoint(x: size.width * 0.35, y: size.height * 0.15),
-                control2: CGPoint(x: size.width * 0.65, y: size.height * 0.85)
-              )
-              context.stroke(
-                baseline,
-                with: .color(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.65)),
-                style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
-              )
-            } else {
+                  VStack(alignment: .leading, spacing: 1) {
+                    if viewModel.isCanvasSnapshotMode {
+                      Text(field.value)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(palette.primaryText.swiftUIColor)
+                        .lineLimit(1)
+                    } else {
+                      TextField(
+                        "입력값",
+                        text: Binding(
+                          get: { field.value },
+                          set: { updated in
+                            viewModel.updatePDFFormField(id: field.id, value: updated)
+                          }
+                        )
+                      )
+                      .textFieldStyle(.plain)
+                      .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                      .foregroundStyle(palette.primaryText.swiftUIColor)
+                      .frame(width: 96)
+                    }
+                    Rectangle()
+                      .fill(palette.border.swiftUIColor)
+                      .frame(width: 96, height: 1)
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if !pageStrokes.isEmpty {
+          Divider()
+          HStack(spacing: 12) {
+            Text("전자서명")
+              .font(.system(size: 10, weight: .semibold))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+            Spacer()
+
+            Canvas { context, size in
               for stroke in pageStrokes where stroke.points.count >= 2 {
                 var path = Path()
                 for (ptIdx, pt) in stroke.points.enumerated() {
@@ -1703,17 +1504,11 @@ public struct PDFStudioDetailPaneView: View {
                 )
               }
             }
+            .frame(width: 160, height: 32)
           }
-          .frame(width: 180, height: 38)
-          .background(palette.cardSurface.swiftUIColor)
-          .overlay(
-            RoundedRectangle(cornerRadius: 5)
-              .stroke(palette.border.swiftUIColor, lineWidth: 0.8)
-          )
-          .clipShape(RoundedRectangle(cornerRadius: 5))
         }
       }
-      .padding(20)
+      .padding(24)
 
       if !pdf.watermarkText.isEmpty {
         Text(pdf.watermarkText)
@@ -1725,28 +1520,23 @@ public struct PDFStudioDetailPaneView: View {
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
     .background(palette.elevatedSurface.swiftUIColor)
-    .overlay(
-      RoundedRectangle(cornerRadius: 8)
-        .stroke(palette.border.swiftUIColor, lineWidth: 1)
-    )
-    .clipShape(RoundedRectangle(cornerRadius: 8))
+    .border(palette.border.swiftUIColor, width: 1)
+    .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
   }
 
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
     let currentPageNum = viewModel.selectedPDFPageNumber
     let currentPageStrokeCount = pdf.inkStrokes.filter { $0.pageNumber == currentPageNum }.count
-    let activePage = {
-      let safeIdx = max(0, min(pdf.pages.count - 1, viewModel.selectedPDFPageIndex))
-      return pdf.pages.indices.contains(safeIdx) ? pdf.pages[safeIdx] : nil
-    }()
+    let safeIdx = max(0, min(pdf.pages.count - 1, viewModel.selectedPDFPageIndex))
+    let activePage = pdf.pages.indices.contains(safeIdx) ? pdf.pages[safeIdx] : nil
 
     AdaptiveScrollContainer(
       axes: .vertical,
       showsIndicators: true,
       isSnapshotMode: viewModel.isCanvasSnapshotMode
     ) {
-      VStack(alignment: .leading, spacing: 10) {
+      VStack(alignment: .leading, spacing: 0) {
         if isPrimaryPane {
           pdfPrimaryToolbar(
             palette: palette,
@@ -1754,32 +1544,23 @@ public struct PDFStudioDetailPaneView: View {
             currentPageStrokeCount: currentPageStrokeCount
           )
 
+          Divider()
+
           if viewModel.isAdvancedToolbarExpanded {
             pdfSecurityAndWatermarkBar(palette: palette)
+            Divider()
             pdfRedactionAndMergeBar(palette: palette)
+            Divider()
             pdfStampAndBookmarkBar(palette: palette)
+            Divider()
 
             if !pdf.formFields.isEmpty {
-              VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                  Label(
-                    "AcroForm 양식 필드 (\(pdf.formFields.count)건)",
-                    systemImage: "list.bullet.rectangle.portrait.fill"
-                  )
-                  .font(.system(size: 11, weight: .bold))
-                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-                  Spacer()
-                }
-
+              VStack(alignment: .leading, spacing: 6) {
                 ForEach(pdf.formFields) { field in
                   HStack(spacing: 10) {
                     Text("P\(field.pageNumber)")
                       .font(.system(size: 9, weight: .bold, design: .monospaced))
-                      .padding(.horizontal, 5)
-                      .padding(.vertical, 2)
-                      .background(EasyOfficeDesignTokens.softBadgeToken(for: .pdf).swiftUIColor)
                       .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-                      .clipShape(RoundedRectangle(cornerRadius: 4))
 
                     Text(field.name)
                       .font(.system(size: 11, weight: .semibold))
@@ -1787,8 +1568,8 @@ public struct PDFStudioDetailPaneView: View {
                       .frame(minWidth: 110, alignment: .leading)
 
                     if field.isCheckbox {
-                      LavenderTogglePill(
-                        title: field.isChecked ? "선택됨 (Checked)" : "해제됨 (Unchecked)",
+                      FlatToggleControl(
+                        title: field.isChecked ? "선택됨" : "해제됨",
                         systemImage: field.isChecked ? "checkmark.square.fill" : "square",
                         isOn: Binding(
                           get: { field.isChecked },
@@ -1799,7 +1580,7 @@ public struct PDFStudioDetailPaneView: View {
                         palette: palette
                       )
                     } else {
-                      LavenderTextFieldPill(
+                      FlatUnderlineTextField(
                         placeholder: "양식 입력값",
                         text: Binding(
                           get: { field.value },
@@ -1817,47 +1598,29 @@ public struct PDFStudioDetailPaneView: View {
                   }
                 }
               }
-              .padding(10)
-              .background(palette.cardSurface.swiftUIColor)
-              .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                  .stroke(palette.border.swiftUIColor, lineWidth: 1)
-              )
-              .clipShape(RoundedRectangle(cornerRadius: 8))
+              .padding(.horizontal, 12)
+              .padding(.vertical, 8)
+              .background(palette.elevatedSurface.swiftUIColor)
+              Divider()
             }
           }
         }
 
         if !pdf.pages.isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            HStack {
-              Label(
-                "네이티브 PDFKit 벡터 뷰어 (ISO 32000-1 · CoreText CJK 서브셋)",
-                systemImage: "doc.viewfinder.fill"
-              )
-              .font(.system(size: 11, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-              Spacer()
-              Text("페이지 수: \(pdf.pages.count)p · 총 벡터 획: \(pdf.inkStrokes.count)건")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
-            }
-
-            if let page = activePage {
-              pdfNativePageSheetView(
-                page: page,
-                pageNumber: currentPageNum,
-                palette: palette
-              )
-            }
-
-            if !viewModel.isCanvasSnapshotMode {
+          VStack(alignment: .leading, spacing: 12) {
+            if showRawPDFKitView && !viewModel.isCanvasSnapshotMode {
               PDFKitRepresentedView(
                 pdfDocument: pdf, selectedPageIndex: viewModel.selectedPDFPageIndex,
                 zoomFactor: CGFloat(viewModel.zoomPercent / 100.0)
               )
               .frame(minHeight: 360, maxHeight: .infinity)
-              .clipShape(RoundedRectangle(cornerRadius: 6))
+              .border(palette.border.swiftUIColor, width: 1)
+            } else if let page = activePage {
+              pdfNativePageSheetView(
+                page: page,
+                pageNumber: currentPageNum,
+                palette: palette
+              )
             }
 
             if isPrimaryPane
@@ -1866,67 +1629,9 @@ public struct PDFStudioDetailPaneView: View {
               PDFInteractiveInkOverlayView(viewModel: viewModel, palette: palette, pdfDocument: pdf)
             }
           }
-          .padding(12)
-          .background(palette.cardSurface.swiftUIColor)
-          .overlay(
-            RoundedRectangle(cornerRadius: 8).stroke(palette.border.swiftUIColor, lineWidth: 1)
-          )
-          .clipShape(RoundedRectangle(cornerRadius: 8))
+          .padding(24)
+          .background(palette.background.swiftUIColor)
         }
-
-        // Single Compact 1-Line PDF Active Page & AcroForm Summary Strip (`UX-12`)
-        AdaptiveScrollContainer(
-          axes: .horizontal,
-          showsIndicators: false,
-          isSnapshotMode: viewModel.isCanvasSnapshotMode
-        ) {
-          HStack(spacing: 10) {
-            Label(
-              "활성 페이지 P\(currentPageNum) / \(max(1, pdf.pages.count))",
-              systemImage: "doc.text.magnifyingglass"
-            )
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-
-            if let page = activePage {
-              Text("회전 \(page.rotationDegrees)°")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(palette.secondaryText.swiftUIColor)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            }
-
-            Divider().frame(height: 14)
-
-            Text(
-              "주석 \(pdf.annotations.count)건 · 서명 획 \(currentPageStrokeCount)건 · AcroForm \(pdf.formFields.count)필드"
-            )
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(palette.primaryText.swiftUIColor)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-
-            if !pdf.watermarkText.isEmpty {
-              Divider().frame(height: 14)
-              Text("워터마크: \(pdf.watermarkText)")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            }
-          }
-          .padding(.horizontal, 10)
-          .padding(.vertical, 6)
-        }
-        .frame(height: 32)
-        .background(palette.cardSurface.swiftUIColor)
-        .overlay(
-          RoundedRectangle(cornerRadius: 6)
-            .stroke(palette.border.swiftUIColor, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 6))
       }
     }
   }

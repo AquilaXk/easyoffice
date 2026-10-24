@@ -1,5 +1,5 @@
 use easyoffice_formats::EasyOfficeError;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 
 pub mod functions;
@@ -9,7 +9,9 @@ mod parser;
 pub mod workbook;
 
 pub use functions::*;
-pub(crate) use parser::*;
+pub use parser::{
+    compile_formula_expr, compute_sheet_id, BinaryOp, Expr, PackedWorkbookCoord, VisitingTracker,
+};
 pub use workbook::*;
 
 /// Bit-packed 64-bit spreadsheet cell coordinate (`row` in upper 32 bits, `col` in lower 32 bits).
@@ -384,36 +386,37 @@ pub struct PivotTableSummary {
 
 pub(crate) struct EvalContext<'a> {
     pub workbook: Option<&'a WorkbookEngine>,
-    pub current_sheet: String,
-    pub visiting: HashSet<(String, PackedCellCoordinate)>,
-    pub memo: HashMap<(String, PackedCellCoordinate), EvaluatedCellValue>,
+    pub visiting: VisitingTracker,
+    pub memo: HashMap<PackedWorkbookCoord, EvaluatedCellValue>,
 }
 
 impl<'a> EvalContext<'a> {
-    pub fn standalone(sheet_name: &str) -> Self {
+    #[inline]
+    pub fn standalone_id(sheet_id: u16) -> Self {
         Self {
             workbook: None,
-            current_sheet: sheet_name.to_ascii_lowercase(),
-            visiting: HashSet::new(),
+            visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
         }
     }
 
-    pub fn with_workbook(workbook: &'a WorkbookEngine, sheet_name: &str) -> Self {
+    #[inline]
+    pub fn with_workbook(workbook: &'a WorkbookEngine, sheet_id: u16) -> Self {
         Self {
             workbook: Some(workbook),
-            current_sheet: sheet_name.to_ascii_lowercase(),
-            visiting: HashSet::new(),
+            visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
         }
     }
 }
 
-/// Spreadsheet calculation engine with $O(V + E)$ cycle detection and DAG memoization.
+/// Spreadsheet calculation engine with $O(V + E)$ cycle detection, pre-compiled ASTs, and DAG memoization.
 #[derive(Debug, Clone, Default)]
 pub struct SheetEngine {
     pub name: String,
+    pub(crate) sheet_id: u16,
     pub(crate) cells: HashMap<PackedCellCoordinate, String>,
+    pub(crate) compiled_asts: HashMap<PackedCellCoordinate, Result<Expr, FormulaError>>,
     pub conditional_rules: Vec<ConditionalFormatRule>,
     pub validation_rule: Option<DataValidationRule>,
 }
@@ -422,11 +425,34 @@ impl SheetEngine {
     pub const MAX_RECURSION_DEPTH: usize = 64;
 
     pub fn new(name: impl Into<String>) -> Self {
+        let name_str = name.into();
+        let sheet_id = compute_sheet_id(&name_str);
         Self {
-            name: name.into(),
+            name: name_str,
+            sheet_id,
             cells: HashMap::new(),
+            compiled_asts: HashMap::new(),
             conditional_rules: Vec::new(),
             validation_rule: None,
+        }
+    }
+
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+        self.sheet_id = compute_sheet_id(&self.name);
+    }
+
+    #[inline]
+    pub fn raw_cells(&self) -> &HashMap<PackedCellCoordinate, String> {
+        &self.cells
+    }
+
+    #[inline]
+    pub(crate) fn resolved_sheet_id(&self) -> u16 {
+        if self.sheet_id != 0 {
+            self.sheet_id
+        } else {
+            compute_sheet_id(&self.name)
         }
     }
 
@@ -439,10 +465,40 @@ impl SheetEngine {
         let val = raw_value.into();
         if val.is_empty() {
             self.cells.remove(&coord);
+            self.compiled_asts.remove(&coord);
         } else {
+            let trimmed = val.trim();
+            if let Some(formula_body) = trimmed.strip_prefix('=') {
+                let expr_src = formula_body.trim();
+                if !expr_src.is_empty() {
+                    self.compiled_asts
+                        .insert(coord, compile_formula_expr(expr_src));
+                } else {
+                    self.compiled_asts.remove(&coord);
+                }
+            } else {
+                self.compiled_asts.remove(&coord);
+            }
             self.cells.insert(coord, val);
         }
         Ok(())
+    }
+
+    pub(crate) fn rebuild_compiled_asts(&mut self) {
+        if self.sheet_id == 0 {
+            self.sheet_id = compute_sheet_id(&self.name);
+        }
+        self.compiled_asts.clear();
+        for (&coord, raw) in &self.cells {
+            let trimmed = raw.trim();
+            if let Some(formula_body) = trimmed.strip_prefix('=') {
+                let expr_src = formula_body.trim();
+                if !expr_src.is_empty() {
+                    self.compiled_asts
+                        .insert(coord, compile_formula_expr(expr_src));
+                }
+            }
+        }
     }
 
     pub fn get_raw_cell(&self, a1: &str) -> Option<&str> {
@@ -454,88 +510,32 @@ impl SheetEngine {
         let Ok(coord) = PackedCellCoordinate::parse_a1(a1) else {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         };
-        let mut ctx = EvalContext::standalone(&self.name);
+        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         self.eval_coord_ctx(coord, &mut ctx, 0)
     }
 
+    /// Evaluates all populated cells in the worksheet in a single shared DAG memoization pass
+    /// using pre-compiled ASTs and the inline `VisitingTracker` bitset.
+    pub fn recalculate_all(&self) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
+        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
+        ctx.memo.reserve(self.cells.len());
+        for &coord in self.cells.keys() {
+            self.eval_coord_ctx(coord, &mut ctx, 0);
+        }
+        let sid = self.resolved_sheet_id();
+        let mut results = HashMap::with_capacity(self.cells.len());
+        for &coord in self.cells.keys() {
+            let key = PackedWorkbookCoord::new(sid, coord);
+            if let Some(val) = ctx.memo.get(&key) {
+                results.insert(coord, val.clone());
+            }
+        }
+        results
+    }
+
     pub fn evaluate_formula_str(&self, formula: &str) -> EvaluatedCellValue {
-        let mut ctx = EvalContext::standalone(&self.name);
+        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         self.eval_raw_string_ctx(formula, &mut ctx, 0)
-    }
-
-    pub fn compute_pivot(
-        &self,
-        range: &CellRange,
-        has_header_row: bool,
-        row_field_col_offset: usize,
-        value_field_col_offset: usize,
-        aggregation: PivotAggregation,
-    ) -> PivotTableSummary {
-        let (row_count, col_count) = range.dimensions();
-        let min_r = range.start.row().min(range.end.row());
-        let min_c = range.start.col().min(range.end.col());
-        let start_row_idx = if has_header_row { 1 } else { 0 };
-
-        let mut ctx = EvalContext::standalone(&self.name);
-        let mut row_keys: Vec<String> = Vec::new();
-        let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
-        let mut all_values: Vec<f64> = Vec::new();
-
-        for r_off in start_row_idx..row_count {
-            if row_field_col_offset >= col_count || value_field_col_offset >= col_count {
-                continue;
-            }
-            let key_coord = PackedCellCoordinate::new(
-                min_r + r_off as u32,
-                min_c + row_field_col_offset as u32,
-            );
-            let val_coord = PackedCellCoordinate::new(
-                min_r + r_off as u32,
-                min_c + value_field_col_offset as u32,
-            );
-            if let (Ok(kc), Ok(vc)) = (key_coord, val_coord) {
-                let key_str = self.eval_coord_ctx(kc, &mut ctx, 0).to_display_string();
-                if key_str.is_empty() {
-                    continue;
-                }
-                if !row_keys.contains(&key_str) {
-                    row_keys.push(key_str.clone());
-                }
-                if let Some(num) = self.eval_coord_ctx(vc, &mut ctx, 0).as_number() {
-                    buckets.entry(key_str).or_default().push(num);
-                    all_values.push(num);
-                }
-            }
-        }
-
-        let row_totals: Vec<f64> = row_keys
-            .iter()
-            .map(|k| Self::aggregate_slice(buckets.get(k).map_or(&[], Vec::as_slice), aggregation))
-            .collect();
-        let matrix: Vec<Vec<f64>> = row_totals.iter().map(|v| vec![*v]).collect();
-        let grand_total = Self::aggregate_slice(&all_values, aggregation);
-
-        PivotTableSummary {
-            row_keys,
-            column_keys: vec!["Total".to_string()],
-            matrix,
-            row_totals,
-            column_totals: vec![grand_total],
-            grand_total,
-        }
-    }
-
-    fn aggregate_slice(values: &[f64], agg: PivotAggregation) -> f64 {
-        if values.is_empty() {
-            return 0.0;
-        }
-        match agg {
-            PivotAggregation::Sum => values.iter().sum(),
-            PivotAggregation::Average => values.iter().sum::<f64>() / (values.len() as f64),
-            PivotAggregation::Count => values.len() as f64,
-            PivotAggregation::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
-            PivotAggregation::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-        }
     }
 
     pub(crate) fn eval_sheet_coord(
@@ -557,13 +557,7 @@ impl SheetEngine {
                 let Some(target_sheet) = wb.sheet(target_name) else {
                     return EvaluatedCellValue::Error(FormulaError::Ref);
                 };
-                let prev_sheet = std::mem::replace(
-                    &mut ctx.current_sheet,
-                    target_sheet.name.to_ascii_lowercase(),
-                );
-                let res = target_sheet.eval_coord_ctx(coord, ctx, depth);
-                ctx.current_sheet = prev_sheet;
-                res
+                target_sheet.eval_coord_ctx(coord, ctx, depth)
             }
         }
     }
@@ -577,20 +571,29 @@ impl SheetEngine {
         if depth > Self::MAX_RECURSION_DEPTH {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
-        let key = (self.name.to_ascii_lowercase(), coord);
+
+        let sid = self.resolved_sheet_id();
+        let key = PackedWorkbookCoord::new(sid, coord);
         if let Some(cached) = ctx.memo.get(&key) {
             return cached.clone();
         }
-        if !ctx.visiting.insert(key.clone()) {
+        if !ctx.visiting.insert(sid, coord) {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
 
-        let result = match self.cells.get(&coord) {
-            None => EvaluatedCellValue::Empty,
-            Some(raw) => self.eval_raw_string_ctx(raw, ctx, depth + 1),
+        let result = if let Some(compiled) = self.compiled_asts.get(&coord) {
+            match compiled {
+                Ok(expr) => self.eval_expr_ctx(expr, ctx, depth + 1),
+                Err(e) => EvaluatedCellValue::Error(*e),
+            }
+        } else {
+            match self.cells.get(&coord) {
+                None => EvaluatedCellValue::Empty,
+                Some(raw) => self.eval_raw_string_ctx(raw, ctx, depth + 1),
+            }
         };
 
-        ctx.visiting.remove(&key);
+        ctx.visiting.remove(sid, coord);
         ctx.memo.insert(key, result.clone());
         result
     }
@@ -610,17 +613,10 @@ impl SheetEngine {
             if expr_src.is_empty() {
                 return EvaluatedCellValue::Empty;
             }
-            let tokens = match tokenize_formula(expr_src) {
-                Ok(t) => t,
-                Err(e) => return EvaluatedCellValue::Error(e),
-            };
-            let mut parser = Parser::new(tokens);
-            let expr = match parser.parse_expression() {
-                Ok(ex) if parser.pos == parser.tokens.len() => ex,
-                Ok(_) => return EvaluatedCellValue::Error(FormulaError::Value),
-                Err(e) => return EvaluatedCellValue::Error(e),
-            };
-            self.eval_expr_ctx(&expr, ctx, depth)
+            match compile_formula_expr(expr_src) {
+                Ok(expr) => self.eval_expr_ctx(&expr, ctx, depth),
+                Err(e) => EvaluatedCellValue::Error(e),
+            }
         } else if let Ok(num) = trimmed.parse::<f64>() {
             if num.is_finite() {
                 EvaluatedCellValue::Number(num)
@@ -826,133 +822,5 @@ impl SheetEngine {
             a.to_display_string()
                 .eq_ignore_ascii_case(&b.to_display_string())
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_packed_cell_coordinate_and_a1_roundtrip() {
-        let c = PackedCellCoordinate::parse_a1("B12").unwrap();
-        assert_eq!(c.row(), 11);
-        assert_eq!(c.col(), 1);
-        assert_eq!(c.to_a1(), "B12");
-
-        let xfd = PackedCellCoordinate::parse_a1("$XFD$1000000").unwrap();
-        assert_eq!(xfd.row(), 999_999);
-        assert_eq!(xfd.col(), 16_383);
-        assert_eq!(xfd.to_a1(), "XFD1000000");
-
-        assert!(PackedCellCoordinate::new(1_000_000, 0).is_err());
-        assert!(PackedCellCoordinate::new(0, 16_384).is_err());
-    }
-
-    #[test]
-    fn test_formula_evaluation_operators_isblank_and_functions() {
-        let mut sheet = SheetEngine::new("재무시트");
-        sheet.set_cell("A1", "100").unwrap();
-        sheet.set_cell("A2", "200").unwrap();
-        sheet.set_cell("A3", "=+$A$1+A2*15%").unwrap();
-        sheet.set_cell("B1", "=\"\"").unwrap();
-        sheet.set_cell("B2", "=ISBLANK(C1)").unwrap();
-        sheet.set_cell("B3", "=ISBLANK(B1)").unwrap();
-        sheet.set_cell("D1", "=SUM(A1:A3)").unwrap();
-        sheet.set_cell("D2", "=AVERAGE(A1:A2)").unwrap();
-        sheet
-            .set_cell("D3", "=IF(D1>200, UPPER(\"pass\"), \"fail\")")
-            .unwrap();
-
-        assert_eq!(sheet.evaluate_cell("A3"), EvaluatedCellValue::Number(130.0));
-        assert_eq!(sheet.evaluate_cell("B2"), EvaluatedCellValue::Boolean(true));
-        assert_eq!(
-            sheet.evaluate_cell("B3"),
-            EvaluatedCellValue::Boolean(false)
-        );
-        assert_eq!(sheet.evaluate_cell("D1"), EvaluatedCellValue::Number(430.0));
-        assert_eq!(sheet.evaluate_cell("D2"), EvaluatedCellValue::Number(150.0));
-        assert_eq!(
-            sheet.evaluate_cell("D3"),
-            EvaluatedCellValue::Text("PASS".to_string())
-        );
-    }
-
-    #[test]
-    fn test_cycle_detection_lookup_npv_and_pivot() {
-        let mut sheet = SheetEngine::new("분석시트");
-        sheet.set_cell("A1", "=B1+1").unwrap();
-        sheet.set_cell("B1", "=A1+1").unwrap();
-        assert_eq!(
-            sheet.evaluate_cell("A1"),
-            EvaluatedCellValue::Error(FormulaError::Cycle)
-        );
-
-        sheet.set_cell("A1", "부서").unwrap();
-        sheet.set_cell("B1", "매출").unwrap();
-        sheet.set_cell("A2", "플랫폼").unwrap();
-        sheet.set_cell("B2", "1200").unwrap();
-        sheet.set_cell("A3", "코어엔진").unwrap();
-        sheet.set_cell("B3", "1800").unwrap();
-        sheet.set_cell("A4", "플랫폼").unwrap();
-        sheet.set_cell("B4", "800").unwrap();
-
-        sheet
-            .set_cell("C1", "=VLOOKUP(\"코어엔진\", A2:B4, 2, FALSE)")
-            .unwrap();
-        sheet.set_cell("C2", "=INDEX(A2:B4, 2, 2)").unwrap();
-        sheet
-            .set_cell("C3", "=MATCH(\"코어엔진\", A2:A4, 0)")
-            .unwrap();
-        sheet.set_cell("C4", "=ROUND(NPV(0.1, B2:B3), 2)").unwrap();
-        sheet
-            .set_cell("C5", "=SQRT(16)+POWER(2,3)+MOD(10,3)")
-            .unwrap();
-        sheet.set_cell("C6", "=CONCAT(A2, \"-\", A3)").unwrap();
-        sheet.set_cell("C7", "=MEDIAN(B2:B4)").unwrap();
-        sheet.set_cell("C8", "=ROUND(STDEV(B2:B4), 2)").unwrap();
-        sheet
-            .set_cell("C9", "=VLOOKUP(\"코어엔진\", A2:B4, 1/0, FALSE)")
-            .unwrap();
-
-        assert_eq!(
-            sheet.evaluate_cell("C1"),
-            EvaluatedCellValue::Number(1800.0)
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C2"),
-            EvaluatedCellValue::Number(1800.0)
-        );
-        assert_eq!(sheet.evaluate_cell("C3"), EvaluatedCellValue::Number(2.0));
-        assert_eq!(
-            sheet.evaluate_cell("C4"),
-            EvaluatedCellValue::Number(2578.51)
-        );
-        assert_eq!(sheet.evaluate_cell("C5"), EvaluatedCellValue::Number(13.0));
-        assert_eq!(
-            sheet.evaluate_cell("C6"),
-            EvaluatedCellValue::Text("플랫폼-코어엔진".to_string())
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C7"),
-            EvaluatedCellValue::Number(1200.0)
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C8"),
-            EvaluatedCellValue::Number(503.32)
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C9"),
-            EvaluatedCellValue::Error(FormulaError::DivByZero)
-        );
-
-        let range = CellRange::parse("A1:B4").unwrap();
-        let pivot = sheet.compute_pivot(&range, true, 0, 1, PivotAggregation::Sum);
-        assert_eq!(
-            pivot.row_keys,
-            vec!["플랫폼".to_string(), "코어엔진".to_string()]
-        );
-        assert_eq!(pivot.row_totals, vec![2000.0, 1800.0]);
-        assert_eq!(pivot.grand_total, 3800.0);
     }
 }

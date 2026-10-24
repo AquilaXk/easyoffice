@@ -515,16 +515,149 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
   // MARK: - Evaluation Context & Public Entrypoints
 
+  /// 1,024-cell (`64 rows × 16 columns`) stack-inline bitset (`16 × UInt64`) for zero-allocation single-sheet cycle tracking.
+  public struct FastCellBitset: Sendable, Equatable {
+    public var words:
+      (
+        UInt64, UInt64, UInt64, UInt64,
+        UInt64, UInt64, UInt64, UInt64,
+        UInt64, UInt64, UInt64, UInt64,
+        UInt64, UInt64, UInt64, UInt64
+      ) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+    public init() {}
+
+    public static func == (lhs: FastCellBitset, rhs: FastCellBitset) -> Bool {
+      withUnsafeBytes(of: lhs.words) { lBuf in
+        withUnsafeBytes(of: rhs.words) { rBuf in
+          for idx in 0..<16 {
+            let lWord = lBuf.load(fromByteOffset: idx * 8, as: UInt64.self)
+            let rWord = rBuf.load(fromByteOffset: idx * 8, as: UInt64.self)
+            if lWord != rWord { return false }
+          }
+          return true
+        }
+      }
+    }
+
+    @inline(__always)
+    public func canTrack(_ coord: PackedCellCoordinate) -> Bool {
+      let r = coord.row
+      let c = coord.column
+      return r >= 0 && r < 64 && c >= 0 && c < 16
+    }
+
+    @inline(__always)
+    public func contains(_ coord: PackedCellCoordinate) -> Bool {
+      let r = coord.row
+      let c = coord.column
+      guard r >= 0, r < 64, c >= 0, c < 16 else { return false }
+      let mask: UInt64 = 1 << UInt64(r)
+      return withUnsafeBytes(of: words) { buf in
+        let word = buf.load(fromByteOffset: c * 8, as: UInt64.self)
+        return (word & mask) != 0
+      }
+    }
+
+    @inline(__always)
+    @discardableResult
+    public mutating func insert(_ coord: PackedCellCoordinate) -> Bool {
+      let r = coord.row
+      let c = coord.column
+      guard r >= 0, r < 64, c >= 0, c < 16 else { return false }
+      let mask: UInt64 = 1 << UInt64(r)
+      return withUnsafeMutableBytes(of: &words) { buf in
+        let current = buf.load(fromByteOffset: c * 8, as: UInt64.self)
+        let wasAbsent = (current & mask) == 0
+        buf.storeBytes(of: current | mask, toByteOffset: c * 8, as: UInt64.self)
+        return wasAbsent
+      }
+    }
+
+    @inline(__always)
+    public mutating func remove(_ coord: PackedCellCoordinate) {
+      let r = coord.row
+      let c = coord.column
+      guard r >= 0, r < 64, c >= 0, c < 16 else { return }
+      let mask: UInt64 = ~(1 << UInt64(r))
+      withUnsafeMutableBytes(of: &words) { buf in
+        let current = buf.load(fromByteOffset: c * 8, as: UInt64.self)
+        buf.storeBytes(of: current & mask, toByteOffset: c * 8, as: UInt64.self)
+      }
+    }
+
+    public func activeCoordinates() -> [PackedCellCoordinate] {
+      var coords: [PackedCellCoordinate] = []
+      withUnsafeBytes(of: words) { buf in
+        for c in 0..<16 {
+          var word = buf.load(fromByteOffset: c * 8, as: UInt64.self)
+          while word != 0 {
+            let r = word.trailingZeroBitCount
+            coords.append(PackedCellCoordinate(row: r, column: c))
+            word &= word &- 1
+          }
+        }
+      }
+      return coords
+    }
+  }
+
   internal struct CrossSheetCellKey: Hashable {
     let sheetNameUpper: String
     let coord: PackedCellCoordinate
   }
 
   internal struct EvaluationContext {
+    var fastVisited = FastCellBitset()
+    var visitedCount: Int = 0
     var visited: Set<PackedCellCoordinate> = []
     var memo: [PackedCellCoordinate: EvaluatedCellValue] = [:]
     var crossVisited: Set<CrossSheetCellKey> = []
     var crossMemo: [CrossSheetCellKey: EvaluatedCellValue] = [:]
+    var sheetModelCache: [String: WorksheetModel] = [:]
+
+    @inline(__always)
+    func isVisited(_ coord: PackedCellCoordinate) -> Bool {
+      if fastVisited.canTrack(coord) {
+        return fastVisited.contains(coord)
+      }
+      return visited.contains(coord)
+    }
+
+    @inline(__always)
+    mutating func markVisited(_ coord: PackedCellCoordinate) {
+      if fastVisited.canTrack(coord) {
+        if fastVisited.insert(coord) {
+          visitedCount += 1
+        }
+      } else {
+        if visited.insert(coord).inserted {
+          visitedCount += 1
+        }
+      }
+    }
+
+    @inline(__always)
+    mutating func unmarkVisited(_ coord: PackedCellCoordinate) {
+      if fastVisited.canTrack(coord) {
+        if fastVisited.contains(coord) {
+          fastVisited.remove(coord)
+          visitedCount = max(0, visitedCount - 1)
+        }
+      } else {
+        if visited.remove(coord) != nil {
+          visitedCount = max(0, visitedCount - 1)
+        }
+      }
+    }
+
+    func allVisitedCoordinates() -> [PackedCellCoordinate] {
+      var all = fastVisited.activeCoordinates()
+      if !visited.isEmpty {
+        all.append(contentsOf: visited)
+      }
+      return all
+    }
   }
 
   public func evaluate(at a1: String) -> EvaluatedCellValue {
@@ -696,7 +829,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     let key = CrossSheetCellKey(sheetNameUpper: targetPage.name.uppercased(), coord: packed)
 
     let activeSheetUpper = name.uppercased()
-    for activeCoord in context.visited {
+    for activeCoord in context.allVisitedCoordinates() {
       context.crossVisited.insert(
         CrossSheetCellKey(sheetNameUpper: activeSheetUpper, coord: activeCoord))
     }
@@ -723,48 +856,57 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       return .boolean(flag)
     default:
       let targetSheetUpper = targetPage.name.uppercased()
-      var remainingSheets = additionalSheets
-      remainingSheets.remove(at: pageIdx)
-      remainingSheets.append(
-        WorksheetSheetPage(
-          id: id,
-          name: name,
-          cellsByCoordinate: cellsByCoordinate,
-          cellStyles: cellStyles,
-          sheetComments: sheetComments,
-          mergedRanges: mergedRanges,
-          columnWidths: columnWidths,
-          rowHeights: rowHeights
+      let targetModel: WorksheetModel
+      if let cachedModel = context.sheetModelCache[targetSheetUpper] {
+        targetModel = cachedModel
+      } else {
+        var remainingSheets = additionalSheets
+        remainingSheets.remove(at: pageIdx)
+        remainingSheets.append(
+          WorksheetSheetPage(
+            id: id,
+            name: name,
+            cellsByCoordinate: cellsByCoordinate,
+            cellStyles: cellStyles,
+            sheetComments: sheetComments,
+            mergedRanges: mergedRanges,
+            columnWidths: columnWidths,
+            rowHeights: rowHeights
+          )
         )
-      )
-      let targetModel = WorksheetModel(
-        id: targetPage.id,
-        name: targetPage.name,
-        cellsByCoordinate: targetPage.cellsByCoordinate,
-        cellStyles: targetPage.cellStyles,
-        pageSetup: pageSetup,
-        sheetComments: targetPage.sheetComments,
-        mergedRanges: targetPage.mergedRanges,
-        columnWidths: targetPage.columnWidths,
-        rowHeights: targetPage.rowHeights,
-        trackChangesEnabled: trackChangesEnabled,
-        additionalSheets: remainingSheets,
-        activeSheetIndex: 0,
-        namedRanges: namedRanges,
-        precompileAllCells: false
-      )
+        let builtModel = WorksheetModel(
+          id: targetPage.id,
+          name: targetPage.name,
+          cellsByCoordinate: targetPage.cellsByCoordinate,
+          cellStyles: targetPage.cellStyles,
+          pageSetup: pageSetup,
+          sheetComments: targetPage.sheetComments,
+          mergedRanges: targetPage.mergedRanges,
+          columnWidths: targetPage.columnWidths,
+          rowHeights: targetPage.rowHeights,
+          trackChangesEnabled: trackChangesEnabled,
+          additionalSheets: remainingSheets,
+          activeSheetIndex: 0,
+          namedRanges: namedRanges,
+          precompileAllCells: false
+        )
+        context.sheetModelCache[targetSheetUpper] = builtModel
+        targetModel = builtModel
+      }
       var subContext = EvaluationContext(
-        visited: [packed],
         memo: [:],
         crossVisited: context.crossVisited.union([key]),
-        crossMemo: context.crossMemo
+        crossMemo: context.crossMemo,
+        sheetModelCache: context.sheetModelCache
       )
+      subContext.markVisited(packed)
       let evaluated = targetModel.evaluateAST(ast, context: &subContext, depth: depth + 1)
       for (subCoord, subVal) in subContext.memo {
         subContext.crossMemo[CrossSheetCellKey(sheetNameUpper: targetSheetUpper, coord: subCoord)] =
           subVal
       }
       context.crossMemo = subContext.crossMemo
+      context.sheetModelCache = subContext.sheetModelCache
       context.crossMemo[key] = evaluated
       return evaluated
     }
@@ -776,11 +918,11 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     depth: Int
   ) -> EvaluatedCellValue {
     guard depth <= Self.maxFormulaRecursionDepth,
-      context.visited.count <= Self.maxFormulaRecursionDepth
+      context.visitedCount <= Self.maxFormulaRecursionDepth
     else {
       return .error("#REF!")
     }
-    if context.visited.contains(packed) {
+    if context.isVisited(packed) {
       return .error("#REF!")
     }
     let selfSheetUpper = name.uppercased()
@@ -819,9 +961,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     case .literalBoolean(let flag):
       return .boolean(flag)
     default:
-      context.visited.insert(packed)
+      context.markVisited(packed)
       let evaluated = evaluateAST(ast, context: &context, depth: depth + 1)
-      context.visited.remove(packed)
+      context.unmarkVisited(packed)
       context.memo[packed] = evaluated
       return evaluated
     }
@@ -833,7 +975,7 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     depth: Int
   ) -> EvaluatedCellValue {
     guard depth <= Self.maxFormulaRecursionDepth,
-      context.visited.count <= Self.maxFormulaRecursionDepth
+      context.visitedCount <= Self.maxFormulaRecursionDepth
     else {
       return .error("#REF!")
     }
@@ -944,3 +1086,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     }
   }
 }
+
+public typealias FastCellBitset = WorksheetModel.FastCellBitset
+

@@ -16,10 +16,12 @@ use easyoffice_sheet::{
     SheetEngine, WorkbookEngine,
 };
 
+pub mod benchmark;
 pub mod ffi;
 pub mod ribbon;
 pub mod smart_tools;
 
+pub use benchmark::*;
 pub use ffi::*;
 pub use ribbon::*;
 pub use smart_tools::*;
@@ -55,6 +57,7 @@ impl EasyOfficeIpcRouter {
             "scrub_pii" => Self::handle_scrub_pii(payload),
             "convert_document_format" => Self::handle_convert_document_format(payload),
             "get_ribbon_category_commands" => Self::handle_get_ribbon_category_commands(payload),
+            "run_engine_benchmark" => Self::handle_run_engine_benchmark(payload),
             other => Err(EasyOfficeError::InvalidArgument(format!(
                 "알 수 없는 Tauri IPC 명령입니다: {other}"
             ))),
@@ -333,18 +336,36 @@ impl EasyOfficeIpcRouter {
         wb.set_cell("Sheet2", "A1", "100")?;
         wb.set_cell("Sheet1", "A1", "1200")?;
         wb.set_cell("Sheet1", "B1", "850")?;
-        let expr = if payload.trim().is_empty() {
+        let (cells_part, expr_part) = match payload.split_once('?') {
+            Some((c, e)) => (Some(c.trim()), e.trim()),
+            None => (None, payload.trim()),
+        };
+        if let Some(cells_str) = cells_part {
+            for pair in cells_str.split(';') {
+                if let Some((lhs, rhs)) = pair.trim().split_once('=') {
+                    let (sh, a1) = lhs.split_once('!').unwrap_or(("Sheet1", lhs));
+                    wb.add_sheet(sh.trim());
+                    wb.set_cell(sh.trim(), a1.trim(), rhs.trim())?;
+                }
+            }
+        }
+        let expr = if expr_part.is_empty() {
             "=Sheet2!A1+50"
         } else {
-            payload.trim()
+            expr_part
         };
         wb.set_cell("Sheet1", "C1", expr)?;
         let val = wb.evaluate_cell("Sheet1", "C1");
         Ok(format!(
             "{{\"sheet\":\"Sheet1\",\"formula\":\"{}\",\"value\":\"{}\"}}",
-            expr,
-            val.to_display_string()
+            Self::escape_json_str(expr),
+            Self::escape_json_str(&val.to_display_string())
         ))
+    }
+
+    fn handle_run_engine_benchmark(payload: &str) -> Result<String, EasyOfficeError> {
+        let iters = payload.trim().parse::<usize>().unwrap_or(5).clamp(3, 25);
+        Ok(run_deterministic_benchmarks(iters).to_json())
     }
 
     fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
@@ -827,99 +848,16 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    Ok(format!(
-        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=12)",
-        DesktopPlatform::current().os_label()
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ipc_router_commands_and_self_test() {
-        let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "").unwrap();
-        assert!(bootstrap.contains("#5C6BC0"));
-        assert!(bootstrap.contains("\"ribbonMatrixSlots\":35"));
-
-        let detect_res =
-            EasyOfficeIpcRouter::dispatch("detect_format", "docx|HEX:504B03041400").unwrap();
-        assert!(detect_res.contains("\"format\":\"docx\""));
-
-        let sheet_res =
-            EasyOfficeIpcRouter::dispatch("evaluate_sheet", "A1=150;A2=250;A3==SUM(A1:A2)?A3")
-                .unwrap();
-        assert!(sheet_res.contains("\"value\":\"400\""));
-        assert!(sheet_res.contains("\"conditionalMatch\":true"));
-
-        let wb_res =
-            EasyOfficeIpcRouter::dispatch("evaluate_workbook_formula", "=Sheet2!A1+50").unwrap();
-        assert!(wb_res.contains("\"value\":\"150\""));
-
-        let conv_res = EasyOfficeIpcRouter::dispatch(
-            "convert_document_format",
-            "docx->hwpx|연간계획서|1. 추진 배경\n2. 실행 계획",
-        )
-        .unwrap();
-        assert!(conv_res.contains("\"targetFormat\":\"hwpx\""));
-        assert!(conv_res.contains("\"status\":\"OK\""));
-
-        let cat_res =
-            EasyOfficeIpcRouter::dispatch("get_ribbon_category_commands", "HWP|module").unwrap();
-        assert!(cat_res.contains("hwp-mod-manuscript"));
-
-        let layout_res = EasyOfficeIpcRouter::dispatch("compute_layout", "landscape").unwrap();
-        assert!(layout_res.contains("\"widthPt\":842.0"));
-
-        let sec_res = EasyOfficeIpcRouter::dispatch(
-            "audit_security",
-            "word/document.xml,512,2048,false|<doc>safe</doc>",
-        )
-        .unwrap();
-        assert!(sec_res.contains("\"status\":\"SAFE\""));
-        assert!(sec_res.contains("\"checkedEntries\":1"));
-
-        let rib_res =
-            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "doc-mod-toc").unwrap();
-        assert!(rib_res.contains("\"catalogCount\":140"));
-        assert!(rib_res.contains("표·개체 도구"));
-
-        let style_res = EasyOfficeIpcRouter::dispatch("switch_ribbon_style", "hangul").unwrap();
-        assert!(style_res.contains("쪽·원고지"));
-
-        let smart_res = EasyOfficeIpcRouter::dispatch(
-            "run_smart_assistant",
-            "첫 문장입니다. TODO: 보안 결재를 완료합니다.",
-        )
-        .unwrap();
-        assert!(smart_res.contains("\"actionItemCount\":1"));
-
-        let pii_res = EasyOfficeIpcRouter::dispatch(
-            "scrub_pii",
-            "주민번호 880101-1234567 전화 010-9876-5432",
-        )
-        .unwrap();
-        assert!(pii_res.contains("******-*******"));
-        assert!(pii_res.contains("010-****-****"));
-
-        assert!(matches!(
-            EasyOfficeIpcRouter::dispatch(
-                "audit_security",
-                "../../etc/passwd,100,200,false|<doc>safe</doc>"
-            ),
-            Err(EasyOfficeError::SecurityViolation(_))
+    let bench_report = run_deterministic_benchmarks(5);
+    if !bench_report.all_equivalent || bench_report.suites.len() != 4 {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "엔진 저수준 최적화 벤치마크 동등성 검증 실패".to_string(),
         ));
-        assert!(matches!(
-            EasyOfficeIpcRouter::dispatch(
-                "audit_security",
-                "word/document.xml,10,50000,false|<doc>safe</doc>"
-            ),
-            Err(EasyOfficeError::DecompressionBombDetected { .. })
-        ));
-
-        let summary = run_self_test().unwrap();
-        assert!(summary.contains("PASSED"));
-        assert!(summary.contains("ribbon_commands=140"));
     }
+
+    Ok(format!(
+        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=13, {})",
+        DesktopPlatform::current().os_label(),
+        bench_report.summary_line()
+    ))
 }

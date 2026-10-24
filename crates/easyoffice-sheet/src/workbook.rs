@@ -1,8 +1,10 @@
 use crate::{
-    CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate, SheetEngine,
+    CellRange, EvalContext, EvaluatedCellValue, FormulaError, PackedCellCoordinate,
+    PivotAggregation, PivotTableSummary, SheetEngine,
 };
 use easyoffice_formats::EasyOfficeError;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 /// Multi-sheet workbook engine supporting cross-sheet references (`=Sheet2!A1`, `=SUM(Sheet2!A1:A3)`)
 /// and cross-sheet cycle detection.
@@ -25,7 +27,14 @@ impl WorkbookEngine {
         {
             return &mut self.sheets[pos];
         }
-        self.sheets.push(SheetEngine::new(name_str));
+        let mut engine = SheetEngine::new(name_str);
+        while engine.sheet_id == 0 || self.sheets.iter().any(|s| s.sheet_id == engine.sheet_id) {
+            engine.sheet_id = engine.sheet_id.wrapping_add(1);
+            if engine.sheet_id == 0 {
+                engine.sheet_id = 1;
+            }
+        }
+        self.sheets.push(engine);
         self.sheets.last_mut().unwrap()
     }
 
@@ -70,7 +79,7 @@ impl WorkbookEngine {
         let Ok(coord) = PackedCellCoordinate::parse_a1(a1) else {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         };
-        let mut ctx = EvalContext::with_workbook(self, &sheet.name);
+        let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
         sheet.eval_coord_ctx(coord, &mut ctx, 0)
     }
 }
@@ -165,8 +174,84 @@ impl SheetEngine {
                 self.cells.insert(coord, raw);
             }
         }
+        self.rebuild_compiled_asts();
 
         Ok(())
+    }
+
+    pub fn compute_pivot(
+        &self,
+        range: &CellRange,
+        has_header_row: bool,
+        row_field_col_offset: usize,
+        value_field_col_offset: usize,
+        aggregation: PivotAggregation,
+    ) -> PivotTableSummary {
+        let (row_count, col_count) = range.dimensions();
+        let min_r = range.start.row().min(range.end.row());
+        let min_c = range.start.col().min(range.end.col());
+        let start_row_idx = if has_header_row { 1 } else { 0 };
+
+        let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
+        let mut row_keys: Vec<String> = Vec::new();
+        let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
+        let mut all_values: Vec<f64> = Vec::new();
+
+        for r_off in start_row_idx..row_count {
+            if row_field_col_offset >= col_count || value_field_col_offset >= col_count {
+                continue;
+            }
+            let key_coord = PackedCellCoordinate::new(
+                min_r + r_off as u32,
+                min_c + row_field_col_offset as u32,
+            );
+            let val_coord = PackedCellCoordinate::new(
+                min_r + r_off as u32,
+                min_c + value_field_col_offset as u32,
+            );
+            if let (Ok(kc), Ok(vc)) = (key_coord, val_coord) {
+                let key_str = self.eval_coord_ctx(kc, &mut ctx, 0).to_display_string();
+                if key_str.is_empty() {
+                    continue;
+                }
+                if !row_keys.contains(&key_str) {
+                    row_keys.push(key_str.clone());
+                }
+                if let Some(num) = self.eval_coord_ctx(vc, &mut ctx, 0).as_number() {
+                    buckets.entry(key_str).or_default().push(num);
+                    all_values.push(num);
+                }
+            }
+        }
+
+        let row_totals: Vec<f64> = row_keys
+            .iter()
+            .map(|k| Self::aggregate_slice(buckets.get(k).map_or(&[], Vec::as_slice), aggregation))
+            .collect();
+        let matrix: Vec<Vec<f64>> = row_totals.iter().map(|v| vec![*v]).collect();
+        let grand_total = Self::aggregate_slice(&all_values, aggregation);
+
+        PivotTableSummary {
+            row_keys,
+            column_keys: vec!["Total".to_string()],
+            matrix,
+            row_totals,
+            column_totals: vec![grand_total],
+            grand_total,
+        }
+    }
+
+    fn aggregate_slice(values: &[f64], agg: PivotAggregation) -> f64 {
+        if values.is_empty() {
+            return 0.0;
+        }
+        match agg {
+            PivotAggregation::Sum => values.iter().sum(),
+            PivotAggregation::Average => values.iter().sum::<f64>() / (values.len() as f64),
+            PivotAggregation::Count => values.len() as f64,
+            PivotAggregation::Min => values.iter().copied().fold(f64::INFINITY, f64::min),
+            PivotAggregation::Max => values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        }
     }
 
     /// Secant / Newton-Raphson solver up to 100 iterations finding the value of `variable_cell`
@@ -189,6 +274,7 @@ impl SheetEngine {
         let initial_guess = self.evaluate_cell(variable_cell).as_number().unwrap_or(0.0);
 
         let eval_at = |sheet: &mut SheetEngine, x: f64| -> Option<f64> {
+            sheet.compiled_asts.remove(&var_coord);
             sheet.cells.insert(var_coord, format!("{x}"));
             sheet
                 .evaluate_cell(target_cell)
@@ -222,6 +308,7 @@ impl SheetEngine {
                 } else {
                     x1
                 };
+                self.compiled_asts.remove(&var_coord);
                 self.cells.insert(var_coord, format!("{rounded}"));
                 return Ok(rounded);
             }
@@ -259,6 +346,7 @@ impl SheetEngine {
             } else {
                 x1
             };
+            self.compiled_asts.remove(&var_coord);
             self.cells.insert(var_coord, format!("{rounded}"));
             return Ok(rounded);
         }
@@ -279,6 +367,7 @@ fn restore_cell(sheet: &mut SheetEngine, coord: PackedCellCoordinate, orig: Opti
             sheet.cells.remove(&coord);
         }
     }
+    sheet.rebuild_compiled_asts();
 }
 
 fn compare_cell_values(a: &EvaluatedCellValue, b: &EvaluatedCellValue, asc: bool) -> Ordering {
@@ -707,5 +796,40 @@ mod tests {
         .unwrap();
         assert_eq!(chart.points.len(), 3);
         assert!((chart.points[2].normalized_y - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_workbook_sheet_id_collision_resolution_without_false_cycle() {
+        let mut seen: HashMap<u16, String> = HashMap::new();
+        let mut pair: Option<(String, String)> = None;
+        for idx in 0..2000u32 {
+            let candidate = format!("Sheet_{idx}");
+            let h = crate::compute_sheet_id(&candidate);
+            if let Some(prev) = seen.insert(h, candidate.clone()) {
+                pair = Some((prev, candidate));
+                break;
+            }
+        }
+        let (sheet_a, sheet_b) = pair.expect("16-bit FNV-1a collision pair found");
+        assert_eq!(
+            crate::compute_sheet_id(&sheet_a),
+            crate::compute_sheet_id(&sheet_b)
+        );
+
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet(&sheet_a);
+        wb.add_sheet(&sheet_b);
+        assert_ne!(
+            wb.sheet(&sheet_a).unwrap().resolved_sheet_id(),
+            wb.sheet(&sheet_b).unwrap().resolved_sheet_id()
+        );
+
+        wb.set_cell(&sheet_b, "A1", "42").unwrap();
+        wb.set_cell(&sheet_a, "A1", format!("={sheet_b}!A1 + 8"))
+            .unwrap();
+        assert_eq!(
+            wb.evaluate_cell(&sheet_a, "A1"),
+            EvaluatedCellValue::Number(50.0)
+        );
     }
 }

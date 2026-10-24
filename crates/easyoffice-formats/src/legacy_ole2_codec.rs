@@ -379,10 +379,16 @@ impl LegacyOle2Codec {
         stream.extend_from_slice(&(payload.sheet_name.encode_utf16().count() as u16).to_le_bytes());
         stream.extend_from_slice(&sheet_name_utf16);
 
-        // Collect SST strings for non-numeric, non-formula text cells
         let mut sst_strings: Vec<String> = Vec::new();
+        let mut sst_index_map: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         for (_, _, val) in &payload.cells {
-            if !val.starts_with('=') && val.parse::<f64>().is_err() && !sst_strings.contains(val) {
+            if !val.starts_with('=')
+                && val.parse::<f64>().is_err()
+                && !sst_index_map.contains_key(val)
+            {
+                let idx = sst_strings.len() as u32;
+                sst_index_map.insert(val.clone(), idx);
                 sst_strings.push(val.clone());
             }
         }
@@ -425,7 +431,7 @@ impl LegacyOle2Codec {
                 stream.extend_from_slice(&0u16.to_le_bytes()); // xf
                 stream.extend_from_slice(&num.to_bits().to_le_bytes());
             } else {
-                let sst_idx = sst_strings.iter().position(|s| s == raw).unwrap_or(0) as u32;
+                let sst_idx = sst_index_map.get(raw).copied().unwrap_or(0);
                 stream.extend_from_slice(&Self::BIFF8_LABELSST.to_le_bytes());
                 stream.extend_from_slice(&10u16.to_le_bytes());
                 stream.extend_from_slice(&r16.to_le_bytes());
