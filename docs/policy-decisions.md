@@ -563,3 +563,22 @@
 - **Verified by**: `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: Windows 네이티브 코드 서명(Authenticode) 및 MSIX 스토어 배포 파이프라인을 추가할 때.
 
+### 28. Rust 5대 모듈 도메인·140종 리본·오프라인 스마트 보조·C-ABI FFI 완비, 표준/한글(HWP) 리본 스위처 및 Windows CI/Release 파이프라인 정책 (2026-10-24)
+
+- **Decision (`PD-054`)**:
+  1. **Rust 5대 도메인 엔진 및 140종 리본·스마트 보조·PII 감사·C-ABI FFI 완비 (`crates/easyoffice-layout/src/domain.rs`, `crates/easyoffice-app/src/{ribbon.rs,smart_tools.rs,ffi.rs}`)**:
+     - `crates/easyoffice-layout/src/domain.rs`에 `RibbonLayoutStyle { StandardOffice, HangulHwp }`, `ContextualObjectToolKind`, `DocumentDomainEngine`(병합 표 `DocumentTableModel` 및 `=SUM(ABOVE)`/`=AVERAGE(LEFT)` 표 셀 수식, 변경 내용 추적 `RevisionRecord`, 각주·미주 `FootnoteEntry`, 1~3단계 자동 목차 생성, `{{필드}}` 메일 머지), `SlideDomainEngine`(5종 마스터 레이아웃, 전환 타이밍, 발표자 레이저 포인터·자유곡선 잉크 `PresenterSessionState`), `PdfDomainEngine`(90도 페이지 회전, 분할·병합, 결재 스탬프, 워터마크, AcroForm 필드)을 구현합니다.
+     - `crates/easyoffice-app/src/ribbon.rs`에 7개 카테고리 × 20개 명령(`140`종) `RibbonCommandRouter`와 최대 64스냅샷 `UndoRedoStack<T>`를 구현하고, `crates/easyoffice-app/src/smart_tools.rs`에 100% 오프라인 `LocalSmartAssistant`(TF 요약, 문장 진단, 액션 추출, LCS 문서 비교) 및 `DocumentSecurityAuditor`(주민등록번호·전화번호·이메일 PII 마스킹)를, `crates/easyoffice-app/src/ffi.rs`에 Null-Safe C-ABI 브리지(`easyoffice_ffi_version`, `easyoffice_ffi_dispatch_json`, `easyoffice_ffi_free_string`)를 구현합니다.
+  2. **macOS SwiftUI 및 Tauri v2 WebUI 표준 오피스 ↔ 한글(HWP) 리본 레이아웃 스위처 & 컨텍스트 개체 도구 배지 (`Sources/EasyOfficeCore`, `Sources/EasyOfficeApp`, `crates/easyoffice-app/ui/*`)**:
+     - `RibbonLayoutStyle`(`표준 오피스` ↔ `한글(HWP) 쪽·편집`: `편집 · 입력 · 쪽·원고지 · 표·개체 · 시트·차트 · 보안·도구 · 보기`)과 `WorkspaceViewModel.activeContextualObjectToolBadge`(`표·개체 도구`, `쪽·결재·원고지 도구`, `수식·피벗 분석`, `발표자·레이저 도구`, `전자결재·주석 도구`)를 macOS `ContextRibbonBarView`와 Tauri v2 데스크톱 WebUI 양쪽에 동일하게 배치합니다.
+  3. **GitHub Actions `windows-latest` 병렬 검증 및 릴리스 패키징 파이프라인 (`.github/workflows/ci.yml`, `.github/workflows/release.yml`)**:
+     - `.github/workflows/ci.yml`에 `verify-windows` 잡(`runs-on: windows-latest`)을 추가하여 `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`를 상시 검증합니다.
+     - `.github/workflows/release.yml`에 `build-windows-release` 잡을 추가하여 `EasyOffice-${VERSION}-windows-x64.zip`과 `SHA256SUMS-windows-x64.txt`를 macOS 릴리스 자산과 함께 GitHub Release에 업로드합니다.
+- **Why**: Swift 코어와 Rust 멀티 크레이트 워크스페이스의 도메인·UI·보안 패리티를 100%로 일치시키고, macOS와 Windows 양대 데스크톱 환경에서 표준 오피스 리본과 한국형 공문서(HWP) 쪽·편집 리본을 즉시 전환할 수 있도록 하기 위함입니다.
+- **Trade-offs**: Windows CI 러너(`windows-latest`) 잡이 추가되나, 외부 크레이트 의존성이 0개이므로 클린 빌드와 테스트가 수십 초 내에 완료됩니다.
+- **Alternatives rejected**:
+  - 리본 레이아웃을 단일 고정 문자열로만 두는 방식: 글로벌 오피스 사용자와 공공·행정 한글(HWP/HWPX) 문서 사용자의 메뉴 탐색 습관을 동시에 만족시키기 위해 실시간 전환 스위처 채택.
+- **Verified by**: `cargo test -p easyoffice-layout -p easyoffice-app`, `cargo run -p easyoffice-app -- --self-test`, `swift test --filter testNinthAudit`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 사용자 정의 리본 단축키 프로필 내보내기/가져오기 기능을 추가할 때.
+
+

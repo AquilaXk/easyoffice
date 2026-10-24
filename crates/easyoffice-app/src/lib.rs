@@ -1,16 +1,27 @@
 use easyoffice_formats::{
     CommonMarkCodec, CsvCodec, DocumentFormat, EasyOfficeError, FormatDetector, Ole2SecurityGuard,
-    PdfDocumentModel, PdfPageModel, PdfSerializer, XmlSanitizer, ZipEntryDescriptor,
-    ZipSecurityGuard, ZipSecurityPolicy,
+    PdfDocumentModel, PdfPageModel, PdfSerializer, UniversalDocumentModel,
+    UniversalFormatConverter, XmlSanitizer, ZipEntryDescriptor, ZipSecurityGuard,
+    ZipSecurityPolicy,
 };
 use easyoffice_layout::{
-    DesktopPlatform, DocumentPageLayout, LayoutRect, OfficeModuleKind, PageOrientation,
-    PdfStudioLayout, SignatureLavenderPalette, SlideDeckTheme, SlideStageLayout,
+    ContextualObjectToolKind, DesktopPlatform, DocumentDomainEngine, DocumentPageLayout,
+    DocumentTableModel, LayoutRect, OfficeModuleKind, PageOrientation, PdfDomainEngine,
+    PdfStudioLayout, RibbonLayoutStyle, SignatureLavenderPalette, SlideDeckTheme,
+    SlideDomainEngine, SlideStageLayout,
 };
 use easyoffice_sheet::{
     CellRange, ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PivotAggregation,
-    SheetEngine,
+    SheetEngine, WorkbookEngine,
 };
+
+pub mod ffi;
+pub mod ribbon;
+pub mod smart_tools;
+
+pub use ffi::*;
+pub use ribbon::*;
+pub use smart_tools::*;
 
 /// Tauri v2 compatible IPC router dispatching desktop workspace commands to pure Rust engines.
 pub struct EasyOfficeIpcRouter;
@@ -26,15 +37,8 @@ impl EasyOfficeIpcRouter {
         "view",
     ];
 
-    pub const RECENT_FORMAT_FILTERS: [&'static str; 7] = [
-        "전체",
-        "DOCX",
-        "HWP/HWPX",
-        "XLSX",
-        "PPTX",
-        "PDF",
-        "ODF",
-    ];
+    pub const RECENT_FORMAT_FILTERS: [&'static str; 7] =
+        ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"];
 
     pub fn dispatch(command: &str, payload: &str) -> Result<String, EasyOfficeError> {
         match command {
@@ -43,6 +47,10 @@ impl EasyOfficeIpcRouter {
             "evaluate_sheet" => Self::handle_evaluate_sheet(payload),
             "compute_layout" => Self::handle_compute_layout(payload),
             "audit_security" => Self::handle_audit_security(payload),
+            "execute_ribbon_command" => Self::handle_execute_ribbon_command(payload),
+            "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
+            "run_smart_assistant" => Self::handle_run_smart_assistant(payload),
+            "scrub_pii" => Self::handle_scrub_pii(payload),
             other => Err(EasyOfficeError::InvalidArgument(format!(
                 "알 수 없는 Tauri IPC 명령입니다: {other}"
             ))),
@@ -214,7 +222,9 @@ impl EasyOfficeIpcRouter {
                         ));
                     }
                     let compressed = cols[1].parse::<u64>().map_err(|_| {
-                        EasyOfficeError::InvalidArgument("유효하지 않은 compressed_size".to_string())
+                        EasyOfficeError::InvalidArgument(
+                            "유효하지 않은 compressed_size".to_string(),
+                        )
                     })?;
                     let uncompressed = cols[2].parse::<u64>().map_err(|_| {
                         EasyOfficeError::InvalidArgument(
@@ -241,20 +251,88 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
-        let cleaned: Vec<u8> = hex
-            .bytes()
-            .filter(|b| !b.is_ascii_whitespace())
+    fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
+        let mut state = RibbonWorkspaceState::default();
+        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut state)?;
+        let badge = state.active_contextual_tool().badge_title();
+        Ok(format!(
+            "{{\"commandId\":\"{}\",\"summary\":\"{}\",\"contextualBadge\":\"{}\",\"catalogCount\":140}}",
+            state.last_command_id, summary, badge
+        ))
+    }
+
+    fn handle_switch_ribbon_style(payload: &str) -> Result<String, EasyOfficeError> {
+        let style = match payload.trim().to_ascii_lowercase().as_str() {
+            "hangul" | "hwp" | "hangul_hwp" | "한글" => RibbonLayoutStyle::HangulHwp,
+            "standard" | "standard_office" | "표준" => RibbonLayoutStyle::StandardOffice,
+            other => {
+                return Err(EasyOfficeError::InvalidArgument(format!(
+                    "지원하지 않는 리본 레이아웃 모드입니다: {other}"
+                )))
+            }
+        };
+        let cats = style
+            .category_titles()
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        Ok(format!(
+            "{{\"style\":\"{}\",\"categories\":[{}]}}",
+            style.display_name(),
+            cats
+        ))
+    }
+
+    fn handle_run_smart_assistant(payload: &str) -> Result<String, EasyOfficeError> {
+        let paragraphs: Vec<String> = payload
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
             .collect();
-        if cleaned.len() % 2 != 0 {
+        let summary = LocalSmartAssistant::summarize_document(&paragraphs, 2);
+        let diag = LocalSmartAssistant::diagnose_writing(payload);
+        let actions = LocalSmartAssistant::extract_action_items(&paragraphs);
+        Ok(format!(
+            "{{\"summaryCount\":{},\"charCount\":{},\"wordCount\":{},\"sentenceCount\":{},\"readingTimeSeconds\":{},\"actionItemCount\":{},\"suggestionCount\":{}}}",
+            summary.len(),
+            diag.char_count,
+            diag.word_count,
+            diag.sentence_count,
+            diag.reading_time_seconds,
+            actions.len(),
+            diag.suggestions.len()
+        ))
+    }
+
+    fn handle_scrub_pii(payload: &str) -> Result<String, EasyOfficeError> {
+        let audit = DocumentSecurityAuditor::scan_and_scrub_pii(payload);
+        let escaped = audit
+            .scrubbed_text
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n");
+        Ok(format!(
+            "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"totalMasked\":{}}}",
+            escaped,
+            audit.masked_resident_ids,
+            audit.masked_phone_numbers,
+            audit.masked_emails,
+            audit.total_masked_count()
+        ))
+    }
+
+    fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
+        let cleaned: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        if !cleaned.len().is_multiple_of(2) {
             return Err(EasyOfficeError::InvalidArgument(
                 "16진수 문자열 길이가 짝수가 아닙니다.".to_string(),
             ));
         }
         let mut out = Vec::with_capacity(cleaned.len() / 2);
-        for pair in cleaned.chunks_exact(2) {
-            let hi = Self::hex_val(pair[0])?;
-            let lo = Self::hex_val(pair[1])?;
+        for &[hi_b, lo_b] in cleaned.as_chunks::<2>().0 {
+            let hi = Self::hex_val(hi_b)?;
+            let lo = Self::hex_val(lo_b)?;
             out.push((hi << 4) | lo);
         }
         Ok(out)
@@ -289,7 +367,12 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
 
     let policy = ZipSecurityPolicy::default();
     ZipSecurityGuard::validate_archive_entries(
-        &[ZipEntryDescriptor::new("word/document.xml", 256, 1024, false)],
+        &[ZipEntryDescriptor::new(
+            "word/document.xml",
+            256,
+            1024,
+            false,
+        )],
         &policy,
     )?;
     if ZipSecurityGuard::validate_archive_entries(
@@ -372,6 +455,45 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
             "피벗 총계 계산 불일치".to_string(),
         ));
     }
+    if SheetEngine::supported_function_names().len() != 122 {
+        return Err(EasyOfficeError::FormulaError(format!(
+            "지원 수식 함수 수가 122종이 아닙니다: {}",
+            SheetEngine::supported_function_names().len()
+        )));
+    }
+    let mut wb = WorkbookEngine::new();
+    wb.add_sheet("Sheet1");
+    wb.add_sheet("Sheet2");
+    wb.set_cell("Sheet2", "A1", "250")?;
+    wb.set_cell("Sheet1", "B1", "=Sheet2!A1*3")?;
+    if wb.evaluate_cell("Sheet1", "B1") != EvaluatedCellValue::Number(750.0) {
+        return Err(EasyOfficeError::FormulaError(
+            "다중 시트 참조(Sheet2!A1) 계산 불일치".to_string(),
+        ));
+    }
+    let sample_doc = UniversalDocumentModel {
+        title: "SelfTest Document".to_string(),
+        paragraphs: vec!["통합 포맷 라운드트립 문단".to_string()],
+        tables: vec![vec![vec!["항목".to_string(), "값".to_string()]]],
+        sheet_cells: vec![(0, 0, "A1_VAL".to_string())],
+        slides: vec![(
+            "슬라이드 제목".to_string(),
+            vec!["핵심 요약".to_string()],
+            "발표 노트".to_string(),
+        )],
+        official_agency: Some("행정표준원".to_string()),
+    };
+    for fmt in DocumentFormat::ALL {
+        let encoded = UniversalFormatConverter::encode(&sample_doc, fmt)?;
+        let (detected_fmt, _decoded) =
+            UniversalFormatConverter::decode(&encoded, Some(fmt.extension()))?;
+        if detected_fmt != fmt {
+            return Err(EasyOfficeError::CorruptedContainer(format!(
+                "20종 포맷 인코딩/디코딩 검증 실패: {}",
+                fmt.extension()
+            )));
+        }
+    }
 
     let doc_layout = DocumentPageLayout::compute(PageOrientation::Portrait, 2, 54.0)?;
     if doc_layout.compute_manuscript_grid_200().len() != 200 {
@@ -380,7 +502,8 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
     let slide_layout = SlideStageLayout::new(SlideDeckTheme::SignatureLavender);
-    let clamped = slide_layout.clamp_element_to_lower_stage(LayoutRect::new(40.0, 50.0, 200.0, 80.0));
+    let clamped =
+        slide_layout.clamp_element_to_lower_stage(LayoutRect::new(40.0, 50.0, 200.0, 80.0));
     if !slide_layout.verify_non_overlapping(&[clamped]) {
         return Err(EasyOfficeError::InvalidArgument(
             "슬라이드 비겹침 스테이지 검증 실패".to_string(),
@@ -390,6 +513,78 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     if !pdf_layout.is_within_upper_middle_viewport() {
         return Err(EasyOfficeError::InvalidArgument(
             "PDF 가시 영역 좌표 검증 실패".to_string(),
+        ));
+    }
+
+    // Verify 140 ribbon commands, RibbonLayoutStyle, and ContextualObjectToolKind
+    let all_ribbon = RibbonCommandRouter::all_commands();
+    if all_ribbon.len() != 140 {
+        return Err(EasyOfficeError::InvalidArgument(format!(
+            "리본 명령 수가 140개가 아닙니다: {}",
+            all_ribbon.len()
+        )));
+    }
+    if RibbonLayoutStyle::HangulHwp.category_titles()[2] != "쪽·원고지"
+        || ContextualObjectToolKind::for_module(OfficeModuleKind::Sheet).badge_title()
+            != "수식·피벗 분석"
+    {
+        return Err(EasyOfficeError::InvalidArgument(
+            "리본 스타일 또는 컨텍스트 개체 도구 배지 검증 실패".to_string(),
+        ));
+    }
+    let mut r_state = RibbonWorkspaceState::default();
+    RibbonCommandRouter::execute_command("hwp-mod-manuscript", &mut r_state)?;
+    if !r_state.manuscript_grid_enabled {
+        return Err(EasyOfficeError::InvalidArgument(
+            "원고지 리본 명령 상태 변경 실패".to_string(),
+        ));
+    }
+
+    // Verify DocumentDomainEngine, SlideDomainEngine, PdfDomainEngine
+    let tbl = DocumentTableModel::new(vec![
+        vec!["100".to_string()],
+        vec!["250".to_string()],
+        vec!["=SUM(ABOVE)".to_string()],
+    ]);
+    if (tbl.evaluate_cell_formula(2, 0)? - 350.0).abs() > 1e-6 {
+        return Err(EasyOfficeError::FormulaError(
+            "표 =SUM(ABOVE) 수식 검증 실패".to_string(),
+        ));
+    }
+    let mut doc_domain = DocumentDomainEngine::new();
+    doc_domain.record_revision("r1", "검토자", "insert", "초안 추가");
+    if !doc_domain.accept_revision("r1") {
+        return Err(EasyOfficeError::InvalidArgument(
+            "문서 변경 내용 추적 승인 실패".to_string(),
+        ));
+    }
+    let mut slide_domain = SlideDomainEngine::default();
+    slide_domain.presenter.move_laser_pointer(300.0, 200.0);
+    slide_domain.presenter.append_ink_point(120.0, 180.0);
+    if slide_domain.presenter.laser_pointer != Some((300.0, 200.0)) {
+        return Err(EasyOfficeError::InvalidArgument(
+            "발표자 레이저 포인터 검증 실패".to_string(),
+        ));
+    }
+    let mut pdf_domain = PdfDomainEngine::new(pdf_model.clone());
+    if pdf_domain.rotate_page(0, 90)? != 90 {
+        return Err(EasyOfficeError::InvalidArgument(
+            "PDF 페이지 회전 검증 실패".to_string(),
+        ));
+    }
+
+    // Verify LocalSmartAssistant, DocumentSecurityAuditor, and C-ABI FFI
+    let pii_res =
+        DocumentSecurityAuditor::scan_and_scrub_pii("900101-1234567 010-1234-5678 a@b.kr");
+    if pii_res.total_masked_count() != 3 {
+        return Err(EasyOfficeError::SecurityViolation(
+            "PII 마스킹 건수 검증 실패".to_string(),
+        ));
+    }
+    let ffi_json = invoke_c_abi_roundtrip("switch_ribbon_style", "hangul");
+    if !ffi_json.contains("쪽·원고지") {
+        return Err(EasyOfficeError::InvalidArgument(
+            "C-ABI FFI 라운드트립 검증 실패".to_string(),
         ));
     }
 
@@ -414,7 +609,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
 
     Ok(format!(
-        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, ipc_commands=5)",
+        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=9)",
         DesktopPlatform::current().os_label()
     ))
 }
@@ -433,11 +628,9 @@ mod tests {
             EasyOfficeIpcRouter::dispatch("detect_format", "docx|HEX:504B03041400").unwrap();
         assert!(detect_res.contains("\"format\":\"docx\""));
 
-        let sheet_res = EasyOfficeIpcRouter::dispatch(
-            "evaluate_sheet",
-            "A1=150;A2=250;A3==SUM(A1:A2)?A3",
-        )
-        .unwrap();
+        let sheet_res =
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", "A1=150;A2=250;A3==SUM(A1:A2)?A3")
+                .unwrap();
         assert!(sheet_res.contains("\"value\":\"400\""));
         assert!(sheet_res.contains("\"conditionalMatch\":true"));
 
@@ -451,6 +644,29 @@ mod tests {
         .unwrap();
         assert!(sec_res.contains("\"status\":\"SAFE\""));
         assert!(sec_res.contains("\"checkedEntries\":1"));
+
+        let rib_res =
+            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "doc-mod-toc").unwrap();
+        assert!(rib_res.contains("\"catalogCount\":140"));
+        assert!(rib_res.contains("표·개체 도구"));
+
+        let style_res = EasyOfficeIpcRouter::dispatch("switch_ribbon_style", "hangul").unwrap();
+        assert!(style_res.contains("쪽·원고지"));
+
+        let smart_res = EasyOfficeIpcRouter::dispatch(
+            "run_smart_assistant",
+            "첫 문장입니다. TODO: 보안 결재를 완료합니다.",
+        )
+        .unwrap();
+        assert!(smart_res.contains("\"actionItemCount\":1"));
+
+        let pii_res = EasyOfficeIpcRouter::dispatch(
+            "scrub_pii",
+            "주민번호 880101-1234567 전화 010-9876-5432",
+        )
+        .unwrap();
+        assert!(pii_res.contains("******-*******"));
+        assert!(pii_res.contains("010-****-****"));
 
         assert!(matches!(
             EasyOfficeIpcRouter::dispatch(
@@ -469,5 +685,6 @@ mod tests {
 
         let summary = run_self_test().unwrap();
         assert!(summary.contains("PASSED"));
+        assert!(summary.contains("ribbon_commands=140"));
     }
 }

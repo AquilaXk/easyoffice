@@ -2,6 +2,16 @@ use easyoffice_formats::EasyOfficeError;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
+pub mod functions;
+mod functions_date_fin;
+mod functions_lookup_text;
+mod parser;
+pub mod workbook;
+
+pub use functions::*;
+pub(crate) use parser::*;
+pub use workbook::*;
+
 /// Bit-packed 64-bit spreadsheet cell coordinate (`row` in upper 32 bits, `col` in lower 32 bits).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackedCellCoordinate(pub u64);
@@ -69,9 +79,7 @@ impl PackedCellCoordinate {
                     .checked_mul(10)
                     .and_then(|v| v.checked_add((b - b'0') as u32))
                     .ok_or_else(|| {
-                        EasyOfficeError::InvalidArgument(format!(
-                            "셀 행 번호 오버플로: {input}"
-                        ))
+                        EasyOfficeError::InvalidArgument(format!("셀 행 번호 오버플로: {input}"))
                     })?;
             } else {
                 return Err(EasyOfficeError::InvalidArgument(format!(
@@ -284,400 +292,6 @@ impl fmt::Display for EvaluatedCellValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum Token {
-    Number(f64),
-    Text(String),
-    Ident(String),
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Caret,
-    Percent,
-    Ampersand,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    LParen,
-    RParen,
-    Comma,
-    Colon,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum Expr {
-    Number(f64),
-    Text(String),
-    Boolean(bool),
-    Cell(PackedCellCoordinate),
-    Range(CellRange),
-    UnaryPlus(Box<Expr>),
-    UnaryMinus(Box<Expr>),
-    PostfixPercent(Box<Expr>),
-    Binary {
-        op: BinaryOp,
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
-    },
-    FuncCall {
-        name: String,
-        args: Vec<Expr>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-    Concat,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
-fn tokenize_formula(src: &str) -> Result<Vec<Token>, FormulaError> {
-    let mut tokens = Vec::new();
-    let chars: Vec<char> = src.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        let ch = chars[i];
-        if ch.is_whitespace() {
-            i += 1;
-            continue;
-        }
-        match ch {
-            '+' => {
-                tokens.push(Token::Plus);
-                i += 1;
-            }
-            '-' => {
-                tokens.push(Token::Minus);
-                i += 1;
-            }
-            '*' => {
-                tokens.push(Token::Star);
-                i += 1;
-            }
-            '/' => {
-                tokens.push(Token::Slash);
-                i += 1;
-            }
-            '^' => {
-                tokens.push(Token::Caret);
-                i += 1;
-            }
-            '%' => {
-                tokens.push(Token::Percent);
-                i += 1;
-            }
-            '&' => {
-                tokens.push(Token::Ampersand);
-                i += 1;
-            }
-            '(' => {
-                tokens.push(Token::LParen);
-                i += 1;
-            }
-            ')' => {
-                tokens.push(Token::RParen);
-                i += 1;
-            }
-            ',' | ';' => {
-                tokens.push(Token::Comma);
-                i += 1;
-            }
-            ':' => {
-                tokens.push(Token::Colon);
-                i += 1;
-            }
-            '=' => {
-                tokens.push(Token::Eq);
-                i += 1;
-            }
-            '<' => {
-                if i + 1 < chars.len() && chars[i + 1] == '>' {
-                    tokens.push(Token::Ne);
-                    i += 2;
-                } else if i + 1 < chars.len() && chars[i + 1] == '=' {
-                    tokens.push(Token::Le);
-                    i += 2;
-                } else {
-                    tokens.push(Token::Lt);
-                    i += 1;
-                }
-            }
-            '>' => {
-                if i + 1 < chars.len() && chars[i + 1] == '=' {
-                    tokens.push(Token::Ge);
-                    i += 2;
-                } else {
-                    tokens.push(Token::Gt);
-                    i += 1;
-                }
-            }
-            '"' => {
-                i += 1;
-                let mut text = String::new();
-                let mut closed = false;
-                while i < chars.len() {
-                    if chars[i] == '"' {
-                        if i + 1 < chars.len() && chars[i + 1] == '"' {
-                            text.push('"');
-                            i += 2;
-                        } else {
-                            i += 1;
-                            closed = true;
-                            break;
-                        }
-                    } else {
-                        text.push(chars[i]);
-                        i += 1;
-                    }
-                }
-                if !closed {
-                    return Err(FormulaError::Value);
-                }
-                tokens.push(Token::Text(text));
-            }
-            c if c.is_ascii_digit() || c == '.' => {
-                let start = i;
-                while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
-                    i += 1;
-                }
-                let num_str: String = chars[start..i].iter().collect();
-                let val = num_str.parse::<f64>().map_err(|_| FormulaError::Value)?;
-                if !val.is_finite() {
-                    return Err(FormulaError::Num);
-                }
-                tokens.push(Token::Number(val));
-            }
-            c if c.is_ascii_alphabetic() || c == '$' || c == '_' => {
-                let start = i;
-                while i < chars.len()
-                    && (chars[i].is_ascii_alphanumeric() || chars[i] == '$' || chars[i] == '_')
-                {
-                    i += 1;
-                }
-                let ident: String = chars[start..i].iter().collect();
-                tokens.push(Token::Ident(ident));
-            }
-            _ => return Err(FormulaError::Value),
-        }
-    }
-
-    Ok(tokens)
-}
-
-struct Parser {
-    tokens: Vec<Token>,
-    pos: usize,
-}
-
-impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
-    }
-
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
-    }
-
-    fn next(&mut self) -> Option<Token> {
-        if self.pos < self.tokens.len() {
-            let tok = self.tokens[self.pos].clone();
-            self.pos += 1;
-            Some(tok)
-        } else {
-            None
-        }
-    }
-
-    fn parse_expression(&mut self) -> Result<Expr, FormulaError> {
-        self.parse_comparison()
-    }
-
-    fn parse_comparison(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_concat()?;
-        while let Some(tok) = self.peek() {
-            let op = match tok {
-                Token::Eq => BinaryOp::Eq,
-                Token::Ne => BinaryOp::Ne,
-                Token::Lt => BinaryOp::Lt,
-                Token::Le => BinaryOp::Le,
-                Token::Gt => BinaryOp::Gt,
-                Token::Ge => BinaryOp::Ge,
-                _ => break,
-            };
-            self.next();
-            let rhs = self.parse_concat()?;
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
-        }
-        Ok(lhs)
-    }
-
-    fn parse_concat(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_additive()?;
-        while matches!(self.peek(), Some(Token::Ampersand)) {
-            self.next();
-            let rhs = self.parse_additive()?;
-            lhs = Expr::Binary {
-                op: BinaryOp::Concat,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
-        }
-        Ok(lhs)
-    }
-
-    fn parse_additive(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_multiplicative()?;
-        while let Some(tok) = self.peek() {
-            let op = match tok {
-                Token::Plus => BinaryOp::Add,
-                Token::Minus => BinaryOp::Sub,
-                _ => break,
-            };
-            self.next();
-            let rhs = self.parse_multiplicative()?;
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
-        }
-        Ok(lhs)
-    }
-
-    fn parse_multiplicative(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_power()?;
-        while let Some(tok) = self.peek() {
-            let op = match tok {
-                Token::Star => BinaryOp::Mul,
-                Token::Slash => BinaryOp::Div,
-                _ => break,
-            };
-            self.next();
-            let rhs = self.parse_power()?;
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
-        }
-        Ok(lhs)
-    }
-
-    fn parse_power(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_unary()?;
-        while matches!(self.peek(), Some(Token::Caret)) {
-            self.next();
-            let rhs = self.parse_unary()?;
-            lhs = Expr::Binary {
-                op: BinaryOp::Pow,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
-        }
-        Ok(lhs)
-    }
-
-    fn parse_unary(&mut self) -> Result<Expr, FormulaError> {
-        if matches!(self.peek(), Some(Token::Plus)) {
-            self.next();
-            return Ok(Expr::UnaryPlus(Box::new(self.parse_unary()?)));
-        }
-        if matches!(self.peek(), Some(Token::Minus)) {
-            self.next();
-            return Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)));
-        }
-        self.parse_postfix()
-    }
-
-    fn parse_postfix(&mut self) -> Result<Expr, FormulaError> {
-        let mut expr = self.parse_primary()?;
-        while matches!(self.peek(), Some(Token::Percent)) {
-            self.next();
-            expr = Expr::PostfixPercent(Box::new(expr));
-        }
-        Ok(expr)
-    }
-
-    fn parse_primary(&mut self) -> Result<Expr, FormulaError> {
-        match self.next() {
-            Some(Token::Number(n)) => Ok(Expr::Number(n)),
-            Some(Token::Text(s)) => Ok(Expr::Text(s)),
-            Some(Token::LParen) => {
-                let inner = self.parse_expression()?;
-                if !matches!(self.next(), Some(Token::RParen)) {
-                    return Err(FormulaError::Value);
-                }
-                Ok(inner)
-            }
-            Some(Token::Ident(name)) => {
-                if matches!(self.peek(), Some(Token::LParen)) {
-                    self.next();
-                    let mut args = Vec::new();
-                    if !matches!(self.peek(), Some(Token::RParen)) {
-                        loop {
-                            args.push(self.parse_expression()?);
-                            if matches!(self.peek(), Some(Token::Comma)) {
-                                self.next();
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    if !matches!(self.next(), Some(Token::RParen)) {
-                        return Err(FormulaError::Value);
-                    }
-                    return Ok(Expr::FuncCall {
-                        name: name.to_ascii_uppercase(),
-                        args,
-                    });
-                }
-
-                if name.eq_ignore_ascii_case("TRUE") {
-                    return Ok(Expr::Boolean(true));
-                }
-                if name.eq_ignore_ascii_case("FALSE") {
-                    return Ok(Expr::Boolean(false));
-                }
-
-                let start_coord =
-                    PackedCellCoordinate::parse_a1(&name).map_err(|_| FormulaError::Name)?;
-                if matches!(self.peek(), Some(Token::Colon)) {
-                    self.next();
-                    let Some(Token::Ident(end_name)) = self.next() else {
-                        return Err(FormulaError::Ref);
-                    };
-                    let end_coord =
-                        PackedCellCoordinate::parse_a1(&end_name).map_err(|_| FormulaError::Ref)?;
-                    let range =
-                        CellRange::new(start_coord, end_coord).map_err(|_| FormulaError::Ref)?;
-                    return Ok(Expr::Range(range));
-                }
-                Ok(Expr::Cell(start_coord))
-            }
-            _ => Err(FormulaError::Value),
-        }
-    }
-}
-
 /// Conditional formatting predicate rules for worksheet ranges.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConditionalFormatRule {
@@ -691,9 +305,9 @@ pub enum ConditionalFormatRule {
 impl ConditionalFormatRule {
     pub fn matches(&self, value: &EvaluatedCellValue, range_values: &[EvaluatedCellValue]) -> bool {
         match self {
-            Self::GreaterThan(threshold) => value.as_number().map_or(false, |v| v > *threshold),
-            Self::LessThan(threshold) => value.as_number().map_or(false, |v| v < *threshold),
-            Self::Between(low, high) => value.as_number().map_or(false, |v| {
+            Self::GreaterThan(threshold) => value.as_number().is_some_and(|v| v > *threshold),
+            Self::LessThan(threshold) => value.as_number().is_some_and(|v| v < *threshold),
+            Self::Between(low, high) => value.as_number().is_some_and(|v| {
                 let min_v = low.min(*high);
                 let max_v = low.max(*high);
                 v >= min_v && v <= max_v
@@ -729,9 +343,9 @@ pub enum DataValidationRule {
 impl DataValidationRule {
     pub fn validate(&self, value: &EvaluatedCellValue) -> bool {
         match self {
-            Self::NumberRange { min, max } => value
-                .as_number()
-                .map_or(false, |v| v >= *min && v <= *max),
+            Self::NumberRange { min, max } => {
+                value.as_number().is_some_and(|v| v >= *min && v <= *max)
+            }
             Self::AllowedList(list) => {
                 let disp = value.to_display_string();
                 list.iter().any(|item| item.eq_ignore_ascii_case(&disp))
@@ -768,11 +382,38 @@ pub struct PivotTableSummary {
     pub grand_total: f64,
 }
 
+pub(crate) struct EvalContext<'a> {
+    pub workbook: Option<&'a WorkbookEngine>,
+    pub current_sheet: String,
+    pub visiting: HashSet<(String, PackedCellCoordinate)>,
+    pub memo: HashMap<(String, PackedCellCoordinate), EvaluatedCellValue>,
+}
+
+impl<'a> EvalContext<'a> {
+    pub fn standalone(sheet_name: &str) -> Self {
+        Self {
+            workbook: None,
+            current_sheet: sheet_name.to_ascii_lowercase(),
+            visiting: HashSet::new(),
+            memo: HashMap::new(),
+        }
+    }
+
+    pub fn with_workbook(workbook: &'a WorkbookEngine, sheet_name: &str) -> Self {
+        Self {
+            workbook: Some(workbook),
+            current_sheet: sheet_name.to_ascii_lowercase(),
+            visiting: HashSet::new(),
+            memo: HashMap::new(),
+        }
+    }
+}
+
 /// Spreadsheet calculation engine with $O(V + E)$ cycle detection and DAG memoization.
 #[derive(Debug, Clone, Default)]
 pub struct SheetEngine {
     pub name: String,
-    cells: HashMap<PackedCellCoordinate, String>,
+    pub(crate) cells: HashMap<PackedCellCoordinate, String>,
     pub conditional_rules: Vec<ConditionalFormatRule>,
     pub validation_rule: Option<DataValidationRule>,
 }
@@ -789,7 +430,11 @@ impl SheetEngine {
         }
     }
 
-    pub fn set_cell(&mut self, a1: &str, raw_value: impl Into<String>) -> Result<(), EasyOfficeError> {
+    pub fn set_cell(
+        &mut self,
+        a1: &str,
+        raw_value: impl Into<String>,
+    ) -> Result<(), EasyOfficeError> {
         let coord = PackedCellCoordinate::parse_a1(a1)?;
         let val = raw_value.into();
         if val.is_empty() {
@@ -809,15 +454,13 @@ impl SheetEngine {
         let Ok(coord) = PackedCellCoordinate::parse_a1(a1) else {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         };
-        let mut visiting = HashSet::new();
-        let mut memo = HashMap::new();
-        self.eval_coord(coord, &mut visiting, &mut memo, 0)
+        let mut ctx = EvalContext::standalone(&self.name);
+        self.eval_coord_ctx(coord, &mut ctx, 0)
     }
 
     pub fn evaluate_formula_str(&self, formula: &str) -> EvaluatedCellValue {
-        let mut visiting = HashSet::new();
-        let mut memo = HashMap::new();
-        self.eval_raw_string(formula, &mut visiting, &mut memo, 0)
+        let mut ctx = EvalContext::standalone(&self.name);
+        self.eval_raw_string_ctx(formula, &mut ctx, 0)
     }
 
     pub fn compute_pivot(
@@ -833,8 +476,7 @@ impl SheetEngine {
         let min_c = range.start.col().min(range.end.col());
         let start_row_idx = if has_header_row { 1 } else { 0 };
 
-        let mut visiting = HashSet::new();
-        let mut memo = HashMap::new();
+        let mut ctx = EvalContext::standalone(&self.name);
         let mut row_keys: Vec<String> = Vec::new();
         let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
         let mut all_values: Vec<f64> = Vec::new();
@@ -852,19 +494,14 @@ impl SheetEngine {
                 min_c + value_field_col_offset as u32,
             );
             if let (Ok(kc), Ok(vc)) = (key_coord, val_coord) {
-                let key_str = self
-                    .eval_coord(kc, &mut visiting, &mut memo, 0)
-                    .to_display_string();
+                let key_str = self.eval_coord_ctx(kc, &mut ctx, 0).to_display_string();
                 if key_str.is_empty() {
                     continue;
                 }
                 if !row_keys.contains(&key_str) {
                     row_keys.push(key_str.clone());
                 }
-                if let Some(num) = self
-                    .eval_coord(vc, &mut visiting, &mut memo, 0)
-                    .as_number()
-                {
+                if let Some(num) = self.eval_coord_ctx(vc, &mut ctx, 0).as_number() {
                     buckets.entry(key_str).or_default().push(num);
                     all_values.push(num);
                 }
@@ -901,38 +538,67 @@ impl SheetEngine {
         }
     }
 
-    fn eval_coord(
+    pub(crate) fn eval_sheet_coord(
+        &self,
+        sheet_opt: Option<&str>,
+        coord: PackedCellCoordinate,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> EvaluatedCellValue {
+        match sheet_opt {
+            None => self.eval_coord_ctx(coord, ctx, depth),
+            Some(target_name) => {
+                if target_name.eq_ignore_ascii_case(&self.name) {
+                    return self.eval_coord_ctx(coord, ctx, depth);
+                }
+                let Some(wb) = ctx.workbook else {
+                    return EvaluatedCellValue::Error(FormulaError::Ref);
+                };
+                let Some(target_sheet) = wb.sheet(target_name) else {
+                    return EvaluatedCellValue::Error(FormulaError::Ref);
+                };
+                let prev_sheet = std::mem::replace(
+                    &mut ctx.current_sheet,
+                    target_sheet.name.to_ascii_lowercase(),
+                );
+                let res = target_sheet.eval_coord_ctx(coord, ctx, depth);
+                ctx.current_sheet = prev_sheet;
+                res
+            }
+        }
+    }
+
+    pub(crate) fn eval_coord_ctx(
         &self,
         coord: PackedCellCoordinate,
-        visiting: &mut HashSet<PackedCellCoordinate>,
-        memo: &mut HashMap<PackedCellCoordinate, EvaluatedCellValue>,
+        ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> EvaluatedCellValue {
         if depth > Self::MAX_RECURSION_DEPTH {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
-        if let Some(cached) = memo.get(&coord) {
+        let key = (self.name.to_ascii_lowercase(), coord);
+        if let Some(cached) = ctx.memo.get(&key) {
             return cached.clone();
         }
-        if !visiting.insert(coord) {
+        if !ctx.visiting.insert(key.clone()) {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
 
         let result = match self.cells.get(&coord) {
             None => EvaluatedCellValue::Empty,
-            Some(raw) => self.eval_raw_string(raw, visiting, memo, depth + 1),
+            Some(raw) => self.eval_raw_string_ctx(raw, ctx, depth + 1),
         };
 
-        visiting.remove(&coord);
-        memo.insert(coord, result.clone());
+        ctx.visiting.remove(&key);
+        ctx.memo.insert(key, result.clone());
         result
     }
 
-    fn eval_raw_string(
+    pub(crate) fn eval_raw_string_ctx(
         &self,
         raw: &str,
-        visiting: &mut HashSet<PackedCellCoordinate>,
-        memo: &mut HashMap<PackedCellCoordinate, EvaluatedCellValue>,
+        ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> EvaluatedCellValue {
         if raw.is_empty() {
@@ -954,7 +620,7 @@ impl SheetEngine {
                 Ok(_) => return EvaluatedCellValue::Error(FormulaError::Value),
                 Err(e) => return EvaluatedCellValue::Error(e),
             };
-            self.eval_expr(&expr, visiting, memo, depth)
+            self.eval_expr_ctx(&expr, ctx, depth)
         } else if let Ok(num) = trimmed.parse::<f64>() {
             if num.is_finite() {
                 EvaluatedCellValue::Number(num)
@@ -970,11 +636,10 @@ impl SheetEngine {
         }
     }
 
-    fn eval_expr(
+    pub(crate) fn eval_expr_ctx(
         &self,
         expr: &Expr,
-        visiting: &mut HashSet<PackedCellCoordinate>,
-        memo: &mut HashMap<PackedCellCoordinate, EvaluatedCellValue>,
+        ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> EvaluatedCellValue {
         if depth > Self::MAX_RECURSION_DEPTH {
@@ -984,10 +649,16 @@ impl SheetEngine {
             Expr::Number(n) => EvaluatedCellValue::Number(*n),
             Expr::Text(s) => EvaluatedCellValue::Text(s.clone()),
             Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
-            Expr::Cell(coord) => self.eval_coord(*coord, visiting, memo, depth + 1),
-            Expr::Range(_) => EvaluatedCellValue::Error(FormulaError::Value),
+            Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
+            Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth + 1),
+            Expr::SheetCell { sheet, coord } => {
+                self.eval_sheet_coord(Some(sheet), *coord, ctx, depth + 1)
+            }
+            Expr::Range(_) | Expr::SheetRange { .. } => {
+                EvaluatedCellValue::Error(FormulaError::Value)
+            }
             Expr::UnaryPlus(inner) => {
-                let val = self.eval_expr(inner, visiting, memo, depth + 1);
+                let val = self.eval_expr_ctx(inner, ctx, depth + 1);
                 if let EvaluatedCellValue::Error(e) = val {
                     return EvaluatedCellValue::Error(e);
                 }
@@ -997,7 +668,7 @@ impl SheetEngine {
                 }
             }
             Expr::UnaryMinus(inner) => {
-                let val = self.eval_expr(inner, visiting, memo, depth + 1);
+                let val = self.eval_expr_ctx(inner, ctx, depth + 1);
                 if let EvaluatedCellValue::Error(e) = val {
                     return EvaluatedCellValue::Error(e);
                 }
@@ -1007,7 +678,7 @@ impl SheetEngine {
                 }
             }
             Expr::PostfixPercent(inner) => {
-                let val = self.eval_expr(inner, visiting, memo, depth + 1);
+                let val = self.eval_expr_ctx(inner, ctx, depth + 1);
                 if let EvaluatedCellValue::Error(e) = val {
                     return EvaluatedCellValue::Error(e);
                 }
@@ -1017,11 +688,11 @@ impl SheetEngine {
                 }
             }
             Expr::Binary { op, lhs, rhs } => {
-                let l_val = self.eval_expr(lhs, visiting, memo, depth + 1);
+                let l_val = self.eval_expr_ctx(lhs, ctx, depth + 1);
                 if let EvaluatedCellValue::Error(e) = l_val {
                     return EvaluatedCellValue::Error(e);
                 }
-                let r_val = self.eval_expr(rhs, visiting, memo, depth + 1);
+                let r_val = self.eval_expr_ctx(rhs, ctx, depth + 1);
                 if let EvaluatedCellValue::Error(e) = r_val {
                     return EvaluatedCellValue::Error(e);
                 }
@@ -1076,17 +747,17 @@ impl SheetEngine {
                     | BinaryOp::Le
                     | BinaryOp::Gt
                     | BinaryOp::Ge => {
-                        let ord = if let (Some(ln), Some(rn)) = (l_val.as_number(), r_val.as_number())
-                        {
-                            ln.partial_cmp(&rn)
-                        } else {
-                            Some(
-                                l_val
-                                    .to_display_string()
-                                    .to_lowercase()
-                                    .cmp(&r_val.to_display_string().to_lowercase()),
-                            )
-                        };
+                        let ord =
+                            if let (Some(ln), Some(rn)) = (l_val.as_number(), r_val.as_number()) {
+                                ln.partial_cmp(&rn)
+                            } else {
+                                Some(
+                                    l_val
+                                        .to_display_string()
+                                        .to_lowercase()
+                                        .cmp(&r_val.to_display_string().to_lowercase()),
+                                )
+                            };
                         let Some(ordering) = ord else {
                             return EvaluatedCellValue::Error(FormulaError::Value);
                         };
@@ -1103,15 +774,14 @@ impl SheetEngine {
                     }
                 }
             }
-            Expr::FuncCall { name, args } => self.eval_func(name, args, visiting, memo, depth + 1),
+            Expr::FuncCall { name, args } => self.eval_func_ctx(name, args, ctx, depth + 1),
         }
     }
 
-    fn expand_args(
+    pub(crate) fn expand_args_ctx(
         &self,
         args: &[Expr],
-        visiting: &mut HashSet<PackedCellCoordinate>,
-        memo: &mut HashMap<PackedCellCoordinate, EvaluatedCellValue>,
+        ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<Vec<EvaluatedCellValue>, FormulaError> {
         let mut out = Vec::new();
@@ -1120,7 +790,17 @@ impl SheetEngine {
                 Expr::Range(range) => {
                     let coords = range.expand().map_err(|_| FormulaError::Ref)?;
                     for c in coords {
-                        let v = self.eval_coord(c, visiting, memo, depth + 1);
+                        let v = self.eval_coord_ctx(c, ctx, depth + 1);
+                        if let EvaluatedCellValue::Error(e) = v {
+                            return Err(e);
+                        }
+                        out.push(v);
+                    }
+                }
+                Expr::SheetRange { sheet, range } => {
+                    let coords = range.expand().map_err(|_| FormulaError::Ref)?;
+                    for c in coords {
+                        let v = self.eval_sheet_coord(Some(sheet), c, ctx, depth + 1);
                         if let EvaluatedCellValue::Error(e) = v {
                             return Err(e);
                         }
@@ -1128,7 +808,7 @@ impl SheetEngine {
                     }
                 }
                 _ => {
-                    let v = self.eval_expr(arg, visiting, memo, depth + 1);
+                    let v = self.eval_expr_ctx(arg, ctx, depth + 1);
                     if let EvaluatedCellValue::Error(e) = v {
                         return Err(e);
                     }
@@ -1139,498 +819,7 @@ impl SheetEngine {
         Ok(out)
     }
 
-    fn eval_func(
-        &self,
-        name: &str,
-        args: &[Expr],
-        visiting: &mut HashSet<PackedCellCoordinate>,
-        memo: &mut HashMap<PackedCellCoordinate, EvaluatedCellValue>,
-        depth: usize,
-    ) -> EvaluatedCellValue {
-        match name {
-            "SUM" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) => {
-                    let sum: f64 = vals.iter().filter_map(EvaluatedCellValue::as_number).sum();
-                    EvaluatedCellValue::Number(sum)
-                }
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "AVERAGE" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) => {
-                    let nums: Vec<f64> =
-                        vals.iter().filter_map(EvaluatedCellValue::as_number).collect();
-                    if nums.is_empty() {
-                        EvaluatedCellValue::Error(FormulaError::DivByZero)
-                    } else {
-                        EvaluatedCellValue::Number(nums.iter().sum::<f64>() / (nums.len() as f64))
-                    }
-                }
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "MIN" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) => {
-                    let min_val = vals
-                        .iter()
-                        .filter_map(EvaluatedCellValue::as_number)
-                        .reduce(f64::min)
-                        .unwrap_or(0.0);
-                    EvaluatedCellValue::Number(min_val)
-                }
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "MAX" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) => {
-                    let max_val = vals
-                        .iter()
-                        .filter_map(EvaluatedCellValue::as_number)
-                        .reduce(f64::max)
-                        .unwrap_or(0.0);
-                    EvaluatedCellValue::Number(max_val)
-                }
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "COUNT" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) => {
-                    let count = vals
-                        .iter()
-                        .filter(|v| matches!(v, EvaluatedCellValue::Number(_)))
-                        .count();
-                    EvaluatedCellValue::Number(count as f64)
-                }
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "COUNTA" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) => {
-                    let count = vals
-                        .iter()
-                        .filter(|v| !matches!(v, EvaluatedCellValue::Empty))
-                        .count();
-                    EvaluatedCellValue::Number(count as f64)
-                }
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "IF" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let cond = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = cond {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let Some(flag) = cond.as_bool() else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                if flag {
-                    self.eval_expr(&args[1], visiting, memo, depth + 1)
-                } else if args.len() == 3 {
-                    self.eval_expr(&args[2], visiting, memo, depth + 1)
-                } else {
-                    EvaluatedCellValue::Boolean(false)
-                }
-            }
-            "IFERROR" => {
-                if args.len() != 2 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let primary = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if matches!(primary, EvaluatedCellValue::Error(_)) {
-                    self.eval_expr(&args[1], visiting, memo, depth + 1)
-                } else {
-                    primary
-                }
-            }
-            "AND" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) if !vals.is_empty() => {
-                    let mut result = true;
-                    for v in vals {
-                        if matches!(v, EvaluatedCellValue::Empty) {
-                            continue;
-                        }
-                        let Some(b) = v.as_bool() else {
-                            return EvaluatedCellValue::Error(FormulaError::Value);
-                        };
-                        if !b {
-                            result = false;
-                        }
-                    }
-                    EvaluatedCellValue::Boolean(result)
-                }
-                Ok(_) => EvaluatedCellValue::Error(FormulaError::Value),
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "OR" => match self.expand_args(args, visiting, memo, depth) {
-                Ok(vals) if !vals.is_empty() => {
-                    let mut result = false;
-                    for v in vals {
-                        if matches!(v, EvaluatedCellValue::Empty) {
-                            continue;
-                        }
-                        let Some(b) = v.as_bool() else {
-                            return EvaluatedCellValue::Error(FormulaError::Value);
-                        };
-                        if b {
-                            result = true;
-                        }
-                    }
-                    EvaluatedCellValue::Boolean(result)
-                }
-                Ok(_) => EvaluatedCellValue::Error(FormulaError::Value),
-                Err(e) => EvaluatedCellValue::Error(e),
-            },
-            "NOT" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                match val.as_bool() {
-                    Some(b) => EvaluatedCellValue::Boolean(!b),
-                    None => EvaluatedCellValue::Error(FormulaError::Value),
-                }
-            }
-            "ABS" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                match val.as_number() {
-                    Some(n) => EvaluatedCellValue::Number(n.abs()),
-                    None => EvaluatedCellValue::Error(FormulaError::Value),
-                }
-            }
-            "ROUND" => {
-                if args.len() != 2 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let v0 = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = v0 {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let v1 = self.eval_expr(&args[1], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = v1 {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let (Some(num), Some(digits)) = (v0.as_number(), v1.as_number()) else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let exp = digits.trunc().clamp(-300.0, 300.0) as i32;
-                let factor = 10f64.powi(exp);
-                if !factor.is_finite() || factor == 0.0 {
-                    return EvaluatedCellValue::Number(num);
-                }
-                EvaluatedCellValue::Number((num * factor).round() / factor)
-            }
-            "SQRT" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let Some(n) = val.as_number() else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                if n < 0.0 {
-                    return EvaluatedCellValue::Error(FormulaError::Num);
-                }
-                EvaluatedCellValue::Number(n.sqrt())
-            }
-            "POWER" => {
-                if args.len() != 2 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let v0 = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = v0 {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let v1 = self.eval_expr(&args[1], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = v1 {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let (Some(base), Some(exp)) = (v0.as_number(), v1.as_number()) else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let res = base.powf(exp);
-                if !res.is_finite() {
-                    return EvaluatedCellValue::Error(FormulaError::Num);
-                }
-                EvaluatedCellValue::Number(res)
-            }
-            "MOD" => {
-                if args.len() != 2 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let v0 = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = v0 {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let v1 = self.eval_expr(&args[1], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = v1 {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let (Some(num), Some(div)) = (v0.as_number(), v1.as_number()) else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                if div.abs() < 1e-15 {
-                    return EvaluatedCellValue::Error(FormulaError::DivByZero);
-                }
-                EvaluatedCellValue::Number(num % div)
-            }
-            "CONCAT" => {
-                let vals = match self.expand_args(args, visiting, memo, depth) {
-                    Ok(v) => v,
-                    Err(e) => return EvaluatedCellValue::Error(e),
-                };
-                let mut joined = String::new();
-                for v in vals {
-                    if let EvaluatedCellValue::Error(e) = v {
-                        return EvaluatedCellValue::Error(e);
-                    }
-                    joined.push_str(&v.to_display_string());
-                }
-                EvaluatedCellValue::Text(joined)
-            }
-            "MEDIAN" => {
-                let vals = match self.expand_args(args, visiting, memo, depth) {
-                    Ok(v) => v,
-                    Err(e) => return EvaluatedCellValue::Error(e),
-                };
-                let mut nums: Vec<f64> = vals
-                    .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
-                    .collect();
-                if nums.is_empty() {
-                    return EvaluatedCellValue::Error(FormulaError::Num);
-                }
-                nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                let mid = nums.len() / 2;
-                let median = if nums.len() % 2 == 1 {
-                    nums[mid]
-                } else {
-                    (nums[mid - 1] + nums[mid]) / 2.0
-                };
-                EvaluatedCellValue::Number(median)
-            }
-            "STDEV" => {
-                let vals = match self.expand_args(args, visiting, memo, depth) {
-                    Ok(v) => v,
-                    Err(e) => return EvaluatedCellValue::Error(e),
-                };
-                let nums: Vec<f64> = vals
-                    .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
-                    .collect();
-                if nums.len() < 2 {
-                    return EvaluatedCellValue::Error(FormulaError::DivByZero);
-                }
-                let mean = nums.iter().sum::<f64>() / (nums.len() as f64);
-                let var = nums.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
-                    / ((nums.len() - 1) as f64);
-                EvaluatedCellValue::Number(var.sqrt())
-            }
-            "LEN" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                EvaluatedCellValue::Number(val.to_display_string().chars().count() as f64)
-            }
-            "UPPER" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                EvaluatedCellValue::Text(val.to_display_string().to_uppercase())
-            }
-            "LOWER" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                EvaluatedCellValue::Text(val.to_display_string().to_lowercase())
-            }
-            "TRIM" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let trimmed = val
-                    .to_display_string()
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                EvaluatedCellValue::Text(trimmed)
-            }
-            "ISBLANK" => {
-                if args.len() != 1 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                // ECMA-376 standard: only genuinely empty cells evaluate to TRUE; `=""` evaluates to Text("") which is FALSE.
-                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                EvaluatedCellValue::Boolean(matches!(val, EvaluatedCellValue::Empty))
-            }
-            "VLOOKUP" => {
-                if args.len() < 3 || args.len() > 4 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let lookup_val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = lookup_val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let Expr::Range(range) = &args[1] else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let col_idx_val = self.eval_expr(&args[2], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = col_idx_val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let Some(col_idx_f) = col_idx_val.as_number() else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let col_idx = col_idx_f.trunc() as isize;
-                let (rows, cols) = range.dimensions();
-                if col_idx < 1 || (col_idx as usize) > cols {
-                    return EvaluatedCellValue::Error(FormulaError::Ref);
-                }
-                let min_r = range.start.row().min(range.end.row());
-                let min_c = range.start.col().min(range.end.col());
-                let target_c = min_c + (col_idx as u32 - 1);
-
-                for r_off in 0..rows {
-                    let key_coord = match PackedCellCoordinate::new(min_r + r_off as u32, min_c) {
-                        Ok(c) => c,
-                        Err(_) => return EvaluatedCellValue::Error(FormulaError::Ref),
-                    };
-                    let cell_val = self.eval_coord(key_coord, visiting, memo, depth + 1);
-                    if Self::values_match(&cell_val, &lookup_val) {
-                        let res_coord =
-                            match PackedCellCoordinate::new(min_r + r_off as u32, target_c) {
-                                Ok(c) => c,
-                                Err(_) => return EvaluatedCellValue::Error(FormulaError::Ref),
-                            };
-                        return self.eval_coord(res_coord, visiting, memo, depth + 1);
-                    }
-                }
-                EvaluatedCellValue::Error(FormulaError::Na)
-            }
-            "INDEX" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let Expr::Range(range) = &args[0] else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let row_val = self.eval_expr(&args[1], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = row_val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let Some(row_f) = row_val.as_number() else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let row_num = row_f.trunc() as isize;
-                let col_num = if args.len() == 3 {
-                    let col_val = self.eval_expr(&args[2], visiting, memo, depth + 1);
-                    if let EvaluatedCellValue::Error(e) = col_val {
-                        return EvaluatedCellValue::Error(e);
-                    }
-                    let Some(col_f) = col_val.as_number() else {
-                        return EvaluatedCellValue::Error(FormulaError::Value);
-                    };
-                    col_f.trunc() as isize
-                } else {
-                    1
-                };
-                let (rows, cols) = range.dimensions();
-                if row_num < 1
-                    || col_num < 1
-                    || (row_num as usize) > rows
-                    || (col_num as usize) > cols
-                {
-                    return EvaluatedCellValue::Error(FormulaError::Ref);
-                }
-                let min_r = range.start.row().min(range.end.row());
-                let min_c = range.start.col().min(range.end.col());
-                match PackedCellCoordinate::new(
-                    min_r + (row_num as u32 - 1),
-                    min_c + (col_num as u32 - 1),
-                ) {
-                    Ok(coord) => self.eval_coord(coord, visiting, memo, depth + 1),
-                    Err(_) => EvaluatedCellValue::Error(FormulaError::Ref),
-                }
-            }
-            "MATCH" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let lookup_val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = lookup_val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let Expr::Range(range) = &args[1] else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                let Ok(coords) = range.expand() else {
-                    return EvaluatedCellValue::Error(FormulaError::Ref);
-                };
-                for (idx, coord) in coords.into_iter().enumerate() {
-                    let v = self.eval_coord(coord, visiting, memo, depth + 1);
-                    if Self::values_match(&v, &lookup_val) {
-                        return EvaluatedCellValue::Number((idx + 1) as f64);
-                    }
-                }
-                EvaluatedCellValue::Error(FormulaError::Na)
-            }
-            "NPV" => {
-                if args.len() < 2 {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                }
-                let rate_val = self.eval_expr(&args[0], visiting, memo, depth + 1);
-                if let EvaluatedCellValue::Error(e) = rate_val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                let Some(rate) = rate_val.as_number() else {
-                    return EvaluatedCellValue::Error(FormulaError::Value);
-                };
-                if rate <= -1.0 {
-                    return EvaluatedCellValue::Error(FormulaError::DivByZero);
-                }
-                let cashflows = match self.expand_args(&args[1..], visiting, memo, depth) {
-                    Ok(vals) => vals,
-                    Err(e) => return EvaluatedCellValue::Error(e),
-                };
-                let mut npv = 0.0;
-                for (t, v) in cashflows
-                    .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
-                    .enumerate()
-                {
-                    npv += v / (1.0 + rate).powi((t + 1) as i32);
-                }
-                EvaluatedCellValue::Number(npv)
-            }
-            _ => EvaluatedCellValue::Error(FormulaError::Name),
-        }
-    }
-
-    fn values_match(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
+    pub(crate) fn values_match(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
         if let (Some(na), Some(nb)) = (a.as_number(), b.as_number()) {
             (na - nb).abs() < 1e-9
         } else {
@@ -1671,13 +860,12 @@ mod tests {
         sheet.set_cell("B3", "=ISBLANK(B1)").unwrap();
         sheet.set_cell("D1", "=SUM(A1:A3)").unwrap();
         sheet.set_cell("D2", "=AVERAGE(A1:A2)").unwrap();
-        sheet.set_cell("D3", "=IF(D1>200, UPPER(\"pass\"), \"fail\")").unwrap();
+        sheet
+            .set_cell("D3", "=IF(D1>200, UPPER(\"pass\"), \"fail\")")
+            .unwrap();
 
         assert_eq!(sheet.evaluate_cell("A3"), EvaluatedCellValue::Number(130.0));
-        assert_eq!(
-            sheet.evaluate_cell("B2"),
-            EvaluatedCellValue::Boolean(true)
-        );
+        assert_eq!(sheet.evaluate_cell("B2"), EvaluatedCellValue::Boolean(true));
         assert_eq!(
             sheet.evaluate_cell("B3"),
             EvaluatedCellValue::Boolean(false)
@@ -1713,13 +901,19 @@ mod tests {
             .set_cell("C1", "=VLOOKUP(\"코어엔진\", A2:B4, 2, FALSE)")
             .unwrap();
         sheet.set_cell("C2", "=INDEX(A2:B4, 2, 2)").unwrap();
-        sheet.set_cell("C3", "=MATCH(\"코어엔진\", A2:A4, 0)").unwrap();
+        sheet
+            .set_cell("C3", "=MATCH(\"코어엔진\", A2:A4, 0)")
+            .unwrap();
         sheet.set_cell("C4", "=ROUND(NPV(0.1, B2:B3), 2)").unwrap();
-        sheet.set_cell("C5", "=SQRT(16)+POWER(2,3)+MOD(10,3)").unwrap();
+        sheet
+            .set_cell("C5", "=SQRT(16)+POWER(2,3)+MOD(10,3)")
+            .unwrap();
         sheet.set_cell("C6", "=CONCAT(A2, \"-\", A3)").unwrap();
         sheet.set_cell("C7", "=MEDIAN(B2:B4)").unwrap();
         sheet.set_cell("C8", "=ROUND(STDEV(B2:B4), 2)").unwrap();
-        sheet.set_cell("C9", "=VLOOKUP(\"코어엔진\", A2:B4, 1/0, FALSE)").unwrap();
+        sheet
+            .set_cell("C9", "=VLOOKUP(\"코어엔진\", A2:B4, 1/0, FALSE)")
+            .unwrap();
 
         assert_eq!(
             sheet.evaluate_cell("C1"),

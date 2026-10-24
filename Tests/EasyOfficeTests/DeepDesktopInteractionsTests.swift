@@ -1330,5 +1330,40 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTFail("Expected slide payload")
     }
   }
+
+  func testNinthAuditRibbonLayoutStyleSwitcherAndContextualObjectToolBadge() throws {
+    let vm = WorkspaceViewModel()
+    XCTAssertEqual(vm.ribbonLayoutStyle, .standardOffice)
+    XCTAssertEqual(
+      vm.ribbonLayoutStyle.displayTitle(for: .home),
+      WorkspaceRibbonCategory.home.rawValue
+    )
+
+    vm.toggleRibbonLayoutStyle()
+    XCTAssertEqual(vm.ribbonLayoutStyle, .hangulHwp)
+    XCTAssertEqual(vm.ribbonLayoutStyle.displayTitle(for: .home), "편집")
+    XCTAssertEqual(vm.ribbonLayoutStyle.displayTitle(for: .insert), "입력")
+    XCTAssertEqual(vm.ribbonLayoutStyle.displayTitle(for: .layout), "쪽·원고지")
+    XCTAssertEqual(vm.ribbonLayoutStyle.displayTitle(for: .formulasAndData), "표·개체")
+    XCTAssertEqual(vm.ribbonLayoutStyle.displayTitle(for: .moduleSpecific), "시트·차트")
+    XCTAssertEqual(vm.ribbonLayoutStyle.displayTitle(for: .review), "보안·도구")
+    XCTAssertEqual(vm.ribbonLayoutStyle.displayTitle(for: .view), "보기")
+
+    vm.toggleRibbonLayoutStyle()
+    XCTAssertEqual(vm.ribbonLayoutStyle, .standardOffice)
+
+    let expectedBadges: [(OfficeModuleKind, String)] = [
+      (.document, "표·개체 도구"),
+      (.hwp, "쪽·결재·원고지 도구"),
+      (.sheet, "수식·피벗 분석"),
+      (.slide, "발표자·레이저 도구"),
+      (.pdf, "전자결재·주석 도구"),
+    ]
+    for (moduleKind, expectedBadge) in expectedBadges {
+      let tab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == moduleKind }))
+      vm.activeTabID = tab.id
+      XCTAssertEqual(vm.activeContextualObjectToolBadge, expectedBadge)
+    }
+  }
 }
 

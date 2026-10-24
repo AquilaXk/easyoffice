@@ -10,7 +10,7 @@
   <div class="workspace-shell">
     <header class="top-titlebar" role="banner">
       <div class="qat-group" aria-label="빠른 실행 도구 모음">
-        <button id="btn-home-hub" class="pill-btn active" type="button">홈 허브</button>
+        <button id="btn-home-hub" class="pill-btn" data-module="home" type="button">홈</button>
         <button id="btn-undo" class="pill-btn" type="button" title="실행 취소">실행 취소</button>
         <button id="btn-redo" class="pill-btn" type="button" title="다시 실행">다시 실행</button>
         <button id="btn-save" class="pill-btn" type="button" title="저장">저장</button>
@@ -37,10 +37,20 @@
           <span class="badge badge-pdf">PDF</span>
           <span>보안_감사_인증서.pdf</span>
         </button>
+        <button class="doc-tab" data-module="converter" type="button">
+          <span class="badge badge-doc">CONV</span>
+          <span>일괄 변환</span>
+        </button>
+        <button class="doc-tab" data-module="smart" type="button">
+          <span class="badge badge-hwp">SMART</span>
+          <span>스마트 보조</span>
+        </button>
         <button id="btn-new-tab" class="pill-btn new-tab-btn" type="button" aria-label="새 문서 탭 추가">+</button>
       </nav>
 
       <div class="titlebar-actions">
+        <span id="contextual-object-badge" class="context-object-pill">표·개체 도구</span>
+        <button id="btn-ribbon-style-toggle" class="pill-btn" type="button" title="표준 리본 ↔ 한글 쪽·편집 리본 전환">표준 리본</button>
         <div class="search-capsule">
           <input id="global-search-input" type="search" placeholder="통합 문서·명령 검색" aria-label="통합 검색" />
           <span id="shortcut-hint" class="shortcut-badge">Cmd+F</span>
@@ -50,23 +60,25 @@
     </header>
 
     <section class="context-ribbon" aria-label="컨텍스트 리본">
-      <div class="ribbon-categories" role="tablist">
-        <button class="ribbon-cat active" data-cat="home" type="button">홈</button>
-        <button class="ribbon-cat" data-cat="insert" type="button">삽입</button>
-        <button class="ribbon-cat" data-cat="layout" type="button">레이아웃</button>
-        <button class="ribbon-cat" data-cat="formulas" type="button">수식·데이터</button>
-        <button class="ribbon-cat" data-cat="module" type="button">모듈 전용</button>
-        <button class="ribbon-cat" data-cat="review" type="button">검토·보안</button>
-        <button class="ribbon-cat" data-cat="view" type="button">보기·창</button>
+      <div id="ribbon-category-bar" class="ribbon-categories" role="tablist">
+        <button class="ribbon-cat active" data-cat="home" data-idx="0" type="button">홈</button>
+        <button class="ribbon-cat" data-cat="insert" data-idx="1" type="button">삽입</button>
+        <button class="ribbon-cat" data-cat="layout" data-idx="2" type="button">레이아웃</button>
+        <button class="ribbon-cat" data-cat="formulas" data-idx="3" type="button">수식·데이터</button>
+        <button class="ribbon-cat" data-cat="module" data-idx="4" type="button">모듈 전용</button>
+        <button class="ribbon-cat" data-cat="review" data-idx="5" type="button">검토·보안</button>
+        <button class="ribbon-cat" data-cat="view" data-idx="6" type="button">보기·창</button>
       </div>
       <div id="ribbon-command-strip" class="ribbon-commands">
-        <button class="cmd-btn" data-cmd="bold" type="button">굵게</button>
-        <button class="cmd-btn" data-cmd="italic" type="button">기울임</button>
-        <button class="cmd-btn" data-cmd="columns-2" type="button">2단 조판</button>
-        <button class="cmd-btn" data-cmd="manuscript-grid" type="button">200자 원고지</button>
-        <button class="cmd-btn" data-cmd="batch-converter" type="button">일괄 변환</button>
-        <button class="cmd-btn" data-cmd="smart-assistant" type="button">스마트 보조 도구</button>
-        <button class="cmd-btn" data-cmd="security-audit" type="button">보안 감사</button>
+        <button class="cmd-btn" data-cmd="document-home-bold" type="button">굵게</button>
+        <button class="cmd-btn" data-cmd="document-home-italic" type="button">기울임</button>
+        <button class="cmd-btn" data-cmd="document-layout-columns" type="button">2단 조판</button>
+        <button class="cmd-btn" data-cmd="hwp-mod-manuscript" type="button">200자 원고지</button>
+        <button class="cmd-btn" data-cmd="hwp-mod-header" type="button">KS X 6101 결재란</button>
+        <button class="cmd-btn" data-cmd="sheet-mod-pivot" type="button">피벗 요약</button>
+        <button class="cmd-btn" data-cmd="slide-mod-presenter" type="button">발표자 레이저</button>
+        <button class="cmd-btn" data-cmd="pdf-mod-rotate" type="button">PDF 스탬프·워터마크</button>
+        <button class="cmd-btn" data-cmd="document-review-verify" type="button">보안·PII 감사</button>
       </div>
     </section>
 
@@ -96,17 +108,84 @@
           <span id="ime-status-pill" class="ime-pill">IME 대기 (UTF-8)</span>
         </div>
 
-        <article id="document-surface" class="a4-sheet" contenteditable="true" spellcheck="false">
-          <h1>EasyOffice 크로스플랫폼 올인원 오피스</h1>
-          <p>OOXML (ECMA-376), ODF (ISO/IEC 26300), HWP 5.0 Binary (OLE2 CFBF), HWPX (KS X 6101 OWPML), PDF (ISO 32000), RFC 4180 CSV, CommonMark Markdown 표준을 단일 워크스페이스에서 처리합니다.</p>
-        </article>
+        <div id="pane-document" class="module-pane active">
+          <div id="ksx6101-approval-banner" class="approval-banner">
+            <div class="approval-title">행정 표준 기안문 (KS X 6101 OWPML / HWP 5.0 호환)</div>
+            <div class="approval-grid">
+              <div class="approval-cell">기안<br/><strong>홍길동</strong></div>
+              <div class="approval-cell">검토<br/><strong>박서연</strong></div>
+              <div class="approval-cell">협조<br/><strong>최현우</strong></div>
+              <div class="approval-cell">결재<br/><strong>승인완료</strong></div>
+            </div>
+          </div>
+
+          <article id="document-surface" class="a4-sheet" contenteditable="true" spellcheck="false">
+            <h1>EasyOffice 크로스플랫폼 올인원 오피스</h1>
+            <p>OOXML (ECMA-376), ODF (ISO/IEC 26300), HWP 5.0 Binary (OLE2 CFBF), HWPX (KS X 6101 OWPML), PDF (ISO 32000), RFC 4180 CSV, CommonMark Markdown 표준을 단일 워크스페이스에서 처리합니다.</p>
+          </article>
+
+          <div id="manuscript-grid-container" class="manuscript-grid hidden" aria-label="200자 원고지 격자"></div>
+        </div>
+
+        <div id="pane-sheet" class="module-pane hidden">
+          <div class="formula-bar">
+            <span class="cell-addr-pill" id="sheet-active-cell">C1</span>
+            <input id="sheet-formula-input" type="text" value="=SUM(A1:B2)" aria-label="수식 입력줄" />
+            <button id="btn-eval-formula" class="pill-btn active" type="button">계산 실행</button>
+            <span id="sheet-eval-result" class="formula-result">결과: 1300</span>
+          </div>
+          <table class="sheet-grid">
+            <thead>
+              <tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th></tr>
+            </thead>
+            <tbody>
+              <tr><th>1</th><td>100</td><td>200</td><td id="cell-c1">1300</td><td>=200*15% → 30</td></tr>
+              <tr><th>2</th><td>400</td><td>600</td><td>=VLOOKUP("코어",A1:B2,2,0)</td><td>피벗 합계: 1300</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div id="pane-slide" class="module-pane hidden">
+          <div id="slide-stage" class="slide-stage">
+            <div class="slide-upper-zone">
+              <h2>EasyOffice 16:9 와이드 프레젠테이션 스테이지</h2>
+              <p>상단 본문 영역 (y &le; 215pt) · 하단 비겹침 오브젝트 영역 (y &ge; 240pt)</p>
+            </div>
+            <div class="slide-lower-zone">
+              <div class="slide-card">아키텍처 요약 카드</div>
+              <div class="slide-card">보안 감사 지표</div>
+            </div>
+            <div id="laser-dot" class="laser-dot hidden"></div>
+          </div>
+        </div>
+
+        <div id="pane-pdf" class="module-pane hidden">
+          <div class="pdf-page-sheet">
+            <div id="pdf-watermark-layer" class="pdf-watermark">CONFIDENTIAL · 대외비</div>
+            <div class="pdf-header-box">ISO 32000-1 PDF 스튜디오 (y = 804..452 가시 좌표계)</div>
+            <div id="pdf-stamp-box" class="pdf-stamp-box">APPROVED · 결재완료 (2026-10-24)</div>
+            <p class="pdf-body-copy">바이트 정밀 xref 테이블, AcroForm 위젯, 자유곡선 주석 및 페이지 분할·병합을 지원합니다.</p>
+          </div>
+        </div>
+
+        <div id="pane-smart" class="module-pane hidden">
+          <div class="smart-panel">
+            <h3>오프라인 스마트 문서 보조 및 PII 개인정보 비식별화</h3>
+            <textarea id="smart-input-text" rows="4">담당자 주민번호 900101-1234567, 연락처 010-1234-5678, 이메일 audit@easyoffice.local. TODO: 10월 30일 기한까지 보안 결재 완료.</textarea>
+            <div class="smart-actions">
+              <button id="btn-run-summary" class="pill-btn active" type="button">TF 요약·액션 추출</button>
+              <button id="btn-run-pii-scrub" class="pill-btn" type="button">PII 마스킹 실행</button>
+            </div>
+            <pre id="smart-output-box" class="smart-output">오프라인 스마트 보조 준비 완료 (외부 네트워크 전송 0건)</pre>
+          </div>
+        </div>
       </section>
 
       <aside id="right-inspector" class="right-inspector" aria-label="우측 세부 속성 인스펙터">
         <h2 class="pane-heading">세부 속성 및 보안 감사</h2>
         <div class="inspector-group">
-          <label>용지 규격</label>
-          <div class="inspector-value">A4 (595 × 842 pt)</div>
+          <label>용지 규격 및 리본 모드</label>
+          <div id="inspector-ribbon-mode" class="inspector-value">A4 (595 × 842 pt) · 표준 오피스</div>
         </div>
         <div class="inspector-group">
           <label>자간 / 장평</label>
@@ -123,6 +202,7 @@
       <div class="status-left">
         <span id="platform-badge" class="status-item">플랫폼 감지 중...</span>
         <span id="format-spec-badge" class="status-item">OOXML (ECMA-376)</span>
+        <span id="command-log-badge" class="status-item">리본 카탈로그 140종 준비</span>
       </div>
       <div class="status-right">
         <span id="zoom-readout" class="status-item">100%</span>

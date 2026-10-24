@@ -934,7 +934,7 @@ struct ContextRibbonBarView: View {
                 viewModel.activeRibbonCategory = category
               } label: {
                 VStack(spacing: 2) {
-                  Text(category.title(for: activeModule))
+                  Text(viewModel.ribbonLayoutStyle.displayTitle(for: category))
                     .font(.system(size: 12, weight: isSelected ? .bold : .medium))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -961,6 +961,34 @@ struct ContextRibbonBarView: View {
         Spacer(minLength: 8)
 
         HStack(spacing: 6) {
+          Text(viewModel.activeContextualObjectToolBadge)
+            .font(.system(size: 10, weight: .bold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(moduleAccent.opacity(0.14))
+            .foregroundStyle(moduleAccent)
+            .overlay(
+              RoundedRectangle(cornerRadius: 5)
+                .stroke(moduleAccent.opacity(0.45), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+
+          Button {
+            viewModel.toggleRibbonLayoutStyle()
+          } label: {
+            Label(viewModel.ribbonLayoutStyle.rawValue, systemImage: "slider.horizontal.3")
+              .font(.system(size: 11, weight: .semibold))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .padding(.horizontal, 7)
+              .padding(.vertical, 3)
+              .background(palette.selectedSurface.swiftUIColor)
+              .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+              .clipShape(RoundedRectangle(cornerRadius: 5))
+          }
+          .buttonStyle(.plain)
           if viewModel.splitSecondaryTab != nil {
             Button {
               viewModel.enableSplitView(secondaryTabID: nil)

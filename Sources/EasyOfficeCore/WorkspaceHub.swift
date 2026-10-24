@@ -22,6 +22,7 @@ public final class WorkspaceViewModel {
   public var isCanvasSnapshotMode: Bool = false
   public var activeHubSection: HubSection = .home
   public var activeRibbonCategory: RibbonCategory = .home
+  public var ribbonLayoutStyle: RibbonLayoutStyle = .standardOffice
   public var isRibbonCollapsed: Bool = false
   public var themeMode: WorkspaceThemeMode = .lightLavender
   public var customTemplates: [OfficeTemplateDescriptor] = []
@@ -258,6 +259,21 @@ public final class WorkspaceViewModel {
   public var activeTab: WorkspaceTabItem? {
     guard let activeTabID else { return openTabs.first }
     return openTabs.first(where: { $0.id == activeTabID })
+  }
+
+  public func toggleRibbonLayoutStyle() {
+    ribbonLayoutStyle = (ribbonLayoutStyle == .standardOffice) ? .hangulHwp : .standardOffice
+    lastExecutedCommandSummary = "리본 레이아웃 전환: \(ribbonLayoutStyle.rawValue)"
+  }
+
+  public var activeContextualObjectToolBadge: String {
+    switch activeTab?.moduleKind ?? .document {
+    case .document: return "표·개체 도구"
+    case .hwp: return "쪽·결재·원고지 도구"
+    case .sheet: return "수식·피벗 분석"
+    case .slide: return "발표자·레이저 도구"
+    case .pdf: return "전자결재·주석 도구"
+    }
   }
 
   public var splitSecondaryTab: WorkspaceTabItem? {

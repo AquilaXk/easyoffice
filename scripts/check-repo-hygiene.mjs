@@ -118,7 +118,7 @@ function walkTrackedCandidateFiles(dir, collected = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (IGNORED_DIRS.has(entry.name)) continue;
     const fullPath = path.join(dir, entry.name);
-    const relPath = path.relative(ROOT, fullPath);
+    const relPath = path.relative(ROOT, fullPath).replaceAll("\\", "/");
     if (IGNORED_ROOT_FILES.has(relPath)) continue;
 
     if (entry.isDirectory()) {
@@ -166,7 +166,7 @@ try {
 
 const files = walkTrackedCandidateFiles(ROOT);
 for (const file of files) {
-  const rel = path.relative(ROOT, file);
+  const rel = path.relative(ROOT, file).replaceAll("\\", "/");
   if (rel === "scripts/check-repo-hygiene.mjs") continue;
 
   const content = fs.readFileSync(file, "utf8");
