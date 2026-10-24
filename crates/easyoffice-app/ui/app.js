@@ -215,32 +215,26 @@
     };
   }
 
-  async function invokeIpc(command, payload) {
-    if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
-      const raw = await window.__TAURI_INTERNALS__.invoke(command, { payload });
-      return typeof raw === "string" ? JSON.parse(raw) : raw;
-    }
-    if (command === "get_workspace_bootstrap") {
-      return {
-        platform: navigator.platform.includes("Mac") ? "macOS" : "Desktop",
-        shortcutModifier: navigator.platform.includes("Mac") ? "⌘" : "Ctrl",
-        recentFormatFilters: ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
-        openTabs: [
-          { id: "tab-doc", title: "연간_업무_보고서.docx", module: "DOC", isPinned: true },
-          { id: "tab-hwp", title: "행정_표준_기안문.hwpx", module: "HWP", isPinned: true },
-          { id: "tab-sheet", title: "분기_예산_시트.xlsx", module: "SHEET", isPinned: false },
-          { id: "tab-slide", title: "제품_전략_발표자료.pptx", module: "SLIDE", isPinned: false },
-          { id: "tab-pdf", title: "검토_승인_문서.pdf", module: "PDF", isPinned: false },
-        ],
-      };
-    }
-    if (command === "get_ribbon_category_commands") {
+  const MOCK_IPC_HANDLERS = {
+    get_workspace_bootstrap: () => ({
+      platform: navigator.platform.includes("Mac") ? "macOS" : "Desktop",
+      shortcutModifier: navigator.platform.includes("Mac") ? "⌘" : "Ctrl",
+      recentFormatFilters: ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
+      openTabs: [
+        { id: "tab-doc", title: "연간_업무_보고서.docx", module: "DOC", isPinned: true },
+        { id: "tab-hwp", title: "행정_표준_기안문.hwpx", module: "HWP", isPinned: true },
+        { id: "tab-sheet", title: "분기_예산_시트.xlsx", module: "SHEET", isPinned: false },
+        { id: "tab-slide", title: "제품_전략_발표자료.pptx", module: "SLIDE", isPinned: false },
+        { id: "tab-pdf", title: "검토_승인_문서.pdf", module: "PDF", isPinned: false },
+      ],
+    }),
+    get_ribbon_category_commands: (payload) => {
       const [modPart, catPart] = String(payload || "DOC|home").split("|");
       const mKey = modPart === "CONV" ? "DOC" : modPart;
       const modMap = RIBBON_CATEGORY_TOOLS[mKey] || RIBBON_CATEGORY_TOOLS.DOC;
       return { commands: modMap[catPart] || modMap.home };
-    }
-    if (command === "convert_document_format") {
+    },
+    convert_document_format: (payload) => {
       const parts = String(payload || "docx->hwpx|문서|본문").split("|");
       const [src, dst] = (parts[0] || "docx->hwpx").split("->");
       return {
@@ -252,51 +246,48 @@
         specification: MODULE_SPECS[dst.toUpperCase()] || "문서 포맷",
         status: "OK",
       };
-    }
-    if (command === "run_engine_benchmark") {
-      return {
-        status: "ok",
-        iterations: 5,
-        allEquivalent: true,
-        suites: [
-          { suiteId: "crc32_slicing_by_8", baselineP50Us: 2068, optimizedP50Us: 464, speedupFactor: 4.46 },
-          { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
-          { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 50, optimizedP50Us: 29, speedupFactor: 1.72 },
-          { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 878, optimizedP50Us: 308, speedupFactor: 2.85 },
-        ],
-      };
-    }
-    if (command === "run_smart_assistant") {
-      return localSmartAssistant(payload);
-    }
-    if (command === "scrub_pii") {
-      return localScrubPii(payload);
-    }
-    if (command === "evaluate_workbook_formula") {
+    },
+    run_engine_benchmark: () => ({
+      status: "ok",
+      iterations: 5,
+      allEquivalent: true,
+      suites: [
+        { suiteId: "crc32_slicing_by_8", baselineP50Us: 2068, optimizedP50Us: 464, speedupFactor: 4.46 },
+        { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
+        { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 50, optimizedP50Us: 29, speedupFactor: 1.72 },
+        { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 878, optimizedP50Us: 308, speedupFactor: 2.85 },
+      ],
+    }),
+    run_smart_assistant: (payload) => localSmartAssistant(payload),
+    scrub_pii: (payload) => localScrubPii(payload),
+    evaluate_workbook_formula: (payload) => {
       const expr = String(payload || "").split("?").pop() || "=Sheet2!A1+50";
       return { sheet: "Sheet1", formula: expr, value: "150" };
-    }
-    if (command === "evaluate_sheet" || command === "evaluate_sheet_formula") {
-      return { value: String(evaluateLocalSheetFormula(payload)) };
-    }
-    if (command === "audit_security") {
-      return { status: "SAFE", xxeGuard: "PASSED", zipGuard: "PASSED", checkedEntries: 2 };
-    }
-    if (command === "switch_ribbon_style") {
+    },
+    evaluate_sheet: (payload) => ({ value: String(evaluateLocalSheetFormula(payload)) }),
+    evaluate_sheet_formula: (payload) => ({ value: String(evaluateLocalSheetFormula(payload)) }),
+    audit_security: () => ({ status: "SAFE", xxeGuard: "PASSED", zipGuard: "PASSED", checkedEntries: 2 }),
+    switch_ribbon_style: (payload) => {
       const isHangul = String(payload).includes("hangul");
       return {
         style: isHangul ? "한글(HWP) 7탭 모드" : "표준 오피스 7탭 모드",
         categories: isHangul ? RIBBON_STYLE_LABELS.hangul : RIBBON_STYLE_LABELS.standard,
       };
+    },
+    execute_ribbon_command: (payload) => ({
+      commandId: payload,
+      summary: "명령 실행 완료 (" + payload + ")",
+      contextualBadge: CONTEXTUAL_TOOL_BADGES[activeModule] || "표·개체 도구",
+    }),
+  };
+
+  async function invokeIpc(command, payload) {
+    if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
+      const raw = await window.__TAURI_INTERNALS__.invoke(command, { payload });
+      return typeof raw === "string" ? JSON.parse(raw) : raw;
     }
-    if (command === "execute_ribbon_command") {
-      return {
-        commandId: payload,
-        summary: "명령 실행 완료 (" + payload + ")",
-        contextualBadge: CONTEXTUAL_TOOL_BADGES[activeModule] || "표·개체 도구",
-      };
-    }
-    return { status: "ok" };
+    const handler = MOCK_IPC_HANDLERS[command];
+    return handler ? handler(payload) : { status: "ok" };
   }
 
   function collectSheetCellMap() {
@@ -304,82 +295,72 @@
     document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
       const ref = td.dataset.cell;
       const formula = td.dataset.formula;
-      map[ref] = formula ? formula : (td.textContent || "").trim();
+      map[ref] = formula || (td.textContent || "").trim();
     });
     return map;
+  }
+
+  function collectRangeNumericValues(startRef, endRef, cellValues) {
+    const c1 = startRef.codePointAt(0);
+    const r1 = Number(startRef.slice(1));
+    const c2 = endRef.codePointAt(0);
+    const r2 = Number(endRef.slice(1));
+    const nums = [];
+    for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
+      for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+        const ref = String.fromCodePoint(c) + r;
+        const v = Number(cellValues[ref]);
+        if (Number.isFinite(v)) nums.push(v);
+      }
+    }
+    return nums;
+  }
+
+  function evaluateBinaryOpString(exprText) {
+    const m = /^([0-9.]+)\s*([+\-*/])\s*([0-9.]+)$/.exec(exprText);
+    if (!m) return null;
+    const a = Number(m[1]);
+    const b = Number(m[3]);
+    const op = m[2];
+    if (op === "/" && b === 0) return "#DIV/0!";
+    let res = 0;
+    if (op === "+") res = a + b;
+    if (op === "-") res = a - b;
+    if (op === "*") res = a * b;
+    if (op === "/") res = a / b;
+    return String(Math.round(res * 100) / 100);
   }
 
   function evaluateFormulaExpression(exprStr, cellValues) {
     const clean = String(exprStr || "").trim();
     if (!clean.startsWith("=")) {
       const n = Number(clean);
-      return Number.isFinite(n) && clean !== "" ? n : clean;
+      return Number.isFinite(n) && clean !== "" ? String(n) : clean;
     }
     const body = clean.slice(1).trim().toUpperCase();
-    const sumMatch = body.match(/^SUM\(([A-D][1-4]):([A-D][1-4])\)$/);
+    const sumMatch = /^SUM\(([A-D][1-4]):([A-D][1-4])\)$/.exec(body);
     if (sumMatch) {
-      const c1 = sumMatch[1].charCodeAt(0);
-      const r1 = Number(sumMatch[1].slice(1));
-      const c2 = sumMatch[2].charCodeAt(0);
-      const r2 = Number(sumMatch[2].slice(1));
-      let total = 0;
-      for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
-        for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
-          const ref = String.fromCharCode(c) + r;
-          const v = Number(cellValues[ref]);
-          if (Number.isFinite(v)) total += v;
-        }
-      }
-      return Math.round(total * 100) / 100;
+      const vals = collectRangeNumericValues(sumMatch[1], sumMatch[2], cellValues);
+      const total = vals.reduce((acc, v) => acc + v, 0);
+      return String(Math.round(total * 100) / 100);
     }
-    const avgMatch = body.match(/^AVERAGE\(([A-D][1-4]):([A-D][1-4])\)$/);
+    const avgMatch = /^AVERAGE\(([A-D][1-4]):([A-D][1-4])\)$/.exec(body);
     if (avgMatch) {
-      const c1 = avgMatch[1].charCodeAt(0);
-      const r1 = Number(avgMatch[1].slice(1));
-      const c2 = avgMatch[2].charCodeAt(0);
-      const r2 = Number(avgMatch[2].slice(1));
-      let total = 0;
-      let count = 0;
-      for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
-        for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
-          const ref = String.fromCharCode(c) + r;
-          const v = Number(cellValues[ref]);
-          if (Number.isFinite(v)) {
-            total += v;
-            count += 1;
-          }
-        }
-      }
-      return count > 0 ? Math.round((total / count) * 100) / 100 : 0;
+      const vals = collectRangeNumericValues(avgMatch[1], avgMatch[2], cellValues);
+      if (vals.length === 0) return "0";
+      const total = vals.reduce((acc, v) => acc + v, 0);
+      return String(Math.round((total / vals.length) * 100) / 100);
     }
     if (body.includes("SHEET2!A1")) {
-      const replaced = body.replace(/SHEET2!A1/g, "100");
-      const m = replaced.match(/^([0-9.]+)\s*([+\-*/])\s*([0-9.]+)$/);
-      if (m) {
-        const a = Number(m[1]);
-        const b = Number(m[3]);
-        if (m[2] === "+") return a + b;
-        if (m[2] === "-") return a - b;
-        if (m[2] === "*") return a * b;
-        if (m[2] === "/") return b !== 0 ? a / b : "#DIV/0!";
-      }
+      const crossResult = evaluateBinaryOpString(body.replaceAll("SHEET2!A1", "100"));
+      if (crossResult !== null) return crossResult;
     }
     const substituted = body.replace(/\b([A-D][1-4])\b/g, (_, ref) => {
       const v = Number(cellValues[ref]);
       return Number.isFinite(v) ? String(v) : "0";
     });
-    const arith = substituted.match(/^([0-9.]+)\s*([+\-*/])\s*([0-9.]+)$/);
-    if (arith) {
-      const a = Number(arith[1]);
-      const b = Number(arith[3]);
-      let res = 0;
-      if (arith[2] === "+") res = a + b;
-      if (arith[2] === "-") res = a - b;
-      if (arith[2] === "*") res = a * b;
-      if (arith[2] === "/") return b !== 0 ? Math.round((a / b) * 100) / 100 : "#DIV/0!";
-      return Math.round(res * 100) / 100;
-    }
-    return clean;
+    const arithResult = evaluateBinaryOpString(substituted);
+    return arithResult ?? clean;
   }
 
   function evaluateLocalSheetFormula(payload) {
@@ -424,7 +405,7 @@
       const isSel = td.dataset.cell === cellRef;
       td.classList.toggle("selected-cell", isSel);
       if (isSel) activeTd = td;
-      const num = Number((td.textContent || "").replace(/,/g, "").trim());
+      const num = Number((td.textContent || "").replaceAll(",", "").trim());
       if (Number.isFinite(num) && (td.textContent || "").trim() !== "") {
         numericVals.push(num);
       }
@@ -497,7 +478,7 @@
     document.querySelectorAll(".tab-pill").forEach((tab) => {
       tab.classList.toggle("active", tab.dataset.module === mod);
     });
-    renderRibbonCategoryTools(activeRibbonCategory);
+    void renderRibbonCategoryTools(activeRibbonCategory);
   }
 
   async function renderRibbonCategoryTools(categoryKey) {
@@ -643,8 +624,7 @@
     }
   }
 
-  async function initWorkspace() {
-    const boot = await invokeIpc("get_workspace_bootstrap", "");
+  function setupTabsAndRibbonChrome(boot) {
     const pill = document.getElementById("platform-pill");
     const hint = document.getElementById("shortcut-hint");
     if (pill) pill.textContent = boot.platform + " · " + boot.shortcutModifier;
@@ -688,14 +668,12 @@
       btn.addEventListener("click", () => {
         document.querySelectorAll(".ribbon-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        renderRibbonCategoryTools(btn.dataset.category);
+        void renderRibbonCategoryTools(btn.dataset.category);
       });
     });
+  }
 
-    renderRibbonCategoryTools("home");
-    updateSheetSelectionAndAggregates("C1");
-    renderSlideDeck(0);
-
+  function setupQatAndRibbonActions() {
     const qatSave = document.getElementById("qat-save");
     if (qatSave) {
       qatSave.addEventListener("click", () => {
@@ -729,13 +707,25 @@
         const res = await invokeIpc("switch_ribbon_style", activeRibbonStyle);
         btnRibbonStyle.textContent =
           activeRibbonStyle === "hangul" ? "리본: 한글(HWP) 7탭" : "리본: 표준 오피스";
-        const labels = (res && res.categories) || RIBBON_STYLE_LABELS[activeRibbonStyle];
+        const labels = res?.categories || RIBBON_STYLE_LABELS[activeRibbonStyle];
         document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b, idx) => {
           if (labels[idx]) b.textContent = labels[idx];
         });
       });
     }
 
+    const themeBtn = document.getElementById("btn-theme-toggle");
+    if (themeBtn) {
+      themeBtn.addEventListener("click", () => {
+        const html = document.documentElement;
+        const next = html.dataset.theme === "dark" ? "light" : "dark";
+        html.dataset.theme = next;
+        themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
+      });
+    }
+  }
+
+  function setupSheetAndConverterHandlers() {
     const btnConvert = document.getElementById("btn-run-convert");
     if (btnConvert) {
       btnConvert.addEventListener("click", async () => {
@@ -797,23 +787,19 @@
           .map((k) => k + "=" + cellMap[k])
           .join(";");
 
-        let computedValue = "";
-        if (rawFormula.toUpperCase().includes("SHEET2!")) {
-          const wbRes = await invokeIpc("evaluate_workbook_formula", pairs + "?" + rawFormula);
-          computedValue = wbRes.value;
-        } else {
-          const sheetRes = await invokeIpc(
-            "evaluate_sheet",
-            pairs + "?" + activeSheetCellRef
-          );
-          computedValue = sheetRes.value;
-        }
+        const isCrossSheet = rawFormula.toUpperCase().includes("SHEET2!");
+        const rpcRes = isCrossSheet
+          ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + rawFormula)
+          : await invokeIpc("evaluate_sheet", pairs + "?" + activeSheetCellRef);
+        const computedValue = rpcRes.value;
         if (activeTd) activeTd.textContent = String(computedValue);
         out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
         updateSheetSelectionAndAggregates(activeSheetCellRef);
       });
     }
+  }
 
+  function setupSlideAndPdfHandlers() {
     const btnAddSlide = document.getElementById("btn-add-slide");
     if (btnAddSlide) {
       btnAddSlide.addEventListener("click", () => {
@@ -883,17 +869,9 @@
         }
       });
     }
+  }
 
-    const themeBtn = document.getElementById("btn-theme-toggle");
-    if (themeBtn) {
-      themeBtn.addEventListener("click", () => {
-        const html = document.documentElement;
-        const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
-        html.setAttribute("data-theme", next);
-        themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
-      });
-    }
-
+  function setupSmartAndSecurityHandlers() {
     const editor = document.getElementById("doc-editor");
     const imeBadge = document.getElementById("ime-indicator");
     if (editor) {
@@ -961,25 +939,20 @@
         const editorEl = document.getElementById("doc-editor");
         const piiOut = document.getElementById("pii-result-text");
         if (!editorEl || !piiOut) return;
-        const blocks = editorEl.querySelectorAll(
-          ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
+        const blocks = Array.from(
+          editorEl.querySelectorAll(":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)")
+        );
+        const targets = blocks.length > 0 ? blocks : [editorEl];
+        const results = await Promise.all(
+          targets.map((node) => invokeIpc("scrub_pii", node.textContent || ""))
         );
         let totalMasked = 0;
-        if (blocks.length > 0) {
-          for (const node of blocks) {
-            const res = await invokeIpc("scrub_pii", node.textContent || "");
-            if (res && typeof res.scrubbedText === "string") {
-              node.textContent = res.scrubbedText;
-              totalMasked += Number(res.totalMasked || 0);
-            }
-          }
-        } else {
-          const res = await invokeIpc("scrub_pii", editorEl.textContent || "");
+        results.forEach((res, idx) => {
           if (res && typeof res.scrubbedText === "string") {
-            editorEl.textContent = res.scrubbedText;
+            targets[idx].textContent = res.scrubbedText;
             totalMasked += Number(res.totalMasked || 0);
           }
-        }
+        });
         piiOut.textContent =
           totalMasked > 0
             ? "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료"
@@ -987,7 +960,22 @@
         computeSmartStats();
       });
     }
+  }
 
+  function togglePaletteModal(modal, cmdSearchInput) {
+    if (!modal) return;
+    if (modal.open && typeof modal.close === "function") {
+      modal.close();
+      return;
+    }
+    if (typeof modal.showModal === "function") {
+      renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
+      modal.showModal();
+      if (cmdSearchInput) cmdSearchInput.focus();
+    }
+  }
+
+  function setupCommandPaletteHandlers() {
     const modal = document.getElementById("cmd-palette-modal");
     const openPaletteBtn = document.getElementById("btn-command-palette");
     const closePaletteBtn = document.getElementById("btn-close-palette");
@@ -1010,22 +998,30 @@
     }
 
     window.addEventListener("keydown", (e) => {
-      if (e.isComposing || isImeComposing || e.keyCode === 229) return;
+      if (e.isComposing || isImeComposing) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        if (!modal) return;
-        if (modal.open && typeof modal.close === "function") {
-          modal.close();
-        } else if (typeof modal.showModal === "function") {
-          renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
-          modal.showModal();
-          if (cmdSearchInput) cmdSearchInput.focus();
-        }
-      } else if (e.key === "Escape" && modal && modal.open && typeof modal.close === "function") {
+        togglePaletteModal(modal, cmdSearchInput);
+      } else if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
         modal.close();
       }
     });
   }
 
-  document.addEventListener("DOMContentLoaded", initWorkspace);
+  async function initWorkspace() {
+    const boot = await invokeIpc("get_workspace_bootstrap", "");
+    setupTabsAndRibbonChrome(boot);
+    void renderRibbonCategoryTools("home");
+    updateSheetSelectionAndAggregates("C1");
+    renderSlideDeck(0);
+    setupQatAndRibbonActions();
+    setupSheetAndConverterHandlers();
+    setupSlideAndPdfHandlers();
+    setupSmartAndSecurityHandlers();
+    setupCommandPaletteHandlers();
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    void initWorkspace();
+  });
 })();

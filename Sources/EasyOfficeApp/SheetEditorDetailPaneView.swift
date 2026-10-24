@@ -607,15 +607,7 @@ public struct SheetEditorDetailPaneView: View {
                 }
                 .help("수식 함수 마법사")
               }
-            } else {
-              Text("fx")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(sheetAccent)
-            }
 
-            if isPrimaryPane {
               FlatUnderlineTextField(
                 placeholder: "수식 또는 값 입력 (=SUM(B2:C2))",
                 text: $viewModel.formulaBarDraft,
@@ -635,6 +627,12 @@ public struct SheetEditorDetailPaneView: View {
                 viewModel.applyFormulaBarEdit()
               }
             } else {
+              Text("fx")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(sheetAccent)
+
               Text(sheet.rawValue(at: viewModel.selectedSheetCell))
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
