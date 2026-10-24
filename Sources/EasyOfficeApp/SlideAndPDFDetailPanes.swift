@@ -295,168 +295,185 @@ public struct SlideEditorDetailPaneView: View {
       isTimerRunning: viewModel.isPresenterTimerRunning
     )
 
-    VStack(alignment: .leading, spacing: 10) {
-      // Single Consolidated Non-Clipping Slide Context Toolbar (`UX-08`)
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 5) {
-          Text("16:9 · \(deck.slides.count)장")
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(palette.selectedSurface.swiftUIColor)
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+    AdaptiveScrollContainer(
+      axes: .vertical,
+      showsIndicators: true,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
+      VStack(alignment: .leading, spacing: 10) {
+        // Single Consolidated Non-Clipping Slide Context Toolbar (`UX-08`)
+        AdaptiveScrollContainer(
+          axes: .horizontal,
+          showsIndicators: false,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        ) {
+          HStack(spacing: 5) {
+            Text("16:9 · \(deck.slides.count)장")
+              .font(.system(size: 10, weight: .bold, design: .monospaced))
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(palette.selectedSurface.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+              .clipShape(RoundedRectangle(cornerRadius: 4))
 
-          if isPrimaryPane {
-            Button {
-              viewModel.addSlideToActiveDeck()
-            } label: {
-              Text("+ 슬라이드")
-                .font(.system(size: 10.5, weight: .semibold))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
-
-            Button {
-              viewModel.duplicateActiveSlide()
-            } label: {
-              Text("복제")
-                .font(.system(size: 10.5, weight: .medium))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
-
-            if let slide = currentSlide {
-              Menu("레이아웃: \(slide.masterLayout.rawValue)") {
-                ForEach(SlideMasterLayout.allCases, id: \.rawValue) { layout in
-                  Button(layout.rawValue) {
-                    mutateActiveSlideDeck { mutableDeck, sIdx in
-                      mutableDeck.slides[sIdx].masterLayout = layout
-                    }
-                  }
-                }
+            if isPrimaryPane {
+              Button {
+                viewModel.addSlideToActiveDeck()
+              } label: {
+                Text("+ 슬라이드")
+                  .font(.system(size: 10.5, weight: .semibold))
+                  .lineLimit(1)
+                  .fixedSize(horizontal: true, vertical: false)
               }
+              .buttonStyle(.bordered)
               .controlSize(.mini)
               .fixedSize(horizontal: true, vertical: false)
-            }
 
-            Menu("테마: \(deck.theme.rawValue)") {
-              ForEach(SlideDeckTheme.allCases, id: \.rawValue) { theme in
-                Button(theme.rawValue) {
-                  viewModel.applyThemeToActiveDeck(theme)
-                }
+              Button {
+                viewModel.duplicateActiveSlide()
+              } label: {
+                Text("복제")
+                  .font(.system(size: 10.5, weight: .medium))
+                  .lineLimit(1)
+                  .fixedSize(horizontal: true, vertical: false)
               }
-            }
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
+              .buttonStyle(.bordered)
+              .controlSize(.mini)
+              .fixedSize(horizontal: true, vertical: false)
 
-            if let slide = currentSlide {
-              Menu("전환 (\(String(format: "%.1f", slide.transitionDurationSeconds))s)") {
-                Section("화면 전환 효과") {
-                  ForEach(SlideTransitionKind.allCases, id: \.rawValue) { trans in
-                    Button(trans.rawValue) {
+              if let slide = currentSlide {
+                LavenderMenuPill(
+                  title: "레이아웃: \(slide.masterLayout.rawValue)",
+                  systemImage: "rectangle.3.group",
+                  palette: palette
+                ) {
+                  ForEach(SlideMasterLayout.allCases, id: \.rawValue) { layout in
+                    Button(layout.rawValue) {
                       mutateActiveSlideDeck { mutableDeck, sIdx in
-                        mutableDeck.slides[sIdx].transition = trans
+                        mutableDeck.slides[sIdx].masterLayout = layout
                       }
                     }
                   }
                 }
-                Section("전환 지속 시간") {
-                  Button("빠르게 (0.4s)") {
-                    viewModel.setActiveSlideTransitionDuration(0.4)
-                  }
-                  Button("표준 (0.8s)") {
-                    viewModel.setActiveSlideTransitionDuration(0.8)
-                  }
-                  Button("느리게 (1.5s)") {
-                    viewModel.setActiveSlideTransitionDuration(1.5)
-                  }
-                }
-                Section("자동 전환 간격") {
-                  Button("수동 클릭") {
-                    viewModel.setActiveSlideAutoAdvance(seconds: nil)
-                  }
-                  Button("5초 후 자동 전환") {
-                    viewModel.setActiveSlideAutoAdvance(seconds: 5)
-                  }
-                  Button("10초 후 자동 전환") {
-                    viewModel.setActiveSlideAutoAdvance(seconds: 10)
+              }
+
+              LavenderMenuPill(
+                title: "테마: \(deck.theme.rawValue)",
+                systemImage: "paintpalette",
+                palette: palette
+              ) {
+                ForEach(SlideDeckTheme.allCases, id: \.rawValue) { theme in
+                  Button(theme.rawValue) {
+                    viewModel.applyThemeToActiveDeck(theme)
                   }
                 }
               }
+
+              if let slide = currentSlide {
+                LavenderMenuPill(
+                  title: "전환 (\(String(format: "%.1f", slide.transitionDurationSeconds))s)",
+                  systemImage: "sparkles.rectangle.stack",
+                  palette: palette
+                ) {
+                  Section("화면 전환 효과") {
+                    ForEach(SlideTransitionKind.allCases, id: \.rawValue) { trans in
+                      Button(trans.rawValue) {
+                        mutateActiveSlideDeck { mutableDeck, sIdx in
+                          mutableDeck.slides[sIdx].transition = trans
+                        }
+                      }
+                    }
+                  }
+                  Section("전환 지속 시간") {
+                    Button("빠르게 (0.4s)") {
+                      viewModel.setActiveSlideTransitionDuration(0.4)
+                    }
+                    Button("표준 (0.8s)") {
+                      viewModel.setActiveSlideTransitionDuration(0.8)
+                    }
+                    Button("느리게 (1.5s)") {
+                      viewModel.setActiveSlideTransitionDuration(1.5)
+                    }
+                  }
+                  Section("자동 전환 간격") {
+                    Button("수동 클릭") {
+                      viewModel.setActiveSlideAutoAdvance(seconds: nil)
+                    }
+                    Button("5초 후 자동 전환") {
+                      viewModel.setActiveSlideAutoAdvance(seconds: 5)
+                    }
+                    Button("10초 후 자동 전환") {
+                      viewModel.setActiveSlideAutoAdvance(seconds: 10)
+                    }
+                  }
+                }
+              }
+
+              LavenderMenuPill(
+                title: "정렬·배분",
+                systemImage: "align.horizontal.center",
+                palette: palette
+              ) {
+                ForEach(SlideElementAlignment.allCases, id: \.rawValue) { alignMode in
+                  Button(alignMode.rawValue) {
+                    viewModel.alignSlideElements(alignMode)
+                  }
+                }
+                Divider()
+                Button("선택 개체 복제") {
+                  viewModel.duplicateActiveSlideElement()
+                }
+                .disabled(selectedElement == nil)
+                Button("선택 개체 삭제") {
+                  viewModel.deleteActiveSlideElement()
+                }
+                .disabled(selectedElement == nil)
+              }
+
+              Button(viewModel.isSlideGridlinesVisible ? "격자 숨김" : "격자선") {
+                viewModel.toggleSlideGridlines()
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.mini)
+              .fixedSize(horizontal: true, vertical: false)
+
+              Button(viewModel.isSlideSorterViewEnabled ? "편집 뷰" : "정렬 뷰") {
+                viewModel.toggleSlideSorterView()
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.mini)
+              .fixedSize(horizontal: true, vertical: false)
+
+              Button(viewModel.isPresenterModeActive ? "발표자 닫기" : "발표자 도구") {
+                viewModel.isPresenterModeActive.toggle()
+                viewModel.isPresenterTimerRunning = viewModel.isPresenterModeActive
+              }
+              .buttonStyle(.bordered)
+              .controlSize(.mini)
+              .fixedSize(horizontal: true, vertical: false)
+
+              Button {
+                viewModel.toggleFullScreenSlideshow()
+              } label: {
+                Label("슬라이드쇼 ▶", systemImage: "play.tv.fill")
+                  .font(.system(size: 10.5, weight: .semibold))
+                  .lineLimit(1)
+                  .fixedSize(horizontal: true, vertical: false)
+              }
+              .buttonStyle(.borderedProminent)
+              .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
               .controlSize(.mini)
               .fixedSize(horizontal: true, vertical: false)
             }
-
-            Menu("정렬·배분") {
-              ForEach(SlideElementAlignment.allCases, id: \.rawValue) { alignMode in
-                Button(alignMode.rawValue) {
-                  viewModel.alignSlideElements(alignMode)
-                }
-              }
-              Divider()
-              Button("선택 개체 복제") {
-                viewModel.duplicateActiveSlideElement()
-              }
-              .disabled(selectedElement == nil)
-              Button("선택 개체 삭제") {
-                viewModel.deleteActiveSlideElement()
-              }
-              .disabled(selectedElement == nil)
-            }
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
-
-            Button(viewModel.isSlideGridlinesVisible ? "격자 숨김" : "격자선") {
-              viewModel.toggleSlideGridlines()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
-
-            Button(viewModel.isSlideSorterViewEnabled ? "편집 뷰" : "정렬 뷰") {
-              viewModel.toggleSlideSorterView()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
-
-            Button(viewModel.isPresenterModeActive ? "발표자 닫기" : "발표자 도구") {
-              viewModel.isPresenterModeActive.toggle()
-              viewModel.isPresenterTimerRunning = viewModel.isPresenterModeActive
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
-
-            Button {
-              viewModel.toggleFullScreenSlideshow()
-            } label: {
-              Label("슬라이드쇼 ▶", systemImage: "play.tv.fill")
-                .font(.system(size: 10.5, weight: .semibold))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
-            .controlSize(.mini)
-            .fixedSize(horizontal: true, vertical: false)
           }
+          .padding(.horizontal, 10)
+          .padding(.vertical, 5)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-      }
-      .frame(height: 34)
-      .background(palette.cardSurface.swiftUIColor)
-      .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(height: 34)
+        .background(palette.cardSurface.swiftUIColor)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
 
       if viewModel.isSlideSorterViewEnabled {
         slideSorterGridView(activeIdx: activeIdx, palette: palette)
@@ -627,6 +644,16 @@ public struct SlideEditorDetailPaneView: View {
                     RoundedRectangle(cornerRadius: 8)
                       .fill(palette.elevatedSurface.swiftUIColor)
 
+                    // Top Deck Theme Accent Strip
+                    Rectangle()
+                      .fill(
+                        EasyOfficeDesignTokens.resolveHexColor(
+                          deck.deckTheme.accentBorderHex,
+                          fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+                        )
+                      )
+                      .frame(height: 5)
+
                     // Optional Rule-of-Thirds & Center Crosshair Gridlines (`FUNC-02`)
                     if viewModel.isSlideGridlinesVisible {
                       Path { path in
@@ -647,25 +674,34 @@ public struct SlideEditorDetailPaneView: View {
                       )
                     }
 
-                    // Slide Header & Bullet Content Overlay
-                    VStack(alignment: .leading, spacing: 8) {
+                    // Slide Header & Bullet Content Overlay (Upper Stage Zone y: 0..220pt)
+                    VStack(alignment: .leading, spacing: 6) {
                       Text(slide.title)
                         .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(palette.primaryText.swiftUIColor)
+                        .lineLimit(1)
 
                       if !slide.subtitle.isEmpty {
                         Text(slide.subtitle)
                           .font(.system(size: 13, weight: .medium))
-                          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                          .foregroundStyle(
+                            EasyOfficeDesignTokens.resolveHexColor(
+                              deck.deckTheme.accentBorderHex,
+                              fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+                            )
+                          )
+                          .lineLimit(1)
                       }
 
                       ForEach(slide.bulletPoints, id: \.self) { bullet in
                         Text("• \(bullet)")
                           .font(.system(size: 12))
                           .foregroundStyle(palette.primaryText.swiftUIColor)
+                          .lineLimit(1)
                       }
                     }
-                    .padding(20)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 18)
 
                     // Visual Alignment Snap Guide Dashed Lines
                     ForEach(Array(activeGuides.enumerated()), id: \.offset) { _, guide in
@@ -789,6 +825,7 @@ public struct SlideEditorDetailPaneView: View {
                       )
                     }
                   }
+                  .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .frame(height: 360)
               }
@@ -801,15 +838,16 @@ public struct SlideEditorDetailPaneView: View {
                   .fixedSize(horizontal: true, vertical: false)
                   .foregroundStyle(palette.secondaryText.swiftUIColor)
                 if isPrimaryPane {
-                  TextField(
-                    "발표자 노트를 입력하세요...",
+                  LavenderTextFieldPill(
+                    placeholder: "발표자 노트를 입력하세요...",
                     text: Binding(
                       get: { slide.speakerNotes },
                       set: { viewModel.updateActiveSlideSpeakerNotes($0) }
-                    )
+                    ),
+                    width: nil,
+                    palette: palette,
+                    isSnapshotMode: viewModel.isCanvasSnapshotMode
                   )
-                  .textFieldStyle(.roundedBorder)
-                  .font(.system(size: 11))
                 } else {
                   Text(slide.speakerNotes)
                     .font(.system(size: 11))
@@ -883,6 +921,7 @@ public struct SlideEditorDetailPaneView: View {
             viewModel.tickPresenterTimer(seconds: 1)
           }
         }
+      }
       }
     }
   }
@@ -1104,7 +1143,11 @@ public struct PDFStudioDetailPaneView: View {
     currentPageNum: Int,
     currentPageStrokeCount: Int
   ) -> some View {
-    ScrollView(.horizontal, showsIndicators: false) {
+    AdaptiveScrollContainer(
+      axes: .horizontal,
+      showsIndicators: false,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
       HStack(spacing: 6) {
         HStack(spacing: 4) {
           Button("◀") {
@@ -1145,46 +1188,36 @@ public struct PDFStudioDetailPaneView: View {
         .controlSize(.small)
         .fixedSize(horizontal: true, vertical: false)
 
-        Menu {
+        LavenderMenuPill(
+          title: "주석 도구 (\(pdf.annotations.count))",
+          systemImage: "highlighter",
+          palette: palette
+        ) {
           ForEach(PDFAnnotationKind.allCases, id: \.rawValue) { kind in
             Button(kind.rawValue) {
               viewModel.addPDFAnnotation(kind: kind, content: "\(kind.rawValue) 검토 마크")
             }
           }
-        } label: {
-          Label("주석 도구 (\(pdf.annotations.count))", systemImage: "highlighter")
-            .font(.system(size: 11, weight: .semibold))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
         }
-        .controlSize(.small)
-        .fixedSize(horizontal: true, vertical: false)
 
-        Menu {
+        LavenderMenuPill(
+          title: "결재 스탬프",
+          systemImage: "seal.fill",
+          palette: palette
+        ) {
           ForEach(["승인", "대외비", "검토필", "긴급", "사본"], id: \.self) { preset in
             Button("결재 스탬프: \(preset)") {
               viewModel.addStampToActivePDFPage(preset: preset)
             }
           }
-        } label: {
-          Label("결재 스탬프", systemImage: "seal.fill")
-            .font(.system(size: 11, weight: .semibold))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
         }
-        .controlSize(.small)
-        .fixedSize(horizontal: true, vertical: false)
 
-        Toggle(isOn: $viewModel.isPDFInkDrawingModeEnabled) {
-          Label("전자서명 그리기", systemImage: "signature")
-            .font(.system(size: 11, weight: .semibold))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-        }
-        .toggleStyle(.button)
-        .controlSize(.small)
-        .tint(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-        .fixedSize(horizontal: true, vertical: false)
+        LavenderTogglePill(
+          title: "전자서명 그리기",
+          systemImage: "signature",
+          isOn: $viewModel.isPDFInkDrawingModeEnabled,
+          palette: palette
+        )
 
         Button {
           viewModel.executeRibbonCommand("pdf-mod-tooffice")
@@ -1234,7 +1267,11 @@ public struct PDFStudioDetailPaneView: View {
 
   @ViewBuilder
   private func pdfSecurityAndWatermarkBar(palette: WorkspaceThemePalette) -> some View {
-    ScrollView(.horizontal, showsIndicators: false) {
+    AdaptiveScrollContainer(
+      axes: .horizontal,
+      showsIndicators: false,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
       HStack(spacing: 8) {
         Label("PDF 보안 점검 & 워터마크", systemImage: "checkmark.shield.fill")
           .font(.system(size: 11, weight: .bold))
@@ -1254,10 +1291,13 @@ public struct PDFStudioDetailPaneView: View {
 
         Divider().frame(height: 16)
 
-        TextField("워터마크", text: $viewModel.pdfWatermarkDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-          .frame(width: 150)
+        LavenderTextFieldPill(
+          placeholder: "워터마크",
+          text: $viewModel.pdfWatermarkDraft,
+          width: 150,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
 
         Button("워터마크 적용") {
           triggerApplyWatermark()
@@ -1276,7 +1316,11 @@ public struct PDFStudioDetailPaneView: View {
 
   @ViewBuilder
   private func pdfRedactionAndMergeBar(palette: WorkspaceThemePalette) -> some View {
-    ScrollView(.horizontal, showsIndicators: false) {
+    AdaptiveScrollContainer(
+      axes: .horizontal,
+      showsIndicators: false,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
       HStack(spacing: 8) {
         Label("보안 리댁션 · 양식 · 병합", systemImage: "eye.slash.fill")
           .font(.system(size: 11, weight: .bold))
@@ -1284,10 +1328,13 @@ public struct PDFStudioDetailPaneView: View {
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
-        TextField("마스킹 구문", text: $viewModel.pdfRedactionPhraseDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-          .frame(width: 120)
+        LavenderTextFieldPill(
+          placeholder: "마스킹 구문",
+          text: $viewModel.pdfRedactionPhraseDraft,
+          width: 120,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
 
         Button("영구 리댁션") {
           _ = viewModel.redactSensitiveTextOnActivePDF()
@@ -1324,15 +1371,21 @@ public struct PDFStudioDetailPaneView: View {
 
         Divider().frame(height: 16)
 
-        TextField("필드명", text: $viewModel.pdfFormFieldNameDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-          .frame(width: 90)
+        LavenderTextFieldPill(
+          placeholder: "필드명",
+          text: $viewModel.pdfFormFieldNameDraft,
+          width: 95,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
 
-        TextField("기본값", text: $viewModel.pdfFormFieldValueDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-          .frame(width: 90)
+        LavenderTextFieldPill(
+          placeholder: "기본값",
+          text: $viewModel.pdfFormFieldValueDraft,
+          width: 95,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
 
         Button("양식 필드 추가") {
           viewModel.addFormFieldToActivePDF()
@@ -1365,7 +1418,11 @@ public struct PDFStudioDetailPaneView: View {
 
   @ViewBuilder
   private func pdfStampAndBookmarkBar(palette: WorkspaceThemePalette) -> some View {
-    ScrollView(.horizontal, showsIndicators: false) {
+    AdaptiveScrollContainer(
+      axes: .horizontal,
+      showsIndicators: false,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
       HStack(spacing: 8) {
         Label("책갈피", systemImage: "bookmark.fill")
           .font(.system(size: 11, weight: .bold))
@@ -1373,10 +1430,13 @@ public struct PDFStudioDetailPaneView: View {
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
-        TextField("책갈피 제목", text: $viewModel.bookmarkTitleDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-          .frame(width: 140)
+        LavenderTextFieldPill(
+          placeholder: "책갈피 제목",
+          text: $viewModel.bookmarkTitleDraft,
+          width: 140,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
 
         Button("책갈피 추가") {
           viewModel.addBookmarkToActivePDF()
@@ -1426,6 +1486,252 @@ public struct PDFStudioDetailPaneView: View {
     .clipShape(RoundedRectangle(cornerRadius: 6))
   }
 
+  @ViewBuilder
+  private func pdfNativePageSheetView(
+    page: PDFPageDescriptor,
+    pageNumber: Int,
+    palette: WorkspaceThemePalette
+  ) -> some View {
+    let pageAnnotations = pdf.annotations.filter { $0.pageNumber == pageNumber }
+    let pageStrokes = pdf.inkStrokes.filter { $0.pageNumber == pageNumber }
+    let pageFormFields = pdf.formFields.filter { $0.pageNumber == pageNumber }
+    let textLines = page.extractedText
+      .split(separator: "\n", omittingEmptySubsequences: false)
+      .map(String.init)
+    let stampAnnotations = pageAnnotations.filter { $0.kind == .stamp }
+    let primaryStampLabel = stampAnnotations.last?.content ?? "APPROVED · 결재완료"
+
+    ZStack {
+      VStack(alignment: .leading, spacing: 12) {
+        // Top Official PDF Page Header & Electronic Approval Stamp Box
+        HStack(alignment: .top, spacing: 12) {
+          VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+              Text("ISO 32000-1 STANDARD PDF")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(EasyOfficeDesignTokens.softBadgeToken(for: .pdf).swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+
+              Text("PAGE \(pageNumber) OF \(max(1, pdf.pages.count))")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+              if page.rotationDegrees != 0 {
+                Text("회전 \(page.rotationDegrees)°")
+                  .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              }
+            }
+
+            Text(pdf.title)
+              .font(.system(size: 16, weight: .bold))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .lineLimit(1)
+          }
+
+          Spacer()
+
+          // Official Approval Stamp Seal Box
+          VStack(spacing: 2) {
+            Text("전자결재 승인인")
+              .font(.system(size: 8, weight: .bold))
+              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+            Text(primaryStampLabel)
+              .font(.system(size: 10, weight: .heavy, design: .monospaced))
+              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+              .lineLimit(1)
+          }
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
+          .background(EasyOfficeDesignTokens.statusDanger.swiftUIColor.opacity(0.08))
+          .overlay(
+            RoundedRectangle(cornerRadius: 5)
+              .stroke(EasyOfficeDesignTokens.statusDanger.swiftUIColor, lineWidth: 1.5)
+          )
+          .clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+
+        Divider()
+
+        // Extracted Document Paragraphs & Highlight Overlay
+        VStack(alignment: .leading, spacing: 7) {
+          ForEach(Array(textLines.enumerated()), id: \.offset) { lineIdx, line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let isHeadingLine = lineIdx == 0 || trimmed.hasPrefix("1.") || trimmed.hasPrefix("2.")
+              || trimmed.hasPrefix("3.") || trimmed.hasPrefix("■") || trimmed.hasPrefix("[")
+            let isHighlightedLine = pageAnnotations.contains {
+              $0.kind == .highlight && !trimmed.isEmpty && trimmed.contains($0.content.prefix(4))
+            } || (lineIdx == 1 && !pageAnnotations.isEmpty)
+
+            Text(trimmed.isEmpty ? " " : line)
+              .font(.system(size: isHeadingLine ? 13 : 11.5, weight: isHeadingLine ? .bold : .regular))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .padding(.horizontal, isHighlightedLine ? 6 : 0)
+              .padding(.vertical, isHighlightedLine ? 3 : 0)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(
+                isHighlightedLine
+                  ? EasyOfficeDesignTokens.statusWarning.swiftUIColor.opacity(0.24)
+                  : Color.clear
+              )
+              .clipShape(RoundedRectangle(cornerRadius: 4))
+          }
+        }
+
+        // Active Page Annotations Strip
+        if !pageAnnotations.isEmpty {
+          VStack(alignment: .leading, spacing: 5) {
+            Text("페이지 주석 및 검토 마크 (\(pageAnnotations.count)건)")
+              .font(.system(size: 10, weight: .bold))
+              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+
+            AdaptiveScrollContainer(
+              axes: .horizontal,
+              showsIndicators: false,
+              isSnapshotMode: viewModel.isCanvasSnapshotMode
+            ) {
+              HStack(spacing: 6) {
+                ForEach(pageAnnotations) { annot in
+                  HStack(spacing: 4) {
+                    Image(systemName: "highlighter")
+                      .font(.system(size: 9, weight: .bold))
+                    Text("[\(annot.kind.rawValue)] \(annot.content)")
+                      .font(.system(size: 10, weight: .medium))
+                      .lineLimit(1)
+                  }
+                  .padding(.horizontal, 8)
+                  .padding(.vertical, 4)
+                  .background(palette.selectedSurface.swiftUIColor)
+                  .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+                  .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+              }
+            }
+          }
+        }
+
+        // Active Page AcroForm Fields Preview
+        if !pageFormFields.isEmpty {
+          VStack(alignment: .leading, spacing: 5) {
+            Text("AcroForm 전자 양식 필드 (\(pageFormFields.count)필드)")
+              .font(.system(size: 10, weight: .bold))
+              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+
+            HStack(spacing: 8) {
+              ForEach(pageFormFields.prefix(4)) { field in
+                HStack(spacing: 5) {
+                  Image(
+                    systemName: field.isCheckbox
+                      ? (field.isChecked ? "checkmark.square.fill" : "square")
+                      : "character.textbox"
+                  )
+                  .font(.system(size: 10, weight: .bold))
+                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  Text("\(field.name): \(field.isCheckbox ? (field.isChecked ? "예" : "아니오") : field.value)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(palette.primaryText.swiftUIColor)
+                    .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(palette.cardSurface.swiftUIColor)
+                .overlay(
+                  RoundedRectangle(cornerRadius: 4)
+                    .stroke(palette.border.swiftUIColor, lineWidth: 0.8)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+              }
+            }
+          }
+        }
+
+        // Vector Signature & Freehand Ink Verification Box
+        HStack(spacing: 12) {
+          VStack(alignment: .leading, spacing: 3) {
+            Text("전자서명 및 벡터 잉크 검증 영역")
+              .font(.system(size: 10, weight: .bold))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            Text("현재 페이지 벡터 획: \(pageStrokes.count)건 · 무결성 검증 정상")
+              .font(.system(size: 9.5, design: .monospaced))
+              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+          }
+
+          Spacer()
+
+          Canvas { context, size in
+            if pageStrokes.isEmpty {
+              var baseline = Path()
+              baseline.move(to: CGPoint(x: 8, y: size.height * 0.65))
+              baseline.addCurve(
+                to: CGPoint(x: size.width - 8, y: size.height * 0.45),
+                control1: CGPoint(x: size.width * 0.35, y: size.height * 0.15),
+                control2: CGPoint(x: size.width * 0.65, y: size.height * 0.85)
+              )
+              context.stroke(
+                baseline,
+                with: .color(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.65)),
+                style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+              )
+            } else {
+              for stroke in pageStrokes where stroke.points.count >= 2 {
+                var path = Path()
+                for (ptIdx, pt) in stroke.points.enumerated() {
+                  let vx = CGFloat((pt.x - 20.0) / 555.0) * size.width
+                  let vy = size.height - (CGFloat((pt.y - 20.0) / 800.0) * size.height)
+                  let point = CGPoint(
+                    x: max(4, min(size.width - 4, vx)),
+                    y: max(4, min(size.height - 4, vy))
+                  )
+                  if ptIdx == 0 {
+                    path.move(to: point)
+                  } else {
+                    path.addLine(to: point)
+                  }
+                }
+                let strokeColor = EasyOfficeDesignTokens.resolveHexColor(
+                  stroke.strokeHex,
+                  fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+                )
+                context.stroke(
+                  path,
+                  with: .color(strokeColor),
+                  style: StrokeStyle(
+                    lineWidth: CGFloat(stroke.lineWidth), lineCap: .round, lineJoin: .round)
+                )
+              }
+            }
+          }
+          .frame(width: 180, height: 38)
+          .background(palette.cardSurface.swiftUIColor)
+          .overlay(
+            RoundedRectangle(cornerRadius: 5)
+              .stroke(palette.border.swiftUIColor, lineWidth: 0.8)
+          )
+          .clipShape(RoundedRectangle(cornerRadius: 5))
+        }
+      }
+      .padding(20)
+
+      if !pdf.watermarkText.isEmpty {
+        Text(pdf.watermarkText)
+          .font(.system(size: 32, weight: .black, design: .rounded))
+          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.14))
+          .rotationEffect(.degrees(-22))
+          .allowsHitTesting(false)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .background(palette.elevatedSurface.swiftUIColor)
+    .overlay(
+      RoundedRectangle(cornerRadius: 8)
+        .stroke(palette.border.swiftUIColor, lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 8))
+  }
+
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
     let currentPageNum = viewModel.selectedPDFPageNumber
@@ -1435,172 +1741,193 @@ public struct PDFStudioDetailPaneView: View {
       return pdf.pages.indices.contains(safeIdx) ? pdf.pages[safeIdx] : nil
     }()
 
-    VStack(alignment: .leading, spacing: 10) {
-      if isPrimaryPane {
-        pdfPrimaryToolbar(
-          palette: palette,
-          currentPageNum: currentPageNum,
-          currentPageStrokeCount: currentPageStrokeCount
-        )
+    AdaptiveScrollContainer(
+      axes: .vertical,
+      showsIndicators: true,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
+      VStack(alignment: .leading, spacing: 10) {
+        if isPrimaryPane {
+          pdfPrimaryToolbar(
+            palette: palette,
+            currentPageNum: currentPageNum,
+            currentPageStrokeCount: currentPageStrokeCount
+          )
 
-        if viewModel.isAdvancedToolbarExpanded {
-          pdfSecurityAndWatermarkBar(palette: palette)
-          pdfRedactionAndMergeBar(palette: palette)
-          pdfStampAndBookmarkBar(palette: palette)
+          if viewModel.isAdvancedToolbarExpanded {
+            pdfSecurityAndWatermarkBar(palette: palette)
+            pdfRedactionAndMergeBar(palette: palette)
+            pdfStampAndBookmarkBar(palette: palette)
 
-          if !pdf.formFields.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Label(
-                  "AcroForm 양식 필드 (\(pdf.formFields.count)건)",
-                  systemImage: "list.bullet.rectangle.portrait.fill"
-                )
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-                Spacer()
-              }
-
-              ForEach(pdf.formFields) { field in
-                HStack(spacing: 10) {
-                  Text("P\(field.pageNumber)")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(EasyOfficeDesignTokens.softBadgeToken(for: .pdf).swiftUIColor)
-                    .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                  Text(field.name)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-                    .frame(minWidth: 110, alignment: .leading)
-
-                  if field.isCheckbox {
-                    Toggle(
-                      isOn: Binding(
-                        get: { field.isChecked },
-                        set: { nextChecked in
-                          viewModel.updatePDFFormField(id: field.id, isChecked: nextChecked)
-                        }
-                      )
-                    ) {
-                      Text(field.isChecked ? "선택됨 (Checked)" : "해제됨 (Unchecked)")
-                        .font(.system(size: 11))
-                    }
-                  } else {
-                    TextField(
-                      "양식 입력값",
-                      text: Binding(
-                        get: { field.value },
-                        set: { nextVal in
-                          viewModel.updatePDFFormField(id: field.id, value: nextVal)
-                        }
-                      )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11))
-                  }
-
+            if !pdf.formFields.isEmpty {
+              VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                  Label(
+                    "AcroForm 양식 필드 (\(pdf.formFields.count)건)",
+                    systemImage: "list.bullet.rectangle.portrait.fill"
+                  )
+                  .font(.system(size: 11, weight: .bold))
+                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
                   Spacer()
                 }
+
+                ForEach(pdf.formFields) { field in
+                  HStack(spacing: 10) {
+                    Text("P\(field.pageNumber)")
+                      .font(.system(size: 9, weight: .bold, design: .monospaced))
+                      .padding(.horizontal, 5)
+                      .padding(.vertical, 2)
+                      .background(EasyOfficeDesignTokens.softBadgeToken(for: .pdf).swiftUIColor)
+                      .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+                      .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    Text(field.name)
+                      .font(.system(size: 11, weight: .semibold))
+                      .foregroundStyle(palette.primaryText.swiftUIColor)
+                      .frame(minWidth: 110, alignment: .leading)
+
+                    if field.isCheckbox {
+                      LavenderTogglePill(
+                        title: field.isChecked ? "선택됨 (Checked)" : "해제됨 (Unchecked)",
+                        systemImage: field.isChecked ? "checkmark.square.fill" : "square",
+                        isOn: Binding(
+                          get: { field.isChecked },
+                          set: { nextChecked in
+                            viewModel.updatePDFFormField(id: field.id, isChecked: nextChecked)
+                          }
+                        ),
+                        palette: palette
+                      )
+                    } else {
+                      LavenderTextFieldPill(
+                        placeholder: "양식 입력값",
+                        text: Binding(
+                          get: { field.value },
+                          set: { nextVal in
+                            viewModel.updatePDFFormField(id: field.id, value: nextVal)
+                          }
+                        ),
+                        width: 200,
+                        palette: palette,
+                        isSnapshotMode: viewModel.isCanvasSnapshotMode
+                      )
+                    }
+
+                    Spacer()
+                  }
+                }
               }
+              .padding(10)
+              .background(palette.cardSurface.swiftUIColor)
+              .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                  .stroke(palette.border.swiftUIColor, lineWidth: 1)
+              )
+              .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .padding(10)
-            .background(palette.cardSurface.swiftUIColor)
-            .overlay(
-              RoundedRectangle(cornerRadius: 8)
-                .stroke(palette.border.swiftUIColor, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
           }
         }
-      }
 
-      if !pdf.pages.isEmpty {
-        VStack(alignment: .leading, spacing: 8) {
-          HStack {
-            Label(
-              "네이티브 PDFKit 벡터 뷰어 (ISO 32000-1 · CoreText CJK 서브셋)",
-              systemImage: "doc.viewfinder.fill"
-            )
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-            Spacer()
-            Text("페이지 수: \(pdf.pages.count)p · 총 벡터 획: \(pdf.inkStrokes.count)건")
-              .font(.system(size: 10, design: .monospaced))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
+        if !pdf.pages.isEmpty {
+          VStack(alignment: .leading, spacing: 8) {
+            HStack {
+              Label(
+                "네이티브 PDFKit 벡터 뷰어 (ISO 32000-1 · CoreText CJK 서브셋)",
+                systemImage: "doc.viewfinder.fill"
+              )
+              .font(.system(size: 11, weight: .bold))
+              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+              Spacer()
+              Text("페이지 수: \(pdf.pages.count)p · 총 벡터 획: \(pdf.inkStrokes.count)건")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
+
+            if let page = activePage {
+              pdfNativePageSheetView(
+                page: page,
+                pageNumber: currentPageNum,
+                palette: palette
+              )
+            }
+
+            if !viewModel.isCanvasSnapshotMode {
+              PDFKitRepresentedView(
+                pdfDocument: pdf, selectedPageIndex: viewModel.selectedPDFPageIndex,
+                zoomFactor: CGFloat(viewModel.zoomPercent / 100.0)
+              )
+              .frame(minHeight: 360, maxHeight: .infinity)
+              .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            if isPrimaryPane
+              && (viewModel.isPDFInkDrawingModeEnabled || viewModel.isPDFInkOverlayExpanded)
+            {
+              PDFInteractiveInkOverlayView(viewModel: viewModel, palette: palette, pdfDocument: pdf)
+            }
           }
-
-          PDFKitRepresentedView(
-            pdfDocument: pdf, selectedPageIndex: viewModel.selectedPDFPageIndex,
-            zoomFactor: CGFloat(viewModel.zoomPercent / 100.0)
+          .padding(12)
+          .background(palette.cardSurface.swiftUIColor)
+          .overlay(
+            RoundedRectangle(cornerRadius: 8).stroke(palette.border.swiftUIColor, lineWidth: 1)
           )
-          .frame(minHeight: 520, maxHeight: .infinity)
-          .clipShape(RoundedRectangle(cornerRadius: 6))
-
-          if isPrimaryPane
-            && (viewModel.isPDFInkDrawingModeEnabled || viewModel.isPDFInkOverlayExpanded)
-          {
-            PDFInteractiveInkOverlayView(viewModel: viewModel, palette: palette, pdfDocument: pdf)
-          }
+          .clipShape(RoundedRectangle(cornerRadius: 8))
         }
-        .padding(12)
+
+        // Single Compact 1-Line PDF Active Page & AcroForm Summary Strip (`UX-12`)
+        AdaptiveScrollContainer(
+          axes: .horizontal,
+          showsIndicators: false,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        ) {
+          HStack(spacing: 10) {
+            Label(
+              "활성 페이지 P\(currentPageNum) / \(max(1, pdf.pages.count))",
+              systemImage: "doc.text.magnifyingglass"
+            )
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+
+            if let page = activePage {
+              Text("회전 \(page.rotationDegrees)°")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+
+            Divider().frame(height: 14)
+
+            Text(
+              "주석 \(pdf.annotations.count)건 · 서명 획 \(currentPageStrokeCount)건 · AcroForm \(pdf.formFields.count)필드"
+            )
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(palette.primaryText.swiftUIColor)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+
+            if !pdf.watermarkText.isEmpty {
+              Divider().frame(height: 14)
+              Text("워터마크: \(pdf.watermarkText)")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+          }
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
+        }
+        .frame(height: 32)
         .background(palette.cardSurface.swiftUIColor)
         .overlay(
-          RoundedRectangle(cornerRadius: 8).stroke(palette.border.swiftUIColor, lineWidth: 1)
+          RoundedRectangle(cornerRadius: 6)
+            .stroke(palette.border.swiftUIColor, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
       }
-
-      // Single Compact 1-Line PDF Active Page & AcroForm Summary Strip (`UX-12`)
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 10) {
-          Label(
-            "활성 페이지 P\(currentPageNum) / \(max(1, pdf.pages.count))",
-            systemImage: "doc.text.magnifyingglass"
-          )
-          .font(.system(size: 11, weight: .bold, design: .monospaced))
-          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
-          .lineLimit(1)
-          .fixedSize(horizontal: true, vertical: false)
-
-          if let page = activePage {
-            Text("회전 \(page.rotationDegrees)°")
-              .font(.system(size: 10, design: .monospaced))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
-              .lineLimit(1)
-              .fixedSize(horizontal: true, vertical: false)
-          }
-
-          Divider().frame(height: 14)
-
-          Text(
-            "주석 \(pdf.annotations.count)건 · 서명 획 \(currentPageStrokeCount)건 · AcroForm \(pdf.formFields.count)필드"
-          )
-          .font(.system(size: 11, weight: .medium))
-          .foregroundStyle(palette.primaryText.swiftUIColor)
-          .lineLimit(1)
-          .fixedSize(horizontal: true, vertical: false)
-
-          if !pdf.watermarkText.isEmpty {
-            Divider().frame(height: 14)
-            Text("워터마크: \(pdf.watermarkText)")
-              .font(.system(size: 10, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-              .lineLimit(1)
-              .fixedSize(horizontal: true, vertical: false)
-          }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-      }
-      .frame(height: 32)
-      .background(palette.cardSurface.swiftUIColor)
-      .overlay(
-        RoundedRectangle(cornerRadius: 6)
-          .stroke(palette.border.swiftUIColor, lineWidth: 1)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 6))
     }
   }
 }

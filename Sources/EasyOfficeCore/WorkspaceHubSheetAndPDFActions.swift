@@ -1100,4 +1100,20 @@ extension WorkspaceViewModel {
     lastExecutedCommandSummary = "단건 바꾸기 완료 (1건 치환)"
     return 1
   }
+
+  @discardableResult
+  public func replaceAllFindMatches() -> Int {
+    performFindAndReplace()
+  }
+
+  public func applyConditionalFormatRuleOnActiveSheet(_ rule: ConditionalFormatRule?) {
+    activeConditionalFormatRule = rule
+    persistSheetRulesToActiveTab()
+  }
+
+  public func applyDataValidationRuleOnActiveSheet(_ rule: DataValidationRule?) {
+    activeDataValidationRule = rule
+    persistSheetRulesToActiveTab()
+  }
 }
+

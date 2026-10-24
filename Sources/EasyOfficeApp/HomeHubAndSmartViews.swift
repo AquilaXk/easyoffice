@@ -52,306 +52,354 @@ struct HomeHubWorkspaceView: View {
 
       Divider()
 
-      ScrollView {
+      AdaptiveScrollContainer(
+        axes: .vertical,
+        showsIndicators: true,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      ) {
         VStack(alignment: .leading, spacing: 24) {
-          if viewModel.activeHubSection == .converter {
+          switch viewModel.activeHubSection {
+          case .converter:
             BatchConversionStudioHubView(viewModel: viewModel)
-          } else if viewModel.activeHubSection == .smartAssistant {
+
+          case .smartAssistant:
             SmartDocumentAssistantHubView(viewModel: viewModel)
-          }
 
-          Text("새 문서 시작하기")
-            .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(palette.primaryText.swiftUIColor)
+          case .home, .recent, .pinned, .templates:
+            if viewModel.activeHubSection == .home {
+              Text("새 문서 시작하기")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(palette.primaryText.swiftUIColor)
 
-          HStack(spacing: 12) {
-            ForEach(OfficeModuleKind.allCases) { module in
-              let accent = EasyOfficeDesignTokens.accentToken(for: module)
-              Button {
-                viewModel.openNewSampleTab(for: module)
-              } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                  Image(systemName: module.systemSymbolName)
-                    .font(.system(size: 22))
-                    .foregroundStyle(accent.swiftUIColor)
-                  Text(module.displayNameKo)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.cardSurface.swiftUIColor)
-                .overlay(
-                  RoundedRectangle(cornerRadius: 10)
-                    .stroke(palette.border.swiftUIColor, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-              }
-              .buttonStyle(.plain)
-            }
-          }
-
-          let filteredTemplates = viewModel.allAvailableTemplates.filter { tpl in
-            switch viewModel.selectedHomeTemplateCategoryFilter {
-            case "문서·한글":
-              return tpl.moduleKind == .document || tpl.moduleKind == .hwp
-            case "시트":
-              return tpl.moduleKind == .sheet
-            case "슬라이드":
-              return tpl.moduleKind == .slide
-            case "PDF":
-              return tpl.moduleKind == .pdf
-            default:
-              return true
-            }
-          }
-
-          let filteredRecentTabs = viewModel.filteredTabs.filter { tab in
-            switch viewModel.selectedHomeRecentFormatFilter {
-            case "DOCX/HWP":
-              return tab.moduleKind == .document || tab.moduleKind == .hwp
-            case "XLSX":
-              return tab.moduleKind == .sheet
-            case "PPTX":
-              return tab.moduleKind == .slide
-            case "PDF":
-              return tab.moduleKind == .pdf
-            default:
-              return true
-            }
-          }
-
-          VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-              Text(
-                "표준 및 사용자 서식 템플릿 (\(filteredTemplates.count) / \(viewModel.allAvailableTemplates.count)종)"
-              )
-              .font(.system(size: 15, weight: .bold))
-              .foregroundStyle(palette.primaryText.swiftUIColor)
-              Spacer()
-              TextField("사용자 템플릿 이름 (선택)", text: $viewModel.customTemplateTitleDraft)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11))
-                .frame(width: 180)
-              Button("현재 탭을 사용자 템플릿으로 저장") {
-                viewModel.saveActiveTabAsCustomTemplate(
-                  title: nil,
-                  subtitle: "현재 활성 문서 기반 커스텀 템플릿"
-                )
-              }
-              .font(.system(size: 11, weight: .semibold))
-            }
-
-            HStack(spacing: 6) {
-              ForEach(["전체", "문서·한글", "시트", "슬라이드", "PDF"], id: \.self) { cat in
-                let isSelected = viewModel.selectedHomeTemplateCategoryFilter == cat
-                Button {
-                  viewModel.selectedHomeTemplateCategoryFilter = cat
-                } label: {
-                  Text(cat)
-                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                      isSelected
-                        ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                        : palette.cardSurface.swiftUIColor
-                    )
-                    .foregroundStyle(
-                      isSelected
-                        ? Color.white
-                        : palette.primaryText.swiftUIColor
-                    )
+              HStack(spacing: 12) {
+                ForEach(OfficeModuleKind.allCases) { module in
+                  let accent = EasyOfficeDesignTokens.accentToken(for: module)
+                  Button {
+                    viewModel.openNewSampleTab(for: module)
+                  } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                      Image(systemName: module.systemSymbolName)
+                        .font(.system(size: 22))
+                        .foregroundStyle(accent.swiftUIColor)
+                      Text(module.displayNameKo)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(palette.primaryText.swiftUIColor)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(palette.cardSurface.swiftUIColor)
                     .overlay(
-                      RoundedRectangle(cornerRadius: 5)
-                        .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
+                      RoundedRectangle(cornerRadius: 10)
+                        .stroke(palette.border.swiftUIColor, lineWidth: 1)
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                  }
+                  .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
               }
             }
-          }
 
-          LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
-            ForEach(filteredTemplates) { tpl in
+            let filteredTemplates = viewModel.allAvailableTemplates.filter { tpl in
+              switch viewModel.selectedHomeTemplateCategoryFilter {
+              case "문서·한글":
+                return tpl.moduleKind == .document || tpl.moduleKind == .hwp
+              case "시트":
+                return tpl.moduleKind == .sheet
+              case "슬라이드":
+                return tpl.moduleKind == .slide
+              case "PDF":
+                return tpl.moduleKind == .pdf
+              default:
+                return true
+              }
+            }
+
+            if viewModel.activeHubSection == .home || viewModel.activeHubSection == .templates {
               VStack(alignment: .leading, spacing: 8) {
-                TemplateMiniaturePreviewHeader(
-                  module: tpl.moduleKind,
-                  formatBadge: tpl.format.rawValue.uppercased(),
-                  palette: palette
-                )
-
-                HStack {
-                  Text(tpl.format.rawValue.uppercased())
-                    .font(.system(size: 10, weight: .bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                      EasyOfficeDesignTokens.softBadgeToken(for: tpl.moduleKind).swiftUIColor
-                    )
-                    .foregroundStyle(
-                      EasyOfficeDesignTokens.accentToken(for: tpl.moduleKind).swiftUIColor
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                  if tpl.isCustomUserTemplate {
-                    Text("사용자 템플릿")
-                      .font(.system(size: 9, weight: .bold))
-                      .foregroundStyle(EasyOfficeDesignTokens.statusInfo.swiftUIColor)
-                  }
+                HStack(spacing: 8) {
+                  Text(
+                    "표준 및 사용자 서식 템플릿 (\(filteredTemplates.count) / \(viewModel.allAvailableTemplates.count)종)"
+                  )
+                  .font(.system(size: 15, weight: .bold))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
                   Spacer()
-                }
-                Text(tpl.title)
-                  .font(.system(size: 13, weight: .semibold))
-                  .foregroundStyle(palette.primaryText.swiftUIColor)
-                Text(tpl.subtitle)
-                  .font(.system(size: 11))
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
-                  .lineLimit(2)
-              }
-              .padding(12)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .background(palette.cardSurface.swiftUIColor)
-              .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                  .stroke(palette.border.swiftUIColor, lineWidth: 1)
-              )
-              .clipShape(RoundedRectangle(cornerRadius: 8))
-              .onTapGesture {
-                viewModel.openTab(from: tpl)
-              }
-            }
-          }
-
-          HStack(spacing: 8) {
-            Text("\(viewModel.activeHubSection.rawValue) · 문서 목록 (\(filteredRecentTabs.count)건)")
-              .font(.system(size: 15, weight: .bold))
-              .foregroundStyle(palette.primaryText.swiftUIColor)
-            Spacer()
-            HStack(spacing: 6) {
-              ForEach(["전체", "DOCX/HWP", "XLSX", "PPTX", "PDF"], id: \.self) { fmt in
-                let isSelected = viewModel.selectedHomeRecentFormatFilter == fmt
-                Button {
-                  viewModel.selectedHomeRecentFormatFilter = fmt
-                } label: {
-                  Text(fmt)
-                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                      isSelected
-                        ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                        : palette.cardSurface.swiftUIColor
-                    )
-                    .foregroundStyle(
-                      isSelected
-                        ? Color.white
-                        : palette.primaryText.swiftUIColor
-                    )
-                    .overlay(
-                      RoundedRectangle(cornerRadius: 5)
-                        .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                }
-                .buttonStyle(.plain)
-              }
-            }
-          }
-
-          VStack(spacing: 8) {
-            ForEach(filteredRecentTabs) { tab in
-              let moduleAccent = EasyOfficeDesignTokens.accentToken(for: tab.moduleKind)
-                .swiftUIColor
-              HStack(spacing: 10) {
-                Image(systemName: tab.moduleKind.systemSymbolName)
-                  .font(.system(size: 14, weight: .semibold))
-                  .foregroundStyle(moduleAccent)
-                  .frame(width: 22)
-
-                Text(tab.moduleKind.shortBadgeTitle)
-                  .font(.system(size: 10, weight: .bold))
-                  .padding(.horizontal, 6)
-                  .padding(.vertical, 3)
-                  .background(
-                    EasyOfficeDesignTokens.softBadgeToken(for: tab.moduleKind).swiftUIColor
+                  LavenderTextFieldPill(
+                    placeholder: "사용자 템플릿 이름 (선택)",
+                    text: $viewModel.customTemplateTitleDraft,
+                    symbolName: "doc.badge.plus",
+                    width: 185,
+                    palette: palette,
+                    isSnapshotMode: viewModel.isCanvasSnapshotMode
                   )
-                  .foregroundStyle(moduleAccent)
-                  .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                Text(tab.format.rawValue.uppercased())
-                  .font(.system(size: 9, weight: .bold, design: .monospaced))
-                  .padding(.horizontal, 5)
-                  .padding(.vertical, 2)
-                  .background(palette.elevatedSurface.swiftUIColor)
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
-                  .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                Text(tab.fileName)
-                  .font(.system(size: 13, weight: .medium))
-                  .foregroundStyle(palette.primaryText.swiftUIColor)
-
-                Text(tab.isModified ? "수정됨" : "정상")
-                  .font(.system(size: 10, weight: .semibold))
-                  .padding(.horizontal, 6)
-                  .padding(.vertical, 2)
-                  .background(
-                    (tab.isModified
-                      ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                      : EasyOfficeDesignTokens.statusSuccess.swiftUIColor).opacity(0.14)
-                  )
-                  .foregroundStyle(
-                    tab.isModified
-                      ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                      : EasyOfficeDesignTokens.statusSuccess.swiftUIColor
-                  )
-                  .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                Spacer()
-
-                Text(tab.format.standardSpecification)
-                  .font(.system(size: 11))
-                  .foregroundStyle(palette.secondaryText.swiftUIColor)
-
-                Button {
-                  viewModel.togglePinTab(id: tab.id)
-                } label: {
-                  Text("📌")
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                      tab.isPinned
-                        ? palette.selectedSurface.swiftUIColor
-                        : palette.elevatedSurface.swiftUIColor
+                  Button("현재 탭을 사용자 템플릿으로 저장") {
+                    viewModel.saveActiveTabAsCustomTemplate(
+                      title: nil,
+                      subtitle: "현재 활성 문서 기반 커스텀 템플릿"
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
-                .buttonStyle(.plain)
-                .help(tab.isPinned ? "고정 해제" : "고정")
-
-                Button("스플릿 뷰로 열기") {
-                  if viewModel.activeTabID == tab.id,
-                    let other = viewModel.openTabs.first(where: { $0.id != tab.id })
-                  {
-                    viewModel.activeTabID = other.id
                   }
-                  viewModel.enableSplitView(secondaryTabID: tab.id)
-                  viewModel.isShowingHomeHub = false
+                  .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
+
+                HStack(spacing: 6) {
+                  ForEach(["전체", "문서·한글", "시트", "슬라이드", "PDF"], id: \.self) { cat in
+                    let isSelected = viewModel.selectedHomeTemplateCategoryFilter == cat
+                    Button {
+                      viewModel.selectedHomeTemplateCategoryFilter = cat
+                    } label: {
+                      Text(cat)
+                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                          isSelected
+                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                            : palette.cardSurface.swiftUIColor
+                        )
+                        .foregroundStyle(
+                          isSelected
+                            ? Color.white
+                            : palette.primaryText.swiftUIColor
+                        )
+                        .overlay(
+                          RoundedRectangle(cornerRadius: 5)
+                            .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    .buttonStyle(.plain)
+                  }
+                }
               }
-              .padding(12)
-              .background(palette.cardSurface.swiftUIColor)
-              .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                  .stroke(palette.border.swiftUIColor, lineWidth: 1)
-              )
-              .clipShape(RoundedRectangle(cornerRadius: 8))
-              .onTapGesture {
-                viewModel.activeTabID = tab.id
-                viewModel.isShowingHomeHub = false
+
+              LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)], spacing: 12) {
+                ForEach(filteredTemplates) { tpl in
+                  VStack(alignment: .leading, spacing: 8) {
+                    TemplateMiniaturePreviewHeader(
+                      module: tpl.moduleKind,
+                      formatBadge: tpl.format.rawValue.uppercased(),
+                      palette: palette
+                    )
+
+                    HStack {
+                      Text(tpl.format.rawValue.uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                          EasyOfficeDesignTokens.softBadgeToken(for: tpl.moduleKind).swiftUIColor
+                        )
+                        .foregroundStyle(
+                          EasyOfficeDesignTokens.accentToken(for: tpl.moduleKind).swiftUIColor
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                      if tpl.isCustomUserTemplate {
+                        Text("사용자 템플릿")
+                          .font(.system(size: 9, weight: .bold))
+                          .foregroundStyle(EasyOfficeDesignTokens.statusInfo.swiftUIColor)
+                      }
+                      Spacer()
+                    }
+                    Text(tpl.title)
+                      .font(.system(size: 13, weight: .semibold))
+                      .foregroundStyle(palette.primaryText.swiftUIColor)
+                    Text(tpl.subtitle)
+                      .font(.system(size: 11))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+                      .lineLimit(2)
+                  }
+                  .padding(12)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .background(palette.cardSurface.swiftUIColor)
+                  .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                      .stroke(palette.border.swiftUIColor, lineWidth: 1)
+                  )
+                  .clipShape(RoundedRectangle(cornerRadius: 8))
+                  .onTapGesture {
+                    viewModel.openTab(from: tpl)
+                  }
+                }
+              }
+            }
+
+            if viewModel.activeHubSection == .home
+              || viewModel.activeHubSection == .recent
+              || viewModel.activeHubSection == .pinned
+            {
+              let filteredRecentTabs = viewModel.filteredHomeRecentTabs
+
+              HStack(spacing: 8) {
+                Text("\(viewModel.activeHubSection.rawValue) · 문서 목록 (\(filteredRecentTabs.count)건)")
+                  .font(.system(size: 15, weight: .bold))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                Spacer()
+                HStack(spacing: 6) {
+                  ForEach(
+                    ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
+                    id: \.self
+                  ) { fmt in
+                    let isSelected =
+                      viewModel.selectedHomeRecentFormatFilter == fmt
+                      || (fmt == "HWP/HWPX"
+                        && viewModel.selectedHomeRecentFormatFilter == "DOCX/HWP")
+                    Button {
+                      viewModel.selectedHomeRecentFormatFilter = fmt
+                    } label: {
+                      Text(fmt)
+                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                          isSelected
+                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                            : palette.cardSurface.swiftUIColor
+                        )
+                        .foregroundStyle(
+                          isSelected
+                            ? Color.white
+                            : palette.primaryText.swiftUIColor
+                        )
+                        .overlay(
+                          RoundedRectangle(cornerRadius: 5)
+                            .stroke(palette.border.swiftUIColor, lineWidth: isSelected ? 0 : 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    .buttonStyle(.plain)
+                  }
+                }
+              }
+
+              VStack(spacing: 8) {
+                ForEach(filteredRecentTabs) { tab in
+                  let moduleAccent = EasyOfficeDesignTokens.accentToken(for: tab.moduleKind)
+                    .swiftUIColor
+                  HStack(spacing: 10) {
+                    Image(systemName: tab.moduleKind.systemSymbolName)
+                      .font(.system(size: 14, weight: .semibold))
+                      .foregroundStyle(moduleAccent)
+                      .frame(width: 22)
+
+                    Text(tab.moduleKind.shortBadgeTitle)
+                      .font(.system(size: 10, weight: .bold))
+                      .padding(.horizontal, 6)
+                      .padding(.vertical, 3)
+                      .background(
+                        EasyOfficeDesignTokens.softBadgeToken(for: tab.moduleKind).swiftUIColor
+                      )
+                      .foregroundStyle(moduleAccent)
+                      .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    Text(tab.format.rawValue.uppercased())
+                      .font(.system(size: 9, weight: .bold, design: .monospaced))
+                      .padding(.horizontal, 5)
+                      .padding(.vertical, 2)
+                      .background(palette.elevatedSurface.swiftUIColor)
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+                      .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    Text(tab.fileName)
+                      .font(.system(size: 13, weight: .medium))
+                      .foregroundStyle(palette.primaryText.swiftUIColor)
+
+                    Text(tab.isModified ? "수정됨" : "정상")
+                      .font(.system(size: 10, weight: .semibold))
+                      .padding(.horizontal, 6)
+                      .padding(.vertical, 2)
+                      .background(
+                        (tab.isModified
+                          ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                          : EasyOfficeDesignTokens.statusSuccess.swiftUIColor).opacity(0.14)
+                      )
+                      .foregroundStyle(
+                        tab.isModified
+                          ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                          : EasyOfficeDesignTokens.statusSuccess.swiftUIColor
+                      )
+                      .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    Spacer()
+
+                    Text(tab.lastOpenedISO8601)
+                      .font(.system(size: 10, weight: .medium, design: .monospaced))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+                      .padding(.horizontal, 6)
+                      .padding(.vertical, 2)
+                      .background(palette.elevatedSurface.swiftUIColor)
+                      .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    Text(tab.format.standardSpecification)
+                      .font(.system(size: 11))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+                    Button {
+                      viewModel.toggleFavoriteTab(id: tab.id)
+                    } label: {
+                      Image(systemName: tab.isFavorite ? "star.fill" : "star")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(
+                          tab.isFavorite
+                            ? EasyOfficeDesignTokens.statusWarning.swiftUIColor
+                            : palette.secondaryText.swiftUIColor
+                        )
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(
+                          tab.isFavorite
+                            ? palette.selectedSurface.swiftUIColor
+                            : palette.elevatedSurface.swiftUIColor
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .help(tab.isFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가")
+
+                    Button {
+                      viewModel.togglePinTab(id: tab.id)
+                    } label: {
+                      Image(systemName: tab.isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(
+                          tab.isPinned
+                            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                            : palette.secondaryText.swiftUIColor
+                        )
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(
+                          tab.isPinned
+                            ? palette.selectedSurface.swiftUIColor
+                            : palette.elevatedSurface.swiftUIColor
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .buttonStyle(.plain)
+                    .help(tab.isPinned ? "고정 해제" : "고정")
+
+                    Button("스플릿 뷰로 열기") {
+                      if viewModel.activeTabID == tab.id,
+                        let other = viewModel.openTabs.first(where: { $0.id != tab.id })
+                      {
+                        viewModel.activeTabID = other.id
+                      }
+                      viewModel.enableSplitView(secondaryTabID: tab.id)
+                      viewModel.isShowingHomeHub = false
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                  }
+                  .padding(12)
+                  .background(palette.cardSurface.swiftUIColor)
+                  .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                      .stroke(palette.border.swiftUIColor, lineWidth: 1)
+                  )
+                  .clipShape(RoundedRectangle(cornerRadius: 8))
+                  .onTapGesture {
+                    viewModel.activeTabID = tab.id
+                    viewModel.isShowingHomeHub = false
+                  }
+                }
               }
             }
           }
@@ -565,14 +613,19 @@ struct BatchConversionStudioHubView: View {
         .font(.system(size: 15, weight: .bold))
         .foregroundStyle(palette.accentBadgeText.swiftUIColor)
         Spacer()
-        Picker("목표 포맷", selection: $viewModel.batchTargetFormat) {
+        LavenderMenuPill(
+          title: "목표 포맷: \(viewModel.batchTargetFormat.rawValue.uppercased())",
+          symbolName: "doc.badge.gearshape",
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        ) {
           ForEach([DocumentFormat.pdf, .docx, .hwpx, .odt, .xlsx, .csv, .md], id: \.rawValue) {
             fmt in
-            Text(fmt.rawValue.uppercased()).tag(fmt)
+            Button(fmt.rawValue.uppercased()) {
+              viewModel.batchTargetFormat = fmt
+            }
           }
         }
-        .pickerStyle(.menu)
-        .frame(width: 140)
 
         Button("열린 탭 전체 일괄 변환 실행") {
           viewModel.runBatchConversionForOpenTabs()

@@ -388,13 +388,12 @@ public struct SlideshowFullScreenOverlayView: View {
             .foregroundStyle(EasyOfficeDesignTokens.brand200.swiftUIColor)
             .clipShape(RoundedRectangle(cornerRadius: 5))
 
-          Toggle(isOn: $viewModel.isLaserPointerEnabled) {
-            Label("레이저 포인터", systemImage: "laser.burst")
-              .font(.system(size: 12, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.darkText.swiftUIColor)
-          }
-          .toggleStyle(.button)
-          .tint(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+          LavenderTogglePill(
+            title: "레이저 포인터",
+            systemImage: "laser.burst",
+            isOn: $viewModel.isLaserPointerEnabled,
+            palette: palette
+          )
 
           Spacer()
 
@@ -636,10 +635,13 @@ public struct PDFInteractiveInkOverlayView: View {
 
         Divider().frame(height: 14)
 
-        TextField("하이라이트할 본문 구절...", text: $highlightSelectionText)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-          .frame(width: 165)
+        LavenderTextFieldPill(
+          placeholder: "하이라이트할 본문 구절...",
+          text: $highlightSelectionText,
+          width: 165,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
 
         Button {
           viewModel.addHighlightToActivePDFPage(selectedText: highlightSelectionText)
