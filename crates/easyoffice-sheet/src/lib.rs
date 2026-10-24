@@ -1318,8 +1318,121 @@ impl SheetEngine {
                 let (Some(num), Some(digits)) = (v0.as_number(), v1.as_number()) else {
                     return EvaluatedCellValue::Error(FormulaError::Value);
                 };
-                let factor = 10f64.powi(digits.trunc() as i32);
+                let exp = digits.trunc().clamp(-300.0, 300.0) as i32;
+                let factor = 10f64.powi(exp);
+                if !factor.is_finite() || factor == 0.0 {
+                    return EvaluatedCellValue::Number(num);
+                }
                 EvaluatedCellValue::Number((num * factor).round() / factor)
+            }
+            "SQRT" => {
+                if args.len() != 1 {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                }
+                let val = self.eval_expr(&args[0], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = val {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let Some(n) = val.as_number() else {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                };
+                if n < 0.0 {
+                    return EvaluatedCellValue::Error(FormulaError::Num);
+                }
+                EvaluatedCellValue::Number(n.sqrt())
+            }
+            "POWER" => {
+                if args.len() != 2 {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                }
+                let v0 = self.eval_expr(&args[0], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = v0 {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let v1 = self.eval_expr(&args[1], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = v1 {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let (Some(base), Some(exp)) = (v0.as_number(), v1.as_number()) else {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                };
+                let res = base.powf(exp);
+                if !res.is_finite() {
+                    return EvaluatedCellValue::Error(FormulaError::Num);
+                }
+                EvaluatedCellValue::Number(res)
+            }
+            "MOD" => {
+                if args.len() != 2 {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                }
+                let v0 = self.eval_expr(&args[0], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = v0 {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let v1 = self.eval_expr(&args[1], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = v1 {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let (Some(num), Some(div)) = (v0.as_number(), v1.as_number()) else {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                };
+                if div.abs() < 1e-15 {
+                    return EvaluatedCellValue::Error(FormulaError::DivByZero);
+                }
+                EvaluatedCellValue::Number(num % div)
+            }
+            "CONCAT" => {
+                let vals = match self.expand_args(args, visiting, memo, depth) {
+                    Ok(v) => v,
+                    Err(e) => return EvaluatedCellValue::Error(e),
+                };
+                let mut joined = String::new();
+                for v in vals {
+                    if let EvaluatedCellValue::Error(e) = v {
+                        return EvaluatedCellValue::Error(e);
+                    }
+                    joined.push_str(&v.to_display_string());
+                }
+                EvaluatedCellValue::Text(joined)
+            }
+            "MEDIAN" => {
+                let vals = match self.expand_args(args, visiting, memo, depth) {
+                    Ok(v) => v,
+                    Err(e) => return EvaluatedCellValue::Error(e),
+                };
+                let mut nums: Vec<f64> = vals
+                    .iter()
+                    .filter_map(EvaluatedCellValue::as_number)
+                    .collect();
+                if nums.is_empty() {
+                    return EvaluatedCellValue::Error(FormulaError::Num);
+                }
+                nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let mid = nums.len() / 2;
+                let median = if nums.len() % 2 == 1 {
+                    nums[mid]
+                } else {
+                    (nums[mid - 1] + nums[mid]) / 2.0
+                };
+                EvaluatedCellValue::Number(median)
+            }
+            "STDEV" => {
+                let vals = match self.expand_args(args, visiting, memo, depth) {
+                    Ok(v) => v,
+                    Err(e) => return EvaluatedCellValue::Error(e),
+                };
+                let nums: Vec<f64> = vals
+                    .iter()
+                    .filter_map(EvaluatedCellValue::as_number)
+                    .collect();
+                if nums.len() < 2 {
+                    return EvaluatedCellValue::Error(FormulaError::DivByZero);
+                }
+                let mean = nums.iter().sum::<f64>() / (nums.len() as f64);
+                let var = nums.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+                    / ((nums.len() - 1) as f64);
+                EvaluatedCellValue::Number(var.sqrt())
             }
             "LEN" => {
                 if args.len() != 1 {
@@ -1386,6 +1499,9 @@ impl SheetEngine {
                     return EvaluatedCellValue::Error(FormulaError::Value);
                 };
                 let col_idx_val = self.eval_expr(&args[2], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = col_idx_val {
+                    return EvaluatedCellValue::Error(e);
+                }
                 let Some(col_idx_f) = col_idx_val.as_number() else {
                     return EvaluatedCellValue::Error(FormulaError::Value);
                 };
@@ -1422,16 +1538,23 @@ impl SheetEngine {
                 let Expr::Range(range) = &args[0] else {
                     return EvaluatedCellValue::Error(FormulaError::Value);
                 };
-                let row_num = self
-                    .eval_expr(&args[1], visiting, memo, depth + 1)
-                    .as_number()
-                    .unwrap_or(0.0)
-                    .trunc() as isize;
+                let row_val = self.eval_expr(&args[1], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = row_val {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let Some(row_f) = row_val.as_number() else {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                };
+                let row_num = row_f.trunc() as isize;
                 let col_num = if args.len() == 3 {
-                    self.eval_expr(&args[2], visiting, memo, depth + 1)
-                        .as_number()
-                        .unwrap_or(0.0)
-                        .trunc() as isize
+                    let col_val = self.eval_expr(&args[2], visiting, memo, depth + 1);
+                    if let EvaluatedCellValue::Error(e) = col_val {
+                        return EvaluatedCellValue::Error(e);
+                    }
+                    let Some(col_f) = col_val.as_number() else {
+                        return EvaluatedCellValue::Error(FormulaError::Value);
+                    };
+                    col_f.trunc() as isize
                 } else {
                     1
                 };
@@ -1479,10 +1602,11 @@ impl SheetEngine {
                 if args.len() < 2 {
                     return EvaluatedCellValue::Error(FormulaError::Value);
                 }
-                let Some(rate) = self
-                    .eval_expr(&args[0], visiting, memo, depth + 1)
-                    .as_number()
-                else {
+                let rate_val = self.eval_expr(&args[0], visiting, memo, depth + 1);
+                if let EvaluatedCellValue::Error(e) = rate_val {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let Some(rate) = rate_val.as_number() else {
                     return EvaluatedCellValue::Error(FormulaError::Value);
                 };
                 if rate <= -1.0 {
@@ -1591,6 +1715,11 @@ mod tests {
         sheet.set_cell("C2", "=INDEX(A2:B4, 2, 2)").unwrap();
         sheet.set_cell("C3", "=MATCH(\"코어엔진\", A2:A4, 0)").unwrap();
         sheet.set_cell("C4", "=ROUND(NPV(0.1, B2:B3), 2)").unwrap();
+        sheet.set_cell("C5", "=SQRT(16)+POWER(2,3)+MOD(10,3)").unwrap();
+        sheet.set_cell("C6", "=CONCAT(A2, \"-\", A3)").unwrap();
+        sheet.set_cell("C7", "=MEDIAN(B2:B4)").unwrap();
+        sheet.set_cell("C8", "=ROUND(STDEV(B2:B4), 2)").unwrap();
+        sheet.set_cell("C9", "=VLOOKUP(\"코어엔진\", A2:B4, 1/0, FALSE)").unwrap();
 
         assert_eq!(
             sheet.evaluate_cell("C1"),
@@ -1604,6 +1733,23 @@ mod tests {
         assert_eq!(
             sheet.evaluate_cell("C4"),
             EvaluatedCellValue::Number(2578.51)
+        );
+        assert_eq!(sheet.evaluate_cell("C5"), EvaluatedCellValue::Number(13.0));
+        assert_eq!(
+            sheet.evaluate_cell("C6"),
+            EvaluatedCellValue::Text("플랫폼-코어엔진".to_string())
+        );
+        assert_eq!(
+            sheet.evaluate_cell("C7"),
+            EvaluatedCellValue::Number(1200.0)
+        );
+        assert_eq!(
+            sheet.evaluate_cell("C8"),
+            EvaluatedCellValue::Number(503.32)
+        );
+        assert_eq!(
+            sheet.evaluate_cell("C9"),
+            EvaluatedCellValue::Error(FormulaError::DivByZero)
         );
 
         let range = CellRange::parse("A1:B4").unwrap();

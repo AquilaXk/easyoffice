@@ -190,16 +190,55 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_audit_security(payload: &str) -> Result<String, EasyOfficeError> {
-        XmlSanitizer::validate_safe_xml(payload)?;
+        let (entries_raw, xml_part) = match payload.split_once('|') {
+            Some((left, right)) => (Some(left.trim()), right.trim()),
+            None => (None, payload.trim()),
+        };
+        if !xml_part.is_empty() {
+            XmlSanitizer::validate_safe_xml(xml_part)?;
+        }
         let policy = ZipSecurityPolicy::default();
-        let default_entries = vec![ZipEntryDescriptor::new(
-            "word/document.xml",
-            512,
-            2048,
-            false,
-        )];
-        ZipSecurityGuard::validate_archive_entries(&default_entries, &policy)?;
-        Ok("{\"status\":\"SAFE\",\"xxeGuard\":\"PASSED\",\"zipGuard\":\"PASSED\"}".to_string())
+        let mut parsed_entries: Vec<ZipEntryDescriptor> = Vec::new();
+        if let Some(entries_segment) = entries_raw {
+            if !entries_segment.is_empty() {
+                for item in entries_segment.split(';') {
+                    let item = item.trim();
+                    if item.is_empty() {
+                        continue;
+                    }
+                    let cols: Vec<&str> = item.split(',').map(str::trim).collect();
+                    if cols.len() < 3 {
+                        return Err(EasyOfficeError::InvalidArgument(
+                            "ZIP 엔트리 명세는 'path,compressed,uncompressed[,encrypted]' 형식이어야 합니다."
+                                .to_string(),
+                        ));
+                    }
+                    let compressed = cols[1].parse::<u64>().map_err(|_| {
+                        EasyOfficeError::InvalidArgument("유효하지 않은 compressed_size".to_string())
+                    })?;
+                    let uncompressed = cols[2].parse::<u64>().map_err(|_| {
+                        EasyOfficeError::InvalidArgument(
+                            "유효하지 않은 uncompressed_size".to_string(),
+                        )
+                    })?;
+                    let encrypted = cols
+                        .get(3)
+                        .map(|v| v.eq_ignore_ascii_case("true") || *v == "1")
+                        .unwrap_or(false);
+                    parsed_entries.push(ZipEntryDescriptor::new(
+                        cols[0],
+                        compressed,
+                        uncompressed,
+                        encrypted,
+                    ));
+                }
+            }
+        }
+        ZipSecurityGuard::validate_archive_entries(&parsed_entries, &policy)?;
+        Ok(format!(
+            "{{\"status\":\"SAFE\",\"xxeGuard\":\"PASSED\",\"zipGuard\":\"PASSED\",\"checkedEntries\":{}}}",
+            parsed_entries.len()
+        ))
     }
 
     fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
@@ -235,7 +274,6 @@ impl EasyOfficeIpcRouter {
 
 /// Executes deterministic end-to-end self-tests across all 4 crates and embedded Tauri UI assets.
 pub fn run_self_test() -> Result<String, EasyOfficeError> {
-    // 1. Format detection across 20 formats and Fail-Closed guards
     if DocumentFormat::ALL.len() != 20 {
         return Err(EasyOfficeError::CorruptedContainer(
             "지원 포맷 수가 20종이 아닙니다.".to_string(),
@@ -249,7 +287,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // 2. ZIP / OLE2 / XML security guards
     let policy = ZipSecurityPolicy::default();
     ZipSecurityGuard::validate_archive_entries(
         &[ZipEntryDescriptor::new("word/document.xml", 256, 1024, false)],
@@ -280,7 +317,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
     XmlSanitizer::validate_safe_xml("<root attr=\"ok\">안전</root>")?;
 
-    // 3. CSV, CommonMark, and PDF codecs
     let csv_rows = vec![vec!["A".to_string(), "B,C".to_string()]];
     let csv_encoded = CsvCodec::serialize(&csv_rows, ',');
     if CsvCodec::parse(&csv_encoded, ',')? != csv_rows {
@@ -311,7 +347,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // 4. Sheet engine & Pivot
     let mut sheet = SheetEngine::new("SelfTestSheet");
     sheet.set_cell("A1", "부서")?;
     sheet.set_cell("B1", "예산")?;
@@ -338,7 +373,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // 5. Layout engine
     let doc_layout = DocumentPageLayout::compute(PageOrientation::Portrait, 2, 54.0)?;
     if doc_layout.compute_manuscript_grid_200().len() != 200 {
         return Err(EasyOfficeError::InvalidArgument(
@@ -359,7 +393,6 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    // 6. IPC Router & Embedded UI asset check
     let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "")?;
     if !bootstrap.contains("#5C6BC0") || !bootstrap.contains("HWP/HWPX") {
         return Err(EasyOfficeError::InvalidArgument(
@@ -411,8 +444,28 @@ mod tests {
         let layout_res = EasyOfficeIpcRouter::dispatch("compute_layout", "landscape").unwrap();
         assert!(layout_res.contains("\"widthPt\":842.0"));
 
-        let sec_res = EasyOfficeIpcRouter::dispatch("audit_security", "<doc>safe</doc>").unwrap();
+        let sec_res = EasyOfficeIpcRouter::dispatch(
+            "audit_security",
+            "word/document.xml,512,2048,false|<doc>safe</doc>",
+        )
+        .unwrap();
         assert!(sec_res.contains("\"status\":\"SAFE\""));
+        assert!(sec_res.contains("\"checkedEntries\":1"));
+
+        assert!(matches!(
+            EasyOfficeIpcRouter::dispatch(
+                "audit_security",
+                "../../etc/passwd,100,200,false|<doc>safe</doc>"
+            ),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+        assert!(matches!(
+            EasyOfficeIpcRouter::dispatch(
+                "audit_security",
+                "word/document.xml,10,50000,false|<doc>safe</doc>"
+            ),
+            Err(EasyOfficeError::DecompressionBombDetected { .. })
+        ));
 
         let summary = run_self_test().unwrap();
         assert!(summary.contains("PASSED"));

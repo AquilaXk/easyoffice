@@ -30,83 +30,81 @@ impl ContainerFamily {
 pub enum DocumentFormat {
     Docx,
     Doc,
-    Dotx,
-    Xlsx,
-    Xls,
-    Xltx,
-    Pptx,
-    Ppt,
-    Potx,
-    Hwp,
-    Hwpx,
-    Pdf,
     Odt,
-    Ods,
-    Odp,
-    Csv,
-    Tsv,
+    Rtf,
     Markdown,
     Txt,
-    Rtf,
+    Hwp,
+    Hwpx,
+    Hwt,
+    Hwtx,
+    Xlsx,
+    Xls,
+    Ods,
+    Csv,
+    Tsv,
+    Pptx,
+    Ppt,
+    Ppsx,
+    Odp,
+    Pdf,
 }
 
 impl DocumentFormat {
     pub const ALL: [DocumentFormat; 20] = [
         Self::Docx,
         Self::Doc,
-        Self::Dotx,
-        Self::Xlsx,
-        Self::Xls,
-        Self::Xltx,
-        Self::Pptx,
-        Self::Ppt,
-        Self::Potx,
-        Self::Hwp,
-        Self::Hwpx,
-        Self::Pdf,
         Self::Odt,
-        Self::Ods,
-        Self::Odp,
-        Self::Csv,
-        Self::Tsv,
+        Self::Rtf,
         Self::Markdown,
         Self::Txt,
-        Self::Rtf,
+        Self::Hwp,
+        Self::Hwpx,
+        Self::Hwt,
+        Self::Hwtx,
+        Self::Xlsx,
+        Self::Xls,
+        Self::Ods,
+        Self::Csv,
+        Self::Tsv,
+        Self::Pptx,
+        Self::Ppt,
+        Self::Ppsx,
+        Self::Odp,
+        Self::Pdf,
     ];
 
     pub fn extension(&self) -> &'static str {
         match self {
             Self::Docx => "docx",
             Self::Doc => "doc",
-            Self::Dotx => "dotx",
-            Self::Xlsx => "xlsx",
-            Self::Xls => "xls",
-            Self::Xltx => "xltx",
-            Self::Pptx => "pptx",
-            Self::Ppt => "ppt",
-            Self::Potx => "potx",
-            Self::Hwp => "hwp",
-            Self::Hwpx => "hwpx",
-            Self::Pdf => "pdf",
             Self::Odt => "odt",
-            Self::Ods => "ods",
-            Self::Odp => "odp",
-            Self::Csv => "csv",
-            Self::Tsv => "tsv",
+            Self::Rtf => "rtf",
             Self::Markdown => "md",
             Self::Txt => "txt",
-            Self::Rtf => "rtf",
+            Self::Hwp => "hwp",
+            Self::Hwpx => "hwpx",
+            Self::Hwt => "hwt",
+            Self::Hwtx => "hwtx",
+            Self::Xlsx => "xlsx",
+            Self::Xls => "xls",
+            Self::Ods => "ods",
+            Self::Csv => "csv",
+            Self::Tsv => "tsv",
+            Self::Pptx => "pptx",
+            Self::Ppt => "ppt",
+            Self::Ppsx => "ppsx",
+            Self::Odp => "odp",
+            Self::Pdf => "pdf",
         }
     }
 
     pub fn container_family(&self) -> ContainerFamily {
         match self {
-            Self::Docx | Self::Dotx | Self::Xlsx | Self::Xltx | Self::Pptx | Self::Potx => {
-                ContainerFamily::ZipOoxml
-            }
+            Self::Docx | Self::Xlsx | Self::Pptx | Self::Ppsx => ContainerFamily::ZipOoxml,
             Self::Odt | Self::Ods | Self::Odp => ContainerFamily::ZipOdf,
-            Self::Hwpx => ContainerFamily::ZipHwpx,
-            Self::Doc | Self::Xls | Self::Ppt | Self::Hwp => ContainerFamily::Ole2Cfbf,
+            Self::Hwpx | Self::Hwtx => ContainerFamily::ZipHwpx,
+            Self::Doc | Self::Xls | Self::Ppt | Self::Hwp | Self::Hwt => ContainerFamily::Ole2Cfbf,
             Self::Pdf => ContainerFamily::PdfIso32000,
             Self::Csv | Self::Tsv | Self::Markdown | Self::Txt | Self::Rtf => {
                 ContainerFamily::PlainTextUtf8
@@ -116,14 +114,14 @@ impl DocumentFormat {
 
     pub fn standard_specification(&self) -> &'static str {
         match self {
-            Self::Docx | Self::Dotx => "OOXML (ECMA-376) WordprocessingML",
+            Self::Docx => "OOXML (ECMA-376) WordprocessingML",
             Self::Doc => "OLE2 CFBF Word Binary",
-            Self::Xlsx | Self::Xltx => "OOXML (ECMA-376) SpreadsheetML",
+            Self::Xlsx => "OOXML (ECMA-376) SpreadsheetML",
             Self::Xls => "OLE2 CFBF BIFF8 Spreadsheet",
-            Self::Pptx | Self::Potx => "OOXML (ECMA-376) PresentationML",
+            Self::Pptx | Self::Ppsx => "OOXML (ECMA-376) PresentationML",
             Self::Ppt => "OLE2 CFBF Presentation Binary",
-            Self::Hwp => "HWP 5.0 Binary (OLE2 CFBF)",
-            Self::Hwpx => "HWPX (KS X 6101 OWPML)",
+            Self::Hwp | Self::Hwt => "HWP 5.0 Binary (OLE2 CFBF)",
+            Self::Hwpx | Self::Hwtx => "HWPX (KS X 6101 OWPML)",
             Self::Pdf => "PDF (ISO 32000)",
             Self::Odt => "ODF (ISO/IEC 26300) Text",
             Self::Ods => "ODF (ISO/IEC 26300) Spreadsheet",
@@ -147,17 +145,17 @@ impl DocumentFormat {
             .unwrap_or(trimmed)
             .to_ascii_lowercase();
         match ext.as_str() {
-            "docx" => Some(Self::Docx),
+            "docx" | "dotx" => Some(Self::Docx),
             "doc" => Some(Self::Doc),
-            "dotx" => Some(Self::Dotx),
-            "xlsx" => Some(Self::Xlsx),
+            "xlsx" | "xltx" => Some(Self::Xlsx),
             "xls" => Some(Self::Xls),
-            "xltx" => Some(Self::Xltx),
-            "pptx" | "ppsx" => Some(Self::Pptx),
+            "pptx" | "potx" => Some(Self::Pptx),
+            "ppsx" => Some(Self::Ppsx),
             "ppt" => Some(Self::Ppt),
-            "potx" => Some(Self::Potx),
-            "hwp" | "hwt" => Some(Self::Hwp),
-            "hwpx" | "hwtx" => Some(Self::Hwpx),
+            "hwp" => Some(Self::Hwp),
+            "hwt" => Some(Self::Hwt),
+            "hwpx" => Some(Self::Hwpx),
+            "hwtx" => Some(Self::Hwtx),
             "pdf" => Some(Self::Pdf),
             "odt" => Some(Self::Odt),
             "ods" => Some(Self::Ods),
@@ -1000,7 +998,17 @@ impl PdfSerializer {
 
         push_line(&mut out, "%PDF-1.4");
 
-        let page_count = doc.pages.len().max(1);
+        let effective_pages: Vec<PdfPageModel> = if doc.pages.is_empty() {
+            vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: String::new(),
+                approval_stamp: None,
+            }]
+        } else {
+            doc.pages.clone()
+        };
+        let page_count = effective_pages.len();
         let page_obj_ids: Vec<usize> = (0..page_count).map(|i| 3 + i * 2).collect();
         let kids_refs = page_obj_ids
             .iter()
@@ -1030,7 +1038,7 @@ impl PdfSerializer {
         );
         push_line(&mut out, "endobj");
 
-        for (idx, page) in doc.pages.iter().enumerate() {
+        for (idx, page) in effective_pages.iter().enumerate() {
             let page_obj = 3 + idx * 2;
             let content_obj = page_obj + 1;
 
@@ -1058,7 +1066,7 @@ impl PdfSerializer {
             push_line(
                 &mut out,
                 &format!(
-                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Contents {content_obj} 0 R >>",
+                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents {content_obj} 0 R >>",
                     page.page_number, page.rotation_degrees
                 ),
             );
@@ -1115,6 +1123,7 @@ impl PdfSerializer {
         let mut title = String::from("PDF 문서");
         let mut watermark_text: Option<String> = None;
         let mut pages: Vec<PdfPageModel> = Vec::new();
+        let mut current_page_number: Option<usize> = None;
         let mut current_rotation = 0;
         let mut current_body = String::new();
         let mut current_stamp: Option<String> = None;
@@ -1128,6 +1137,11 @@ impl PdfSerializer {
                 }
             }
             if trimmed.contains("/Type /Page") && !trimmed.contains("/Type /Pages") {
+                if let Some(pn_idx) = trimmed.find("/PageNumber ") {
+                    let after = &trimmed[pn_idx + 12..];
+                    let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    current_page_number = num_str.parse::<usize>().ok();
+                }
                 if let Some(rot_idx) = trimmed.find("/Rotate ") {
                     let after = &trimmed[rot_idx + 8..];
                     let num_str: String = after
@@ -1146,7 +1160,7 @@ impl PdfSerializer {
             if trimmed == "endstream" {
                 if in_stream {
                     pages.push(PdfPageModel {
-                        page_number: pages.len() + 1,
+                        page_number: current_page_number.take().unwrap_or(pages.len() + 1),
                         rotation_degrees: current_rotation,
                         body_text: current_body.clone(),
                         approval_stamp: current_stamp.take(),
@@ -1215,7 +1229,8 @@ impl PdfSerializer {
                 '\\' => out.push_str("\\\\"),
                 '(' => out.push_str("\\("),
                 ')' => out.push_str("\\)"),
-                '\n' | '\r' => out.push(' '),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
                 _ => out.push(ch),
             }
         }
@@ -1227,10 +1242,11 @@ impl PdfSerializer {
         let mut chars = text.chars();
         while let Some(ch) = chars.next() {
             if ch == '\\' {
-                if let Some(escaped) = chars.next() {
-                    out.push(escaped);
-                } else {
-                    out.push('\\');
+                match chars.next() {
+                    Some('n') => out.push('\n'),
+                    Some('r') => out.push('\r'),
+                    Some(escaped) => out.push(escaped),
+                    None => out.push('\\'),
                 }
             } else {
                 out.push(ch);
@@ -1283,17 +1299,29 @@ mod tests {
         );
         assert_eq!(
             FormatDetector::detect(zip_sample, Some("template.dotx")).unwrap(),
-            DocumentFormat::Dotx
+            DocumentFormat::Docx
         );
         assert_eq!(
             FormatDetector::detect(zip_sample, Some("official.hwpx")).unwrap(),
             DocumentFormat::Hwpx
+        );
+        assert_eq!(
+            FormatDetector::detect(zip_sample, Some("template.hwtx")).unwrap(),
+            DocumentFormat::Hwtx
+        );
+        assert_eq!(
+            FormatDetector::detect(zip_sample, Some("show.ppsx")).unwrap(),
+            DocumentFormat::Ppsx
         );
 
         let ole2_sample = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1HWP Document File";
         assert_eq!(
             FormatDetector::detect(ole2_sample, Some("proposal.hwp")).unwrap(),
             DocumentFormat::Hwp
+        );
+        assert_eq!(
+            FormatDetector::detect(ole2_sample, Some("template.hwt")).unwrap(),
+            DocumentFormat::Hwt
         );
 
         let pdf_sample = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF";
@@ -1424,11 +1452,11 @@ mod tests {
                 PdfPageModel {
                     page_number: 1,
                     rotation_degrees: 0,
-                    body_text: "ISO 32000-1 PDF 본문 텍스트".to_string(),
+                    body_text: "ISO 32000-1 PDF 본문 텍스트\n2행 개행 보존".to_string(),
                     approval_stamp: Some("APPROVED".to_string()),
                 },
                 PdfPageModel {
-                    page_number: 2,
+                    page_number: 5,
                     rotation_degrees: 90,
                     body_text: "2페이지 부록".to_string(),
                     approval_stamp: None,
