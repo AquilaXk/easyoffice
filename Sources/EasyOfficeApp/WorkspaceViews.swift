@@ -45,6 +45,415 @@ extension WorkspaceThemePalette {
   }
 }
 
+// MARK: - Signature Lavender Pure-SwiftUI Controls & Snapshot-Safe Containers
+
+private struct CanvasSnapshotModeEnvironmentKey: EnvironmentKey {
+  static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+  var isCanvasSnapshotMode: Bool {
+    get { self[CanvasSnapshotModeEnvironmentKey.self] }
+    set { self[CanvasSnapshotModeEnvironmentKey.self] = newValue }
+  }
+}
+
+struct AdaptiveScrollContainer<Content: View>: View {
+  @Environment(\.isCanvasSnapshotMode) private var envSnapshotMode
+  let axes: Axis.Set
+  let showsIndicators: Bool
+  let isSnapshotMode: Bool
+  let content: () -> Content
+
+  init(
+    axes: Axis.Set = .vertical,
+    showsIndicators: Bool = true,
+    isSnapshotMode: Bool = false,
+    @ViewBuilder content: @escaping () -> Content
+  ) {
+    self.axes = axes
+    self.showsIndicators = showsIndicators
+    self.isSnapshotMode = isSnapshotMode
+    self.content = content
+  }
+
+  private var effectiveSnapshotMode: Bool {
+    isSnapshotMode || envSnapshotMode
+  }
+
+  var body: some View {
+    if effectiveSnapshotMode {
+      if axes == .horizontal {
+        HStack(spacing: 0) {
+          content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+      } else {
+        GeometryReader { geo in
+          VStack(alignment: .leading, spacing: 0) {
+            content()
+          }
+          .frame(width: geo.size.width, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+      }
+    } else if axes == .horizontal {
+      ViewThatFits(in: .horizontal) {
+        content()
+        ScrollView(.horizontal, showsIndicators: showsIndicators) {
+          content()
+        }
+      }
+    } else {
+      ScrollView(axes, showsIndicators: showsIndicators) {
+        content()
+      }
+    }
+  }
+}
+
+struct LavenderMenuPill<MenuContent: View>: View {
+  @Environment(\.isCanvasSnapshotMode) private var envSnapshotMode
+  let title: String
+  var symbolName: String? = nil
+  var accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor
+  let palette: WorkspaceThemePalette
+  var isSnapshotMode: Bool = false
+  var minWidth: CGFloat? = nil
+  @ViewBuilder let menuContent: () -> MenuContent
+
+  init(
+    title: String,
+    symbolName: String? = nil,
+    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    palette: WorkspaceThemePalette,
+    isSnapshotMode: Bool = false,
+    minWidth: CGFloat? = nil,
+    @ViewBuilder menuContent: @escaping () -> MenuContent
+  ) {
+    self.title = title
+    self.symbolName = symbolName
+    self.accent = accent
+    self.palette = palette
+    self.isSnapshotMode = isSnapshotMode
+    self.minWidth = minWidth
+    self.menuContent = menuContent
+  }
+
+  init(
+    title: String,
+    systemImage: String?,
+    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    palette: WorkspaceThemePalette,
+    isSnapshotMode: Bool = false,
+    minWidth: CGFloat? = nil,
+    @ViewBuilder menuContent: @escaping () -> MenuContent
+  ) {
+    self.title = title
+    self.symbolName = systemImage
+    self.accent = accent
+    self.palette = palette
+    self.isSnapshotMode = isSnapshotMode
+    self.minWidth = minWidth
+    self.menuContent = menuContent
+  }
+
+  private var pillBadge: some View {
+    HStack(spacing: 5) {
+      if let symbolName {
+        Image(systemName: symbolName)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(accent)
+      }
+      Text(title)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
+        .lineLimit(1)
+      Spacer(minLength: 2)
+      Image(systemName: "chevron.down")
+        .font(.system(size: 8, weight: .bold))
+        .foregroundStyle(palette.secondaryText.swiftUIColor)
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 5)
+    .frame(minWidth: minWidth)
+    .background(palette.elevatedSurface.swiftUIColor)
+    .overlay(
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(palette.border.swiftUIColor, lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+
+  var body: some View {
+    if isSnapshotMode || envSnapshotMode {
+      pillBadge
+        .fixedSize(horizontal: minWidth == nil, vertical: false)
+    } else {
+      Menu {
+        menuContent()
+      } label: {
+        pillBadge
+      }
+      .menuStyle(.borderlessButton)
+      .buttonStyle(.plain)
+      .fixedSize(horizontal: minWidth == nil, vertical: false)
+    }
+  }
+}
+
+struct LavenderTextFieldPill: View {
+  @Environment(\.isCanvasSnapshotMode) private var envSnapshotMode
+  let placeholder: String
+  @Binding var text: String
+  var symbolName: String? = nil
+  var width: CGFloat? = nil
+  var isMonospaced: Bool = false
+  let palette: WorkspaceThemePalette
+  var isSnapshotMode: Bool = false
+  var onSubmit: (() -> Void)? = nil
+
+  init(
+    placeholder: String,
+    text: Binding<String>,
+    symbolName: String? = nil,
+    width: CGFloat? = nil,
+    isMonospaced: Bool = false,
+    palette: WorkspaceThemePalette,
+    isSnapshotMode: Bool = false,
+    onSubmit: (() -> Void)? = nil
+  ) {
+    self.placeholder = placeholder
+    self._text = text
+    self.symbolName = symbolName
+    self.width = width
+    self.isMonospaced = isMonospaced
+    self.palette = palette
+    self.isSnapshotMode = isSnapshotMode
+    self.onSubmit = onSubmit
+  }
+
+  init(
+    placeholder: String,
+    text: Binding<String>,
+    systemImage: String?,
+    width: CGFloat? = nil,
+    isMonospaced: Bool = false,
+    palette: WorkspaceThemePalette,
+    isSnapshotMode: Bool = false,
+    onSubmit: (() -> Void)? = nil
+  ) {
+    self.placeholder = placeholder
+    self._text = text
+    self.symbolName = systemImage
+    self.width = width
+    self.isMonospaced = isMonospaced
+    self.palette = palette
+    self.isSnapshotMode = isSnapshotMode
+    self.onSubmit = onSubmit
+  }
+
+  var body: some View {
+    HStack(spacing: 5) {
+      if let symbolName {
+        Image(systemName: symbolName)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+      }
+      if isSnapshotMode || envSnapshotMode {
+        Text(text.isEmpty ? placeholder : text)
+          .font(
+            isMonospaced
+              ? .system(size: 11, design: .monospaced)
+              : .system(size: 11)
+          )
+          .foregroundStyle(
+            text.isEmpty
+              ? palette.secondaryText.swiftUIColor.opacity(0.75)
+              : palette.primaryText.swiftUIColor
+          )
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      } else {
+        TextField(placeholder, text: $text)
+          .textFieldStyle(.plain)
+          .font(
+            isMonospaced
+              ? .system(size: 11, design: .monospaced)
+              : .system(size: 11)
+          )
+          .foregroundStyle(palette.primaryText.swiftUIColor)
+          .onSubmit {
+            onSubmit?()
+          }
+      }
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 5)
+    .frame(width: width)
+    .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    .background(palette.cardSurface.swiftUIColor)
+    .overlay(
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(palette.border.swiftUIColor, lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+}
+
+struct LavenderTogglePill: View {
+  let title: String
+  @Binding var isOn: Bool
+  var symbolName: String? = nil
+  var accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor
+  let palette: WorkspaceThemePalette
+
+  init(
+    title: String,
+    isOn: Binding<Bool>,
+    symbolName: String? = nil,
+    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    palette: WorkspaceThemePalette
+  ) {
+    self.title = title
+    self._isOn = isOn
+    self.symbolName = symbolName
+    self.accent = accent
+    self.palette = palette
+  }
+
+  init(
+    title: String,
+    systemImage: String?,
+    isOn: Binding<Bool>,
+    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    palette: WorkspaceThemePalette
+  ) {
+    self.title = title
+    self._isOn = isOn
+    self.symbolName = systemImage
+    self.accent = accent
+    self.palette = palette
+  }
+
+  var body: some View {
+    Button {
+      isOn.toggle()
+    } label: {
+      HStack(spacing: 5) {
+        Image(systemName: isOn ? "checkmark.circle.fill" : (symbolName ?? "circle"))
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(isOn ? accent : palette.secondaryText.swiftUIColor)
+        Text(title)
+          .font(.system(size: 11, weight: isOn ? .semibold : .medium))
+          .foregroundStyle(
+            isOn ? palette.accentBadgeText.swiftUIColor : palette.primaryText.swiftUIColor
+          )
+          .lineLimit(1)
+      }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 5)
+      .background(
+        isOn ? palette.selectedSurface.swiftUIColor : palette.elevatedSurface.swiftUIColor
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(
+            isOn ? accent.opacity(0.75) : palette.border.swiftUIColor,
+            lineWidth: isOn ? 1.2 : 1.0
+          )
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+    .buttonStyle(.plain)
+    .fixedSize(horizontal: true, vertical: false)
+  }
+}
+
+struct LavenderStepperPill: View {
+  var title: String? = nil
+  let valueText: String
+  let palette: WorkspaceThemePalette
+  let onDecrement: () -> Void
+  let onIncrement: () -> Void
+
+  init(
+    title: String? = nil,
+    valueText: String,
+    palette: WorkspaceThemePalette,
+    onDecrement: @escaping () -> Void,
+    onIncrement: @escaping () -> Void
+  ) {
+    self.title = title
+    self.valueText = valueText
+    self.palette = palette
+    self.onDecrement = onDecrement
+    self.onIncrement = onIncrement
+  }
+
+  init(
+    label: String,
+    value: Binding<Int>,
+    range: ClosedRange<Int>,
+    palette: WorkspaceThemePalette
+  ) {
+    self.title = label
+    self.valueText = "\(value.wrappedValue)"
+    self.palette = palette
+    self.onDecrement = {
+      value.wrappedValue = max(range.lowerBound, value.wrappedValue - 1)
+    }
+    self.onIncrement = {
+      value.wrappedValue = min(range.upperBound, value.wrappedValue + 1)
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 4) {
+      if let title {
+        Text(title)
+          .font(.system(size: 10, weight: .medium))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+      }
+      Button(action: onDecrement) {
+        Image(systemName: "minus")
+          .font(.system(size: 9, weight: .bold))
+          .foregroundStyle(palette.primaryText.swiftUIColor)
+          .frame(width: 18, height: 18)
+          .background(palette.cardSurface.swiftUIColor)
+          .clipShape(RoundedRectangle(cornerRadius: 4))
+      }
+      .buttonStyle(.plain)
+
+      Text(valueText)
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
+        .padding(.horizontal, 4)
+
+      Button(action: onIncrement) {
+        Image(systemName: "plus")
+          .font(.system(size: 9, weight: .bold))
+          .foregroundStyle(palette.primaryText.swiftUIColor)
+          .frame(width: 18, height: 18)
+          .background(palette.cardSurface.swiftUIColor)
+          .clipShape(RoundedRectangle(cornerRadius: 4))
+      }
+      .buttonStyle(.plain)
+    }
+    .padding(.horizontal, 6)
+    .padding(.vertical, 3)
+    .background(palette.elevatedSurface.swiftUIColor)
+    .overlay(
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(palette.border.swiftUIColor, lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .fixedSize(horizontal: true, vertical: false)
+  }
+}
+
 /// Native macOS file dialog, print panel, and pasteboard presenter for office documents.
 @MainActor
 public enum WorkspaceFileDialogPresenter {
@@ -231,12 +640,48 @@ public struct MainWorkspaceWindowView: View {
         SlideshowFullScreenOverlayView(viewModel: viewModel, palette: palette)
       }
     }
+    .environment(\.isCanvasSnapshotMode, viewModel.isCanvasSnapshotMode)
   }
 }
 
 struct TopDocumentTabStripView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Bindable var viewModel: WorkspaceViewModel
+
+  private func qatIconButton(
+    symbol: String,
+    helpText: String,
+    isActive: Bool = false,
+    isDisabled: Bool = false,
+    palette: WorkspaceThemePalette,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(
+          isActive
+            ? Color.white
+            : (isDisabled
+              ? palette.secondaryText.swiftUIColor.opacity(0.45)
+              : palette.primaryText.swiftUIColor)
+        )
+        .frame(width: 24, height: 24)
+        .background(
+          isActive
+            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+            : palette.cardSurface.swiftUIColor
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: 5)
+            .stroke(palette.border.swiftUIColor, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+    }
+    .buttonStyle(.plain)
+    .disabled(isDisabled)
+    .help(helpText)
+  }
 
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
@@ -262,59 +707,72 @@ struct TopDocumentTabStripView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
       }
       .buttonStyle(.plain)
+      .fixedSize(horizontal: true, vertical: false)
 
-      HStack(spacing: 4) {
-        Button {
+      HStack(spacing: 3) {
+        qatIconButton(
+          symbol: "folder",
+          helpText: "열기 (⌘O)",
+          palette: palette
+        ) {
           WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
-        } label: {
-          Label("열기", systemImage: "folder").font(.system(size: 11, weight: .medium))
         }
-        .buttonStyle(.bordered).controlSize(.small)
 
-        Button {
+        qatIconButton(
+          symbol: "square.and.arrow.down",
+          helpText: "저장 (⌘S)",
+          isDisabled: viewModel.activeTab == nil,
+          palette: palette
+        ) {
           WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
-        } label: {
-          Label("저장", systemImage: "square.and.arrow.down").font(.system(size: 11, weight: .medium))
         }
-        .buttonStyle(.bordered).controlSize(.small)
-        .disabled(viewModel.activeTab == nil)
 
-        Button {
+        qatIconButton(
+          symbol: "printer",
+          helpText: "인쇄 (⌘P)",
+          isDisabled: viewModel.activeTab == nil,
+          palette: palette
+        ) {
           WorkspaceFileDialogPresenter.presentPrintPanel(viewModel: viewModel)
-        } label: {
-          Label("인쇄 (⌘P)", systemImage: "printer").font(.system(size: 11, weight: .medium))
         }
-        .buttonStyle(.bordered).controlSize(.small)
-        .disabled(viewModel.activeTab == nil)
 
-        Button {
-          viewModel.isFindReplaceBarVisible.toggle()
-        } label: {
-          Label("찾기 (⌘F)", systemImage: "magnifyingglass").font(.system(size: 11, weight: .medium))
-        }
-        .buttonStyle(.bordered).controlSize(.small)
-        .disabled(viewModel.activeTab == nil)
-
-        Button {
+        qatIconButton(
+          symbol: "arrow.uturn.backward",
+          helpText: "실행 취소 (⌘Z)",
+          isDisabled: !viewModel.canUndo,
+          palette: palette
+        ) {
           viewModel.undo()
-        } label: {
-          Image(systemName: "arrow.uturn.backward").font(.system(size: 11, weight: .semibold))
         }
-        .buttonStyle(.bordered).controlSize(.small)
-        .disabled(!viewModel.canUndo)
-        .help("실행 취소 (⌘Z)")
 
-        Button {
+        qatIconButton(
+          symbol: "arrow.uturn.forward",
+          helpText: "다시 실행 (⇧⌘Z)",
+          isDisabled: !viewModel.canRedo,
+          palette: palette
+        ) {
           viewModel.redo()
-        } label: {
-          Image(systemName: "arrow.uturn.forward").font(.system(size: 11, weight: .semibold))
         }
-        .buttonStyle(.bordered).controlSize(.small)
-        .disabled(!viewModel.canRedo)
-        .help("다시 실행 (⇧⌘Z)")
-      }
 
-      ScrollView(.horizontal, showsIndicators: false) {
+        qatIconButton(
+          symbol: "magnifyingglass",
+          helpText: "찾기 및 바꾸기 (⌘F)",
+          isActive: viewModel.isFindReplaceBarVisible,
+          isDisabled: viewModel.activeTab == nil,
+          palette: palette
+        ) {
+          viewModel.isFindReplaceBarVisible.toggle()
+        }
+      }
+      .fixedSize(horizontal: true, vertical: false)
+
+      Divider().frame(height: 18)
+
+      AdaptiveScrollContainer(
+        axes: .horizontal,
+        showsIndicators: false,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      ) {
         HStack(spacing: 6) {
           ForEach(viewModel.openTabs) { tab in
             let isSelected = !viewModel.isShowingHomeHub && viewModel.activeTabID == tab.id
@@ -343,6 +801,7 @@ struct TopDocumentTabStripView: View {
               Text(tab.fileName)
                 .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
+                .lineLimit(1)
 
               if tab.isModified {
                 Circle()
@@ -360,7 +819,7 @@ struct TopDocumentTabStripView: View {
               .buttonStyle(.plain)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .background(
               isSelected ? palette.cardSurface.swiftUIColor : palette.elevatedSurface.swiftUIColor
             )
@@ -399,22 +858,49 @@ struct TopDocumentTabStripView: View {
               }
             }
           }
+
+          Button {
+            viewModel.openNewSampleTab(for: .document)
+          } label: {
+            Image(systemName: "plus")
+              .font(.system(size: 10, weight: .bold))
+              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .frame(width: 24, height: 24)
+              .background(palette.cardSurface.swiftUIColor)
+              .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                  .stroke(palette.border.swiftUIColor, lineWidth: 1)
+              )
+              .clipShape(RoundedRectangle(cornerRadius: 5))
+          }
+          .buttonStyle(.plain)
+          .help("새 문서 탭 생성")
         }
       }
 
-      Spacer()
+      Spacer(minLength: 6)
 
-      Picker("테마", selection: $viewModel.themeMode) {
+      LavenderMenuPill(
+        title: viewModel.themeMode.rawValue,
+        symbolName: "paintpalette",
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      ) {
         ForEach(WorkspaceThemeMode.allCases) { mode in
-          Text(mode.rawValue).tag(mode)
+          Button(mode.rawValue) {
+            viewModel.themeMode = mode
+          }
         }
       }
-      .pickerStyle(.menu)
-      .frame(width: 145)
 
-      TextField("문서·본문·수식 통합 검색...", text: $viewModel.searchQuery)
-        .textFieldStyle(.roundedBorder)
-        .frame(width: 190)
+      LavenderTextFieldPill(
+        placeholder: "명령·본문 통합 검색",
+        text: $viewModel.searchQuery,
+        symbolName: "magnifyingglass",
+        width: 170,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      )
     }
     .padding(.horizontal, 12)
     .frame(height: EasyOfficeDesignTokens.LayoutMetrics.tabStripHeight + 6)
@@ -436,26 +922,36 @@ struct ContextRibbonBarView: View {
 
     VStack(alignment: .leading, spacing: 6) {
       HStack(spacing: 8) {
-        ScrollView(.horizontal, showsIndicators: false) {
+        AdaptiveScrollContainer(
+          axes: .horizontal,
+          showsIndicators: false,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        ) {
           HStack(spacing: 8) {
             ForEach(RibbonCategory.allCases) { category in
               let isSelected = viewModel.activeRibbonCategory == category
               Button {
                 viewModel.activeRibbonCategory = category
               } label: {
-                Text(category.title(for: activeModule))
-                  .font(.system(size: 12, weight: isSelected ? .bold : .medium))
-                  .lineLimit(1)
-                  .fixedSize(horizontal: true, vertical: false)
-                  .foregroundStyle(
-                    isSelected
-                      ? palette.accentBadgeText.swiftUIColor
-                      : palette.secondaryText.swiftUIColor
-                  )
-                  .padding(.vertical, 4)
-                  .padding(.horizontal, 8)
-                  .background(isSelected ? palette.selectedSurface.swiftUIColor : Color.clear)
-                  .clipShape(RoundedRectangle(cornerRadius: 5))
+                VStack(spacing: 2) {
+                  Text(category.title(for: activeModule))
+                    .font(.system(size: 12, weight: isSelected ? .bold : .medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(
+                      isSelected
+                        ? palette.accentBadgeText.swiftUIColor
+                        : palette.secondaryText.swiftUIColor
+                    )
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 8)
+                    .background(isSelected ? palette.selectedSurface.swiftUIColor : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+
+                  RoundedRectangle(cornerRadius: 1.5)
+                    .fill(isSelected ? moduleAccent : Color.clear)
+                    .frame(height: 2.5)
+                }
               }
               .buttonStyle(.plain)
             }
@@ -519,7 +1015,11 @@ struct ContextRibbonBarView: View {
       }
 
       if !viewModel.isRibbonCollapsed {
-        ScrollView(.horizontal, showsIndicators: false) {
+        AdaptiveScrollContainer(
+          axes: .horizontal,
+          showsIndicators: false,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        ) {
           HStack(alignment: .bottom, spacing: 8) {
             ribbonGroupContainer(title: "편집·실행", palette: palette) {
               HStack(spacing: 4) {
@@ -838,17 +1338,25 @@ struct FindAndReplaceBarView: View {
 
   var body: some View {
     HStack(spacing: 8) {
-      ScrollView(.horizontal, showsIndicators: false) {
+      AdaptiveScrollContainer(
+        axes: .horizontal,
+        showsIndicators: false,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      ) {
         HStack(spacing: 8) {
           Label("찾기 및 바꾸기", systemImage: "magnifyingglass.circle.fill")
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
             .fixedSize(horizontal: true, vertical: false)
 
-          TextField("찾을 내용...", text: $viewModel.findQueryText)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 150)
+          LavenderTextFieldPill(
+            placeholder: "찾을 내용...",
+            text: $viewModel.findQueryText,
+            symbolName: "magnifyingglass",
+            width: 145,
+            palette: palette,
+            isSnapshotMode: viewModel.isCanvasSnapshotMode
+          )
 
           let totalMatches = viewModel.findMatchCount
           let displayMatchIndex =
@@ -862,10 +1370,12 @@ struct FindAndReplaceBarView: View {
             .clipShape(RoundedRectangle(cornerRadius: 4))
             .fixedSize(horizontal: true, vertical: false)
 
-          Toggle("대소문자", isOn: $viewModel.isFindCaseSensitive)
-            .toggleStyle(.checkbox)
-            .font(.system(size: 11))
-            .fixedSize(horizontal: true, vertical: false)
+          LavenderTogglePill(
+            title: "대소문자",
+            isOn: $viewModel.isFindCaseSensitive,
+            symbolName: "textformat",
+            palette: palette
+          )
 
           Button("◀ 이전") { viewModel.findPreviousMatch() }
             .buttonStyle(.bordered)
@@ -879,10 +1389,14 @@ struct FindAndReplaceBarView: View {
 
           Divider().frame(height: 16)
 
-          TextField("바꿀 내용...", text: $viewModel.replaceQueryText)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
-            .frame(width: 150)
+          LavenderTextFieldPill(
+            placeholder: "바꿀 내용...",
+            text: $viewModel.replaceQueryText,
+            symbolName: "arrow.triangle.2.circlepath",
+            width: 145,
+            palette: palette,
+            isSnapshotMode: viewModel.isCanvasSnapshotMode
+          )
 
           Button("바꾸기(1건)") { _ = viewModel.replaceCurrentMatch() }
             .buttonStyle(.bordered)
@@ -1068,7 +1582,11 @@ public struct LeftNavigatorPanelView: View {
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
-    ScrollView(.vertical, showsIndicators: false) {
+    AdaptiveScrollContainer(
+      axes: .vertical,
+      showsIndicators: false,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
       VStack(alignment: .leading, spacing: 10) {
         Text("\(tab.moduleKind.shortBadgeTitle) 구조 내비게이터")
           .font(.system(size: 11, weight: .bold))
@@ -1368,23 +1886,23 @@ struct EditorCanvasSinglePaneView: View {
   var isPrimaryPane: Bool = true
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        switch tab.payload {
-        case .document(let doc):
-          DocumentEditorDetailPaneView(
-            viewModel: viewModel, document: doc, isPrimaryPane: isPrimaryPane)
-        case .sheet(let sheet):
-          SheetEditorDetailPaneView(
-            viewModel: viewModel, sheet: sheet, isPrimaryPane: isPrimaryPane)
-        case .slide(let deck):
-          SlideEditorDetailPaneView(viewModel: viewModel, deck: deck, isPrimaryPane: isPrimaryPane)
-        case .pdf(let pdf):
-          PDFStudioDetailPaneView(viewModel: viewModel, pdf: pdf, isPrimaryPane: isPrimaryPane)
-        }
+    VStack(alignment: .leading, spacing: 0) {
+      switch tab.payload {
+      case .document(let doc):
+        DocumentEditorDetailPaneView(
+          viewModel: viewModel, document: doc, isPrimaryPane: isPrimaryPane)
+      case .sheet(let sheet):
+        SheetEditorDetailPaneView(
+          viewModel: viewModel, sheet: sheet, isPrimaryPane: isPrimaryPane)
+      case .slide(let deck):
+        SlideEditorDetailPaneView(viewModel: viewModel, deck: deck, isPrimaryPane: isPrimaryPane)
+      case .pdf(let pdf):
+        PDFStudioDetailPaneView(viewModel: viewModel, pdf: pdf, isPrimaryPane: isPrimaryPane)
       }
-      .padding(24)
     }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 }
 
@@ -1399,7 +1917,11 @@ struct BottomWorkspaceStatusBarView: View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
     HStack(spacing: 10) {
-      ScrollView(.horizontal, showsIndicators: false) {
+      AdaptiveScrollContainer(
+        axes: .horizontal,
+        showsIndicators: false,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      ) {
         HStack(spacing: 10) {
           Text("\(tab.moduleKind.displayNameKo) · \(tab.format.standardSpecification)")
             .font(.system(size: 11))
@@ -1502,6 +2024,20 @@ struct BottomWorkspaceStatusBarView: View {
           .font(.system(size: 11, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         Button("+") { viewModel.setZoom(viewModel.zoomPercent + 25.0) }.buttonStyle(.plain)
+
+        Button {
+          viewModel.setZoom(100.0)
+        } label: {
+          Text("100%")
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(palette.selectedSurface.swiftUIColor)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .help("100% 배율로 초기화")
       }
       .fixedSize(horizontal: true, vertical: false)
     }

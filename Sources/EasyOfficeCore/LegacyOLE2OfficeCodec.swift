@@ -13,6 +13,8 @@ private struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
   var columnWidths: [Int: Double]?
   var rowHeights: [Int: Double]?
   var namedRanges: [String: String]?
+  var conditionalFormatRules: [SheetConditionalFormatRule]?
+  var dataValidationRule: SheetDataValidationRule?
 
   init(from sheet: WorksheetModel) {
     self.cellStyles = sheet.cellStyles
@@ -25,6 +27,9 @@ private struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
     self.columnWidths = sheet.columnWidths.isEmpty ? nil : sheet.columnWidths
     self.rowHeights = sheet.rowHeights.isEmpty ? nil : sheet.rowHeights
     self.namedRanges = sheet.namedRanges.isEmpty ? nil : sheet.namedRanges
+    self.conditionalFormatRules =
+      sheet.conditionalFormatRules.isEmpty ? nil : sheet.conditionalFormatRules
+    self.dataValidationRule = sheet.dataValidationRule
   }
 
   func apply(to sheet: inout WorksheetModel) {
@@ -47,6 +52,12 @@ private struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
     }
     if let namedRanges, !namedRanges.isEmpty {
       sheet.namedRanges = namedRanges
+    }
+    if let conditionalFormatRules, !conditionalFormatRules.isEmpty {
+      sheet.conditionalFormatRules = conditionalFormatRules
+    }
+    if let dataValidationRule {
+      sheet.dataValidationRule = dataValidationRule
     }
   }
 }
@@ -612,10 +623,15 @@ public enum LegacyOLE2OfficeCodec {
     appendPPTAtom(
       verAndInstance: 0x0010, recType: pptRecordTextCharsAtom,
       payload: BitPacking.encodeUTF16LE(deck.aspectRatio.rawValue), to: &docChildren)
+    appendPPTAtom(
+      verAndInstance: 0x0020, recType: pptRecordTextCharsAtom,
+      payload: BitPacking.encodeUTF16LE(deck.deckTheme.rawValue), to: &docChildren)
 
     for slide in deck.slides {
       var slideChildren = Data()
-      let slideAtomText = "\(slide.masterLayout.rawValue)|\(slide.transition.rawValue)"
+      let autoAdvanceToken = slide.autoAdvanceSeconds.map(String.init) ?? ""
+      let slideAtomText =
+        "\(slide.masterLayout.rawValue)|\(slide.transition.rawValue)|\(slide.transitionDurationSeconds)|\(autoAdvanceToken)"
       appendPPTAtom(
         verAndInstance: 0x0002, recType: pptRecordSlideAtom,
         payload: BitPacking.encodeUTF16LE(slideAtomText), to: &slideChildren)
@@ -691,6 +707,7 @@ public enum LegacyOLE2OfficeCodec {
 
     var deckTitle = "발표자료"
     var aspectRatio: SlideAspectRatio = .widescreen16x9
+    var deckTheme: SlideDeckTheme = .signatureLavender
     var slides: [SlideModel] = []
 
     var offset = 8
@@ -713,6 +730,8 @@ public enum LegacyOLE2OfficeCodec {
           deckTitle = text
         } else if verAndInst == 0x0010, let parsedRatio = SlideAspectRatio(rawValue: text) {
           aspectRatio = parsedRatio
+        } else if verAndInst == 0x0020, let parsedTheme = SlideDeckTheme(rawValue: text) {
+          deckTheme = parsedTheme
         }
       } else if recType == pptRecordSlide {
         var sTitle = ""
@@ -722,6 +741,8 @@ public enum LegacyOLE2OfficeCodec {
         var sElements: [SlideCanvasElement] = []
         var sLayout: SlideMasterLayout = .titleAndContent
         var sTransition: SlideTransitionKind = .fade
+        var sTransitionDuration: Double = 0.8
+        var sAutoAdvance: Int? = nil
 
         var sCursor = payloadStart
         while sCursor <= payloadEnd - 8 {
@@ -742,6 +763,12 @@ public enum LegacyOLE2OfficeCodec {
             if parts.count >= 2 {
               sLayout = SlideMasterLayout(rawValue: parts[0]) ?? .titleAndContent
               sTransition = SlideTransitionKind(rawValue: parts[1]) ?? .fade
+            }
+            if parts.count >= 3, let parsedDur = Double(parts[2]), parsedDur.isFinite {
+              sTransitionDuration = parsedDur
+            }
+            if parts.count >= 4, let parsedAdv = Int(parts[3]) {
+              sAutoAdvance = parsedAdv
             }
           } else if sType == pptRecordTextCharsAtom {
             switch sVerInst {
@@ -841,14 +868,21 @@ public enum LegacyOLE2OfficeCodec {
             speakerNotes: sNotes,
             masterLayout: sLayout,
             transition: sTransition,
-            elements: sElements
+            elements: sElements,
+            transitionDurationSeconds: sTransitionDuration,
+            autoAdvanceSeconds: sAutoAdvance
           ))
       }
 
       offset = payloadEnd
     }
 
-    return PresentationDeckModel(title: deckTitle, aspectRatio: aspectRatio, slides: slides)
+    return PresentationDeckModel(
+      title: deckTitle,
+      aspectRatio: aspectRatio,
+      slides: slides,
+      deckTheme: deckTheme
+    )
   }
 
   private static func appendPPTAtom(

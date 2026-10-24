@@ -466,7 +466,7 @@ extension WorkspaceViewModel {
           } else {
             let offset = Double(deck.slides[sIdx].elements.count) * 12.0
             let badge = SlideCanvasElement(
-              title: "변경 내용 추적 활성", bodyText: "슬라이드 변경 이력 추적", x: 200.0 + offset, y: 120.0 + offset,
+              title: "변경 내용 추적 활성", bodyText: "슬라이드 변경 이력 추적", x: 200.0 + offset, y: 240.0 + offset,
               width: 180, height: 70, kind: .calloutShape)
             deck.slides[sIdx].elements.append(badge)
             selectedSlideElementID = badge.id
@@ -509,7 +509,7 @@ extension WorkspaceViewModel {
           let offset = Double(deck.slides[sIdx].elements.count) * 12.0
           let callout = SlideCanvasElement(
             title: "검토 메모 (\(authorName))", bodyText: noteText, x: 220.0 + offset,
-            y: 140.0 + offset, width: 210, height: 80, kind: .calloutShape)
+            y: 240.0 + offset, width: 210, height: 80, kind: .calloutShape)
           deck.slides[sIdx].elements.append(callout)
           selectedSlideElementID = callout.id
           openTabs[idx].payload = .slide(deck)
@@ -647,7 +647,7 @@ extension WorkspaceViewModel {
       if deck.slides[sIdx].elements.isEmpty {
         deck.slides[sIdx].elements.append(
           SlideCanvasElement(
-            title: "기본 텍스트 상자", bodyText: "슬라이드 본문", x: 200, y: 160, width: 240, height: 90,
+            title: "기본 텍스트 상자", bodyText: "슬라이드 본문", x: 200, y: 245, width: 240, height: 150,
             kind: .textBox))
       }
       let eIdx =
@@ -845,8 +845,8 @@ extension WorkspaceViewModel {
       }
       let offsetCount = Double(deck.slides[sIdx].elements.count)
       let newElem = SlideCanvasElement(
-        title: title, bodyText: "슬라이드 \(sIdx + 1) 추가 개체", x: 240.0 + offsetCount * 16.0,
-        y: 160.0 + offsetCount * 12.0, width: 200, height: 100, kind: elementKind)
+        title: title, bodyText: "슬라이드 \(sIdx + 1) 추가 개체", x: 340.0 + offsetCount * 16.0,
+        y: 240.0 + offsetCount * 12.0, width: 220, height: 150, kind: elementKind)
       deck.slides[sIdx].elements.append(newElem)
       selectedSlideElementID = newElem.id
       openTabs[idx].payload = .slide(deck)
@@ -1060,6 +1060,7 @@ extension WorkspaceViewModel {
           (activeDataValidationRule == nil)
           ? DataValidationRule(minimumValue: 0, maximumValue: 1_000_000_000, allowedSet: nil)
           : nil
+        sheet.dataValidationRule = activeDataValidationRule
       }
       openTabs[idx].payload = .sheet(sheet)
       openTabs[idx].isModified = true
@@ -1122,14 +1123,14 @@ extension WorkspaceViewModel {
       switch kind {
       case .autoSum:
         let elem = SlideCanvasElement(
-          title: "핵심 지표 합계 (SUM)", bodyText: "누적 실적 합계 요약 블록", x: 180.0 + offset, y: 140.0 + offset,
-          width: 220, height: 96, kind: .chartEmbed)
+          title: "핵심 지표 합계 (SUM)", bodyText: "누적 실적 합계 요약 블록", x: 340.0 + offset, y: 240.0 + offset,
+          width: 220, height: 150, kind: .chartEmbed)
         deck.slides[sIdx].elements.append(elem)
         selectedSlideElementID = elem.id
       case .functionWizard:
         let elem = SlideCanvasElement(
-          title: "평균 성장률 (AVERAGE)", bodyText: "지표 평균 분석 카드", x: 180.0 + offset, y: 140.0 + offset,
-          width: 220, height: 96, kind: .chartEmbed)
+          title: "평균 성장률 (AVERAGE)", bodyText: "지표 평균 분석 카드", x: 340.0 + offset, y: 240.0 + offset,
+          width: 220, height: 150, kind: .chartEmbed)
         deck.slides[sIdx].elements.append(elem)
         selectedSlideElementID = elem.id
       case .sort:
@@ -1145,15 +1146,15 @@ extension WorkspaceViewModel {
         } else {
           let elem = SlideCanvasElement(
             title: "정렬 요약 표", bodyText: sheetSortAscending ? "오름차순 정렬 기준" : "내림차순 정렬 기준",
-            x: 180.0 + offset, y: 140.0 + offset, width: 220, height: 96, kind: .tableGrid)
+            x: 340.0 + offset, y: 240.0 + offset, width: 220, height: 150, kind: .tableGrid)
           deck.slides[sIdx].elements.append(elem)
           selectedSlideElementID = elem.id
         }
       case .validation:
         activeDataValidationRule = (activeDataValidationRule == nil) ? .nonEmptyText : nil
         let elem = SlideCanvasElement(
-          title: "데이터 검증 요약", bodyText: "필수 지표 무결성 확인 완료", x: 180.0 + offset, y: 140.0 + offset,
-          width: 220, height: 96, kind: .tableGrid)
+          title: "데이터 검증 요약", bodyText: "필수 지표 무결성 확인 완료", x: 340.0 + offset, y: 240.0 + offset,
+          width: 220, height: 150, kind: .tableGrid)
         deck.slides[sIdx].elements.append(elem)
         selectedSlideElementID = elem.id
       }
@@ -1175,8 +1176,11 @@ extension WorkspaceViewModel {
 
   @discardableResult
   public func performFindAndReplace() -> Int {
-    let query = findQueryText
-    let replacement = replaceQueryText
+    let query =
+      findQueryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      ? findQueryDraft
+      : findQueryText
+    let replacement = replaceQueryText.isEmpty && !replaceQueryDraft.isEmpty ? replaceQueryDraft : replaceQueryText
     guard !query.isEmpty, let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID })
     else {
@@ -1184,14 +1188,21 @@ extension WorkspaceViewModel {
       return 0
     }
 
+    let options: String.CompareOptions = isFindCaseSensitive ? [] : [.caseInsensitive]
     var count = 0
     func replaceOccurrences(in source: inout String) {
-      guard source.contains(query) else { return }
-      let components = source.components(separatedBy: query)
-      let occurrences = max(0, components.count - 1)
-      if occurrences > 0 {
-        count += occurrences
-        source = components.joined(separator: replacement)
+      var searchStart = source.startIndex
+      var matches: [Range<String.Index>] = []
+      while searchStart < source.endIndex,
+        let r = source.range(of: query, options: options, range: searchStart..<source.endIndex)
+      {
+        matches.append(r)
+        searchStart = r.upperBound
+      }
+      guard !matches.isEmpty else { return }
+      count += matches.count
+      for matchRange in matches.reversed() {
+        source.replaceSubrange(matchRange, with: replacement)
       }
     }
 
@@ -1201,11 +1212,12 @@ extension WorkspaceViewModel {
       for pIdx in doc.paragraphs.indices {
         replaceOccurrences(in: &doc.paragraphs[pIdx].text)
         for rIdx in doc.paragraphs[pIdx].inlineRuns.indices {
-          let runText = doc.paragraphs[pIdx].inlineRuns[rIdx].text
-          if runText.contains(query) {
-            doc.paragraphs[pIdx].inlineRuns[rIdx].text = runText.replacingOccurrences(
-              of: query, with: replacement)
-          }
+          doc.paragraphs[pIdx].inlineRuns[rIdx].text = doc.paragraphs[pIdx].inlineRuns[rIdx].text
+            .replacingOccurrences(of: query, with: replacement, options: options)
+        }
+        for rIdx in doc.paragraphs[pIdx].runs.indices {
+          doc.paragraphs[pIdx].runs[rIdx].text = doc.paragraphs[pIdx].runs[rIdx].text
+            .replacingOccurrences(of: query, with: replacement, options: options)
         }
       }
       for tIdx in doc.tables.indices {
@@ -1249,6 +1261,7 @@ extension WorkspaceViewModel {
           replaceOccurrences(in: &deck.slides[sIdx].elements[eIdx].title)
           replaceOccurrences(in: &deck.slides[sIdx].elements[eIdx].bodyText)
         }
+        replaceOccurrences(in: &deck.slides[sIdx].speakerNotes)
       }
       if deck != beforeDeck {
         recordUndoSnapshot(for: activeTabID)
