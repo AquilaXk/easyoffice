@@ -107,7 +107,7 @@
     const badgeEl = document.getElementById("contextual-object-badge");
     const badgeMap = {
       document: "표·개체 도구",
-      hwp: "표·개체 도구",
+      hwp: "쪽·결재·원고지 도구",
       sheet: "수식·피벗 분석",
       slide: "발표자·레이저 도구",
       pdf: "전자결재·주석 도구",

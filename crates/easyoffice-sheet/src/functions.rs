@@ -626,9 +626,9 @@ impl SheetEngine {
             "IF" | "IFS" | "AND" | "OR" | "XOR" | "NOT" | "IFERROR" | "IFNA" | "SWITCH"
             | "TRUE" | "FALSE" => self.eval_logical_func(name, args, ctx, depth),
 
-            // --- Lookup & Reference (12) ---
+            // --- Lookup & Reference (12 + INDIRECT) ---
             "VLOOKUP" | "HLOOKUP" | "XLOOKUP" | "INDEX" | "MATCH" | "CHOOSE" | "OFFSET" | "ROW"
-            | "COLUMN" | "ROWS" | "COLUMNS" | "TRANSPOSE" => {
+            | "COLUMN" | "ROWS" | "COLUMNS" | "TRANSPOSE" | "INDIRECT" => {
                 self.eval_lookup_func(name, args, ctx, depth)
             }
 
@@ -643,13 +643,13 @@ impl SheetEngine {
             "DATE" | "YEAR" | "MONTH" | "DAY" | "TIME" | "HOUR" | "MINUTE" | "SECOND" | "DAYS"
             | "EDATE" => self.eval_date_func(name, args, ctx, depth),
 
-            // --- Financial (11) ---
+            // --- Financial (11 + DB) ---
             "PMT" | "IPMT" | "PPMT" | "FV" | "PV" | "NPV" | "IRR" | "RATE" | "NPER" | "SLN"
-            | "DDB" => self.eval_financial_func(name, args, ctx, depth),
+            | "DB" | "DDB" => self.eval_financial_func(name, args, ctx, depth),
 
-            // --- Information (9) ---
+            // --- Information (9 + TYPE) ---
             "ISBLANK" | "ISNUMBER" | "ISTEXT" | "ISLOGICAL" | "ISERR" | "ISERROR" | "ISNA"
-            | "ISEVEN" | "ISODD" => self.eval_info_func(name, args, ctx, depth),
+            | "ISEVEN" | "ISODD" | "TYPE" => self.eval_info_func(name, args, ctx, depth),
 
             _ => Err(FormulaError::Name),
         }

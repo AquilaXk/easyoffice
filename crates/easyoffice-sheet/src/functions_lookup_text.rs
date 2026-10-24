@@ -205,6 +205,23 @@ impl SheetEngine {
                     Ok(EvaluatedCellValue::Text(joined))
                 }
             }
+            "INDIRECT" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(FormulaError::Value);
+                }
+                let ref_str = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
+                let trimmed = ref_str.trim();
+                if let Some((sh, cell_part)) = trimmed.split_once('!') {
+                    let sh_clean = sh.trim().trim_matches('\'');
+                    let coord =
+                        PackedCellCoordinate::parse_a1(cell_part).map_err(|_| FormulaError::Ref)?;
+                    Ok(self.eval_sheet_coord(Some(sh_clean), coord, ctx, depth + 1))
+                } else {
+                    let coord =
+                        PackedCellCoordinate::parse_a1(trimmed).map_err(|_| FormulaError::Ref)?;
+                    Ok(self.eval_sheet_coord(None, coord, ctx, depth + 1))
+                }
+            }
             _ => Err(FormulaError::Name),
         }
     }

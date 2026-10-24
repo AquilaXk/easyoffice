@@ -633,9 +633,23 @@ mod tests {
             s.evaluate_formula_str("=SLN(10000, 1000, 9)+DDB(10000, 1000, 5, 1)"),
             EvaluatedCellValue::Number(5000.0)
         );
+        assert!(
+            s.evaluate_formula_str("=DB(10000, 1000, 5, 1)")
+                .as_number()
+                .unwrap()
+                > 3600.0
+        );
 
-        // Information
+        // Information & INDIRECT
         assert_eq!(s.evaluate_formula_str("=AND(ISNUMBER(1), ISTEXT(\"a\"), ISLOGICAL(TRUE()), ISERR(1/0), ISERROR(#N/A), ISNA(MATCH(99, A1:A4, 0)), ISEVEN(4), ISODD(5))"), EvaluatedCellValue::Boolean(true));
+        assert_eq!(
+            s.evaluate_formula_str("=TYPE(42)+TYPE(\"abc\")+TYPE(TRUE())+TYPE(1/0)"),
+            EvaluatedCellValue::Number(23.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=INDIRECT(\"A1\")"),
+            EvaluatedCellValue::Number(10.0)
+        );
     }
 
     #[test]

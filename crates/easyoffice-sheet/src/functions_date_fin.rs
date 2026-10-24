@@ -360,6 +360,42 @@ impl SheetEngine {
                 }
                 Ok(EvaluatedCellValue::Number((cost - salvage) / life))
             }
+            "DB" => {
+                if args.len() < 4 || args.len() > 5 {
+                    return Err(FormulaError::Value);
+                }
+                let cost = self.eval_arg_num(&args[0], ctx, depth)?;
+                let salvage = self.eval_arg_num(&args[1], ctx, depth)?;
+                let life = self.eval_arg_num(&args[2], ctx, depth)?;
+                let period = self.eval_arg_num(&args[3], ctx, depth)?.trunc() as usize;
+                let month = if args.len() == 5 {
+                    self.eval_arg_num(&args[4], ctx, depth)?.trunc() as usize
+                } else {
+                    12
+                };
+                if cost <= 0.0
+                    || salvage < 0.0
+                    || life <= 0.0
+                    || !(1..=10_000).contains(&period)
+                    || !(1..=12).contains(&month)
+                {
+                    return Err(FormulaError::Num);
+                }
+                let rate = ((1.0 - (salvage / cost).powf(1.0 / life)) * 1000.0).round() / 1000.0;
+                let mut total_dep = 0.0;
+                let mut dep = 0.0;
+                for p in 1..=period {
+                    dep = if p == 1 {
+                        cost * rate * (month as f64) / 12.0
+                    } else if p == (life.trunc() as usize) + 1 && month < 12 {
+                        (cost - total_dep) * rate * ((12 - month) as f64) / 12.0
+                    } else {
+                        (cost - total_dep) * rate
+                    };
+                    total_dep += dep;
+                }
+                Ok(EvaluatedCellValue::Number(dep))
+            }
             "DDB" => {
                 if args.len() < 4 || args.len() > 5 {
                     return Err(FormulaError::Value);
@@ -373,7 +409,12 @@ impl SheetEngine {
                 } else {
                     2.0
                 };
-                if cost < 0.0 || salvage < 0.0 || life <= 0.0 || period < 1 || factor <= 0.0 {
+                if cost < 0.0
+                    || salvage < 0.0
+                    || life <= 0.0
+                    || !(1..=10_000).contains(&period)
+                    || factor <= 0.0
+                {
                     return Err(FormulaError::Num);
                 }
                 let mut book = cost;
@@ -442,6 +483,15 @@ impl SheetEngine {
                 } else {
                     !is_even
                 }))
+            }
+            "TYPE" => {
+                let code = match val {
+                    EvaluatedCellValue::Empty | EvaluatedCellValue::Number(_) => 1.0,
+                    EvaluatedCellValue::Text(_) => 2.0,
+                    EvaluatedCellValue::Boolean(_) => 4.0,
+                    EvaluatedCellValue::Error(_) => 16.0,
+                };
+                Ok(EvaluatedCellValue::Number(code))
             }
             _ => Err(FormulaError::Name),
         }

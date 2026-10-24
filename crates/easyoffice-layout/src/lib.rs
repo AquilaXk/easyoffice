@@ -493,6 +493,10 @@ mod tests {
             "수식·피벗 분석"
         );
         assert_eq!(
+            ContextualObjectToolKind::for_module(OfficeModuleKind::Hwp).badge_title(),
+            "쪽·결재·원고지 도구"
+        );
+        assert_eq!(
             ContextualObjectToolKind::for_module(OfficeModuleKind::Slide).badge_title(),
             "발표자·레이저 도구"
         );
@@ -592,6 +596,8 @@ mod tests {
         assert_eq!(pdf_engine.rotate_page(0, 90).unwrap(), 90);
         let split_doc = pdf_engine.split_range(0, 0).unwrap();
         assert_eq!(split_doc.pages.len(), 1);
+        assert_eq!(pdf_engine.split_range(0, 1).unwrap().pages.len(), 2);
+        assert!(pdf_engine.split_range(0, 2).is_err());
         let merged_doc = PdfDomainEngine::merge_documents(&base_pdf, &split_doc);
         assert_eq!(merged_doc.pages.len(), 3);
         let stamp = pdf_engine.add_stamp("APPROVED", "감사관", "2026-10-24");

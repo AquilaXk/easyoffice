@@ -52,6 +52,7 @@ impl RibbonLayoutStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContextualObjectToolKind {
     TableAndObject,
+    PageApprovalAndManuscript,
     FormulaAndPivot,
     PresenterAndLaser,
     ApprovalAndAnnotation,
@@ -61,6 +62,7 @@ impl ContextualObjectToolKind {
     pub fn badge_title(&self) -> &'static str {
         match self {
             Self::TableAndObject => "표·개체 도구",
+            Self::PageApprovalAndManuscript => "쪽·결재·원고지 도구",
             Self::FormulaAndPivot => "수식·피벗 분석",
             Self::PresenterAndLaser => "발표자·레이저 도구",
             Self::ApprovalAndAnnotation => "전자결재·주석 도구",
@@ -69,7 +71,8 @@ impl ContextualObjectToolKind {
 
     pub fn for_module(module: OfficeModuleKind) -> Self {
         match module {
-            OfficeModuleKind::Document | OfficeModuleKind::Hwp => Self::TableAndObject,
+            OfficeModuleKind::Document => Self::TableAndObject,
+            OfficeModuleKind::Hwp => Self::PageApprovalAndManuscript,
             OfficeModuleKind::Sheet => Self::FormulaAndPivot,
             OfficeModuleKind::Slide => Self::PresenterAndLaser,
             OfficeModuleKind::Pdf => Self::ApprovalAndAnnotation,
@@ -560,31 +563,14 @@ impl PdfDomainEngine {
         start_page: usize,
         end_page: usize,
     ) -> Result<PdfDocumentModel, EasyOfficeError> {
-        if self.document.pages.is_empty() || start_page > end_page {
-            return Err(EasyOfficeError::InvalidArgument(
-                "유효하지 않은 PDF 분할 페이지 범위입니다.".to_string(),
-            ));
-        }
         let len = self.document.pages.len();
-        let (s_idx, e_idx) = if start_page >= 1
-            && end_page <= len
-            && end_page == len
-            && start_page <= len
-        {
-            if start_page == 0 {
-                (0, end_page)
-            } else {
-                (start_page - 1, end_page - 1)
-            }
-        } else if end_page < len {
-            (start_page, end_page)
-        } else {
+        if len == 0 || start_page > end_page || end_page >= len {
             return Err(EasyOfficeError::InvalidArgument(format!(
-                "PDF 페이지 분할 범위({start_page}..={end_page})가 총 페이지 수({len})를 초과했습니다."
+                "PDF 페이지 분할 범위({start_page}..={end_page})가 총 페이지 수({len})를 초과했거나 유효하지 않습니다."
             )));
-        };
+        }
 
-        let pages: Vec<PdfPageModel> = self.document.pages[s_idx..=e_idx]
+        let pages: Vec<PdfPageModel> = self.document.pages[start_page..=end_page]
             .iter()
             .enumerate()
             .map(|(i, p)| PdfPageModel {
