@@ -114,4 +114,103 @@ mod tests {
         let bootstrap_json = invoke_c_abi_roundtrip("get_workspace_bootstrap", "");
         assert!(bootstrap_json.contains("#5C6BC0"));
     }
+
+    #[test]
+    fn test_ipc_router_commands_and_self_test() {
+        use crate::{run_self_test, EasyOfficeError, EasyOfficeIpcRouter};
+
+        let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "").unwrap();
+        assert!(bootstrap.contains("#5C6BC0"));
+        assert!(bootstrap.contains("\"ribbonMatrixSlots\":35"));
+
+        let detect_res =
+            EasyOfficeIpcRouter::dispatch("detect_format", "docx|HEX:504B03041400").unwrap();
+        assert!(detect_res.contains("\"format\":\"docx\""));
+
+        let sheet_res =
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", "A1=150;A2=250;A3==SUM(A1:A2)?A3")
+                .unwrap();
+        assert!(sheet_res.contains("\"value\":\"400\""));
+        assert!(sheet_res.contains("\"conditionalMatch\":true"));
+
+        let wb_res =
+            EasyOfficeIpcRouter::dispatch("evaluate_workbook_formula", "=Sheet2!A1+50").unwrap();
+        assert!(wb_res.contains("\"value\":\"150\""));
+
+        let wb_dyn_res = EasyOfficeIpcRouter::dispatch(
+            "evaluate_workbook_formula",
+            "Sheet2!A1=300;Sheet1!A1=700?=Sheet1!A1+Sheet2!A1",
+        )
+        .unwrap();
+        assert!(wb_dyn_res.contains("\"value\":\"1000\""));
+
+        let bench_res = EasyOfficeIpcRouter::dispatch("run_engine_benchmark", "3").unwrap();
+        assert!(bench_res.contains("\"allEquivalent\":true"));
+        assert!(bench_res.contains("crc32_slicing_by_8"));
+
+        let conv_res = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            "docx->hwpx|연간계획서|1. 추진 배경\n2. 실행 계획",
+        )
+        .unwrap();
+        assert!(conv_res.contains("\"targetFormat\":\"hwpx\""));
+        assert!(conv_res.contains("\"status\":\"OK\""));
+
+        let cat_res =
+            EasyOfficeIpcRouter::dispatch("get_ribbon_category_commands", "HWP|module").unwrap();
+        assert!(cat_res.contains("hwp-mod-manuscript"));
+
+        let layout_res = EasyOfficeIpcRouter::dispatch("compute_layout", "landscape").unwrap();
+        assert!(layout_res.contains("\"widthPt\":842.0"));
+
+        let sec_res = EasyOfficeIpcRouter::dispatch(
+            "audit_security",
+            "word/document.xml,512,2048,false|<doc>safe</doc>",
+        )
+        .unwrap();
+        assert!(sec_res.contains("\"status\":\"SAFE\""));
+        assert!(sec_res.contains("\"checkedEntries\":1"));
+
+        let rib_res =
+            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "doc-mod-toc").unwrap();
+        assert!(rib_res.contains("\"catalogCount\":140"));
+        assert!(rib_res.contains("표·개체 도구"));
+
+        let style_res = EasyOfficeIpcRouter::dispatch("switch_ribbon_style", "hangul").unwrap();
+        assert!(style_res.contains("쪽·원고지"));
+
+        let smart_res = EasyOfficeIpcRouter::dispatch(
+            "run_smart_assistant",
+            "첫 문장입니다. TODO: 보안 결재를 완료합니다.",
+        )
+        .unwrap();
+        assert!(smart_res.contains("\"actionItemCount\":1"));
+
+        let pii_res = EasyOfficeIpcRouter::dispatch(
+            "scrub_pii",
+            "주민번호 880101-1234567 전화 010-9876-5432",
+        )
+        .unwrap();
+        assert!(pii_res.contains("******-*******"));
+        assert!(pii_res.contains("010-****-****"));
+
+        assert!(matches!(
+            EasyOfficeIpcRouter::dispatch(
+                "audit_security",
+                "../../etc/passwd,100,200,false|<doc>safe</doc>"
+            ),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+        assert!(matches!(
+            EasyOfficeIpcRouter::dispatch(
+                "audit_security",
+                "word/document.xml,10,50000,false|<doc>safe</doc>"
+            ),
+            Err(EasyOfficeError::DecompressionBombDetected { .. })
+        ));
+
+        let summary = run_self_test().unwrap();
+        assert!(summary.contains("PASSED"));
+        assert!(summary.contains("ipc_commands=13"));
+    }
 }

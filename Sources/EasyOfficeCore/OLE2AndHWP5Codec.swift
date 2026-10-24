@@ -123,6 +123,51 @@ public struct OLE2StreamEntry: Sendable, Equatable {
   }
 }
 
+/// OLE2 FAT sector chain resolver using a compact `UInt64` bitset (`64` sectors per word) for $O(1)$ cycle and sharing detection.
+public struct OLE2SectorTable: Sendable, Equatable {
+  public static let endOfChain: UInt32 = 0xFFFF_FFFE
+  public static let freeSector: UInt32 = 0xFFFF_FFFF
+
+  public let entries: [UInt32]
+
+  public init(entries: [UInt32]) {
+    self.entries = entries
+  }
+
+  public func chain(
+    startingAt startSector: UInt32,
+    maxSectors: Int = 65_536
+  ) throws -> [UInt32] {
+    guard maxSectors > 0 else { return [] }
+    if startSector == OLE2ContainerCodec.endOfChain { return [] }
+    let wordCount = max(1, (max(entries.count, maxSectors) + 63) >> 6)
+    var visitedWords = [UInt64](repeating: 0, count: wordCount)
+    var result: [UInt32] = []
+    result.reserveCapacity(min(entries.count, 64))
+    var current = startSector
+
+    while current != OLE2ContainerCodec.endOfChain {
+      let idx = Int(current)
+      guard idx >= 0, idx < entries.count, result.count < maxSectors else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "OLE2 FAT 체인이 유효하지 않은 섹터(\(current))를 참조하거나 최대 섹터 한도(\(maxSectors))를 초과했습니다."
+        )
+      }
+      let wordIdx = idx >> 6
+      let mask: UInt64 = 1 << UInt64(idx & 63)
+      if (visitedWords[wordIdx] & mask) != 0 {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "OLE2 sector cycle or cross-stream sector sharing detected"
+        )
+      }
+      visitedWords[wordIdx] |= mask
+      result.append(current)
+      current = entries[idx]
+    }
+    return result
+  }
+}
+
 /// 512-byte sector OLE2 Compound File Binary Format (`D0 CF 11 E0 A1 B1 1A E1`) container codec.
 public enum OLE2ContainerCodec {
   public static let sectorSize = 512
@@ -293,13 +338,14 @@ public enum OLE2ContainerCodec {
       }
     }
 
-    var claimedSectors = Set<UInt32>()
+    let wordCount = max(1, (max(fat.count, totalSectorsInFile) + 63) >> 6)
+    var claimedWords = [UInt64](repeating: 0, count: wordCount)
     let directoryData = try readSectorChain(
       startSector: firstDirSector,
       fat: fat,
       data: data,
       totalSectors: totalSectorsInFile,
-      claimedSectors: &claimedSectors,
+      claimedWords: &claimedWords,
       expectedByteCount: sectorSize
     )
     guard !directoryData.isEmpty else {
@@ -337,7 +383,7 @@ public enum OLE2ContainerCodec {
           fat: fat,
           data: data,
           totalSectors: totalSectorsInFile,
-          claimedSectors: &claimedSectors,
+          claimedWords: &claimedWords,
           expectedByteCount: streamSize
         )
         guard rawChain.count >= streamSize else {
@@ -356,7 +402,7 @@ public enum OLE2ContainerCodec {
     fat: [UInt32],
     data: Data,
     totalSectors: Int,
-    claimedSectors: inout Set<UInt32>,
+    claimedWords: inout [UInt64],
     expectedByteCount: Int? = nil
   ) throws -> Data {
     var output = Data()
@@ -366,21 +412,24 @@ public enum OLE2ContainerCodec {
     var current = startSector
 
     while current != endOfChain {
-      guard !claimedSectors.contains(current) else {
-        throw EasyOfficeError.corruptedContainer(
-          detail: "OLE2 sector cycle or cross-stream sector sharing detected"
-        )
-      }
       guard current < UInt32(totalSectors), Int(current) < fat.count else {
         throw EasyOfficeError.corruptedContainer(
           detail: "OLE2 FAT 체인이 유효하지 않은 섹터(\(current))를 참조합니다.")
       }
-      claimedSectors.insert(current)
+      let idx = Int(current)
+      let wordIdx = idx >> 6
+      let mask: UInt64 = 1 << UInt64(idx & 63)
+      guard (claimedWords[wordIdx] & mask) == 0 else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "OLE2 sector cycle or cross-stream sector sharing detected"
+        )
+      }
+      claimedWords[wordIdx] |= mask
 
-      let fileOffset = (1 + Int(current)) * sectorSize
+      let fileOffset = (1 + idx) * sectorSize
       let startIdx = data.startIndex + fileOffset
       output.append(contentsOf: data[startIdx..<(startIdx + sectorSize)])
-      current = fat[Int(current)]
+      current = fat[idx]
     }
 
     return output

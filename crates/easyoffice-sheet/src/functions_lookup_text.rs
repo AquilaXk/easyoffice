@@ -520,4 +520,116 @@ impl SheetEngine {
             _ => Err(FormulaError::Name),
         }
     }
+
+    pub(crate) fn eval_logical_func(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        match name {
+            "IF" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(FormulaError::Value);
+                }
+                let flag = self
+                    .eval_arg_val(&args[0], ctx, depth)?
+                    .as_bool()
+                    .ok_or(FormulaError::Value)?;
+                if flag {
+                    Ok(self.eval_expr_ctx(&args[1], ctx, depth + 1))
+                } else if args.len() == 3 {
+                    Ok(self.eval_expr_ctx(&args[2], ctx, depth + 1))
+                } else {
+                    Ok(EvaluatedCellValue::Boolean(false))
+                }
+            }
+            "IFS" => {
+                if args.len() < 2 || !args.len().is_multiple_of(2) {
+                    return Err(FormulaError::Value);
+                }
+                for pair in args.chunks(2) {
+                    let cond = self.eval_arg_val(&pair[0], ctx, depth)?;
+                    if cond.as_bool().ok_or(FormulaError::Value)? {
+                        return Ok(self.eval_expr_ctx(&pair[1], ctx, depth + 1));
+                    }
+                }
+                Err(FormulaError::Na)
+            }
+            "AND" | "OR" | "XOR" => {
+                let vals = self.expand_args_ctx(args, ctx, depth)?;
+                if vals.is_empty() {
+                    return Err(FormulaError::Value);
+                }
+                let mut trues = 0usize;
+                let mut seen = 0usize;
+                for v in vals {
+                    if matches!(v, EvaluatedCellValue::Empty) {
+                        continue;
+                    }
+                    let b = v.as_bool().ok_or(FormulaError::Value)?;
+                    seen += 1;
+                    if b {
+                        trues += 1;
+                    }
+                }
+                if seen == 0 {
+                    return Err(FormulaError::Value);
+                }
+                Ok(EvaluatedCellValue::Boolean(match name {
+                    "AND" => trues == seen,
+                    "OR" => trues > 0,
+                    _ => trues % 2 == 1,
+                }))
+            }
+            "NOT" => {
+                if args.len() != 1 {
+                    return Err(FormulaError::Value);
+                }
+                let b = self
+                    .eval_arg_val(&args[0], ctx, depth)?
+                    .as_bool()
+                    .ok_or(FormulaError::Value)?;
+                Ok(EvaluatedCellValue::Boolean(!b))
+            }
+            "IFERROR" | "IFNA" => {
+                if args.len() != 2 {
+                    return Err(FormulaError::Value);
+                }
+                let primary = self.eval_expr_ctx(&args[0], ctx, depth + 1);
+                let catch = match primary {
+                    EvaluatedCellValue::Error(FormulaError::Na) => true,
+                    EvaluatedCellValue::Error(_) => name == "IFERROR",
+                    _ => false,
+                };
+                Ok(if catch {
+                    self.eval_expr_ctx(&args[1], ctx, depth + 1)
+                } else {
+                    primary
+                })
+            }
+            "SWITCH" => {
+                if args.len() < 3 {
+                    return Err(FormulaError::Value);
+                }
+                let target = self.eval_arg_val(&args[0], ctx, depth)?;
+                let rest = &args[1..];
+                for i in 0..(rest.len() / 2) {
+                    let k = self.eval_arg_val(&rest[i * 2], ctx, depth)?;
+                    if Self::values_match(&target, &k) {
+                        return Ok(self.eval_expr_ctx(&rest[i * 2 + 1], ctx, depth + 1));
+                    }
+                }
+                if rest.len() % 2 == 1 {
+                    Ok(self.eval_expr_ctx(rest.last().unwrap(), ctx, depth + 1))
+                } else {
+                    Err(FormulaError::Na)
+                }
+            }
+            "TRUE" => Ok(EvaluatedCellValue::Boolean(true)),
+            "FALSE" => Ok(EvaluatedCellValue::Boolean(false)),
+            _ => Err(FormulaError::Name),
+        }
+    }
 }

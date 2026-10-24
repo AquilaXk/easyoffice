@@ -1,12 +1,18 @@
 use crate::{EasyOfficeError, ZipSecurityGuard};
+use std::sync::OnceLock;
 
 const MAX_BITS: usize = 15;
+const FAST_LUT_BITS: u32 = 9;
+const FAST_LUT_SIZE: usize = 1 << FAST_LUT_BITS;
+const FAST_LUT_MASK: u64 = (FAST_LUT_SIZE as u64) - 1;
 const MAX_MATCH_LEN: usize = 258;
 const MIN_MATCH_LEN: usize = 3;
 const WINDOW_SIZE: usize = 32_768;
 const HASH_BITS: usize = 12;
 const HASH_SIZE: usize = 1 << HASH_BITS;
 const HASH_MASK: usize = HASH_SIZE - 1;
+const ADLER_MOD: u32 = 65_521;
+const ADLER_NMAX: usize = 5_552;
 
 const LENGTH_BASE: [u16; 29] = [
     3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
@@ -31,6 +37,46 @@ const CL_ORDER: [usize; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
 ];
 
+const LENGTH_CODE_LUT: [u8; 259] = {
+    let mut lut = [0u8; 259];
+    let mut len = 3usize;
+    while len <= 257 {
+        let mut idx = 0usize;
+        while idx + 1 < 28 && (LENGTH_BASE[idx + 1] as usize) <= len {
+            idx += 1;
+        }
+        lut[len] = idx as u8;
+        len += 1;
+    }
+    lut[258] = 28;
+    lut
+};
+
+const DIST_CODE_LUT: [u8; 512] = {
+    let mut lut = [0u8; 512];
+    let mut d = 0usize;
+    while d < 256 {
+        let dist = d + 1;
+        let mut idx = 0usize;
+        while idx + 1 < 30 && (DIST_BASE[idx + 1] as usize) <= dist {
+            idx += 1;
+        }
+        lut[d] = idx as u8;
+        d += 1;
+    }
+    let mut hi = 0usize;
+    while hi < 256 {
+        let dist = (hi << 7) + 1;
+        let mut idx = 0usize;
+        while idx + 1 < 30 && (DIST_BASE[idx + 1] as usize) <= dist {
+            idx += 1;
+        }
+        lut[256 + hi] = idx as u8;
+        hi += 1;
+    }
+    lut
+};
+
 struct BitReader<'a> {
     input: &'a [u8],
     byte_pos: usize,
@@ -50,6 +96,24 @@ impl<'a> BitReader<'a> {
 
     #[inline]
     fn fill(&mut self) {
+        if self.bit_count <= 56 && self.byte_pos + 8 <= self.input.len() {
+            let chunk = u64::from_le_bytes(
+                self.input[self.byte_pos..self.byte_pos + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let take = ((64 - self.bit_count) >> 3) as usize;
+            let take_bits = (take as u32) << 3;
+            let mask = if take_bits == 64 {
+                u64::MAX
+            } else {
+                (1u64 << take_bits) - 1
+            };
+            self.bit_buf |= (chunk & mask) << self.bit_count;
+            self.byte_pos += take;
+            self.bit_count += take_bits;
+            return;
+        }
         while self.bit_count <= 56 && self.byte_pos < self.input.len() {
             self.bit_buf |= u64::from(self.input[self.byte_pos]) << self.bit_count;
             self.byte_pos += 1;
@@ -62,11 +126,13 @@ impl<'a> BitReader<'a> {
         if n == 0 {
             return Ok(0);
         }
-        self.fill();
         if self.bit_count < n {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "DEFLATE 비트스트림이 예기치 않게 절단되었습니다.".to_string(),
-            ));
+            self.fill();
+            if self.bit_count < n {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "DEFLATE 비트스트림이 예기치 않게 절단되었습니다.".to_string(),
+                ));
+            }
         }
         let mask = (1u64 << n) - 1;
         let val = (self.bit_buf & mask) as u32;
@@ -82,6 +148,11 @@ impl<'a> BitReader<'a> {
         self.bit_count -= discard;
     }
 
+    #[inline]
+    fn byte_pos(&self) -> usize {
+        self.byte_pos - (self.bit_count / 8) as usize
+    }
+
     fn read_aligned_u16_le(&mut self) -> Result<u16, EasyOfficeError> {
         let lo = self.read_bits(8)? as u16;
         let hi = self.read_bits(8)? as u16;
@@ -95,9 +166,22 @@ impl<'a> BitReader<'a> {
         max_output_bytes: usize,
         input_len: usize,
     ) -> Result<(), EasyOfficeError> {
-        for _ in 0..len {
-            let b = self.read_bits(8)? as u8;
-            push_checked_byte(out, b, max_output_bytes, input_len)?;
+        check_budget(out.len() + len, max_output_bytes, input_len)?;
+        let mut remaining = len;
+        while remaining > 0 && self.bit_count >= 8 {
+            out.push((self.bit_buf & 0xFF) as u8);
+            self.bit_buf >>= 8;
+            self.bit_count -= 8;
+            remaining -= 1;
+        }
+        if remaining > 0 {
+            if self.byte_pos + remaining > self.input.len() {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "DEFLATE Stored 블록 바이트가 절단되었습니다.".to_string(),
+                ));
+            }
+            out.extend_from_slice(&self.input[self.byte_pos..self.byte_pos + remaining]);
+            self.byte_pos += remaining;
         }
         Ok(())
     }
@@ -105,6 +189,7 @@ impl<'a> BitReader<'a> {
 
 struct HuffmanTable {
     max_bits: u32,
+    fast_lut: [u16; FAST_LUT_SIZE],
     entries: Vec<u16>,
 }
 
@@ -131,7 +216,8 @@ impl HuffmanTable {
         if max_bits == 0 {
             return Ok(Self {
                 max_bits: 1,
-                entries: vec![0; 2],
+                fast_lut: [0u16; FAST_LUT_SIZE],
+                entries: Vec::new(),
             });
         }
 
@@ -152,8 +238,12 @@ impl HuffmanTable {
             next_code[bits] = code;
         }
 
-        let table_size = 1usize << max_bits;
-        let mut entries = vec![0u16; table_size];
+        let mut fast_lut = [0u16; FAST_LUT_SIZE];
+        let mut entries = if max_bits > FAST_LUT_BITS as usize {
+            vec![0u16; 1usize << max_bits]
+        } else {
+            Vec::new()
+        };
 
         for (sym, &len_u8) in lengths.iter().enumerate() {
             let len = len_u8 as usize;
@@ -162,28 +252,55 @@ impl HuffmanTable {
             }
             let canonical = next_code[len];
             next_code[len] += 1;
-            let rev = reverse_bits(canonical, len) as usize;
+            let rev = reverse_bits(canonical, len_u8) as usize;
             let packed = ((sym as u16) << 5) | (len as u16);
             let step = 1usize << len;
-            let mut idx = rev;
-            while idx < table_size {
-                entries[idx] = packed;
-                idx += step;
+
+            if len <= FAST_LUT_BITS as usize {
+                let mut idx = rev;
+                while idx < FAST_LUT_SIZE {
+                    fast_lut[idx] = packed;
+                    idx += step;
+                }
+            }
+            if !entries.is_empty() {
+                let table_size = entries.len();
+                let mut idx = rev;
+                while idx < table_size {
+                    entries[idx] = packed;
+                    idx += step;
+                }
             }
         }
 
         Ok(Self {
             max_bits: max_bits as u32,
+            fast_lut,
             entries,
         })
     }
 
     #[inline]
     fn decode(&self, reader: &mut BitReader<'_>) -> Result<u16, EasyOfficeError> {
-        reader.fill();
-        if reader.bit_count == 0 {
+        if reader.bit_count < MAX_BITS as u32 {
+            reader.fill();
+        }
+        let fast_entry = self.fast_lut[(reader.bit_buf & FAST_LUT_MASK) as usize];
+        let fast_len = (fast_entry & 0x1F) as u32;
+        if fast_len != 0 {
+            if reader.bit_count < fast_len {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "유효하지 않은 DEFLATE 허프만 코드 또는 절단된 스트림입니다.".to_string(),
+                ));
+            }
+            reader.bit_buf >>= fast_len;
+            reader.bit_count -= fast_len;
+            return Ok(fast_entry >> 5);
+        }
+        if self.entries.is_empty() || reader.bit_count == 0 {
             return Err(EasyOfficeError::CorruptedContainer(
-                "DEFLATE 허프만 심볼 디코딩 중 스트림이 종료되었습니다.".to_string(),
+                "DEFLATE 허프만 심볼 디코딩 중 스트림이 종료되었거나 유효하지 않은 코드입니다."
+                    .to_string(),
             ));
         }
         let mask = (1u64 << self.max_bits) - 1;
@@ -202,13 +319,12 @@ impl HuffmanTable {
 }
 
 #[inline]
-fn reverse_bits(mut val: u16, bit_len: usize) -> u16 {
-    let mut out = 0u16;
-    for _ in 0..bit_len {
-        out = (out << 1) | (val & 1);
-        val >>= 1;
+fn reverse_bits(code: u16, bit_len: u8) -> u16 {
+    if bit_len == 0 {
+        0
+    } else {
+        code.reverse_bits() >> (16 - bit_len)
     }
-    out
 }
 
 #[inline]
@@ -250,17 +366,20 @@ fn push_checked_byte(
     Ok(())
 }
 
-fn fixed_huffman_tables() -> Result<(HuffmanTable, HuffmanTable), EasyOfficeError> {
-    let mut lit_lengths = [0u8; 288];
-    lit_lengths[..=143].fill(8);
-    lit_lengths[144..=255].fill(9);
-    lit_lengths[256..=279].fill(7);
-    lit_lengths[280..=287].fill(8);
-    let dist_lengths = [5u8; 32];
-    Ok((
-        HuffmanTable::from_code_lengths(&lit_lengths)?,
-        HuffmanTable::from_code_lengths(&dist_lengths)?,
-    ))
+fn fixed_huffman_tables() -> &'static (HuffmanTable, HuffmanTable) {
+    static FIXED_TABLES: OnceLock<(HuffmanTable, HuffmanTable)> = OnceLock::new();
+    FIXED_TABLES.get_or_init(|| {
+        let mut lit_lengths = [0u8; 288];
+        lit_lengths[..=143].fill(8);
+        lit_lengths[144..=255].fill(9);
+        lit_lengths[256..=279].fill(7);
+        lit_lengths[280..=287].fill(8);
+        let dist_lengths = [5u8; 32];
+        (
+            HuffmanTable::from_code_lengths(&lit_lengths).expect("valid RFC 1951 fixed lit"),
+            HuffmanTable::from_code_lengths(&dist_lengths).expect("valid RFC 1951 fixed dist"),
+        )
+    })
 }
 
 fn read_dynamic_huffman_tables(
@@ -381,9 +500,17 @@ fn decode_huffman_block(
             }
 
             check_budget(out.len() + match_len, max_output_bytes, input_len)?;
-            for _ in 0..match_len {
-                let b = out[out.len() - distance];
-                out.push(b);
+            if distance == 1 {
+                let b = out[out.len() - 1];
+                out.resize(out.len() + match_len, b);
+            } else if distance >= match_len {
+                let start = out.len() - distance;
+                out.extend_from_within(start..start + match_len);
+            } else {
+                for _ in 0..match_len {
+                    let b = out[out.len() - distance];
+                    out.push(b);
+                }
             }
         } else {
             return Err(EasyOfficeError::CorruptedContainer(format!(
@@ -394,8 +521,10 @@ fn decode_huffman_block(
     Ok(())
 }
 
-/// Decompresses an RFC 1951 raw DEFLATE bitstream with Fail-Closed output budget enforcement.
-pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
+fn inflate_raw_with_consumed(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<(Vec<u8>, usize), EasyOfficeError> {
     if input.is_empty() {
         return Err(EasyOfficeError::CorruptedContainer(
             "비어 있는 DEFLATE 스트림입니다.".to_string(),
@@ -422,11 +551,11 @@ pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Eas
                 reader.copy_aligned_bytes(len as usize, &mut out, max_output_bytes, input.len())?;
             }
             1 => {
-                let (lit_table, dist_table) = fixed_huffman_tables()?;
+                let (lit_table, dist_table) = fixed_huffman_tables();
                 decode_huffman_block(
                     &mut reader,
-                    &lit_table,
-                    &dist_table,
+                    lit_table,
+                    dist_table,
                     &mut out,
                     max_output_bytes,
                     input.len(),
@@ -451,28 +580,103 @@ pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Eas
         }
 
         if bfinal != 0 {
+            reader.align_to_byte();
             break;
         }
     }
 
-    Ok(out)
+    Ok((out, reader.byte_pos()))
+}
+
+/// Decompresses an RFC 1951 raw DEFLATE bitstream with Fail-Closed output budget enforcement.
+pub fn inflate_raw(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
+    inflate_raw_with_consumed(input, max_output_bytes).map(|(out, _)| out)
+}
+
+/// Computes the RFC 1950 Adler-32 checksum using `NMAX = 5552` deferred modulo reduction.
+#[inline]
+pub fn adler32(bytes: &[u8]) -> u32 {
+    let mut s1: u32 = 1;
+    let mut s2: u32 = 0;
+
+    for chunk in bytes.chunks(ADLER_NMAX) {
+        let mut i = 0usize;
+        while i + 16 <= chunk.len() {
+            for k in 0..16 {
+                s1 += u32::from(chunk[i + k]);
+                s2 += s1;
+            }
+            i += 16;
+        }
+        while i < chunk.len() {
+            s1 += u32::from(chunk[i]);
+            s2 += s1;
+            i += 1;
+        }
+        s1 %= ADLER_MOD;
+        s2 %= ADLER_MOD;
+    }
+
+    (s2 << 16) | s1
+}
+
+/// Compresses `input` into an RFC 1950 zlib stream (`[0x78, 0x9C] + deflate_raw + 4-byte BE Adler-32`).
+pub fn deflate_zlib(input: &[u8]) -> Vec<u8> {
+    let raw = deflate_raw(input);
+    let checksum = adler32(input);
+    let mut out = Vec::with_capacity(2 + raw.len() + 4);
+    out.extend_from_slice(&[0x78, 0x9C]);
+    out.extend_from_slice(&raw);
+    out.extend_from_slice(&checksum.to_be_bytes());
+    out
+}
+
+#[inline]
+fn is_valid_zlib_header(input: &[u8]) -> bool {
+    input.len() >= 2
+        && (input[0] & 0x0F) == 8
+        && (input[0] & 0x80) == 0
+        && (input[1] & 0x20) == 0
+        && (u16::from(input[0]) * 256 + u16::from(input[1])).is_multiple_of(31)
+}
+
+/// Decompresses an RFC 1950 zlib stream and validates the 2-byte header and 4-byte Adler-32 trailer.
+pub fn inflate_zlib(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
+    if input.len() < 6 || !is_valid_zlib_header(input) {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "유효하지 않은 RFC 1950 zlib 스트림(헤더 2 + 데이터 + Adler-32 4)입니다.".to_string(),
+        ));
+    }
+    let decoded = inflate_raw(&input[2..input.len() - 4], max_output_bytes)?;
+    let expected_adler = u32::from_be_bytes(input[input.len() - 4..].try_into().unwrap());
+    let actual_adler = adler32(&decoded);
+    if actual_adler != expected_adler {
+        return Err(EasyOfficeError::CorruptedContainer(format!(
+            "RFC 1950 Adler-32 체크섬 불일치 (expected: {expected_adler:#010x}, actual: {actual_adler:#010x})"
+        )));
+    }
+    Ok(decoded)
 }
 
 /// Decompresses either a raw RFC 1951 DEFLATE stream or an RFC 1950 zlib-wrapped DEFLATE stream.
 pub fn inflate_auto(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, EasyOfficeError> {
-    if input.len() >= 2 {
-        let b0 = input[0];
-        let b1 = input[1];
-        let is_zlib_header = (b0 & 0x0F) == 8
-            && (b0 & 0x80) == 0
-            && (b1 & 0x20) == 0
-            && ((u16::from(b0) * 256 + u16::from(b1)).is_multiple_of(31));
-        if is_zlib_header {
-            match inflate_raw(&input[2..], max_output_bytes) {
-                Ok(decoded) => return Ok(decoded),
-                Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
-                Err(_) => {}
+    if is_valid_zlib_header(input) {
+        match inflate_raw_with_consumed(&input[2..], max_output_bytes) {
+            Ok((decoded, consumed)) => {
+                let rem = &input[2 + consumed..];
+                if rem.len() >= 4 {
+                    let expected = u32::from_be_bytes([rem[0], rem[1], rem[2], rem[3]]);
+                    let actual = adler32(&decoded);
+                    if expected != actual {
+                        return Err(EasyOfficeError::CorruptedContainer(format!(
+                            "RFC 1950 Adler-32 체크섬 불일치 (expected: {expected:#010x}, actual: {actual:#010x})"
+                        )));
+                    }
+                }
+                return Ok(decoded);
             }
+            Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
+            Err(_) => {}
         }
     }
     inflate_raw(input, max_output_bytes)
@@ -501,6 +705,12 @@ impl BitWriter {
         let mask = (1u64 << n) - 1;
         self.bit_buf |= (u64::from(val) & mask) << self.bit_count;
         self.bit_count += n;
+        if self.bit_count >= 32 {
+            self.out
+                .extend_from_slice(&(self.bit_buf as u32).to_le_bytes());
+            self.bit_buf >>= 32;
+            self.bit_count -= 32;
+        }
         while self.bit_count >= 8 {
             self.out.push((self.bit_buf & 0xFF) as u8);
             self.bit_buf >>= 8;
@@ -509,9 +719,9 @@ impl BitWriter {
     }
 
     #[inline]
-    fn write_huffman_msb(&mut self, code: u16, len: usize) {
+    fn write_huffman_msb(&mut self, code: u16, len: u8) {
         let rev = reverse_bits(code, len);
-        self.write_bits_lsb(u32::from(rev), len as u32);
+        self.write_bits_lsb(u32::from(rev), u32::from(len));
     }
 
     #[inline]
@@ -543,26 +753,20 @@ fn hash3(bytes: &[u8], pos: usize) -> usize {
 
 #[inline]
 fn find_length_code(len: usize) -> usize {
-    if len == 258 {
-        return 28;
-    }
-    let mut idx = 0usize;
-    while idx + 1 < 28 && (LENGTH_BASE[idx + 1] as usize) <= len {
-        idx += 1;
-    }
-    idx
+    LENGTH_CODE_LUT[len] as usize
 }
 
 #[inline]
 fn find_dist_code(dist: usize) -> usize {
-    let mut idx = 0usize;
-    while idx + 1 < 30 && (DIST_BASE[idx + 1] as usize) <= dist {
-        idx += 1;
+    let d = dist - 1;
+    if d < 256 {
+        DIST_CODE_LUT[d] as usize
+    } else {
+        DIST_CODE_LUT[256 + (d >> 7)] as usize
     }
-    idx
 }
 
-/// Compresses `input` into a deterministic RFC 1951 raw DEFLATE bitstream using Fixed Huffman + LZ77 sliding window.
+/// Compresses `input` into a deterministic RFC 1951 raw DEFLATE bitstream using Fixed Huffman + SWAR `u64` LZ77.
 pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
     let mut writer = BitWriter::with_capacity(input.len() / 2 + 16);
     writer.write_bits_lsb(1, 1);
@@ -602,6 +806,21 @@ pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
                     && input[c_pos + best_len] == input[pos + best_len]
                 {
                     let mut m_len = 0usize;
+                    while m_len + 8 <= max_len {
+                        let a = u64::from_le_bytes(
+                            input[c_pos + m_len..c_pos + m_len + 8].try_into().unwrap(),
+                        );
+                        let b = u64::from_le_bytes(
+                            input[pos + m_len..pos + m_len + 8].try_into().unwrap(),
+                        );
+                        let diff = a ^ b;
+                        if diff == 0 {
+                            m_len += 8;
+                        } else {
+                            m_len += (diff.trailing_zeros() >> 3) as usize;
+                            break;
+                        }
+                    }
                     while m_len < max_len && input[c_pos + m_len] == input[pos + m_len] {
                         m_len += 1;
                     }
@@ -658,12 +877,31 @@ mod tests {
 
     #[test]
     fn test_deflate_and_inflate_fixed_stored_and_zlib_auto() {
+        // RFC 1950 standard Adler-32 test vector: "Wikipedia" -> 0x11E60398
+        assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
+
         let xml = b"<w:document><w:body><w:p><w:r><w:t>EasyOffice RFC 1951 DEFLATE</w:t></w:p></w:body></w:document>"
             .repeat(8);
         let compressed = deflate_raw(&xml);
         assert!(compressed.len() < xml.len() / 3);
         let decompressed = inflate_raw(&compressed, 1024 * 1024).unwrap();
         assert_eq!(decompressed, xml);
+
+        let zlib_full = deflate_zlib(&xml);
+        assert_eq!(inflate_zlib(&zlib_full, 1024 * 1024).unwrap(), xml);
+        assert_eq!(inflate_auto(&zlib_full, 1024 * 1024).unwrap(), xml);
+
+        let mut bad_zlib = zlib_full.clone();
+        let last_idx = bad_zlib.len() - 1;
+        bad_zlib[last_idx] ^= 0xFF;
+        assert!(matches!(
+            inflate_zlib(&bad_zlib, 1024 * 1024),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
+        assert!(matches!(
+            inflate_auto(&bad_zlib, 1024 * 1024),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
 
         let stored_stream = [0x01u8, 0x05, 0x00, 0xFA, 0xFF, b'H', b'e', b'l', b'l', b'o'];
         assert_eq!(inflate_raw(&stored_stream, 1024).unwrap(), b"Hello");

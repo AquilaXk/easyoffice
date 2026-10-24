@@ -75,11 +75,7 @@ public struct SlideElementShapeContentView: View {
     if element.animation != .none {
       Text("✦ \(element.animation.rawValue)")
         .font(.system(size: 8, weight: .bold))
-        .padding(.horizontal, 4)
-        .padding(.vertical, 1)
-        .background(palette.selectedSurface.swiftUIColor)
         .foregroundStyle(palette.accentBadgeText.swiftUIColor)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
     }
   }
 
@@ -161,14 +157,18 @@ public struct SlideElementShapeContentView: View {
       }
 
     case .calloutShape:
-      VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .top, spacing: 8) {
+        Rectangle()
+          .fill(strokeColor)
+          .frame(width: 2.5)
+
         VStack(alignment: .leading, spacing: 3) {
           HStack(spacing: 4) {
-            Text("💬 \(element.title)")
+            Text(element.title)
               .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
               .italic(element.isItalic)
               .underline(element.isUnderlined)
-              .foregroundStyle(elementTextColor)
+              .foregroundStyle(strokeColor)
               .lineLimit(1)
             Spacer(minLength: 2)
             animationBadgeView
@@ -178,36 +178,21 @@ public struct SlideElementShapeContentView: View {
             .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
             .italic(element.isItalic)
             .underline(element.isUnderlined)
-            .foregroundStyle(elementSecondaryTextColor)
+            .foregroundStyle(palette.primaryText.swiftUIColor)
             .lineLimit(2)
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(fillColor.opacity(0.96))
-        .overlay(
-          RoundedRectangle(cornerRadius: 8)
-            .stroke(strokeColor, lineWidth: strokeLineWidth)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-        Canvas { context, size in
-          var tail = Path()
-          tail.move(to: CGPoint(x: 16.0, y: 0.0))
-          tail.addLine(to: CGPoint(x: 28.0, y: 0.0))
-          tail.addLine(to: CGPoint(x: 12.0, y: size.height))
-          tail.closeSubpath()
-          context.fill(tail, with: .color(fillColor))
-          context.stroke(tail, with: .color(strokeColor), lineWidth: 1.4)
-        }
-        .frame(height: 9)
       }
+      .padding(.vertical, 4)
+      .padding(.horizontal, 6)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
 
     case .tableGrid:
       VStack(alignment: .leading, spacing: 3) {
         HStack {
           Label(element.title, systemImage: "tablecells")
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(elementTextColor)
+            .foregroundStyle(strokeColor)
             .lineLimit(1)
           Spacer(minLength: 2)
           animationBadgeView
@@ -233,16 +218,11 @@ public struct SlideElementShapeContentView: View {
             }
           }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .border(palette.border.swiftUIColor, width: 0.8)
       }
-      .padding(6)
+      .padding(4)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .background(fillColor.opacity(0.95))
-      .overlay(
-        RoundedRectangle(cornerRadius: 6)
-          .stroke(strokeColor, lineWidth: strokeLineWidth)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 6))
+      .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
 
     case .chartEmbed:
       let barRatios: [CGFloat] = [0.45, 0.82, 0.64, 0.95]
@@ -250,7 +230,7 @@ public struct SlideElementShapeContentView: View {
         HStack {
           Label(element.title, systemImage: "chart.bar.fill")
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(elementTextColor)
+            .foregroundStyle(strokeColor)
             .lineLimit(1)
           Spacer(minLength: 2)
           animationBadgeView
@@ -258,7 +238,7 @@ public struct SlideElementShapeContentView: View {
 
         HStack(alignment: .bottom, spacing: 6) {
           ForEach(Array(barRatios.enumerated()), id: \.offset) { idx, ratio in
-            RoundedRectangle(cornerRadius: 2)
+            Rectangle()
               .fill(
                 idx % 2 == 0
                   ? EasyOfficeDesignTokens.brand700.swiftUIColor
@@ -273,51 +253,43 @@ public struct SlideElementShapeContentView: View {
         if !element.bodyText.isEmpty {
           Text(element.bodyText)
             .font(.system(size: 8, design: .monospaced))
-            .foregroundStyle(elementSecondaryTextColor)
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
             .lineLimit(1)
         }
       }
-      .padding(7)
+      .padding(6)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .background(fillColor.opacity(0.95))
-      .overlay(
-        RoundedRectangle(cornerRadius: 6)
-          .stroke(strokeColor, lineWidth: strokeLineWidth)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 6))
+      .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
 
     case .roundedRectangleShape, .rectangleShape, .textBox:
-      let cornerRadius: CGFloat =
-        element.kind == .roundedRectangleShape
-        ? 12.0
-        : (element.kind == .rectangleShape ? 2.0 : 6.0)
+      HStack(alignment: .top, spacing: 8) {
+        Rectangle()
+          .fill(strokeColor)
+          .frame(width: 2)
 
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 4) {
-          Text(element.title)
-            .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(spacing: 4) {
+            Text(element.title)
+              .font(.system(size: 11.5, weight: element.isBold ? .heavy : .bold))
+              .italic(element.isItalic)
+              .underline(element.isUnderlined)
+              .foregroundStyle(strokeColor)
+              .lineLimit(1)
+            Spacer(minLength: 2)
+            animationBadgeView
+          }
+          Text(element.bodyText)
+            .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
             .italic(element.isItalic)
             .underline(element.isUnderlined)
-            .foregroundStyle(elementTextColor)
-            .lineLimit(1)
-          Spacer(minLength: 2)
-          animationBadgeView
+            .foregroundStyle(palette.primaryText.swiftUIColor)
+            .lineLimit(2)
         }
-        Text(element.bodyText)
-          .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
-          .italic(element.isItalic)
-          .underline(element.isUnderlined)
-          .foregroundStyle(elementSecondaryTextColor)
-          .lineLimit(2)
       }
-      .padding(8)
+      .padding(.vertical, 4)
+      .padding(.horizontal, 6)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-      .background(fillColor.opacity(0.95))
-      .overlay(
-        RoundedRectangle(cornerRadius: cornerRadius)
-          .stroke(strokeColor, lineWidth: strokeLineWidth)
-      )
-      .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+      .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
     }
   }
 }
@@ -371,24 +343,19 @@ public struct SlideshowFullScreenOverlayView: View {
         .ignoresSafeArea()
 
       VStack(spacing: 16) {
-        // Top Presenter Header Bar
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
           Label(
-            "전체화면 발표 스테이지 · \(activeIdx + 1) / \(max(1, deck.slides.count))",
+            "발표 스테이지 · \(activeIdx + 1) / \(max(1, deck.slides.count))",
             systemImage: "play.tv.fill"
           )
           .font(.system(size: 13, weight: .bold))
           .foregroundStyle(EasyOfficeDesignTokens.darkText.swiftUIColor)
 
-          Text("경과: \(presenterSession.elapsedSeconds)초")
+          Text("경과 \(presenterSession.elapsedSeconds)초")
             .font(.system(size: 12, weight: .semibold, design: .monospaced))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(EasyOfficeDesignTokens.darkElevated.swiftUIColor)
             .foregroundStyle(EasyOfficeDesignTokens.brand200.swiftUIColor)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
 
-          LavenderTogglePill(
+          FlatToggleControl(
             title: "레이저 포인터",
             systemImage: "laser.burst",
             isOn: $viewModel.isLaserPointerEnabled,
@@ -404,7 +371,9 @@ public struct SlideshowFullScreenOverlayView: View {
               isStageAnimatedIn = true
             }
           }
-          .buttonStyle(.bordered)
+          .buttonStyle(.plain)
+          .font(.system(size: 12, weight: .medium))
+          .foregroundStyle(EasyOfficeDesignTokens.darkText.swiftUIColor)
           .disabled(activeIdx == 0)
 
           Button("다음 슬라이드") {
@@ -414,21 +383,22 @@ public struct SlideshowFullScreenOverlayView: View {
               isStageAnimatedIn = true
             }
           }
-          .buttonStyle(.borderedProminent)
-          .tint(EasyOfficeDesignTokens.brand600.swiftUIColor)
+          .buttonStyle(.plain)
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(EasyOfficeDesignTokens.brand200.swiftUIColor)
           .disabled(activeIdx + 1 >= deck.slides.count)
 
           Button("슬라이드쇼 종료 (ESC)") {
             viewModel.toggleFullScreenSlideshow()
           }
-          .buttonStyle(.borderedProminent)
-          .tint(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+          .buttonStyle(.plain)
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
           .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
 
-        // Large 16:9 Presentation Stage with Element Entrance Transitions & Glowing Laser Pointer
         if let slide = currentSlide {
           GeometryReader { geo in
             let stageW = max(1.0, deck.aspectRatio.widthPoints)
@@ -437,7 +407,7 @@ public struct SlideshowFullScreenOverlayView: View {
             let scaleY = max(0.01, geo.size.height / stageH)
 
             ZStack(alignment: .topLeading) {
-              RoundedRectangle(cornerRadius: 12)
+              Rectangle()
                 .fill(EasyOfficeDesignTokens.lightWhite.swiftUIColor)
                 .shadow(color: Color.black.opacity(0.45), radius: 18, x: 0, y: 8)
 
@@ -494,7 +464,6 @@ public struct SlideshowFullScreenOverlayView: View {
                   Circle()
                     .fill(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
                     .frame(width: 12, height: 12)
-                    .shadow(color: EasyOfficeDesignTokens.statusDanger.swiftUIColor, radius: 8)
                 }
                 .position(laserPointerLocation)
                 .allowsHitTesting(false)
@@ -515,10 +484,9 @@ public struct SlideshowFullScreenOverlayView: View {
           }
           .padding(.horizontal, 36)
 
-          // Bottom Speaker Notes HUD Drawer
           HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-              Text("발표자 노트 HUD (전환: \(slide.transition.rawValue))")
+              Text("발표자 노트 (전환: \(slide.transition.rawValue))")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(EasyOfficeDesignTokens.brand200.swiftUIColor)
               Text(slide.speakerNotes.isEmpty ? "등록된 발표자 노트가 없습니다." : slide.speakerNotes)
@@ -534,7 +502,6 @@ public struct SlideshowFullScreenOverlayView: View {
           }
           .padding(16)
           .background(EasyOfficeDesignTokens.darkSurface.swiftUIColor)
-          .clipShape(RoundedRectangle(cornerRadius: 10))
           .padding(.horizontal, 36)
           .padding(.bottom, 20)
         }
@@ -582,27 +549,18 @@ public struct PDFInteractiveInkOverlayView: View {
     )
 
     VStack(alignment: .leading, spacing: 8) {
-      // Freehand Ink & Quick Highlight Bar
-      HStack(spacing: 8) {
-        Label("자유곡선 벡터 펜 · 본문 하이라이트", systemImage: "scribble.variable")
-          .font(.system(size: 11, weight: .bold))
+      HStack(spacing: 10) {
+        Label("자유곡선 펜 · 본문 하이라이트", systemImage: "scribble.variable")
+          .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
 
         Text(viewModel.isPDFInkDrawingModeEnabled ? "펜 활성" : "펜 대기")
-          .font(.system(size: 10, weight: .bold))
-          .padding(.horizontal, 6)
-          .padding(.vertical, 2)
-          .background(
-            viewModel.isPDFInkDrawingModeEnabled
-              ? palette.selectedSurface.swiftUIColor
-              : palette.cardSurface.swiftUIColor
-          )
+          .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(
             viewModel.isPDFInkDrawingModeEnabled
               ? palette.accentBadgeText.swiftUIColor
               : palette.secondaryText.swiftUIColor
           )
-          .clipShape(Capsule())
 
         ForEach(["#5C6BC0", "#D9383A", "#0A705A"], id: \.self) { hex in
           let chipColor = EasyOfficeDesignTokens.resolveHexColor(
@@ -615,27 +573,19 @@ public struct PDFInteractiveInkOverlayView: View {
           } label: {
             Circle()
               .fill(chipColor)
-              .frame(width: 14, height: 14)
-              .overlay(
-                Circle()
-                  .stroke(
-                    viewModel.pdfInkStrokeColorHex.uppercased() == hex
-                      ? palette.primaryText.swiftUIColor
-                      : Color.clear,
-                    lineWidth: 1.5
-                  )
-              )
+              .frame(width: 12, height: 12)
+              .opacity(viewModel.pdfInkStrokeColorHex.uppercased() == hex ? 1.0 : 0.55)
           }
           .buttonStyle(.plain)
         }
 
-        Text("굵기: \(String(format: "%.1f", viewModel.pdfInkLineWidth))pt")
+        Text("굵기 \(String(format: "%.1f", viewModel.pdfInkLineWidth))pt")
           .font(.system(size: 10, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
 
         Divider().frame(height: 14)
 
-        LavenderTextFieldPill(
+        FlatUnderlineTextField(
           placeholder: "하이라이트할 본문 구절...",
           text: $highlightSelectionText,
           width: 165,
@@ -648,37 +598,29 @@ public struct PDFInteractiveInkOverlayView: View {
         } label: {
           Label("구절 하이라이트", systemImage: "highlighter")
             .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
 
         Spacer()
 
-        Text("현재 페이지 벡터 획: \(pageStrokes.count)건")
-          .font(.system(size: 10, weight: .semibold, design: .monospaced))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        Text("벡터 획 \(pageStrokes.count)건")
+          .font(.system(size: 10, weight: .medium, design: .monospaced))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
       }
 
-      // Interactive Vector Drawing Canvas Overlay
       GeometryReader { geo in
         let canvasW = max(1.0, geo.size.width)
         let canvasH = max(1.0, geo.size.height)
 
         ZStack {
-          RoundedRectangle(cornerRadius: 6)
-            .fill(
+          Rectangle()
+            .fill(palette.elevatedSurface.swiftUIColor)
+            .border(
               viewModel.isPDFInkDrawingModeEnabled
-                ? palette.subtleAccentSurface.swiftUIColor.opacity(0.45)
-                : palette.cardSurface.swiftUIColor.opacity(0.45)
-            )
-            .overlay(
-              RoundedRectangle(cornerRadius: 6)
-                .stroke(
-                  viewModel.isPDFInkDrawingModeEnabled
-                    ? EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor.opacity(0.65)
-                    : palette.border.swiftUIColor,
-                  style: StrokeStyle(lineWidth: 1.2, dash: [5, 3])
-                )
+                ? EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor.opacity(0.65)
+                : palette.border.swiftUIColor,
+              width: 1
             )
 
           Canvas { context, size in
@@ -756,8 +698,6 @@ public struct PDFInteractiveInkOverlayView: View {
       }
       .frame(height: 96)
     }
-    .padding(10)
-    .background(palette.elevatedSurface.swiftUIColor)
-    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .padding(.vertical, 8)
   }
 }

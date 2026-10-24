@@ -109,6 +109,9 @@ impl RtfCodec {
     }
 
     pub fn unescape_rtf_text(input: &str) -> String {
+        if !input.contains('\\') && !input.contains('{') && !input.contains('}') {
+            return input.trim().to_string();
+        }
         let units: Vec<u16> = input.encode_utf16().collect();
         let mut out_units: Vec<u16> = Vec::with_capacity(units.len());
         let mut i = 0usize;
@@ -170,6 +173,283 @@ impl RtfCodec {
 
         String::from_utf16_lossy(&out_units)
     }
+}
+
+/// Compact `u64` word bitset replacing `HashSet<u32>` for $O(1)$ OLE2 sector cycle and claim tracking.
+#[derive(Debug, Clone)]
+pub struct SectorBitset {
+    words: Vec<u64>,
+}
+
+impl SectorBitset {
+    #[inline]
+    pub fn with_capacity(max_sectors: usize) -> Self {
+        Self {
+            words: vec![0u64; (max_sectors + 64) / 64],
+        }
+    }
+
+    #[inline]
+    pub fn insert(&mut self, sec: u32) -> bool {
+        let idx = sec as usize;
+        let word_idx = idx >> 6;
+        if word_idx >= self.words.len() {
+            if word_idx > 1_048_576 {
+                return false;
+            }
+            self.words.resize(word_idx + 1, 0);
+        }
+        let mask = 1u64 << (idx & 63);
+        if (self.words[word_idx] & mask) != 0 {
+            false
+        } else {
+            self.words[word_idx] |= mask;
+            true
+        }
+    }
+}
+
+/// Single-pass SWAR UTF-16LE decoder scanning 4 code units (`u64`) at a time without allocating `Vec<u16>`.
+#[inline]
+pub fn decode_utf16le_swar(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+    if !bytes.len().is_multiple_of(2) {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "UTF-16LE 바이트 길이가 짝수가 아닙니다.".to_string(),
+        ));
+    }
+    let mut out = String::with_capacity(bytes.len() / 2);
+    let mut offset = 0usize;
+
+    while offset + 8 <= bytes.len() {
+        let word = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        if (word & 0xFF80_FF80_FF80_FF80) == 0 {
+            out.push((word & 0x7F) as u8 as char);
+            out.push(((word >> 16) & 0x7F) as u8 as char);
+            out.push(((word >> 32) & 0x7F) as u8 as char);
+            out.push(((word >> 48) & 0x7F) as u8 as char);
+            offset += 8;
+        } else {
+            decode_one_utf16le_unit(bytes, &mut offset, &mut out)?;
+        }
+    }
+
+    while offset < bytes.len() {
+        decode_one_utf16le_unit(bytes, &mut offset, &mut out)?;
+    }
+
+    Ok(out)
+}
+
+#[inline]
+fn decode_one_utf16le_unit(
+    bytes: &[u8],
+    offset: &mut usize,
+    out: &mut String,
+) -> Result<(), EasyOfficeError> {
+    let u = u16::from_le_bytes([bytes[*offset], bytes[*offset + 1]]);
+    *offset += 2;
+    if u < 0x80 {
+        out.push(u as u8 as char);
+        Ok(())
+    } else if !(0xD800..=0xDFFF).contains(&u) {
+        out.push(char::from_u32(u as u32).unwrap());
+        Ok(())
+    } else if (0xD800..=0xDBFF).contains(&u) && *offset + 2 <= bytes.len() {
+        let u2 = u16::from_le_bytes([bytes[*offset], bytes[*offset + 1]]);
+        if (0xDC00..=0xDFFF).contains(&u2) {
+            *offset += 2;
+            let cp = 0x10000 + (((u as u32 - 0xD800) << 10) | (u2 as u32 - 0xDC00));
+            out.push(char::from_u32(cp).unwrap());
+            return Ok(());
+        }
+        Err(EasyOfficeError::InvalidUtf8(
+            "유효하지 않은 UTF-16LE 서로게이트 쌍입니다.".to_string(),
+        ))
+    } else {
+        Err(EasyOfficeError::InvalidUtf8(
+            "유효하지 않은 UTF-16LE 시퀀스입니다.".to_string(),
+        ))
+    }
+}
+
+/// Baseline two-pass `Vec<u16>` UTF-16LE decoder retained for benchmark verification.
+pub fn decode_utf16le_vec_baseline(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+    if !bytes.len().is_multiple_of(2) {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "UTF-16LE 바이트 길이가 짝수가 아닙니다.".to_string(),
+        ));
+    }
+    let units: Vec<u16> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    String::from_utf16(&units).map_err(|_| {
+        EasyOfficeError::InvalidUtf8("유효하지 않은 UTF-16LE 시퀀스입니다.".to_string())
+    })
+}
+
+#[inline]
+pub fn encode_utf16le_swar(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len() * 2);
+    for u in text.encode_utf16() {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
+    out
+}
+
+/// Single-pass XML entity unescaper with `&`-absence fast path and numeric entity decoding.
+#[inline]
+pub fn unescape_xml_single_pass(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(amp_pos) = rest.find('&') {
+        out.push_str(&rest[..amp_pos]);
+        let after_amp = &rest[amp_pos + 1..];
+        if let Some(semi_offset) = after_amp
+            .as_bytes()
+            .iter()
+            .take(12)
+            .position(|&b| b == b';')
+        {
+            let entity = &after_amp[..semi_offset];
+            let decoded = match entity {
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "amp" => Some('&'),
+                _ if entity.starts_with("#x") || entity.starts_with("#X") => {
+                    u32::from_str_radix(&entity[2..], 16)
+                        .ok()
+                        .and_then(char::from_u32)
+                }
+                _ if entity.starts_with('#') => {
+                    entity[1..].parse::<u32>().ok().and_then(char::from_u32)
+                }
+                _ => None,
+            };
+            if let Some(ch) = decoded {
+                out.push(ch);
+                rest = &after_amp[semi_offset + 1..];
+                continue;
+            }
+        }
+        out.push('&');
+        rest = after_amp;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Baseline 5-pass `.replace` XML unescaper retained for benchmark verification.
+pub fn unescape_xml_five_pass_baseline(text: &str) -> String {
+    text.replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+#[inline]
+pub(crate) fn encode_utf16le(text: &str) -> Vec<u8> {
+    encode_utf16le_swar(text)
+}
+
+#[inline]
+pub(crate) fn decode_utf16le(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+    decode_utf16le_swar(bytes)
+}
+
+pub(crate) fn append_len_prefixed_utf16le(buf: &mut Vec<u8>, text: &str) {
+    let bytes = encode_utf16le_swar(text);
+    buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&bytes);
+}
+
+pub(crate) fn read_len_prefixed_utf16le(
+    bytes: &[u8],
+    cursor: &mut usize,
+    limit: usize,
+) -> Result<String, EasyOfficeError> {
+    if *cursor + 4 > limit {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "UTF-16LE 길이 프리픽스 읽기 범위 초과".to_string(),
+        ));
+    }
+    let byte_len = read_u32_le(bytes, *cursor)? as usize;
+    *cursor += 4;
+    if !byte_len.is_multiple_of(2) || *cursor + byte_len > limit {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "UTF-16LE 문자열 페이로드 범위 초과".to_string(),
+        ));
+    }
+    let s = decode_utf16le_swar(&bytes[*cursor..*cursor + byte_len])?;
+    *cursor += byte_len;
+    Ok(s)
+}
+
+#[inline]
+pub(crate) fn write_u16_le(buf: &mut [u8], offset: usize, val: u16) {
+    buf[offset..offset + 2].copy_from_slice(&val.to_le_bytes());
+}
+
+#[inline]
+pub(crate) fn write_u32_le(buf: &mut [u8], offset: usize, val: u32) {
+    buf[offset..offset + 4].copy_from_slice(&val.to_le_bytes());
+}
+
+#[inline]
+pub(crate) fn write_u64_le(buf: &mut [u8], offset: usize, val: u64) {
+    buf[offset..offset + 8].copy_from_slice(&val.to_le_bytes());
+}
+
+#[inline]
+pub(crate) fn read_u16_le(bytes: &[u8], offset: usize) -> Result<u16, EasyOfficeError> {
+    if offset + 2 > bytes.len() {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "OLE2 u16 읽기 범위 초과".to_string(),
+        ));
+    }
+    Ok(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]))
+}
+
+#[inline]
+pub(crate) fn read_u32_le(bytes: &[u8], offset: usize) -> Result<u32, EasyOfficeError> {
+    if offset + 4 > bytes.len() {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "OLE2 u32 읽기 범위 초과".to_string(),
+        ));
+    }
+    Ok(u32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ]))
+}
+
+#[inline]
+pub(crate) fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, EasyOfficeError> {
+    if offset + 8 > bytes.len() {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "OLE2 u64 읽기 범위 초과".to_string(),
+        ));
+    }
+    Ok(u64::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7],
+    ]))
 }
 
 pub(crate) fn format_col_letters(col: u32) -> String {
@@ -282,4 +562,44 @@ pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
     }
     out.push_str(&xml[cursor..]);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sector_bitset_and_swar_utf16_and_xml_unescape_parity() {
+        let mut bitset = SectorBitset::with_capacity(200);
+        assert!(bitset.insert(0));
+        assert!(!bitset.insert(0));
+        assert!(bitset.insert(63));
+        assert!(bitset.insert(64));
+        assert!(!bitset.insert(64));
+        assert!(bitset.insert(512));
+        assert!(!bitset.insert(512));
+
+        for sample in [
+            "Pure ASCII 64-bit SWAR fast path test with > 32 chars!",
+            "행정안전부 표준 전자문서 한글·영문 혼합 UTF-16LE 라운드트립",
+            "Emoji surrogate pair 🚀✨ and Hangul 가나다라",
+        ] {
+            let encoded = encode_utf16le_swar(sample);
+            let swar = decode_utf16le_swar(&encoded).unwrap();
+            let base = decode_utf16le_vec_baseline(&encoded).unwrap();
+            assert_eq!(swar, sample);
+            assert_eq!(swar, base);
+        }
+
+        let xml_sample = "Plain text without entities &amp; with &lt;tag attr=&quot;val&quot;&gt; and &#xAC00; &#44032; &apos;ok&apos;";
+        assert_eq!(
+            unescape_xml_single_pass("No entities at all"),
+            "No entities at all"
+        );
+        assert_eq!(
+            unescape_xml_single_pass("&quot;&apos;&lt;&gt;&amp;"),
+            unescape_xml_five_pass_baseline("&quot;&apos;&lt;&gt;&amp;")
+        );
+        assert!(unescape_xml_single_pass(xml_sample).contains("가 가 'ok'"));
+    }
 }
