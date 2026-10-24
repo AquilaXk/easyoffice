@@ -1194,4 +1194,141 @@ final class DeepDesktopInteractionsTests: XCTestCase {
       XCTFail("Expected HWP payload after .heading1 style")
     }
   }
+
+  func testEighthAuditFindReplaceSyncSheetRulesPersistencePPTThemeRoundTripAndSnapshotMode() throws {
+    let vm = WorkspaceViewModel()
+
+    // 1. Snapshot mode toggle & recent format filter categories
+    XCTAssertFalse(vm.isCanvasSnapshotMode)
+    vm.isCanvasSnapshotMode = true
+    XCTAssertTrue(vm.isCanvasSnapshotMode)
+    vm.isCanvasSnapshotMode = false
+
+    vm.selectedHomeRecentFormatFilter = "전체"
+    let allCount = vm.filteredHomeRecentTabs.count
+    XCTAssertGreaterThanOrEqual(allCount, 5)
+
+    vm.selectedHomeRecentFormatFilter = "DOCX"
+    XCTAssertTrue(vm.filteredHomeRecentTabs.allSatisfy { $0.moduleKind == .document })
+
+    vm.selectedHomeRecentFormatFilter = "HWP/HWPX"
+    XCTAssertTrue(vm.filteredHomeRecentTabs.allSatisfy { $0.moduleKind == .hwp })
+
+    vm.selectedHomeRecentFormatFilter = "XLSX"
+    XCTAssertTrue(vm.filteredHomeRecentTabs.allSatisfy { $0.moduleKind == .sheet })
+
+    vm.selectedHomeRecentFormatFilter = "PPTX"
+    XCTAssertTrue(vm.filteredHomeRecentTabs.allSatisfy { $0.moduleKind == .slide })
+
+    vm.selectedHomeRecentFormatFilter = "PDF"
+    XCTAssertTrue(vm.filteredHomeRecentTabs.allSatisfy { $0.moduleKind == .pdf })
+    vm.selectedHomeRecentFormatFilter = "전체"
+
+    // 2. Find & Replace bidirectional synchronization and inlineRuns/speakerNotes replacement
+    let docTabID = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .document })?.id)
+    vm.activeTabID = docTabID
+
+    vm.findQueryDraft = "클라우드"
+    XCTAssertEqual(vm.findQueryText, "클라우드")
+    vm.findQueryText = "아키텍처"
+    XCTAssertEqual(vm.findQueryDraft, "아키텍처")
+
+    vm.replaceQueryDraft = "플랫폼"
+    XCTAssertEqual(vm.replaceQueryText, "플랫폼")
+    vm.replaceQueryText = "엔진아키텍처"
+    XCTAssertEqual(vm.replaceQueryDraft, "엔진아키텍처")
+
+    vm.recomputeFindMatches()
+    let matchesBefore = vm.findMatchCount
+    XCTAssertGreaterThan(matchesBefore, 0)
+    let replacedCount = vm.replaceAllFindMatches()
+    XCTAssertGreaterThan(replacedCount, 0)
+
+    vm.findQueryDraft = "엔진아키텍처"
+    vm.replaceQueryDraft = "아키텍처"
+    vm.performFindAndReplace()
+    vm.findQueryDraft = "아키텍처"
+    vm.recomputeFindMatches()
+    XCTAssertGreaterThan(vm.findMatchCount, 0)
+
+    // 3. Per-tab and per-worksheet persistence of conditionalFormatRules and dataValidationRule + BIFF8/XLSX/ODS round-trip
+    let sheetTabID = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .sheet })?.id)
+    vm.activeTabID = sheetTabID
+
+    let cfRule = ConditionalFormatRule.greaterThan(1000.0)
+    let dvRule = DataValidationRule(minimumValue: 0, maximumValue: 999999)
+    vm.applyConditionalFormatRuleOnActiveSheet(cfRule)
+    vm.applyDataValidationRuleOnActiveSheet(dvRule)
+    XCTAssertEqual(vm.activeConditionalFormatRule, cfRule)
+    XCTAssertEqual(vm.activeDataValidationRule, dvRule)
+
+    // Switch to another tab and back: rules must persist on the sheet tab
+    vm.activeTabID = docTabID
+    XCTAssertNil(vm.activeConditionalFormatRule)
+    XCTAssertNil(vm.activeDataValidationRule)
+
+    vm.activeTabID = sheetTabID
+    XCTAssertEqual(vm.activeConditionalFormatRule, cfRule)
+    XCTAssertEqual(vm.activeDataValidationRule, dvRule)
+
+    // Add a second worksheet tab and verify per-worksheet isolation
+    vm.addWorksheetTab()
+    vm.selectWorksheetTab(index: 1)
+    XCTAssertNil(vm.activeConditionalFormatRule)
+    XCTAssertNil(vm.activeDataValidationRule)
+
+    vm.selectWorksheetTab(index: 0)
+    XCTAssertEqual(vm.activeConditionalFormatRule, cfRule)
+    XCTAssertEqual(vm.activeDataValidationRule, dvRule)
+
+    if case .sheet(let sheetModel) = vm.activeTab?.payload {
+      let xlsData = try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(sheetModel)
+      let roundTrippedXLS = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: xlsData)
+      XCTAssertEqual(roundTrippedXLS.conditionalFormatRules, [cfRule])
+      XCTAssertEqual(roundTrippedXLS.dataValidationRule, dvRule)
+
+      let xlsxData = try OOXMLContainerCodec.encodeWorksheet(sheetModel)
+      let roundTrippedXLSX = try OOXMLContainerCodec.decodeWorksheet(from: xlsxData)
+      XCTAssertEqual(roundTrippedXLSX.conditionalFormatRules, [cfRule])
+      XCTAssertEqual(roundTrippedXLSX.dataValidationRule, dvRule)
+
+      let odsData = try ODFContainerCodec.encodeWorksheet(sheetModel)
+      let roundTrippedODS = try ODFContainerCodec.decodeWorksheet(from: odsData)
+      XCTAssertEqual(roundTrippedODS.conditionalFormatRules, [cfRule])
+      XCTAssertEqual(roundTrippedODS.dataValidationRule, dvRule)
+    } else {
+      XCTFail("Expected sheet payload")
+    }
+
+    // 4. Slide non-overlapping lower-stage coordinates and legacy .ppt deckTheme / transition timing round-trip
+    let slideTabID = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .slide })?.id)
+    vm.activeTabID = slideTabID
+    vm.executeRibbonCommand("도형")
+
+    if case .slide(var deck) = vm.activeTab?.payload {
+      for slide in deck.slides {
+        for element in slide.elements {
+          XCTAssertGreaterThanOrEqual(
+            element.y,
+            220.0,
+            "Canvas element \(element.title) must sit in lower stage zone (y >= 220) to avoid overlapping slide header/bullets"
+          )
+        }
+      }
+      deck.deckTheme = .corporateNavy
+      deck.slides[0].transition = .morph
+      deck.slides[0].transitionDurationSeconds = 1.75
+      deck.slides[0].autoAdvanceSeconds = 12
+
+      let pptData = try LegacyOLE2OfficeCodec.encodePowerPointBinary(deck)
+      let decodedDeck = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: pptData)
+      XCTAssertEqual(decodedDeck.deckTheme, .corporateNavy)
+      XCTAssertEqual(decodedDeck.slides[0].transition, .morph)
+      XCTAssertEqual(decodedDeck.slides[0].transitionDurationSeconds, 1.75, accuracy: 0.001)
+      XCTAssertEqual(decodedDeck.slides[0].autoAdvanceSeconds, 12)
+    } else {
+      XCTFail("Expected slide payload")
+    }
+  }
 }
+

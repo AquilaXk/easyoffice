@@ -32,6 +32,10 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
   public var activeSheetIndex: Int = 0
   /// Workbook/worksheet named ranges mapping normalized identifier names to A1 cell or range notation.
   public var namedRanges: [String: String] = [:]
+  /// Active worksheet conditional formatting rules.
+  public var conditionalFormatRules: [SheetConditionalFormatRule] = []
+  /// Active worksheet data validation rule.
+  public var dataValidationRule: SheetDataValidationRule? = nil
   /// Pre-compiled AST cache keyed by `PackedCellCoordinate`.
   internal var compiledASTs: [PackedCellCoordinate: FormulaAST] = [:]
 
@@ -116,7 +120,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     trackChangesEnabled: Bool = false,
     additionalSheets: [WorksheetSheetPage] = [],
     activeSheetIndex: Int = 0,
-    namedRanges: [String: String] = [:]
+    namedRanges: [String: String] = [:],
+    conditionalFormatRules: [SheetConditionalFormatRule] = [],
+    dataValidationRule: SheetDataValidationRule? = nil
   ) {
     self.id = id
     self.name = name
@@ -130,6 +136,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     self.additionalSheets = additionalSheets
     self.activeSheetIndex = activeSheetIndex
     self.namedRanges = namedRanges
+    self.conditionalFormatRules = conditionalFormatRules
+    self.dataValidationRule = dataValidationRule
     for (key, val) in rawCells where !val.isEmpty {
       if let addr = try? CellAddress(a1Notation: key) {
         let coord = addr.packedCoordinate
@@ -153,6 +161,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     additionalSheets: [WorksheetSheetPage],
     activeSheetIndex: Int,
     namedRanges: [String: String] = [:],
+    conditionalFormatRules: [SheetConditionalFormatRule] = [],
+    dataValidationRule: SheetDataValidationRule? = nil,
     precompileAllCells: Bool = true
   ) {
     self.id = id
@@ -168,6 +178,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     self.additionalSheets = additionalSheets
     self.activeSheetIndex = activeSheetIndex
     self.namedRanges = namedRanges
+    self.conditionalFormatRules = conditionalFormatRules
+    self.dataValidationRule = dataValidationRule
     if precompileAllCells {
       for (coord, val) in cellsByCoordinate where !val.isEmpty {
         self.compiledASTs[coord] = Self.compileCellInput(val)
@@ -190,6 +202,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     case additionalSheets
     case activeSheetIndex
     case namedRanges
+    case conditionalFormatRules
+    case dataValidationRule
   }
 
   public init(from decoder: Decoder) throws {
@@ -234,6 +248,11 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     self.activeSheetIndex = try container.decodeIfPresent(Int.self, forKey: .activeSheetIndex) ?? 0
     self.namedRanges =
       try container.decodeIfPresent([String: String].self, forKey: .namedRanges) ?? [:]
+    self.conditionalFormatRules =
+      try container.decodeIfPresent(
+        [SheetConditionalFormatRule].self, forKey: .conditionalFormatRules) ?? []
+    self.dataValidationRule =
+      try container.decodeIfPresent(SheetDataValidationRule.self, forKey: .dataValidationRule)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -251,6 +270,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     try container.encode(additionalSheets, forKey: .additionalSheets)
     try container.encode(activeSheetIndex, forKey: .activeSheetIndex)
     try container.encode(namedRanges, forKey: .namedRanges)
+    try container.encode(conditionalFormatRules, forKey: .conditionalFormatRules)
+    try container.encodeIfPresent(dataValidationRule, forKey: .dataValidationRule)
   }
 
   public static func == (lhs: WorksheetModel, rhs: WorksheetModel) -> Bool {
@@ -261,6 +282,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       && lhs.trackChangesEnabled == rhs.trackChangesEnabled
       && lhs.additionalSheets == rhs.additionalSheets
       && lhs.activeSheetIndex == rhs.activeSheetIndex && lhs.namedRanges == rhs.namedRanges
+      && lhs.conditionalFormatRules == rhs.conditionalFormatRules
+      && lhs.dataValidationRule == rhs.dataValidationRule
   }
 
   // MARK: - Named Ranges, Multi-Sheet Management, Cell Merging & Style Helpers
@@ -316,7 +339,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       sheetComments: sheetComments,
       mergedRanges: mergedRanges,
       columnWidths: columnWidths,
-      rowHeights: rowHeights
+      rowHeights: rowHeights,
+      conditionalFormatRules: conditionalFormatRules,
+      dataValidationRule: dataValidationRule
     )
     allPages.insert(currentActivePage, at: currentInsertionIndex)
     guard allPages.indices.contains(newIndex), newIndex != currentInsertionIndex else {
@@ -331,6 +356,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     self.mergedRanges = targetPage.mergedRanges
     self.columnWidths = targetPage.columnWidths
     self.rowHeights = targetPage.rowHeights
+    self.conditionalFormatRules = targetPage.conditionalFormatRules
+    self.dataValidationRule = targetPage.dataValidationRule
     self.additionalSheets = allPages
     self.activeSheetIndex = newIndex
 
@@ -352,7 +379,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       sheetComments: sheetComments,
       mergedRanges: mergedRanges,
       columnWidths: columnWidths,
-      rowHeights: rowHeights
+      rowHeights: rowHeights,
+      conditionalFormatRules: conditionalFormatRules,
+      dataValidationRule: dataValidationRule
     )
     allPages.insert(currentActivePage, at: currentInsertionIndex)
     return allPages

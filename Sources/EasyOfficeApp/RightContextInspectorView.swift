@@ -13,7 +13,11 @@ struct RightContextInspectorView: View {
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
 
-    ScrollView {
+    AdaptiveScrollContainer(
+      axes: .vertical,
+      showsIndicators: false,
+      isSnapshotMode: viewModel.isCanvasSnapshotMode
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         Text("속성 인스펙터")
           .font(.system(size: 12, weight: .bold))
@@ -30,9 +34,13 @@ struct RightContextInspectorView: View {
           Text("작성자:")
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-          TextField("작성자 이름", text: $viewModel.authorName)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11))
+          LavenderTextFieldPill(
+            placeholder: "작성자 이름",
+            text: $viewModel.authorName,
+            width: nil,
+            palette: palette,
+            isSnapshotMode: viewModel.isCanvasSnapshotMode
+          )
         }
 
         Divider()
@@ -88,47 +96,41 @@ struct RightContextInspectorView: View {
       .font(.system(size: 11, weight: .bold))
       .foregroundStyle(palette.primaryText.swiftUIColor)
 
-    Picker(
-      "용지 규격",
-      selection: Binding(
-        get: { doc.paperSize },
-        set: { newSize in
-          mutateDocument { d in
-            if d.sections.isEmpty { d.sections = [DocumentSectionLayout(paperSize: newSize)] }
-            d.paperSize = newSize
-            d.sections[0].paperSize = newSize
+    HStack(spacing: 6) {
+      LavenderMenuPill(
+        title: "용지: \(doc.paperSize.rawValue)",
+        systemImage: "doc.plaintext",
+        palette: palette
+      ) {
+        ForEach(PaperSizePreset.allCases, id: \.self) { preset in
+          Button(preset.rawValue) {
+            mutateDocument { d in
+              if d.sections.isEmpty { d.sections = [DocumentSectionLayout(paperSize: preset)] }
+              d.paperSize = preset
+              d.sections[0].paperSize = preset
+            }
           }
         }
-      )
-    ) {
-      ForEach(PaperSizePreset.allCases, id: \.self) { preset in
-        Text(preset.rawValue).tag(preset)
       }
-    }
-    .pickerStyle(.menu)
-    .controlSize(.small)
 
-    Picker(
-      "용지 방향",
-      selection: Binding(
-        get: { currentOrientation },
-        set: { newOrientation in
-          mutateDocument { d in
-            if d.sections.isEmpty { d.sections = [DocumentSectionLayout(paperSize: d.paperSize)] }
-            d.sections[0].orientation = newOrientation
+      LavenderMenuPill(
+        title: "방향: \(currentOrientation.rawValue)",
+        systemImage: "rectangle.portrait.rotate",
+        palette: palette
+      ) {
+        ForEach(PageOrientation.allCases, id: \.self) { orient in
+          Button(orient.rawValue) {
+            mutateDocument { d in
+              if d.sections.isEmpty { d.sections = [DocumentSectionLayout(paperSize: d.paperSize)] }
+              d.sections[0].orientation = orient
+            }
           }
         }
-      )
-    ) {
-      ForEach(PageOrientation.allCases, id: \.self) { orient in
-        Text(orient.rawValue).tag(orient)
       }
     }
-    .pickerStyle(.segmented)
-    .controlSize(.small)
 
-    Stepper(
-      "다단 열 수: \(currentColumns)단",
+    LavenderStepperPill(
+      label: "다단 열 수: \(currentColumns)단",
       value: Binding(
         get: { currentColumns },
         set: { newCols in
@@ -137,42 +139,46 @@ struct RightContextInspectorView: View {
             d.sections[0].columnCount = max(1, min(3, newCols))
           }
         }
-      ), in: 1...3
+      ),
+      range: 1...3,
+      palette: palette
     )
-    .font(.system(size: 11))
 
-    Toggle(
-      "변경 내용 추적",
+    LavenderTogglePill(
+      title: "변경 내용 추적",
+      systemImage: "checkmark.bubble",
       isOn: Binding(
         get: { doc.trackChangesEnabled },
         set: { enabled in mutateDocument { $0.trackChangesEnabled = enabled } }
-      )
+      ),
+      palette: palette
     )
-    .font(.system(size: 11, weight: .medium))
 
     VStack(alignment: .leading, spacing: 4) {
       Text("머리말 / 꼬리말")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
-      TextField(
-        "머리말 텍스트",
+      LavenderTextFieldPill(
+        placeholder: "머리말 텍스트",
         text: Binding(
           get: { doc.headerText },
           set: { text in mutateDocument { $0.headerText = text } }
-        )
+        ),
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
       )
-      .textFieldStyle(.roundedBorder)
-      .font(.system(size: 11))
 
-      TextField(
-        "꼬리말 텍스트",
+      LavenderTextFieldPill(
+        placeholder: "꼬리말 텍스트",
         text: Binding(
           get: { doc.footerText },
           set: { text in mutateDocument { $0.footerText = text } }
-        )
+        ),
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
       )
-      .textFieldStyle(.roundedBorder)
-      .font(.system(size: 11))
     }
 
     Divider()
@@ -182,9 +188,14 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 6) {
-        TextField("LaTeX / 수식 입력", text: $viewModel.equationDraftText)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11, design: .monospaced))
+        LavenderTextFieldPill(
+          placeholder: "LaTeX / 수식 입력",
+          text: $viewModel.equationDraftText,
+          width: nil,
+          isMonospaced: true,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
         Button("수식 삽입") { viewModel.insertEquationIntoActiveDocument() }
           .buttonStyle(.bordered)
           .controlSize(.small)
@@ -193,9 +204,13 @@ struct RightContextInspectorView: View {
       Text("워터마크 적용/해제")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
-      TextField("워터마크 문구", text: $viewModel.watermarkDraftText)
-        .textFieldStyle(.roundedBorder)
-        .font(.system(size: 11))
+      LavenderTextFieldPill(
+        placeholder: "워터마크 문구",
+        text: $viewModel.watermarkDraftText,
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      )
       HStack(spacing: 6) {
         Button("워터마크 적용") { viewModel.setDocumentWatermark(viewModel.watermarkDraftText) }
           .buttonStyle(.bordered)
@@ -226,9 +241,13 @@ struct RightContextInspectorView: View {
           .controlSize(.small)
       }
       HStack(spacing: 6) {
-        TextField("하이퍼링크 URL", text: $viewModel.inlineLinkURLDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
+        LavenderTextFieldPill(
+          placeholder: "하이퍼링크 URL",
+          text: $viewModel.inlineLinkURLDraft,
+          width: nil,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
         Button("링크 삽입") { viewModel.insertHyperlinkIntoActiveParagraph() }
           .buttonStyle(.bordered)
           .controlSize(.small)
@@ -434,19 +453,31 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 4) {
-        TextField("필드 키", text: $viewModel.mailMergeFieldKeyDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-        TextField("치환 값", text: $viewModel.mailMergeFieldValueDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
+        LavenderTextFieldPill(
+          placeholder: "필드 키",
+          text: $viewModel.mailMergeFieldKeyDraft,
+          width: 72,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
+        LavenderTextFieldPill(
+          placeholder: "치환 값",
+          text: $viewModel.mailMergeFieldValueDraft,
+          width: 72,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
         Button("필드 치환") { viewModel.applyMailMergeFieldReplacement() }
           .buttonStyle(.bordered)
           .controlSize(.small)
       }
 
-      Toggle("200자 원고지 격자 뷰", isOn: $viewModel.isManuscriptGridModeEnabled)
-        .font(.system(size: 11, weight: .semibold))
+      LavenderTogglePill(
+        title: "200자 원고지 격자 뷰",
+        systemImage: "squareshape.split.3x3",
+        isOn: $viewModel.isManuscriptGridModeEnabled,
+        palette: palette
+      )
 
       Button("미주(Endnote) 삽입") { viewModel.insertEndnoteIntoActiveDocument() }
         .buttonStyle(.bordered)
@@ -497,33 +528,31 @@ struct RightContextInspectorView: View {
 
     Divider()
 
-    Picker(
-      "숫자 표시 형식",
-      selection: Binding(
-        get: { currentStyle.numberFormat },
-        set: { viewModel.setSelectedSheetCellNumberFormat($0) }
-      )
-    ) {
-      ForEach(CellNumberFormat.allCases, id: \.self) { fmt in
-        Text(fmt.rawValue).tag(fmt)
+    HStack(spacing: 6) {
+      LavenderMenuPill(
+        title: "형식: \(currentStyle.numberFormat.rawValue)",
+        systemImage: "number",
+        palette: palette
+      ) {
+        ForEach(CellNumberFormat.allCases, id: \.self) { fmt in
+          Button(fmt.rawValue) {
+            viewModel.setSelectedSheetCellNumberFormat(fmt)
+          }
+        }
       }
-    }
-    .pickerStyle(.menu)
-    .controlSize(.small)
 
-    Picker(
-      "가로 정렬",
-      selection: Binding(
-        get: { currentStyle.alignment },
-        set: { viewModel.setSelectedSheetCellAlignment($0) }
-      )
-    ) {
-      ForEach(CellHorizontalAlignment.allCases, id: \.self) { align in
-        Text(align.rawValue).tag(align)
+      LavenderMenuPill(
+        title: "정렬: \(currentStyle.alignment.rawValue)",
+        systemImage: "text.alignleft",
+        palette: palette
+      ) {
+        ForEach(CellHorizontalAlignment.allCases, id: \.self) { align in
+          Button(align.rawValue) {
+            viewModel.setSelectedSheetCellAlignment(align)
+          }
+        }
       }
     }
-    .pickerStyle(.segmented)
-    .controlSize(.small)
 
     VStack(alignment: .leading, spacing: 6) {
       Text(
@@ -557,15 +586,16 @@ struct RightContextInspectorView: View {
       Text("선택 셀 메모 (\(viewModel.selectedSheetCell))")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
-      TextField(
-        "셀 메모 입력",
+      LavenderTextFieldPill(
+        placeholder: "셀 메모 입력",
         text: Binding(
           get: { sheet.sheetComments[selectedAddr.packedCoordinate] ?? "" },
           set: { viewModel.setSelectedSheetCellComment($0) }
-        )
+        ),
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
       )
-      .textFieldStyle(.roundedBorder)
-      .font(.system(size: 11))
     }
 
     VStack(alignment: .leading, spacing: 6) {
@@ -627,14 +657,19 @@ struct RightContextInspectorView: View {
           .controlSize(.mini)
       }
 
-      Stepper(
-        "자동 필터 기준 열: \(CellAddress.columnLabel(for: max(0, viewModel.sheetAutoFilterColumn)))열",
-        value: $viewModel.sheetAutoFilterColumn, in: 0...15
+      LavenderStepperPill(
+        label: "자동 필터 열: \(CellAddress.columnLabel(for: max(0, viewModel.sheetAutoFilterColumn)))열",
+        value: $viewModel.sheetAutoFilterColumn,
+        range: 0...15,
+        palette: palette
       )
-      .font(.system(size: 10))
-      TextField("열 자동 필터 검색어", text: $viewModel.sheetAutoFilterQuery)
-        .textFieldStyle(.roundedBorder)
-        .font(.system(size: 11))
+      LavenderTextFieldPill(
+        placeholder: "열 자동 필터 검색어",
+        text: $viewModel.sheetAutoFilterQuery,
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      )
 
       Button("선택 셀 병합 / 해제") { viewModel.toggleMergeOnSelectedSheetCell() }
         .buttonStyle(.bordered).controlSize(.small)
@@ -651,12 +686,21 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 6) {
-        TextField("이름", text: $viewModel.namedRangeNameDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-        TextField("범위 (예: B2:B4)", text: $viewModel.namedRangeTargetDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11, design: .monospaced))
+        LavenderTextFieldPill(
+          placeholder: "이름",
+          text: $viewModel.namedRangeNameDraft,
+          width: 78,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
+        LavenderTextFieldPill(
+          placeholder: "범위 (예: B2:B4)",
+          text: $viewModel.namedRangeTargetDraft,
+          width: 96,
+          isMonospaced: true,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
       }
       Button("이름 정의 등록") { viewModel.defineNamedRangeOnActiveSheet() }
         .buttonStyle(.bordered)
@@ -668,15 +712,30 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 4) {
-        TextField("수식 셀", text: $viewModel.goalSeekTargetCellDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 10, design: .monospaced))
-        TextField("목표값", text: $viewModel.goalSeekTargetValueDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 10, design: .monospaced))
-        TextField("변경 셀", text: $viewModel.goalSeekVariableCellDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 10, design: .monospaced))
+        LavenderTextFieldPill(
+          placeholder: "수식 셀",
+          text: $viewModel.goalSeekTargetCellDraft,
+          width: 56,
+          isMonospaced: true,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
+        LavenderTextFieldPill(
+          placeholder: "목표값",
+          text: $viewModel.goalSeekTargetValueDraft,
+          width: 56,
+          isMonospaced: true,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
+        LavenderTextFieldPill(
+          placeholder: "변경 셀",
+          text: $viewModel.goalSeekVariableCellDraft,
+          width: 56,
+          isMonospaced: true,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
       }
       Button("목표값 찾기 실행") { viewModel.runGoalSeekOnActiveSheet() }
         .buttonStyle(.bordered)
@@ -687,16 +746,32 @@ struct RightContextInspectorView: View {
       Button("통화/백분율/소수 서식 전환") { viewModel.executeRibbonCommand("sheet-home-style") }
         .buttonStyle(.bordered).controlSize(.small)
 
-      Toggle("머리글 행 고정", isOn: $viewModel.isHeaderRowFrozen)
-        .font(.system(size: 11, weight: .medium))
+      LavenderTogglePill(
+        title: "머리글 행 고정",
+        systemImage: "pin.fill",
+        isOn: $viewModel.isHeaderRowFrozen,
+        palette: palette
+      )
 
-      Toggle("첫 열(A열) 틀 고정", isOn: $viewModel.isFirstColumnFrozen)
-        .font(.system(size: 11, weight: .medium))
+      LavenderTogglePill(
+        title: "첫 열(A열) 틀 고정",
+        systemImage: "pin.fill",
+        isOn: $viewModel.isFirstColumnFrozen,
+        palette: palette
+      )
 
-      Toggle("셀 내 데이터 막대 표시", isOn: $viewModel.isDataBarsEnabled)
-        .font(.system(size: 11, weight: .medium))
+      LavenderTogglePill(
+        title: "셀 내 데이터 막대 표시",
+        systemImage: "chart.bar.fill",
+        isOn: $viewModel.isDataBarsEnabled,
+        palette: palette
+      )
 
-      Picker("피벗 집계", selection: $viewModel.selectedPivotAggregation) {
+      LavenderMenuPill(
+        title: "피벗 집계: \(viewModel.selectedPivotAggregation.rawValue)",
+        systemImage: "function",
+        palette: palette
+      ) {
         ForEach(
           [
             PivotAggregationFunction.sum,
@@ -707,11 +782,11 @@ struct RightContextInspectorView: View {
           ],
           id: \.self
         ) { fn in
-          Text(fn.rawValue).tag(fn)
+          Button(fn.rawValue) {
+            viewModel.selectedPivotAggregation = fn
+          }
         }
       }
-      .pickerStyle(.menu)
-      .controlSize(.small)
 
       Text("데이터 정제 (중복 제거 · 텍스트 나누기 · 다중 정렬)")
         .font(.system(size: 10, weight: .semibold))
@@ -765,70 +840,62 @@ struct RightContextInspectorView: View {
     Text("총 슬라이드: \(deck.slides.count)장")
       .font(.system(size: 11))
 
-    Picker(
-      "마스터 테마",
-      selection: Binding(
-        get: { deck.theme },
-        set: { viewModel.applyThemeToActiveDeck($0) }
-      )
-    ) {
-      ForEach(SlideDeckTheme.allCases, id: \.self) { theme in
-        Text(theme.rawValue).tag(theme)
+    HStack(spacing: 6) {
+      LavenderMenuPill(
+        title: "테마: \(deck.theme.rawValue)",
+        systemImage: "paintpalette",
+        palette: palette
+      ) {
+        ForEach(SlideDeckTheme.allCases, id: \.self) { theme in
+          Button(theme.rawValue) {
+            viewModel.applyThemeToActiveDeck(theme)
+          }
+        }
       }
-    }
-    .pickerStyle(.menu)
-    .controlSize(.small)
 
-    Picker(
-      "화면 비율",
-      selection: Binding(
-        get: { deck.aspectRatio },
-        set: { newRatio in mutateSlideDeck { $0.aspectRatio = newRatio } }
-      )
-    ) {
-      ForEach(SlideAspectRatio.allCases, id: \.self) { ratio in
-        Text(ratio.rawValue).tag(ratio)
+      LavenderMenuPill(
+        title: "비율: \(deck.aspectRatio.rawValue)",
+        systemImage: "aspectratio",
+        palette: palette
+      ) {
+        ForEach(SlideAspectRatio.allCases, id: \.self) { ratio in
+          Button(ratio.rawValue) {
+            mutateSlideDeck { $0.aspectRatio = ratio }
+          }
+        }
       }
     }
-    .pickerStyle(.menu)
-    .controlSize(.small)
 
     if let slide = activeSlide {
-      Picker(
-        "마스터 레이아웃",
-        selection: Binding(
-          get: { slide.masterLayout },
-          set: { newLayout in
-            mutateSlideDeck { d in
-              if d.slides.indices.contains(sIdx) { d.slides[sIdx].masterLayout = newLayout }
+      HStack(spacing: 6) {
+        LavenderMenuPill(
+          title: "레이아웃: \(slide.masterLayout.rawValue)",
+          systemImage: "rectangle.3.group",
+          palette: palette
+        ) {
+          ForEach(SlideMasterLayout.allCases, id: \.self) { layout in
+            Button(layout.rawValue) {
+              mutateSlideDeck { d in
+                if d.slides.indices.contains(sIdx) { d.slides[sIdx].masterLayout = layout }
+              }
             }
           }
-        )
-      ) {
-        ForEach(SlideMasterLayout.allCases, id: \.self) { layout in
-          Text(layout.rawValue).tag(layout)
         }
-      }
-      .pickerStyle(.menu)
-      .controlSize(.small)
 
-      Picker(
-        "화면 전환",
-        selection: Binding(
-          get: { slide.transition },
-          set: { newTrans in
-            mutateSlideDeck { d in
-              if d.slides.indices.contains(sIdx) { d.slides[sIdx].transition = newTrans }
+        LavenderMenuPill(
+          title: "전환: \(slide.transition.rawValue)",
+          systemImage: "sparkles.rectangle.stack",
+          palette: palette
+        ) {
+          ForEach(SlideTransitionKind.allCases, id: \.self) { trans in
+            Button(trans.rawValue) {
+              mutateSlideDeck { d in
+                if d.slides.indices.contains(sIdx) { d.slides[sIdx].transition = trans }
+              }
             }
           }
-        )
-      ) {
-        ForEach(SlideTransitionKind.allCases, id: \.self) { trans in
-          Text(trans.rawValue).tag(trans)
         }
       }
-      .pickerStyle(.menu)
-      .controlSize(.small)
 
       VStack(alignment: .leading, spacing: 4) {
         Text(
@@ -872,15 +939,16 @@ struct RightContextInspectorView: View {
         Text("발표자 노트")
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        TextField(
-          "발표자 노트 입력",
+        LavenderTextFieldPill(
+          placeholder: "발표자 노트 입력",
           text: Binding(
             get: { slide.speakerNotes },
             set: { viewModel.updateSlideSpeakerNotes(slideIndex: sIdx, notes: $0) }
-          )
+          ),
+          width: nil,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
-        .textFieldStyle(.roundedBorder)
-        .font(.system(size: 11))
       }
     }
 
@@ -891,31 +959,33 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold, design: .monospaced))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-      TextField(
-        "개체 제목",
+      LavenderTextFieldPill(
+        placeholder: "개체 제목",
         text: Binding(
           get: { elem.title },
           set: {
             viewModel.updateSlideElementText(
               slideIndex: sIdx, elementID: elementID, title: $0, bodyText: nil)
           }
-        )
+        ),
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
       )
-      .textFieldStyle(.roundedBorder)
-      .font(.system(size: 11))
 
-      TextField(
-        "개체 본문",
+      LavenderTextFieldPill(
+        placeholder: "개체 본문",
         text: Binding(
           get: { elem.bodyText },
           set: {
             viewModel.updateSlideElementText(
               slideIndex: sIdx, elementID: elementID, title: nil, bodyText: $0)
           }
-        )
+        ),
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
       )
-      .textFieldStyle(.roundedBorder)
-      .font(.system(size: 11))
 
       HStack(spacing: 6) {
         Button("X -10") {
@@ -1030,17 +1100,22 @@ struct RightContextInspectorView: View {
 
     Divider()
 
-    Toggle("슬라이드 정렬 격자 뷰", isOn: $viewModel.isSlideSorterViewEnabled)
-      .font(.system(size: 11, weight: .semibold))
+    LavenderTogglePill(
+      title: "슬라이드 정렬 격자 뷰",
+      systemImage: "square.grid.3x2.fill",
+      isOn: $viewModel.isSlideSorterViewEnabled,
+      palette: palette
+    )
 
-    Toggle(
-      "스테이지 격자 안내선",
+    LavenderTogglePill(
+      title: "스테이지 격자 안내선",
+      systemImage: "grid",
       isOn: Binding(
         get: { viewModel.isSlideGridlinesVisible },
         set: { _ in viewModel.toggleSlideGridlines() }
-      )
+      ),
+      palette: palette
     )
-    .font(.system(size: 11, weight: .semibold))
 
     VStack(alignment: .leading, spacing: 6) {
       Text("슬라이드 덱 관리")
@@ -1097,17 +1172,22 @@ struct RightContextInspectorView: View {
     )
     .font(.system(size: 11))
 
-    Stepper(
-      "대상 페이지: \(viewModel.selectedPDFPageNumber)p", value: $viewModel.selectedPDFPageNumber,
-      in: 1...max(1, pdf.pages.count)
+    LavenderStepperPill(
+      label: "대상 페이지: \(viewModel.selectedPDFPageNumber)p",
+      value: $viewModel.selectedPDFPageNumber,
+      range: 1...max(1, pdf.pages.count),
+      palette: palette
     )
-    .font(.system(size: 11, weight: .medium))
 
     Divider()
 
     VStack(alignment: .leading, spacing: 6) {
-      Toggle("자유곡선 펜 그리기 모드", isOn: $viewModel.isPDFInkDrawingModeEnabled)
-        .font(.system(size: 11, weight: .semibold))
+      LavenderTogglePill(
+        title: "자유곡선 펜 그리기 모드",
+        systemImage: "scribble.variable",
+        isOn: $viewModel.isPDFInkDrawingModeEnabled,
+        palette: palette
+      )
 
       HStack(spacing: 6) {
         Text("펜 색상:")
@@ -1144,9 +1224,13 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-      TextField("PDF 워터마크 문구", text: $viewModel.pdfWatermarkDraft)
-        .textFieldStyle(.roundedBorder)
-        .font(.system(size: 11))
+      LavenderTextFieldPill(
+        placeholder: "PDF 워터마크 문구",
+        text: $viewModel.pdfWatermarkDraft,
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      )
 
       HStack(spacing: 6) {
         Button("워터마크 적용") {
@@ -1175,9 +1259,13 @@ struct RightContextInspectorView: View {
       Text("민감 정보 리댁션 (영구 마스킹)")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
-      TextField("마스킹할 구문 입력", text: $viewModel.pdfRedactionPhraseDraft)
-        .textFieldStyle(.roundedBorder)
-        .font(.system(size: 11))
+      LavenderTextFieldPill(
+        placeholder: "마스킹할 구문 입력",
+        text: $viewModel.pdfRedactionPhraseDraft,
+        width: nil,
+        palette: palette,
+        isSnapshotMode: viewModel.isCanvasSnapshotMode
+      )
       Button("민감 구문 영구 리댁션") {
         viewModel.redactSensitiveTextOnActivePDF()
       }
@@ -1190,12 +1278,20 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 6) {
-        TextField("필드명", text: $viewModel.pdfFormFieldNameDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
-        TextField("기본값", text: $viewModel.pdfFormFieldValueDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
+        LavenderTextFieldPill(
+          placeholder: "필드명",
+          text: $viewModel.pdfFormFieldNameDraft,
+          width: 78,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
+        LavenderTextFieldPill(
+          placeholder: "기본값",
+          text: $viewModel.pdfFormFieldValueDraft,
+          width: 78,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
       }
       HStack(spacing: 6) {
         Button("텍스트 필드 추가") {
@@ -1229,9 +1325,13 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 6) {
-        TextField("책갈피 제목", text: $viewModel.bookmarkTitleDraft)
-          .textFieldStyle(.roundedBorder)
-          .font(.system(size: 11))
+        LavenderTextFieldPill(
+          placeholder: "책갈피 제목",
+          text: $viewModel.bookmarkTitleDraft,
+          width: nil,
+          palette: palette,
+          isSnapshotMode: viewModel.isCanvasSnapshotMode
+        )
         Button("책갈피 추가") {
           viewModel.addBookmarkToActivePDF()
         }

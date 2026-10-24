@@ -615,6 +615,8 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
   public var mergedRanges: [CellRange]
   public var columnWidths: [Int: Double]
   public var rowHeights: [Int: Double]
+  public var conditionalFormatRules: [SheetConditionalFormatRule]
+  public var dataValidationRule: SheetDataValidationRule?
 
   public init(
     id: UUID = UUID(),
@@ -624,7 +626,9 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
     sheetComments: [PackedCellCoordinate: String] = [:],
     mergedRanges: [CellRange] = [],
     columnWidths: [Int: Double] = [:],
-    rowHeights: [Int: Double] = [:]
+    rowHeights: [Int: Double] = [:],
+    conditionalFormatRules: [SheetConditionalFormatRule] = [],
+    dataValidationRule: SheetDataValidationRule? = nil
   ) {
     self.id = id
     self.name = name
@@ -634,6 +638,8 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
     self.mergedRanges = mergedRanges
     self.columnWidths = columnWidths
     self.rowHeights = rowHeights
+    self.conditionalFormatRules = conditionalFormatRules
+    self.dataValidationRule = dataValidationRule
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -645,6 +651,8 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
     case mergedRanges
     case columnWidths
     case rowHeights
+    case conditionalFormatRules
+    case dataValidationRule
   }
 
   public init(from decoder: Decoder) throws {
@@ -664,6 +672,11 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
     self.columnWidths =
       try container.decodeIfPresent([Int: Double].self, forKey: .columnWidths) ?? [:]
     self.rowHeights = try container.decodeIfPresent([Int: Double].self, forKey: .rowHeights) ?? [:]
+    self.conditionalFormatRules =
+      try container.decodeIfPresent(
+        [SheetConditionalFormatRule].self, forKey: .conditionalFormatRules) ?? []
+    self.dataValidationRule =
+      try container.decodeIfPresent(SheetDataValidationRule.self, forKey: .dataValidationRule)
   }
 }
 

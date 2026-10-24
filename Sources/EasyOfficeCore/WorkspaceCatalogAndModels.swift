@@ -350,8 +350,8 @@ public struct WorkspaceHubCatalog: Sendable {
             masterLayout: .titleSlide,
             elements: [
               SlideCanvasElement(
-                title: "핵심 가치 배너", bodyText: "Signature Lavender #5C6BC0", x: 380, y: 220,
-                width: 200, height: 100, kind: .roundedRectangleShape)
+                title: "핵심 가치 배너", bodyText: "Signature Lavender #5C6BC0", x: 380, y: 245,
+                width: 240, height: 155, kind: .roundedRectangleShape)
             ]
           ),
           SlideModel(
@@ -364,8 +364,8 @@ public struct WorkspaceHubCatalog: Sendable {
               SlideCanvasElement(
                 title: "아키텍처 카드",
                 bodyText: "\(WorksheetModel.supportedFunctionNames.count)종 수식 & 양방향 변환", x: 380,
-                y: 220, width: 200,
-                height: 100, kind: .rectangleShape)
+                y: 245, width: 240,
+                height: 155, kind: .rectangleShape)
             ]
           ),
         ]
@@ -404,6 +404,37 @@ public struct WorkspaceHubCatalog: Sendable {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return tabs }
     return tabs.filter { $0.searchableCorpus().localizedCaseInsensitiveContains(trimmed) }
+  }
+
+  public static func matchesRecentFormatFilter(_ tab: WorkspaceTabItem, filter: String) -> Bool {
+    let normalized = filter.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    switch normalized {
+    case "", "전체", "ALL":
+      return true
+    case "DOCX":
+      return tab.format == .docx || tab.format == .doc || tab.format == .rtf || tab.format == .md
+        || tab.format == .txt
+    case "HWP", "HWPX", "HWP/HWPX":
+      return tab.moduleKind == .hwp
+    case "DOCX/HWP":
+      return tab.moduleKind == .document || tab.moduleKind == .hwp
+    case "XLSX", "XLS", "CSV":
+      return tab.format == .xlsx || tab.format == .xls || tab.format == .csv || tab.format == .tsv
+    case "PPTX", "PPT":
+      return tab.format == .pptx || tab.format == .ppt || tab.format == .ppsx
+    case "PDF":
+      return tab.moduleKind == .pdf
+    case "ODF", "ODT/ODS/ODP":
+      return tab.format == .odt || tab.format == .ods || tab.format == .odp
+    default:
+      return tab.format.rawValue.uppercased() == normalized
+    }
+  }
+
+  public static func filterRecentTabs(_ tabs: [WorkspaceTabItem], formatFilter: String)
+    -> [WorkspaceTabItem]
+  {
+    tabs.filter { matchesRecentFormatFilter($0, filter: formatFilter) }
   }
 
   public static func filterTabs(_ tabs: [WorkspaceTabItem], section: HubSection, query: String)

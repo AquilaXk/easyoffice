@@ -72,6 +72,20 @@ extension XMLDocumentModelMapper {
           lines.append("<eo:rowHeight sheetIdx=\"\(sheetIdx)\" row=\"\(row)\" height=\"\(h)\"/>")
         }
       }
+      if !page.conditionalFormatRules.isEmpty,
+        let encodedCF = try? JSONEncoder().encode(page.conditionalFormatRules).base64EncodedString()
+      {
+        lines.append(
+          "<eo:condFormats sheetIdx=\"\(sheetIdx)\" payload=\"\(XMLSanitizer.escape(encodedCF))\"/>"
+        )
+      }
+      if let dv = page.dataValidationRule,
+        let encodedDV = try? JSONEncoder().encode(dv).base64EncodedString()
+      {
+        lines.append(
+          "<eo:dataValidation sheetIdx=\"\(sheetIdx)\" payload=\"\(XMLSanitizer.escape(encodedDV))\"/>"
+        )
+      }
     }
     for key in sheet.namedRanges.keys.sorted() {
       if let ref = sheet.namedRanges[key] {
@@ -162,6 +176,30 @@ extension XMLDocumentModelMapper {
         sheet.setRowHeight(h, at: row)
       } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
         sheet.additionalSheets[sheetIdx - 1].rowHeights[row] = max(22.0, min(h, 180.0))
+      }
+    }
+    for cfElem in XMLSanitizer.extractElements(named: "eo:condFormats", in: xml) {
+      guard let payloadB64 = cfElem.attributes["payload"],
+        let data = Data(base64Encoded: payloadB64),
+        let rules = try? JSONDecoder().decode([SheetConditionalFormatRule].self, from: data)
+      else { continue }
+      let sheetIdx = Int(cfElem.attributes["sheetIdx"] ?? "0") ?? 0
+      if sheetIdx == 0 {
+        sheet.conditionalFormatRules = rules
+      } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
+        sheet.additionalSheets[sheetIdx - 1].conditionalFormatRules = rules
+      }
+    }
+    for dvElem in XMLSanitizer.extractElements(named: "eo:dataValidation", in: xml) {
+      guard let payloadB64 = dvElem.attributes["payload"],
+        let data = Data(base64Encoded: payloadB64),
+        let rule = try? JSONDecoder().decode(SheetDataValidationRule.self, from: data)
+      else { continue }
+      let sheetIdx = Int(dvElem.attributes["sheetIdx"] ?? "0") ?? 0
+      if sheetIdx == 0 {
+        sheet.dataValidationRule = rule
+      } else if sheetIdx > 0, sheetIdx - 1 < sheet.additionalSheets.count {
+        sheet.additionalSheets[sheetIdx - 1].dataValidationRule = rule
       }
     }
     if let metaElem = XMLSanitizer.extractElements(named: "eo:sheetMeta", in: xml).first {

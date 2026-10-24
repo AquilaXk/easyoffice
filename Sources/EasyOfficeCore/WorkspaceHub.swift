@@ -14,10 +14,12 @@ public final class WorkspaceViewModel {
     didSet {
       activeInlineEditTargetKey = nil
       if let activeTabID, splitSecondaryTabID == activeTabID { splitSecondaryTabID = nil }
+      syncSheetRulesFromActiveTab()
     }
   }
   public var splitSecondaryTabID: UUID? = nil
   public var isShowingHomeHub: Bool = false
+  public var isCanvasSnapshotMode: Bool = false
   public var activeHubSection: HubSection = .home
   public var activeRibbonCategory: RibbonCategory = .home
   public var isRibbonCollapsed: Bool = false
@@ -88,8 +90,19 @@ public final class WorkspaceViewModel {
   public var selectedChartKind: SheetChartKind = .column
   public var isHeaderRowFrozen: Bool = false
   public var mergedSheetRangesByTab: [UUID: [String]] = [:]
-  public var activeConditionalFormatRule: ConditionalFormatRule? = nil
-  public var activeDataValidationRule: DataValidationRule? = nil
+  private var isSyncingSheetRulesState: Bool = false
+  public var activeConditionalFormatRule: ConditionalFormatRule? = nil {
+    didSet {
+      guard !isSyncingSheetRulesState else { return }
+      persistSheetRulesToActiveTab()
+    }
+  }
+  public var activeDataValidationRule: DataValidationRule? = nil {
+    didSet {
+      guard !isSyncingSheetRulesState else { return }
+      persistSheetRulesToActiveTab()
+    }
+  }
   public var isSnapGuidesEnabled: Bool = true
   public var presenterElapsedSeconds: Int = 95
   public var isPresenterTimerRunning: Bool = false
@@ -102,21 +115,52 @@ public final class WorkspaceViewModel {
   public var pdfInkLineWidth: Double = 2.4
   public var lastPivotGrandTotal: Double = 0
   public var authorName: String = "표준 문서 작성자"
+  private var isSyncingFindReplaceState: Bool = false
   public var findQueryText: String = "" {
     didSet {
       if findQueryText != oldValue {
         currentFindMatchIndex = 0
       }
+      guard !isSyncingFindReplaceState else { return }
+      isSyncingFindReplaceState = true
+      defer { isSyncingFindReplaceState = false }
+      if findQueryDraft != findQueryText {
+        findQueryDraft = findQueryText
+      }
     }
   }
-  public var replaceQueryText: String = ""
-  public var findQueryDraft: String {
-    get { findQueryText }
-    set { findQueryText = newValue }
+  public var replaceQueryText: String = "" {
+    didSet {
+      guard !isSyncingFindReplaceState else { return }
+      isSyncingFindReplaceState = true
+      defer { isSyncingFindReplaceState = false }
+      if replaceQueryDraft != replaceQueryText {
+        replaceQueryDraft = replaceQueryText
+      }
+    }
   }
-  public var replaceQueryDraft: String {
-    get { replaceQueryText }
-    set { replaceQueryText = newValue }
+  public var findQueryDraft: String = "" {
+    didSet {
+      if findQueryDraft != oldValue {
+        currentFindMatchIndex = 0
+      }
+      guard !isSyncingFindReplaceState else { return }
+      isSyncingFindReplaceState = true
+      defer { isSyncingFindReplaceState = false }
+      if findQueryText != findQueryDraft {
+        findQueryText = findQueryDraft
+      }
+    }
+  }
+  public var replaceQueryDraft: String = "" {
+    didSet {
+      guard !isSyncingFindReplaceState else { return }
+      isSyncingFindReplaceState = true
+      defer { isSyncingFindReplaceState = false }
+      if replaceQueryText != replaceQueryDraft {
+        replaceQueryText = replaceQueryDraft
+      }
+    }
   }
   public var isFindCaseSensitive: Bool = false {
     didSet {
@@ -184,6 +228,33 @@ public final class WorkspaceViewModel {
     self.formulaBarDraft = "=SUM(B2:C2)"
   }
 
+  internal func syncSheetRulesFromActiveTab() {
+    guard !isSyncingSheetRulesState else { return }
+    isSyncingSheetRulesState = true
+    defer { isSyncingSheetRulesState = false }
+    guard let tab = activeTab, case .sheet(let sheet) = tab.payload else {
+      activeConditionalFormatRule = nil
+      activeDataValidationRule = nil
+      return
+    }
+    activeConditionalFormatRule = sheet.conditionalFormatRules.first
+    activeDataValidationRule = sheet.dataValidationRule
+  }
+
+  internal func persistSheetRulesToActiveTab() {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .sheet(var sheet) = openTabs[idx].payload
+    else { return }
+    let rules = activeConditionalFormatRule.map { [$0] } ?? []
+    if sheet.conditionalFormatRules != rules || sheet.dataValidationRule != activeDataValidationRule
+    {
+      sheet.conditionalFormatRules = rules
+      sheet.dataValidationRule = activeDataValidationRule
+      openTabs[idx].payload = .sheet(sheet)
+    }
+  }
+
   public var activeTab: WorkspaceTabItem? {
     guard let activeTabID else { return openTabs.first }
     return openTabs.first(where: { $0.id == activeTabID })
@@ -196,6 +267,14 @@ public final class WorkspaceViewModel {
 
   public var filteredTabs: [WorkspaceTabItem] {
     WorkspaceHubCatalog.filterTabs(openTabs, section: activeHubSection, query: searchQuery)
+  }
+
+  public var filteredRecentTabs: [WorkspaceTabItem] {
+    WorkspaceHubCatalog.filterRecentTabs(filteredTabs, formatFilter: selectedHomeRecentFormatFilter)
+  }
+
+  public var filteredHomeRecentTabs: [WorkspaceTabItem] {
+    filteredRecentTabs
   }
 
   public var allAvailableTemplates: [OfficeTemplateDescriptor] {
@@ -254,6 +333,7 @@ public final class WorkspaceViewModel {
     redoStacks[tabID] = rStack
     openTabs[idx].payload = previousPayload
     openTabs[idx].isModified = true
+    syncSheetRulesFromActiveTab()
     lastExecutedCommandSummary = "실행 취소 완료"
   }
 
@@ -270,6 +350,7 @@ public final class WorkspaceViewModel {
     undoStacks[tabID] = uStack
     openTabs[idx].payload = nextPayload
     openTabs[idx].isModified = true
+    syncSheetRulesFromActiveTab()
     lastExecutedCommandSummary = "다시 실행 완료"
   }
 
@@ -745,6 +826,7 @@ public final class WorkspaceViewModel {
     sheet.switchActiveSheet(to: index)
     formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
     openTabs[idx].payload = .sheet(sheet)
+    syncSheetRulesFromActiveTab()
     lastExecutedCommandSummary = "시트 탭 전환: \(sheet.name)"
   }
 }

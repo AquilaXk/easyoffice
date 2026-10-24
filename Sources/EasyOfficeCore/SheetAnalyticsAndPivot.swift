@@ -277,3 +277,7 @@ public enum DataValidationRule: Sendable, Codable, Equatable {
     }
   }
 }
+
+public typealias SheetConditionalFormatRule = ConditionalFormatRule
+public typealias SheetDataValidationRule = DataValidationRule
+

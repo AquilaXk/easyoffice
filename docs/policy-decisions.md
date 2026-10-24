@@ -521,3 +521,24 @@
 - **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testSeventhAuditInteractiveFindReplaceSlideTransitionGridlinesAndMultiColumnSort`), `Tests/EasyOfficeTests/EnterpriseParityAndOptimizationTests.swift` (`testSeventhAuditFormulaUnaryPlusPostfixPercentIsBlankAndMultiColumnSort`)
 - **Revisit when**: 사용자 정의 리본 탭 순서 편집 또는 다중 윈도우 분리(Tear-off Tab Window) 요구사항이 추가될 때.
 
+### 26. 8차 심층 적대적 감사 기반 무결점 CoreGraphics 스냅샷 래스터화, 올인원 데스크톱 UI/UX 정밀 개편 및 코어·레거시 코덱 동기화 정책 (2026-10-24)
+
+- **Decision (`PD-052`)**:
+  1. **무결점 CoreGraphics 스냅샷 래스터화 호환성 및 순수 SwiftUI 컨트롤 일원화 (`UX-01`~`UX-12`)**:
+     - `WorkspaceViewModel`에 `isCanvasSnapshotMode: Bool = false` 플래그를 도입하고, `AdaptiveScrollContainer`, `LavenderMenuPill`, `LavenderTextFieldPill`, `LavenderTogglePill`, `LavenderStepperPill` 공통 컴포넌트를 통해 오프스크린 `NSView.cacheDisplay(in:to:)` 캡처 시 빈 사각형이나 잘림을 유발하던 AppKit `NSScrollView`/`NSTextView`/`PDFView`/`NSPopUpButton`/`NSTextField(.roundedBorder)` 브리지를 순수 SwiftUI/CoreGraphics 벡터 렌더링으로 일원화합니다.
+     - 상단 문서 탭 스트립(`TopDocumentTabStripView`), 컨텍스트 리본(`ContextRibbonBarView`), 에디터 2차 포맷 바, 우측 컨텍스트 인스펙터(`RightContextInspectorView`), 좌측 내비게이터(`LeftNavigatorPanelView`), 하단 상태바(`BottomWorkspaceStatusBarView`) 전 구간에서 컨트롤 잘림과 텍스트 말줄임표를 해소합니다.
+  2. **모듈별 데스크톱 오피스 전용 UX 정밀 고도화**:
+     - **홈 허브 (`HomeHubAndSmartViews.swift`)**: `selectedHomeNavSection`이 `.converter` 또는 `.smartAssistant`일 때 하단 최근 문서 테이블 중복 노출을 차단하고, 최근 문서 포맷 필터를 `["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"]`로 세분화하며 최종 열람 시각(`lastOpenedISO8601`)과 즐겨찾기(`★`)·상단 고정(`📌`) 즉시 토글을 제공합니다.
+     - **문서 및 HWP/HWPX 에디터 (`EditorDetailPanes.swift`)**: `.hwp` 탭 상단에 KS X 6101 / HWP 5.0 공공·행정 문서 규격 안내 배너와 전자결재 협조란을 렌더링하고, 페이지 가로/세로 방향(`isLandscape`) 및 다단 조판(`pageColumnCount >= 2`)을 A4 캔버스 레이아웃에 실시간 반영합니다.
+     - **스프레드시트 (`SheetEditorDetailPaneView.swift`)**: 수식 입력줄 좌측 이름 상자(`Name Box`) 옆에 취소(`×`), 입력 확인(`✓`), 함수 마법사(`fx`) 버튼을 배치하고, 스냅샷 모드 및 64행 이하 시트에서 `VStack` 즉시 렌더링으로 하단 요약 행까지 누락 없이 표시합니다.
+     - **슬라이드 및 PDF 스튜디오 (`SlideAndPDFDetailPanes.swift`)**: 16:9 슬라이드 스테이지에서 상단 제목/불릿 영역(`y: 0..215pt`)과 하단 도형/차트/표 스테이지 영역(`y >= 240pt`)을 분리하여 겹침을 원천 차단하고, PDF 스튜디오 우측 본문에 네이티브 A4 벡터 페이지 시트(`pdfNativePageSheetView`)를 배치하여 본문 텍스트, 하이라이트, 주석 스티커, 전자결재 승인 도장(`APPROVED · 결재완료`), AcroForm 위젯, 대각선 워터마크, 벡터 자유곡선 주석이 백지 현상 없이 선명하게 렌더링되도록 보장합니다.
+  3. **찾기/바꾸기 양방향 동기화, 시트별 조건부 서식·유효성 규칙 영속화 및 레거시 바이너리 코덱 패리티**:
+     - `findQueryText` ↔ `findQueryDraft` 및 `replaceQueryText` ↔ `replaceQueryDraft`를 양방향 동기화하고, `performFindAndReplace()`가 `isFindCaseSensitive` 및 문단/슬라이드 `inlineRuns`·`runs`·`speakerNotes`를 모두 갱신하도록 통합합니다.
+     - `WorksheetModel` 및 `WorksheetSheetPage`에 `conditionalFormatRules: [SheetConditionalFormatRule]`와 `dataValidationRule: SheetDataValidationRule?`을 내장하여 탭 전환·시트 탭 전환·실행 취소(`undo`)/다시 실행(`redo`) 및 `.xlsx`/`.xls`(BIFF8)/`.ods` 직렬화 라운드트립에서 손실 없이 보존합니다.
+     - 레거시 바이너리 프레젠테이션(`.ppt`) 코덱(`LegacyOLE2OfficeCodec`)이 `deck.deckTheme`(`0x0020` 인스턴스 태그)과 슬라이드별 `transitionDurationSeconds`·`autoAdvanceSeconds`를 무손실 라운드트립하도록 확장합니다.
+- **Why**: 8차 적대적 실사용 및 오프스크린 스냅샷 감사에서 발견된 AppKit 브리지 뷰 백지화/클리핑, 슬라이드 도형과 본문 텍스트 겹침, 탭 전환 시 시트 조건부 서식·데이터 유효성 규칙 유실, 찾기/바꾸기 프로퍼티 이원화 버그를 근본적으로 해결하기 위함입니다.
+- **Trade-offs**: 순수 SwiftUI/CoreGraphics 기반 커스텀 컨트롤(`LavenderMenuPill`, `LavenderTextFieldPill` 등)과 PDF 벡터 페이지 시트 렌더러를 유지 관리해야 하나, macOS 온스크린 대화형 환경과 오프스크린 스냅샷 검증 환경 모두에서 100% 결정론적 시각 품질을 보장합니다.
+- **Alternatives rejected**:
+  - `PDFKitRepresentedView`나 `NSScrollView`에 타이머 지연을 추가하여 스냅샷 백지 현상을 우회하려는 시도: 비결정론적 플레이키니스를 유발하고 근본 원인을 해결하지 못하므로 배제.
+- **Verified by**: `Tests/EasyOfficeTests/DeepDesktopInteractionsTests.swift` (`testEighthAuditFindReplaceSyncSheetRulesPersistencePPTThemeRoundTripAndSnapshotMode`)
+- **Revisit when**: 외부 플러그인 기반 서드파티 렌더러 확장 인터페이스를 도입할 때.
