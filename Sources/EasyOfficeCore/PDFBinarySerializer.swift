@@ -132,9 +132,9 @@ public enum PDFBinarySerializer {
         )
       }
 
-      // 3. Body Paragraphs (y = 728 down to y = 76, fixed 15.0pt leading)
-      var cursorY = 728.0
-      let lineLeading = 15.0
+      // 3. Body Paragraphs (24pt leading for <= 18 lines at y=668, 15pt leading for 19..42 lines at y=728)
+      var cursorY = visualLines.count <= 18 ? 668.0 : 728.0
+      let lineLeading = visualLines.count <= 18 ? 24.0 : 15.0
       for rawLine in visualLines {
         guard cursorY >= 76.0 else { break }
         let yInt = XMLDocumentModelMapper.safeClampedInt(cursorY)
