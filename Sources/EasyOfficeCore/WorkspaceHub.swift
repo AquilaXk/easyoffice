@@ -221,6 +221,8 @@ public final class WorkspaceViewModel {
   public var isPDFInkOverlayExpanded: Bool = false
   public var documentHorizontalPadding: Double = 28.0
   public var collapsedOutlineParagraphIDs: Set<UUID> = []
+  public var pendingCloseConfirmTabID: UUID? = nil
+  public var recentlyClosedTabs: [WorkspaceTabItem] = []
 
   internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
   internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
@@ -425,8 +427,50 @@ public final class WorkspaceViewModel {
     isShowingHomeHub = false
   }
 
+  public func requestCloseTab(id: UUID) {
+    guard let tab = openTabs.first(where: { $0.id == id }) else { return }
+    if tab.isModified {
+      pendingCloseConfirmTabID = id
+      lastExecutedCommandSummary = "저장되지 않은 변경사항 확인 대기: \(tab.fileName)"
+    } else {
+      closeTab(id: id)
+    }
+  }
+
+  public func confirmCloseTab(id: UUID, saveTo url: URL? = nil) {
+    if let url {
+      try? saveTabToDisk(id: id, to: url)
+    }
+    closeTab(id: id)
+  }
+
+  public func cancelCloseTab() {
+    pendingCloseConfirmTabID = nil
+  }
+
+  @discardableResult
+  public func reopenLastClosedTab() -> WorkspaceTabItem? {
+    guard !recentlyClosedTabs.isEmpty else { return nil }
+    let restored = recentlyClosedTabs.removeFirst()
+    openTabs.append(restored)
+    activeTabID = restored.id
+    isShowingHomeHub = false
+    lastExecutedCommandSummary = "최근 닫은 탭 복원: \(restored.fileName)"
+    return restored
+  }
+
   public func closeTab(id: UUID) {
     activeInlineEditTargetKey = nil
+    if let closingTab = openTabs.first(where: { $0.id == id }) {
+      recentlyClosedTabs.removeAll { $0.id == closingTab.id }
+      recentlyClosedTabs.insert(closingTab, at: 0)
+      if recentlyClosedTabs.count > 10 {
+        recentlyClosedTabs.removeLast(recentlyClosedTabs.count - 10)
+      }
+    }
+    if pendingCloseConfirmTabID == id {
+      pendingCloseConfirmTabID = nil
+    }
     openTabs.removeAll { $0.id == id }
     undoStacks.removeValue(forKey: id)
     redoStacks.removeValue(forKey: id)
@@ -656,11 +700,15 @@ public final class WorkspaceViewModel {
       ?? openTabs[idx].format
     let result = try convertTab(id: id, targetFormat: fmt)
     try result.outputBytes.write(to: url, options: .atomic)
-    openTabs[idx].payload = result.convertedPayload
-    openTabs[idx].isModified = false
-    openTabs[idx].fileURL = url
-    openTabs[idx].fileName = url.lastPathComponent
-    openTabs[idx].format = fmt
+    if fmt.moduleKind == openTabs[idx].format.moduleKind {
+      openTabs[idx].payload = result.convertedPayload
+      openTabs[idx].isModified = false
+      openTabs[idx].fileURL = url
+      openTabs[idx].fileName = url.lastPathComponent
+      openTabs[idx].format = fmt
+    } else {
+      lastExecutedCommandSummary = "포맷 내보내기 완료: \(url.lastPathComponent)"
+    }
     lastErrorMessage = nil
   }
 

@@ -109,6 +109,7 @@ public enum XMLSanitizer {
       let gtMask = broadcastByte(UInt8(ascii: ">"))
       let quotMask = broadcastByte(UInt8(ascii: "\""))
       let aposMask = broadcastByte(UInt8(ascii: "'"))
+      let ctrlHighMask: UInt64 = 0xE0E0_E0E0_E0E0_E0E0
 
       var idx = 0
       var spanStart = 0
@@ -122,33 +123,44 @@ public enum XMLSanitizer {
           | zeroByteMask(word ^ gtMask)
           | zeroByteMask(word ^ quotMask)
           | zeroByteMask(word ^ aposMask)
+          | zeroByteMask(word & ctrlHighMask)
         if matchBits == 0 {
           idx += 8
           continue
         }
-        idx += matchBits.trailingZeroBitCount >> 3
-        let b = buf[idx]
-        if out.isEmpty {
-          out.reserveCapacity(count + 16)
+        let blockEnd = idx + 8
+        while idx < blockEnd {
+          let b = buf[idx]
+          let isIllegalCtrl = (b < 0x20 && b != 0x09 && b != 0x0A && b != 0x0D)
+          if isIllegalCtrl || b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
+            if out.isEmpty {
+              out.reserveCapacity(count + 16)
+            }
+            if spanStart < idx {
+              out.append(contentsOf: buf[spanStart..<idx])
+            }
+            if !isIllegalCtrl {
+              appendEscapedEntity(for: b, into: &out)
+            }
+            spanStart = idx + 1
+          }
+          idx += 1
         }
-        if spanStart < idx {
-          out.append(contentsOf: buf[spanStart..<idx])
-        }
-        appendEscapedEntity(for: b, into: &out)
-        idx += 1
-        spanStart = idx
       }
 
       while idx < count {
         let b = buf[idx]
-        if b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
+        let isIllegalCtrl = (b < 0x20 && b != 0x09 && b != 0x0A && b != 0x0D)
+        if isIllegalCtrl || b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
           if out.isEmpty {
             out.reserveCapacity(count + 16)
           }
           if spanStart < idx {
             out.append(contentsOf: buf[spanStart..<idx])
           }
-          appendEscapedEntity(for: b, into: &out)
+          if !isIllegalCtrl {
+            appendEscapedEntity(for: b, into: &out)
+          }
           spanStart = idx + 1
         }
         idx += 1

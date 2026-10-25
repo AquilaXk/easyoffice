@@ -374,6 +374,17 @@ public enum ODFContainerCodec {
         ZipContainerEntry(
           path: "Pictures/\(safeName)", data: img.imageData, compressionMethod: .store))
     }
+    let existingPaths = Set(entries.map(\.path))
+    for path in doc.preservedArchiveEntries.keys.sorted() where !existingPaths.contains(path) {
+      if let rawData = doc.preservedArchiveEntries[path] {
+        entries.append(
+          ZipContainerEntry(
+            path: path,
+            data: rawData,
+            compressionMethod: XMLDocumentModelMapper.isXMLValidatedPath(path) ? .deflate : .store
+          ))
+      }
+    }
     return try ZipContainerCodec.pack(entries: entries)
   }
 
@@ -388,8 +399,14 @@ public enum ODFContainerCodec {
       throw EasyOfficeError.corruptedContainer(detail: "ODT 컨테이너에 'content.xml'이 누락되었습니다.")
     }
     var binaryEntries: [String: Data] = [:]
-    for entry in entries where XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-      binaryEntries[entry.path] = entry.data
+    var preservedEntries: [String: Data] = [:]
+    for entry in entries {
+      if XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
+        binaryEntries[entry.path] = entry.data
+      }
+      if entry.path != "mimetype" && entry.path != "content.xml" {
+        preservedEntries[entry.path] = entry.data
+      }
     }
 
     let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
@@ -429,7 +446,7 @@ public enum ODFContainerCodec {
     let meta = XMLDocumentModelMapper.parseExtendedMetadata(
       from: root.innerXML, defaultPaperSize: paperSize, binaryEntries: binaryEntries)
 
-    return OfficeDocumentModel(
+    var decodedDoc = OfficeDocumentModel(
       title: root.attributes["title"] ?? "제목 없음",
       format: .odt,
       paperSize: paperSize,
@@ -447,6 +464,8 @@ public enum ODFContainerCodec {
       equations: meta.equations,
       watermarkText: meta.watermarkText
     )
+    decodedDoc.preservedArchiveEntries = preservedEntries
+    return decodedDoc
   }
 
   public static func encodeWorksheet(_ sheet: WorksheetModel) throws -> Data {
@@ -513,12 +532,24 @@ public enum ODFContainerCodec {
       </office:document-content>
       """
 
-    return try ZipContainerCodec.pack(entries: [
+    var entries: [ZipContainerEntry] = [
       ZipContainerEntry(
         path: "mimetype", data: Data(spreadsheetMimeType.utf8), compressionMethod: .store),
       ZipContainerEntry(
         path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate),
-    ])
+    ]
+    let existingPaths = Set(entries.map(\.path))
+    for path in sheet.preservedArchiveEntries.keys.sorted() where !existingPaths.contains(path) {
+      if let rawData = sheet.preservedArchiveEntries[path] {
+        entries.append(
+          ZipContainerEntry(
+            path: path,
+            data: rawData,
+            compressionMethod: XMLDocumentModelMapper.isXMLValidatedPath(path) ? .deflate : .store
+          ))
+      }
+    }
+    return try ZipContainerCodec.pack(entries: entries)
   }
 
   public static func decodeWorksheet(from data: Data) throws -> WorksheetModel {
@@ -530,6 +561,10 @@ public enum ODFContainerCodec {
     }
     guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
       throw EasyOfficeError.corruptedContainer(detail: "ODS 컨테이너에 'content.xml'이 누락되었습니다.")
+    }
+    var preservedEntries: [String: Data] = [:]
+    for entry in entries where entry.path != "mimetype" && entry.path != "content.xml" {
+      preservedEntries[entry.path] = entry.data
     }
     let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
     let tableElems = XMLSanitizer.extractElements(named: "table:table", in: xml)
@@ -628,6 +663,7 @@ public enum ODFContainerCodec {
       }
     }
     XMLDocumentModelMapper.applyWorksheetMetadata(from: xml, to: &primary)
+    primary.preservedArchiveEntries = preservedEntries
     return primary
   }
 
@@ -659,12 +695,24 @@ public enum ODFContainerCodec {
       </office:document-content>
       """
 
-    return try ZipContainerCodec.pack(entries: [
+    var entries: [ZipContainerEntry] = [
       ZipContainerEntry(
         path: "mimetype", data: Data(presentationMimeType.utf8), compressionMethod: .store),
       ZipContainerEntry(
         path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate),
-    ])
+    ]
+    let existingPaths = Set(entries.map(\.path))
+    for path in deck.preservedArchiveEntries.keys.sorted() where !existingPaths.contains(path) {
+      if let rawData = deck.preservedArchiveEntries[path] {
+        entries.append(
+          ZipContainerEntry(
+            path: path,
+            data: rawData,
+            compressionMethod: XMLDocumentModelMapper.isXMLValidatedPath(path) ? .deflate : .store
+          ))
+      }
+    }
+    return try ZipContainerCodec.pack(entries: entries)
   }
 
   public static func decodePresentation(from data: Data) throws -> PresentationDeckModel {
@@ -676,6 +724,10 @@ public enum ODFContainerCodec {
     }
     guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
       throw EasyOfficeError.corruptedContainer(detail: "ODP 컨테이너에 'content.xml'이 누락되었습니다.")
+    }
+    var preservedEntries: [String: Data] = [:]
+    for entry in entries where entry.path != "mimetype" && entry.path != "content.xml" {
+      preservedEntries[entry.path] = entry.data
     }
     let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
     let root = XMLSanitizer.extractElements(named: "office:document-content", in: xml).first
@@ -714,13 +766,15 @@ public enum ODFContainerCodec {
       SlideDeckTheme(
         rawValue: root?.attributes["eo:deckTheme"] ?? root?.attributes["deckTheme"] ?? ""
       ) ?? .signatureLavender
-    return PresentationDeckModel(
+    var deck = PresentationDeckModel(
       title: root?.attributes["title"] ?? "발표자료",
       aspectRatio: SlideAspectRatio(rawValue: root?.attributes["aspectRatio"] ?? "")
         ?? .widescreen16x9,
       slides: slides,
       deckTheme: deckTheme
     )
+    deck.preservedArchiveEntries = preservedEntries
+    return deck
   }
 }
 
@@ -811,6 +865,17 @@ public enum HWPXContainerCodec {
         ZipContainerEntry(
           path: "BinData/\(safeName)", data: img.imageData, compressionMethod: .store))
     }
+    let existingPaths = Set(entries.map(\.path))
+    for path in doc.preservedArchiveEntries.keys.sorted() where !existingPaths.contains(path) {
+      if let rawData = doc.preservedArchiveEntries[path] {
+        entries.append(
+          ZipContainerEntry(
+            path: path,
+            data: rawData,
+            compressionMethod: XMLDocumentModelMapper.isXMLValidatedPath(path) ? .deflate : .store
+          ))
+      }
+    }
     return try ZipContainerCodec.pack(entries: entries)
   }
 
@@ -818,11 +883,18 @@ public enum HWPXContainerCodec {
     let entries = try ZipContainerCodec.unpack(from: data)
     var entryMap: [String: String] = [:]
     var binaryEntries: [String: Data] = [:]
+    var preservedEntries: [String: Data] = [:]
+    let corePaths: Set<String> = [
+      "mimetype", "Contents/content.hpf", "Contents/header.xml", "Contents/section0.xml",
+    ]
     for entry in entries {
       if XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
         binaryEntries[entry.path] = entry.data
-      } else {
+      } else if XMLDocumentModelMapper.isXMLValidatedPath(entry.path) {
         entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
+      }
+      if !corePaths.contains(entry.path) {
+        preservedEntries[entry.path] = entry.data
       }
     }
 
@@ -877,7 +949,7 @@ public enum HWPXContainerCodec {
     let meta = XMLDocumentModelMapper.parseExtendedMetadata(
       from: headerXML, defaultPaperSize: paperSize, binaryEntries: binaryEntries)
 
-    return OfficeDocumentModel(
+    var decodedDoc = OfficeDocumentModel(
       title: title, format: .hwpx, paperSize: paperSize,
       headerText: headerText, footerText: footerText,
       paragraphs: paragraphs, tables: tables, trackChangesEnabled: trackChanges,
@@ -885,5 +957,7 @@ public enum HWPXContainerCodec {
       comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images,
       equations: meta.equations, watermarkText: meta.watermarkText
     )
+    decodedDoc.preservedArchiveEntries = preservedEntries
+    return decodedDoc
   }
 }

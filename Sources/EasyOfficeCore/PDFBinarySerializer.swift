@@ -97,14 +97,13 @@ public enum PDFBinarySerializer {
       let visualLines = page.extractedText
         .split(separator: "\n", omittingEmptySubsequences: false)
         .flatMap { wrapLine(String($0), maxChars: 64) }
-        .prefix(26)
 
       // 3. Body Paragraphs (y = 728 down to y = 638)
       var cursorY = 728.0
-      let lineLeading = 15.0
+      let lineLeading = visualLines.count > 6 ? max(4.0, 90.0 / Double(visualLines.count)) : 15.0
       for rawLine in visualLines {
         guard cursorY >= 638.0 else { break }
-        let yInt = Int(cursorY.rounded())
+        let yInt = XMLDocumentModelMapper.safeClampedInt(cursorY)
         let barWidth = min(480, max(60, rawLine.count * 9))
         let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
         streamLines.append("0.925 0.937 0.984 rg 54 \(yInt - 3) \(barWidth) 13 re f")
@@ -193,22 +192,27 @@ public enum PDFBinarySerializer {
         )
         for stroke in pageStrokes {
           let (r, g, b) = parseRGBHex(stroke.strokeHex)
+          let safeWidth = stroke.lineWidth.isFinite ? max(0.5, min(24.0, stroke.lineWidth)) : 2.0
           var sigPathOps = String(
-            format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, stroke.lineWidth
+            format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, safeWidth
           )
           if let first = stroke.points.first {
-            let drawX0 = max(56.0, min(318.0, first.x))
+            let fx = first.x.isFinite ? first.x : 56.0
+            let fy = first.y.isFinite ? first.y : 460.0
+            let drawX0 = max(56.0, min(318.0, fx))
             let drawY0 =
-              first.y < 400.0
-              ? (458.0 + (abs(first.y).truncatingRemainder(dividingBy: 24.0)))
-              : min(480.0, max(456.0, first.y))
+              fy < 400.0
+              ? (458.0 + (abs(fy).truncatingRemainder(dividingBy: 24.0)))
+              : min(480.0, max(456.0, fy))
             sigPathOps += String(format: " %.2f %.2f m", drawX0, drawY0)
             for pt in stroke.points.dropFirst() {
-              let drawX = max(56.0, min(318.0, pt.x))
+              let px = pt.x.isFinite ? pt.x : 56.0
+              let py = pt.y.isFinite ? pt.y : 460.0
+              let drawX = max(56.0, min(318.0, px))
               let drawY =
-                pt.y < 400.0
-                ? (458.0 + (abs(pt.y).truncatingRemainder(dividingBy: 24.0)))
-                : min(480.0, max(456.0, pt.y))
+                py < 400.0
+                ? (458.0 + (abs(py).truncatingRemainder(dividingBy: 24.0)))
+                : min(480.0, max(456.0, py))
               sigPathOps += String(format: " %.2f %.2f l", drawX, drawY)
             }
             sigPathOps += " S Q"
@@ -220,7 +224,7 @@ public enum PDFBinarySerializer {
       // Clipped zero-area stream block preserving raw-coordinate audit tokens without visual clutter below y = 445
       streamLines.append("q 0 0 0 0 re W n")
       let startY = visualLines.count <= 18 ? 668 : 672
-      let lineStep = visualLines.count <= 18 ? 24 : 18
+      let lineStep = max(8, min(24, 640 / max(1, visualLines.count)))
       for (lineIdx, rawLine) in visualLines.enumerated() {
         let y = startY - (lineIdx * lineStep)
         let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
