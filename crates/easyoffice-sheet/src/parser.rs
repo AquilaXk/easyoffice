@@ -128,44 +128,20 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
         (None, trimmed)
     }
 
-    if let Some((lhs, rhs)) = split_once_unquoted(inner, ':') {
-        let (left_sheet, left_cell) = split_sheet_and_cell(lhs);
-        let (right_sheet, right_cell) = split_sheet_and_cell(rhs);
-        match (left_sheet, right_sheet) {
-            (Some(ls), Some(rs)) => {
-                let ls_inner = ls
-                    .strip_prefix('\'')
-                    .and_then(|s| s.strip_suffix('\''))
-                    .unwrap_or(&ls)
-                    .replace("''", "'");
-                let rs_inner = rs
-                    .strip_prefix('\'')
-                    .and_then(|s| s.strip_suffix('\''))
-                    .unwrap_or(&rs)
-                    .replace("''", "'");
-                if ls_inner.eq_ignore_ascii_case(&rs_inner) {
-                    return format!("{ls}!{left_cell}:{right_cell}");
-                }
-                return format!("{ls}!{left_cell}:{rs}!{right_cell}");
-            }
-            (Some(sheet), None) => {
-                return format!("{sheet}!{left_cell}:{right_cell}");
-            }
-            (None, Some(sheet)) => {
-                return format!("{left_cell}:{sheet}!{right_cell}");
-            }
-            (None, None) => {
-                return format!("{left_cell}:{right_cell}");
-            }
+    fn format_endpoint(part: &str) -> String {
+        let (sheet, cell) = split_sheet_and_cell(part);
+        if let Some(sheet) = sheet {
+            format!("{sheet}!{cell}")
+        } else {
+            cell.to_string()
         }
     }
 
-    let (sheet, cell) = split_sheet_and_cell(inner);
-    if let Some(sheet) = sheet {
-        format!("{sheet}!{cell}")
-    } else {
-        cell.to_string()
+    if let Some((lhs, rhs)) = split_once_unquoted(inner, ':') {
+        return format!("{}:{}", format_endpoint(lhs), format_endpoint(rhs));
     }
+
+    format_endpoint(inner)
 }
 
 #[inline]
