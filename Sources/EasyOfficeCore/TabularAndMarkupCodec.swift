@@ -14,15 +14,18 @@ public enum CSVStateMachineCodec {
 
   public static let maxExportRows = 65_536
   public static let maxExportColumns = 1_024
+  public static let maxDenseExportCells = 200_000
 
-  public static func encodeWorksheet(_ sheet: WorksheetModel, delimiter: Character = ",") -> Data {
+  public static func encodeWorksheet(_ sheet: WorksheetModel, delimiter: Character = ",") throws
+    -> Data
+  {
     var maxRow = -1
     var maxCol = -1
 
     for (coord, rawValue) in sheet.cellsByCoordinate where !rawValue.isEmpty {
       let r = coord.row
       let c = coord.column
-      if r >= 0, r < maxExportRows, c >= 0, c < maxExportColumns {
+      if r >= 0, r <= CellAddress.maxZeroBasedRow, c >= 0, c <= CellAddress.maxZeroBasedColumn {
         if r > maxRow { maxRow = r }
         if c > maxCol { maxCol = c }
       }
@@ -32,8 +35,17 @@ public enum CSVStateMachineCodec {
       return Data()
     }
 
+    let (denseCells, overflow) = (maxRow + 1).multipliedReportingOverflow(by: maxCol + 1)
+    guard !overflow, denseCells <= maxDenseExportCells else {
+      throw EasyOfficeError.resourceExhausted(
+        limitName: "csvMaxDenseExportCells",
+        limitValue: maxDenseExportCells,
+        actualValue: overflow ? Int.max : denseCells
+      )
+    }
+
     var out = ""
-    out.reserveCapacity((maxRow + 1) * (maxCol + 1) * 4)
+    out.reserveCapacity(denseCells * 4)
     for r in 0...maxRow {
       if r > 0 {
         out.append("\r\n")
