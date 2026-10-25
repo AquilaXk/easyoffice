@@ -429,7 +429,6 @@ final class WorkspaceUIParityTests: XCTestCase {
     XCTAssertNotEqual(restoredFromTemplateTab.id, openedDocTab.id)
     XCTAssertEqual(restoredFromTemplateTab.payload, openedDocTab.payload)
 
-    // 5. Verify scrubActiveTabMetadata() and non-destructive cross-module export vs same-module save
     freshVM.activeTabID = restoredFromTemplateTab.id
     freshVM.scrubActiveTabMetadata()
     XCTAssertGreaterThan(freshVM.lastScrubbedMetadataCount, 0)

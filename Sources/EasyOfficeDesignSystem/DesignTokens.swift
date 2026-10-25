@@ -285,19 +285,18 @@ public enum EasyOfficeDesignTokens {
   public static let statusDanger = RGBColorToken(red: 0xC8, green: 0x1E, blue: 0x1E, hex: "#C81E1E")
   public static let statusInfo = RGBColorToken(red: 0x4A, green: 0x58, blue: 0xA9, hex: "#4A58A9")
 
-  // MARK: - Module Semantic Accents (WCAG 2.1 AA Verified >= 4.5 on White & Light Scaffold)
   public static func accentToken(for module: OfficeModuleKind) -> RGBColorToken {
     switch module {
     case .document:
-      return brand700  // Signature Indigo-Lavender (#5C6BC0)
+      return brand700
     case .hwp:
-      return RGBColorToken(red: 0x5B, green: 0x3F, blue: 0xD1, hex: "#5B3FD1")  // Royal Violet
+      return RGBColorToken(red: 0x5B, green: 0x3F, blue: 0xD1, hex: "#5B3FD1")
     case .sheet:
-      return RGBColorToken(red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")  // Deep Emerald
+      return RGBColorToken(red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")
     case .slide:
-      return RGBColorToken(red: 0xB4, green: 0x53, blue: 0x09, hex: "#B45309")  // Deep Amber
+      return RGBColorToken(red: 0xB4, green: 0x53, blue: 0x09, hex: "#B45309")
     case .pdf:
-      return RGBColorToken(red: 0xB9, green: 0x1C, blue: 0x1C, hex: "#B91C1C")  // Deep Crimson
+      return RGBColorToken(red: 0xB9, green: 0x1C, blue: 0x1C, hex: "#B91C1C")
     }
   }
 

@@ -1299,8 +1299,6 @@ extension WorksheetModel {
     }
   }
 
-  // MARK: - Date & Range Helpers
-
   internal func rangeBounds(_ range: CellRange) -> (
     minRow: Int, maxRow: Int, minCol: Int, maxCol: Int, rowCount: Int, colCount: Int
   )? {

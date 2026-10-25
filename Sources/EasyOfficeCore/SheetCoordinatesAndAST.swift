@@ -768,12 +768,10 @@ extension WorksheetModel {
     let trimmed = expr.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return .empty }
 
-    // 1. Top-level comparison: >=, <=, <>, =, >, <
     if let cmpAST = compileTopLevelComparison(trimmed, depth: depth) {
       return cmpAST
     }
 
-    // 2. Binary arithmetic & concatenation: &, +, -, *, /, ^
     if let arithAST = compileBinaryArithmetic(trimmed, depth: depth) {
       return arithAST
     }
@@ -851,12 +849,10 @@ extension WorksheetModel {
       }
     }
 
-    // 10. Cross-sheet reference (e.g. Sheet2!A1, 'Summary Sheet'!B2:D10)
     if let crossSheetRef = parseCrossSheetReference(trimmed) {
       return crossSheetRef
     }
 
-    // 11. Same-sheet range reference (e.g. A1:B5)
     if trimmed.contains(":") && !trimmed.contains("(") && !trimmed.contains("\"") {
       if let range = try? CellRange(notation: trimmed) {
         return .rangeRef(range)
@@ -864,12 +860,10 @@ extension WorksheetModel {
       return .error(.ref)
     }
 
-    // 12. Direct cell reference
     if let addr = try? CellAddress(a1Notation: trimmed) {
       return .cellRef(addr.packedCoordinate)
     }
 
-    // 13. Named range identifier
     if isValidNamedRangeIdentifier(trimmed) {
       return .namedRangeRef(trimmed)
     }
@@ -1014,10 +1008,10 @@ extension WorksheetModel {
     let utf8 = expr.utf8
     guard !utf8.isEmpty else { return nil }
     let operatorPasses: [(UInt8, UInt8)] = [
-      (0x26, 0x26),  // '&'
-      (0x2B, 0x2D),  // '+', '-'
-      (0x2A, 0x2F),  // '*', '/'
-      (0x5E, 0x5E),  // '^'
+      (UInt8(ascii: "&"), UInt8(ascii: "&")),
+      (UInt8(ascii: "+"), UInt8(ascii: "-")),
+      (UInt8(ascii: "*"), UInt8(ascii: "/")),
+      (UInt8(ascii: "^"), UInt8(ascii: "^")),
     ]
     for (opA, opB) in operatorPasses {
       var parenDepth = 0

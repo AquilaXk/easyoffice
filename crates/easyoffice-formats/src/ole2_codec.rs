@@ -117,7 +117,7 @@ impl Ole2ContainerCodec {
         write_u16_le(&mut container, 32, 0x0006); // mini_sector_shift = 6 (64 bytes)
         write_u32_le(&mut container, 44, fat_sector_count as u32);
         write_u32_le(&mut container, 48, 0); // first directory sector = 0
-        write_u32_le(&mut container, 56, 0); // mini stream cutoff = 0 (all streams in regular sectors)
+        write_u32_le(&mut container, 56, 0);
         write_u32_le(&mut container, 60, Self::END_OF_CHAIN);
         write_u32_le(&mut container, 64, 0);
         write_u32_le(&mut container, 68, Self::END_OF_CHAIN);

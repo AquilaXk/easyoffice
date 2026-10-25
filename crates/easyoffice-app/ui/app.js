@@ -485,7 +485,6 @@
           return await resp.json();
         }
       } catch {
-        // Offline file or test environment fallback
       }
     }
     const handler = MOCK_IPC_HANDLERS[command];
