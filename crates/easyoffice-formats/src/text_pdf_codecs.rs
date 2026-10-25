@@ -813,7 +813,7 @@ impl PdfSerializer {
             push_line(
                 &mut out,
                 &format!(
-                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents {content_obj} 0 R >>",
+                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /EasyOfficeGothic-Medium /Encoding /Identity-H /ToUnicode /Identity-H >> >> >> /Contents {content_obj} 0 R >>",
                     page.page_number, page.rotation_degrees
                 ),
             );

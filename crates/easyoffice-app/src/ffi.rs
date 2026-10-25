@@ -222,7 +222,7 @@ mod tests {
 
         let summary = run_self_test().unwrap();
         assert!(summary.contains("PASSED"));
-        assert!(summary.contains("ipc_commands=13"));
+        assert!(summary.contains("ipc_commands=15"));
     }
 
     #[test]

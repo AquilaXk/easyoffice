@@ -168,11 +168,11 @@ impl DocumentFormat {
             .unwrap_or(trimmed)
             .to_ascii_lowercase();
         match ext.as_str() {
-            "docx" | "dotx" => Some(Self::Docx),
+            "docx" | "dotx" | "docm" | "dotm" => Some(Self::Docx),
             "doc" => Some(Self::Doc),
-            "xlsx" | "xltx" => Some(Self::Xlsx),
+            "xlsx" | "xltx" | "xlsm" | "xltm" => Some(Self::Xlsx),
             "xls" => Some(Self::Xls),
-            "pptx" | "potx" => Some(Self::Pptx),
+            "pptx" | "potx" | "pptm" | "potm" => Some(Self::Pptx),
             "ppsx" => Some(Self::Ppsx),
             "ppt" => Some(Self::Ppt),
             "hwp" => Some(Self::Hwp),
@@ -185,7 +185,7 @@ impl DocumentFormat {
             "odp" => Some(Self::Odp),
             "csv" => Some(Self::Csv),
             "tsv" => Some(Self::Tsv),
-            "md" | "markdown" => Some(Self::Markdown),
+            "md" | "markdown" | "htm" | "html" => Some(Self::Markdown),
             "txt" => Some(Self::Txt),
             "rtf" => Some(Self::Rtf),
             _ => None,

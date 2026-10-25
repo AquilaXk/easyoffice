@@ -82,6 +82,14 @@ impl WorkbookEngine {
         let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
         sheet.eval_coord_ctx(coord, &mut ctx, 0)
     }
+
+    pub fn evaluate_formula_on_sheet(&self, sheet_name: &str, formula: &str) -> EvaluatedCellValue {
+        let Some(sheet) = self.sheet(sheet_name) else {
+            return EvaluatedCellValue::Error(FormulaError::Ref);
+        };
+        let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
+        sheet.eval_raw_string_ctx(formula, &mut ctx, 0)
+    }
 }
 
 impl SheetEngine {

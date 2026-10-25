@@ -24,11 +24,14 @@ impl UniversalDocumentModel {
         }
         if !self.slides.is_empty() {
             let mut out = Vec::new();
-            for (s_title, bullets, _) in &self.slides {
+            for (s_title, bullets, notes) in &self.slides {
                 if !s_title.is_empty() {
                     out.push(s_title.clone());
                 }
                 out.extend(bullets.iter().cloned());
+                if !notes.is_empty() {
+                    out.push(notes.clone());
+                }
             }
             if !out.is_empty() {
                 return out;
@@ -44,22 +47,14 @@ impl UniversalDocumentModel {
         if !self.sheet_cells.is_empty() {
             return self.sheet_cells.clone();
         }
-        if let Some(first_table) = self.tables.first() {
-            let mut cells = Vec::new();
-            for (r_idx, row) in first_table.iter().enumerate() {
-                for (c_idx, val) in row.iter().enumerate() {
-                    cells.push((r_idx as u32, c_idx as u32, val.clone()));
-                }
-            }
-            if !cells.is_empty() {
-                return cells;
-            }
-        }
-        self.effective_paragraphs()
-            .into_iter()
-            .enumerate()
-            .map(|(idx, p)| (idx as u32, 0, p))
-            .collect()
+        let eff_paragraphs = if !self.paragraphs.is_empty() {
+            self.paragraphs.clone()
+        } else if !self.tables.is_empty() {
+            Vec::new()
+        } else {
+            self.effective_paragraphs()
+        };
+        doc_to_sheet_cells(&eff_paragraphs, &self.tables)
     }
 
     fn effective_slides(&self) -> Vec<(String, Vec<String>, String)> {
@@ -128,29 +123,39 @@ impl UniversalFormatConverter {
                 lines.extend(paragraphs);
                 Ok(lines.join("\n").into_bytes())
             }
-            DocumentFormat::Hwp | DocumentFormat::Hwt => Hwp5Codec::pack(&Hwp5DocumentPayload {
-                version: (5, 0, 3, 0),
-                is_template: format == DocumentFormat::Hwt,
-                agency_name: model
-                    .official_agency
-                    .clone()
-                    .unwrap_or_else(|| title.clone()),
-                document_number: title,
-                paragraphs: paragraphs
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, text)| Hwp5ParagraphRecord {
-                        text,
-                        style_name: if idx == 0 {
-                            "표제".to_string()
-                        } else {
-                            "본문".to_string()
-                        },
-                        is_official_header: idx == 0 && model.official_agency.is_some(),
-                    })
-                    .collect(),
-                table_cells: model.tables.first().cloned().unwrap_or_default(),
-            }),
+            DocumentFormat::Hwp | DocumentFormat::Hwt => {
+                let extra_tables = if model.tables.len() > 1 {
+                    &model.tables[1..]
+                } else {
+                    &[]
+                };
+                Hwp5Codec::pack_multi_tables(
+                    &Hwp5DocumentPayload {
+                        version: (5, 0, 3, 0),
+                        is_template: format == DocumentFormat::Hwt,
+                        agency_name: model
+                            .official_agency
+                            .clone()
+                            .unwrap_or_else(|| title.clone()),
+                        document_number: title,
+                        paragraphs: paragraphs
+                            .into_iter()
+                            .enumerate()
+                            .map(|(idx, text)| Hwp5ParagraphRecord {
+                                text,
+                                style_name: if idx == 0 {
+                                    "표제".to_string()
+                                } else {
+                                    "본문".to_string()
+                                },
+                                is_official_header: idx == 0 && model.official_agency.is_some(),
+                            })
+                            .collect(),
+                        table_cells: model.tables.first().cloned().unwrap_or_default(),
+                    },
+                    extra_tables,
+                )
+            }
             DocumentFormat::Hwpx | DocumentFormat::Hwtx => HwpxCodec::pack(&HwpxPayload {
                 title,
                 is_template: format == DocumentFormat::Hwtx,
@@ -291,12 +296,7 @@ impl UniversalFormatConverter {
                 Self::from_doc(title, lines, Vec::new(), None)
             }
             DocumentFormat::Hwp | DocumentFormat::Hwt => {
-                let p = Hwp5Codec::unpack(bytes)?;
-                let tables = if p.table_cells.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![p.table_cells]
-                };
+                let (p, tables) = Hwp5Codec::unpack_multi_tables(bytes)?;
                 let paragraphs = p.paragraphs.into_iter().map(|r| r.text).collect();
                 let agency = if p.agency_name.is_empty() {
                     None
@@ -398,11 +398,7 @@ impl UniversalFormatConverter {
         tables: Vec<Vec<Vec<String>>>,
         official_agency: Option<String>,
     ) -> UniversalDocumentModel {
-        let sheet_cells: Vec<(u32, u32, String)> = paragraphs
-            .iter()
-            .enumerate()
-            .map(|(idx, p)| (idx as u32, 0, p.clone()))
-            .collect();
+        let sheet_cells = doc_to_sheet_cells(&paragraphs, &tables);
         let slides = vec![(title.clone(), paragraphs.clone(), String::new())];
         UniversalDocumentModel {
             title,
@@ -419,11 +415,36 @@ impl UniversalFormatConverter {
         sheet_cells: Vec<(u32, u32, String)>,
     ) -> UniversalDocumentModel {
         let paragraphs: Vec<String> = sheet_cells.iter().map(|(_, _, v)| v.clone()).collect();
+        let tables = if sheet_cells.is_empty() {
+            Vec::new()
+        } else {
+            let max_r = sheet_cells
+                .iter()
+                .map(|(r, _, _)| *r)
+                .max()
+                .unwrap_or(0)
+                .min(512) as usize;
+            let max_c = sheet_cells
+                .iter()
+                .map(|(_, c, _)| *c)
+                .max()
+                .unwrap_or(0)
+                .min(64) as usize;
+            let mut grid = vec![vec![String::new(); max_c + 1]; max_r + 1];
+            for (r, c, val) in &sheet_cells {
+                let ri = *r as usize;
+                let ci = *c as usize;
+                if ri <= max_r && ci <= max_c {
+                    grid[ri][ci] = val.clone();
+                }
+            }
+            vec![grid]
+        };
         let slides = vec![(sheet_name.clone(), paragraphs.clone(), String::new())];
         UniversalDocumentModel {
             title: sheet_name,
             paragraphs,
-            tables: Vec::new(),
+            tables,
             sheet_cells,
             slides,
             official_agency: None,
@@ -435,11 +456,17 @@ impl UniversalFormatConverter {
         slides: Vec<(String, Vec<String>, String)>,
     ) -> UniversalDocumentModel {
         let mut paragraphs = Vec::new();
-        for (s_title, bullets, _) in &slides {
-            if !bullets.is_empty() {
-                paragraphs.extend(bullets.iter().cloned());
-            } else if !s_title.is_empty() {
+        for (s_title, bullets, notes) in &slides {
+            if !s_title.is_empty() {
                 paragraphs.push(s_title.clone());
+            }
+            for b in bullets {
+                if !b.is_empty() && paragraphs.last() != Some(b) {
+                    paragraphs.push(b.clone());
+                }
+            }
+            if !notes.is_empty() && paragraphs.last() != Some(notes) {
+                paragraphs.push(notes.clone());
             }
         }
         let sheet_cells: Vec<(u32, u32, String)> = paragraphs
@@ -456,6 +483,27 @@ impl UniversalFormatConverter {
             official_agency: None,
         }
     }
+}
+
+fn doc_to_sheet_cells(
+    paragraphs: &[String],
+    tables: &[Vec<Vec<String>>],
+) -> Vec<(u32, u32, String)> {
+    let mut cells: Vec<(u32, u32, String)> = Vec::new();
+    let mut next_row: u32 = 0;
+    for p in paragraphs {
+        cells.push((next_row, 0, p.clone()));
+        next_row += 1;
+    }
+    for table in tables {
+        for row in table {
+            for (c_idx, val) in row.iter().enumerate() {
+                cells.push((next_row, c_idx as u32, val.clone()));
+            }
+            next_row += 1;
+        }
+    }
+    cells
 }
 
 fn cells_to_grid(cells: &[(u32, u32, String)], fallback_title: &str) -> Vec<Vec<String>> {
@@ -565,10 +613,112 @@ mod tests {
         assert_eq!(md_decoded.tables, model.tables);
 
         let pdf_bytes = UniversalFormatConverter::encode(&model, DocumentFormat::Pdf).unwrap();
+        let pdf_raw = String::from_utf8_lossy(&pdf_bytes);
+        assert!(pdf_raw.contains("/Subtype /Type0"));
+        assert!(pdf_raw.contains("/Encoding /Identity-H"));
+        assert!(pdf_raw.contains("/ToUnicode /Identity-H"));
         let (_, pdf_decoded) = UniversalFormatConverter::decode(&pdf_bytes, Some("pdf")).unwrap();
         assert!(pdf_decoded
             .paragraphs
             .iter()
             .any(|p| p.contains("매출 | 1200")));
+    }
+
+    #[test]
+    fn test_cross_family_tables_hwp5_multi_table_slides_and_xml_quote_gt() {
+        let doc_model = UniversalDocumentModel {
+            title: "복합표문서".to_string(),
+            paragraphs: vec!["머리말문단".to_string()],
+            tables: vec![
+                vec![
+                    vec!["부서".to_string(), "예산".to_string()],
+                    vec!["플랫폼팀".to_string(), "5000".to_string()],
+                ],
+                vec![
+                    vec!["분기".to_string(), "상태".to_string()],
+                    vec!["4분기".to_string(), "완료".to_string()],
+                ],
+            ],
+            sheet_cells: Vec::new(),
+            slides: Vec::new(),
+            official_agency: Some("행정안전부".to_string()),
+        };
+
+        let hwp_bytes = UniversalFormatConverter::encode(&doc_model, DocumentFormat::Hwp).unwrap();
+        let (_, hwp_decoded) = UniversalFormatConverter::decode(&hwp_bytes, Some("hwp")).unwrap();
+        assert_eq!(hwp_decoded.tables.len(), 2);
+        assert_eq!(hwp_decoded.tables, doc_model.tables);
+
+        let xlsx_from_hwp =
+            UniversalFormatConverter::encode(&hwp_decoded, DocumentFormat::Xlsx).unwrap();
+        let (_, sheet_decoded) =
+            UniversalFormatConverter::decode(&xlsx_from_hwp, Some("xlsx")).unwrap();
+        assert!(sheet_decoded
+            .sheet_cells
+            .iter()
+            .any(|(_, _, v)| v == "머리말문단"));
+        assert!(sheet_decoded
+            .sheet_cells
+            .iter()
+            .any(|(_, _, v)| v == "플랫폼팀"));
+        assert!(sheet_decoded
+            .sheet_cells
+            .iter()
+            .any(|(_, _, v)| v == "4분기"));
+        assert!(!sheet_decoded.tables.is_empty());
+        assert_eq!(sheet_decoded.tables[0][1][0], "부서");
+        assert_eq!(sheet_decoded.tables[0][1][1], "예산");
+
+        let pptx_bytes = UniversalFormatConverter::encode(
+            &UniversalDocumentModel {
+                title: "발표덱".to_string(),
+                paragraphs: Vec::new(),
+                tables: Vec::new(),
+                sheet_cells: Vec::new(),
+                slides: vec![(
+                    "슬라이드제목1".to_string(),
+                    vec!["핵심불릿1".to_string()],
+                    "발표자노트1".to_string(),
+                )],
+                official_agency: None,
+            },
+            DocumentFormat::Pptx,
+        )
+        .unwrap();
+        let (_, slide_decoded) =
+            UniversalFormatConverter::decode(&pptx_bytes, Some("pptx")).unwrap();
+        assert!(slide_decoded
+            .paragraphs
+            .iter()
+            .any(|p| p == "슬라이드제목1"));
+        assert!(slide_decoded.paragraphs.iter().any(|p| p == "핵심불릿1"));
+        assert!(slide_decoded.paragraphs.iter().any(|p| p == "발표자노트1"));
+
+        assert_eq!(
+            DocumentFormat::from_extension("docm"),
+            Some(DocumentFormat::Docx)
+        );
+        assert_eq!(
+            DocumentFormat::from_extension("xlsm"),
+            Some(DocumentFormat::Xlsx)
+        );
+        assert_eq!(
+            DocumentFormat::from_extension("pptm"),
+            Some(DocumentFormat::Pptx)
+        );
+        assert_eq!(
+            DocumentFormat::from_extension("html"),
+            Some(DocumentFormat::Markdown)
+        );
+
+        let xml_with_gt_attr =
+            "<table:table table:name=\"A > B\"><table:table-row><table:table-cell><text:p>셀값</text:p></table:table-cell></table:table-row></table:table>";
+        assert_eq!(
+            crate::rtf_xml_helpers::extract_attr(xml_with_gt_attr, "table:table", "table:name"),
+            Some("A > B".to_string())
+        );
+        let blocks = crate::rtf_xml_helpers::extract_tag_bodies(xml_with_gt_attr, "table:table");
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].contains("셀값"));
     }
 }

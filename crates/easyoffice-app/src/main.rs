@@ -11,7 +11,7 @@ use std::time::Duration;
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
 const APP_JS: &str = include_str!("../ui/app.js");
-const MAX_HTTP_BODY_BYTES: usize = 262_144;
+const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
 const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
 
 fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
@@ -83,7 +83,7 @@ fn is_allowed_origin(origin: &str, port: u16) -> bool {
 }
 
 fn write_http_413(stream: &mut TcpStream) {
-    let body = "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(256KB)를 초과했습니다.\"}";
+    let body = "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(1MB)를 초과했습니다.\"}";
     let resp = format!(
         "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -246,16 +246,54 @@ fn handle_http_connection(mut stream: TcpStream, port: u16) {
     let _ = stream.flush();
 }
 
-fn serve_webui(port: u16) -> ExitCode {
-    let addr = format!("127.0.0.1:{port}");
-    let listener = match TcpListener::bind(&addr) {
+fn bind_with_fallback(preferred_port: u16) -> std::io::Result<TcpListener> {
+    if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{preferred_port}")) {
+        return Ok(listener);
+    }
+    if preferred_port == 8787 {
+        for candidate in 8788..=8800 {
+            if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{candidate}")) {
+                return Ok(listener);
+            }
+        }
+    }
+    TcpListener::bind("127.0.0.1:0")
+}
+
+fn try_open_desktop_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
+fn serve_webui(preferred_port: u16, open_browser: bool) -> ExitCode {
+    let listener = match bind_with_fallback(preferred_port) {
         Ok(l) => l,
         Err(err) => {
-            eprintln!("Failed to bind {addr}: {err}");
+            eprintln!("Failed to bind 127.0.0.1:{preferred_port}: {err}");
             return ExitCode::FAILURE;
         }
     };
-    println!("EasyOffice WebUI Server listening on http://{addr}");
+    let bound_port = listener
+        .local_addr()
+        .map(|a| a.port())
+        .unwrap_or(preferred_port);
+    let url = format!("http://127.0.0.1:{bound_port}");
+    println!("EasyOffice WebUI Server listening on {url}");
+    if open_browser {
+        try_open_desktop_browser(&url);
+    }
     let active_threads = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
         let current = active_threads.load(Ordering::Relaxed);
@@ -263,11 +301,11 @@ fn serve_webui(port: u16) -> ExitCode {
             active_threads.fetch_add(1, Ordering::Relaxed);
             let counter = Arc::clone(&active_threads);
             thread::spawn(move || {
-                handle_http_connection(stream, port);
+                handle_http_connection(stream, bound_port);
                 counter.fetch_sub(1, Ordering::Relaxed);
             });
         } else {
-            handle_http_connection(stream, port);
+            handle_http_connection(stream, bound_port);
         }
     }
     ExitCode::SUCCESS
@@ -289,12 +327,23 @@ fn main() -> ExitCode {
         }
     }
 
+    let open_flag = args.iter().any(|a| a == "--open");
     if let Some(idx) = args.iter().position(|a| a == "--serve") {
         let port = args
             .get(idx + 1)
             .and_then(|s| s.parse::<u16>().ok())
             .unwrap_or(8787);
-        return serve_webui(port);
+        return serve_webui(port, open_flag);
+    }
+    if open_flag {
+        return serve_webui(8787, true);
+    }
+
+    let headless = args.iter().any(|a| a == "--bootstrap" || a == "--headless")
+        || env::var("EASYOFFICE_HEADLESS").is_ok()
+        || env::var("CI").is_ok();
+    if cfg!(target_os = "windows") && args.is_empty() && !headless {
+        return serve_webui(8787, true);
     }
 
     match EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "") {

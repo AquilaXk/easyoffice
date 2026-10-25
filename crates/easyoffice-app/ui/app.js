@@ -39,8 +39,18 @@
 
   const RIBBON_STYLE_LABELS = {
     standard: ["홈", "삽입", "레이아웃", "수식·데이터", "모듈 전용", "검토", "보기"],
-    hangul: ["파일·편집", "보기", "쪽·원고지", "입력·누름틀", "서식·스타일", "표·개체", "생산성·보안"],
+    hangul: ["편집", "입력", "쪽·원고지", "표·개체", "시트·차트", "보안·도구", "보기"],
   };
+
+  const RIBBON_CATEGORY_ORDER = [
+    "home",
+    "insert",
+    "layout",
+    "formulasAndData",
+    "moduleSpecific",
+    "review",
+    "view",
+  ];
 
   const COMMON_CATEGORY_SPECS = {
     home: [
@@ -179,13 +189,27 @@
   let activeSlideIndex = 0;
   let slideLaserActive = false;
   let pdfRotationDeg = 0;
+  let activeDocBlockEl = null;
+
+  const workspaceUndoStack = [];
+  const workspaceRedoStack = [];
+  const MAX_UNDO_SNAPSHOTS = 64;
+
+  const docTabStore = {
+    DOC: null,
+    HWP: null,
+  };
 
   const localRibbonState = {
     isBold: false,
     isItalic: false,
     isUnderline: false,
+    stylePresetIndex: 0,
+    paperSize: "A4",
     columnCount: 1,
     isLandscape: false,
+    marginPresetIndex: 0,
+    sortAscending: true,
     manuscriptGridEnabled: false,
     approvalHeaderEnabled: true,
     trackChangesEnabled: false,
@@ -346,11 +370,19 @@
       localRibbonState.isItalic = !localRibbonState.isItalic;
     } else if (cmdId.endsWith("-home-underline")) {
       localRibbonState.isUnderline = !localRibbonState.isUnderline;
+    } else if (cmdId.endsWith("-home-style")) {
+      localRibbonState.stylePresetIndex = (localRibbonState.stylePresetIndex + 1) % 4;
+    } else if (cmdId.endsWith("-layout-paper")) {
+      localRibbonState.paperSize = localRibbonState.paperSize === "A4" ? "Letter" : "A4";
     } else if (cmdId.endsWith("-layout-orientation")) {
       localRibbonState.isLandscape = !localRibbonState.isLandscape;
     } else if (cmdId.endsWith("-layout-columns")) {
       localRibbonState.columnCount =
         localRibbonState.columnCount >= 3 ? 1 : localRibbonState.columnCount + 1;
+    } else if (cmdId.endsWith("-layout-margins")) {
+      localRibbonState.marginPresetIndex = (localRibbonState.marginPresetIndex + 1) % 3;
+    } else if (cmdId.endsWith("-data-sort")) {
+      localRibbonState.sortAscending = !localRibbonState.sortAscending;
     } else if (cmdId === "hwp-mod-manuscript") {
       localRibbonState.manuscriptGridEnabled = !localRibbonState.manuscriptGridEnabled;
     } else if (cmdId === "hwp-mod-header") {
@@ -364,7 +396,14 @@
     } else if (cmdId.endsWith("-view-theme")) {
       localRibbonState.darkThemeEnabled = !localRibbonState.darkThemeEnabled;
     } else if (cmdId.endsWith("-view-zoom")) {
-      localRibbonState.zoomPercent = 100;
+      localRibbonState.zoomPercent =
+        localRibbonState.zoomPercent === 100
+          ? 125
+          : localRibbonState.zoomPercent === 125
+            ? 150
+            : localRibbonState.zoomPercent === 150
+              ? 90
+              : 100;
     } else if (cmdId === "pdf-mod-rotate") {
       localRibbonState.pdfRotationDegrees = (localRibbonState.pdfRotationDegrees + 90) % 360;
     }
@@ -375,6 +414,15 @@
       catalogCount: 140,
       ...localRibbonState,
     };
+  }
+
+  function encodeUtf8Base64(text) {
+    const bytes = new TextEncoder().encode(String(text || ""));
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return typeof globalThis.btoa === "function" ? globalThis.btoa(binary) : "";
   }
 
   const MOCK_IPC_HANDLERS = {
@@ -397,29 +445,42 @@
       return { commands: modMap[catPart] || modMap.home };
     },
     convert_document_format: (payload) => {
-      const parts = String(payload || "docx->hwpx|문서|본문").split("|");
-      const [src, dst] = (parts[0] || "docx->hwpx").split("->");
-      const title = parts[1] || "통합_변환_문서";
-      const body = parts[2] || "본문 텍스트";
+      const raw = String(payload || "docx->hwpx|문서|본문");
+      const firstPipe = raw.indexOf("|");
+      const firstSeg = firstPipe >= 0 ? raw.slice(0, firstPipe) : raw;
+      const restSeg = firstPipe >= 0 ? raw.slice(firstPipe + 1) : "통합_변환_문서|본문";
+      const secondPipe = restSeg.indexOf("|");
+      const [src, dst] = (firstSeg || "docx->hwpx").split("->");
+      const title = (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서";
+      const body = (secondPipe >= 0 ? restSeg.slice(secondPipe + 1) : "") || "본문 텍스트";
       const encoder = new TextEncoder();
       const rawBytes = encoder.encode(title + "\n" + body).length;
       const containerOverhead = {
         docx: 640,
+        doc: 1024,
         hwpx: 720,
+        hwtx: 720,
         hwp: 1024,
+        hwt: 1024,
         odt: 600,
         xlsx: 680,
         xls: 1024,
+        ods: 620,
         pptx: 760,
+        ppsx: 760,
+        ppt: 1024,
+        odp: 640,
         pdf: 480,
         rtf: 180,
         md: 16,
         html: 140,
         csv: 24,
+        tsv: 24,
         txt: 0,
       };
       const srcBytes = rawBytes + (containerOverhead[src] ?? 256);
       const dstBytes = rawBytes + (containerOverhead[dst] ?? 256);
+      const b64 = encodeUtf8Base64(title + "\n" + body);
       return {
         sourceFormat: src,
         targetFormat: dst,
@@ -427,7 +488,9 @@
         outputBytes: dstBytes,
         targetBytes: dstBytes,
         detectedTarget: dst,
-        specification: MODULE_SPECS[dst.toUpperCase()] || "표준 문서 포맷",
+        specification: MODULE_SPECS[(dst || "").toUpperCase()] || "표준 문서 포맷",
+        converted_base64: b64,
+        convertedBase64: b64,
         status: "OK",
       };
     },
@@ -463,6 +526,16 @@
       };
     },
     execute_ribbon_command: (payload) => localExecuteRibbonCommand(payload),
+    undo_ribbon_command: () => ({
+      commandId: "undo",
+      summary: "실행 취소 완료",
+      ...localRibbonState,
+    }),
+    redo_ribbon_command: () => ({
+      commandId: "redo",
+      summary: "다시 실행 완료",
+      ...localRibbonState,
+    }),
   };
 
   async function invokeIpc(command, payload) {
@@ -567,16 +640,19 @@
   }
 
   function collectSheetCellMap() {
+    sheetDataStore[activeSheetName] = snapshotDomSheetCells();
     const map = {};
-    const sheet2Snap = sheetDataStore.Sheet2 || {};
-    Object.keys(sheet2Snap).forEach((ref) => {
-      const entry = sheet2Snap[ref];
-      if (entry && (entry.formula || entry.value)) {
-        const val = entry.formula
-          ? entry.formula
-          : normalizeFormattedNumericCell(entry.value);
-        map["Sheet2!" + ref] = escapeSemicolonToken(val);
-      }
+    Object.keys(sheetDataStore).forEach((shName) => {
+      const snap = sheetDataStore[shName] || {};
+      Object.keys(snap).forEach((ref) => {
+        const entry = snap[ref];
+        if (entry && (entry.formula || entry.value)) {
+          const val = entry.formula
+            ? entry.formula
+            : normalizeFormattedNumericCell(entry.value);
+          map[shName + "!" + ref] = escapeSemicolonToken(val);
+        }
+      });
     });
     document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
       const ref = td.dataset.cell;
@@ -584,6 +660,7 @@
       const rawText = normalizeFormattedNumericCell(td.textContent || "");
       const val = formula || rawText;
       map[ref] = escapeSemicolonToken(val);
+      map[activeSheetName + "!" + ref] = escapeSemicolonToken(val);
     });
     return map;
   }
@@ -754,20 +831,168 @@
     }
 
     const aggEl = document.getElementById("status-sheet-agg");
-    if (aggEl && numericVals.length > 0) {
-      const sum = numericVals.reduce((a, b) => a + b, 0);
-      const avg = Math.round((sum / numericVals.length) * 10) / 10;
-      const max = Math.max(...numericVals);
-      aggEl.textContent =
-        "선택 집계 · 합계 " +
-        sum.toLocaleString() +
-        " · 평균 " +
-        avg.toLocaleString() +
-        " · 개수 " +
-        numericVals.length +
-        " · 최대 " +
-        max.toLocaleString();
+    if (aggEl) {
+      if (numericVals.length > 0) {
+        const sum = numericVals.reduce((a, b) => a + b, 0);
+        const avg = Math.round((sum / numericVals.length) * 10) / 10;
+        const max = Math.max(...numericVals);
+        aggEl.textContent =
+          "선택 집계 · 합계 " +
+          sum.toLocaleString() +
+          " · 평균 " +
+          avg.toLocaleString() +
+          " · 개수 " +
+          numericVals.length +
+          " · 최대 " +
+          max.toLocaleString();
+      } else {
+        aggEl.textContent = "선택 집계 · 숫자 데이터 없음";
+      }
     }
+  }
+
+  function saveActiveDocTabState() {
+    if (activeModule !== "DOC" && activeModule !== "HWP") return;
+    const editor = document.getElementById("doc-editor");
+    const tbody = document.getElementById("doc-table-body");
+    if (!editor) return;
+    docTabStore[activeModule] = {
+      editorHtml: editor.innerHTML,
+      tableHtml: tbody ? tbody.innerHTML : "",
+    };
+  }
+
+  function ensureDefaultDocTabStore() {
+    const editor = document.getElementById("doc-editor");
+    const tbody = document.getElementById("doc-table-body");
+    if (!docTabStore.DOC && editor) {
+      docTabStore.DOC = {
+        editorHtml: editor.innerHTML,
+        tableHtml: tbody ? tbody.innerHTML : "",
+      };
+    }
+    if (!docTabStore.HWP) {
+      docTabStore.HWP = {
+        editorHtml:
+          "<h1>행정안전부 전자결재 표준 기안문 (KS X 6101 HWPX)</h1>" +
+          "<p>문서번호: 기획재정담당관-2026-0418 · 시행일자: 2026. 10. 25. · 공개구분: 대국민 공개</p>" +
+          "<h2>1. 추진 배경 및 목적</h2>" +
+          "<p>공공기관 행정 문서의 HWP 5.0(OLE2 CFBF) 및 HWPX(OWPML) 상호운용성 표준을 준수하고 다중 표·누름틀·원고지 조판 정합성을 확보합니다.</p>" +
+          '<p id="hwp-manuscript-preview" class="hwp-manuscript-notice">한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성</p>',
+        tableHtml:
+          '<tr><td>표준화 총괄과</td><td>김민준 서기관</td><td data-doc-num="520">520</td></tr>' +
+          '<tr><td>정보보호 감사팀</td><td>박서연 사무관</td><td data-doc-num="340">340</td></tr>' +
+          '<tr id="doc-table-sum-row"><td>합계 (=SUM(ABOVE))</td><td>자동 집계</td><td id="doc-table-sum-cell" data-doc-num="860">860</td></tr>',
+      };
+    }
+  }
+
+  function restoreDocTabState(mod) {
+    if (mod !== "DOC" && mod !== "HWP") return;
+    ensureDefaultDocTabStore();
+    const saved = docTabStore[mod];
+    if (!saved) return;
+    const editor = document.getElementById("doc-editor");
+    const tbody = document.getElementById("doc-table-body");
+    if (editor) editor.innerHTML = saved.editorHtml;
+    if (tbody && saved.tableHtml) tbody.innerHTML = saved.tableHtml;
+    activeDocBlockEl = null;
+    computeDocTableSummary();
+    computeSmartStats();
+  }
+
+  function captureWorkspaceSnapshot() {
+    saveActiveDocTabState();
+    sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+    return {
+      activeModule,
+      activeSheetName,
+      activeSheetCellRef,
+      activeSlideIndex,
+      pdfRotationDeg,
+      theme: document.documentElement.dataset.theme || "light",
+      docTabs: JSON.parse(JSON.stringify(docTabStore)),
+      sheets: JSON.parse(JSON.stringify(sheetDataStore)),
+      slides: JSON.parse(JSON.stringify(SLIDE_DECK_STATE)),
+      ribbonState: JSON.parse(JSON.stringify(localRibbonState)),
+    };
+  }
+
+  function restoreWorkspaceSnapshot(snap) {
+    if (!snap) return;
+    if (snap.docTabs) {
+      docTabStore.DOC = snap.docTabs.DOC;
+      docTabStore.HWP = snap.docTabs.HWP;
+    }
+    if (snap.sheets) {
+      Object.keys(sheetDataStore).forEach((k) => delete sheetDataStore[k]);
+      Object.assign(sheetDataStore, JSON.parse(JSON.stringify(snap.sheets)));
+    }
+    if (Array.isArray(snap.slides)) {
+      SLIDE_DECK_STATE.splice(0, SLIDE_DECK_STATE.length, ...JSON.parse(JSON.stringify(snap.slides)));
+    }
+    if (snap.ribbonState) {
+      Object.assign(localRibbonState, snap.ribbonState);
+    }
+    pdfRotationDeg = typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0;
+    const badge = document.getElementById("pdf-rotation-badge");
+    const card = document.getElementById("pdf-page-card");
+    if (badge) badge.textContent = "회전: " + pdfRotationDeg + "°";
+    if (card) card.style.transform = "rotate(" + pdfRotationDeg + "deg)";
+
+    if (snap.theme) {
+      document.documentElement.dataset.theme = snap.theme;
+      const themeBtn = document.getElementById("btn-theme-toggle");
+      if (themeBtn) themeBtn.textContent = snap.theme === "dark" ? "라이트 모드" : "다크 모드";
+    }
+
+    const targetMod = snap.activeModule || activeModule;
+    if (targetMod === "DOC" || targetMod === "HWP") {
+      restoreDocTabState(targetMod);
+    }
+    if (snap.activeSheetName) {
+      activeSheetName = snap.activeSheetName;
+      restoreDomSheetCells(activeSheetName);
+      updateSheetSelectionAndAggregates(snap.activeSheetCellRef || "F2");
+    }
+    if (typeof snap.activeSlideIndex === "number") {
+      renderSlideDeck(Math.min(snap.activeSlideIndex, SLIDE_DECK_STATE.length - 1));
+    }
+    activatePane(targetMod, true);
+  }
+
+  function pushUndoSnapshot() {
+    workspaceUndoStack.push(captureWorkspaceSnapshot());
+    if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
+      workspaceUndoStack.shift();
+    }
+    workspaceRedoStack.length = 0;
+  }
+
+  async function performWorkspaceUndo() {
+    const fb = document.getElementById("status-command-feedback");
+    await invokeIpc("undo_ribbon_command", "");
+    if (workspaceUndoStack.length === 0) {
+      if (fb) fb.textContent = "실행 취소할 작업이 없습니다";
+      return;
+    }
+    workspaceRedoStack.push(captureWorkspaceSnapshot());
+    const prev = workspaceUndoStack.pop();
+    restoreWorkspaceSnapshot(prev);
+    if (fb) fb.textContent = "실행 취소 완료 (" + activeModule + ")";
+  }
+
+  async function performWorkspaceRedo() {
+    const fb = document.getElementById("status-command-feedback");
+    await invokeIpc("redo_ribbon_command", "");
+    if (workspaceRedoStack.length === 0) {
+      if (fb) fb.textContent = "다시 실행할 작업이 없습니다";
+      return;
+    }
+    workspaceUndoStack.push(captureWorkspaceSnapshot());
+    const next = workspaceRedoStack.pop();
+    restoreWorkspaceSnapshot(next);
+    if (fb) fb.textContent = "다시 실행 완료 (" + activeModule + ")";
   }
 
   function renderModuleOutline(mod) {
@@ -782,23 +1007,16 @@
         active: idx === 0,
       }));
     } else if (mod === "SHEET") {
-      items = [
-        {
-          label: "1. 2026 분기별 실적 (Sheet1)",
-          action: () => switchSheetTab("Sheet1"),
-          active: activeSheetName === "Sheet1",
-        },
-        {
-          label: "2. 부문별 요약 (Sheet2)",
-          action: () => switchSheetTab("Sheet2"),
-          active: activeSheetName === "Sheet2",
-        },
-        {
-          label: "3. 연간 합계 행 (F7)",
-          action: () => updateSheetSelectionAndAggregates("F7"),
-          active: false,
-        },
-      ];
+      items = Object.keys(sheetDataStore).map((sName, idx) => ({
+        label: idx + 1 + ". 시트 워크시트 (" + sName + ")",
+        action: () => switchSheetTab(sName),
+        active: activeSheetName === sName,
+      }));
+      items.push({
+        label: items.length + 1 + ". 연간 합계 행 (F7)",
+        action: () => updateSheetSelectionAndAggregates("F7"),
+        active: false,
+      });
     } else if (mod === "SLIDE") {
       items = SLIDE_DECK_STATE.map((s, idx) => ({
         label: idx + 1 + ". " + s.title,
@@ -868,7 +1086,13 @@
     if (hwpNotice) hwpNotice.hidden = mod !== "HWP" && !localRibbonState.manuscriptGridEnabled;
   }
 
-  function activatePane(mod) {
+  function activatePane(mod, skipTabBufferSync) {
+    if (!skipTabBufferSync && (activeModule === "DOC" || activeModule === "HWP") && mod !== activeModule) {
+      saveActiveDocTabState();
+    }
+    if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== activeModule) {
+      restoreDocTabState(mod);
+    }
     applyModuleAccent(mod);
     const panes = {
       DOC: document.getElementById("pane-doc"),
@@ -894,21 +1118,53 @@
     void renderRibbonCategoryTools(activeRibbonCategory);
   }
 
+  function getFocusedDocBlock(docEditor) {
+    if (!docEditor) return null;
+    const sel = globalThis.getSelection ? globalThis.getSelection() : null;
+    if (sel && sel.anchorNode) {
+      const node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      const block = node ? node.closest("#doc-editor > h1, #doc-editor > h2, #doc-editor > p") : null;
+      if (block) {
+        activeDocBlockEl = block;
+        return block;
+      }
+    }
+    if (activeDocBlockEl && docEditor.contains(activeDocBlockEl)) {
+      return activeDocBlockEl;
+    }
+    return docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview), :scope > h2, :scope > h1") || docEditor;
+  }
+
   function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
     if (!docEditor) return false;
+    const targetEl = getFocusedDocBlock(docEditor);
     if (cmdId.endsWith("-home-bold")) {
-      const boldOn = execRes?.isBold ?? !docEditor.style.fontWeight;
-      docEditor.style.fontWeight = boldOn ? "600" : "";
+      const boldOn = execRes?.isBold ?? targetEl.style.fontWeight !== "600";
+      targetEl.style.fontWeight = boldOn ? "600" : "";
       return true;
     }
     if (cmdId.endsWith("-home-italic")) {
-      const italicOn = execRes?.isItalic ?? docEditor.style.fontStyle !== "italic";
-      docEditor.style.fontStyle = italicOn ? "italic" : "";
+      const italicOn = execRes?.isItalic ?? targetEl.style.fontStyle !== "italic";
+      targetEl.style.fontStyle = italicOn ? "italic" : "";
       return true;
     }
     if (cmdId.endsWith("-home-underline")) {
-      const underOn = execRes?.isUnderline ?? docEditor.style.textDecoration !== "underline";
-      docEditor.style.textDecoration = underOn ? "underline" : "";
+      const underOn = execRes?.isUnderline ?? targetEl.style.textDecoration !== "underline";
+      targetEl.style.textDecoration = underOn ? "underline" : "";
+      return true;
+    }
+    if (cmdId.endsWith("-home-style")) {
+      const presetIdx = Number(execRes?.stylePresetIndex ?? 0) % 4;
+      const sizes = ["15px", "18px", "22px", "13.5px"];
+      targetEl.style.fontSize = sizes[presetIdx];
+      return true;
+    }
+    if (cmdId.endsWith("-home-find")) {
+      const firstP = docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview)");
+      if (firstP) {
+        firstP.dataset.highlighted = firstP.dataset.highlighted === "true" ? "false" : "true";
+        firstP.style.backgroundColor = firstP.dataset.highlighted === "true" ? "rgba(92, 107, 192, 0.14)" : "";
+      }
       return true;
     }
     if (cmdId.endsWith("-layout-columns")) {
@@ -921,12 +1177,54 @@
       docEditor.style.maxWidth = landscape ? "980px" : "";
       return true;
     }
+    if (cmdId.endsWith("-layout-margins")) {
+      const idx = Number(execRes?.marginPresetIndex ?? 0) % 3;
+      const pads = ["28px 36px", "16px 20px", "36px 52px"];
+      docEditor.style.padding = pads[idx];
+      return true;
+    }
+    if (cmdId.endsWith("-layout-size")) {
+      const paper = execRes?.paperSize || "A4";
+      docEditor.dataset.paperSize = paper;
+      return true;
+    }
+    if (cmdId.endsWith("-layout-break") || cmdId.endsWith("-insert-section") || cmdId.endsWith("-insert-footnote") || cmdId.endsWith("-insert-toc") || cmdId.endsWith("-insert-image") || cmdId.endsWith("-insert-field") || cmdId.endsWith("-insert-header") || cmdId.endsWith("-insert-equation") || cmdId.endsWith("-mod-pressfield") || cmdId.endsWith("-mod-Stamp") || cmdId.endsWith("-mod-stamp") || cmdId.endsWith("-mod-citation") || cmdId.endsWith("-mod-bookmark")) {
+      const p = document.createElement("p");
+      p.textContent = "[" + (execRes?.summary || cmdId) + "]";
+      docEditor.appendChild(p);
+      computeSmartStats();
+      renderModuleOutline(activeModule);
+      return true;
+    }
+    if (cmdId.endsWith("-insert-table")) {
+      document.getElementById("btn-doc-add-row")?.click();
+      return true;
+    }
+    if (cmdId.endsWith("-data-sum")) {
+      computeDocTableSummary();
+      return true;
+    }
+    if (cmdId.endsWith("-data-sort")) {
+      const tbody = document.getElementById("doc-table-body");
+      if (tbody) {
+        const rows = Array.from(tbody.querySelectorAll("tr:not(#doc-table-sum-row)"));
+        const asc = Boolean(execRes?.sortAscending);
+        rows.sort((a, b) => {
+          const aText = (a.cells[0]?.textContent || "").trim();
+          const bText = (b.cells[0]?.textContent || "").trim();
+          return asc ? aText.localeCompare(bText, "ko") : bText.localeCompare(aText, "ko");
+        });
+        const sumRow = document.getElementById("doc-table-sum-row");
+        rows.forEach((r) => (sumRow ? sumRow.before(r) : tbody.appendChild(r)));
+      }
+      return true;
+    }
     return false;
   }
 
   function applyRibbonDomSideEffects(cmdId, execRes) {
     const docEditor = document.getElementById("doc-editor");
-    if (applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
+    if ((activeModule === "DOC" || activeModule === "HWP") && applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
       return;
     }
     if (cmdId === "hwp-mod-manuscript") {
@@ -936,6 +1234,51 @@
           execRes?.manuscriptGridEnabled === undefined
             ? !hwpNotice.hidden
             : !execRes.manuscriptGridEnabled;
+      }
+      return;
+    }
+    if (cmdId.startsWith("sheet-")) {
+      const activeTd = document.querySelector('#pane-sheet td[data-cell="' + activeSheetCellRef + '"]');
+      if (cmdId === "sheet-home-bold" && activeTd) {
+        activeTd.style.fontWeight = execRes?.isBold ? "600" : "";
+      } else if (cmdId === "sheet-home-italic" && activeTd) {
+        activeTd.style.fontStyle = execRes?.isItalic ? "italic" : "";
+      } else if (cmdId === "sheet-home-underline" && activeTd) {
+        activeTd.style.textDecoration = execRes?.isUnderline ? "underline" : "";
+      } else if (cmdId === "sheet-data-sum" || cmdId === "sheet-mod-eval") {
+        document.getElementById("btn-eval-formula")?.click();
+      } else if (cmdId === "sheet-insert-row") {
+        const tbody = document.querySelector("#pane-sheet tbody");
+        if (tbody) {
+          const rowIdx = tbody.querySelectorAll("tr").length + 1;
+          const tr = document.createElement("tr");
+          tr.innerHTML =
+            "<th>" +
+            rowIdx +
+            "</th>" +
+            ["A", "B", "C", "D", "E", "F"]
+              .map((c) => '<td contenteditable="true" data-cell="' + c + rowIdx + '">0</td>')
+              .join("");
+          tbody.appendChild(tr);
+          bindSheetCellEvents(tr);
+        }
+      }
+      return;
+    }
+    if (cmdId.startsWith("slide-")) {
+      if (cmdId === "slide-insert-new") {
+        document.getElementById("btn-add-slide")?.click();
+      } else if (cmdId === "slide-mod-laser") {
+        document.getElementById("btn-slide-laser")?.click();
+      } else if (cmdId === "slide-mod-transition") {
+        const sel = document.getElementById("slide-transition-select");
+        if (sel) {
+          const opts = ["fade", "push", "zoom", "none"];
+          const nextIdx = (opts.indexOf(sel.value) + 1) % opts.length;
+          sel.value = opts[nextIdx];
+          SLIDE_DECK_STATE[activeSlideIndex].transition = sel.value;
+          renderSlideDeck(activeSlideIndex);
+        }
       }
       return;
     }
@@ -950,12 +1293,34 @@
       if (card) card.style.transform = "rotate(" + pdfRotationDeg + "deg)";
       return;
     }
+    if (cmdId.startsWith("pdf-")) {
+      document.getElementById("btn-pdf-apply")?.click();
+      return;
+    }
+    if (cmdId.endsWith("-review-pii")) {
+      document.getElementById("btn-scrub-pii")?.click();
+      return;
+    }
+    if (cmdId.endsWith("-review-security") || cmdId.endsWith("-data-validate")) {
+      document.getElementById("btn-run-security-audit")?.click();
+      return;
+    }
+    if (cmdId.endsWith("-review-spell") || cmdId.endsWith("-review-stats")) {
+      document.getElementById("btn-smart-diagnose")?.click();
+      return;
+    }
     if (cmdId.endsWith("-view-theme")) {
       const html = document.documentElement;
       const next = html.dataset.theme === "dark" ? "light" : "dark";
       html.dataset.theme = next;
       const themeBtn = document.getElementById("btn-theme-toggle");
       if (themeBtn) themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
+      return;
+    }
+    if (cmdId.endsWith("-view-zoom")) {
+      const zoom = Number(execRes?.zoomPercent || 100);
+      const stage = document.querySelector(".workspace-center");
+      if (stage) stage.style.zoom = zoom + "%";
       return;
     }
     if (cmdId.endsWith("-view-ribbon")) {
@@ -979,6 +1344,7 @@
       btn.innerHTML =
         "<span>" + cmd.title + "</span> <small>(" + (cmd.shortcut || "") + ")</small>";
       btn.addEventListener("click", async () => {
+        pushUndoSnapshot();
         const execRes = await invokeIpc("execute_ribbon_command", cmd.id);
         applyRibbonDomSideEffects(cmd.id, execRes);
         const fb = document.getElementById("status-command-feedback");
@@ -1045,6 +1411,100 @@
     return (editor.innerText || "").trim();
   }
 
+  function buildStructuredConversionBody() {
+    const lines = [];
+    const docText = extractEditableDocumentText();
+    if (docText) {
+      lines.push(docText);
+    }
+    const tbody = document.getElementById("doc-table-body");
+    if (tbody) {
+      tbody.querySelectorAll("tr").forEach((tr) => {
+        const cells = Array.from(tr.querySelectorAll("td")).map((td) =>
+          (td.textContent || "").trim().replaceAll("\t", " ")
+        );
+        if (cells.length > 0) {
+          lines.push("TABLE_ROW:\t" + cells.join("\t"));
+        }
+      });
+    }
+    sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+    Object.keys(sheetDataStore).forEach((sName) => {
+      const sheetObj = sheetDataStore[sName] || {};
+      const entries = Object.keys(sheetObj).map((ref) => {
+        const c = sheetObj[ref];
+        return ref + "=" + (c.formula || c.value || "");
+      });
+      if (entries.length > 0) {
+        lines.push("SHEET_CELLS:" + sName + ":" + entries.join(";"));
+      }
+    });
+    SLIDE_DECK_STATE.forEach((s) => {
+      lines.push(
+        "SLIDE_CARD:" +
+          (s.title || "").replaceAll("|", "/") +
+          "|" +
+          (s.lower || "").replaceAll("|", "/") +
+          "|" +
+          (s.notes || "").replaceAll("|", "/")
+      );
+    });
+    return lines.join("\n") || "본문 텍스트";
+  }
+
+  function triggerBase64Download(base64Data, baseFilename, ext) {
+    if (!base64Data) return false;
+    try {
+      const binStr = atob(base64Data);
+      const bytes = new Uint8Array(binStr.length);
+      for (let i = 0; i < binStr.length; i += 1) {
+        bytes[i] = binStr.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = baseFilename + "." + ext.toLowerCase();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function saveActiveModuleDocument() {
+    const extMap = {
+      DOC: "docx",
+      HWP: "hwpx",
+      SHEET: "xlsx",
+      SLIDE: "pptx",
+      PDF: "pdf",
+      CONV: document.getElementById("conv-dst-fmt")?.value || "hwpx",
+    };
+    const dstExt = extMap[activeModule] || "docx";
+    const srcExt = activeModule === "CONV" ? document.getElementById("conv-src-fmt")?.value || "docx" : dstExt;
+    const body = buildStructuredConversionBody();
+    const title = "EasyOffice_" + activeModule + "_문서";
+    const res = await invokeIpc("convert_document_format", srcExt + "->" + dstExt + "|" + title + "|" + body);
+    const fb = document.getElementById("status-command-feedback");
+    if (res && res.convertedBase64) {
+      triggerBase64Download(res.convertedBase64, title, dstExt);
+    }
+    if (fb && res) {
+      fb.textContent =
+        "문서 저장 완료 (" +
+        dstExt.toUpperCase() +
+        " · " +
+        (res.outputBytes || 0) +
+        "B · " +
+        (res.specification || "") +
+        ")";
+    }
+  }
+
   function computeSmartStats() {
     const statsEl = document.getElementById("smart-stats");
     if (!statsEl) return;
@@ -1098,6 +1558,7 @@
           if (item.id === "bench-run") {
             await runBenchmarkAction();
           } else {
+            pushUndoSnapshot();
             activatePane(item.module);
             const res = await invokeIpc("execute_ribbon_command", item.id);
             applyRibbonDomSideEffects(item.id, res);
@@ -1191,22 +1652,19 @@
     const qatSave = document.getElementById("qat-save");
     if (qatSave) {
       qatSave.addEventListener("click", () => {
-        const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "문서 저장 완료 (" + activeModule + ")";
+        void saveActiveModuleDocument();
       });
     }
     const qatUndo = document.getElementById("qat-undo");
     if (qatUndo) {
       qatUndo.addEventListener("click", () => {
-        const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "실행 취소 완료";
+        void performWorkspaceUndo();
       });
     }
     const qatRedo = document.getElementById("qat-redo");
     if (qatRedo) {
       qatRedo.addEventListener("click", () => {
-        const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "다시 실행 완료";
+        void performWorkspaceRedo();
       });
     }
     const btnBench = document.getElementById("btn-run-benchmark");
@@ -1222,15 +1680,25 @@
         btnRibbonStyle.textContent =
           activeRibbonStyle === "hangul" ? "리본: 한글(HWP) 7탭" : "리본: 표준 오피스";
         const labels = res?.categories || RIBBON_STYLE_LABELS[activeRibbonStyle];
+        const keys = RIBBON_STYLE_KEYS[activeRibbonStyle] || RIBBON_STYLE_KEYS.standard;
+        let nextActiveCat = activeRibbonCategory;
         document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b, idx) => {
           if (labels[idx]) b.textContent = labels[idx];
+          if (keys[idx]) {
+            b.dataset.category = keys[idx];
+            if (b.classList.contains("active")) {
+              nextActiveCat = keys[idx];
+            }
+          }
         });
+        await renderRibbonCategoryTools(nextActiveCat);
       });
     }
 
     const themeBtn = document.getElementById("btn-theme-toggle");
     if (themeBtn) {
       themeBtn.addEventListener("click", () => {
+        pushUndoSnapshot();
         const html = document.documentElement;
         const next = html.dataset.theme === "dark" ? "light" : "dark";
         html.dataset.theme = next;
@@ -1239,18 +1707,78 @@
     }
   }
 
+  async function recalculateActiveSheetFormulas() {
+    const cellMap = collectSheetCellMap();
+    const pairs = Object.keys(cellMap)
+      .map((k) => k + "=" + cellMap[k])
+      .join(";");
+    const formulaTds = Array.from(document.querySelectorAll("#pane-sheet td[data-cell][data-formula]"));
+    for (const td of formulaTds) {
+      const ref = td.dataset.cell;
+      const formula = td.dataset.formula || "";
+      if (!formula.startsWith("=")) continue;
+      const isCrossSheet = /SHEET\d+!/i.test(formula);
+      const rpcRes = isCrossSheet
+        ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + activeSheetName + "|" + formula)
+        : await invokeIpc("evaluate_sheet", pairs + "?" + ref);
+      if (rpcRes && rpcRes.value !== undefined) {
+        td.textContent = String(rpcRes.value);
+      }
+    }
+    sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+  }
+
+  function bindSheetCellEvents(rootEl) {
+    rootEl.querySelectorAll("td[data-cell]").forEach((td) => {
+      td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
+      td.addEventListener("focus", () => {
+        pushUndoSnapshot();
+      });
+      td.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          td.blur();
+        }
+      });
+      td.addEventListener("blur", async () => {
+        const rawText = (td.textContent || "").trim();
+        if (rawText.startsWith("=")) {
+          td.dataset.formula = rawText;
+        }
+        await recalculateActiveSheetFormulas();
+        updateSheetSelectionAndAggregates(td.dataset.cell);
+      });
+      td.addEventListener("input", () => {
+        const rawText = (td.textContent || "").trim();
+        if (rawText.startsWith("=")) {
+          td.dataset.formula = rawText;
+        } else {
+          delete td.dataset.formula;
+        }
+        const formulaInput = document.getElementById("formula-input");
+        if (formulaInput && activeSheetCellRef === td.dataset.cell) {
+          formulaInput.value = rawText;
+        }
+        updateSheetSelectionAndAggregates(td.dataset.cell);
+      });
+    });
+  }
+
   function setupSheetAndConverterHandlers() {
     const btnConvert = document.getElementById("btn-run-convert");
     if (btnConvert) {
       btnConvert.addEventListener("click", async () => {
         const src = document.getElementById("conv-src-fmt").value;
         const dst = document.getElementById("conv-dst-fmt").value;
-        const body = extractEditableDocumentText() || "본문 텍스트";
+        const body = buildStructuredConversionBody();
         const res = await invokeIpc(
           "convert_document_format",
           src + "->" + dst + "|통합_변환_문서|" + body
         );
         const box = document.getElementById("conv-result-box");
+        if (res && res.convertedBase64) {
+          triggerBase64Download(res.convertedBase64, "통합_변환_문서", dst);
+        }
         if (box && res) {
           box.textContent =
             "[" +
@@ -1269,13 +1797,10 @@
       });
     }
 
-    document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
-      td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
-      td.addEventListener("input", () => {
-        delete td.dataset.formula;
-        updateSheetSelectionAndAggregates(td.dataset.cell);
-      });
-    });
+    const sheetPane = document.getElementById("pane-sheet");
+    if (sheetPane) {
+      bindSheetCellEvents(sheetPane);
+    }
 
     const evalBtn = document.getElementById("btn-eval-formula");
     const formulaInputEl = document.getElementById("formula-input");
@@ -1292,6 +1817,7 @@
         const input = document.getElementById("formula-input");
         const out = document.getElementById("sheet-eval-result");
         if (!input || !out) return;
+        pushUndoSnapshot();
         const rawFormula = input.value.trim();
         const activeTd = document.querySelector(
           '#pane-sheet td[data-cell="' + activeSheetCellRef + '"]'
@@ -1301,23 +1827,30 @@
             activeTd.dataset.formula = rawFormula;
           } else {
             delete activeTd.dataset.formula;
+            activeTd.textContent = rawFormula;
           }
         }
 
         const cellMap = collectSheetCellMap();
         cellMap[activeSheetCellRef] = escapeSemicolonToken(rawFormula);
+        if (activeSheetName !== "Sheet1") {
+          cellMap[activeSheetName + "!" + activeSheetCellRef] = escapeSemicolonToken(rawFormula);
+        }
         const pairs = Object.keys(cellMap)
           .map((k) => k + "=" + cellMap[k])
           .join(";");
 
-        const isCrossSheet = /SHEET\d+!/i.test(rawFormula);
+        const isCrossSheet = /SHEET\d+!/i.test(rawFormula) || activeSheetName !== "Sheet1";
         const rpcRes = isCrossSheet
-          ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + rawFormula)
+          ? await invokeIpc(
+              "evaluate_workbook_formula",
+              pairs + "?" + activeSheetName + "|" + (rawFormula.startsWith("=") ? rawFormula : "=" + rawFormula)
+            )
           : await invokeIpc("evaluate_sheet", pairs + "?" + activeSheetCellRef);
         const computedValue = rpcRes.value;
         if (activeTd) activeTd.textContent = String(computedValue);
         out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
-        sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+        await recalculateActiveSheetFormulas();
         updateSheetSelectionAndAggregates(activeSheetCellRef);
       });
     }
@@ -1327,6 +1860,7 @@
     const btnAddSlide = document.getElementById("btn-add-slide");
     if (btnAddSlide) {
       btnAddSlide.addEventListener("click", () => {
+        pushUndoSnapshot();
         const nextNum = SLIDE_DECK_STATE.length + 1;
         SLIDE_DECK_STATE.push({
           title: "새 슬라이드 #" + nextNum + " (16:9 와이드)",
@@ -1340,6 +1874,7 @@
     const slideTransSelect = document.getElementById("slide-transition-select");
     if (slideTransSelect) {
       slideTransSelect.addEventListener("change", () => {
+        pushUndoSnapshot();
         SLIDE_DECK_STATE[activeSlideIndex].transition = slideTransSelect.value;
         renderSlideDeck(activeSlideIndex);
       });
@@ -1392,6 +1927,7 @@
     const btnPdfRotate = document.getElementById("btn-pdf-rotate");
     if (btnPdfRotate) {
       btnPdfRotate.addEventListener("click", async () => {
+        pushUndoSnapshot();
         const execRes = await invokeIpc("execute_ribbon_command", "pdf-mod-rotate");
         applyRibbonDomSideEffects("pdf-mod-rotate", execRes);
       });
@@ -1399,6 +1935,7 @@
     const btnPdfApply = document.getElementById("btn-pdf-apply");
     if (btnPdfApply) {
       btnPdfApply.addEventListener("click", () => {
+        pushUndoSnapshot();
         const stampSel = document.getElementById("pdf-stamp-select");
         const wmInput = document.getElementById("pdf-watermark-input");
         const appInput = document.getElementById("pdf-form-applicant");
@@ -1423,11 +1960,41 @@
     }
   }
 
+  function collectActiveModuleNodesForScrub() {
+    if (activeModule === "SHEET") {
+      return Array.from(document.querySelectorAll("#pane-sheet td[data-cell]")).filter(
+        (td) => !(td.dataset.formula || "").startsWith("=")
+      );
+    }
+    if (activeModule === "SLIDE") {
+      const nodes = [];
+      const titleZone = document.getElementById("slide-title-zone");
+      const lowerZone = document.getElementById("slide-lower-zone");
+      if (titleZone) nodes.push(titleZone);
+      if (lowerZone) nodes.push(lowerZone);
+      return nodes;
+    }
+    if (activeModule === "PDF") {
+      return Array.from(document.querySelectorAll("#pdf-page-card p"));
+    }
+    const editorEl = document.getElementById("doc-editor");
+    if (!editorEl) return [];
+    const blocks = Array.from(
+      editorEl.querySelectorAll(":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)")
+    );
+    const tableCells = Array.from(document.querySelectorAll("#doc-table-body td:not([data-doc-num])"));
+    return (blocks.length > 0 ? blocks : [editorEl]).concat(tableCells);
+  }
+
   function setupSmartAndSecurityHandlers() {
     const editor = document.getElementById("doc-editor");
     const imeBadge =
       document.getElementById("ime-badge") || document.getElementById("ime-indicator");
     if (editor) {
+      editor.addEventListener("click", (ev) => {
+        const block = ev.target.closest("#doc-editor > h1, #doc-editor > h2, #doc-editor > p");
+        if (block) activeDocBlockEl = block;
+      });
       editor.addEventListener("compositionstart", () => {
         isImeComposing = true;
         if (imeBadge) imeBadge.textContent = "IME: 조합 중(한글)";
@@ -1488,22 +2055,35 @@
     const auditBtn = document.getElementById("btn-run-security-audit");
     if (auditBtn) {
       auditBtn.addEventListener("click", async () => {
-        const res = await invokeIpc("audit_security", "word/document.xml,512,2048,false|<doc>ok</doc>");
+        const bodyText = buildStructuredConversionBody();
+        const byteLen = new TextEncoder().encode(bodyText).length;
+        const entryNameMap = {
+          DOC: "word/document.xml",
+          HWP: "Contents/section0.xml",
+          SHEET: "xl/worksheets/sheet1.xml",
+          SLIDE: "ppt/slides/slide1.xml",
+          PDF: "Catalog/Pages.pdf",
+          CONV: "package/content.xml",
+        };
+        const entryName = entryNameMap[activeModule] || "word/document.xml";
+        const xmlSnippet = "<doc module=\"" + activeModule + "\">" + bodyText.slice(0, 512) + "</doc>";
+        const payload =
+          entryName + "," + Math.max(64, Math.floor(byteLen / 2)) + "," + Math.max(128, byteLen) + ",false|" + xmlSnippet;
+        const res = await invokeIpc("audit_security", payload);
         const txt = document.getElementById("security-status-text");
-        if (txt && res) txt.textContent = "문서 보안 검사 완료: " + res.status;
+        if (txt && res) {
+          txt.textContent = "문서 보안 검사 완료 (" + activeModule + "): " + res.status;
+        }
       });
     }
 
     const piiBtn = document.getElementById("btn-scrub-pii");
     if (piiBtn) {
       piiBtn.addEventListener("click", async () => {
-        const editorEl = document.getElementById("doc-editor");
         const piiOut = document.getElementById("pii-result-text");
-        if (!editorEl || !piiOut) return;
-        const blocks = Array.from(
-          editorEl.querySelectorAll(":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)")
-        );
-        const targets = blocks.length > 0 ? blocks : [editorEl];
+        if (!piiOut) return;
+        pushUndoSnapshot();
+        const targets = collectActiveModuleNodesForScrub();
         const results = await Promise.all(
           targets.map((node) => invokeIpc("scrub_pii", node.textContent || ""))
         );
@@ -1514,10 +2094,21 @@
             totalMasked += Number(res.totalMasked || 0);
           }
         });
+        if (activeModule === "SLIDE" && SLIDE_DECK_STATE[activeSlideIndex]) {
+          const notesInput = document.getElementById("slide-presenter-notes");
+          if (notesInput && notesInput.value) {
+            const noteRes = await invokeIpc("scrub_pii", notesInput.value);
+            if (noteRes && typeof noteRes.scrubbedText === "string") {
+              notesInput.value = noteRes.scrubbedText;
+              SLIDE_DECK_STATE[activeSlideIndex].notes = noteRes.scrubbedText;
+              totalMasked += Number(noteRes.totalMasked || 0);
+            }
+          }
+        }
         piiOut.textContent =
           totalMasked > 0
-            ? "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료"
-            : "주민번호·전화번호·이메일 스캔 완료 (감지 0건)";
+            ? "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + activeModule + ")"
+            : "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + activeModule + ")";
         computeSmartStats();
       });
     }
@@ -1581,6 +2172,7 @@
     const tbody = document.getElementById("doc-table-body");
     if (addRowBtn && tbody) {
       addRowBtn.addEventListener("click", () => {
+        pushUndoSnapshot();
         const tr = document.createElement("tr");
         tr.innerHTML =
           '<td>신규 사업부</td><td>담당 연구원</td><td data-doc-num="150">150</td>';
@@ -1597,6 +2189,7 @@
     const mergeBtn = document.getElementById("btn-doc-merge-toggle");
     if (mergeBtn && tbody) {
       mergeBtn.addEventListener("click", () => {
+        pushUndoSnapshot();
         const sumRow = document.getElementById("doc-table-sum-row");
         const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
         if (cells.length < 2) return;
@@ -1623,6 +2216,7 @@
     }
     if (addSheetBtn && sheetTabBar) {
       addSheetBtn.addEventListener("click", () => {
+        pushUndoSnapshot();
         const count = sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").length + 1;
         const sheetKey = "Sheet" + count;
         const newTab = document.createElement("button");
@@ -1672,9 +2266,19 @@
 
     globalThis.addEventListener("keydown", (e) => {
       if (e.isComposing || isImeComposing) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const keyLower = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && keyLower === "k") {
         e.preventDefault();
         togglePaletteModal(modal, cmdSearchInput);
+      } else if ((e.metaKey || e.ctrlKey) && keyLower === "s") {
+        e.preventDefault();
+        void saveActiveModuleDocument();
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && keyLower === "z") {
+        e.preventDefault();
+        void performWorkspaceUndo();
+      } else if ((e.metaKey || e.ctrlKey) && (keyLower === "y" || (e.shiftKey && keyLower === "z"))) {
+        e.preventDefault();
+        void performWorkspaceRedo();
       } else if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
         modal.close();
       }
@@ -1682,6 +2286,7 @@
   }
 
   async function initWorkspace() {
+    ensureDefaultDocTabStore();
     sheetDataStore.Sheet1 = snapshotDomSheetCells();
     const boot = await invokeIpc("get_workspace_bootstrap", "");
     setupTabsAndRibbonChrome(boot);

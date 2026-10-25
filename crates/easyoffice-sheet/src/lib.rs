@@ -36,12 +36,12 @@ impl PackedCellCoordinate {
     }
 
     #[inline]
-    pub fn row(self) -> u32 {
+    pub const fn row(self) -> u32 {
         (self.0 >> 32) as u32
     }
 
     #[inline]
-    pub fn col(self) -> u32 {
+    pub const fn col(self) -> u32 {
         (self.0 & 0xFFFF_FFFF) as u32
     }
 
@@ -408,6 +408,7 @@ pub(crate) struct EvalContext<'a> {
     pub workbook: Option<&'a WorkbookEngine>,
     pub visiting: VisitingTracker,
     pub memo: HashMap<PackedWorkbookCoord, EvaluatedCellValue>,
+    pub current_coord: Option<PackedCellCoordinate>,
     pub(crate) steps: usize,
 }
 
@@ -418,6 +419,7 @@ impl<'a> EvalContext<'a> {
             workbook: None,
             visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
+            current_coord: None,
             steps: 0,
         }
     }
@@ -428,6 +430,7 @@ impl<'a> EvalContext<'a> {
             workbook: Some(workbook),
             visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
+            current_coord: None,
             steps: 0,
         }
     }
@@ -693,10 +696,13 @@ impl SheetEngine {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
 
+        let prev_coord = ctx.current_coord;
+        ctx.current_coord = Some(coord);
         let mut result = match compiled {
             Ok(expr) => self.eval_expr_ctx(expr, ctx, depth + 1),
             Err(e) => EvaluatedCellValue::Error(*e),
         };
+        ctx.current_coord = prev_coord;
         if let EvaluatedCellValue::Text(ref s) = result {
             if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
                 result = EvaluatedCellValue::Error(FormulaError::Value);
@@ -1115,6 +1121,23 @@ impl SheetEngine {
                     let v = self.eval_expr_ctx(arg, ctx, depth);
                     fold_cell(v, 0, true)?;
                 }
+                Expr::FuncCall { name: fn_name, .. }
+                    if matches!(fn_name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
+                {
+                    if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
+                        let (_, _, _, rows, cols, _) = spec;
+                        for dr in 0..rows {
+                            for dc in 0..cols {
+                                let v = self
+                                    .eval_streaming_cell_allow_error(&spec, dr, dc, ctx, depth)?;
+                                fold_cell(v, (dr * cols + dc) & 3, true)?;
+                            }
+                        }
+                    } else {
+                        let v = self.eval_expr_ctx(arg, ctx, depth);
+                        fold_cell(v, 0, false)?;
+                    }
+                }
                 _ => {
                     let v = self.eval_expr_ctx(arg, ctx, depth);
                     fold_cell(v, 0, false)?;
@@ -1167,6 +1190,24 @@ impl SheetEngine {
                     let coords = range.expand().map_err(|_| FormulaError::Ref)?;
                     for c in coords {
                         let v = self.eval_sheet_coord(Some(sheet), c, ctx, depth);
+                        if let EvaluatedCellValue::Error(e) = v {
+                            return Err(e);
+                        }
+                        out.push(v);
+                    }
+                }
+                Expr::FuncCall { name: fn_name, .. }
+                    if matches!(fn_name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
+                {
+                    if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
+                        let (_, _, _, rows, cols, _) = spec;
+                        for dr in 0..rows {
+                            for dc in 0..cols {
+                                out.push(self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?);
+                            }
+                        }
+                    } else {
+                        let v = self.eval_expr_ctx(arg, ctx, depth);
                         if let EvaluatedCellValue::Error(e) = v {
                             return Err(e);
                         }
@@ -1305,5 +1346,84 @@ mod tests {
             .set_cell("E1", "=VLOOKUP(10, C1:D3, 2, TRUE)")
             .unwrap();
         assert_eq!(sheet.evaluate_cell("E1"), EvaluatedCellValue::Number(200.0));
+    }
+
+    #[test]
+    fn test_dynamic_ranges_row_col_npv_and_criteria_parity() {
+        let mut wb = WorkbookEngine::new();
+        {
+            let s1 = wb.add_sheet("Sheet1");
+            s1.set_cell("A1", "10").unwrap();
+            s1.set_cell("A2", "20").unwrap();
+            s1.set_cell("A3", "30").unwrap();
+            s1.set_cell("B1", "=SUM(INDIRECT(\"A1:A3\"))").unwrap();
+            s1.set_cell("B2", "=SUM(OFFSET(A1, 0, 0, 3, 1))").unwrap();
+            s1.set_cell("B3", "=SUBTOTAL(9, A1:A3)").unwrap();
+            s1.set_cell("B4", "=SUBTOTAL(109, INDIRECT(\"Sheet2!A1:B2\"))")
+                .unwrap();
+            s1.set_cell("C5", "=ROW()*10+COLUMN()").unwrap();
+            s1.set_cell("D1", "110").unwrap();
+            s1.set_cell("D2", "TRUE").unwrap();
+            s1.set_cell("D3", "text-not-num").unwrap();
+            s1.set_cell("D4", "121").unwrap();
+            s1.set_cell("E1", "=ROUND(NPV(0.1, D1:D4), 2)").unwrap();
+            s1.set_cell("F1", "2025-12-31").unwrap();
+            s1.set_cell("F2", "2026-03-15").unwrap();
+            s1.set_cell("F3", "=DATE(2026, 6, 1)").unwrap();
+            s1.set_cell("G1", "Alpha").unwrap();
+            s1.set_cell("G2", "Bravo").unwrap();
+            s1.set_cell("G3", "Charlie").unwrap();
+        }
+        {
+            let s2 = wb.add_sheet("Sheet2");
+            s2.set_cell("A1", "5").unwrap();
+            s2.set_cell("B1", "15").unwrap();
+            s2.set_cell("A2", "25").unwrap();
+            s2.set_cell("B2", "35").unwrap();
+        }
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "B1"),
+            EvaluatedCellValue::Number(60.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "B2"),
+            EvaluatedCellValue::Number(60.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "B3"),
+            EvaluatedCellValue::Number(60.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "B4"),
+            EvaluatedCellValue::Number(80.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "C5"),
+            EvaluatedCellValue::Number(53.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "E1"),
+            EvaluatedCellValue::Number(200.0)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(F1:F3, \">2026-01-01\")"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(G1:G3, \">=Bravo\")"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=SUMIF(A1:A3, \">10\", A1:A2)"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=MINIFS(A1:A3, G1:G3, \">=Bravo\")"),
+            EvaluatedCellValue::Number(20.0)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=MAXIFS(A1:A3, G1:G3, \">=Bravo\")"),
+            EvaluatedCellValue::Number(30.0)
+        );
     }
 }

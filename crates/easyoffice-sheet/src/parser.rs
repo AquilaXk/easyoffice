@@ -743,14 +743,24 @@ pub struct PackedWorkbookCoord(pub u64);
 impl PackedWorkbookCoord {
     #[inline]
     pub const fn new(sheet_id: u16, coord: PackedCellCoordinate) -> Self {
-        let row_bits = ((coord.0 >> 32) & 0xFFFF_FFFF) << 16;
-        let col_bits = coord.0 & 0xFFFF;
+        let row_bits = ((coord.row() as u64) & 0xFFFF_FFFF) << 16;
+        let col_bits = (coord.col() as u64) & 0xFFFF;
         Self(((sheet_id as u64) << 48) | row_bits | col_bits)
     }
 
     #[inline]
     pub const fn sheet_id(self) -> u16 {
         (self.0 >> 48) as u16
+    }
+
+    #[inline]
+    pub const fn row(self) -> u32 {
+        ((self.0 >> 16) & 0xFFFF_FFFF) as u32
+    }
+
+    #[inline]
+    pub const fn col(self) -> u32 {
+        (self.0 & 0xFFFF) as u32
     }
 }
 
@@ -860,6 +870,16 @@ mod tests {
         assert_eq!(xfd.row(), 999_999);
         assert_eq!(xfd.col(), 16_383);
         assert_eq!(xfd.to_a1(), "XFD1000000");
+
+        let a1 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A1").unwrap());
+        let a2 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A2").unwrap());
+        let a70000 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A70000").unwrap());
+        assert_ne!(a1, a2);
+        assert_ne!(a1, a70000);
+        assert_ne!(a2, a70000);
+        assert_eq!(a70000.sheet_id(), 7);
+        assert_eq!(a70000.row(), 69_999);
+        assert_eq!(a70000.col(), 0);
 
         assert!(PackedCellCoordinate::new(1_000_000, 0).is_err());
         assert!(PackedCellCoordinate::new(0, 16_384).is_err());

@@ -26,11 +26,17 @@ pub use ffi::*;
 pub use ribbon::*;
 pub use smart_tools::*;
 
-static RIBBON_WORKSPACE_STATE: std::sync::OnceLock<std::sync::Mutex<RibbonWorkspaceState>> =
+#[derive(Default)]
+struct SharedRibbonSession {
+    state: RibbonWorkspaceState,
+    history: UndoRedoStack<RibbonWorkspaceState>,
+}
+
+static RIBBON_WORKSPACE_SESSION: std::sync::OnceLock<std::sync::Mutex<SharedRibbonSession>> =
     std::sync::OnceLock::new();
 
-fn shared_ribbon_state() -> &'static std::sync::Mutex<RibbonWorkspaceState> {
-    RIBBON_WORKSPACE_STATE.get_or_init(|| std::sync::Mutex::new(RibbonWorkspaceState::default()))
+fn shared_ribbon_session() -> &'static std::sync::Mutex<SharedRibbonSession> {
+    RIBBON_WORKSPACE_SESSION.get_or_init(|| std::sync::Mutex::new(SharedRibbonSession::default()))
 }
 
 /// Tauri v2 compatible IPC router dispatching desktop workspace commands to pure Rust engines.
@@ -59,6 +65,8 @@ impl EasyOfficeIpcRouter {
             "compute_layout" => Self::handle_compute_layout(payload),
             "audit_security" => Self::handle_audit_security(payload),
             "execute_ribbon_command" => Self::handle_execute_ribbon_command(payload),
+            "undo_ribbon_command" => Self::handle_undo_ribbon_command(),
+            "redo_ribbon_command" => Self::handle_redo_ribbon_command(),
             "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
             "run_smart_assistant" => Self::handle_run_smart_assistant(payload),
             "scrub_pii" => Self::handle_scrub_pii(payload),
@@ -401,13 +409,14 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
-        let mut guard = shared_ribbon_state()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut guard)?;
-        let badge = guard.active_contextual_tool().badge_title();
-        Ok(format!(
+    fn format_ribbon_state_json(
+        state: &RibbonWorkspaceState,
+        summary: &str,
+        can_undo: bool,
+        can_redo: bool,
+    ) -> String {
+        let badge = state.active_contextual_tool().badge_title();
+        format!(
             concat!(
                 "{{",
                 "\"commandId\":\"{}\",",
@@ -417,36 +426,147 @@ impl EasyOfficeIpcRouter {
                 "\"isBold\":{},",
                 "\"isItalic\":{},",
                 "\"isUnderline\":{},",
+                "\"stylePresetIndex\":{},",
+                "\"insertedTableCount\":{},",
+                "\"insertedChartCount\":{},",
+                "\"insertedShapeCount\":{},",
+                "\"insertedLinkCount\":{},",
+                "\"paperSize\":\"{}\",",
                 "\"columnCount\":{},",
                 "\"isLandscape\":{},",
+                "\"marginPresetIndex\":{},",
+                "\"autosumAppliedCount\":{},",
+                "\"formulaWizardOpen\":{},",
+                "\"sortAscending\":{},",
+                "\"validationGuardEnabled\":{},",
+                "\"tocGenerated\":{},",
+                "\"footnoteCount\":{},",
+                "\"mailMergeAppliedCount\":{},",
+                "\"tableFormulaEvaluatedCount\":{},",
                 "\"manuscriptGridEnabled\":{},",
                 "\"approvalHeaderEnabled\":{},",
+                "\"clickHereFieldCount\":{},",
+                "\"doubleDiagonalBorderEnabled\":{},",
+                "\"pivotSummaryEnabled\":{},",
+                "\"conditionalFormatEnabled\":{},",
+                "\"freezePanesEnabled\":{},",
+                "\"masterLayoutIndex\":{},",
+                "\"snapGuideEnabled\":{},",
+                "\"slideTransitionIndex\":{},",
+                "\"presenterModeActive\":{},",
+                "\"pdfHighlightCount\":{},",
+                "\"pdfRotationDegrees\":{},",
+                "\"pdfSplitMergeCount\":{},",
+                "\"pdfConvertedToOfficeCount\":{},",
                 "\"trackChangesEnabled\":{},",
+                "\"reviewCommentCount\":{},",
+                "\"securityVerifiedCount\":{},",
+                "\"statsInspectedCount\":{},",
                 "\"splitViewEnabled\":{},",
                 "\"ribbonCollapsed\":{},",
                 "\"darkThemeEnabled\":{},",
                 "\"zoomPercent\":{},",
-                "\"pdfRotationDegrees\":{},",
-                "\"executedCount\":{}",
+                "\"executedCount\":{},",
+                "\"canUndo\":{},",
+                "\"canRedo\":{}",
                 "}}"
             ),
-            Self::escape_json_str(&guard.last_command_id),
-            Self::escape_json_str(&summary),
+            Self::escape_json_str(&state.last_command_id),
+            Self::escape_json_str(summary),
             Self::escape_json_str(badge),
-            guard.is_bold,
-            guard.is_italic,
-            guard.is_underline,
-            guard.column_count,
-            guard.is_landscape,
-            guard.manuscript_grid_enabled,
-            guard.approval_header_enabled,
-            guard.track_changes_enabled,
-            guard.split_view_enabled,
-            guard.ribbon_collapsed,
-            guard.dark_theme_enabled,
-            guard.zoom_percent,
-            guard.pdf_rotation_degrees,
-            guard.executed_count
+            state.is_bold,
+            state.is_italic,
+            state.is_underline,
+            state.style_preset_index,
+            state.inserted_table_count,
+            state.inserted_chart_count,
+            state.inserted_shape_count,
+            state.inserted_link_count,
+            Self::escape_json_str(&state.paper_size),
+            state.column_count,
+            state.is_landscape,
+            state.margin_preset_index,
+            state.autosum_applied_count,
+            state.formula_wizard_open,
+            state.sort_ascending,
+            state.validation_guard_enabled,
+            state.toc_generated,
+            state.footnote_count,
+            state.mail_merge_applied_count,
+            state.table_formula_evaluated_count,
+            state.manuscript_grid_enabled,
+            state.approval_header_enabled,
+            state.click_here_field_count,
+            state.double_diagonal_border_enabled,
+            state.pivot_summary_enabled,
+            state.conditional_format_enabled,
+            state.freeze_panes_enabled,
+            state.master_layout_index,
+            state.snap_guide_enabled,
+            state.slide_transition_index,
+            state.presenter_mode_active,
+            state.pdf_highlight_count,
+            state.pdf_rotation_degrees,
+            state.pdf_split_merge_count,
+            state.pdf_converted_to_office_count,
+            state.track_changes_enabled,
+            state.review_comment_count,
+            state.security_verified_count,
+            state.stats_inspected_count,
+            state.split_view_enabled,
+            state.ribbon_collapsed,
+            state.dark_theme_enabled,
+            state.zoom_percent,
+            state.executed_count,
+            can_undo,
+            can_redo
+        )
+    }
+
+    fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
+        let mut session = shared_ribbon_session()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let snapshot = session.state.clone();
+        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut session.state)?;
+        session.history.push_state(snapshot);
+        Ok(Self::format_ribbon_state_json(
+            &session.state,
+            &summary,
+            session.history.can_undo(),
+            session.history.can_redo(),
+        ))
+    }
+
+    fn handle_undo_ribbon_command() -> Result<String, EasyOfficeError> {
+        let mut session = shared_ribbon_session()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let current = session.state.clone();
+        if let Some(prev) = session.history.undo(current) {
+            session.state = prev;
+        }
+        Ok(Self::format_ribbon_state_json(
+            &session.state,
+            "실행 취소 완료",
+            session.history.can_undo(),
+            session.history.can_redo(),
+        ))
+    }
+
+    fn handle_redo_ribbon_command() -> Result<String, EasyOfficeError> {
+        let mut session = shared_ribbon_session()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let current = session.state.clone();
+        if let Some(next) = session.history.redo(current) {
+            session.state = next;
+        }
+        Ok(Self::format_ribbon_state_json(
+            &session.state,
+            "다시 실행 완료",
+            session.history.can_undo(),
+            session.history.can_redo(),
         ))
     }
 
@@ -460,8 +580,8 @@ impl EasyOfficeIpcRouter {
                 )))
             }
         };
-        if let Ok(mut guard) = shared_ribbon_state().lock() {
-            guard.ribbon_style = style;
+        if let Ok(mut session) = shared_ribbon_session().lock() {
+            session.state.ribbon_style = style;
         }
         let cats = style
             .category_titles()
@@ -560,15 +680,29 @@ impl EasyOfficeIpcRouter {
                 wb.set_cell(sh.trim(), a1.trim(), rhs.trim())?;
             }
         }
-        let expr = if expr_part.is_empty() {
+        let raw_expr = if expr_part.is_empty() {
             "=Sheet2!A1+50"
         } else {
             expr_part
         };
-        wb.set_cell("Sheet1", "C1", expr)?;
-        let val = wb.evaluate_cell("Sheet1", "C1");
+        let (active_sheet, expr) = if let Some((sh, rest)) = raw_expr.split_once('!') {
+            if !sh.starts_with('=') && !sh.contains('(') {
+                (sh.trim(), rest.trim())
+            } else {
+                ("Sheet1", raw_expr)
+            }
+        } else {
+            ("Sheet1", raw_expr)
+        };
+        wb.add_sheet(active_sheet);
+        let val = if expr.starts_with('=') {
+            wb.evaluate_formula_on_sheet(active_sheet, expr)
+        } else {
+            wb.evaluate_cell(active_sheet, expr)
+        };
         Ok(format!(
-            "{{\"sheet\":\"Sheet1\",\"formula\":\"{}\",\"value\":\"{}\"}}",
+            "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\"}}",
+            Self::escape_json_str(active_sheet),
             Self::escape_json_str(expr),
             Self::escape_json_str(&val.to_display_string())
         ))
@@ -580,27 +714,26 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
-        let parts: Vec<&str> = payload.split('|').collect();
-        let (src_ext, dst_ext, title, body) = if let Some(first) = parts.first() {
+        let (src_ext, dst_ext, title, body) = if let Some((first, rest)) = payload.split_once('|') {
             if let Some((s, d)) = first.split_once("->") {
-                (
-                    s.trim(),
-                    d.trim(),
-                    parts.get(1).copied().unwrap_or("변환_문서").trim(),
-                    parts.get(2).copied().unwrap_or("본문 텍스트").trim(),
-                )
-            } else if parts.len() >= 2 {
-                (
-                    parts[0].trim(),
-                    parts[1].trim(),
-                    parts.get(2).copied().unwrap_or("변환_문서").trim(),
-                    parts.get(3).copied().unwrap_or("본문 텍스트").trim(),
-                )
+                let (t, b) = rest.split_once('|').unwrap_or((rest, ""));
+                (s.trim(), d.trim(), t.trim(), b.trim())
+            } else if let Some((second, rest2)) = rest.split_once('|') {
+                let (t, b) = rest2.split_once('|').unwrap_or((rest2, ""));
+                (first.trim(), second.trim(), t.trim(), b.trim())
             } else {
-                ("docx", "hwpx", "변환_문서", "본문 텍스트")
+                (first.trim(), rest.trim(), "변환_문서", "본문 텍스트")
             }
+        } else if let Some((s, d)) = payload.split_once("->") {
+            (s.trim(), d.trim(), "변환_문서", "본문 텍스트")
         } else {
             ("docx", "hwpx", "변환_문서", "본문 텍스트")
+        };
+
+        let title = if title.is_empty() {
+            "변환_문서"
+        } else {
+            title
         };
 
         let src_fmt = DocumentFormat::from_extension(src_ext).ok_or_else(|| {
@@ -610,11 +743,72 @@ impl EasyOfficeIpcRouter {
             EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
         })?;
 
-        let mut paragraphs: Vec<String> = body
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
+        let mut paragraphs: Vec<String> = Vec::new();
+        let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
+        let mut current_table: Vec<Vec<String>> = Vec::new();
+        let mut sheet_cells: Vec<(u32, u32, String)> = Vec::new();
+        let mut slides: Vec<(String, Vec<String>, String)> = Vec::new();
+        let mut official_agency: Option<String> = None;
+
+        for raw_line in body.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some(agency) = line.strip_prefix("[[AGENCY]]\t") {
+                if !agency.trim().is_empty() {
+                    official_agency = Some(agency.trim().to_string());
+                }
+            } else if line == "[[TABLE_NEW]]" {
+                if !current_table.is_empty() {
+                    tables.push(std::mem::take(&mut current_table));
+                }
+            } else if let Some(row_str) = line.strip_prefix("[[TABLE_ROW]]\t") {
+                let row: Vec<String> = row_str.split('\t').map(|c| c.trim().to_string()).collect();
+                if !row.is_empty() {
+                    current_table.push(row);
+                }
+            } else if let Some(cell_str) = line.strip_prefix("[[SHEET_CELL]]\t") {
+                let mut cols = cell_str.splitn(3, '\t');
+                if let (Some(r_s), Some(c_s), Some(v_s)) = (cols.next(), cols.next(), cols.next()) {
+                    if let (Ok(r), Ok(c)) = (r_s.trim().parse::<u32>(), c_s.trim().parse::<u32>()) {
+                        sheet_cells.push((r, c, v_s.to_string()));
+                    }
+                }
+            } else if let Some(slide_str) = line.strip_prefix("[[SLIDE]]\t") {
+                let mut cols = slide_str.splitn(3, '\t');
+                let s_title = cols.next().unwrap_or(title).trim().to_string();
+                let bullets: Vec<String> = cols
+                    .next()
+                    .unwrap_or("")
+                    .split(";;")
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToString::to_string)
+                    .collect();
+                let notes = cols.next().unwrap_or("").trim().to_string();
+                slides.push((s_title, bullets, notes));
+            } else {
+                paragraphs.push(line.to_string());
+            }
+        }
+        if !current_table.is_empty() {
+            tables.push(current_table);
+        }
+        if paragraphs.is_empty() && !sheet_cells.is_empty() {
+            paragraphs = sheet_cells.iter().map(|(_, _, v)| v.clone()).collect();
+        }
+        if paragraphs.is_empty() && !slides.is_empty() {
+            for (s_t, bullets, notes) in &slides {
+                if !s_t.is_empty() {
+                    paragraphs.push(s_t.clone());
+                }
+                paragraphs.extend(bullets.iter().cloned());
+                if !notes.is_empty() {
+                    paragraphs.push(notes.clone());
+                }
+            }
+        }
         if paragraphs.is_empty() {
             paragraphs.push(title.to_string());
         }
@@ -622,21 +816,10 @@ impl EasyOfficeIpcRouter {
         let model = UniversalDocumentModel {
             title: title.to_string(),
             paragraphs,
-            tables: vec![vec![
-                vec!["항목".to_string(), "값".to_string()],
-                vec!["원본포맷".to_string(), src_fmt.extension().to_string()],
-            ]],
-            sheet_cells: vec![
-                (0, 0, title.to_string()),
-                (0, 1, "100".to_string()),
-                (1, 1, "=B1*2".to_string()),
-            ],
-            slides: vec![(
-                title.to_string(),
-                vec![body.to_string()],
-                "발표자 노트".to_string(),
-            )],
-            official_agency: Some("행정안전부".to_string()),
+            tables,
+            sheet_cells,
+            slides,
+            official_agency,
         };
 
         let src_bytes = UniversalFormatConverter::encode(&model, src_fmt)?;
@@ -644,6 +827,7 @@ impl EasyOfficeIpcRouter {
             UniversalFormatConverter::convert(&src_bytes, Some(src_fmt.extension()), dst_fmt)?;
         let (detected_dst, decoded) =
             UniversalFormatConverter::decode(&dst_bytes, Some(dst_fmt.extension()))?;
+        let b64 = Self::encode_base64(&dst_bytes);
 
         Ok(format!(
             concat!(
@@ -657,7 +841,10 @@ impl EasyOfficeIpcRouter {
                 "\"containerFamily\":\"{}\",",
                 "\"specification\":\"{}\",",
                 "\"paragraphCount\":{},",
+                "\"tableCount\":{},",
                 "\"title\":\"{}\",",
+                "\"converted_base64\":\"{}\",",
+                "\"convertedBase64\":\"{}\",",
                 "\"status\":\"OK\"",
                 "}}"
             ),
@@ -670,7 +857,10 @@ impl EasyOfficeIpcRouter {
             dst_fmt.container_family().as_str(),
             dst_fmt.standard_specification(),
             decoded.paragraphs.len(),
-            Self::escape_json_str(&decoded.title)
+            decoded.tables.len(),
+            Self::escape_json_str(&decoded.title),
+            b64,
+            b64
         ))
     }
 
@@ -684,14 +874,15 @@ impl EasyOfficeIpcRouter {
             _ => OfficeModuleKind::Document,
         };
         let (category_key, category_label) = match cat_str.trim().to_ascii_lowercase().as_str() {
-            "home" | "홈" => ("home", "홈"),
-            "insert" | "삽입" => ("insert", "삽입"),
+            "home" | "홈" | "편집" => ("home", "홈"),
+            "insert" | "삽입" | "입력" => ("insert", "삽입"),
             "layout" | "레이아웃" | "쪽·원고지" => ("layout", "레이아웃"),
-            "formulas" | "formulasanddata" | "수식·데이터" | "productivity" | "생산성·보안" => {
-                ("formulasAndData", "수식·데이터")
+            "formulas" | "formulasanddata" | "수식·데이터" | "productivity" | "생산성·보안"
+            | "표·개체" => ("formulasAndData", "수식·데이터"),
+            "module" | "modulespecific" | "모듈 전용" | "시트·차트" => {
+                ("moduleSpecific", "모듈 전용")
             }
-            "module" | "modulespecific" | "모듈 전용" => ("moduleSpecific", "모듈 전용"),
-            "review" | "검토" => ("review", "검토"),
+            "review" | "검토" | "보안·도구" => ("review", "검토"),
             "view" | "보기" => ("view", "보기"),
             _ => ("home", "홈"),
         };
@@ -759,6 +950,30 @@ impl EasyOfficeIpcRouter {
                 "유효하지 않은 16진수 문자입니다.".to_string(),
             )),
         }
+    }
+
+    fn encode_base64(bytes: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let b0 = chunk[0];
+            let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+            let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+            out.push(TABLE[(b0 >> 2) as usize] as char);
+            out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+            if chunk.len() > 1 {
+                out.push(TABLE[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char);
+            } else {
+                out.push('=');
+            }
+            if chunk.len() > 2 {
+                out.push(TABLE[(b2 & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+        out
     }
 }
 
@@ -1028,7 +1243,9 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         "convert_document_format",
         "docx->hwpx|기관보고서|1. 개요\n2. 세부 계획",
     )?;
-    if !conv_json.contains("\"targetFormat\":\"hwpx\"") || !conv_json.contains("\"status\":\"OK\"")
+    if !conv_json.contains("\"targetFormat\":\"hwpx\"")
+        || !conv_json.contains("\"converted_base64\":\"")
+        || !conv_json.contains("\"status\":\"OK\"")
     {
         return Err(EasyOfficeError::InvalidArgument(
             "IPC 포맷 변환 검증 실패".to_string(),
@@ -1070,7 +1287,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
 
     Ok(format!(
-        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=13, {})",
+        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=15, {})",
         DesktopPlatform::current().os_label(),
         bench_report.summary_line()
     ))
@@ -1085,6 +1302,15 @@ mod tests {
         let first =
             EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "document-home-bold").unwrap();
         assert!(first.contains("\"isBold\":true"));
+        assert!(first.contains("\"canUndo\":true"));
+
+        let undone = EasyOfficeIpcRouter::dispatch("undo_ribbon_command", "").unwrap();
+        assert!(undone.contains("\"isBold\":false"));
+        assert!(undone.contains("\"canRedo\":true"));
+
+        let redone = EasyOfficeIpcRouter::dispatch("redo_ribbon_command", "").unwrap();
+        assert!(redone.contains("\"isBold\":true"));
+
         let second =
             EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "document-home-bold").unwrap();
         assert!(second.contains("\"isBold\":false"));
@@ -1099,6 +1325,21 @@ mod tests {
         )
         .unwrap();
         assert!(eval_json.contains("\"value\":\"100\""));
+
+        let wb_json = EasyOfficeIpcRouter::dispatch(
+            "evaluate_workbook_formula",
+            "Sheet1!A1=10;Sheet1!B1=20;Sheet1!C1=30?=SUM(A1:C1)",
+        )
+        .unwrap();
+        assert!(wb_json.contains("\"value\":\"60\""));
+
+        let conv_json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            "docx->xlsx|예산보고서|첫번째문단\n[[TABLE_ROW]]\t항목\t금액\n[[TABLE_ROW]]\t인건비\t500",
+        )
+        .unwrap();
+        assert!(conv_json.contains("\"converted_base64\":\""));
+        assert!(conv_json.contains("\"tableCount\":1"));
 
         let smart_json = EasyOfficeIpcRouter::dispatch(
             "run_smart_assistant",
