@@ -313,7 +313,7 @@ impl EasyOfficeIpcRouter {
         let mut wb = WorkbookEngine::new();
         wb.add_sheet("Sheet1");
         wb.add_sheet("Sheet2");
-        if seed_defaults {
+        if seed_defaults && cells_part.is_none_or(|s| s.trim().is_empty()) {
             wb.set_cell("Sheet2", "A1", "100")?;
             wb.set_cell("Sheet1", "A1", "1200")?;
             wb.set_cell("Sheet1", "B1", "850")?;
@@ -839,8 +839,7 @@ impl EasyOfficeIpcRouter {
         };
 
         let src_bytes = UniversalFormatConverter::encode(&model, src_fmt)?;
-        let dst_bytes =
-            UniversalFormatConverter::convert(&src_bytes, Some(src_fmt.extension()), dst_fmt)?;
+        let dst_bytes = UniversalFormatConverter::encode(&model, dst_fmt)?;
         let (detected_dst, decoded) =
             UniversalFormatConverter::decode(&dst_bytes, Some(dst_fmt.extension()))?;
         let b64 = Self::encode_base64(&dst_bytes);
@@ -990,6 +989,42 @@ impl EasyOfficeIpcRouter {
             }
         }
         out
+    }
+
+    pub fn decode_base64(input: &str) -> Option<Vec<u8>> {
+        let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        if clean.is_empty() || (clean.len() & 3) != 0 {
+            return None;
+        }
+        let val = |b: u8| -> Option<u8> {
+            match b {
+                b'A'..=b'Z' => Some(b - b'A'),
+                b'a'..=b'z' => Some(b - b'a' + 26),
+                b'0'..=b'9' => Some(b - b'0' + 52),
+                b'+' => Some(62),
+                b'/' => Some(63),
+                _ => None,
+            }
+        };
+        let mut out = Vec::with_capacity((clean.len() / 4) * 3);
+        let mut idx = 0usize;
+        while idx + 4 <= clean.len() {
+            let a = val(clean[idx])?;
+            let b = val(clean[idx + 1])?;
+            out.push((a << 2) | (b >> 4));
+            if clean[idx + 2] != b'=' {
+                let c = val(clean[idx + 2])?;
+                out.push(((b & 0x0F) << 4) | (c >> 2));
+                if clean[idx + 3] != b'=' {
+                    let d = val(clean[idx + 3])?;
+                    out.push(((c & 0x03) << 6) | d);
+                }
+            } else if clean[idx + 3] != b'=' {
+                return None;
+            }
+            idx += 4;
+        }
+        Some(out)
     }
 }
 
@@ -1369,11 +1404,21 @@ mod tests {
                 cross2.contains("\"value\":\"300\""),
                 "cmd={cmd} res={cross2}"
             );
+
+            let cleared_res = EasyOfficeIpcRouter::dispatch(
+                cmd,
+                "Sheet1!B1=10;Sheet1!C4==Sheet1!A1+Sheet1!B1+ROW()+COLUMN()?Sheet1|C4",
+            )
+            .unwrap();
+            assert!(
+                cleared_res.contains("\"value\":\"17\""),
+                "cmd={cmd} res={cleared_res}"
+            );
         }
 
         let conv_json = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
-            "docx->xlsx|예산보고서|첫번째문단\n[[AGENCY]]\t행정안전부\n[[TABLE_NEW]]\n[[TABLE_ROW]]\t항목\t금액\n[[TABLE_ROW]]\t인건비\t500\n[[SHEET_CELL]]\t0\t0\t시트셀값\n[[SLIDE]]\t발표제목\t핵심1;;핵심2\t발표노트",
+            "docx->xlsx|예산보고서|첫번째문단\n[[AGENCY]]\t행정안전부\n[[TABLE_NEW]]\n[[TABLE_ROW]]\t항목\t금액\n[[TABLE_ROW]]\t인건비\t500\n[[SHEET_CELL]]\t0\t0\t시트셀값\n[[SHEET_A1]]\tAA1\t다중열셀\n[[SLIDE]]\t발표제목\t핵심1;;핵심2\t발표노트",
         )
         .unwrap();
         assert!(conv_json.contains("\"convertedBase64\":\""));
@@ -1383,6 +1428,15 @@ mod tests {
         let b64_end = conv_json[b64_start..].find('"').unwrap() + b64_start;
         let b64_str = &conv_json[b64_start..b64_end];
         assert!(!b64_str.is_empty());
+        let xlsx_bytes = EasyOfficeIpcRouter::decode_base64(b64_str).unwrap();
+        let (_, decoded_xlsx) =
+            UniversalFormatConverter::decode(&xlsx_bytes, Some("xlsx")).unwrap();
+        assert!(decoded_xlsx
+            .sheet_cells
+            .contains(&(0, 0, "시트셀값".to_string())));
+        assert!(decoded_xlsx
+            .sheet_cells
+            .contains(&(0, 26, "다중열셀".to_string())));
 
         let hwp_conv_json = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
@@ -1391,6 +1445,12 @@ mod tests {
         .unwrap();
         assert!(hwp_conv_json.contains("\"tableCount\":1"));
         assert!(hwp_conv_json.contains("\"convertedBase64\":\""));
+        let hwp_b64_start = hwp_conv_json.find(b64_marker).unwrap() + b64_marker.len();
+        let hwp_b64_end = hwp_conv_json[hwp_b64_start..].find('"').unwrap() + hwp_b64_start;
+        let hwp_b64_str = &hwp_conv_json[hwp_b64_start..hwp_b64_end];
+        let hwp_bytes = EasyOfficeIpcRouter::decode_base64(hwp_b64_str).unwrap();
+        let hwp_unpacked = easyoffice_formats::Hwp5Codec::unpack(&hwp_bytes).unwrap();
+        assert_eq!(hwp_unpacked.agency_name, "행정안전부");
 
         let smart_json = EasyOfficeIpcRouter::dispatch(
             "run_smart_assistant",

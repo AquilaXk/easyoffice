@@ -790,23 +790,18 @@ impl PdfSerializer {
             let mut stream_lines: Vec<String> = Vec::new();
             for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
                 let y = 760 - (l_idx as i32) * 16;
-                let font_tag = if line_str.is_ascii() { "/F1" } else { "/F2" };
-                stream_lines.push(format!(
-                    "BT {font_tag} 12 Tf 54 {y} Td ({}) Tj ET",
-                    Self::escape_pdf_text(line_str)
-                ));
+                let (font_tag, operand) = Self::format_pdf_tj_operand(line_str);
+                stream_lines.push(format!("BT {font_tag} 12 Tf 54 {y} Td {operand} Tj ET"));
             }
             if let Some(stamp) = &page.approval_stamp {
-                stream_lines.push(format!(
-                    "BT /F1 10 Tf 386 604 Td ([STAMP] {}) Tj ET",
-                    Self::escape_pdf_text(stamp)
-                ));
+                let stamp_text = format!("[STAMP] {stamp}");
+                let (font_tag, operand) = Self::format_pdf_tj_operand(&stamp_text);
+                stream_lines.push(format!("BT {font_tag} 10 Tf 386 604 Td {operand} Tj ET"));
             }
             if let Some(wm) = &doc.watermark_text {
-                stream_lines.push(format!(
-                    "BT /F1 10 Tf 320 746 Td ([WM] {}) Tj ET",
-                    Self::escape_pdf_text(wm)
-                ));
+                let wm_text = format!("[WM] {wm}");
+                let (font_tag, operand) = Self::format_pdf_tj_operand(&wm_text);
+                stream_lines.push(format!("BT {font_tag} 10 Tf 320 746 Td {operand} Tj ET"));
             }
             let stream_body = stream_lines.join("\n");
 
@@ -963,8 +958,7 @@ impl PdfSerializer {
                 if is_form_meta_line {
                     continue;
                 }
-                for raw_token in Self::extract_all_paren_tokens(trimmed) {
-                    let content = Self::unescape_pdf_text(&raw_token);
+                for content in Self::extract_all_bt_tokens(trimmed) {
                     if !is_body_line {
                         if let Some(wm) = content.strip_prefix("[WM] ") {
                             watermark_text = Some(wm.to_string());
@@ -1143,7 +1137,43 @@ impl PdfSerializer {
         String::from_utf8(out).ok()
     }
 
-    fn extract_all_paren_tokens(line: &str) -> Vec<String> {
+    fn encode_utf16be_hex(text: &str) -> String {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        let mut out = String::with_capacity(text.len() * 4);
+        for unit in text.encode_utf16() {
+            out.push(HEX[((unit >> 12) & 0x0F) as usize] as char);
+            out.push(HEX[((unit >> 8) & 0x0F) as usize] as char);
+            out.push(HEX[((unit >> 4) & 0x0F) as usize] as char);
+            out.push(HEX[(unit & 0x0F) as usize] as char);
+        }
+        out
+    }
+
+    fn format_pdf_tj_operand(text: &str) -> (&'static str, String) {
+        if text.is_ascii() {
+            ("/F1", format!("({})", Self::escape_pdf_text(text)))
+        } else {
+            ("/F2", format!("<{}>", Self::encode_utf16be_hex(text)))
+        }
+    }
+
+    fn decode_utf16be_hex(hex: &str) -> Option<String> {
+        let clean: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        if clean.len() % 4 != 0 {
+            return None;
+        }
+        let mut units = Vec::with_capacity(clean.len() / 4);
+        let mut idx = 0usize;
+        while idx + 4 <= clean.len() {
+            let chunk = std::str::from_utf8(&clean[idx..idx + 4]).ok()?;
+            let code = u16::from_str_radix(chunk, 16).ok()?;
+            units.push(code);
+            idx += 4;
+        }
+        Some(String::from_utf16_lossy(&units))
+    }
+
+    fn extract_all_bt_tokens(line: &str) -> Vec<String> {
         let mut tokens = Vec::new();
         let mut chars = line.chars();
         while let Some(c) = chars.next() {
@@ -1156,11 +1186,22 @@ impl PdfSerializer {
                             token.push(escaped);
                         }
                     } else if inner == ')' {
-                        tokens.push(token);
+                        tokens.push(Self::unescape_pdf_text(&token));
                         break;
                     } else {
                         token.push(inner);
                     }
+                }
+            } else if c == '<' {
+                let mut hex_str = String::new();
+                for inner in chars.by_ref() {
+                    if inner == '>' {
+                        if let Some(decoded) = Self::decode_utf16be_hex(&hex_str) {
+                            tokens.push(decoded);
+                        }
+                        break;
+                    }
+                    hex_str.push(inner);
                 }
             }
         }
@@ -1397,7 +1438,6 @@ mod tests {
         );
 
         let mut pdf_with_b64_json = pdf_with_literal_encrypt.clone();
-        // Base64 of `{"title":"Guide to /Encrypt in PDF","bodyText":"Section 1 discusses /Encrypt dictionary."}`
         let b64_trailer = "\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6Ikd1aWRlIHRvIC9FbmNyeXB0IGluIFBERiIsImJvZHlUZXh0IjoiU2VjdGlvbiAxIGRpc2N1c3NlcyAvRW5jcnlwdCBkaWN0aW9uYXJ5LiJ9\n";
         pdf_with_b64_json.extend_from_slice(b64_trailer.as_bytes());
         assert!(
@@ -1406,13 +1446,32 @@ mod tests {
         );
 
         let mut pdf_with_spoofed_b64_json = pdf_with_literal_encrypt;
-        // Base64 of `{"title":"Spoofed","bodyText":"Completely different content"}`
         let spoofed_trailer = "\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mZWQiLCJib2R5VGV4dCI6IkNvbXBsZXRlbHkgZGlmZmVyZW50IGNvbnRlbnQifQ==\n";
         pdf_with_spoofed_b64_json.extend_from_slice(spoofed_trailer.as_bytes());
         assert!(matches!(
             PdfSerializer::parse(&pdf_with_spoofed_b64_json),
             Err(EasyOfficeError::SecurityViolation(_))
         ));
+
+        let korean_pdf_model = PdfDocumentModel {
+            title: "한글 보고서".to_string(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "첫째 줄 한글 본문\nASCII Line 2".to_string(),
+                approval_stamp: Some("전결승인".to_string()),
+            }],
+            watermark_text: Some("대외비문서".to_string()),
+        };
+        let korean_pdf_bytes = PdfSerializer::serialize(&korean_pdf_model);
+        let korean_pdf_raw = String::from_utf8_lossy(&korean_pdf_bytes);
+        assert!(korean_pdf_raw.contains("BT /F2 12 Tf 54 760 Td <"));
+        assert!(korean_pdf_raw.contains("BT /F1 12 Tf 54 744 Td (ASCII Line 2) Tj ET"));
+        assert!(korean_pdf_raw.contains("BT /F2 10 Tf 386 604 Td <"));
+        assert!(korean_pdf_raw.contains("BT /F2 10 Tf 320 746 Td <"));
+        assert!(!korean_pdf_raw.contains("(첫째 줄 한글 본문)"));
+        let parsed_korean_pdf = PdfSerializer::parse(&korean_pdf_bytes).unwrap();
+        assert_eq!(parsed_korean_pdf, korean_pdf_model);
     }
 
     #[test]

@@ -318,8 +318,8 @@
     if (
       upperXml.includes("<!DOCTYPE") ||
       upperXml.includes("<!ENTITY") ||
-      upperXml.includes("SYSTEM") ||
-      upperXml.includes("PUBLIC")
+      ((upperXml.includes("<!DOCTYPE") || upperXml.includes("<!ENTITY")) &&
+        (upperXml.includes("SYSTEM") || upperXml.includes("PUBLIC")))
     ) {
       return {
         status: "REJECTED",
@@ -675,8 +675,23 @@
 
   function parseCellRefParts(ref) {
     const m = /^([A-Z]+)(\d+)$/.exec(String(ref || "").toUpperCase());
-    if (!m) return { col: 65, row: 1 };
-    return { col: m[1].codePointAt(0), row: Number(m[2]) };
+    if (!m) return { col: 0, row: 1 };
+    let col = 0;
+    for (let i = 0; i < m[1].length; i++) {
+      col = col * 26 + (m[1].codePointAt(i) - 64);
+    }
+    return { col: col - 1, row: Number(m[2]) };
+  }
+
+  function colIndexToLetters(colIdx) {
+    let n = Math.max(0, Number(colIdx) || 0) + 1;
+    let out = "";
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      out = String.fromCodePoint(65 + rem) + out;
+      n = Math.floor((n - 1) / 26);
+    }
+    return out || "A";
   }
 
   function collectRangeNumericValues(startRef, endRef, cellValues, currentSheet) {
@@ -686,7 +701,7 @@
     const nums = [];
     for (let c = Math.min(p1.col, p2.col); c <= Math.max(p1.col, p2.col); c++) {
       for (let r = Math.min(p1.row, p2.row); r <= Math.max(p1.row, p2.row); r++) {
-        const ref = String.fromCodePoint(c) + r;
+        const ref = colIndexToLetters(c) + r;
         const raw = String(cellValues[shPrefix + ref] ?? cellValues[ref] ?? "")
           .replaceAll(",", "")
           .trim();
@@ -745,7 +760,7 @@
     return String(Math.round(res * 100) / 100);
   }
 
-  function evaluateFormulaExpression(exprStr, cellValues, currentSheet) {
+  function evaluateFormulaExpression(exprStr, cellValues, currentSheet, currentCellRef) {
     const shUpper = String(currentSheet || "SHEET1").toUpperCase();
     const clean = String(exprStr || "").trim();
     if (!clean.startsWith("=")) {
@@ -753,7 +768,16 @@
       const n = Number(normalized);
       return Number.isFinite(n) && normalized !== "" ? String(n) : clean;
     }
-    const body = clean.slice(1).trim().toUpperCase();
+    const body = clean
+      .slice(1)
+      .trim()
+      .toUpperCase()
+      .replaceAll(/\bROW\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
+        String(parseCellRefParts(ref || currentCellRef || "A1").row)
+      )
+      .replaceAll(/\bCOLUMN\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
+        String(parseCellRefParts(ref || currentCellRef || "A1").col + 1)
+      );
     const rangeMatch =
       /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:([A-Z0-9_]+)!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
         body
@@ -763,9 +787,14 @@
       const vals = collectRangeNumericValues(rangeMatch[3], rangeMatch[4], cellValues, rangeSheet);
       return evaluateRangeFunction(rangeMatch[1], vals);
     }
+    const hasExplicitCells = Object.keys(cellValues).length > 0;
     const withCrossSheet = body.replaceAll(/\b([A-Z0-9_]+)!([A-Z]+\d+)\b/g, (_, sh, ref) => {
       const key = sh + "!" + ref;
-      const fallback = sheetDataStore.Sheet2?.[ref] ? sheetDataStore.Sheet2[ref].value : "100";
+      const fallback = hasExplicitCells
+        ? ""
+        : sheetDataStore.Sheet2?.[ref]
+          ? sheetDataStore.Sheet2[ref].value
+          : "100";
       const raw = String(cellValues[key] ?? fallback).replaceAll(",", "").trim();
       const v = Number(raw);
       return raw !== "" && Number.isFinite(v) ? String(v) : "0";
@@ -823,12 +852,13 @@
       Object.keys(values).forEach((k) => {
         if (String(values[k]).startsWith("=")) {
           const kSheet = k.includes("!") ? k.split("!")[0] : evalSheet;
-          values[k] = evaluateFormulaExpression(values[k], values, kSheet);
+          const kRef = k.includes("!") ? k.split("!")[1] : k;
+          values[k] = evaluateFormulaExpression(values[k], values, kSheet, kRef);
         }
       });
     }
     if (q.startsWith("=")) {
-      return evaluateFormulaExpression(q, values, evalSheet);
+      return evaluateFormulaExpression(q, values, evalSheet, activeSheetCellRef || "A1");
     }
     const qUpper = q.toUpperCase();
     return values[evalSheet + "!" + qUpper] ?? values[qUpper] ?? "";
@@ -908,17 +938,21 @@
       };
     }
     if (!docTabStore.HWP) {
+      const hwpTableRows =
+        '<tr><td>표준화 총괄과</td><td>김민준 서기관</td><td data-doc-num="520">520</td></tr>' +
+        '<tr><td>정보보호 감사팀</td><td>박서연 사무관</td><td data-doc-num="340">340</td></tr>' +
+        '<tr id="doc-table-sum-row"><td>합계 (=SUM(ABOVE))</td><td>자동 집계</td><td id="doc-table-sum-cell" data-doc-num="860">860</td></tr>';
       docTabStore.HWP = {
         editorHtml:
           "<h1>행정안전부 전자결재 표준 기안문 (KS X 6101 HWPX)</h1>" +
           "<p>문서번호: 기획재정담당관-2026-0418 · 시행일자: 2026. 10. 25. · 공개구분: 대국민 공개</p>" +
           "<h2>1. 추진 배경 및 목적</h2>" +
           "<p>공공기관 행정 문서의 HWP 5.0(OLE2 CFBF) 및 HWPX(OWPML) 상호운용성 표준을 준수하고 다중 표·누름틀·원고지 조판 정합성을 확보합니다.</p>" +
+          '<table id="doc-table" class="sheet-table doc-inline-table"><thead><tr><th>소관 부서</th><th>담당자</th><th>집행액(백만원)</th></tr></thead><tbody id="doc-table-body">' +
+          hwpTableRows +
+          "</tbody></table>" +
           '<p id="hwp-manuscript-preview" class="hwp-manuscript-notice">한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성</p>',
-        tableHtml:
-          '<tr><td>표준화 총괄과</td><td>김민준 서기관</td><td data-doc-num="520">520</td></tr>' +
-          '<tr><td>정보보호 감사팀</td><td>박서연 사무관</td><td data-doc-num="340">340</td></tr>' +
-          '<tr id="doc-table-sum-row"><td>합계 (=SUM(ABOVE))</td><td>자동 집계</td><td id="doc-table-sum-cell" data-doc-num="860">860</td></tr>',
+        tableHtml: hwpTableRows,
       };
     }
   }
@@ -929,18 +963,19 @@
     const saved = docTabStore[mod];
     if (!saved) return;
     const editor = document.getElementById("doc-editor");
-    const tbody = document.getElementById("doc-table-body");
     if (editor) editor.innerHTML = saved.editorHtml;
+    const tbody = document.getElementById("doc-table-body");
     if (tbody && saved.tableHtml) tbody.innerHTML = saved.tableHtml;
     activeDocBlockEl = null;
     computeDocTableSummary();
     computeSmartStats();
   }
 
-  function captureWorkspaceSnapshot() {
+  function captureWorkspaceSnapshot(isRibbon = false) {
     saveActiveDocTabState();
     sheetDataStore[activeSheetName] = snapshotDomSheetCells();
     return {
+      isRibbon: Boolean(isRibbon),
       activeModule,
       activeSheetName,
       activeSheetCellRef,
@@ -997,8 +1032,8 @@
     activatePane(targetMod, true);
   }
 
-  function pushUndoSnapshot() {
-    workspaceUndoStack.push(captureWorkspaceSnapshot());
+  function pushUndoSnapshot(isRibbon = false) {
+    workspaceUndoStack.push(captureWorkspaceSnapshot(isRibbon));
     if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
       workspaceUndoStack.shift();
     }
@@ -1007,26 +1042,30 @@
 
   async function performWorkspaceUndo() {
     const fb = document.getElementById("status-command-feedback");
-    await invokeIpc("undo_ribbon_command", "");
     if (workspaceUndoStack.length === 0) {
       if (fb) fb.textContent = "실행 취소할 작업이 없습니다";
       return;
     }
-    workspaceRedoStack.push(captureWorkspaceSnapshot());
     const prev = workspaceUndoStack.pop();
+    workspaceRedoStack.push(captureWorkspaceSnapshot(Boolean(prev.isRibbon)));
+    if (prev.isRibbon === true) {
+      await invokeIpc("undo_ribbon_command", "");
+    }
     restoreWorkspaceSnapshot(prev);
     if (fb) fb.textContent = "실행 취소 완료 (" + activeModule + ")";
   }
 
   async function performWorkspaceRedo() {
     const fb = document.getElementById("status-command-feedback");
-    await invokeIpc("redo_ribbon_command", "");
     if (workspaceRedoStack.length === 0) {
       if (fb) fb.textContent = "다시 실행할 작업이 없습니다";
       return;
     }
-    workspaceUndoStack.push(captureWorkspaceSnapshot());
     const next = workspaceRedoStack.pop();
+    workspaceUndoStack.push(captureWorkspaceSnapshot(Boolean(next.isRibbon)));
+    if (next.isRibbon === true) {
+      await invokeIpc("redo_ribbon_command", "");
+    }
     restoreWorkspaceSnapshot(next);
     if (fb) fb.textContent = "다시 실행 완료 (" + activeModule + ")";
   }
@@ -1244,7 +1283,7 @@
       targetEl.style.fontSize = sizes[presetIdx];
       return true;
     }
-    if (cmdId.endsWith("-home-find") || cmdId.endsWith("-review-track")) {
+    if (cmdId.endsWith("-review-track")) {
       const firstP = docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview)");
       if (firstP) {
         firstP.dataset.highlighted = firstP.dataset.highlighted === "true" ? "false" : "true";
@@ -1269,7 +1308,7 @@
       docEditor.style.padding = pads[idx];
       return true;
     }
-    if (cmdId.endsWith("-layout-paper") || cmdId.endsWith("-layout-size")) {
+    if (cmdId.endsWith("-layout-paper")) {
       const paper = execRes?.paperSize || "A4";
       docEditor.dataset.paperSize = paper;
       return true;
@@ -1304,11 +1343,7 @@
       appendDocTableRow();
       return true;
     }
-    if (
-      cmdId.endsWith("-data-autosum") ||
-      cmdId.endsWith("-data-sum") ||
-      cmdId === "doc-mod-tableformula"
-    ) {
+    if (cmdId.endsWith("-data-autosum") || cmdId === "doc-mod-tableformula") {
       computeDocTableSummary();
       return true;
     }
@@ -1357,21 +1392,12 @@
       }
       return;
     }
-    if (
-      cmdId.endsWith("-review-verify") ||
-      cmdId.endsWith("-review-security") ||
-      cmdId.endsWith("-data-validation") ||
-      cmdId.endsWith("-data-validate")
-    ) {
+    if (cmdId.endsWith("-review-verify") || cmdId.endsWith("-data-validation")) {
       document.getElementById("btn-run-security-audit")?.click();
       return;
     }
-    if (cmdId.endsWith("-review-stats") || cmdId.endsWith("-review-spell")) {
+    if (cmdId.endsWith("-review-stats")) {
       document.getElementById("btn-smart-diagnose")?.click();
-      return;
-    }
-    if (cmdId.endsWith("-review-pii")) {
-      void runPiiScrubAction(false);
       return;
     }
     if (cmdId === "hwp-mod-manuscript") {
@@ -1386,9 +1412,26 @@
     }
     const docEditor = document.getElementById("doc-editor");
     if (
+      activeModule === "CONV" &&
+      (cmdId.startsWith("document-") || cmdId.startsWith("doc-mod-"))
+    ) {
+      restoreDocTabState("DOC");
+      if (applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
+        if (docEditor) {
+          const tbody = document.getElementById("doc-table-body");
+          docTabStore.DOC = {
+            editorHtml: docEditor.innerHTML,
+            tableHtml: tbody ? tbody.innerHTML : "",
+          };
+        }
+        return;
+      }
+    }
+    if (
       (activeModule === "DOC" || activeModule === "HWP") &&
       applyDocEditorRibbonEffect(docEditor, cmdId, execRes)
     ) {
+      saveActiveDocTabState();
       return;
     }
     if (cmdId.startsWith("sheet-")) {
@@ -1405,14 +1448,9 @@
         const presetIdx = Number(execRes?.stylePresetIndex ?? 0) % 4;
         const sizes = ["13px", "15px", "17px", "12px"];
         activeTd.style.fontSize = sizes[presetIdx];
-      } else if (
-        cmdId === "sheet-data-autosum" ||
-        cmdId === "sheet-data-sum" ||
-        cmdId === "sheet-mod-eval" ||
-        cmdId === "sheet-data-fn-browser"
-      ) {
+      } else if (cmdId === "sheet-data-autosum" || cmdId === "sheet-data-fn-browser") {
         void evaluateActiveSheetFormulaBar(false);
-      } else if (cmdId === "sheet-insert-table" || cmdId === "sheet-insert-row") {
+      } else if (cmdId === "sheet-insert-table") {
         const tbody = document.querySelector("#pane-sheet tbody");
         if (tbody) {
           const rowIdx = tbody.querySelectorAll("tr").length + 1;
@@ -1437,20 +1475,50 @@
     }
     if (cmdId.startsWith("slide-")) {
       const titleZone = document.getElementById("slide-title-zone");
+      const lowerZone = document.getElementById("slide-lower-zone");
+      const stageBox = document.getElementById("slide-stage-box");
+      const curSlide = SLIDE_DECK_STATE[activeSlideIndex];
       if (cmdId === "slide-home-bold" && titleZone) {
         titleZone.style.fontWeight = execRes?.isBold ? "700" : "";
       } else if (cmdId === "slide-home-italic" && titleZone) {
         titleZone.style.fontStyle = execRes?.isItalic ? "italic" : "";
       } else if (cmdId === "slide-home-underline" && titleZone) {
         titleZone.style.textDecoration = execRes?.isUnderline ? "underline" : "";
+      } else if (cmdId === "slide-home-style" && titleZone) {
+        const presetIdx = Number(execRes?.stylePresetIndex ?? 0) % 4;
+        const sizes = ["20px", "22px", "24px", "18px"];
+        titleZone.style.fontSize = sizes[presetIdx];
       } else if (
-        cmdId === "slide-insert-new" ||
         cmdId === "slide-insert-table" ||
         cmdId === "slide-insert-chart" ||
         cmdId === "slide-insert-shape"
       ) {
         appendNewSlideDeckItem();
-      } else if (cmdId === "slide-mod-laser" || cmdId === "slide-mod-presenter") {
+      } else if (
+        cmdId === "slide-insert-link" ||
+        cmdId === "slide-data-autosum" ||
+        cmdId === "slide-data-fn-browser" ||
+        cmdId === "slide-review-comment"
+      ) {
+        const tag = "[" + (execRes?.summary || cmdId) + "]";
+        if (curSlide) {
+          curSlide.lower = (curSlide.lower ? curSlide.lower + " · " : "") + tag;
+        }
+        if (lowerZone && curSlide) {
+          const p = document.createElement("p");
+          p.textContent = curSlide.lower;
+          lowerZone.replaceChildren(p);
+        }
+      } else if (cmdId === "slide-data-sort" && curSlide && curSlide.lower) {
+        const asc = Boolean(execRes?.sortAscending);
+        const parts = curSlide.lower
+          .split("·")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        parts.sort((a, b) => (asc ? a.localeCompare(b, "ko") : b.localeCompare(a, "ko")));
+        curSlide.lower = parts.join(" · ");
+        renderSlideDeck(activeSlideIndex);
+      } else if (cmdId === "slide-mod-presenter") {
         document.getElementById("btn-slide-laser")?.click();
       } else if (cmdId === "slide-mod-transition") {
         const sel = document.getElementById("slide-transition-select");
@@ -1461,6 +1529,29 @@
           SLIDE_DECK_STATE[activeSlideIndex].transition = sel.value;
           renderSlideDeck(activeSlideIndex);
         }
+      } else if (stageBox) {
+        if (cmdId === "slide-layout-columns" && lowerZone) {
+          const cols = execRes?.columnCount || 1;
+          lowerZone.style.columnCount = cols > 1 ? String(cols) : "";
+        } else if (cmdId === "slide-layout-margins") {
+          const idx = Number(execRes?.marginPresetIndex ?? 0) % 3;
+          const pads = ["20px", "12px", "28px"];
+          stageBox.style.padding = pads[idx];
+        } else if (cmdId === "slide-mod-snap" || cmdId === "slide-review-track") {
+          stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--eo-primary)";
+        } else {
+          stageBox.dataset.layoutState = execRes?.summary || cmdId;
+        }
+      }
+      const metaStatus = document.getElementById("slide-meta-status");
+      if (metaStatus && execRes?.summary && cmdId !== "slide-mod-transition") {
+        metaStatus.textContent =
+          "슬라이드 " +
+          (activeSlideIndex + 1) +
+          " / " +
+          SLIDE_DECK_STATE.length +
+          " · " +
+          execRes.summary;
       }
       return;
     }
@@ -1499,7 +1590,7 @@
       btn.innerHTML =
         "<span>" + cmd.title + "</span> <small>(" + (cmd.shortcut || "") + ")</small>";
       btn.addEventListener("click", async () => {
-        pushUndoSnapshot();
+        pushUndoSnapshot(true);
         const execRes = await invokeIpc("execute_ribbon_command", cmd.id);
         applyRibbonDomSideEffects(cmd.id, execRes);
         const fb = document.getElementById("status-command-feedback");
@@ -1585,7 +1676,22 @@
     return activeModule === "HWP" ? "HWP" : "DOC";
   }
 
+  function appendTableRowsFromTrList(rows, lines) {
+    if (rows.length === 0) return;
+    lines.push("[[TABLE_NEW]]");
+    rows.forEach((tr) => {
+      const cells = Array.from(tr.querySelectorAll("th, td")).map((cell) =>
+        (cell.textContent || "").trim().replaceAll("\t", " ").replaceAll("\n", " ")
+      );
+      if (cells.length > 0) {
+        lines.push("[[TABLE_ROW]]\t" + cells.join("\t"));
+      }
+    });
+  }
+
   function buildStructuredConversionBody(sourceFormatOrModule) {
+    saveActiveDocTabState();
+    ensureDefaultDocTabStore();
     const scope = resolveSourceScopeKind(sourceFormatOrModule);
     const lines = [];
 
@@ -1594,23 +1700,43 @@
     }
 
     if (scope === "DOC" || scope === "HWP") {
-      const docText = extractEditableDocumentText();
-      if (docText) {
-        lines.push(docText);
-      }
-      const docTable = document.querySelector("#doc-table-area table");
-      if (docTable) {
-        const rows = Array.from(docTable.querySelectorAll("tr"));
-        if (rows.length > 0) {
-          lines.push("[[TABLE_NEW]]");
-          rows.forEach((tr) => {
-            const cells = Array.from(tr.querySelectorAll("th, td")).map((cell) =>
-              (cell.textContent || "").trim().replaceAll("\t", " ").replaceAll("\n", " ")
-            );
-            if (cells.length > 0) {
-              lines.push("[[TABLE_ROW]]\t" + cells.join("\t"));
-            }
-          });
+      if (activeModule === scope) {
+        const docText = extractEditableDocumentText();
+        if (docText) {
+          lines.push(docText);
+        }
+        const docTable = document.querySelector("#doc-table-area table");
+        if (docTable) {
+          appendTableRowsFromTrList(Array.from(docTable.querySelectorAll("tr")), lines);
+        }
+      } else {
+        const saved = docTabStore[scope];
+        if (saved) {
+          const tempDiv = document.createElement("div");
+          tempDiv.innerHTML = saved.editorHtml || "";
+          const blocks = tempDiv.querySelectorAll(
+            ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
+          );
+          const docText =
+            blocks.length > 0
+              ? Array.from(blocks)
+                  .map((el) => (el.textContent || "").trim())
+                  .filter((t) => t.length > 0)
+                  .join("\n")
+              : (tempDiv.innerText || "").trim();
+          if (docText) {
+            lines.push(docText);
+          }
+          const inlineTable = tempDiv.querySelector("table");
+          if (inlineTable) {
+            const tb = inlineTable.querySelector("tbody");
+            if (tb && saved.tableHtml) tb.innerHTML = saved.tableHtml;
+            appendTableRowsFromTrList(Array.from(inlineTable.querySelectorAll("tr")), lines);
+          } else if (saved.tableHtml) {
+            const tempTbody = document.createElement("tbody");
+            tempTbody.innerHTML = saved.tableHtml;
+            appendTableRowsFromTrList(Array.from(tempTbody.querySelectorAll("tr")), lines);
+          }
         }
       }
     } else if (scope === "SHEET") {
@@ -1619,17 +1745,21 @@
       const rowMap = new Map();
       Object.keys(sheetObj).forEach((ref) => {
         const entry = sheetObj[ref];
-        const val = (entry?.value || entry?.formula || "")
+        const rawVal = (entry?.formula || entry?.value || "")
           .trim()
           .replaceAll("\t", " ")
           .replaceAll("\n", " ");
-        if (!val) return;
+        const dispVal = (entry?.value || entry?.formula || "")
+          .trim()
+          .replaceAll("\t", " ")
+          .replaceAll("\n", " ");
+        if (!rawVal && !dispVal) return;
+        lines.push("[[SHEET_A1]]\t" + ref + "\t" + (rawVal || dispVal));
         const p = parseCellRefParts(ref);
         const rIdx = Math.max(0, p.row - 1);
-        const cIdx = Math.max(0, p.col - 65);
-        lines.push("[[SHEET_CELL]]\t" + rIdx + "\t" + cIdx + "\t" + val);
+        const cIdx = Math.max(0, p.col);
         if (!rowMap.has(rIdx)) rowMap.set(rIdx, []);
-        rowMap.get(rIdx)[cIdx] = val;
+        rowMap.get(rIdx)[cIdx] = dispVal || rawVal;
       });
       if (rowMap.size > 0) {
         lines.push("[[TABLE_NEW]]");
@@ -1779,7 +1909,7 @@
           if (item.id === "bench-run") {
             await runBenchmarkAction();
           } else {
-            pushUndoSnapshot();
+            pushUndoSnapshot(true);
             activatePane(item.module);
             const res = await invokeIpc("execute_ribbon_command", item.id);
             applyRibbonDomSideEffects(item.id, res);
@@ -1919,7 +2049,7 @@
     const themeBtn = document.getElementById("btn-theme-toggle");
     if (themeBtn) {
       themeBtn.addEventListener("click", () => {
-        pushUndoSnapshot();
+        pushUndoSnapshot(false);
         const html = document.documentElement;
         const next = html.dataset.theme === "dark" ? "light" : "dark";
         html.dataset.theme = next;
@@ -1935,19 +2065,21 @@
       .join(";");
     const formulaTds = Array.from(
       document.querySelectorAll("#pane-sheet td[data-cell][data-formula]")
+    ).filter((td) => (td.dataset.formula || "").startsWith("="));
+    await Promise.all(
+      formulaTds.map(async (td) => {
+        const formula = td.dataset.formula || "";
+        const ref = td.dataset.cell || "A1";
+        const queryTarget = activeSheetName + "|" + ref;
+        const isCrossSheet = /SHEET\d+!/i.test(formula) || activeSheetName !== "Sheet1";
+        const rpcRes = isCrossSheet
+          ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
+          : await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
+        if (rpcRes && rpcRes.value !== undefined) {
+          td.textContent = String(rpcRes.value);
+        }
+      })
     );
-    for (const td of formulaTds) {
-      const formula = td.dataset.formula || "";
-      if (!formula.startsWith("=")) continue;
-      const queryTarget = activeSheetName + "|" + formula;
-      const isCrossSheet = /SHEET\d+!/i.test(formula) || activeSheetName !== "Sheet1";
-      const rpcRes = isCrossSheet
-        ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
-        : await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
-      if (rpcRes && rpcRes.value !== undefined) {
-        td.textContent = String(rpcRes.value);
-      }
-    }
     sheetDataStore[activeSheetName] = snapshotDomSheetCells();
   }
 
@@ -1955,7 +2087,7 @@
     const input = document.getElementById("formula-input");
     const out = document.getElementById("sheet-eval-result");
     if (!input || !out) return;
-    if (recordUndo) pushUndoSnapshot();
+    if (recordUndo) pushUndoSnapshot(false);
     const rawFormula = input.value.trim();
     const activeTd = document.querySelector(
       '#pane-sheet td[data-cell="' + activeSheetCellRef + '"]'
@@ -1969,30 +2101,43 @@
       }
     }
 
+    if (activeTd && rawFormula.startsWith("=")) {
+      await recalculateActiveSheetFormulas();
+      const computedValue = (activeTd.textContent || "").trim();
+      out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
+      updateSheetSelectionAndAggregates(activeSheetCellRef);
+      return;
+    }
+
     const cellMap = collectSheetCellMap();
     cellMap[activeSheetName + "!" + activeSheetCellRef] = escapeSemicolonToken(rawFormula);
     const pairs = Object.keys(cellMap)
       .map((k) => k + "=" + cellMap[k])
       .join(";");
-
-    const exprOrRef = rawFormula.startsWith("=") ? rawFormula : activeSheetCellRef;
-    const queryTarget = activeSheetName + "|" + exprOrRef;
+    const queryTarget = activeSheetName + "|" + activeSheetCellRef;
     const isCrossSheet = /SHEET\d+!/i.test(rawFormula) || activeSheetName !== "Sheet1";
-    const rpcRes = isCrossSheet
-      ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
-      : await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
+    const [rpcRes] = await Promise.all([
+      isCrossSheet
+        ? invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
+        : invokeIpc("evaluate_sheet", pairs + "?" + queryTarget),
+      recalculateActiveSheetFormulas(),
+    ]);
     const computedValue = rpcRes.value;
     if (activeTd) activeTd.textContent = String(computedValue);
     out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
-    await recalculateActiveSheetFormulas();
     updateSheetSelectionAndAggregates(activeSheetCellRef);
   }
 
   function bindSheetCellEvents(rootEl) {
     rootEl.querySelectorAll("td[data-cell]").forEach((td) => {
+      let pendingFocusSnapshot = null;
+      let focusInitialRaw = "";
+      let snapshotPushedForFocus = false;
       td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
       td.addEventListener("focus", () => {
-        pushUndoSnapshot();
+        focusInitialRaw = td.dataset.formula || (td.textContent || "").trim();
+        pendingFocusSnapshot = captureWorkspaceSnapshot(false);
+        snapshotPushedForFocus = false;
       });
       td.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
@@ -2002,6 +2147,15 @@
       });
       td.addEventListener("blur", async () => {
         const rawText = (td.textContent || "").trim();
+        if (!snapshotPushedForFocus && rawText !== focusInitialRaw && pendingFocusSnapshot) {
+          workspaceUndoStack.push(pendingFocusSnapshot);
+          if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
+            workspaceUndoStack.shift();
+          }
+          workspaceRedoStack.length = 0;
+          snapshotPushedForFocus = true;
+        }
+        pendingFocusSnapshot = null;
         if (rawText.startsWith("=")) {
           td.dataset.formula = rawText;
         }
@@ -2010,6 +2164,14 @@
       });
       td.addEventListener("input", () => {
         const rawText = (td.textContent || "").trim();
+        if (!snapshotPushedForFocus && rawText !== focusInitialRaw && pendingFocusSnapshot) {
+          workspaceUndoStack.push(pendingFocusSnapshot);
+          if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
+            workspaceUndoStack.shift();
+          }
+          workspaceRedoStack.length = 0;
+          snapshotPushedForFocus = true;
+        }
         if (rawText.startsWith("=")) {
           td.dataset.formula = rawText;
         } else {
@@ -2083,14 +2245,14 @@
     const btnAddSlide = document.getElementById("btn-add-slide");
     if (btnAddSlide) {
       btnAddSlide.addEventListener("click", () => {
-        pushUndoSnapshot();
+        pushUndoSnapshot(false);
         appendNewSlideDeckItem();
       });
     }
     const slideTransSelect = document.getElementById("slide-transition-select");
     if (slideTransSelect) {
       slideTransSelect.addEventListener("change", () => {
-        pushUndoSnapshot();
+        pushUndoSnapshot(false);
         SLIDE_DECK_STATE[activeSlideIndex].transition = slideTransSelect.value;
         renderSlideDeck(activeSlideIndex);
       });
@@ -2143,7 +2305,7 @@
     const btnPdfRotate = document.getElementById("btn-pdf-rotate");
     if (btnPdfRotate) {
       btnPdfRotate.addEventListener("click", async () => {
-        pushUndoSnapshot();
+        pushUndoSnapshot(true);
         const execRes = await invokeIpc("execute_ribbon_command", "pdf-mod-rotate");
         applyRibbonDomSideEffects("pdf-mod-rotate", execRes);
       });
@@ -2151,7 +2313,7 @@
     const btnPdfApply = document.getElementById("btn-pdf-apply");
     if (btnPdfApply) {
       btnPdfApply.addEventListener("click", () => {
-        pushUndoSnapshot();
+        pushUndoSnapshot(false);
         applyPdfStudioFormState();
       });
     }

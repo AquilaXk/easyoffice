@@ -664,7 +664,7 @@ impl SheetEngine {
         };
         matches!(
             target_sheet.compiled_asts.get(&coord),
-            Some(Ok(Expr::FuncCall { name, .. })) if name.eq_ignore_ascii_case("SUBTOTAL")
+            Some(Ok(expr)) if expr_contains_subtotal(expr)
         )
     }
 
@@ -1237,6 +1237,26 @@ impl SheetEngine {
     }
 }
 
+pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
+    match expr {
+        Expr::FuncCall { name, args } => {
+            name.eq_ignore_ascii_case("SUBTOTAL") || args.iter().any(expr_contains_subtotal)
+        }
+        Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
+            expr_contains_subtotal(inner)
+        }
+        Expr::Binary { lhs, rhs, .. } => expr_contains_subtotal(lhs) || expr_contains_subtotal(rhs),
+        Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Boolean(_)
+        | Expr::ErrorLiteral(_)
+        | Expr::Cell(_)
+        | Expr::Range(_)
+        | Expr::SheetCell { .. }
+        | Expr::SheetRange { .. } => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1363,6 +1383,9 @@ mod tests {
             s1.set_cell("J4", "30").unwrap();
             s1.set_cell("J5", "40").unwrap();
             s1.set_cell("J6", "=SUBTOTAL(9, J1:J5)").unwrap();
+            s1.set_cell("J7", "=ROUND(SUBTOTAL(9, J1:J2), 0)").unwrap();
+            s1.set_cell("J8", "=+SUBTOTAL(9, J1:J2)").unwrap();
+            s1.set_cell("J9", "=SUBTOTAL(9, J1:J8)").unwrap();
         }
         {
             let s2 = wb.add_sheet("Sheet2");
@@ -1404,12 +1427,28 @@ mod tests {
             EvaluatedCellValue::Number(1.0)
         );
         assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(H1:H3, \"2026-05-01\")"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(G1:G3, \"2026-05-01\")"),
+            EvaluatedCellValue::Number(0.0)
+        );
+        assert_eq!(
             wb.evaluate_cell("Sheet1", "J3"),
             EvaluatedCellValue::Number(30.0)
         );
         assert_eq!(
             wb.evaluate_cell("Sheet1", "J6"),
             EvaluatedCellValue::Number(100.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "J9"),
+            EvaluatedCellValue::Number(100.0)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=SUBTOTAL(9, J1:J2, SUBTOTAL(9, J4:J5))"),
+            EvaluatedCellValue::Number(30.0)
         );
         assert_eq!(
             wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(G1:G3, \">=Bravo\")"),

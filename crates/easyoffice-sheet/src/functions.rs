@@ -1,4 +1,4 @@
-use crate::functions_date_fin::{matches_criteria, parse_iso_date_serial, wildcard_match};
+use crate::functions_date_fin::{parse_iso_date_serial, wildcard_match};
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate,
     SheetEngine,
@@ -393,20 +393,27 @@ enum CritNumOp {
     Eq,
 }
 
-enum CompiledCriteria<'a> {
+enum CompiledCriteria {
     Number(f64),
     NumericCmp(CritNumOp, f64),
+    IsoDateEq(f64),
+    IsoDateCmp(CritNumOp, f64),
     TextEq(String),
     TextNe(String),
+    TextOrd(CritNumOp, String),
     Wildcard(String),
-    Fallback(&'a EvaluatedCellValue),
 }
 
-impl<'a> CompiledCriteria<'a> {
+impl CompiledCriteria {
     #[inline]
-    fn compile(crit: &'a EvaluatedCellValue) -> Self {
+    fn compile(crit: &EvaluatedCellValue) -> Self {
         match crit {
             EvaluatedCellValue::Number(cn) => Self::Number(*cn),
+            EvaluatedCellValue::Empty => Self::TextEq(String::new()),
+            EvaluatedCellValue::Boolean(b) => {
+                Self::TextEq(if *b { "true" } else { "false" }.to_string())
+            }
+            EvaluatedCellValue::Error(e) => Self::TextEq(e.code().to_lowercase()),
             EvaluatedCellValue::Text(s) => {
                 let trimmed = s.trim();
                 for (op_str, op_kind) in [
@@ -422,21 +429,22 @@ impl<'a> CompiledCriteria<'a> {
                         if let Ok(rhs_num) = rhs_trim.parse::<f64>() {
                             return Self::NumericCmp(op_kind, rhs_num);
                         }
-                        if parse_iso_date_serial(rhs_trim).is_some() {
-                            return Self::Fallback(crit);
+                        if let Some(rhs_serial) = parse_iso_date_serial(rhs_trim) {
+                            return Self::IsoDateCmp(op_kind, rhs_serial);
                         }
+                        let rhs_lower = rhs_trim.to_lowercase();
                         return match op_kind {
-                            CritNumOp::Eq => Self::TextEq(rhs_trim.to_lowercase()),
-                            CritNumOp::Ne => Self::TextNe(rhs_trim.to_lowercase()),
-                            _ => Self::Fallback(crit),
+                            CritNumOp::Eq => Self::TextEq(rhs_lower),
+                            CritNumOp::Ne => Self::TextNe(rhs_lower),
+                            _ => Self::TextOrd(op_kind, rhs_lower),
                         };
                     }
                 }
                 if let Ok(rhs_num) = trimmed.parse::<f64>() {
                     return Self::Number(rhs_num);
                 }
-                if parse_iso_date_serial(trimmed).is_some() {
-                    return Self::Fallback(crit);
+                if let Some(rhs_serial) = parse_iso_date_serial(trimmed) {
+                    return Self::IsoDateEq(rhs_serial);
                 }
                 if trimmed.contains('*') || trimmed.contains('?') || trimmed.contains('~') {
                     Self::Wildcard(trimmed.to_string())
@@ -444,7 +452,6 @@ impl<'a> CompiledCriteria<'a> {
                     Self::TextEq(trimmed.to_lowercase())
                 }
             }
-            _ => Self::Fallback(crit),
         }
     }
 
@@ -475,14 +482,33 @@ impl<'a> CompiledCriteria<'a> {
     }
 
     #[inline]
+    fn cell_iso_date_serial(cell: &EvaluatedCellValue) -> Option<f64> {
+        match cell {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            EvaluatedCellValue::Text(ts) => parse_iso_date_serial(ts),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn cmp_f64(op: CritNumOp, lhs_num: f64, rhs_num: f64) -> bool {
+        match op {
+            CritNumOp::Ge => lhs_num >= rhs_num - 1e-12,
+            CritNumOp::Le => lhs_num <= rhs_num + 1e-12,
+            CritNumOp::Ne => (lhs_num - rhs_num).abs() >= 1e-12,
+            CritNumOp::Gt => lhs_num > rhs_num,
+            CritNumOp::Lt => lhs_num < rhs_num,
+            CritNumOp::Eq => (lhs_num - rhs_num).abs() < 1e-12,
+        }
+    }
+
+    #[inline]
     fn matches(&self, cell: &EvaluatedCellValue) -> bool {
         if let EvaluatedCellValue::Error(e) = cell {
             return match *self {
                 Self::TextEq(ref rhs_lower) => Self::str_eq_lowercase(e.code(), rhs_lower),
                 Self::TextNe(ref rhs_lower) => !Self::str_eq_lowercase(e.code(), rhs_lower),
-                Self::NumericCmp(CritNumOp::Ne, _) => true,
-                Self::Fallback(EvaluatedCellValue::Error(ce)) => *e == *ce,
-                Self::Fallback(crit) => matches_criteria(cell, crit),
+                Self::NumericCmp(CritNumOp::Ne, _) | Self::IsoDateCmp(CritNumOp::Ne, _) => true,
                 _ => false,
             };
         }
@@ -492,22 +518,36 @@ impl<'a> CompiledCriteria<'a> {
                 let Some(lhs_num) = cell.as_number() else {
                     return matches!(op, CritNumOp::Ne);
                 };
-                match op {
-                    CritNumOp::Ge => lhs_num >= rhs_num - 1e-12,
-                    CritNumOp::Le => lhs_num <= rhs_num + 1e-12,
-                    CritNumOp::Ne => (lhs_num - rhs_num).abs() >= 1e-12,
-                    CritNumOp::Gt => lhs_num > rhs_num,
-                    CritNumOp::Lt => lhs_num < rhs_num,
-                    CritNumOp::Eq => (lhs_num - rhs_num).abs() < 1e-12,
-                }
+                Self::cmp_f64(op, lhs_num, rhs_num)
+            }
+            Self::IsoDateEq(rhs_serial) => Self::cell_iso_date_serial(cell)
+                .is_some_and(|lhs_num| (lhs_num - rhs_serial).abs() < 1e-9),
+            Self::IsoDateCmp(op, rhs_serial) => {
+                let Some(lhs_num) = Self::cell_iso_date_serial(cell) else {
+                    return matches!(op, CritNumOp::Ne);
+                };
+                Self::cmp_f64(op, lhs_num, rhs_serial)
             }
             Self::TextEq(ref rhs_lower) => Self::cell_eq_lowercase(cell, rhs_lower),
             Self::TextNe(ref rhs_lower) => !Self::cell_eq_lowercase(cell, rhs_lower),
+            Self::TextOrd(op, ref rhs_lower) => {
+                let EvaluatedCellValue::Text(s) = cell else {
+                    return false;
+                };
+                let lhs_lower = s.to_lowercase();
+                match op {
+                    CritNumOp::Ge => lhs_lower.as_str() >= rhs_lower.as_str(),
+                    CritNumOp::Le => lhs_lower.as_str() <= rhs_lower.as_str(),
+                    CritNumOp::Gt => lhs_lower.as_str() > rhs_lower.as_str(),
+                    CritNumOp::Lt => lhs_lower.as_str() < rhs_lower.as_str(),
+                    CritNumOp::Eq => lhs_lower == *rhs_lower,
+                    CritNumOp::Ne => lhs_lower != *rhs_lower,
+                }
+            }
             Self::Wildcard(ref pat) => match cell {
                 EvaluatedCellValue::Text(s) => wildcard_match(s, pat),
                 _ => false,
             },
-            Self::Fallback(crit) => matches_criteria(cell, crit),
         }
     }
 }
@@ -734,7 +774,7 @@ impl SheetEngine {
         }
 
         let (r_count, c_count) = expected_dims.ok_or(FormulaError::Value)?;
-        let compiled_crits: Vec<CompiledCriteria<'_>> =
+        let compiled_crits: Vec<CompiledCriteria> =
             crit_vals.iter().map(CompiledCriteria::compile).collect();
 
         let mut sum = 0.0f64;
@@ -847,15 +887,7 @@ impl SheetEngine {
                         fold_val(v)?;
                     }
                 }
-            } else if let Expr::Cell(coord) = arg {
-                if !self.is_nested_subtotal_cell(None, *coord, ctx) {
-                    fold_val(self.eval_coord_ctx(*coord, ctx, depth))?;
-                }
-            } else if let Expr::SheetCell { sheet, coord } = arg {
-                if !self.is_nested_subtotal_cell(Some(sheet), *coord, ctx) {
-                    fold_val(self.eval_sheet_coord(Some(sheet), *coord, ctx, depth))?;
-                }
-            } else {
+            } else if !crate::expr_contains_subtotal(arg) {
                 fold_val(self.eval_arg_val(arg, ctx, depth)?)?;
             }
         }
