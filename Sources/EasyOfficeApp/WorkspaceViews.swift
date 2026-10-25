@@ -611,7 +611,8 @@ public struct MainWorkspaceWindowView: View {
             Spacer()
             Button("저장 후 닫기") {
               if WorkspaceFileDialogPresenter.presentSavePanel(
-                viewModel: viewModel, tabID: pendingID)
+                viewModel: viewModel, tabID: pendingID),
+                viewModel.openTabs.first(where: { $0.id == pendingID })?.isModified == false
               {
                 viewModel.confirmCloseTab(id: pendingID)
               }

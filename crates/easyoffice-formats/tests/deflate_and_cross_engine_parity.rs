@@ -456,3 +456,254 @@ fn test_xml_control_stripping_zip_duplicate_lfh_mismatch_and_multiline_pdf_harde
     assert_eq!(unpacked_pptx.slides[0].0, "슬라이드 2");
     assert_eq!(unpacked_pptx.slides[1].0, "슬라이드 10");
 }
+
+#[test]
+fn test_mscfb_ministream_hierarchical_storage_and_hwp5_table_budget() {
+    let small_a = b"MiniStream entry under 4096 bytes".to_vec();
+    let small_b = vec![0x42u8; 1500];
+    let large_c = vec![0x7Au8; 6000];
+    let cfb = Ole2ContainerCodec::pack(&[
+        ("FileHeader".to_string(), small_a.clone()),
+        ("BodyText/Section0".to_string(), small_b.clone()),
+        ("BodyText/Section1".to_string(), large_c.clone()),
+    ])
+    .expect("pack CFB with MiniStream and storage hierarchy");
+    assert_eq!(&cfb[24..26], &0x003Eu16.to_le_bytes());
+    assert_eq!(&cfb[26..28], &0x0003u16.to_le_bytes());
+    assert_eq!(&cfb[56..60], &4096u32.to_le_bytes());
+
+    let unpacked = Ole2ContainerCodec::unpack(&cfb).expect("unpack CFB with MiniStream");
+    let map: std::collections::BTreeMap<String, Vec<u8>> =
+        unpacked.into_iter().map(|e| (e.name, e.data)).collect();
+    assert_eq!(map.get("FileHeader"), Some(&small_a));
+    assert_eq!(map.get("BodyText/Section0"), Some(&small_b));
+    assert_eq!(map.get("BodyText/Section1"), Some(&large_c));
+
+    // HWP 5.0 table cell budget rejection (row_count * col_count > 65,536)
+    let mut fh = vec![0u8; 256];
+    fh[..17].copy_from_slice(b"HWP Document File");
+    fh[32..36].copy_from_slice(&[0, 3, 0, 5]);
+    fh[36..40].copy_from_slice(&0u32.to_le_bytes());
+    let doc_info = Hwp5Codec::encode_record_header(Hwp5Codec::HWPTAG_DOCUMENT_PROPERTIES, 0, 0);
+
+    let mut bad_sec = Vec::new();
+    let mut bad_tbl = Vec::new();
+    bad_tbl.extend_from_slice(&1000u16.to_le_bytes());
+    bad_tbl.extend_from_slice(&1000u16.to_le_bytes());
+    bad_sec.extend_from_slice(&Hwp5Codec::encode_record_header(
+        Hwp5Codec::HWPTAG_TABLE,
+        1,
+        bad_tbl.len(),
+    ));
+    bad_sec.extend_from_slice(&bad_tbl);
+    let bad_hwp = Ole2ContainerCodec::pack(&[
+        ("FileHeader".to_string(), fh),
+        ("DocInfo".to_string(), doc_info),
+        ("BodyText/Section0".to_string(), bad_sec),
+    ])
+    .unwrap();
+    assert!(matches!(
+        Hwp5Codec::unpack(&bad_hwp),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+}
+
+#[test]
+fn test_biff8_xls_multi_substream_sst_rk_mulrk_and_ppt_recursive_containers() {
+    use easyoffice_formats::{LegacyXlsPayload, PdfDocumentModel, PdfPageModel, PdfSerializer};
+
+    let xls_payload = LegacyXlsPayload {
+        sheet_name: "재무실적".to_string(),
+        cells: vec![
+            (0, 0, "항목".to_string()),
+            (0, 1, "금액".to_string()),
+            (1, 0, "매출액".to_string()),
+            (1, 1, "125000.5".to_string()),
+        ],
+    };
+    let packed_xls = LegacyOle2Codec::pack_xls(&xls_payload).expect("pack standard BIFF8 XLS");
+    let unpacked_xls = LegacyOle2Codec::unpack_xls(&packed_xls).expect("unpack standard BIFF8 XLS");
+    assert_eq!(unpacked_xls, xls_payload);
+
+    // Build a synthetic BIFF8 stream with RK, MULRK, and FORMULA + STRING records
+    let mut wb = Vec::new();
+    // Workbook Globals BOF (0x0809, dt=0x0005)
+    let mut bof_globals = vec![0u8; 16];
+    bof_globals[0..2].copy_from_slice(&0x0600u16.to_le_bytes());
+    bof_globals[2..4].copy_from_slice(&0x0005u16.to_le_bytes());
+    wb.extend_from_slice(&LegacyOle2Codec::BIFF8_BOF.to_le_bytes());
+    wb.extend_from_slice(&16u16.to_le_bytes());
+    wb.extend_from_slice(&bof_globals);
+    // 1-byte cch BOUNDSHEET (0x0085)
+    let mut bs = Vec::new();
+    bs.extend_from_slice(&0u32.to_le_bytes());
+    bs.push(0);
+    bs.push(0);
+    bs.push(5); // cch = 5
+    bs.push(0); // grbit = 0 (compressed Latin-1)
+    bs.extend_from_slice(b"Sheet");
+    wb.extend_from_slice(&LegacyOle2Codec::BIFF8_BOUNDSHEET.to_le_bytes());
+    wb.extend_from_slice(&(bs.len() as u16).to_le_bytes());
+    wb.extend_from_slice(&bs);
+    // Workbook Globals EOF
+    wb.extend_from_slice(&LegacyOle2Codec::BIFF8_EOF.to_le_bytes());
+    wb.extend_from_slice(&0u16.to_le_bytes());
+
+    // Worksheet Substream BOF (dt=0x0010)
+    let mut bof_sheet = vec![0u8; 16];
+    bof_sheet[0..2].copy_from_slice(&0x0600u16.to_le_bytes());
+    bof_sheet[2..4].copy_from_slice(&0x0010u16.to_le_bytes());
+    wb.extend_from_slice(&LegacyOle2Codec::BIFF8_BOF.to_le_bytes());
+    wb.extend_from_slice(&16u16.to_le_bytes());
+    wb.extend_from_slice(&bof_sheet);
+
+    // RK record (0x027E): row 0, col 0, integer 42 -> (42 << 2) | 0x02
+    let mut rk = Vec::new();
+    rk.extend_from_slice(&0u16.to_le_bytes());
+    rk.extend_from_slice(&0u16.to_le_bytes());
+    rk.extend_from_slice(&0u16.to_le_bytes());
+    rk.extend_from_slice(&((42u32 << 2) | 0x02).to_le_bytes());
+    wb.extend_from_slice(&0x027Eu16.to_le_bytes());
+    wb.extend_from_slice(&(rk.len() as u16).to_le_bytes());
+    wb.extend_from_slice(&rk);
+
+    // MULRK record (0x00BD): row 0, colFirst 1..=2, values 10 and 20
+    let mut mulrk = Vec::new();
+    mulrk.extend_from_slice(&0u16.to_le_bytes());
+    mulrk.extend_from_slice(&1u16.to_le_bytes());
+    mulrk.extend_from_slice(&0u16.to_le_bytes());
+    mulrk.extend_from_slice(&((10u32 << 2) | 0x02).to_le_bytes());
+    mulrk.extend_from_slice(&0u16.to_le_bytes());
+    mulrk.extend_from_slice(&((20u32 << 2) | 0x02).to_le_bytes());
+    mulrk.extend_from_slice(&2u16.to_le_bytes()); // colLast = 2
+    wb.extend_from_slice(&0x00BDu16.to_le_bytes());
+    wb.extend_from_slice(&(mulrk.len() as u16).to_le_bytes());
+    wb.extend_from_slice(&mulrk);
+
+    // FORMULA record (0x0006) with cached string indicator (byte 6 == 0, bytes 12..14 == 0xFFFF) + STRING (0x0207)
+    let mut f_rec = vec![0u8; 22];
+    f_rec[0..2].copy_from_slice(&1u16.to_le_bytes()); // row 1
+    f_rec[2..4].copy_from_slice(&0u16.to_le_bytes()); // col 0
+    f_rec[6] = 0x00;
+    f_rec[12] = 0xFF;
+    f_rec[13] = 0xFF;
+    wb.extend_from_slice(&LegacyOle2Codec::BIFF8_FORMULA.to_le_bytes());
+    wb.extend_from_slice(&(f_rec.len() as u16).to_le_bytes());
+    wb.extend_from_slice(&f_rec);
+
+    let mut str_rec = Vec::new();
+    str_rec.extend_from_slice(&6u16.to_le_bytes()); // cch = 6
+    str_rec.push(0); // compressed Latin-1
+    str_rec.extend_from_slice(b"Result");
+    wb.extend_from_slice(&0x0207u16.to_le_bytes());
+    wb.extend_from_slice(&(str_rec.len() as u16).to_le_bytes());
+    wb.extend_from_slice(&str_rec);
+
+    wb.extend_from_slice(&LegacyOle2Codec::BIFF8_EOF.to_le_bytes());
+    wb.extend_from_slice(&0u16.to_le_bytes());
+
+    let cfb_xls = Ole2ContainerCodec::pack(&[("Workbook".to_string(), wb)]).unwrap();
+    let parsed_xls = LegacyOle2Codec::unpack_xls(&cfb_xls).unwrap();
+    assert_eq!(parsed_xls.sheet_name, "Sheet");
+    assert_eq!(
+        parsed_xls.cells,
+        vec![
+            (0, 0, "42".to_string()),
+            (0, 1, "10".to_string()),
+            (0, 2, "20".to_string()),
+            (1, 0, "Result".to_string()),
+        ]
+    );
+
+    // Nested PPT container with RT_TextBytesAtom (0x0FA8) for Title (0) and Body (1)
+    let mut nested_atoms = Vec::new();
+    // RT_TextHeaderAtom (0x0F9F), textType = 0 (Title)
+    nested_atoms.extend_from_slice(&0u16.to_le_bytes());
+    nested_atoms.extend_from_slice(&0x0F9Fu16.to_le_bytes());
+    nested_atoms.extend_from_slice(&4u32.to_le_bytes());
+    nested_atoms.extend_from_slice(&0u32.to_le_bytes());
+    // RT_TextBytesAtom (0x0FA8)
+    let title_ascii = b"Nested PPT Title";
+    nested_atoms.extend_from_slice(&0u16.to_le_bytes());
+    nested_atoms.extend_from_slice(&0x0FA8u16.to_le_bytes());
+    nested_atoms.extend_from_slice(&(title_ascii.len() as u32).to_le_bytes());
+    nested_atoms.extend_from_slice(title_ascii);
+    // RT_TextHeaderAtom (0x0F9F), textType = 1 (Body)
+    nested_atoms.extend_from_slice(&0u16.to_le_bytes());
+    nested_atoms.extend_from_slice(&0x0F9Fu16.to_le_bytes());
+    nested_atoms.extend_from_slice(&4u32.to_le_bytes());
+    nested_atoms.extend_from_slice(&1u32.to_le_bytes());
+    // RT_TextBytesAtom (0x0FA8)
+    let body_ascii = b"Bullet 1\rBullet 2";
+    nested_atoms.extend_from_slice(&0u16.to_le_bytes());
+    nested_atoms.extend_from_slice(&0x0FA8u16.to_le_bytes());
+    nested_atoms.extend_from_slice(&(body_ascii.len() as u32).to_le_bytes());
+    nested_atoms.extend_from_slice(body_ascii);
+
+    // Wrap inside RT_Drawing container (ver_inst = 0x000F, rec_type = 0x040C)
+    let mut slide_body = Vec::new();
+    slide_body.extend_from_slice(&0x000Fu16.to_le_bytes());
+    slide_body.extend_from_slice(&0x040Cu16.to_le_bytes());
+    slide_body.extend_from_slice(&(nested_atoms.len() as u32).to_le_bytes());
+    slide_body.extend_from_slice(&nested_atoms);
+
+    // Wrap inside RT_SlideContainer (0x03EE)
+    let mut ppt_stream = Vec::new();
+    ppt_stream.extend_from_slice(&0x000Fu16.to_le_bytes());
+    ppt_stream.extend_from_slice(&LegacyOle2Codec::RT_SLIDE.to_le_bytes());
+    ppt_stream.extend_from_slice(&(slide_body.len() as u32).to_le_bytes());
+    ppt_stream.extend_from_slice(&slide_body);
+
+    let cfb_ppt =
+        Ole2ContainerCodec::pack(&[("PowerPoint Document".to_string(), ppt_stream)]).unwrap();
+    let parsed_ppt = LegacyOle2Codec::unpack_ppt(&cfb_ppt).unwrap();
+    assert_eq!(parsed_ppt.slides.len(), 1);
+    assert_eq!(parsed_ppt.slides[0].title, "Nested PPT Title");
+    assert_eq!(
+        parsed_ppt.slides[0].bullets,
+        vec!["Bullet 1".to_string(), "Bullet 2".to_string()]
+    );
+
+    // Multi-page PDF pagination (60 lines -> 2 /Page objects) and [WM]/[STAMP] preservation in body
+    let sixty_lines: String = (1..=60)
+        .map(|i| {
+            if i == 1 {
+                "[WM] 본문 첫 줄".to_string()
+            } else if i == 2 {
+                "[STAMP] 본문 둘째 줄".to_string()
+            } else {
+                format!("Line {i}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let multi_pdf = PdfDocumentModel {
+        title: "Pagination Test".to_string(),
+        pages: vec![PdfPageModel {
+            page_number: 1,
+            rotation_degrees: 0,
+            body_text: sixty_lines.clone(),
+            approval_stamp: Some("전결".to_string()),
+        }],
+        watermark_text: Some("CONFIDENTIAL".to_string()),
+    };
+    let multi_pdf_bytes = PdfSerializer::serialize(&multi_pdf);
+    let multi_pdf_text = String::from_utf8_lossy(&multi_pdf_bytes);
+    assert!(
+        multi_pdf_text.contains("/Count 2"),
+        "60 lines must paginate into 2 PDF /Page objects"
+    );
+    assert!(
+        !multi_pdf_text.contains(" -"),
+        "No negative y coordinates allowed in PDF stream"
+    );
+    let reparsed_multi = PdfSerializer::parse(&multi_pdf_bytes).unwrap();
+    assert_eq!(reparsed_multi.pages.len(), 2);
+    let rejoined: String = reparsed_multi
+        .pages
+        .iter()
+        .map(|p| p.body_text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(rejoined, sixty_lines);
+}

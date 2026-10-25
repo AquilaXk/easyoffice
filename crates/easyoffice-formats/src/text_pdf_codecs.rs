@@ -610,7 +610,8 @@ impl PdfSerializer {
 
         push_line(&mut out, "%PDF-1.4");
 
-        let effective_pages: Vec<PdfPageModel> = if doc.pages.is_empty() {
+        const MAX_LINES_PER_PDF_PAGE: usize = 42;
+        let source_pages: Vec<PdfPageModel> = if doc.pages.is_empty() {
             vec![PdfPageModel {
                 page_number: 1,
                 rotation_degrees: 0,
@@ -620,6 +621,22 @@ impl PdfSerializer {
         } else {
             doc.pages.clone()
         };
+        let mut effective_pages: Vec<PdfPageModel> = Vec::with_capacity(source_pages.len());
+        for page in source_pages {
+            let lines: Vec<&str> = page.body_text.split('\n').collect();
+            if lines.len() <= MAX_LINES_PER_PDF_PAGE {
+                effective_pages.push(page);
+            } else {
+                for chunk in lines.chunks(MAX_LINES_PER_PDF_PAGE) {
+                    effective_pages.push(PdfPageModel {
+                        page_number: effective_pages.len() + 1,
+                        rotation_degrees: page.rotation_degrees,
+                        body_text: chunk.join("\n"),
+                        approval_stamp: page.approval_stamp.clone(),
+                    });
+                }
+            }
+        }
         let page_count = effective_pages.len();
         let page_obj_ids: Vec<usize> = (0..page_count).map(|i| 3 + i * 2).collect();
         let kids_refs = page_obj_ids
@@ -656,18 +673,11 @@ impl PdfSerializer {
 
             let mut stream_lines: Vec<String> = Vec::new();
             for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
-                if l_idx == 0 {
-                    stream_lines.push(format!(
-                        "BT /F1 12 Tf 54 780 Td ({}) Tj ET",
-                        Self::escape_pdf_text(line_str)
-                    ));
-                } else {
-                    let y = 780 - (l_idx as i32) * 16;
-                    stream_lines.push(format!(
-                        "BT /F1 12 Tf 54 {y} Td 0 -16 Td ({}) Tj ET",
-                        Self::escape_pdf_text(line_str)
-                    ));
-                }
+                let y = 760 - (l_idx as i32) * 16;
+                stream_lines.push(format!(
+                    "BT /F1 12 Tf 54 {y} Td ({}) Tj ET",
+                    Self::escape_pdf_text(line_str)
+                ));
             }
             if let Some(stamp) = &page.approval_stamp {
                 stream_lines.push(format!(
@@ -750,13 +760,23 @@ impl PdfSerializer {
         let mut current_body = String::new();
         let mut current_stamp: Option<String> = None;
         let mut in_stream = false;
+        let mut is_metadata_obj = false;
         let mut trailer_b64: Option<String> = None;
+        let mut trailer_b64_count = 0usize;
 
         for line in raw.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("%EasyOfficePDFModelBase64:") {
+                trailer_b64_count += 1;
                 trailer_b64 = Some(rest.trim().to_string());
                 continue;
+            }
+            if trimmed == "endobj" {
+                is_metadata_obj = false;
+                continue;
+            }
+            if trimmed.contains("/Type /Metadata") {
+                is_metadata_obj = true;
             }
             if trimmed.contains("/Type /Catalog") {
                 if let Some(t) = Self::extract_paren_token(trimmed, "/Title (") {
@@ -787,30 +807,42 @@ impl PdfSerializer {
             }
             if trimmed == "endstream" {
                 if in_stream {
-                    pages.push(PdfPageModel {
-                        page_number: current_page_number.take().unwrap_or(pages.len() + 1),
-                        rotation_degrees: current_rotation,
-                        body_text: current_body.clone(),
-                        approval_stamp: current_stamp.take(),
-                    });
+                    if !is_metadata_obj {
+                        pages.push(PdfPageModel {
+                            page_number: current_page_number.take().unwrap_or(pages.len() + 1),
+                            rotation_degrees: current_rotation,
+                            body_text: current_body.clone(),
+                            approval_stamp: current_stamp.take(),
+                        });
+                    }
                     current_rotation = 0;
                     in_stream = false;
                 }
                 continue;
             }
-            if in_stream && trimmed.starts_with("BT ") {
+            if in_stream && !is_metadata_obj && trimmed.starts_with("BT ") {
+                let is_body_line = trimmed.starts_with("BT /F1 12 Tf 54 ")
+                    || trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 0 Td ");
+                let is_form_meta_line = trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 2 Td ");
+                if is_form_meta_line {
+                    continue;
+                }
                 for raw_token in Self::extract_all_paren_tokens(trimmed) {
                     let content = Self::unescape_pdf_text(&raw_token);
-                    if let Some(wm) = content.strip_prefix("[WM] ") {
-                        watermark_text = Some(wm.to_string());
-                    } else if let Some(stamp) = content.strip_prefix("[STAMP] ") {
-                        current_stamp = Some(stamp.to_string());
-                    } else {
-                        if !current_body.is_empty() {
-                            current_body.push('\n');
+                    if !is_body_line {
+                        if let Some(wm) = content.strip_prefix("[WM] ") {
+                            watermark_text = Some(wm.to_string());
+                            continue;
                         }
-                        current_body.push_str(&content);
+                        if let Some(stamp) = content.strip_prefix("[STAMP] ") {
+                            current_stamp = Some(stamp.to_string());
+                            continue;
+                        }
                     }
+                    if !current_body.is_empty() {
+                        current_body.push('\n');
+                    }
+                    current_body.push_str(&content);
                 }
             }
         }
@@ -821,6 +853,11 @@ impl PdfSerializer {
             ));
         }
 
+        if trailer_b64_count > 1 {
+            return Err(EasyOfficeError::SecurityViolation(
+                "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 중복 주입되었습니다.".to_string(),
+            ));
+        }
         if let Some(b64) = trailer_b64 {
             let visible_concat: String = pages
                 .iter()
@@ -857,7 +894,7 @@ impl PdfSerializer {
             };
             if !matches_trailer {
                 return Err(EasyOfficeError::SecurityViolation(
-                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64)과 가시 스트림 텍스트가 불일치합니다."
+                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 본문 스트림과 일치하지 않습니다."
                         .to_string(),
                 ));
             }

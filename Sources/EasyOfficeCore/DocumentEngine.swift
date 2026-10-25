@@ -626,7 +626,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
       .filter { !$0.isEmpty }
       .count
 
-    let manuscriptPages = charsWithSpaces == 0 ? 0 : Int(ceil(Double(charsWithSpaces) / 200.0))
+    let manuscriptPages = charsWithSpaces == 0 ? 0 : (charsWithSpaces + 199) / 200
 
     return DocumentStatistics(
       paragraphCount: paragraphs.count,

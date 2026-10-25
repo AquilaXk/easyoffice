@@ -314,16 +314,41 @@ impl SlideStageLayout {
 
     /// Clamps a canvas element into the lower non-overlapping object zone (`y >= 240.0 pt`).
     pub fn clamp_element_to_lower_stage(&self, rect: LayoutRect) -> LayoutRect {
-        let clamped_w = rect.width.clamp(40.0, self.stage_width_pt - 48.0);
-        let clamped_h = rect.height.clamp(
-            32.0,
-            self.stage_height_pt - self.lower_element_zone_min_y - 16.0,
-        );
-        let clamped_x = rect.x.clamp(24.0, self.stage_width_pt - clamped_w - 24.0);
-        let clamped_y = rect.y.clamp(
-            self.lower_element_zone_min_y,
-            self.stage_height_pt - clamped_h - 16.0,
-        );
+        let stage_w = if self.stage_width_pt.is_finite() {
+            self.stage_width_pt
+        } else {
+            Self::STAGE_WIDTH_PT
+        };
+        let stage_h = if self.stage_height_pt.is_finite() {
+            self.stage_height_pt
+        } else {
+            Self::STAGE_HEIGHT_PT
+        };
+        let min_y = if self.lower_element_zone_min_y.is_finite() {
+            self.lower_element_zone_min_y
+        } else {
+            Self::LOWER_ELEMENT_ZONE_MIN_Y
+        };
+        let max_w = (stage_w - 48.0).max(40.0);
+        let max_h = (stage_h - min_y - 16.0).max(32.0);
+        let raw_w = if rect.width.is_finite() {
+            rect.width
+        } else {
+            40.0
+        };
+        let raw_h = if rect.height.is_finite() {
+            rect.height
+        } else {
+            32.0
+        };
+        let clamped_w = raw_w.clamp(40.0, max_w);
+        let clamped_h = raw_h.clamp(32.0, max_h);
+        let max_x = (stage_w - clamped_w - 24.0).max(24.0);
+        let max_y = (stage_h - clamped_h - 16.0).max(min_y);
+        let raw_x = if rect.x.is_finite() { rect.x } else { 24.0 };
+        let raw_y = if rect.y.is_finite() { rect.y } else { min_y };
+        let clamped_x = raw_x.clamp(24.0, max_x);
+        let clamped_y = raw_y.clamp(min_y, max_y);
         LayoutRect::new(clamped_x, clamped_y, clamped_w, clamped_h)
     }
 
@@ -607,5 +632,22 @@ mod tests {
             pdf_engine.document.watermark_text.as_deref(),
             Some("CONFIDENTIAL")
         );
+
+        let tiny_stage = SlideStageLayout {
+            stage_width_pt: 10.0,
+            stage_height_pt: 10.0,
+            upper_text_zone_max_y: 4.0,
+            lower_element_zone_min_y: 5.0,
+            theme: SlideDeckTheme::SignatureLavender,
+        };
+        let clamped_tiny = tiny_stage.clamp_element_to_lower_stage(LayoutRect::new(
+            f64::NAN,
+            f64::INFINITY,
+            f64::NAN,
+            -10.0,
+        ));
+        assert!(clamped_tiny.width >= 40.0);
+        assert!(clamped_tiny.height >= 32.0);
+        assert!(clamped_tiny.x >= 24.0);
     }
 }
