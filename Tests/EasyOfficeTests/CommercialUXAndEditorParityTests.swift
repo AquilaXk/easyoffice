@@ -348,5 +348,31 @@ final class CommercialUXAndEditorParityTests: XCTestCase {
       XCTFail("Expected merged PDF payload")
     }
     XCTAssertThrowsError(try vm.mergeActivePDFWithFile(url: corruptURL))
+
+    let tabCountBeforeDiskEnqueue = vm.openTabs.count
+    vm.enqueueFilesFromDiskIntoBatchConversion(urls: [externalPDFURL], targetFormat: .docx)
+    XCTAssertEqual(vm.openTabs.count, tabCountBeforeDiskEnqueue)
+
+    let initialDark = vm.usesDarkMode
+    vm.toggleDarkMode()
+    XCTAssertNotEqual(vm.usesDarkMode, initialDark)
+    vm.toggleDarkMode()
+
+    let dirtyDocTab = vm.openNewBlankTab(for: .document)
+    vm.activeTabID = dirtyDocTab.id
+    vm.executeRibbonCommand("doc-insert-footnote")
+    if case .document(let docWithFootnote) = vm.activeTab?.payload {
+      XCTAssertFalse(docWithFootnote.footnotes.isEmpty)
+    } else {
+      XCTFail("Expected document payload")
+    }
+    vm.requestCloseTab(id: dirtyDocTab.id)
+    XCTAssertEqual(vm.pendingCloseConfirmTabID, dirtyDocTab.id)
+    vm.cancelCloseTab()
+    XCTAssertNil(vm.pendingCloseConfirmTabID)
+    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == dirtyDocTab.id }))
+    vm.requestCloseTab(id: dirtyDocTab.id)
+    vm.confirmDiscardAndClosePendingTab()
+    XCTAssertFalse(vm.openTabs.contains(where: { $0.id == dirtyDocTab.id }))
   }
 }

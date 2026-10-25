@@ -159,114 +159,89 @@ extension WorksheetModel {
         return val
       }
 
-    case "VLOOKUP":
+    case "VLOOKUP", "HLOOKUP":
+      let isVertical = (name == "VLOOKUP")
       guard (3...4).contains(frame.count),
         let range = extractCellRange(from: frame.args[1]),
-        let colIndexVal = frame.arg(2, in: self).numericValue,
-        let rawColIdx = Self.safeInt(colIndexVal)
+        let rawIdxVal = frame.arg(2, in: self).numericValue,
+        let rawIdx = Self.safeInt(rawIdxVal)
       else { return .error("#VALUE!") }
       let sheetName = frame.args[1].targetSheetName
       if let sheetName, !hasSheet(named: sheetName) {
         return .error("#REF!")
       }
       guard let bounds = rangeBounds(range) else { return .error("#REF!") }
-      let colIdx = rawColIdx - 1
-      guard colIdx >= 0, colIdx < bounds.colCount else {
+      let offsetIdx = rawIdx - 1
+      let maxOffset = isVertical ? bounds.colCount : bounds.rowCount
+      guard offsetIdx >= 0, offsetIdx < maxOffset else {
         return .error("#REF!")
       }
       let lookupVal = frame.arg(0, in: self)
       if case .error = lookupVal { return lookupVal }
       let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : true
-      let targetCol = bounds.minCol + colIdx
-      var approxBestRow: Int?
+      let targetFixed = (isVertical ? bounds.minCol : bounds.minRow) + offsetIdx
+      let scanRange = isVertical ? (bounds.minRow...bounds.maxRow) : (bounds.minCol...bounds.maxCol)
+      var approxBestCoord: Int?
       var approxBestNum = -Double.infinity
+      var approxBestText: String?
       let targetNum = isApprox ? lookupVal.numericValue : nil
+      let targetText: String? =
+        (isApprox && targetNum == nil && lookupVal != .empty) ? lookupVal.description : nil
 
-      for r in bounds.minRow...bounds.maxRow {
+      for coord in scanRange {
         let keyVal = evaluateSingleCellInRange(
           onSheet: sheetName,
-          row: r,
-          column: bounds.minCol,
+          row: isVertical ? coord : bounds.minRow,
+          column: isVertical ? bounds.minCol : coord,
           context: &frame.context,
-          depth: frame.depth + 1
+          depth: frame.depth + 1,
+          coerceEmptyToZero: false
         )
-        if Self.cellValuesEqual(keyVal, lookupVal) {
-          if colIdx == 0 { return keyVal }
-          return evaluateSingleCellInRange(
-            onSheet: sheetName,
-            row: r,
-            column: targetCol,
-            context: &frame.context,
-            depth: frame.depth + 1
-          )
-        }
-        if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
+        if case .error = keyVal { continue }
+        if !isApprox {
+          let isExactMatch: Bool
+          if Self.cellValuesEqual(keyVal, lookupVal) {
+            isExactMatch = true
+          } else if case (.text(let keyText), .text(let patText)) = (keyVal, lookupVal) {
+            isExactMatch = Self.matchesWildcardPattern(text: keyText, pattern: patText)
+          } else {
+            isExactMatch = false
+          }
+          if isExactMatch {
+            return evaluateSingleCellInRange(
+              onSheet: sheetName,
+              row: isVertical ? coord : targetFixed,
+              column: isVertical ? targetFixed : coord,
+              context: &frame.context,
+              depth: frame.depth + 1
+            )
+          }
+        } else if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
           approxBestNum = n
-          approxBestRow = r
+          approxBestCoord = coord
+        } else if let targetText, keyVal.numericValue == nil, keyVal != .empty {
+          let candidateText = keyVal.description
+          let cmpTarget = candidateText.caseInsensitiveCompare(targetText)
+          if cmpTarget == .orderedAscending || cmpTarget == .orderedSame {
+            let isBetter: Bool
+            if let prevBest = approxBestText {
+              let cmpPrev = candidateText.caseInsensitiveCompare(prevBest)
+              isBetter = (cmpPrev == .orderedDescending || cmpPrev == .orderedSame)
+            } else {
+              isBetter = true
+            }
+            if isBetter {
+              approxBestText = candidateText
+              approxBestCoord = coord
+            }
+          }
         }
       }
-      if let matchedRow = approxBestRow {
+      if let matchedCoord = approxBestCoord {
         return evaluateSingleCellInRange(
           onSheet: sheetName,
-          row: matchedRow,
-          column: targetCol,
-          context: &frame.context,
-          depth: frame.depth + 1
-        )
-      }
-      return .error("#N/A")
-
-    case "HLOOKUP":
-      guard (3...4).contains(frame.count),
-        let range = extractCellRange(from: frame.args[1]),
-        let rowIndexVal = frame.arg(2, in: self).numericValue,
-        let rawRowIdx = Self.safeInt(rowIndexVal)
-      else { return .error("#VALUE!") }
-      let sheetName = frame.args[1].targetSheetName
-      if let sheetName, !hasSheet(named: sheetName) {
-        return .error("#REF!")
-      }
-      guard let bounds = rangeBounds(range) else { return .error("#REF!") }
-      let rowIdx = rawRowIdx - 1
-      guard rowIdx >= 0, rowIdx < bounds.rowCount else {
-        return .error("#REF!")
-      }
-      let lookupVal = frame.arg(0, in: self)
-      if case .error = lookupVal { return lookupVal }
-      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : true
-      let targetRow = bounds.minRow + rowIdx
-      var approxBestCol: Int?
-      var approxBestNum = -Double.infinity
-      let targetNum = isApprox ? lookupVal.numericValue : nil
-
-      for c in bounds.minCol...bounds.maxCol {
-        let keyVal = evaluateSingleCellInRange(
-          onSheet: sheetName,
-          row: bounds.minRow,
-          column: c,
-          context: &frame.context,
-          depth: frame.depth + 1
-        )
-        if Self.cellValuesEqual(keyVal, lookupVal) {
-          if rowIdx == 0 { return keyVal }
-          return evaluateSingleCellInRange(
-            onSheet: sheetName,
-            row: targetRow,
-            column: c,
-            context: &frame.context,
-            depth: frame.depth + 1
-          )
-        }
-        if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
-          approxBestNum = n
-          approxBestCol = c
-        }
-      }
-      if let matchedCol = approxBestCol {
-        return evaluateSingleCellInRange(
-          onSheet: sheetName,
-          row: targetRow,
-          column: matchedCol,
+          row: isVertical ? matchedCoord : targetFixed,
+          column: isVertical ? targetFixed : matchedCoord,
           context: &frame.context,
           depth: frame.depth + 1
         )
@@ -949,6 +924,17 @@ extension WorksheetModel {
         }
         let maxMag = max(1.0, rawCashFlows.map { abs($0) }.max() ?? 1.0)
         let cashFlows = rawCashFlows.map { $0 / maxMag }
+
+        func evalNPV(_ r: Double) -> Double {
+          let base = 1.0 + r
+          guard base > 1e-9 else { return .nan }
+          var sum = 0.0
+          for (t, cf) in cashFlows.enumerated() {
+            sum += cf / pow(base, Double(t))
+          }
+          return sum
+        }
+
         let guess = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 0.1) : 0.1
         var rate = guess <= -1.0 ? 0.1 : guess
         var lastResidual = Double.infinity
@@ -980,10 +966,17 @@ extension WorksheetModel {
           }
           rate = max(-0.9999, nextRate)
         }
-        guard rate.isFinite, lastResidual < 1e-5 else {
-          return .error("#NUM!")
+        if rate.isFinite, lastResidual < 1e-5 {
+          return .number(rate)
         }
-        return .number(rate)
+        let samplePoints: [Double] = [
+          -0.99, -0.95, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,
+          0.0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0,
+        ]
+        if let root = Self.bisectRoot(samplePoints: samplePoints, eval: evalNPV) {
+          return .number(root)
+        }
+        return .error("#NUM!")
       }
 
     case "NPER":
@@ -1043,13 +1036,20 @@ extension WorksheetModel {
           break
         }
         let nextR = r - y / dy
-        if abs(nextR - r) < 1e-9 {
+        if abs(nextR - r) < 1e-9, abs(evalTVM(nextR)) < 1e-5 {
           return .number(nextR)
         }
         r = max(-0.9999, nextR)
       }
       if abs(evalTVM(r)) < 1e-5 && r.isFinite {
         return .number(r)
+      }
+      let samplePoints: [Double] = [
+        -0.99, -0.95, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,
+        0.0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0,
+      ]
+      if let root = Self.bisectRoot(samplePoints: samplePoints, eval: evalTVM) {
+        return .number(root)
       }
       return .error("#NUM!")
 
@@ -1239,7 +1239,7 @@ extension WorksheetModel {
       return .number(serial)
 
     case "WORKDAY":
-      guard frame.count == 2,
+      guard (2...3).contains(frame.count),
         let startDate = Self.parseDateValue(frame.arg(0, in: self)),
         let dNum = frame.arg(1, in: self).numericValue,
         let days = Self.safeInt(trunc(dNum))
@@ -1248,6 +1248,13 @@ extension WorksheetModel {
       }
       guard abs(days) <= 100_000 else {
         return .error("#NUM!")
+      }
+      let holidayDates: Set<Date>
+      switch resolveHolidayDates(from: &frame) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let dates):
+        holidayDates = dates
       }
       var current = startDate
       var remaining = abs(days)
@@ -1258,7 +1265,7 @@ extension WorksheetModel {
         }
         current = next
         let wd = Self.utcCalendar.component(.weekday, from: current)
-        if wd != 1 && wd != 7 {
+        if wd != 1 && wd != 7 && !holidayDates.contains(current) {
           remaining -= 1
         }
       }
@@ -1268,11 +1275,18 @@ extension WorksheetModel {
       return .number(serial)
 
     case "NETWORKDAYS":
-      guard frame.count == 2,
+      guard (2...3).contains(frame.count),
         let startDate = Self.parseDateValue(frame.arg(0, in: self)),
         let endDate = Self.parseDateValue(frame.arg(1, in: self))
       else {
         return .error("#VALUE!")
+      }
+      let holidayDates: Set<Date>
+      switch resolveHolidayDates(from: &frame) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let dates):
+        holidayDates = dates
       }
       let isReverse = startDate > endDate
       let fromDate = isReverse ? endDate : startDate
@@ -1286,7 +1300,7 @@ extension WorksheetModel {
       var count = 0
       while current <= toDate {
         let wd = Self.utcCalendar.component(.weekday, from: current)
-        if wd != 1 && wd != 7 {
+        if wd != 1 && wd != 7 && !holidayDates.contains(current) {
           count += 1
         }
         guard let next = Self.utcCalendar.date(byAdding: .day, value: 1, to: current) else {
@@ -1388,14 +1402,15 @@ extension WorksheetModel {
     row: Int,
     column: Int,
     context: inout EvaluationContext,
-    depth: Int
+    depth: Int,
+    coerceEmptyToZero: Bool = true
   ) -> EvaluatedCellValue {
     let coord = PackedCellCoordinate(row: row, column: column)
     let val =
       sheetName.map {
         evaluateOnSheet(named: $0, at: coord, context: &context, depth: depth)
       } ?? evaluateInternal(at: coord, context: &context, depth: depth)
-    if case .empty = val {
+    if coerceEmptyToZero, case .empty = val {
       return .number(0.0)
     }
     return val
@@ -1495,5 +1510,64 @@ extension WorksheetModel {
       return makeUTCDate(year: y, month: m, day: d, allowRollover: false)
     }
     return nil
+  }
+
+  private static func bisectRoot(samplePoints: [Double], eval: (Double) -> Double) -> Double? {
+    guard !samplePoints.isEmpty else { return nil }
+    var prevR = samplePoints[0]
+    var prevY = eval(prevR)
+    for idx in 1..<samplePoints.count {
+      let curR = samplePoints[idx]
+      let curY = eval(curR)
+      if prevY.isFinite, curY.isFinite, prevY * curY <= 0.0 {
+        var lo = prevR
+        var hi = curR
+        var fLo = prevY
+        for _ in 0..<80 {
+          let mid = 0.5 * (lo + hi)
+          let fMid = eval(mid)
+          if !fMid.isFinite { break }
+          if abs(fMid) < 1e-9 || (hi - lo) < 1e-11 {
+            return mid
+          }
+          if fLo * fMid <= 0.0 {
+            hi = mid
+          } else {
+            lo = mid
+            fLo = fMid
+          }
+        }
+        let mid = 0.5 * (lo + hi)
+        if abs(eval(mid)) < 1e-4 {
+          return mid
+        }
+      }
+      prevR = curR
+      prevY = curY
+    }
+    return nil
+  }
+
+  private enum HolidayResolutionResult {
+    case success(Set<Date>)
+    case failure(String)
+  }
+
+  private func resolveHolidayDates(from frame: inout EvalFrame) -> HolidayResolutionResult {
+    var holidayDates = Set<Date>()
+    if frame.count == 3, frame.args[2] != .empty {
+      switch frame.resolve(2..<3, in: self) {
+      case .failure(let err):
+        return .failure(err)
+      case .success(let hVals):
+        for hVal in hVals where hVal != .empty {
+          guard let hDate = Self.parseDateValue(hVal) else {
+            return .failure("#VALUE!")
+          }
+          holidayDates.insert(hDate)
+        }
+      }
+    }
+    return .success(holidayDates)
   }
 }

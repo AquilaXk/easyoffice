@@ -161,11 +161,16 @@ impl OoxmlCodec {
             XmlSanitizer::escape(&payload.sheet_name)
         );
 
-        let mut shared_strings: Vec<String> = Vec::new();
+        let mut shared_strings: Vec<&str> = Vec::new();
+        let mut sst_map: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for (_, _, val) in &payload.cells {
-            if !val.starts_with('=') && val.parse::<f64>().is_err() && !shared_strings.contains(val)
+            if !val.starts_with('=')
+                && val.parse::<f64>().is_err()
+                && !sst_map.contains_key(val.as_str())
             {
-                shared_strings.push(val.clone());
+                let idx = shared_strings.len();
+                shared_strings.push(val.as_str());
+                sst_map.insert(val.as_str(), idx);
             }
         }
 
@@ -207,7 +212,7 @@ impl OoxmlCodec {
                         XmlSanitizer::escape(raw)
                     ));
                 } else {
-                    let idx = shared_strings.iter().position(|s| s == raw).unwrap_or(0);
+                    let idx = sst_map.get(raw.as_str()).copied().unwrap_or(0);
                     sheet_xml.push_str(&format!(
                         "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\" t=\"s\"><v>{idx}</v></c>"
                     ));

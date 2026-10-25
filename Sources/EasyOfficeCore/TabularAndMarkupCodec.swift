@@ -113,6 +113,7 @@ public enum CSVStateMachineCodec {
         if state == .inUnquotedField, let base = baseAddress {
           while idx + 8 <= count {
             let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
+              .littleEndian
             let matchBits =
               XMLSanitizer.zeroByteMask(word ^ delimMask)
               | XMLSanitizer.zeroByteMask(word ^ quoteMask)
@@ -124,6 +125,18 @@ public enum CSVStateMachineCodec {
               idx += matchBits.trailingZeroBitCount >> 3
               break
             }
+          }
+          if idx >= count { break }
+        } else if state == .inQuotedField, let base = baseAddress {
+          let quotePos = XMLSanitizer.findByteSWAR(
+            in: base,
+            from: idx,
+            count: count,
+            target: quote
+          )
+          if quotePos > idx {
+            quotedBytes.append(contentsOf: bytes[idx..<quotePos])
+            idx = quotePos
           }
           if idx >= count { break }
         }
@@ -704,8 +717,17 @@ public enum RTFCodec {
       }
     }
 
+    let hexLut: [UInt8] = Array("0123456789abcdef".utf8)
     for img in doc.images {
-      let hexPayload = img.imageData.map { String(format: "%02x", $0) }.joined()
+      var hexBytes = [UInt8](repeating: 0, count: img.imageData.count * 2)
+      img.imageData.withUnsafeBytes { rawBuf in
+        for i in 0..<rawBuf.count {
+          let byte = rawBuf[i]
+          hexBytes[i * 2] = hexLut[Int(byte >> 4)]
+          hexBytes[i * 2 + 1] = hexLut[Int(byte & 0x0F)]
+        }
+      }
+      let hexPayload = String(decoding: hexBytes, as: UTF8.self)
       lines.append("{\\*\\shppict{\\pict\\pngblip \(hexPayload)}}")
     }
 

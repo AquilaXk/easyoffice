@@ -457,12 +457,6 @@ public struct SheetEditorDetailPaneView: View {
       return sheet.sparklineNormalizedValues(for: detectedRange, using: evaluatedGrid)
     }()
 
-    let pivotSummary: PivotTableSummary = sheet.computeFilteredPivotSummary(
-      range: detectedRange,
-      hasHeaderRow: true,
-      aggregation: viewModel.selectedPivotAggregation
-    )
-
     let condRangeValues: [EvaluatedCellValue] =
       viewModel.activeConditionalFormatRule != nil ? Array(evaluatedGrid.values) : []
 
@@ -474,70 +468,6 @@ public struct SheetEditorDetailPaneView: View {
         return nil
       }.max()
       return max(1.0, maxFound ?? 1.0)
-    }()
-
-    let chartSourceRange: CellRange = {
-      let draft = viewModel.customChartRangeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !draft.isEmpty, let parsed = try? CellRange(notation: draft) {
-        return parsed
-      }
-      return detectedRange
-    }()
-
-    let chartModel: SheetChartModel = {
-      let startRow = min(chartSourceRange.start.row, chartSourceRange.end.row)
-      let endRow = max(chartSourceRange.start.row, chartSourceRange.end.row)
-      let startCol = min(chartSourceRange.start.column, chartSourceRange.end.column)
-      let endCol = max(chartSourceRange.start.column, chartSourceRange.end.column)
-
-      let dataStartRow = min(endRow, startRow + 1)
-      let isLastRowSummary =
-        endRow > dataStartRow
-        && sheet.isSummaryOrTotalRow(
-          endRow,
-          startColumn: startCol,
-          valueColumn: max(startCol + 1, endCol)
-        )
-      let dataEndRow = isLastRowSummary ? max(dataStartRow, endRow - 1) : endRow
-
-      let catStart = CellAddress(packed: PackedCellCoordinate(row: dataStartRow, column: startCol))
-      let catEnd = CellAddress(packed: PackedCellCoordinate(row: dataEndRow, column: startCol))
-      let categoryRange = CellRange(start: catStart, end: catEnd)
-
-      let lastColHeader =
-        (sheet.cellsByCoordinate[PackedCellCoordinate(row: startRow, column: endCol)] ?? "")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      let lastColFirstCell =
-        (sheet.cellsByCoordinate[PackedCellCoordinate(row: dataStartRow, column: endCol)] ?? "")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .uppercased()
-      let isLastColSummary =
-        (endCol - startCol >= 2)
-        && (lastColHeader.contains("합계") || lastColHeader.contains("총계")
-          || lastColHeader.lowercased().contains("total") || lastColFirstCell.hasPrefix("=SUM("))
-      let seriesEndCol = isLastColSummary ? max(startCol + 1, endCol - 1) : max(startCol + 1, endCol)
-      var valueRanges: [(name: String, range: CellRange)] = []
-      if seriesEndCol >= startCol + 1 {
-        for colIdx in (startCol + 1)...min(seriesEndCol, startCol + 3) {
-          let headerCoord = PackedCellCoordinate(row: startRow, column: colIdx)
-          let headerAddr = CellAddress(packed: headerCoord)
-          let rawHeader = sheet.formattedDisplayValue(at: headerAddr, using: evaluatedGrid)
-          let seriesName = rawHeader.isEmpty ? CellAddress.columnLabel(for: colIdx) : rawHeader
-          let sStart = CellAddress(packed: PackedCellCoordinate(row: dataStartRow, column: colIdx))
-          let sEnd = CellAddress(packed: PackedCellCoordinate(row: dataEndRow, column: colIdx))
-          valueRanges.append((name: seriesName, range: CellRange(start: sStart, end: sEnd)))
-        }
-      }
-      let customTitle = viewModel.customChartTitleDraft.trimmingCharacters(
-        in: .whitespacesAndNewlines)
-      let resolvedTitle = customTitle.isEmpty ? "\(sheet.name) 데이터 비교" : customTitle
-      return SheetChartBuilder.buildChart(
-        from: sheet,
-        title: resolvedTitle,
-        kind: viewModel.selectedChartKind,
-        categoryRange: categoryRange,
-        valueRanges: valueRanges
-      )
     }()
 
     let activeMergedList: [String] = {
@@ -1283,6 +1213,83 @@ public struct SheetEditorDetailPaneView: View {
         .background(palette.elevatedSurface.swiftUIColor)
 
         if showAnalyticsDrawer {
+          let pivotSummary: PivotTableSummary = sheet.computeFilteredPivotSummary(
+            range: detectedRange,
+            hasHeaderRow: true,
+            aggregation: viewModel.selectedPivotAggregation
+          )
+          let chartSourceRange: CellRange = {
+            let draft = viewModel.customChartRangeDraft.trimmingCharacters(
+              in: .whitespacesAndNewlines)
+            if !draft.isEmpty, let parsed = try? CellRange(notation: draft) {
+              return parsed
+            }
+            return detectedRange
+          }()
+          let chartModel: SheetChartModel = {
+            let startRow = min(chartSourceRange.start.row, chartSourceRange.end.row)
+            let endRow = max(chartSourceRange.start.row, chartSourceRange.end.row)
+            let startCol = min(chartSourceRange.start.column, chartSourceRange.end.column)
+            let endCol = max(chartSourceRange.start.column, chartSourceRange.end.column)
+
+            let dataStartRow = min(endRow, startRow + 1)
+            let isLastRowSummary =
+              endRow > dataStartRow
+              && sheet.isSummaryOrTotalRow(
+                endRow,
+                startColumn: startCol,
+                valueColumn: max(startCol + 1, endCol)
+              )
+            let dataEndRow = isLastRowSummary ? max(dataStartRow, endRow - 1) : endRow
+
+            let catStart = CellAddress(
+              packed: PackedCellCoordinate(row: dataStartRow, column: startCol))
+            let catEnd = CellAddress(
+              packed: PackedCellCoordinate(row: dataEndRow, column: startCol))
+            let categoryRange = CellRange(start: catStart, end: catEnd)
+
+            let lastColHeader =
+              (sheet.cellsByCoordinate[PackedCellCoordinate(row: startRow, column: endCol)] ?? "")
+              .trimmingCharacters(in: .whitespacesAndNewlines)
+            let lastColFirstCell =
+              (sheet.cellsByCoordinate[PackedCellCoordinate(row: dataStartRow, column: endCol)]
+              ?? "")
+              .trimmingCharacters(in: .whitespacesAndNewlines)
+              .uppercased()
+            let isLastColSummary =
+              (endCol - startCol >= 2)
+              && (lastColHeader.contains("합계") || lastColHeader.contains("총계")
+                || lastColHeader.lowercased().contains("total")
+                || lastColFirstCell.hasPrefix("=SUM("))
+            let seriesEndCol =
+              isLastColSummary ? max(startCol + 1, endCol - 1) : max(startCol + 1, endCol)
+            var valueRanges: [(name: String, range: CellRange)] = []
+            if seriesEndCol >= startCol + 1 {
+              for colIdx in (startCol + 1)...min(seriesEndCol, startCol + 3) {
+                let headerCoord = PackedCellCoordinate(row: startRow, column: colIdx)
+                let headerAddr = CellAddress(packed: headerCoord)
+                let rawHeader = sheet.formattedDisplayValue(at: headerAddr, using: evaluatedGrid)
+                let seriesName =
+                  rawHeader.isEmpty ? CellAddress.columnLabel(for: colIdx) : rawHeader
+                let sStart = CellAddress(
+                  packed: PackedCellCoordinate(row: dataStartRow, column: colIdx))
+                let sEnd = CellAddress(
+                  packed: PackedCellCoordinate(row: dataEndRow, column: colIdx))
+                valueRanges.append((name: seriesName, range: CellRange(start: sStart, end: sEnd)))
+              }
+            }
+            let customTitle = viewModel.customChartTitleDraft.trimmingCharacters(
+              in: .whitespacesAndNewlines)
+            let resolvedTitle = customTitle.isEmpty ? "\(sheet.name) 데이터 비교" : customTitle
+            return SheetChartBuilder.buildChart(
+              from: sheet,
+              title: resolvedTitle,
+              kind: viewModel.selectedChartKind,
+              categoryRange: categoryRange,
+              valueRanges: valueRanges
+            )
+          }()
+
           Divider()
           HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {

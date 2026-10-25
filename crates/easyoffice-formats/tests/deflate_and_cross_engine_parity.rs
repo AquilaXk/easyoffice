@@ -707,3 +707,34 @@ fn test_biff8_xls_multi_substream_sst_rk_mulrk_and_ppt_recursive_containers() {
         .join("\n");
     assert_eq!(rejoined, sixty_lines);
 }
+
+#[test]
+fn test_markdown_multi_table_escaped_pipe_empty_cell_and_dash_row_roundtrip() {
+    use easyoffice_formats::{UniversalDocumentModel, UniversalFormatConverter};
+
+    let expected_tables = vec![
+        vec![
+            vec!["".to_string(), "A\\|B".to_string(), "".to_string()],
+            vec!["---".to_string(), "---".to_string(), "---".to_string()],
+            vec!["-".to_string(), "-".to_string(), "-".to_string()],
+        ],
+        vec![
+            vec!["구분".to_string(), "수치|단위".to_string()],
+            vec!["-".to_string(), "-".to_string()],
+        ],
+    ];
+    let model = UniversalDocumentModel {
+        title: "표 라운드트립 문서".to_string(),
+        official_agency: None,
+        paragraphs: vec!["본문 요약".to_string()],
+        tables: expected_tables.clone(),
+        sheet_cells: Vec::new(),
+        slides: Vec::new(),
+    };
+
+    let md_bytes = UniversalFormatConverter::encode(&model, DocumentFormat::Markdown).unwrap();
+    let (fmt, decoded) = UniversalFormatConverter::decode(&md_bytes, Some("report.md")).unwrap();
+    assert_eq!(fmt, DocumentFormat::Markdown);
+    assert_eq!(decoded.tables.len(), 2);
+    assert_eq!(decoded.tables, expected_tables);
+}

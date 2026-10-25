@@ -49,13 +49,32 @@ impl Ole2ContainerCodec {
     const OBJ_TYPE_STREAM: u8 = 2;
     const OBJ_TYPE_ROOT: u8 = 5;
 
+    #[inline]
+    fn fold_cfb_utf16_unit(u: u16) -> u16 {
+        if u >= u16::from(b'a') && u <= u16::from(b'z') {
+            u - 32
+        } else if u < 0x80 {
+            u
+        } else if let Some(ch) = char::from_u32(u32::from(u)) {
+            let mut upper = ch.to_uppercase();
+            if let (Some(first), None) = (upper.next(), upper.next()) {
+                if (first as u32) <= 0xFFFF {
+                    return first as u16;
+                }
+            }
+            u
+        } else {
+            u
+        }
+    }
+
     fn cmp_cfb_dir_names(a: &str, b: &str) -> std::cmp::Ordering {
         let a_len = a.encode_utf16().count();
         let b_len = b.encode_utf16().count();
         a_len.cmp(&b_len).then_with(|| {
-            let a_up = a.to_uppercase();
-            let b_up = b.to_uppercase();
-            a_up.encode_utf16().cmp(b_up.encode_utf16())
+            a.encode_utf16()
+                .map(Self::fold_cfb_utf16_unit)
+                .cmp(b.encode_utf16().map(Self::fold_cfb_utf16_unit))
         })
     }
 
@@ -893,7 +912,7 @@ impl Hwp5Codec {
                     pending_meta = Some(Self::parse_para_header(&section0_bytes, start, end)?);
                 }
                 Self::HWPTAG_PARA_TEXT => {
-                    let text = decode_utf16le(&section0_bytes[start..end])?;
+                    let text = Self::decode_hwp5_para_text(&section0_bytes[start..end])?;
                     let (style_name, is_official_header) = pending_meta
                         .take()
                         .unwrap_or_else(|| ("본문".to_string(), false));
@@ -925,6 +944,67 @@ impl Hwp5Codec {
             paragraphs,
             table_cells,
         })
+    }
+
+    fn decode_hwp5_para_text(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+        if bytes.len() % 2 != 0 {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "HWP 5.0 문단 텍스트 페이로드 길이가 2바이트(WCHAR) 배수가 아닙니다.".to_string(),
+            ));
+        }
+        let has_control = bytes
+            .chunks_exact(2)
+            .any(|c| u16::from_le_bytes([c[0], c[1]]) < 0x0020);
+        if !has_control {
+            return decode_utf16le(bytes);
+        }
+
+        let mut filtered = Vec::with_capacity(bytes.len());
+        let mut cursor = 0usize;
+        while cursor < bytes.len() {
+            let code = u16::from_le_bytes([bytes[cursor], bytes[cursor + 1]]);
+            if code < 0x0020 {
+                match code {
+                    0x0009 => {
+                        filtered.extend_from_slice(&0x0009u16.to_le_bytes());
+                        if cursor + 16 <= bytes.len()
+                            && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]])
+                                == 0x0009
+                            && bytes[cursor + 2..cursor + 14].iter().all(|&b| b == 0)
+                        {
+                            cursor += 16;
+                        } else {
+                            cursor += 2;
+                        }
+                    }
+                    0x000A => {
+                        filtered.extend_from_slice(&0x000Au16.to_le_bytes());
+                        cursor += 2;
+                    }
+                    0x000D => {
+                        if cursor + 2 < bytes.len() {
+                            filtered.extend_from_slice(&0x000Au16.to_le_bytes());
+                        }
+                        cursor += 2;
+                    }
+                    0x0001..=0x0008 | 0x000B..=0x000C | 0x000E..=0x0017
+                        if cursor + 16 <= bytes.len()
+                            && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]])
+                                == code =>
+                    {
+                        cursor += 16;
+                    }
+                    _ => {
+                        cursor += 2;
+                    }
+                }
+            } else {
+                filtered.push(bytes[cursor]);
+                filtered.push(bytes[cursor + 1]);
+                cursor += 2;
+            }
+        }
+        decode_utf16le(&filtered)
     }
 
     fn parse_doc_properties(
@@ -1402,5 +1482,45 @@ mod tests {
         let xls_bytes = LegacyOle2Codec::pack_xls(&xls_payload).unwrap();
         let decoded_xls = LegacyOle2Codec::unpack_xls(&xls_bytes).unwrap();
         assert_eq!(decoded_xls, xls_payload);
+    }
+
+    #[test]
+    fn test_hwp5_para_text_control_chars_and_cfb_dir_cmp() {
+        assert_eq!(
+            Ole2ContainerCodec::cmp_cfb_dir_names("DocInfo", "docinfo"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            Ole2ContainerCodec::cmp_cfb_dir_names("a", "BB"),
+            std::cmp::Ordering::Less
+        );
+
+        const HWP5_CTRL_SECTION_COL: u16 = 0x0002;
+        const HWP5_CTRL_DRAWING_TABLE: u16 = 0x000B;
+        const HWP5_CTRL_INLINE_TAB: u16 = 0x0009;
+        const HWP5_CTRL_HYPHEN: u16 = 0x0018;
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&encode_utf16le("문단앞"));
+        payload.extend_from_slice(&HWP5_CTRL_SECTION_COL.to_le_bytes());
+        for i in 0..6u16 {
+            payload.extend_from_slice(&(0xAC00 + i).to_le_bytes());
+        }
+        payload.extend_from_slice(&HWP5_CTRL_SECTION_COL.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_DRAWING_TABLE.to_le_bytes());
+        for i in 0..6u16 {
+            payload.extend_from_slice(&(0xAC00 + i).to_le_bytes());
+        }
+        payload.extend_from_slice(&HWP5_CTRL_DRAWING_TABLE.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
+        payload.extend_from_slice(&[0u8; 12]);
+        payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_HYPHEN.to_le_bytes());
+        payload.extend_from_slice(&encode_utf16le("문단뒤"));
+        payload.extend_from_slice(&0x000Au16.to_le_bytes());
+        payload.extend_from_slice(&encode_utf16le("둘째줄"));
+        payload.extend_from_slice(&0x000Du16.to_le_bytes());
+
+        let decoded = Hwp5Codec::decode_hwp5_para_text(&payload).unwrap();
+        assert_eq!(decoded, "문단앞\t문단뒤\n둘째줄");
     }
 }

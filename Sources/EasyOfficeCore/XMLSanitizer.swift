@@ -30,13 +30,39 @@ public enum XMLSanitizer {
     UInt64(byte) &* swarLoMask
   }
 
+  @inline(__always)
+  internal static func findByteSWAR(
+    in base: UnsafePointer<UInt8>,
+    from start: Int,
+    count: Int,
+    target: UInt8
+  ) -> Int {
+    let mask = broadcastByte(target)
+    var idx = start
+    while idx + 8 <= count {
+      let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self).littleEndian
+      let hits = zeroByteMask(word ^ mask)
+      if hits != 0 {
+        return idx + (hits.trailingZeroBitCount >> 3)
+      }
+      idx += 8
+    }
+    while idx < count {
+      if base[idx] == target {
+        return idx
+      }
+      idx += 1
+    }
+    return count
+  }
+
   private static func scanUnsafeXMLBuffer(_ buffer: UnsafeBufferPointer<UInt8>) throws {
     let count = buffer.count
     guard count >= 8, let base = buffer.baseAddress else { return }
     let ltMask = broadcastByte(UInt8(ascii: "<"))
     var idx = 0
     while idx <= count - 8 {
-      let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
+      let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self).littleEndian
       let matchBits = zeroByteMask(word ^ ltMask)
       if matchBits == 0 {
         idx += 8
@@ -175,7 +201,7 @@ public enum XMLSanitizer {
       var out: [UInt8] = []
 
       while idx + 8 <= count {
-        let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self)
+        let word = UnsafeRawPointer(base.advanced(by: idx)).loadUnaligned(as: UInt64.self).littleEndian
         let matchBits =
           zeroByteMask(word ^ ampMask)
           | zeroByteMask(word ^ ltMask)
@@ -188,8 +214,9 @@ public enum XMLSanitizer {
           idx += 8
           continue
         }
+        idx += matchBits.trailingZeroBitCount >> 3
         escapeBytes(
-          upTo: Swift.min(idx + 8, count),
+          upTo: Swift.min(idx + 1, count),
           idx: &idx,
           spanStart: &spanStart,
           count: count,

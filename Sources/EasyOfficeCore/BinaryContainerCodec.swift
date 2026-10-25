@@ -96,28 +96,81 @@ public enum BitPacking {
     }
   }
 
-  /// Encodes a Swift String as contiguous little-endian UTF-16 code units without intermediate array allocation.
+  @inline(__always)
+  public static func expandASCII4ToUTF16LE(_ fourBytes: UInt32) -> UInt64 {
+    var x = UInt64(fourBytes)
+    x = (x | (x << 16)) & 0x0000_FFFF_0000_FFFF
+    x = (x | (x << 8)) & 0x00FF_00FF_00FF_00FF
+    return x
+  }
+
+  /// Appends a Swift String as contiguous little-endian UTF-16 code units directly into `data`.
   @inlinable
-  public static func encodeUTF16LE(_ text: String) -> Data {
-    let utf16 = text.utf16
-    let unitCount = utf16.count
-    guard unitCount > 0 else { return Data() }
-    var out = Data(count: unitCount * 2)
-    out.withUnsafeMutableBytes { rawBuf in
-      var byteOffset = 0
-      for unit in utf16 {
-        rawBuf.storeBytes(of: unit.littleEndian, toByteOffset: byteOffset, as: UInt16.self)
-        byteOffset += 2
+  public static func appendUTF16LE(_ text: String, to data: inout Data) {
+    if text.isEmpty { return }
+    var mutableText = text
+    let (asciiPrefixLen, totalUTF8Count) = mutableText.withUTF8 { utf8Buf -> (Int, Int) in
+      let count = utf8Buf.count
+      guard count > 0, let base = utf8Buf.baseAddress else { return (0, 0) }
+      data.reserveCapacity(data.count + count * 2)
+      let rawIn = UnsafeRawPointer(base)
+      var pos = 0
+      while pos + 8 <= count {
+        let word = rawIn.loadUnaligned(fromByteOffset: pos, as: UInt64.self).littleEndian
+        if (word & 0x8080_8080_8080_8080) == 0 {
+          let lo4 = UInt32(truncatingIfNeeded: word)
+          let hi4 = UInt32(truncatingIfNeeded: word >> 32)
+          let expLo = expandASCII4ToUTF16LE(lo4).littleEndian
+          let expHi = expandASCII4ToUTF16LE(hi4).littleEndian
+          withUnsafeBytes(of: expLo) { data.append(contentsOf: $0) }
+          withUnsafeBytes(of: expHi) { data.append(contentsOf: $0) }
+          pos += 8
+        } else if (UInt32(truncatingIfNeeded: word) & 0x8080_8080) == 0 {
+          let lo4 = UInt32(truncatingIfNeeded: word)
+          let expLo = expandASCII4ToUTF16LE(lo4).littleEndian
+          withUnsafeBytes(of: expLo) { data.append(contentsOf: $0) }
+          pos += 4
+        } else {
+          break
+        }
+      }
+      while pos < count {
+        let b = base[pos]
+        if (b & 0x80) != 0 {
+          return (pos, count)
+        }
+        data.append(b)
+        data.append(0)
+        pos += 1
+      }
+      return (count, count)
+    }
+    if asciiPrefixLen < totalUTF8Count {
+      let suffixUTF8 = text.utf8.dropFirst(asciiPrefixLen)
+      for unit in Substring(suffixUTF8).utf16 {
+        withUnsafeBytes(of: unit.littleEndian) { data.append(contentsOf: $0) }
       }
     }
+  }
+
+  /// Encodes a Swift String as contiguous little-endian UTF-16 code units.
+  @inlinable
+  public static func encodeUTF16LE(_ text: String) -> Data {
+    if text.isEmpty { return Data() }
+    var out = Data()
+    out.reserveCapacity(text.utf8.count * 2)
+    appendUTF16LE(text, to: &out)
     return out
   }
 
   /// Encodes a Swift String as UTF-16LE bytes prefixed with a 32-bit byte length.
   public static func appendLengthPrefixedUTF16LE(_ text: String, to data: inout Data) {
-    let utf16Bytes = encodeUTF16LE(text)
-    appendUInt32LE(UInt32(utf16Bytes.count), to: &data)
-    data.append(utf16Bytes)
+    let lengthOffset = data.count
+    appendUInt32LE(0, to: &data)
+    let payloadStart = data.count
+    appendUTF16LE(text, to: &data)
+    let byteCount = UInt32(data.count - payloadStart)
+    try? writeUInt32LE(byteCount, into: &data, at: lengthOffset)
   }
 
   /// Decodes a length-prefixed UTF-16LE String from `data` within `limit` and advances `offset`.
@@ -177,29 +230,30 @@ public enum BitPacking {
         }
       }
       if isPureASCII {
-        var asciiBytes = [UInt8](repeating: 0, count: unitCount)
-        var srcOffset = 0
-        var dstIdx = 0
-        while srcOffset <= byteLength - 8 {
-          let word =
-            rawBuffer.loadUnaligned(fromByteOffset: offset + srcOffset, as: UInt64.self)
-            .littleEndian
-          asciiBytes[dstIdx] = UInt8(truncatingIfNeeded: word)
-          asciiBytes[dstIdx + 1] = UInt8(truncatingIfNeeded: word >> 16)
-          asciiBytes[dstIdx + 2] = UInt8(truncatingIfNeeded: word >> 32)
-          asciiBytes[dstIdx + 3] = UInt8(truncatingIfNeeded: word >> 48)
-          srcOffset += 8
-          dstIdx += 4
+        return String(unsafeUninitializedCapacity: unitCount) { dstBuf in
+          var srcOffset = 0
+          var dstIdx = 0
+          while srcOffset <= byteLength - 8 {
+            let word =
+              rawBuffer.loadUnaligned(fromByteOffset: offset + srcOffset, as: UInt64.self)
+              .littleEndian
+            dstBuf[dstIdx] = UInt8(truncatingIfNeeded: word)
+            dstBuf[dstIdx + 1] = UInt8(truncatingIfNeeded: word >> 16)
+            dstBuf[dstIdx + 2] = UInt8(truncatingIfNeeded: word >> 32)
+            dstBuf[dstIdx + 3] = UInt8(truncatingIfNeeded: word >> 48)
+            srcOffset += 8
+            dstIdx += 4
+          }
+          while srcOffset < byteLength {
+            let unit =
+              rawBuffer.loadUnaligned(fromByteOffset: offset + srcOffset, as: UInt16.self)
+              .littleEndian
+            dstBuf[dstIdx] = UInt8(truncatingIfNeeded: unit)
+            srcOffset += 2
+            dstIdx += 1
+          }
+          return unitCount
         }
-        while srcOffset < byteLength {
-          let unit =
-            rawBuffer.loadUnaligned(fromByteOffset: offset + srcOffset, as: UInt16.self)
-            .littleEndian
-          asciiBytes[dstIdx] = UInt8(truncatingIfNeeded: unit)
-          srcOffset += 2
-          dstIdx += 1
-        }
-        return String(decoding: asciiBytes, as: UTF8.self)
       }
 
       var units = [UInt16](repeating: 0, count: unitCount)
@@ -228,22 +282,25 @@ public enum Adler32Calculator {
       while offset < count {
         let chunkEnd = min(count, offset + nmax)
         while offset <= chunkEnd - 8 {
-          s1 &+= UInt32(rawBuffer[offset])
-          s2 &+= s1
-          s1 &+= UInt32(rawBuffer[offset + 1])
-          s2 &+= s1
-          s1 &+= UInt32(rawBuffer[offset + 2])
-          s2 &+= s1
-          s1 &+= UInt32(rawBuffer[offset + 3])
-          s2 &+= s1
-          s1 &+= UInt32(rawBuffer[offset + 4])
-          s2 &+= s1
-          s1 &+= UInt32(rawBuffer[offset + 5])
-          s2 &+= s1
-          s1 &+= UInt32(rawBuffer[offset + 6])
-          s2 &+= s1
-          s1 &+= UInt32(rawBuffer[offset + 7])
-          s2 &+= s1
+          let b0 = UInt32(rawBuffer[offset])
+          let b1 = UInt32(rawBuffer[offset + 1])
+          let b2 = UInt32(rawBuffer[offset + 2])
+          let b3 = UInt32(rawBuffer[offset + 3])
+          let b4 = UInt32(rawBuffer[offset + 4])
+          let b5 = UInt32(rawBuffer[offset + 5])
+          let b6 = UInt32(rawBuffer[offset + 6])
+          let b7 = UInt32(rawBuffer[offset + 7])
+          s2 &+=
+            8 &* s1
+            &+ 8 &* b0
+            &+ 7 &* b1
+            &+ 6 &* b2
+            &+ 5 &* b3
+            &+ 4 &* b4
+            &+ 3 &* b5
+            &+ 2 &* b6
+            &+ b7
+          s1 &+= b0 &+ b1 &+ b2 &+ b3 &+ b4 &+ b5 &+ b6 &+ b7
           offset += 8
         }
         while offset < chunkEnd {

@@ -1,7 +1,8 @@
 use easyoffice_formats::{
-    adler32, decode_utf16le_swar, decode_utf16le_vec_baseline, deflate_zlib, encode_utf16le_swar,
-    inflate_raw, inflate_zlib, unescape_xml_five_pass_baseline, unescape_xml_single_pass, CsvCodec,
-    EasyOfficeError, IeeeCrc32, XmlSanitizer,
+    adler32, decode_utf16le_swar, decode_utf16le_vec_baseline, deflate_zlib,
+    encode_utf16le_scalar_baseline, encode_utf16le_swar, inflate_raw, inflate_zlib,
+    unescape_xml_five_pass_baseline, unescape_xml_single_pass, CsvCodec, EasyOfficeError,
+    IeeeCrc32, XmlSanitizer,
 };
 use easyoffice_sheet::{
     compile_formula_expr, wildcard_match, wildcard_match_alloc_baseline, BinaryOp, CellRange,
@@ -577,16 +578,19 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
 
     for r in 0..=rounds {
         let t0 = Instant::now();
-        let u_a = decode_utf16le_vec_baseline(black_box(&utf16_bytes)).unwrap_or_default();
+        let enc_a = encode_utf16le_scalar_baseline(black_box(&sample_text));
+        let u_a = decode_utf16le_vec_baseline(black_box(&enc_a)).unwrap_or_default();
         let x_a = unescape_xml_five_pass_baseline(black_box(&escaped_xml));
         let dt_a = t0.elapsed().as_micros() as u64;
 
         let t1 = Instant::now();
-        let u_b = decode_utf16le_swar(black_box(&utf16_bytes)).unwrap_or_default();
+        let enc_b = encode_utf16le_swar(black_box(&sample_text));
+        let u_b = decode_utf16le_swar(black_box(&enc_b)).unwrap_or_default();
         let x_b = unescape_xml_single_pass(black_box(&escaped_xml));
         let dt_b = t1.elapsed().as_micros() as u64;
 
-        if u_a != u_b || x_a != x_b || u_b != sample_text {
+        if enc_a != enc_b || enc_b != utf16_bytes || u_a != u_b || x_a != x_b || u_b != sample_text
+        {
             utf_eq = false;
         }
         utf_digest = IeeeCrc32::checksum(x_b.as_bytes());
@@ -747,12 +751,12 @@ fn matches_criteria_scalar_baseline(cell: &EvaluatedCellValue, crit: &EvaluatedC
                     return op == "<>";
                 };
                 return match op {
-                    ">=" => lhs_num >= rhs_num - 1e-9,
-                    "<=" => lhs_num <= rhs_num + 1e-9,
-                    "<>" => (lhs_num - rhs_num).abs() >= 1e-9,
-                    ">" => lhs_num > rhs_num + 1e-9,
-                    "<" => lhs_num < rhs_num - 1e-9,
-                    _ => (lhs_num - rhs_num).abs() < 1e-9,
+                    ">=" => lhs_num >= rhs_num - 1e-12,
+                    "<=" => lhs_num <= rhs_num + 1e-12,
+                    "<>" => (lhs_num - rhs_num).abs() >= 1e-12,
+                    ">" => lhs_num > rhs_num,
+                    "<" => lhs_num < rhs_num,
+                    _ => (lhs_num - rhs_num).abs() < 1e-12,
                 };
             }
         }

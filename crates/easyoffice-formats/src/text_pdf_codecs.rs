@@ -455,12 +455,38 @@ pub enum MarkdownBlock {
     BlockQuote(String),
     BulletList(Vec<String>),
     NumberedList(Vec<String>),
+    Table(Vec<Vec<String>>),
 }
 
 /// CommonMark Markdown parser and serializer.
 pub struct CommonMarkCodec;
 
 impl CommonMarkCodec {
+    fn parse_markdown_table_row(inner: &str) -> Vec<String> {
+        let mut cells = Vec::new();
+        let mut cur = String::new();
+        let mut chars = inner.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                if let Some(&next_ch) = chars.peek() {
+                    if next_ch == '|' {
+                        cur.push('|');
+                        chars.next();
+                        continue;
+                    }
+                }
+                cur.push(ch);
+            } else if ch == '|' {
+                cells.push(cur.trim().to_string());
+                cur.clear();
+            } else {
+                cur.push(ch);
+            }
+        }
+        cells.push(cur.trim().to_string());
+        cells
+    }
+
     pub fn parse(markdown: &str) -> Result<Vec<MarkdownBlock>, EasyOfficeError> {
         if markdown.as_bytes().contains(&0) {
             return Err(EasyOfficeError::InvalidUtf8(
@@ -471,22 +497,63 @@ impl CommonMarkCodec {
         let mut blocks: Vec<MarkdownBlock> = Vec::new();
         let mut bullet_acc: Vec<String> = Vec::new();
         let mut numbered_acc: Vec<String> = Vec::new();
+        let mut table_acc: Vec<Vec<String>> = Vec::new();
+        let mut table_seen_sep = false;
 
         let flush_lists = |blocks: &mut Vec<MarkdownBlock>,
                            bullet_acc: &mut Vec<String>,
-                           numbered_acc: &mut Vec<String>| {
+                           numbered_acc: &mut Vec<String>,
+                           table_acc: &mut Vec<Vec<String>>,
+                           table_seen_sep: &mut bool| {
             if !bullet_acc.is_empty() {
                 blocks.push(MarkdownBlock::BulletList(std::mem::take(bullet_acc)));
             }
             if !numbered_acc.is_empty() {
                 blocks.push(MarkdownBlock::NumberedList(std::mem::take(numbered_acc)));
             }
+            if !table_acc.is_empty() {
+                blocks.push(MarkdownBlock::Table(std::mem::take(table_acc)));
+            }
+            *table_seen_sep = false;
         };
 
         for raw_line in markdown.lines() {
             let trimmed = raw_line.trim();
             if trimmed.is_empty() {
-                flush_lists(&mut blocks, &mut bullet_acc, &mut numbered_acc);
+                flush_lists(
+                    &mut blocks,
+                    &mut bullet_acc,
+                    &mut numbered_acc,
+                    &mut table_acc,
+                    &mut table_seen_sep,
+                );
+                continue;
+            }
+
+            if trimmed.len() >= 2 && trimmed.starts_with('|') && trimmed.ends_with('|') {
+                if !bullet_acc.is_empty() {
+                    blocks.push(MarkdownBlock::BulletList(std::mem::take(&mut bullet_acc)));
+                }
+                if !numbered_acc.is_empty() {
+                    blocks.push(MarkdownBlock::NumberedList(std::mem::take(
+                        &mut numbered_acc,
+                    )));
+                }
+                let inner = trimmed.strip_prefix('|').unwrap_or(trimmed);
+                let inner = inner.strip_suffix('|').unwrap_or(inner);
+                let cells = Self::parse_markdown_table_row(inner);
+                let is_sep = table_acc.len() == 1
+                    && !table_seen_sep
+                    && !cells.is_empty()
+                    && cells.iter().all(|c| {
+                        let core = c.trim().trim_matches(':');
+                        core.len() >= 3 && core.chars().all(|ch| ch == '-')
+                    });
+                if is_sep {
+                    table_seen_sep = true;
+                } else {
+                    table_acc.push(cells);
+                }
                 continue;
             }
 
@@ -499,6 +566,10 @@ impl CommonMarkCodec {
                         &mut numbered_acc,
                     )));
                 }
+                if !table_acc.is_empty() {
+                    blocks.push(MarkdownBlock::Table(std::mem::take(&mut table_acc)));
+                    table_seen_sep = false;
+                }
                 bullet_acc.push(rest.trim().to_string());
                 continue;
             }
@@ -509,12 +580,22 @@ impl CommonMarkCodec {
                     if !bullet_acc.is_empty() {
                         blocks.push(MarkdownBlock::BulletList(std::mem::take(&mut bullet_acc)));
                     }
+                    if !table_acc.is_empty() {
+                        blocks.push(MarkdownBlock::Table(std::mem::take(&mut table_acc)));
+                        table_seen_sep = false;
+                    }
                     numbered_acc.push(trimmed[dot_idx + 2..].trim().to_string());
                     continue;
                 }
             }
 
-            flush_lists(&mut blocks, &mut bullet_acc, &mut numbered_acc);
+            flush_lists(
+                &mut blocks,
+                &mut bullet_acc,
+                &mut numbered_acc,
+                &mut table_acc,
+                &mut table_seen_sep,
+            );
 
             if let Some(h4) = trimmed.strip_prefix("#### ") {
                 blocks.push(MarkdownBlock::Heading {
@@ -543,7 +624,13 @@ impl CommonMarkCodec {
             }
         }
 
-        flush_lists(&mut blocks, &mut bullet_acc, &mut numbered_acc);
+        flush_lists(
+            &mut blocks,
+            &mut bullet_acc,
+            &mut numbered_acc,
+            &mut table_acc,
+            &mut table_seen_sep,
+        );
         Ok(blocks)
     }
 
@@ -573,6 +660,34 @@ impl CommonMarkCodec {
                         .collect::<Vec<_>>()
                         .join("\n");
                     rendered.push(lines);
+                }
+                MarkdownBlock::Table(rows) => {
+                    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+                    if col_count == 0 {
+                        continue;
+                    }
+                    let mut table_lines = Vec::with_capacity(rows.len() + 1);
+                    for (r_idx, row) in rows.iter().enumerate() {
+                        let mut line = String::from("|");
+                        for c_idx in 0..col_count {
+                            let cell = row
+                                .get(c_idx)
+                                .map(|s| s.replace('|', "\\|").replace('\n', " "))
+                                .unwrap_or_default();
+                            line.push(' ');
+                            line.push_str(&cell);
+                            line.push_str(" |");
+                        }
+                        table_lines.push(line);
+                        if r_idx == 0 {
+                            let mut sep = String::from("|");
+                            for _ in 0..col_count {
+                                sep.push_str(" --- |");
+                            }
+                            table_lines.push(sep);
+                        }
+                    }
+                    rendered.push(table_lines.join("\n"));
                 }
             }
         }
