@@ -1202,10 +1202,6 @@ extension WorkspaceViewModel {
       let beforeDoc = doc
       for pIdx in doc.paragraphs.indices {
         replaceOccurrences(in: &doc.paragraphs[pIdx].text)
-        for rIdx in doc.paragraphs[pIdx].inlineRuns.indices {
-          doc.paragraphs[pIdx].inlineRuns[rIdx].text = doc.paragraphs[pIdx].inlineRuns[rIdx].text
-            .replacingOccurrences(of: query, with: replacement, options: options)
-        }
         for rIdx in doc.paragraphs[pIdx].runs.indices {
           doc.paragraphs[pIdx].runs[rIdx].text = doc.paragraphs[pIdx].runs[rIdx].text
             .replacingOccurrences(of: query, with: replacement, options: options)

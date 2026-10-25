@@ -686,3 +686,25 @@
 - **Verified by**: `swift build`, `swift test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 외부 수식 플러그인 인터페이스 또는 스트리밍 대용량 XLSX/ODS 청크 파서를 확장할 때.
 
+### 34. Swift 코어 수식 문자열 상한, 희소 시트 RLE 직렬화, OLE2 MiniFAT 격리, Codable 좌표 불변식 및 찾기·바꾸기 정합성 정책 (2026-10-25)
+
+- **Decision (`PD-025` / `PD-060`)**:
+  1. **ECMA-376 셀 문자열 상한(`maxCellTextLength = 32_767`) 및 이중 따옴표(`""`) 이스케이프 파싱 (`SheetEngine.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `SheetCoordinatesAndAST.swift`)**
+     - `SheetEngine.maxCellTextLength = 32_767`(ECMA-376 Part 1 §18.18.11)을 단일 진실 원천으로 정의하고, `&` 연산자, `CONCAT`/`CONCATENATE`, `TEXTJOIN`, `SUBSTITUTE`, `REPLACE` 및 `evaluateInternal`/`evaluateOnSheet` 평가 경로에서 문자열 길이가 `32,767`자를 초과하기 전에 즉시 `#VALUE!`(`.error(.value)`)로 거부하여 체인 수식에 의한 지수적 문자열 증폭을 차단합니다.
+     - 수식 문자열 리터럴 파서(`parseQuotedStringLiteral`)는 ECMA-376 및 OASIS OpenFormula 규격에 따라 내부 이중 따옴표(`""`)를 단일 `"`로 언이스케이프하고, 이스케이프되지 않은 내부 따옴표나 닫히지 않은 문자열 리터럴을 `#VALUE!`로 거부합니다.
+  2. **희소 시트 ODS RLE 직렬화 및 CSV·문서 변환 밀집 그리드 예산(`maxDenseExportCells = 200_000`) (`ODFAndHWPXCodecs.swift`, `TabularAndMarkupCodec.swift`, `SmartProductivityTools.swift`, `FormatDetector.swift`)**
+     - `ODFContainerCodec.encodeWorksheet`는 `0...maxRow` 및 `0...maxCol` 밀집 루프를 제거하고 실제 데이터가 존재하는 행·열 좌표만 정렬 순회하며, 빈 행·열 간격을 OASIS OpenDocument 1.3 `table:number-rows-repeated` 및 `table:number-columns-repeated` 속성으로 RLE 압축합니다.
+     - `CSVStateMachineCodec.encodeWorksheet`와 `DocumentConversionOrchestrator.extractGridRows`는 `(maxRow + 1) * (maxCol + 1)`을 `multipliedReportingOverflow`로 계산하여 `CSVStateMachineCodec.maxDenseExportCells = 200_000`을 초과하면 조용한 셀 누락이나 메모리 고갈 대신 `EasyOfficeError.resourceExhausted`로 즉시 거부(Fail-Closed)하며, PDF 시트 변환(`convertPayloadToPDF`)은 희소 렌더러(`PDFStudioDocumentModel.fromWorksheet`)를 직접 호출합니다.
+  3. **OLE2 Root Entry 64비트 스트림 크기 검증 및 컨테이너 전역 MiniFAT 섹터 독점 보장 (`OLE2AndHWP5Codec.swift`)**
+     - `OLE2ContainerCodec.unpack`은 루트 엔트리의 64비트 `rawRootStreamSize`를 `Int`로 변환하기 전에 `UInt64(maxTotalExtractedBytes)`(`64 MiB`) 이하인지 먼저 검증하여 부호 있는 64비트 정수 오버플로를 차단합니다.
+     - `claimedMiniSectors: Set<UInt32>`를 스트림 루프 바깥에서 컨테이너 단위로 유지하여 서로 다른 미니스트림이 동일 MiniFAT 섹터를 공유하거나 순환 참조하는 악성 컨테이너를 `EasyOfficeError.malformedContainer`로 거부합니다.
+  4. **ECMA-376 7자리 행 참조 이동·`OFFSET` 전체 그리드 지원, `Codable` 좌표 불변식 및 찾기·바꾸기 범위 통일 (`SheetAutoFillAndLayout.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `SheetCoordinatesAndAST.swift`, `DocumentSubmodelsAndNotes.swift`, `WorkspaceRibbonCommandRouter.swift`, `WorkspaceHubSheetAndPDFActions.swift`)**
+     - `parseRawCellRef`의 행 숫자 자릿수 상한을 5자리에서 7자리(`1..1,048,576`)로 확장하고, `resolveOffsetRange`의 행·열 경계를 `CellAddress.maxZeroBasedRow`(`1,048,575`) 및 `CellAddress.maxZeroBasedColumn`(`16,383`)으로 통일합니다.
+     - `PackedCellCoordinate`, `CellAddress`, `CellRange`, `TableCellSpan`에 커스텀 `init(from decoder: Decoder) throws`를 구현하여 역직렬화 시점에 ECMA-376 좌표 범위, `CellRange.maxExpandedCellCount`(`100,000`), `TableCellSpan.maxSpan`(`256`) 불변식을 강제합니다.
+     - `replaceAllMatches`의 중복 `inlineRuns` 치환 루프를 제거하고, `findMatchCount`·`navigateSelectionToFindMatch`·`replaceCurrentMatch`가 문서 표(`doc.tables`) 셀과 슬라이드 부제목(`slide.subtitle`)을 일관되게 순회하도록 통일합니다.
+- **Why**: 수식 평가, 희소 시트 직렬화, OLE2 미니스트림 파싱, JSON 역직렬화 경계의 메모리 증폭 및 불변식 우회 경로를 원천 차단하고, 전체 그리드 좌표계와 찾기·바꾸기 상태 머신의 정합성을 보장하기 위함입니다.
+- **Trade-offs**: `CSVStateMachineCodec.encodeWorksheet`가 `throws` 함수가 되어 호출부에서 오류를 전파해야 하나, 원거리 단일 셀(`XFD1048576`)이 포함된 시트를 내보낼 때 조용한 데이터 유실이나 다중 기가바이트 할당을 결정론적으로 방지합니다.
+- **Alternatives rejected**:
+  - `CSVStateMachineCodec`에서 `65,536 x 1,024` 바깥 셀을 무시하고 조용히 잘라내는 방식은 사용자 데이터를 침묵 속에 유실하므로 기각.
+- **Verified by**: `swift build`, `swift test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 대용량 CSV 청크 스트리밍 익스포터를 별도 비동기 파일 파이프라인으로 분리할 때.

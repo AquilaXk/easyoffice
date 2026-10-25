@@ -661,7 +661,7 @@ final class EasyOfficeTests: XCTestCase {
     let oversizedErr = evalFrame.forEachResolvedCell(in: 0..<1, sheet: sheet, { _ in })
     XCTAssertEqual(oversizedErr, "#REF!")
 
-    let csvBytes = CSVStateMachineCodec.encodeWorksheet(sheet)
+    let csvBytes = try CSVStateMachineCodec.encodeWorksheet(sheet)
     let decodedSheet = try CSVStateMachineCodec.decodeWorksheet(from: csvBytes, name: "복원시트")
     XCTAssertEqual(decodedSheet.rawValue(at: "A1"), "2")
     XCTAssertEqual(decodedSheet.rawValue(at: "A4"), "텍스트")

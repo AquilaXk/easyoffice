@@ -112,7 +112,7 @@ public enum DocumentConversionOrchestrator {
 
     switch request.targetFormat {
     case .docx, .doc, .odt, .rtf, .md, .txt, .hwp, .hwpx, .hwt, .hwtx:
-      let docModel = convertPayloadToDocument(request.payload, targetFormat: request.targetFormat)
+      let docModel = try convertPayloadToDocument(request.payload, targetFormat: request.targetFormat)
       convertedPayload = .document(docModel)
       outputBytes = try encodeDocumentModel(docModel, as: request.targetFormat)
 
@@ -122,7 +122,7 @@ public enum DocumentConversionOrchestrator {
       outputBytes = try encodeWorksheetModel(sheetModel, as: request.targetFormat)
 
     case .pptx, .ppt, .ppsx, .odp:
-      let deckModel = convertPayloadToPresentation(request.payload)
+      let deckModel = try convertPayloadToPresentation(request.payload)
       convertedPayload = .slide(deckModel)
       outputBytes = try encodePresentationModel(deckModel, as: request.targetFormat)
 
@@ -199,7 +199,7 @@ public enum DocumentConversionOrchestrator {
   private static func convertPayloadToDocument(
     _ payload: OpenTabPayload,
     targetFormat: DocumentFormat
-  ) -> OfficeDocumentModel {
+  ) throws -> OfficeDocumentModel {
     switch payload {
     case .document(var doc):
       doc.format = targetFormat
@@ -209,7 +209,7 @@ public enum DocumentConversionOrchestrator {
       return pdf.convertToEditableDocument(targetFormat: targetFormat)
 
     case .sheet(let sheet):
-      let rows = extractGridRows(from: sheet)
+      let rows = try extractGridRows(from: sheet)
       var tables: [DocumentTableBlock] = []
       if !rows.isEmpty {
         tables.append(DocumentTableBlock(caption: sheet.name, rows: rows, hasHeaderRow: true))
@@ -305,7 +305,7 @@ public enum DocumentConversionOrchestrator {
     }
   }
 
-  private static func convertPayloadToPresentation(_ payload: OpenTabPayload)
+  private static func convertPayloadToPresentation(_ payload: OpenTabPayload) throws
     -> PresentationDeckModel
   {
     switch payload {
@@ -333,7 +333,7 @@ public enum DocumentConversionOrchestrator {
       return PresentationDeckModel(title: doc.title, slides: slides)
 
     case .sheet(let sheet):
-      let rows = extractGridRows(from: sheet)
+      let rows = try extractGridRows(from: sheet)
       let bullets = rows.map { $0.joined(separator: " | ") }
       return PresentationDeckModel(
         title: sheet.name,
@@ -355,25 +355,32 @@ public enum DocumentConversionOrchestrator {
     case .document(let doc):
       return PDFStudioDocumentModel.fromDocument(doc)
     case .sheet(let sheet):
-      let range = boundingRange(for: sheet)
-      return PDFStudioDocumentModel.fromWorksheet(sheet, range: range)
+      return PDFStudioDocumentModel.fromWorksheet(sheet)
     case .slide(let deck):
       return PDFStudioDocumentModel.fromPresentation(deck)
     }
   }
 
-  private static func extractGridRows(from sheet: WorksheetModel) -> [[String]] {
+  private static func extractGridRows(from sheet: WorksheetModel) throws -> [[String]] {
     var maxRow = -1
     var maxCol = -1
-    for coord in sheet.cellsByCoordinate.keys {
-      if coord.row < CSVStateMachineCodec.maxExportRows,
-        coord.column < CSVStateMachineCodec.maxExportColumns
+    for (coord, raw) in sheet.cellsByCoordinate where !raw.isEmpty {
+      if coord.row >= 0, coord.row <= CellAddress.maxZeroBasedRow,
+        coord.column >= 0, coord.column <= CellAddress.maxZeroBasedColumn
       {
         maxRow = max(maxRow, coord.row)
         maxCol = max(maxCol, coord.column)
       }
     }
     guard maxRow >= 0, maxCol >= 0 else { return [] }
+    let (denseCells, overflow) = (maxRow + 1).multipliedReportingOverflow(by: maxCol + 1)
+    guard !overflow, denseCells <= CSVStateMachineCodec.maxDenseExportCells else {
+      throw EasyOfficeError.resourceExhausted(
+        limitName: "conversionMaxDenseGridCells",
+        limitValue: CSVStateMachineCodec.maxDenseExportCells,
+        actualValue: overflow ? Int.max : denseCells
+      )
+    }
     var rows: [[String]] = []
     rows.reserveCapacity(maxRow + 1)
     for r in 0...maxRow {
@@ -386,20 +393,6 @@ public enum DocumentConversionOrchestrator {
       rows.append(rowCells)
     }
     return rows
-  }
-
-  private static func boundingRange(for sheet: WorksheetModel) -> CellRange {
-    var maxRow = 0
-    var maxCol = 0
-    for coord in sheet.cellsByCoordinate.keys {
-      maxRow = max(maxRow, min(coord.row, 65_535))
-      maxCol = max(maxCol, min(coord.column, 1_023))
-    }
-    let start =
-      (try? CellAddress(column: 0, row: 0))
-      ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    let end = (try? CellAddress(column: maxCol, row: maxRow)) ?? start
-    return CellRange(start: start, end: end)
   }
 
   // MARK: Format Encoders
@@ -453,9 +446,9 @@ public enum DocumentConversionOrchestrator {
     case .ods:
       return try ODFContainerCodec.encodeWorksheet(sheet)
     case .csv:
-      return CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: ",")
+      return try CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: ",")
     case .tsv:
-      return CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: "\t")
+      return try CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: "\t")
     case .xls:
       return try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(sheet)
     default:

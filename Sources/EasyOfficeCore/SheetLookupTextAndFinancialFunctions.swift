@@ -53,21 +53,24 @@ extension WorksheetModel {
       return .failure("#VALUE!")
     }
 
-    guard (-65535...65535).contains(rowDelta),
-      (-65535...65535).contains(colDelta)
+    let maxRow = CellAddress.maxZeroBasedRow
+    let maxCol = CellAddress.maxZeroBasedColumn
+    guard (-maxRow...maxRow).contains(rowDelta),
+      (-maxCol...maxCol).contains(colDelta)
     else {
       return .failure("#REF!")
     }
 
     let baseRow = min(baseRange.start.row, baseRange.end.row)
     let baseCol = min(baseRange.start.column, baseRange.end.column)
-    let targetRow = baseRow + rowDelta
-    let targetCol = baseCol + colDelta
-    guard targetRow >= 0,
+    let (targetRow, rowOverflow) = baseRow.addingReportingOverflow(rowDelta)
+    let (targetCol, colOverflow) = baseCol.addingReportingOverflow(colDelta)
+    guard !rowOverflow,
+      !colOverflow,
+      targetRow >= 0,
       targetCol >= 0,
-      targetRow <= 65535,
-      targetCol <= 65535,
-      targetCol <= CellAddress.maxZeroBasedColumn
+      targetRow <= maxRow,
+      targetCol <= maxCol
     else {
       return .failure("#REF!")
     }
@@ -83,7 +86,7 @@ extension WorksheetModel {
       guard let hNum = hVal.numericValue, let hInt = Self.safeInt(hNum) else {
         return .failure("#VALUE!")
       }
-      guard (1...65536).contains(hInt) else {
+      guard (1...(maxRow + 1)).contains(hInt) else {
         return .failure("#REF!")
       }
       height = hInt
@@ -100,7 +103,7 @@ extension WorksheetModel {
       guard let wNum = wVal.numericValue, let wInt = Self.safeInt(wNum) else {
         return .failure("#VALUE!")
       }
-      guard (1...65536).contains(wInt) else {
+      guard (1...(maxCol + 1)).contains(wInt) else {
         return .failure("#REF!")
       }
       width = wInt
@@ -108,14 +111,17 @@ extension WorksheetModel {
       width = defaultWidth
     }
 
-    let endRow = targetRow + height - 1
-    let endCol = targetCol + width - 1
-    guard endRow >= 0,
+    let (endRow, endRowOverflow) = targetRow.addingReportingOverflow(height - 1)
+    let (endCol, endColOverflow) = targetCol.addingReportingOverflow(width - 1)
+    let (area, areaOverflow) = height.multipliedReportingOverflow(by: width)
+    guard !endRowOverflow,
+      !endColOverflow,
+      !areaOverflow,
+      endRow >= 0,
       endCol >= 0,
-      endRow <= 65535,
-      endCol <= 65535,
-      endCol <= CellAddress.maxZeroBasedColumn,
-      height * width <= CellRange.maxExpandedCellCount
+      endRow <= maxRow,
+      endCol <= maxCol,
+      area <= CellRange.maxExpandedCellCount
     else {
       return .failure("#REF!")
     }
@@ -583,7 +589,16 @@ extension WorksheetModel {
     case "CONCAT", "CONCATENATE":
       switch frame.resolve(frame.indices, in: self) {
       case .failure(let err): return .error(err)
-      case .success(let vals): return .text(vals.map { $0.description }.joined())
+      case .success(let vals):
+        var result = ""
+        for val in vals {
+          let part = val.description
+          guard result.count + part.count <= Self.maxCellTextLength else {
+            return .error(.value)
+          }
+          result.append(part)
+        }
+        return .text(result)
       }
     case "TEXTJOIN":
       guard frame.count >= 3 else { return .error("#VALUE!") }
@@ -592,8 +607,22 @@ extension WorksheetModel {
       switch frame.resolve(2..<frame.count, in: self) {
       case .failure(let err): return .error(err)
       case .success(let vals):
-        let parts = vals.map(\.description).filter { !ignoreEmpty || !$0.isEmpty }
-        return .text(parts.joined(separator: delimiter))
+        var result = ""
+        var isFirst = true
+        for val in vals {
+          let part = val.description
+          if ignoreEmpty && part.isEmpty { continue }
+          let addedCount = (isFirst ? 0 : delimiter.count) + part.count
+          guard result.count + addedCount <= Self.maxCellTextLength else {
+            return .error(.value)
+          }
+          if !isFirst {
+            result.append(delimiter)
+          }
+          result.append(part)
+          isFirst = false
+        }
+        return .text(result)
       }
     case "LEFT", "RIGHT":
       guard (1...2).contains(frame.count) else { return .error("#VALUE!") }
@@ -651,29 +680,59 @@ extension WorksheetModel {
       let source = frame.arg(0, in: self).description
       let target = frame.arg(1, in: self).description
       let replacement = frame.arg(2, in: self).description
-      guard !target.isEmpty else { return .text(source) }
-      if frame.count == 4, let instNum = frame.arg(3, in: self).numericValue {
-        guard let targetOccurrence = Self.safeInt(instNum), targetOccurrence >= 1 else {
-          return .error("#VALUE!")
-        }
-        var currentOccurrence = 0
-        var result = ""
-        var searchStart = source.startIndex
-        while let range = source.range(of: target, range: searchStart..<source.endIndex) {
-          currentOccurrence += 1
-          result += source[searchStart..<range.lowerBound]
-          if currentOccurrence == targetOccurrence {
-            result += replacement
-            result += source[range.upperBound..<source.endIndex]
-            return .text(result)
-          } else {
-            result += target
-          }
-          searchStart = range.upperBound
-        }
+      guard !target.isEmpty else {
+        guard source.count <= Self.maxCellTextLength else { return .error(.value) }
         return .text(source)
       }
-      return .text(source.replacingOccurrences(of: target, with: replacement))
+      let targetOccurrence: Int?
+      if frame.count == 4, let instNum = frame.arg(3, in: self).numericValue {
+        guard let occ = Self.safeInt(instNum), occ >= 1 else {
+          return .error("#VALUE!")
+        }
+        targetOccurrence = occ
+      } else {
+        targetOccurrence = nil
+      }
+      var currentOccurrence = 0
+      var result = ""
+      var searchStart = source.startIndex
+      while let range = source.range(of: target, range: searchStart..<source.endIndex) {
+        currentOccurrence += 1
+        let prefixSlice = source[searchStart..<range.lowerBound]
+        guard result.count + prefixSlice.count <= Self.maxCellTextLength else {
+          return .error(.value)
+        }
+        result.append(contentsOf: prefixSlice)
+        if let targetOcc = targetOccurrence {
+          if currentOccurrence == targetOcc {
+            let suffixSlice = source[range.upperBound..<source.endIndex]
+            guard result.count + replacement.count + suffixSlice.count <= Self.maxCellTextLength
+            else {
+              return .error(.value)
+            }
+            result.append(replacement)
+            result.append(contentsOf: suffixSlice)
+            return .text(result)
+          } else {
+            guard result.count + target.count <= Self.maxCellTextLength else {
+              return .error(.value)
+            }
+            result.append(target)
+          }
+        } else {
+          guard result.count + replacement.count <= Self.maxCellTextLength else {
+            return .error(.value)
+          }
+          result.append(replacement)
+        }
+        searchStart = range.upperBound
+      }
+      let trailingSlice = source[searchStart..<source.endIndex]
+      guard result.count + trailingSlice.count <= Self.maxCellTextLength else {
+        return .error(.value)
+      }
+      result.append(contentsOf: trailingSlice)
+      return .text(result)
     case "REPLACE":
       guard frame.count == 4,
         let startVal = frame.arg(1, in: self).numericValue,
@@ -688,6 +747,11 @@ extension WorksheetModel {
       let startIdx = oldText.index(oldText.startIndex, offsetBy: startOffset)
       let endIdx =
         oldText.index(startIdx, offsetBy: numChars, limitedBy: oldText.endIndex) ?? oldText.endIndex
+      let removedCount = oldText.distance(from: startIdx, to: endIdx)
+      let finalCount = oldText.count - removedCount + newText.count
+      guard finalCount <= Self.maxCellTextLength else {
+        return .error(.value)
+      }
       var result = oldText
       result.replaceSubrange(startIdx..<endIdx, with: newText)
       return .text(result)

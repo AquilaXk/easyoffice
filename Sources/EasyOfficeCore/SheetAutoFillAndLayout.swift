@@ -561,14 +561,14 @@ extension WorksheetModel {
 
     var digitCount = 0
     var rowOneBased = 0
-    while cursor < bytes.count && digitCount < 6 {
+    while cursor < bytes.count && digitCount < 8 {
       let b = bytes[cursor]
       guard b >= 0x30 && b <= 0x39 else { break }
       digitCount += 1
       rowOneBased = rowOneBased * 10 + Int(b - 0x30)
       cursor += 1
     }
-    guard digitCount >= 1 && digitCount <= 5 else { return nil }
+    guard digitCount >= 1 && digitCount <= 7 else { return nil }
 
     if cursor < bytes.count {
       let nextByte = bytes[cursor]

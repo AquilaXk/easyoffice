@@ -555,7 +555,7 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
     try sheet.setCell("F1", rawValue: "=OFFSET(B2, 1, 1)")
     try sheet.setCell("F2", rawValue: "=SUM(OFFSET(B2, 0, 0, 2, 2))")
     try sheet.setCell("F3", rawValue: "=OFFSET(B2, -5, 0)")
-    try sheet.setCell("F4", rawValue: "=OFFSET(B2, 70000, 0)")
+    try sheet.setCell("F4", rawValue: "=OFFSET(B2, 1048576, 0)")
     try sheet.setCell("F5", rawValue: "=SUM(OFFSET(B2, -2, 0, 2, 2))")
 
     XCTAssertEqual(sheet.evaluate(at: "F1"), .number(40))
@@ -958,4 +958,232 @@ final class EnterpriseParityAndOptimizationTests: XCTestCase {
       XCTFail("Expected active PDF tab")
     }
   }
+
+  @MainActor
+  func testSwiftCoreSparseGridOLE2CoordinateFormulaAndFindReplaceHardening() throws {
+    var bombSheet = WorksheetModel(name: "AmplificationGuard")
+    try bombSheet.setCell("A1", rawValue: "=REPT(\"A\", 20000)")
+    try bombSheet.setCell("A2", rawValue: "=A1 & A1")
+    try bombSheet.setCell("A3", rawValue: "=CONCAT(A1, A1)")
+    try bombSheet.setCell("A4", rawValue: "=TEXTJOIN(\"-\", TRUE, A1, A1)")
+    try bombSheet.setCell("A5", rawValue: "=SUBSTITUTE(\"AAAA\", \"A\", A1)")
+    try bombSheet.setCell("A6", rawValue: "=REPLACE(A1, 1, 1, A1)")
+    XCTAssertEqual(bombSheet.evaluate(at: "A2"), .error(.value))
+    XCTAssertEqual(bombSheet.evaluate(at: "A3"), .error(.value))
+    XCTAssertEqual(bombSheet.evaluate(at: "A4"), .error(.value))
+    XCTAssertEqual(bombSheet.evaluate(at: "A5"), .error(.value))
+    XCTAssertEqual(bombSheet.evaluate(at: "A6"), .error(.value))
+
+    var quoteSheet = WorksheetModel(name: "QuoteUnescape")
+    try quoteSheet.setCell("A1", rawValue: #"="He said ""Hello""""#)
+    try quoteSheet.setCell("A2", rawValue: #"="""""#)
+    try quoteSheet.setCell("A3", rawValue: #"=LEN("a""b")"#)
+    XCTAssertEqual(quoteSheet.evaluate(at: "A1"), .text(#"He said "Hello""#))
+    XCTAssertEqual(quoteSheet.evaluate(at: "A2"), .text("\""))
+    XCTAssertEqual(quoteSheet.evaluate(at: "A3"), .number(3))
+
+    let shifted = WorksheetModel.shiftFormulaReferences(
+      "=A100000+$B$1048575+C1048575",
+      rowDelta: 1,
+      columnDelta: 1
+    )
+    XCTAssertEqual(shifted, "=B100001+$B$1048575+D1048576")
+
+    var offsetSheet = WorksheetModel(name: "HighOffset")
+    try offsetSheet.setCell("A70001", rawValue: "HighRowValue")
+    try offsetSheet.setCell("B1", rawValue: "=OFFSET(A1, 70000, 0)")
+    try offsetSheet.setCell("B2", rawValue: "=OFFSET(A1, 1048576, 0)")
+    XCTAssertEqual(offsetSheet.evaluate(at: "B1"), .text("HighRowValue"))
+    XCTAssertEqual(offsetSheet.evaluate(at: "B2"), .error(.ref))
+
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(
+        CellAddress.self,
+        from: Data(#"{"column": -1, "row": 0}"#.utf8)
+      )
+    )
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(
+        CellAddress.self,
+        from: Data(#"{"column": 0, "row": 2000000}"#.utf8)
+      )
+    )
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(
+        PackedCellCoordinate.self,
+        from: Data(#"{"rawValue": 18446744073709551615}"#.utf8)
+      )
+    )
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(
+        CellRange.self,
+        from: Data(#"{"start": {"column": 0, "row": 0}, "end": {"column": 16383, "row": 1048575}}"#.utf8)
+      )
+    )
+    let decodedSpan = try JSONDecoder().decode(
+      TableCellSpan.self,
+      from: Data(
+        #"{"rowIndex": 2, "columnIndex": 3, "rowSpan": 99999, "columnSpan": -5, "borderStyle": "실선"}"#
+          .utf8)
+    )
+    XCTAssertEqual(decodedSpan.rowSpan, TableCellSpan.maxSpan)
+    XCTAssertEqual(decodedSpan.columnSpan, 1)
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(
+        TableCellSpan.self,
+        from: Data(
+          #"{"rowIndex": -1, "columnIndex": 0, "rowSpan": 1, "columnSpan": 1, "borderStyle": "실선"}"#
+            .utf8)
+      )
+    )
+
+    var sparseOdsSheet = WorksheetModel(name: "SparseODS")
+    try sparseOdsSheet.setCell("A1", rawValue: "Origin")
+    try sparseOdsSheet.setCell("Z2500", rawValue: "FarCell")
+    try sparseOdsSheet.setCell("XFD1048576", rawValue: "MaxCorner")
+    let odsData = try ODFContainerCodec.encodeWorksheet(sparseOdsSheet)
+    let unpackedOds = try ZipContainerCodec.unpack(from: odsData)
+    let contentXML = String(
+      decoding: unpackedOds.first(where: { $0.path == "content.xml" })?.data ?? Data(),
+      as: UTF8.self
+    )
+    XCTAssertTrue(contentXML.contains("table:number-rows-repeated=\"2498\""))
+    XCTAssertTrue(contentXML.contains("table:number-columns-repeated=\"25\""))
+    let roundTripSparseOds = try ODFContainerCodec.decodeWorksheet(from: odsData)
+    XCTAssertEqual(roundTripSparseOds.rawValue(at: "A1"), "Origin")
+    XCTAssertEqual(roundTripSparseOds.rawValue(at: "Z2500"), "FarCell")
+    XCTAssertEqual(roundTripSparseOds.rawValue(at: "XFD1048576"), "MaxCorner")
+    XCTAssertThrowsError(try CSVStateMachineCodec.encodeWorksheet(sparseOdsSheet))
+    let sparsePdf = PDFStudioDocumentModel.fromWorksheet(sparseOdsSheet)
+    XCTAssertFalse(sparsePdf.pages.isEmpty)
+
+    var overBudgetSheet = WorksheetModel(name: "OverDenseBudget")
+    try overBudgetSheet.setCell("A1", rawValue: "TopLeft")
+    try overBudgetSheet.setCell("J25000", rawValue: "BottomRight")
+    let convReq = ConversionJobRequest(
+      sourceFileName: "sparse.xlsx",
+      sourceFormat: .xlsx,
+      targetFormat: .docx,
+      payload: .sheet(overBudgetSheet)
+    )
+    XCTAssertThrowsError(try DocumentConversionOrchestrator.convert(convReq))
+
+    // F4: OLE2 64-bit Root Entry streamSize overflow (> 64 MiB) & shared MiniFAT sector rejection
+    var baseOle2 = try OLE2ContainerCodec.pack(streams: [
+      OLE2StreamEntry(name: "StreamA", data: Data(repeating: 0x41, count: 64)),
+      OLE2StreamEntry(name: "StreamB", data: Data(repeating: 0x42, count: 64)),
+    ])
+    // Enable MiniFAT header (cutoff = 4096 at offset 56, firstMiniFatSector = 1 at offset 60, count = 1 at offset 64)
+    try BitPacking.writeUInt32LE(4096, into: &baseOle2, at: 56)
+    try BitPacking.writeUInt32LE(1, into: &baseOle2, at: 60)
+    try BitPacking.writeUInt32LE(1, into: &baseOle2, at: 64)
+    // Directory sector is sector 0 (file offset 512). Root Entry is entry 0 (offset 512..639).
+    // Set Root Entry streamSize (offset 512 + 120 = 632) to 0xFFFF_FFFF_FFFF_FFFF
+    var overflowRootOle2 = baseOle2
+    try BitPacking.writeUInt64LE(UInt64.max, into: &overflowRootOle2, at: 512 + 120)
+    XCTAssertThrowsError(try OLE2ContainerCodec.unpack(from: overflowRootOle2))
+
+    // Craft a valid 4-sector OLE2 container where StreamA and StreamB both claim MiniFAT sector 0
+    let secSize = OLE2ContainerCodec.sectorSize
+    var sharedMiniOle2 = Data(repeating: 0, count: 5 * secSize)
+    for (i, b) in FormatDetector.ole2Magic.enumerated() { sharedMiniOle2[i] = b }
+    try BitPacking.writeUInt16LE(0x003E, into: &sharedMiniOle2, at: 24)
+    try BitPacking.writeUInt16LE(0x0003, into: &sharedMiniOle2, at: 26)
+    try BitPacking.writeUInt16LE(0xFFFE, into: &sharedMiniOle2, at: 28)
+    try BitPacking.writeUInt16LE(0x0009, into: &sharedMiniOle2, at: 30)
+    try BitPacking.writeUInt16LE(0x0006, into: &sharedMiniOle2, at: 32)
+    try BitPacking.writeUInt32LE(1, into: &sharedMiniOle2, at: 44)  // 1 FAT sector (sector 3)
+    try BitPacking.writeUInt32LE(0, into: &sharedMiniOle2, at: 48)  // Dir at sector 0
+    try BitPacking.writeUInt32LE(4096, into: &sharedMiniOle2, at: 56)  // MiniCutoff = 4096
+    try BitPacking.writeUInt32LE(1, into: &sharedMiniOle2, at: 60)  // MiniFAT at sector 1
+    try BitPacking.writeUInt32LE(1, into: &sharedMiniOle2, at: 64)  // 1 MiniFAT sector
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.endOfChain, into: &sharedMiniOle2, at: 68)
+    try BitPacking.writeUInt32LE(3, into: &sharedMiniOle2, at: 76)  // DIFAT[0] = sector 3
+    for slot in 1..<109 {
+      try BitPacking.writeUInt32LE(OLE2ContainerCodec.freeSector, into: &sharedMiniOle2, at: 76 + slot * 4)
+    }
+    // Sector 0 (offset 512): Directory (Root Entry, StreamA, StreamB)
+    func writeDirEntry(at entryIdx: Int, name: String, objType: UInt8, startSec: UInt32, size: UInt64) throws {
+      let base = 512 + entryIdx * 128
+      let utf16 = Array(name.utf16)
+      for (i, u) in utf16.enumerated() {
+        try BitPacking.writeUInt16LE(u, into: &sharedMiniOle2, at: base + i * 2)
+      }
+      try BitPacking.writeUInt16LE(UInt16((utf16.count + 1) * 2), into: &sharedMiniOle2, at: base + 64)
+      sharedMiniOle2[base + 66] = objType
+      try BitPacking.writeUInt32LE(OLE2ContainerCodec.freeSector, into: &sharedMiniOle2, at: base + 68)
+      try BitPacking.writeUInt32LE(OLE2ContainerCodec.freeSector, into: &sharedMiniOle2, at: base + 72)
+      try BitPacking.writeUInt32LE(OLE2ContainerCodec.freeSector, into: &sharedMiniOle2, at: base + 76)
+      try BitPacking.writeUInt32LE(startSec, into: &sharedMiniOle2, at: base + 116)
+      try BitPacking.writeUInt64LE(size, into: &sharedMiniOle2, at: base + 120)
+    }
+    try writeDirEntry(at: 0, name: "Root Entry", objType: 5, startSec: 2, size: 128)
+    try writeDirEntry(at: 1, name: "MiniA", objType: 2, startSec: 0, size: 64)
+    try writeDirEntry(at: 2, name: "MiniB", objType: 2, startSec: 0, size: 64)
+    // Sector 1 (offset 1024): MiniFAT: miniSector 0 -> endOfChain, miniSector 1 -> endOfChain
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.endOfChain, into: &sharedMiniOle2, at: 1024)
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.endOfChain, into: &sharedMiniOle2, at: 1028)
+    // Sector 3 (offset 2048): FAT: sector 0 -> EOC, 1 -> EOC, 2 -> EOC, 3 -> FAT marker
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.endOfChain, into: &sharedMiniOle2, at: 2048 + 0)
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.endOfChain, into: &sharedMiniOle2, at: 2048 + 4)
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.endOfChain, into: &sharedMiniOle2, at: 2048 + 8)
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.fatSectorMarker, into: &sharedMiniOle2, at: 2048 + 12)
+    XCTAssertThrowsError(try OLE2ContainerCodec.unpack(from: sharedMiniOle2))
+
+    let vm = WorkspaceViewModel()
+    let docTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .document }))
+    vm.activeTabID = docTab.id
+    if let tabIdx = vm.openTabs.firstIndex(where: { $0.id == docTab.id }),
+      case .document(var docModel) = vm.openTabs[tabIdx].payload
+    {
+      docModel.paragraphs = [
+        ParagraphBlock(
+          text: "foo bar",
+          runs: [DocumentTextRun(text: "foo"), DocumentTextRun(text: " bar")]
+        )
+      ]
+      docModel.tables = [
+        DocumentTableBlock(
+          caption: "표",
+          rows: [["셀키워드", "일반셀"]]
+        )
+      ]
+      vm.openTabs[tabIdx].payload = .document(docModel)
+      vm.findQueryDraft = "foo"
+      vm.replaceQueryDraft = "foobar"
+      let replacedAll = vm.performFindAndReplace()
+      XCTAssertEqual(replacedAll, 1)
+      if case .document(let afterReplaceAll) = vm.activeTab?.payload {
+        XCTAssertEqual(afterReplaceAll.paragraphs[0].text, "foobar bar")
+        XCTAssertEqual(afterReplaceAll.paragraphs[0].runs[0].text, "foobar")
+      }
+
+      vm.findQueryDraft = "셀키워드"
+      vm.replaceQueryDraft = "교체키워드"
+      XCTAssertEqual(vm.findMatchCount, 1)
+      XCTAssertEqual(vm.replaceCurrentMatch(), 1)
+      if case .document(let afterTableReplace) = vm.activeTab?.payload {
+        XCTAssertEqual(afterTableReplace.tables[0].rows[0][0], "교체키워드")
+      }
+    }
+
+    let slideTab = try XCTUnwrap(vm.openTabs.first(where: { $0.moduleKind == .slide }))
+    vm.activeTabID = slideTab.id
+    if let sTabIdx = vm.openTabs.firstIndex(where: { $0.id == slideTab.id }),
+      case .slide(var deckModel) = vm.openTabs[sTabIdx].payload
+    {
+      deckModel.slides = [
+        SlideModel(title: "제목", subtitle: "부제목검색대상", bulletPoints: ["본문"])
+      ]
+      vm.openTabs[sTabIdx].payload = .slide(deckModel)
+      vm.findQueryDraft = "부제목검색대상"
+      vm.replaceQueryDraft = "부제목교체완료"
+      XCTAssertEqual(vm.findMatchCount, 1)
+      XCTAssertEqual(vm.replaceCurrentMatch(), 1)
+      if case .slide(let afterSlideReplace) = vm.activeTab?.payload {
+        XCTAssertEqual(afterSlideReplace.slides[0].subtitle, "부제목교체완료")
+      }
+    }
+  }
 }
+

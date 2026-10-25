@@ -15,6 +15,11 @@ public enum EasyOfficeError: Error, Sendable, Equatable, LocalizedError {
   case encryptedDocumentUnsupported(format: DocumentFormat)
   case xxeOrExternalEntityDetected
   case decompressionBombDetected(ratio: Double, maxRatio: Double)
+  case resourceExhausted(limitName: String, limitValue: Int, actualValue: Int)
+
+  public static func malformedContainer(detail: String) -> EasyOfficeError {
+    .corruptedContainer(detail: detail)
+  }
 
   public var errorDescription: String? {
     switch self {
@@ -46,6 +51,8 @@ public enum EasyOfficeError: Error, Sendable, Equatable, LocalizedError {
       return String(
         format: "비정상적인 압축 해제 비율(%.1fx > 허용 %.1fx)이 감지되어 압축 폭탄(Decompression Bomb) 방어를 위해 차단했습니다.",
         ratio, maxRatio)
+    case .resourceExhausted(let limitName, let limitValue, let actualValue):
+      return "리소스 허용 한도(\(limitName): 최대 \(limitValue), 실제 \(actualValue))를 초과하여 처리를 차단했습니다 (Fail-Closed)."
     }
   }
 }

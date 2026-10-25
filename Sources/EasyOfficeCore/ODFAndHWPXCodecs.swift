@@ -454,18 +454,35 @@ public enum ODFContainerCodec {
       guard !allCoords.isEmpty else {
         return "<table:table table:name=\"\(XMLSanitizer.escape(page.name))\"/>"
       }
-      let maxRow = allCoords.map(\.row).max() ?? 0
+      let coordsByRow = Dictionary(grouping: allCoords, by: \.row)
+      let sortedRows = coordsByRow.keys.sorted()
       var rowStrings: [String] = []
-      for r in 0...maxRow {
-        let rowCoords = allCoords.filter { $0.row == r }
-        guard !rowCoords.isEmpty else {
-          rowStrings.append("        <table:table-row/>")
-          continue
+      var previousRow = -1
+
+      for r in sortedRows {
+        let rowGap = r - previousRow - 1
+        if rowGap > 1 {
+          rowStrings.append(
+            "        <table:table-row table:number-rows-repeated=\"\(rowGap)\"><table:table-cell/></table:table-row>"
+          )
+        } else if rowGap == 1 {
+          rowStrings.append("        <table:table-row><table:table-cell/></table:table-row>")
         }
-        let maxCol = rowCoords.map(\.column).max() ?? 0
+
+        let sortedRowCoords = (coordsByRow[r] ?? []).sorted { $0.column < $1.column }
         var cellStrings: [String] = []
-        for c in 0...maxCol {
-          let coord = PackedCellCoordinate(row: r, column: c)
+        var previousCol = -1
+        for coord in sortedRowCoords {
+          let c = coord.column
+          let colGap = c - previousCol - 1
+          if colGap > 1 {
+            cellStrings.append(
+              "<table:table-cell table:number-columns-repeated=\"\(colGap)\"/>"
+            )
+          } else if colGap == 1 {
+            cellStrings.append("<table:table-cell/>")
+          }
+
           let raw = page.cellsByCoordinate[coord] ?? ""
           let styleAttrs = XMLDocumentModelMapper.cellStyleAttributes(page.cellStyles[coord])
           if raw.isEmpty && styleAttrs.isEmpty {
@@ -486,8 +503,10 @@ public enum ODFContainerCodec {
               "<table:table-cell address=\"\(coord.description)\" raw=\"\(escapedRaw)\" office:value-type=\"string\"\(styleAttrs)><text:p>\(escapedRaw)</text:p></table:table-cell>"
             )
           }
+          previousCol = c
         }
         rowStrings.append("        <table:table-row>\(cellStrings.joined())</table:table-row>")
+        previousRow = r
       }
       return """
               <table:table table:name="\(XMLSanitizer.escape(page.name))">
@@ -548,13 +567,23 @@ public enum ODFContainerCodec {
         var populatedCellCount = 0
         for rowElem in rowElems {
           let rowRepeat = max(
-            1, min(1024, Int(rowElem.attributes["table:number-rows-repeated"] ?? "1") ?? 1))
+            1,
+            min(
+              CellAddress.maxZeroBasedRow + 1,
+              Int(rowElem.attributes["table:number-rows-repeated"] ?? "1") ?? 1
+            )
+          )
           var colIdx = 0
           let cellElems = XMLSanitizer.extractElements(
             named: "table:table-cell", in: rowElem.innerXML)
           for cellElem in cellElems {
             let colRepeat = max(
-              1, min(1024, Int(cellElem.attributes["table:number-columns-repeated"] ?? "1") ?? 1))
+              1,
+              min(
+                CellAddress.maxZeroBasedColumn + 1,
+                Int(cellElem.attributes["table:number-columns-repeated"] ?? "1") ?? 1
+              )
+            )
             let attrs = cellElem.attributes
             let resolvedRaw: String
             if let rawAttr = attrs["raw"] {
@@ -577,8 +606,9 @@ public enum ODFContainerCodec {
               continue
             }
 
-            let expansionCount = rowRepeat * colRepeat
-            guard populatedCellCount + expansionCount <= CellRange.maxExpandedCellCount else {
+            let (expansionCount, expOverflow) = rowRepeat.multipliedReportingOverflow(by: colRepeat)
+            guard !expOverflow, populatedCellCount + expansionCount <= CellRange.maxExpandedCellCount
+            else {
               throw EasyOfficeError.securityViolation(
                 detail: "ODF(.ods) 반복 셀 확장 개수가 허용 상한(\(CellRange.maxExpandedCellCount)셀)을 초과했습니다."
               )
