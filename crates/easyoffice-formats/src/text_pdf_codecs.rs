@@ -282,10 +282,20 @@ impl CsvCodec {
                         current_field.clear();
                         state = CsvParseState::InQuoted;
                     } else if ch == delimiter {
+                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                            ));
+                        }
                         current_row.push(String::new());
                     } else if ch == '\r' || ch == '\n' {
                         if ch == '\r' && chars.peek() == Some(&'\n') {
                             chars.next();
+                        }
+                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                            ));
                         }
                         current_row.push(String::new());
                         rows.push(std::mem::take(&mut current_row));
@@ -302,11 +312,21 @@ impl CsvCodec {
                                 .to_string(),
                         ));
                     } else if ch == delimiter {
+                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                            ));
+                        }
                         current_row.push(std::mem::take(&mut current_field));
                         state = CsvParseState::Start;
                     } else if ch == '\r' || ch == '\n' {
                         if ch == '\r' && chars.peek() == Some(&'\n') {
                             chars.next();
+                        }
+                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                            ));
                         }
                         current_row.push(std::mem::take(&mut current_field));
                         rows.push(std::mem::take(&mut current_row));
@@ -327,11 +347,21 @@ impl CsvCodec {
                         current_field.push('"');
                         state = CsvParseState::InQuoted;
                     } else if ch == delimiter {
+                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                            ));
+                        }
                         current_row.push(std::mem::take(&mut current_field));
                         state = CsvParseState::Start;
                     } else if ch == '\r' || ch == '\n' {
                         if ch == '\r' && chars.peek() == Some(&'\n') {
                             chars.next();
+                        }
+                        if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                            ));
                         }
                         current_row.push(std::mem::take(&mut current_field));
                         rows.push(std::mem::take(&mut current_row));
@@ -352,11 +382,21 @@ impl CsvCodec {
                 ));
             }
             CsvParseState::QuoteInQuoted | CsvParseState::InUnquoted => {
+                if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                    ));
+                }
                 current_row.push(current_field);
                 rows.push(current_row);
             }
             CsvParseState::Start => {
                 if !current_row.is_empty() {
+                    if current_row.len() >= Self::MAX_COLS || rows.len() >= Self::MAX_ROWS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "CSV 행 또는 열 개수가 허용 예산을 초과했습니다.".to_string(),
+                        ));
+                    }
                     current_row.push(String::new());
                     rows.push(current_row);
                 }
@@ -696,7 +736,7 @@ impl PdfSerializer {
                 "PDF xref 테이블 또는 %%EOF 트레일러가 누락되었습니다.".to_string(),
             ));
         }
-        if raw.contains("/Encrypt") {
+        if Self::has_structural_encrypt_token(&raw) {
             return Err(EasyOfficeError::EncryptedDocumentUnsupported(
                 DocumentFormat::Pdf,
             ));
@@ -787,7 +827,35 @@ impl PdfSerializer {
                 .map(|p| p.body_text.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            if b64.is_empty() || (!b64.contains(&visible_concat) && b64 != title) {
+            if b64.is_empty() {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 비어 있습니다.".to_string(),
+                ));
+            }
+            let matches_trailer = if let Some(decoded) =
+                Self::decode_base64_utf8(&b64).filter(|s| s.trim_start().starts_with('{'))
+            {
+                let normalized = decoded
+                    .replace("\\n", "\n")
+                    .replace("\\r", "\r")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\");
+                if visible_concat.is_empty() {
+                    decoded.contains(&title) || normalized.contains(&title)
+                } else {
+                    visible_concat
+                        .lines()
+                        .filter(|l| !l.is_empty())
+                        .all(|l| decoded.contains(l) || normalized.contains(l))
+                }
+            } else {
+                let unescaped_b64 = Self::unescape_pdf_text(&b64);
+                b64.contains(&visible_concat)
+                    || unescaped_b64.contains(&visible_concat)
+                    || b64 == title
+                    || unescaped_b64 == title
+            };
+            if !matches_trailer {
                 return Err(EasyOfficeError::SecurityViolation(
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)과 가시 스트림 텍스트가 불일치합니다."
                         .to_string(),
@@ -800,6 +868,106 @@ impl PdfSerializer {
             pages,
             watermark_text,
         })
+    }
+
+    fn has_structural_encrypt_token(raw: &str) -> bool {
+        let mut in_stream = false;
+        let mut structural = String::with_capacity(raw.len().min(4096));
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed == "stream" {
+                in_stream = true;
+                continue;
+            }
+            if trimmed == "endstream" {
+                in_stream = false;
+                continue;
+            }
+            if in_stream {
+                continue;
+            }
+            let mut chars = trimmed.chars().peekable();
+            let mut paren_depth: usize = 0;
+            while let Some(c) = chars.next() {
+                if paren_depth > 0 {
+                    if c == '\\' {
+                        let _ = chars.next();
+                    } else if c == '(' {
+                        paren_depth += 1;
+                    } else if c == ')' {
+                        paren_depth -= 1;
+                    }
+                    continue;
+                }
+                if c == '%' {
+                    break;
+                }
+                if c == '(' {
+                    paren_depth = 1;
+                    structural.push(' ');
+                    continue;
+                }
+                structural.push(c);
+            }
+            structural.push('\n');
+        }
+
+        let bytes = structural.as_bytes();
+        let needle = b"/Encrypt";
+        let mut pos = 0;
+        while pos + needle.len() <= bytes.len() {
+            if let Some(rel) = structural[pos..].find("/Encrypt") {
+                let idx = pos + rel;
+                let after_idx = idx + needle.len();
+                let next_ok = match bytes.get(after_idx) {
+                    None => true,
+                    Some(b) => b.is_ascii_whitespace() || b"()<>[]{}/%".contains(b),
+                };
+                if next_ok {
+                    return true;
+                }
+                pos = idx + 1;
+            } else {
+                break;
+            }
+        }
+        false
+    }
+
+    fn decode_base64_utf8(input: &str) -> Option<String> {
+        let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        if clean.is_empty() || (clean.len() & 3) != 0 {
+            return None;
+        }
+        let val = |b: u8| -> Option<u8> {
+            match b {
+                b'A'..=b'Z' => Some(b - b'A'),
+                b'a'..=b'z' => Some(b - b'a' + 26),
+                b'0'..=b'9' => Some(b - b'0' + 52),
+                b'+' => Some(62),
+                b'/' => Some(63),
+                _ => None,
+            }
+        };
+        let mut out = Vec::with_capacity((clean.len() / 4) * 3);
+        let mut idx = 0usize;
+        while idx + 4 <= clean.len() {
+            let a = val(clean[idx])?;
+            let b = val(clean[idx + 1])?;
+            out.push((a << 2) | (b >> 4));
+            if clean[idx + 2] != b'=' {
+                let c = val(clean[idx + 2])?;
+                out.push(((b & 0x0F) << 4) | (c >> 2));
+                if clean[idx + 3] != b'=' {
+                    let d = val(clean[idx + 3])?;
+                    out.push(((c & 0x03) << 6) | d);
+                }
+            } else if clean[idx + 3] != b'=' {
+                return None;
+            }
+            idx += 4;
+        }
+        String::from_utf8(out).ok()
     }
 
     fn extract_all_paren_tokens(line: &str) -> Vec<String> {
@@ -941,5 +1109,145 @@ mod tests {
             crate::rtf_xml_helpers::unescape_xml_single_pass("A&#0;&#x01;&#xFFFE;&#65;B"),
             "A&#0;&#x01;&#xFFFE;AB"
         );
+    }
+
+    #[test]
+    fn test_f5_ods_xlsx_hwpx_and_pdf_standard_compatibility() {
+        use crate::{
+            HwpxCodec, HwpxPayload, OdfCodec, OoxmlCodec, OoxmlXlsxPayload, ZipArchiveCodec,
+            ZipSecurityPolicy,
+        };
+
+        let ods_bytes = OdfCodec::pack_ods(
+            "예산표",
+            &[
+                (0, 0, "항목".to_string()),
+                (2, 3, "450".to_string()),
+                (4, 1, "=D3*2".to_string()),
+            ],
+        )
+        .unwrap();
+        let ods_entries =
+            ZipArchiveCodec::unpack(&ods_bytes, &ZipSecurityPolicy::default()).unwrap();
+        let ods_xml = std::str::from_utf8(
+            &ods_entries
+                .iter()
+                .find(|e| e.path == "content.xml")
+                .unwrap()
+                .data,
+        )
+        .unwrap();
+        assert!(
+            ods_xml.matches("<table:table-row").count() >= 3,
+            "pack_ods must emit multiple table:table-row elements: {ods_xml}"
+        );
+
+        let std_ods_xml = concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" office:version=\"1.2\">",
+            "<office:body><office:spreadsheet><table:table table:name=\"표준시트\">",
+            "<table:table-row>",
+            "<table:table-cell office:value-type=\"string\"><text:p>A1</text:p></table:table-cell>",
+            "<table:table-cell table:number-columns-repeated=\"2\"/>",
+            "<table:table-cell office:value-type=\"float\" office:value=\"42\"><text:p>42</text:p></table:table-cell>",
+            "</table:table-row>",
+            "<table:table-row table:number-rows-repeated=\"2\"><table:table-cell/></table:table-row>",
+            "<table:table-row>",
+            "<table:table-cell table:number-columns-repeated=\"1\"/>",
+            "<table:table-cell table:formula=\"of:=SUM(D1:D3)\" office:value-type=\"float\" office:value=\"42\"><text:p>42</text:p></table:table-cell>",
+            "</table:table-row>",
+            "</table:table></office:spreadsheet></office:body></office:document-content>"
+        );
+        let std_ods_zip = ZipArchiveCodec::pack(&[
+            (
+                "mimetype".to_string(),
+                OdfCodec::MIMETYPE_ODS.as_bytes().to_vec(),
+            ),
+            ("content.xml".to_string(), std_ods_xml.as_bytes().to_vec()),
+        ])
+        .unwrap();
+        let (sheet_name, unpacked_cells) = OdfCodec::unpack_ods(&std_ods_zip).unwrap();
+        assert_eq!(sheet_name, "표준시트");
+        assert!(unpacked_cells.contains(&(0, 0, "A1".to_string())));
+        assert!(unpacked_cells.contains(&(0, 3, "42".to_string())));
+        assert!(unpacked_cells.contains(&(3, 1, "=SUM(D1:D3)".to_string())));
+
+        let xlsx_bytes = OoxmlCodec::pack_xlsx(&OoxmlXlsxPayload {
+            sheet_name: "Sheet1".to_string(),
+            cells: vec![(0, 0, "A1".to_string()), (2, 1, "B3".to_string())],
+        })
+        .unwrap();
+        let xlsx_entries =
+            ZipArchiveCodec::unpack(&xlsx_bytes, &ZipSecurityPolicy::default()).unwrap();
+        let sheet_xml = std::str::from_utf8(
+            &xlsx_entries
+                .iter()
+                .find(|e| e.path == "xl/worksheets/sheet1.xml")
+                .unwrap()
+                .data,
+        )
+        .unwrap();
+        assert!(sheet_xml.contains("<row r=\"1\">"));
+        assert!(sheet_xml.contains("<row r=\"3\">"));
+
+        let hwpx_bytes = HwpxCodec::pack(&HwpxPayload {
+            title: "기안문".to_string(),
+            is_template: false,
+            official_agency: Some("행정안전부".to_string()),
+            approval_lines: vec!["기안".to_string()],
+            paragraphs: vec!["본문".to_string()],
+            tables: Vec::new(),
+        })
+        .unwrap();
+        let hwpx_entries =
+            ZipArchiveCodec::unpack(&hwpx_bytes, &ZipSecurityPolicy::default()).unwrap();
+        assert!(
+            hwpx_entries
+                .iter()
+                .any(|e| e.path == "Contents/content.hpf"),
+            "HwpxCodec::pack must include Contents/content.hpf"
+        );
+
+        let pdf_with_literal_encrypt = PdfSerializer::serialize(&PdfDocumentModel {
+            title: "Guide to /Encrypt in PDF".to_string(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "Section 1 discusses /Encrypt dictionary.".to_string(),
+                approval_stamp: None,
+            }],
+            watermark_text: None,
+        });
+        assert!(
+            PdfSerializer::parse(&pdf_with_literal_encrypt).is_ok(),
+            "Literal /Encrypt inside text or stream must not trigger false positive"
+        );
+
+        let mut pdf_with_b64_json = pdf_with_literal_encrypt.clone();
+        // Base64 of `{"title":"Guide to /Encrypt in PDF","bodyText":"Section 1 discusses /Encrypt dictionary."}`
+        let b64_trailer = "\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6Ikd1aWRlIHRvIC9FbmNyeXB0IGluIFBERiIsImJvZHlUZXh0IjoiU2VjdGlvbiAxIGRpc2N1c3NlcyAvRW5jcnlwdCBkaWN0aW9uYXJ5LiJ9\n";
+        pdf_with_b64_json.extend_from_slice(b64_trailer.as_bytes());
+        assert!(
+            PdfSerializer::parse(&pdf_with_b64_json).is_ok(),
+            "Valid Base64 JSON trailer must be accepted"
+        );
+
+        let mut pdf_with_spoofed_b64_json = pdf_with_literal_encrypt;
+        // Base64 of `{"title":"Spoofed","bodyText":"Completely different content"}`
+        let spoofed_trailer = "\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mZWQiLCJib2R5VGV4dCI6IkNvbXBsZXRlbHkgZGlmZmVyZW50IGNvbnRlbnQifQ==\n";
+        pdf_with_spoofed_b64_json.extend_from_slice(spoofed_trailer.as_bytes());
+        assert!(matches!(
+            PdfSerializer::parse(&pdf_with_spoofed_b64_json),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+    }
+
+    #[test]
+    fn test_f14_csv_scalar_baseline_enforces_max_cols() {
+        let too_many_cols = "a,".repeat(CsvCodec::MAX_COLS + 1);
+        assert!(matches!(
+            CsvCodec::parse_scalar_baseline(&too_many_cols, ','),
+            Err(EasyOfficeError::ResourceBudgetExceeded(_))
+        ));
     }
 }

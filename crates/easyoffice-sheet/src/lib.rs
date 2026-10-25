@@ -392,10 +392,14 @@ pub struct PivotTableSummary {
     pub grand_total: f64,
 }
 
+pub const MAX_CELL_TEXT_CHARS: usize = 32_767;
+pub const MAX_EVAL_STEPS: usize = 65_536;
+
 pub(crate) struct EvalContext<'a> {
     pub workbook: Option<&'a WorkbookEngine>,
     pub visiting: VisitingTracker,
     pub memo: HashMap<PackedWorkbookCoord, EvaluatedCellValue>,
+    pub(crate) steps: usize,
 }
 
 impl<'a> EvalContext<'a> {
@@ -405,6 +409,7 @@ impl<'a> EvalContext<'a> {
             workbook: None,
             visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
+            steps: 0,
         }
     }
 
@@ -414,6 +419,7 @@ impl<'a> EvalContext<'a> {
             workbook: Some(workbook),
             visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
+            steps: 0,
         }
     }
 }
@@ -432,6 +438,8 @@ pub struct SheetEngine {
 
 impl SheetEngine {
     pub const MAX_RECURSION_DEPTH: usize = 512;
+    pub const MAX_CELL_TEXT_CHARS: usize = MAX_CELL_TEXT_CHARS;
+    pub const MAX_EVAL_STEPS: usize = MAX_EVAL_STEPS;
     const DENSE_ROWS: usize = 256;
     const DENSE_COLS: usize = 16;
 
@@ -583,6 +591,7 @@ impl SheetEngine {
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         let mut results = HashMap::with_capacity(self.cells.len());
         for &coord in self.cells.keys() {
+            ctx.steps = 0;
             let val = self.eval_coord_ctx(coord, &mut ctx, 0);
             results.insert(coord, val);
         }
@@ -626,6 +635,10 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> EvaluatedCellValue {
+        ctx.steps = ctx.steps.saturating_add(1);
+        if ctx.steps > Self::MAX_EVAL_STEPS {
+            return EvaluatedCellValue::Error(FormulaError::Value);
+        }
         if depth > Self::MAX_RECURSION_DEPTH {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         }
@@ -644,6 +657,8 @@ impl SheetEngine {
                 Some(raw) => {
                     if raw.trim() == "=" {
                         EvaluatedCellValue::Empty
+                    } else if raw.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                        EvaluatedCellValue::Error(FormulaError::Value)
                     } else {
                         EvaluatedCellValue::Text(raw.clone())
                     }
@@ -666,15 +681,18 @@ impl SheetEngine {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
 
-        let result = match compiled {
+        let mut result = match compiled {
             Ok(expr) => self.eval_expr_ctx(expr, ctx, depth + 1),
             Err(e) => EvaluatedCellValue::Error(*e),
         };
+        if let EvaluatedCellValue::Text(ref s) = result {
+            if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                result = EvaluatedCellValue::Error(FormulaError::Value);
+            }
+        }
 
         ctx.visiting.remove(sid, coord);
-        if !matches!(result, EvaluatedCellValue::Error(FormulaError::Cycle)) {
-            ctx.memo.insert(key, result.clone());
-        }
+        ctx.memo.insert(key, result.clone());
         result
     }
 
@@ -688,7 +706,7 @@ impl SheetEngine {
             return EvaluatedCellValue::Empty;
         }
         let trimmed = raw.trim();
-        if let Some(formula_body) = trimmed.strip_prefix('=') {
+        let mut res = if let Some(formula_body) = trimmed.strip_prefix('=') {
             let expr_src = formula_body.trim();
             if expr_src.is_empty() {
                 return EvaluatedCellValue::Empty;
@@ -709,7 +727,13 @@ impl SheetEngine {
             EvaluatedCellValue::Boolean(false)
         } else {
             EvaluatedCellValue::Text(raw.to_string())
+        };
+        if let EvaluatedCellValue::Text(ref s) = res {
+            if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                res = EvaluatedCellValue::Error(FormulaError::Value);
+            }
         }
+        res
     }
 
     pub(crate) fn eval_expr_ctx(
@@ -718,12 +742,19 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> EvaluatedCellValue {
-        if depth > Self::MAX_RECURSION_DEPTH {
+        ctx.steps = ctx.steps.saturating_add(1);
+        if ctx.steps > Self::MAX_EVAL_STEPS || depth > Self::MAX_RECURSION_DEPTH {
             return EvaluatedCellValue::Error(FormulaError::Value);
         }
         match expr {
             Expr::Number(n) => EvaluatedCellValue::Number(*n),
-            Expr::Text(s) => EvaluatedCellValue::Text(s.clone()),
+            Expr::Text(s) => {
+                if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                    EvaluatedCellValue::Error(FormulaError::Value)
+                } else {
+                    EvaluatedCellValue::Text(s.clone())
+                }
+            }
             Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
             Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
             Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth + 1),
@@ -805,11 +836,16 @@ impl SheetEngine {
         r_val: EvaluatedCellValue,
     ) -> EvaluatedCellValue {
         match op {
-            BinaryOp::Concat => EvaluatedCellValue::Text(format!(
-                "{}{}",
-                l_val.to_display_string(),
-                r_val.to_display_string()
-            )),
+            BinaryOp::Concat => {
+                let ls = l_val.to_display_string();
+                let rs = r_val.to_display_string();
+                if ls.chars().count().saturating_add(rs.chars().count()) > Self::MAX_CELL_TEXT_CHARS
+                {
+                    EvaluatedCellValue::Error(FormulaError::Value)
+                } else {
+                    EvaluatedCellValue::Text(format!("{ls}{rs}"))
+                }
+            }
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
                 let ln = match l_val {
                     EvaluatedCellValue::Empty => 0.0,

@@ -52,7 +52,7 @@ pub unsafe extern "C" fn easyoffice_ffi_dispatch_json(
         match EasyOfficeIpcRouter::dispatch(cmd_str, payload_str) {
             Ok(json) => into_raw_c_string(&json),
             Err(err) => {
-                let escaped = err.to_string().replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
                 into_raw_c_string(&format!("{{\"ok\":false,\"error\":\"{escaped}\"}}"))
             }
         }
@@ -223,5 +223,35 @@ mod tests {
         let summary = run_self_test().unwrap();
         assert!(summary.contains("PASSED"));
         assert!(summary.contains("ipc_commands=13"));
+    }
+
+    #[test]
+    fn test_f6_and_f13_error_json_escaping_and_webui_no_silent_fallback() {
+        let err_json = invoke_c_abi_roundtrip("unknown_cmd_\n\r\t\x07", "");
+        assert!(
+            !err_json.contains('\n')
+                && !err_json.contains('\r')
+                && !err_json.contains('\t')
+                && !err_json.contains('\x07'),
+            "FFI error JSON must escape control chars: {err_json:?}"
+        );
+        assert!(
+            err_json.contains("\\n")
+                && err_json.contains("\\r")
+                && err_json.contains("\\t")
+                && err_json.contains("\\u0007")
+        );
+
+        let app_js = include_str!("../ui/app.js");
+        let ipc_start = app_js.find("async function invokeIpc(").unwrap();
+        let ipc_end = app_js[ipc_start..]
+            .find("function snapshotDomSheetCells()")
+            .unwrap()
+            + ipc_start;
+        let ipc_fn = &app_js[ipc_start..ipc_end];
+        assert!(
+            ipc_fn.contains("IPC request failed ("),
+            "invokeIpc must throw on non-OK HTTP responses instead of falling back to MOCK_IPC_HANDLERS"
+        );
     }
 }
