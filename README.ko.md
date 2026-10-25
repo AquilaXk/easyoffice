@@ -19,7 +19,7 @@ EasyOffice (`v1.0.0`)는 Swift 6, SwiftUI, AppKit 기반으로 설계된 **100% 
   - `BitPacking` (리틀 엔디언 `UInt16`/`UInt32`/`UInt64` 리더·라이터 및 길이 접두 UTF-16LE 인코딩), 256-엔트리 룩업 테이블 기반 IEEE 802.3 `CRC32Calculator`, `HWP5RecordHeader` 비트필드 연산, 문자열 할당 없는 $O(1)$ 셀 조회 및 순환 참조 검출을 위한 64비트 `PackedCellCoordinate` (`UInt64`: 상위 32비트 `row`, 하위 32비트 `column`).
 - **5대 결정론적 에디터 엔진**:
   - **Document & HWP/HWPX (`OfficeDocumentModel`)**: 다중 구역 조판(`PaperSizePreset`, `PageOrientation`), 문단/글자 스타일, 셀 병합 및 인라인 표 수식(`=SUM(ABOVE|LEFT)`, `=AVERAGE(ABOVE|LEFT)`)을 지원하는 `DocumentTableBlock`, 각주(`FootnoteItem`), 변경 내용 추적(`TrackedRevision`), 코멘트 스레드, 자동 목차(`TableOfContentsEntry`), `{{필드}}` 메일 머지.
-  - **Sheet (`WorksheetModel`)**: 수학/삼각(27종), 통계(7종), 논리(10종), 찾기/참조(8종), 텍스트(16종), 재무(4종: `PMT`, `FV`, `PV`, `NPV`), 날짜/시간(5종)을 아우르는 **77종 내장 수식 함수**, `PivotTableEngine`, `SheetChartBuilder`, `ConditionalFormatRule`, `DataValidationRule`.
+  - **Sheet (`WorksheetModel`)**: 수학/삼각, 통계, 논리, 찾기/참조, 텍스트, 재무(`PMT`, `FV`, `PV`, `NPV`, `IRR`, `RATE`, `NPER`, `SLN`, `SYD`), 날짜/시간, 정보/공학을 아우르는 **122종 내장 수식 함수**, `PivotTableEngine`, `SheetChartBuilder`, `ConditionalFormatRule`, `DataValidationRule`.
   - **Slide (`PresentationDeckModel`)**: `SlideAspectRatio` (`16:9`, `4:3`, `A4`), `SlideMasterLayout`, `SlideCanvasElement` 레이어(Z-order) 및 정렬/균등 배분, `SnapGuideCalculator` 스마트 정렬 가이드, `SlideTransitionKind`, 듀얼 모니터 `PresenterSession`.
   - **PDF Studio (`PDFStudioDocumentModel`)**: 고속 벡터 페이지 캔버스, 5종 주석(`PDFAnnotationItem`: 형광펜, 밑줄, 스티커 메모, 도장, 전자 서명), 북마크 트리(`PDFOutlineNode`), 페이지 회전/재배치/분할/병합, 양방향 오피스 ↔ PDF 변환.
 - **100% 오프라인 스마트 생산성 도구 및 보안 감사 스튜디오**:
@@ -37,7 +37,7 @@ EasyOffice (`v1.0.0`)는 Swift 6, SwiftUI, AppKit 기반으로 설계된 **100% 
 | :--- | :--- | :--- | :--- |
 | **Document** | `DOCX`, `DOC`, `ODT`, `RTF`, `MD`, `TXT` | ECMA-376 WordprocessingML (ZIP+XML), OLE2 Word, ISO/IEC 26300 ODF Text, RTF 1.9, CommonMark, UTF-8 | `OOXMLContainerCodec`, `ODFContainerCodec`, `OLE2ContainerCodec`, `RTFCodec`, `CommonMarkCodec`, 다단/구역 조판, 표 계산식, 변경 내용 추적, 메일 머지 |
 | **HWP (한글)** | `HWP`, `HWPX`, `HWT`, `HWTX` | HWP 5.0 Binary (OLE2 CFBF `FileHeader`/`DocInfo`/`BodyText`), KS X 6101 OWPML (ZIP+XML) | `HWP5BinaryCodec`, `HWP5RecordHeader`, `HWPXContainerCodec`, 공문서 두문/결재란 표 양식, 머리말/꼬리말, 각주, 서식 템플릿, HWP ↔ HWPX/DOCX/PDF 변환 |
-| **Sheet** | `XLSX`, `XLS`, `ODS`, `CSV`, `TSV` | ECMA-376 SpreadsheetML, OLE2 BIFF8, ISO/IEC 26300 ODF Spreadsheet, RFC 4180 CSV/TSV | `PackedCellCoordinate`, 77종 내장 수식 함수, `PivotTableEngine`, `SheetChartBuilder`, `CSVStateMachineCodec`, 다중 정렬, 조건부 서식·유효성 검사 |
+| **Sheet** | `XLSX`, `XLS`, `ODS`, `CSV`, `TSV` | ECMA-376 SpreadsheetML, OLE2 BIFF8, ISO/IEC 26300 ODF Spreadsheet, RFC 4180 CSV/TSV | `PackedCellCoordinate`, 122종 내장 수식 함수, `PivotTableEngine`, `SheetChartBuilder`, `CSVStateMachineCodec`, 다중 정렬, 조건부 서식·유효성 검사 |
 | **Slide** | `PPTX`, `PPT`, `PPSX`, `ODP` | ECMA-376 PresentationML, OLE2 Presentation, ISO/IEC 26300 ODF Presentation | `PresentationDeckModel`, 16:9·4:3·A4 캔버스, `SnapGuideCalculator` 스마트 정렬 가이드, 레이어 순서 제어, 전환 효과, `PresenterSession` 발표자 뷰 |
 | **PDF Studio** | `PDF` | ISO 32000-1 / 32000-2 (`%PDF-1.x` / `%PDF-2.0`) | `PDFBinarySerializer`, `PDFStudioDocumentModel`, 5종 주석·서명, 북마크 트리, 페이지 병합/분할/재배치/회전, 오피스 ↔ PDF 양방향 변환 |
 

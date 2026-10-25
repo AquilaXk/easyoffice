@@ -6,7 +6,7 @@ Security updates are applied to the latest release on the `main` branch and publ
 
 | Version | Supported |
 | :--- | :--- |
-| `0.1.x` (latest `main`) | Yes |
+| `1.0.x` (latest `main`) | Yes |
 
 ## Security Architecture & Invariants
 

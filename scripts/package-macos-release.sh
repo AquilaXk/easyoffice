@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-0.1.0}"
+VERSION="${1:-1.0.0}"
 MODE="${2:-full}"
 APP_NAME="EasyOffice"
 BUNDLE_ID="com.aquilaxk.easyoffice"
