@@ -686,3 +686,40 @@
 - **Verified by**: `swift build`, `swift test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 외부 수식 플러그인 인터페이스 또는 스트리밍 대용량 XLSX/ODS 청크 파서를 확장할 때.
 
+### 34. 15차 적대적 감사 기반 정수 변환·컨테이너 규격·시트 수식·PDF 페이지네이션·데이터 손실 방어 완결 정책 (2026-10-25)
+
+- **Decision (`PD-060`)**:
+  1. **Swift 코어 수치 변환 및 고정폭 정수 오버플로 트랩 원천 차단 (`LegacyOLE2OfficeCodec.swift`, `TabularAndMarkupCodec.swift`, `OLE2AndHWP5Codec.swift`, `StandardZipOfficeCodecs.swift`, `SheetBuiltInFunctions.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `SheetEngine.swift`, `DocumentSubmodelsAndNotes.swift`, `BinaryContainerCodec.swift`)**
+     - `.doc` FibBase, `.rtf`, `.hwp` 직렬화 시 부동소수점(`fontSizePt`, `lineSpacingPercent`, `widthPt`, `heightPt`, `letterSpacingPercent`)에서 `Int`/`UInt32`로의 직접 변환을 제거하고 `2^63` 경계 가드가 포함된 `safeClampedInt` 및 `safeClampedUInt32` 헬퍼로 통일합니다.
+     - `.doc`와 `.hwp` 표 직렬화 시 행(`<= 4,096`)과 열(`<= 256`) 상한을 검증하고, `.xls` BIFF8 직렬화 시 시트 이름 길이(`<= 255` UTF-16 코드 유닛), 행(`0..<65,536`), 열(`0..<256`), 셀 문자열 길이(`<= 65,535`) 상한을 초과하면 조용한 절단 없이 `EasyOfficeError.corruptedContainer`로 거부합니다.
+     - `ZipContainerCodec.pack`은 엔트리 수와 UTF-8 경로 바이트 길이가 `UInt16.max`(`65,535`)를 초과할 때 즉시 거부하며, `TableCellSpan`의 `rowIndex`와 `columnIndex`는 생성자 및 `Codable` 디코더 모두에서 `0...100_000` 범위로 클램핑합니다.
+     - `SheetBuiltInFunctions.safeInt`는 `Int(exactly: trunc(value))`와 `[-2^63, 2^63)` 경계 검사를 결합하여 거대 배정밀도 실수에서 런타임 트랩 없이 `#NUM!`을 반환합니다.
+  2. **OLE2 CFBF 계층 스토리지·MiniFAT·균형 디렉터리 트리 및 BIFF8·PPT·HWP5 표준 호환성 (`OLE2AndHWP5Codec.swift`, `LegacyOLE2OfficeCodec.swift`)**
+     - `OLE2ContainerCodec.pack`은 `4,096`바이트 미만 스트림을 64바이트 MiniStream과 MiniFAT 섹터에 패킹하고, `"BodyText/Section0"`와 같은 계층 경로를 `Storage`(`objectType = 1`)와 자식 `Stream`(`objectType = 2`) 엔트리 및 균형 이진 탐색 트리(`leftSiblingID`, `rightSiblingID`, `childID`)로 직렬화합니다.
+     - `OLE2ContainerCodec.unpack`은 `Storage -> Child` 디렉터리 트리를 순회하여 계층 스트림 경로를 복원하고, `rawRootSize <= UInt64(data.count)` 경계 검사와 스트림 간 미니섹터 중복 참조(`claimedMiniSectors`) 탐지를 수행합니다.
+     - `HWP5BinaryCodec`은 `maxHWP5Records = 524_288`과 누적 표 셀 상한(`maxTotalHWP5TableCells = 65_536`)을 적용합니다.
+     - `LegacyOLE2OfficeCodec.encodeBIFF8Worksheet`는 표준 BIFF8 Workbook Globals 서브스트림(`BOF 0x0005` -> 1바이트 `cch` 및 `grbit=0x01`이 포함된 `BOUNDSHEET 0x0085` -> `EOF 0x000A`)과 Worksheet 서브스트림(`BOF 0x0010` -> `DIMENSIONS` -> 셀 레코드 -> `EOF 0x000A`)을 분리 출력하고 `lbPlyPos` 오프셋을 패치하며, 디코더는 `MULRK`(`0x00BD`)와 1바이트/2바이트 `cch` 포맷을 모두 지원합니다.
+     - `LegacyOLE2OfficeCodec.decodePowerPointBinary`는 `RT_TextBytesAtom`(`4008`) 8비트 텍스트 아톰과 중첩 컨테이너 레코드(`(verAndInst & 0x000F) == 0x000F`) 순회를 지원합니다.
+  3. **PDF 다중 페이지 자동 분할 및 본문 접두사 보존 (`PDFBinarySerializer.swift`)**
+     - PDF 페이지당 본문 렌더링 범위를 `Y = 728..76`(`15pt` 줄간격 기준 페이지당 최대 42줄)으로 확장하고, 42줄을 초과하는 페이지는 자동으로 후속 페이지 객체로 분할하여 60줄 이상의 본문도 손실 없이 출력 및 라운드트립 디코딩합니다.
+     - 비가시 메타데이터 라인(`[WM] `, `[FORM] `)은 `0 1 Td`·`0 2 Td` 오프셋에 기록하여 본문 문단(`0 0 Td`)이 `[WM] `, `[STAMP] `, `[FORM] `으로 시작하더라도 디코딩 시 삭제되지 않도록 보존합니다.
+  4. **ZIP 미디어 파일명 중복 방지, 보존 아카이브 화이트리스트, UTF-16 XML 검사 및 한국어 PII 탐지 (`StandardZipOfficeCodecs.swift`, `SmartProductivityTools.swift`, `XMLSanitizer.swift`)**
+     - OOXML·ODF·HWPX 패킹 시 첨부 이미지 파일명이 충돌하면 고유 접미사(`_2`, `_3`)를 부여하고, `preservedArchiveEntries`는 안전한 경로 화이트리스트만 허용하며, 이종 포맷 변환 시 이전 포맷의 보존 엔트리를 비우고, 메타데이터 정리 시 `thumbnail`, `preview/`, `vbaproject`, `app.xml`, `settings.xml`을 함께 제거합니다.
+     - `XMLSanitizer.validateSafeXMLData`는 UTF-16LE(`FF FE`) 및 UTF-16BE(`FE FF`) BOM XML 스트림을 디코딩하여 검사하고, 외부 엔티티나 원격 프로토콜(`SYSTEM`, `<!ENTITY`, `[`, `http://`, `https://`, `file://`, `ftp://`)이 없는 로컬 `PUBLIC` `<!DOCTYPE>` 선언은 허용합니다.
+     - `DocumentSecurityAuditor`는 한글 조사와 결합된 개인정보도 누락 없이 마스킹하도록 ASCII `\b` 경계를 숫자·영문 부정 전후방 탐색(`(?<![0-9])...(?![0-9])`)으로 교체하고 무하이픈 13자리 주민등록번호 패턴을 포함합니다.
+  5. **스프레드시트 수식 평가·조회 기본값·날짜 직렬값·정렬 수식 이동·피벗 빈 키 보존 (`SheetCoordinatesAndAST.swift`, `SheetEngine.swift`, `SheetBuiltInFunctions.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `SheetAutoFillAndLayout.swift`, `SheetAnalyticsAndPivot.swift`)**
+     - 수식 파서와 평가기는 좌결합 이항 연산 체인을 반복 루프로 처리하여 200개 이상의 항을 가진 평탄한 수식이 재귀 깊이 상한에 걸리지 않도록 하고, `evaluateOnSheet`는 반환 시 자신이 추가한 `crossVisited` 키를 정리하여 300개 이상의 교차 시트 셀 참조 시 가짜 `#CYCLE!`이 발생하지 않도록 합니다.
+     - `ROUND`·`ROUNDUP`·`ROUNDDOWN`은 고정 `1e-12` 보정 대신 ULP 비례 보정(`abs(scaled) * Double.ulpOfOne * 2.0`)을 사용하며, `EvaluatedCellValue.description`은 `1e15` 미만의 유한 실수를 과학적 표기법 없이 포맷합니다.
+     - 표준 스프레드시트 규격에 맞춰 `VLOOKUP`·`HLOOKUP` 4번째 인자 기본값을 `TRUE`, `MATCH` 3번째 인자 기본값을 `1`로 설정하고, `DATE`·`EDATE`·`EOMONTH`·`WORKDAY`는 1900 직렬 수치(`DATE(2024,1,1) == 45292`, `DATE(1900,2,29) == 60`)를 반환합니다.
+     - `sortRows`는 행 이동량만큼 상대 수식 참조를 자동 이동시키고, `PivotTableEngine`은 비어 있지 않은 레코드의 빈 행·열 키를 `"(빈 값)"`으로 집계하며 `.count` 집계 시 텍스트 셀도 개수에 포함합니다.
+  6. **워크스페이스 미저장 탭 보호, CSV 전체 열 내보내기 및 WCAG AA 명암비 보장 (`WorkspaceHub.swift`, `WorkspaceViews.swift`, `EasyOfficeApp.swift`, `TabularAndMarkupCodec.swift`, `DesignTokens.swift`)**
+     - `closeOtherTabs`는 수정된 탭(`isModified == true`)을 삭제하지 않고 `pendingCloseConfirmTabID`로 확인을 요청하며, `confirmCloseTab`과 저장 후 닫기 동작은 이종 포맷(PDF 등) 내보내기로 인해 원본 탭의 `isModified`가 해제되지 않은 경우 탭을 닫지 않습니다.
+     - `EasyOfficeAppDelegate`는 미저장 탭이 있을 때 `applicationShouldTerminate`에서 앱 종료를 중단하고 저장 확인 배너를 표시하며, `application(_:open:)` 및 `.onOpenURL`로 외부 파일 열기를 연결합니다.
+     - `CSVStateMachineCodec`의 내보내기 좌표 상한을 스프레드시트 전체 그리드(`1,048,576`행 × `16,384`열 `XFD`)까지 허용하고(밀집 셀 총량 `4,194,304`셀 가드 유지), `EasyOfficeDesignTokens`의 라이트·다크 모드 텍스트 및 모듈 강조색 토큰은 모든 배경 표면에서 WCAG 2.1 AA(`>= 4.5:1`) 명암비를 충족합니다.
+- **Why**: 15차 적대적 코드리뷰 및 보안 감사에서 식별된 정수 변환 트랩, 컨테이너 규격 불일치, PDF 1페이지 절단, 한국어 PII 탐지 누락, 수식 엔진 표준 편차, 미저장 문서 손실 경로를 근본 원인으로 해결하기 위함입니다.
+- **Trade-offs**: 날짜 함수(`DATE`, `EDATE`, `EOMONTH`, `WORKDAY`)가 문자열 대신 1900 직렬 수치를 반환함에 따라 기존 날짜 수식 단언문을 직렬 수치 기준으로 갱신해야 하나, 날짜 결과에 대한 사칙연산(`=DATE(2024,1,1)+7`)과 비교 연산이 표준 스프레드시트와 동일하게 동작합니다.
+- **Alternatives rejected**:
+  - 좌결합 수식에서 단순히 `maxFormulaRecursionDepth` 상수만 늘리는 방식은 더 긴 수식에서 실제 호출 스택 오버플로를 유발하므로 반복 루프 언롤링으로 해결.
+- **Verified by**: `swift build`, `swift test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 다중 섹션(`Section1..N`) HWP 5.0 스트림 병합 또는 BIFF8 수식 바이트코드(`rgce`) 역컴파일러를 확장할 때.
+

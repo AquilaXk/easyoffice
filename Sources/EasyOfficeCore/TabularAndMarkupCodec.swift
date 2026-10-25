@@ -12,8 +12,9 @@ public enum CSVStateMachineCodec {
     case quoteInQuotedField
   }
 
-  public static let maxExportRows = 65_536
-  public static let maxExportColumns = 1_024
+  public static let maxExportRows = CellAddress.maxZeroBasedRow + 1
+  public static let maxExportColumns = CellAddress.maxZeroBasedColumn + 1
+  public static let maxExportDenseCells = 4_194_304
 
   public static func encodeWorksheet(_ sheet: WorksheetModel, delimiter: Character = ",") -> Data {
     var maxRow = -1
@@ -31,9 +32,12 @@ public enum CSVStateMachineCodec {
     guard maxRow >= 0, maxCol >= 0 else {
       return Data()
     }
+    if (maxRow + 1) * (maxCol + 1) > maxExportDenseCells {
+      maxRow = max(0, maxExportDenseCells / max(1, maxCol + 1) - 1)
+    }
 
     var out = ""
-    out.reserveCapacity((maxRow + 1) * (maxCol + 1) * 4)
+    out.reserveCapacity(min((maxRow + 1) * (maxCol + 1) * 4, 1_048_576))
     for r in 0...maxRow {
       if r > 0 {
         out.append("\r\n")
@@ -658,12 +662,16 @@ public enum RTFCodec {
     for p in doc.paragraphs {
       var controls = "\\pard"
       controls += "\\s\(styleCode(for: p.style))"
-      let fiTwips = Int((p.firstLineIndentPt * 20.0).rounded())
-      let liTwips = Int((p.leftIndentPt * 20.0).rounded())
+      let fiTwips = XMLDocumentModelMapper.safeClampedInt(
+        p.firstLineIndentPt * 20.0, min: -1_000_000, max: 1_000_000)
+      let liTwips = XMLDocumentModelMapper.safeClampedInt(
+        p.leftIndentPt * 20.0, min: -1_000_000, max: 1_000_000)
       if fiTwips != 0 { controls += "\\fi\(fiTwips)" }
       if liTwips != 0 { controls += "\\li\(liTwips)" }
-      let expndPct = Int(p.letterSpacingPercent.rounded())
-      let scalePct = Int(p.charWidthScalePercent.rounded())
+      let expndPct = XMLDocumentModelMapper.safeClampedInt(
+        p.letterSpacingPercent, min: -10_000, max: 10_000)
+      let scalePct = XMLDocumentModelMapper.safeClampedInt(
+        p.charWidthScalePercent, min: 1, max: 10_000)
       if expndPct != 0 { controls += "\\expnd\(expndPct)" }
       if scalePct != 100 { controls += "\\charscalex\(scalePct)" }
       let hasStrike = p.runs.contains(where: \.isStrikethrough)

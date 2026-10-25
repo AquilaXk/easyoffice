@@ -23,6 +23,7 @@ public enum TableCellBorderStyle: String, CaseIterable, Sendable, Codable {
 /// Merged cell span descriptor in a document or HWP table.
 public struct TableCellSpan: Sendable, Codable, Equatable {
   public static let maxSpan = 256
+  public static let maxIndex = 100_000
   public var rowIndex: Int
   public var columnIndex: Int
   public var rowSpan: Int
@@ -36,11 +37,21 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
     columnSpan: Int = 1,
     borderStyle: TableCellBorderStyle = .solid
   ) {
-    self.rowIndex = max(0, rowIndex)
-    self.columnIndex = max(0, columnIndex)
+    self.rowIndex = min(max(0, rowIndex), Self.maxIndex)
+    self.columnIndex = min(max(0, columnIndex), Self.maxIndex)
     self.rowSpan = min(max(1, rowSpan), Self.maxSpan)
     self.columnSpan = min(max(1, columnSpan), Self.maxSpan)
     self.borderStyle = borderStyle
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let r = try container.decode(Int.self, forKey: .rowIndex)
+    let c = try container.decode(Int.self, forKey: .columnIndex)
+    let rs = try container.decodeIfPresent(Int.self, forKey: .rowSpan) ?? 1
+    let cs = try container.decodeIfPresent(Int.self, forKey: .columnSpan) ?? 1
+    let bs = try container.decodeIfPresent(TableCellBorderStyle.self, forKey: .borderStyle) ?? .solid
+    self.init(rowIndex: r, columnIndex: c, rowSpan: rs, columnSpan: cs, borderStyle: bs)
   }
 }
 

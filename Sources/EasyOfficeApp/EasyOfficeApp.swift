@@ -3,9 +3,40 @@ import EasyOfficeCore
 import EasyOfficeDesignSystem
 import SwiftUI
 
+@MainActor
+final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
+  let viewModel = WorkspaceViewModel()
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if let modifiedTab = viewModel.openTabs.first(where: \.isModified) {
+      viewModel.activeTabID = modifiedTab.id
+      viewModel.isShowingHomeHub = false
+      viewModel.pendingCloseConfirmTabID = modifiedTab.id
+      viewModel.lastExecutedCommandSummary =
+        "앱 종료 전 저장되지 않은 변경사항 확인 대기: \(modifiedTab.fileName)"
+      return .terminateCancel
+    }
+    return .terminateNow
+  }
+
+  func application(_ application: NSApplication, open urls: [URL]) {
+    for url in urls {
+      do {
+        _ = try viewModel.loadFromDisk(url: url)
+      } catch {
+        viewModel.lastErrorMessage = error.localizedDescription
+      }
+    }
+  }
+}
+
 @main
 struct EasyOfficeApplication: App {
-  @State private var viewModel = WorkspaceViewModel()
+  @NSApplicationDelegateAdaptor(EasyOfficeAppDelegate.self) private var appDelegate
+
+  private var viewModel: WorkspaceViewModel {
+    appDelegate.viewModel
+  }
 
   var body: some Scene {
     WindowGroup("EasyOffice") {
@@ -14,6 +45,13 @@ struct EasyOfficeApplication: App {
           minWidth: EasyOfficeDesignTokens.LayoutMetrics.minimumWindowWidth,
           minHeight: EasyOfficeDesignTokens.LayoutMetrics.minimumWindowHeight
         )
+        .onOpenURL { url in
+          do {
+            _ = try viewModel.loadFromDisk(url: url)
+          } catch {
+            viewModel.lastErrorMessage = error.localizedDescription
+          }
+        }
     }
     .commands {
       CommandMenu("파일 및 편집") {

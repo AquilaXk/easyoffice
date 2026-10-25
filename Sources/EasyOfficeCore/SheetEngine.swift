@@ -822,9 +822,17 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     let key = CrossSheetCellKey(sheetNameUpper: targetPage.name.uppercased(), coord: packed)
 
     let activeSheetUpper = name.uppercased()
+    var newlyInsertedActiveKeys: [CrossSheetCellKey] = []
     for activeCoord in context.allVisitedCoordinates() {
-      context.crossVisited.insert(
-        CrossSheetCellKey(sheetNameUpper: activeSheetUpper, coord: activeCoord))
+      let activeKey = CrossSheetCellKey(sheetNameUpper: activeSheetUpper, coord: activeCoord)
+      if context.crossVisited.insert(activeKey).inserted {
+        newlyInsertedActiveKeys.append(activeKey)
+      }
+    }
+    defer {
+      for activeKey in newlyInsertedActiveKeys {
+        context.crossVisited.remove(activeKey)
+      }
     }
     if context.crossVisited.contains(key)
       || context.crossVisited.count > Self.maxFormulaRecursionDepth
@@ -1023,66 +1031,89 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       if case .error = val { return val }
       guard let num = val.numericValue else { return .error("#VALUE!") }
       return .number(-num)
-    case .binaryOp(let op, let lhs, let rhs):
-      if op == "&" {
-        let lhsVal = evaluateASTPreservingEmpty(lhs, context: &context, depth: depth)
-        if case .error = lhsVal { return lhsVal }
-        let rhsVal = evaluateASTPreservingEmpty(rhs, context: &context, depth: depth)
+    case .binaryOp:
+      var chain: [(op: String, rhs: FormulaAST)] = []
+      var cursor = ast
+      while case .binaryOp(let op, let l, let r) = cursor {
+        chain.append((op: op, rhs: r))
+        cursor = l
+      }
+      var accVal: EvaluatedCellValue
+      if chain.last?.op == "&" {
+        accVal = evaluateASTPreservingEmpty(cursor, context: &context, depth: depth)
+      } else {
+        accVal = evaluateAST(cursor, context: &context, depth: depth + 1)
+      }
+      if case .error = accVal { return accVal }
+
+      for (op, rhs) in chain.reversed() {
+        if op == "&" {
+          let rhsVal = evaluateASTPreservingEmpty(rhs, context: &context, depth: depth)
+          if case .error = rhsVal { return rhsVal }
+          accVal = .text(accVal.description + rhsVal.description)
+          continue
+        }
+        let lhsVal = accVal
+        let rhsVal = evaluateAST(rhs, context: &context, depth: depth + 1)
         if case .error = rhsVal { return rhsVal }
-        return .text(lhsVal.description + rhsVal.description)
+        if let lNum = lhsVal.numericValue, let rNum = rhsVal.numericValue {
+          let result: Double
+          switch op {
+          case "+": result = lNum + rNum
+          case "-": result = lNum - rNum
+          case "*": result = lNum * rNum
+          case "/":
+            guard rNum != 0.0 else { return .error("#DIV/0!") }
+            result = lNum / rNum
+          case "^":
+            result = pow(lNum, rNum)
+          default:
+            return .error("#VALUE!")
+          }
+          guard result.isFinite else { return .error("#NUM!") }
+          accVal = .number(result)
+          continue
+        }
+        if op == "+" {
+          if let lDate = Self.parseDateValue(lhsVal),
+            let rNum = rhsVal.numericValue,
+            let days = Self.safeInt(trunc(rNum)),
+            abs(Double(days)) <= 10_000_000,
+            let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: lDate)
+          {
+            accVal = .text(Self.formatUTCDate(shifted))
+            continue
+          }
+          if let rDate = Self.parseDateValue(rhsVal),
+            let lNum = lhsVal.numericValue,
+            let days = Self.safeInt(trunc(lNum)),
+            abs(Double(days)) <= 10_000_000,
+            let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: rDate)
+          {
+            accVal = .text(Self.formatUTCDate(shifted))
+            continue
+          }
+        } else if op == "-" {
+          if let lDate = Self.parseDateValue(lhsVal),
+            let rNum = rhsVal.numericValue,
+            let days = Self.safeInt(trunc(rNum)),
+            abs(Double(days)) <= 10_000_000,
+            let shifted = Self.utcCalendar.date(byAdding: .day, value: -days, to: lDate)
+          {
+            accVal = .text(Self.formatUTCDate(shifted))
+            continue
+          }
+          if let lDate = Self.parseDateValue(lhsVal),
+            let rDate = Self.parseDateValue(rhsVal)
+          {
+            let diff = Self.utcCalendar.dateComponents([.day], from: rDate, to: lDate).day ?? 0
+            accVal = .number(Double(diff))
+            continue
+          }
+        }
+        return .error("#VALUE!")
       }
-      let lhsVal = evaluateAST(lhs, context: &context, depth: depth + 1)
-      if case .error = lhsVal { return lhsVal }
-      let rhsVal = evaluateAST(rhs, context: &context, depth: depth + 1)
-      if case .error = rhsVal { return rhsVal }
-      if let lNum = lhsVal.numericValue, let rNum = rhsVal.numericValue {
-        let result: Double
-        switch op {
-        case "+": result = lNum + rNum
-        case "-": result = lNum - rNum
-        case "*": result = lNum * rNum
-        case "/":
-          guard rNum != 0.0 else { return .error("#DIV/0!") }
-          result = lNum / rNum
-        case "^":
-          result = pow(lNum, rNum)
-        default:
-          return .error("#VALUE!")
-        }
-        guard result.isFinite else { return .error("#NUM!") }
-        return .number(result)
-      }
-      if op == "+" {
-        if let lDate = Self.parseDateValue(lhsVal),
-          let rNum = rhsVal.numericValue,
-          let days = Self.safeInt(trunc(rNum)),
-          let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: lDate)
-        {
-          return .text(Self.formatUTCDate(shifted))
-        }
-        if let rDate = Self.parseDateValue(rhsVal),
-          let lNum = lhsVal.numericValue,
-          let days = Self.safeInt(trunc(lNum)),
-          let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: rDate)
-        {
-          return .text(Self.formatUTCDate(shifted))
-        }
-      } else if op == "-" {
-        if let lDate = Self.parseDateValue(lhsVal),
-          let rNum = rhsVal.numericValue,
-          let days = Self.safeInt(trunc(rNum)),
-          let shifted = Self.utcCalendar.date(byAdding: .day, value: -days, to: lDate)
-        {
-          return .text(Self.formatUTCDate(shifted))
-        }
-        if let lDate = Self.parseDateValue(lhsVal),
-          let rDate = Self.parseDateValue(rhsVal)
-        {
-          let diff = Self.utcCalendar.dateComponents([.day], from: rDate, to: lDate).day ?? 0
-          return .number(Double(diff))
-        }
-      }
-      return .error("#VALUE!")
+      return accVal
 
     case .comparisonOp(let op, let lhs, let rhs):
       var lVal = evaluateASTPreservingEmpty(lhs, context: &context, depth: depth)
