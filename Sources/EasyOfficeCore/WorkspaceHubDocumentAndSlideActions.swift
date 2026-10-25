@@ -1534,4 +1534,369 @@ extension WorkspaceViewModel {
       break
     }
   }
+
+  @discardableResult
+  public func splitParagraph(paragraphID: UUID, atUTF16Offset offset: Int) -> UUID? {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      let pIdx = doc.paragraphs.firstIndex(where: { $0.id == paragraphID })
+    else { return nil }
+
+    recordUndoSnapshot(for: activeTabID)
+    let source = doc.paragraphs[pIdx]
+    let fullText = source.text
+    let utf16 = fullText.utf16
+    let clampedOffset = max(0, min(offset, utf16.count))
+    let splitUTF16Idx =
+      utf16.index(utf16.startIndex, offsetBy: clampedOffset, limitedBy: utf16.endIndex)
+      ?? utf16.endIndex
+    let splitStrIdx = splitUTF16Idx.samePosition(in: fullText) ?? fullText.endIndex
+
+    let prefixText = String(fullText[..<splitStrIdx])
+    let suffixText = String(fullText[splitStrIdx...])
+
+    doc.paragraphs[pIdx].text = prefixText
+    doc.paragraphs[pIdx].runs = []
+
+    let nextStyle: ParagraphStyleRole =
+      (source.style == .title || source.style == .heading1 || source.style == .heading2
+        || source.style == .heading3 || source.style == .officialHeader)
+      ? .body : source.style
+
+    let newParagraph = ParagraphBlock(
+      style: nextStyle,
+      alignment: source.alignment,
+      text: suffixText,
+      fontName: source.fontName,
+      fontSizePt: nextStyle == .body && source.style != .body ? 11.0 : source.fontSizePt,
+      isBold: nextStyle == .body && source.style != .body ? false : source.isBold,
+      isItalic: source.isItalic,
+      isUnderlined: source.isUnderlined,
+      lineSpacingPercent: source.lineSpacingPercent,
+      firstLineIndentPt: source.firstLineIndentPt,
+      leftIndentPt: source.leftIndentPt,
+      listKind: source.listKind,
+      listLevel: source.listLevel,
+      letterSpacingPercent: source.letterSpacingPercent,
+      charWidthScalePercent: source.charWidthScalePercent
+    )
+
+    doc.paragraphs.insert(newParagraph, at: pIdx + 1)
+    selectedParagraphID = newParagraph.id
+    selectedParagraphUTF16Range = 0..<0
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "문단 분할 완료"
+    return newParagraph.id
+  }
+
+  @discardableResult
+  public func mergeParagraphWithPrevious(paragraphID: UUID) -> UUID? {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      let pIdx = doc.paragraphs.firstIndex(where: { $0.id == paragraphID }),
+      pIdx > 0
+    else { return nil }
+
+    recordUndoSnapshot(for: activeTabID)
+    let prevIdx = pIdx - 1
+    let current = doc.paragraphs[pIdx]
+    let prevUTF16Count = doc.paragraphs[prevIdx].text.utf16.count
+    doc.paragraphs[prevIdx].text += current.text
+    doc.paragraphs[prevIdx].runs = []
+
+    let targetPrevID = doc.paragraphs[prevIdx].id
+    for imgIdx in doc.images.indices where doc.images[imgIdx].anchorParagraphID == current.id {
+      doc.images[imgIdx].anchorParagraphID = targetPrevID
+    }
+    for fnIdx in doc.footnotes.indices where doc.footnotes[fnIdx].anchorParagraphID == current.id {
+      doc.footnotes[fnIdx].anchorParagraphID = targetPrevID
+    }
+
+    doc.paragraphs.remove(at: pIdx)
+    selectedParagraphID = targetPrevID
+    selectedParagraphUTF16Range = prevUTF16Count..<prevUTF16Count
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "이전 문단과 병합 완료"
+    return targetPrevID
+  }
+
+  public func selectAdjacentParagraph(from paragraphID: UUID, delta: Int) {
+    guard let tab = activeTab,
+      case .document(let doc) = tab.payload,
+      let pIdx = doc.paragraphs.firstIndex(where: { $0.id == paragraphID })
+    else { return }
+    let nextIdx = max(0, min(doc.paragraphs.count - 1, pIdx + delta))
+    selectedParagraphID = doc.paragraphs[nextIdx].id
+  }
+
+  public func setActiveParagraphFont(fontName: String? = nil, fontSizePt: Double? = nil) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      !doc.paragraphs.isEmpty
+    else { return }
+
+    recordUndoSnapshot(for: activeTabID)
+    let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+    if let fontName {
+      let trimmed = fontName.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        doc.paragraphs[pIdx].fontName = trimmed
+        for rIdx in doc.paragraphs[pIdx].runs.indices {
+          doc.paragraphs[pIdx].runs[rIdx].fontName = trimmed
+        }
+      }
+    }
+    if let fontSizePt, fontSizePt.isFinite {
+      let clampedSize = max(6.0, min(96.0, fontSizePt))
+      doc.paragraphs[pIdx].fontSizePt = clampedSize
+      for rIdx in doc.paragraphs[pIdx].runs.indices {
+        doc.paragraphs[pIdx].runs[rIdx].fontSizePt = clampedSize
+      }
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary =
+      "문단 글꼴 설정 (\(doc.paragraphs[pIdx].fontName) \(Int(doc.paragraphs[pIdx].fontSizePt))pt)"
+  }
+
+  public func setActiveParagraphIndent(leftIndentPt: Double? = nil, firstLineIndentPt: Double? = nil)
+  {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload,
+      !doc.paragraphs.isEmpty
+    else { return }
+
+    recordUndoSnapshot(
+      for: activeTabID,
+      coalescingTargetKey: "doc-indent-\(activeTabID.uuidString)-\(selectedParagraphID?.uuidString ?? "0")"
+    )
+    let pIdx = doc.paragraphs.firstIndex(where: { $0.id == selectedParagraphID }) ?? 0
+    if let leftIndentPt, leftIndentPt.isFinite {
+      doc.paragraphs[pIdx].leftIndentPt = max(0.0, min(144.0, leftIndentPt))
+    }
+    if let firstLineIndentPt, firstLineIndentPt.isFinite {
+      doc.paragraphs[pIdx].firstLineIndentPt = max(0.0, min(144.0, firstLineIndentPt))
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary =
+      "눈금자 들여쓰기 설정 (좌측 \(Int(doc.paragraphs[pIdx].leftIndentPt))pt, 첫 줄 \(Int(doc.paragraphs[pIdx].firstLineIndentPt))pt)"
+  }
+
+  public func visibleDocumentOutlineParagraphs(for doc: OfficeDocumentModel) -> [ParagraphBlock] {
+    var result: [ParagraphBlock] = []
+    var collapsedHeadingLevel: Int? = nil
+
+    func headingLevel(for style: ParagraphStyleRole) -> Int? {
+      switch style {
+      case .title, .officialHeader: return 0
+      case .heading1: return 1
+      case .heading2: return 2
+      case .heading3: return 3
+      case .body, .quote: return nil
+      }
+    }
+
+    for paragraph in doc.paragraphs {
+      let currentLevel = headingLevel(for: paragraph.style)
+      if let activeCollapsedLevel = collapsedHeadingLevel {
+        if let currentLevel, currentLevel <= activeCollapsedLevel {
+          collapsedHeadingLevel = nil
+        } else {
+          continue
+        }
+      }
+      result.append(paragraph)
+      if let currentLevel, collapsedOutlineParagraphIDs.contains(paragraph.id) {
+        collapsedHeadingLevel = currentLevel
+      }
+    }
+    return result
+  }
+
+  public func formattedTableOfContentsEntryTitle(index: Int, rawTitle: String) -> String {
+    let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "\(index + 1)." }
+    let pattern = #"^\d+[\.\)]\s*"#
+    if trimmed.range(of: pattern, options: .regularExpression) != nil {
+      return trimmed
+    }
+    return "\(index + 1). \(trimmed)"
+  }
+
+  public func updateActiveDocumentOfficialHeaderText(_ text: String) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(
+      for: activeTabID,
+      coalescingTargetKey: "doc-official-header-\(activeTabID.uuidString)"
+    )
+    doc.headerText = text
+    if let bannerIdx = doc.paragraphs.firstIndex(where: { $0.style == .officialHeader }) {
+      doc.paragraphs[bannerIdx].text = text
+      doc.paragraphs[bannerIdx].runs = []
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "행정 공문서 두문 텍스트 수정"
+  }
+
+  public func updateActiveDocumentManuscriptFullText(_ fullText: String) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(
+      for: activeTabID,
+      coalescingTargetKey: "doc-manuscript-text-\(activeTabID.uuidString)"
+    )
+    let lines = fullText.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+    if lines.isEmpty {
+      doc.paragraphs = [ParagraphBlock(style: .body, alignment: .leading, text: "")]
+    } else {
+      var updatedParagraphs: [ParagraphBlock] = []
+      for (lineIdx, line) in lines.enumerated() {
+        if doc.paragraphs.indices.contains(lineIdx) {
+          var existing = doc.paragraphs[lineIdx]
+          existing.text = line
+          existing.runs = []
+          updatedParagraphs.append(existing)
+        } else {
+          updatedParagraphs.append(ParagraphBlock(style: .body, alignment: .leading, text: line))
+        }
+      }
+      doc.paragraphs = updatedParagraphs
+    }
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "원고지 본문 텍스트 편집 반영"
+  }
+
+  public func updateSlideContent(
+    slideIndex: Int? = nil,
+    title: String? = nil,
+    subtitle: String? = nil,
+    bulletPoints: [String]? = nil
+  ) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let targetIdx =
+      slideIndex ?? (deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0)
+    guard deck.slides.indices.contains(targetIdx) else { return }
+
+    recordUndoSnapshot(
+      for: activeTabID,
+      coalescingTargetKey: "slide-content-\(activeTabID.uuidString)-\(targetIdx)"
+    )
+    if let title {
+      deck.slides[targetIdx].title = title
+    }
+    if let subtitle {
+      deck.slides[targetIdx].subtitle = subtitle
+    }
+    if let bulletPoints {
+      deck.slides[targetIdx].bulletPoints = bulletPoints
+    }
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "슬라이드 제목·부제목·본문 불릿 편집 반영"
+  }
+
+  public func setActiveSlideMasterLayout(_ layout: SlideMasterLayout) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    let targetIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    recordUndoSnapshot(for: activeTabID)
+    deck.slides[targetIdx].masterLayout = layout
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "슬라이드 마스터 레이아웃 변경: \(layout.rawValue)"
+  }
+
+  public enum DocumentInsertionShapeKind: String, Sendable {
+    case callout
+    case rectangle
+    case flowchart
+  }
+
+  public func insertFootnoteOnActiveDocument(noteText: String) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .document(var doc) = openTabs[idx].payload
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    let anchorID = selectedParagraphID ?? doc.paragraphs.last?.id ?? UUID()
+    let nextNum = doc.footnotes.count + 1
+    doc.footnotes.append(
+      FootnoteItem(number: nextNum, anchorParagraphID: anchorID, text: noteText)
+    )
+    openTabs[idx].payload = .document(doc)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "각주 삽입 완료 (#\(nextNum))"
+  }
+
+  public func insertTableIntoActiveDocument() {
+    executeRibbonCommand("document-insert-table")
+  }
+
+  public func insertShapeOnActiveDocument(
+    kind: DocumentInsertionShapeKind = .callout,
+    caption: String = "다이어그램 도형"
+  ) {
+    insertSampleImageAttachment(caption: caption)
+  }
+
+  public func insertShapeOnActiveSlide(kind: SlideElementKind = .calloutShape) {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .slide(var deck) = openTabs[idx].payload,
+      !deck.slides.isEmpty
+    else { return }
+    recordUndoSnapshot(for: activeTabID)
+    let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
+    let newEl = SlideCanvasElement(
+      title: kind.rawValue,
+      bodyText: "핵심 메시지 강조 도형",
+      x: 520,
+      y: 220,
+      width: 260,
+      height: 110,
+      kind: kind,
+      zIndex: deck.slides[sIdx].elements.count + 1
+    )
+    deck.slides[sIdx].elements.append(newEl)
+    selectedSlideElementID = newEl.id
+    openTabs[idx].payload = .slide(deck)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary = "슬라이드 도형 추가: \(kind.rawValue)"
+  }
+
+  public func mergeActivePDFWithFile(url: URL) throws {
+    guard let activeTabID,
+      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
+      case .pdf(let currentPDF) = openTabs[idx].payload
+    else { return }
+    let data = try Data(contentsOf: url)
+    let externalPDF = try PDFBinarySerializer.decode(from: data)
+    recordUndoSnapshot(for: activeTabID)
+    let merged = currentPDF.merged(with: externalPDF, title: currentPDF.title)
+    openTabs[idx].payload = .pdf(merged)
+    openTabs[idx].isModified = true
+    lastExecutedCommandSummary =
+      "외부 PDF 병합 완료 (\(externalPDF.pages.count)페이지 추가, 총 \(merged.pages.count)페이지)"
+  }
 }

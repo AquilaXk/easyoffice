@@ -382,6 +382,41 @@ struct RightContextInspectorView: View {
     let currentCharScale = activeParagraph?.charWidthScalePercent ?? 100.0
 
     VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
+        FlatToolbarMenu(
+          title: "글꼴: \(activeParagraph?.fontName ?? "Pretendard")",
+          systemImage: "textformat",
+          palette: palette
+        ) {
+          ForEach(
+            [
+              "Pretendard",
+              "AppleSDGothicNeo-Regular",
+              "NanumMyeongjo",
+              "Menlo",
+              "Helvetica Neue",
+            ],
+            id: \.self
+          ) { family in
+            Button(family) {
+              viewModel.setActiveParagraphFont(fontName: family)
+            }
+          }
+        }
+
+        FlatToolbarMenu(
+          title: "크기: \(Int(activeParagraph?.fontSizePt ?? 11))pt",
+          systemImage: "textformat.size",
+          palette: palette
+        ) {
+          ForEach([9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 32.0], id: \.self) { pt in
+            Button("\(Int(pt))pt") {
+              viewModel.setActiveParagraphFont(fontSizePt: pt)
+            }
+          }
+        }
+      }
+
       Text("자간 · 장평 (\(Int(currentLetterSpacing))% / \(Int(currentCharScale))%)")
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
@@ -588,6 +623,24 @@ struct RightContextInspectorView: View {
           }
           inspectorButton("소수점 +1", showsChevron: false, palette: palette) {
             viewModel.adjustSelectedSheetCellDecimalPlaces(delta: 1)
+          }
+        }
+
+        Text("셀 배경색 · 글자색")
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(palette.secondaryText.swiftUIColor)
+        HStack(spacing: 8) {
+          inspectorButton("배경 라벤더", showsChevron: false, palette: palette) {
+            viewModel.setSelectedSheetCellColors(fillHex: "#E8EAF6")
+          }
+          inspectorButton("배경 노랑", showsChevron: false, palette: palette) {
+            viewModel.setSelectedSheetCellColors(fillHex: "#FFF8E1")
+          }
+          inspectorButton("글자 파랑", showsChevron: false, palette: palette) {
+            viewModel.setSelectedSheetCellColors(textHex: "#1A237E")
+          }
+          inspectorButton("색상 해제", showsChevron: false, palette: palette) {
+            viewModel.setSelectedSheetCellColors(clearFill: true, clearText: true)
           }
         }
       }
@@ -874,9 +927,7 @@ struct RightContextInspectorView: View {
         ) {
           ForEach(SlideMasterLayout.allCases, id: \.self) { layout in
             Button(layout.rawValue) {
-              mutateSlideDeck { d in
-                if d.slides.indices.contains(sIdx) { d.slides[sIdx].masterLayout = layout }
-              }
+              viewModel.setActiveSlideMasterLayout(layout)
             }
           }
         }
@@ -940,6 +991,47 @@ struct RightContextInspectorView: View {
         }
 
         VStack(alignment: .leading, spacing: 6) {
+          Text("슬라이드 제목 · 부제목 · 핵심 요점")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+          FlatUnderlineTextField(
+            placeholder: "슬라이드 제목",
+            text: Binding(
+              get: { slide.title },
+              set: { viewModel.updateSlideContent(slideIndex: sIdx, title: $0) }
+            ),
+            width: nil,
+            palette: palette,
+            isSnapshotMode: viewModel.isCanvasSnapshotMode
+          )
+          FlatUnderlineTextField(
+            placeholder: "슬라이드 부제목",
+            text: Binding(
+              get: { slide.subtitle },
+              set: { viewModel.updateSlideContent(slideIndex: sIdx, subtitle: $0) }
+            ),
+            width: nil,
+            palette: palette,
+            isSnapshotMode: viewModel.isCanvasSnapshotMode
+          )
+          FlatUnderlineTextField(
+            placeholder: "핵심 요점 (줄바꿈 또는 | 구분)",
+            text: Binding(
+              get: { slide.bulletPoints.joined(separator: " | ") },
+              set: { raw in
+                let items =
+                  raw
+                  .components(separatedBy: CharacterSet(charactersIn: "|\n"))
+                  .map { $0.trimmingCharacters(in: .whitespaces) }
+                  .filter { !$0.isEmpty }
+                viewModel.updateSlideContent(slideIndex: sIdx, bulletPoints: items)
+              }
+            ),
+            width: nil,
+            palette: palette,
+            isSnapshotMode: viewModel.isCanvasSnapshotMode
+          )
+
           Text("발표자 노트")
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
