@@ -246,6 +246,22 @@ pub(crate) fn tokenize_formula(src: &str) -> Result<Vec<Token>, FormulaError> {
                 while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
                     i += 1;
                 }
+                if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+                    if i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+                        i += 1;
+                        while i < bytes.len() && bytes[i].is_ascii_digit() {
+                            i += 1;
+                        }
+                    } else if i + 2 < bytes.len()
+                        && (bytes[i + 1] == b'+' || bytes[i + 1] == b'-')
+                        && bytes[i + 2].is_ascii_digit()
+                    {
+                        i += 2;
+                        while i < bytes.len() && bytes[i].is_ascii_digit() {
+                            i += 1;
+                        }
+                    }
+                }
                 let val = src[start..i]
                     .parse::<f64>()
                     .map_err(|_| FormulaError::Value)?;

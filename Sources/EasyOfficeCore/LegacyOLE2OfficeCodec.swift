@@ -104,8 +104,13 @@ public enum LegacyOLE2OfficeCodec {
       BitPacking.appendLengthPrefixedUTF16LE(p.style.rawValue, to: &wordStream)
       BitPacking.appendLengthPrefixedUTF16LE(p.alignment.rawValue, to: &wordStream)
       BitPacking.appendLengthPrefixedUTF16LE(p.fontName, to: &wordStream)
-      BitPacking.appendUInt32LE(UInt32((p.fontSizePt * 100.0).rounded()), to: &wordStream)
-      BitPacking.appendUInt32LE(UInt32((p.lineSpacingPercent * 100.0).rounded()), to: &wordStream)
+      BitPacking.appendUInt32LE(
+        XMLDocumentModelMapper.safeClampedUInt32(p.fontSizePt * 100.0, min: 100, max: 1_000_000),
+        to: &wordStream)
+      BitPacking.appendUInt32LE(
+        XMLDocumentModelMapper.safeClampedUInt32(
+          p.lineSpacingPercent * 100.0, min: 5_000, max: 1_000_000),
+        to: &wordStream)
       var flags: UInt8 = 0
       if p.isBold { flags |= 0x01 }
       if p.isItalic { flags |= 0x02 }
@@ -116,10 +121,20 @@ public enum LegacyOLE2OfficeCodec {
 
     BitPacking.appendUInt32LE(UInt32(doc.tables.count), to: &wordStream)
     for tbl in doc.tables {
+      guard tbl.rows.count <= HWP5BinaryCodec.maxHWP5TableRows else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "Word 바이너리 표 행 개수(\(tbl.rows.count))가 허용 상한(\(HWP5BinaryCodec.maxHWP5TableRows))을 초과했습니다."
+        )
+      }
       BitPacking.appendLengthPrefixedUTF16LE(tbl.caption, to: &wordStream)
       wordStream.append(tbl.hasHeaderRow ? 1 : 0)
       BitPacking.appendUInt16LE(UInt16(tbl.rows.count), to: &wordStream)
       for row in tbl.rows {
+        guard row.count <= HWP5BinaryCodec.maxHWP5TableColumns else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "Word 바이너리 표 열 개수(\(row.count))가 허용 상한(\(HWP5BinaryCodec.maxHWP5TableColumns))을 초과했습니다."
+          )
+        }
         BitPacking.appendUInt16LE(UInt16(row.count), to: &wordStream)
         for cell in row {
           BitPacking.appendLengthPrefixedUTF16LE(cell, to: &wordStream)
@@ -169,117 +184,198 @@ public enum LegacyOLE2OfficeCodec {
     if fcMac + 4 <= wordStream.count,
       (try? BitPacking.readUInt32LE(from: wordStream, at: fcMac)) == wordStructuredTrailerMagic
     {
-      var cursor = fcMac + 4
-      let title = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-      let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-      let headerText = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-      let footerText = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-      guard cursor < wordStream.count else {
-        throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 메타데이터가 절단되었습니다.")
-      }
-      let trackChanges = wordStream[wordStream.startIndex + cursor] != 0
-      cursor += 1
+      var budgetViolationError: EasyOfficeError?
+      do {
+        var cursor = fcMac + 4
+        let title = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+        let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+        let headerText = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+        let footerText = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+        guard cursor < wordStream.count else {
+          throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 메타데이터가 절단되었습니다.")
+        }
+        let trackChanges = wordStream[wordStream.startIndex + cursor] != 0
+        cursor += 1
 
-      let pCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor))
-      cursor += 4
-      guard pCount >= 0, pCount <= (wordStream.count - cursor) / 13 else {
+        let pCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor))
+        cursor += 4
+        guard pCount >= 0, pCount <= (wordStream.count - cursor) / 13 else {
+          throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 문단 개수가 스트림 범위를 초과했습니다.")
+        }
+        var paragraphs: [ParagraphBlock] = []
+        paragraphs.reserveCapacity(min(pCount, 4096))
+        for _ in 0..<pCount {
+          let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+          let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+          let fontName = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+          let sizeX100 = try BitPacking.readUInt32LE(from: wordStream, at: cursor)
+          cursor += 4
+          let spacingX100 = try BitPacking.readUInt32LE(from: wordStream, at: cursor)
+          cursor += 4
+          guard cursor < wordStream.count else {
+            throw EasyOfficeError.corruptedContainer(detail: "Word 문단 스타일 플래그가 절단되었습니다.")
+          }
+          let styleFlags = wordStream[wordStream.startIndex + cursor]
+          cursor += 1
+          let text = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+          paragraphs.append(
+            ParagraphBlock(
+              style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
+              alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
+              text: text,
+              fontName: fontName,
+              fontSizePt: Double(sizeX100) / 100.0,
+              isBold: (styleFlags & 0x01) != 0,
+              isItalic: (styleFlags & 0x02) != 0,
+              isUnderlined: (styleFlags & 0x04) != 0,
+              lineSpacingPercent: Double(spacingX100) / 100.0
+            ))
+        }
+
+        let tCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor))
+        cursor += 4
+        guard tCount >= 0, tCount <= (wordStream.count - cursor) / 7 else {
+          throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 표 개수가 스트림 범위를 초과했습니다.")
+        }
+        var tables: [DocumentTableBlock] = []
+        tables.reserveCapacity(min(tCount, 1024))
+        var totalDecodedTableCells = 0
+        for _ in 0..<tCount {
+          let caption = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
+          guard cursor < wordStream.count else {
+            throw EasyOfficeError.corruptedContainer(detail: "Word 표 헤더가 절단되었습니다.")
+          }
+          let hasHeader = wordStream[wordStream.startIndex + cursor] != 0
+          cursor += 1
+          let rowCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cursor))
+          cursor += 2
+          guard rowCount >= 0, rowCount <= HWP5BinaryCodec.maxHWP5TableRows,
+            rowCount <= (wordStream.count - cursor) / 2
+          else {
+            throw EasyOfficeError.corruptedContainer(detail: "Word 표 행 개수가 스트림 범위를 초과했습니다.")
+          }
+          var rows: [[String]] = []
+          for _ in 0..<rowCount {
+            let colCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cursor))
+            cursor += 2
+            guard colCount >= 0, colCount <= HWP5BinaryCodec.maxHWP5TableColumns,
+              colCount <= (wordStream.count - cursor) / 4
+            else {
+              throw EasyOfficeError.corruptedContainer(detail: "Word 표 열 개수가 스트림 범위를 초과했습니다.")
+            }
+            totalDecodedTableCells += colCount
+            guard totalDecodedTableCells <= HWP5BinaryCodec.maxTotalHWP5TableCells else {
+              let err = EasyOfficeError.corruptedContainer(detail: "Word 표 누적 셀 개수가 허용 상한을 초과했습니다.")
+              budgetViolationError = err
+              throw err
+            }
+            var rowCells: [String] = []
+            for _ in 0..<colCount {
+              rowCells.append(
+                try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor))
+            }
+            rows.append(rowCells)
+          }
+          tables.append(DocumentTableBlock(caption: caption, rows: rows, hasHeaderRow: hasHeader))
+        }
+
+        var docModel = OfficeDocumentModel(
+          title: title,
+          format: .doc,
+          paperSize: PaperSizePreset(rawValue: paperRaw) ?? .a4,
+          headerText: headerText,
+          footerText: footerText,
+          paragraphs: paragraphs,
+          tables: tables,
+          trackChangesEnabled: trackChanges
+        )
+
+        if cursor + 8 <= wordStream.count,
+          (try? BitPacking.readUInt32LE(from: wordStream, at: cursor)) == wordExtendedMetaMagic
+        {
+          let metaLen = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor + 4))
+          let metaStart = cursor + 8
+          if metaLen >= 0, metaStart + metaLen <= wordStream.count {
+            let slice = Data(
+              wordStream[
+                (wordStream.startIndex + metaStart)..<(wordStream.startIndex + metaStart + metaLen)])
+            if let envelope = try? JSONDecoder().decode(
+              ExtendedDocumentMetadataEnvelope.self, from: slice)
+            {
+              envelope.apply(to: &docModel)
+            }
+            cursor = metaStart + metaLen
+          }
+        }
+
+        guard cursor == wordStream.count else {
+          throw EasyOfficeError.corruptedContainer(detail: "Word 확장 트레일러 잔여 바이트 불일치")
+        }
+        return docModel
+      } catch {
+        if let budgetErr = budgetViolationError {
+          throw budgetErr
+        }
+      }
+
+      var cCursor = fcMac + 4
+      let cTitle = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cCursor)
+      let pCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cCursor))
+      cCursor += 4
+      guard pCount >= 0, pCount <= (wordStream.count - cCursor) / 4 else {
         throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 문단 개수가 스트림 범위를 초과했습니다.")
       }
       var paragraphs: [ParagraphBlock] = []
       paragraphs.reserveCapacity(min(pCount, 4096))
       for _ in 0..<pCount {
-        let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-        let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-        let fontName = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-        let sizeX100 = try BitPacking.readUInt32LE(from: wordStream, at: cursor)
-        cursor += 4
-        let spacingX100 = try BitPacking.readUInt32LE(from: wordStream, at: cursor)
-        cursor += 4
-        guard cursor < wordStream.count else {
-          throw EasyOfficeError.corruptedContainer(detail: "Word 문단 스타일 플래그가 절단되었습니다.")
-        }
-        let styleFlags = wordStream[wordStream.startIndex + cursor]
-        cursor += 1
-        let text = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-        paragraphs.append(
-          ParagraphBlock(
-            style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
-            alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
-            text: text,
-            fontName: fontName,
-            fontSizePt: Double(sizeX100) / 100.0,
-            isBold: (styleFlags & 0x01) != 0,
-            isItalic: (styleFlags & 0x02) != 0,
-            isUnderlined: (styleFlags & 0x04) != 0,
-            lineSpacingPercent: Double(spacingX100) / 100.0
-          ))
-      }
-
-      let tCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor))
-      cursor += 4
-      guard tCount >= 0, tCount <= (wordStream.count - cursor) / 7 else {
-        throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 표 개수가 스트림 범위를 초과했습니다.")
+        let pText = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cCursor)
+        paragraphs.append(ParagraphBlock(text: pText))
       }
       var tables: [DocumentTableBlock] = []
-      tables.reserveCapacity(min(tCount, 1024))
-      for _ in 0..<tCount {
-        let caption = try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor)
-        guard cursor < wordStream.count else {
-          throw EasyOfficeError.corruptedContainer(detail: "Word 표 헤더가 절단되었습니다.")
+      if cCursor + 4 <= wordStream.count {
+        let tCount = Int(try BitPacking.readUInt32LE(from: wordStream, at: cCursor))
+        cCursor += 4
+        guard tCount >= 0, tCount <= (wordStream.count - cCursor) / 2 else {
+          throw EasyOfficeError.corruptedContainer(detail: "Word 트레일러 표 개수가 스트림 범위를 초과했습니다.")
         }
-        let hasHeader = wordStream[wordStream.startIndex + cursor] != 0
-        cursor += 1
-        let rowCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cursor))
-        cursor += 2
-        guard rowCount >= 0, rowCount <= (wordStream.count - cursor) / 2 else {
-          throw EasyOfficeError.corruptedContainer(detail: "Word 표 행 개수가 스트림 범위를 초과했습니다.")
-        }
-        var rows: [[String]] = []
-        for _ in 0..<rowCount {
-          let colCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cursor))
-          cursor += 2
-          guard colCount >= 0, colCount <= (wordStream.count - cursor) / 4 else {
-            throw EasyOfficeError.corruptedContainer(detail: "Word 표 열 개수가 스트림 범위를 초과했습니다.")
+        var totalDecodedTableCells = 0
+        for _ in 0..<tCount {
+          let rowCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cCursor))
+          cCursor += 2
+          guard rowCount >= 0, rowCount <= HWP5BinaryCodec.maxHWP5TableRows,
+            rowCount <= (wordStream.count - cCursor) / 2
+          else {
+            throw EasyOfficeError.corruptedContainer(detail: "Word 표 행 개수가 스트림 범위를 초과했습니다.")
           }
-          var rowCells: [String] = []
-          for _ in 0..<colCount {
-            rowCells.append(
-              try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cursor))
+          var rows: [[String]] = []
+          for _ in 0..<rowCount {
+            let colCount = Int(try BitPacking.readUInt16LE(from: wordStream, at: cCursor))
+            cCursor += 2
+            guard colCount >= 0, colCount <= HWP5BinaryCodec.maxHWP5TableColumns,
+              colCount <= (wordStream.count - cCursor) / 4
+            else {
+              throw EasyOfficeError.corruptedContainer(detail: "Word 표 열 개수가 스트림 범위를 초과했습니다.")
+            }
+            totalDecodedTableCells += colCount
+            guard totalDecodedTableCells <= HWP5BinaryCodec.maxTotalHWP5TableCells else {
+              throw EasyOfficeError.corruptedContainer(detail: "Word 표 누적 셀 개수가 허용 상한을 초과했습니다.")
+            }
+            var rowCells: [String] = []
+            for _ in 0..<colCount {
+              rowCells.append(
+                try BitPacking.readLengthPrefixedUTF16LE(from: wordStream, offset: &cCursor))
+            }
+            rows.append(rowCells)
           }
-          rows.append(rowCells)
+          tables.append(DocumentTableBlock(caption: "", rows: rows, hasHeaderRow: true))
         }
-        tables.append(DocumentTableBlock(caption: caption, rows: rows, hasHeaderRow: hasHeader))
       }
-
-      var docModel = OfficeDocumentModel(
-        title: title,
+      return OfficeDocumentModel(
+        title: cTitle,
         format: .doc,
-        paperSize: PaperSizePreset(rawValue: paperRaw) ?? .a4,
-        headerText: headerText,
-        footerText: footerText,
         paragraphs: paragraphs,
-        tables: tables,
-        trackChangesEnabled: trackChanges
+        tables: tables
       )
-
-      if cursor + 8 <= wordStream.count,
-        (try? BitPacking.readUInt32LE(from: wordStream, at: cursor)) == wordExtendedMetaMagic
-      {
-        let metaLen = Int(try BitPacking.readUInt32LE(from: wordStream, at: cursor + 4))
-        let metaStart = cursor + 8
-        if metaLen >= 0, metaStart + metaLen <= wordStream.count {
-          let slice = Data(
-            wordStream[
-              (wordStream.startIndex + metaStart)..<(wordStream.startIndex + metaStart + metaLen)])
-          if let envelope = try? JSONDecoder().decode(
-            ExtendedDocumentMetadataEnvelope.self, from: slice)
-          {
-            envelope.apply(to: &docModel)
-          }
-        }
-      }
-
-      return docModel
     }
 
     let textBytesLen = fcMac - fcMin
@@ -326,12 +422,13 @@ public enum LegacyOLE2OfficeCodec {
     return OfficeDocumentModel(title: "Word 문서", format: .doc, paragraphs: paragraphs)
   }
 
-  // MARK: 2. BIFF8 Spreadsheet (.xls) — BOF / DIMENSIONS / SST / LABELSST / RK / FORMULA / NUMBER / LABEL / EOF
+  // MARK: 2. BIFF8 Spreadsheet (.xls) — BOF / DIMENSIONS / SST / LABELSST / RK / MULRK / FORMULA / NUMBER / LABEL / EOF
 
   public static let biff8OpcodeFormula: UInt16 = 0x0006
   public static let biff8OpcodeEOF: UInt16 = 0x000A
   public static let biff8OpcodeFilePass: UInt16 = 0x002F
   public static let biff8OpcodeBoundSheet: UInt16 = 0x0085
+  public static let biff8OpcodeMulRK: UInt16 = 0x00BD
   public static let biff8OpcodeSST: UInt16 = 0x00FC
   public static let biff8OpcodeLabelSST: UInt16 = 0x00FD
   public static let biff8OpcodeDimensions: UInt16 = 0x0200
@@ -341,12 +438,29 @@ public enum LegacyOLE2OfficeCodec {
   public static let biff8OpcodeRK: UInt16 = 0x027E
   public static let biff8OpcodeBOF: UInt16 = 0x0809
   public static let biff8OpcodeExtendedMeta: UInt16 = 0x0868
+  public static let maxBIFF8Rows = 65_536
+  public static let maxBIFF8Columns = 256
 
   private static func formatBIFF8Numeric(_ num: Double) -> String {
     if num.rounded() == num && abs(num) < 1e15 {
       return String(Int64(num))
     }
     return String(num)
+  }
+
+  private static func decodeRKValue(_ rkRaw: UInt32) -> Double {
+    var numVal: Double
+    if (rkRaw & 0x02) != 0 {
+      let signedInt = Int32(bitPattern: rkRaw) >> 2
+      numVal = Double(signedInt)
+    } else {
+      let floatBits = UInt64(rkRaw & ~0x03) << 32
+      numVal = Double(bitPattern: floatBits)
+    }
+    if (rkRaw & 0x01) != 0 {
+      numVal /= 100.0
+    }
+    return numVal
   }
 
   private static func biff8ErrorCodeString(_ code: UInt8) -> String {
@@ -363,9 +477,59 @@ public enum LegacyOLE2OfficeCodec {
   }
 
   public static func encodeBIFF8Worksheet(_ sheet: WorksheetModel) throws -> Data {
+    let nameUnitsCount = sheet.name.utf16.count
+    guard nameUnitsCount <= 255 else {
+      throw EasyOfficeError.corruptedContainer(
+        detail: "BIFF8 시트 이름 길이(\(nameUnitsCount))가 255 UTF-16 코드 유닛 한도를 초과했습니다.")
+    }
+
+    let sortedCoords = sheet.cellsByCoordinate.keys.sorted()
+    for coord in sortedCoords {
+      guard coord.row >= 0, coord.row < maxBIFF8Rows,
+        coord.column >= 0, coord.column < maxBIFF8Columns
+      else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "BIFF8(.xls) 워크시트 좌표(\(coord.row), \(coord.column))가 65,536행×256열 규격 한도를 초과했습니다.")
+      }
+    }
+
     var stream = Data()
 
-    // 1. BOF record (0x0809, length 16)
+    // 1. Workbook Globals Substream: BOF record (0x0809, length 16, dt = 0x0005)
+    BitPacking.appendUInt16LE(biff8OpcodeBOF, to: &stream)
+    BitPacking.appendUInt16LE(16, to: &stream)
+    BitPacking.appendUInt16LE(0x0600, to: &stream)  // BIFF8 version
+    BitPacking.appendUInt16LE(0x0005, to: &stream)  // Workbook Globals substream
+    BitPacking.appendUInt16LE(0x0DBB, to: &stream)  // build ID
+    BitPacking.appendUInt16LE(0x07CC, to: &stream)  // build year
+    BitPacking.appendUInt32LE(0, to: &stream)
+    BitPacking.appendUInt32LE(0x0006, to: &stream)
+
+    // 2. BOUNDSHEET record (0x0085) with standard ShortXLUnicodeString (1-byte cch + 1-byte grbit=0x01)
+    let nameBytes = BitPacking.encodeUTF16LE(sheet.name)
+    guard 8 + nameBytes.count <= Int(UInt16.max) else {
+      throw EasyOfficeError.corruptedContainer(detail: "BIFF8 시트 이름 길이가 레코드 한도를 초과했습니다.")
+    }
+    let boundSheetLen = UInt16(8 + nameBytes.count)
+    BitPacking.appendUInt16LE(biff8OpcodeBoundSheet, to: &stream)
+    BitPacking.appendUInt16LE(boundSheetLen, to: &stream)
+    let lbPlyPosOffset = stream.count
+    BitPacking.appendUInt32LE(0, to: &stream)  // lbPlyPos (patched to Worksheet BOF offset below)
+    stream.append(0)  // hsState: visible
+    stream.append(0)  // dt: worksheet
+    stream.append(UInt8(nameUnitsCount))  // 1-byte cch
+    stream.append(0x01)  // grbit = 0x01 (uncompressed UTF-16LE)
+    stream.append(nameBytes)
+
+    // 3. Workbook Globals EOF record (0x000A, length 0)
+    BitPacking.appendUInt16LE(biff8OpcodeEOF, to: &stream)
+    BitPacking.appendUInt16LE(0, to: &stream)
+
+    // Patch lbPlyPos in BOUNDSHEET to point to the start of the Worksheet substream
+    let worksheetSubstreamOffset = UInt32(stream.count)
+    try BitPacking.writeUInt32LE(worksheetSubstreamOffset, into: &stream, at: lbPlyPosOffset)
+
+    // 4. Worksheet Substream: BOF record (0x0809, length 16, dt = 0x0010)
     BitPacking.appendUInt16LE(biff8OpcodeBOF, to: &stream)
     BitPacking.appendUInt16LE(16, to: &stream)
     BitPacking.appendUInt16LE(0x0600, to: &stream)  // BIFF8 version
@@ -375,22 +539,7 @@ public enum LegacyOLE2OfficeCodec {
     BitPacking.appendUInt32LE(0, to: &stream)
     BitPacking.appendUInt32LE(0x0006, to: &stream)
 
-    // 2. BOUNDSHEET record (0x0085) storing UTF-16LE sheet name
-    let nameBytes = BitPacking.encodeUTF16LE(sheet.name)
-    guard 8 + nameBytes.count <= Int(UInt16.max) else {
-      throw EasyOfficeError.corruptedContainer(detail: "BIFF8 시트 이름 길이가 레코드 한도를 초과했습니다.")
-    }
-    let boundSheetLen = UInt16(8 + nameBytes.count)
-    BitPacking.appendUInt16LE(biff8OpcodeBoundSheet, to: &stream)
-    BitPacking.appendUInt16LE(boundSheetLen, to: &stream)
-    BitPacking.appendUInt32LE(0, to: &stream)  // lbPlyPos
-    stream.append(0)  // visible
-    stream.append(0)  // worksheet
-    BitPacking.appendUInt16LE(UInt16(sheet.name.utf16.count), to: &stream)
-    stream.append(nameBytes)
-
-    // 3. DIMENSIONS record (0x0200, length 14) — single-pass min/max over sortedCoords
-    let sortedCoords = sheet.cellsByCoordinate.keys.sorted()
+    // 5. DIMENSIONS record (0x0200, length 14) — single-pass min/max over sortedCoords
     var minRow = 0
     var maxRow = 0
     var minCol = 0
@@ -420,11 +569,11 @@ public enum LegacyOLE2OfficeCodec {
     BitPacking.appendUInt16LE(lastColPlus1, to: &stream)
     BitPacking.appendUInt16LE(0, to: &stream)
 
-    // 4. Cell records: NUMBER (0x0203) for numbers, LABEL (0x0204) for strings and formulas
+    // 6. Cell records: NUMBER (0x0203) for numbers, LABEL (0x0204) with XLUnicodeString for strings and formulas
     for coord in sortedCoords {
       guard let raw = sheet.cellsByCoordinate[coord], !raw.isEmpty else { continue }
-      let row16 = UInt16(clamping: coord.row)
-      let col16 = UInt16(clamping: coord.column)
+      let row16 = UInt16(coord.row)
+      let col16 = UInt16(coord.column)
 
       if !raw.hasPrefix("="), let num = Double(raw), num.isFinite {
         BitPacking.appendUInt16LE(biff8OpcodeNumber, to: &stream)
@@ -434,22 +583,24 @@ public enum LegacyOLE2OfficeCodec {
         BitPacking.appendUInt16LE(0, to: &stream)  // xf index
         BitPacking.appendUInt64LE(num.bitPattern, to: &stream)
       } else {
+        let rawUTF16Count = raw.utf16.count
         let textUTF16 = BitPacking.encodeUTF16LE(raw)
-        guard 8 + textUTF16.count <= Int(UInt16.max) else {
+        guard rawUTF16Count <= Int(UInt16.max), 9 + textUTF16.count <= Int(UInt16.max) else {
           throw EasyOfficeError.corruptedContainer(detail: "BIFF8 셀 문자열 길이가 16비트 레코드 한도를 초과했습니다.")
         }
-        let recLen = UInt16(8 + textUTF16.count)
+        let recLen = UInt16(9 + textUTF16.count)
         BitPacking.appendUInt16LE(biff8OpcodeLabel, to: &stream)
         BitPacking.appendUInt16LE(recLen, to: &stream)
         BitPacking.appendUInt16LE(row16, to: &stream)
         BitPacking.appendUInt16LE(col16, to: &stream)
         BitPacking.appendUInt16LE(0, to: &stream)  // xf index
-        BitPacking.appendUInt16LE(UInt16(raw.utf16.count), to: &stream)
+        BitPacking.appendUInt16LE(UInt16(rawUTF16Count), to: &stream)
+        stream.append(0x01)  // XLUnicodeString grbit = 0x01 (UTF-16LE)
         stream.append(textUTF16)
       }
     }
 
-    // 5. Extended worksheet metadata record (0x0868)
+    // 7. Extended worksheet metadata record (0x0868)
     let extEnvelope = BIFF8ExtendedMetadataEnvelope(from: sheet)
     if let extBytes = try? JSONEncoder().encode(extEnvelope),
       !extBytes.isEmpty,
@@ -460,7 +611,7 @@ public enum LegacyOLE2OfficeCodec {
       stream.append(extBytes)
     }
 
-    // 6. EOF record (0x000A, length 0)
+    // 8. Worksheet EOF record (0x000A, length 0)
     BitPacking.appendUInt16LE(biff8OpcodeEOF, to: &stream)
     BitPacking.appendUInt16LE(0, to: &stream)
 
@@ -632,18 +783,25 @@ public enum LegacyOLE2OfficeCodec {
         let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
         let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
         let rkRaw = try BitPacking.readUInt32LE(from: workbook, at: payloadStart + 6)
-        var numVal: Double
-        if (rkRaw & 0x02) != 0 {
-          let signedInt = Int32(bitPattern: rkRaw) >> 2
-          numVal = Double(signedInt)
-        } else {
-          let floatBits = UInt64(rkRaw & ~0x03) << 32
-          numVal = Double(bitPattern: floatBits)
-        }
-        if (rkRaw & 0x01) != 0 {
-          numVal /= 100.0
-        }
+        let numVal = decodeRKValue(rkRaw)
         try currentSheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(numVal))
+
+      case biff8OpcodeMulRK:
+        guard length >= 12 else {
+          throw EasyOfficeError.corruptedContainer(detail: "BIFF8 MULRK 레코드 길이 오류: \(length)")
+        }
+        let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
+        let firstCol = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
+        let lastCol = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadEnd - 2))
+        var rkCursor = payloadStart + 4
+        var col = firstCol
+        while rkCursor + 6 <= payloadEnd - 2 && col <= lastCol {
+          let rkRaw = try BitPacking.readUInt32LE(from: workbook, at: rkCursor + 2)
+          let numVal = decodeRKValue(rkRaw)
+          try currentSheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(numVal))
+          rkCursor += 6
+          col += 1
+        }
 
       case biff8OpcodeFormula:
         guard length >= 14 else {
@@ -651,32 +809,48 @@ public enum LegacyOLE2OfficeCodec {
         }
         let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
         let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
-        let fExprO = try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 12)
-        if fExprO == 0xFFFF {
-          let valueType = workbook[workbook.startIndex + payloadStart + 6]
-          switch valueType {
-          case 0x00:
-            pendingFormulaCoord = (row: row, col: col)
-          case 0x01:
+        var setFormulaExpr = false
+        if length >= 18 {
+          let cce = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 14))
+          if cce > 0, cce % 2 == 0, payloadStart + 16 + cce <= payloadEnd,
+            let expr = try? BitPacking.decodeUTF16LE(
+              from: workbook, at: payloadStart + 16, byteLength: cce),
+            expr.hasPrefix("=")
+          {
+            try currentSheet.setCell(row: row, column: col, rawValue: expr)
+            setFormulaExpr = true
+          }
+        }
+        if !setFormulaExpr {
+          let fExprO = try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 12)
+          if fExprO == 0xFFFF {
+            let valueType = workbook[workbook.startIndex + payloadStart + 6]
+            switch valueType {
+            case 0x00:
+              pendingFormulaCoord = (row: row, col: col)
+            case 0x01:
+              pendingFormulaCoord = nil
+              let boolByte = workbook[workbook.startIndex + payloadStart + 8]
+              try currentSheet.setCell(
+                row: row, column: col, rawValue: boolByte != 0 ? "TRUE" : "FALSE")
+            case 0x02:
+              pendingFormulaCoord = nil
+              let errByte = workbook[workbook.startIndex + payloadStart + 8]
+              try currentSheet.setCell(
+                row: row, column: col, rawValue: biff8ErrorCodeString(errByte))
+            default:
+              pendingFormulaCoord = nil
+            }
+          } else {
             pendingFormulaCoord = nil
-            let boolByte = workbook[workbook.startIndex + payloadStart + 8]
-            try currentSheet.setCell(
-              row: row, column: col, rawValue: boolByte != 0 ? "TRUE" : "FALSE")
-          case 0x02:
-            pendingFormulaCoord = nil
-            let errByte = workbook[workbook.startIndex + payloadStart + 8]
-            try currentSheet.setCell(
-              row: row, column: col, rawValue: biff8ErrorCodeString(errByte))
-          default:
-            pendingFormulaCoord = nil
+            let bits = try BitPacking.readUInt64LE(from: workbook, at: payloadStart + 6)
+            let num = Double(bitPattern: bits)
+            if num.isFinite {
+              try currentSheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
+            }
           }
         } else {
           pendingFormulaCoord = nil
-          let bits = try BitPacking.readUInt64LE(from: workbook, at: payloadStart + 6)
-          let num = Double(bitPattern: bits)
-          if num.isFinite {
-            try currentSheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
-          }
         }
 
       case biff8OpcodeString:
@@ -724,12 +898,32 @@ public enum LegacyOLE2OfficeCodec {
         let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
         let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
         let charCount = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 6))
-        let byteLen = charCount * 2
-        guard payloadStart + 8 + byteLen <= payloadEnd else {
-          throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABEL 문자열 길이가 레코드 경계를 초과합니다.")
+        let str: String
+        if payloadStart + 9 <= payloadEnd {
+          let grbit = workbook[workbook.startIndex + payloadStart + 8]
+          if (grbit & 0x01) != 0, payloadStart + 9 + charCount * 2 == payloadEnd {
+            str = try BitPacking.decodeUTF16LE(
+              from: workbook, at: payloadStart + 9, byteLength: charCount * 2)
+          } else if grbit == 0x00, payloadStart + 9 + charCount == payloadEnd {
+            let slice = workbook[
+              (workbook.startIndex + payloadStart + 9)..<(workbook.startIndex + payloadEnd)]
+            str = String(decoding: slice.map { UInt16($0) }, as: UTF16.self)
+          } else {
+            let byteLen = charCount * 2
+            guard payloadStart + 8 + byteLen <= payloadEnd else {
+              throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABEL 문자열 길이가 레코드 경계를 초과합니다.")
+            }
+            str = try BitPacking.decodeUTF16LE(
+              from: workbook, at: payloadStart + 8, byteLength: byteLen)
+          }
+        } else {
+          let byteLen = charCount * 2
+          guard payloadStart + 8 + byteLen <= payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABEL 문자열 길이가 레코드 경계를 초과합니다.")
+          }
+          str = try BitPacking.decodeUTF16LE(
+            from: workbook, at: payloadStart + 8, byteLength: byteLen)
         }
-        let str = try BitPacking.decodeUTF16LE(
-          from: workbook, at: payloadStart + 8, byteLength: byteLen)
         try currentSheet.setCell(row: row, column: col, rawValue: str)
 
       case biff8OpcodeExtendedMeta:
@@ -783,7 +977,7 @@ public enum LegacyOLE2OfficeCodec {
     return result
   }
 
-  // MARK: 3. Presentation Binary (.ppt) — RT_Document (1000) / RT_Slide (1006) / RT_SlideAtom (1007) / RT_TextCharsAtom (4000)
+  // MARK: 3. Presentation Binary (.ppt) — RT_Document (1000) / RT_Slide (1006) / RT_SlideAtom (1007) / RT_TextCharsAtom (4000) / RT_TextBytesAtom (4008)
 
   public static let pptRecordDocument: UInt16 = 1000
   public static let pptRecordSlide: UInt16 = 1006
@@ -1099,7 +1293,6 @@ public enum LegacyOLE2OfficeCodec {
               )
             }
           }
-
           sCursor = sAtomEnd
         }
       }

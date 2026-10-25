@@ -1310,8 +1310,9 @@ public struct DocumentEditorDetailPaneView: View {
     palette: WorkspaceThemePalette
   ) -> AttributedString {
     var combined = AttributedString()
-    if paragraph.firstLineIndentPt > 0 {
-      let spaceCount = max(1, min(12, Int(round(paragraph.firstLineIndentPt / 6.0))))
+    if paragraph.firstLineIndentPt.isFinite && paragraph.firstLineIndentPt > 0 {
+      let spaceCount = XMLDocumentModelMapper.safeClampedInt(
+        round(paragraph.firstLineIndentPt / 6.0), min: 1, max: 12)
       combined.append(AttributedString(String(repeating: " ", count: spaceCount)))
     }
     for run in paragraph.effectiveRuns {

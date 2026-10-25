@@ -167,7 +167,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<f64, FormulaError> {
-        let val = self.eval_expr_ctx(arg, ctx, depth + 1);
+        let val = self.eval_expr_ctx(arg, ctx, depth);
         if let EvaluatedCellValue::Error(e) = val {
             return Err(e);
         }
@@ -180,7 +180,7 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
-        let val = self.eval_expr_ctx(arg, ctx, depth + 1);
+        let val = self.eval_expr_ctx(arg, ctx, depth);
         if let EvaluatedCellValue::Error(e) = val {
             return Err(e);
         }
@@ -245,7 +245,7 @@ impl SheetEngine {
             (min_r + dr as u32, min_c + dc as u32)
         };
         let coord = PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-        Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1))
+        Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth))
     }
 
     #[inline]
@@ -311,7 +311,7 @@ impl SheetEngine {
                     for r in min_r..=max_r {
                         let coord =
                             PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-                        let v = self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1);
+                        let v = self.eval_sheet_coord(sheet_opt, coord, ctx, depth);
                         if let EvaluatedCellValue::Error(e) = v {
                             return Err(e);
                         }
@@ -323,7 +323,7 @@ impl SheetEngine {
                     for c in min_c..=max_c {
                         let coord =
                             PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-                        let v = self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1);
+                        let v = self.eval_sheet_coord(sheet_opt, coord, ctx, depth);
                         if let EvaluatedCellValue::Error(e) = v {
                             return Err(e);
                         }
@@ -451,12 +451,7 @@ impl<'a> CompiledCriteria<'a> {
             Self::TextNe(ref rhs_lower) => !Self::cell_eq_lowercase(cell, rhs_lower),
             Self::Wildcard(ref pat) => match cell {
                 EvaluatedCellValue::Text(s) => wildcard_match(s, pat),
-                EvaluatedCellValue::Empty => wildcard_match("", pat),
-                EvaluatedCellValue::Boolean(b) => {
-                    wildcard_match(if *b { "TRUE" } else { "FALSE" }, pat)
-                }
-                EvaluatedCellValue::Error(_) => false,
-                EvaluatedCellValue::Number(_) => wildcard_match(&cell.to_display_string(), pat),
+                _ => false,
             },
             Self::Fallback(crit) => matches_criteria(cell, crit),
         }
@@ -499,14 +494,14 @@ impl SheetEngine {
                 let mut lane = 0usize;
                 for dr in 0..r_count {
                     for dc in 0..c_count {
-                        let a = self
-                            .eval_streaming_cell(first_spec, dr, dc, ctx, depth)?
-                            .as_number()
-                            .unwrap_or(0.0);
-                        let b = self
-                            .eval_streaming_cell(second_spec, dr, dc, ctx, depth)?
-                            .as_number()
-                            .unwrap_or(0.0);
+                        let a = match self.eval_streaming_cell(first_spec, dr, dc, ctx, depth)? {
+                            EvaluatedCellValue::Number(n) => n,
+                            _ => 0.0,
+                        };
+                        let b = match self.eval_streaming_cell(second_spec, dr, dc, ctx, depth)? {
+                            EvaluatedCellValue::Number(n) => n,
+                            _ => 0.0,
+                        };
                         let p = a * b;
                         match lane & 3 {
                             0 => acc0 += p,
@@ -541,7 +536,11 @@ impl SheetEngine {
                     } else {
                         self.eval_arg_val(arg, ctx, depth)?
                     };
-                    row_prod *= v.as_number().unwrap_or(0.0);
+                    let n = match v {
+                        EvaluatedCellValue::Number(n) => n,
+                        _ => 0.0,
+                    };
+                    row_prod *= n;
                 }
                 sum += row_prod;
             }
@@ -561,7 +560,7 @@ impl SheetEngine {
                 return Err(FormulaError::Value);
             }
             let Some(range_spec) = self.extract_streaming_range(&args[0])? else {
-                let val = self.eval_expr_ctx(&args[0], ctx, depth + 1);
+                let val = self.eval_expr_ctx(&args[0], ctx, depth);
                 let crit = self.eval_arg_val(&args[1], ctx, depth)?;
                 let compiled_crit = CompiledCriteria::compile(&crit);
                 return Ok(EvaluatedCellValue::Number(if compiled_crit.matches(&val) {
@@ -613,13 +612,12 @@ impl SheetEngine {
             for dc in 0..c_count {
                 let val = self.eval_streaming_cell_allow_error(range_spec, dr, dc, ctx, depth)?;
                 if compiled_crit.matches(&val) {
-                    let num_opt = if let Some(ts) = target_spec {
+                    let target_v = if let Some(ts) = target_spec {
                         self.eval_streaming_cell(ts, dr, dc, ctx, depth)?
-                            .as_number()
                     } else {
-                        val.as_number()
+                        val
                     };
-                    if let Some(n) = num_opt {
+                    if let EvaluatedCellValue::Number(n) = target_v {
                         sum += n;
                         count += 1;
                     }
@@ -645,7 +643,7 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         if name == "COUNTIFS" {
-            if args.len() < 2 || !args.len().is_multiple_of(2) {
+            if args.len() < 2 || args.len() % 2 != 0 {
                 return Err(FormulaError::Value);
             }
             if args.len() > 16 {
@@ -691,7 +689,7 @@ impl SheetEngine {
             return Ok(EvaluatedCellValue::Number(cnt as f64));
         }
 
-        if args.len() < 3 || args.len().is_multiple_of(2) {
+        if args.len() < 3 || args.len() % 2 == 0 {
             return Err(FormulaError::Value);
         }
         let Some(target_spec) = self.extract_streaming_range(&args[0])? else {
@@ -707,7 +705,7 @@ impl SheetEngine {
             let mut count = 0usize;
             for (tv, m) in target_vals.into_iter().zip(mask) {
                 if m {
-                    if let Some(n) = tv.as_number() {
+                    if let EvaluatedCellValue::Number(n) = tv {
                         sum += n;
                         count += 1;
                     }
@@ -751,7 +749,7 @@ impl SheetEngine {
                     }
                 }
                 let tv = self.eval_streaming_cell(target_spec, dr, dc, ctx, depth)?;
-                if let Some(n) = tv.as_number() {
+                if let EvaluatedCellValue::Number(n) = tv {
                     sum += n;
                     count += 1;
                 }
@@ -821,27 +819,51 @@ impl SheetEngine {
                 }
                 let scaled = num * factor;
                 let rounded = match name {
-                    "ROUND" => (scaled + 1e-12 * scaled.signum()).round(),
-                    "ROUNDUP" => {
-                        if scaled > 0.0 {
-                            (scaled - 1e-12).ceil()
-                        } else if scaled < 0.0 {
-                            (scaled + 1e-12).floor()
+                    "ROUND" => {
+                        if exp > 0 {
+                            let nudge = scaled.abs() * f64::EPSILON * 2.0;
+                            (scaled + nudge.copysign(scaled)).round()
                         } else {
+                            scaled.round()
+                        }
+                    }
+                    "ROUNDUP" => {
+                        if num == 0.0 {
                             0.0
+                        } else {
+                            let abs_s = scaled.abs();
+                            let snapped = if exp > 0
+                                && (abs_s - abs_s.round()).abs() <= abs_s * f64::EPSILON * 4.0
+                            {
+                                abs_s.round()
+                            } else {
+                                abs_s.ceil()
+                            };
+                            snapped.copysign(num)
                         }
                     }
                     _ => {
-                        if scaled > 0.0 {
-                            (scaled + 1e-12).floor()
-                        } else if scaled < 0.0 {
-                            (scaled - 1e-12).ceil()
-                        } else {
+                        if num == 0.0 {
                             0.0
+                        } else {
+                            let abs_s = scaled.abs();
+                            let snapped = if exp > 0
+                                && (abs_s.round() - abs_s).abs() <= abs_s * f64::EPSILON * 4.0
+                            {
+                                abs_s.round()
+                            } else {
+                                abs_s.floor()
+                            };
+                            snapped.copysign(num)
                         }
                     }
                 };
-                Ok(EvaluatedCellValue::Number(rounded / factor))
+                let res = rounded / factor;
+                Ok(EvaluatedCellValue::Number(if res == 0.0 {
+                    0.0
+                } else {
+                    res
+                }))
             }
             "INT" => {
                 if args.len() != 1 {
@@ -874,7 +896,7 @@ impl SheetEngine {
                     return Err(FormulaError::Num);
                 }
                 let q = num / sig;
-                let q_adj = if (q - q.round()).abs() < 1e-12 {
+                let q_adj = if (q - q.round()).abs() <= q.abs() * f64::EPSILON * 4.0 {
                     q.round()
                 } else {
                     q
@@ -1053,7 +1075,7 @@ impl SheetEngine {
         let mut mean = 0.0f64;
         let mut m2 = 0.0f64;
         self.visit_args_streaming(args, ctx, depth, |v| {
-            if let Some(x) = v.as_number() {
+            if let EvaluatedCellValue::Number(x) = v {
                 count += 1;
                 let delta = x - mean;
                 mean += delta / (count as f64);
@@ -1089,7 +1111,10 @@ impl SheetEngine {
         let vals = self.expand_args_ctx(args, ctx, depth)?;
         let mut nums: Vec<f64> = vals
             .iter()
-            .filter_map(EvaluatedCellValue::as_number)
+            .filter_map(|v| match v {
+                EvaluatedCellValue::Number(n) => Some(*n),
+                _ => None,
+            })
             .collect();
         match name {
             "MEDIAN" => {
@@ -1112,7 +1137,7 @@ impl SheetEngine {
                 let mut best_val = nums[0];
                 let mut best_cnt = 0usize;
                 for &x in &nums {
-                    let cnt = nums.iter().filter(|&&y| (x - y).abs() < 1e-12).count();
+                    let cnt = nums.iter().filter(|&&y| x == y).count();
                     if cnt > best_cnt {
                         best_cnt = cnt;
                         best_val = x;
@@ -1143,7 +1168,10 @@ impl SheetEngine {
                 let k = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
                 let mut nums: Vec<f64> = vals
                     .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
+                    .filter_map(|v| match v {
+                        EvaluatedCellValue::Number(n) => Some(*n),
+                        _ => None,
+                    })
                     .collect();
                 if k < 1 || (k as usize) > nums.len() {
                     return Err(FormulaError::Num);
@@ -1169,12 +1197,10 @@ impl SheetEngine {
                 let mut found = false;
                 let mut better_count = 0usize;
                 self.visit_args_streaming(std::slice::from_ref(&args[1]), ctx, depth, |v| {
-                    if let Some(x) = v.as_number() {
-                        if (x - target).abs() < 1e-12 {
+                    if let EvaluatedCellValue::Number(x) = v {
+                        if x == target {
                             found = true;
-                        } else if (order == 0 && x > target + 1e-12)
-                            || (order != 0 && x < target - 1e-12)
-                        {
+                        } else if (order == 0 && x > target) || (order != 0 && x < target) {
                             better_count += 1;
                         }
                     }
@@ -1204,7 +1230,10 @@ impl SheetEngine {
                 };
                 let mut nums: Vec<f64> = vals
                     .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
+                    .filter_map(|v| match v {
+                        EvaluatedCellValue::Number(n) => Some(*n),
+                        _ => None,
+                    })
                     .collect();
                 if nums.is_empty() {
                     return Err(FormulaError::Num);

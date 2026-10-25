@@ -530,19 +530,12 @@ final class StandardCodecInteroperabilityTests: XCTestCase {
     section0Stream.append(textRec)
     section0Stream.append(paraTextPayload)
 
-    // Pack flat streams then rewrite directory entry 3 into storage "BodyText" -> child entry 4 "Section0"
-    var packed = try OLE2ContainerCodec.pack(streams: [
+    // Pack hierarchical stream "BodyText/Section0" so OLE2ContainerCodec writes storage "BodyText" (objectType = 1) -> child stream "Section0"
+    let packed = try OLE2ContainerCodec.pack(streams: [
       OLE2StreamEntry(name: "FileHeader", data: fileHeader),
       OLE2StreamEntry(name: "DocInfo", data: docInfoStream),
-      OLE2StreamEntry(name: "BodyText", data: Data()),
-      OLE2StreamEntry(name: "Section0", data: section0Stream),
+      OLE2StreamEntry(name: "BodyText/Section0", data: section0Stream),
     ])
-    // Directory sector is sector 0 (file offset 512).
-    // Entry 3 (offset 512 + 3 * 128 = 896) is "BodyText": set objectType = 1 (storage), childID = 4, rightSiblingID = freeSector
-    let bodyTextEntryOffset = 512 + 3 * 128
-    packed[bodyTextEntryOffset + 66] = 1
-    try BitPacking.writeUInt32LE(OLE2ContainerCodec.freeSector, into: &packed, at: bodyTextEntryOffset + 72)
-    try BitPacking.writeUInt32LE(4, into: &packed, at: bodyTextEntryOffset + 76)
 
     let unpackedStreams = try OLE2ContainerCodec.unpack(from: packed)
     XCTAssertTrue(unpackedStreams.contains(where: { $0.name == "BodyText/Section0" }))

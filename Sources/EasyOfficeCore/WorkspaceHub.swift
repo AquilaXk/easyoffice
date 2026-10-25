@@ -445,6 +445,10 @@ public final class WorkspaceViewModel {
         lastErrorMessage = error.localizedDescription
         return
       }
+      if let tab = openTabs.first(where: { $0.id == id }), tab.isModified {
+        lastErrorMessage = "원본 문서 포맷으로 저장되지 않아 변경사항이 유지됩니다: \(tab.fileName)"
+        return
+      }
     }
     closeTab(id: id)
   }
@@ -488,17 +492,25 @@ public final class WorkspaceViewModel {
 
   public func closeOtherTabs(keeping id: UUID) {
     activeInlineEditTargetKey = nil
-    let removedIDs = openTabs.filter { $0.id != id && !$0.isPinned }.map(\.id)
-    openTabs.removeAll { $0.id != id && !$0.isPinned }
+    let firstModifiedOther = openTabs.first { $0.id != id && !$0.isPinned && $0.isModified }
+    let removedIDs = openTabs.filter { $0.id != id && !$0.isPinned && !$0.isModified }.map(\.id)
+    openTabs.removeAll { $0.id != id && !$0.isPinned && !$0.isModified }
     for removedID in removedIDs {
       undoStacks.removeValue(forKey: removedID)
       redoStacks.removeValue(forKey: removedID)
       mergedSheetRangesByTab.removeValue(forKey: removedID)
     }
-    splitSecondaryTabID = nil
+    if let splitID = splitSecondaryTabID, !openTabs.contains(where: { $0.id == splitID }) {
+      splitSecondaryTabID = nil
+    }
     activeTabID = openTabs.contains(where: { $0.id == id }) ? id : openTabs.first?.id
     if openTabs.isEmpty { isShowingHomeHub = true }
-    lastExecutedCommandSummary = "다른 탭 닫기 완료"
+    if let modifiedTab = firstModifiedOther {
+      pendingCloseConfirmTabID = modifiedTab.id
+      lastExecutedCommandSummary = "저장되지 않은 변경사항 확인 대기: \(modifiedTab.fileName)"
+    } else {
+      lastExecutedCommandSummary = "다른 탭 닫기 완료"
+    }
   }
 
   public func setDocumentHorizontalPadding(_ padding: Double) {

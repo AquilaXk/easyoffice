@@ -176,7 +176,7 @@ extension WorksheetModel {
       }
       let lookupVal = frame.arg(0, in: self)
       if case .error = lookupVal { return lookupVal }
-      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? true) : true
+      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : true
       let targetCol = bounds.minCol + colIdx
       var approxBestRow: Int?
       var approxBestNum = -Double.infinity
@@ -233,7 +233,7 @@ extension WorksheetModel {
       }
       let lookupVal = frame.arg(0, in: self)
       if case .error = lookupVal { return lookupVal }
-      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? true) : true
+      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : true
       let targetRow = bounds.minRow + rowIdx
       var approxBestCol: Int?
       var approxBestNum = -Double.infinity
@@ -1114,24 +1114,46 @@ extension WorksheetModel {
         let yNum = frame.arg(0, in: self).numericValue,
         let mNum = frame.arg(1, in: self).numericValue,
         let dNum = frame.arg(2, in: self).numericValue,
-        let y = Self.safeInt(yNum), let m = Self.safeInt(mNum), let d = Self.safeInt(dNum),
-        let date = Self.makeUTCDate(year: y, month: m, day: d, allowRollover: true)
+        let y = Self.safeInt(yNum), let m = Self.safeInt(mNum), let d = Self.safeInt(dNum)
       else { return .error("#VALUE!") }
-      return .text(Self.formatUTCDate(date))
+      guard abs(m) <= 120_000, abs(d) <= 4_000_000 else { return .error("#NUM!") }
+      let resolvedY = (0...1899).contains(y) ? (1900 + y) : y
+      if resolvedY == 1900 && m == 2 && d == 29 {
+        return .number(60.0)
+      }
+      guard let date = Self.makeUTCDate(year: y, month: m, day: d, allowRollover: true),
+        let serial = Self.excelSerialNumber(from: date)
+      else { return .error("#VALUE!") }
+      return .number(serial)
 
     case "YEAR":
+      if frame.count == 1, let raw = frame.arg(0, in: self).numericValue,
+        Self.safeInt(floor(raw)) == 60
+      {
+        return .number(1900.0)
+      }
       guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else {
         return .error("#VALUE!")
       }
       return .number(Double(Self.utcCalendar.component(.year, from: date)))
 
     case "MONTH":
+      if frame.count == 1, let raw = frame.arg(0, in: self).numericValue,
+        Self.safeInt(floor(raw)) == 60
+      {
+        return .number(2.0)
+      }
       guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else {
         return .error("#VALUE!")
       }
       return .number(Double(Self.utcCalendar.component(.month, from: date)))
 
     case "DAY":
+      if frame.count == 1, let raw = frame.arg(0, in: self).numericValue,
+        Self.safeInt(floor(raw)) == 60
+      {
+        return .number(29.0)
+      }
       guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else {
         return .error("#VALUE!")
       }
@@ -1185,17 +1207,20 @@ extension WorksheetModel {
         let startDate = Self.parseDateValue(frame.arg(0, in: self)),
         let mNum = frame.arg(1, in: self).numericValue,
         let months = Self.safeInt(trunc(mNum)),
-        let targetDate = Self.utcCalendar.date(byAdding: .month, value: months, to: startDate)
+        abs(months) <= 120_000,
+        let targetDate = Self.utcCalendar.date(byAdding: .month, value: months, to: startDate),
+        let serial = Self.excelSerialNumber(from: targetDate)
       else {
         return .error("#VALUE!")
       }
-      return .text(Self.formatUTCDate(targetDate))
+      return .number(serial)
 
     case "EOMONTH":
       guard frame.count == 2,
         let startDate = Self.parseDateValue(frame.arg(0, in: self)),
         let mNum = frame.arg(1, in: self).numericValue,
-        let months = Self.safeInt(trunc(mNum))
+        let months = Self.safeInt(trunc(mNum)),
+        abs(months) <= 120_000
       else {
         return .error("#VALUE!")
       }
@@ -1206,11 +1231,12 @@ extension WorksheetModel {
         let firstOfNextAfterTarget = Self.utcCalendar.date(
           byAdding: .month, value: months + 1, to: firstOfStartMonth),
         let lastDayOfTargetMonth = Self.utcCalendar.date(
-          byAdding: .day, value: -1, to: firstOfNextAfterTarget)
+          byAdding: .day, value: -1, to: firstOfNextAfterTarget),
+        let serial = Self.excelSerialNumber(from: lastDayOfTargetMonth)
       else {
         return .error("#VALUE!")
       }
-      return .text(Self.formatUTCDate(lastDayOfTargetMonth))
+      return .number(serial)
 
     case "WORKDAY":
       guard frame.count == 2,
@@ -1236,7 +1262,10 @@ extension WorksheetModel {
           remaining -= 1
         }
       }
-      return .text(Self.formatUTCDate(current))
+      guard let serial = Self.excelSerialNumber(from: current) else {
+        return .error("#VALUE!")
+      }
+      return .number(serial)
 
     case "NETWORKDAYS":
       guard frame.count == 2,
@@ -1421,9 +1450,22 @@ extension WorksheetModel {
     return String(format: "%04d-%02d-%02d", comps.year ?? 1970, comps.month ?? 1, comps.day ?? 1)
   }
 
+  internal static func excelSerialNumber(from date: Date) -> Double? {
+    var epoch1899Dec31 = DateComponents()
+    epoch1899Dec31.year = 1899
+    epoch1899Dec31.month = 12
+    epoch1899Dec31.day = 31
+    guard let base = utcCalendar.date(from: epoch1899Dec31),
+      let rawDays = utcCalendar.dateComponents([.day], from: base, to: date).day
+    else { return nil }
+    guard rawDays >= 1 else { return nil }
+    let serial = rawDays >= 60 ? (rawDays + 1) : rawDays
+    return Double(serial)
+  }
+
   internal static func parseDateValue(_ value: EvaluatedCellValue) -> Date? {
     if case .number(let n) = value, n.isFinite {
-      let intVal = Int(floor(n))
+      guard let intVal = safeInt(floor(n)) else { return nil }
       if intVal >= 19_000_101 && intVal <= 99_991_231 {
         let y = intVal / 10_000
         let m = (intVal / 100) % 100
