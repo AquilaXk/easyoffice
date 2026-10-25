@@ -761,25 +761,16 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     context: inout EvaluationContext,
     depth: Int
   ) -> [[EvaluatedCellValue]] {
-    let minRow = min(range.start.row, range.end.row)
-    let maxRow = max(range.start.row, range.end.row)
-    let minCol = min(range.start.column, range.end.column)
-    let maxCol = max(range.start.column, range.end.column)
-    let (rowSpan, rOverflow) = (maxRow - minRow).addingReportingOverflow(1)
-    let (colSpan, cOverflow) = (maxCol - minCol).addingReportingOverflow(1)
-    let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
-    guard !rOverflow, !cOverflow, !mulOverflow,
-      totalCells > 0, totalCells <= CellRange.maxExpandedCellCount
-    else {
+    guard let bounds = rangeBounds(range) else {
       return []
     }
 
     var grid: [[EvaluatedCellValue]] = []
-    grid.reserveCapacity(rowSpan)
-    for r in minRow...maxRow {
+    grid.reserveCapacity(bounds.rowCount)
+    for r in bounds.minRow...bounds.maxRow {
       var rowVals: [EvaluatedCellValue] = []
-      rowVals.reserveCapacity(colSpan)
-      for c in minCol...maxCol {
+      rowVals.reserveCapacity(bounds.colCount)
+      for c in bounds.minCol...bounds.maxCol {
         let packed = PackedCellCoordinate(row: r, column: c)
         if let targetSheetName {
           rowVals.append(

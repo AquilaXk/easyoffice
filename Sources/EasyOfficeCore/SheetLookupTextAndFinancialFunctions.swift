@@ -595,7 +595,7 @@ extension WorksheetModel {
         let parts = vals.map(\.description).filter { !ignoreEmpty || !$0.isEmpty }
         return .text(parts.joined(separator: delimiter))
       }
-    case "LEFT":
+    case "LEFT", "RIGHT":
       guard (1...2).contains(frame.count) else { return .error("#VALUE!") }
       let text = frame.arg(0, in: self).description
       let count: Int
@@ -609,22 +609,7 @@ extension WorksheetModel {
       } else {
         count = 1
       }
-      return .text(String(text.prefix(count)))
-    case "RIGHT":
-      guard (1...2).contains(frame.count) else { return .error("#VALUE!") }
-      let text = frame.arg(0, in: self).description
-      let count: Int
-      if frame.count == 2 {
-        guard let cNum = frame.arg(1, in: self).numericValue, let cInt = Self.safeInt(cNum),
-          cInt >= 0
-        else {
-          return .error("#VALUE!")
-        }
-        count = cInt
-      } else {
-        count = 1
-      }
-      return .text(String(text.suffix(count)))
+      return .text(name == "LEFT" ? String(text.prefix(count)) : String(text.suffix(count)))
     case "MID":
       guard frame.count == 3,
         let startVal = frame.arg(1, in: self).numericValue,
@@ -1092,7 +1077,7 @@ extension WorksheetModel {
       return .number(
         Double(Self.utcCalendar.dateComponents([.day], from: startDate, to: endDate).day ?? 0))
 
-    case "WEEKDAY":
+    case "WEEKDAY", "WEEKNUM":
       guard (1...2).contains(frame.count),
         let date = Self.parseDateValue(frame.arg(0, in: self))
       else {
@@ -1109,34 +1094,18 @@ extension WorksheetModel {
       } else {
         returnType = 1
       }
-      let calWeekday = Self.utcCalendar.component(.weekday, from: date)
-      switch returnType {
-      case 1:
-        return .number(Double(calWeekday))
-      case 2:
-        return .number(Double(calWeekday == 1 ? 7 : calWeekday - 1))
-      case 3:
-        return .number(Double(calWeekday == 1 ? 6 : calWeekday - 2))
-      default:
-        return .error("#NUM!")
-      }
-
-    case "WEEKNUM":
-      guard (1...2).contains(frame.count),
-        let date = Self.parseDateValue(frame.arg(0, in: self))
-      else {
-        return .error("#VALUE!")
-      }
-      let returnType: Int
-      if frame.count == 2 {
-        guard let rtNum = frame.arg(1, in: self).numericValue,
-          let rtInt = Self.safeInt(rtNum)
-        else {
-          return .error("#VALUE!")
+      if name == "WEEKDAY" {
+        let calWeekday = Self.utcCalendar.component(.weekday, from: date)
+        switch returnType {
+        case 1:
+          return .number(Double(calWeekday))
+        case 2:
+          return .number(Double(calWeekday == 1 ? 7 : calWeekday - 1))
+        case 3:
+          return .number(Double(calWeekday == 1 ? 6 : calWeekday - 2))
+        default:
+          return .error("#NUM!")
         }
-        returnType = rtInt
-      } else {
-        returnType = 1
       }
       var cal = Self.utcCalendar
       cal.firstWeekday = (returnType == 2 || returnType == 21) ? 2 : 1

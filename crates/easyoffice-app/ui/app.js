@@ -525,6 +525,10 @@
     });
   }
 
+  function escapeSemicolonToken(value) {
+    return String(value || "").replaceAll(";", String.raw`\;`);
+  }
+
   function collectSheetCellMap() {
     const map = {};
     const sheet2Snap = sheetDataStore.Sheet2 || {};
@@ -539,7 +543,7 @@
       const formula = td.dataset.formula;
       const rawText = (td.textContent || "").replaceAll(",", "").trim();
       const val = formula || rawText;
-      map[ref] = val.replaceAll(";", "\\;");
+      map[ref] = escapeSemicolonToken(val);
     });
     return map;
   }
@@ -630,10 +634,7 @@
     }
     const withCrossSheet = body.replaceAll(/\b(SHEET\d+)!([A-Z]+\d+)\b/g, (_, sh, ref) => {
       const key = sh + "!" + ref;
-      const fallback =
-        sheetDataStore.Sheet2 && sheetDataStore.Sheet2[ref]
-          ? sheetDataStore.Sheet2[ref].value
-          : "100";
+      const fallback = sheetDataStore.Sheet2?.[ref] ? sheetDataStore.Sheet2[ref].value : "100";
       const raw = String(cellValues[key] ?? fallback).replaceAll(",", "").trim();
       const v = Number(raw);
       return raw !== "" && Number.isFinite(v) ? String(v) : "0";
@@ -853,31 +854,52 @@
     void renderRibbonCategoryTools(activeRibbonCategory);
   }
 
-  function applyRibbonDomSideEffects(cmdId, execRes) {
-    const docEditor = document.getElementById("doc-editor");
-    if (cmdId.endsWith("-home-bold") && docEditor) {
-      const boldOn = execRes?.isBold ?? ! docEditor.style.fontWeight;
+  function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
+    if (!docEditor) return false;
+    if (cmdId.endsWith("-home-bold")) {
+      const boldOn = execRes?.isBold ?? !docEditor.style.fontWeight;
       docEditor.style.fontWeight = boldOn ? "600" : "";
-    } else if (cmdId.endsWith("-home-italic") && docEditor) {
+      return true;
+    }
+    if (cmdId.endsWith("-home-italic")) {
       const italicOn = execRes?.isItalic ?? docEditor.style.fontStyle !== "italic";
       docEditor.style.fontStyle = italicOn ? "italic" : "";
-    } else if (cmdId.endsWith("-home-underline") && docEditor) {
+      return true;
+    }
+    if (cmdId.endsWith("-home-underline")) {
       const underOn = execRes?.isUnderline ?? docEditor.style.textDecoration !== "underline";
       docEditor.style.textDecoration = underOn ? "underline" : "";
-    } else if (cmdId.endsWith("-layout-columns") && docEditor) {
+      return true;
+    }
+    if (cmdId.endsWith("-layout-columns")) {
       const cols = execRes?.columnCount || 1;
       docEditor.style.columnCount = cols > 1 ? String(cols) : "";
-    } else if (cmdId.endsWith("-layout-orientation") && docEditor) {
+      return true;
+    }
+    if (cmdId.endsWith("-layout-orientation")) {
       const landscape = Boolean(execRes?.isLandscape);
       docEditor.style.maxWidth = landscape ? "980px" : "";
-    } else if (cmdId === "hwp-mod-manuscript") {
+      return true;
+    }
+    return false;
+  }
+
+  function applyRibbonDomSideEffects(cmdId, execRes) {
+    const docEditor = document.getElementById("doc-editor");
+    if (applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
+      return;
+    }
+    if (cmdId === "hwp-mod-manuscript") {
       const hwpNotice = document.getElementById("hwp-manuscript-preview");
       if (hwpNotice) {
-        hwpNotice.hidden = execRes?.manuscriptGridEnabled === undefined
-          ? !hwpNotice.hidden
-          : !execRes.manuscriptGridEnabled;
+        hwpNotice.hidden =
+          execRes?.manuscriptGridEnabled === undefined
+            ? !hwpNotice.hidden
+            : !execRes.manuscriptGridEnabled;
       }
-    } else if (cmdId === "pdf-mod-rotate") {
+      return;
+    }
+    if (cmdId === "pdf-mod-rotate") {
       pdfRotationDeg =
         typeof execRes?.pdfRotationDegrees === "number"
           ? execRes.pdfRotationDegrees
@@ -886,13 +908,17 @@
       const card = document.getElementById("pdf-page-card");
       if (badge) badge.textContent = "회전: " + pdfRotationDeg + "°";
       if (card) card.style.transform = "rotate(" + pdfRotationDeg + "deg)";
-    } else if (cmdId.endsWith("-view-theme")) {
+      return;
+    }
+    if (cmdId.endsWith("-view-theme")) {
       const html = document.documentElement;
       const next = html.dataset.theme === "dark" ? "light" : "dark";
       html.dataset.theme = next;
       const themeBtn = document.getElementById("btn-theme-toggle");
       if (themeBtn) themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
-    } else if (cmdId.endsWith("-view-ribbon")) {
+      return;
+    }
+    if (cmdId.endsWith("-view-ribbon")) {
       const strip = document.getElementById("ribbon-tool-strip");
       if (strip) strip.hidden = !strip.hidden;
     }
@@ -1230,7 +1256,7 @@
         }
 
         const cellMap = collectSheetCellMap();
-        cellMap[activeSheetCellRef] = rawFormula.replaceAll(";", "\\;");
+        cellMap[activeSheetCellRef] = escapeSemicolonToken(rawFormula);
         const pairs = Object.keys(cellMap)
           .map((k) => k + "=" + cellMap[k])
           .join(";");

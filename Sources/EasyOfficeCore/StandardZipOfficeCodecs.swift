@@ -24,6 +24,62 @@ internal enum XMLDocumentModelMapper {
       || lower == "mimetype"
   }
 
+  static func packArchiveEntries(
+    _ baseEntries: [ZipContainerEntry],
+    images: [EmbeddedImageAttachment] = [],
+    mediaFolderPrefix: String = "",
+    preserved: [String: Data]
+  ) throws -> Data {
+    var entries = baseEntries
+    if !mediaFolderPrefix.isEmpty {
+      for img in images {
+        let safeName = sanitizeMediaFileName(img.fileName)
+        entries.append(
+          ZipContainerEntry(
+            path: "\(mediaFolderPrefix)\(safeName)", data: img.imageData, compressionMethod: .store
+          ))
+      }
+    }
+    let existingPaths = Set(entries.map(\.path))
+    for path in preserved.keys.sorted() where !existingPaths.contains(path) {
+      if let rawData = preserved[path] {
+        entries.append(
+          ZipContainerEntry(
+            path: path,
+            data: rawData,
+            compressionMethod: isXMLValidatedPath(path) ? .deflate : .store
+          ))
+      }
+    }
+    return try ZipContainerCodec.pack(entries: entries)
+  }
+
+  static func unpackAndValidateArchiveEntries(
+    from data: Data,
+    excludedPreservedPaths: Set<String> = []
+  ) throws -> (
+    entries: [ZipContainerEntry],
+    xmlEntries: [String: String],
+    binaryEntries: [String: Data],
+    preservedEntries: [String: Data]
+  ) {
+    let entries = try ZipContainerCodec.unpack(from: data)
+    var xmlEntries: [String: String] = [:]
+    var binaryEntries: [String: Data] = [:]
+    var preservedEntries: [String: Data] = [:]
+    for entry in entries {
+      if isBinaryMediaPath(entry.path) {
+        binaryEntries[entry.path] = entry.data
+      } else if isXMLValidatedPath(entry.path) {
+        xmlEntries[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
+      }
+      if !excludedPreservedPaths.contains(entry.path) {
+        preservedEntries[entry.path] = entry.data
+      }
+    }
+    return (entries, xmlEntries, binaryEntries, preservedEntries)
+  }
+
   static func safeClampedInt(
     _ value: Double, min minVal: Int = -100_000_000, max maxVal: Int = 100_000_000
   ) -> Int {
@@ -701,7 +757,7 @@ public enum OOXMLContainerCodec {
       </w:document>
       """
 
-    var entries: [ZipContainerEntry] = [
+    let baseEntries: [ZipContainerEntry] = [
       ZipContainerEntry(
         path: "[Content_Types].xml", data: Data(contentTypesXML.utf8), compressionMethod: .deflate),
       ZipContainerEntry(path: "_rels/.rels", data: Data(relsXML.utf8), compressionMethod: .deflate),
@@ -710,44 +766,24 @@ public enum OOXMLContainerCodec {
       ZipContainerEntry(
         path: "word/document.xml", data: Data(documentXML.utf8), compressionMethod: .deflate),
     ]
-    for img in doc.images {
-      let safeName = XMLDocumentModelMapper.sanitizeMediaFileName(img.fileName)
-      entries.append(
-        ZipContainerEntry(
-          path: "word/media/\(safeName)", data: img.imageData, compressionMethod: .store))
-    }
-    let existingPaths = Set(entries.map(\.path))
-    for path in doc.preservedArchiveEntries.keys.sorted() where !existingPaths.contains(path) {
-      if let rawData = doc.preservedArchiveEntries[path] {
-        entries.append(
-          ZipContainerEntry(
-            path: path,
-            data: rawData,
-            compressionMethod: XMLDocumentModelMapper.isXMLValidatedPath(path) ? .deflate : .store
-          ))
-      }
-    }
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      baseEntries,
+      images: doc.images,
+      mediaFolderPrefix: "word/media/",
+      preserved: doc.preservedArchiveEntries
+    )
   }
 
   public static func decodeDocument(from data: Data) throws -> OfficeDocumentModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    var entryMap: [String: String] = [:]
-    var binaryEntries: [String: Data] = [:]
-    var preservedEntries: [String: Data] = [:]
-    let corePaths: Set<String> = [
-      "[Content_Types].xml", "_rels/.rels", "docProps/core.xml", "word/document.xml",
-    ]
-    for entry in entries {
-      if XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-        binaryEntries[entry.path] = entry.data
-      } else if XMLDocumentModelMapper.isXMLValidatedPath(entry.path) {
-        entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-      }
-      if !corePaths.contains(entry.path) {
-        preservedEntries[entry.path] = entry.data
-      }
-    }
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(
+      from: data,
+      excludedPreservedPaths: [
+        "[Content_Types].xml", "_rels/.rels", "docProps/core.xml", "word/document.xml",
+      ]
+    )
+    let entryMap = unpacked.xmlEntries
+    let binaryEntries = unpacked.binaryEntries
+    let preservedEntries = unpacked.preservedEntries
     guard let documentXML = entryMap["word/document.xml"] else {
       throw EasyOfficeError.corruptedContainer(
         detail: "OOXML DOCX 필수 스트림 'word/document.xml'이 누락되었습니다.")
@@ -952,33 +988,16 @@ public enum OOXMLContainerCodec {
         ))
     }
 
-    let existingPaths = Set(entries.map(\.path))
-    for path in sheet.preservedArchiveEntries.keys.sorted() where !existingPaths.contains(path) {
-      if let rawData = sheet.preservedArchiveEntries[path] {
-        entries.append(
-          ZipContainerEntry(
-            path: path,
-            data: rawData,
-            compressionMethod: XMLDocumentModelMapper.isXMLValidatedPath(path) ? .deflate : .store
-          ))
-      }
-    }
-
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      entries,
+      preserved: sheet.preservedArchiveEntries
+    )
   }
 
   public static func decodeWorksheet(from data: Data) throws -> WorksheetModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    var entryMap: [String: String] = [:]
-    var preservedEntries: [String: Data] = [:]
-    for entry in entries {
-      if !XMLDocumentModelMapper.isBinaryMediaPath(entry.path),
-        XMLDocumentModelMapper.isXMLValidatedPath(entry.path)
-      {
-        entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-      }
-      preservedEntries[entry.path] = entry.data
-    }
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(from: data)
+    let entryMap = unpacked.xmlEntries
+    var preservedEntries = unpacked.preservedEntries
     guard entryMap["xl/worksheets/sheet1.xml"] != nil else {
       throw EasyOfficeError.corruptedContainer(
         detail: "OOXML XLSX 필수 스트림 'xl/worksheets/sheet1.xml'이 누락되었습니다.")
@@ -1196,33 +1215,16 @@ public enum OOXMLContainerCodec {
       }
     }
 
-    let existingPaths = Set(entries.map(\.path))
-    for path in deck.preservedArchiveEntries.keys.sorted() where !existingPaths.contains(path) {
-      if let rawData = deck.preservedArchiveEntries[path] {
-        entries.append(
-          ZipContainerEntry(
-            path: path,
-            data: rawData,
-            compressionMethod: XMLDocumentModelMapper.isXMLValidatedPath(path) ? .deflate : .store
-          ))
-      }
-    }
-
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      entries,
+      preserved: deck.preservedArchiveEntries
+    )
   }
 
   public static func decodePresentation(from data: Data) throws -> PresentationDeckModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    var entryMap: [String: String] = [:]
-    var preservedEntries: [String: Data] = [:]
-    for entry in entries {
-      if !XMLDocumentModelMapper.isBinaryMediaPath(entry.path),
-        XMLDocumentModelMapper.isXMLValidatedPath(entry.path)
-      {
-        entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-      }
-      preservedEntries[entry.path] = entry.data
-    }
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(from: data)
+    let entryMap = unpacked.xmlEntries
+    var preservedEntries = unpacked.preservedEntries
     guard let presentationXML = entryMap["ppt/presentation.xml"] else {
       throw EasyOfficeError.corruptedContainer(
         detail: "OOXML PPTX 필수 스트림 'ppt/presentation.xml'이 누락되었습니다.")
@@ -1241,9 +1243,14 @@ public enum OOXMLContainerCodec {
     if let relsXML = entryMap["ppt/_rels/presentation.xml.rels"] {
       for rel in XMLSanitizer.extractElements(named: "Relationship", in: relsXML) {
         if let rId = rel.attributes["Id"], let rawTarget = rel.attributes["Target"] {
-          let normalized = rawTarget.hasPrefix("/")
-            ? String(rawTarget.dropFirst())
-            : (rawTarget.hasPrefix("ppt/") ? rawTarget : "ppt/\(rawTarget)")
+          let normalized: String
+          if rawTarget.hasPrefix("/") {
+            normalized = String(rawTarget.dropFirst())
+          } else if rawTarget.hasPrefix("ppt/") {
+            normalized = rawTarget
+          } else {
+            normalized = "ppt/\(rawTarget)"
+          }
           relTargets[rId] = normalized
         }
       }

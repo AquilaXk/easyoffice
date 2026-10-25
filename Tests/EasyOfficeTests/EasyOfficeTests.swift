@@ -806,7 +806,7 @@ final class EasyOfficeTests: XCTestCase {
       ),
       ZipContainerEntry(
         path: "styles.xml",
-        data: Data("<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><styles/>".utf8)
+        data: Data("<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"ext.dtd\">]><styles/>".utf8)
       ),
     ]
     let xxeOdtData = try ZipContainerCodec.pack(entries: xxeOdtEntries)
