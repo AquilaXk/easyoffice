@@ -68,6 +68,7 @@ public enum XMLSanitizer {
           && (buffer[kw + 4] & 0xDF) == doctypeAsciiUpper.4
           && (buffer[kw + 5] & 0xDF) == doctypeAsciiUpper.5
           && (buffer[kw + 6] & 0xDF) == doctypeAsciiUpper.6
+          && isDangerousDoctype(buffer, from: kw + 7, count: count)
         {
           throw EasyOfficeError.xxeOrExternalEntityDetected
         }
@@ -76,7 +77,45 @@ public enum XMLSanitizer {
     }
   }
 
-  /// Scans UTF-8 bytes directly for `<!ENTITY` or `<!DOCTYPE` (case-insensitive) with zero heap allocations.
+  private static func isDangerousDoctype(
+    _ buffer: UnsafeBufferPointer<UInt8>, from start: Int, count: Int
+  ) -> Bool {
+    var pos = start
+    var foundClose = false
+    while pos < count {
+      let b = buffer[pos]
+      if b == UInt8(ascii: "[") || b == UInt8(ascii: "<") {
+        return true
+      }
+      if b == UInt8(ascii: ">") {
+        foundClose = true
+        break
+      }
+      // Block SYSTEM keyword (case-insensitive)
+      if pos <= count - 6
+        && (b & 0xDF) == 0x53  // S
+        && (buffer[pos + 1] & 0xDF) == 0x59  // Y
+        && (buffer[pos + 2] & 0xDF) == 0x53  // S
+        && (buffer[pos + 3] & 0xDF) == 0x54  // T
+        && (buffer[pos + 4] & 0xDF) == 0x45  // E
+        && (buffer[pos + 5] & 0xDF) == 0x4D  // M
+      {
+        return true
+      }
+      // Block remote protocol URIs (http://, https://, file://, ftp://)
+      if pos <= count - 3
+        && b == UInt8(ascii: ":")
+        && buffer[pos + 1] == UInt8(ascii: "/")
+        && buffer[pos + 2] == UInt8(ascii: "/")
+      {
+        return true
+      }
+      pos += 1
+    }
+    return !foundClose
+  }
+
+  /// Scans UTF-8 bytes directly for `<!ENTITY` or dangerous `<!DOCTYPE` (case-insensitive) with zero heap allocations.
   public static func validateSafeXMLBytes(_ data: Data) throws {
     try data.withUnsafeBytes { rawBuffer in
       try scanUnsafeXMLBuffer(rawBuffer.bindMemory(to: UInt8.self))
@@ -91,7 +130,26 @@ public enum XMLSanitizer {
   }
 
   public static func validateSafeXMLData(_ data: Data) throws -> String {
+    if data.count >= 2 {
+      let b0 = data[data.startIndex]
+      let b1 = data[data.index(after: data.startIndex)]
+      if (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) {
+        let encoding: String.Encoding = (b0 == 0xFF) ? .utf16LittleEndian : .utf16BigEndian
+        let payload = data.dropFirst(2)
+        guard payload.count % 2 == 0,
+          let xmlString = String(data: payload, encoding: encoding),
+          !xmlString.utf8.contains(0x00)
+        else {
+          throw EasyOfficeError.corruptedContainer(detail: "XML 스트림이 유효한 UTF-16 인코딩이 아닙니다.")
+        }
+        try validateSafeXML(xmlString)
+        return xmlString
+      }
+    }
     try validateSafeXMLBytes(data)
+    if data.contains(0x00) {
+      throw EasyOfficeError.corruptedContainer(detail: "XML 스트림에 비정상 NUL 바이트가 포함되어 있습니다.")
+    }
     guard let xmlString = String(data: data, encoding: .utf8) else {
       throw EasyOfficeError.corruptedContainer(detail: "XML 스트림이 유효한 UTF-8 인코딩이 아닙니다.")
     }

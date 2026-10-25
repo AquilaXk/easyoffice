@@ -662,7 +662,8 @@ public struct DocumentEditorDetailPaneView: View {
 
   private func compactParagraphHeight(for paragraph: ParagraphBlock) -> CGFloat {
     let isSplitActive = viewModel.splitSecondaryTab != nil
-    let charsPerLine = max(24, Int(round(Double(isSplitActive ? 42 : 62) * (11.0 / max(8.0, paragraph.fontSizePt)))))
+    let scaledChars = (Double(isSplitActive ? 42 : 62) * (11.0 / max(8.0, min(144.0, paragraph.fontSizePt)))).rounded()
+    let charsPerLine = max(24, Int(exactly: min(200.0, max(24.0, scaledChars))) ?? 52)
     let segments = paragraph.text.components(separatedBy: .newlines)
     var totalLines = 0
     for seg in segments {
@@ -1457,8 +1458,9 @@ public struct DocumentEditorDetailPaneView: View {
     palette: WorkspaceThemePalette
   ) -> AttributedString {
     var combined = AttributedString()
-    if paragraph.firstLineIndentPt > 0 {
-      let spaceCount = max(1, min(12, Int(round(paragraph.firstLineIndentPt / 6.0))))
+    if paragraph.firstLineIndentPt.isFinite && paragraph.firstLineIndentPt > 0 {
+      let spaceCount = XMLDocumentModelMapper.safeClampedInt(
+        round(paragraph.firstLineIndentPt / 6.0), min: 1, max: 12)
       combined.append(AttributedString(String(repeating: " ", count: spaceCount)))
     }
     for run in paragraph.effectiveRuns {

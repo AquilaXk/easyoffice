@@ -437,7 +437,7 @@ pub struct SheetEngine {
 }
 
 impl SheetEngine {
-    pub const MAX_RECURSION_DEPTH: usize = 512;
+    pub const MAX_RECURSION_DEPTH: usize = 1024;
     pub const MAX_CELL_TEXT_CHARS: usize = MAX_CELL_TEXT_CHARS;
     pub const MAX_EVAL_STEPS: usize = MAX_EVAL_STEPS;
     const DENSE_ROWS: usize = 256;
@@ -590,7 +590,9 @@ impl SheetEngine {
     pub fn recalculate_all(&self) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         let mut results = HashMap::with_capacity(self.cells.len());
-        for &coord in self.cells.keys() {
+        let mut coords: Vec<PackedCellCoordinate> = self.cells.keys().copied().collect();
+        coords.sort_unstable();
+        for coord in coords {
             ctx.steps = 0;
             let val = self.eval_coord_ctx(coord, &mut ctx, 0);
             results.insert(coord, val);
@@ -743,8 +745,11 @@ impl SheetEngine {
         depth: usize,
     ) -> EvaluatedCellValue {
         ctx.steps = ctx.steps.saturating_add(1);
-        if ctx.steps > Self::MAX_EVAL_STEPS || depth > Self::MAX_RECURSION_DEPTH {
+        if ctx.steps > Self::MAX_EVAL_STEPS {
             return EvaluatedCellValue::Error(FormulaError::Value);
+        }
+        if depth > Self::MAX_RECURSION_DEPTH {
+            return EvaluatedCellValue::Error(FormulaError::Ref);
         }
         match expr {
             Expr::Number(n) => EvaluatedCellValue::Number(*n),
@@ -757,15 +762,15 @@ impl SheetEngine {
             }
             Expr::Boolean(b) => EvaluatedCellValue::Boolean(*b),
             Expr::ErrorLiteral(e) => EvaluatedCellValue::Error(*e),
-            Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth + 1),
+            Expr::Cell(coord) => self.eval_coord_ctx(*coord, ctx, depth),
             Expr::SheetCell { sheet, coord } => {
-                self.eval_sheet_coord(Some(sheet), *coord, ctx, depth + 1)
+                self.eval_sheet_coord(Some(sheet), *coord, ctx, depth)
             }
             Expr::Range(_) | Expr::SheetRange { .. } => {
                 EvaluatedCellValue::Error(FormulaError::Value)
             }
             Expr::UnaryPlus(inner) => {
-                let val = self.eval_expr_ctx(inner, ctx, depth + 1);
+                let val = self.eval_expr_ctx(inner, ctx, depth);
                 if let EvaluatedCellValue::Error(e) = val {
                     return EvaluatedCellValue::Error(e);
                 }
@@ -775,7 +780,7 @@ impl SheetEngine {
                 }
             }
             Expr::UnaryMinus(inner) => {
-                let val = self.eval_expr_ctx(inner, ctx, depth + 1);
+                let val = self.eval_expr_ctx(inner, ctx, depth);
                 if let EvaluatedCellValue::Error(e) = val {
                     return EvaluatedCellValue::Error(e);
                 }
@@ -785,7 +790,7 @@ impl SheetEngine {
                 }
             }
             Expr::PostfixPercent(inner) => {
-                let val = self.eval_expr_ctx(inner, ctx, depth + 1);
+                let val = self.eval_expr_ctx(inner, ctx, depth);
                 if let EvaluatedCellValue::Error(e) = val {
                     return EvaluatedCellValue::Error(e);
                 }
@@ -801,12 +806,12 @@ impl SheetEngine {
                     chain.push((*op, rhs));
                     cur = lhs;
                 }
-                let mut l_val = self.eval_expr_ctx(cur, ctx, depth + 1);
+                let mut l_val = self.eval_expr_ctx(cur, ctx, depth);
                 if let EvaluatedCellValue::Error(e) = l_val {
                     return EvaluatedCellValue::Error(e);
                 }
                 while let Some((op, rhs)) = chain.pop() {
-                    let r_val = self.eval_expr_ctx(rhs, ctx, depth + 1);
+                    let r_val = self.eval_expr_ctx(rhs, ctx, depth);
                     if let EvaluatedCellValue::Error(e) = r_val {
                         return EvaluatedCellValue::Error(e);
                     }
@@ -819,13 +824,11 @@ impl SheetEngine {
             }
             Expr::FuncCall { name, args } => match name.as_str() {
                 "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK"
-                | "PRODUCT" => {
-                    match self.eval_streaming_range_agg_ctx(name, args, ctx, depth + 1) {
-                        Ok(v) => v,
-                        Err(e) => EvaluatedCellValue::Error(e),
-                    }
-                }
-                _ => self.eval_func_ctx(name, args, ctx, depth + 1),
+                | "PRODUCT" => match self.eval_streaming_range_agg_ctx(name, args, ctx, depth) {
+                    Ok(v) => v,
+                    Err(e) => EvaluatedCellValue::Error(e),
+                },
+                _ => self.eval_func_ctx(name, args, ctx, depth),
             },
         }
     }
@@ -912,31 +915,13 @@ impl SheetEngine {
             (EvaluatedCellValue::Empty, EvaluatedCellValue::Empty) => {
                 Some(std::cmp::Ordering::Equal)
             }
-            (EvaluatedCellValue::Empty, EvaluatedCellValue::Number(b)) => {
-                if b.abs() < 1e-12 {
-                    Some(std::cmp::Ordering::Equal)
-                } else {
-                    0.0f64.partial_cmp(b)
-                }
-            }
-            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Empty) => {
-                if a.abs() < 1e-12 {
-                    Some(std::cmp::Ordering::Equal)
-                } else {
-                    a.partial_cmp(&0.0)
-                }
-            }
+            (EvaluatedCellValue::Empty, EvaluatedCellValue::Number(b)) => 0.0f64.partial_cmp(b),
+            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Empty) => a.partial_cmp(&0.0),
             (EvaluatedCellValue::Empty, EvaluatedCellValue::Text(b)) => Some("".cmp(b.as_str())),
             (EvaluatedCellValue::Text(a), EvaluatedCellValue::Empty) => Some(a.as_str().cmp("")),
             (EvaluatedCellValue::Empty, EvaluatedCellValue::Boolean(b)) => Some(false.cmp(b)),
             (EvaluatedCellValue::Boolean(a), EvaluatedCellValue::Empty) => Some(a.cmp(&false)),
-            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Number(b)) => {
-                if (a - b).abs() < 1e-12 {
-                    Some(std::cmp::Ordering::Equal)
-                } else {
-                    a.partial_cmp(b)
-                }
-            }
+            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Number(b)) => a.partial_cmp(b),
             (EvaluatedCellValue::Text(a), EvaluatedCellValue::Text(b)) => {
                 Some(a.to_lowercase().cmp(&b.to_lowercase()))
             }
@@ -972,63 +957,77 @@ impl SheetEngine {
         let mut min_val: Option<f64> = None;
         let mut max_val: Option<f64> = None;
 
-        let mut fold_cell = |v: EvaluatedCellValue, lane: usize| -> Result<(), FormulaError> {
-            if let EvaluatedCellValue::Error(e) = v {
-                return Err(e);
-            }
-            match name {
-                "SUM" | "AVERAGE" | "AVG" => {
-                    if let Some(n) = v.as_number() {
-                        num_count += 1;
-                        match lane & 3 {
-                            0 => acc0 += n,
-                            1 => acc1 += n,
-                            2 => acc2 += n,
-                            _ => acc3 += n,
+        let mut fold_cell =
+            |v: EvaluatedCellValue, lane: usize, from_range: bool| -> Result<(), FormulaError> {
+                if let EvaluatedCellValue::Error(e) = v {
+                    return Err(e);
+                }
+                let extract_num = |val: &EvaluatedCellValue| -> Result<Option<f64>, FormulaError> {
+                    if from_range {
+                        Ok(match val {
+                            EvaluatedCellValue::Number(n) => Some(*n),
+                            _ => None,
+                        })
+                    } else {
+                        match val {
+                            EvaluatedCellValue::Empty => Ok(None),
+                            _ => val.as_number().map(Some).ok_or(FormulaError::Value),
                         }
                     }
-                }
-                "PRODUCT" => {
-                    if let Some(n) = v.as_number() {
-                        num_count += 1;
-                        match lane & 3 {
-                            0 => p0 *= n,
-                            1 => p1 *= n,
-                            2 => p2 *= n,
-                            _ => p3 *= n,
+                };
+                match name {
+                    "SUM" | "AVERAGE" | "AVG" => {
+                        if let Some(n) = extract_num(&v)? {
+                            num_count += 1;
+                            match lane & 3 {
+                                0 => acc0 += n,
+                                1 => acc1 += n,
+                                2 => acc2 += n,
+                                _ => acc3 += n,
+                            }
                         }
                     }
-                }
-                "MIN" => {
-                    if let Some(n) = v.as_number() {
-                        min_val = Some(min_val.map_or(n, |m| m.min(n)));
+                    "PRODUCT" => {
+                        if let Some(n) = extract_num(&v)? {
+                            num_count += 1;
+                            match lane & 3 {
+                                0 => p0 *= n,
+                                1 => p1 *= n,
+                                2 => p2 *= n,
+                                _ => p3 *= n,
+                            }
+                        }
                     }
-                }
-                "MAX" => {
-                    if let Some(n) = v.as_number() {
-                        max_val = Some(max_val.map_or(n, |m| m.max(n)));
+                    "MIN" => {
+                        if let Some(n) = extract_num(&v)? {
+                            min_val = Some(min_val.map_or(n, |m| m.min(n)));
+                        }
                     }
-                }
-                "COUNT" => {
-                    if matches!(v, EvaluatedCellValue::Number(_)) {
+                    "MAX" => {
+                        if let Some(n) = extract_num(&v)? {
+                            max_val = Some(max_val.map_or(n, |m| m.max(n)));
+                        }
+                    }
+                    "COUNT" => {
+                        if matches!(v, EvaluatedCellValue::Number(_)) {
+                            item_count += 1;
+                        }
+                    }
+                    "COUNTA" => {
+                        if !matches!(v, EvaluatedCellValue::Empty) {
+                            item_count += 1;
+                        }
+                    }
+                    "COUNTBLANK"
+                        if matches!(v, EvaluatedCellValue::Empty)
+                            || matches!(&v, EvaluatedCellValue::Text(s) if s.is_empty()) =>
+                    {
                         item_count += 1;
                     }
+                    _ => {}
                 }
-                "COUNTA" => {
-                    if !matches!(v, EvaluatedCellValue::Empty) {
-                        item_count += 1;
-                    }
-                }
-                "COUNTBLANK"
-                    if matches!(v, EvaluatedCellValue::Empty)
-                        || matches!(&v, EvaluatedCellValue::Text(s) if s.is_empty()) =>
-                {
-                    item_count += 1;
-                }
-                _ => {}
-            }
-            Ok(())
-        };
+                Ok(())
+            };
 
         for arg in args {
             match arg {
@@ -1051,16 +1050,16 @@ impl SheetEngine {
                                 .map_err(|_| FormulaError::Ref)?;
                             let c3 = PackedCellCoordinate::new(r, c + 3)
                                 .map_err(|_| FormulaError::Ref)?;
-                            fold_cell(self.eval_coord_ctx(c0, ctx, depth + 1), 0)?;
-                            fold_cell(self.eval_coord_ctx(c1, ctx, depth + 1), 1)?;
-                            fold_cell(self.eval_coord_ctx(c2, ctx, depth + 1), 2)?;
-                            fold_cell(self.eval_coord_ctx(c3, ctx, depth + 1), 3)?;
+                            fold_cell(self.eval_coord_ctx(c0, ctx, depth), 0, true)?;
+                            fold_cell(self.eval_coord_ctx(c1, ctx, depth), 1, true)?;
+                            fold_cell(self.eval_coord_ctx(c2, ctx, depth), 2, true)?;
+                            fold_cell(self.eval_coord_ctx(c3, ctx, depth), 3, true)?;
                             c += 4;
                         }
                         while c <= max_c {
                             let coord =
                                 PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-                            fold_cell(self.eval_coord_ctx(coord, ctx, depth + 1), 0)?;
+                            fold_cell(self.eval_coord_ctx(coord, ctx, depth), 0, true)?;
                             c += 1;
                         }
                     }
@@ -1084,26 +1083,31 @@ impl SheetEngine {
                                 .map_err(|_| FormulaError::Ref)?;
                             let c3 = PackedCellCoordinate::new(r, c + 3)
                                 .map_err(|_| FormulaError::Ref)?;
-                            fold_cell(self.eval_sheet_coord(Some(sheet), c0, ctx, depth + 1), 0)?;
-                            fold_cell(self.eval_sheet_coord(Some(sheet), c1, ctx, depth + 1), 1)?;
-                            fold_cell(self.eval_sheet_coord(Some(sheet), c2, ctx, depth + 1), 2)?;
-                            fold_cell(self.eval_sheet_coord(Some(sheet), c3, ctx, depth + 1), 3)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c0, ctx, depth), 0, true)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c1, ctx, depth), 1, true)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c2, ctx, depth), 2, true)?;
+                            fold_cell(self.eval_sheet_coord(Some(sheet), c3, ctx, depth), 3, true)?;
                             c += 4;
                         }
                         while c <= max_c {
                             let coord =
                                 PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
                             fold_cell(
-                                self.eval_sheet_coord(Some(sheet), coord, ctx, depth + 1),
+                                self.eval_sheet_coord(Some(sheet), coord, ctx, depth),
                                 0,
+                                true,
                             )?;
                             c += 1;
                         }
                     }
                 }
+                Expr::Cell(_) | Expr::SheetCell { .. } => {
+                    let v = self.eval_expr_ctx(arg, ctx, depth);
+                    fold_cell(v, 0, true)?;
+                }
                 _ => {
-                    let v = self.eval_expr_ctx(arg, ctx, depth + 1);
-                    fold_cell(v, 0)?;
+                    let v = self.eval_expr_ctx(arg, ctx, depth);
+                    fold_cell(v, 0, false)?;
                 }
             }
         }
@@ -1142,7 +1146,7 @@ impl SheetEngine {
                 Expr::Range(range) => {
                     let coords = range.expand().map_err(|_| FormulaError::Ref)?;
                     for c in coords {
-                        let v = self.eval_coord_ctx(c, ctx, depth + 1);
+                        let v = self.eval_coord_ctx(c, ctx, depth);
                         if let EvaluatedCellValue::Error(e) = v {
                             return Err(e);
                         }
@@ -1152,7 +1156,7 @@ impl SheetEngine {
                 Expr::SheetRange { sheet, range } => {
                     let coords = range.expand().map_err(|_| FormulaError::Ref)?;
                     for c in coords {
-                        let v = self.eval_sheet_coord(Some(sheet), c, ctx, depth + 1);
+                        let v = self.eval_sheet_coord(Some(sheet), c, ctx, depth);
                         if let EvaluatedCellValue::Error(e) = v {
                             return Err(e);
                         }
@@ -1160,7 +1164,7 @@ impl SheetEngine {
                     }
                 }
                 _ => {
-                    let v = self.eval_expr_ctx(arg, ctx, depth + 1);
+                    let v = self.eval_expr_ctx(arg, ctx, depth);
                     if let EvaluatedCellValue::Error(e) = v {
                         return Err(e);
                     }
@@ -1173,15 +1177,30 @@ impl SheetEngine {
 
     pub(crate) fn values_match(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
         match (a, b) {
-            (EvaluatedCellValue::Number(na), EvaluatedCellValue::Number(nb)) => {
-                (na - nb).abs() < 1e-9
-            }
+            (EvaluatedCellValue::Number(na), EvaluatedCellValue::Number(nb)) => na == nb,
             (EvaluatedCellValue::Boolean(ba), EvaluatedCellValue::Boolean(bb)) => ba == bb,
-            (EvaluatedCellValue::Text(sa), EvaluatedCellValue::Text(sb)) => wildcard_match(sa, sb),
+            (EvaluatedCellValue::Text(sa), EvaluatedCellValue::Text(sb)) => {
+                if sa.is_ascii() && sb.is_ascii() {
+                    sa.eq_ignore_ascii_case(sb)
+                } else {
+                    sa.to_lowercase() == sb.to_lowercase()
+                }
+            }
             (EvaluatedCellValue::Empty, EvaluatedCellValue::Empty) => true,
             (EvaluatedCellValue::Empty, EvaluatedCellValue::Text(s))
             | (EvaluatedCellValue::Text(s), EvaluatedCellValue::Empty) => s.is_empty(),
             _ => false,
+        }
+    }
+
+    pub(crate) fn values_match_wildcard(
+        cell: &EvaluatedCellValue,
+        pattern: &EvaluatedCellValue,
+    ) -> bool {
+        if let (EvaluatedCellValue::Text(s), EvaluatedCellValue::Text(p)) = (cell, pattern) {
+            wildcard_match(s, p)
+        } else {
+            Self::values_match(cell, pattern)
         }
     }
 }

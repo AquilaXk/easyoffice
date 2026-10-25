@@ -59,6 +59,18 @@ final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
     }
     sender.reply(toOpenOrPrint: allSucceeded ? .success : .failure)
   }
+
+  func application(_ _: NSApplication, open urls: [URL]) {
+    guard let vm = viewModel else { return }
+    for url in urls {
+      do {
+        _ = try vm.importDocumentFromDisk(url: url)
+      } catch {
+        vm.lastErrorMessage =
+          (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+      }
+    }
+  }
 }
 
 @main
@@ -76,6 +88,14 @@ struct EasyOfficeApplication: App {
         .onAppear {
           appDelegate.viewModel = viewModel
           viewModel.restorePersistedRecentDocuments()
+        }
+        .onOpenURL { url in
+          do {
+            _ = try viewModel.importDocumentFromDisk(url: url)
+          } catch {
+            viewModel.lastErrorMessage =
+              (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+          }
         }
     }
     .commands {

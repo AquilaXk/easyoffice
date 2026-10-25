@@ -641,6 +641,10 @@ public final class WorkspaceViewModel {
         lastErrorMessage = error.localizedDescription
         return
       }
+      if let tab = openTabs.first(where: { $0.id == id }), tab.isModified {
+        lastErrorMessage = "원본 문서 포맷으로 저장되지 않아 변경사항이 유지됩니다: \(tab.fileName)"
+        return
+      }
     }
     closeTab(id: id)
   }

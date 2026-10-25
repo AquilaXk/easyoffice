@@ -1,4 +1,4 @@
-use crate::{EasyOfficeError, ZipSecurityGuard};
+use crate::EasyOfficeError;
 use std::sync::OnceLock;
 
 const MAX_BITS: usize = 15;
@@ -338,17 +338,10 @@ fn check_budget(
             "DEFLATE 출력 크기({new_len} bytes)가 허용 상한({max_output_bytes} bytes)을 초과했습니다."
         )));
     }
-    if input_len > 0
-        && new_len > 4096
-        && new_len
-            > input_len
-                .max(1)
-                .saturating_mul(ZipSecurityGuard::MAX_COMPRESSION_RATIO as usize)
-    {
+    if input_len > 0 && new_len > 1_048_576 && new_len > input_len.max(1).saturating_mul(1000) {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "DEFLATE 압축 해제 비율({}x)이 보안 상한({}x)을 초과했습니다.",
+            "DEFLATE 압축 해제 비율({}x)이 보안 상한(1000x)을 초과했습니다.",
             new_len / input_len.max(1),
-            ZipSecurityGuard::MAX_COMPRESSION_RATIO
         )));
     }
     Ok(())
@@ -637,7 +630,7 @@ fn is_valid_zlib_header(input: &[u8]) -> bool {
         && (input[0] & 0x0F) == 8
         && (input[0] & 0x80) == 0
         && (input[1] & 0x20) == 0
-        && (u16::from(input[0]) * 256 + u16::from(input[1])).is_multiple_of(31)
+        && (u16::from(input[0]) * 256 + u16::from(input[1])) % 31 == 0
 }
 
 /// Decompresses an RFC 1950 zlib stream and validates the 2-byte header and 4-byte Adler-32 trailer.
@@ -919,5 +912,11 @@ mod tests {
             inflate_raw(&compressed, 16),
             Err(EasyOfficeError::ResourceBudgetExceeded(_))
         ));
+
+        let sparse_zeros = vec![0u8; 32_768];
+        let compressed_zeros = deflate_raw(&sparse_zeros);
+        assert!(compressed_zeros.len() * 100 < sparse_zeros.len());
+        let inflated_zeros = inflate_raw(&compressed_zeros, 65_536).unwrap();
+        assert_eq!(inflated_zeros, sparse_zeros);
     }
 }

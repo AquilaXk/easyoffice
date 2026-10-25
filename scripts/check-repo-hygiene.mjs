@@ -253,6 +253,38 @@ if (fs.existsSync(swiftAppDir)) {
   }
 }
 
+const UNCHECKED_SWIFT_FLOAT_INT_REGEX = /\b(Int|UInt32|UInt16)\((floor|ceil|round)\(/;
+for (const file of files) {
+  const rel = path.relative(ROOT, file).replaceAll("\\", "/");
+  if (rel.startsWith("Sources/") && rel.endsWith(".swift")) {
+    const text = fs.readFileSync(file, "utf8");
+    if (UNCHECKED_SWIFT_FLOAT_INT_REGEX.test(text)) {
+      errors.push(
+        `Unchecked float-to-integer conversion detected in ${rel}; use safeInt/checkedInteger/safeClampedInt instead.`
+      );
+    }
+  }
+}
+
+const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".floor_char_boundary("];
+for (const file of files) {
+  const rel = path.relative(ROOT, file).replaceAll("\\", "/");
+  if (rel.startsWith("crates/") && rel.endsWith("/Cargo.toml")) {
+    const tomlText = fs.readFileSync(file, "utf8");
+    if (!tomlText.includes("rust-version.workspace = true")) {
+      errors.push(`Crate manifest ${rel} is missing 'rust-version.workspace = true' for MSRV 1.85 enforcement.`);
+    }
+  }
+  if (rel.startsWith("crates/") && rel.endsWith(".rs")) {
+    const rsText = fs.readFileSync(file, "utf8");
+    for (const api of POST_185_RUST_APIS) {
+      if (rsText.includes(api)) {
+        errors.push(`Post-Rust-1.85 API '${api}' detected in ${rel} (breaks MSRV 1.85).`);
+      }
+    }
+  }
+}
+
 if (errors.length > 0) {
   console.error("Repository hygiene check failed:");
   for (const err of errors) {

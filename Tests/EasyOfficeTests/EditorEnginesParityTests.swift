@@ -238,7 +238,7 @@ final class EditorEnginesParityTests: XCTestCase {
     XCTAssertEqual(sheet.evaluate(at: "P3"), .number(1000))
     // 100/1.1 + 110/1.21 + 121/1.331 = 90.909 + 90.909 + 90.909 = 272.73
     XCTAssertEqual(sheet.evaluate(at: "P4"), .number(272.73))
-    XCTAssertEqual(sheet.evaluate(at: "P5"), .text("2026-10-17"))
+    XCTAssertEqual(sheet.evaluate(at: "P5"), .number(46312))
     XCTAssertEqual(sheet.evaluate(at: "P6"), .number(2026))
     XCTAssertEqual(sheet.evaluate(at: "P7"), .number(10))
     XCTAssertEqual(sheet.evaluate(at: "P8"), .number(17))
@@ -246,7 +246,7 @@ final class EditorEnginesParityTests: XCTestCase {
 
     // Direct evaluation via PackedCellCoordinate
     let p5Coord = try CellAddress(a1Notation: "P5").packedCoordinate
-    XCTAssertEqual(sheet.evaluate(at: p5Coord), .text("2026-10-17"))
+    XCTAssertEqual(sheet.evaluate(at: p5Coord), .number(46312))
   }
 
   // MARK: - 3. Pivot Table, Chart Builder, Conditional Format, Validation, Sort/Filter

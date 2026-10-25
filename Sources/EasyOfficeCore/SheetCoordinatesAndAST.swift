@@ -422,6 +422,12 @@ public enum EvaluatedCellValue: Sendable, Codable, Equatable, CustomStringConver
       if val.isFinite && val.rounded() == val && abs(val) < 1e15 {
         return String(format: "%.0f", val)
       }
+      if val.isFinite && abs(val) >= 1e6 && abs(val) < 1e15 {
+        var formatted = String(format: "%.6f", val)
+        while formatted.hasSuffix("0") { formatted.removeLast() }
+        if formatted.hasSuffix(".") { formatted.removeLast() }
+        return formatted
+      }
       return String(format: "%.10g", val)
     case .text(let str):
       return str
@@ -797,10 +803,24 @@ extension WorksheetModel {
   private static func estimateFormulaTokenCount(_ utf8Source: String) -> Int {
     var tokens = 0
     var inAlnum = false
+    var inQuotes = false
     for b in utf8Source.utf8 {
+      if b == 0x22 {
+        if !inQuotes {
+          tokens += 1
+          inQuotes = true
+          inAlnum = false
+        } else {
+          inQuotes = false
+        }
+        continue
+      }
+      if inQuotes {
+        continue
+      }
       let isWord =
         (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A)
-        || (b >= 0x61 && b <= 0x7A) || b == 0x5F || b == 0x2E || b == 0x24
+        || (b >= 0x61 && b <= 0x7A) || b == 0x5F || b == 0x2E || b == 0x24 || b >= 0x80
       if isWord {
         if !inAlnum {
           tokens += 1
@@ -1133,6 +1153,8 @@ extension WorksheetModel {
       var inDoubleQuotes = false
       var inSingleQuotes = false
       var idx = utf8.endIndex
+      var currentEnd = expr.endIndex
+      var splits: [(op: String, rhs: String)] = []
       while idx > utf8.startIndex {
         idx = utf8.index(before: idx)
         let b = utf8[idx]
@@ -1152,7 +1174,7 @@ extension WorksheetModel {
         } else if parenDepth == 0 && idx > utf8.startIndex && (b == opA || b == opB) {
           let nextIdx = utf8.index(after: idx)
           let lhsStr = String(expr[expr.startIndex..<idx]).trimmingCharacters(in: .whitespaces)
-          let rhsStr = String(expr[nextIdx..<expr.endIndex]).trimmingCharacters(in: .whitespaces)
+          let rhsStr = String(expr[nextIdx..<currentEnd]).trimmingCharacters(in: .whitespaces)
           if lhsStr.isEmpty || rhsStr.isEmpty { continue }
           if let prevByte = lhsStr.utf8.last,
             prevByte == 0x2B || prevByte == 0x2D || prevByte == 0x2A || prevByte == 0x2F
@@ -1171,12 +1193,23 @@ extension WorksheetModel {
           case 0x5E: opStr = "^"
           default: opStr = "+"
           }
-          return .binaryOp(
+          splits.append((op: opStr, rhs: rhsStr))
+          currentEnd = idx
+        }
+      }
+      if !splits.isEmpty {
+        let firstTerm = String(expr[expr.startIndex..<currentEnd]).trimmingCharacters(
+          in: .whitespaces)
+        guard !firstTerm.isEmpty else { continue }
+        var acc = compileExpression(firstTerm, depth: depth + 1)
+        for (opStr, rhsStr) in splits.reversed() {
+          acc = .binaryOp(
             op: opStr,
-            lhs: compileExpression(lhsStr, depth: depth + 1),
+            lhs: acc,
             rhs: compileExpression(rhsStr, depth: depth + 1)
           )
         }
+        return acc
       }
     }
     return nil

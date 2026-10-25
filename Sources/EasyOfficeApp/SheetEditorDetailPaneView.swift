@@ -1789,8 +1789,10 @@ public struct SheetEditorDetailPaneView: View {
                   let startAddr = CellAddress(
                     packed: PackedCellCoordinate(row: minR, column: minC))
                   if abs(value.translation.height) >= abs(value.translation.width) {
-                    let extraRows = max(
-                      1, Int(round(max(1.0, value.translation.height) / max(22.0, rowHeightPt)))
+                    let extraRows = XMLDocumentModelMapper.safeClampedInt(
+                      round(max(1.0, value.translation.height) / max(22.0, rowHeightPt)),
+                      min: 1,
+                      max: CellAddress.maxZeroBasedRow
                     )
                     let endR = min(CellAddress.maxZeroBasedRow, maxR + extraRows)
                     let endAddr = CellAddress(
@@ -1799,8 +1801,11 @@ public struct SheetEditorDetailPaneView: View {
                       targetRangeNotation: "\(startAddr.a1Notation):\(endAddr.a1Notation)"
                     )
                   } else {
-                    let extraCols = max(
-                      1, Int(round(max(1.0, value.translation.width) / max(48.0, colWidthPt))))
+                    let extraCols = XMLDocumentModelMapper.safeClampedInt(
+                      round(max(1.0, value.translation.width) / max(48.0, colWidthPt)),
+                      min: 1,
+                      max: CellAddress.maxZeroBasedColumn
+                    )
                     let endC = min(CellAddress.maxZeroBasedColumn, maxC + extraCols)
                     let endAddr = CellAddress(
                       packed: PackedCellCoordinate(row: maxR, column: endC))
@@ -1826,8 +1831,16 @@ public struct SheetEditorDetailPaneView: View {
       DragGesture(minimumDistance: 12)
         .onEnded { value in
           guard isPrimaryPane else { return }
-          let dCols = Int(round(value.translation.width / max(48.0, colWidthPt)))
-          let dRows = Int(round(value.translation.height / max(22.0, rowHeightPt)))
+          let dCols = XMLDocumentModelMapper.safeClampedInt(
+            round(value.translation.width / max(48.0, colWidthPt)),
+            min: -CellAddress.maxZeroBasedColumn,
+            max: CellAddress.maxZeroBasedColumn
+          )
+          let dRows = XMLDocumentModelMapper.safeClampedInt(
+            round(value.translation.height / max(22.0, rowHeightPt)),
+            min: -CellAddress.maxZeroBasedRow,
+            max: CellAddress.maxZeroBasedRow
+          )
           let endRow = max(0, min(CellAddress.maxZeroBasedRow, zeroRow + dRows))
           let endCol = max(0, min(CellAddress.maxZeroBasedColumn, colIdx + dCols))
           let targetAddr = CellAddress(
