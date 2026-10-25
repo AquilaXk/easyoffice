@@ -50,16 +50,22 @@ impl LegacyOle2Codec {
     pub const BIFF8_EOF: u16 = 0x000A;
     pub const BIFF8_FILEPASS: u16 = 0x002F;
     pub const BIFF8_BOUNDSHEET: u16 = 0x0085;
+    pub const BIFF8_MULRK: u16 = 0x00BD;
     pub const BIFF8_SST: u16 = 0x00FC;
     pub const BIFF8_LABELSST: u16 = 0x00FD;
+    pub const BIFF8_DIMENSIONS: u16 = 0x0200;
     pub const BIFF8_NUMBER: u16 = 0x0203;
     pub const BIFF8_LABEL: u16 = 0x0204;
+    pub const BIFF8_STRING: u16 = 0x0207;
+    pub const BIFF8_RK: u16 = 0x027E;
     pub const BIFF8_FORMULA: u16 = 0x0006;
 
     pub const RT_DOCUMENT: u16 = 0x03E8;
     pub const RT_SLIDE: u16 = 0x03EE;
     pub const RT_SLIDE_ATOM: u16 = 0x03EF;
+    pub const RT_SLIDE_LIST_WITH_TEXT: u16 = 0x0FF0;
     pub const RT_TEXT_CHARS_ATOM: u16 = 0x0FA0;
+    pub const RT_TEXT_BYTES_ATOM: u16 = 0x0FA8;
     pub const PPT_RT_TEXT_CHARS_ATOM: u16 = 0x0FA0;
 
     fn doc_stream_name() -> String {
@@ -355,28 +361,57 @@ impl LegacyOle2Codec {
         })
     }
 
+    #[inline]
+    fn format_biff_number(num: f64) -> String {
+        if num.fract() == 0.0 && num.abs() < 1e15 {
+            format!("{num:.0}")
+        } else {
+            format!("{num}")
+        }
+    }
+
+    #[inline]
+    fn decode_rk_number(rk: u32) -> f64 {
+        let base = if (rk & 0x02) != 0 {
+            ((rk as i32) >> 2) as f64
+        } else {
+            f64::from_bits(((rk & !3) as u64) << 32)
+        };
+        if (rk & 0x01) != 0 {
+            base / 100.0
+        } else {
+            base
+        }
+    }
+
     pub fn pack_xls(payload: &LegacyXlsPayload) -> Result<Vec<u8>, EasyOfficeError> {
         let mut stream = Vec::with_capacity(512);
 
-        // 1. BOF record (0x0809, len 16)
+        // 1. Workbook Globals Substream BOF (0x0809, len 16, substream 0x0005)
         stream.extend_from_slice(&Self::BIFF8_BOF.to_le_bytes());
         stream.extend_from_slice(&16u16.to_le_bytes());
         stream.extend_from_slice(&0x0600u16.to_le_bytes()); // BIFF8
-        stream.extend_from_slice(&0x0010u16.to_le_bytes()); // Worksheet substream
+        stream.extend_from_slice(&0x0005u16.to_le_bytes()); // Workbook Globals
         stream.extend_from_slice(&0x0DBBu16.to_le_bytes());
         stream.extend_from_slice(&0x07CCu16.to_le_bytes());
         stream.extend_from_slice(&0u32.to_le_bytes());
         stream.extend_from_slice(&0x0006u32.to_le_bytes());
 
-        // 2. BOUNDSHEET record (0x0085)
-        let sheet_name_utf16 = encode_utf16le(&payload.sheet_name);
+        // 2. BOUNDSHEET record (0x0085): 4B lbPlyPos + 1B hsState + 1B dt + 1B cch + 1B grbit + UTF-16LE name
+        let sheet_units: Vec<u16> = payload.sheet_name.encode_utf16().take(255).collect();
+        let mut sheet_name_utf16 = Vec::with_capacity(sheet_units.len() * 2);
+        for u in &sheet_units {
+            sheet_name_utf16.extend_from_slice(&u.to_le_bytes());
+        }
         let bs_len = (8 + sheet_name_utf16.len()) as u16;
         stream.extend_from_slice(&Self::BIFF8_BOUNDSHEET.to_le_bytes());
         stream.extend_from_slice(&bs_len.to_le_bytes());
-        stream.extend_from_slice(&0u32.to_le_bytes());
-        stream.push(0);
-        stream.push(0);
-        stream.extend_from_slice(&(payload.sheet_name.encode_utf16().count() as u16).to_le_bytes());
+        let lb_ply_pos_offset = stream.len();
+        stream.extend_from_slice(&0u32.to_le_bytes()); // patched to Worksheet BOF offset
+        stream.push(0); // hsState = visible
+        stream.push(0); // dt = worksheet
+        stream.push(sheet_units.len() as u8); // 1-byte cch
+        stream.push(0x01); // grbit = 1 (UTF-16LE)
         stream.extend_from_slice(&sheet_name_utf16);
 
         let mut sst_strings: Vec<String> = Vec::new();
@@ -408,7 +443,40 @@ impl LegacyOle2Codec {
             stream.extend_from_slice(&sst_payload);
         }
 
-        // Cell records: NUMBER (0x0203), FORMULA (0x0006), or LABELSST (0x00FD)
+        // End of Workbook Globals substream
+        stream.extend_from_slice(&Self::BIFF8_EOF.to_le_bytes());
+        stream.extend_from_slice(&0u16.to_le_bytes());
+
+        // Patch BOUNDSHEET lbPlyPos to point to the Worksheet BOF
+        let worksheet_bof_pos = stream.len() as u32;
+        write_u32_le(&mut stream, lb_ply_pos_offset, worksheet_bof_pos);
+
+        // 3. Worksheet Substream BOF (0x0809, len 16, substream 0x0010)
+        stream.extend_from_slice(&Self::BIFF8_BOF.to_le_bytes());
+        stream.extend_from_slice(&16u16.to_le_bytes());
+        stream.extend_from_slice(&0x0600u16.to_le_bytes()); // BIFF8
+        stream.extend_from_slice(&0x0010u16.to_le_bytes()); // Worksheet substream
+        stream.extend_from_slice(&0x0DBBu16.to_le_bytes());
+        stream.extend_from_slice(&0x07CCu16.to_le_bytes());
+        stream.extend_from_slice(&0u32.to_le_bytes());
+        stream.extend_from_slice(&0x0006u32.to_le_bytes());
+
+        // 4. DIMENSIONS record (0x0200, len 14)
+        let (max_r, max_c) = payload
+            .cells
+            .iter()
+            .fold((0u32, 0u32), |(mr, mc), &(r, c, _)| {
+                (mr.max(r + 1), mc.max(c + 1))
+            });
+        stream.extend_from_slice(&Self::BIFF8_DIMENSIONS.to_le_bytes());
+        stream.extend_from_slice(&14u16.to_le_bytes());
+        stream.extend_from_slice(&0u32.to_le_bytes()); // first_row
+        stream.extend_from_slice(&max_r.to_le_bytes()); // last_row + 1
+        stream.extend_from_slice(&0u16.to_le_bytes()); // first_col
+        stream.extend_from_slice(&(max_c.min(u16::MAX as u32) as u16).to_le_bytes()); // last_col + 1
+        stream.extend_from_slice(&0u16.to_le_bytes()); // reserved
+
+        // 5. Cell records: NUMBER (0x0203), FORMULA (0x0006), or LABELSST (0x00FD)
         for (row, col, raw) in &payload.cells {
             let r16 = (*row).min(u16::MAX as u32) as u16;
             let c16 = (*col).min(u16::MAX as u32) as u16;
@@ -441,7 +509,7 @@ impl LegacyOle2Codec {
             }
         }
 
-        // EOF record (0x000A, len 0)
+        // End of Worksheet substream
         stream.extend_from_slice(&Self::BIFF8_EOF.to_le_bytes());
         stream.extend_from_slice(&0u16.to_le_bytes());
 
@@ -467,6 +535,7 @@ impl LegacyOle2Codec {
         let mut sheet_name = "Sheet1".to_string();
         let mut sst_strings: Vec<String> = Vec::new();
         let mut cells: Vec<(u32, u32, String)> = Vec::new();
+        let mut last_formula_cell_idx: Option<usize> = None;
         let mut offset = 0usize;
 
         while offset + 4 <= wb.data.len() {
@@ -490,10 +559,23 @@ impl LegacyOle2Codec {
                 }
                 Self::BIFF8_BOUNDSHEET => {
                     if rec_len >= 8 {
-                        let char_count = read_u16_le(&wb.data, start + 6)? as usize;
-                        let byte_len = char_count * 2;
-                        if start + 8 + byte_len <= end {
-                            sheet_name = decode_utf16le(&wb.data[start + 8..start + 8 + byte_len])?;
+                        let cch_u8 = wb.data[start + 6] as usize;
+                        let grbit = wb.data[start + 7];
+                        let is_utf16 = (grbit & 0x01) != 0;
+                        let std_byte_len = if is_utf16 { cch_u8 * 2 } else { cch_u8 };
+                        if (grbit & 0xFE) == 0 && start + 8 + std_byte_len == end {
+                            sheet_name = if is_utf16 {
+                                decode_utf16le(&wb.data[start + 8..end])?
+                            } else {
+                                String::from_utf8_lossy(&wb.data[start + 8..end]).into_owned()
+                            };
+                        } else {
+                            let char_count = read_u16_le(&wb.data, start + 6)? as usize;
+                            let byte_len = char_count * 2;
+                            if start + 8 + byte_len <= end {
+                                sheet_name =
+                                    decode_utf16le(&wb.data[start + 8..start + 8 + byte_len])?;
+                            }
                         }
                     }
                 }
@@ -508,6 +590,26 @@ impl LegacyOle2Codec {
                             let char_count = read_u16_le(&wb.data, cursor)? as usize;
                             let flags = wb.data[cursor + 2];
                             cursor += 3;
+                            let rich_runs = if (flags & 0x08) != 0 {
+                                if cursor + 2 > end {
+                                    break;
+                                }
+                                let r = read_u16_le(&wb.data, cursor)? as usize;
+                                cursor += 2;
+                                r
+                            } else {
+                                0
+                            };
+                            let ext_rst_len = if (flags & 0x04) != 0 {
+                                if cursor + 4 > end {
+                                    break;
+                                }
+                                let ext = read_u32_le(&wb.data, cursor)? as usize;
+                                cursor += 4;
+                                ext
+                            } else {
+                                0
+                            };
                             if (flags & 0x01) != 0 {
                                 let byte_len = char_count * 2;
                                 if cursor + byte_len > end {
@@ -526,6 +628,9 @@ impl LegacyOle2Codec {
                                 sst_strings.push(s);
                                 cursor += char_count;
                             }
+                            cursor = cursor
+                                .saturating_add(rich_runs.saturating_mul(4))
+                                .saturating_add(ext_rst_len);
                         }
                     }
                 }
@@ -540,6 +645,7 @@ impl LegacyOle2Codec {
                             )
                         })?;
                         cells.push((row, col, text));
+                        last_formula_cell_idx = None;
                     }
                 }
                 Self::BIFF8_NUMBER => {
@@ -548,62 +654,141 @@ impl LegacyOle2Codec {
                         let col = read_u16_le(&wb.data, start + 2)? as u32;
                         let bits = read_u64_le(&wb.data, start + 6)?;
                         let num = f64::from_bits(bits);
-                        let formatted = if num.fract() == 0.0 && num.abs() < 1e15 {
-                            format!("{num:.0}")
-                        } else {
-                            format!("{num}")
-                        };
-                        cells.push((row, col, formatted));
+                        cells.push((row, col, Self::format_biff_number(num)));
+                        last_formula_cell_idx = None;
+                    }
+                }
+                Self::BIFF8_RK => {
+                    if rec_len >= 10 {
+                        let row = read_u16_le(&wb.data, start)? as u32;
+                        let col = read_u16_le(&wb.data, start + 2)? as u32;
+                        let rk = read_u32_le(&wb.data, start + 6)?;
+                        let num = Self::decode_rk_number(rk);
+                        cells.push((row, col, Self::format_biff_number(num)));
+                        last_formula_cell_idx = None;
+                    }
+                }
+                Self::BIFF8_MULRK => {
+                    if rec_len >= 12 {
+                        let row = read_u16_le(&wb.data, start)? as u32;
+                        let first_col = read_u16_le(&wb.data, start + 2)? as u32;
+                        let count = (rec_len - 6) / 6;
+                        for i in 0..count {
+                            let rk = read_u32_le(&wb.data, start + 4 + i * 6 + 2)?;
+                            let num = Self::decode_rk_number(rk);
+                            cells.push((row, first_col + i as u32, Self::format_biff_number(num)));
+                        }
+                        last_formula_cell_idx = None;
                     }
                 }
                 Self::BIFF8_FORMULA => {
-                    if rec_len > 16 {
+                    if rec_len >= 14 {
                         let row = read_u16_le(&wb.data, start)? as u32;
                         let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let char_count = read_u16_le(&wb.data, start + 14)? as usize;
-                        let byte_len = char_count * 2;
-                        let expr_raw = if char_count > 0 && start + 16 + byte_len <= end {
-                            decode_utf16le(&wb.data[start + 16..start + 16 + byte_len])?
-                        } else if (end - (start + 16)).is_multiple_of(2) {
-                            decode_utf16le(&wb.data[start + 16..end])?
-                        } else {
-                            String::new()
-                        };
-                        let expr = expr_raw.trim_matches('\0');
-                        if !expr.is_empty() {
-                            let formatted = if expr.starts_with('=') {
-                                expr.to_string()
-                            } else {
-                                format!("={expr}")
-                            };
-                            cells.push((row, col, formatted));
+                        let mut handled_inline = false;
+                        if rec_len > 16 {
+                            let char_count = read_u16_le(&wb.data, start + 14)? as usize;
+                            let byte_len = char_count * 2;
+                            let is_swift_inline = char_count == 0
+                                && (end - (start + 16)) % 2 == 0
+                                && end >= start + 18
+                                && wb.data[start + 16] == b'='
+                                && wb.data[start + 17] == 0;
+                            if (char_count > 0 && start + 16 + byte_len == end) || is_swift_inline {
+                                let slice = if char_count > 0 {
+                                    &wb.data[start + 16..start + 16 + byte_len]
+                                } else {
+                                    &wb.data[start + 16..end]
+                                };
+                                if let Ok(expr_raw) = decode_utf16le(slice) {
+                                    let expr = expr_raw.trim_matches('\0');
+                                    if !expr.is_empty() && !expr.chars().any(char::is_control) {
+                                        let formatted = if expr.starts_with('=') {
+                                            expr.to_string()
+                                        } else {
+                                            format!("={expr}")
+                                        };
+                                        cells.push((row, col, formatted));
+                                        last_formula_cell_idx = Some(cells.len() - 1);
+                                        handled_inline = true;
+                                    }
+                                }
+                            }
                         }
-                    } else if rec_len >= 14 {
-                        let row = read_u16_le(&wb.data, start)? as u32;
-                        let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let bits = read_u64_le(&wb.data, start + 6)?;
-                        let num = f64::from_bits(bits);
-                        let formatted = if num.fract() == 0.0 && num.abs() < 1e15 {
-                            format!("{num:.0}")
-                        } else {
-                            format!("{num}")
-                        };
-                        cells.push((row, col, formatted));
+                        if !handled_inline {
+                            let is_special =
+                                wb.data[start + 12] == 0xFF && wb.data[start + 13] == 0xFF;
+                            if is_special && wb.data[start + 6] == 0 {
+                                cells.push((row, col, String::new()));
+                                last_formula_cell_idx = Some(cells.len() - 1);
+                            } else {
+                                let bits = read_u64_le(&wb.data, start + 6)?;
+                                let num = f64::from_bits(bits);
+                                let val_str = if num.is_finite() {
+                                    Self::format_biff_number(num)
+                                } else {
+                                    String::new()
+                                };
+                                cells.push((row, col, val_str));
+                                last_formula_cell_idx = Some(cells.len() - 1);
+                            }
+                        }
+                    }
+                }
+                Self::BIFF8_STRING => {
+                    if rec_len >= 3 {
+                        let cch = read_u16_le(&wb.data, start)? as usize;
+                        let grbit = wb.data[start + 2];
+                        let is_utf16 = (grbit & 0x01) != 0;
+                        let byte_len = if is_utf16 { cch * 2 } else { cch };
+                        if start + 3 + byte_len <= end {
+                            let s = if is_utf16 {
+                                decode_utf16le(&wb.data[start + 3..start + 3 + byte_len])?
+                            } else {
+                                String::from_utf8_lossy(&wb.data[start + 3..start + 3 + byte_len])
+                                    .into_owned()
+                            };
+                            if let Some(cell_idx) = last_formula_cell_idx.take() {
+                                if let Some(entry) = cells.get_mut(cell_idx) {
+                                    if entry.2.is_empty() || !entry.2.starts_with('=') {
+                                        entry.2 = s;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Self::BIFF8_LABEL => {
                     if rec_len >= 8 {
                         let row = read_u16_le(&wb.data, start)? as u32;
                         let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let char_count = read_u16_le(&wb.data, start + 6)? as usize;
-                        let byte_len = char_count * 2;
+                        let cch = read_u16_le(&wb.data, start + 6)? as usize;
+                        if rec_len >= 9 && (wb.data[start + 8] & 0xFE) == 0 {
+                            let is_utf16 = (wb.data[start + 8] & 0x01) != 0;
+                            let std_len = if is_utf16 { cch * 2 } else { cch };
+                            if start + 9 + std_len == end {
+                                let s = if is_utf16 {
+                                    decode_utf16le(&wb.data[start + 9..end])?
+                                } else {
+                                    String::from_utf8_lossy(&wb.data[start + 9..end]).into_owned()
+                                };
+                                cells.push((row, col, s));
+                                last_formula_cell_idx = None;
+                                offset = end;
+                                continue;
+                            }
+                        }
+                        let byte_len = cch * 2;
                         if start + 8 + byte_len <= end {
                             let s = decode_utf16le(&wb.data[start + 8..start + 8 + byte_len])?;
                             cells.push((row, col, s));
+                            last_formula_cell_idx = None;
                         }
                     }
                 }
-                Self::BIFF8_EOF => break,
+                Self::BIFF8_EOF => {
+                    last_formula_cell_idx = None;
+                }
                 _ => {}
             }
             offset = end;
@@ -658,6 +843,178 @@ impl LegacyOle2Codec {
         Ole2ContainerCodec::pack(&[(Self::ppt_stream_name(), stream)])
     }
 
+    fn decode_ppt_text_atom(rec_type: u16, slice: &[u8]) -> Result<String, EasyOfficeError> {
+        if rec_type == Self::RT_TEXT_CHARS_ATOM {
+            decode_utf16le(slice)
+        } else {
+            Ok(slice.iter().map(|&b| b as char).collect())
+        }
+    }
+
+    fn parse_ppt_slide_records(
+        data: &[u8],
+        start: usize,
+        end: usize,
+        slide: &mut LegacyPptSlide,
+        depth: usize,
+    ) -> Result<(), EasyOfficeError> {
+        if depth > 16 {
+            return Ok(());
+        }
+        let mut s_cur = start;
+        while s_cur + 8 <= end {
+            let s_ver = read_u16_le(data, s_cur)?;
+            let s_type = read_u16_le(data, s_cur + 2)?;
+            let s_len = read_u32_le(data, s_cur + 4)? as usize;
+            let a_start = s_cur + 8;
+            let a_end = a_start.checked_add(s_len).ok_or_else(|| {
+                EasyOfficeError::CorruptedContainer("PPT 슬라이드 아톰 오버플로".to_string())
+            })?;
+            if a_end > end {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "PPT 슬라이드 아톰 경계 초과".to_string(),
+                ));
+            }
+            if s_type == Self::RT_SLIDE_ATOM {
+                if (a_end - a_start) % 2 == 0 {
+                    if let Ok(meta) = decode_utf16le(&data[a_start..a_end]) {
+                        if let Some((th, tr)) = meta.split_once('|') {
+                            slide.theme = th.to_string();
+                            slide.transition = tr.to_string();
+                        }
+                    }
+                }
+            } else if (s_type == Self::RT_TEXT_CHARS_ATOM || s_type == Self::RT_TEXT_BYTES_ATOM)
+                && s_ver != Self::PPT_INST_CANVAS_ELEMENT
+            {
+                let txt = Self::decode_ppt_text_atom(s_type, &data[a_start..a_end])?;
+                let push_bullets = |bullets: &mut Vec<String>, s: String| {
+                    if s.contains('\r') {
+                        for part in s.split('\r') {
+                            bullets.push(part.to_string());
+                        }
+                    } else {
+                        bullets.push(s);
+                    }
+                };
+                match s_ver {
+                    0x0000 => {
+                        if slide.title.is_empty() {
+                            slide.title = txt;
+                        } else {
+                            push_bullets(&mut slide.bullets, txt);
+                        }
+                    }
+                    0x0010 => {
+                        if !txt.is_empty() {
+                            push_bullets(&mut slide.bullets, txt);
+                        }
+                    }
+                    0x0020 => slide.notes = txt,
+                    0x0030 => push_bullets(&mut slide.bullets, txt),
+                    _ => {
+                        if slide.title.is_empty() {
+                            slide.title = txt;
+                        } else {
+                            push_bullets(&mut slide.bullets, txt);
+                        }
+                    }
+                }
+            } else if (s_ver & 0x000F) == 0x000F {
+                Self::parse_ppt_slide_records(data, a_start, a_end, slide, depth + 1)?;
+            }
+            s_cur = a_end;
+        }
+        Ok(())
+    }
+
+    fn parse_ppt_container_records(
+        data: &[u8],
+        start: usize,
+        end: usize,
+        title: &mut String,
+        slides: &mut Vec<LegacyPptSlide>,
+        saw_valid_ppt: &mut bool,
+        depth: usize,
+    ) -> Result<(), EasyOfficeError> {
+        if depth > 16 {
+            return Ok(());
+        }
+        let mut offset = start;
+        while offset + 8 <= end {
+            let ver_inst = read_u16_le(data, offset)?;
+            let rec_type = read_u16_le(data, offset + 2)?;
+            let rec_len = read_u32_le(data, offset + 4)? as usize;
+            let r_start = offset + 8;
+            let r_end = r_start.checked_add(rec_len).ok_or_else(|| {
+                EasyOfficeError::CorruptedContainer("PPT 레코드 오프셋 오버플로".to_string())
+            })?;
+            if r_end > end {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "PPT 레코드가 컨테이너 경계를 초과합니다.".to_string(),
+                ));
+            }
+
+            if rec_type == Self::RT_DOCUMENT || rec_type == Self::RT_SLIDE_LIST_WITH_TEXT {
+                *saw_valid_ppt = true;
+                Self::parse_ppt_container_records(
+                    data,
+                    r_start,
+                    r_end,
+                    title,
+                    slides,
+                    saw_valid_ppt,
+                    depth + 1,
+                )?;
+            } else if rec_type == Self::RT_SLIDE {
+                *saw_valid_ppt = true;
+                let mut slide = LegacyPptSlide {
+                    title: String::new(),
+                    bullets: Vec::new(),
+                    notes: String::new(),
+                    theme: "SignatureLavender".to_string(),
+                    transition: "Fade".to_string(),
+                };
+                Self::parse_ppt_slide_records(data, r_start, r_end, &mut slide, depth + 1)?;
+                slides.push(slide);
+            } else if rec_type == Self::RT_TEXT_CHARS_ATOM || rec_type == Self::RT_TEXT_BYTES_ATOM {
+                *saw_valid_ppt = true;
+                let txt = Self::decode_ppt_text_atom(rec_type, &data[r_start..r_end])?;
+                if ver_inst == 0x0000 && depth <= 1 && title == "발표자료" {
+                    *title = txt;
+                } else if depth <= 1 && (ver_inst == 0x0010 || ver_inst == 0x0020) {
+                } else if let Some(last_slide) = slides.last_mut() {
+                    if last_slide.title.is_empty() {
+                        last_slide.title = txt;
+                    } else {
+                        last_slide.bullets.push(txt);
+                    }
+                } else {
+                    slides.push(LegacyPptSlide {
+                        title: txt,
+                        bullets: Vec::new(),
+                        notes: String::new(),
+                        theme: "SignatureLavender".to_string(),
+                        transition: "Fade".to_string(),
+                    });
+                }
+            } else if (ver_inst & 0x000F) == 0x000F {
+                *saw_valid_ppt = true;
+                Self::parse_ppt_container_records(
+                    data,
+                    r_start,
+                    r_end,
+                    title,
+                    slides,
+                    saw_valid_ppt,
+                    depth + 1,
+                )?;
+            }
+            offset = r_end;
+        }
+        Ok(())
+    }
+
     pub fn unpack_ppt(bytes: &[u8]) -> Result<LegacyPptPayload, EasyOfficeError> {
         let streams = Ole2ContainerCodec::unpack(bytes)?;
         if streams.iter().any(|s| s.name == "EncryptedSummary") {
@@ -680,87 +1037,24 @@ impl LegacyOle2Codec {
             ));
         }
 
-        let root_type = read_u16_le(&ppt_stream.data, 2)?;
-        let root_len = read_u32_le(&ppt_stream.data, 4)? as usize;
-        if root_type != Self::RT_DOCUMENT || 8 + root_len > ppt_stream.data.len() {
+        let mut title = "발표자료".to_string();
+        let mut slides: Vec<LegacyPptSlide> = Vec::new();
+        let mut saw_valid_ppt = false;
+
+        Self::parse_ppt_container_records(
+            &ppt_stream.data,
+            0,
+            ppt_stream.data.len(),
+            &mut title,
+            &mut slides,
+            &mut saw_valid_ppt,
+            0,
+        )?;
+
+        if !saw_valid_ppt {
             return Err(EasyOfficeError::CorruptedContainer(
                 "PPT RT_Document(0x03E8) 루트 레코드가 유효하지 않습니다.".to_string(),
             ));
-        }
-
-        let mut title = "발표자료".to_string();
-        let mut slides: Vec<LegacyPptSlide> = Vec::new();
-        let mut offset = 8usize;
-        let doc_end = 8 + root_len;
-
-        while offset + 8 <= doc_end {
-            let ver_inst = read_u16_le(&ppt_stream.data, offset)?;
-            let rec_type = read_u16_le(&ppt_stream.data, offset + 2)?;
-            let rec_len = read_u32_le(&ppt_stream.data, offset + 4)? as usize;
-            let start = offset + 8;
-            let end = start.checked_add(rec_len).ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer("PPT 레코드 오프셋 오버플로".to_string())
-            })?;
-            if end > doc_end {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "PPT 레코드가 RT_Document 경계를 초과합니다.".to_string(),
-                ));
-            }
-
-            if rec_type == Self::RT_TEXT_CHARS_ATOM && ver_inst == 0x0000 {
-                title = decode_utf16le(&ppt_stream.data[start..end])?;
-            } else if rec_type == Self::RT_SLIDE {
-                let mut s_title = String::new();
-                let mut s_bullets = Vec::new();
-                let mut s_notes = String::new();
-                let mut s_theme = "SignatureLavender".to_string();
-                let mut s_transition = "Fade".to_string();
-                let mut s_cur = start;
-
-                while s_cur + 8 <= end {
-                    let s_ver = read_u16_le(&ppt_stream.data, s_cur)?;
-                    let s_type = read_u16_le(&ppt_stream.data, s_cur + 2)?;
-                    let s_len = read_u32_le(&ppt_stream.data, s_cur + 4)? as usize;
-                    let a_start = s_cur + 8;
-                    let a_end = a_start.checked_add(s_len).ok_or_else(|| {
-                        EasyOfficeError::CorruptedContainer(
-                            "PPT 슬라이드 아톰 오버플로".to_string(),
-                        )
-                    })?;
-                    if a_end > end {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "PPT 슬라이드 아톰 경계 초과".to_string(),
-                        ));
-                    }
-                    if s_type == Self::RT_SLIDE_ATOM {
-                        let meta = decode_utf16le(&ppt_stream.data[a_start..a_end])?;
-                        if let Some((th, tr)) = meta.split_once('|') {
-                            s_theme = th.to_string();
-                            s_transition = tr.to_string();
-                        }
-                    } else if s_type == Self::RT_TEXT_CHARS_ATOM
-                        && s_ver != Self::PPT_INST_CANVAS_ELEMENT
-                    {
-                        let txt = decode_utf16le(&ppt_stream.data[a_start..a_end])?;
-                        match s_ver {
-                            0x0000 => s_title = txt,
-                            0x0020 => s_notes = txt,
-                            0x0030 => s_bullets.push(txt),
-                            _ => {}
-                        }
-                    }
-                    s_cur = a_end;
-                }
-
-                slides.push(LegacyPptSlide {
-                    title: s_title,
-                    bullets: s_bullets,
-                    notes: s_notes,
-                    theme: s_theme,
-                    transition: s_transition,
-                });
-            }
-            offset = end;
         }
 
         Ok(LegacyPptPayload { title, slides })

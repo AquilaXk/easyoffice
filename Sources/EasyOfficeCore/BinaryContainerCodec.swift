@@ -476,12 +476,20 @@ public enum ZipContainerCodec {
   }
 
   public static func pack(entries: [ZipContainerEntry]) throws -> Data {
+    guard entries.count <= Int(UInt16.max) else {
+      throw EasyOfficeError.corruptedContainer(
+        detail: "ZIP 엔트리 개수(\(entries.count))가 표준 EOCD 한도(65,535)를 초과합니다.")
+    }
     var archive = Data()
     var centralDirectory = Data()
 
     for entry in entries {
       try validateEntryPath(entry.path)
       let pathBytes = Data(entry.path.utf8)
+      guard pathBytes.count <= Int(UInt16.max) else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "ZIP 엔트리 경로 길이(\(pathBytes.count) 바이트)가 최대 한도(65,535)를 초과합니다.")
+      }
       let uncompressedSize = UInt32(entry.data.count)
       let crc32 = CRC32Calculator.compute(for: entry.data)
 

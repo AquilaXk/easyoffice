@@ -3,12 +3,16 @@ use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
 const APP_JS: &str = include_str!("../ui/app.js");
 const MAX_HTTP_BODY_BYTES: usize = 262_144;
+const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
 
 fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{key}\"");
@@ -37,9 +41,23 @@ fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
     None
 }
 
-fn handle_http_connection(mut stream: TcpStream) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+fn is_allowed_host(host: &str, port: u16) -> bool {
+    let h = host.trim();
+    h.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
+        || h.eq_ignore_ascii_case(&format!("localhost:{port}"))
+        || h.eq_ignore_ascii_case("127.0.0.1")
+        || h.eq_ignore_ascii_case("localhost")
+}
+
+fn is_allowed_origin(origin: &str, port: u16) -> bool {
+    let o = origin.trim().trim_end_matches('/');
+    o.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
+        || o.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
+}
+
+fn handle_http_connection(mut stream: TcpStream, port: u16) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
 
     let mut buf = Vec::with_capacity(8192);
     let mut chunk = [0u8; 4096];
@@ -68,14 +86,50 @@ fn handle_http_connection(mut stream: TcpStream) {
     let path = parts.next().unwrap_or("/");
 
     let mut content_length = 0usize;
+    let mut host_header: Option<String> = None;
+    let mut origin_header: Option<String> = None;
     for line in lines {
         if let Some((k, v)) = line.split_once(':') {
-            if k.trim().eq_ignore_ascii_case("content-length") {
+            let key = k.trim();
+            if key.eq_ignore_ascii_case("content-length") {
                 content_length = v
                     .trim()
                     .parse::<usize>()
                     .unwrap_or(0)
                     .min(MAX_HTTP_BODY_BYTES);
+            } else if key.eq_ignore_ascii_case("host") {
+                host_header = Some(v.trim().to_string());
+            } else if key.eq_ignore_ascii_case("origin") {
+                origin_header = Some(v.trim().to_string());
+            }
+        }
+    }
+
+    if let Some(ref host) = host_header {
+        if !is_allowed_host(host, port) {
+            let body = "{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Host 헤더입니다.\"}";
+            let resp = format!(
+                "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(resp.as_bytes());
+            let _ = stream.flush();
+            return;
+        }
+    }
+
+    if method == "POST" {
+        if let Some(ref origin) = origin_header {
+            if !is_allowed_origin(origin, port) {
+                let body =
+                    "{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Origin 헤더입니다.\"}";
+                let resp = format!(
+                    "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+                return;
             }
         }
     }
@@ -160,8 +214,19 @@ fn serve_webui(port: u16) -> ExitCode {
         }
     };
     println!("EasyOffice WebUI Server listening on http://{addr}");
+    let active_threads = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
-        handle_http_connection(stream);
+        let current = active_threads.load(Ordering::Relaxed);
+        if current < MAX_CONCURRENT_HTTP_THREADS {
+            active_threads.fetch_add(1, Ordering::Relaxed);
+            let counter = Arc::clone(&active_threads);
+            thread::spawn(move || {
+                handle_http_connection(stream, port);
+                counter.fetch_sub(1, Ordering::Relaxed);
+            });
+        } else {
+            handle_http_connection(stream, port);
+        }
     }
     ExitCode::SUCCESS
 }

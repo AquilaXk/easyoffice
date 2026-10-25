@@ -50,12 +50,12 @@ impl SheetEngine {
                     for r_off in 0..rows {
                         let kc = PackedCellCoordinate::new(min_r + r_off as u32, min_c)
                             .map_err(|_| FormulaError::Ref)?;
-                        let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth + 1);
+                        let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth);
                         if !range_lookup {
-                            if Self::values_match(&kv, &lookup_val) {
+                            if Self::values_match_wildcard(&kv, &lookup_val) {
                                 let rc = PackedCellCoordinate::new(min_r + r_off as u32, target_c)
                                     .map_err(|_| FormulaError::Ref)?;
-                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth + 1));
+                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
                             }
                         } else if same_type(&kv, &lookup_val) {
                             if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
@@ -75,7 +75,7 @@ impl SheetEngine {
                     if let Some((best_r_off, _)) = best {
                         let rc = PackedCellCoordinate::new(min_r + best_r_off, target_c)
                             .map_err(|_| FormulaError::Ref)?;
-                        return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth + 1));
+                        return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
                     }
                 } else {
                     if idx_num < 1 || (idx_num as usize) > rows {
@@ -86,12 +86,12 @@ impl SheetEngine {
                     for c_off in 0..cols {
                         let kc = PackedCellCoordinate::new(min_r, min_c + c_off as u32)
                             .map_err(|_| FormulaError::Ref)?;
-                        let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth + 1);
+                        let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth);
                         if !range_lookup {
-                            if Self::values_match(&kv, &lookup_val) {
+                            if Self::values_match_wildcard(&kv, &lookup_val) {
                                 let rc = PackedCellCoordinate::new(target_r, min_c + c_off as u32)
                                     .map_err(|_| FormulaError::Ref)?;
-                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth + 1));
+                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
                             }
                         } else if same_type(&kv, &lookup_val) {
                             if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
@@ -111,7 +111,7 @@ impl SheetEngine {
                     if let Some((best_c_off, _)) = best {
                         let rc = PackedCellCoordinate::new(target_r, min_c + best_c_off)
                             .map_err(|_| FormulaError::Ref)?;
-                        return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth + 1));
+                        return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
                     }
                 }
                 Err(FormulaError::Na)
@@ -121,39 +121,110 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let lookup_val = self.eval_arg_val(&args[0], ctx, depth)?;
+                let match_mode = if args.len() >= 5 {
+                    self.eval_arg_num(&args[4], ctx, depth)?.trunc() as i32
+                } else {
+                    0
+                };
+                if !matches!(match_mode, -1..=2) {
+                    return Err(FormulaError::Value);
+                }
+                let search_mode = if args.len() >= 6 {
+                    self.eval_arg_num(&args[5], ctx, depth)?.trunc() as i32
+                } else {
+                    1
+                };
+                if !matches!(search_mode, -2 | -1 | 1 | 2) {
+                    return Err(FormulaError::Value);
+                }
+                let cell_matches = |k: &EvaluatedCellValue| -> bool {
+                    if match_mode == 2 {
+                        Self::values_match_wildcard(k, &lookup_val)
+                    } else {
+                        Self::values_match(k, &lookup_val)
+                    }
+                };
+                let same_type = |a: &EvaluatedCellValue, b: &EvaluatedCellValue| -> bool {
+                    matches!(
+                        (a, b),
+                        (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(_))
+                            | (EvaluatedCellValue::Text(_), EvaluatedCellValue::Text(_))
+                            | (
+                                EvaluatedCellValue::Boolean(_),
+                                EvaluatedCellValue::Boolean(_)
+                            )
+                    )
+                };
                 if let (Some(lookup_spec), Some(return_spec)) = (
                     self.extract_streaming_range(&args[1])?,
                     self.extract_streaming_range(&args[2])?,
                 ) {
                     let (_, _, _, l_rows, l_cols, _) = lookup_spec;
                     let (_, _, _, r_rows, r_cols, _) = return_spec;
-                    if l_rows * l_cols != r_rows * r_cols || r_cols == 0 {
+                    let total_len = l_rows * l_cols;
+                    if total_len != r_rows * r_cols || r_cols == 0 || l_cols == 0 {
                         return Err(FormulaError::Value);
                     }
-                    let mut flat_idx = 0usize;
-                    for r_off in 0..l_rows {
-                        for c_off in 0..l_cols {
-                            let k = self.eval_streaming_cell_allow_error(
-                                lookup_spec,
-                                r_off,
-                                c_off,
+                    let mut best_approx: Option<(usize, EvaluatedCellValue)> = None;
+                    for step in 0..total_len {
+                        let flat_idx = if search_mode < 0 {
+                            total_len - 1 - step
+                        } else {
+                            step
+                        };
+                        let r_off = flat_idx / l_cols;
+                        let c_off = flat_idx % l_cols;
+                        let k = self.eval_streaming_cell_allow_error(
+                            lookup_spec,
+                            r_off,
+                            c_off,
+                            ctx,
+                            depth,
+                        )?;
+                        if cell_matches(&k) {
+                            return self.eval_streaming_cell(
+                                return_spec,
+                                flat_idx / r_cols,
+                                flat_idx % r_cols,
                                 ctx,
                                 depth,
-                            )?;
-                            if Self::values_match(&k, &lookup_val) {
-                                return self.eval_streaming_cell(
-                                    return_spec,
-                                    flat_idx / r_cols,
-                                    flat_idx % r_cols,
-                                    ctx,
-                                    depth,
-                                );
+                            );
+                        }
+                        if (match_mode == -1 || match_mode == 1) && same_type(&k, &lookup_val) {
+                            if let Some(ord) = Self::compare_excel_values(&k, &lookup_val) {
+                                if match_mode == -1 && ord.is_lt() {
+                                    let replace = match &best_approx {
+                                        None => true,
+                                        Some((_, prev)) => Self::compare_excel_values(&k, prev)
+                                            .is_some_and(|o| o.is_gt()),
+                                    };
+                                    if replace {
+                                        best_approx = Some((flat_idx, k));
+                                    }
+                                } else if match_mode == 1 && ord.is_gt() {
+                                    let replace = match &best_approx {
+                                        None => true,
+                                        Some((_, prev)) => Self::compare_excel_values(&k, prev)
+                                            .is_some_and(|o| o.is_lt()),
+                                    };
+                                    if replace {
+                                        best_approx = Some((flat_idx, k));
+                                    }
+                                }
                             }
-                            flat_idx += 1;
                         }
                     }
+                    if let Some((best_idx, _)) = best_approx {
+                        return self.eval_streaming_cell(
+                            return_spec,
+                            best_idx / r_cols,
+                            best_idx % r_cols,
+                            ctx,
+                            depth,
+                        );
+                    }
                     if args.len() >= 4 {
-                        return Ok(self.eval_expr_ctx(&args[3], ctx, depth + 1));
+                        return Ok(self.eval_expr_ctx(&args[3], ctx, depth));
                     } else {
                         return Err(FormulaError::Na);
                     }
@@ -163,13 +234,19 @@ impl SheetEngine {
                 if lookup_arr.len() != return_arr.len() {
                     return Err(FormulaError::Value);
                 }
-                for (k, v) in lookup_arr.iter().zip(return_arr) {
-                    if Self::values_match(k, &lookup_val) {
-                        return Ok(v);
+                let total_len = lookup_arr.len();
+                for step in 0..total_len {
+                    let idx = if search_mode < 0 {
+                        total_len - 1 - step
+                    } else {
+                        step
+                    };
+                    if cell_matches(&lookup_arr[idx]) {
+                        return Ok(return_arr[idx].clone());
                     }
                 }
                 if args.len() >= 4 {
-                    Ok(self.eval_expr_ctx(&args[3], ctx, depth + 1))
+                    Ok(self.eval_expr_ctx(&args[3], ctx, depth))
                 } else {
                     Err(FormulaError::Na)
                 }
@@ -210,7 +287,7 @@ impl SheetEngine {
                 };
                 let coord = PackedCellCoordinate::new(min_r + r_off, min_c + c_off)
                     .map_err(|_| FormulaError::Ref)?;
-                Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1))
+                Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth))
             }
             "MATCH" => {
                 if args.len() < 2 || args.len() > 3 {
@@ -243,7 +320,7 @@ impl SheetEngine {
                             let v = self
                                 .eval_streaming_cell_allow_error(spec, r_off, c_off, ctx, depth)?;
                             if match_type == 0 {
-                                if Self::values_match(&v, &lookup_val) {
+                                if Self::values_match_wildcard(&v, &lookup_val) {
                                     return Ok(EvaluatedCellValue::Number(idx as f64));
                                 }
                             } else if same_type(&v, &lookup_val) {
@@ -278,7 +355,7 @@ impl SheetEngine {
                 }
                 let arr = self.eval_range_vec(&args[1], ctx, depth)?;
                 for (idx, v) in arr.iter().enumerate() {
-                    if Self::values_match(v, &lookup_val) {
+                    if Self::values_match_wildcard(v, &lookup_val) {
                         return Ok(EvaluatedCellValue::Number((idx + 1) as f64));
                     }
                 }
@@ -292,7 +369,7 @@ impl SheetEngine {
                 if idx < 1 || (idx as usize) >= args.len() {
                     return Err(FormulaError::Value);
                 }
-                Ok(self.eval_expr_ctx(&args[idx as usize], ctx, depth + 1))
+                Ok(self.eval_expr_ctx(&args[idx as usize], ctx, depth))
             }
             "OFFSET" => {
                 if args.len() < 3 || args.len() > 5 {
@@ -310,7 +387,7 @@ impl SheetEngine {
                 }
                 let coord = PackedCellCoordinate::new(base_r as u32, base_c as u32)
                     .map_err(|_| FormulaError::Ref)?;
-                Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1))
+                Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth))
             }
             "ROW" | "COLUMN" => {
                 if args.is_empty() {
@@ -371,11 +448,11 @@ impl SheetEngine {
                     let sh_clean = sh.trim().trim_matches('\'');
                     let coord =
                         PackedCellCoordinate::parse_a1(cell_part).map_err(|_| FormulaError::Ref)?;
-                    Ok(self.eval_sheet_coord(Some(sh_clean), coord, ctx, depth + 1))
+                    Ok(self.eval_sheet_coord(Some(sh_clean), coord, ctx, depth))
                 } else {
                     let coord =
                         PackedCellCoordinate::parse_a1(trimmed).map_err(|_| FormulaError::Ref)?;
-                    Ok(self.eval_sheet_coord(None, coord, ctx, depth + 1))
+                    Ok(self.eval_sheet_coord(None, coord, ctx, depth))
                 }
             }
             _ => Err(FormulaError::Name),
@@ -765,21 +842,21 @@ impl SheetEngine {
                     .as_bool()
                     .ok_or(FormulaError::Value)?;
                 if flag {
-                    Ok(self.eval_expr_ctx(&args[1], ctx, depth + 1))
+                    Ok(self.eval_expr_ctx(&args[1], ctx, depth))
                 } else if args.len() == 3 {
-                    Ok(self.eval_expr_ctx(&args[2], ctx, depth + 1))
+                    Ok(self.eval_expr_ctx(&args[2], ctx, depth))
                 } else {
                     Ok(EvaluatedCellValue::Boolean(false))
                 }
             }
             "IFS" => {
-                if args.len() < 2 || !args.len().is_multiple_of(2) {
+                if args.len() < 2 || args.len() % 2 != 0 {
                     return Err(FormulaError::Value);
                 }
                 for pair in args.chunks(2) {
                     let cond = self.eval_arg_val(&pair[0], ctx, depth)?;
                     if cond.as_bool().ok_or(FormulaError::Value)? {
-                        return Ok(self.eval_expr_ctx(&pair[1], ctx, depth + 1));
+                        return Ok(self.eval_expr_ctx(&pair[1], ctx, depth));
                     }
                 }
                 Err(FormulaError::Na)
@@ -824,14 +901,14 @@ impl SheetEngine {
                 if args.len() != 2 {
                     return Err(FormulaError::Value);
                 }
-                let primary = self.eval_expr_ctx(&args[0], ctx, depth + 1);
+                let primary = self.eval_expr_ctx(&args[0], ctx, depth);
                 let catch = match primary {
                     EvaluatedCellValue::Error(FormulaError::Na) => true,
                     EvaluatedCellValue::Error(_) => name == "IFERROR",
                     _ => false,
                 };
                 Ok(if catch {
-                    self.eval_expr_ctx(&args[1], ctx, depth + 1)
+                    self.eval_expr_ctx(&args[1], ctx, depth)
                 } else {
                     primary
                 })
@@ -845,11 +922,11 @@ impl SheetEngine {
                 for i in 0..(rest.len() / 2) {
                     let k = self.eval_arg_val(&rest[i * 2], ctx, depth)?;
                     if Self::values_match(&target, &k) {
-                        return Ok(self.eval_expr_ctx(&rest[i * 2 + 1], ctx, depth + 1));
+                        return Ok(self.eval_expr_ctx(&rest[i * 2 + 1], ctx, depth));
                     }
                 }
                 if rest.len() % 2 == 1 {
-                    Ok(self.eval_expr_ctx(rest.last().unwrap(), ctx, depth + 1))
+                    Ok(self.eval_expr_ctx(rest.last().unwrap(), ctx, depth))
                 } else {
                     Err(FormulaError::Na)
                 }

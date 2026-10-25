@@ -23,6 +23,7 @@ public enum TableCellBorderStyle: String, CaseIterable, Sendable, Codable {
 /// Merged cell span descriptor in a document or HWP table.
 public struct TableCellSpan: Sendable, Codable, Equatable {
   public static let maxSpan = 256
+  public static let maxIndex = 100_000
   public var rowIndex: Int
   public var columnIndex: Int
   public var rowSpan: Int
@@ -44,8 +45,8 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
     columnSpan: Int = 1,
     borderStyle: TableCellBorderStyle = .solid
   ) {
-    self.rowIndex = max(0, rowIndex)
-    self.columnIndex = max(0, columnIndex)
+    self.rowIndex = min(max(0, rowIndex), Self.maxIndex)
+    self.columnIndex = min(max(0, columnIndex), Self.maxIndex)
     self.rowSpan = min(max(1, rowSpan), Self.maxSpan)
     self.columnSpan = min(max(1, columnSpan), Self.maxSpan)
     self.borderStyle = borderStyle

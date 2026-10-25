@@ -118,6 +118,7 @@ impl SheetEngine {
 
         #[derive(Clone)]
         struct RowEntry {
+            orig_row: u32,
             primary_val: EvaluatedCellValue,
             secondary_val: Option<EvaluatedCellValue>,
             cells: Vec<(u32, String)>,
@@ -149,6 +150,7 @@ impl SheetEngine {
             let mut row_cells = row_map.remove(&r).unwrap_or_default();
             row_cells.sort_unstable_by_key(|(c, _)| *c);
             rows_data.push(RowEntry {
+                orig_row: r,
                 primary_val,
                 secondary_val,
                 cells: row_cells,
@@ -173,8 +175,9 @@ impl SheetEngine {
         for (offset, entry) in rows_data.into_iter().enumerate() {
             let target_r = start_row + offset as u32;
             for (col, raw) in entry.cells {
+                let adjusted = adjust_formula_row_refs(&raw, entry.orig_row, target_r);
                 let coord = PackedCellCoordinate::new(target_r, col)?;
-                self.cells.insert(coord, raw);
+                self.cells.insert(coord, adjusted);
             }
         }
         self.rebuild_compiled_asts();
@@ -216,9 +219,16 @@ impl SheetEngine {
                     if !row_keys.contains(&key_str) {
                         row_keys.push(key_str.clone());
                     }
-                    if let Some(num) = self.eval_coord_ctx(vc, &mut ctx, 0).as_number() {
+                    let val = self.eval_coord_ctx(vc, &mut ctx, 0);
+                    if let Some(num) = val.as_number() {
                         buckets.entry(key_str).or_default().push(num);
                         all_values.push(num);
+                    } else if aggregation == PivotAggregation::Count
+                        && !matches!(val, EvaluatedCellValue::Empty)
+                        && !val.to_display_string().is_empty()
+                    {
+                        buckets.entry(key_str).or_default().push(1.0);
+                        all_values.push(1.0);
                     }
                 }
             }
@@ -353,6 +363,95 @@ impl SheetEngine {
             "100회 반복 내에 목표값 찾기가 수렴하지 않았습니다.".to_string(),
         ))
     }
+}
+
+fn adjust_formula_row_refs(raw: &str, orig_row: u32, target_row: u32) -> String {
+    if orig_row == target_row || !raw.trim_start().starts_with('=') {
+        return raw.to_string();
+    }
+    let delta = (target_row as i64) - (orig_row as i64);
+    let bytes = raw.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len + 8);
+    let mut i = 0usize;
+    let mut in_double_quotes = false;
+    let mut in_single_quotes = false;
+
+    while i < len {
+        let b = bytes[i];
+        if b == b'"' && !in_single_quotes {
+            in_double_quotes = !in_double_quotes;
+            out.push('"');
+            i += 1;
+            continue;
+        }
+        if b == b'\'' && !in_double_quotes {
+            in_single_quotes = !in_single_quotes;
+            out.push('\'');
+            i += 1;
+            continue;
+        }
+        if !in_double_quotes && !in_single_quotes {
+            let prev_is_ident = i > 0
+                && (bytes[i - 1].is_ascii_alphanumeric()
+                    || bytes[i - 1] == b'_'
+                    || bytes[i - 1] == b'.');
+            if !prev_is_ident {
+                let mut cur = i;
+                let has_col_dollar = if cur < len && bytes[cur] == b'$' {
+                    cur += 1;
+                    true
+                } else {
+                    false
+                };
+                let col_start = cur;
+                while cur < len && bytes[cur].is_ascii_alphabetic() && (cur - col_start) < 4 {
+                    cur += 1;
+                }
+                let col_len = cur - col_start;
+                if (1..=3).contains(&col_len) {
+                    let has_row_dollar = if cur < len && bytes[cur] == b'$' {
+                        cur += 1;
+                        true
+                    } else {
+                        false
+                    };
+                    let row_start = cur;
+                    if cur < len && bytes[cur].is_ascii_digit() && bytes[cur] != b'0' {
+                        while cur < len && bytes[cur].is_ascii_digit() {
+                            cur += 1;
+                        }
+                        let next_is_ident_or_call = cur < len
+                            && (bytes[cur].is_ascii_alphanumeric()
+                                || bytes[cur] == b'_'
+                                || bytes[cur] == b'(');
+                        if !next_is_ident_or_call {
+                            if has_col_dollar {
+                                out.push('$');
+                            }
+                            out.push_str(&raw[col_start..col_start + col_len]);
+                            if has_row_dollar {
+                                out.push('$');
+                                out.push_str(&raw[row_start..cur]);
+                            } else if let Ok(r_1based) = raw[row_start..cur].parse::<i64>() {
+                                let new_r = (r_1based + delta)
+                                    .clamp(1, PackedCellCoordinate::MAX_ROWS as i64);
+                                out.push_str(&new_r.to_string());
+                            } else {
+                                out.push_str(&raw[row_start..cur]);
+                            }
+                            i = cur;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        let ch = raw[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 fn restore_cell(sheet: &mut SheetEngine, coord: PackedCellCoordinate, orig: Option<String>) {
@@ -1078,6 +1177,188 @@ mod tests {
         assert_eq!(
             sheet.evaluate_formula_str(&over_nested),
             EvaluatedCellValue::Error(FormulaError::Value)
+        );
+    }
+
+    #[test]
+    fn test_adversarial_sheet_remediations() {
+        let mut chain_sheet = SheetEngine::new("Chain500");
+        chain_sheet.set_cell("A1", "1").unwrap();
+        for r in 2..=500 {
+            let prev = r - 1;
+            chain_sheet
+                .set_cell(&format!("A{r}"), format!("=A{prev}+1"))
+                .unwrap();
+        }
+        assert_eq!(
+            chain_sheet.evaluate_cell("A500"),
+            EvaluatedCellValue::Number(500.0)
+        );
+
+        let mut s = SheetEngine::new("SpecRemediation");
+        // Scientific notation
+        assert_eq!(
+            s.evaluate_formula_str("=1E5"),
+            EvaluatedCellValue::Number(100_000.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=1.5e-3"),
+            EvaluatedCellValue::Number(0.0015)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=1E+10"),
+            EvaluatedCellValue::Number(1e10)
+        );
+
+        // Rounding without 1e-12 bias & -0.0 normalization
+        assert_eq!(
+            s.evaluate_formula_str("=ROUND(0.4999999999995, 0)"),
+            EvaluatedCellValue::Number(0.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=ROUND(10000.005, 2)"),
+            EvaluatedCellValue::Number(10000.01)
+        );
+        if let EvaluatedCellValue::Number(z) = s.evaluate_formula_str("=ROUND(-0.0001, 0)") {
+            assert_eq!(z, 0.0);
+            assert!(!z.is_sign_negative());
+        } else {
+            panic!("Expected numeric zero");
+        }
+
+        // Exact IEEE-754 comparison without 1e-12 epsilon
+        assert_eq!(
+            s.evaluate_formula_str("=1E-13>0"),
+            EvaluatedCellValue::Boolean(true)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=1E-13=0"),
+            EvaluatedCellValue::Boolean(false)
+        );
+
+        // 1900 date system leap-year bug & serial bounds
+        assert_eq!(
+            s.evaluate_formula_str("=DATE(1900, 1, 1)"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DATE(1900, 2, 28)"),
+            EvaluatedCellValue::Number(59.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DATE(1900, 2, 29)"),
+            EvaluatedCellValue::Number(60.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DATE(1900, 3, 1)"),
+            EvaluatedCellValue::Number(61.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=YEAR(60)"),
+            EvaluatedCellValue::Number(1900.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=MONTH(60)"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DAY(60)"),
+            EvaluatedCellValue::Number(29.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=DATE(1E20, 1, 1)"),
+            EvaluatedCellValue::Error(FormulaError::Num)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=YEAR(1E20)"),
+            EvaluatedCellValue::Error(FormulaError::Num)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=ISEVEN(1E20)"),
+            EvaluatedCellValue::Error(FormulaError::Num)
+        );
+
+        // RATE with bisection fallback
+        if let EvaluatedCellValue::Number(rate) =
+            s.evaluate_formula_str("=RATE(48, -250, 10000, 0, 0, 0.9)")
+        {
+            assert!(rate > 0.0 && rate < 0.05, "rate={rate}");
+        } else {
+            panic!("Expected numeric RATE");
+        }
+
+        // SWITCH exact match vs wildcard
+        assert_eq!(
+            s.evaluate_formula_str("=SWITCH(\"a*b\", \"a1b\", \"wrong\", \"a*b\", \"exact\")"),
+            EvaluatedCellValue::Text("exact".to_string())
+        );
+
+        // XLOOKUP match_mode (0 exact vs 2 wildcard) & COUNTIF("*", range) text-only
+        s.set_cell("A1", "a1b").unwrap();
+        s.set_cell("A2", "a*b").unwrap();
+        s.set_cell("A3", "100").unwrap();
+        s.set_cell("A4", "TRUE").unwrap();
+        s.set_cell("B1", "10").unwrap();
+        s.set_cell("B2", "20").unwrap();
+        s.set_cell("B3", "30").unwrap();
+        s.set_cell("B4", "40").unwrap();
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(\"a*b\", A1:A4, B1:B4, -1, 0)"),
+            EvaluatedCellValue::Number(20.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=XLOOKUP(\"a*b\", A1:A4, B1:B4, -1, 2)"),
+            EvaluatedCellValue::Number(10.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=COUNTIF(A1:A4, \"*\")"),
+            EvaluatedCellValue::Number(2.0)
+        );
+
+        // Range aggregation ignores text/booleans in range, coerces direct scalar args
+        s.set_cell("C1", "10").unwrap();
+        s.set_cell("C2", "20").unwrap();
+        s.set_cell("C3", "TRUE").unwrap();
+        s.set_cell("C4", "not-a-number").unwrap();
+        assert_eq!(
+            s.evaluate_formula_str("=AVERAGE(C1:C4)"),
+            EvaluatedCellValue::Number(15.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=MEDIAN(C1:C4)"),
+            EvaluatedCellValue::Number(15.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=AVERAGE(10, TRUE)"),
+            EvaluatedCellValue::Number(5.5)
+        );
+
+        // sort_rows adjusts relative row references while preserving $ absolute row references
+        let mut sort_sheet = SheetEngine::new("SortRel");
+        sort_sheet.set_cell("A1", "10").unwrap();
+        sort_sheet.set_cell("B1", "=A1*2").unwrap();
+        sort_sheet.set_cell("C1", "=$A$1*2").unwrap();
+        sort_sheet.set_cell("A2", "30").unwrap();
+        sort_sheet.set_cell("B2", "=A2*2").unwrap();
+        sort_sheet.set_cell("C2", "=$A$1*2").unwrap();
+        sort_sheet.sort_rows(0, 1, 0, false, None, true).unwrap();
+        let raw_at = |s: &SheetEngine, r: &str| -> Option<String> {
+            s.raw_cells()
+                .get(&PackedCellCoordinate::parse_a1(r).unwrap())
+                .cloned()
+        };
+        assert_eq!(raw_at(&sort_sheet, "A1").as_deref(), Some("30"));
+        assert_eq!(raw_at(&sort_sheet, "B1").as_deref(), Some("=A1*2"));
+        assert_eq!(raw_at(&sort_sheet, "C1").as_deref(), Some("=$A$1*2"));
+        assert_eq!(
+            sort_sheet.evaluate_cell("B1"),
+            EvaluatedCellValue::Number(60.0)
+        );
+        assert_eq!(raw_at(&sort_sheet, "A2").as_deref(), Some("10"));
+        assert_eq!(raw_at(&sort_sheet, "B2").as_deref(), Some("=A2*2"));
+        assert_eq!(
+            sort_sheet.evaluate_cell("B2"),
+            EvaluatedCellValue::Number(20.0)
         );
     }
 

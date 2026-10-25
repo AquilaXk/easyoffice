@@ -1,31 +1,41 @@
 :root {
-  --eo-primary: #5C6BC0;
-  --eo-primary-hover: #3F51B5;
-  --eo-primary-soft: rgba(92, 107, 192, 0.14);
+  --eo-primary-brand: #5C6BC0;
+  --eo-primary: #4554A8;
+  --eo-primary-hover: #36438E;
+  --eo-primary-on: #FFFFFF;
+  --eo-primary-soft: rgba(69, 84, 168, 0.10);
   --eo-bg: #F7F8FC;
   --eo-surface: #FFFFFF;
   --eo-surface-elevated: #EEF0F8;
   --eo-text: #1C1F2E;
-  --eo-text-muted: #5A607A;
+  --eo-text-muted: #4E546E;
   --eo-border: #D8DCEB;
-  --eo-accent-doc: #5C6BC0;
-  --eo-accent-hwp: #2563EB;
-  --eo-accent-sheet: #10B981;
-  --eo-accent-slide: #D97706;
-  --eo-accent-pdf: #DC2626;
-  --eo-module-active: #5C6BC0;
+  --eo-accent-doc: #4554A8;
+  --eo-accent-hwp: #1D4ED8;
+  --eo-accent-sheet: #047857;
+  --eo-accent-slide: #B45309;
+  --eo-accent-pdf: #B91C1C;
+  --eo-module-active: var(--eo-accent-doc);
 }
 
 html[data-theme="dark"] {
-  --eo-primary: #5C6BC0;
-  --eo-primary-hover: #7986CB;
-  --eo-primary-soft: rgba(92, 107, 192, 0.24);
+  --eo-primary-brand: #5C6BC0;
+  --eo-primary: #9FA8DA;
+  --eo-primary-hover: #C5CAE9;
+  --eo-primary-on: #141724;
+  --eo-primary-soft: rgba(159, 168, 218, 0.16);
   --eo-bg: #141724;
   --eo-surface: #1D2133;
   --eo-surface-elevated: #252A40;
-  --eo-text: #eef0f8;
-  --eo-text-muted: #9aa1bd;
+  --eo-text: #EEF0F8;
+  --eo-text-muted: #A6ADCA;
   --eo-border: #313752;
+  --eo-accent-doc: #9FA8DA;
+  --eo-accent-hwp: #93C5FD;
+  --eo-accent-sheet: #6EE7B7;
+  --eo-accent-slide: #FCD34D;
+  --eo-accent-pdf: #FCA5A5;
+  --eo-module-active: var(--eo-accent-doc);
 }
 
 * {
@@ -74,7 +84,7 @@ button {
 
 .brand-badge {
   background: var(--eo-primary);
-  color: #ffffff;
+  color: var(--eo-primary-on);
   font-weight: 700;
   font-size: 12px;
   padding: 3px 7px;
@@ -169,7 +179,7 @@ button {
   font-size: 12px;
   font-weight: 600;
   background: var(--eo-primary);
-  color: #ffffff;
+  color: var(--eo-primary-on);
 }
 
 .primary-btn:hover {

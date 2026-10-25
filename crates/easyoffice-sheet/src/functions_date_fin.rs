@@ -36,23 +36,49 @@ impl SheetEngine {
                 if args.len() != 3 {
                     return Err(FormulaError::Value);
                 }
-                let mut y = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as i64;
+                let mut y = checked_f64_to_i64(
+                    self.eval_arg_num(&args[0], ctx, depth)?,
+                    0.0,
+                    9_999.999_999,
+                )?;
                 if (0..1900).contains(&y) {
                     y += 1900;
                 }
-                let m = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as i64;
-                let d = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as i64;
-                let adj_y = y + (m - 1).div_euclid(12);
-                let adj_m = (m - 1).rem_euclid(12) + 1;
-                let serial = serial_from_civil(adj_y, adj_m, 1) + (d - 1);
+                let m = checked_f64_to_i64(
+                    self.eval_arg_num(&args[1], ctx, depth)?,
+                    -1_000_000.0,
+                    1_000_000.0,
+                )?;
+                let d = checked_f64_to_i64(
+                    self.eval_arg_num(&args[2], ctx, depth)?,
+                    -100_000_000.0,
+                    100_000_000.0,
+                )?;
+                let total_m = y
+                    .checked_mul(12)
+                    .and_then(|v| v.checked_add(m - 1))
+                    .ok_or(FormulaError::Num)?;
+                let adj_y = total_m.div_euclid(12);
+                let adj_m = total_m.rem_euclid(12) + 1;
+                let serial = serial_from_civil(adj_y, adj_m, 1)
+                    .checked_add(d - 1)
+                    .ok_or(FormulaError::Num)?;
+                if !(1..=2_958_465).contains(&serial) {
+                    return Err(FormulaError::Num);
+                }
                 Ok(EvaluatedCellValue::Number(serial as f64))
             }
             "YEAR" | "MONTH" | "DAY" => {
                 if args.len() != 1 {
                     return Err(FormulaError::Value);
                 }
-                let serial = self.eval_arg_num(&args[0], ctx, depth)?.floor() as i64;
-                let (y, m, d) = civil_from_serial(serial);
+                let raw = self.eval_arg_num(&args[0], ctx, depth)?;
+                let serial = checked_f64_to_i64(raw.floor(), 0.0, 2_958_465.0)?;
+                let (y, m, d) = if serial == 0 {
+                    (1900, 1, 0)
+                } else {
+                    civil_from_serial(serial)
+                };
                 let v = match name {
                     "YEAR" => y,
                     "MONTH" => m,
@@ -64,10 +90,26 @@ impl SheetEngine {
                 if args.len() != 3 {
                     return Err(FormulaError::Value);
                 }
-                let h = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as i64;
-                let m = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as i64;
-                let s = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as i64;
-                let total = h * 3600 + m * 60 + s;
+                let h = checked_f64_to_i64(
+                    self.eval_arg_num(&args[0], ctx, depth)?,
+                    -1_000_000_000.0,
+                    1_000_000_000.0,
+                )?;
+                let m = checked_f64_to_i64(
+                    self.eval_arg_num(&args[1], ctx, depth)?,
+                    -1_000_000_000.0,
+                    1_000_000_000.0,
+                )?;
+                let s = checked_f64_to_i64(
+                    self.eval_arg_num(&args[2], ctx, depth)?,
+                    -1_000_000_000.0,
+                    1_000_000_000.0,
+                )?;
+                let total = h
+                    .checked_mul(3600)
+                    .and_then(|v| m.checked_mul(60).and_then(|m60| v.checked_add(m60)))
+                    .and_then(|v| v.checked_add(s))
+                    .ok_or(FormulaError::Num)?;
                 if total < 0 {
                     return Err(FormulaError::Num);
                 }
@@ -80,7 +122,7 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let n = self.eval_arg_num(&args[0], ctx, depth)?;
-                if n < 0.0 {
+                if !n.is_finite() || n < 0.0 || n > 1e15 {
                     return Err(FormulaError::Num);
                 }
                 let secs = (n.fract() * 86_400.0).round() as i64 % 86_400;
@@ -95,24 +137,43 @@ impl SheetEngine {
                 if args.len() != 2 {
                     return Err(FormulaError::Value);
                 }
-                let end_d = self.eval_arg_num(&args[0], ctx, depth)?.trunc();
-                let start_d = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
-                Ok(EvaluatedCellValue::Number(end_d - start_d))
+                let end_d = checked_f64_to_i64(
+                    self.eval_arg_num(&args[0], ctx, depth)?,
+                    -100_000_000.0,
+                    100_000_000.0,
+                )?;
+                let start_d = checked_f64_to_i64(
+                    self.eval_arg_num(&args[1], ctx, depth)?,
+                    -100_000_000.0,
+                    100_000_000.0,
+                )?;
+                Ok(EvaluatedCellValue::Number((end_d - start_d) as f64))
             }
             "EDATE" => {
                 if args.len() != 2 {
                     return Err(FormulaError::Value);
                 }
-                let start_s = self.eval_arg_num(&args[0], ctx, depth)?.floor() as i64;
-                let months = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as i64;
+                let start_raw = self.eval_arg_num(&args[0], ctx, depth)?;
+                let start_s = checked_f64_to_i64(start_raw.floor(), 1.0, 2_958_465.0)?;
+                let months = checked_f64_to_i64(
+                    self.eval_arg_num(&args[1], ctx, depth)?,
+                    -1_000_000.0,
+                    1_000_000.0,
+                )?;
                 let (y, m, d) = civil_from_serial(start_s);
-                let total_m = (y * 12 + (m - 1)) + months;
+                let total_m = y
+                    .checked_mul(12)
+                    .and_then(|v| v.checked_add(m - 1))
+                    .and_then(|v| v.checked_add(months))
+                    .ok_or(FormulaError::Num)?;
                 let ny = total_m.div_euclid(12);
                 let nm = total_m.rem_euclid(12) + 1;
                 let nd = d.min(days_in_month(ny, nm));
-                Ok(EvaluatedCellValue::Number(
-                    serial_from_civil(ny, nm, nd) as f64
-                ))
+                let serial = serial_from_civil(ny, nm, nd);
+                if !(1..=2_958_465).contains(&serial) {
+                    return Err(FormulaError::Num);
+                }
+                Ok(EvaluatedCellValue::Number(serial as f64))
             }
             _ => Err(FormulaError::Name),
         }
@@ -337,17 +398,56 @@ impl SheetEngine {
                 } else {
                     0.1
                 };
+                if nper <= 0.0 {
+                    return Err(FormulaError::Num);
+                }
                 for _ in 0..100 {
-                    let f = calc_fv(r, nper, pmt, pv, t)? - fv;
+                    if r <= -0.999_999 || !r.is_finite() {
+                        break;
+                    }
+                    let Ok(fv_r) = calc_fv(r, nper, pmt, pv, t) else {
+                        break;
+                    };
+                    let f = fv_r - fv;
                     if f.abs() < 1e-7 {
                         return Ok(EvaluatedCellValue::Number(r));
                     }
                     let eps = 1e-6;
-                    let df = (calc_fv(r + eps, nper, pmt, pv, t)? - fv - f) / eps;
+                    let Ok(fv_eps) = calc_fv(r + eps, nper, pmt, pv, t) else {
+                        break;
+                    };
+                    let df = (fv_eps - fv - f) / eps;
                     if df.abs() < 1e-15 {
                         break;
                     }
                     r -= f / df;
+                }
+                let mut lo = -0.99_f64;
+                let mut hi = 10.0_f64;
+                if let (Ok(fv_lo), Ok(fv_hi)) =
+                    (calc_fv(lo, nper, pmt, pv, t), calc_fv(hi, nper, pmt, pv, t))
+                {
+                    let mut f_lo = fv_lo - fv;
+                    let f_hi = fv_hi - fv;
+                    if f_lo.is_finite() && f_hi.is_finite() && f_lo * f_hi <= 0.0 {
+                        for _ in 0..100 {
+                            let mid = 0.5 * (lo + hi);
+                            let Ok(fv_mid) = calc_fv(mid, nper, pmt, pv, t) else {
+                                break;
+                            };
+                            let f_mid = fv_mid - fv;
+                            if f_mid.abs() < 1e-9 || (hi - lo).abs() < 1e-12 {
+                                return Ok(EvaluatedCellValue::Number(mid));
+                            }
+                            if f_lo * f_mid <= 0.0 {
+                                hi = mid;
+                            } else {
+                                lo = mid;
+                                f_lo = f_mid;
+                            }
+                        }
+                        return Ok(EvaluatedCellValue::Number(0.5 * (lo + hi)));
+                    }
                 }
                 Err(FormulaError::Num)
             }
@@ -475,7 +575,7 @@ impl SheetEngine {
         if args.len() != 1 {
             return Err(FormulaError::Value);
         }
-        let val = self.eval_expr_ctx(&args[0], ctx, depth + 1);
+        let val = self.eval_expr_ctx(&args[0], ctx, depth);
         match name {
             "ISBLANK" => Ok(EvaluatedCellValue::Boolean(matches!(
                 val,
@@ -512,7 +612,8 @@ impl SheetEngine {
                 if matches!(val, EvaluatedCellValue::Boolean(_)) {
                     return Err(FormulaError::Value);
                 }
-                let n = val.as_number().ok_or(FormulaError::Value)?.trunc().abs() as i64;
+                let raw_n = val.as_number().ok_or(FormulaError::Value)?;
+                let n = checked_f64_to_i64(raw_n.trunc().abs(), 0.0, 9e15)?;
                 let is_even = n % 2 == 0;
                 Ok(EvaluatedCellValue::Boolean(if name == "ISEVEN" {
                     is_even
@@ -573,14 +674,26 @@ pub(crate) fn matches_criteria(cell: &EvaluatedCellValue, crit: &EvaluatedCellVa
             return (lhs_num - rhs_num).abs() < 1e-9;
         }
     }
+    if trimmed.is_empty() {
+        return match cell {
+            EvaluatedCellValue::Empty => true,
+            EvaluatedCellValue::Text(s) => s.is_empty(),
+            _ => false,
+        };
+    }
+    if trimmed.contains('*') || trimmed.contains('?') || trimmed.contains('~') {
+        return match cell {
+            EvaluatedCellValue::Text(s) => wildcard_match(s, trimmed),
+            _ => false,
+        };
+    }
     match cell {
-        EvaluatedCellValue::Text(s) => wildcard_match(s, trimmed),
-        EvaluatedCellValue::Empty => wildcard_match("", trimmed),
+        EvaluatedCellValue::Text(s) => s.to_lowercase() == trimmed.to_lowercase(),
         EvaluatedCellValue::Boolean(b) => {
-            wildcard_match(if *b { "TRUE" } else { "FALSE" }, trimmed)
+            trimmed.eq_ignore_ascii_case(if *b { "TRUE" } else { "FALSE" })
         }
-        EvaluatedCellValue::Error(e) => wildcard_match(e.code(), trimmed),
-        EvaluatedCellValue::Number(_) => wildcard_match(&cell.to_display_string(), trimmed),
+        EvaluatedCellValue::Error(e) => trimmed.eq_ignore_ascii_case(e.code()),
+        EvaluatedCellValue::Empty | EvaluatedCellValue::Number(_) => false,
     }
 }
 
@@ -690,18 +803,38 @@ pub fn wildcard_match_alloc_baseline(text: &str, pattern: &str) -> bool {
     dp[t.len()][p.len()]
 }
 
+#[inline]
+fn checked_f64_to_i64(n: f64, min: f64, max: f64) -> Result<i64, FormulaError> {
+    if !n.is_finite() || n < min || n > max {
+        return Err(FormulaError::Num);
+    }
+    Ok(n.trunc() as i64)
+}
+
 fn serial_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    if y == 1900 && m == 2 && d == 29 {
+        return 60;
+    }
     let yr = y - if m <= 2 { 1 } else { 0 };
     let era = if yr >= 0 { yr } else { yr - 399 } / 400;
     let yoe = yr - era * 400;
     let mp = m + if m > 2 { -3 } else { 9 };
     let doy = (153 * mp + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468 + 25_569
+    let raw = era * 146_097 + doe - 719_468 + 25_569;
+    if raw <= 60 {
+        raw - 1
+    } else {
+        raw
+    }
 }
 
 fn civil_from_serial(serial: i64) -> (i64, i64, i64) {
-    let z = serial - 25_569 + 719_468;
+    if serial == 60 {
+        return (1900, 2, 29);
+    }
+    let adj = if serial < 60 { serial + 1 } else { serial };
+    let z = adj - 25_569 + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
@@ -718,7 +851,7 @@ fn days_in_month(y: i64, m: i64) -> i64 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0) {
+            if y == 1900 || (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0) {
                 29
             } else {
                 28

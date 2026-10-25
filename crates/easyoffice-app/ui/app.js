@@ -470,31 +470,51 @@
       const raw = await globalThis.__TAURI_INTERNALS__.invoke(command, { payload });
       return typeof raw === "string" ? JSON.parse(raw) : raw;
     }
-    if (
-      globalThis.location &&
-      (globalThis.location.protocol === "http:" || globalThis.location.protocol === "https:") &&
-      typeof globalThis.fetch === "function"
-    ) {
-      let resp = null;
-      try {
-        resp = await globalThis.fetch("/api/ipc", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command, payload: String(payload ?? "") }),
-        });
-      } catch {
-        resp = null;
-      }
-      if (resp) {
-        if (resp.ok) {
-          return await resp.json();
-        }
-        const errBody = await resp.json().catch(() => ({}));
-        throw new Error(errBody.error || errBody.message || "IPC request failed (" + resp.status + ")");
-      }
+    if (isHttpIpcTransportAvailable()) {
+      return await invokeHttpIpc(command, payload);
     }
     const handler = MOCK_IPC_HANDLERS[command];
     return handler ? handler(payload) : { status: "ok" };
+  }
+
+  function isHttpIpcTransportAvailable() {
+    const proto = globalThis.location?.protocol;
+    return (proto === "http:" || proto === "https:") && typeof globalThis.fetch === "function";
+  }
+
+  function reportIpcFailure(command, msg) {
+    const fb = document.getElementById("status-command-feedback");
+    if (fb) fb.textContent = "[요청 거부] " + msg;
+    let targetId = null;
+    if (command === "convert_document_format") {
+      targetId = "conv-result-box";
+    } else if (command === "audit_security") {
+      targetId = "security-status-text";
+    }
+    const targetEl = targetId ? document.getElementById(targetId) : null;
+    if (targetEl) targetEl.textContent = "[요청 거부] " + msg;
+  }
+
+  async function invokeHttpIpc(command, payload) {
+    let resp;
+    try {
+      resp = await globalThis.fetch("/api/ipc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command, payload: String(payload ?? "") }),
+      });
+    } catch (netErr) {
+      const msg = "백엔드 IPC 네트워크 오류: " + (netErr?.message || String(netErr));
+      reportIpcFailure(command, msg);
+      throw new Error(msg);
+    }
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      const msg = errBody.error || errBody.message || "IPC request failed (" + resp.status + ")";
+      reportIpcFailure(command, msg);
+      throw new Error(msg);
+    }
+    return await resp.json();
   }
 
   function snapshotDomSheetCells() {
@@ -531,8 +551,19 @@
     });
   }
 
+  function normalizeFormattedNumericCell(raw) {
+    const trimmed = String(raw || "").trim();
+    if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(trimmed)) {
+      return trimmed.replaceAll(",", "");
+    }
+    return trimmed;
+  }
+
   function escapeSemicolonToken(value) {
-    return String(value || "").replaceAll(";", String.raw`\;`);
+    return String(value || "")
+      .replaceAll("\\", "\\\\")
+      .replaceAll(";", String.raw`\;`)
+      .replaceAll("?", String.raw`\?`);
   }
 
   function collectSheetCellMap() {
@@ -541,13 +572,16 @@
     Object.keys(sheet2Snap).forEach((ref) => {
       const entry = sheet2Snap[ref];
       if (entry && (entry.formula || entry.value)) {
-        map["Sheet2!" + ref] = String(entry.formula || entry.value).replaceAll(",", "");
+        const val = entry.formula
+          ? entry.formula
+          : normalizeFormattedNumericCell(entry.value);
+        map["Sheet2!" + ref] = escapeSemicolonToken(val);
       }
     });
     document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
       const ref = td.dataset.cell;
       const formula = td.dataset.formula;
-      const rawText = (td.textContent || "").replaceAll(",", "").trim();
+      const rawText = normalizeFormattedNumericCell(td.textContent || "");
       const val = formula || rawText;
       map[ref] = escapeSemicolonToken(val);
     });

@@ -836,7 +836,14 @@ extension WorksheetModel {
     nextCells.reserveCapacity(cellsByCoordinate.count)
     for (coord, rawVal) in cellsByCoordinate {
       let targetRow = oldToNewRow[coord.row] ?? coord.row
-      nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = rawVal
+      let rowDelta = targetRow - coord.row
+      let adjustedVal: String
+      if rowDelta != 0 && rawVal.hasPrefix("=") {
+        adjustedVal = Self.shiftFormulaReferences(rawVal, rowDelta: rowDelta, columnDelta: 0)
+      } else {
+        adjustedVal = rawVal
+      }
+      nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = adjustedVal
     }
     cellsByCoordinate = nextCells
 

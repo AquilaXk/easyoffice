@@ -112,17 +112,26 @@ public enum DocumentConversionOrchestrator {
 
     switch request.targetFormat {
     case .docx, .doc, .odt, .rtf, .md, .txt, .hwp, .hwpx, .hwt, .hwtx:
-      let docModel = try convertPayloadToDocument(request.payload, targetFormat: request.targetFormat)
+      var docModel = try convertPayloadToDocument(request.payload, targetFormat: request.targetFormat)
+      if request.sourceFormat != request.targetFormat {
+        docModel.preservedArchiveEntries = [:]
+      }
       convertedPayload = .document(docModel)
       outputBytes = try encodeDocumentModel(docModel, as: request.targetFormat)
 
     case .xlsx, .xls, .ods, .csv, .tsv:
-      let sheetModel = try convertPayloadToWorksheet(request.payload)
+      var sheetModel = try convertPayloadToWorksheet(request.payload)
+      if request.sourceFormat != request.targetFormat {
+        sheetModel.preservedArchiveEntries = [:]
+      }
       convertedPayload = .sheet(sheetModel)
       outputBytes = try encodeWorksheetModel(sheetModel, as: request.targetFormat)
 
     case .pptx, .ppt, .ppsx, .odp:
-      let deckModel = try convertPayloadToPresentation(request.payload)
+      var deckModel = try convertPayloadToPresentation(request.payload)
+      if request.sourceFormat != request.targetFormat {
+        deckModel.preservedArchiveEntries = [:]
+      }
       convertedPayload = .slide(deckModel)
       outputBytes = try encodePresentationModel(deckModel, as: request.targetFormat)
 
@@ -202,6 +211,9 @@ public enum DocumentConversionOrchestrator {
   ) throws -> OfficeDocumentModel {
     switch payload {
     case .document(var doc):
+      if doc.format != targetFormat {
+        doc.preservedArchiveEntries = [:]
+      }
       doc.format = targetFormat
       return doc
 
@@ -511,15 +523,35 @@ public enum DocumentSecurityAuditor {
 
   private static let sensitivePatternRules: [(label: String, regex: NSRegularExpression, mask: String)] = {
     let rawRules: [(String, String, String)] = [
-      ("주민등록번호", #"\b\d{6}[-–]\s*[1-8]\d{6}\b"#, "[주민등록번호 비식별]"),
-      ("운전면허번호", #"\b\d{2}-\d{2}-\d{6}-\d{2}\b"#, "[운전면허 비식별]"),
-      ("여권번호", #"\b(?:[MSRGD]\d{8}|[A-Z]{2}\d{7})\b"#, "[여권번호 비식별]"),
-      ("신용카드번호", #"\b(?:\d{4}[-\s]){3}\d{4}\b"#, "[카드번호 비식별]"),
-      ("전화번호", #"\b01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}\b|\b0\d{1,2}[-.\s]\d{3,4}[-.\s]\d{4}\b"#, "[연락처 비식별]"),
-      ("이메일", #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#, "[이메일 비식별]"),
-      ("사업자/법인등록번호", #"\b\d{3}-\d{2}-\d{5}\b"#, "[사업자번호 비식별]"),
-      ("IPv4주소", #"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"#, "[IP 비식별]"),
-      ("API토큰", #"\b(?:sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b"#, "[인증토큰 비식별]"),
+      (
+        "주민등록번호",
+        #"(?<![0-9])\d{6}[-–]\s*[1-8]\d{6}(?![0-9])|(?<![0-9])\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])[1-8]\d{6}(?![0-9])"#,
+        "[주민등록번호 비식별]"
+      ),
+      ("운전면허번호", #"(?<![0-9])\d{2}-\d{2}-\d{6}-\d{2}(?![0-9])"#, "[운전면허 비식별]"),
+      ("여권번호", #"(?<![A-Za-z0-9])(?:[MSRGD]\d{8}|[A-Z]{2}\d{7})(?![A-Za-z0-9])"#, "[여권번호 비식별]"),
+      ("신용카드번호", #"(?<![0-9])(?:\d{4}[-\s]){3}\d{4}(?![0-9])"#, "[카드번호 비식별]"),
+      (
+        "전화번호",
+        #"(?<![0-9])01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}(?![0-9])|(?<![0-9])0\d{1,2}[-.\s]\d{3,4}[-.\s]\d{4}(?![0-9])"#,
+        "[연락처 비식별]"
+      ),
+      (
+        "이메일",
+        #"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9])"#,
+        "[이메일 비식별]"
+      ),
+      ("사업자/법인등록번호", #"(?<![0-9])\d{3}-\d{2}-\d{5}(?![0-9])"#, "[사업자번호 비식별]"),
+      (
+        "IPv4주소",
+        #"(?<![0-9])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![0-9])"#,
+        "[IP 비식별]"
+      ),
+      (
+        "API토큰",
+        #"(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)(?![A-Za-z0-9_-])"#,
+        "[인증토큰 비식별]"
+      ),
     ]
     return rawRules.compactMap { label, pattern, mask in
       guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
@@ -633,8 +665,10 @@ public enum DocumentSecurityAuditor {
       if lower.contains("comment") || lower.contains("notesslide")
         || lower.contains("revision") || lower.contains("people.xml")
         || lower.hasSuffix("meta.xml") || lower.hasSuffix("core.xml")
-        || lower.hasSuffix("custom.xml") || lower.contains("header")
-        || lower.contains("footer")
+        || lower.hasSuffix("custom.xml") || lower.hasSuffix("app.xml")
+        || lower.hasSuffix("settings.xml") || lower.contains("header")
+        || lower.contains("footer") || lower.contains("thumbnail")
+        || lower.hasPrefix("preview/") || lower.contains("vbaproject")
       {
         removedCount += 1
         continue

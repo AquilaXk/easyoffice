@@ -83,14 +83,16 @@ public struct PivotTableEngine: Sendable {
       else {
         continue
       }
-      let rKey = row[configuration.rowFieldColumnIndex].description
-      guard !rKey.isEmpty else { continue }
+      guard !row.allSatisfy({ $0 == .empty || $0.description.isEmpty }) else { continue }
+      let rawRKey = row[configuration.rowFieldColumnIndex].description
+      let rKey = rawRKey.isEmpty ? "(빈 값)" : rawRKey
       let cKey: String
       if let colField = configuration.columnFieldColumnIndex,
         colField >= 0,
         colField < row.count
       {
-        cKey = row[colField].description
+        let rawCKey = row[colField].description
+        cKey = rawCKey.isEmpty ? "(빈 값)" : rawCKey
       } else {
         cKey = "Total"
       }
@@ -98,11 +100,20 @@ public struct PivotTableEngine: Sendable {
       if !rowKeys.contains(rKey) { rowKeys.append(rKey) }
       if !colKeys.contains(cKey) { colKeys.append(cKey) }
 
-      if let val = row[configuration.valueFieldColumnIndex].numericValue {
+      let valCell = row[configuration.valueFieldColumnIndex]
+      if let val = valCell.numericValue {
         buckets[rKey, default: [:]][cKey, default: []].append(val)
         rowBuckets[rKey, default: []].append(val)
         colBuckets[cKey, default: []].append(val)
         allValues.append(val)
+      } else if configuration.aggregation == .count,
+        valCell != .empty,
+        !valCell.description.isEmpty
+      {
+        buckets[rKey, default: [:]][cKey, default: []].append(1.0)
+        rowBuckets[rKey, default: []].append(1.0)
+        colBuckets[cKey, default: []].append(1.0)
+        allValues.append(1.0)
       }
     }
 

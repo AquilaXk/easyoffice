@@ -245,7 +245,7 @@ public enum EasyOfficeDesignTokens {
   public static let darkElevated = RGBColorToken(red: 0x24, green: 0x2B, blue: 0x42, hex: "#242B42")
   public static let darkBorder = RGBColorToken(red: 0x2C, green: 0x34, blue: 0x52, hex: "#2C3452")
   public static let darkText = RGBColorToken(red: 0xF8, green: 0xF9, blue: 0xFD, hex: "#F8F9FD")
-  public static let darkMuted = RGBColorToken(red: 0x9E, green: 0xA8, blue: 0xCA, hex: "#9EA8CA")
+  public static let darkMuted = RGBColorToken(red: 0xB0, green: 0xB9, blue: 0xD8, hex: "#B0B9D8")
   public static let darkSelectedSurface = RGBColorToken(
     red: 0x28, green: 0x31, blue: 0x52, hex: "#283152")
   public static let darkSubtleAccentSurface = RGBColorToken(
@@ -277,7 +277,7 @@ public enum EasyOfficeDesignTokens {
     relativeLuminance(forHex: hex) > 0.42
   }
 
-  // MARK: - Semantic Status Tokens (WCAG 2.1 AA Verified >= 4.5 on White)
+  // MARK: - Semantic Status Tokens (WCAG 2.1 AA Verified >= 4.5 on White & Light Surfaces)
   public static let statusSuccess = RGBColorToken(
     red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")
   public static let statusWarning = RGBColorToken(
@@ -285,18 +285,34 @@ public enum EasyOfficeDesignTokens {
   public static let statusDanger = RGBColorToken(red: 0xC8, green: 0x1E, blue: 0x1E, hex: "#C81E1E")
   public static let statusInfo = RGBColorToken(red: 0x4A, green: 0x58, blue: 0xA9, hex: "#4A58A9")
 
-  public static func accentToken(for module: OfficeModuleKind) -> RGBColorToken {
+  public static func accentToken(for module: OfficeModuleKind, isDark: Bool = false)
+    -> RGBColorToken
+  {
+    if isDark {
+      switch module {
+      case .document:
+        return brand200
+      case .hwp:
+        return RGBColorToken(red: 0xD6, green: 0xCC, blue: 0xFF, hex: "#D6CCFF")
+      case .sheet:
+        return RGBColorToken(red: 0x9C, green: 0xE8, blue: 0xD5, hex: "#9CE8D5")
+      case .slide:
+        return RGBColorToken(red: 0xFC, green: 0xD1, blue: 0x9C, hex: "#FCD19C")
+      case .pdf:
+        return RGBColorToken(red: 0xFC, green: 0xA5, blue: 0xA5, hex: "#FCA5A5")
+      }
+    }
     switch module {
     case .document:
-      return brand700
+      return brand800
     case .hwp:
-      return RGBColorToken(red: 0x5B, green: 0x3F, blue: 0xD1, hex: "#5B3FD1")
+      return RGBColorToken(red: 0x53, green: 0x35, blue: 0xC7, hex: "#5335C7")
     case .sheet:
-      return RGBColorToken(red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")
+      return RGBColorToken(red: 0x0A, green: 0x66, blue: 0x52, hex: "#0A6652")
     case .slide:
-      return RGBColorToken(red: 0xB4, green: 0x53, blue: 0x09, hex: "#B45309")
+      return RGBColorToken(red: 0x9A, green: 0x42, blue: 0x06, hex: "#9A4206")
     case .pdf:
-      return RGBColorToken(red: 0xB9, green: 0x1C, blue: 0x1C, hex: "#B91C1C")
+      return RGBColorToken(red: 0xAD, green: 0x18, blue: 0x18, hex: "#AD1818")
     }
   }
 

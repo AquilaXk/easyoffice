@@ -171,6 +171,8 @@ public struct OLE2SectorTable: Sendable, Equatable {
 /// 512-byte sector OLE2 Compound File Binary Format (`D0 CF 11 E0 A1 B1 1A E1`) container codec.
 public enum OLE2ContainerCodec {
   public static let sectorSize = 512
+  public static let miniSectorSize = 64
+  public static let miniStreamCutoffSize = 4096
   public static let directoryEntrySize = 128
   public static let entriesPerSector = sectorSize / directoryEntrySize  // 4
   public static let fatEntriesPerSector = sectorSize / 4  // 128
@@ -181,27 +183,139 @@ public enum OLE2ContainerCodec {
   public static let maxTotalExtractedBytes = 64 * 1024 * 1024
 
   private static let objectTypeUnallocated: UInt8 = 0
+  private static let objectTypeStorage: UInt8 = 1
   private static let objectTypeStream: UInt8 = 2
   private static let objectTypeRootStorage: UInt8 = 5
 
+  private static func compareCFBNames(_ lhs: String, _ rhs: String) -> Bool {
+    let lLen = lhs.utf16.count
+    let rLen = rhs.utf16.count
+    if lLen != rLen { return lLen < rLen }
+    let lUpper = Array(lhs.uppercased().utf16)
+    let rUpper = Array(rhs.uppercased().utf16)
+    return lUpper.lexicographicallyPrecedes(rUpper)
+  }
+
+  private static func buildBalancedDirectoryBST(
+    sortedEntryIDs: [Int],
+    range: Range<Int>,
+    depth: Int,
+    maxDepth: Int,
+    links: inout [Int: (left: UInt32, right: UInt32, color: UInt8)]
+  ) -> UInt32 {
+    guard !range.isEmpty else { return freeSector }
+    let mid = range.lowerBound + (range.count / 2)
+    let entryID = sortedEntryIDs[mid]
+    let leftChild = buildBalancedDirectoryBST(
+      sortedEntryIDs: sortedEntryIDs,
+      range: range.lowerBound..<mid,
+      depth: depth + 1,
+      maxDepth: maxDepth,
+      links: &links
+    )
+    let rightChild = buildBalancedDirectoryBST(
+      sortedEntryIDs: sortedEntryIDs,
+      range: (mid + 1)..<range.upperBound,
+      depth: depth + 1,
+      maxDepth: maxDepth,
+      links: &links
+    )
+    let color: UInt8 = (depth > 0 && depth == maxDepth) ? 0 : 1  // 0 = red on deepest incomplete level, 1 = black
+    links[entryID] = (left: leftChild, right: rightChild, color: color)
+    return UInt32(entryID)
+  }
+
+  private static func treeHeight(for count: Int) -> Int {
+    guard count > 1 else { return 0 }
+    var h = 0
+    var n = count
+    while n > 1 {
+      n >>= 1
+      h += 1
+    }
+    return h
+  }
+
   public static func pack(streams: [OLE2StreamEntry]) throws -> Data {
-    let totalDirEntries = 1 + streams.count
+    // Decompose hierarchical stream names ("Storage/Stream") into storage + leaf stream
+    var storageNames: [String] = []
+    var streamLeafNames: [String] = []
+    var streamParentStorageName: [String?] = []
+
+    for stream in streams {
+      if let slashIdx = stream.name.firstIndex(of: "/") {
+        let storageName = String(stream.name[..<slashIdx])
+        let leafName = String(stream.name[stream.name.index(after: slashIdx)...])
+        guard !storageName.isEmpty, !leafName.isEmpty, !leafName.contains("/") else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "유효하지 않은 OLE2 계층 스트림 경로: \(stream.name)")
+        }
+        if !storageNames.contains(storageName) {
+          storageNames.append(storageName)
+        }
+        streamLeafNames.append(leafName)
+        streamParentStorageName.append(storageName)
+      } else {
+        streamLeafNames.append(stream.name)
+        streamParentStorageName.append(nil)
+      }
+    }
+
+    // Entry 0: Root Entry
+    // Entries 1..streams.count: Stream entries
+    // Entries (streams.count + 1)..<(1 + streams.count + storageNames.count): Storage entries
+    let totalDirEntries = 1 + streams.count + storageNames.count
     let dirSectorCount = max(1, (totalDirEntries + entriesPerSector - 1) / entriesPerSector)
 
     var nextSectorIndex = UInt32(dirSectorCount)
-    var streamStartSectors: [UInt32] = []
-    var streamSectorCounts: [Int] = []
+    var streamStartSectors: [UInt32] = Array(repeating: endOfChain, count: streams.count)
+    var regularStreamSectorCounts: [Int] = Array(repeating: 0, count: streams.count)
 
-    for stream in streams {
+    var miniStreamBuffer = Data()
+    var miniFat: [UInt32] = []
+    var nextMiniSectorIndex: UInt32 = 0
+
+    for (idx, stream) in streams.enumerated() {
       if stream.data.isEmpty {
-        streamStartSectors.append(endOfChain)
-        streamSectorCounts.append(0)
+        streamStartSectors[idx] = endOfChain
+      } else if stream.data.count < miniStreamCutoffSize {
+        let miniCount = (stream.data.count + miniSectorSize - 1) / miniSectorSize
+        streamStartSectors[idx] = nextMiniSectorIndex
+        for offset in 0..<miniCount {
+          let current = nextMiniSectorIndex + UInt32(offset)
+          miniFat.append((offset + 1 < miniCount) ? (current + 1) : endOfChain)
+        }
+        nextMiniSectorIndex += UInt32(miniCount)
+        miniStreamBuffer.append(stream.data)
+        let rem = stream.data.count % miniSectorSize
+        if rem != 0 {
+          miniStreamBuffer.append(Data(repeating: 0, count: miniSectorSize - rem))
+        }
       } else {
         let count = (stream.data.count + sectorSize - 1) / sectorSize
-        streamStartSectors.append(nextSectorIndex)
-        streamSectorCounts.append(count)
+        streamStartSectors[idx] = nextSectorIndex
+        regularStreamSectorCounts[idx] = count
         nextSectorIndex += UInt32(count)
       }
+    }
+
+    var firstMiniFatSector: UInt32 = endOfChain
+    var miniFatSectorCount = 0
+    var rootStartSector: UInt32 = endOfChain
+    var rootMiniStreamSectorCount = 0
+
+    if !miniStreamBuffer.isEmpty {
+      let remMiniFat = miniFat.count % fatEntriesPerSector
+      if remMiniFat != 0 {
+        miniFat.append(contentsOf: repeatElement(freeSector, count: fatEntriesPerSector - remMiniFat))
+      }
+      miniFatSectorCount = max(1, miniFat.count / fatEntriesPerSector)
+      firstMiniFatSector = nextSectorIndex
+      nextSectorIndex += UInt32(miniFatSectorCount)
+
+      rootMiniStreamSectorCount = (miniStreamBuffer.count + sectorSize - 1) / sectorSize
+      rootStartSector = nextSectorIndex
+      nextSectorIndex += UInt32(rootMiniStreamSectorCount)
     }
 
     let contentSectorCount = Int(nextSectorIndex)
@@ -221,12 +335,28 @@ public enum OLE2ContainerCodec {
     }
 
     for idx in streams.indices {
-      let count = streamSectorCounts[idx]
+      let count = regularStreamSectorCounts[idx]
       guard count > 0 else { continue }
       let start = Int(streamStartSectors[idx])
       for offset in 0..<count {
         let current = start + offset
         fat[current] = (offset + 1 < count) ? UInt32(current + 1) : endOfChain
+      }
+    }
+
+    if miniFatSectorCount > 0 {
+      let start = Int(firstMiniFatSector)
+      for offset in 0..<miniFatSectorCount {
+        let current = start + offset
+        fat[current] = (offset + 1 < miniFatSectorCount) ? UInt32(current + 1) : endOfChain
+      }
+    }
+
+    if rootMiniStreamSectorCount > 0 {
+      let start = Int(rootStartSector)
+      for offset in 0..<rootMiniStreamSectorCount {
+        let current = start + offset
+        fat[current] = (offset + 1 < rootMiniStreamSectorCount) ? UInt32(current + 1) : endOfChain
       }
     }
 
@@ -245,9 +375,9 @@ public enum OLE2ContainerCodec {
     try BitPacking.writeUInt16LE(0x0006, into: &container, at: 32)
     try BitPacking.writeUInt32LE(UInt32(fatSectorCount), into: &container, at: 44)
     try BitPacking.writeUInt32LE(0, into: &container, at: 48)
-    try BitPacking.writeUInt32LE(0, into: &container, at: 56)
-    try BitPacking.writeUInt32LE(endOfChain, into: &container, at: 60)
-    try BitPacking.writeUInt32LE(0, into: &container, at: 64)
+    try BitPacking.writeUInt32LE(UInt32(miniStreamCutoffSize), into: &container, at: 56)
+    try BitPacking.writeUInt32LE(firstMiniFatSector, into: &container, at: 60)
+    try BitPacking.writeUInt32LE(UInt32(miniFatSectorCount), into: &container, at: 64)
     try BitPacking.writeUInt32LE(endOfChain, into: &container, at: 68)
     try BitPacking.writeUInt32LE(0, into: &container, at: 72)
 
@@ -256,39 +386,125 @@ public enum OLE2ContainerCodec {
       try BitPacking.writeUInt32LE(value, into: &container, at: 76 + slot * 4)
     }
 
+    // Build Red-Black BST links for Root Entry children and each Storage's children
+    var entryNamesByID: [Int: String] = [0: "Root Entry"]
+    var rootChildEntryIDs: [Int] = []
+    var storageChildEntryIDs: [String: [Int]] = [:]
+
+    for sIdx in streams.indices {
+      let entryID = sIdx + 1
+      entryNamesByID[entryID] = streamLeafNames[sIdx]
+      if let storageName = streamParentStorageName[sIdx] {
+        storageChildEntryIDs[storageName, default: []].append(entryID)
+      } else {
+        rootChildEntryIDs.append(entryID)
+      }
+    }
+    for (stIdx, stName) in storageNames.enumerated() {
+      let entryID = 1 + streams.count + stIdx
+      entryNamesByID[entryID] = stName
+      rootChildEntryIDs.append(entryID)
+    }
+
+    var bstLinks: [Int: (left: UInt32, right: UInt32, color: UInt8)] = [:]
+    let sortedRootChildren = rootChildEntryIDs.sorted {
+      compareCFBNames(entryNamesByID[$0] ?? "", entryNamesByID[$1] ?? "")
+    }
+    let rootChildID = buildBalancedDirectoryBST(
+      sortedEntryIDs: sortedRootChildren,
+      range: 0..<sortedRootChildren.count,
+      depth: 0,
+      maxDepth: treeHeight(for: sortedRootChildren.count),
+      links: &bstLinks
+    )
+
+    var storageRootChildByIndex: [Int: UInt32] = [:]
+    for (stIdx, stName) in storageNames.enumerated() {
+      let children = (storageChildEntryIDs[stName] ?? []).sorted {
+        compareCFBNames(entryNamesByID[$0] ?? "", entryNamesByID[$1] ?? "")
+      }
+      storageRootChildByIndex[stIdx] = buildBalancedDirectoryBST(
+        sortedEntryIDs: children,
+        range: 0..<children.count,
+        depth: 0,
+        maxDepth: treeHeight(for: children.count),
+        links: &bstLinks
+      )
+    }
+
     var directoryBytes = Data(repeating: 0, count: dirSectorCount * sectorSize)
     try writeDirectoryEntry(
       into: &directoryBytes,
       entryIndex: 0,
       name: "Root Entry",
       objectType: objectTypeRootStorage,
-      childID: streams.isEmpty ? freeSector : 1,
+      colorFlag: 1,
+      leftSiblingID: freeSector,
       rightSiblingID: freeSector,
-      startSector: endOfChain,
-      streamSize: 0
+      childID: rootChildID,
+      startSector: rootStartSector,
+      streamSize: UInt64(miniStreamBuffer.count)
     )
 
-    for (sIdx, stream) in streams.enumerated() {
+    for sIdx in streams.indices {
       let entryIndex = sIdx + 1
-      let nextSibling = (sIdx + 1 < streams.count) ? UInt32(entryIndex + 1) : freeSector
+      let link = bstLinks[entryIndex] ?? (left: freeSector, right: freeSector, color: 1)
       try writeDirectoryEntry(
         into: &directoryBytes,
         entryIndex: entryIndex,
-        name: stream.name,
+        name: streamLeafNames[sIdx],
         objectType: objectTypeStream,
+        colorFlag: link.color,
+        leftSiblingID: link.left,
+        rightSiblingID: link.right,
         childID: freeSector,
-        rightSiblingID: nextSibling,
         startSector: streamStartSectors[sIdx],
-        streamSize: UInt64(stream.data.count)
+        streamSize: UInt64(streams[sIdx].data.count)
       )
     }
+
+    for (stIdx, stName) in storageNames.enumerated() {
+      let entryIndex = 1 + streams.count + stIdx
+      let link = bstLinks[entryIndex] ?? (left: freeSector, right: freeSector, color: 1)
+      try writeDirectoryEntry(
+        into: &directoryBytes,
+        entryIndex: entryIndex,
+        name: stName,
+        objectType: objectTypeStorage,
+        colorFlag: link.color,
+        leftSiblingID: link.left,
+        rightSiblingID: link.right,
+        childID: storageRootChildByIndex[stIdx] ?? freeSector,
+        startSector: 0,
+        streamSize: 0
+      )
+    }
+
     container.append(directoryBytes)
 
-    for stream in streams where !stream.data.isEmpty {
+    // Append regular streams (>= 4096 bytes)
+    for (idx, stream) in streams.enumerated() where regularStreamSectorCounts[idx] > 0 {
       container.append(stream.data)
       let remainder = stream.data.count % sectorSize
       if remainder != 0 {
         container.append(Data(repeating: 0, count: sectorSize - remainder))
+      }
+    }
+
+    // Append MiniFAT sectors and Root Entry MiniStream sectors if present
+    if miniFatSectorCount > 0 {
+      var miniFatBytes = Data(count: miniFat.count * 4)
+      miniFatBytes.withUnsafeMutableBytes { rawBuffer in
+        for (idx, entry) in miniFat.enumerated() {
+          rawBuffer.storeBytes(of: entry.littleEndian, toByteOffset: idx * 4, as: UInt32.self)
+        }
+      }
+      container.append(miniFatBytes)
+
+      container.append(miniStreamBuffer)
+      let rem = miniStreamBuffer.count % sectorSize
+      if rem != 0 {
+        container.append(Data(repeating: 0, count: sectorSize - rem))
       }
     }
 
@@ -319,7 +535,7 @@ public enum OLE2ContainerCodec {
 
     let fatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 44))
     let firstDirSector = try BitPacking.readUInt32LE(from: data, at: 48)
-    let miniStreamCutoffSize = Int(try BitPacking.readUInt32LE(from: data, at: 56))
+    let cutoffSize = Int(try BitPacking.readUInt32LE(from: data, at: 56))
     let firstMiniFatSector = try BitPacking.readUInt32LE(from: data, at: 60)
     let miniFatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 64))
     let firstDifatSector = try BitPacking.readUInt32LE(from: data, at: 68)
@@ -390,9 +606,13 @@ public enum OLE2ContainerCodec {
 
     var miniFat: [UInt32] = []
     var miniStreamData = Data()
-    if miniStreamCutoffSize > 0, firstMiniFatSector != endOfChain, firstMiniFatSector != freeSector,
+    if cutoffSize > 0, firstMiniFatSector != endOfChain, firstMiniFatSector != freeSector,
       miniFatSectorCount > 0
     {
+      guard miniFatSectorCount <= totalSectorsInFile else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "OLE2 MiniFAT 섹터 개수(\(miniFatSectorCount))가 파일 범위를 초과합니다.")
+      }
       let miniFatBytes = try readSectorChain(
         startSector: firstMiniFatSector,
         fat: fat,
@@ -416,6 +636,10 @@ public enum OLE2ContainerCodec {
             actualValue: Int(min(rawRootStreamSize, UInt64(Int.max)))
           )
         }
+        guard rawRootStreamSize <= UInt64(data.count) else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "OLE2 Root Entry 미니스트림 크기 오류: \(rawRootStreamSize)")
+        }
         let rootStreamSize = Int(rawRootStreamSize)
         if rootStartSector != endOfChain, rootStartSector != freeSector, rootStreamSize > 0 {
           miniStreamData = try readSectorChain(
@@ -434,35 +658,84 @@ public enum OLE2ContainerCodec {
     }
 
     let entryCount = directoryData.count / directoryEntrySize
-    var streams: [OLE2StreamEntry] = []
-    var claimedMiniSectors = Set<UInt32>()
-
+    struct ParsedDirNode {
+      let objectType: UInt8
+      let name: String
+      let leftSiblingID: UInt32
+      let rightSiblingID: UInt32
+      let childID: UInt32
+      let startSector: UInt32
+      let streamSize: Int
+    }
+    var dirNodes: [Int: ParsedDirNode] = [:]
     for idx in 0..<entryCount {
       let entryBase = idx * directoryEntrySize
       let objectType = directoryData[directoryData.startIndex + entryBase + 66]
-      guard objectType == objectTypeStream else { continue }
-
+      guard objectType != objectTypeUnallocated else { continue }
       let nameByteLen = Int(try BitPacking.readUInt16LE(from: directoryData, at: entryBase + 64))
       guard nameByteLen >= 2, nameByteLen <= 64, nameByteLen % 2 == 0 else {
         throw EasyOfficeError.corruptedContainer(detail: "OLE2 디렉터리 엔트리 이름 길이 오류: \(nameByteLen)")
       }
       let name = try BitPacking.decodeUTF16LE(
         from: directoryData, at: entryBase, byteLength: nameByteLen - 2)
+      let leftSibling = try BitPacking.readUInt32LE(from: directoryData, at: entryBase + 68)
+      let rightSibling = try BitPacking.readUInt32LE(from: directoryData, at: entryBase + 72)
+      let childID = try BitPacking.readUInt32LE(from: directoryData, at: entryBase + 76)
       let startSector = try BitPacking.readUInt32LE(from: directoryData, at: entryBase + 116)
       let rawStreamSize = try BitPacking.readUInt64LE(from: directoryData, at: entryBase + 120)
-
-      guard rawStreamSize <= UInt64(data.count) else {
-        throw EasyOfficeError.corruptedContainer(
-          detail: "OLE2 스트림 '\(name)' 크기 오류: \(rawStreamSize)")
+      if objectType == objectTypeStream {
+        guard rawStreamSize <= UInt64(data.count) else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "OLE2 스트림 '\(name)' 크기 오류: \(rawStreamSize)")
+        }
       }
-      let streamSize = Int(rawStreamSize)
+      dirNodes[idx] = ParsedDirNode(
+        objectType: objectType,
+        name: name,
+        leftSiblingID: leftSibling,
+        rightSiblingID: rightSibling,
+        childID: childID,
+        startSector: startSector,
+        streamSize: objectType == objectTypeStream ? Int(rawStreamSize) : 0
+      )
+    }
+
+    // Reconstruct hierarchical paths from Storage -> Child BST
+    var resolvedStreamPaths: [Int: String] = [:]
+    var visitedDirIDs = Set<Int>()
+    func traverseDirectorySubtree(entryID: UInt32, prefix: String) {
+      guard entryID != freeSector, entryID != endOfChain else { return }
+      let idx = Int(entryID)
+      guard idx > 0, idx < entryCount, let node = dirNodes[idx],
+        visitedDirIDs.insert(idx).inserted
+      else { return }
+      traverseDirectorySubtree(entryID: node.leftSiblingID, prefix: prefix)
+      let fullPath = prefix.isEmpty ? node.name : "\(prefix)/\(node.name)"
+      if node.objectType == objectTypeStream {
+        resolvedStreamPaths[idx] = fullPath
+      } else if node.objectType == objectTypeStorage {
+        traverseDirectorySubtree(entryID: node.childID, prefix: fullPath)
+      }
+      traverseDirectorySubtree(entryID: node.rightSiblingID, prefix: prefix)
+    }
+    if let rootNode = dirNodes[0] {
+      traverseDirectorySubtree(entryID: rootNode.childID, prefix: "")
+    }
+
+    var streams: [OLE2StreamEntry] = []
+    var claimedMiniSectors = Set<UInt32>()
+
+    for idx in 0..<entryCount {
+      guard let node = dirNodes[idx], node.objectType == objectTypeStream else { continue }
+      let name = resolvedStreamPaths[idx] ?? node.name
+      let startSector = node.startSector
+      let streamSize = node.streamSize
 
       if streamSize == 0 {
         streams.append(OLE2StreamEntry(name: name, data: Data()))
-      } else if miniStreamCutoffSize > 0, streamSize < miniStreamCutoffSize, !miniFat.isEmpty,
+      } else if cutoffSize > 0, streamSize < cutoffSize, !miniFat.isEmpty,
         !miniStreamData.isEmpty
       {
-        let miniSectorSize = 64
         let totalMiniSectors = miniStreamData.count / miniSectorSize
         var output = Data()
         output.reserveCapacity(streamSize)
@@ -470,7 +743,7 @@ public enum OLE2ContainerCodec {
         while current != endOfChain {
           guard Int(current) < totalMiniSectors, Int(current) < miniFat.count else {
             throw EasyOfficeError.corruptedContainer(
-              detail: "OLE2 MiniFAT 체인이 유효하지 않은 미니섹터(\(current))를 참조합니다.")
+              detail: "OLE2 MiniFAT 체인이 유효하지 않거나 중복된 미니섹터(\(current))를 참조합니다.")
           }
           guard claimedMiniSectors.insert(current).inserted else {
             throw EasyOfficeError.malformedContainer(
@@ -551,8 +824,10 @@ public enum OLE2ContainerCodec {
     entryIndex: Int,
     name: String,
     objectType: UInt8,
-    childID: UInt32,
+    colorFlag: UInt8 = 1,
+    leftSiblingID: UInt32 = freeSector,
     rightSiblingID: UInt32,
+    childID: UInt32,
     startSector: UInt32,
     streamSize: UInt64
   ) throws {
@@ -568,8 +843,8 @@ public enum OLE2ContainerCodec {
     let nameByteLen = UInt16((utf16Units.count + 1) * 2)
     try BitPacking.writeUInt16LE(nameByteLen, into: &directoryBytes, at: base + 64)
     directoryBytes[directoryBytes.startIndex + base + 66] = objectType
-    directoryBytes[directoryBytes.startIndex + base + 67] = 1
-    try BitPacking.writeUInt32LE(freeSector, into: &directoryBytes, at: base + 68)
+    directoryBytes[directoryBytes.startIndex + base + 67] = colorFlag
+    try BitPacking.writeUInt32LE(leftSiblingID, into: &directoryBytes, at: base + 68)
     try BitPacking.writeUInt32LE(rightSiblingID, into: &directoryBytes, at: base + 72)
     try BitPacking.writeUInt32LE(childID, into: &directoryBytes, at: base + 76)
     try BitPacking.writeUInt32LE(startSector, into: &directoryBytes, at: base + 116)
@@ -587,7 +862,10 @@ public enum HWP5BinaryCodec {
   public static let flagCompressed: UInt32 = 0x0000_0001
   public static let flagEncrypted: UInt32 = 0x0000_0002
   public static let flagDistribution: UInt32 = 0x0000_0004
-  public static let maxHWP5Records = 65_536
+  public static let maxHWP5Records = 524_288
+  public static let maxTotalHWP5TableCells = 65_536
+  public static let maxHWP5TableRows = 4096
+  public static let maxHWP5TableColumns = 256
 
   private static func safeClampedUInt32(
     _ value: Double, min minVal: UInt32 = 0, max maxVal: UInt32 = 100_000_000
@@ -686,12 +964,20 @@ public enum HWP5BinaryCodec {
     }
 
     for table in doc.tables {
+      guard table.rows.count <= maxHWP5TableRows else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "HWP 5.0 표 행 개수(\(table.rows.count))가 허용 상한(\(maxHWP5TableRows))을 초과했습니다.")
+      }
       var tablePayload = Data()
       BitPacking.appendLengthPrefixedUTF16LE(table.caption, to: &tablePayload)
       tablePayload.append(table.hasHeaderRow ? 1 : 0)
-      BitPacking.appendUInt16LE(UInt16(clamping: table.rows.count), to: &tablePayload)
+      BitPacking.appendUInt16LE(UInt16(table.rows.count), to: &tablePayload)
       for row in table.rows {
-        BitPacking.appendUInt16LE(UInt16(clamping: row.count), to: &tablePayload)
+        guard row.count <= maxHWP5TableColumns else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "HWP 5.0 표 열 개수(\(row.count))가 허용 상한(\(maxHWP5TableColumns))을 초과했습니다.")
+        }
+        BitPacking.appendUInt16LE(UInt16(row.count), to: &tablePayload)
         for cell in row {
           BitPacking.appendLengthPrefixedUTF16LE(cell, to: &tablePayload)
         }
@@ -757,6 +1043,7 @@ public enum HWP5BinaryCodec {
     var trackChanges = false
     var extendedEnvelope: ExtendedDocumentMetadataEnvelope?
     var totalDecodedRecords = 0
+    var totalDecodedTableCells = 0
 
     if let rawDocInfo = streamMap["DocInfo"], !rawDocInfo.isEmpty {
       let docInfo =
@@ -781,13 +1068,18 @@ public enum HWP5BinaryCodec {
             from: docInfo, offset: &cursor, limit: recordEnd)
           let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(
             from: docInfo, offset: &cursor, limit: recordEnd)
-          paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
-          headerText = try BitPacking.readLengthPrefixedUTF16LE(
-            from: docInfo, offset: &cursor, limit: recordEnd)
-          footerText = try BitPacking.readLengthPrefixedUTF16LE(
-            from: docInfo, offset: &cursor, limit: recordEnd)
-          if cursor < recordEnd {
-            trackChanges = docInfo[docInfo.startIndex + cursor] != 0
+          if cursor == recordEnd {
+            paperSize = .a4
+            headerText = paperRaw
+          } else {
+            paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
+            headerText = try BitPacking.readLengthPrefixedUTF16LE(
+              from: docInfo, offset: &cursor, limit: recordEnd)
+            footerText = try BitPacking.readLengthPrefixedUTF16LE(
+              from: docInfo, offset: &cursor, limit: recordEnd)
+            if cursor < recordEnd {
+              trackChanges = docInfo[docInfo.startIndex + cursor] != 0
+            }
           }
           parsedDocProps = true
         } else if recHeader.tagID == HWP5RecordHeader.tagExtendedMetadata {
@@ -839,42 +1131,52 @@ public enum HWP5BinaryCodec {
         var pCursor = payloadStart
         let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(
           from: section0, offset: &pCursor, limit: payloadEnd)
-        let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(
-          from: section0, offset: &pCursor, limit: payloadEnd)
-        let fontName = try BitPacking.readLengthPrefixedUTF16LE(
-          from: section0, offset: &pCursor, limit: payloadEnd)
-        guard pCursor + 9 <= payloadEnd else {
-          throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
-        }
-        let fontSizeX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-        pCursor += 4
-        let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-        pCursor += 4
-        let styleFlags = section0[section0.startIndex + pCursor]
-        pCursor += 1
-        var letterSpacingPct = 0.0
-        var charWidthScalePct = 100.0
-        if pCursor + 8 <= payloadEnd {
-          let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+        if pCursor + 1 == payloadEnd {
+          let isOfficial = section0[section0.startIndex + pCursor] != 0
+          let resolvedStyle: ParagraphStyleRole =
+            isOfficial ? .officialHeader : (ParagraphStyleRole(rawValue: styleRaw) ?? .body)
+          pendingParagraph = ParagraphBlock(
+            style: resolvedStyle,
+            text: ""
+          )
+        } else {
+          let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(
+            from: section0, offset: &pCursor, limit: payloadEnd)
+          let fontName = try BitPacking.readLengthPrefixedUTF16LE(
+            from: section0, offset: &pCursor, limit: payloadEnd)
+          guard pCursor + 9 <= payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
+          }
+          let fontSizeX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
           pCursor += 4
-          let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+          let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
           pCursor += 4
-          letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
-          charWidthScalePct = Double(charScaleX100) / 100.0
+          let styleFlags = section0[section0.startIndex + pCursor]
+          pCursor += 1
+          var letterSpacingPct = 0.0
+          var charWidthScalePct = 100.0
+          if pCursor + 8 <= payloadEnd {
+            let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+            pCursor += 4
+            let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+            pCursor += 4
+            letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
+            charWidthScalePct = Double(charScaleX100) / 100.0
+          }
+          pendingParagraph = ParagraphBlock(
+            style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
+            alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
+            text: "",
+            fontName: fontName,
+            fontSizePt: Double(fontSizeX100) / 100.0,
+            isBold: (styleFlags & 0x01) != 0,
+            isItalic: (styleFlags & 0x02) != 0,
+            isUnderlined: (styleFlags & 0x04) != 0,
+            lineSpacingPercent: Double(lineSpacingX100) / 100.0,
+            letterSpacingPercent: letterSpacingPct,
+            charWidthScalePercent: charWidthScalePct
+          )
         }
-        pendingParagraph = ParagraphBlock(
-          style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
-          alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
-          text: "",
-          fontName: fontName,
-          fontSizePt: Double(fontSizeX100) / 100.0,
-          isBold: (styleFlags & 0x01) != 0,
-          isItalic: (styleFlags & 0x02) != 0,
-          isUnderlined: (styleFlags & 0x04) != 0,
-          lineSpacingPercent: Double(lineSpacingX100) / 100.0,
-          letterSpacingPercent: letterSpacingPct,
-          charWidthScalePercent: charWidthScalePct
-        )
 
       case HWP5RecordHeader.tagParaText:
         let text = try BitPacking.decodeUTF16LE(
@@ -888,40 +1190,101 @@ public enum HWP5BinaryCodec {
         }
 
       case HWP5RecordHeader.tagTableRecord:
-        var tCursor = payloadStart
-        let caption = try BitPacking.readLengthPrefixedUTF16LE(
-          from: section0, offset: &tCursor, limit: payloadEnd)
-        guard tCursor + 3 <= payloadEnd else {
-          throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
-        }
-        let hasHeader = section0[section0.startIndex + tCursor] != 0
-        tCursor += 1
-        let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
-        tCursor += 2
-        guard rowCount <= (payloadEnd - tCursor) / 2 else {
-          throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 페이로드 길이를 초과합니다.")
-        }
-        var rows: [[String]] = []
-        rows.reserveCapacity(rowCount)
-        for _ in 0..<rowCount {
-          guard tCursor + 2 <= payloadEnd else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
+        let savedCellTotal = totalDecodedTableCells
+        var decodedTable: DocumentTableBlock?
+        var budgetExceededError: EasyOfficeError?
+        do {
+          var tCursor = payloadStart
+          let caption = try BitPacking.readLengthPrefixedUTF16LE(
+            from: section0, offset: &tCursor, limit: payloadEnd)
+          guard tCursor + 3 <= payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
           }
-          let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
+          let hasHeader = section0[section0.startIndex + tCursor] != 0
+          tCursor += 1
+          let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
           tCursor += 2
-          guard colCount * 4 <= payloadEnd - tCursor else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 페이로드 길이를 초과합니다.")
+          guard rowCount <= maxHWP5TableRows, rowCount <= (payloadEnd - tCursor) / 2 else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
           }
-          var rowCells: [String] = []
-          rowCells.reserveCapacity(colCount)
-          for _ in 0..<colCount {
-            let cell = try BitPacking.readLengthPrefixedUTF16LE(
-              from: section0, offset: &tCursor, limit: payloadEnd)
-            rowCells.append(cell)
+          var rows: [[String]] = []
+          rows.reserveCapacity(rowCount)
+          for _ in 0..<rowCount {
+            guard tCursor + 2 <= payloadEnd else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
+            }
+            let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
+            tCursor += 2
+            guard colCount <= maxHWP5TableColumns, colCount * 4 <= payloadEnd - tCursor else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
+            }
+            totalDecodedTableCells += colCount
+            guard totalDecodedTableCells <= maxTotalHWP5TableCells else {
+              let err = EasyOfficeError.corruptedContainer(
+                detail: "HWP 5.0 누적 표 셀 개수(\(totalDecodedTableCells))가 허용 상한(\(maxTotalHWP5TableCells))을 초과했습니다."
+              )
+              budgetExceededError = err
+              throw err
+            }
+            var rowCells: [String] = []
+            rowCells.reserveCapacity(colCount)
+            for _ in 0..<colCount {
+              let cell = try BitPacking.readLengthPrefixedUTF16LE(
+                from: section0, offset: &tCursor, limit: payloadEnd)
+              rowCells.append(cell)
+            }
+            rows.append(rowCells)
           }
-          rows.append(rowCells)
+          guard tCursor == payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 잔여 바이트 불일치")
+          }
+          decodedTable = DocumentTableBlock(caption: caption, rows: rows, hasHeaderRow: hasHeader)
+        } catch {
+          if let budgetErr = budgetExceededError {
+            throw budgetErr
+          }
+          totalDecodedTableCells = savedCellTotal
         }
-        tables.append(DocumentTableBlock(caption: caption, rows: rows, hasHeaderRow: hasHeader))
+        if let table = decodedTable {
+          tables.append(table)
+        } else {
+          var rCursor = payloadStart
+          guard rCursor + 2 <= payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
+          }
+          let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: rCursor))
+          rCursor += 2
+          guard rowCount <= maxHWP5TableRows, rowCount <= (payloadEnd - rCursor) / 2 else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
+          }
+          var rows: [[String]] = []
+          rows.reserveCapacity(rowCount)
+          for _ in 0..<rowCount {
+            guard rCursor + 2 <= payloadEnd else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
+            }
+            let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: rCursor))
+            rCursor += 2
+            guard colCount <= maxHWP5TableColumns, colCount * 4 <= payloadEnd - rCursor else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
+            }
+            totalDecodedTableCells += colCount
+            guard totalDecodedTableCells <= maxTotalHWP5TableCells else {
+              throw EasyOfficeError.corruptedContainer(
+                detail: "HWP 5.0 누적 표 셀 개수(\(totalDecodedTableCells))가 허용 상한(\(maxTotalHWP5TableCells))을 초과했습니다."
+              )
+            }
+            var rowCells: [String] = []
+            rowCells.reserveCapacity(colCount)
+            for _ in 0..<colCount {
+              let cell = try BitPacking.readLengthPrefixedUTF16LE(
+                from: section0, offset: &rCursor, limit: payloadEnd)
+              rowCells.append(cell)
+            }
+            rows.append(rowCells)
+          }
+          tables.append(DocumentTableBlock(caption: "", rows: rows, hasHeaderRow: true))
+        }
 
       default:
         break

@@ -212,7 +212,7 @@ impl SectorBitset {
 /// Single-pass SWAR UTF-16LE decoder scanning 4 code units (`u64`) at a time without allocating `Vec<u16>`.
 #[inline]
 pub fn decode_utf16le_swar(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-    if !bytes.len().is_multiple_of(2) {
+    if bytes.len() % 2 != 0 {
         return Err(EasyOfficeError::CorruptedContainer(
             "UTF-16LE 바이트 길이가 짝수가 아닙니다.".to_string(),
         ));
@@ -274,15 +274,13 @@ fn decode_one_utf16le_unit(
 
 /// Baseline two-pass `Vec<u16>` UTF-16LE decoder retained for benchmark verification.
 pub fn decode_utf16le_vec_baseline(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-    if !bytes.len().is_multiple_of(2) {
+    if bytes.len() % 2 != 0 {
         return Err(EasyOfficeError::CorruptedContainer(
             "UTF-16LE 바이트 길이가 짝수가 아닙니다.".to_string(),
         ));
     }
     let units: Vec<u16> = bytes
-        .as_chunks::<2>()
-        .0
-        .iter()
+        .chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     String::from_utf16(&units).map_err(|_| {
@@ -412,7 +410,7 @@ pub(crate) fn read_len_prefixed_utf16le(
     }
     let byte_len = read_u32_le(bytes, *cursor)? as usize;
     *cursor += 4;
-    if !byte_len.is_multiple_of(2) || *cursor + byte_len > limit {
+    if byte_len % 2 != 0 || *cursor + byte_len > limit {
         return Err(EasyOfficeError::CorruptedContainer(
             "UTF-16LE 문자열 페이로드 범위 초과".to_string(),
         ));
