@@ -631,9 +631,11 @@ final class StandardCodecInteroperabilityTests: XCTestCase {
 
     var splitSheet = WorksheetModel(name: "SplitInjection")
     try splitSheet.setCell("A1", rawValue: "홍길동, =99+1")
+    try splitSheet.setCell("A2", rawValue: "이순신,\n=40+2")
     let splitRows = splitSheet.splitColumnByDelimiter(column: 0, delimiter: ",")
-    XCTAssertEqual(splitRows, 1)
+    XCTAssertEqual(splitRows, 2)
     XCTAssertEqual(splitSheet.evaluate(at: "B1"), .text("=99+1"))
+    XCTAssertEqual(splitSheet.evaluate(at: "B2"), .text("=40+2"))
   }
 
   func testVLOOKUPHLOOKUPDefaultApproximateMatchAndErrorPropagation() throws {

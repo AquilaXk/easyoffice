@@ -978,13 +978,13 @@ extension WorksheetModel {
     for r in 0...upperRow {
       let coord = PackedCellCoordinate(row: r, column: column)
       guard let raw = cellsByCoordinate[coord],
-        !raw.hasPrefix("="),
+        !raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("="),
         raw.contains(delimiter)
       else {
         continue
       }
       let parts = raw.components(separatedBy: delimiter).map {
-        $0.trimmingCharacters(in: .whitespaces)
+        $0.trimmingCharacters(in: .whitespacesAndNewlines)
       }
       guard parts.count > 1 else { continue }
       for (offset, part) in parts.enumerated()
