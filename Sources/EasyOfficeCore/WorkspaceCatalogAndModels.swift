@@ -208,6 +208,8 @@ public enum HubSection: String, CaseIterable, Sendable, Identifiable {
     case .smartAssistant: return "sparkles.rectangle.stack.fill"
     }
   }
+
+  public static var batchConversion: HubSection { .converter }
 }
 
 /// Built-in or user-saved template descriptor available from the Home Hub.
@@ -508,6 +510,115 @@ public struct WorkspaceHubCatalog: Sendable {
     }
   }
 
+  public static func instantiateBlankTab(
+    for module: OfficeModuleKind,
+    indexSuffix: Int = 1
+  ) -> WorkspaceTabItem {
+    let safeIndex = max(1, indexSuffix)
+    switch module {
+    case .document:
+      let emptyParagraph = ParagraphBlock(
+        style: .body,
+        alignment: .leading,
+        text: "",
+        fontSizePt: 11,
+        isBold: false
+      )
+      let doc = OfficeDocumentModel(
+        title: "새 문서 \(safeIndex)",
+        format: .docx,
+        paperSize: .a4,
+        headerText: "",
+        footerText: "",
+        paragraphs: [emptyParagraph],
+        tables: []
+      )
+      return WorkspaceTabItem(
+        fileName: "새_문서_\(safeIndex).docx",
+        format: .docx,
+        isPinned: false,
+        isModified: false,
+        payload: .document(doc)
+      )
+
+    case .hwp:
+      let emptyParagraph = ParagraphBlock(
+        style: .body,
+        alignment: .justified,
+        text: "",
+        fontSizePt: 11,
+        isBold: false
+      )
+      let hwpDoc = OfficeDocumentModel(
+        title: "새 한글 문서 \(safeIndex)",
+        format: .hwpx,
+        paperSize: .a4,
+        headerText: "문서번호: 기안-2026-000\(safeIndex)",
+        footerText: "",
+        paragraphs: [emptyParagraph],
+        tables: []
+      )
+      return WorkspaceTabItem(
+        fileName: "새_한글문서_\(safeIndex).hwpx",
+        format: .hwpx,
+        isPinned: false,
+        isModified: false,
+        payload: .document(hwpDoc)
+      )
+
+    case .sheet:
+      let sheet = WorksheetModel(name: "Sheet1")
+      return WorkspaceTabItem(
+        fileName: "새_스프레드시트_\(safeIndex).xlsx",
+        format: .xlsx,
+        isPinned: false,
+        isModified: false,
+        payload: .sheet(sheet)
+      )
+
+    case .slide:
+      let deck = PresentationDeckModel(
+        title: "새 프레젠테이션 \(safeIndex)",
+        aspectRatio: .widescreen16x9,
+        slides: [
+          SlideModel(
+            title: "새 슬라이드 제목",
+            subtitle: "",
+            bulletPoints: [],
+            speakerNotes: "",
+            masterLayout: .titleAndContent,
+            elements: []
+          )
+        ]
+      )
+      return WorkspaceTabItem(
+        fileName: "새_프레젠테이션_\(safeIndex).pptx",
+        format: .pptx,
+        isPinned: false,
+        isModified: false,
+        payload: .slide(deck)
+      )
+
+    case .pdf:
+      let pdf = PDFStudioDocumentModel(
+        title: "새 PDF 문서 \(safeIndex)",
+        pages: [
+          PDFPageDescriptor(
+            pageNumber: 1,
+            extractedText: ""
+          )
+        ]
+      )
+      return WorkspaceTabItem(
+        fileName: "새_PDF문서_\(safeIndex).pdf",
+        format: .pdf,
+        isPinned: false,
+        isModified: false,
+        payload: .pdf(pdf)
+      )
+    }
+  }
+
   public static func searchTabs(_ tabs: [WorkspaceTabItem], query: String) -> [WorkspaceTabItem] {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return tabs }
@@ -682,7 +793,7 @@ public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
       return [
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-data-autosum", title: "자동 합계 (SUM)", symbolName: "sum",
-          shortcutHint: "⇧⌘T"),
+          shortcutHint: "⌥⇧="),
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-data-fn-browser",
           title: "함수 마법사", symbolName: "function",
@@ -801,5 +912,238 @@ public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
           shortcutHint: "⌘0"),
       ]
     }
+  }
+}
+
+extension SlideMasterLayout {
+  public static var twoColumn: SlideMasterLayout { .twoColumnComparison }
+  public static var comparison: SlideMasterLayout { .twoColumnComparison }
+  public static var blank: SlideMasterLayout { .blankCanvas }
+}
+
+extension DocumentFormat {
+  public var primaryFileExtension: String { fileExtension }
+}
+
+public enum BatchConversionQueueStatus: String, Sendable, Equatable {
+  case pending = "대기"
+  case completed = "완료"
+  case failed = "실패"
+}
+
+public struct BatchConversionQueueItem: Identifiable, Sendable, Equatable {
+  public let id: UUID
+  public let sourceFileName: String
+  public let sourceFormat: DocumentFormat
+  public let targetFormat: DocumentFormat
+  public let status: BatchConversionQueueStatus
+  public let convertedPayloadBytes: Data?
+  public let result: ConversionJobResult?
+  public let errorDescription: String?
+
+  public init(
+    id: UUID = UUID(),
+    sourceFileName: String,
+    sourceFormat: DocumentFormat,
+    targetFormat: DocumentFormat,
+    status: BatchConversionQueueStatus,
+    convertedPayloadBytes: Data? = nil,
+    result: ConversionJobResult? = nil,
+    errorDescription: String? = nil
+  ) {
+    self.id = id
+    self.sourceFileName = sourceFileName
+    self.sourceFormat = sourceFormat
+    self.targetFormat = targetFormat
+    self.status = status
+    self.convertedPayloadBytes = convertedPayloadBytes
+    self.result = result
+    self.errorDescription = errorDescription
+  }
+}
+
+extension WorksheetModel {
+  public mutating func renameSheetPage(at index: Int, to newName: String) {
+    let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    let currentIndex = min(max(0, activeSheetIndex), additionalSheets.count)
+    if index == currentIndex {
+      self.name = trimmed
+    } else {
+      let adjusted = index < currentIndex ? index : (index - 1)
+      guard additionalSheets.indices.contains(adjusted) else { return }
+      additionalSheets[adjusted].name = trimmed
+    }
+  }
+
+  public mutating func deleteSheetPage(at index: Int) {
+    guard allSheetNames.count > 1 else { return }
+    let currentIndex = min(max(0, activeSheetIndex), additionalSheets.count)
+    if index == currentIndex {
+      let replacementIndex = min(index, additionalSheets.count - 1)
+      guard additionalSheets.indices.contains(replacementIndex) else { return }
+      let nextActive = additionalSheets.remove(at: replacementIndex)
+      self.name = nextActive.name
+      self.cellsByCoordinate = nextActive.cellsByCoordinate
+      self.cellStyles = nextActive.cellStyles
+      self.sheetComments = nextActive.sheetComments
+      self.mergedRanges = nextActive.mergedRanges
+      self.columnWidths = nextActive.columnWidths
+      self.rowHeights = nextActive.rowHeights
+      self.conditionalFormatRules = nextActive.conditionalFormatRules
+      self.dataValidationRule = nextActive.dataValidationRule
+      self.activeSheetIndex = replacementIndex
+      self.compiledASTs.removeAll(keepingCapacity: true)
+      for (coord, rawVal) in self.cellsByCoordinate where !rawVal.isEmpty {
+        self.compiledASTs[coord] = Self.compileCellInput(rawVal)
+      }
+    } else {
+      let adjusted = index < currentIndex ? index : (index - 1)
+      guard additionalSheets.indices.contains(adjusted) else { return }
+      additionalSheets.remove(at: adjusted)
+      if index < currentIndex {
+        activeSheetIndex = max(0, currentIndex - 1)
+      }
+    }
+  }
+
+  public func expandedGridBounds(
+    minRows: Int = 30,
+    minCols: Int = 12,
+    extraRows: Int = 12,
+    extraCols: Int = 4,
+    maxRows: Int = 512,
+    maxCols: Int = 64
+  ) -> (rows: Int, cols: Int) {
+    var detectedMaxRow = 0
+    var detectedMaxCol = 0
+    let safeUpperRow = max(minRows, min(maxRows, CellAddress.maxZeroBasedRow + 1))
+    let safeUpperCol = max(minCols, min(maxCols, CellAddress.maxZeroBasedColumn + 1))
+    for coord in cellsByCoordinate.keys {
+      if coord.row < safeUpperRow {
+        detectedMaxRow = max(detectedMaxRow, coord.row + 1)
+      } else {
+        detectedMaxRow = max(detectedMaxRow, safeUpperRow)
+      }
+      if coord.column < safeUpperCol {
+        detectedMaxCol = max(detectedMaxCol, coord.column + 1)
+      } else {
+        detectedMaxCol = max(detectedMaxCol, safeUpperCol)
+      }
+    }
+    for merged in mergedRanges {
+      let mRow = min(safeUpperRow, max(merged.start.row, merged.end.row) + 1)
+      let mCol = min(safeUpperCol, max(merged.start.column, merged.end.column) + 1)
+      detectedMaxRow = max(detectedMaxRow, mRow)
+      detectedMaxCol = max(detectedMaxCol, mCol)
+    }
+    let rows = min(safeUpperRow, max(minRows, detectedMaxRow + extraRows))
+    let cols = min(safeUpperCol, max(minCols, detectedMaxCol + extraCols))
+    let (area, overflow) = rows.multipliedReportingOverflow(by: cols)
+    if overflow || area > CellRange.maxExpandedCellCount {
+      let cappedRows = min(rows, max(1, CellRange.maxExpandedCellCount / max(1, cols)))
+      return (cappedRows, cols)
+    }
+    return (rows, cols)
+  }
+
+  public func isSummaryOrTotalRow(
+    _ zeroBasedRow: Int,
+    startColumn: Int,
+    valueColumn: Int
+  ) -> Bool {
+    let labelCoord = PackedCellCoordinate(row: zeroBasedRow, column: startColumn)
+    let rawLabel = (cellsByCoordinate[labelCoord] ?? "").trimmingCharacters(
+      in: .whitespacesAndNewlines)
+    let normalizedLabel = rawLabel.lowercased()
+    let summaryKeywords = ["전체 합계", "합계", "총계", "소계", "total", "grand total", "subtotal"]
+    if summaryKeywords.contains(normalizedLabel)
+      || rawLabel.contains("합계")
+      || rawLabel.contains("총계")
+    {
+      return true
+    }
+
+    let valCoord = PackedCellCoordinate(row: zeroBasedRow, column: valueColumn)
+    let rawVal = (cellsByCoordinate[valCoord] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      .uppercased()
+    if rawVal.hasPrefix("=SUM(") && rawLabel.isEmpty {
+      return true
+    }
+    if rawVal.hasPrefix("=SUM(") {
+      let colLabel = CellAddress.columnLabel(for: valueColumn).uppercased()
+      let prevColLabel = CellAddress.columnLabel(for: max(0, startColumn + 1)).uppercased()
+      let checkCoord = PackedCellCoordinate(row: zeroBasedRow, column: max(0, startColumn + 1))
+      let checkVal = (cellsByCoordinate[checkCoord] ?? "").trimmingCharacters(
+        in: .whitespacesAndNewlines
+      ).uppercased()
+      if checkVal.hasPrefix("=SUM(\(prevColLabel)") || rawVal.hasPrefix("=SUM(\(colLabel)") {
+        return true
+      }
+    }
+    return false
+  }
+
+  public func computeFilteredPivotSummary(
+    range: CellRange? = nil,
+    hasHeaderRow: Bool = true,
+    configuration: PivotTableConfiguration? = nil,
+    aggregation: PivotAggregationFunction = .sum
+  ) -> PivotTableSummary {
+    let rawBaseRange = range ?? detectedDataRange()
+    let rawMinR = min(rawBaseRange.start.row, rawBaseRange.end.row)
+    let rawMaxR = max(rawBaseRange.start.row, rawBaseRange.end.row)
+    let rawMinC = min(rawBaseRange.start.column, rawBaseRange.end.column)
+    let rawMaxC = max(rawBaseRange.start.column, rawBaseRange.end.column)
+    let (rSpan, rOv) = (rawMaxR - rawMinR).addingReportingOverflow(1)
+    let (cSpan, cOv) = (rawMaxC - rawMinC).addingReportingOverflow(1)
+    let (area, aOv) = rSpan.multipliedReportingOverflow(by: cSpan)
+    let baseRange: CellRange
+    if rOv || cOv || aOv || area > CellRange.maxExpandedCellCount {
+      let clampedMaxR = min(rawMaxR, rawMinR + 511)
+      let clampedMaxC = min(rawMaxC, rawMinC + 63)
+      baseRange = CellRange(
+        start: CellAddress(packed: PackedCellCoordinate(row: rawMinR, column: rawMinC)),
+        end: CellAddress(packed: PackedCellCoordinate(row: clampedMaxR, column: clampedMaxC))
+      )
+    } else {
+      baseRange = rawBaseRange
+    }
+    let minR = min(baseRange.start.row, baseRange.end.row)
+    let maxR = max(baseRange.start.row, baseRange.end.row)
+    let minC = min(baseRange.start.column, baseRange.end.column)
+    let maxC = max(baseRange.start.column, baseRange.end.column)
+    let valueColOffset = max(0, maxC - minC)
+    let resolvedConfig =
+      configuration
+      ?? PivotTableConfiguration(
+        rowFieldColumnIndex: 0,
+        valueFieldColumnIndex: valueColOffset,
+        aggregation: aggregation
+      )
+
+    let dataStartRow = hasHeaderRow ? min(maxR, minR + 1) : minR
+    let rowKeyColumn = minC + max(0, resolvedConfig.rowFieldColumnIndex)
+    let valueColumn = minC + max(0, resolvedConfig.valueFieldColumnIndex)
+
+    var cleanedSheet = self
+    if dataStartRow <= maxR {
+      for r in dataStartRow...maxR {
+        if isSummaryOrTotalRow(r, startColumn: rowKeyColumn, valueColumn: valueColumn) {
+          for c in minC...maxC {
+            let coord = PackedCellCoordinate(row: r, column: c)
+            cleanedSheet.cellsByCoordinate.removeValue(forKey: coord)
+            cleanedSheet.compiledASTs.removeValue(forKey: coord)
+          }
+        }
+      }
+    }
+
+    return PivotTableEngine.compute(
+      from: cleanedSheet,
+      range: baseRange,
+      hasHeaderRow: hasHeaderRow,
+      configuration: resolvedConfig
+    )
   }
 }

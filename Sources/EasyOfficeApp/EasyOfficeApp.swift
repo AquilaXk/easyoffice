@@ -5,26 +5,69 @@ import SwiftUI
 
 @MainActor
 final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
-  let viewModel = WorkspaceViewModel()
+  var viewModel: WorkspaceViewModel?
 
-  func applicationShouldTerminate(_ _: NSApplication) -> NSApplication.TerminateReply {
-    if let modifiedTab = viewModel.openTabs.first(where: \.isModified) {
-      viewModel.activeTabID = modifiedTab.id
-      viewModel.isShowingHomeHub = false
-      viewModel.pendingCloseConfirmTabID = modifiedTab.id
-      viewModel.lastExecutedCommandSummary =
-        "앱 종료 전 저장되지 않은 변경사항 확인 대기: \(modifiedTab.fileName)"
-      return .terminateCancel
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if ProcessInfo.processInfo.environment["EO_HEADLESS_QUIT"] == "1" {
+      return .terminateNow
     }
-    return .terminateNow
+    guard let vm = viewModel else { return .terminateNow }
+    let modifiedTabs = vm.openTabs.filter(\.isModified)
+    guard !modifiedTabs.isEmpty else { return .terminateNow }
+
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "저장하지 않은 변경 사항이 있는 탭이 \(modifiedTabs.count)개 있습니다."
+    let names = modifiedTabs.prefix(5).map(\.fileName).joined(separator: ", ")
+    alert.informativeText = "변경된 문서(\(names))를 저장하지 않고 종료하시겠습니까?"
+    alert.addButton(withTitle: "저장 후 종료")
+    alert.addButton(withTitle: "취소")
+    alert.addButton(withTitle: "저장하지 않고 종료")
+
+    let response = alert.runModal()
+    switch response {
+    case .alertFirstButtonReturn:
+      for tab in modifiedTabs {
+        WorkspaceFileDialogPresenter.presentSavePanel(viewModel: vm, tabID: tab.id)
+        if vm.openTabs.first(where: { $0.id == tab.id })?.isModified == true {
+          return .terminateCancel
+        }
+      }
+      return .terminateNow
+    case .alertSecondButtonReturn:
+      return .terminateCancel
+    default:
+      return .terminateNow
+    }
+  }
+
+  func application(_ sender: NSApplication, openFiles filenames: [String]) {
+    guard let vm = viewModel else {
+      sender.reply(toOpenOrPrint: .failure)
+      return
+    }
+    var allSucceeded = true
+    for path in filenames {
+      let url = URL(fileURLWithPath: path)
+      do {
+        _ = try vm.importDocumentFromDisk(url: url)
+      } catch {
+        vm.lastErrorMessage =
+          (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        allSucceeded = false
+      }
+    }
+    sender.reply(toOpenOrPrint: allSucceeded ? .success : .failure)
   }
 
   func application(_ _: NSApplication, open urls: [URL]) {
+    guard let vm = viewModel else { return }
     for url in urls {
       do {
-        _ = try viewModel.loadFromDisk(url: url)
+        _ = try vm.importDocumentFromDisk(url: url)
       } catch {
-        viewModel.lastErrorMessage = error.localizedDescription
+        vm.lastErrorMessage =
+          (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       }
     }
   }
@@ -33,10 +76,7 @@ final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct EasyOfficeApplication: App {
   @NSApplicationDelegateAdaptor(EasyOfficeAppDelegate.self) private var appDelegate
-
-  private var viewModel: WorkspaceViewModel {
-    appDelegate.viewModel
-  }
+  @State private var viewModel = WorkspaceViewModel()
 
   var body: some Scene {
     WindowGroup("EasyOffice") {
@@ -45,25 +85,49 @@ struct EasyOfficeApplication: App {
           minWidth: EasyOfficeDesignTokens.LayoutMetrics.minimumWindowWidth,
           minHeight: EasyOfficeDesignTokens.LayoutMetrics.minimumWindowHeight
         )
+        .onAppear {
+          appDelegate.viewModel = viewModel
+          viewModel.restorePersistedRecentDocuments()
+        }
         .onOpenURL { url in
           do {
-            _ = try viewModel.loadFromDisk(url: url)
+            _ = try viewModel.importDocumentFromDisk(url: url)
           } catch {
-            viewModel.lastErrorMessage = error.localizedDescription
+            viewModel.lastErrorMessage =
+              (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
           }
         }
     }
     .commands {
       CommandMenu("파일 및 편집") {
+        Button("새 빈 문서 (⌘N)") {
+          _ = viewModel.openNewBlankTab(for: viewModel.activeTab?.moduleKind ?? .document)
+        }
+        .keyboardShortcut("n", modifiers: [.command])
+
         Button("파일 열기...") {
           WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
         }
         .keyboardShortcut("o", modifiers: [.command])
 
-        Button("현재 탭 저장...") {
+        Button("현재 탭 저장") {
           WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
         }
         .keyboardShortcut("s", modifiers: [.command])
+        .disabled(viewModel.activeTab == nil)
+
+        Button("다른 이름으로 저장... (⇧⌘S)") {
+          WorkspaceFileDialogPresenter.presentSaveAsPanel(viewModel: viewModel)
+        }
+        .keyboardShortcut("s", modifiers: [.command, .shift])
+        .disabled(viewModel.activeTab == nil)
+
+        Button("현재 탭 닫기 (⌘W)") {
+          if let activeID = viewModel.activeTabID {
+            viewModel.requestCloseTab(id: activeID)
+          }
+        }
+        .keyboardShortcut("w", modifiers: [.command])
         .disabled(viewModel.activeTab == nil)
 
         Button("현재 문서 인쇄 (⌘P)...") {
@@ -112,9 +176,58 @@ struct EasyOfficeApplication: App {
         .keyboardShortcut("t", modifiers: [.command, .shift])
         .disabled(viewModel.recentlyClosedTabs.isEmpty)
       }
+      CommandMenu("서식 및 단축키") {
+        Button("굵게 (⌘B)") {
+          if let m = viewModel.activeTab?.moduleKind {
+            viewModel.executeRibbonCommand("\(m.rawValue)-home-bold")
+          }
+        }
+        .keyboardShortcut("b", modifiers: [.command])
+        .disabled(viewModel.activeTab == nil)
+
+        Button("기울임 (⌘I)") {
+          if let m = viewModel.activeTab?.moduleKind {
+            viewModel.executeRibbonCommand("\(m.rawValue)-home-italic")
+          }
+        }
+        .keyboardShortcut("i", modifiers: [.command])
+        .disabled(viewModel.activeTab == nil)
+
+        Button("밑줄 (⌘U)") {
+          if let m = viewModel.activeTab?.moduleKind {
+            viewModel.executeRibbonCommand("\(m.rawValue)-home-underline")
+          }
+        }
+        .keyboardShortcut("u", modifiers: [.command])
+        .disabled(viewModel.activeTab == nil)
+
+        Button("책갈피·링크 삽입 (⌘K)") {
+          if let m = viewModel.activeTab?.moduleKind {
+            viewModel.executeRibbonCommand("\(m.rawValue)-insert-link")
+          }
+        }
+        .keyboardShortcut("k", modifiers: [.command])
+        .disabled(viewModel.activeTab == nil)
+
+        Divider()
+
+        Button("자동 합계 (⌥⇧=)") {
+          if let m = viewModel.activeTab?.moduleKind {
+            viewModel.executeRibbonCommand("\(m.rawValue)-data-autosum")
+          }
+        }
+        .keyboardShortcut("=", modifiers: [.option, .shift])
+        .disabled(viewModel.activeTab == nil)
+      }
       CommandMenu("문서 생성") {
         ForEach(OfficeModuleKind.allCases) { module in
-          Button("새 \(module.displayNameKo)") {
+          Button("새 빈 \(module.displayNameKo)") {
+            _ = viewModel.openNewBlankTab(for: module)
+          }
+        }
+        Divider()
+        ForEach(OfficeModuleKind.allCases) { module in
+          Button("샘플 \(module.displayNameKo)") {
             viewModel.openNewSampleTab(for: module)
           }
         }
