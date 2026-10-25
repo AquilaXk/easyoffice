@@ -423,13 +423,24 @@ impl ZipArchiveCodec {
             }
             let local_name_len = read_u16_le(bytes, local_offset + 26)? as usize;
             let local_extra_len = read_u16_le(bytes, local_offset + 28)? as usize;
-            let data_start = local_offset
-                .checked_add(30)
-                .and_then(|v| v.checked_add(local_name_len))
-                .and_then(|v| v.checked_add(local_extra_len))
+            let local_name_start = local_offset + 30;
+            let local_name_end = local_name_start
+                .checked_add(local_name_len)
                 .ok_or_else(|| {
-                    EasyOfficeError::CorruptedContainer("ZIP 로컬 헤더 오프셋 오버플로".to_string())
+                    EasyOfficeError::CorruptedContainer(
+                        "ZIP 로컬 헤더 이름 오프셋 오버플로".to_string(),
+                    )
                 })?;
+            if local_name_end > cd_offset
+                || &bytes[local_name_start..local_name_end] != path.as_bytes()
+            {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "ZIP 로컬 파일 헤더와 Central Directory 엔트리 경로 불일치: {path}"
+                )));
+            }
+            let data_start = local_name_end.checked_add(local_extra_len).ok_or_else(|| {
+                EasyOfficeError::CorruptedContainer("ZIP 로컬 헤더 오프셋 오버플로".to_string())
+            })?;
             let data_end = data_start.checked_add(comp_size).ok_or_else(|| {
                 EasyOfficeError::CorruptedContainer("ZIP 데이터 크기 오버플로".to_string())
             })?;

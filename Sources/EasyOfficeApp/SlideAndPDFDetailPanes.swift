@@ -254,7 +254,7 @@ public struct SlideEditorDetailPaneView: View {
           showsIndicators: false,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         ) {
-          HStack(spacing: 12) {
+          HStack(spacing: 8) {
             Text("16:9 · \(deck.slides.count)장")
               .font(.system(size: 11, weight: .semibold, design: .monospaced))
               .lineLimit(1)
@@ -292,7 +292,7 @@ public struct SlideEditorDetailPaneView: View {
 
               if let slide = currentSlide {
                 FlatToolbarMenu(
-                  title: "레이아웃: \(slide.masterLayout.rawValue)",
+                  title: slide.masterLayout.rawValue,
                   systemImage: "rectangle.3.group",
                   palette: palette
                 ) {
@@ -307,7 +307,7 @@ public struct SlideEditorDetailPaneView: View {
               }
 
               FlatToolbarMenu(
-                title: "테마: \(deck.theme.rawValue)",
+                title: deck.theme.rawValue,
                 systemImage: "paintpalette",
                 palette: palette
               ) {
@@ -320,7 +320,7 @@ public struct SlideEditorDetailPaneView: View {
 
               if let slide = currentSlide {
                 FlatToolbarMenu(
-                  title: "전환 (\(String(format: "%.1f", slide.transitionDurationSeconds))s)",
+                  title: "전환 \(String(format: "%.1f", slide.transitionDurationSeconds))초",
                   systemImage: "sparkles.rectangle.stack",
                   palette: palette
                 ) {
@@ -421,7 +421,7 @@ public struct SlideEditorDetailPaneView: View {
               .fixedSize(horizontal: true, vertical: false)
             }
           }
-          .padding(.horizontal, 12)
+          .padding(.horizontal, 10)
           .padding(.vertical, 6)
         }
         .frame(height: 32)
@@ -478,20 +478,19 @@ public struct SlideEditorDetailPaneView: View {
                       let scaleY = max(0.01, geo.size.height / stageH)
                       let activeGuides: [AlignmentSnapGuide] = {
                         guard viewModel.isSnapGuidesEnabled else { return [] }
-                        let targetID = activeDragOffset?.elementID ?? selectedElement?.id
-                        guard let targetID,
-                          var activeElem = slide.elements.first(where: { $0.id == targetID })
-                        else { return [] }
-                        if let drag = activeDragOffset, drag.elementID == activeElem.id {
+                        if let drag = activeDragOffset,
+                          var activeElem = slide.elements.first(where: { $0.id == drag.elementID })
+                        {
                           activeElem.x += Double(drag.translation.width / scaleX)
                           activeElem.y += Double(drag.translation.height / scaleY)
+                          let siblings = slide.elements.filter { $0.id != activeElem.id }
+                          return SnapGuideCalculator.computeGuides(
+                            for: activeElem,
+                            siblings: siblings,
+                            aspectRatio: deck.aspectRatio
+                          )
                         }
-                        let siblings = slide.elements.filter { $0.id != activeElem.id }
-                        return SnapGuideCalculator.computeGuides(
-                          for: activeElem,
-                          siblings: siblings,
-                          aspectRatio: deck.aspectRatio
-                        )
+                        return viewModel.activeSnapGuides
                       }()
 
                       ZStack(alignment: .topLeading) {
@@ -607,6 +606,7 @@ public struct SlideEditorDetailPaneView: View {
                                           deltaX: dX,
                                           deltaY: dY
                                         )
+                                        viewModel.activeSnapGuides = []
                                       }
                                   )
                               }
@@ -663,6 +663,7 @@ public struct SlideEditorDetailPaneView: View {
                                   deltaX: dX,
                                   deltaY: dY
                                 )
+                                viewModel.activeSnapGuides = []
                               }
                           )
                         }

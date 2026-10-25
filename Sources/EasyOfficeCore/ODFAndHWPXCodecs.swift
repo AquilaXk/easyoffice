@@ -363,36 +363,32 @@ public enum ODFContainerCodec {
       </office:document-content>
       """
 
-    var entries: [ZipContainerEntry] = [
+    let baseEntries: [ZipContainerEntry] = [
       ZipContainerEntry(path: "mimetype", data: Data(textMimeType.utf8), compressionMethod: .store),
       ZipContainerEntry(
         path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate),
     ]
-    for img in doc.images {
-      let safeName = XMLDocumentModelMapper.sanitizeMediaFileName(img.fileName)
-      entries.append(
-        ZipContainerEntry(
-          path: "Pictures/\(safeName)", data: img.imageData, compressionMethod: .store))
-    }
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      baseEntries,
+      images: doc.images,
+      mediaFolderPrefix: "Pictures/",
+      preserved: doc.preservedArchiveEntries
+    )
   }
 
   public static func decodeDocument(from data: Data) throws -> OfficeDocumentModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    guard let mimeEntry = entries.first(where: { $0.path == "mimetype" }),
-      String(data: mimeEntry.data, encoding: .utf8) == textMimeType
-    else {
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(
+      from: data,
+      excludedPreservedPaths: ["mimetype", "content.xml"]
+    )
+    guard unpacked.xmlEntries["mimetype"] == textMimeType else {
       throw EasyOfficeError.corruptedContainer(detail: "ODT 컨테이너의 mimetype 엔트리가 유효하지 않습니다.")
     }
-    guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
+    guard let xml = unpacked.xmlEntries["content.xml"] else {
       throw EasyOfficeError.corruptedContainer(detail: "ODT 컨테이너에 'content.xml'이 누락되었습니다.")
     }
-    var binaryEntries: [String: Data] = [:]
-    for entry in entries where XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-      binaryEntries[entry.path] = entry.data
-    }
-
-    let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
+    let binaryEntries = unpacked.binaryEntries
+    let preservedEntries = unpacked.preservedEntries
     guard let root = XMLSanitizer.extractElements(named: "office:document-content", in: xml).first
     else {
       throw EasyOfficeError.corruptedContainer(
@@ -429,7 +425,7 @@ public enum ODFContainerCodec {
     let meta = XMLDocumentModelMapper.parseExtendedMetadata(
       from: root.innerXML, defaultPaperSize: paperSize, binaryEntries: binaryEntries)
 
-    return OfficeDocumentModel(
+    var decodedDoc = OfficeDocumentModel(
       title: root.attributes["title"] ?? "제목 없음",
       format: .odt,
       paperSize: paperSize,
@@ -447,6 +443,8 @@ public enum ODFContainerCodec {
       equations: meta.equations,
       watermarkText: meta.watermarkText
     )
+    decodedDoc.preservedArchiveEntries = preservedEntries
+    return decodedDoc
   }
 
   public static func encodeWorksheet(_ sheet: WorksheetModel) throws -> Data {
@@ -513,25 +511,30 @@ public enum ODFContainerCodec {
       </office:document-content>
       """
 
-    return try ZipContainerCodec.pack(entries: [
+    let baseEntries: [ZipContainerEntry] = [
       ZipContainerEntry(
         path: "mimetype", data: Data(spreadsheetMimeType.utf8), compressionMethod: .store),
       ZipContainerEntry(
         path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate),
-    ])
+    ]
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      baseEntries,
+      preserved: sheet.preservedArchiveEntries
+    )
   }
 
   public static func decodeWorksheet(from data: Data) throws -> WorksheetModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    guard let mimeEntry = entries.first(where: { $0.path == "mimetype" }),
-      String(data: mimeEntry.data, encoding: .utf8) == spreadsheetMimeType
-    else {
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(
+      from: data,
+      excludedPreservedPaths: ["mimetype", "content.xml"]
+    )
+    guard unpacked.xmlEntries["mimetype"] == spreadsheetMimeType else {
       throw EasyOfficeError.corruptedContainer(detail: "ODS 컨테이너의 mimetype 엔트리가 유효하지 않습니다.")
     }
-    guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
+    guard let xml = unpacked.xmlEntries["content.xml"] else {
       throw EasyOfficeError.corruptedContainer(detail: "ODS 컨테이너에 'content.xml'이 누락되었습니다.")
     }
-    let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
+    let preservedEntries = unpacked.preservedEntries
     let tableElems = XMLSanitizer.extractElements(named: "table:table", in: xml)
 
     func decodeTableElement(_ tableElem: (attributes: [String: String], innerXML: String)) throws
@@ -628,6 +631,7 @@ public enum ODFContainerCodec {
       }
     }
     XMLDocumentModelMapper.applyWorksheetMetadata(from: xml, to: &primary)
+    primary.preservedArchiveEntries = preservedEntries
     return primary
   }
 
@@ -659,25 +663,30 @@ public enum ODFContainerCodec {
       </office:document-content>
       """
 
-    return try ZipContainerCodec.pack(entries: [
+    let baseEntries: [ZipContainerEntry] = [
       ZipContainerEntry(
         path: "mimetype", data: Data(presentationMimeType.utf8), compressionMethod: .store),
       ZipContainerEntry(
         path: "content.xml", data: Data(contentXML.utf8), compressionMethod: .deflate),
-    ])
+    ]
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      baseEntries,
+      preserved: deck.preservedArchiveEntries
+    )
   }
 
   public static func decodePresentation(from data: Data) throws -> PresentationDeckModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    guard let mimeEntry = entries.first(where: { $0.path == "mimetype" }),
-      String(data: mimeEntry.data, encoding: .utf8) == presentationMimeType
-    else {
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(
+      from: data,
+      excludedPreservedPaths: ["mimetype", "content.xml"]
+    )
+    guard unpacked.xmlEntries["mimetype"] == presentationMimeType else {
       throw EasyOfficeError.corruptedContainer(detail: "ODP 컨테이너의 mimetype 엔트리가 유효하지 않습니다.")
     }
-    guard let contentEntry = entries.first(where: { $0.path == "content.xml" }) else {
+    guard let xml = unpacked.xmlEntries["content.xml"] else {
       throw EasyOfficeError.corruptedContainer(detail: "ODP 컨테이너에 'content.xml'이 누락되었습니다.")
     }
-    let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
+    let preservedEntries = unpacked.preservedEntries
     let root = XMLSanitizer.extractElements(named: "office:document-content", in: xml).first
     let slides = XMLSanitizer.extractElements(named: "draw:page", in: xml).map {
       page -> SlideModel in
@@ -714,13 +723,15 @@ public enum ODFContainerCodec {
       SlideDeckTheme(
         rawValue: root?.attributes["eo:deckTheme"] ?? root?.attributes["deckTheme"] ?? ""
       ) ?? .signatureLavender
-    return PresentationDeckModel(
+    var deck = PresentationDeckModel(
       title: root?.attributes["title"] ?? "발표자료",
       aspectRatio: SlideAspectRatio(rawValue: root?.attributes["aspectRatio"] ?? "")
         ?? .widescreen16x9,
       slides: slides,
       deckTheme: deckTheme
     )
+    deck.preservedArchiveEntries = preservedEntries
+    return deck
   }
 }
 
@@ -796,7 +807,7 @@ public enum HWPXContainerCodec {
       </hs:sec>
       """
 
-    var entries: [ZipContainerEntry] = [
+    let baseEntries: [ZipContainerEntry] = [
       ZipContainerEntry(path: "mimetype", data: Data(hwpxMimeType.utf8), compressionMethod: .store),
       ZipContainerEntry(
         path: "Contents/content.hpf", data: Data(contentHPF.utf8), compressionMethod: .deflate),
@@ -805,26 +816,24 @@ public enum HWPXContainerCodec {
       ZipContainerEntry(
         path: "Contents/section0.xml", data: Data(sectionXML.utf8), compressionMethod: .deflate),
     ]
-    for img in doc.images {
-      let safeName = XMLDocumentModelMapper.sanitizeMediaFileName(img.fileName)
-      entries.append(
-        ZipContainerEntry(
-          path: "BinData/\(safeName)", data: img.imageData, compressionMethod: .store))
-    }
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      baseEntries,
+      images: doc.images,
+      mediaFolderPrefix: "BinData/",
+      preserved: doc.preservedArchiveEntries
+    )
   }
 
   public static func decodeDocument(from data: Data) throws -> OfficeDocumentModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    var entryMap: [String: String] = [:]
-    var binaryEntries: [String: Data] = [:]
-    for entry in entries {
-      if XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-        binaryEntries[entry.path] = entry.data
-      } else {
-        entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-      }
-    }
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(
+      from: data,
+      excludedPreservedPaths: [
+        "mimetype", "Contents/content.hpf", "Contents/header.xml", "Contents/section0.xml",
+      ]
+    )
+    let entryMap = unpacked.xmlEntries
+    let binaryEntries = unpacked.binaryEntries
+    let preservedEntries = unpacked.preservedEntries
 
     guard entryMap["mimetype"] == hwpxMimeType else {
       throw EasyOfficeError.corruptedContainer(
@@ -877,7 +886,7 @@ public enum HWPXContainerCodec {
     let meta = XMLDocumentModelMapper.parseExtendedMetadata(
       from: headerXML, defaultPaperSize: paperSize, binaryEntries: binaryEntries)
 
-    return OfficeDocumentModel(
+    var decodedDoc = OfficeDocumentModel(
       title: title, format: .hwpx, paperSize: paperSize,
       headerText: headerText, footerText: footerText,
       paragraphs: paragraphs, tables: tables, trackChangesEnabled: trackChanges,
@@ -885,5 +894,7 @@ public enum HWPXContainerCodec {
       comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images,
       equations: meta.equations, watermarkText: meta.watermarkText
     )
+    decodedDoc.preservedArchiveEntries = preservedEntries
+    return decodedDoc
   }
 }

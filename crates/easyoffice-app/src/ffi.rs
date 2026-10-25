@@ -20,40 +20,49 @@ pub unsafe extern "C" fn easyoffice_ffi_dispatch_json(
     command_ptr: *const c_char,
     payload_ptr: *const c_char,
 ) -> *mut c_char {
-    if command_ptr.is_null() {
-        return into_raw_c_string(
-            "{\"ok\":false,\"error\":\"null command pointer (Fail-Closed)\"}",
-        );
-    }
-
-    let cmd_str = match CStr::from_ptr(command_ptr).to_str() {
-        Ok(s) => s,
-        Err(_) => {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if command_ptr.is_null() {
             return into_raw_c_string(
-                "{\"ok\":false,\"error\":\"invalid UTF-8 in command_ptr (Fail-Closed)\"}",
+                "{\"ok\":false,\"error\":\"null command pointer (Fail-Closed)\"}",
             );
         }
-    };
 
-    let payload_str = if payload_ptr.is_null() {
-        ""
-    } else {
-        match CStr::from_ptr(payload_ptr).to_str() {
+        let cmd_str = match CStr::from_ptr(command_ptr).to_str() {
             Ok(s) => s,
             Err(_) => {
                 return into_raw_c_string(
-                    "{\"ok\":false,\"error\":\"invalid UTF-8 in payload_ptr (Fail-Closed)\"}",
+                    "{\"ok\":false,\"error\":\"invalid UTF-8 in command_ptr (Fail-Closed)\"}",
                 );
             }
-        }
-    };
+        };
 
-    match EasyOfficeIpcRouter::dispatch(cmd_str, payload_str) {
-        Ok(json) => into_raw_c_string(&json),
-        Err(err) => {
-            let escaped = err.to_string().replace('\\', "\\\\").replace('"', "\\\"");
-            into_raw_c_string(&format!("{{\"ok\":false,\"error\":\"{escaped}\"}}"))
+        let payload_str = if payload_ptr.is_null() {
+            ""
+        } else {
+            match CStr::from_ptr(payload_ptr).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    return into_raw_c_string(
+                        "{\"ok\":false,\"error\":\"invalid UTF-8 in payload_ptr (Fail-Closed)\"}",
+                    );
+                }
+            }
+        };
+
+        match EasyOfficeIpcRouter::dispatch(cmd_str, payload_str) {
+            Ok(json) => into_raw_c_string(&json),
+            Err(err) => {
+                let escaped = err.to_string().replace('\\', "\\\\").replace('"', "\\\"");
+                into_raw_c_string(&format!("{{\"ok\":false,\"error\":\"{escaped}\"}}"))
+            }
         }
+    }));
+
+    match outcome {
+        Ok(ptr) => ptr,
+        Err(_) => into_raw_c_string(
+            "{\"ok\":false,\"error\":\"internal panic caught at FFI boundary (Fail-Closed)\"}",
+        ),
     }
 }
 
@@ -63,9 +72,11 @@ pub unsafe extern "C" fn easyoffice_ffi_dispatch_json(
 /// `ptr` must be either null or a pointer returned by `easyoffice_ffi_dispatch_json` that has not yet been freed.
 #[no_mangle]
 pub unsafe extern "C" fn easyoffice_ffi_free_string(ptr: *mut c_char) {
-    if !ptr.is_null() {
-        let _ = CString::from_raw(ptr);
-    }
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if !ptr.is_null() {
+            let _ = CString::from_raw(ptr);
+        }
+    }));
 }
 
 fn into_raw_c_string(text: &str) -> *mut c_char {

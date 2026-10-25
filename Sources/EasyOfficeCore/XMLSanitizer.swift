@@ -109,6 +109,8 @@ public enum XMLSanitizer {
       let gtMask = broadcastByte(UInt8(ascii: ">"))
       let quotMask = broadcastByte(UInt8(ascii: "\""))
       let aposMask = broadcastByte(UInt8(ascii: "'"))
+      let efMask = broadcastByte(0xEF)
+      let ctrlHighMask: UInt64 = 0xE0E0_E0E0_E0E0_E0E0
 
       var idx = 0
       var spanStart = 0
@@ -122,37 +124,30 @@ public enum XMLSanitizer {
           | zeroByteMask(word ^ gtMask)
           | zeroByteMask(word ^ quotMask)
           | zeroByteMask(word ^ aposMask)
+          | zeroByteMask(word ^ efMask)
+          | zeroByteMask(word & ctrlHighMask)
         if matchBits == 0 {
           idx += 8
           continue
         }
-        idx += matchBits.trailingZeroBitCount >> 3
-        let b = buf[idx]
-        if out.isEmpty {
-          out.reserveCapacity(count + 16)
-        }
-        if spanStart < idx {
-          out.append(contentsOf: buf[spanStart..<idx])
-        }
-        appendEscapedEntity(for: b, into: &out)
-        idx += 1
-        spanStart = idx
+        escapeBytes(
+          upTo: Swift.min(idx + 8, count),
+          idx: &idx,
+          spanStart: &spanStart,
+          count: count,
+          buf: buf,
+          out: &out
+        )
       }
 
-      while idx < count {
-        let b = buf[idx]
-        if b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
-          if out.isEmpty {
-            out.reserveCapacity(count + 16)
-          }
-          if spanStart < idx {
-            out.append(contentsOf: buf[spanStart..<idx])
-          }
-          appendEscapedEntity(for: b, into: &out)
-          spanStart = idx + 1
-        }
-        idx += 1
-      }
+      escapeBytes(
+        upTo: count,
+        idx: &idx,
+        spanStart: &spanStart,
+        count: count,
+        buf: buf,
+        out: &out
+      )
 
       if spanStart == 0 {
         return input
@@ -161,6 +156,46 @@ public enum XMLSanitizer {
         out.append(contentsOf: buf[spanStart..<count])
       }
       return String(decoding: out, as: UTF8.self)
+    }
+  }
+
+  private static func escapeBytes(
+    upTo limit: Int,
+    idx: inout Int,
+    spanStart: inout Int,
+    count: Int,
+    buf: UnsafeBufferPointer<UInt8>,
+    out: inout [UInt8]
+  ) {
+    while idx < limit {
+      let b = buf[idx]
+      if b == 0xEF && idx + 2 < count && buf[idx + 1] == 0xBF
+        && (buf[idx + 2] == 0xBE || buf[idx + 2] == 0xBF)
+      {
+        if out.isEmpty {
+          out.reserveCapacity(count + 16)
+        }
+        if spanStart < idx {
+          out.append(contentsOf: buf[spanStart..<idx])
+        }
+        idx += 3
+        spanStart = idx
+        continue
+      }
+      let isIllegalCtrl = (b < 0x20 && b != 0x09 && b != 0x0A && b != 0x0D)
+      if isIllegalCtrl || b == 0x26 || b == 0x3C || b == 0x3E || b == 0x22 || b == 0x27 {
+        if out.isEmpty {
+          out.reserveCapacity(count + 16)
+        }
+        if spanStart < idx {
+          out.append(contentsOf: buf[spanStart..<idx])
+        }
+        if !isIllegalCtrl {
+          appendEscapedEntity(for: b, into: &out)
+        }
+        spanStart = idx + 1
+      }
+      idx += 1
     }
   }
 

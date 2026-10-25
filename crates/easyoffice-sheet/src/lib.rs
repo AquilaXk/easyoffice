@@ -9,6 +9,7 @@ mod parser;
 pub mod workbook;
 
 pub use functions::*;
+pub use functions_date_fin::{wildcard_match, wildcard_match_alloc_baseline};
 pub use parser::{
     compile_formula_expr, compute_sheet_id, BinaryOp, Expr, PackedWorkbookCoord, VisitingTracker,
 };
@@ -430,7 +431,7 @@ pub struct SheetEngine {
 }
 
 impl SheetEngine {
-    pub const MAX_RECURSION_DEPTH: usize = 64;
+    pub const MAX_RECURSION_DEPTH: usize = 512;
     const DENSE_ROWS: usize = 256;
     const DENSE_COLS: usize = 16;
 
@@ -626,7 +627,7 @@ impl SheetEngine {
         depth: usize,
     ) -> EvaluatedCellValue {
         if depth > Self::MAX_RECURSION_DEPTH {
-            return EvaluatedCellValue::Error(FormulaError::Cycle);
+            return EvaluatedCellValue::Error(FormulaError::Ref);
         }
         let r = coord.row() as usize;
         let c = coord.col() as usize;
@@ -671,7 +672,9 @@ impl SheetEngine {
         };
 
         ctx.visiting.remove(sid, coord);
-        ctx.memo.insert(key, result.clone());
+        if !matches!(result, EvaluatedCellValue::Error(FormulaError::Cycle)) {
+            ctx.memo.insert(key, result.clone());
+        }
         result
     }
 
@@ -716,7 +719,7 @@ impl SheetEngine {
         depth: usize,
     ) -> EvaluatedCellValue {
         if depth > Self::MAX_RECURSION_DEPTH {
-            return EvaluatedCellValue::Error(FormulaError::Cycle);
+            return EvaluatedCellValue::Error(FormulaError::Value);
         }
         match expr {
             Expr::Number(n) => EvaluatedCellValue::Number(*n),
@@ -760,92 +763,28 @@ impl SheetEngine {
                     None => EvaluatedCellValue::Error(FormulaError::Value),
                 }
             }
-            Expr::Binary { op, lhs, rhs } => {
-                let l_val = self.eval_expr_ctx(lhs, ctx, depth + 1);
+            Expr::Binary { .. } => {
+                let mut chain: Vec<(BinaryOp, &Expr)> = Vec::new();
+                let mut cur = expr;
+                while let Expr::Binary { op, lhs, rhs } = cur {
+                    chain.push((*op, rhs));
+                    cur = lhs;
+                }
+                let mut l_val = self.eval_expr_ctx(cur, ctx, depth + 1);
                 if let EvaluatedCellValue::Error(e) = l_val {
                     return EvaluatedCellValue::Error(e);
                 }
-                let r_val = self.eval_expr_ctx(rhs, ctx, depth + 1);
-                if let EvaluatedCellValue::Error(e) = r_val {
-                    return EvaluatedCellValue::Error(e);
-                }
-
-                match op {
-                    BinaryOp::Concat => EvaluatedCellValue::Text(format!(
-                        "{}{}",
-                        l_val.to_display_string(),
-                        r_val.to_display_string()
-                    )),
-                    BinaryOp::Add
-                    | BinaryOp::Sub
-                    | BinaryOp::Mul
-                    | BinaryOp::Div
-                    | BinaryOp::Pow => {
-                        let ln = match l_val {
-                            EvaluatedCellValue::Empty => 0.0,
-                            _ => match l_val.as_number() {
-                                Some(v) => v,
-                                None => return EvaluatedCellValue::Error(FormulaError::Value),
-                            },
-                        };
-                        let rn = match r_val {
-                            EvaluatedCellValue::Empty => 0.0,
-                            _ => match r_val.as_number() {
-                                Some(v) => v,
-                                None => return EvaluatedCellValue::Error(FormulaError::Value),
-                            },
-                        };
-                        let res = match op {
-                            BinaryOp::Add => ln + rn,
-                            BinaryOp::Sub => ln - rn,
-                            BinaryOp::Mul => ln * rn,
-                            BinaryOp::Div => {
-                                if rn == 0.0 {
-                                    return EvaluatedCellValue::Error(FormulaError::DivByZero);
-                                }
-                                ln / rn
-                            }
-                            BinaryOp::Pow => ln.powf(rn),
-                            _ => unreachable!(),
-                        };
-                        if res.is_finite() {
-                            EvaluatedCellValue::Number(res)
-                        } else {
-                            EvaluatedCellValue::Error(FormulaError::Num)
-                        }
+                while let Some((op, rhs)) = chain.pop() {
+                    let r_val = self.eval_expr_ctx(rhs, ctx, depth + 1);
+                    if let EvaluatedCellValue::Error(e) = r_val {
+                        return EvaluatedCellValue::Error(e);
                     }
-                    BinaryOp::Eq
-                    | BinaryOp::Ne
-                    | BinaryOp::Lt
-                    | BinaryOp::Le
-                    | BinaryOp::Gt
-                    | BinaryOp::Ge => {
-                        let ord =
-                            if let (Some(ln), Some(rn)) = (l_val.as_number(), r_val.as_number()) {
-                                ln.partial_cmp(&rn)
-                            } else {
-                                Some(
-                                    l_val
-                                        .to_display_string()
-                                        .to_lowercase()
-                                        .cmp(&r_val.to_display_string().to_lowercase()),
-                                )
-                            };
-                        let Some(ordering) = ord else {
-                            return EvaluatedCellValue::Error(FormulaError::Value);
-                        };
-                        let flag = match op {
-                            BinaryOp::Eq => ordering.is_eq(),
-                            BinaryOp::Ne => ordering.is_ne(),
-                            BinaryOp::Lt => ordering.is_lt(),
-                            BinaryOp::Le => ordering.is_le(),
-                            BinaryOp::Gt => ordering.is_gt(),
-                            BinaryOp::Ge => ordering.is_ge(),
-                            _ => unreachable!(),
-                        };
-                        EvaluatedCellValue::Boolean(flag)
+                    l_val = Self::apply_binary_op(op, l_val, r_val);
+                    if let EvaluatedCellValue::Error(e) = l_val {
+                        return EvaluatedCellValue::Error(e);
                     }
                 }
+                l_val
             }
             Expr::FuncCall { name, args } => match name.as_str() {
                 "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK"
@@ -857,6 +796,123 @@ impl SheetEngine {
                 }
                 _ => self.eval_func_ctx(name, args, ctx, depth + 1),
             },
+        }
+    }
+
+    pub(crate) fn apply_binary_op(
+        op: BinaryOp,
+        l_val: EvaluatedCellValue,
+        r_val: EvaluatedCellValue,
+    ) -> EvaluatedCellValue {
+        match op {
+            BinaryOp::Concat => EvaluatedCellValue::Text(format!(
+                "{}{}",
+                l_val.to_display_string(),
+                r_val.to_display_string()
+            )),
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
+                let ln = match l_val {
+                    EvaluatedCellValue::Empty => 0.0,
+                    _ => match l_val.as_number() {
+                        Some(v) => v,
+                        None => return EvaluatedCellValue::Error(FormulaError::Value),
+                    },
+                };
+                let rn = match r_val {
+                    EvaluatedCellValue::Empty => 0.0,
+                    _ => match r_val.as_number() {
+                        Some(v) => v,
+                        None => return EvaluatedCellValue::Error(FormulaError::Value),
+                    },
+                };
+                let res = match op {
+                    BinaryOp::Add => ln + rn,
+                    BinaryOp::Sub => ln - rn,
+                    BinaryOp::Mul => ln * rn,
+                    BinaryOp::Div => {
+                        if rn == 0.0 {
+                            return EvaluatedCellValue::Error(FormulaError::DivByZero);
+                        }
+                        ln / rn
+                    }
+                    BinaryOp::Pow => ln.powf(rn),
+                    _ => unreachable!(),
+                };
+                if res.is_finite() {
+                    EvaluatedCellValue::Number(res)
+                } else {
+                    EvaluatedCellValue::Error(FormulaError::Num)
+                }
+            }
+            BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::Lt
+            | BinaryOp::Le
+            | BinaryOp::Gt
+            | BinaryOp::Ge => {
+                let Some(ordering) = Self::compare_excel_values(&l_val, &r_val) else {
+                    return EvaluatedCellValue::Error(FormulaError::Value);
+                };
+                let flag = match op {
+                    BinaryOp::Eq => ordering.is_eq(),
+                    BinaryOp::Ne => ordering.is_ne(),
+                    BinaryOp::Lt => ordering.is_lt(),
+                    BinaryOp::Le => ordering.is_le(),
+                    BinaryOp::Gt => ordering.is_gt(),
+                    BinaryOp::Ge => ordering.is_ge(),
+                    _ => unreachable!(),
+                };
+                EvaluatedCellValue::Boolean(flag)
+            }
+        }
+    }
+
+    pub(crate) fn compare_excel_values(
+        l_val: &EvaluatedCellValue,
+        r_val: &EvaluatedCellValue,
+    ) -> Option<std::cmp::Ordering> {
+        match (l_val, r_val) {
+            (EvaluatedCellValue::Error(_), _) | (_, EvaluatedCellValue::Error(_)) => None,
+            (EvaluatedCellValue::Empty, EvaluatedCellValue::Empty) => {
+                Some(std::cmp::Ordering::Equal)
+            }
+            (EvaluatedCellValue::Empty, EvaluatedCellValue::Number(b)) => {
+                if b.abs() < 1e-12 {
+                    Some(std::cmp::Ordering::Equal)
+                } else {
+                    0.0f64.partial_cmp(b)
+                }
+            }
+            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Empty) => {
+                if a.abs() < 1e-12 {
+                    Some(std::cmp::Ordering::Equal)
+                } else {
+                    a.partial_cmp(&0.0)
+                }
+            }
+            (EvaluatedCellValue::Empty, EvaluatedCellValue::Text(b)) => Some("".cmp(b.as_str())),
+            (EvaluatedCellValue::Text(a), EvaluatedCellValue::Empty) => Some(a.as_str().cmp("")),
+            (EvaluatedCellValue::Empty, EvaluatedCellValue::Boolean(b)) => Some(false.cmp(b)),
+            (EvaluatedCellValue::Boolean(a), EvaluatedCellValue::Empty) => Some(a.cmp(&false)),
+            (EvaluatedCellValue::Number(a), EvaluatedCellValue::Number(b)) => {
+                if (a - b).abs() < 1e-12 {
+                    Some(std::cmp::Ordering::Equal)
+                } else {
+                    a.partial_cmp(b)
+                }
+            }
+            (EvaluatedCellValue::Text(a), EvaluatedCellValue::Text(b)) => {
+                Some(a.to_lowercase().cmp(&b.to_lowercase()))
+            }
+            (EvaluatedCellValue::Boolean(a), EvaluatedCellValue::Boolean(b)) => Some(a.cmp(b)),
+            (EvaluatedCellValue::Number(_), _) => Some(std::cmp::Ordering::Less),
+            (_, EvaluatedCellValue::Number(_)) => Some(std::cmp::Ordering::Greater),
+            (EvaluatedCellValue::Text(_), EvaluatedCellValue::Boolean(_)) => {
+                Some(std::cmp::Ordering::Less)
+            }
+            (EvaluatedCellValue::Boolean(_), EvaluatedCellValue::Text(_)) => {
+                Some(std::cmp::Ordering::Greater)
+            }
         }
     }
 
@@ -1080,11 +1136,16 @@ impl SheetEngine {
     }
 
     pub(crate) fn values_match(a: &EvaluatedCellValue, b: &EvaluatedCellValue) -> bool {
-        if let (Some(na), Some(nb)) = (a.as_number(), b.as_number()) {
-            (na - nb).abs() < 1e-9
-        } else {
-            a.to_display_string()
-                .eq_ignore_ascii_case(&b.to_display_string())
+        match (a, b) {
+            (EvaluatedCellValue::Number(na), EvaluatedCellValue::Number(nb)) => {
+                (na - nb).abs() < 1e-9
+            }
+            (EvaluatedCellValue::Boolean(ba), EvaluatedCellValue::Boolean(bb)) => ba == bb,
+            (EvaluatedCellValue::Text(sa), EvaluatedCellValue::Text(sb)) => wildcard_match(sa, sb),
+            (EvaluatedCellValue::Empty, EvaluatedCellValue::Empty) => true,
+            (EvaluatedCellValue::Empty, EvaluatedCellValue::Text(s))
+            | (EvaluatedCellValue::Text(s), EvaluatedCellValue::Empty) => s.is_empty(),
+            _ => false,
         }
     }
 }

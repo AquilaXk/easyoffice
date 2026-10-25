@@ -19,7 +19,7 @@ public struct PDFAnnotationItem: Sendable, Codable, Equatable, Identifiable {
 
   public init(
     id: UUID = UUID(), pageNumber: Int, kind: PDFAnnotationKind, content: String,
-    author: String = "Workspace User"
+    author: String = "표준 문서 작성자"
   ) {
     self.id = id
     self.pageNumber = max(1, pageNumber)
@@ -757,23 +757,14 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
   public static func fromWorksheet(_ sheet: WorksheetModel, range: CellRange)
     -> PDFStudioDocumentModel
   {
-    let minRow = min(range.start.row, range.end.row)
-    let maxRow = max(range.start.row, range.end.row)
-    let minCol = min(range.start.column, range.end.column)
-    let maxCol = max(range.start.column, range.end.column)
-    let (rowSpan, rOverflow) = (maxRow - minRow).addingReportingOverflow(1)
-    let (colSpan, cOverflow) = (maxCol - minCol).addingReportingOverflow(1)
-    let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
-    guard !rOverflow, !cOverflow, !mulOverflow,
-      totalCells > 0, totalCells <= CellRange.maxExpandedCellCount
-    else {
+    guard let bounds = sheet.rangeBounds(range) else {
       return PDFStudioDocumentModel(title: sheet.name, pages: [])
     }
 
     var rowStrings: [String] = []
-    for r in minRow...maxRow {
+    for r in bounds.minRow...bounds.maxRow {
       var cells: [String] = []
-      for c in minCol...maxCol {
+      for c in bounds.minCol...bounds.maxCol {
         let packed = PackedCellCoordinate(row: r, column: c)
         let val = sheet.evaluate(at: packed)
         if val != .empty {

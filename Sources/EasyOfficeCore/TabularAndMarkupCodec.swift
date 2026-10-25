@@ -12,7 +12,7 @@ public enum CSVStateMachineCodec {
     case quoteInQuotedField
   }
 
-  public static let maxExportRows = 10_000
+  public static let maxExportRows = 65_536
   public static let maxExportColumns = 1_024
 
   public static func encodeWorksheet(_ sheet: WorksheetModel, delimiter: Character = ",") -> Data {

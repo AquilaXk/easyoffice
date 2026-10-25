@@ -98,6 +98,7 @@ pub struct RibbonWorkspaceState {
     pub ribbon_collapsed: bool,
     pub dark_theme_enabled: bool,
     pub zoom_percent: u32,
+    pub pdf_rotation_degrees: u32,
     pub last_command_id: String,
     pub executed_count: usize,
 }
@@ -119,6 +120,7 @@ impl Default for RibbonWorkspaceState {
             ribbon_collapsed: false,
             dark_theme_enabled: false,
             zoom_percent: 100,
+            pdf_rotation_degrees: 0,
             last_command_id: String::new(),
             executed_count: 0,
         }
@@ -191,7 +193,7 @@ impl RibbonCommandRouter {
                     ],
                     "formulasAndData" => [
                         ("data-autosum", "자동 합계 (SUM)", "Shift+Cmd+T"),
-                        ("data-fn-browser", "122종 함수 마법사", "Shift+F3"),
+                        ("data-fn-browser", "함수 마법사", "Shift+F3"),
                         ("data-sort", "오름차순·내림차순 정렬", "Alt+Cmd+R"),
                         ("data-validation", "데이터 유효성 검사", "Alt+Cmd+V"),
                     ],
@@ -210,12 +212,12 @@ impl RibbonCommandRouter {
                         ],
                         OfficeModuleKind::Sheet => [
                             ("mod-pivot", "피벗 테이블 요약", "Alt+Cmd+P"),
-                            ("mod-chart", "7종 차트 시각화", "Alt+F1"),
+                            ("mod-chart", "차트 시각화", "Alt+F1"),
                             ("mod-condfmt", "조건부 서식 규칙", "Ctrl+Cmd+F"),
                             ("mod-freeze", "행·열 틀 고정", "Ctrl+Cmd+L"),
                         ],
                         OfficeModuleKind::Slide => [
-                            ("mod-master", "5대 마스터 레이아웃", "Shift+Cmd+M"),
+                            ("mod-master", "마스터 레이아웃", "Shift+Cmd+M"),
                             ("mod-snap", "스마트 정렬 가이드", "Cmd+;"),
                             ("mod-transition", "화면 전환 효과", "Alt+Cmd+T"),
                             ("mod-presenter", "발표자 도구 시작", "Alt+Cmd+P"),
@@ -230,7 +232,7 @@ impl RibbonCommandRouter {
                     "review" => [
                         ("review-track", "변경 내용 추적", "Shift+Cmd+E"),
                         ("review-comment", "검토 메모 스레드", "Alt+Cmd+C"),
-                        ("review-verify", "매직 바이트 보안 검증", "Ctrl+Cmd+V"),
+                        ("review-verify", "문서 구조 보안 검사", "Ctrl+Cmd+V"),
                         ("review-stats", "문서 통계·글자 수", "Shift+Cmd+I"),
                     ],
                     "view" => [
@@ -312,6 +314,8 @@ impl RibbonCommandRouter {
             state.dark_theme_enabled = !state.dark_theme_enabled;
         } else if trimmed.ends_with("-view-zoom") {
             state.zoom_percent = 100;
+        } else if trimmed == "pdf-mod-rotate" {
+            state.pdf_rotation_degrees = (state.pdf_rotation_degrees + 90) % 360;
         }
 
         let cat_title = state.ribbon_style.category_titles()[matched.category_index];

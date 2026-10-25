@@ -323,6 +323,8 @@ final class WorkspaceUIParityTests: XCTestCase {
           let beforeStatsCount = vm.reviewStatsRefreshCount
           let beforeSnapGuides = vm.activeSnapGuides
           let beforePivotTotal = vm.lastPivotGrandTotal
+          let beforePadding = vm.documentHorizontalPadding
+          let beforeViewMode = vm.workspaceViewMode
 
           vm.lastExecutedCommandSummary = nil
           vm.executeRibbonCommand(cmd.id)
@@ -352,6 +354,8 @@ final class WorkspaceUIParityTests: XCTestCase {
             || (vm.reviewStatsRefreshCount != beforeStatsCount)
             || (vm.activeSnapGuides != beforeSnapGuides)
             || (vm.lastPivotGrandTotal != beforePivotTotal)
+            || (vm.documentHorizontalPadding != beforePadding)
+            || (vm.workspaceViewMode != beforeViewMode)
 
           XCTAssertTrue(
             didMutateState,
@@ -425,7 +429,6 @@ final class WorkspaceUIParityTests: XCTestCase {
     XCTAssertNotEqual(restoredFromTemplateTab.id, openedDocTab.id)
     XCTAssertEqual(restoredFromTemplateTab.payload, openedDocTab.payload)
 
-    // 5. Verify scrubActiveTabMetadata() and cross-format saveTabToDisk payload sync (F3, F4)
     freshVM.activeTabID = restoredFromTemplateTab.id
     freshVM.scrubActiveTabMetadata()
     XCTAssertGreaterThan(freshVM.lastScrubbedMetadataCount, 0)
@@ -434,14 +437,25 @@ final class WorkspaceUIParityTests: XCTestCase {
       "easyoffice_f4_sync_\(UUID().uuidString).pdf")
     defer { try? FileManager.default.removeItem(at: tempPDFURL) }
     try freshVM.saveTabToDisk(id: restoredFromTemplateTab.id, to: tempPDFURL, targetFormat: .pdf)
+    let exportedPDFData = try Data(contentsOf: tempPDFURL)
+    let exportedPDFModel = try PDFBinarySerializer.decode(from: exportedPDFData)
+    XCTAssertGreaterThanOrEqual(exportedPDFModel.pages.count, 1)
+    let preservedTab = try XCTUnwrap(
+      freshVM.openTabs.first(where: { $0.id == restoredFromTemplateTab.id }))
+    XCTAssertEqual(preservedTab.format, .docx)
+    if case .document(let preservedDoc) = preservedTab.payload {
+      XCTAssertGreaterThanOrEqual(preservedDoc.paragraphs.count, 1)
+    } else {
+      XCTFail("Cross-module PDF export must preserve editable .document payload")
+    }
+
+    let tempODTURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "easyoffice_f4_sync_\(UUID().uuidString).odt")
+    defer { try? FileManager.default.removeItem(at: tempODTURL) }
+    try freshVM.saveTabToDisk(id: restoredFromTemplateTab.id, to: tempODTURL, targetFormat: .odt)
     let syncedTab = try XCTUnwrap(
       freshVM.openTabs.first(where: { $0.id == restoredFromTemplateTab.id }))
-    XCTAssertEqual(syncedTab.format, .pdf)
-    if case .pdf(let convertedPDF) = syncedTab.payload {
-      XCTAssertGreaterThanOrEqual(convertedPDF.pages.count, 1)
-    } else {
-      XCTFail("saveTabToDisk with targetFormat .pdf must update tab.payload to .pdf")
-    }
+    XCTAssertEqual(syncedTab.format, .odt)
   }
 
   @MainActor
