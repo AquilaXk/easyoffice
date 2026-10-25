@@ -133,15 +133,26 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
         let (right_sheet, right_cell) = split_sheet_and_cell(rhs);
         match (left_sheet, right_sheet) {
             (Some(ls), Some(rs)) => {
-                let ls_clean = ls.trim_matches('\'').replace("''", "'");
-                let rs_clean = rs.trim_matches('\'').replace("''", "'");
-                if ls_clean.eq_ignore_ascii_case(&rs_clean) || ls_clean == rs_clean {
+                let ls_inner = ls
+                    .strip_prefix('\'')
+                    .and_then(|s| s.strip_suffix('\''))
+                    .unwrap_or(&ls)
+                    .replace("''", "'");
+                let rs_inner = rs
+                    .strip_prefix('\'')
+                    .and_then(|s| s.strip_suffix('\''))
+                    .unwrap_or(&rs)
+                    .replace("''", "'");
+                if ls_inner.eq_ignore_ascii_case(&rs_inner) {
                     return format!("{ls}!{left_cell}:{right_cell}");
                 }
                 return format!("{ls}!{left_cell}:{rs}!{right_cell}");
             }
-            (Some(sheet), None) | (None, Some(sheet)) => {
+            (Some(sheet), None) => {
                 return format!("{sheet}!{left_cell}:{right_cell}");
+            }
+            (None, Some(sheet)) => {
+                return format!("{left_cell}:{sheet}!{right_cell}");
             }
             (None, None) => {
                 return format!("{left_cell}:{right_cell}");
@@ -662,11 +673,7 @@ impl Parser {
                             Some(Token::Ident(s)) => {
                                 if matches!(self.peek(), Some(Token::Bang)) {
                                     self.next();
-                                    let s_clean = s.trim_matches('\'');
-                                    let name_clean = name.trim_matches('\'');
-                                    if !s_clean.eq_ignore_ascii_case(name_clean)
-                                        && s_clean != name_clean
-                                    {
+                                    if !s.eq_ignore_ascii_case(&name) {
                                         return Err(FormulaError::Ref);
                                     }
                                     let Some(Token::Ident(s2)) = self.next() else {
@@ -727,6 +734,9 @@ impl Parser {
                     let Some(Token::Ident(end_name)) = self.next() else {
                         return Err(FormulaError::Ref);
                     };
+                    if matches!(self.peek(), Some(Token::Bang)) {
+                        return Err(FormulaError::Ref);
+                    }
                     let end_coord =
                         PackedCellCoordinate::parse_a1(&end_name).map_err(|_| FormulaError::Ref)?;
                     let range =

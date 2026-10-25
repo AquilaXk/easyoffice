@@ -194,15 +194,20 @@ extension WorksheetModel {
           row: isVertical ? coord : bounds.minRow,
           column: isVertical ? bounds.minCol : coord,
           context: &frame.context,
-          depth: frame.depth + 1
+          depth: frame.depth + 1,
+          coerceEmptyToZero: false
         )
-        if case .error = keyVal { return keyVal }
+        if case .error = keyVal { continue }
         if !isApprox {
-          if Self.cellValuesEqual(keyVal, lookupVal)
-            || Self.matchesWildcardPattern(
-              text: keyVal.description, pattern: lookupVal.description)
-          {
-            if offsetIdx == 0 { return keyVal }
+          let isExactMatch: Bool
+          if Self.cellValuesEqual(keyVal, lookupVal) {
+            isExactMatch = true
+          } else if case (.text(let keyText), .text(let patText)) = (keyVal, lookupVal) {
+            isExactMatch = Self.matchesWildcardPattern(text: keyText, pattern: patText)
+          } else {
+            isExactMatch = false
+          }
+          if isExactMatch {
             return evaluateSingleCellInRange(
               onSheet: sheetName,
               row: isVertical ? coord : targetFixed,
@@ -1397,14 +1402,15 @@ extension WorksheetModel {
     row: Int,
     column: Int,
     context: inout EvaluationContext,
-    depth: Int
+    depth: Int,
+    coerceEmptyToZero: Bool = true
   ) -> EvaluatedCellValue {
     let coord = PackedCellCoordinate(row: row, column: column)
     let val =
       sheetName.map {
         evaluateOnSheet(named: $0, at: coord, context: &context, depth: depth)
       } ?? evaluateInternal(at: coord, context: &context, depth: depth)
-    if case .empty = val {
+    if coerceEmptyToZero, case .empty = val {
       return .number(0.0)
     }
     return val

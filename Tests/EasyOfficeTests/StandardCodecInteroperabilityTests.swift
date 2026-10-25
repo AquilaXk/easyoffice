@@ -741,7 +741,11 @@ final class StandardCodecInteroperabilityTests: XCTestCase {
     try finSheet.setCell("F3", rawValue: "300")
     try finSheet.setCell("G1", rawValue: "=VLOOKUP(10, E1:F3, 2, TRUE)")
     try finSheet.setCell("G2", rawValue: "=VLOOKUP(10, E1:F3, 2, FALSE)")
+    try finSheet.setCell("G3", rawValue: "=VLOOKUP(0, E1:F5, 2, FALSE)")
+    try finSheet.setCell("G4", rawValue: "=VLOOKUP(5, E1:F5, 2, TRUE)")
     XCTAssertEqual(finSheet.evaluate(at: "G1"), .number(200.0))
     XCTAssertEqual(finSheet.evaluate(at: "G2"), .number(100.0))
+    XCTAssertEqual(finSheet.evaluate(at: "G3"), .error("#N/A"))
+    XCTAssertEqual(finSheet.evaluate(at: "G4"), .error("#N/A"))
   }
 }
