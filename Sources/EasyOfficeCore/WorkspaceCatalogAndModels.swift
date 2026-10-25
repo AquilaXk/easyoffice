@@ -1011,20 +1011,39 @@ extension WorksheetModel {
     minRows: Int = 30,
     minCols: Int = 12,
     extraRows: Int = 12,
-    extraCols: Int = 4
+    extraCols: Int = 4,
+    maxRows: Int = 512,
+    maxCols: Int = 64
   ) -> (rows: Int, cols: Int) {
     var detectedMaxRow = 0
     var detectedMaxCol = 0
+    let safeUpperRow = max(minRows, min(maxRows, CellAddress.maxZeroBasedRow + 1))
+    let safeUpperCol = max(minCols, min(maxCols, CellAddress.maxZeroBasedColumn + 1))
     for coord in cellsByCoordinate.keys {
-      detectedMaxRow = max(detectedMaxRow, coord.row + 1)
-      detectedMaxCol = max(detectedMaxCol, coord.column + 1)
+      if coord.row < safeUpperRow {
+        detectedMaxRow = max(detectedMaxRow, coord.row + 1)
+      } else {
+        detectedMaxRow = max(detectedMaxRow, safeUpperRow)
+      }
+      if coord.column < safeUpperCol {
+        detectedMaxCol = max(detectedMaxCol, coord.column + 1)
+      } else {
+        detectedMaxCol = max(detectedMaxCol, safeUpperCol)
+      }
     }
     for merged in mergedRanges {
-      detectedMaxRow = max(detectedMaxRow, max(merged.start.row, merged.end.row) + 1)
-      detectedMaxCol = max(detectedMaxCol, max(merged.start.column, merged.end.column) + 1)
+      let mRow = min(safeUpperRow, max(merged.start.row, merged.end.row) + 1)
+      let mCol = min(safeUpperCol, max(merged.start.column, merged.end.column) + 1)
+      detectedMaxRow = max(detectedMaxRow, mRow)
+      detectedMaxCol = max(detectedMaxCol, mCol)
     }
-    let rows = min(CellAddress.maxZeroBasedRow + 1, max(minRows, detectedMaxRow + extraRows))
-    let cols = min(CellAddress.maxZeroBasedColumn + 1, max(minCols, detectedMaxCol + extraCols))
+    let rows = min(safeUpperRow, max(minRows, detectedMaxRow + extraRows))
+    let cols = min(safeUpperCol, max(minCols, detectedMaxCol + extraCols))
+    let (area, overflow) = rows.multipliedReportingOverflow(by: cols)
+    if overflow || area > CellRange.maxExpandedCellCount {
+      let cappedRows = min(rows, max(1, CellRange.maxExpandedCellCount / max(1, cols)))
+      return (cappedRows, cols)
+    }
     return (rows, cols)
   }
 
@@ -1071,7 +1090,25 @@ extension WorksheetModel {
     configuration: PivotTableConfiguration? = nil,
     aggregation: PivotAggregationFunction = .sum
   ) -> PivotTableSummary {
-    let baseRange = range ?? detectedDataRange()
+    let rawBaseRange = range ?? detectedDataRange()
+    let rawMinR = min(rawBaseRange.start.row, rawBaseRange.end.row)
+    let rawMaxR = max(rawBaseRange.start.row, rawBaseRange.end.row)
+    let rawMinC = min(rawBaseRange.start.column, rawBaseRange.end.column)
+    let rawMaxC = max(rawBaseRange.start.column, rawBaseRange.end.column)
+    let (rSpan, rOv) = (rawMaxR - rawMinR).addingReportingOverflow(1)
+    let (cSpan, cOv) = (rawMaxC - rawMinC).addingReportingOverflow(1)
+    let (area, aOv) = rSpan.multipliedReportingOverflow(by: cSpan)
+    let baseRange: CellRange
+    if rOv || cOv || aOv || area > CellRange.maxExpandedCellCount {
+      let clampedMaxR = min(rawMaxR, rawMinR + 511)
+      let clampedMaxC = min(rawMaxC, rawMinC + 63)
+      baseRange = CellRange(
+        start: CellAddress(packed: PackedCellCoordinate(row: rawMinR, column: rawMinC)),
+        end: CellAddress(packed: PackedCellCoordinate(row: clampedMaxR, column: clampedMaxC))
+      )
+    } else {
+      baseRange = rawBaseRange
+    }
     let minR = min(baseRange.start.row, baseRange.end.row)
     let maxR = max(baseRange.start.row, baseRange.end.row)
     let minC = min(baseRange.start.column, baseRange.end.column)

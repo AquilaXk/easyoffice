@@ -275,6 +275,10 @@ public final class WorkspaceViewModel {
     if recentDocumentRecords.count > 24 {
       recentDocumentRecords.removeLast(recentDocumentRecords.count - 24)
     }
+    persistRecentDocumentMetadata()
+  }
+
+  public func persistRecentDocumentMetadata(to defaults: UserDefaults = .standard) {
     let metadataList = recentDocumentRecords.map { item in
       PersistedRecentRecordMetadata(
         idString: item.id.uuidString,
@@ -287,8 +291,70 @@ public final class WorkspaceViewModel {
       )
     }
     if let encoded = try? JSONEncoder().encode(metadataList) {
-      UserDefaults.standard.set(encoded, forKey: Self.recentMetadataDefaultsKey)
+      defaults.set(encoded, forKey: Self.recentMetadataDefaultsKey)
     }
+  }
+
+  public func restorePersistedRecentDocuments(from defaults: UserDefaults = .standard) {
+    guard let rawData = defaults.data(forKey: Self.recentMetadataDefaultsKey),
+      let decodedList = try? JSONDecoder().decode([PersistedRecentRecordMetadata].self, from: rawData)
+    else {
+      return
+    }
+    var restored: [WorkspaceTabItem] = []
+    for meta in decodedList.prefix(24) {
+      let resolvedID = UUID(uuidString: meta.idString) ?? UUID()
+      if let existingIdx = recentDocumentRecords.firstIndex(where: {
+        $0.id == resolvedID || ($0.fileURL != nil && $0.fileURL?.path == meta.filePath)
+      }) {
+        var existing = recentDocumentRecords[existingIdx]
+        existing.isPinned = meta.isPinned
+        existing.isFavorite = meta.isFavorite
+        existing.lastOpenedISO8601 = meta.lastOpenedISO8601
+        restored.append(existing)
+      } else if let filePath = meta.filePath,
+        FileManager.default.fileExists(atPath: filePath),
+        let diskTab = try? loadFromDisk(url: URL(fileURLWithPath: filePath))
+      {
+        restored.append(
+          WorkspaceTabItem(
+            id: resolvedID,
+            fileName: meta.fileName,
+            format: diskTab.format,
+            isPinned: meta.isPinned,
+            isFavorite: meta.isFavorite,
+            isModified: false,
+            lastOpenedISO8601: meta.lastOpenedISO8601,
+            fileURL: URL(fileURLWithPath: filePath),
+            payload: diskTab.payload
+          )
+        )
+      } else if let fmt = DocumentFormat(rawValue: meta.formatRawValue) {
+        let blankTab = WorkspaceHubCatalog.instantiateBlankTab(
+          for: fmt.moduleKind,
+          indexSuffix: 1
+        )
+        restored.append(
+          WorkspaceTabItem(
+            id: resolvedID,
+            fileName: meta.fileName,
+            format: fmt,
+            isPinned: meta.isPinned,
+            isFavorite: meta.isFavorite,
+            isModified: false,
+            lastOpenedISO8601: meta.lastOpenedISO8601,
+            fileURL: meta.filePath.map { URL(fileURLWithPath: $0) },
+            payload: blankTab.payload
+          )
+        )
+      }
+    }
+    for existing in recentDocumentRecords where !restored.contains(where: { $0.id == existing.id }) {
+      if restored.count < 24 {
+        restored.append(existing)
+      }
+    }
+    recentDocumentRecords = restored
   }
 
   internal var combinedRecentPool: [WorkspaceTabItem] {
@@ -704,6 +770,7 @@ public final class WorkspaceViewModel {
       recordRecentDocument(openTabs[idx])
     } else if let rIdx = recentDocumentRecords.firstIndex(where: { $0.id == id }) {
       recentDocumentRecords[rIdx].isPinned.toggle()
+      persistRecentDocumentMetadata()
     }
   }
 
@@ -713,6 +780,7 @@ public final class WorkspaceViewModel {
       recordRecentDocument(openTabs[idx])
     } else if let rIdx = recentDocumentRecords.firstIndex(where: { $0.id == id }) {
       recentDocumentRecords[rIdx].isFavorite.toggle()
+      persistRecentDocumentMetadata()
     }
   }
 
@@ -1375,8 +1443,10 @@ public final class WorkspaceViewModel {
     if let targetFormat {
       batchTargetFormat = targetFormat
     }
+    var enqueuedCount = 0
     for url in urls {
-      if let tab = try? loadFromDisk(url: url) {
+      do {
+        let tab = try loadFromDisk(url: url)
         let safeSourceName =
           tab.fileName.contains(".") ? tab.fileName : "\(tab.fileName).\(tab.format.fileExtension)"
         additionalBatchJobs.append(
@@ -1387,7 +1457,13 @@ public final class WorkspaceViewModel {
             payload: tab.payload
           )
         )
+        enqueuedCount += 1
+      } catch {
+        lastErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
       }
+    }
+    if enqueuedCount > 0 {
+      lastExecutedCommandSummary = "일괄 변환 대기열 파일 추가: \(enqueuedCount)건"
     }
     isShowingHomeHub = true
     activeHubSection = .converter
@@ -1398,6 +1474,7 @@ public final class WorkspaceViewModel {
       let safeSourceName =
         tab.fileName.contains(".") ? tab.fileName : "\(tab.fileName).\(tab.format.fileExtension)"
       return ConversionJobRequest(
+        id: tab.id,
         sourceFileName: safeSourceName,
         sourceFormat: tab.format,
         targetFormat: batchTargetFormat,
@@ -1422,7 +1499,7 @@ public final class WorkspaceViewModel {
 
   public var batchConversionQueue: [BatchConversionQueueItem] {
     guard let report = lastBatchConversionReport else {
-      return openTabs.map { tab in
+      var pendingItems = openTabs.map { tab in
         BatchConversionQueueItem(
           id: tab.id,
           sourceFileName: tab.fileName,
@@ -1431,6 +1508,19 @@ public final class WorkspaceViewModel {
           status: .pending
         )
       }
+      for extra in additionalBatchJobs
+      where !pendingItems.contains(where: { $0.sourceFileName == extra.sourceFileName }) {
+        pendingItems.append(
+          BatchConversionQueueItem(
+            id: extra.id,
+            sourceFileName: extra.sourceFileName,
+            sourceFormat: extra.sourceFormat,
+            targetFormat: batchTargetFormat,
+            status: .pending
+          )
+        )
+      }
+      return pendingItems
     }
     var items: [BatchConversionQueueItem] = report.succeededResults.map { res in
       BatchConversionQueueItem(
@@ -1444,11 +1534,13 @@ public final class WorkspaceViewModel {
       )
     }
     for failed in report.failedErrors {
+      let matchedTab = openTabs.first(where: { $0.id == failed.jobID })
+      let matchedExtra = additionalBatchJobs.first(where: { $0.id == failed.jobID })
       items.append(
         BatchConversionQueueItem(
           id: failed.jobID,
-          sourceFileName: "변환 작업",
-          sourceFormat: .docx,
+          sourceFileName: matchedTab?.fileName ?? matchedExtra?.sourceFileName ?? "변환 작업",
+          sourceFormat: matchedTab?.format ?? matchedExtra?.sourceFormat ?? .docx,
           targetFormat: batchTargetFormat,
           status: .failed,
           errorDescription: failed.errorDescription

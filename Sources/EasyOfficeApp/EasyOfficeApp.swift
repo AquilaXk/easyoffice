@@ -46,11 +46,18 @@ final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
       sender.reply(toOpenOrPrint: .failure)
       return
     }
+    var allSucceeded = true
     for path in filenames {
       let url = URL(fileURLWithPath: path)
-      _ = try? vm.importDocumentFromDisk(url: url)
+      do {
+        _ = try vm.importDocumentFromDisk(url: url)
+      } catch {
+        vm.lastErrorMessage =
+          (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        allSucceeded = false
+      }
     }
-    sender.reply(toOpenOrPrint: .success)
+    sender.reply(toOpenOrPrint: allSucceeded ? .success : .failure)
   }
 }
 
@@ -68,6 +75,7 @@ struct EasyOfficeApplication: App {
         )
         .onAppear {
           appDelegate.viewModel = viewModel
+          viewModel.restorePersistedRecentDocuments()
         }
     }
     .commands {

@@ -23,6 +23,8 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
     public var lastLeftIndentPt: Double = 0
     public var lastLetterSpacingPercent: Double = 0
     public var lastCharWidthScalePercent: Double = 100
+    public var lastFontName: String = ""
+    public var lastFontSizePt: Double = 0
 
     public init(parent: SelectableParagraphTextView) {
       self.parent = parent
@@ -156,6 +158,8 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
     context.coordinator.lastLeftIndentPt = paragraph.leftIndentPt
     context.coordinator.lastLetterSpacingPercent = paragraph.letterSpacingPercent
     context.coordinator.lastCharWidthScalePercent = paragraph.charWidthScalePercent
+    context.coordinator.lastFontName = paragraph.fontName
+    context.coordinator.lastFontSizePt = paragraph.fontSizePt
     context.coordinator.isUpdatingProgrammatically = false
 
     scrollView.documentView = textView
@@ -177,6 +181,8 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       || context.coordinator.lastLeftIndentPt != paragraph.leftIndentPt
       || context.coordinator.lastLetterSpacingPercent != paragraph.letterSpacingPercent
       || context.coordinator.lastCharWidthScalePercent != paragraph.charWidthScalePercent
+      || context.coordinator.lastFontName != paragraph.fontName
+      || context.coordinator.lastFontSizePt != paragraph.fontSizePt
 
     if context.coordinator.lastParagraphID != paragraph.id
       || context.coordinator.lastRenderedRuns != currentRuns
@@ -198,6 +204,8 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       context.coordinator.lastLeftIndentPt = paragraph.leftIndentPt
       context.coordinator.lastLetterSpacingPercent = paragraph.letterSpacingPercent
       context.coordinator.lastCharWidthScalePercent = paragraph.charWidthScalePercent
+      context.coordinator.lastFontName = paragraph.fontName
+      context.coordinator.lastFontSizePt = paragraph.fontSizePt
       context.coordinator.isUpdatingProgrammatically = false
     }
   }

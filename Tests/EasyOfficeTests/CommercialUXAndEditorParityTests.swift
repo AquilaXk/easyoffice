@@ -71,6 +71,18 @@ final class CommercialUXAndEditorParityTests: XCTestCase {
         "Closed blank tab should remain visible in recent document records"
       )
     }
+
+    let targetRecentID = try! XCTUnwrap(vm.recentDocumentRecords.first?.id)
+    vm.togglePinTab(id: targetRecentID)
+    vm.toggleFavoriteTab(id: targetRecentID)
+
+    let freshVM = WorkspaceViewModel()
+    freshVM.restorePersistedRecentDocuments()
+    let restoredRecord = try! XCTUnwrap(
+      freshVM.recentDocumentRecords.first(where: { $0.id == targetRecentID })
+    )
+    XCTAssertTrue(restoredRecord.isPinned)
+    XCTAssertTrue(restoredRecord.isFavorite)
   }
 
   func testSaveOverwriteWhenFileURLExistsVersusSaveAsAndImportFromDisk() throws {
@@ -168,6 +180,10 @@ final class CommercialUXAndEditorParityTests: XCTestCase {
       )
       XCTAssertEqual(target.fontName, "NanumMyeongjo")
       XCTAssertEqual(target.fontSizePt, 18.0, accuracy: 1e-6)
+      for run in target.runs {
+        XCTAssertEqual(run.fontName, "NanumMyeongjo")
+        XCTAssertEqual(run.fontSizePt ?? 0.0, 18.0, accuracy: 1e-6)
+      }
       XCTAssertEqual(target.leftIndentPt, 24.0, accuracy: 1e-6)
       XCTAssertEqual(target.firstLineIndentPt, 12.0, accuracy: 1e-6)
 
@@ -210,6 +226,15 @@ final class CommercialUXAndEditorParityTests: XCTestCase {
     let bounds = sheet.expandedGridBounds()
     XCTAssertGreaterThanOrEqual(bounds.rows, 163)
     XCTAssertGreaterThanOrEqual(bounds.cols, 35)
+
+    // Sparse high-coordinate defense (CWE-400): XFD1048576 must remain capped
+    try sheet.setCell("XFD1048576", rawValue: "1")
+    let cappedBounds = sheet.expandedGridBounds()
+    XCTAssertLessThanOrEqual(cappedBounds.rows, 512)
+    XCTAssertLessThanOrEqual(cappedBounds.cols, 64)
+    XCTAssertLessThanOrEqual(cappedBounds.rows * cappedBounds.cols, CellRange.maxExpandedCellCount)
+    let sparsePivot = sheet.computeFilteredPivotSummary(aggregation: .sum)
+    XCTAssertGreaterThanOrEqual(sparsePivot.grandTotal, 0.0)
   }
 
   func testSheetMultiCellTSVCopyAndPasteAndKeyboardNavigation() throws {
@@ -301,7 +326,27 @@ final class CommercialUXAndEditorParityTests: XCTestCase {
     XCTAssertFalse(writtenURLs.isEmpty)
     for url in writtenURLs {
       let data = try Data(contentsOf: url)
-      XCTAssertGreaterThan(data.count, 64)
+      let decodedPDF = try PDFBinarySerializer.decode(from: data)
+      XCTAssertFalse(decodedPDF.pages.isEmpty)
     }
+
+    // Fail-closed error reporting when enqueueing a corrupted file from disk
+    let corruptURL = tempDir.appendingPathComponent("corrupt.docx")
+    try Data("NOT_A_ZIP_CONTAINER".utf8).write(to: corruptURL)
+    vm.lastErrorMessage = nil
+    vm.enqueueFilesFromDiskIntoBatchConversion(urls: [corruptURL], targetFormat: .pdf)
+    XCTAssertNotNil(vm.lastErrorMessage)
+
+    // External PDF merge verification (valid merge + fail-closed corrupted rejection)
+    let pdfTab = vm.openNewBlankTab(for: .pdf)
+    vm.activeTabID = pdfTab.id
+    let externalPDFURL = try XCTUnwrap(writtenURLs.first)
+    try vm.mergeActivePDFWithFile(url: externalPDFURL)
+    if case .pdf(let mergedPDF) = vm.activeTab?.payload {
+      XCTAssertGreaterThan(mergedPDF.pages.count, 1)
+    } else {
+      XCTFail("Expected merged PDF payload")
+    }
+    XCTAssertThrowsError(try vm.mergeActivePDFWithFile(url: corruptURL))
   }
 }

@@ -1646,6 +1646,9 @@ extension WorkspaceViewModel {
       let trimmed = fontName.trimmingCharacters(in: .whitespacesAndNewlines)
       if !trimmed.isEmpty {
         doc.paragraphs[pIdx].fontName = trimmed
+        for rIdx in doc.paragraphs[pIdx].runs.indices {
+          doc.paragraphs[pIdx].runs[rIdx].fontName = trimmed
+        }
       }
     }
     if let fontSizePt, fontSizePt.isFinite {
