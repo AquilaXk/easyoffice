@@ -647,7 +647,7 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    fn escape_json_str(s: &str) -> String {
+    pub fn escape_json_str(s: &str) -> String {
         let mut out = String::with_capacity(s.len());
         for ch in s.chars() {
             match ch {

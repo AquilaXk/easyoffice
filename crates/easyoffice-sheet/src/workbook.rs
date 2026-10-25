@@ -731,9 +731,41 @@ mod tests {
                 .unwrap()
                 > 3600.0
         );
+        assert!(
+            s.evaluate_formula_str("=NPV(0.08, C2:C4)")
+                .as_number()
+                .unwrap()
+                > 1200.0
+        );
+
+        // Core Math, Statistical, Logical, Lookup, Text & Information completion
+        assert_eq!(
+            s.evaluate_formula_str("=SUM(A1:A4)+ABS(-5)+MOD(17, 5)+SQRT(16)+POWER(2, 3)"),
+            EvaluatedCellValue::Number(109.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str(
+                "=AVERAGE(A1:A4)+MEDIAN(A1:A4)+MIN(A1:A4)+MAX(A1:A4)+COUNT(A1:A4)+COUNTA(A1:A4)+ROUND(STDEV(A1:A4), 2)"
+            ),
+            EvaluatedCellValue::Number(113.08)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=IF(OR(NOT(FALSE()), FALSE()), IFERROR(1/0, 7), 0)"),
+            EvaluatedCellValue::Number(7.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str("=VLOOKUP(20, A1:B4, 2, FALSE)+INDEX(B1:B4, 4, 1)"),
+            EvaluatedCellValue::Number(6.0)
+        );
+        assert_eq!(
+            s.evaluate_formula_str(
+                "=CONCAT(TRIM(\"  Easy  \"), UPPER(\"o\"), LOWER(\"FFICE\"), LEN(\"ABC\"))"
+            ),
+            EvaluatedCellValue::Text("EasyOffice3".to_string())
+        );
 
         // Information & INDIRECT
-        assert_eq!(s.evaluate_formula_str("=AND(ISNUMBER(1), ISTEXT(\"a\"), ISLOGICAL(TRUE()), ISERR(1/0), ISERROR(#N/A), ISNA(MATCH(99, A1:A4, 0)), ISEVEN(4), ISODD(5))"), EvaluatedCellValue::Boolean(true));
+        assert_eq!(s.evaluate_formula_str("=AND(ISBLANK(Z99), ISNUMBER(1), ISTEXT(\"a\"), ISLOGICAL(TRUE()), ISERR(1/0), ISERROR(#N/A), ISNA(MATCH(99, A1:A4, 0)), ISEVEN(4), ISODD(5))"), EvaluatedCellValue::Boolean(true));
         assert_eq!(
             s.evaluate_formula_str("=TYPE(42)+TYPE(\"abc\")+TYPE(TRUE())+TYPE(1/0)"),
             EvaluatedCellValue::Number(23.0)
@@ -1046,6 +1078,136 @@ mod tests {
         assert_eq!(
             sheet.evaluate_formula_str(&over_nested),
             EvaluatedCellValue::Error(FormulaError::Value)
+        );
+    }
+
+    #[test]
+    fn test_f1_string_amplification_bomb_caps_at_32767_chars() {
+        let mut sheet = SheetEngine::new("StringBombGuard");
+        sheet.set_cell("A1", "=REPT(\"A\", 20000)").unwrap();
+        sheet.set_cell("A2", "=A1 & A1").unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("A2"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+
+        sheet.set_cell("A3", "=CONCAT(A1, A1)").unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("A3"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+
+        sheet.set_cell("A4", "=CONCATENATE(A1, A1)").unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("A4"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+
+        sheet
+            .set_cell("A5", "=TEXTJOIN(\"-\", TRUE, A1, A1)")
+            .unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("A5"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+
+        sheet.set_cell("B1", "=REPT(\"A\", 2000)").unwrap();
+        sheet
+            .set_cell("B2", "=SUBSTITUTE(B1, \"A\", \"BBBBBBBBBBBBBBBBBBBB\")")
+            .unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("B2"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+
+        sheet
+            .set_cell("B3", "=SUBSTITUTE(A1, \"A\", A1, 1)")
+            .unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("B3"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+
+        sheet.set_cell("B4", "=REPLACE(A1, 1, 1, A1)").unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("B4"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+
+        let fmt_zeros = format!("0.{}", "0".repeat(500));
+        sheet
+            .set_cell("B5", format!("=TEXT(1.25, \"{fmt_zeros}\")"))
+            .unwrap();
+        if let EvaluatedCellValue::Text(formatted) = sheet.evaluate_cell("B5") {
+            assert_eq!(formatted, "1.2500000000");
+        } else {
+            panic!("Expected bounded TEXT output");
+        }
+
+        let raw_over = "가".repeat(32_768);
+        sheet.set_cell("C1", raw_over).unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("C1"),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+    }
+
+    #[test]
+    fn test_f2_cycle_memoization_and_eval_step_budget() {
+        let mut sheet = SheetEngine::new("CycleMemo");
+        sheet.set_cell("A1", "=A2").unwrap();
+        sheet.set_cell("A2", "=A1").unwrap();
+        for idx in 1..=25u32 {
+            let prev = if idx == 1 {
+                "A1".to_string()
+            } else {
+                format!("B{}", idx - 1)
+            };
+            sheet
+                .set_cell(
+                    &format!("B{idx}"),
+                    format!("=IFERROR({prev}, 1) + IFERROR({prev}, 1)"),
+                )
+                .unwrap();
+        }
+
+        let coord_a1 = PackedCellCoordinate::parse_a1("A1").unwrap();
+        let mut ctx = crate::EvalContext::standalone_id(sheet.resolved_sheet_id());
+        let a1_val = sheet.eval_coord_ctx(coord_a1, &mut ctx, 0);
+        assert_eq!(a1_val, EvaluatedCellValue::Error(FormulaError::Cycle));
+        let key_a1 = crate::PackedWorkbookCoord::new(sheet.resolved_sheet_id(), coord_a1);
+        assert_eq!(
+            ctx.memo.get(&key_a1),
+            Some(&EvaluatedCellValue::Error(FormulaError::Cycle))
+        );
+
+        assert_eq!(
+            sheet.evaluate_cell("B25"),
+            EvaluatedCellValue::Number(33_554_432.0)
+        );
+    }
+
+    #[test]
+    fn test_f12_canonical_122_coverage_completeness() {
+        let test_src = include_str!("workbook.rs");
+        let fn_start = test_src
+            .find("fn test_all_122_canonical_functions_evaluated()")
+            .unwrap();
+        let fn_end = test_src[fn_start..]
+            .find("fn test_workbook_cross_sheet_formulas_and_sort_goal_seek_chart()")
+            .unwrap()
+            + fn_start;
+        let body = &test_src[fn_start..fn_end];
+        let mut missing = Vec::new();
+        for &func_name in SheetEngine::supported_function_names() {
+            let pat = format!("{func_name}(");
+            if !body.contains(&pat) {
+                missing.push(func_name);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "Missing canonical functions in test_all_122_canonical_functions_evaluated: {missing:?}"
         );
     }
 }

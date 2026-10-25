@@ -181,29 +181,41 @@ impl OoxmlCodec {
         }
         sst_xml.push_str("</sst>");
 
-        let mut sheet_xml = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row>",
-        );
+        let mut rows_map: std::collections::BTreeMap<u32, Vec<(u32, &String)>> =
+            std::collections::BTreeMap::new();
         for (row, col, raw) in &payload.cells {
-            let a1 = format!("{}{}", format_col_letters(*col), row + 1);
-            if let Some(formula) = raw.strip_prefix('=') {
-                sheet_xml.push_str(&format!(
-                    "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\"><f>{}</f><v>0</v></c>",
-                    XmlSanitizer::escape(formula)
-                ));
-            } else if raw.parse::<f64>().is_ok() {
-                sheet_xml.push_str(&format!(
-                    "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\" t=\"n\"><v>{}</v></c>",
-                    XmlSanitizer::escape(raw)
-                ));
-            } else {
-                let idx = shared_strings.iter().position(|s| s == raw).unwrap_or(0);
-                sheet_xml.push_str(&format!(
-                    "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\" t=\"s\"><v>{idx}</v></c>"
-                ));
-            }
+            rows_map.entry(*row).or_default().push((*col, raw));
         }
-        sheet_xml.push_str("</row></sheetData></worksheet>");
+
+        let mut sheet_xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>",
+        );
+        for (row, mut row_cells) in rows_map {
+            row_cells.sort_by_key(|(col, _)| *col);
+            let row_num = row.saturating_add(1);
+            sheet_xml.push_str(&format!("<row r=\"{row_num}\">"));
+            for (col, raw) in row_cells {
+                let a1 = format!("{}{}", format_col_letters(col), row_num);
+                if let Some(formula) = raw.strip_prefix('=') {
+                    sheet_xml.push_str(&format!(
+                        "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\"><f>{}</f><v>0</v></c>",
+                        XmlSanitizer::escape(formula)
+                    ));
+                } else if raw.parse::<f64>().is_ok() {
+                    sheet_xml.push_str(&format!(
+                        "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\" t=\"n\"><v>{}</v></c>",
+                        XmlSanitizer::escape(raw)
+                    ));
+                } else {
+                    let idx = shared_strings.iter().position(|s| s == raw).unwrap_or(0);
+                    sheet_xml.push_str(&format!(
+                        "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\" t=\"s\"><v>{idx}</v></c>"
+                    ));
+                }
+            }
+            sheet_xml.push_str("</row>");
+        }
+        sheet_xml.push_str("</sheetData></worksheet>");
 
         XmlSanitizer::validate_safe_xml(&workbook_xml)?;
         XmlSanitizer::validate_safe_xml(&sst_xml)?;
@@ -278,9 +290,19 @@ impl OoxmlCodec {
                 extract_attr_from_fragment(attrs_raw, "row").and_then(|v| v.parse::<u32>().ok()),
                 extract_attr_from_fragment(attrs_raw, "col").and_then(|v| v.parse::<u32>().ok()),
             ) {
+                if r > 1_048_575 || c > 16_383 {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "XLSX 셀 좌표가 ECMA-376 허용 범위를 초과했습니다.".to_string(),
+                    ));
+                }
                 (r, c)
             } else if let Some(a1) = r_attr {
-                parse_a1_ZeroBased(&a1).unwrap_or((0, 0))
+                parse_a1_ZeroBased(&a1).ok_or_else(|| {
+                    EasyOfficeError::ResourceBudgetExceeded(
+                        "XLSX A1 셀 참조가 ECMA-376 허용 범위를 초과했거나 잘못되었습니다."
+                            .to_string(),
+                    )
+                })?
             } else {
                 (0, 0)
             };
@@ -440,6 +462,9 @@ impl OdfCodec {
     pub const MIMETYPE_ODT: &'static str = "application/vnd.oasis.opendocument.text";
     pub const MIMETYPE_ODS: &'static str = "application/vnd.oasis.opendocument.spreadsheet";
     pub const MIMETYPE_ODP: &'static str = "application/vnd.oasis.opendocument.presentation";
+    pub const MAX_CELLS: usize = 200_000;
+    pub const MAX_ROWS: u32 = 1_048_575;
+    pub const MAX_COLS: u32 = 16_383;
 
     pub fn pack_odt(
         title: &str,
@@ -519,18 +544,79 @@ impl OdfCodec {
         sheet_name: &str,
         cells: &[(u32, u32, String)],
     ) -> Result<Vec<u8>, EasyOfficeError> {
-        let manifest = Self::build_manifest(Self::MIMETYPE_ODS);
-        let mut content = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" office:version=\"1.2\"><office:body><office:spreadsheet><table:table table:name=\"{}\"><table:table-row>",
-            XmlSanitizer::escape(sheet_name)
-        );
-        for (row, col, raw) in cells {
-            content.push_str(&format!(
-                "<table:table-cell row=\"{row}\" col=\"{col}\"><text:p>{}</text:p></table:table-cell>",
-                XmlSanitizer::escape(raw)
+        if cells.len() > Self::MAX_CELLS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "ODS 셀 개수가 허용 예산을 초과했습니다.".to_string(),
             ));
         }
-        content.push_str("</table:table-row></table:table></office:spreadsheet></office:body></office:document-content>");
+        let manifest = Self::build_manifest(Self::MIMETYPE_ODS);
+        let mut grid: std::collections::BTreeMap<u32, std::collections::BTreeMap<u32, &String>> =
+            std::collections::BTreeMap::new();
+        for (row, col, raw) in cells {
+            if *row > Self::MAX_ROWS || *col > Self::MAX_COLS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "ODS 셀 좌표가 허용 범위를 초과했습니다.".to_string(),
+                ));
+            }
+            grid.entry(*row).or_default().insert(*col, raw);
+        }
+
+        let mut content = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" office:version=\"1.2\"><office:body><office:spreadsheet><table:table table:name=\"{}\">",
+            XmlSanitizer::escape(sheet_name)
+        );
+
+        let mut expected_row: u32 = 0;
+        for (row, row_cells) in grid {
+            if row > expected_row {
+                let gap = row - expected_row;
+                if gap == 1 {
+                    content.push_str("<table:table-row><table:table-cell/></table:table-row>");
+                } else {
+                    content.push_str(&format!(
+                        "<table:table-row table:number-rows-repeated=\"{gap}\"><table:table-cell/></table:table-row>"
+                    ));
+                }
+            }
+            content.push_str("<table:table-row>");
+            let mut expected_col: u32 = 0;
+            for (col, raw) in row_cells {
+                if col > expected_col {
+                    let gap = col - expected_col;
+                    if gap == 1 {
+                        content.push_str("<table:table-cell/>");
+                    } else {
+                        content.push_str(&format!(
+                            "<table:table-cell table:number-columns-repeated=\"{gap}\"/>"
+                        ));
+                    }
+                }
+                if let Some(formula) = raw.strip_prefix('=') {
+                    let escaped_formula = XmlSanitizer::escape(formula);
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\" table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                        XmlSanitizer::escape(raw)
+                    ));
+                } else if raw.parse::<f64>().is_ok() {
+                    let escaped_val = XmlSanitizer::escape(raw);
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\" office:value-type=\"float\" office:value=\"{escaped_val}\"><text:p>{escaped_val}</text:p></table:table-cell>"
+                    ));
+                } else {
+                    content.push_str(&format!(
+                        "<table:table-cell row=\"{row}\" col=\"{col}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                        XmlSanitizer::escape(raw)
+                    ));
+                }
+                expected_col = col.saturating_add(1);
+            }
+            content.push_str("</table:table-row>");
+            expected_row = row.saturating_add(1);
+        }
+
+        content.push_str(
+            "</table:table></office:spreadsheet></office:body></office:document-content>",
+        );
         XmlSanitizer::validate_safe_xml(&content)?;
 
         ZipArchiveCodec::pack(&[
@@ -550,21 +636,131 @@ impl OdfCodec {
             .unwrap_or_else(|| "Sheet1".to_string());
 
         let mut cells = Vec::new();
-        for (idx, (attrs, inner)) in extract_tags_with_attrs(&content_xml, "table:table-cell")
-            .into_iter()
-            .enumerate()
+        let mut current_row: u32 = 0;
+
+        for (row_attrs, row_inner) in
+            extract_tags_or_self_closing_with_attrs(&content_xml, "table:table-row")
         {
-            let row = extract_attr_from_fragment(attrs, "row")
+            let row_repeat = extract_attr_from_fragment(row_attrs, "table:number-rows-repeated")
                 .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(0);
-            let col = extract_attr_from_fragment(attrs, "col")
-                .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(idx as u32);
-            let val = extract_tag_bodies(inner, "text:p")
-                .first()
-                .map(|s| XmlSanitizer::unescape(s))
-                .unwrap_or_default();
-            cells.push((row, col, val));
+                .unwrap_or(1)
+                .max(1);
+            let next_row = current_row.checked_add(row_repeat).ok_or_else(|| {
+                EasyOfficeError::ResourceBudgetExceeded(
+                    "ODS 행 반복 횟수가 허용 범위를 초과했습니다.".to_string(),
+                )
+            })?;
+            if next_row > Self::MAX_ROWS + 1 {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "ODS 행 인덱스가 허용 범위를 초과했습니다.".to_string(),
+                ));
+            }
+
+            type ParsedOdsRowCell = (Option<u32>, Option<u32>, u32, Option<String>);
+            let raw_cells = extract_ods_cells_from_row(row_inner);
+            let mut parsed_row_cells: Vec<ParsedOdsRowCell> = Vec::new();
+            let mut has_any_populated = false;
+            for (_is_self_closing, cell_attrs, cell_inner) in raw_cells {
+                let col_repeat =
+                    extract_attr_from_fragment(cell_attrs, "table:number-columns-repeated")
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .unwrap_or(1)
+                        .max(1);
+                let explicit_row = extract_attr_from_fragment(cell_attrs, "row")
+                    .and_then(|v| v.parse::<u32>().ok());
+                let explicit_col = extract_attr_from_fragment(cell_attrs, "col")
+                    .and_then(|v| v.parse::<u32>().ok());
+
+                let formula_val =
+                    extract_attr_from_fragment(cell_attrs, "table:formula").map(|raw_f| {
+                        let unescaped = XmlSanitizer::unescape(&raw_f);
+                        let stripped = unescaped
+                            .strip_prefix("of:")
+                            .or_else(|| unescaped.strip_prefix("oooc:"))
+                            .or_else(|| unescaped.strip_prefix("msoxl:"))
+                            .unwrap_or(&unescaped);
+                        if stripped.starts_with('=') {
+                            stripped.to_string()
+                        } else {
+                            format!("={stripped}")
+                        }
+                    });
+
+                let text_p_bodies = extract_tag_bodies(cell_inner, "text:p");
+                let office_val = extract_attr_from_fragment(cell_attrs, "office:value")
+                    .or_else(|| extract_attr_from_fragment(cell_attrs, "office:string-value"))
+                    .map(|s| XmlSanitizer::unescape(&s));
+
+                let resolved_val = if let Some(f) = formula_val {
+                    Some(f)
+                } else if !text_p_bodies.is_empty() {
+                    Some(
+                        text_p_bodies
+                            .into_iter()
+                            .map(XmlSanitizer::unescape)
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                } else if let Some(ov) = office_val {
+                    Some(ov)
+                } else if explicit_row.is_some() || explicit_col.is_some() {
+                    Some(String::new())
+                } else {
+                    None
+                };
+
+                if resolved_val.is_some() {
+                    has_any_populated = true;
+                }
+                parsed_row_cells.push((explicit_row, explicit_col, col_repeat, resolved_val));
+            }
+
+            if has_any_populated {
+                for r_offset in 0..row_repeat {
+                    let target_row = current_row + r_offset;
+                    if target_row > Self::MAX_ROWS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "ODS 행 좌표가 허용 범위를 초과했습니다.".to_string(),
+                        ));
+                    }
+                    let mut current_col: u32 = 0;
+                    for (explicit_row, explicit_col, col_repeat, resolved_val) in &parsed_row_cells
+                    {
+                        let next_col = current_col.checked_add(*col_repeat).ok_or_else(|| {
+                            EasyOfficeError::ResourceBudgetExceeded(
+                                "ODS 열 반복 횟수가 허용 범위를 초과했습니다.".to_string(),
+                            )
+                        })?;
+                        if next_col > Self::MAX_COLS + 1 {
+                            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                "ODS 열 인덱스가 허용 범위를 초과했습니다.".to_string(),
+                            ));
+                        }
+                        if let Some(val) = resolved_val {
+                            for c_offset in 0..*col_repeat {
+                                let r = explicit_row.unwrap_or(target_row);
+                                let c = explicit_col
+                                    .map(|ec| ec.saturating_add(c_offset))
+                                    .unwrap_or(current_col + c_offset);
+                                if r > Self::MAX_ROWS || c > Self::MAX_COLS {
+                                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                        "ODS 셀 좌표가 허용 범위를 초과했습니다.".to_string(),
+                                    ));
+                                }
+                                if cells.len() >= Self::MAX_CELLS {
+                                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                                        "ODS 셀 개수가 허용 예산(200,000)을 초과했습니다."
+                                            .to_string(),
+                                    ));
+                                }
+                                cells.push((r, c, val.clone()));
+                            }
+                        }
+                        current_col = next_col;
+                    }
+                }
+            }
+            current_row = next_row;
         }
 
         Ok((sheet_name, cells))
@@ -688,6 +884,20 @@ impl HwpxCodec {
             "<ocf:rootfiles><ocf:rootfile full-path=\"Contents/content.hpf\" media-type=\"application/hwpml-package+xml\"/></ocf:rootfiles>",
             "</ocf:container>"
         );
+        let content_hpf = format!(
+            concat!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+                "<opf:package xmlns:opf=\"http://www.idpf.org/2007/opf/\" version=\"1.0\" unique-identifier=\"bookid\">",
+                "<opf:metadata><opf:title>{}</opf:title><opf:language>ko</opf:language></opf:metadata>",
+                "<opf:manifest>",
+                "<opf:item id=\"header\" href=\"Contents/header.xml\" media-type=\"application/xml\"/>",
+                "<opf:item id=\"section0\" href=\"Contents/section0.xml\" media-type=\"application/xml\"/>",
+                "</opf:manifest>",
+                "<opf:spine><opf:itemref idref=\"header\" linear=\"no\"/><opf:itemref idref=\"section0\" linear=\"yes\"/></opf:spine>",
+                "</opf:package>"
+            ),
+            XmlSanitizer::escape(&payload.title)
+        );
         let agency_attr = payload.official_agency.as_deref().unwrap_or("");
         let approval_joined = payload.approval_lines.join("|");
         let header_xml = format!(
@@ -721,6 +931,7 @@ impl HwpxCodec {
         }
         sec_xml.push_str("</hs:sec>");
 
+        XmlSanitizer::validate_safe_xml(&content_hpf)?;
         XmlSanitizer::validate_safe_xml(&header_xml)?;
         XmlSanitizer::validate_safe_xml(&sec_xml)?;
 
@@ -733,6 +944,7 @@ impl HwpxCodec {
                 "META-INF/container.xml".to_string(),
                 container_xml.as_bytes().to_vec(),
             ),
+            ("Contents/content.hpf".to_string(), content_hpf.into_bytes()),
             ("Contents/header.xml".to_string(), header_xml.into_bytes()),
             ("Contents/section0.xml".to_string(), sec_xml.into_bytes()),
         ])
