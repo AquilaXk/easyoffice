@@ -485,12 +485,12 @@
   function reportIpcFailure(command, msg) {
     const fb = document.getElementById("status-command-feedback");
     if (fb) fb.textContent = "[요청 거부] " + msg;
-    const targetId =
-      command === "convert_document_format"
-        ? "conv-result-box"
-        : command === "audit_security"
-          ? "security-status-text"
-          : null;
+    let targetId = null;
+    if (command === "convert_document_format") {
+      targetId = "conv-result-box";
+    } else if (command === "audit_security") {
+      targetId = "security-status-text";
+    }
     const targetEl = targetId ? document.getElementById(targetId) : null;
     if (targetEl) targetEl.textContent = "[요청 거부] " + msg;
   }

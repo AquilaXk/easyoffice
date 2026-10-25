@@ -518,7 +518,7 @@ public enum PDFBinarySerializer {
     var currentStreamHasInvisibleLayer = false
 
     for line in lines {
-      if line.contains("/Type /Page") && !line.contains("/Type /Pages") {
+      if line.contains("Type /Page") && !line.contains("Type /Pages") {
         sawPageObject = true
       }
       if let rotRange = line.range(of: "/Rotate ") {
