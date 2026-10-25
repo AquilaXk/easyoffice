@@ -328,3 +328,125 @@ fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 }
+
+#[test]
+fn test_xml_control_stripping_zip_duplicate_lfh_mismatch_and_multiline_pdf_hardening() {
+    use easyoffice_formats::{
+        PdfDocumentModel, PdfPageModel, PdfSerializer, UniversalFormatConverter, XmlSanitizer,
+        ZipEntryDescriptor, ZipSecurityGuard,
+    };
+
+    let escaped = XmlSanitizer::escape("A\x00B\x08C\tD\nE\x1FF\u{FFFE}G&H");
+    assert_eq!(escaped, "ABC\tD\nEFG&amp;H");
+    assert_eq!(
+        escaped,
+        XmlSanitizer::escape_scalar_baseline("A\x00B\x08C\tD\nE\x1FF\u{FFFE}G&H")
+    );
+
+    let policy = ZipSecurityPolicy::default();
+    assert!(ZipSecurityGuard::validate_archive_entries(
+        &[
+            ZipEntryDescriptor::new("word/", 0, 0, false),
+            ZipEntryDescriptor::new("word/document.xml", 128, 256, false),
+        ],
+        &policy
+    )
+    .is_ok());
+    assert!(ZipSecurityGuard::validate_archive_entries(
+        &[
+            ZipEntryDescriptor::new("word/document.xml", 128, 256, false),
+            ZipEntryDescriptor::new("word/document.xml", 128, 256, false),
+        ],
+        &policy
+    )
+    .is_err());
+
+    let mut zip_bytes = ZipArchiveCodec::pack_deflate(&[ZipEntry::new(
+        "word/document.xml",
+        b"<w:document/>".to_vec(),
+    )])
+    .unwrap();
+    zip_bytes[30] = b'X';
+    assert!(ZipArchiveCodec::unpack(&zip_bytes, &policy).is_err());
+
+    let pdf_model = PdfDocumentModel {
+        title: "다중행 PDF".to_string(),
+        pages: vec![PdfPageModel {
+            page_number: 1,
+            rotation_degrees: 90,
+            body_text: "첫째 줄\n둘째 줄\n셋째 줄".to_string(),
+            approval_stamp: Some("승인필".to_string()),
+        }],
+        watermark_text: Some("대외비".to_string()),
+    };
+    let pdf_bytes = PdfSerializer::serialize(&pdf_model);
+    let parsed_pdf = PdfSerializer::parse(&pdf_bytes).unwrap();
+    assert_eq!(parsed_pdf, pdf_model);
+
+    let mut forged_pdf = pdf_bytes.clone();
+    forged_pdf.extend_from_slice(b"\n%EasyOfficePDFModelBase64:!!!FORGED_BASE64!!!\n%%EOF\n");
+    assert!(PdfSerializer::parse(&forged_pdf).is_err());
+
+    let xlsx_zip = ZipArchiveCodec::pack_deflate(&[
+        ZipEntry::new(
+            "[Content_Types].xml",
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>"
+                .as_bytes()
+                .to_vec(),
+        ),
+        ZipEntry::new(
+            "xl/workbook.xml",
+            "<workbook><sheets><sheet name=\"예산시트\"/></sheets></workbook>"
+                .as_bytes()
+                .to_vec(),
+        ),
+        ZipEntry::new(
+            "xl/sharedStrings.xml",
+            "<sst><si><r><t>복합 </t></r><r><t>런 텍스트</t></r></si></sst>"
+                .as_bytes()
+                .to_vec(),
+        ),
+        ZipEntry::new(
+            "xl/worksheets/sheet1.xml",
+            "<worksheet><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"inlineStr\"><is><t>인라인</t></is></c></row></sheetData></worksheet>"
+                .as_bytes()
+                .to_vec(),
+        ),
+    ])
+    .unwrap();
+    let (_, unpacked_xlsx) = UniversalFormatConverter::decode(&xlsx_zip, Some("xlsx")).unwrap();
+    assert_eq!(
+        unpacked_xlsx.sheet_cells,
+        vec![
+            (0, 0, "복합 런 텍스트".to_string()),
+            (0, 1, "인라인".to_string()),
+        ]
+    );
+
+    let pptx_zip = ZipArchiveCodec::pack_deflate(&[
+        ZipEntry::new(
+            "[Content_Types].xml",
+            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>"
+                .as_bytes()
+                .to_vec(),
+        ),
+        ZipEntry::new(
+            "ppt/presentation.xml",
+            "<p:presentation name=\"덱\"/>".as_bytes().to_vec(),
+        ),
+        ZipEntry::new(
+            "ppt/slides/slide10.xml",
+            "<p:sld><a:t>슬라이드 10</a:t></p:sld>".as_bytes().to_vec(),
+        ),
+        ZipEntry::new(
+            "ppt/slides/slide2.xml",
+            "<p:sld><a:t>슬라이드 2</a:t></p:sld>".as_bytes().to_vec(),
+        ),
+        ZipEntry::new("ppt/media/image1.png", vec![0x89, b'P', b'N', b'G', 0x00]),
+    ])
+    .unwrap();
+    let (_, unpacked_pptx) = UniversalFormatConverter::decode(&pptx_zip, Some("pptx")).unwrap();
+    assert_eq!(unpacked_pptx.slides.len(), 2);
+    assert_eq!(unpacked_pptx.slides[0].0, "슬라이드 2");
+    assert_eq!(unpacked_pptx.slides[1].0, "슬라이드 10");
+}

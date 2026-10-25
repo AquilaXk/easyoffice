@@ -370,15 +370,15 @@
               <button id="btn-pdf-rotate" class="secondary-btn">↻ 90° 회전</button>
               <label for="pdf-stamp-select">결재 스탬프</label>
               <select id="pdf-stamp-select" class="cmd-input" style="width:140px;margin:0;padding:4px 8px">
-                <option value="APPROVED" selected>승인 완료</option>
-                <option value="CONFIDENTIAL">대외비</option>
-                <option value="DRAFT">초안</option>
-                <option value="FINAL">최종본</option>
+                <option value="승인필" selected>승인 완료</option>
+                <option value="대외비">대외비</option>
+                <option value="초안">초안</option>
+                <option value="최종본">최종본</option>
               </select>
               <input
                 id="pdf-watermark-input"
                 type="text"
-                value="CONFIDENTIAL · EASYOFFICE"
+                value="대외비 · 기획조정실"
                 aria-label="워터마크 문구"
                 style="max-width:200px"
               />
@@ -386,8 +386,8 @@
               <span id="pdf-rotation-badge" class="ctx-badge">회전: 0°</span>
             </div>
             <div class="pdf-page-card" id="pdf-page-card">
-              <div class="pdf-stamp" id="pdf-stamp-badge">APPROVED</div>
-              <div class="pdf-watermark" id="pdf-watermark-layer">CONFIDENTIAL · EASYOFFICE</div>
+              <div class="pdf-stamp" id="pdf-stamp-badge">승인필</div>
+              <div class="pdf-watermark" id="pdf-watermark-layer">대외비 · 기획조정실</div>
               <h3>PDF 스튜디오 문서 검토 및 결재</h3>
               <p>페이지 회전, 결재 스탬프, 워터마크, 양식 필드 및 주석 편집</p>
               <div class="pdf-acroform-grid">
@@ -466,6 +466,7 @@
             <h3>문서 통계 및 진단</h3>
             <p id="smart-stats">문자: 0 · 단어: 0 · 읽기 시간: 1초</p>
             <button id="btn-smart-diagnose" class="secondary-btn">문장 진단 및 요약</button>
+            <p id="smart-summary-output" class="formula-result">요약 대기 중</p>
           </div>
 
           <div class="inspector-section">
@@ -473,13 +474,19 @@
             <button id="btn-scrub-pii" class="secondary-btn">개인정보 스캔/마스킹</button>
             <p id="pii-result-text">감지된 개인정보 없음</p>
           </div>
+
+          <div class="inspector-section">
+            <h3>성능 진단 결과</h3>
+            <p id="bench-result-box">상단 [성능 진단] 버튼을 눌러 측정하세요.</p>
+          </div>
         </aside>
       </main>
 
-      <footer class="statusbar" role="contentinfo">
+      <footer id="status-bar" class="statusbar" role="contentinfo">
         <span id="status-module">모듈: 문서 (DOCX)</span>
         <span id="status-format-spec">포맷: DOCX 문서</span>
         <span id="status-sheet-agg">선택 집계 · 합계 1,300 · 평균 650 · 개수 2 · 최대 1,000</span>
+        <span id="ime-badge">IME: 완료</span>
         <span id="status-command-feedback">준비 완료</span>
       </footer>
     </div>

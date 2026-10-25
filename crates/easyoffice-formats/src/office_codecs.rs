@@ -93,6 +93,7 @@ impl OoxmlCodec {
 
     pub fn unpack_docx(bytes: &[u8]) -> Result<OoxmlDocxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+        validate_zip_xml_entries(&entries)?;
         let doc_entry = entries
             .iter()
             .find(|e| e.path == "word/document.xml")
@@ -156,7 +157,7 @@ impl OoxmlCodec {
             "</Types>"
         );
         let workbook_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook><sheets><sheet name=\"{}\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"{}\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
             XmlSanitizer::escape(&payload.sheet_name)
         );
 
@@ -168,7 +169,11 @@ impl OoxmlCodec {
             }
         }
 
-        let mut sst_xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><sst>");
+        let mut sst_xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{}\" uniqueCount=\"{}\">",
+            shared_strings.len(),
+            shared_strings.len()
+        );
         for s in &shared_strings {
             sst_xml.push_str("<si><t>");
             sst_xml.push_str(&XmlSanitizer::escape(s));
@@ -176,8 +181,9 @@ impl OoxmlCodec {
         }
         sst_xml.push_str("</sst>");
 
-        let mut sheet_xml =
-            String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet><sheetData><row>");
+        let mut sheet_xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row>",
+        );
         for (row, col, raw) in &payload.cells {
             let a1 = format!("{}{}", format_col_letters(*col), row + 1);
             if let Some(formula) = raw.strip_prefix('=') {
@@ -219,6 +225,7 @@ impl OoxmlCodec {
 
     pub fn unpack_xlsx(bytes: &[u8]) -> Result<OoxmlXlsxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+        validate_zip_xml_entries(&entries)?;
         let wb_entry = entries
             .iter()
             .find(|e| e.path == "xl/workbook.xml")
@@ -242,9 +249,12 @@ impl OoxmlCodec {
             })?;
             XmlSanitizer::validate_safe_xml(sst_xml)?;
             for si in extract_tag_bodies(sst_xml, "si") {
-                for t in extract_tag_bodies(si, "t") {
-                    shared_strings.push(XmlSanitizer::unescape(t));
-                }
+                let joined = extract_tag_bodies(si, "t")
+                    .into_iter()
+                    .map(XmlSanitizer::unescape)
+                    .collect::<Vec<_>>()
+                    .join("");
+                shared_strings.push(joined);
             }
         }
 
@@ -278,6 +288,13 @@ impl OoxmlCodec {
             let cell_type = extract_attr_from_fragment(attrs_raw, "t").unwrap_or_default();
             if let Some(f_body) = extract_tag_bodies(inner, "f").first() {
                 cells.push((row, col, format!("={}", XmlSanitizer::unescape(f_body))));
+            } else if cell_type == "inlineStr" {
+                let inline_txt = extract_tag_bodies(inner, "t")
+                    .into_iter()
+                    .map(XmlSanitizer::unescape)
+                    .collect::<Vec<_>>()
+                    .join("");
+                cells.push((row, col, inline_txt));
             } else if let Some(v_body) = extract_tag_bodies(inner, "v").first() {
                 let raw_v = XmlSanitizer::unescape(v_body);
                 if cell_type == "s" {
@@ -303,7 +320,7 @@ impl OoxmlCodec {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Override PartName=\"/ppt/presentation.xml\" ContentType=\"{main_ct}\"/></Types>"
         );
         let pres_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><p:presentation title=\"{}\" slideshow=\"{}\"><p:sldIdLst count=\"{}\"/></p:presentation>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><p:presentation xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" title=\"{}\" slideshow=\"{}\"><p:sldIdLst count=\"{}\"/></p:presentation>",
             XmlSanitizer::escape(&payload.title),
             if payload.is_slideshow { "1" } else { "0" },
             payload.slides.len()
@@ -320,7 +337,7 @@ impl OoxmlCodec {
 
         for (idx, (s_title, bullets, notes)) in payload.slides.iter().enumerate() {
             let mut sld_xml = format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><p:sld title=\"{}\" notes=\"{}\"><p:cSld>",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" title=\"{}\" notes=\"{}\"><p:cSld>",
                 XmlSanitizer::escape(s_title),
                 XmlSanitizer::escape(notes)
             );
@@ -342,6 +359,7 @@ impl OoxmlCodec {
 
     pub fn unpack_pptx(bytes: &[u8]) -> Result<OoxmlPptxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+        validate_zip_xml_entries(&entries)?;
         let pres_entry = entries
             .iter()
             .find(|e| e.path == "ppt/presentation.xml")
@@ -366,7 +384,21 @@ impl OoxmlCodec {
             .iter()
             .filter(|e| e.path.starts_with("ppt/slides/slide") && e.path.ends_with(".xml"))
             .collect();
-        slide_entries.sort_by(|a, b| a.path.cmp(&b.path));
+        slide_entries.sort_by(|a, b| {
+            let num_a = a
+                .path
+                .strip_prefix("ppt/slides/slide")
+                .and_then(|s| s.strip_suffix(".xml"))
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(usize::MAX);
+            let num_b = b
+                .path
+                .strip_prefix("ppt/slides/slide")
+                .and_then(|s| s.strip_suffix(".xml"))
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(usize::MAX);
+            num_a.cmp(&num_b).then_with(|| a.path.cmp(&b.path))
+        });
 
         let mut slides = Vec::new();
         for s_entry in slide_entries {
@@ -374,16 +406,22 @@ impl OoxmlCodec {
                 EasyOfficeError::InvalidUtf8("ppt/slides/slide.xml UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(s_xml)?;
-            let s_title = extract_attr(s_xml, "<p:sld", "title")
-                .map(|s| XmlSanitizer::unescape(&s))
-                .unwrap_or_default();
-            let notes = extract_attr(s_xml, "<p:sld", "notes")
-                .map(|s| XmlSanitizer::unescape(&s))
-                .unwrap_or_default();
-            let bullets = extract_tag_bodies(s_xml, "a:t")
+            let mut bullets: Vec<String> = extract_tag_bodies(s_xml, "a:t")
                 .into_iter()
                 .map(XmlSanitizer::unescape)
                 .collect();
+            let s_title = extract_attr(s_xml, "<p:sld", "title")
+                .map(|s| XmlSanitizer::unescape(&s))
+                .unwrap_or_else(|| {
+                    if !bullets.is_empty() {
+                        bullets.remove(0)
+                    } else {
+                        String::new()
+                    }
+                });
+            let notes = extract_attr(s_xml, "<p:sld", "notes")
+                .map(|s| XmlSanitizer::unescape(&s))
+                .unwrap_or_default();
             slides.push((s_title, bullets, notes));
         }
 
@@ -410,7 +448,7 @@ impl OdfCodec {
     ) -> Result<Vec<u8>, EasyOfficeError> {
         let manifest = Self::build_manifest(Self::MIMETYPE_ODT);
         let mut content = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content title=\"{}\"><office:body><office:text>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" office:version=\"1.2\" title=\"{}\"><office:body><office:text>",
             XmlSanitizer::escape(title)
         );
         for p in paragraphs {
@@ -483,7 +521,7 @@ impl OdfCodec {
     ) -> Result<Vec<u8>, EasyOfficeError> {
         let manifest = Self::build_manifest(Self::MIMETYPE_ODS);
         let mut content = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content><office:body><office:spreadsheet><table:table table:name=\"{}\"><table:table-row>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" office:version=\"1.2\"><office:body><office:spreadsheet><table:table table:name=\"{}\"><table:table-row>",
             XmlSanitizer::escape(sheet_name)
         );
         for (row, col, raw) in cells {
@@ -538,7 +576,7 @@ impl OdfCodec {
     ) -> Result<Vec<u8>, EasyOfficeError> {
         let manifest = Self::build_manifest(Self::MIMETYPE_ODP);
         let mut content = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content title=\"{}\"><office:body><office:presentation>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\" office:version=\"1.2\" title=\"{}\"><office:body><office:presentation>",
             XmlSanitizer::escape(title)
         );
         for (s_title, bullets, notes) in slides {
@@ -599,6 +637,7 @@ impl OdfCodec {
 
     fn extract_content_xml(bytes: &[u8], expected_mime: &str) -> Result<String, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+        validate_zip_xml_entries(&entries)?;
         if let Some(mime_entry) = entries.iter().find(|e| e.path == "mimetype") {
             let actual_mime = std::str::from_utf8(&mime_entry.data).unwrap_or_default();
             if actual_mime.trim() != expected_mime {
@@ -652,7 +691,7 @@ impl HwpxCodec {
         let agency_attr = payload.official_agency.as_deref().unwrap_or("");
         let approval_joined = payload.approval_lines.join("|");
         let header_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><hh:head version=\"1.4\" title=\"{}\" isTemplate=\"{}\" officialAgency=\"{}\" approvalLines=\"{}\"/>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><hh:head xmlns:hh=\"http://www.owpml.org/owpml/2011/head\" version=\"1.4\" title=\"{}\" isTemplate=\"{}\" officialAgency=\"{}\" approvalLines=\"{}\"/>",
             XmlSanitizer::escape(&payload.title),
             if payload.is_template { "1" } else { "0" },
             XmlSanitizer::escape(agency_attr),
@@ -701,6 +740,7 @@ impl HwpxCodec {
 
     pub fn unpack(bytes: &[u8]) -> Result<HwpxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
+        validate_zip_xml_entries(&entries)?;
         let header_entry = entries
             .iter()
             .find(|e| e.path == "Contents/header.xml")
@@ -780,6 +820,22 @@ impl HwpxCodec {
             tables,
         })
     }
+}
+
+fn validate_zip_xml_entries(entries: &[crate::ZipArchiveEntry]) -> Result<(), EasyOfficeError> {
+    for entry in entries {
+        if entry.path.ends_with('/') {
+            continue;
+        }
+        let lower = entry.path.to_ascii_lowercase();
+        if lower.ends_with(".xml") || lower.ends_with(".rels") || lower.ends_with(".hpf") {
+            let xml = std::str::from_utf8(&entry.data).map_err(|_| {
+                EasyOfficeError::InvalidUtf8(format!("ZIP XML 엔트리 UTF-8 오류: {}", entry.path))
+            })?;
+            XmlSanitizer::validate_safe_xml(xml)?;
+        }
+    }
+    Ok(())
 }
 
 pub use crate::rtf_xml_helpers::*;

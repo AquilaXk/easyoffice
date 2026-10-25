@@ -117,7 +117,7 @@ impl Ole2ContainerCodec {
         write_u16_le(&mut container, 32, 0x0006); // mini_sector_shift = 6 (64 bytes)
         write_u32_le(&mut container, 44, fat_sector_count as u32);
         write_u32_le(&mut container, 48, 0); // first directory sector = 0
-        write_u32_le(&mut container, 56, 0x0000_1000); // mini stream cutoff
+        write_u32_le(&mut container, 56, 0); // mini stream cutoff = 0 (all streams in regular sectors)
         write_u32_le(&mut container, 60, Self::END_OF_CHAIN);
         write_u32_le(&mut container, 64, 0);
         write_u32_le(&mut container, 68, Self::END_OF_CHAIN);
@@ -187,8 +187,11 @@ impl Ole2ContainerCodec {
     }
 
     pub fn unpack(bytes: &[u8]) -> Result<Vec<Ole2StreamEntry>, EasyOfficeError> {
+        const MINI_SECTOR_SIZE: usize = 64;
         let fat = Ole2SecurityGuard::validate_header_and_fat(bytes)?;
         let first_dir_sector = read_u32_le(bytes, 48)?;
+        let mini_cutoff = read_u32_le(bytes, 56)? as usize;
+        let first_minifat_sector = read_u32_le(bytes, 60)?;
         let dir_chain = Ole2SecurityGuard::validate_sector_chain(bytes, &fat, first_dir_sector)?;
 
         let mut dir_bytes = Vec::with_capacity(dir_chain.len() * Self::SECTOR_SIZE);
@@ -204,6 +207,55 @@ impl Ole2ContainerCodec {
         for &sec in &dir_chain {
             claimed_sectors.insert(sec);
         }
+
+        let mut mini_stream: Vec<u8> = Vec::new();
+        let mut minifat: Vec<u32> = Vec::new();
+        if entry_count > 0 && dir_bytes[66] == Self::OBJ_TYPE_ROOT {
+            let root_start = read_u32_le(&dir_bytes, 116)?;
+            let root_size = read_u64_le(&dir_bytes, 120)? as usize;
+            if root_size > 0
+                && root_start != Self::END_OF_CHAIN
+                && root_start != Self::FREE_SECTOR
+                && first_minifat_sector != Self::END_OF_CHAIN
+                && first_minifat_sector != Self::FREE_SECTOR
+            {
+                if root_size > bytes.len() {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "OLE2 Root Entry MiniStream 크기가 컨테이너를 초과합니다.".to_string(),
+                    ));
+                }
+                let root_chain = Ole2SecurityGuard::validate_sector_chain(bytes, &fat, root_start)?;
+                mini_stream.reserve(root_chain.len() * Self::SECTOR_SIZE);
+                for sec in root_chain {
+                    if !claimed_sectors.insert(sec) {
+                        return Err(EasyOfficeError::SecurityViolation(
+                            "OLE2 Root MiniStream 섹터 중복 참조가 감지되었습니다.".to_string(),
+                        ));
+                    }
+                    let offset = (1 + sec as usize) * Self::SECTOR_SIZE;
+                    mini_stream.extend_from_slice(&bytes[offset..offset + Self::SECTOR_SIZE]);
+                }
+                if mini_stream.len() < root_size {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "OLE2 Root Entry MiniStream 섹터 체인 길이가 부족합니다.".to_string(),
+                    ));
+                }
+                mini_stream.truncate(root_size);
+
+                let mf_chain =
+                    Ole2SecurityGuard::validate_sector_chain(bytes, &fat, first_minifat_sector)?;
+                minifat.reserve(mf_chain.len() * Self::FAT_ENTRIES_PER_SECTOR);
+                for sec in mf_chain {
+                    let offset = (1 + sec as usize) * Self::SECTOR_SIZE;
+                    for entry_idx in 0..Self::FAT_ENTRIES_PER_SECTOR {
+                        minifat.push(read_u32_le(bytes, offset + entry_idx * 4)?);
+                    }
+                }
+            }
+        }
+
+        let total_mini_sectors = mini_stream.len().div_ceil(MINI_SECTOR_SIZE);
+        let mut claimed_mini_sectors = SectorBitset::with_capacity(total_mini_sectors);
 
         for idx in 0..entry_count {
             let base = idx * Self::DIR_ENTRY_SIZE;
@@ -229,6 +281,35 @@ impl Ole2ContainerCodec {
 
             if stream_size == 0 {
                 streams.push(Ole2StreamEntry::new(name, Vec::new()));
+            } else if stream_size < mini_cutoff && !mini_stream.is_empty() && !minifat.is_empty() {
+                let mut payload =
+                    Vec::with_capacity(stream_size.div_ceil(MINI_SECTOR_SIZE) * MINI_SECTOR_SIZE);
+                let mut cur = start_sector;
+                let mut visited = SectorBitset::with_capacity(total_mini_sectors);
+                while cur != Self::END_OF_CHAIN {
+                    let m_idx = cur as usize;
+                    if m_idx >= total_mini_sectors || m_idx >= minifat.len() {
+                        return Err(EasyOfficeError::CorruptedContainer(format!(
+                            "OLE2 MiniFAT 체인이 유효하지 않은 미니섹터({cur})를 참조합니다."
+                        )));
+                    }
+                    if !visited.insert(cur) || !claimed_mini_sectors.insert(cur) {
+                        return Err(EasyOfficeError::SecurityViolation(
+                            "OLE2 MiniFAT 섹터 순환 또는 공유가 감지되었습니다.".to_string(),
+                        ));
+                    }
+                    let offset = m_idx * MINI_SECTOR_SIZE;
+                    let end = (offset + MINI_SECTOR_SIZE).min(mini_stream.len());
+                    payload.extend_from_slice(&mini_stream[offset..end]);
+                    cur = minifat[m_idx];
+                }
+                if payload.len() < stream_size {
+                    return Err(EasyOfficeError::CorruptedContainer(format!(
+                        "OLE2 미니스트림('{name}') 체인 길이가 부족합니다."
+                    )));
+                }
+                payload.truncate(stream_size);
+                streams.push(Ole2StreamEntry::new(name, payload));
             } else {
                 let chain = Ole2SecurityGuard::validate_sector_chain(bytes, &fat, start_sector)?;
                 let mut payload = Vec::with_capacity(chain.len() * Self::SECTOR_SIZE);
@@ -319,6 +400,7 @@ impl Hwp5Codec {
     pub const HWPTAG_TABLE: u16 = 77;
     pub const HWPTAG_TABLE_RECORD: u16 = 77;
     pub const HWT_TEMPLATE_MARKER: &'static [u8; 12] = b"HWT_TEMPLATE";
+    pub const MAX_HWP5_RECORDS: usize = 65_536;
 
     pub fn encode_record_header(tag_id: u16, level: u16, size: usize) -> Vec<u8> {
         let tag_bits = (tag_id as u32) & 0x03FF;
@@ -463,6 +545,7 @@ impl Hwp5Codec {
         let is_template =
             file_header.data.len() >= 52 && &file_header.data[40..52] == Self::HWT_TEMPLATE_MARKER;
 
+        let mut total_records = 0usize;
         let mut agency_name = String::new();
         let mut document_number = String::new();
         if let Some(doc_info) = streams.iter().find(|s| s.name == "DocInfo") {
@@ -478,6 +561,12 @@ impl Hwp5Codec {
 
                 let mut offset = 0usize;
                 while offset < doc_info_bytes.len() {
+                    total_records += 1;
+                    if total_records > Self::MAX_HWP5_RECORDS {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(
+                            "HWP 5.0 레코드 개수가 보안 상한(65536)을 초과했습니다.".to_string(),
+                        ));
+                    }
                     let (tag_id, _level, size, hdr_len) =
                         Self::decode_record_header(&doc_info_bytes, offset)?;
                     let start = offset + hdr_len;
@@ -507,7 +596,7 @@ impl Hwp5Codec {
 
         let section0 = streams
             .iter()
-            .find(|s| s.name == "BodyText/Section0")
+            .find(|s| s.name == "BodyText/Section0" || s.name == "Section0")
             .ok_or_else(|| {
                 EasyOfficeError::CorruptedContainer(
                     "HWP 5.0 필수 스트림 'BodyText/Section0'가 누락되었습니다.".to_string(),
@@ -529,6 +618,12 @@ impl Hwp5Codec {
         let mut offset = 0usize;
 
         while offset < section0_bytes.len() {
+            total_records += 1;
+            if total_records > Self::MAX_HWP5_RECORDS {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "HWP 5.0 레코드 개수가 보안 상한(65536)을 초과했습니다.".to_string(),
+                ));
+            }
             let (tag_id, _level, size, hdr_len) =
                 Self::decode_record_header(&section0_bytes, offset)?;
             let start = offset + hdr_len;
@@ -753,7 +848,13 @@ impl Ole2SecurityGuard {
             )));
         }
         let fat_sector_count = read_u32_le(container_bytes, 44)? as usize;
-        if fat_sector_count == 0 || fat_sector_count > Self::MAX_FAT_SECTORS {
+        let first_difat_sector = read_u32_le(container_bytes, 68)?;
+        let num_difat_sectors = read_u32_le(container_bytes, 72)? as usize;
+        let max_allowed_fat_sectors = Self::MAX_FAT_SECTORS + num_difat_sectors.min(64) * 127;
+        if fat_sector_count == 0
+            || fat_sector_count > max_allowed_fat_sectors
+            || (fat_sector_count > Self::MAX_FAT_SECTORS && num_difat_sectors == 0)
+        {
             return Err(EasyOfficeError::SecurityViolation(format!(
                 "OLE2 DIFAT 섹터 개수({fat_sector_count})가 허용 범위(1..={})를 벗어났습니다.",
                 Self::MAX_FAT_SECTORS
@@ -761,14 +862,55 @@ impl Ole2SecurityGuard {
         }
 
         let total_sectors = (container_bytes.len() / Self::SECTOR_SIZE) - 1;
-        let mut fat = Vec::with_capacity(fat_sector_count * 128);
-        for slot in 0..fat_sector_count {
+        let mut fat_sector_indices = Vec::with_capacity(fat_sector_count);
+        for slot in 0..fat_sector_count.min(Self::MAX_FAT_SECTORS) {
             let fat_sec_idx = read_u32_le(container_bytes, 76 + slot * 4)? as usize;
             if fat_sec_idx >= total_sectors {
                 return Err(EasyOfficeError::CorruptedContainer(
                     "OLE2 FAT 섹터 인덱스가 파일 범위를 벗어났습니다.".to_string(),
                 ));
             }
+            fat_sector_indices.push(fat_sec_idx);
+        }
+
+        let mut difat_sec = first_difat_sector;
+        let mut difat_visited = SectorBitset::with_capacity(total_sectors);
+        let mut difat_steps = 0usize;
+        while fat_sector_indices.len() < fat_sector_count
+            && difat_sec != Self::END_OF_CHAIN
+            && difat_sec != Self::FREE_SECTOR
+        {
+            if difat_steps >= num_difat_sectors.min(64) {
+                break;
+            }
+            let d_idx = difat_sec as usize;
+            if d_idx >= total_sectors || !difat_visited.insert(difat_sec) {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "OLE2 DIFAT 체인이 유효하지 않거나 순환합니다.".to_string(),
+                ));
+            }
+            let d_offset = (1 + d_idx) * Self::SECTOR_SIZE;
+            for slot in 0..127 {
+                if fat_sector_indices.len() >= fat_sector_count {
+                    break;
+                }
+                let fat_sec = read_u32_le(container_bytes, d_offset + slot * 4)?;
+                if fat_sec == Self::FREE_SECTOR || fat_sec == Self::END_OF_CHAIN {
+                    continue;
+                }
+                if (fat_sec as usize) >= total_sectors {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "OLE2 DIFAT 내 FAT 섹터 인덱스가 범위를 벗어났습니다.".to_string(),
+                    ));
+                }
+                fat_sector_indices.push(fat_sec as usize);
+            }
+            difat_sec = read_u32_le(container_bytes, d_offset + 127 * 4)?;
+            difat_steps += 1;
+        }
+
+        let mut fat = Vec::with_capacity(fat_sector_indices.len() * 128);
+        for fat_sec_idx in fat_sector_indices {
             let sec_offset = (1 + fat_sec_idx) * Self::SECTOR_SIZE;
             for entry_idx in 0..128 {
                 let val = read_u32_le(container_bytes, sec_offset + entry_idx * 4)?;
@@ -801,7 +943,9 @@ impl Ole2SecurityGuard {
         }
 
         let fat_sector_count = read_u32_le(container_bytes, 44)? as usize;
-        if fat_sector_count == 0 || fat_sector_count > Self::MAX_FAT_SECTORS {
+        let num_difat_sectors = read_u32_le(container_bytes, 72)? as usize;
+        let max_allowed = Self::MAX_FAT_SECTORS + num_difat_sectors.min(64) * 127;
+        if fat_sector_count == 0 || fat_sector_count > max_allowed {
             return Err(EasyOfficeError::SecurityViolation(format!(
                 "OLE2 DIFAT 섹터 개수({fat_sector_count})가 허용 범위(1..={})를 벗어났습니다.",
                 Self::MAX_FAT_SECTORS

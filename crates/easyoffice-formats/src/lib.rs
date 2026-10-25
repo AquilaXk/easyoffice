@@ -550,7 +550,13 @@ impl ZipSecurityGuard {
                 "Windows 드라이브 문자가 포함된 ZIP 경로: {path}"
             )));
         }
-        for segment in path.split('/') {
+        let trimmed = path.strip_suffix('/').unwrap_or(path);
+        if trimmed.is_empty() {
+            return Err(EasyOfficeError::SecurityViolation(format!(
+                "유효하지 않은 ZIP 루트 디렉터리 경로: {path}"
+            )));
+        }
+        for segment in trimmed.split('/') {
             if segment.is_empty() || segment == "." || segment == ".." || segment.contains(':') {
                 return Err(EasyOfficeError::SecurityViolation(format!(
                     "상위 디렉터리 순회(..) 또는 비정상 세그먼트가 포함된 ZIP 경로: {path}"
@@ -580,8 +586,23 @@ impl ZipSecurityGuard {
         }
 
         let mut total_uncompressed: u64 = 0;
+        let mut seen_paths = std::collections::HashSet::with_capacity(entries.len());
         for entry in entries {
             Self::validate_entry_path(&entry.path)?;
+            if !seen_paths.insert(entry.path.as_str()) {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "중복된 ZIP 엔트리 경로가 감지되었습니다: {}",
+                    entry.path
+                )));
+            }
+            if entry.path.ends_with('/')
+                && (entry.compressed_size > 0 || entry.uncompressed_size > 0)
+            {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "ZIP 디렉터리 엔트리({})는 데이터를 포함할 수 없습니다.",
+                    entry.path
+                )));
+            }
 
             if entry.is_encrypted {
                 return Err(EasyOfficeError::EncryptedDocumentUnsupported(
@@ -681,6 +702,11 @@ impl XmlSanitizer {
     }
 
     #[inline]
+    fn is_forbidden_xml_ctrl_byte(b: u8) -> bool {
+        b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r'
+    }
+
+    #[inline]
     fn xml_escape_mask(word: u64) -> u64 {
         const LO: u64 = 0x0101_0101_0101_0101;
         const HI: u64 = 0x8080_8080_8080_8080;
@@ -689,12 +715,25 @@ impl XmlSanitizer {
         let d_gt = word ^ (0x3Eu64 * LO);
         let d_quot = word ^ (0x22u64 * LO);
         let d_apos = word ^ (0x27u64 * LO);
+        let d_ef = word ^ (0xEFu64 * LO);
         let m_amp = d_amp.wrapping_sub(LO) & !d_amp;
         let m_lt = d_lt.wrapping_sub(LO) & !d_lt;
         let m_gt = d_gt.wrapping_sub(LO) & !d_gt;
         let m_quot = d_quot.wrapping_sub(LO) & !d_quot;
         let m_apos = d_apos.wrapping_sub(LO) & !d_apos;
-        (m_amp | m_lt | m_gt | m_quot | m_apos) & HI
+        let m_ef = d_ef.wrapping_sub(LO) & !d_ef;
+        let mut m_ctrl = !(word | (word << 1) | (word << 2)) & HI;
+        if m_ctrl != 0 {
+            let d_tab = word ^ (0x09u64 * LO);
+            let d_lf = word ^ (0x0Au64 * LO);
+            let d_cr = word ^ (0x0Du64 * LO);
+            let m_ws = ((d_tab.wrapping_sub(LO) & !d_tab)
+                | (d_lf.wrapping_sub(LO) & !d_lf)
+                | (d_cr.wrapping_sub(LO) & !d_cr))
+                & HI;
+            m_ctrl &= !m_ws;
+        }
+        ((m_amp | m_lt | m_gt | m_quot | m_apos | m_ef) & HI) | m_ctrl
     }
 
     pub fn validate_safe_xml(xml: &str) -> Result<(), EasyOfficeError> {
@@ -761,39 +800,84 @@ impl XmlSanitizer {
                 idx += 8;
             } else {
                 let hit = idx + ((mask.trailing_zeros() >> 3) as usize);
-                if hit > last {
-                    out.push_str(&text[last..hit]);
-                }
                 match bytes[hit] {
-                    b'&' => out.push_str("&amp;"),
-                    b'<' => out.push_str("&lt;"),
-                    b'>' => out.push_str("&gt;"),
-                    b'"' => out.push_str("&quot;"),
-                    b'\'' => out.push_str("&apos;"),
-                    _ => unreachable!(),
+                    b'&' | b'<' | b'>' | b'"' | b'\'' => {
+                        if hit > last {
+                            out.push_str(&text[last..hit]);
+                        }
+                        match bytes[hit] {
+                            b'&' => out.push_str("&amp;"),
+                            b'<' => out.push_str("&lt;"),
+                            b'>' => out.push_str("&gt;"),
+                            b'"' => out.push_str("&quot;"),
+                            b'\'' => out.push_str("&apos;"),
+                            _ => unreachable!(),
+                        }
+                        idx = hit + 1;
+                        last = idx;
+                    }
+                    b if Self::is_forbidden_xml_ctrl_byte(b) => {
+                        if hit > last {
+                            out.push_str(&text[last..hit]);
+                        }
+                        idx = hit + 1;
+                        last = idx;
+                    }
+                    0xEF if hit + 3 <= bytes.len()
+                        && bytes[hit + 1] == 0xBF
+                        && (bytes[hit + 2] == 0xBE || bytes[hit + 2] == 0xBF) =>
+                    {
+                        if hit > last {
+                            out.push_str(&text[last..hit]);
+                        }
+                        idx = hit + 3;
+                        last = idx;
+                    }
+                    _ => {
+                        idx = hit + 1;
+                    }
                 }
-                idx = hit + 1;
-                last = idx;
             }
         }
 
         while idx < bytes.len() {
-            let rep = match bytes[idx] {
-                b'&' => Some("&amp;"),
-                b'<' => Some("&lt;"),
-                b'>' => Some("&gt;"),
-                b'"' => Some("&quot;"),
-                b'\'' => Some("&apos;"),
-                _ => None,
-            };
-            if let Some(entity) = rep {
-                if idx > last {
-                    out.push_str(&text[last..idx]);
+            match bytes[idx] {
+                b'&' | b'<' | b'>' | b'"' | b'\'' => {
+                    if idx > last {
+                        out.push_str(&text[last..idx]);
+                    }
+                    match bytes[idx] {
+                        b'&' => out.push_str("&amp;"),
+                        b'<' => out.push_str("&lt;"),
+                        b'>' => out.push_str("&gt;"),
+                        b'"' => out.push_str("&quot;"),
+                        b'\'' => out.push_str("&apos;"),
+                        _ => unreachable!(),
+                    }
+                    idx += 1;
+                    last = idx;
                 }
-                out.push_str(entity);
-                last = idx + 1;
+                b if Self::is_forbidden_xml_ctrl_byte(b) => {
+                    if idx > last {
+                        out.push_str(&text[last..idx]);
+                    }
+                    idx += 1;
+                    last = idx;
+                }
+                0xEF if idx + 3 <= bytes.len()
+                    && bytes[idx + 1] == 0xBF
+                    && (bytes[idx + 2] == 0xBE || bytes[idx + 2] == 0xBF) =>
+                {
+                    if idx > last {
+                        out.push_str(&text[last..idx]);
+                    }
+                    idx += 3;
+                    last = idx;
+                }
+                _ => {
+                    idx += 1;
+                }
             }
-            idx += 1;
         }
 
         if last < bytes.len() {
@@ -811,6 +895,7 @@ impl XmlSanitizer {
                 '>' => out.push_str("&gt;"),
                 '"' => out.push_str("&quot;"),
                 '\'' => out.push_str("&apos;"),
+                '\x00'..='\x08' | '\x0B'..='\x0C' | '\x0E'..='\x1F' | '\u{FFFE}' | '\u{FFFF}' => {}
                 _ => out.push(ch),
             }
         }

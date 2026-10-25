@@ -134,14 +134,15 @@ impl LocalSmartAssistant {
     pub fn diff_documents_lcs(before: &[String], after: &[String]) -> Vec<DocumentDiffLine> {
         let m = before.len();
         let n = after.len();
-        let mut dp = vec![vec![0usize; n + 1]; m + 1];
+        let stride = n + 1;
+        let mut dp = vec![0usize; (m + 1) * stride];
 
         for i in (0..m).rev() {
             for j in (0..n).rev() {
                 if before[i] == after[j] {
-                    dp[i][j] = 1 + dp[i + 1][j + 1];
+                    dp[i * stride + j] = 1 + dp[(i + 1) * stride + (j + 1)];
                 } else {
-                    dp[i][j] = dp[i + 1][j].max(dp[i][j + 1]);
+                    dp[i * stride + j] = dp[(i + 1) * stride + j].max(dp[i * stride + (j + 1)]);
                 }
             }
         }
@@ -157,7 +158,7 @@ impl LocalSmartAssistant {
                 });
                 i += 1;
                 j += 1;
-            } else if dp[i + 1][j] >= dp[i][j + 1] {
+            } else if dp[(i + 1) * stride + j] >= dp[i * stride + (j + 1)] {
                 out.push(DocumentDiffLine {
                     kind: DiffLineKind::Removed,
                     text: before[i].clone(),
@@ -186,6 +187,10 @@ impl LocalSmartAssistant {
             j += 1;
         }
         out
+    }
+
+    pub fn scrub_pii(text: &str) -> PiiAuditResult {
+        DocumentSecurityAuditor::scan_and_scrub_pii(text)
     }
 }
 
@@ -227,6 +232,17 @@ impl DocumentSecurityAuditor {
         }
     }
 
+    fn is_valid_rrn_date_and_gender(front6: &[u8], gender_digit: u8) -> bool {
+        if front6.len() != 6 || !front6.iter().all(u8::is_ascii_digit) {
+            return false;
+        }
+        let month = (front6[2] - b'0') * 10 + (front6[3] - b'0');
+        let day = (front6[4] - b'0') * 10 + (front6[5] - b'0');
+        (1..=12).contains(&month)
+            && (1..=31).contains(&day)
+            && (b'1'..=b'8').contains(&gender_digit)
+    }
+
     fn mask_resident_ids(input: &str) -> (String, usize) {
         let bytes = input.as_bytes();
         let mut out = String::with_capacity(input.len());
@@ -234,16 +250,26 @@ impl DocumentSecurityAuditor {
         let mut idx = 0usize;
 
         while idx < bytes.len() {
-            if idx + 14 <= bytes.len()
+            let left_ok = idx == 0 || !bytes[idx - 1].is_ascii_digit();
+            if left_ok
+                && idx + 14 <= bytes.len()
                 && bytes[idx..idx + 6].iter().all(u8::is_ascii_digit)
                 && bytes[idx + 6] == b'-'
                 && bytes[idx + 7..idx + 14].iter().all(u8::is_ascii_digit)
-                && (idx == 0 || !bytes[idx - 1].is_ascii_digit())
                 && (idx + 14 == bytes.len() || !bytes[idx + 14].is_ascii_digit())
             {
                 out.push_str("******-*******");
                 count += 1;
                 idx += 14;
+            } else if left_ok
+                && idx + 13 <= bytes.len()
+                && bytes[idx..idx + 13].iter().all(u8::is_ascii_digit)
+                && Self::is_valid_rrn_date_and_gender(&bytes[idx..idx + 6], bytes[idx + 6])
+                && (idx + 13 == bytes.len() || !bytes[idx + 13].is_ascii_digit())
+            {
+                out.push_str("******-*******");
+                count += 1;
+                idx += 13;
             } else {
                 let ch = input[idx..].chars().next().unwrap();
                 out.push(ch);
@@ -253,6 +279,106 @@ impl DocumentSecurityAuditor {
         (out, count)
     }
 
+    fn consume_digits(bytes: &[u8], pos: usize, min_len: usize, max_len: usize) -> Option<usize> {
+        let mut end = pos;
+        while end < bytes.len() && end - pos < max_len && bytes[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end - pos >= min_len {
+            Some(end)
+        } else {
+            None
+        }
+    }
+
+    fn match_phone_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+        if idx > 0 && (bytes[idx - 1].is_ascii_digit() || bytes[idx - 1] == b'+') {
+            return None;
+        }
+        if idx + 3 <= bytes.len() && &bytes[idx..idx + 3] == b"+82" {
+            let mut p = idx + 3;
+            if p < bytes.len() && (bytes[p] == b'-' || bytes[p] == b' ') {
+                p += 1;
+            }
+            let p_area = Self::consume_digits(bytes, p, 1, 3)?;
+            let mut p2 = p_area;
+            if p2 < bytes.len() && (bytes[p2] == b'-' || bytes[p2] == b' ') {
+                p2 += 1;
+            }
+            let p_mid = Self::consume_digits(bytes, p2, 3, 4)?;
+            let mut p3 = p_mid;
+            if p3 < bytes.len() && (bytes[p3] == b'-' || bytes[p3] == b' ') {
+                p3 += 1;
+            }
+            let p_end = Self::consume_digits(bytes, p3, 4, 4)?;
+            if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
+                return Some((p_end - idx, "+82-**-****-****"));
+            }
+        }
+
+        if idx + 3 <= bytes.len()
+            && bytes[idx] == b'0'
+            && bytes[idx + 1] == b'1'
+            && matches!(bytes[idx + 2], b'0' | b'1' | b'6' | b'7' | b'8' | b'9')
+        {
+            let p = idx + 3;
+            if p < bytes.len() && (bytes[p] == b'-' || bytes[p] == b' ') {
+                let sep = bytes[p];
+                if let Some(p_mid) = Self::consume_digits(bytes, p + 1, 3, 4) {
+                    if p_mid < bytes.len() && bytes[p_mid] == sep {
+                        if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
+                            if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
+                                return Some((p_end - idx, "010-****-****"));
+                            }
+                        }
+                    }
+                }
+            } else if idx + 11 <= bytes.len()
+                && bytes[idx..idx + 11].iter().all(u8::is_ascii_digit)
+                && (idx + 11 == bytes.len() || !bytes[idx + 11].is_ascii_digit())
+            {
+                return Some((11, "010-****-****"));
+            }
+        }
+
+        if idx + 3 <= bytes.len()
+            && bytes[idx] == b'0'
+            && bytes[idx + 1] == b'2'
+            && (bytes[idx + 2] == b'-' || bytes[idx + 2] == b' ')
+        {
+            let sep = bytes[idx + 2];
+            if let Some(p_mid) = Self::consume_digits(bytes, idx + 3, 3, 4) {
+                if p_mid < bytes.len() && bytes[p_mid] == sep {
+                    if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
+                        if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
+                            return Some((p_end - idx, "02-****-****"));
+                        }
+                    }
+                }
+            }
+        }
+
+        if idx + 4 <= bytes.len()
+            && bytes[idx] == b'0'
+            && (b'3'..=b'6').contains(&bytes[idx + 1])
+            && (b'1'..=b'5').contains(&bytes[idx + 2])
+            && (bytes[idx + 3] == b'-' || bytes[idx + 3] == b' ')
+        {
+            let sep = bytes[idx + 3];
+            if let Some(p_mid) = Self::consume_digits(bytes, idx + 4, 3, 4) {
+                if p_mid < bytes.len() && bytes[p_mid] == sep {
+                    if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
+                        if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
+                            return Some((p_end - idx, "***-****-****"));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     fn mask_phone_numbers(input: &str) -> (String, usize) {
         let bytes = input.as_bytes();
         let mut out = String::with_capacity(input.len());
@@ -260,17 +386,10 @@ impl DocumentSecurityAuditor {
         let mut idx = 0usize;
 
         while idx < bytes.len() {
-            if idx + 13 <= bytes.len()
-                && &bytes[idx..idx + 4] == b"010-"
-                && bytes[idx + 4..idx + 8].iter().all(u8::is_ascii_digit)
-                && bytes[idx + 8] == b'-'
-                && bytes[idx + 9..idx + 13].iter().all(u8::is_ascii_digit)
-                && (idx == 0 || !bytes[idx - 1].is_ascii_digit())
-                && (idx + 13 == bytes.len() || !bytes[idx + 13].is_ascii_digit())
-            {
-                out.push_str("010-****-****");
+            if let Some((matched_len, replacement)) = Self::match_phone_at(bytes, idx) {
+                out.push_str(replacement);
                 count += 1;
-                idx += 13;
+                idx += matched_len;
             } else {
                 let ch = input[idx..].chars().next().unwrap();
                 out.push(ch);
@@ -346,16 +465,24 @@ mod tests {
             .iter()
             .any(|d| d.kind == DiffLineKind::Added && d.text == "2장 신규 아키텍처"));
 
-        let raw_pii = "담당자 주민번호 900101-1234567, 연락처 010-1234-5678, 이메일 security@easyoffice.local 입니다.";
+        let raw_pii = "담당자 주민번호 900101-1234567 및 9203152345678, 연락처 010-1234-5678, 010 9876 5432, +82-10-1111-2222, 02-123-4567, 031-765-4321, 이메일 security@easyoffice.local 입니다.";
         let audit = DocumentSecurityAuditor::scan_and_scrub_pii(raw_pii);
-        assert_eq!(audit.masked_resident_ids, 1);
-        assert_eq!(audit.masked_phone_numbers, 1);
+        assert_eq!(audit.masked_resident_ids, 2);
+        assert_eq!(audit.masked_phone_numbers, 5);
         assert_eq!(audit.masked_emails, 1);
         assert!(audit.scrubbed_text.contains("******-*******"));
         assert!(audit.scrubbed_text.contains("010-****-****"));
+        assert!(audit.scrubbed_text.contains("+82-**-****-****"));
+        assert!(audit.scrubbed_text.contains("02-****-****"));
+        assert!(audit.scrubbed_text.contains("***-****-****"));
         assert!(audit.scrubbed_text.contains("***@***"));
         assert!(!audit.scrubbed_text.contains("900101-1234567"));
+        assert!(!audit.scrubbed_text.contains("9203152345678"));
         assert!(!audit.scrubbed_text.contains("010-1234-5678"));
+        assert!(!audit.scrubbed_text.contains("010 9876 5432"));
+        assert!(!audit.scrubbed_text.contains("+82-10-1111-2222"));
+        assert!(!audit.scrubbed_text.contains("02-123-4567"));
+        assert!(!audit.scrubbed_text.contains("031-765-4321"));
         assert!(!audit.scrubbed_text.contains("security@easyoffice.local"));
     }
 }

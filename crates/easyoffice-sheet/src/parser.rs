@@ -72,12 +72,22 @@ pub enum BinaryOp {
     Ge,
 }
 
+pub const MAX_FORMULA_LEN: usize = 8_192;
+pub const MAX_TOKENS: usize = 2_048;
+pub const MAX_PARSE_DEPTH: usize = 64;
+
 pub(crate) fn tokenize_formula(src: &str) -> Result<Vec<Token>, FormulaError> {
+    if src.len() > MAX_FORMULA_LEN {
+        return Err(FormulaError::Value);
+    }
     let bytes = src.as_bytes();
-    let mut tokens = Vec::with_capacity((bytes.len() / 2).max(4));
+    let mut tokens = Vec::with_capacity((bytes.len() / 2).clamp(4, MAX_TOKENS));
     let mut i = 0usize;
 
     while i < bytes.len() {
+        if tokens.len() >= MAX_TOKENS {
+            return Err(FormulaError::Value);
+        }
         let b = bytes[i];
         if b.is_ascii_whitespace() {
             i += 1;
@@ -312,12 +322,15 @@ impl Parser {
         }
     }
 
-    pub(crate) fn parse_expression(&mut self) -> Result<Expr, FormulaError> {
-        self.parse_comparison()
+    pub(crate) fn parse_expression(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        if depth > MAX_PARSE_DEPTH {
+            return Err(FormulaError::Value);
+        }
+        self.parse_comparison(depth)
     }
 
-    fn parse_comparison(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_concat()?;
+    fn parse_comparison(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        let mut lhs = self.parse_concat(depth)?;
         while let Some(tok) = self.peek() {
             let op = match tok {
                 Token::Eq => BinaryOp::Eq,
@@ -329,7 +342,7 @@ impl Parser {
                 _ => break,
             };
             self.next();
-            let rhs = self.parse_concat()?;
+            let rhs = self.parse_concat(depth)?;
             lhs = Expr::Binary {
                 op,
                 lhs: Box::new(lhs),
@@ -339,11 +352,11 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_concat(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_additive()?;
+    fn parse_concat(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        let mut lhs = self.parse_additive(depth)?;
         while matches!(self.peek(), Some(Token::Ampersand)) {
             self.next();
-            let rhs = self.parse_additive()?;
+            let rhs = self.parse_additive(depth)?;
             lhs = Expr::Binary {
                 op: BinaryOp::Concat,
                 lhs: Box::new(lhs),
@@ -353,8 +366,8 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_additive(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_multiplicative()?;
+    fn parse_additive(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        let mut lhs = self.parse_multiplicative(depth)?;
         while let Some(tok) = self.peek() {
             let op = match tok {
                 Token::Plus => BinaryOp::Add,
@@ -362,7 +375,7 @@ impl Parser {
                 _ => break,
             };
             self.next();
-            let rhs = self.parse_multiplicative()?;
+            let rhs = self.parse_multiplicative(depth)?;
             lhs = Expr::Binary {
                 op,
                 lhs: Box::new(lhs),
@@ -372,8 +385,8 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_multiplicative(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_power()?;
+    fn parse_multiplicative(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        let mut lhs = self.parse_power(depth)?;
         while let Some(tok) = self.peek() {
             let op = match tok {
                 Token::Star => BinaryOp::Mul,
@@ -381,7 +394,7 @@ impl Parser {
                 _ => break,
             };
             self.next();
-            let rhs = self.parse_power()?;
+            let rhs = self.parse_power(depth)?;
             lhs = Expr::Binary {
                 op,
                 lhs: Box::new(lhs),
@@ -391,11 +404,11 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_power(&mut self) -> Result<Expr, FormulaError> {
-        let mut lhs = self.parse_unary()?;
+    fn parse_power(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        let mut lhs = self.parse_unary(depth)?;
         while matches!(self.peek(), Some(Token::Caret)) {
             self.next();
-            let rhs = self.parse_unary()?;
+            let rhs = self.parse_unary(depth)?;
             lhs = Expr::Binary {
                 op: BinaryOp::Pow,
                 lhs: Box::new(lhs),
@@ -405,34 +418,45 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, FormulaError> {
+    fn parse_unary(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        if depth > MAX_PARSE_DEPTH {
+            return Err(FormulaError::Value);
+        }
         if matches!(self.peek(), Some(Token::Plus)) {
             self.next();
-            return Ok(Expr::UnaryPlus(Box::new(self.parse_unary()?)));
+            return Ok(Expr::UnaryPlus(Box::new(self.parse_unary(depth + 1)?)));
         }
         if matches!(self.peek(), Some(Token::Minus)) {
             self.next();
-            return Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)));
+            return Ok(Expr::UnaryMinus(Box::new(self.parse_unary(depth + 1)?)));
         }
-        self.parse_postfix()
+        self.parse_postfix(depth)
     }
 
-    fn parse_postfix(&mut self) -> Result<Expr, FormulaError> {
-        let mut expr = self.parse_primary()?;
+    fn parse_postfix(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        let mut expr = self.parse_primary(depth)?;
+        let mut pct_depth = depth;
         while matches!(self.peek(), Some(Token::Percent)) {
+            pct_depth += 1;
+            if pct_depth > MAX_PARSE_DEPTH {
+                return Err(FormulaError::Value);
+            }
             self.next();
             expr = Expr::PostfixPercent(Box::new(expr));
         }
         Ok(expr)
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, FormulaError> {
+    fn parse_primary(&mut self, depth: usize) -> Result<Expr, FormulaError> {
+        if depth > MAX_PARSE_DEPTH {
+            return Err(FormulaError::Value);
+        }
         match self.next() {
             Some(Token::Number(n)) => Ok(Expr::Number(n)),
             Some(Token::Text(s)) => Ok(Expr::Text(s)),
             Some(Token::ErrorLiteral(e)) => Ok(Expr::ErrorLiteral(e)),
             Some(Token::LParen) => {
-                let inner = self.parse_expression()?;
+                let inner = self.parse_expression(depth + 1)?;
                 if !matches!(self.next(), Some(Token::RParen)) {
                     return Err(FormulaError::Value);
                 }
@@ -479,7 +503,7 @@ impl Parser {
                     let mut args = Vec::new();
                     if !matches!(self.peek(), Some(Token::RParen)) {
                         loop {
-                            args.push(self.parse_expression()?);
+                            args.push(self.parse_expression(depth + 1)?);
                             if matches!(self.peek(), Some(Token::Comma)) {
                                 self.next();
                             } else {
@@ -526,7 +550,7 @@ impl Parser {
 pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
     let tokens = tokenize_formula(expr_src)?;
     let mut parser = Parser::new(tokens);
-    let expr = parser.parse_expression()?;
+    let expr = parser.parse_expression(0)?;
     if parser.pos != parser.tokens.len() {
         return Err(FormulaError::Value);
     }
@@ -568,12 +592,13 @@ pub fn compute_sheet_id(name: &str) -> u16 {
 }
 
 /// Zero-heap-allocation cycle tracker combining an inline 1,024-cell bitset (`64 rows × 16 cols`
-/// on the root sheet) with a fixed-capacity 66-entry recursion stack.
+/// on the root sheet) with a fixed-capacity 66-entry recursion stack and overflow spill vector.
 pub struct VisitingTracker {
     primary_sheet_id: u16,
     grid_bitset: [u64; 16],
     stack: [u64; 66],
     len: usize,
+    spill: Vec<u64>,
 }
 
 impl VisitingTracker {
@@ -584,6 +609,7 @@ impl VisitingTracker {
             grid_bitset: [0u64; 16],
             stack: [0u64; 66],
             len: 0,
+            spill: Vec::new(),
         }
     }
 
@@ -607,11 +633,15 @@ impl VisitingTracker {
                 return false;
             }
         }
-        if self.len >= self.stack.len() {
+        if self.spill.contains(&packed) {
             return false;
         }
-        self.stack[self.len] = packed;
-        self.len += 1;
+        if self.len < self.stack.len() {
+            self.stack[self.len] = packed;
+            self.len += 1;
+        } else {
+            self.spill.push(packed);
+        }
         true
     }
 
@@ -625,7 +655,9 @@ impl VisitingTracker {
             return;
         }
         let packed = PackedWorkbookCoord::new(sheet_id, coord).0;
-        if self.len > 0 && self.stack[self.len - 1] == packed {
+        if let Some(pos) = self.spill.iter().rposition(|&x| x == packed) {
+            self.spill.swap_remove(pos);
+        } else if self.len > 0 && self.stack[self.len - 1] == packed {
             self.len -= 1;
         } else if let Some(pos) = self.stack[..self.len].iter().rposition(|&x| x == packed) {
             self.stack[pos] = self.stack[self.len - 1];
