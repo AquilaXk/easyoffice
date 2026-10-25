@@ -26,6 +26,13 @@ pub use ffi::*;
 pub use ribbon::*;
 pub use smart_tools::*;
 
+static RIBBON_WORKSPACE_STATE: std::sync::OnceLock<std::sync::Mutex<RibbonWorkspaceState>> =
+    std::sync::OnceLock::new();
+
+fn shared_ribbon_state() -> &'static std::sync::Mutex<RibbonWorkspaceState> {
+    RIBBON_WORKSPACE_STATE.get_or_init(|| std::sync::Mutex::new(RibbonWorkspaceState::default()))
+}
+
 /// Tauri v2 compatible IPC router dispatching desktop workspace commands to pure Rust engines.
 pub struct EasyOfficeIpcRouter;
 
@@ -89,11 +96,11 @@ impl EasyOfficeIpcRouter {
                 "\"ribbonMatrixSlots\":35,",
                 "\"recentFormatFilters\":[{}],",
                 "\"openTabs\":[",
-                "{{\"id\":\"tab-doc\",\"title\":\"연간_아키텍처_보고서.docx\",\"module\":\"DOC\",\"isPinned\":true,\"isFavorite\":true}},",
-                "{{\"id\":\"tab-hwp\",\"title\":\"행정_표준_기안문.hwpx\",\"module\":\"HWP\",\"isPinned\":true,\"isFavorite\":false}},",
-                "{{\"id\":\"tab-sheet\",\"title\":\"분기_예산_시트.xlsx\",\"module\":\"SHEET\",\"isPinned\":false,\"isFavorite\":true}},",
-                "{{\"id\":\"tab-slide\",\"title\":\"제품_전략_발표덱.pptx\",\"module\":\"SLIDE\",\"isPinned\":false,\"isFavorite\":false}},",
-                "{{\"id\":\"tab-pdf\",\"title\":\"보안_감사_인증서.pdf\",\"module\":\"PDF\",\"isPinned\":false,\"isFavorite\":true}}",
+                "{{\"id\":\"tab-doc\",\"title\":\"분기_경영실적_보고서.docx\",\"module\":\"DOC\",\"isPinned\":true,\"isFavorite\":true}},",
+                "{{\"id\":\"tab-hwp\",\"title\":\"행정안전부_기안문.hwpx\",\"module\":\"HWP\",\"isPinned\":true,\"isFavorite\":false}},",
+                "{{\"id\":\"tab-sheet\",\"title\":\"예산집행_총괄표.xlsx\",\"module\":\"SHEET\",\"isPinned\":false,\"isFavorite\":true}},",
+                "{{\"id\":\"tab-slide\",\"title\":\"전략기획_발표자료.pptx\",\"module\":\"SLIDE\",\"isPinned\":false,\"isFavorite\":false}},",
+                "{{\"id\":\"tab-pdf\",\"title\":\"최종계약서_검토본.pdf\",\"module\":\"PDF\",\"isPinned\":false,\"isFavorite\":true}}",
                 "]",
                 "}}"
             ),
@@ -129,25 +136,92 @@ impl EasyOfficeIpcRouter {
         let fmt = FormatDetector::detect(&bytes, hint)?;
         Ok(format!(
             "{{\"format\":\"{}\",\"containerFamily\":\"{}\",\"specification\":\"{}\",\"byteCount\":{}}}",
-            fmt.extension(),
-            fmt.container_family().as_str(),
-            fmt.standard_specification(),
+            Self::escape_json_str(fmt.extension()),
+            Self::escape_json_str(fmt.container_family().as_str()),
+            Self::escape_json_str(fmt.standard_specification()),
             bytes.len()
         ))
+    }
+
+    fn is_cell_key_prefix(s: &str) -> bool {
+        let trimmed = s.trim_start();
+        let Some((lhs, _)) = trimmed.split_once('=') else {
+            return false;
+        };
+        let key = lhs.trim();
+        let ref_part = key.split_once('!').map(|(_, r)| r.trim()).unwrap_or(key);
+        let bytes = ref_part.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+            i += 1;
+        }
+        if i == 0 || i > 3 || i == bytes.len() {
+            return false;
+        }
+        bytes[i..].iter().all(|b| b.is_ascii_digit())
+    }
+
+    fn split_cell_assignments(cells_part: &str) -> Vec<(String, String)> {
+        let mut items = Vec::new();
+        let mut current = String::new();
+        let mut in_quotes = false;
+        let mut paren_depth = 0usize;
+        let mut chars = cells_part.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                if let Some(&next_ch) = chars.peek() {
+                    if next_ch == ';' || next_ch == '?' || next_ch == '\\' {
+                        current.push(chars.next().unwrap());
+                        continue;
+                    }
+                }
+                current.push(ch);
+                continue;
+            }
+            if ch == '"' {
+                in_quotes = !in_quotes;
+                current.push(ch);
+                continue;
+            }
+            if !in_quotes {
+                if ch == '(' {
+                    paren_depth += 1;
+                } else if ch == ')' {
+                    paren_depth = paren_depth.saturating_sub(1);
+                } else if ch == ';' && paren_depth == 0 {
+                    let rest: String = chars.clone().collect();
+                    if rest.trim().is_empty() || Self::is_cell_key_prefix(&rest) {
+                        let seg = std::mem::take(&mut current);
+                        if let Some((k, v)) = seg.trim().split_once('=') {
+                            items.push((
+                                k.trim().to_string(),
+                                v.trim().replace("%3B", ";").replace("%3F", "?"),
+                            ));
+                        }
+                        continue;
+                    }
+                }
+            }
+            current.push(ch);
+        }
+        if let Some((k, v)) = current.trim().split_once('=') {
+            items.push((
+                k.trim().to_string(),
+                v.trim().replace("%3B", ";").replace("%3F", "?"),
+            ));
+        }
+        items
     }
 
     /// Payload format: semicolon-separated `A1=val` pairs followed by `?target_expr_or_cell`
     /// Example: `A1=100;A2=200;A3==SUM(A1:A2)?A3`
     fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
-        let (cells_part, query_part) = payload.split_once('?').unwrap_or((payload, "A1"));
+        let (cells_part, query_part) = payload.rsplit_once('?').unwrap_or((payload, "A1"));
         let mut sheet = SheetEngine::new("IPC_Sheet");
-        for pair in cells_part.split(';') {
-            let trimmed = pair.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if let Some((addr, val)) = trimmed.split_once('=') {
-                sheet.set_cell(addr.trim(), val.trim())?;
+        for (addr, val) in Self::split_cell_assignments(cells_part) {
+            if !addr.is_empty() {
+                sheet.set_cell(&addr, &val)?;
             }
         }
         let evaluated = if query_part.trim().starts_with('=') {
@@ -165,8 +239,8 @@ impl EasyOfficeIpcRouter {
 
         Ok(format!(
             "{{\"query\":\"{}\",\"value\":\"{}\",\"conditionalMatch\":{},\"validationPassed\":{}}}",
-            query_part.trim(),
-            evaluated.to_display_string(),
+            Self::escape_json_str(query_part.trim()),
+            Self::escape_json_str(&evaluated.to_display_string()),
             cf_match,
             dv_valid
         ))
@@ -181,7 +255,7 @@ impl EasyOfficeIpcRouter {
         };
         let doc_layout = DocumentPageLayout::compute(orientation, 2, 54.0)?;
         let slide_layout = SlideStageLayout::new(SlideDeckTheme::SignatureLavender);
-        let pdf_layout = PdfStudioLayout::compute("APPROVED");
+        let pdf_layout = PdfStudioLayout::compute("승인필");
 
         Ok(format!(
             concat!(
@@ -200,7 +274,7 @@ impl EasyOfficeIpcRouter {
             slide_layout.lower_element_zone_min_y,
             PdfStudioLayout::MIN_VISIBLE_Y,
             PdfStudioLayout::MAX_VISIBLE_Y,
-            pdf_layout.stamp_label
+            Self::escape_json_str(&pdf_layout.stamp_label)
         ))
     }
 
@@ -259,12 +333,51 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
-        let mut state = RibbonWorkspaceState::default();
-        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut state)?;
-        let badge = state.active_contextual_tool().badge_title();
+        let mut guard = shared_ribbon_state()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut guard)?;
+        let badge = guard.active_contextual_tool().badge_title();
         Ok(format!(
-            "{{\"commandId\":\"{}\",\"summary\":\"{}\",\"contextualBadge\":\"{}\",\"catalogCount\":140}}",
-            state.last_command_id, summary, badge
+            concat!(
+                "{{",
+                "\"commandId\":\"{}\",",
+                "\"summary\":\"{}\",",
+                "\"contextualBadge\":\"{}\",",
+                "\"catalogCount\":140,",
+                "\"isBold\":{},",
+                "\"isItalic\":{},",
+                "\"isUnderline\":{},",
+                "\"columnCount\":{},",
+                "\"isLandscape\":{},",
+                "\"manuscriptGridEnabled\":{},",
+                "\"approvalHeaderEnabled\":{},",
+                "\"trackChangesEnabled\":{},",
+                "\"splitViewEnabled\":{},",
+                "\"ribbonCollapsed\":{},",
+                "\"darkThemeEnabled\":{},",
+                "\"zoomPercent\":{},",
+                "\"pdfRotationDegrees\":{},",
+                "\"executedCount\":{}",
+                "}}"
+            ),
+            Self::escape_json_str(&guard.last_command_id),
+            Self::escape_json_str(&summary),
+            Self::escape_json_str(badge),
+            guard.is_bold,
+            guard.is_italic,
+            guard.is_underline,
+            guard.column_count,
+            guard.is_landscape,
+            guard.manuscript_grid_enabled,
+            guard.approval_header_enabled,
+            guard.track_changes_enabled,
+            guard.split_view_enabled,
+            guard.ribbon_collapsed,
+            guard.dark_theme_enabled,
+            guard.zoom_percent,
+            guard.pdf_rotation_degrees,
+            guard.executed_count
         ))
     }
 
@@ -278,15 +391,18 @@ impl EasyOfficeIpcRouter {
                 )))
             }
         };
+        if let Ok(mut guard) = shared_ribbon_state().lock() {
+            guard.ribbon_style = style;
+        }
         let cats = style
             .category_titles()
             .iter()
-            .map(|c| format!("\"{c}\""))
+            .map(|c| format!("\"{}\"", Self::escape_json_str(c)))
             .collect::<Vec<_>>()
             .join(",");
         Ok(format!(
             "{{\"style\":\"{}\",\"categories\":[{}]}}",
-            style.display_name(),
+            Self::escape_json_str(style.display_name()),
             cats
         ))
     }
@@ -300,25 +416,53 @@ impl EasyOfficeIpcRouter {
         let summary = LocalSmartAssistant::summarize_document(&paragraphs, 2);
         let diag = LocalSmartAssistant::diagnose_writing(payload);
         let actions = LocalSmartAssistant::extract_action_items(&paragraphs);
+        let summary_json = summary
+            .iter()
+            .map(|s| format!("\"{}\"", Self::escape_json_str(s)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let suggestions_json = diag
+            .suggestions
+            .iter()
+            .map(|s| format!("\"{}\"", Self::escape_json_str(s)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let actions_json = actions
+            .iter()
+            .map(|a| format!("\"{}\"", Self::escape_json_str(a)))
+            .collect::<Vec<_>>()
+            .join(",");
         Ok(format!(
-            "{{\"summaryCount\":{},\"charCount\":{},\"wordCount\":{},\"sentenceCount\":{},\"readingTimeSeconds\":{},\"actionItemCount\":{},\"suggestionCount\":{}}}",
+            concat!(
+                "{{",
+                "\"summaryCount\":{},",
+                "\"charCount\":{},",
+                "\"wordCount\":{},",
+                "\"sentenceCount\":{},",
+                "\"readingTimeSeconds\":{},",
+                "\"actionItemCount\":{},",
+                "\"suggestionCount\":{},",
+                "\"summaryLines\":[{}],",
+                "\"styleSuggestions\":[{}],",
+                "\"actionItems\":[{}]",
+                "}}"
+            ),
             summary.len(),
             diag.char_count,
             diag.word_count,
             diag.sentence_count,
             diag.reading_time_seconds,
             actions.len(),
-            diag.suggestions.len()
+            diag.suggestions.len(),
+            summary_json,
+            suggestions_json,
+            actions_json
         ))
     }
 
     fn handle_scrub_pii(payload: &str) -> Result<String, EasyOfficeError> {
         let audit = DocumentSecurityAuditor::scan_and_scrub_pii(payload);
-        let escaped = audit
-            .scrubbed_text
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n");
+        let escaped = Self::escape_json_str(&audit.scrubbed_text);
         Ok(format!(
             "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"totalMasked\":{}}}",
             escaped,
@@ -336,17 +480,15 @@ impl EasyOfficeIpcRouter {
         wb.set_cell("Sheet2", "A1", "100")?;
         wb.set_cell("Sheet1", "A1", "1200")?;
         wb.set_cell("Sheet1", "B1", "850")?;
-        let (cells_part, expr_part) = match payload.split_once('?') {
+        let (cells_part, expr_part) = match payload.rsplit_once('?') {
             Some((c, e)) => (Some(c.trim()), e.trim()),
             None => (None, payload.trim()),
         };
         if let Some(cells_str) = cells_part {
-            for pair in cells_str.split(';') {
-                if let Some((lhs, rhs)) = pair.trim().split_once('=') {
-                    let (sh, a1) = lhs.split_once('!').unwrap_or(("Sheet1", lhs));
-                    wb.add_sheet(sh.trim());
-                    wb.set_cell(sh.trim(), a1.trim(), rhs.trim())?;
-                }
+            for (lhs, rhs) in Self::split_cell_assignments(cells_str) {
+                let (sh, a1) = lhs.split_once('!').unwrap_or(("Sheet1", &lhs));
+                wb.add_sheet(sh.trim());
+                wb.set_cell(sh.trim(), a1.trim(), rhs.trim())?;
             }
         }
         let expr = if expr_part.is_empty() {
@@ -514,6 +656,9 @@ impl EasyOfficeIpcRouter {
                 '\n' => out.push_str("\\n"),
                 '\r' => out.push_str("\\r"),
                 '\t' => out.push_str("\\t"),
+                c if (c as u32) < 0x20 => {
+                    out.push_str(&format!("\\u{:04x}", c as u32));
+                }
                 c => out.push(c),
             }
         }
@@ -860,4 +1005,38 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         DesktopPlatform::current().os_label(),
         bench_report.summary_line()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ipc_persistent_ribbon_state_and_safe_sheet_semicolon_parsing() {
+        let first =
+            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "document-home-bold").unwrap();
+        assert!(first.contains("\"isBold\":true"));
+        let second =
+            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "document-home-bold").unwrap();
+        assert!(second.contains("\"isBold\":false"));
+
+        let rot1 =
+            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "pdf-mod-rotate").unwrap();
+        assert!(rot1.contains("\"pdfRotationDegrees\":90"));
+
+        let eval_json = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            "A1=항목;설명;B1=100;C1=foo\\;B1=999?B1",
+        )
+        .unwrap();
+        assert!(eval_json.contains("\"value\":\"100\""));
+
+        let smart_json = EasyOfficeIpcRouter::dispatch(
+            "run_smart_assistant",
+            "첫 번째 핵심 문단입니다.\n[TODO] 보안 감사 보고서 제출\n두 번째 요약 문단입니다.",
+        )
+        .unwrap();
+        assert!(smart_json.contains("\"summaryLines\":["));
+        assert!(smart_json.contains("\"actionItems\":[\"[TODO] 보안 감사 보고서 제출\"]"));
+    }
 }

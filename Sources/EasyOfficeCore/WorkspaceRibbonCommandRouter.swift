@@ -453,26 +453,8 @@ extension WorkspaceViewModel {
       case .sheet(var sheet):
         sheet.trackChangesEnabled.toggle()
         openTabs[idx].payload = .sheet(sheet)
-      case .slide(var deck):
-        if !deck.slides.isEmpty {
-          let sIdx = deck.slides.indices.contains(selectedSlideIndex) ? selectedSlideIndex : 0
-          if let existingIdx = deck.slides[sIdx].elements.firstIndex(where: {
-            $0.title.hasPrefix("변경 내용 추적")
-          }) {
-            let currentTitle = deck.slides[sIdx].elements[existingIdx].title
-            deck.slides[sIdx].elements[existingIdx].title =
-              (currentTitle == "변경 내용 추적 활성") ? "변경 내용 추적 일시정지" : "변경 내용 추적 활성"
-            selectedSlideElementID = deck.slides[sIdx].elements[existingIdx].id
-          } else {
-            let offset = Double(deck.slides[sIdx].elements.count) * 12.0
-            let badge = SlideCanvasElement(
-              title: "변경 내용 추적 활성", bodyText: "슬라이드 변경 이력 추적", x: 200.0 + offset, y: 240.0 + offset,
-              width: 180, height: 70, kind: .calloutShape)
-            deck.slides[sIdx].elements.append(badge)
-            selectedSlideElementID = badge.id
-          }
-          openTabs[idx].payload = .slide(deck)
-        }
+      case .slide:
+        isPresenterModeActive.toggle()
       case .pdf(var pdfDoc):
         pdfDoc.annotations.append(
           PDFAnnotationItem(
@@ -905,11 +887,20 @@ extension WorkspaceViewModel {
       openTabs[idx].isModified = true
 
     case .pdf(var pdfDoc):
-      let targetIndex =
-        pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
-      pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: 90)
-      openTabs[idx].payload = .pdf(pdfDoc)
-      openTabs[idx].isModified = true
+      switch kind {
+      case .orientation:
+        let targetIndex =
+          pdfDoc.pages.indices.contains(selectedPDFPageIndex) ? selectedPDFPageIndex : 0
+        pdfDoc.rotatePage(at: targetIndex, clockwiseDegrees: 90)
+        openTabs[idx].payload = .pdf(pdfDoc)
+        openTabs[idx].isModified = true
+      case .paperSize:
+        setZoom(zoomPercent == 100.0 ? 125.0 : 100.0)
+      case .margins:
+        setDocumentHorizontalPadding(documentHorizontalPadding < 40.0 ? 56.0 : 28.0)
+      case .columns:
+        workspaceViewMode = (workspaceViewMode == .editView) ? .readOnlyView : .editView
+      }
 
     case .sheet(var sheet):
       switch kind {
@@ -1308,12 +1299,12 @@ extension WorkspaceViewModel {
 
   public func scrubActiveTabMetadata() {
     guard let activeTabID,
-      let targetIdx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .document(let doc) = openTabs[targetIdx].payload
+      let targetIdx = openTabs.firstIndex(where: { $0.id == activeTabID })
     else { return }
     recordUndoSnapshot(for: openTabs[targetIdx].id)
-    let (scrubbed, removedCount) = DocumentSecurityAuditor.scrubMetadata(from: doc)
-    openTabs[targetIdx].payload = .document(scrubbed)
+    let (scrubbed, removedCount) = DocumentSecurityAuditor.scrubPayload(
+      openTabs[targetIdx].payload)
+    openTabs[targetIdx].payload = scrubbed
     openTabs[targetIdx].isModified = true
     lastScrubbedMetadataCount = removedCount
     lastExecutedCommandSummary = "개인정보·메타데이터 \(removedCount)건 비식별화 완료"

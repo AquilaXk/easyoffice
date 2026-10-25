@@ -318,16 +318,51 @@ public enum OLE2ContainerCodec {
 
     let fatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 44))
     let firstDirSector = try BitPacking.readUInt32LE(from: data, at: 48)
+    let miniStreamCutoffSize = Int(try BitPacking.readUInt32LE(from: data, at: 56))
+    let firstMiniFatSector = try BitPacking.readUInt32LE(from: data, at: 60)
+    let miniFatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 64))
+    let firstDifatSector = try BitPacking.readUInt32LE(from: data, at: 68)
+    let difatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 72))
     let totalSectorsInFile = (data.count / sectorSize) - 1
 
-    guard fatSectorCount > 0, fatSectorCount <= 109 else {
+    guard fatSectorCount > 0, fatSectorCount <= totalSectorsInFile else {
       throw EasyOfficeError.corruptedContainer(detail: "유효하지 않은 OLE2 FAT 섹터 개수: \(fatSectorCount)")
     }
 
-    var fat: [UInt32] = []
-    fat.reserveCapacity(fatSectorCount * fatEntriesPerSector)
-    for slot in 0..<fatSectorCount {
+    var fatSectorIndices: [Int] = []
+    fatSectorIndices.reserveCapacity(fatSectorCount)
+    let headerSlots = min(fatSectorCount, 109)
+    for slot in 0..<headerSlots {
       let fatSecIndex = Int(try BitPacking.readUInt32LE(from: data, at: 76 + slot * 4))
+      fatSectorIndices.append(fatSecIndex)
+    }
+
+    if fatSectorCount > 109 {
+      var currentDifat = firstDifatSector
+      var remainingDifatSectors = max(0, difatSectorCount)
+      var visitedDifat = Set<UInt32>()
+      while currentDifat != endOfChain && currentDifat != freeSector
+        && fatSectorIndices.count < fatSectorCount && remainingDifatSectors > 0
+      {
+        guard Int(currentDifat) < totalSectorsInFile, visitedDifat.insert(currentDifat).inserted
+        else {
+          throw EasyOfficeError.corruptedContainer(detail: "OLE2 DIFAT 체인이 손상되었습니다.")
+        }
+        let difatOffset = (1 + Int(currentDifat)) * sectorSize
+        for slot in 0..<127 where fatSectorIndices.count < fatSectorCount {
+          let secIdx = try BitPacking.readUInt32LE(from: data, at: difatOffset + slot * 4)
+          if secIdx != freeSector {
+            fatSectorIndices.append(Int(secIdx))
+          }
+        }
+        currentDifat = try BitPacking.readUInt32LE(from: data, at: difatOffset + 127 * 4)
+        remainingDifatSectors -= 1
+      }
+    }
+
+    var fat: [UInt32] = []
+    fat.reserveCapacity(fatSectorIndices.count * fatEntriesPerSector)
+    for fatSecIndex in fatSectorIndices {
       guard fatSecIndex >= 0, fatSecIndex < totalSectorsInFile else {
         throw EasyOfficeError.corruptedContainer(detail: "OLE2 FAT 섹터 인덱스가 파일 범위를 벗어납니다.")
       }
@@ -350,6 +385,43 @@ public enum OLE2ContainerCodec {
     )
     guard !directoryData.isEmpty else {
       throw EasyOfficeError.corruptedContainer(detail: "OLE2 디렉터리 섹터 체인이 비어 있습니다.")
+    }
+
+    var miniFat: [UInt32] = []
+    var miniStreamData = Data()
+    if miniStreamCutoffSize > 0, firstMiniFatSector != endOfChain, firstMiniFatSector != freeSector,
+      miniFatSectorCount > 0
+    {
+      let miniFatBytes = try readSectorChain(
+        startSector: firstMiniFatSector,
+        fat: fat,
+        data: data,
+        totalSectors: totalSectorsInFile,
+        claimedWords: &claimedWords,
+        expectedByteCount: miniFatSectorCount * sectorSize
+      )
+      let count = miniFatBytes.count / 4
+      miniFat.reserveCapacity(count)
+      for i in 0..<count {
+        miniFat.append(try BitPacking.readUInt32LE(from: miniFatBytes, at: i * 4))
+      }
+      if directoryData.count >= directoryEntrySize {
+        let rootStartSector = try BitPacking.readUInt32LE(from: directoryData, at: 116)
+        let rootStreamSize = Int(try BitPacking.readUInt64LE(from: directoryData, at: 120))
+        if rootStartSector != endOfChain, rootStartSector != freeSector, rootStreamSize > 0 {
+          miniStreamData = try readSectorChain(
+            startSector: rootStartSector,
+            fat: fat,
+            data: data,
+            totalSectors: totalSectorsInFile,
+            claimedWords: &claimedWords,
+            expectedByteCount: rootStreamSize
+          )
+          if miniStreamData.count > rootStreamSize {
+            miniStreamData.removeSubrange(rootStreamSize..<miniStreamData.count)
+          }
+        }
+      }
     }
 
     let entryCount = directoryData.count / directoryEntrySize
@@ -377,6 +449,33 @@ public enum OLE2ContainerCodec {
 
       if streamSize == 0 {
         streams.append(OLE2StreamEntry(name: name, data: Data()))
+      } else if miniStreamCutoffSize > 0, streamSize < miniStreamCutoffSize, !miniFat.isEmpty,
+        !miniStreamData.isEmpty
+      {
+        let miniSectorSize = 64
+        let totalMiniSectors = miniStreamData.count / miniSectorSize
+        var output = Data()
+        output.reserveCapacity(streamSize)
+        var current = startSector
+        var visitedMini = Set<UInt32>()
+        while current != endOfChain {
+          guard Int(current) < totalMiniSectors, Int(current) < miniFat.count,
+            visitedMini.insert(current).inserted
+          else {
+            throw EasyOfficeError.corruptedContainer(
+              detail: "OLE2 MiniFAT 체인이 유효하지 않은 미니섹터(\(current))를 참조합니다.")
+          }
+          let offset = Int(current) * miniSectorSize
+          let startIdx = miniStreamData.startIndex + offset
+          output.append(contentsOf: miniStreamData[startIdx..<(startIdx + miniSectorSize)])
+          current = miniFat[Int(current)]
+        }
+        guard output.count >= streamSize else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "OLE2 미니스트림 '\(name)'의 섹터 체인 길이가 부족합니다.")
+        }
+        output.removeSubrange(streamSize..<output.count)
+        streams.append(OLE2StreamEntry(name: name, data: output))
       } else {
         var rawChain = try readSectorChain(
           startSector: startSector,
@@ -476,6 +575,23 @@ public enum HWP5BinaryCodec {
   public static let flagCompressed: UInt32 = 0x0000_0001
   public static let flagEncrypted: UInt32 = 0x0000_0002
   public static let flagDistribution: UInt32 = 0x0000_0004
+  public static let maxHWP5Records = 65_536
+
+  private static func safeClampedUInt32(
+    _ value: Double, min minVal: UInt32 = 0, max maxVal: UInt32 = 100_000_000
+  ) -> UInt32 {
+    guard value.isFinite else { return minVal }
+    let clamped = Swift.max(Double(minVal), Swift.min(Double(maxVal), value.rounded()))
+    return UInt32(clamped)
+  }
+
+  private static func safeClampedInt32(
+    _ value: Double, min minVal: Int32 = -100_000_000, max maxVal: Int32 = 100_000_000
+  ) -> Int32 {
+    guard value.isFinite else { return 0 }
+    let clamped = Swift.max(Double(minVal), Swift.min(Double(maxVal), value.rounded()))
+    return Int32(clamped)
+  }
 
   public static func encodeDocument(_ doc: OfficeDocumentModel, compressed: Bool = true) throws
     -> Data
@@ -522,19 +638,21 @@ public enum HWP5BinaryCodec {
       BitPacking.appendLengthPrefixedUTF16LE(paragraph.alignment.rawValue, to: &paraHeaderPayload)
       BitPacking.appendLengthPrefixedUTF16LE(paragraph.fontName, to: &paraHeaderPayload)
       BitPacking.appendUInt32LE(
-        UInt32((paragraph.fontSizePt * 100.0).rounded()), to: &paraHeaderPayload)
+        safeClampedUInt32(paragraph.fontSizePt * 100.0, min: 100, max: 1_000_000),
+        to: &paraHeaderPayload)
       BitPacking.appendUInt32LE(
-        UInt32((paragraph.lineSpacingPercent * 100.0).rounded()), to: &paraHeaderPayload)
+        safeClampedUInt32(paragraph.lineSpacingPercent * 100.0, min: 5_000, max: 1_000_000),
+        to: &paraHeaderPayload)
       var styleFlags: UInt8 = 0
       if paragraph.isBold { styleFlags |= 0x01 }
       if paragraph.isItalic { styleFlags |= 0x02 }
       if paragraph.isUnderlined { styleFlags |= 0x04 }
       paraHeaderPayload.append(styleFlags)
       BitPacking.appendUInt32LE(
-        UInt32(bitPattern: Int32((paragraph.letterSpacingPercent * 100.0).rounded())),
+        UInt32(bitPattern: safeClampedInt32(paragraph.letterSpacingPercent * 100.0)),
         to: &paraHeaderPayload)
       BitPacking.appendUInt32LE(
-        UInt32((paragraph.charWidthScalePercent * 100.0).rounded()),
+        safeClampedUInt32(paragraph.charWidthScalePercent * 100.0, min: 1_000, max: 1_000_000),
         to: &paraHeaderPayload)
 
       let headerRec = try HWP5RecordHeader.encode(
@@ -559,9 +677,9 @@ public enum HWP5BinaryCodec {
       var tablePayload = Data()
       BitPacking.appendLengthPrefixedUTF16LE(table.caption, to: &tablePayload)
       tablePayload.append(table.hasHeaderRow ? 1 : 0)
-      BitPacking.appendUInt16LE(UInt16(table.rows.count), to: &tablePayload)
+      BitPacking.appendUInt16LE(UInt16(clamping: table.rows.count), to: &tablePayload)
       for row in table.rows {
-        BitPacking.appendUInt16LE(UInt16(row.count), to: &tablePayload)
+        BitPacking.appendUInt16LE(UInt16(clamping: row.count), to: &tablePayload)
         for cell in row {
           BitPacking.appendLengthPrefixedUTF16LE(cell, to: &tablePayload)
         }
@@ -626,6 +744,7 @@ public enum HWP5BinaryCodec {
     var footerText = ""
     var trackChanges = false
     var extendedEnvelope: ExtendedDocumentMetadataEnvelope?
+    var totalDecodedRecords = 0
 
     if let rawDocInfo = streamMap["DocInfo"], !rawDocInfo.isEmpty {
       let docInfo =
@@ -633,6 +752,11 @@ public enum HWP5BinaryCodec {
       var docOffset = 0
       var parsedDocProps = false
       while docOffset < docInfo.count {
+        totalDecodedRecords += 1
+        guard totalDecodedRecords <= maxHWP5Records else {
+          throw EasyOfficeError.securityViolation(
+            detail: "HWP 5.0 레코드 개수가 허용 상한(\(maxHWP5Records))을 초과했습니다.")
+        }
         let (recHeader, headerLen) = try HWP5RecordHeader.decode(from: docInfo, at: docOffset)
         let payloadStart = docOffset + headerLen
         let recordEnd = payloadStart + Int(recHeader.payloadSize)
@@ -681,6 +805,11 @@ public enum HWP5BinaryCodec {
     var offset = 0
 
     while offset < section0.count {
+      totalDecodedRecords += 1
+      guard totalDecodedRecords <= maxHWP5Records else {
+        throw EasyOfficeError.securityViolation(
+          detail: "HWP 5.0 레코드 개수가 허용 상한(\(maxHWP5Records))을 초과했습니다.")
+      }
       let (recHeader, headerLen) = try HWP5RecordHeader.decode(from: section0, at: offset)
       let payloadStart = offset + headerLen
       let payloadLen = Int(recHeader.payloadSize)

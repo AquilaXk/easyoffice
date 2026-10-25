@@ -922,4 +922,130 @@ mod tests {
         assert!(huge_range.cell_count() > CellRange::MAX_EXPANDED_CELLS);
         assert!(huge_range.expand().is_err());
     }
+
+    #[test]
+    fn test_zero_alloc_xlookup_match_welford_stdev_rank_averagea_and_wildcard_escapes() {
+        use crate::functions_date_fin::{wildcard_match, wildcard_match_alloc_baseline};
+
+        let cases = [
+            ("Report_2026_Final.xlsx", "report*final.xlsx", true),
+            ("Report_2026_Draft.xlsx", "report*final.xlsx", false),
+            ("A*B", "a~*b", true),
+            ("AXB", "a~*b", false),
+            ("A?B", "a~?b", true),
+            ("AXB", "a~?b", false),
+            ("A~B", "a~~b", true),
+            ("Item-01", "item-??", true),
+            ("Item-001", "item-??", false),
+        ];
+        for (text, pat, expected) in cases {
+            assert_eq!(wildcard_match(text, pat), expected, "text={text} pat={pat}");
+        }
+        assert_eq!(
+            wildcard_match("Report_2026_Final.xlsx", "report*final.xlsx"),
+            wildcard_match_alloc_baseline("Report_2026_Final.xlsx", "report*final.xlsx")
+        );
+
+        let mut sheet = SheetEngine::new("ZeroAllocStats");
+        let dataset = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+        for (idx, val) in dataset.iter().enumerate() {
+            let r = idx + 1;
+            sheet.set_cell(&format!("A{r}"), val.to_string()).unwrap();
+            sheet
+                .set_cell(&format!("B{r}"), ((idx as f64 + 1.0) * 100.0).to_string())
+                .unwrap();
+        }
+        sheet.set_cell("B8", "=1/0").unwrap();
+
+        assert_eq!(
+            sheet.evaluate_formula_str("=XLOOKUP(5, A1:A8, B1:B8, -1)"),
+            EvaluatedCellValue::Number(500.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=XLOOKUP(999, A1:A7, B1:B7, -1)"),
+            EvaluatedCellValue::Number(-1.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=MATCH(7, A1:A8, 0)"),
+            EvaluatedCellValue::Number(7.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=VLOOKUP(6, A1:B7, 2)"),
+            EvaluatedCellValue::Number(600.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=RANK(7, A1:A8)"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=RANK(7, A1:A8, 1)"),
+            EvaluatedCellValue::Number(7.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=VARP(A1:A8)"),
+            EvaluatedCellValue::Number(4.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=STDEVP(A1:A8)"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        if let EvaluatedCellValue::Number(v) = sheet.evaluate_formula_str("=VAR(A1:A8)") {
+            assert!((v - 32.0 / 7.0).abs() < 1e-12);
+        } else {
+            panic!("Expected numeric VAR");
+        }
+        if let EvaluatedCellValue::Number(s) = sheet.evaluate_formula_str("=STDEV(A1:A8)") {
+            assert!((s - (32.0_f64 / 7.0).sqrt()).abs() < 1e-12);
+        } else {
+            panic!("Expected numeric STDEV");
+        }
+
+        sheet.set_cell("C1", "10").unwrap();
+        sheet.set_cell("C2", "TRUE").unwrap();
+        sheet.set_cell("C3", "FALSE").unwrap();
+        sheet.set_cell("C4", "label").unwrap();
+        assert_eq!(
+            sheet.evaluate_formula_str("=AVERAGEA(C1:C4)"),
+            EvaluatedCellValue::Number(11.0 / 4.0)
+        );
+
+        sheet.set_cell("D1", "Apple*Pie").unwrap();
+        sheet.set_cell("D2", "AppleSauce").unwrap();
+        sheet.set_cell("D3", "Banana").unwrap();
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNTIF(D1:D3, \"apple~*pie\")"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNTIF(D1:D3, \"apple*\")"),
+            EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=COUNTIF(D1:D3, \"<>banana\")"),
+            EvaluatedCellValue::Number(2.0)
+        );
+
+        assert_eq!(
+            sheet.evaluate_formula_str("=DATE(2024, 1, 1)"),
+            EvaluatedCellValue::Number(45292.0)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=ROUND(2.675, 2)"),
+            EvaluatedCellValue::Number(2.68)
+        );
+        assert_eq!(
+            sheet.evaluate_formula_str("=\"1\"=1"),
+            EvaluatedCellValue::Boolean(false)
+        );
+        let deep_sum = format!("={}", vec!["1"; 250].join("+"));
+        assert_eq!(
+            sheet.evaluate_formula_str(&deep_sum),
+            EvaluatedCellValue::Number(250.0)
+        );
+        let over_nested = format!("={}1{}", "(".repeat(70), ")".repeat(70));
+        assert_eq!(
+            sheet.evaluate_formula_str(&over_nested),
+            EvaluatedCellValue::Error(FormulaError::Value)
+        );
+    }
 }

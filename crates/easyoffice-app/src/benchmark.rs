@@ -4,8 +4,8 @@ use easyoffice_formats::{
     EasyOfficeError, IeeeCrc32, XmlSanitizer,
 };
 use easyoffice_sheet::{
-    compile_formula_expr, BinaryOp, CellRange, EvaluatedCellValue, Expr, FormulaError,
-    PackedCellCoordinate, SheetEngine,
+    compile_formula_expr, wildcard_match, wildcard_match_alloc_baseline, BinaryOp, CellRange,
+    EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate, SheetEngine,
 };
 use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
@@ -765,7 +765,9 @@ fn scalar_vec_range_agg_baseline(
     range: &CellRange,
     left_range: &CellRange,
     right_range: &CellRange,
-) -> [f64; 8] {
+    col_a_range: &CellRange,
+    col_h_range: &CellRange,
+) -> [f64; 11] {
     let sum_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
     let sum_nums: Vec<f64> = sum_vals
         .iter()
@@ -850,7 +852,48 @@ fn scalar_vec_range_agg_baseline(
         .collect();
     let sumprod_v: f64 = sp_prods.iter().sum();
 
-    [sum, avg, min_v, max_v, cnt, sumif_v, countif_v, sumprod_v]
+    let stdev_vals = expand_range_values_scalar_baseline(precompiled_cells, range);
+    let stdev_nums: Vec<f64> = stdev_vals
+        .iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let stdev_mean = stdev_nums.iter().sum::<f64>() / (stdev_nums.len().max(1) as f64);
+    let stdev_var = stdev_nums
+        .iter()
+        .map(|x| (x - stdev_mean).powi(2))
+        .sum::<f64>()
+        / ((stdev_nums.len().saturating_sub(1)).max(1) as f64);
+    let stdev_v = stdev_var.sqrt();
+
+    let lookup_a = expand_range_values_scalar_baseline(precompiled_cells, col_a_range);
+    let lookup_h = expand_range_values_scalar_baseline(precompiled_cells, col_h_range);
+    let mut xlookup_v = 0.0;
+    for (av, hv) in lookup_a.iter().zip(lookup_h.iter()) {
+        if let Some(n) = av.as_number() {
+            if (n - 1501.0).abs() < 1e-9 {
+                xlookup_v = hv.as_number().unwrap_or(0.0);
+                break;
+            }
+        }
+    }
+
+    let match_a = expand_range_values_scalar_baseline(precompiled_cells, col_a_range);
+    let mut match_v = 0.0;
+    for (idx, av) in match_a.iter().enumerate() {
+        if let Some(n) = av.as_number() {
+            if (n - 1501.0).abs() < 1e-9 {
+                match_v = (idx + 1) as f64;
+                break;
+            }
+        }
+    }
+
+    [
+        sum, avg, min_v, max_v, cnt, sumif_v, countif_v, sumprod_v, stdev_v, xlookup_v, match_v,
+    ]
 }
 
 pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> BenchmarkSuiteResult {
@@ -905,10 +948,29 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
     agg_sheet
         .set_cell("I8", "=SUMPRODUCT(A1:D200, E1:H200)")
         .unwrap();
+    agg_sheet.set_cell("I9", "=STDEV(A1:H200)").unwrap();
+    agg_sheet
+        .set_cell("I10", "=XLOOKUP(1501, A1:A200, H1:H200, 0)")
+        .unwrap();
+    agg_sheet
+        .set_cell("I11", "=MATCH(1501, A1:A200, 0)")
+        .unwrap();
     let agg_range = CellRange::parse("A1:H200").unwrap();
     let left_range = CellRange::parse("A1:D200").unwrap();
     let right_range = CellRange::parse("E1:H200").unwrap();
+    let col_a_range = CellRange::parse("A1:A200").unwrap();
+    let col_h_range = CellRange::parse("H1:H200").unwrap();
     let precompiled_cells = agg_sheet.recalculate_all();
+
+    let wildcard_pairs = [
+        (
+            "행정안전부_디지털정부실_2026_보고서",
+            "행정*디지털*2026*보고서",
+        ),
+        ("기획조정실_예산_A1", "기획조정실_예산_?1"),
+        ("특수문자*포함_텍스트", "특수문자~*포함_*"),
+        ("물음표?이스케이프", "물음표~?이스케이프"),
+    ];
 
     let mut base_samples = Vec::with_capacity(rounds);
     let mut opt_samples = Vec::with_capacity(rounds);
@@ -934,7 +996,17 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
             black_box(&agg_range),
             black_box(&left_range),
             black_box(&right_range),
+            black_box(&col_a_range),
+            black_box(&col_h_range),
         );
+        let mut wc_hits_a = 0usize;
+        for _ in 0..32 {
+            for &(txt, pat) in &wildcard_pairs {
+                if wildcard_match_alloc_baseline(black_box(txt), black_box(pat)) {
+                    wc_hits_a += 1;
+                }
+            }
+        }
         let dt_a = t0.elapsed().as_micros() as u64;
 
         let t1 = Instant::now();
@@ -959,7 +1031,18 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
             agg_sheet.evaluate_cell("I6").as_number().unwrap_or(0.0),
             agg_sheet.evaluate_cell("I7").as_number().unwrap_or(0.0),
             agg_sheet.evaluate_cell("I8").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I9").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I10").as_number().unwrap_or(0.0),
+            agg_sheet.evaluate_cell("I11").as_number().unwrap_or(0.0),
         ];
+        let mut wc_hits_b = 0usize;
+        for _ in 0..32 {
+            for &(txt, pat) in &wildcard_pairs {
+                if wildcard_match(black_box(txt), black_box(pat)) {
+                    wc_hits_b += 1;
+                }
+            }
+        }
         let dt_b = t1.elapsed().as_micros() as u64;
 
         let agg_match = agg_a
@@ -977,13 +1060,19 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
             || unesc_b != raw_escape_input
             || !csv_match
             || !agg_match
+            || wc_hits_a != wc_hits_b
+            || wc_hits_b != 128
         {
             eq = false;
         }
         digest = IeeeCrc32::checksum(unesc_b.as_bytes())
             ^ (csv_bytes_b as u32)
             ^ (agg_b[0] as u32)
-            ^ (agg_b[7] as u32);
+            ^ (agg_b[7] as u32)
+            ^ (agg_b[8] as u32)
+            ^ (agg_b[9] as u32)
+            ^ (agg_b[10] as u32)
+            ^ (wc_hits_b as u32);
         if r > 0 {
             base_samples.push(dt_a.max(1));
             opt_samples.push(dt_b.max(1));
@@ -997,7 +1086,7 @@ pub fn bench_swar_csv_xml_and_zero_alloc_range_agg(iterations: usize) -> Benchma
         suite_id: "swar_csv_xml_and_zero_alloc_range_agg",
         title: "64-Bit SWAR XML/CSV & Zero-Alloc Range Agg",
         workload_description:
-            "16 KiB XML + 200x8 CSV + 1,600-cell streaming SUM/AVG/MIN/MAX/COUNT/SUMIF/COUNTIF/SUMPRODUCT",
+            "16 KiB XML + 200x8 CSV + 1,600-cell streaming SUM/AVG/MIN/MAX/COUNT/SUMIF/COUNTIF/SUMPRODUCT/STDEV/XLOOKUP/MATCH + Wildcard",
         iterations: rounds,
         baseline_p50_us: bp50,
         baseline_p95_us: bp95,

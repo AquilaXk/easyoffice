@@ -693,6 +693,7 @@ public struct PresentationDeckModel: Sendable, Codable, Equatable, Identifiable 
   public var aspectRatio: SlideAspectRatio
   public var slides: [SlideModel]
   public var deckTheme: SlideDeckTheme
+  public var preservedArchiveEntries: [String: Data] = [:]
 
   public var theme: SlideDeckTheme {
     get { deckTheme }

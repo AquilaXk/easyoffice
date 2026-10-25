@@ -238,14 +238,14 @@ public enum EasyOfficeDesignTokens {
 
   public static let inkPrimary = RGBColorToken(red: 0x1F, green: 0x23, blue: 0x40, hex: "#1F2340")
   public static let inkSecondary = RGBColorToken(red: 0x4D, green: 0x53, blue: 0x6B, hex: "#4D536B")
-  public static let inkMuted = RGBColorToken(red: 0x69, green: 0x70, blue: 0x89, hex: "#697089")
+  public static let inkMuted = RGBColorToken(red: 0x52, green: 0x58, blue: 0x70, hex: "#525870")
 
   public static let darkScaffold = RGBColorToken(red: 0x14, green: 0x17, blue: 0x24, hex: "#141724")
   public static let darkSurface = RGBColorToken(red: 0x1B, green: 0x20, blue: 0x32, hex: "#1B2032")
   public static let darkElevated = RGBColorToken(red: 0x24, green: 0x2B, blue: 0x42, hex: "#242B42")
   public static let darkBorder = RGBColorToken(red: 0x2C, green: 0x34, blue: 0x52, hex: "#2C3452")
   public static let darkText = RGBColorToken(red: 0xF8, green: 0xF9, blue: 0xFD, hex: "#F8F9FD")
-  public static let darkMuted = RGBColorToken(red: 0x8A, green: 0x94, blue: 0xB8, hex: "#8A94B8")
+  public static let darkMuted = RGBColorToken(red: 0x9E, green: 0xA8, blue: 0xCA, hex: "#9EA8CA")
   public static let darkSelectedSurface = RGBColorToken(
     red: 0x28, green: 0x31, blue: 0x52, hex: "#283152")
   public static let darkSubtleAccentSurface = RGBColorToken(
@@ -285,19 +285,18 @@ public enum EasyOfficeDesignTokens {
   public static let statusDanger = RGBColorToken(red: 0xC8, green: 0x1E, blue: 0x1E, hex: "#C81E1E")
   public static let statusInfo = RGBColorToken(red: 0x4A, green: 0x58, blue: 0xA9, hex: "#4A58A9")
 
-  // MARK: - Module Semantic Accents
   public static func accentToken(for module: OfficeModuleKind) -> RGBColorToken {
     switch module {
     case .document:
-      return brand700  // Signature Indigo-Lavender (#5C6BC0)
+      return brand700
     case .hwp:
-      return RGBColorToken(red: 0x6E, green: 0x56, blue: 0xCF, hex: "#6E56CF")  // Royal Violet
+      return RGBColorToken(red: 0x5B, green: 0x3F, blue: 0xD1, hex: "#5B3FD1")
     case .sheet:
-      return RGBColorToken(red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")  // Deep Emerald
+      return RGBColorToken(red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")
     case .slide:
-      return RGBColorToken(red: 0xD9, green: 0x6B, blue: 0x27, hex: "#D96B27")  // Warm Amber-Coral
+      return RGBColorToken(red: 0xB4, green: 0x53, blue: 0x09, hex: "#B45309")
     case .pdf:
-      return RGBColorToken(red: 0xD9, green: 0x38, blue: 0x3A, hex: "#D9383A")  // Crimson
+      return RGBColorToken(red: 0xB9, green: 0x1C, blue: 0x1C, hex: "#B91C1C")
     }
   }
 

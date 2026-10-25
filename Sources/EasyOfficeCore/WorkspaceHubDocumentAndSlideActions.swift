@@ -992,6 +992,7 @@ extension WorkspaceViewModel {
       targetID: selectedSlideElementID,
       stageSize: (deck.aspectRatio.widthPoints, deck.aspectRatio.heightPoints)
     )
+    activeSnapGuides = []
     openTabs[idx].payload = .slide(deck)
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = "슬라이드 개체 정렬 (\(alignment.rawValue))"
@@ -1064,6 +1065,7 @@ extension WorkspaceViewModel {
   public func selectSlideElement(id: UUID?) {
     activeInlineEditTargetKey = nil
     selectedSlideElementID = id
+    activeSnapGuides = []
   }
 
   public func moveSlideElement(

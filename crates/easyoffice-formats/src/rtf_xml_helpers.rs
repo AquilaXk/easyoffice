@@ -516,18 +516,77 @@ pub(crate) fn extract_between<'a>(src: &'a str, start_pat: &str, end_pat: &str) 
     Some(&src[start..end])
 }
 
+#[inline]
+fn find_open_tag_prefix(bytes: &[u8], tag_bytes: &[u8]) -> Option<usize> {
+    let need = 1 + tag_bytes.len();
+    let mut pos = 0usize;
+    while pos + need <= bytes.len() {
+        let lt = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'<')?;
+        if lt + need > bytes.len() {
+            return None;
+        }
+        if &bytes[lt + 1..lt + need] == tag_bytes {
+            return Some(lt);
+        }
+        pos = lt + 1;
+    }
+    None
+}
+
+#[inline]
+fn find_close_tag(bytes: &[u8], tag_bytes: &[u8]) -> Option<usize> {
+    let need = 3 + tag_bytes.len();
+    let mut pos = 0usize;
+    while pos + need <= bytes.len() {
+        let lt = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'<')?;
+        if lt + need > bytes.len() {
+            return None;
+        }
+        if bytes[lt + 1] == b'/'
+            && &bytes[lt + 2..lt + 2 + tag_bytes.len()] == tag_bytes
+            && bytes[lt + 2 + tag_bytes.len()] == b'>'
+        {
+            return Some(lt);
+        }
+        pos = lt + 1;
+    }
+    None
+}
+
 pub(crate) fn extract_attr(xml: &str, tag_prefix: &str, attr_name: &str) -> Option<String> {
     let tag_start = xml.find(tag_prefix)?;
     let rest = &xml[tag_start..];
-    let tag_end = rest.find('>')?;
+    let tag_end = crate::XmlSanitizer::find_byte_swar(rest.as_bytes(), 0, b'>')?;
     extract_attr_from_fragment(&rest[..tag_end], attr_name)
 }
 
 pub(crate) fn extract_attr_from_fragment(fragment: &str, attr_name: &str) -> Option<String> {
-    let pattern = format!("{attr_name}=\"");
-    let start = fragment.find(&pattern)? + pattern.len();
-    let end = fragment[start..].find('"')? + start;
-    Some(fragment[start..end].to_string())
+    let frag_bytes = fragment.as_bytes();
+    let attr_bytes = attr_name.as_bytes();
+    let need_len = attr_bytes.len() + 2;
+    if frag_bytes.len() < need_len || attr_bytes.is_empty() {
+        return None;
+    }
+    let first_b = attr_bytes[0];
+    let mut pos = 0usize;
+    while pos + need_len <= frag_bytes.len() {
+        let Some(idx) = crate::XmlSanitizer::find_byte_swar(frag_bytes, pos, first_b) else {
+            break;
+        };
+        if idx + need_len > frag_bytes.len() {
+            break;
+        }
+        if &frag_bytes[idx..idx + attr_bytes.len()] == attr_bytes
+            && frag_bytes[idx + attr_bytes.len()] == b'='
+            && frag_bytes[idx + attr_bytes.len() + 1] == b'"'
+        {
+            let val_start = idx + need_len;
+            let val_end = crate::XmlSanitizer::find_byte_swar(frag_bytes, val_start, b'"')?;
+            return Some(fragment[val_start..val_end].to_string());
+        }
+        pos = idx + 1;
+    }
+    None
 }
 
 pub(crate) fn extract_tag_bodies<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
@@ -538,52 +597,54 @@ pub(crate) fn extract_tag_bodies<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
 }
 
 pub(crate) fn extract_tags_with_attrs<'a>(xml: &'a str, tag: &str) -> Vec<(&'a str, &'a str)> {
-    let open_prefix = format!("<{tag}");
-    let close_tag = format!("</{tag}>");
+    let bytes = xml.as_bytes();
+    let tag_bytes = tag.as_bytes();
+    let open_prefix_len = 1 + tag_bytes.len();
+    let close_tag_len = 3 + tag_bytes.len();
     let mut out = Vec::new();
     let mut cursor = 0usize;
 
-    while let Some(rel_open) = xml[cursor..].find(&open_prefix) {
+    while let Some(rel_open) = find_open_tag_prefix(&bytes[cursor..], tag_bytes) {
         let open_pos = cursor + rel_open;
-        let after_tag = open_pos + open_prefix.len();
-        if after_tag < xml.len() {
-            let next_ch = xml.as_bytes()[after_tag];
+        let after_tag = open_pos + open_prefix_len;
+        if after_tag < bytes.len() {
+            let next_ch = bytes[after_tag];
             if next_ch != b'>' && next_ch != b' ' && next_ch != b'/' {
                 cursor = after_tag;
                 continue;
             }
         }
-        let Some(rel_gt) = xml[after_tag..].find('>') else {
+        let Some(gt_pos) = crate::XmlSanitizer::find_byte_swar(bytes, after_tag, b'>') else {
             break;
         };
-        let gt_pos = after_tag + rel_gt;
-        if xml.as_bytes()[gt_pos - 1] == b'/' {
+        if bytes[gt_pos - 1] == b'/' {
             cursor = gt_pos + 1;
             continue;
         }
         let attrs = &xml[after_tag..gt_pos];
         let body_start = gt_pos + 1;
-        let Some(rel_close) = xml[body_start..].find(&close_tag) else {
+        let Some(rel_close) = find_close_tag(&bytes[body_start..], tag_bytes) else {
             break;
         };
         let body_end = body_start + rel_close;
         out.push((attrs, &xml[body_start..body_end]));
-        cursor = body_end + close_tag.len();
+        cursor = body_end + close_tag_len;
     }
     out
 }
 
 pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
-    let open_prefix = format!("<{tag}");
-    let close_tag = format!("</{tag}>");
+    let bytes = xml.as_bytes();
+    let tag_bytes = tag.as_bytes();
+    let close_tag_len = 3 + tag_bytes.len();
     let mut out = String::with_capacity(xml.len());
     let mut cursor = 0usize;
 
-    while let Some(rel_open) = xml[cursor..].find(&open_prefix) {
+    while let Some(rel_open) = find_open_tag_prefix(&bytes[cursor..], tag_bytes) {
         let open_pos = cursor + rel_open;
         out.push_str(&xml[cursor..open_pos]);
-        if let Some(rel_close) = xml[open_pos..].find(&close_tag) {
-            cursor = open_pos + rel_close + close_tag.len();
+        if let Some(rel_close) = find_close_tag(&bytes[open_pos..], tag_bytes) {
+            cursor = open_pos + rel_close + close_tag_len;
         } else {
             cursor = xml.len();
             break;

@@ -662,3 +662,27 @@
 - **Verified by**: `swift test`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when**: 다중 행 행렬(`\begin{matrix}`) 수식 블록 조판을 추가할 때.
 
+### 33. 14차 적대적 감사 기반 무할당 조회·통계·와일드카드 커널, 컨테이너 무결성 하드닝 및 상용 오피스 UI/UX 완결 정책 (2026-10-25)
+
+- **Decision (`PD-059`)**:
+  1. **무할당 조회(`INDEX`/`VLOOKUP`/`HLOOKUP`)·Welford 온라인 분산(`VAR`/`STDEV`)·무할당 다중 조건부 스트리밍(`SUMIFS`/`COUNTIFS`/`AVERAGEIFS`/`MINIFS`/`MAXIFS`)·투포인터 와일드카드 매처 (`SheetLookupTextAndFinancialFunctions.swift`, `SheetBuiltInFunctions.swift`, `SheetCoordinatesAndAST.swift`, `SheetEngine.swift`)**
+     - `INDEX`는 `evaluateRangeGrid` 2차원 배열 할당 없이 목표 셀 `(startRow + rIdx, startCol + cIdx)` 단 1개만 $O(1)$로 평가하며, `VLOOKUP`·`HLOOKUP`은 탐색 열·행만 스트리밍 비교한 뒤 일치한 반환 셀 1개만 평가합니다.
+     - `SUMIF`, `COUNTIF`, `AVERAGEIF`, `SUMIFS`, `COUNTIFS`, `AVERAGEIFS`, `MINIFS`, `MAXIFS`는 `[Bool]` 마스크 배열 할당을 제거하고 `streamMultiCriteriaStats` 단일 패스로 조건을 직접 판별·집계합니다.
+     - `VAR`, `STDEV`, `VARP`, `STDEVP`, `SUMSQ`, `AVEDEV`, `GEOMEAN`, `HARMEAN` 및 논리 집계(`AND`, `OR`, `XOR`)는 `forEachResolvedCell` 스트리밍과 Welford 온라인 알고리즘으로 중간 `[Double]` 할당을 제거합니다.
+     - `matchesWildcardPattern`은 `NSRegularExpression` 컴파일을 제거하고 `~*`, `~?`, `~~` 이스케이프와 대소문자 무시 비교를 지원하는 투포인터 백트래킹 루프로 교체합니다.
+     - 수식 컴파일러에 입력 길이(`maxFormulaUTF8Bytes = 8_192`), 토큰 수(`maxFormulaTokenCount = 2_048`), 괄호·함수 중첩 깊이(`maxFormulaParseDepth = 64`) 상한과 `&`(문자열 결합)·`^`(거듭제곱) 연산자, 엄격한 타입 비교(`"1" = 1`은 `FALSE`, 빈 셀은 `""` 및 `0`과 동치), `1e-12` 부동소수점 반올림 보정, `IRR` 현금흐름 스케일 정규화, 1900 직렬 날짜 및 연·월·일 롤오버를 적용합니다.
+  2. **ZIP·OLE2·XML·HWP5·PDF 컨테이너 보안 및 라운드트립 보존 강화 (`BinaryContainerCodec.swift`, `XMLSanitizer.swift`, `StandardZipOfficeCodecs.swift`, `ODFAndHWPXCodecs.swift`, `OLE2AndHWP5Codec.swift`, `PDFBinarySerializer.swift`, `SmartProductivityTools.swift`, `TabularAndMarkupCodec.swift`, `DocumentSubmodelsAndNotes.swift`)**
+     - `ZipContainerCodec.unpack`은 디렉터리 엔트리(`/`)를 허용하되 중복 경로와 Local/Central 헤더 파일명 불일치 및 `:` 경로를 즉시 거부하며, OOXML·ODF·HWPX 코덱은 비표준 아카이브 엔트리를 `preservedArchiveEntries`에 보존하고 XML 검증을 `.xml`·`.rels`·`.hpf` 엔트리로 한정합니다.
+     - `XMLSanitizer.escape`는 64비트 SWAR 고속 경로에서 XML 1.0 금지 C0 제어문자(`0x00..0x08`, `0x0B..0x0C`, `0x0E..0x1F`)를 검출·제거하고, `OLE2ContainerCodec.unpack`은 DIFAT 섹터 체인과 MiniStream/MiniFAT를 지원하며, `HWP5BinaryCodec`은 `maxHWP5Records = 65_536` 상한과 안전한 정수 클램핑을 적용합니다.
+     - `TableCellSpan.maxSpan = 256`, `CSVStateMachineCodec.maxExportRows = 65_536` 상한을 적용하고, `PDFBinarySerializer`의 26줄 본문 절단을 해제하며, `DocumentSecurityAuditor`는 주민등록번호·운전면허·여권·신용카드·전화번호·이메일·사업자번호·IPv4·API 토큰 패턴을 문서·시트·슬라이드·PDF 전 페이로드에서 마스킹합니다.
+  3. **macOS 워크스페이스 UI/UX 정밀 교정 (`SlideAndPDFDetailPanes.swift`, `RightContextInspectorView.swift`, `WorkspaceViews.swift`, `EditorDetailPanes.swift`, `HomeHubAndSmartViews.swift`, `EasyOfficeApp.swift`, `WorkspaceHub.swift`, `WorkspaceRibbonCommandRouter.swift`)**
+     - 슬라이드 상단 툴바의 간격과 레이블을 압축하여 `1440x900` 해상도에서 `쇼 시작 ▶` 버튼 잘림을 해소하고, 드래그 종료·정렬·선택 시 `activeSnapGuides`를 즉시 초기화하여 유령 스냅 가이드라인을 제거합니다.
+     - 우측 인스펙터의 다단 인라인 버튼에서 불필요한 우측 셰브론(`>`)을 제거하고, HWPX 인스펙터 빠른 실행 명령 접두사(`hwp-*`), PDF 펜 색상 한글 명칭(`라벤더`, `적색`, `흑색`), PDF 레이아웃 명령 분기, 용지 방향 순수 한글 표기(`세로`, `가로`), 스마트 보조 도구 전체 제안 노출을 적용합니다.
+     - 수정된 탭 닫기 시 인라인 저장 확인 바(`requestCloseTab`)와 최근 닫은 탭 복원(`reopenLastClosedTab`, `⇧⌘T`), 이종 포맷 내보내기 시 활성 탭 페이로드 보존, 텍스트 입력 포커스 시 네이티브 `⌘C`/`⌘V` 전달을 보장합니다.
+- **Why**: 스프레드시트 조회·통계·조건부 집계 함수의 힙 할당과 정규식 오버헤드를 제거하고, 컨테이너 파서의 경계 조건 및 macOS 워크스페이스의 사용성 결함을 근본 원인으로 해결하기 위함입니다.
+- **Trade-offs**: 컨테이너 모델에 `preservedArchiveEntries` 사전을 유지해야 하나, 외부 오피스 도구에서 생성한 테마·확장 메타데이터 스트림을 손실 없이 라운드트립 보존할 수 있습니다.
+- **Alternatives rejected**:
+  - 와일드카드 매칭에 정규식 캐시를 두는 방식은 패턴마다 여전히 객체 할당과 정규식 엔진 호출 비용이 발생하므로 무할당 투포인터 스캐너로 대체.
+- **Verified by**: `swift build`, `swift test`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when**: 외부 수식 플러그인 인터페이스 또는 스트리밍 대용량 XLSX/ODS 청크 파서를 확장할 때.
+

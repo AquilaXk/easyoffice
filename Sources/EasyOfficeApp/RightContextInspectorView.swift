@@ -14,6 +14,7 @@ struct RightContextInspectorView: View {
   private func inspectorButton(
     _ title: String,
     isProminent: Bool = false,
+    showsChevron: Bool = true,
     palette: WorkspaceThemePalette,
     action: @escaping () -> Void
   ) -> some View {
@@ -27,14 +28,16 @@ struct RightContextInspectorView: View {
               : palette.primaryText.swiftUIColor
           )
           .lineLimit(1)
-        Spacer(minLength: 2)
-        Image(systemName: "chevron.right")
-          .font(.system(size: 8.5, weight: .semibold))
-          .foregroundStyle(
-            isProminent
-              ? EasyOfficeDesignTokens.brand600.swiftUIColor
-              : palette.secondaryText.swiftUIColor.opacity(0.6)
-          )
+        if showsChevron {
+          Spacer(minLength: 2)
+          Image(systemName: "chevron.right")
+            .font(.system(size: 8.5, weight: .semibold))
+            .foregroundStyle(
+              isProminent
+                ? EasyOfficeDesignTokens.brand600.swiftUIColor
+                : palette.secondaryText.swiftUIColor.opacity(0.6)
+            )
+        }
       }
       .padding(.vertical, 3)
       .contentShape(Rectangle())
@@ -128,7 +131,7 @@ struct RightContextInspectorView: View {
     -> some View
   {
     let stats = doc.computeStatistics()
-    let modulePrefix = tab.moduleKind == .hwp ? "hwp" : "doc"
+    let modulePrefix = tab.moduleKind.rawValue
     let currentOrientation = doc.sections.first?.orientation ?? .portrait
     let currentColumns = doc.sections.first?.columnCount ?? 1
     let shortPaperLabel = doc.paperSize == .a4 ? "A4" : "Letter"
@@ -282,7 +285,7 @@ struct RightContextInspectorView: View {
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          inspectorButton("삽입", isProminent: true, palette: palette) {
+          inspectorButton("삽입", isProminent: true, showsChevron: false, palette: palette) {
             viewModel.insertEquationIntoActiveDocument()
           }
         }
@@ -298,10 +301,10 @@ struct RightContextInspectorView: View {
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          inspectorButton("적용", isProminent: true, palette: palette) {
+          inspectorButton("적용", isProminent: true, showsChevron: false, palette: palette) {
             viewModel.setDocumentWatermark(viewModel.watermarkDraftText)
           }
-          inspectorButton("해제", palette: palette) {
+          inspectorButton("해제", showsChevron: false, palette: palette) {
             viewModel.setDocumentWatermark("")
           }
         }
@@ -319,13 +322,13 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 10) {
-          inspectorButton("형광펜 강조", palette: palette) {
+          inspectorButton("형광펜 강조", showsChevron: false, palette: palette) {
             viewModel.toggleHighlightOnActiveParagraph()
           }
-          inspectorButton("취소선", palette: palette) {
+          inspectorButton("취소선", showsChevron: false, palette: palette) {
             viewModel.toggleStrikethroughOnActiveParagraph()
           }
-          inspectorButton("미주 삽입", palette: palette) {
+          inspectorButton("미주 삽입", showsChevron: false, palette: palette) {
             viewModel.insertEndnoteIntoActiveDocument()
           }
         }
@@ -337,7 +340,7 @@ struct RightContextInspectorView: View {
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          inspectorButton("링크 삽입", isProminent: true, palette: palette) {
+          inspectorButton("링크 삽입", isProminent: true, showsChevron: false, palette: palette) {
             viewModel.insertHyperlinkIntoActiveParagraph()
           }
         }
@@ -346,13 +349,13 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 10) {
-          inspectorButton("첫 줄 +10pt", palette: palette) {
+          inspectorButton("첫 줄 +10pt", showsChevron: false, palette: palette) {
             viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: 10, leftIndentDeltaPt: 0)
           }
-          inspectorButton("좌측 +10pt", palette: palette) {
+          inspectorButton("좌측 +10pt", showsChevron: false, palette: palette) {
             viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: 0, leftIndentDeltaPt: 10)
           }
-          inspectorButton("초기화", palette: palette) {
+          inspectorButton("초기화", showsChevron: false, palette: palette) {
             viewModel.adjustActiveParagraphIndent(firstLineDeltaPt: -144, leftIndentDeltaPt: -144)
           }
         }
@@ -384,19 +387,19 @@ struct RightContextInspectorView: View {
         .foregroundStyle(palette.secondaryText.swiftUIColor)
 
       HStack(spacing: 8) {
-        inspectorButton("자간-5%", palette: palette) {
+        inspectorButton("자간-5%", showsChevron: false, palette: palette) {
           viewModel.adjustActiveParagraphTypography(letterSpacingDelta: -5.0)
         }
-        inspectorButton("자간+5%", palette: palette) {
+        inspectorButton("자간+5%", showsChevron: false, palette: palette) {
           viewModel.adjustActiveParagraphTypography(letterSpacingDelta: 5.0)
         }
-        inspectorButton("장평90%", palette: palette) {
+        inspectorButton("장평90%", showsChevron: false, palette: palette) {
           viewModel.adjustActiveParagraphTypography(charScaleDelta: 90.0 - currentCharScale)
         }
-        inspectorButton("장평105%", palette: palette) {
+        inspectorButton("장평105%", showsChevron: false, palette: palette) {
           viewModel.adjustActiveParagraphTypography(charScaleDelta: 105.0 - currentCharScale)
         }
-        inspectorButton("초기화", palette: palette) {
+        inspectorButton("초기화", showsChevron: false, palette: palette) {
           viewModel.adjustActiveParagraphTypography(reset: true)
         }
       }
@@ -405,26 +408,40 @@ struct RightContextInspectorView: View {
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(palette.secondaryText.swiftUIColor)
       HStack(spacing: 10) {
-        inspectorButton("좌측", palette: palette) { viewModel.setActiveParagraphAlignment(.leading) }
-        inspectorButton("가운데", palette: palette) { viewModel.setActiveParagraphAlignment(.center) }
-        inspectorButton("우측", palette: palette) { viewModel.setActiveParagraphAlignment(.trailing) }
-        inspectorButton("양쪽", palette: palette) { viewModel.setActiveParagraphAlignment(.justified) }
+        inspectorButton("좌측", showsChevron: false, palette: palette) {
+          viewModel.setActiveParagraphAlignment(.leading)
+        }
+        inspectorButton("가운데", showsChevron: false, palette: palette) {
+          viewModel.setActiveParagraphAlignment(.center)
+        }
+        inspectorButton("우측", showsChevron: false, palette: palette) {
+          viewModel.setActiveParagraphAlignment(.trailing)
+        }
+        inspectorButton("양쪽", showsChevron: false, palette: palette) {
+          viewModel.setActiveParagraphAlignment(.justified)
+        }
       }
       HStack(spacing: 8) {
         ForEach([100.0, 115.0, 150.0, 160.0, 200.0], id: \.self) { pct in
-          inspectorButton("\(Int(pct))%", palette: palette) {
+          inspectorButton("\(Int(pct))%", showsChevron: false, palette: palette) {
             viewModel.setActiveParagraphLineSpacing(pct)
           }
         }
       }
       HStack(spacing: 8) {
-        inspectorButton("글머리", palette: palette) { viewModel.setActiveParagraphListKind(.bullet) }
-        inspectorButton("번호", palette: palette) { viewModel.setActiveParagraphListKind(.numbered) }
-        inspectorButton("공문서", palette: palette) {
+        inspectorButton("글머리", showsChevron: false, palette: palette) {
+          viewModel.setActiveParagraphListKind(.bullet)
+        }
+        inspectorButton("번호", showsChevron: false, palette: palette) {
+          viewModel.setActiveParagraphListKind(.numbered)
+        }
+        inspectorButton("공문서", showsChevron: false, palette: palette) {
           viewModel.setActiveParagraphListKind(.koreanOfficial)
         }
-        inspectorButton("해제", palette: palette) { viewModel.setActiveParagraphListKind(.none) }
-        inspectorButton("수준+1", palette: palette) {
+        inspectorButton("해제", showsChevron: false, palette: palette) {
+          viewModel.setActiveParagraphListKind(.none)
+        }
+        inspectorButton("수준+1", showsChevron: false, palette: palette) {
           viewModel.setActiveParagraphListKind(
             activeListKind == .none ? .koreanOfficial : activeListKind,
             levelDelta: 1
@@ -441,12 +458,24 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 8) {
-          inspectorButton("+행", palette: palette) { viewModel.insertRowInDocumentTable() }
-          inspectorButton("-행", palette: palette) { viewModel.deleteRowInDocumentTable() }
-          inspectorButton("+열", palette: palette) { viewModel.insertColumnInDocumentTable() }
-          inspectorButton("-열", palette: palette) { viewModel.deleteColumnInDocumentTable() }
-          inspectorButton("병합", palette: palette) { viewModel.mergeActiveDocumentTableCells() }
-          inspectorButton("분할", palette: palette) { viewModel.splitActiveDocumentTableCell() }
+          inspectorButton("+행", showsChevron: false, palette: palette) {
+            viewModel.insertRowInDocumentTable()
+          }
+          inspectorButton("-행", showsChevron: false, palette: palette) {
+            viewModel.deleteRowInDocumentTable()
+          }
+          inspectorButton("+열", showsChevron: false, palette: palette) {
+            viewModel.insertColumnInDocumentTable()
+          }
+          inspectorButton("-열", showsChevron: false, palette: palette) {
+            viewModel.deleteColumnInDocumentTable()
+          }
+          inspectorButton("병합", showsChevron: false, palette: palette) {
+            viewModel.mergeActiveDocumentTableCells()
+          }
+          inspectorButton("분할", showsChevron: false, palette: palette) {
+            viewModel.splitActiveDocumentTableCell()
+          }
         }
       }
 
@@ -468,7 +497,7 @@ struct RightContextInspectorView: View {
           palette: palette,
           isSnapshotMode: viewModel.isCanvasSnapshotMode
         )
-        inspectorButton("치환", isProminent: true, palette: palette) {
+        inspectorButton("치환", isProminent: true, showsChevron: false, palette: palette) {
           viewModel.applyMailMergeFieldReplacement()
         }
       }
@@ -551,13 +580,13 @@ struct RightContextInspectorView: View {
         .foregroundStyle(palette.secondaryText.swiftUIColor)
 
         HStack(spacing: 10) {
-          inspectorButton("줄바꿈 전환", palette: palette) {
+          inspectorButton("줄바꿈 전환", showsChevron: false, palette: palette) {
             viewModel.toggleWrapTextOnSelectedSheetCell()
           }
-          inspectorButton("소수점 -1", palette: palette) {
+          inspectorButton("소수점 -1", showsChevron: false, palette: palette) {
             viewModel.adjustSelectedSheetCellDecimalPlaces(delta: -1)
           }
-          inspectorButton("소수점 +1", palette: palette) {
+          inspectorButton("소수점 +1", showsChevron: false, palette: palette) {
             viewModel.adjustSelectedSheetCellDecimalPlaces(delta: 1)
           }
         }
@@ -569,10 +598,10 @@ struct RightContextInspectorView: View {
         HStack(spacing: 8) {
           Text("열 폭 (\(Int(colWidth))pt)")
             .font(.system(size: 10, design: .monospaced))
-          inspectorButton("-20pt", palette: palette) {
+          inspectorButton("-20pt", showsChevron: false, palette: palette) {
             viewModel.updateActiveSheetColumnWidth(column: selectedAddr.column, width: colWidth - 20)
           }
-          inspectorButton("+20pt", palette: palette) {
+          inspectorButton("+20pt", showsChevron: false, palette: palette) {
             viewModel.updateActiveSheetColumnWidth(column: selectedAddr.column, width: colWidth + 20)
           }
         }
@@ -580,19 +609,27 @@ struct RightContextInspectorView: View {
         HStack(spacing: 8) {
           Text("행 높이 (\(Int(rowHeight))pt)")
             .font(.system(size: 10, design: .monospaced))
-          inspectorButton("-20pt", palette: palette) {
+          inspectorButton("-20pt", showsChevron: false, palette: palette) {
             viewModel.updateActiveSheetRowHeight(row: selectedAddr.row, height: rowHeight - 20)
           }
-          inspectorButton("+20pt", palette: palette) {
+          inspectorButton("+20pt", showsChevron: false, palette: palette) {
             viewModel.updateActiveSheetRowHeight(row: selectedAddr.row, height: rowHeight + 20)
           }
         }
 
         HStack(spacing: 10) {
-          inspectorButton("+행", palette: palette) { viewModel.insertSheetRowAtSelection() }
-          inspectorButton("-행", palette: palette) { viewModel.deleteSheetRowAtSelection() }
-          inspectorButton("+열", palette: palette) { viewModel.insertSheetColumnAtSelection() }
-          inspectorButton("-열", palette: palette) { viewModel.deleteSheetColumnAtSelection() }
+          inspectorButton("+행", showsChevron: false, palette: palette) {
+            viewModel.insertSheetRowAtSelection()
+          }
+          inspectorButton("-행", showsChevron: false, palette: palette) {
+            viewModel.deleteSheetRowAtSelection()
+          }
+          inspectorButton("+열", showsChevron: false, palette: palette) {
+            viewModel.insertSheetColumnAtSelection()
+          }
+          inspectorButton("-열", showsChevron: false, palette: palette) {
+            viewModel.deleteSheetColumnAtSelection()
+          }
         }
 
         FlatToggleControl(
@@ -774,10 +811,10 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 10) {
-          inspectorButton("중복 행 제거", palette: palette) {
+          inspectorButton("중복 행 제거", showsChevron: false, palette: palette) {
             viewModel.removeDuplicatesInActiveSheet()
           }
-          inspectorButton("텍스트 나누기(,)", palette: palette) {
+          inspectorButton("텍스트 나누기(,)", showsChevron: false, palette: palette) {
             viewModel.splitActiveSheetColumnByDelimiter()
           }
         }
@@ -883,20 +920,20 @@ struct RightContextInspectorView: View {
 
           HStack(spacing: 10) {
             ForEach([0.4, 0.8, 1.5, 2.5], id: \.self) { sec in
-              inspectorButton("\(String(format: "%.1f", sec))초", palette: palette) {
+              inspectorButton("\(String(format: "%.1f", sec))초", showsChevron: false, palette: palette) {
                 viewModel.setActiveSlideTransitionDuration(sec)
               }
             }
           }
 
           HStack(spacing: 10) {
-            inspectorButton("수동", palette: palette) {
+            inspectorButton("수동", showsChevron: false, palette: palette) {
               viewModel.setActiveSlideAutoAdvance(seconds: nil)
             }
-            inspectorButton("5초", palette: palette) {
+            inspectorButton("5초", showsChevron: false, palette: palette) {
               viewModel.setActiveSlideAutoAdvance(seconds: 5)
             }
-            inspectorButton("10초", palette: palette) {
+            inspectorButton("10초", showsChevron: false, palette: palette) {
               viewModel.setActiveSlideAutoAdvance(seconds: 10)
             }
           }
@@ -943,14 +980,24 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 10) {
-          inspectorButton("슬라이드 추가", palette: palette) { viewModel.addSlideToActiveDeck() }
-          inspectorButton("복제", palette: palette) { viewModel.duplicateActiveSlide() }
-          inspectorButton("삭제", palette: palette) { viewModel.deleteActiveSlide() }
-            .disabled(deck.slides.count <= 1)
+          inspectorButton("슬라이드 추가", showsChevron: false, palette: palette) {
+            viewModel.addSlideToActiveDeck()
+          }
+          inspectorButton("복제", showsChevron: false, palette: palette) {
+            viewModel.duplicateActiveSlide()
+          }
+          inspectorButton("삭제", showsChevron: false, palette: palette) {
+            viewModel.deleteActiveSlide()
+          }
+          .disabled(deck.slides.count <= 1)
         }
         HStack(spacing: 10) {
-          inspectorButton("위로 이동", palette: palette) { viewModel.moveActiveSlide(offset: -1) }
-          inspectorButton("아래로 이동", palette: palette) { viewModel.moveActiveSlide(offset: 1) }
+          inspectorButton("위로 이동", showsChevron: false, palette: palette) {
+            viewModel.moveActiveSlide(offset: -1)
+          }
+          inspectorButton("아래로 이동", showsChevron: false, palette: palette) {
+            viewModel.moveActiveSlide(offset: 1)
+          }
         }
       }
 
@@ -1000,34 +1047,34 @@ struct RightContextInspectorView: View {
         )
 
         HStack(spacing: 10) {
-          inspectorButton("X -10", palette: palette) {
+          inspectorButton("X -10", showsChevron: false, palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: -10, deltaY: 0)
           }
-          inspectorButton("X +10", palette: palette) {
+          inspectorButton("X +10", showsChevron: false, palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 10, deltaY: 0)
           }
-          inspectorButton("Y -10", palette: palette) {
+          inspectorButton("Y -10", showsChevron: false, palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 0, deltaY: -10)
           }
-          inspectorButton("Y +10", palette: palette) {
+          inspectorButton("Y +10", showsChevron: false, palette: palette) {
             viewModel.moveSlideElement(slideIndex: sIdx, elementID: elementID, deltaX: 0, deltaY: 10)
           }
         }
 
         HStack(spacing: 10) {
-          inspectorButton("폭 -20", palette: palette) {
+          inspectorButton("폭 -20", showsChevron: false, palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: -20, deltaHeight: 0)
           }
-          inspectorButton("폭 +20", palette: palette) {
+          inspectorButton("폭 +20", showsChevron: false, palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: 20, deltaHeight: 0)
           }
-          inspectorButton("높이 -20", palette: palette) {
+          inspectorButton("높이 -20", showsChevron: false, palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: 0, deltaHeight: -20)
           }
-          inspectorButton("높이 +20", palette: palette) {
+          inspectorButton("높이 +20", showsChevron: false, palette: palette) {
             viewModel.resizeSlideElement(
               slideIndex: sIdx, elementID: elementID, deltaWidth: 0, deltaHeight: 20)
           }
@@ -1036,15 +1083,15 @@ struct RightContextInspectorView: View {
         HStack(spacing: 8) {
           Text("회전 \(Int(elem.rotationDegrees))°")
             .font(.system(size: 10, design: .monospaced))
-          inspectorButton("-15°", palette: palette) {
+          inspectorButton("-15°", showsChevron: false, palette: palette) {
             viewModel.rotateSlideElement(
               slideIndex: sIdx, elementID: elementID, toDegrees: elem.rotationDegrees - 15)
           }
-          inspectorButton("+15°", palette: palette) {
+          inspectorButton("+15°", showsChevron: false, palette: palette) {
             viewModel.rotateSlideElement(
               slideIndex: sIdx, elementID: elementID, toDegrees: elem.rotationDegrees + 15)
           }
-          inspectorButton("0° 초기화", palette: palette) {
+          inspectorButton("0° 초기화", showsChevron: false, palette: palette) {
             viewModel.rotateSlideElement(slideIndex: sIdx, elementID: elementID, toDegrees: 0)
           }
         }
@@ -1059,11 +1106,11 @@ struct RightContextInspectorView: View {
         }
 
         HStack(spacing: 10) {
-          inspectorButton("앞으로", palette: palette) {
+          inspectorButton("앞으로", showsChevron: false, palette: palette) {
             viewModel.moveSlideElementZOrder(
               slideIndex: sIdx, elementID: elementID, bringForward: true)
           }
-          inspectorButton("뒤로", palette: palette) {
+          inspectorButton("뒤로", showsChevron: false, palette: palette) {
             viewModel.moveSlideElementZOrder(
               slideIndex: sIdx, elementID: elementID, bringForward: false)
           }
@@ -1073,16 +1120,26 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 8) {
-          inspectorButton("좌측", palette: palette) { viewModel.alignSlideElements(.alignLeft) }
-          inspectorButton("중앙", palette: palette) { viewModel.alignSlideElements(.alignCenter) }
-          inspectorButton("우측", palette: palette) { viewModel.alignSlideElements(.alignRight) }
-          inspectorButton("배분", palette: palette) {
+          inspectorButton("좌측", showsChevron: false, palette: palette) {
+            viewModel.alignSlideElements(.alignLeft)
+          }
+          inspectorButton("중앙", showsChevron: false, palette: palette) {
+            viewModel.alignSlideElements(.alignCenter)
+          }
+          inspectorButton("우측", showsChevron: false, palette: palette) {
+            viewModel.alignSlideElements(.alignRight)
+          }
+          inspectorButton("배분", showsChevron: false, palette: palette) {
             viewModel.alignSlideElements(.distributeHorizontally)
           }
         }
         HStack(spacing: 10) {
-          inspectorButton("개체 복제", palette: palette) { viewModel.duplicateActiveSlideElement() }
-          inspectorButton("개체 삭제", palette: palette) { viewModel.deleteActiveSlideElement() }
+          inspectorButton("개체 복제", showsChevron: false, palette: palette) {
+            viewModel.duplicateActiveSlideElement()
+          }
+          inspectorButton("개체 삭제", showsChevron: false, palette: palette) {
+            viewModel.deleteActiveSlideElement()
+          }
         }
       }
 
@@ -1122,34 +1179,42 @@ struct RightContextInspectorView: View {
 
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 10) {
-          inspectorButton("90° 회전", palette: palette) {
+          inspectorButton("90° 회전", showsChevron: false, palette: palette) {
             viewModel.rotateActivePDFPage(clockwiseDegrees: 90)
           }
-          inspectorButton("하이라이트 주석", palette: palette) {
+          inspectorButton("하이라이트 주석", showsChevron: false, palette: palette) {
             viewModel.addPDFAnnotation(kind: .highlight, content: "하이라이트 주석")
           }
         }
 
         HStack(spacing: 10) {
-          inspectorButton("빈 페이지 추가", palette: palette) {
+          inspectorButton("빈 페이지 추가", showsChevron: false, palette: palette) {
             viewModel.insertBlankPDFPage(afterPage: viewModel.selectedPDFPageNumber)
           }
-          inspectorButton("페이지 삭제", palette: palette) {
+          inspectorButton("페이지 삭제", showsChevron: false, palette: palette) {
             viewModel.deleteActivePDFPage()
           }
           .disabled(pdf.pages.count <= 1)
         }
 
         HStack(spacing: 10) {
-          inspectorButton("페이지 위로", palette: palette) { viewModel.moveActivePDFPage(offset: -1) }
-          inspectorButton("페이지 아래로", palette: palette) { viewModel.moveActivePDFPage(offset: 1) }
+          inspectorButton("페이지 위로", showsChevron: false, palette: palette) {
+            viewModel.moveActivePDFPage(offset: -1)
+          }
+          inspectorButton("페이지 아래로", showsChevron: false, palette: palette) {
+            viewModel.moveActivePDFPage(offset: 1)
+          }
         }
 
         HStack(spacing: 10) {
-          inspectorButton("PDF 탭 병합", palette: palette) {
+          inspectorButton("PDF 탭 병합", showsChevron: false, palette: palette) {
             viewModel.mergeActivePDFWithAnotherOpenTab()
           }
-          inspectorButton("페이지 분할 (\(viewModel.selectedPDFPageNumber)p)", palette: palette) {
+          inspectorButton(
+            "페이지 분할 (\(viewModel.selectedPDFPageNumber)p)",
+            showsChevron: false,
+            palette: palette
+          ) {
             viewModel.executeRibbonCommand("pdf-mod-splitmerge")
           }
         }
@@ -1166,16 +1231,16 @@ struct RightContextInspectorView: View {
           .font(.system(size: 10, weight: .semibold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
         HStack(spacing: 10) {
-          inspectorButton("승인", palette: palette) {
+          inspectorButton("승인", showsChevron: false, palette: palette) {
             viewModel.addStampToActivePDFPage(preset: .approved)
           }
-          inspectorButton("대외비", palette: palette) {
+          inspectorButton("대외비", showsChevron: false, palette: palette) {
             viewModel.addStampToActivePDFPage(preset: .confidential)
           }
-          inspectorButton("검토필", palette: palette) {
+          inspectorButton("검토필", showsChevron: false, palette: palette) {
             viewModel.addStampToActivePDFPage(preset: .reviewed)
           }
-          inspectorButton("긴급", palette: palette) {
+          inspectorButton("긴급", showsChevron: false, palette: palette) {
             viewModel.addStampToActivePDFPage(preset: .urgent)
           }
         }
@@ -1195,10 +1260,10 @@ struct RightContextInspectorView: View {
         )
 
         HStack(spacing: 10) {
-          inspectorButton("워터마크 적용", isProminent: true, palette: palette) {
+          inspectorButton("워터마크 적용", isProminent: true, showsChevron: false, palette: palette) {
             viewModel.applyWatermarkOnActivePDF()
           }
-          inspectorButton("워터마크 해제", palette: palette) {
+          inspectorButton("워터마크 해제", showsChevron: false, palette: palette) {
             viewModel.applyWatermarkOnActivePDF(text: "")
           }
         }
@@ -1216,13 +1281,25 @@ struct RightContextInspectorView: View {
           palette: palette
         )
 
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
           Text("펜 색상")
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
-          ForEach(["#5C6BC0", "#D32F2F", "#1E293B"], id: \.self) { hex in
-            inspectorButton(hex, palette: palette) {
-              viewModel.pdfInkStrokeColorHex = hex
+          ForEach(
+            [
+              (label: "라벤더", hex: "#5C6BC0"),
+              (label: "적색", hex: "#D32F2F"),
+              (label: "흑색", hex: "#1E293B"),
+            ],
+            id: \.hex
+          ) { item in
+            inspectorButton(
+              item.label,
+              isProminent: viewModel.pdfInkStrokeColorHex == item.hex,
+              showsChevron: false,
+              palette: palette
+            ) {
+              viewModel.pdfInkStrokeColorHex = item.hex
             }
           }
         }
@@ -1281,10 +1358,10 @@ struct RightContextInspectorView: View {
           )
         }
         HStack(spacing: 10) {
-          inspectorButton("텍스트 필드 추가", palette: palette) {
+          inspectorButton("텍스트 필드 추가", showsChevron: false, palette: palette) {
             viewModel.addFormFieldToActivePDF(isCheckbox: false)
           }
-          inspectorButton("체크박스 추가", palette: palette) {
+          inspectorButton("체크박스 추가", showsChevron: false, palette: palette) {
             viewModel.addFormFieldToActivePDF(isCheckbox: true)
           }
         }
@@ -1302,7 +1379,7 @@ struct RightContextInspectorView: View {
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
           )
-          inspectorButton("추가", isProminent: true, palette: palette) {
+          inspectorButton("추가", isProminent: true, showsChevron: false, palette: palette) {
             viewModel.addBookmarkToActivePDF()
           }
         }

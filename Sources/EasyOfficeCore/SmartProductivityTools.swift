@@ -35,6 +35,7 @@ public struct ConversionJobResult: Sendable, Equatable, Identifiable {
   public let outputBytes: Data
   public let convertedPayload: OpenTabPayload
   public let verifiedSignature: VerifiedDocumentSignature
+  public let outputFileURL: URL?
 
   public init(
     id: UUID,
@@ -44,7 +45,8 @@ public struct ConversionJobResult: Sendable, Equatable, Identifiable {
     targetFormat: DocumentFormat,
     outputBytes: Data,
     convertedPayload: OpenTabPayload,
-    verifiedSignature: VerifiedDocumentSignature
+    verifiedSignature: VerifiedDocumentSignature,
+    outputFileURL: URL? = nil
   ) {
     self.id = id
     self.sourceFileName = sourceFileName
@@ -54,6 +56,7 @@ public struct ConversionJobResult: Sendable, Equatable, Identifiable {
     self.outputBytes = outputBytes
     self.convertedPayload = convertedPayload
     self.verifiedSignature = verifiedSignature
+    self.outputFileURL = outputFileURL
   }
 }
 
@@ -146,13 +149,37 @@ public enum DocumentConversionOrchestrator {
     )
   }
 
-  public static func executeBatch(_ jobs: [ConversionJobRequest]) -> BatchConversionReport {
+  public static func executeBatch(
+    _ jobs: [ConversionJobRequest],
+    outputDirectory: URL? = nil
+  ) -> BatchConversionReport {
     var succeeded: [ConversionJobResult] = []
     var failed: [(jobID: UUID, errorDescription: String)] = []
+    let targetDir =
+      outputDirectory
+      ?? FileManager.default.temporaryDirectory.appendingPathComponent(
+        "EasyOfficeBatchOutput", isDirectory: true)
+    try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
     for job in jobs {
       do {
-        let result = try convert(job)
+        let converted = try convert(job)
+        let fileURL = targetDir.appendingPathComponent(converted.outputFileName)
+        var writtenURL: URL? = nil
+        if (try? converted.outputBytes.write(to: fileURL, options: .atomic)) != nil {
+          writtenURL = fileURL
+        }
+        let result = ConversionJobResult(
+          id: converted.id,
+          sourceFileName: converted.sourceFileName,
+          outputFileName: converted.outputFileName,
+          sourceFormat: converted.sourceFormat,
+          targetFormat: converted.targetFormat,
+          outputBytes: converted.outputBytes,
+          convertedPayload: converted.convertedPayload,
+          verifiedSignature: converted.verifiedSignature,
+          outputFileURL: writtenURL
+        )
         succeeded.append(result)
       } catch {
         let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -365,8 +392,8 @@ public enum DocumentConversionOrchestrator {
     var maxRow = 0
     var maxCol = 0
     for coord in sheet.cellsByCoordinate.keys {
-      maxRow = max(maxRow, min(coord.row, 200))
-      maxCol = max(maxCol, min(coord.column, 50))
+      maxRow = max(maxRow, min(coord.row, 65_535))
+      maxCol = max(maxCol, min(coord.column, 1_023))
     }
     let start =
       (try? CellAddress(column: 0, row: 0))
@@ -489,7 +516,54 @@ public struct SecurityAuditReport: Sendable, Codable, Equatable {
 /// Container security auditor and document metadata/PII scrubber.
 public enum DocumentSecurityAuditor {
 
-  /// Scrubs header/footer PII markers, anonymizes revision authors to `"Redacted"`, and removes all review comments.
+  private static let sensitivePatternRules: [(label: String, regex: NSRegularExpression, mask: String)] = {
+    let rawRules: [(String, String, String)] = [
+      ("주민등록번호", #"\b\d{6}[-–]\s*[1-8]\d{6}\b"#, "[주민등록번호 비식별]"),
+      ("운전면허번호", #"\b\d{2}-\d{2}-\d{6}-\d{2}\b"#, "[운전면허 비식별]"),
+      ("여권번호", #"\b(?:[MSRGD]\d{8}|[A-Z]{2}\d{7})\b"#, "[여권번호 비식별]"),
+      ("신용카드번호", #"\b(?:\d{4}[-\s]){3}\d{4}\b"#, "[카드번호 비식별]"),
+      ("전화번호", #"\b01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}\b|\b0\d{1,2}[-.\s]\d{3,4}[-.\s]\d{4}\b"#, "[연락처 비식별]"),
+      ("이메일", #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#, "[이메일 비식별]"),
+      ("사업자/법인등록번호", #"\b\d{3}-\d{2}-\d{5}\b"#, "[사업자번호 비식별]"),
+      ("IPv4주소", #"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"#, "[IP 비식별]"),
+      ("API토큰", #"\b(?:sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b"#, "[인증토큰 비식별]"),
+    ]
+    return rawRules.compactMap { label, pattern, mask in
+      guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+      return (label, regex, mask)
+    }
+  }()
+
+  public static func detectSensitivePatterns(in text: String) -> [String] {
+    guard !text.isEmpty else { return [] }
+    let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+    var findings: [String] = []
+    for rule in sensitivePatternRules {
+      let matches = rule.regex.matches(in: text, options: [], range: nsRange)
+      if !matches.isEmpty {
+        findings.append("\(rule.label) (\(matches.count)건)")
+      }
+    }
+    return findings
+  }
+
+  public static func maskSensitivePatterns(in text: String) -> (masked: String, matchCount: Int) {
+    guard !text.isEmpty else { return (text, 0) }
+    var current = text
+    var totalMatches = 0
+    for rule in sensitivePatternRules {
+      let nsRange = NSRange(current.startIndex..<current.endIndex, in: current)
+      let count = rule.regex.numberOfMatches(in: current, options: [], range: nsRange)
+      if count > 0 {
+        totalMatches += count
+        current = rule.regex.stringByReplacingMatches(
+          in: current, options: [], range: nsRange, withTemplate: rule.mask)
+      }
+    }
+    return (current, totalMatches)
+  }
+
+  /// Scrubs header/footer PII markers, anonymizes revision authors to `"Redacted"`, removes all review comments, and masks sensitive PII patterns in body paragraphs and tables.
   public static func scrubMetadata(
     from document: OfficeDocumentModel
   ) -> (scrubbed: OfficeDocumentModel, removedItemCount: Int) {
@@ -517,7 +591,178 @@ public enum DocumentSecurityAuditor {
       copy.comments.removeAll()
     }
 
+    for pIdx in copy.paragraphs.indices {
+      let (maskedText, count) = maskSensitivePatterns(in: copy.paragraphs[pIdx].text)
+      if count > 0 {
+        copy.paragraphs[pIdx].text = maskedText
+        removedCount += count
+      }
+      for rIdx in copy.paragraphs[pIdx].runs.indices {
+        let (maskedRun, rCount) = maskSensitivePatterns(in: copy.paragraphs[pIdx].runs[rIdx].text)
+        if rCount > 0 {
+          copy.paragraphs[pIdx].runs[rIdx].text = maskedRun
+        }
+      }
+    }
+
+    for tIdx in copy.tables.indices {
+      for rIdx in copy.tables[tIdx].rows.indices {
+        for cIdx in copy.tables[tIdx].rows[rIdx].indices {
+          let (maskedCell, count) = maskSensitivePatterns(in: copy.tables[tIdx].rows[rIdx][cIdx])
+          if count > 0 {
+            copy.tables[tIdx].rows[rIdx][cIdx] = maskedCell
+            removedCount += count
+          }
+        }
+      }
+    }
+
+    let (scrubbedPreserved, preservedRemoved) = scrubPreservedArchiveEntries(
+      copy.preservedArchiveEntries)
+    copy.preservedArchiveEntries = scrubbedPreserved
+    removedCount += preservedRemoved
+
     return (copy, removedCount)
+  }
+
+  private static func scrubPreservedArchiveEntries(
+    _ entries: [String: Data]
+  ) -> (scrubbed: [String: Data], removedCount: Int) {
+    guard !entries.isEmpty else { return (entries, 0) }
+    var out: [String: Data] = [:]
+    var removedCount = 0
+    for (path, data) in entries {
+      if XMLDocumentModelMapper.isBinaryMediaPath(path) {
+        out[path] = data
+        continue
+      }
+      let lower = path.lowercased()
+      if lower.contains("comment") || lower.contains("notesslide")
+        || lower.contains("revision") || lower.contains("people.xml")
+        || lower.hasSuffix("meta.xml") || lower.hasSuffix("core.xml")
+        || lower.hasSuffix("custom.xml") || lower.contains("header")
+        || lower.contains("footer")
+      {
+        removedCount += 1
+        continue
+      }
+      if let xmlText = String(data: data, encoding: .utf8) {
+        let (maskedText, count) = maskSensitivePatterns(in: xmlText)
+        removedCount += count
+        out[path] = Data(maskedText.utf8)
+      } else {
+        out[path] = data
+      }
+    }
+    return (out, removedCount)
+  }
+
+  public static func scrubPayload(
+    _ payload: OpenTabPayload
+  ) -> (scrubbed: OpenTabPayload, removedItemCount: Int) {
+    switch payload {
+    case .document(let doc):
+      let (scrubbed, count) = scrubMetadata(from: doc)
+      return (.document(scrubbed), count)
+
+    case .sheet(var sheet):
+      var removedCount = sheet.sheetComments.count
+      sheet.sheetComments.removeAll()
+      for coord in Array(sheet.cellsByCoordinate.keys) {
+        if let raw = sheet.cellsByCoordinate[coord], !raw.hasPrefix("=") {
+          let (masked, count) = maskSensitivePatterns(in: raw)
+          if count > 0 {
+            sheet.cellsByCoordinate[coord] = masked
+            removedCount += count
+          }
+        }
+      }
+      for sIdx in sheet.additionalSheets.indices {
+        removedCount += sheet.additionalSheets[sIdx].sheetComments.count
+        sheet.additionalSheets[sIdx].sheetComments.removeAll()
+        for coord in Array(sheet.additionalSheets[sIdx].cellsByCoordinate.keys) {
+          if let raw = sheet.additionalSheets[sIdx].cellsByCoordinate[coord], !raw.hasPrefix("=") {
+            let (masked, count) = maskSensitivePatterns(in: raw)
+            if count > 0 {
+              sheet.additionalSheets[sIdx].cellsByCoordinate[coord] = masked
+              removedCount += count
+            }
+          }
+        }
+      }
+      let (scrubbedSheetPreserved, sheetPreservedRemoved) = scrubPreservedArchiveEntries(
+        sheet.preservedArchiveEntries)
+      sheet.preservedArchiveEntries = scrubbedSheetPreserved
+      removedCount += sheetPreservedRemoved
+      return (.sheet(sheet), removedCount)
+
+    case .slide(var deck):
+      var removedCount = 0
+      for sIdx in deck.slides.indices {
+        if !deck.slides[sIdx].speakerNotes.isEmpty {
+          deck.slides[sIdx].speakerNotes = ""
+          removedCount += 1
+        }
+        let (mTitle, c1) = maskSensitivePatterns(in: deck.slides[sIdx].title)
+        if c1 > 0 {
+          deck.slides[sIdx].title = mTitle
+          removedCount += c1
+        }
+        let (mSub, c2) = maskSensitivePatterns(in: deck.slides[sIdx].subtitle)
+        if c2 > 0 {
+          deck.slides[sIdx].subtitle = mSub
+          removedCount += c2
+        }
+        for bIdx in deck.slides[sIdx].bulletPoints.indices {
+          let (mBullet, c3) = maskSensitivePatterns(in: deck.slides[sIdx].bulletPoints[bIdx])
+          if c3 > 0 {
+            deck.slides[sIdx].bulletPoints[bIdx] = mBullet
+            removedCount += c3
+          }
+        }
+        for eIdx in deck.slides[sIdx].elements.indices {
+          let (mBody, c4) = maskSensitivePatterns(in: deck.slides[sIdx].elements[eIdx].bodyText)
+          if c4 > 0 {
+            deck.slides[sIdx].elements[eIdx].bodyText = mBody
+            removedCount += c4
+          }
+        }
+      }
+      let (scrubbedSlidePreserved, slidePreservedRemoved) = scrubPreservedArchiveEntries(
+        deck.preservedArchiveEntries)
+      deck.preservedArchiveEntries = scrubbedSlidePreserved
+      removedCount += slidePreservedRemoved
+      return (.slide(deck), removedCount)
+
+    case .pdf(var pdf):
+      var removedCount = 0
+      for aIdx in pdf.annotations.indices {
+        if pdf.annotations[aIdx].author != "Redacted" {
+          pdf.annotations[aIdx].author = "Redacted"
+          removedCount += 1
+        }
+        let (mContent, c0) = maskSensitivePatterns(in: pdf.annotations[aIdx].content)
+        if c0 > 0 {
+          pdf.annotations[aIdx].content = mContent
+          removedCount += c0
+        }
+      }
+      for pIdx in pdf.pages.indices {
+        let (maskedPage, count) = maskSensitivePatterns(in: pdf.pages[pIdx].extractedText)
+        if count > 0 {
+          pdf.pages[pIdx].extractedText = maskedPage
+          removedCount += count
+        }
+      }
+      for fIdx in pdf.formFields.indices {
+        let (maskedVal, count) = maskSensitivePatterns(in: pdf.formFields[fIdx].value)
+        if count > 0 {
+          pdf.formFields[fIdx].value = maskedVal
+          removedCount += count
+        }
+      }
+      return (.pdf(pdf), removedCount)
+    }
   }
 
   /// Audits a raw document container against magic-byte spoofing, ZIP decompression bombs, path traversal, XML external entities (XXE), and unsupported encryption.

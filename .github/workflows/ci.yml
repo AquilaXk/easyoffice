@@ -37,6 +37,12 @@ jobs:
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
 
+      - name: Check Rust formatting across workspace
+        run: cargo fmt --all -- --check
+
+      - name: Run Rust Clippy lint gate across workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Run Rust cross-platform workspace test suite
         run: cargo test --workspace
 
@@ -50,7 +56,7 @@ jobs:
         run: swift test
 
       - name: Verify macOS .app bundle packaging
-        run: bash scripts/package-macos-release.sh 0.1.0-ci --verify-only
+        run: bash scripts/package-macos-release.sh 1.0.0-ci --verify-only
 
   verify-windows:
     name: Verify Rust Core & Tauri Shell (Windows x64)

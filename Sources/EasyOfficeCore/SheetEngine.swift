@@ -36,6 +36,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
   public var conditionalFormatRules: [SheetConditionalFormatRule] = []
   /// Active worksheet data validation rule.
   public var dataValidationRule: SheetDataValidationRule? = nil
+  /// Passthrough archive entries preserved across round-trip open/save for container formats.
+  public var preservedArchiveEntries: [String: Data] = [:]
   /// Pre-compiled AST cache keyed by `PackedCellCoordinate`.
   internal var compiledASTs: [PackedCellCoordinate: FormulaAST] = [:]
 
@@ -759,25 +761,16 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     context: inout EvaluationContext,
     depth: Int
   ) -> [[EvaluatedCellValue]] {
-    let minRow = min(range.start.row, range.end.row)
-    let maxRow = max(range.start.row, range.end.row)
-    let minCol = min(range.start.column, range.end.column)
-    let maxCol = max(range.start.column, range.end.column)
-    let (rowSpan, rOverflow) = (maxRow - minRow).addingReportingOverflow(1)
-    let (colSpan, cOverflow) = (maxCol - minCol).addingReportingOverflow(1)
-    let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
-    guard !rOverflow, !cOverflow, !mulOverflow,
-      totalCells > 0, totalCells <= CellRange.maxExpandedCellCount
-    else {
+    guard let bounds = rangeBounds(range) else {
       return []
     }
 
     var grid: [[EvaluatedCellValue]] = []
-    grid.reserveCapacity(rowSpan)
-    for r in minRow...maxRow {
+    grid.reserveCapacity(bounds.rowCount)
+    for r in bounds.minRow...bounds.maxRow {
       var rowVals: [EvaluatedCellValue] = []
-      rowVals.reserveCapacity(colSpan)
-      for c in minCol...maxCol {
+      rowVals.reserveCapacity(bounds.colCount)
+      for c in bounds.minCol...bounds.maxCol {
         let packed = PackedCellCoordinate(row: r, column: c)
         if let targetSheetName {
           rowVals.append(
@@ -1031,34 +1024,88 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       guard let num = val.numericValue else { return .error("#VALUE!") }
       return .number(-num)
     case .binaryOp(let op, let lhs, let rhs):
+      if op == "&" {
+        let lhsVal = evaluateASTPreservingEmpty(lhs, context: &context, depth: depth)
+        if case .error = lhsVal { return lhsVal }
+        let rhsVal = evaluateASTPreservingEmpty(rhs, context: &context, depth: depth)
+        if case .error = rhsVal { return rhsVal }
+        return .text(lhsVal.description + rhsVal.description)
+      }
       let lhsVal = evaluateAST(lhs, context: &context, depth: depth + 1)
       if case .error = lhsVal { return lhsVal }
       let rhsVal = evaluateAST(rhs, context: &context, depth: depth + 1)
       if case .error = rhsVal { return rhsVal }
-      guard let lNum = lhsVal.numericValue, let rNum = rhsVal.numericValue else {
-        return .error("#VALUE!")
+      if let lNum = lhsVal.numericValue, let rNum = rhsVal.numericValue {
+        let result: Double
+        switch op {
+        case "+": result = lNum + rNum
+        case "-": result = lNum - rNum
+        case "*": result = lNum * rNum
+        case "/":
+          guard rNum != 0.0 else { return .error("#DIV/0!") }
+          result = lNum / rNum
+        case "^":
+          result = pow(lNum, rNum)
+        default:
+          return .error("#VALUE!")
+        }
+        guard result.isFinite else { return .error("#NUM!") }
+        return .number(result)
       }
-      let result: Double
-      switch op {
-      case "+": result = lNum + rNum
-      case "-": result = lNum - rNum
-      case "*": result = lNum * rNum
-      case "/":
-        guard rNum != 0.0 else { return .error("#DIV/0!") }
-        result = lNum / rNum
-      default:
-        return .error("#VALUE!")
+      if op == "+" {
+        if let lDate = Self.parseDateValue(lhsVal),
+          let rNum = rhsVal.numericValue,
+          let days = Self.safeInt(trunc(rNum)),
+          let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: lDate)
+        {
+          return .text(Self.formatUTCDate(shifted))
+        }
+        if let rDate = Self.parseDateValue(rhsVal),
+          let lNum = lhsVal.numericValue,
+          let days = Self.safeInt(trunc(lNum)),
+          let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: rDate)
+        {
+          return .text(Self.formatUTCDate(shifted))
+        }
+      } else if op == "-" {
+        if let lDate = Self.parseDateValue(lhsVal),
+          let rNum = rhsVal.numericValue,
+          let days = Self.safeInt(trunc(rNum)),
+          let shifted = Self.utcCalendar.date(byAdding: .day, value: -days, to: lDate)
+        {
+          return .text(Self.formatUTCDate(shifted))
+        }
+        if let lDate = Self.parseDateValue(lhsVal),
+          let rDate = Self.parseDateValue(rhsVal)
+        {
+          let diff = Self.utcCalendar.dateComponents([.day], from: rDate, to: lDate).day ?? 0
+          return .number(Double(diff))
+        }
       }
-      guard result.isFinite else { return .error("#NUM!") }
-      return .number(result)
+      return .error("#VALUE!")
 
     case .comparisonOp(let op, let lhs, let rhs):
-      let lVal = evaluateAST(lhs, context: &context, depth: depth + 1)
+      var lVal = evaluateASTPreservingEmpty(lhs, context: &context, depth: depth)
       if case .error = lVal { return lVal }
-      let rVal = evaluateAST(rhs, context: &context, depth: depth + 1)
+      var rVal = evaluateASTPreservingEmpty(rhs, context: &context, depth: depth)
       if case .error = rVal { return rVal }
 
-      if let lNum = lVal.numericValue, let rNum = rVal.numericValue {
+      if lVal == .empty {
+        switch rVal {
+        case .text: lVal = .text("")
+        case .boolean: lVal = .boolean(false)
+        default: lVal = .number(0.0)
+        }
+      }
+      if rVal == .empty {
+        switch lVal {
+        case .text: rVal = .text("")
+        case .boolean: rVal = .boolean(false)
+        default: rVal = .number(0.0)
+        }
+      }
+
+      if case .number(let lNum) = lVal, case .number(let rNum) = rVal {
         switch op {
         case ">=": return .boolean(lNum >= rNum)
         case "<=": return .boolean(lNum <= rNum)
@@ -1068,8 +1115,8 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case "<": return .boolean(lNum < rNum)
         default: return .error("#VALUE!")
         }
-      } else {
-        let cmp = lVal.description.caseInsensitiveCompare(rVal.description)
+      } else if case .text(let lStr) = lVal, case .text(let rStr) = rVal {
+        let cmp = lStr.caseInsensitiveCompare(rStr)
         switch op {
         case "=": return .boolean(cmp == .orderedSame)
         case "<>": return .boolean(cmp != .orderedSame)
@@ -1079,10 +1126,65 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         case "<=": return .boolean(cmp == .orderedSame || cmp == .orderedAscending)
         default: return .error("#VALUE!")
         }
+      } else if case .boolean(let lBool) = lVal, case .boolean(let rBool) = rVal {
+        let lInt = lBool ? 1 : 0
+        let rInt = rBool ? 1 : 0
+        switch op {
+        case "=": return .boolean(lInt == rInt)
+        case "<>": return .boolean(lInt != rInt)
+        case ">": return .boolean(lInt > rInt)
+        case "<": return .boolean(lInt < rInt)
+        case ">=": return .boolean(lInt >= rInt)
+        case "<=": return .boolean(lInt <= rInt)
+        default: return .error("#VALUE!")
+        }
+      } else {
+        func typeRank(_ v: EvaluatedCellValue) -> Int {
+          switch v {
+          case .number, .empty: return 1
+          case .text: return 2
+          case .boolean: return 3
+          case .error: return 4
+          }
+        }
+        let lRank = typeRank(lVal)
+        let rRank = typeRank(rVal)
+        switch op {
+        case "=": return .boolean(false)
+        case "<>": return .boolean(true)
+        case ">": return .boolean(lRank > rRank)
+        case "<": return .boolean(lRank < rRank)
+        case ">=": return .boolean(lRank >= rRank)
+        case "<=": return .boolean(lRank <= rRank)
+        default: return .error("#VALUE!")
+        }
       }
 
     case .functionCall(let name, let args):
       return evaluateFunction(name: name, args: args, context: &context, depth: depth + 1)
+    }
+  }
+
+  private func evaluateASTPreservingEmpty(
+    _ ast: FormulaAST,
+    context: inout EvaluationContext,
+    depth: Int
+  ) -> EvaluatedCellValue {
+    switch ast {
+    case .cellRef(let coord):
+      return evaluateInternal(at: coord, context: &context, depth: depth + 1)
+    case .sheetCellRef(let sheetName, let coord):
+      return evaluateOnSheet(named: sheetName, at: coord, context: &context, depth: depth + 1)
+    case .namedRangeRef(let rangeName):
+      guard let notation = resolveNamedRange(rangeName) else {
+        return .error("#NAME?")
+      }
+      if let addr = try? CellAddress(a1Notation: notation) {
+        return evaluateInternal(at: addr.packedCoordinate, context: &context, depth: depth + 1)
+      }
+      return .error("#REF!")
+    default:
+      return evaluateAST(ast, context: &context, depth: depth + 1)
     }
   }
 }

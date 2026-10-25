@@ -615,10 +615,20 @@ impl PdfSerializer {
             let content_obj = page_obj + 1;
 
             let mut stream_lines: Vec<String> = Vec::new();
-            stream_lines.push(format!(
-                "BT /F1 12 Tf 54 780 Td ({}) Tj ET",
-                Self::escape_pdf_text(&page.body_text)
-            ));
+            for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
+                if l_idx == 0 {
+                    stream_lines.push(format!(
+                        "BT /F1 12 Tf 54 780 Td ({}) Tj ET",
+                        Self::escape_pdf_text(line_str)
+                    ));
+                } else {
+                    let y = 780 - (l_idx as i32) * 16;
+                    stream_lines.push(format!(
+                        "BT /F1 12 Tf 54 {y} Td 0 -16 Td ({}) Tj ET",
+                        Self::escape_pdf_text(line_str)
+                    ));
+                }
+            }
             if let Some(stamp) = &page.approval_stamp {
                 stream_lines.push(format!(
                     "BT /F1 10 Tf 386 604 Td ([STAMP] {}) Tj ET",
@@ -700,9 +710,14 @@ impl PdfSerializer {
         let mut current_body = String::new();
         let mut current_stamp: Option<String> = None;
         let mut in_stream = false;
+        let mut trailer_b64: Option<String> = None;
 
         for line in raw.lines() {
             let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("%EasyOfficePDFModelBase64:") {
+                trailer_b64 = Some(rest.trim().to_string());
+                continue;
+            }
             if trimmed.contains("/Type /Catalog") {
                 if let Some(t) = Self::extract_paren_token(trimmed, "/Title (") {
                     title = Self::unescape_pdf_text(&t);
@@ -744,19 +759,17 @@ impl PdfSerializer {
                 continue;
             }
             if in_stream && trimmed.starts_with("BT ") {
-                if let (Some(open), Some(close)) = (trimmed.find('('), trimmed.rfind(')')) {
-                    if open < close {
-                        let content = Self::unescape_pdf_text(&trimmed[open + 1..close]);
-                        if let Some(wm) = content.strip_prefix("[WM] ") {
-                            watermark_text = Some(wm.to_string());
-                        } else if let Some(stamp) = content.strip_prefix("[STAMP] ") {
-                            current_stamp = Some(stamp.to_string());
-                        } else {
-                            if !current_body.is_empty() {
-                                current_body.push('\n');
-                            }
-                            current_body.push_str(&content);
+                for raw_token in Self::extract_all_paren_tokens(trimmed) {
+                    let content = Self::unescape_pdf_text(&raw_token);
+                    if let Some(wm) = content.strip_prefix("[WM] ") {
+                        watermark_text = Some(wm.to_string());
+                    } else if let Some(stamp) = content.strip_prefix("[STAMP] ") {
+                        current_stamp = Some(stamp.to_string());
+                    } else {
+                        if !current_body.is_empty() {
+                            current_body.push('\n');
                         }
+                        current_body.push_str(&content);
                     }
                 }
             }
@@ -768,11 +781,49 @@ impl PdfSerializer {
             ));
         }
 
+        if let Some(b64) = trailer_b64 {
+            let visible_concat: String = pages
+                .iter()
+                .map(|p| p.body_text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if b64.is_empty() || (!b64.contains(&visible_concat) && b64 != title) {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64)과 가시 스트림 텍스트가 불일치합니다."
+                        .to_string(),
+                ));
+            }
+        }
+
         Ok(PdfDocumentModel {
             title,
             pages,
             watermark_text,
         })
+    }
+
+    fn extract_all_paren_tokens(line: &str) -> Vec<String> {
+        let mut tokens = Vec::new();
+        let mut chars = line.chars();
+        while let Some(c) = chars.next() {
+            if c == '(' {
+                let mut token = String::new();
+                while let Some(inner) = chars.next() {
+                    if inner == '\\' {
+                        token.push('\\');
+                        if let Some(escaped) = chars.next() {
+                            token.push(escaped);
+                        }
+                    } else if inner == ')' {
+                        tokens.push(token);
+                        break;
+                    } else {
+                        token.push(inner);
+                    }
+                }
+            }
+        }
+        tokens
     }
 
     fn extract_paren_token(line: &str, prefix: &str) -> Option<String> {

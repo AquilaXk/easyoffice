@@ -1,10 +1,10 @@
-use crate::functions_date_fin::matches_criteria;
+use crate::functions_date_fin::{matches_criteria, wildcard_match};
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate,
     SheetEngine,
 };
 
-type StreamingRangeSpec<'a> = (Option<&'a str>, u32, u32, usize, usize, bool);
+pub(crate) type StreamingRangeSpec<'a> = (Option<&'a str>, u32, u32, usize, usize, bool);
 
 /// Canonical 122 built-in spreadsheet functions across 8 standard categories:
 /// Math & Trig (27), Statistical (22), Logical (10), Lookup & Reference (12),
@@ -205,7 +205,7 @@ impl SheetEngine {
         }
     }
 
-    fn extract_streaming_range<'b>(
+    pub(crate) fn extract_streaming_range<'b>(
         &self,
         expr: &'b Expr,
     ) -> Result<Option<StreamingRangeSpec<'b>>, FormulaError> {
@@ -230,7 +230,7 @@ impl SheetEngine {
     }
 
     #[inline]
-    fn eval_streaming_cell(
+    pub(crate) fn eval_streaming_cell_allow_error(
         &self,
         spec: StreamingRangeSpec<'_>,
         dr: usize,
@@ -245,11 +245,50 @@ impl SheetEngine {
             (min_r + dr as u32, min_c + dc as u32)
         };
         let coord = PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-        let v = self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1);
+        Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth + 1))
+    }
+
+    #[inline]
+    pub(crate) fn eval_streaming_cell(
+        &self,
+        spec: StreamingRangeSpec<'_>,
+        dr: usize,
+        dc: usize,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        let v = self.eval_streaming_cell_allow_error(spec, dr, dc, ctx, depth)?;
         if let EvaluatedCellValue::Error(e) = v {
             return Err(e);
         }
         Ok(v)
+    }
+
+    pub(crate) fn visit_args_streaming<F>(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+        mut f: F,
+    ) -> Result<(), FormulaError>
+    where
+        F: FnMut(EvaluatedCellValue) -> Result<(), FormulaError>,
+    {
+        for arg in args {
+            if let Some(spec) = self.extract_streaming_range(arg)? {
+                let (_, _, _, rows, cols, _) = spec;
+                for dr in 0..rows {
+                    for dc in 0..cols {
+                        let v = self.eval_streaming_cell(spec, dr, dc, ctx, depth)?;
+                        f(v)?;
+                    }
+                }
+            } else {
+                let v = self.eval_arg_val(arg, ctx, depth)?;
+                f(v)?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn eval_range_vec(
@@ -312,6 +351,9 @@ enum CritNumOp {
 enum CompiledCriteria<'a> {
     Number(f64),
     NumericCmp(CritNumOp, f64),
+    TextEq(String),
+    TextNe(String),
+    Wildcard(String),
     Fallback(&'a EvaluatedCellValue),
 }
 
@@ -331,23 +373,65 @@ impl<'a> CompiledCriteria<'a> {
                     ("=", CritNumOp::Eq),
                 ] {
                     if let Some(rhs) = trimmed.strip_prefix(op_str) {
-                        if let Ok(rhs_num) = rhs.trim().parse::<f64>() {
+                        let rhs_trim = rhs.trim();
+                        if let Ok(rhs_num) = rhs_trim.parse::<f64>() {
                             return Self::NumericCmp(op_kind, rhs_num);
                         }
-                        return Self::Fallback(crit);
+                        return match op_kind {
+                            CritNumOp::Eq => Self::TextEq(rhs_trim.to_lowercase()),
+                            CritNumOp::Ne => Self::TextNe(rhs_trim.to_lowercase()),
+                            _ => Self::Fallback(crit),
+                        };
                     }
                 }
                 if let Ok(rhs_num) = trimmed.parse::<f64>() {
                     return Self::Number(rhs_num);
                 }
-                Self::Fallback(crit)
+                if trimmed.contains('*') || trimmed.contains('?') || trimmed.contains('~') {
+                    Self::Wildcard(trimmed.to_string())
+                } else {
+                    Self::TextEq(trimmed.to_lowercase())
+                }
             }
             _ => Self::Fallback(crit),
         }
     }
 
     #[inline]
+    fn str_eq_lowercase(text: &str, lower_target: &str) -> bool {
+        if text.is_ascii() && lower_target.is_ascii() {
+            text.eq_ignore_ascii_case(lower_target)
+        } else {
+            text.chars()
+                .flat_map(char::to_lowercase)
+                .eq(lower_target.chars())
+        }
+    }
+
+    #[inline]
+    fn cell_eq_lowercase(cell: &EvaluatedCellValue, lower_target: &str) -> bool {
+        match cell {
+            EvaluatedCellValue::Text(s) => Self::str_eq_lowercase(s, lower_target),
+            EvaluatedCellValue::Empty => lower_target.is_empty(),
+            EvaluatedCellValue::Boolean(b) => {
+                Self::str_eq_lowercase(if *b { "true" } else { "false" }, lower_target)
+            }
+            EvaluatedCellValue::Error(e) => Self::str_eq_lowercase(e.code(), lower_target),
+            EvaluatedCellValue::Number(_) => {
+                Self::str_eq_lowercase(&cell.to_display_string(), lower_target)
+            }
+        }
+    }
+
+    #[inline]
     fn matches(&self, cell: &EvaluatedCellValue) -> bool {
+        if let EvaluatedCellValue::Error(e) = cell {
+            return match *self {
+                Self::TextEq(ref rhs_lower) => Self::str_eq_lowercase(e.code(), rhs_lower),
+                Self::Fallback(EvaluatedCellValue::Error(ce)) => *e == *ce,
+                _ => false,
+            };
+        }
         match *self {
             Self::Number(cn) => cell.as_number().is_some_and(|v| (v - cn).abs() < 1e-9),
             Self::NumericCmp(op, rhs_num) => {
@@ -363,6 +447,17 @@ impl<'a> CompiledCriteria<'a> {
                     CritNumOp::Eq => (lhs_num - rhs_num).abs() < 1e-9,
                 }
             }
+            Self::TextEq(ref rhs_lower) => Self::cell_eq_lowercase(cell, rhs_lower),
+            Self::TextNe(ref rhs_lower) => !Self::cell_eq_lowercase(cell, rhs_lower),
+            Self::Wildcard(ref pat) => match cell {
+                EvaluatedCellValue::Text(s) => wildcard_match(s, pat),
+                EvaluatedCellValue::Empty => wildcard_match("", pat),
+                EvaluatedCellValue::Boolean(b) => {
+                    wildcard_match(if *b { "TRUE" } else { "FALSE" }, pat)
+                }
+                EvaluatedCellValue::Error(_) => false,
+                EvaluatedCellValue::Number(_) => wildcard_match(&cell.to_display_string(), pat),
+            },
             Self::Fallback(crit) => matches_criteria(cell, crit),
         }
     }
@@ -466,15 +561,14 @@ impl SheetEngine {
                 return Err(FormulaError::Value);
             }
             let Some(range_spec) = self.extract_streaming_range(&args[0])? else {
-                let val = self.eval_arg_val(&args[0], ctx, depth)?;
+                let val = self.eval_expr_ctx(&args[0], ctx, depth + 1);
                 let crit = self.eval_arg_val(&args[1], ctx, depth)?;
-                return Ok(EvaluatedCellValue::Number(
-                    if matches_criteria(&val, &crit) {
-                        1.0
-                    } else {
-                        0.0
-                    },
-                ));
+                let compiled_crit = CompiledCriteria::compile(&crit);
+                return Ok(EvaluatedCellValue::Number(if compiled_crit.matches(&val) {
+                    1.0
+                } else {
+                    0.0
+                }));
             };
             let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
             let compiled_crit = CompiledCriteria::compile(&crit_val);
@@ -482,7 +576,8 @@ impl SheetEngine {
             let mut cnt = 0usize;
             for dr in 0..r_count {
                 for dc in 0..c_count {
-                    let val = self.eval_streaming_cell(range_spec, dr, dc, ctx, depth)?;
+                    let val =
+                        self.eval_streaming_cell_allow_error(range_spec, dr, dc, ctx, depth)?;
                     if compiled_crit.matches(&val) {
                         cnt += 1;
                     }
@@ -516,7 +611,7 @@ impl SheetEngine {
         let mut count = 0usize;
         for dr in 0..r_count {
             for dc in 0..c_count {
-                let val = self.eval_streaming_cell(range_spec, dr, dc, ctx, depth)?;
+                let val = self.eval_streaming_cell_allow_error(range_spec, dr, dc, ctx, depth)?;
                 if compiled_crit.matches(&val) {
                     let num_opt = if let Some(ts) = target_spec {
                         self.eval_streaming_cell(ts, dr, dc, ctx, depth)?
@@ -585,7 +680,7 @@ impl SheetEngine {
                 'cell_loop: for dc in 0..c_count {
                     for idx in 0..pair_count {
                         let sp = specs[idx].unwrap();
-                        let val = self.eval_streaming_cell(sp, dr, dc, ctx, depth)?;
+                        let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
                         if !compiled_crits[idx].matches(&val) {
                             continue 'cell_loop;
                         }
@@ -650,7 +745,7 @@ impl SheetEngine {
             'sumifs_cell: for dc in 0..c_count {
                 for idx in 0..pair_count {
                     let sp = specs[idx].unwrap();
-                    let val = self.eval_streaming_cell(sp, dr, dc, ctx, depth)?;
+                    let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
                     if !compiled_crits[idx].matches(&val) {
                         continue 'sumifs_cell;
                     }
@@ -726,15 +821,25 @@ impl SheetEngine {
                 }
                 let scaled = num * factor;
                 let rounded = match name {
-                    "ROUND" => scaled.round(),
+                    "ROUND" => (scaled + 1e-12 * scaled.signum()).round(),
                     "ROUNDUP" => {
-                        if scaled >= 0.0 {
-                            scaled.ceil()
+                        if scaled > 0.0 {
+                            (scaled - 1e-12).ceil()
+                        } else if scaled < 0.0 {
+                            (scaled + 1e-12).floor()
                         } else {
-                            scaled.floor()
+                            0.0
                         }
                     }
-                    _ => scaled.trunc(),
+                    _ => {
+                        if scaled > 0.0 {
+                            (scaled + 1e-12).floor()
+                        } else if scaled < 0.0 {
+                            (scaled - 1e-12).ceil()
+                        } else {
+                            0.0
+                        }
+                    }
                 };
                 Ok(EvaluatedCellValue::Number(rounded / factor))
             }
@@ -769,10 +874,15 @@ impl SheetEngine {
                     return Err(FormulaError::Num);
                 }
                 let q = num / sig;
-                Ok(EvaluatedCellValue::Number(if name == "CEILING" {
-                    q.ceil() * sig
+                let q_adj = if (q - q.round()).abs() < 1e-12 {
+                    q.round()
                 } else {
-                    q.floor() * sig
+                    q
+                };
+                Ok(EvaluatedCellValue::Number(if name == "CEILING" {
+                    q_adj.ceil() * sig
+                } else {
+                    q_adj.floor() * sig
                 }))
             }
             "MOD" | "QUOTIENT" => {
@@ -863,14 +973,14 @@ impl SheetEngine {
             "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK" => {
                 self.eval_streaming_range_agg_ctx(name, args, ctx, depth)
             }
-            "MEDIAN" | "MODE" | "STDEV" | "STDEVP" | "VAR" | "VARP" => {
-                self.eval_stat_basic(name, args, ctx, depth)
+            "STDEV" | "STDEVP" | "VAR" | "VARP" => {
+                self.eval_welford_variance_streaming(name, args, ctx, depth)
             }
+            "MEDIAN" | "MODE" => self.eval_stat_basic(name, args, ctx, depth),
             "AVERAGEA" => {
-                let vals = self.expand_args_ctx(args, ctx, depth)?;
                 let mut sum = 0.0;
                 let mut count = 0usize;
-                for v in vals {
+                self.visit_args_streaming(args, ctx, depth, |v| {
                     match v {
                         EvaluatedCellValue::Empty => {}
                         EvaluatedCellValue::Number(n) => {
@@ -884,7 +994,8 @@ impl SheetEngine {
                         EvaluatedCellValue::Text(_) => count += 1,
                         EvaluatedCellValue::Error(e) => return Err(e),
                     }
-                }
+                    Ok(())
+                })?;
                 if count == 0 {
                     return Err(FormulaError::DivByZero);
                 }
@@ -931,6 +1042,43 @@ impl SheetEngine {
         }
     }
 
+    fn eval_welford_variance_streaming(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        let mut count = 0usize;
+        let mut mean = 0.0f64;
+        let mut m2 = 0.0f64;
+        self.visit_args_streaming(args, ctx, depth, |v| {
+            if let Some(x) = v.as_number() {
+                count += 1;
+                let delta = x - mean;
+                mean += delta / (count as f64);
+                let delta2 = x - mean;
+                m2 += delta * delta2;
+            }
+            Ok(())
+        })?;
+        let is_sample = name == "STDEV" || name == "VAR";
+        if count == 0 || (is_sample && count < 2) {
+            return Err(FormulaError::DivByZero);
+        }
+        let denom = if is_sample {
+            (count - 1) as f64
+        } else {
+            count as f64
+        };
+        let var = m2 / denom;
+        Ok(EvaluatedCellValue::Number(if name.starts_with("STDEV") {
+            var.sqrt()
+        } else {
+            var
+        }))
+    }
+
     fn eval_stat_basic(
         &self,
         name: &str,
@@ -944,14 +1092,6 @@ impl SheetEngine {
             .filter_map(EvaluatedCellValue::as_number)
             .collect();
         match name {
-            "AVERAGE" => {
-                if nums.is_empty() {
-                    return Err(FormulaError::DivByZero);
-                }
-                Ok(EvaluatedCellValue::Number(
-                    nums.iter().sum::<f64>() / (nums.len() as f64),
-                ))
-            }
             "MEDIAN" => {
                 if nums.is_empty() {
                     return Err(FormulaError::Num);
@@ -983,30 +1123,7 @@ impl SheetEngine {
                 }
                 Ok(EvaluatedCellValue::Number(best_val))
             }
-            "MIN" => Ok(EvaluatedCellValue::Number(
-                nums.into_iter().reduce(f64::min).unwrap_or(0.0),
-            )),
-            "MAX" => Ok(EvaluatedCellValue::Number(
-                nums.into_iter().reduce(f64::max).unwrap_or(0.0),
-            )),
-            _ => {
-                let is_sample = name == "STDEV" || name == "VAR";
-                if nums.is_empty() || (is_sample && nums.len() < 2) {
-                    return Err(FormulaError::DivByZero);
-                }
-                let mean = nums.iter().sum::<f64>() / (nums.len() as f64);
-                let denom = if is_sample {
-                    (nums.len() - 1) as f64
-                } else {
-                    nums.len() as f64
-                };
-                let var = nums.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / denom;
-                Ok(EvaluatedCellValue::Number(if name.starts_with("STDEV") {
-                    var.sqrt()
-                } else {
-                    var
-                }))
-            }
+            _ => Err(FormulaError::Name),
         }
     }
 
@@ -1044,25 +1161,29 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let target = self.eval_arg_num(&args[0], ctx, depth)?;
-                let vals = self.eval_range_vec(&args[1], ctx, depth)?;
                 let order = if args.len() == 3 {
                     self.eval_arg_num(&args[2], ctx, depth)?.trunc() as i32
                 } else {
                     0
                 };
-                let nums: Vec<f64> = vals
-                    .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
-                    .collect();
-                if !nums.iter().any(|&x| (x - target).abs() < 1e-12) {
+                let mut found = false;
+                let mut better_count = 0usize;
+                self.visit_args_streaming(std::slice::from_ref(&args[1]), ctx, depth, |v| {
+                    if let Some(x) = v.as_number() {
+                        if (x - target).abs() < 1e-12 {
+                            found = true;
+                        } else if (order == 0 && x > target + 1e-12)
+                            || (order != 0 && x < target - 1e-12)
+                        {
+                            better_count += 1;
+                        }
+                    }
+                    Ok(())
+                })?;
+                if !found {
                     return Err(FormulaError::Na);
                 }
-                let better = if order == 0 {
-                    nums.iter().filter(|&&x| x > target + 1e-12).count()
-                } else {
-                    nums.iter().filter(|&&x| x < target - 1e-12).count()
-                };
-                Ok(EvaluatedCellValue::Number((better + 1) as f64))
+                Ok(EvaluatedCellValue::Number((better_count + 1) as f64))
             }
             _ => {
                 if args.len() != 2 {

@@ -329,13 +329,14 @@ extension WorksheetModel {
       else { return .error("#VALUE!") }
       let factor = pow(10.0, Double(digits))
       let scaled = num * factor
+      let eps = scaled >= 0 ? 1e-12 : -1e-12
       let roundedVal: Double
       if name == "ROUND" {
-        roundedVal = scaled.rounded() / factor
+        roundedVal = (scaled + eps).rounded() / factor
       } else if name == "ROUNDUP" {
-        roundedVal = (scaled >= 0 ? ceil(scaled) : floor(scaled)) / factor
+        roundedVal = (scaled >= 0 ? ceil(scaled - 1e-12) : floor(scaled + 1e-12)) / factor
       } else {
-        roundedVal = trunc(scaled) / factor
+        roundedVal = trunc(scaled + eps) / factor
       }
       guard roundedVal.isFinite else { return .error("#NUM!") }
       return .number(roundedVal)
@@ -405,70 +406,68 @@ extension WorksheetModel {
       return .number(total)
     case "SUMIF":
       guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: frame.count == 3 ? 2 : 0, firstPairIndex: 0, pairEndIndex: 2,
         frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched): return .number(matched.compactMap(\.numericValue).reduce(0.0, +))
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.sum)
       }
     case "COUNTIF":
       guard frame.count == 2 else { return .error("#VALUE!") }
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: nil, firstPairIndex: 0, pairEndIndex: 2, frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched): return .number(Double(matched.count))
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(Double(stats.matchCount))
       }
     case "AVERAGEIF":
       guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: frame.count == 3 ? 2 : 0, firstPairIndex: 0, pairEndIndex: 2,
         frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched):
-        let nums = matched.compactMap(\.numericValue)
-        guard !nums.isEmpty else { return .error("#DIV/0!") }
-        return .number(nums.reduce(0.0, +) / Double(nums.count))
+      case .failure(let err): return .error(err.code)
+      case .success(let stats):
+        guard stats.numericCount > 0 else { return .error("#DIV/0!") }
+        return .number(stats.sum / Double(stats.numericCount))
       }
     case "SUMIFS":
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: 0, firstPairIndex: 1, pairEndIndex: frame.count, frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched): return .number(matched.compactMap(\.numericValue).reduce(0.0, +))
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.sum)
       }
     case "COUNTIFS":
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: nil, firstPairIndex: 0, pairEndIndex: frame.count, frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched): return .number(Double(matched.count))
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(Double(stats.matchCount))
       }
     case "AVERAGEIFS":
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: 0, firstPairIndex: 1, pairEndIndex: frame.count, frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched):
-        let nums = matched.compactMap(\.numericValue)
-        guard !nums.isEmpty else { return .error("#DIV/0!") }
-        return .number(nums.reduce(0.0, +) / Double(nums.count))
+      case .failure(let err): return .error(err.code)
+      case .success(let stats):
+        guard stats.numericCount > 0 else { return .error("#DIV/0!") }
+        return .number(stats.sum / Double(stats.numericCount))
       }
     case "MINIFS":
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: 0, firstPairIndex: 1, pairEndIndex: frame.count, frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched): return .number(matched.compactMap(\.numericValue).min() ?? 0.0)
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.minVal ?? 0.0)
       }
     case "MAXIFS":
-      switch evaluateMultiCriteriaMatches(
+      switch streamMultiCriteriaStats(
         targetRangeIndex: 0, firstPairIndex: 1, pairEndIndex: frame.count, frame: &frame)
       {
-      case .failure(let err): return .error(err)
-      case .success(let matched): return .number(matched.compactMap(\.numericValue).max() ?? 0.0)
+      case .failure(let err): return .error(err.code)
+      case .success(let stats): return .number(stats.maxVal ?? 0.0)
       }
     case "CEILING":
       guard (1...2).contains(frame.count), let num = frame.arg(0, in: self).numericValue else {
@@ -476,7 +475,8 @@ extension WorksheetModel {
       }
       let sig = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 1.0) : 1.0
       guard sig != 0.0 else { return .number(0.0) }
-      let result = ceil(num / sig) * sig
+      let q = num / sig
+      let result = ceil(q - (q >= 0 ? 1e-12 : -1e-12)) * sig
       return result.isFinite ? .number(result) : .error("#NUM!")
     case "FLOOR":
       guard (1...2).contains(frame.count), let num = frame.arg(0, in: self).numericValue else {
@@ -484,7 +484,8 @@ extension WorksheetModel {
       }
       let sig = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 1.0) : 1.0
       guard sig != 0.0 else { return .error("#DIV/0!") }
-      let result = floor(num / sig) * sig
+      let q = num / sig
+      let result = floor(q + (q >= 0 ? 1e-12 : -1e-12)) * sig
       return result.isFinite ? .number(result) : .error("#NUM!")
     case "SIGN":
       guard frame.count == 1, let num = frame.arg(0, in: self).numericValue else {
@@ -508,12 +509,16 @@ extension WorksheetModel {
       let result = exp(num)
       return result.isFinite ? .number(result) : .error("#NUM!")
     case "SUMSQ":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err):
+      var sumSq = 0.0
+      if let err = frame.forEachResolvedCell(
+        in: frame.indices, sheet: self,
+        { v in
+          if let n = v.numericValue { sumSq += n * n }
+        })
+      {
         return .error(err)
-      case .success(let vals):
-        return .number(vals.compactMap(\.numericValue).reduce(0.0) { $0 + $1 * $1 })
       }
+      return .number(sumSq)
     case "MROUND":
       guard frame.count == 2,
         let num = frame.arg(0, in: self).numericValue,
@@ -637,48 +642,174 @@ extension WorksheetModel {
     }
   }
 
-  private func evaluateMultiCriteriaMatches(
+  internal struct CriteriaStreamStats {
+    var matchCount: Int = 0
+    var numericCount: Int = 0
+    var sum: Double = 0.0
+    var minVal: Double? = nil
+    var maxVal: Double? = nil
+  }
+
+  private struct CriteriaRangeSpec {
+    let sheetName: String?
+    let minRow: Int
+    let minCol: Int
+    let rowCount: Int
+    let colCount: Int
+    var totalCells: Int { rowCount * colCount }
+
+    @inline(__always)
+    func coordinate(at offset: Int) -> PackedCellCoordinate {
+      PackedCellCoordinate(
+        row: minRow + (offset / colCount),
+        column: minCol + (offset % colCount)
+      )
+    }
+  }
+
+  private func resolveCriteriaRangeSpec(
+    at argIndex: Int,
+    frame: inout EvalFrame
+  ) -> Result<CriteriaRangeSpec, ErrorCode> {
+    let ast = frame.args[argIndex]
+    let sheetName: String?
+    let resolvedRange: CellRange
+    switch ast {
+    case .rangeRef(let r):
+      sheetName = nil
+      resolvedRange = r
+    case .sheetRangeRef(let s, let r):
+      guard hasSheet(named: s) else { return .failure(ErrorCode(code: "#REF!")) }
+      sheetName = s
+      resolvedRange = r
+    case .namedRangeRef(let name):
+      guard let notation = resolveNamedRange(name) else {
+        return .failure(ErrorCode(code: "#NAME?"))
+      }
+      if let r = try? CellRange(notation: notation) {
+        sheetName = nil
+        resolvedRange = r
+      } else if let addr = try? CellAddress(a1Notation: notation) {
+        sheetName = nil
+        resolvedRange = CellRange(start: addr, end: addr)
+      } else {
+        return .failure(ErrorCode(code: "#REF!"))
+      }
+    case .cellRef(let coord):
+      return .success(
+        CriteriaRangeSpec(
+          sheetName: nil, minRow: coord.row, minCol: coord.column, rowCount: 1, colCount: 1
+        )
+      )
+    case .sheetCellRef(let s, let coord):
+      guard hasSheet(named: s) else { return .failure(ErrorCode(code: "#REF!")) }
+      return .success(
+        CriteriaRangeSpec(
+          sheetName: s, minRow: coord.row, minCol: coord.column, rowCount: 1, colCount: 1
+        )
+      )
+    case .functionCall(let fnName, let fnArgs) where fnName == "OFFSET":
+      switch resolveOffsetRange(args: fnArgs, frame: &frame) {
+      case .failure(let err):
+        return .failure(ErrorCode(code: err))
+      case .success(let s, let r):
+        if let s, !hasSheet(named: s) {
+          return .failure(ErrorCode(code: "#REF!"))
+        }
+        sheetName = s
+        resolvedRange = r
+      }
+    case .error(let err):
+      return .failure(ErrorCode(code: err.rawValue))
+    default:
+      return .failure(ErrorCode(code: "#VALUE!"))
+    }
+    guard let bounds = rangeBounds(resolvedRange) else {
+      return .failure(ErrorCode(code: "#REF!"))
+    }
+    return .success(
+      CriteriaRangeSpec(
+        sheetName: sheetName,
+        minRow: bounds.minRow,
+        minCol: bounds.minCol,
+        rowCount: bounds.rowCount,
+        colCount: bounds.colCount
+      )
+    )
+  }
+
+  private func streamMultiCriteriaStats(
     targetRangeIndex: Int?,
     firstPairIndex: Int,
     pairEndIndex: Int,
     frame: inout EvalFrame
-  ) -> FormulaResolutionResult {
+  ) -> Result<CriteriaStreamStats, ErrorCode> {
     guard pairEndIndex >= firstPairIndex + 2,
       (pairEndIndex - firstPairIndex) % 2 == 0
     else {
-      return .failure("#VALUE!")
+      return .failure(ErrorCode(code: "#VALUE!"))
     }
-    var targetCells: [EvaluatedCellValue]?
+    let targetSpec: CriteriaRangeSpec?
     if let targetIdx = targetRangeIndex {
-      switch frame.resolve(targetIdx..<(targetIdx + 1), in: self) {
+      switch resolveCriteriaRangeSpec(at: targetIdx, frame: &frame) {
       case .failure(let err): return .failure(err)
-      case .success(let vals): targetCells = vals
+      case .success(let spec): targetSpec = spec
       }
+    } else {
+      targetSpec = nil
     }
 
-    var pairs: [([EvaluatedCellValue], EvaluatedCellValue)] = []
+    var pairSpecs: [(CriteriaRangeSpec, EvaluatedCellValue)] = []
+    pairSpecs.reserveCapacity((pairEndIndex - firstPairIndex) / 2)
     for idx in stride(from: firstPairIndex, to: pairEndIndex, by: 2) {
       let critVal = frame.arg(idx + 1, in: self)
-      if case .error(let code) = critVal { return .failure(code) }
-      switch frame.resolve(idx..<(idx + 1), in: self) {
+      if case .error(let code) = critVal { return .failure(ErrorCode(code: code)) }
+      switch resolveCriteriaRangeSpec(at: idx, frame: &frame) {
       case .failure(let err): return .failure(err)
-      case .success(let rangeCells):
-        if let expectedLen = targetCells?.count ?? pairs.first?.0.count,
-          rangeCells.count != expectedLen
-        {
-          return .failure("#VALUE!")
+      case .success(let spec):
+        let expectedLen = targetSpec?.totalCells ?? pairSpecs.first?.0.totalCells ?? spec.totalCells
+        guard spec.totalCells == expectedLen else {
+          return .failure(ErrorCode(code: "#VALUE!"))
         }
-        pairs.append((rangeCells, critVal))
+        pairSpecs.append((spec, critVal))
       }
     }
 
-    let sourceCells = targetCells ?? (pairs.first?.0 ?? [])
-    var matched: [EvaluatedCellValue] = []
-    for i in sourceCells.indices
-    where pairs.allSatisfy({ Self.matchesCriteriaValue($0.0[i], criteriaValue: $0.1) }) {
-      matched.append(sourceCells[i])
+    let totalCells = targetSpec?.totalCells ?? pairSpecs.first?.0.totalCells ?? 0
+    var stats = CriteriaStreamStats()
+    for offset in 0..<totalCells {
+      var allMatched = true
+      for (rangeSpec, critVal) in pairSpecs {
+        let coord = rangeSpec.coordinate(at: offset)
+        let cellVal =
+          rangeSpec.sheetName.map {
+            evaluateOnSheet(named: $0, at: coord, context: &frame.context, depth: frame.depth + 1)
+          } ?? evaluateInternal(at: coord, context: &frame.context, depth: frame.depth + 1)
+        if !Self.matchesCriteriaValue(cellVal, criteriaValue: critVal) {
+          allMatched = false
+          break
+        }
+      }
+      guard allMatched else { continue }
+      stats.matchCount += 1
+      if let tSpec = targetSpec {
+        let tCoord = tSpec.coordinate(at: offset)
+        let tVal =
+          tSpec.sheetName.map {
+            evaluateOnSheet(named: $0, at: tCoord, context: &frame.context, depth: frame.depth + 1)
+          } ?? evaluateInternal(at: tCoord, context: &frame.context, depth: frame.depth + 1)
+        if case .error(let code) = tVal {
+          return .failure(ErrorCode(code: code))
+        }
+        if let num = tVal.numericValue {
+          stats.numericCount += 1
+          stats.sum += num
+          stats.minVal = stats.minVal.map { min($0, num) } ?? num
+          stats.maxVal = stats.maxVal.map { max($0, num) } ?? num
+        }
+      }
     }
-    return .success(matched)
+    return .success(stats)
   }
 
   // MARK: - 2. Statistical Functions
@@ -709,69 +840,96 @@ extension WorksheetModel {
         else { return .error("#N/A") }
         return .number(best)
       }
-    case "VAR", "STDEV":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        let nums = vals.compactMap(\.numericValue)
-        guard nums.count >= 2 else { return .error("#DIV/0!") }
-        let mean = nums.reduce(0.0, +) / Double(nums.count)
-        let variance = nums.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) } / Double(nums.count - 1)
-        return .number(name == "VAR" ? variance : sqrt(variance))
-      }
-    case "VARP", "STDEVP":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err):
+    case "VAR", "STDEV", "VARP", "STDEVP":
+      var count = 0
+      var mean = 0.0
+      var m2 = 0.0
+      if let err = frame.forEachResolvedCell(
+        in: frame.indices, sheet: self,
+        { v in
+          if let x = v.numericValue {
+            count += 1
+            let delta = x - mean
+            mean += delta / Double(count)
+            let delta2 = x - mean
+            m2 += delta * delta2
+          }
+        })
+      {
         return .error(err)
-      case .success(let vals):
-        let nums = vals.compactMap(\.numericValue)
-        guard !nums.isEmpty else { return .error("#DIV/0!") }
-        let mean = nums.reduce(0.0, +) / Double(nums.count)
-        let variance = nums.reduce(0.0) { $0 + ($1 - mean) * ($1 - mean) } / Double(nums.count)
-        return .number(name == "VARP" ? variance : sqrt(variance))
       }
+      let isSample = (name == "VAR" || name == "STDEV")
+      guard count >= (isSample ? 2 : 1) else { return .error("#DIV/0!") }
+      let variance = m2 / Double(isSample ? (count - 1) : count)
+      return .number((name == "VAR" || name == "VARP") ? variance : sqrt(variance))
     case "AVEDEV":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err):
+      var count = 0
+      var sum = 0.0
+      if let err = frame.forEachResolvedCell(
+        in: frame.indices, sheet: self,
+        { v in
+          if let x = v.numericValue {
+            count += 1
+            sum += x
+          }
+        })
+      {
         return .error(err)
-      case .success(let vals):
-        let nums = vals.compactMap(\.numericValue)
-        guard !nums.isEmpty else { return .error("#DIV/0!") }
-        let mean = nums.reduce(0.0, +) / Double(nums.count)
-        let avgDev = nums.reduce(0.0) { $0 + abs($1 - mean) } / Double(nums.count)
-        return .number(avgDev)
       }
+      guard count > 0 else { return .error("#DIV/0!") }
+      let mean = sum / Double(count)
+      var devSum = 0.0
+      _ = frame.forEachResolvedCell(in: frame.indices, sheet: self) { v in
+        if let x = v.numericValue {
+          devSum += abs(x - mean)
+        }
+      }
+      return .number(devSum / Double(count))
     case "GEOMEAN":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err):
+      var count = 0
+      var logSum = 0.0
+      var hasInvalid = false
+      if let err = frame.forEachResolvedCell(
+        in: frame.indices, sheet: self,
+        { v in
+          if let x = v.numericValue {
+            if x <= 0.0 {
+              hasInvalid = true
+            } else {
+              count += 1
+              logSum += log(x)
+            }
+          }
+        })
+      {
         return .error(err)
-      case .success(let vals):
-        let nums = vals.compactMap(\.numericValue)
-        guard !nums.isEmpty, nums.allSatisfy({ $0 > 0.0 }) else {
-          return .error("#VALUE!")
-        }
-        let prod = nums.reduce(1.0, *)
-        let result =
-          (prod.isFinite && prod > 0.0)
-          ? pow(prod, 1.0 / Double(nums.count))
-          : exp(nums.reduce(0.0) { $0 + log($1) } / Double(nums.count))
-        return result.isFinite ? .number(result) : .error("#VALUE!")
       }
+      guard count > 0, !hasInvalid else { return .error("#VALUE!") }
+      let result = exp(logSum / Double(count))
+      return result.isFinite ? .number(result) : .error("#VALUE!")
     case "HARMEAN":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err):
+      var count = 0
+      var reciprocalSum = 0.0
+      var hasInvalid = false
+      if let err = frame.forEachResolvedCell(
+        in: frame.indices, sheet: self,
+        { v in
+          if let x = v.numericValue {
+            if x <= 0.0 {
+              hasInvalid = true
+            } else {
+              count += 1
+              reciprocalSum += 1.0 / x
+            }
+          }
+        })
+      {
         return .error(err)
-      case .success(let vals):
-        let nums = vals.compactMap(\.numericValue)
-        guard !nums.isEmpty, nums.allSatisfy({ $0 > 0.0 }) else {
-          return .error("#VALUE!")
-        }
-        let reciprocalSum = nums.reduce(0.0) { $0 + (1.0 / $1) }
-        guard reciprocalSum > 0.0 else {
-          return .error("#VALUE!")
-        }
-        return .number(Double(nums.count) / reciprocalSum)
       }
+      guard count > 0, !hasInvalid, reciprocalSum > 0.0 else {
+        return .error("#VALUE!")
+      }
+      return .number(Double(count) / reciprocalSum)
     case "PERCENTILE":
       guard frame.count == 2 else { return .error("#VALUE!") }
       switch frame.resolve(0..<1, in: self) {
@@ -940,14 +1098,28 @@ extension WorksheetModel {
       }
       return .error("#N/A")
     case "AND", "OR", "XOR":
-      switch frame.resolve(frame.indices, in: self) {
-      case .failure(let err): return .error(err)
-      case .success(let vals):
-        guard !vals.isEmpty else { return .error("#VALUE!") }
-        if name == "AND" { return .boolean(vals.allSatisfy { $0.booleanValue == true }) }
-        if name == "OR" { return .boolean(vals.contains { $0.booleanValue == true }) }
-        return .boolean(vals.filter { $0.booleanValue == true }.count % 2 == 1)
+      var count = 0
+      var allTrue = true
+      var anyTrue = false
+      var trueCount = 0
+      if let err = frame.forEachResolvedCell(
+        in: frame.indices, sheet: self,
+        { v in
+          count += 1
+          if v.booleanValue == true {
+            anyTrue = true
+            trueCount += 1
+          } else {
+            allTrue = false
+          }
+        })
+      {
+        return .error(err)
       }
+      guard count > 0 else { return .error("#VALUE!") }
+      if name == "AND" { return .boolean(allTrue) }
+      if name == "OR" { return .boolean(anyTrue) }
+      return .boolean(trueCount % 2 == 1)
     case "NOT":
       guard frame.count == 1 else { return .error("#VALUE!") }
       let v = frame.arg(0, in: self)
@@ -996,47 +1168,62 @@ extension WorksheetModel {
     return a.description.caseInsensitiveCompare(b.description) == .orderedSame
   }
 
-  internal static func matchesWildcardPattern(text: String, pattern: String) -> Bool {
-    let textChars = Array(text.lowercased())
-    let patChars = Array(pattern.lowercased())
-    var tIdx = 0
-    var pIdx = 0
-    var starPatIdx: Int?
-    var matchTextIdx = 0
+  @inline(__always)
+  private static func foldScalar(_ s: UnicodeScalar) -> UInt32 {
+    let v = s.value
+    if v >= 0x41 && v <= 0x5A { return v + 32 }
+    return v
+  }
 
-    while tIdx < textChars.count {
-      if pIdx < patChars.count && patChars[pIdx] == "~" && (pIdx + 1) < patChars.count {
-        if textChars[tIdx] == patChars[pIdx + 1] {
-          tIdx += 1
-          pIdx += 2
+  internal static func matchesWildcardPattern(text: String, pattern: String) -> Bool {
+    let tScalars = text.unicodeScalars
+    let pScalars = pattern.unicodeScalars
+    var tIdx = tScalars.startIndex
+    var pIdx = pScalars.startIndex
+    var starPatIdx: String.UnicodeScalarView.Index? = nil
+    var matchTextIdx = tScalars.startIndex
+
+    while tIdx < tScalars.endIndex {
+      if pIdx < pScalars.endIndex {
+        let pVal = pScalars[pIdx].value
+        if pVal == 0x7E {
+          let nextP = pScalars.index(after: pIdx)
+          if nextP < pScalars.endIndex {
+            if foldScalar(tScalars[tIdx]) == foldScalar(pScalars[nextP]) {
+              tIdx = tScalars.index(after: tIdx)
+              pIdx = pScalars.index(after: nextP)
+              continue
+            }
+          } else if foldScalar(tScalars[tIdx]) == 0x7E {
+            tIdx = tScalars.index(after: tIdx)
+            pIdx = nextP
+            continue
+          }
+        } else if pVal == 0x2A {
+          starPatIdx = pIdx
+          matchTextIdx = tIdx
+          pIdx = pScalars.index(after: pIdx)
+          continue
+        } else if pVal == 0x3F || foldScalar(pScalars[pIdx]) == foldScalar(tScalars[tIdx]) {
+          tIdx = tScalars.index(after: tIdx)
+          pIdx = pScalars.index(after: pIdx)
           continue
         }
-      } else if pIdx < patChars.count
-        && (patChars[pIdx] == "?" || patChars[pIdx] == textChars[tIdx])
-      {
-        tIdx += 1
-        pIdx += 1
-        continue
-      } else if pIdx < patChars.count && patChars[pIdx] == "*" {
-        starPatIdx = pIdx
-        matchTextIdx = tIdx
-        pIdx += 1
-        continue
       }
 
       if let sIdx = starPatIdx {
-        pIdx = sIdx + 1
-        matchTextIdx += 1
+        pIdx = pScalars.index(after: sIdx)
+        matchTextIdx = tScalars.index(after: matchTextIdx)
         tIdx = matchTextIdx
       } else {
         return false
       }
     }
 
-    while pIdx < patChars.count && patChars[pIdx] == "*" {
-      pIdx += 1
+    while pIdx < pScalars.endIndex && pScalars[pIdx].value == 0x2A {
+      pIdx = pScalars.index(after: pIdx)
     }
-    return pIdx == patChars.count
+    return pIdx == pScalars.endIndex
   }
 
   internal static func matchesCriteriaValue(
@@ -1058,7 +1245,9 @@ extension WorksheetModel {
         default: return false
         }
       } else {
-        if (op == "=" || op == "<>") && (operand.contains("*") || operand.contains("?")) {
+        if (op == "=" || op == "<>")
+          && (operand.contains("*") || operand.contains("?") || operand.contains("~"))
+        {
           let matched = matchesWildcardPattern(text: value.description, pattern: operand)
           return op == "=" ? matched : !matched
         }
@@ -1066,7 +1255,7 @@ extension WorksheetModel {
         return op == "=" ? (cmp == .orderedSame) : (op == "<>" ? (cmp != .orderedSame) : false)
       }
     }
-    if critStr.contains("*") || critStr.contains("?") {
+    if critStr.contains("*") || critStr.contains("?") || critStr.contains("~") {
       return matchesWildcardPattern(text: value.description, pattern: critStr)
     }
     if let critNum = critVal.numericValue, let cellNum = value.numericValue {

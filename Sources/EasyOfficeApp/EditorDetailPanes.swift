@@ -842,7 +842,7 @@ public struct DocumentEditorDetailPaneView: View {
               palette: palette,
               isSnapshotMode: viewModel.isCanvasSnapshotMode
             ) {
-              Button("세로 (Portrait)") {
+              Button("세로") {
                 if let tabID = viewModel.activeTabID,
                   let idx = viewModel.openTabs.firstIndex(where: { $0.id == tabID }),
                   case .document(var d) = viewModel.openTabs[idx].payload
@@ -856,7 +856,7 @@ public struct DocumentEditorDetailPaneView: View {
                   viewModel.openTabs[idx].isModified = true
                 }
               }
-              Button("가로 (Landscape)") {
+              Button("가로") {
                 if let tabID = viewModel.activeTabID,
                   let idx = viewModel.openTabs.firstIndex(where: { $0.id == tabID }),
                   case .document(var d) = viewModel.openTabs[idx].payload

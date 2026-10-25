@@ -56,17 +56,23 @@ struct EasyOfficeApplication: App {
         .keyboardShortcut("f", modifiers: [.command])
         .disabled(viewModel.activeTab == nil)
 
-        Button("선택 영역 복사 (⌘C)") {
+        Button("문서 블록 복사") {
           WorkspaceFileDialogPresenter.copySelectionToPasteboard(viewModel: viewModel)
         }
-        .keyboardShortcut("c", modifiers: [.command])
         .disabled(viewModel.activeTab == nil)
 
-        Button("붙여넣기 (⌘V)") {
+        Button("문서 블록 붙여넣기") {
           WorkspaceFileDialogPresenter.pasteFromPasteboard(viewModel: viewModel)
         }
-        .keyboardShortcut("v", modifiers: [.command])
         .disabled(viewModel.activeTab == nil)
+
+        Divider()
+
+        Button("최근 닫은 탭 다시 열기 (⇧⌘T)") {
+          _ = viewModel.reopenLastClosedTab()
+        }
+        .keyboardShortcut("t", modifiers: [.command, .shift])
+        .disabled(viewModel.recentlyClosedTabs.isEmpty)
       }
       CommandMenu("문서 생성") {
         ForEach(OfficeModuleKind.allCases) { module in

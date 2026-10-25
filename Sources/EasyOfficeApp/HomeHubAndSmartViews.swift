@@ -492,7 +492,7 @@ private struct TemplateMiniaturePreviewHeader: View {
 
         case .pdf:
           VStack(alignment: .leading, spacing: 4) {
-            Text("APPROVED")
+            Text("승인필")
               .font(.system(size: 6, weight: .black, design: .monospaced))
               .foregroundStyle(accent)
             Rectangle()
@@ -946,11 +946,10 @@ struct SmartDocumentAssistantHubView: View {
             Text("문장 가독성 교정 제안 (\(suggestions.count)건)")
               .font(.system(size: 11, weight: .bold))
               .foregroundStyle(palette.primaryText.swiftUIColor)
-            ForEach(suggestions.prefix(2), id: \.paragraphID) { item in
+            ForEach(suggestions, id: \.paragraphID) { item in
               Text("• [\(item.issueKind)] \(item.suggestedRewrite)")
                 .font(.system(size: 11))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
-                .lineLimit(1)
             }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -959,11 +958,10 @@ struct SmartDocumentAssistantHubView: View {
             Text("추출된 일정·예산·조치 항목 (\(actionItems.count)건)")
               .font(.system(size: 11, weight: .bold))
               .foregroundStyle(palette.primaryText.swiftUIColor)
-            ForEach(Array(actionItems.prefix(2).enumerated()), id: \.offset) { _, act in
+            ForEach(Array(actionItems.enumerated()), id: \.offset) { _, act in
               Text("• [\(act.category)] \(act.extractedText)")
                 .font(.system(size: 11))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
-                .lineLimit(1)
             }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -988,10 +986,21 @@ struct SmartDocumentAssistantHubView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        if documentModels.count >= 2 {
+        if let primaryDoc = activeDoc {
+          let (baselineDoc, revisedDoc): (OfficeDocumentModel, OfficeDocumentModel) = {
+            if documentModels.count >= 2 {
+              return (documentModels[0], documentModels[1])
+            }
+            let baselineParagraphs = Array(primaryDoc.paragraphs.dropLast(1))
+            let fallbackBaseline = OfficeDocumentModel(
+              title: "\(primaryDoc.title) (기준본)",
+              paragraphs: baselineParagraphs.isEmpty ? primaryDoc.paragraphs : baselineParagraphs
+            )
+            return (fallbackBaseline, primaryDoc)
+          }()
           let diff = SmartAssistantAnalysisMemoizer.compareDocuments(
-            baseline: documentModels[0],
-            revised: documentModels[1]
+            baseline: baselineDoc,
+            revised: revisedDoc
           )
           VStack(alignment: .leading, spacing: 4) {
             Text("문서 비교")

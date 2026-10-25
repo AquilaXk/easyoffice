@@ -18,6 +18,76 @@ internal enum XMLDocumentModelMapper {
       || path.hasPrefix("ppt/media/") || path.hasPrefix("xl/media/")
   }
 
+  static func isXMLValidatedPath(_ path: String) -> Bool {
+    let lower = path.lowercased()
+    return lower.hasSuffix(".xml") || lower.hasSuffix(".rels") || lower.hasSuffix(".hpf")
+      || lower == "mimetype"
+  }
+
+  static func packArchiveEntries(
+    _ baseEntries: [ZipContainerEntry],
+    images: [EmbeddedImageAttachment] = [],
+    mediaFolderPrefix: String = "",
+    preserved: [String: Data]
+  ) throws -> Data {
+    var entries = baseEntries
+    if !mediaFolderPrefix.isEmpty {
+      for img in images {
+        let safeName = sanitizeMediaFileName(img.fileName)
+        entries.append(
+          ZipContainerEntry(
+            path: "\(mediaFolderPrefix)\(safeName)", data: img.imageData, compressionMethod: .store
+          ))
+      }
+    }
+    let existingPaths = Set(entries.map(\.path))
+    for path in preserved.keys.sorted() where !existingPaths.contains(path) {
+      if let rawData = preserved[path] {
+        entries.append(
+          ZipContainerEntry(
+            path: path,
+            data: rawData,
+            compressionMethod: isXMLValidatedPath(path) ? .deflate : .store
+          ))
+      }
+    }
+    return try ZipContainerCodec.pack(entries: entries)
+  }
+
+  static func unpackAndValidateArchiveEntries(
+    from data: Data,
+    excludedPreservedPaths: Set<String> = []
+  ) throws -> (
+    entries: [ZipContainerEntry],
+    xmlEntries: [String: String],
+    binaryEntries: [String: Data],
+    preservedEntries: [String: Data]
+  ) {
+    let entries = try ZipContainerCodec.unpack(from: data)
+    var xmlEntries: [String: String] = [:]
+    var binaryEntries: [String: Data] = [:]
+    var preservedEntries: [String: Data] = [:]
+    for entry in entries {
+      if isBinaryMediaPath(entry.path) {
+        binaryEntries[entry.path] = entry.data
+      } else if isXMLValidatedPath(entry.path) {
+        xmlEntries[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
+      }
+      if !excludedPreservedPaths.contains(entry.path) {
+        preservedEntries[entry.path] = entry.data
+      }
+    }
+    return (entries, xmlEntries, binaryEntries, preservedEntries)
+  }
+
+  static func safeClampedInt(
+    _ value: Double, min minVal: Int = -100_000_000, max maxVal: Int = 100_000_000
+  ) -> Int {
+    guard value.isFinite else { return 0 }
+    let clamped = Swift.max(Double(minVal), Swift.min(Double(maxVal), value.rounded()))
+    return Int(clamped)
+  }
+
   static func paragraphAttributes(_ p: ParagraphBlock) -> String {
     let boldAttr = p.isBold ? "1" : "0"
     let italicAttr = p.isItalic ? "1" : "0"
@@ -611,8 +681,8 @@ public enum OOXMLContainerCodec {
       let jcVal = XMLDocumentModelMapper.ooxmlJustificationVal(for: p.alignment)
       let indTag: String
       if p.leftIndentPt != 0 || p.firstLineIndentPt != 0 {
-        let leftTwips = Int((p.leftIndentPt * 20.0).rounded())
-        let firstLineTwips = Int((p.firstLineIndentPt * 20.0).rounded())
+        let leftTwips = XMLDocumentModelMapper.safeClampedInt(p.leftIndentPt * 20.0)
+        let firstLineTwips = XMLDocumentModelMapper.safeClampedInt(p.firstLineIndentPt * 20.0)
         indTag = "<w:ind w:left=\"\(leftTwips)\" w:firstLine=\"\(firstLineTwips)\"/>"
       } else {
         indTag = ""
@@ -630,7 +700,8 @@ public enum OOXMLContainerCodec {
         let rAttrs = XMLDocumentModelMapper.runAttributes(run)
         let resolvedFont = run.fontName ?? p.fontName
         let resolvedSize = run.fontSizePt ?? p.fontSizePt
-        let halfPtSize = Int((resolvedSize * 2.0).rounded())
+        let halfPtSize = XMLDocumentModelMapper.safeClampedInt(
+          resolvedSize * 2.0, min: 1, max: 3_276)
         var rPrTags = "<w:rFonts w:ascii=\"\(XMLSanitizer.escape(resolvedFont))\"/>"
         rPrTags += "<w:sz w:val=\"\(halfPtSize)\"/>"
         if run.isBold { rPrTags += "<w:b/>" }
@@ -686,7 +757,7 @@ public enum OOXMLContainerCodec {
       </w:document>
       """
 
-    var entries: [ZipContainerEntry] = [
+    let baseEntries: [ZipContainerEntry] = [
       ZipContainerEntry(
         path: "[Content_Types].xml", data: Data(contentTypesXML.utf8), compressionMethod: .deflate),
       ZipContainerEntry(path: "_rels/.rels", data: Data(relsXML.utf8), compressionMethod: .deflate),
@@ -695,26 +766,24 @@ public enum OOXMLContainerCodec {
       ZipContainerEntry(
         path: "word/document.xml", data: Data(documentXML.utf8), compressionMethod: .deflate),
     ]
-    for img in doc.images {
-      let safeName = XMLDocumentModelMapper.sanitizeMediaFileName(img.fileName)
-      entries.append(
-        ZipContainerEntry(
-          path: "word/media/\(safeName)", data: img.imageData, compressionMethod: .store))
-    }
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      baseEntries,
+      images: doc.images,
+      mediaFolderPrefix: "word/media/",
+      preserved: doc.preservedArchiveEntries
+    )
   }
 
   public static func decodeDocument(from data: Data) throws -> OfficeDocumentModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    var entryMap: [String: String] = [:]
-    var binaryEntries: [String: Data] = [:]
-    for entry in entries {
-      if XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-        binaryEntries[entry.path] = entry.data
-      } else {
-        entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-      }
-    }
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(
+      from: data,
+      excludedPreservedPaths: [
+        "[Content_Types].xml", "_rels/.rels", "docProps/core.xml", "word/document.xml",
+      ]
+    )
+    let entryMap = unpacked.xmlEntries
+    let binaryEntries = unpacked.binaryEntries
+    let preservedEntries = unpacked.preservedEntries
     guard let documentXML = entryMap["word/document.xml"] else {
       throw EasyOfficeError.corruptedContainer(
         detail: "OOXML DOCX 필수 스트림 'word/document.xml'이 누락되었습니다.")
@@ -758,7 +827,7 @@ public enum OOXMLContainerCodec {
     let meta = XMLDocumentModelMapper.parseExtendedMetadata(
       from: coreXML, defaultPaperSize: paperSize, binaryEntries: binaryEntries)
 
-    return OfficeDocumentModel(
+    var decodedDoc = OfficeDocumentModel(
       title: title, format: .docx, paperSize: paperSize,
       headerText: headerText, footerText: footerText,
       paragraphs: paragraphs, tables: tables, trackChangesEnabled: trackChanges,
@@ -766,6 +835,8 @@ public enum OOXMLContainerCodec {
       comments: meta.comments, bookmarks: meta.bookmarks, images: meta.images,
       equations: meta.equations, watermarkText: meta.watermarkText
     )
+    decodedDoc.preservedArchiveEntries = preservedEntries
+    return decodedDoc
   }
 
   // MARK: XLSX (SpreadsheetML)
@@ -917,15 +988,16 @@ public enum OOXMLContainerCodec {
         ))
     }
 
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      entries,
+      preserved: sheet.preservedArchiveEntries
+    )
   }
 
   public static func decodeWorksheet(from data: Data) throws -> WorksheetModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    var entryMap: [String: String] = [:]
-    for entry in entries where !XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-      entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-    }
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(from: data)
+    let entryMap = unpacked.xmlEntries
+    var preservedEntries = unpacked.preservedEntries
     guard entryMap["xl/worksheets/sheet1.xml"] != nil else {
       throw EasyOfficeError.corruptedContainer(
         detail: "OOXML XLSX 필수 스트림 'xl/worksheets/sheet1.xml'이 누락되었습니다.")
@@ -1026,6 +1098,16 @@ public enum OOXMLContainerCodec {
       }
     }
     XMLDocumentModelMapper.applyWorksheetMetadata(from: workbookXML, to: &primary)
+    var coreSheetPaths: Set<String> = [
+      "[Content_Types].xml", "xl/workbook.xml", "xl/sharedStrings.xml",
+    ]
+    for desc in sheetDescriptors {
+      coreSheetPaths.insert(desc.path)
+    }
+    for path in coreSheetPaths {
+      preservedEntries.removeValue(forKey: path)
+    }
+    primary.preservedArchiveEntries = preservedEntries
     return primary
   }
 
@@ -1082,10 +1164,14 @@ public enum OOXMLContainerCodec {
         let attrs = XMLDocumentModelMapper.slideElementAttributes(el)
         let rPrAttrs =
           "b=\"\(el.isBold ? "1" : "0")\" i=\"\(el.isItalic ? "1" : "0")\" u=\"\(el.isUnderlined ? "sng" : "none")\""
+        let offX = XMLDocumentModelMapper.safeClampedInt(el.x)
+        let offY = XMLDocumentModelMapper.safeClampedInt(el.y)
+        let extW = XMLDocumentModelMapper.safeClampedInt(el.width, min: 0)
+        let extH = XMLDocumentModelMapper.safeClampedInt(el.height, min: 0)
         return """
               <p:sp \(attrs)>
                 <p:nvSpPr><p:cNvPr id="\(elIdx + 2)" name="\(XMLSanitizer.escape(el.title))"/></p:nvSpPr>
-                <p:spPr><a:xfrm><a:off x="\(Int(el.x.rounded()))" y="\(Int(el.y.rounded()))"/><a:ext cx="\(Int(el.width.rounded()))" cy="\(Int(el.height.rounded()))"/></a:xfrm></p:spPr>
+                <p:spPr><a:xfrm><a:off x="\(offX)" y="\(offY)"/><a:ext cx="\(extW)" cy="\(extH)"/></a:xfrm></p:spPr>
                 <p:txBody><a:bodyPr/><a:p><a:r><a:rPr \(rPrAttrs)/><a:t>\(XMLSanitizer.escape(el.bodyText))</a:t></a:r></a:p></p:txBody>
               </p:sp>
           """
@@ -1129,15 +1215,16 @@ public enum OOXMLContainerCodec {
       }
     }
 
-    return try ZipContainerCodec.pack(entries: entries)
+    return try XMLDocumentModelMapper.packArchiveEntries(
+      entries,
+      preserved: deck.preservedArchiveEntries
+    )
   }
 
   public static func decodePresentation(from data: Data) throws -> PresentationDeckModel {
-    let entries = try ZipContainerCodec.unpack(from: data)
-    var entryMap: [String: String] = [:]
-    for entry in entries where !XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
-      entryMap[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
-    }
+    let unpacked = try XMLDocumentModelMapper.unpackAndValidateArchiveEntries(from: data)
+    let entryMap = unpacked.xmlEntries
+    var preservedEntries = unpacked.preservedEntries
     guard let presentationXML = entryMap["ppt/presentation.xml"] else {
       throw EasyOfficeError.corruptedContainer(
         detail: "OOXML PPTX 필수 스트림 'ppt/presentation.xml'이 누락되었습니다.")
@@ -1151,14 +1238,57 @@ public enum OOXMLContainerCodec {
       SlideDeckTheme(
         rawValue: presRoot?.attributes["eo:deckTheme"] ?? presRoot?.attributes["deckTheme"] ?? ""
       ) ?? .signatureLavender
+
+    var relTargets: [String: String] = [:]
+    if let relsXML = entryMap["ppt/_rels/presentation.xml.rels"] {
+      for rel in XMLSanitizer.extractElements(named: "Relationship", in: relsXML) {
+        if let rId = rel.attributes["Id"], let rawTarget = rel.attributes["Target"] {
+          let normalized: String
+          if rawTarget.hasPrefix("/") {
+            normalized = String(rawTarget.dropFirst())
+          } else if rawTarget.hasPrefix("ppt/") {
+            normalized = rawTarget
+          } else {
+            normalized = "ppt/\(rawTarget)"
+          }
+          relTargets[rId] = normalized
+        }
+      }
+    }
+
     let slideRefs = XMLSanitizer.extractElements(named: "p:sldId", in: presentationXML)
+    let resolvedSlidePaths: [String]
+    if !slideRefs.isEmpty {
+      resolvedSlidePaths = slideRefs.enumerated().map { idx, ref in
+        if let target = ref.attributes["target"] { return target }
+        if let rId = ref.attributes["r:id"] ?? ref.attributes["id"],
+          let relPath = relTargets[rId]
+        {
+          return relPath
+        }
+        return "ppt/slides/slide\(idx + 1).xml"
+      }
+    } else {
+      resolvedSlidePaths = entryMap.keys
+        .filter { $0.hasPrefix("ppt/slides/slide") && $0.hasSuffix(".xml") }
+        .sorted { lhs, rhs in
+          let lNum = Int(
+            lhs.replacingOccurrences(of: "ppt/slides/slide", with: "")
+              .replacingOccurrences(of: ".xml", with: "")) ?? Int.max
+          let rNum = Int(
+            rhs.replacingOccurrences(of: "ppt/slides/slide", with: "")
+              .replacingOccurrences(of: ".xml", with: "")) ?? Int.max
+          return lNum != rNum ? lNum < rNum : lhs < rhs
+        }
+    }
 
     var slides: [SlideModel] = []
-    for (idx, ref) in slideRefs.enumerated() {
-      let target = ref.attributes["target"] ?? "ppt/slides/slide\(idx + 1).xml"
+    var consumedPaths: Set<String> = ["[Content_Types].xml", "ppt/presentation.xml"]
+    for (idx, target) in resolvedSlidePaths.enumerated() {
       guard let slideXML = entryMap[target] else {
         throw EasyOfficeError.corruptedContainer(detail: "PPTX 슬라이드 파트 누락: \(target)")
       }
+      consumedPaths.insert(target)
       guard let sldElem = XMLSanitizer.extractElements(named: "p:sld", in: slideXML).first else {
         continue
       }
@@ -1183,7 +1313,9 @@ public enum OOXMLContainerCodec {
         XMLSanitizer.extractElements(named: "p:notes", in: sldElem.innerXML).first.map {
           XMLSanitizer.unescape($0.innerXML)
         } ?? ""
-      if notes.isEmpty, let notesSlideXML = entryMap["ppt/notesSlides/notesSlide\(idx + 1).xml"] {
+      let notesPath = "ppt/notesSlides/notesSlide\(idx + 1).xml"
+      consumedPaths.insert(notesPath)
+      if notes.isEmpty, let notesSlideXML = entryMap[notesPath] {
         let noteTexts = XMLSanitizer.extractElements(named: "a:t", in: notesSlideXML).map {
           XMLSanitizer.unescape($0.innerXML)
         }
@@ -1210,7 +1342,12 @@ public enum OOXMLContainerCodec {
       )
     }
 
-    return PresentationDeckModel(
+    for path in consumedPaths {
+      preservedEntries.removeValue(forKey: path)
+    }
+    var deck = PresentationDeckModel(
       title: title, aspectRatio: aspectRatio, slides: slides, deckTheme: deckTheme)
+    deck.preservedArchiveEntries = preservedEntries
+    return deck
   }
 }

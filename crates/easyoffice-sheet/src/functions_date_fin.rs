@@ -251,31 +251,67 @@ impl SheetEngine {
                     .iter()
                     .filter_map(EvaluatedCellValue::as_number)
                     .collect();
-                if cfs.len() < 2 {
+                let max_cf = cfs.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+                if cfs.len() < 2
+                    || max_cf == 0.0
+                    || !cfs.iter().any(|&v| v > 0.0)
+                    || !cfs.iter().any(|&v| v < 0.0)
+                {
                     return Err(FormulaError::Num);
                 }
+                let scaled_cfs: Vec<f64> = cfs.iter().map(|&v| v / max_cf).collect();
+                let eval_npv = |rate: f64| -> f64 {
+                    scaled_cfs
+                        .iter()
+                        .enumerate()
+                        .map(|(t, &cf)| cf / (1.0 + rate).powi(t as i32))
+                        .sum()
+                };
                 let mut r = if args.len() == 2 {
                     self.eval_arg_num(&args[1], ctx, depth)?
                 } else {
                     0.1
                 };
                 for _ in 0..100 {
+                    if r <= -0.999_999 || !r.is_finite() {
+                        break;
+                    }
                     let mut f = 0.0;
                     let mut df = 0.0;
-                    for (t, &cf) in cfs.iter().enumerate() {
+                    for (t, &cf) in scaled_cfs.iter().enumerate() {
                         let denom = (1.0 + r).powi(t as i32);
                         f += cf / denom;
                         if t > 0 {
                             df -= (t as f64) * cf / (1.0 + r).powi((t + 1) as i32);
                         }
                     }
-                    if f.abs() < 1e-9 {
+                    if f.abs() < 1e-10 {
                         return Ok(EvaluatedCellValue::Number(r));
                     }
                     if df.abs() < 1e-15 {
                         break;
                     }
                     r -= f / df;
+                }
+                let mut lo = -0.99_f64;
+                let mut hi = 10.0_f64;
+                let mut f_lo = eval_npv(lo);
+                let f_hi = eval_npv(hi);
+                if f_lo.is_finite() && f_hi.is_finite() && f_lo * f_hi <= 0.0 {
+                    for _ in 0..100 {
+                        let mid = 0.5 * (lo + hi);
+                        let f_mid = eval_npv(mid);
+                        if f_mid.abs() < 1e-11 || (hi - lo).abs() < 1e-12 {
+                            return Ok(EvaluatedCellValue::Number(mid));
+                        }
+                        if f_lo * f_mid <= 0.0 {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                            f_lo = f_mid;
+                        }
+                    }
+                    return Ok(EvaluatedCellValue::Number(0.5 * (lo + hi)));
                 }
                 Err(FormulaError::Num)
             }
@@ -537,30 +573,116 @@ pub(crate) fn matches_criteria(cell: &EvaluatedCellValue, crit: &EvaluatedCellVa
             return (lhs_num - rhs_num).abs() < 1e-9;
         }
     }
-    wildcard_match(
-        &cell.to_display_string().to_lowercase(),
-        &trimmed.to_lowercase(),
-    )
+    match cell {
+        EvaluatedCellValue::Text(s) => wildcard_match(s, trimmed),
+        EvaluatedCellValue::Empty => wildcard_match("", trimmed),
+        EvaluatedCellValue::Boolean(b) => {
+            wildcard_match(if *b { "TRUE" } else { "FALSE" }, trimmed)
+        }
+        EvaluatedCellValue::Error(e) => wildcard_match(e.code(), trimmed),
+        EvaluatedCellValue::Number(_) => wildcard_match(&cell.to_display_string(), trimmed),
+    }
 }
 
-fn wildcard_match(text: &str, pattern: &str) -> bool {
-    if !pattern.contains('*') && !pattern.contains('?') {
-        return text == pattern;
+#[inline]
+fn next_pattern_token(pattern: &str, p_idx: usize) -> Option<(char, bool, usize)> {
+    let mut chars = pattern[p_idx..].chars();
+    let ch = chars.next()?;
+    let after_first = p_idx + ch.len_utf8();
+    if ch == '~' {
+        if let Some(escaped) = chars.next() {
+            if matches!(escaped, '*' | '?' | '~') {
+                return Some((escaped, true, after_first + escaped.len_utf8()));
+            }
+        }
     }
-    let t: Vec<char> = text.chars().collect();
-    let p: Vec<char> = pattern.chars().collect();
+    Some((ch, false, after_first))
+}
+
+#[inline]
+fn chars_eq_case_insensitive(a: char, b: char) -> bool {
+    if a == b {
+        return true;
+    }
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(&b);
+    }
+    a.to_lowercase().eq(b.to_lowercase())
+}
+
+/// Zero-allocation two-pointer backtracking wildcard matcher (`*`, `?`, `~*`, `~?`, `~~`)
+/// operating directly on UTF-8 `&str` slices with case-insensitive comparison.
+pub fn wildcard_match(text: &str, pattern: &str) -> bool {
+    let mut t_idx = 0usize;
+    let mut p_idx = 0usize;
+    let mut star_p: Option<usize> = None;
+    let mut match_t = 0usize;
+
+    while t_idx < text.len() {
+        if let Some((p_ch, is_escaped, next_p)) = next_pattern_token(pattern, p_idx) {
+            if !is_escaped && p_ch == '*' {
+                star_p = Some(next_p);
+                match_t = t_idx;
+                p_idx = next_p;
+                continue;
+            }
+            let t_ch = text[t_idx..].chars().next().unwrap();
+            if (!is_escaped && p_ch == '?') || chars_eq_case_insensitive(p_ch, t_ch) {
+                t_idx += t_ch.len_utf8();
+                p_idx = next_p;
+                continue;
+            }
+        }
+        if let Some(sp) = star_p {
+            p_idx = sp;
+            let skip_ch = text[match_t..].chars().next().unwrap();
+            match_t += skip_ch.len_utf8();
+            t_idx = match_t;
+        } else {
+            return false;
+        }
+    }
+
+    while let Some((p_ch, is_escaped, next_p)) = next_pattern_token(pattern, p_idx) {
+        if !is_escaped && p_ch == '*' {
+            p_idx = next_p;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+/// Baseline 2D heap-allocated DP wildcard matcher retained for 1:1 benchmark verification.
+pub fn wildcard_match_alloc_baseline(text: &str, pattern: &str) -> bool {
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    let pat_lower = pattern.to_lowercase();
+    let mut p: Vec<(char, bool)> = Vec::with_capacity(pat_lower.len());
+    let mut chars = pat_lower.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '~' {
+            if let Some(&next) = chars.peek() {
+                if matches!(next, '*' | '?' | '~') {
+                    p.push((chars.next().unwrap(), true));
+                    continue;
+                }
+            }
+        }
+        p.push((ch, false));
+    }
     let mut dp = vec![vec![false; p.len() + 1]; t.len() + 1];
     dp[0][0] = true;
     for j in 1..=p.len() {
-        if p[j - 1] == '*' {
+        if !p[j - 1].1 && p[j - 1].0 == '*' {
             dp[0][j] = dp[0][j - 1];
         }
     }
     for i in 1..=t.len() {
         for j in 1..=p.len() {
-            if p[j - 1] == '*' {
+            let (pch, escaped) = p[j - 1];
+            if !escaped && pch == '*' {
                 dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
-            } else if p[j - 1] == '?' || p[j - 1] == t[i - 1] {
+            } else if (!escaped && pch == '?') || pch == t[i - 1] {
                 dp[i][j] = dp[i - 1][j - 1];
             }
         }
@@ -575,11 +697,11 @@ fn serial_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let mp = m + if m > 2 { -3 } else { 9 };
     let doy = (153 * mp + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe + 719_468 - 693_594
+    era * 146_097 + doe - 719_468 + 25_569
 }
 
 fn civil_from_serial(serial: i64) -> (i64, i64, i64) {
-    let z = serial + 693_594 - 719_468;
+    let z = serial - 25_569 + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;

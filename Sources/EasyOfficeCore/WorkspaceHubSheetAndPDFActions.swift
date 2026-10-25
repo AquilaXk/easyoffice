@@ -46,7 +46,7 @@ extension PDFAnnotationItem {
     id: UUID = UUID(),
     pageNumber: Int,
     kind: PDFAnnotationKind,
-    author: String = "Workspace User",
+    author: String = "표준 문서 작성자",
     contents: String
   ) {
     self.init(
@@ -81,7 +81,7 @@ extension PDFStudioDocumentModel {
   public mutating func addAnnotation(
     pageNumber: Int,
     kind: PDFAnnotationKind,
-    author: String = "Workspace User",
+    author: String = "표준 문서 작성자",
     contents: String
   ) {
     annotations.append(

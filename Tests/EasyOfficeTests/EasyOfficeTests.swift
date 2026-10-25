@@ -666,4 +666,166 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(decodedSheet.rawValue(at: "A1"), "2")
     XCTAssertEqual(decodedSheet.rawValue(at: "A4"), "텍스트")
   }
+
+  func testZeroAllocationSheetKernelsAndWildcardAndOperatorsAndPrecision() throws {
+    var sheet = WorksheetModel(name: "무할당커널검증")
+    try sheet.setCell("A1", rawValue: "품목*1")
+    try sheet.setCell("A2", rawValue: "품목?2")
+    try sheet.setCell("A3", rawValue: "품목~3")
+    try sheet.setCell("A4", rawValue: "일반품목")
+    try sheet.setCell("B1", rawValue: "100")
+    try sheet.setCell("B2", rawValue: "200")
+    try sheet.setCell("B3", rawValue: "300")
+    try sheet.setCell("B4", rawValue: "400")
+
+    try sheet.setCell("C1", rawValue: "=INDEX(A1:B4, 3, 2)")
+    try sheet.setCell("C2", rawValue: "=VLOOKUP(\"품목~3\", A1:B4, 2, FALSE)")
+    try sheet.setCell("C3", rawValue: "=SUMIF(A1:A4, \"품목~*1\", B1:B4)")
+    try sheet.setCell("C4", rawValue: "=COUNTIF(A1:A4, \"품목~?2\")")
+    try sheet.setCell("C5", rawValue: "=SUMIFS(B1:B4, A1:A4, \"품목*\", B1:B4, \">=200\")")
+    try sheet.setCell("C6", rawValue: "=MINIFS(B1:B4, A1:A4, \"품목*\")")
+    try sheet.setCell("C7", rawValue: "=MAXIFS(B1:B4, A1:A4, \"품목*\")")
+    try sheet.setCell("C8", rawValue: "=VAR(B1:B4)")
+    try sheet.setCell("C9", rawValue: "=STDEVP(B1:B4)")
+    try sheet.setCell("C10", rawValue: "=AVEDEV(B1:B4)")
+
+    XCTAssertEqual(sheet.evaluate(at: "C1"), .number(300.0))
+    XCTAssertEqual(sheet.evaluate(at: "C2"), .number(300.0))
+    XCTAssertEqual(sheet.evaluate(at: "C3"), .number(100.0))
+    XCTAssertEqual(sheet.evaluate(at: "C4"), .number(1.0))
+    XCTAssertEqual(sheet.evaluate(at: "C5"), .number(500.0))
+    XCTAssertEqual(sheet.evaluate(at: "C6"), .number(100.0))
+    XCTAssertEqual(sheet.evaluate(at: "C7"), .number(300.0))
+    if case .number(let variance) = sheet.evaluate(at: "C8") {
+      XCTAssertEqual(variance, 16666.666666666668, accuracy: 1e-6)
+    } else {
+      XCTFail("Expected numeric VAR")
+    }
+    if case .number(let stdevp) = sheet.evaluate(at: "C9") {
+      XCTAssertEqual(stdevp, 111.80339887498948, accuracy: 1e-6)
+    } else {
+      XCTFail("Expected numeric STDEVP")
+    }
+    XCTAssertEqual(sheet.evaluate(at: "C10"), .number(100.0))
+
+    try sheet.setCell("D1", rawValue: "=\"문서\" & \"-\" & 2026")
+    try sheet.setCell("D2", rawValue: "=2 ^ 10")
+    try sheet.setCell("D3", rawValue: "=\"1\" = 1")
+    try sheet.setCell("D4", rawValue: "=Z99 = \"\"")
+    try sheet.setCell("D5", rawValue: "=Z99 = 0")
+    try sheet.setCell("D6", rawValue: "=ROUND(1.005, 2)")
+    try sheet.setCell("D7", rawValue: "=DATE(108, 14, 2)")
+    try sheet.setCell("D8", rawValue: "=YEAR(46023)")
+    try sheet.setCell("D9", rawValue: "=12345.6789")
+
+    XCTAssertEqual(sheet.evaluate(at: "D1"), .text("문서-2026"))
+    XCTAssertEqual(sheet.evaluate(at: "D2"), .number(1024.0))
+    XCTAssertEqual(sheet.evaluate(at: "D3"), .boolean(false))
+    XCTAssertEqual(sheet.evaluate(at: "D4"), .boolean(true))
+    XCTAssertEqual(sheet.evaluate(at: "D5"), .boolean(true))
+    XCTAssertEqual(sheet.evaluate(at: "D6"), .number(1.01))
+    XCTAssertEqual(sheet.evaluate(at: "D7"), .text("2009-02-02"))
+    XCTAssertEqual(sheet.evaluate(at: "D8"), .number(2026.0))
+    XCTAssertEqual(sheet.evaluate(at: "D9").description, "12345.6789")
+
+    try sheet.setCell("E1", rawValue: "-100000000")
+    try sheet.setCell("E2", rawValue: "60000000")
+    try sheet.setCell("E3", rawValue: "60000000")
+    try sheet.setCell("E4", rawValue: "=IRR(E1:E3)")
+    if case .number(let irrVal) = sheet.evaluate(at: "E4") {
+      XCTAssertEqual(irrVal, 0.13066238629, accuracy: 1e-5)
+    } else {
+      XCTFail("Expected IRR to converge on large cashflows")
+    }
+
+    let deepParen = "=" + String(repeating: "(", count: 70) + "1" + String(repeating: ")", count: 70)
+    try sheet.setCell("F1", rawValue: deepParen)
+    XCTAssertEqual(sheet.evaluate(at: "F1"), .error("#VALUE!"))
+  }
+
+  @MainActor
+  func testContainerHardeningArchivePreservationAndWorkspaceCommercialUX() throws {
+    let dirtyText = "정상\u{0000}제어\u{0007}문자\u{001F}제거\u{FFFE}비문자\u{FFFF}\n유지\t탭"
+    XCTAssertEqual(XMLSanitizer.escape(dirtyText), "정상제어문자제거비문자\n유지\t탭")
+
+    let clampedSpan = TableCellSpan(rowIndex: 0, columnIndex: 0, rowSpan: 9999, columnSpan: -3)
+    XCTAssertEqual(clampedSpan.rowSpan, TableCellSpan.maxSpan)
+    XCTAssertEqual(clampedSpan.columnSpan, 1)
+
+    let para = ParagraphBlock(text: "본문 연락처 010-1234-5678 및 user@example.kr")
+    var doc = OfficeDocumentModel(
+      title: "보존검증",
+      paragraphs: [para]
+    )
+    doc.preservedArchiveEntries = [
+      "word/customXml/item1.xml": Data("<item>010-1234-5678</item>".utf8),
+      "word/comments.xml": Data("<comments>민감 메모</comments>".utf8),
+    ]
+    doc.revisions.append(
+      TrackedRevision(
+        author: "작성자",
+        kind: .insertion,
+        paragraphID: para.id,
+        originalText: "",
+        proposedText: "초안"
+      )
+    )
+    doc.comments.append(
+      DocumentCommentThread(anchorParagraphID: para.id, author: "검토자", message: "검토 메모")
+    )
+
+    let docxData = try OOXMLContainerCodec.encodeDocument(doc)
+    let roundTrippedDoc = try OOXMLContainerCodec.decodeDocument(from: docxData)
+    XCTAssertEqual(
+      roundTrippedDoc.preservedArchiveEntries["word/customXml/item1.xml"],
+      Data("<item>010-1234-5678</item>".utf8)
+    )
+
+    let scrubbedResult = DocumentSecurityAuditor.scrubPayload(.document(doc))
+    XCTAssertGreaterThanOrEqual(scrubbedResult.removedItemCount, 3)
+    if case .document(let scrubbedDoc) = scrubbedResult.scrubbed {
+      XCTAssertEqual(scrubbedDoc.revisions.first?.author, "Redacted")
+      XCTAssertTrue(scrubbedDoc.comments.isEmpty)
+      XCTAssertFalse(scrubbedDoc.paragraphs[0].text.contains("010-1234-5678"))
+      XCTAssertFalse(scrubbedDoc.paragraphs[0].text.contains("user@example.kr"))
+      XCTAssertNil(scrubbedDoc.preservedArchiveEntries["word/comments.xml"])
+      let customItemText = String(
+        decoding: scrubbedDoc.preservedArchiveEntries["word/customXml/item1.xml"] ?? Data(),
+        as: UTF8.self
+      )
+      XCTAssertFalse(customItemText.contains("010-1234-5678"))
+    } else {
+      XCTFail("Expected scrubbed document payload")
+    }
+
+    let xxeOdtEntries = [
+      ZipContainerEntry(path: "mimetype", data: Data(ODFContainerCodec.textMimeType.utf8)),
+      ZipContainerEntry(
+        path: "content.xml",
+        data: Data("<office:document-content><text:p>본문</text:p></office:document-content>".utf8)
+      ),
+      ZipContainerEntry(
+        path: "styles.xml",
+        data: Data("<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"ext.dtd\">]><styles/>".utf8)
+      ),
+    ]
+    let xxeOdtData = try ZipContainerCodec.pack(entries: xxeOdtEntries)
+    XCTAssertThrowsError(try ODFContainerCodec.decodeDocument(from: xxeOdtData))
+
+    let vm = WorkspaceViewModel()
+    let initialCount = vm.openTabs.count
+    let activeID = try XCTUnwrap(vm.activeTabID)
+    vm.openTabs[0].isModified = true
+    vm.requestCloseTab(id: activeID)
+    XCTAssertEqual(vm.pendingCloseConfirmTabID, activeID)
+    XCTAssertEqual(vm.openTabs.count, initialCount)
+    vm.confirmCloseTab(id: activeID, saveTo: URL(fileURLWithPath: "/nonexistent_dir_eo/fail.docx"))
+    XCTAssertEqual(vm.openTabs.count, initialCount)
+    vm.confirmCloseTab(id: activeID)
+    XCTAssertNil(vm.pendingCloseConfirmTabID)
+    XCTAssertEqual(vm.openTabs.count, initialCount - 1)
+    vm.reopenLastClosedTab()
+    XCTAssertEqual(vm.openTabs.count, initialCount)
+  }
 }
+

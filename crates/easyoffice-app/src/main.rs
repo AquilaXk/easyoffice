@@ -1,6 +1,168 @@
 use easyoffice_app::{run_self_test, EasyOfficeIpcRouter};
 use std::env;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::process::ExitCode;
+use std::time::Duration;
+
+const INDEX_HTML: &str = include_str!("../ui/index.html");
+const STYLES_CSS: &str = include_str!("../ui/styles.css");
+const APP_JS: &str = include_str!("../ui/app.js");
+const MAX_HTTP_BODY_BYTES: usize = 262_144;
+
+fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{key}\"");
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = json[start..].trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let mut out = String::new();
+    let mut chars = rest.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next()? {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                other => out.push(other),
+            }
+        } else if ch == '"' {
+            return Some(out);
+        } else {
+            out.push(ch);
+        }
+    }
+    None
+}
+
+fn handle_http_connection(mut stream: TcpStream) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    let mut buf = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+                if buf.len() > MAX_HTTP_BODY_BYTES {
+                    return;
+                }
+            }
+        }
+    };
+
+    let header_str = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+    let mut lines = header_str.lines();
+    let Some(req_line) = lines.next() else {
+        return;
+    };
+    let mut parts = req_line.split_whitespace();
+    let method = parts.next().unwrap_or("GET");
+    let path = parts.next().unwrap_or("/");
+
+    let mut content_length = 0usize;
+    for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("content-length") {
+                content_length = v
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap_or(0)
+                    .min(MAX_HTTP_BODY_BYTES);
+            }
+        }
+    }
+
+    while buf.len() < header_end + content_length {
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > header_end + MAX_HTTP_BODY_BYTES {
+                    break;
+                }
+            }
+        }
+    }
+
+    let body_slice = if buf.len() >= header_end {
+        &buf[header_end..buf.len().min(header_end + content_length)]
+    } else {
+        &[][..]
+    };
+    let body_str = String::from_utf8_lossy(body_slice);
+
+    let (status, content_type, response_body) = match (method, path) {
+        ("GET", "/" | "/index.html") => {
+            ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
+        }
+        ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
+        ("GET", "/app.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            APP_JS.to_string(),
+        ),
+        ("POST", "/api/ipc") => {
+            let trimmed = body_str.trim();
+            let (cmd, payload) = if trimmed.starts_with('{') {
+                let c = extract_json_string_field(trimmed, "command").unwrap_or_default();
+                let p = extract_json_string_field(trimmed, "payload").unwrap_or_default();
+                (c, p)
+            } else if let Some((c, p)) = trimmed.split_once('|') {
+                (c.trim().to_string(), p.to_string())
+            } else {
+                (trimmed.to_string(), String::new())
+            };
+            match EasyOfficeIpcRouter::dispatch(&cmd, &payload) {
+                Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
+                Err(err) => (
+                    "400 Bad Request",
+                    "application/json; charset=utf-8",
+                    format!(
+                        "{{\"status\":\"error\",\"message\":\"{}\"}}",
+                        err.to_string().replace('\\', "\\\\").replace('"', "\\\"")
+                    ),
+                ),
+            }
+        }
+        _ => (
+            "404 Not Found",
+            "application/json; charset=utf-8",
+            "{\"status\":\"not_found\"}".to_string(),
+        ),
+    };
+
+    let resp = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{}",
+        response_body.len(),
+        response_body
+    );
+    let _ = stream.write_all(resp.as_bytes());
+    let _ = stream.flush();
+}
+
+fn serve_webui(port: u16) -> ExitCode {
+    let addr = format!("127.0.0.1:{port}");
+    let listener = match TcpListener::bind(&addr) {
+        Ok(l) => l,
+        Err(err) => {
+            eprintln!("Failed to bind {addr}: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("EasyOffice WebUI Server listening on http://{addr}");
+    for stream in listener.incoming().flatten() {
+        handle_http_connection(stream);
+    }
+    ExitCode::SUCCESS
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -16,6 +178,14 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    }
+
+    if let Some(idx) = args.iter().position(|a| a == "--serve") {
+        let port = args
+            .get(idx + 1)
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(8787);
+        return serve_webui(port);
     }
 
     match EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "") {
