@@ -7,7 +7,7 @@ import SwiftUI
 final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
   let viewModel = WorkspaceViewModel()
 
-  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+  func applicationShouldTerminate(_ _: NSApplication) -> NSApplication.TerminateReply {
     if let modifiedTab = viewModel.openTabs.first(where: \.isModified) {
       viewModel.activeTabID = modifiedTab.id
       viewModel.isShowingHomeHub = false
@@ -19,7 +19,7 @@ final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
     return .terminateNow
   }
 
-  func application(_ application: NSApplication, open urls: [URL]) {
+  func application(_ _: NSApplication, open urls: [URL]) {
     for url in urls {
       do {
         _ = try viewModel.loadFromDisk(url: url)

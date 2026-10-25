@@ -441,7 +441,9 @@ public enum PDFBinarySerializer {
       if trimmed == "endobj" {
         inMetadataObj = false
         inMetadataStream = false
-      } else if trimmed.contains("/Type /Metadata") && trimmed.contains("/Subtype /EasyOfficeStudio") {
+      } else if trimmed.hasPrefix("<< /Type") && trimmed.contains("Metadata")
+        && trimmed.contains("EasyOfficeStudio")
+      {
         inMetadataObj = true
       } else if trimmed == "stream" && inMetadataObj {
         inMetadataStream = true

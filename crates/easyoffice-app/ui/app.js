@@ -470,45 +470,51 @@
       const raw = await globalThis.__TAURI_INTERNALS__.invoke(command, { payload });
       return typeof raw === "string" ? JSON.parse(raw) : raw;
     }
-    if (
-      globalThis.location &&
-      (globalThis.location.protocol === "http:" || globalThis.location.protocol === "https:") &&
-      typeof globalThis.fetch === "function"
-    ) {
-      let resp;
-      try {
-        resp = await globalThis.fetch("/api/ipc", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command, payload: String(payload ?? "") }),
-        });
-      } catch (netErr) {
-        const msg =
-          "백엔드 IPC 네트워크 오류: " +
-          (netErr && netErr.message ? netErr.message : String(netErr));
-        const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "[요청 거부] " + msg;
-        throw new Error(msg);
-      }
-      if (!resp.ok) {
-        const errBody = await resp.json().catch(() => ({}));
-        const msg = errBody.error || errBody.message || "IPC request failed (" + resp.status + ")";
-        const fb = document.getElementById("status-command-feedback");
-        if (fb) fb.textContent = "[요청 거부] " + msg;
-        const convBox = document.getElementById("conv-result-box");
-        if (command === "convert_document_format" && convBox) {
-          convBox.textContent = "[요청 거부] " + msg;
-        }
-        const secTxt = document.getElementById("security-status-text");
-        if (command === "audit_security" && secTxt) {
-          secTxt.textContent = "[요청 거부] " + msg;
-        }
-        throw new Error(msg);
-      }
-      return await resp.json();
+    if (isHttpIpcTransportAvailable()) {
+      return await invokeHttpIpc(command, payload);
     }
     const handler = MOCK_IPC_HANDLERS[command];
     return handler ? handler(payload) : { status: "ok" };
+  }
+
+  function isHttpIpcTransportAvailable() {
+    const proto = globalThis.location?.protocol;
+    return (proto === "http:" || proto === "https:") && typeof globalThis.fetch === "function";
+  }
+
+  function reportIpcFailure(command, msg) {
+    const fb = document.getElementById("status-command-feedback");
+    if (fb) fb.textContent = "[요청 거부] " + msg;
+    const targetId =
+      command === "convert_document_format"
+        ? "conv-result-box"
+        : command === "audit_security"
+          ? "security-status-text"
+          : null;
+    const targetEl = targetId ? document.getElementById(targetId) : null;
+    if (targetEl) targetEl.textContent = "[요청 거부] " + msg;
+  }
+
+  async function invokeHttpIpc(command, payload) {
+    let resp;
+    try {
+      resp = await globalThis.fetch("/api/ipc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command, payload: String(payload ?? "") }),
+      });
+    } catch (netErr) {
+      const msg = "백엔드 IPC 네트워크 오류: " + (netErr?.message || String(netErr));
+      reportIpcFailure(command, msg);
+      throw new Error(msg);
+    }
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      const msg = errBody.error || errBody.message || "IPC request failed (" + resp.status + ")";
+      reportIpcFailure(command, msg);
+      throw new Error(msg);
+    }
+    return await resp.json();
   }
 
   function snapshotDomSheetCells() {

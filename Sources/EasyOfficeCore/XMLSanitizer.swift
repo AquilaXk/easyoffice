@@ -68,10 +68,9 @@ public enum XMLSanitizer {
           && (buffer[kw + 4] & 0xDF) == doctypeAsciiUpper.4
           && (buffer[kw + 5] & 0xDF) == doctypeAsciiUpper.5
           && (buffer[kw + 6] & 0xDF) == doctypeAsciiUpper.6
+          && isDangerousDoctype(buffer, from: kw + 7, count: count)
         {
-          if isDangerousDoctype(buffer, from: kw + 7, count: count) {
-            throw EasyOfficeError.xxeOrExternalEntityDetected
-          }
+          throw EasyOfficeError.xxeOrExternalEntityDetected
         }
       }
       idx += 1
