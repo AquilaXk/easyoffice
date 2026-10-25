@@ -241,21 +241,16 @@ extension XMLDocumentModelMapper {
       }
       if !inQuotes {
         if ch == "[" {
-          let nextIdx = expr.index(after: idx)
-          if nextIdx < expr.endIndex, expr[nextIdx] == "." {
-            idx = expr.index(after: nextIdx)
+          var closeIdx = expr.index(after: idx)
+          while closeIdx < expr.endIndex && expr[closeIdx] != "]" {
+            closeIdx = expr.index(after: closeIdx)
+          }
+          if closeIdx < expr.endIndex {
+            let inner = String(expr[expr.index(after: idx)..<closeIdx])
+            normalized.append(normalizeBracketedOpenFormulaRef(inner))
+            idx = expr.index(after: closeIdx)
             continue
           }
-        } else if ch == ":" {
-          let nextIdx = expr.index(after: idx)
-          if nextIdx < expr.endIndex, expr[nextIdx] == "." {
-            normalized.append(":")
-            idx = expr.index(after: nextIdx)
-            continue
-          }
-        } else if ch == "]" {
-          idx = expr.index(after: idx)
-          continue
         } else if ch == ";" {
           normalized.append(",")
           idx = expr.index(after: idx)
@@ -266,6 +261,37 @@ extension XMLDocumentModelMapper {
       idx = expr.index(after: idx)
     }
     return normalized
+  }
+
+  private static func normalizeBracketedOpenFormulaRef(_ inner: String) -> String {
+    func splitSheetAndCell(_ part: String) -> (sheet: String?, cell: String) {
+      let trimmed = part.trimmingCharacters(in: .whitespaces)
+      if trimmed.hasPrefix(".") {
+        return (nil, String(trimmed.dropFirst()))
+      }
+      if let dotIdx = trimmed.lastIndex(of: ".") {
+        let sheetPart = String(trimmed[..<dotIdx])
+        let cellPart = String(trimmed[trimmed.index(after: dotIdx)...])
+        return (sheetPart.isEmpty ? nil : sheetPart, cellPart)
+      }
+      return (nil, trimmed)
+    }
+
+    let parts = inner.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(
+      String.init)
+    if parts.count == 2 {
+      let left = splitSheetAndCell(parts[0])
+      let right = splitSheetAndCell(parts[1])
+      if let sheet = left.sheet ?? right.sheet {
+        return "\(sheet)!\(left.cell):\(right.cell)"
+      }
+      return "\(left.cell):\(right.cell)"
+    }
+    let single = splitSheetAndCell(inner)
+    if let sheet = single.sheet {
+      return "\(sheet)!\(single.cell)"
+    }
+    return single.cell
   }
 
   static func slideElementAttributes(_ el: SlideCanvasElement) -> String {
@@ -404,10 +430,30 @@ public enum ODFContainerCodec {
     }
 
     let bodyWithoutTables = XMLSanitizer.stripElements(named: "table:table", from: root.innerXML)
+      .replacingOccurrences(of: "<text:h ", with: "<text:p eo:isHeading=\"1\" ")
+      .replacingOccurrences(of: "<text:h>", with: "<text:p eo:isHeading=\"1\">")
+      .replacingOccurrences(of: "</text:h>", with: "</text:p>")
     let paragraphs = XMLSanitizer.extractElements(named: "text:p", in: bodyWithoutTables).map {
       elem -> ParagraphBlock in
       var parsed = XMLDocumentModelMapper.parseParagraph(
         attributes: elem.attributes, innerXML: elem.innerXML, childTextTag: nil)
+      if elem.attributes["eo:isHeading"] == "1" && elem.attributes["style"] == nil {
+        let level = Int(elem.attributes["text:outline-level"] ?? "1") ?? 1
+        switch level {
+        case 1:
+          parsed.style = .heading1
+          parsed.fontSizePt = 20.0
+          parsed.isBold = true
+        case 2:
+          parsed.style = .heading2
+          parsed.fontSizePt = 16.0
+          parsed.isBold = true
+        default:
+          parsed.style = .heading3
+          parsed.fontSizePt = 13.5
+          parsed.isBold = true
+        }
+      }
       if let lsStr = elem.attributes["eo:letterSpacing"] ?? elem.attributes["fo:letter-spacing"],
         let lsVal = Double(lsStr.replacingOccurrences(of: "%", with: ""))
       {

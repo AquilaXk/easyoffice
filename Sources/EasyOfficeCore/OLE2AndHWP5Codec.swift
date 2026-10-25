@@ -1063,25 +1063,35 @@ public enum HWP5BinaryCodec {
           throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 DocInfo 레코드가 손상되었습니다.")
         }
         if recHeader.tagID == HWP5RecordHeader.tagDocumentProperties {
-          var cursor = payloadStart
-          title = try BitPacking.readLengthPrefixedUTF16LE(
-            from: docInfo, offset: &cursor, limit: recordEnd)
-          let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(
-            from: docInfo, offset: &cursor, limit: recordEnd)
-          if cursor == recordEnd {
-            paperSize = .a4
-            headerText = paperRaw
-          } else {
-            paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
-            headerText = try BitPacking.readLengthPrefixedUTF16LE(
-              from: docInfo, offset: &cursor, limit: recordEnd)
-            footerText = try BitPacking.readLengthPrefixedUTF16LE(
-              from: docInfo, offset: &cursor, limit: recordEnd)
-            if cursor < recordEnd {
-              trackChanges = docInfo[docInfo.startIndex + cursor] != 0
+          let firstU32 = (try? BitPacking.readUInt32LE(from: docInfo, at: payloadStart)) ?? 0
+          if recHeader.payloadSize == 26 && (firstU32 == 0 || firstU32 > 18 || firstU32 % 2 != 0) {
+            let sectionCount = try BitPacking.readUInt16LE(from: docInfo, at: payloadStart)
+            guard sectionCount >= 1 else {
+              throw EasyOfficeError.corruptedContainer(
+                detail: "HWP 5.0 표준 문서 속성 레코드의 구역 개수가 유효하지 않습니다.")
             }
+            parsedDocProps = true
+          } else {
+            var cursor = payloadStart
+            title = try BitPacking.readLengthPrefixedUTF16LE(
+              from: docInfo, offset: &cursor, limit: recordEnd)
+            let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(
+              from: docInfo, offset: &cursor, limit: recordEnd)
+            if cursor == recordEnd {
+              paperSize = .a4
+              headerText = paperRaw
+            } else {
+              paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
+              headerText = try BitPacking.readLengthPrefixedUTF16LE(
+                from: docInfo, offset: &cursor, limit: recordEnd)
+              footerText = try BitPacking.readLengthPrefixedUTF16LE(
+                from: docInfo, offset: &cursor, limit: recordEnd)
+              if cursor < recordEnd {
+                trackChanges = docInfo[docInfo.startIndex + cursor] != 0
+              }
+            }
+            parsedDocProps = true
           }
-          parsedDocProps = true
         } else if recHeader.tagID == HWP5RecordHeader.tagExtendedMetadata {
           let slice = Data(
             docInfo[(docInfo.startIndex + payloadStart)..<(docInfo.startIndex + recordEnd)])
@@ -1095,7 +1105,7 @@ public enum HWP5BinaryCodec {
       }
     }
 
-    guard let rawSection0 = streamMap["BodyText/Section0"] else {
+    guard let rawSection0 = streamMap["BodyText/Section0"] ?? streamMap["Section0"] else {
       throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 'BodyText/Section0' 스트림이 누락되었습니다.")
     }
     let section0 =
@@ -1128,58 +1138,62 @@ public enum HWP5BinaryCodec {
         if let prev = pendingParagraph {
           paragraphs.append(prev)
         }
-        var pCursor = payloadStart
-        let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(
-          from: section0, offset: &pCursor, limit: payloadEnd)
-        if pCursor + 1 == payloadEnd {
-          let isOfficial = section0[section0.startIndex + pCursor] != 0
-          let resolvedStyle: ParagraphStyleRole =
-            isOfficial ? .officialHeader : (ParagraphStyleRole(rawValue: styleRaw) ?? .body)
-          pendingParagraph = ParagraphBlock(
-            style: resolvedStyle,
-            text: ""
-          )
+        if payloadLen == 22 || payloadLen == 24 {
+          pendingParagraph = ParagraphBlock(text: "")
         } else {
-          let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(
+          var pCursor = payloadStart
+          let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(
             from: section0, offset: &pCursor, limit: payloadEnd)
-          let fontName = try BitPacking.readLengthPrefixedUTF16LE(
-            from: section0, offset: &pCursor, limit: payloadEnd)
-          guard pCursor + 9 <= payloadEnd else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
-          }
-          let fontSizeX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-          pCursor += 4
-          let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-          pCursor += 4
-          let styleFlags = section0[section0.startIndex + pCursor]
-          pCursor += 1
-          var letterSpacingPct = 0.0
-          var charWidthScalePct = 100.0
-          if pCursor + 8 <= payloadEnd {
-            let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+          if pCursor + 1 == payloadEnd {
+            let isOfficial = section0[section0.startIndex + pCursor] != 0
+            let resolvedStyle: ParagraphStyleRole =
+              isOfficial ? .officialHeader : (ParagraphStyleRole(rawValue: styleRaw) ?? .body)
+            pendingParagraph = ParagraphBlock(
+              style: resolvedStyle,
+              text: ""
+            )
+          } else {
+            let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(
+              from: section0, offset: &pCursor, limit: payloadEnd)
+            let fontName = try BitPacking.readLengthPrefixedUTF16LE(
+              from: section0, offset: &pCursor, limit: payloadEnd)
+            guard pCursor + 9 <= payloadEnd else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
+            }
+            let fontSizeX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
             pCursor += 4
-            let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+            let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
             pCursor += 4
-            letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
-            charWidthScalePct = Double(charScaleX100) / 100.0
+            let styleFlags = section0[section0.startIndex + pCursor]
+            pCursor += 1
+            var letterSpacingPct = 0.0
+            var charWidthScalePct = 100.0
+            if pCursor + 8 <= payloadEnd {
+              let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+              pCursor += 4
+              let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+              pCursor += 4
+              letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
+              charWidthScalePct = Double(charScaleX100) / 100.0
+            }
+            pendingParagraph = ParagraphBlock(
+              style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
+              alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
+              text: "",
+              fontName: fontName,
+              fontSizePt: Double(fontSizeX100) / 100.0,
+              isBold: (styleFlags & 0x01) != 0,
+              isItalic: (styleFlags & 0x02) != 0,
+              isUnderlined: (styleFlags & 0x04) != 0,
+              lineSpacingPercent: Double(lineSpacingX100) / 100.0,
+              letterSpacingPercent: letterSpacingPct,
+              charWidthScalePercent: charWidthScalePct
+            )
           }
-          pendingParagraph = ParagraphBlock(
-            style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
-            alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
-            text: "",
-            fontName: fontName,
-            fontSizePt: Double(fontSizeX100) / 100.0,
-            isBold: (styleFlags & 0x01) != 0,
-            isItalic: (styleFlags & 0x02) != 0,
-            isUnderlined: (styleFlags & 0x04) != 0,
-            lineSpacingPercent: Double(lineSpacingX100) / 100.0,
-            letterSpacingPercent: letterSpacingPct,
-            charWidthScalePercent: charWidthScalePct
-          )
         }
 
       case HWP5RecordHeader.tagParaText:
-        let text = try BitPacking.decodeUTF16LE(
+        let text = try decodeParaTextPayload(
           from: section0, at: payloadStart, byteLength: payloadLen)
         if var current = pendingParagraph {
           current.text = text
@@ -1309,5 +1323,64 @@ public enum HWP5BinaryCodec {
     )
     extendedEnvelope?.apply(to: &docModel)
     return docModel
+  }
+
+  private static func decodeParaTextPayload(
+    from data: Data,
+    at offset: Int,
+    byteLength: Int
+  ) throws -> String {
+    guard byteLength >= 0, byteLength % 2 == 0, offset >= 0, offset + byteLength <= data.count else {
+      throw EasyOfficeError.corruptedContainer(
+        detail: "HWP 5.0 문단 텍스트 페이로드 길이가 2바이트(WCHAR) 배수가 아니거나 범위를 초과합니다.")
+    }
+    let payloadEnd = offset + byteLength
+    var units: [UInt16] = []
+    units.reserveCapacity(byteLength / 2)
+    var cursor = offset
+
+    while cursor < payloadEnd {
+      let code = try BitPacking.readUInt16LE(from: data, at: cursor)
+      if code < 0x0020 {
+        if code == 0x0009 {
+          units.append(0x0009)
+          if cursor + 16 <= payloadEnd,
+            (try? BitPacking.readUInt16LE(from: data, at: cursor + 14)) == 0x0009
+          {
+            var allZeroAttrs = true
+            for attrOff in stride(from: 2, through: 12, by: 2) {
+              if (try? BitPacking.readUInt16LE(from: data, at: cursor + attrOff)) != 0 {
+                allZeroAttrs = false
+                break
+              }
+            }
+            cursor += allZeroAttrs ? 16 : 2
+          } else {
+            cursor += 2
+          }
+        } else if code == 0x000A {
+          units.append(0x000A)
+          cursor += 2
+        } else if code == 0x000D {
+          if cursor + 2 < payloadEnd {
+            units.append(0x000D)
+          }
+          cursor += 2
+        } else if code == 0x0000 {
+          cursor += 2
+        } else if cursor + 16 <= payloadEnd,
+          (try? BitPacking.readUInt16LE(from: data, at: cursor + 14)) == code
+        {
+          cursor += 16
+        } else {
+          cursor += 2
+        }
+      } else {
+        units.append(code)
+        cursor += 2
+      }
+    }
+
+    return String(decoding: units, as: UTF16.self)
   }
 }
