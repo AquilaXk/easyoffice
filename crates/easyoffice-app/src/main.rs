@@ -122,14 +122,16 @@ fn handle_http_connection(mut stream: TcpStream) {
             };
             match EasyOfficeIpcRouter::dispatch(&cmd, &payload) {
                 Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
-                Err(err) => (
-                    "400 Bad Request",
-                    "application/json; charset=utf-8",
-                    format!(
-                        "{{\"status\":\"error\",\"message\":\"{}\"}}",
-                        err.to_string().replace('\\', "\\\\").replace('"', "\\\"")
-                    ),
-                ),
+                Err(err) => {
+                    let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
+                    (
+                        "400 Bad Request",
+                        "application/json; charset=utf-8",
+                        format!(
+                            "{{\"status\":\"error\",\"error\":\"{escaped}\",\"message\":\"{escaped}\"}}"
+                        ),
+                    )
+                }
             }
         }
         _ => (

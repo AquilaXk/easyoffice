@@ -475,16 +475,22 @@
       (globalThis.location.protocol === "http:" || globalThis.location.protocol === "https:") &&
       typeof globalThis.fetch === "function"
     ) {
+      let resp = null;
       try {
-        const resp = await globalThis.fetch("/api/ipc", {
+        resp = await globalThis.fetch("/api/ipc", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ command, payload: String(payload ?? "") }),
         });
+      } catch {
+        resp = null;
+      }
+      if (resp) {
         if (resp.ok) {
           return await resp.json();
         }
-      } catch {
+        const errBody = await resp.json().catch(() => ({}));
+        throw new Error(errBody.error || errBody.message || "IPC request failed (" + resp.status + ")");
       }
     }
     const handler = MOCK_IPC_HANDLERS[command];

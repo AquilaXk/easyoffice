@@ -130,8 +130,12 @@ impl LocalSmartAssistant {
         items
     }
 
+    pub const MAX_DIFF_PARAGRAPHS: usize = 512;
+
     /// Computes exact Longest Common Subsequence (LCS) line diff between `before` and `after`.
     pub fn diff_documents_lcs(before: &[String], after: &[String]) -> Vec<DocumentDiffLine> {
+        let before = &before[..before.len().min(Self::MAX_DIFF_PARAGRAPHS)];
+        let after = &after[..after.len().min(Self::MAX_DIFF_PARAGRAPHS)];
         let m = before.len();
         let n = after.len();
         let stride = n + 1;
@@ -484,5 +488,10 @@ mod tests {
         assert!(!audit.scrubbed_text.contains("02-123-4567"));
         assert!(!audit.scrubbed_text.contains("031-765-4321"));
         assert!(!audit.scrubbed_text.contains("security@easyoffice.local"));
+
+        let huge_before: Vec<String> = (0..1000).map(|i| format!("문단_{i}")).collect();
+        let huge_after: Vec<String> = (0..1000).map(|i| format!("문단_{i}")).collect();
+        let capped_diff = LocalSmartAssistant::diff_documents_lcs(&huge_before, &huge_after);
+        assert_eq!(capped_diff.len(), 512);
     }
 }
