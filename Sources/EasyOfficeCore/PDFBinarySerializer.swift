@@ -36,7 +36,42 @@ public enum PDFBinarySerializer {
     appendLine("%PDF-1.7")
     appendLine("%\u{00E2}\u{00E3}\u{00CF}\u{00D3}")
 
-    let pageCount = pdf.pages.count
+    let maxLinesPerPage = 42
+    var renderedPages: [(
+      sourcePage: PDFPageDescriptor, pageSliceIndex: Int, visualLines: [String], chunkText: String
+    )] = []
+    for page in pdf.pages {
+      let allVisualLines = page.extractedText
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .flatMap { wrapLine(String($0), maxChars: 64) }
+      if allVisualLines.count <= maxLinesPerPage {
+        renderedPages.append(
+          (
+            sourcePage: page,
+            pageSliceIndex: 0,
+            visualLines: allVisualLines,
+            chunkText: page.extractedText
+          ))
+      } else {
+        var sliceIdx = 0
+        var start = 0
+        while start < allVisualLines.count {
+          let end = Swift.min(start + maxLinesPerPage, allVisualLines.count)
+          let slice = Array(allVisualLines[start..<end])
+          renderedPages.append(
+            (
+              sourcePage: page,
+              pageSliceIndex: sliceIdx,
+              visualLines: slice,
+              chunkText: slice.joined(separator: "\n")
+            ))
+          sliceIdx += 1
+          start = end
+        }
+      }
+    }
+
+    let pageCount = renderedPages.count
     let pageObjectNumbers = (0..<pageCount).map { 3 + ($0 * 2) }
     let kidsRefs = pageObjectNumbers.map { "\($0) 0 R" }.joined(separator: " ")
     let metadataObjNum = 3 + (pageCount * 2)
@@ -57,14 +92,17 @@ public enum PDFBinarySerializer {
     appendLine("<< /Type /Pages /Count \(pageCount) /Kids [\(kidsRefs)] >>")
     appendLine("endobj")
 
-    for (idx, page) in pdf.pages.enumerated() {
+    for (idx, rendered) in renderedPages.enumerated() {
+      let page = rendered.sourcePage
+      let isFirstSlice = rendered.pageSliceIndex == 0
+      let visualLines = rendered.visualLines
       let pageObjNum = 3 + (idx * 2)
       let contentObjNum = pageObjNum + 1
-      let escapedText = escapePDFString(page.extractedText)
+      let escapedText = escapePDFString(rendered.chunkText)
       let headerHex = hexEncodeASCII(
-        "EasyOffice ISO 32000-1 PDF Studio - Page \(page.pageNumber) (\(page.rotationDegrees) deg)")
+        "EasyOffice ISO 32000-1 PDF Studio - Page \(idx + 1) (\(page.rotationDegrees) deg)")
       let statusHex = hexEncodeASCII(
-        "Verified ISO 32000-1 Vector Page | UTF-8 Stream: \(page.extractedText.utf8.count) Bytes | Status: SAFE"
+        "Verified ISO 32000-1 Vector Page | UTF-8 Stream: \(rendered.chunkText.utf8.count) Bytes | Status: SAFE"
       )
       var streamLines: [String] = [
         "q",
@@ -88,21 +126,17 @@ public enum PDFBinarySerializer {
         let wmLabel = "[WM] \(pdf.watermarkText)"
         let wmHex = hexEncodeUTF16BE(wmLabel, maxChars: 64)
         let escapedWM = escapePDFString(wmLabel)
-        streamLines.append("BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedWM)) Tj ET")
+        streamLines.append("BT 3 Tr /F1 1 Tf 0 1 Td (\(escapedWM)) Tj ET")
         streamLines.append(
           "q 0.780 0.800 0.880 rg BT 0 Tr /F2 10 Tf 1 0 0 1 320 746 Tm <\(wmHex)> Tj ET Q"
         )
       }
 
-      let visualLines = page.extractedText
-        .split(separator: "\n", omittingEmptySubsequences: false)
-        .flatMap { wrapLine(String($0), maxChars: 64) }
-
-      // 3. Body Paragraphs (y = 728 down to y = 638)
+      // 3. Body Paragraphs (y = 728 down to y = 76, fixed 15.0pt leading)
       var cursorY = 728.0
-      let lineLeading = visualLines.count > 6 ? max(4.0, 90.0 / Double(visualLines.count)) : 15.0
+      let lineLeading = 15.0
       for rawLine in visualLines {
-        guard cursorY >= 638.0 else { break }
+        guard cursorY >= 76.0 else { break }
         let yInt = XMLDocumentModelMapper.safeClampedInt(cursorY)
         let barWidth = min(480, max(60, rawLine.count * 9))
         let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
@@ -114,7 +148,8 @@ public enum PDFBinarySerializer {
       }
 
       // 4. Visual Annotations & Official Approval Stamp Badge (y = 576..626)
-      let pageAnnotations = pdf.annotations.filter { $0.pageNumber == page.pageNumber }
+      let pageAnnotations =
+        isFirstSlice ? pdf.annotations.filter { $0.pageNumber == page.pageNumber } : []
       for (aIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
         let ay = 610.0 - Double(aIdx) * 16.0
         let pillFill = annotation.kind == .highlight ? "0.98 0.96 0.84" : "0.94 0.95 1.00"
@@ -152,7 +187,8 @@ public enum PDFBinarySerializer {
       }
 
       // 5. AcroForm Interactive Field Boxes (y = 516..562)
-      let pageFormFields = pdf.formFields.filter { $0.pageNumber == page.pageNumber }
+      let pageFormFields =
+        isFirstSlice ? pdf.formFields.filter { $0.pageNumber == page.pageNumber } : []
       for (fIdx, field) in pageFormFields.prefix(4).enumerated() {
         let col = fIdx % 2
         let row = fIdx / 2
@@ -168,7 +204,7 @@ public enum PDFBinarySerializer {
             fx, fy - 5.0
           )
         )
-        streamLines.append("BT 3 Tr /F1 1 Tf 0 0 Td (\(escapedForm)) Tj ET")
+        streamLines.append("BT 3 Tr /F1 1 Tf 0 2 Td (\(escapedForm)) Tj ET")
         streamLines.append(
           String(
             format: "0.145 0.165 0.243 rg BT 0 Tr /F2 8 Tf 1 0 0 1 %.0f %.0f Tm <%@> Tj ET",
@@ -178,9 +214,11 @@ public enum PDFBinarySerializer {
       }
 
       // 6. Electronic Signature Box & Vector Ink Curve (y = 450..504)
-      let pageStrokes = pdf.inkStrokes.filter {
-        $0.pageNumber == page.pageNumber && $0.points.count >= 2
-      }
+      let pageStrokes =
+        isFirstSlice
+        ? pdf.inkStrokes.filter {
+          $0.pageNumber == page.pageNumber && $0.points.count >= 2
+        } : []
       if !pageStrokes.isEmpty {
         streamLines.append("0.97 0.98 1.00 rg 0.45 0.50 0.78 RG 1.0 w 48 452 280 46 re B")
         let sigHeaderHex = hexEncodeUTF16BE(
@@ -466,11 +504,15 @@ public enum PDFBinarySerializer {
       {
         let inner = String(line[line.index(after: openParen)..<closeParen])
         let unescaped = unescapePDFString(inner)
-        if unescaped.hasPrefix("[WM] ") {
+        if unescaped.hasPrefix("[WM] ")
+          && (line.contains(" 0 1 Td ") || !currentStreamLines.isEmpty)
+        {
           fallbackWatermarkText = String(unescaped.dropFirst(5))
           continue
         }
-        if unescaped.hasPrefix("[FORM] ") {
+        if unescaped.hasPrefix("[FORM] ")
+          && (line.contains(" 0 2 Td ") || !currentStreamLines.isEmpty)
+        {
           let remainder = String(unescaped.dropFirst(7))
           let parts = remainder.components(separatedBy: ": ")
           let fieldName = parts.first ?? "Field"

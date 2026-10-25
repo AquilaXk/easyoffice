@@ -327,16 +327,30 @@ extension WorksheetModel {
         let digitsNum = frame.arg(1, in: self).numericValue,
         let digits = Self.safeInt(digitsNum)
       else { return .error("#VALUE!") }
-      let factor = pow(10.0, Double(digits))
-      let scaled = num * factor
-      let eps = scaled >= 0 ? 1e-12 : -1e-12
+      guard abs(digits) <= 300 else { return .error("#NUM!") }
       let roundedVal: Double
-      if name == "ROUND" {
-        roundedVal = (scaled + eps).rounded() / factor
-      } else if name == "ROUNDUP" {
-        roundedVal = (scaled >= 0 ? ceil(scaled - 1e-12) : floor(scaled + 1e-12)) / factor
+      if digits == 0 {
+        if name == "ROUND" {
+          roundedVal = num.rounded(.toNearestOrAwayFromZero)
+        } else if name == "ROUNDUP" {
+          roundedVal = num >= 0 ? ceil(num) : floor(num)
+        } else {
+          roundedVal = trunc(num)
+        }
       } else {
-        roundedVal = trunc(scaled + eps) / factor
+        let factor = pow(10.0, Double(digits))
+        let scaled = num * factor
+        guard scaled.isFinite, factor.isFinite, factor != 0 else { return .error("#NUM!") }
+        let ulpNudge = abs(scaled) * Double.ulpOfOne * 2.0
+        if name == "ROUND" {
+          let nudged = scaled >= 0 ? scaled + ulpNudge : scaled - ulpNudge
+          roundedVal = nudged.rounded(.toNearestOrAwayFromZero) / factor
+        } else if name == "ROUNDUP" {
+          roundedVal = (scaled >= 0 ? ceil(scaled - ulpNudge) : floor(scaled + ulpNudge)) / factor
+        } else {
+          let nudged = scaled >= 0 ? scaled + ulpNudge : scaled - ulpNudge
+          roundedVal = trunc(nudged) / factor
+        }
       }
       guard roundedVal.isFinite else { return .error("#NUM!") }
       return .number(roundedVal)
@@ -1159,8 +1173,10 @@ extension WorksheetModel {
   // MARK: - Numeric & Criteria Matching Helpers
 
   internal static func safeInt(_ value: Double) -> Int? {
-    guard value.isFinite, value > Double(Int.min), value < Double(Int.max) else { return nil }
-    return Int(value)
+    guard value.isFinite else { return nil }
+    let t = trunc(value)
+    guard t >= -9223372036854775808.0, t < 9223372036854775808.0 else { return nil }
+    return Int(exactly: t)
   }
 
   internal static func cellValuesEqual(_ a: EvaluatedCellValue, _ b: EvaluatedCellValue) -> Bool {

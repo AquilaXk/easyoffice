@@ -724,7 +724,7 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(sheet.evaluate(at: "D4"), .boolean(true))
     XCTAssertEqual(sheet.evaluate(at: "D5"), .boolean(true))
     XCTAssertEqual(sheet.evaluate(at: "D6"), .number(1.01))
-    XCTAssertEqual(sheet.evaluate(at: "D7"), .text("2009-02-02"))
+    XCTAssertEqual(sheet.evaluate(at: "D7"), .number(39846.0))
     XCTAssertEqual(sheet.evaluate(at: "D8"), .number(2026.0))
     XCTAssertEqual(sheet.evaluate(at: "D9").description, "12345.6789")
 
@@ -826,6 +826,306 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(vm.openTabs.count, initialCount - 1)
     vm.reopenLastClosedTab()
     XCTAssertEqual(vm.openTabs.count, initialCount)
+  }
+
+  @MainActor
+  func testAdversarialRemediationBatch15NumericContainerFormulaPDFAndWorkspaceGuards() throws {
+    // 1. Numeric overflow & fixed-width integer bounds (NaN/Infinity/1e100 in .doc/.rtf/.hwp, safeInt(2^63), TableCellSpan JSON decode, Zip path > 65535)
+    let extremePara = ParagraphBlock(
+      text: "극단수치",
+      fontSizePt: -50.0,
+      lineSpacingPercent: .infinity,
+      letterSpacingPercent: .nan,
+      charWidthScalePercent: 1e100
+    )
+    let extremeImg = EmbeddedImageAttachment(
+      fileName: "dup.png",
+      caption: "그림1",
+      imageData: Data([0x89, 0x50, 0x4E, 0x47]),
+      widthPt: 1e100,
+      heightPt: -999.0
+    )
+    let extremeImg2 = EmbeddedImageAttachment(
+      fileName: "dup.png",
+      caption: "그림2",
+      imageData: Data([0x89, 0x50, 0x4E, 0x47, 0x0D]),
+      widthPt: .nan,
+      heightPt: .infinity
+    )
+    var extremeDoc = OfficeDocumentModel(
+      title: "극단수치문서",
+      paragraphs: [extremePara],
+      images: [extremeImg, extremeImg2]
+    )
+    extremeDoc.preservedArchiveEntries = [
+      "word/customXml/item1.xml": Data("<ok/>".utf8),
+      "evil/untrusted.bin": Data([0x01, 0x02]),
+    ]
+    let encodedDocBinary = try LegacyOLE2OfficeCodec.encodeWordBinary(extremeDoc)
+    XCTAssertFalse(encodedDocBinary.isEmpty)
+    let encodedRtf = RTFCodec.encodeDocument(extremeDoc)
+    XCTAssertFalse(encodedRtf.isEmpty)
+    let encodedDocx = try OOXMLContainerCodec.encodeDocument(extremeDoc)
+    let docxUnpacked = try ZipContainerCodec.unpack(from: encodedDocx)
+    let docxPaths = Set(docxUnpacked.map(\.path))
+    XCTAssertTrue(docxPaths.contains("word/media/dup.png"))
+    XCTAssertTrue(docxPaths.contains("word/media/dup_2.png"))
+    XCTAssertTrue(docxPaths.contains("word/customXml/item1.xml"))
+    XCTAssertFalse(docxPaths.contains("evil/untrusted.bin"))
+
+    let spanJSON = Data(
+      "{\"rowIndex\":-999,\"columnIndex\":999999999,\"rowSpan\":5000,\"columnSpan\":-10}".utf8)
+    let decodedSpan = try JSONDecoder().decode(TableCellSpan.self, from: spanJSON)
+    XCTAssertEqual(decodedSpan.rowIndex, 0)
+    XCTAssertEqual(decodedSpan.columnIndex, TableCellSpan.maxIndex)
+    XCTAssertEqual(decodedSpan.rowSpan, TableCellSpan.maxSpan)
+    XCTAssertEqual(decodedSpan.columnSpan, 1)
+
+    let hugePathEntry = ZipContainerEntry(
+      path: String(repeating: "a", count: 65_536), data: Data([0x01]))
+    XCTAssertThrowsError(try ZipContainerCodec.pack(entries: [hugePathEntry]))
+
+    var overflowBiffSheet = WorksheetModel(name: "RowOverflow")
+    try overflowBiffSheet.setCell(row: 70_000, column: 0, rawValue: "초과행")
+    XCTAssertThrowsError(try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(overflowBiffSheet))
+
+    // 2. OLE2 MiniFAT (<4096 bytes), Storage hierarchy ("BodyText/Section0" -> BodyText + Section0), MiniFAT shared sector rejection, BIFF8 Globals+Worksheet & MULRK, PPT RT_TextBytesAtom
+    let hwpDoc = OfficeDocumentModel(
+      title: "계층스토리지검증",
+      format: .hwp,
+      paragraphs: [ParagraphBlock(text: "HWP 5.0 표준 스토리지 트리 및 미니스트림")]
+    )
+    let hwpBytes = try HWP5BinaryCodec.encodeDocument(hwpDoc, compressed: true)
+    let firstDirSector = Int(try BitPacking.readUInt32LE(from: hwpBytes, at: 48))
+    let cutoffSize = Int(try BitPacking.readUInt32LE(from: hwpBytes, at: 56))
+    XCTAssertEqual(cutoffSize, 4096)
+    let dirBase = (1 + firstDirSector) * 512
+    var dirEntryNames: [(name: String, type: UInt8)] = []
+    for i in 0..<8 {
+      let base = dirBase + i * 128
+      guard base + 128 <= hwpBytes.count else { break }
+      let objType = hwpBytes[base + 66]
+      guard objType != 0 else { continue }
+      let nameLen = Int(try BitPacking.readUInt16LE(from: hwpBytes, at: base + 64))
+      if nameLen >= 2 {
+        let name = try BitPacking.decodeUTF16LE(
+          from: hwpBytes, at: base, byteLength: nameLen - 2)
+        dirEntryNames.append((name, objType))
+      }
+    }
+    XCTAssertTrue(dirEntryNames.contains(where: { $0.name == "BodyText" && $0.type == 1 }))
+    XCTAssertTrue(dirEntryNames.contains(where: { $0.name == "Section0" && $0.type == 2 }))
+    let roundTrippedHwp = try HWP5BinaryCodec.decodeDocument(from: hwpBytes)
+    XCTAssertEqual(roundTrippedHwp.paragraphs.first?.text, "HWP 5.0 표준 스토리지 트리 및 미니스트림")
+
+    // Corrupted OLE2 with Root Entry streamSize = UInt64.max must fail closed without trapping
+    var corruptedOle2 = hwpBytes
+    try BitPacking.writeUInt64LE(UInt64.max, into: &corruptedOle2, at: dirBase + 120)
+    XCTAssertThrowsError(try OLE2ContainerCodec.unpack(from: corruptedOle2))
+
+    // BIFF8 Globals (0x0005) + Worksheet (0x0010) substream verification
+    var biffSheet = WorksheetModel(name: "표준BIFF8")
+    try biffSheet.setCell("A1", rawValue: "헤더")
+    try biffSheet.setCell("B1", rawValue: "42.5")
+    let biffEncoded = try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(biffSheet)
+    let biffStreams = try OLE2ContainerCodec.unpack(from: biffEncoded)
+    let wbStream = try XCTUnwrap(biffStreams.first(where: { $0.name == "Workbook" })?.data)
+    XCTAssertEqual(try BitPacking.readUInt16LE(from: wbStream, at: 6), 0x0005)  // Globals BOF
+
+    // PPT with RT_TextBytesAtom (4008) inside nested container
+    var pptSlideChildren = Data()
+    BitPacking.appendUInt16LE(0x0000, to: &pptSlideChildren)
+    BitPacking.appendUInt16LE(4008, to: &pptSlideChildren)  // RT_TextBytesAtom
+    let asciiSlideTitle = Data("ASCII Slide Title".utf8)
+    BitPacking.appendUInt32LE(UInt32(asciiSlideTitle.count), to: &pptSlideChildren)
+    pptSlideChildren.append(asciiSlideTitle)
+
+    var pptDocChildren = Data()
+    BitPacking.appendUInt16LE(0x000F, to: &pptDocChildren)
+    BitPacking.appendUInt16LE(1006, to: &pptDocChildren)  // RT_Slide
+    BitPacking.appendUInt32LE(UInt32(pptSlideChildren.count), to: &pptDocChildren)
+    pptDocChildren.append(pptSlideChildren)
+
+    var pptRootStream = Data()
+    BitPacking.appendUInt16LE(0x000F, to: &pptRootStream)
+    BitPacking.appendUInt16LE(1000, to: &pptRootStream)  // RT_Document
+    BitPacking.appendUInt32LE(UInt32(pptDocChildren.count), to: &pptRootStream)
+    pptRootStream.append(pptDocChildren)
+
+    let customPptContainer = try OLE2ContainerCodec.pack(streams: [
+      OLE2StreamEntry(name: "PowerPoint Document", data: pptRootStream)
+    ])
+    let decodedAsciiPpt = try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: customPptContainer)
+    XCTAssertEqual(decodedAsciiPpt.slides.first?.title, "ASCII Slide Title")
+
+    // 3. PDF 60-line auto-pagination & preservation of body paragraphs starting with [WM] / [STAMP] / [FORM]
+    let sixtyLines = (1...60).map { "Line_\($0)_BodyText" }.joined(separator: "\n")
+    let pdfModel = PDFStudioDocumentModel(
+      title: "다중페이지PDF",
+      pages: [
+        PDFPageDescriptor(
+          pageNumber: 1,
+          extractedText: "[WM] 본문접두사보존\n[STAMP] 스탬프본문\n[FORM] 양식본문\n" + sixtyLines
+        )
+      ],
+      formFields: [PDFFormField(pageNumber: 1, name: "서명", value: "홍길동")],
+      watermarkText: "대외비"
+    )
+    let pdfBytes = PDFBinarySerializer.encode(pdfModel)
+    let decodedPdf = try PDFBinarySerializer.decode(from: pdfBytes)
+    let joinedPdfBody = decodedPdf.pages.map(\.extractedText).joined(separator: "\n")
+    XCTAssertTrue(joinedPdfBody.contains("[WM] 본문접두사보존"))
+    XCTAssertTrue(joinedPdfBody.contains("[STAMP] 스탬프본문"))
+    XCTAssertTrue(joinedPdfBody.contains("[FORM] 양식본문"))
+    XCTAssertTrue(joinedPdfBody.contains("Line_60_BodyText"))
+    XCTAssertEqual(decodedPdf.watermarkText, "대외비")
+    XCTAssertEqual(decodedPdf.formFields.first?.value, "홍길동")
+
+    // 4. XMLSanitizer UTF-16 BOM XXE blocking, benign local PUBLIC DOCTYPE allowance, and Korean PII detection without spaces
+    var utf16LEBomXML = Data([0xFF, 0xFE])
+    utf16LEBomXML.append(
+      BitPacking.encodeUTF16LE("<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><a/>"))
+    XCTAssertThrowsError(try XMLSanitizer.validateSafeXMLData(utf16LEBomXML))
+
+    let benignPublicDoctype = Data(
+      "<?xml version=\"1.0\"?><!DOCTYPE office:document-content PUBLIC \"-//OpenOffice.org//DTD OfficeDocument 1.0//EN\" \"office.dtd\"><office:document-content/>"
+        .utf8)
+    XCTAssertNoThrow(try XMLSanitizer.validateSafeXMLData(benignPublicDoctype))
+
+    let koreanPIIDoc = OfficeDocumentModel(
+      title: "개인정보검출",
+      paragraphs: [
+        ParagraphBlock(
+          text: "연락처는010-1234-5678입니다 주민번호900101-1234567과 무하이픈9001011234567 이메일test@example.com입니다"
+        )
+      ]
+    )
+    let piiScrubResult = DocumentSecurityAuditor.scrubPayload(.document(koreanPIIDoc))
+    XCTAssertGreaterThanOrEqual(piiScrubResult.removedItemCount, 3)
+    if case .document(let maskedDoc) = piiScrubResult.scrubbed {
+      let maskedText = maskedDoc.paragraphs[0].text
+      XCTAssertFalse(maskedText.contains("010-1234-5678"))
+      XCTAssertFalse(maskedText.contains("900101-1234567"))
+      XCTAssertFalse(maskedText.contains("9001011234567"))
+      XCTAssertFalse(maskedText.contains("test@example.com"))
+    }
+
+    // 5. Spreadsheet 200-term formula, ROUND ULP precision, 300-cell cross-sheet SUM, VLOOKUP/HLOOKUP/MATCH defaults, DATE serials, sortRows formula shifting, Pivot "(빈 값)" & .count text cells
+    var calcSheet = WorksheetModel(name: "Main")
+    try calcSheet.setCell("A1", rawValue: "1")
+    let twoHundredTerms = "=" + Array(repeating: "A1", count: 200).joined(separator: "+")
+    try calcSheet.setCell("B1", rawValue: twoHundredTerms)
+    XCTAssertEqual(calcSheet.evaluate(at: "B1"), .number(200.0))
+
+    try calcSheet.setCell("C1", rawValue: "=ROUND(2251799813685248.5, 0)")
+    XCTAssertEqual(calcSheet.evaluate(at: "C1"), .number(2251799813685249.0))
+    try calcSheet.setCell("C6", rawValue: "=ROUND(0.4999999999995, 0)")
+    XCTAssertEqual(calcSheet.evaluate(at: "C6"), .number(0.0))
+    try calcSheet.setCell("C2", rawValue: "=12345678901.5")
+    XCTAssertEqual(calcSheet.evaluate(at: "C2").description, "12345678901.5")
+    try calcSheet.setCell("C3", rawValue: "=GCD(9223372036854775808, 2)")
+    XCTAssertEqual(calcSheet.evaluate(at: "C3"), .error("#NUM!"))
+    try calcSheet.setCell("C4", rawValue: "=DATE(2024, 1, 1)")
+    try calcSheet.setCell("C5", rawValue: "=DATE(1900, 2, 29)")
+    XCTAssertEqual(calcSheet.evaluate(at: "C4"), .number(45292.0))
+    XCTAssertEqual(calcSheet.evaluate(at: "C5"), .number(60.0))
+
+    var sheet2Cells: [PackedCellCoordinate: String] = [:]
+    for r in 0..<300 {
+      sheet2Cells[PackedCellCoordinate(row: r, column: 0)] = "2"
+    }
+    calcSheet.additionalSheets.append(
+      WorksheetSheetPage(name: "Sheet2", cellsByCoordinate: sheet2Cells)
+    )
+    try calcSheet.setCell("D1", rawValue: "=SUM(Sheet2!A1:A300)")
+    XCTAssertEqual(calcSheet.evaluate(at: "D1"), .number(600.0))
+
+    // VLOOKUP / HLOOKUP / MATCH default approximate match on sorted ranges
+    var lookupSheet = WorksheetModel(name: "Lookup")
+    try lookupSheet.setCell("A1", rawValue: "10")
+    try lookupSheet.setCell("B1", rawValue: "십")
+    try lookupSheet.setCell("A2", rawValue: "20")
+    try lookupSheet.setCell("B2", rawValue: "이십")
+    try lookupSheet.setCell("A3", rawValue: "30")
+    try lookupSheet.setCell("B3", rawValue: "삼십")
+    try lookupSheet.setCell("C1", rawValue: "=VLOOKUP(25, A1:B3, 2)")
+    try lookupSheet.setCell("C2", rawValue: "=MATCH(25, A1:A3)")
+    XCTAssertEqual(lookupSheet.evaluate(at: "C1"), .text("이십"))
+    XCTAssertEqual(lookupSheet.evaluate(at: "C2"), .number(2.0))
+
+    // sortRows formula reference shifting
+    var sortSheet = WorksheetModel(name: "Sort")
+    try sortSheet.setCell("A1", rawValue: "부서")
+    try sortSheet.setCell("B1", rawValue: "값")
+    try sortSheet.setCell("C1", rawValue: "두배")
+    try sortSheet.setCell("A2", rawValue: "나")
+    try sortSheet.setCell("B2", rawValue: "30")
+    try sortSheet.setCell("C2", rawValue: "=B2*2")
+    try sortSheet.setCell("A3", rawValue: "가")
+    try sortSheet.setCell("B3", rawValue: "10")
+    try sortSheet.setCell("C3", rawValue: "=B3*2")
+    sortSheet.sortRows(byColumn: 0, ascending: true, hasHeader: true)
+    XCTAssertEqual(sortSheet.rawValue(at: "C2"), "=B2*2")
+    XCTAssertEqual(sortSheet.evaluate(at: "C2"), .number(20.0))
+    XCTAssertEqual(sortSheet.rawValue(at: "C3"), "=B3*2")
+    XCTAssertEqual(sortSheet.evaluate(at: "C3"), .number(60.0))
+
+    // PivotTableEngine empty key -> "(빈 값)" & .count includes text values
+    var pivotSheet = WorksheetModel(name: "Pivot")
+    try pivotSheet.setCell("A1", rawValue: "지역")
+    try pivotSheet.setCell("B1", rawValue: "분류")
+    try pivotSheet.setCell("C1", rawValue: "항목")
+    try pivotSheet.setCell("A2", rawValue: "")
+    try pivotSheet.setCell("B2", rawValue: "기타")
+    try pivotSheet.setCell("C2", rawValue: "텍스트항목")
+    let pivotRes = PivotTableEngine.compute(
+      from: pivotSheet,
+      range: try CellRange(notation: "A1:C2"),
+      hasHeaderRow: true,
+      configuration: PivotTableConfiguration(
+        rowFieldColumnIndex: 0,
+        columnFieldColumnIndex: 1,
+        valueFieldColumnIndex: 2,
+        aggregation: .count
+      )
+    )
+    XCTAssertEqual(pivotRes.rowKeys, ["(빈 값)"])
+    XCTAssertEqual(pivotRes.grandTotal, 1.0)
+
+    // 6. Workspace closeOtherTabs & cross-module PDF export dirty protection, CSV XFD1 export, WCAG AA contrast
+    var wideCsvSheet = WorksheetModel(name: "Wide")
+    try wideCsvSheet.setCell("XFD1", rawValue: "끝열")
+    let wideCsvData = try CSVStateMachineCodec.encodeWorksheet(wideCsvSheet)
+    XCTAssertTrue(String(decoding: wideCsvData, as: UTF8.self).contains("끝열"))
+
+    let vm = WorkspaceViewModel()
+    let keptID = try XCTUnwrap(vm.openTabs.first?.id)
+    let dirtyOtherID = try XCTUnwrap(vm.openTabs.dropFirst().first(where: { !$0.isPinned })?.id)
+    if let idx = vm.openTabs.firstIndex(where: { $0.id == dirtyOtherID }) {
+      vm.openTabs[idx].isModified = true
+    }
+    vm.closeOtherTabs(keeping: keptID)
+    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == dirtyOtherID }))
+    XCTAssertEqual(vm.pendingCloseConfirmTabID, dirtyOtherID)
+
+    let tempPDFURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "eo_cross_export_\(UUID().uuidString).pdf")
+    defer { try? FileManager.default.removeItem(at: tempPDFURL) }
+    vm.confirmCloseTab(id: dirtyOtherID, saveTo: tempPDFURL)
+    // Exporting a modified non-PDF tab to .pdf must NOT close the modified source tab
+    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == dirtyOtherID }))
+
+    for module in OfficeModuleKind.allCases {
+      let lightAccent = EasyOfficeDesignTokens.accentToken(for: module, isDark: false)
+      let darkAccent = EasyOfficeDesignTokens.accentToken(for: module, isDark: true)
+      XCTAssertGreaterThanOrEqual(
+        lightAccent.contrastRatio(against: EasyOfficeDesignTokens.lightSubtle), 4.5)
+      XCTAssertGreaterThanOrEqual(
+        darkAccent.contrastRatio(against: EasyOfficeDesignTokens.darkElevated), 4.5)
+    }
+    XCTAssertGreaterThanOrEqual(
+      EasyOfficeDesignTokens.darkMuted.contrastRatio(
+        against: EasyOfficeDesignTokens.darkSelectedSurface), 4.5)
   }
 }
 

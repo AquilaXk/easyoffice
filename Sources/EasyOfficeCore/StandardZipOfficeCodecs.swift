@@ -24,6 +24,37 @@ internal enum XMLDocumentModelMapper {
       || lower == "mimetype"
   }
 
+  static func isSafePreservedArchivePath(_ path: String, archiveEntryPaths: Set<String>) -> Bool {
+    let lower = path.lowercased()
+    if lower.hasSuffix(".rels") || lower == "[content_types].xml" || lower == "mimetype" {
+      return false
+    }
+    if archiveEntryPaths.contains("word/document.xml") {
+      return path == "word/styles.xml" || path == "word/fontTable.xml"
+        || path == "word/numbering.xml" || path == "word/webSettings.xml"
+        || path.hasPrefix("word/theme/") || path.hasPrefix("word/media/")
+        || path.hasPrefix("word/customXml/") || path.hasPrefix("customXml/")
+    }
+    if archiveEntryPaths.contains("xl/workbook.xml") {
+      return path == "xl/styles.xml" || path.hasPrefix("xl/theme/")
+        || path.hasPrefix("xl/media/") || path.hasPrefix("customXml/")
+    }
+    if archiveEntryPaths.contains("ppt/presentation.xml") {
+      return path.hasPrefix("ppt/slideMasters/") || path.hasPrefix("ppt/slideLayouts/")
+        || path.hasPrefix("ppt/theme/") || path.hasPrefix("ppt/media/")
+        || path == "ppt/tableStyles.xml" || path == "ppt/presProps.xml"
+        || path == "ppt/viewProps.xml" || path.hasPrefix("customXml/")
+    }
+    if archiveEntryPaths.contains("Contents/content.hpf") {
+      return path.hasPrefix("BinData/") || path == "settings.xml" || path.hasPrefix("Preview/")
+    }
+    if archiveEntryPaths.contains("content.xml") {
+      return path == "styles.xml" || path == "meta.xml" || path == "settings.xml"
+        || path.hasPrefix("Pictures/") || path.hasPrefix("Configurations2/")
+    }
+    return true
+  }
+
   static func packArchiveEntries(
     _ baseEntries: [ZipContainerEntry],
     images: [EmbeddedImageAttachment] = [],
@@ -31,18 +62,43 @@ internal enum XMLDocumentModelMapper {
     preserved: [String: Data]
   ) throws -> Data {
     var entries = baseEntries
+    var existingPaths = Set(entries.map(\.path))
+    var mediaDataByPath: [String: Data] = [:]
+    for entry in entries {
+      mediaDataByPath[entry.path] = entry.data
+    }
     if !mediaFolderPrefix.isEmpty {
       for img in images {
         let safeName = sanitizeMediaFileName(img.fileName)
+        var candidatePath = "\(mediaFolderPrefix)\(safeName)"
+        if existingPaths.contains(candidatePath) {
+          if mediaDataByPath[candidatePath] == img.imageData {
+            continue
+          }
+          let nsName = safeName as NSString
+          let stem = nsName.deletingPathExtension
+          let ext = nsName.pathExtension
+          var counter = 2
+          while existingPaths.contains(candidatePath) {
+            let suffixed = ext.isEmpty ? "\(stem)_\(counter)" : "\(stem)_\(counter).\(ext)"
+            candidatePath = "\(mediaFolderPrefix)\(suffixed)"
+            counter += 1
+          }
+        }
+        existingPaths.insert(candidatePath)
+        mediaDataByPath[candidatePath] = img.imageData
         entries.append(
           ZipContainerEntry(
-            path: "\(mediaFolderPrefix)\(safeName)", data: img.imageData, compressionMethod: .store
+            path: candidatePath, data: img.imageData, compressionMethod: .store
           ))
       }
     }
-    let existingPaths = Set(entries.map(\.path))
-    for path in preserved.keys.sorted() where !existingPaths.contains(path) {
+    for path in preserved.keys.sorted()
+    where !existingPaths.contains(path)
+      && isSafePreservedArchivePath(path, archiveEntryPaths: existingPaths)
+    {
       if let rawData = preserved[path] {
+        existingPaths.insert(path)
         entries.append(
           ZipContainerEntry(
             path: path,
@@ -64,6 +120,7 @@ internal enum XMLDocumentModelMapper {
     preservedEntries: [String: Data]
   ) {
     let entries = try ZipContainerCodec.unpack(from: data)
+    let allEntryPaths = Set(entries.map(\.path))
     var xmlEntries: [String: String] = [:]
     var binaryEntries: [String: Data] = [:]
     var preservedEntries: [String: Data] = [:]
@@ -73,7 +130,9 @@ internal enum XMLDocumentModelMapper {
       } else if isXMLValidatedPath(entry.path) {
         xmlEntries[entry.path] = try XMLSanitizer.validateSafeXMLData(entry.data)
       }
-      if !excludedPreservedPaths.contains(entry.path) {
+      if !excludedPreservedPaths.contains(entry.path)
+        && isSafePreservedArchivePath(entry.path, archiveEntryPaths: allEntryPaths)
+      {
         preservedEntries[entry.path] = entry.data
       }
     }
@@ -83,9 +142,19 @@ internal enum XMLDocumentModelMapper {
   static func safeClampedInt(
     _ value: Double, min minVal: Int = -100_000_000, max maxVal: Int = 100_000_000
   ) -> Int {
-    guard value.isFinite else { return 0 }
-    let clamped = Swift.max(Double(minVal), Swift.min(Double(maxVal), value.rounded()))
+    guard value.isFinite else { return Swift.max(minVal, Swift.min(maxVal, 0)) }
+    let effectiveMin = Swift.max(Double(minVal), -9223372036854775808.0)
+    let effectiveMax = Swift.min(Double(maxVal), 9223372036854774784.0)
+    let clamped = Swift.max(effectiveMin, Swift.min(effectiveMax, value.rounded()))
     return Int(clamped)
+  }
+
+  static func safeClampedUInt32(
+    _ value: Double, min minVal: UInt32 = 0, max maxVal: UInt32 = 100_000_000
+  ) -> UInt32 {
+    guard value.isFinite else { return minVal }
+    let clamped = Swift.max(Double(minVal), Swift.min(Double(maxVal), value.rounded()))
+    return UInt32(clamped)
   }
 
   static func paragraphAttributes(_ p: ParagraphBlock) -> String {
