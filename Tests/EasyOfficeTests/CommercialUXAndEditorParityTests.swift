@@ -367,9 +367,9 @@ final class CommercialUXAndEditorParityTests: XCTestCase {
       XCTFail("Expected document payload")
     }
     vm.requestCloseTab(id: dirtyDocTab.id)
-    XCTAssertEqual(vm.pendingCloseTabID, dirtyDocTab.id)
-    vm.cancelClosePendingTab()
-    XCTAssertNil(vm.pendingCloseTabID)
+    XCTAssertEqual(vm.pendingCloseConfirmTabID, dirtyDocTab.id)
+    vm.cancelCloseTab()
+    XCTAssertNil(vm.pendingCloseConfirmTabID)
     XCTAssertTrue(vm.openTabs.contains(where: { $0.id == dirtyDocTab.id }))
     vm.requestCloseTab(id: dirtyDocTab.id)
     vm.confirmDiscardAndClosePendingTab()

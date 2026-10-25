@@ -679,6 +679,14 @@ final class StandardCodecInteroperabilityTests: XCTestCase {
     )
     XCTAssertEqual(decodedASCII, asciiText)
 
+    let shortPrefixMixed = "ABCD한글"
+    var shortPrefixBuf = Data()
+    BitPacking.appendUTF16LE(shortPrefixMixed, to: &shortPrefixBuf)
+    XCTAssertEqual(
+      try BitPacking.decodeUTF16LE(from: shortPrefixBuf, at: 0, byteLength: shortPrefixBuf.count),
+      shortPrefixMixed
+    )
+
     let mixedText = "StandardPrefix_한글과_이모지_😀_Suffix_0123456789"
     var packet = Data([0xAA, 0xBB])
     BitPacking.appendLengthPrefixedUTF16LE(mixedText, to: &packet)

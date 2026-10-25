@@ -749,22 +749,22 @@
 
 - **Status**: Implemented (`Sources/EasyOfficeCore/**`, `Sources/EasyOfficeApp/**`, `crates/**`)
 - **Decision (`PD-061`)**:
-  1. **64비트 SWAR Morton 비트 인터리빙 UTF-16LE·CSV·XML 핫패스 및 OLE2 미니섹터 비트셋 최적화 (`BinaryContainerCodec.swift`, `XMLSanitizer.swift`, `OLE2AndHWP5Codec.swift`, `TabularAndMarkupCodec.swift`, `rtf_xml_helpers.rs`, `deflate.rs`, `text_pdf_codecs.rs`, `ole2_codec.rs`)**
-     - `BitPacking.encodeUTF16LE` 및 Rust `encode_utf16le_swar`는 8바이트 ASCII 워드(`(word & 0x8080_8080_8080_8080) == 0`)를 Morton 비트 인터리빙(`expandASCII4ToUTF16LE` / `expand_ascii4_to_utf16le_u64`)으로 분기 없이 16바이트 UTF-16LE로 확장하며, `appendLengthPrefixedUTF16LE` 및 `append_len_prefixed_utf16le`는 4바이트 길이 슬롯을 선예약 후 백패치하여 임시 버퍼 할당을 제거합니다.
-     - `XMLSanitizer.escape`는 이스케이프 문자 발견 시 SWAR 루프를 조기 탈출하지 않고 `matchBits.trailingZeroBitCount >> 3`만큼 전진하여 8바이트 SWAR 루프를 끝까지 유지하며, `CSVStateMachineCodec.parseRows`의 `.inQuotedField`와 Rust `parse_delimited`의 비인용 필드에 64비트 SWAR 스캐닝을 적용합니다.
+  1. **64비트 SWAR Morton 비트 인터리빙 UTF-16LE·CSV·XML 핫패스 및 OLE2 미니섹터 비트셋 최적화 (`BinaryContainerCodec.swift`, `XMLSanitizer.swift`, `OLE2AndHWP5Codec.swift`, `TabularAndMarkupCodec.swift`, `utf16_swar.rs`, `rtf_xml_helpers.rs`, `deflate.rs`, `ole2_codec.rs`)**
+     - `BitPacking.appendUTF16LE`·`encodeUTF16LE` 및 Rust `utf16_swar::encode_utf16le_swar`는 8바이트 ASCII 워드(`(word & 0x8080_8080_8080_8080) == 0`)를 Morton 비트 인터리빙(`expandASCII4ToUTF16LE` / `expand_ascii4_to_utf16le_u64`)으로 분기 없이 16바이트 UTF-16LE로 확장하며, `appendLengthPrefixedUTF16LE` 및 `append_len_prefixed_utf16le`는 4바이트 길이 슬롯을 선예약 후 대상 버퍼에 직접 기록하고 백패치하여 중간 버퍼 할당을 제거합니다.
+     - `XMLSanitizer.escape`는 이스케이프 문자 발견 시 SWAR 루프를 조기 탈출하지 않고 `matchBits.trailingZeroBitCount >> 3`만큼 전진하여 8바이트 SWAR 루프를 끝까지 유지하며, `CSVStateMachineCodec.parseRows`의 `.inQuotedField`에 64비트 SWAR 스캐닝을 적용합니다.
      - `OLE2ContainerCodec.unpack`의 `claimedMiniSectors`를 `Set<UInt32>` 해시 테이블에서 평탄한 `[UInt64]` 워드 비트셋(`claimedMiniWords`)으로 전환하고, `compareCFBNames` 및 `cmp_cfb_dir_names`는 UTF-16 길이를 우선 비교한 뒤 인라인 대소문자 폴딩을 수행합니다.
      - Rust `deflate_raw`는 `vec![-1i32; input.len()]` 대신 고정 크기 `WINDOW_SIZE = 32,768` 링버퍼(`[-1i32; WINDOW_SIZE]`)를 사용하여 입력 크기와 무관하게 해시 체인 메모리를 128KB로 제한하고, `decode_huffman_block`의 중첩 역참조(`1 < distance < match_len`)는 지수 배증(`extend_from_within`) 복사로 처리하며, `adler32`는 `NMAX = 5552` 청크 내부 루프를 8바이트 단위로 언롤링합니다.
   2. **수식·통계·재무·변환 엔진의 Swift/Rust 크로스스택 표준 호환성 및 BIFF8 청크 직렬화 (`LegacyOLE2OfficeCodec.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `SheetAnalyticsAndPivot.swift`, `crates/easyoffice-sheet/**`, `crates/easyoffice-formats/**`)**
      - `LegacyOLE2OfficeCodec.encodeBIFF8Worksheet`는 `BIFF8ExtendedMetadataEnvelope`(`0x0868`)가 `65,535`바이트를 초과할 때 조용히 버리지 않고 다중 `0x0868` 레코드 청크로 분할 기록하며, `decodeBIFF8Worksheet`는 모든 `0x0868` 청크를 병합하여 복원합니다.
      - `WORKDAY` 및 `NETWORKDAYS`는 선택적 3번째 공휴일(`holidays`) 인자를 지원하고, `IRR` 및 `RATE`는 뉴턴-랩슨 미수렴 시 `[-0.99, 10.0]` 구간 25점 브래킷 이분법 폴백을 수행합니다.
      - Rust `easyoffice-sheet` 파서는 OpenFormula 대괄호 참조(`[.A1:.B2]` -> `A1:B2`), 과학적 표기법(`1.5E-3`), 에러 리터럴(`#N/A` 등)을 지원하며, `VLOOKUP`·`HLOOKUP`·`MATCH`의 에러 키 즉시 전파 및 `VLOOKUP`/`HLOOKUP` 4번째 인자 생략 시 `TRUE`(유사 일치) 기본값을 적용합니다.
-     - Rust `Hwp5Codec::unpack`은 `HWPTAG_PARA_TEXT` 디코딩 시 8-WCHAR(16바이트) 인라인·확장 제어문자 스킵 상태 머신을 적용하고, `UniversalFormatConverter::encode`는 `.md` 및 `.pdf` 변환 시 문서 표(`model.tables`)를 함께 직렬화합니다.
-  3. **macOS 네이티브 및 WebUI/Tauri 실사용자 워크스페이스 UX 완결성 (`WorkspaceHub*.swift`, `Sources/EasyOfficeApp/**`, `crates/easyoffice-app/**`)**
-     - `WorkspaceViewModel`은 워크스페이스 전역 `usesDarkMode` 동기화, 닫은 탭 복원 스택(`recentlyClosedTabs`, `reopenLastClosedTab`, `Cmd+Shift+T`), 일괄 변환기 파일 추가 시 열린 탭 오염 방지, 시트 탭 전환 시 `formulaBarDraft` 동기화, 대소문자 무시 PDF/문서 검색 순회, 문단 분할·병합 시 `inlineRuns` 보존을 제공합니다.
-     - `SheetEditorDetailPaneView`는 하단 분석 서랍(`showAnalyticsDrawer`)이 닫혀 있을 때 피벗·차트 재계산을 생략하고, `SlideshowFullScreenOverlayView`는 중복 타이머 구독을 제거하여 1Hz 정속 발표자 타이머와 다크 테마 명도 대비를 보장합니다.
-     - 내장 HTTP 서버(`main.rs`)는 JSON `\uXXXX` 유니코드 이스케이프를 디코딩하고 `MAX_HTTP_BODY_BYTES`(256KB) 초과 요청에 대해 무음 절단 대신 명시적 `413 Payload Too Large`를 반환합니다.
+     - Rust `Hwp5Codec::unpack`은 `HWPTAG_PARA_TEXT` 디코딩 시 8-WCHAR(16바이트) 인라인·확장 제어문자 스킵 상태 머신을 적용하고, `CommonMarkCodec`은 `MarkdownBlock::Table` 양방향 파싱·직렬화 라운드트립을 수행하며, `UniversalFormatConverter::encode`는 `.md` 및 `.pdf` 변환 시 문서 표(`model.tables`)를 함께 직렬화합니다.
+  3. **macOS 네이티브 및 WebUI/Tauri 실사용자 워크스페이스 UX 완결성 (`WorkspaceHub.swift`, `WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/**`, `crates/easyoffice-app/**`)**
+     - `WorkspaceViewModel`은 다크 모드 전환(`usesDarkMode`, `toggleDarkMode`), 미저장 탭 닫기 확인 및 폐기(`requestCloseTab`, `confirmDiscardAndClosePendingTab`, `cancelCloseTab`), 디스크 파일 직접 일괄 변환 큐 등록 시 열린 탭 오염 방지(`enqueueFilesFromDiskIntoBatchConversion`), 리본 각주 삽입(`doc-insert-footnote`)을 제공합니다.
+     - `SheetEditorDetailPaneView`는 하단 분석 서랍(`showAnalyticsDrawer`)이 닫혀 있을 때 피벗·차트 재계산을 생략하고, `SlideshowFullScreenOverlayView` 및 `SlideAndPDFDetailPanes`는 다크 테마 명도 대비를 보장합니다.
+     - 내장 HTTP 서버(`main.rs`)는 JSON `\uXXXX` 유니코드 이스케이프(UTF-16 서로게이트 쌍 포함)를 디코딩하고 `MAX_HTTP_BODY_BYTES`(256KB) 초과 `Content-Length` 및 스트림 요청에 대해 무음 절단 대신 명시적 `413 Payload Too Large`를 반환합니다.
 - **Why**: 바이트·비트 수준 핫루프의 불필요한 힙 할당과 선형 탐색을 제거하고, Swift 코어와 Rust 코어 간 포맷·수식 동작 편차 및 실사용 편집 흐름의 UX 단절을 해소하기 위함입니다.
-- **Trade-offs**: `recentlyClosedTabs`가 최근 닫은 탭 스냅샷을 최대 10개까지 메모리에 유지하나, 실수로 탭을 닫았을 때 즉시 복원할 수 있는 사용자 안전성을 우선합니다.
+- **Trade-offs**: `BIFF8ExtendedMetadataEnvelope`가 `65,535`바이트를 초과할 때 다중 `0x0868` 레코드 청크로 분할 직렬화하므로 레코드 헤더 오버헤드(청크당 16바이트)가 소폭 증가하나, 대용량 다중 시트 메타데이터의 무손실 라운드트립을 보장합니다.
 - **Alternatives rejected**:
   - `deflate_raw`에서 입력 길이 전체 크기로 `prev` 벡터를 할당하는 방식은 대용량 스트림 압축 시 불필요한 `4 * N` 힙 할당을 유발하므로 32KB 고정 링버퍼로 교체.
 - **Verified by**: `swift build`, `swift test`, `cargo test --workspace`, `node scripts/check-repo-hygiene.mjs`, `.agents/skills/verify-easyoffice/scripts/eo.sh`

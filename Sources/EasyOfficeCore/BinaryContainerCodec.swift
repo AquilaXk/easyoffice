@@ -104,67 +104,62 @@ public enum BitPacking {
     return x
   }
 
-  /// Encodes a Swift String as contiguous little-endian UTF-16 code units.
+  /// Appends a Swift String as contiguous little-endian UTF-16 code units directly into `data`.
   @inlinable
-  public static func encodeUTF16LE(_ text: String) -> Data {
-    if text.isEmpty { return Data() }
+  public static func appendUTF16LE(_ text: String, to data: inout Data) {
+    if text.isEmpty { return }
     var mutableText = text
-    let asciiFastResult: Data? = mutableText.withUTF8 { utf8Buf -> Data? in
+    let (asciiPrefixLen, totalUTF8Count) = mutableText.withUTF8 { utf8Buf -> (Int, Int) in
       let count = utf8Buf.count
-      guard count > 0, let base = utf8Buf.baseAddress else { return Data() }
+      guard count > 0, let base = utf8Buf.baseAddress else { return (0, 0) }
+      data.reserveCapacity(data.count + count * 2)
       let rawIn = UnsafeRawPointer(base)
-      var idx = 0
-      while idx + 8 <= count {
-        let word = rawIn.loadUnaligned(fromByteOffset: idx, as: UInt64.self)
-        if (word & 0x8080_8080_8080_8080) != 0 {
-          return nil
-        }
-        idx += 8
-      }
-      while idx < count {
-        if (base[idx] & 0x80) != 0 {
-          return nil
-        }
-        idx += 1
-      }
-      var out = Data(count: count * 2)
-      out.withUnsafeMutableBytes { outBuf in
-        var srcIdx = 0
-        var dstByteOffset = 0
-        while srcIdx + 8 <= count {
-          let word = rawIn.loadUnaligned(fromByteOffset: srcIdx, as: UInt64.self).littleEndian
+      var pos = 0
+      while pos + 8 <= count {
+        let word = rawIn.loadUnaligned(fromByteOffset: pos, as: UInt64.self).littleEndian
+        if (word & 0x8080_8080_8080_8080) == 0 {
           let lo4 = UInt32(truncatingIfNeeded: word)
           let hi4 = UInt32(truncatingIfNeeded: word >> 32)
           let expLo = expandASCII4ToUTF16LE(lo4).littleEndian
           let expHi = expandASCII4ToUTF16LE(hi4).littleEndian
-          outBuf.storeBytes(of: expLo, toByteOffset: dstByteOffset, as: UInt64.self)
-          outBuf.storeBytes(of: expHi, toByteOffset: dstByteOffset + 8, as: UInt64.self)
-          srcIdx += 8
-          dstByteOffset += 16
-        }
-        while srcIdx < count {
-          let unit = UInt16(base[srcIdx]).littleEndian
-          outBuf.storeBytes(of: unit, toByteOffset: dstByteOffset, as: UInt16.self)
-          srcIdx += 1
-          dstByteOffset += 2
+          withUnsafeBytes(of: expLo) { data.append(contentsOf: $0) }
+          withUnsafeBytes(of: expHi) { data.append(contentsOf: $0) }
+          pos += 8
+        } else if (UInt32(truncatingIfNeeded: word) & 0x8080_8080) == 0 {
+          let lo4 = UInt32(truncatingIfNeeded: word)
+          let expLo = expandASCII4ToUTF16LE(lo4).littleEndian
+          withUnsafeBytes(of: expLo) { data.append(contentsOf: $0) }
+          pos += 4
+        } else {
+          break
         }
       }
-      return out
+      while pos < count {
+        let b = base[pos]
+        if (b & 0x80) != 0 {
+          return (pos, count)
+        }
+        data.append(b)
+        data.append(0)
+        pos += 1
+      }
+      return (count, count)
     }
-    if let asciiFastResult {
-      return asciiFastResult
-    }
-    let utf16 = text.utf16
-    let unitCount = utf16.count
-    guard unitCount > 0 else { return Data() }
-    var out = Data(count: unitCount * 2)
-    out.withUnsafeMutableBytes { rawBuf in
-      var byteOffset = 0
-      for unit in utf16 {
-        rawBuf.storeBytes(of: unit.littleEndian, toByteOffset: byteOffset, as: UInt16.self)
-        byteOffset += 2
+    if asciiPrefixLen < totalUTF8Count {
+      let suffixUTF8 = text.utf8.dropFirst(asciiPrefixLen)
+      for unit in String(Substring(suffixUTF8)).utf16 {
+        withUnsafeBytes(of: unit.littleEndian) { data.append(contentsOf: $0) }
       }
     }
+  }
+
+  /// Encodes a Swift String as contiguous little-endian UTF-16 code units.
+  @inlinable
+  public static func encodeUTF16LE(_ text: String) -> Data {
+    if text.isEmpty { return Data() }
+    var out = Data()
+    out.reserveCapacity(text.utf8.count * 2)
+    appendUTF16LE(text, to: &out)
     return out
   }
 
@@ -172,9 +167,10 @@ public enum BitPacking {
   public static func appendLengthPrefixedUTF16LE(_ text: String, to data: inout Data) {
     let lengthOffset = data.count
     appendUInt32LE(0, to: &data)
-    let utf16Bytes = encodeUTF16LE(text)
-    try? writeUInt32LE(UInt32(utf16Bytes.count), into: &data, at: lengthOffset)
-    data.append(utf16Bytes)
+    let payloadStart = data.count
+    appendUTF16LE(text, to: &data)
+    let byteCount = UInt32(data.count - payloadStart)
+    try? writeUInt32LE(byteCount, into: &data, at: lengthOffset)
   }
 
   /// Decodes a length-prefixed UTF-16LE String from `data` within `limit` and advances `offset`.
@@ -267,11 +263,6 @@ public enum BitPacking {
       }
       return String(decoding: units, as: UTF16.self)
     }
-  }
-
-  /// Computes RFC 1950 Adler-32 checksum over `data`.
-  public static func adler32(_ data: Data) -> UInt32 {
-    Adler32Calculator.compute(for: data)
   }
 }
 

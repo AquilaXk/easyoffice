@@ -7,6 +7,7 @@ pub mod office_codecs;
 pub mod ole2_codec;
 pub mod rtf_xml_helpers;
 pub mod text_pdf_codecs;
+pub mod utf16_swar;
 pub mod zip_codec;
 
 pub use converter::*;
@@ -14,11 +15,13 @@ pub use deflate::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use rtf_xml_helpers::{
-    decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_scalar_baseline,
-    encode_utf16le_swar, encode_utf16le_swar_into, expand_ascii4_to_utf16le_u64,
-    unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload, SectorBitset,
+    unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };
 pub use text_pdf_codecs::*;
+pub use utf16_swar::{
+    decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_scalar_baseline,
+    encode_utf16le_swar, encode_utf16le_swar_into, expand_ascii4_to_utf16le_u64, SectorBitset,
+};
 pub use zip_codec::*;
 
 /// Container technology family for supported document formats.

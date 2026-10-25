@@ -998,36 +998,8 @@ extension WorksheetModel {
           -0.99, -0.95, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,
           0.0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0,
         ]
-        var prevR = samplePoints[0]
-        var prevY = evalNPV(prevR)
-        for idx in 1..<samplePoints.count {
-          let curR = samplePoints[idx]
-          let curY = evalNPV(curR)
-          if prevY.isFinite, curY.isFinite, prevY * curY <= 0.0 {
-            var lo = prevR
-            var hi = curR
-            var fLo = prevY
-            for _ in 0..<80 {
-              let mid = 0.5 * (lo + hi)
-              let fMid = evalNPV(mid)
-              if !fMid.isFinite { break }
-              if abs(fMid) < 1e-9 || (hi - lo) < 1e-11 {
-                return .number(mid)
-              }
-              if fLo * fMid <= 0.0 {
-                hi = mid
-              } else {
-                lo = mid
-                fLo = fMid
-              }
-            }
-            let mid = 0.5 * (lo + hi)
-            if abs(evalNPV(mid)) < 1e-4 {
-              return .number(mid)
-            }
-          }
-          prevR = curR
-          prevY = curY
+        if let root = Self.bisectRoot(samplePoints: samplePoints, eval: evalNPV) {
+          return .number(root)
         }
         return .error("#NUM!")
       }
@@ -1101,36 +1073,8 @@ extension WorksheetModel {
         -0.99, -0.95, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,
         0.0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0,
       ]
-      var prevR = samplePoints[0]
-      var prevY = evalTVM(prevR)
-      for idx in 1..<samplePoints.count {
-        let curR = samplePoints[idx]
-        let curY = evalTVM(curR)
-        if prevY.isFinite, curY.isFinite, prevY * curY <= 0.0 {
-          var lo = prevR
-          var hi = curR
-          var fLo = prevY
-          for _ in 0..<80 {
-            let mid = 0.5 * (lo + hi)
-            let fMid = evalTVM(mid)
-            if !fMid.isFinite { break }
-            if abs(fMid) < 1e-9 || (hi - lo) < 1e-11 {
-              return .number(mid)
-            }
-            if fLo * fMid <= 0.0 {
-              hi = mid
-            } else {
-              lo = mid
-              fLo = fMid
-            }
-          }
-          let mid = 0.5 * (lo + hi)
-          if abs(evalTVM(mid)) < 1e-4 {
-            return .number(mid)
-          }
-        }
-        prevR = curR
-        prevY = curY
+      if let root = Self.bisectRoot(samplePoints: samplePoints, eval: evalTVM) {
+        return .number(root)
       }
       return .error("#NUM!")
 
@@ -1330,19 +1274,12 @@ extension WorksheetModel {
       guard abs(days) <= 100_000 else {
         return .error("#NUM!")
       }
-      var holidayDates = Set<Date>()
-      if frame.count == 3, frame.args[2] != .empty {
-        switch frame.resolve(2..<3, in: self) {
-        case .failure(let err):
-          return .error(err)
-        case .success(let hVals):
-          for hVal in hVals where hVal != .empty {
-            guard let hDate = Self.parseDateValue(hVal) else {
-              return .error("#VALUE!")
-            }
-            holidayDates.insert(hDate)
-          }
-        }
+      let holidayDates: Set<Date>
+      switch resolveHolidayDates(from: &frame) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let dates):
+        holidayDates = dates
       }
       var current = startDate
       var remaining = abs(days)
@@ -1369,19 +1306,12 @@ extension WorksheetModel {
       else {
         return .error("#VALUE!")
       }
-      var holidayDates = Set<Date>()
-      if frame.count == 3, frame.args[2] != .empty {
-        switch frame.resolve(2..<3, in: self) {
-        case .failure(let err):
-          return .error(err)
-        case .success(let hVals):
-          for hVal in hVals where hVal != .empty {
-            guard let hDate = Self.parseDateValue(hVal) else {
-              return .error("#VALUE!")
-            }
-            holidayDates.insert(hDate)
-          }
-        }
+      let holidayDates: Set<Date>
+      switch resolveHolidayDates(from: &frame) {
+      case .failure(let err):
+        return .error(err)
+      case .success(let dates):
+        holidayDates = dates
       }
       let isReverse = startDate > endDate
       let fromDate = isReverse ? endDate : startDate
@@ -1604,5 +1534,64 @@ extension WorksheetModel {
       return makeUTCDate(year: y, month: m, day: d, allowRollover: false)
     }
     return nil
+  }
+
+  private static func bisectRoot(samplePoints: [Double], eval: (Double) -> Double) -> Double? {
+    guard !samplePoints.isEmpty else { return nil }
+    var prevR = samplePoints[0]
+    var prevY = eval(prevR)
+    for idx in 1..<samplePoints.count {
+      let curR = samplePoints[idx]
+      let curY = eval(curR)
+      if prevY.isFinite, curY.isFinite, prevY * curY <= 0.0 {
+        var lo = prevR
+        var hi = curR
+        var fLo = prevY
+        for _ in 0..<80 {
+          let mid = 0.5 * (lo + hi)
+          let fMid = eval(mid)
+          if !fMid.isFinite { break }
+          if abs(fMid) < 1e-9 || (hi - lo) < 1e-11 {
+            return mid
+          }
+          if fLo * fMid <= 0.0 {
+            hi = mid
+          } else {
+            lo = mid
+            fLo = fMid
+          }
+        }
+        let mid = 0.5 * (lo + hi)
+        if abs(eval(mid)) < 1e-4 {
+          return mid
+        }
+      }
+      prevR = curR
+      prevY = curY
+    }
+    return nil
+  }
+
+  private enum HolidayResolutionResult {
+    case success(Set<Date>)
+    case failure(String)
+  }
+
+  private func resolveHolidayDates(from frame: inout EvalFrame) -> HolidayResolutionResult {
+    var holidayDates = Set<Date>()
+    if frame.count == 3, frame.args[2] != .empty {
+      switch frame.resolve(2..<3, in: self) {
+      case .failure(let err):
+        return .failure(err)
+      case .success(let hVals):
+        for hVal in hVals where hVal != .empty {
+          guard let hDate = Self.parseDateValue(hVal) else {
+            return .failure("#VALUE!")
+          }
+          holidayDates.insert(hDate)
+        }
+      }
+    }
+    return .success(holidayDates)
   }
 }

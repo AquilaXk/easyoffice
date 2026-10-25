@@ -30,6 +30,16 @@ impl SheetEngine {
                 let (rows, cols) = range.dimensions();
                 let min_r = range.start.row().min(range.end.row());
                 let min_c = range.start.col().min(range.end.col());
+                let is_vertical = name == "VLOOKUP";
+                let (outer_count, bound_limit) = if is_vertical {
+                    (rows, cols)
+                } else {
+                    (cols, rows)
+                };
+                if idx_num < 1 || (idx_num as usize) > bound_limit {
+                    return Err(FormulaError::Ref);
+                }
+                let target_idx = idx_num as u32 - 1;
                 let same_type = |a: &EvaluatedCellValue, b: &EvaluatedCellValue| -> bool {
                     matches!(
                         (a, b),
@@ -41,96 +51,52 @@ impl SheetEngine {
                             )
                     )
                 };
-                if name == "VLOOKUP" {
-                    if idx_num < 1 || (idx_num as usize) > cols {
-                        return Err(FormulaError::Ref);
+                let coord_pair = |off: u32| -> Result<
+                    (PackedCellCoordinate, PackedCellCoordinate),
+                    FormulaError,
+                > {
+                    if is_vertical {
+                        Ok((
+                            PackedCellCoordinate::new(min_r + off, min_c)
+                                .map_err(|_| FormulaError::Ref)?,
+                            PackedCellCoordinate::new(min_r + off, min_c + target_idx)
+                                .map_err(|_| FormulaError::Ref)?,
+                        ))
+                    } else {
+                        Ok((
+                            PackedCellCoordinate::new(min_r, min_c + off)
+                                .map_err(|_| FormulaError::Ref)?,
+                            PackedCellCoordinate::new(min_r + target_idx, min_c + off)
+                                .map_err(|_| FormulaError::Ref)?,
+                        ))
                     }
-                    let target_c = min_c + (idx_num as u32 - 1);
-                    let mut best: Option<(u32, EvaluatedCellValue)> = None;
-                    for r_off in 0..rows {
-                        let kc = PackedCellCoordinate::new(min_r + r_off as u32, min_c)
-                            .map_err(|_| FormulaError::Ref)?;
-                        let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth);
-                        if !range_lookup {
-                            if Self::values_match_wildcard(&kv, &lookup_val) {
-                                let rc = PackedCellCoordinate::new(min_r + r_off as u32, target_c)
-                                    .map_err(|_| FormulaError::Ref)?;
-                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
-                            }
-                        } else {
-                            if Self::values_match(&kv, &lookup_val) {
-                                let rc = PackedCellCoordinate::new(min_r + r_off as u32, target_c)
-                                    .map_err(|_| FormulaError::Ref)?;
-                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
-                            }
-                            if same_type(&kv, &lookup_val) {
-                                if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
-                                    if ord.is_le() {
-                                        let replace = match &best {
-                                            None => true,
-                                            Some((_, prev)) => {
-                                                Self::compare_excel_values(&kv, prev)
-                                                    .is_some_and(|o| o.is_ge())
-                                            }
-                                        };
-                                        if replace {
-                                            best = Some((r_off as u32, kv));
-                                        }
-                                    }
+                };
+                let mut best: Option<(u32, EvaluatedCellValue)> = None;
+                for off in 0..outer_count {
+                    let (kc, rc) = coord_pair(off as u32)?;
+                    let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth);
+                    if !range_lookup {
+                        if Self::values_match_wildcard(&kv, &lookup_val) {
+                            return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
+                        }
+                    } else if same_type(&kv, &lookup_val) {
+                        if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
+                            if ord.is_le() {
+                                let replace = match &best {
+                                    None => true,
+                                    Some((_, prev)) => Self::compare_excel_values(&kv, prev)
+                                        .is_some_and(|o| o.is_ge()),
+                                };
+                                if replace {
+                                    best = Some((off as u32, kv));
                                 }
                             }
                         }
                     }
-                    if let Some((best_r_off, _)) = best {
-                        let rc = PackedCellCoordinate::new(min_r + best_r_off, target_c)
-                            .map_err(|_| FormulaError::Ref)?;
-                        return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
-                    }
-                } else {
-                    if idx_num < 1 || (idx_num as usize) > rows {
-                        return Err(FormulaError::Ref);
-                    }
-                    let target_r = min_r + (idx_num as u32 - 1);
-                    let mut best: Option<(u32, EvaluatedCellValue)> = None;
-                    for c_off in 0..cols {
-                        let kc = PackedCellCoordinate::new(min_r, min_c + c_off as u32)
-                            .map_err(|_| FormulaError::Ref)?;
-                        let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth);
-                        if !range_lookup {
-                            if Self::values_match_wildcard(&kv, &lookup_val) {
-                                let rc = PackedCellCoordinate::new(target_r, min_c + c_off as u32)
-                                    .map_err(|_| FormulaError::Ref)?;
-                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
-                            }
-                        } else {
-                            if Self::values_match(&kv, &lookup_val) {
-                                let rc = PackedCellCoordinate::new(target_r, min_c + c_off as u32)
-                                    .map_err(|_| FormulaError::Ref)?;
-                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
-                            }
-                            if same_type(&kv, &lookup_val) {
-                                if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
-                                    if ord.is_le() {
-                                        let replace = match &best {
-                                            None => true,
-                                            Some((_, prev)) => {
-                                                Self::compare_excel_values(&kv, prev)
-                                                    .is_some_and(|o| o.is_ge())
-                                            }
-                                        };
-                                        if replace {
-                                            best = Some((c_off as u32, kv));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if let Some((best_c_off, _)) = best {
-                        let rc = PackedCellCoordinate::new(target_r, min_c + best_c_off)
-                            .map_err(|_| FormulaError::Ref)?;
-                        return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
-                    }
+                }
+                if let Some((best_off, _)) = best {
+                    let (_, rc) = coord_pair(best_off)?;
+                    return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
                 }
                 Err(FormulaError::Na)
             }
@@ -162,16 +128,40 @@ impl SheetEngine {
                         Self::values_match(k, &lookup_val)
                     }
                 };
-                let same_type = |a: &EvaluatedCellValue, b: &EvaluatedCellValue| -> bool {
-                    matches!(
-                        (a, b),
+                let update_approx = |best: &mut Option<(usize, EvaluatedCellValue)>,
+                                     idx: usize,
+                                     k: &EvaluatedCellValue| {
+                    let same_t = matches!(
+                        (k, &lookup_val),
                         (EvaluatedCellValue::Number(_), EvaluatedCellValue::Number(_))
                             | (EvaluatedCellValue::Text(_), EvaluatedCellValue::Text(_))
                             | (
                                 EvaluatedCellValue::Boolean(_),
                                 EvaluatedCellValue::Boolean(_)
                             )
-                    )
+                    );
+                    if (match_mode == -1 || match_mode == 1) && same_t {
+                        if let Some(ord) = Self::compare_excel_values(k, &lookup_val) {
+                            let valid = (match_mode == -1 && ord.is_lt())
+                                || (match_mode == 1 && ord.is_gt());
+                            if valid {
+                                let replace = match best {
+                                    None => true,
+                                    Some((_, prev)) => Self::compare_excel_values(k, prev)
+                                        .is_some_and(|o| {
+                                            if match_mode == -1 {
+                                                o.is_gt()
+                                            } else {
+                                                o.is_lt()
+                                            }
+                                        }),
+                                };
+                                if replace {
+                                    *best = Some((idx, k.clone()));
+                                }
+                            }
+                        }
+                    }
                 };
                 if let (Some(lookup_spec), Some(return_spec)) = (
                     self.extract_streaming_range(&args[1])?,
@@ -190,12 +180,10 @@ impl SheetEngine {
                         } else {
                             step
                         };
-                        let r_off = flat_idx / l_cols;
-                        let c_off = flat_idx % l_cols;
                         let k = self.eval_streaming_cell_allow_error(
                             lookup_spec,
-                            r_off,
-                            c_off,
+                            flat_idx / l_cols,
+                            flat_idx % l_cols,
                             ctx,
                             depth,
                         )?;
@@ -208,29 +196,7 @@ impl SheetEngine {
                                 depth,
                             );
                         }
-                        if (match_mode == -1 || match_mode == 1) && same_type(&k, &lookup_val) {
-                            if let Some(ord) = Self::compare_excel_values(&k, &lookup_val) {
-                                if match_mode == -1 && ord.is_lt() {
-                                    let replace = match &best_approx {
-                                        None => true,
-                                        Some((_, prev)) => Self::compare_excel_values(&k, prev)
-                                            .is_some_and(|o| o.is_gt()),
-                                    };
-                                    if replace {
-                                        best_approx = Some((flat_idx, k));
-                                    }
-                                } else if match_mode == 1 && ord.is_gt() {
-                                    let replace = match &best_approx {
-                                        None => true,
-                                        Some((_, prev)) => Self::compare_excel_values(&k, prev)
-                                            .is_some_and(|o| o.is_lt()),
-                                    };
-                                    if replace {
-                                        best_approx = Some((flat_idx, k));
-                                    }
-                                }
-                            }
-                        }
+                        update_approx(&mut best_approx, flat_idx, &k);
                     }
                     if let Some((best_idx, _)) = best_approx {
                         return self.eval_streaming_cell(
@@ -241,11 +207,11 @@ impl SheetEngine {
                             depth,
                         );
                     }
-                    if args.len() >= 4 {
-                        return Ok(self.eval_expr_ctx(&args[3], ctx, depth));
+                    return if args.len() >= 4 {
+                        Ok(self.eval_expr_ctx(&args[3], ctx, depth))
                     } else {
-                        return Err(FormulaError::Na);
-                    }
+                        Err(FormulaError::Na)
+                    };
                 }
                 let lookup_arr = self.eval_range_vec(&args[1], ctx, depth)?;
                 let return_arr = self.eval_range_vec(&args[2], ctx, depth)?;
@@ -264,29 +230,7 @@ impl SheetEngine {
                     if cell_matches(k) {
                         return Ok(return_arr[idx].clone());
                     }
-                    if (match_mode == -1 || match_mode == 1) && same_type(k, &lookup_val) {
-                        if let Some(ord) = Self::compare_excel_values(k, &lookup_val) {
-                            if match_mode == -1 && ord.is_lt() {
-                                let replace = match &best_approx {
-                                    None => true,
-                                    Some((_, prev)) => Self::compare_excel_values(k, prev)
-                                        .is_some_and(|o| o.is_gt()),
-                                };
-                                if replace {
-                                    best_approx = Some((idx, k.clone()));
-                                }
-                            } else if match_mode == 1 && ord.is_gt() {
-                                let replace = match &best_approx {
-                                    None => true,
-                                    Some((_, prev)) => Self::compare_excel_values(k, prev)
-                                        .is_some_and(|o| o.is_lt()),
-                                };
-                                if replace {
-                                    best_approx = Some((idx, k.clone()));
-                                }
-                            }
-                        }
-                    }
+                    update_approx(&mut best_approx, idx, k);
                 }
                 if let Some((best_idx, _)) = best_approx {
                     return Ok(return_arr[best_idx].clone());

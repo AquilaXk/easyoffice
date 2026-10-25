@@ -116,43 +116,12 @@ impl UniversalFormatConverter {
                 for p in paragraphs {
                     blocks.push(MarkdownBlock::Paragraph(p));
                 }
-                let mut md = CommonMarkCodec::render(&blocks);
                 for table in &model.tables {
-                    if table.is_empty() {
-                        continue;
-                    }
-                    let col_count = table.iter().map(|r| r.len()).max().unwrap_or(0);
-                    if col_count == 0 {
-                        continue;
-                    }
-                    if !md.is_empty() && !md.ends_with('\n') {
-                        md.push('\n');
-                    }
-                    if !md.is_empty() {
-                        md.push('\n');
-                    }
-                    for (r_idx, row) in table.iter().enumerate() {
-                        md.push('|');
-                        for c_idx in 0..col_count {
-                            let cell = row
-                                .get(c_idx)
-                                .map(|s| s.replace('|', "\\|").replace('\n', " "))
-                                .unwrap_or_default();
-                            md.push(' ');
-                            md.push_str(&cell);
-                            md.push_str(" |");
-                        }
-                        md.push('\n');
-                        if r_idx == 0 {
-                            md.push('|');
-                            for _ in 0..col_count {
-                                md.push_str(" --- |");
-                            }
-                            md.push('\n');
-                        }
+                    if !table.is_empty() {
+                        blocks.push(MarkdownBlock::Table(table.clone()));
                     }
                 }
-                Ok(md.into_bytes())
+                Ok(CommonMarkCodec::render(&blocks).into_bytes())
             }
             DocumentFormat::Txt => {
                 let mut lines = vec![title];
@@ -282,48 +251,27 @@ impl UniversalFormatConverter {
                 let mut title = "Markdown 문서".to_string();
                 let mut paragraphs = Vec::new();
                 let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
-                let mut current_table: Vec<Vec<String>> = Vec::new();
                 for block in blocks {
                     match block {
                         MarkdownBlock::Heading { level: 1, text }
-                            if paragraphs.is_empty() && current_table.is_empty() =>
+                            if paragraphs.is_empty() && tables.is_empty() =>
                         {
                             title = text;
-                        }
-                        MarkdownBlock::Paragraph(line)
-                            if line.trim_start().starts_with('|')
-                                && line.trim_end().ends_with('|') =>
-                        {
-                            let inner = line.trim().trim_matches('|');
-                            let cells: Vec<String> =
-                                inner.split('|').map(|c| c.trim().to_string()).collect();
-                            let is_sep = !cells.is_empty()
-                                && cells.iter().all(|c| {
-                                    !c.is_empty()
-                                        && c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
-                                });
-                            if !is_sep {
-                                current_table.push(cells);
-                            }
                         }
                         MarkdownBlock::Heading { text, .. }
                         | MarkdownBlock::Paragraph(text)
                         | MarkdownBlock::BlockQuote(text) => {
-                            if !current_table.is_empty() {
-                                tables.push(std::mem::take(&mut current_table));
-                            }
                             paragraphs.push(text);
                         }
                         MarkdownBlock::BulletList(items) | MarkdownBlock::NumberedList(items) => {
-                            if !current_table.is_empty() {
-                                tables.push(std::mem::take(&mut current_table));
-                            }
                             paragraphs.extend(items);
                         }
+                        MarkdownBlock::Table(rows) => {
+                            if !rows.is_empty() {
+                                tables.push(rows);
+                            }
+                        }
                     }
-                }
-                if !current_table.is_empty() {
-                    tables.push(current_table);
                 }
                 Self::from_doc(title, paragraphs, tables, None)
             }

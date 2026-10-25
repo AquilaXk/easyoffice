@@ -644,7 +644,6 @@ public enum LegacyOLE2OfficeCodec {
     var currentSheet = WorksheetModel(name: name)
     var currentSheetIndex = 0
     var inWorksheetSubstream = false
-    var extendedEnvelope: BIFF8ExtendedMetadataEnvelope? = nil
     var extendedMetaBytes = Data()
     var pendingFormulaCoord: (row: Int, col: Int)? = nil
     var sstStrings: [String] = []
@@ -976,9 +975,6 @@ public enum LegacyOLE2OfficeCodec {
     if !extendedMetaBytes.isEmpty,
       let ext = try? JSONDecoder().decode(BIFF8ExtendedMetadataEnvelope.self, from: extendedMetaBytes)
     {
-      extendedEnvelope = ext
-    }
-    if let ext = extendedEnvelope {
       ext.apply(to: &result)
     }
     return result

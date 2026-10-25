@@ -977,12 +977,22 @@ impl Hwp5Codec {
                             cursor += 2;
                         }
                     }
-                    0x000A | 0x000D => {
+                    0x000A => {
                         filtered.extend_from_slice(&0x000Au16.to_le_bytes());
                         cursor += 2;
                     }
-                    0x0001..=0x0008 | 0x000B..=0x000C | 0x000E..=0x0018 => {
-                        cursor = (cursor + 16).min(bytes.len());
+                    0x000D => {
+                        if cursor + 2 < bytes.len() {
+                            filtered.extend_from_slice(&0x000Au16.to_le_bytes());
+                        }
+                        cursor += 2;
+                    }
+                    0x0001..=0x0008 | 0x000B..=0x000C | 0x000E..=0x0017
+                        if cursor + 16 <= bytes.len()
+                            && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]])
+                                == code =>
+                    {
+                        cursor += 16;
                     }
                     _ => {
                         cursor += 2;
@@ -1485,10 +1495,17 @@ mod tests {
             std::cmp::Ordering::Less
         );
 
+        const HWP5_CTRL_SECTION_COL: u16 = 0x0002;
         const HWP5_CTRL_DRAWING_TABLE: u16 = 0x000B;
         const HWP5_CTRL_INLINE_TAB: u16 = 0x0009;
+        const HWP5_CTRL_HYPHEN: u16 = 0x0018;
         let mut payload = Vec::new();
         payload.extend_from_slice(&encode_utf16le("문단앞"));
+        payload.extend_from_slice(&HWP5_CTRL_SECTION_COL.to_le_bytes());
+        for i in 0..6u16 {
+            payload.extend_from_slice(&(0xAC00 + i).to_le_bytes());
+        }
+        payload.extend_from_slice(&HWP5_CTRL_SECTION_COL.to_le_bytes());
         payload.extend_from_slice(&HWP5_CTRL_DRAWING_TABLE.to_le_bytes());
         for i in 0..6u16 {
             payload.extend_from_slice(&(0xAC00 + i).to_le_bytes());
@@ -1497,9 +1514,11 @@ mod tests {
         payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
         payload.extend_from_slice(&[0u8; 12]);
         payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_HYPHEN.to_le_bytes());
         payload.extend_from_slice(&encode_utf16le("문단뒤"));
         payload.extend_from_slice(&0x000Au16.to_le_bytes());
         payload.extend_from_slice(&encode_utf16le("둘째줄"));
+        payload.extend_from_slice(&0x000Du16.to_le_bytes());
 
         let decoded = Hwp5Codec::decode_hwp5_para_text(&payload).unwrap();
         assert_eq!(decoded, "문단앞\t문단뒤\n둘째줄");

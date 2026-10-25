@@ -24,13 +24,7 @@ public final class WorkspaceViewModel {
   public var activeRibbonCategory: RibbonCategory = .home
   public var ribbonLayoutStyle: RibbonLayoutStyle = .standardOffice
   public var isRibbonCollapsed: Bool = false
-  public nonisolated(unsafe) static var isGlobalDarkModeActive: Bool = false
-
-  public var themeMode: WorkspaceThemeMode = .lightLavender {
-    didSet {
-      Self.isGlobalDarkModeActive = (themeMode == .darkIndigo)
-    }
-  }
+  public var themeMode: WorkspaceThemeMode = .lightLavender
   public var usesDarkMode: Bool {
     get { themeMode == .darkIndigo }
     set { themeMode = newValue ? .darkIndigo : .lightLavender }
@@ -638,11 +632,6 @@ public final class WorkspaceViewModel {
     isShowingHomeHub = false
   }
 
-  public var pendingCloseTabID: UUID? {
-    get { pendingCloseConfirmTabID }
-    set { pendingCloseConfirmTabID = newValue }
-  }
-
   public func requestCloseTab(id: UUID) {
     guard let tab = openTabs.first(where: { $0.id == id }) else { return }
     if tab.isModified {
@@ -676,10 +665,6 @@ public final class WorkspaceViewModel {
   }
 
   public func cancelCloseTab() {
-    pendingCloseConfirmTabID = nil
-  }
-
-  public func cancelClosePendingTab() {
     pendingCloseConfirmTabID = nil
   }
 
@@ -1614,14 +1599,5 @@ public final class WorkspaceViewModel {
     lastExecutedCommandSummary = "일괄 변환 결과 \(writtenURLs.count)건 폴더 저장 완료"
     lastErrorMessage = nil
     return writtenURLs
-  }
-}
-
-public typealias WorkspaceHub = WorkspaceViewModel
-
-extension WorkspaceTabItem {
-  public var usesDarkMode: Bool {
-    get { WorkspaceViewModel.isGlobalDarkModeActive }
-    set { WorkspaceViewModel.isGlobalDarkModeActive = newValue }
   }
 }

@@ -76,13 +76,38 @@ pub const MAX_FORMULA_LEN: usize = 8_192;
 pub const MAX_TOKENS: usize = 2_048;
 pub const MAX_PARSE_DEPTH: usize = 64;
 
+fn split_once_unquoted(s: &str, delimiter: char) -> Option<(&str, &str)> {
+    let mut in_single_quote = false;
+    for (idx, ch) in s.char_indices() {
+        if ch == '\'' {
+            in_single_quote = !in_single_quote;
+        } else if ch == delimiter && !in_single_quote {
+            return Some((&s[..idx], &s[idx + ch.len_utf8()..]));
+        }
+    }
+    None
+}
+
+fn rfind_unquoted_dot(s: &str) -> Option<usize> {
+    let mut in_single_quote = false;
+    let mut last_dot = None;
+    for (idx, ch) in s.char_indices() {
+        if ch == '\'' {
+            in_single_quote = !in_single_quote;
+        } else if ch == '.' && !in_single_quote {
+            last_dot = Some(idx);
+        }
+    }
+    last_dot
+}
+
 fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
     fn split_sheet_and_cell(part: &str) -> (Option<String>, &str) {
         let trimmed = part.trim();
         if let Some(rest) = trimmed.strip_prefix('.') {
             return (None, rest.trim());
         }
-        if let Some(dot_idx) = trimmed.rfind('.') {
+        if let Some(dot_idx) = rfind_unquoted_dot(trimmed) {
             let raw_sheet = trimmed[..dot_idx].trim().trim_start_matches('$');
             let cell_part = trimmed[dot_idx + 1..].trim();
             if raw_sheet.is_empty() {
@@ -103,7 +128,7 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
         (None, trimmed)
     }
 
-    if let Some((lhs, rhs)) = inner.split_once(':') {
+    if let Some((lhs, rhs)) = split_once_unquoted(inner, ':') {
         let (left_sheet, left_cell) = split_sheet_and_cell(lhs);
         let (right_sheet, right_cell) = split_sheet_and_cell(rhs);
         if let Some(sheet) = left_sheet.or(right_sheet) {
@@ -120,44 +145,87 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
     }
 }
 
-/// Normalizes ODF OpenFormula (`of:=`, `[.A1:.B2]`, `['Sheet 1'.A1:.B2]`, `[Sheet1.A1]`) references into standard A1 syntax.
-pub fn normalize_open_formula_references(raw_src: &str) -> std::borrow::Cow<'_, str> {
+#[inline]
+pub(crate) fn strip_formula_prefix(raw_src: &str) -> Option<&str> {
     let trimmed = raw_src.trim();
-    let stripped = if trimmed.len() >= 3 && trimmed[..3].eq_ignore_ascii_case("of:") {
+    let after_ns = if trimmed
+        .get(..3)
+        .is_some_and(|s| s.eq_ignore_ascii_case("of:"))
+    {
         trimmed[3..].trim_start()
-    } else if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("oooc:") {
+    } else if trimmed
+        .get(..5)
+        .is_some_and(|s| s.eq_ignore_ascii_case("oooc:"))
+    {
         trimmed[5..].trim_start()
-    } else if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("msoxl:") {
+    } else if trimmed
+        .get(..6)
+        .is_some_and(|s| s.eq_ignore_ascii_case("msoxl:"))
+    {
         trimmed[6..].trim_start()
     } else {
-        raw_src
+        trimmed
     };
-    let stripped = stripped.strip_prefix('=').unwrap_or(stripped);
-    if !stripped.contains('[')
-        && stripped.as_ptr() == raw_src.as_ptr()
-        && stripped.len() == raw_src.len()
-    {
-        return std::borrow::Cow::Borrowed(raw_src);
+    after_ns.strip_prefix('=')
+}
+
+/// Normalizes ODF OpenFormula (`of:=`, `[.A1:.B2]`, `['Sheet 1'.A1:.B2]`, `[Sheet1.A1]`) references into standard A1 syntax.
+pub fn normalize_open_formula_references(raw_src: &str) -> std::borrow::Cow<'_, str> {
+    let stripped = strip_formula_prefix(raw_src).unwrap_or_else(|| {
+        let trimmed = raw_src.trim();
+        if trimmed
+            .get(..3)
+            .is_some_and(|s| s.eq_ignore_ascii_case("of:"))
+        {
+            trimmed[3..].trim_start()
+        } else if trimmed
+            .get(..5)
+            .is_some_and(|s| s.eq_ignore_ascii_case("oooc:"))
+        {
+            trimmed[5..].trim_start()
+        } else if trimmed
+            .get(..6)
+            .is_some_and(|s| s.eq_ignore_ascii_case("msoxl:"))
+        {
+            trimmed[6..].trim_start()
+        } else {
+            raw_src
+        }
+    });
+    if !stripped.contains('[') {
+        return std::borrow::Cow::Borrowed(stripped);
     }
 
     let mut out = String::with_capacity(stripped.len());
-    let mut in_quotes = false;
+    let mut in_double_quote = false;
+    let mut in_single_quote = false;
     let mut chars = stripped.char_indices().peekable();
     while let Some((idx, ch)) = chars.next() {
-        if ch == '"' {
-            in_quotes = !in_quotes;
+        if ch == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
             out.push(ch);
             continue;
         }
-        if !in_quotes && ch == '[' {
+        if ch == '\'' && !in_double_quote {
+            if in_single_quote && chars.peek().is_some_and(|&(_, next_ch)| next_ch == '\'') {
+                out.push('\'');
+                out.push('\'');
+                chars.next();
+            } else {
+                in_single_quote = !in_single_quote;
+                out.push(ch);
+            }
+            continue;
+        }
+        if !in_double_quote && !in_single_quote && ch == '[' {
             let start_inner = idx + ch.len_utf8();
             let mut close_idx = None;
-            let mut in_single_quote = false;
+            let mut bracket_single_quote = false;
             while let Some(&(c_idx, c_ch)) = chars.peek() {
                 chars.next();
                 if c_ch == '\'' {
-                    in_single_quote = !in_single_quote;
-                } else if c_ch == ']' && !in_single_quote {
+                    bracket_single_quote = !bracket_single_quote;
+                } else if c_ch == ']' && !bracket_single_quote {
                     close_idx = Some(c_idx);
                     break;
                 }
