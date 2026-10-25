@@ -104,7 +104,7 @@ public enum BitPacking {
     return x
   }
 
-  /// Encodes a Swift String as contiguous little-endian UTF-16 code units with a 64-bit SWAR Morton bit-interleaving ASCII fast path.
+  /// Encodes a Swift String as contiguous little-endian UTF-16 code units.
   @inlinable
   public static func encodeUTF16LE(_ text: String) -> Data {
     if text.isEmpty { return Data() }

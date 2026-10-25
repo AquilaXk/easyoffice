@@ -1485,18 +1485,18 @@ mod tests {
             std::cmp::Ordering::Less
         );
 
+        const HWP5_CTRL_DRAWING_TABLE: u16 = 0x000B;
+        const HWP5_CTRL_INLINE_TAB: u16 = 0x0009;
         let mut payload = Vec::new();
         payload.extend_from_slice(&encode_utf16le("문단앞"));
-        // 16-byte extended control char 0x000B (table/drawing object) with non-zero metadata
-        payload.extend_from_slice(&0x000Bu16.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_DRAWING_TABLE.to_le_bytes());
         for i in 0..6u16 {
             payload.extend_from_slice(&(0xAC00 + i).to_le_bytes());
         }
-        payload.extend_from_slice(&0x000Bu16.to_le_bytes());
-        // 16-byte inline tab control 0x0009
-        payload.extend_from_slice(&0x0009u16.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_DRAWING_TABLE.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
         payload.extend_from_slice(&[0u8; 12]);
-        payload.extend_from_slice(&0x0009u16.to_le_bytes());
+        payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
         payload.extend_from_slice(&encode_utf16le("문단뒤"));
         payload.extend_from_slice(&0x000Au16.to_le_bytes());
         payload.extend_from_slice(&encode_utf16le("둘째줄"));

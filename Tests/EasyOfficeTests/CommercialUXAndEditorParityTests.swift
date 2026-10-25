@@ -349,12 +349,10 @@ final class CommercialUXAndEditorParityTests: XCTestCase {
     }
     XCTAssertThrowsError(try vm.mergeActivePDFWithFile(url: corruptURL))
 
-    // Batch disk enqueue must not pollute openTabs
     let tabCountBeforeDiskEnqueue = vm.openTabs.count
     vm.enqueueFilesFromDiskIntoBatchConversion(urls: [externalPDFURL], targetFormat: .docx)
     XCTAssertEqual(vm.openTabs.count, tabCountBeforeDiskEnqueue)
 
-    // Unsaved tab close confirmation & Dark mode toggle
     let initialDark = vm.usesDarkMode
     vm.toggleDarkMode()
     XCTAssertNotEqual(vm.usesDarkMode, initialDark)

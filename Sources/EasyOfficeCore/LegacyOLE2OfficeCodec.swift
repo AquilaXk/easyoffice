@@ -600,7 +600,6 @@ public enum LegacyOLE2OfficeCodec {
       }
     }
 
-    // 7. Extended worksheet metadata record (0x0868), chunked at 65,535-byte record boundaries
     let extEnvelope = BIFF8ExtendedMetadataEnvelope(from: sheet)
     if let extBytes = try? JSONEncoder().encode(extEnvelope), !extBytes.isEmpty {
       let maxChunkLen = Int(UInt16.max)
