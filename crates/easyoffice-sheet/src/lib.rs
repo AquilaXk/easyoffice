@@ -335,7 +335,16 @@ impl ConditionalFormatRule {
                 if *value == EvaluatedCellValue::Empty {
                     return false;
                 }
-                range_values.iter().filter(|item| *item == value).count() > 1
+                let mut hits = 0usize;
+                for item in range_values {
+                    if item == value {
+                        hits += 1;
+                        if hits > 1 {
+                            return true;
+                        }
+                    }
+                }
+                false
             }
         }
     }

@@ -187,13 +187,39 @@ public enum OLE2ContainerCodec {
   private static let objectTypeStream: UInt8 = 2
   private static let objectTypeRootStorage: UInt8 = 5
 
+  @inline(__always)
+  private static func foldCFBCodeUnit(_ unit: UInt16) -> UInt16 {
+    if unit >= 0x0061 && unit <= 0x007A {
+      return unit &- 0x0020
+    }
+    if unit < 0x0080 {
+      return unit
+    }
+    if let scalar = UnicodeScalar(unit) {
+      let upper = String(scalar).uppercased().utf16
+      if upper.count == 1, let first = upper.first {
+        return first
+      }
+    }
+    return unit
+  }
+
   private static func compareCFBNames(_ lhs: String, _ rhs: String) -> Bool {
-    let lLen = lhs.utf16.count
-    let rLen = rhs.utf16.count
+    let lUTF16 = lhs.utf16
+    let rUTF16 = rhs.utf16
+    let lLen = lUTF16.count
+    let rLen = rUTF16.count
     if lLen != rLen { return lLen < rLen }
-    let lUpper = Array(lhs.uppercased().utf16)
-    let rUpper = Array(rhs.uppercased().utf16)
-    return lUpper.lexicographicallyPrecedes(rUpper)
+    var lIdx = lUTF16.startIndex
+    var rIdx = rUTF16.startIndex
+    while lIdx < lUTF16.endIndex {
+      let lu = foldCFBCodeUnit(lUTF16[lIdx])
+      let ru = foldCFBCodeUnit(rUTF16[rIdx])
+      if lu != ru { return lu < ru }
+      lIdx = lUTF16.index(after: lIdx)
+      rIdx = rUTF16.index(after: rIdx)
+    }
+    return false
   }
 
   private static func buildBalancedDirectoryBST(
@@ -723,7 +749,8 @@ public enum OLE2ContainerCodec {
     }
 
     var streams: [OLE2StreamEntry] = []
-    var claimedMiniSectors = Set<UInt32>()
+    let totalMiniSectorsCapacity = max(miniStreamData.count / miniSectorSize, miniFat.count)
+    var claimedMiniWords = [UInt64](repeating: 0, count: (totalMiniSectorsCapacity + 63) / 64)
 
     for idx in 0..<entryCount {
       guard let node = dirNodes[idx], node.objectType == objectTypeStream else { continue }
@@ -745,11 +772,17 @@ public enum OLE2ContainerCodec {
             throw EasyOfficeError.corruptedContainer(
               detail: "OLE2 MiniFAT 체인이 유효하지 않거나 중복된 미니섹터(\(current))를 참조합니다.")
           }
-          guard claimedMiniSectors.insert(current).inserted else {
+          let miniIdx = Int(current)
+          let miniWordIdx = miniIdx >> 6
+          let miniBitMask: UInt64 = 1 << (miniIdx & 63)
+          guard miniWordIdx < claimedMiniWords.count,
+            (claimedMiniWords[miniWordIdx] & miniBitMask) == 0
+          else {
             throw EasyOfficeError.malformedContainer(
               detail: "OLE2 MiniFAT sector \(current) claimed by multiple streams or cycle"
             )
           }
+          claimedMiniWords[miniWordIdx] |= miniBitMask
           let offset = Int(current) * miniSectorSize
           let startIdx = miniStreamData.startIndex + offset
           output.append(contentsOf: miniStreamData[startIdx..<(startIdx + miniSectorSize)])
@@ -1337,47 +1370,52 @@ public enum HWP5BinaryCodec {
     let payloadEnd = offset + byteLength
     var units: [UInt16] = []
     units.reserveCapacity(byteLength / 2)
-    var cursor = offset
 
-    while cursor < payloadEnd {
-      let code = try BitPacking.readUInt16LE(from: data, at: cursor)
-      if code < 0x0020 {
-        if code == 0x0009 {
-          units.append(0x0009)
-          if cursor + 16 <= payloadEnd,
-            (try? BitPacking.readUInt16LE(from: data, at: cursor + 14)) == 0x0009
-          {
-            var allZeroAttrs = true
-            for attrOff in stride(from: 2, through: 12, by: 2) {
-              if (try? BitPacking.readUInt16LE(from: data, at: cursor + attrOff)) != 0 {
-                allZeroAttrs = false
-                break
+    data.withUnsafeBytes { rawBuffer in
+      var cursor = offset
+      while cursor < payloadEnd {
+        let code = rawBuffer.loadUnaligned(fromByteOffset: cursor, as: UInt16.self).littleEndian
+        if code < 0x0020 {
+          if code == 0x0009 {
+            units.append(0x0009)
+            if cursor + 16 <= payloadEnd,
+              rawBuffer.loadUnaligned(fromByteOffset: cursor + 14, as: UInt16.self).littleEndian
+                == 0x0009
+            {
+              var allZeroAttrs = true
+              for attrOff in stride(from: 2, through: 12, by: 2) {
+                if rawBuffer.loadUnaligned(fromByteOffset: cursor + attrOff, as: UInt16.self)
+                  .littleEndian != 0
+                {
+                  allZeroAttrs = false
+                  break
+                }
               }
+              cursor += allZeroAttrs ? 16 : 2
+            } else {
+              cursor += 2
             }
-            cursor += allZeroAttrs ? 16 : 2
+          } else if code == 0x000A {
+            units.append(0x000A)
+            cursor += 2
+          } else if code == 0x000D {
+            if cursor + 2 < payloadEnd {
+              units.append(0x000D)
+            }
+            cursor += 2
+          } else if code == 0x0000 {
+            cursor += 2
+          } else if cursor + 16 <= payloadEnd,
+            rawBuffer.loadUnaligned(fromByteOffset: cursor + 14, as: UInt16.self).littleEndian == code
+          {
+            cursor += 16
           } else {
             cursor += 2
           }
-        } else if code == 0x000A {
-          units.append(0x000A)
-          cursor += 2
-        } else if code == 0x000D {
-          if cursor + 2 < payloadEnd {
-            units.append(0x000D)
-          }
-          cursor += 2
-        } else if code == 0x0000 {
-          cursor += 2
-        } else if cursor + 16 <= payloadEnd,
-          (try? BitPacking.readUInt16LE(from: data, at: cursor + 14)) == code
-        {
-          cursor += 16
         } else {
+          units.append(code)
           cursor += 2
         }
-      } else {
-        units.append(code)
-        cursor += 2
       }
     }
 

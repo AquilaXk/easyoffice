@@ -439,12 +439,12 @@ impl<'a> CompiledCriteria<'a> {
                     return matches!(op, CritNumOp::Ne);
                 };
                 match op {
-                    CritNumOp::Ge => lhs_num >= rhs_num - 1e-9,
-                    CritNumOp::Le => lhs_num <= rhs_num + 1e-9,
-                    CritNumOp::Ne => (lhs_num - rhs_num).abs() >= 1e-9,
-                    CritNumOp::Gt => lhs_num > rhs_num + 1e-9,
-                    CritNumOp::Lt => lhs_num < rhs_num - 1e-9,
-                    CritNumOp::Eq => (lhs_num - rhs_num).abs() < 1e-9,
+                    CritNumOp::Ge => lhs_num >= rhs_num - 1e-12,
+                    CritNumOp::Le => lhs_num <= rhs_num + 1e-12,
+                    CritNumOp::Ne => (lhs_num - rhs_num).abs() >= 1e-12,
+                    CritNumOp::Gt => lhs_num > rhs_num,
+                    CritNumOp::Lt => lhs_num < rhs_num,
+                    CritNumOp::Eq => (lhs_num - rhs_num).abs() < 1e-12,
                 }
             }
             Self::TextEq(ref rhs_lower) => Self::cell_eq_lowercase(cell, rhs_lower),
@@ -1134,13 +1134,25 @@ impl SheetEngine {
                 if nums.is_empty() {
                     return Err(FormulaError::Na);
                 }
+                let mut counts: std::collections::HashMap<u64, (usize, usize, f64)> =
+                    std::collections::HashMap::with_capacity(nums.len());
+                for (idx, &x) in nums.iter().enumerate() {
+                    let key = if x == 0.0 {
+                        0.0f64.to_bits()
+                    } else {
+                        x.to_bits()
+                    };
+                    let entry = counts.entry(key).or_insert((0, idx, x));
+                    entry.0 += 1;
+                }
                 let mut best_val = nums[0];
                 let mut best_cnt = 0usize;
-                for &x in &nums {
-                    let cnt = nums.iter().filter(|&&y| x == y).count();
-                    if cnt > best_cnt {
+                let mut best_idx = usize::MAX;
+                for &(cnt, first_idx, val) in counts.values() {
+                    if cnt > best_cnt || (cnt == best_cnt && first_idx < best_idx) {
                         best_cnt = cnt;
-                        best_val = x;
+                        best_idx = first_idx;
+                        best_val = val;
                     }
                 }
                 if best_cnt < 2 {

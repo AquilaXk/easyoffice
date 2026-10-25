@@ -1278,6 +1278,15 @@
     });
 
     const evalBtn = document.getElementById("btn-eval-formula");
+    const formulaInputEl = document.getElementById("formula-input");
+    if (formulaInputEl && evalBtn) {
+      formulaInputEl.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          evalBtn.click();
+        }
+      });
+    }
     if (evalBtn) {
       evalBtn.addEventListener("click", async () => {
         const input = document.getElementById("formula-input");
@@ -1339,6 +1348,35 @@
     if (slideNotesInput) {
       slideNotesInput.addEventListener("input", () => {
         SLIDE_DECK_STATE[activeSlideIndex].notes = slideNotesInput.value;
+      });
+    }
+    const slideTitleZone = document.getElementById("slide-title-zone");
+    if (slideTitleZone) {
+      slideTitleZone.addEventListener("input", () => {
+        if (SLIDE_DECK_STATE[activeSlideIndex]) {
+          SLIDE_DECK_STATE[activeSlideIndex].title = slideTitleZone.textContent || "";
+        }
+      });
+    }
+    const slideLowerZone = document.getElementById("slide-lower-zone");
+    if (slideLowerZone) {
+      slideLowerZone.addEventListener("input", () => {
+        if (SLIDE_DECK_STATE[activeSlideIndex]) {
+          SLIDE_DECK_STATE[activeSlideIndex].lower = slideLowerZone.textContent || "";
+        }
+      });
+    }
+    const slideStageBox = document.getElementById("slide-stage-box");
+    if (slideStageBox) {
+      slideStageBox.addEventListener("pointermove", (ev) => {
+        if (!slideLaserActive) return;
+        const dot = document.getElementById("slide-laser-dot");
+        if (!dot) return;
+        const rect = slideStageBox.getBoundingClientRect();
+        const x = Math.max(8, Math.min(rect.width - 8, ev.clientX - rect.left));
+        const y = Math.max(8, Math.min(rect.height - 8, ev.clientY - rect.top));
+        dot.style.left = x + "px";
+        dot.style.top = y + "px";
       });
     }
     const btnSlideLaser = document.getElementById("btn-slide-laser");
@@ -1491,9 +1529,11 @@
     );
     let total = 0;
     numCells.forEach((cell) => {
-      const raw = (cell.dataset.docNum || cell.textContent || "0").replaceAll(",", "");
+      const textCandidate = (cell.textContent || "").trim();
+      const raw = (textCandidate || cell.dataset.docNum || "0").replaceAll(",", "");
       const val = Number.parseFloat(raw);
       if (!Number.isNaN(val)) {
+        cell.dataset.docNum = String(val);
         total += val;
       }
     });

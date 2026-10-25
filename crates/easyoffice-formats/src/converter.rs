@@ -116,7 +116,43 @@ impl UniversalFormatConverter {
                 for p in paragraphs {
                     blocks.push(MarkdownBlock::Paragraph(p));
                 }
-                Ok(CommonMarkCodec::render(&blocks).into_bytes())
+                let mut md = CommonMarkCodec::render(&blocks);
+                for table in &model.tables {
+                    if table.is_empty() {
+                        continue;
+                    }
+                    let col_count = table.iter().map(|r| r.len()).max().unwrap_or(0);
+                    if col_count == 0 {
+                        continue;
+                    }
+                    if !md.is_empty() && !md.ends_with('\n') {
+                        md.push('\n');
+                    }
+                    if !md.is_empty() {
+                        md.push('\n');
+                    }
+                    for (r_idx, row) in table.iter().enumerate() {
+                        md.push('|');
+                        for c_idx in 0..col_count {
+                            let cell = row
+                                .get(c_idx)
+                                .map(|s| s.replace('|', "\\|").replace('\n', " "))
+                                .unwrap_or_default();
+                            md.push(' ');
+                            md.push_str(&cell);
+                            md.push_str(" |");
+                        }
+                        md.push('\n');
+                        if r_idx == 0 {
+                            md.push('|');
+                            for _ in 0..col_count {
+                                md.push_str(" --- |");
+                            }
+                            md.push('\n');
+                        }
+                    }
+                }
+                Ok(md.into_bytes())
             }
             DocumentFormat::Txt => {
                 let mut lines = vec![title];
@@ -193,16 +229,26 @@ impl UniversalFormatConverter {
                     .collect(),
             }),
             DocumentFormat::Odp => OdfCodec::pack_odp(&title, &slides),
-            DocumentFormat::Pdf => Ok(PdfSerializer::serialize(&PdfDocumentModel {
-                title,
-                pages: vec![PdfPageModel {
-                    page_number: 1,
-                    rotation_degrees: 0,
-                    body_text: paragraphs.join("\n"),
-                    approval_stamp: model.official_agency.clone(),
-                }],
-                watermark_text: None,
-            })),
+            DocumentFormat::Pdf => {
+                let mut body_lines = paragraphs;
+                for table in &model.tables {
+                    for row in table {
+                        if !row.is_empty() {
+                            body_lines.push(row.join(" | "));
+                        }
+                    }
+                }
+                Ok(PdfSerializer::serialize(&PdfDocumentModel {
+                    title,
+                    pages: vec![PdfPageModel {
+                        page_number: 1,
+                        rotation_degrees: 0,
+                        body_text: body_lines.join("\n"),
+                        approval_stamp: model.official_agency.clone(),
+                    }],
+                    watermark_text: None,
+                }))
+            }
         }
     }
 
@@ -235,20 +281,51 @@ impl UniversalFormatConverter {
                 let blocks = CommonMarkCodec::parse(text)?;
                 let mut title = "Markdown 문서".to_string();
                 let mut paragraphs = Vec::new();
+                let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
+                let mut current_table: Vec<Vec<String>> = Vec::new();
                 for block in blocks {
                     match block {
-                        MarkdownBlock::Heading { level: 1, text } if paragraphs.is_empty() => {
+                        MarkdownBlock::Heading { level: 1, text }
+                            if paragraphs.is_empty() && current_table.is_empty() =>
+                        {
                             title = text;
+                        }
+                        MarkdownBlock::Paragraph(line)
+                            if line.trim_start().starts_with('|')
+                                && line.trim_end().ends_with('|') =>
+                        {
+                            let inner = line.trim().trim_matches('|');
+                            let cells: Vec<String> =
+                                inner.split('|').map(|c| c.trim().to_string()).collect();
+                            let is_sep = !cells.is_empty()
+                                && cells.iter().all(|c| {
+                                    !c.is_empty()
+                                        && c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
+                                });
+                            if !is_sep {
+                                current_table.push(cells);
+                            }
                         }
                         MarkdownBlock::Heading { text, .. }
                         | MarkdownBlock::Paragraph(text)
-                        | MarkdownBlock::BlockQuote(text) => paragraphs.push(text),
+                        | MarkdownBlock::BlockQuote(text) => {
+                            if !current_table.is_empty() {
+                                tables.push(std::mem::take(&mut current_table));
+                            }
+                            paragraphs.push(text);
+                        }
                         MarkdownBlock::BulletList(items) | MarkdownBlock::NumberedList(items) => {
+                            if !current_table.is_empty() {
+                                tables.push(std::mem::take(&mut current_table));
+                            }
                             paragraphs.extend(items);
                         }
                     }
                 }
-                Self::from_doc(title, paragraphs, Vec::new(), None)
+                if !current_table.is_empty() {
+                    tables.push(current_table);
+                }
+                Self::from_doc(title, paragraphs, tables, None)
             }
             DocumentFormat::Txt => {
                 let text = std::str::from_utf8(bytes).map_err(|_| {
@@ -515,5 +592,35 @@ mod tests {
                 DocumentFormat::Pdf
             );
         }
+    }
+
+    #[test]
+    fn test_markdown_and_pdf_preserve_document_tables() {
+        let model = UniversalDocumentModel {
+            title: "표보존검증".to_string(),
+            paragraphs: vec!["본문요약".to_string()],
+            tables: vec![vec![
+                vec!["항목".to_string(), "값".to_string()],
+                vec!["매출".to_string(), "1200".to_string()],
+            ]],
+            sheet_cells: Vec::new(),
+            slides: Vec::new(),
+            official_agency: None,
+        };
+
+        let md_bytes = UniversalFormatConverter::encode(&model, DocumentFormat::Markdown).unwrap();
+        let md_str = String::from_utf8(md_bytes.clone()).unwrap();
+        assert!(md_str.contains("| 항목 | 값 |"));
+        assert!(md_str.contains("| --- | --- |"));
+        assert!(md_str.contains("| 매출 | 1200 |"));
+        let (_, md_decoded) = UniversalFormatConverter::decode(&md_bytes, Some("md")).unwrap();
+        assert_eq!(md_decoded.tables, model.tables);
+
+        let pdf_bytes = UniversalFormatConverter::encode(&model, DocumentFormat::Pdf).unwrap();
+        let (_, pdf_decoded) = UniversalFormatConverter::decode(&pdf_bytes, Some("pdf")).unwrap();
+        assert!(pdf_decoded
+            .paragraphs
+            .iter()
+            .any(|p| p.contains("매출 | 1200")));
     }
 }

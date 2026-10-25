@@ -949,6 +949,17 @@ extension WorksheetModel {
         }
         let maxMag = max(1.0, rawCashFlows.map { abs($0) }.max() ?? 1.0)
         let cashFlows = rawCashFlows.map { $0 / maxMag }
+
+        func evalNPV(_ r: Double) -> Double {
+          let base = 1.0 + r
+          guard base > 1e-9 else { return .nan }
+          var sum = 0.0
+          for (t, cf) in cashFlows.enumerated() {
+            sum += cf / pow(base, Double(t))
+          }
+          return sum
+        }
+
         let guess = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 0.1) : 0.1
         var rate = guess <= -1.0 ? 0.1 : guess
         var lastResidual = Double.infinity
@@ -980,10 +991,45 @@ extension WorksheetModel {
           }
           rate = max(-0.9999, nextRate)
         }
-        guard rate.isFinite, lastResidual < 1e-5 else {
-          return .error("#NUM!")
+        if rate.isFinite, lastResidual < 1e-5 {
+          return .number(rate)
         }
-        return .number(rate)
+        let samplePoints: [Double] = [
+          -0.99, -0.95, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,
+          0.0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0,
+        ]
+        var prevR = samplePoints[0]
+        var prevY = evalNPV(prevR)
+        for idx in 1..<samplePoints.count {
+          let curR = samplePoints[idx]
+          let curY = evalNPV(curR)
+          if prevY.isFinite, curY.isFinite, prevY * curY <= 0.0 {
+            var lo = prevR
+            var hi = curR
+            var fLo = prevY
+            for _ in 0..<80 {
+              let mid = 0.5 * (lo + hi)
+              let fMid = evalNPV(mid)
+              if !fMid.isFinite { break }
+              if abs(fMid) < 1e-9 || (hi - lo) < 1e-11 {
+                return .number(mid)
+              }
+              if fLo * fMid <= 0.0 {
+                hi = mid
+              } else {
+                lo = mid
+                fLo = fMid
+              }
+            }
+            let mid = 0.5 * (lo + hi)
+            if abs(evalNPV(mid)) < 1e-4 {
+              return .number(mid)
+            }
+          }
+          prevR = curR
+          prevY = curY
+        }
+        return .error("#NUM!")
       }
 
     case "NPER":
@@ -1043,13 +1089,48 @@ extension WorksheetModel {
           break
         }
         let nextR = r - y / dy
-        if abs(nextR - r) < 1e-9 {
+        if abs(nextR - r) < 1e-9, abs(evalTVM(nextR)) < 1e-5 {
           return .number(nextR)
         }
         r = max(-0.9999, nextR)
       }
       if abs(evalTVM(r)) < 1e-5 && r.isFinite {
         return .number(r)
+      }
+      let samplePoints: [Double] = [
+        -0.99, -0.95, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1,
+        0.0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.5, 10.0,
+      ]
+      var prevR = samplePoints[0]
+      var prevY = evalTVM(prevR)
+      for idx in 1..<samplePoints.count {
+        let curR = samplePoints[idx]
+        let curY = evalTVM(curR)
+        if prevY.isFinite, curY.isFinite, prevY * curY <= 0.0 {
+          var lo = prevR
+          var hi = curR
+          var fLo = prevY
+          for _ in 0..<80 {
+            let mid = 0.5 * (lo + hi)
+            let fMid = evalTVM(mid)
+            if !fMid.isFinite { break }
+            if abs(fMid) < 1e-9 || (hi - lo) < 1e-11 {
+              return .number(mid)
+            }
+            if fLo * fMid <= 0.0 {
+              hi = mid
+            } else {
+              lo = mid
+              fLo = fMid
+            }
+          }
+          let mid = 0.5 * (lo + hi)
+          if abs(evalTVM(mid)) < 1e-4 {
+            return .number(mid)
+          }
+        }
+        prevR = curR
+        prevY = curY
       }
       return .error("#NUM!")
 
@@ -1239,7 +1320,7 @@ extension WorksheetModel {
       return .number(serial)
 
     case "WORKDAY":
-      guard frame.count == 2,
+      guard (2...3).contains(frame.count),
         let startDate = Self.parseDateValue(frame.arg(0, in: self)),
         let dNum = frame.arg(1, in: self).numericValue,
         let days = Self.safeInt(trunc(dNum))
@@ -1248,6 +1329,20 @@ extension WorksheetModel {
       }
       guard abs(days) <= 100_000 else {
         return .error("#NUM!")
+      }
+      var holidayDates = Set<Date>()
+      if frame.count == 3, frame.args[2] != .empty {
+        switch frame.resolve(2..<3, in: self) {
+        case .failure(let err):
+          return .error(err)
+        case .success(let hVals):
+          for hVal in hVals where hVal != .empty {
+            guard let hDate = Self.parseDateValue(hVal) else {
+              return .error("#VALUE!")
+            }
+            holidayDates.insert(hDate)
+          }
+        }
       }
       var current = startDate
       var remaining = abs(days)
@@ -1258,7 +1353,7 @@ extension WorksheetModel {
         }
         current = next
         let wd = Self.utcCalendar.component(.weekday, from: current)
-        if wd != 1 && wd != 7 {
+        if wd != 1 && wd != 7 && !holidayDates.contains(current) {
           remaining -= 1
         }
       }
@@ -1268,11 +1363,25 @@ extension WorksheetModel {
       return .number(serial)
 
     case "NETWORKDAYS":
-      guard frame.count == 2,
+      guard (2...3).contains(frame.count),
         let startDate = Self.parseDateValue(frame.arg(0, in: self)),
         let endDate = Self.parseDateValue(frame.arg(1, in: self))
       else {
         return .error("#VALUE!")
+      }
+      var holidayDates = Set<Date>()
+      if frame.count == 3, frame.args[2] != .empty {
+        switch frame.resolve(2..<3, in: self) {
+        case .failure(let err):
+          return .error(err)
+        case .success(let hVals):
+          for hVal in hVals where hVal != .empty {
+            guard let hDate = Self.parseDateValue(hVal) else {
+              return .error("#VALUE!")
+            }
+            holidayDates.insert(hDate)
+          }
+        }
       }
       let isReverse = startDate > endDate
       let fromDate = isReverse ? endDate : startDate
@@ -1286,7 +1395,7 @@ extension WorksheetModel {
       var count = 0
       while current <= toDate {
         let wd = Self.utcCalendar.component(.weekday, from: current)
-        if wd != 1 && wd != 7 {
+        if wd != 1 && wd != 7 && !holidayDates.contains(current) {
           count += 1
         }
         guard let next = Self.utcCalendar.date(byAdding: .day, value: 1, to: current) else {

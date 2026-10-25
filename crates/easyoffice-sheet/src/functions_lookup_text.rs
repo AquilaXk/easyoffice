@@ -57,16 +57,25 @@ impl SheetEngine {
                                     .map_err(|_| FormulaError::Ref)?;
                                 return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
                             }
-                        } else if same_type(&kv, &lookup_val) {
-                            if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
-                                if ord.is_le() {
-                                    let replace = match &best {
-                                        None => true,
-                                        Some((_, prev)) => Self::compare_excel_values(&kv, prev)
-                                            .is_some_and(|o| o.is_ge()),
-                                    };
-                                    if replace {
-                                        best = Some((r_off as u32, kv));
+                        } else {
+                            if Self::values_match(&kv, &lookup_val) {
+                                let rc = PackedCellCoordinate::new(min_r + r_off as u32, target_c)
+                                    .map_err(|_| FormulaError::Ref)?;
+                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
+                            }
+                            if same_type(&kv, &lookup_val) {
+                                if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
+                                    if ord.is_le() {
+                                        let replace = match &best {
+                                            None => true,
+                                            Some((_, prev)) => {
+                                                Self::compare_excel_values(&kv, prev)
+                                                    .is_some_and(|o| o.is_ge())
+                                            }
+                                        };
+                                        if replace {
+                                            best = Some((r_off as u32, kv));
+                                        }
                                     }
                                 }
                             }
@@ -93,16 +102,25 @@ impl SheetEngine {
                                     .map_err(|_| FormulaError::Ref)?;
                                 return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
                             }
-                        } else if same_type(&kv, &lookup_val) {
-                            if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
-                                if ord.is_le() {
-                                    let replace = match &best {
-                                        None => true,
-                                        Some((_, prev)) => Self::compare_excel_values(&kv, prev)
-                                            .is_some_and(|o| o.is_ge()),
-                                    };
-                                    if replace {
-                                        best = Some((c_off as u32, kv));
+                        } else {
+                            if Self::values_match(&kv, &lookup_val) {
+                                let rc = PackedCellCoordinate::new(target_r, min_c + c_off as u32)
+                                    .map_err(|_| FormulaError::Ref)?;
+                                return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
+                            }
+                            if same_type(&kv, &lookup_val) {
+                                if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
+                                    if ord.is_le() {
+                                        let replace = match &best {
+                                            None => true,
+                                            Some((_, prev)) => {
+                                                Self::compare_excel_values(&kv, prev)
+                                                    .is_some_and(|o| o.is_ge())
+                                            }
+                                        };
+                                        if replace {
+                                            best = Some((c_off as u32, kv));
+                                        }
                                     }
                                 }
                             }
@@ -235,15 +253,43 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let total_len = lookup_arr.len();
+                let mut best_approx: Option<(usize, EvaluatedCellValue)> = None;
                 for step in 0..total_len {
                     let idx = if search_mode < 0 {
                         total_len - 1 - step
                     } else {
                         step
                     };
-                    if cell_matches(&lookup_arr[idx]) {
+                    let k = &lookup_arr[idx];
+                    if cell_matches(k) {
                         return Ok(return_arr[idx].clone());
                     }
+                    if (match_mode == -1 || match_mode == 1) && same_type(k, &lookup_val) {
+                        if let Some(ord) = Self::compare_excel_values(k, &lookup_val) {
+                            if match_mode == -1 && ord.is_lt() {
+                                let replace = match &best_approx {
+                                    None => true,
+                                    Some((_, prev)) => Self::compare_excel_values(k, prev)
+                                        .is_some_and(|o| o.is_gt()),
+                                };
+                                if replace {
+                                    best_approx = Some((idx, k.clone()));
+                                }
+                            } else if match_mode == 1 && ord.is_gt() {
+                                let replace = match &best_approx {
+                                    None => true,
+                                    Some((_, prev)) => Self::compare_excel_values(k, prev)
+                                        .is_some_and(|o| o.is_lt()),
+                                };
+                                if replace {
+                                    best_approx = Some((idx, k.clone()));
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some((best_idx, _)) = best_approx {
+                    return Ok(return_arr[best_idx].clone());
                 }
                 if args.len() >= 4 {
                     Ok(self.eval_expr_ctx(&args[3], ctx, depth))
@@ -271,19 +317,37 @@ impl SheetEngine {
                 } else {
                     (orig_rows, orig_cols)
                 };
-                if row_num < 1
-                    || col_num < 1
-                    || (row_num as usize) > rows
-                    || (col_num as usize) > cols
-                {
-                    return Err(FormulaError::Ref);
-                }
                 let min_r = range.start.row().min(range.end.row());
                 let min_c = range.start.col().min(range.end.col());
-                let (r_off, c_off) = if transposed {
-                    (col_num as u32 - 1, row_num as u32 - 1)
+                let (eff_r, eff_c) = if args.len() == 2
+                    && rows == 1
+                    && cols > 1
+                    && row_num >= 1
+                    && (row_num as usize) <= cols
+                {
+                    (1isize, row_num)
+                } else if args.len() == 3
+                    && row_num == 0
+                    && col_num >= 1
+                    && (col_num as usize) <= cols
+                {
+                    (1isize, col_num)
+                } else if args.len() == 3
+                    && col_num == 0
+                    && row_num >= 1
+                    && (row_num as usize) <= rows
+                {
+                    (row_num, 1isize)
                 } else {
-                    (row_num as u32 - 1, col_num as u32 - 1)
+                    (row_num, col_num)
+                };
+                if eff_r < 1 || eff_c < 1 || (eff_r as usize) > rows || (eff_c as usize) > cols {
+                    return Err(FormulaError::Ref);
+                }
+                let (r_off, c_off) = if transposed {
+                    (eff_c as u32 - 1, eff_r as u32 - 1)
+                } else {
+                    (eff_r as u32 - 1, eff_c as u32 - 1)
                 };
                 let coord = PackedCellCoordinate::new(min_r + r_off, min_c + c_off)
                     .map_err(|_| FormulaError::Ref)?;

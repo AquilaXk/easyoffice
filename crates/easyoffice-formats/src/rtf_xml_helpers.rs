@@ -289,7 +289,89 @@ pub fn decode_utf16le_vec_baseline(bytes: &[u8]) -> Result<String, EasyOfficeErr
 }
 
 #[inline]
+pub const fn expand_ascii4_to_utf16le_u64(four_bytes: u32) -> u64 {
+    let mut x = four_bytes as u64;
+    x = (x | (x << 16)) & 0x0000_FFFF_0000_FFFF;
+    x = (x | (x << 8)) & 0x00FF_00FF_00FF_00FF;
+    x
+}
+
+#[inline]
+pub fn encode_utf16le_swar_into(text: &str, out: &mut Vec<u8>) {
+    out.reserve(text.len() * 2);
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0usize;
+    let mut u16_buf = [0u16; 2];
+
+    while pos + 8 <= len {
+        let word = u64::from_le_bytes([
+            bytes[pos],
+            bytes[pos + 1],
+            bytes[pos + 2],
+            bytes[pos + 3],
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]);
+        if (word & 0x8080_8080_8080_8080) == 0 {
+            let lo = expand_ascii4_to_utf16le_u64(word as u32);
+            let hi = expand_ascii4_to_utf16le_u64((word >> 32) as u32);
+            out.extend_from_slice(&lo.to_le_bytes());
+            out.extend_from_slice(&hi.to_le_bytes());
+            pos += 8;
+        } else if ((word as u32) & 0x8080_8080) == 0 {
+            let lo = expand_ascii4_to_utf16le_u64(word as u32);
+            out.extend_from_slice(&lo.to_le_bytes());
+            pos += 4;
+        } else if bytes[pos] < 0x80 {
+            out.extend_from_slice(&[bytes[pos], 0]);
+            pos += 1;
+        } else if let Some(ch) = text[pos..].chars().next() {
+            for u in ch.encode_utf16(&mut u16_buf) {
+                out.extend_from_slice(&u.to_le_bytes());
+            }
+            pos += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    if pos + 4 <= len {
+        let word4 =
+            u32::from_le_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]]);
+        if (word4 & 0x8080_8080) == 0 {
+            let lo = expand_ascii4_to_utf16le_u64(word4);
+            out.extend_from_slice(&lo.to_le_bytes());
+            pos += 4;
+        }
+    }
+
+    while pos < len {
+        if bytes[pos] < 0x80 {
+            out.extend_from_slice(&[bytes[pos], 0]);
+            pos += 1;
+        } else if let Some(ch) = text[pos..].chars().next() {
+            for u in ch.encode_utf16(&mut u16_buf) {
+                out.extend_from_slice(&u.to_le_bytes());
+            }
+            pos += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+}
+
+#[inline]
 pub fn encode_utf16le_swar(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len() * 2);
+    encode_utf16le_swar_into(text, &mut out);
+    out
+}
+
+/// Baseline scalar `encode_utf16()` UTF-16LE encoder retained for benchmark verification.
+pub fn encode_utf16le_scalar_baseline(text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len() * 2);
     for u in text.encode_utf16() {
         out.extend_from_slice(&u.to_le_bytes());
@@ -393,9 +475,12 @@ pub(crate) fn decode_utf16le(bytes: &[u8]) -> Result<String, EasyOfficeError> {
 }
 
 pub(crate) fn append_len_prefixed_utf16le(buf: &mut Vec<u8>, text: &str) {
-    let bytes = encode_utf16le_swar(text);
-    buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&bytes);
+    let len_pos = buf.len();
+    buf.extend_from_slice(&0u32.to_le_bytes());
+    let start_pos = buf.len();
+    encode_utf16le_swar_into(text, buf);
+    let byte_len = (buf.len() - start_pos) as u32;
+    buf[len_pos..len_pos + 4].copy_from_slice(&byte_len.to_le_bytes());
 }
 
 pub(crate) fn read_len_prefixed_utf16le(
@@ -905,5 +990,32 @@ mod tests {
         assert_eq!(parse_a1_ZeroBased("A1048577"), None);
         assert_eq!(parse_a1_ZeroBased("AAAA1"), None);
         assert_eq!(parse_a1_ZeroBased("ZZZZZZZZZZ999999999999"), None);
+    }
+
+    #[test]
+    fn test_encode_utf16le_swar_morton_and_backpatch() {
+        let samples = [
+            "",
+            "A",
+            "ABCD",
+            "ABCDEFGH",
+            "ABCDEFGHIJKLM",
+            "EasyOffice ASCII 0123456789!@#$%^&*()",
+            "한글과 ASCII Mixed 12345678 가나다라마바사 🚀🎉",
+            "ABCD한글EFGH🎉IJKL",
+        ];
+        let mut buf = Vec::new();
+        for s in samples {
+            let swar = encode_utf16le_swar(s);
+            let scalar = encode_utf16le_scalar_baseline(s);
+            assert_eq!(swar, scalar, "mismatch for sample: {s}");
+            append_len_prefixed_utf16le(&mut buf, s);
+        }
+        let mut cursor = 0usize;
+        for s in samples {
+            let decoded = read_len_prefixed_utf16le(&buf, &mut cursor, buf.len()).unwrap();
+            assert_eq!(decoded, s);
+        }
+        assert_eq!(cursor, buf.len());
     }
 }

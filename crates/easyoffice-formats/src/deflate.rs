@@ -500,9 +500,13 @@ fn decode_huffman_block(
                 let start = out.len() - distance;
                 out.extend_from_within(start..start + match_len);
             } else {
-                for _ in 0..match_len {
-                    let b = out[out.len() - distance];
-                    out.push(b);
+                let base_start = out.len() - distance;
+                let mut remaining = match_len;
+                while remaining > 0 {
+                    let avail = out.len() - base_start;
+                    let step = remaining.min(avail);
+                    out.extend_from_within(base_start..base_start + step);
+                    remaining -= step;
                 }
             }
         } else {
@@ -594,12 +598,18 @@ pub fn adler32(bytes: &[u8]) -> u32 {
 
     for chunk in bytes.chunks(ADLER_NMAX) {
         let mut i = 0usize;
-        while i + 16 <= chunk.len() {
-            for k in 0..16 {
-                s1 += u32::from(chunk[i + k]);
-                s2 += s1;
-            }
-            i += 16;
+        while i + 8 <= chunk.len() {
+            let b0 = u32::from(chunk[i]);
+            let b1 = u32::from(chunk[i + 1]);
+            let b2 = u32::from(chunk[i + 2]);
+            let b3 = u32::from(chunk[i + 3]);
+            let b4 = u32::from(chunk[i + 4]);
+            let b5 = u32::from(chunk[i + 5]);
+            let b6 = u32::from(chunk[i + 6]);
+            let b7 = u32::from(chunk[i + 7]);
+            s2 += 8 * s1 + 8 * b0 + 7 * b1 + 6 * b2 + 5 * b3 + 4 * b4 + 3 * b5 + 2 * b6 + b7;
+            s1 += b0 + b1 + b2 + b3 + b4 + b5 + b6 + b7;
+            i += 8;
         }
         while i < chunk.len() {
             s1 += u32::from(chunk[i]);
@@ -774,7 +784,8 @@ pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
     }
 
     let mut head = [-1i32; HASH_SIZE];
-    let mut prev = vec![-1i32; input.len()];
+    let mut prev = [-1i32; WINDOW_SIZE];
+    let window_mask = WINDOW_SIZE - 1;
     let mut pos = 0usize;
 
     while pos < input.len() {
@@ -783,9 +794,8 @@ pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
 
         if pos + MIN_MATCH_LEN <= input.len() {
             let h = hash3(input, pos);
-            let mut candidate = head[h];
-            prev[pos] = candidate;
-            head[h] = pos as i32;
+            let first_candidate = head[h];
+            let mut candidate = first_candidate;
 
             let max_len = (input.len() - pos).min(MAX_MATCH_LEN);
             let min_pos = pos.saturating_sub(WINDOW_SIZE);
@@ -825,9 +835,16 @@ pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
                         }
                     }
                 }
-                candidate = prev[c_pos];
+                let next_cand = prev[c_pos & window_mask];
+                if next_cand >= candidate {
+                    break;
+                }
+                candidate = next_cand;
                 chain_steps += 1;
             }
+
+            prev[pos & window_mask] = first_candidate;
+            head[h] = pos as i32;
         }
 
         if best_len >= MIN_MATCH_LEN {
@@ -849,7 +866,7 @@ pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
                 let adv = pos + step;
                 if adv + MIN_MATCH_LEN <= input.len() {
                     let h = hash3(input, adv);
-                    prev[adv] = head[h];
+                    prev[adv & window_mask] = head[h];
                     head[h] = adv as i32;
                 }
             }
@@ -918,5 +935,31 @@ mod tests {
         assert!(compressed_zeros.len() * 100 < sparse_zeros.len());
         let inflated_zeros = inflate_raw(&compressed_zeros, 65_536).unwrap();
         assert_eq!(inflated_zeros, sparse_zeros);
+    }
+
+    #[test]
+    fn test_deflate_ring_buffer_overlap_doubling_and_adler32_chunks() {
+        for period in [2usize, 3, 5, 7, 13] {
+            let pattern: Vec<u8> = (0..period).map(|i| b'A' + (i as u8)).collect();
+            let repeated = pattern.repeat(300);
+            let compressed = deflate_raw(&repeated);
+            let decompressed = inflate_raw(&compressed, repeated.len() + 64).unwrap();
+            assert_eq!(decompressed, repeated);
+        }
+
+        let multi_window: Vec<u8> = (0..100_000usize)
+            .map(|i| ((i * 31 + (i >> 7)) & 0x7F) as u8)
+            .collect();
+        let z = deflate_zlib(&multi_window);
+        let roundtrip = inflate_zlib(&z, 200_000).unwrap();
+        assert_eq!(roundtrip, multi_window);
+
+        let mut s1 = 1u32;
+        let mut s2 = 0u32;
+        for &b in &multi_window {
+            s1 = (s1 + u32::from(b)) % ADLER_MOD;
+            s2 = (s2 + s1) % ADLER_MOD;
+        }
+        assert_eq!(adler32(&multi_window), (s2 << 16) | s1);
     }
 }

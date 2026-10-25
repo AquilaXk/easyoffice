@@ -667,4 +667,62 @@ final class StandardCodecInteroperabilityTests: XCTestCase {
     XCTAssertEqual(scrubbedSheet.evaluate(at: "A1"), .text("[연락처 비식별]"))
     XCTAssertEqual(scrubbedSheet.evaluate(at: "B1"), .text("[연락처 비식별]"))
   }
+
+  func testBitLevelMortonUTF16LESWARAndXMLSanitizerSWARContinuation() throws {
+    let asciiText = "EasyOffice_SWAR_Morton_Interleave_2026_Test_0123456789!"
+    let encodedASCII = BitPacking.encodeUTF16LE(asciiText)
+    XCTAssertEqual(encodedASCII.count, asciiText.utf16.count * 2)
+    let decodedASCII = try BitPacking.decodeUTF16LE(
+      from: encodedASCII,
+      at: 0,
+      byteLength: encodedASCII.count
+    )
+    XCTAssertEqual(decodedASCII, asciiText)
+
+    let mixedText = "StandardPrefix_한글과_이모지_😀_Suffix_0123456789"
+    var packet = Data([0xAA, 0xBB])
+    BitPacking.appendLengthPrefixedUTF16LE(mixedText, to: &packet)
+    var readOffset = 2
+    let decodedMixed = try BitPacking.readLengthPrefixedUTF16LE(from: packet, offset: &readOffset)
+    XCTAssertEqual(decodedMixed, mixedText)
+    XCTAssertEqual(readOffset, packet.count)
+
+    let xmlInput = "<tag attr=\"val\">" + String(repeating: "PlainBodyText1234", count: 16) + "&tail</tag>"
+    let escaped = XMLSanitizer.escape(xmlInput)
+    XCTAssertTrue(escaped.hasPrefix("&lt;tag attr=&quot;val&quot;&gt;PlainBodyText1234"))
+    XCTAssertTrue(escaped.hasSuffix("&amp;tail&lt;/tag&gt;"))
+  }
+
+  func testBIFF8ExtendedMetadataChunkingOver64KBAndFinancialWorkdayParity() throws {
+    var largeSheet = WorksheetModel(name: "PrimarySheet")
+    try largeSheet.setCell("A1", rawValue: "헤더")
+    let paddingNotes = String(repeating: "가나다라마바사아자차카타파하_0123456789_", count: 1500)
+    largeSheet.addSheetPage(
+      named: "SecondSheetOver64KB",
+      initialCells: [
+        PackedCellCoordinate(row: 0, column: 0): paddingNotes,
+        PackedCellCoordinate(row: 1, column: 0): "보존검증",
+      ]
+    )
+    let xlsBytes = try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(largeSheet)
+    let roundtripped = try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: xlsBytes)
+    XCTAssertEqual(roundtripped.allSheetNames, ["PrimarySheet", "SecondSheetOver64KB"])
+    var switched = roundtripped
+    switched.switchActiveSheet(to: 1)
+    XCTAssertEqual(switched.rawValue(at: "A2"), "보존검증")
+    XCTAssertEqual(switched.rawValue(at: "A1").count, paddingNotes.count)
+
+    var finSheet = WorksheetModel(name: "FinAndDate")
+    try finSheet.setCell("A1", rawValue: "2026-05-01")
+    try finSheet.setCell("A2", rawValue: "2026-05-05")
+    try finSheet.setCell("B1", rawValue: "=WORKDAY(\"2026-04-30\", 2, A1:A2)")
+    try finSheet.setCell("B2", rawValue: "=NETWORKDAYS(\"2026-04-30\", \"2026-05-06\", A1:A2)")
+    try finSheet.setCell("C1", rawValue: "-1000")
+    try finSheet.setCell("C2", rawValue: "0")
+    try finSheet.setCell("C3", rawValue: "1210")
+    try finSheet.setCell("C4", rawValue: "=IRR(C1:C3, -0.5)")
+    XCTAssertEqual(finSheet.evaluate(at: "B1"), .number(46148.0))
+    XCTAssertEqual(finSheet.evaluate(at: "B2"), .number(3.0))
+    XCTAssertEqual(finSheet.evaluate(at: "C4").numericValue ?? 0.0, 0.10, accuracy: 1e-3)
+  }
 }

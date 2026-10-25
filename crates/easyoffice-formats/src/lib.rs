@@ -14,7 +14,8 @@ pub use deflate::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use rtf_xml_helpers::{
-    decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_swar,
+    decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_scalar_baseline,
+    encode_utf16le_swar, encode_utf16le_swar_into, expand_ascii4_to_utf16le_u64,
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload, SectorBitset,
 };
 pub use text_pdf_codecs::*;

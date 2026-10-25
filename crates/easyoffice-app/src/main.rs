@@ -28,8 +28,19 @@ fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
                 'n' => out.push('\n'),
                 'r' => out.push('\r'),
                 't' => out.push('\t'),
+                'b' => out.push('\u{0008}'),
+                'f' => out.push('\u{000C}'),
                 '"' => out.push('"'),
+                '/' => out.push('/'),
                 '\\' => out.push('\\'),
+                'u' => {
+                    let mut hex = String::with_capacity(4);
+                    for _ in 0..4 {
+                        hex.push(chars.next()?);
+                    }
+                    let code = u32::from_str_radix(&hex, 16).ok()?;
+                    out.push(char::from_u32(code)?);
+                }
                 other => out.push(other),
             }
         } else if ch == '"' {
@@ -92,11 +103,18 @@ fn handle_http_connection(mut stream: TcpStream, port: u16) {
         if let Some((k, v)) = line.split_once(':') {
             let key = k.trim();
             if key.eq_ignore_ascii_case("content-length") {
-                content_length = v
-                    .trim()
-                    .parse::<usize>()
-                    .unwrap_or(0)
-                    .min(MAX_HTTP_BODY_BYTES);
+                let raw_len = v.trim().parse::<usize>().unwrap_or(0);
+                if raw_len > MAX_HTTP_BODY_BYTES {
+                    let body = "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(256KB)를 초과했습니다.\"}";
+                    let resp = format!(
+                        "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(resp.as_bytes());
+                    let _ = stream.flush();
+                    return;
+                }
+                content_length = raw_len;
             } else if key.eq_ignore_ascii_case("host") {
                 host_header = Some(v.trim().to_string());
             } else if key.eq_ignore_ascii_case("origin") {
@@ -264,5 +282,27 @@ fn main() -> ExitCode {
             eprintln!("Bootstrap error: {err}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_json_string_field_unicode_escapes_and_host_origin_guards() {
+        let json = r#"{"command":"evaluate_sheet","payload":"\uAC00\uB098\uB2E4\/A1=10\nB1=20"}"#;
+        assert_eq!(
+            extract_json_string_field(json, "command").as_deref(),
+            Some("evaluate_sheet")
+        );
+        assert_eq!(
+            extract_json_string_field(json, "payload").as_deref(),
+            Some("가나다/A1=10\nB1=20")
+        );
+        assert!(is_allowed_host("127.0.0.1:8787", 8787));
+        assert!(!is_allowed_host("evil.example.com", 8787));
+        assert!(is_allowed_origin("http://localhost:8787/", 8787));
+        assert!(!is_allowed_origin("http://evil.example.com", 8787));
     }
 }

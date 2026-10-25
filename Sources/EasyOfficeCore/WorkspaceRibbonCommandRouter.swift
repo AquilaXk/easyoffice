@@ -164,10 +164,10 @@ extension WorkspaceViewModel {
       lastExecutedCommandSummary = "자동 목차(TOC) 생성 완료"
       return
 
-    case "doc-mod-footnote":
+    case "doc-mod-footnote", "doc-insert-footnote":
       recordUndoSnapshot(for: tabID)
       if case .document(var doc) = openTabs[idx].payload {
-        let anchorID = doc.paragraphs.last?.id ?? UUID()
+        let anchorID = selectedParagraphID ?? doc.paragraphs.last?.id ?? UUID()
         let nextNum = doc.footnotes.count + 1
         doc.footnotes.append(
           FootnoteItem(
@@ -579,9 +579,24 @@ extension WorkspaceViewModel {
         }
       } else {
         switch action {
-        case .bold: doc.paragraphs[pIdx].isBold.toggle()
-        case .italic: doc.paragraphs[pIdx].isItalic.toggle()
-        case .underline: doc.paragraphs[pIdx].isUnderlined.toggle()
+        case .bold:
+          doc.paragraphs[pIdx].isBold.toggle()
+          let nextVal = doc.paragraphs[pIdx].isBold
+          for rIdx in doc.paragraphs[pIdx].runs.indices {
+            doc.paragraphs[pIdx].runs[rIdx].isBold = nextVal
+          }
+        case .italic:
+          doc.paragraphs[pIdx].isItalic.toggle()
+          let nextVal = doc.paragraphs[pIdx].isItalic
+          for rIdx in doc.paragraphs[pIdx].runs.indices {
+            doc.paragraphs[pIdx].runs[rIdx].isItalic = nextVal
+          }
+        case .underline:
+          doc.paragraphs[pIdx].isUnderlined.toggle()
+          let nextVal = doc.paragraphs[pIdx].isUnderlined
+          for rIdx in doc.paragraphs[pIdx].runs.indices {
+            doc.paragraphs[pIdx].runs[rIdx].isUnderlined = nextVal
+          }
         case .styleCycle:
           let allStyles = ParagraphStyleRole.allCases
           let cur = doc.paragraphs[pIdx].style

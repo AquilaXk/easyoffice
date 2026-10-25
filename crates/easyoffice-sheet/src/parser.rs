@@ -76,7 +76,112 @@ pub const MAX_FORMULA_LEN: usize = 8_192;
 pub const MAX_TOKENS: usize = 2_048;
 pub const MAX_PARSE_DEPTH: usize = 64;
 
-pub(crate) fn tokenize_formula(src: &str) -> Result<Vec<Token>, FormulaError> {
+fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
+    fn split_sheet_and_cell(part: &str) -> (Option<String>, &str) {
+        let trimmed = part.trim();
+        if let Some(rest) = trimmed.strip_prefix('.') {
+            return (None, rest.trim());
+        }
+        if let Some(dot_idx) = trimmed.rfind('.') {
+            let raw_sheet = trimmed[..dot_idx].trim().trim_start_matches('$');
+            let cell_part = trimmed[dot_idx + 1..].trim();
+            if raw_sheet.is_empty() {
+                return (None, cell_part);
+            }
+            let formatted_sheet = if raw_sheet.starts_with('\'') && raw_sheet.ends_with('\'') {
+                raw_sheet.to_string()
+            } else if raw_sheet
+                .chars()
+                .any(|c| c.is_whitespace() || (!c.is_alphanumeric() && c != '_'))
+            {
+                format!("'{}'", raw_sheet.replace('\'', "''"))
+            } else {
+                raw_sheet.to_string()
+            };
+            return (Some(formatted_sheet), cell_part);
+        }
+        (None, trimmed)
+    }
+
+    if let Some((lhs, rhs)) = inner.split_once(':') {
+        let (left_sheet, left_cell) = split_sheet_and_cell(lhs);
+        let (right_sheet, right_cell) = split_sheet_and_cell(rhs);
+        if let Some(sheet) = left_sheet.or(right_sheet) {
+            return format!("{sheet}!{left_cell}:{right_cell}");
+        }
+        return format!("{left_cell}:{right_cell}");
+    }
+
+    let (sheet, cell) = split_sheet_and_cell(inner);
+    if let Some(sheet) = sheet {
+        format!("{sheet}!{cell}")
+    } else {
+        cell.to_string()
+    }
+}
+
+/// Normalizes ODF OpenFormula (`of:=`, `[.A1:.B2]`, `['Sheet 1'.A1:.B2]`, `[Sheet1.A1]`) references into standard A1 syntax.
+pub fn normalize_open_formula_references(raw_src: &str) -> std::borrow::Cow<'_, str> {
+    let trimmed = raw_src.trim();
+    let stripped = if trimmed.len() >= 3 && trimmed[..3].eq_ignore_ascii_case("of:") {
+        trimmed[3..].trim_start()
+    } else if trimmed.len() >= 5 && trimmed[..5].eq_ignore_ascii_case("oooc:") {
+        trimmed[5..].trim_start()
+    } else if trimmed.len() >= 6 && trimmed[..6].eq_ignore_ascii_case("msoxl:") {
+        trimmed[6..].trim_start()
+    } else {
+        raw_src
+    };
+    let stripped = stripped.strip_prefix('=').unwrap_or(stripped);
+    if !stripped.contains('[')
+        && stripped.as_ptr() == raw_src.as_ptr()
+        && stripped.len() == raw_src.len()
+    {
+        return std::borrow::Cow::Borrowed(raw_src);
+    }
+
+    let mut out = String::with_capacity(stripped.len());
+    let mut in_quotes = false;
+    let mut chars = stripped.char_indices().peekable();
+    while let Some((idx, ch)) = chars.next() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            out.push(ch);
+            continue;
+        }
+        if !in_quotes && ch == '[' {
+            let start_inner = idx + ch.len_utf8();
+            let mut close_idx = None;
+            let mut in_single_quote = false;
+            while let Some(&(c_idx, c_ch)) = chars.peek() {
+                chars.next();
+                if c_ch == '\'' {
+                    in_single_quote = !in_single_quote;
+                } else if c_ch == ']' && !in_single_quote {
+                    close_idx = Some(c_idx);
+                    break;
+                }
+            }
+            if let Some(end_inner) = close_idx {
+                let inner = &stripped[start_inner..end_inner];
+                out.push_str(&normalize_bracketed_open_formula_ref(inner));
+                continue;
+            }
+            out.push('[');
+            out.push_str(&stripped[start_inner..]);
+            break;
+        }
+        out.push(ch);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+pub(crate) fn tokenize_formula(raw_src: &str) -> Result<Vec<Token>, FormulaError> {
+    if raw_src.len() > MAX_FORMULA_LEN {
+        return Err(FormulaError::Value);
+    }
+    let normalized = normalize_open_formula_references(raw_src);
+    let src: &str = normalized.as_ref();
     if src.len() > MAX_FORMULA_LEN {
         return Err(FormulaError::Value);
     }
@@ -231,7 +336,7 @@ pub(crate) fn tokenize_formula(src: &str) -> Result<Vec<Token>, FormulaError> {
                 }
                 let err = match src[start..i].to_ascii_uppercase().as_str() {
                     "#DIV/0!" => FormulaError::DivByZero,
-                    "#VALUE!" => FormulaError::Value,
+                    "#VALUE!" | "#NULL!" => FormulaError::Value,
                     "#REF!" => FormulaError::Ref,
                     "#CYCLE!" => FormulaError::Cycle,
                     "#NAME?" => FormulaError::Name,
@@ -330,7 +435,7 @@ impl Parser {
 
     fn next(&mut self) -> Option<Token> {
         if self.pos < self.tokens.len() {
-            let tok = self.tokens[self.pos].clone();
+            let tok = std::mem::replace(&mut self.tokens[self.pos], Token::Comma);
             self.pos += 1;
             Some(tok)
         } else {

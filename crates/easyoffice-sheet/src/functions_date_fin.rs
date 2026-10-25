@@ -649,12 +649,12 @@ pub(crate) fn matches_criteria(cell: &EvaluatedCellValue, crit: &EvaluatedCellVa
                     return op == "<>";
                 };
                 return match op {
-                    ">=" => lhs_num >= rhs_num - 1e-9,
-                    "<=" => lhs_num <= rhs_num + 1e-9,
-                    "<>" => (lhs_num - rhs_num).abs() >= 1e-9,
-                    ">" => lhs_num > rhs_num + 1e-9,
-                    "<" => lhs_num < rhs_num - 1e-9,
-                    _ => (lhs_num - rhs_num).abs() < 1e-9,
+                    ">=" => lhs_num >= rhs_num - 1e-12,
+                    "<=" => lhs_num <= rhs_num + 1e-12,
+                    "<>" => (lhs_num - rhs_num).abs() >= 1e-12,
+                    ">" => lhs_num > rhs_num,
+                    "<" => lhs_num < rhs_num,
+                    _ => (lhs_num - rhs_num).abs() < 1e-12,
                 };
             }
             let lhs_s = cell.to_display_string().to_lowercase();
