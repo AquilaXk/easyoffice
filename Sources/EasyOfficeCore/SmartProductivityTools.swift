@@ -700,6 +700,7 @@ public enum DocumentSecurityAuditor {
           let (masked, count) = maskSensitivePatterns(in: raw)
           if count > 0 {
             sheet.cellsByCoordinate[coord] = masked
+            sheet.compiledASTs[coord] = WorksheetModel.compileCellInput(masked)
             removedCount += count
           }
         }

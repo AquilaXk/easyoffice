@@ -838,6 +838,9 @@ extension WorksheetModel {
 
   public static func compileCellInput(_ raw: String) -> FormulaAST {
     guard !raw.isEmpty else { return .empty }
+    if raw.hasPrefix("'") {
+      return .literalText(String(raw.dropFirst()))
+    }
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmed.hasPrefix("=") else {
       if let num = Double(trimmed), num.isFinite {
@@ -865,6 +868,18 @@ extension WorksheetModel {
     guard depth <= maxFormulaParseDepth else { return .error(.value) }
     let trimmed = expr.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return .empty }
+
+    if trimmed.hasPrefix("#") {
+      switch trimmed.uppercased() {
+      case "#DIV/0!": return .error(.divByZero)
+      case "#VALUE!": return .error(.value)
+      case "#NAME?": return .error(.name)
+      case "#REF!": return .error(.ref)
+      case "#N/A": return .error(.na)
+      case "#NUM!": return .error(.num)
+      default: break
+      }
+    }
 
     if let cmpAST = compileTopLevelComparison(trimmed, depth: depth) {
       return cmpAST
@@ -1183,6 +1198,9 @@ extension WorksheetModel {
           {
             continue
           }
+          if (b == 0x2B || b == 0x2D) && isScientificNotationExponentPrefix(lhsStr) {
+            continue
+          }
           let opStr: String
           switch b {
           case 0x26: opStr = "&"
@@ -1213,6 +1231,29 @@ extension WorksheetModel {
       }
     }
     return nil
+  }
+
+  private static func isScientificNotationExponentPrefix(_ lhsStr: String) -> Bool {
+    let bytes = Array(lhsStr.utf8)
+    guard bytes.count >= 2 else { return false }
+    let last = bytes[bytes.count - 1]
+    guard last == 0x45 || last == 0x65 else { return false }
+    var idx = bytes.count - 2
+    var hasDigit = false
+    while idx >= 0 {
+      let ch = bytes[idx]
+      if ch >= 0x30 && ch <= 0x39 {
+        hasDigit = true
+        idx -= 1
+      } else if ch == 0x2E {
+        idx -= 1
+      } else {
+        let isWordChar =
+          (ch >= 0x41 && ch <= 0x5A) || (ch >= 0x61 && ch <= 0x7A) || ch == 0x5F || ch == 0x24
+        return hasDigit && !isWordChar
+      }
+    }
+    return hasDigit
   }
 
   private static func matchingCloseIndex(in text: String, openAt: String.Index) -> String.Index? {

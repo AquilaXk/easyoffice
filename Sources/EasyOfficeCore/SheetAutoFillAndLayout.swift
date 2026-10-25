@@ -837,13 +837,12 @@ extension WorksheetModel {
     for (coord, rawVal) in cellsByCoordinate {
       let targetRow = oldToNewRow[coord.row] ?? coord.row
       let rowDelta = targetRow - coord.row
-      let adjustedVal: String
-      if rowDelta != 0 && rawVal.hasPrefix("=") {
-        adjustedVal = Self.shiftFormulaReferences(rawVal, rowDelta: rowDelta, columnDelta: 0)
+      if rowDelta != 0 && rawVal.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("=") {
+        nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] =
+          Self.shiftFormulaReferences(rawVal, rowDelta: rowDelta, columnDelta: 0)
       } else {
-        adjustedVal = rawVal
+        nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = rawVal
       }
-      nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = adjustedVal
     }
     cellsByCoordinate = nextCells
 
@@ -979,18 +978,19 @@ extension WorksheetModel {
     for r in 0...upperRow {
       let coord = PackedCellCoordinate(row: r, column: column)
       guard let raw = cellsByCoordinate[coord],
-        !raw.hasPrefix("="),
+        !raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("="),
         raw.contains(delimiter)
       else {
         continue
       }
       let parts = raw.components(separatedBy: delimiter).map {
-        $0.trimmingCharacters(in: .whitespaces)
+        $0.trimmingCharacters(in: .whitespacesAndNewlines)
       }
       guard parts.count > 1 else { continue }
       for (offset, part) in parts.enumerated()
       where column + offset <= CellAddress.maxZeroBasedColumn {
-        cellsByCoordinate[PackedCellCoordinate(row: r, column: column + offset)] = part
+        let safePart = part.hasPrefix("=") ? ("'" + part) : part
+        cellsByCoordinate[PackedCellCoordinate(row: r, column: column + offset)] = safePart
       }
       splitRowCount += 1
     }
