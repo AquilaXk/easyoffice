@@ -490,22 +490,52 @@ pub(crate) fn format_col_letters(col: u32) -> String {
     chars.into_iter().rev().collect()
 }
 
-#[allow(non_snake_case)]
-pub(crate) fn parse_a1_ZeroBased(a1: &str) -> Option<(u32, u32)> {
+pub(crate) fn parse_a1_zero_based(a1: &str) -> Option<(u32, u32)> {
+    let trimmed = a1.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
     let mut col: u32 = 0;
     let mut row: u32 = 0;
-    for b in a1.bytes() {
+    let mut letter_count = 0usize;
+    let mut digit_count = 0usize;
+    for b in trimmed.bytes() {
+        if b == b'$' {
+            continue;
+        }
         if b.is_ascii_alphabetic() {
-            col = col * 26 + ((b.to_ascii_uppercase() - b'A') as u32 + 1);
+            if digit_count > 0 || letter_count >= 3 {
+                return None;
+            }
+            letter_count += 1;
+            let digit = (b.to_ascii_uppercase() - b'A') as u32 + 1;
+            col = col.checked_mul(26)?.checked_add(digit)?;
         } else if b.is_ascii_digit() {
-            row = row * 10 + ((b - b'0') as u32);
+            if letter_count == 0 {
+                return None;
+            }
+            digit_count += 1;
+            row = row.checked_mul(10)?.checked_add((b - b'0') as u32)?;
+        } else {
+            return None;
         }
     }
-    if col > 0 && row > 0 {
-        Some((row - 1, col - 1))
+    if letter_count == 0 || digit_count == 0 || col == 0 || row == 0 {
+        return None;
+    }
+    let row0 = row - 1;
+    let col0 = col - 1;
+    if row0 <= 1_048_575 && col0 <= 16_383 {
+        Some((row0, col0))
     } else {
         None
     }
+}
+
+#[allow(non_snake_case)]
+#[inline]
+pub(crate) fn parse_a1_ZeroBased(a1: &str) -> Option<(u32, u32)> {
+    parse_a1_zero_based(a1)
 }
 
 pub(crate) fn extract_between<'a>(src: &'a str, start_pat: &str, end_pat: &str) -> Option<&'a str> {
@@ -515,45 +545,90 @@ pub(crate) fn extract_between<'a>(src: &'a str, start_pat: &str, end_pat: &str) 
 }
 
 #[inline]
-fn find_open_tag_prefix(bytes: &[u8], tag_bytes: &[u8]) -> Option<usize> {
+fn is_xml_ws(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+}
+
+#[inline]
+fn is_tag_name_boundary(b: u8) -> bool {
+    matches!(b, b'>' | b'/' | b' ' | b'\t' | b'\n' | b'\r')
+}
+
+#[inline]
+fn is_self_closing_open_tag(bytes: &[u8], after_tag: usize, gt_pos: usize) -> bool {
+    let mut p = gt_pos;
+    while p > after_tag && is_xml_ws(bytes[p - 1]) {
+        p -= 1;
+    }
+    p > after_tag && bytes[p - 1] == b'/'
+}
+
+#[inline]
+fn find_valid_open_tag(bytes: &[u8], start: usize, tag_bytes: &[u8]) -> Option<(usize, usize)> {
     let need = 1 + tag_bytes.len();
-    let mut pos = 0usize;
-    while pos + need <= bytes.len() {
+    let mut pos = start;
+    while pos + need < bytes.len() {
         let lt = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'<')?;
-        if lt + need > bytes.len() {
+        let after_tag = lt + need;
+        if after_tag >= bytes.len() {
             return None;
         }
-        if &bytes[lt + 1..lt + need] == tag_bytes {
-            return Some(lt);
+        if &bytes[lt + 1..after_tag] == tag_bytes && is_tag_name_boundary(bytes[after_tag]) {
+            let gt_pos = crate::XmlSanitizer::find_byte_swar(bytes, after_tag, b'>')?;
+            return Some((lt, gt_pos));
         }
         pos = lt + 1;
     }
     None
 }
 
-#[inline]
-fn find_close_tag(bytes: &[u8], tag_bytes: &[u8]) -> Option<usize> {
-    let need = 3 + tag_bytes.len();
-    let mut pos = 0usize;
-    while pos + need <= bytes.len() {
-        let lt = crate::XmlSanitizer::find_byte_swar(bytes, pos, b'<')?;
-        if lt + need > bytes.len() {
-            return None;
-        }
-        if bytes[lt + 1] == b'/'
-            && &bytes[lt + 2..lt + 2 + tag_bytes.len()] == tag_bytes
-            && bytes[lt + 2 + tag_bytes.len()] == b'>'
+fn find_matching_close_tag(
+    bytes: &[u8],
+    body_start: usize,
+    tag_bytes: &[u8],
+) -> Option<(usize, usize)> {
+    let open_prefix_len = 1 + tag_bytes.len();
+    let close_prefix_len = 2 + tag_bytes.len();
+    let mut depth = 1usize;
+    let mut scan = body_start;
+
+    while scan < bytes.len() {
+        let lt = crate::XmlSanitizer::find_byte_swar(bytes, scan, b'<')?;
+        if lt + close_prefix_len < bytes.len()
+            && bytes[lt + 1] == b'/'
+            && &bytes[lt + 2..lt + close_prefix_len] == tag_bytes
         {
-            return Some(lt);
+            let after_close_name = lt + close_prefix_len;
+            if bytes[after_close_name] == b'>' || is_xml_ws(bytes[after_close_name]) {
+                let close_gt = crate::XmlSanitizer::find_byte_swar(bytes, after_close_name, b'>')?;
+                depth -= 1;
+                if depth == 0 {
+                    return Some((lt, close_gt + 1));
+                }
+                scan = close_gt + 1;
+                continue;
+            }
         }
-        pos = lt + 1;
+        if lt + open_prefix_len < bytes.len()
+            && &bytes[lt + 1..lt + open_prefix_len] == tag_bytes
+            && is_tag_name_boundary(bytes[lt + open_prefix_len])
+        {
+            let after_open_name = lt + open_prefix_len;
+            let open_gt = crate::XmlSanitizer::find_byte_swar(bytes, after_open_name, b'>')?;
+            if !is_self_closing_open_tag(bytes, after_open_name, open_gt) {
+                depth += 1;
+            }
+            scan = open_gt + 1;
+            continue;
+        }
+        scan = lt + 1;
     }
     None
 }
 
 pub(crate) fn extract_attr(xml: &str, tag_prefix: &str, attr_name: &str) -> Option<String> {
     let tag_start = xml.find(tag_prefix)?;
-    let rest = &xml[tag_start..];
+    let rest = &xml[tag_start + tag_prefix.len()..];
     let tag_end = crate::XmlSanitizer::find_byte_swar(rest.as_bytes(), 0, b'>')?;
     extract_attr_from_fragment(&rest[..tag_end], attr_name)
 }
@@ -561,7 +636,7 @@ pub(crate) fn extract_attr(xml: &str, tag_prefix: &str, attr_name: &str) -> Opti
 pub(crate) fn extract_attr_from_fragment(fragment: &str, attr_name: &str) -> Option<String> {
     let frag_bytes = fragment.as_bytes();
     let attr_bytes = attr_name.as_bytes();
-    let need_len = attr_bytes.len() + 2;
+    let need_len = attr_bytes.len() + 3;
     if frag_bytes.len() < need_len || attr_bytes.is_empty() {
         return None;
     }
@@ -574,13 +649,27 @@ pub(crate) fn extract_attr_from_fragment(fragment: &str, attr_name: &str) -> Opt
         if idx + need_len > frag_bytes.len() {
             break;
         }
-        if &frag_bytes[idx..idx + attr_bytes.len()] == attr_bytes
-            && frag_bytes[idx + attr_bytes.len()] == b'='
-            && frag_bytes[idx + attr_bytes.len() + 1] == b'"'
-        {
-            let val_start = idx + need_len;
-            let val_end = crate::XmlSanitizer::find_byte_swar(frag_bytes, val_start, b'"')?;
-            return Some(fragment[val_start..val_end].to_string());
+        let valid_boundary = idx == 0 || is_xml_ws(frag_bytes[idx - 1]);
+        if valid_boundary && &frag_bytes[idx..idx + attr_bytes.len()] == attr_bytes {
+            let mut eq_pos = idx + attr_bytes.len();
+            while eq_pos < frag_bytes.len() && is_xml_ws(frag_bytes[eq_pos]) {
+                eq_pos += 1;
+            }
+            if eq_pos < frag_bytes.len() && frag_bytes[eq_pos] == b'=' {
+                let mut q_pos = eq_pos + 1;
+                while q_pos < frag_bytes.len() && is_xml_ws(frag_bytes[q_pos]) {
+                    q_pos += 1;
+                }
+                if q_pos < frag_bytes.len()
+                    && (frag_bytes[q_pos] == b'"' || frag_bytes[q_pos] == b'\'')
+                {
+                    let quote_b = frag_bytes[q_pos];
+                    let val_start = q_pos + 1;
+                    let val_end =
+                        crate::XmlSanitizer::find_byte_swar(frag_bytes, val_start, quote_b)?;
+                    return Some(fragment[val_start..val_end].to_string());
+                }
+            }
         }
         pos = idx + 1;
     }
@@ -598,35 +687,106 @@ pub(crate) fn extract_tags_with_attrs<'a>(xml: &'a str, tag: &str) -> Vec<(&'a s
     let bytes = xml.as_bytes();
     let tag_bytes = tag.as_bytes();
     let open_prefix_len = 1 + tag_bytes.len();
-    let close_tag_len = 3 + tag_bytes.len();
     let mut out = Vec::new();
     let mut cursor = 0usize;
 
-    while let Some(rel_open) = find_open_tag_prefix(&bytes[cursor..], tag_bytes) {
-        let open_pos = cursor + rel_open;
+    while let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag_bytes) {
         let after_tag = open_pos + open_prefix_len;
-        if after_tag < bytes.len() {
-            let next_ch = bytes[after_tag];
-            if next_ch != b'>' && next_ch != b' ' && next_ch != b'/' {
-                cursor = after_tag;
-                continue;
-            }
-        }
-        let Some(gt_pos) = crate::XmlSanitizer::find_byte_swar(bytes, after_tag, b'>') else {
-            break;
-        };
-        if bytes[gt_pos - 1] == b'/' {
+        if is_self_closing_open_tag(bytes, after_tag, gt_pos) {
             cursor = gt_pos + 1;
             continue;
         }
         let attrs = &xml[after_tag..gt_pos];
         let body_start = gt_pos + 1;
-        let Some(rel_close) = find_close_tag(&bytes[body_start..], tag_bytes) else {
+        let Some((body_end, next_cursor)) = find_matching_close_tag(bytes, body_start, tag_bytes)
+        else {
             break;
         };
-        let body_end = body_start + rel_close;
         out.push((attrs, &xml[body_start..body_end]));
-        cursor = body_end + close_tag_len;
+        cursor = next_cursor;
+    }
+    out
+}
+
+pub(crate) fn extract_tags_or_self_closing_with_attrs<'a>(
+    xml: &'a str,
+    tag: &str,
+) -> Vec<(&'a str, &'a str)> {
+    let bytes = xml.as_bytes();
+    let tag_bytes = tag.as_bytes();
+    let open_prefix_len = 1 + tag_bytes.len();
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+
+    while let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag_bytes) {
+        let after_tag = open_pos + open_prefix_len;
+        if is_self_closing_open_tag(bytes, after_tag, gt_pos) {
+            let mut attr_end = gt_pos;
+            while attr_end > after_tag && is_xml_ws(bytes[attr_end - 1]) {
+                attr_end -= 1;
+            }
+            if attr_end > after_tag && bytes[attr_end - 1] == b'/' {
+                attr_end -= 1;
+            }
+            out.push((&xml[after_tag..attr_end], ""));
+            cursor = gt_pos + 1;
+            continue;
+        }
+        let attrs = &xml[after_tag..gt_pos];
+        let body_start = gt_pos + 1;
+        let Some((body_end, next_cursor)) = find_matching_close_tag(bytes, body_start, tag_bytes)
+        else {
+            break;
+        };
+        out.push((attrs, &xml[body_start..body_end]));
+        cursor = next_cursor;
+    }
+    out
+}
+
+pub(crate) fn extract_ods_cells_from_row(row_xml: &str) -> Vec<(bool, &str, &str)> {
+    const CELL_TAG: &[u8] = b"table:table-cell";
+    const COVERED_TAG: &[u8] = b"table:covered-table-cell";
+    let bytes = row_xml.as_bytes();
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+
+    while cursor < bytes.len() {
+        let next_cell = find_valid_open_tag(bytes, cursor, CELL_TAG);
+        let next_covered = find_valid_open_tag(bytes, cursor, COVERED_TAG);
+        let (is_covered, open_pos, gt_pos, tag_bytes) = match (next_cell, next_covered) {
+            (Some((p1, g1)), Some((p2, g2))) => {
+                if p1 <= p2 {
+                    (false, p1, g1, CELL_TAG)
+                } else {
+                    (true, p2, g2, COVERED_TAG)
+                }
+            }
+            (Some((p1, g1)), None) => (false, p1, g1, CELL_TAG),
+            (None, Some((p2, g2))) => (true, p2, g2, COVERED_TAG),
+            (None, None) => break,
+        };
+        let after_tag = open_pos + 1 + tag_bytes.len();
+        if is_self_closing_open_tag(bytes, after_tag, gt_pos) {
+            let mut attr_end = gt_pos;
+            while attr_end > after_tag && is_xml_ws(bytes[attr_end - 1]) {
+                attr_end -= 1;
+            }
+            if attr_end > after_tag && bytes[attr_end - 1] == b'/' {
+                attr_end -= 1;
+            }
+            out.push((is_covered, &row_xml[after_tag..attr_end], ""));
+            cursor = gt_pos + 1;
+            continue;
+        }
+        let attrs = &row_xml[after_tag..gt_pos];
+        let body_start = gt_pos + 1;
+        let Some((body_end, next_cursor)) = find_matching_close_tag(bytes, body_start, tag_bytes)
+        else {
+            break;
+        };
+        out.push((is_covered, attrs, &row_xml[body_start..body_end]));
+        cursor = next_cursor;
     }
     out
 }
@@ -634,15 +794,20 @@ pub(crate) fn extract_tags_with_attrs<'a>(xml: &'a str, tag: &str) -> Vec<(&'a s
 pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
     let bytes = xml.as_bytes();
     let tag_bytes = tag.as_bytes();
-    let close_tag_len = 3 + tag_bytes.len();
+    let open_prefix_len = 1 + tag_bytes.len();
     let mut out = String::with_capacity(xml.len());
     let mut cursor = 0usize;
 
-    while let Some(rel_open) = find_open_tag_prefix(&bytes[cursor..], tag_bytes) {
-        let open_pos = cursor + rel_open;
+    while let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag_bytes) {
         out.push_str(&xml[cursor..open_pos]);
-        if let Some(rel_close) = find_close_tag(&bytes[open_pos..], tag_bytes) {
-            cursor = open_pos + rel_close + close_tag_len;
+        let after_tag = open_pos + open_prefix_len;
+        if is_self_closing_open_tag(bytes, after_tag, gt_pos) {
+            cursor = gt_pos + 1;
+            continue;
+        }
+        let body_start = gt_pos + 1;
+        if let Some((_, next_cursor)) = find_matching_close_tag(bytes, body_start, tag_bytes) {
+            cursor = next_cursor;
         } else {
             cursor = xml.len();
             break;
@@ -689,5 +854,56 @@ mod tests {
             unescape_xml_five_pass_baseline("&quot;&apos;&lt;&gt;&amp;")
         );
         assert!(unescape_xml_single_pass(xml_sample).contains("가 가 'ok'"));
+    }
+
+    #[test]
+    fn test_f7_xml_tag_boundary_nesting_and_attr_parsing() {
+        let odt_xml = concat!(
+            "<office:text>",
+            "<table:table-column/>",
+            "<text:p>문단1</text:p>",
+            "<table:table><table:table-row><table:table-cell><text:p>셀</text:p></table:table-cell></table:table-row></table:table>",
+            "<text:p>문단2</text:p>",
+            "</office:text>"
+        );
+        let stripped = strip_tag_blocks(odt_xml, "table:table");
+        assert!(stripped.contains("문단1"));
+        assert!(stripped.contains("문단2"));
+        assert!(!stripped.contains("셀"));
+
+        let nested_tbl = concat!(
+            "<w:body>",
+            "<w:p><w:t>머리글</w:t></w:p>",
+            "<w:tbl><w:tr><w:tc><w:tbl><w:tr><w:tc><w:p><w:t>내부표</w:t></w:p></w:tc></w:tr></w:tbl></w:tc></w:tr></w:tbl>",
+            "<w:tbl/>",
+            "<w:p><w:t>바닥글</w:t></w:p>",
+            "</w:body>"
+        );
+        let stripped_nested = strip_tag_blocks(nested_tbl, "w:tbl");
+        assert!(stripped_nested.contains("머리글"));
+        assert!(stripped_nested.contains("바닥글"));
+        assert!(!stripped_nested.contains("내부표"));
+
+        let extracted_nested = extract_tags_with_attrs(nested_tbl, "w:tbl");
+        assert_eq!(extracted_nested.len(), 1);
+        assert!(extracted_nested[0].1.contains("내부표"));
+
+        let newline_tag = "<c\n  other_r=\"Z99\"\n  r='B3'\n  t=\"s\"><v>0</v></c>";
+        let tags = extract_tags_with_attrs(newline_tag, "c");
+        assert_eq!(tags.len(), 1);
+        assert_eq!(
+            extract_attr_from_fragment(tags[0].0, "r"),
+            Some("B3".to_string())
+        );
+    }
+
+    #[test]
+    fn test_f10_parse_a1_zero_based_checked_bounds() {
+        assert_eq!(parse_a1_ZeroBased("A1"), Some((0, 0)));
+        assert_eq!(parse_a1_ZeroBased("XFD1048576"), Some((1_048_575, 16_383)));
+        assert_eq!(parse_a1_ZeroBased("XFE1"), None);
+        assert_eq!(parse_a1_ZeroBased("A1048577"), None);
+        assert_eq!(parse_a1_ZeroBased("AAAA1"), None);
+        assert_eq!(parse_a1_ZeroBased("ZZZZZZZZZZ999999999999"), None);
     }
 }

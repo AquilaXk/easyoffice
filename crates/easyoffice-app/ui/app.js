@@ -492,7 +492,7 @@
       }
       if (!resp.ok) {
         const errBody = await resp.json().catch(() => ({}));
-        const msg = errBody.message || "백엔드 IPC 요청 거부 (" + resp.status + ")";
+        const msg = errBody.error || errBody.message || "IPC request failed (" + resp.status + ")";
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = "[요청 거부] " + msg;
         const convBox = document.getElementById("conv-result-box");

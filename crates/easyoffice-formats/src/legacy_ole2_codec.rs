@@ -851,16 +851,11 @@ impl LegacyOle2Codec {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn parse_ppt_slide_records(
         data: &[u8],
         start: usize,
         end: usize,
-        s_title: &mut String,
-        s_bullets: &mut Vec<String>,
-        s_notes: &mut String,
-        s_theme: &mut String,
-        s_transition: &mut String,
+        slide: &mut LegacyPptSlide,
         depth: usize,
     ) -> Result<(), EasyOfficeError> {
         if depth > 16 {
@@ -884,8 +879,8 @@ impl LegacyOle2Codec {
                 if (a_end - a_start) % 2 == 0 {
                     if let Ok(meta) = decode_utf16le(&data[a_start..a_end]) {
                         if let Some((th, tr)) = meta.split_once('|') {
-                            *s_theme = th.to_string();
-                            *s_transition = tr.to_string();
+                            slide.theme = th.to_string();
+                            slide.transition = tr.to_string();
                         }
                     }
                 }
@@ -904,39 +899,29 @@ impl LegacyOle2Codec {
                 };
                 match s_ver {
                     0x0000 => {
-                        if s_title.is_empty() {
-                            *s_title = txt;
+                        if slide.title.is_empty() {
+                            slide.title = txt;
                         } else {
-                            push_bullets(s_bullets, txt);
+                            push_bullets(&mut slide.bullets, txt);
                         }
                     }
                     0x0010 => {
                         if !txt.is_empty() {
-                            push_bullets(s_bullets, txt);
+                            push_bullets(&mut slide.bullets, txt);
                         }
                     }
-                    0x0020 => *s_notes = txt,
-                    0x0030 => push_bullets(s_bullets, txt),
+                    0x0020 => slide.notes = txt,
+                    0x0030 => push_bullets(&mut slide.bullets, txt),
                     _ => {
-                        if s_title.is_empty() {
-                            *s_title = txt;
+                        if slide.title.is_empty() {
+                            slide.title = txt;
                         } else {
-                            push_bullets(s_bullets, txt);
+                            push_bullets(&mut slide.bullets, txt);
                         }
                     }
                 }
             } else if (s_ver & 0x000F) == 0x000F {
-                Self::parse_ppt_slide_records(
-                    data,
-                    a_start,
-                    a_end,
-                    s_title,
-                    s_bullets,
-                    s_notes,
-                    s_theme,
-                    s_transition,
-                    depth + 1,
-                )?;
+                Self::parse_ppt_slide_records(data, a_start, a_end, slide, depth + 1)?;
             }
             s_cur = a_end;
         }
@@ -983,36 +968,21 @@ impl LegacyOle2Codec {
                 )?;
             } else if rec_type == Self::RT_SLIDE {
                 *saw_valid_ppt = true;
-                let mut s_title = String::new();
-                let mut s_bullets = Vec::new();
-                let mut s_notes = String::new();
-                let mut s_theme = "SignatureLavender".to_string();
-                let mut s_transition = "Fade".to_string();
-                Self::parse_ppt_slide_records(
-                    data,
-                    r_start,
-                    r_end,
-                    &mut s_title,
-                    &mut s_bullets,
-                    &mut s_notes,
-                    &mut s_theme,
-                    &mut s_transition,
-                    depth + 1,
-                )?;
-                slides.push(LegacyPptSlide {
-                    title: s_title,
-                    bullets: s_bullets,
-                    notes: s_notes,
-                    theme: s_theme,
-                    transition: s_transition,
-                });
+                let mut slide = LegacyPptSlide {
+                    title: String::new(),
+                    bullets: Vec::new(),
+                    notes: String::new(),
+                    theme: "SignatureLavender".to_string(),
+                    transition: "Fade".to_string(),
+                };
+                Self::parse_ppt_slide_records(data, r_start, r_end, &mut slide, depth + 1)?;
+                slides.push(slide);
             } else if rec_type == Self::RT_TEXT_CHARS_ATOM || rec_type == Self::RT_TEXT_BYTES_ATOM {
                 *saw_valid_ppt = true;
                 let txt = Self::decode_ppt_text_atom(rec_type, &data[r_start..r_end])?;
                 if ver_inst == 0x0000 && depth <= 1 && title == "발표자료" {
                     *title = txt;
                 } else if depth <= 1 && (ver_inst == 0x0010 || ver_inst == 0x0020) {
-                    // Deck-level aspectRatio / deckTheme metadata atoms inside RT_Document
                 } else if let Some(last_slide) = slides.last_mut() {
                     if last_slide.title.is_empty() {
                         last_slide.title = txt;

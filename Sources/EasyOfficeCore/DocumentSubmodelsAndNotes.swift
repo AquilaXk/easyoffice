@@ -30,6 +30,14 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
   public var columnSpan: Int
   public var borderStyle: TableCellBorderStyle
 
+  private enum CodingKeys: String, CodingKey {
+    case rowIndex
+    case columnIndex
+    case rowSpan
+    case columnSpan
+    case borderStyle
+  }
+
   public init(
     rowIndex: Int,
     columnIndex: Int,
@@ -46,12 +54,28 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    let r = try container.decode(Int.self, forKey: .rowIndex)
-    let c = try container.decode(Int.self, forKey: .columnIndex)
-    let rs = try container.decodeIfPresent(Int.self, forKey: .rowSpan) ?? 1
-    let cs = try container.decodeIfPresent(Int.self, forKey: .columnSpan) ?? 1
-    let bs = try container.decodeIfPresent(TableCellBorderStyle.self, forKey: .borderStyle) ?? .solid
-    self.init(rowIndex: r, columnIndex: c, rowSpan: rs, columnSpan: cs, borderStyle: bs)
+    let rawRow = try container.decode(Int.self, forKey: .rowIndex)
+    let rawCol = try container.decode(Int.self, forKey: .columnIndex)
+    guard rawRow >= 0, rawRow <= CellAddress.maxZeroBasedRow,
+      rawCol >= 0, rawCol <= CellAddress.maxZeroBasedColumn
+    else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(
+          codingPath: decoder.codingPath,
+          debugDescription:
+            "TableCellSpan coordinate out of bounds: rowIndex=\(rawRow), columnIndex=\(rawCol)"
+        )
+      )
+    }
+    let rawRowSpan = try container.decodeIfPresent(Int.self, forKey: .rowSpan) ?? 1
+    let rawColSpan = try container.decodeIfPresent(Int.self, forKey: .columnSpan) ?? 1
+    let border =
+      try container.decodeIfPresent(TableCellBorderStyle.self, forKey: .borderStyle) ?? .solid
+    self.rowIndex = rawRow
+    self.columnIndex = rawCol
+    self.rowSpan = min(max(1, rawRowSpan), Self.maxSpan)
+    self.columnSpan = min(max(1, rawColSpan), Self.maxSpan)
+    self.borderStyle = border
   }
 }
 

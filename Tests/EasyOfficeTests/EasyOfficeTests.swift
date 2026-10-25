@@ -661,7 +661,7 @@ final class EasyOfficeTests: XCTestCase {
     let oversizedErr = evalFrame.forEachResolvedCell(in: 0..<1, sheet: sheet, { _ in })
     XCTAssertEqual(oversizedErr, "#REF!")
 
-    let csvBytes = CSVStateMachineCodec.encodeWorksheet(sheet)
+    let csvBytes = try CSVStateMachineCodec.encodeWorksheet(sheet)
     let decodedSheet = try CSVStateMachineCodec.decodeWorksheet(from: csvBytes, name: "복원시트")
     XCTAssertEqual(decodedSheet.rawValue(at: "A1"), "2")
     XCTAssertEqual(decodedSheet.rawValue(at: "A4"), "텍스트")
@@ -874,12 +874,15 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertFalse(docxPaths.contains("evil/untrusted.bin"))
 
     let spanJSON = Data(
-      "{\"rowIndex\":-999,\"columnIndex\":999999999,\"rowSpan\":5000,\"columnSpan\":-10}".utf8)
+      "{\"rowIndex\":0,\"columnIndex\":0,\"rowSpan\":5000,\"columnSpan\":-10}".utf8)
     let decodedSpan = try JSONDecoder().decode(TableCellSpan.self, from: spanJSON)
     XCTAssertEqual(decodedSpan.rowIndex, 0)
-    XCTAssertEqual(decodedSpan.columnIndex, TableCellSpan.maxIndex)
+    XCTAssertEqual(decodedSpan.columnIndex, 0)
     XCTAssertEqual(decodedSpan.rowSpan, TableCellSpan.maxSpan)
     XCTAssertEqual(decodedSpan.columnSpan, 1)
+    let invalidCoordSpanJSON = Data(
+      "{\"rowIndex\":-999,\"columnIndex\":999999999,\"rowSpan\":5000,\"columnSpan\":-10}".utf8)
+    XCTAssertThrowsError(try JSONDecoder().decode(TableCellSpan.self, from: invalidCoordSpanJSON))
 
     let hugePathEntry = ZipContainerEntry(
       path: String(repeating: "a", count: 65_536), data: Data([0x01]))
@@ -1095,7 +1098,7 @@ final class EasyOfficeTests: XCTestCase {
     // 6. Workspace closeOtherTabs & cross-module PDF export dirty protection, CSV XFD1 export, WCAG AA contrast
     var wideCsvSheet = WorksheetModel(name: "Wide")
     try wideCsvSheet.setCell("XFD1", rawValue: "끝열")
-    let wideCsvData = CSVStateMachineCodec.encodeWorksheet(wideCsvSheet)
+    let wideCsvData = try CSVStateMachineCodec.encodeWorksheet(wideCsvSheet)
     XCTAssertTrue(String(decoding: wideCsvData, as: UTF8.self).contains("끝열"))
 
     let vm = WorkspaceViewModel()

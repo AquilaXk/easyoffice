@@ -477,8 +477,14 @@ impl SheetEngine {
             "CONCAT" | "CONCATENATE" => {
                 let vals = self.expand_args_ctx(args, ctx, depth)?;
                 let mut out = String::new();
+                let mut total_chars = 0usize;
                 for v in vals {
-                    out.push_str(&v.to_display_string());
+                    let piece = v.to_display_string();
+                    total_chars = total_chars.saturating_add(piece.chars().count());
+                    if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                        return Err(FormulaError::Value);
+                    }
+                    out.push_str(&piece);
                 }
                 Ok(EvaluatedCellValue::Text(out))
             }
@@ -487,17 +493,35 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let delim = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
+                let delim_chars = delim.chars().count();
                 let ignore_empty = self
                     .eval_arg_val(&args[1], ctx, depth)?
                     .as_bool()
                     .ok_or(FormulaError::Value)?;
                 let vals = self.expand_args_ctx(&args[2..], ctx, depth)?;
-                let items: Vec<String> = vals
-                    .into_iter()
-                    .map(|v| v.to_display_string())
-                    .filter(|s| !ignore_empty || !s.is_empty())
-                    .collect();
-                Ok(EvaluatedCellValue::Text(items.join(&delim)))
+                let mut out = String::new();
+                let mut total_chars = 0usize;
+                let mut first = true;
+                for v in vals {
+                    let s = v.to_display_string();
+                    if ignore_empty && s.is_empty() {
+                        continue;
+                    }
+                    if !first {
+                        total_chars = total_chars.saturating_add(delim_chars);
+                        if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                            return Err(FormulaError::Value);
+                        }
+                        out.push_str(&delim);
+                    }
+                    first = false;
+                    total_chars = total_chars.saturating_add(s.chars().count());
+                    if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                        return Err(FormulaError::Value);
+                    }
+                    out.push_str(&s);
+                }
+                Ok(EvaluatedCellValue::Text(out))
             }
             "LEFT" | "RIGHT" => {
                 if args.is_empty() || args.len() > 2 {
@@ -571,6 +595,9 @@ impl SheetEngine {
                         res
                     }
                 };
+                if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                    return Err(FormulaError::Value);
+                }
                 Ok(EvaluatedCellValue::Text(out))
             }
             "SUBSTITUTE" => {
@@ -580,33 +607,65 @@ impl SheetEngine {
                 let text = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
                 let old_t = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
                 let new_t = self.eval_arg_val(&args[2], ctx, depth)?.to_display_string();
-                if old_t.is_empty() {
-                    return Ok(EvaluatedCellValue::Text(text));
-                }
-                if args.len() == 4 {
+                let target_inst = if args.len() == 4 {
                     let inst = self.eval_arg_num(&args[3], ctx, depth)?.trunc() as isize;
                     if inst < 1 {
                         return Err(FormulaError::Value);
                     }
-                    let mut out = String::new();
-                    let mut rem = text.as_str();
-                    let mut count = 0isize;
-                    while let Some(pos) = rem.find(&old_t) {
-                        count += 1;
-                        out.push_str(&rem[..pos]);
-                        if count == inst {
-                            out.push_str(&new_t);
-                            out.push_str(&rem[pos + old_t.len()..]);
+                    Some(inst as usize)
+                } else {
+                    None
+                };
+                if old_t.is_empty() {
+                    if text.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                        return Err(FormulaError::Value);
+                    }
+                    return Ok(EvaluatedCellValue::Text(text));
+                }
+                let old_chars = old_t.chars().count();
+                let new_chars = new_t.chars().count();
+                let mut out = String::new();
+                let mut total_chars = 0usize;
+                let mut rem = text.as_str();
+                let mut count = 0usize;
+                while let Some(pos) = rem.find(&old_t) {
+                    count += 1;
+                    let prefix = &rem[..pos];
+                    total_chars = total_chars.saturating_add(prefix.chars().count());
+                    if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                        return Err(FormulaError::Value);
+                    }
+                    out.push_str(prefix);
+                    if target_inst.is_none() || target_inst == Some(count) {
+                        total_chars = total_chars.saturating_add(new_chars);
+                        if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                            return Err(FormulaError::Value);
+                        }
+                        out.push_str(&new_t);
+                        if target_inst == Some(count) {
+                            let tail = &rem[pos + old_t.len()..];
+                            total_chars = total_chars.saturating_add(tail.chars().count());
+                            if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                                return Err(FormulaError::Value);
+                            }
+                            out.push_str(tail);
                             return Ok(EvaluatedCellValue::Text(out));
                         }
+                    } else {
+                        total_chars = total_chars.saturating_add(old_chars);
+                        if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                            return Err(FormulaError::Value);
+                        }
                         out.push_str(&old_t);
-                        rem = &rem[pos + old_t.len()..];
                     }
-                    out.push_str(rem);
-                    Ok(EvaluatedCellValue::Text(out))
-                } else {
-                    Ok(EvaluatedCellValue::Text(text.replace(&old_t, &new_t)))
+                    rem = &rem[pos + old_t.len()..];
                 }
+                total_chars = total_chars.saturating_add(rem.chars().count());
+                if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                    return Err(FormulaError::Value);
+                }
+                out.push_str(rem);
+                Ok(EvaluatedCellValue::Text(out))
             }
             "REPLACE" => {
                 if args.len() != 4 {
@@ -625,6 +684,13 @@ impl SheetEngine {
                 }
                 let st = ((start - 1) as usize).min(chars.len());
                 let end = (st + num_chars as usize).min(chars.len());
+                let suffix_len = chars.len() - end;
+                let total_chars = st
+                    .saturating_add(new_t.chars().count())
+                    .saturating_add(suffix_len);
+                if total_chars > Self::MAX_CELL_TEXT_CHARS {
+                    return Err(FormulaError::Value);
+                }
                 let mut out: String = chars[..st].iter().collect();
                 out.push_str(&new_t);
                 out.extend(chars[end..].iter());
@@ -679,7 +745,8 @@ impl SheetEngine {
                 }
                 let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
                 let n = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-                if n < 0 || s.len().saturating_mul(n as usize) > 32_767 {
+                if n < 0 || s.chars().count().saturating_mul(n as usize) > Self::MAX_CELL_TEXT_CHARS
+                {
                     return Err(FormulaError::Value);
                 }
                 Ok(EvaluatedCellValue::Text(s.repeat(n as usize)))
@@ -707,29 +774,33 @@ impl SheetEngine {
                 }
                 let val = self.eval_arg_val(&args[0], ctx, depth)?;
                 let fmt_str = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
-                if let Some(num) = val.as_number() {
+                let out = if let Some(num) = val.as_number() {
                     if fmt_str.ends_with('%') {
-                        let decimals = fmt_str
-                            .split('.')
-                            .nth(1)
-                            .map_or(0, |d| d.trim_end_matches('%').len());
-                        Ok(EvaluatedCellValue::Text(format!(
-                            "{:.prec$}%",
-                            num * 100.0,
-                            prec = decimals
-                        )))
-                    } else if let Some((_, dec_part)) = fmt_str.split_once('.') {
-                        let decimals = dec_part.chars().filter(|&c| c == '0' || c == '#').count();
-                        Ok(EvaluatedCellValue::Text(format!(
-                            "{num:.prec$}",
-                            prec = decimals
-                        )))
+                        let decimals = fmt_str.split('.').nth(1).map_or(0, |d| {
+                            d.trim_end_matches('%')
+                                .chars()
+                                .take_while(|&c| c == '0' || c == '#')
+                                .count()
+                                .min(10)
+                        });
+                        format!("{:.prec$}%", num * 100.0, prec = decimals)
+                    } else if let Some((_, after_dot)) = fmt_str.split_once('.') {
+                        let decimals = after_dot
+                            .chars()
+                            .take_while(|&c| c == '0' || c == '#')
+                            .count()
+                            .min(10);
+                        format!("{num:.prec$}", prec = decimals)
                     } else {
-                        Ok(EvaluatedCellValue::Text(format!("{:.0}", num.round())))
+                        format!("{:.0}", num.round())
                     }
                 } else {
-                    Ok(EvaluatedCellValue::Text(val.to_display_string()))
+                    val.to_display_string()
+                };
+                if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                    return Err(FormulaError::Value);
                 }
+                Ok(EvaluatedCellValue::Text(out))
             }
             "CHAR" => {
                 if args.len() != 1 {

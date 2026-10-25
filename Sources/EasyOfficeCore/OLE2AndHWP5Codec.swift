@@ -180,6 +180,7 @@ public enum OLE2ContainerCodec {
   public static let freeSector: UInt32 = 0xFFFF_FFFF
   public static let endOfChain: UInt32 = 0xFFFF_FFFE
   public static let fatSectorMarker: UInt32 = 0xFFFF_FFFD
+  public static let maxTotalExtractedBytes = 64 * 1024 * 1024
 
   private static let objectTypeUnallocated: UInt8 = 0
   private static let objectTypeStorage: UInt8 = 1
@@ -627,12 +628,19 @@ public enum OLE2ContainerCodec {
       }
       if directoryData.count >= directoryEntrySize {
         let rootStartSector = try BitPacking.readUInt32LE(from: directoryData, at: 116)
-        let rawRootSize = try BitPacking.readUInt64LE(from: directoryData, at: 120)
-        guard rawRootSize <= UInt64(data.count) else {
-          throw EasyOfficeError.corruptedContainer(
-            detail: "OLE2 Root Entry 미니스트림 크기 오류: \(rawRootSize)")
+        let rawRootStreamSize = try BitPacking.readUInt64LE(from: directoryData, at: 120)
+        guard rawRootStreamSize <= UInt64(maxTotalExtractedBytes) else {
+          throw EasyOfficeError.resourceExhausted(
+            limitName: "ole2RootStreamBytes",
+            limitValue: maxTotalExtractedBytes,
+            actualValue: Int(min(rawRootStreamSize, UInt64(Int.max)))
+          )
         }
-        let rootStreamSize = Int(rawRootSize)
+        guard rawRootStreamSize <= UInt64(data.count) else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "OLE2 Root Entry 미니스트림 크기 오류: \(rawRootStreamSize)")
+        }
+        let rootStreamSize = Int(rawRootStreamSize)
         if rootStartSector != endOfChain, rootStartSector != freeSector, rootStreamSize > 0 {
           miniStreamData = try readSectorChain(
             startSector: rootStartSector,
@@ -733,11 +741,14 @@ public enum OLE2ContainerCodec {
         output.reserveCapacity(streamSize)
         var current = startSector
         while current != endOfChain {
-          guard Int(current) < totalMiniSectors, Int(current) < miniFat.count,
-            claimedMiniSectors.insert(current).inserted
-          else {
+          guard Int(current) < totalMiniSectors, Int(current) < miniFat.count else {
             throw EasyOfficeError.corruptedContainer(
               detail: "OLE2 MiniFAT 체인이 유효하지 않거나 중복된 미니섹터(\(current))를 참조합니다.")
+          }
+          guard claimedMiniSectors.insert(current).inserted else {
+            throw EasyOfficeError.malformedContainer(
+              detail: "OLE2 MiniFAT sector \(current) claimed by multiple streams or cycle"
+            )
           }
           let offset = Int(current) * miniSectorSize
           let startIdx = miniStreamData.startIndex + offset

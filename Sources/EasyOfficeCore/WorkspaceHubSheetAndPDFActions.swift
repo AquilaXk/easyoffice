@@ -736,9 +736,19 @@ extension WorkspaceViewModel {
     guard !needle.isEmpty, let tab = activeTab else { return 0 }
     switch tab.payload {
     case .document(let doc):
-      return doc.paragraphs.reduce(0) { acc, p in
+      let paragraphTotal = doc.paragraphs.reduce(0) { acc, p in
         acc + countOccurrences(of: needle, in: p.text, caseSensitive: isFindCaseSensitive)
       }
+      let tableTotal = doc.tables.reduce(0) { tAcc, tbl in
+        tAcc
+          + tbl.rows.reduce(0) { rAcc, row in
+            rAcc
+              + row.reduce(0) { cAcc, cell in
+                cAcc + countOccurrences(of: needle, in: cell, caseSensitive: isFindCaseSensitive)
+              }
+          }
+      }
+      return paragraphTotal + tableTotal
     case .sheet(let sheet):
       return sheet.cellsByCoordinate.keys.sorted().reduce(0) { acc, coord in
         let raw = sheet.cellsByCoordinate[coord] ?? ""
@@ -749,6 +759,11 @@ extension WorkspaceViewModel {
         var slideTotal = countOccurrences(
           of: needle,
           in: slide.title,
+          caseSensitive: isFindCaseSensitive
+        )
+        slideTotal += countOccurrences(
+          of: needle,
+          in: slide.subtitle,
           caseSensitive: isFindCaseSensitive
         )
         for bullet in slide.bulletPoints {
@@ -803,6 +818,17 @@ extension WorkspaceViewModel {
           return
         }
       }
+      for tbl in doc.tables {
+        for row in tbl.rows {
+          for cell in row {
+            let c = countOccurrences(of: needle, in: cell, caseSensitive: isFindCaseSensitive)
+            running += c
+            if running >= targetOneBasedIndex {
+              return
+            }
+          }
+        }
+      }
     case .sheet(let sheet):
       for coord in sheet.cellsByCoordinate.keys.sorted() {
         let raw = sheet.cellsByCoordinate[coord] ?? ""
@@ -821,6 +847,11 @@ extension WorkspaceViewModel {
         var slideCount = countOccurrences(
           of: needle,
           in: slide.title,
+          caseSensitive: isFindCaseSensitive
+        )
+        slideCount += countOccurrences(
+          of: needle,
+          in: slide.subtitle,
           caseSensitive: isFindCaseSensitive
         )
         for bullet in slide.bulletPoints {
@@ -979,6 +1010,25 @@ extension WorkspaceViewModel {
           break
         }
       }
+      if !didReplace {
+        tableLoop: for tIdx in doc.tables.indices {
+          for rIdx in doc.tables[tIdx].rows.indices {
+            for cIdx in doc.tables[tIdx].rows[rIdx].indices {
+              if replaceTargetOccurrence(
+                in: &doc.tables[tIdx].rows[rIdx][cIdx],
+                needle: needle,
+                replacement: replacement,
+                caseSensitive: isFindCaseSensitive,
+                currentCounter: &counter,
+                targetOneBasedIndex: targetOccurrence
+              ) {
+                didReplace = true
+                break tableLoop
+              }
+            }
+          }
+        }
+      }
       if didReplace {
         openTabs[idx].payload = .document(doc)
       }
@@ -1011,6 +1061,18 @@ extension WorkspaceViewModel {
       slideLoop: for sIdx in deck.slides.indices {
         if replaceTargetOccurrence(
           in: &deck.slides[sIdx].title,
+          needle: needle,
+          replacement: replacement,
+          caseSensitive: isFindCaseSensitive,
+          currentCounter: &counter,
+          targetOneBasedIndex: targetOccurrence
+        ) {
+          selectedSlideIndex = sIdx
+          didReplace = true
+          break slideLoop
+        }
+        if replaceTargetOccurrence(
+          in: &deck.slides[sIdx].subtitle,
           needle: needle,
           replacement: replacement,
           caseSensitive: isFindCaseSensitive,

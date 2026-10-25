@@ -253,7 +253,6 @@ if (fs.existsSync(swiftAppDir)) {
   }
 }
 
-// Structural guard 1: Zero unchecked Int/UInt32/UInt16(floor|ceil|round(...)) casts in Sources/**/*.swift
 const UNCHECKED_SWIFT_FLOAT_INT_REGEX = /\b(Int|UInt32|UInt16)\((floor|ceil|round)\(/;
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
@@ -267,7 +266,6 @@ for (const file of files) {
   }
 }
 
-// Structural guard 2: MSRV 1.85 inheritance and forbidden post-1.85 APIs in crates/**
 const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".floor_char_boundary("];
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");

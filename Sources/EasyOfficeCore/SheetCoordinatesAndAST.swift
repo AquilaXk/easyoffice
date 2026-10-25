@@ -7,6 +7,10 @@ public struct PackedCellCoordinate: Sendable, Codable, Equatable, Hashable, Comp
 {
   public let rawValue: UInt64
 
+  private enum CodingKeys: String, CodingKey {
+    case rawValue
+  }
+
   @inlinable
   public init(rawValue: UInt64) {
     self.rawValue = rawValue
@@ -17,6 +21,32 @@ public struct PackedCellCoordinate: Sendable, Codable, Equatable, Hashable, Comp
     let clampedRow = UInt32(clamping: max(0, row))
     let clampedColumn = UInt32(clamping: max(0, column))
     self.rawValue = (UInt64(clampedRow) << 32) | UInt64(clampedColumn)
+  }
+
+  public init(from decoder: Decoder) throws {
+    let raw: UInt64
+    if let container = try? decoder.container(keyedBy: CodingKeys.self),
+      let keyedRaw = try? container.decode(UInt64.self, forKey: .rawValue)
+    {
+      raw = keyedRaw
+    } else {
+      let single = try decoder.singleValueContainer()
+      raw = try single.decode(UInt64.self)
+    }
+    let decodedRow = Int(raw >> 32)
+    let decodedCol = Int(raw & 0xFFFF_FFFF)
+    guard decodedRow >= 0, decodedRow <= CellAddress.maxZeroBasedRow,
+      decodedCol >= 0, decodedCol <= CellAddress.maxZeroBasedColumn
+    else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(
+          codingPath: decoder.codingPath,
+          debugDescription:
+            "PackedCellCoordinate out of ECMA-376 bounds: row=\(decodedRow), col=\(decodedCol)"
+        )
+      )
+    }
+    self.rawValue = raw
   }
 
   @inlinable
@@ -49,11 +79,34 @@ public struct CellAddress: Sendable, Codable, Equatable, Hashable, CustomStringC
   public let column: Int  // 0 = A, 25 = Z, 26 = AA
   public let row: Int  // 0 = row 1
 
+  private enum CodingKeys: String, CodingKey {
+    case column
+    case row
+  }
+
   public init(column: Int, row: Int) throws {
     guard column >= 0, column <= Self.maxZeroBasedColumn,
       row >= 0, row <= Self.maxZeroBasedRow
     else {
       throw EasyOfficeError.invalidCellAddress("col=\(column), row=\(row)")
+    }
+    self.column = column
+    self.row = row
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let column = try container.decode(Int.self, forKey: .column)
+    let row = try container.decode(Int.self, forKey: .row)
+    guard column >= 0, column <= Self.maxZeroBasedColumn,
+      row >= 0, row <= Self.maxZeroBasedRow
+    else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(
+          codingPath: decoder.codingPath,
+          debugDescription: "CellAddress out of ECMA-376 bounds: col=\(column), row=\(row)"
+        )
+      )
     }
     self.column = column
     self.row = row
@@ -181,7 +234,32 @@ public struct CellRange: Sendable, Codable, Equatable, Hashable, CustomStringCon
   public let start: CellAddress
   public let end: CellAddress
 
+  private enum CodingKeys: String, CodingKey {
+    case start
+    case end
+  }
+
   public init(start: CellAddress, end: CellAddress) {
+    self.start = start
+    self.end = end
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let start = try container.decode(CellAddress.self, forKey: .start)
+    let end = try container.decode(CellAddress.self, forKey: .end)
+    let rowSpan = abs(end.row - start.row) + 1
+    let colSpan = abs(end.column - start.column) + 1
+    let (area, overflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
+    guard !overflow, area <= Self.maxExpandedCellCount else {
+      throw DecodingError.dataCorrupted(
+        DecodingError.Context(
+          codingPath: decoder.codingPath,
+          debugDescription:
+            "CellRange span (\(rowSpan)x\(colSpan)) exceeds maxExpandedCellCount (\(Self.maxExpandedCellCount))"
+        )
+      )
+    }
     self.start = start
     self.end = end
   }
@@ -826,10 +904,11 @@ extension WorksheetModel {
     }
 
     // 5. Quoted string literal
-    if trimmed.hasPrefix("\"") && trimmed.hasSuffix("\"") && trimmed.count >= 2 {
-      let start = trimmed.index(after: trimmed.startIndex)
-      let end = trimmed.index(before: trimmed.endIndex)
-      return .text(String(trimmed[start..<end]))
+    if trimmed.hasPrefix("\"") {
+      if let unescaped = parseQuotedStringLiteral(trimmed) {
+        return .text(unescaped)
+      }
+      return .error(.value)
     }
 
     // 6. Boolean literal
@@ -889,6 +968,42 @@ extension WorksheetModel {
     }
 
     return .error(.value)
+  }
+
+  private static func parseQuotedStringLiteral(_ token: String) -> String? {
+    guard token.hasPrefix("\""), token.count >= 2 else {
+      return nil
+    }
+    var result = ""
+    result.reserveCapacity(token.count - 2)
+    var idx = token.index(after: token.startIndex)
+    while idx < token.endIndex {
+      let ch = token[idx]
+      if ch == "\"" {
+        let nextIdx = token.index(after: idx)
+        if nextIdx == token.endIndex {
+          guard result.count <= Self.maxCellTextLength else {
+            return nil
+          }
+          return result
+        }
+        if token[nextIdx] == "\"" {
+          result.append("\"")
+          guard result.count <= Self.maxCellTextLength else {
+            return nil
+          }
+          idx = token.index(after: nextIdx)
+          continue
+        }
+        return nil
+      }
+      result.append(ch)
+      guard result.count <= Self.maxCellTextLength else {
+        return nil
+      }
+      idx = token.index(after: idx)
+    }
+    return nil
   }
 
   private static func isValidNamedRangeIdentifier(_ token: String) -> Bool {

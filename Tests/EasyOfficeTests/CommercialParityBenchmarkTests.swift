@@ -252,7 +252,7 @@ final class CommercialParityBenchmarkTests: XCTestCase {
     XCTAssertEqual(decodedPDF.outline.map(\.title), ["제1장 직렬화", "제2장 주석 무결성"])
 
     // 7. CSV, TSV, CommonMark Markdown (.md), and RTF (.rtf) round-trip
-    let csvBytes = CSVStateMachineCodec.encodeWorksheet(masterSheet, delimiter: ",")
+    let csvBytes = try CSVStateMachineCodec.encodeWorksheet(masterSheet, delimiter: ",")
     let csvSig = try FormatDetector.verify(data: csvBytes, fileName: "finance.csv")
     XCTAssertEqual(csvSig.format, .csv)
     let decodedCsv = try CSVStateMachineCodec.decodeWorksheet(
@@ -260,7 +260,7 @@ final class CommercialParityBenchmarkTests: XCTestCase {
     XCTAssertEqual(decodedCsv.evaluate(at: "D2"), .number(3000.0))
     XCTAssertEqual(decodedCsv.evaluate(at: "D4"), .number(2550.0))
 
-    let tsvBytes = CSVStateMachineCodec.encodeWorksheet(masterSheet, delimiter: "\t")
+    let tsvBytes = try CSVStateMachineCodec.encodeWorksheet(masterSheet, delimiter: "\t")
     let tsvSig = try FormatDetector.verify(data: tsvBytes, fileName: "finance.tsv")
     XCTAssertEqual(tsvSig.format, .tsv)
     let decodedTsv = try CSVStateMachineCodec.decodeWorksheet(

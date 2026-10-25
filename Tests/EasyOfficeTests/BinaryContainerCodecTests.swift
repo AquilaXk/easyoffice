@@ -565,7 +565,7 @@ final class BinaryContainerCodecTests: XCTestCase {
     try sheet.setCell("A2", rawValue: "첫째줄\n둘째줄")
     try sheet.setCell("B2", rawValue: "=SUM(10,20)")
 
-    let csvData = CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: ",")
+    let csvData = try CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: ",")
     let decodedCSV = try CSVStateMachineCodec.decodeWorksheet(
       from: csvData, name: "고객목록", delimiter: ",")
     XCTAssertEqual(decodedCSV.rawValue(at: "A1"), "이름, 부서")
@@ -575,7 +575,7 @@ final class BinaryContainerCodecTests: XCTestCase {
     XCTAssertEqual(decodedCSV.evaluate(at: "B2"), .number(30))
 
     // TSV round-trip
-    let tsvData = CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: "\t")
+    let tsvData = try CSVStateMachineCodec.encodeWorksheet(sheet, delimiter: "\t")
     let decodedTSV = try CSVStateMachineCodec.decodeWorksheet(
       from: tsvData, name: "고객목록", delimiter: "\t")
     XCTAssertEqual(decodedTSV.rawValue(at: "A1"), "이름, 부서")
