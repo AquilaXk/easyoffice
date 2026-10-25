@@ -1030,8 +1030,14 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(calcSheet.evaluate(at: "C3"), .error("#NUM!"))
     try calcSheet.setCell("C4", rawValue: "=DATE(2024, 1, 1)")
     try calcSheet.setCell("C5", rawValue: "=DATE(1900, 2, 29)")
+    try calcSheet.setCell("C7", rawValue: "=YEAR(60)")
+    try calcSheet.setCell("C8", rawValue: "=MONTH(60)")
+    try calcSheet.setCell("C9", rawValue: "=DAY(60)")
     XCTAssertEqual(calcSheet.evaluate(at: "C4"), .number(45292.0))
     XCTAssertEqual(calcSheet.evaluate(at: "C5"), .number(60.0))
+    XCTAssertEqual(calcSheet.evaluate(at: "C7"), .number(1900.0))
+    XCTAssertEqual(calcSheet.evaluate(at: "C8"), .number(2.0))
+    XCTAssertEqual(calcSheet.evaluate(at: "C9"), .number(29.0))
 
     var sheet2Cells: [PackedCellCoordinate: String] = [:]
     for r in 0..<300 {

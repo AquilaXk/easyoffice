@@ -1123,18 +1123,33 @@ extension WorksheetModel {
       return .number(serial)
 
     case "YEAR":
+      if frame.count == 1, let raw = frame.arg(0, in: self).numericValue,
+        Self.safeInt(floor(raw)) == 60
+      {
+        return .number(1900.0)
+      }
       guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else {
         return .error("#VALUE!")
       }
       return .number(Double(Self.utcCalendar.component(.year, from: date)))
 
     case "MONTH":
+      if frame.count == 1, let raw = frame.arg(0, in: self).numericValue,
+        Self.safeInt(floor(raw)) == 60
+      {
+        return .number(2.0)
+      }
       guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else {
         return .error("#VALUE!")
       }
       return .number(Double(Self.utcCalendar.component(.month, from: date)))
 
     case "DAY":
+      if frame.count == 1, let raw = frame.arg(0, in: self).numericValue,
+        Self.safeInt(floor(raw)) == 60
+      {
+        return .number(29.0)
+      }
       guard frame.count == 1, let date = Self.parseDateValue(frame.arg(0, in: self)) else {
         return .error("#VALUE!")
       }
