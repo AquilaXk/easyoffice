@@ -185,7 +185,7 @@ impl DocumentFormat {
             "odp" => Some(Self::Odp),
             "csv" => Some(Self::Csv),
             "tsv" => Some(Self::Tsv),
-            "md" | "markdown" | "htm" | "html" => Some(Self::Markdown),
+            "md" | "markdown" => Some(Self::Markdown),
             "txt" => Some(Self::Txt),
             "rtf" => Some(Self::Rtf),
             _ => None,

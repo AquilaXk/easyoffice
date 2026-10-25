@@ -643,6 +643,32 @@ impl SheetEngine {
     }
 
     #[inline]
+    pub(crate) fn is_nested_subtotal_cell(
+        &self,
+        sheet_opt: Option<&str>,
+        coord: PackedCellCoordinate,
+        ctx: &EvalContext<'_>,
+    ) -> bool {
+        let target_sheet = match sheet_opt {
+            None => self,
+            Some(target_name) if target_name.eq_ignore_ascii_case(&self.name) => self,
+            Some(target_name) => {
+                let Some(wb) = ctx.workbook else {
+                    return false;
+                };
+                let Some(ts) = wb.sheet(target_name) else {
+                    return false;
+                };
+                ts
+            }
+        };
+        matches!(
+            target_sheet.compiled_asts.get(&coord),
+            Some(Ok(Expr::FuncCall { name, .. })) if name.eq_ignore_ascii_case("SUBTOTAL")
+        )
+    }
+
+    #[inline]
     pub(crate) fn eval_coord_ctx(
         &self,
         coord: PackedCellCoordinate,
@@ -1174,55 +1200,10 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<Vec<EvaluatedCellValue>, FormulaError> {
         let mut out = Vec::new();
-        for arg in args {
-            match arg {
-                Expr::Range(range) => {
-                    let coords = range.expand().map_err(|_| FormulaError::Ref)?;
-                    for c in coords {
-                        let v = self.eval_coord_ctx(c, ctx, depth);
-                        if let EvaluatedCellValue::Error(e) = v {
-                            return Err(e);
-                        }
-                        out.push(v);
-                    }
-                }
-                Expr::SheetRange { sheet, range } => {
-                    let coords = range.expand().map_err(|_| FormulaError::Ref)?;
-                    for c in coords {
-                        let v = self.eval_sheet_coord(Some(sheet), c, ctx, depth);
-                        if let EvaluatedCellValue::Error(e) = v {
-                            return Err(e);
-                        }
-                        out.push(v);
-                    }
-                }
-                Expr::FuncCall { name: fn_name, .. }
-                    if matches!(fn_name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
-                {
-                    if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                        let (_, _, _, rows, cols, _) = spec;
-                        for dr in 0..rows {
-                            for dc in 0..cols {
-                                out.push(self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?);
-                            }
-                        }
-                    } else {
-                        let v = self.eval_expr_ctx(arg, ctx, depth);
-                        if let EvaluatedCellValue::Error(e) = v {
-                            return Err(e);
-                        }
-                        out.push(v);
-                    }
-                }
-                _ => {
-                    let v = self.eval_expr_ctx(arg, ctx, depth);
-                    if let EvaluatedCellValue::Error(e) = v {
-                        return Err(e);
-                    }
-                    out.push(v);
-                }
-            }
-        }
+        self.visit_args_streaming(args, ctx, depth, |v| {
+            out.push(v);
+            Ok(())
+        })?;
         Ok(out)
     }
 
@@ -1373,6 +1354,15 @@ mod tests {
             s1.set_cell("G1", "Alpha").unwrap();
             s1.set_cell("G2", "Bravo").unwrap();
             s1.set_cell("G3", "Charlie").unwrap();
+            s1.set_cell("H1", "Alpha").unwrap();
+            s1.set_cell("H2", "가나다").unwrap();
+            s1.set_cell("H3", "2026-05-01").unwrap();
+            s1.set_cell("J1", "10").unwrap();
+            s1.set_cell("J2", "20").unwrap();
+            s1.set_cell("J3", "=SUBTOTAL(9, J1:J2)").unwrap();
+            s1.set_cell("J4", "30").unwrap();
+            s1.set_cell("J5", "40").unwrap();
+            s1.set_cell("J6", "=SUBTOTAL(9, J1:J5)").unwrap();
         }
         {
             let s2 = wb.add_sheet("Sheet2");
@@ -1408,6 +1398,18 @@ mod tests {
         assert_eq!(
             wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(F1:F3, \">2026-01-01\")"),
             EvaluatedCellValue::Number(2.0)
+        );
+        assert_eq!(
+            wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(H1:H3, \">2026-01-01\")"),
+            EvaluatedCellValue::Number(1.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "J3"),
+            EvaluatedCellValue::Number(30.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "J6"),
+            EvaluatedCellValue::Number(100.0)
         );
         assert_eq!(
             wb.evaluate_formula_on_sheet("Sheet1", "=COUNTIF(G1:G3, \">=Bravo\")"),

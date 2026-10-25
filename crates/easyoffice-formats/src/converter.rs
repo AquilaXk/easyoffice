@@ -616,7 +616,9 @@ mod tests {
         let pdf_raw = String::from_utf8_lossy(&pdf_bytes);
         assert!(pdf_raw.contains("/Subtype /Type0"));
         assert!(pdf_raw.contains("/Encoding /Identity-H"));
-        assert!(pdf_raw.contains("/ToUnicode /Identity-H"));
+        assert!(pdf_raw.contains("/DescendantFonts"));
+        assert!(pdf_raw.contains("/Subtype /CIDFontType2"));
+        assert!(pdf_raw.contains("begincmap"));
         let (_, pdf_decoded) = UniversalFormatConverter::decode(&pdf_bytes, Some("pdf")).unwrap();
         assert!(pdf_decoded
             .paragraphs
@@ -706,10 +708,8 @@ mod tests {
             DocumentFormat::from_extension("pptm"),
             Some(DocumentFormat::Pptx)
         );
-        assert_eq!(
-            DocumentFormat::from_extension("html"),
-            Some(DocumentFormat::Markdown)
-        );
+        assert_eq!(DocumentFormat::from_extension("html"), None);
+        assert_eq!(DocumentFormat::from_extension("htm"), None);
 
         let xml_with_gt_attr =
             "<table:table table:name=\"A > B\"><table:table-row><table:table-cell><text:p>셀값</text:p></table:table-cell></table:table-row></table:table>";

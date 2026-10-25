@@ -760,7 +760,8 @@ impl PdfSerializer {
             .collect::<Vec<_>>()
             .join(" ");
 
-        let total_objects = 3 + page_count * 2;
+        let cmap_obj = 3 + page_count * 2;
+        let total_objects = cmap_obj + 1;
         let mut offsets: Vec<usize> = vec![0; total_objects];
 
         offsets[1] = out.len();
@@ -789,8 +790,9 @@ impl PdfSerializer {
             let mut stream_lines: Vec<String> = Vec::new();
             for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
                 let y = 760 - (l_idx as i32) * 16;
+                let font_tag = if line_str.is_ascii() { "/F1" } else { "/F2" };
                 stream_lines.push(format!(
-                    "BT /F1 12 Tf 54 {y} Td ({}) Tj ET",
+                    "BT {font_tag} 12 Tf 54 {y} Td ({}) Tj ET",
                     Self::escape_pdf_text(line_str)
                 ));
             }
@@ -813,7 +815,7 @@ impl PdfSerializer {
             push_line(
                 &mut out,
                 &format!(
-                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /EasyOfficeGothic-Medium /Encoding /Identity-H /ToUnicode /Identity-H >> >> >> /Contents {content_obj} 0 R >>",
+                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /EasyOfficeGothic-Medium /Encoding /Identity-H /DescendantFonts [ << /Type /Font /Subtype /CIDFontType2 /BaseFont /EasyOfficeGothic-Medium /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /DW 1000 >> ] /ToUnicode {cmap_obj} 0 R >> >> >> /Contents {content_obj} 0 R >>",
                     page.page_number, page.rotation_degrees
                 ),
             );
@@ -827,6 +829,21 @@ impl PdfSerializer {
             push_line(&mut out, "endstream");
             push_line(&mut out, "endobj");
         }
+
+        let cmap_stream = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
+        offsets[cmap_obj] = out.len();
+        push_line(&mut out, &format!("{cmap_obj} 0 obj"));
+        push_line(
+            &mut out,
+            &format!(
+                "<< /Type /CMap /CMapName /Adobe-Identity-UCS /Length {} >>",
+                cmap_stream.len()
+            ),
+        );
+        push_line(&mut out, "stream");
+        push_line(&mut out, cmap_stream);
+        push_line(&mut out, "endstream");
+        push_line(&mut out, "endobj");
 
         let xref_offset = out.len();
         push_line(&mut out, "xref");
@@ -890,7 +907,10 @@ impl PdfSerializer {
                 is_metadata_obj = false;
                 continue;
             }
-            if trimmed.contains("/Type /Metadata") {
+            if trimmed.contains("/Type /Metadata")
+                || trimmed.contains("/Type /CMap")
+                || trimmed == "begincmap"
+            {
                 is_metadata_obj = true;
             }
             if trimmed.contains("/Type /Catalog") {
@@ -937,6 +957,7 @@ impl PdfSerializer {
             }
             if in_stream && !is_metadata_obj && trimmed.starts_with("BT ") {
                 let is_body_line = trimmed.starts_with("BT /F1 12 Tf 54 ")
+                    || trimmed.starts_with("BT /F2 12 Tf 54 ")
                     || trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 0 Td ");
                 let is_form_meta_line = trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 2 Td ");
                 if is_form_meta_line {

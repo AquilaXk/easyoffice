@@ -1,37 +1,6 @@
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 impl SheetEngine {
-    pub(crate) fn eval_multi_criteria(
-        &self,
-        criteria_pairs: &[Expr],
-        expected_rows: usize,
-        expected_cols: usize,
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<Vec<bool>, FormulaError> {
-        let expected_len = expected_rows * expected_cols;
-        let mut mask = vec![true; expected_len];
-        for pair in criteria_pairs.chunks(2) {
-            let Some(sp) = self.extract_streaming_range_ctx(&pair[0], ctx, depth)? else {
-                return Err(FormulaError::Value);
-            };
-            if sp.3 != expected_rows || sp.4 != expected_cols {
-                return Err(FormulaError::Value);
-            }
-            let r_vals = self.eval_range_vec(&pair[0], ctx, depth)?;
-            if r_vals.len() != expected_len {
-                return Err(FormulaError::Value);
-            }
-            let crit = self.eval_arg_val(&pair[1], ctx, depth)?;
-            for (m, rv) in mask.iter_mut().zip(r_vals.iter()) {
-                if *m && !matches_criteria(rv, &crit) {
-                    *m = false;
-                }
-            }
-        }
-        Ok(mask)
-    }
-
     pub(crate) fn eval_date_func(
         &self,
         name: &str,
@@ -707,16 +676,17 @@ pub(crate) fn matches_criteria(cell: &EvaluatedCellValue, crit: &EvaluatedCellVa
                     EvaluatedCellValue::Text(ts) => parse_iso_date_serial(ts),
                     _ => None,
                 };
-                if let Some(lhs_num) = lhs_serial {
-                    return match op {
-                        ">=" => lhs_num >= rhs_serial - 1e-12,
-                        "<=" => lhs_num <= rhs_serial + 1e-12,
-                        "<>" => (lhs_num - rhs_serial).abs() >= 1e-12,
-                        ">" => lhs_num > rhs_serial,
-                        "<" => lhs_num < rhs_serial,
-                        _ => (lhs_num - rhs_serial).abs() < 1e-12,
-                    };
-                }
+                let Some(lhs_num) = lhs_serial else {
+                    return op == "<>";
+                };
+                return match op {
+                    ">=" => lhs_num >= rhs_serial - 1e-12,
+                    "<=" => lhs_num <= rhs_serial + 1e-12,
+                    "<>" => (lhs_num - rhs_serial).abs() >= 1e-12,
+                    ">" => lhs_num > rhs_serial,
+                    "<" => lhs_num < rhs_serial,
+                    _ => (lhs_num - rhs_serial).abs() < 1e-12,
+                };
             }
             let rhs_s = rhs_trim.to_lowercase();
             return match op {

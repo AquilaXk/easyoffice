@@ -12,8 +12,8 @@ use easyoffice_layout::{
     SlideDomainEngine, SlideStageLayout,
 };
 use easyoffice_sheet::{
-    CellRange, ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PivotAggregation,
-    SheetEngine, WorkbookEngine,
+    CellRange, ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PackedCellCoordinate,
+    PivotAggregation, SheetEngine, WorkbookEngine,
 };
 
 pub mod benchmark;
@@ -290,21 +290,42 @@ impl EasyOfficeIpcRouter {
         items
     }
 
-    /// Payload format: semicolon-separated `A1=val` pairs followed by `?target_expr_or_cell`
-    /// Example: `A1=100;A2=200;A3==SUM(A1:A2)?A3`
+    fn extract_active_sheet_and_expr(raw_expr: &str) -> (&str, &str) {
+        if let Some((sh, rest)) = raw_expr.split_once('|') {
+            if !sh.trim().is_empty() && !sh.starts_with('=') && !sh.contains('(') {
+                return (sh.trim(), rest.trim());
+            }
+        }
+        if let Some((sh, rest)) = raw_expr.split_once('!') {
+            if !sh.trim().is_empty() && !sh.starts_with('=') && !sh.contains('(') {
+                return (sh.trim(), rest.trim());
+            }
+        }
+        ("Sheet1", raw_expr.trim())
+    }
+
+    /// Payload format: semicolon-separated `[Sheet!]A1=val` pairs followed by `?[Sheet|]target_expr_or_cell`
     fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
         let (cells_part, query_part) =
             Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
-        let mut sheet = SheetEngine::new("IPC_Sheet");
-        for (addr, val) in Self::split_cell_assignments(cells_part) {
-            if !addr.is_empty() {
-                sheet.set_cell(&addr, &val)?;
+        let (active_sheet, expr) = Self::extract_active_sheet_and_expr(query_part.trim());
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet("Sheet1");
+        wb.add_sheet("Sheet2");
+        wb.add_sheet(active_sheet);
+        for (lhs, val) in Self::split_cell_assignments(cells_part) {
+            let (sh, addr) = lhs.split_once('!').unwrap_or((active_sheet, &lhs));
+            let sh_trim = sh.trim();
+            let addr_trim = addr.trim();
+            if !sh_trim.is_empty() && !addr_trim.is_empty() {
+                wb.add_sheet(sh_trim);
+                wb.set_cell(sh_trim, addr_trim, &val)?;
             }
         }
-        let evaluated = if query_part.trim().starts_with('=') {
-            sheet.evaluate_formula_str(query_part.trim())
+        let evaluated = if expr.starts_with('=') {
+            wb.evaluate_formula_on_sheet(active_sheet, expr)
         } else {
-            sheet.evaluate_cell(query_part.trim())
+            wb.evaluate_cell(active_sheet, expr)
         };
         let rule = ConditionalFormatRule::GreaterThan(100.0);
         let cf_match = rule.matches(&evaluated, &[]);
@@ -316,7 +337,7 @@ impl EasyOfficeIpcRouter {
 
         Ok(format!(
             "{{\"query\":\"{}\",\"value\":\"{}\",\"conditionalMatch\":{},\"validationPassed\":{}}}",
-            Self::escape_json_str(query_part.trim()),
+            Self::escape_json_str(expr),
             Self::escape_json_str(&evaluated.to_display_string()),
             cf_match,
             dv_valid
@@ -673,28 +694,24 @@ impl EasyOfficeIpcRouter {
             Some((c, e)) => (Some(c.trim()), e.trim()),
             None => (None, payload.trim()),
         };
-        if let Some(cells_str) = cells_part {
-            for (lhs, rhs) in Self::split_cell_assignments(cells_str) {
-                let (sh, a1) = lhs.split_once('!').unwrap_or(("Sheet1", &lhs));
-                wb.add_sheet(sh.trim());
-                wb.set_cell(sh.trim(), a1.trim(), rhs.trim())?;
-            }
-        }
         let raw_expr = if expr_part.is_empty() {
             "=Sheet2!A1+50"
         } else {
             expr_part
         };
-        let (active_sheet, expr) = if let Some((sh, rest)) = raw_expr.split_once('!') {
-            if !sh.starts_with('=') && !sh.contains('(') {
-                (sh.trim(), rest.trim())
-            } else {
-                ("Sheet1", raw_expr)
-            }
-        } else {
-            ("Sheet1", raw_expr)
-        };
+        let (active_sheet, expr) = Self::extract_active_sheet_and_expr(raw_expr);
         wb.add_sheet(active_sheet);
+        if let Some(cells_str) = cells_part {
+            for (lhs, rhs) in Self::split_cell_assignments(cells_str) {
+                let (sh, a1) = lhs.split_once('!').unwrap_or((active_sheet, &lhs));
+                let sh_trim = sh.trim();
+                let a1_trim = a1.trim();
+                if !sh_trim.is_empty() && !a1_trim.is_empty() {
+                    wb.add_sheet(sh_trim);
+                    wb.set_cell(sh_trim, a1_trim, &rhs)?;
+                }
+            }
+        }
         let val = if expr.starts_with('=') {
             wb.evaluate_formula_on_sheet(active_sheet, expr)
         } else {
@@ -773,6 +790,12 @@ impl EasyOfficeIpcRouter {
                 if let (Some(r_s), Some(c_s), Some(v_s)) = (cols.next(), cols.next(), cols.next()) {
                     if let (Ok(r), Ok(c)) = (r_s.trim().parse::<u32>(), c_s.trim().parse::<u32>()) {
                         sheet_cells.push((r, c, v_s.to_string()));
+                    }
+                }
+            } else if let Some(a1_str) = line.strip_prefix("[[SHEET_A1]]\t") {
+                if let Some((a1, v_s)) = a1_str.split_once('\t') {
+                    if let Ok(coord) = PackedCellCoordinate::parse_a1(a1.trim()) {
+                        sheet_cells.push((coord.row(), coord.col(), v_s.to_string()));
                     }
                 }
             } else if let Some(slide_str) = line.strip_prefix("[[SLIDE]]\t") {
@@ -1333,13 +1356,48 @@ mod tests {
         .unwrap();
         assert!(wb_json.contains("\"value\":\"60\""));
 
+        for cmd in ["evaluate_workbook_formula", "evaluate_sheet"] {
+            let cross1 = EasyOfficeIpcRouter::dispatch(
+                cmd,
+                "Sheet1!A1=100;Sheet2!A1=250?Sheet1|=Sheet2!A1+50",
+            )
+            .unwrap();
+            assert!(
+                cross1.contains("\"value\":\"300\""),
+                "cmd={cmd} res={cross1}"
+            );
+
+            let cross2 = EasyOfficeIpcRouter::dispatch(
+                cmd,
+                "Sheet1!A1=100;Sheet2!A1=250;Sheet2!B1=50?Sheet2|=SUM(A1:B1)",
+            )
+            .unwrap();
+            assert!(
+                cross2.contains("\"value\":\"300\""),
+                "cmd={cmd} res={cross2}"
+            );
+        }
+
         let conv_json = EasyOfficeIpcRouter::dispatch(
             "convert_document_format",
-            "docx->xlsx|예산보고서|첫번째문단\n[[TABLE_ROW]]\t항목\t금액\n[[TABLE_ROW]]\t인건비\t500",
+            "docx->xlsx|예산보고서|첫번째문단\n[[AGENCY]]\t행정안전부\n[[TABLE_NEW]]\n[[TABLE_ROW]]\t항목\t금액\n[[TABLE_ROW]]\t인건비\t500\n[[SHEET_CELL]]\t0\t0\t시트셀값\n[[SLIDE]]\t발표제목\t핵심1;;핵심2\t발표노트",
         )
         .unwrap();
-        assert!(conv_json.contains("\"converted_base64\":\""));
+        assert!(conv_json.contains("\"convertedBase64\":\""));
         assert!(conv_json.contains("\"tableCount\":1"));
+        let b64_marker = "\"convertedBase64\":\"";
+        let b64_start = conv_json.find(b64_marker).unwrap() + b64_marker.len();
+        let b64_end = conv_json[b64_start..].find('"').unwrap() + b64_start;
+        let b64_str = &conv_json[b64_start..b64_end];
+        assert!(!b64_str.is_empty());
+
+        let hwp_conv_json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            "docx->hwp|공문서|본문문단\n[[AGENCY]]\t행정안전부\n[[TABLE_NEW]]\n[[TABLE_ROW]]\t구분\t비고\n[[TABLE_ROW]]\t승인\t정상",
+        )
+        .unwrap();
+        assert!(hwp_conv_json.contains("\"tableCount\":1"));
+        assert!(hwp_conv_json.contains("\"convertedBase64\":\""));
 
         let smart_json = EasyOfficeIpcRouter::dispatch(
             "run_smart_assistant",
