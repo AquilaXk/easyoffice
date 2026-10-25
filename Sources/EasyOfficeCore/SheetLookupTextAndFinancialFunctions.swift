@@ -159,31 +159,53 @@ extension WorksheetModel {
         let colIndexVal = frame.arg(2, in: self).numericValue,
         let rawColIdx = Self.safeInt(colIndexVal)
       else { return .error("#VALUE!") }
-      if let sheetName = frame.args[1].targetSheetName, !hasSheet(named: sheetName) {
+      let sheetName = frame.args[1].targetSheetName
+      if let sheetName, !hasSheet(named: sheetName) {
+        return .error("#REF!")
+      }
+      guard let bounds = rangeBounds(range) else { return .error("#REF!") }
+      let colIdx = rawColIdx - 1
+      guard colIdx >= 0, colIdx < bounds.colCount else {
         return .error("#REF!")
       }
       let lookupVal = frame.arg(0, in: self)
       let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
-      let grid = evaluateGridInternal(
-        onSheet: frame.args[1].targetSheetName, in: range, context: &frame.context,
-        depth: frame.depth + 1)
-      let colIdx = rawColIdx - 1
-      guard let firstRow = grid.first, colIdx >= 0, colIdx < firstRow.count else {
-        return .error("#REF!")
-      }
-      for row in grid where Self.cellValuesEqual(row[0], lookupVal) {
-        return row[colIdx]
-      }
-      if isApprox, let targetNum = lookupVal.numericValue {
-        var bestRow: [EvaluatedCellValue]?
-        var bestNum = -Double.infinity
-        for row in grid {
-          if let n = row[0].numericValue, n <= targetNum, n >= bestNum {
-            bestNum = n
-            bestRow = row
-          }
+      let targetCol = bounds.minCol + colIdx
+      var approxBestRow: Int?
+      var approxBestNum = -Double.infinity
+      let targetNum = isApprox ? lookupVal.numericValue : nil
+
+      for r in bounds.minRow...bounds.maxRow {
+        let keyVal = evaluateSingleCellInRange(
+          onSheet: sheetName,
+          row: r,
+          column: bounds.minCol,
+          context: &frame.context,
+          depth: frame.depth + 1
+        )
+        if Self.cellValuesEqual(keyVal, lookupVal) {
+          if colIdx == 0 { return keyVal }
+          return evaluateSingleCellInRange(
+            onSheet: sheetName,
+            row: r,
+            column: targetCol,
+            context: &frame.context,
+            depth: frame.depth + 1
+          )
         }
-        if let bestRow { return bestRow[colIdx] }
+        if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
+          approxBestNum = n
+          approxBestRow = r
+        }
+      }
+      if let matchedRow = approxBestRow {
+        return evaluateSingleCellInRange(
+          onSheet: sheetName,
+          row: matchedRow,
+          column: targetCol,
+          context: &frame.context,
+          depth: frame.depth + 1
+        )
       }
       return .error("#N/A")
 
@@ -193,31 +215,53 @@ extension WorksheetModel {
         let rowIndexVal = frame.arg(2, in: self).numericValue,
         let rawRowIdx = Self.safeInt(rowIndexVal)
       else { return .error("#VALUE!") }
-      if let sheetName = frame.args[1].targetSheetName, !hasSheet(named: sheetName) {
+      let sheetName = frame.args[1].targetSheetName
+      if let sheetName, !hasSheet(named: sheetName) {
+        return .error("#REF!")
+      }
+      guard let bounds = rangeBounds(range) else { return .error("#REF!") }
+      let rowIdx = rawRowIdx - 1
+      guard rowIdx >= 0, rowIdx < bounds.rowCount else {
         return .error("#REF!")
       }
       let lookupVal = frame.arg(0, in: self)
       let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
-      let grid = evaluateGridInternal(
-        onSheet: frame.args[1].targetSheetName, in: range, context: &frame.context,
-        depth: frame.depth + 1)
-      let rowIdx = rawRowIdx - 1
-      guard rowIdx >= 0, rowIdx < grid.count, let headerRow = grid.first else {
-        return .error("#REF!")
-      }
-      for col in headerRow.indices where Self.cellValuesEqual(headerRow[col], lookupVal) {
-        return grid[rowIdx][col]
-      }
-      if isApprox, let targetNum = lookupVal.numericValue {
-        var bestCol: Int?
-        var bestNum = -Double.infinity
-        for col in headerRow.indices {
-          if let n = headerRow[col].numericValue, n <= targetNum, n >= bestNum {
-            bestNum = n
-            bestCol = col
-          }
+      let targetRow = bounds.minRow + rowIdx
+      var approxBestCol: Int?
+      var approxBestNum = -Double.infinity
+      let targetNum = isApprox ? lookupVal.numericValue : nil
+
+      for c in bounds.minCol...bounds.maxCol {
+        let keyVal = evaluateSingleCellInRange(
+          onSheet: sheetName,
+          row: bounds.minRow,
+          column: c,
+          context: &frame.context,
+          depth: frame.depth + 1
+        )
+        if Self.cellValuesEqual(keyVal, lookupVal) {
+          if rowIdx == 0 { return keyVal }
+          return evaluateSingleCellInRange(
+            onSheet: sheetName,
+            row: targetRow,
+            column: c,
+            context: &frame.context,
+            depth: frame.depth + 1
+          )
         }
-        if let bestCol { return grid[rowIdx][bestCol] }
+        if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
+          approxBestNum = n
+          approxBestCol = c
+        }
+      }
+      if let matchedCol = approxBestCol {
+        return evaluateSingleCellInRange(
+          onSheet: sheetName,
+          row: targetRow,
+          column: matchedCol,
+          context: &frame.context,
+          depth: frame.depth + 1
+        )
       }
       return .error("#N/A")
 
@@ -355,35 +399,58 @@ extension WorksheetModel {
         let rowNumVal = frame.arg(1, in: self).numericValue,
         let rawRowIdx = Self.safeInt(rowNumVal)
       else { return .error("#VALUE!") }
-      if let sheetName = frame.args[0].targetSheetName, !hasSheet(named: sheetName) {
+      let sheetName = frame.args[0].targetSheetName
+      if let sheetName, !hasSheet(named: sheetName) {
         return .error("#REF!")
       }
       let colNumVal = frame.count == 3 ? (frame.arg(2, in: self).numericValue ?? 1.0) : 1.0
-      guard let rawColIdx = Self.safeInt(colNumVal) else { return .error("#VALUE!") }
-      let grid = evaluateGridInternal(
-        onSheet: frame.args[0].targetSheetName, in: range, context: &frame.context,
-        depth: frame.depth + 1)
+      guard let rawColIdx = Self.safeInt(colNumVal),
+        let bounds = rangeBounds(range)
+      else { return .error("#VALUE!") }
       let rIdx = rawRowIdx - 1
       let cIdx = rawColIdx - 1
       if frame.count == 2,
-        range.start.row == range.end.row,
-        range.end.column != range.start.column,
-        grid.count == 1,
+        bounds.rowCount == 1,
+        bounds.colCount > 1,
         rIdx >= 0,
-        rIdx < grid[0].count
+        rIdx < bounds.colCount
       {
-        return grid[0][rIdx]
+        return evaluateSingleCellInRange(
+          onSheet: sheetName,
+          row: bounds.minRow,
+          column: bounds.minCol + rIdx,
+          context: &frame.context,
+          depth: frame.depth + 1
+        )
       }
-      if frame.count == 3, rawRowIdx == 0, !grid.isEmpty, cIdx >= 0, cIdx < grid[0].count {
-        return grid[0][cIdx]
+      if frame.count == 3, rawRowIdx == 0, cIdx >= 0, cIdx < bounds.colCount {
+        return evaluateSingleCellInRange(
+          onSheet: sheetName,
+          row: bounds.minRow,
+          column: bounds.minCol + cIdx,
+          context: &frame.context,
+          depth: frame.depth + 1
+        )
       }
-      if frame.count == 3, rawColIdx == 0, rIdx >= 0, rIdx < grid.count, !grid[rIdx].isEmpty {
-        return grid[rIdx][0]
+      if frame.count == 3, rawColIdx == 0, rIdx >= 0, rIdx < bounds.rowCount {
+        return evaluateSingleCellInRange(
+          onSheet: sheetName,
+          row: bounds.minRow + rIdx,
+          column: bounds.minCol,
+          context: &frame.context,
+          depth: frame.depth + 1
+        )
       }
-      guard rIdx >= 0, rIdx < grid.count, cIdx >= 0, cIdx < grid[rIdx].count else {
+      guard rIdx >= 0, rIdx < bounds.rowCount, cIdx >= 0, cIdx < bounds.colCount else {
         return .error("#REF!")
       }
-      return grid[rIdx][cIdx]
+      return evaluateSingleCellInRange(
+        onSheet: sheetName,
+        row: bounds.minRow + rIdx,
+        column: bounds.minCol + cIdx,
+        context: &frame.context,
+        depth: frame.depth + 1
+      )
 
     case "MATCH":
       guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
@@ -821,12 +888,14 @@ extension WorksheetModel {
       case .failure(let err):
         return .error(err)
       case .success(let vals):
-        let cashFlows = vals.compactMap(\.numericValue)
-        guard cashFlows.contains(where: { $0 > 0.0 }),
-          cashFlows.contains(where: { $0 < 0.0 })
+        let rawCashFlows = vals.compactMap(\.numericValue)
+        guard rawCashFlows.contains(where: { $0 > 0.0 }),
+          rawCashFlows.contains(where: { $0 < 0.0 })
         else {
           return .error("#NUM!")
         }
+        let maxMag = max(1.0, rawCashFlows.map { abs($0) }.max() ?? 1.0)
+        let cashFlows = rawCashFlows.map { $0 / maxMag }
         let guess = frame.count == 2 ? (frame.arg(1, in: self).numericValue ?? 0.1) : 0.1
         var rate = guess <= -1.0 ? 0.1 : guess
         var lastResidual = Double.infinity
@@ -993,7 +1062,7 @@ extension WorksheetModel {
         let mNum = frame.arg(1, in: self).numericValue,
         let dNum = frame.arg(2, in: self).numericValue,
         let y = Self.safeInt(yNum), let m = Self.safeInt(mNum), let d = Self.safeInt(dNum),
-        let date = Self.makeUTCDate(year: y, month: m, day: d)
+        let date = Self.makeUTCDate(year: y, month: m, day: d, allowRollover: true)
       else { return .error("#VALUE!") }
       return .text(Self.formatUTCDate(date))
 
@@ -1230,7 +1299,43 @@ extension WorksheetModel {
     }
   }
 
-  // MARK: - Date Helpers
+  // MARK: - Date & Range Helpers
+
+  internal func rangeBounds(_ range: CellRange) -> (
+    minRow: Int, maxRow: Int, minCol: Int, maxCol: Int, rowCount: Int, colCount: Int
+  )? {
+    let minRow = min(range.start.row, range.end.row)
+    let maxRow = max(range.start.row, range.end.row)
+    let minCol = min(range.start.column, range.end.column)
+    let maxCol = max(range.start.column, range.end.column)
+    let (rowSpan, rOverflow) = (maxRow - minRow).addingReportingOverflow(1)
+    let (colSpan, cOverflow) = (maxCol - minCol).addingReportingOverflow(1)
+    let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
+    guard !rOverflow, !cOverflow, !mulOverflow,
+      totalCells > 0, totalCells <= CellRange.maxExpandedCellCount
+    else {
+      return nil
+    }
+    return (minRow, maxRow, minCol, maxCol, rowSpan, colSpan)
+  }
+
+  internal func evaluateSingleCellInRange(
+    onSheet sheetName: String?,
+    row: Int,
+    column: Int,
+    context: inout EvaluationContext,
+    depth: Int
+  ) -> EvaluatedCellValue {
+    let coord = PackedCellCoordinate(row: row, column: column)
+    let val =
+      sheetName.map {
+        evaluateOnSheet(named: $0, at: coord, context: &context, depth: depth)
+      } ?? evaluateInternal(at: coord, context: &context, depth: depth)
+    if case .empty = val {
+      return .number(0.0)
+    }
+    return val
+  }
 
   internal static let utcCalendar: Calendar = {
     var cal = Calendar(identifier: .gregorian)
@@ -1238,16 +1343,42 @@ extension WorksheetModel {
     return cal
   }()
 
-  internal static func makeUTCDate(year: Int, month: Int, day: Int) -> Date? {
-    guard (1...9999).contains(year) else { return nil }
+  internal static func makeUTCDate(
+    year: Int, month: Int, day: Int, allowRollover: Bool = false
+  ) -> Date? {
+    let resolvedYear = (allowRollover && (0...1899).contains(year)) ? (1900 + year) : year
+    guard (1...9999).contains(resolvedYear) else { return nil }
+    if allowRollover {
+      var baseComps = DateComponents()
+      baseComps.year = resolvedYear
+      baseComps.month = 1
+      baseComps.day = 1
+      baseComps.hour = 0
+      baseComps.minute = 0
+      baseComps.second = 0
+      guard let jan1 = utcCalendar.date(from: baseComps),
+        let monthShifted = utcCalendar.date(byAdding: .month, value: month - 1, to: jan1),
+        let dayShifted = utcCalendar.date(byAdding: .day, value: day - 1, to: monthShifted)
+      else {
+        return nil
+      }
+      return dayShifted
+    }
+    guard (1...12).contains(month), (1...31).contains(day) else { return nil }
     var comps = DateComponents()
-    comps.year = year
+    comps.year = resolvedYear
     comps.month = month
     comps.day = day
     comps.hour = 0
     comps.minute = 0
     comps.second = 0
-    return utcCalendar.date(from: comps)
+    guard let constructed = utcCalendar.date(from: comps),
+      utcCalendar.component(.month, from: constructed) == month,
+      utcCalendar.component(.day, from: constructed) == day
+    else {
+      return nil
+    }
+    return constructed
   }
 
   internal static func formatUTCDate(_ date: Date) -> String {
@@ -1256,6 +1387,26 @@ extension WorksheetModel {
   }
 
   internal static func parseDateValue(_ value: EvaluatedCellValue) -> Date? {
+    if case .number(let n) = value, n.isFinite {
+      let intVal = Int(floor(n))
+      if intVal >= 19_000_101 && intVal <= 99_991_231 {
+        let y = intVal / 10_000
+        let m = (intVal / 100) % 100
+        let d = intVal % 100
+        if let ymd = makeUTCDate(year: y, month: m, day: d, allowRollover: false) {
+          return ymd
+        }
+      }
+      if intVal >= 1 && intVal <= 2_958_465 {
+        var epochComps = DateComponents()
+        epochComps.year = 1899
+        epochComps.month = 12
+        epochComps.day = intVal < 60 ? 31 : 30
+        if let base = utcCalendar.date(from: epochComps) {
+          return utcCalendar.date(byAdding: .day, value: intVal, to: base)
+        }
+      }
+    }
     let raw = value.description.trimmingCharacters(in: .whitespacesAndNewlines)
     let separators = CharacterSet(charactersIn: "-/.")
     let parts = raw.components(separatedBy: separators)
@@ -1264,7 +1415,7 @@ extension WorksheetModel {
       let m = Int(parts[1]),
       let d = Int(parts[2])
     {
-      return makeUTCDate(year: y, month: m, day: d)
+      return makeUTCDate(year: y, month: m, day: d, allowRollover: false)
     }
     return nil
   }

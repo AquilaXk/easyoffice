@@ -341,10 +341,10 @@ public enum EvaluatedCellValue: Sendable, Codable, Equatable, CustomStringConver
     case .empty:
       return ""
     case .number(let val):
-      if val.rounded() == val {
+      if val.isFinite && val.rounded() == val && abs(val) < 1e15 {
         return String(format: "%.0f", val)
       }
-      return String(format: "%.4g", val)
+      return String(format: "%.10g", val)
     case .text(let str):
       return str
     case .boolean(let flag):
@@ -709,6 +709,34 @@ public struct WorksheetSheetPage: Sendable, Codable, Equatable, Identifiable {
 // MARK: - FormulaAST Compiler
 
 extension WorksheetModel {
+  /// Maximum UTF-8 byte length permitted for a single formula input string.
+  public static let maxFormulaUTF8Bytes = 8_192
+  /// Maximum lexical token count permitted in a single formula input string.
+  public static let maxFormulaTokenCount = 2_048
+  /// Maximum syntax tree recursion depth permitted when parsing a formula.
+  public static let maxFormulaParseDepth = 64
+
+  private static func estimateFormulaTokenCount(_ utf8Source: String) -> Int {
+    var tokens = 0
+    var inAlnum = false
+    for b in utf8Source.utf8 {
+      let isWord =
+        (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A)
+        || (b >= 0x61 && b <= 0x7A) || b == 0x5F || b == 0x2E || b == 0x24
+      if isWord {
+        if !inAlnum {
+          tokens += 1
+          inAlnum = true
+        }
+      } else {
+        inAlnum = false
+        if b != 0x20 && b != 0x09 && b != 0x0A && b != 0x0D {
+          tokens += 1
+        }
+      }
+    }
+    return tokens
+  }
 
   public static func compileCellInput(_ raw: String) -> FormulaAST {
     guard !raw.isEmpty else { return .empty }
@@ -725,21 +753,28 @@ extension WorksheetModel {
       }
       return .literalText(raw)
     }
+    if trimmed.utf8.count > maxFormulaUTF8Bytes {
+      return .error(.value)
+    }
+    if estimateFormulaTokenCount(trimmed) > maxFormulaTokenCount {
+      return .error(.value)
+    }
     let expression = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
-    return compileExpression(expression)
+    return compileExpression(expression, depth: 0)
   }
 
-  public static func compileExpression(_ expr: String) -> FormulaAST {
+  public static func compileExpression(_ expr: String, depth: Int = 0) -> FormulaAST {
+    guard depth <= maxFormulaParseDepth else { return .error(.value) }
     let trimmed = expr.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return .empty }
 
     // 1. Top-level comparison: >=, <=, <>, =, >, <
-    if let cmpAST = compileTopLevelComparison(trimmed) {
+    if let cmpAST = compileTopLevelComparison(trimmed, depth: depth) {
       return cmpAST
     }
 
-    // 2. Binary arithmetic: +, -, *, /
-    if let arithAST = compileBinaryArithmetic(trimmed) {
+    // 2. Binary arithmetic & concatenation: &, +, -, *, /, ^
+    if let arithAST = compileBinaryArithmetic(trimmed, depth: depth) {
       return arithAST
     }
 
@@ -749,7 +784,7 @@ extension WorksheetModel {
         == trimmed.index(before: trimmed.endIndex)
     {
       let inner = String(trimmed.dropFirst().dropLast())
-      return compileExpression(inner)
+      return compileExpression(inner, depth: depth + 1)
     }
 
     // 4. Function call: FUNCNAME(args...)
@@ -766,7 +801,7 @@ extension WorksheetModel {
         let argString = innerStart <= innerEnd ? String(trimmed[innerStart..<innerEnd]) : ""
         let rawArgs = splitTopLevelArguments(argString)
         let compiledArgs = rawArgs.map { arg -> FormulaAST in
-          compileExpression(arg.trimmingCharacters(in: .whitespacesAndNewlines))
+          compileExpression(arg.trimmingCharacters(in: .whitespacesAndNewlines), depth: depth + 1)
         }
         return .functionCall(name: funcName, args: compiledArgs)
       }
@@ -797,13 +832,13 @@ extension WorksheetModel {
     if trimmed.hasPrefix("+") && trimmed.count > 1 {
       let inner = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
       if !inner.isEmpty {
-        return compileExpression(inner)
+        return compileExpression(inner, depth: depth + 1)
       }
     }
     if trimmed.hasPrefix("-") && trimmed.count > 1 {
       let inner = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
       if !inner.isEmpty {
-        return .unaryMinus(compileExpression(inner))
+        return .unaryMinus(compileExpression(inner, depth: depth + 1))
       }
     }
 
@@ -811,16 +846,17 @@ extension WorksheetModel {
     if trimmed.hasSuffix("%") && trimmed.count > 1 && !trimmed.hasPrefix("\"") {
       let inner = String(trimmed.dropLast()).trimmingCharacters(in: .whitespaces)
       if !inner.isEmpty {
-        return .binaryOp(op: "/", lhs: compileExpression(inner), rhs: .number(100.0))
+        return .binaryOp(
+          op: "/", lhs: compileExpression(inner, depth: depth + 1), rhs: .number(100.0))
       }
     }
 
-    // 9. Cross-sheet reference (e.g. Sheet2!A1, 'Summary Sheet'!B2:D10)
+    // 10. Cross-sheet reference (e.g. Sheet2!A1, 'Summary Sheet'!B2:D10)
     if let crossSheetRef = parseCrossSheetReference(trimmed) {
       return crossSheetRef
     }
 
-    // 10. Same-sheet range reference (e.g. A1:B5)
+    // 11. Same-sheet range reference (e.g. A1:B5)
     if trimmed.contains(":") && !trimmed.contains("(") && !trimmed.contains("\"") {
       if let range = try? CellRange(notation: trimmed) {
         return .rangeRef(range)
@@ -828,12 +864,12 @@ extension WorksheetModel {
       return .error(.ref)
     }
 
-    // 11. Direct cell reference
+    // 12. Direct cell reference
     if let addr = try? CellAddress(a1Notation: trimmed) {
       return .cellRef(addr.packedCoordinate)
     }
 
-    // 12. Named range identifier
+    // 13. Named range identifier
     if isValidNamedRangeIdentifier(trimmed) {
       return .namedRangeRef(trimmed)
     }
@@ -911,7 +947,7 @@ extension WorksheetModel {
     }
   }
 
-  private static func compileTopLevelComparison(_ expr: String) -> FormulaAST? {
+  private static func compileTopLevelComparison(_ expr: String, depth: Int) -> FormulaAST? {
     let utf8 = expr.utf8
     var parenDepth = 0
     var inDoubleQuotes = false
@@ -963,8 +999,8 @@ extension WorksheetModel {
             guard !leftStr.isEmpty, !rightStr.isEmpty else { return nil }
             return .comparisonOp(
               op: op,
-              lhs: compileExpression(leftStr),
-              rhs: compileExpression(rightStr)
+              lhs: compileExpression(leftStr, depth: depth + 1),
+              rhs: compileExpression(rightStr, depth: depth + 1)
             )
           }
         }
@@ -974,12 +1010,14 @@ extension WorksheetModel {
     return nil
   }
 
-  private static func compileBinaryArithmetic(_ expr: String) -> FormulaAST? {
+  private static func compileBinaryArithmetic(_ expr: String, depth: Int) -> FormulaAST? {
     let utf8 = expr.utf8
     guard !utf8.isEmpty else { return nil }
     let operatorPasses: [(UInt8, UInt8)] = [
+      (0x26, 0x26),  // '&'
       (0x2B, 0x2D),  // '+', '-'
       (0x2A, 0x2F),  // '*', '/'
+      (0x5E, 0x5E),  // '^'
     ]
     for (opA, opB) in operatorPasses {
       var parenDepth = 0
@@ -1009,16 +1047,25 @@ extension WorksheetModel {
           if lhsStr.isEmpty || rhsStr.isEmpty { continue }
           if let prevByte = lhsStr.utf8.last,
             prevByte == 0x2B || prevByte == 0x2D || prevByte == 0x2A || prevByte == 0x2F
-              || prevByte == 0x28 || prevByte == 0x2C || prevByte == 0x3D || prevByte == 0x3C
-              || prevByte == 0x3E
+              || prevByte == 0x5E || prevByte == 0x26 || prevByte == 0x28 || prevByte == 0x2C
+              || prevByte == 0x3D || prevByte == 0x3C || prevByte == 0x3E
           {
             continue
           }
-          let opStr = b == 0x2B ? "+" : (b == 0x2D ? "-" : (b == 0x2A ? "*" : "/"))
+          let opStr: String
+          switch b {
+          case 0x26: opStr = "&"
+          case 0x2B: opStr = "+"
+          case 0x2D: opStr = "-"
+          case 0x2A: opStr = "*"
+          case 0x2F: opStr = "/"
+          case 0x5E: opStr = "^"
+          default: opStr = "+"
+          }
           return .binaryOp(
             op: opStr,
-            lhs: compileExpression(lhsStr),
-            rhs: compileExpression(rhsStr)
+            lhs: compileExpression(lhsStr, depth: depth + 1),
+            rhs: compileExpression(rhsStr, depth: depth + 1)
           )
         }
       }

@@ -19,7 +19,7 @@ public struct PDFAnnotationItem: Sendable, Codable, Equatable, Identifiable {
 
   public init(
     id: UUID = UUID(), pageNumber: Int, kind: PDFAnnotationKind, content: String,
-    author: String = "Workspace User"
+    author: String = "표준 문서 작성자"
   ) {
     self.id = id
     self.pageNumber = max(1, pageNumber)

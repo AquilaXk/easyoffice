@@ -508,6 +508,10 @@ public enum WorkspaceFileDialogPresenter {
   }
 
   public static func copySelectionToPasteboard(viewModel: WorkspaceViewModel) {
+    if let responder = NSApp?.keyWindow?.firstResponder, responder is NSText {
+      NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+      return
+    }
     guard let activeTab = viewModel.activeTab else { return }
     let textToCopy: String
     switch activeTab.payload {
@@ -550,6 +554,10 @@ public enum WorkspaceFileDialogPresenter {
   }
 
   public static func pasteFromPasteboard(viewModel: WorkspaceViewModel) {
+    if let responder = NSApp?.keyWindow?.firstResponder, responder is NSText {
+      NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+      return
+    }
     guard let activeTab = viewModel.activeTab,
       let pasted = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(
         in: .whitespacesAndNewlines),
@@ -585,6 +593,42 @@ public struct MainWorkspaceWindowView: View {
       VStack(spacing: 0) {
         TopDocumentTabStripView(viewModel: viewModel)
         Divider()
+
+        if let pendingID = viewModel.pendingCloseConfirmTabID,
+          let pendingTab = viewModel.openTabs.first(where: { $0.id == pendingID })
+        {
+          HStack(spacing: 10) {
+            Text("'\(pendingTab.fileName)' 탭에 저장되지 않은 변경사항이 있습니다.")
+              .font(.system(size: 11, weight: .semibold))
+              .foregroundStyle(palette.primaryText.swiftUIColor)
+            Spacer()
+            Button("저장 후 닫기") {
+              WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
+              viewModel.confirmCloseTab(id: pendingID)
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+
+            Button("저장 안 함") {
+              viewModel.confirmCloseTab(id: pendingID)
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+
+            Button("취소") {
+              viewModel.cancelCloseTab()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .regular))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+          }
+          .padding(.horizontal, 14)
+          .padding(.vertical, 6)
+          .background(palette.elevatedSurface.swiftUIColor)
+          Divider()
+        }
 
         if viewModel.isShowingHomeHub || viewModel.activeTab == nil {
           HomeHubWorkspaceView(viewModel: viewModel)
@@ -802,7 +846,7 @@ struct TopDocumentTabStripView: View {
               }
 
               Button {
-                viewModel.closeTab(id: tab.id)
+                viewModel.requestCloseTab(id: tab.id)
               } label: {
                 Image(systemName: "xmark")
                   .font(.system(size: 9, weight: .semibold))
@@ -849,11 +893,16 @@ struct TopDocumentTabStripView: View {
                     secondaryTabID: viewModel.splitSecondaryTabID == tab.id ? nil : tab.id)
                 }
               }
+              if !viewModel.recentlyClosedTabs.isEmpty {
+                Button("최근 닫은 탭 다시 열기") {
+                  _ = viewModel.reopenLastClosedTab()
+                }
+              }
               Divider()
               if viewModel.openTabs.count > 1 {
                 Button("다른 탭 닫기") { viewModel.closeOtherTabs(keeping: tab.id) }
               }
-              Button("탭 닫기", role: .destructive) { viewModel.closeTab(id: tab.id) }
+              Button("탭 닫기", role: .destructive) { viewModel.requestCloseTab(id: tab.id) }
             }
 
             Rectangle()
@@ -1216,7 +1265,7 @@ struct ContextRibbonBarView: View {
       if commandID.hasSuffix("-layout-orientation") || commandID.hasSuffix("-layout-orient") {
         return doc.sections.first?.orientation == .landscape
       }
-      if commandID == "doc-rev-track" { return doc.trackChangesEnabled }
+      if commandID.hasSuffix("-review-track") { return doc.trackChangesEnabled }
       return false
     case .sheet(let sheet):
       let style = sheet.cellStyle(at: viewModel.selectedSheetCell)

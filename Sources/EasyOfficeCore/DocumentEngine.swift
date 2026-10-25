@@ -410,6 +410,7 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
   public var images: [EmbeddedImageAttachment]
   public var equations: [DocumentEquationBlock]
   public var watermarkText: String?
+  public var preservedArchiveEntries: [String: Data] = [:]
 
   public init(
     id: UUID = UUID(), title: String, format: DocumentFormat = .docx,

@@ -458,11 +458,15 @@ public enum ZipContainerCodec {
     guard !path.isEmpty else {
       throw EasyOfficeError.securityViolation(detail: "비어 있는 ZIP 엔트리 경로는 허용되지 않습니다.")
     }
-    if path.hasPrefix("/") || path.contains("\\") || path.utf8.contains(0) {
+    if path.hasPrefix("/") || path.contains("\\") || path.contains(":") || path.utf8.contains(0) {
       throw EasyOfficeError.securityViolation(
-        detail: "절대 경로, 역슬래시, 또는 NUL 바이트가 포함된 ZIP 경로: \(path)")
+        detail: "절대 경로, 역슬래시, 드라이브 구분자, 또는 NUL 바이트가 포함된 ZIP 경로: \(path)")
     }
-    let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+    let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
+    guard !trimmed.isEmpty else {
+      throw EasyOfficeError.securityViolation(detail: "비어 있는 ZIP 디렉터리 경로: \(path)")
+    }
+    let segments = trimmed.split(separator: "/", omittingEmptySubsequences: false)
     for segment in segments {
       if segment.isEmpty || segment == "." || segment == ".." {
         throw EasyOfficeError.securityViolation(
@@ -582,6 +586,8 @@ public enum ZipContainerCodec {
 
     var results: [ZipContainerEntry] = []
     results.reserveCapacity(entryCount)
+    var seenPaths = Set<String>()
+    seenPaths.reserveCapacity(entryCount)
 
     var cdCursor = centralDirOffset
     var totalUncompressedBytes = 0
@@ -621,6 +627,9 @@ public enum ZipContainerCodec {
         throw EasyOfficeError.corruptedContainer(detail: "ZIP 엔트리 파일명이 유효한 UTF-8이 아닙니다.")
       }
       try validateEntryPath(path)
+      guard seenPaths.insert(path).inserted else {
+        throw EasyOfficeError.securityViolation(detail: "중복된 ZIP 엔트리 경로가 감지되었습니다: \(path)")
+      }
 
       guard uncompressedSize >= 0, uncompressedSize <= policy.maxSingleEntryUncompressedBytes else {
         throw EasyOfficeError.securityViolation(
@@ -653,10 +662,28 @@ public enum ZipContainerCodec {
       }
       let localNameLen = Int(try BitPacking.readUInt16LE(from: data, at: localHeaderOffset + 26))
       let localExtraLen = Int(try BitPacking.readUInt16LE(from: data, at: localHeaderOffset + 28))
+      guard localHeaderOffset >= 0,
+        localHeaderOffset + 30 + localNameLen <= data.count
+      else {
+        throw EasyOfficeError.corruptedContainer(detail: "Local File Header 파일명 영역이 절단되었습니다.")
+      }
+      let localNameData = data.subdata(
+        in: (data.startIndex + localHeaderOffset + 30)..<(data.startIndex + localHeaderOffset + 30
+          + localNameLen))
+      guard localNameData == nameData else {
+        throw EasyOfficeError.securityViolation(
+          detail: "ZIP Local File Header 파일명과 Central Directory 파일명이 일치하지 않습니다: \(path)")
+      }
+
       let payloadStart = localHeaderOffset + 30 + localNameLen + localExtraLen
       guard payloadStart >= 0, compressedSize >= 0, payloadStart + compressedSize <= data.count
       else {
         throw EasyOfficeError.corruptedContainer(detail: "ZIP 엔트리 '\(path)' 데이터 영역이 파일 경계를 벗어납니다.")
+      }
+
+      if path.hasSuffix("/") && uncompressedSize == 0 {
+        cdCursor = nameStart + nameLen + extraLen + commentLen
+        continue
       }
 
       let compressedSlice = data.subdata(
