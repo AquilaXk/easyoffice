@@ -1,3 +1,4 @@
+import AppKit
 import EasyOfficeCore
 import EasyOfficeDesignSystem
 import Observation
@@ -69,50 +70,78 @@ struct HomeHubWorkspaceView: View {
 
           case .home, .recent, .pinned, .templates:
             VStack(alignment: .leading, spacing: 10) {
-              Text("새 문서 만들기")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(palette.primaryText.swiftUIColor)
+              HStack {
+                Text("새 빈 문서 만들기")
+                  .font(.system(size: 16, weight: .bold))
+                  .foregroundStyle(palette.primaryText.swiftUIColor)
+                Spacer()
+                Button("디스크 파일 열기...") {
+                  WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              }
 
               HStack(spacing: 12) {
                 ForEach(OfficeModuleKind.allCases) { module in
                   let accent = EasyOfficeDesignTokens.accentToken(for: module)
-                  Button {
-                    viewModel.openNewSampleTab(for: module)
-                  } label: {
-                    VStack(alignment: .leading, spacing: 0) {
-                      Rectangle()
-                        .fill(accent.swiftUIColor)
-                        .frame(height: 3)
+                  VStack(alignment: .leading, spacing: 0) {
+                    Rectangle()
+                      .fill(accent.swiftUIColor)
+                      .frame(height: 3)
 
-                      VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                          Image(systemName: module.systemSymbolName)
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(accent.swiftUIColor)
-                          Spacer(minLength: 4)
-                          Text(module.quickLauncherFormatBadge)
-                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(accent.swiftUIColor)
-                        }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                          Text(module.quickLauncherCardTitleKo)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(palette.primaryText.swiftUIColor)
-                            .lineLimit(1)
-                          Text(module.displayNameKo)
-                            .font(.system(size: 11))
-                            .foregroundStyle(palette.secondaryText.swiftUIColor)
-                            .lineLimit(1)
-                        }
+                    VStack(alignment: .leading, spacing: 8) {
+                      HStack {
+                        Image(systemName: module.systemSymbolName)
+                          .font(.system(size: 20, weight: .semibold))
+                          .foregroundStyle(accent.swiftUIColor)
+                        Spacer(minLength: 4)
+                        Text(module.quickLauncherFormatBadge)
+                          .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                          .foregroundStyle(accent.swiftUIColor)
                       }
-                      .padding(12)
+
+                      VStack(alignment: .leading, spacing: 2) {
+                        Text(module.quickLauncherCardTitleKo)
+                          .font(.system(size: 13, weight: .bold))
+                          .foregroundStyle(palette.primaryText.swiftUIColor)
+                          .lineLimit(1)
+                        Text(module.displayNameKo)
+                          .font(.system(size: 11))
+                          .foregroundStyle(palette.secondaryText.swiftUIColor)
+                          .lineLimit(1)
+                      }
+
+                      HStack(spacing: 8) {
+                        Button("새 빈 문서") {
+                          _ = viewModel.openNewBlankTab(for: module)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(accent.swiftUIColor)
+
+                        Text("·")
+                          .font(.system(size: 10))
+                          .foregroundStyle(palette.secondaryText.swiftUIColor)
+
+                        Button("샘플") {
+                          viewModel.openNewSampleTab(for: module)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(palette.secondaryText.swiftUIColor)
+                      }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(palette.cardSurface.swiftUIColor)
-                    .border(palette.border.swiftUIColor, width: 1)
+                    .padding(12)
                   }
-                  .buttonStyle(.plain)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .background(palette.cardSurface.swiftUIColor)
+                  .border(palette.border.swiftUIColor, width: 1)
+                  .contentShape(Rectangle())
+                  .onTapGesture {
+                    _ = viewModel.openNewBlankTab(for: module)
+                  }
                 }
               }
             }
@@ -360,8 +389,7 @@ struct HomeHubWorkspaceView: View {
                     .padding(.horizontal, 4)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                      viewModel.activeTabID = tab.id
-                      viewModel.isShowingHomeHub = false
+                      viewModel.activateOrReopenRecentTab(tab)
                     }
 
                     Divider()
@@ -541,6 +569,20 @@ struct BatchConversionStudioHubView: View {
 
         Spacer()
 
+        Button("디스크 파일 불러오기...") {
+          let panel = NSOpenPanel()
+          panel.title = "일괄 변환할 문서 파일 선택"
+          panel.canChooseFiles = true
+          panel.canChooseDirectories = false
+          panel.allowsMultipleSelection = true
+          if panel.runModal() == .OK, !panel.urls.isEmpty {
+            viewModel.enqueueFilesFromDiskIntoBatchConversion(urls: panel.urls)
+          }
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 11.5, weight: .medium))
+        .foregroundStyle(palette.primaryText.swiftUIColor)
+
         FlatToolbarMenu(
           title: "목표 포맷: \(viewModel.batchTargetFormat.rawValue.uppercased())",
           symbolName: "doc.badge.gearshape",
@@ -555,7 +597,7 @@ struct BatchConversionStudioHubView: View {
         }
 
         Button("열린 탭 전체 변환 실행") {
-          viewModel.runBatchConversionForOpenTabs()
+          viewModel.runAllBatchConversions()
         }
         .buttonStyle(.plain)
         .font(.system(size: 12, weight: .semibold))
@@ -578,6 +620,27 @@ struct BatchConversionStudioHubView: View {
                 ? EasyOfficeDesignTokens.statusDanger.swiftUIColor
                 : palette.secondaryText.swiftUIColor
             )
+          Spacer()
+          if !report.succeededResults.isEmpty {
+            Button("전체 결과 폴더에 저장...") {
+              let panel = NSOpenPanel()
+              panel.title = "일괄 변환 결과 저장 폴더 선택"
+              panel.canChooseFiles = false
+              panel.canChooseDirectories = true
+              panel.canCreateDirectories = true
+              panel.allowsMultipleSelection = false
+              if panel.runModal() == .OK, let dirURL = panel.url {
+                do {
+                  _ = try viewModel.exportAllCompletedBatchItems(toDirectory: dirURL)
+                } catch {
+                  viewModel.lastErrorMessage = error.localizedDescription
+                }
+              }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          }
         }
 
         Divider()
@@ -608,6 +671,23 @@ struct BatchConversionStudioHubView: View {
                 Text("완료 · \(item.outputBytes.count) B")
                   .font(.system(size: 11, design: .monospaced))
                   .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+
+                Button("디스크에 저장...") {
+                  let panel = NSSavePanel()
+                  panel.title = "변환된 문서 저장"
+                  panel.nameFieldStringValue = item.outputFileName
+                  panel.canCreateDirectories = true
+                  if panel.runModal() == .OK, let saveURL = panel.url {
+                    do {
+                      try viewModel.exportBatchConversionItem(result: item, to: saveURL)
+                    } catch {
+                      viewModel.lastErrorMessage = error.localizedDescription
+                    }
+                  }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
               }
               .padding(.vertical, 8)
 
