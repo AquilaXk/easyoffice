@@ -745,8 +745,8 @@ final class EasyOfficeTests: XCTestCase {
 
   @MainActor
   func testContainerHardeningArchivePreservationAndWorkspaceCommercialUX() throws {
-    let dirtyText = "정상\u{0000}제어\u{0007}문자\u{001F}제거\n유지\t탭"
-    XCTAssertEqual(XMLSanitizer.escape(dirtyText), "정상제어문자제거\n유지\t탭")
+    let dirtyText = "정상\u{0000}제어\u{0007}문자\u{001F}제거\u{FFFE}비문자\u{FFFF}\n유지\t탭"
+    XCTAssertEqual(XMLSanitizer.escape(dirtyText), "정상제어문자제거비문자\n유지\t탭")
 
     let clampedSpan = TableCellSpan(rowIndex: 0, columnIndex: 0, rowSpan: 9999, columnSpan: -3)
     XCTAssertEqual(clampedSpan.rowSpan, TableCellSpan.maxSpan)
@@ -757,7 +757,10 @@ final class EasyOfficeTests: XCTestCase {
       title: "보존검증",
       paragraphs: [para]
     )
-    doc.preservedArchiveEntries = ["word/customXml/item1.xml": Data("<item/>".utf8)]
+    doc.preservedArchiveEntries = [
+      "word/customXml/item1.xml": Data("<item>010-1234-5678</item>".utf8),
+      "word/comments.xml": Data("<comments>민감 메모</comments>".utf8),
+    ]
     doc.revisions.append(
       TrackedRevision(
         author: "작성자",
@@ -775,19 +778,39 @@ final class EasyOfficeTests: XCTestCase {
     let roundTrippedDoc = try OOXMLContainerCodec.decodeDocument(from: docxData)
     XCTAssertEqual(
       roundTrippedDoc.preservedArchiveEntries["word/customXml/item1.xml"],
-      Data("<item/>".utf8)
+      Data("<item>010-1234-5678</item>".utf8)
     )
 
     let scrubbedResult = DocumentSecurityAuditor.scrubPayload(.document(doc))
-    XCTAssertGreaterThanOrEqual(scrubbedResult.removedItemCount, 2)
+    XCTAssertGreaterThanOrEqual(scrubbedResult.removedItemCount, 3)
     if case .document(let scrubbedDoc) = scrubbedResult.scrubbed {
       XCTAssertEqual(scrubbedDoc.revisions.first?.author, "Redacted")
       XCTAssertTrue(scrubbedDoc.comments.isEmpty)
       XCTAssertFalse(scrubbedDoc.paragraphs[0].text.contains("010-1234-5678"))
       XCTAssertFalse(scrubbedDoc.paragraphs[0].text.contains("user@example.kr"))
+      XCTAssertNil(scrubbedDoc.preservedArchiveEntries["word/comments.xml"])
+      let customItemText = String(
+        decoding: scrubbedDoc.preservedArchiveEntries["word/customXml/item1.xml"] ?? Data(),
+        as: UTF8.self
+      )
+      XCTAssertFalse(customItemText.contains("010-1234-5678"))
     } else {
       XCTFail("Expected scrubbed document payload")
     }
+
+    let xxeOdtEntries = [
+      ZipContainerEntry(path: "mimetype", data: Data(ODFContainerCodec.textMimeType.utf8)),
+      ZipContainerEntry(
+        path: "content.xml",
+        data: Data("<office:document-content><text:p>본문</text:p></office:document-content>".utf8)
+      ),
+      ZipContainerEntry(
+        path: "styles.xml",
+        data: Data("<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><styles/>".utf8)
+      ),
+    ]
+    let xxeOdtData = try ZipContainerCodec.pack(entries: xxeOdtEntries)
+    XCTAssertThrowsError(try ODFContainerCodec.decodeDocument(from: xxeOdtData))
 
     let vm = WorkspaceViewModel()
     let initialCount = vm.openTabs.count
@@ -795,6 +818,8 @@ final class EasyOfficeTests: XCTestCase {
     vm.openTabs[0].isModified = true
     vm.requestCloseTab(id: activeID)
     XCTAssertEqual(vm.pendingCloseConfirmTabID, activeID)
+    XCTAssertEqual(vm.openTabs.count, initialCount)
+    vm.confirmCloseTab(id: activeID, saveTo: URL(fileURLWithPath: "/nonexistent_dir_eo/fail.docx"))
     XCTAssertEqual(vm.openTabs.count, initialCount)
     vm.confirmCloseTab(id: activeID)
     XCTAssertNil(vm.pendingCloseConfirmTabID)

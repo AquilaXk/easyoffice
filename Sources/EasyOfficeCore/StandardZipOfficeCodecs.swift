@@ -1307,8 +1307,8 @@ public enum OOXMLContainerCodec {
           XMLSanitizer.unescape($0.innerXML)
         } ?? ""
       let notesPath = "ppt/notesSlides/notesSlide\(idx + 1).xml"
+      consumedPaths.insert(notesPath)
       if notes.isEmpty, let notesSlideXML = entryMap[notesPath] {
-        consumedPaths.insert(notesPath)
         let noteTexts = XMLSanitizer.extractElements(named: "a:t", in: notesSlideXML).map {
           XMLSanitizer.unescape($0.innerXML)
         }

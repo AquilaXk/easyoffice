@@ -617,7 +617,44 @@ public enum DocumentSecurityAuditor {
       }
     }
 
+    let (scrubbedPreserved, preservedRemoved) = scrubPreservedArchiveEntries(
+      copy.preservedArchiveEntries)
+    copy.preservedArchiveEntries = scrubbedPreserved
+    removedCount += preservedRemoved
+
     return (copy, removedCount)
+  }
+
+  private static func scrubPreservedArchiveEntries(
+    _ entries: [String: Data]
+  ) -> (scrubbed: [String: Data], removedCount: Int) {
+    guard !entries.isEmpty else { return (entries, 0) }
+    var out: [String: Data] = [:]
+    var removedCount = 0
+    for (path, data) in entries {
+      if XMLDocumentModelMapper.isBinaryMediaPath(path) {
+        out[path] = data
+        continue
+      }
+      let lower = path.lowercased()
+      if lower.contains("comment") || lower.contains("notesslide")
+        || lower.contains("revision") || lower.contains("people.xml")
+        || lower.hasSuffix("meta.xml") || lower.hasSuffix("core.xml")
+        || lower.hasSuffix("custom.xml") || lower.contains("header")
+        || lower.contains("footer")
+      {
+        removedCount += 1
+        continue
+      }
+      if let xmlText = String(data: data, encoding: .utf8) {
+        let (maskedText, count) = maskSensitivePatterns(in: xmlText)
+        removedCount += count
+        out[path] = Data(maskedText.utf8)
+      } else {
+        out[path] = data
+      }
+    }
+    return (out, removedCount)
   }
 
   public static func scrubPayload(
@@ -653,6 +690,10 @@ public enum DocumentSecurityAuditor {
           }
         }
       }
+      let (scrubbedSheetPreserved, sheetPreservedRemoved) = scrubPreservedArchiveEntries(
+        sheet.preservedArchiveEntries)
+      sheet.preservedArchiveEntries = scrubbedSheetPreserved
+      removedCount += sheetPreservedRemoved
       return (.sheet(sheet), removedCount)
 
     case .slide(var deck):
@@ -687,6 +728,10 @@ public enum DocumentSecurityAuditor {
           }
         }
       }
+      let (scrubbedSlidePreserved, slidePreservedRemoved) = scrubPreservedArchiveEntries(
+        deck.preservedArchiveEntries)
+      deck.preservedArchiveEntries = scrubbedSlidePreserved
+      removedCount += slidePreservedRemoved
       return (.slide(deck), removedCount)
 
     case .pdf(var pdf):

@@ -403,6 +403,8 @@ public enum ODFContainerCodec {
     for entry in entries {
       if XMLDocumentModelMapper.isBinaryMediaPath(entry.path) {
         binaryEntries[entry.path] = entry.data
+      } else if XMLDocumentModelMapper.isXMLValidatedPath(entry.path) {
+        _ = try XMLSanitizer.validateSafeXMLData(entry.data)
       }
       if entry.path != "mimetype" && entry.path != "content.xml" {
         preservedEntries[entry.path] = entry.data
@@ -564,6 +566,11 @@ public enum ODFContainerCodec {
     }
     var preservedEntries: [String: Data] = [:]
     for entry in entries where entry.path != "mimetype" && entry.path != "content.xml" {
+      if !XMLDocumentModelMapper.isBinaryMediaPath(entry.path)
+        && XMLDocumentModelMapper.isXMLValidatedPath(entry.path)
+      {
+        _ = try XMLSanitizer.validateSafeXMLData(entry.data)
+      }
       preservedEntries[entry.path] = entry.data
     }
     let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)
@@ -727,6 +734,11 @@ public enum ODFContainerCodec {
     }
     var preservedEntries: [String: Data] = [:]
     for entry in entries where entry.path != "mimetype" && entry.path != "content.xml" {
+      if !XMLDocumentModelMapper.isBinaryMediaPath(entry.path)
+        && XMLDocumentModelMapper.isXMLValidatedPath(entry.path)
+      {
+        _ = try XMLSanitizer.validateSafeXMLData(entry.data)
+      }
       preservedEntries[entry.path] = entry.data
     }
     let xml = try XMLSanitizer.validateSafeXMLData(contentEntry.data)

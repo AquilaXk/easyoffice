@@ -439,7 +439,12 @@ public final class WorkspaceViewModel {
 
   public func confirmCloseTab(id: UUID, saveTo url: URL? = nil) {
     if let url {
-      try? saveTabToDisk(id: id, to: url)
+      do {
+        try saveTabToDisk(id: id, to: url)
+      } catch {
+        lastErrorMessage = error.localizedDescription
+        return
+      }
     }
     closeTab(id: id)
   }

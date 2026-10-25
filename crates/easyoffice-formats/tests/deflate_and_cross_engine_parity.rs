@@ -342,6 +342,12 @@ fn test_xml_control_stripping_zip_duplicate_lfh_mismatch_and_multiline_pdf_harde
         escaped,
         XmlSanitizer::escape_scalar_baseline("A\x00B\x08C\tD\nE\x1FF\u{FFFE}G&H")
     );
+    for sample in ["\t\x08AAAAAA", "\n\x0BAAAAAA", "\r\x0CAAAAAA"] {
+        assert_eq!(
+            XmlSanitizer::escape(sample),
+            XmlSanitizer::escape_scalar_baseline(sample)
+        );
+    }
 
     let policy = ZipSecurityPolicy::default();
     assert!(ZipSecurityGuard::validate_archive_entries(

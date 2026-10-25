@@ -474,19 +474,26 @@ public enum WorkspaceFileDialogPresenter {
     }
   }
 
-  public static func presentSavePanel(viewModel: WorkspaceViewModel) {
-    guard let activeTab = viewModel.activeTab else { return }
+  @discardableResult
+  public static func presentSavePanel(viewModel: WorkspaceViewModel, tabID: UUID? = nil) -> Bool {
+    let resolvedID = tabID ?? viewModel.activeTab?.id
+    guard let resolvedID,
+      let targetTab = viewModel.openTabs.first(where: { $0.id == resolvedID })
+    else { return false }
     let panel = NSSavePanel()
     panel.title = "현재 문서 저장"
-    panel.nameFieldStringValue = activeTab.fileName
+    panel.nameFieldStringValue = targetTab.fileName
     panel.canCreateDirectories = true
     if panel.runModal() == .OK, let url = panel.url {
       do {
-        try viewModel.saveTabToDisk(id: activeTab.id, to: url)
+        try viewModel.saveTabToDisk(id: targetTab.id, to: url)
+        return true
       } catch {
         viewModel.lastErrorMessage = error.localizedDescription
+        return false
       }
     }
+    return false
   }
 
   public static func presentPrintPanel(viewModel: WorkspaceViewModel) {
@@ -603,8 +610,11 @@ public struct MainWorkspaceWindowView: View {
               .foregroundStyle(palette.primaryText.swiftUIColor)
             Spacer()
             Button("저장 후 닫기") {
-              WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
-              viewModel.confirmCloseTab(id: pendingID)
+              if WorkspaceFileDialogPresenter.presentSavePanel(
+                viewModel: viewModel, tabID: pendingID)
+              {
+                viewModel.confirmCloseTab(id: pendingID)
+              }
             }
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .semibold))

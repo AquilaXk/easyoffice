@@ -1287,12 +1287,9 @@
 
     const btnPdfRotate = document.getElementById("btn-pdf-rotate");
     if (btnPdfRotate) {
-      btnPdfRotate.addEventListener("click", () => {
-        pdfRotationDeg = (pdfRotationDeg + 90) % 360;
-        const badge = document.getElementById("pdf-rotation-badge");
-        const card = document.getElementById("pdf-page-card");
-        if (badge) badge.textContent = "회전: " + pdfRotationDeg + "°";
-        if (card) card.style.transform = "rotate(" + pdfRotationDeg + "deg)";
+      btnPdfRotate.addEventListener("click", async () => {
+        const execRes = await invokeIpc("execute_ribbon_command", "pdf-mod-rotate");
+        applyRibbonDomSideEffects("pdf-mod-rotate", execRes);
       });
     }
     const btnPdfApply = document.getElementById("btn-pdf-apply");

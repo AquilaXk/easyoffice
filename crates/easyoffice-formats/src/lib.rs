@@ -724,13 +724,12 @@ impl XmlSanitizer {
         let m_ef = d_ef.wrapping_sub(LO) & !d_ef;
         let mut m_ctrl = !(word | (word << 1) | (word << 2)) & HI;
         if m_ctrl != 0 {
+            const MASK7F: u64 = 0x7F7F_7F7F_7F7F_7F7F;
+            let zero_byte = |d: u64| !(((d & MASK7F).wrapping_add(MASK7F)) | d) & HI;
             let d_tab = word ^ (0x09u64 * LO);
             let d_lf = word ^ (0x0Au64 * LO);
             let d_cr = word ^ (0x0Du64 * LO);
-            let m_ws = ((d_tab.wrapping_sub(LO) & !d_tab)
-                | (d_lf.wrapping_sub(LO) & !d_lf)
-                | (d_cr.wrapping_sub(LO) & !d_cr))
-                & HI;
+            let m_ws = zero_byte(d_tab) | zero_byte(d_lf) | zero_byte(d_cr);
             m_ctrl &= !m_ws;
         }
         ((m_amp | m_lt | m_gt | m_quot | m_apos | m_ef) & HI) | m_ctrl
