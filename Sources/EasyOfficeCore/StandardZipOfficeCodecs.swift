@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Shared XML Document, Worksheet & Presentation Model Mapper
 
 /// Shared mapper eliminating duplicate paragraph, run, image, table, worksheet, slide, and metadata XML serialization across OOXML, ODF, and HWPX.
-internal enum XMLDocumentModelMapper {
+public enum XMLDocumentModelMapper {
 
   static func sanitizeMediaFileName(_ raw: String) -> String {
     let base = (raw as NSString).lastPathComponent
@@ -139,7 +139,7 @@ internal enum XMLDocumentModelMapper {
     return (entries, xmlEntries, binaryEntries, preservedEntries)
   }
 
-  static func safeClampedInt(
+  public static func safeClampedInt(
     _ value: Double, min minVal: Int = -100_000_000, max maxVal: Int = 100_000_000
   ) -> Int {
     guard value.isFinite else { return Swift.max(minVal, Swift.min(maxVal, 0)) }
@@ -149,7 +149,7 @@ internal enum XMLDocumentModelMapper {
     return Int(clamped)
   }
 
-  static func safeClampedUInt32(
+  public static func safeClampedUInt32(
     _ value: Double, min minVal: UInt32 = 0, max maxVal: UInt32 = 100_000_000
   ) -> UInt32 {
     guard value.isFinite else { return minVal }

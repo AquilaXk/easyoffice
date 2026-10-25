@@ -432,11 +432,38 @@ public enum PDFBinarySerializer {
 
     let lines = rawText.components(separatedBy: .newlines)
     var metadataBase64Payload: String?
+    var metadataPayloadCount = 0
+    var inMetadataObj = false
+    var inMetadataStream = false
+    var streamBodyChunks: [String] = []
     for line in lines {
       let trimmed = line.trimmingCharacters(in: .whitespaces)
+      if trimmed == "endobj" {
+        inMetadataObj = false
+        inMetadataStream = false
+      } else if trimmed.contains("/Type /Metadata") && trimmed.contains("/Subtype /EasyOfficeStudio") {
+        inMetadataObj = true
+      } else if trimmed == "stream" && inMetadataObj {
+        inMetadataStream = true
+      } else if trimmed == "endstream" && inMetadataStream {
+        inMetadataStream = false
+      }
       if trimmed.hasPrefix(modelStreamPrefix) {
+        metadataPayloadCount += 1
+        guard inMetadataStream, metadataPayloadCount == 1 else {
+          throw EasyOfficeError.securityViolation(
+            detail: "PDF 메타데이터 스트림 주석(%EasyOfficePDFModelBase64)이 위조되었거나 중복 주입되었습니다.")
+        }
         metadataBase64Payload = String(trimmed.dropFirst(modelStreamPrefix.count))
         continue
+      }
+      if trimmed.hasPrefix("BT 3 Tr /F1 1 Tf 0 0 Td ("),
+        let openParen = trimmed.firstIndex(of: "("),
+        let closeParen = trimmed.lastIndex(of: ")"),
+        openParen < closeParen
+      {
+        let inner = String(trimmed[trimmed.index(after: openParen)..<closeParen])
+        streamBodyChunks.append(unescapePDFString(inner))
       }
       if !trimmed.hasPrefix("BT "), trimmed.contains("/Encrypt") {
         throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
@@ -446,12 +473,35 @@ public enum PDFBinarySerializer {
       guard let decodedBytes = Data(base64Encoded: b64) else {
         throw EasyOfficeError.corruptedContainer(detail: "PDF 메타데이터 스트림 Base64 디코딩에 실패했습니다.")
       }
+      let decodedModel: PDFStudioDocumentModel
       do {
-        return try JSONDecoder().decode(PDFStudioDocumentModel.self, from: decodedBytes)
+        decodedModel = try JSONDecoder().decode(PDFStudioDocumentModel.self, from: decodedBytes)
       } catch {
         throw EasyOfficeError.corruptedContainer(
           detail: "PDF 모델 역직렬화 실패: \(error.localizedDescription)")
       }
+      var expectedChunks: [String] = []
+      let maxLinesPerPage = 42
+      for page in decodedModel.pages {
+        let allVisualLines = page.extractedText
+          .split(separator: "\n", omittingEmptySubsequences: false)
+          .flatMap { wrapLine(String($0), maxChars: 64) }
+        if allVisualLines.count <= maxLinesPerPage {
+          expectedChunks.append(page.extractedText)
+        } else {
+          var start = 0
+          while start < allVisualLines.count {
+            let end = Swift.min(start + maxLinesPerPage, allVisualLines.count)
+            expectedChunks.append(Array(allVisualLines[start..<end]).joined(separator: "\n"))
+            start = end
+          }
+        }
+      }
+      guard expectedChunks == streamBodyChunks else {
+        throw EasyOfficeError.securityViolation(
+          detail: "PDF 메타데이터 스트림이 페이지 본문 스트림과 일치하지 않습니다.")
+      }
+      return decodedModel
     }
 
     var fallbackPages: [PDFPageDescriptor] = []

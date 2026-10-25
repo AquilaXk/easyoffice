@@ -910,6 +910,11 @@ impl LegacyOle2Codec {
                             push_bullets(s_bullets, txt);
                         }
                     }
+                    0x0010 => {
+                        if !txt.is_empty() {
+                            push_bullets(s_bullets, txt);
+                        }
+                    }
                     0x0020 => *s_notes = txt,
                     0x0030 => push_bullets(s_bullets, txt),
                     _ => {
@@ -1006,6 +1011,8 @@ impl LegacyOle2Codec {
                 let txt = Self::decode_ppt_text_atom(rec_type, &data[r_start..r_end])?;
                 if ver_inst == 0x0000 && depth <= 1 && title == "발표자료" {
                     *title = txt;
+                } else if depth <= 1 && (ver_inst == 0x0010 || ver_inst == 0x0020) {
+                    // Deck-level aspectRatio / deckTheme metadata atoms inside RT_Document
                 } else if let Some(last_slide) = slides.last_mut() {
                     if last_slide.title.is_empty() {
                         last_slide.title = txt;

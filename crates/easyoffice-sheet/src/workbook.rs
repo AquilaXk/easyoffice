@@ -219,9 +219,16 @@ impl SheetEngine {
                     if !row_keys.contains(&key_str) {
                         row_keys.push(key_str.clone());
                     }
-                    if let Some(num) = self.eval_coord_ctx(vc, &mut ctx, 0).as_number() {
+                    let val = self.eval_coord_ctx(vc, &mut ctx, 0);
+                    if let Some(num) = val.as_number() {
                         buckets.entry(key_str).or_default().push(num);
                         all_values.push(num);
+                    } else if aggregation == PivotAggregation::Count
+                        && !matches!(val, EvaluatedCellValue::Empty)
+                        && !val.to_display_string().is_empty()
+                    {
+                        buckets.entry(key_str).or_default().push(1.0);
+                        all_values.push(1.0);
                     }
                 }
             }

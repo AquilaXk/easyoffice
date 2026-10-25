@@ -1057,13 +1057,18 @@ public enum HWP5BinaryCodec {
             from: docInfo, offset: &cursor, limit: recordEnd)
           let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(
             from: docInfo, offset: &cursor, limit: recordEnd)
-          paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
-          headerText = try BitPacking.readLengthPrefixedUTF16LE(
-            from: docInfo, offset: &cursor, limit: recordEnd)
-          footerText = try BitPacking.readLengthPrefixedUTF16LE(
-            from: docInfo, offset: &cursor, limit: recordEnd)
-          if cursor < recordEnd {
-            trackChanges = docInfo[docInfo.startIndex + cursor] != 0
+          if cursor == recordEnd {
+            paperSize = .a4
+            headerText = paperRaw
+          } else {
+            paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
+            headerText = try BitPacking.readLengthPrefixedUTF16LE(
+              from: docInfo, offset: &cursor, limit: recordEnd)
+            footerText = try BitPacking.readLengthPrefixedUTF16LE(
+              from: docInfo, offset: &cursor, limit: recordEnd)
+            if cursor < recordEnd {
+              trackChanges = docInfo[docInfo.startIndex + cursor] != 0
+            }
           }
           parsedDocProps = true
         } else if recHeader.tagID == HWP5RecordHeader.tagExtendedMetadata {
@@ -1115,42 +1120,52 @@ public enum HWP5BinaryCodec {
         var pCursor = payloadStart
         let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(
           from: section0, offset: &pCursor, limit: payloadEnd)
-        let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(
-          from: section0, offset: &pCursor, limit: payloadEnd)
-        let fontName = try BitPacking.readLengthPrefixedUTF16LE(
-          from: section0, offset: &pCursor, limit: payloadEnd)
-        guard pCursor + 9 <= payloadEnd else {
-          throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
-        }
-        let fontSizeX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-        pCursor += 4
-        let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-        pCursor += 4
-        let styleFlags = section0[section0.startIndex + pCursor]
-        pCursor += 1
-        var letterSpacingPct = 0.0
-        var charWidthScalePct = 100.0
-        if pCursor + 8 <= payloadEnd {
-          let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+        if pCursor + 1 == payloadEnd {
+          let isOfficial = section0[section0.startIndex + pCursor] != 0
+          let resolvedStyle: ParagraphStyleRole =
+            isOfficial ? .officialHeader : (ParagraphStyleRole(rawValue: styleRaw) ?? .body)
+          pendingParagraph = ParagraphBlock(
+            style: resolvedStyle,
+            text: ""
+          )
+        } else {
+          let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(
+            from: section0, offset: &pCursor, limit: payloadEnd)
+          let fontName = try BitPacking.readLengthPrefixedUTF16LE(
+            from: section0, offset: &pCursor, limit: payloadEnd)
+          guard pCursor + 9 <= payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
+          }
+          let fontSizeX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
           pCursor += 4
-          let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+          let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
           pCursor += 4
-          letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
-          charWidthScalePct = Double(charScaleX100) / 100.0
+          let styleFlags = section0[section0.startIndex + pCursor]
+          pCursor += 1
+          var letterSpacingPct = 0.0
+          var charWidthScalePct = 100.0
+          if pCursor + 8 <= payloadEnd {
+            let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+            pCursor += 4
+            let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
+            pCursor += 4
+            letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
+            charWidthScalePct = Double(charScaleX100) / 100.0
+          }
+          pendingParagraph = ParagraphBlock(
+            style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
+            alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
+            text: "",
+            fontName: fontName,
+            fontSizePt: Double(fontSizeX100) / 100.0,
+            isBold: (styleFlags & 0x01) != 0,
+            isItalic: (styleFlags & 0x02) != 0,
+            isUnderlined: (styleFlags & 0x04) != 0,
+            lineSpacingPercent: Double(lineSpacingX100) / 100.0,
+            letterSpacingPercent: letterSpacingPct,
+            charWidthScalePercent: charWidthScalePct
+          )
         }
-        pendingParagraph = ParagraphBlock(
-          style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
-          alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
-          text: "",
-          fontName: fontName,
-          fontSizePt: Double(fontSizeX100) / 100.0,
-          isBold: (styleFlags & 0x01) != 0,
-          isItalic: (styleFlags & 0x02) != 0,
-          isUnderlined: (styleFlags & 0x04) != 0,
-          lineSpacingPercent: Double(lineSpacingX100) / 100.0,
-          letterSpacingPercent: letterSpacingPct,
-          charWidthScalePercent: charWidthScalePct
-        )
 
       case HWP5RecordHeader.tagParaText:
         let text = try BitPacking.decodeUTF16LE(
@@ -1164,46 +1179,101 @@ public enum HWP5BinaryCodec {
         }
 
       case HWP5RecordHeader.tagTableRecord:
-        var tCursor = payloadStart
-        let caption = try BitPacking.readLengthPrefixedUTF16LE(
-          from: section0, offset: &tCursor, limit: payloadEnd)
-        guard tCursor + 3 <= payloadEnd else {
-          throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
-        }
-        let hasHeader = section0[section0.startIndex + tCursor] != 0
-        tCursor += 1
-        let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
-        tCursor += 2
-        guard rowCount <= maxHWP5TableRows, rowCount <= (payloadEnd - tCursor) / 2 else {
-          throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
-        }
-        var rows: [[String]] = []
-        rows.reserveCapacity(rowCount)
-        for _ in 0..<rowCount {
-          guard tCursor + 2 <= payloadEnd else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
+        let savedCellTotal = totalDecodedTableCells
+        var decodedTable: DocumentTableBlock?
+        var budgetExceededError: EasyOfficeError?
+        do {
+          var tCursor = payloadStart
+          let caption = try BitPacking.readLengthPrefixedUTF16LE(
+            from: section0, offset: &tCursor, limit: payloadEnd)
+          guard tCursor + 3 <= payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
           }
-          let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
+          let hasHeader = section0[section0.startIndex + tCursor] != 0
+          tCursor += 1
+          let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
           tCursor += 2
-          guard colCount <= maxHWP5TableColumns, colCount * 4 <= payloadEnd - tCursor else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
+          guard rowCount <= maxHWP5TableRows, rowCount <= (payloadEnd - tCursor) / 2 else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
           }
-          totalDecodedTableCells += colCount
-          guard totalDecodedTableCells <= maxTotalHWP5TableCells else {
-            throw EasyOfficeError.corruptedContainer(
-              detail: "HWP 5.0 누적 표 셀 개수(\(totalDecodedTableCells))가 허용 상한(\(maxTotalHWP5TableCells))을 초과했습니다."
-            )
+          var rows: [[String]] = []
+          rows.reserveCapacity(rowCount)
+          for _ in 0..<rowCount {
+            guard tCursor + 2 <= payloadEnd else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
+            }
+            let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
+            tCursor += 2
+            guard colCount <= maxHWP5TableColumns, colCount * 4 <= payloadEnd - tCursor else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
+            }
+            totalDecodedTableCells += colCount
+            guard totalDecodedTableCells <= maxTotalHWP5TableCells else {
+              let err = EasyOfficeError.corruptedContainer(
+                detail: "HWP 5.0 누적 표 셀 개수(\(totalDecodedTableCells))가 허용 상한(\(maxTotalHWP5TableCells))을 초과했습니다."
+              )
+              budgetExceededError = err
+              throw err
+            }
+            var rowCells: [String] = []
+            rowCells.reserveCapacity(colCount)
+            for _ in 0..<colCount {
+              let cell = try BitPacking.readLengthPrefixedUTF16LE(
+                from: section0, offset: &tCursor, limit: payloadEnd)
+              rowCells.append(cell)
+            }
+            rows.append(rowCells)
           }
-          var rowCells: [String] = []
-          rowCells.reserveCapacity(colCount)
-          for _ in 0..<colCount {
-            let cell = try BitPacking.readLengthPrefixedUTF16LE(
-              from: section0, offset: &tCursor, limit: payloadEnd)
-            rowCells.append(cell)
+          guard tCursor == payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 잔여 바이트 불일치")
           }
-          rows.append(rowCells)
+          decodedTable = DocumentTableBlock(caption: caption, rows: rows, hasHeaderRow: hasHeader)
+        } catch {
+          if let budgetErr = budgetExceededError {
+            throw budgetErr
+          }
+          totalDecodedTableCells = savedCellTotal
         }
-        tables.append(DocumentTableBlock(caption: caption, rows: rows, hasHeaderRow: hasHeader))
+        if let table = decodedTable {
+          tables.append(table)
+        } else {
+          var rCursor = payloadStart
+          guard rCursor + 2 <= payloadEnd else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
+          }
+          let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: rCursor))
+          rCursor += 2
+          guard rowCount <= maxHWP5TableRows, rowCount <= (payloadEnd - rCursor) / 2 else {
+            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
+          }
+          var rows: [[String]] = []
+          rows.reserveCapacity(rowCount)
+          for _ in 0..<rowCount {
+            guard rCursor + 2 <= payloadEnd else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
+            }
+            let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: rCursor))
+            rCursor += 2
+            guard colCount <= maxHWP5TableColumns, colCount * 4 <= payloadEnd - rCursor else {
+              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
+            }
+            totalDecodedTableCells += colCount
+            guard totalDecodedTableCells <= maxTotalHWP5TableCells else {
+              throw EasyOfficeError.corruptedContainer(
+                detail: "HWP 5.0 누적 표 셀 개수(\(totalDecodedTableCells))가 허용 상한(\(maxTotalHWP5TableCells))을 초과했습니다."
+              )
+            }
+            var rowCells: [String] = []
+            rowCells.reserveCapacity(colCount)
+            for _ in 0..<colCount {
+              let cell = try BitPacking.readLengthPrefixedUTF16LE(
+                from: section0, offset: &rCursor, limit: payloadEnd)
+              rowCells.append(cell)
+            }
+            rows.append(rowCells)
+          }
+          tables.append(DocumentTableBlock(caption: "", rows: rows, hasHeaderRow: true))
+        }
 
       default:
         break

@@ -1095,7 +1095,7 @@ final class EasyOfficeTests: XCTestCase {
     // 6. Workspace closeOtherTabs & cross-module PDF export dirty protection, CSV XFD1 export, WCAG AA contrast
     var wideCsvSheet = WorksheetModel(name: "Wide")
     try wideCsvSheet.setCell("XFD1", rawValue: "끝열")
-    let wideCsvData = try CSVStateMachineCodec.encodeWorksheet(wideCsvSheet)
+    let wideCsvData = CSVStateMachineCodec.encodeWorksheet(wideCsvSheet)
     XCTAssertTrue(String(decoding: wideCsvData, as: UTF8.self).contains("끝열"))
 
     let vm = WorkspaceViewModel()
@@ -1126,6 +1126,72 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(
       EasyOfficeDesignTokens.darkMuted.contrastRatio(
         against: EasyOfficeDesignTokens.darkSelectedSurface), 4.5)
+
+    // 7. Forged %EasyOfficePDFModelBase64 trailer rejection and Rust compact HWP5/DOC/BIFF8 decoding in Swift
+    var forgedPdfBytes = pdfBytes
+    forgedPdfBytes.append(Data("\n%EasyOfficePDFModelBase64:Zm9yZ2Vk\n".utf8))
+    XCTAssertThrowsError(try PDFBinarySerializer.decode(from: forgedPdfBytes))
+
+    // Rust compact HWP 5.0 record decoding in Swift HWP5BinaryCodec
+    var rustFh = Data(repeating: 0, count: 256)
+    let hwpSig = Data("HWP Document File".utf8)
+    rustFh.replaceSubrange(0..<hwpSig.count, with: hwpSig)
+    rustFh[32] = 0
+    rustFh[33] = 3
+    rustFh[34] = 0
+    rustFh[35] = 5
+    var rustDocPropsPayload = Data()
+    BitPacking.appendLengthPrefixedUTF16LE("러스트문서", to: &rustDocPropsPayload)
+    BitPacking.appendLengthPrefixedUTF16LE("DOC-2026-01", to: &rustDocPropsPayload)
+    var rustDocInfo = try HWP5RecordHeader.encode(
+      tagID: HWP5RecordHeader.tagDocumentProperties,
+      level: 0,
+      payloadSize: UInt32(rustDocPropsPayload.count)
+    )
+    rustDocInfo.append(rustDocPropsPayload)
+
+    var rustParaHeaderPayload = Data()
+    BitPacking.appendLengthPrefixedUTF16LE("본문", to: &rustParaHeaderPayload)
+    rustParaHeaderPayload.append(1)
+    var rustSec0 = try HWP5RecordHeader.encode(
+      tagID: HWP5RecordHeader.tagParaHeader,
+      level: 0,
+      payloadSize: UInt32(rustParaHeaderPayload.count)
+    )
+    rustSec0.append(rustParaHeaderPayload)
+    let rustParaTextBytes = BitPacking.encodeUTF16LE("러스트 호환 본문")
+    rustSec0.append(
+      try HWP5RecordHeader.encode(
+        tagID: HWP5RecordHeader.tagParaText,
+        level: 1,
+        payloadSize: UInt32(rustParaTextBytes.count)
+      )
+    )
+    rustSec0.append(rustParaTextBytes)
+
+    var rustTablePayload = Data()
+    BitPacking.appendUInt16LE(1, to: &rustTablePayload)
+    BitPacking.appendUInt16LE(2, to: &rustTablePayload)
+    BitPacking.appendLengthPrefixedUTF16LE("셀1", to: &rustTablePayload)
+    BitPacking.appendLengthPrefixedUTF16LE("셀2", to: &rustTablePayload)
+    rustSec0.append(
+      try HWP5RecordHeader.encode(
+        tagID: HWP5RecordHeader.tagTableRecord,
+        level: 1,
+        payloadSize: UInt32(rustTablePayload.count)
+      )
+    )
+    rustSec0.append(rustTablePayload)
+
+    let rustCompactHwp = try OLE2ContainerCodec.pack(streams: [
+      OLE2StreamEntry(name: "FileHeader", data: rustFh),
+      OLE2StreamEntry(name: "DocInfo", data: rustDocInfo),
+      OLE2StreamEntry(name: "BodyText/Section0", data: rustSec0),
+    ])
+    let decodedRustHwp = try HWP5BinaryCodec.decodeDocument(from: rustCompactHwp)
+    XCTAssertEqual(decodedRustHwp.title, "러스트문서")
+    XCTAssertEqual(decodedRustHwp.paragraphs.first?.text, "러스트 호환 본문")
+    XCTAssertEqual(decodedRustHwp.tables.first?.rows, [["셀1", "셀2"]])
   }
 }
 

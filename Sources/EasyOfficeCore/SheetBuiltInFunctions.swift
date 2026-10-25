@@ -956,8 +956,9 @@ extension WorksheetModel {
         let sorted = vals.compactMap(\.numericValue).sorted()
         guard !sorted.isEmpty else { return .error("#VALUE!") }
         let pos = k * Double(sorted.count - 1)
-        let lower = Int(floor(pos))
-        let upper = Int(ceil(pos))
+        guard let lower = Self.safeInt(floor(pos)), let upper = Self.safeInt(ceil(pos)) else {
+          return .error("#NUM!")
+        }
         let interpolated = sorted[lower] + (pos - Double(lower)) * (sorted[upper] - sorted[lower])
         return .number(interpolated)
       }
@@ -977,8 +978,9 @@ extension WorksheetModel {
         guard !sorted.isEmpty else { return .error("#VALUE!") }
         let k = Double(quart) * 0.25
         let pos = k * Double(sorted.count - 1)
-        let lower = Int(floor(pos))
-        let upper = Int(ceil(pos))
+        guard let lower = Self.safeInt(floor(pos)), let upper = Self.safeInt(ceil(pos)) else {
+          return .error("#NUM!")
+        }
         let interpolated = sorted[lower] + (pos - Double(lower)) * (sorted[upper] - sorted[lower])
         return .number(interpolated)
       }

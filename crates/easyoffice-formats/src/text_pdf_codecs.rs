@@ -720,13 +720,23 @@ impl PdfSerializer {
         let mut current_body = String::new();
         let mut current_stamp: Option<String> = None;
         let mut in_stream = false;
+        let mut is_metadata_obj = false;
         let mut trailer_b64: Option<String> = None;
+        let mut trailer_b64_count = 0usize;
 
         for line in raw.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("%EasyOfficePDFModelBase64:") {
+                trailer_b64_count += 1;
                 trailer_b64 = Some(rest.trim().to_string());
                 continue;
+            }
+            if trimmed == "endobj" {
+                is_metadata_obj = false;
+                continue;
+            }
+            if trimmed.contains("/Type /Metadata") {
+                is_metadata_obj = true;
             }
             if trimmed.contains("/Type /Catalog") {
                 if let Some(t) = Self::extract_paren_token(trimmed, "/Title (") {
@@ -757,19 +767,26 @@ impl PdfSerializer {
             }
             if trimmed == "endstream" {
                 if in_stream {
-                    pages.push(PdfPageModel {
-                        page_number: current_page_number.take().unwrap_or(pages.len() + 1),
-                        rotation_degrees: current_rotation,
-                        body_text: current_body.clone(),
-                        approval_stamp: current_stamp.take(),
-                    });
+                    if !is_metadata_obj {
+                        pages.push(PdfPageModel {
+                            page_number: current_page_number.take().unwrap_or(pages.len() + 1),
+                            rotation_degrees: current_rotation,
+                            body_text: current_body.clone(),
+                            approval_stamp: current_stamp.take(),
+                        });
+                    }
                     current_rotation = 0;
                     in_stream = false;
                 }
                 continue;
             }
-            if in_stream && trimmed.starts_with("BT ") {
-                let is_body_line = trimmed.starts_with("BT /F1 12 Tf 54 ");
+            if in_stream && !is_metadata_obj && trimmed.starts_with("BT ") {
+                let is_body_line = trimmed.starts_with("BT /F1 12 Tf 54 ")
+                    || trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 0 Td ");
+                let is_form_meta_line = trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 2 Td ");
+                if is_form_meta_line {
+                    continue;
+                }
                 for raw_token in Self::extract_all_paren_tokens(trimmed) {
                     let content = Self::unescape_pdf_text(&raw_token);
                     if !is_body_line {
@@ -796,14 +813,39 @@ impl PdfSerializer {
             ));
         }
 
+        if trailer_b64_count > 1 {
+            return Err(EasyOfficeError::SecurityViolation(
+                "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 중복 주입되었습니다.".to_string(),
+            ));
+        }
         if let Some(b64) = trailer_b64 {
-            let is_valid_b64 = !b64.is_empty()
-                && b64.bytes().all(|b| {
-                    b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=' | b'-' | b'_')
-                });
-            if !is_valid_b64 {
-                return Err(EasyOfficeError::SecurityViolation(
+            let decoded = Self::decode_base64(&b64).ok_or_else(|| {
+                EasyOfficeError::SecurityViolation(
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64) 형식이 손상되었거나 위조되었습니다."
+                        .to_string(),
+                )
+            })?;
+            let json_str = std::str::from_utf8(&decoded).map_err(|_| {
+                EasyOfficeError::SecurityViolation(
+                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64) UTF-8 디코딩에 실패했습니다."
+                        .to_string(),
+                )
+            })?;
+            let mut matches_page_content =
+                json_str.contains("\"pages\"") && json_str.contains(&title);
+            if matches_page_content {
+                for page in &pages {
+                    if let Some(first_line) = page.body_text.lines().next() {
+                        if !first_line.is_empty() && !json_str.contains(first_line) {
+                            matches_page_content = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !matches_page_content {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 본문 스트림과 일치하지 않습니다."
                         .to_string(),
                 ));
             }
@@ -814,6 +856,43 @@ impl PdfSerializer {
             pages,
             watermark_text,
         })
+    }
+
+    fn decode_base64(input: &str) -> Option<Vec<u8>> {
+        if input.is_empty() || input.len() % 4 != 0 {
+            return None;
+        }
+        let mut out = Vec::with_capacity((input.len() / 4) * 3);
+        let bytes = input.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let mut vals = [0u8; 4];
+            let mut pad = 0usize;
+            for j in 0..4 {
+                let b = bytes[i + j];
+                vals[j] = match b {
+                    b'A'..=b'Z' => b - b'A',
+                    b'a'..=b'z' => b - b'a' + 26,
+                    b'0'..=b'9' => b - b'0' + 52,
+                    b'+' | b'-' => 62,
+                    b'/' | b'_' => 63,
+                    b'=' => {
+                        pad += 1;
+                        0
+                    }
+                    _ => return None,
+                };
+            }
+            out.push((vals[0] << 2) | (vals[1] >> 4));
+            if pad < 2 {
+                out.push((vals[1] << 4) | (vals[2] >> 2));
+            }
+            if pad < 1 {
+                out.push((vals[2] << 6) | vals[3]);
+            }
+            i += 4;
+        }
+        Some(out)
     }
 
     fn extract_all_paren_tokens(line: &str) -> Vec<String> {
