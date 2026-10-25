@@ -147,7 +147,7 @@ public enum BitPacking {
     }
     if asciiPrefixLen < totalUTF8Count {
       let suffixUTF8 = text.utf8.dropFirst(asciiPrefixLen)
-      for unit in String(Substring(suffixUTF8)).utf16 {
+      for unit in Substring(suffixUTF8).utf16 {
         withUnsafeBytes(of: unit.littleEndian) { data.append(contentsOf: $0) }
       }
     }

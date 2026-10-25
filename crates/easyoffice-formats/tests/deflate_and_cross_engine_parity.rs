@@ -714,7 +714,8 @@ fn test_markdown_multi_table_escaped_pipe_empty_cell_and_dash_row_roundtrip() {
 
     let expected_tables = vec![
         vec![
-            vec!["".to_string(), "A|B".to_string(), "".to_string()],
+            vec!["".to_string(), "A\\|B".to_string(), "".to_string()],
+            vec!["---".to_string(), "---".to_string(), "---".to_string()],
             vec!["-".to_string(), "-".to_string(), "-".to_string()],
         ],
         vec![

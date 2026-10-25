@@ -1405,7 +1405,7 @@ public enum HWP5BinaryCodec {
             cursor += 2
           } else if code == 0x0000 {
             cursor += 2
-          } else if cursor + 16 <= payloadEnd,
+          } else if code <= 0x0017, cursor + 16 <= payloadEnd,
             rawBuffer.loadUnaligned(fromByteOffset: cursor + 14, as: UInt16.self).littleEndian == code
           {
             cursor += 16

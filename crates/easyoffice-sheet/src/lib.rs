@@ -1263,6 +1263,9 @@ mod tests {
             main_sheet
                 .set_cell("A4", "of:=SUM(['A.B'.C1:.D2])")
                 .unwrap();
+            main_sheet
+                .set_cell("A5", "of:=SUM(['Q1:Q2'.A1:'A.B'.D2])")
+                .unwrap();
         }
         assert_eq!(
             wb.evaluate_cell("요약", "A1"),
@@ -1279,6 +1282,10 @@ mod tests {
         assert_eq!(
             wb.evaluate_cell("요약", "A4"),
             EvaluatedCellValue::Number(35.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("요약", "A5"),
+            EvaluatedCellValue::Error(FormulaError::Ref)
         );
 
         sheet.set_cell("C1", "10").unwrap();

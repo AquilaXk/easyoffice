@@ -474,12 +474,6 @@ impl CommonMarkCodec {
                         chars.next();
                         continue;
                     }
-                    if next_ch == '\\' {
-                        cur.push('\\');
-                        cur.push('\\');
-                        chars.next();
-                        continue;
-                    }
                 }
                 cur.push(ch);
             } else if ch == '|' {
@@ -504,11 +498,13 @@ impl CommonMarkCodec {
         let mut bullet_acc: Vec<String> = Vec::new();
         let mut numbered_acc: Vec<String> = Vec::new();
         let mut table_acc: Vec<Vec<String>> = Vec::new();
+        let mut table_seen_sep = false;
 
         let flush_lists = |blocks: &mut Vec<MarkdownBlock>,
                            bullet_acc: &mut Vec<String>,
                            numbered_acc: &mut Vec<String>,
-                           table_acc: &mut Vec<Vec<String>>| {
+                           table_acc: &mut Vec<Vec<String>>,
+                           table_seen_sep: &mut bool| {
             if !bullet_acc.is_empty() {
                 blocks.push(MarkdownBlock::BulletList(std::mem::take(bullet_acc)));
             }
@@ -518,6 +514,7 @@ impl CommonMarkCodec {
             if !table_acc.is_empty() {
                 blocks.push(MarkdownBlock::Table(std::mem::take(table_acc)));
             }
+            *table_seen_sep = false;
         };
 
         for raw_line in markdown.lines() {
@@ -528,6 +525,7 @@ impl CommonMarkCodec {
                     &mut bullet_acc,
                     &mut numbered_acc,
                     &mut table_acc,
+                    &mut table_seen_sep,
                 );
                 continue;
             }
@@ -545,12 +543,15 @@ impl CommonMarkCodec {
                 let inner = inner.strip_suffix('|').unwrap_or(inner);
                 let cells = Self::parse_markdown_table_row(inner);
                 let is_sep = table_acc.len() == 1
+                    && !table_seen_sep
                     && !cells.is_empty()
                     && cells.iter().all(|c| {
                         let core = c.trim().trim_matches(':');
                         core.len() >= 3 && core.chars().all(|ch| ch == '-')
                     });
-                if !is_sep {
+                if is_sep {
+                    table_seen_sep = true;
+                } else {
                     table_acc.push(cells);
                 }
                 continue;
@@ -567,6 +568,7 @@ impl CommonMarkCodec {
                 }
                 if !table_acc.is_empty() {
                     blocks.push(MarkdownBlock::Table(std::mem::take(&mut table_acc)));
+                    table_seen_sep = false;
                 }
                 bullet_acc.push(rest.trim().to_string());
                 continue;
@@ -580,6 +582,7 @@ impl CommonMarkCodec {
                     }
                     if !table_acc.is_empty() {
                         blocks.push(MarkdownBlock::Table(std::mem::take(&mut table_acc)));
+                        table_seen_sep = false;
                     }
                     numbered_acc.push(trimmed[dot_idx + 2..].trim().to_string());
                     continue;
@@ -591,6 +594,7 @@ impl CommonMarkCodec {
                 &mut bullet_acc,
                 &mut numbered_acc,
                 &mut table_acc,
+                &mut table_seen_sep,
             );
 
             if let Some(h4) = trimmed.strip_prefix("#### ") {
@@ -625,6 +629,7 @@ impl CommonMarkCodec {
             &mut bullet_acc,
             &mut numbered_acc,
             &mut table_acc,
+            &mut table_seen_sep,
         );
         Ok(blocks)
     }

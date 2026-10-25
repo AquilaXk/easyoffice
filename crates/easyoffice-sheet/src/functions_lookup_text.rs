@@ -318,41 +318,41 @@ impl SheetEngine {
                             )
                     )
                 };
+                let mut best: Option<(usize, EvaluatedCellValue)> = None;
+                let mut eval_match_candidate = |idx: usize, v: &EvaluatedCellValue| -> bool {
+                    if match_type == 0 {
+                        return Self::values_match_wildcard(v, &lookup_val);
+                    }
+                    if same_type(v, &lookup_val) {
+                        if let Some(ord) = Self::compare_excel_values(v, &lookup_val) {
+                            let is_better = if match_type > 0 && ord.is_le() {
+                                best.as_ref().is_none_or(|(_, prev)| {
+                                    Self::compare_excel_values(v, prev).is_some_and(|o| o.is_ge())
+                                })
+                            } else if match_type < 0 && ord.is_ge() {
+                                best.as_ref().is_none_or(|(_, prev)| {
+                                    Self::compare_excel_values(v, prev).is_some_and(|o| o.is_le())
+                                })
+                            } else {
+                                false
+                            };
+                            if is_better {
+                                best = Some((idx, v.clone()));
+                            }
+                        }
+                    }
+                    false
+                };
                 if let Some(spec) = self.extract_streaming_range(&args[1])? {
                     let (_, _, _, rows, cols, _) = spec;
                     let mut idx = 0usize;
-                    let mut best: Option<(usize, EvaluatedCellValue)> = None;
                     for r_off in 0..rows {
                         for c_off in 0..cols {
                             idx += 1;
                             let v = self
                                 .eval_streaming_cell_allow_error(spec, r_off, c_off, ctx, depth)?;
-                            if match_type == 0 {
-                                if Self::values_match_wildcard(&v, &lookup_val) {
-                                    return Ok(EvaluatedCellValue::Number(idx as f64));
-                                }
-                            } else if same_type(&v, &lookup_val) {
-                                if let Some(ord) = Self::compare_excel_values(&v, &lookup_val) {
-                                    if match_type > 0 && ord.is_le() {
-                                        let replace = match &best {
-                                            None => true,
-                                            Some((_, prev)) => Self::compare_excel_values(&v, prev)
-                                                .is_some_and(|o| o.is_ge()),
-                                        };
-                                        if replace {
-                                            best = Some((idx, v));
-                                        }
-                                    } else if match_type < 0 && ord.is_ge() {
-                                        let replace = match &best {
-                                            None => true,
-                                            Some((_, prev)) => Self::compare_excel_values(&v, prev)
-                                                .is_some_and(|o| o.is_le()),
-                                        };
-                                        if replace {
-                                            best = Some((idx, v));
-                                        }
-                                    }
-                                }
+                            if eval_match_candidate(idx, &v) {
+                                return Ok(EvaluatedCellValue::Number(idx as f64));
                             }
                         }
                     }
@@ -362,10 +362,14 @@ impl SheetEngine {
                     return Err(FormulaError::Na);
                 }
                 let arr = self.eval_range_vec(&args[1], ctx, depth)?;
-                for (idx, v) in arr.iter().enumerate() {
-                    if Self::values_match_wildcard(v, &lookup_val) {
-                        return Ok(EvaluatedCellValue::Number((idx + 1) as f64));
+                for (zero_idx, v) in arr.iter().enumerate() {
+                    let idx = zero_idx + 1;
+                    if eval_match_candidate(idx, v) {
+                        return Ok(EvaluatedCellValue::Number(idx as f64));
                     }
+                }
+                if let Some((best_idx, _)) = best {
+                    return Ok(EvaluatedCellValue::Number(best_idx as f64));
                 }
                 Err(FormulaError::Na)
             }

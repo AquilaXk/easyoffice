@@ -159,114 +159,84 @@ extension WorksheetModel {
         return val
       }
 
-    case "VLOOKUP":
+    case "VLOOKUP", "HLOOKUP":
+      let isVertical = (name == "VLOOKUP")
       guard (3...4).contains(frame.count),
         let range = extractCellRange(from: frame.args[1]),
-        let colIndexVal = frame.arg(2, in: self).numericValue,
-        let rawColIdx = Self.safeInt(colIndexVal)
+        let rawIdxVal = frame.arg(2, in: self).numericValue,
+        let rawIdx = Self.safeInt(rawIdxVal)
       else { return .error("#VALUE!") }
       let sheetName = frame.args[1].targetSheetName
       if let sheetName, !hasSheet(named: sheetName) {
         return .error("#REF!")
       }
       guard let bounds = rangeBounds(range) else { return .error("#REF!") }
-      let colIdx = rawColIdx - 1
-      guard colIdx >= 0, colIdx < bounds.colCount else {
+      let offsetIdx = rawIdx - 1
+      let maxOffset = isVertical ? bounds.colCount : bounds.rowCount
+      guard offsetIdx >= 0, offsetIdx < maxOffset else {
         return .error("#REF!")
       }
       let lookupVal = frame.arg(0, in: self)
       if case .error = lookupVal { return lookupVal }
       let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : true
-      let targetCol = bounds.minCol + colIdx
-      var approxBestRow: Int?
+      let targetFixed = (isVertical ? bounds.minCol : bounds.minRow) + offsetIdx
+      let scanRange = isVertical ? (bounds.minRow...bounds.maxRow) : (bounds.minCol...bounds.maxCol)
+      var approxBestCoord: Int?
       var approxBestNum = -Double.infinity
+      var approxBestText: String?
       let targetNum = isApprox ? lookupVal.numericValue : nil
+      let targetText: String? =
+        (isApprox && targetNum == nil && lookupVal != .empty) ? lookupVal.description : nil
 
-      for r in bounds.minRow...bounds.maxRow {
+      for coord in scanRange {
         let keyVal = evaluateSingleCellInRange(
           onSheet: sheetName,
-          row: r,
-          column: bounds.minCol,
+          row: isVertical ? coord : bounds.minRow,
+          column: isVertical ? bounds.minCol : coord,
           context: &frame.context,
           depth: frame.depth + 1
         )
-        if Self.cellValuesEqual(keyVal, lookupVal) {
-          if colIdx == 0 { return keyVal }
-          return evaluateSingleCellInRange(
-            onSheet: sheetName,
-            row: r,
-            column: targetCol,
-            context: &frame.context,
-            depth: frame.depth + 1
-          )
-        }
-        if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
+        if case .error = keyVal { return keyVal }
+        if !isApprox {
+          if Self.cellValuesEqual(keyVal, lookupVal)
+            || Self.matchesWildcardPattern(
+              text: keyVal.description, pattern: lookupVal.description)
+          {
+            if offsetIdx == 0 { return keyVal }
+            return evaluateSingleCellInRange(
+              onSheet: sheetName,
+              row: isVertical ? coord : targetFixed,
+              column: isVertical ? targetFixed : coord,
+              context: &frame.context,
+              depth: frame.depth + 1
+            )
+          }
+        } else if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
           approxBestNum = n
-          approxBestRow = r
+          approxBestCoord = coord
+        } else if let targetText, keyVal.numericValue == nil, keyVal != .empty {
+          let candidateText = keyVal.description
+          let cmpTarget = candidateText.caseInsensitiveCompare(targetText)
+          if cmpTarget == .orderedAscending || cmpTarget == .orderedSame {
+            let isBetter: Bool
+            if let prevBest = approxBestText {
+              let cmpPrev = candidateText.caseInsensitiveCompare(prevBest)
+              isBetter = (cmpPrev == .orderedDescending || cmpPrev == .orderedSame)
+            } else {
+              isBetter = true
+            }
+            if isBetter {
+              approxBestText = candidateText
+              approxBestCoord = coord
+            }
+          }
         }
       }
-      if let matchedRow = approxBestRow {
+      if let matchedCoord = approxBestCoord {
         return evaluateSingleCellInRange(
           onSheet: sheetName,
-          row: matchedRow,
-          column: targetCol,
-          context: &frame.context,
-          depth: frame.depth + 1
-        )
-      }
-      return .error("#N/A")
-
-    case "HLOOKUP":
-      guard (3...4).contains(frame.count),
-        let range = extractCellRange(from: frame.args[1]),
-        let rowIndexVal = frame.arg(2, in: self).numericValue,
-        let rawRowIdx = Self.safeInt(rowIndexVal)
-      else { return .error("#VALUE!") }
-      let sheetName = frame.args[1].targetSheetName
-      if let sheetName, !hasSheet(named: sheetName) {
-        return .error("#REF!")
-      }
-      guard let bounds = rangeBounds(range) else { return .error("#REF!") }
-      let rowIdx = rawRowIdx - 1
-      guard rowIdx >= 0, rowIdx < bounds.rowCount else {
-        return .error("#REF!")
-      }
-      let lookupVal = frame.arg(0, in: self)
-      if case .error = lookupVal { return lookupVal }
-      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : true
-      let targetRow = bounds.minRow + rowIdx
-      var approxBestCol: Int?
-      var approxBestNum = -Double.infinity
-      let targetNum = isApprox ? lookupVal.numericValue : nil
-
-      for c in bounds.minCol...bounds.maxCol {
-        let keyVal = evaluateSingleCellInRange(
-          onSheet: sheetName,
-          row: bounds.minRow,
-          column: c,
-          context: &frame.context,
-          depth: frame.depth + 1
-        )
-        if Self.cellValuesEqual(keyVal, lookupVal) {
-          if rowIdx == 0 { return keyVal }
-          return evaluateSingleCellInRange(
-            onSheet: sheetName,
-            row: targetRow,
-            column: c,
-            context: &frame.context,
-            depth: frame.depth + 1
-          )
-        }
-        if let targetNum, let n = keyVal.numericValue, n <= targetNum, n >= approxBestNum {
-          approxBestNum = n
-          approxBestCol = c
-        }
-      }
-      if let matchedCol = approxBestCol {
-        return evaluateSingleCellInRange(
-          onSheet: sheetName,
-          row: targetRow,
-          column: matchedCol,
+          row: isVertical ? matchedCoord : targetFixed,
+          column: isVertical ? targetFixed : matchedCoord,
           context: &frame.context,
           depth: frame.depth + 1
         )

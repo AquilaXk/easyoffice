@@ -131,10 +131,22 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
     if let Some((lhs, rhs)) = split_once_unquoted(inner, ':') {
         let (left_sheet, left_cell) = split_sheet_and_cell(lhs);
         let (right_sheet, right_cell) = split_sheet_and_cell(rhs);
-        if let Some(sheet) = left_sheet.or(right_sheet) {
-            return format!("{sheet}!{left_cell}:{right_cell}");
+        match (left_sheet, right_sheet) {
+            (Some(ls), Some(rs)) => {
+                let ls_clean = ls.trim_matches('\'').replace("''", "'");
+                let rs_clean = rs.trim_matches('\'').replace("''", "'");
+                if ls_clean.eq_ignore_ascii_case(&rs_clean) || ls_clean == rs_clean {
+                    return format!("{ls}!{left_cell}:{right_cell}");
+                }
+                return format!("{ls}!{left_cell}:{rs}!{right_cell}");
+            }
+            (Some(sheet), None) | (None, Some(sheet)) => {
+                return format!("{sheet}!{left_cell}:{right_cell}");
+            }
+            (None, None) => {
+                return format!("{left_cell}:{right_cell}");
+            }
         }
-        return format!("{left_cell}:{right_cell}");
     }
 
     let (sheet, cell) = split_sheet_and_cell(inner);
@@ -146,9 +158,9 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
 }
 
 #[inline]
-pub(crate) fn strip_formula_prefix(raw_src: &str) -> Option<&str> {
+fn strip_formula_namespace(raw_src: &str) -> &str {
     let trimmed = raw_src.trim();
-    let after_ns = if trimmed
+    if trimmed
         .get(..3)
         .is_some_and(|s| s.eq_ignore_ascii_case("of:"))
     {
@@ -165,33 +177,18 @@ pub(crate) fn strip_formula_prefix(raw_src: &str) -> Option<&str> {
         trimmed[6..].trim_start()
     } else {
         trimmed
-    };
-    after_ns.strip_prefix('=')
+    }
+}
+
+#[inline]
+pub(crate) fn strip_formula_prefix(raw_src: &str) -> Option<&str> {
+    strip_formula_namespace(raw_src).strip_prefix('=')
 }
 
 /// Normalizes ODF OpenFormula (`of:=`, `[.A1:.B2]`, `['Sheet 1'.A1:.B2]`, `[Sheet1.A1]`) references into standard A1 syntax.
 pub fn normalize_open_formula_references(raw_src: &str) -> std::borrow::Cow<'_, str> {
-    let stripped = strip_formula_prefix(raw_src).unwrap_or_else(|| {
-        let trimmed = raw_src.trim();
-        if trimmed
-            .get(..3)
-            .is_some_and(|s| s.eq_ignore_ascii_case("of:"))
-        {
-            trimmed[3..].trim_start()
-        } else if trimmed
-            .get(..5)
-            .is_some_and(|s| s.eq_ignore_ascii_case("oooc:"))
-        {
-            trimmed[5..].trim_start()
-        } else if trimmed
-            .get(..6)
-            .is_some_and(|s| s.eq_ignore_ascii_case("msoxl:"))
-        {
-            trimmed[6..].trim_start()
-        } else {
-            raw_src
-        }
-    });
+    let after_ns = strip_formula_namespace(raw_src);
+    let stripped = after_ns.strip_prefix('=').unwrap_or(after_ns);
     if !stripped.contains('[') {
         return std::borrow::Cow::Borrowed(stripped);
     }
@@ -665,6 +662,13 @@ impl Parser {
                             Some(Token::Ident(s)) => {
                                 if matches!(self.peek(), Some(Token::Bang)) {
                                     self.next();
+                                    let s_clean = s.trim_matches('\'');
+                                    let name_clean = name.trim_matches('\'');
+                                    if !s_clean.eq_ignore_ascii_case(name_clean)
+                                        && s_clean != name_clean
+                                    {
+                                        return Err(FormulaError::Ref);
+                                    }
                                     let Some(Token::Ident(s2)) = self.next() else {
                                         return Err(FormulaError::Ref);
                                     };
