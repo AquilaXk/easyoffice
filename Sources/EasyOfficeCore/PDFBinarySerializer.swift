@@ -142,7 +142,7 @@ public enum PDFBinarySerializer {
         let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
         streamLines.append("0.925 0.937 0.984 rg 54 \(yInt - 3) \(barWidth) 13 re f")
         streamLines.append(
-          "0.145 0.165 0.243 rg BT 0 Tr /F2 10 Tf 1 0 0 1 54 \(yInt) Tm <\(visibleLineHex)> Tj ET"
+          "0.145 0.165 0.243 rg BT 0 Tr /F2 10 Tf 54 \(yInt) Td <\(visibleLineHex)> Tj ET"
         )
         cursorY -= lineLeading
       }
@@ -259,17 +259,6 @@ public enum PDFBinarySerializer {
         }
       }
 
-      // Clipped zero-area stream block preserving raw-coordinate audit tokens without visual clutter below y = 445
-      streamLines.append("q 0 0 0 0 re W n")
-      let startY = visualLines.count <= 18 ? 668 : 672
-      let lineStep = max(8, min(24, 640 / max(1, visualLines.count)))
-      for (lineIdx, rawLine) in visualLines.enumerated() {
-        let y = startY - (lineIdx * lineStep)
-        let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
-        streamLines.append(
-          "0.145 0.165 0.243 rg BT 0 Tr /F2 10 Tf 54 \(y) Td <\(visibleLineHex)> Tj ET"
-        )
-      }
       for (annIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
         let annY = 180 - (annIdx * 32)
         let annLabel =
@@ -297,7 +286,6 @@ public enum PDFBinarySerializer {
           streamLines.append(pathOps)
         }
       }
-      streamLines.append("Q")
 
       streamLines.append("Q")
       let streamBody = streamLines.joined(separator: "\n")
@@ -506,34 +494,62 @@ public enum PDFBinarySerializer {
       return decodedModel
     }
 
+    var fallbackTitle: String? = nil
     var fallbackPages: [PDFPageDescriptor] = []
     var fallbackInvisibleFlags: [Bool] = []
     var fallbackFormFields: [PDFFormField] = []
     var fallbackWatermarkText = ""
     let isRedactedCatalog = rawText.contains("/Redacted true")
+    let hasCompressedXRef =
+      rawText.contains("Type /XRef") || rawText.contains("Type/XRef")
+      || rawText.contains("/ObjStm")
     var sawPageObject = false
     var currentRotate = 0
     var inStream = false
+    var currentObjectIsNonContentStream = false
     var currentStreamLines: [String] = []
     var currentStreamHasInvisibleLayer = false
 
     for line in lines {
-      if line.contains("Type /Page") && !line.contains("Type /Pages") {
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      if (line.contains("Type /Page") && !line.contains("Type /Pages"))
+        || (line.contains("Type/Page") && !line.contains("Type/Pages"))
+      {
         sawPageObject = true
+      }
+      if !inStream {
+        if trimmed.hasSuffix("obj") {
+          currentObjectIsNonContentStream = false
+        }
+        if line.contains("Type /XRef") || line.contains("Type/XRef")
+          || line.contains("Type /Metadata") || line.contains("Type/Metadata")
+          || line.contains("Type /ObjStm") || line.contains("Type/ObjStm")
+        {
+          currentObjectIsNonContentStream = true
+        }
+        if fallbackTitle == nil, let titleRange = line.range(of: "/Title (") {
+          let afterTitle = line[titleRange.upperBound...]
+          if let closeIdx = afterTitle.firstIndex(of: ")") {
+            let parsed = unescapePDFString(String(afterTitle[..<closeIdx]))
+            if !parsed.isEmpty {
+              fallbackTitle = parsed
+            }
+          }
+        }
       }
       if let rotRange = line.range(of: "/Rotate ") {
         let after = line[rotRange.upperBound...]
         let digits = after.prefix(while: { $0.isNumber || $0 == "-" })
         currentRotate = Int(digits) ?? 0
       }
-      if line == "stream" {
+      if trimmed == "stream" {
         inStream = true
         currentStreamLines.removeAll(keepingCapacity: true)
         currentStreamHasInvisibleLayer = false
         continue
       }
-      if line == "endstream" {
-        if !currentStreamLines.isEmpty {
+      if trimmed == "endstream" {
+        if !currentStreamLines.isEmpty && !currentObjectIsNonContentStream {
           fallbackPages.append(
             PDFPageDescriptor(
               pageNumber: fallbackPages.count + 1,
@@ -545,16 +561,22 @@ public enum PDFBinarySerializer {
           currentRotate = 0
         }
         inStream = false
+        currentObjectIsNonContentStream = false
         currentStreamLines.removeAll(keepingCapacity: true)
         currentStreamHasInvisibleLayer = false
         continue
       }
-      if line.hasPrefix("BT "),
-        let openParen = line.firstIndex(of: "("),
-        let closeParen = line.lastIndex(of: ")"),
+      let isTextOperatorLine =
+        trimmed.hasPrefix("BT ")
+        || (inStream && !currentObjectIsNonContentStream
+          && (trimmed.hasSuffix("Tj") || trimmed.hasSuffix("TJ")
+            || trimmed.hasSuffix(" Tj ET") || trimmed.hasSuffix(")ET")))
+      if isTextOperatorLine,
+        let openParen = trimmed.firstIndex(of: "("),
+        let closeParen = trimmed.lastIndex(of: ")"),
         openParen < closeParen
       {
-        let inner = String(line[line.index(after: openParen)..<closeParen])
+        let inner = String(trimmed[trimmed.index(after: openParen)..<closeParen])
         let unescaped = unescapePDFString(inner)
         if unescaped.hasPrefix("[WM] ")
           && (line.contains(" 0 1 Td ") || !currentStreamLines.isEmpty)
@@ -580,7 +602,7 @@ public enum PDFBinarySerializer {
         }
         if inStream {
           currentStreamLines.append(unescaped)
-          if line.hasPrefix("BT 3 Tr ") {
+          if trimmed.hasPrefix("BT 3 Tr ") {
             currentStreamHasInvisibleLayer = true
           }
         } else {
@@ -591,20 +613,21 @@ public enum PDFBinarySerializer {
               extractedText: unescaped
             )
           )
-          fallbackInvisibleFlags.append(line.hasPrefix("BT 3 Tr "))
+          fallbackInvisibleFlags.append(trimmed.hasPrefix("BT 3 Tr "))
           currentRotate = 0
         }
       }
     }
 
     let hasValidXrefStructure =
-      rawText.contains("xref") && rawText.contains("startxref")
+      (((rawText.contains("xref") || rawText.contains("/XRef")) && rawText.contains("startxref"))
+        || hasCompressedXRef || fallbackPages.isEmpty)
       && !fallbackInvisibleFlags.contains(true)
     if hasValidXrefStructure, let pdfDoc = PDFDocument(data: data) {
       if pdfDoc.isEncrypted {
         throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
       }
-      if pdfDoc.pageCount > 0 {
+      if pdfDoc.pageCount > 0 && (sawPageObject || hasCompressedXRef || !fallbackPages.isEmpty) {
         var pages: [PDFPageDescriptor] = []
         var annotations: [PDFAnnotationItem] = []
 
@@ -668,7 +691,7 @@ public enum PDFBinarySerializer {
 
         let docTitle =
           (pdfDoc.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String)
-          .flatMap { $0.isEmpty ? nil : $0 } ?? "PDF 문서"
+          .flatMap { $0.isEmpty ? nil : $0 } ?? fallbackTitle ?? "PDF 문서"
 
         return PDFStudioDocumentModel(
           title: docTitle,
@@ -683,14 +706,14 @@ public enum PDFBinarySerializer {
     }
 
     if fallbackPages.isEmpty {
-      guard sawPageObject else {
+      guard sawPageObject || hasCompressedXRef else {
         throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 페이지(/Type /Page) 객체가 없습니다.")
       }
       fallbackPages.append(
         PDFPageDescriptor(pageNumber: 1, rotationDegrees: currentRotate, extractedText: ""))
     }
     return PDFStudioDocumentModel(
-      title: "PDF 문서",
+      title: fallbackTitle ?? "PDF 문서",
       pages: fallbackPages,
       isRedacted: isRedactedCatalog,
       formFields: fallbackFormFields,
