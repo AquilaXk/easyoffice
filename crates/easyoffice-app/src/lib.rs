@@ -304,22 +304,30 @@ impl EasyOfficeIpcRouter {
         ("Sheet1", raw_expr.trim())
     }
 
-    /// Payload format: semicolon-separated `[Sheet!]A1=val` pairs followed by `?[Sheet|]target_expr_or_cell`
-    fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
-        let (cells_part, query_part) =
-            Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
-        let (active_sheet, expr) = Self::extract_active_sheet_and_expr(query_part.trim());
+    fn evaluate_workbook_query<'a>(
+        cells_part: Option<&str>,
+        raw_query: &'a str,
+        seed_defaults: bool,
+    ) -> Result<(&'a str, &'a str, EvaluatedCellValue), EasyOfficeError> {
+        let (active_sheet, expr) = Self::extract_active_sheet_and_expr(raw_query.trim());
         let mut wb = WorkbookEngine::new();
         wb.add_sheet("Sheet1");
         wb.add_sheet("Sheet2");
+        if seed_defaults {
+            wb.set_cell("Sheet2", "A1", "100")?;
+            wb.set_cell("Sheet1", "A1", "1200")?;
+            wb.set_cell("Sheet1", "B1", "850")?;
+        }
         wb.add_sheet(active_sheet);
-        for (lhs, val) in Self::split_cell_assignments(cells_part) {
-            let (sh, addr) = lhs.split_once('!').unwrap_or((active_sheet, &lhs));
-            let sh_trim = sh.trim();
-            let addr_trim = addr.trim();
-            if !sh_trim.is_empty() && !addr_trim.is_empty() {
-                wb.add_sheet(sh_trim);
-                wb.set_cell(sh_trim, addr_trim, &val)?;
+        if let Some(cells_str) = cells_part {
+            for (lhs, val) in Self::split_cell_assignments(cells_str) {
+                let (sh, addr) = lhs.split_once('!').unwrap_or((active_sheet, &lhs));
+                let sh_trim = sh.trim();
+                let addr_trim = addr.trim();
+                if !sh_trim.is_empty() && !addr_trim.is_empty() {
+                    wb.add_sheet(sh_trim);
+                    wb.set_cell(sh_trim, addr_trim, &val)?;
+                }
             }
         }
         let evaluated = if expr.starts_with('=') {
@@ -327,6 +335,14 @@ impl EasyOfficeIpcRouter {
         } else {
             wb.evaluate_cell(active_sheet, expr)
         };
+        Ok((active_sheet, expr, evaluated))
+    }
+
+    fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
+        let (cells_part, query_part) =
+            Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
+        let (_, expr, evaluated) =
+            Self::evaluate_workbook_query(Some(cells_part), query_part, false)?;
         let rule = ConditionalFormatRule::GreaterThan(100.0);
         let cf_match = rule.matches(&evaluated, &[]);
         let dv_rule = DataValidationRule::NumberRange {
@@ -684,12 +700,6 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_evaluate_workbook_formula(payload: &str) -> Result<String, EasyOfficeError> {
-        let mut wb = WorkbookEngine::new();
-        wb.add_sheet("Sheet1");
-        wb.add_sheet("Sheet2");
-        wb.set_cell("Sheet2", "A1", "100")?;
-        wb.set_cell("Sheet1", "A1", "1200")?;
-        wb.set_cell("Sheet1", "B1", "850")?;
         let (cells_part, expr_part) = match Self::split_unescaped_query(payload) {
             Some((c, e)) => (Some(c.trim()), e.trim()),
             None => (None, payload.trim()),
@@ -699,24 +709,7 @@ impl EasyOfficeIpcRouter {
         } else {
             expr_part
         };
-        let (active_sheet, expr) = Self::extract_active_sheet_and_expr(raw_expr);
-        wb.add_sheet(active_sheet);
-        if let Some(cells_str) = cells_part {
-            for (lhs, rhs) in Self::split_cell_assignments(cells_str) {
-                let (sh, a1) = lhs.split_once('!').unwrap_or((active_sheet, &lhs));
-                let sh_trim = sh.trim();
-                let a1_trim = a1.trim();
-                if !sh_trim.is_empty() && !a1_trim.is_empty() {
-                    wb.add_sheet(sh_trim);
-                    wb.set_cell(sh_trim, a1_trim, &rhs)?;
-                }
-            }
-        }
-        let val = if expr.starts_with('=') {
-            wb.evaluate_formula_on_sheet(active_sheet, expr)
-        } else {
-            wb.evaluate_cell(active_sheet, expr)
-        };
+        let (active_sheet, expr, val) = Self::evaluate_workbook_query(cells_part, raw_expr, true)?;
         Ok(format!(
             "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\"}}",
             Self::escape_json_str(active_sheet),
