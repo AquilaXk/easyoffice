@@ -315,12 +315,7 @@
     const raw = String(payload || "");
     const [entriesPart, xmlPart] = raw.includes("|") ? raw.split("|", 2) : ["", raw];
     const upperXml = (xmlPart || "").toUpperCase();
-    if (
-      upperXml.includes("<!DOCTYPE") ||
-      upperXml.includes("<!ENTITY") ||
-      ((upperXml.includes("<!DOCTYPE") || upperXml.includes("<!ENTITY")) &&
-        (upperXml.includes("SYSTEM") || upperXml.includes("PUBLIC")))
-    ) {
+    if (upperXml.includes("<!DOCTYPE") || upperXml.includes("<!ENTITY")) {
       return {
         status: "REJECTED",
         xxeGuard: "BLOCKED",
@@ -948,6 +943,11 @@
           "<p>문서번호: 기획재정담당관-2026-0418 · 시행일자: 2026. 10. 25. · 공개구분: 대국민 공개</p>" +
           "<h2>1. 추진 배경 및 목적</h2>" +
           "<p>공공기관 행정 문서의 HWP 5.0(OLE2 CFBF) 및 HWPX(OWPML) 상호운용성 표준을 준수하고 다중 표·누름틀·원고지 조판 정합성을 확보합니다.</p>" +
+          '<div class="doc-table-toolbar" contenteditable="false">' +
+          '<button id="btn-doc-add-row" class="secondary-btn">+행 추가</button>' +
+          '<button id="btn-doc-merge-toggle" class="secondary-btn">셀 병합 토글</button>' +
+          '<button id="btn-doc-eval-table" class="secondary-btn">=SUM(ABOVE)</button>' +
+          "</div>" +
           '<table id="doc-table" class="sheet-table doc-inline-table"><thead><tr><th>소관 부서</th><th>담당자</th><th>집행액(백만원)</th></tr></thead><tbody id="doc-table-body">' +
           hwpTableRows +
           "</tbody></table>" +
@@ -1314,7 +1314,7 @@
       return true;
     }
     if (cmdId === "hwp-mod-border") {
-      const tableEl = document.querySelector("#doc-table-area table");
+      const tableEl = document.getElementById("doc-table");
       if (tableEl) {
         tableEl.style.borderStyle = tableEl.style.borderStyle === "double" ? "solid" : "double";
       }
@@ -1700,43 +1700,32 @@
     }
 
     if (scope === "DOC" || scope === "HWP") {
-      if (activeModule === scope) {
-        const docText = extractEditableDocumentText();
+      const saved = docTabStore[scope];
+      if (saved) {
+        const tempDiv = document.createElement("div");
+        tempDiv.innerHTML = saved.editorHtml || "";
+        const blocks = tempDiv.querySelectorAll(
+          ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
+        );
+        const docText =
+          blocks.length > 0
+            ? Array.from(blocks)
+                .map((el) => (el.textContent || "").trim())
+                .filter((t) => t.length > 0)
+                .join("\n")
+            : (tempDiv.innerText || "").trim();
         if (docText) {
           lines.push(docText);
         }
-        const docTable = document.querySelector("#doc-table-area table");
-        if (docTable) {
-          appendTableRowsFromTrList(Array.from(docTable.querySelectorAll("tr")), lines);
-        }
-      } else {
-        const saved = docTabStore[scope];
-        if (saved) {
-          const tempDiv = document.createElement("div");
-          tempDiv.innerHTML = saved.editorHtml || "";
-          const blocks = tempDiv.querySelectorAll(
-            ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
-          );
-          const docText =
-            blocks.length > 0
-              ? Array.from(blocks)
-                  .map((el) => (el.textContent || "").trim())
-                  .filter((t) => t.length > 0)
-                  .join("\n")
-              : (tempDiv.innerText || "").trim();
-          if (docText) {
-            lines.push(docText);
-          }
-          const inlineTable = tempDiv.querySelector("table");
-          if (inlineTable) {
-            const tb = inlineTable.querySelector("tbody");
-            if (tb && saved.tableHtml) tb.innerHTML = saved.tableHtml;
-            appendTableRowsFromTrList(Array.from(inlineTable.querySelectorAll("tr")), lines);
-          } else if (saved.tableHtml) {
-            const tempTbody = document.createElement("tbody");
-            tempTbody.innerHTML = saved.tableHtml;
-            appendTableRowsFromTrList(Array.from(tempTbody.querySelectorAll("tr")), lines);
-          }
+        const inlineTable = tempDiv.querySelector("table");
+        if (inlineTable) {
+          const tb = inlineTable.querySelector("tbody");
+          if (tb && saved.tableHtml) tb.innerHTML = saved.tableHtml;
+          appendTableRowsFromTrList(Array.from(inlineTable.querySelectorAll("tr")), lines);
+        } else if (saved.tableHtml) {
+          const tempTbody = document.createElement("tbody");
+          tempTbody.innerHTML = saved.tableHtml;
+          appendTableRowsFromTrList(Array.from(tempTbody.querySelectorAll("tr")), lines);
         }
       }
     } else if (scope === "SHEET") {
@@ -2099,9 +2088,6 @@
         delete activeTd.dataset.formula;
         activeTd.textContent = rawFormula;
       }
-    }
-
-    if (activeTd && rawFormula.startsWith("=")) {
       await recalculateActiveSheetFormulas();
       const computedValue = (activeTd.textContent || "").trim();
       out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
@@ -2116,14 +2102,11 @@
       .join(";");
     const queryTarget = activeSheetName + "|" + activeSheetCellRef;
     const isCrossSheet = /SHEET\d+!/i.test(rawFormula) || activeSheetName !== "Sheet1";
-    const [rpcRes] = await Promise.all([
-      isCrossSheet
-        ? invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
-        : invokeIpc("evaluate_sheet", pairs + "?" + queryTarget),
-      recalculateActiveSheetFormulas(),
-    ]);
+    const rpcRes = isCrossSheet
+      ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
+      : await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
+    await recalculateActiveSheetFormulas();
     const computedValue = rpcRes.value;
-    if (activeTd) activeTd.textContent = String(computedValue);
     out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
     updateSheetSelectionAndAggregates(activeSheetCellRef);
   }
@@ -2132,10 +2115,12 @@
     rootEl.querySelectorAll("td[data-cell]").forEach((td) => {
       let pendingFocusSnapshot = null;
       let focusInitialRaw = "";
+      let focusInitialText = "";
       let snapshotPushedForFocus = false;
       td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
       td.addEventListener("focus", () => {
-        focusInitialRaw = td.dataset.formula || (td.textContent || "").trim();
+        focusInitialText = (td.textContent || "").trim();
+        focusInitialRaw = td.dataset.formula || focusInitialText;
         pendingFocusSnapshot = captureWorkspaceSnapshot(false);
         snapshotPushedForFocus = false;
       });
@@ -2147,7 +2132,16 @@
       });
       td.addEventListener("blur", async () => {
         const rawText = (td.textContent || "").trim();
-        if (!snapshotPushedForFocus && rawText !== focusInitialRaw && pendingFocusSnapshot) {
+        const textChangedOnBlur = rawText !== focusInitialText;
+        if (textChangedOnBlur) {
+          if (rawText.startsWith("=")) {
+            td.dataset.formula = rawText;
+          } else {
+            delete td.dataset.formula;
+          }
+        }
+        const effectiveRaw = td.dataset.formula || rawText;
+        if (!snapshotPushedForFocus && effectiveRaw !== focusInitialRaw && pendingFocusSnapshot) {
           workspaceUndoStack.push(pendingFocusSnapshot);
           if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
             workspaceUndoStack.shift();
@@ -2156,11 +2150,10 @@
           snapshotPushedForFocus = true;
         }
         pendingFocusSnapshot = null;
-        if (rawText.startsWith("=")) {
-          td.dataset.formula = rawText;
+        if (snapshotPushedForFocus || textChangedOnBlur) {
+          await recalculateActiveSheetFormulas();
+          updateSheetSelectionAndAggregates(activeSheetCellRef || td.dataset.cell);
         }
-        await recalculateActiveSheetFormulas();
-        updateSheetSelectionAndAggregates(td.dataset.cell);
       });
       td.addEventListener("input", () => {
         const rawText = (td.textContent || "").trim();
@@ -2540,30 +2533,34 @@
   }
 
   function setupDocTableAndSheetTabHandlers() {
-    const addRowBtn = document.getElementById("btn-doc-add-row");
-    const tbody = document.getElementById("doc-table-body");
-    if (addRowBtn && tbody) {
-      addRowBtn.addEventListener("click", () => {
-        pushUndoSnapshot();
-        appendDocTableRow();
+    const docEditor = document.getElementById("doc-editor");
+    if (docEditor) {
+      docEditor.addEventListener("click", (e) => {
+        const addRowBtn = e.target.closest("#btn-doc-add-row");
+        if (addRowBtn) {
+          pushUndoSnapshot();
+          appendDocTableRow();
+          return;
+        }
+        const mergeBtn = e.target.closest("#btn-doc-merge-toggle");
+        if (mergeBtn) {
+          const tbody = document.getElementById("doc-table-body");
+          if (!tbody) return;
+          pushUndoSnapshot();
+          const sumRow = document.getElementById("doc-table-sum-row");
+          const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
+          if (cells.length < 2) return;
+          const isMerged = cells[0].colSpan > 1;
+          cells[0].colSpan = isMerged ? 1 : 2;
+          cells[1].hidden = !isMerged;
+          mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
+          return;
+        }
+        const evalDocBtn = e.target.closest("#btn-doc-eval-table");
+        if (evalDocBtn) {
+          computeDocTableSummary();
+        }
       });
-    }
-    const mergeBtn = document.getElementById("btn-doc-merge-toggle");
-    if (mergeBtn && tbody) {
-      mergeBtn.addEventListener("click", () => {
-        pushUndoSnapshot();
-        const sumRow = document.getElementById("doc-table-sum-row");
-        const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
-        if (cells.length < 2) return;
-        const isMerged = cells[0].colSpan > 1;
-        cells[0].colSpan = isMerged ? 1 : 2;
-        cells[1].hidden = !isMerged;
-        mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
-      });
-    }
-    const evalDocBtn = document.getElementById("btn-doc-eval-table");
-    if (evalDocBtn) {
-      evalDocBtn.addEventListener("click", computeDocTableSummary);
     }
 
     const sheetTabBar = document.getElementById("sheet-tab-bar");

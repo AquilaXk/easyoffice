@@ -887,6 +887,7 @@ impl PdfSerializer {
         let mut current_body = String::new();
         let mut current_stamp: Option<String> = None;
         let mut in_stream = false;
+        let mut seen_body_line = false;
         let mut is_metadata_obj = false;
         let mut trailer_b64: Option<String> = None;
         let mut trailer_b64_count = 0usize;
@@ -933,6 +934,7 @@ impl PdfSerializer {
                 in_stream = true;
                 current_body.clear();
                 current_stamp = None;
+                seen_body_line = false;
                 continue;
             }
             if trimmed == "endstream" {
@@ -962,16 +964,15 @@ impl PdfSerializer {
                     if !is_body_line {
                         if let Some(wm) = content.strip_prefix("[WM] ") {
                             watermark_text = Some(wm.to_string());
-                            continue;
-                        }
-                        if let Some(stamp) = content.strip_prefix("[STAMP] ") {
+                        } else if let Some(stamp) = content.strip_prefix("[STAMP] ") {
                             current_stamp = Some(stamp.to_string());
-                            continue;
                         }
+                        continue;
                     }
-                    if !current_body.is_empty() {
+                    if seen_body_line {
                         current_body.push('\n');
                     }
+                    seen_body_line = true;
                     current_body.push_str(&content);
                 }
             }
@@ -1101,7 +1102,7 @@ impl PdfSerializer {
         false
     }
 
-    fn decode_base64_utf8(input: &str) -> Option<String> {
+    pub fn decode_base64_bytes(input: &str) -> Option<Vec<u8>> {
         let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
         if clean.is_empty() || (clean.len() & 3) != 0 {
             return None;
@@ -1134,7 +1135,11 @@ impl PdfSerializer {
             }
             idx += 4;
         }
-        String::from_utf8(out).ok()
+        Some(out)
+    }
+
+    fn decode_base64_utf8(input: &str) -> Option<String> {
+        Self::decode_base64_bytes(input).and_then(|bytes| String::from_utf8(bytes).ok())
     }
 
     fn encode_utf16be_hex(text: &str) -> String {
@@ -1472,6 +1477,20 @@ mod tests {
         assert!(!korean_pdf_raw.contains("(첫째 줄 한글 본문)"));
         let parsed_korean_pdf = PdfSerializer::parse(&korean_pdf_bytes).unwrap();
         assert_eq!(parsed_korean_pdf, korean_pdf_model);
+
+        let leading_blank_pdf_model = PdfDocumentModel {
+            title: "빈 줄 보존 테스트".to_string(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "\n둘째 줄 한글 본문".to_string(),
+                approval_stamp: None,
+            }],
+            watermark_text: None,
+        };
+        let leading_blank_bytes = PdfSerializer::serialize(&leading_blank_pdf_model);
+        let parsed_leading_blank = PdfSerializer::parse(&leading_blank_bytes).unwrap();
+        assert_eq!(parsed_leading_blank, leading_blank_pdf_model);
     }
 
     #[test]

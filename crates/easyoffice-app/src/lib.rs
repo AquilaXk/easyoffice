@@ -313,10 +313,20 @@ impl EasyOfficeIpcRouter {
         let mut wb = WorkbookEngine::new();
         wb.add_sheet("Sheet1");
         wb.add_sheet("Sheet2");
-        if seed_defaults && cells_part.is_none_or(|s| s.trim().is_empty()) {
-            wb.set_cell("Sheet2", "A1", "100")?;
-            wb.set_cell("Sheet1", "A1", "1200")?;
-            wb.set_cell("Sheet1", "B1", "850")?;
+        if seed_defaults {
+            if cells_part.is_none_or(|s| s.trim().is_empty()) {
+                wb.set_cell("Sheet1", "A1", "1200")?;
+                wb.set_cell("Sheet1", "B1", "850")?;
+            }
+            let has_sheet2 = cells_part.is_some_and(|s| {
+                Self::split_cell_assignments(s).iter().any(|(lhs, _)| {
+                    lhs.split_once('!')
+                        .is_some_and(|(sh, _)| sh.trim().eq_ignore_ascii_case("Sheet2"))
+                })
+            });
+            if !has_sheet2 && !active_sheet.eq_ignore_ascii_case("Sheet2") {
+                wb.set_cell("Sheet2", "A1", "100")?;
+            }
         }
         wb.add_sheet(active_sheet);
         if let Some(cells_str) = cells_part {
@@ -992,39 +1002,7 @@ impl EasyOfficeIpcRouter {
     }
 
     pub fn decode_base64(input: &str) -> Option<Vec<u8>> {
-        let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-        if clean.is_empty() || (clean.len() & 3) != 0 {
-            return None;
-        }
-        let val = |b: u8| -> Option<u8> {
-            match b {
-                b'A'..=b'Z' => Some(b - b'A'),
-                b'a'..=b'z' => Some(b - b'a' + 26),
-                b'0'..=b'9' => Some(b - b'0' + 52),
-                b'+' => Some(62),
-                b'/' => Some(63),
-                _ => None,
-            }
-        };
-        let mut out = Vec::with_capacity((clean.len() / 4) * 3);
-        let mut idx = 0usize;
-        while idx + 4 <= clean.len() {
-            let a = val(clean[idx])?;
-            let b = val(clean[idx + 1])?;
-            out.push((a << 2) | (b >> 4));
-            if clean[idx + 2] != b'=' {
-                let c = val(clean[idx + 2])?;
-                out.push(((b & 0x0F) << 4) | (c >> 2));
-                if clean[idx + 3] != b'=' {
-                    let d = val(clean[idx + 3])?;
-                    out.push(((c & 0x03) << 6) | d);
-                }
-            } else if clean[idx + 3] != b'=' {
-                return None;
-            }
-            idx += 4;
-        }
-        Some(out)
+        easyoffice_formats::PdfSerializer::decode_base64_bytes(input)
     }
 }
 
@@ -1383,6 +1361,13 @@ mod tests {
         )
         .unwrap();
         assert!(wb_json.contains("\"value\":\"60\""));
+
+        let default_sheet2_json = EasyOfficeIpcRouter::dispatch(
+            "evaluate_workbook_formula",
+            "Sheet1!A1=500?Sheet1|=Sheet2!A1+50",
+        )
+        .unwrap();
+        assert!(default_sheet2_json.contains("\"value\":\"150\""));
 
         for cmd in ["evaluate_workbook_formula", "evaluate_sheet"] {
             let cross1 = EasyOfficeIpcRouter::dispatch(
