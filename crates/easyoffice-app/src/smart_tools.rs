@@ -399,31 +399,54 @@ impl DocumentSecurityAuditor {
         (out, count)
     }
 
+    fn is_email_local_byte(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'+')
+    }
+
+    fn is_email_domain_byte(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-')
+    }
+
     fn mask_emails(input: &str) -> (String, usize) {
+        let bytes = input.as_bytes();
+        let len = bytes.len();
+        let mut out = String::with_capacity(len);
         let mut count = 0usize;
-        let mut tokens: Vec<String> = Vec::new();
-        for line in input.split('\n') {
-            let mut words: Vec<String> = Vec::new();
-            for word in line.split(' ') {
-                if let Some((left, right)) = word.split_once('@') {
-                    let clean_left = left.trim_matches(|c: char| {
-                        !c.is_alphanumeric() && c != '.' && c != '_' && c != '-'
-                    });
-                    let clean_right =
-                        right.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
-                    if !clean_left.is_empty() && clean_right.contains('.') && clean_right.len() >= 3
+        let mut idx = 0usize;
+
+        while idx < len {
+            if bytes[idx].is_ascii_alphanumeric() {
+                let start = idx;
+                let mut p = idx;
+                while p < len && Self::is_email_local_byte(bytes[p]) {
+                    p += 1;
+                }
+                if p > start && p < len && bytes[p] == b'@' {
+                    let dom_start = p + 1;
+                    let mut q = dom_start;
+                    while q < len && Self::is_email_domain_byte(bytes[q]) {
+                        q += 1;
+                    }
+                    while q > dom_start && !bytes[q - 1].is_ascii_alphanumeric() {
+                        q -= 1;
+                    }
+                    let domain = &bytes[dom_start..q];
+                    if domain.len() >= 3
+                        && domain[0].is_ascii_alphanumeric()
+                        && domain.contains(&b'.')
                     {
+                        out.push_str("***@***");
                         count += 1;
-                        let target = format!("{clean_left}@{clean_right}");
-                        words.push(word.replacen(&target, "***@***", 1));
+                        idx = q;
                         continue;
                     }
                 }
-                words.push(word.to_string());
             }
-            tokens.push(words.join(" "));
+            let ch = input[idx..].chars().next().unwrap();
+            out.push(ch);
+            idx += ch.len_utf8();
         }
-        (tokens.join("\n"), count)
+        (out, count)
     }
 }
 

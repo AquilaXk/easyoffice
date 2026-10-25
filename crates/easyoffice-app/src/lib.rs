@@ -143,9 +143,14 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    fn is_cell_key_prefix(s: &str) -> bool {
+    fn is_cell_key_prefix_at(s: &str) -> bool {
         let trimmed = s.trim_start();
-        let Some((lhs, _)) = trimmed.split_once('=') else {
+        let mut max_len = trimmed.len().min(64);
+        while max_len > 0 && !trimmed.is_char_boundary(max_len) {
+            max_len -= 1;
+        }
+        let probe = &trimmed[..max_len];
+        let Some((lhs, _)) = probe.split_once('=') else {
             return false;
         };
         let key = lhs.trim();
@@ -161,49 +166,112 @@ impl EasyOfficeIpcRouter {
         bytes[i..].iter().all(|b| b.is_ascii_digit())
     }
 
+    fn split_unescaped_query(payload: &str) -> Option<(&str, &str)> {
+        let bytes = payload.as_bytes();
+        for i in (0..bytes.len()).rev() {
+            if bytes[i] == b'?' {
+                let mut backslashes = 0usize;
+                let mut k = i;
+                while k > 0 && bytes[k - 1] == b'\\' {
+                    backslashes += 1;
+                    k -= 1;
+                }
+                if backslashes % 2 == 0 {
+                    return Some((&payload[..i], &payload[i + 1..]));
+                }
+            }
+        }
+        None
+    }
+
     fn split_cell_assignments(cells_part: &str) -> Vec<(String, String)> {
         let mut items = Vec::new();
         let mut current = String::new();
+        let mut seen_eq = false;
+        let mut in_formula = false;
+        let mut rhs_started = false;
         let mut in_quotes = false;
         let mut paren_depth = 0usize;
-        let mut chars = cells_part.chars().peekable();
+        let mut idx = 0usize;
 
-        while let Some(ch) = chars.next() {
+        while idx < cells_part.len() {
+            let rest_from_idx = &cells_part[idx..];
+            let ch = rest_from_idx.chars().next().unwrap();
+            let next_idx = idx + ch.len_utf8();
+
             if ch == '\\' {
-                if let Some(&next_ch) = chars.peek() {
+                if let Some(next_ch) = cells_part[next_idx..].chars().next() {
                     if next_ch == ';' || next_ch == '?' || next_ch == '\\' {
-                        current.push(chars.next().unwrap());
+                        if seen_eq && !rhs_started && !next_ch.is_whitespace() {
+                            rhs_started = true;
+                        }
+                        current.push(next_ch);
+                        idx = next_idx + next_ch.len_utf8();
                         continue;
                     }
                 }
                 current.push(ch);
+                idx = next_idx;
                 continue;
             }
-            if ch == '"' {
+
+            if !seen_eq && ch == '=' {
+                seen_eq = true;
+                current.push(ch);
+                idx = next_idx;
+                continue;
+            }
+
+            if seen_eq && !rhs_started && !ch.is_whitespace() {
+                rhs_started = true;
+                if ch == '=' {
+                    in_formula = true;
+                }
+            }
+
+            if in_formula && ch == '"' {
                 in_quotes = !in_quotes;
                 current.push(ch);
+                idx = next_idx;
                 continue;
             }
-            if !in_quotes {
+
+            if in_formula && !in_quotes {
                 if ch == '(' {
                     paren_depth += 1;
                 } else if ch == ')' {
                     paren_depth = paren_depth.saturating_sub(1);
-                } else if ch == ';' && paren_depth == 0 {
-                    let rest: String = chars.clone().collect();
-                    if rest.trim().is_empty() || Self::is_cell_key_prefix(&rest) {
-                        let seg = std::mem::take(&mut current);
-                        if let Some((k, v)) = seg.trim().split_once('=') {
-                            items.push((
-                                k.trim().to_string(),
-                                v.trim().replace("%3B", ";").replace("%3F", "?"),
-                            ));
-                        }
-                        continue;
-                    }
                 }
             }
+
+            let can_split = if in_formula {
+                !in_quotes && paren_depth == 0
+            } else {
+                true
+            };
+
+            if ch == ';' && can_split {
+                let tail = &cells_part[next_idx..];
+                if tail.trim().is_empty() || Self::is_cell_key_prefix_at(tail) {
+                    let seg = std::mem::take(&mut current);
+                    if let Some((k, v)) = seg.trim().split_once('=') {
+                        items.push((
+                            k.trim().to_string(),
+                            v.trim().replace("%3B", ";").replace("%3F", "?"),
+                        ));
+                    }
+                    seen_eq = false;
+                    in_formula = false;
+                    rhs_started = false;
+                    in_quotes = false;
+                    paren_depth = 0;
+                    idx = next_idx;
+                    continue;
+                }
+            }
+
             current.push(ch);
+            idx = next_idx;
         }
         if let Some((k, v)) = current.trim().split_once('=') {
             items.push((
@@ -217,7 +285,8 @@ impl EasyOfficeIpcRouter {
     /// Payload format: semicolon-separated `A1=val` pairs followed by `?target_expr_or_cell`
     /// Example: `A1=100;A2=200;A3==SUM(A1:A2)?A3`
     fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
-        let (cells_part, query_part) = payload.rsplit_once('?').unwrap_or((payload, "A1"));
+        let (cells_part, query_part) =
+            Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
         let mut sheet = SheetEngine::new("IPC_Sheet");
         for (addr, val) in Self::split_cell_assignments(cells_part) {
             if !addr.is_empty() {
@@ -480,7 +549,7 @@ impl EasyOfficeIpcRouter {
         wb.set_cell("Sheet2", "A1", "100")?;
         wb.set_cell("Sheet1", "A1", "1200")?;
         wb.set_cell("Sheet1", "B1", "850")?;
-        let (cells_part, expr_part) = match payload.rsplit_once('?') {
+        let (cells_part, expr_part) = match Self::split_unescaped_query(payload) {
             Some((c, e)) => (Some(c.trim()), e.trim()),
             None => (None, payload.trim()),
         };
@@ -667,15 +736,15 @@ impl EasyOfficeIpcRouter {
 
     fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
         let cleaned: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-        if !cleaned.len().is_multiple_of(2) {
+        if cleaned.len() % 2 != 0 {
             return Err(EasyOfficeError::InvalidArgument(
                 "16진수 문자열 길이가 짝수가 아닙니다.".to_string(),
             ));
         }
         let mut out = Vec::with_capacity(cleaned.len() / 2);
-        for &[hi_b, lo_b] in cleaned.as_chunks::<2>().0 {
-            let hi = Self::hex_val(hi_b)?;
-            let lo = Self::hex_val(lo_b)?;
+        for chunk in cleaned.chunks_exact(2) {
+            let hi = Self::hex_val(chunk[0])?;
+            let lo = Self::hex_val(chunk[1])?;
             out.push((hi << 4) | lo);
         }
         Ok(out)
@@ -1038,5 +1107,26 @@ mod tests {
         .unwrap();
         assert!(smart_json.contains("\"summaryLines\":["));
         assert!(smart_json.contains("\"actionItems\":[\"[TODO] 보안 감사 보고서 제출\"]"));
+
+        let cells_prefix =
+            "A1=Hello (world;B1=He said \"hi;C1=Question\\?;D1=42;E1==IF(D1>10, \"x;y\", \"z\")";
+        for (query, expected) in [
+            ("A1", "\"value\":\"Hello (world\""),
+            ("B1", "\"value\":\"He said \\\"hi\""),
+            ("C1", "\"value\":\"Question?\""),
+            ("D1", "\"value\":\"42\""),
+            ("E1", "\"value\":\"x;y\""),
+        ] {
+            let res =
+                EasyOfficeIpcRouter::dispatch("evaluate_sheet", &format!("{cells_prefix}?{query}"))
+                    .unwrap();
+            assert!(res.contains(expected), "query={query} res={res}");
+        }
+
+        let hangul_pii = DocumentSecurityAuditor::scan_and_scrub_pii(
+            "담당자 이메일은security@easyoffice.local입니다.",
+        );
+        assert_eq!(hangul_pii.masked_emails, 1);
+        assert_eq!(hangul_pii.scrubbed_text, "담당자 이메일은***@***입니다.");
     }
 }

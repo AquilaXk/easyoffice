@@ -475,17 +475,37 @@
       (globalThis.location.protocol === "http:" || globalThis.location.protocol === "https:") &&
       typeof globalThis.fetch === "function"
     ) {
+      let resp;
       try {
-        const resp = await globalThis.fetch("/api/ipc", {
+        resp = await globalThis.fetch("/api/ipc", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ command, payload: String(payload ?? "") }),
         });
-        if (resp.ok) {
-          return await resp.json();
-        }
-      } catch {
+      } catch (netErr) {
+        const msg =
+          "백엔드 IPC 네트워크 오류: " +
+          (netErr && netErr.message ? netErr.message : String(netErr));
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "[요청 거부] " + msg;
+        throw new Error(msg);
       }
+      if (!resp.ok) {
+        const errBody = await resp.json().catch(() => ({}));
+        const msg = errBody.message || "백엔드 IPC 요청 거부 (" + resp.status + ")";
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "[요청 거부] " + msg;
+        const convBox = document.getElementById("conv-result-box");
+        if (command === "convert_document_format" && convBox) {
+          convBox.textContent = "[요청 거부] " + msg;
+        }
+        const secTxt = document.getElementById("security-status-text");
+        if (command === "audit_security" && secTxt) {
+          secTxt.textContent = "[요청 거부] " + msg;
+        }
+        throw new Error(msg);
+      }
+      return await resp.json();
     }
     const handler = MOCK_IPC_HANDLERS[command];
     return handler ? handler(payload) : { status: "ok" };
@@ -525,8 +545,19 @@
     });
   }
 
+  function normalizeFormattedNumericCell(raw) {
+    const trimmed = String(raw || "").trim();
+    if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(trimmed)) {
+      return trimmed.replaceAll(",", "");
+    }
+    return trimmed;
+  }
+
   function escapeSemicolonToken(value) {
-    return String(value || "").replaceAll(";", String.raw`\;`);
+    return String(value || "")
+      .replaceAll("\\", "\\\\")
+      .replaceAll(";", String.raw`\;`)
+      .replaceAll("?", String.raw`\?`);
   }
 
   function collectSheetCellMap() {
@@ -535,13 +566,16 @@
     Object.keys(sheet2Snap).forEach((ref) => {
       const entry = sheet2Snap[ref];
       if (entry && (entry.formula || entry.value)) {
-        map["Sheet2!" + ref] = String(entry.formula || entry.value).replaceAll(",", "");
+        const val = entry.formula
+          ? entry.formula
+          : normalizeFormattedNumericCell(entry.value);
+        map["Sheet2!" + ref] = escapeSemicolonToken(val);
       }
     });
     document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
       const ref = td.dataset.cell;
       const formula = td.dataset.formula;
-      const rawText = (td.textContent || "").replaceAll(",", "").trim();
+      const rawText = normalizeFormattedNumericCell(td.textContent || "");
       const val = formula || rawText;
       map[ref] = escapeSemicolonToken(val);
     });
