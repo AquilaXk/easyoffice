@@ -25,6 +25,14 @@ public final class WorkspaceViewModel {
   public var ribbonLayoutStyle: RibbonLayoutStyle = .standardOffice
   public var isRibbonCollapsed: Bool = false
   public var themeMode: WorkspaceThemeMode = .lightLavender
+  public var usesDarkMode: Bool {
+    get { themeMode == .darkIndigo }
+    set { themeMode = newValue ? .darkIndigo : .lightLavender }
+  }
+  public func toggleDarkMode() {
+    usesDarkMode.toggle()
+    lastExecutedCommandSummary = "테마 모드 전환: \(themeMode.rawValue)"
+  }
   public var customTemplates: [OfficeTemplateDescriptor] = []
   public var showLeftNavigator: Bool = true
   public var showRightInspector: Bool = true
@@ -385,6 +393,7 @@ public final class WorkspaceViewModel {
     }
     activeConditionalFormatRule = sheet.conditionalFormatRules.first
     activeDataValidationRule = sheet.dataValidationRule
+    formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
   }
 
   internal func persistSheetRulesToActiveTab() {
@@ -649,6 +658,12 @@ public final class WorkspaceViewModel {
     closeTab(id: id)
   }
 
+  public func confirmDiscardAndClosePendingTab() {
+    guard let id = pendingCloseConfirmTabID else { return }
+    pendingCloseConfirmTabID = nil
+    closeTab(id: id)
+  }
+
   public func cancelCloseTab() {
     pendingCloseConfirmTabID = nil
   }
@@ -843,10 +858,9 @@ public final class WorkspaceViewModel {
 
   // MARK: - Real File Open / Export / Save I/O
 
-  @discardableResult
-  public func openDocument(data: Data, fileName: String, fileURL: URL? = nil) throws
-    -> WorkspaceTabItem
-  {
+  internal func decodeDocumentPayload(data: Data, fileName: String) throws -> (
+    format: DocumentFormat, payload: OpenTabPayload
+  ) {
     let verified = try FormatDetector.verify(data: data, fileName: fileName)
     let format = verified.format
     let payload: OpenTabPayload
@@ -895,11 +909,18 @@ public final class WorkspaceViewModel {
     case .odp: payload = .slide(try ODFContainerCodec.decodePresentation(from: data))
     case .pdf: payload = .pdf(try PDFBinarySerializer.decode(from: data))
     }
+    return (format, payload)
+  }
 
+  @discardableResult
+  public func openDocument(data: Data, fileName: String, fileURL: URL? = nil) throws
+    -> WorkspaceTabItem
+  {
+    let decoded = try decodeDocumentPayload(data: data, fileName: fileName)
     let newTab = WorkspaceTabItem(
-      fileName: fileName, format: format,
+      fileName: fileName, format: decoded.format,
       lastOpenedISO8601: OfficeDocumentModel.currentISO8601Timestamp(), fileURL: fileURL,
-      payload: payload)
+      payload: decoded.payload)
     openTabs.append(newTab)
     activeTabID = newTab.id
     isShowingHomeHub = false
@@ -1450,15 +1471,17 @@ public final class WorkspaceViewModel {
     var enqueuedCount = 0
     for url in urls {
       do {
-        let tab = try loadFromDisk(url: url)
+        let rawData = try Data(contentsOf: url)
+        let fileName = url.lastPathComponent
+        let decoded = try decodeDocumentPayload(data: rawData, fileName: fileName)
         let safeSourceName =
-          tab.fileName.contains(".") ? tab.fileName : "\(tab.fileName).\(tab.format.fileExtension)"
+          fileName.contains(".") ? fileName : "\(fileName).\(decoded.format.fileExtension)"
         additionalBatchJobs.append(
           ConversionJobRequest(
             sourceFileName: safeSourceName,
-            sourceFormat: tab.format,
+            sourceFormat: decoded.format,
             targetFormat: batchTargetFormat,
-            payload: tab.payload
+            payload: decoded.payload
           )
         )
         enqueuedCount += 1

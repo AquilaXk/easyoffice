@@ -427,21 +427,29 @@ public struct SlideshowFullScreenOverlayView: View {
                 )
                 .shadow(color: Color.black.opacity(0.45), radius: 18, x: 0, y: 8)
 
+              let stageTextColor = EasyOfficeDesignTokens.contrastingTextColor(
+                forFillHex: deck.deckTheme.primaryFillHex
+              )
               VStack(alignment: .leading, spacing: 12) {
                 Text(slide.title)
                   .font(.system(size: 28, weight: .bold))
-                  .foregroundStyle(EasyOfficeDesignTokens.inkPrimary.swiftUIColor)
+                  .foregroundStyle(stageTextColor)
 
                 if !slide.subtitle.isEmpty {
                   Text(slide.subtitle)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .foregroundStyle(
+                      EasyOfficeDesignTokens.resolveHexColor(
+                        deck.deckTheme.accentBorderHex,
+                        fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
+                      )
+                    )
                 }
 
                 ForEach(slide.bulletPoints, id: \.self) { bullet in
                   Text("• \(bullet)")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(EasyOfficeDesignTokens.inkPrimary.swiftUIColor)
+                    .foregroundStyle(stageTextColor)
                 }
               }
               .padding(32)

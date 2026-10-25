@@ -69,7 +69,9 @@ public struct PivotTableEngine: Sendable {
     let dataRows = hasHeaderRow ? Array(allRows.dropFirst()) : allRows
 
     var rowKeys: [String] = []
+    var rowKeySet = Set<String>()
     var colKeys: [String] = []
+    var colKeySet = Set<String>()
     var buckets: [String: [String: [Double]]] = [:]
     var rowBuckets: [String: [Double]] = [:]
     var colBuckets: [String: [Double]] = [:]
@@ -97,8 +99,8 @@ public struct PivotTableEngine: Sendable {
         cKey = "Total"
       }
 
-      if !rowKeys.contains(rKey) { rowKeys.append(rKey) }
-      if !colKeys.contains(cKey) { colKeys.append(cKey) }
+      if rowKeySet.insert(rKey).inserted { rowKeys.append(rKey) }
+      if colKeySet.insert(cKey).inserted { colKeys.append(cKey) }
 
       let valCell = row[configuration.valueFieldColumnIndex]
       if let val = valCell.numericValue {
@@ -283,7 +285,12 @@ public enum ConditionalFormatRule: Sendable, Codable, Equatable {
       return value.description.localizedCaseInsensitiveContains(substring)
     case .duplicateValues:
       guard value != .empty else { return false }
-      return allValuesInRange.filter { $0 == value }.count > 1
+      var matchCount = 0
+      for item in allValuesInRange where item == value {
+        matchCount += 1
+        if matchCount > 1 { return true }
+      }
+      return false
     }
   }
 }

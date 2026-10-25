@@ -600,15 +600,18 @@ public enum LegacyOLE2OfficeCodec {
       }
     }
 
-    // 7. Extended worksheet metadata record (0x0868)
     let extEnvelope = BIFF8ExtendedMetadataEnvelope(from: sheet)
-    if let extBytes = try? JSONEncoder().encode(extEnvelope),
-      !extBytes.isEmpty,
-      extBytes.count <= Int(UInt16.max)
-    {
-      BitPacking.appendUInt16LE(biff8OpcodeExtendedMeta, to: &stream)
-      BitPacking.appendUInt16LE(UInt16(extBytes.count), to: &stream)
-      stream.append(extBytes)
+    if let extBytes = try? JSONEncoder().encode(extEnvelope), !extBytes.isEmpty {
+      let maxChunkLen = Int(UInt16.max)
+      var chunkOffset = 0
+      while chunkOffset < extBytes.count {
+        let chunkLen = min(maxChunkLen, extBytes.count - chunkOffset)
+        BitPacking.appendUInt16LE(biff8OpcodeExtendedMeta, to: &stream)
+        BitPacking.appendUInt16LE(UInt16(chunkLen), to: &stream)
+        let startIdx = extBytes.startIndex + chunkOffset
+        stream.append(extBytes[startIdx..<(startIdx + chunkLen)])
+        chunkOffset += chunkLen
+      }
     }
 
     // 8. Worksheet EOF record (0x000A, length 0)
@@ -641,7 +644,7 @@ public enum LegacyOLE2OfficeCodec {
     var currentSheet = WorksheetModel(name: name)
     var currentSheetIndex = 0
     var inWorksheetSubstream = false
-    var extendedEnvelope: BIFF8ExtendedMetadataEnvelope? = nil
+    var extendedMetaBytes = Data()
     var pendingFormulaCoord: (row: Int, col: Int)? = nil
     var sstStrings: [String] = []
     var currentSubstreamType: UInt16 = 0x0010
@@ -927,11 +930,9 @@ public enum LegacyOLE2OfficeCodec {
         try currentSheet.setCell(row: row, column: col, rawValue: str)
 
       case biff8OpcodeExtendedMeta:
-        let slice = Data(
-          workbook[(workbook.startIndex + payloadStart)..<(workbook.startIndex + payloadEnd)])
-        if let ext = try? JSONDecoder().decode(BIFF8ExtendedMetadataEnvelope.self, from: slice) {
-          extendedEnvelope = ext
-        }
+        extendedMetaBytes.append(
+          workbook[(workbook.startIndex + payloadStart)..<(workbook.startIndex + payloadEnd)]
+        )
 
       case biff8OpcodeEOF:
         pendingFormulaCoord = nil
@@ -971,7 +972,9 @@ public enum LegacyOLE2OfficeCodec {
         )
       }
     }
-    if let ext = extendedEnvelope {
+    if !extendedMetaBytes.isEmpty,
+      let ext = try? JSONDecoder().decode(BIFF8ExtendedMetadataEnvelope.self, from: extendedMetaBytes)
+    {
       ext.apply(to: &result)
     }
     return result

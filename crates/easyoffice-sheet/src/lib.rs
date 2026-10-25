@@ -335,7 +335,16 @@ impl ConditionalFormatRule {
                 if *value == EvaluatedCellValue::Empty {
                     return false;
                 }
-                range_values.iter().filter(|item| *item == value).count() > 1
+                let mut hits = 0usize;
+                for item in range_values {
+                    if item == value {
+                        hits += 1;
+                        if hits > 1 {
+                            return true;
+                        }
+                    }
+                }
+                false
             }
         }
     }
@@ -478,7 +487,7 @@ impl SheetEngine {
 
     fn compile_cell_entry(raw: &str) -> Option<Result<Expr, FormulaError>> {
         let trimmed = raw.trim();
-        if let Some(formula_body) = trimmed.strip_prefix('=') {
+        if let Some(formula_body) = crate::parser::strip_formula_prefix(trimmed) {
             let expr_src = formula_body.trim();
             if expr_src.is_empty() {
                 None
@@ -657,7 +666,8 @@ impl SheetEngine {
             return match self.cells.get(&coord) {
                 None => EvaluatedCellValue::Empty,
                 Some(raw) => {
-                    if raw.trim() == "=" {
+                    if crate::parser::strip_formula_prefix(raw).is_some_and(|s| s.trim().is_empty())
+                    {
                         EvaluatedCellValue::Empty
                     } else if raw.chars().count() > Self::MAX_CELL_TEXT_CHARS {
                         EvaluatedCellValue::Error(FormulaError::Value)
@@ -708,7 +718,7 @@ impl SheetEngine {
             return EvaluatedCellValue::Empty;
         }
         let trimmed = raw.trim();
-        let mut res = if let Some(formula_body) = trimmed.strip_prefix('=') {
+        let mut res = if let Some(formula_body) = crate::parser::strip_formula_prefix(trimmed) {
             let expr_src = formula_body.trim();
             if expr_src.is_empty() {
                 return EvaluatedCellValue::Empty;
@@ -1202,5 +1212,98 @@ impl SheetEngine {
         } else {
             Self::values_match(cell, pattern)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_korean_formulas_openformula_prefixes_and_quoted_sheet_brackets() {
+        let mut sheet = SheetEngine::new("매출");
+        sheet.set_cell("A1", "=\"한글\"").unwrap();
+        sheet.set_cell("A2", "='매출'!A1").unwrap();
+        sheet.set_cell("A3", "=매출!A1").unwrap();
+        assert_eq!(
+            sheet.evaluate_cell("A1"),
+            EvaluatedCellValue::Text("한글".to_string())
+        );
+        assert_eq!(
+            sheet.evaluate_cell("A2"),
+            EvaluatedCellValue::Text("한글".to_string())
+        );
+        assert_eq!(
+            sheet.evaluate_cell("A3"),
+            EvaluatedCellValue::Text("한글".to_string())
+        );
+
+        sheet.set_cell("A1", "10").unwrap();
+        sheet.set_cell("A2", "20").unwrap();
+        sheet.set_cell("B1", "of:=SUM([.A1:.A2])").unwrap();
+        sheet.set_cell("B2", "oooc:=SUM([.A1:.A2])").unwrap();
+        sheet.set_cell("B3", "msoxl:=SUM(A1:A2)").unwrap();
+        assert_eq!(sheet.evaluate_cell("B1"), EvaluatedCellValue::Number(30.0));
+        assert_eq!(sheet.evaluate_cell("B2"), EvaluatedCellValue::Number(30.0));
+        assert_eq!(sheet.evaluate_cell("B3"), EvaluatedCellValue::Number(30.0));
+
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet("2026 [Q1]").set_cell("A1", "42").unwrap();
+        wb.add_sheet("Q1:Q2").set_cell("A1", "55").unwrap();
+        {
+            let ab = wb.add_sheet("A.B");
+            ab.set_cell("C1", "10").unwrap();
+            ab.set_cell("D2", "25").unwrap();
+        }
+        {
+            let main_sheet = wb.add_sheet("요약");
+            main_sheet.set_cell("A1", "=['2026 [Q1]'!A1]").unwrap();
+            main_sheet.set_cell("A2", "='2026 [Q1]'!A1").unwrap();
+            main_sheet.set_cell("A3", "of:=['Q1:Q2'.A1]").unwrap();
+            main_sheet
+                .set_cell("A4", "of:=SUM(['A.B'.C1:.D2])")
+                .unwrap();
+            main_sheet
+                .set_cell("A5", "of:=SUM(['Q1:Q2'.A1:'A.B'.D2])")
+                .unwrap();
+            main_sheet
+                .set_cell("A6", "of:=SUM([.A1:'A.B'.D2])")
+                .unwrap();
+        }
+        assert_eq!(
+            wb.evaluate_cell("요약", "A1"),
+            EvaluatedCellValue::Number(42.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("요약", "A2"),
+            EvaluatedCellValue::Number(42.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("요약", "A3"),
+            EvaluatedCellValue::Number(55.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("요약", "A4"),
+            EvaluatedCellValue::Number(35.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("요약", "A5"),
+            EvaluatedCellValue::Error(FormulaError::Ref)
+        );
+        assert_eq!(
+            wb.evaluate_cell("요약", "A6"),
+            EvaluatedCellValue::Error(FormulaError::Ref)
+        );
+
+        sheet.set_cell("C1", "10").unwrap();
+        sheet.set_cell("D1", "100").unwrap();
+        sheet.set_cell("C2", "10").unwrap();
+        sheet.set_cell("D2", "200").unwrap();
+        sheet.set_cell("C3", "20").unwrap();
+        sheet.set_cell("D3", "300").unwrap();
+        sheet
+            .set_cell("E1", "=VLOOKUP(10, C1:D3, 2, TRUE)")
+            .unwrap();
+        assert_eq!(sheet.evaluate_cell("E1"), EvaluatedCellValue::Number(200.0));
     }
 }

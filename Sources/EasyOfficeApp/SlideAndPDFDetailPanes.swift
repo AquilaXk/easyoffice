@@ -163,6 +163,9 @@ public struct SlideEditorDetailPaneView: View {
       deck.deckTheme.primaryFillHex,
       fallback: palette.elevatedSurface.swiftUIColor
     )
+    let themeText = EasyOfficeDesignTokens.contrastingTextColor(
+      forFillHex: deck.deckTheme.primaryFillHex
+    )
     let themeAccent = EasyOfficeDesignTokens.resolveHexColor(
       deck.deckTheme.accentBorderHex,
       fallback: EasyOfficeDesignTokens.brand700.swiftUIColor
@@ -185,7 +188,7 @@ public struct SlideEditorDetailPaneView: View {
 
             Text(slide.title)
               .font(.system(size: 9, weight: .bold))
-              .foregroundStyle(palette.primaryText.swiftUIColor)
+              .foregroundStyle(themeText)
               .lineLimit(1)
           }
 
@@ -496,7 +499,12 @@ public struct SlideEditorDetailPaneView: View {
 
                       ZStack(alignment: .topLeading) {
                         Rectangle()
-                          .fill(palette.elevatedSurface.swiftUIColor)
+                          .fill(
+                            EasyOfficeDesignTokens.resolveHexColor(
+                              deck.deckTheme.primaryFillHex,
+                              fallback: palette.elevatedSurface.swiftUIColor
+                            )
+                          )
 
                         Rectangle()
                           .fill(
@@ -670,6 +678,9 @@ public struct SlideEditorDetailPaneView: View {
     activeIdx: Int,
     palette: WorkspaceThemePalette
   ) -> some View {
+    let slideThemeText = EasyOfficeDesignTokens.contrastingTextColor(
+      forFillHex: deck.deckTheme.primaryFillHex
+    )
     VStack(alignment: .leading, spacing: 6) {
       if isPrimaryPane && !viewModel.isCanvasSnapshotMode {
         TextField(
@@ -686,7 +697,7 @@ public struct SlideEditorDetailPaneView: View {
             weight: .bold
           )
         )
-        .foregroundStyle(palette.primaryText.swiftUIColor)
+        .foregroundStyle(slideThemeText)
       } else {
         Text(slide.title)
           .font(
@@ -696,7 +707,7 @@ public struct SlideEditorDetailPaneView: View {
               weight: .bold
             )
           )
-          .foregroundStyle(palette.primaryText.swiftUIColor)
+          .foregroundStyle(slideThemeText)
           .lineLimit(1)
       }
 
@@ -739,7 +750,7 @@ public struct SlideEditorDetailPaneView: View {
             ForEach(leftBullets, id: \.self) { bullet in
               Text("• \(bullet)")
                 .font(.system(size: 12))
-                .foregroundStyle(palette.primaryText.swiftUIColor)
+                .foregroundStyle(slideThemeText)
                 .lineLimit(1)
             }
           }
@@ -748,7 +759,7 @@ public struct SlideEditorDetailPaneView: View {
             ForEach(rightBullets, id: \.self) { bullet in
               Text("• \(bullet)")
                 .font(.system(size: 12))
-                .foregroundStyle(palette.primaryText.swiftUIColor)
+                .foregroundStyle(slideThemeText)
                 .lineLimit(1)
             }
           }
@@ -758,7 +769,7 @@ public struct SlideEditorDetailPaneView: View {
         ForEach(slide.bulletPoints, id: \.self) { bullet in
           Text("• \(bullet)")
             .font(.system(size: 12))
-            .foregroundStyle(palette.primaryText.swiftUIColor)
+            .foregroundStyle(slideThemeText)
             .lineLimit(1)
         }
       }
@@ -1572,7 +1583,7 @@ public struct PDFStudioDetailPaneView: View {
                   $0.kind == .highlight && !trimmed.isEmpty
                     && (trimmed.contains($0.content.prefix(4))
                       || $0.content.contains(trimmed.prefix(4)))
-                } || (lineIdx == 1 && !pageAnnotations.isEmpty)
+                }
 
               Text(trimmed.isEmpty ? " " : line)
                 .font(

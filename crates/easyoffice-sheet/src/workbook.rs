@@ -4,7 +4,7 @@ use crate::{
 };
 use easyoffice_formats::EasyOfficeError;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Multi-sheet workbook engine supporting cross-sheet references (`=Sheet2!A1`, `=SUM(Sheet2!A1:A3)`)
 /// and cross-sheet cycle detection.
@@ -200,6 +200,7 @@ impl SheetEngine {
 
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         let mut row_keys: Vec<String> = Vec::new();
+        let mut row_key_set: HashSet<String> = HashSet::new();
         let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
         let mut all_values: Vec<f64> = Vec::new();
 
@@ -216,7 +217,7 @@ impl SheetEngine {
                     if key_str.is_empty() {
                         continue;
                     }
-                    if !row_keys.contains(&key_str) {
+                    if row_key_set.insert(key_str.clone()) {
                         row_keys.push(key_str.clone());
                     }
                     let val = self.eval_coord_ctx(vc, &mut ctx, 0);

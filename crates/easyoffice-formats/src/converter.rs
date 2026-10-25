@@ -116,6 +116,11 @@ impl UniversalFormatConverter {
                 for p in paragraphs {
                     blocks.push(MarkdownBlock::Paragraph(p));
                 }
+                for table in &model.tables {
+                    if !table.is_empty() {
+                        blocks.push(MarkdownBlock::Table(table.clone()));
+                    }
+                }
                 Ok(CommonMarkCodec::render(&blocks).into_bytes())
             }
             DocumentFormat::Txt => {
@@ -193,16 +198,26 @@ impl UniversalFormatConverter {
                     .collect(),
             }),
             DocumentFormat::Odp => OdfCodec::pack_odp(&title, &slides),
-            DocumentFormat::Pdf => Ok(PdfSerializer::serialize(&PdfDocumentModel {
-                title,
-                pages: vec![PdfPageModel {
-                    page_number: 1,
-                    rotation_degrees: 0,
-                    body_text: paragraphs.join("\n"),
-                    approval_stamp: model.official_agency.clone(),
-                }],
-                watermark_text: None,
-            })),
+            DocumentFormat::Pdf => {
+                let mut body_lines = paragraphs;
+                for table in &model.tables {
+                    for row in table {
+                        if !row.is_empty() {
+                            body_lines.push(row.join(" | "));
+                        }
+                    }
+                }
+                Ok(PdfSerializer::serialize(&PdfDocumentModel {
+                    title,
+                    pages: vec![PdfPageModel {
+                        page_number: 1,
+                        rotation_degrees: 0,
+                        body_text: body_lines.join("\n"),
+                        approval_stamp: model.official_agency.clone(),
+                    }],
+                    watermark_text: None,
+                }))
+            }
         }
     }
 
@@ -235,20 +250,30 @@ impl UniversalFormatConverter {
                 let blocks = CommonMarkCodec::parse(text)?;
                 let mut title = "Markdown 문서".to_string();
                 let mut paragraphs = Vec::new();
+                let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
                 for block in blocks {
                     match block {
-                        MarkdownBlock::Heading { level: 1, text } if paragraphs.is_empty() => {
+                        MarkdownBlock::Heading { level: 1, text }
+                            if paragraphs.is_empty() && tables.is_empty() =>
+                        {
                             title = text;
                         }
                         MarkdownBlock::Heading { text, .. }
                         | MarkdownBlock::Paragraph(text)
-                        | MarkdownBlock::BlockQuote(text) => paragraphs.push(text),
+                        | MarkdownBlock::BlockQuote(text) => {
+                            paragraphs.push(text);
+                        }
                         MarkdownBlock::BulletList(items) | MarkdownBlock::NumberedList(items) => {
                             paragraphs.extend(items);
                         }
+                        MarkdownBlock::Table(rows) => {
+                            if !rows.is_empty() {
+                                tables.push(rows);
+                            }
+                        }
                     }
                 }
-                Self::from_doc(title, paragraphs, Vec::new(), None)
+                Self::from_doc(title, paragraphs, tables, None)
             }
             DocumentFormat::Txt => {
                 let text = std::str::from_utf8(bytes).map_err(|_| {
@@ -515,5 +540,35 @@ mod tests {
                 DocumentFormat::Pdf
             );
         }
+    }
+
+    #[test]
+    fn test_markdown_and_pdf_preserve_document_tables() {
+        let model = UniversalDocumentModel {
+            title: "표보존검증".to_string(),
+            paragraphs: vec!["본문요약".to_string()],
+            tables: vec![vec![
+                vec!["항목".to_string(), "값".to_string()],
+                vec!["매출".to_string(), "1200".to_string()],
+            ]],
+            sheet_cells: Vec::new(),
+            slides: Vec::new(),
+            official_agency: None,
+        };
+
+        let md_bytes = UniversalFormatConverter::encode(&model, DocumentFormat::Markdown).unwrap();
+        let md_str = String::from_utf8(md_bytes.clone()).unwrap();
+        assert!(md_str.contains("| 항목 | 값 |"));
+        assert!(md_str.contains("| --- | --- |"));
+        assert!(md_str.contains("| 매출 | 1200 |"));
+        let (_, md_decoded) = UniversalFormatConverter::decode(&md_bytes, Some("md")).unwrap();
+        assert_eq!(md_decoded.tables, model.tables);
+
+        let pdf_bytes = UniversalFormatConverter::encode(&model, DocumentFormat::Pdf).unwrap();
+        let (_, pdf_decoded) = UniversalFormatConverter::decode(&pdf_bytes, Some("pdf")).unwrap();
+        assert!(pdf_decoded
+            .paragraphs
+            .iter()
+            .any(|p| p.contains("매출 | 1200")));
     }
 }
