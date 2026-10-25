@@ -836,7 +836,13 @@ extension WorksheetModel {
     nextCells.reserveCapacity(cellsByCoordinate.count)
     for (coord, rawVal) in cellsByCoordinate {
       let targetRow = oldToNewRow[coord.row] ?? coord.row
-      nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = rawVal
+      let rowDelta = targetRow - coord.row
+      if rowDelta != 0 && rawVal.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("=") {
+        nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] =
+          Self.shiftFormulaReferences(rawVal, rowDelta: rowDelta, columnDelta: 0)
+      } else {
+        nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = rawVal
+      }
     }
     cellsByCoordinate = nextCells
 
@@ -983,7 +989,8 @@ extension WorksheetModel {
       guard parts.count > 1 else { continue }
       for (offset, part) in parts.enumerated()
       where column + offset <= CellAddress.maxZeroBasedColumn {
-        cellsByCoordinate[PackedCellCoordinate(row: r, column: column + offset)] = part
+        let safePart = part.hasPrefix("=") ? ("'" + part) : part
+        cellsByCoordinate[PackedCellCoordinate(row: r, column: column + offset)] = safePart
       }
       splitRowCount += 1
     }

@@ -175,7 +175,8 @@ extension WorksheetModel {
         return .error("#REF!")
       }
       let lookupVal = frame.arg(0, in: self)
-      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
+      if case .error = lookupVal { return lookupVal }
+      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? true) : true
       let targetCol = bounds.minCol + colIdx
       var approxBestRow: Int?
       var approxBestNum = -Double.infinity
@@ -231,7 +232,8 @@ extension WorksheetModel {
         return .error("#REF!")
       }
       let lookupVal = frame.arg(0, in: self)
-      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? false) : false
+      if case .error = lookupVal { return lookupVal }
+      let isApprox = frame.count == 4 ? (frame.arg(3, in: self).booleanValue ?? true) : true
       let targetRow = bounds.minRow + rowIdx
       var approxBestCol: Int?
       var approxBestNum = -Double.infinity
@@ -281,6 +283,7 @@ extension WorksheetModel {
           return .error("#VALUE!")
         }
         let lookupVal = frame.arg(0, in: self)
+        if case .error = lookupVal { return lookupVal }
         let matchMode: Int
         if frame.count >= 5, frame.args[4] != .empty {
           guard let mmNum = frame.arg(4, in: self).numericValue,
@@ -468,12 +471,13 @@ extension WorksheetModel {
         }
         matchType = mtInt
       } else {
-        matchType = 0
+        matchType = 1
       }
       switch frame.resolve(1..<2, in: self) {
       case .failure(let err): return .error(err)
       case .success(let lookupArr):
         let lookupVal = frame.arg(0, in: self)
+        if case .error = lookupVal { return lookupVal }
         if matchType == 0 {
           for (idx, item) in lookupArr.enumerated() where Self.cellValuesEqual(item, lookupVal) {
             return .number(Double(idx + 1))

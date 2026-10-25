@@ -485,4 +485,191 @@ final class StandardCodecInteroperabilityTests: XCTestCase {
     XCTAssertEqual(decodedDeck.slides[0].elements[0].bodyText, "Nested Escher Slide Title")
     XCTAssertEqual(decodedDeck.slides[0].elements[1].bodyText, "Bullet One\rBullet Two")
   }
+
+  func testOLE2HierarchicalStorageAndStandardHWP5BinaryRecords() throws {
+    var fileHeader = Data(repeating: 0, count: HWP5BinaryCodec.fileHeaderByteLength)
+    for (idx, b) in Array(HWP5BinaryCodec.signatureString.utf8).enumerated() {
+      fileHeader[idx] = b
+    }
+    try BitPacking.writeUInt32LE(HWP5BinaryCodec.defaultVersion, into: &fileHeader, at: 32)
+    try BitPacking.writeUInt32LE(0, into: &fileHeader, at: 36)
+
+    // Standard 26-byte HWPTAG_DOCUMENT_PROPERTIES (sectionCount = 1 at offset 0)
+    var stdDocProps = Data(repeating: 0, count: 26)
+    try BitPacking.writeUInt16LE(1, into: &stdDocProps, at: 0)
+    var docInfoStream = try HWP5RecordHeader.encode(
+      tagID: HWP5RecordHeader.tagDocumentProperties,
+      level: 0,
+      payloadSize: 26
+    )
+    docInfoStream.append(stdDocProps)
+
+    // Standard 24-byte HWPTAG_PARA_HEADER + HWPTAG_PARA_TEXT with 8-WCHAR control (0x000B) & trailing 0x000D
+    let stdParaHeader = Data(repeating: 0, count: 24)
+    var section0Stream = try HWP5RecordHeader.encode(
+      tagID: HWP5RecordHeader.tagParaHeader,
+      level: 0,
+      payloadSize: 24
+    )
+    section0Stream.append(stdParaHeader)
+
+    var paraTextPayload = BitPacking.encodeUTF16LE("표준 한글 본문")
+    // Append 8-WCHAR extended control (code 0x000B at +0 and +14)
+    var controlBlock = Data(repeating: 0, count: 16)
+    try BitPacking.writeUInt16LE(0x000B, into: &controlBlock, at: 0)
+    try BitPacking.writeUInt16LE(0x000B, into: &controlBlock, at: 14)
+    paraTextPayload.append(controlBlock)
+    paraTextPayload.append(BitPacking.encodeUTF16LE(" 정상 추출"))
+    BitPacking.appendUInt16LE(0x000D, to: &paraTextPayload)
+
+    let textRec = try HWP5RecordHeader.encode(
+      tagID: HWP5RecordHeader.tagParaText,
+      level: 1,
+      payloadSize: UInt32(paraTextPayload.count)
+    )
+    section0Stream.append(textRec)
+    section0Stream.append(paraTextPayload)
+
+    // Pack flat streams then rewrite directory entry 3 into storage "BodyText" -> child entry 4 "Section0"
+    var packed = try OLE2ContainerCodec.pack(streams: [
+      OLE2StreamEntry(name: "FileHeader", data: fileHeader),
+      OLE2StreamEntry(name: "DocInfo", data: docInfoStream),
+      OLE2StreamEntry(name: "BodyText", data: Data()),
+      OLE2StreamEntry(name: "Section0", data: section0Stream),
+    ])
+    // Directory sector is sector 0 (file offset 512).
+    // Entry 3 (offset 512 + 3 * 128 = 896) is "BodyText": set objectType = 1 (storage), childID = 4, rightSiblingID = freeSector
+    let bodyTextEntryOffset = 512 + 3 * 128
+    packed[bodyTextEntryOffset + 66] = 1
+    try BitPacking.writeUInt32LE(OLE2ContainerCodec.freeSector, into: &packed, at: bodyTextEntryOffset + 72)
+    try BitPacking.writeUInt32LE(4, into: &packed, at: bodyTextEntryOffset + 76)
+
+    let unpackedStreams = try OLE2ContainerCodec.unpack(from: packed)
+    XCTAssertTrue(unpackedStreams.contains(where: { $0.name == "BodyText/Section0" }))
+
+    let decodedDoc = try HWP5BinaryCodec.decodeDocument(from: packed)
+    XCTAssertEqual(decodedDoc.paragraphs.count, 1)
+    XCTAssertEqual(decodedDoc.paragraphs[0].text, "표준 한글 본문 정상 추출")
+  }
+
+  func testODFHeadingExtractionAndOpenFormulaCrossSheetNormalization() throws {
+    let contentXML = """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+        <office:body>
+          <office:text>
+            <text:h text:outline-level="1">제1장 서론</text:h>
+            <text:p>본문 단락입니다.</text:p>
+            <text:h text:outline-level="2">제1절 배경</text:h>
+          </office:text>
+        </office:body>
+      </office:document-content>
+      """
+    let odtBytes = try ZipContainerCodec.pack(entries: [
+      ZipContainerEntry(
+        path: "mimetype",
+        data: Data(ODFContainerCodec.textMimeType.utf8),
+        compressionMethod: .store
+      ),
+      ZipContainerEntry(
+        path: "content.xml",
+        data: Data(contentXML.utf8),
+        compressionMethod: .deflate
+      ),
+    ])
+    let decodedODT = try ODFContainerCodec.decodeDocument(from: odtBytes)
+    XCTAssertEqual(decodedODT.paragraphs.count, 3)
+    XCTAssertEqual(decodedODT.paragraphs[0].style, .heading1)
+    XCTAssertEqual(decodedODT.paragraphs[0].text, "제1장 서론")
+    XCTAssertEqual(decodedODT.paragraphs[1].style, .body)
+    XCTAssertEqual(decodedODT.paragraphs[2].style, .heading2)
+    XCTAssertEqual(decodedODT.paragraphs[2].text, "제1절 배경")
+
+    let normalizedRange = XMLDocumentModelMapper.normalizeOpenFormulaExpression(
+      "of:=SUM([Sheet2.A1:Sheet2.A3])"
+    )
+    XCTAssertEqual(normalizedRange, "=SUM(Sheet2!A1:A3)")
+  }
+
+  func testFormulaASTScientificNotationErrorLiteralsAndLeadingApostrophe() throws {
+    var sheet = WorksheetModel(name: "ScientificAndErrors")
+    try sheet.setCell("A1", rawValue: "=1E-5+2.5e+2")
+    try sheet.setCell("A2", rawValue: "=IFNA(#N/A, \"대체완료\")")
+    try sheet.setCell("A3", rawValue: "=ISERROR(#DIV/0!)")
+    try sheet.setCell("A4", rawValue: "'=10+20")
+
+    XCTAssertEqual(sheet.evaluate(at: "A1").numericValue ?? 0.0, 250.00001, accuracy: 1e-8)
+    XCTAssertEqual(sheet.evaluate(at: "A2"), .text("대체완료"))
+    XCTAssertEqual(sheet.evaluate(at: "A3"), .boolean(true))
+    XCTAssertEqual(sheet.evaluate(at: "A4"), .text("=10+20"))
+  }
+
+  func testSheetSortShiftsRelativeRowFormulasAndSplitColumnEscapesFormulaInjection() throws {
+    var sheet = WorksheetModel(name: "SortAndSplit")
+    try sheet.setCell("A1", rawValue: "품목")
+    try sheet.setCell("B1", rawValue: "단가")
+    try sheet.setCell("C1", rawValue: "수량")
+    try sheet.setCell("D1", rawValue: "금액")
+
+    try sheet.setCell("A2", rawValue: "나-항목")
+    try sheet.setCell("B2", rawValue: "10")
+    try sheet.setCell("C2", rawValue: "3")
+    try sheet.setCell("D2", rawValue: "=B2*C2")
+
+    try sheet.setCell("A3", rawValue: "가-항목")
+    try sheet.setCell("B3", rawValue: "50")
+    try sheet.setCell("C3", rawValue: "4")
+    try sheet.setCell("D3", rawValue: "=B3*C3")
+
+    sheet.sortRows(byColumn: 0, ascending: true, hasHeader: true)
+    XCTAssertEqual(sheet.rawValue(at: "A2"), "가-항목")
+    XCTAssertEqual(sheet.rawValue(at: "D2"), "=B2*C2")
+    XCTAssertEqual(sheet.evaluate(at: "D2"), .number(200.0))
+    XCTAssertEqual(sheet.rawValue(at: "A3"), "나-항목")
+    XCTAssertEqual(sheet.rawValue(at: "D3"), "=B3*C3")
+    XCTAssertEqual(sheet.evaluate(at: "D3"), .number(30.0))
+
+    var splitSheet = WorksheetModel(name: "SplitInjection")
+    try splitSheet.setCell("A1", rawValue: "홍길동, =99+1")
+    let splitRows = splitSheet.splitColumnByDelimiter(column: 0, delimiter: ",")
+    XCTAssertEqual(splitRows, 1)
+    XCTAssertEqual(splitSheet.evaluate(at: "B1"), .text("=99+1"))
+  }
+
+  func testVLOOKUPHLOOKUPDefaultApproximateMatchAndErrorPropagation() throws {
+    var sheet = WorksheetModel(name: "LookupParity")
+    try sheet.setCell("A1", rawValue: "10")
+    try sheet.setCell("B1", rawValue: "Bronze")
+    try sheet.setCell("A2", rawValue: "20")
+    try sheet.setCell("B2", rawValue: "Silver")
+    try sheet.setCell("A3", rawValue: "30")
+    try sheet.setCell("B3", rawValue: "Gold")
+
+    try sheet.setCell("D1", rawValue: "=VLOOKUP(25, A1:B3, 2)")
+    try sheet.setCell("D2", rawValue: "=MATCH(25, A1:A3)")
+    try sheet.setCell("D3", rawValue: "=VLOOKUP(#N/A, A1:B3, 2, FALSE)")
+    try sheet.setCell("D4", rawValue: "=MATCH(#DIV/0!, A1:A3, 0)")
+    try sheet.setCell("D5", rawValue: "=XLOOKUP(#NAME?, A1:A3, B1:B3)")
+
+    XCTAssertEqual(sheet.evaluate(at: "D1"), .text("Silver"))
+    XCTAssertEqual(sheet.evaluate(at: "D2"), .number(2.0))
+    XCTAssertEqual(sheet.evaluate(at: "D3"), .error("#N/A"))
+    XCTAssertEqual(sheet.evaluate(at: "D4"), .error("#DIV/0!"))
+    XCTAssertEqual(sheet.evaluate(at: "D5"), .error("#NAME?"))
+  }
+
+  func testDocumentSecurityAuditorScrubPayloadUpdatesSheetCompiledASTs() throws {
+    var sheet = WorksheetModel(name: "PrivacySheet")
+    try sheet.setCell("A1", rawValue: "010-1234-5678")
+    try sheet.setCell("B1", rawValue: "=A1")
+    XCTAssertEqual(sheet.evaluate(at: "B1"), .text("010-1234-5678"))
+
+    let (scrubbedPayload, removedCount) = DocumentSecurityAuditor.scrubPayload(.sheet(sheet))
+    XCTAssertGreaterThan(removedCount, 0)
+    guard case .sheet(let scrubbedSheet) = scrubbedPayload else {
+      return XCTFail("Expected sheet payload")
+    }
+    XCTAssertEqual(scrubbedSheet.evaluate(at: "A1"), .text("[연락처 비식별]"))
+    XCTAssertEqual(scrubbedSheet.evaluate(at: "B1"), .text("[연락처 비식별]"))
+  }
 }
