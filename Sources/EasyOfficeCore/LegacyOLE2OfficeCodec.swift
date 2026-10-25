@@ -283,8 +283,42 @@ public enum LegacyOLE2OfficeCodec {
     }
 
     let textBytesLen = fcMac - fcMin
-    let rawText = try BitPacking.decodeUTF16LE(
-      from: wordStream, at: fcMin, byteLength: textBytesLen)
+    let ccpText = Int(try BitPacking.readUInt32LE(from: wordStream, at: 32))
+    let rawSlice = Data(
+      wordStream[(wordStream.startIndex + fcMin)..<(wordStream.startIndex + fcMac)])
+
+    let isEightBitEncoding: Bool
+    if textBytesLen % 2 != 0 || (ccpText > 0 && ccpText == textBytesLen) {
+      isEightBitEncoding = true
+    } else if ccpText > 0 && ccpText * 2 == textBytesLen {
+      isEightBitEncoding = false
+    } else if textBytesLen > 0 {
+      var zeroHighBytes = 0
+      var hangulHighBytes = 0
+      let pairCount = textBytesLen / 2
+      for i in 0..<pairCount {
+        let hi = rawSlice[rawSlice.startIndex + i * 2 + 1]
+        if hi == 0x00 {
+          zeroHighBytes += 1
+        } else if (0xAC...0xD7).contains(hi) || hi == 0x31 {
+          hangulHighBytes += 1
+        }
+      }
+      isEightBitEncoding = (zeroHighBytes == 0 && hangulHighBytes == 0)
+    } else {
+      isEightBitEncoding = false
+    }
+
+    let rawText: String
+    if isEightBitEncoding {
+      rawText =
+        String(data: rawSlice, encoding: .utf8)
+        ?? String(data: rawSlice, encoding: .windowsCP1252)
+        ?? String(decoding: rawSlice, as: UTF8.self)
+    } else {
+      rawText = try BitPacking.decodeUTF16LE(
+        from: wordStream, at: fcMin, byteLength: textBytesLen)
+    }
     let lines = rawText.components(separatedBy: CharacterSet(charactersIn: "\r\n")).filter {
       !$0.isEmpty
     }
@@ -303,6 +337,7 @@ public enum LegacyOLE2OfficeCodec {
   public static let biff8OpcodeDimensions: UInt16 = 0x0200
   public static let biff8OpcodeNumber: UInt16 = 0x0203
   public static let biff8OpcodeLabel: UInt16 = 0x0204
+  public static let biff8OpcodeString: UInt16 = 0x0207
   public static let biff8OpcodeRK: UInt16 = 0x027E
   public static let biff8OpcodeBOF: UInt16 = 0x0809
   public static let biff8OpcodeExtendedMeta: UInt16 = 0x0868
@@ -312,6 +347,19 @@ public enum LegacyOLE2OfficeCodec {
       return String(Int64(num))
     }
     return String(num)
+  }
+
+  private static func biff8ErrorCodeString(_ code: UInt8) -> String {
+    switch code {
+    case 0x00: return "#NULL!"
+    case 0x07: return "#DIV/0!"
+    case 0x0F: return "#VALUE!"
+    case 0x17: return "#REF!"
+    case 0x1D: return "#NAME?"
+    case 0x24: return "#NUM!"
+    case 0x2A: return "#N/A"
+    default: return "#VALUE!"
+    }
   }
 
   public static func encodeBIFF8Worksheet(_ sheet: WorksheetModel) throws -> Data {
@@ -437,7 +485,13 @@ public enum LegacyOLE2OfficeCodec {
         detail: "BIFF8 BOF(0x0809) 레코드 시그니처 불일치: \(String(format: "0x%04X", firstOpcode))")
     }
 
-    var worksheet = WorksheetModel(name: name)
+    var boundSheetNames: [String] = []
+    var completedSheets: [WorksheetModel] = []
+    var currentSheet = WorksheetModel(name: name)
+    var currentSheetIndex = 0
+    var inWorksheetSubstream = false
+    var extendedEnvelope: BIFF8ExtendedMetadataEnvelope? = nil
+    var pendingFormulaCoord: (row: Int, col: Int)? = nil
     var sstStrings: [String] = []
     var currentSubstreamType: UInt16 = 0x0010
     var offset = 0
@@ -454,8 +508,28 @@ public enum LegacyOLE2OfficeCodec {
 
       switch opcode {
       case biff8OpcodeBOF:
+        pendingFormulaCoord = nil
         if length >= 4 {
           currentSubstreamType = try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2)
+        } else {
+          currentSubstreamType = 0x0010
+        }
+        if currentSubstreamType == 0x0010 {
+          if inWorksheetSubstream {
+            completedSheets.append(currentSheet)
+            currentSheetIndex += 1
+          }
+          let resolvedName: String
+          if currentSheetIndex < boundSheetNames.count, !boundSheetNames[currentSheetIndex].isEmpty
+          {
+            resolvedName = boundSheetNames[currentSheetIndex]
+          } else if currentSheetIndex == 0 {
+            resolvedName = name
+          } else {
+            resolvedName = "Sheet\(currentSheetIndex + 1)"
+          }
+          currentSheet = WorksheetModel(name: resolvedName)
+          inWorksheetSubstream = true
         }
 
       case biff8OpcodeFilePass:
@@ -463,13 +537,33 @@ public enum LegacyOLE2OfficeCodec {
 
       case biff8OpcodeBoundSheet:
         if length >= 8 {
-          let charCount = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 6))
-          let byteLen = charCount * 2
-          if payloadStart + 8 + byteLen <= payloadEnd {
-            let decodedName = try BitPacking.decodeUTF16LE(
-              from: workbook, at: payloadStart + 8, byteLength: byteLen)
-            if !decodedName.isEmpty {
-              worksheet.name = decodedName
+          let cchByte = Int(workbook[workbook.startIndex + payloadStart + 6])
+          let grbitByte = workbook[workbook.startIndex + payloadStart + 7]
+          let remBytes = payloadEnd - (payloadStart + 8)
+          var decodedName = ""
+          if (grbitByte & 0x01) != 0, remBytes >= cchByte * 2 {
+            decodedName = try BitPacking.decodeUTF16LE(
+              from: workbook, at: payloadStart + 8, byteLength: cchByte * 2)
+          } else if grbitByte == 0x00, remBytes == cchByte, cchByte > 0 {
+            let slice = Data(
+              workbook[
+                (workbook.startIndex + payloadStart + 8)..<(workbook.startIndex + payloadStart + 8
+                  + cchByte)])
+            decodedName =
+              String(data: slice, encoding: .windowsCP1252)
+              ?? String(decoding: slice, as: UTF8.self)
+          } else {
+            let charCount = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 6))
+            let byteLen = charCount * 2
+            if payloadStart + 8 + byteLen <= payloadEnd {
+              decodedName = try BitPacking.decodeUTF16LE(
+                from: workbook, at: payloadStart + 8, byteLength: byteLen)
+            }
+          }
+          if !decodedName.isEmpty {
+            boundSheetNames.append(decodedName)
+            if inWorksheetSubstream && currentSheetIndex == 0 && boundSheetNames.count == 1 {
+              currentSheet.name = decodedName
             }
           }
         }
@@ -518,6 +612,7 @@ public enum LegacyOLE2OfficeCodec {
         }
 
       case biff8OpcodeLabelSST:
+        pendingFormulaCoord = nil
         guard length >= 10 else {
           throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABELSST 레코드 길이 오류: \(length)")
         }
@@ -527,9 +622,10 @@ public enum LegacyOLE2OfficeCodec {
         guard sstIdx >= 0, sstIdx < sstStrings.count else {
           throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABELSST 인덱스 범위 초과: \(sstIdx)")
         }
-        try worksheet.setCell(row: row, column: col, rawValue: sstStrings[sstIdx])
+        try currentSheet.setCell(row: row, column: col, rawValue: sstStrings[sstIdx])
 
       case biff8OpcodeRK:
+        pendingFormulaCoord = nil
         guard length >= 10 else {
           throw EasyOfficeError.corruptedContainer(detail: "BIFF8 RK 레코드 길이 오류: \(length)")
         }
@@ -547,7 +643,7 @@ public enum LegacyOLE2OfficeCodec {
         if (rkRaw & 0x01) != 0 {
           numVal /= 100.0
         }
-        try worksheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(numVal))
+        try currentSheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(numVal))
 
       case biff8OpcodeFormula:
         guard length >= 14 else {
@@ -555,13 +651,62 @@ public enum LegacyOLE2OfficeCodec {
         }
         let row = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
         let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
-        let bits = try BitPacking.readUInt64LE(from: workbook, at: payloadStart + 6)
-        let num = Double(bitPattern: bits)
-        if num.isFinite {
-          try worksheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
+        let fExprO = try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 12)
+        if fExprO == 0xFFFF {
+          let valueType = workbook[workbook.startIndex + payloadStart + 6]
+          switch valueType {
+          case 0x00:
+            pendingFormulaCoord = (row: row, col: col)
+          case 0x01:
+            pendingFormulaCoord = nil
+            let boolByte = workbook[workbook.startIndex + payloadStart + 8]
+            try currentSheet.setCell(
+              row: row, column: col, rawValue: boolByte != 0 ? "TRUE" : "FALSE")
+          case 0x02:
+            pendingFormulaCoord = nil
+            let errByte = workbook[workbook.startIndex + payloadStart + 8]
+            try currentSheet.setCell(
+              row: row, column: col, rawValue: biff8ErrorCodeString(errByte))
+          default:
+            pendingFormulaCoord = nil
+          }
+        } else {
+          pendingFormulaCoord = nil
+          let bits = try BitPacking.readUInt64LE(from: workbook, at: payloadStart + 6)
+          let num = Double(bitPattern: bits)
+          if num.isFinite {
+            try currentSheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
+          }
         }
 
+      case biff8OpcodeString:
+        if let target = pendingFormulaCoord, length >= 3 {
+          let charCount = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart))
+          let flags = workbook[workbook.startIndex + payloadStart + 2]
+          var sCursor = payloadStart + 3
+          if (flags & 0x08) != 0 { sCursor += 2 }
+          if (flags & 0x04) != 0 { sCursor += 4 }
+          if (flags & 0x01) != 0 {
+            let byteLen = charCount * 2
+            if sCursor + byteLen <= payloadEnd {
+              let str = try BitPacking.decodeUTF16LE(
+                from: workbook, at: sCursor, byteLength: byteLen)
+              try currentSheet.setCell(row: target.row, column: target.col, rawValue: str)
+            }
+          } else if sCursor + charCount <= payloadEnd {
+            let slice = Data(
+              workbook[(workbook.startIndex + sCursor)..<(workbook.startIndex + sCursor + charCount)]
+            )
+            let str =
+              String(data: slice, encoding: .windowsCP1252)
+              ?? String(decoding: slice, as: UTF8.self)
+            try currentSheet.setCell(row: target.row, column: target.col, rawValue: str)
+          }
+        }
+        pendingFormulaCoord = nil
+
       case biff8OpcodeNumber:
+        pendingFormulaCoord = nil
         guard length == 14 else {
           throw EasyOfficeError.corruptedContainer(detail: "BIFF8 NUMBER 레코드 길이 오류: \(length)")
         }
@@ -569,9 +714,10 @@ public enum LegacyOLE2OfficeCodec {
         let col = Int(try BitPacking.readUInt16LE(from: workbook, at: payloadStart + 2))
         let bits = try BitPacking.readUInt64LE(from: workbook, at: payloadStart + 6)
         let num = Double(bitPattern: bits)
-        try worksheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
+        try currentSheet.setCell(row: row, column: col, rawValue: formatBIFF8Numeric(num))
 
       case biff8OpcodeLabel:
+        pendingFormulaCoord = nil
         guard length >= 8 else {
           throw EasyOfficeError.corruptedContainer(detail: "BIFF8 LABEL 레코드 길이 오류: \(length)")
         }
@@ -584,18 +730,25 @@ public enum LegacyOLE2OfficeCodec {
         }
         let str = try BitPacking.decodeUTF16LE(
           from: workbook, at: payloadStart + 8, byteLength: byteLen)
-        try worksheet.setCell(row: row, column: col, rawValue: str)
+        try currentSheet.setCell(row: row, column: col, rawValue: str)
 
       case biff8OpcodeExtendedMeta:
         let slice = Data(
           workbook[(workbook.startIndex + payloadStart)..<(workbook.startIndex + payloadEnd)])
         if let ext = try? JSONDecoder().decode(BIFF8ExtendedMetadataEnvelope.self, from: slice) {
-          ext.apply(to: &worksheet)
+          extendedEnvelope = ext
         }
 
       case biff8OpcodeEOF:
-        if currentSubstreamType == 0x0010 || payloadEnd > workbook.count - 4 {
-          return worksheet
+        pendingFormulaCoord = nil
+        if currentSubstreamType == 0x0010 && inWorksheetSubstream {
+          if currentSheetIndex < boundSheetNames.count, !boundSheetNames[currentSheetIndex].isEmpty
+          {
+            currentSheet.name = boundSheetNames[currentSheetIndex]
+          }
+          completedSheets.append(currentSheet)
+          currentSheetIndex += 1
+          inWorksheetSubstream = false
         }
 
       default:
@@ -605,7 +758,29 @@ public enum LegacyOLE2OfficeCodec {
       offset = payloadEnd
     }
 
-    return worksheet
+    if inWorksheetSubstream {
+      if currentSheetIndex < boundSheetNames.count, !boundSheetNames[currentSheetIndex].isEmpty {
+        currentSheet.name = boundSheetNames[currentSheetIndex]
+      }
+      completedSheets.append(currentSheet)
+    }
+
+    var result = completedSheets.first ?? currentSheet
+    if completedSheets.count > 1 {
+      result.additionalSheets = completedSheets.dropFirst().map { page in
+        WorksheetSheetPage(
+          name: page.name,
+          cellsByCoordinate: page.cellsByCoordinate,
+          cellStyles: page.cellStyles,
+          sheetComments: page.sheetComments,
+          mergedRanges: page.mergedRanges
+        )
+      }
+    }
+    if let ext = extendedEnvelope {
+      ext.apply(to: &result)
+    }
+    return result
   }
 
   // MARK: 3. Presentation Binary (.ppt) — RT_Document (1000) / RT_Slide (1006) / RT_SlideAtom (1007) / RT_TextCharsAtom (4000)
@@ -613,7 +788,16 @@ public enum LegacyOLE2OfficeCodec {
   public static let pptRecordDocument: UInt16 = 1000
   public static let pptRecordSlide: UInt16 = 1006
   public static let pptRecordSlideAtom: UInt16 = 1007
+  public static let pptRecordMainMaster: UInt16 = 1016
+  public static let pptRecordPPDrawing: UInt16 = 1036
   public static let pptRecordTextCharsAtom: UInt16 = 4000
+  public static let pptRecordTextBytesAtom: UInt16 = 4008
+  public static let pptRecordSlideListWithText: UInt16 = 4080
+  public static let pptRecordEscherDgContainer: UInt16 = 0xF002
+  public static let pptRecordEscherSpgrContainer: UInt16 = 0xF003
+  public static let pptRecordEscherSpContainer: UInt16 = 0xF004
+  public static let pptRecordEscherClientTextbox: UInt16 = 0xF00D
+  public static let maxPPTContainerRecursionDepth = 32
 
   public static func encodePowerPointBinary(_ deck: PresentationDeckModel) throws -> Data {
     var docChildren = Data()
@@ -701,7 +885,7 @@ public enum LegacyOLE2OfficeCodec {
 
     let rootType = try BitPacking.readUInt16LE(from: pptStream, at: 2)
     let rootLen = Int(try BitPacking.readUInt32LE(from: pptStream, at: 4))
-    guard rootType == pptRecordDocument, 8 + rootLen <= pptStream.count else {
+    guard rootType == pptRecordDocument, rootLen >= 0, 8 + rootLen <= pptStream.count else {
       throw EasyOfficeError.corruptedContainer(detail: "PPT RT_Document(1000) 루트 레코드가 유효하지 않습니다.")
     }
 
@@ -709,82 +893,76 @@ public enum LegacyOLE2OfficeCodec {
     var aspectRatio: SlideAspectRatio = .widescreen16x9
     var deckTheme: SlideDeckTheme = .signatureLavender
     var slides: [SlideModel] = []
+    var slideListTexts: [String] = []
 
-    var offset = 8
-    let docEnd = 8 + rootLen
+    func decodePPTEightBitText(start: Int, end: Int) -> String {
+      let slice = Data(
+        pptStream[(pptStream.startIndex + start)..<(pptStream.startIndex + end)])
+      return String(data: slice, encoding: .windowsCP1252)
+        ?? String(decoding: slice, as: UTF8.self)
+    }
 
-    while offset <= docEnd - 8 {
-      let verAndInst = try BitPacking.readUInt16LE(from: pptStream, at: offset)
-      let recType = try BitPacking.readUInt16LE(from: pptStream, at: offset + 2)
-      let recLen = Int(try BitPacking.readUInt32LE(from: pptStream, at: offset + 4))
-      let payloadStart = offset + 8
-      let payloadEnd = payloadStart + recLen
-      guard recLen >= 0, payloadEnd <= docEnd else {
-        throw EasyOfficeError.corruptedContainer(detail: "PPT 레코드 길이가 RT_Document 경계를 초과합니다.")
+    func isSlideSubContainer(verInst: UInt16, recType: UInt16) -> Bool {
+      if (verInst & 0x000F) == 0x000F { return true }
+      switch recType {
+      case pptRecordPPDrawing, pptRecordEscherDgContainer, pptRecordEscherSpgrContainer,
+        pptRecordEscherSpContainer, pptRecordEscherClientTextbox:
+        return true
+      default:
+        return false
       }
+    }
 
-      if recType == pptRecordTextCharsAtom {
-        let text = try BitPacking.decodeUTF16LE(
-          from: pptStream, at: payloadStart, byteLength: recLen)
-        if verAndInst == 0x0000 {
-          deckTitle = text
-        } else if verAndInst == 0x0010, let parsedRatio = SlideAspectRatio(rawValue: text) {
-          aspectRatio = parsedRatio
-        } else if verAndInst == 0x0020, let parsedTheme = SlideDeckTheme(rawValue: text) {
-          deckTheme = parsedTheme
+    func decodeSlideContainer(start: Int, end: Int) throws -> SlideModel {
+      var sTitle = ""
+      var sSubtitle = ""
+      var sNotes = ""
+      var sBullets: [String] = []
+      var sElements: [SlideCanvasElement] = []
+      var sLayout: SlideMasterLayout = .titleAndContent
+      var sTransition: SlideTransitionKind = .fade
+      var sTransitionDuration: Double = 0.8
+      var sAutoAdvance: Int? = nil
+
+      var currentSpTexts: [String]? = nil
+
+      func parseSlideRecords(rangeStart: Int, rangeEnd: Int, depth: Int) throws {
+        guard depth <= maxPPTContainerRecursionDepth else {
+          throw EasyOfficeError.corruptedContainer(detail: "PPT 컨테이너 중첩 깊이가 상한을 초과했습니다.")
         }
-      } else if recType == pptRecordSlide {
-        var sTitle = ""
-        var sSubtitle = ""
-        var sNotes = ""
-        var sBullets: [String] = []
-        var sElements: [SlideCanvasElement] = []
-        var sLayout: SlideMasterLayout = .titleAndContent
-        var sTransition: SlideTransitionKind = .fade
-        var sTransitionDuration: Double = 0.8
-        var sAutoAdvance: Int? = nil
+        var sCursor = rangeStart
 
-        var sCursor = payloadStart
-        while sCursor <= payloadEnd - 8 {
+        while sCursor <= rangeEnd - 8 {
           let sVerInst = try BitPacking.readUInt16LE(from: pptStream, at: sCursor)
           let sType = try BitPacking.readUInt16LE(from: pptStream, at: sCursor + 2)
           let sLen = Int(try BitPacking.readUInt32LE(from: pptStream, at: sCursor + 4))
           let sAtomStart = sCursor + 8
           let sAtomEnd = sAtomStart + sLen
-          guard sLen >= 0, sAtomEnd <= payloadEnd else {
+          guard sLen >= 0, sAtomEnd <= rangeEnd else {
             throw EasyOfficeError.corruptedContainer(detail: "PPT RT_Slide 내부 아톰 길이가 경계를 초과합니다.")
           }
 
           if sType == pptRecordSlideAtom {
-            let atomStr = try BitPacking.decodeUTF16LE(
-              from: pptStream, at: sAtomStart, byteLength: sLen)
-            let parts = atomStr.split(separator: "|", omittingEmptySubsequences: false).map(
-              String.init)
-            if parts.count >= 2 {
-              sLayout = SlideMasterLayout(rawValue: parts[0]) ?? .titleAndContent
-              sTransition = SlideTransitionKind(rawValue: parts[1]) ?? .fade
+            if sLen % 2 == 0,
+              let atomStr = try? BitPacking.decodeUTF16LE(
+                from: pptStream, at: sAtomStart, byteLength: sLen),
+              atomStr.contains("|")
+            {
+              let parts = atomStr.split(separator: "|", omittingEmptySubsequences: false).map(
+                String.init)
+              if parts.count >= 2 {
+                sLayout = SlideMasterLayout(rawValue: parts[0]) ?? .titleAndContent
+                sTransition = SlideTransitionKind(rawValue: parts[1]) ?? .fade
+              }
+              if parts.count >= 3, let parsedDur = Double(parts[2]), parsedDur.isFinite {
+                sTransitionDuration = parsedDur
+              }
+              if parts.count >= 4, let parsedAdv = Int(parts[3]) {
+                sAutoAdvance = parsedAdv
+              }
             }
-            if parts.count >= 3, let parsedDur = Double(parts[2]), parsedDur.isFinite {
-              sTransitionDuration = parsedDur
-            }
-            if parts.count >= 4, let parsedAdv = Int(parts[3]) {
-              sAutoAdvance = parsedAdv
-            }
-          } else if sType == pptRecordTextCharsAtom {
-            switch sVerInst {
-            case 0x0000:
-              sTitle = try BitPacking.decodeUTF16LE(
-                from: pptStream, at: sAtomStart, byteLength: sLen)
-            case 0x0010:
-              sSubtitle = try BitPacking.decodeUTF16LE(
-                from: pptStream, at: sAtomStart, byteLength: sLen)
-            case 0x0020:
-              sNotes = try BitPacking.decodeUTF16LE(
-                from: pptStream, at: sAtomStart, byteLength: sLen)
-            case 0x0030:
-              sBullets.append(
-                try BitPacking.decodeUTF16LE(from: pptStream, at: sAtomStart, byteLength: sLen))
-            case 0x0040:
+          } else if sType == pptRecordTextCharsAtom || sType == pptRecordTextBytesAtom {
+            if sType == pptRecordTextCharsAtom && sVerInst == 0x0040 {
               var elCursor = sAtomStart
               let elTitle = try BitPacking.readLengthPrefixedUTF16LE(
                 from: pptStream, offset: &elCursor, limit: sAtomEnd)
@@ -793,13 +971,17 @@ public enum LegacyOLE2OfficeCodec {
               guard elCursor + 32 <= sAtomEnd else {
                 throw EasyOfficeError.corruptedContainer(detail: "PPT 슬라이드 도형 좌표 필드가 절단되었습니다.")
               }
-              let x = Double(bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
+              let x = Double(
+                bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
               elCursor += 8
-              let y = Double(bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
+              let y = Double(
+                bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
               elCursor += 8
-              let w = Double(bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
+              let w = Double(
+                bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
               elCursor += 8
-              let h = Double(bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
+              let h = Double(
+                bitPattern: try BitPacking.readUInt64LE(from: pptStream, at: elCursor))
               elCursor += 8
               let kindRaw = try BitPacking.readLengthPrefixedUTF16LE(
                 from: pptStream, offset: &elCursor, limit: sAtomEnd)
@@ -852,29 +1034,150 @@ public enum LegacyOLE2OfficeCodec {
                   isItalic: isItalic,
                   isUnderlined: isUnderlined
                 ))
-            default:
-              break
+            } else {
+              let decodedText =
+                sType == pptRecordTextCharsAtom
+                ? try BitPacking.decodeUTF16LE(from: pptStream, at: sAtomStart, byteLength: sLen)
+                : decodePPTEightBitText(start: sAtomStart, end: sAtomEnd)
+              switch sVerInst {
+              case 0x0000:
+                if sTitle.isEmpty {
+                  sTitle = decodedText
+                } else if !decodedText.isEmpty {
+                  let lines = decodedText.components(
+                    separatedBy: CharacterSet(charactersIn: "\r\n")
+                  ).filter { !$0.isEmpty }
+                  sBullets.append(contentsOf: lines)
+                }
+              case 0x0010:
+                sSubtitle = decodedText
+              case 0x0020:
+                sNotes = decodedText
+              case 0x0030:
+                sBullets.append(decodedText)
+              default:
+                if !decodedText.isEmpty {
+                  if sTitle.isEmpty {
+                    sTitle = decodedText
+                  } else {
+                    sBullets.append(decodedText)
+                  }
+                }
+              }
+              if !decodedText.isEmpty {
+                currentSpTexts?.append(decodedText)
+              }
+            }
+          } else if isSlideSubContainer(verInst: sVerInst, recType: sType) {
+            if sType == pptRecordEscherSpContainer {
+              let previousSpTexts = currentSpTexts
+              currentSpTexts = []
+              try parseSlideRecords(
+                rangeStart: sAtomStart,
+                rangeEnd: sAtomEnd,
+                depth: depth + 1
+              )
+              if let collected = currentSpTexts, !collected.isEmpty {
+                let joined = collected.joined(separator: "\n")
+                let shapeTitle = sElements.isEmpty ? "Title 1" : "Shape \(sElements.count + 1)"
+                sElements.append(
+                  SlideCanvasElement(
+                    title: shapeTitle,
+                    bodyText: joined,
+                    x: 40,
+                    y: Double(60 + sElements.count * 80),
+                    width: 320,
+                    height: 80
+                  ))
+              }
+              currentSpTexts = previousSpTexts
+            } else {
+              try parseSlideRecords(
+                rangeStart: sAtomStart,
+                rangeEnd: sAtomEnd,
+                depth: depth + 1
+              )
             }
           }
 
           sCursor = sAtomEnd
         }
-
-        slides.append(
-          SlideModel(
-            title: sTitle,
-            subtitle: sSubtitle,
-            bulletPoints: sBullets,
-            speakerNotes: sNotes,
-            masterLayout: sLayout,
-            transition: sTransition,
-            elements: sElements,
-            transitionDurationSeconds: sTransitionDuration,
-            autoAdvanceSeconds: sAutoAdvance
-          ))
       }
 
-      offset = payloadEnd
+      try parseSlideRecords(rangeStart: start, rangeEnd: end, depth: 1)
+
+      return SlideModel(
+        title: sTitle,
+        subtitle: sSubtitle,
+        bulletPoints: sBullets,
+        speakerNotes: sNotes,
+        masterLayout: sLayout,
+        transition: sTransition,
+        elements: sElements,
+        transitionDurationSeconds: sTransitionDuration,
+        autoAdvanceSeconds: sAutoAdvance
+      )
+    }
+
+    func parseDocumentRecords(rangeStart: Int, rangeEnd: Int, depth: Int) throws {
+      guard depth <= maxPPTContainerRecursionDepth else {
+        throw EasyOfficeError.corruptedContainer(detail: "PPT 문서 컨테이너 중첩 깊이가 상한을 초과했습니다.")
+      }
+      var offset = rangeStart
+      while offset <= rangeEnd - 8 {
+        let verAndInst = try BitPacking.readUInt16LE(from: pptStream, at: offset)
+        let recType = try BitPacking.readUInt16LE(from: pptStream, at: offset + 2)
+        let recLen = Int(try BitPacking.readUInt32LE(from: pptStream, at: offset + 4))
+        let payloadStart = offset + 8
+        let payloadEnd = payloadStart + recLen
+        guard recLen >= 0, payloadEnd <= rangeEnd else {
+          throw EasyOfficeError.corruptedContainer(detail: "PPT 레코드 길이가 RT_Document 경계를 초과합니다.")
+        }
+
+        if recType == pptRecordSlide {
+          slides.append(try decodeSlideContainer(start: payloadStart, end: payloadEnd))
+        } else if recType == pptRecordTextCharsAtom || recType == pptRecordTextBytesAtom {
+          let text =
+            recType == pptRecordTextCharsAtom
+            ? try BitPacking.decodeUTF16LE(from: pptStream, at: payloadStart, byteLength: recLen)
+            : decodePPTEightBitText(start: payloadStart, end: payloadEnd)
+          if depth == 1 {
+            if verAndInst == 0x0000 {
+              deckTitle = text
+            } else if verAndInst == 0x0010, let parsedRatio = SlideAspectRatio(rawValue: text) {
+              aspectRatio = parsedRatio
+            } else if verAndInst == 0x0020, let parsedTheme = SlideDeckTheme(rawValue: text) {
+              deckTheme = parsedTheme
+            }
+          } else if !text.isEmpty {
+            slideListTexts.append(text)
+          }
+        } else if recType == pptRecordSlideListWithText
+          || recType == pptRecordDocument
+          || (verAndInst & 0x000F) == 0x000F
+        {
+          if recType != pptRecordMainMaster {
+            try parseDocumentRecords(
+              rangeStart: payloadStart, rangeEnd: payloadEnd, depth: depth + 1)
+          }
+        }
+
+        offset = payloadEnd
+      }
+    }
+
+    let docEnd = 8 + rootLen
+    try parseDocumentRecords(rangeStart: 8, rangeEnd: docEnd, depth: 1)
+    if docEnd <= pptStream.count - 8 {
+      try parseDocumentRecords(rangeStart: docEnd, rangeEnd: pptStream.count, depth: 1)
+    }
+
+    if slides.isEmpty && !slideListTexts.isEmpty {
+      slides.append(
+        SlideModel(
+          title: slideListTexts[0],
+          bulletPoints: Array(slideListTexts.dropFirst())
+        ))
     }
 
     return PresentationDeckModel(
