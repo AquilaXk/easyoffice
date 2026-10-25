@@ -1,10 +1,14 @@
 import Foundation
 
+public typealias SheetEngine = WorksheetModel
+
 /// Worksheet model storing cell inputs keyed by `PackedCellCoordinate`, pre-compiling `FormulaAST`,
 /// and evaluating formulas with $O(V + E)$ DAG memoization and cross-sheet reference resolution.
 public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
+  /// ECMA-376 SpreadsheetML maximum characters in a single cell text output.
+  public static let maxCellTextLength = 32_767
   /// Maximum output characters permitted for `REPT` to prevent memory exhaustion.
-  public static let maxReptOutputCharacters = 32_767
+  public static let maxReptOutputCharacters = maxCellTextLength
   /// Maximum formula evaluation recursion depth before returning `#REF!`.
   public static let maxFormulaRecursionDepth = 256
 
@@ -893,7 +897,10 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         sheetModelCache: context.sheetModelCache
       )
       subContext.markVisited(packed)
-      let evaluated = targetModel.evaluateAST(ast, context: &subContext, depth: depth + 1)
+      var evaluated = targetModel.evaluateAST(ast, context: &subContext, depth: depth + 1)
+      if case .text(let str) = evaluated, str.count > Self.maxCellTextLength {
+        evaluated = .error(.value)
+      }
       for (subCoord, subVal) in subContext.memo {
         subContext.crossMemo[CrossSheetCellKey(sheetNameUpper: targetSheetUpper, coord: subCoord)] =
           subVal
@@ -955,7 +962,10 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       return .boolean(flag)
     default:
       context.markVisited(packed)
-      let evaluated = evaluateAST(ast, context: &context, depth: depth + 1)
+      var evaluated = evaluateAST(ast, context: &context, depth: depth + 1)
+      if case .text(let str) = evaluated, str.count > Self.maxCellTextLength {
+        evaluated = .error(.value)
+      }
       context.unmarkVisited(packed)
       context.memo[packed] = evaluated
       return evaluated
@@ -1029,7 +1039,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         if case .error = lhsVal { return lhsVal }
         let rhsVal = evaluateASTPreservingEmpty(rhs, context: &context, depth: depth)
         if case .error = rhsVal { return rhsVal }
-        return .text(lhsVal.description + rhsVal.description)
+        let leftText = lhsVal.description
+        let rightText = rhsVal.description
+        guard leftText.count + rightText.count <= Self.maxCellTextLength else {
+          return .error(.value)
+        }
+        return .text(leftText + rightText)
       }
       let lhsVal = evaluateAST(lhs, context: &context, depth: depth + 1)
       if case .error = lhsVal { return lhsVal }
