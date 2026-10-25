@@ -400,13 +400,7 @@ public struct SheetEditorDetailPaneView: View {
   }
 
   private func gridBounds(for sheet: WorksheetModel) -> (rows: Int, cols: Int) {
-    var maxRow = 22
-    var maxCol = 10
-    for coord in sheet.cellsByCoordinate.keys {
-      maxRow = max(maxRow, coord.row + 1)
-      maxCol = max(maxCol, coord.column + 1)
-    }
-    return (min(128, maxRow), min(26, maxCol))
+    sheet.expandedGridBounds(minRows: 22, minCols: 10, extraRows: 10, extraCols: 4)
   }
 
   private var gridBounds: (rows: Int, cols: Int) {
@@ -463,20 +457,11 @@ public struct SheetEditorDetailPaneView: View {
       return sheet.sparklineNormalizedValues(for: detectedRange, using: evaluatedGrid)
     }()
 
-    let pivotSummary: PivotTableSummary = {
-      let valueColOffset = max(0, detectedRange.end.column - detectedRange.start.column)
-      let config = PivotTableConfiguration(
-        rowFieldColumnIndex: 0,
-        valueFieldColumnIndex: valueColOffset,
-        aggregation: viewModel.selectedPivotAggregation
-      )
-      return PivotTableEngine.compute(
-        from: sheet,
-        range: detectedRange,
-        hasHeaderRow: true,
-        configuration: config
-      )
-    }()
+    let pivotSummary: PivotTableSummary = sheet.computeFilteredPivotSummary(
+      range: detectedRange,
+      hasHeaderRow: true,
+      aggregation: viewModel.selectedPivotAggregation
+    )
 
     let condRangeValues: [EvaluatedCellValue] =
       viewModel.activeConditionalFormatRule != nil ? Array(evaluatedGrid.values) : []
@@ -500,19 +485,37 @@ public struct SheetEditorDetailPaneView: View {
     }()
 
     let chartModel: SheetChartModel = {
-      let startRow = chartSourceRange.start.row
-      let endRow = chartSourceRange.end.row
-      let startCol = chartSourceRange.start.column
-      let endCol = chartSourceRange.end.column
+      let startRow = min(chartSourceRange.start.row, chartSourceRange.end.row)
+      let endRow = max(chartSourceRange.start.row, chartSourceRange.end.row)
+      let startCol = min(chartSourceRange.start.column, chartSourceRange.end.column)
+      let endCol = max(chartSourceRange.start.column, chartSourceRange.end.column)
 
       let dataStartRow = min(endRow, startRow + 1)
-      let dataEndRow = max(dataStartRow, (endRow - startRow >= 3) ? (endRow - 1) : endRow)
+      let isLastRowSummary =
+        endRow > dataStartRow
+        && sheet.isSummaryOrTotalRow(
+          endRow,
+          startColumn: startCol,
+          valueColumn: max(startCol + 1, endCol)
+        )
+      let dataEndRow = isLastRowSummary ? max(dataStartRow, endRow - 1) : endRow
 
       let catStart = CellAddress(packed: PackedCellCoordinate(row: dataStartRow, column: startCol))
       let catEnd = CellAddress(packed: PackedCellCoordinate(row: dataEndRow, column: startCol))
       let categoryRange = CellRange(start: catStart, end: catEnd)
 
-      let seriesEndCol = max(startCol + 1, (endCol - startCol >= 3) ? (endCol - 1) : endCol)
+      let lastColHeader =
+        (sheet.cellsByCoordinate[PackedCellCoordinate(row: startRow, column: endCol)] ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let lastColFirstCell =
+        (sheet.cellsByCoordinate[PackedCellCoordinate(row: dataStartRow, column: endCol)] ?? "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .uppercased()
+      let isLastColSummary =
+        (endCol - startCol >= 2)
+        && (lastColHeader.contains("합계") || lastColHeader.contains("총계")
+          || lastColHeader.lowercased().contains("total") || lastColFirstCell.hasPrefix("=SUM("))
+      let seriesEndCol = isLastColSummary ? max(startCol + 1, endCol - 1) : max(startCol + 1, endCol)
       var valueRanges: [(name: String, range: CellRange)] = []
       if seriesEndCol >= startCol + 1 {
         for colIdx in (startCol + 1)...min(seriesEndCol, startCol + 3) {
@@ -1216,6 +1219,29 @@ public struct SheetEditorDetailPaneView: View {
               }
             }
             .buttonStyle(.plain)
+            .contextMenu {
+              Button("시트 이름 변경...") {
+                let alert = NSAlert()
+                alert.messageText = "시트 이름 변경"
+                alert.informativeText = "새 시트 탭 이름을 입력하세요."
+                alert.addButton(withTitle: "변경")
+                alert.addButton(withTitle: "취소")
+                let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+                input.stringValue = rawSheetName
+                alert.accessoryView = input
+                if alert.runModal() == .alertFirstButtonReturn {
+                  viewModel.renameWorksheetTab(at: idx, to: input.stringValue)
+                }
+              }
+              Button("오른쪽에 새 시트 추가") {
+                viewModel.addWorksheetTab()
+              }
+              Divider()
+              Button("시트 삭제", role: .destructive) {
+                viewModel.deleteWorksheetTab(at: idx)
+              }
+              .disabled(sheet.allSheetNames.count <= 1)
+            }
 
             Rectangle()
               .fill(palette.border.swiftUIColor)
@@ -1517,33 +1543,40 @@ public struct SheetEditorDetailPaneView: View {
       ForEach(Array(columnIndices), id: \.self) { colIdx in
         let col = columnLabels[colIdx]
         let coord = PackedCellCoordinate(row: zeroRow, column: colIdx)
-        let addr = "\(col)\(row)"
-        let isPrimaryCell = viewModel.selectedSheetCell == addr
-        let isInRange = activeRange.contains(coord)
-        let isSelectionTopEdge = isInRange && (zeroRow == selMinRow)
-        let isSelectionBottomEdge = isInRange && (zeroRow == selMaxRow)
-        let isSelectionLeadingEdge = isInRange && (colIdx == selMinCol)
-        let isSelectionTrailingEdge = isInRange && (colIdx == selMaxCol)
+        let matchingMerge = sheet.mergedRanges.first(where: { $0.contains(coord) })
+        let mergeMinCol = matchingMerge.map { min($0.start.column, $0.end.column) } ?? colIdx
+        if matchingMerge != nil && colIdx > mergeMinCol && columnIndices.contains(mergeMinCol) {
+          EmptyView()
+        } else {
+          let addr = "\(col)\(row)"
+          let isPrimaryCell = viewModel.selectedSheetCell == addr
+          let isInRange = activeRange.contains(coord)
+          let isSelectionTopEdge = isInRange && (zeroRow == selMinRow)
+          let isSelectionBottomEdge = isInRange && (zeroRow == selMaxRow)
+          let isSelectionLeadingEdge = isInRange && (colIdx == selMinCol)
+          let isSelectionTrailingEdge = isInRange && (colIdx == selMaxCol)
 
-        gridCellView(
-          row: row,
-          zeroRow: zeroRow,
-          colIdx: colIdx,
-          addr: addr,
-          coord: coord,
-          rowHeightPt: rowHeightPt,
-          activeRange: activeRange,
-          isPrimarySelected: isPrimaryCell,
-          isInSelectedRange: isInRange,
-          isSelectionTopEdge: isSelectionTopEdge,
-          isSelectionBottomEdge: isSelectionBottomEdge,
-          isSelectionLeadingEdge: isSelectionLeadingEdge,
-          isSelectionTrailingEdge: isSelectionTrailingEdge,
-          evaluatedGrid: evaluatedGrid,
-          condRangeValues: condRangeValues,
-          maxPositiveValue: maxPositiveValue,
-          palette: palette
-        )
+          gridCellView(
+            row: row,
+            zeroRow: zeroRow,
+            colIdx: colIdx,
+            columnIndices: columnIndices,
+            addr: addr,
+            coord: coord,
+            rowHeightPt: rowHeightPt,
+            activeRange: activeRange,
+            isPrimarySelected: isPrimaryCell,
+            isInSelectedRange: isInRange,
+            isSelectionTopEdge: isSelectionTopEdge,
+            isSelectionBottomEdge: isSelectionBottomEdge,
+            isSelectionLeadingEdge: isSelectionLeadingEdge,
+            isSelectionTrailingEdge: isSelectionTrailingEdge,
+            evaluatedGrid: evaluatedGrid,
+            condRangeValues: condRangeValues,
+            maxPositiveValue: maxPositiveValue,
+            palette: palette
+          )
+        }
       }
     }
   }
@@ -1553,6 +1586,7 @@ public struct SheetEditorDetailPaneView: View {
     row: Int,
     zeroRow: Int,
     colIdx: Int,
+    columnIndices: Range<Int>,
     addr: String,
     coord: PackedCellCoordinate,
     rowHeightPt: CGFloat,
@@ -1569,12 +1603,30 @@ public struct SheetEditorDetailPaneView: View {
     palette: WorkspaceThemePalette
   ) -> some View {
     let cellAddress = CellAddress(packed: coord)
-    let colWidthPt = CGFloat(sheet.columnWidth(at: colIdx))
+    let matchingMergedRange = sheet.mergedRanges.first(where: { $0.contains(coord) })
+    let colWidthPt: CGFloat = {
+      guard let merged = matchingMergedRange else {
+        return CGFloat(sheet.columnWidth(at: colIdx))
+      }
+      let startC = max(columnIndices.lowerBound, min(merged.start.column, merged.end.column))
+      let endC = min(columnIndices.upperBound - 1, max(merged.start.column, merged.end.column))
+      guard colIdx == startC, endC >= startC else {
+        return CGFloat(sheet.columnWidth(at: colIdx))
+      }
+      return (startC...endC).reduce(CGFloat(0.0)) { acc, c in
+        acc + CGFloat(sheet.columnWidth(at: c))
+      }
+    }()
+    let isNonAnchorMergedRow: Bool = {
+      guard let merged = matchingMergedRange else { return false }
+      return zeroRow > min(merged.start.row, merged.end.row)
+    }()
     let evaluated = evaluatedGrid[coord] ?? .empty
-    let displayValue = sheet.formattedDisplayValue(at: cellAddress, using: evaluatedGrid)
+    let displayValue =
+      isNonAnchorMergedRow
+      ? "" : sheet.formattedDisplayValue(at: cellAddress, using: evaluatedGrid)
     let cellStyle = sheet.cellStyle(at: coord)
     let hasComment = sheet.sheetComments[coord] != nil
-    let matchingMergedRange = sheet.mergedRanges.first(where: { $0.contains(coord) })
     let isMergedAnchor = matchingMergedRange?.start == cellAddress
     let isInlineEditing = isPrimaryPane && (inlineEditingCoord == coord)
     let isCondHighlighted =

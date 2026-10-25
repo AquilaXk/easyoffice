@@ -480,8 +480,25 @@ public enum WorkspaceFileDialogPresenter {
     guard let resolvedID,
       let targetTab = viewModel.openTabs.first(where: { $0.id == resolvedID })
     else { return false }
+    do {
+      if try viewModel.saveTabOverwriteIfBackedByFile(id: targetTab.id) {
+        return true
+      }
+    } catch {
+      viewModel.lastErrorMessage = error.localizedDescription
+      return false
+    }
+    return presentSaveAsPanel(viewModel: viewModel, tabID: targetTab.id)
+  }
+
+  @discardableResult
+  public static func presentSaveAsPanel(viewModel: WorkspaceViewModel, tabID: UUID? = nil) -> Bool {
+    let resolvedID = tabID ?? viewModel.activeTab?.id
+    guard let resolvedID,
+      let targetTab = viewModel.openTabs.first(where: { $0.id == resolvedID })
+    else { return false }
     let panel = NSSavePanel()
-    panel.title = "현재 문서 저장"
+    panel.title = "다른 이름으로 문서 저장"
     panel.nameFieldStringValue = targetTab.fileName
     panel.canCreateDirectories = true
     if panel.runModal() == .OK, let url = panel.url {
@@ -531,8 +548,13 @@ public enum WorkspaceFileDialogPresenter {
         textToCopy = doc.paragraphs.first?.text ?? doc.title
       }
     case .sheet(let sheet):
-      let raw = sheet.rawValue(at: viewModel.selectedSheetCell)
-      textToCopy = raw.isEmpty ? sheet.evaluate(at: viewModel.selectedSheetCell).description : raw
+      let tsv = viewModel.copySelectedSheetRangeAsTSV()
+      if !tsv.isEmpty {
+        textToCopy = tsv
+      } else {
+        let raw = sheet.rawValue(at: viewModel.selectedSheetCell)
+        textToCopy = raw.isEmpty ? sheet.evaluate(at: viewModel.selectedSheetCell).description : raw
+      }
     case .slide(let deck):
       let sIdx =
         deck.slides.indices.contains(viewModel.selectedSlideIndex)
@@ -566,15 +588,19 @@ public enum WorkspaceFileDialogPresenter {
       return
     }
     guard let activeTab = viewModel.activeTab,
-      let pasted = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(
-        in: .whitespacesAndNewlines),
-      !pasted.isEmpty
+      let rawClipboard = NSPasteboard.general.string(forType: .string),
+      !rawClipboard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else { return }
+    let pasted = rawClipboard.trimmingCharacters(in: .whitespacesAndNewlines)
     switch activeTab.payload {
     case .document: viewModel.appendParagraphToActiveDocument(text: pasted, style: .body)
     case .sheet:
-      viewModel.formulaBarDraft = pasted
-      viewModel.applyFormulaBarEdit()
+      if rawClipboard.contains("\t") || rawClipboard.contains("\n") {
+        viewModel.pasteSheetCellsFromTSV(rawClipboard)
+      } else {
+        viewModel.formulaBarDraft = pasted
+        viewModel.applyFormulaBarEdit()
+      }
     case .slide:
       viewModel.addSlideBulletPoint(slideIndex: viewModel.selectedSlideIndex, text: pasted)
     case .pdf: viewModel.addPDFAnnotation(kind: .stickyNote, content: pasted)
@@ -677,6 +703,30 @@ public struct MainWorkspaceWindowView: View {
       }
     }
     .environment(\.isCanvasSnapshotMode, viewModel.isCanvasSnapshotMode)
+    .onOpenURL { url in
+      do {
+        _ = try viewModel.importDocumentFromDisk(url: url)
+      } catch {
+        viewModel.lastErrorMessage = error.localizedDescription
+      }
+    }
+    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+      var didAccept = false
+      for provider in providers {
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+          guard let url else { return }
+          Task { @MainActor in
+            do {
+              _ = try viewModel.importDocumentFromDisk(url: url)
+            } catch {
+              viewModel.lastErrorMessage = error.localizedDescription
+            }
+          }
+        }
+        didAccept = true
+      }
+      return didAccept
+    }
   }
 }
 
@@ -921,7 +971,7 @@ struct TopDocumentTabStripView: View {
           }
 
           Button {
-            viewModel.openNewSampleTab(for: viewModel.activeTab?.moduleKind ?? .document)
+            _ = viewModel.openNewBlankTab(for: viewModel.activeTab?.moduleKind ?? .document)
           } label: {
             Image(systemName: "plus")
               .font(.system(size: 11, weight: .semibold))
@@ -929,13 +979,19 @@ struct TopDocumentTabStripView: View {
               .frame(width: 26, height: 24)
           }
           .buttonStyle(.plain)
-          .help("현재 모듈 새 문서 탭 생성 (우클릭으로 형식 선택)")
+          .help("현재 모듈 새 빈 문서 탭 생성 (우클릭으로 형식 선택)")
           .contextMenu {
-            Button("새 문서 (.docx)") { viewModel.openNewSampleTab(for: .document) }
-            Button("새 한글 문서 (.hwpx)") { viewModel.openNewSampleTab(for: .hwp) }
-            Button("새 스프레드시트 (.xlsx)") { viewModel.openNewSampleTab(for: .sheet) }
-            Button("새 프레젠테이션 (.pptx)") { viewModel.openNewSampleTab(for: .slide) }
-            Button("새 PDF 문서 (.pdf)") { viewModel.openNewSampleTab(for: .pdf) }
+            Button("새 빈 문서 (.docx)") { _ = viewModel.openNewBlankTab(for: .document) }
+            Button("새 빈 한글 문서 (.hwpx)") { _ = viewModel.openNewBlankTab(for: .hwp) }
+            Button("새 빈 스프레드시트 (.xlsx)") { _ = viewModel.openNewBlankTab(for: .sheet) }
+            Button("새 빈 프레젠테이션 (.pptx)") { _ = viewModel.openNewBlankTab(for: .slide) }
+            Button("새 빈 PDF 문서 (.pdf)") { _ = viewModel.openNewBlankTab(for: .pdf) }
+            Divider()
+            Button("샘플 문서 (.docx)") { viewModel.openNewSampleTab(for: .document) }
+            Button("샘플 한글 문서 (.hwpx)") { viewModel.openNewSampleTab(for: .hwp) }
+            Button("샘플 스프레드시트 (.xlsx)") { viewModel.openNewSampleTab(for: .sheet) }
+            Button("샘플 프레젠테이션 (.pptx)") { viewModel.openNewSampleTab(for: .slide) }
+            Button("샘플 PDF 문서 (.pdf)") { viewModel.openNewSampleTab(for: .pdf) }
           }
         }
       }

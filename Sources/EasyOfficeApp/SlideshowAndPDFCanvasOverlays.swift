@@ -310,6 +310,7 @@ public struct SlideshowFullScreenOverlayView: View {
   public let palette: WorkspaceThemePalette
   @State private var laserPointerLocation: CGPoint = CGPoint(x: 420, y: 240)
   @State private var isStageAnimatedIn: Bool = false
+  @State private var autoAdvanceElapsedForSlide: Int = 0
   private let presenterTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
   public init(viewModel: WorkspaceViewModel, palette: WorkspaceThemePalette) {
@@ -418,7 +419,12 @@ public struct SlideshowFullScreenOverlayView: View {
 
             ZStack(alignment: .topLeading) {
               Rectangle()
-                .fill(EasyOfficeDesignTokens.lightWhite.swiftUIColor)
+                .fill(
+                  EasyOfficeDesignTokens.resolveHexColor(
+                    deck.deckTheme.primaryFillHex,
+                    fallback: EasyOfficeDesignTokens.lightWhite.swiftUIColor
+                  )
+                )
                 .shadow(color: Color.black.opacity(0.45), radius: 18, x: 0, y: 8)
 
               VStack(alignment: .leading, spacing: 12) {
@@ -491,6 +497,22 @@ public struct SlideshowFullScreenOverlayView: View {
                   laserPointerLocation = value.location
                 }
             )
+            .simultaneousGesture(
+              TapGesture()
+                .onEnded {
+                  guard !viewModel.isLaserPointerEnabled else { return }
+                  if activeIdx + 1 < deck.slides.count {
+                    isStageAnimatedIn = false
+                    autoAdvanceElapsedForSlide = 0
+                    viewModel.advancePresenterSlide()
+                    withAnimation(
+                      .easeOut(duration: max(0.2, slide.transitionDurationSeconds))
+                    ) {
+                      isStageAnimatedIn = true
+                    }
+                  }
+                }
+            )
           }
           .padding(.horizontal, 36)
 
@@ -523,10 +545,23 @@ public struct SlideshowFullScreenOverlayView: View {
       }
     }
     .onReceive(presenterTimer) { _ in
-      if viewModel.isFullScreenSlideshowActive && viewModel.isPresenterTimerRunning
-        && !viewModel.isPresenterModeActive
-      {
-        viewModel.tickPresenterTimer(seconds: 1)
+      if viewModel.isFullScreenSlideshowActive {
+        if viewModel.isPresenterTimerRunning && !viewModel.isPresenterModeActive {
+          viewModel.tickPresenterTimer(seconds: 1)
+        }
+        if let autoSeconds = currentSlide?.autoAdvanceSeconds, autoSeconds > 0 {
+          autoAdvanceElapsedForSlide += 1
+          if autoAdvanceElapsedForSlide >= autoSeconds && activeIdx + 1 < deck.slides.count {
+            autoAdvanceElapsedForSlide = 0
+            isStageAnimatedIn = false
+            viewModel.advancePresenterSlide()
+            withAnimation(
+              .easeOut(duration: max(0.2, currentSlide?.transitionDurationSeconds ?? 0.4))
+            ) {
+              isStageAnimatedIn = true
+            }
+          }
+        }
       }
     }
   }

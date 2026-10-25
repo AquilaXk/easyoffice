@@ -55,6 +55,40 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
 
     public func textView(
       _ textView: NSTextView,
+      doCommandBy commandSelector: Selector
+    ) -> Bool {
+      if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+        if NSEvent.modifierFlags.contains(.shift) {
+          return false
+        }
+        let loc = textView.selectedRange().location
+        _ = parent.viewModel.splitParagraph(
+          paragraphID: parent.paragraph.id,
+          atUTF16Offset: loc
+        )
+        return true
+      }
+      if commandSelector == #selector(NSResponder.deleteBackward(_:)) {
+        let range = textView.selectedRange()
+        if range.location == 0 && range.length == 0 {
+          if parent.viewModel.mergeParagraphWithPrevious(paragraphID: parent.paragraph.id) != nil {
+            return true
+          }
+        }
+      }
+      if commandSelector == #selector(NSResponder.moveUp(_:)) {
+        parent.viewModel.selectAdjacentParagraph(from: parent.paragraph.id, delta: -1)
+        return true
+      }
+      if commandSelector == #selector(NSResponder.moveDown(_:)) {
+        parent.viewModel.selectAdjacentParagraph(from: parent.paragraph.id, delta: 1)
+        return true
+      }
+      return false
+    }
+
+    public func textView(
+      _ textView: NSTextView,
       clickedOnLink link: Any,
       at charIndex: Int
     ) -> Bool {
@@ -72,7 +106,10 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       else {
         return true
       }
-      parent.viewModel.lastExecutedCommandSummary = "안전 하이퍼링크 검증 완료: \(safeURL.absoluteString)"
+      if safeURL.host != "easyoffice.local" {
+        NSWorkspace.shared.open(safeURL)
+      }
+      parent.viewModel.lastExecutedCommandSummary = "안전 하이퍼링크 열기: \(safeURL.absoluteString)"
       return true
     }
   }
@@ -322,15 +359,19 @@ public struct DocumentHorizontalRulerView: View {
           .gesture(
             DragGesture(minimumDistance: 2)
               .onChanged { drag in
-                let newPadding = max(16.0, min(96.0, Double(drag.location.x) - 26.0))
-                viewModel?.setDocumentHorizontalPadding(newPadding)
+                let newFirst = max(
+                  0.0,
+                  min(144.0, Double(drag.location.x - leftMarginPt - leftIndentOffsetPt))
+                )
+                viewModel?.setActiveParagraphIndent(firstLineIndentPt: newFirst)
               }
           )
           .onTapGesture {
-            let nextPadding = customPadding >= 56.0 ? 28.0 : (customPadding + 14.0)
-            viewModel?.setDocumentHorizontalPadding(nextPadding)
+            let currentFirst = Double(firstLineOffsetPt)
+            let nextFirst = currentFirst >= 24.0 ? 0.0 : (currentFirst + 12.0)
+            viewModel?.setActiveParagraphIndent(firstLineIndentPt: nextFirst)
           }
-          .help("첫 줄 들여쓰기 · 드래그 또는 클릭하여 여백 조절 (\(Int(customPadding))pt)")
+          .help("첫 줄 들여쓰기 마커 (\(Int(firstLineOffsetPt))pt)")
 
         Text("△")
           .font(.system(size: 9, weight: .bold))
@@ -342,15 +383,16 @@ public struct DocumentHorizontalRulerView: View {
           .gesture(
             DragGesture(minimumDistance: 2)
               .onChanged { drag in
-                let newPadding = max(16.0, min(96.0, Double(drag.location.x) - 26.0))
-                viewModel?.setDocumentHorizontalPadding(newPadding)
+                let newLeft = max(0.0, min(144.0, Double(drag.location.x - leftMarginPt)))
+                viewModel?.setActiveParagraphIndent(leftIndentPt: newLeft)
               }
           )
           .onTapGesture {
-            let nextPadding = customPadding >= 56.0 ? 28.0 : (customPadding + 14.0)
-            viewModel?.setDocumentHorizontalPadding(nextPadding)
+            let currentLeft = Double(leftIndentOffsetPt)
+            let nextLeft = currentLeft >= 36.0 ? 0.0 : (currentLeft + 18.0)
+            viewModel?.setActiveParagraphIndent(leftIndentPt: nextLeft)
           }
-          .help("왼쪽 여백·들여쓰기 마커 (\(Int(customPadding))pt)")
+          .help("좌측 단락 들여쓰기 마커 (\(Int(leftIndentOffsetPt))pt)")
 
         Text("▽")
           .font(.system(size: 9, weight: .bold))
@@ -432,14 +474,19 @@ public struct DocumentVerticalRulerView: View {
   }
 }
 
-/// Korean 200-Character Manuscript Grid Paper View (`20×10 = 200자` 원고지 격자 뷰) with traditional reddish-amber borders and inter-row spacing strips.
 public struct HWPManuscriptGridPaperView: View {
   public let document: OfficeDocumentModel
   public let palette: WorkspaceThemePalette
+  public var viewModel: WorkspaceViewModel?
 
-  public init(document: OfficeDocumentModel, palette: WorkspaceThemePalette) {
+  public init(
+    document: OfficeDocumentModel,
+    palette: WorkspaceThemePalette,
+    viewModel: WorkspaceViewModel? = nil
+  ) {
     self.document = document
     self.palette = palette
+    self.viewModel = viewModel
   }
 
   private var manuscriptPages: [[String]] {
@@ -463,8 +510,7 @@ public struct HWPManuscriptGridPaperView: View {
     }
     var pages: [[String]] = []
     var offset = 0
-    let maxPages = 16
-    while offset < cells.count && pages.count < maxPages {
+    while offset < cells.count {
       let end = min(cells.count, offset + 200)
       var slice = Array(cells[offset..<end])
       if slice.count < 200 {
@@ -482,8 +528,28 @@ public struct HWPManuscriptGridPaperView: View {
       palette.isDark ? "#D97706" : "#C84B31",
       fallback: palette.border.swiftUIColor
     )
+    let fullText = document.paragraphs.map(\.text).joined(separator: "\n")
 
-    VStack(alignment: .leading, spacing: 18) {
+    VStack(alignment: .leading, spacing: 14) {
+      if let vm = viewModel, !vm.isCanvasSnapshotMode {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("원고지 본문 직접 편집 (입력 즉시 200자 원고지 격자에 반영)")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+          TextEditor(
+            text: Binding(
+              get: { fullText },
+              set: { vm.updateActiveDocumentManuscriptFullText($0) }
+            )
+          )
+          .font(.system(size: 12, design: .monospaced))
+          .frame(minHeight: 68, maxHeight: 110)
+          .padding(6)
+          .background(palette.cardSurface.swiftUIColor)
+          .border(gridStrokeColor.opacity(0.6), width: 1)
+        }
+      }
+
       ForEach(Array(pages.enumerated()), id: \.offset) { pageIdx, pageCells in
         VStack(alignment: .leading, spacing: 6) {
           HStack {
@@ -588,23 +654,25 @@ public struct DocumentEditorDetailPaneView: View {
 
   private func compactParagraphHeight(for paragraph: ParagraphBlock) -> CGFloat {
     let isSplitActive = viewModel.splitSecondaryTab != nil
-    let explicitLines = paragraph.text.components(separatedBy: .newlines).count
-    let charsPerLine = isSplitActive ? 42 : 62
-    let wrappedLines = max(1, (paragraph.text.count + charsPerLine - 1) / charsPerLine)
-    let lineCount = max(explicitLines, wrappedLines)
-    switch paragraph.style {
-    case .title:
-      return max(isSplitActive ? 32 : 30, CGFloat(lineCount) * 26)
-    case .heading1, .heading2, .officialHeader:
-      return max(24, CGFloat(lineCount) * 22)
-    case .heading3, .body, .quote:
-      return max(24, CGFloat(lineCount) * 22)
+    let charsPerLine = max(24, Int(round(Double(isSplitActive ? 42 : 62) * (11.0 / max(8.0, paragraph.fontSizePt)))))
+    let segments = paragraph.text.components(separatedBy: .newlines)
+    var totalLines = 0
+    for seg in segments {
+      let wrapped = max(1, (seg.count + charsPerLine - 1) / charsPerLine)
+      totalLines += wrapped
     }
+    let lineCount = max(1, totalLines)
+    let spacingFactor = max(1.0, paragraph.lineSpacingPercent / 100.0)
+    let baseLineHeight = max(20.0, CGFloat(paragraph.fontSizePt) * CGFloat(spacingFactor) * 1.15)
+    return max(isSplitActive ? 28.0 : 26.0, CGFloat(lineCount) * baseLineHeight + 6.0)
   }
 
   @ViewBuilder
   private func hwpOfficialHeaderBanner(palette: WorkspaceThemePalette) -> some View {
     let hwpAccent = EasyOfficeDesignTokens.accentToken(for: .hwp).swiftUIColor
+    let officialHeaderText =
+      document.paragraphs.first(where: { $0.style == .officialHeader })?.text
+      ?? (document.headerText.isEmpty ? "행정기관 표준 공문서 · 문서번호 기안-2026-0201" : document.headerText)
     VStack(alignment: .leading, spacing: 6) {
       HStack(alignment: .center, spacing: 12) {
         VStack(alignment: .leading, spacing: 3) {
@@ -613,9 +681,23 @@ public struct DocumentEditorDetailPaneView: View {
               .font(.system(size: 10, weight: .bold))
               .foregroundStyle(hwpAccent)
 
-            Text("문서번호 기획조정-2026-0104호")
-              .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+            if isPrimaryPane && !viewModel.isCanvasSnapshotMode {
+              TextField(
+                "공문서 두문·문서번호 입력",
+                text: Binding(
+                  get: { officialHeaderText },
+                  set: { viewModel.updateActiveDocumentOfficialHeaderText($0) }
+                )
+              )
+              .textFieldStyle(.plain)
+              .font(.system(size: 10, weight: .medium, design: .monospaced))
               .foregroundStyle(palette.secondaryText.swiftUIColor)
+              .frame(minWidth: 220)
+            } else {
+              Text(officialHeaderText)
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
           }
           Text(document.title)
             .font(.system(size: 13, weight: .bold))
@@ -728,6 +810,42 @@ public struct DocumentEditorDetailPaneView: View {
               ) { role in
                 Button(role.rawValue) {
                   viewModel.setActiveParagraphStyle(role)
+                }
+              }
+            }
+
+            FlatToolbarMenu(
+              title: selectedParagraph?.fontName ?? "Pretendard",
+              symbolName: "textformat",
+              palette: palette,
+              isSnapshotMode: viewModel.isCanvasSnapshotMode
+            ) {
+              ForEach(
+                [
+                  "Pretendard",
+                  "AppleSDGothicNeo-Regular",
+                  "NanumMyeongjo",
+                  "Menlo",
+                  "Helvetica Neue",
+                ],
+                id: \.self
+              ) { family in
+                Button(family) {
+                  viewModel.setActiveParagraphFont(fontName: family)
+                }
+              }
+            }
+
+            FlatToolbarMenu(
+              title: "\(Int(selectedParagraph?.fontSizePt ?? 11))pt",
+              symbolName: "textformat.size.larger",
+              palette: palette,
+              isSnapshotMode: viewModel.isCanvasSnapshotMode
+            ) {
+              ForEach([9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 32.0], id: \.self) {
+                pt in
+                Button("\(Int(pt))pt") {
+                  viewModel.setActiveParagraphFont(fontSizePt: pt)
                 }
               }
             }
@@ -1118,7 +1236,11 @@ public struct DocumentEditorDetailPaneView: View {
                 }
 
                 if viewModel.isManuscriptGridModeEnabled {
-                  HWPManuscriptGridPaperView(document: document, palette: palette)
+                  HWPManuscriptGridPaperView(
+                    document: document,
+                    palette: palette,
+                    viewModel: viewModel
+                  )
                 } else {
                   if viewModel.workspaceViewMode == .outlineView {
                     documentOutlineTreePanel(palette: palette)
@@ -1147,14 +1269,19 @@ public struct DocumentEditorDetailPaneView: View {
                                   utf16Range: nil
                                 )
                               } label: {
-                                Text("\(idx + 1). \(entry.title)")
-                                  .font(.system(size: 10, weight: .medium))
-                                  .lineLimit(1)
-                                  .foregroundStyle(
-                                    viewModel.selectedParagraphID == entry.paragraphID
-                                      ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                                      : palette.secondaryText.swiftUIColor
+                                Text(
+                                  viewModel.formattedTableOfContentsEntryTitle(
+                                    index: idx,
+                                    rawTitle: entry.title
                                   )
+                                )
+                                .font(.system(size: 10, weight: .medium))
+                                .lineLimit(1)
+                                .foregroundStyle(
+                                  viewModel.selectedParagraphID == entry.paragraphID
+                                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                                    : palette.secondaryText.swiftUIColor
+                                )
                               }
                               .buttonStyle(.plain)
                             }
@@ -1165,20 +1292,32 @@ public struct DocumentEditorDetailPaneView: View {
                     }
                   }
 
-                  if colCount >= 2 && document.paragraphs.count >= 2 {
-                    let effectiveCols = min(max(2, colCount), max(2, document.paragraphs.count))
-                    let enumeratedParagraphs = Array(document.paragraphs.enumerated())
+                  let visibleParagraphs: [(Int, ParagraphBlock)] = {
+                    if viewModel.workspaceViewMode == .outlineView {
+                      let visibleSet = Set(
+                        viewModel.visibleDocumentOutlineParagraphs(for: document).map(\.id)
+                      )
+                      return Array(document.paragraphs.enumerated()).filter {
+                        visibleSet.contains($0.element.id)
+                      }
+                    } else {
+                      return Array(document.paragraphs.enumerated())
+                    }
+                  }()
+
+                  if colCount >= 2 && visibleParagraphs.count >= 2 {
+                    let effectiveCols = min(max(2, colCount), max(2, visibleParagraphs.count))
                     let chunkSize = max(
-                      1, (enumeratedParagraphs.count + effectiveCols - 1) / effectiveCols)
+                      1, (visibleParagraphs.count + effectiveCols - 1) / effectiveCols)
 
                     HStack(alignment: .top, spacing: 20) {
                       ForEach(0..<effectiveCols, id: \.self) { colIdx in
-                        let startIdx = min(enumeratedParagraphs.count, colIdx * chunkSize)
-                        let endIdx = min(enumeratedParagraphs.count, (colIdx + 1) * chunkSize)
-                        let colSlice = Array(enumeratedParagraphs[startIdx..<endIdx])
+                        let startIdx = min(visibleParagraphs.count, colIdx * chunkSize)
+                        let endIdx = min(visibleParagraphs.count, (colIdx + 1) * chunkSize)
+                        let colSlice = Array(visibleParagraphs[startIdx..<endIdx])
 
                         VStack(alignment: .leading, spacing: 4) {
-                          ForEach(colSlice, id: \.element.id) { idx, paragraph in
+                          ForEach(colSlice, id: \.1.id) { idx, paragraph in
                             paragraphBlockView(
                               for: paragraph, paragraphIndex: idx, palette: palette)
                           }
@@ -1194,8 +1333,7 @@ public struct DocumentEditorDetailPaneView: View {
                     }
                   } else {
                     VStack(alignment: .leading, spacing: 4) {
-                      ForEach(Array(document.paragraphs.enumerated()), id: \.element.id) {
-                        idx, paragraph in
+                      ForEach(visibleParagraphs, id: \.1.id) { idx, paragraph in
                         paragraphBlockView(for: paragraph, paragraphIndex: idx, palette: palette)
                       }
                     }
@@ -1228,9 +1366,10 @@ public struct DocumentEditorDetailPaneView: View {
                   .frame(maxWidth: .infinity)
                 }
 
-                if !document.images.isEmpty {
+                let unanchoredImages = document.images.filter { $0.anchorParagraphID == nil }
+                if !unanchoredImages.isEmpty {
                   VStack(alignment: .leading, spacing: 4) {
-                    ForEach(document.images) { img in
+                    ForEach(unanchoredImages) { img in
                       imageWrapCardView(for: img, palette: palette)
                     }
                   }
@@ -1393,50 +1532,62 @@ public struct DocumentEditorDetailPaneView: View {
     let listPrefix = document.formattedListPrefix(forParagraphAt: paragraphIndex)
     let rowHeight = compactParagraphHeight(for: paragraph)
     let linkedRuns = paragraph.effectiveRuns.filter { ($0.linkURL ?? "").isEmpty == false }
+    let anchoredImages = document.images.filter { $0.anchorParagraphID == paragraph.id }
 
-    HStack(alignment: .center, spacing: 6) {
-      if isPrimaryPane && isSelectedParagraph && !viewModel.isCanvasSnapshotMode {
-        HStack(alignment: .top, spacing: 6) {
-          if let listPrefix {
-            Text(listPrefix)
-              .font(
-                .system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced)
-              )
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-              .padding(.leading, CGFloat(paragraph.listLevel) * 14.0)
-              .padding(.top, 2)
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .center, spacing: 6) {
+        if isPrimaryPane && isSelectedParagraph && !viewModel.isCanvasSnapshotMode {
+          HStack(alignment: .top, spacing: 6) {
+            if let listPrefix {
+              Text(listPrefix)
+                .font(
+                  .system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced)
+                )
+                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .padding(.leading, CGFloat(paragraph.listLevel) * 14.0)
+                .padding(.top, 2)
+            }
+            SelectableParagraphTextView(
+              viewModel: viewModel,
+              paragraph: paragraph,
+              palette: palette
+            )
+            .frame(height: rowHeight)
           }
-          SelectableParagraphTextView(
-            viewModel: viewModel,
-            paragraph: paragraph,
-            palette: palette
-          )
-          .frame(height: rowHeight)
+        } else {
+          paragraphRow(for: paragraph, paragraphIndex: paragraphIndex, palette: palette)
+            .contentShape(Rectangle())
+            .onTapGesture {
+              guard isPrimaryPane else { return }
+              viewModel.updateSelectedParagraphSelection(paragraphID: paragraph.id, utf16Range: nil)
+            }
         }
-      } else {
-        paragraphRow(for: paragraph, paragraphIndex: paragraphIndex, palette: palette)
-          .contentShape(Rectangle())
-          .onTapGesture {
-            guard isPrimaryPane else { return }
-            viewModel.updateSelectedParagraphSelection(paragraphID: paragraph.id, utf16Range: nil)
+
+        if let firstLinkRun = linkedRuns.first,
+          let rawURL = firstLinkRun.linkURL,
+          let safeURLString = WorkspaceViewModel.sanitizeSafeHyperlinkURL(rawURL)
+        {
+          Button {
+            viewModel.lastExecutedCommandSummary = "안전 하이퍼링크 이동: \(safeURLString)"
+            if !viewModel.isCanvasSnapshotMode, let url = URL(string: safeURLString) {
+              NSWorkspace.shared.open(url)
+            }
+          } label: {
+            Label("링크", systemImage: "link")
+              .font(.system(size: 9, weight: .semibold))
+              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
           }
+          .buttonStyle(.plain)
+          .help(safeURLString)
+        }
       }
 
-      if let firstLinkRun = linkedRuns.first,
-        let rawURL = firstLinkRun.linkURL,
-        let safeURLString = WorkspaceViewModel.sanitizeSafeHyperlinkURL(rawURL)
-      {
-        Button {
-          viewModel.lastExecutedCommandSummary = "안전 하이퍼링크 이동 준비: \(safeURLString)"
-        } label: {
-          Label("링크", systemImage: "link")
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
+      if !anchoredImages.isEmpty {
+        ForEach(anchoredImages) { img in
+          imageWrapCardView(for: img, palette: palette)
         }
-        .buttonStyle(.plain)
-        .help(safeURLString)
       }
     }
     .padding(.vertical, 2)
@@ -1634,7 +1785,8 @@ public struct DocumentEditorDetailPaneView: View {
   }
 
   private func documentOutlineTreePanel(palette: WorkspaceThemePalette) -> some View {
-    VStack(alignment: .leading, spacing: 5) {
+    let outlineItems = viewModel.visibleDocumentOutlineParagraphs(for: document)
+    return VStack(alignment: .leading, spacing: 5) {
       HStack(spacing: 8) {
         Image(systemName: "list.bullet.indent")
           .font(.system(size: 11, weight: .bold))
@@ -1654,7 +1806,7 @@ public struct DocumentEditorDetailPaneView: View {
         }
       }
 
-      ForEach(Array(document.paragraphs.enumerated()), id: \.element.id) { idx, p in
+      ForEach(Array(outlineItems.enumerated()), id: \.element.id) { idx, p in
         let isHeading = (p.style == .heading1 || p.style == .heading2)
         let isCollapsed = viewModel.collapsedOutlineParagraphIDs.contains(p.id)
         let levelIndent: CGFloat = {
