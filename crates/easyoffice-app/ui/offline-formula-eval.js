@@ -3,7 +3,6 @@
 
   const astApi = host.__EASYOFFICE_FORMULA_AST__;
   const {
-    MAX_PARSE_DEPTH,
     MAX_EXPANDED_CELL_COUNT,
     asciiUpperJs,
     jsonSheetNameOrDefaultJs,
@@ -473,12 +472,12 @@
       return v;
     }
 
-    function evalIndirectCall(args, astDepth) {
+    function evalIndirectCall(args) {
       if (args.length !== 1 && args.length !== 2) return valErr("#VALUE!");
-      const refVal = ensureScalar(evalAst(args[0], astDepth));
+      const refVal = ensureScalar(evalAst(args[0]));
       if (refVal.kind === "error") return refVal;
       if (args.length === 2) {
-        const modeVal = ensureScalar(evalAst(args[1], astDepth));
+        const modeVal = ensureScalar(evalAst(args[1]));
         if (modeVal.kind === "error") return modeVal;
         const a1Flag = coerceScalarBool(modeVal);
         if (a1Flag !== true) return valErr("#VALUE!");
@@ -486,8 +485,7 @@
       return resolveIndirectRange(formatFormulaValue(refVal), workbook, currentSheetUpper);
     }
 
-    function evalAst(node, astDepth = 0) {
-      if (astDepth > MAX_PARSE_DEPTH) return valErr("#VALUE!");
+    function evalAst(node) {
       if (!node || node.kind === "Empty") return valEmpty();
       if (isChainBinaryNode(node)) {
         const ops = [];
@@ -496,11 +494,11 @@
           ops.push(cur);
           cur = cur.lhs;
         }
-        let acc = ensureScalar(evalAst(cur, astDepth));
+        let acc = ensureScalar(evalAst(cur));
         if (acc.kind === "error") return acc;
         for (let i = ops.length - 1; i >= 0; i -= 1) {
           const step = ops[i];
-          const rhs = ensureScalar(evalAst(step.rhs, astDepth + 1));
+          const rhs = ensureScalar(evalAst(step.rhs));
           if (rhs.kind === "error") return rhs;
           acc = applyChainBinaryStep(step, acc, rhs);
           if (acc.kind === "error") return acc;
@@ -531,7 +529,7 @@
         };
       }
       if (node.kind === "Unary") {
-        const inner = ensureScalar(evalAst(node.expr, astDepth + 1));
+        const inner = ensureScalar(evalAst(node.expr));
         if (inner.kind === "error") return inner;
         const n = coerceScalarNumber(inner);
         if (n === null) return valErr("#VALUE!");
@@ -543,22 +541,22 @@
         const fnUpper = node.name;
         const args = node.args;
         if (fnUpper === "INDIRECT") {
-          return evalIndirectCall(args, astDepth + 1);
+          return evalIndirectCall(args);
         }
         if (fnUpper === "IF") {
           if (args.length < 2 || args.length > 3) return valErr("#VALUE!");
-          const cond = ensureScalar(evalAst(args[0], astDepth + 1));
+          const cond = ensureScalar(evalAst(args[0]));
           if (cond.kind === "error") return cond;
           const flag = coerceScalarBool(cond);
           if (flag === null) return valErr("#VALUE!");
-          if (flag) return ensureScalar(evalAst(args[1], astDepth + 1));
-          if (args.length === 3) return ensureScalar(evalAst(args[2], astDepth + 1));
+          if (flag) return ensureScalar(evalAst(args[1]));
+          if (args.length === 3) return ensureScalar(evalAst(args[2]));
           return valBool(false);
         }
         if (fnUpper === "IFERROR") {
           if (args.length !== 2) return valErr("#VALUE!");
-          const primary = ensureScalar(evalAst(args[0], astDepth + 1));
-          if (primary.kind === "error") return ensureScalar(evalAst(args[1], astDepth + 1));
+          const primary = ensureScalar(evalAst(args[0]));
+          if (primary.kind === "error") return ensureScalar(evalAst(args[1]));
           return primary;
         }
         if (fnUpper === "ROW" || fnUpper === "COLUMN") {
@@ -579,7 +577,7 @@
             return valNum(fnUpper === "ROW" ? target.minRow : target.minCol + 1);
           }
           if (target.kind === "FuncCall" && target.name === "INDIRECT") {
-            const ind = evalIndirectCall(target.args, astDepth + 1);
+            const ind = evalIndirectCall(target.args);
             if (ind.kind === "error") return ind;
             return valNum(fnUpper === "ROW" ? ind.minRow : ind.minCol + 1);
           }
@@ -602,7 +600,7 @@
             return valNum(span);
           }
           if (target.kind === "FuncCall" && target.name === "INDIRECT") {
-            const ind = evalIndirectCall(target.args, astDepth + 1);
+            const ind = evalIndirectCall(target.args);
             if (ind.kind === "error") return ind;
             const span =
               fnUpper === "ROWS"
@@ -610,13 +608,13 @@
                 : ind.maxCol - ind.minCol + 1;
             return valNum(span);
           }
-          const scalarTarget = ensureScalar(evalAst(target, astDepth + 1));
+          const scalarTarget = ensureScalar(evalAst(target));
           if (scalarTarget.kind === "error") return scalarTarget;
           return valNum(1);
         }
         const evaluatedArgs = [];
         for (let i = 0; i < args.length; i += 1) {
-          evaluatedArgs.push(evalAst(args[i], astDepth + 1));
+          evaluatedArgs.push(evalAst(args[i]));
         }
         if (AGGREGATE_FN_SET.has(fnUpper)) {
           return evalAggregateFunction(fnUpper, evaluatedArgs, workbook, depth);
@@ -655,7 +653,7 @@
       return valErr("#VALUE!");
     }
 
-    return ensureScalar(evalAst(parsed.root, 0));
+    return ensureScalar(evalAst(parsed.root));
   }
 
   function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {

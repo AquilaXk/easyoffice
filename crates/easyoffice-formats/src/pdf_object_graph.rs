@@ -1,5 +1,7 @@
 #[path = "pdf_damaged_encrypt.rs"]
 mod pdf_damaged_encrypt;
+#[path = "pdf_splice_classifier.rs"]
+mod pdf_splice_classifier;
 
 use crate::pdf_stream_parser::{
     contains_subslice, decode_pdf_hex_string, decode_pdf_name, has_structural_after_endobj_cached,
@@ -9,10 +11,10 @@ use crate::pdf_stream_parser::{
     validate_balanced_pdf_literals, ParenJumpTable, PdfNonCodeKind, PdfNonCodeStep,
 };
 use crate::EasyOfficeError;
+pub(super) use pdf_damaged_encrypt::fail_corrupted_or_encrypted;
 use pdf_damaged_encrypt::step_closed_unspliced_single;
-pub(super) use pdf_damaged_encrypt::{
-    fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt,
-    trailer_or_xref_has_spliced_encrypt,
+pub(super) use pdf_splice_classifier::{
+    indirect_val_has_spliced_encrypt, trailer_or_xref_has_spliced_encrypt,
 };
 use std::collections::HashMap;
 
@@ -498,14 +500,19 @@ pub(super) fn build_eof_and_int_index(
 
 pub(super) fn lookup_indexed_int_obj(
     int_objs: &IntObjIndex,
+    eof_markers: &[usize],
     bytes: &[u8],
     stream_start: usize,
     target_obj: u32,
     target_gen: u16,
 ) -> Option<usize> {
     let candidates = int_objs.get(&(target_obj, target_gen))?;
+    let rev_idx = eof_markers.partition_point(|&pos| pos < stream_start);
+    let rev_limit = eof_markers.get(rev_idx).copied().unwrap_or(bytes.len());
+    let min_post_pos = |len_val: usize| stream_start.saturating_add(len_val);
     for &(obj_pos, len_val) in candidates {
-        if obj_pos >= stream_start.saturating_add(len_val)
+        if obj_pos >= min_post_pos(len_val)
+            && obj_pos < rev_limit
             && verify_direct_stream_bounds(bytes, stream_start, len_val).is_some()
         {
             return Some(len_val);
@@ -513,6 +520,14 @@ pub(super) fn lookup_indexed_int_obj(
     }
     for &(obj_pos, len_val) in candidates.iter().rev() {
         if obj_pos < stream_start
+            && verify_direct_stream_bounds(bytes, stream_start, len_val).is_some()
+        {
+            return Some(len_val);
+        }
+    }
+    for &(obj_pos, len_val) in candidates {
+        if obj_pos >= rev_limit
+            && obj_pos >= min_post_pos(len_val)
             && verify_direct_stream_bounds(bytes, stream_start, len_val).is_some()
         {
             return Some(len_val);
@@ -527,14 +542,15 @@ pub(super) fn resolve_stream_length_hint(
     entries: &[(String, PdfObjValue)],
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
     strict_table: &ParenJumpTable,
-    int_index: &mut Option<IntObjIndex>,
+    int_index: &mut Option<(Vec<usize>, IntObjIndex)>,
 ) -> Option<usize> {
     match dict_get(entries, "/Length")? {
         PdfObjValue::Int(n) => usize::try_from(*n).ok(),
         PdfObjValue::Ref(lo, lg) => {
-            let idx =
-                int_index.get_or_insert_with(|| build_eof_and_int_index(bytes, strict_table).1);
-            if let Some(u) = lookup_indexed_int_obj(idx, bytes, stream_start, *lo, *lg) {
+            let (eof_markers, idx) =
+                int_index.get_or_insert_with(|| build_eof_and_int_index(bytes, strict_table));
+            if let Some(u) = lookup_indexed_int_obj(idx, eof_markers, bytes, stream_start, *lo, *lg)
+            {
                 return Some(u);
             }
             if let Some(obj) = objects.get(&(*lo, *lg)) {

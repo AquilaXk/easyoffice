@@ -621,7 +621,7 @@ impl PdfSerializer {
 
     fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
         let paren_table = ParenJumpTable::build(bytes);
-        let mut int_index: Option<IntObjIndex> = None;
+        let mut int_index: Option<(Vec<usize>, IntObjIndex)> = None;
         let mut objects: HashMap<(u32, u16), PdfIndirectObject> = HashMap::new();
         let mut trailers: Vec<Vec<(String, PdfObjValue)>> = Vec::new();
         let mut stream_spans: Vec<(usize, usize)> = Vec::new();

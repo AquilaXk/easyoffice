@@ -792,6 +792,50 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
 
 const MAX_PAREN_JUMP_DEPTH: usize = 4096;
 
+pub(crate) fn is_structural_endobj_at(
+    bytes: &[u8],
+    i: usize,
+    endobj_cache: &mut (usize, usize),
+) -> bool {
+    let len = bytes.len();
+    if !is_standalone_pdf_kw(bytes, i, b"endobj") {
+        return false;
+    }
+    let mut b = i;
+    while b > 0 && matches!(bytes[b - 1], b' ' | b'\t') {
+        b -= 1;
+    }
+    let preceded_structurally = b > 0
+        && (matches!(bytes[b - 1], b'\n' | b'\r' | b']')
+            || (b >= 2 && bytes[b - 2] == b'>' && bytes[b - 1] == b'>'));
+    let mut a = i + 6;
+    while a < len && matches!(bytes[a], b' ' | b'\t') {
+        a += 1;
+    }
+    let followed_by_eol = a < len && matches!(bytes[a], b'\n' | b'\r' | b'%');
+    (preceded_structurally || followed_by_eol)
+        && has_structural_after_endobj_cached(bytes, i + 6, endobj_cache)
+}
+
+pub(crate) fn is_valid_xref_follow(bytes: &[u8], xref_pos: usize) -> bool {
+    let len = bytes.len();
+    if !is_standalone_pdf_kw(bytes, xref_pos, b"xref")
+        || xref_pos + 4 >= len
+        || (!is_pdf_ws(bytes[xref_pos + 4]) && bytes[xref_pos + 4] != b'%')
+    {
+        return false;
+    }
+    let qx = skip_pdf_ws_stopping_at_eof(bytes, xref_pos + 4, len);
+    let mut qd = qx;
+    while qd < len && bytes[qd].is_ascii_digit() {
+        qd += 1;
+    }
+    let qd_ws = skip_pdf_ws_only(bytes, qd, len);
+    is_line_eof_marker(bytes, qx)
+        || is_standalone_pdf_kw(bytes, qx, b"trailer")
+        || (qd > qx && qd_ws > qd && qd_ws < len && bytes[qd_ws].is_ascii_digit())
+}
+
 pub(crate) fn is_paren_reset_boundary(
     bytes: &[u8],
     i: usize,
@@ -801,24 +845,8 @@ pub(crate) fn is_paren_reset_boundary(
     if is_line_eof_marker(bytes, i) {
         return Some(i + 5);
     }
-    if is_standalone_pdf_kw(bytes, i, b"endobj") {
-        let mut b = i;
-        while b > 0 && matches!(bytes[b - 1], b' ' | b'\t') {
-            b -= 1;
-        }
-        let preceded_structurally = b > 0
-            && (matches!(bytes[b - 1], b'\n' | b'\r' | b']')
-                || (b >= 2 && bytes[b - 2] == b'>' && bytes[b - 1] == b'>'));
-        let mut a = i + 6;
-        while a < len && matches!(bytes[a], b' ' | b'\t') {
-            a += 1;
-        }
-        let followed_by_eol = a >= len || matches!(bytes[a], b'\n' | b'\r' | b'%');
-        if (preceded_structurally || followed_by_eol)
-            && has_structural_after_endobj_cached(bytes, i + 6, endobj_cache)
-        {
-            return Some(i + 6);
-        }
+    if is_structural_endobj_at(bytes, i, endobj_cache) {
+        return Some(i + 6);
     }
     if i > 0 && matches!(bytes[i - 1], b'\n' | b'\r') {
         let line_tok = {
@@ -834,23 +862,8 @@ pub(crate) fn is_paren_reset_boundary(
                 return Some(line_tok);
             }
         }
-        if is_standalone_pdf_kw(bytes, line_tok, b"xref")
-            && line_tok + 4 < len
-            && (is_pdf_ws(bytes[line_tok + 4]) || bytes[line_tok + 4] == b'%')
-        {
-            let qx = skip_pdf_ws_stopping_at_eof(bytes, line_tok + 4, len);
-            let mut qd = qx;
-            while qd < len && bytes[qd].is_ascii_digit() {
-                qd += 1;
-            }
-            let qd_ws = skip_pdf_ws_only(bytes, qd, len);
-            let valid_xref_follow = qx >= len
-                || (qx + 5 <= len && &bytes[qx..qx + 5] == b"%%EOF")
-                || is_standalone_pdf_kw(bytes, qx, b"trailer")
-                || (qd > qx && qd_ws > qd && qd_ws < len && bytes[qd_ws].is_ascii_digit());
-            if valid_xref_follow {
-                return Some(line_tok);
-            }
+        if is_valid_xref_follow(bytes, line_tok) {
+            return Some(line_tok);
         }
         if is_standalone_pdf_kw(bytes, line_tok, b"startxref") {
             let qs = skip_pdf_ws_stopping_at_eof(bytes, line_tok + 9, len);
@@ -899,7 +912,7 @@ impl ParenJumpTable {
             }
             let in_paren = !stack.is_empty();
             if !in_paren && bytes[i] == b'%' {
-                if i + 5 <= len && &bytes[i..i + 5] == b"%%EOF" {
+                if is_line_eof_marker(bytes, i) {
                     i += 5;
                     continue;
                 }

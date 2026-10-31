@@ -815,12 +815,12 @@ startxref\n0\n%%EOF\n";
     let balanced_prose_stream = b"BT /F1 12 Tf 72 720 Td (Body ok) Tj ET";
     let valid_balanced_parens_pdf = format!(
         "%PDF-1.7\n\
-1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Section (7.6): trailer << /Encrypt 9 0 R >>) >> endobj\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Section /A (7.6): trailer << /Encrypt 9 0 R >>) /Subject (Menu >> Security: /Encrypt 9 0 R disabled) >> endobj\n\
 2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n\
 3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n\
 4 0 obj << /Length {} >>\nstream\n{}\nendstream\nendobj\n\
 xref\n0 5\n\
-trailer << /Size 5 /Root 1 0 R /Producer (EasyPDF (macOS) /Encrypt 9 0 R disabled) >>\n\
+trailer << /Size 5 /Root 1 0 R /Producer (EasyPDF /macOS (arm64) /Encrypt 9 0 R disabled) /Keywords (   %%EOF\nxref overview /Encrypt 9 0 R) >>\n\
 startxref\n0\n%%EOF\n",
         balanced_prose_stream.len(),
         std::str::from_utf8(balanced_prose_stream).unwrap()
@@ -829,7 +829,7 @@ startxref\n0\n%%EOF\n",
         .expect("valid PDF with balanced inner parentheses in prose must succeed");
     assert_eq!(
         parsed_balanced.title,
-        "Section (7.6): trailer << /Encrypt 9 0 R >>"
+        "Section /A (7.6): trailer << /Encrypt 9 0 R >>"
     );
 
     let rev2_payload = b"BT (x)\nendstream\nendobj\n (real_tail) Tj ET";
@@ -849,8 +849,37 @@ xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
     );
     assert!(PdfSerializer::parse(stale_indirect_len_pdf.as_bytes()).is_ok());
 
+    let rev1_long_payload = b"123456\nendstream\nendobj\nBT /F1 12 Tf (Rev1) Tj ET";
+    let rev2_short_payload = b"BT /F1 12 Tf (Rev2) Tj ET";
+    let shrunk_indirect_len_pdf = format!(
+        "%PDF-1.7\n\
+2 0 obj << /Type /Catalog /Pages 3 0 R >> endobj\n\
+3 0 obj << /Type /Pages /Count 1 /Kids [4 0 R] >> endobj\n\
+4 0 obj << /Type /Page /Parent 3 0 R /Contents 5 0 R >> endobj\n\
+5 0 obj << /Length 1 0 R >>\nstream\n{}\nendstream\nendobj\n\
+1 0 obj {} endobj\n\
+xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n\
+5 0 obj << /Length 1 0 R >>\nstream\n{}\nendstream\nendobj\n\
+1 0 obj {} endobj\n\
+xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
+        std::str::from_utf8(rev1_long_payload).unwrap(),
+        rev1_long_payload.len(),
+        std::str::from_utf8(rev2_short_payload).unwrap(),
+        rev2_short_payload.len()
+    );
+    let parsed_shrunk = PdfSerializer::parse(shrunk_indirect_len_pdf.as_bytes())
+        .expect("incremental PDF shrinking indirect /Length in later revision must succeed");
+    assert_eq!(parsed_shrunk.pages[0].body_text, "Rev2");
+
     for enc_case in [
         &b"%PDF-1.5\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 0 /Kids [] >> endobj\n3 0 obj << /Title (unclosed\n4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Desc cd) /Encrypt 9 0 R /Length 4 >>\nstream\nABCD\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n3 0 obj << /Note (outer (unclosed\n4 0 obj << /Type /XRef /Size 6 /Root 1 0 R /Encrypt 9 0 R /Desc cd)) >> endobj\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n3 0 obj [ (unclosed\n4 0 obj << /Type /XRef /Size 6 /Root 1 0 R /Encrypt 9 0 R /Length 4 >> stream\nABCD)\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n4 0 obj << /Meta << /Note (unclosed >> /Encrypt 9 0 R /Other text) /Type /XRef /Size 6 /Root 1 0 R /Length 4 >>\nstream\nABCD\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj << /Note (mentions\n%%EOF\nhere) /Broken [ 1 >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\ntrailer << /Size 2 /Root 1 0 R /ID [ (unclosed /Sub << /Type /XRef text) % endstream\n (f) ] /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj << /Broken (unclosed mentioning 2 0 obj and xref and endstream inline\n4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 4 >>\nstream\nABCD\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj << /Title %%EOF (unclosed\n4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Desc cd) /Encrypt 9 0 R /Length 4 >>\nstream\nABCD\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],
         &b"%PDF-1.5\n1 0 obj << /Title (unclosed >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n2 0 obj << /Note text) >> endobj\nxref\n0 3\ntrailer << /Size 3 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"[..],
         &b"%PDF-1.5\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Size 2 /Root 1 0 R /Note (mentions %%EOF here) /Broken [ 1 /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
         &b"%PDF-1.5\n4 0 obj << /Broken [ 1 2 /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 4 >>\nstream\nABCD\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],

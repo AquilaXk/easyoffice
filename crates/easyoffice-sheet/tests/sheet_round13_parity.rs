@@ -415,6 +415,16 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet("Main", &nested_add_33),
         EvaluatedCellValue::Number(35.0)
     );
+    let nested_add_64 = format!("=1+{}1{}", "(1+".repeat(64), ")".repeat(64));
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", &nested_add_64),
+        EvaluatedCellValue::Number(66.0)
+    );
+    let mixed_prec_13 = format!("={}1{}", "1=1&1+1*1^(".repeat(13), ")".repeat(13));
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", &mixed_prec_13),
+        EvaluatedCellValue::Boolean(false)
+    );
     let nested_parens_64 = format!("=1+{}1{}", "(".repeat(64), ")".repeat(64));
     assert_eq!(
         wb.evaluate_formula_on_sheet("Main", &nested_parens_64),
