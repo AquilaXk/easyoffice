@@ -531,7 +531,6 @@
         };
       }
       if (node.kind === "Unary") {
-        if (node.op === "group") return evalAst(node.expr, astDepth + 1);
         const inner = ensureScalar(evalAst(node.expr, astDepth + 1));
         if (inner.kind === "error") return inner;
         const n = coerceScalarNumber(inner);
@@ -569,10 +568,7 @@
             return valNum(fnUpper === "ROW" ? parts.row : parts.col + 1);
           }
           if (args.length !== 1) return valErr("#VALUE!");
-          let target = args[0];
-          while (target && target.kind === "Unary" && target.op === "group") {
-            target = target.expr;
-          }
+          const target = args[0];
           if (target.kind === "Error") return valErr(target.code);
           if (target.kind === "Cell") {
             if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
@@ -591,10 +587,7 @@
         }
         if (fnUpper === "ROWS" || fnUpper === "COLUMNS") {
           if (args.length !== 1) return valErr("#VALUE!");
-          let target = args[0];
-          while (target && target.kind === "Unary" && target.op === "group") {
-            target = target.expr;
-          }
+          const target = args[0];
           if (target.kind === "Error") return valErr(target.code);
           if (target.kind === "Cell") {
             if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");

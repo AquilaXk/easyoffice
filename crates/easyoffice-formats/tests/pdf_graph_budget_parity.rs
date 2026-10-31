@@ -811,4 +811,74 @@ startxref\n0\n%%EOF\n";
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
     assert!(stream_flood_t.elapsed().as_secs_f64() < 1.0);
+
+    let balanced_prose_stream = b"BT /F1 12 Tf 72 720 Td (Body ok) Tj ET";
+    let valid_balanced_parens_pdf = format!(
+        "%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Section (7.6): trailer << /Encrypt 9 0 R >>) >> endobj\n\
+2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n\
+4 0 obj << /Length {} >>\nstream\n{}\nendstream\nendobj\n\
+xref\n0 5\n\
+trailer << /Size 5 /Root 1 0 R /Producer (EasyPDF (macOS) /Encrypt 9 0 R disabled) >>\n\
+startxref\n0\n%%EOF\n",
+        balanced_prose_stream.len(),
+        std::str::from_utf8(balanced_prose_stream).unwrap()
+    );
+    let parsed_balanced = PdfSerializer::parse(valid_balanced_parens_pdf.as_bytes())
+        .expect("valid PDF with balanced inner parentheses in prose must succeed");
+    assert_eq!(
+        parsed_balanced.title,
+        "Section (7.6): trailer << /Encrypt 9 0 R >>"
+    );
+
+    let rev2_payload = b"BT (x)\nendstream\nendobj\n (real_tail) Tj ET";
+    let stale_indirect_len_pdf = format!(
+        "%PDF-1.7\n\
+1 0 obj 6 endobj\n\
+2 0 obj << /Type /Catalog /Pages 3 0 R >> endobj\n\
+3 0 obj << /Type /Pages /Count 1 /Kids [4 0 R] >> endobj\n\
+4 0 obj << /Type /Page /Parent 3 0 R /Contents 5 0 R >> endobj\n\
+5 0 obj << /Length 1 0 R >>\nstream\nABCDEF\nendstream\nendobj\n\
+xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n\
+5 0 obj << /Length 1 0 R >>\nstream\n{}\nendstream\nendobj\n\
+1 0 obj {} endobj\n\
+xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
+        std::str::from_utf8(rev2_payload).unwrap(),
+        rev2_payload.len()
+    );
+    assert!(PdfSerializer::parse(stale_indirect_len_pdf.as_bytes()).is_ok());
+
+    for enc_case in [
+        &b"%PDF-1.5\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 0 /Kids [] >> endobj\n3 0 obj << /Title (unclosed\n4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Desc cd) /Encrypt 9 0 R /Length 4 >>\nstream\nABCD\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj << /Title (unclosed >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n2 0 obj << /Note text) >> endobj\nxref\n0 3\ntrailer << /Size 3 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Size 2 /Root 1 0 R /Note (mentions %%EOF here) /Broken [ 1 /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n4 0 obj << /Broken [ 1 2 /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 4 >>\nstream\nABCD\nendstream\nendobj\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\ntrailer << /Size 2 /Root 1 0 R /Custom (a%b(e) /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\ntrailer << /Size 2 /Root 1 0 R /Sub << /K (a>>b(c) >> /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\ntrailer << /Size 2 /Root 1 0 R /ID [(a>>b(c) % endstream\n(f)] /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\ntrailer << /Size 2 /Root 1 0 R /ID [ % endstream\n <0123> <4567> ] /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj [ (unclosed /Type /XRef /Encrypt 9 0 R /Desc (ab)) ] endobj\nxref\n0 2\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj [ (unclosed trailer << /Size 2 /Root 1 0 R /Encrypt 9 0 R /Desc (ab)) >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj (unclosed /Type /XRef /Encrypt 9 0 R\nstream\nABCD) endobj\nxref\n0 2\n%%EOF\n"[..],
+    ] {
+        assert!(matches!(
+            PdfSerializer::parse(enc_case),
+            Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                DocumentFormat::Pdf
+            ))
+        ));
+    }
+
+    for corrupted_case in [
+        &b"%PDF-1.7\n1 0 obj << /Broken [ (Note:\ntrailer << /Encrypt 9 0 R >>) 123\nxref\n0 2\n%%EOF\n"[..],
+        &b"%PDF-1.7\n1 0 obj << /Broken [ (Note: %%EOF trailer << /Encrypt 9 0 R >>) 123\nxref\n0 2\n%%EOF\n"[..],
+        &b"%PDF-1.7\n1 0 obj << /Broken [ 1 >> endobj\n2 0 obj << /Title (Note:\n4 0 obj << /Type /XRef /Encrypt 9 0 R >>) >> endobj\nxref\n0 3\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Broken (Note: /Encrypt 9 0 R)y) >>\nstartxref\n0\n%%EOF\n"[..],
+    ] {
+        assert!(matches!(
+            PdfSerializer::parse(corrupted_case),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
+    }
 }

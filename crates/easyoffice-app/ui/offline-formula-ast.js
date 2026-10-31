@@ -329,10 +329,11 @@
       if ((ch >= "0" && ch <= "9") || ch === ".") {
         const numMatch = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(src.slice(i));
         if (!numMatch) return { error: "#VALUE!" };
-        const afterNum = src[i + numMatch[0].length] || "";
-        if (afterNum === "." || /[\p{Alphabetic}_$]/u.test(afterNum)) return { error: "#VALUE!" };
         const parsedNum = Number(numMatch[0]);
         if (!Number.isFinite(parsedNum)) return { error: "#NUM!" };
+        if (/^(?:\.|[\p{Alphabetic}_$])/u.test(src.slice(i + numMatch[0].length))) {
+          return { error: "#VALUE!" };
+        }
         if (!pushTok({ type: "num", value: parsedNum })) return { error: "#VALUE!" };
         i += numMatch[0].length;
         continue;
@@ -557,7 +558,7 @@
         if (!inner) return null;
         if (!(peek()?.type === "punct" && peek().value === ")")) return fail("#VALUE!");
         next();
-        return { kind: "Unary", op: "group", expr: inner };
+        return inner;
       }
       if (t.type === "sheet") {
         const refTok = next();

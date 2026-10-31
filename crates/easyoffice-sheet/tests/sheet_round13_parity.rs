@@ -374,4 +374,55 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet("Main", "=2026분기!B2"),
         EvaluatedCellValue::Error(FormulaError::Value)
     );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=2026\u{20000}!B2"),
+        EvaluatedCellValue::Error(FormulaError::Value)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=1e999분기"),
+        EvaluatedCellValue::Error(FormulaError::Num)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=(Ⅰ분기!A1:A1)"),
+        EvaluatedCellValue::Number(66.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=(Missing!A1:B2)"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=ROW((B3))"),
+        EvaluatedCellValue::Number(3.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=COLUMN((C4))"),
+        EvaluatedCellValue::Number(3.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=ROWS((A1:B3))"),
+        EvaluatedCellValue::Number(3.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=COLUMNS((A1:C2))"),
+        EvaluatedCellValue::Number(3.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=SUM((Ⅰ분기!A1:A1))"),
+        EvaluatedCellValue::Number(66.0)
+    );
+    let nested_add_33 = format!("=1+{}1{}", "(1+".repeat(33), ")".repeat(33));
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", &nested_add_33),
+        EvaluatedCellValue::Number(35.0)
+    );
+    let nested_parens_64 = format!("=1+{}1{}", "(".repeat(64), ")".repeat(64));
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", &nested_parens_64),
+        EvaluatedCellValue::Number(2.0)
+    );
+    let nested_parens_65 = format!("=1+{}1{}", "(".repeat(65), ")".repeat(65));
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", &nested_parens_65),
+        EvaluatedCellValue::Error(FormulaError::Value)
+    );
 }

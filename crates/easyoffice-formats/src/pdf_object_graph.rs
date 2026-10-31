@@ -3,14 +3,16 @@ mod pdf_damaged_encrypt;
 
 use crate::pdf_stream_parser::{
     contains_subslice, decode_pdf_hex_string, decode_pdf_name, has_structural_after_endobj_cached,
-    is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header, skip_pdf_ws_and_comments,
-    skip_pdf_ws_stopping_at_eof, span_crosses_object_boundary, step_indexed_non_code_token,
-    step_pdf_non_code_token, unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable,
-    PdfNonCodeKind, PdfNonCodeStep,
+    is_line_eof_marker, is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
+    skip_pdf_ws_and_comments, skip_pdf_ws_stopping_at_eof, span_crosses_object_boundary,
+    step_indexed_non_code_token, step_pdf_non_code_token, unescape_pdf_text,
+    validate_balanced_pdf_literals, ParenJumpTable, PdfNonCodeKind, PdfNonCodeStep,
 };
 use crate::EasyOfficeError;
+use pdf_damaged_encrypt::step_closed_unspliced_single;
 pub(super) use pdf_damaged_encrypt::{
-    fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt, trailer_or_xref_has_spliced_encrypt,
+    fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt,
+    trailer_or_xref_has_spliced_encrypt,
 };
 use std::collections::HashMap;
 
@@ -448,13 +450,20 @@ pub(super) fn parse_direct_int_endobj(
     Ok((u, end_p + 6))
 }
 
-pub(super) fn build_eof_and_int_index(bytes: &[u8]) -> (Vec<usize>, IntObjIndex) {
+pub(super) fn build_eof_and_int_index(
+    bytes: &[u8],
+    strict_table: &ParenJumpTable,
+) -> (Vec<usize>, IntObjIndex) {
     let mut eof_markers = Vec::new();
     let mut int_objs: IntObjIndex = HashMap::new();
     let mut q = 0usize;
     while q < bytes.len() {
+        if let Some(next_q) = step_closed_unspliced_single(bytes, strict_table, q, bytes.len()) {
+            q = next_q;
+            continue;
+        }
         if bytes[q] == b'%' {
-            if q + 5 <= bytes.len() && &bytes[q..q + 5] == b"%%EOF" {
+            if is_line_eof_marker(bytes, q) {
                 eof_markers.push(q);
                 q += 5;
                 continue;
@@ -495,29 +504,21 @@ pub(super) fn lookup_indexed_int_obj(
     target_gen: u16,
 ) -> Option<usize> {
     let candidates = int_objs.get(&(target_obj, target_gen))?;
-    let mut post_fallback = None;
     for &(obj_pos, len_val) in candidates {
-        if obj_pos < stream_start {
-            continue;
-        }
-        if obj_pos >= stream_start.saturating_add(len_val) {
-            if verify_direct_stream_bounds(bytes, stream_start, len_val).is_some() {
-                return Some(len_val);
-            }
-            post_fallback.get_or_insert(len_val);
-        }
-    }
-    let mut pre_fallback = None;
-    for &(obj_pos, len_val) in candidates.iter().rev() {
-        if obj_pos >= stream_start {
-            continue;
-        }
-        if verify_direct_stream_bounds(bytes, stream_start, len_val).is_some() {
+        if obj_pos >= stream_start.saturating_add(len_val)
+            && verify_direct_stream_bounds(bytes, stream_start, len_val).is_some()
+        {
             return Some(len_val);
         }
-        pre_fallback.get_or_insert(len_val);
     }
-    post_fallback.or(pre_fallback)
+    for &(obj_pos, len_val) in candidates.iter().rev() {
+        if obj_pos < stream_start
+            && verify_direct_stream_bounds(bytes, stream_start, len_val).is_some()
+        {
+            return Some(len_val);
+        }
+    }
+    None
 }
 
 pub(super) fn resolve_stream_length_hint(
@@ -525,11 +526,17 @@ pub(super) fn resolve_stream_length_hint(
     stream_start: usize,
     entries: &[(String, PdfObjValue)],
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
+    strict_table: &ParenJumpTable,
     int_index: &mut Option<IntObjIndex>,
 ) -> Option<usize> {
     match dict_get(entries, "/Length")? {
         PdfObjValue::Int(n) => usize::try_from(*n).ok(),
         PdfObjValue::Ref(lo, lg) => {
+            let idx =
+                int_index.get_or_insert_with(|| build_eof_and_int_index(bytes, strict_table).1);
+            if let Some(u) = lookup_indexed_int_obj(idx, bytes, stream_start, *lo, *lg) {
+                return Some(u);
+            }
             if let Some(obj) = objects.get(&(*lo, *lg)) {
                 if let PdfObjValue::Int(n) = obj.val {
                     if let Ok(u) = usize::try_from(n) {
@@ -539,8 +546,7 @@ pub(super) fn resolve_stream_length_hint(
                     }
                 }
             }
-            let idx = int_index.get_or_insert_with(|| build_eof_and_int_index(bytes).1);
-            lookup_indexed_int_obj(idx, bytes, stream_start, *lo, *lg)
+            None
         }
         _ => None,
     }

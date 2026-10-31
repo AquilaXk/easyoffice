@@ -655,11 +655,11 @@ impl PdfSerializer {
                     )
                 })?;
                 let (val, mut next_p) = parsed_val.unwrap_or((PdfObjValue::Null, after_obj));
-                if indirect_val_has_spliced_encrypt(&val) {
+                if let Some(spliced_enc) = indirect_val_has_spliced_encrypt(&val) {
                     return Err(fail_corrupted_or_encrypted(
                         bytes,
                         p,
-                        has_encrypt,
+                        has_encrypt || spliced_enc,
                         "PDF 상호참조 딕셔너리 구조가 손상되었습니다.",
                     ));
                 }
@@ -688,6 +688,7 @@ impl PdfSerializer {
                         stream_start,
                         entries,
                         &objects,
+                        &paren_table,
                         &mut int_index,
                     );
                     let Some((stream_end, after_endstream)) =
@@ -769,11 +770,13 @@ impl PdfSerializer {
                     ));
                 };
                 let tr_has_enc = dict_has_non_null_key(&tr_entries, "/Encrypt");
-                if trailer_or_xref_has_spliced_encrypt(&tr_entries, tr_has_enc) {
+                if let Some(spliced_enc) =
+                    trailer_or_xref_has_spliced_encrypt(&tr_entries, tr_has_enc)
+                {
                     return Err(fail_corrupted_or_encrypted(
                         bytes,
                         p,
-                        has_encrypt || tr_has_enc,
+                        has_encrypt || tr_has_enc || spliced_enc,
                         "PDF trailer /ID 배열 구조가 손상되었습니다.",
                     ));
                 }

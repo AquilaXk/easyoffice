@@ -233,13 +233,27 @@ pub(crate) fn match_indirect_obj_header(bytes: &[u8], pos: usize, limit: usize) 
     parse_indirect_obj_header(bytes, pos, limit).map(|(_, _, end)| end)
 }
 
+pub(crate) fn is_line_eof_marker(bytes: &[u8], pos: usize) -> bool {
+    if pos + 5 > bytes.len() || &bytes[pos..pos + 5] != b"%%EOF" {
+        return false;
+    }
+    if pos + 5 < bytes.len() && !is_pdf_delim_or_ws(bytes[pos + 5]) {
+        return false;
+    }
+    let mut b = pos;
+    while b > 0 && matches!(bytes[b - 1], b' ' | b'\t') {
+        b -= 1;
+    }
+    b == 0 || matches!(bytes[b - 1], b'\n' | b'\r')
+}
+
 pub(crate) fn skip_pdf_ws_stopping_at_eof(bytes: &[u8], mut pos: usize, limit: usize) -> usize {
     let end = limit.min(bytes.len());
     while pos < end {
         if is_pdf_ws(bytes[pos]) {
             pos += 1;
         } else if bytes[pos] == b'%' {
-            if pos + 5 <= bytes.len() && &bytes[pos..pos + 5] == b"%%EOF" {
+            if is_line_eof_marker(bytes, pos) {
                 break;
             }
             while pos < end && bytes[pos] != b'\n' && bytes[pos] != b'\r' {
@@ -784,7 +798,7 @@ pub(crate) fn is_paren_reset_boundary(
     endobj_cache: &mut (usize, usize),
 ) -> Option<usize> {
     let len = bytes.len();
-    if i + 5 <= len && &bytes[i..i + 5] == b"%%EOF" {
+    if is_line_eof_marker(bytes, i) {
         return Some(i + 5);
     }
     if is_standalone_pdf_kw(bytes, i, b"endobj") {

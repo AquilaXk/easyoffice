@@ -546,6 +546,9 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
     )
   );
 
+  const nestedAdd33 = `=1+${"(1+".repeat(33)}1${")".repeat(33)}`;
+  const nestedParens64 = `=1+${"(".repeat(64)}1${")".repeat(64)}`;
+  const nestedParens65 = `=1+${"(".repeat(65)}1${")".repeat(65)}`;
   const romanSheet = offlineRpc.evaluate_sheet(
     JSON.stringify({
       sheet: "Main",
@@ -565,6 +568,18 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
         { sheet: "Main", cell: "=Missing!A1:A1" },
         { sheet: "Main", cell: "=Ⅰ분기!A1:A1" },
         { sheet: "Main", cell: "=2026분기!B2" },
+        { sheet: "Main", cell: "=2026\u{20000}!B2" },
+        { sheet: "Main", cell: "=1e999분기" },
+        { sheet: "Main", cell: "=(Ⅰ분기!A1:A1)" },
+        { sheet: "Main", cell: "=(Missing!A1:B2)" },
+        { sheet: "Main", cell: "=ROW((B3))" },
+        { sheet: "Main", cell: "=COLUMN((C4))" },
+        { sheet: "Main", cell: "=ROWS((A1:B3))" },
+        { sheet: "Main", cell: "=COLUMNS((A1:C2))" },
+        { sheet: "Main", cell: "=SUM((Ⅰ분기!A1:A1))" },
+        { sheet: "Main", cell: nestedAdd33 },
+        { sheet: "Main", cell: nestedParens64 },
+        { sheet: "Main", cell: nestedParens65 },
       ],
       cells: [
         { sheet: "Ⅰ분기", cell: "A1", value: "66" },
@@ -586,6 +601,18 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
     "#REF!",
     "#REF!",
     "66",
+    "#VALUE!",
+    "#VALUE!",
+    "#NUM!",
+    "66",
+    "#REF!",
+    "3",
+    "3",
+    "3",
+    "3",
+    "66",
+    "35",
+    "2",
     "#VALUE!",
   ]);
 
