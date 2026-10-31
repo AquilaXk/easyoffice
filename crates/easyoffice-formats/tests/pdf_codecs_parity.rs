@@ -440,4 +440,84 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
         parsed_np.pages[0].approval_stamp.as_deref(),
         Some("정위치스탬프")
     );
+
+    let tagged_dict_spoof_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (TaggedSpoof) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 120 >>\nstream\n",
+        "BT /Span << /MCID 0\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mIn0=\n>> BDC (Body) Tj EMC ET\n",
+        "endstream\nendobj\n",
+        "xref\n0 4\ntrailer << /Root 1 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(tagged_dict_spoof_pdf.as_bytes()),
+        Err(EasyOfficeError::SecurityViolation(_))
+    ));
+
+    let tagged_dict_valid_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (About /Encrypt Guide) /OpenAction << /S /URI /Title (SubIgnore) >> >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Resources << /Font << /F1 << /Type /Font >> >> >> >> endobj\n",
+        "3 0 obj << /Length 96 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td /Span << /Alt (a > b\nendstream\n) >> BDC (TaggedBody) Tj EMC ET\n",
+        "endstream\nendobj\n",
+        "xref\n0 4\ntrailer << /Root 1 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n"
+    );
+    let parsed_tagged = PdfSerializer::parse(tagged_dict_valid_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_tagged.title, "About /Encrypt Guide");
+    assert_eq!(parsed_tagged.pages.len(), 1);
+    assert_eq!(parsed_tagged.pages[0].body_text, "TaggedBody");
+
+    let ciphertext_paren_trailer_encrypt_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (CipherDoc) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 18 >>\nstream\n",
+        "cipher(text<bytes!\n",
+        "endstream\nendobj\n",
+        "xref\n0 4\ntrailer << /Root 1 0 R /Encrypt 9 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(ciphertext_paren_trailer_encrypt_pdf.as_bytes()),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let ciphertext_xref_stream_encrypt_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (CipherXRef) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 12 >>\nstream\n",
+        "cipher(open!\n",
+        "endstream\nendobj\n",
+        "4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 6 >>\nstream\n",
+        "xyz)00\n",
+        "endstream\nendobj\n",
+        "xref\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(ciphertext_xref_stream_encrypt_pdf.as_bytes()),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let cr_nonpage_spoof_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (CrSpoof) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 36 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
+        "endstream\nendobj\n",
+        "4 0 obj << /Type /CMap >>\nstream\r",
+        "begincmap\r%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mIn0=\rendcmap\r",
+        "endstream\nendobj\n",
+        "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(cr_nonpage_spoof_pdf.as_bytes()),
+        Err(EasyOfficeError::SecurityViolation(_))
+    ));
 }

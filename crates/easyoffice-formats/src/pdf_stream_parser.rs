@@ -475,3 +475,154 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
     }
     out
 }
+
+fn strip_ws(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+fn wrap_line_64_raw(line: &str) -> Vec<String> {
+    let chars: Vec<char> = line.chars().collect();
+    if chars.len() <= 64 {
+        return vec![line.to_string()];
+    }
+    chars.chunks(64).map(|c| c.iter().collect()).collect()
+}
+
+fn wrap_line_64_swift_trimmed(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= 64 {
+        return vec![trimmed.to_string()];
+    }
+    chars.chunks(64).map(|c| c.iter().collect()).collect()
+}
+
+fn expand_logical_pages_to_chunks(logical_pages: &[&str], mode: u8) -> Vec<String> {
+    const MAX_LINES_PER_PDF_PAGE: usize = 42;
+    let mut out = Vec::with_capacity(logical_pages.len());
+    for &text in logical_pages {
+        let lines: Vec<String> = match mode {
+            0 => text.split('\n').map(str::to_string).collect(),
+            1 => text.split('\n').flat_map(wrap_line_64_raw).collect(),
+            _ => text
+                .split('\n')
+                .flat_map(wrap_line_64_swift_trimmed)
+                .collect(),
+        };
+        if lines.len() <= MAX_LINES_PER_PDF_PAGE {
+            out.push(text.to_string());
+        } else {
+            for chunk in lines.chunks(MAX_LINES_PER_PDF_PAGE) {
+                out.push(chunk.join("\n"));
+            }
+        }
+    }
+    out
+}
+
+fn matches_pages_1to1(logical_pages: &[&str], page_body_texts: &[&str]) -> bool {
+    if logical_pages.len() == page_body_texts.len() {
+        return logical_pages
+            .iter()
+            .zip(page_body_texts.iter())
+            .all(|(jt, bt)| strip_ws(jt) == strip_ws(bt));
+    }
+    for mode in [0u8, 1u8, 2u8] {
+        let chunks = expand_logical_pages_to_chunks(logical_pages, mode);
+        if chunks.len() == page_body_texts.len()
+            && chunks
+                .iter()
+                .zip(page_body_texts.iter())
+                .all(|(ct, bt)| strip_ws(ct) == strip_ws(bt))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn extract_validated_page_text(p_entries: &[(String, crate::StrictJsonValue)]) -> Option<&str> {
+    let ext_val = crate::StrictJsonValue::get_field(p_entries, "extractedText");
+    let body_val = crate::StrictJsonValue::get_field(p_entries, "bodyText");
+    let ext_str = match ext_val {
+        Some(v) => Some(v.as_str()?),
+        None => None,
+    };
+    let body_str = match body_val {
+        Some(v) => Some(v.as_str()?),
+        None => None,
+    };
+    if let (Some(a), Some(b)) = (ext_str, body_str) {
+        if a != b {
+            return None;
+        }
+    }
+    ext_str.or(body_str)
+}
+
+pub(crate) fn validate_pdf_trailer_json(
+    decoded: &str,
+    expected_title: &str,
+    page_body_texts: &[&str],
+    parsed_watermark: Option<&str>,
+) -> Option<String> {
+    let Ok(root) = crate::StrictJsonValue::parse(decoded) else {
+        return None;
+    };
+    let root_entries = root.as_object()?;
+    let json_title = crate::StrictJsonValue::get_str(root_entries, "title")?;
+    let normalized_json_title = json_title.replace(['\r', '\n'], " ");
+    if json_title != expected_title && normalized_json_title != expected_title {
+        return None;
+    }
+    match crate::StrictJsonValue::get_field(root_entries, "watermarkText") {
+        Some(crate::StrictJsonValue::Str(wm)) => {
+            if wm.is_empty() {
+                if parsed_watermark.is_some() {
+                    return None;
+                }
+            } else if parsed_watermark != Some(wm.as_str()) {
+                return None;
+            }
+        }
+        Some(crate::StrictJsonValue::Null) | None => {
+            if parsed_watermark.is_some() {
+                return None;
+            }
+        }
+        Some(_) => return None,
+    }
+    let root_body_field = crate::StrictJsonValue::get_field(root_entries, "bodyText");
+    if let Some(pages_val) = crate::StrictJsonValue::get_field(root_entries, "pages") {
+        let page_items = pages_val.as_array()?;
+        if page_items.is_empty() || page_items.len() > page_body_texts.len() {
+            return None;
+        }
+        let mut json_page_texts = Vec::with_capacity(page_items.len());
+        for item in page_items {
+            let p_entries = item.as_object()?;
+            let text = extract_validated_page_text(p_entries)?;
+            json_page_texts.push(text);
+        }
+        if let Some(rb) = root_body_field {
+            let rb_str = rb.as_str()?;
+            if strip_ws(rb_str) != strip_ws(&json_page_texts.join("\n")) {
+                return None;
+            }
+        }
+        if matches_pages_1to1(&json_page_texts, page_body_texts) {
+            return Some(json_title.to_string());
+        }
+        return None;
+    }
+    if let Some(rb) = root_body_field {
+        let body_str = rb.as_str()?;
+        if matches_pages_1to1(&[body_str], page_body_texts) {
+            return Some(json_title.to_string());
+        }
+    }
+    None
+}

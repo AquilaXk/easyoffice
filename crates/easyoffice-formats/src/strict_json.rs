@@ -62,9 +62,6 @@ impl StrictJsonValue {
         let Self::Number(n) = self else {
             return None;
         };
-        if let Ok(v) = n.parse::<u64>() {
-            return Some(v);
-        }
         let (is_neg, unsigned_str) = match n.strip_prefix('-') {
             Some(rest) => (true, rest),
             None => (false, n.as_str()),
@@ -82,9 +79,19 @@ impl StrictJsonValue {
             }
             None => (mantissa, ""),
         };
-        if int_part.is_empty() || !int_part.bytes().all(|b| b.is_ascii_digit()) {
+        if int_part.is_empty()
+            || !int_part.bytes().all(|b| b.is_ascii_digit())
+            || (int_part.len() > 1 && int_part.starts_with('0'))
+        {
             return None;
         }
+        if !is_neg && frac_part.is_empty() && exp_opt.is_none() {
+            return int_part.parse::<u64>().ok();
+        }
+        let int_bytes = int_part.as_bytes();
+        let frac_bytes = frac_part.as_bytes();
+        let total_digits = int_bytes.len().checked_add(frac_bytes.len())?;
+        let exp_clamp = i64::try_from(total_digits.saturating_add(25)).unwrap_or(i64::MAX / 4);
         let exp: i64 = match exp_opt {
             Some(exp_raw) => {
                 let (exp_neg, exp_digits) = if let Some(r) = exp_raw.strip_prefix('-') {
@@ -100,8 +107,8 @@ impl StrictJsonValue {
                 let mut acc = 0i64;
                 for b in exp_digits.bytes() {
                     acc = (acc.saturating_mul(10)).saturating_add(i64::from(b - b'0'));
-                    if acc > 1_000_000 {
-                        acc = 1_000_000;
+                    if acc > exp_clamp {
+                        acc = exp_clamp;
                         break;
                     }
                 }
@@ -113,25 +120,34 @@ impl StrictJsonValue {
             }
             None => 0,
         };
-        let mut raw_digits: Vec<u8> = Vec::with_capacity(int_part.len() + frac_part.len());
-        raw_digits.extend_from_slice(int_part.as_bytes());
-        raw_digits.extend_from_slice(frac_part.as_bytes());
-        let Some(first_nz) = raw_digits.iter().position(|&b| b != b'0') else {
+        let digit_at = |idx: usize| -> u8 {
+            if idx < int_bytes.len() {
+                int_bytes[idx]
+            } else {
+                frac_bytes[idx - int_bytes.len()]
+            }
+        };
+        let Some(first_nz) = (0..total_digits).find(|&idx| digit_at(idx) != b'0') else {
             return Some(0);
         };
         if is_neg {
             return None;
         }
-        let last_nz = raw_digits.iter().rposition(|&b| b != b'0')?;
-        let trailing_zeros = (raw_digits.len() - 1 - last_nz) as i64;
-        let sig = &raw_digits[first_nz..=last_nz];
-        let scale = exp - (frac_part.len() as i64) + trailing_zeros;
-        if scale < 0 || (sig.len() as i64) + scale > 20 {
+        let last_nz = (first_nz..total_digits)
+            .rev()
+            .find(|&idx| digit_at(idx) != b'0')?;
+        let sig_len = last_nz - first_nz + 1;
+        let trailing_zeros = i64::try_from(total_digits - 1 - last_nz).ok()?;
+        let frac_len = i64::try_from(frac_bytes.len()).ok()?;
+        let scale = exp.checked_sub(frac_len)?.checked_add(trailing_zeros)?;
+        if scale < 0 || sig_len > 20 || (sig_len as i64) + scale > 20 {
             return None;
         }
         let mut val = 0u64;
-        for &b in sig {
-            val = val.checked_mul(10)?.checked_add(u64::from(b - b'0'))?;
+        for idx in first_nz..=last_nz {
+            val = val
+                .checked_mul(10)?
+                .checked_add(u64::from(digit_at(idx) - b'0'))?;
         }
         for _ in 0..scale {
             val = val.checked_mul(10)?;
@@ -497,6 +513,14 @@ mod tests {
         assert_eq!(StrictJsonValue::parse("1.5").unwrap().as_u64(), None);
         assert_eq!(StrictJsonValue::parse("-1").unwrap().as_u64(), None);
         assert_eq!(StrictJsonValue::parse("1e25").unwrap().as_u64(), None);
+        assert_eq!(StrictJsonValue::Number("+42".to_string()).as_u64(), None);
+        assert_eq!(StrictJsonValue::Number("007".to_string()).as_u64(), None);
+        let huge_overflow = format!("0.{}1e999999999", "0".repeat(999_999));
+        assert_eq!(StrictJsonValue::Number(huge_overflow).as_u64(), None);
+        let huge_fraction = format!("1{}e-999999999", "0".repeat(1_000_000));
+        assert_eq!(StrictJsonValue::Number(huge_fraction).as_u64(), None);
+        let huge_exact_five = format!("0.{}5e1000001", "0".repeat(1_000_000));
+        assert_eq!(StrictJsonValue::Number(huge_exact_five).as_u64(), Some(5));
 
         let many_pairs: String = (0..5_000)
             .map(|i| format!("\"k{i}\":{i}"))

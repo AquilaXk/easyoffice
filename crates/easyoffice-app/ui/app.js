@@ -466,11 +466,126 @@
     return cells;
   }
 
-  function workbookHasAnyFormula() {
-    return Object.keys(sheetDataStore).some((shName) => {
-      const snap = sheetDataStore[shName] || {};
+  function sheetMapHasAnyFormula(sheetsMap) {
+    return Object.keys(sheetsMap || {}).some((shName) => {
+      const snap = sheetsMap[shName] || {};
       return Object.keys(snap).some((ref) => (snap[ref]?.formula || "").startsWith("="));
     });
+  }
+
+  function extractEvaluatedTargetValue(
+    rpcRes,
+    targetValues,
+    batchValues,
+    target,
+    idx,
+    totalTargets
+  ) {
+    if (targetValues && idx < targetValues.length) {
+      return targetValues[idx];
+    }
+    if (batchValues) {
+      return (
+        batchValues[target.key] ??
+        batchValues[target.sheet.toUpperCase() + "!" + target.cell.toUpperCase()]
+      );
+    }
+    if (totalTargets === 1 && rpcRes && rpcRes.value !== undefined) {
+      return rpcRes.value;
+    }
+    return undefined;
+  }
+
+  async function computeEvaluatedSheetStore(baseSheets, defaultSheet, extraTarget = null) {
+    const sheets = JSON.parse(JSON.stringify(baseSheets || {}));
+    const cells = [];
+    const formulaTargets = [];
+    Object.keys(sheets).forEach((shName) => {
+      const snap = sheets[shName] || {};
+      Object.keys(snap).forEach((ref) => {
+        const entry = snap[ref];
+        if (!entry) return;
+        if ((entry.formula || "").startsWith("=")) {
+          formulaTargets.push({ sheet: shName, cell: ref, key: shName + "!" + ref });
+        }
+        if (entry.formula || entry.value) {
+          const val = entry.formula
+            ? entry.formula
+            : normalizeFormattedNumericCell(entry.value);
+          cells.push({ sheet: shName, cell: ref, value: val });
+        }
+      });
+    });
+
+    const rpcTargets = [];
+    if (extraTarget) {
+      rpcTargets.push({
+        sheet: extraTarget.sheet,
+        cell: extraTarget.cell,
+        key: extraTarget.sheet + "!" + extraTarget.cell,
+      });
+    }
+    formulaTargets.forEach((ft) => {
+      if (!extraTarget || ft.sheet !== extraTarget.sheet || ft.cell !== extraTarget.cell) {
+        rpcTargets.push(ft);
+      }
+    });
+
+    if (rpcTargets.length === 0) {
+      return { sheets, extraValue: "" };
+    }
+
+    const rpcPayload = JSON.stringify({
+      sheet: defaultSheet,
+      sheets: Object.keys(sheets),
+      targets: rpcTargets.map(({ sheet, cell }) => ({ sheet, cell })),
+      cells,
+    });
+    const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
+    const targetValues = Array.isArray(rpcRes?.targetValues) ? rpcRes.targetValues : null;
+    const batchValues =
+      rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
+
+    rpcTargets.forEach((target, idx) => {
+      const rawVal = extractEvaluatedTargetValue(
+        rpcRes,
+        targetValues,
+        batchValues,
+        target,
+        idx,
+        rpcTargets.length
+      );
+      if (rawVal === undefined || rawVal === null) return;
+      const storedEntry = sheets[target.sheet]?.[target.cell];
+      if (storedEntry && (storedEntry.formula || "").startsWith("=")) {
+        storedEntry.value = String(rawVal);
+      }
+    });
+
+    let extraValue = "";
+    if (extraTarget) {
+      const rawExtra = extractEvaluatedTargetValue(
+        rpcRes,
+        targetValues,
+        batchValues,
+        rpcTargets[0],
+        0,
+        rpcTargets.length
+      );
+      if (rawExtra !== undefined && rawExtra !== null) {
+        extraValue = String(rawExtra);
+      } else if (rpcRes && rpcRes.value !== undefined && rpcRes.value !== null) {
+        extraValue = String(rpcRes.value);
+      } else {
+        extraValue = sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "";
+      }
+    }
+    return { sheets, extraValue };
+  }
+
+  function replaceLiveSheetDataStore(nextSheets) {
+    Object.keys(sheetDataStore).forEach((k) => delete sheetDataStore[k]);
+    Object.assign(sheetDataStore, nextSheets);
   }
 
   function updateSheetSelectionAndAggregates(cellRef) {
@@ -783,19 +898,26 @@
       const prev = workspaceUndoStack[workspaceUndoStack.length - 1];
       const currentSnap = captureWorkspaceSnapshot(Boolean(prev.isRibbon));
       const beforeSheetsJson = JSON.stringify(currentSnap.sheets || {});
+      const prevSheetsJson = JSON.stringify(prev.sheets || {});
+      let evaluatedSheets = null;
+      if (beforeSheetsJson !== prevSheetsJson && sheetMapHasAnyFormula(prev.sheets)) {
+        const evalRes = await trackSheetAsyncWork(
+          computeEvaluatedSheetStore(
+            prev.sheets,
+            prev.activeSheetName || activeSheetName,
+            null
+          )
+        );
+        evaluatedSheets = evalRes.sheets;
+      }
       if (prev.isRibbon === true) {
         await invokeIpc("undo_ribbon_command", "");
       }
       workspaceUndoStack.pop();
       workspaceRedoStack.push(currentSnap);
-      restoreWorkspaceSnapshot(prev);
-      const afterSheetsJson = JSON.stringify(sheetDataStore);
-      if (beforeSheetsJson !== afterSheetsJson && workbookHasAnyFormula()) {
-        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
-        if (activeModule === "SHEET") {
-          updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
-        }
-      }
+      restoreWorkspaceSnapshot(
+        evaluatedSheets ? { ...prev, sheets: evaluatedSheets } : prev
+      );
       if (fb) fb.textContent = "실행 취소 완료 (" + activeModule + ")";
     });
   }
@@ -811,19 +933,26 @@
       const next = workspaceRedoStack[workspaceRedoStack.length - 1];
       const currentSnap = captureWorkspaceSnapshot(Boolean(next.isRibbon));
       const beforeSheetsJson = JSON.stringify(currentSnap.sheets || {});
+      const nextSheetsJson = JSON.stringify(next.sheets || {});
+      let evaluatedSheets = null;
+      if (beforeSheetsJson !== nextSheetsJson && sheetMapHasAnyFormula(next.sheets)) {
+        const evalRes = await trackSheetAsyncWork(
+          computeEvaluatedSheetStore(
+            next.sheets,
+            next.activeSheetName || activeSheetName,
+            null
+          )
+        );
+        evaluatedSheets = evalRes.sheets;
+      }
       if (next.isRibbon === true) {
         await invokeIpc("redo_ribbon_command", "");
       }
       workspaceRedoStack.pop();
       workspaceUndoStack.push(currentSnap);
-      restoreWorkspaceSnapshot(next);
-      const afterSheetsJson = JSON.stringify(sheetDataStore);
-      if (beforeSheetsJson !== afterSheetsJson && workbookHasAnyFormula()) {
-        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
-        if (activeModule === "SHEET") {
-          updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
-        }
-      }
+      restoreWorkspaceSnapshot(
+        evaluatedSheets ? { ...next, sheets: evaluatedSheets } : next
+      );
       if (fb) fb.textContent = "다시 실행 완료 (" + activeModule + ")";
     });
   }
@@ -1226,7 +1355,7 @@
         const sizes = ["13px", "15px", "17px", "12px"];
         activeTd.style.fontSize = sizes[presetIdx];
       } else if (cmdId === "sheet-data-autosum" || cmdId === "sheet-data-fn-browser") {
-        void evaluateActiveSheetFormulaBar(false);
+        return evaluateActiveSheetFormulaBar(false);
       } else if (cmdId === "sheet-insert-table") {
         const tbody = document.querySelector("#pane-sheet tbody");
         if (tbody) {
@@ -1369,17 +1498,34 @@
         }
         throw err;
       }
+      try {
+        await applyRibbonDomSideEffects(cmdId, execRes);
+        await drainInFlightSheetWork();
+      } catch (sideEffectErr) {
+        const fbEl = document.getElementById("status-command-feedback");
+        const preservedFeedback = fbEl ? fbEl.textContent : "";
+        restoreWorkspaceSnapshot(preSnapshot);
+        try {
+          await invokeIpc("undo_ribbon_command", "");
+        } catch {
+          if (fbEl && preservedFeedback) {
+            fbEl.textContent = preservedFeedback;
+          }
+        }
+        if (fbEl && preservedFeedback) {
+          fbEl.textContent = preservedFeedback;
+        }
+        throw sideEffectErr;
+      }
       workspaceUndoStack.push(preSnapshot);
       if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
         workspaceUndoStack.shift();
       }
       workspaceRedoStack.length = 0;
-      applyRibbonDomSideEffects(cmdId, execRes);
-      await drainInFlightSheetWork();
       const fb = document.getElementById("status-command-feedback");
       if (fb && execRes && !options.skipFeedback) {
-        fb.textContent =
-          execRes.summary || (options.fallbackTitle ? "명령 실행: " + options.fallbackTitle : "");
+        const fallbackMsg = options.fallbackTitle ? "명령 실행: " + options.fallbackTitle : "";
+        fb.textContent = execRes.summary || fallbackMsg;
       }
       return execRes;
     });
@@ -1878,25 +2024,24 @@
       const batchValues =
         rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
       let updatedActiveSheet = false;
-      formulaTargets.forEach(({ sheet, cell: ref, key }, idx) => {
-        let rawVal;
-        if (targetValues && idx < targetValues.length) {
-          rawVal = targetValues[idx];
-        } else if (batchValues) {
-          rawVal =
-            batchValues[key] ?? batchValues[sheet.toUpperCase() + "!" + ref.toUpperCase()];
-        } else if (formulaTargets.length === 1 && rpcRes && rpcRes.value !== undefined) {
-          rawVal = rpcRes.value;
-        }
+      formulaTargets.forEach((target, idx) => {
+        const rawVal = extractEvaluatedTargetValue(
+          rpcRes,
+          targetValues,
+          batchValues,
+          target,
+          idx,
+          formulaTargets.length
+        );
         if (rawVal === undefined || rawVal === null) return;
         const value = String(rawVal);
-        const storedEntry = sheetDataStore[sheet]?.[ref];
+        const storedEntry = sheetDataStore[target.sheet]?.[target.cell];
         if (storedEntry && (storedEntry.formula || "").startsWith("=")) {
           storedEntry.value = value;
         }
-        if (activeSheetName === sheet) {
+        if (activeSheetName === target.sheet) {
           updatedActiveSheet = true;
-          const td = document.querySelector('#pane-sheet td[data-cell="' + ref + '"]');
+          const td = document.querySelector('#pane-sheet td[data-cell="' + target.cell + '"]');
           const focusSt = td ? sheetCellFocusState.get(td) : null;
           if (!td || !(td.dataset.formula || "").startsWith("=")) return;
           if (!forceFocusedDisplay && (focusSt?.userEdited || focusSt?.snapshotPushed)) return;
@@ -1927,73 +2072,39 @@
       const targetSheet = activeSheetName;
       const targetCellRef = activeSheetCellRef;
       const preSnapshot = recordUndo ? captureWorkspaceSnapshot(false) : null;
+      sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+      const candidateSheets = JSON.parse(JSON.stringify(sheetDataStore));
+      if (!candidateSheets[targetSheet]) {
+        candidateSheets[targetSheet] = {};
+      }
       const rawFormula = input.value.trim();
-      const activeTd = document.querySelector(
-        '#pane-sheet td[data-cell="' + targetCellRef + '"]'
-      );
-      try {
-        if (activeTd) {
-          if (rawFormula.startsWith("=")) {
-            activeTd.dataset.formula = rawFormula;
-          } else {
-            delete activeTd.dataset.formula;
-            activeTd.textContent = rawFormula;
-          }
-          syncSheetCellFocusBaseline(activeTd, true);
-          refreshFocusedSheetCellPendingSnapshot();
-          await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
-          commitDeferredUndoSnapshot(preSnapshot);
-          if (epoch !== sheetSnapshotEpoch) return;
-          const storedVal = sheetDataStore[targetSheet]?.[targetCellRef]?.value;
-          let computedValue = "";
-          if (storedVal !== undefined && storedVal !== "") {
-            computedValue = storedVal;
-          } else if (activeSheetName === targetSheet) {
-            computedValue = (activeTd.textContent || "").trim();
-          }
-          if (activeSheetName === targetSheet) {
-            out.textContent = "결과 (" + targetCellRef + "): " + computedValue;
-            updateSheetSelectionAndAggregates(activeSheetCellRef || targetCellRef);
-          }
-          return;
-        }
-
-        const cells = buildWorkbookCellsArray().filter(
-          (c) => !(c.sheet === targetSheet && c.cell === targetCellRef)
-        );
-        cells.push({ sheet: targetSheet, cell: targetCellRef, value: rawFormula });
-        if (!sheetDataStore[targetSheet]) sheetDataStore[targetSheet] = {};
-        sheetDataStore[targetSheet][targetCellRef] = {
-          value: rawFormula.startsWith("=") ? "" : rawFormula,
-          formula: rawFormula.startsWith("=") ? rawFormula : "",
-        };
-        const rpcRes = await invokeIpc(
-          "evaluate_sheet",
-          JSON.stringify({
-            sheet: targetSheet,
-            sheets: Object.keys(sheetDataStore),
-            expr: targetCellRef,
-            cells,
-          })
-        );
-        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
-        commitDeferredUndoSnapshot(preSnapshot);
-        if (epoch !== sheetSnapshotEpoch) return;
-        if (activeSheetName === targetSheet) {
-          out.textContent = "결과 (" + targetCellRef + "): " + rpcRes.value;
-          updateSheetSelectionAndAggregates(activeSheetCellRef || targetCellRef);
-        }
-      } catch (err) {
-        if (preSnapshot) {
-          restoreWorkspaceSnapshot(preSnapshot);
-        }
-        throw err;
+      const isFormula = rawFormula.startsWith("=");
+      candidateSheets[targetSheet][targetCellRef] = {
+        value: isFormula ? "" : rawFormula,
+        formula: isFormula ? rawFormula : "",
+      };
+      const evaluated = await computeEvaluatedSheetStore(candidateSheets, targetSheet, {
+        sheet: targetSheet,
+        cell: targetCellRef,
+      });
+      if (epoch !== sheetSnapshotEpoch) return;
+      commitDeferredUndoSnapshot(preSnapshot);
+      replaceLiveSheetDataStore(evaluated.sheets);
+      restoreDomSheetCells(activeSheetName);
+      refreshFocusedSheetCellPendingSnapshot();
+      if (activeSheetName === targetSheet) {
+        out.textContent = "결과 (" + targetCellRef + "): " + evaluated.extraValue;
+        updateSheetSelectionAndAggregates(activeSheetCellRef || targetCellRef);
       }
     };
+    const drainThenRun = async () => {
+      await drainInFlightSheetWork();
+      return trackSheetAsyncWork(run());
+    };
     if (recordUndo) {
-      return enqueueWorkspaceHistoryOp(() => trackSheetAsyncWork(run()));
+      return enqueueWorkspaceHistoryOp(drainThenRun);
     }
-    return trackSheetAsyncWork(run());
+    return drainThenRun();
   }
 
   function buildPreEditSnapshotForCell(td, st) {
@@ -2315,10 +2426,11 @@
 
       if (targetScope === "SHEET") {
         sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+        const candidateSheets = JSON.parse(JSON.stringify(sheetDataStore));
         const plainEntries = [];
         const formulaJobs = [];
-        Object.keys(sheetDataStore).forEach((shName) => {
-          const snap = sheetDataStore[shName] || {};
+        Object.keys(candidateSheets).forEach((shName) => {
+          const snap = candidateSheets[shName] || {};
           Object.keys(snap).forEach((ref) => {
             const entry = snap[ref];
             if (!entry) return;
@@ -2344,7 +2456,6 @@
           Promise.all(plainEntries.map((entry) => invokeIpc("scrub_pii", entry.value))),
           Promise.all(literalInputs.map((seg) => invokeIpc("scrub_pii", seg.text))),
         ]);
-        commitDeferredUndoSnapshot(preSnapshot);
         plainResults.forEach((res, idx) => {
           if (res && typeof res.scrubbedText === "string") {
             const count = Number(res.totalMasked || 0);
@@ -2369,18 +2480,27 @@
           });
           if (changed) {
             job.entry.formula = job.segments
-              .map((seg) =>
-                seg.isLiteral ? '"' + seg.text.replaceAll('"', '""') + '"' : seg.text
-              )
+              .map((seg) => {
+                if (seg.isLiteral) {
+                  return '"' + seg.text.replaceAll('"', '""') + '"';
+                }
+                return seg.text;
+              })
               .join("");
             job.entry.value = "";
           }
         });
+        let nextSheets = candidateSheets;
+        if (sheetMapHasAnyFormula(candidateSheets)) {
+          const evaluated = await trackSheetAsyncWork(
+            computeEvaluatedSheetStore(candidateSheets, activeSheetName, null)
+          );
+          nextSheets = evaluated.sheets;
+        }
+        commitDeferredUndoSnapshot(preSnapshot);
+        replaceLiveSheetDataStore(nextSheets);
         restoreDomSheetCells(activeSheetName);
         refreshFocusedSheetCellPendingSnapshot();
-        if (workbookHasAnyFormula()) {
-          await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
-        }
         updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
       } else if (targetScope === "SLIDE") {
         const fields = [];

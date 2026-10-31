@@ -18,35 +18,19 @@ impl WorkbookEngine {
         Self { sheets: Vec::new() }
     }
 
-    fn unquote_sheet_token(s: &str) -> Option<String> {
-        if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
-            Some(s[1..s.len() - 1].replace("''", "'"))
-        } else {
-            None
+    pub fn canonical_sheet_key(raw: &str) -> String {
+        let mut cur = raw.trim().to_string();
+        while cur.len() >= 2 && cur.starts_with('\'') && cur.ends_with('\'') {
+            cur = cur[1..cur.len() - 1].replace("''", "'");
         }
+        cur.make_ascii_uppercase();
+        cur
     }
 
     pub fn is_same_sheet_identity(a: &str, b: &str) -> bool {
-        let ta = a.trim();
-        let tb = b.trim();
-        if ta.is_empty() || tb.is_empty() {
-            return false;
-        }
-        if ta.eq_ignore_ascii_case(tb) {
-            return true;
-        }
-        let ua = Self::unquote_sheet_token(ta);
-        let ub = Self::unquote_sheet_token(tb);
-        if ua.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(tb)) {
-            return true;
-        }
-        if ub.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(ta)) {
-            return true;
-        }
-        match (ua, ub) {
-            (Some(sa), Some(sb)) => sa.eq_ignore_ascii_case(&sb),
-            _ => false,
-        }
+        let ka = Self::canonical_sheet_key(a);
+        let kb = Self::canonical_sheet_key(b);
+        !ka.is_empty() && ka == kb
     }
 
     fn find_sheet_index(&self, name: &str) -> Option<usize> {
@@ -1577,6 +1561,32 @@ mod tests {
         assert_eq!(
             wb.evaluate_cell("없는시트", "A1"),
             EvaluatedCellValue::Error(FormulaError::Ref)
+        );
+        assert!(WorkbookEngine::is_same_sheet_identity(
+            "특수시트",
+            "'특수시트'"
+        ));
+        assert!(WorkbookEngine::is_same_sheet_identity(
+            "'특수시트'",
+            "'''특수시트'''"
+        ));
+        assert!(WorkbookEngine::is_same_sheet_identity(
+            "특수시트",
+            "'''특수시트'''"
+        ));
+        assert!(!WorkbookEngine::is_same_sheet_identity("ß", "SS"));
+
+        let mut wb_rev = WorkbookEngine::new();
+        wb_rev.add_sheet("특수시트");
+        wb_rev.add_sheet("'특수시트'");
+        wb_rev.set_cell("특수시트", "A1", "250").unwrap();
+        wb_rev.add_sheet("Sheet1");
+        wb_rev
+            .set_cell("Sheet1", "B2", "='''특수시트'''!A1+50")
+            .unwrap();
+        assert_eq!(
+            wb_rev.evaluate_cell("Sheet1", "B2"),
+            EvaluatedCellValue::Number(300.0)
         );
     }
 }

@@ -40,6 +40,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   ".github/workflows/release.yml",
   "scripts/webui-dom-harness.mjs",
   "scripts/test-webui-behavior.mjs",
+  "scripts/test-webui-sheet-atomicity.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)

@@ -35,31 +35,31 @@
     return trimmed || fallback;
   }
 
-  function unquoteSheetTokenStrictJs(rawToken) {
-    const trimmed = String(rawToken ?? "").trim();
-    if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
-      return trimmed.slice(1, -1).replaceAll("''", "'");
+  function asciiUpperJs(str) {
+    return String(str ?? "").replaceAll(/[a-z]/g, (c) =>
+      String.fromCodePoint(c.codePointAt(0) - 32)
+    );
+  }
+
+  function canonicalSheetKeyJs(rawToken) {
+    let cur = String(rawToken ?? "").trim();
+    while (cur.length >= 2 && cur.startsWith("'") && cur.endsWith("'")) {
+      cur = cur.slice(1, -1).replaceAll("''", "'");
     }
-    return null;
+    return asciiUpperJs(cur);
   }
 
   function isSameSheetIdentityJs(a, b) {
-    const ta = String(a ?? "").trim();
-    const tb = String(b ?? "").trim();
-    if (!ta || !tb) return false;
-    if (ta.toUpperCase() === tb.toUpperCase()) return true;
-    const ua = unquoteSheetTokenStrictJs(ta);
-    const ub = unquoteSheetTokenStrictJs(tb);
-    if (ua !== null && ua.toUpperCase() === tb.toUpperCase()) return true;
-    if (ub !== null && ub.toUpperCase() === ta.toUpperCase()) return true;
-    return ua !== null && ub !== null && ua.toUpperCase() === ub.toUpperCase();
+    const ka = canonicalSheetKeyJs(a);
+    const kb = canonicalSheetKeyJs(b);
+    return ka.length > 0 && ka === kb;
   }
 
   function resolveCanonicalSheetUpper(knownSheets, rawName) {
-    const trimmed = String(rawName ?? "").trim();
-    if (!trimmed) return null;
+    const targetKey = canonicalSheetKeyJs(rawName);
+    if (!targetKey) return null;
     for (const stored of knownSheets) {
-      if (isSameSheetIdentityJs(stored, trimmed)) return stored.toUpperCase();
+      if (canonicalSheetKeyJs(stored) === targetKey) return targetKey;
     }
     return null;
   }
@@ -69,7 +69,7 @@
     const existing = resolveCanonicalSheetUpper(knownSheets, trimmed);
     if (existing) return existing;
     knownSheets.push(trimmed);
-    return trimmed.toUpperCase();
+    return canonicalSheetKeyJs(trimmed);
   }
 
   function collectRangeNumericValues(startRef, endRef, cellValues, canonicalSheetUpper) {
@@ -138,57 +138,85 @@
     return String(Math.round(res * 100) / 100);
   }
 
+  const FORMULA_ERROR_CODES = new Set(["#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!", "#ERROR!", "#CYCLE!"]);
+
   function maskFormulaLiteralsUpper(src) {
     const literals = [];
+    const sheetTokens = [];
     let out = "";
     let i = 0;
     while (i < src.length) {
-      if (src[i] !== '"') {
-        out += src[i].toUpperCase();
+      const ch = src[i];
+      if (ch === "\uE000" || ch === "\uE001" || ch === "\uE002") return null;
+      if (ch === "'" || ch === '"') {
+        const quote = ch;
         i += 1;
+        let buf = "";
+        let closed = false;
+        while (i < src.length) {
+          if (src[i] === quote) {
+            if (i + 1 < src.length && src[i + 1] === quote) {
+              buf += quote;
+              i += 2;
+              continue;
+            }
+            i += 1;
+            closed = true;
+            break;
+          }
+          buf += src[i];
+          i += 1;
+        }
+        if (!closed) return null;
+        if (quote === '"') {
+          out += "\uE000" + literals.length + "\uE001";
+          literals.push(buf);
+        } else {
+          out += "\uE002" + sheetTokens.length + "\uE001";
+          sheetTokens.push(buf);
+        }
         continue;
       }
+      out += asciiUpperJs(ch);
       i += 1;
-      let lit = "";
-      let closed = false;
-      while (i < src.length) {
-        if (src[i] === '"') {
-          if (i + 1 < src.length && src[i + 1] === '"') {
-            lit += '"';
-            i += 2;
-            continue;
-          }
-          i += 1;
-          closed = true;
-          break;
-        }
-        lit += src[i];
-        i += 1;
-      }
-      if (!closed) return null;
-      out += "\uE000" + literals.length + "\uE001";
-      literals.push(lit);
     }
-    return { masked: out, literals };
+    return { masked: out, literals, sheetTokens };
   }
 
-  function evalConcatSegment(seg, literals, workbook, currentSheetUpper, currentCellRef) {
+  function resolveMaskedSheetKey(rawShToken, sheetTokens, knownSheets) {
+    const shMask = /^\uE002(\d+)\uE001$/.exec(rawShToken);
+    if (shMask) {
+      const idx = Number(shMask[1]);
+      if (idx >= sheetTokens.length) return null;
+      return resolveCanonicalSheetUpper(knownSheets, sheetTokens[idx]);
+    }
+    return resolveCanonicalSheetUpper(knownSheets, rawShToken);
+  }
+
+  function evalConcatSegment(seg, literals, sheetTokens, workbook, currentSheetUpper, currentCellRef) {
     const litMatch = /^\uE000(\d+)\uE001$/.exec(seg);
-    if (litMatch) return literals[Number(litMatch[1])];
-    const crossMatch = /^('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)$/.exec(seg);
+    if (litMatch) {
+      const idx = Number(litMatch[1]);
+      return idx < literals.length
+        ? { value: literals[idx], isError: false }
+        : { value: "#ERROR!", isError: true };
+    }
+    const crossMatch = /^(\uE002\d+\uE001|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)$/.exec(seg);
     if (crossMatch) {
-      const shKey = resolveCanonicalSheetUpper(workbook.knownSheets, crossMatch[1]);
-      if (!shKey) return "#REF!";
-      return String(workbook.values[shKey + "!" + crossMatch[2]] ?? "");
+      const shKey = resolveMaskedSheetKey(crossMatch[1], sheetTokens, workbook.knownSheets);
+      if (!shKey) return { value: "#REF!", isError: true };
+      const v = String(workbook.values[shKey + "!" + crossMatch[2]] ?? "");
+      return { value: v, isError: FORMULA_ERROR_CODES.has(v) };
     }
     if (/^[A-Z]+\d+$/.test(seg)) {
-      return String(workbook.values[currentSheetUpper + "!" + seg] ?? "");
+      const v = String(workbook.values[currentSheetUpper + "!" + seg] ?? "");
+      return { value: v, isError: FORMULA_ERROR_CODES.has(v) };
     }
-    const restored = seg.replaceAll(
-      /\uE000(\d+)\uE001/g,
-      (_, idx) => '"' + literals[Number(idx)].replaceAll('"', '""') + '"'
-    );
-    return evaluateFormulaExpression("=" + restored, workbook, currentSheetUpper, currentCellRef);
+    const restored = seg
+      .replaceAll(/\uE000(\d+)\uE001/g, (_, idx) => '"' + (literals[Number(idx)] ?? "").replaceAll('"', '""') + '"')
+      .replaceAll(/\uE002(\d+)\uE001/g, (_, idx) => "'" + (sheetTokens[Number(idx)] ?? "").replaceAll("'", "''") + "'");
+    const subVal = evaluateFormulaExpression("=" + restored, workbook, currentSheetUpper, currentCellRef);
+    return { value: subVal, isError: FORMULA_ERROR_CODES.has(subVal) };
   }
 
   function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {
@@ -201,7 +229,7 @@
     }
     const maskedRes = maskFormulaLiteralsUpper(clean.slice(1).trim());
     if (!maskedRes) return "#ERROR!";
-    const { literals } = maskedRes;
+    const { literals, sheetTokens } = maskedRes;
     const body = maskedRes.masked
       .replaceAll(/\bROW\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
         String(parseCellRefParts(ref || currentCellRef || "A1").row)
@@ -210,27 +238,30 @@
         String(parseCellRefParts(ref || currentCellRef || "A1").col + 1)
       );
     const singleLit = /^\uE000(\d+)\uE001$/.exec(body);
-    if (singleLit) return literals[Number(singleLit[1])];
+    if (singleLit) {
+      const idx = Number(singleLit[1]);
+      return idx < literals.length ? literals[idx] : "#ERROR!";
+    }
     if (body.includes("&")) {
       const parts = body.split("&").map((s) => s.trim());
       if (parts.some((p) => !p)) return "#ERROR!";
       let joined = "";
       for (const part of parts) {
-        const val = evalConcatSegment(part, literals, workbook, currentSheetUpper, currentCellRef);
-        if (val.startsWith("#")) return val;
-        joined += val;
+        const res = evalConcatSegment(part, literals, sheetTokens, workbook, currentSheetUpper, currentCellRef);
+        if (res.isError) return res.value;
+        joined += res.value;
       }
       return joined;
     }
     const rangeMatch =
-      /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
+      /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:(\uE002\d+\uE001|[^\s!+\-*/^&=<>(),:]+)!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
         body
       );
     if (rangeMatch) {
       const rangeSheetUpper =
         rangeMatch[2] === undefined
           ? currentSheetUpper
-          : resolveCanonicalSheetUpper(knownSheets, rangeMatch[2]);
+          : resolveMaskedSheetKey(rangeMatch[2], sheetTokens, knownSheets);
       if (!rangeSheetUpper) return "#REF!";
       const vals = collectRangeNumericValues(
         rangeMatch[3],
@@ -242,9 +273,9 @@
     }
     let hasMissingRef = false;
     const withCrossSheet = body.replaceAll(
-      /('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)\b/g,
+      /(\uE002\d+\uE001|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)\b/g,
       (_, shToken, ref) => {
-        const shKey = resolveCanonicalSheetUpper(knownSheets, shToken);
+        const shKey = resolveMaskedSheetKey(shToken, sheetTokens, knownSheets);
         if (!shKey) {
           hasMissingRef = true;
           return "#REF!";
@@ -252,7 +283,7 @@
         const raw = String(values[shKey + "!" + ref] ?? "")
           .replaceAll(",", "")
           .trim();
-        if (raw.startsWith("#")) {
+        if (FORMULA_ERROR_CODES.has(raw)) {
           hasMissingRef = true;
           return raw;
         }
@@ -284,13 +315,28 @@
     throw new Error("InvalidArgument: JSON 셀 'value'는 스칼라여야 합니다.");
   }
 
+  function resolveDefaultSheetFromDocJs(doc) {
+    if (doc.sheet !== undefined && doc.sheet !== null && typeof doc.sheet !== "string") {
+      throw new Error("InvalidArgument: JSON 'sheet' 필드는 문자열이어야 합니다.");
+    }
+    const explicitTop = String(doc.sheet ?? "").trim();
+    if (explicitTop) return explicitTop;
+    if (doc.sheets !== undefined) {
+      if (!Array.isArray(doc.sheets)) {
+        throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
+      }
+      for (const s of doc.sheets) {
+        if (typeof s !== "string") {
+          throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
+        }
+        if (s.trim()) return s.trim();
+      }
+    }
+    return "Sheet1";
+  }
+
   function buildLocalWorkbookFromJson(doc, defaultSheet, seedDefaults) {
     const knownSheets = [];
-    if (doc.sheets === undefined) {
-      ensureKnownSheetUpper(knownSheets, "Sheet1");
-      ensureKnownSheetUpper(knownSheets, "Sheet2");
-    }
-    ensureKnownSheetUpper(knownSheets, defaultSheet);
     if (doc.sheets !== undefined) {
       if (!Array.isArray(doc.sheets)) {
         throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
@@ -301,6 +347,10 @@
         }
         if (s.trim()) ensureKnownSheetUpper(knownSheets, s.trim());
       }
+    } else {
+      ensureKnownSheetUpper(knownSheets, "Sheet1");
+      ensureKnownSheetUpper(knownSheets, "Sheet2");
+      ensureKnownSheetUpper(knownSheets, defaultSheet);
     }
     if (doc.cells !== undefined && !Array.isArray(doc.cells)) {
       throw new Error("InvalidArgument: JSON 'cells' 필드는 배열이어야 합니다.");
@@ -478,26 +528,15 @@
         return { len: 11, replacement: "010-****-****" };
       }
     }
-    if (idx + 3 <= str.length && str.startsWith("02", idx) && (str[idx + 2] === "-" || str[idx + 2] === " ")) {
-      const sep = str[idx + 2];
-      const pMid = consumeDigitsJs(str, idx + 3, 3, 4);
+    const landlineMatch = /^(02|0[3-6][1-5])([-\s])/.exec(str.slice(idx, idx + 4));
+    if (landlineMatch) {
+      const area = landlineMatch[1];
+      const sep = landlineMatch[2];
+      const pMid = consumeDigitsJs(str, idx + area.length + 1, 3, 4);
       if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
         const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
         if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
-          return { len: pEnd - idx, replacement: "02-****-****" };
-        }
-      }
-    }
-    if (
-      idx + 4 <= str.length &&
-      /^0[3-6][1-5][-\s]/.test(str.slice(idx, idx + 4))
-    ) {
-      const sep = str[idx + 3];
-      const pMid = consumeDigitsJs(str, idx + 4, 3, 4);
-      if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
-        const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
-        if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
-          return { len: pEnd - idx, replacement: "***-****-****" };
+          return { len: pEnd - idx, replacement: area === "02" ? "02-****-****" : "***-****-****" };
         }
       }
     }
@@ -514,31 +553,19 @@
     let idx = 0;
     while (idx < text.length) {
       const em = matchEmailAtJs(text, idx);
-      if (em) {
-        scrubbedText += em.replacement;
-        spans.push({ start: idx, end: idx + em.len, replacement: em.replacement });
-        emailCount += 1;
-        idx += em.len;
+      const rrn = em ? null : matchRrnAtJs(text, idx);
+      const ph = em || rrn ? null : matchPhoneAtJs(text, idx);
+      const hit = em || rrn || ph;
+      if (hit) {
+        scrubbedText += hit.replacement;
+        spans.push({ start: idx, end: idx + hit.len, replacement: hit.replacement });
+        if (em) emailCount += 1;
+        else if (rrn) residentCount += 1;
+        else phoneCount += 1;
+        idx += hit.len;
         continue;
       }
-      const rrn = matchRrnAtJs(text, idx);
-      if (rrn) {
-        scrubbedText += rrn.replacement;
-        spans.push({ start: idx, end: idx + rrn.len, replacement: rrn.replacement });
-        residentCount += 1;
-        idx += rrn.len;
-        continue;
-      }
-      const ph = matchPhoneAtJs(text, idx);
-      if (ph) {
-        scrubbedText += ph.replacement;
-        spans.push({ start: idx, end: idx + ph.len, replacement: ph.replacement });
-        phoneCount += 1;
-        idx += ph.len;
-        continue;
-      }
-      const cp = text.codePointAt(idx);
-      const step = cp > 0xffff ? 2 : 1;
+      const step = text.codePointAt(idx) > 0xffff ? 2 : 1;
       scrubbedText += text.slice(idx, idx + step);
       idx += step;
     }
@@ -558,39 +585,16 @@
     const words = text ? text.split(/\s+/).length : 0;
     const sentences = text ? text.split(/[.!?。]+/).filter((s) => s.trim().length > 0).length : 0;
     const readingTimeSeconds = Math.max(1, Math.ceil((words / 220) * 60));
-    const lines = text
-      ? text
-          .split(/\n+/)
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0)
+    const lines = text ? text.split(/\n+/).map((l) => l.trim()).filter(Boolean) : [];
+    const summaryLines = lines.slice().sort((a, b) => b.length - a.length).slice(0, 2);
+    const actionItems = lines.filter((l) => /^(- \[ \]|\[TODO\]|TODO:|할일:|조치:)/.test(l));
+    const styleSuggestions = lines.some((l) => Array.from(l).length > 120)
+      ? ["120자를 초과하는 긴 문장이 있습니다. 두 문장으로 나누세요."]
       : [];
-    const summaryLines = lines
-      .slice()
-      .sort((a, b) => b.length - a.length)
-      .slice(0, 2);
-    const actionItems = lines.filter(
-      (l) =>
-        l.startsWith("- [ ]") ||
-        l.startsWith("[TODO]") ||
-        l.startsWith("TODO:") ||
-        l.startsWith("할일:") ||
-        l.startsWith("조치:")
-    );
-    const styleSuggestions = [];
-    if (lines.some((l) => Array.from(l).length > 120)) {
-      styleSuggestions.push("120자를 초과하는 긴 문장이 있습니다. 두 문장으로 나누세요.");
-    }
     return {
-      summaryCount: summaryLines.length,
-      charCount: chars,
-      wordCount: words,
-      sentenceCount: sentences,
-      readingTimeSeconds,
-      actionItemCount: actionItems.length,
-      suggestionCount: styleSuggestions.length,
-      summaryLines,
-      styleSuggestions,
-      actionItems,
+      summaryCount: summaryLines.length, charCount: chars, wordCount: words,
+      sentenceCount: sentences, readingTimeSeconds, actionItemCount: actionItems.length,
+      suggestionCount: styleSuggestions.length, summaryLines, styleSuggestions, actionItems,
     };
   }
 
@@ -655,14 +659,14 @@
         throw new Error("InvalidArgument: ZIP 엔트리 이름('name')이 비어 있습니다.");
       }
       const entryPath = rawName.trim();
-      const rawComp = item.compressed ?? item.compressedSize;
-      const rawUncomp = item.uncompressed ?? item.uncompressedSize;
+      const rawComp = item.compressed !== undefined ? item.compressed : item.compressedSize;
+      const rawUncomp = item.uncompressed !== undefined ? item.uncompressed : item.uncompressedSize;
       if (
         typeof rawComp !== "number" ||
-        !Number.isInteger(rawComp) ||
+        !Number.isSafeInteger(rawComp) ||
         rawComp < 0 ||
         typeof rawUncomp !== "number" ||
-        !Number.isInteger(rawUncomp) ||
+        !Number.isSafeInteger(rawUncomp) ||
         rawUncomp < 0
       ) {
         throw new Error("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
@@ -717,18 +721,17 @@
     } = ctx;
 
     function evaluateSingleDocExpr(doc, seedDefaults) {
-      if (doc.sheet !== undefined && doc.sheet !== null && typeof doc.sheet !== "string") {
-        throw new Error("InvalidArgument: JSON 'sheet' 필드는 문자열이어야 합니다.");
-      }
-      const sheetName = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
+      const sheetName = resolveDefaultSheetFromDocJs(doc);
       const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
       if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
         throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
       }
       const q = String(rawExpr ?? (seedDefaults ? "=Sheet2!A1+50" : "A1")).trim() || "A1";
       const workbook = buildLocalWorkbookFromJson(doc, sheetName, seedDefaults);
-      const evalSheetUpper =
-        resolveCanonicalSheetUpper(workbook.knownSheets, sheetName) || sheetName.toUpperCase();
+      const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
+      if (!evalSheetUpper) {
+        return { sheetName, expr: q, value: "#REF!" };
+      }
       if (q.startsWith("=")) {
         return {
           sheetName,
@@ -741,7 +744,7 @@
       return {
         sheetName,
         expr: q,
-        value: String(workbook.values[evalSheetUpper + "!" + q.toUpperCase()] ?? ""),
+        value: String(workbook.values[evalSheetUpper + "!" + asciiUpperJs(q)] ?? ""),
       };
     }
 
@@ -753,10 +756,7 @@
 
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
-      if (doc.sheet !== undefined && doc.sheet !== null && typeof doc.sheet !== "string") {
-        throw new Error("InvalidArgument: JSON 'sheet' 필드는 문자열이어야 합니다.");
-      }
-      const defaultSheet = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
+      const defaultSheet = resolveDefaultSheetFromDocJs(doc);
       if (doc.targets !== undefined) {
         if (!Array.isArray(doc.targets)) {
           throw new Error("InvalidArgument: JSON 'targets' 필드는 배열이어야 합니다.");
@@ -784,7 +784,7 @@
             if (canonicalUpper) {
               val = expr.startsWith("=")
                 ? String(evaluateFormulaExpression(expr, workbook, canonicalUpper, "A1"))
-                : String(workbook.values[canonicalUpper + "!" + expr.toUpperCase()] ?? "");
+                : String(workbook.values[canonicalUpper + "!" + asciiUpperJs(expr)] ?? "");
             }
             outMap[sh + "!" + expr] = val;
             targetValues.push(val);
@@ -800,52 +800,43 @@
       return {
         query: single.expr,
         value: single.value,
-        values: { [defaultSheet + "!" + single.expr]: single.value },
+        values: { [single.sheetName + "!" + single.expr]: single.value },
         targetValues: [single.value],
       };
     }
 
+    const RIBBON_EXACT_MUTATORS = {
+      "hwp-mod-manuscript": (s) => { s.manuscriptGridEnabled = !s.manuscriptGridEnabled; },
+      "hwp-mod-header": (s) => { s.approvalHeaderEnabled = !s.approvalHeaderEnabled; },
+      "hwp-mod-border": (s) => { s.doubleDiagonalBorderEnabled = !s.doubleDiagonalBorderEnabled; },
+      "pdf-mod-rotate": (s) => { s.pdfRotationDegrees = (s.pdfRotationDegrees + 90) % 360; },
+    };
+    const RIBBON_SUFFIX_MUTATORS = [
+      ["-home-bold", (s) => { s.isBold = !s.isBold; }],
+      ["-home-italic", (s) => { s.isItalic = !s.isItalic; }],
+      ["-home-underline", (s) => { s.isUnderline = !s.isUnderline; }],
+      ["-home-style", (s) => { s.stylePresetIndex = (s.stylePresetIndex + 1) % 4; }],
+      ["-layout-paper", (s) => { s.paperSize = s.paperSize === "A4" ? "Letter" : "A4"; }],
+      ["-layout-orientation", (s) => { s.isLandscape = !s.isLandscape; }],
+      ["-layout-columns", (s) => { s.columnCount = s.columnCount >= 3 ? 1 : s.columnCount + 1; }],
+      ["-layout-margins", (s) => { s.marginPresetIndex = (s.marginPresetIndex + 1) % 3; }],
+      ["-data-sort", (s) => { s.sortAscending = !s.sortAscending; }],
+      ["-review-track", (s) => { s.trackChangesEnabled = !s.trackChangesEnabled; }],
+      ["-view-split", (s) => { s.splitViewEnabled = !s.splitViewEnabled; }],
+      ["-view-ribbon", (s) => { s.ribbonCollapsed = !s.ribbonCollapsed; }],
+      ["-view-theme", (s) => { s.darkThemeEnabled = !s.darkThemeEnabled; }],
+      ["-view-zoom", (s) => { s.zoomPercent = ZOOM_STEP_CYCLE[s.zoomPercent] ?? 100; }],
+    ];
+
     function localExecuteRibbonCommand(payload) {
       const cmdId = String(payload || "").trim();
       localRibbonState.executedCount += 1;
-      if (cmdId.endsWith("-home-bold")) {
-        localRibbonState.isBold = !localRibbonState.isBold;
-      } else if (cmdId.endsWith("-home-italic")) {
-        localRibbonState.isItalic = !localRibbonState.isItalic;
-      } else if (cmdId.endsWith("-home-underline")) {
-        localRibbonState.isUnderline = !localRibbonState.isUnderline;
-      } else if (cmdId.endsWith("-home-style")) {
-        localRibbonState.stylePresetIndex = (localRibbonState.stylePresetIndex + 1) % 4;
-      } else if (cmdId.endsWith("-layout-paper")) {
-        localRibbonState.paperSize = localRibbonState.paperSize === "A4" ? "Letter" : "A4";
-      } else if (cmdId.endsWith("-layout-orientation")) {
-        localRibbonState.isLandscape = !localRibbonState.isLandscape;
-      } else if (cmdId.endsWith("-layout-columns")) {
-        localRibbonState.columnCount =
-          localRibbonState.columnCount >= 3 ? 1 : localRibbonState.columnCount + 1;
-      } else if (cmdId.endsWith("-layout-margins")) {
-        localRibbonState.marginPresetIndex = (localRibbonState.marginPresetIndex + 1) % 3;
-      } else if (cmdId.endsWith("-data-sort")) {
-        localRibbonState.sortAscending = !localRibbonState.sortAscending;
-      } else if (cmdId === "hwp-mod-manuscript") {
-        localRibbonState.manuscriptGridEnabled = !localRibbonState.manuscriptGridEnabled;
-      } else if (cmdId === "hwp-mod-header") {
-        localRibbonState.approvalHeaderEnabled = !localRibbonState.approvalHeaderEnabled;
-      } else if (cmdId === "hwp-mod-border") {
-        localRibbonState.doubleDiagonalBorderEnabled =
-          !localRibbonState.doubleDiagonalBorderEnabled;
-      } else if (cmdId.endsWith("-review-track")) {
-        localRibbonState.trackChangesEnabled = !localRibbonState.trackChangesEnabled;
-      } else if (cmdId.endsWith("-view-split")) {
-        localRibbonState.splitViewEnabled = !localRibbonState.splitViewEnabled;
-      } else if (cmdId.endsWith("-view-ribbon")) {
-        localRibbonState.ribbonCollapsed = !localRibbonState.ribbonCollapsed;
-      } else if (cmdId.endsWith("-view-theme")) {
-        localRibbonState.darkThemeEnabled = !localRibbonState.darkThemeEnabled;
-      } else if (cmdId.endsWith("-view-zoom")) {
-        localRibbonState.zoomPercent = ZOOM_STEP_CYCLE[localRibbonState.zoomPercent] ?? 100;
-      } else if (cmdId === "pdf-mod-rotate") {
-        localRibbonState.pdfRotationDegrees = (localRibbonState.pdfRotationDegrees + 90) % 360;
+      const exactFn = RIBBON_EXACT_MUTATORS[cmdId];
+      if (exactFn) {
+        exactFn(localRibbonState);
+      } else {
+        const suffixPair = RIBBON_SUFFIX_MUTATORS.find(([sfx]) => cmdId.endsWith(sfx));
+        if (suffixPair) suffixPair[1](localRibbonState);
       }
       const mod = getActiveModule();
       return {

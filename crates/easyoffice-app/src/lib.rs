@@ -186,6 +186,34 @@ impl EasyOfficeIpcRouter {
         }
     }
 
+    fn resolve_default_sheet_from_entries(
+        entries: &[(String, StrictJsonValue)],
+    ) -> Result<String, EasyOfficeError> {
+        if let Some(s) = Self::optional_json_str(entries, "sheet")? {
+            if !s.trim().is_empty() {
+                return Ok(s.trim().to_string());
+            }
+        }
+        if let Some(sheets_val) = StrictJsonValue::get_field(entries, "sheets") {
+            let sheet_items = sheets_val.as_array().ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "JSON 'sheets' 필드는 문자열 배열이어야 합니다.".to_string(),
+                )
+            })?;
+            for s_item in sheet_items {
+                let s_name = s_item.as_str().ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(
+                        "JSON 'sheets' 항목은 문자열이어야 합니다.".to_string(),
+                    )
+                })?;
+                if !s_name.trim().is_empty() {
+                    return Ok(s_name.trim().to_string());
+                }
+            }
+        }
+        Ok("Sheet1".to_string())
+    }
+
     fn build_workbook_from_json_entries(
         entries: &[(String, StrictJsonValue)],
         default_sheet: &str,
@@ -193,11 +221,6 @@ impl EasyOfficeIpcRouter {
     ) -> Result<WorkbookEngine, EasyOfficeError> {
         let mut wb = WorkbookEngine::new();
         let explicit_sheets_val = StrictJsonValue::get_field(entries, "sheets");
-        if explicit_sheets_val.is_none() {
-            wb.add_sheet("Sheet1");
-            wb.add_sheet("Sheet2");
-        }
-        wb.add_sheet(default_sheet);
         if let Some(sheets_val) = explicit_sheets_val {
             let sheet_items = sheets_val.as_array().ok_or_else(|| {
                 EasyOfficeError::InvalidArgument(
@@ -214,6 +237,10 @@ impl EasyOfficeIpcRouter {
                     wb.add_sheet(s_name.trim());
                 }
             }
+        } else {
+            wb.add_sheet("Sheet1");
+            wb.add_sheet("Sheet2");
+            wb.add_sheet(default_sheet);
         }
         let mut seen_sheet1 = false;
         let mut seen_sheet2 = false;
@@ -281,8 +308,8 @@ impl EasyOfficeIpcRouter {
             max: 1_000_000.0,
         };
         let entries = Self::parse_rpc_json_object(payload)?;
-        let raw_default_sh = Self::optional_json_str(&entries, "sheet")?.unwrap_or("Sheet1");
-        let default_sh = Self::json_sheet_name_or_default(raw_default_sh, "Sheet1");
+        let default_sh_owned = Self::resolve_default_sheet_from_entries(&entries)?;
+        let default_sh = default_sh_owned.as_str();
         let wb = Self::build_workbook_from_json_entries(&entries, default_sh, false)?;
         if let Some(targets_val) = StrictJsonValue::get_field(&entries, "targets") {
             let targets = targets_val.as_array().ok_or_else(|| {
@@ -743,10 +770,8 @@ impl EasyOfficeIpcRouter {
 
     fn handle_evaluate_workbook_formula(payload: &str) -> Result<String, EasyOfficeError> {
         let entries = Self::parse_rpc_json_object(payload)?;
-        let active_sheet = Self::json_sheet_name_or_default(
-            Self::optional_json_str(&entries, "sheet")?.unwrap_or("Sheet1"),
-            "Sheet1",
-        );
+        let active_sheet_owned = Self::resolve_default_sheet_from_entries(&entries)?;
+        let active_sheet = active_sheet_owned.as_str();
         let expr = Self::optional_json_str(&entries, "expr")?
             .filter(|s| !s.trim().is_empty())
             .unwrap_or("=Sheet2!A1+50")
@@ -1574,5 +1599,25 @@ mod tests {
         )
         .unwrap();
         assert!(quoted_sheet1_override.contains("\"value\":\"500\""));
+
+        let omitted_top_sheet_explicit_sheets = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheets":["예산표"],"targets":[{"sheet":"예산표","cell":"=Sheet1!A1+10"}],"cells":[{"sheet":"예산표","cell":"A1","value":300}]}"#,
+        )
+        .unwrap();
+        assert!(omitted_top_sheet_explicit_sheets.contains("\"targetValues\":[\"#REF!\"]"));
+
+        let unlisted_top_sheet_explicit_sheets = EasyOfficeIpcRouter::dispatch(
+            "evaluate_workbook_formula",
+            r#"{"sheet":"없는시트","sheets":["예산표"],"expr":"=A1"}"#,
+        )
+        .unwrap();
+        assert!(unlisted_top_sheet_explicit_sheets.contains("\"value\":\"#REF!\""));
+
+        let huge_exp_overflow_audit = format!(
+            "{{\"entries\":[{{\"name\":\"a.xml\",\"compressed\":100,\"uncompressed\":0.{}1e999999999}}]}}",
+            "0".repeat(999_999)
+        );
+        assert!(EasyOfficeIpcRouter::dispatch("audit_security", &huge_exp_overflow_audit).is_err());
     }
 }
