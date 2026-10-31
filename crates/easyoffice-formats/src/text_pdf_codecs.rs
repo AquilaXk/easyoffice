@@ -5,14 +5,15 @@ use crate::pdf_stream_parser::{
     advance_past_stream_eol, contains_subslice, escape_pdf_text, is_pdf_delim_or_ws,
     is_standalone_pdf_kw, parse_indirect_obj_header, parse_pdf_content_stream,
     skip_pdf_ws_and_comments, span_crosses_object_boundary, step_pdf_non_code_token,
-    unescape_pdf_text, validate_balanced_pdf_literals, validate_pdf_trailer_json, PdfNonCodeKind,
+    unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable, PdfNonCodeKind,
     PdfNonCodeStep,
 };
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
 use pdf_object_graph::{
-    decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_name_eq,
-    fail_corrupted_or_encrypted, parse_pdf_value, resolve_catalog_and_pages_target, resolve_int,
-    resolve_stream_bounds, resolve_stream_length_hint, resolve_value, PageNodeTarget,
+    decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_has_suspicious_id,
+    dict_name_eq, fail_corrupted_or_encrypted, parse_pdf_value_with_table,
+    resolve_catalog_and_pages_target, resolve_int, resolve_stream_bounds,
+    resolve_stream_length_hint, resolve_value, validate_pdf_trailer_json, PageNodeTarget,
     PdfIndirectObject, PdfObjValue, MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH,
     MAX_PDF_TOTAL_DECODED_BYTES,
 };
@@ -216,6 +217,7 @@ impl PdfSerializer {
         if !contains_subslice(bytes, b"xref") || !contains_subslice(bytes, b"%%EOF") {
             return Err(fail_corrupted_or_encrypted(
                 bytes,
+                0,
                 false,
                 "PDF xref 테이블 또는 %%EOF 트레일러가 누락되었습니다.",
             ));
@@ -228,8 +230,11 @@ impl PdfSerializer {
             ));
         }
         if scanned.pages.is_empty() {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "PDF 페이지 스트림을 찾을 수 없습니다.".to_string(),
+            return Err(fail_corrupted_or_encrypted(
+                bytes,
+                0,
+                false,
+                "PDF 페이지 스트림을 찾을 수 없습니다.",
             ));
         }
         if scanned.trailer_b64_count > 1 {
@@ -615,6 +620,7 @@ impl PdfSerializer {
     }
 
     fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
+        let paren_table = ParenJumpTable::build(bytes);
         let mut objects: HashMap<(u32, u16), PdfIndirectObject> = HashMap::new();
         let mut trailers: Vec<Vec<(String, PdfObjValue)>> = Vec::new();
         let mut stream_spans: Vec<(usize, usize)> = Vec::new();
@@ -632,16 +638,31 @@ impl PdfSerializer {
             if let Some((obj_num, gen_num, after_obj)) =
                 parse_indirect_obj_header(bytes, p, bytes.len())
             {
-                let parsed_val =
-                    parse_pdf_value(bytes, after_obj, bytes.len(), 0).map_err(|_| {
-                        fail_corrupted_or_encrypted(
-                            &bytes[p..],
-                            has_encrypt,
-                            "PDF 간접 객체 구문이 손상되었거나 리터럴이 닫히지 않았습니다.",
-                        )
-                    })?;
+                let parsed_val = parse_pdf_value_with_table(
+                    bytes,
+                    Some(&paren_table),
+                    after_obj,
+                    bytes.len(),
+                    0,
+                )
+                .map_err(|_| {
+                    fail_corrupted_or_encrypted(
+                        bytes,
+                        p,
+                        has_encrypt,
+                        "PDF 간접 객체 구문이 손상되었거나 리터럴이 닫히지 않았습니다.",
+                    )
+                })?;
                 let (val, mut next_p) = parsed_val.unwrap_or((PdfObjValue::Null, after_obj));
                 if let PdfObjValue::Dict(ref entries) = val {
+                    if dict_has_suspicious_id(entries) {
+                        return Err(fail_corrupted_or_encrypted(
+                            bytes,
+                            p,
+                            has_encrypt,
+                            "PDF 간접 객체의 /ID 배열 구조가 손상되었습니다.",
+                        ));
+                    }
                     if dict_name_eq(entries, "/Type", "/XRef")
                         && dict_has_non_null_key(entries, "/Encrypt")
                     {
@@ -653,7 +674,8 @@ impl PdfSerializer {
                 if is_standalone_pdf_kw(bytes, next_p, b"stream") {
                     let PdfObjValue::Dict(ref entries) = val else {
                         return Err(fail_corrupted_or_encrypted(
-                            &bytes[p..],
+                            bytes,
+                            p,
                             has_encrypt,
                             "PDF stream 앞에 객체 딕셔너리가 없습니다.",
                         ));
@@ -666,7 +688,8 @@ impl PdfSerializer {
                         resolve_stream_bounds(bytes, stream_start, len_hint)
                     else {
                         return Err(fail_corrupted_or_encrypted(
-                            &bytes[p..],
+                            bytes,
+                            p,
                             has_encrypt,
                             "PDF stream 블록에 대응하는 endstream 토큰이 누락되었거나 경계가 손상되었습니다.",
                         ));
@@ -677,7 +700,8 @@ impl PdfSerializer {
                 }
                 if !is_standalone_pdf_kw(bytes, next_p, b"endobj") {
                     return Err(fail_corrupted_or_encrypted(
-                        &bytes[p..],
+                        bytes,
+                        p,
                         has_encrypt,
                         "PDF 간접 객체에 대응하는 endobj 토큰이 누락되었습니다.",
                     ));
@@ -720,20 +744,32 @@ impl PdfSerializer {
                 continue;
             }
             if is_standalone_pdf_kw(bytes, p, b"trailer") {
-                let parsed_tr = parse_pdf_value(bytes, p + 7, bytes.len(), 0).map_err(|_| {
-                    fail_corrupted_or_encrypted(
-                        &bytes[p..],
-                        has_encrypt,
-                        "PDF trailer 딕셔너리가 손상되었습니다.",
-                    )
-                })?;
+                let parsed_tr =
+                    parse_pdf_value_with_table(bytes, Some(&paren_table), p + 7, bytes.len(), 0)
+                        .map_err(|_| {
+                            fail_corrupted_or_encrypted(
+                                bytes,
+                                p,
+                                has_encrypt,
+                                "PDF trailer 딕셔너리가 손상되었습니다.",
+                            )
+                        })?;
                 let Some((PdfObjValue::Dict(tr_entries), next_p)) = parsed_tr else {
                     return Err(fail_corrupted_or_encrypted(
-                        &bytes[p..],
+                        bytes,
+                        p,
                         has_encrypt,
                         "PDF trailer 뒤에 딕셔너리가 없습니다.",
                     ));
                 };
+                if dict_has_suspicious_id(&tr_entries) {
+                    return Err(fail_corrupted_or_encrypted(
+                        bytes,
+                        p,
+                        has_encrypt,
+                        "PDF trailer /ID 배열 구조가 손상되었습니다.",
+                    ));
+                }
                 if dict_has_non_null_key(&tr_entries, "/Encrypt") {
                     has_encrypt = true;
                 }
@@ -750,7 +786,8 @@ impl PdfSerializer {
                 }
                 if p == start_off {
                     return Err(fail_corrupted_or_encrypted(
-                        &bytes[sx_pos..],
+                        bytes,
+                        sx_pos,
                         has_encrypt,
                         "PDF startxref 오프셋 숫자가 누락되었습니다.",
                     ));
@@ -758,7 +795,8 @@ impl PdfSerializer {
                 continue;
             }
             return Err(fail_corrupted_or_encrypted(
-                &bytes[p..],
+                bytes,
+                p,
                 has_encrypt,
                 "PDF 상위 구조에 해석할 수 없는 손상 토큰이 존재합니다.",
             ));

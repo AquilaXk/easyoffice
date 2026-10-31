@@ -297,4 +297,25 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"Ⅰ분기!A1\")"),
         EvaluatedCellValue::Number(66.0)
     );
+
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=A01"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=XFE1"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=A01:B2"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=IF(TRUE, 42, A01)"),
+        EvaluatedCellValue::Number(42.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=IFERROR(A01, 99)"),
+        EvaluatedCellValue::Number(99.0)
+    );
 }

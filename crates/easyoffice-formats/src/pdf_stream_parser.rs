@@ -168,6 +168,13 @@ pub(crate) fn is_standalone_pdf_kw(bytes: &[u8], pos: usize, kw: &[u8]) -> bool 
         && (pos + kw.len() == bytes.len() || is_pdf_delim_or_ws(bytes[pos + kw.len()]))
 }
 
+pub(crate) fn skip_pdf_ws_only(bytes: &[u8], mut p: usize, limit: usize) -> usize {
+    while p < limit && is_pdf_ws(bytes[p]) {
+        p += 1;
+    }
+    p
+}
+
 pub(crate) fn skip_pdf_ws_and_comments(bytes: &[u8], mut p: usize, limit: usize) -> usize {
     while p < limit {
         if is_pdf_ws(bytes[p]) {
@@ -203,7 +210,7 @@ pub(crate) fn parse_indirect_obj_header(
         .ok()?
         .parse::<u32>()
         .ok()?;
-    let q_gen = skip_pdf_ws_and_comments(bytes, q, limit);
+    let q_gen = skip_pdf_ws_only(bytes, q, limit);
     if q_gen == q || q_gen >= limit || !bytes[q_gen].is_ascii_digit() {
         return None;
     }
@@ -215,7 +222,7 @@ pub(crate) fn parse_indirect_obj_header(
         .ok()?
         .parse::<u16>()
         .ok()?;
-    let r_obj = skip_pdf_ws_and_comments(bytes, r, limit);
+    let r_obj = skip_pdf_ws_only(bytes, r, limit);
     if r_obj == r || r_obj + 3 > limit || !is_standalone_pdf_kw(&bytes[..limit], r_obj, b"obj") {
         return None;
     }
@@ -741,142 +748,65 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
     out
 }
 
-fn strip_ws(s: &str) -> String {
-    s.chars().filter(|c| !c.is_whitespace()).collect()
-}
+const MAX_PAREN_JUMP_DEPTH: usize = 4096;
 
-fn wrap_line_64(s: &str, trim_blank: bool) -> Vec<String> {
-    let target = if trim_blank { s.trim() } else { s };
-    if trim_blank && target.is_empty() {
-        return Vec::new();
+pub(crate) fn is_paren_reset_boundary(bytes: &[u8], i: usize) -> Option<usize> {
+    let len = bytes.len();
+    if i + 5 <= len && &bytes[i..i + 5] == b"%%EOF" {
+        return Some(i + 5);
     }
-    let chars: Vec<char> = target.chars().collect();
-    if chars.len() <= 64 {
-        vec![target.to_string()]
-    } else {
-        chars.chunks(64).map(|c| c.iter().collect()).collect()
+    if is_standalone_pdf_kw(bytes, i, b"endobj") && has_structural_after_endobj(bytes, i + 6) {
+        let mut b = i;
+        while b > 0 && matches!(bytes[b - 1], b' ' | b'\t') {
+            b -= 1;
+        }
+        let preceded_structurally = b > 0
+            && (matches!(bytes[b - 1], b'\n' | b'\r')
+                || (b >= 2 && bytes[b - 2] == b'>' && bytes[b - 1] == b'>'));
+        let mut a = i + 6;
+        while a < len && matches!(bytes[a], b' ' | b'\t') {
+            a += 1;
+        }
+        let followed_by_eol = a >= len || matches!(bytes[a], b'\n' | b'\r' | b'%');
+        if preceded_structurally || followed_by_eol {
+            return Some(i + 6);
+        }
     }
-}
-
-fn expand_logical_pages_to_chunks(logical_pages: &[&str], mode: u8) -> Vec<String> {
-    const MAX_LINES_PER_PDF_PAGE: usize = 42;
-    let mut out = Vec::with_capacity(logical_pages.len());
-    for &text in logical_pages {
-        let lines: Vec<String> = match mode {
-            0 => text.split('\n').map(str::to_string).collect(),
-            1 => text
-                .split('\n')
-                .flat_map(|l| wrap_line_64(l, false))
-                .collect(),
-            _ => text
-                .split('\n')
-                .flat_map(|l| wrap_line_64(l, true))
-                .collect(),
+    if i > 0 && matches!(bytes[i - 1], b'\n' | b'\r') {
+        let line_tok = {
+            let mut t = i;
+            while t < len && matches!(bytes[t], b' ' | b'\t') {
+                t += 1;
+            }
+            t
         };
-        if lines.len() <= MAX_LINES_PER_PDF_PAGE {
-            out.push(text.to_string());
-        } else {
-            out.extend(lines.chunks(MAX_LINES_PER_PDF_PAGE).map(|c| c.join("\n")));
-        }
-    }
-    out
-}
-
-fn same_ws_stripped(a: &[&str], b: &[&str]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| strip_ws(x) == strip_ws(y))
-}
-
-fn matches_pages_1to1(logical_pages: &[&str], page_body_texts: &[&str]) -> bool {
-    if same_ws_stripped(logical_pages, page_body_texts) {
-        return true;
-    }
-    [0u8, 1u8, 2u8].into_iter().any(|mode| {
-        let chunks = expand_logical_pages_to_chunks(logical_pages, mode);
-        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
-        same_ws_stripped(&refs, page_body_texts)
-    })
-}
-
-fn extract_validated_page_text(p_entries: &[(String, crate::StrictJsonValue)]) -> Option<&str> {
-    let ext_str = match crate::StrictJsonValue::get_field(p_entries, "extractedText") {
-        Some(v) => Some(v.as_str()?),
-        None => None,
-    };
-    let body_str = match crate::StrictJsonValue::get_field(p_entries, "bodyText") {
-        Some(v) => Some(v.as_str()?),
-        None => None,
-    };
-    if matches!((ext_str, body_str), (Some(a), Some(b)) if a != b) {
-        return None;
-    }
-    ext_str.or(body_str)
-}
-
-pub(crate) fn validate_pdf_trailer_json(
-    decoded: &str,
-    expected_title: &str,
-    page_body_texts: &[&str],
-    parsed_watermark: Option<&str>,
-) -> Option<String> {
-    let Ok(root) = crate::StrictJsonValue::parse(decoded) else {
-        return None;
-    };
-    let root_entries = root.as_object()?;
-    let json_title = crate::StrictJsonValue::get_str(root_entries, "title")?;
-    let normalized_json_title = json_title.replace(['\r', '\n'], " ");
-    if json_title != expected_title && normalized_json_title != expected_title {
-        return None;
-    }
-    match crate::StrictJsonValue::get_field(root_entries, "watermarkText") {
-        Some(crate::StrictJsonValue::Str(wm)) => {
-            if wm.is_empty() {
-                if parsed_watermark.is_some() {
-                    return None;
-                }
-            } else if parsed_watermark != Some(wm.as_str()) {
-                return None;
+        if is_standalone_pdf_kw(bytes, line_tok, b"trailer") {
+            let qt = skip_pdf_ws_only(bytes, line_tok + 7, len);
+            if qt + 1 < len && bytes[qt] == b'<' && bytes[qt + 1] == b'<' {
+                return Some(line_tok);
             }
         }
-        Some(crate::StrictJsonValue::Null) | None => {
-            if parsed_watermark.is_some() {
-                return None;
+        if is_standalone_pdf_kw(bytes, line_tok, b"xref")
+            && line_tok + 4 < len
+            && is_pdf_ws(bytes[line_tok + 4])
+        {
+            return Some(line_tok);
+        }
+        if is_standalone_pdf_kw(bytes, line_tok, b"startxref") {
+            let qs = skip_pdf_ws_only(bytes, line_tok + 9, len);
+            if qs > line_tok + 9 && qs < len && bytes[qs].is_ascii_digit() {
+                return Some(line_tok);
             }
         }
-        Some(_) => return None,
-    }
-    let root_body_field = crate::StrictJsonValue::get_field(root_entries, "bodyText");
-    if let Some(pages_val) = crate::StrictJsonValue::get_field(root_entries, "pages") {
-        let page_items = pages_val.as_array()?;
-        if page_items.is_empty() || page_items.len() > page_body_texts.len() {
-            return None;
-        }
-        let mut json_page_texts = Vec::with_capacity(page_items.len());
-        for item in page_items {
-            let p_entries = item.as_object()?;
-            let text = extract_validated_page_text(p_entries)?;
-            json_page_texts.push(text);
-        }
-        if let Some(rb) = root_body_field {
-            let rb_str = rb.as_str()?;
-            if strip_ws(rb_str) != strip_ws(&json_page_texts.join("\n")) {
-                return None;
+        if let Some((_, _, after_hdr)) = parse_indirect_obj_header(bytes, line_tok, len) {
+            let qo = skip_pdf_ws_only(bytes, after_hdr, len);
+            if qo + 1 < len && bytes[qo] == b'<' && bytes[qo + 1] == b'<' {
+                return Some(line_tok);
             }
-        }
-        if matches_pages_1to1(&json_page_texts, page_body_texts) {
-            return Some(json_title.to_string());
-        }
-        return None;
-    }
-    if let Some(rb) = root_body_field {
-        let body_str = rb.as_str()?;
-        if matches_pages_1to1(&[body_str], page_body_texts) {
-            return Some(json_title.to_string());
         }
     }
     None
 }
-
-const MAX_PAREN_JUMP_DEPTH: usize = 4096;
 
 pub(crate) struct ParenJumpTable {
     pairs: Vec<(u32, u32)>,
@@ -884,14 +814,34 @@ pub(crate) struct ParenJumpTable {
 
 impl ParenJumpTable {
     pub(crate) fn build(bytes: &[u8]) -> Self {
+        Self::build_inner(bytes, false)
+    }
+
+    pub(crate) fn build_damaged(bytes: &[u8]) -> Self {
+        Self::build_inner(bytes, true)
+    }
+
+    fn build_inner(bytes: &[u8], reset_on_boundaries: bool) -> Self {
         let len = bytes.len();
         let mut pairs: Vec<(u32, u32)> = Vec::new();
-        let mut stack: Vec<u32> = Vec::new();
-        let mut overflow_depth = 0usize;
+        let mut stack: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
         let mut i = 0usize;
         while i < len {
-            let in_paren = !stack.is_empty() || overflow_depth > 0;
+            if reset_on_boundaries && !stack.is_empty() {
+                if let Some(next_i) = is_paren_reset_boundary(bytes, i) {
+                    stack.clear();
+                    if next_i > i {
+                        i = next_i;
+                        continue;
+                    }
+                }
+            }
+            let in_paren = !stack.is_empty();
             if !in_paren && bytes[i] == b'%' {
+                if i + 5 <= len && &bytes[i..i + 5] == b"%%EOF" {
+                    i += 5;
+                    continue;
+                }
                 while i < len && bytes[i] != b'\n' && bytes[i] != b'\r' {
                     i += 1;
                 }
@@ -902,19 +852,14 @@ impl ParenJumpTable {
                 continue;
             }
             if bytes[i] == b'(' {
-                if stack.len() < MAX_PAREN_JUMP_DEPTH {
-                    if let Ok(pos32) = u32::try_from(i) {
-                        stack.push(pos32);
-                    } else {
-                        overflow_depth += 1;
+                if let Ok(pos32) = u32::try_from(i) {
+                    if stack.len() == MAX_PAREN_JUMP_DEPTH {
+                        stack.pop_front();
                     }
-                } else {
-                    overflow_depth += 1;
+                    stack.push_back(pos32);
                 }
             } else if bytes[i] == b')' {
-                if overflow_depth > 0 {
-                    overflow_depth -= 1;
-                } else if let Some(open_pos) = stack.pop() {
+                if let Some(open_pos) = stack.pop_back() {
                     if let Ok(end32) = u32::try_from(i + 1) {
                         pairs.push((open_pos, end32));
                     }

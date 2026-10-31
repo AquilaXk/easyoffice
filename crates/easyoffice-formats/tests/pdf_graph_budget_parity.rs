@@ -536,4 +536,81 @@ xref\n0 7\n%%EOF\n"
         PdfSerializer::parse(post_truncation_closed_note.as_bytes()),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
+
+    let mut comment_digit_flood = Vec::from(&b"%PDF-1.7\n1 0 obj << /Broken [\n"[..]);
+    for _ in 0..20_000 {
+        comment_digit_flood.extend_from_slice(b"% 1 0 obj\n");
+    }
+    comment_digit_flood.extend_from_slice(b"xref\n%%EOF\n");
+    let comment_flood_t = std::time::Instant::now();
+    assert!(matches!(
+        PdfSerializer::parse(&comment_digit_flood),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+    assert!(comment_flood_t.elapsed().as_secs_f64() < 1.0);
+
+    let preceding_length_damaged_pdf = b"%PDF-1.5\n\
+1 0 obj 24 endobj\n\
+2 0 obj << /Type /Catalog /Broken [\n\
+3 0 obj << /Length 1 0 R >>\n\
+stream\n\
+4 0 obj << /Type /XRef\n\n\
+endstream\nendobj\n\
+5 0 obj << /Type /XRef /Size 6 /Root 2 0 R /Encrypt 9 0 R /Length 4 >>\n\
+stream\nABCD\nendstream\nendobj\n\
+startxref\n0\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(preceding_length_damaged_pdf),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let cross_obj_paren_encrypt = b"%PDF-1.5\n\
+1 0 obj << /Title (unclosed >> endobj\n\
+4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Desc (ab)cd) >>\n\
+stream\nABCD\nendstream\nendobj\n\
+startxref\n0\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(cross_obj_paren_encrypt),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let mut deep_unclosed_before_trailer = Vec::from(&b"%PDF-1.4\n1 0 obj "[..]);
+    deep_unclosed_before_trailer.extend(std::iter::repeat_n(b'(', 5_000));
+    deep_unclosed_before_trailer.extend_from_slice(
+        b"\ntrailer << /Size 2 /Root 1 0 R /Info (v1>>v2) /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n",
+    );
+    assert!(matches!(
+        PdfSerializer::parse(&deep_unclosed_before_trailer),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let binary_id_before_encrypt = b"%PDF-1.4\n\
+1 0 obj << /Type /Catalog >> endobj\n\
+xref\n0 2\n\
+trailer << /Size 2 /Root 1 0 R /ID [(a%b[c>>d(e) (f)] /Encrypt 9 0 R >>\n\
+startxref\n0\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(binary_id_before_encrypt),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let broken_array_body_before_xref = b"%PDF-1.5\n\
+1 0 obj [ 10 20\n\
+4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 4 >>\n\
+stream\nABCD\nendstream\nendobj\n\
+startxref\n0\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(broken_array_body_before_xref),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
 }

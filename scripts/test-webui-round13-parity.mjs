@@ -587,7 +587,45 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   assert.equal(firstRibbonTab.textContent, baselineTabText);
   assert.equal(f2.textContent, "456");
 
+  sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(btnStyle.textContent, "리본: 한글(HWP) 7탭");
+  assert.notEqual(firstRibbonTab.textContent, baselineTabText);
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(btnStyle.textContent, "리본: 표준 오피스");
+
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
   assert.equal(f2.textContent, baselineText);
+
+  const btnTheme = document.getElementById("btn-theme-toggle");
+  assert.equal(document.documentElement.dataset.theme || "light", "light");
+  btnTheme.click();
+  await flushAsyncTurns(10);
+  assert.equal(document.documentElement.dataset.theme, "dark");
+
+  userClick(document.querySelector('[data-category="view"]'));
+  await flushAsyncTurns(10);
+  const ribbonThemeBtn = document.querySelector('[data-command-id="sheet-view-theme"]');
+  assert.ok(ribbonThemeBtn);
+  ribbonThemeBtn.click();
+  await flushAsyncTurns(10);
+  assert.equal(document.documentElement.dataset.theme, "light");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(document.documentElement.dataset.theme, "dark");
+
+  sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(document.documentElement.dataset.theme, "light");
+
+  assert.equal(
+    sandbox.__EASYOFFICE_RIBBON_CATALOG__.DEFAULT_HWP_EDITOR_HTML.includes(
+      'id="hwp-manuscript-preview" class="manuscript-notice"'
+    ),
+    true
+  );
 });

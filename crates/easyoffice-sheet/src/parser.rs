@@ -139,8 +139,29 @@ fn needs_sheet_quoting(raw_sheet: &str) -> bool {
         || raw_sheet.contains('$')
         || raw_sheet.eq_ignore_ascii_case("TRUE")
         || raw_sheet.eq_ignore_ascii_case("FALSE")
-        || PackedCellCoordinate::parse_a1(raw_sheet).is_ok()
         || looks_like_ascii_cell_token(raw_sheet)
+}
+
+fn classify_failed_a1_token(raw: &str) -> FormulaError {
+    let bytes = raw.trim().as_bytes();
+    let mut i = usize::from(bytes.first() == Some(&b'$'));
+    let mut letters = 0usize;
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        letters += 1;
+        i += 1;
+    }
+    if !(1..=3).contains(&letters) {
+        return FormulaError::Name;
+    }
+    if bytes.get(i) == Some(&b'$') {
+        i += 1;
+    }
+    let digits = &bytes[i..];
+    if !digits.is_empty() && digits.iter().all(u8::is_ascii_digit) {
+        FormulaError::Ref
+    } else {
+        FormulaError::Name
+    }
 }
 
 fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
@@ -680,8 +701,7 @@ impl Parser {
                     let Some(Token::Ident(cell_ident)) = self.next() else {
                         return Err(FormulaError::Ref);
                     };
-                    let start_coord = PackedCellCoordinate::parse_a1(&cell_ident)
-                        .map_err(|_| FormulaError::Ref)?;
+                    let start_coord = PackedCellCoordinate::parse_a1(&cell_ident);
                     if matches!(self.peek(), Some(Token::Colon)) {
                         self.next();
                         let Some(Token::Ident(s)) = self.next() else {
@@ -699,15 +719,22 @@ impl Parser {
                         } else {
                             s
                         };
-                        let end_coord = PackedCellCoordinate::parse_a1(&end_ident)
-                            .map_err(|_| FormulaError::Ref)?;
-                        let range = CellRange::new(start_coord, end_coord)
-                            .map_err(|_| FormulaError::Ref)?;
+                        let (Ok(sc), Ok(ec)) =
+                            (start_coord, PackedCellCoordinate::parse_a1(&end_ident))
+                        else {
+                            return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                        };
+                        let Ok(range) = CellRange::new(sc, ec) else {
+                            return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                        };
                         return Ok(Expr::SheetRange { sheet: name, range });
                     }
+                    let Ok(sc) = start_coord else {
+                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                    };
                     return Ok(Expr::SheetCell {
                         sheet: name,
-                        coord: start_coord,
+                        coord: sc,
                     });
                 }
 
@@ -740,8 +767,7 @@ impl Parser {
                     return Ok(Expr::Boolean(false));
                 }
 
-                let start_coord =
-                    PackedCellCoordinate::parse_a1(&name).map_err(|_| FormulaError::Name)?;
+                let start_coord = PackedCellCoordinate::parse_a1(&name);
                 if matches!(self.peek(), Some(Token::Colon)) {
                     self.next();
                     let Some(Token::Ident(end_name)) = self.next() else {
@@ -750,13 +776,19 @@ impl Parser {
                     if matches!(self.peek(), Some(Token::Bang)) {
                         return Err(FormulaError::Ref);
                     }
-                    let end_coord =
-                        PackedCellCoordinate::parse_a1(&end_name).map_err(|_| FormulaError::Ref)?;
-                    let range =
-                        CellRange::new(start_coord, end_coord).map_err(|_| FormulaError::Ref)?;
+                    let (Ok(sc), Ok(ec)) = (start_coord, PackedCellCoordinate::parse_a1(&end_name))
+                    else {
+                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                    };
+                    let Ok(range) = CellRange::new(sc, ec) else {
+                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                    };
                     return Ok(Expr::Range(range));
                 }
-                Ok(Expr::Cell(start_coord))
+                let Ok(sc) = start_coord else {
+                    return Ok(Expr::ErrorLiteral(classify_failed_a1_token(&name)));
+                };
+                Ok(Expr::Cell(sc))
             }
             _ => Err(FormulaError::Value),
         }

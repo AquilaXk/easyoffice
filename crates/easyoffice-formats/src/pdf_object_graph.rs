@@ -3,10 +3,10 @@ mod pdf_damaged_encrypt;
 
 use crate::pdf_stream_parser::{
     contains_subslice, decode_pdf_hex_string, decode_pdf_name, has_structural_after_endobj,
-    is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header, skip_pdf_ws_and_comments,
-    span_crosses_object_boundary, step_indexed_non_code_token, step_pdf_non_code_token,
-    unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable, PdfNonCodeKind,
-    PdfNonCodeStep,
+    is_paren_reset_boundary, is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
+    skip_pdf_ws_and_comments, span_crosses_object_boundary, step_indexed_non_code_token,
+    step_pdf_non_code_token, unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable,
+    PdfNonCodeKind, PdfNonCodeStep,
 };
 use crate::EasyOfficeError;
 pub(super) use pdf_damaged_encrypt::fail_corrupted_or_encrypted;
@@ -51,6 +51,45 @@ pub(super) fn dict_get<'a>(
 
 pub(super) fn dict_has_non_null_key(entries: &[(String, PdfObjValue)], key: &str) -> bool {
     dict_get(entries, key).is_some_and(|v| !matches!(v, PdfObjValue::Null))
+}
+
+fn value_swallowed_structural_encrypt(val: &PdfObjValue) -> bool {
+    match val {
+        PdfObjValue::ParenStr(raw) => {
+            contains_subslice(raw, b"/Encrypt")
+                && (0..raw.len()).any(|i| is_paren_reset_boundary(raw, i).is_some())
+        }
+        PdfObjValue::Array(items) => items.iter().any(value_swallowed_structural_encrypt),
+        PdfObjValue::Dict(entries) => entries
+            .iter()
+            .any(|(_, v)| value_swallowed_structural_encrypt(v)),
+        _ => false,
+    }
+}
+
+pub(super) fn dict_has_suspicious_id(entries: &[(String, PdfObjValue)]) -> bool {
+    if entries
+        .iter()
+        .any(|(_, v)| value_swallowed_structural_encrypt(v))
+    {
+        return true;
+    }
+    let Some(val) = dict_get(entries, "/ID") else {
+        return false;
+    };
+    let PdfObjValue::Array(items) = val else {
+        return true;
+    };
+    if items.len() != 2 {
+        return true;
+    };
+    items.iter().any(|item| match item {
+        PdfObjValue::ParenStr(raw) => {
+            contains_subslice(raw, b"/Encrypt") || contains_subslice(raw, b"/Type")
+        }
+        PdfObjValue::HexStr(_) => false,
+        _ => true,
+    })
 }
 
 pub(super) fn dict_name_eq(entries: &[(String, PdfObjValue)], key: &str, expected: &str) -> bool {
@@ -162,15 +201,6 @@ pub(super) fn resolve_catalog_and_pages_target<'a>(
         });
 
     (title, pages_target)
-}
-
-pub(super) fn parse_pdf_value(
-    bytes: &[u8],
-    pos: usize,
-    limit: usize,
-    depth: usize,
-) -> Result<Option<(PdfObjValue, usize)>, ()> {
-    parse_pdf_value_with_table(bytes, None, pos, limit, depth)
 }
 
 pub(super) fn parse_pdf_value_with_table(
@@ -414,6 +444,42 @@ pub(super) fn resolve_stream_bounds(
         .or_else(|| scan_stream_to_endstream(bytes, start, false))
 }
 
+pub(super) fn parse_direct_int_endobj(
+    bytes: &[u8],
+    after_hdr: usize,
+    limit: usize,
+) -> Result<(usize, usize), usize> {
+    let p = skip_pdf_ws_and_comments(bytes, after_hdr, limit);
+    if p >= limit {
+        return Err(p);
+    }
+    let mut d = p;
+    if matches!(bytes[d], b'+' | b'-') {
+        d += 1;
+    }
+    let digit_start = d;
+    while d < limit && bytes[d].is_ascii_digit() {
+        d += 1;
+    }
+    if d == digit_start || (d < limit && !is_pdf_delim_or_ws(bytes[d])) {
+        return Err(d.max(after_hdr));
+    }
+    let end_p = skip_pdf_ws_and_comments(bytes, d, limit);
+    if !is_standalone_pdf_kw(&bytes[..limit], end_p, b"endobj") {
+        return Err(end_p.max(after_hdr));
+    }
+    let Ok(s) = std::str::from_utf8(&bytes[p..d]) else {
+        return Err(end_p + 6);
+    };
+    let Ok(n) = s.parse::<i64>() else {
+        return Err(end_p + 6);
+    };
+    let Ok(u) = usize::try_from(n) else {
+        return Err(end_p + 6);
+    };
+    Ok((u, end_p + 6))
+}
+
 fn lookup_forward_int_obj(
     bytes: &[u8],
     stream_start: usize,
@@ -423,23 +489,33 @@ fn lookup_forward_int_obj(
     let mut q = stream_start;
     let mut fallback = None;
     while q < bytes.len() {
-        if let Some((on, gn, after_hdr)) = parse_indirect_obj_header(bytes, q, bytes.len()) {
-            if on == target_obj && gn == target_gen {
-                if let Ok(Some((PdfObjValue::Int(n), after_val))) =
-                    parse_pdf_value(bytes, after_hdr, bytes.len(), 0)
-                {
-                    let end_p = skip_pdf_ws_and_comments(bytes, after_val, bytes.len());
-                    if is_standalone_pdf_kw(bytes, end_p, b"endobj") {
-                        if let Ok(u) = usize::try_from(n) {
+        if bytes[q] == b'%' {
+            while q < bytes.len() && bytes[q] != b'\n' && bytes[q] != b'\r' {
+                q += 1;
+            }
+            continue;
+        }
+        if bytes[q].is_ascii_digit() && (q == 0 || is_pdf_delim_or_ws(bytes[q - 1])) {
+            if let Some((on, gn, after_hdr)) = parse_indirect_obj_header(bytes, q, bytes.len()) {
+                match parse_direct_int_endobj(bytes, after_hdr, bytes.len()) {
+                    Ok((u, next_q)) => {
+                        if on == target_obj && gn == target_gen {
                             if verify_direct_stream_bounds(bytes, stream_start, u).is_some() {
                                 return Some(u);
                             }
                             fallback.get_or_insert(u);
                         }
+                        q = next_q;
+                    }
+                    Err(next_q) => {
+                        q = next_q.max(after_hdr);
                     }
                 }
+                continue;
             }
-            q = after_hdr;
+            while q < bytes.len() && bytes[q].is_ascii_digit() {
+                q += 1;
+            }
             continue;
         }
         q += 1;
@@ -597,4 +673,139 @@ pub(super) fn stream_contains_forbidden_b64_comment(stream_bytes: &[u8]) -> bool
     } else {
         contains_subslice(stream_bytes, b"%EasyOfficePDFModelBase64:")
     }
+}
+
+fn strip_ws(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+fn wrap_line_64(s: &str, trim_blank: bool) -> Vec<String> {
+    let target = if trim_blank { s.trim() } else { s };
+    if trim_blank && target.is_empty() {
+        return Vec::new();
+    }
+    let chars: Vec<char> = target.chars().collect();
+    if chars.len() <= 64 {
+        vec![target.to_string()]
+    } else {
+        chars.chunks(64).map(|c| c.iter().collect()).collect()
+    }
+}
+
+fn expand_logical_pages_to_chunks(logical_pages: &[&str], mode: u8) -> Vec<String> {
+    const MAX_LINES_PER_PDF_PAGE: usize = 42;
+    let mut out = Vec::with_capacity(logical_pages.len());
+    for &text in logical_pages {
+        let lines: Vec<String> = match mode {
+            0 => text.split('\n').map(str::to_string).collect(),
+            1 => text
+                .split('\n')
+                .flat_map(|l| wrap_line_64(l, false))
+                .collect(),
+            _ => text
+                .split('\n')
+                .flat_map(|l| wrap_line_64(l, true))
+                .collect(),
+        };
+        if lines.len() <= MAX_LINES_PER_PDF_PAGE {
+            out.push(text.to_string());
+        } else {
+            out.extend(lines.chunks(MAX_LINES_PER_PDF_PAGE).map(|c| c.join("\n")));
+        }
+    }
+    out
+}
+
+fn same_ws_stripped(a: &[&str], b: &[&str]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| strip_ws(x) == strip_ws(y))
+}
+
+fn matches_pages_1to1(logical_pages: &[&str], page_body_texts: &[&str]) -> bool {
+    if same_ws_stripped(logical_pages, page_body_texts) {
+        return true;
+    }
+    [0u8, 1u8, 2u8].into_iter().any(|mode| {
+        let chunks = expand_logical_pages_to_chunks(logical_pages, mode);
+        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        same_ws_stripped(&refs, page_body_texts)
+    })
+}
+
+fn extract_validated_page_text(p_entries: &[(String, crate::StrictJsonValue)]) -> Option<&str> {
+    let ext_str = match crate::StrictJsonValue::get_field(p_entries, "extractedText") {
+        Some(v) => Some(v.as_str()?),
+        None => None,
+    };
+    let body_str = match crate::StrictJsonValue::get_field(p_entries, "bodyText") {
+        Some(v) => Some(v.as_str()?),
+        None => None,
+    };
+    if matches!((ext_str, body_str), (Some(a), Some(b)) if a != b) {
+        return None;
+    }
+    ext_str.or(body_str)
+}
+
+pub(super) fn validate_pdf_trailer_json(
+    decoded: &str,
+    expected_title: &str,
+    page_body_texts: &[&str],
+    parsed_watermark: Option<&str>,
+) -> Option<String> {
+    let Ok(root) = crate::StrictJsonValue::parse(decoded) else {
+        return None;
+    };
+    let root_entries = root.as_object()?;
+    let json_title = crate::StrictJsonValue::get_str(root_entries, "title")?;
+    let normalized_json_title = json_title.replace(['\r', '\n'], " ");
+    if json_title != expected_title && normalized_json_title != expected_title {
+        return None;
+    }
+    match crate::StrictJsonValue::get_field(root_entries, "watermarkText") {
+        Some(crate::StrictJsonValue::Str(wm)) => {
+            if wm.is_empty() {
+                if parsed_watermark.is_some() {
+                    return None;
+                }
+            } else if parsed_watermark != Some(wm.as_str()) {
+                return None;
+            }
+        }
+        Some(crate::StrictJsonValue::Null) | None => {
+            if parsed_watermark.is_some() {
+                return None;
+            }
+        }
+        Some(_) => return None,
+    }
+    let root_body_field = crate::StrictJsonValue::get_field(root_entries, "bodyText");
+    if let Some(pages_val) = crate::StrictJsonValue::get_field(root_entries, "pages") {
+        let page_items = pages_val.as_array()?;
+        if page_items.is_empty() || page_items.len() > page_body_texts.len() {
+            return None;
+        }
+        let mut json_page_texts = Vec::with_capacity(page_items.len());
+        for item in page_items {
+            let p_entries = item.as_object()?;
+            let text = extract_validated_page_text(p_entries)?;
+            json_page_texts.push(text);
+        }
+        if let Some(rb) = root_body_field {
+            let rb_str = rb.as_str()?;
+            if strip_ws(rb_str) != strip_ws(&json_page_texts.join("\n")) {
+                return None;
+            }
+        }
+        if matches_pages_1to1(&json_page_texts, page_body_texts) {
+            return Some(json_title.to_string());
+        }
+        return None;
+    }
+    if let Some(rb) = root_body_field {
+        let body_str = rb.as_str()?;
+        if matches_pages_1to1(&[body_str], page_body_texts) {
+            return Some(json_title.to_string());
+        }
+    }
+    None
 }

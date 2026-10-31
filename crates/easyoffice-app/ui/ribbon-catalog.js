@@ -219,7 +219,7 @@
     '<table id="doc-table" class="sheet-table doc-inline-table"><thead><tr><th>소관 부서</th><th>담당자</th><th>집행액(백만원)</th></tr></thead><tbody id="doc-table-body">' +
     DEFAULT_HWP_TABLE_ROWS +
     "</tbody></table>" +
-    '<p id="hwp-manuscript-preview" class="hwp-manuscript-notice" hidden>한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성</p>';
+    '<p id="hwp-manuscript-preview" class="manuscript-notice" hidden>한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성</p>';
 
   function createDefaultRibbonState() {
     return {
