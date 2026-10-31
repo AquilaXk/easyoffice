@@ -1,4 +1,5 @@
 use easyoffice_app::{run_self_test, EasyOfficeIpcRouter};
+use easyoffice_formats::StrictJsonValue;
 use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -10,80 +11,69 @@ use std::time::Duration;
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
+const OFFLINE_FORMULA_AST_JS: &str = include_str!("../ui/offline-formula-ast.js");
+const OFFLINE_FORMULA_EVAL_JS: &str = include_str!("../ui/offline-formula-eval.js");
+const OFFLINE_RPC_JS: &str = include_str!("../ui/offline-rpc.js");
+const PII_DOM_SCRUBBER_JS: &str = include_str!("../ui/pii-dom-scrubber.js");
+const SHEET_STORE_JS: &str = include_str!("../ui/sheet-store.js");
+const RIBBON_CATALOG_JS: &str = include_str!("../ui/ribbon-catalog.js");
+const WORKSPACE_TOOLS_JS: &str = include_str!("../ui/workspace-tools.js");
+const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
+const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
+const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
 const APP_JS: &str = include_str!("../ui/app.js");
-const MAX_HTTP_BODY_BYTES: usize = 262_144;
+const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
 const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
 
-fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{key}\"");
-    let start = json.find(&pattern)? + pattern.len();
-    let rest = json[start..].trim_start();
-    let rest = rest.strip_prefix(':')?.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let mut out = String::new();
-    let mut chars = rest.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            match chars.next()? {
-                'n' => out.push('\n'),
-                'r' => out.push('\r'),
-                't' => out.push('\t'),
-                'b' => out.push('\u{0008}'),
-                'f' => out.push('\u{000C}'),
-                '"' => out.push('"'),
-                '/' => out.push('/'),
-                '\\' => out.push('\\'),
-                'u' => {
-                    let mut hex = String::with_capacity(4);
-                    for _ in 0..4 {
-                        hex.push(chars.next()?);
-                    }
-                    let code = u32::from_str_radix(&hex, 16).ok()?;
-                    if (0xD800..=0xDBFF).contains(&code) {
-                        if chars.next()? != '\\' || chars.next()? != 'u' {
-                            return None;
-                        }
-                        let mut low_hex = String::with_capacity(4);
-                        for _ in 0..4 {
-                            low_hex.push(chars.next()?);
-                        }
-                        let low = u32::from_str_radix(&low_hex, 16).ok()?;
-                        if !(0xDC00..=0xDFFF).contains(&low) {
-                            return None;
-                        }
-                        let combined = 0x10000 + (((code - 0xD800) << 10) | (low - 0xDC00));
-                        out.push(char::from_u32(combined)?);
-                    } else {
-                        out.push(char::from_u32(code)?);
-                    }
-                }
-                other => out.push(other),
-            }
-        } else if ch == '"' {
-            return Some(out);
-        } else {
-            out.push(ch);
-        }
+fn parse_ipc_http_body(
+    body: &str,
+) -> Result<(String, String), easyoffice_formats::EasyOfficeError> {
+    let trimmed = body.strip_prefix('\u{FEFF}').unwrap_or(body).trim();
+    if trimmed.starts_with('{') {
+        let root = StrictJsonValue::parse(trimmed)?;
+        let entries = root.as_object().ok_or_else(|| {
+            easyoffice_formats::EasyOfficeError::InvalidArgument(
+                "IPC HTTP 요청 본문은 JSON 객체여야 합니다.".to_string(),
+            )
+        })?;
+        let cmd = StrictJsonValue::get_str(entries, "command")
+            .ok_or_else(|| {
+                easyoffice_formats::EasyOfficeError::InvalidArgument(
+                    "IPC JSON 요청에 문자열 'command' 필드가 필요합니다.".to_string(),
+                )
+            })?
+            .to_string();
+        let payload = match StrictJsonValue::get_field(entries, "payload") {
+            Some(v) => v.to_scalar_string().unwrap_or_else(|| v.to_json_string()),
+            None => String::new(),
+        };
+        Ok((cmd, payload))
+    } else if let Some((c, p)) = trimmed.split_once('|') {
+        Ok((c.trim().to_string(), p.to_string()))
+    } else {
+        Ok((trimmed.to_string(), String::new()))
     }
-    None
 }
 
 fn is_allowed_host(host: &str, port: u16) -> bool {
     let h = host.trim();
     h.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
         || h.eq_ignore_ascii_case(&format!("localhost:{port}"))
+        || h.eq_ignore_ascii_case(&format!("[::1]:{port}"))
         || h.eq_ignore_ascii_case("127.0.0.1")
         || h.eq_ignore_ascii_case("localhost")
+        || h.eq_ignore_ascii_case("[::1]")
 }
 
 fn is_allowed_origin(origin: &str, port: u16) -> bool {
     let o = origin.trim().trim_end_matches('/');
     o.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
         || o.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
+        || o.eq_ignore_ascii_case(&format!("http://[::1]:{port}"))
 }
 
 fn write_http_413(stream: &mut TcpStream) {
-    let body = "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(256KB)를 초과했습니다.\"}";
+    let body = "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(1MB)를 초과했습니다.\"}";
     let resp = format!(
         "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
         body.len()
@@ -200,23 +190,65 @@ fn handle_http_connection(mut stream: TcpStream, port: u16) {
             ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
         }
         ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
+        ("GET", "/offline-formula-ast.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            OFFLINE_FORMULA_AST_JS.to_string(),
+        ),
+        ("GET", "/offline-formula-eval.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            OFFLINE_FORMULA_EVAL_JS.to_string(),
+        ),
+        ("GET", "/offline-rpc.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            OFFLINE_RPC_JS.to_string(),
+        ),
+        ("GET", "/pii-dom-scrubber.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            PII_DOM_SCRUBBER_JS.to_string(),
+        ),
+        ("GET", "/sheet-store.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            SHEET_STORE_JS.to_string(),
+        ),
+        ("GET", "/ribbon-catalog.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            RIBBON_CATALOG_JS.to_string(),
+        ),
+        ("GET", "/workspace-tools.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            WORKSPACE_TOOLS_JS.to_string(),
+        ),
+        ("GET", "/workspace-panels.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            WORKSPACE_PANELS_JS.to_string(),
+        ),
+        ("GET", "/sheet-controller.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            SHEET_CONTROLLER_JS.to_string(),
+        ),
+        ("GET", "/ribbon-history.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            RIBBON_HISTORY_JS.to_string(),
+        ),
         ("GET", "/app.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
             APP_JS.to_string(),
         ),
         ("POST", "/api/ipc") => {
-            let trimmed = body_str.trim();
-            let (cmd, payload) = if trimmed.starts_with('{') {
-                let c = extract_json_string_field(trimmed, "command").unwrap_or_default();
-                let p = extract_json_string_field(trimmed, "payload").unwrap_or_default();
-                (c, p)
-            } else if let Some((c, p)) = trimmed.split_once('|') {
-                (c.trim().to_string(), p.to_string())
-            } else {
-                (trimmed.to_string(), String::new())
-            };
-            match EasyOfficeIpcRouter::dispatch(&cmd, &payload) {
+            let dispatched = parse_ipc_http_body(&body_str)
+                .and_then(|(cmd, payload)| EasyOfficeIpcRouter::dispatch(&cmd, &payload));
+            match dispatched {
                 Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
                 Err(err) => {
                     let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
@@ -246,16 +278,54 @@ fn handle_http_connection(mut stream: TcpStream, port: u16) {
     let _ = stream.flush();
 }
 
-fn serve_webui(port: u16) -> ExitCode {
-    let addr = format!("127.0.0.1:{port}");
-    let listener = match TcpListener::bind(&addr) {
+fn bind_with_fallback(preferred_port: u16) -> std::io::Result<TcpListener> {
+    if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{preferred_port}")) {
+        return Ok(listener);
+    }
+    if preferred_port == 8787 {
+        for candidate in 8788..=8800 {
+            if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{candidate}")) {
+                return Ok(listener);
+            }
+        }
+    }
+    TcpListener::bind("127.0.0.1:0")
+}
+
+fn try_open_desktop_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
+fn serve_webui(preferred_port: u16, open_browser: bool) -> ExitCode {
+    let listener = match bind_with_fallback(preferred_port) {
         Ok(l) => l,
         Err(err) => {
-            eprintln!("Failed to bind {addr}: {err}");
+            eprintln!("Failed to bind 127.0.0.1:{preferred_port}: {err}");
             return ExitCode::FAILURE;
         }
     };
-    println!("EasyOffice WebUI Server listening on http://{addr}");
+    let bound_port = listener
+        .local_addr()
+        .map(|a| a.port())
+        .unwrap_or(preferred_port);
+    let url = format!("http://127.0.0.1:{bound_port}");
+    println!("EasyOffice WebUI Server listening on {url}");
+    if open_browser {
+        try_open_desktop_browser(&url);
+    }
     let active_threads = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming().flatten() {
         let current = active_threads.load(Ordering::Relaxed);
@@ -263,11 +333,11 @@ fn serve_webui(port: u16) -> ExitCode {
             active_threads.fetch_add(1, Ordering::Relaxed);
             let counter = Arc::clone(&active_threads);
             thread::spawn(move || {
-                handle_http_connection(stream, port);
+                handle_http_connection(stream, bound_port);
                 counter.fetch_sub(1, Ordering::Relaxed);
             });
         } else {
-            handle_http_connection(stream, port);
+            handle_http_connection(stream, bound_port);
         }
     }
     ExitCode::SUCCESS
@@ -289,12 +359,23 @@ fn main() -> ExitCode {
         }
     }
 
+    let open_flag = args.iter().any(|a| a == "--open");
     if let Some(idx) = args.iter().position(|a| a == "--serve") {
         let port = args
             .get(idx + 1)
             .and_then(|s| s.parse::<u16>().ok())
             .unwrap_or(8787);
-        return serve_webui(port);
+        return serve_webui(port, open_flag);
+    }
+    if open_flag {
+        return serve_webui(8787, true);
+    }
+
+    let headless = args.iter().any(|a| a == "--bootstrap" || a == "--headless")
+        || env::var("EASYOFFICE_HEADLESS").is_ok()
+        || env::var("CI").is_ok();
+    if cfg!(target_os = "windows") && args.is_empty() && !headless {
+        return serve_webui(8787, true);
     }
 
     match EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "") {
@@ -314,19 +395,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_json_string_field_unicode_escapes_and_host_origin_guards() {
+    fn test_parse_ipc_http_body_unicode_escapes_and_host_origin_guards() {
         let json = r#"{"command":"evaluate_sheet","payload":"\uAC00\uB098\uB2E4\uD83D\uDE00\/A1=10\nB1=20"}"#;
-        assert_eq!(
-            extract_json_string_field(json, "command").as_deref(),
-            Some("evaluate_sheet")
-        );
-        assert_eq!(
-            extract_json_string_field(json, "payload").as_deref(),
-            Some("가나다😀/A1=10\nB1=20")
-        );
+        let (cmd, payload) = parse_ipc_http_body(json).unwrap();
+        assert_eq!(cmd, "evaluate_sheet");
+        assert_eq!(payload, "가나다😀/A1=10\nB1=20");
+
+        let nested = r#"{"command":"evaluate_sheet","payload":{"sheet":"Sheet1","cells":[{"cell":"A1","value":42}],"expr":"A1"}}"#;
+        let (nested_cmd, nested_payload) = parse_ipc_http_body(nested).unwrap();
+        assert_eq!(nested_cmd, "evaluate_sheet");
+        let dispatched = EasyOfficeIpcRouter::dispatch(&nested_cmd, &nested_payload).unwrap();
+        assert!(dispatched.contains("\"value\":\"42\""));
+
+        assert!(parse_ipc_http_body(r#"{"command":"evaluate_sheet","command":"dup"}"#).is_err());
         assert!(is_allowed_host("127.0.0.1:8787", 8787));
+        assert!(is_allowed_host("[::1]:8787", 8787));
+        assert!(is_allowed_host("[::1]", 8787));
         assert!(!is_allowed_host("evil.example.com", 8787));
         assert!(is_allowed_origin("http://localhost:8787/", 8787));
+        assert!(is_allowed_origin("http://[::1]:8787/", 8787));
         assert!(!is_allowed_origin("http://evil.example.com", 8787));
     }
 }

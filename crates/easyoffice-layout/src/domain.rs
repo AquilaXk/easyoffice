@@ -163,6 +163,8 @@ impl DocumentTableModel {
         for span in &mut self.spans {
             if span.start_row >= idx {
                 span.start_row += 1;
+            } else if idx < span.start_row + span.row_span {
+                span.row_span += 1;
             }
         }
         Ok(())
@@ -173,13 +175,16 @@ impl DocumentTableModel {
         col_idx: usize,
         default_text: &str,
     ) -> Result<(), EasyOfficeError> {
+        let idx = col_idx.min(self.col_count());
         for row in &mut self.rows {
-            let idx = col_idx.min(row.len());
-            row.insert(idx, default_text.to_string());
+            let row_idx = col_idx.min(row.len());
+            row.insert(row_idx, default_text.to_string());
         }
         for span in &mut self.spans {
-            if span.start_col >= col_idx {
+            if span.start_col >= idx {
                 span.start_col += 1;
+            } else if idx < span.start_col + span.col_span {
+                span.col_span += 1;
             }
         }
         Ok(())

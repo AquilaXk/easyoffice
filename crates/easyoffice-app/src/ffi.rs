@@ -138,19 +138,24 @@ mod tests {
             EasyOfficeIpcRouter::dispatch("detect_format", "docx|HEX:504B03041400").unwrap();
         assert!(detect_res.contains("\"format\":\"docx\""));
 
-        let sheet_res =
-            EasyOfficeIpcRouter::dispatch("evaluate_sheet", "A1=150;A2=250;A3==SUM(A1:A2)?A3")
-                .unwrap();
+        let sheet_res = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","expr":"A3","cells":[{"cell":"A1","value":150},{"cell":"A2","value":250},{"cell":"A3","value":"=SUM(A1:A2)"}]}"#,
+        )
+        .unwrap();
         assert!(sheet_res.contains("\"value\":\"400\""));
         assert!(sheet_res.contains("\"conditionalMatch\":true"));
 
-        let wb_res =
-            EasyOfficeIpcRouter::dispatch("evaluate_workbook_formula", "=Sheet2!A1+50").unwrap();
+        let wb_res = EasyOfficeIpcRouter::dispatch(
+            "evaluate_workbook_formula",
+            r#"{"sheet":"Sheet1","expr":"=Sheet2!A1+50","cells":[]}"#,
+        )
+        .unwrap();
         assert!(wb_res.contains("\"value\":\"150\""));
 
         let wb_dyn_res = EasyOfficeIpcRouter::dispatch(
             "evaluate_workbook_formula",
-            "Sheet2!A1=300;Sheet1!A1=700?=Sheet1!A1+Sheet2!A1",
+            r#"{"sheet":"Sheet1","expr":"=Sheet1!A1+Sheet2!A1","cells":[{"sheet":"Sheet2","cell":"A1","value":300},{"sheet":"Sheet1","cell":"A1","value":700}]}"#,
         )
         .unwrap();
         assert!(wb_dyn_res.contains("\"value\":\"1000\""));
@@ -176,7 +181,7 @@ mod tests {
 
         let sec_res = EasyOfficeIpcRouter::dispatch(
             "audit_security",
-            "word/document.xml,512,2048,false|<doc>safe</doc>",
+            r#"{"entries":[{"name":"word/document.xml","compressed":512,"uncompressed":2048,"encrypted":false}],"xml":"<doc>safe</doc>"}"#,
         )
         .unwrap();
         assert!(sec_res.contains("\"status\":\"SAFE\""));
@@ -204,25 +209,26 @@ mod tests {
         .unwrap();
         assert!(pii_res.contains("******-*******"));
         assert!(pii_res.contains("010-****-****"));
+        assert!(pii_res.contains("\"spans\":["));
 
         assert!(matches!(
             EasyOfficeIpcRouter::dispatch(
                 "audit_security",
-                "../../etc/passwd,100,200,false|<doc>safe</doc>"
+                r#"{"entries":[{"name":"../../etc/passwd","compressed":100,"uncompressed":200,"encrypted":false}],"xml":"<doc>safe</doc>"}"#
             ),
             Err(EasyOfficeError::SecurityViolation(_))
         ));
         assert!(matches!(
             EasyOfficeIpcRouter::dispatch(
                 "audit_security",
-                "word/document.xml,10,50000,false|<doc>safe</doc>"
+                r#"{"entries":[{"name":"word/document.xml","compressed":10,"uncompressed":50000,"encrypted":false}],"xml":"<doc>safe</doc>"}"#
             ),
             Err(EasyOfficeError::DecompressionBombDetected { .. })
         ));
 
         let summary = run_self_test().unwrap();
         assert!(summary.contains("PASSED"));
-        assert!(summary.contains("ipc_commands=13"));
+        assert!(summary.contains("ipc_commands=15"));
     }
 
     #[test]

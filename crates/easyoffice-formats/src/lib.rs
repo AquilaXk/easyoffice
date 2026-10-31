@@ -1,22 +1,27 @@
 use std::fmt;
 
 pub mod converter;
+pub mod csv_markdown_codecs;
 pub mod deflate;
 mod legacy_ole2_codec;
 pub mod office_codecs;
 pub mod ole2_codec;
+mod pdf_stream_parser;
 pub mod rtf_xml_helpers;
+pub mod strict_json;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
 pub mod zip_codec;
 
 pub use converter::*;
+pub use csv_markdown_codecs::*;
 pub use deflate::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };
+pub use strict_json::StrictJsonValue;
 pub use text_pdf_codecs::*;
 pub use utf16_swar::{
     decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_scalar_baseline,
@@ -168,11 +173,11 @@ impl DocumentFormat {
             .unwrap_or(trimmed)
             .to_ascii_lowercase();
         match ext.as_str() {
-            "docx" | "dotx" => Some(Self::Docx),
+            "docx" | "dotx" | "docm" | "dotm" => Some(Self::Docx),
             "doc" => Some(Self::Doc),
-            "xlsx" | "xltx" => Some(Self::Xlsx),
+            "xlsx" | "xltx" | "xlsm" | "xltm" => Some(Self::Xlsx),
             "xls" => Some(Self::Xls),
-            "pptx" | "potx" => Some(Self::Pptx),
+            "pptx" | "potx" | "pptm" | "potm" => Some(Self::Pptx),
             "ppsx" => Some(Self::Ppsx),
             "ppt" => Some(Self::Ppt),
             "hwp" => Some(Self::Hwp),

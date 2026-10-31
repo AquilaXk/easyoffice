@@ -16,7 +16,9 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let lookup_val = self.eval_arg_val(&args[0], ctx, depth)?;
-                let Some((sheet_opt, range, _)) = self.extract_range_and_sheet(&args[1]) else {
+                let Some((sheet_opt, range, _)) =
+                    self.extract_range_and_sheet_ctx(&args[1], ctx, depth)?
+                else {
                     return Err(FormulaError::Value);
                 };
                 let idx_num = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as isize;
@@ -74,10 +76,10 @@ impl SheetEngine {
                 let mut best: Option<(u32, EvaluatedCellValue)> = None;
                 for off in 0..outer_count {
                     let (kc, rc) = coord_pair(off as u32)?;
-                    let kv = self.eval_sheet_coord(sheet_opt, kc, ctx, depth);
+                    let kv = self.eval_sheet_coord(sheet_opt.as_deref(), kc, ctx, depth);
                     if !range_lookup {
                         if Self::values_match_wildcard(&kv, &lookup_val) {
-                            return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
+                            return Ok(self.eval_sheet_coord(sheet_opt.as_deref(), rc, ctx, depth));
                         }
                     } else if same_type(&kv, &lookup_val) {
                         if let Some(ord) = Self::compare_excel_values(&kv, &lookup_val) {
@@ -96,7 +98,7 @@ impl SheetEngine {
                 }
                 if let Some((best_off, _)) = best {
                     let (_, rc) = coord_pair(best_off)?;
-                    return Ok(self.eval_sheet_coord(sheet_opt, rc, ctx, depth));
+                    return Ok(self.eval_sheet_coord(sheet_opt.as_deref(), rc, ctx, depth));
                 }
                 Err(FormulaError::Na)
             }
@@ -164,8 +166,8 @@ impl SheetEngine {
                     }
                 };
                 if let (Some(lookup_spec), Some(return_spec)) = (
-                    self.extract_streaming_range(&args[1])?,
-                    self.extract_streaming_range(&args[2])?,
+                    self.extract_streaming_range_ctx(&args[1], ctx, depth)?,
+                    self.extract_streaming_range_ctx(&args[2], ctx, depth)?,
                 ) {
                     let (_, _, _, l_rows, l_cols, _) = lookup_spec;
                     let (_, _, _, r_rows, r_cols, _) = return_spec;
@@ -181,7 +183,7 @@ impl SheetEngine {
                             step
                         };
                         let k = self.eval_streaming_cell_allow_error(
-                            lookup_spec,
+                            &lookup_spec,
                             flat_idx / l_cols,
                             flat_idx % l_cols,
                             ctx,
@@ -189,7 +191,7 @@ impl SheetEngine {
                         )?;
                         if cell_matches(&k) {
                             return self.eval_streaming_cell(
-                                return_spec,
+                                &return_spec,
                                 flat_idx / r_cols,
                                 flat_idx % r_cols,
                                 ctx,
@@ -200,7 +202,7 @@ impl SheetEngine {
                     }
                     if let Some((best_idx, _)) = best_approx {
                         return self.eval_streaming_cell(
-                            return_spec,
+                            &return_spec,
                             best_idx / r_cols,
                             best_idx % r_cols,
                             ctx,
@@ -245,7 +247,8 @@ impl SheetEngine {
                 if args.len() < 2 || args.len() > 3 {
                     return Err(FormulaError::Value);
                 }
-                let Some((sheet_opt, range, transposed)) = self.extract_range_and_sheet(&args[0])
+                let Some((sheet_opt, range, transposed)) =
+                    self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
                 else {
                     return Err(FormulaError::Value);
                 };
@@ -295,7 +298,7 @@ impl SheetEngine {
                 };
                 let coord = PackedCellCoordinate::new(min_r + r_off, min_c + c_off)
                     .map_err(|_| FormulaError::Ref)?;
-                Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth))
+                Ok(self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth))
             }
             "MATCH" => {
                 if args.len() < 2 || args.len() > 3 {
@@ -343,14 +346,14 @@ impl SheetEngine {
                     }
                     false
                 };
-                if let Some(spec) = self.extract_streaming_range(&args[1])? {
+                if let Some(spec) = self.extract_streaming_range_ctx(&args[1], ctx, depth)? {
                     let (_, _, _, rows, cols, _) = spec;
                     let mut idx = 0usize;
                     for r_off in 0..rows {
                         for c_off in 0..cols {
                             idx += 1;
                             let v = self
-                                .eval_streaming_cell_allow_error(spec, r_off, c_off, ctx, depth)?;
+                                .eval_streaming_cell_allow_error(&spec, r_off, c_off, ctx, depth)?;
                             if eval_match_candidate(idx, &v) {
                                 return Ok(EvaluatedCellValue::Number(idx as f64));
                             }
@@ -383,32 +386,37 @@ impl SheetEngine {
                 }
                 Ok(self.eval_expr_ctx(&args[idx as usize], ctx, depth))
             }
-            "OFFSET" => {
-                if args.len() < 3 || args.len() > 5 {
-                    return Err(FormulaError::Value);
-                }
-                let Some((sheet_opt, range, _)) = self.extract_range_and_sheet(&args[0]) else {
+            "OFFSET" | "INDIRECT" => {
+                let expr = Expr::FuncCall {
+                    name: name.to_string(),
+                    args: args.to_vec(),
+                };
+                let Some((sheet_opt, range, _)) =
+                    self.extract_range_and_sheet_ctx(&expr, ctx, depth)?
+                else {
                     return Err(FormulaError::Value);
                 };
-                let dr = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as i64;
-                let dc = self.eval_arg_num(&args[2], ctx, depth)?.trunc() as i64;
-                let base_r = range.start.row().min(range.end.row()) as i64 + dr;
-                let base_c = range.start.col().min(range.end.col()) as i64 + dc;
-                if base_r < 0 || base_c < 0 {
-                    return Err(FormulaError::Ref);
+                if range.start != range.end {
+                    return Err(FormulaError::Value);
                 }
-                let coord = PackedCellCoordinate::new(base_r as u32, base_c as u32)
-                    .map_err(|_| FormulaError::Ref)?;
-                Ok(self.eval_sheet_coord(sheet_opt, coord, ctx, depth))
+                Ok(self.eval_sheet_coord(sheet_opt.as_deref(), range.start, ctx, depth))
             }
             "ROW" | "COLUMN" => {
                 if args.is_empty() {
-                    return Ok(EvaluatedCellValue::Number(1.0));
+                    let v = ctx.current_coord.map_or(1, |c| {
+                        if name == "ROW" {
+                            c.row() + 1
+                        } else {
+                            c.col() + 1
+                        }
+                    });
+                    return Ok(EvaluatedCellValue::Number(v as f64));
                 }
                 if args.len() != 1 {
                     return Err(FormulaError::Value);
                 }
-                let Some((_, range, _)) = self.extract_range_and_sheet(&args[0]) else {
+                let Some((_, range, _)) = self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
+                else {
                     return Err(FormulaError::Value);
                 };
                 let v = if name == "ROW" {
@@ -422,7 +430,9 @@ impl SheetEngine {
                 if args.len() != 1 {
                     return Err(FormulaError::Value);
                 }
-                if let Some((_, range, transposed)) = self.extract_range_and_sheet(&args[0]) {
+                if let Some((_, range, transposed)) =
+                    self.extract_range_and_sheet_ctx(&args[0], ctx, depth)?
+                {
                     let (r, c) = range.dimensions();
                     let ans = match (name == "ROWS", transposed) {
                         (true, false) | (false, true) => r,
@@ -448,23 +458,6 @@ impl SheetEngine {
                         .collect::<Vec<_>>()
                         .join(",");
                     Ok(EvaluatedCellValue::Text(joined))
-                }
-            }
-            "INDIRECT" => {
-                if args.is_empty() || args.len() > 2 {
-                    return Err(FormulaError::Value);
-                }
-                let ref_str = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
-                let trimmed = ref_str.trim();
-                if let Some((sh, cell_part)) = trimmed.split_once('!') {
-                    let sh_clean = sh.trim().trim_matches('\'');
-                    let coord =
-                        PackedCellCoordinate::parse_a1(cell_part).map_err(|_| FormulaError::Ref)?;
-                    Ok(self.eval_sheet_coord(Some(sh_clean), coord, ctx, depth))
-                } else {
-                    let coord =
-                        PackedCellCoordinate::parse_a1(trimmed).map_err(|_| FormulaError::Ref)?;
-                    Ok(self.eval_sheet_coord(None, coord, ctx, depth))
                 }
             }
             _ => Err(FormulaError::Name),

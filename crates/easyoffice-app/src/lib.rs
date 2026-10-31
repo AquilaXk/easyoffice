@@ -1,36 +1,40 @@
 use easyoffice_formats::{
-    deflate_raw, inflate_raw, CommonMarkCodec, CsvCodec, DocumentFormat, EasyOfficeError,
-    FormatDetector, Hwp5Codec, Hwp5DocumentPayload, Hwp5ParagraphRecord, Ole2SecurityGuard,
-    PdfDocumentModel, PdfPageModel, PdfSerializer, UniversalDocumentModel,
-    UniversalFormatConverter, XmlSanitizer, ZipEntryDescriptor, ZipSecurityGuard,
-    ZipSecurityPolicy,
+    EasyOfficeError, FormatDetector, StrictJsonValue, XmlSanitizer, ZipEntryDescriptor,
+    ZipSecurityGuard, ZipSecurityPolicy,
 };
 use easyoffice_layout::{
-    ContextualObjectToolKind, DesktopPlatform, DocumentDomainEngine, DocumentPageLayout,
-    DocumentTableModel, LayoutRect, OfficeModuleKind, PageOrientation, PdfDomainEngine,
-    PdfStudioLayout, RibbonLayoutStyle, SignatureLavenderPalette, SlideDeckTheme,
-    SlideDomainEngine, SlideStageLayout,
+    DesktopPlatform, DocumentPageLayout, OfficeModuleKind, PageOrientation, PdfStudioLayout,
+    RibbonLayoutStyle, SignatureLavenderPalette, SlideDeckTheme, SlideStageLayout,
 };
 use easyoffice_sheet::{
-    CellRange, ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PivotAggregation,
-    SheetEngine, WorkbookEngine,
+    ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PackedCellCoordinate,
+    WorkbookEngine,
 };
 
 pub mod benchmark;
+mod convert_ipc;
 pub mod ffi;
 pub mod ribbon;
+pub mod self_test;
 pub mod smart_tools;
 
 pub use benchmark::*;
 pub use ffi::*;
 pub use ribbon::*;
+pub use self_test::run_self_test;
 pub use smart_tools::*;
 
-static RIBBON_WORKSPACE_STATE: std::sync::OnceLock<std::sync::Mutex<RibbonWorkspaceState>> =
+#[derive(Default)]
+struct SharedRibbonSession {
+    state: RibbonWorkspaceState,
+    history: UndoRedoStack<RibbonWorkspaceState>,
+}
+
+static RIBBON_WORKSPACE_SESSION: std::sync::OnceLock<std::sync::Mutex<SharedRibbonSession>> =
     std::sync::OnceLock::new();
 
-fn shared_ribbon_state() -> &'static std::sync::Mutex<RibbonWorkspaceState> {
-    RIBBON_WORKSPACE_STATE.get_or_init(|| std::sync::Mutex::new(RibbonWorkspaceState::default()))
+fn shared_ribbon_session() -> &'static std::sync::Mutex<SharedRibbonSession> {
+    RIBBON_WORKSPACE_SESSION.get_or_init(|| std::sync::Mutex::new(SharedRibbonSession::default()))
 }
 
 /// Tauri v2 compatible IPC router dispatching desktop workspace commands to pure Rust engines.
@@ -59,6 +63,8 @@ impl EasyOfficeIpcRouter {
             "compute_layout" => Self::handle_compute_layout(payload),
             "audit_security" => Self::handle_audit_security(payload),
             "execute_ribbon_command" => Self::handle_execute_ribbon_command(payload),
+            "undo_ribbon_command" => Self::handle_undo_ribbon_command(),
+            "redo_ribbon_command" => Self::handle_redo_ribbon_command(),
             "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
             "run_smart_assistant" => Self::handle_run_smart_assistant(payload),
             "scrub_pii" => Self::handle_scrub_pii(payload),
@@ -143,173 +149,286 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    fn is_cell_key_prefix_at(s: &str) -> bool {
-        let trimmed = s.trim_start();
-        let mut max_len = trimmed.len().min(64);
-        while max_len > 0 && !trimmed.is_char_boundary(max_len) {
-            max_len -= 1;
-        }
-        let probe = &trimmed[..max_len];
-        let Some((lhs, _)) = probe.split_once('=') else {
-            return false;
-        };
-        let key = lhs.trim();
-        let ref_part = key.split_once('!').map(|(_, r)| r.trim()).unwrap_or(key);
-        let bytes = ref_part.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
-            i += 1;
-        }
-        if i == 0 || i > 3 || i == bytes.len() {
-            return false;
-        }
-        bytes[i..].iter().all(|b| b.is_ascii_digit())
-    }
-
-    fn split_unescaped_query(payload: &str) -> Option<(&str, &str)> {
-        let bytes = payload.as_bytes();
-        for i in (0..bytes.len()).rev() {
-            if bytes[i] == b'?' {
-                let mut backslashes = 0usize;
-                let mut k = i;
-                while k > 0 && bytes[k - 1] == b'\\' {
-                    backslashes += 1;
-                    k -= 1;
-                }
-                if backslashes % 2 == 0 {
-                    return Some((&payload[..i], &payload[i + 1..]));
-                }
-            }
-        }
-        None
-    }
-
-    fn split_cell_assignments(cells_part: &str) -> Vec<(String, String)> {
-        let mut items = Vec::new();
-        let mut current = String::new();
-        let mut seen_eq = false;
-        let mut in_formula = false;
-        let mut rhs_started = false;
-        let mut in_quotes = false;
-        let mut paren_depth = 0usize;
-        let mut idx = 0usize;
-
-        while idx < cells_part.len() {
-            let rest_from_idx = &cells_part[idx..];
-            let ch = rest_from_idx.chars().next().unwrap();
-            let next_idx = idx + ch.len_utf8();
-
-            if ch == '\\' {
-                if let Some(next_ch) = cells_part[next_idx..].chars().next() {
-                    if next_ch == ';' || next_ch == '?' || next_ch == '\\' {
-                        if seen_eq && !rhs_started && !next_ch.is_whitespace() {
-                            rhs_started = true;
-                        }
-                        current.push(next_ch);
-                        idx = next_idx + next_ch.len_utf8();
-                        continue;
-                    }
-                }
-                current.push(ch);
-                idx = next_idx;
-                continue;
-            }
-
-            if !seen_eq && ch == '=' {
-                seen_eq = true;
-                current.push(ch);
-                idx = next_idx;
-                continue;
-            }
-
-            if seen_eq && !rhs_started && !ch.is_whitespace() {
-                rhs_started = true;
-                if ch == '=' {
-                    in_formula = true;
-                }
-            }
-
-            if in_formula && ch == '"' {
-                in_quotes = !in_quotes;
-                current.push(ch);
-                idx = next_idx;
-                continue;
-            }
-
-            if in_formula && !in_quotes {
-                if ch == '(' {
-                    paren_depth += 1;
-                } else if ch == ')' {
-                    paren_depth = paren_depth.saturating_sub(1);
-                }
-            }
-
-            let can_split = if in_formula {
-                !in_quotes && paren_depth == 0
-            } else {
-                true
-            };
-
-            if ch == ';' && can_split {
-                let tail = &cells_part[next_idx..];
-                if tail.trim().is_empty() || Self::is_cell_key_prefix_at(tail) {
-                    let seg = std::mem::take(&mut current);
-                    if let Some((k, v)) = seg.trim().split_once('=') {
-                        items.push((
-                            k.trim().to_string(),
-                            v.trim().replace("%3B", ";").replace("%3F", "?"),
-                        ));
-                    }
-                    seen_eq = false;
-                    in_formula = false;
-                    rhs_started = false;
-                    in_quotes = false;
-                    paren_depth = 0;
-                    idx = next_idx;
-                    continue;
-                }
-            }
-
-            current.push(ch);
-            idx = next_idx;
-        }
-        if let Some((k, v)) = current.trim().split_once('=') {
-            items.push((
-                k.trim().to_string(),
-                v.trim().replace("%3B", ";").replace("%3F", "?"),
-            ));
-        }
-        items
-    }
-
-    /// Payload format: semicolon-separated `A1=val` pairs followed by `?target_expr_or_cell`
-    /// Example: `A1=100;A2=200;A3==SUM(A1:A2)?A3`
-    fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
-        let (cells_part, query_part) =
-            Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
-        let mut sheet = SheetEngine::new("IPC_Sheet");
-        for (addr, val) in Self::split_cell_assignments(cells_part) {
-            if !addr.is_empty() {
-                sheet.set_cell(&addr, &val)?;
-            }
-        }
-        let evaluated = if query_part.trim().starts_with('=') {
-            sheet.evaluate_formula_str(query_part.trim())
+    fn json_sheet_name_or_default<'a>(raw: &'a str, fallback: &'a str) -> &'a str {
+        if raw.trim().is_empty() {
+            fallback
         } else {
-            sheet.evaluate_cell(query_part.trim())
-        };
+            raw
+        }
+    }
+
+    fn is_formula_expr(expr: &str) -> bool {
+        let s = expr.trim_start();
+        if s.starts_with('=') {
+            return true;
+        }
+        if let Some((prefix, rest)) = s.split_once(':') {
+            if prefix.eq_ignore_ascii_case("of")
+                || prefix.eq_ignore_ascii_case("oooc")
+                || prefix.eq_ignore_ascii_case("msoxl")
+            {
+                return rest.trim_start().starts_with('=');
+            }
+        }
+        false
+    }
+
+    fn parse_rpc_json_object(
+        payload: &str,
+    ) -> Result<Vec<(String, StrictJsonValue)>, EasyOfficeError> {
+        let clean = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
+        let root = StrictJsonValue::parse(clean)?;
+        match root {
+            StrictJsonValue::Object(entries) => Ok(entries),
+            _ => Err(EasyOfficeError::InvalidArgument(
+                "RPC JSON 페이로드 루트는 객체여야 합니다.".to_string(),
+            )),
+        }
+    }
+
+    fn optional_json_str<'a>(
+        entries: &'a [(String, StrictJsonValue)],
+        key: &str,
+    ) -> Result<Option<&'a str>, EasyOfficeError> {
+        match StrictJsonValue::get_field(entries, key) {
+            None | Some(StrictJsonValue::Null) => Ok(None),
+            Some(StrictJsonValue::Str(s)) => Ok(Some(s.as_str())),
+            Some(_) => Err(EasyOfficeError::InvalidArgument(format!(
+                "JSON 필드 '{key}'는 문자열이어야 합니다."
+            ))),
+        }
+    }
+
+    fn resolve_default_sheet_from_entries(
+        entries: &[(String, StrictJsonValue)],
+    ) -> Result<String, EasyOfficeError> {
+        if let Some(s) = Self::optional_json_str(entries, "sheet")? {
+            if !s.trim().is_empty() {
+                return Ok(s.to_string());
+            }
+        }
+        if let Some(sheets_val) = StrictJsonValue::get_field(entries, "sheets") {
+            let sheet_items = sheets_val.as_array().ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "JSON 'sheets' 필드는 문자열 배열이어야 합니다.".to_string(),
+                )
+            })?;
+            let mut first_sheet: Option<String> = None;
+            for s_item in sheet_items {
+                let s_name = s_item.as_str().ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(
+                        "JSON 'sheets' 항목은 문자열이어야 합니다.".to_string(),
+                    )
+                })?;
+                if s_name.trim().is_empty() {
+                    return Err(EasyOfficeError::InvalidArgument(
+                        "JSON 'sheets' 항목은 비어 있거나 공백만일 수 없습니다.".to_string(),
+                    ));
+                }
+                if first_sheet.is_none() {
+                    first_sheet = Some(s_name.to_string());
+                }
+            }
+            return Ok(first_sheet.unwrap_or_default());
+        }
+        Ok("Sheet1".to_string())
+    }
+
+    fn build_workbook_from_json_entries(
+        entries: &[(String, StrictJsonValue)],
+        default_sheet: &str,
+        seed_defaults: bool,
+    ) -> Result<WorkbookEngine, EasyOfficeError> {
+        let mut wb = WorkbookEngine::new();
+        let explicit_sheets_val = StrictJsonValue::get_field(entries, "sheets");
+        if let Some(sheets_val) = explicit_sheets_val {
+            let sheet_items = sheets_val.as_array().ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "JSON 'sheets' 필드는 문자열 배열이어야 합니다.".to_string(),
+                )
+            })?;
+            for s_item in sheet_items {
+                let s_name = s_item.as_str().ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(
+                        "JSON 'sheets' 항목은 문자열이어야 합니다.".to_string(),
+                    )
+                })?;
+                if s_name.trim().is_empty() {
+                    return Err(EasyOfficeError::InvalidArgument(
+                        "JSON 'sheets' 항목은 비어 있거나 공백만일 수 없습니다.".to_string(),
+                    ));
+                }
+                wb.add_sheet(s_name);
+            }
+        } else {
+            wb.add_sheet("Sheet1");
+            wb.add_sheet("Sheet2");
+            if !default_sheet.trim().is_empty() {
+                wb.add_sheet(default_sheet);
+            }
+        }
+        let mut seen_sheet1 = false;
+        let mut seen_sheet2 = false;
+        let mut cell_triples: Vec<(String, String, String)> = Vec::new();
+        if let Some(cells_val) = StrictJsonValue::get_field(entries, "cells") {
+            let cells = cells_val.as_array().ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "JSON 'cells' 필드는 배열이어야 합니다.".to_string(),
+                )
+            })?;
+            for item in cells {
+                let c_entries = item.as_object().ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(
+                        "JSON 'cells' 항목은 객체여야 합니다.".to_string(),
+                    )
+                })?;
+                let raw_sh = Self::optional_json_str(c_entries, "sheet")?.unwrap_or(default_sheet);
+                let sh = Self::json_sheet_name_or_default(raw_sh, default_sheet);
+                let addr = Self::optional_json_str(c_entries, "cell")?
+                    .unwrap_or("")
+                    .trim();
+                if addr.is_empty() {
+                    return Err(EasyOfficeError::InvalidArgument(
+                        "JSON 'cells' 항목에 비어 있지 않은 'cell' 주소가 필요합니다.".to_string(),
+                    ));
+                }
+                let val = match StrictJsonValue::get_field(c_entries, "value") {
+                    None => String::new(),
+                    Some(v) => v.to_scalar_string().ok_or_else(|| {
+                        EasyOfficeError::InvalidArgument(
+                            "JSON 셀 'value'는 문자열·숫자·불리언·null 스칼라여야 합니다."
+                                .to_string(),
+                        )
+                    })?,
+                };
+                if WorkbookEngine::is_same_sheet_identity(sh, "Sheet1") {
+                    seen_sheet1 = true;
+                }
+                if WorkbookEngine::is_same_sheet_identity(sh, "Sheet2") {
+                    seen_sheet2 = true;
+                }
+                cell_triples.push((sh.to_string(), addr.to_string(), val));
+            }
+        }
+        if seed_defaults {
+            if !seen_sheet1 && wb.sheet("Sheet1").is_some() {
+                wb.set_cell("Sheet1", "A1", "1200")?;
+                wb.set_cell("Sheet1", "B1", "850")?;
+            }
+            if !seen_sheet2 && wb.sheet("Sheet2").is_some() {
+                wb.set_cell("Sheet2", "A1", "100")?;
+            }
+        }
+        let has_explicit_sheets = explicit_sheets_val.is_some();
+        for (sh, addr, val) in cell_triples {
+            if !has_explicit_sheets && !sh.trim().is_empty() {
+                wb.add_sheet(&sh);
+            }
+            if wb.sheet(&sh).is_some() {
+                wb.set_cell(&sh, &addr, val)?;
+            }
+        }
+        Ok(wb)
+    }
+
+    fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
         let rule = ConditionalFormatRule::GreaterThan(100.0);
-        let cf_match = rule.matches(&evaluated, &[]);
         let dv_rule = DataValidationRule::NumberRange {
             min: 0.0,
             max: 1_000_000.0,
         };
+        let entries = Self::parse_rpc_json_object(payload)?;
+        let default_sh_owned = Self::resolve_default_sheet_from_entries(&entries)?;
+        let default_sh = default_sh_owned.as_str();
+        let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
+        let wb = Self::build_workbook_from_json_entries(&entries, default_sh, false)?;
+        if let Some(targets_val) = StrictJsonValue::get_field(&entries, "targets") {
+            let targets = targets_val.as_array().ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "JSON 'targets' 필드는 배열이어야 합니다.".to_string(),
+                )
+            })?;
+            if !targets.is_empty() {
+                let mut first_expr = "A1".to_string();
+                let mut first_eval = EvaluatedCellValue::Empty;
+                let mut values_entries = Vec::with_capacity(targets.len());
+                let mut target_values_entries = Vec::with_capacity(targets.len());
+                for (idx, item) in targets.iter().enumerate() {
+                    let t_entries = item.as_object().ok_or_else(|| {
+                        EasyOfficeError::InvalidArgument(
+                            "JSON 'targets' 항목은 객체여야 합니다.".to_string(),
+                        )
+                    })?;
+                    let sh = Self::json_sheet_name_or_default(
+                        Self::optional_json_str(t_entries, "sheet")?.unwrap_or(default_sh),
+                        default_sh,
+                    );
+                    let expr = Self::optional_json_str(t_entries, "cell")?
+                        .unwrap_or("")
+                        .trim();
+                    if expr.is_empty() {
+                        return Err(EasyOfficeError::InvalidArgument(
+                            "JSON 'targets' 항목에 비어 있지 않은 'cell' 필드가 필요합니다."
+                                .to_string(),
+                        ));
+                    }
+                    let val = if Self::is_formula_expr(expr) {
+                        wb.evaluate_formula_on_sheet_at(sh, anchor_coord, expr)
+                    } else {
+                        wb.evaluate_cell(sh, expr)
+                    };
+                    let display = val.to_display_string();
+                    let escaped_display = Self::escape_json_str(&display);
+                    values_entries.push(format!(
+                        "\"{}!{}\":\"{}\"",
+                        Self::escape_json_str(sh),
+                        Self::escape_json_str(expr),
+                        escaped_display
+                    ));
+                    target_values_entries.push(format!("\"{escaped_display}\""));
+                    if idx == 0 {
+                        first_expr = expr.to_string();
+                        first_eval = val;
+                    }
+                }
+                let cf_match = rule.matches(&first_eval, &[]);
+                let dv_valid = dv_rule.validate(&first_eval);
+                return Ok(format!(
+                    "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"conditionalMatch\":{},\"validationPassed\":{}}}",
+                    Self::escape_json_str(&first_expr),
+                    Self::escape_json_str(&first_eval.to_display_string()),
+                    values_entries.join(","),
+                    target_values_entries.join(","),
+                    cf_match,
+                    dv_valid
+                ));
+            }
+        }
+        let default_cell_label = anchor_coord
+            .map(PackedCellCoordinate::to_a1)
+            .unwrap_or_else(|| "A1".to_string());
+        let expr_raw = match Self::optional_json_str(&entries, "expr")? {
+            Some(s) => Some(s),
+            None => Self::optional_json_str(&entries, "query")?,
+        };
+        let expr = match expr_raw.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => s,
+            None => default_cell_label.as_str(),
+        };
+        let evaluated = if Self::is_formula_expr(expr) {
+            wb.evaluate_formula_on_sheet_at(default_sh, anchor_coord, expr)
+        } else {
+            wb.evaluate_cell(default_sh, expr)
+        };
+        let cf_match = rule.matches(&evaluated, &[]);
         let dv_valid = dv_rule.validate(&evaluated);
-
+        let display_val = evaluated.to_display_string();
+        let escaped_display = Self::escape_json_str(&display_val);
         Ok(format!(
-            "{{\"query\":\"{}\",\"value\":\"{}\",\"conditionalMatch\":{},\"validationPassed\":{}}}",
-            Self::escape_json_str(query_part.trim()),
-            Self::escape_json_str(&evaluated.to_display_string()),
+            "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"conditionalMatch\":{3},\"validationPassed\":{4}}}",
+            Self::escape_json_str(expr),
+            escaped_display,
+            Self::escape_json_str(default_sh),
             cf_match,
             dv_valid
         ))
@@ -348,50 +467,67 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_audit_security(payload: &str) -> Result<String, EasyOfficeError> {
-        let (entries_raw, xml_part) = match payload.split_once('|') {
-            Some((left, right)) => (Some(left.trim()), right.trim()),
-            None => (None, payload.trim()),
-        };
-        if !xml_part.is_empty() {
-            XmlSanitizer::validate_safe_xml(xml_part)?;
-        }
         let policy = ZipSecurityPolicy::default();
+        let entries = Self::parse_rpc_json_object(payload)?;
+        if let Some(xml_str) = Self::optional_json_str(&entries, "xml")? {
+            if !xml_str.trim().is_empty() {
+                XmlSanitizer::validate_safe_xml(xml_str)?;
+            }
+        }
         let mut parsed_entries: Vec<ZipEntryDescriptor> = Vec::new();
-        if let Some(entries_segment) = entries_raw {
-            if !entries_segment.is_empty() {
-                for item in entries_segment.split(';') {
-                    let item = item.trim();
-                    if item.is_empty() {
-                        continue;
-                    }
-                    let cols: Vec<&str> = item.split(',').map(str::trim).collect();
-                    if cols.len() < 3 {
-                        return Err(EasyOfficeError::InvalidArgument(
-                            "ZIP 엔트리 명세는 'path,compressed,uncompressed[,encrypted]' 형식이어야 합니다."
-                                .to_string(),
-                        ));
-                    }
-                    let compressed = cols[1].parse::<u64>().map_err(|_| {
+        if let Some(entries_val) = StrictJsonValue::get_field(&entries, "entries") {
+            let items = entries_val.as_array().ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "JSON 'entries' 필드는 배열이어야 합니다.".to_string(),
+                )
+            })?;
+            for item in items {
+                let obj = item.as_object().ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(
+                        "JSON 'entries' 항목은 객체여야 합니다.".to_string(),
+                    )
+                })?;
+                let name = match Self::optional_json_str(obj, "name")? {
+                    Some(n) => n,
+                    None => Self::optional_json_str(obj, "path")?.unwrap_or(""),
+                }
+                .trim();
+                if name.is_empty() {
+                    return Err(EasyOfficeError::InvalidArgument(
+                        "ZIP 엔트리 이름('name')이 비어 있습니다.".to_string(),
+                    ));
+                }
+                let compressed = StrictJsonValue::get_field(obj, "compressed")
+                    .or_else(|| StrictJsonValue::get_field(obj, "compressedSize"))
+                    .and_then(StrictJsonValue::as_u64)
+                    .ok_or_else(|| {
                         EasyOfficeError::InvalidArgument(
                             "유효하지 않은 compressed_size".to_string(),
                         )
                     })?;
-                    let uncompressed = cols[2].parse::<u64>().map_err(|_| {
+                let uncompressed = StrictJsonValue::get_field(obj, "uncompressed")
+                    .or_else(|| StrictJsonValue::get_field(obj, "uncompressedSize"))
+                    .and_then(StrictJsonValue::as_u64)
+                    .ok_or_else(|| {
                         EasyOfficeError::InvalidArgument(
                             "유효하지 않은 uncompressed_size".to_string(),
                         )
                     })?;
-                    let encrypted = cols
-                        .get(3)
-                        .map(|v| v.eq_ignore_ascii_case("true") || *v == "1")
-                        .unwrap_or(false);
-                    parsed_entries.push(ZipEntryDescriptor::new(
-                        cols[0],
-                        compressed,
-                        uncompressed,
-                        encrypted,
-                    ));
-                }
+                let encrypted = match StrictJsonValue::get_field(obj, "encrypted") {
+                    None | Some(StrictJsonValue::Null) => false,
+                    Some(StrictJsonValue::Bool(b)) => *b,
+                    Some(_) => {
+                        return Err(EasyOfficeError::InvalidArgument(
+                            "유효하지 않은 encrypted 불리언 값".to_string(),
+                        ))
+                    }
+                };
+                parsed_entries.push(ZipEntryDescriptor::new(
+                    name,
+                    compressed,
+                    uncompressed,
+                    encrypted,
+                ));
             }
         }
         ZipSecurityGuard::validate_archive_entries(&parsed_entries, &policy)?;
@@ -401,52 +537,179 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
-        let mut guard = shared_ribbon_state()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut guard)?;
-        let badge = guard.active_contextual_tool().badge_title();
-        Ok(format!(
+    fn format_ribbon_state_json(
+        state: &RibbonWorkspaceState,
+        summary: &str,
+        can_undo: bool,
+        can_redo: bool,
+    ) -> String {
+        let badge = state.active_contextual_tool().badge_title();
+        let active_mod = match state.active_module {
+            OfficeModuleKind::Document => "DOC",
+            OfficeModuleKind::Hwp => "HWP",
+            OfficeModuleKind::Sheet => "SHEET",
+            OfficeModuleKind::Slide => "SLIDE",
+            OfficeModuleKind::Pdf => "PDF",
+        };
+        let ribbon_style = match state.ribbon_style {
+            RibbonLayoutStyle::HangulHwp => "hangul",
+            RibbonLayoutStyle::StandardOffice => "standard",
+        };
+        format!(
             concat!(
                 "{{",
                 "\"commandId\":\"{}\",",
                 "\"summary\":\"{}\",",
                 "\"contextualBadge\":\"{}\",",
+                "\"activeModule\":\"{}\",",
+                "\"ribbonStyle\":\"{}\",",
                 "\"catalogCount\":140,",
                 "\"isBold\":{},",
                 "\"isItalic\":{},",
                 "\"isUnderline\":{},",
+                "\"stylePresetIndex\":{},",
+                "\"insertedTableCount\":{},",
+                "\"insertedChartCount\":{},",
+                "\"insertedShapeCount\":{},",
+                "\"insertedLinkCount\":{},",
+                "\"paperSize\":\"{}\",",
                 "\"columnCount\":{},",
                 "\"isLandscape\":{},",
+                "\"marginPresetIndex\":{},",
+                "\"autosumAppliedCount\":{},",
+                "\"formulaWizardOpen\":{},",
+                "\"sortAscending\":{},",
+                "\"validationGuardEnabled\":{},",
+                "\"tocGenerated\":{},",
+                "\"footnoteCount\":{},",
+                "\"mailMergeAppliedCount\":{},",
+                "\"tableFormulaEvaluatedCount\":{},",
                 "\"manuscriptGridEnabled\":{},",
                 "\"approvalHeaderEnabled\":{},",
+                "\"clickHereFieldCount\":{},",
+                "\"doubleDiagonalBorderEnabled\":{},",
+                "\"pivotSummaryEnabled\":{},",
+                "\"conditionalFormatEnabled\":{},",
+                "\"freezePanesEnabled\":{},",
+                "\"masterLayoutIndex\":{},",
+                "\"snapGuideEnabled\":{},",
+                "\"slideTransitionIndex\":{},",
+                "\"presenterModeActive\":{},",
+                "\"pdfHighlightCount\":{},",
+                "\"pdfRotationDegrees\":{},",
+                "\"pdfSplitMergeCount\":{},",
+                "\"pdfConvertedToOfficeCount\":{},",
                 "\"trackChangesEnabled\":{},",
+                "\"reviewCommentCount\":{},",
+                "\"securityVerifiedCount\":{},",
+                "\"statsInspectedCount\":{},",
                 "\"splitViewEnabled\":{},",
                 "\"ribbonCollapsed\":{},",
                 "\"darkThemeEnabled\":{},",
                 "\"zoomPercent\":{},",
-                "\"pdfRotationDegrees\":{},",
-                "\"executedCount\":{}",
+                "\"executedCount\":{},",
+                "\"canUndo\":{},",
+                "\"canRedo\":{}",
                 "}}"
             ),
-            Self::escape_json_str(&guard.last_command_id),
-            Self::escape_json_str(&summary),
+            Self::escape_json_str(&state.last_command_id),
+            Self::escape_json_str(summary),
             Self::escape_json_str(badge),
-            guard.is_bold,
-            guard.is_italic,
-            guard.is_underline,
-            guard.column_count,
-            guard.is_landscape,
-            guard.manuscript_grid_enabled,
-            guard.approval_header_enabled,
-            guard.track_changes_enabled,
-            guard.split_view_enabled,
-            guard.ribbon_collapsed,
-            guard.dark_theme_enabled,
-            guard.zoom_percent,
-            guard.pdf_rotation_degrees,
-            guard.executed_count
+            active_mod,
+            ribbon_style,
+            state.is_bold,
+            state.is_italic,
+            state.is_underline,
+            state.style_preset_index,
+            state.inserted_table_count,
+            state.inserted_chart_count,
+            state.inserted_shape_count,
+            state.inserted_link_count,
+            Self::escape_json_str(&state.paper_size),
+            state.column_count,
+            state.is_landscape,
+            state.margin_preset_index,
+            state.autosum_applied_count,
+            state.formula_wizard_open,
+            state.sort_ascending,
+            state.validation_guard_enabled,
+            state.toc_generated,
+            state.footnote_count,
+            state.mail_merge_applied_count,
+            state.table_formula_evaluated_count,
+            state.manuscript_grid_enabled,
+            state.approval_header_enabled,
+            state.click_here_field_count,
+            state.double_diagonal_border_enabled,
+            state.pivot_summary_enabled,
+            state.conditional_format_enabled,
+            state.freeze_panes_enabled,
+            state.master_layout_index,
+            state.snap_guide_enabled,
+            state.slide_transition_index,
+            state.presenter_mode_active,
+            state.pdf_highlight_count,
+            state.pdf_rotation_degrees,
+            state.pdf_split_merge_count,
+            state.pdf_converted_to_office_count,
+            state.track_changes_enabled,
+            state.review_comment_count,
+            state.security_verified_count,
+            state.stats_inspected_count,
+            state.split_view_enabled,
+            state.ribbon_collapsed,
+            state.dark_theme_enabled,
+            state.zoom_percent,
+            state.executed_count,
+            can_undo,
+            can_redo
+        )
+    }
+
+    fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
+        let mut session = shared_ribbon_session()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let snapshot = session.state.clone();
+        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut session.state)?;
+        session.history.push_state(snapshot);
+        Ok(Self::format_ribbon_state_json(
+            &session.state,
+            &summary,
+            session.history.can_undo(),
+            session.history.can_redo(),
+        ))
+    }
+
+    fn handle_undo_ribbon_command() -> Result<String, EasyOfficeError> {
+        let mut session = shared_ribbon_session()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let current = session.state.clone();
+        if let Some(prev) = session.history.undo(current) {
+            session.state = prev;
+        }
+        Ok(Self::format_ribbon_state_json(
+            &session.state,
+            "실행 취소 완료",
+            session.history.can_undo(),
+            session.history.can_redo(),
+        ))
+    }
+
+    fn handle_redo_ribbon_command() -> Result<String, EasyOfficeError> {
+        let mut session = shared_ribbon_session()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let current = session.state.clone();
+        if let Some(next) = session.history.redo(current) {
+            session.state = next;
+        }
+        Ok(Self::format_ribbon_state_json(
+            &session.state,
+            "다시 실행 완료",
+            session.history.can_undo(),
+            session.history.can_redo(),
         ))
     }
 
@@ -460,8 +723,8 @@ impl EasyOfficeIpcRouter {
                 )))
             }
         };
-        if let Ok(mut guard) = shared_ribbon_state().lock() {
-            guard.ribbon_style = style;
+        if let Ok(mut session) = shared_ribbon_session().lock() {
+            session.state.ribbon_style = style;
         }
         let cats = style
             .category_titles()
@@ -532,43 +795,67 @@ impl EasyOfficeIpcRouter {
     fn handle_scrub_pii(payload: &str) -> Result<String, EasyOfficeError> {
         let audit = DocumentSecurityAuditor::scan_and_scrub_pii(payload);
         let escaped = Self::escape_json_str(&audit.scrubbed_text);
+        let spans_json = audit
+            .spans
+            .iter()
+            .map(|sp| {
+                format!(
+                    "{{\"start\":{},\"end\":{},\"replacement\":\"{}\"}}",
+                    sp.start_utf16,
+                    sp.end_utf16,
+                    Self::escape_json_str(&sp.replacement)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         Ok(format!(
-            "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"totalMasked\":{}}}",
+            "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"totalMasked\":{},\"spans\":[{}]}}",
             escaped,
             audit.masked_resident_ids,
             audit.masked_phone_numbers,
             audit.masked_emails,
-            audit.total_masked_count()
+            audit.total_masked_count(),
+            spans_json
         ))
     }
 
-    fn handle_evaluate_workbook_formula(payload: &str) -> Result<String, EasyOfficeError> {
-        let mut wb = WorkbookEngine::new();
-        wb.add_sheet("Sheet1");
-        wb.add_sheet("Sheet2");
-        wb.set_cell("Sheet2", "A1", "100")?;
-        wb.set_cell("Sheet1", "A1", "1200")?;
-        wb.set_cell("Sheet1", "B1", "850")?;
-        let (cells_part, expr_part) = match Self::split_unescaped_query(payload) {
-            Some((c, e)) => (Some(c.trim()), e.trim()),
-            None => (None, payload.trim()),
+    fn resolve_optional_anchor_coord(
+        entries: &[(String, StrictJsonValue)],
+    ) -> Result<Option<PackedCellCoordinate>, EasyOfficeError> {
+        let Some(raw) = Self::optional_json_str(entries, "cell")? else {
+            return Ok(None);
         };
-        if let Some(cells_str) = cells_part {
-            for (lhs, rhs) in Self::split_cell_assignments(cells_str) {
-                let (sh, a1) = lhs.split_once('!').unwrap_or(("Sheet1", &lhs));
-                wb.add_sheet(sh.trim());
-                wb.set_cell(sh.trim(), a1.trim(), rhs.trim())?;
-            }
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
         }
-        let expr = if expr_part.is_empty() {
-            "=Sheet2!A1+50"
+        PackedCellCoordinate::parse_a1(trimmed)
+            .map(Some)
+            .map_err(|_| {
+                EasyOfficeError::InvalidArgument(format!(
+                    "유효하지 않은 셀 좌표('cell'): {trimmed}"
+                ))
+            })
+    }
+
+    fn handle_evaluate_workbook_formula(payload: &str) -> Result<String, EasyOfficeError> {
+        let entries = Self::parse_rpc_json_object(payload)?;
+        let active_sheet_owned = Self::resolve_default_sheet_from_entries(&entries)?;
+        let active_sheet = active_sheet_owned.as_str();
+        let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
+        let expr = Self::optional_json_str(&entries, "expr")?
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("=Sheet2!A1+50")
+            .trim();
+        let wb = Self::build_workbook_from_json_entries(&entries, active_sheet, true)?;
+        let val = if Self::is_formula_expr(expr) {
+            wb.evaluate_formula_on_sheet_at(active_sheet, anchor_coord, expr)
         } else {
-            expr_part
+            wb.evaluate_cell(active_sheet, expr)
         };
-        wb.set_cell("Sheet1", "C1", expr)?;
-        let val = wb.evaluate_cell("Sheet1", "C1");
         Ok(format!(
-            "{{\"sheet\":\"Sheet1\",\"formula\":\"{}\",\"value\":\"{}\"}}",
+            "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\"}}",
+            Self::escape_json_str(active_sheet),
             Self::escape_json_str(expr),
             Self::escape_json_str(&val.to_display_string())
         ))
@@ -577,101 +864,6 @@ impl EasyOfficeIpcRouter {
     fn handle_run_engine_benchmark(payload: &str) -> Result<String, EasyOfficeError> {
         let iters = payload.trim().parse::<usize>().unwrap_or(5).clamp(3, 25);
         Ok(run_deterministic_benchmarks(iters).to_json())
-    }
-
-    fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
-        let parts: Vec<&str> = payload.split('|').collect();
-        let (src_ext, dst_ext, title, body) = if let Some(first) = parts.first() {
-            if let Some((s, d)) = first.split_once("->") {
-                (
-                    s.trim(),
-                    d.trim(),
-                    parts.get(1).copied().unwrap_or("변환_문서").trim(),
-                    parts.get(2).copied().unwrap_or("본문 텍스트").trim(),
-                )
-            } else if parts.len() >= 2 {
-                (
-                    parts[0].trim(),
-                    parts[1].trim(),
-                    parts.get(2).copied().unwrap_or("변환_문서").trim(),
-                    parts.get(3).copied().unwrap_or("본문 텍스트").trim(),
-                )
-            } else {
-                ("docx", "hwpx", "변환_문서", "본문 텍스트")
-            }
-        } else {
-            ("docx", "hwpx", "변환_문서", "본문 텍스트")
-        };
-
-        let src_fmt = DocumentFormat::from_extension(src_ext).ok_or_else(|| {
-            EasyOfficeError::InvalidArgument(format!("지원하지 않는 원본 포맷: {src_ext}"))
-        })?;
-        let dst_fmt = DocumentFormat::from_extension(dst_ext).ok_or_else(|| {
-            EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
-        })?;
-
-        let mut paragraphs: Vec<String> = body
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
-        if paragraphs.is_empty() {
-            paragraphs.push(title.to_string());
-        }
-
-        let model = UniversalDocumentModel {
-            title: title.to_string(),
-            paragraphs,
-            tables: vec![vec![
-                vec!["항목".to_string(), "값".to_string()],
-                vec!["원본포맷".to_string(), src_fmt.extension().to_string()],
-            ]],
-            sheet_cells: vec![
-                (0, 0, title.to_string()),
-                (0, 1, "100".to_string()),
-                (1, 1, "=B1*2".to_string()),
-            ],
-            slides: vec![(
-                title.to_string(),
-                vec![body.to_string()],
-                "발표자 노트".to_string(),
-            )],
-            official_agency: Some("행정안전부".to_string()),
-        };
-
-        let src_bytes = UniversalFormatConverter::encode(&model, src_fmt)?;
-        let dst_bytes =
-            UniversalFormatConverter::convert(&src_bytes, Some(src_fmt.extension()), dst_fmt)?;
-        let (detected_dst, decoded) =
-            UniversalFormatConverter::decode(&dst_bytes, Some(dst_fmt.extension()))?;
-
-        Ok(format!(
-            concat!(
-                "{{",
-                "\"sourceFormat\":\"{}\",",
-                "\"targetFormat\":\"{}\",",
-                "\"sourceBytes\":{},",
-                "\"outputBytes\":{},",
-                "\"targetBytes\":{},",
-                "\"detectedTarget\":\"{}\",",
-                "\"containerFamily\":\"{}\",",
-                "\"specification\":\"{}\",",
-                "\"paragraphCount\":{},",
-                "\"title\":\"{}\",",
-                "\"status\":\"OK\"",
-                "}}"
-            ),
-            src_fmt.extension(),
-            dst_fmt.extension(),
-            src_bytes.len(),
-            dst_bytes.len(),
-            dst_bytes.len(),
-            detected_dst.extension(),
-            dst_fmt.container_family().as_str(),
-            dst_fmt.standard_specification(),
-            decoded.paragraphs.len(),
-            Self::escape_json_str(&decoded.title)
-        ))
     }
 
     fn handle_get_ribbon_category_commands(payload: &str) -> Result<String, EasyOfficeError> {
@@ -684,14 +876,15 @@ impl EasyOfficeIpcRouter {
             _ => OfficeModuleKind::Document,
         };
         let (category_key, category_label) = match cat_str.trim().to_ascii_lowercase().as_str() {
-            "home" | "홈" => ("home", "홈"),
-            "insert" | "삽입" => ("insert", "삽입"),
+            "home" | "홈" | "편집" => ("home", "홈"),
+            "insert" | "삽입" | "입력" => ("insert", "삽입"),
             "layout" | "레이아웃" | "쪽·원고지" => ("layout", "레이아웃"),
-            "formulas" | "formulasanddata" | "수식·데이터" | "productivity" | "생산성·보안" => {
-                ("formulasAndData", "수식·데이터")
+            "formulas" | "formulasanddata" | "수식·데이터" | "productivity" | "생산성·보안"
+            | "표·개체" => ("formulasAndData", "수식·데이터"),
+            "module" | "modulespecific" | "모듈 전용" | "시트·차트" => {
+                ("moduleSpecific", "모듈 전용")
             }
-            "module" | "modulespecific" | "모듈 전용" => ("moduleSpecific", "모듈 전용"),
-            "review" | "검토" => ("review", "검토"),
+            "review" | "검토" | "보안·도구" => ("review", "검토"),
             "view" | "보기" => ("view", "보기"),
             _ => ("home", "홈"),
         };
@@ -760,373 +953,32 @@ impl EasyOfficeIpcRouter {
             )),
         }
     }
-}
 
-/// Executes deterministic end-to-end self-tests across all 4 crates and embedded Tauri UI assets.
-pub fn run_self_test() -> Result<String, EasyOfficeError> {
-    if DocumentFormat::ALL.len() != 20 {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "지원 포맷 수가 20종이 아닙니다.".to_string(),
-        ));
-    }
-    let zip_bytes = b"PK\x03\x04\x14\x00\x00\x00word/document.xml";
-    let detected_docx = FormatDetector::detect(zip_bytes, Some("report.docx"))?;
-    if detected_docx != DocumentFormat::Docx {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "DOCX 포맷 감지 실패".to_string(),
-        ));
-    }
-
-    let raw_deflate_input = "EasyOffice RFC 1951 DEFLATE Self-Test Vector ".repeat(16);
-    let deflated = deflate_raw(raw_deflate_input.as_bytes());
-    let inflated = inflate_raw(&deflated, 65_536)?;
-    if inflated != raw_deflate_input.as_bytes() {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "RFC 1951 DEFLATE 라운드트립 불일치".to_string(),
-        ));
-    }
-    let hwp_compressed_payload = Hwp5DocumentPayload {
-        version: (5, 0, 3, 0),
-        is_template: false,
-        agency_name: "행정안전부".to_string(),
-        document_number: "제2026-55호".to_string(),
-        paragraphs: vec![Hwp5ParagraphRecord {
-            text: "HWP 5.0 압축 스트림 검증".to_string(),
-            style_name: "본문".to_string(),
-            is_official_header: false,
-        }],
-        table_cells: vec![vec!["항목".to_string(), "통과".to_string()]],
-    };
-    let packed_comp_hwp = Hwp5Codec::pack_compressed(&hwp_compressed_payload)?;
-    if Hwp5Codec::unpack(&packed_comp_hwp)? != hwp_compressed_payload {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "HWP 5.0 압축 스트림(flags=0x01) 라운드트립 불일치".to_string(),
-        ));
-    }
-
-    let policy = ZipSecurityPolicy::default();
-    ZipSecurityGuard::validate_archive_entries(
-        &[ZipEntryDescriptor::new(
-            "word/document.xml",
-            256,
-            1024,
-            false,
-        )],
-        &policy,
-    )?;
-    if ZipSecurityGuard::validate_archive_entries(
-        &[ZipEntryDescriptor::new("../evil.xml", 100, 200, false)],
-        &policy,
-    )
-    .is_ok()
-    {
-        return Err(EasyOfficeError::SecurityViolation(
-            "Zip-Slip 경로 순회 차단에 실패했습니다.".to_string(),
-        ));
-    }
-    let mut ole2_buf = vec![0u8; 512 * 3];
-    ole2_buf[..8].copy_from_slice(&FormatDetector::OLE2_MAGIC);
-    ole2_buf[44..48].copy_from_slice(&1u32.to_le_bytes());
-    let chain = Ole2SecurityGuard::validate_sector_chain(
-        &ole2_buf,
-        &[1u32, Ole2SecurityGuard::END_OF_CHAIN],
-        0,
-    )?;
-    if chain != vec![0, 1] {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "OLE2 FAT 체인 검증 결과 불일치".to_string(),
-        ));
-    }
-    XmlSanitizer::validate_safe_xml("<root attr=\"ok\">안전</root>")?;
-
-    let csv_rows = vec![vec!["A".to_string(), "B,C".to_string()]];
-    let csv_encoded = CsvCodec::serialize(&csv_rows, ',');
-    if CsvCodec::parse(&csv_encoded, ',')? != csv_rows {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "CSV 라운드트립 불일치".to_string(),
-        ));
-    }
-    let md_blocks = CommonMarkCodec::parse("# 제목\n\n본문")?;
-    if CommonMarkCodec::render(&md_blocks) != "# 제목\n\n본문" {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "CommonMark 라운드트립 불일치".to_string(),
-        ));
-    }
-    let pdf_model = PdfDocumentModel {
-        title: "SelfTest PDF".to_string(),
-        pages: vec![PdfPageModel {
-            page_number: 1,
-            rotation_degrees: 0,
-            body_text: "PDF 본문".to_string(),
-            approval_stamp: Some("APPROVED".to_string()),
-        }],
-        watermark_text: Some("CONFIDENTIAL".to_string()),
-    };
-    let pdf_bytes = PdfSerializer::serialize(&pdf_model);
-    if PdfSerializer::parse(&pdf_bytes)? != pdf_model {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "PDF 직렬화 라운드트립 불일치".to_string(),
-        ));
-    }
-
-    let mut sheet = SheetEngine::new("SelfTestSheet");
-    sheet.set_cell("A1", "부서")?;
-    sheet.set_cell("B1", "예산")?;
-    sheet.set_cell("A2", "코어")?;
-    sheet.set_cell("B2", "1000")?;
-    sheet.set_cell("A3", "코어")?;
-    sheet.set_cell("B3", "=200*150%")?;
-    sheet.set_cell("C1", "=SUM(B2:B3)")?;
-    if sheet.evaluate_cell("C1") != EvaluatedCellValue::Number(1300.0) {
-        return Err(EasyOfficeError::FormulaError(
-            "시트 SUM 계산 결과 불일치".to_string(),
-        ));
-    }
-    let pivot = sheet.compute_pivot(
-        &CellRange::parse("A1:B3")?,
-        true,
-        0,
-        1,
-        PivotAggregation::Sum,
-    );
-    if (pivot.grand_total - 1300.0).abs() > 1e-6 {
-        return Err(EasyOfficeError::FormulaError(
-            "피벗 총계 계산 불일치".to_string(),
-        ));
-    }
-    if SheetEngine::supported_function_names().len() != 122 {
-        return Err(EasyOfficeError::FormulaError(format!(
-            "지원 수식 함수 수가 122종이 아닙니다: {}",
-            SheetEngine::supported_function_names().len()
-        )));
-    }
-    let mut wb = WorkbookEngine::new();
-    wb.add_sheet("Sheet1");
-    wb.add_sheet("Sheet2");
-    wb.set_cell("Sheet2", "A1", "250")?;
-    wb.set_cell("Sheet1", "B1", "=Sheet2!A1*3")?;
-    if wb.evaluate_cell("Sheet1", "B1") != EvaluatedCellValue::Number(750.0) {
-        return Err(EasyOfficeError::FormulaError(
-            "다중 시트 참조(Sheet2!A1) 계산 불일치".to_string(),
-        ));
-    }
-    let sample_doc = UniversalDocumentModel {
-        title: "SelfTest Document".to_string(),
-        paragraphs: vec!["통합 포맷 라운드트립 문단".to_string()],
-        tables: vec![vec![vec!["항목".to_string(), "값".to_string()]]],
-        sheet_cells: vec![(0, 0, "A1_VAL".to_string())],
-        slides: vec![(
-            "슬라이드 제목".to_string(),
-            vec!["핵심 요약".to_string()],
-            "발표 노트".to_string(),
-        )],
-        official_agency: Some("행정표준원".to_string()),
-    };
-    for fmt in DocumentFormat::ALL {
-        let encoded = UniversalFormatConverter::encode(&sample_doc, fmt)?;
-        let (detected_fmt, _decoded) =
-            UniversalFormatConverter::decode(&encoded, Some(fmt.extension()))?;
-        if detected_fmt != fmt {
-            return Err(EasyOfficeError::CorruptedContainer(format!(
-                "20종 포맷 인코딩/디코딩 검증 실패: {}",
-                fmt.extension()
-            )));
+    pub(crate) fn encode_base64(bytes: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let b0 = chunk[0];
+            let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+            let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+            out.push(TABLE[(b0 >> 2) as usize] as char);
+            out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+            if chunk.len() > 1 {
+                out.push(TABLE[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char);
+            } else {
+                out.push('=');
+            }
+            if chunk.len() > 2 {
+                out.push(TABLE[(b2 & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
         }
+        out
     }
 
-    let doc_layout = DocumentPageLayout::compute(PageOrientation::Portrait, 2, 54.0)?;
-    if doc_layout.compute_manuscript_grid_200().len() != 200 {
-        return Err(EasyOfficeError::InvalidArgument(
-            "200자 원고지 격자 수 불일치".to_string(),
-        ));
-    }
-    let slide_layout = SlideStageLayout::new(SlideDeckTheme::SignatureLavender);
-    let clamped =
-        slide_layout.clamp_element_to_lower_stage(LayoutRect::new(40.0, 50.0, 200.0, 80.0));
-    if !slide_layout.verify_non_overlapping(&[clamped]) {
-        return Err(EasyOfficeError::InvalidArgument(
-            "슬라이드 비겹침 스테이지 검증 실패".to_string(),
-        ));
-    }
-    let pdf_layout = PdfStudioLayout::compute("APPROVED");
-    if !pdf_layout.is_within_upper_middle_viewport() {
-        return Err(EasyOfficeError::InvalidArgument(
-            "PDF 가시 영역 좌표 검증 실패".to_string(),
-        ));
-    }
-
-    let all_ribbon = RibbonCommandRouter::all_commands();
-    if all_ribbon.len() != 140 {
-        return Err(EasyOfficeError::InvalidArgument(format!(
-            "리본 명령 수가 140개가 아닙니다: {}",
-            all_ribbon.len()
-        )));
-    }
-    if RibbonLayoutStyle::HangulHwp.category_titles()[2] != "쪽·원고지"
-        || ContextualObjectToolKind::for_module(OfficeModuleKind::Sheet).badge_title()
-            != "수식·피벗 분석"
-    {
-        return Err(EasyOfficeError::InvalidArgument(
-            "리본 스타일 또는 컨텍스트 개체 도구 배지 검증 실패".to_string(),
-        ));
-    }
-    let mut r_state = RibbonWorkspaceState::default();
-    RibbonCommandRouter::execute_command("hwp-mod-manuscript", &mut r_state)?;
-    if !r_state.manuscript_grid_enabled {
-        return Err(EasyOfficeError::InvalidArgument(
-            "원고지 리본 명령 상태 변경 실패".to_string(),
-        ));
-    }
-
-    let tbl = DocumentTableModel::new(vec![
-        vec!["100".to_string()],
-        vec!["250".to_string()],
-        vec!["=SUM(ABOVE)".to_string()],
-    ]);
-    if (tbl.evaluate_cell_formula(2, 0)? - 350.0).abs() > 1e-6 {
-        return Err(EasyOfficeError::FormulaError(
-            "표 =SUM(ABOVE) 수식 검증 실패".to_string(),
-        ));
-    }
-    let mut doc_domain = DocumentDomainEngine::new();
-    doc_domain.record_revision("r1", "검토자", "insert", "초안 추가");
-    if !doc_domain.accept_revision("r1") {
-        return Err(EasyOfficeError::InvalidArgument(
-            "문서 변경 내용 추적 승인 실패".to_string(),
-        ));
-    }
-    let mut slide_domain = SlideDomainEngine::default();
-    slide_domain.presenter.move_laser_pointer(300.0, 200.0);
-    slide_domain.presenter.append_ink_point(120.0, 180.0);
-    if slide_domain.presenter.laser_pointer != Some((300.0, 200.0)) {
-        return Err(EasyOfficeError::InvalidArgument(
-            "발표자 레이저 포인터 검증 실패".to_string(),
-        ));
-    }
-    let mut pdf_domain = PdfDomainEngine::new(pdf_model.clone());
-    if pdf_domain.rotate_page(0, 90)? != 90 {
-        return Err(EasyOfficeError::InvalidArgument(
-            "PDF 페이지 회전 검증 실패".to_string(),
-        ));
-    }
-
-    let pii_res =
-        DocumentSecurityAuditor::scan_and_scrub_pii("900101-1234567 010-1234-5678 a@b.kr");
-    if pii_res.total_masked_count() != 3 {
-        return Err(EasyOfficeError::SecurityViolation(
-            "PII 마스킹 건수 검증 실패".to_string(),
-        ));
-    }
-    let ffi_json = invoke_c_abi_roundtrip("switch_ribbon_style", "hangul");
-    if !ffi_json.contains("쪽·원고지") {
-        return Err(EasyOfficeError::InvalidArgument(
-            "C-ABI FFI 라운드트립 검증 실패".to_string(),
-        ));
-    }
-
-    let conv_json = EasyOfficeIpcRouter::dispatch(
-        "convert_document_format",
-        "docx->hwpx|기관보고서|1. 개요\n2. 세부 계획",
-    )?;
-    if !conv_json.contains("\"targetFormat\":\"hwpx\"") || !conv_json.contains("\"status\":\"OK\"")
-    {
-        return Err(EasyOfficeError::InvalidArgument(
-            "IPC 포맷 변환 검증 실패".to_string(),
-        ));
-    }
-    let cat_cmds_json =
-        EasyOfficeIpcRouter::dispatch("get_ribbon_category_commands", "HWP|module")?;
-    if !cat_cmds_json.contains("hwp-mod-header") || !cat_cmds_json.contains("hwp-mod-manuscript") {
-        return Err(EasyOfficeError::InvalidArgument(
-            "IPC 리본 카테고리 명령 조회 검증 실패".to_string(),
-        ));
-    }
-
-    let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "")?;
-    if !bootstrap.contains("#5C6BC0") || !bootstrap.contains("HWP/HWPX") {
-        return Err(EasyOfficeError::InvalidArgument(
-            "IPC 부트스트랩 응답 검증 실패".to_string(),
-        ));
-    }
-    let html_asset = include_str!("../ui/index.html");
-    let css_asset = include_str!("../ui/styles.css");
-    let js_asset = include_str!("../ui/app.js");
-    let tauri_conf = include_str!("../tauri.conf.json");
-    if !html_asset.contains("EasyOffice")
-        || !css_asset.contains("#5C6BC0")
-        || !js_asset.contains("compositionstart")
-        || !tauri_conf.contains("downloadBootstrapper")
-    {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "Tauri v2 UI 또는 번들 설정 자산 무결성 검증 실패".to_string(),
-        ));
-    }
-
-    let bench_report = run_deterministic_benchmarks(5);
-    if !bench_report.all_equivalent || bench_report.suites.len() != 5 {
-        return Err(EasyOfficeError::CorruptedContainer(
-            "엔진 저수준 최적화 벤치마크 동등성 검증 실패".to_string(),
-        ));
-    }
-
-    Ok(format!(
-        "EasyOffice Rust Cross-Platform Self-Test PASSED (platform={}, formats=20, functions=122, ribbon_commands=140, ipc_commands=13, {})",
-        DesktopPlatform::current().os_label(),
-        bench_report.summary_line()
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ipc_persistent_ribbon_state_and_safe_sheet_semicolon_parsing() {
-        let first =
-            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "document-home-bold").unwrap();
-        assert!(first.contains("\"isBold\":true"));
-        let second =
-            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "document-home-bold").unwrap();
-        assert!(second.contains("\"isBold\":false"));
-
-        let rot1 =
-            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "pdf-mod-rotate").unwrap();
-        assert!(rot1.contains("\"pdfRotationDegrees\":90"));
-
-        let eval_json = EasyOfficeIpcRouter::dispatch(
-            "evaluate_sheet",
-            "A1=항목;설명;B1=100;C1=foo\\;B1=999?B1",
-        )
-        .unwrap();
-        assert!(eval_json.contains("\"value\":\"100\""));
-
-        let smart_json = EasyOfficeIpcRouter::dispatch(
-            "run_smart_assistant",
-            "첫 번째 핵심 문단입니다.\n[TODO] 보안 감사 보고서 제출\n두 번째 요약 문단입니다.",
-        )
-        .unwrap();
-        assert!(smart_json.contains("\"summaryLines\":["));
-        assert!(smart_json.contains("\"actionItems\":[\"[TODO] 보안 감사 보고서 제출\"]"));
-
-        let cells_prefix =
-            "A1=Hello (world;B1=He said \"hi;C1=Question\\?;D1=42;E1==IF(D1>10, \"x;y\", \"z\")";
-        for (query, expected) in [
-            ("A1", "\"value\":\"Hello (world\""),
-            ("B1", "\"value\":\"He said \\\"hi\""),
-            ("C1", "\"value\":\"Question?\""),
-            ("D1", "\"value\":\"42\""),
-            ("E1", "\"value\":\"x;y\""),
-        ] {
-            let res =
-                EasyOfficeIpcRouter::dispatch("evaluate_sheet", &format!("{cells_prefix}?{query}"))
-                    .unwrap();
-            assert!(res.contains(expected), "query={query} res={res}");
-        }
-
-        let hangul_pii = DocumentSecurityAuditor::scan_and_scrub_pii(
-            "담당자 이메일은security@easyoffice.local입니다.",
-        );
-        assert_eq!(hangul_pii.masked_emails, 1);
-        assert_eq!(hangul_pii.scrubbed_text, "담당자 이메일은***@***입니다.");
+    pub fn decode_base64(input: &str) -> Option<Vec<u8>> {
+        easyoffice_formats::PdfSerializer::decode_base64_bytes(input)
     }
 }

@@ -17,6 +17,10 @@ if [[ ! -x "$BIN_PATH" ]]; then
   exit 1
 fi
 
+if command -v cargo >/dev/null 2>&1; then
+  cargo build --release -p easyoffice-app
+fi
+
 echo "==> [2/4] Constructing macOS Application Bundle (${APP_BUNDLE})..."
 rm -rf "${DIST_DIR}"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
@@ -24,6 +28,13 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
 cp "$BIN_PATH" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+if [[ -x "target/release/easyoffice-app" ]]; then
+  cp "target/release/easyoffice-app" "${APP_BUNDLE}/Contents/MacOS/easyoffice-core-host"
+  chmod +x "${APP_BUNDLE}/Contents/MacOS/easyoffice-core-host"
+fi
+if [[ -d "crates/easyoffice-app/ui" ]]; then
+  cp -R "crates/easyoffice-app/ui" "${APP_BUNDLE}/Contents/Resources/ui"
+fi
 printf "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
 
 cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF

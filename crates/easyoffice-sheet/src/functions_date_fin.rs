@@ -1,29 +1,6 @@
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
 impl SheetEngine {
-    pub(crate) fn eval_multi_criteria(
-        &self,
-        criteria_pairs: &[Expr],
-        expected_len: usize,
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<Vec<bool>, FormulaError> {
-        let mut mask = vec![true; expected_len];
-        for pair in criteria_pairs.chunks(2) {
-            let r_vals = self.eval_range_vec(&pair[0], ctx, depth)?;
-            if r_vals.len() != expected_len {
-                return Err(FormulaError::Value);
-            }
-            let crit = self.eval_arg_val(&pair[1], ctx, depth)?;
-            for (m, rv) in mask.iter_mut().zip(r_vals.iter()) {
-                if *m && !matches_criteria(rv, &crit) {
-                    *m = false;
-                }
-            }
-        }
-        Ok(mask)
-    }
-
     pub(crate) fn eval_date_func(
         &self,
         name: &str,
@@ -292,14 +269,28 @@ impl SheetEngine {
                 if rate <= -1.0 {
                     return Err(FormulaError::DivByZero);
                 }
-                let cfs = self.expand_args_ctx(&args[1..], ctx, depth)?;
                 let mut npv = 0.0;
-                for (t, v) in cfs
-                    .iter()
-                    .filter_map(EvaluatedCellValue::as_number)
-                    .enumerate()
-                {
-                    npv += v / (1.0 + rate).powi((t + 1) as i32);
+                let mut t = 0i32;
+                for arg in &args[1..] {
+                    if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
+                        let (_, _, _, rows, cols, _) = spec;
+                        for dr in 0..rows {
+                            for dc in 0..cols {
+                                let v = self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?;
+                                if let EvaluatedCellValue::Number(n) = v {
+                                    t += 1;
+                                    npv += n / (1.0 + rate).powi(t);
+                                }
+                            }
+                        }
+                    } else {
+                        let v = self.eval_arg_val(arg, ctx, depth)?;
+                        if !matches!(v, EvaluatedCellValue::Empty) {
+                            let n = v.as_number().ok_or(FormulaError::Value)?;
+                            t += 1;
+                            npv += n / (1.0 + rate).powi(t);
+                        }
+                    }
                 }
                 Ok(EvaluatedCellValue::Number(npv))
             }
@@ -635,66 +626,26 @@ impl SheetEngine {
     }
 }
 
-pub(crate) fn matches_criteria(cell: &EvaluatedCellValue, crit: &EvaluatedCellValue) -> bool {
-    if let EvaluatedCellValue::Number(cn) = crit {
-        return cell.as_number().is_some_and(|v| (v - cn).abs() < 1e-9);
+pub(crate) fn parse_iso_date_serial(s: &str) -> Option<f64> {
+    let trimmed = s.trim();
+    let sep = if trimmed.contains('-') {
+        '-'
+    } else if trimmed.contains('/') {
+        '/'
+    } else {
+        return None;
+    };
+    let mut parts = trimmed.split(sep);
+    let y: i64 = parts.next()?.parse().ok()?;
+    let m: i64 = parts.next()?.parse().ok()?;
+    let d: i64 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() || !(1900..=9999).contains(&y) || !(1..=12).contains(&m) {
+        return None;
     }
-    let crit_str = crit.to_display_string();
-    let trimmed = crit_str.trim();
-    for op in [">=", "<=", "<>", ">", "<", "="] {
-        if let Some(rhs) = trimmed.strip_prefix(op) {
-            let rhs_trim = rhs.trim();
-            if let Ok(rhs_num) = rhs_trim.parse::<f64>() {
-                let Some(lhs_num) = cell.as_number() else {
-                    return op == "<>";
-                };
-                return match op {
-                    ">=" => lhs_num >= rhs_num - 1e-12,
-                    "<=" => lhs_num <= rhs_num + 1e-12,
-                    "<>" => (lhs_num - rhs_num).abs() >= 1e-12,
-                    ">" => lhs_num > rhs_num,
-                    "<" => lhs_num < rhs_num,
-                    _ => (lhs_num - rhs_num).abs() < 1e-12,
-                };
-            }
-            let lhs_s = cell.to_display_string().to_lowercase();
-            let rhs_s = rhs_trim.to_lowercase();
-            return match op {
-                "<>" => lhs_s != rhs_s,
-                "=" => lhs_s == rhs_s,
-                ">=" => lhs_s >= rhs_s,
-                "<=" => lhs_s <= rhs_s,
-                ">" => lhs_s > rhs_s,
-                _ => lhs_s < rhs_s,
-            };
-        }
+    if d < 1 || d > days_in_month(y, m) {
+        return None;
     }
-    if let Ok(rhs_num) = trimmed.parse::<f64>() {
-        if let Some(lhs_num) = cell.as_number() {
-            return (lhs_num - rhs_num).abs() < 1e-9;
-        }
-    }
-    if trimmed.is_empty() {
-        return match cell {
-            EvaluatedCellValue::Empty => true,
-            EvaluatedCellValue::Text(s) => s.is_empty(),
-            _ => false,
-        };
-    }
-    if trimmed.contains('*') || trimmed.contains('?') || trimmed.contains('~') {
-        return match cell {
-            EvaluatedCellValue::Text(s) => wildcard_match(s, trimmed),
-            _ => false,
-        };
-    }
-    match cell {
-        EvaluatedCellValue::Text(s) => s.to_lowercase() == trimmed.to_lowercase(),
-        EvaluatedCellValue::Boolean(b) => {
-            trimmed.eq_ignore_ascii_case(if *b { "TRUE" } else { "FALSE" })
-        }
-        EvaluatedCellValue::Error(e) => trimmed.eq_ignore_ascii_case(e.code()),
-        EvaluatedCellValue::Empty | EvaluatedCellValue::Number(_) => false,
-    }
+    Some(serial_from_civil(y, m, d) as f64)
 }
 
 #[inline]

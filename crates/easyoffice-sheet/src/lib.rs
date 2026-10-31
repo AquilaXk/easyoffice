@@ -1,405 +1,18 @@
 use easyoffice_formats::EasyOfficeError;
 use std::collections::HashMap;
-use std::fmt;
 
 pub mod functions;
 mod functions_date_fin;
 mod functions_lookup_text;
 mod parser;
+pub mod types;
 pub mod workbook;
 
 pub use functions::*;
 pub use functions_date_fin::{wildcard_match, wildcard_match_alloc_baseline};
-pub use parser::{
-    compile_formula_expr, compute_sheet_id, BinaryOp, Expr, PackedWorkbookCoord, VisitingTracker,
-};
+pub use parser::{compile_formula_expr, BinaryOp, Expr};
+pub use types::*;
 pub use workbook::*;
-
-/// Bit-packed 64-bit spreadsheet cell coordinate (`row` in upper 32 bits, `col` in lower 32 bits).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackedCellCoordinate(pub u64);
-
-impl PackedCellCoordinate {
-    pub const MAX_ROWS: u32 = 1_000_000;
-    pub const MAX_COLS: u32 = 16_384;
-
-    #[inline]
-    pub fn new(row: u32, col: u32) -> Result<Self, EasyOfficeError> {
-        if row >= Self::MAX_ROWS || col >= Self::MAX_COLS {
-            return Err(EasyOfficeError::InvalidArgument(format!(
-                "셀 좌표가 허용 범위(row < {}, col < {})를 초과했습니다: ({row}, {col})",
-                Self::MAX_ROWS,
-                Self::MAX_COLS
-            )));
-        }
-        Ok(Self(((row as u64) << 32) | (col as u64)))
-    }
-
-    #[inline]
-    pub fn row(self) -> u32 {
-        (self.0 >> 32) as u32
-    }
-
-    #[inline]
-    pub fn col(self) -> u32 {
-        (self.0 & 0xFFFF_FFFF) as u32
-    }
-
-    pub fn parse_a1(input: &str) -> Result<Self, EasyOfficeError> {
-        let trimmed = input.trim();
-        if trimmed.is_empty() {
-            return Err(EasyOfficeError::InvalidArgument(
-                "빈 셀 주소입니다.".to_string(),
-            ));
-        }
-
-        let mut col_acc: u32 = 0;
-        let mut row_acc: u32 = 0;
-        let mut letter_count = 0usize;
-        let mut digit_count = 0usize;
-
-        for b in trimmed.bytes() {
-            if b == b'$' {
-                continue;
-            }
-            let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
-            if upper.is_ascii_uppercase() {
-                if digit_count > 0 || letter_count >= 3 {
-                    return Err(EasyOfficeError::InvalidArgument(format!(
-                        "유효하지 않은 A1 셀 주소: {input}"
-                    )));
-                }
-                letter_count += 1;
-                col_acc = col_acc * 26 + ((upper - b'A') as u32 + 1);
-            } else if b.is_ascii_digit() {
-                if letter_count == 0 {
-                    return Err(EasyOfficeError::InvalidArgument(format!(
-                        "유효하지 않은 A1 셀 주소: {input}"
-                    )));
-                }
-                digit_count += 1;
-                row_acc = row_acc
-                    .checked_mul(10)
-                    .and_then(|v| v.checked_add((b - b'0') as u32))
-                    .ok_or_else(|| {
-                        EasyOfficeError::InvalidArgument(format!("셀 행 번호 오버플로: {input}"))
-                    })?;
-            } else {
-                return Err(EasyOfficeError::InvalidArgument(format!(
-                    "유효하지 않은 A1 셀 주소: {input}"
-                )));
-            }
-        }
-
-        if letter_count == 0 || digit_count == 0 || row_acc == 0 {
-            return Err(EasyOfficeError::InvalidArgument(format!(
-                "유효하지 않은 A1 셀 주소: {input}"
-            )));
-        }
-
-        Self::new(row_acc - 1, col_acc - 1)
-    }
-
-    pub fn format_col_label(col: u32) -> String {
-        let mut idx = col + 1;
-        let mut buf = [0u8; 8];
-        let mut pos = buf.len();
-        while idx > 0 && pos > 0 {
-            let rem = ((idx - 1) % 26) as u8;
-            pos -= 1;
-            buf[pos] = b'A' + rem;
-            idx = (idx - 1) / 26;
-        }
-        String::from_utf8_lossy(&buf[pos..]).into_owned()
-    }
-
-    pub fn to_a1(self) -> String {
-        format!("{}{}", Self::format_col_label(self.col()), self.row() + 1)
-    }
-}
-
-impl fmt::Display for PackedCellCoordinate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_a1())
-    }
-}
-
-/// Rectangular cell range (`start..=end`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CellRange {
-    pub start: PackedCellCoordinate,
-    pub end: PackedCellCoordinate,
-}
-
-impl CellRange {
-    pub const MAX_EXPANDED_CELL_COUNT: usize = 100_000;
-    pub const MAX_EXPANDED_CELLS: usize = Self::MAX_EXPANDED_CELL_COUNT;
-
-    #[inline]
-    pub fn cell_count(&self) -> usize {
-        let (rows, cols) = self.dimensions();
-        rows.saturating_mul(cols)
-    }
-
-    pub fn new(
-        start: PackedCellCoordinate,
-        end: PackedCellCoordinate,
-    ) -> Result<Self, EasyOfficeError> {
-        let min_r = start.row().min(end.row());
-        let max_r = start.row().max(end.row());
-        let min_c = start.col().min(end.col());
-        let max_c = start.col().max(end.col());
-        let rows = (max_r - min_r + 1) as usize;
-        let cols = (max_c - min_c + 1) as usize;
-        let count = rows.saturating_mul(cols);
-        if count > Self::MAX_EXPANDED_CELL_COUNT {
-            return Err(EasyOfficeError::InvalidArgument(format!(
-                "셀 범위 확장 개수({count})가 상한({})을 초과했습니다.",
-                Self::MAX_EXPANDED_CELL_COUNT
-            )));
-        }
-        Ok(Self { start, end })
-    }
-
-    pub fn parse(notation: &str) -> Result<Self, EasyOfficeError> {
-        if let Some((lhs, rhs)) = notation.split_once(':') {
-            let start = PackedCellCoordinate::parse_a1(lhs)?;
-            let end = PackedCellCoordinate::parse_a1(rhs)?;
-            Self::new(start, end)
-        } else {
-            let single = PackedCellCoordinate::parse_a1(notation)?;
-            Self::new(single, single)
-        }
-    }
-
-    pub fn expand(&self) -> Result<Vec<PackedCellCoordinate>, EasyOfficeError> {
-        let min_r = self.start.row().min(self.end.row());
-        let max_r = self.start.row().max(self.end.row());
-        let min_c = self.start.col().min(self.end.col());
-        let max_c = self.start.col().max(self.end.col());
-        let rows = (max_r - min_r + 1) as usize;
-        let cols = (max_c - min_c + 1) as usize;
-        let total = rows.saturating_mul(cols);
-        if total > Self::MAX_EXPANDED_CELL_COUNT {
-            return Err(EasyOfficeError::InvalidArgument(
-                "셀 범위 확장 한도 초과".to_string(),
-            ));
-        }
-        let mut coords = Vec::with_capacity(total);
-        for r in min_r..=max_r {
-            for c in min_c..=max_c {
-                coords.push(PackedCellCoordinate::new(r, c)?);
-            }
-        }
-        Ok(coords)
-    }
-
-    pub fn dimensions(&self) -> (usize, usize) {
-        let min_r = self.start.row().min(self.end.row());
-        let max_r = self.start.row().max(self.end.row());
-        let min_c = self.start.col().min(self.end.col());
-        let max_c = self.start.col().max(self.end.col());
-        ((max_r - min_r + 1) as usize, (max_c - min_c + 1) as usize)
-    }
-}
-
-/// Standard spreadsheet formula errors.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FormulaError {
-    DivByZero,
-    Value,
-    Ref,
-    Cycle,
-    Name,
-    Na,
-    Num,
-}
-
-impl FormulaError {
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::DivByZero => "#DIV/0!",
-            Self::Value => "#VALUE!",
-            Self::Ref => "#REF!",
-            Self::Cycle => "#CYCLE!",
-            Self::Name => "#NAME?",
-            Self::Na => "#N/A",
-            Self::Num => "#NUM!",
-        }
-    }
-}
-
-impl fmt::Display for FormulaError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.code())
-    }
-}
-
-/// Evaluated cell value in a worksheet.
-#[derive(Debug, Clone, PartialEq)]
-pub enum EvaluatedCellValue {
-    Empty,
-    Number(f64),
-    Text(String),
-    Boolean(bool),
-    Error(FormulaError),
-}
-
-impl EvaluatedCellValue {
-    pub fn as_number(&self) -> Option<f64> {
-        match self {
-            Self::Number(v) => Some(*v),
-            Self::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
-            Self::Text(s) => s.trim().parse::<f64>().ok(),
-            Self::Empty | Self::Error(_) => None,
-        }
-    }
-
-    pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            Self::Boolean(b) => Some(*b),
-            Self::Number(n) => Some(*n != 0.0),
-            Self::Text(s) => {
-                if s.eq_ignore_ascii_case("TRUE") {
-                    Some(true)
-                } else if s.eq_ignore_ascii_case("FALSE") {
-                    Some(false)
-                } else {
-                    None
-                }
-            }
-            Self::Empty => Some(false),
-            Self::Error(_) => None,
-        }
-    }
-
-    pub fn to_display_string(&self) -> String {
-        match self {
-            Self::Empty => String::new(),
-            Self::Number(n) => {
-                if n.fract() == 0.0 {
-                    format!("{n:.0}")
-                } else {
-                    format!("{n}")
-                }
-            }
-            Self::Text(s) => s.clone(),
-            Self::Boolean(b) => {
-                if *b {
-                    "TRUE".to_string()
-                } else {
-                    "FALSE".to_string()
-                }
-            }
-            Self::Error(e) => e.code().to_string(),
-        }
-    }
-}
-
-impl fmt::Display for EvaluatedCellValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_display_string())
-    }
-}
-
-/// Conditional formatting predicate rules for worksheet ranges.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConditionalFormatRule {
-    GreaterThan(f64),
-    LessThan(f64),
-    Between(f64, f64),
-    ContainsText(String),
-    DuplicateValues,
-}
-
-impl ConditionalFormatRule {
-    pub fn matches(&self, value: &EvaluatedCellValue, range_values: &[EvaluatedCellValue]) -> bool {
-        match self {
-            Self::GreaterThan(threshold) => value.as_number().is_some_and(|v| v > *threshold),
-            Self::LessThan(threshold) => value.as_number().is_some_and(|v| v < *threshold),
-            Self::Between(low, high) => value.as_number().is_some_and(|v| {
-                let min_v = low.min(*high);
-                let max_v = low.max(*high);
-                v >= min_v && v <= max_v
-            }),
-            Self::ContainsText(needle) => {
-                if needle.is_empty() {
-                    return false;
-                }
-                value
-                    .to_display_string()
-                    .to_lowercase()
-                    .contains(&needle.to_lowercase())
-            }
-            Self::DuplicateValues => {
-                if *value == EvaluatedCellValue::Empty {
-                    return false;
-                }
-                let mut hits = 0usize;
-                for item in range_values {
-                    if item == value {
-                        hits += 1;
-                        if hits > 1 {
-                            return true;
-                        }
-                    }
-                }
-                false
-            }
-        }
-    }
-}
-
-/// Cell input data validation rule.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DataValidationRule {
-    NumberRange { min: f64, max: f64 },
-    AllowedList(Vec<String>),
-    NonEmptyText,
-    MaxTextLength(usize),
-}
-
-impl DataValidationRule {
-    pub fn validate(&self, value: &EvaluatedCellValue) -> bool {
-        match self {
-            Self::NumberRange { min, max } => {
-                value.as_number().is_some_and(|v| v >= *min && v <= *max)
-            }
-            Self::AllowedList(list) => {
-                let disp = value.to_display_string();
-                list.iter().any(|item| item.eq_ignore_ascii_case(&disp))
-            }
-            Self::NonEmptyText => {
-                *value != EvaluatedCellValue::Empty && !value.to_display_string().trim().is_empty()
-            }
-            Self::MaxTextLength(max_len) => {
-                *value != EvaluatedCellValue::Empty
-                    && value.to_display_string().chars().count() <= *max_len
-            }
-        }
-    }
-}
-
-/// Aggregation functions supported by PivotTableSummary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PivotAggregation {
-    Sum,
-    Average,
-    Count,
-    Min,
-    Max,
-}
-
-/// Computed Pivot Table summary over a worksheet range.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PivotTableSummary {
-    pub row_keys: Vec<String>,
-    pub column_keys: Vec<String>,
-    pub matrix: Vec<Vec<f64>>,
-    pub row_totals: Vec<f64>,
-    pub column_totals: Vec<f64>,
-    pub grand_total: f64,
-}
 
 pub const MAX_CELL_TEXT_CHARS: usize = 32_767;
 pub const MAX_EVAL_STEPS: usize = 65_536;
@@ -408,6 +21,7 @@ pub(crate) struct EvalContext<'a> {
     pub workbook: Option<&'a WorkbookEngine>,
     pub visiting: VisitingTracker,
     pub memo: HashMap<PackedWorkbookCoord, EvaluatedCellValue>,
+    pub current_coord: Option<PackedCellCoordinate>,
     pub(crate) steps: usize,
 }
 
@@ -418,6 +32,7 @@ impl<'a> EvalContext<'a> {
             workbook: None,
             visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
+            current_coord: None,
             steps: 0,
         }
     }
@@ -428,6 +43,7 @@ impl<'a> EvalContext<'a> {
             workbook: Some(workbook),
             visiting: VisitingTracker::new(sheet_id),
             memo: HashMap::new(),
+            current_coord: None,
             steps: 0,
         }
     }
@@ -453,7 +69,12 @@ impl SheetEngine {
     const DENSE_COLS: usize = 16;
 
     pub fn new(name: impl Into<String>) -> Self {
-        let name_str = name.into();
+        let raw = name.into();
+        let name_str = if raw.trim().is_empty() {
+            "Sheet1".to_string()
+        } else {
+            raw
+        };
         let sheet_id = compute_sheet_id(&name_str);
         Self {
             name: name_str,
@@ -467,7 +88,12 @@ impl SheetEngine {
     }
 
     pub fn set_name(&mut self, name: impl Into<String>) {
-        self.name = name.into();
+        let raw = name.into();
+        self.name = if raw.trim().is_empty() {
+            "Sheet1".to_string()
+        } else {
+            raw
+        };
         self.sheet_id = compute_sheet_id(&self.name);
     }
 
@@ -625,7 +251,7 @@ impl SheetEngine {
         match sheet_opt {
             None => self.eval_coord_ctx(coord, ctx, depth),
             Some(target_name) => {
-                if target_name.eq_ignore_ascii_case(&self.name) {
+                if WorkbookEngine::is_same_sheet_identity(target_name, &self.name) {
                     return self.eval_coord_ctx(coord, ctx, depth);
                 }
                 let Some(wb) = ctx.workbook else {
@@ -637,6 +263,36 @@ impl SheetEngine {
                 target_sheet.eval_coord_ctx(coord, ctx, depth)
             }
         }
+    }
+
+    #[inline]
+    pub(crate) fn is_nested_subtotal_cell(
+        &self,
+        sheet_opt: Option<&str>,
+        coord: PackedCellCoordinate,
+        ctx: &EvalContext<'_>,
+    ) -> bool {
+        let target_sheet = match sheet_opt {
+            None => self,
+            Some(target_name)
+                if WorkbookEngine::is_same_sheet_identity(target_name, &self.name) =>
+            {
+                self
+            }
+            Some(target_name) => {
+                let Some(wb) = ctx.workbook else {
+                    return false;
+                };
+                let Some(ts) = wb.sheet(target_name) else {
+                    return false;
+                };
+                ts
+            }
+        };
+        matches!(
+            target_sheet.compiled_asts.get(&coord),
+            Some(Ok(expr)) if expr_contains_subtotal(expr)
+        )
     }
 
     #[inline]
@@ -693,10 +349,13 @@ impl SheetEngine {
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
 
+        let prev_coord = ctx.current_coord;
+        ctx.current_coord = Some(coord);
         let mut result = match compiled {
             Ok(expr) => self.eval_expr_ctx(expr, ctx, depth + 1),
             Err(e) => EvaluatedCellValue::Error(*e),
         };
+        ctx.current_coord = prev_coord;
         if let EvaluatedCellValue::Text(ref s) = result {
             if s.chars().count() > Self::MAX_CELL_TEXT_CHARS {
                 result = EvaluatedCellValue::Error(FormulaError::Value);
@@ -776,8 +435,21 @@ impl SheetEngine {
             Expr::SheetCell { sheet, coord } => {
                 self.eval_sheet_coord(Some(sheet), *coord, ctx, depth)
             }
-            Expr::Range(_) | Expr::SheetRange { .. } => {
-                EvaluatedCellValue::Error(FormulaError::Value)
+            Expr::Range(range) => {
+                if range.start == range.end {
+                    self.eval_coord_ctx(range.start, ctx, depth)
+                } else {
+                    EvaluatedCellValue::Error(FormulaError::Value)
+                }
+            }
+            Expr::SheetRange { sheet, range } => {
+                if !self.has_sheet_in_ctx(sheet, ctx) {
+                    EvaluatedCellValue::Error(FormulaError::Ref)
+                } else if range.start == range.end {
+                    self.eval_sheet_coord(Some(sheet), range.start, ctx, depth)
+                } else {
+                    EvaluatedCellValue::Error(FormulaError::Value)
+                }
             }
             Expr::UnaryPlus(inner) => {
                 let val = self.eval_expr_ctx(inner, ctx, depth);
@@ -1115,6 +787,23 @@ impl SheetEngine {
                     let v = self.eval_expr_ctx(arg, ctx, depth);
                     fold_cell(v, 0, true)?;
                 }
+                Expr::FuncCall { name: fn_name, .. }
+                    if matches!(fn_name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
+                {
+                    if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
+                        let (_, _, _, rows, cols, _) = spec;
+                        for dr in 0..rows {
+                            for dc in 0..cols {
+                                let v = self
+                                    .eval_streaming_cell_allow_error(&spec, dr, dc, ctx, depth)?;
+                                fold_cell(v, (dr * cols + dc) & 3, true)?;
+                            }
+                        }
+                    } else {
+                        let v = self.eval_expr_ctx(arg, ctx, depth);
+                        fold_cell(v, 0, false)?;
+                    }
+                }
                 _ => {
                     let v = self.eval_expr_ctx(arg, ctx, depth);
                     fold_cell(v, 0, false)?;
@@ -1151,37 +840,10 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<Vec<EvaluatedCellValue>, FormulaError> {
         let mut out = Vec::new();
-        for arg in args {
-            match arg {
-                Expr::Range(range) => {
-                    let coords = range.expand().map_err(|_| FormulaError::Ref)?;
-                    for c in coords {
-                        let v = self.eval_coord_ctx(c, ctx, depth);
-                        if let EvaluatedCellValue::Error(e) = v {
-                            return Err(e);
-                        }
-                        out.push(v);
-                    }
-                }
-                Expr::SheetRange { sheet, range } => {
-                    let coords = range.expand().map_err(|_| FormulaError::Ref)?;
-                    for c in coords {
-                        let v = self.eval_sheet_coord(Some(sheet), c, ctx, depth);
-                        if let EvaluatedCellValue::Error(e) = v {
-                            return Err(e);
-                        }
-                        out.push(v);
-                    }
-                }
-                _ => {
-                    let v = self.eval_expr_ctx(arg, ctx, depth);
-                    if let EvaluatedCellValue::Error(e) = v {
-                        return Err(e);
-                    }
-                    out.push(v);
-                }
-            }
-        }
+        self.visit_args_streaming(args, ctx, depth, |v| {
+            out.push(v);
+            Ok(())
+        })?;
         Ok(out)
     }
 
@@ -1215,95 +877,22 @@ impl SheetEngine {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_korean_formulas_openformula_prefixes_and_quoted_sheet_brackets() {
-        let mut sheet = SheetEngine::new("매출");
-        sheet.set_cell("A1", "=\"한글\"").unwrap();
-        sheet.set_cell("A2", "='매출'!A1").unwrap();
-        sheet.set_cell("A3", "=매출!A1").unwrap();
-        assert_eq!(
-            sheet.evaluate_cell("A1"),
-            EvaluatedCellValue::Text("한글".to_string())
-        );
-        assert_eq!(
-            sheet.evaluate_cell("A2"),
-            EvaluatedCellValue::Text("한글".to_string())
-        );
-        assert_eq!(
-            sheet.evaluate_cell("A3"),
-            EvaluatedCellValue::Text("한글".to_string())
-        );
-
-        sheet.set_cell("A1", "10").unwrap();
-        sheet.set_cell("A2", "20").unwrap();
-        sheet.set_cell("B1", "of:=SUM([.A1:.A2])").unwrap();
-        sheet.set_cell("B2", "oooc:=SUM([.A1:.A2])").unwrap();
-        sheet.set_cell("B3", "msoxl:=SUM(A1:A2)").unwrap();
-        assert_eq!(sheet.evaluate_cell("B1"), EvaluatedCellValue::Number(30.0));
-        assert_eq!(sheet.evaluate_cell("B2"), EvaluatedCellValue::Number(30.0));
-        assert_eq!(sheet.evaluate_cell("B3"), EvaluatedCellValue::Number(30.0));
-
-        let mut wb = WorkbookEngine::new();
-        wb.add_sheet("2026 [Q1]").set_cell("A1", "42").unwrap();
-        wb.add_sheet("Q1:Q2").set_cell("A1", "55").unwrap();
-        {
-            let ab = wb.add_sheet("A.B");
-            ab.set_cell("C1", "10").unwrap();
-            ab.set_cell("D2", "25").unwrap();
+pub(crate) fn expr_contains_subtotal(expr: &Expr) -> bool {
+    match expr {
+        Expr::FuncCall { name, args } => {
+            name.eq_ignore_ascii_case("SUBTOTAL") || args.iter().any(expr_contains_subtotal)
         }
-        {
-            let main_sheet = wb.add_sheet("요약");
-            main_sheet.set_cell("A1", "=['2026 [Q1]'!A1]").unwrap();
-            main_sheet.set_cell("A2", "='2026 [Q1]'!A1").unwrap();
-            main_sheet.set_cell("A3", "of:=['Q1:Q2'.A1]").unwrap();
-            main_sheet
-                .set_cell("A4", "of:=SUM(['A.B'.C1:.D2])")
-                .unwrap();
-            main_sheet
-                .set_cell("A5", "of:=SUM(['Q1:Q2'.A1:'A.B'.D2])")
-                .unwrap();
-            main_sheet
-                .set_cell("A6", "of:=SUM([.A1:'A.B'.D2])")
-                .unwrap();
+        Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
+            expr_contains_subtotal(inner)
         }
-        assert_eq!(
-            wb.evaluate_cell("요약", "A1"),
-            EvaluatedCellValue::Number(42.0)
-        );
-        assert_eq!(
-            wb.evaluate_cell("요약", "A2"),
-            EvaluatedCellValue::Number(42.0)
-        );
-        assert_eq!(
-            wb.evaluate_cell("요약", "A3"),
-            EvaluatedCellValue::Number(55.0)
-        );
-        assert_eq!(
-            wb.evaluate_cell("요약", "A4"),
-            EvaluatedCellValue::Number(35.0)
-        );
-        assert_eq!(
-            wb.evaluate_cell("요약", "A5"),
-            EvaluatedCellValue::Error(FormulaError::Ref)
-        );
-        assert_eq!(
-            wb.evaluate_cell("요약", "A6"),
-            EvaluatedCellValue::Error(FormulaError::Ref)
-        );
-
-        sheet.set_cell("C1", "10").unwrap();
-        sheet.set_cell("D1", "100").unwrap();
-        sheet.set_cell("C2", "10").unwrap();
-        sheet.set_cell("D2", "200").unwrap();
-        sheet.set_cell("C3", "20").unwrap();
-        sheet.set_cell("D3", "300").unwrap();
-        sheet
-            .set_cell("E1", "=VLOOKUP(10, C1:D3, 2, TRUE)")
-            .unwrap();
-        assert_eq!(sheet.evaluate_cell("E1"), EvaluatedCellValue::Number(200.0));
+        Expr::Binary { lhs, rhs, .. } => expr_contains_subtotal(lhs) || expr_contains_subtotal(rhs),
+        Expr::Number(_)
+        | Expr::Text(_)
+        | Expr::Boolean(_)
+        | Expr::ErrorLiteral(_)
+        | Expr::Cell(_)
+        | Expr::Range(_)
+        | Expr::SheetCell { .. }
+        | Expr::SheetRange { .. } => false,
     }
 }
