@@ -815,7 +815,7 @@ startxref\n0\n%%EOF\n";
     let balanced_prose_stream = b"BT /F1 12 Tf 72 720 Td (Body ok) Tj ET";
     let valid_balanced_parens_pdf = format!(
         "%PDF-1.7\n\
-1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Section /A (7.6): trailer << /Encrypt 9 0 R >>) /Subject (Menu >> Security: /Encrypt 9 0 R disabled) >> endobj\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Section /A (7.6): trailer << /Encrypt 9 0 R >>) /Subject (Menu >> Security: /Encrypt 9 0 R disabled) /Author (EasyPDF - /Encrypt 9 0 R disabled on /macOS (arm64)) >> endobj\n\
 2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n\
 3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n\
 4 0 obj << /Length {} >>\nstream\n{}\nendstream\nendobj\n\
@@ -833,6 +833,7 @@ startxref\n0\n%%EOF\n",
     );
 
     let rev2_payload = b"BT (x)\nendstream\nendobj\n (real_tail) Tj ET";
+    let embedded_noise = b"%%EOF\n1 0 obj 6 endobj\ntext!";
     let stale_indirect_len_pdf = format!(
         "%PDF-1.7\n\
 1 0 obj 6 endobj\n\
@@ -840,30 +841,34 @@ startxref\n0\n%%EOF\n",
 3 0 obj << /Type /Pages /Count 1 /Kids [4 0 R] >> endobj\n\
 4 0 obj << /Type /Page /Parent 3 0 R /Contents 5 0 R >> endobj\n\
 5 0 obj << /Length 1 0 R >>\nstream\nABCDEF\nendstream\nendobj\n\
-xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n\
+xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF(rev1_note\n\
+6 0 obj << /Length {} >>\nstream\n{}\nendstream\nendobj\n\
 5 0 obj << /Length 1 0 R >>\nstream\n{}\nendstream\nendobj\n\
 1 0 obj {} endobj\n\
-xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
+xref\n0 7\ntrailer << /Size 7 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
+        embedded_noise.len(),
+        std::str::from_utf8(embedded_noise).unwrap(),
         std::str::from_utf8(rev2_payload).unwrap(),
         rev2_payload.len()
     );
     assert!(PdfSerializer::parse(stale_indirect_len_pdf.as_bytes()).is_ok());
 
-    let rev1_long_payload = b"123456\nendstream\nendobj\nBT /F1 12 Tf (Rev1) Tj ET";
+    let rev1_long_payload =
+        b"BT /F1 12 Tf (Fake) Tj ET\nendstream\nendobj\nBT /F1 12 Tf (Rev1) Tj ET";
     let rev2_short_payload = b"BT /F1 12 Tf (Rev2) Tj ET";
     let shrunk_indirect_len_pdf = format!(
         "%PDF-1.7\n\
+1 0 obj {} endobj\n\
 2 0 obj << /Type /Catalog /Pages 3 0 R >> endobj\n\
 3 0 obj << /Type /Pages /Count 1 /Kids [4 0 R] >> endobj\n\
 4 0 obj << /Type /Page /Parent 3 0 R /Contents 5 0 R >> endobj\n\
 5 0 obj << /Length 1 0 R >>\nstream\n{}\nendstream\nendobj\n\
-1 0 obj {} endobj\n\
 xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n\
 5 0 obj << /Length 1 0 R >>\nstream\n{}\nendstream\nendobj\n\
 1 0 obj {} endobj\n\
 xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
-        std::str::from_utf8(rev1_long_payload).unwrap(),
         rev1_long_payload.len(),
+        std::str::from_utf8(rev1_long_payload).unwrap(),
         std::str::from_utf8(rev2_short_payload).unwrap(),
         rev2_short_payload.len()
     );
@@ -890,6 +895,15 @@ xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
         &b"%PDF-1.5\n1 0 obj [ (unclosed /Type /XRef /Encrypt 9 0 R /Desc (ab)) ] endobj\nxref\n0 2\n%%EOF\n"[..],
         &b"%PDF-1.5\n1 0 obj [ (unclosed trailer << /Size 2 /Root 1 0 R /Encrypt 9 0 R /Desc (ab)) >>\nstartxref\n0\n%%EOF\n"[..],
         &b"%PDF-1.5\n1 0 obj (unclosed /Type /XRef /Encrypt 9 0 R\nstream\nABCD) endobj\nxref\n0 2\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Custom (unclosed /Encrypt << /Filter /Standard >> /Desc (ab)cd) >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Title (unclosed /Encrypt 9 0 R >>\n2 0 obj [ text) ] endobj\nxref\n0 5\n%%EOF\n"[..],
+        &b"%PDF-1.5\n1 0 obj << /Title (unclosed /Type /XRef /Encrypt 9 0 R >>\n2 0 obj [ text) ] endobj\nxref\n0 3\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Note (unclosed /ID [<0123> <4567>] /Encrypt 9 0 R) >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /ID [ (unclosed ] /Encrypt 9 0 R) >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Note (outer (unclosed /Encrypt 9 0 R /Author cd)) >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.5\n5 0 obj << /Title (unclosed\ntrailer << /Size 6 /Root 1 0 R /Encrypt 9 0 R >>\ntail) >> endobj\nxref\n0 6\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /BrokenKey /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Note (unclosed N/A /Encrypt 9 0 R >>\nstartxref\n0\n%%EOF\n"[..],
     ] {
         assert!(matches!(
             PdfSerializer::parse(enc_case),
@@ -904,6 +918,8 @@ xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
         &b"%PDF-1.7\n1 0 obj << /Broken [ (Note: %%EOF trailer << /Encrypt 9 0 R >>) 123\nxref\n0 2\n%%EOF\n"[..],
         &b"%PDF-1.7\n1 0 obj << /Broken [ 1 >> endobj\n2 0 obj << /Title (Note:\n4 0 obj << /Type /XRef /Encrypt 9 0 R >>) >> endobj\nxref\n0 3\n%%EOF\n"[..],
         &b"%PDF-1.5\n1 0 obj << /Type /Catalog >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Broken (Note: /Encrypt 9 0 R)y) >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Broken [ 1 >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Sub << /K (a<<b(c) >> /Note (Mentions /Encrypt 9 0 R in prose) >>\nstartxref\n0\n%%EOF\n"[..],
+        &b"%PDF-1.4\n1 0 obj << /Broken [ 1 >> endobj\nxref\n0 2\ntrailer << /Size 2 /Root 1 0 R /Bad (unclosed N/A)more) /Note (Mentions /Encrypt 9 0 R in prose) >>\nstartxref\n0\n%%EOF\n"[..],
     ] {
         assert!(matches!(
             PdfSerializer::parse(corrupted_case),

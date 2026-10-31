@@ -569,7 +569,6 @@
         const up = asciiUpperJs(t.value);
         if (peek()?.type === "punct" && peek().value === "(") {
           next();
-          if (!checkDepth(depth + 1)) return null;
           const args = [];
           if (!(peek()?.type === "punct" && peek().value === ")")) {
             while (true) {

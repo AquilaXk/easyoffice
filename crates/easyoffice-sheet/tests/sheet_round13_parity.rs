@@ -435,4 +435,14 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet("Main", &nested_parens_65),
         EvaluatedCellValue::Error(FormulaError::Value)
     );
+    let nested_row_64 = format!("={}ROW(){}", "(".repeat(64), ")".repeat(64));
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", &nested_row_64),
+        EvaluatedCellValue::Number(1.0)
+    );
+    let nested_row_65 = format!("={}ROW(){}", "(".repeat(65), ")".repeat(65));
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", &nested_row_65),
+        EvaluatedCellValue::Error(FormulaError::Value)
+    );
 }

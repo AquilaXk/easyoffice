@@ -4,8 +4,9 @@ mod pdf_damaged_encrypt;
 mod pdf_splice_classifier;
 
 use crate::pdf_stream_parser::{
-    contains_subslice, decode_pdf_hex_string, decode_pdf_name, has_structural_after_endobj_cached,
-    is_line_eof_marker, is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
+    advance_past_stream_eol, contains_subslice, decode_pdf_hex_string, decode_pdf_name,
+    has_structural_after_endobj_cached, is_line_eof_marker, is_pdf_delim_or_ws,
+    is_standalone_pdf_kw, is_valid_startxref_at, parse_indirect_obj_header,
     skip_pdf_ws_and_comments, skip_pdf_ws_stopping_at_eof, span_crosses_object_boundary,
     step_indexed_non_code_token, step_pdf_non_code_token, unescape_pdf_text,
     validate_balanced_pdf_literals, ParenJumpTable, PdfNonCodeKind, PdfNonCodeStep,
@@ -458,6 +459,8 @@ pub(super) fn build_eof_and_int_index(
 ) -> (Vec<usize>, IntObjIndex) {
     let mut eof_markers = Vec::new();
     let mut int_objs: IntObjIndex = HashMap::new();
+    let mut seen_startxref_in_rev = false;
+    let mut endobj_cache = (0usize, 0usize);
     let mut q = 0usize;
     while q < bytes.len() {
         if let Some(next_q) = step_closed_unspliced_single(bytes, strict_table, q, bytes.len()) {
@@ -466,13 +469,23 @@ pub(super) fn build_eof_and_int_index(
         }
         if bytes[q] == b'%' {
             if is_line_eof_marker(bytes, q) {
-                eof_markers.push(q);
-                q += 5;
-                continue;
+                let after_eof = skip_pdf_ws_and_comments(bytes, q + 5, bytes.len());
+                if seen_startxref_in_rev
+                    || after_eof >= bytes.len()
+                    || has_structural_after_endobj_cached(bytes, q + 5, &mut endobj_cache)
+                {
+                    eof_markers.push(q);
+                    seen_startxref_in_rev = false;
+                }
             }
             while q < bytes.len() && bytes[q] != b'\n' && bytes[q] != b'\r' {
                 q += 1;
             }
+            continue;
+        }
+        if is_valid_startxref_at(bytes, q, bytes.len()) {
+            seen_startxref_in_rev = true;
+            q += 9;
             continue;
         }
         if bytes[q].is_ascii_digit() && (q == 0 || is_pdf_delim_or_ws(bytes[q - 1])) {
@@ -483,7 +496,41 @@ pub(super) fn build_eof_and_int_index(
                         q = next_q;
                     }
                     Err(next_q) => {
-                        q = next_q.max(after_hdr);
+                        let mut jumped_stream = None;
+                        if let Ok(Some((PdfObjValue::Dict(entries), dict_end))) =
+                            parse_pdf_value_with_table(
+                                bytes,
+                                Some(strict_table),
+                                after_hdr,
+                                bytes.len(),
+                                0,
+                            )
+                        {
+                            let kw_p = skip_pdf_ws_and_comments(bytes, dict_end, bytes.len());
+                            if is_standalone_pdf_kw(bytes, kw_p, b"stream") {
+                                let stream_start = advance_past_stream_eol(bytes, kw_p + 6);
+                                let direct_or_prev_len = match dict_get(&entries, "/Length") {
+                                    Some(PdfObjValue::Int(n)) => usize::try_from(*n).ok(),
+                                    Some(PdfObjValue::Ref(lo, lg)) => lookup_indexed_int_obj(
+                                        &int_objs,
+                                        &eof_markers,
+                                        bytes,
+                                        stream_start,
+                                        *lo,
+                                        *lg,
+                                    ),
+                                    _ => None,
+                                };
+                                if let Some((_, _, after_endobj)) =
+                                    direct_or_prev_len.and_then(|u| {
+                                        verify_direct_stream_bounds(bytes, stream_start, u)
+                                    })
+                                {
+                                    jumped_stream = Some(after_endobj);
+                                }
+                            }
+                        }
+                        q = jumped_stream.unwrap_or_else(|| next_q.max(after_hdr));
                     }
                 }
                 continue;

@@ -551,6 +551,8 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   const mixedPrec13 = `=${"1=1&1+1*1^(".repeat(13)}1${")".repeat(13)}`;
   const nestedParens64 = `=1+${"(".repeat(64)}1${")".repeat(64)}`;
   const nestedParens65 = `=1+${"(".repeat(65)}1${")".repeat(65)}`;
+  const nestedRow64 = `=${"(".repeat(64)}ROW()${")".repeat(64)}`;
+  const nestedRow65 = `=${"(".repeat(65)}ROW()${")".repeat(65)}`;
   const romanSheet = offlineRpc.evaluate_sheet(
     JSON.stringify({
       sheet: "Main",
@@ -584,6 +586,8 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
         { sheet: "Main", cell: mixedPrec13 },
         { sheet: "Main", cell: nestedParens64 },
         { sheet: "Main", cell: nestedParens65 },
+        { sheet: "Main", cell: nestedRow64 },
+        { sheet: "Main", cell: nestedRow65 },
       ],
       cells: [
         { sheet: "Ⅰ분기", cell: "A1", value: "66" },
@@ -619,6 +623,8 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
     "66",
     "FALSE",
     "2",
+    "#VALUE!",
+    "1",
     "#VALUE!",
   ]);
 
