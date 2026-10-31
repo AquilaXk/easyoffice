@@ -531,9 +531,9 @@
         };
       }
       if (node.kind === "Unary") {
+        if (node.op === "group") return evalAst(node.expr, astDepth + 1);
         const inner = ensureScalar(evalAst(node.expr, astDepth + 1));
         if (inner.kind === "error") return inner;
-        if (node.op === "group") return inner;
         const n = coerceScalarNumber(inner);
         if (n === null) return valErr("#VALUE!");
         if (node.op === "-") return valNum(-n);
@@ -569,7 +569,10 @@
             return valNum(fnUpper === "ROW" ? parts.row : parts.col + 1);
           }
           if (args.length !== 1) return valErr("#VALUE!");
-          const target = args[0];
+          let target = args[0];
+          while (target && target.kind === "Unary" && target.op === "group") {
+            target = target.expr;
+          }
           if (target.kind === "Error") return valErr(target.code);
           if (target.kind === "Cell") {
             if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
@@ -588,7 +591,10 @@
         }
         if (fnUpper === "ROWS" || fnUpper === "COLUMNS") {
           if (args.length !== 1) return valErr("#VALUE!");
-          const target = args[0];
+          let target = args[0];
+          while (target && target.kind === "Unary" && target.op === "group") {
+            target = target.expr;
+          }
           if (target.kind === "Error") return valErr(target.code);
           if (target.kind === "Cell") {
             if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
@@ -611,7 +617,9 @@
                 : ind.maxCol - ind.minCol + 1;
             return valNum(span);
           }
-          return valErr("#VALUE!");
+          const scalarTarget = ensureScalar(evalAst(target, astDepth + 1));
+          if (scalarTarget.kind === "error") return scalarTarget;
+          return valNum(1);
         }
         const evaluatedArgs = [];
         for (let i = 0; i < args.length; i += 1) {

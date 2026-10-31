@@ -1,17 +1,213 @@
 use super::{
-    dict_get, dict_has_non_null_key, dict_name_eq, indirect_dict_has_spliced_encrypt,
-    parse_direct_int_endobj, parse_pdf_value_with_table, resolve_stream_bounds,
-    value_contains_encrypt_bytes, value_contains_xref_and_encrypt, verify_direct_stream_bounds,
+    build_eof_and_int_index, dict_get, dict_has_non_null_key, dict_name_eq, lookup_indexed_int_obj,
+    parse_pdf_value_with_table, resolve_stream_bounds, verify_direct_stream_bounds, IntObjIndex,
     PdfObjValue,
 };
 use crate::pdf_stream_parser::{
-    advance_past_stream_eol, contains_subslice, decode_pdf_name,
-    has_structural_after_endobj_cached, is_pdf_delim_or_ws, is_pdf_ws, is_standalone_pdf_kw,
-    match_indirect_obj_header, parse_indirect_obj_header, skip_damaged_truncated_stream,
-    skip_pdf_ws_stopping_at_eof, ParenJumpTable,
+    advance_past_stream_eol, decode_pdf_name, has_structural_after_endobj_cached,
+    is_pdf_delim_or_ws, is_pdf_ws, is_standalone_pdf_kw, match_indirect_obj_header,
+    skip_damaged_truncated_stream, skip_pdf_ws_stopping_at_eof, step_indexed_non_code_token,
+    ParenJumpTable, PdfNonCodeKind,
 };
 use crate::{DocumentFormat, EasyOfficeError};
-use std::collections::HashMap;
+
+fn raw_paren_str_has_splice_markers(raw: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i < raw.len() {
+        match raw[i] {
+            b'\\' => {
+                i = (i + 2).min(raw.len());
+                continue;
+            }
+            b'(' | b')' => return true,
+            b'\n' | b'\r' => {
+                let mut q = i + 1;
+                while q < raw.len() && matches!(raw[q], b'\n' | b'\r' | b' ' | b'\t') {
+                    q += 1;
+                }
+                if is_standalone_pdf_kw(raw, q, b"stream") {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+fn bytes_contain_pdf_name(haystack: &[u8], expected: &str) -> bool {
+    let mut i = 0usize;
+    while i < haystack.len() {
+        if haystack[i] == b'/' {
+            let mut k = i + 1;
+            while k < haystack.len() && !is_pdf_delim_or_ws(haystack[k]) {
+                k += 1;
+            }
+            if k > i + 1 && decode_pdf_name(&haystack[i + 1..k]) == expected {
+                return true;
+            }
+            i = k;
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+fn contains_trailer_dict_kw(haystack: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i + 7 <= haystack.len() {
+        if is_standalone_pdf_kw(haystack, i, b"trailer") {
+            let qt = skip_pdf_ws_stopping_at_eof(haystack, i + 7, haystack.len());
+            if qt + 1 < haystack.len() && haystack[qt] == b'<' && haystack[qt + 1] == b'<' {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn is_encrypt_entry_at(bytes: &[u8], i: usize, limit: usize) -> Option<usize> {
+    let end = limit.min(bytes.len());
+    if i >= end || bytes[i] != b'/' {
+        return None;
+    }
+    let mut k = i + 1;
+    while k < end && !is_pdf_delim_or_ws(bytes[k]) {
+        k += 1;
+    }
+    if k == i + 1 || decode_pdf_name(&bytes[i + 1..k]) != "/Encrypt" {
+        return None;
+    }
+    let q = skip_pdf_ws_stopping_at_eof(bytes, k, end);
+    if q + 1 < end && bytes[q] == b'<' && bytes[q + 1] == b'<' {
+        return Some(k);
+    }
+    if q < end && bytes[q].is_ascii_digit() {
+        let mut d1 = q;
+        while d1 < end && bytes[d1].is_ascii_digit() {
+            d1 += 1;
+        }
+        let q2 = skip_pdf_ws_stopping_at_eof(bytes, d1, end);
+        if q2 > d1 && q2 < end && bytes[q2].is_ascii_digit() {
+            let mut d2 = q2;
+            while d2 < end && bytes[d2].is_ascii_digit() {
+                d2 += 1;
+            }
+            let q3 = skip_pdf_ws_stopping_at_eof(bytes, d2, end);
+            if q3 > d2 && is_standalone_pdf_kw(&bytes[..end], q3, b"R") {
+                return Some(k);
+            }
+        }
+    }
+    None
+}
+
+fn bytes_contain_encrypt_entry(haystack: &[u8]) -> bool {
+    let len = haystack.len();
+    let mut i = 0usize;
+    while i < len {
+        if haystack[i] == b'/' {
+            if is_encrypt_entry_at(haystack, i, len).is_some() {
+                return true;
+            }
+            let mut k = i + 1;
+            while k < len && !is_pdf_delim_or_ws(haystack[k]) {
+                k += 1;
+            }
+            i = k;
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+fn value_contains_spliced_encrypt(val: &PdfObjValue) -> bool {
+    match val {
+        PdfObjValue::ParenStr(raw) => {
+            raw_paren_str_has_splice_markers(raw) && bytes_contain_encrypt_entry(raw)
+        }
+        PdfObjValue::Array(items) => items.iter().any(value_contains_spliced_encrypt),
+        PdfObjValue::Dict(entries) => entries
+            .iter()
+            .any(|(_, v)| value_contains_spliced_encrypt(v)),
+        _ => false,
+    }
+}
+
+fn value_contains_spliced_xref_or_trailer(val: &PdfObjValue) -> bool {
+    match val {
+        PdfObjValue::ParenStr(raw) => {
+            raw_paren_str_has_splice_markers(raw)
+                && (bytes_contain_pdf_name(raw, "/XRef") || contains_trailer_dict_kw(raw))
+        }
+        PdfObjValue::Array(items) => items.iter().any(value_contains_spliced_xref_or_trailer),
+        PdfObjValue::Dict(entries) => entries
+            .iter()
+            .any(|(_, v)| value_contains_spliced_xref_or_trailer(v)),
+        _ => false,
+    }
+}
+
+fn value_contains_xref_or_trailer_and_encrypt(val: &PdfObjValue) -> bool {
+    match val {
+        PdfObjValue::ParenStr(raw) => {
+            raw_paren_str_has_splice_markers(raw)
+                && (bytes_contain_pdf_name(raw, "/XRef") || contains_trailer_dict_kw(raw))
+                && bytes_contain_encrypt_entry(raw)
+        }
+        PdfObjValue::Array(items) => items.iter().any(value_contains_xref_or_trailer_and_encrypt),
+        PdfObjValue::Dict(entries) => entries
+            .iter()
+            .any(|(_, v)| value_contains_xref_or_trailer_and_encrypt(v)),
+        _ => false,
+    }
+}
+
+pub(in crate::text_pdf_codecs) fn trailer_or_xref_has_spliced_encrypt(
+    entries: &[(String, PdfObjValue)],
+    has_encrypt: bool,
+) -> bool {
+    if entries
+        .iter()
+        .any(|(_, v)| value_contains_spliced_encrypt(v))
+    {
+        return true;
+    }
+    let Some(val) = dict_get(entries, "/ID") else {
+        return false;
+    };
+    match val {
+        PdfObjValue::Null | PdfObjValue::Ref(_, _) if !has_encrypt => false,
+        PdfObjValue::Array(items) if items.len() == 2 => items
+            .iter()
+            .any(|item| !matches!(item, PdfObjValue::ParenStr(_) | PdfObjValue::HexStr(_))),
+        _ => true,
+    }
+}
+
+pub(in crate::text_pdf_codecs) fn indirect_val_has_spliced_encrypt(val: &PdfObjValue) -> bool {
+    if value_contains_xref_or_trailer_and_encrypt(val) {
+        return true;
+    }
+    if let PdfObjValue::Dict(entries) = val {
+        if dict_has_non_null_key(entries, "/Encrypt")
+            && entries
+                .iter()
+                .any(|(_, v)| value_contains_spliced_xref_or_trailer(v))
+        {
+            return true;
+        }
+        if dict_name_eq(entries, "/Type", "/XRef") {
+            let has_enc = dict_has_non_null_key(entries, "/Encrypt");
+            return trailer_or_xref_has_spliced_encrypt(entries, has_enc);
+        }
+    }
+    false
+}
 
 #[derive(Clone, Copy)]
 enum DamagedLengthHint {
@@ -24,7 +220,7 @@ fn is_damaged_top_boundary(
     q: usize,
     limit: usize,
     allow_stream: bool,
-    non_structural_until: &mut usize,
+    endobj_cache: &mut (usize, usize),
 ) -> Option<bool> {
     if q >= limit {
         return Some(false);
@@ -43,7 +239,7 @@ fn is_damaged_top_boundary(
     }
     if is_standalone_pdf_kw(bytes, q, b"endobj")
         && (q + 6 >= bytes.len()
-            || has_structural_after_endobj_cached(bytes, q + 6, non_structural_until))
+            || has_structural_after_endobj_cached(bytes, q + 6, endobj_cache))
     {
         return Some(false);
     }
@@ -71,140 +267,79 @@ fn is_damaged_top_boundary(
     None
 }
 
-type IntObjIndex = HashMap<(u32, u16), Vec<(usize, usize)>>;
-
-fn build_eof_and_int_index(bytes: &[u8]) -> (Vec<usize>, IntObjIndex) {
-    let mut eof_markers = Vec::new();
-    let mut int_objs: IntObjIndex = HashMap::new();
-    let mut q = 0usize;
-    while q < bytes.len() {
-        if bytes[q] == b'%' {
-            if q + 5 <= bytes.len() && &bytes[q..q + 5] == b"%%EOF" {
-                eof_markers.push(q);
-                q += 5;
-                continue;
-            }
-            while q < bytes.len() && bytes[q] != b'\n' && bytes[q] != b'\r' {
-                q += 1;
-            }
-            continue;
-        }
-        if bytes[q].is_ascii_digit() && (q == 0 || is_pdf_delim_or_ws(bytes[q - 1])) {
-            if let Some((on, gn, after_hdr)) = parse_indirect_obj_header(bytes, q, bytes.len()) {
-                match parse_direct_int_endobj(bytes, after_hdr, bytes.len()) {
-                    Ok((u, next_q)) => {
-                        int_objs.entry((on, gn)).or_default().push((q, u));
-                        q = next_q;
-                    }
-                    Err(next_q) => {
-                        q = next_q.max(after_hdr);
-                    }
-                }
-                continue;
-            }
-            while q < bytes.len() && bytes[q].is_ascii_digit() {
-                q += 1;
-            }
-            continue;
-        }
-        q += 1;
-    }
-    (eof_markers, int_objs)
-}
-
-fn lookup_indexed_int_obj(
-    int_objs: &IntObjIndex,
+fn step_closed_unspliced_literal(
     bytes: &[u8],
-    stream_start: usize,
-    target_obj: u32,
-    target_gen: u16,
+    paren_table: &ParenJumpTable,
+    q: usize,
+    limit: usize,
 ) -> Option<usize> {
-    let candidates = int_objs.get(&(target_obj, target_gen))?;
-    let mut post_fallback = None;
-    for &(obj_pos, len_val) in candidates {
-        if obj_pos < stream_start {
-            continue;
-        }
-        if obj_pos >= stream_start.saturating_add(len_val) {
-            if verify_direct_stream_bounds(bytes, stream_start, len_val).is_some() {
-                return Some(len_val);
-            }
-            post_fallback.get_or_insert(len_val);
+    if q >= limit || !matches!(bytes[q], b'(' | b'<') {
+        return None;
+    }
+    if q + 1 < limit && bytes[q] == b'<' && bytes[q + 1] == b'<' {
+        return None;
+    }
+    let step = step_indexed_non_code_token(bytes, paren_table, q, limit).ok()??;
+    if let PdfNonCodeKind::ParenString {
+        inner_start,
+        inner_end,
+    } = step.kind
+    {
+        let raw = &bytes[inner_start..inner_end];
+        if raw_paren_str_has_splice_markers(raw)
+            && (bytes_contain_encrypt_entry(raw)
+                || bytes_contain_pdf_name(raw, "/XRef")
+                || contains_trailer_dict_kw(raw))
+        {
+            return None;
         }
     }
-    let mut pre_fallback = None;
-    for &(obj_pos, len_val) in candidates.iter().rev() {
-        if obj_pos >= stream_start {
-            continue;
-        }
-        if verify_direct_stream_bounds(bytes, stream_start, len_val).is_some() {
-            return Some(len_val);
-        }
-        pre_fallback.get_or_insert(len_val);
-    }
-    post_fallback.or(pre_fallback)
-}
-
-struct DamagedDictBounds {
-    effective_limit: usize,
-    boundary_hit: Option<bool>,
-    scan_cursor: usize,
-    full_limit: usize,
+    Some(step.next_index)
 }
 
 fn find_id_array_end(
     bytes: &[u8],
+    paren_table: &ParenJumpTable,
     open_bracket: usize,
-    bounds: &mut DamagedDictBounds,
+    limit: usize,
     allow_stream: bool,
-    non_structural_until: &mut usize,
+    endobj_cache: &mut (usize, usize),
 ) -> Option<usize> {
-    if open_bracket >= bounds.effective_limit || bytes[open_bracket] != b'[' {
+    if open_bracket >= limit || bytes[open_bracket] != b'[' {
         return None;
     }
-    let mut q = open_bracket + 1;
-    while q < bounds.effective_limit {
-        if q >= bounds.scan_cursor {
-            if let Some(hs) = is_damaged_top_boundary(
-                bytes,
-                q,
-                bounds.full_limit,
-                allow_stream,
-                non_structural_until,
-            ) {
-                bounds.effective_limit = q;
-                bounds.boundary_hit = Some(hs);
-                return None;
-            }
-            bounds.scan_cursor = q + 1;
+    let mut q = skip_pdf_ws_stopping_at_eof(bytes, open_bracket + 1, limit);
+    while q < limit {
+        if let Some(next_q) = step_closed_unspliced_literal(bytes, paren_table, q, limit) {
+            q = next_q;
+            continue;
+        }
+        if is_damaged_top_boundary(bytes, q, limit, allow_stream, endobj_cache).is_some() {
+            return None;
         }
         if bytes[q] == b']' {
             let span = &bytes[open_bracket..q];
-            if contains_subslice(span, b"/Encrypt") || contains_subslice(span, b"/#45") {
+            if bytes_contain_encrypt_entry(span) {
                 return None;
             }
-            let after = skip_pdf_ws_stopping_at_eof(bytes, q + 1, bounds.effective_limit);
-            let at_next_key = after + 1 < bounds.effective_limit
-                && bytes[after] == b'/'
-                && !is_pdf_delim_or_ws(bytes[after + 1]);
-            let at_dict_end = if after + 1 < bounds.effective_limit
-                && bytes[after] == b'>'
-                && bytes[after + 1] == b'>'
-            {
-                let after_dict =
-                    skip_pdf_ws_stopping_at_eof(bytes, after + 2, bounds.effective_limit);
-                after_dict >= bounds.effective_limit
-                    || is_damaged_top_boundary(
-                        bytes,
-                        after_dict,
-                        bounds.full_limit,
-                        allow_stream,
-                        non_structural_until,
-                    )
-                    .is_some()
-            } else {
-                false
-            };
+            let after = skip_pdf_ws_stopping_at_eof(bytes, q + 1, limit);
+            let at_next_key =
+                after + 1 < limit && bytes[after] == b'/' && !is_pdf_delim_or_ws(bytes[after + 1]);
+            let at_dict_end =
+                if after + 1 < limit && bytes[after] == b'>' && bytes[after + 1] == b'>' {
+                    let after_dict = skip_pdf_ws_stopping_at_eof(bytes, after + 2, limit);
+                    after_dict >= limit
+                        || is_damaged_top_boundary(
+                            bytes,
+                            after_dict,
+                            limit,
+                            allow_stream,
+                            endobj_cache,
+                        )
+                        .is_some()
+                } else {
+                    false
+                };
             if at_next_key || at_dict_end {
                 return Some(q + 1);
             }
@@ -216,23 +351,33 @@ fn find_id_array_end(
 
 fn recover_broken_dict_value(
     bytes: &[u8],
+    paren_table: &ParenJumpTable,
     p: usize,
     limit: usize,
     allow_stream: bool,
-    non_structural_until: &mut usize,
+    endobj_cache: &mut (usize, usize),
+    saw_spliced_encrypt: &mut bool,
 ) -> (usize, Option<bool>) {
     if bytes[p] == b'[' {
         let mut depth = 1usize;
         let mut q = p + 1;
         while q < limit {
-            if let Some(hs) =
-                is_damaged_top_boundary(bytes, q, limit, allow_stream, non_structural_until)
-            {
+            if bytes[q] == b'%' {
+                let next_q = skip_pdf_ws_stopping_at_eof(bytes, q, limit);
+                if next_q > q {
+                    q = next_q;
+                    continue;
+                }
+            }
+            if let Some(next_q) = step_closed_unspliced_literal(bytes, paren_table, q, limit) {
+                q = next_q;
+                continue;
+            }
+            if let Some(hs) = is_damaged_top_boundary(bytes, q, limit, allow_stream, endobj_cache) {
                 return (q, Some(hs));
             }
-            if bytes[q] == b'%' {
-                q = skip_pdf_ws_stopping_at_eof(bytes, q, limit);
-                continue;
+            if bytes[q] == b'/' && is_encrypt_entry_at(bytes, q, limit).is_some() {
+                *saw_spliced_encrypt = true;
             }
             if bytes[q] == b'[' {
                 depth += 1;
@@ -252,14 +397,22 @@ fn recover_broken_dict_value(
         let mut depth = 1usize;
         let mut q = p + 2;
         while q < limit {
-            if let Some(hs) =
-                is_damaged_top_boundary(bytes, q, limit, allow_stream, non_structural_until)
-            {
+            if bytes[q] == b'%' {
+                let next_q = skip_pdf_ws_stopping_at_eof(bytes, q, limit);
+                if next_q > q {
+                    q = next_q;
+                    continue;
+                }
+            }
+            if let Some(next_q) = step_closed_unspliced_literal(bytes, paren_table, q, limit) {
+                q = next_q;
+                continue;
+            }
+            if let Some(hs) = is_damaged_top_boundary(bytes, q, limit, allow_stream, endobj_cache) {
                 return (q, Some(hs));
             }
-            if bytes[q] == b'%' {
-                q = skip_pdf_ws_stopping_at_eof(bytes, q, limit);
-                continue;
+            if bytes[q] == b'/' && is_encrypt_entry_at(bytes, q, limit).is_some() {
+                *saw_spliced_encrypt = true;
             }
             if q + 1 < limit && bytes[q] == b'<' && bytes[q + 1] == b'<' {
                 depth += 1;
@@ -280,9 +433,14 @@ fn recover_broken_dict_value(
     }
     let mut q = p + 1;
     while q < limit {
-        if let Some(hs) =
-            is_damaged_top_boundary(bytes, q, limit, allow_stream, non_structural_until)
-        {
+        if bytes[q] == b'%' {
+            let next_q = skip_pdf_ws_stopping_at_eof(bytes, q, limit);
+            if next_q > q {
+                q = next_q;
+                continue;
+            }
+        }
+        if let Some(hs) = is_damaged_top_boundary(bytes, q, limit, allow_stream, endobj_cache) {
             return (q, Some(hs));
         }
         if (q + 1 < limit && bytes[q] == b'>' && bytes[q + 1] == b'>') || bytes[q] == b'/' {
@@ -299,7 +457,7 @@ fn walk_damaged_dict_or_body(
     start: usize,
     limit: usize,
     allow_stream: bool,
-    non_structural_until: &mut usize,
+    endobj_cache: &mut (usize, usize),
 ) -> (bool, bool, Option<DamagedLengthHint>, usize, bool) {
     let p0 = skip_pdf_ws_stopping_at_eof(bytes, start, limit);
     if p0 >= limit {
@@ -315,7 +473,7 @@ fn walk_damaged_dict_or_body(
                     break;
                 }
                 if let Some(hs) =
-                    is_damaged_top_boundary(bytes, q, limit, allow_stream, non_structural_until)
+                    is_damaged_top_boundary(bytes, q, limit, allow_stream, endobj_cache)
                 {
                     return (false, false, None, q, hs);
                 }
@@ -329,14 +487,19 @@ fn walk_damaged_dict_or_body(
             }
         }
         while q < limit {
-            if let Some(hs) =
-                is_damaged_top_boundary(bytes, q, limit, allow_stream, non_structural_until)
-            {
-                return (false, false, None, q, hs);
-            }
             if bytes[q] == b'%' {
-                q = skip_pdf_ws_stopping_at_eof(bytes, q, limit);
+                let next_q = skip_pdf_ws_stopping_at_eof(bytes, q, limit);
+                if next_q > q {
+                    q = next_q;
+                    continue;
+                }
+            }
+            if let Some(next_q) = step_closed_unspliced_literal(bytes, paren_table, q, limit) {
+                q = next_q;
                 continue;
+            }
+            if let Some(hs) = is_damaged_top_boundary(bytes, q, limit, allow_stream, endobj_cache) {
+                return (false, false, None, q, hs);
             }
             q += 1;
         }
@@ -344,97 +507,86 @@ fn walk_damaged_dict_or_body(
     }
 
     let mut is_xref_type = false;
+    let mut saw_spliced_xref = false;
     let mut has_encrypt_key = false;
+    let mut saw_spliced_encrypt = false;
     let mut length_hint: Option<DamagedLengthHint> = None;
-    let mut effective_limit = limit;
-    let mut boundary_hit: Option<bool> = None;
     let mut p = p0 + 2;
-    let mut scan_cursor = p;
 
-    while p < effective_limit {
-        p = skip_pdf_ws_stopping_at_eof(bytes, p, effective_limit);
-        if p >= effective_limit {
+    while p < limit {
+        p = skip_pdf_ws_stopping_at_eof(bytes, p, limit);
+        if p >= limit {
             break;
         }
-        if p + 1 < effective_limit && bytes[p] == b'>' && bytes[p + 1] == b'>' {
+        if p + 1 < limit && bytes[p] == b'>' && bytes[p + 1] == b'>' {
             p += 2;
-            boundary_hit = None;
             break;
         }
-        if let Some(hs) =
-            is_damaged_top_boundary(bytes, p, limit, allow_stream, non_structural_until)
-        {
-            return (is_xref_type, has_encrypt_key, length_hint, p, hs);
+        if let Some(hs) = is_damaged_top_boundary(bytes, p, limit, allow_stream, endobj_cache) {
+            return (
+                is_xref_type || saw_spliced_xref,
+                has_encrypt_key || saw_spliced_encrypt,
+                length_hint,
+                p,
+                hs,
+            );
         }
         if bytes[p] != b'/' {
             let (next_p, hit) = recover_broken_dict_value(
                 bytes,
+                paren_table,
                 p,
-                effective_limit,
+                limit,
                 allow_stream,
-                non_structural_until,
+                endobj_cache,
+                &mut saw_spliced_encrypt,
             );
             if let Some(hs) = hit {
-                return (is_xref_type, has_encrypt_key, length_hint, next_p, hs);
+                return (
+                    is_xref_type || saw_spliced_xref,
+                    has_encrypt_key || saw_spliced_encrypt,
+                    length_hint,
+                    next_p,
+                    hs,
+                );
             }
             p = next_p.max(p + 1);
             continue;
         }
         let mut k = p + 1;
-        while k < effective_limit && !is_pdf_delim_or_ws(bytes[k]) {
+        while k < limit && !is_pdf_delim_or_ws(bytes[k]) {
             k += 1;
         }
         let key = decode_pdf_name(&bytes[p + 1..k]);
-        p = skip_pdf_ws_stopping_at_eof(bytes, k, effective_limit);
-        if p >= effective_limit {
+        p = skip_pdf_ws_stopping_at_eof(bytes, k, limit);
+        if p >= limit {
             break;
         }
-        if p + 1 < effective_limit && bytes[p] == b'>' && bytes[p + 1] == b'>' {
+        if p + 1 < limit && bytes[p] == b'>' && bytes[p + 1] == b'>' {
             p += 2;
-            boundary_hit = None;
             break;
         }
-        if let Some(hs) =
-            is_damaged_top_boundary(bytes, p, limit, allow_stream, non_structural_until)
-        {
-            return (is_xref_type, has_encrypt_key, length_hint, p, hs);
+        if let Some(hs) = is_damaged_top_boundary(bytes, p, limit, allow_stream, endobj_cache) {
+            return (
+                is_xref_type || saw_spliced_xref,
+                has_encrypt_key || saw_spliced_encrypt,
+                length_hint,
+                p,
+                hs,
+            );
         }
-        if key == "/Encrypt" && !is_standalone_pdf_kw(&bytes[..effective_limit], p, b"null") {
+        if key == "/Encrypt" && !is_standalone_pdf_kw(&bytes[..limit], p, b"null") {
             has_encrypt_key = true;
         }
-        let parsed_val =
-            parse_pdf_value_with_table(bytes, Some(paren_table), p, effective_limit, 1)
-                .ok()
-                .flatten();
+        let parsed_val = parse_pdf_value_with_table(bytes, Some(paren_table), p, limit, 1)
+            .ok()
+            .flatten();
         let accepted_val = parsed_val.and_then(|(val, next_p)| {
-            scan_cursor = scan_cursor.max(p + 1);
-            while scan_cursor < next_p {
-                if let Some(hs) = is_damaged_top_boundary(
-                    bytes,
-                    scan_cursor,
-                    limit,
-                    allow_stream,
-                    non_structural_until,
-                ) {
-                    effective_limit = scan_cursor;
-                    boundary_hit = Some(hs);
-                    break;
-                }
-                scan_cursor += 1;
-            }
-            if next_p > effective_limit {
-                return None;
-            }
-            if (!allow_stream || is_xref_type || value_contains_xref_and_encrypt(&val))
-                && value_contains_encrypt_bytes(&val)
-            {
-                return None;
-            }
             let valid_follow = if matches!(val, PdfObjValue::ParenStr(_) | PdfObjValue::Array(_)) {
-                let after_v = skip_pdf_ws_stopping_at_eof(bytes, next_p, effective_limit);
-                after_v < effective_limit
+                let after_v = skip_pdf_ws_stopping_at_eof(bytes, next_p, limit);
+                after_v < limit
                     && (bytes[after_v] == b'/'
-                        || (after_v + 1 < effective_limit
+                        || (after_v + 1 < limit
                             && bytes[after_v] == b'>'
                             && bytes[after_v + 1] == b'>'))
             } else {
@@ -443,6 +595,12 @@ fn walk_damaged_dict_or_body(
             valid_follow.then_some((val, next_p))
         });
         if let Some((val, next_p)) = accepted_val {
+            if value_contains_spliced_encrypt(&val) {
+                saw_spliced_encrypt = true;
+            }
+            if value_contains_spliced_xref_or_trailer(&val) {
+                saw_spliced_xref = true;
+            }
             if key == "/Type" && matches!(&val, PdfObjValue::Name(n) if n == "/XRef") {
                 is_xref_type = true;
             }
@@ -459,64 +617,54 @@ fn walk_damaged_dict_or_body(
             p = next_p;
         } else {
             if key == "/ID" && bytes[p] == b'[' {
-                let mut bounds = DamagedDictBounds {
-                    effective_limit,
-                    boundary_hit,
-                    scan_cursor,
-                    full_limit: limit,
-                };
-                let id_res =
-                    find_id_array_end(bytes, p, &mut bounds, allow_stream, non_structural_until);
-                effective_limit = bounds.effective_limit;
-                boundary_hit = bounds.boundary_hit;
-                scan_cursor = bounds.scan_cursor;
-                if let Some(id_end) = id_res {
+                if let Some(id_end) =
+                    find_id_array_end(bytes, paren_table, p, limit, allow_stream, endobj_cache)
+                {
                     p = id_end;
                     continue;
                 }
             }
+            let recover_start = if key == "/ID" && bytes[p] == b'[' {
+                (p + 1).min(limit)
+            } else {
+                p
+            };
             let (next_p, hit) = recover_broken_dict_value(
                 bytes,
-                p,
-                effective_limit,
+                paren_table,
+                recover_start,
+                limit,
                 allow_stream,
-                non_structural_until,
+                endobj_cache,
+                &mut saw_spliced_encrypt,
             );
             if let Some(hs) = hit {
-                return (is_xref_type, has_encrypt_key, length_hint, next_p, hs);
+                return (
+                    is_xref_type || saw_spliced_xref,
+                    has_encrypt_key || saw_spliced_encrypt,
+                    length_hint,
+                    next_p,
+                    hs,
+                );
             }
             p = next_p.max(p + 1);
         }
     }
 
-    if let Some(hs) = boundary_hit {
-        return (
-            is_xref_type,
-            has_encrypt_key,
-            length_hint,
-            effective_limit,
-            hs,
-        );
-    }
-
+    let is_xref_out = is_xref_type || saw_spliced_xref;
+    let has_enc_out = has_encrypt_key || saw_spliced_encrypt;
     let after_dict = skip_pdf_ws_stopping_at_eof(bytes, p, limit);
     if allow_stream
         && is_standalone_pdf_kw(bytes, after_dict, b"stream")
         && (after_dict + 6 >= bytes.len()
             || matches!(bytes[after_dict + 6], b'\r' | b'\n' | b' ' | b'\t'))
     {
-        return (is_xref_type, has_encrypt_key, length_hint, after_dict, true);
+        return (is_xref_out, has_enc_out, length_hint, after_dict, true);
     }
     if is_standalone_pdf_kw(bytes, after_dict, b"endobj") {
-        return (
-            is_xref_type,
-            has_encrypt_key,
-            length_hint,
-            after_dict + 6,
-            false,
-        );
+        return (is_xref_out, has_enc_out, length_hint, after_dict + 6, false);
     }
-    (is_xref_type, has_encrypt_key, length_hint, p, false)
+    (is_xref_out, has_enc_out, length_hint, p, false)
 }
 
 fn try_step_undamaged_object(
@@ -528,10 +676,10 @@ fn try_step_undamaged_object(
 ) -> Option<(bool, usize)> {
     let (val, next_p) =
         parse_pdf_value_with_table(bytes, Some(paren_table), after_obj, rev_limit, 0).ok()??;
+    if indirect_val_has_spliced_encrypt(&val) {
+        return None;
+    }
     if let PdfObjValue::Dict(ref entries) = val {
-        if indirect_dict_has_spliced_encrypt(entries) {
-            return None;
-        }
         if dict_name_eq(entries, "/Type", "/XRef") && dict_has_non_null_key(entries, "/Encrypt") {
             return Some((true, next_p));
         }
@@ -572,7 +720,7 @@ fn try_step_undamaged_object(
 fn has_encrypt_in_damaged_or_cipher_pdf(bytes: &[u8], start_offset: usize) -> bool {
     let paren_table = ParenJumpTable::build_damaged(bytes);
     let (eof_markers, int_objs) = build_eof_and_int_index(bytes);
-    let mut non_structural_until = 0usize;
+    let mut endobj_cache = (0usize, 0usize);
     let mut p = start_offset.min(bytes.len());
     while p < bytes.len() {
         if is_pdf_ws(bytes[p]) {
@@ -599,7 +747,7 @@ fn has_encrypt_in_damaged_or_cipher_pdf(bytes: &[u8], start_offset: usize) -> bo
                 start,
                 trailer_limit,
                 false,
-                &mut non_structural_until,
+                &mut endobj_cache,
             );
             if has_enc {
                 return true;
@@ -625,7 +773,7 @@ fn has_encrypt_in_damaged_or_cipher_pdf(bytes: &[u8], start_offset: usize) -> bo
                 after_obj,
                 rev_limit,
                 true,
-                &mut non_structural_until,
+                &mut endobj_cache,
             );
             if is_xref && has_enc {
                 return true;

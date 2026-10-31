@@ -11,10 +11,10 @@ use crate::pdf_stream_parser::{
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
 use pdf_object_graph::{
     decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_name_eq,
-    fail_corrupted_or_encrypted, indirect_dict_has_spliced_encrypt, parse_pdf_value_with_table,
+    fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt, parse_pdf_value_with_table,
     resolve_catalog_and_pages_target, resolve_int, resolve_stream_bounds,
     resolve_stream_length_hint, resolve_value, trailer_or_xref_has_spliced_encrypt,
-    validate_pdf_trailer_json, PageNodeTarget, PdfIndirectObject, PdfObjValue,
+    validate_pdf_trailer_json, IntObjIndex, PageNodeTarget, PdfIndirectObject, PdfObjValue,
     MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH, MAX_PDF_TOTAL_DECODED_BYTES,
 };
 use std::borrow::Cow;
@@ -620,7 +620,8 @@ impl PdfSerializer {
     }
 
     fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
-        let paren_table = ParenJumpTable::build_damaged(bytes);
+        let paren_table = ParenJumpTable::build(bytes);
+        let mut int_index: Option<IntObjIndex> = None;
         let mut objects: HashMap<(u32, u16), PdfIndirectObject> = HashMap::new();
         let mut trailers: Vec<Vec<(String, PdfObjValue)>> = Vec::new();
         let mut stream_spans: Vec<(usize, usize)> = Vec::new();
@@ -654,15 +655,15 @@ impl PdfSerializer {
                     )
                 })?;
                 let (val, mut next_p) = parsed_val.unwrap_or((PdfObjValue::Null, after_obj));
+                if indirect_val_has_spliced_encrypt(&val) {
+                    return Err(fail_corrupted_or_encrypted(
+                        bytes,
+                        p,
+                        has_encrypt,
+                        "PDF 상호참조 딕셔너리 구조가 손상되었습니다.",
+                    ));
+                }
                 if let PdfObjValue::Dict(ref entries) = val {
-                    if indirect_dict_has_spliced_encrypt(entries) {
-                        return Err(fail_corrupted_or_encrypted(
-                            bytes,
-                            p,
-                            has_encrypt,
-                            "PDF 상호참조 딕셔너리 구조가 손상되었습니다.",
-                        ));
-                    }
                     if dict_name_eq(entries, "/Type", "/XRef")
                         && dict_has_non_null_key(entries, "/Encrypt")
                     {
@@ -682,8 +683,13 @@ impl PdfSerializer {
                     };
                     let stream_kw_pos = next_p;
                     let stream_start = advance_past_stream_eol(bytes, next_p + 6);
-                    let len_hint =
-                        resolve_stream_length_hint(bytes, stream_start, entries, &objects);
+                    let len_hint = resolve_stream_length_hint(
+                        bytes,
+                        stream_start,
+                        entries,
+                        &objects,
+                        &mut int_index,
+                    );
                     let Some((stream_end, after_endstream)) =
                         resolve_stream_bounds(bytes, stream_start, len_hint)
                     else {

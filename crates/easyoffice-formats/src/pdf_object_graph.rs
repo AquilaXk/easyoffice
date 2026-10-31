@@ -2,15 +2,19 @@
 mod pdf_damaged_encrypt;
 
 use crate::pdf_stream_parser::{
-    contains_subslice, decode_pdf_hex_string, decode_pdf_name, has_structural_after_endobj,
+    contains_subslice, decode_pdf_hex_string, decode_pdf_name, has_structural_after_endobj_cached,
     is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header, skip_pdf_ws_and_comments,
     skip_pdf_ws_stopping_at_eof, span_crosses_object_boundary, step_indexed_non_code_token,
     step_pdf_non_code_token, unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable,
     PdfNonCodeKind, PdfNonCodeStep,
 };
 use crate::EasyOfficeError;
-pub(super) use pdf_damaged_encrypt::fail_corrupted_or_encrypted;
+pub(super) use pdf_damaged_encrypt::{
+    fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt, trailer_or_xref_has_spliced_encrypt,
+};
 use std::collections::HashMap;
+
+pub(super) type IntObjIndex = HashMap<(u32, u16), Vec<(usize, usize)>>;
 
 pub(super) const MAX_PDF_NESTING_DEPTH: usize = 64;
 pub(super) const MAX_PDF_STREAM_DECODE_BYTES: usize = 16 * 1024 * 1024;
@@ -51,64 +55,6 @@ pub(super) fn dict_get<'a>(
 
 pub(super) fn dict_has_non_null_key(entries: &[(String, PdfObjValue)], key: &str) -> bool {
     dict_get(entries, key).is_some_and(|v| !matches!(v, PdfObjValue::Null))
-}
-
-pub(super) fn value_contains_encrypt_bytes(val: &PdfObjValue) -> bool {
-    match val {
-        PdfObjValue::ParenStr(raw) => {
-            contains_subslice(raw, b"/Encrypt") || contains_subslice(raw, b"/#45")
-        }
-        PdfObjValue::Array(items) => items.iter().any(value_contains_encrypt_bytes),
-        PdfObjValue::Dict(entries) => entries.iter().any(|(_, v)| value_contains_encrypt_bytes(v)),
-        _ => false,
-    }
-}
-
-pub(super) fn value_contains_xref_and_encrypt(val: &PdfObjValue) -> bool {
-    match val {
-        PdfObjValue::ParenStr(raw) => {
-            (contains_subslice(raw, b"/XRef") || contains_subslice(raw, b"#58Ref"))
-                && (contains_subslice(raw, b"/Encrypt") || contains_subslice(raw, b"/#45"))
-        }
-        PdfObjValue::Array(items) => items.iter().any(value_contains_xref_and_encrypt),
-        PdfObjValue::Dict(entries) => entries
-            .iter()
-            .any(|(_, v)| value_contains_xref_and_encrypt(v)),
-        _ => false,
-    }
-}
-
-pub(super) fn trailer_or_xref_has_spliced_encrypt(
-    entries: &[(String, PdfObjValue)],
-    has_encrypt: bool,
-) -> bool {
-    if entries.iter().any(|(_, v)| value_contains_encrypt_bytes(v)) {
-        return true;
-    }
-    let Some(val) = dict_get(entries, "/ID") else {
-        return false;
-    };
-    match val {
-        PdfObjValue::Ref(_, _) if !has_encrypt => false,
-        PdfObjValue::Array(items) if items.len() == 2 => items
-            .iter()
-            .any(|item| !matches!(item, PdfObjValue::ParenStr(_) | PdfObjValue::HexStr(_))),
-        _ => true,
-    }
-}
-
-pub(super) fn indirect_dict_has_spliced_encrypt(entries: &[(String, PdfObjValue)]) -> bool {
-    if entries
-        .iter()
-        .any(|(_, v)| value_contains_xref_and_encrypt(v))
-    {
-        return true;
-    }
-    if dict_name_eq(entries, "/Type", "/XRef") {
-        let has_enc = dict_has_non_null_key(entries, "/Encrypt");
-        return trailer_or_xref_has_spliced_encrypt(entries, has_enc);
-    }
-    false
 }
 
 pub(super) fn dict_name_eq(entries: &[(String, PdfObjValue)], key: &str, expected: &str) -> bool {
@@ -384,6 +330,7 @@ fn scan_stream_to_endstream(
     skip_pdf_strings: bool,
 ) -> Option<(usize, usize)> {
     let kw = b"endstream";
+    let mut endobj_cache = (0usize, 0usize);
     let mut i = start;
     while i < bytes.len() {
         if skip_pdf_strings {
@@ -396,7 +343,9 @@ fn scan_stream_to_endstream(
                 Err(()) => return None,
             }
         }
-        if is_standalone_pdf_kw(bytes, i, b"endobj") && has_structural_after_endobj(bytes, i + 6) {
+        if is_standalone_pdf_kw(bytes, i, b"endobj")
+            && has_structural_after_endobj_cached(bytes, i + 6, &mut endobj_cache)
+        {
             return None;
         }
         if is_standalone_pdf_kw(bytes, i, kw) {
@@ -499,16 +448,17 @@ pub(super) fn parse_direct_int_endobj(
     Ok((u, end_p + 6))
 }
 
-fn lookup_forward_int_obj(
-    bytes: &[u8],
-    stream_start: usize,
-    target_obj: u32,
-    target_gen: u16,
-) -> Option<usize> {
-    let mut q = stream_start;
-    let mut fallback = None;
+pub(super) fn build_eof_and_int_index(bytes: &[u8]) -> (Vec<usize>, IntObjIndex) {
+    let mut eof_markers = Vec::new();
+    let mut int_objs: IntObjIndex = HashMap::new();
+    let mut q = 0usize;
     while q < bytes.len() {
         if bytes[q] == b'%' {
+            if q + 5 <= bytes.len() && &bytes[q..q + 5] == b"%%EOF" {
+                eof_markers.push(q);
+                q += 5;
+                continue;
+            }
             while q < bytes.len() && bytes[q] != b'\n' && bytes[q] != b'\r' {
                 q += 1;
             }
@@ -518,15 +468,7 @@ fn lookup_forward_int_obj(
             if let Some((on, gn, after_hdr)) = parse_indirect_obj_header(bytes, q, bytes.len()) {
                 match parse_direct_int_endobj(bytes, after_hdr, bytes.len()) {
                     Ok((u, next_q)) => {
-                        if on == target_obj
-                            && gn == target_gen
-                            && q >= stream_start.saturating_add(u)
-                        {
-                            if verify_direct_stream_bounds(bytes, stream_start, u).is_some() {
-                                return Some(u);
-                            }
-                            fallback.get_or_insert(u);
-                        }
+                        int_objs.entry((on, gn)).or_default().push((q, u));
                         q = next_q;
                     }
                     Err(next_q) => {
@@ -542,7 +484,40 @@ fn lookup_forward_int_obj(
         }
         q += 1;
     }
-    fallback
+    (eof_markers, int_objs)
+}
+
+pub(super) fn lookup_indexed_int_obj(
+    int_objs: &IntObjIndex,
+    bytes: &[u8],
+    stream_start: usize,
+    target_obj: u32,
+    target_gen: u16,
+) -> Option<usize> {
+    let candidates = int_objs.get(&(target_obj, target_gen))?;
+    let mut post_fallback = None;
+    for &(obj_pos, len_val) in candidates {
+        if obj_pos < stream_start {
+            continue;
+        }
+        if obj_pos >= stream_start.saturating_add(len_val) {
+            if verify_direct_stream_bounds(bytes, stream_start, len_val).is_some() {
+                return Some(len_val);
+            }
+            post_fallback.get_or_insert(len_val);
+        }
+    }
+    let mut pre_fallback = None;
+    for &(obj_pos, len_val) in candidates.iter().rev() {
+        if obj_pos >= stream_start {
+            continue;
+        }
+        if verify_direct_stream_bounds(bytes, stream_start, len_val).is_some() {
+            return Some(len_val);
+        }
+        pre_fallback.get_or_insert(len_val);
+    }
+    post_fallback.or(pre_fallback)
 }
 
 pub(super) fn resolve_stream_length_hint(
@@ -550,16 +525,22 @@ pub(super) fn resolve_stream_length_hint(
     stream_start: usize,
     entries: &[(String, PdfObjValue)],
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
+    int_index: &mut Option<IntObjIndex>,
 ) -> Option<usize> {
     match dict_get(entries, "/Length")? {
         PdfObjValue::Int(n) => usize::try_from(*n).ok(),
         PdfObjValue::Ref(lo, lg) => {
             if let Some(obj) = objects.get(&(*lo, *lg)) {
                 if let PdfObjValue::Int(n) = obj.val {
-                    return usize::try_from(n).ok();
+                    if let Ok(u) = usize::try_from(n) {
+                        if verify_direct_stream_bounds(bytes, stream_start, u).is_some() {
+                            return Some(u);
+                        }
+                    }
                 }
             }
-            lookup_forward_int_obj(bytes, stream_start, *lo, *lg)
+            let idx = int_index.get_or_insert_with(|| build_eof_and_int_index(bytes).1);
+            lookup_indexed_int_obj(idx, bytes, stream_start, *lo, *lg)
         }
         _ => None,
     }

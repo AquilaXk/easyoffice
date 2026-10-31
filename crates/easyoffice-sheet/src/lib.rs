@@ -435,8 +435,21 @@ impl SheetEngine {
             Expr::SheetCell { sheet, coord } => {
                 self.eval_sheet_coord(Some(sheet), *coord, ctx, depth)
             }
-            Expr::Range(_) | Expr::SheetRange { .. } => {
-                EvaluatedCellValue::Error(FormulaError::Value)
+            Expr::Range(range) => {
+                if range.start == range.end {
+                    self.eval_coord_ctx(range.start, ctx, depth)
+                } else {
+                    EvaluatedCellValue::Error(FormulaError::Value)
+                }
+            }
+            Expr::SheetRange { sheet, range } => {
+                if !self.has_sheet_in_ctx(sheet, ctx) {
+                    EvaluatedCellValue::Error(FormulaError::Ref)
+                } else if range.start == range.end {
+                    self.eval_sheet_coord(Some(sheet), range.start, ctx, depth)
+                } else {
+                    EvaluatedCellValue::Error(FormulaError::Value)
+                }
             }
             Expr::UnaryPlus(inner) => {
                 let val = self.eval_expr_ctx(inner, ctx, depth);

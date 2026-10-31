@@ -252,30 +252,25 @@ pub(crate) fn skip_pdf_ws_stopping_at_eof(bytes: &[u8], mut pos: usize, limit: u
     pos
 }
 
-pub(crate) fn has_structural_after_endobj(slice: &[u8], after_endobj: usize) -> bool {
-    let mut non_structural_until = 0usize;
-    has_structural_after_endobj_cached(slice, after_endobj, &mut non_structural_until)
-}
-
 pub(crate) fn has_structural_after_endobj_cached(
     slice: &[u8],
     after_endobj: usize,
-    non_structural_until: &mut usize,
+    cache: &mut (usize, usize),
 ) -> bool {
     let len = slice.len();
     if after_endobj >= len || (!is_pdf_ws(slice[after_endobj]) && slice[after_endobj] != b'%') {
         return false;
     }
-    if after_endobj < *non_structural_until {
+    if cache.0 <= after_endobj && after_endobj < cache.1 {
         return false;
     }
     let q = skip_pdf_ws_and_comments(slice, after_endobj, len);
     if match_indirect_obj_header(slice, q, len).is_some() {
         return true;
     }
-    if q + 4 < len
+    if q + 4 <= len
         && is_standalone_pdf_kw(slice, q, b"xref")
-        && (is_pdf_ws(slice[q + 4]) || slice[q + 4] == b'%')
+        && (q + 4 == len || is_pdf_ws(slice[q + 4]) || slice[q + 4] == b'%')
     {
         return true;
     }
@@ -291,7 +286,7 @@ pub(crate) fn has_structural_after_endobj_cached(
             return true;
         }
     }
-    *non_structural_until = q.max(after_endobj + 1);
+    *cache = (after_endobj, q.max(after_endobj + 1));
     false
 }
 
@@ -302,6 +297,7 @@ pub(crate) fn span_crosses_object_boundary(bytes: &[u8], start: usize, end: usiz
     let slice = &bytes[start..end];
     let len = slice.len();
     let paren_table = ParenJumpTable::build(slice);
+    let mut endobj_cache = (0usize, 0usize);
     let mut p = 0usize;
     while p < len {
         match step_indexed_non_code_token(slice, &paren_table, p, len) {
@@ -319,14 +315,14 @@ pub(crate) fn span_crosses_object_boundary(bytes: &[u8], start: usize, end: usiz
             let q = skip_pdf_ws_and_comments(slice, p + 9, len);
             if (q + 6 <= len
                 && is_standalone_pdf_kw(slice, q, b"endobj")
-                && has_structural_after_endobj(slice, q + 6))
+                && has_structural_after_endobj_cached(slice, q + 6, &mut endobj_cache))
                 || match_indirect_obj_header(slice, q, len).is_some()
             {
                 return true;
             }
         } else if p + 6 <= len
             && is_standalone_pdf_kw(slice, p, b"endobj")
-            && has_structural_after_endobj(slice, p + 6)
+            && has_structural_after_endobj_cached(slice, p + 6, &mut endobj_cache)
         {
             return true;
         }
@@ -785,7 +781,7 @@ const MAX_PAREN_JUMP_DEPTH: usize = 4096;
 pub(crate) fn is_paren_reset_boundary(
     bytes: &[u8],
     i: usize,
-    non_structural_until: &mut usize,
+    endobj_cache: &mut (usize, usize),
 ) -> Option<usize> {
     let len = bytes.len();
     if i + 5 <= len && &bytes[i..i + 5] == b"%%EOF" {
@@ -805,7 +801,7 @@ pub(crate) fn is_paren_reset_boundary(
         }
         let followed_by_eol = a >= len || matches!(bytes[a], b'\n' | b'\r' | b'%');
         if (preceded_structurally || followed_by_eol)
-            && has_structural_after_endobj_cached(bytes, i + 6, non_structural_until)
+            && has_structural_after_endobj_cached(bytes, i + 6, endobj_cache)
         {
             return Some(i + 6);
         }
@@ -819,25 +815,37 @@ pub(crate) fn is_paren_reset_boundary(
             t
         };
         if is_standalone_pdf_kw(bytes, line_tok, b"trailer") {
-            let qt = skip_pdf_ws_only(bytes, line_tok + 7, len);
+            let qt = skip_pdf_ws_stopping_at_eof(bytes, line_tok + 7, len);
             if qt + 1 < len && bytes[qt] == b'<' && bytes[qt + 1] == b'<' {
                 return Some(line_tok);
             }
         }
         if is_standalone_pdf_kw(bytes, line_tok, b"xref")
             && line_tok + 4 < len
-            && is_pdf_ws(bytes[line_tok + 4])
+            && (is_pdf_ws(bytes[line_tok + 4]) || bytes[line_tok + 4] == b'%')
         {
-            return Some(line_tok);
+            let qx = skip_pdf_ws_stopping_at_eof(bytes, line_tok + 4, len);
+            let mut qd = qx;
+            while qd < len && bytes[qd].is_ascii_digit() {
+                qd += 1;
+            }
+            let qd_ws = skip_pdf_ws_only(bytes, qd, len);
+            let valid_xref_follow = qx >= len
+                || (qx + 5 <= len && &bytes[qx..qx + 5] == b"%%EOF")
+                || is_standalone_pdf_kw(bytes, qx, b"trailer")
+                || (qd > qx && qd_ws > qd && qd_ws < len && bytes[qd_ws].is_ascii_digit());
+            if valid_xref_follow {
+                return Some(line_tok);
+            }
         }
         if is_standalone_pdf_kw(bytes, line_tok, b"startxref") {
-            let qs = skip_pdf_ws_only(bytes, line_tok + 9, len);
+            let qs = skip_pdf_ws_stopping_at_eof(bytes, line_tok + 9, len);
             if qs > line_tok + 9 && qs < len && bytes[qs].is_ascii_digit() {
                 return Some(line_tok);
             }
         }
         if let Some((_, _, after_hdr)) = parse_indirect_obj_header(bytes, line_tok, len) {
-            let qo = skip_pdf_ws_only(bytes, after_hdr, len);
+            let qo = skip_pdf_ws_stopping_at_eof(bytes, after_hdr, len);
             if qo + 1 < len && bytes[qo] == b'<' && bytes[qo + 1] == b'<' {
                 return Some(line_tok);
             }
@@ -863,11 +871,11 @@ impl ParenJumpTable {
         let len = bytes.len();
         let mut pairs: Vec<(u32, u32)> = Vec::new();
         let mut stack: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
-        let mut non_structural_until = 0usize;
+        let mut endobj_cache = (0usize, 0usize);
         let mut i = 0usize;
         while i < len {
             if reset_on_boundaries && !stack.is_empty() {
-                if let Some(next_i) = is_paren_reset_boundary(bytes, i, &mut non_structural_until) {
+                if let Some(next_i) = is_paren_reset_boundary(bytes, i, &mut endobj_cache) {
                     stack.clear();
                     if next_i > i {
                         i = next_i;
@@ -941,10 +949,12 @@ pub(crate) fn step_indexed_non_code_token(
 }
 
 pub(crate) fn skip_damaged_truncated_stream(bytes: &[u8], stream_start: usize) -> usize {
+    let mut endobj_cache = (0usize, 0usize);
     let mut q = stream_start;
     while q < bytes.len() {
         if is_standalone_pdf_kw(bytes, q, b"endobj")
-            && (q + 6 >= bytes.len() || has_structural_after_endobj(bytes, q + 6))
+            && (q + 6 >= bytes.len()
+                || has_structural_after_endobj_cached(bytes, q + 6, &mut endobj_cache))
         {
             return q + 6;
         }

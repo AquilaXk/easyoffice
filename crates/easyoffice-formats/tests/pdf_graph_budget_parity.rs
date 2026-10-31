@@ -712,4 +712,103 @@ startxref\n0\n%%EOF\n";
             DocumentFormat::Pdf
         ))
     ));
+
+    let multiline_xref_prose_pdf = b"%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Chapter 1:\nxref overview) >> endobj\n\
+2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n\
+4 0 obj << /Length 36 >>\nstream\nBT /F1 12 Tf 72 720 Td (Normal) Tj ET\nendstream\nendobj\n\
+xref\n0 5\ntrailer << /Size 5 /Root 1 0 R /ID null >>\nstartxref\n0\n%%EOF\n";
+    let multiline_doc = PdfSerializer::parse(multiline_xref_prose_pdf).unwrap();
+    assert_eq!(multiline_doc.title, "Chapter 1:\nxref overview");
+    assert_eq!(multiline_doc.pages[0].body_text, "Normal");
+
+    let binary_hash45_and_prose_encrypt_pdf = b"%PDF-1.7\n\
+1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Note: /Encrypt 9 0 R prose) >> endobj\n\
+2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n\
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n\
+4 0 obj << /Length 35 >>\nstream\nBT /F1 12 Tf 72 720 Td (Clean) Tj ET\nendstream\nendobj\n\
+xref\n0 5\ntrailer << /Size 5 /Root 1 0 R /ID [(0123456789ab/#45) (0123456789abcdef)] >>\nstartxref\n0\n%%EOF\n";
+    let clean_doc = PdfSerializer::parse(binary_hash45_and_prose_encrypt_pdf).unwrap();
+    assert_eq!(clean_doc.pages[0].body_text, "Clean");
+
+    let rev2_stream = b"BT /F1 12 Tf 72 720 Td (Rev2Body) Tj ET";
+    let incremental_stale_len_pdf = format!(
+        "%PDF-1.7\n\
+1 0 obj 999 endobj\n\
+2 0 obj << /Type /Catalog /Pages 3 0 R >> endobj\n\
+3 0 obj << /Type /Pages /Count 1 /Kids [4 0 R] >> endobj\n\
+4 0 obj << /Type /Page /Parent 3 0 R /Contents 5 0 R >> endobj\n\
+5 0 obj << /Length 1 0 R >>\nstream\n{}\nendstream\nendobj\n\
+1 0 obj {} endobj\n\
+xref\n0 6\ntrailer << /Size 6 /Root 2 0 R >>\nstartxref\n0\n%%EOF\n",
+        std::str::from_utf8(rev2_stream).unwrap(),
+        rev2_stream.len(),
+    );
+    let inc_doc = PdfSerializer::parse(incremental_stale_len_pdf.as_bytes()).unwrap();
+    assert_eq!(inc_doc.pages[0].body_text, "Rev2Body");
+
+    let obj_hdr_comment_xref_encrypt = b"%PDF-1.5\n\
+1 0 obj << /Title (unclosed\n\
+4 0 obj %header comment\n\
+<< /Type /XRef /Size 5 /Root 1 0 R /Desc (ab)cd) /Encrypt 9 0 R /Length 4 >>\n\
+stream\nABCD\nendstream\nendobj\n\
+startxref\n0\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(obj_hdr_comment_xref_encrypt),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let spliced_before_type_xref_encrypt = b"%PDF-1.5\n\
+4 0 obj << /Custom (unclosed /E#6ecrypt 9 0 R /Desc (ab)) /Type /XRef /Size 5 /Root 1 0 R /Length 4 >>\n\
+stream\nABCD\nendstream\nendobj\n\
+startxref\n0\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(spliced_before_type_xref_encrypt),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let broken_dict_closed_trailer_note = b"%PDF-1.7\n\
+1 0 obj << /Broken [ (Note: trailer << /Encrypt 9 0 R >>) 123\n\
+xref\n0 2\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(broken_dict_closed_trailer_note),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let nested_array_closed_trailer_note = b"%PDF-1.7\n\
+1 0 obj [ [ (Note: trailer << /Encrypt 9 0 R >>) /Broken\n\
+xref\n0 2\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(nested_array_closed_trailer_note),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let broken_trailer_closed_obj_note_encrypt = b"%PDF-1.4\n\
+1 0 obj << /Type /Catalog >> endobj\n\
+xref\n0 2\n\
+trailer << /Size 2 /Root 1 0 R /Arr [ (See 2 0 obj) 1 ] /Broken (x)y) /E#6ecrypt 9 0 R >>\n\
+startxref\n0\n%%EOF\n";
+    assert!(matches!(
+        PdfSerializer::parse(broken_trailer_closed_obj_note_encrypt),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let mut stream_endobj_comment_flood = Vec::from(&b"%PDF-1.7\n1 0 obj << >>\nstream\n"[..]);
+    for _ in 0..20_000 {
+        stream_endobj_comment_flood.extend_from_slice(b"% endobj\n");
+    }
+    stream_endobj_comment_flood.extend_from_slice(b"payload\nendstream\nendobj\nxref\n%%EOF\n");
+    let stream_flood_t = std::time::Instant::now();
+    assert!(matches!(
+        PdfSerializer::parse(&stream_endobj_comment_flood),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+    assert!(stream_flood_t.elapsed().as_secs_f64() < 1.0);
 }

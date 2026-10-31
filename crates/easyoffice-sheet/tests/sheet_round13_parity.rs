@@ -350,4 +350,28 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet("Main", "=Main!A1:Ⅰ분기!B2"),
         EvaluatedCellValue::Error(FormulaError::Ref)
     );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=Missing!A1:B2"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=Missing!A1:Missing!B2"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=Missing!A1:A1"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=Ⅰ분기!A1:A1"),
+        EvaluatedCellValue::Number(66.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Ⅰ분기", "=A1:A1"),
+        EvaluatedCellValue::Number(66.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=2026분기!B2"),
+        EvaluatedCellValue::Error(FormulaError::Value)
+    );
 }

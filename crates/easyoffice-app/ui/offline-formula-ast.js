@@ -330,7 +330,7 @@
         const numMatch = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(src.slice(i));
         if (!numMatch) return { error: "#VALUE!" };
         const afterNum = src[i + numMatch[0].length] || "";
-        if (afterNum === "." || /[A-Za-z_$]/.test(afterNum)) return { error: "#VALUE!" };
+        if (afterNum === "." || /[\p{Alphabetic}_$]/u.test(afterNum)) return { error: "#VALUE!" };
         const parsedNum = Number(numMatch[0]);
         if (!Number.isFinite(parsedNum)) return { error: "#NUM!" };
         if (!pushTok({ type: "num", value: parsedNum })) return { error: "#VALUE!" };

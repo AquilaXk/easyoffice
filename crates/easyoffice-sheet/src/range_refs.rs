@@ -94,7 +94,7 @@ fn parse_indirect_endpoint(
 
 impl SheetEngine {
     #[inline]
-    fn has_sheet_in_ctx(&self, sheet: &str, ctx: &EvalContext<'_>) -> bool {
+    pub(crate) fn has_sheet_in_ctx(&self, sheet: &str, ctx: &EvalContext<'_>) -> bool {
         WorkbookEngine::is_same_sheet_identity(sheet, &self.name)
             || ctx.workbook.and_then(|wb| wb.sheet(sheet)).is_some()
     }

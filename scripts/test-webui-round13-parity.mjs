@@ -549,12 +549,22 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   const romanSheet = offlineRpc.evaluate_sheet(
     JSON.stringify({
       sheet: "Main",
-      sheets: ["Main", "Ⅰ분기", "１분기"],
+      sheets: ["Main", "Ⅰ분기", "１분기", "2026Q1"],
       targets: [
         { sheet: "Main", cell: "=Ⅰ분기!A1" },
         { sheet: "Main", cell: "=INDIRECT(\"Ⅰ분기!A1\")" },
         { sheet: "Main", cell: "=INDIRECT(\"１분기!A1\")" },
         { sheet: "Main", cell: "=INDIRECT(\"'１분기'!A1\")" },
+        { sheet: "Main", cell: "=ROW(A01)" },
+        { sheet: "Main", cell: "=ROW(FOOBAR)" },
+        { sheet: "Main", cell: "=IF(TRUE, 42, Main!A1:Ⅰ분기!B2)" },
+        { sheet: "Main", cell: "=IFERROR(Main!A1:'2026Q1'!B2, 99)" },
+        { sheet: "Main", cell: "=Main!A1:Ⅰ분기!B2" },
+        { sheet: "Main", cell: "=Missing!A1:B2" },
+        { sheet: "Main", cell: "=Missing!A1:Missing!B2" },
+        { sheet: "Main", cell: "=Missing!A1:A1" },
+        { sheet: "Main", cell: "=Ⅰ분기!A1:A1" },
+        { sheet: "Main", cell: "=2026분기!B2" },
       ],
       cells: [
         { sheet: "Ⅰ분기", cell: "A1", value: "66" },
@@ -562,7 +572,22 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
       ],
     })
   );
-  assert.deepEqual(romanSheet.targetValues, ["66", "66", "#REF!", "44"]);
+  assert.deepEqual(romanSheet.targetValues, [
+    "66",
+    "66",
+    "#REF!",
+    "44",
+    "#REF!",
+    "#NAME?",
+    "42",
+    "99",
+    "#REF!",
+    "#REF!",
+    "#REF!",
+    "#REF!",
+    "66",
+    "#VALUE!",
+  ]);
 
   userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
   await flushAsyncTurns();
