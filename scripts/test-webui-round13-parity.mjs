@@ -302,6 +302,8 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   assert.equal(docEditor.style.columnCount, "");
   assert.equal(docEditor.style.padding, "");
   assert.equal(docEditor.dataset.paperSize, undefined);
+  assert.equal(docEditor.classList.contains("manuscript-grid"), false);
+  assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
   userClick(document.querySelector('[data-command-id="hwp-layout-orientation"]'));
   await flushAsyncTurns();
@@ -327,6 +329,16 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   userClick(document.querySelector('[data-command-id="hwp-mod-border"]'));
   await flushAsyncTurns();
   assert.equal(hwpTable.style.borderStyle, "double");
+
+  userClick(document.querySelector('[data-command-id="hwp-mod-manuscript"]'));
+  await flushAsyncTurns();
+  assert.equal(docEditor.classList.contains("manuscript-grid"), true);
+  assert.equal(document.getElementById("hwp-manuscript-preview").hidden, false);
+
+  userClick(document.getElementById("qat-undo"));
+  await flushAsyncTurns(8);
+  assert.equal(docEditor.classList.contains("manuscript-grid"), false);
+  assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
   userClick(document.querySelector('[data-command-id="hwp-mod-manuscript"]'));
   await flushAsyncTurns();
@@ -483,4 +495,99 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
     2
   );
   assert.equal(eventLog[eventLog.length - 1], "audit_security");
+});
+
+test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident, and ribbon-style Undo sync", async () => {
+  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const offlineRpc = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "SHEET",
+    getActiveSheetCellRef: () => "A1",
+    ribbonCategoryTools: sandbox.__EASYOFFICE_RIBBON_CATALOG__.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: sandbox.__EASYOFFICE_RIBBON_CATALOG__.RIBBON_STYLE_LABELS,
+    contextualToolBadges: sandbox.__EASYOFFICE_RIBBON_CATALOG__.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: sandbox.__EASYOFFICE_RIBBON_CATALOG__.MODULE_SPECS,
+    localRibbonState: sandbox.__EASYOFFICE_RIBBON_CATALOG__.createDefaultRibbonState(),
+  });
+
+  const batchAnchor = offlineRpc.evaluate_sheet(
+    JSON.stringify({
+      sheet: "Sheet1",
+      cell: "C5",
+      targets: [{ sheet: "Sheet1", cell: "=ROW()" }, { sheet: "Sheet1", cell: "=COLUMN()" }],
+    })
+  );
+  assert.deepEqual(batchAnchor.targetValues, ["5", "3"]);
+
+  const omittedExprAtCell = offlineRpc.evaluate_sheet(
+    JSON.stringify({
+      sheet: "Sheet1",
+      cell: "C5",
+      cells: [{ sheet: "Sheet1", cell: "C5", value: "77" }],
+    })
+  );
+  assert.equal(omittedExprAtCell.value, "77");
+
+  assert.throws(() =>
+    offlineRpc.evaluate_sheet(
+      JSON.stringify({
+        sheet: "Sheet1",
+        cell: "NOT_A_CELL",
+        targets: [{ sheet: "Sheet1", cell: "A1" }],
+      })
+    )
+  );
+  assert.throws(() =>
+    offlineRpc.evaluate_sheet(
+      JSON.stringify({
+        sheet: "Sheet1",
+        cell: "A$B1",
+        expr: "=ROW()",
+      })
+    )
+  );
+
+  const romanSheet = offlineRpc.evaluate_sheet(
+    JSON.stringify({
+      sheet: "Main",
+      sheets: ["Main", "Ⅰ분기", "１분기"],
+      targets: [
+        { sheet: "Main", cell: "=Ⅰ분기!A1" },
+        { sheet: "Main", cell: "=INDIRECT(\"Ⅰ분기!A1\")" },
+        { sheet: "Main", cell: "=INDIRECT(\"１분기!A1\")" },
+        { sheet: "Main", cell: "=INDIRECT(\"'１분기'!A1\")" },
+      ],
+      cells: [
+        { sheet: "Ⅰ분기", cell: "A1", value: "66" },
+        { sheet: "１분기", cell: "A1", value: "44" },
+      ],
+    })
+  );
+  assert.deepEqual(romanSheet.targetValues, ["66", "66", "#REF!", "44"]);
+
+  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  await flushAsyncTurns();
+  const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
+  const baselineText = f2.textContent;
+  const btnStyle = document.getElementById("btn-ribbon-style");
+  const firstRibbonTab = document.querySelector("#ribbon-tabs .ribbon-btn");
+  const baselineTabText = firstRibbonTab.textContent;
+
+  f2.focus();
+  f2.textContent = "456";
+  f2.dispatchEvent({ type: "input", target: f2 });
+  btnStyle.click();
+  await flushAsyncTurns(10);
+
+  assert.equal(btnStyle.textContent, "리본: 한글(HWP) 7탭");
+  assert.notEqual(firstRibbonTab.textContent, baselineTabText);
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(btnStyle.textContent, "리본: 표준 오피스");
+  assert.equal(firstRibbonTab.textContent, baselineTabText);
+  assert.equal(f2.textContent, "456");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(f2.textContent, baselineText);
 });

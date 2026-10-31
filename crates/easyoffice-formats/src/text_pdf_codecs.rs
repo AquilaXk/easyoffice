@@ -348,16 +348,16 @@ impl PdfSerializer {
                     }
                     Ok(slice)
                 } else {
-                    if span_crosses_object_boundary(state.bytes, s_start, s_end) {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "PDF 페이지 스트림 내부에 닫히지 않은 객체 경계 토큰이 감지되었습니다."
-                                .to_string(),
-                        ));
-                    }
                     let slice = &state.bytes[s_start..s_end];
                     if !validate_balanced_pdf_literals(slice) {
                         return Err(EasyOfficeError::CorruptedContainer(
                             "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다."
+                                .to_string(),
+                        ));
+                    }
+                    if span_crosses_object_boundary(state.bytes, s_start, s_end) {
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "PDF 페이지 스트림 내부에 닫히지 않은 객체 경계 토큰이 감지되었습니다."
                                 .to_string(),
                         ));
                     }

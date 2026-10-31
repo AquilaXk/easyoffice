@@ -35,6 +35,8 @@
       MODULE_LABELS,
       MODULE_SPECS,
       CONTEXTUAL_TOOL_BADGES,
+      RIBBON_STYLE_LABELS,
+      RIBBON_CATEGORY_ORDER,
       syncLocalRibbonStateFromBackend,
     } = ribbonCatalog;
 
@@ -112,9 +114,53 @@
       if (ctxBadge) ctxBadge.textContent = CONTEXTUAL_TOOL_BADGES[mod] || "표·개체 도구";
 
       const hwpNotice = document.getElementById("hwp-manuscript-preview");
-      if (hwpNotice && mod !== "HWP") {
-        hwpNotice.hidden = true;
+      const docEditorEl = document.getElementById("doc-editor");
+      if (hwpNotice) {
+        hwpNotice.hidden =
+          mod !== "HWP" || !Boolean(docEditorEl?.classList.contains("manuscript-grid"));
       }
+    }
+
+    function normalizeRibbonStyleKey(rawStyle) {
+      return String(rawStyle || "").toLowerCase().includes("hangul") ? "hangul" : "standard";
+    }
+
+    function applyRibbonStyleDom(rawStyle, categoriesOverride) {
+      const styleKey = normalizeRibbonStyleKey(rawStyle);
+      localRibbonState.ribbonStyle = styleKey;
+      const btnRibbonStyle = document.getElementById("btn-ribbon-style");
+      if (btnRibbonStyle) {
+        btnRibbonStyle.textContent =
+          styleKey === "hangul" ? "리본: 한글(HWP) 7탭" : "리본: 표준 오피스";
+      }
+      const labels =
+        categoriesOverride || RIBBON_STYLE_LABELS[styleKey] || RIBBON_STYLE_LABELS.standard;
+      let nextActiveCat = getActiveRibbonCategory();
+      document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b, idx) => {
+        if (labels[idx]) b.textContent = labels[idx];
+        if (RIBBON_CATEGORY_ORDER[idx]) {
+          b.dataset.category = RIBBON_CATEGORY_ORDER[idx];
+          if (b.classList.contains("active")) {
+            nextActiveCat = RIBBON_CATEGORY_ORDER[idx];
+          }
+        }
+      });
+      return nextActiveCat;
+    }
+
+    function switchRibbonStyleTracked() {
+      return enqueueWorkspaceHistoryOp(async () => {
+        const sheetController = getSheetController();
+        await sheetController.commitPendingFocusedSheetCell(true);
+        const preSnapshot = captureWorkspaceSnapshot(false);
+        const curStyle = normalizeRibbonStyleKey(localRibbonState.ribbonStyle);
+        const nextStyle = curStyle === "standard" ? "hangul" : "standard";
+        const res = await invokeIpc("switch_ribbon_style", nextStyle);
+        const nextActiveCat = applyRibbonStyleDom(nextStyle, res?.categories);
+        await renderRibbonCategoryTools(nextActiveCat);
+        commitDeferredUndoSnapshot(preSnapshot);
+        sheetController.refreshFocusedSheetCellPendingSnapshot();
+      });
     }
 
     async function renderRibbonCategoryTools(categoryKey) {
@@ -213,12 +259,17 @@
           ...JSON.parse(JSON.stringify(snap.slides))
         );
       }
+      const targetStyle = normalizeRibbonStyleKey(
+        snap.ribbonState?.ribbonStyle || localRibbonState.ribbonStyle
+      );
       if (snap.ribbonState) {
         Object.assign(localRibbonState, JSON.parse(JSON.stringify(snap.ribbonState)));
       }
       if (backendSyncRes) {
         syncLocalRibbonStateFromBackend(localRibbonState, backendSyncRes);
       }
+      await invokeIpc("switch_ribbon_style", targetStyle).catch(() => null);
+      applyRibbonStyleDom(targetStyle);
       const nextRot = typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0;
       setPdfRotationDeg(nextRot);
       const badge = document.getElementById("pdf-rotation-badge");
@@ -235,6 +286,7 @@
           themeBtn.textContent = snap.theme === "dark" ? "라이트 모드" : "다크 모드";
         }
       }
+      localRibbonState.darkThemeEnabled = document.documentElement.dataset.theme === "dark";
 
       const targetMod = snap.activeModule || getActiveModule();
       if (targetMod === "DOC" || targetMod === "HWP") {
@@ -482,6 +534,7 @@
         const html = document.documentElement;
         const next = html.dataset.theme === "dark" ? "light" : "dark";
         html.dataset.theme = next;
+        localRibbonState.darkThemeEnabled = next === "dark";
         const themeBtn = document.getElementById("btn-theme-toggle");
         if (themeBtn) themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
         return;
@@ -721,8 +774,11 @@
         const preSnapshot = captureWorkspaceSnapshot(true);
         const effectiveModule = options.targetModule || getActiveModule();
         const preparedEffect = await prepareRibbonAsyncEffect(cmdId, effectiveModule);
+        const currentStyle = normalizeRibbonStyleKey(localRibbonState.ribbonStyle);
         const execRes = await invokeIpc("execute_ribbon_command", cmdId);
         syncLocalRibbonStateFromBackend(localRibbonState, execRes);
+        localRibbonState.ribbonStyle = currentStyle;
+        localRibbonState.darkThemeEnabled = document.documentElement.dataset.theme === "dark";
         if (options.targetModule && options.targetModule !== getActiveModule()) {
           await activatePaneInternal(options.targetModule, false);
         } else {
@@ -750,6 +806,7 @@
       performWorkspaceUndo,
       performWorkspaceRedo,
       applyModuleAccent,
+      switchRibbonStyleTracked,
       renderRibbonCategoryTools,
       activatePaneInternal,
       activatePane,

@@ -392,26 +392,32 @@
       return getActiveModule();
     }
 
-    function evaluateSingleDocExpr(doc, seedDefaults) {
-      const sheetName = resolveDefaultSheetFromDocJs(doc);
+    function resolveOptionalAnchorCell(doc) {
       if (doc.cell !== undefined && doc.cell !== null && typeof doc.cell !== "string") {
         throw new Error("InvalidArgument: JSON 'cell' 필드는 문자열이어야 합니다.");
       }
-      let anchorCell = "A1";
       if (typeof doc.cell === "string" && doc.cell.trim().length > 0) {
         const normAnchor = normalizeA1Token(doc.cell.trim());
         if (!normAnchor) {
           throw new Error("InvalidArgument: 유효하지 않은 셀 좌표('cell')입니다.");
         }
-        anchorCell = normAnchor;
+        return normAnchor;
       }
+      return null;
+    }
+
+    function evaluateSingleDocExpr(doc, seedDefaults) {
+      const sheetName = resolveDefaultSheetFromDocJs(doc);
+      const explicitAnchor = resolveOptionalAnchorCell(doc);
+      const anchorCell = explicitAnchor || "A1";
       const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
       if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
         throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
       }
-      const defaultQuery = seedDefaults ? "=Sheet2!A1+50" : "A1";
+      const fallbackCell = explicitAnchor || "A1";
+      const defaultQuery = seedDefaults ? "=Sheet2!A1+50" : fallbackCell;
       const chosenQuery = rawExpr === undefined || rawExpr === null ? defaultQuery : rawExpr;
-      const q = String(chosenQuery).trim() || "A1";
+      const q = String(chosenQuery).trim() || defaultQuery;
       const workbook = buildLocalWorkbookFromJson(doc, sheetName, seedDefaults);
       const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
       if (!evalSheetUpper) {
@@ -440,6 +446,8 @@
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
       const defaultSheet = resolveDefaultSheetFromDocJs(doc);
+      const explicitAnchor = resolveOptionalAnchorCell(doc);
+      const anchorCell = explicitAnchor || "A1";
       if (doc.targets !== undefined) {
         if (!Array.isArray(doc.targets)) {
           throw new Error("InvalidArgument: JSON 'targets' 필드는 배열이어야 합니다.");
@@ -466,7 +474,7 @@
             let val = "#REF!";
             if (canonicalUpper) {
               val = isFormulaStringJs(expr)
-                ? String(evaluateFormulaExpression(expr, workbook, canonicalUpper, "A1"))
+                ? String(evaluateFormulaExpression(expr, workbook, canonicalUpper, anchorCell))
                 : formatFormulaValue(readWorkbookTypedCell(workbook, canonicalUpper, expr, 0));
             }
             outMap[sh + "!" + expr] = val;

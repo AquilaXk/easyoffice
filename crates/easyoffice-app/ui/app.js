@@ -10,7 +10,6 @@
     CONTEXTUAL_TOOL_BADGES,
     MODULE_SHORT_BADGES,
     RIBBON_STYLE_LABELS,
-    RIBBON_CATEGORY_ORDER,
     RIBBON_CATEGORY_TOOLS,
     DEFAULT_HWP_EDITOR_HTML,
     createEmptySlideStyleFields,
@@ -23,7 +22,6 @@
 
   let isImeComposing = false;
   let activeModule = "DOC";
-  let activeRibbonStyle = "standard";
   let activeRibbonCategory = "home";
   let activeSheetName = "Sheet1";
   let activeSheetCellRef = "F2";
@@ -386,30 +384,7 @@
     const btnRibbonStyle = document.getElementById("btn-ribbon-style");
     if (btnRibbonStyle) {
       btnRibbonStyle.addEventListener("click", () => {
-        void ribbonHistory
-          .enqueueWorkspaceHistoryOp(async () => {
-            await sheetController.commitPendingFocusedSheetCell(true);
-            activeRibbonStyle = activeRibbonStyle === "standard" ? "hangul" : "standard";
-            localRibbonState.ribbonStyle = activeRibbonStyle;
-            const res = await invokeIpc("switch_ribbon_style", activeRibbonStyle);
-            btnRibbonStyle.textContent =
-              activeRibbonStyle === "hangul" ? "리본: 한글(HWP) 7탭" : "리본: 표준 오피스";
-            const labels = res?.categories || RIBBON_STYLE_LABELS[activeRibbonStyle];
-            const keys = RIBBON_CATEGORY_ORDER;
-            let nextActiveCat = activeRibbonCategory;
-            document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b, idx) => {
-              if (labels[idx]) b.textContent = labels[idx];
-              if (keys[idx]) {
-                b.dataset.category = keys[idx];
-                if (b.classList.contains("active")) {
-                  nextActiveCat = keys[idx];
-                }
-              }
-            });
-            await ribbonHistory.renderRibbonCategoryTools(nextActiveCat);
-            sheetController.refreshFocusedSheetCellPendingSnapshot();
-          })
-          .catch(() => {});
+        void ribbonHistory.switchRibbonStyleTracked().catch(() => {});
       });
     }
 

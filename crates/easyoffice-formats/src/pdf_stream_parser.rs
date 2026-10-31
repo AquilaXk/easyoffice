@@ -262,9 +262,10 @@ pub(crate) fn span_crosses_object_boundary(bytes: &[u8], start: usize, end: usiz
     }
     let slice = &bytes[start..end];
     let len = slice.len();
+    let paren_table = ParenJumpTable::build(slice);
     let mut p = 0usize;
     while p < len {
-        match step_pdf_non_code_token(slice, p) {
+        match step_indexed_non_code_token(slice, &paren_table, p, len) {
             Ok(Some(step)) => {
                 p = step.next_index;
                 continue;
@@ -875,88 +876,84 @@ pub(crate) fn validate_pdf_trailer_json(
     None
 }
 
-pub(crate) struct DamagedPdfTables {
-    paren_close: Vec<usize>,
-    structural_endobjs: Vec<usize>,
+const MAX_PAREN_JUMP_DEPTH: usize = 4096;
+
+pub(crate) struct ParenJumpTable {
+    pairs: Vec<(u32, u32)>,
 }
 
-impl DamagedPdfTables {
+impl ParenJumpTable {
     pub(crate) fn build(bytes: &[u8]) -> Self {
         let len = bytes.len();
-        let mut paren_close = vec![0usize; len];
-        let mut stack: Vec<usize> = Vec::new();
-        let mut structural_endobjs: Vec<usize> = Vec::new();
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        let mut stack: Vec<u32> = Vec::new();
+        let mut overflow_depth = 0usize;
         let mut i = 0usize;
         while i < len {
-            if stack.is_empty() && bytes[i] == b'%' {
+            let in_paren = !stack.is_empty() || overflow_depth > 0;
+            if !in_paren && bytes[i] == b'%' {
                 while i < len && bytes[i] != b'\n' && bytes[i] != b'\r' {
                     i += 1;
                 }
                 continue;
             }
-            if is_standalone_pdf_kw(bytes, i, b"endobj")
-                && (i + 6 >= len || has_structural_after_endobj(bytes, i + 6))
-            {
-                structural_endobjs.push(i);
-            }
-            if bytes[i] == b'\\' {
+            if in_paren && bytes[i] == b'\\' {
                 i = (i + 2).min(len);
                 continue;
             }
             if bytes[i] == b'(' {
-                stack.push(i);
+                if stack.len() < MAX_PAREN_JUMP_DEPTH {
+                    if let Ok(pos32) = u32::try_from(i) {
+                        stack.push(pos32);
+                    } else {
+                        overflow_depth += 1;
+                    }
+                } else {
+                    overflow_depth += 1;
+                }
             } else if bytes[i] == b')' {
-                if let Some(open_idx) = stack.pop() {
-                    paren_close[open_idx] = i + 1;
+                if overflow_depth > 0 {
+                    overflow_depth -= 1;
+                } else if let Some(open_pos) = stack.pop() {
+                    if let Ok(end32) = u32::try_from(i + 1) {
+                        pairs.push((open_pos, end32));
+                    }
                 }
             }
             i += 1;
         }
-        Self {
-            paren_close,
-            structural_endobjs,
-        }
+        pairs.sort_unstable_by_key(|&(open_pos, _)| open_pos);
+        Self { pairs }
     }
 
-    fn crosses_structural_endobj(&self, inner_start: usize, inner_end: usize) -> bool {
-        if inner_start >= inner_end {
-            return false;
-        }
-        let idx = self
-            .structural_endobjs
-            .partition_point(|&e| e < inner_start);
-        self.structural_endobjs
-            .get(idx)
-            .is_some_and(|&e| e + 6 <= inner_end)
+    pub(crate) fn close_end(&self, open_pos: usize, limit: usize) -> Option<usize> {
+        let open32 = u32::try_from(open_pos).ok()?;
+        let idx = self.pairs.binary_search_by_key(&open32, |&(o, _)| o).ok()?;
+        let end_pos = self.pairs[idx].1 as usize;
+        (end_pos <= limit).then_some(end_pos)
     }
 }
 
-pub(crate) fn step_damaged_non_code(
+pub(crate) fn step_indexed_non_code_token(
     bytes: &[u8],
-    tables: &DamagedPdfTables,
-    pos: usize,
+    table: &ParenJumpTable,
+    i: usize,
     limit: usize,
-) -> Option<usize> {
-    if pos >= limit {
-        return None;
+) -> Result<Option<PdfNonCodeStep>, ()> {
+    if i >= limit {
+        return Ok(None);
     }
-    if bytes[pos] == b'(' {
-        let next_idx = tables.paren_close[pos];
-        if next_idx == 0 || next_idx > limit {
-            return None;
-        }
-        if tables.crosses_structural_endobj(pos + 1, next_idx - 1) {
-            return None;
-        }
-        return Some(next_idx);
-    }
-    match step_pdf_non_code_token(&bytes[..limit], pos) {
-        Ok(Some(PdfNonCodeStep {
+    if bytes[i] == b'(' {
+        let next_index = table.close_end(i, limit).ok_or(())?;
+        return Ok(Some(PdfNonCodeStep {
             next_index,
-            kind: PdfNonCodeKind::Comment { .. } | PdfNonCodeKind::HexString { .. },
-        })) => Some(next_index),
-        _ => None,
+            kind: PdfNonCodeKind::ParenString {
+                inner_start: i + 1,
+                inner_end: next_index - 1,
+            },
+        }));
     }
+    step_pdf_non_code_token(&bytes[..limit], i)
 }
 
 pub(crate) fn skip_damaged_truncated_stream(bytes: &[u8], stream_start: usize) -> usize {

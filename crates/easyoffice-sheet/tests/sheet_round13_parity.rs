@@ -261,4 +261,40 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet_at("Main", Some(c5), "=COLUMN()"),
         EvaluatedCellValue::Number(3.0)
     );
+
+    assert!(easyoffice_sheet::PackedCellCoordinate::parse_a1("$C$5").is_ok());
+    assert!(easyoffice_sheet::PackedCellCoordinate::parse_a1("$$A1").is_err());
+    assert!(easyoffice_sheet::PackedCellCoordinate::parse_a1("A$B1").is_err());
+    assert!(easyoffice_sheet::PackedCellCoordinate::parse_a1("A1$").is_err());
+    assert!(easyoffice_sheet::PackedCellCoordinate::parse_a1("C1$2").is_err());
+    assert!(easyoffice_sheet::PackedCellCoordinate::parse_a1("A01").is_err());
+
+    {
+        let fw = wb.add_sheet("１분기");
+        fw.set_cell("A1", "44").unwrap();
+    }
+    {
+        let rn = wb.add_sheet("Ⅰ분기");
+        rn.set_cell("A1", "66").unwrap();
+    }
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "of:=[１분기.A1]"),
+        EvaluatedCellValue::Number(44.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"１분기!A1\")"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"'１분기'!A1\")"),
+        EvaluatedCellValue::Number(44.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=Ⅰ분기!A1"),
+        EvaluatedCellValue::Number(66.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"Ⅰ분기!A1\")"),
+        EvaluatedCellValue::Number(66.0)
+    );
 }

@@ -362,7 +362,7 @@
         sheetName = unquoteFormulaSheetTokenOnce(shRaw);
         if (!sheetName || sheetName.trim().length === 0) return { ok: false };
       } else {
-        if (!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(shRaw)) {
+        if (!/^[\p{Alphabetic}_$][\p{Alphabetic}\p{N}_$]*$/u.test(shRaw)) {
           return { ok: false };
         }
         sheetName = shRaw;

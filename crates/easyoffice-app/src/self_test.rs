@@ -629,5 +629,35 @@ mod tests {
             "0".repeat(999_999)
         );
         assert!(EasyOfficeIpcRouter::dispatch("audit_security", &huge_exp_overflow_audit).is_err());
+
+        let targets_with_anchor = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","cell":"C5","targets":[{"sheet":"Sheet1","cell":"=ROW()"},{"sheet":"Sheet1","cell":"=COLUMN()"}]}"#,
+        )
+        .unwrap();
+        assert!(targets_with_anchor.contains("\"targetValues\":[\"5\",\"3\"]"));
+
+        let default_lookup_at_cell = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","cell":"C5","cells":[{"sheet":"Sheet1","cell":"C5","value":77}]}"#,
+        )
+        .unwrap();
+        assert!(default_lookup_at_cell.contains("\"value\":\"77\""));
+
+        assert!(EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","cell":"NOT_A_CELL","targets":[{"sheet":"Sheet1","cell":"A1"}]}"#,
+        )
+        .is_err());
+        assert!(EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","cell":"A$B1","expr":"=ROW()"}"#,
+        )
+        .is_err());
+        assert!(EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","cell":"A01","expr":"=ROW()"}"#,
+        )
+        .is_err());
     }
 }

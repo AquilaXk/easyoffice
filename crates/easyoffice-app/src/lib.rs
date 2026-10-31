@@ -340,6 +340,7 @@ impl EasyOfficeIpcRouter {
         let entries = Self::parse_rpc_json_object(payload)?;
         let default_sh_owned = Self::resolve_default_sheet_from_entries(&entries)?;
         let default_sh = default_sh_owned.as_str();
+        let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
         let wb = Self::build_workbook_from_json_entries(&entries, default_sh, false)?;
         if let Some(targets_val) = StrictJsonValue::get_field(&entries, "targets") {
             let targets = targets_val.as_array().ok_or_else(|| {
@@ -372,7 +373,7 @@ impl EasyOfficeIpcRouter {
                         ));
                     }
                     let val = if Self::is_formula_expr(expr) {
-                        wb.evaluate_formula_on_sheet(sh, expr)
+                        wb.evaluate_formula_on_sheet_at(sh, anchor_coord, expr)
                     } else {
                         wb.evaluate_cell(sh, expr)
                     };
@@ -403,13 +404,17 @@ impl EasyOfficeIpcRouter {
                 ));
             }
         }
-        let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
-        let expr = match Self::optional_json_str(&entries, "expr")? {
+        let default_cell_label = anchor_coord
+            .map(PackedCellCoordinate::to_a1)
+            .unwrap_or_else(|| "A1".to_string());
+        let expr_raw = match Self::optional_json_str(&entries, "expr")? {
+            Some(s) => Some(s),
+            None => Self::optional_json_str(&entries, "query")?,
+        };
+        let expr = match expr_raw.map(str::trim).filter(|s| !s.is_empty()) {
             Some(s) => s,
-            None => Self::optional_json_str(&entries, "query")?.unwrap_or("A1"),
-        }
-        .trim();
-        let expr = if expr.is_empty() { "A1" } else { expr };
+            None => default_cell_label.as_str(),
+        };
         let evaluated = if Self::is_formula_expr(expr) {
             wb.evaluate_formula_on_sheet_at(default_sh, anchor_coord, expr)
         } else {

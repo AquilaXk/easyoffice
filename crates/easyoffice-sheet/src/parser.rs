@@ -135,10 +135,8 @@ pub(crate) fn is_valid_unquoted_sheet_ident(raw_sheet: &str) -> bool {
 }
 
 fn needs_sheet_quoting(raw_sheet: &str) -> bool {
-    raw_sheet
-        .chars()
-        .any(|c| c.is_whitespace() || (!c.is_alphanumeric() && c != '_'))
-        || raw_sheet.as_bytes().first().is_some_and(u8::is_ascii_digit)
+    !is_valid_unquoted_sheet_ident(raw_sheet)
+        || raw_sheet.contains('$')
         || raw_sheet.eq_ignore_ascii_case("TRUE")
         || raw_sheet.eq_ignore_ascii_case("FALSE")
         || PackedCellCoordinate::parse_a1(raw_sheet).is_ok()

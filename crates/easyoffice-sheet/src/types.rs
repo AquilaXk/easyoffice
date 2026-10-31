@@ -38,48 +38,47 @@ impl PackedCellCoordinate {
             ));
         }
 
+        let bytes = trimmed.as_bytes();
+        let mut i = if bytes.first() == Some(&b'$') { 1 } else { 0 };
         let mut col_acc: u32 = 0;
-        let mut row_acc: u32 = 0;
         let mut letter_count = 0usize;
-        let mut digit_count = 0usize;
 
-        for b in trimmed.bytes() {
-            if b == b'$' {
-                continue;
-            }
-            let upper = if b.is_ascii_lowercase() { b - 32 } else { b };
-            if upper.is_ascii_uppercase() {
-                if digit_count > 0 || letter_count >= 3 {
-                    return Err(EasyOfficeError::InvalidArgument(format!(
-                        "유효하지 않은 A1 셀 주소: {input}"
-                    )));
-                }
-                letter_count += 1;
-                col_acc = col_acc * 26 + ((upper - b'A') as u32 + 1);
-            } else if b.is_ascii_digit() {
-                if letter_count == 0 {
-                    return Err(EasyOfficeError::InvalidArgument(format!(
-                        "유효하지 않은 A1 셀 주소: {input}"
-                    )));
-                }
-                digit_count += 1;
-                row_acc = row_acc
-                    .checked_mul(10)
-                    .and_then(|v| v.checked_add((b - b'0') as u32))
-                    .ok_or_else(|| {
-                        EasyOfficeError::InvalidArgument(format!("셀 행 번호 오버플로: {input}"))
-                    })?;
-            } else {
+        while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+            if letter_count >= 3 {
                 return Err(EasyOfficeError::InvalidArgument(format!(
                     "유효하지 않은 A1 셀 주소: {input}"
                 )));
             }
+            letter_count += 1;
+            let upper = bytes[i].to_ascii_uppercase();
+            col_acc = col_acc * 26 + ((upper - b'A') as u32 + 1);
+            i += 1;
         }
-
-        if letter_count == 0 || digit_count == 0 || row_acc == 0 {
+        if letter_count == 0 {
             return Err(EasyOfficeError::InvalidArgument(format!(
                 "유효하지 않은 A1 셀 주소: {input}"
             )));
+        }
+        if bytes.get(i) == Some(&b'$') {
+            i += 1;
+        }
+        let row_digits = &bytes[i..];
+        if row_digits.is_empty()
+            || row_digits[0] == b'0'
+            || !row_digits.iter().all(u8::is_ascii_digit)
+        {
+            return Err(EasyOfficeError::InvalidArgument(format!(
+                "유효하지 않은 A1 셀 주소: {input}"
+            )));
+        }
+        let mut row_acc: u32 = 0;
+        for &b in row_digits {
+            row_acc = row_acc
+                .checked_mul(10)
+                .and_then(|v| v.checked_add((b - b'0') as u32))
+                .ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(format!("셀 행 번호 오버플로: {input}"))
+                })?;
         }
 
         Self::new(row_acc - 1, col_acc - 1)
