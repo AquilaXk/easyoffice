@@ -212,6 +212,7 @@
     sortAscending: true,
     manuscriptGridEnabled: false,
     approvalHeaderEnabled: true,
+    doubleDiagonalBorderEnabled: false,
     trackChangesEnabled: false,
     splitViewEnabled: false,
     ribbonCollapsed: false,
@@ -313,7 +314,9 @@
 
   function localAuditSecurity(payload) {
     const raw = String(payload || "");
-    const [entriesPart, xmlPart] = raw.includes("|") ? raw.split("|", 2) : ["", raw];
+    const pipeIdx = raw.indexOf("|");
+    const entriesPart = pipeIdx >= 0 ? raw.slice(0, pipeIdx) : "";
+    const xmlPart = pipeIdx >= 0 ? raw.slice(pipeIdx + 1) : raw;
     const upperXml = (xmlPart || "").toUpperCase();
     if (upperXml.includes("<!DOCTYPE") || upperXml.includes("<!ENTITY")) {
       return {
@@ -382,6 +385,8 @@
       localRibbonState.manuscriptGridEnabled = !localRibbonState.manuscriptGridEnabled;
     } else if (cmdId === "hwp-mod-header") {
       localRibbonState.approvalHeaderEnabled = !localRibbonState.approvalHeaderEnabled;
+    } else if (cmdId === "hwp-mod-border") {
+      localRibbonState.doubleDiagonalBorderEnabled = !localRibbonState.doubleDiagonalBorderEnabled;
     } else if (cmdId.endsWith("-review-track")) {
       localRibbonState.trackChangesEnabled = !localRibbonState.trackChangesEnabled;
     } else if (cmdId.endsWith("-view-split")) {
@@ -516,11 +521,13 @@
       const pipeIdx = rawExpr.indexOf("|");
       const sheet = pipeIdx > 0 && !rawExpr.slice(0, pipeIdx).startsWith("=") ? rawExpr.slice(0, pipeIdx).trim() : activeSheetName;
       const expr = pipeIdx > 0 && !rawExpr.slice(0, pipeIdx).startsWith("=") ? rawExpr.slice(pipeIdx + 1).trim() : rawExpr;
-      const val = String(evaluateLocalSheetFormula(raw));
+      const val = String(evaluateLocalSheetFormula(raw, true));
       return { sheet, formula: expr, value: val };
     },
-    evaluate_sheet: (payload) => ({ value: String(evaluateLocalSheetFormula(payload)) }),
-    evaluate_sheet_formula: (payload) => ({ value: String(evaluateLocalSheetFormula(payload)) }),
+    evaluate_sheet: (payload) => ({ value: String(evaluateLocalSheetFormula(payload, false)) }),
+    evaluate_sheet_formula: (payload) => ({
+      value: String(evaluateLocalSheetFormula(payload, false)),
+    }),
     audit_security: (payload) => localAuditSecurity(payload),
     switch_ribbon_style: (payload) => {
       const isHangul = String(payload).includes("hangul");
@@ -606,6 +613,23 @@
     return snap;
   }
 
+  const sheetCellFocusState = new WeakMap();
+  const sheetRecalcSeqBySheet = {};
+  let sheetSnapshotEpoch = 0;
+
+  function syncSheetCellFocusBaseline(td, clearPending) {
+    const st = sheetCellFocusState.get(td);
+    if (!st) return;
+    const text = (td.textContent || "").trim();
+    st.initialText = text;
+    st.initialRaw = td.dataset.formula || text;
+    if (clearPending) {
+      st.pendingSnapshot = null;
+      st.snapshotPushed = false;
+      st.sheetName = activeSheetName;
+    }
+  }
+
   function restoreDomSheetCells(sheetName) {
     if (!sheetDataStore.Sheet1) {
       sheetDataStore.Sheet1 = snapshotDomSheetCells();
@@ -625,6 +649,7 @@
         td.textContent = "";
         delete td.dataset.formula;
       }
+      syncSheetCellFocusBaseline(td, true);
     });
   }
 
@@ -755,7 +780,13 @@
     return String(Math.round(res * 100) / 100);
   }
 
-  function evaluateFormulaExpression(exprStr, cellValues, currentSheet, currentCellRef) {
+  function evaluateFormulaExpression(
+    exprStr,
+    cellValues,
+    currentSheet,
+    currentCellRef,
+    seedDefaults
+  ) {
     const shUpper = String(currentSheet || "SHEET1").toUpperCase();
     const clean = String(exprStr || "").trim();
     if (!clean.startsWith("=")) {
@@ -782,14 +813,14 @@
       const vals = collectRangeNumericValues(rangeMatch[3], rangeMatch[4], cellValues, rangeSheet);
       return evaluateRangeFunction(rangeMatch[1], vals);
     }
-    const hasExplicitCells = Object.keys(cellValues).length > 0;
     const withCrossSheet = body.replaceAll(/\b([A-Z0-9_]+)!([A-Z]+\d+)\b/g, (_, sh, ref) => {
-      const key = sh + "!" + ref;
-      const fallback = hasExplicitCells
-        ? ""
-        : sheetDataStore.Sheet2?.[ref]
-          ? sheetDataStore.Sheet2[ref].value
-          : "100";
+      const shKey = sh.toUpperCase();
+      const key = shKey + "!" + ref;
+      const hasSheetCells = Object.keys(cellValues).some((k) => k.startsWith(shKey + "!"));
+      let fallback = "";
+      if (seedDefaults && !hasSheetCells && shKey === "SHEET2" && ref === "A1") {
+        fallback = "100";
+      }
       const raw = String(cellValues[key] ?? fallback).replaceAll(",", "").trim();
       const v = Number(raw);
       return raw !== "" && Number.isFinite(v) ? String(v) : "0";
@@ -809,21 +840,23 @@
     return arithResult ?? clean;
   }
 
-  function evaluateLocalSheetFormula(payload) {
+  function evaluateLocalSheetFormula(payload, seedDefaults = false) {
     const raw = String(payload || "");
-    const qIdx = raw.lastIndexOf("?");
-    const cellsPart = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
-    const rawQueryPart = (qIdx >= 0 ? raw.slice(qIdx + 1) : "F2").trim();
+    const qIdx = raw.search(/(?<!\\)\?/);
+    const cellsPart = qIdx >= 0 ? raw.slice(0, qIdx) : seedDefaults ? "" : raw;
+    const rawQueryPart = (
+      qIdx >= 0 ? raw.slice(qIdx + 1) : seedDefaults ? raw.trim() || "=Sheet2!A1+50" : "A1"
+    ).trim();
     let evalSheet = (activeSheetName || "Sheet1").toUpperCase();
     let q = rawQueryPart;
     const pipeIdx = rawQueryPart.indexOf("|");
     if (pipeIdx > 0 && !rawQueryPart.slice(0, pipeIdx).startsWith("=")) {
-      evalSheet = rawQueryPart.slice(0, pipeIdx).trim().toUpperCase();
+      evalSheet = rawQueryPart.slice(0, pipeIdx).trim().replaceAll(/^'+|'+$/g, "").toUpperCase();
       q = rawQueryPart.slice(pipeIdx + 1).trim();
     } else {
       const bangIdx = rawQueryPart.indexOf("!");
       if (bangIdx > 0 && !rawQueryPart.slice(0, bangIdx).startsWith("=")) {
-        evalSheet = rawQueryPart.slice(0, bangIdx).trim().toUpperCase();
+        evalSheet = rawQueryPart.slice(0, bangIdx).trim().replaceAll(/^'+|'+$/g, "").toUpperCase();
         q = rawQueryPart.slice(bangIdx + 1).trim();
       }
     }
@@ -833,27 +866,46 @@
       .forEach((pair) => {
         const idx = pair.indexOf("=");
         if (idx > 0) {
-          const rawKey = pair.slice(0, idx).trim().toUpperCase();
+          const rawKey = pair.slice(0, idx).trim();
           const v = pair.slice(idx + 1).replaceAll("\\;", ";").replaceAll("\\?", "?").trim();
-          if (rawKey.includes("!")) {
-            values[rawKey] = v;
+          const bIdx = rawKey.indexOf("!");
+          if (bIdx > 0) {
+            const shPart = rawKey.slice(0, bIdx).trim().replaceAll(/^'+|'+$/g, "").toUpperCase();
+            const refPart = rawKey.slice(bIdx + 1).trim().toUpperCase();
+            values[shPart + "!" + refPart] = v;
           } else {
-            values[evalSheet + "!" + rawKey] = v;
-            values[rawKey] = v;
+            const refUpper = rawKey.toUpperCase();
+            values[evalSheet + "!" + refUpper] = v;
+            values[refUpper] = v;
           }
         }
       });
+    if (seedDefaults) {
+      if (!Object.keys(values).some((k) => k.startsWith("SHEET1!"))) {
+        values["SHEET1!A1"] = "1200";
+        values["SHEET1!B1"] = "850";
+      }
+      if (!Object.keys(values).some((k) => k.startsWith("SHEET2!"))) {
+        values["SHEET2!A1"] = "100";
+      }
+    }
     for (let pass = 0; pass < 3; pass++) {
       Object.keys(values).forEach((k) => {
         if (String(values[k]).startsWith("=")) {
           const kSheet = k.includes("!") ? k.split("!")[0] : evalSheet;
           const kRef = k.includes("!") ? k.split("!")[1] : k;
-          values[k] = evaluateFormulaExpression(values[k], values, kSheet, kRef);
+          values[k] = evaluateFormulaExpression(values[k], values, kSheet, kRef, seedDefaults);
         }
       });
     }
     if (q.startsWith("=")) {
-      return evaluateFormulaExpression(q, values, evalSheet, activeSheetCellRef || "A1");
+      return evaluateFormulaExpression(
+        q,
+        values,
+        evalSheet,
+        activeSheetCellRef || "A1",
+        seedDefaults
+      );
     }
     const qUpper = q.toUpperCase();
     return values[evalSheet + "!" + qUpper] ?? values[qUpper] ?? "";
@@ -915,21 +967,17 @@
   function saveActiveDocTabState() {
     if (activeModule !== "DOC" && activeModule !== "HWP") return;
     const editor = document.getElementById("doc-editor");
-    const tbody = document.getElementById("doc-table-body");
     if (!editor) return;
     docTabStore[activeModule] = {
       editorHtml: editor.innerHTML,
-      tableHtml: tbody ? tbody.innerHTML : "",
     };
   }
 
   function ensureDefaultDocTabStore() {
     const editor = document.getElementById("doc-editor");
-    const tbody = document.getElementById("doc-table-body");
     if (!docTabStore.DOC && editor) {
       docTabStore.DOC = {
         editorHtml: editor.innerHTML,
-        tableHtml: tbody ? tbody.innerHTML : "",
       };
     }
     if (!docTabStore.HWP) {
@@ -952,7 +1000,6 @@
           hwpTableRows +
           "</tbody></table>" +
           '<p id="hwp-manuscript-preview" class="hwp-manuscript-notice">한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성</p>',
-        tableHtml: hwpTableRows,
       };
     }
   }
@@ -964,8 +1011,6 @@
     if (!saved) return;
     const editor = document.getElementById("doc-editor");
     if (editor) editor.innerHTML = saved.editorHtml;
-    const tbody = document.getElementById("doc-table-body");
-    if (tbody && saved.tableHtml) tbody.innerHTML = saved.tableHtml;
     activeDocBlockEl = null;
     computeDocTableSummary();
     computeSmartStats();
@@ -991,6 +1036,7 @@
 
   function restoreWorkspaceSnapshot(snap) {
     if (!snap) return;
+    sheetSnapshotEpoch += 1;
     if (snap.docTabs) {
       docTabStore.DOC = snap.docTabs.DOC;
       docTabStore.HWP = snap.docTabs.HWP;
@@ -1316,7 +1362,9 @@
     if (cmdId === "hwp-mod-border") {
       const tableEl = document.getElementById("doc-table");
       if (tableEl) {
-        tableEl.style.borderStyle = tableEl.style.borderStyle === "double" ? "solid" : "double";
+        const borderOn =
+          execRes?.doubleDiagonalBorderEnabled ?? tableEl.style.borderStyle !== "double";
+        tableEl.style.borderStyle = borderOn ? "double" : "";
       }
       return true;
     }
@@ -1418,10 +1466,8 @@
       restoreDocTabState("DOC");
       if (applyDocEditorRibbonEffect(docEditor, cmdId, execRes)) {
         if (docEditor) {
-          const tbody = document.getElementById("doc-table-body");
           docTabStore.DOC = {
             editorHtml: docEditor.innerHTML,
-            tableHtml: tbody ? tbody.innerHTML : "",
           };
         }
         return;
@@ -1650,11 +1696,10 @@
     }
   }
 
-  function extractEditableDocumentText() {
-    const editor = document.getElementById("doc-editor");
-    if (!editor) return "";
-    const blocks = editor.querySelectorAll(
-      ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
+  function extractEditableDocumentText(rootEl = document.getElementById("doc-editor")) {
+    if (!rootEl) return "";
+    const blocks = rootEl.querySelectorAll(
+      ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview), :scope > div:not(.doc-table-toolbar)"
     );
     if (blocks.length > 0) {
       return Array.from(blocks)
@@ -1662,7 +1707,11 @@
         .filter((t) => t.length > 0)
         .join("\n");
     }
-    return (editor.innerText || "").trim();
+    const clone = rootEl.cloneNode(true);
+    clone
+      .querySelectorAll(".doc-table-toolbar, table, #hwp-manuscript-preview, footer")
+      .forEach((el) => el.remove());
+    return (clone.textContent || "").trim();
   }
 
   function resolveSourceScopeKind(sourceFormatOrModule) {
@@ -1673,7 +1722,7 @@
     if (["pptx", "ppsx", "ppt", "odp", "slide"].includes(token)) return "SLIDE";
     if (["pdf"].includes(token)) return "PDF";
     if (["hwp", "hwt", "hwpx", "hwtx"].includes(token)) return "HWP";
-    return activeModule === "HWP" ? "HWP" : "DOC";
+    return "DOC";
   }
 
   function appendTableRowsFromTrList(rows, lines) {
@@ -1704,28 +1753,13 @@
       if (saved) {
         const tempDiv = document.createElement("div");
         tempDiv.innerHTML = saved.editorHtml || "";
-        const blocks = tempDiv.querySelectorAll(
-          ":scope > h1, :scope > h2, :scope > p:not(#hwp-manuscript-preview)"
-        );
-        const docText =
-          blocks.length > 0
-            ? Array.from(blocks)
-                .map((el) => (el.textContent || "").trim())
-                .filter((t) => t.length > 0)
-                .join("\n")
-            : (tempDiv.innerText || "").trim();
+        const docText = extractEditableDocumentText(tempDiv);
         if (docText) {
           lines.push(docText);
         }
         const inlineTable = tempDiv.querySelector("table");
         if (inlineTable) {
-          const tb = inlineTable.querySelector("tbody");
-          if (tb && saved.tableHtml) tb.innerHTML = saved.tableHtml;
           appendTableRowsFromTrList(Array.from(inlineTable.querySelectorAll("tr")), lines);
-        } else if (saved.tableHtml) {
-          const tempTbody = document.createElement("tbody");
-          tempTbody.innerHTML = saved.tableHtml;
-          appendTableRowsFromTrList(Array.from(tempTbody.querySelectorAll("tr")), lines);
         }
       }
     } else if (scope === "SHEET") {
@@ -2048,38 +2082,66 @@
   }
 
   async function recalculateActiveSheetFormulas() {
+    const targetSheet = activeSheetName;
+    const epoch = sheetSnapshotEpoch;
+    const seq = (sheetRecalcSeqBySheet[targetSheet] || 0) + 1;
+    sheetRecalcSeqBySheet[targetSheet] = seq;
     const cellMap = collectSheetCellMap();
     const pairs = Object.keys(cellMap)
       .map((k) => k + "=" + cellMap[k])
       .join(";");
-    const formulaTds = Array.from(
-      document.querySelectorAll("#pane-sheet td[data-cell][data-formula]")
-    ).filter((td) => (td.dataset.formula || "").startsWith("="));
-    await Promise.all(
-      formulaTds.map(async (td) => {
-        const formula = td.dataset.formula || "";
-        const ref = td.dataset.cell || "A1";
-        const queryTarget = activeSheetName + "|" + ref;
-        const isCrossSheet = /SHEET\d+!/i.test(formula) || activeSheetName !== "Sheet1";
-        const rpcRes = isCrossSheet
-          ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
-          : await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
-        if (rpcRes && rpcRes.value !== undefined) {
-          td.textContent = String(rpcRes.value);
-        }
+    const sheetSnap = sheetDataStore[targetSheet] || {};
+    const formulaRefs = Object.keys(sheetSnap).filter((ref) =>
+      (sheetSnap[ref]?.formula || "").startsWith("=")
+    );
+    const evaluatedEntries = await Promise.all(
+      formulaRefs.map(async (ref) => {
+        const queryTarget = targetSheet + "|" + ref;
+        const rpcRes = await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
+        return {
+          ref,
+          value: rpcRes && rpcRes.value !== undefined ? String(rpcRes.value) : null,
+        };
       })
     );
-    sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+    if (epoch !== sheetSnapshotEpoch || sheetRecalcSeqBySheet[targetSheet] !== seq) {
+      return;
+    }
+    const latestSheetSnap = sheetDataStore[targetSheet] || {};
+    sheetDataStore[targetSheet] = latestSheetSnap;
+    evaluatedEntries.forEach(({ ref, value }) => {
+      if (value === null) return;
+      const storedEntry = latestSheetSnap[ref];
+      if (!storedEntry || !(storedEntry.formula || "").startsWith("=")) return;
+      storedEntry.value = value;
+      if (activeSheetName === targetSheet) {
+        const td = document.querySelector('#pane-sheet td[data-cell="' + ref + '"]');
+        const focusSt = td ? sheetCellFocusState.get(td) : null;
+        if (td && (td.dataset.formula || "").startsWith("=") && !focusSt?.snapshotPushed) {
+          td.textContent = value;
+          syncSheetCellFocusBaseline(td, false);
+        }
+      }
+    });
+    if (activeSheetName === targetSheet) {
+      const activeEl = document.activeElement;
+      const activeSt = activeEl ? sheetCellFocusState.get(activeEl) : null;
+      if (activeSt && !activeSt.snapshotPushed && activeSt.sheetName === targetSheet) {
+        activeSt.pendingSnapshot = captureWorkspaceSnapshot(false);
+      }
+    }
   }
 
   async function evaluateActiveSheetFormulaBar(recordUndo) {
     const input = document.getElementById("formula-input");
     const out = document.getElementById("sheet-eval-result");
     if (!input || !out) return;
+    const targetSheet = activeSheetName;
+    const targetCellRef = activeSheetCellRef;
     if (recordUndo) pushUndoSnapshot(false);
     const rawFormula = input.value.trim();
     const activeTd = document.querySelector(
-      '#pane-sheet td[data-cell="' + activeSheetCellRef + '"]'
+      '#pane-sheet td[data-cell="' + targetCellRef + '"]'
     );
     if (activeTd) {
       if (rawFormula.startsWith("=")) {
@@ -2088,41 +2150,47 @@
         delete activeTd.dataset.formula;
         activeTd.textContent = rawFormula;
       }
+      syncSheetCellFocusBaseline(activeTd, true);
       await recalculateActiveSheetFormulas();
-      const computedValue = (activeTd.textContent || "").trim();
-      out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
-      updateSheetSelectionAndAggregates(activeSheetCellRef);
+      const computedValue =
+        activeSheetName === targetSheet
+          ? (activeTd.textContent || "").trim()
+          : sheetDataStore[targetSheet]?.[targetCellRef]?.value || "";
+      out.textContent = "결과 (" + targetCellRef + "): " + computedValue;
+      if (activeSheetName === targetSheet) {
+        updateSheetSelectionAndAggregates(activeSheetCellRef || targetCellRef);
+      }
       return;
     }
 
     const cellMap = collectSheetCellMap();
-    cellMap[activeSheetName + "!" + activeSheetCellRef] = escapeSemicolonToken(rawFormula);
+    cellMap[targetSheet + "!" + targetCellRef] = escapeSemicolonToken(rawFormula);
     const pairs = Object.keys(cellMap)
       .map((k) => k + "=" + cellMap[k])
       .join(";");
-    const queryTarget = activeSheetName + "|" + activeSheetCellRef;
-    const isCrossSheet = /SHEET\d+!/i.test(rawFormula) || activeSheetName !== "Sheet1";
-    const rpcRes = isCrossSheet
-      ? await invokeIpc("evaluate_workbook_formula", pairs + "?" + queryTarget)
-      : await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
+    const queryTarget = targetSheet + "|" + targetCellRef;
+    const rpcRes = await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
     await recalculateActiveSheetFormulas();
     const computedValue = rpcRes.value;
-    out.textContent = "결과 (" + activeSheetCellRef + "): " + computedValue;
-    updateSheetSelectionAndAggregates(activeSheetCellRef);
+    out.textContent = "결과 (" + targetCellRef + "): " + computedValue;
+    if (activeSheetName === targetSheet) {
+      updateSheetSelectionAndAggregates(activeSheetCellRef || targetCellRef);
+    }
   }
 
   function bindSheetCellEvents(rootEl) {
     rootEl.querySelectorAll("td[data-cell]").forEach((td) => {
-      let pendingFocusSnapshot = null;
-      let focusInitialRaw = "";
-      let focusInitialText = "";
-      let snapshotPushedForFocus = false;
       td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
       td.addEventListener("focus", () => {
-        focusInitialText = (td.textContent || "").trim();
-        focusInitialRaw = td.dataset.formula || focusInitialText;
-        pendingFocusSnapshot = captureWorkspaceSnapshot(false);
-        snapshotPushedForFocus = false;
+        updateSheetSelectionAndAggregates(td.dataset.cell);
+        const initialText = (td.textContent || "").trim();
+        sheetCellFocusState.set(td, {
+          initialText,
+          initialRaw: td.dataset.formula || initialText,
+          pendingSnapshot: captureWorkspaceSnapshot(false),
+          snapshotPushed: false,
+          sheetName: activeSheetName,
+        });
       });
       td.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
@@ -2131,8 +2199,14 @@
         }
       });
       td.addEventListener("blur", async () => {
+        const st = sheetCellFocusState.get(td);
+        if (!st || st.sheetName !== activeSheetName) {
+          sheetCellFocusState.delete(td);
+          return;
+        }
+        const blurSheet = st.sheetName;
         const rawText = (td.textContent || "").trim();
-        const textChangedOnBlur = rawText !== focusInitialText;
+        const textChangedOnBlur = rawText !== st.initialText;
         if (textChangedOnBlur) {
           if (rawText.startsWith("=")) {
             td.dataset.formula = rawText;
@@ -2141,34 +2215,42 @@
           }
         }
         const effectiveRaw = td.dataset.formula || rawText;
-        if (!snapshotPushedForFocus && effectiveRaw !== focusInitialRaw && pendingFocusSnapshot) {
-          workspaceUndoStack.push(pendingFocusSnapshot);
+        if (!st.snapshotPushed && effectiveRaw !== st.initialRaw && st.pendingSnapshot) {
+          workspaceUndoStack.push(st.pendingSnapshot);
           if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
             workspaceUndoStack.shift();
           }
           workspaceRedoStack.length = 0;
-          snapshotPushedForFocus = true;
+          st.snapshotPushed = true;
         }
-        pendingFocusSnapshot = null;
-        if (snapshotPushedForFocus || textChangedOnBlur) {
+        const shouldRecalc = st.snapshotPushed || textChangedOnBlur;
+        sheetCellFocusState.delete(td);
+        if (shouldRecalc) {
           await recalculateActiveSheetFormulas();
-          updateSheetSelectionAndAggregates(activeSheetCellRef || td.dataset.cell);
+          if (activeSheetName === blurSheet) {
+            updateSheetSelectionAndAggregates(activeSheetCellRef || td.dataset.cell);
+          }
         }
       });
       td.addEventListener("input", () => {
+        const st = sheetCellFocusState.get(td);
         const rawText = (td.textContent || "").trim();
-        if (!snapshotPushedForFocus && rawText !== focusInitialRaw && pendingFocusSnapshot) {
-          workspaceUndoStack.push(pendingFocusSnapshot);
+        if (st && !st.snapshotPushed && rawText !== st.initialRaw && st.pendingSnapshot) {
+          workspaceUndoStack.push(st.pendingSnapshot);
           if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
             workspaceUndoStack.shift();
           }
           workspaceRedoStack.length = 0;
-          snapshotPushedForFocus = true;
+          st.snapshotPushed = true;
         }
         if (rawText.startsWith("=")) {
           td.dataset.formula = rawText;
         } else {
           delete td.dataset.formula;
+        }
+        if (st) {
+          st.initialText = rawText;
+          st.initialRaw = td.dataset.formula || rawText;
         }
         const formulaInput = document.getElementById("formula-input");
         if (formulaInput && activeSheetCellRef === td.dataset.cell) {
@@ -2546,10 +2628,10 @@
         if (mergeBtn) {
           const tbody = document.getElementById("doc-table-body");
           if (!tbody) return;
-          pushUndoSnapshot();
           const sumRow = document.getElementById("doc-table-sum-row");
           const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
           if (cells.length < 2) return;
+          pushUndoSnapshot();
           const isMerged = cells[0].colSpan > 1;
           cells[0].colSpan = isMerged ? 1 : 2;
           cells[1].hidden = !isMerged;

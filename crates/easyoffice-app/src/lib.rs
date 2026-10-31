@@ -304,40 +304,55 @@ impl EasyOfficeIpcRouter {
         ("Sheet1", raw_expr.trim())
     }
 
+    fn normalize_sheet_token(raw: &str) -> &str {
+        raw.trim().trim_matches('\'')
+    }
+
     fn evaluate_workbook_query<'a>(
         cells_part: Option<&str>,
         raw_query: &'a str,
         seed_defaults: bool,
     ) -> Result<(&'a str, &'a str, EvaluatedCellValue), EasyOfficeError> {
-        let (active_sheet, expr) = Self::extract_active_sheet_and_expr(raw_query.trim());
+        let (raw_active_sheet, expr) = Self::extract_active_sheet_and_expr(raw_query.trim());
+        let active_sheet = Self::normalize_sheet_token(raw_active_sheet);
         let mut wb = WorkbookEngine::new();
         wb.add_sheet("Sheet1");
         wb.add_sheet("Sheet2");
+        let assignments = cells_part
+            .map(Self::split_cell_assignments)
+            .unwrap_or_default();
         if seed_defaults {
-            if cells_part.is_none_or(|s| s.trim().is_empty()) {
+            let has_sheet1 = assignments.iter().any(|(lhs, _)| {
+                let sh = lhs
+                    .split_once('!')
+                    .map_or(active_sheet, |(s, _)| Self::normalize_sheet_token(s));
+                sh.eq_ignore_ascii_case("Sheet1")
+            });
+            if !has_sheet1 {
                 wb.set_cell("Sheet1", "A1", "1200")?;
                 wb.set_cell("Sheet1", "B1", "850")?;
             }
-            let has_sheet2 = cells_part.is_some_and(|s| {
-                Self::split_cell_assignments(s).iter().any(|(lhs, _)| {
-                    lhs.split_once('!')
-                        .is_some_and(|(sh, _)| sh.trim().eq_ignore_ascii_case("Sheet2"))
-                })
+            let has_sheet2 = assignments.iter().any(|(lhs, _)| {
+                let sh = lhs
+                    .split_once('!')
+                    .map_or(active_sheet, |(s, _)| Self::normalize_sheet_token(s));
+                sh.eq_ignore_ascii_case("Sheet2")
             });
-            if !has_sheet2 && !active_sheet.eq_ignore_ascii_case("Sheet2") {
+            if !has_sheet2 {
                 wb.set_cell("Sheet2", "A1", "100")?;
             }
         }
         wb.add_sheet(active_sheet);
-        if let Some(cells_str) = cells_part {
-            for (lhs, val) in Self::split_cell_assignments(cells_str) {
-                let (sh, addr) = lhs.split_once('!').unwrap_or((active_sheet, &lhs));
-                let sh_trim = sh.trim();
-                let addr_trim = addr.trim();
-                if !sh_trim.is_empty() && !addr_trim.is_empty() {
-                    wb.add_sheet(sh_trim);
-                    wb.set_cell(sh_trim, addr_trim, &val)?;
-                }
+        for (lhs, val) in assignments {
+            let (sh, addr) = lhs
+                .split_once('!')
+                .map_or((active_sheet, lhs.as_str()), |(s, a)| {
+                    (Self::normalize_sheet_token(s), a)
+                });
+            let addr_trim = addr.trim();
+            if !sh.is_empty() && !addr_trim.is_empty() {
+                wb.add_sheet(sh);
+                wb.set_cell(sh, addr_trim, &val)?;
             }
         }
         let evaluated = if expr.starts_with('=') {
@@ -1368,6 +1383,22 @@ mod tests {
         )
         .unwrap();
         assert!(default_sheet2_json.contains("\"value\":\"150\""));
+
+        let direct_sheet2_default =
+            EasyOfficeIpcRouter::dispatch("evaluate_workbook_formula", "?Sheet2|=A1+50").unwrap();
+        assert!(direct_sheet2_default.contains("\"value\":\"150\""));
+
+        let quoted_sheet2_override = EasyOfficeIpcRouter::dispatch(
+            "evaluate_workbook_formula",
+            "'Sheet2'!A1=250?Sheet1|=Sheet2!A1+50",
+        )
+        .unwrap();
+        assert!(quoted_sheet2_override.contains("\"value\":\"300\""));
+
+        let cleared_sheet2_ui =
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", "Sheet1!A1=500?Sheet1|=Sheet2!A1+50")
+                .unwrap();
+        assert!(cleared_sheet2_ui.contains("\"value\":\"50\""));
 
         for cmd in ["evaluate_workbook_formula", "evaluate_sheet"] {
             let cross1 = EasyOfficeIpcRouter::dispatch(

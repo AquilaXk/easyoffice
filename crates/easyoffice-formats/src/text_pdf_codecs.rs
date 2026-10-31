@@ -885,9 +885,11 @@ impl PdfSerializer {
         let mut current_page_number: Option<usize> = None;
         let mut current_rotation = 0;
         let mut current_body = String::new();
+        let mut fallback_body = String::new();
         let mut current_stamp: Option<String> = None;
         let mut in_stream = false;
         let mut seen_body_line = false;
+        let mut seen_fallback_line = false;
         let mut is_metadata_obj = false;
         let mut trailer_b64: Option<String> = None;
         let mut trailer_b64_count = 0usize;
@@ -933,17 +935,24 @@ impl PdfSerializer {
             if trimmed == "stream" {
                 in_stream = true;
                 current_body.clear();
+                fallback_body.clear();
                 current_stamp = None;
                 seen_body_line = false;
+                seen_fallback_line = false;
                 continue;
             }
             if trimmed == "endstream" {
                 if in_stream {
                     if !is_metadata_obj {
+                        let page_body = if seen_body_line {
+                            current_body.clone()
+                        } else {
+                            fallback_body.clone()
+                        };
                         pages.push(PdfPageModel {
                             page_number: current_page_number.take().unwrap_or(pages.len() + 1),
                             rotation_degrees: current_rotation,
-                            body_text: current_body.clone(),
+                            body_text: page_body,
                             approval_stamp: current_stamp.take(),
                         });
                     }
@@ -964,9 +973,17 @@ impl PdfSerializer {
                     if !is_body_line {
                         if let Some(wm) = content.strip_prefix("[WM] ") {
                             watermark_text = Some(wm.to_string());
-                        } else if let Some(stamp) = content.strip_prefix("[STAMP] ") {
-                            current_stamp = Some(stamp.to_string());
+                            continue;
                         }
+                        if let Some(stamp) = content.strip_prefix("[STAMP] ") {
+                            current_stamp = Some(stamp.to_string());
+                            continue;
+                        }
+                        if seen_fallback_line {
+                            fallback_body.push('\n');
+                        }
+                        seen_fallback_line = true;
+                        fallback_body.push_str(&content);
                         continue;
                     }
                     if seen_body_line {
@@ -1008,12 +1025,13 @@ impl PdfSerializer {
                     .replace("\\r", "\r")
                     .replace("\\\"", "\"")
                     .replace("\\\\", "\\");
-                if visible_concat.is_empty() {
+                let non_empty_lines: Vec<&str> =
+                    visible_concat.lines().filter(|l| !l.is_empty()).collect();
+                if non_empty_lines.is_empty() {
                     decoded.contains(&title) || normalized.contains(&title)
                 } else {
-                    visible_concat
-                        .lines()
-                        .filter(|l| !l.is_empty())
+                    non_empty_lines
+                        .into_iter()
                         .all(|l| decoded.contains(l) || normalized.contains(l))
                 }
             } else {
@@ -1120,6 +1138,9 @@ impl PdfSerializer {
         let mut out = Vec::with_capacity((clean.len() / 4) * 3);
         let mut idx = 0usize;
         while idx + 4 <= clean.len() {
+            if (clean[idx + 2] == b'=' || clean[idx + 3] == b'=') && idx + 4 != clean.len() {
+                return None;
+            }
             let a = val(clean[idx])?;
             let b = val(clean[idx + 1])?;
             out.push((a << 2) | (b >> 4));
@@ -1175,7 +1196,8 @@ impl PdfSerializer {
             units.push(code);
             idx += 4;
         }
-        Some(String::from_utf16_lossy(&units))
+        let slice = units.strip_prefix(&[0xFEFF]).unwrap_or(&units);
+        Some(String::from_utf16_lossy(slice))
     }
 
     fn extract_all_bt_tokens(line: &str) -> Vec<String> {
@@ -1491,6 +1513,40 @@ mod tests {
         let leading_blank_bytes = PdfSerializer::serialize(&leading_blank_pdf_model);
         let parsed_leading_blank = PdfSerializer::parse(&leading_blank_bytes).unwrap();
         assert_eq!(parsed_leading_blank, leading_blank_pdf_model);
+
+        let newline_only_pdf_bytes = PdfSerializer::serialize(&PdfDocumentModel {
+            title: "줄바꿈 전용 문서".to_string(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "\n".to_string(),
+                approval_stamp: None,
+            }],
+            watermark_text: None,
+        });
+        let mut spoofed_newline_pdf = newline_only_pdf_bytes;
+        spoofed_newline_pdf.extend_from_slice(spoofed_trailer.as_bytes());
+        assert!(matches!(
+            PdfSerializer::parse(&spoofed_newline_pdf),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+
+        let external_pdf = concat!(
+            "%PDF-1.7\n",
+            "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (External Spec) >> endobj\n",
+            "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+            "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+            "4 0 obj << /Length 98 >>\nstream\n",
+            "BT /F1 11 Tf 72 720 Td (External Line 1) Tj ET\n",
+            "BT /F2 11 Tf 72 704 Td <FEFFAC00B098> Tj ET\n",
+            "endstream\nendobj\n",
+            "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
+        );
+        let parsed_external = PdfSerializer::parse(external_pdf.as_bytes()).unwrap();
+        assert_eq!(parsed_external.title, "External Spec");
+        assert_eq!(parsed_external.pages[0].body_text, "External Line 1\n가나");
+
+        assert_eq!(PdfSerializer::decode_base64_bytes("YQ==YQ=="), None);
     }
 
     #[test]
