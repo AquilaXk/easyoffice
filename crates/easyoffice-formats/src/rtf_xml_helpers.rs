@@ -347,6 +347,26 @@ fn is_self_closing_open_tag(bytes: &[u8], after_tag: usize, gt_pos: usize) -> bo
 }
 
 #[inline]
+fn find_tag_close_gt(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut in_quote: Option<u8> = None;
+    let mut i = start;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = in_quote {
+            if b == q {
+                in_quote = None;
+            }
+        } else if b == b'"' || b == b'\'' {
+            in_quote = Some(b);
+        } else if b == b'>' {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+#[inline]
 fn find_valid_open_tag(bytes: &[u8], start: usize, tag_bytes: &[u8]) -> Option<(usize, usize)> {
     let need = 1 + tag_bytes.len();
     let mut pos = start;
@@ -357,7 +377,7 @@ fn find_valid_open_tag(bytes: &[u8], start: usize, tag_bytes: &[u8]) -> Option<(
             return None;
         }
         if &bytes[lt + 1..after_tag] == tag_bytes && is_tag_name_boundary(bytes[after_tag]) {
-            let gt_pos = crate::XmlSanitizer::find_byte_swar(bytes, after_tag, b'>')?;
+            let gt_pos = find_tag_close_gt(bytes, after_tag)?;
             return Some((lt, gt_pos));
         }
         pos = lt + 1;
@@ -383,7 +403,7 @@ fn find_matching_close_tag(
         {
             let after_close_name = lt + close_prefix_len;
             if bytes[after_close_name] == b'>' || is_xml_ws(bytes[after_close_name]) {
-                let close_gt = crate::XmlSanitizer::find_byte_swar(bytes, after_close_name, b'>')?;
+                let close_gt = find_tag_close_gt(bytes, after_close_name)?;
                 depth -= 1;
                 if depth == 0 {
                     return Some((lt, close_gt + 1));
@@ -397,7 +417,7 @@ fn find_matching_close_tag(
             && is_tag_name_boundary(bytes[lt + open_prefix_len])
         {
             let after_open_name = lt + open_prefix_len;
-            let open_gt = crate::XmlSanitizer::find_byte_swar(bytes, after_open_name, b'>')?;
+            let open_gt = find_tag_close_gt(bytes, after_open_name)?;
             if !is_self_closing_open_tag(bytes, after_open_name, open_gt) {
                 depth += 1;
             }
@@ -412,7 +432,7 @@ fn find_matching_close_tag(
 pub(crate) fn extract_attr(xml: &str, tag_prefix: &str, attr_name: &str) -> Option<String> {
     let tag_start = xml.find(tag_prefix)?;
     let rest = &xml[tag_start + tag_prefix.len()..];
-    let tag_end = crate::XmlSanitizer::find_byte_swar(rest.as_bytes(), 0, b'>')?;
+    let tag_end = find_tag_close_gt(rest.as_bytes(), 0)?;
     extract_attr_from_fragment(&rest[..tag_end], attr_name)
 }
 

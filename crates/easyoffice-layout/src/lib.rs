@@ -561,6 +561,17 @@ mod tests {
         table.insert_column(0, "0").unwrap();
         assert_eq!(table.row_count(), 4);
         assert_eq!(table.col_count(), 4);
+        assert_eq!(table.spans[0].start_row, 1);
+        assert_eq!(table.spans[0].start_col, 1);
+        assert_eq!(table.spans[0].row_span, 2);
+        assert_eq!(table.spans[0].col_span, 2);
+
+        table.insert_row(2, "0").unwrap();
+        table.insert_column(2, "0").unwrap();
+        assert_eq!(table.spans[0].start_row, 1);
+        assert_eq!(table.spans[0].start_col, 1);
+        assert_eq!(table.spans[0].row_span, 3);
+        assert_eq!(table.spans[0].col_span, 3);
 
         let mut doc_engine = DocumentDomainEngine::new();
         doc_engine.record_revision("rev-1", "작성자", "insert", "문단 추가");

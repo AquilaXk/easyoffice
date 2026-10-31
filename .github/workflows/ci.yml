@@ -31,6 +31,9 @@ jobs:
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
 
+      - name: Run WebUI behavioral regression suite
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-sheet-atomicity.mjs
+
       - name: Check Swift toolchain version
         run: swift --version
 
@@ -73,6 +76,9 @@ jobs:
 
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
+
+      - name: Run WebUI behavioral regression suite
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-sheet-atomicity.mjs
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version

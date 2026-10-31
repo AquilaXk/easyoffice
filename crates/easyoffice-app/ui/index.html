@@ -408,35 +408,54 @@
             <div class="editor-surface converter-surface">
               <h2>통합 문서 포맷 변환기</h2>
               <p>
-                DOCX, HWP/HWPX, ODF, XLSX, PPTX, PDF, RTF, CSV, Markdown, HTML, TXT 간 문서를 변환합니다.
+                DOCX, HWP/HWPX, ODF, XLSX, PPTX, PDF, RTF, CSV, Markdown, TXT 간 문서를 변환합니다.
               </p>
               <div class="formula-bar">
                 <label for="conv-src-fmt">원본</label>
                 <select id="conv-src-fmt" aria-label="원본 포맷">
                   <option value="docx" selected>DOCX</option>
+                  <option value="doc">DOC</option>
                   <option value="hwpx">HWPX</option>
+                  <option value="hwtx">HWTX</option>
                   <option value="hwp">HWP 5.0</option>
+                  <option value="hwt">HWT</option>
                   <option value="odt">ODT</option>
                   <option value="xlsx">XLSX</option>
                   <option value="xls">XLS</option>
+                  <option value="ods">ODS</option>
+                  <option value="csv">CSV (.csv)</option>
+                  <option value="tsv">TSV (.tsv)</option>
                   <option value="pptx">PPTX</option>
+                  <option value="ppsx">PPSX</option>
+                  <option value="ppt">PPT</option>
+                  <option value="odp">ODP</option>
                   <option value="pdf">PDF</option>
                   <option value="rtf">RTF</option>
                   <option value="md">Markdown (.md)</option>
-                  <option value="html">HTML (.html)</option>
-                  <option value="csv">CSV (.csv)</option>
+                  <option value="txt">TXT (.txt)</option>
                 </select>
                 <span>→</span>
                 <label for="conv-dst-fmt">대상</label>
                 <select id="conv-dst-fmt" aria-label="대상 포맷">
                   <option value="hwpx" selected>HWPX</option>
+                  <option value="hwtx">HWTX</option>
                   <option value="hwp">HWP 5.0</option>
+                  <option value="hwt">HWT</option>
                   <option value="docx">DOCX</option>
+                  <option value="doc">DOC</option>
                   <option value="odt">ODT</option>
+                  <option value="xlsx">XLSX</option>
+                  <option value="xls">XLS</option>
+                  <option value="ods">ODS</option>
+                  <option value="csv">CSV (.csv)</option>
+                  <option value="tsv">TSV (.tsv)</option>
+                  <option value="pptx">PPTX</option>
+                  <option value="ppsx">PPSX</option>
+                  <option value="ppt">PPT</option>
+                  <option value="odp">ODP</option>
                   <option value="pdf">PDF</option>
                   <option value="rtf">RTF</option>
                   <option value="md">Markdown (.md)</option>
-                  <option value="html">HTML (.html)</option>
                   <option value="txt">TXT (.txt)</option>
                 </select>
                 <button id="btn-run-convert" class="primary-btn">즉시 변환 검증</button>
@@ -505,6 +524,16 @@
       </div>
     </dialog>
 
+    <script src="./offline-formula-ast.js"></script>
+    <script src="./offline-formula-eval.js"></script>
+    <script src="./offline-rpc.js"></script>
+    <script src="./pii-dom-scrubber.js"></script>
+    <script src="./sheet-store.js"></script>
+    <script src="./ribbon-catalog.js"></script>
+    <script src="./workspace-tools.js"></script>
+    <script src="./workspace-panels.js"></script>
+    <script src="./sheet-controller.js"></script>
+    <script src="./ribbon-history.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

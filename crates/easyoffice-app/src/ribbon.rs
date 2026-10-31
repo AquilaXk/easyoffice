@@ -89,16 +89,46 @@ pub struct RibbonWorkspaceState {
     pub is_bold: bool,
     pub is_italic: bool,
     pub is_underline: bool,
+    pub style_preset_index: usize,
+    pub inserted_table_count: usize,
+    pub inserted_chart_count: usize,
+    pub inserted_shape_count: usize,
+    pub inserted_link_count: usize,
+    pub paper_size: String,
     pub column_count: usize,
     pub is_landscape: bool,
+    pub margin_preset_index: usize,
+    pub autosum_applied_count: usize,
+    pub formula_wizard_open: bool,
+    pub sort_ascending: bool,
+    pub validation_guard_enabled: bool,
+    pub toc_generated: bool,
+    pub footnote_count: usize,
+    pub mail_merge_applied_count: usize,
+    pub table_formula_evaluated_count: usize,
     pub manuscript_grid_enabled: bool,
     pub approval_header_enabled: bool,
+    pub click_here_field_count: usize,
+    pub double_diagonal_border_enabled: bool,
+    pub pivot_summary_enabled: bool,
+    pub conditional_format_enabled: bool,
+    pub freeze_panes_enabled: bool,
+    pub master_layout_index: usize,
+    pub snap_guide_enabled: bool,
+    pub slide_transition_index: usize,
+    pub presenter_mode_active: bool,
+    pub pdf_highlight_count: usize,
+    pub pdf_rotation_degrees: u32,
+    pub pdf_split_merge_count: usize,
+    pub pdf_converted_to_office_count: usize,
     pub track_changes_enabled: bool,
+    pub review_comment_count: usize,
+    pub security_verified_count: usize,
+    pub stats_inspected_count: usize,
     pub split_view_enabled: bool,
     pub ribbon_collapsed: bool,
     pub dark_theme_enabled: bool,
     pub zoom_percent: u32,
-    pub pdf_rotation_degrees: u32,
     pub last_command_id: String,
     pub executed_count: usize,
 }
@@ -111,16 +141,46 @@ impl Default for RibbonWorkspaceState {
             is_bold: false,
             is_italic: false,
             is_underline: false,
+            style_preset_index: 0,
+            inserted_table_count: 0,
+            inserted_chart_count: 0,
+            inserted_shape_count: 0,
+            inserted_link_count: 0,
+            paper_size: "A4".to_string(),
             column_count: 1,
             is_landscape: false,
+            margin_preset_index: 0,
+            autosum_applied_count: 0,
+            formula_wizard_open: false,
+            sort_ascending: true,
+            validation_guard_enabled: true,
+            toc_generated: false,
+            footnote_count: 0,
+            mail_merge_applied_count: 0,
+            table_formula_evaluated_count: 0,
             manuscript_grid_enabled: false,
             approval_header_enabled: true,
+            click_here_field_count: 0,
+            double_diagonal_border_enabled: false,
+            pivot_summary_enabled: false,
+            conditional_format_enabled: false,
+            freeze_panes_enabled: false,
+            master_layout_index: 0,
+            snap_guide_enabled: true,
+            slide_transition_index: 0,
+            presenter_mode_active: false,
+            pdf_highlight_count: 0,
+            pdf_rotation_degrees: 0,
+            pdf_split_merge_count: 0,
+            pdf_converted_to_office_count: 0,
             track_changes_enabled: false,
+            review_comment_count: 0,
+            security_verified_count: 0,
+            stats_inspected_count: 0,
             split_view_enabled: false,
             ribbon_collapsed: false,
             dark_theme_enabled: false,
             zoom_percent: 100,
-            pdf_rotation_degrees: 0,
             last_command_id: String::new(),
             executed_count: 0,
         }
@@ -292,6 +352,22 @@ impl RibbonCommandRouter {
             state.is_italic = !state.is_italic;
         } else if trimmed.ends_with("-home-underline") {
             state.is_underline = !state.is_underline;
+        } else if trimmed.ends_with("-home-style") {
+            state.style_preset_index = (state.style_preset_index + 1) % 4;
+        } else if trimmed.ends_with("-insert-table") {
+            state.inserted_table_count += 1;
+        } else if trimmed.ends_with("-insert-chart") || trimmed == "sheet-mod-chart" {
+            state.inserted_chart_count += 1;
+        } else if trimmed.ends_with("-insert-shape") {
+            state.inserted_shape_count += 1;
+        } else if trimmed.ends_with("-insert-link") {
+            state.inserted_link_count += 1;
+        } else if trimmed.ends_with("-layout-paper") {
+            state.paper_size = if state.paper_size == "A4" {
+                "Letter".to_string()
+            } else {
+                "A4".to_string()
+            };
         } else if trimmed.ends_with("-layout-orientation") {
             state.is_landscape = !state.is_landscape;
         } else if trimmed.ends_with("-layout-columns") {
@@ -300,12 +376,62 @@ impl RibbonCommandRouter {
             } else {
                 state.column_count + 1
             };
-        } else if trimmed == "hwp-mod-manuscript" {
-            state.manuscript_grid_enabled = !state.manuscript_grid_enabled;
+        } else if trimmed.ends_with("-layout-margins") {
+            state.margin_preset_index = (state.margin_preset_index + 1) % 3;
+        } else if trimmed.ends_with("-data-autosum") {
+            state.autosum_applied_count += 1;
+        } else if trimmed.ends_with("-data-fn-browser") {
+            state.formula_wizard_open = !state.formula_wizard_open;
+        } else if trimmed.ends_with("-data-sort") {
+            state.sort_ascending = !state.sort_ascending;
+        } else if trimmed.ends_with("-data-validation") {
+            state.validation_guard_enabled = !state.validation_guard_enabled;
+        } else if trimmed == "doc-mod-toc" {
+            state.toc_generated = !state.toc_generated;
+        } else if trimmed == "doc-mod-footnote" {
+            state.footnote_count += 1;
+        } else if trimmed == "doc-mod-mailmerge" {
+            state.mail_merge_applied_count += 1;
+        } else if trimmed == "doc-mod-tableformula" {
+            state.table_formula_evaluated_count += 1;
         } else if trimmed == "hwp-mod-header" {
             state.approval_header_enabled = !state.approval_header_enabled;
+        } else if trimmed == "hwp-mod-field" {
+            state.click_here_field_count += 1;
+        } else if trimmed == "hwp-mod-border" {
+            state.double_diagonal_border_enabled = !state.double_diagonal_border_enabled;
+        } else if trimmed == "hwp-mod-manuscript" {
+            state.manuscript_grid_enabled = !state.manuscript_grid_enabled;
+        } else if trimmed == "sheet-mod-pivot" {
+            state.pivot_summary_enabled = !state.pivot_summary_enabled;
+        } else if trimmed == "sheet-mod-condfmt" {
+            state.conditional_format_enabled = !state.conditional_format_enabled;
+        } else if trimmed == "sheet-mod-freeze" {
+            state.freeze_panes_enabled = !state.freeze_panes_enabled;
+        } else if trimmed == "slide-mod-master" {
+            state.master_layout_index = (state.master_layout_index + 1) % 3;
+        } else if trimmed == "slide-mod-snap" {
+            state.snap_guide_enabled = !state.snap_guide_enabled;
+        } else if trimmed == "slide-mod-transition" {
+            state.slide_transition_index = (state.slide_transition_index + 1) % 4;
+        } else if trimmed == "slide-mod-presenter" {
+            state.presenter_mode_active = !state.presenter_mode_active;
+        } else if trimmed == "pdf-mod-highlight" {
+            state.pdf_highlight_count += 1;
+        } else if trimmed == "pdf-mod-rotate" {
+            state.pdf_rotation_degrees = (state.pdf_rotation_degrees + 90) % 360;
+        } else if trimmed == "pdf-mod-splitmerge" {
+            state.pdf_split_merge_count += 1;
+        } else if trimmed == "pdf-mod-tooffice" {
+            state.pdf_converted_to_office_count += 1;
         } else if trimmed.ends_with("-review-track") {
             state.track_changes_enabled = !state.track_changes_enabled;
+        } else if trimmed.ends_with("-review-comment") {
+            state.review_comment_count += 1;
+        } else if trimmed.ends_with("-review-verify") {
+            state.security_verified_count += 1;
+        } else if trimmed.ends_with("-review-stats") {
+            state.stats_inspected_count += 1;
         } else if trimmed.ends_with("-view-split") {
             state.split_view_enabled = !state.split_view_enabled;
         } else if trimmed.ends_with("-view-ribbon") {
@@ -313,9 +439,12 @@ impl RibbonCommandRouter {
         } else if trimmed.ends_with("-view-theme") {
             state.dark_theme_enabled = !state.dark_theme_enabled;
         } else if trimmed.ends_with("-view-zoom") {
-            state.zoom_percent = 100;
-        } else if trimmed == "pdf-mod-rotate" {
-            state.pdf_rotation_degrees = (state.pdf_rotation_degrees + 90) % 360;
+            state.zoom_percent = match state.zoom_percent {
+                100 => 125,
+                125 => 150,
+                150 => 90,
+                _ => 100,
+            };
         }
 
         let cat_title = state.ribbon_style.category_titles()[matched.category_index];
@@ -340,9 +469,18 @@ mod tests {
         let mut undo_stack = UndoRedoStack::new();
 
         for cmd in &catalog {
+            let mut probe_before = state.clone();
             undo_stack.push_state(state.clone());
             let summary = RibbonCommandRouter::execute_command(&cmd.id, &mut state).unwrap();
             assert!(summary.contains(cmd.title));
+            probe_before.active_module = state.active_module;
+            probe_before.last_command_id = state.last_command_id.clone();
+            probe_before.executed_count = state.executed_count;
+            assert_ne!(
+                probe_before, state,
+                "Command {} did not mutate domain state",
+                cmd.id
+            );
         }
 
         assert_eq!(state.executed_count, 140);

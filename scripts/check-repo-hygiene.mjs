@@ -26,6 +26,17 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-layout/src/lib.rs",
   "crates/easyoffice-app/src/lib.rs",
   "crates/easyoffice-app/tauri.conf.json",
+  "crates/easyoffice-app/ui/offline-formula-ast.js",
+  "crates/easyoffice-app/ui/offline-formula-eval.js",
+  "crates/easyoffice-app/ui/offline-rpc.js",
+  "crates/easyoffice-app/ui/pii-dom-scrubber.js",
+  "crates/easyoffice-app/ui/sheet-store.js",
+  "crates/easyoffice-app/ui/ribbon-catalog.js",
+  "crates/easyoffice-app/ui/workspace-tools.js",
+  "crates/easyoffice-app/ui/workspace-panels.js",
+  "crates/easyoffice-app/ui/sheet-controller.js",
+  "crates/easyoffice-app/ui/ribbon-history.js",
+  "crates/easyoffice-app/ui/app.js",
   "docs/policy-decisions.md",
   "docs/design-system.md",
   "docs/product-spec.md",
@@ -35,6 +46,10 @@ const REQUIRED_TRACKED_CONTRACTS = [
   ".github/workflows/ci.yml",
   ".github/workflows/automerge.yml",
   ".github/workflows/release.yml",
+  "scripts/webui-dom-harness.mjs",
+  "scripts/test-webui-behavior.mjs",
+  "scripts/test-webui-sheet-atomicity.mjs",
+  "scripts/test-webui-round13-parity.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)
@@ -175,6 +190,18 @@ for (const file of files) {
       errors.push(`Prohibited external brand or local-only reference detected in ${rel} (pattern: ${regex.source})`);
     }
   }
+
+  if (rel.endsWith(".js") || rel.endsWith(".mjs")) {
+    try {
+      execFileSync(process.execPath, ["--check", file], {
+        cwd: ROOT,
+        stdio: "pipe",
+      });
+    } catch (err) {
+      const stderr = err && err.stderr ? err.stderr.toString("utf8").trim() : String(err);
+      errors.push(`JavaScript syntax check failed in ${rel}: ${stderr}`);
+    }
+  }
 }
 
 const FORBIDDEN_UI_GATE_PHRASES = [
@@ -206,13 +233,28 @@ if (fs.existsSync(webuiCssPath)) {
   }
 }
 
-for (const uiRel of ["crates/easyoffice-app/ui/index.html", "crates/easyoffice-app/ui/app.js"]) {
+const webuiDir = path.join(ROOT, "crates/easyoffice-app/ui");
+const webuiJsRels = fs.existsSync(webuiDir)
+  ? fs
+      .readdirSync(webuiDir)
+      .filter((name) => name.endsWith(".js"))
+      .sort()
+      .map((name) => `crates/easyoffice-app/ui/${name}`)
+  : [];
+
+for (const uiRel of ["crates/easyoffice-app/ui/index.html", ...webuiJsRels]) {
   const uiFull = path.join(ROOT, uiRel);
   if (!fs.existsSync(uiFull)) continue;
   const uiText = fs.readFileSync(uiFull, "utf8");
   for (const phrase of FORBIDDEN_UI_GATE_PHRASES) {
     if (uiText.includes(phrase)) {
       errors.push(`Forbidden internal gate/spec copy "${phrase}" detected in ${uiRel}`);
+    }
+  }
+  if (uiRel.endsWith(".js")) {
+    const lineCount = uiText.split("\n").length - (uiText.endsWith("\n") ? 1 : 0);
+    if (lineCount >= 1000) {
+      errors.push(`WebUI JS file ${uiRel} exceeds 1,000-line ceiling (${lineCount} lines)`);
     }
   }
 }

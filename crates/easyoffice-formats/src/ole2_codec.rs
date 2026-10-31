@@ -656,6 +656,7 @@ pub struct Hwp5DocumentPayload {
 }
 
 pub type DocumentCodecPayload = Hwp5DocumentPayload;
+pub type Hwp5TableGrid = Vec<Vec<String>>;
 
 /// HWP 5.0 (`.hwp`) and HWT (`.hwt`) OLE2 container codec using 32-bit HWP record headers.
 pub struct Hwp5Codec;
@@ -702,15 +703,23 @@ impl Hwp5Codec {
     }
 
     pub fn pack(payload: &Hwp5DocumentPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_with_compression(payload, false)
+        Self::pack_with_compression_and_tables(payload, &[], false)
+    }
+
+    pub fn pack_multi_tables(
+        payload: &Hwp5DocumentPayload,
+        extra_tables: &[Hwp5TableGrid],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_with_compression_and_tables(payload, extra_tables, false)
     }
 
     pub fn pack_compressed(payload: &Hwp5DocumentPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_with_compression(payload, true)
+        Self::pack_with_compression_and_tables(payload, &[], true)
     }
 
-    fn pack_with_compression(
+    fn pack_with_compression_and_tables(
         payload: &Hwp5DocumentPayload,
+        extra_tables: &[Hwp5TableGrid],
         compressed: bool,
     ) -> Result<Vec<u8>, EasyOfficeError> {
         let mut file_header = vec![0u8; Ole2SecurityGuard::HWP5_FILE_HEADER_LEN];
@@ -757,21 +766,23 @@ impl Hwp5Codec {
             section0.extend_from_slice(&text_utf16);
         }
 
-        if !payload.table_cells.is_empty() {
-            let mut tbl_buf = Vec::new();
-            tbl_buf.extend_from_slice(&(payload.table_cells.len() as u16).to_le_bytes());
-            for row in &payload.table_cells {
-                tbl_buf.extend_from_slice(&(row.len() as u16).to_le_bytes());
-                for cell in row {
-                    append_len_prefixed_utf16le(&mut tbl_buf, cell);
+        for tbl in std::iter::once(&payload.table_cells).chain(extra_tables.iter()) {
+            if !tbl.is_empty() {
+                let mut tbl_buf = Vec::new();
+                tbl_buf.extend_from_slice(&(tbl.len() as u16).to_le_bytes());
+                for row in tbl {
+                    tbl_buf.extend_from_slice(&(row.len() as u16).to_le_bytes());
+                    for cell in row {
+                        append_len_prefixed_utf16le(&mut tbl_buf, cell);
+                    }
                 }
+                section0.extend_from_slice(&Self::encode_record_header(
+                    Self::HWPTAG_TABLE_RECORD,
+                    0,
+                    tbl_buf.len(),
+                ));
+                section0.extend_from_slice(&tbl_buf);
             }
-            section0.extend_from_slice(&Self::encode_record_header(
-                Self::HWPTAG_TABLE_RECORD,
-                0,
-                tbl_buf.len(),
-            ));
-            section0.extend_from_slice(&tbl_buf);
         }
 
         let (final_doc_info, final_section0) = if compressed {
@@ -791,6 +802,12 @@ impl Hwp5Codec {
     }
 
     pub fn unpack(bytes: &[u8]) -> Result<Hwp5DocumentPayload, EasyOfficeError> {
+        Ok(Self::unpack_multi_tables(bytes)?.0)
+    }
+
+    pub fn unpack_multi_tables(
+        bytes: &[u8],
+    ) -> Result<(Hwp5DocumentPayload, Vec<Hwp5TableGrid>), EasyOfficeError> {
         let streams = Ole2ContainerCodec::unpack(bytes)?;
         let file_header = streams
             .iter()
@@ -884,6 +901,7 @@ impl Hwp5Codec {
 
         let mut paragraphs: Vec<Hwp5ParagraphRecord> = Vec::new();
         let mut table_cells: Vec<Vec<String>> = Vec::new();
+        let mut all_tables: Vec<Vec<Vec<String>>> = Vec::new();
         let mut pending_meta: Option<(String, bool)> = None;
         let mut offset = 0usize;
 
@@ -929,21 +947,27 @@ impl Hwp5Codec {
                         end,
                         &mut total_table_cells,
                     )?;
-                    table_cells.extend(parsed_rows);
+                    if !parsed_rows.is_empty() {
+                        table_cells.extend(parsed_rows.iter().cloned());
+                        all_tables.push(parsed_rows);
+                    }
                 }
                 _ => {}
             }
             offset = end;
         }
 
-        Ok(Hwp5DocumentPayload {
-            version,
-            is_template,
-            agency_name,
-            document_number,
-            paragraphs,
-            table_cells,
-        })
+        Ok((
+            Hwp5DocumentPayload {
+                version,
+                is_template,
+                agency_name,
+                document_number,
+                paragraphs,
+                table_cells,
+            },
+            all_tables,
+        ))
     }
 
     fn decode_hwp5_para_text(bytes: &[u8]) -> Result<String, EasyOfficeError> {
