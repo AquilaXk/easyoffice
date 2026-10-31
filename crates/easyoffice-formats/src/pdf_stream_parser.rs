@@ -99,6 +99,251 @@ impl PdfStreamCollector {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PdfNonCodeKind {
+    Comment {
+        start: usize,
+        end: usize,
+    },
+    ParenString {
+        inner_start: usize,
+        inner_end: usize,
+    },
+    DictOpen,
+    DictClose,
+    HexString {
+        inner_start: usize,
+        inner_end: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PdfNonCodeStep {
+    pub(crate) next_index: usize,
+    pub(crate) kind: PdfNonCodeKind,
+}
+
+pub(crate) fn is_pdf_delim_or_ws(b: u8) -> bool {
+    b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b)
+}
+
+pub(crate) fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack.len() >= needle.len()
+        && haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+pub(crate) fn is_standalone_pdf_kw(bytes: &[u8], pos: usize, kw: &[u8]) -> bool {
+    pos + kw.len() <= bytes.len()
+        && &bytes[pos..pos + kw.len()] == kw
+        && (pos == 0 || is_pdf_delim_or_ws(bytes[pos - 1]))
+        && (pos + kw.len() == bytes.len() || is_pdf_delim_or_ws(bytes[pos + kw.len()]))
+}
+
+pub(crate) fn skip_pdf_ws_and_comments(bytes: &[u8], mut p: usize, limit: usize) -> usize {
+    while p < limit {
+        if bytes[p].is_ascii_whitespace() {
+            p += 1;
+        } else if bytes[p] == b'%' {
+            p += 1;
+            while p < limit && bytes[p] != b'\n' && bytes[p] != b'\r' {
+                p += 1;
+            }
+        } else {
+            break;
+        }
+    }
+    p
+}
+
+pub(crate) fn match_indirect_obj_header(bytes: &[u8], pos: usize, limit: usize) -> Option<usize> {
+    if pos >= limit
+        || !bytes[pos].is_ascii_digit()
+        || (pos > 0 && !is_pdf_delim_or_ws(bytes[pos - 1]))
+    {
+        return None;
+    }
+    let mut q = pos;
+    while q < limit && bytes[q].is_ascii_digit() {
+        q += 1;
+    }
+    let q_gen = skip_pdf_ws_and_comments(bytes, q, limit);
+    if q_gen == q || q_gen >= limit || !bytes[q_gen].is_ascii_digit() {
+        return None;
+    }
+    let mut r = q_gen;
+    while r < limit && bytes[r].is_ascii_digit() {
+        r += 1;
+    }
+    let r_obj = skip_pdf_ws_and_comments(bytes, r, limit);
+    if r_obj == r || r_obj + 3 > limit || !is_standalone_pdf_kw(bytes, r_obj, b"obj") {
+        return None;
+    }
+    Some(r_obj + 3)
+}
+
+pub(crate) fn span_crosses_object_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
+    let mut p = start;
+    while p < end {
+        if p + 9 <= end && is_standalone_pdf_kw(bytes, p, b"endstream") {
+            let q = skip_pdf_ws_and_comments(bytes, p + 9, end);
+            if (q + 6 <= end && is_standalone_pdf_kw(bytes, q, b"endobj"))
+                || match_indirect_obj_header(bytes, q, end).is_some()
+            {
+                return true;
+            }
+        } else if p + 6 <= end && is_standalone_pdf_kw(bytes, p, b"endobj") {
+            let q = skip_pdf_ws_and_comments(bytes, p + 6, end);
+            if match_indirect_obj_header(bytes, q, end).is_some()
+                || (q + 4 <= end && is_standalone_pdf_kw(bytes, q, b"xref"))
+                || (q + 7 <= end && is_standalone_pdf_kw(bytes, q, b"trailer"))
+                || (q + 9 <= end && is_standalone_pdf_kw(bytes, q, b"startxref"))
+            {
+                return true;
+            }
+        }
+        p += 1;
+    }
+    false
+}
+
+pub(crate) fn validate_balanced_pdf_literals(stream_bytes: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i < stream_bytes.len() {
+        match step_pdf_non_code_token(stream_bytes, i) {
+            Ok(Some(step)) => {
+                if matches!(
+                    step.kind,
+                    PdfNonCodeKind::ParenString { .. } | PdfNonCodeKind::HexString { .. }
+                ) && span_crosses_object_boundary(stream_bytes, i + 1, step.next_index)
+                {
+                    return false;
+                }
+                i = step.next_index;
+            }
+            Ok(None) => i += 1,
+            Err(()) => return false,
+        }
+    }
+    true
+}
+
+pub(crate) fn stream_has_top_level_token(stream_bytes: &[u8], target: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i < stream_bytes.len() {
+        if stream_bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        match step_pdf_non_code_token(stream_bytes, i) {
+            Ok(Some(step)) => {
+                i = step.next_index;
+                continue;
+            }
+            Err(()) => return false,
+            Ok(None) => {}
+        }
+        if is_pdf_delim_or_ws(stream_bytes[i]) {
+            i += 1;
+            continue;
+        }
+        let start_tok = i;
+        while i < stream_bytes.len() && !is_pdf_delim_or_ws(stream_bytes[i]) {
+            i += 1;
+        }
+        if &stream_bytes[start_tok..i] == target {
+            return true;
+        }
+    }
+    false
+}
+
+pub(crate) fn advance_past_stream_eol(bytes: &[u8], mut i: usize) -> usize {
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'\r' {
+        i += 1;
+        if i < bytes.len() && bytes[i] == b'\n' {
+            i += 1;
+        }
+    } else if i < bytes.len() && bytes[i] == b'\n' {
+        i += 1;
+    }
+    i
+}
+
+pub(crate) fn step_pdf_non_code_token(
+    bytes: &[u8],
+    i: usize,
+) -> Result<Option<PdfNonCodeStep>, ()> {
+    match bytes[i] {
+        b'%' => {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b'\n' && bytes[j] != b'\r' {
+                j += 1;
+            }
+            Ok(Some(PdfNonCodeStep {
+                next_index: j,
+                kind: PdfNonCodeKind::Comment { start: i, end: j },
+            }))
+        }
+        b'(' => {
+            let mut depth = 1usize;
+            let mut j = i + 1;
+            while j < bytes.len() && depth > 0 {
+                if bytes[j] == b'\\' {
+                    j = (j + 2).min(bytes.len());
+                    continue;
+                }
+                if bytes[j] == b'(' {
+                    depth += 1;
+                } else if bytes[j] == b')' {
+                    depth -= 1;
+                }
+                j += 1;
+            }
+            if depth != 0 {
+                Err(())
+            } else {
+                Ok(Some(PdfNonCodeStep {
+                    next_index: j,
+                    kind: PdfNonCodeKind::ParenString {
+                        inner_start: i + 1,
+                        inner_end: j - 1,
+                    },
+                }))
+            }
+        }
+        b'<' if i + 1 < bytes.len() && bytes[i + 1] == b'<' => Ok(Some(PdfNonCodeStep {
+            next_index: i + 2,
+            kind: PdfNonCodeKind::DictOpen,
+        })),
+        b'>' if i + 1 < bytes.len() && bytes[i + 1] == b'>' => Ok(Some(PdfNonCodeStep {
+            next_index: i + 2,
+            kind: PdfNonCodeKind::DictClose,
+        })),
+        b'<' => {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b'>' {
+                j += 1;
+            }
+            if j >= bytes.len() {
+                Err(())
+            } else {
+                Ok(Some(PdfNonCodeStep {
+                    next_index: j + 1,
+                    kind: PdfNonCodeKind::HexString {
+                        inner_start: i + 1,
+                        inner_end: j,
+                    },
+                }))
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
 pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
     let bytes = stream.as_bytes();
     let mut i = 0usize;
@@ -120,22 +365,54 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
             i += 1;
             continue;
         }
-        if b == b'%' {
-            i += 1;
-            while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
-                i += 1;
+        match step_pdf_non_code_token(bytes, i) {
+            Ok(Some(step)) => {
+                match step.kind {
+                    PdfNonCodeKind::Comment { .. } => {}
+                    PdfNonCodeKind::DictOpen => {
+                        dict_depth += 1;
+                    }
+                    PdfNonCodeKind::DictClose => {
+                        dict_depth = dict_depth.saturating_sub(1);
+                    }
+                    PdfNonCodeKind::ParenString {
+                        inner_start,
+                        inner_end,
+                    } => {
+                        if dict_depth == 0 && in_text_object {
+                            let decoded = unescape_pdf_text(&stream[inner_start..inner_end]);
+                            if in_array {
+                                array_buf.push_str(&decoded);
+                                array_has_text = true;
+                            } else {
+                                operands.push(PdfStreamOperand::Str(decoded));
+                            }
+                        }
+                    }
+                    PdfNonCodeKind::HexString {
+                        inner_start,
+                        inner_end,
+                    } => {
+                        if dict_depth == 0 && in_text_object {
+                            if let Some(decoded) = decode_pdf_hex_string(
+                                &stream[inner_start..inner_end],
+                                gs.font_utf16be,
+                            ) {
+                                if in_array {
+                                    array_buf.push_str(&decoded);
+                                    array_has_text = true;
+                                } else {
+                                    operands.push(PdfStreamOperand::Str(decoded));
+                                }
+                            }
+                        }
+                    }
+                }
+                i = step.next_index;
+                continue;
             }
-            continue;
-        }
-        if b == b'<' && i + 1 < bytes.len() && bytes[i + 1] == b'<' {
-            dict_depth += 1;
-            i += 2;
-            continue;
-        }
-        if b == b'>' && i + 1 < bytes.len() && bytes[i + 1] == b'>' {
-            dict_depth = dict_depth.saturating_sub(1);
-            i += 2;
-            continue;
+            Err(()) => break,
+            Ok(None) => {}
         }
         if b == b'[' {
             if dict_depth == 0 && in_text_object {
@@ -159,60 +436,6 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
             i += 1;
             continue;
         }
-        if b == b'(' {
-            let start_inner = i + 1;
-            let mut depth = 1usize;
-            i += 1;
-            while i < bytes.len() && depth > 0 {
-                if bytes[i] == b'\\' {
-                    i = (i + 2).min(bytes.len());
-                    continue;
-                }
-                if bytes[i] == b'(' {
-                    depth += 1;
-                } else if bytes[i] == b')' {
-                    depth -= 1;
-                    if depth == 0 {
-                        let raw_lit = &stream[start_inner..i];
-                        if dict_depth == 0 && in_text_object {
-                            let decoded = unescape_pdf_text(raw_lit);
-                            if in_array {
-                                array_buf.push_str(&decoded);
-                                array_has_text = true;
-                            } else {
-                                operands.push(PdfStreamOperand::Str(decoded));
-                            }
-                        }
-                        i += 1;
-                        break;
-                    }
-                }
-                i += 1;
-            }
-            continue;
-        }
-        if b == b'<' {
-            let start_hex = i + 1;
-            i += 1;
-            while i < bytes.len() && bytes[i] != b'>' {
-                i += 1;
-            }
-            if i < bytes.len() {
-                let raw_hex = &stream[start_hex..i];
-                if dict_depth == 0 && in_text_object {
-                    if let Some(decoded) = decode_pdf_hex_string(raw_hex, gs.font_utf16be) {
-                        if in_array {
-                            array_buf.push_str(&decoded);
-                            array_has_text = true;
-                        } else {
-                            operands.push(PdfStreamOperand::Str(decoded));
-                        }
-                    }
-                }
-                i += 1;
-            }
-            continue;
-        }
         if b == b'>' || b == b'{' || b == b'}' {
             i += 1;
             continue;
@@ -220,10 +443,7 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
         if b == b'/' {
             let start = i;
             i += 1;
-            while i < bytes.len()
-                && !bytes[i].is_ascii_whitespace()
-                && !b"()<>[]{}/%".contains(&bytes[i])
-            {
+            while i < bytes.len() && !is_pdf_delim_or_ws(bytes[i]) {
                 i += 1;
             }
             if dict_depth == 0 && !in_array {
@@ -232,10 +452,7 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
             continue;
         }
         let start = i;
-        while i < bytes.len()
-            && !bytes[i].is_ascii_whitespace()
-            && !b"()<>[]{}/%".contains(&bytes[i])
-        {
+        while i < bytes.len() && !is_pdf_delim_or_ws(bytes[i]) {
             i += 1;
         }
         let tok = &stream[start..i];

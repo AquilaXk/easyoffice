@@ -445,7 +445,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (TaggedSpoof) >> endobj\n",
         "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
-        "3 0 obj << /Length 120 >>\nstream\n",
+        "3 0 obj << /Length 94 >>\nstream\n",
         "BT /Span << /MCID 0\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mIn0=\n>> BDC (Body) Tj EMC ET\n",
         "endstream\nendobj\n",
         "xref\n0 4\ntrailer << /Root 1 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n"
@@ -459,7 +459,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (About /Encrypt Guide) /OpenAction << /S /URI /Title (SubIgnore) >> >> endobj\n",
         "2 0 obj << /Type /Page /PageNumber 1 /Resources << /Font << /F1 << /Type /Font >> >> >> >> endobj\n",
-        "3 0 obj << /Length 96 >>\nstream\n",
+        "3 0 obj << /Length 85 >>\nstream\n",
         "BT /F1 12 Tf 72 720 Td /Span << /Alt (a > b\nendstream\n) >> BDC (TaggedBody) Tj EMC ET\n",
         "endstream\nendobj\n",
         "xref\n0 4\ntrailer << /Root 1 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n"
@@ -468,6 +468,165 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     assert_eq!(parsed_tagged.title, "About /Encrypt Guide");
     assert_eq!(parsed_tagged.pages.len(), 1);
     assert_eq!(parsed_tagged.pages[0].body_text, "TaggedBody");
+
+    let unencrypted_stream_with_encrypt_text = {
+        let body = b"BT /F1 12 Tf 72 720 Td (a\nendstream\n<< /Encrypt ) Tj ET";
+        let mut raw = Vec::new();
+        raw.extend_from_slice(
+            format!(
+                "%PDF-1.7\n1 0 obj << /Type /Catalog /Title (LiteralEncrypt) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length {} >>\nstream\n",
+                body.len()
+            )
+            .as_bytes(),
+        );
+        raw.extend_from_slice(body);
+        raw.extend_from_slice(
+            b"\nendstream\nendobj\nxref\n0 4\ntrailer << /Root 1 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n",
+        );
+        raw
+    };
+    let parsed_lit_enc = PdfSerializer::parse(&unencrypted_stream_with_encrypt_text).unwrap();
+    assert_eq!(parsed_lit_enc.pages.len(), 1);
+    assert_eq!(
+        parsed_lit_enc.pages[0].body_text,
+        "a\nendstream\n<< /Encrypt "
+    );
+
+    let missing_endstream_before_xref_encrypt = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (MissingEndstreamEncrypt) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 12 >>\nstream\n",
+        "cipher_bytes\n",
+        "endobj\n",
+        "4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 4 >>\nstream\n",
+        "0000\n",
+        "endstream\nendobj\n",
+        "startxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(missing_endstream_before_xref_encrypt.as_bytes()),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let unclosed_obj_paren_before_xref_encrypt = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (UnclosedCipher >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 4 >>\nstream\n",
+        "0000\n",
+        "endstream\nendobj\n",
+        "startxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(unclosed_obj_paren_before_xref_encrypt.as_bytes()),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let forged_length_hiding_page2 = {
+        let p1_part = b"BT /F1 12 Tf 72 720 Td (Page1) Tj ET\nendstream % comment\nendobj\n4 0 obj << /Type /Page /PageNumber 2 >>\nstream\nBT /F1 12 Tf 72 720 Td (HiddenPage2) Tj ET";
+        let mut raw = Vec::new();
+        raw.extend_from_slice(
+            format!(
+                "%PDF-1.7\n1 0 obj << /Type /Catalog /Title (ForgedLen) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length {} >>\nstream\n",
+                p1_part.len()
+            )
+            .as_bytes(),
+        );
+        raw.extend_from_slice(p1_part);
+        raw.extend_from_slice(
+            b"\nendstream\nendobj\nxref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n",
+        );
+        raw
+    };
+    assert!(matches!(
+        PdfSerializer::parse(&forged_length_hiding_page2),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let unclosed_nonstream_paren_after_page1 = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (UnclosedTail) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 36 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (Page1) Tj ET\n",
+        "endstream\nendobj\n",
+        "4 0 obj << /Note (unclosed_swallow >> endobj\n",
+        "5 0 obj << /Type /Page /PageNumber 2 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (Page2) Tj ET\n",
+        "endstream\nendobj\n",
+        "xref\n0 6\ntrailer << /Root 1 0 R /Size 6 >>\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(unclosed_nonstream_paren_after_page1.as_bytes()),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let tounicode_without_type_cmap_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (ToUnicodeNoType) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 35 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
+        "endstream\nendobj\n",
+        "4 0 obj << >>\nstream\n",
+        "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n% ps(unclosed\nendcmap\n",
+        "endstream\nendobj\n",
+        "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
+    );
+    let parsed_tu = PdfSerializer::parse(tounicode_without_type_cmap_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_tu.pages.len(), 1);
+    assert_eq!(parsed_tu.pages[0].body_text, "Body");
+
+    let tounicode_spoof_trailer_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (ToUnicodeSpoof) >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "3 0 obj << /Length 35 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
+        "endstream\nendobj\n",
+        "4 0 obj << >>\nstream\n",
+        "/CIDInit /ProcSet findresource begin begincmap\n% ps(unclosed\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mIn0=\nendcmap\n",
+        "endstream\nendobj\n",
+        "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(tounicode_spoof_trailer_pdf.as_bytes()),
+        Err(EasyOfficeError::SecurityViolation(_))
+    ));
+
+    let binary_high_bytes_and_stream_space_eol = {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+        raw.extend_from_slice(b"1 0 obj << /Type /Catalog /Title (HighBytes) >> endobj\n");
+        let img_bytes: [u8; 8] = [0x89, 0xFE, 0xA0, b'(', 0xFF, b'<', 0x90, 0x81];
+        raw.extend_from_slice(
+            format!(
+                "2 0 obj << /Type /XObject /Subtype /Image /Length {} >>\nstream \n",
+                img_bytes.len()
+            )
+            .as_bytes(),
+        );
+        raw.extend_from_slice(&img_bytes);
+        raw.extend_from_slice(b"\nendstream\nendobj\n");
+        let page_stream = b"BT /F1 12 Tf 72 720 Td (ExactBinaryOffset) Tj ET";
+        raw.extend_from_slice(b"3 0 obj << /Type /Page /PageNumber 1 >> endobj\n");
+        raw.extend_from_slice(
+            format!("4 0 obj << /Length {} >>\nstream \t\r\n", page_stream.len()).as_bytes(),
+        );
+        raw.extend_from_slice(page_stream);
+        raw.extend_from_slice(
+            b"\r\nendstream\nendobj\nxref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n",
+        );
+        raw
+    };
+    let parsed_bin = PdfSerializer::parse(&binary_high_bytes_and_stream_space_eol).unwrap();
+    assert_eq!(parsed_bin.pages.len(), 1);
+    assert_eq!(parsed_bin.pages[0].body_text, "ExactBinaryOffset");
 
     let ciphertext_paren_trailer_encrypt_pdf = concat!(
         "%PDF-1.7\n",

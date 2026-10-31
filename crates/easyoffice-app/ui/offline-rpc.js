@@ -1,419 +1,18 @@
 (function (host) {
   "use strict";
 
-  function parseCellRefParts(ref) {
-    const m = /^([A-Z]+)(\d+)$/.exec(String(ref || "").toUpperCase());
-    if (!m) return { col: 0, row: 1 };
-    let col = 0;
-    for (let i = 0; i < m[1].length; i++) {
-      col = col * 26 + (m[1].codePointAt(i) - 64);
-    }
-    return { col: col - 1, row: Number(m[2]) };
-  }
-
-  function colIndexToLetters(colIdx) {
-    let n = Math.max(0, Number(colIdx) || 0) + 1;
-    let out = "";
-    while (n > 0) {
-      const rem = (n - 1) % 26;
-      out = String.fromCodePoint(65 + rem) + out;
-      n = Math.floor((n - 1) / 26);
-    }
-    return out || "A";
-  }
-
-  function normalizeFormattedNumericCell(raw) {
-    const trimmed = String(raw || "").trim();
-    if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(trimmed)) {
-      return trimmed.replaceAll(",", "");
-    }
-    return trimmed;
-  }
-
-  function jsonSheetNameOrDefaultJs(raw, fallback = "Sheet1") {
-    const trimmed = String(raw ?? "").trim();
-    return trimmed || fallback;
-  }
-
-  function asciiUpperJs(str) {
-    return String(str ?? "").replaceAll(/[a-z]/g, (c) =>
-      String.fromCodePoint(c.codePointAt(0) - 32)
-    );
-  }
-
-  function canonicalSheetKeyJs(rawToken) {
-    let cur = String(rawToken ?? "").trim();
-    while (cur.length >= 2 && cur.startsWith("'") && cur.endsWith("'")) {
-      cur = cur.slice(1, -1).replaceAll("''", "'");
-    }
-    return asciiUpperJs(cur);
-  }
-
-  function isSameSheetIdentityJs(a, b) {
-    const ka = canonicalSheetKeyJs(a);
-    const kb = canonicalSheetKeyJs(b);
-    return ka.length > 0 && ka === kb;
-  }
-
-  function resolveCanonicalSheetUpper(knownSheets, rawName) {
-    const targetKey = canonicalSheetKeyJs(rawName);
-    if (!targetKey) return null;
-    for (const stored of knownSheets) {
-      if (canonicalSheetKeyJs(stored) === targetKey) return targetKey;
-    }
-    return null;
-  }
-
-  function ensureKnownSheetUpper(knownSheets, name) {
-    const trimmed = String(name ?? "").trim() || "Sheet1";
-    const existing = resolveCanonicalSheetUpper(knownSheets, trimmed);
-    if (existing) return existing;
-    knownSheets.push(trimmed);
-    return canonicalSheetKeyJs(trimmed);
-  }
-
-  function collectRangeNumericValues(startRef, endRef, cellValues, canonicalSheetUpper) {
-    const shPrefix = canonicalSheetUpper + "!";
-    const p1 = parseCellRefParts(startRef);
-    const p2 = parseCellRefParts(endRef);
-    const nums = [];
-    for (let c = Math.min(p1.col, p2.col); c <= Math.max(p1.col, p2.col); c++) {
-      for (let r = Math.min(p1.row, p2.row); r <= Math.max(p1.row, p2.row); r++) {
-        const ref = colIndexToLetters(c) + r;
-        const raw = String(cellValues[shPrefix + ref] ?? "")
-          .replaceAll(",", "")
-          .trim();
-        const v = Number(raw);
-        if (raw !== "" && Number.isFinite(v)) nums.push(v);
-      }
-    }
-    return nums;
-  }
-
-  function evaluateRangeFunction(fnName, vals) {
-    if (fnName === "COUNT") return String(vals.length);
-    if (vals.length === 0) return "0";
-    if (fnName === "MAX") return String(Math.max(...vals));
-    if (fnName === "MIN") return String(Math.min(...vals));
-    const total = vals.reduce((acc, v) => acc + v, 0);
-    if (fnName === "SUM") return String(Math.round(total * 100) / 100);
-    if (fnName === "STDEV" || fnName === "VAR") {
-      if (vals.length < 2) return "#DIV/0!";
-      const mean = total / vals.length;
-      const m2 = vals.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
-      const variance = m2 / (vals.length - 1);
-      const out = fnName === "STDEV" ? Math.sqrt(variance) : variance;
-      return String(Math.round(out * 100) / 100);
-    }
-    return String(Math.round((total / vals.length) * 100) / 100);
-  }
-
-  function evaluateBinaryOpString(exprText) {
-    const src = String(exprText || "").trim();
-    let opIdx = -1;
-    let op = "";
-    for (let i = 1; i < src.length - 1; i++) {
-      const ch = src[i];
-      if (ch === "+" || ch === "-" || ch === "*" || ch === "/") {
-        opIdx = i;
-        op = ch;
-        break;
-      }
-    }
-    if (opIdx < 1) return null;
-    const lhs = src.slice(0, opIdx).trim();
-    const rhs = src.slice(opIdx + 1).trim();
-    if (!lhs || !rhs) return null;
-    const a = Number.parseFloat(lhs);
-    const b = Number.parseFloat(rhs);
-    if (!Number.isFinite(a) || !Number.isFinite(b) || Number(lhs) !== a || Number(rhs) !== b) {
-      return null;
-    }
-    if (op === "/" && b === 0) return "#DIV/0!";
-    let res = 0;
-    if (op === "+") res = a + b;
-    if (op === "-") res = a - b;
-    if (op === "*") res = a * b;
-    if (op === "/") res = a / b;
-    return String(Math.round(res * 100) / 100);
-  }
-
-  const FORMULA_ERROR_CODES = new Set(["#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!", "#ERROR!", "#CYCLE!"]);
-
-  function maskFormulaLiteralsUpper(src) {
-    const literals = [];
-    const sheetTokens = [];
-    let out = "";
-    let i = 0;
-    while (i < src.length) {
-      const ch = src[i];
-      if (ch === "\uE000" || ch === "\uE001" || ch === "\uE002") return null;
-      if (ch === "'" || ch === '"') {
-        const quote = ch;
-        i += 1;
-        let buf = "";
-        let closed = false;
-        while (i < src.length) {
-          if (src[i] === quote) {
-            if (i + 1 < src.length && src[i + 1] === quote) {
-              buf += quote;
-              i += 2;
-              continue;
-            }
-            i += 1;
-            closed = true;
-            break;
-          }
-          buf += src[i];
-          i += 1;
-        }
-        if (!closed) return null;
-        if (quote === '"') {
-          out += "\uE000" + literals.length + "\uE001";
-          literals.push(buf);
-        } else {
-          out += "\uE002" + sheetTokens.length + "\uE001";
-          sheetTokens.push(buf);
-        }
-        continue;
-      }
-      out += asciiUpperJs(ch);
-      i += 1;
-    }
-    return { masked: out, literals, sheetTokens };
-  }
-
-  function resolveMaskedSheetKey(rawShToken, sheetTokens, knownSheets) {
-    const shMask = /^\uE002(\d+)\uE001$/.exec(rawShToken);
-    if (shMask) {
-      const idx = Number(shMask[1]);
-      if (idx >= sheetTokens.length) return null;
-      return resolveCanonicalSheetUpper(knownSheets, sheetTokens[idx]);
-    }
-    return resolveCanonicalSheetUpper(knownSheets, rawShToken);
-  }
-
-  function evalConcatSegment(seg, literals, sheetTokens, workbook, currentSheetUpper, currentCellRef) {
-    const litMatch = /^\uE000(\d+)\uE001$/.exec(seg);
-    if (litMatch) {
-      const idx = Number(litMatch[1]);
-      return idx < literals.length
-        ? { value: literals[idx], isError: false }
-        : { value: "#ERROR!", isError: true };
-    }
-    const crossMatch = /^(\uE002\d+\uE001|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)$/.exec(seg);
-    if (crossMatch) {
-      const shKey = resolveMaskedSheetKey(crossMatch[1], sheetTokens, workbook.knownSheets);
-      if (!shKey) return { value: "#REF!", isError: true };
-      const v = String(workbook.values[shKey + "!" + crossMatch[2]] ?? "");
-      return { value: v, isError: FORMULA_ERROR_CODES.has(v) };
-    }
-    if (/^[A-Z]+\d+$/.test(seg)) {
-      const v = String(workbook.values[currentSheetUpper + "!" + seg] ?? "");
-      return { value: v, isError: FORMULA_ERROR_CODES.has(v) };
-    }
-    const restored = seg
-      .replaceAll(/\uE000(\d+)\uE001/g, (_, idx) => '"' + (literals[Number(idx)] ?? "").replaceAll('"', '""') + '"')
-      .replaceAll(/\uE002(\d+)\uE001/g, (_, idx) => "'" + (sheetTokens[Number(idx)] ?? "").replaceAll("'", "''") + "'");
-    const subVal = evaluateFormulaExpression("=" + restored, workbook, currentSheetUpper, currentCellRef);
-    return { value: subVal, isError: FORMULA_ERROR_CODES.has(subVal) };
-  }
-
-  function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {
-    const { values, knownSheets } = workbook;
-    const clean = String(exprStr || "").trim();
-    if (!clean.startsWith("=")) {
-      const normalized = clean.replaceAll(",", "");
-      const n = Number(normalized);
-      return Number.isFinite(n) && normalized !== "" ? String(n) : clean;
-    }
-    const maskedRes = maskFormulaLiteralsUpper(clean.slice(1).trim());
-    if (!maskedRes) return "#ERROR!";
-    const { literals, sheetTokens } = maskedRes;
-    const body = maskedRes.masked
-      .replaceAll(/\bROW\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
-        String(parseCellRefParts(ref || currentCellRef || "A1").row)
-      )
-      .replaceAll(/\bCOLUMN\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
-        String(parseCellRefParts(ref || currentCellRef || "A1").col + 1)
-      );
-    const singleLit = /^\uE000(\d+)\uE001$/.exec(body);
-    if (singleLit) {
-      const idx = Number(singleLit[1]);
-      return idx < literals.length ? literals[idx] : "#ERROR!";
-    }
-    if (body.includes("&")) {
-      const parts = body.split("&").map((s) => s.trim());
-      if (parts.some((p) => !p)) return "#ERROR!";
-      let joined = "";
-      for (const part of parts) {
-        const res = evalConcatSegment(part, literals, sheetTokens, workbook, currentSheetUpper, currentCellRef);
-        if (res.isError) return res.value;
-        joined += res.value;
-      }
-      return joined;
-    }
-    const rangeMatch =
-      /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:(\uE002\d+\uE001|[^\s!+\-*/^&=<>(),:]+)!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
-        body
-      );
-    if (rangeMatch) {
-      const rangeSheetUpper =
-        rangeMatch[2] === undefined
-          ? currentSheetUpper
-          : resolveMaskedSheetKey(rangeMatch[2], sheetTokens, knownSheets);
-      if (!rangeSheetUpper) return "#REF!";
-      const vals = collectRangeNumericValues(
-        rangeMatch[3],
-        rangeMatch[4],
-        values,
-        rangeSheetUpper
-      );
-      return evaluateRangeFunction(rangeMatch[1], vals);
-    }
-    let hasMissingRef = false;
-    const withCrossSheet = body.replaceAll(
-      /(\uE002\d+\uE001|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)\b/g,
-      (_, shToken, ref) => {
-        const shKey = resolveMaskedSheetKey(shToken, sheetTokens, knownSheets);
-        if (!shKey) {
-          hasMissingRef = true;
-          return "#REF!";
-        }
-        const raw = String(values[shKey + "!" + ref] ?? "")
-          .replaceAll(",", "")
-          .trim();
-        if (FORMULA_ERROR_CODES.has(raw)) {
-          hasMissingRef = true;
-          return raw;
-        }
-        const v = Number(raw);
-        return raw !== "" && Number.isFinite(v) ? String(v) : "0";
-      }
-    );
-    if (hasMissingRef) return "#REF!";
-    const substituted = withCrossSheet.replaceAll(/\b([A-Z]+\d+)\b/g, (_, ref) => {
-      const raw = String(values[currentSheetUpper + "!" + ref] ?? "")
-        .replaceAll(",", "")
-        .trim();
-      const v = Number(raw);
-      return raw !== "" && Number.isFinite(v) ? String(v) : "0";
-    });
-    const directNum = Number(substituted);
-    if (substituted !== "" && Number.isFinite(directNum)) {
-      return String(Math.round(directNum * 100) / 100);
-    }
-    const arithResult = evaluateBinaryOpString(substituted);
-    return arithResult ?? clean;
-  }
-
-  function scalarJsonCellValue(rawVal) {
-    if (rawVal === undefined || rawVal === null) return "";
-    if (typeof rawVal === "string") return rawVal;
-    if (typeof rawVal === "number" && Number.isFinite(rawVal)) return String(rawVal);
-    if (typeof rawVal === "boolean") return rawVal ? "TRUE" : "FALSE";
-    throw new Error("InvalidArgument: JSON 셀 'value'는 스칼라여야 합니다.");
-  }
-
-  function resolveDefaultSheetFromDocJs(doc) {
-    if (doc.sheet !== undefined && doc.sheet !== null && typeof doc.sheet !== "string") {
-      throw new Error("InvalidArgument: JSON 'sheet' 필드는 문자열이어야 합니다.");
-    }
-    const explicitTop = String(doc.sheet ?? "").trim();
-    if (explicitTop) return explicitTop;
-    if (doc.sheets !== undefined) {
-      if (!Array.isArray(doc.sheets)) {
-        throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
-      }
-      for (const s of doc.sheets) {
-        if (typeof s !== "string") {
-          throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
-        }
-        if (s.trim()) return s.trim();
-      }
-    }
-    return "Sheet1";
-  }
-
-  function buildLocalWorkbookFromJson(doc, defaultSheet, seedDefaults) {
-    const knownSheets = [];
-    if (doc.sheets !== undefined) {
-      if (!Array.isArray(doc.sheets)) {
-        throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
-      }
-      for (const s of doc.sheets) {
-        if (typeof s !== "string") {
-          throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
-        }
-        if (s.trim()) ensureKnownSheetUpper(knownSheets, s.trim());
-      }
-    } else {
-      ensureKnownSheetUpper(knownSheets, "Sheet1");
-      ensureKnownSheetUpper(knownSheets, "Sheet2");
-      ensureKnownSheetUpper(knownSheets, defaultSheet);
-    }
-    if (doc.cells !== undefined && !Array.isArray(doc.cells)) {
-      throw new Error("InvalidArgument: JSON 'cells' 필드는 배열이어야 합니다.");
-    }
-    const cells = doc.cells || [];
-    const values = {};
-    const formulaEntries = {};
-    let seenSheet1 = false;
-    let seenSheet2 = false;
-    const triples = [];
-
-    for (const item of cells) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) {
-        throw new Error("InvalidArgument: JSON 'cells' 항목은 객체여야 합니다.");
-      }
-      if (item.sheet !== undefined && item.sheet !== null && typeof item.sheet !== "string") {
-        throw new Error("InvalidArgument: JSON 셀 'sheet' 필드는 문자열이어야 합니다.");
-      }
-      if (typeof item.cell !== "string" || !item.cell.trim()) {
-        throw new Error("InvalidArgument: JSON 셀 'cell' 주소가 비어 있습니다.");
-      }
-      const shName = jsonSheetNameOrDefaultJs(item.sheet ?? defaultSheet, defaultSheet);
-      const addrUpper = item.cell.trim().toUpperCase();
-      const strVal = scalarJsonCellValue(item.value);
-      if (isSameSheetIdentityJs(shName, "Sheet1")) seenSheet1 = true;
-      if (isSameSheetIdentityJs(shName, "Sheet2")) seenSheet2 = true;
-      const shUpper = ensureKnownSheetUpper(knownSheets, shName);
-      triples.push({ shUpper, addrUpper, strVal });
-    }
-
-    if (seedDefaults) {
-      const s1Key = resolveCanonicalSheetUpper(knownSheets, "Sheet1");
-      if (!seenSheet1 && s1Key) {
-        values[s1Key + "!A1"] = "1200";
-        values[s1Key + "!B1"] = "850";
-      }
-      const s2Key = resolveCanonicalSheetUpper(knownSheets, "Sheet2");
-      if (!seenSheet2 && s2Key) {
-        values[s2Key + "!A1"] = "100";
-      }
-    }
-
-    for (const { shUpper, addrUpper, strVal } of triples) {
-      const fullKey = shUpper + "!" + addrUpper;
-      values[fullKey] = strVal;
-      if (strVal.startsWith("=")) {
-        formulaEntries[fullKey] = strVal;
-      } else {
-        delete formulaEntries[fullKey];
-      }
-    }
-
-    const workbook = { values, knownSheets };
-    for (let pass = 0; pass < 4; pass++) {
-      Object.keys(formulaEntries).forEach((k) => {
-        const bangPos = k.lastIndexOf("!");
-        const kSheet = k.slice(0, bangPos);
-        const kRef = k.slice(bangPos + 1);
-        values[k] = evaluateFormulaExpression(formulaEntries[k], workbook, kSheet, kRef);
-      });
-    }
-    return workbook;
-  }
+  const {
+    parseCellRefParts,
+    colIndexToLetters,
+    normalizeFormattedNumericCell,
+    jsonSheetNameOrDefaultJs,
+    resolveCanonicalSheetUpper,
+    resolveDefaultSheetFromDocJs,
+    buildLocalWorkbookFromJson,
+    readWorkbookTypedCell,
+    formatFormulaValue,
+    evaluateFormulaExpression,
+  } = host.__EASYOFFICE_OFFLINE_FORMULA_EVAL__;
 
   function isAsciiDigitCode(c) {
     return c >= 48 && c <= 57;
@@ -592,9 +191,16 @@
       ? ["120자를 초과하는 긴 문장이 있습니다. 두 문장으로 나누세요."]
       : [];
     return {
-      summaryCount: summaryLines.length, charCount: chars, wordCount: words,
-      sentenceCount: sentences, readingTimeSeconds, actionItemCount: actionItems.length,
-      suggestionCount: styleSuggestions.length, summaryLines, styleSuggestions, actionItems,
+      summaryCount: summaryLines.length,
+      charCount: chars,
+      wordCount: words,
+      sentenceCount: sentences,
+      readingTimeSeconds,
+      actionItemCount: actionItems.length,
+      suggestionCount: styleSuggestions.length,
+      summaryLines,
+      styleSuggestions,
+      actionItems,
     };
   }
 
@@ -726,7 +332,9 @@
       if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
         throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
       }
-      const q = String(rawExpr ?? (seedDefaults ? "=Sheet2!A1+50" : "A1")).trim() || "A1";
+      const defaultQuery = seedDefaults ? "=Sheet2!A1+50" : "A1";
+      const chosenQuery = rawExpr === undefined || rawExpr === null ? defaultQuery : rawExpr;
+      const q = String(chosenQuery).trim() || "A1";
       const workbook = buildLocalWorkbookFromJson(doc, sheetName, seedDefaults);
       const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
       if (!evalSheetUpper) {
@@ -744,7 +352,7 @@
       return {
         sheetName,
         expr: q,
-        value: String(workbook.values[evalSheetUpper + "!" + asciiUpperJs(q)] ?? ""),
+        value: formatFormulaValue(readWorkbookTypedCell(workbook, evalSheetUpper, q, 0)),
       };
     }
 
@@ -784,7 +392,7 @@
             if (canonicalUpper) {
               val = expr.startsWith("=")
                 ? String(evaluateFormulaExpression(expr, workbook, canonicalUpper, "A1"))
-                : String(workbook.values[canonicalUpper + "!" + asciiUpperJs(expr)] ?? "");
+                : formatFormulaValue(readWorkbookTypedCell(workbook, canonicalUpper, expr, 0));
             }
             outMap[sh + "!" + expr] = val;
             targetValues.push(val);

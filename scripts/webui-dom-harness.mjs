@@ -7,8 +7,12 @@ const cjsRequire = createRequire(import.meta.url);
 const INDEX_HTML_PATH = fileURLToPath(
   new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)
 );
+const OFFLINE_FORMULA_EVAL_RESOLVED = cjsRequire.resolve(
+  "../crates/easyoffice-app/ui/offline-formula-eval.js"
+);
 const OFFLINE_RPC_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/offline-rpc.js");
 const PII_SCRUBBER_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/pii-dom-scrubber.js");
+const SHEET_STORE_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/sheet-store.js");
 const APP_JS_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/app.js");
 
 const VOID_TAGS = new Set(["meta", "link", "input", "br", "hr", "img"]);
@@ -672,11 +676,15 @@ export async function createWorkspaceHarness(options = {}) {
 
   globalThis.__EASYOFFICE_HOST_ENV__ = hostEnv;
   try {
+    delete cjsRequire.cache[OFFLINE_FORMULA_EVAL_RESOLVED];
     delete cjsRequire.cache[OFFLINE_RPC_RESOLVED];
     delete cjsRequire.cache[PII_SCRUBBER_RESOLVED];
+    delete cjsRequire.cache[SHEET_STORE_RESOLVED];
     delete cjsRequire.cache[APP_JS_RESOLVED];
+    cjsRequire("../crates/easyoffice-app/ui/offline-formula-eval.js");
     cjsRequire("../crates/easyoffice-app/ui/offline-rpc.js");
     cjsRequire("../crates/easyoffice-app/ui/pii-dom-scrubber.js");
+    cjsRequire("../crates/easyoffice-app/ui/sheet-store.js");
     cjsRequire("../crates/easyoffice-app/ui/app.js");
   } finally {
     delete globalThis.__EASYOFFICE_HOST_ENV__;
@@ -687,6 +695,7 @@ export async function createWorkspaceHarness(options = {}) {
     clearTimeout: hostEnv.clearTimeout,
     __EASYOFFICE_SHEET_UTILS__: hostEnv.__EASYOFFICE_SHEET_UTILS__,
     __EASYOFFICE_CREATE_OFFLINE_RPC__: hostEnv.__EASYOFFICE_CREATE_OFFLINE_RPC__,
+    __EASYOFFICE_CREATE_SHEET_STORE__: hostEnv.__EASYOFFICE_CREATE_SHEET_STORE__,
     dispatchWindowKeydown: (ev) => {
       const eventObj = {
         type: "keydown",

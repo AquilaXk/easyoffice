@@ -26,8 +26,10 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-layout/src/lib.rs",
   "crates/easyoffice-app/src/lib.rs",
   "crates/easyoffice-app/tauri.conf.json",
+  "crates/easyoffice-app/ui/offline-formula-eval.js",
   "crates/easyoffice-app/ui/offline-rpc.js",
   "crates/easyoffice-app/ui/pii-dom-scrubber.js",
+  "crates/easyoffice-app/ui/sheet-store.js",
   "crates/easyoffice-app/ui/app.js",
   "docs/policy-decisions.md",
   "docs/design-system.md",
@@ -226,8 +228,10 @@ if (fs.existsSync(webuiCssPath)) {
 
 for (const uiRel of [
   "crates/easyoffice-app/ui/index.html",
+  "crates/easyoffice-app/ui/offline-formula-eval.js",
   "crates/easyoffice-app/ui/offline-rpc.js",
   "crates/easyoffice-app/ui/pii-dom-scrubber.js",
+  "crates/easyoffice-app/ui/sheet-store.js",
   "crates/easyoffice-app/ui/app.js",
 ]) {
   const uiFull = path.join(ROOT, uiRel);

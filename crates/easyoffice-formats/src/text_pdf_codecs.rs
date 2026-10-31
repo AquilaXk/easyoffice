@@ -1,5 +1,9 @@
 use crate::pdf_stream_parser::{
-    escape_pdf_text, parse_pdf_content_stream, unescape_pdf_text, validate_pdf_trailer_json,
+    advance_past_stream_eol, contains_subslice, escape_pdf_text, is_pdf_delim_or_ws,
+    is_standalone_pdf_kw, match_indirect_obj_header, parse_pdf_content_stream,
+    span_crosses_object_boundary, step_pdf_non_code_token, stream_has_top_level_token,
+    unescape_pdf_text, validate_balanced_pdf_literals, validate_pdf_trailer_json, PdfNonCodeKind,
+    PdfNonCodeStep,
 };
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
 
@@ -27,11 +31,6 @@ struct ScannedPdfStructure {
     pages: Vec<PdfPageModel>,
     trailer_b64: Option<String>,
     trailer_b64_count: usize,
-}
-
-struct PdfNonCodeStep {
-    next_index: usize,
-    comment_span: Option<(usize, usize)>,
 }
 
 #[derive(Default)]
@@ -208,22 +207,23 @@ impl PdfSerializer {
                 detail: "유효한 PDF 시그니처가 아닙니다.".to_string(),
             });
         }
-        let raw = String::from_utf8_lossy(bytes);
-        if !raw.contains("xref") || !raw.contains("%%EOF") {
+        if !contains_subslice(bytes, b"xref") || !contains_subslice(bytes, b"%%EOF") {
             return Err(EasyOfficeError::CorruptedContainer(
                 "PDF xref 테이블 또는 %%EOF 트레일러가 누락되었습니다.".to_string(),
             ));
         }
 
-        let mut scanned = Self::scan_pdf_structure(&raw)?;
+        let mut scanned = Self::scan_pdf_structure(bytes)?;
         if scanned.has_encrypt {
             return Err(EasyOfficeError::EncryptedDocumentUnsupported(
                 DocumentFormat::Pdf,
             ));
         }
         if scanned.pages.is_empty() {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "PDF 페이지 스트림을 찾을 수 없습니다.".to_string(),
+            return Err(Self::fail_corrupted_or_encrypted(
+                bytes,
+                false,
+                "PDF 페이지 스트림을 찾을 수 없습니다.",
             ));
         }
         if scanned.trailer_b64_count > 1 {
@@ -266,149 +266,43 @@ impl PdfSerializer {
         })
     }
 
-    fn is_pdf_delim_or_ws(b: u8) -> bool {
-        b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b)
-    }
-
-    fn step_pdf_non_code_token(bytes: &[u8], i: usize) -> Result<Option<PdfNonCodeStep>, ()> {
-        match bytes[i] {
-            b'%' => {
-                let mut j = i + 1;
-                while j < bytes.len() && bytes[j] != b'\n' && bytes[j] != b'\r' {
-                    j += 1;
-                }
-                Ok(Some(PdfNonCodeStep {
-                    next_index: j,
-                    comment_span: Some((i, j)),
-                }))
-            }
-            b'(' => {
-                let mut depth = 1usize;
-                let mut j = i + 1;
-                while j < bytes.len() && depth > 0 {
-                    if bytes[j] == b'\\' {
-                        j = (j + 2).min(bytes.len());
-                        continue;
-                    }
-                    if bytes[j] == b'(' {
-                        depth += 1;
-                    } else if bytes[j] == b')' {
-                        depth -= 1;
-                    }
-                    j += 1;
-                }
-                if depth != 0 {
-                    Err(())
-                } else {
-                    Ok(Some(PdfNonCodeStep {
-                        next_index: j,
-                        comment_span: None,
-                    }))
-                }
-            }
-            b'<' if i + 1 < bytes.len() && bytes[i + 1] == b'<' => Ok(Some(PdfNonCodeStep {
-                next_index: i + 2,
-                comment_span: None,
-            })),
-            b'>' if i + 1 < bytes.len() && bytes[i + 1] == b'>' => Ok(Some(PdfNonCodeStep {
-                next_index: i + 2,
-                comment_span: None,
-            })),
-            b'<' => {
-                let mut j = i + 1;
-                while j < bytes.len() && bytes[j] != b'>' {
-                    j += 1;
-                }
-                if j >= bytes.len() {
-                    Err(())
-                } else {
-                    Ok(Some(PdfNonCodeStep {
-                        next_index: j + 1,
-                        comment_span: None,
-                    }))
-                }
-            }
-            _ => Ok(None),
-        }
-    }
-
-    fn validate_balanced_pdf_literals(stream_slice: &str) -> bool {
-        let bytes = stream_slice.as_bytes();
-        let mut i = 0usize;
-        while i < bytes.len() {
-            match Self::step_pdf_non_code_token(bytes, i) {
-                Ok(Some(step)) => i = step.next_index,
-                Ok(None) => i += 1,
-                Err(()) => return false,
-            }
-        }
-        true
-    }
-
-    fn span_crosses_endstream_endobj(bytes: &[u8], start: usize, end: usize) -> bool {
-        let kw = b"endstream";
-        let eo = b"endobj";
-        let mut p = start;
-        while p + kw.len() <= end {
-            if &bytes[p..p + kw.len()] == kw {
-                let prev_ok = p == 0 || Self::is_pdf_delim_or_ws(bytes[p - 1]);
-                let after_kw = p + kw.len();
-                let next_ok = after_kw == bytes.len() || Self::is_pdf_delim_or_ws(bytes[after_kw]);
-                if prev_ok && next_ok {
-                    let mut q = after_kw;
-                    while q < end && bytes[q].is_ascii_whitespace() {
-                        q += 1;
-                    }
-                    if q + eo.len() <= end
-                        && &bytes[q..q + eo.len()] == eo
-                        && (q + eo.len() == bytes.len()
-                            || Self::is_pdf_delim_or_ws(bytes[q + eo.len()]))
-                    {
-                        return true;
-                    }
-                }
-            }
-            p += 1;
-        }
-        false
-    }
-
     fn has_pdf_comment_with_prefix(
-        stream_slice: &str,
-        prefix: &str,
+        stream_bytes: &[u8],
+        prefix: &[u8],
         skip_pdf_strings: bool,
     ) -> bool {
         if !skip_pdf_strings {
-            return stream_slice.contains(prefix);
+            return contains_subslice(stream_bytes, prefix);
         }
-        let bytes = stream_slice.as_bytes();
         let mut i = 0usize;
-        while i < bytes.len() {
-            match Self::step_pdf_non_code_token(bytes, i) {
+        while i < stream_bytes.len() {
+            match step_pdf_non_code_token(stream_bytes, i) {
                 Ok(Some(PdfNonCodeStep {
                     next_index,
-                    comment_span: Some((cs, ce)),
+                    kind: PdfNonCodeKind::Comment { start, end },
                 })) => {
-                    if stream_slice[cs..ce].trim().starts_with(prefix) {
+                    let mut cs = start;
+                    while cs < end && stream_bytes[cs].is_ascii_whitespace() {
+                        cs += 1;
+                    }
+                    if end - cs >= prefix.len() && &stream_bytes[cs..cs + prefix.len()] == prefix {
                         return true;
                     }
                     i = next_index;
                 }
                 Ok(Some(step)) => i = step.next_index,
-                Ok(None) => i += 1,
-                Err(()) => return false,
+                Ok(None) | Err(()) => i += 1,
             }
         }
         false
     }
 
     fn resolve_stream_bounds(
-        raw: &str,
+        bytes: &[u8],
         start: usize,
         direct_length: Option<usize>,
         skip_pdf_strings: bool,
     ) -> Option<(usize, usize)> {
-        let bytes = raw.as_bytes();
         let kw = b"endstream";
         if let Some(len) = direct_length {
             if let Some(end_pos) = start.checked_add(len) {
@@ -422,13 +316,12 @@ impl PdfSerializer {
                     } else if kw_pos < bytes.len() && bytes[kw_pos] == b'\n' {
                         kw_pos += 1;
                     }
-                    if kw_pos + kw.len() <= bytes.len()
-                        && &bytes[kw_pos..kw_pos + kw.len()] == kw
-                        && (kw_pos + kw.len() == bytes.len()
-                            || Self::is_pdf_delim_or_ws(bytes[kw_pos + kw.len()]))
-                    {
+                    if is_standalone_pdf_kw(bytes, kw_pos, kw) {
+                        if span_crosses_object_boundary(bytes, start, end_pos) {
+                            return None;
+                        }
                         if skip_pdf_strings
-                            && !Self::validate_balanced_pdf_literals(&raw[start..end_pos])
+                            && !validate_balanced_pdf_literals(&bytes[start..end_pos])
                         {
                             return None;
                         }
@@ -440,11 +333,12 @@ impl PdfSerializer {
         let mut i = start;
         while i < bytes.len() {
             if skip_pdf_strings {
-                match Self::step_pdf_non_code_token(bytes, i) {
+                match step_pdf_non_code_token(bytes, i) {
                     Ok(Some(step)) => {
-                        if (bytes[i] == b'(' || bytes[i] == b'<')
-                            && step.next_index > i + 2
-                            && Self::span_crosses_endstream_endobj(bytes, i + 1, step.next_index)
+                        if matches!(
+                            step.kind,
+                            PdfNonCodeKind::ParenString { .. } | PdfNonCodeKind::HexString { .. }
+                        ) && span_crosses_object_boundary(bytes, i + 1, step.next_index)
                         {
                             return None;
                         }
@@ -455,49 +349,54 @@ impl PdfSerializer {
                     Err(()) => return None,
                 }
             }
-            if i + kw.len() <= bytes.len() && &bytes[i..i + kw.len()] == kw {
-                let prev_ok = i == start || Self::is_pdf_delim_or_ws(bytes[i - 1]);
-                let next_ok =
-                    i + kw.len() == bytes.len() || Self::is_pdf_delim_or_ws(bytes[i + kw.len()]);
-                if prev_ok && next_ok {
-                    let mut trim_end = i;
-                    if trim_end > start && bytes[trim_end - 1] == b'\n' {
-                        trim_end -= 1;
-                        if trim_end > start && bytes[trim_end - 1] == b'\r' {
-                            trim_end -= 1;
-                        }
-                    } else if trim_end > start && bytes[trim_end - 1] == b'\r' {
+            if is_standalone_pdf_kw(bytes, i, b"endobj") {
+                let q =
+                    crate::pdf_stream_parser::skip_pdf_ws_and_comments(bytes, i + 6, bytes.len());
+                if match_indirect_obj_header(bytes, q, bytes.len()).is_some()
+                    || is_standalone_pdf_kw(bytes, q, b"xref")
+                    || is_standalone_pdf_kw(bytes, q, b"trailer")
+                    || is_standalone_pdf_kw(bytes, q, b"startxref")
+                {
+                    return None;
+                }
+            }
+            if is_standalone_pdf_kw(bytes, i, kw) {
+                let mut trim_end = i;
+                if trim_end > start && bytes[trim_end - 1] == b'\n' {
+                    trim_end -= 1;
+                    if trim_end > start && bytes[trim_end - 1] == b'\r' {
                         trim_end -= 1;
                     }
-                    return Some((trim_end, i + kw.len()));
+                } else if trim_end > start && bytes[trim_end - 1] == b'\r' {
+                    trim_end -= 1;
                 }
+                return Some((trim_end, i + kw.len()));
             }
             i += 1;
         }
         None
     }
 
-    fn scan_slice_for_encrypt_entry(slice: &str, skip_streams: bool) -> bool {
-        let bytes = slice.as_bytes();
+    fn slice_has_dict_encrypt_key(slice: &[u8]) -> bool {
         let mut i = 0usize;
         let mut dict_depth = 0usize;
-        while i < bytes.len() {
-            let b = bytes[i];
+        while i < slice.len() {
+            let b = slice[i];
             if b.is_ascii_whitespace() {
                 i += 1;
                 continue;
             }
-            if b == b'<' && i + 1 < bytes.len() && bytes[i + 1] == b'<' {
+            if b == b'<' && i + 1 < slice.len() && slice[i + 1] == b'<' {
                 dict_depth += 1;
                 i += 2;
                 continue;
             }
-            if b == b'>' && i + 1 < bytes.len() && bytes[i + 1] == b'>' {
+            if b == b'>' && i + 1 < slice.len() && slice[i + 1] == b'>' {
                 dict_depth = dict_depth.saturating_sub(1);
                 i += 2;
                 continue;
             }
-            match Self::step_pdf_non_code_token(bytes, i) {
+            match step_pdf_non_code_token(slice, i) {
                 Ok(Some(step)) => {
                     i = step.next_index;
                     continue;
@@ -511,66 +410,81 @@ impl PdfSerializer {
             if b == b'/' {
                 let start_name = i;
                 i += 1;
-                while i < bytes.len() && !Self::is_pdf_delim_or_ws(bytes[i]) {
+                while i < slice.len() && !is_pdf_delim_or_ws(slice[i]) {
                     i += 1;
                 }
-                if dict_depth >= 1 && &slice[start_name..i] == "/Encrypt" {
+                if dict_depth >= 1 && &slice[start_name..i] == b"/Encrypt" {
                     return true;
                 }
                 continue;
             }
-            if Self::is_pdf_delim_or_ws(b) {
-                i += 1;
+            i += 1;
+        }
+        false
+    }
+
+    fn has_encrypt_in_damaged_or_cipher_pdf(bytes: &[u8]) -> bool {
+        let mut p = 0usize;
+        while p < bytes.len() {
+            if is_standalone_pdf_kw(bytes, p, b"trailer") {
+                let start = p + 7;
+                let cap = (start + 16_384).min(bytes.len());
+                let mut end = cap;
+                let mut q = start;
+                while q < cap {
+                    if is_standalone_pdf_kw(bytes, q, b"startxref")
+                        || (q + 5 <= cap && &bytes[q..q + 5] == b"%%EOF")
+                    {
+                        end = q;
+                        break;
+                    }
+                    q += 1;
+                }
+                if Self::slice_has_dict_encrypt_key(&bytes[start..end]) {
+                    return true;
+                }
+                p = end.max(start);
                 continue;
             }
-            let start_tok = i;
-            while i < bytes.len() && !Self::is_pdf_delim_or_ws(bytes[i]) {
-                i += 1;
-            }
-            if skip_streams && dict_depth == 0 && &slice[start_tok..i] == "stream" {
-                if i < bytes.len() && bytes[i] == b'\r' {
-                    i += 1;
-                    if i < bytes.len() && bytes[i] == b'\n' {
-                        i += 1;
+            if let Some(after_obj) = match_indirect_obj_header(bytes, p, bytes.len()) {
+                let cap = (after_obj + 16_384).min(bytes.len());
+                let mut end = cap;
+                let mut q = after_obj;
+                while q < cap {
+                    if is_standalone_pdf_kw(bytes, q, b"stream")
+                        || is_standalone_pdf_kw(bytes, q, b"endobj")
+                        || is_standalone_pdf_kw(bytes, q, b"xref")
+                        || is_standalone_pdf_kw(bytes, q, b"trailer")
+                    {
+                        end = q;
+                        break;
                     }
-                } else if i < bytes.len()
-                    && (bytes[i] == b'\n' || bytes[i] == b' ' || bytes[i] == b'\t')
-                {
-                    i += 1;
+                    q += 1;
                 }
-                if let Some((_, after_end)) = Self::resolve_stream_bounds(slice, i, None, false) {
-                    i = after_end;
+                if Self::slice_has_dict_encrypt_key(&bytes[after_obj..end]) {
+                    return true;
                 }
+                p = end.max(after_obj);
+                continue;
             }
+            p += 1;
         }
         false
     }
 
-    fn detect_pdf_encryption_outside_streams(raw: &str) -> bool {
-        if Self::scan_slice_for_encrypt_entry(raw, true) {
-            return true;
+    fn fail_corrupted_or_encrypted(
+        bytes: &[u8],
+        has_encrypt: bool,
+        detail: &str,
+    ) -> EasyOfficeError {
+        if has_encrypt || Self::has_encrypt_in_damaged_or_cipher_pdf(bytes) {
+            EasyOfficeError::EncryptedDocumentUnsupported(DocumentFormat::Pdf)
+        } else {
+            EasyOfficeError::CorruptedContainer(detail.to_string())
         }
-        if let Some(last_es) = raw.rfind("endstream") {
-            let tail = &raw[last_es + "endstream".len()..];
-            if Self::scan_slice_for_encrypt_entry(tail, false) {
-                return true;
-            }
-        }
-        false
     }
 
-    fn scan_pdf_structure(raw: &str) -> Result<ScannedPdfStructure, EasyOfficeError> {
-        if Self::detect_pdf_encryption_outside_streams(raw) {
-            return Ok(ScannedPdfStructure {
-                has_encrypt: true,
-                title: String::from("PDF 문서"),
-                watermark_text: None,
-                pages: Vec::new(),
-                trailer_b64: None,
-                trailer_b64_count: 0,
-            });
-        }
-        let bytes = raw.as_bytes();
+    fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
         let mut i = 0usize;
         let mut dict_depth = 0usize;
         let mut has_encrypt = false;
@@ -609,69 +523,98 @@ impl PdfSerializer {
                 i += 1;
                 continue;
             }
-            if b == b'%' {
-                let start_comment = i;
-                while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
-                    i += 1;
-                }
-                let comment_line = raw[start_comment..i].trim();
-                if let Some(rest) = comment_line.strip_prefix("%EasyOfficePDFModelBase64:") {
-                    trailer_b64_count += 1;
-                    trailer_b64 = Some(rest.trim().to_string());
-                }
-                continue;
-            }
-            if b == b'(' {
-                obj.length_indirect_stage = 0;
-                let start_inner = i + 1;
-                let mut depth = 1usize;
-                i += 1;
-                while i < bytes.len() && depth > 0 {
-                    if bytes[i] == b'\\' {
-                        i = (i + 2).min(bytes.len());
-                        continue;
+            match step_pdf_non_code_token(bytes, i) {
+                Ok(Some(PdfNonCodeStep {
+                    next_index,
+                    kind: PdfNonCodeKind::Comment { start, end },
+                })) => {
+                    let comment_line = String::from_utf8_lossy(&bytes[start..end]);
+                    if let Some(rest) = comment_line
+                        .trim()
+                        .strip_prefix("%EasyOfficePDFModelBase64:")
+                    {
+                        trailer_b64_count += 1;
+                        trailer_b64 = Some(rest.trim().to_string());
                     }
-                    if bytes[i] == b'(' {
-                        depth += 1;
-                    } else if bytes[i] == b')' {
-                        depth -= 1;
-                        if depth == 0 {
-                            let inner = &raw[start_inner..i];
-                            if dict_depth == 1 && prev_name.as_deref() == Some("/Title") {
-                                obj.title = Some(inner.to_string());
-                            }
-                            prev_name = None;
-                            i += 1;
-                            break;
-                        }
+                    i = next_index;
+                    continue;
+                }
+                Ok(Some(PdfNonCodeStep {
+                    next_index,
+                    kind:
+                        PdfNonCodeKind::ParenString {
+                            inner_start,
+                            inner_end,
+                        },
+                })) => {
+                    if span_crosses_object_boundary(bytes, inner_start, next_index) {
+                        return Err(Self::fail_corrupted_or_encrypted(
+                            bytes,
+                            has_encrypt,
+                            "PDF 객체 문자열 리터럴이 객체 경계를 침범했습니다.",
+                        ));
                     }
-                    i += 1;
+                    obj.length_indirect_stage = 0;
+                    if dict_depth == 1 && prev_name.as_deref() == Some("/Title") {
+                        obj.title = Some(
+                            String::from_utf8_lossy(&bytes[inner_start..inner_end]).into_owned(),
+                        );
+                    }
+                    prev_name = None;
+                    i = next_index;
+                    continue;
                 }
-                continue;
-            }
-            if b == b'<' && i + 1 < bytes.len() && bytes[i + 1] == b'<' {
-                dict_depth += 1;
-                obj.length_indirect_stage = 0;
-                prev_name = None;
-                i += 2;
-                continue;
-            }
-            if b == b'>' && i + 1 < bytes.len() && bytes[i + 1] == b'>' {
-                dict_depth = dict_depth.saturating_sub(1);
-                obj.length_indirect_stage = 0;
-                prev_name = None;
-                i += 2;
-                continue;
-            }
-            if b == b'<' {
-                obj.length_indirect_stage = 0;
-                i += 1;
-                while i < bytes.len() && bytes[i] != b'>' {
-                    i += 1;
+                Ok(Some(PdfNonCodeStep {
+                    next_index,
+                    kind: PdfNonCodeKind::DictOpen,
+                })) => {
+                    dict_depth += 1;
+                    obj.length_indirect_stage = 0;
+                    prev_name = None;
+                    i = next_index;
+                    continue;
                 }
-                i = (i + 1).min(bytes.len());
-                prev_name = None;
-                continue;
+                Ok(Some(PdfNonCodeStep {
+                    next_index,
+                    kind: PdfNonCodeKind::DictClose,
+                })) => {
+                    dict_depth = dict_depth.saturating_sub(1);
+                    obj.length_indirect_stage = 0;
+                    prev_name = None;
+                    i = next_index;
+                    continue;
+                }
+                Ok(Some(PdfNonCodeStep {
+                    next_index,
+                    kind:
+                        PdfNonCodeKind::HexString {
+                            inner_start,
+                            inner_end,
+                        },
+                })) => {
+                    let valid_hex = bytes[inner_start..inner_end]
+                        .iter()
+                        .all(|c| c.is_ascii_hexdigit() || c.is_ascii_whitespace());
+                    if !valid_hex || span_crosses_object_boundary(bytes, inner_start, next_index) {
+                        return Err(Self::fail_corrupted_or_encrypted(
+                            bytes,
+                            has_encrypt,
+                            "PDF 16진수 문자열 리터럴이 손상되었거나 닫히지 않았습니다.",
+                        ));
+                    }
+                    obj.length_indirect_stage = 0;
+                    prev_name = None;
+                    i = next_index;
+                    continue;
+                }
+                Err(()) => {
+                    return Err(Self::fail_corrupted_or_encrypted(
+                        bytes,
+                        has_encrypt,
+                        "PDF 객체 문자열 리터럴이 닫히지 않았습니다.",
+                    ));
+                }
+                Ok(None) => {}
             }
             if b"[]>{}".contains(&b) {
                 obj.length_indirect_stage = 0;
@@ -683,10 +626,11 @@ impl PdfSerializer {
                 obj.length_indirect_stage = 0;
                 let start_name = i;
                 i += 1;
-                while i < bytes.len() && !Self::is_pdf_delim_or_ws(bytes[i]) {
+                while i < bytes.len() && !is_pdf_delim_or_ws(bytes[i]) {
                     i += 1;
                 }
-                let name = &raw[start_name..i];
+                let name_cow = String::from_utf8_lossy(&bytes[start_name..i]);
+                let name = name_cow.as_ref();
                 if dict_depth >= 1 && name == "/Encrypt" {
                     has_encrypt = true;
                 }
@@ -741,10 +685,11 @@ impl PdfSerializer {
             }
 
             let start_tok = i;
-            while i < bytes.len() && !Self::is_pdf_delim_or_ws(bytes[i]) {
+            while i < bytes.len() && !is_pdf_delim_or_ws(bytes[i]) {
                 i += 1;
             }
-            let tok = &raw[start_tok..i];
+            let tok_cow = String::from_utf8_lossy(&bytes[start_tok..i]);
+            let tok = tok_cow.as_ref();
             match tok {
                 "obj" => {
                     obj = PdfObjectHeaderState::default();
@@ -776,35 +721,38 @@ impl PdfSerializer {
                     );
                     dict_depth = 0;
                     prev_name = None;
-                    if i < bytes.len() && bytes[i] == b'\r' {
-                        i += 1;
-                        if i < bytes.len() && bytes[i] == b'\n' {
-                            i += 1;
-                        }
-                    } else if i < bytes.len()
-                        && (bytes[i] == b'\n' || bytes[i] == b' ' || bytes[i] == b'\t')
-                    {
-                        i += 1;
-                    }
-                    let Some((stream_end, after_endstream)) = Self::resolve_stream_bounds(
-                        raw,
+                    i = advance_past_stream_eol(bytes, i);
+                    let mut is_non_page = obj.is_non_page_stream;
+                    let resolved = match Self::resolve_stream_bounds(
+                        bytes,
                         i,
                         obj.direct_length,
-                        !obj.is_non_page_stream,
-                    ) else {
-                        if has_encrypt {
-                            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
-                                DocumentFormat::Pdf,
-                            ));
+                        !is_non_page,
+                    ) {
+                        Some(bounds) => Some(bounds),
+                        None if !is_non_page => {
+                            Self::resolve_stream_bounds(bytes, i, obj.direct_length, false).filter(
+                                |&(end, _)| {
+                                    stream_has_top_level_token(&bytes[i..end], b"begincmap")
+                                },
+                            )
                         }
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "PDF stream 블록에 대응하는 endstream 토큰이 누락되었거나 문자열 리터럴이 닫히지 않았습니다."
-                                .to_string(),
+                        None => None,
+                    };
+                    let Some((stream_end, after_endstream)) = resolved else {
+                        return Err(Self::fail_corrupted_or_encrypted(
+                            bytes,
+                            has_encrypt,
+                            "PDF stream 블록에 대응하는 endstream 토큰이 누락되었거나 문자열 리터럴이 닫히지 않았습니다.",
                         ));
                     };
-                    let stream_slice = &raw[i..stream_end];
+                    let stream_bytes = &bytes[i..stream_end];
+                    if !is_non_page && stream_has_top_level_token(stream_bytes, b"begincmap") {
+                        is_non_page = true;
+                    }
                     if obj.is_metadata_stream() {
-                        for s_line in stream_slice.split(['\r', '\n']) {
+                        let meta_text = String::from_utf8_lossy(stream_bytes);
+                        for s_line in meta_text.split(['\r', '\n']) {
                             let s_trim = s_line.trim();
                             if let Some(rest) = s_trim.strip_prefix("%EasyOfficePDFModelBase64:") {
                                 trailer_b64_count += 1;
@@ -813,17 +761,18 @@ impl PdfSerializer {
                         }
                     } else {
                         if Self::has_pdf_comment_with_prefix(
-                            stream_slice,
-                            "%EasyOfficePDFModelBase64:",
-                            !obj.is_non_page_stream,
+                            stream_bytes,
+                            b"%EasyOfficePDFModelBase64:",
+                            !is_non_page,
                         ) {
                             return Err(EasyOfficeError::SecurityViolation(
                                 "PDF 비메타데이터 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
                                     .to_string(),
                             ));
                         }
-                        if !(obj.is_non_page_stream || stream_slice.contains("begincmap")) {
-                            let parsed_stream = parse_pdf_content_stream(stream_slice);
+                        if !is_non_page {
+                            let stream_text = String::from_utf8_lossy(stream_bytes);
+                            let parsed_stream = parse_pdf_content_stream(&stream_text);
                             if let Some(wm) = parsed_stream.watermark {
                                 watermark_text = Some(wm);
                             }

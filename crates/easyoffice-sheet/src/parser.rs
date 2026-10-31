@@ -645,22 +645,20 @@ impl Parser {
                         .map_err(|_| FormulaError::Ref)?;
                     if matches!(self.peek(), Some(Token::Colon)) {
                         self.next();
-                        let end_ident = match self.next() {
-                            Some(Token::Ident(s)) => {
-                                if matches!(self.peek(), Some(Token::Bang)) {
-                                    self.next();
-                                    if !s.eq_ignore_ascii_case(&name) {
-                                        return Err(FormulaError::Ref);
-                                    }
-                                    let Some(Token::Ident(s2)) = self.next() else {
-                                        return Err(FormulaError::Ref);
-                                    };
-                                    s2
-                                } else {
-                                    s
-                                }
+                        let Some(Token::Ident(s)) = self.next() else {
+                            return Err(FormulaError::Ref);
+                        };
+                        let end_ident = if matches!(self.peek(), Some(Token::Bang)) {
+                            self.next();
+                            if !crate::WorkbookEngine::is_same_sheet_identity(&s, &name) {
+                                return Err(FormulaError::Ref);
                             }
-                            _ => return Err(FormulaError::Ref),
+                            let Some(Token::Ident(s2)) = self.next() else {
+                                return Err(FormulaError::Ref);
+                            };
+                            s2
+                        } else {
+                            s
                         };
                         let end_coord = PackedCellCoordinate::parse_a1(&end_ident)
                             .map_err(|_| FormulaError::Ref)?;
