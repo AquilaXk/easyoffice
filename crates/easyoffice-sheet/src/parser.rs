@@ -101,6 +101,39 @@ fn rfind_unquoted_dot(s: &str) -> Option<usize> {
     last_dot
 }
 
+fn looks_like_ascii_cell_token(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut letters = 0usize;
+    let mut digits = 0usize;
+    for &b in bytes {
+        if b.is_ascii_alphabetic() {
+            if digits > 0 || letters >= 3 {
+                return false;
+            }
+            letters += 1;
+        } else if b.is_ascii_digit() {
+            if letters == 0 {
+                return false;
+            }
+            digits += 1;
+        } else {
+            return false;
+        }
+    }
+    letters > 0 && digits > 0
+}
+
+fn needs_sheet_quoting(raw_sheet: &str) -> bool {
+    raw_sheet
+        .chars()
+        .any(|c| c.is_whitespace() || (!c.is_alphanumeric() && c != '_'))
+        || raw_sheet.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        || raw_sheet.eq_ignore_ascii_case("TRUE")
+        || raw_sheet.eq_ignore_ascii_case("FALSE")
+        || PackedCellCoordinate::parse_a1(raw_sheet).is_ok()
+        || looks_like_ascii_cell_token(raw_sheet)
+}
+
 fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
     fn split_sheet_and_cell(part: &str) -> (Option<String>, &str) {
         let trimmed = part.trim();
@@ -115,10 +148,7 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
             }
             let formatted_sheet = if raw_sheet.starts_with('\'') && raw_sheet.ends_with('\'') {
                 raw_sheet.to_string()
-            } else if raw_sheet
-                .chars()
-                .any(|c| c.is_whitespace() || (!c.is_alphanumeric() && c != '_'))
-            {
+            } else if needs_sheet_quoting(raw_sheet) {
                 format!("'{}'", raw_sheet.replace('\'', "''"))
             } else {
                 raw_sheet.to_string()
@@ -732,125 +762,6 @@ pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
         return Err(FormulaError::Value);
     }
     Ok(expr)
-}
-
-/// Compact 64-bit workbook coordinate packing `sheet_id (16 bits) | row (32 bits) | col (16 bits)`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackedWorkbookCoord(pub u64);
-
-impl PackedWorkbookCoord {
-    #[inline]
-    pub const fn new(sheet_id: u16, coord: PackedCellCoordinate) -> Self {
-        let row_bits = ((coord.row() as u64) & 0xFFFF_FFFF) << 16;
-        let col_bits = (coord.col() as u64) & 0xFFFF;
-        Self(((sheet_id as u64) << 48) | row_bits | col_bits)
-    }
-
-    #[inline]
-    pub const fn sheet_id(self) -> u16 {
-        (self.0 >> 48) as u16
-    }
-
-    #[inline]
-    pub const fn row(self) -> u32 {
-        ((self.0 >> 16) & 0xFFFF_FFFF) as u32
-    }
-
-    #[inline]
-    pub const fn col(self) -> u32 {
-        (self.0 & 0xFFFF) as u32
-    }
-}
-
-/// Computes a deterministic 16-bit case-insensitive FNV-1a sheet identifier.
-#[inline]
-pub fn compute_sheet_id(name: &str) -> u16 {
-    let mut hash: u32 = 0x811C_9DC5;
-    for b in name.bytes() {
-        hash ^= u32::from(b.to_ascii_lowercase());
-        hash = hash.wrapping_mul(0x0100_0193);
-    }
-    let folded = ((hash >> 16) ^ (hash & 0xFFFF)) as u16;
-    if folded == 0 {
-        1
-    } else {
-        folded
-    }
-}
-
-/// Zero-heap-allocation cycle tracker combining an inline 1,024-cell bitset (`64 rows × 16 cols`
-/// on the root sheet) with a fixed-capacity 66-entry recursion stack and overflow spill vector.
-pub struct VisitingTracker {
-    primary_sheet_id: u16,
-    grid_bitset: [u64; 16],
-    stack: [u64; 66],
-    len: usize,
-    spill: Vec<u64>,
-}
-
-impl VisitingTracker {
-    #[inline]
-    pub const fn new(primary_sheet_id: u16) -> Self {
-        Self {
-            primary_sheet_id,
-            grid_bitset: [0u64; 16],
-            stack: [0u64; 66],
-            len: 0,
-            spill: Vec::new(),
-        }
-    }
-
-    #[inline]
-    pub fn insert(&mut self, sheet_id: u16, coord: PackedCellCoordinate) -> bool {
-        let r = coord.row();
-        let c = coord.col();
-        if sheet_id == self.primary_sheet_id && r < 64 && c < 16 {
-            let bit_idx = (r as usize) * 16 + (c as usize);
-            let word = &mut self.grid_bitset[bit_idx >> 6];
-            let mask = 1u64 << (bit_idx & 63);
-            if (*word & mask) != 0 {
-                return false;
-            }
-            *word |= mask;
-            return true;
-        }
-        let packed = PackedWorkbookCoord::new(sheet_id, coord).0;
-        for i in 0..self.len {
-            if self.stack[i] == packed {
-                return false;
-            }
-        }
-        if self.spill.contains(&packed) {
-            return false;
-        }
-        if self.len < self.stack.len() {
-            self.stack[self.len] = packed;
-            self.len += 1;
-        } else {
-            self.spill.push(packed);
-        }
-        true
-    }
-
-    #[inline]
-    pub fn remove(&mut self, sheet_id: u16, coord: PackedCellCoordinate) {
-        let r = coord.row();
-        let c = coord.col();
-        if sheet_id == self.primary_sheet_id && r < 64 && c < 16 {
-            let bit_idx = (r as usize) * 16 + (c as usize);
-            self.grid_bitset[bit_idx >> 6] &= !(1u64 << (bit_idx & 63));
-            return;
-        }
-        let packed = PackedWorkbookCoord::new(sheet_id, coord).0;
-        if let Some(pos) = self.spill.iter().rposition(|&x| x == packed) {
-            self.spill.swap_remove(pos);
-        } else if self.len > 0 && self.stack[self.len - 1] == packed {
-            self.len -= 1;
-        } else if let Some(pos) = self.stack[..self.len].iter().rposition(|&x| x == packed) {
-            self.stack[pos] = self.stack[self.len - 1];
-            self.len -= 1;
-        }
-    }
 }
 
 #[cfg(test)]

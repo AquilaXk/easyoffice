@@ -190,43 +190,45 @@
       }
     }
 
-    async function saveActiveModuleDocument() {
-      await sheetController.commitPendingFocusedSheetCell(true);
-      const curMod = getActiveModule();
-      const extMap = {
-        DOC: "docx",
-        HWP: "hwpx",
-        SHEET: "xlsx",
-        SLIDE: "pptx",
-        PDF: "pdf",
-        CONV: document.getElementById("conv-dst-fmt")?.value || "hwpx",
-      };
-      const dstExt = extMap[curMod] || "docx";
-      let srcExt = dstExt;
-      if (curMod === "CONV") {
-        srcExt = document.getElementById("conv-src-fmt")?.value || "docx";
-      }
-      const sourceTarget = curMod === "CONV" ? srcExt : curMod;
-      const body = buildStructuredConversionBody(sourceTarget);
-      const title = "EasyOffice_" + curMod + "_문서";
-      const res = await invokeIpc(
-        "convert_document_format",
-        srcExt + "->" + dstExt + "|" + title + "|" + body
-      );
-      const fb = document.getElementById("status-command-feedback");
-      if (res && res.convertedBase64) {
-        triggerBase64Download(res.convertedBase64, title, dstExt);
-      }
-      if (fb && res) {
-        fb.textContent =
-          "문서 저장 완료 (" +
-          dstExt.toUpperCase() +
-          " · " +
-          (res.outputBytes || 0) +
-          "B · " +
-          (res.specification || "") +
-          ")";
-      }
+    function saveActiveModuleDocument() {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await sheetController.commitPendingFocusedSheetCell(true);
+        const curMod = getActiveModule();
+        const extMap = {
+          DOC: "docx",
+          HWP: "hwpx",
+          SHEET: "xlsx",
+          SLIDE: "pptx",
+          PDF: "pdf",
+          CONV: document.getElementById("conv-dst-fmt")?.value || "hwpx",
+        };
+        const dstExt = extMap[curMod] || "docx";
+        let srcExt = dstExt;
+        if (curMod === "CONV") {
+          srcExt = document.getElementById("conv-src-fmt")?.value || "docx";
+        }
+        const sourceTarget = curMod === "CONV" ? srcExt : curMod;
+        const body = buildStructuredConversionBody(sourceTarget);
+        const title = "EasyOffice_" + curMod + "_문서";
+        const res = await invokeIpc(
+          "convert_document_format",
+          srcExt + "->" + dstExt + "|" + title + "|" + body
+        );
+        const fb = document.getElementById("status-command-feedback");
+        if (res && res.convertedBase64) {
+          triggerBase64Download(res.convertedBase64, title, dstExt);
+        }
+        if (fb && res) {
+          fb.textContent =
+            "문서 저장 완료 (" +
+            dstExt.toUpperCase() +
+            " · " +
+            (res.outputBytes || 0) +
+            "B · " +
+            (res.specification || "") +
+            ")";
+        }
+      });
     }
 
     function computeSmartStats() {
@@ -337,10 +339,12 @@
       }
     }
 
-    async function runSecurityAuditAction() {
-      await sheetController.commitPendingFocusedSheetCell(true);
-      const outcome = await fetchSecurityAuditOutcome(getActiveModule());
-      applySecurityAuditDom(outcome);
+    function runSecurityAuditAction() {
+      return enqueueWorkspaceHistoryOp(async () => {
+        await sheetController.commitPendingFocusedSheetCell(true);
+        const outcome = await fetchSecurityAuditOutcome(getActiveModule());
+        applySecurityAuditDom(outcome);
+      });
     }
 
     async function runBenchmarkAction() {

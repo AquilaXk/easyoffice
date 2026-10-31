@@ -4,16 +4,17 @@ mod pdf_object_graph;
 use crate::pdf_stream_parser::{
     advance_past_stream_eol, contains_subslice, escape_pdf_text, is_pdf_delim_or_ws,
     is_standalone_pdf_kw, parse_indirect_obj_header, parse_pdf_content_stream,
-    skip_pdf_ws_and_comments, step_pdf_non_code_token, unescape_pdf_text,
-    validate_balanced_pdf_literals, validate_pdf_trailer_json, PdfNonCodeKind, PdfNonCodeStep,
+    skip_pdf_ws_and_comments, span_crosses_object_boundary, step_pdf_non_code_token,
+    unescape_pdf_text, validate_balanced_pdf_literals, validate_pdf_trailer_json, PdfNonCodeKind,
+    PdfNonCodeStep,
 };
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
 use pdf_object_graph::{
-    decode_stream_bytes, dict_get, dict_has_flate_filter, dict_has_non_null_key, dict_name_eq,
-    fail_corrupted_or_encrypted, is_studio_metadata_dict, parse_pdf_value,
-    resolve_catalog_and_pages_target, resolve_int, resolve_stream_bounds,
-    resolve_stream_length_hint, resolve_value, stream_contains_forbidden_b64_comment,
-    PageNodeTarget, PdfIndirectObject, PdfObjValue,
+    decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_name_eq,
+    fail_corrupted_or_encrypted, parse_pdf_value, resolve_catalog_and_pages_target, resolve_int,
+    resolve_stream_bounds, resolve_stream_length_hint, resolve_value, PageNodeTarget,
+    PdfIndirectObject, PdfObjValue, MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH,
+    MAX_PDF_TOTAL_DECODED_BYTES,
 };
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -44,6 +45,18 @@ struct ScannedPdfStructure {
     pages: Vec<PdfPageModel>,
     trailer_b64: Option<String>,
     trailer_b64_count: usize,
+}
+
+struct PageWalkState<'a> {
+    bytes: &'a [u8],
+    objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
+    flate_cache: &'a HashMap<(u32, u16), Vec<u8>>,
+    first_used_flate: HashSet<(u32, u16)>,
+    remaining_budget: usize,
+    visited: HashSet<(u32, u16)>,
+    node_count: usize,
+    pages: Vec<PdfPageModel>,
+    watermark_text: Option<String>,
 }
 
 pub struct PdfSerializer;
@@ -312,101 +325,120 @@ impl PdfSerializer {
     }
 
     fn collect_page_content_slices<'a>(
-        bytes: &'a [u8],
-        objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
+        state: &mut PageWalkState<'a>,
         page_entries: &[(String, PdfObjValue)],
-        inline_stream: Option<(usize, usize)>,
-        has_encrypt: bool,
-    ) -> Result<Vec<Cow<'a, [u8]>>, EasyOfficeError> {
-        let decode_stream_obj = |so: u32, sg: u16| -> Result<Cow<'a, [u8]>, EasyOfficeError> {
-            let Some(stream_obj) = objects.get(&(so, sg)) else {
-                return Err(fail_corrupted_or_encrypted(
-                    bytes,
-                    has_encrypt,
-                    "PDF /Contents 간접 스트림 객체를 찾을 수 없습니다.",
-                ));
+        inline_stream: Option<((u32, u16), (usize, usize))>,
+    ) -> Result<Vec<&'a [u8]>, EasyOfficeError> {
+        let mut resolve_one =
+            |so: u32, sg: u16, s_start: usize, s_end: usize| -> Result<&'a [u8], EasyOfficeError> {
+                if let Some(decoded) = state.flate_cache.get(&(so, sg)) {
+                    let slice = decoded.as_slice();
+                    if !validate_balanced_pdf_literals(slice) {
+                        return Err(fail_corrupted_or_encrypted(
+                            state.bytes,
+                            false,
+                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다.",
+                        ));
+                    }
+                    if !state.first_used_flate.insert((so, sg)) {
+                        let Some(next_b) = state.remaining_budget.checked_sub(slice.len()) else {
+                            return Err(EasyOfficeError::SecurityViolation(
+                                "PDF 페이지 콘텐츠 스트림 누적 바이트 예산(32MiB)을 초과했습니다."
+                                    .to_string(),
+                            ));
+                        };
+                        state.remaining_budget = next_b;
+                    }
+                    Ok(slice)
+                } else {
+                    if span_crosses_object_boundary(state.bytes, s_start, s_end) {
+                        return Err(fail_corrupted_or_encrypted(
+                            state.bytes,
+                            false,
+                            "PDF 페이지 스트림 내부에 닫히지 않은 객체 경계 토큰이 감지되었습니다.",
+                        ));
+                    }
+                    let slice = &state.bytes[s_start..s_end];
+                    if !validate_balanced_pdf_literals(slice) {
+                        return Err(fail_corrupted_or_encrypted(
+                            state.bytes,
+                            false,
+                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다.",
+                        ));
+                    }
+                    let Some(next_b) = state.remaining_budget.checked_sub(slice.len()) else {
+                        return Err(EasyOfficeError::SecurityViolation(
+                            "PDF 페이지 콘텐츠 스트림 누적 바이트 예산(32MiB)을 초과했습니다."
+                                .to_string(),
+                        ));
+                    };
+                    state.remaining_budget = next_b;
+                    Ok(slice)
+                }
             };
-            let Some((s_start, s_end)) = stream_obj.stream_range else {
-                return Err(fail_corrupted_or_encrypted(
-                    bytes,
-                    has_encrypt,
-                    "PDF /Contents 대상 객체에 stream 본문이 없습니다.",
-                ));
+
+        let mut push_ref =
+            |out: &mut Vec<&'a [u8]>, so: u32, sg: u16| -> Result<(), EasyOfficeError> {
+                let Some(stream_obj) = state.objects.get(&(so, sg)) else {
+                    return Err(fail_corrupted_or_encrypted(
+                        state.bytes,
+                        false,
+                        "PDF /Contents 간접 스트림 객체를 찾을 수 없습니다.",
+                    ));
+                };
+                let Some((s_start, s_end)) = stream_obj.stream_range else {
+                    return Err(fail_corrupted_or_encrypted(
+                        state.bytes,
+                        false,
+                        "PDF /Contents 대상 객체에 stream 본문이 없습니다.",
+                    ));
+                };
+                if !matches!(stream_obj.val, PdfObjValue::Dict(_)) {
+                    return Err(fail_corrupted_or_encrypted(
+                        state.bytes,
+                        false,
+                        "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.",
+                    ));
+                }
+                out.push(resolve_one(so, sg, s_start, s_end)?);
+                Ok(())
             };
-            let PdfObjValue::Dict(ref s_entries) = stream_obj.val else {
-                return Err(fail_corrupted_or_encrypted(
-                    bytes,
-                    has_encrypt,
-                    "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.",
-                ));
-            };
-            let decoded = decode_stream_bytes(
-                s_entries,
-                &bytes[s_start..s_end],
-                objects,
-                bytes,
-                has_encrypt,
-            )?;
-            if matches!(decoded, Cow::Owned(_))
-                && stream_contains_forbidden_b64_comment(decoded.as_ref())
-            {
-                return Err(EasyOfficeError::SecurityViolation(
-                    "PDF 압축 페이지 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
-                        .to_string(),
-                ));
-            }
-            if !validate_balanced_pdf_literals(decoded.as_ref()) {
-                return Err(fail_corrupted_or_encrypted(
-                    bytes,
-                    has_encrypt,
-                    "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다.",
-                ));
-            }
-            Ok(decoded)
-        };
 
         match dict_get(page_entries, "/Contents") {
             None | Some(PdfObjValue::Null) => {
-                if let Some((s_start, s_end)) = inline_stream {
-                    let decoded = decode_stream_bytes(
-                        page_entries,
-                        &bytes[s_start..s_end],
-                        objects,
-                        bytes,
-                        has_encrypt,
-                    )?;
-                    if !validate_balanced_pdf_literals(decoded.as_ref()) {
-                        return Err(fail_corrupted_or_encrypted(
-                            bytes,
-                            has_encrypt,
-                            "PDF 인라인 페이지 스트림의 문자열 리터럴이 닫히지 않았습니다.",
-                        ));
-                    }
-                    Ok(vec![decoded])
+                if let Some(((so, sg), (s_start, s_end))) = inline_stream {
+                    Ok(vec![resolve_one(so, sg, s_start, s_end)?])
                 } else {
                     Ok(Vec::new())
                 }
             }
             Some(PdfObjValue::Ref(co, cg)) => {
-                let Some(target) = objects.get(&(*co, *cg)) else {
+                let Some(target) = state.objects.get(&(*co, *cg)) else {
                     return Err(fail_corrupted_or_encrypted(
-                        bytes,
-                        has_encrypt,
+                        state.bytes,
+                        false,
                         "PDF /Contents 간접 참조 대상을 찾을 수 없습니다.",
                     ));
                 };
                 if target.stream_range.is_some() {
-                    Ok(vec![decode_stream_obj(*co, *cg)?])
+                    let mut out = Vec::with_capacity(1);
+                    push_ref(&mut out, *co, *cg)?;
+                    Ok(out)
                 } else if let PdfObjValue::Array(ref arr) = target.val {
+                    if arr.len() > MAX_PDF_CONTENTS_ARRAY_LEN {
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "PDF /Contents 배열 원소 상한(256)을 초과했습니다.".to_string(),
+                        ));
+                    }
                     let mut out = Vec::with_capacity(arr.len());
                     for item in arr {
                         match item {
-                            PdfObjValue::Ref(so, sg) => out.push(decode_stream_obj(*so, *sg)?),
+                            PdfObjValue::Ref(so, sg) => push_ref(&mut out, *so, *sg)?,
                             PdfObjValue::Null => {}
                             _ => {
                                 return Err(fail_corrupted_or_encrypted(
-                                    bytes,
-                                    has_encrypt,
+                                    state.bytes,
+                                    false,
                                     "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다.",
                                 ))
                             }
@@ -415,22 +447,27 @@ impl PdfSerializer {
                     Ok(out)
                 } else {
                     Err(fail_corrupted_or_encrypted(
-                        bytes,
-                        has_encrypt,
+                        state.bytes,
+                        false,
                         "PDF /Contents 참조 대상이 스트림 또는 배열이 아닙니다.",
                     ))
                 }
             }
             Some(PdfObjValue::Array(arr)) => {
+                if arr.len() > MAX_PDF_CONTENTS_ARRAY_LEN {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "PDF /Contents 배열 원소 상한(256)을 초과했습니다.".to_string(),
+                    ));
+                }
                 let mut out = Vec::with_capacity(arr.len());
                 for item in arr {
                     match item {
-                        PdfObjValue::Ref(so, sg) => out.push(decode_stream_obj(*so, *sg)?),
+                        PdfObjValue::Ref(so, sg) => push_ref(&mut out, *so, *sg)?,
                         PdfObjValue::Null => {}
                         _ => {
                             return Err(fail_corrupted_or_encrypted(
-                                bytes,
-                                has_encrypt,
+                                state.bytes,
+                                false,
                                 "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다.",
                             ))
                         }
@@ -439,34 +476,30 @@ impl PdfSerializer {
                 Ok(out)
             }
             Some(_) => Err(fail_corrupted_or_encrypted(
-                bytes,
-                has_encrypt,
+                state.bytes,
+                false,
                 "PDF /Page /Contents 항목 타입이 올바르지 않습니다.",
             )),
         }
     }
 
-    fn emit_page_from_node(
-        bytes: &[u8],
-        objects: &HashMap<(u32, u16), PdfIndirectObject>,
+    fn emit_page_from_node<'a>(
+        state: &mut PageWalkState<'a>,
         page_entries: &[(String, PdfObjValue)],
-        inline_stream: Option<(usize, usize)>,
+        inline_stream: Option<((u32, u16), (usize, usize))>,
         inherited_rotation: i32,
-        pages: &mut Vec<PdfPageModel>,
-        watermark_text: &mut Option<String>,
     ) -> Result<(), EasyOfficeError> {
         let rotation = dict_get(page_entries, "/Rotate")
-            .and_then(|v| resolve_int(v, objects))
+            .and_then(|v| resolve_int(v, state.objects))
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(inherited_rotation);
         let page_number = dict_get(page_entries, "/PageNumber")
-            .and_then(|v| resolve_int(v, objects))
+            .and_then(|v| resolve_int(v, state.objects))
             .and_then(|n| usize::try_from(n).ok())
-            .unwrap_or(pages.len() + 1);
-        let slices =
-            Self::collect_page_content_slices(bytes, objects, page_entries, inline_stream, false)?;
+            .unwrap_or(state.pages.len() + 1);
+        let slices = Self::collect_page_content_slices(state, page_entries, inline_stream)?;
         if slices.is_empty() {
-            pages.push(PdfPageModel {
+            state.pages.push(PdfPageModel {
                 page_number,
                 rotation_degrees: rotation,
                 body_text: String::new(),
@@ -475,25 +508,31 @@ impl PdfSerializer {
             return Ok(());
         }
         let merged_cow: Cow<'_, [u8]> = if slices.len() == 1 {
-            slices.into_iter().next().unwrap()
+            Cow::Borrowed(slices[0])
         } else {
-            let total_len: usize =
-                slices.iter().map(|s| s.len()).sum::<usize>() + slices.len().saturating_sub(1);
+            let joiners = slices.len() - 1;
+            let Some(next_b) = state.remaining_budget.checked_sub(joiners) else {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "PDF 페이지 콘텐츠 스트림 누적 바이트 예산(32MiB)을 초과했습니다.".to_string(),
+                ));
+            };
+            state.remaining_budget = next_b;
+            let total_len: usize = slices.iter().map(|s| s.len()).sum::<usize>() + joiners;
             let mut joined = Vec::with_capacity(total_len);
             for (idx, chunk) in slices.iter().enumerate() {
                 if idx > 0 {
                     joined.push(b'\n');
                 }
-                joined.extend_from_slice(chunk.as_ref());
+                joined.extend_from_slice(chunk);
             }
             Cow::Owned(joined)
         };
         let stream_text = String::from_utf8_lossy(merged_cow.as_ref());
         let parsed = parse_pdf_content_stream(&stream_text);
         if let Some(wm) = parsed.watermark {
-            *watermark_text = Some(wm);
+            state.watermark_text = Some(wm);
         }
-        pages.push(PdfPageModel {
+        state.pages.push(PdfPageModel {
             page_number,
             rotation_degrees: rotation,
             body_text: parsed.body_text,
@@ -503,49 +542,51 @@ impl PdfSerializer {
     }
 
     fn walk_page_tree_node<'a>(
-        bytes: &'a [u8],
-        objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
+        state: &mut PageWalkState<'a>,
         target: PageNodeTarget<'a>,
         inherited_rotation: i32,
-        visited: &mut HashSet<(u32, u16)>,
-        node_count: &mut usize,
-        out: &mut (Vec<PdfPageModel>, Option<String>),
+        depth: usize,
     ) -> Result<(), EasyOfficeError> {
-        *node_count += 1;
-        if *node_count > MAX_PDF_PAGE_TREE_NODES {
+        if depth > MAX_PDF_PAGE_TREE_DEPTH {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "PDF 페이지 트리 중첩 깊이 상한(64)을 초과했습니다.".to_string(),
+            ));
+        }
+        state.node_count += 1;
+        if state.node_count > MAX_PDF_PAGE_TREE_NODES {
             return Err(EasyOfficeError::CorruptedContainer(
                 "PDF 페이지 트리 노드 상한(4096)을 초과했습니다.".to_string(),
             ));
         }
         let (entries, inline_stream) = match target {
             PageNodeTarget::Ref(on, gn) => {
-                if !visited.insert((on, gn)) {
+                if !state.visited.insert((on, gn)) {
                     return Err(EasyOfficeError::CorruptedContainer(
                         "PDF 페이지 트리에서 순환 참조 또는 중복 노드가 감지되었습니다."
                             .to_string(),
                     ));
                 }
-                let Some(obj) = objects.get(&(on, gn)) else {
+                let Some(obj) = state.objects.get(&(on, gn)) else {
                     return Err(fail_corrupted_or_encrypted(
-                        bytes,
+                        state.bytes,
                         false,
                         "PDF 페이지 트리 간접 객체를 찾을 수 없습니다.",
                     ));
                 };
                 let PdfObjValue::Dict(ref d) = obj.val else {
                     return Err(fail_corrupted_or_encrypted(
-                        bytes,
+                        state.bytes,
                         false,
                         "PDF 페이지 트리 노드가 딕셔너리가 아닙니다.",
                     ));
                 };
-                (d.as_slice(), obj.stream_range)
+                (d.as_slice(), obj.stream_range.map(|r| ((on, gn), r)))
             }
             PageNodeTarget::Inline(d) => (d, None),
         };
 
         let effective_rotation = dict_get(entries, "/Rotate")
-            .and_then(|v| resolve_int(v, objects))
+            .and_then(|v| resolve_int(v, state.objects))
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(inherited_rotation);
 
@@ -557,7 +598,7 @@ impl PdfSerializer {
                     "PDF /Pages 노드에 /Kids 배열이 누락되었습니다.".to_string(),
                 ));
             };
-            let Some(PdfObjValue::Array(kids)) = resolve_value(kids_raw, objects) else {
+            let Some(PdfObjValue::Array(kids)) = resolve_value(kids_raw, state.objects) else {
                 return Err(EasyOfficeError::CorruptedContainer(
                     "PDF /Pages /Kids 항목이 배열이 아닙니다.".to_string(),
                 ));
@@ -565,22 +606,16 @@ impl PdfSerializer {
             for kid in kids {
                 match kid {
                     PdfObjValue::Ref(ko, kg) => Self::walk_page_tree_node(
-                        bytes,
-                        objects,
+                        state,
                         PageNodeTarget::Ref(*ko, *kg),
                         effective_rotation,
-                        visited,
-                        node_count,
-                        out,
+                        depth + 1,
                     )?,
                     PdfObjValue::Dict(kd) => Self::walk_page_tree_node(
-                        bytes,
-                        objects,
+                        state,
                         PageNodeTarget::Inline(kd.as_slice()),
                         effective_rotation,
-                        visited,
-                        node_count,
-                        out,
+                        depth + 1,
                     )?,
                     _ => {
                         return Err(EasyOfficeError::CorruptedContainer(
@@ -599,15 +634,7 @@ impl PdfSerializer {
                 "PDF 페이지 트리에 허용되지 않는 객체 /Type이 포함되었습니다.".to_string(),
             ));
         }
-        Self::emit_page_from_node(
-            bytes,
-            objects,
-            entries,
-            inline_stream,
-            effective_rotation,
-            &mut out.0,
-            &mut out.1,
-        )
+        Self::emit_page_from_node(state, entries, inline_stream, effective_rotation)
     }
 
     fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
@@ -668,39 +695,6 @@ impl PdfSerializer {
                         ));
                     };
                     stream_spans.push((stream_kw_pos, after_endstream));
-                    let raw_stream = &bytes[stream_start..stream_end];
-                    if is_studio_metadata_dict(entries) {
-                        let decoded_meta =
-                            decode_stream_bytes(entries, raw_stream, &objects, bytes, has_encrypt)?;
-                        let meta_text = String::from_utf8_lossy(decoded_meta.as_ref());
-                        for s_line in meta_text.split(['\r', '\n']) {
-                            if let Some(rest) =
-                                s_line.trim().strip_prefix("%EasyOfficePDFModelBase64:")
-                            {
-                                trailer_b64_count += 1;
-                                trailer_b64 = Some(rest.trim().to_string());
-                            }
-                        }
-                    } else {
-                        if stream_contains_forbidden_b64_comment(raw_stream) {
-                            return Err(EasyOfficeError::SecurityViolation(
-                                "PDF 비메타데이터 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
-                                    .to_string(),
-                            ));
-                        }
-                        if matches!(dict_has_flate_filter(entries, &objects), Ok(true)) {
-                            if let Ok(inflated) =
-                                crate::deflate::inflate_auto(raw_stream, 4 * 1024 * 1024)
-                            {
-                                if stream_contains_forbidden_b64_comment(&inflated) {
-                                    return Err(EasyOfficeError::SecurityViolation(
-                                        "PDF 압축 비메타데이터 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
-                                            .to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                    }
                     stream_range = Some((stream_start, stream_end));
                     next_p = skip_pdf_ws_and_comments(bytes, after_endstream, bytes.len());
                 }
@@ -814,41 +808,48 @@ impl PdfSerializer {
             objects.iter().map(|(&id, o)| (id, o)).collect();
         ordered_objs.sort_by_key(|(_, o)| o.order_seq);
 
+        let mut remaining_budget = MAX_PDF_TOTAL_DECODED_BYTES;
+        let flate_cache = decode_and_validate_pdf_streams(
+            bytes,
+            &objects,
+            &ordered_objs,
+            &mut remaining_budget,
+            &mut trailer_b64,
+            &mut trailer_b64_count,
+        )?;
+
         let (title, pages_target) =
             resolve_catalog_and_pages_target(&objects, &ordered_objs, &trailers);
 
-        let mut walk_out: (Vec<PdfPageModel>, Option<String>) = (Vec::new(), None);
-        let mut visited: HashSet<(u32, u16)> = HashSet::new();
-        let mut node_count = 0usize;
+        let mut walk_state = PageWalkState {
+            bytes,
+            objects: &objects,
+            flate_cache: &flate_cache,
+            first_used_flate: HashSet::new(),
+            remaining_budget,
+            visited: HashSet::new(),
+            node_count: 0,
+            pages: Vec::new(),
+            watermark_text: None,
+        };
 
         if let Some(target) = pages_target {
-            Self::walk_page_tree_node(
-                bytes,
-                &objects,
-                target,
-                0,
-                &mut visited,
-                &mut node_count,
-                &mut walk_out,
-            )?;
+            Self::walk_page_tree_node(&mut walk_state, target, 0, 0)?;
         } else {
-            for (_, obj) in &ordered_objs {
+            for &((on, gn), obj) in &ordered_objs {
                 if let PdfObjValue::Dict(ref d) = obj.val {
                     if dict_name_eq(d, "/Type", "/Page") {
-                        node_count += 1;
-                        if node_count > MAX_PDF_PAGE_TREE_NODES {
+                        walk_state.node_count += 1;
+                        if walk_state.node_count > MAX_PDF_PAGE_TREE_NODES {
                             return Err(EasyOfficeError::CorruptedContainer(
                                 "PDF 페이지 트리 노드 상한(4096)을 초과했습니다.".to_string(),
                             ));
                         }
                         Self::emit_page_from_node(
-                            bytes,
-                            &objects,
+                            &mut walk_state,
                             d,
-                            obj.stream_range,
+                            obj.stream_range.map(|r| ((on, gn), r)),
                             0,
-                            &mut walk_out.0,
-                            &mut walk_out.1,
                         )?;
                     }
                 }
@@ -858,8 +859,8 @@ impl PdfSerializer {
         Ok(ScannedPdfStructure {
             has_encrypt: false,
             title,
-            watermark_text: walk_out.1,
-            pages: walk_out.0,
+            watermark_text: walk_state.watermark_text,
+            pages: walk_state.pages,
             trailer_b64,
             trailer_b64_count,
         })

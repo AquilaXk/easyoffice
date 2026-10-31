@@ -1,16 +1,18 @@
 use crate::pdf_stream_parser::{
     advance_past_stream_eol, contains_subslice, decode_pdf_hex_string, decode_pdf_name,
     has_structural_after_endobj, is_pdf_delim_or_ws, is_pdf_ws, is_standalone_pdf_kw,
-    match_indirect_obj_header, parse_indirect_obj_header, raw_span_crosses_object_boundary,
-    skip_pdf_ws_and_comments, span_crosses_object_boundary, step_pdf_non_code_token,
-    unescape_pdf_text, validate_balanced_pdf_literals, PdfNonCodeKind, PdfNonCodeStep,
+    match_indirect_obj_header, parse_indirect_obj_header, skip_pdf_ws_and_comments,
+    span_crosses_object_boundary, step_pdf_non_code_token, unescape_pdf_text,
+    validate_balanced_pdf_literals, PdfNonCodeKind, PdfNonCodeStep,
 };
 use crate::{DocumentFormat, EasyOfficeError};
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 pub(super) const MAX_PDF_NESTING_DEPTH: usize = 64;
 pub(super) const MAX_PDF_STREAM_DECODE_BYTES: usize = 16 * 1024 * 1024;
+pub(super) const MAX_PDF_TOTAL_DECODED_BYTES: usize = 32 * 1024 * 1024;
+pub(super) const MAX_PDF_PAGE_TREE_DEPTH: usize = 64;
+pub(super) const MAX_PDF_CONTENTS_ARRAY_LEN: usize = 256;
 
 #[derive(Debug, Clone)]
 pub(super) enum PdfObjValue {
@@ -316,15 +318,6 @@ fn scan_stream_to_endstream(
         if skip_pdf_strings {
             match step_pdf_non_code_token(bytes, i) {
                 Ok(Some(step)) => {
-                    if let PdfNonCodeKind::ParenString {
-                        inner_start,
-                        inner_end,
-                    } = step.kind
-                    {
-                        if raw_span_crosses_object_boundary(&bytes[inner_start..inner_end]) {
-                            return None;
-                        }
-                    }
                     i = step.next_index;
                     continue;
                 }
@@ -355,31 +348,44 @@ fn scan_stream_to_endstream(
     None
 }
 
+fn verify_direct_stream_bounds(
+    bytes: &[u8],
+    start: usize,
+    len: usize,
+) -> Option<(usize, usize, usize)> {
+    let end_pos = start.checked_add(len)?;
+    if end_pos > bytes.len() {
+        return None;
+    }
+    let mut kw_pos = end_pos;
+    if kw_pos < bytes.len() && bytes[kw_pos] == b'\r' {
+        kw_pos += 1;
+        if kw_pos < bytes.len() && bytes[kw_pos] == b'\n' {
+            kw_pos += 1;
+        }
+    } else if kw_pos < bytes.len() && bytes[kw_pos] == b'\n' {
+        kw_pos += 1;
+    }
+    if !is_standalone_pdf_kw(bytes, kw_pos, b"endstream") {
+        return None;
+    }
+    let after_endstream = kw_pos + 9;
+    let after_ws = skip_pdf_ws_and_comments(bytes, after_endstream, bytes.len());
+    if !is_standalone_pdf_kw(bytes, after_ws, b"endobj") {
+        return None;
+    }
+    Some((end_pos, after_endstream, after_ws + 6))
+}
+
 pub(super) fn resolve_stream_bounds(
     bytes: &[u8],
     start: usize,
     direct_length: Option<usize>,
 ) -> Option<(usize, usize)> {
-    let kw = b"endstream";
     if let Some(len) = direct_length {
-        if let Some(end_pos) = start.checked_add(len) {
-            if end_pos <= bytes.len() {
-                let mut kw_pos = end_pos;
-                if kw_pos < bytes.len() && bytes[kw_pos] == b'\r' {
-                    kw_pos += 1;
-                    if kw_pos < bytes.len() && bytes[kw_pos] == b'\n' {
-                        kw_pos += 1;
-                    }
-                } else if kw_pos < bytes.len() && bytes[kw_pos] == b'\n' {
-                    kw_pos += 1;
-                }
-                if is_standalone_pdf_kw(bytes, kw_pos, kw) {
-                    if span_crosses_object_boundary(bytes, start, end_pos) {
-                        return None;
-                    }
-                    return Some((end_pos, kw_pos + kw.len()));
-                }
-            }
+        if let Some((end_pos, after_endstream, _)) = verify_direct_stream_bounds(bytes, start, len)
+        {
+            return Some((end_pos, after_endstream));
         }
     }
     scan_stream_to_endstream(bytes, start, true)
@@ -452,32 +458,89 @@ pub(super) fn dict_has_flate_filter(
         PdfObjValue::Array(arr) if arr.is_empty() => Ok(false),
         PdfObjValue::Array(arr) if arr.len() == 1 => match resolve_value(&arr[0], objects) {
             Some(PdfObjValue::Name(n)) if n == "/FlateDecode" => Ok(true),
+            None => Err("PDF 스트림 /Filter 배열 원소 간접 참조를 해석할 수 없습니다."),
             _ => Err("지원하지 않는 PDF 스트림 필터 배열입니다."),
         },
         _ => Err("지원하지 않는 PDF 스트림 필터입니다."),
     }
 }
 
-pub(super) fn decode_stream_bytes<'a>(
-    entries: &[(String, PdfObjValue)],
-    raw_stream: &'a [u8],
+pub(super) fn decode_and_validate_pdf_streams(
+    bytes: &[u8],
     objects: &HashMap<(u32, u16), PdfIndirectObject>,
-    full_pdf: &[u8],
-    has_encrypt: bool,
-) -> Result<Cow<'a, [u8]>, EasyOfficeError> {
-    match dict_has_flate_filter(entries, objects) {
-        Ok(false) => Ok(Cow::Borrowed(raw_stream)),
-        Ok(true) => match crate::deflate::inflate_auto(raw_stream, MAX_PDF_STREAM_DECODE_BYTES) {
-            Ok(decoded) => Ok(Cow::Owned(decoded)),
-            Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => Err(e),
-            Err(_) => Err(fail_corrupted_or_encrypted(
-                full_pdf,
-                has_encrypt,
-                "PDF FlateDecode 스트림 압축 해제에 실패했습니다.",
-            )),
-        },
-        Err(detail) => Err(fail_corrupted_or_encrypted(full_pdf, has_encrypt, detail)),
+    ordered_objs: &[((u32, u16), &PdfIndirectObject)],
+    remaining_budget: &mut usize,
+    trailer_b64: &mut Option<String>,
+    trailer_b64_count: &mut usize,
+) -> Result<HashMap<(u32, u16), Vec<u8>>, EasyOfficeError> {
+    let mut flate_cache: HashMap<(u32, u16), Vec<u8>> = HashMap::new();
+    for &(obj_id, obj) in ordered_objs {
+        let Some((s_start, s_end)) = obj.stream_range else {
+            continue;
+        };
+        let PdfObjValue::Dict(ref entries) = obj.val else {
+            return Err(fail_corrupted_or_encrypted(
+                bytes,
+                false,
+                "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.",
+            ));
+        };
+        let raw_stream = &bytes[s_start..s_end];
+        let is_flate = dict_has_flate_filter(entries, objects)
+            .map_err(|detail| fail_corrupted_or_encrypted(bytes, false, detail))?;
+        let is_meta = is_studio_metadata_dict(entries);
+        if is_flate {
+            let cap = MAX_PDF_STREAM_DECODE_BYTES.min(*remaining_budget);
+            let decoded = match crate::deflate::inflate_auto(raw_stream, cap) {
+                Ok(d) => d,
+                Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
+                Err(_) => {
+                    return Err(fail_corrupted_or_encrypted(
+                        bytes,
+                        false,
+                        "PDF FlateDecode 스트림 압축 해제에 실패했습니다.",
+                    ))
+                }
+            };
+            *remaining_budget = remaining_budget.saturating_sub(decoded.len());
+            if is_meta {
+                let meta_text = String::from_utf8_lossy(&decoded);
+                for s_line in meta_text.split(['\r', '\n']) {
+                    if let Some(rest) = s_line.trim().strip_prefix("%EasyOfficePDFModelBase64:") {
+                        *trailer_b64_count += 1;
+                        *trailer_b64 = Some(rest.trim().to_string());
+                    }
+                }
+            } else if stream_contains_forbidden_b64_comment(&decoded) {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "PDF 압축 비메타데이터 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
+                        .to_string(),
+                ));
+            }
+            flate_cache.insert(obj_id, decoded);
+        } else if is_meta {
+            let cap = MAX_PDF_STREAM_DECODE_BYTES.min(*remaining_budget);
+            if raw_stream.len() > cap {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "PDF 메타데이터 스트림 바이트 예산을 초과했습니다.".to_string(),
+                ));
+            }
+            *remaining_budget = remaining_budget.saturating_sub(raw_stream.len());
+            let meta_text = String::from_utf8_lossy(raw_stream);
+            for s_line in meta_text.split(['\r', '\n']) {
+                if let Some(rest) = s_line.trim().strip_prefix("%EasyOfficePDFModelBase64:") {
+                    *trailer_b64_count += 1;
+                    *trailer_b64 = Some(rest.trim().to_string());
+                }
+            }
+        } else if stream_contains_forbidden_b64_comment(raw_stream) {
+            return Err(EasyOfficeError::SecurityViolation(
+                "PDF 비메타데이터 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
+                    .to_string(),
+            ));
+        }
     }
+    Ok(flate_cache)
 }
 
 fn has_pdf_comment_with_prefix(stream_bytes: &[u8], prefix: &[u8], skip_pdf_strings: bool) -> bool {
@@ -715,12 +778,45 @@ fn scan_damaged_top_dict(slice: &[u8]) -> (bool, bool, Option<usize>) {
     (is_xref_type, has_encrypt_key, direct_length)
 }
 
+fn paren_crosses_stream_object(slice: &[u8]) -> bool {
+    let len = slice.len();
+    let mut p = 0usize;
+    while p + 6 <= len {
+        if is_standalone_pdf_kw(slice, p, b"endobj") {
+            let after_endobj = skip_pdf_ws_and_comments(slice, p + 6, len);
+            if let Some(after_hdr) = match_indirect_obj_header(slice, after_endobj, len) {
+                let mut r = after_hdr;
+                while r < len {
+                    if let Ok(Some(step)) = step_pdf_non_code_token(slice, r) {
+                        if matches!(
+                            step.kind,
+                            PdfNonCodeKind::Comment { .. } | PdfNonCodeKind::HexString { .. }
+                        ) {
+                            r = step.next_index;
+                            continue;
+                        }
+                    }
+                    if is_standalone_pdf_kw(slice, r, b"endobj") {
+                        break;
+                    }
+                    if is_standalone_pdf_kw(slice, r, b"stream") {
+                        return true;
+                    }
+                    r += 1;
+                }
+            }
+        }
+        p += 1;
+    }
+    false
+}
+
 fn step_damaged_non_code(bytes: &[u8], pos: usize, limit: usize) -> Option<usize> {
     let slice = &bytes[..limit];
     match step_pdf_non_code_token(slice, pos) {
         Ok(Some(PdfNonCodeStep {
             next_index,
-            kind: PdfNonCodeKind::Comment { .. },
+            kind: PdfNonCodeKind::Comment { .. } | PdfNonCodeKind::HexString { .. },
         })) => Some(next_index),
         Ok(Some(PdfNonCodeStep {
             next_index,
@@ -728,13 +824,9 @@ fn step_damaged_non_code(bytes: &[u8], pos: usize, limit: usize) -> Option<usize
                 PdfNonCodeKind::ParenString {
                     inner_start,
                     inner_end,
-                }
-                | PdfNonCodeKind::HexString {
-                    inner_start,
-                    inner_end,
                 },
         })) => {
-            if raw_span_crosses_object_boundary(&slice[inner_start..inner_end]) {
+            if paren_crosses_stream_object(&slice[inner_start..inner_end]) {
                 None
             } else {
                 Some(next_index)
@@ -829,7 +921,11 @@ fn has_encrypt_in_damaged_or_cipher_pdf(bytes: &[u8]) -> bool {
             }
             if hit_stream {
                 let stream_start = advance_past_stream_eol(bytes, end + 6);
-                if let Some((_, after_endstream)) =
+                if let Some((_, _, after_endobj)) =
+                    direct_len.and_then(|len| verify_direct_stream_bounds(bytes, stream_start, len))
+                {
+                    p = after_endobj;
+                } else if let Some((_, after_endstream)) =
                     resolve_stream_bounds(bytes, stream_start, direct_len)
                 {
                     p = after_endstream;

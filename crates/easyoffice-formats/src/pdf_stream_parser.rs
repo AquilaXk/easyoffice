@@ -256,30 +256,6 @@ pub(crate) fn has_structural_after_endobj(slice: &[u8], after_endobj: usize) -> 
     false
 }
 
-pub(crate) fn raw_span_crosses_object_boundary(slice: &[u8]) -> bool {
-    let len = slice.len();
-    let mut p = 0usize;
-    while p < len {
-        if p + 9 <= len && is_standalone_pdf_kw(slice, p, b"endstream") {
-            let q = skip_pdf_ws_and_comments(slice, p + 9, len);
-            if (q + 6 <= len
-                && is_standalone_pdf_kw(slice, q, b"endobj")
-                && has_structural_after_endobj(slice, q + 6))
-                || match_indirect_obj_header(slice, q, len).is_some()
-            {
-                return true;
-            }
-        } else if p + 6 <= len
-            && is_standalone_pdf_kw(slice, p, b"endobj")
-            && has_structural_after_endobj(slice, p + 6)
-        {
-            return true;
-        }
-        p += 1;
-    }
-    false
-}
-
 pub(crate) fn span_crosses_object_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
     if start >= end || end > bytes.len() {
         return false;
@@ -290,15 +266,6 @@ pub(crate) fn span_crosses_object_boundary(bytes: &[u8], start: usize, end: usiz
     while p < len {
         match step_pdf_non_code_token(slice, p) {
             Ok(Some(step)) => {
-                if let PdfNonCodeKind::ParenString {
-                    inner_start,
-                    inner_end,
-                } = step.kind
-                {
-                    if raw_span_crosses_object_boundary(&slice[inner_start..inner_end]) {
-                        return true;
-                    }
-                }
                 p = step.next_index;
                 continue;
             }

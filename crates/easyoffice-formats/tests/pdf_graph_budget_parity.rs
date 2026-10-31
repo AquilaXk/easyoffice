@@ -1,0 +1,377 @@
+use easyoffice_formats::{
+    adler32, deflate_zlib, DocumentFormat, EasyOfficeError, PdfDocumentModel, PdfPageModel,
+    PdfSerializer,
+};
+
+fn build_stored_zlib(payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(payload.len() + (payload.len() / 65_535 + 2) * 5 + 6);
+    out.extend_from_slice(&[0x78, 0x01]);
+    if payload.is_empty() {
+        out.extend_from_slice(&[0x01, 0x00, 0x00, 0xFF, 0xFF]);
+    } else {
+        let chunks: Vec<&[u8]> = payload.chunks(65_535).collect();
+        for (idx, chunk) in chunks.iter().enumerate() {
+            let is_last = idx + 1 == chunks.len();
+            out.push(u8::from(is_last));
+            let len = chunk.len() as u16;
+            let nlen = !len;
+            out.extend_from_slice(&len.to_le_bytes());
+            out.extend_from_slice(&nlen.to_le_bytes());
+            out.extend_from_slice(chunk);
+        }
+    }
+    out.extend_from_slice(&adler32(payload).to_be_bytes());
+    out
+}
+
+#[test]
+fn test_pdf_serializer_roundtrip_closed_boundary_and_encrypt_literals() {
+    let doc = PdfDocumentModel {
+        title: "Note: endobj trailer << /Encrypt 9 0 R >>".to_string(),
+        pages: vec![
+            PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: [
+                    "Note: endobj xref table",
+                    "Example: endobj 2 0 obj",
+                    "Note: endobj trailer << /Encrypt 9 0 R >>",
+                    "한글 문장 endobj xref 확인",
+                ]
+                .join("\n"),
+                approval_stamp: Some("승인완료".to_string()),
+            },
+            PdfPageModel {
+                page_number: 2,
+                rotation_degrees: 90,
+                body_text: "endstream\nendobj\n2 0 obj << /Encrypt 1 0 R >>".to_string(),
+                approval_stamp: None,
+            },
+        ],
+        watermark_text: Some("대외비".to_string()),
+    };
+
+    let bytes = PdfSerializer::serialize(&doc);
+    let parsed = PdfSerializer::parse(&bytes).expect("valid serialized PDF must round-trip");
+    assert_eq!(parsed, doc);
+}
+
+#[test]
+fn test_truncated_two_page_unencrypted_pdf_with_closed_encrypt_strings_returns_corrupted() {
+    let p1_stream = b"BT /F1 12 Tf 72 720 Td (endobj 2 0 obj trailer << /Encrypt 1 0 R >>) Tj ET";
+    let mut raw = Vec::new();
+    raw.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /Title (endobj 2 0 obj trailer << /Encrypt 1 0 R >>) >> endobj\n",
+    );
+    raw.extend_from_slice(b"2 0 obj << /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >> endobj\n");
+    raw.extend_from_slice(b"3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n");
+    raw.extend_from_slice(
+        format!("4 0 obj << /Length {} >>\nstream\n", p1_stream.len()).as_bytes(),
+    );
+    raw.extend_from_slice(p1_stream);
+    raw.extend_from_slice(b"\nendstream\nendobj\n");
+    raw.extend_from_slice(b"5 0 obj << /Type /Page /Parent 2 0 R /Contents 6 0 R >> endobj\n");
+    raw.extend_from_slice(
+        b"6 0 obj << /Length 120 >>\nstream\nBT /F1 12 Tf (truncated_p2) Tj ET\nendobj\n",
+    );
+    raw.extend_from_slice(b"xref\n0 7\ntrailer << /Size 7 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n");
+
+    assert!(matches!(
+        PdfSerializer::parse(&raw),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let full_two_page = PdfSerializer::serialize(&PdfDocumentModel {
+        title: "endobj 2 0 obj trailer << /Encrypt 1 0 R >>".to_string(),
+        pages: vec![
+            PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "endobj 2 0 obj trailer << /Encrypt 1 0 R >>".to_string(),
+                approval_stamp: None,
+            },
+            PdfPageModel {
+                page_number: 2,
+                rotation_degrees: 0,
+                body_text: "Page two intact text".to_string(),
+                approval_stamp: None,
+            },
+        ],
+        watermark_text: None,
+    });
+    let chopped = &full_two_page[..full_two_page.len() - 60];
+    assert!(matches!(
+        PdfSerializer::parse(chopped),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let unclosed_into_xref_stream = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Title (UnclosedCipher >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "4 0 obj << /Type /XRef /Size 5 /Root 1 0 R /Encrypt 9 0 R /Length 6 >>\nstream\n",
+        "xyz)00\n",
+        "endstream\nendobj\n",
+        "startxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(unclosed_into_xref_stream.as_bytes()),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+}
+
+#[test]
+fn test_direct_length_binary_stream_allows_boundary_bytes_and_forward_filter_resolves() {
+    let binary_payload = b"\x89PNG\r\n(unclosed\nendstream\nendobj\n99 0 obj << /Encrypt 1 0 R >>";
+    let page_flate = deflate_zlib(b"BT /F1 12 Tf 72 720 Td (ForwardFlateBody) Tj ET");
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /Title (DirectLenAndForwardFilter) >> endobj\n",
+    );
+    pdf.extend_from_slice(b"2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n");
+    pdf.extend_from_slice(
+        b"3 0 obj << /Type /Page /Parent 2 0 R /Thumb 6 0 R /Contents 4 0 R >> endobj\n",
+    );
+    pdf.extend_from_slice(
+        format!(
+            "4 0 obj << /Length {} /Filter 9 0 R >>\nstream\n",
+            page_flate.len()
+        )
+        .as_bytes(),
+    );
+    pdf.extend_from_slice(&page_flate);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    pdf.extend_from_slice(
+        format!(
+            "6 0 obj << /Subtype /Image /Length {} >>\nstream\n",
+            binary_payload.len()
+        )
+        .as_bytes(),
+    );
+    pdf.extend_from_slice(binary_payload);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    pdf.extend_from_slice(b"9 0 obj [/FlateDecode] endobj\n");
+    pdf.extend_from_slice(b"xref\n0 10\ntrailer << /Size 10 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n");
+
+    let parsed =
+        PdfSerializer::parse(&pdf).expect("direct /Length binary + forward /Filter must pass");
+    assert_eq!(parsed.title, "DirectLenAndForwardFilter");
+    assert_eq!(parsed.pages.len(), 1);
+    assert_eq!(parsed.pages[0].body_text, "ForwardFlateBody");
+}
+
+#[test]
+fn test_fail_closed_filter_and_non_page_or_inline_flate_b64_rejection() {
+    let page_raw = b"BT /F1 12 Tf 72 720 Td (CleanBody) Tj ET";
+
+    let mut missing_filter_pdf = Vec::new();
+    missing_filter_pdf.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+    );
+    missing_filter_pdf.extend_from_slice(
+        format!("4 0 obj << /Length {} >>\nstream\n", page_raw.len()).as_bytes(),
+    );
+    missing_filter_pdf.extend_from_slice(page_raw);
+    missing_filter_pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    missing_filter_pdf.extend_from_slice(
+        b"7 0 obj << /Length 4 /Filter 99 0 R >>\nstream\nABCD\nendstream\nendobj\nxref\n0 8\ntrailer << /Size 8 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
+    );
+    assert!(matches!(
+        PdfSerializer::parse(&missing_filter_pdf),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let mut corrupt_flate_pdf = Vec::new();
+    corrupt_flate_pdf.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+    );
+    corrupt_flate_pdf.extend_from_slice(
+        format!("4 0 obj << /Length {} >>\nstream\n", page_raw.len()).as_bytes(),
+    );
+    corrupt_flate_pdf.extend_from_slice(page_raw);
+    corrupt_flate_pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    corrupt_flate_pdf.extend_from_slice(
+        b"7 0 obj << /Length 6 /Filter /FlateDecode >>\nstream\nBADZLB\nendstream\nendobj\nxref\n0 8\ntrailer << /Size 8 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
+    );
+    assert!(matches!(
+        PdfSerializer::parse(&corrupt_flate_pdf),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let mut large_spoof = vec![b'A'; 5 * 1024 * 1024];
+    large_spoof.extend_from_slice(b"\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mIn0=\n");
+    let compressed_spoof = build_stored_zlib(&large_spoof);
+    let mut forward_spoof_pdf = Vec::new();
+    forward_spoof_pdf.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+    );
+    forward_spoof_pdf.extend_from_slice(
+        format!("4 0 obj << /Length {} >>\nstream\n", page_raw.len()).as_bytes(),
+    );
+    forward_spoof_pdf.extend_from_slice(page_raw);
+    forward_spoof_pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    forward_spoof_pdf.extend_from_slice(
+        format!(
+            "7 0 obj << /Length {} /Filter 9 0 R >>\nstream\n",
+            compressed_spoof.len()
+        )
+        .as_bytes(),
+    );
+    forward_spoof_pdf.extend_from_slice(&compressed_spoof);
+    forward_spoof_pdf.extend_from_slice(b"\nendstream\nendobj\n9 0 obj /FlateDecode endobj\nxref\n0 10\ntrailer << /Size 10 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n");
+    assert!(matches!(
+        PdfSerializer::parse(&forward_spoof_pdf),
+        Err(EasyOfficeError::SecurityViolation(_))
+    ));
+
+    let inline_spoof = deflate_zlib(
+        b"BT /F1 12 Tf (Inline) Tj ET\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mIn0=\n",
+    );
+    let mut inline_page_pdf = Vec::new();
+    inline_page_pdf.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n",
+    );
+    inline_page_pdf.extend_from_slice(
+        format!(
+            "3 0 obj << /Type /Page /Parent 2 0 R /Length {} /Filter /FlateDecode >>\nstream\n",
+            inline_spoof.len()
+        )
+        .as_bytes(),
+    );
+    inline_page_pdf.extend_from_slice(&inline_spoof);
+    inline_page_pdf.extend_from_slice(
+        b"\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
+    );
+    assert!(matches!(
+        PdfSerializer::parse(&inline_page_pdf),
+        Err(EasyOfficeError::SecurityViolation(_))
+    ));
+}
+
+#[test]
+fn test_cumulative_32mib_budget_shared_contents_and_page_tree_depth_caps() {
+    let mut chunk_12m = vec![b' '; 12 * 1024 * 1024 - 32];
+    chunk_12m.extend_from_slice(b"BT /F1 12 Tf 72 720 Td (Ok) Tj ET");
+    let flate_12m = build_stored_zlib(&chunk_12m);
+
+    let mut two_12m_pdf = Vec::new();
+    two_12m_pdf.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+    );
+    two_12m_pdf.extend_from_slice(
+        format!(
+            "4 0 obj << /Length {} /Filter /FlateDecode >>\nstream\n",
+            flate_12m.len()
+        )
+        .as_bytes(),
+    );
+    two_12m_pdf.extend_from_slice(&flate_12m);
+    two_12m_pdf.extend_from_slice(
+        b"\nendstream\nendobj\n5 0 obj << /Type /Page /Parent 2 0 R /Contents 6 0 R >> endobj\n",
+    );
+    two_12m_pdf.extend_from_slice(
+        format!(
+            "6 0 obj << /Length {} /Filter /FlateDecode >>\nstream\n",
+            flate_12m.len()
+        )
+        .as_bytes(),
+    );
+    two_12m_pdf.extend_from_slice(&flate_12m);
+    two_12m_pdf.extend_from_slice(
+        b"\nendstream\nendobj\nxref\n0 7\ntrailer << /Size 7 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
+    );
+    let ok_24m = PdfSerializer::parse(&two_12m_pdf).expect("24MiB cumulative Flate must succeed");
+    assert_eq!(ok_24m.pages.len(), 2);
+
+    let mut three_12m_pdf = Vec::new();
+    three_12m_pdf.extend_from_slice(
+        b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+    );
+    for obj_id in [4usize, 5, 6] {
+        three_12m_pdf.extend_from_slice(
+            format!(
+                "{obj_id} 0 obj << /Length {} /Filter /FlateDecode >>\nstream\n",
+                flate_12m.len()
+            )
+            .as_bytes(),
+        );
+        three_12m_pdf.extend_from_slice(&flate_12m);
+        three_12m_pdf.extend_from_slice(b"\nendstream\nendobj\n");
+    }
+    three_12m_pdf
+        .extend_from_slice(b"xref\n0 7\ntrailer << /Size 7 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n");
+    assert!(matches!(
+        PdfSerializer::parse(&three_12m_pdf),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
+
+    let mut shared_200k = vec![b' '; 200 * 1024 - 34];
+    shared_200k.extend_from_slice(b"BT /F1 12 Tf 72 720 Td (Amp) Tj ET");
+    let repeated_200 = std::iter::repeat_n("4 0 R", 200)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut shared_amp_pdf = Vec::new();
+    shared_amp_pdf.extend_from_slice(
+        format!(
+            "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents [{repeated_200}] >> endobj\n4 0 obj << /Length {} >>\nstream\n",
+            shared_200k.len()
+        )
+        .as_bytes(),
+    );
+    shared_amp_pdf.extend_from_slice(&shared_200k);
+    shared_amp_pdf.extend_from_slice(
+        b"\nendstream\nendobj\nxref\n0 5\ntrailer << /Size 5 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
+    );
+    assert!(matches!(
+        PdfSerializer::parse(&shared_amp_pdf),
+        Err(EasyOfficeError::SecurityViolation(_))
+    ));
+
+    let repeated_257 = std::iter::repeat_n("4 0 R", 257)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let over_contents_cap = format!(
+        "%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents [{repeated_257}] >> endobj\n4 0 obj << /Length 31 >>\nstream\nBT /F1 12 Tf 72 720 Td (X) Tj ET\nendstream\nendobj\nxref\n0 5\ntrailer << /Size 5 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(over_contents_cap.as_bytes()),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let build_deep_pages_pdf = |chain_len: usize| -> Vec<u8> {
+        let mut s = String::from("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+        for i in 0..chain_len {
+            let cur = 2 + i;
+            let next = cur + 1;
+            s.push_str(&format!(
+                "{cur} 0 obj << /Type /Pages /Count 1 /Kids [{next} 0 R] >> endobj\n"
+            ));
+        }
+        let leaf_page = 2 + chain_len;
+        let content_id = leaf_page + 1;
+        let body = "BT /F1 12 Tf 72 720 Td (DeepLeaf) Tj ET";
+        s.push_str(&format!(
+            "{leaf_page} 0 obj << /Type /Page /Contents {content_id} 0 R >> endobj\n"
+        ));
+        s.push_str(&format!(
+            "{content_id} 0 obj << /Length {} >>\nstream\n{body}\nendstream\nendobj\n",
+            body.len()
+        ));
+        let total = content_id + 1;
+        s.push_str(&format!(
+            "xref\n0 {total}\ntrailer << /Size {total} /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+        ));
+        s.into_bytes()
+    };
+
+    let ok_depth_64 = PdfSerializer::parse(&build_deep_pages_pdf(64)).unwrap();
+    assert_eq!(ok_depth_64.pages.len(), 1);
+    assert_eq!(ok_depth_64.pages[0].body_text, "DeepLeaf");
+
+    assert!(matches!(
+        PdfSerializer::parse(&build_deep_pages_pdf(65)),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+}

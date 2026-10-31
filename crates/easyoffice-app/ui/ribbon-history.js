@@ -370,44 +370,33 @@
         return true;
       }
       if (cmdId.endsWith("-layout-columns")) {
-        let cols = Number(execRes?.columnCount || 0);
-        if (!cols) {
-          const curCols = Number(docEditor.style.columnCount || "1");
-          cols = curCols >= 3 ? 1 : curCols + 1;
-        }
+        const curCols = Number(docEditor.style.columnCount || "1");
+        const cols = curCols >= 3 ? 1 : curCols + 1;
         docEditor.style.columnCount = cols > 1 ? String(cols) : "";
         return true;
       }
       if (cmdId.endsWith("-layout-orientation")) {
-        const landscape =
-          execRes?.isLandscape !== undefined
-            ? Boolean(execRes.isLandscape)
-            : docEditor.style.maxWidth !== "980px";
+        const landscape = docEditor.style.maxWidth !== "980px";
         docEditor.style.maxWidth = landscape ? "980px" : "";
         return true;
       }
       if (cmdId.endsWith("-layout-margins")) {
         const pads = ["28px 36px", "16px 20px", "36px 52px"];
-        let idx = Number(execRes?.marginPresetIndex ?? -1);
-        if (idx < 0) {
-          const curPadIdx = pads.indexOf(docEditor.style.padding);
-          idx = curPadIdx >= 0 ? (curPadIdx + 1) % pads.length : 1;
-        } else {
-          idx %= pads.length;
-        }
+        const curPadIdx = pads.indexOf(docEditor.style.padding);
+        const idx = curPadIdx >= 0 ? (curPadIdx + 1) % pads.length : 1;
         docEditor.style.padding = pads[idx];
         return true;
       }
       if (cmdId.endsWith("-layout-paper")) {
-        const paper = execRes?.paperSize || (docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter");
+        const paper = docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter";
         docEditor.dataset.paperSize = paper;
         return true;
       }
       if (cmdId === "hwp-mod-border") {
-        const tableEl = document.getElementById("doc-table");
+        const tableEl =
+          docEditor.querySelector("#doc-table") || document.getElementById("doc-table");
         if (tableEl) {
-          const borderOn =
-            execRes?.doubleDiagonalBorderEnabled ?? tableEl.style.borderStyle !== "double";
+          const borderOn = tableEl.style.borderStyle !== "double";
           tableEl.style.borderStyle = borderOn ? "double" : "";
         }
         return true;
@@ -682,11 +671,13 @@
           }
         } else if (stageBox) {
           if (cmdId === "slide-layout-columns" && lowerZone) {
-            const cols = execRes?.columnCount || 1;
+            const curCols = Number(lowerZone.style.columnCount || "1");
+            const cols = curCols >= 3 ? 1 : curCols + 1;
             lowerZone.style.columnCount = cols > 1 ? String(cols) : "";
           } else if (cmdId === "slide-layout-margins") {
-            const idx = Number(execRes?.marginPresetIndex ?? 0) % 3;
             const pads = ["20px", "12px", "28px"];
+            const curPadIdx = pads.indexOf(stageBox.style.padding);
+            const idx = curPadIdx >= 0 ? (curPadIdx + 1) % pads.length : 1;
             stageBox.style.padding = pads[idx];
           } else if (cmdId === "slide-mod-snap" || cmdId === "slide-review-track") {
             stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--eo-primary)";
@@ -744,6 +735,7 @@
         }
         await applyRibbonDomSideEffects(cmdId, execRes, preparedEffect);
         commitDeferredUndoSnapshot(preSnapshot);
+        sheetController.refreshFocusedSheetCellPendingSnapshot();
         const fb = document.getElementById("status-command-feedback");
         if (fb && execRes && !options.skipFeedback) {
           const fallbackMsg = options.fallbackTitle ? "명령 실행: " + options.fallbackTitle : "";
@@ -754,6 +746,7 @@
     }
 
     return {
+      enqueueWorkspaceHistoryOp,
       pushRawUndoSnapshot,
       commitDeferredUndoSnapshot,
       captureWorkspaceSnapshot,

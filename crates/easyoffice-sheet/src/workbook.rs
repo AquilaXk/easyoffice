@@ -78,8 +78,6 @@ impl WorkbookEngine {
             return &mut self.sheets[pos];
         }
         let mut engine = SheetEngine::new(norm);
-        engine.name = norm.to_string();
-        engine.sheet_id = crate::compute_sheet_id(&engine.name);
         while engine.sheet_id == 0 || self.sheets.iter().any(|s| s.sheet_id == engine.sheet_id) {
             engine.sheet_id = engine.sheet_id.wrapping_add(1);
             if engine.sheet_id == 0 {

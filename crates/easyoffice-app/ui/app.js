@@ -419,6 +419,7 @@
         html.dataset.theme = next;
         localRibbonState.darkThemeEnabled = next === "dark";
         themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
+        sheetController.refreshFocusedSheetCellPendingSnapshot();
       });
     }
   }
@@ -491,35 +492,36 @@
     const btnConvert = document.getElementById("btn-run-convert");
     if (btnConvert) {
       btnConvert.addEventListener("click", () => {
-        const runConvert = async () => {
-          await sheetController.commitPendingFocusedSheetCell(true);
-          const src = document.getElementById("conv-src-fmt").value;
-          const dst = document.getElementById("conv-dst-fmt").value;
-          const body = workspacePanels.buildStructuredConversionBody(src);
-          const res = await invokeIpc(
-            "convert_document_format",
-            src + "->" + dst + "|통합_변환_문서|" + body
-          );
-          const box = document.getElementById("conv-result-box");
-          if (res && res.convertedBase64) {
-            workspacePanels.triggerBase64Download(res.convertedBase64, "통합_변환_문서", dst);
-          }
-          if (box && res) {
-            box.textContent =
-              "[" +
-              res.status +
-              "] " +
-              res.sourceFormat.toUpperCase() +
-              " (" +
-              res.sourceBytes +
-              "B) → " +
-              res.targetFormat.toUpperCase() +
-              " (" +
-              res.outputBytes +
-              "B) · " +
-              res.specification;
-          }
-        };
+        const runConvert = () =>
+          ribbonHistory.enqueueWorkspaceHistoryOp(async () => {
+            await sheetController.commitPendingFocusedSheetCell(true);
+            const src = document.getElementById("conv-src-fmt").value;
+            const dst = document.getElementById("conv-dst-fmt").value;
+            const body = workspacePanels.buildStructuredConversionBody(src);
+            const res = await invokeIpc(
+              "convert_document_format",
+              src + "->" + dst + "|통합_변환_문서|" + body
+            );
+            const box = document.getElementById("conv-result-box");
+            if (res && res.convertedBase64) {
+              workspacePanels.triggerBase64Download(res.convertedBase64, "통합_변환_문서", dst);
+            }
+            if (box && res) {
+              box.textContent =
+                "[" +
+                res.status +
+                "] " +
+                res.sourceFormat.toUpperCase() +
+                " (" +
+                res.sourceBytes +
+                "B) → " +
+                res.targetFormat.toUpperCase() +
+                " (" +
+                res.outputBytes +
+                "B) · " +
+                res.specification;
+            }
+          });
         void runConvert().catch(() => {});
       });
     }
@@ -659,7 +661,9 @@
       });
     }
 
-    const auditBtn = document.getElementById("btn-run-security-audit");
+    const auditBtn =
+      document.getElementById("btn-run-security-audit") ||
+      document.getElementById("btn-security-audit");
     if (auditBtn) {
       auditBtn.addEventListener("click", () => {
         void workspacePanels.runSecurityAuditAction().catch(() => {});

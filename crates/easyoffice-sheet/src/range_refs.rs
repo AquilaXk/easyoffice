@@ -37,6 +37,62 @@ fn split_indirect_sheet_bang(s: &str) -> Result<Option<(&str, &str)>, FormulaErr
     Ok(None)
 }
 
+fn split_once_unquoted_colon(s: &str) -> Result<Option<(&str, &str)>, FormulaError> {
+    let bytes = s.as_bytes();
+    let mut in_quotes = false;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' if in_quotes => {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    i += 2;
+                    continue;
+                }
+                in_quotes = false;
+            }
+            b'\'' => {
+                in_quotes = true;
+            }
+            b':' if !in_quotes => {
+                return Ok(Some((&s[..i], &s[i + 1..])));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if in_quotes {
+        return Err(FormulaError::Ref);
+    }
+    Ok(None)
+}
+
+fn parse_indirect_sheet_token(sh_raw: &str) -> Result<String, FormulaError> {
+    let sh_tok = sh_raw.trim();
+    if sh_tok.starts_with('\'') {
+        WorkbookEngine::unquote_formula_sheet_token(sh_tok).ok_or(FormulaError::Ref)
+    } else {
+        if sh_tok.is_empty() || sh_tok.contains('\'') || sh_tok.chars().any(char::is_whitespace) {
+            return Err(FormulaError::Ref);
+        }
+        Ok(sh_tok.to_string())
+    }
+}
+
+fn parse_indirect_endpoint(
+    part: &str,
+) -> Result<(Option<String>, PackedCellCoordinate), FormulaError> {
+    let trimmed = part.trim();
+    if let Some((sh_raw, cell_part)) = split_indirect_sheet_bang(trimmed)? {
+        let sh = parse_indirect_sheet_token(sh_raw)?;
+        let coord =
+            PackedCellCoordinate::parse_a1(cell_part.trim()).map_err(|_| FormulaError::Ref)?;
+        Ok((Some(sh), coord))
+    } else {
+        let coord = PackedCellCoordinate::parse_a1(trimmed).map_err(|_| FormulaError::Ref)?;
+        Ok((None, coord))
+    }
+}
+
 impl SheetEngine {
     #[inline]
     fn has_sheet_in_ctx(&self, sheet: &str, ctx: &EvalContext<'_>) -> bool {
@@ -80,33 +136,48 @@ impl SheetEngine {
                 let ref_str = self
                     .eval_arg_val(&args[0], ctx, depth + 1)?
                     .to_display_string();
+                if args.len() == 2 {
+                    let mode_val = self.eval_arg_val(&args[1], ctx, depth + 1)?;
+                    if mode_val.as_bool() != Some(true) {
+                        return Err(FormulaError::Value);
+                    }
+                }
                 let trimmed = ref_str.trim();
                 if trimmed.is_empty() {
                     return Err(FormulaError::Ref);
                 }
-                if let Some((sh_raw, range_part)) = split_indirect_sheet_bang(trimmed)? {
-                    let sh_tok = sh_raw.trim();
-                    let sh_clean = if sh_tok.starts_with('\'') {
-                        WorkbookEngine::unquote_formula_sheet_token(sh_tok)
-                            .ok_or(FormulaError::Ref)?
-                    } else {
-                        if sh_tok.is_empty()
-                            || sh_tok.contains('\'')
-                            || sh_tok.chars().any(char::is_whitespace)
-                        {
+                if let Some((lhs_raw, rhs_raw)) = split_once_unquoted_colon(trimmed)? {
+                    let (lhs_sh, start_coord) = parse_indirect_endpoint(lhs_raw)?;
+                    let (rhs_sh, end_coord) = parse_indirect_endpoint(rhs_raw)?;
+                    if let Some(ref rs) = rhs_sh {
+                        let Some(ref ls) = lhs_sh else {
+                            return Err(FormulaError::Ref);
+                        };
+                        if !WorkbookEngine::is_same_sheet_identity(ls, rs) {
                             return Err(FormulaError::Ref);
                         }
-                        sh_tok.to_string()
-                    };
-                    if sh_clean.is_empty() || !self.has_sheet_in_ctx(&sh_clean, ctx) {
-                        return Err(FormulaError::Ref);
                     }
                     let range =
-                        CellRange::parse(range_part.trim()).map_err(|_| FormulaError::Ref)?;
-                    Ok(Some((Some(Cow::Owned(sh_clean)), range, false)))
+                        CellRange::new(start_coord, end_coord).map_err(|_| FormulaError::Ref)?;
+                    if let Some(sh_clean) = lhs_sh {
+                        if sh_clean.is_empty() || !self.has_sheet_in_ctx(&sh_clean, ctx) {
+                            return Err(FormulaError::Ref);
+                        }
+                        Ok(Some((Some(Cow::Owned(sh_clean)), range, false)))
+                    } else {
+                        Ok(Some((None, range, false)))
+                    }
                 } else {
-                    let range = CellRange::parse(trimmed).map_err(|_| FormulaError::Ref)?;
-                    Ok(Some((None, range, false)))
+                    let (sh_opt, coord) = parse_indirect_endpoint(trimmed)?;
+                    let range = CellRange::new(coord, coord).map_err(|_| FormulaError::Ref)?;
+                    if let Some(sh_clean) = sh_opt {
+                        if sh_clean.is_empty() || !self.has_sheet_in_ctx(&sh_clean, ctx) {
+                            return Err(FormulaError::Ref);
+                        }
+                        Ok(Some((Some(Cow::Owned(sh_clean)), range, false)))
+                    } else {
+                        Ok(Some((None, range, false)))
+                    }
                 }
             }
             Expr::FuncCall { name, args } if name == "OFFSET" => {

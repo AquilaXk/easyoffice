@@ -49,6 +49,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/webui-dom-harness.mjs",
   "scripts/test-webui-behavior.mjs",
   "scripts/test-webui-sheet-atomicity.mjs",
+  "scripts/test-webui-round13-parity.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)

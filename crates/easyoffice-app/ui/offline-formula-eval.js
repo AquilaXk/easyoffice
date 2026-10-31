@@ -3,12 +3,15 @@
 
   const astApi = host.__EASYOFFICE_FORMULA_AST__;
   const {
+    MAX_PARSE_DEPTH,
     MAX_EXPANDED_CELL_COUNT,
     asciiUpperJs,
     jsonSheetNameOrDefaultJs,
     canonicalSheetKeyJs,
     isSameSheetIdentityJs,
+    unquoteFormulaSheetTokenOnce,
     quoteFormulaSheetName,
+    parseStrictA1Coord,
     normalizeA1Token,
     parseCellRefParts,
     colIndexToLetters,
@@ -114,16 +117,25 @@
     if (!shKey) return valErr("#REF!");
     const normRef = normalizeA1Token(cellRef);
     if (!normRef) return valErr("#REF!");
-    if (depth > 64) return valErr("#REF!");
+    if (depth > 64) {
+      if (workbook) workbook.depthTruncated = true;
+      return valErr("#REF!");
+    }
     const fullKey = shKey + "!" + normRef;
     if (workbook.memo.has(fullKey)) return workbook.memo.get(fullKey);
     const formula = workbook.formulaEntries[fullKey];
     if (formula !== undefined) {
       if (workbook.visiting.has(fullKey)) return valErr("#CYCLE!");
+      const savedTruncated = Boolean(workbook.depthTruncated);
+      workbook.depthTruncated = false;
       workbook.visiting.add(fullKey);
       const computed = evaluateFormulaTyped(formula, workbook, shKey, normRef, depth + 1);
       workbook.visiting.delete(fullKey);
-      workbook.memo.set(fullKey, computed);
+      const childTruncated = Boolean(workbook.depthTruncated);
+      workbook.depthTruncated = savedTruncated || childTruncated;
+      if (!childTruncated) {
+        workbook.memo.set(fullKey, computed);
+      }
       return computed;
     }
     const plain = parsePlainCellTyped(workbook.rawValues[fullKey] ?? "");
@@ -311,19 +323,190 @@
     "VAR",
   ]);
 
+  function splitOnceUnquotedStrict(src, delimiter) {
+    let inQuotes = false;
+    let splitIdx = -1;
+    for (let i = 0; i < src.length; i += 1) {
+      const ch = src[i];
+      if (ch === "'") {
+        if (inQuotes) {
+          if (i + 1 < src.length && src[i + 1] === "'") {
+            i += 1;
+            continue;
+          }
+          inQuotes = false;
+        } else {
+          inQuotes = true;
+        }
+        continue;
+      }
+      if (!inQuotes && ch === delimiter) {
+        if (splitIdx !== -1) return { ok: false };
+        splitIdx = i;
+      }
+    }
+    if (inQuotes) return { ok: false };
+    if (splitIdx === -1) return { ok: true, parts: [src] };
+    return { ok: true, parts: [src.slice(0, splitIdx), src.slice(splitIdx + 1)] };
+  }
+
+  function parseIndirectEndpoint(rawPart) {
+    const bangSplit = splitOnceUnquotedStrict(String(rawPart ?? "").trim(), "!");
+    if (!bangSplit.ok) return { ok: false };
+    if (bangSplit.parts.length === 2) {
+      const shRaw = bangSplit.parts[0].trim();
+      const coordRaw = bangSplit.parts[1].trim();
+      if (!shRaw || !coordRaw) return { ok: false };
+      let sheetName = null;
+      if (shRaw.startsWith("'")) {
+        sheetName = unquoteFormulaSheetTokenOnce(shRaw);
+        if (!sheetName || sheetName.trim().length === 0) return { ok: false };
+      } else {
+        if (/^[0-9.]/.test(shRaw) || /[\s'!"#%&()*+,\-/:;<=>?@[\\\]^`{|}~.]/.test(shRaw)) {
+          return { ok: false };
+        }
+        sheetName = shRaw;
+      }
+      const coord = parseStrictA1Coord(coordRaw);
+      if (!coord.ok) return { ok: false };
+      return { ok: true, sheet: sheetName, col: coord.col, row: coord.row };
+    }
+    const coord = parseStrictA1Coord(bangSplit.parts[0].trim());
+    if (!coord.ok) return { ok: false };
+    return { ok: true, sheet: null, col: coord.col, row: coord.row };
+  }
+
+  function resolveIndirectRange(refText, workbook, currentSheetUpper) {
+    const trimmed = String(refText ?? "").trim();
+    if (!trimmed) return valErr("#REF!");
+    const colonSplit = splitOnceUnquotedStrict(trimmed, ":");
+    if (!colonSplit.ok) return valErr("#REF!");
+    const lhs = parseIndirectEndpoint(colonSplit.parts[0]);
+    if (!lhs.ok) return valErr("#REF!");
+    const sheetUpper =
+      lhs.sheet === null
+        ? currentSheetUpper
+        : resolveCanonicalSheetUpper(workbook.knownSheets, lhs.sheet);
+    if (!sheetUpper) return valErr("#REF!");
+    if (colonSplit.parts.length === 1) {
+      return {
+        kind: "range",
+        sheetUpper,
+        minCol: lhs.col,
+        maxCol: lhs.col,
+        minRow: lhs.row,
+        maxRow: lhs.row,
+        cellCount: 1,
+      };
+    }
+    const rhs = parseIndirectEndpoint(colonSplit.parts[1]);
+    if (!rhs.ok) return valErr("#REF!");
+    if (lhs.sheet === null && rhs.sheet !== null) return valErr("#REF!");
+    if (rhs.sheet !== null) {
+      if (!isSameSheetIdentityJs(lhs.sheet, rhs.sheet)) return valErr("#REF!");
+      if (!resolveCanonicalSheetUpper(workbook.knownSheets, rhs.sheet)) return valErr("#REF!");
+    }
+    const minCol = Math.min(lhs.col, rhs.col);
+    const maxCol = Math.max(lhs.col, rhs.col);
+    const minRow = Math.min(lhs.row, rhs.row);
+    const maxRow = Math.max(lhs.row, rhs.row);
+    const cellCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
+    if (cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
+    return { kind: "range", sheetUpper, minCol, maxCol, minRow, maxRow, cellCount };
+  }
+
+  function isChainBinaryNode(node) {
+    return (
+      Boolean(node) &&
+      (node.kind === "Binary" || node.kind === "Concat" || node.kind === "Compare")
+    );
+  }
+
+  function applyChainBinaryStep(step, lhs, rhs) {
+    if (step.kind === "Concat") {
+      return valText(formatFormulaValue(lhs) + formatFormulaValue(rhs));
+    }
+    if (step.kind === "Compare") {
+      const cmp = compareTypedValues(lhs, rhs);
+      if (step.op === "=") return valBool(cmp === 0);
+      if (step.op === "<>") return valBool(cmp !== 0);
+      if (step.op === "<") return valBool(cmp < 0);
+      if (step.op === "<=") return valBool(cmp <= 0);
+      if (step.op === ">") return valBool(cmp > 0);
+      return valBool(cmp >= 0);
+    }
+    const a = coerceScalarNumber(lhs);
+    const b = coerceScalarNumber(rhs);
+    if (a === null || b === null) return valErr("#VALUE!");
+    if (step.op === "+") return valNum(a + b);
+    if (step.op === "-") return valNum(a - b);
+    if (step.op === "*") return valNum(a * b);
+    if (step.op === "/") {
+      if (b === 0) return valErr("#DIV/0!");
+      return valNum(a / b);
+    }
+    return valNum(a ** b);
+  }
+
   function evaluateFormulaTyped(exprStr, workbook, currentSheetUpper, currentCellRef, depth = 0) {
-    if (depth > 64) return valErr("#REF!");
+    if (depth > 64) {
+      if (workbook) workbook.depthTruncated = true;
+      return valErr("#REF!");
+    }
     const parsed = parseFormulaAstJs(exprStr);
     if (parsed.kind === "Plain") return parsePlainCellTyped(parsed.raw);
     if (parsed.kind === "FormulaError") return valErr(parsed.code);
 
     function ensureScalar(v) {
-      if (v && v.kind === "range") return valErr("#VALUE!");
+      if (v && v.kind === "range") {
+        if (v.minCol === v.maxCol && v.minRow === v.maxRow) {
+          if (!v.sheetUpper) return valErr("#REF!");
+          return readWorkbookTypedCell(
+            workbook,
+            v.sheetUpper,
+            colIndexToLetters(v.minCol) + v.minRow,
+            depth
+          );
+        }
+        return valErr("#VALUE!");
+      }
       return v;
     }
 
-    function evalAst(node) {
+    function evalIndirectCall(args, astDepth) {
+      if (args.length !== 1 && args.length !== 2) return valErr("#VALUE!");
+      const refVal = ensureScalar(evalAst(args[0], astDepth));
+      if (refVal.kind === "error") return refVal;
+      if (args.length === 2) {
+        const modeVal = ensureScalar(evalAst(args[1], astDepth));
+        if (modeVal.kind === "error") return modeVal;
+        const a1Flag = coerceScalarBool(modeVal);
+        if (a1Flag !== true) return valErr("#VALUE!");
+      }
+      return resolveIndirectRange(formatFormulaValue(refVal), workbook, currentSheetUpper);
+    }
+
+    function evalAst(node, astDepth = 0) {
+      if (astDepth > MAX_PARSE_DEPTH) return valErr("#VALUE!");
       if (!node || node.kind === "Empty") return valEmpty();
+      if (isChainBinaryNode(node)) {
+        const ops = [];
+        let cur = node;
+        while (isChainBinaryNode(cur)) {
+          ops.push(cur);
+          cur = cur.lhs;
+        }
+        let acc = ensureScalar(evalAst(cur, astDepth));
+        if (acc.kind === "error") return acc;
+        for (let i = ops.length - 1; i >= 0; i -= 1) {
+          const step = ops[i];
+          const rhs = ensureScalar(evalAst(step.rhs, astDepth + 1));
+          if (rhs.kind === "error") return rhs;
+          acc = applyChainBinaryStep(step, acc, rhs);
+          if (acc.kind === "error") return acc;
+        }
+        return acc;
+      }
       if (node.kind === "Number") return valNum(node.value);
       if (node.kind === "Str") return valText(node.value);
       if (node.kind === "Bool") return valBool(node.value);
@@ -348,7 +531,7 @@
         };
       }
       if (node.kind === "Unary") {
-        const inner = ensureScalar(evalAst(node.expr));
+        const inner = ensureScalar(evalAst(node.expr, astDepth + 1));
         if (inner.kind === "error") return inner;
         if (node.op === "group") return inner;
         const n = coerceScalarNumber(inner);
@@ -357,60 +540,26 @@
         if (node.op === "+") return valNum(n);
         return valNum(n / 100);
       }
-      if (node.kind === "Concat") {
-        const lhs = ensureScalar(evalAst(node.lhs));
-        if (lhs.kind === "error") return lhs;
-        const rhs = ensureScalar(evalAst(node.rhs));
-        if (rhs.kind === "error") return rhs;
-        return valText(formatFormulaValue(lhs) + formatFormulaValue(rhs));
-      }
-      if (node.kind === "Compare") {
-        const lhs = ensureScalar(evalAst(node.lhs));
-        if (lhs.kind === "error") return lhs;
-        const rhs = ensureScalar(evalAst(node.rhs));
-        if (rhs.kind === "error") return rhs;
-        const cmp = compareTypedValues(lhs, rhs);
-        if (node.op === "=") return valBool(cmp === 0);
-        if (node.op === "<>") return valBool(cmp !== 0);
-        if (node.op === "<") return valBool(cmp < 0);
-        if (node.op === "<=") return valBool(cmp <= 0);
-        if (node.op === ">") return valBool(cmp > 0);
-        return valBool(cmp >= 0);
-      }
-      if (node.kind === "Binary") {
-        const lhs = ensureScalar(evalAst(node.lhs));
-        if (lhs.kind === "error") return lhs;
-        const rhs = ensureScalar(evalAst(node.rhs));
-        if (rhs.kind === "error") return rhs;
-        const a = coerceScalarNumber(lhs);
-        const b = coerceScalarNumber(rhs);
-        if (a === null || b === null) return valErr("#VALUE!");
-        if (node.op === "+") return valNum(a + b);
-        if (node.op === "-") return valNum(a - b);
-        if (node.op === "*") return valNum(a * b);
-        if (node.op === "/") {
-          if (b === 0) return valErr("#DIV/0!");
-          return valNum(a / b);
-        }
-        return valNum(a ** b);
-      }
       if (node.kind === "FuncCall") {
         const fnUpper = node.name;
         const args = node.args;
+        if (fnUpper === "INDIRECT") {
+          return evalIndirectCall(args, astDepth + 1);
+        }
         if (fnUpper === "IF") {
           if (args.length < 2 || args.length > 3) return valErr("#VALUE!");
-          const cond = ensureScalar(evalAst(args[0]));
+          const cond = ensureScalar(evalAst(args[0], astDepth + 1));
           if (cond.kind === "error") return cond;
           const flag = coerceScalarBool(cond);
           if (flag === null) return valErr("#VALUE!");
-          if (flag) return ensureScalar(evalAst(args[1]));
-          if (args.length === 3) return ensureScalar(evalAst(args[2]));
+          if (flag) return ensureScalar(evalAst(args[1], astDepth + 1));
+          if (args.length === 3) return ensureScalar(evalAst(args[2], astDepth + 1));
           return valBool(false);
         }
         if (fnUpper === "IFERROR") {
           if (args.length !== 2) return valErr("#VALUE!");
-          const primary = ensureScalar(evalAst(args[0]));
-          if (primary.kind === "error") return ensureScalar(evalAst(args[1]));
+          const primary = ensureScalar(evalAst(args[0], astDepth + 1));
+          if (primary.kind === "error") return ensureScalar(evalAst(args[1], astDepth + 1));
           return primary;
         }
         if (fnUpper === "ROW" || fnUpper === "COLUMN") {
@@ -430,6 +579,11 @@
             if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
             return valNum(fnUpper === "ROW" ? target.minRow : target.minCol + 1);
           }
+          if (target.kind === "FuncCall" && target.name === "INDIRECT") {
+            const ind = evalIndirectCall(target.args, astDepth + 1);
+            if (ind.kind === "error") return ind;
+            return valNum(fnUpper === "ROW" ? ind.minRow : ind.minCol + 1);
+          }
           return valErr("#VALUE!");
         }
         if (fnUpper === "ROWS" || fnUpper === "COLUMNS") {
@@ -448,11 +602,20 @@
                 : target.maxCol - target.minCol + 1;
             return valNum(span);
           }
+          if (target.kind === "FuncCall" && target.name === "INDIRECT") {
+            const ind = evalIndirectCall(target.args, astDepth + 1);
+            if (ind.kind === "error") return ind;
+            const span =
+              fnUpper === "ROWS"
+                ? ind.maxRow - ind.minRow + 1
+                : ind.maxCol - ind.minCol + 1;
+            return valNum(span);
+          }
           return valErr("#VALUE!");
         }
         const evaluatedArgs = [];
         for (let i = 0; i < args.length; i += 1) {
-          evaluatedArgs.push(evalAst(args[i]));
+          evaluatedArgs.push(evalAst(args[i], astDepth + 1));
         }
         if (AGGREGATE_FN_SET.has(fnUpper)) {
           return evalAggregateFunction(fnUpper, evaluatedArgs, workbook, depth);
@@ -491,10 +654,11 @@
       return valErr("#VALUE!");
     }
 
-    return ensureScalar(evalAst(parsed.root));
+    return ensureScalar(evalAst(parsed.root, 0));
   }
 
   function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {
+    if (workbook) workbook.depthTruncated = false;
     return formatFormulaValue(
       evaluateFormulaTyped(exprStr, workbook, currentSheetUpper, currentCellRef, 0)
     );
@@ -616,6 +780,7 @@
       knownSheets,
       memo: new Map(),
       visiting: new Set(),
+      depthTruncated: false,
     };
   }
 

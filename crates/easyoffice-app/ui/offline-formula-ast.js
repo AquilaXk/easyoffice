@@ -327,19 +327,6 @@
         continue;
       }
       if ((ch >= "0" && ch <= "9") || ch === ".") {
-        if (ch >= "0" && ch <= "9") {
-          let sheetEnd = i;
-          while (sheetEnd < src.length && !/[\s!+\-*/^&=<>%(),;:'"#]/.test(src[sheetEnd])) {
-            sheetEnd += 1;
-          }
-          if (sheetEnd < src.length && src[sheetEnd] === "!") {
-            if (!pushTok({ type: "sheet", name: src.slice(i, sheetEnd) })) {
-              return { error: "#VALUE!" };
-            }
-            i = sheetEnd + 1;
-            continue;
-          }
-        }
         const numMatch = /^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(src.slice(i));
         if (!numMatch) return { error: "#VALUE!" };
         const afterNum = src[i + numMatch[0].length] || "";

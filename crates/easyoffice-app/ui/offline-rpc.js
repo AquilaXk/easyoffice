@@ -320,7 +320,6 @@
   function createOfflineRpcHandlers(ctx) {
     const {
       getActiveModule,
-      getActiveSheetCellRef,
       ribbonCategoryTools,
       ribbonStyleLabels,
       contextualToolBadges,
@@ -394,6 +393,11 @@
 
     function evaluateSingleDocExpr(doc, seedDefaults) {
       const sheetName = resolveDefaultSheetFromDocJs(doc);
+      if (doc.cell !== undefined && doc.cell !== null && typeof doc.cell !== "string") {
+        throw new Error("InvalidArgument: JSON 'cell' 필드는 문자열이어야 합니다.");
+      }
+      const anchorCell =
+        typeof doc.cell === "string" && doc.cell.trim().length > 0 ? doc.cell.trim() : "A1";
       const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
       if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
         throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
@@ -410,9 +414,7 @@
         return {
           sheetName,
           expr: q,
-          value: String(
-            evaluateFormulaExpression(q, workbook, evalSheetUpper, getActiveSheetCellRef() || "A1")
-          ),
+          value: String(evaluateFormulaExpression(q, workbook, evalSheetUpper, anchorCell)),
         };
       }
       return {
