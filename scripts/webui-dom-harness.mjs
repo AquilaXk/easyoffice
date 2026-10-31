@@ -1,11 +1,14 @@
 import fs from "node:fs";
-import path from "node:path";
-import vm from "node:vm";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { matchesSelectorList } from "./webui-css-selector.mjs";
 
-const ROOT = process.cwd();
-const INDEX_HTML_PATH = path.join(ROOT, "crates/easyoffice-app/ui/index.html");
-const OFFLINE_RPC_JS_PATH = path.join(ROOT, "crates/easyoffice-app/ui/offline-rpc.js");
-const APP_JS_PATH = path.join(ROOT, "crates/easyoffice-app/ui/app.js");
+const cjsRequire = createRequire(import.meta.url);
+const INDEX_HTML_PATH = fileURLToPath(
+  new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)
+);
+const OFFLINE_RPC_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/offline-rpc.js");
+const APP_JS_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/app.js");
 
 const VOID_TAGS = new Set(["meta", "link", "input", "br", "hr", "img"]);
 
@@ -19,16 +22,59 @@ function decodeHtmlEntities(str) {
 }
 
 function camelToDataAttr(prop) {
-  return (
-    "data-" +
-    String(prop).replaceAll(/[A-Z]/g, (m) => "-" + m.toLowerCase())
-  );
+  return "data-" + String(prop).replaceAll(/[A-Z]/g, (m) => "-" + m.toLowerCase());
 }
 
 function dataAttrToCamel(attr) {
-  return attr
-    .slice(5)
-    .replaceAll(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+  return attr.slice(5).replaceAll(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+}
+
+function createStyleProxy(el) {
+  const parseStyleMap = () => {
+    const map = new Map();
+    const raw = el._attrs.get("style") || "";
+    raw.split(";").forEach((decl) => {
+      const colonIdx = decl.indexOf(":");
+      if (colonIdx > 0) {
+        const k = decl.slice(0, colonIdx).trim();
+        const v = decl.slice(colonIdx + 1).trim();
+        if (k && v) map.set(k, v);
+      }
+    });
+    return map;
+  };
+  const writeStyleMap = (map) => {
+    const parts = [];
+    for (const [k, v] of map.entries()) {
+      parts.push(`${k}: ${v}`);
+    }
+    if (parts.length > 0) el._attrs.set("style", parts.join("; "));
+    else el._attrs.delete("style");
+  };
+  const toKebab = (prop) =>
+    prop.startsWith("--") ? prop : prop.replaceAll(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+  const methods = {
+    setProperty(k, v) {
+      const map = parseStyleMap();
+      const strV = String(v ?? "").trim();
+      if (strV) map.set(String(k), strV);
+      else map.delete(String(k));
+      writeStyleMap(map);
+    },
+  };
+  return new Proxy(methods, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      if (typeof prop !== "string") return "";
+      return parseStyleMap().get(toKebab(prop)) || "";
+    },
+    set(target, prop, value) {
+      if (typeof prop === "string" && !(prop in target)) {
+        target.setProperty(toKebab(prop), value);
+      }
+      return true;
+    },
+  });
 }
 
 class MiniNode {
@@ -72,297 +118,6 @@ class MiniTextNode extends MiniNode {
   cloneNode() {
     return new MiniTextNode(this._text, this.ownerDocument);
   }
-}
-
-function extractBalancedNotClauses(input) {
-  let out = "";
-  const negInners = [];
-  let i = 0;
-  let inQuote = null;
-  let bracketDepth = 0;
-  while (i < input.length) {
-    const ch = input[i];
-    if (inQuote) {
-      out += ch;
-      if (ch === "\\" && i + 1 < input.length) {
-        out += input[i + 1];
-        i += 2;
-        continue;
-      }
-      if (ch === inQuote) inQuote = null;
-      i += 1;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      inQuote = ch;
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === "[") {
-      bracketDepth += 1;
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === "]" && bracketDepth > 0) {
-      bracketDepth -= 1;
-      out += ch;
-      i += 1;
-      continue;
-    }
-    if (bracketDepth === 0 && input.slice(i, i + 5).toLowerCase() === ":not(") {
-      let j = i + 5;
-      let pDepth = 1;
-      let q = null;
-      while (j < input.length && pDepth > 0) {
-        const c = input[j];
-        if (q) {
-          if (c === "\\" && j + 1 < input.length) {
-            j += 2;
-            continue;
-          }
-          if (c === q) q = null;
-        } else if (c === '"' || c === "'") {
-          q = c;
-        } else if (c === "(") {
-          pDepth += 1;
-        } else if (c === ")") {
-          pDepth -= 1;
-          if (pDepth === 0) break;
-        }
-        j += 1;
-      }
-      if (pDepth === 0) {
-        negInners.push(input.slice(i + 5, j));
-        i = j + 1;
-        continue;
-      }
-    }
-    out += ch;
-    i += 1;
-  }
-  return { rest: out, negInners };
-}
-
-function extractAttributeClauses(input) {
-  let out = "";
-  const attrs = [];
-  let i = 0;
-  while (i < input.length) {
-    if (input[i] !== "[") {
-      out += input[i];
-      i += 1;
-      continue;
-    }
-    let j = i + 1;
-    let q = null;
-    while (j < input.length) {
-      const c = input[j];
-      if (q) {
-        if (c === "\\" && j + 1 < input.length) {
-          j += 2;
-          continue;
-        }
-        if (c === q) q = null;
-      } else if (c === '"' || c === "'") {
-        q = c;
-      } else if (c === "]") {
-        break;
-      }
-      j += 1;
-    }
-    if (j < input.length && input[j] === "]") {
-      const rawInner = input.slice(i + 1, j).trim();
-      const eqIdx = rawInner.indexOf("=");
-      if (eqIdx < 0) {
-        if (rawInner) attrs.push({ name: rawInner.toLowerCase(), value: undefined });
-      } else {
-        const name = rawInner.slice(0, eqIdx).trim().toLowerCase();
-        let val = rawInner.slice(eqIdx + 1).trim();
-        if (
-          val.length >= 2 &&
-          ((val.startsWith('"') && val.endsWith('"')) ||
-            (val.startsWith("'") && val.endsWith("'")))
-        ) {
-          val = val.slice(1, -1).replaceAll(/\\(.)/g, "$1");
-        }
-        if (name) attrs.push({ name, value: val });
-      }
-      i = j + 1;
-      continue;
-    }
-    out += input[i];
-    i += 1;
-  }
-  return { rest: out, attrs };
-}
-
-function parseSimpleSelector(rawSel) {
-  const { rest: withoutNot, negInners } = extractBalancedNotClauses(rawSel.trim());
-  const notConditions = negInners.map((inner) => parseSimpleSelector(inner));
-  const { rest: withoutAttrs, attrs } = extractAttributeClauses(withoutNot);
-  let rest = withoutAttrs;
-  let id = null;
-  rest = rest.replaceAll(/#([A-Za-z0-9_-]+)/g, (_, m) => {
-    id = m;
-    return "";
-  });
-  const classes = [];
-  rest = rest.replaceAll(/\.([A-Za-z0-9_-]+)/g, (_, m) => {
-    classes.push(m);
-    return "";
-  });
-  const tag = rest.trim() ? rest.trim().toUpperCase() : null;
-  return { tag, id, classes, attrs, notConditions };
-}
-
-function matchesSimple(el, spec) {
-  if (!el || el.nodeType !== 1) return false;
-  if (spec.tag && spec.tag !== "*" && el.tagName !== spec.tag) return false;
-  if (spec.id && el.id !== spec.id) return false;
-  for (const cls of spec.classes) {
-    if (!el.classList.contains(cls)) return false;
-  }
-  for (const attr of spec.attrs) {
-    if (!el._attrs.has(attr.name)) return false;
-    if (attr.value !== undefined && el._attrs.get(attr.name) !== attr.value) return false;
-  }
-  for (const neg of spec.notConditions) {
-    if (matchesSimple(el, neg)) return false;
-  }
-  return true;
-}
-
-function pushSelectorToken(tokens, rawBuf) {
-  const trimmed = rawBuf.trim();
-  if (!trimmed) return;
-  if (trimmed === ":scope") {
-    tokens.push({ type: "scope" });
-    return;
-  }
-  tokens.push({ type: "sel", spec: parseSimpleSelector(trimmed) });
-}
-
-function tokenizeComplexSelector(sel, scopeEl) {
-  const working = sel.trim();
-  const tokens = [];
-  let buf = "";
-  let bracketDepth = 0;
-  let parenDepth = 0;
-  let inQuote = null;
-  for (let i = 0; i < working.length; i++) {
-    const ch = working[i];
-    if (inQuote) {
-      buf += ch;
-      if (ch === "\\" && i + 1 < working.length) {
-        buf += working[i + 1];
-        i += 1;
-        continue;
-      }
-      if (ch === inQuote) inQuote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      inQuote = ch;
-      buf += ch;
-      continue;
-    }
-    if (ch === "[") bracketDepth += 1;
-    else if (ch === "]" && bracketDepth > 0) bracketDepth -= 1;
-    else if (ch === "(") parenDepth += 1;
-    else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
-
-    if (bracketDepth === 0 && parenDepth === 0 && (ch === ">" || /\s/.test(ch))) {
-      if (buf.trim()) {
-        pushSelectorToken(tokens, buf);
-        buf = "";
-      }
-      if (ch === ">") {
-        if (tokens.length > 0 && tokens[tokens.length - 1].type === "comb") {
-          tokens[tokens.length - 1].comb = ">";
-        } else {
-          tokens.push({ type: "comb", comb: ">" });
-        }
-      } else if (tokens.length > 0 && tokens[tokens.length - 1].type !== "comb") {
-        tokens.push({ type: "comb", comb: " " });
-      }
-      continue;
-    }
-    buf += ch;
-  }
-  if (buf.trim()) {
-    pushSelectorToken(tokens, buf);
-  }
-  if (tokens.length > 0 && tokens[tokens.length - 1].type === "comb") {
-    tokens.pop();
-  }
-  return { scopeEl, tokens };
-}
-
-function matchesToken(el, tok, scopeEl) {
-  if (!el || el.nodeType !== 1 || !tok) return false;
-  if (tok.type === "scope") return el === scopeEl;
-  if (tok.type === "sel") return matchesSimple(el, tok.spec);
-  return false;
-}
-
-function matchChainAt(el, idx, tokens, scopeEl) {
-  if (idx < 0 || !matchesToken(el, tokens[idx], scopeEl)) return false;
-  if (idx === 0) return true;
-  const combTok = tokens[idx - 1];
-  if (!combTok || combTok.type !== "comb") return false;
-  if (combTok.comb === ">") {
-    return Boolean(el.parentElement) && matchChainAt(el.parentElement, idx - 2, tokens, scopeEl);
-  }
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    if (matchChainAt(p, idx - 2, tokens, scopeEl)) return true;
-  }
-  return false;
-}
-
-function matchesParsedChain(el, parsed) {
-  const { scopeEl, tokens } = parsed;
-  if (tokens.length === 0) return false;
-  return matchChainAt(el, tokens.length - 1, tokens, scopeEl);
-}
-
-function matchesSelectorList(el, selectorList, scopeEl) {
-  const parts = [];
-  let buf = "";
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  let inQuote = null;
-  for (let i = 0; i < selectorList.length; i++) {
-    const ch = selectorList[i];
-    if (inQuote) {
-      buf += ch;
-      if (ch === "\\" && i + 1 < selectorList.length) {
-        buf += selectorList[i + 1];
-        i += 1;
-        continue;
-      }
-      if (ch === inQuote) inQuote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      inQuote = ch;
-      buf += ch;
-      continue;
-    }
-    if (ch === "(") parenDepth += 1;
-    else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
-    else if (ch === "[") bracketDepth += 1;
-    else if (ch === "]" && bracketDepth > 0) bracketDepth -= 1;
-    if (ch === "," && parenDepth === 0 && bracketDepth === 0) {
-      if (buf.trim()) parts.push(buf.trim());
-      buf = "";
-      continue;
-    }
-    buf += ch;
-  }
-  if (buf.trim()) parts.push(buf.trim());
-  return parts.some((p) => matchesParsedChain(el, tokenizeComplexSelector(p, scopeEl)));
 }
 
 class MiniClassList {
@@ -414,11 +169,7 @@ class MiniElement extends MiniNode {
     this._attrs = new Map();
     this.childNodes = [];
     this._listeners = new Map();
-    this.style = {
-      setProperty(k, v) {
-        this[k] = v;
-      },
-    };
+    this.style = createStyleProxy(this);
     this.classList = new MiniClassList(this);
     this.colSpan = 1;
     this.open = false;
@@ -643,6 +394,7 @@ class MiniElement extends MiniNode {
   }
 
   dispatchEvent(ev) {
+    this.ownerDocument?._activateGlobals?.();
     const eventObj = {
       type: ev.type,
       target: ev.target || this,
@@ -672,6 +424,7 @@ class MiniElement extends MiniNode {
 
   focus() {
     const doc = this.ownerDocument;
+    doc?._activateGlobals?.();
     if (doc.activeElement === this) {
       return;
     }
@@ -684,6 +437,7 @@ class MiniElement extends MiniNode {
 
   blur() {
     const doc = this.ownerDocument;
+    doc?._activateGlobals?.();
     if (doc.activeElement !== this) {
       return;
     }
@@ -692,6 +446,7 @@ class MiniElement extends MiniNode {
   }
 
   click() {
+    this.ownerDocument?._activateGlobals?.();
     this.dispatchEvent({ type: "click", target: this });
   }
 
@@ -724,7 +479,9 @@ function escapeHtmlAttr(str) {
 function serializeNodesToHtml(nodes) {
   return nodes
     .map((n) => {
-      if (n.nodeType === 3) return escapeHtmlText(n.textContent);
+      if (n.nodeType === 3) {
+        return escapeHtmlText(n.textContent);
+      }
       const tag = n.tagName.toLowerCase();
       const attrParts = [];
       for (const [k, v] of n._attrs.entries()) {
@@ -748,7 +505,13 @@ function parseAttributesInto(attrText, el) {
 }
 
 function parseHtmlFragment(html, ownerDocument) {
-  const root = { childNodes: [], _adopt: (n) => n, appendChild(n) { this.childNodes.push(n); } };
+  const root = {
+    childNodes: [],
+    _adopt: (n) => n,
+    appendChild(n) {
+      this.childNodes.push(n);
+    },
+  };
   const stack = [root];
   const tagRe =
     /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([A-Za-z0-9-]+)\s*>|<([A-Za-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
@@ -790,6 +553,7 @@ class MiniDocument {
   constructor(htmlSource) {
     this.activeElement = null;
     this._listeners = new Map();
+    this._activateGlobals = null;
     const nodes = parseHtmlFragment(htmlSource, this);
     this.documentElement =
       nodes.find((n) => n.nodeType === 1 && n.tagName === "HTML") ||
@@ -825,10 +589,38 @@ class MiniDocument {
   }
 
   dispatchEvent(ev) {
+    this._activateGlobals?.();
     const fns = this._listeners.get(ev.type) || [];
     for (const fn of fns) {
       fn(ev);
     }
+  }
+}
+
+function defineGlobalBinding(key, value) {
+  Object.defineProperty(globalThis, key, {
+    value,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+}
+
+function installBrowserGlobals(bindings) {
+  defineGlobalBinding("document", bindings.document);
+  defineGlobalBinding("navigator", bindings.navigator);
+  defineGlobalBinding("location", bindings.location);
+  defineGlobalBinding("atob", bindings.atob);
+  defineGlobalBinding("btoa", bindings.btoa);
+  defineGlobalBinding("URL", bindings.URL);
+  defineGlobalBinding("setTimeout", bindings.setTimeout);
+  defineGlobalBinding("clearTimeout", bindings.clearTimeout);
+  defineGlobalBinding("getSelection", bindings.getSelection);
+  defineGlobalBinding("addEventListener", bindings.addEventListener);
+  if (bindings.tauriInternals) {
+    defineGlobalBinding("__TAURI_INTERNALS__", bindings.tauriInternals);
+  } else {
+    delete globalThis.__TAURI_INTERNALS__;
   }
 }
 
@@ -840,59 +632,51 @@ export async function flushAsyncTurns(count = 6) {
 
 export async function createWorkspaceHarness(options = {}) {
   const html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
-  const offlineRpcCode = fs.readFileSync(OFFLINE_RPC_JS_PATH, "utf8");
-  const jsCode = fs.readFileSync(APP_JS_PATH, "utf8");
   const document = new MiniDocument(html);
   const windowListeners = new Map();
   const downloads = [];
   const revokedUrls = [];
   let nextTimerId = 1;
+  let nextTimerSeq = 1;
   let virtualNowMs = 0;
   const cancelledTimers = new Set();
   const delayedTimers = new Map();
+  const NativeURL = globalThis.URL;
 
-  const sandbox = {
-    document,
-    navigator: { platform: options.platform || "Win32" },
-    location: { protocol: "app:" },
-    TextEncoder,
-    TextDecoder,
-    Blob,
-    Uint8Array,
-    Map,
-    Set,
-    WeakMap,
-    Promise,
-    JSON,
-    Math,
-    Number,
-    String,
-    Boolean,
-    Array,
-    Object,
-    RegExp,
-    Error,
-    console,
-    atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
-    btoa: (bin) => Buffer.from(bin, "binary").toString("base64"),
-    URL: {
+  const urlShim = Object.assign(
+    function URLShim(...args) {
+      return new NativeURL(...args);
+    },
+    {
       createObjectURL: () => "blob:easyoffice-test",
       revokeObjectURL: (url) => {
         revokedUrls.push(url);
       },
-    },
+    }
+  );
+
+  const bindings = {
+    document,
+    navigator: { platform: options.platform || "Win32" },
+    location: { protocol: "app:" },
+    atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
+    btoa: (bin) => Buffer.from(bin, "binary").toString("base64"),
+    URL: urlShim,
     setTimeout: (fn, delay = 0) => {
       const id = nextTimerId;
       nextTimerId += 1;
+      const seq = nextTimerSeq;
+      nextTimerSeq += 1;
       const delayMs = Math.max(0, Number(delay) || 0);
-      if (delayMs <= 50) {
+      delayedTimers.set(id, { seq, fn, dueAt: virtualNowMs + delayMs });
+      if (delayMs === 0) {
         setImmediate(() => {
-          if (!cancelledTimers.has(id)) {
+          if (delayedTimers.has(id) && !cancelledTimers.has(id)) {
+            delayedTimers.delete(id);
+            installBrowserGlobals(bindings);
             fn();
           }
         });
-      } else {
-        delayedTimers.set(id, { fn, dueAt: virtualNowMs + delayMs });
       }
       return id;
     },
@@ -905,7 +689,35 @@ export async function createWorkspaceHarness(options = {}) {
       if (!windowListeners.has(type)) windowListeners.set(type, []);
       windowListeners.get(type).push(fn);
     },
+    tauriInternals: options.tauriInvoke ? { invoke: options.tauriInvoke } : null,
+  };
+
+  document._activateGlobals = () => installBrowserGlobals(bindings);
+
+  const origCreateElement = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = origCreateElement(tag);
+    if (String(tag).toLowerCase() === "a") {
+      el.click = () => {
+        downloads.push({ href: el.href, download: el.download });
+      };
+    }
+    return el;
+  };
+
+  installBrowserGlobals(bindings);
+  delete cjsRequire.cache[OFFLINE_RPC_RESOLVED];
+  delete cjsRequire.cache[APP_JS_RESOLVED];
+  cjsRequire("../crates/easyoffice-app/ui/offline-rpc.js");
+  cjsRequire("../crates/easyoffice-app/ui/app.js");
+
+  const sandbox = {
+    setTimeout: bindings.setTimeout,
+    clearTimeout: bindings.clearTimeout,
+    __EASYOFFICE_SHEET_UTILS__: globalThis.__EASYOFFICE_SHEET_UTILS__,
+    __EASYOFFICE_CREATE_OFFLINE_RPC__: globalThis.__EASYOFFICE_CREATE_OFFLINE_RPC__,
     dispatchWindowKeydown: (ev) => {
+      installBrowserGlobals(bindings);
       const eventObj = {
         type: "keydown",
         key: ev.key,
@@ -925,34 +737,15 @@ export async function createWorkspaceHarness(options = {}) {
     },
   };
 
-  if (options.tauriInvoke) {
-    sandbox.__TAURI_INTERNALS__ = { invoke: options.tauriInvoke };
-  }
-
-  const origCreateElement = document.createElement.bind(document);
-  document.createElement = (tag) => {
-    const el = origCreateElement(tag);
-    if (String(tag).toLowerCase() === "a") {
-      el.click = () => {
-        downloads.push({ href: el.href, download: el.download });
-      };
-    }
-    return el;
-  };
-
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(offlineRpcCode, sandbox, { filename: "offline-rpc.js" });
-  vm.runInContext(jsCode, sandbox, { filename: "app.js" });
   document.dispatchEvent({ type: "DOMContentLoaded" });
   await flushAsyncTurns();
 
   function userClick(el) {
     if (!el) return;
+    installBrowserGlobals(bindings);
     const focusable =
-      el.closest(
-        'button, input, select, textarea, a, [contenteditable="true"], [tabindex]'
-      ) || null;
+      el.closest('button, input, select, textarea, a, [contenteditable="true"], [tabindex]') ||
+      null;
     if (
       document.activeElement &&
       document.activeElement !== document.body &&
@@ -967,16 +760,34 @@ export async function createWorkspaceHarness(options = {}) {
   }
 
   function advanceTimers(ms = 2000) {
-    virtualNowMs += Math.max(0, Number(ms) || 0);
-    const dueEntries = Array.from(delayedTimers.entries())
-      .filter(([, entry]) => entry.dueAt <= virtualNowMs)
-      .sort((a, b) => a[1].dueAt - b[1].dueAt);
-    for (const [id, entry] of dueEntries) {
-      delayedTimers.delete(id);
-      if (!cancelledTimers.has(id)) {
-        entry.fn();
+    installBrowserGlobals(bindings);
+    const targetMs = virtualNowMs + Math.max(0, Number(ms) || 0);
+    while (true) {
+      let nextId = null;
+      let nextEntry = null;
+      for (const [id, entry] of delayedTimers.entries()) {
+        if (cancelledTimers.has(id)) {
+          delayedTimers.delete(id);
+          continue;
+        }
+        if (entry.dueAt > targetMs) continue;
+        if (
+          !nextEntry ||
+          entry.dueAt < nextEntry.dueAt ||
+          (entry.dueAt === nextEntry.dueAt && entry.seq < nextEntry.seq)
+        ) {
+          nextId = id;
+          nextEntry = entry;
+        }
+      }
+      if (!nextEntry || nextId === null) break;
+      delayedTimers.delete(nextId);
+      virtualNowMs = nextEntry.dueAt;
+      if (!cancelledTimers.has(nextId)) {
+        nextEntry.fn();
       }
     }
+    virtualNowMs = targetMs;
   }
 
   return { document, sandbox, downloads, revokedUrls, userClick, advanceTimers };

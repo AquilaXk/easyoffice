@@ -234,7 +234,7 @@
     },
   };
 
-  const { parseCellRefParts, normalizeFormattedNumericCell } =
+  const { parseCellRefParts, normalizeFormattedNumericCell, localScrubPii } =
     globalThis.__EASYOFFICE_SHEET_UTILS__;
   const MOCK_IPC_HANDLERS = globalThis.__EASYOFFICE_CREATE_OFFLINE_RPC__({
     getActiveModule: () => activeModule,
@@ -471,12 +471,26 @@
 
     let activeTd = null;
     const numericVals = [];
+    const activeSheetSnap = sheetDataStore[activeSheetName] || {};
     document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
-      const isSel = td.dataset.cell === cellRef;
+      const ref = td.dataset.cell;
+      const isSel = ref === cellRef;
       td.classList.toggle("selected-cell", isSel);
       if (isSel) activeTd = td;
-      const num = Number((td.textContent || "").replaceAll(",", "").trim());
-      if (Number.isFinite(num) && (td.textContent || "").trim() !== "") {
+      const focusSt = sheetCellFocusState.get(td);
+      let displayCandidate = (td.textContent || "").trim();
+      if (
+        (td.dataset.formula || "").startsWith("=") &&
+        !focusSt?.userEdited &&
+        displayCandidate.startsWith("=")
+      ) {
+        const storedVal = (activeSheetSnap[ref]?.value || "").trim();
+        if (storedVal && !storedVal.startsWith("=")) {
+          displayCandidate = storedVal;
+        }
+      }
+      const num = Number(displayCandidate.replaceAll(",", "").trim());
+      if (Number.isFinite(num) && displayCandidate !== "") {
         numericVals.push(num);
       }
     });
@@ -485,7 +499,10 @@
     if (refBadge) refBadge.textContent = cellRef;
     const formulaInput = document.getElementById("formula-input");
     if (formulaInput && activeTd && document.activeElement !== formulaInput) {
-      formulaInput.value = activeTd.dataset.formula || (activeTd.textContent || "").trim();
+      const activeFocusSt = sheetCellFocusState.get(activeTd);
+      formulaInput.value = activeFocusSt?.userEdited
+        ? (activeTd.textContent || "").trim()
+        : activeTd.dataset.formula || (activeTd.textContent || "").trim();
     }
 
     const aggEl = document.getElementById("status-sheet-agg");
@@ -562,6 +579,9 @@
   }
 
   function capturePdfStudioState() {
+    const bodyParagraphs = Array.from(
+      document.querySelectorAll("#pdf-page-card p:not(#pdf-form-status)")
+    );
     return {
       stampValue: document.getElementById("pdf-stamp-select")?.value ?? "승인필",
       stampBadge: document.getElementById("pdf-stamp-badge")?.textContent ?? "승인필",
@@ -569,9 +589,8 @@
       watermarkLayer: document.getElementById("pdf-watermark-layer")?.textContent ?? "",
       applicant: document.getElementById("pdf-form-applicant")?.value ?? "",
       dept: document.getElementById("pdf-form-dept")?.value ?? "",
-      cardHeading: document.querySelector("#pdf-page-card h3")?.textContent ?? "",
-      cardBody:
-        document.querySelector("#pdf-page-card p:not(#pdf-form-status)")?.textContent ?? "",
+      cardHeadingHtml: document.querySelector("#pdf-page-card h3")?.innerHTML ?? "",
+      cardBodyParagraphsHtml: bodyParagraphs.map((p) => p.innerHTML),
       formStatus: document.getElementById("pdf-form-status")?.textContent ?? "",
     };
   }
@@ -584,8 +603,8 @@
     const wmLayer = document.getElementById("pdf-watermark-layer");
     const appInput = document.getElementById("pdf-form-applicant");
     const deptInput = document.getElementById("pdf-form-dept");
+    const card = document.getElementById("pdf-page-card");
     const cardHeading = document.querySelector("#pdf-page-card h3");
-    const cardBody = document.querySelector("#pdf-page-card p:not(#pdf-form-status)");
     const formStatus = document.getElementById("pdf-form-status");
     if (stampSel && pdfStudio.stampValue !== undefined) stampSel.value = pdfStudio.stampValue;
     if (stampBadge && pdfStudio.stampBadge !== undefined) {
@@ -599,11 +618,36 @@
     }
     if (appInput && pdfStudio.applicant !== undefined) appInput.value = pdfStudio.applicant;
     if (deptInput && pdfStudio.dept !== undefined) deptInput.value = pdfStudio.dept;
-    if (cardHeading && pdfStudio.cardHeading !== undefined) {
-      cardHeading.textContent = pdfStudio.cardHeading;
+    if (cardHeading) {
+      if (pdfStudio.cardHeadingHtml !== undefined) {
+        cardHeading.innerHTML = pdfStudio.cardHeadingHtml;
+      } else if (pdfStudio.cardHeading !== undefined) {
+        cardHeading.textContent = pdfStudio.cardHeading;
+      }
     }
-    if (cardBody && pdfStudio.cardBody !== undefined) {
-      cardBody.textContent = pdfStudio.cardBody;
+    if (Array.isArray(pdfStudio.cardBodyParagraphsHtml) && card) {
+      const existingPs = Array.from(
+        card.querySelectorAll("p:not(#pdf-form-status)")
+      );
+      while (existingPs.length > pdfStudio.cardBodyParagraphsHtml.length) {
+        const extra = existingPs.pop();
+        extra.remove();
+      }
+      while (existingPs.length < pdfStudio.cardBodyParagraphsHtml.length) {
+        const newP = document.createElement("p");
+        if (formStatus && formStatus.parentElement === card) {
+          formStatus.before(newP);
+        } else {
+          card.appendChild(newP);
+        }
+        existingPs.push(newP);
+      }
+      pdfStudio.cardBodyParagraphsHtml.forEach((html, idx) => {
+        existingPs[idx].innerHTML = html;
+      });
+    } else if (pdfStudio.cardBody !== undefined) {
+      const firstBody = document.querySelector("#pdf-page-card p:not(#pdf-form-status)");
+      if (firstBody) firstBody.textContent = pdfStudio.cardBody;
     }
     if (formStatus && pdfStudio.formStatus !== undefined) {
       formStatus.textContent = pdfStudio.formStatus;
@@ -729,7 +773,7 @@
       restoreWorkspaceSnapshot(prev);
       const afterSheetsJson = JSON.stringify(sheetDataStore);
       if (beforeSheetsJson !== afterSheetsJson && workbookHasAnyFormula()) {
-        await recalculateActiveSheetFormulas();
+        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         if (activeModule === "SHEET") {
           updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
         }
@@ -756,7 +800,7 @@
       restoreWorkspaceSnapshot(next);
       const afterSheetsJson = JSON.stringify(sheetDataStore);
       if (beforeSheetsJson !== afterSheetsJson && workbookHasAnyFormula()) {
-        await recalculateActiveSheetFormulas();
+        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         if (activeModule === "SHEET") {
           updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
         }
@@ -1289,6 +1333,39 @@
     }
   }
 
+  function executeTrackedRibbonCommand(cmdId, options = {}) {
+    return enqueueWorkspaceHistoryOp(async () => {
+      await commitPendingFocusedSheetCell(true);
+      const preSnapshot = captureWorkspaceSnapshot(true);
+      const prevModule = activeModule;
+      if (options.targetModule && options.targetModule !== activeModule) {
+        activatePane(options.targetModule);
+      }
+      let execRes;
+      try {
+        execRes = await invokeIpc("execute_ribbon_command", cmdId);
+      } catch (err) {
+        if (prevModule !== activeModule) {
+          activatePane(prevModule);
+        }
+        throw err;
+      }
+      workspaceUndoStack.push(preSnapshot);
+      if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
+        workspaceUndoStack.shift();
+      }
+      workspaceRedoStack.length = 0;
+      applyRibbonDomSideEffects(cmdId, execRes);
+      await drainInFlightSheetWork();
+      const fb = document.getElementById("status-command-feedback");
+      if (fb && execRes && !options.skipFeedback) {
+        fb.textContent =
+          execRes.summary || (options.fallbackTitle ? "명령 실행: " + options.fallbackTitle : "");
+      }
+      return execRes;
+    });
+  }
+
   async function renderRibbonCategoryTools(categoryKey) {
     activeRibbonCategory = categoryKey || "home";
     const strip = document.getElementById("ribbon-tool-strip");
@@ -1303,12 +1380,8 @@
       btn.dataset.commandId = cmd.id;
       btn.innerHTML =
         "<span>" + cmd.title + "</span> <small>(" + (cmd.shortcut || "") + ")</small>";
-      btn.addEventListener("click", async () => {
-        pushUndoSnapshot(true);
-        const execRes = await invokeIpc("execute_ribbon_command", cmd.id);
-        applyRibbonDomSideEffects(cmd.id, execRes);
-        const fb = document.getElementById("status-command-feedback");
-        if (fb && execRes) fb.textContent = execRes.summary || "명령 실행: " + cmd.title;
+      btn.addEventListener("click", () => {
+        void executeTrackedRibbonCommand(cmd.id, { fallbackTitle: cmd.title });
       });
       strip.appendChild(btn);
     });
@@ -1380,19 +1453,23 @@
     return isExcludedNonTableDocChrome(el);
   }
 
-  function collectEditableDocTextNodes(rootEl, options = {}) {
+  function collectEditableInlineTokens(rootEl, options = {}) {
     const includeTables = Boolean(options.includeTables);
     const out = [];
     function walk(node) {
       if (!node) return;
       if (node.nodeType === 3) {
-        out.push(node);
+        out.push({ type: "text", node });
         return;
       }
       if (node.nodeType !== 1) return;
       if (isExcludedNonTableDocChrome(node)) return;
       if (node.id === "doc-table-sum-row" || node.id === "doc-table-sum-cell") return;
       const tag = (node.tagName || "").toUpperCase();
+      if (tag === "BR") {
+        out.push({ type: "br" });
+        return;
+      }
       if (tag === "TABLE" && !includeTables) return;
       Array.from(node.childNodes || []).forEach(walk);
     }
@@ -1450,49 +1527,87 @@
     return rootEl;
   }
 
-  function applyScrubbedTextToInlineGroup(nodes, origText, scrubbedText) {
+  function deriveSingleDiffSpan(origText, scrubbedText) {
+    let prefixLen = 0;
+    while (
+      prefixLen < origText.length &&
+      prefixLen < scrubbedText.length &&
+      origText[prefixLen] === scrubbedText[prefixLen]
+    ) {
+      prefixLen += 1;
+    }
+    let suffixLen = 0;
+    while (
+      suffixLen < origText.length - prefixLen &&
+      suffixLen < scrubbedText.length - prefixLen &&
+      origText[origText.length - 1 - suffixLen] ===
+        scrubbedText[scrubbedText.length - 1 - suffixLen]
+    ) {
+      suffixLen += 1;
+    }
+    return [
+      {
+        start: prefixLen,
+        end: origText.length - suffixLen,
+        replacement: scrubbedText.slice(prefixLen, scrubbedText.length - suffixLen),
+      },
+    ];
+  }
+
+  function resolveScrubSpans(origText, res) {
+    if (Array.isArray(res?.spans) && res.spans.length > 0) {
+      const valid = res.spans.filter(
+        (sp) =>
+          sp &&
+          Number.isInteger(sp.start) &&
+          Number.isInteger(sp.end) &&
+          sp.start >= 0 &&
+          sp.end > sp.start &&
+          sp.end <= origText.length &&
+          typeof sp.replacement === "string"
+      );
+      if (valid.length > 0) return valid;
+    }
+    if (typeof localScrubPii === "function") {
+      const localRes = localScrubPii(origText);
+      if (localRes.scrubbedText === res.scrubbedText && localRes.spans.length > 0) {
+        return localRes.spans;
+      }
+    }
+    return deriveSingleDiffSpan(origText, res.scrubbedText);
+  }
+
+  function applyScrubbedSpansToInlineGroup(nodes, origText, res) {
     if (nodes.length === 1) {
-      nodes[0].nodeValue = scrubbedText;
+      nodes[0].nodeValue = res.scrubbedText;
     } else {
-      let prefixLen = 0;
-      while (
-        prefixLen < origText.length &&
-        prefixLen < scrubbedText.length &&
-        origText[prefixLen] === scrubbedText[prefixLen]
-      ) {
-        prefixLen += 1;
-      }
-      let suffixLen = 0;
-      while (
-        suffixLen < origText.length - prefixLen &&
-        suffixLen < scrubbedText.length - prefixLen &&
-        origText[origText.length - 1 - suffixLen] ===
-          scrubbedText[scrubbedText.length - 1 - suffixLen]
-      ) {
-        suffixLen += 1;
-      }
-      const changeStart = prefixLen;
-      const changeEnd = origText.length - suffixLen;
-      const replacementMid = scrubbedText.slice(prefixLen, scrubbedText.length - suffixLen);
+      const spans = resolveScrubSpans(origText, res);
+      const emittedSpans = new Set();
       let offset = 0;
-      let emittedReplacement = false;
       nodes.forEach((node) => {
         const text = node.nodeValue || "";
-        const start = offset;
-        const end = offset + text.length;
-        offset = end;
-        if (end <= changeStart || start >= changeEnd) {
-          if (!emittedReplacement && changeStart === changeEnd && start === changeStart) {
-            node.nodeValue = replacementMid + text;
-            emittedReplacement = true;
+        const nodeStart = offset;
+        const nodeEnd = offset + text.length;
+        offset = nodeEnd;
+        let cursor = nodeStart;
+        let rebuilt = "";
+        for (let sIdx = 0; sIdx < spans.length; sIdx += 1) {
+          const sp = spans[sIdx];
+          if (sp.end <= nodeStart) continue;
+          if (sp.start >= nodeEnd) break;
+          if (sp.start > cursor) {
+            rebuilt += text.slice(cursor - nodeStart, sp.start - nodeStart);
           }
-          return;
+          if (!emittedSpans.has(sIdx)) {
+            rebuilt += sp.replacement;
+            emittedSpans.add(sIdx);
+          }
+          cursor = Math.min(nodeEnd, sp.end);
         }
-        const keepLeft = start < changeStart ? text.slice(0, changeStart - start) : "";
-        const mid = !emittedReplacement ? replacementMid : "";
-        emittedReplacement = true;
-        const keepRight = end > changeEnd ? text.slice(changeEnd - start) : "";
-        node.nodeValue = keepLeft + mid + keepRight;
+        if (cursor < nodeEnd) {
+          rebuilt += text.slice(cursor - nodeStart, nodeEnd - nodeStart);
+        }
+        node.nodeValue = rebuilt;
       });
     }
     nodes.forEach((node) => {
@@ -1781,12 +1896,7 @@
           if (item.id === "bench-run") {
             await runBenchmarkAction();
           } else {
-            pushUndoSnapshot(true);
-            activatePane(item.module);
-            const res = await invokeIpc("execute_ribbon_command", item.id);
-            applyRibbonDomSideEffects(item.id, res);
-            const fb = document.getElementById("status-command-feedback");
-            if (fb && res) fb.textContent = res.summary;
+            await executeTrackedRibbonCommand(item.id, { targetModule: item.module });
           }
         });
         listEl.appendChild(li);
@@ -1930,7 +2040,8 @@
     }
   }
 
-  function recalculateActiveSheetFormulas() {
+  function recalculateActiveSheetFormulas(options = {}) {
+    const forceFocusedDisplay = Boolean(options.updateFocusedDisplay);
     const run = async () => {
       const epoch = sheetSnapshotEpoch;
       const seq = latestSheetRecalcSeq + 1;
@@ -1950,6 +2061,7 @@
       }
       const rpcPayload = JSON.stringify({
         sheet: activeSheetName,
+        sheets: Object.keys(sheetDataStore),
         targets: formulaTargets.map(({ sheet, cell }) => ({ sheet, cell })),
         cells,
       });
@@ -1982,12 +2094,14 @@
           const td = document.querySelector('#pane-sheet td[data-cell="' + ref + '"]');
           const focusSt = td ? sheetCellFocusState.get(td) : null;
           if (!td || !(td.dataset.formula || "").startsWith("=")) return;
-          if (focusSt?.userEdited || focusSt?.snapshotPushed) return;
+          if (!forceFocusedDisplay && (focusSt?.userEdited || focusSt?.snapshotPushed)) return;
           const isEditingFormulaInPlace =
-            document.activeElement === td && (td.textContent || "").trim().startsWith("=");
+            !forceFocusedDisplay &&
+            document.activeElement === td &&
+            (td.textContent || "").trim().startsWith("=");
           if (!isEditingFormulaInPlace) {
             td.textContent = value;
-            syncSheetCellFocusBaseline(td, false);
+            syncSheetCellFocusBaseline(td, forceFocusedDisplay);
           }
         }
       });
@@ -2021,15 +2135,15 @@
         }
         syncSheetCellFocusBaseline(activeTd, true);
         refreshFocusedSheetCellPendingSnapshot();
-        await recalculateActiveSheetFormulas();
+        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
         if (epoch !== sheetSnapshotEpoch) return;
         const storedVal = sheetDataStore[targetSheet]?.[targetCellRef]?.value;
-        const computedValue =
-          storedVal !== undefined && storedVal !== ""
-            ? storedVal
-            : activeSheetName === targetSheet
-              ? (activeTd.textContent || "").trim()
-              : "";
+        let computedValue = "";
+        if (storedVal !== undefined && storedVal !== "") {
+          computedValue = storedVal;
+        } else if (activeSheetName === targetSheet) {
+          computedValue = (activeTd.textContent || "").trim();
+        }
         if (activeSheetName === targetSheet) {
           out.textContent = "결과 (" + targetCellRef + "): " + computedValue;
           updateSheetSelectionAndAggregates(activeSheetCellRef || targetCellRef);
@@ -2048,9 +2162,14 @@
       };
       const rpcRes = await invokeIpc(
         "evaluate_sheet",
-        JSON.stringify({ sheet: targetSheet, expr: targetCellRef, cells })
+        JSON.stringify({
+          sheet: targetSheet,
+          sheets: Object.keys(sheetDataStore),
+          expr: targetCellRef,
+          cells,
+        })
       );
-      await recalculateActiveSheetFormulas();
+      await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
       if (epoch !== sheetSnapshotEpoch) return;
       if (activeSheetName === targetSheet) {
         out.textContent = "결과 (" + targetCellRef + "): " + rpcRes.value;
@@ -2343,10 +2462,8 @@
 
     const btnPdfRotate = document.getElementById("btn-pdf-rotate");
     if (btnPdfRotate) {
-      btnPdfRotate.addEventListener("click", async () => {
-        pushUndoSnapshot(true);
-        const execRes = await invokeIpc("execute_ribbon_command", "pdf-mod-rotate");
-        applyRibbonDomSideEffects("pdf-mod-rotate", execRes);
+      btnPdfRotate.addEventListener("click", () => {
+        void executeTrackedRibbonCommand("pdf-mod-rotate", { skipFeedback: true });
       });
     }
     const btnPdfApply = document.getElementById("btn-pdf-apply");
@@ -2358,38 +2475,43 @@
     }
   }
 
-  async function scrubEditableTextNodesInRoot(rootEl) {
-    if (!rootEl) return 0;
-    const textNodes = collectEditableDocTextNodes(rootEl, {
+  function collectActiveScrubGroups(rootEl) {
+    if (!rootEl) return [];
+    const tokens = collectEditableInlineTokens(rootEl, {
       includeTables: true,
     });
     const groups = [];
-    textNodes.forEach((tn) => {
+    let lineEpoch = 0;
+    tokens.forEach((tok) => {
+      if (tok.type === "br") {
+        lineEpoch += 1;
+        return;
+      }
+      const tn = tok.node;
       const block = findNearestScrubBlock(tn, rootEl);
       const last = groups[groups.length - 1];
-      if (last && last.block === block) {
+      if (last && last.block === block && last.lineEpoch === lineEpoch) {
         last.nodes.push(tn);
       } else {
-        groups.push({ block, nodes: [tn] });
+        groups.push({ block, lineEpoch, nodes: [tn] });
       }
     });
-    const activeGroups = groups
+    return groups
       .map((g) => ({
         nodes: g.nodes,
         origText: g.nodes.map((n) => n.nodeValue || "").join(""),
       }))
       .filter((g) => g.origText.trim().length > 0);
-    if (activeGroups.length === 0) return 0;
-    const results = await Promise.all(
-      activeGroups.map((g) => invokeIpc("scrub_pii", g.origText))
-    );
+  }
+
+  function applyScrubResultsToGroups(activeGroups, results) {
     let masked = 0;
     results.forEach((res, idx) => {
       if (res && typeof res.scrubbedText === "string") {
         const count = Number(res.totalMasked || 0);
         const group = activeGroups[idx];
         if (count > 0 && res.scrubbedText !== group.origText) {
-          applyScrubbedTextToInlineGroup(group.nodes, group.origText, res.scrubbedText);
+          applyScrubbedSpansToInlineGroup(group.nodes, group.origText, res);
         }
         masked += count;
       }
@@ -2397,133 +2519,278 @@
     return masked;
   }
 
-  async function runPiiScrubAction(recordUndo) {
-    const piiOut = document.getElementById("pii-result-text");
-    if (!piiOut) return;
-    await commitPendingFocusedSheetCell(true);
-    if (recordUndo) pushUndoSnapshot();
-    let totalMasked = 0;
-    const targetScope =
-      activeModule === "CONV"
-        ? resolveSourceScopeKind(document.getElementById("conv-src-fmt")?.value || "docx")
-        : activeModule;
-
-    if (targetScope === "SHEET") {
-      sheetDataStore[activeSheetName] = snapshotDomSheetCells();
-      const entriesToScrub = [];
-      Object.keys(sheetDataStore).forEach((shName) => {
-        const snap = sheetDataStore[shName] || {};
-        Object.keys(snap).forEach((ref) => {
-          const entry = snap[ref];
-          if (entry && !(entry.formula || "").startsWith("=") && (entry.value || "").trim()) {
-            entriesToScrub.push(entry);
+  function tokenizeFormulaStringLiterals(formula) {
+    const segments = [];
+    let i = 0;
+    let rawStart = 0;
+    while (i < formula.length) {
+      const ch = formula[i];
+      if (ch === "'") {
+        i += 1;
+        while (i < formula.length) {
+          if (formula[i] === "'") {
+            if (i + 1 < formula.length && formula[i + 1] === "'") {
+              i += 2;
+              continue;
+            }
+            i += 1;
+            break;
           }
-        });
-      });
-      const results = await Promise.all(
-        entriesToScrub.map((entry) => invokeIpc("scrub_pii", entry.value))
-      );
-      results.forEach((res, idx) => {
-        if (res && typeof res.scrubbedText === "string") {
-          const count = Number(res.totalMasked || 0);
-          if (count > 0) entriesToScrub[idx].value = res.scrubbedText;
-          totalMasked += count;
+          i += 1;
         }
-      });
-      restoreDomSheetCells(activeSheetName);
-      refreshFocusedSheetCellPendingSnapshot();
-      if (workbookHasAnyFormula()) {
-        await recalculateActiveSheetFormulas();
+        continue;
       }
-      updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
-    } else if (targetScope === "SLIDE") {
-      const fields = [];
-      SLIDE_DECK_STATE.forEach((slide) => {
-        ["title", "lower", "notes"].forEach((key) => {
-          if ((slide[key] || "").trim()) {
-            fields.push({ slide, key, text: slide[key] });
+      if (ch === '"') {
+        if (i > rawStart) {
+          segments.push({ isLiteral: false, text: formula.slice(rawStart, i) });
+        }
+        let j = i + 1;
+        let inner = "";
+        let closed = false;
+        while (j < formula.length) {
+          if (formula[j] === '"') {
+            if (j + 1 < formula.length && formula[j + 1] === '"') {
+              inner += '"';
+              j += 2;
+              continue;
+            }
+            closed = true;
+            j += 1;
+            break;
           }
-        });
-      });
-      const results = await Promise.all(
-        fields.map((item) => invokeIpc("scrub_pii", item.text))
-      );
-      results.forEach((res, idx) => {
-        if (res && typeof res.scrubbedText === "string") {
-          const count = Number(res.totalMasked || 0);
-          if (count > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
-          totalMasked += count;
+          inner += formula[j];
+          j += 1;
         }
-      });
-      renderSlideDeck(activeSlideIndex);
-    } else if (targetScope === "PDF") {
-      const pdfNodes = Array.from(
-        document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)")
-      );
-      for (const el of pdfNodes) {
-        totalMasked += await scrubEditableTextNodesInRoot(el);
-      }
-      const wmInput = document.getElementById("pdf-watermark-input");
-      const wmLayer = document.getElementById("pdf-watermark-layer");
-      const prevWmInputVal = wmInput ? wmInput.value : "";
-      if (wmInput && (wmInput.value || "").trim()) {
-        const res = await invokeIpc("scrub_pii", wmInput.value);
-        if (res && typeof res.scrubbedText === "string") {
-          const count = Number(res.totalMasked || 0);
-          if (count > 0) wmInput.value = res.scrubbedText;
-          totalMasked += count;
+        if (closed) {
+          segments.push({ isLiteral: true, text: inner });
+          i = j;
+          rawStart = j;
+        } else {
+          break;
         }
+        continue;
       }
-      if (wmLayer) {
-        if (wmInput && wmLayer.textContent === prevWmInputVal) {
-          wmLayer.textContent = wmInput.value;
-        } else if ((wmLayer.textContent || "").trim()) {
-          const res = await invokeIpc("scrub_pii", wmLayer.textContent);
-          if (res && typeof res.scrubbedText === "string") {
-            const count = Number(res.totalMasked || 0);
-            if (count > 0) wmLayer.textContent = res.scrubbedText;
-            totalMasked += count;
-          }
-        }
-      }
-      for (const inputId of ["pdf-form-applicant", "pdf-form-dept"]) {
-        const inp = document.getElementById(inputId);
-        if (inp && (inp.value || "").trim()) {
-          const res = await invokeIpc("scrub_pii", inp.value);
-          if (res && typeof res.scrubbedText === "string") {
-            const count = Number(res.totalMasked || 0);
-            if (count > 0) inp.value = res.scrubbedText;
-            totalMasked += count;
-          }
-        }
-      }
-      const formStatus = document.getElementById("pdf-form-status");
-      if (formStatus && (formStatus.textContent || "").startsWith("양식 반영 완료")) {
-        applyPdfStudioFormState();
-      }
-    } else {
-      ensureDefaultDocTabStore();
-      const editorEl = document.getElementById("doc-editor");
-      if (activeModule === targetScope && editorEl) {
-        totalMasked += await scrubEditableTextNodesInRoot(editorEl);
-        computeDocTableSummary();
-        saveActiveDocTabState();
-      } else if (docTabStore[targetScope]?.editorHtml) {
-        const tempDiv = document.createElement("div");
-        tempDiv.innerHTML = docTabStore[targetScope].editorHtml;
-        const modMasked = await scrubEditableTextNodesInRoot(tempDiv);
-        if (modMasked > 0) {
-          docTabStore[targetScope] = { editorHtml: tempDiv.innerHTML };
-        }
-        totalMasked += modMasked;
-      }
+      i += 1;
     }
+    if (rawStart < formula.length) {
+      segments.push({ isLiteral: false, text: formula.slice(rawStart) });
+    }
+    return segments;
+  }
 
-    piiOut.textContent =
-      totalMasked > 0
-        ? "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + activeModule + ")"
-        : "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + activeModule + ")";
-    computeSmartStats();
+  function commitDeferredUndoSnapshot(preSnapshot) {
+    if (!preSnapshot) return;
+    workspaceUndoStack.push(preSnapshot);
+    if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
+      workspaceUndoStack.shift();
+    }
+    workspaceRedoStack.length = 0;
+  }
+
+  function runPiiScrubAction(recordUndo) {
+    return enqueueWorkspaceHistoryOp(async () => {
+      const piiOut = document.getElementById("pii-result-text");
+      if (!piiOut) return;
+      await commitPendingFocusedSheetCell(true);
+      const preSnapshot = recordUndo ? captureWorkspaceSnapshot(false) : null;
+      let totalMasked = 0;
+      const targetScope =
+        activeModule === "CONV"
+          ? resolveSourceScopeKind(document.getElementById("conv-src-fmt")?.value || "docx")
+          : activeModule;
+
+      if (targetScope === "SHEET") {
+        sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+        const plainEntries = [];
+        const formulaJobs = [];
+        Object.keys(sheetDataStore).forEach((shName) => {
+          const snap = sheetDataStore[shName] || {};
+          Object.keys(snap).forEach((ref) => {
+            const entry = snap[ref];
+            if (!entry) return;
+            const formula = entry.formula || "";
+            if (formula.startsWith("=")) {
+              const segments = tokenizeFormulaStringLiterals(formula);
+              const literalSegs = segments.filter(
+                (seg) => seg.isLiteral && seg.text.trim().length > 0
+              );
+              if (literalSegs.length > 0) {
+                formulaJobs.push({ entry, segments, literalSegs });
+              }
+            } else if ((entry.value || "").trim()) {
+              plainEntries.push(entry);
+            }
+          });
+        });
+        const literalInputs = [];
+        formulaJobs.forEach((job) => {
+          job.literalSegs.forEach((seg) => literalInputs.push(seg));
+        });
+        const [plainResults, literalResults] = await Promise.all([
+          Promise.all(plainEntries.map((entry) => invokeIpc("scrub_pii", entry.value))),
+          Promise.all(literalInputs.map((seg) => invokeIpc("scrub_pii", seg.text))),
+        ]);
+        commitDeferredUndoSnapshot(preSnapshot);
+        plainResults.forEach((res, idx) => {
+          if (res && typeof res.scrubbedText === "string") {
+            const count = Number(res.totalMasked || 0);
+            if (count > 0) plainEntries[idx].value = res.scrubbedText;
+            totalMasked += count;
+          }
+        });
+        let litOffset = 0;
+        formulaJobs.forEach((job) => {
+          let changed = false;
+          job.literalSegs.forEach((seg) => {
+            const res = literalResults[litOffset];
+            litOffset += 1;
+            if (res && typeof res.scrubbedText === "string") {
+              const count = Number(res.totalMasked || 0);
+              if (count > 0 && res.scrubbedText !== seg.text) {
+                seg.text = res.scrubbedText;
+                changed = true;
+              }
+              totalMasked += count;
+            }
+          });
+          if (changed) {
+            job.entry.formula = job.segments
+              .map((seg) =>
+                seg.isLiteral ? '"' + seg.text.replaceAll('"', '""') + '"' : seg.text
+              )
+              .join("");
+          }
+        });
+        restoreDomSheetCells(activeSheetName);
+        refreshFocusedSheetCellPendingSnapshot();
+        if (workbookHasAnyFormula()) {
+          await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+        }
+        updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
+      } else if (targetScope === "SLIDE") {
+        const fields = [];
+        SLIDE_DECK_STATE.forEach((slide) => {
+          ["title", "lower", "notes"].forEach((key) => {
+            if ((slide[key] || "").trim()) {
+              fields.push({ slide, key, text: slide[key] });
+            }
+          });
+        });
+        const results = await Promise.all(
+          fields.map((item) => invokeIpc("scrub_pii", item.text))
+        );
+        commitDeferredUndoSnapshot(preSnapshot);
+        results.forEach((res, idx) => {
+          if (res && typeof res.scrubbedText === "string") {
+            const count = Number(res.totalMasked || 0);
+            if (count > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
+            totalMasked += count;
+          }
+        });
+        renderSlideDeck(activeSlideIndex);
+      } else if (targetScope === "PDF") {
+        const pdfNodes = Array.from(
+          document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)")
+        );
+        const nodeGroups = [];
+        pdfNodes.forEach((el) => {
+          nodeGroups.push(...collectActiveScrubGroups(el));
+        });
+        const wmInput = document.getElementById("pdf-watermark-input");
+        const wmLayer = document.getElementById("pdf-watermark-layer");
+        const prevWmInputVal = wmInput ? wmInput.value : "";
+        const scrubSeparateLayer =
+          Boolean(wmLayer) &&
+          !(wmInput && wmLayer.textContent === prevWmInputVal) &&
+          Boolean((wmLayer.textContent || "").trim());
+        const appInput = document.getElementById("pdf-form-applicant");
+        const deptInput = document.getElementById("pdf-form-dept");
+
+        const [
+          groupResults,
+          wmInputRes,
+          wmLayerRes,
+          appRes,
+          deptRes,
+        ] = await Promise.all([
+          Promise.all(nodeGroups.map((g) => invokeIpc("scrub_pii", g.origText))),
+          wmInput && (wmInput.value || "").trim()
+            ? invokeIpc("scrub_pii", wmInput.value)
+            : Promise.resolve(null),
+          scrubSeparateLayer
+            ? invokeIpc("scrub_pii", wmLayer.textContent)
+            : Promise.resolve(null),
+          appInput && (appInput.value || "").trim()
+            ? invokeIpc("scrub_pii", appInput.value)
+            : Promise.resolve(null),
+          deptInput && (deptInput.value || "").trim()
+            ? invokeIpc("scrub_pii", deptInput.value)
+            : Promise.resolve(null),
+        ]);
+        commitDeferredUndoSnapshot(preSnapshot);
+        totalMasked += applyScrubResultsToGroups(nodeGroups, groupResults);
+        if (wmInput && wmInputRes && typeof wmInputRes.scrubbedText === "string") {
+          const count = Number(wmInputRes.totalMasked || 0);
+          if (count > 0) wmInput.value = wmInputRes.scrubbedText;
+          totalMasked += count;
+        }
+        if (wmLayer) {
+          if (wmInput && wmLayer.textContent === prevWmInputVal) {
+            wmLayer.textContent = wmInput.value;
+          } else if (wmLayerRes && typeof wmLayerRes.scrubbedText === "string") {
+            const count = Number(wmLayerRes.totalMasked || 0);
+            if (count > 0) wmLayer.textContent = wmLayerRes.scrubbedText;
+            totalMasked += count;
+          }
+        }
+        if (appInput && appRes && typeof appRes.scrubbedText === "string") {
+          const count = Number(appRes.totalMasked || 0);
+          if (count > 0) appInput.value = appRes.scrubbedText;
+          totalMasked += count;
+        }
+        if (deptInput && deptRes && typeof deptRes.scrubbedText === "string") {
+          const count = Number(deptRes.totalMasked || 0);
+          if (count > 0) deptInput.value = deptRes.scrubbedText;
+          totalMasked += count;
+        }
+        const formStatus = document.getElementById("pdf-form-status");
+        if (formStatus && (formStatus.textContent || "").startsWith("양식 반영 완료")) {
+          applyPdfStudioFormState();
+        }
+      } else {
+        ensureDefaultDocTabStore();
+        const editorEl = document.getElementById("doc-editor");
+        if (activeModule === targetScope && editorEl) {
+          const activeGroups = collectActiveScrubGroups(editorEl);
+          const groupResults = await Promise.all(
+            activeGroups.map((g) => invokeIpc("scrub_pii", g.origText))
+          );
+          commitDeferredUndoSnapshot(preSnapshot);
+          totalMasked += applyScrubResultsToGroups(activeGroups, groupResults);
+          computeDocTableSummary();
+          saveActiveDocTabState();
+        } else if (docTabStore[targetScope]?.editorHtml) {
+          const tempDiv = document.createElement("div");
+          tempDiv.innerHTML = docTabStore[targetScope].editorHtml;
+          const activeGroups = collectActiveScrubGroups(tempDiv);
+          const groupResults = await Promise.all(
+            activeGroups.map((g) => invokeIpc("scrub_pii", g.origText))
+          );
+          commitDeferredUndoSnapshot(preSnapshot);
+          const modMasked = applyScrubResultsToGroups(activeGroups, groupResults);
+          if (modMasked > 0) {
+            docTabStore[targetScope] = { editorHtml: tempDiv.innerHTML };
+          }
+          totalMasked += modMasked;
+        }
+      }
+
+      piiOut.textContent =
+        totalMasked > 0
+          ? "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + activeModule + ")"
+          : "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + activeModule + ")";
+      computeSmartStats();
+    });
   }
 
   function setupSmartAndSecurityHandlers() {

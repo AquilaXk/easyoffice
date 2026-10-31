@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use crate::EasyOfficeError;
 
 const MAX_JSON_NESTING_DEPTH: usize = 32;
+const MAX_EXACT_F64_INT: f64 = 9_007_199_254_740_991.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrictJsonValue {
@@ -57,9 +60,17 @@ impl StrictJsonValue {
     }
 
     pub fn as_u64(&self) -> Option<u64> {
-        match self {
-            Self::Number(n) => n.parse::<u64>().ok(),
-            _ => None,
+        let Self::Number(n) = self else {
+            return None;
+        };
+        if let Ok(v) = n.parse::<u64>() {
+            return Some(v);
+        }
+        let f = n.parse::<f64>().ok()?;
+        if f.is_finite() && (0.0..=MAX_EXACT_F64_INT).contains(&f) && f.fract() == 0.0 {
+            Some(f as u64)
+        } else {
+            None
         }
     }
 
@@ -70,6 +81,63 @@ impl StrictJsonValue {
             Self::Number(n) => Some(n.clone()),
             Self::Str(s) => Some(s.clone()),
             Self::Array(_) | Self::Object(_) => None,
+        }
+    }
+
+    pub fn to_json_string(&self) -> String {
+        let mut out = String::new();
+        self.write_json(&mut out);
+        out
+    }
+
+    fn write_escaped_str(out: &mut String, s: &str) {
+        out.push('"');
+        for ch in s.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\u{0008}' => out.push_str("\\b"),
+                '\u{000C}' => out.push_str("\\f"),
+                c if (c as u32) < 0x20 => {
+                    out.push_str(&format!("\\u{:04x}", c as u32));
+                }
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+
+    fn write_json(&self, out: &mut String) {
+        match self {
+            Self::Null => out.push_str("null"),
+            Self::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Self::Number(n) => out.push_str(n),
+            Self::Str(s) => Self::write_escaped_str(out, s),
+            Self::Array(items) => {
+                out.push('[');
+                for (idx, item) in items.iter().enumerate() {
+                    if idx > 0 {
+                        out.push(',');
+                    }
+                    item.write_json(out);
+                }
+                out.push(']');
+            }
+            Self::Object(entries) => {
+                out.push('{');
+                for (idx, (k, v)) in entries.iter().enumerate() {
+                    if idx > 0 {
+                        out.push(',');
+                    }
+                    Self::write_escaped_str(out, k);
+                    out.push(':');
+                    v.write_json(out);
+                }
+                out.push('}');
+            }
         }
     }
 
@@ -171,7 +239,7 @@ impl StrictJsonValue {
         }
         if chars.peek() == Some(&'.') {
             raw.push(chars.next()?);
-            if !chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+            if !chars.peek().is_some_and(char::is_ascii_digit) {
                 return None;
             }
             while let Some(&d) = chars.peek() {
@@ -188,7 +256,7 @@ impl StrictJsonValue {
             if chars.peek().is_some_and(|c| *c == '+' || *c == '-') {
                 raw.push(chars.next()?);
             }
-            if !chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+            if !chars.peek().is_some_and(char::is_ascii_digit) {
                 return None;
             }
             while let Some(&d) = chars.peek() {
@@ -236,13 +304,14 @@ impl StrictJsonValue {
                     let _ = chars.next();
                     return Some(Self::Object(entries));
                 }
+                let mut seen_keys: HashSet<String> = HashSet::new();
                 loop {
                     Self::skip_ws(chars);
                     if chars.next()? != '"' {
                         return None;
                     }
                     let key = Self::parse_string_literal(chars)?;
-                    if entries.iter().any(|(k, _)| k == &key) {
+                    if !seen_keys.insert(key.clone()) {
                         return None;
                     }
                     Self::skip_ws(chars);
@@ -294,5 +363,54 @@ impl StrictJsonValue {
             '-' | '0'..='9' => Some(Self::Number(Self::parse_number(chars)?)),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rfc8259_strict_validation_boundaries_and_roundtrip() {
+        let deep_ok = format!("{}0{}", "[".repeat(32), "]".repeat(32));
+        assert!(StrictJsonValue::parse(&deep_ok).is_ok());
+        let deep_err = format!("{}0{}", "[".repeat(33), "]".repeat(33));
+        assert!(StrictJsonValue::parse(&deep_err).is_err());
+
+        assert!(StrictJsonValue::parse("\"raw\nnewline\"").is_err());
+        assert!(StrictJsonValue::parse("\"\\uD800\"").is_err());
+        assert!(StrictJsonValue::parse("\"\\uDC00\"").is_err());
+        assert!(StrictJsonValue::parse("\"\\uD83D\\u0041\"").is_err());
+
+        let emoji = StrictJsonValue::parse("\"\\uD83D\\uDE00\"").unwrap();
+        assert_eq!(emoji.as_str(), Some("😀"));
+
+        assert_eq!(
+            StrictJsonValue::parse("1000.0").unwrap().as_u64(),
+            Some(1000)
+        );
+        assert_eq!(
+            StrictJsonValue::parse("1e4").unwrap().as_u64(),
+            Some(10_000)
+        );
+        assert_eq!(StrictJsonValue::parse("-0").unwrap().as_u64(), Some(0));
+        assert_eq!(StrictJsonValue::parse("1.5").unwrap().as_u64(), None);
+        assert_eq!(StrictJsonValue::parse("-1").unwrap().as_u64(), None);
+        assert_eq!(StrictJsonValue::parse("1e25").unwrap().as_u64(), None);
+
+        let many_pairs: String = (0..5_000)
+            .map(|i| format!("\"k{i}\":{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let big_obj = StrictJsonValue::parse(&format!("{{{many_pairs}}}")).unwrap();
+        assert_eq!(big_obj.as_object().unwrap().len(), 5_000);
+        assert!(StrictJsonValue::parse("{\"a\":1,\"a\":2}").is_err());
+
+        let complex = StrictJsonValue::parse(
+            r#"{"sheet":"'특수시트'","cells":[{"cell":"A1","value":"line1\nline2\u0007"}],"ok":true,"n":null}"#,
+        )
+        .unwrap();
+        let encoded = complex.to_json_string();
+        assert_eq!(StrictJsonValue::parse(&encoded).unwrap(), complex);
     }
 }

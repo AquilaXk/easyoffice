@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-/// Writing diagnostics report generated 100% offline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WritingDiagnosticReport {
     pub char_count: usize,
@@ -10,7 +9,6 @@ pub struct WritingDiagnosticReport {
     pub suggestions: Vec<String>,
 }
 
-/// Line diff kind returned by `LocalSmartAssistant::diff_documents_lcs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffLineKind {
     Unchanged,
@@ -18,18 +16,22 @@ pub enum DiffLineKind {
     Removed,
 }
 
-/// Single line diff item from deterministic LCS document comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentDiffLine {
     pub kind: DiffLineKind,
     pub text: String,
 }
 
-/// 100% offline deterministic smart document assistant (zero network telemetry).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PiiReplacementSpan {
+    pub start_utf16: usize,
+    pub end_utf16: usize,
+    pub replacement: String,
+}
+
 pub struct LocalSmartAssistant;
 
 impl LocalSmartAssistant {
-    /// Extracts up to `max_sentences` key sentences using term-frequency (TF) weighting while preserving document order.
     pub fn summarize_document(paragraphs: &[String], max_sentences: usize) -> Vec<String> {
         if max_sentences == 0 || paragraphs.is_empty() {
             return Vec::new();
@@ -74,7 +76,6 @@ impl LocalSmartAssistant {
         scored.into_iter().map(|(_, _, s)| s).collect()
     }
 
-    /// Computes character/word/sentence counts, reading time, and passive/long-sentence style suggestions.
     pub fn diagnose_writing(text: &str) -> WritingDiagnosticReport {
         let char_count = text.chars().count();
         let word_count = text.split_whitespace().count();
@@ -112,7 +113,6 @@ impl LocalSmartAssistant {
         }
     }
 
-    /// Extracts paragraphs or lines containing action markers (`TODO`, `검토`, `결재`, `기한`, `완료`).
     pub fn extract_action_items(paragraphs: &[String]) -> Vec<String> {
         const MARKERS: [&str; 6] = ["TODO", "검토", "결재", "기한", "완료", "조치"];
         let mut items = Vec::new();
@@ -132,7 +132,6 @@ impl LocalSmartAssistant {
 
     pub const MAX_DIFF_PARAGRAPHS: usize = 512;
 
-    /// Computes exact Longest Common Subsequence (LCS) line diff between `before` and `after`.
     pub fn diff_documents_lcs(before: &[String], after: &[String]) -> Vec<DocumentDiffLine> {
         let before = &before[..before.len().min(Self::MAX_DIFF_PARAGRAPHS)];
         let after = &after[..after.len().min(Self::MAX_DIFF_PARAGRAPHS)];
@@ -198,13 +197,13 @@ impl LocalSmartAssistant {
     }
 }
 
-/// Result of offline PII & hidden metadata scrubbing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PiiAuditResult {
     pub scrubbed_text: String,
     pub masked_resident_ids: usize,
     pub masked_phone_numbers: usize,
     pub masked_emails: usize,
+    pub spans: Vec<PiiReplacementSpan>,
     pub stripped_metadata_fields: Vec<String>,
 }
 
@@ -214,20 +213,68 @@ impl PiiAuditResult {
     }
 }
 
-/// Offline document security auditor masking PII patterns and stripping hidden author/company metadata.
 pub struct DocumentSecurityAuditor;
 
 impl DocumentSecurityAuditor {
     pub fn scan_and_scrub_pii(text: &str) -> PiiAuditResult {
-        let (after_rrn, masked_resident_ids) = Self::mask_resident_ids(text);
-        let (after_phone, masked_phone_numbers) = Self::mask_phone_numbers(&after_rrn);
-        let (scrubbed_text, masked_emails) = Self::mask_emails(&after_phone);
+        let bytes = text.as_bytes();
+        let mut scrubbed_text = String::with_capacity(text.len());
+        let mut masked_resident_ids = 0usize;
+        let mut masked_phone_numbers = 0usize;
+        let mut masked_emails = 0usize;
+        let mut spans: Vec<PiiReplacementSpan> = Vec::new();
+        let mut idx = 0usize;
+        let mut utf16_pos = 0usize;
+
+        while idx < bytes.len() {
+            if let Some((matched_len, replacement)) = Self::match_email_at(bytes, idx) {
+                scrubbed_text.push_str(replacement);
+                spans.push(PiiReplacementSpan {
+                    start_utf16: utf16_pos,
+                    end_utf16: utf16_pos + matched_len,
+                    replacement: replacement.to_string(),
+                });
+                masked_emails += 1;
+                idx += matched_len;
+                utf16_pos += matched_len;
+                continue;
+            }
+            if let Some((matched_len, replacement)) = Self::match_resident_id_at(bytes, idx) {
+                scrubbed_text.push_str(replacement);
+                spans.push(PiiReplacementSpan {
+                    start_utf16: utf16_pos,
+                    end_utf16: utf16_pos + matched_len,
+                    replacement: replacement.to_string(),
+                });
+                masked_resident_ids += 1;
+                idx += matched_len;
+                utf16_pos += matched_len;
+                continue;
+            }
+            if let Some((matched_len, replacement)) = Self::match_phone_at(bytes, idx) {
+                scrubbed_text.push_str(replacement);
+                spans.push(PiiReplacementSpan {
+                    start_utf16: utf16_pos,
+                    end_utf16: utf16_pos + matched_len,
+                    replacement: replacement.to_string(),
+                });
+                masked_phone_numbers += 1;
+                idx += matched_len;
+                utf16_pos += matched_len;
+                continue;
+            }
+            let ch = text[idx..].chars().next().unwrap();
+            scrubbed_text.push(ch);
+            idx += ch.len_utf8();
+            utf16_pos += ch.len_utf16();
+        }
 
         PiiAuditResult {
             scrubbed_text,
             masked_resident_ids,
             masked_phone_numbers,
             masked_emails,
+            spans,
             stripped_metadata_fields: vec![
                 "dc:creator".to_string(),
                 "cp:lastModifiedBy".to_string(),
@@ -247,40 +294,26 @@ impl DocumentSecurityAuditor {
             && (b'1'..=b'8').contains(&gender_digit)
     }
 
-    fn mask_resident_ids(input: &str) -> (String, usize) {
-        let bytes = input.as_bytes();
-        let mut out = String::with_capacity(input.len());
-        let mut count = 0usize;
-        let mut idx = 0usize;
-
-        while idx < bytes.len() {
-            let left_ok = idx == 0 || !bytes[idx - 1].is_ascii_digit();
-            if left_ok
-                && idx + 14 <= bytes.len()
-                && bytes[idx..idx + 6].iter().all(u8::is_ascii_digit)
-                && bytes[idx + 6] == b'-'
-                && bytes[idx + 7..idx + 14].iter().all(u8::is_ascii_digit)
-                && (idx + 14 == bytes.len() || !bytes[idx + 14].is_ascii_digit())
-            {
-                out.push_str("******-*******");
-                count += 1;
-                idx += 14;
-            } else if left_ok
-                && idx + 13 <= bytes.len()
-                && bytes[idx..idx + 13].iter().all(u8::is_ascii_digit)
-                && Self::is_valid_rrn_date_and_gender(&bytes[idx..idx + 6], bytes[idx + 6])
-                && (idx + 13 == bytes.len() || !bytes[idx + 13].is_ascii_digit())
-            {
-                out.push_str("******-*******");
-                count += 1;
-                idx += 13;
-            } else {
-                let ch = input[idx..].chars().next().unwrap();
-                out.push(ch);
-                idx += ch.len_utf8();
-            }
+    fn match_resident_id_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+        if idx > 0 && bytes[idx - 1].is_ascii_digit() {
+            return None;
         }
-        (out, count)
+        if idx + 14 <= bytes.len()
+            && bytes[idx..idx + 6].iter().all(u8::is_ascii_digit)
+            && bytes[idx + 6] == b'-'
+            && bytes[idx + 7..idx + 14].iter().all(u8::is_ascii_digit)
+            && (idx + 14 == bytes.len() || !bytes[idx + 14].is_ascii_digit())
+        {
+            return Some((14, "******-*******"));
+        }
+        if idx + 13 <= bytes.len()
+            && bytes[idx..idx + 13].iter().all(u8::is_ascii_digit)
+            && Self::is_valid_rrn_date_and_gender(&bytes[idx..idx + 6], bytes[idx + 6])
+            && (idx + 13 == bytes.len() || !bytes[idx + 13].is_ascii_digit())
+        {
+            return Some((13, "******-*******"));
+        }
+        None
     }
 
     fn consume_digits(bytes: &[u8], pos: usize, min_len: usize, max_len: usize) -> Option<usize> {
@@ -383,26 +416,6 @@ impl DocumentSecurityAuditor {
         None
     }
 
-    fn mask_phone_numbers(input: &str) -> (String, usize) {
-        let bytes = input.as_bytes();
-        let mut out = String::with_capacity(input.len());
-        let mut count = 0usize;
-        let mut idx = 0usize;
-
-        while idx < bytes.len() {
-            if let Some((matched_len, replacement)) = Self::match_phone_at(bytes, idx) {
-                out.push_str(replacement);
-                count += 1;
-                idx += matched_len;
-            } else {
-                let ch = input[idx..].chars().next().unwrap();
-                out.push(ch);
-                idx += ch.len_utf8();
-            }
-        }
-        (out, count)
-    }
-
     fn is_email_local_byte(b: u8) -> bool {
         b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'+')
     }
@@ -411,46 +424,32 @@ impl DocumentSecurityAuditor {
         b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-')
     }
 
-    fn mask_emails(input: &str) -> (String, usize) {
-        let bytes = input.as_bytes();
-        let len = bytes.len();
-        let mut out = String::with_capacity(len);
-        let mut count = 0usize;
-        let mut idx = 0usize;
-
-        while idx < len {
-            if bytes[idx].is_ascii_alphanumeric() {
-                let start = idx;
-                let mut p = idx;
-                while p < len && Self::is_email_local_byte(bytes[p]) {
-                    p += 1;
-                }
-                if p > start && p < len && bytes[p] == b'@' {
-                    let dom_start = p + 1;
-                    let mut q = dom_start;
-                    while q < len && Self::is_email_domain_byte(bytes[q]) {
-                        q += 1;
-                    }
-                    while q > dom_start && !bytes[q - 1].is_ascii_alphanumeric() {
-                        q -= 1;
-                    }
-                    let domain = &bytes[dom_start..q];
-                    if domain.len() >= 3
-                        && domain[0].is_ascii_alphanumeric()
-                        && domain.contains(&b'.')
-                    {
-                        out.push_str("***@***");
-                        count += 1;
-                        idx = q;
-                        continue;
-                    }
-                }
-            }
-            let ch = input[idx..].chars().next().unwrap();
-            out.push(ch);
-            idx += ch.len_utf8();
+    fn match_email_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+        if !bytes[idx].is_ascii_alphanumeric() {
+            return None;
         }
-        (out, count)
+        let len = bytes.len();
+        let mut p = idx;
+        while p < len && Self::is_email_local_byte(bytes[p]) {
+            p += 1;
+        }
+        if p == idx || p >= len || bytes[p] != b'@' {
+            return None;
+        }
+        let dom_start = p + 1;
+        let mut q = dom_start;
+        while q < len && Self::is_email_domain_byte(bytes[q]) {
+            q += 1;
+        }
+        while q > dom_start && !bytes[q - 1].is_ascii_alphanumeric() {
+            q -= 1;
+        }
+        let domain = &bytes[dom_start..q];
+        if domain.len() >= 3 && domain[0].is_ascii_alphanumeric() && domain.contains(&b'.') {
+            Some((q - idx, "***@***"))
+        } else {
+            None
+        }
     }
 }
 
@@ -492,25 +491,22 @@ mod tests {
             .iter()
             .any(|d| d.kind == DiffLineKind::Added && d.text == "2장 신규 아키텍처"));
 
-        let raw_pii = "담당자 주민번호 900101-1234567 및 9203152345678, 연락처 010-1234-5678, 010 9876 5432, +82-10-1111-2222, 02-123-4567, 031-765-4321, 이메일 security@easyoffice.local 입니다.";
+        let raw_pii = "담당자 😀 주민번호 900101-1234567 및 9203152345678, 연락처 010-1234-5678, 010 9876 5432, +82-10-1111-2222, 02-123-4567, 031-765-4321, 이메일 security@easyoffice.local 입니다.";
         let audit = DocumentSecurityAuditor::scan_and_scrub_pii(raw_pii);
         assert_eq!(audit.masked_resident_ids, 2);
         assert_eq!(audit.masked_phone_numbers, 5);
         assert_eq!(audit.masked_emails, 1);
-        assert!(audit.scrubbed_text.contains("******-*******"));
-        assert!(audit.scrubbed_text.contains("010-****-****"));
-        assert!(audit.scrubbed_text.contains("+82-**-****-****"));
-        assert!(audit.scrubbed_text.contains("02-****-****"));
-        assert!(audit.scrubbed_text.contains("***-****-****"));
-        assert!(audit.scrubbed_text.contains("***@***"));
-        assert!(!audit.scrubbed_text.contains("900101-1234567"));
-        assert!(!audit.scrubbed_text.contains("9203152345678"));
-        assert!(!audit.scrubbed_text.contains("010-1234-5678"));
-        assert!(!audit.scrubbed_text.contains("010 9876 5432"));
-        assert!(!audit.scrubbed_text.contains("+82-10-1111-2222"));
-        assert!(!audit.scrubbed_text.contains("02-123-4567"));
-        assert!(!audit.scrubbed_text.contains("031-765-4321"));
-        assert!(!audit.scrubbed_text.contains("security@easyoffice.local"));
+        assert_eq!(audit.spans.len(), 8);
+        let raw_utf16: Vec<u16> = raw_pii.encode_utf16().collect();
+        let mut rebuilt: Vec<u16> = Vec::new();
+        let mut cursor = 0usize;
+        for sp in &audit.spans {
+            rebuilt.extend_from_slice(&raw_utf16[cursor..sp.start_utf16]);
+            rebuilt.extend(sp.replacement.encode_utf16());
+            cursor = sp.end_utf16;
+        }
+        rebuilt.extend_from_slice(&raw_utf16[cursor..]);
+        assert_eq!(String::from_utf16(&rebuilt).unwrap(), audit.scrubbed_text);
 
         let huge_before: Vec<String> = (0..1000).map(|i| format!("문단_{i}")).collect();
         let huge_after: Vec<String> = (0..1000).map(|i| format!("문단_{i}")).collect();

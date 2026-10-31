@@ -18,16 +18,56 @@ impl WorkbookEngine {
         Self { sheets: Vec::new() }
     }
 
-    pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
-        let name_str = name.into();
+    fn unquote_sheet_token(s: &str) -> Option<String> {
+        if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
+            Some(s[1..s.len() - 1].replace("''", "'"))
+        } else {
+            None
+        }
+    }
+
+    fn find_sheet_index(&self, name: &str) -> Option<usize> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
         if let Some(pos) = self
             .sheets
             .iter()
-            .position(|s| s.name.eq_ignore_ascii_case(&name_str))
+            .position(|s| s.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Some(pos);
+        }
+        if let Some(unquoted) = Self::unquote_sheet_token(trimmed) {
+            if let Some(pos) = self
+                .sheets
+                .iter()
+                .position(|s| s.name.eq_ignore_ascii_case(&unquoted))
+            {
+                return Some(pos);
+            }
+        }
+        self.sheets.iter().position(|s| {
+            Self::unquote_sheet_token(&s.name).is_some_and(|su| su.eq_ignore_ascii_case(trimmed))
+        })
+    }
+
+    pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
+        let raw = name.into();
+        let trimmed = raw.trim();
+        let norm = if trimmed.is_empty() {
+            "Sheet1"
+        } else {
+            trimmed
+        };
+        if let Some(pos) = self
+            .sheets
+            .iter()
+            .position(|s| s.name.eq_ignore_ascii_case(norm))
         {
             return &mut self.sheets[pos];
         }
-        let mut engine = SheetEngine::new(name_str);
+        let mut engine = SheetEngine::new(norm);
         while engine.sheet_id == 0 || self.sheets.iter().any(|s| s.sheet_id == engine.sheet_id) {
             engine.sheet_id = engine.sheet_id.wrapping_add(1);
             if engine.sheet_id == 0 {
@@ -39,44 +79,12 @@ impl WorkbookEngine {
     }
 
     pub fn sheet(&self, name: &str) -> Option<&SheetEngine> {
-        let trimmed = name.trim();
-        if let Some(found) = self
-            .sheets
-            .iter()
-            .find(|s| s.name.eq_ignore_ascii_case(trimmed))
-        {
-            return Some(found);
-        }
-        if trimmed.len() >= 2 && trimmed.starts_with('\'') && trimmed.ends_with('\'') {
-            let unquoted = trimmed[1..trimmed.len() - 1].replace("''", "'");
-            return self
-                .sheets
-                .iter()
-                .find(|s| s.name.eq_ignore_ascii_case(&unquoted));
-        }
-        None
+        self.find_sheet_index(name).map(|pos| &self.sheets[pos])
     }
 
     pub fn sheet_mut(&mut self, name: &str) -> Option<&mut SheetEngine> {
-        let trimmed = name.trim();
-        if let Some(pos) = self
-            .sheets
-            .iter()
-            .position(|s| s.name.eq_ignore_ascii_case(trimmed))
-        {
-            return Some(&mut self.sheets[pos]);
-        }
-        if trimmed.len() >= 2 && trimmed.starts_with('\'') && trimmed.ends_with('\'') {
-            let unquoted = trimmed[1..trimmed.len() - 1].replace("''", "'");
-            if let Some(pos) = self
-                .sheets
-                .iter()
-                .position(|s| s.name.eq_ignore_ascii_case(&unquoted))
-            {
-                return Some(&mut self.sheets[pos]);
-            }
-        }
-        None
+        self.find_sheet_index(name)
+            .map(move |pos| &mut self.sheets[pos])
     }
 
     pub fn sheet_count(&self) -> usize {
@@ -1525,6 +1533,40 @@ mod tests {
         assert!(
             missing.is_empty(),
             "Missing canonical functions in test_all_122_canonical_functions_evaluated: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn test_sheet_whitespace_trim_and_apostrophe_cross_sheet_lookup() {
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet(" MySheet ");
+        wb.set_cell(" MySheet ", "A1", "125").unwrap();
+        assert_eq!(
+            wb.evaluate_cell("MySheet", "A1"),
+            EvaluatedCellValue::Number(125.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell(" MySheet ", "A1"),
+            EvaluatedCellValue::Number(125.0)
+        );
+
+        wb.add_sheet("'특수시트'");
+        wb.set_cell("'특수시트'", "A1", "250").unwrap();
+        wb.add_sheet("Sheet1");
+        wb.set_cell("Sheet1", "B1", "='특수시트'!A1+50").unwrap();
+        wb.set_cell("Sheet1", "B2", "='''특수시트'''!A1+50")
+            .unwrap();
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "B1"),
+            EvaluatedCellValue::Number(300.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("Sheet1", "B2"),
+            EvaluatedCellValue::Number(300.0)
+        );
+        assert_eq!(
+            wb.evaluate_cell("없는시트", "A1"),
+            EvaluatedCellValue::Error(FormulaError::Ref)
         );
     }
 }

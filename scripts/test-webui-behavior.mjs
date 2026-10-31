@@ -388,7 +388,7 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
   assert.ok(!docEditor.textContent.includes("900101-1234567"));
   assert.equal(docEditor.querySelector("[data-doc-num]").dataset.docNum, "0");
   assert.ok(docEditor.textContent.includes("010-****-****"));
-  assert.ok(docEditor.textContent.includes("***@***.***"));
+  assert.ok(docEditor.textContent.includes("***@***"));
   assert.ok(docEditor.textContent.includes("******-*******"));
 
   userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
@@ -432,7 +432,23 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
     moduleSpecs: {},
     localRibbonState: {},
   });
-  assert.equal(offlineRpc.audit_security("word/document.xml,0,4096,false|<doc/>").status, "REJECTED");
+  assert.equal(
+    offlineRpc.audit_security(
+      JSON.stringify({
+        entries: [{ name: "word/document.xml", compressed: 0, uncompressed: 4096, encrypted: false }],
+        xml: "<doc/>",
+      })
+    ).status,
+    "REJECTED"
+  );
+  assert.equal(
+    offlineRpc.audit_security(JSON.stringify({ entries: [], xml: "<doc/>" })).checkedEntries,
+    0
+  );
+  assert.throws(
+    () => offlineRpc.audit_security("word/document.xml,0,4096,false|<doc/>"),
+    /InvalidArgument/
+  );
 
   userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
   await flushAsyncTurns();
@@ -579,4 +595,190 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
   assert.equal(e9.textContent, "=400+100");
   assert.match(exportedBodies[0], /\[\[SHEET_A1\]\]\tE9\t=400\+100/);
   assert.match(exportedBodies[0], /\[\[TABLE_ROW\]\][^\n]*300\t500/);
+});
+
+test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and multi-paragraph PDF undo preserve DOM structure", async () => {
+  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const docEditor = document.getElementById("doc-editor");
+  docEditor.innerHTML =
+    '<p id="multi-inline">1차 <strong>010-1234-5678</strong> / <em>a@b.com</em> 확인</p>' +
+    '<p id="br-phone">사번 2026<br>010-9999-8888</p>' +
+    '<p id="br-email">ext9<br>user@example.com</p>';
+
+  userClick(document.getElementById("btn-scrub-pii"));
+  await flushAsyncTurns();
+
+  assert.match(document.getElementById("pii-result-text").textContent, /4건 마스킹 완료/);
+  const multiInline = document.getElementById("multi-inline");
+  assert.ok(multiInline.querySelector("strong"));
+  assert.ok(multiInline.querySelector("em"));
+  assert.equal(multiInline.querySelector("strong").textContent, "010-****-****");
+  assert.equal(multiInline.querySelector("em").textContent, "***@***");
+  assert.equal(multiInline.textContent, "1차 010-****-**** / ***@*** 확인");
+
+  const brPhone = document.getElementById("br-phone");
+  assert.ok(brPhone.querySelector("br"));
+  assert.equal(brPhone.innerHTML, "사번 2026<br>010-****-****");
+
+  const brEmail = document.getElementById("br-email");
+  assert.ok(brEmail.querySelector("br"));
+  assert.equal(brEmail.innerHTML, "ext9<br>***@***");
+
+  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  await flushAsyncTurns();
+  const a9 = document.querySelector('#pane-sheet td[data-cell="A9"]');
+  a9.focus();
+  a9.textContent = '="담당자 ""김연구원"" 010-1234-5678"';
+  a9.dispatchEvent({ type: "input", target: a9 });
+  a9.blur();
+  await flushAsyncTurns();
+
+  userClick(document.getElementById("btn-scrub-pii"));
+  await flushAsyncTurns();
+  assert.match(document.getElementById("pii-result-text").textContent, /1건 마스킹 완료/);
+  assert.equal(a9.dataset.formula, '="담당자 ""김연구원"" 010-****-****"');
+  assert.ok(!a9.textContent.includes("010-1234-5678"));
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(a9.dataset.formula, '="담당자 ""김연구원"" 010-1234-5678"');
+
+  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  await flushAsyncTurns();
+  const pdfCard = document.getElementById("pdf-page-card");
+  const formStatus = document.getElementById("pdf-form-status");
+  pdfCard.querySelector("h3").innerHTML = '결재문서 <span>010-1111-2222</span>';
+  const firstBodyP = pdfCard.querySelector("p:not(#pdf-form-status)");
+  firstBodyP.innerHTML = '1문단 <strong>010-3333-4444</strong>';
+  const secondBodyP = document.createElement("p");
+  secondBodyP.innerHTML = '2문단 <em>sec@example.org</em>';
+  formStatus.before(secondBodyP);
+
+  userClick(document.getElementById("btn-scrub-pii"));
+  await flushAsyncTurns();
+  assert.match(document.getElementById("pii-result-text").textContent, /3건 마스킹 완료/);
+  const bodyPsAfterScrub = pdfCard.querySelectorAll("p:not(#pdf-form-status)");
+  assert.equal(bodyPsAfterScrub.length, 2);
+  assert.equal(bodyPsAfterScrub[0].innerHTML, "1문단 <strong>010-****-****</strong>");
+  assert.equal(bodyPsAfterScrub[1].innerHTML, "2문단 <em>***@***</em>");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  const bodyPsAfterUndo = pdfCard.querySelectorAll("p:not(#pdf-form-status)");
+  assert.equal(bodyPsAfterUndo.length, 2);
+  assert.equal(pdfCard.querySelector("h3").innerHTML, "결재문서 <span>010-1111-2222</span>");
+  assert.equal(bodyPsAfterUndo[0].innerHTML, "1문단 <strong>010-3333-4444</strong>");
+  assert.equal(bodyPsAfterUndo[1].innerHTML, "2문단 <em>sec@example.org</em>");
+});
+
+test("focused formula undo-redo updates displayed result, missing sheet returns #REF!, and in-flight or failed ribbon IPC keeps undo stack consistent", async () => {
+  const { document, sandbox, userClick, advanceTimers } = await createWorkspaceHarness();
+  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  await flushAsyncTurns();
+
+  const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
+  const formulaInput = document.getElementById("formula-input");
+  assert.equal(f2.textContent, "4950");
+
+  f2.focus();
+  f2.textContent = "=B2+100";
+  f2.dispatchEvent({ type: "input", target: f2 });
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(document.activeElement, f2);
+  assert.equal(f2.textContent, "4950");
+
+  sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(document.activeElement, f2);
+  assert.equal(f2.textContent, "1250");
+  assert.equal(f2.dataset.formula, "=B2+100");
+  assert.equal(formulaInput.value, "=B2+100");
+
+  const g9 = document.querySelector('#pane-sheet td[data-cell="G9"]');
+  g9.focus();
+  g9.textContent = "=NoSuchSheet!A1+10";
+  g9.dispatchEvent({ type: "input", target: g9 });
+  g9.blur();
+  await flushAsyncTurns();
+  assert.equal(g9.textContent, "#REF!");
+
+  assert.equal(
+    document.querySelectorAll('#pane-sheet td[data-cell^="B"][data-cell$="2"]').length,
+    2
+  );
+  assert.equal(
+    document.querySelectorAll(
+      '#pane-sheet td[data-cell^="B"][data-cell$="2"]:not([data-cell="B12"], .none)'
+    ).length,
+    1
+  );
+
+  const timerOrder = [];
+  sandbox.setTimeout(() => {
+    timerOrder.push("t100");
+    sandbox.setTimeout(() => {
+      timerOrder.push("nested200");
+    }, 100);
+  }, 100);
+  sandbox.setTimeout(() => {
+    timerOrder.push("t250");
+  }, 250);
+  advanceTimers(300);
+  assert.deepEqual(timerOrder, ["t100", "nested200", "t250"]);
+
+  let shouldFailRibbon = false;
+  let pendingRibbonResolve = null;
+  let undoRpcCalls = 0;
+  const asyncHarness = await createWorkspaceHarness({
+    tauriInvoke: (command) => {
+      if (command === "get_workspace_bootstrap") {
+        return {
+          platform: "Windows",
+          shortcutModifier: "Ctrl",
+          recentFormatFilters: ["전체"],
+          openTabs: [],
+        };
+      }
+      if (command === "get_ribbon_category_commands") {
+        return {
+          commands: [{ id: "document-home-bold", title: "굵게", shortcut: "Ctrl+B" }],
+        };
+      }
+      if (command === "execute_ribbon_command") {
+        if (shouldFailRibbon) {
+          return Promise.reject(new Error("IPC rejected"));
+        }
+        return new Promise((resolve) => {
+          pendingRibbonResolve = resolve;
+        });
+      }
+      if (command === "undo_ribbon_command") {
+        undoRpcCalls += 1;
+        return { commandId: "undo", summary: "실행 취소 완료" };
+      }
+      return { status: "ok" };
+    },
+  });
+
+  const boldBtn = asyncHarness.document.querySelector('[data-command-id="document-home-bold"]');
+  asyncHarness.userClick(boldBtn);
+  asyncHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(undoRpcCalls, 0);
+
+  pendingRibbonResolve({ commandId: "document-home-bold", summary: "굵게", isBold: true });
+  await flushAsyncTurns(10);
+  assert.equal(undoRpcCalls, 1);
+  assert.equal(
+    asyncHarness.document.querySelector("#doc-editor h1").style.fontWeight || "",
+    ""
+  );
+
+  shouldFailRibbon = true;
+  asyncHarness.userClick(boldBtn);
+  await flushAsyncTurns(10);
+  asyncHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(undoRpcCalls, 1);
 });

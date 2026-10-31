@@ -456,7 +456,13 @@ impl SheetEngine {
     const DENSE_COLS: usize = 16;
 
     pub fn new(name: impl Into<String>) -> Self {
-        let name_str = name.into();
+        let raw = name.into();
+        let trimmed = raw.trim();
+        let name_str = if trimmed.is_empty() {
+            "Sheet1".to_string()
+        } else {
+            trimmed.to_string()
+        };
         let sheet_id = compute_sheet_id(&name_str);
         Self {
             name: name_str,
@@ -470,7 +476,13 @@ impl SheetEngine {
     }
 
     pub fn set_name(&mut self, name: impl Into<String>) {
-        self.name = name.into();
+        let raw = name.into();
+        let trimmed = raw.trim();
+        self.name = if trimmed.is_empty() {
+            "Sheet1".to_string()
+        } else {
+            trimmed.to_string()
+        };
         self.sheet_id = compute_sheet_id(&self.name);
     }
 

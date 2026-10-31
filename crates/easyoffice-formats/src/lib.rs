@@ -1,10 +1,12 @@
 use std::fmt;
 
 pub mod converter;
+pub mod csv_markdown_codecs;
 pub mod deflate;
 mod legacy_ole2_codec;
 pub mod office_codecs;
 pub mod ole2_codec;
+mod pdf_stream_parser;
 pub mod rtf_xml_helpers;
 pub mod strict_json;
 pub mod text_pdf_codecs;
@@ -12,6 +14,7 @@ pub mod utf16_swar;
 pub mod zip_codec;
 
 pub use converter::*;
+pub use csv_markdown_codecs::*;
 pub use deflate::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;

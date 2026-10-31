@@ -35,18 +35,47 @@
     return trimmed || fallback;
   }
 
-  function unquoteFormulaSheetTokenJs(rawToken, fallback = "Sheet1") {
+  function unquoteSheetTokenStrictJs(rawToken) {
     const trimmed = String(rawToken ?? "").trim();
-    const unquoted =
-      trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")
-        ? trimmed.slice(1, -1).replaceAll("''", "'")
-        : trimmed;
-    const norm = unquoted.trim();
-    return norm || fallback;
+    if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+      return trimmed.slice(1, -1).replaceAll("''", "'");
+    }
+    return null;
   }
 
-  function collectRangeNumericValues(startRef, endRef, cellValues, currentSheet) {
-    const shPrefix = String(currentSheet || "SHEET1").toUpperCase() + "!";
+  function resolveCanonicalSheetUpper(knownSheets, rawName) {
+    const trimmed = String(rawName ?? "").trim();
+    if (!trimmed) return null;
+    const upper = trimmed.toUpperCase();
+    for (const stored of knownSheets) {
+      if (stored.toUpperCase() === upper) return stored.toUpperCase();
+    }
+    const unquoted = unquoteSheetTokenStrictJs(trimmed);
+    if (unquoted !== null) {
+      const uqUpper = unquoted.toUpperCase();
+      for (const stored of knownSheets) {
+        if (stored.toUpperCase() === uqUpper) return stored.toUpperCase();
+      }
+    }
+    for (const stored of knownSheets) {
+      const storedUnquoted = unquoteSheetTokenStrictJs(stored);
+      if (storedUnquoted !== null && storedUnquoted.toUpperCase() === upper) {
+        return stored.toUpperCase();
+      }
+    }
+    return null;
+  }
+
+  function addKnownSheet(knownSheets, name) {
+    const trimmed = String(name ?? "").trim() || "Sheet1";
+    const upper = trimmed.toUpperCase();
+    if (!knownSheets.some((s) => s.toUpperCase() === upper)) {
+      knownSheets.push(trimmed);
+    }
+  }
+
+  function collectRangeNumericValues(startRef, endRef, cellValues, canonicalSheetUpper) {
+    const shPrefix = canonicalSheetUpper + "!";
     const p1 = parseCellRefParts(startRef);
     const p2 = parseCellRefParts(endRef);
     const nums = [];
@@ -111,8 +140,8 @@
     return String(Math.round(res * 100) / 100);
   }
 
-  function evaluateFormulaExpression(exprStr, cellValues, currentSheet, currentCellRef) {
-    const shUpper = String(currentSheet || "SHEET1").toUpperCase();
+  function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {
+    const { values, knownSheets } = workbook;
     const clean = String(exprStr || "").trim();
     if (!clean.startsWith("=")) {
       const normalized = clean.replaceAll(",", "");
@@ -134,26 +163,42 @@
         body
       );
     if (rangeMatch) {
-      const rangeSheet =
-        rangeMatch[2] !== undefined
-          ? unquoteFormulaSheetTokenJs(rangeMatch[2], "SHEET1").toUpperCase()
-          : shUpper;
-      const vals = collectRangeNumericValues(rangeMatch[3], rangeMatch[4], cellValues, rangeSheet);
+      const rangeSheetUpper =
+        rangeMatch[2] === undefined
+          ? currentSheetUpper
+          : resolveCanonicalSheetUpper(knownSheets, rangeMatch[2]);
+      if (!rangeSheetUpper) return "#REF!";
+      const vals = collectRangeNumericValues(
+        rangeMatch[3],
+        rangeMatch[4],
+        values,
+        rangeSheetUpper
+      );
       return evaluateRangeFunction(rangeMatch[1], vals);
     }
+    let hasMissingRef = false;
     const withCrossSheet = body.replaceAll(
       /('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)\b/g,
       (_, shToken, ref) => {
-        const shKey = unquoteFormulaSheetTokenJs(shToken, "SHEET1").toUpperCase();
-        const raw = String(cellValues[shKey + "!" + ref] ?? "")
+        const shKey = resolveCanonicalSheetUpper(knownSheets, shToken);
+        if (!shKey) {
+          hasMissingRef = true;
+          return "#REF!";
+        }
+        const raw = String(values[shKey + "!" + ref] ?? "")
           .replaceAll(",", "")
           .trim();
+        if (raw.startsWith("#")) {
+          hasMissingRef = true;
+          return raw;
+        }
         const v = Number(raw);
         return raw !== "" && Number.isFinite(v) ? String(v) : "0";
       }
     );
+    if (hasMissingRef) return "#REF!";
     const substituted = withCrossSheet.replaceAll(/\b([A-Z]+\d+)\b/g, (_, ref) => {
-      const raw = String(cellValues[shUpper + "!" + ref] ?? "")
+      const raw = String(values[currentSheetUpper + "!" + ref] ?? "")
         .replaceAll(",", "")
         .trim();
       const v = Number(raw);
@@ -167,83 +212,275 @@
     return arithResult ?? clean;
   }
 
-  function evaluatePairsIntoWorkbookMap(pairsList, seedDefaults) {
+  function scalarJsonCellValue(rawVal) {
+    if (rawVal === undefined || rawVal === null) return "";
+    if (typeof rawVal === "string") return rawVal;
+    if (typeof rawVal === "number" && Number.isFinite(rawVal)) return String(rawVal);
+    if (typeof rawVal === "boolean") return rawVal ? "TRUE" : "FALSE";
+    throw new Error("InvalidArgument: JSON 셀 'value'는 스칼라여야 합니다.");
+  }
+
+  function buildLocalWorkbookFromJson(doc, defaultSheet, seedDefaults) {
+    const knownSheets = [];
+    addKnownSheet(knownSheets, "Sheet1");
+    addKnownSheet(knownSheets, "Sheet2");
+    addKnownSheet(knownSheets, defaultSheet);
+    if (doc.sheets !== undefined) {
+      if (!Array.isArray(doc.sheets)) {
+        throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
+      }
+      for (const s of doc.sheets) {
+        if (typeof s !== "string") {
+          throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
+        }
+        if (s.trim()) addKnownSheet(knownSheets, s.trim());
+      }
+    }
+    if (doc.cells !== undefined && !Array.isArray(doc.cells)) {
+      throw new Error("InvalidArgument: JSON 'cells' 필드는 배열이어야 합니다.");
+    }
+    const cells = doc.cells || [];
     const values = {};
     const formulaEntries = {};
-    pairsList.forEach(({ sheetUpper, refUpper, value }) => {
-      if (!sheetUpper || !refUpper) return;
-      const fullKey = sheetUpper + "!" + refUpper;
-      const strVal = String(value ?? "");
+    let seenSheet1 = false;
+    let seenSheet2 = false;
+    const triples = [];
+
+    for (const item of cells) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error("InvalidArgument: JSON 'cells' 항목은 객체여야 합니다.");
+      }
+      if (item.sheet !== undefined && item.sheet !== null && typeof item.sheet !== "string") {
+        throw new Error("InvalidArgument: JSON 셀 'sheet' 필드는 문자열이어야 합니다.");
+      }
+      if (typeof item.cell !== "string" || !item.cell.trim()) {
+        throw new Error("InvalidArgument: JSON 셀 'cell' 주소가 비어 있습니다.");
+      }
+      const shName = jsonSheetNameOrDefaultJs(item.sheet ?? defaultSheet, defaultSheet);
+      const addrUpper = item.cell.trim().toUpperCase();
+      const strVal = scalarJsonCellValue(item.value);
+      if (shName.toUpperCase() === "SHEET1") seenSheet1 = true;
+      if (shName.toUpperCase() === "SHEET2") seenSheet2 = true;
+      addKnownSheet(knownSheets, shName);
+      triples.push({ shUpper: shName.toUpperCase(), addrUpper, strVal });
+    }
+
+    if (seedDefaults) {
+      if (!seenSheet1) {
+        values["SHEET1!A1"] = "1200";
+        values["SHEET1!B1"] = "850";
+      }
+      if (!seenSheet2) {
+        values["SHEET2!A1"] = "100";
+      }
+    }
+
+    for (const { shUpper, addrUpper, strVal } of triples) {
+      const fullKey = shUpper + "!" + addrUpper;
       values[fullKey] = strVal;
       if (strVal.startsWith("=")) {
         formulaEntries[fullKey] = strVal;
       } else {
         delete formulaEntries[fullKey];
       }
-    });
-    if (seedDefaults) {
-      if (!Object.keys(values).some((k) => k.startsWith("SHEET1!"))) {
-        values["SHEET1!A1"] = "1200";
-        values["SHEET1!B1"] = "850";
-      }
-      if (!Object.keys(values).some((k) => k.startsWith("SHEET2!"))) {
-        values["SHEET2!A1"] = "100";
-      }
     }
+
+    const workbook = { values, knownSheets };
     for (let pass = 0; pass < 4; pass++) {
       Object.keys(formulaEntries).forEach((k) => {
         const bangPos = k.lastIndexOf("!");
         const kSheet = k.slice(0, bangPos);
         const kRef = k.slice(bangPos + 1);
-        values[k] = evaluateFormulaExpression(formulaEntries[k], values, kSheet, kRef);
+        values[k] = evaluateFormulaExpression(formulaEntries[k], workbook, kSheet, kRef);
       });
     }
-    return values;
+    return workbook;
   }
 
-  function buildLocalWorkbookValuesFromJson(doc, defaultSheetUpper, seedDefaults) {
-    const cells = Array.isArray(doc?.cells) ? doc.cells : [];
-    const pairsList = cells.map((item) => ({
-      sheetUpper: jsonSheetNameOrDefaultJs(item?.sheet ?? defaultSheetUpper, "Sheet1").toUpperCase(),
-      refUpper: String(item?.cell || "").trim().toUpperCase(),
-      value: String(item?.value ?? ""),
-    }));
-    return evaluatePairsIntoWorkbookMap(pairsList, seedDefaults);
+  function isAsciiDigitCode(c) {
+    return c >= 48 && c <= 57;
+  }
+
+  function isAsciiAlphaNumCode(c) {
+    return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+  }
+
+  function consumeDigitsJs(str, pos, minLen, maxLen) {
+    let end = pos;
+    while (end < str.length && end - pos < maxLen && isAsciiDigitCode(str.charCodeAt(end))) {
+      end += 1;
+    }
+    return end - pos >= minLen ? end : -1;
+  }
+
+  function matchEmailAtJs(str, idx) {
+    if (!isAsciiAlphaNumCode(str.charCodeAt(idx))) return null;
+    let p = idx;
+    while (p < str.length) {
+      const c = str.charCodeAt(p);
+      if (isAsciiAlphaNumCode(c) || c === 46 || c === 95 || c === 45 || c === 43) {
+        p += 1;
+      } else {
+        break;
+      }
+    }
+    if (p === idx || p >= str.length || str.charCodeAt(p) !== 64) return null;
+    const domStart = p + 1;
+    let q = domStart;
+    while (q < str.length) {
+      const c = str.charCodeAt(q);
+      if (isAsciiAlphaNumCode(c) || c === 46 || c === 45) {
+        q += 1;
+      } else {
+        break;
+      }
+    }
+    while (q > domStart && !isAsciiAlphaNumCode(str.charCodeAt(q - 1))) {
+      q -= 1;
+    }
+    const domain = str.slice(domStart, q);
+    if (domain.length >= 3 && isAsciiAlphaNumCode(domain.charCodeAt(0)) && domain.includes(".")) {
+      return { len: q - idx, replacement: "***@***" };
+    }
+    return null;
+  }
+
+  function matchRrnAtJs(str, idx) {
+    if (idx > 0 && isAsciiDigitCode(str.charCodeAt(idx - 1))) return null;
+    if (
+      idx + 14 <= str.length &&
+      /^\d{6}-\d{7}$/.test(str.slice(idx, idx + 14)) &&
+      (idx + 14 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 14)))
+    ) {
+      return { len: 14, replacement: "******-*******" };
+    }
+    if (
+      idx + 13 <= str.length &&
+      /^\d{13}$/.test(str.slice(idx, idx + 13)) &&
+      (idx + 13 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 13)))
+    ) {
+      const month = Number(str.slice(idx + 2, idx + 4));
+      const day = Number(str.slice(idx + 4, idx + 6));
+      const gender = Number(str[idx + 6]);
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && gender >= 1 && gender <= 8) {
+        return { len: 13, replacement: "******-*******" };
+      }
+    }
+    return null;
+  }
+
+  function matchPhoneAtJs(str, idx) {
+    if (idx > 0 && (isAsciiDigitCode(str.charCodeAt(idx - 1)) || str[idx - 1] === "+")) {
+      return null;
+    }
+    if (str.startsWith("+82", idx)) {
+      let p = idx + 3;
+      if (p < str.length && (str[p] === "-" || str[p] === " ")) p += 1;
+      const pArea = consumeDigitsJs(str, p, 1, 3);
+      if (pArea > 0) {
+        let p2 = pArea;
+        if (p2 < str.length && (str[p2] === "-" || str[p2] === " ")) p2 += 1;
+        const pMid = consumeDigitsJs(str, p2, 3, 4);
+        if (pMid > 0) {
+          let p3 = pMid;
+          if (p3 < str.length && (str[p3] === "-" || str[p3] === " ")) p3 += 1;
+          const pEnd = consumeDigitsJs(str, p3, 4, 4);
+          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
+            return { len: pEnd - idx, replacement: "+82-**-****-****" };
+          }
+        }
+      }
+    }
+    if (/^01[016789]/.test(str.slice(idx, idx + 3))) {
+      const p = idx + 3;
+      if (p < str.length && (str[p] === "-" || str[p] === " ")) {
+        const sep = str[p];
+        const pMid = consumeDigitsJs(str, p + 1, 3, 4);
+        if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
+          const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
+          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
+            return { len: pEnd - idx, replacement: "010-****-****" };
+          }
+        }
+      } else if (
+        idx + 11 <= str.length &&
+        /^\d{11}$/.test(str.slice(idx, idx + 11)) &&
+        (idx + 11 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 11)))
+      ) {
+        return { len: 11, replacement: "010-****-****" };
+      }
+    }
+    if (idx + 3 <= str.length && str.startsWith("02", idx) && (str[idx + 2] === "-" || str[idx + 2] === " ")) {
+      const sep = str[idx + 2];
+      const pMid = consumeDigitsJs(str, idx + 3, 3, 4);
+      if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
+        const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
+        if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
+          return { len: pEnd - idx, replacement: "02-****-****" };
+        }
+      }
+    }
+    if (
+      idx + 4 <= str.length &&
+      /^0[3-6][1-5][-\s]/.test(str.slice(idx, idx + 4))
+    ) {
+      const sep = str[idx + 3];
+      const pMid = consumeDigitsJs(str, idx + 4, 3, 4);
+      if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
+        const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
+        if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
+          return { len: pEnd - idx, replacement: "***-****-****" };
+        }
+      }
+    }
+    return null;
   }
 
   function localScrubPii(rawText) {
-    const text = String(rawText || "");
+    const text = String(rawText ?? "");
+    let scrubbedText = "";
     let residentCount = 0;
     let phoneCount = 0;
     let emailCount = 0;
-    const scrubbedText = text
-      .replace(/\b\d{6}-[1-4]\d{6}\b/g, () => {
-        residentCount += 1;
-        return "******-*******";
-      })
-      .replace(/\b\d{6}[1-4]\d{6}\b/g, () => {
-        residentCount += 1;
-        return "*************";
-      })
-      .replace(
-        /(?:\+82[-\s]?10|01[016789]|02|0[3-6][1-5])[-\s]\d{3,4}[-\s]\d{4}\b/g,
-        (match) => {
-          phoneCount += 1;
-          if (match.startsWith("+82")) return "+82-10-****-****";
-          if (match.startsWith("02")) return "02-****-****";
-          return "010-****-****";
-        }
-      )
-      .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, () => {
+    const spans = [];
+    let idx = 0;
+    while (idx < text.length) {
+      const em = matchEmailAtJs(text, idx);
+      if (em) {
+        scrubbedText += em.replacement;
+        spans.push({ start: idx, end: idx + em.len, replacement: em.replacement });
         emailCount += 1;
-        return "***@***.***";
-      });
+        idx += em.len;
+        continue;
+      }
+      const rrn = matchRrnAtJs(text, idx);
+      if (rrn) {
+        scrubbedText += rrn.replacement;
+        spans.push({ start: idx, end: idx + rrn.len, replacement: rrn.replacement });
+        residentCount += 1;
+        idx += rrn.len;
+        continue;
+      }
+      const ph = matchPhoneAtJs(text, idx);
+      if (ph) {
+        scrubbedText += ph.replacement;
+        spans.push({ start: idx, end: idx + ph.len, replacement: ph.replacement });
+        phoneCount += 1;
+        idx += ph.len;
+        continue;
+      }
+      const cp = text.codePointAt(idx);
+      const step = cp > 0xffff ? 2 : 1;
+      scrubbedText += text.slice(idx, idx + step);
+      idx += step;
+    }
     return {
       scrubbedText,
       maskedResidentIds: residentCount,
       maskedPhoneNumbers: phoneCount,
       maskedEmails: emailCount,
       totalMasked: residentCount + phoneCount + emailCount,
+      spans,
     };
   }
 
@@ -289,89 +526,43 @@
     };
   }
 
-  function isUnsafeZipDescriptor(entryPath, comp, uncomp, enc) {
-    if (
-      !entryPath ||
-      typeof enc !== "boolean" ||
-      !Number.isFinite(comp) ||
-      !Number.isFinite(uncomp) ||
-      !Number.isInteger(comp) ||
-      !Number.isInteger(uncomp) ||
-      comp < 0 ||
-      uncomp < 0
-    ) {
-      return true;
+  function isValidZipEntryPath(entryPath) {
+    if (!entryPath || entryPath.includes("\0") || entryPath.startsWith("/") || entryPath.includes("\\")) {
+      return false;
     }
-    return (
-      entryPath.startsWith("/") ||
-      entryPath.includes("..") ||
-      entryPath.includes("\\") ||
-      enc ||
-      (comp === 0 && uncomp > 0) ||
-      (comp > 0 && uncomp / comp > 100)
-    );
+    if (/^[A-Za-z]:/.test(entryPath)) return false;
+    const trimmed = entryPath.endsWith("/") ? entryPath.slice(0, -1) : entryPath;
+    if (!trimmed) return false;
+    for (const seg of trimmed.split("/")) {
+      if (!seg || seg === "." || seg === ".." || seg.includes(":")) return false;
+    }
+    return true;
   }
 
   function hasDangerousXmlDirective(xmlText) {
     return /<!\s*(?:DOCTYPE|ENTITY)\b/i.test(String(xmlText ?? ""));
   }
 
-  function localAuditSecurity(payload) {
-    const raw = String(payload ?? "").replace(/^\uFEFF/, "");
-    const trimmed = raw.trimStart();
-    if (trimmed.startsWith("{")) {
-      const doc = JSON.parse(trimmed);
-      if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-        throw new Error("InvalidArgument: audit_security JSON 루트는 객체여야 합니다.");
-      }
-      const xmlPart = doc.xml === undefined || doc.xml === null ? "" : String(doc.xml);
-      if (hasDangerousXmlDirective(xmlPart)) {
-        return {
-          status: "REJECTED",
-          xxeGuard: "BLOCKED",
-          zipGuard: "PASSED",
-          checkedEntries: 0,
-        };
-      }
-      const entries = doc.entries === undefined ? [] : doc.entries;
-      if (!Array.isArray(entries)) {
-        throw new Error("InvalidArgument: audit_security entries 필드는 배열이어야 합니다.");
-      }
-      for (const item of entries) {
-        if (!item || typeof item !== "object" || Array.isArray(item)) {
-          return {
-            status: "REJECTED",
-            xxeGuard: "PASSED",
-            zipGuard: "BLOCKED",
-            checkedEntries: entries.length,
-          };
-        }
-        const entryPath = typeof item.name === "string" ? item.name.trim() : "";
-        const comp = typeof item.compressed === "number" ? item.compressed : Number.NaN;
-        const uncomp = typeof item.uncompressed === "number" ? item.uncompressed : Number.NaN;
-        const enc = item.encrypted === undefined || item.encrypted === null ? false : item.encrypted;
-        if (isUnsafeZipDescriptor(entryPath, comp, uncomp, enc)) {
-          return {
-            status: "REJECTED",
-            xxeGuard: "PASSED",
-            zipGuard: "BLOCKED",
-            checkedEntries: entries.length,
-          };
-        }
-      }
-      return {
-        status: "SAFE",
-        xxeGuard: "PASSED",
-        zipGuard: "PASSED",
-        checkedEntries: entries.length || 1,
-      };
+  function parseRequiredRpcJsonObject(payload) {
+    const trimmed = String(payload ?? "")
+      .replace(/^\uFEFF/, "")
+      .trim();
+    if (!trimmed.startsWith("{")) {
+      throw new Error("InvalidArgument: RPC 페이로드는 JSON 객체여야 합니다.");
     }
+    const doc = JSON.parse(trimmed);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+      throw new Error("InvalidArgument: RPC JSON 루트는 객체여야 합니다.");
+    }
+    return doc;
+  }
 
-    const pipeIdx = raw.indexOf("|");
-    const leftPart = pipeIdx >= 0 ? raw.slice(0, pipeIdx) : "";
-    const hasEntrySpec = pipeIdx >= 0 && !leftPart.includes("<") && !leftPart.includes(">");
-    const entriesPart = hasEntrySpec ? leftPart : "";
-    const xmlPart = hasEntrySpec ? raw.slice(pipeIdx + 1) : raw;
+  function localAuditSecurity(payload) {
+    const doc = parseRequiredRpcJsonObject(payload);
+    if (doc.xml !== undefined && doc.xml !== null && typeof doc.xml !== "string") {
+      throw new Error("InvalidArgument: audit_security 'xml' 필드는 문자열이어야 합니다.");
+    }
+    const xmlPart = doc.xml ?? "";
     if (hasDangerousXmlDirective(xmlPart)) {
       return {
         status: "REJECTED",
@@ -380,13 +571,59 @@
         checkedEntries: 0,
       };
     }
-    const entries = (entriesPart || "")
-      .split(";")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const entries = doc.entries === undefined ? [] : doc.entries;
+    if (!Array.isArray(entries)) {
+      throw new Error("InvalidArgument: audit_security 'entries' 필드는 배열이어야 합니다.");
+    }
+    const MAX_ENTRIES = 4096;
+    const MAX_SINGLE_UNCOMPRESSED = 128 * 1024 * 1024;
+    const MAX_TOTAL_UNCOMPRESSED = 512 * 1024 * 1024;
+    if (entries.length > MAX_ENTRIES) {
+      return {
+        status: "REJECTED",
+        xxeGuard: "PASSED",
+        zipGuard: "BLOCKED",
+        checkedEntries: entries.length,
+      };
+    }
+    let totalUncompressed = 0;
+    const seenPaths = new Set();
     for (const item of entries) {
-      const cols = item.split(",").map((c) => c.trim());
-      if (cols.length < 3 || cols.length > 4) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error("InvalidArgument: audit_security 'entries' 항목은 객체여야 합니다.");
+      }
+      const rawName = item.name !== undefined && item.name !== null ? item.name : item.path;
+      if (typeof rawName !== "string" || !rawName.trim()) {
+        throw new Error("InvalidArgument: ZIP 엔트리 이름('name')이 비어 있습니다.");
+      }
+      const entryPath = rawName.trim();
+      const rawComp = item.compressed ?? item.compressedSize;
+      const rawUncomp = item.uncompressed ?? item.uncompressedSize;
+      if (
+        typeof rawComp !== "number" ||
+        !Number.isInteger(rawComp) ||
+        rawComp < 0 ||
+        typeof rawUncomp !== "number" ||
+        !Number.isInteger(rawUncomp) ||
+        rawUncomp < 0
+      ) {
+        throw new Error("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
+      }
+      const enc = item.encrypted === undefined || item.encrypted === null ? false : item.encrypted;
+      if (typeof enc !== "boolean") {
+        throw new Error("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
+      }
+      totalUncompressed += rawUncomp;
+      const unsafe =
+        !isValidZipEntryPath(entryPath) ||
+        seenPaths.has(entryPath) ||
+        (entryPath.endsWith("/") && (rawComp > 0 || rawUncomp > 0)) ||
+        enc ||
+        rawUncomp > MAX_SINGLE_UNCOMPRESSED ||
+        totalUncompressed > MAX_TOTAL_UNCOMPRESSED ||
+        (rawComp === 0 && rawUncomp > 0) ||
+        (rawComp > 0 && rawUncomp / rawComp > 100);
+      if (unsafe) {
         return {
           status: "REJECTED",
           xxeGuard: "PASSED",
@@ -394,31 +631,13 @@
           checkedEntries: entries.length,
         };
       }
-      const entryPath = cols[0] || "";
-      const comp = cols[1] === "" ? Number.NaN : Number(cols[1]);
-      const uncomp = cols[2] === "" ? Number.NaN : Number(cols[2]);
-      let enc = null;
-      if (cols.length === 3) {
-        enc = false;
-      } else if (cols[3].toLowerCase() === "true" || cols[3] === "1") {
-        enc = true;
-      } else if (cols[3].toLowerCase() === "false" || cols[3] === "0") {
-        enc = false;
-      }
-      if (isUnsafeZipDescriptor(entryPath, comp, uncomp, enc)) {
-        return {
-          status: "REJECTED",
-          xxeGuard: "PASSED",
-          zipGuard: "BLOCKED",
-          checkedEntries: entries.length,
-        };
-      }
+      seenPaths.add(entryPath);
     }
     return {
       status: "SAFE",
       xxeGuard: "PASSED",
       zipGuard: "PASSED",
-      checkedEntries: entries.length || 1,
+      checkedEntries: entries.length,
     };
   }
 
@@ -431,19 +650,7 @@
     return typeof globalThis.btoa === "function" ? globalThis.btoa(binary) : "";
   }
 
-  function parseRequiredRpcJsonObject(payload) {
-    const trimmed = String(payload ?? "")
-      .replace(/^\uFEFF/, "")
-      .trimStart();
-    if (!trimmed.startsWith("{")) {
-      throw new Error("InvalidArgument: 시트 RPC 페이로드는 JSON 객체여야 합니다.");
-    }
-    const doc = JSON.parse(trimmed);
-    if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-      throw new Error("InvalidArgument: 시트 RPC 루트는 JSON 객체여야 합니다.");
-    }
-    return doc;
-  }
+  const ZOOM_STEP_CYCLE = { 100: 125, 125: 150, 150: 90 };
 
   function createOfflineRpcHandlers(ctx) {
     const {
@@ -456,57 +663,92 @@
       localRibbonState,
     } = ctx;
 
-    function evaluateLocalSheetFormula(payload, seedDefaults = false) {
-      const doc = parseRequiredRpcJsonObject(payload);
-      const sheetName = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
-      const evalSheet = sheetName.toUpperCase();
-      const q = String(doc.expr ?? doc.query ?? (seedDefaults ? "=Sheet2!A1+50" : "A1")).trim();
-      const values = buildLocalWorkbookValuesFromJson(doc, evalSheet, seedDefaults);
-      if (q.startsWith("=")) {
-        return evaluateFormulaExpression(q, values, evalSheet, getActiveSheetCellRef() || "A1");
+    function evaluateSingleDocExpr(doc, seedDefaults) {
+      if (doc.sheet !== undefined && doc.sheet !== null && typeof doc.sheet !== "string") {
+        throw new Error("InvalidArgument: JSON 'sheet' 필드는 문자열이어야 합니다.");
       }
-      return values[evalSheet + "!" + q.toUpperCase()] ?? "";
+      const sheetName = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
+      const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
+      if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
+        throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
+      }
+      const q = String(rawExpr ?? (seedDefaults ? "=Sheet2!A1+50" : "A1")).trim() || "A1";
+      const workbook = buildLocalWorkbookFromJson(doc, sheetName, seedDefaults);
+      const evalSheetUpper =
+        resolveCanonicalSheetUpper(workbook.knownSheets, sheetName) || sheetName.toUpperCase();
+      if (q.startsWith("=")) {
+        return {
+          sheetName,
+          expr: q,
+          value: String(
+            evaluateFormulaExpression(q, workbook, evalSheetUpper, getActiveSheetCellRef() || "A1")
+          ),
+        };
+      }
+      return {
+        sheetName,
+        expr: q,
+        value: String(workbook.values[evalSheetUpper + "!" + q.toUpperCase()] ?? ""),
+      };
     }
 
     function evaluateLocalWorkbookFormulaRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
-      const sheet = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
-      const formula = String(doc.expr || "=Sheet2!A1+50").trim();
-      const value = String(evaluateLocalSheetFormula(payload, true));
-      return { sheet, formula, value };
+      const res = evaluateSingleDocExpr(doc, true);
+      return { sheet: res.sheetName, formula: res.expr, value: res.value };
     }
 
     function evaluateLocalSheetRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
-      const defaultSheet = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
-      const values = buildLocalWorkbookValuesFromJson(doc, defaultSheet.toUpperCase(), false);
-      if (Array.isArray(doc.targets) && doc.targets.length > 0) {
-        const outMap = {};
-        const targetValues = [];
-        let firstExpr = "A1";
-        let firstVal = "";
-        doc.targets.forEach((item, idx) => {
-          const sh = jsonSheetNameOrDefaultJs(item?.sheet ?? defaultSheet, "Sheet1");
-          const expr = String(item?.cell || "A1").trim();
-          const val = expr.startsWith("=")
-            ? String(evaluateFormulaExpression(expr, values, sh.toUpperCase(), "A1"))
-            : String(values[sh.toUpperCase() + "!" + expr.toUpperCase()] ?? "");
-          outMap[sh + "!" + expr] = val;
-          targetValues.push(val);
-          if (idx === 0) {
-            firstExpr = expr;
-            firstVal = val;
-          }
-        });
-        return { query: firstExpr, value: firstVal, values: outMap, targetValues };
+      if (doc.sheet !== undefined && doc.sheet !== null && typeof doc.sheet !== "string") {
+        throw new Error("InvalidArgument: JSON 'sheet' 필드는 문자열이어야 합니다.");
       }
-      const expr = String(doc.expr ?? doc.query ?? "A1").trim();
-      const val = String(evaluateLocalSheetFormula(payload, false));
+      const defaultSheet = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
+      if (doc.targets !== undefined) {
+        if (!Array.isArray(doc.targets)) {
+          throw new Error("InvalidArgument: JSON 'targets' 필드는 배열이어야 합니다.");
+        }
+        if (doc.targets.length > 0) {
+          const workbook = buildLocalWorkbookFromJson(doc, defaultSheet, false);
+          const outMap = {};
+          const targetValues = [];
+          let firstExpr = "A1";
+          let firstVal = "";
+          doc.targets.forEach((item, idx) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+              throw new Error("InvalidArgument: JSON 'targets' 항목은 객체여야 합니다.");
+            }
+            if (item.sheet !== undefined && item.sheet !== null && typeof item.sheet !== "string") {
+              throw new Error("InvalidArgument: JSON 'targets' 시트명은 문자열이어야 합니다.");
+            }
+            if (typeof item.cell !== "string" || !item.cell.trim()) {
+              throw new Error("InvalidArgument: JSON 'targets' 항목에 'cell' 필드가 필요합니다.");
+            }
+            const sh = jsonSheetNameOrDefaultJs(item.sheet ?? defaultSheet, defaultSheet);
+            const expr = item.cell.trim();
+            const canonicalUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sh);
+            let val = "#REF!";
+            if (canonicalUpper) {
+              val = expr.startsWith("=")
+                ? String(evaluateFormulaExpression(expr, workbook, canonicalUpper, "A1"))
+                : String(workbook.values[canonicalUpper + "!" + expr.toUpperCase()] ?? "");
+            }
+            outMap[sh + "!" + expr] = val;
+            targetValues.push(val);
+            if (idx === 0) {
+              firstExpr = expr;
+              firstVal = val;
+            }
+          });
+          return { query: firstExpr, value: firstVal, values: outMap, targetValues };
+        }
+      }
+      const single = evaluateSingleDocExpr(doc, false);
       return {
-        query: expr,
-        value: val,
-        values: { [defaultSheet + "!" + expr]: val },
-        targetValues: [val],
+        query: single.expr,
+        value: single.value,
+        values: { [defaultSheet + "!" + single.expr]: single.value },
+        targetValues: [single.value],
       };
     }
 
@@ -548,14 +790,7 @@
       } else if (cmdId.endsWith("-view-theme")) {
         localRibbonState.darkThemeEnabled = !localRibbonState.darkThemeEnabled;
       } else if (cmdId.endsWith("-view-zoom")) {
-        localRibbonState.zoomPercent =
-          localRibbonState.zoomPercent === 100
-            ? 125
-            : localRibbonState.zoomPercent === 125
-              ? 150
-              : localRibbonState.zoomPercent === 150
-                ? 90
-                : 100;
+        localRibbonState.zoomPercent = ZOOM_STEP_CYCLE[localRibbonState.zoomPercent] ?? 100;
       } else if (cmdId === "pdf-mod-rotate") {
         localRibbonState.pdfRotationDegrees = (localRibbonState.pdfRotationDegrees + 90) % 360;
       }
@@ -595,7 +830,8 @@
         const restSeg = firstPipe >= 0 ? raw.slice(firstPipe + 1) : "통합_변환_문서|본문";
         const secondPipe = restSeg.indexOf("|");
         const [src, dst] = (firstSeg || "docx->hwpx").split("->");
-        const title = (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서";
+        const title =
+          (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서";
         const body = (secondPipe >= 0 ? restSeg.slice(secondPipe + 1) : "") || "본문 텍스트";
         const encoder = new TextEncoder();
         const rawBytes = encoder.encode(title + "\n" + body).length;
@@ -649,11 +885,36 @@
         iterations: 5,
         allEquivalent: true,
         suites: [
-          { suiteId: "crc32_slicing_by_8", baselineP50Us: 2068, optimizedP50Us: 464, speedupFactor: 4.46 },
-          { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
-          { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 50, optimizedP50Us: 29, speedupFactor: 1.72 },
-          { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 878, optimizedP50Us: 308, speedupFactor: 2.85 },
-          { suiteId: "swar_csv_xml_and_zero_alloc_range_agg", baselineP50Us: 640, optimizedP50Us: 195, speedupFactor: 3.28 },
+          {
+            suiteId: "crc32_slicing_by_8",
+            baselineP50Us: 2068,
+            optimizedP50Us: 464,
+            speedupFactor: 4.46,
+          },
+          {
+            suiteId: "deflate_zlib_roundtrip",
+            baselineP50Us: 234,
+            optimizedP50Us: 59,
+            speedupFactor: 3.97,
+          },
+          {
+            suiteId: "utf16_swar_and_xml_unescape",
+            baselineP50Us: 50,
+            optimizedP50Us: 29,
+            speedupFactor: 1.72,
+          },
+          {
+            suiteId: "sheet_dag_bitset_eval",
+            baselineP50Us: 878,
+            optimizedP50Us: 308,
+            speedupFactor: 2.85,
+          },
+          {
+            suiteId: "swar_csv_xml_and_zero_alloc_range_agg",
+            baselineP50Us: 640,
+            optimizedP50Us: 195,
+            speedupFactor: 3.28,
+          },
         ],
       }),
       run_smart_assistant: (payload) => localSmartAssistant(payload),
@@ -661,7 +922,7 @@
       evaluate_workbook_formula: (payload) => evaluateLocalWorkbookFormulaRpc(payload),
       evaluate_sheet: (payload) => evaluateLocalSheetRpc(payload),
       evaluate_sheet_formula: (payload) => ({
-        value: String(evaluateLocalSheetFormula(payload, false)),
+        value: evaluateSingleDocExpr(parseRequiredRpcJsonObject(payload), false).value,
       }),
       audit_security: (payload) => localAuditSecurity(payload),
       switch_ribbon_style: (payload) => {
@@ -689,6 +950,7 @@
     parseCellRefParts,
     colIndexToLetters,
     normalizeFormattedNumericCell,
+    localScrubPii,
   };
   globalThis.__EASYOFFICE_CREATE_OFFLINE_RPC__ = createOfflineRpcHandlers;
 })();

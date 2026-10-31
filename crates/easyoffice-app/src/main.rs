@@ -35,11 +35,7 @@ fn parse_ipc_http_body(
             })?
             .to_string();
         let payload = match StrictJsonValue::get_field(entries, "payload") {
-            Some(v) => v.to_scalar_string().ok_or_else(|| {
-                easyoffice_formats::EasyOfficeError::InvalidArgument(
-                    "IPC JSON 'payload' 필드는 스칼라 값이어야 합니다.".to_string(),
-                )
-            })?,
+            Some(v) => v.to_scalar_string().unwrap_or_else(|| v.to_json_string()),
             None => String::new(),
         };
         Ok((cmd, payload))
@@ -54,14 +50,17 @@ fn is_allowed_host(host: &str, port: u16) -> bool {
     let h = host.trim();
     h.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
         || h.eq_ignore_ascii_case(&format!("localhost:{port}"))
+        || h.eq_ignore_ascii_case(&format!("[::1]:{port}"))
         || h.eq_ignore_ascii_case("127.0.0.1")
         || h.eq_ignore_ascii_case("localhost")
+        || h.eq_ignore_ascii_case("[::1]")
 }
 
 fn is_allowed_origin(origin: &str, port: u16) -> bool {
     let o = origin.trim().trim_end_matches('/');
     o.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
         || o.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
+        || o.eq_ignore_ascii_case(&format!("http://[::1]:{port}"))
 }
 
 fn write_http_413(stream: &mut TcpStream) {
@@ -347,11 +346,20 @@ mod tests {
         let (cmd, payload) = parse_ipc_http_body(json).unwrap();
         assert_eq!(cmd, "evaluate_sheet");
         assert_eq!(payload, "가나다😀/A1=10\nB1=20");
+
+        let nested = r#"{"command":"evaluate_sheet","payload":{"sheet":"Sheet1","cells":[{"cell":"A1","value":42}],"expr":"A1"}}"#;
+        let (nested_cmd, nested_payload) = parse_ipc_http_body(nested).unwrap();
+        assert_eq!(nested_cmd, "evaluate_sheet");
+        let dispatched = EasyOfficeIpcRouter::dispatch(&nested_cmd, &nested_payload).unwrap();
+        assert!(dispatched.contains("\"value\":\"42\""));
+
         assert!(parse_ipc_http_body(r#"{"command":"evaluate_sheet","command":"dup"}"#).is_err());
-        assert!(parse_ipc_http_body(r#"{"command":"evaluate_sheet","payload":["bad"]}"#).is_err());
         assert!(is_allowed_host("127.0.0.1:8787", 8787));
+        assert!(is_allowed_host("[::1]:8787", 8787));
+        assert!(is_allowed_host("[::1]", 8787));
         assert!(!is_allowed_host("evil.example.com", 8787));
         assert!(is_allowed_origin("http://localhost:8787/", 8787));
+        assert!(is_allowed_origin("http://[::1]:8787/", 8787));
         assert!(!is_allowed_origin("http://evil.example.com", 8787));
     }
 }
