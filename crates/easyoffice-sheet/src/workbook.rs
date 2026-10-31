@@ -39,17 +39,44 @@ impl WorkbookEngine {
     }
 
     pub fn sheet(&self, name: &str) -> Option<&SheetEngine> {
-        let clean = name.trim().trim_matches('\'');
-        self.sheets
+        let trimmed = name.trim();
+        if let Some(found) = self
+            .sheets
             .iter()
-            .find(|s| s.name.eq_ignore_ascii_case(clean))
+            .find(|s| s.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Some(found);
+        }
+        if trimmed.len() >= 2 && trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+            let unquoted = trimmed[1..trimmed.len() - 1].replace("''", "'");
+            return self
+                .sheets
+                .iter()
+                .find(|s| s.name.eq_ignore_ascii_case(&unquoted));
+        }
+        None
     }
 
     pub fn sheet_mut(&mut self, name: &str) -> Option<&mut SheetEngine> {
-        let clean = name.trim().trim_matches('\'');
-        self.sheets
-            .iter_mut()
-            .find(|s| s.name.eq_ignore_ascii_case(clean))
+        let trimmed = name.trim();
+        if let Some(pos) = self
+            .sheets
+            .iter()
+            .position(|s| s.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Some(&mut self.sheets[pos]);
+        }
+        if trimmed.len() >= 2 && trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+            let unquoted = trimmed[1..trimmed.len() - 1].replace("''", "'");
+            if let Some(pos) = self
+                .sheets
+                .iter()
+                .position(|s| s.name.eq_ignore_ascii_case(&unquoted))
+            {
+                return Some(&mut self.sheets[pos]);
+            }
+        }
+        None
     }
 
     pub fn sheet_count(&self) -> usize {

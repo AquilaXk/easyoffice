@@ -1,4 +1,5 @@
 use easyoffice_app::{run_self_test, EasyOfficeIpcRouter};
+use easyoffice_formats::StrictJsonValue;
 use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -15,58 +16,38 @@ const APP_JS: &str = include_str!("../ui/app.js");
 const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
 const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
 
-fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{key}\"");
-    let start = json.find(&pattern)? + pattern.len();
-    let rest = json[start..].trim_start();
-    let rest = rest.strip_prefix(':')?.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let mut out = String::new();
-    let mut chars = rest.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            match chars.next()? {
-                'n' => out.push('\n'),
-                'r' => out.push('\r'),
-                't' => out.push('\t'),
-                'b' => out.push('\u{0008}'),
-                'f' => out.push('\u{000C}'),
-                '"' => out.push('"'),
-                '/' => out.push('/'),
-                '\\' => out.push('\\'),
-                'u' => {
-                    let mut hex = String::with_capacity(4);
-                    for _ in 0..4 {
-                        hex.push(chars.next()?);
-                    }
-                    let code = u32::from_str_radix(&hex, 16).ok()?;
-                    if (0xD800..=0xDBFF).contains(&code) {
-                        if chars.next()? != '\\' || chars.next()? != 'u' {
-                            return None;
-                        }
-                        let mut low_hex = String::with_capacity(4);
-                        for _ in 0..4 {
-                            low_hex.push(chars.next()?);
-                        }
-                        let low = u32::from_str_radix(&low_hex, 16).ok()?;
-                        if !(0xDC00..=0xDFFF).contains(&low) {
-                            return None;
-                        }
-                        let combined = 0x10000 + (((code - 0xD800) << 10) | (low - 0xDC00));
-                        out.push(char::from_u32(combined)?);
-                    } else {
-                        out.push(char::from_u32(code)?);
-                    }
-                }
-                other => out.push(other),
-            }
-        } else if ch == '"' {
-            return Some(out);
-        } else {
-            out.push(ch);
-        }
+fn parse_ipc_http_body(
+    body: &str,
+) -> Result<(String, String), easyoffice_formats::EasyOfficeError> {
+    let trimmed = body.strip_prefix('\u{FEFF}').unwrap_or(body).trim();
+    if trimmed.starts_with('{') {
+        let root = StrictJsonValue::parse(trimmed)?;
+        let entries = root.as_object().ok_or_else(|| {
+            easyoffice_formats::EasyOfficeError::InvalidArgument(
+                "IPC HTTP 요청 본문은 JSON 객체여야 합니다.".to_string(),
+            )
+        })?;
+        let cmd = StrictJsonValue::get_str(entries, "command")
+            .ok_or_else(|| {
+                easyoffice_formats::EasyOfficeError::InvalidArgument(
+                    "IPC JSON 요청에 문자열 'command' 필드가 필요합니다.".to_string(),
+                )
+            })?
+            .to_string();
+        let payload = match StrictJsonValue::get_field(entries, "payload") {
+            Some(v) => v.to_scalar_string().ok_or_else(|| {
+                easyoffice_formats::EasyOfficeError::InvalidArgument(
+                    "IPC JSON 'payload' 필드는 스칼라 값이어야 합니다.".to_string(),
+                )
+            })?,
+            None => String::new(),
+        };
+        Ok((cmd, payload))
+    } else if let Some((c, p)) = trimmed.split_once('|') {
+        Ok((c.trim().to_string(), p.to_string()))
+    } else {
+        Ok((trimmed.to_string(), String::new()))
     }
-    None
 }
 
 fn is_allowed_host(host: &str, port: u16) -> bool {
@@ -212,17 +193,9 @@ fn handle_http_connection(mut stream: TcpStream, port: u16) {
             APP_JS.to_string(),
         ),
         ("POST", "/api/ipc") => {
-            let trimmed = body_str.trim();
-            let (cmd, payload) = if trimmed.starts_with('{') {
-                let c = extract_json_string_field(trimmed, "command").unwrap_or_default();
-                let p = extract_json_string_field(trimmed, "payload").unwrap_or_default();
-                (c, p)
-            } else if let Some((c, p)) = trimmed.split_once('|') {
-                (c.trim().to_string(), p.to_string())
-            } else {
-                (trimmed.to_string(), String::new())
-            };
-            match EasyOfficeIpcRouter::dispatch(&cmd, &payload) {
+            let dispatched = parse_ipc_http_body(&body_str)
+                .and_then(|(cmd, payload)| EasyOfficeIpcRouter::dispatch(&cmd, &payload));
+            match dispatched {
                 Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
                 Err(err) => {
                     let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
@@ -369,16 +342,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_json_string_field_unicode_escapes_and_host_origin_guards() {
+    fn test_parse_ipc_http_body_unicode_escapes_and_host_origin_guards() {
         let json = r#"{"command":"evaluate_sheet","payload":"\uAC00\uB098\uB2E4\uD83D\uDE00\/A1=10\nB1=20"}"#;
-        assert_eq!(
-            extract_json_string_field(json, "command").as_deref(),
-            Some("evaluate_sheet")
-        );
-        assert_eq!(
-            extract_json_string_field(json, "payload").as_deref(),
-            Some("가나다😀/A1=10\nB1=20")
-        );
+        let (cmd, payload) = parse_ipc_http_body(json).unwrap();
+        assert_eq!(cmd, "evaluate_sheet");
+        assert_eq!(payload, "가나다😀/A1=10\nB1=20");
+        assert!(parse_ipc_http_body(r#"{"command":"evaluate_sheet","command":"dup"}"#).is_err());
+        assert!(parse_ipc_http_body(r#"{"command":"evaluate_sheet","payload":["bad"]}"#).is_err());
         assert!(is_allowed_host("127.0.0.1:8787", 8787));
         assert!(!is_allowed_host("evil.example.com", 8787));
         assert!(is_allowed_origin("http://localhost:8787/", 8787));

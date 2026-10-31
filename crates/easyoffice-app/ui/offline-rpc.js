@@ -30,150 +30,19 @@
     return trimmed;
   }
 
-  function splitUnescapedQueryJs(raw) {
-    const str = String(raw || "");
-    for (let i = str.length - 1; i >= 0; i--) {
-      if (str[i] === "?") {
-        let bs = 0;
-        for (let k = i - 1; k >= 0 && str[k] === "\\"; k--) {
-          bs += 1;
-        }
-        if (bs % 2 === 0) {
-          return { cellsPart: str.slice(0, i), queryPart: str.slice(i + 1) };
-        }
-      }
-    }
-    return null;
+  function jsonSheetNameOrDefaultJs(raw, fallback = "Sheet1") {
+    const trimmed = String(raw ?? "").trim();
+    return trimmed || fallback;
   }
 
-  function isCellKeyPrefixJs(str) {
-    const trimmed = String(str || "").trimStart();
-    const eqIdx = trimmed.indexOf("=");
-    if (eqIdx <= 0 || eqIdx > 64) return false;
-    const lhs = trimmed.slice(0, eqIdx).trim();
-    const bangIdx = lhs.indexOf("!");
-    const refPart = bangIdx >= 0 ? lhs.slice(bangIdx + 1).trim() : lhs;
-    return /^[A-Za-z]{1,3}\d+$/.test(refPart);
-  }
-
-  function splitEscapedCellAssignmentsJs(cellsPart) {
-    const src = String(cellsPart || "");
-    const items = [];
-    let current = "";
-    let seenEq = false;
-    let rhsStarted = false;
-    let inFormula = false;
-    let inQuotes = false;
-    let parenDepth = 0;
-
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i];
-      if (ch === "\\" && i + 1 < src.length) {
-        const nextCh = src[i + 1];
-        if (nextCh === ";" || nextCh === "?" || nextCh === "\\") {
-          if (seenEq && !rhsStarted && nextCh.trim() !== "") {
-            rhsStarted = true;
-          }
-          current += nextCh;
-          i += 1;
-          continue;
-        }
-      }
-      if (!seenEq && ch === "=") {
-        seenEq = true;
-        current += ch;
-        continue;
-      }
-      if (seenEq && !rhsStarted && ch.trim() !== "") {
-        rhsStarted = true;
-        if (ch === "=") {
-          inFormula = true;
-        }
-      }
-      if (inFormula && ch === '"') {
-        inQuotes = !inQuotes;
-        current += ch;
-        continue;
-      }
-      if (inFormula && !inQuotes) {
-        if (ch === "(") parenDepth += 1;
-        else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
-      }
-      const canSplit = inFormula ? !inQuotes && parenDepth === 0 : true;
-      if (ch === ";" && canSplit) {
-        const tail = src.slice(i + 1);
-        if (tail.trim() === "" || isCellKeyPrefixJs(tail)) {
-          const eqPos = current.indexOf("=");
-          if (eqPos > 0) {
-            items.push({
-              key: current.slice(0, eqPos).trim(),
-              value: current
-                .slice(eqPos + 1)
-                .trim()
-                .replaceAll("%3B", ";")
-                .replaceAll("%3F", "?"),
-            });
-          }
-          current = "";
-          seenEq = false;
-          rhsStarted = false;
-          inFormula = false;
-          inQuotes = false;
-          parenDepth = 0;
-          continue;
-        }
-      }
-      current += ch;
-    }
-    const lastEqPos = current.indexOf("=");
-    if (lastEqPos > 0) {
-      items.push({
-        key: current.slice(0, lastEqPos).trim(),
-        value: current
-          .slice(lastEqPos + 1)
-          .trim()
-          .replaceAll("%3B", ";")
-          .replaceAll("%3F", "?"),
-      });
-    }
-    return items;
-  }
-
-  function normalizeSheetTokenJs(raw) {
-    return String(raw || "")
-      .trim()
-      .replaceAll(/^'+|'+$/g, "")
-      .trim();
-  }
-
-  function normalizeSheetTokenOrDefaultJs(raw, fallback = "Sheet1") {
-    const norm = normalizeSheetTokenJs(raw);
+  function unquoteFormulaSheetTokenJs(rawToken, fallback = "Sheet1") {
+    const trimmed = String(rawToken ?? "").trim();
+    const unquoted =
+      trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")
+        ? trimmed.slice(1, -1).replaceAll("''", "'")
+        : trimmed;
+    const norm = unquoted.trim();
     return norm || fallback;
-  }
-
-  function extractActiveSheetAndExprJs(rawExpr, defaultSheet = "Sheet1") {
-    const trimmed = String(rawExpr || "").trim();
-    const pipeIdx = trimmed.indexOf("|");
-    if (pipeIdx >= 0) {
-      const left = trimmed.slice(0, pipeIdx).trim();
-      if (!left.startsWith("=")) {
-        return {
-          sheet: normalizeSheetTokenOrDefaultJs(left, defaultSheet),
-          expr: trimmed.slice(pipeIdx + 1).trim(),
-        };
-      }
-    }
-    const bangIdx = trimmed.indexOf("!");
-    if (bangIdx >= 0) {
-      const left = trimmed.slice(0, bangIdx).trim();
-      if (!left.startsWith("=") && !left.includes("(")) {
-        return {
-          sheet: normalizeSheetTokenOrDefaultJs(left, defaultSheet),
-          expr: trimmed.slice(bangIdx + 1).trim(),
-        };
-      }
-    }
-    return { sheet: defaultSheet, expr: trimmed };
   }
 
   function collectRangeNumericValues(startRef, endRef, cellValues, currentSheet) {
@@ -261,27 +130,21 @@
         String(parseCellRefParts(ref || currentCellRef || "A1").col + 1)
       );
     const rangeMatch =
-      /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:(?:'([^']*)'|([^\s!+\-*/^&=<>(),:]+))!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
+      /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
         body
       );
     if (rangeMatch) {
-      const hasQuoted = rangeMatch[2] !== undefined;
-      const hasBare = rangeMatch[3] !== undefined;
-      const rangeSheet = hasQuoted
-        ? normalizeSheetTokenOrDefaultJs(rangeMatch[2], "SHEET1").toUpperCase()
-        : hasBare
-          ? normalizeSheetTokenOrDefaultJs(rangeMatch[3], "SHEET1").toUpperCase()
+      const rangeSheet =
+        rangeMatch[2] !== undefined
+          ? unquoteFormulaSheetTokenJs(rangeMatch[2], "SHEET1").toUpperCase()
           : shUpper;
-      const vals = collectRangeNumericValues(rangeMatch[4], rangeMatch[5], cellValues, rangeSheet);
+      const vals = collectRangeNumericValues(rangeMatch[3], rangeMatch[4], cellValues, rangeSheet);
       return evaluateRangeFunction(rangeMatch[1], vals);
     }
     const withCrossSheet = body.replaceAll(
-      /(?:'([^']*)'|([^\s!+\-*/^&=<>(),:]+))!([A-Z]+\d+)\b/g,
-      (_, quotedSh, bareSh, ref) => {
-        const shKey =
-          quotedSh !== undefined
-            ? normalizeSheetTokenOrDefaultJs(quotedSh, "SHEET1").toUpperCase()
-            : normalizeSheetTokenOrDefaultJs(bareSh, "SHEET1").toUpperCase();
+      /('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)\b/g,
+      (_, shToken, ref) => {
+        const shKey = unquoteFormulaSheetTokenJs(shToken, "SHEET1").toUpperCase();
         const raw = String(cellValues[shKey + "!" + ref] ?? "")
           .replaceAll(",", "")
           .trim();
@@ -338,30 +201,10 @@
     return values;
   }
 
-  function buildLocalWorkbookValuesMap(cellsPart, defaultSheetUpper, seedDefaults) {
-    const assignments = splitEscapedCellAssignmentsJs(cellsPart);
-    const pairsList = assignments.map(({ key, value }) => {
-      const bIdx = key.indexOf("!");
-      if (bIdx >= 0) {
-        return {
-          sheetUpper: normalizeSheetTokenOrDefaultJs(key.slice(0, bIdx), "Sheet1").toUpperCase(),
-          refUpper: key.slice(bIdx + 1).trim().toUpperCase(),
-          value,
-        };
-      }
-      return {
-        sheetUpper: defaultSheetUpper,
-        refUpper: key.trim().toUpperCase(),
-        value,
-      };
-    });
-    return evaluatePairsIntoWorkbookMap(pairsList, seedDefaults);
-  }
-
   function buildLocalWorkbookValuesFromJson(doc, defaultSheetUpper, seedDefaults) {
     const cells = Array.isArray(doc?.cells) ? doc.cells : [];
     const pairsList = cells.map((item) => ({
-      sheetUpper: normalizeSheetTokenOrDefaultJs(item?.sheet ?? defaultSheetUpper, "Sheet1").toUpperCase(),
+      sheetUpper: jsonSheetNameOrDefaultJs(item?.sheet ?? defaultSheetUpper, "Sheet1").toUpperCase(),
       refUpper: String(item?.cell || "").trim().toUpperCase(),
       value: String(item?.value ?? ""),
     }));
@@ -446,14 +289,90 @@
     };
   }
 
+  function isUnsafeZipDescriptor(entryPath, comp, uncomp, enc) {
+    if (
+      !entryPath ||
+      typeof enc !== "boolean" ||
+      !Number.isFinite(comp) ||
+      !Number.isFinite(uncomp) ||
+      !Number.isInteger(comp) ||
+      !Number.isInteger(uncomp) ||
+      comp < 0 ||
+      uncomp < 0
+    ) {
+      return true;
+    }
+    return (
+      entryPath.startsWith("/") ||
+      entryPath.includes("..") ||
+      entryPath.includes("\\") ||
+      enc ||
+      (comp === 0 && uncomp > 0) ||
+      (comp > 0 && uncomp / comp > 100)
+    );
+  }
+
+  function hasDangerousXmlDirective(xmlText) {
+    return /<!\s*(?:DOCTYPE|ENTITY)\b/i.test(String(xmlText ?? ""));
+  }
+
   function localAuditSecurity(payload) {
-    const raw = String(payload || "");
+    const raw = String(payload ?? "").replace(/^\uFEFF/, "");
+    const trimmed = raw.trimStart();
+    if (trimmed.startsWith("{")) {
+      const doc = JSON.parse(trimmed);
+      if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+        throw new Error("InvalidArgument: audit_security JSON 루트는 객체여야 합니다.");
+      }
+      const xmlPart = doc.xml === undefined || doc.xml === null ? "" : String(doc.xml);
+      if (hasDangerousXmlDirective(xmlPart)) {
+        return {
+          status: "REJECTED",
+          xxeGuard: "BLOCKED",
+          zipGuard: "PASSED",
+          checkedEntries: 0,
+        };
+      }
+      const entries = doc.entries === undefined ? [] : doc.entries;
+      if (!Array.isArray(entries)) {
+        throw new Error("InvalidArgument: audit_security entries 필드는 배열이어야 합니다.");
+      }
+      for (const item of entries) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return {
+            status: "REJECTED",
+            xxeGuard: "PASSED",
+            zipGuard: "BLOCKED",
+            checkedEntries: entries.length,
+          };
+        }
+        const entryPath = typeof item.name === "string" ? item.name.trim() : "";
+        const comp = typeof item.compressed === "number" ? item.compressed : Number.NaN;
+        const uncomp = typeof item.uncompressed === "number" ? item.uncompressed : Number.NaN;
+        const enc = item.encrypted === undefined || item.encrypted === null ? false : item.encrypted;
+        if (isUnsafeZipDescriptor(entryPath, comp, uncomp, enc)) {
+          return {
+            status: "REJECTED",
+            xxeGuard: "PASSED",
+            zipGuard: "BLOCKED",
+            checkedEntries: entries.length,
+          };
+        }
+      }
+      return {
+        status: "SAFE",
+        xxeGuard: "PASSED",
+        zipGuard: "PASSED",
+        checkedEntries: entries.length || 1,
+      };
+    }
+
     const pipeIdx = raw.indexOf("|");
-    const hasEntrySpec = pipeIdx >= 0 && !raw.slice(0, pipeIdx).trimStart().startsWith("<");
-    const entriesPart = hasEntrySpec ? raw.slice(0, pipeIdx) : "";
+    const leftPart = pipeIdx >= 0 ? raw.slice(0, pipeIdx) : "";
+    const hasEntrySpec = pipeIdx >= 0 && !leftPart.includes("<") && !leftPart.includes(">");
+    const entriesPart = hasEntrySpec ? leftPart : "";
     const xmlPart = hasEntrySpec ? raw.slice(pipeIdx + 1) : raw;
-    const upperXml = (xmlPart || "").toUpperCase();
-    if (upperXml.includes("<!DOCTYPE") || upperXml.includes("<!ENTITY")) {
+    if (hasDangerousXmlDirective(xmlPart)) {
       return {
         status: "REJECTED",
         xxeGuard: "BLOCKED",
@@ -467,17 +386,26 @@
       .filter(Boolean);
     for (const item of entries) {
       const cols = item.split(",").map((c) => c.trim());
+      if (cols.length < 3 || cols.length > 4) {
+        return {
+          status: "REJECTED",
+          xxeGuard: "PASSED",
+          zipGuard: "BLOCKED",
+          checkedEntries: entries.length,
+        };
+      }
       const entryPath = cols[0] || "";
-      const comp = Number(cols[1] || 1);
-      const uncomp = Number(cols[2] || 0);
-      const enc = cols[3] === "true" || cols[3] === "1";
-      if (
-        entryPath.startsWith("/") ||
-        entryPath.includes("..") ||
-        entryPath.includes("\\") ||
-        enc ||
-        (comp > 0 && uncomp / comp > 100)
-      ) {
+      const comp = cols[1] === "" ? Number.NaN : Number(cols[1]);
+      const uncomp = cols[2] === "" ? Number.NaN : Number(cols[2]);
+      let enc = null;
+      if (cols.length === 3) {
+        enc = false;
+      } else if (cols[3].toLowerCase() === "true" || cols[3] === "1") {
+        enc = true;
+      } else if (cols[3].toLowerCase() === "false" || cols[3] === "0") {
+        enc = false;
+      }
+      if (isUnsafeZipDescriptor(entryPath, comp, uncomp, enc)) {
         return {
           status: "REJECTED",
           xxeGuard: "PASSED",
@@ -503,6 +431,20 @@
     return typeof globalThis.btoa === "function" ? globalThis.btoa(binary) : "";
   }
 
+  function parseRequiredRpcJsonObject(payload) {
+    const trimmed = String(payload ?? "")
+      .replace(/^\uFEFF/, "")
+      .trimStart();
+    if (!trimmed.startsWith("{")) {
+      throw new Error("InvalidArgument: 시트 RPC 페이로드는 JSON 객체여야 합니다.");
+    }
+    const doc = JSON.parse(trimmed);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+      throw new Error("InvalidArgument: 시트 RPC 루트는 JSON 객체여야 합니다.");
+    }
+    return doc;
+  }
+
   function createOfflineRpcHandlers(ctx) {
     const {
       getActiveModule,
@@ -515,30 +457,11 @@
     } = ctx;
 
     function evaluateLocalSheetFormula(payload, seedDefaults = false) {
-      const raw = String(payload || "");
-      const trimmedStart = raw.trimStart();
-      if (trimmedStart.startsWith("{")) {
-        const doc = JSON.parse(trimmedStart);
-        const sheetName = normalizeSheetTokenOrDefaultJs(doc.sheet, "Sheet1");
-        const evalSheet = sheetName.toUpperCase();
-        const q = String(doc.expr ?? doc.query ?? (seedDefaults ? "=Sheet2!A1+50" : "A1")).trim();
-        const values = buildLocalWorkbookValuesFromJson(doc, evalSheet, seedDefaults);
-        if (q.startsWith("=")) {
-          return evaluateFormulaExpression(q, values, evalSheet, getActiveSheetCellRef() || "A1");
-        }
-        return values[evalSheet + "!" + q.toUpperCase()] ?? "";
-      }
-      const splitRes = splitUnescapedQueryJs(raw);
-      const cellsPart = splitRes ? splitRes.cellsPart : seedDefaults ? "" : raw;
-      const rawQueryPart = splitRes
-        ? splitRes.queryPart.trim()
-        : seedDefaults
-          ? raw.trim() || "=Sheet2!A1+50"
-          : "A1";
-      const parsedTarget = extractActiveSheetAndExprJs(rawQueryPart, "Sheet1");
-      const evalSheet = parsedTarget.sheet.toUpperCase();
-      const q = parsedTarget.expr;
-      const values = buildLocalWorkbookValuesMap(cellsPart, evalSheet, seedDefaults);
+      const doc = parseRequiredRpcJsonObject(payload);
+      const sheetName = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
+      const evalSheet = sheetName.toUpperCase();
+      const q = String(doc.expr ?? doc.query ?? (seedDefaults ? "=Sheet2!A1+50" : "A1")).trim();
+      const values = buildLocalWorkbookValuesFromJson(doc, evalSheet, seedDefaults);
       if (q.startsWith("=")) {
         return evaluateFormulaExpression(q, values, evalSheet, getActiveSheetCellRef() || "A1");
       }
@@ -546,94 +469,44 @@
     }
 
     function evaluateLocalWorkbookFormulaRpc(payload) {
-      const raw = String(payload || "");
-      const trimmedStart = raw.trimStart();
-      if (trimmedStart.startsWith("{")) {
-        const doc = JSON.parse(trimmedStart);
-        const sheet = normalizeSheetTokenOrDefaultJs(doc.sheet, "Sheet1");
-        const formula = String(doc.expr || "=Sheet2!A1+50").trim();
-        const value = String(evaluateLocalSheetFormula(trimmedStart, true));
-        return { sheet, formula, value };
-      }
-      const splitRes = splitUnescapedQueryJs(raw);
-      const exprCandidate = splitRes ? splitRes.queryPart.trim() : raw.trim();
-      const rawExpr = exprCandidate || "=Sheet2!A1+50";
-      const parsed = extractActiveSheetAndExprJs(rawExpr, "Sheet1");
-      const val = String(evaluateLocalSheetFormula(raw, true));
-      return { sheet: parsed.sheet, formula: parsed.expr, value: val };
+      const doc = parseRequiredRpcJsonObject(payload);
+      const sheet = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
+      const formula = String(doc.expr || "=Sheet2!A1+50").trim();
+      const value = String(evaluateLocalSheetFormula(payload, true));
+      return { sheet, formula, value };
     }
 
     function evaluateLocalSheetRpc(payload) {
-      const raw = String(payload || "");
-      const trimmedStart = raw.trimStart();
-      if (trimmedStart.startsWith("{")) {
-        const doc = JSON.parse(trimmedStart);
-        const defaultSheet = normalizeSheetTokenOrDefaultJs(doc.sheet, "Sheet1");
-        const values = buildLocalWorkbookValuesFromJson(doc, defaultSheet.toUpperCase(), false);
-        if (Array.isArray(doc.targets) && doc.targets.length > 0) {
-          const outMap = {};
-          let firstExpr = "A1";
-          let firstVal = "";
-          doc.targets.forEach((item, idx) => {
-            const sh = normalizeSheetTokenOrDefaultJs(item?.sheet ?? defaultSheet, "Sheet1");
-            const expr = String(item?.cell || "A1").trim();
-            const val = expr.startsWith("=")
-              ? String(evaluateFormulaExpression(expr, values, sh.toUpperCase(), "A1"))
-              : String(values[sh.toUpperCase() + "!" + expr.toUpperCase()] ?? "");
-            outMap[sh + "!" + expr] = val;
-            if (idx === 0) {
-              firstExpr = expr;
-              firstVal = val;
-            }
-          });
-          return { query: firstExpr, value: firstVal, values: outMap };
-        }
-        const expr = String(doc.expr ?? doc.query ?? "A1").trim();
-        const val = String(evaluateLocalSheetFormula(trimmedStart, false));
-        return {
-          query: expr,
-          value: val,
-          values: { [defaultSheet + "!" + expr]: val },
-        };
-      }
-
-      const splitRes = splitUnescapedQueryJs(raw);
-      const cellsPart = splitRes ? splitRes.cellsPart : raw;
-      const trimmedQuery = (splitRes ? splitRes.queryPart : "A1").trim() || "A1";
-      const isBatch = trimmedQuery.includes(",") && !trimmedQuery.includes("=");
-      if (isBatch) {
-        const targets = trimmedQuery
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const firstParsed = extractActiveSheetAndExprJs(targets[0] || "A1", "Sheet1");
-        const values = buildLocalWorkbookValuesMap(
-          cellsPart,
-          firstParsed.sheet.toUpperCase(),
-          false
-        );
+      const doc = parseRequiredRpcJsonObject(payload);
+      const defaultSheet = jsonSheetNameOrDefaultJs(doc.sheet, "Sheet1");
+      const values = buildLocalWorkbookValuesFromJson(doc, defaultSheet.toUpperCase(), false);
+      if (Array.isArray(doc.targets) && doc.targets.length > 0) {
         const outMap = {};
+        const targetValues = [];
         let firstExpr = "A1";
         let firstVal = "";
-        targets.forEach((t, idx) => {
-          const parsed = extractActiveSheetAndExprJs(t, "Sheet1");
-          const shUpper = parsed.sheet.toUpperCase();
-          const refUpper = parsed.expr.toUpperCase();
-          const v = String(values[shUpper + "!" + refUpper] ?? "");
-          outMap[parsed.sheet + "!" + parsed.expr] = v;
+        doc.targets.forEach((item, idx) => {
+          const sh = jsonSheetNameOrDefaultJs(item?.sheet ?? defaultSheet, "Sheet1");
+          const expr = String(item?.cell || "A1").trim();
+          const val = expr.startsWith("=")
+            ? String(evaluateFormulaExpression(expr, values, sh.toUpperCase(), "A1"))
+            : String(values[sh.toUpperCase() + "!" + expr.toUpperCase()] ?? "");
+          outMap[sh + "!" + expr] = val;
+          targetValues.push(val);
           if (idx === 0) {
-            firstExpr = parsed.expr;
-            firstVal = v;
+            firstExpr = expr;
+            firstVal = val;
           }
         });
-        return { query: firstExpr, value: firstVal, values: outMap };
+        return { query: firstExpr, value: firstVal, values: outMap, targetValues };
       }
-      const singleParsed = extractActiveSheetAndExprJs(trimmedQuery, "Sheet1");
-      const val = String(evaluateLocalSheetFormula(raw, false));
+      const expr = String(doc.expr ?? doc.query ?? "A1").trim();
+      const val = String(evaluateLocalSheetFormula(payload, false));
       return {
-        query: singleParsed.expr,
+        query: expr,
         value: val,
-        values: { [singleParsed.sheet + "!" + singleParsed.expr]: val },
+        values: { [defaultSheet + "!" + expr]: val },
+        targetValues: [val],
       };
     }
 

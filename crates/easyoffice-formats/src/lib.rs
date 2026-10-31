@@ -6,6 +6,7 @@ mod legacy_ole2_codec;
 pub mod office_codecs;
 pub mod ole2_codec;
 pub mod rtf_xml_helpers;
+pub mod strict_json;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
 pub mod zip_codec;
@@ -17,6 +18,7 @@ pub use ole2_codec::*;
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };
+pub use strict_json::StrictJsonValue;
 pub use text_pdf_codecs::*;
 pub use utf16_swar::{
     decode_utf16le_swar, decode_utf16le_vec_baseline, encode_utf16le_scalar_baseline,

@@ -74,18 +74,135 @@ class MiniTextNode extends MiniNode {
   }
 }
 
-function parseSimpleSelector(rawSel) {
-  let rest = rawSel.trim();
-  const notConditions = [];
-  rest = rest.replaceAll(/:not\(([^)]+)\)/g, (_, inner) => {
-    notConditions.push(parseSimpleSelector(inner));
-    return "";
-  });
+function extractBalancedNotClauses(input) {
+  let out = "";
+  const negInners = [];
+  let i = 0;
+  let inQuote = null;
+  let bracketDepth = 0;
+  while (i < input.length) {
+    const ch = input[i];
+    if (inQuote) {
+      out += ch;
+      if (ch === "\\" && i + 1 < input.length) {
+        out += input[i + 1];
+        i += 2;
+        continue;
+      }
+      if (ch === inQuote) inQuote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "[") {
+      bracketDepth += 1;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "]" && bracketDepth > 0) {
+      bracketDepth -= 1;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (bracketDepth === 0 && input.slice(i, i + 5).toLowerCase() === ":not(") {
+      let j = i + 5;
+      let pDepth = 1;
+      let q = null;
+      while (j < input.length && pDepth > 0) {
+        const c = input[j];
+        if (q) {
+          if (c === "\\" && j + 1 < input.length) {
+            j += 2;
+            continue;
+          }
+          if (c === q) q = null;
+        } else if (c === '"' || c === "'") {
+          q = c;
+        } else if (c === "(") {
+          pDepth += 1;
+        } else if (c === ")") {
+          pDepth -= 1;
+          if (pDepth === 0) break;
+        }
+        j += 1;
+      }
+      if (pDepth === 0) {
+        negInners.push(input.slice(i + 5, j));
+        i = j + 1;
+        continue;
+      }
+    }
+    out += ch;
+    i += 1;
+  }
+  return { rest: out, negInners };
+}
+
+function extractAttributeClauses(input) {
+  let out = "";
   const attrs = [];
-  rest = rest.replaceAll(/\[([A-Za-z0-9_-]+)(?:="([^"]*)")?\]/g, (_, name, val) => {
-    attrs.push({ name: name.toLowerCase(), value: val });
-    return "";
-  });
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] !== "[") {
+      out += input[i];
+      i += 1;
+      continue;
+    }
+    let j = i + 1;
+    let q = null;
+    while (j < input.length) {
+      const c = input[j];
+      if (q) {
+        if (c === "\\" && j + 1 < input.length) {
+          j += 2;
+          continue;
+        }
+        if (c === q) q = null;
+      } else if (c === '"' || c === "'") {
+        q = c;
+      } else if (c === "]") {
+        break;
+      }
+      j += 1;
+    }
+    if (j < input.length && input[j] === "]") {
+      const rawInner = input.slice(i + 1, j).trim();
+      const eqIdx = rawInner.indexOf("=");
+      if (eqIdx < 0) {
+        if (rawInner) attrs.push({ name: rawInner.toLowerCase(), value: undefined });
+      } else {
+        const name = rawInner.slice(0, eqIdx).trim().toLowerCase();
+        let val = rawInner.slice(eqIdx + 1).trim();
+        if (
+          val.length >= 2 &&
+          ((val.startsWith('"') && val.endsWith('"')) ||
+            (val.startsWith("'") && val.endsWith("'")))
+        ) {
+          val = val.slice(1, -1).replaceAll(/\\(.)/g, "$1");
+        }
+        if (name) attrs.push({ name, value: val });
+      }
+      i = j + 1;
+      continue;
+    }
+    out += input[i];
+    i += 1;
+  }
+  return { rest: out, attrs };
+}
+
+function parseSimpleSelector(rawSel) {
+  const { rest: withoutNot, negInners } = extractBalancedNotClauses(rawSel.trim());
+  const notConditions = negInners.map((inner) => parseSimpleSelector(inner));
+  const { rest: withoutAttrs, attrs } = extractAttributeClauses(withoutNot);
+  let rest = withoutAttrs;
   let id = null;
   rest = rest.replaceAll(/#([A-Za-z0-9_-]+)/g, (_, m) => {
     id = m;
@@ -133,8 +250,24 @@ function tokenizeComplexSelector(sel, scopeEl) {
   let buf = "";
   let bracketDepth = 0;
   let parenDepth = 0;
+  let inQuote = null;
   for (let i = 0; i < working.length; i++) {
     const ch = working[i];
+    if (inQuote) {
+      buf += ch;
+      if (ch === "\\" && i + 1 < working.length) {
+        buf += working[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === inQuote) inQuote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      buf += ch;
+      continue;
+    }
     if (ch === "[") bracketDepth += 1;
     else if (ch === "]" && bracketDepth > 0) bracketDepth -= 1;
     else if (ch === "(") parenDepth += 1;
@@ -199,8 +332,24 @@ function matchesSelectorList(el, selectorList, scopeEl) {
   let buf = "";
   let parenDepth = 0;
   let bracketDepth = 0;
+  let inQuote = null;
   for (let i = 0; i < selectorList.length; i++) {
     const ch = selectorList[i];
+    if (inQuote) {
+      buf += ch;
+      if (ch === "\\" && i + 1 < selectorList.length) {
+        buf += selectorList[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === inQuote) inQuote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      buf += ch;
+      continue;
+    }
     if (ch === "(") parenDepth += 1;
     else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
     else if (ch === "[") bracketDepth += 1;
@@ -456,13 +605,13 @@ class MiniElement extends MiniNode {
   }
 
   matches(sel) {
-    return matchesSelectorList(this, sel, null);
+    return matchesSelectorList(this, sel, this);
   }
 
   closest(sel) {
     let cur = this;
     while (cur && cur.nodeType === 1) {
-      if (matchesSelectorList(cur, sel, null)) return cur;
+      if (matchesSelectorList(cur, sel, this)) return cur;
       cur = cur.parentElement;
     }
     return null;
@@ -696,8 +845,11 @@ export async function createWorkspaceHarness(options = {}) {
   const document = new MiniDocument(html);
   const windowListeners = new Map();
   const downloads = [];
+  const revokedUrls = [];
   let nextTimerId = 1;
+  let virtualNowMs = 0;
   const cancelledTimers = new Set();
+  const delayedTimers = new Map();
 
   const sandbox = {
     document,
@@ -725,20 +877,28 @@ export async function createWorkspaceHarness(options = {}) {
     btoa: (bin) => Buffer.from(bin, "binary").toString("base64"),
     URL: {
       createObjectURL: () => "blob:easyoffice-test",
-      revokeObjectURL: () => {},
+      revokeObjectURL: (url) => {
+        revokedUrls.push(url);
+      },
     },
-    setTimeout: (fn) => {
+    setTimeout: (fn, delay = 0) => {
       const id = nextTimerId;
       nextTimerId += 1;
-      setImmediate(() => {
-        if (!cancelledTimers.has(id)) {
-          fn();
-        }
-      });
+      const delayMs = Math.max(0, Number(delay) || 0);
+      if (delayMs <= 50) {
+        setImmediate(() => {
+          if (!cancelledTimers.has(id)) {
+            fn();
+          }
+        });
+      } else {
+        delayedTimers.set(id, { fn, dueAt: virtualNowMs + delayMs });
+      }
       return id;
     },
     clearTimeout: (id) => {
       cancelledTimers.add(id);
+      delayedTimers.delete(id);
     },
     getSelection: () => options.selection || null,
     addEventListener: (type, fn) => {
@@ -806,5 +966,18 @@ export async function createWorkspaceHarness(options = {}) {
     el.click();
   }
 
-  return { document, sandbox, downloads, userClick };
+  function advanceTimers(ms = 2000) {
+    virtualNowMs += Math.max(0, Number(ms) || 0);
+    const dueEntries = Array.from(delayedTimers.entries())
+      .filter(([, entry]) => entry.dueAt <= virtualNowMs)
+      .sort((a, b) => a[1].dueAt - b[1].dueAt);
+    for (const [id, entry] of dueEntries) {
+      delayedTimers.delete(id);
+      if (!cancelledTimers.has(id)) {
+        entry.fn();
+      }
+    }
+  }
+
+  return { document, sandbox, downloads, revokedUrls, userClick, advanceTimers };
 }

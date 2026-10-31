@@ -712,14 +712,90 @@ pub struct PdfDocumentModel {
     pub watermark_text: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PdfTrailerJsonValue {
-    Null,
-    Bool,
-    Number,
+#[derive(Debug, Clone, Copy)]
+struct PdfGraphicsState {
+    font_utf16be: bool,
+    font_size: f64,
+    render_mode: i32,
+}
+
+impl Default for PdfGraphicsState {
+    fn default() -> Self {
+        Self {
+            font_utf16be: false,
+            font_size: 12.0,
+            render_mode: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum PdfStreamOperand {
+    Num(f64),
+    Name(String),
     Str(String),
-    Array(Vec<PdfTrailerJsonValue>),
-    Object(Vec<(String, PdfTrailerJsonValue)>),
+    ArrayText(String),
+}
+
+struct ParsedPdfContentStream {
+    body_text: String,
+    watermark: Option<String>,
+    stamp: Option<String>,
+}
+
+#[derive(Default)]
+struct PdfStreamCollector {
+    invisible_canonical_chunks: Vec<String>,
+    visible_segments: Vec<String>,
+    watermark: Option<String>,
+    stamp: Option<String>,
+}
+
+impl PdfStreamCollector {
+    fn record(&mut self, text: String, gs: PdfGraphicsState, pos: (f64, f64)) {
+        let (td_x, td_y) = pos;
+        let is_wm_slot = (gs.render_mode == 3 && td_x.abs() < 1e-6 && (td_y - 1.0).abs() < 1e-6)
+            || (gs.render_mode != 3
+                && (gs.font_size - 10.0).abs() < 1e-6
+                && (td_x - 320.0).abs() < 1e-6
+                && (td_y - 746.0).abs() < 1e-6);
+        if is_wm_slot {
+            if let Some(wm) = text.strip_prefix("[WM] ") {
+                self.watermark = Some(wm.to_string());
+                return;
+            }
+        }
+        let is_stamp_slot = gs.render_mode != 3
+            && (gs.font_size - 10.0).abs() < 1e-6
+            && (td_x - 386.0).abs() < 1e-6
+            && (td_y - 604.0).abs() < 1e-6;
+        if is_stamp_slot {
+            if let Some(st) = text.strip_prefix("[STAMP] ") {
+                self.stamp = Some(st.to_string());
+                return;
+            }
+        }
+        if gs.render_mode == 3 {
+            if td_x.abs() < 1e-6 && td_y.abs() < 1e-6 {
+                self.invisible_canonical_chunks.push(text);
+            }
+        } else {
+            self.visible_segments.push(text);
+        }
+    }
+
+    fn finish(self) -> ParsedPdfContentStream {
+        let body_text = if !self.invisible_canonical_chunks.is_empty() {
+            self.invisible_canonical_chunks.join("\n")
+        } else {
+            self.visible_segments.join("\n")
+        };
+        ParsedPdfContentStream {
+            body_text,
+            watermark: self.watermark,
+            stamp: self.stamp,
+        }
+    }
 }
 
 /// ISO 32000-1 (`%PDF-1.4`) binary serializer and parser with byte-accurate `xref` table.
@@ -894,17 +970,46 @@ impl PdfSerializer {
         let mut pages: Vec<PdfPageModel> = Vec::new();
         let mut current_page_number: Option<usize> = None;
         let mut current_rotation = 0;
-        let mut current_body = String::new();
-        let mut fallback_stream_buf = String::new();
-        let mut current_stamp: Option<String> = None;
+        let mut stream_buf = String::new();
         let mut in_stream = false;
-        let mut seen_body_line = false;
         let mut is_metadata_obj = false;
         let mut trailer_b64: Option<String> = None;
         let mut trailer_b64_count = 0usize;
 
         for line in raw.lines() {
             let trimmed = line.trim();
+            if in_stream {
+                if trimmed == "endstream" {
+                    if !is_metadata_obj {
+                        let parsed_stream = Self::parse_pdf_content_stream(&stream_buf);
+                        if let Some(wm) = parsed_stream.watermark {
+                            watermark_text = Some(wm);
+                        }
+                        pages.push(PdfPageModel {
+                            page_number: current_page_number.take().unwrap_or(pages.len() + 1),
+                            rotation_degrees: current_rotation,
+                            body_text: parsed_stream.body_text,
+                            approval_stamp: parsed_stream.stamp,
+                        });
+                    }
+                    stream_buf.clear();
+                    current_rotation = 0;
+                    in_stream = false;
+                    continue;
+                }
+                if is_metadata_obj {
+                    if let Some(rest) = trimmed.strip_prefix("%EasyOfficePDFModelBase64:") {
+                        trailer_b64_count += 1;
+                        trailer_b64 = Some(rest.trim().to_string());
+                    }
+                } else {
+                    if !stream_buf.is_empty() {
+                        stream_buf.push('\n');
+                    }
+                    stream_buf.push_str(line);
+                }
+                continue;
+            }
             if let Some(rest) = trimmed.strip_prefix("%EasyOfficePDFModelBase64:") {
                 trailer_b64_count += 1;
                 trailer_b64 = Some(rest.trim().to_string());
@@ -943,72 +1048,7 @@ impl PdfSerializer {
             }
             if trimmed == "stream" {
                 in_stream = true;
-                current_body.clear();
-                fallback_stream_buf.clear();
-                current_stamp = None;
-                seen_body_line = false;
-                continue;
-            }
-            if trimmed == "endstream" {
-                if in_stream {
-                    if !is_metadata_obj {
-                        let mut fallback_body = String::new();
-                        let mut seen_fallback_line = false;
-                        for content in Self::extract_pdf_stream_text_segments(&fallback_stream_buf)
-                        {
-                            if let Some(wm) = content.strip_prefix("[WM] ") {
-                                watermark_text = Some(wm.to_string());
-                                continue;
-                            }
-                            if let Some(stamp) = content.strip_prefix("[STAMP] ") {
-                                current_stamp = Some(stamp.to_string());
-                                continue;
-                            }
-                            if seen_fallback_line {
-                                fallback_body.push('\n');
-                            }
-                            seen_fallback_line = true;
-                            fallback_body.push_str(&content);
-                        }
-                        let page_body = if seen_body_line {
-                            current_body.clone()
-                        } else {
-                            fallback_body
-                        };
-                        pages.push(PdfPageModel {
-                            page_number: current_page_number.take().unwrap_or(pages.len() + 1),
-                            rotation_degrees: current_rotation,
-                            body_text: page_body,
-                            approval_stamp: current_stamp.take(),
-                        });
-                    }
-                    current_rotation = 0;
-                    in_stream = false;
-                }
-                continue;
-            }
-            if in_stream && !is_metadata_obj {
-                let is_body_line = trimmed.starts_with("BT /F1 12 Tf 54 ")
-                    || trimmed.starts_with("BT /F2 12 Tf 54 ")
-                    || trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 0 Td ");
-                let is_form_meta_line = trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 2 Td ");
-                if is_form_meta_line {
-                    continue;
-                }
-                if is_body_line {
-                    for content in Self::extract_pdf_stream_text_segments(trimmed) {
-                        if seen_body_line {
-                            current_body.push('\n');
-                        }
-                        seen_body_line = true;
-                        current_body.push_str(&content);
-                    }
-                    continue;
-                }
-                if !fallback_stream_buf.is_empty() {
-                    fallback_stream_buf.push('\n');
-                }
-                fallback_stream_buf.push_str(line);
+                stream_buf.clear();
             }
         }
 
@@ -1178,222 +1218,76 @@ impl PdfSerializer {
         }
     }
 
-    fn parse_json_string_literal(
-        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-    ) -> Option<String> {
-        let mut out = String::new();
-        while let Some(c) = chars.next() {
-            if c == '"' {
-                return Some(out);
-            }
-            if (c as u32) < 0x20 {
-                return None;
-            }
-            if c != '\\' {
-                out.push(c);
-                continue;
-            }
-            match chars.next()? {
-                '"' => out.push('"'),
-                '\\' => out.push('\\'),
-                '/' => out.push('/'),
-                'b' => out.push('\u{0008}'),
-                'f' => out.push('\u{000C}'),
-                'n' => out.push('\n'),
-                'r' => out.push('\r'),
-                't' => out.push('\t'),
-                'u' => {
-                    let mut hex4 = String::with_capacity(4);
-                    for _ in 0..4 {
-                        hex4.push(chars.next()?);
-                    }
-                    let hi = u16::from_str_radix(&hex4, 16).ok()?;
-                    if (0xD800..=0xDBFF).contains(&hi) {
-                        if chars.peek() == Some(&'\\') {
-                            let _ = chars.next();
-                            if chars.peek() == Some(&'u') {
-                                let _ = chars.next();
-                                let mut lo_hex = String::with_capacity(4);
-                                for _ in 0..4 {
-                                    lo_hex.push(chars.next()?);
-                                }
-                                let lo = u16::from_str_radix(&lo_hex, 16).ok()?;
-                                if (0xDC00..=0xDFFF).contains(&lo) {
-                                    let cp = 0x10000
-                                        + (((hi as u32 - 0xD800) << 10) | (lo as u32 - 0xDC00));
-                                    out.push(char::from_u32(cp)?);
-                                    continue;
-                                }
-                            }
-                        }
-                        return None;
-                    }
-                    out.push(char::from_u32(hi as u32)?);
-                }
-                _ => return None,
-            }
-        }
-        None
-    }
-
-    fn skip_json_ws(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-        while chars
-            .peek()
-            .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
-        {
-            let _ = chars.next();
-        }
-    }
-
-    fn parse_json_number(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<()> {
-        if chars.peek() == Some(&'-') {
-            let _ = chars.next();
-        }
-        match chars.next()? {
-            '0' => {}
-            '1'..='9' => {
-                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                    let _ = chars.next();
-                }
-            }
-            _ => return None,
-        }
-        if chars.peek() == Some(&'.') {
-            let _ = chars.next();
-            if !chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                let _ = chars.next();
-            }
-        }
-        if chars.peek().is_some_and(|c| *c == 'e' || *c == 'E') {
-            let _ = chars.next();
-            if chars.peek().is_some_and(|c| *c == '+' || *c == '-') {
-                let _ = chars.next();
-            }
-            if !chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                let _ = chars.next();
-            }
-        }
-        Some(())
-    }
-
-    fn consume_json_keyword(
-        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-        kw: &str,
-    ) -> Option<()> {
-        for expected in kw.chars() {
-            if chars.next()? != expected {
-                return None;
-            }
-        }
-        Some(())
-    }
-
-    fn parse_json_value(
-        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-        depth: usize,
-    ) -> Option<PdfTrailerJsonValue> {
-        if depth > 32 {
-            return None;
-        }
-        Self::skip_json_ws(chars);
-        let peek = *chars.peek()?;
-        match peek {
-            '"' => {
-                let _ = chars.next();
-                Some(PdfTrailerJsonValue::Str(Self::parse_json_string_literal(
-                    chars,
-                )?))
-            }
-            '{' => {
-                let _ = chars.next();
-                Self::skip_json_ws(chars);
-                let mut entries: Vec<(String, PdfTrailerJsonValue)> = Vec::new();
-                if chars.peek() == Some(&'}') {
-                    let _ = chars.next();
-                    return Some(PdfTrailerJsonValue::Object(entries));
-                }
-                loop {
-                    Self::skip_json_ws(chars);
-                    if chars.next()? != '"' {
-                        return None;
-                    }
-                    let key = Self::parse_json_string_literal(chars)?;
-                    if entries.iter().any(|(k, _)| k == &key) {
-                        return None;
-                    }
-                    Self::skip_json_ws(chars);
-                    if chars.next()? != ':' {
-                        return None;
-                    }
-                    let val = Self::parse_json_value(chars, depth + 1)?;
-                    entries.push((key, val));
-                    Self::skip_json_ws(chars);
-                    match chars.next()? {
-                        ',' => continue,
-                        '}' => break,
-                        _ => return None,
-                    }
-                }
-                Some(PdfTrailerJsonValue::Object(entries))
-            }
-            '[' => {
-                let _ = chars.next();
-                Self::skip_json_ws(chars);
-                let mut items = Vec::new();
-                if chars.peek() == Some(&']') {
-                    let _ = chars.next();
-                    return Some(PdfTrailerJsonValue::Array(items));
-                }
-                loop {
-                    let val = Self::parse_json_value(chars, depth + 1)?;
-                    items.push(val);
-                    Self::skip_json_ws(chars);
-                    match chars.next()? {
-                        ',' => continue,
-                        ']' => break,
-                        _ => return None,
-                    }
-                }
-                Some(PdfTrailerJsonValue::Array(items))
-            }
-            't' => {
-                Self::consume_json_keyword(chars, "true")?;
-                Some(PdfTrailerJsonValue::Bool)
-            }
-            'f' => {
-                Self::consume_json_keyword(chars, "false")?;
-                Some(PdfTrailerJsonValue::Bool)
-            }
-            'n' => {
-                Self::consume_json_keyword(chars, "null")?;
-                Some(PdfTrailerJsonValue::Null)
-            }
-            '-' | '0'..='9' => {
-                Self::parse_json_number(chars)?;
-                Some(PdfTrailerJsonValue::Number)
-            }
-            _ => None,
-        }
-    }
-
-    fn parse_json_document(input: &str) -> Option<PdfTrailerJsonValue> {
-        let mut chars = input.chars().peekable();
-        let root = Self::parse_json_value(&mut chars, 0)?;
-        Self::skip_json_ws(&mut chars);
-        if chars.peek().is_some() {
-            return None;
-        }
-        Some(root)
-    }
-
     fn strip_ws(s: &str) -> String {
         s.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    fn wrap_line_64(line: &str) -> Vec<String> {
+        let chars: Vec<char> = line.chars().collect();
+        if chars.len() <= 64 {
+            return vec![line.to_string()];
+        }
+        chars.chunks(64).map(|c| c.iter().collect()).collect()
+    }
+
+    fn expand_logical_pages_to_chunks(logical_pages: &[&str], wrap_64: bool) -> Vec<String> {
+        const MAX_LINES_PER_PDF_PAGE: usize = 42;
+        let mut out = Vec::with_capacity(logical_pages.len());
+        for &text in logical_pages {
+            let lines: Vec<String> = if wrap_64 {
+                text.split('\n').flat_map(Self::wrap_line_64).collect()
+            } else {
+                text.split('\n').map(str::to_string).collect()
+            };
+            if lines.len() <= MAX_LINES_PER_PDF_PAGE {
+                out.push(text.to_string());
+            } else {
+                for chunk in lines.chunks(MAX_LINES_PER_PDF_PAGE) {
+                    out.push(chunk.join("\n"));
+                }
+            }
+        }
+        out
+    }
+
+    fn matches_pages_1to1(logical_pages: &[&str], pages: &[PdfPageModel]) -> bool {
+        if logical_pages.len() == pages.len() {
+            return logical_pages
+                .iter()
+                .zip(pages.iter())
+                .all(|(jt, p)| Self::strip_ws(jt) == Self::strip_ws(&p.body_text));
+        }
+        for wrap_64 in [false, true] {
+            let chunks = Self::expand_logical_pages_to_chunks(logical_pages, wrap_64);
+            if chunks.len() == pages.len()
+                && chunks
+                    .iter()
+                    .zip(pages.iter())
+                    .all(|(ct, p)| Self::strip_ws(ct) == Self::strip_ws(&p.body_text))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn extract_validated_page_text(p_entries: &[(String, crate::StrictJsonValue)]) -> Option<&str> {
+        let ext_val = crate::StrictJsonValue::get_field(p_entries, "extractedText");
+        let body_val = crate::StrictJsonValue::get_field(p_entries, "bodyText");
+        let ext_str = match ext_val {
+            Some(v) => Some(v.as_str()?),
+            None => None,
+        };
+        let body_str = match body_val {
+            Some(v) => Some(v.as_str()?),
+            None => None,
+        };
+        if let (Some(a), Some(b)) = (ext_str, body_str) {
+            if a != b {
+                return None;
+            }
+        }
+        ext_str.or(body_str)
     }
 
     fn validate_pdf_trailer_json(
@@ -1402,35 +1296,38 @@ impl PdfSerializer {
         pages: &[PdfPageModel],
         parsed_watermark: Option<&str>,
     ) -> bool {
-        let Some(PdfTrailerJsonValue::Object(root_entries)) = Self::parse_json_document(decoded)
-        else {
+        let Ok(root) = crate::StrictJsonValue::parse(decoded) else {
             return false;
         };
-        let Some(PdfTrailerJsonValue::Str(json_title)) = root_entries
-            .iter()
-            .find(|(k, _)| k == "title")
-            .map(|(_, v)| v)
-        else {
+        let Some(root_entries) = root.as_object() else {
+            return false;
+        };
+        let Some(json_title) = crate::StrictJsonValue::get_str(root_entries, "title") else {
             return false;
         };
         if json_title != expected_title {
             return false;
         }
-        if let Some(PdfTrailerJsonValue::Str(wm)) = root_entries
-            .iter()
-            .find(|(k, _)| k == "watermarkText")
-            .map(|(_, v)| v)
-        {
-            if !wm.is_empty() && parsed_watermark != Some(wm.as_str()) {
-                return false;
+        match crate::StrictJsonValue::get_field(root_entries, "watermarkText") {
+            Some(crate::StrictJsonValue::Str(wm)) => {
+                if wm.is_empty() {
+                    if parsed_watermark.is_some() {
+                        return false;
+                    }
+                } else if parsed_watermark != Some(wm.as_str()) {
+                    return false;
+                }
             }
+            Some(crate::StrictJsonValue::Null) | None => {
+                if parsed_watermark.is_some() {
+                    return false;
+                }
+            }
+            Some(_) => return false,
         }
-        if let Some(pages_val) = root_entries
-            .iter()
-            .find(|(k, _)| k == "pages")
-            .map(|(_, v)| v)
-        {
-            let PdfTrailerJsonValue::Array(page_items) = pages_val else {
+        let root_body_field = crate::StrictJsonValue::get_field(root_entries, "bodyText");
+        if let Some(pages_val) = crate::StrictJsonValue::get_field(root_entries, "pages") {
+            let Some(page_items) = pages_val.as_array() else {
                 return false;
             };
             if page_items.is_empty() || page_items.len() > pages.len() {
@@ -1438,59 +1335,47 @@ impl PdfSerializer {
             }
             let mut json_page_texts = Vec::with_capacity(page_items.len());
             for item in page_items {
-                let PdfTrailerJsonValue::Object(p_entries) = item else {
+                let Some(p_entries) = item.as_object() else {
                     return false;
                 };
-                let page_str = p_entries
-                    .iter()
-                    .find(|(k, _)| k == "extractedText" || k == "bodyText")
-                    .and_then(|(_, v)| match v {
-                        PdfTrailerJsonValue::Str(s) => Some(s.as_str()),
-                        _ => None,
-                    });
-                let Some(text) = page_str else {
+                let Some(text) = Self::extract_validated_page_text(p_entries) else {
                     return false;
                 };
                 json_page_texts.push(text);
             }
-            if json_page_texts.len() == pages.len() {
-                return json_page_texts
-                    .iter()
-                    .zip(pages.iter())
-                    .all(|(jt, p)| Self::strip_ws(jt) == Self::strip_ws(&p.body_text));
+            if let Some(rb) = root_body_field {
+                let Some(rb_str) = rb.as_str() else {
+                    return false;
+                };
+                if Self::strip_ws(rb_str) != Self::strip_ws(&json_page_texts.join("\n")) {
+                    return false;
+                }
             }
-            let visible_concat: String = pages
-                .iter()
-                .map(|p| p.body_text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Self::strip_ws(&json_page_texts.join("\n")) == Self::strip_ws(&visible_concat);
+            return Self::matches_pages_1to1(&json_page_texts, pages);
         }
-        if let Some(PdfTrailerJsonValue::Str(body_str)) = root_entries
-            .iter()
-            .find(|(k, _)| k == "bodyText")
-            .map(|(_, v)| v)
-        {
-            let visible_concat: String = pages
-                .iter()
-                .map(|p| p.body_text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Self::strip_ws(body_str) == Self::strip_ws(&visible_concat);
+        if let Some(rb) = root_body_field {
+            let Some(body_str) = rb.as_str() else {
+                return false;
+            };
+            return Self::matches_pages_1to1(&[body_str], pages);
         }
         false
     }
 
-    fn extract_pdf_stream_text_segments(stream: &str) -> Vec<String> {
+    fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
         let bytes = stream.as_bytes();
         let mut i = 0usize;
         let mut in_text_object = false;
-        let mut active_font_utf16be = false;
-        let mut last_slash_name: Option<&str> = None;
+        let mut gs = PdfGraphicsState::default();
+        let mut gs_stack: Vec<PdfGraphicsState> = Vec::new();
+        let mut td_x = 0.0f64;
+        let mut td_y = 0.0f64;
+        let mut dict_depth = 0usize;
         let mut in_array = false;
         let mut array_buf = String::new();
         let mut array_has_text = false;
-        let mut segments = Vec::new();
+        let mut operands: Vec<PdfStreamOperand> = Vec::new();
+        let mut collector = PdfStreamCollector::default();
 
         while i < bytes.len() {
             let b = bytes[i];
@@ -1505,8 +1390,18 @@ impl PdfSerializer {
                 }
                 continue;
             }
+            if b == b'<' && i + 1 < bytes.len() && bytes[i + 1] == b'<' {
+                dict_depth += 1;
+                i += 2;
+                continue;
+            }
+            if b == b'>' && i + 1 < bytes.len() && bytes[i + 1] == b'>' {
+                dict_depth = dict_depth.saturating_sub(1);
+                i += 2;
+                continue;
+            }
             if b == b'[' {
-                if in_text_object {
+                if dict_depth == 0 && in_text_object {
                     in_array = true;
                     array_buf.clear();
                     array_has_text = false;
@@ -1515,10 +1410,10 @@ impl PdfSerializer {
                 continue;
             }
             if b == b']' {
-                if in_text_object && in_array {
+                if dict_depth == 0 && in_text_object && in_array {
                     in_array = false;
                     if array_has_text {
-                        segments.push(std::mem::take(&mut array_buf));
+                        operands.push(PdfStreamOperand::ArrayText(std::mem::take(&mut array_buf)));
                     } else {
                         array_buf.clear();
                     }
@@ -1542,13 +1437,13 @@ impl PdfSerializer {
                         depth -= 1;
                         if depth == 0 {
                             let raw_lit = &stream[start_inner..i];
-                            if in_text_object {
+                            if dict_depth == 0 && in_text_object {
                                 let decoded = Self::unescape_pdf_text(raw_lit);
                                 if in_array {
                                     array_buf.push_str(&decoded);
                                     array_has_text = true;
                                 } else {
-                                    segments.push(decoded);
+                                    operands.push(PdfStreamOperand::Str(decoded));
                                 }
                             }
                             i += 1;
@@ -1560,10 +1455,6 @@ impl PdfSerializer {
                 continue;
             }
             if b == b'<' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'<' {
-                    i += 2;
-                    continue;
-                }
                 let start_hex = i + 1;
                 i += 1;
                 while i < bytes.len() && bytes[i] != b'>' {
@@ -1571,15 +1462,14 @@ impl PdfSerializer {
                 }
                 if i < bytes.len() {
                     let raw_hex = &stream[start_hex..i];
-                    if in_text_object {
-                        if let Some(decoded) =
-                            Self::decode_pdf_hex_string(raw_hex, active_font_utf16be)
+                    if dict_depth == 0 && in_text_object {
+                        if let Some(decoded) = Self::decode_pdf_hex_string(raw_hex, gs.font_utf16be)
                         {
                             if in_array {
                                 array_buf.push_str(&decoded);
                                 array_has_text = true;
                             } else {
-                                segments.push(decoded);
+                                operands.push(PdfStreamOperand::Str(decoded));
                             }
                         }
                     }
@@ -1600,7 +1490,9 @@ impl PdfSerializer {
                 {
                     i += 1;
                 }
-                last_slash_name = Some(&stream[start..i]);
+                if dict_depth == 0 && !in_array {
+                    operands.push(PdfStreamOperand::Name(stream[start..i].to_string()));
+                }
                 continue;
             }
             let start = i;
@@ -1611,29 +1503,97 @@ impl PdfSerializer {
                 i += 1;
             }
             let tok = &stream[start..i];
-            if !in_text_object {
-                if tok == "BT" {
-                    in_text_object = true;
-                    active_font_utf16be = false;
-                    last_slash_name = None;
-                    in_array = false;
-                    array_buf.clear();
-                    array_has_text = false;
-                }
-            } else if tok == "Tf" {
-                if let Some(font_name) = last_slash_name {
-                    active_font_utf16be = font_name == "/F2";
-                }
-            } else if tok == "ET" {
-                in_text_object = false;
-                active_font_utf16be = false;
-                last_slash_name = None;
-                in_array = false;
-                array_buf.clear();
-                array_has_text = false;
+            if dict_depth > 0 || in_array {
+                continue;
             }
+            if let Ok(num) = tok.parse::<f64>() {
+                operands.push(PdfStreamOperand::Num(num));
+                continue;
+            }
+            match tok {
+                "q" => {
+                    if gs_stack.len() < 64 {
+                        gs_stack.push(gs);
+                    }
+                }
+                "Q" => {
+                    if let Some(prev) = gs_stack.pop() {
+                        gs = prev;
+                    }
+                }
+                "BT" => {
+                    in_text_object = true;
+                    td_x = 0.0;
+                    td_y = 0.0;
+                }
+                "ET" => {
+                    in_text_object = false;
+                }
+                "Tf" => {
+                    let mut size_opt = None;
+                    let mut name_opt = None;
+                    for op in operands.iter().rev() {
+                        match op {
+                            PdfStreamOperand::Num(sz) if size_opt.is_none() => size_opt = Some(*sz),
+                            PdfStreamOperand::Name(nm) if name_opt.is_none() => {
+                                name_opt = Some(nm.as_str())
+                            }
+                            _ => {}
+                        }
+                        if size_opt.is_some() && name_opt.is_some() {
+                            break;
+                        }
+                    }
+                    if let Some(nm) = name_opt {
+                        gs.font_utf16be = nm == "/F2";
+                    }
+                    if let Some(sz) = size_opt {
+                        gs.font_size = sz;
+                    }
+                }
+                "Tr" => {
+                    if let Some(PdfStreamOperand::Num(m)) = operands
+                        .iter()
+                        .rev()
+                        .find(|op| matches!(op, PdfStreamOperand::Num(_)))
+                    {
+                        gs.render_mode = *m as i32;
+                    }
+                }
+                "Td" | "TD" | "Tm" => {
+                    let nums: Vec<f64> = operands
+                        .iter()
+                        .filter_map(|op| match op {
+                            PdfStreamOperand::Num(n) => Some(*n),
+                            _ => None,
+                        })
+                        .collect();
+                    if nums.len() >= 2 {
+                        td_x = nums[nums.len() - 2];
+                        td_y = nums[nums.len() - 1];
+                    }
+                }
+                "Tj" | "'" | "\"" if in_text_object => {
+                    if let Some(text) = operands.iter().rev().find_map(|op| match op {
+                        PdfStreamOperand::Str(s) => Some(s.clone()),
+                        _ => None,
+                    }) {
+                        collector.record(text, gs, (td_x, td_y));
+                    }
+                }
+                "TJ" if in_text_object => {
+                    if let Some(text) = operands.iter().rev().find_map(|op| match op {
+                        PdfStreamOperand::ArrayText(s) => Some(s.clone()),
+                        _ => None,
+                    }) {
+                        collector.record(text, gs, (td_x, td_y));
+                    }
+                }
+                _ => {}
+            }
+            operands.clear();
         }
-        segments
+        collector.finish()
     }
 
     fn decode_pdf_hex_string(hex: &str, prefer_utf16be: bool) -> Option<String> {
@@ -2155,24 +2115,67 @@ mod tests {
             ],
             watermark_text: None,
         });
-        let mut boundary_spoof_pdf = two_page_pdf;
-        let boundary_json =
-            r#"{"title":"TwoPages","pages":[{"extractedText":"AB"},{"extractedText":""}]}"#;
-        boundary_spoof_pdf.extend_from_slice(
-            format!(
-                "\n%EasyOfficePDFModelBase64:{}\n",
-                b64_encode(boundary_json.as_bytes())
-            )
-            .as_bytes(),
-        );
-        assert!(matches!(
-            PdfSerializer::parse(&boundary_spoof_pdf),
-            Err(EasyOfficeError::SecurityViolation(_))
-        ));
+        for spoof_two_page_json in [
+            r#"{"title":"TwoPages","pages":[{"extractedText":"AB"},{"extractedText":""}]}"#,
+            r#"{"title":"TwoPages","pages":[{"extractedText":"AB"}]}"#,
+            r#"{"title":"TwoPages","bodyText":"AB"}"#,
+            r#"{"title":"TwoPages","pages":[{"bodyText":"A","extractedText":"SPOOFED"},{"extractedText":"B"}]}"#,
+        ] {
+            let mut boundary_spoof_pdf = two_page_pdf.clone();
+            boundary_spoof_pdf.extend_from_slice(
+                format!(
+                    "\n%EasyOfficePDFModelBase64:{}\n",
+                    b64_encode(spoof_two_page_json.as_bytes())
+                )
+                .as_bytes(),
+            );
+            assert!(matches!(
+                PdfSerializer::parse(&boundary_spoof_pdf),
+                Err(EasyOfficeError::SecurityViolation(_))
+            ));
+        }
 
-        let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length 160 >>\nstream\nBT\n[3 2] 0 d\n/F1 11 Tf\n[(Hel) -15 (lo )\n(World)] TJ % inline (FakeComment) ET\n(\\101\\tLine\\\nCont) Tj\nET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
+        for spoof_wm_json in [
+            r#"{"title":"한글 보고서","watermarkText":"","pages":[{"extractedText":"첫째 줄 한글 본문\nASCII Line 2"}]}"#,
+            r#"{"title":"한글 보고서","watermarkText":123,"pages":[{"extractedText":"첫째 줄 한글 본문\nASCII Line 2"}]}"#,
+        ] {
+            let mut wm_spoof_pdf = korean_pdf_bytes.clone();
+            wm_spoof_pdf.extend_from_slice(
+                format!(
+                    "\n%EasyOfficePDFModelBase64:{}\n",
+                    b64_encode(spoof_wm_json.as_bytes())
+                )
+                .as_bytes(),
+            );
+            assert!(matches!(
+                PdfSerializer::parse(&wm_spoof_pdf),
+                Err(EasyOfficeError::SecurityViolation(_))
+            ));
+        }
+
+        let structural_body_model = PdfDocumentModel {
+            title: "StreamFraming".to_string(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "Literal /Type /Metadata and /Type /Page /Rotate 90 inside stream"
+                    .to_string(),
+                approval_stamp: None,
+            }],
+            watermark_text: None,
+        };
+        let structural_body_bytes = PdfSerializer::serialize(&structural_body_model);
+        assert_eq!(
+            PdfSerializer::parse(&structural_body_bytes).unwrap(),
+            structural_body_model
+        );
+
+        let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length 260 >>\nstream\n/F2 11 Tf\nBT /F1 12 Tf 54 760 Td [(Hel) -15 (lo )\n(World)] TJ ET\nBT [3 2] 0 d /Span << /MCID 0 /Lang (ko-KR) >> BDC (\\101\\tLine\\\nCont) Tj EMC ET\nBT /F2 11 Tf ET\nBT <AC00> Tj ET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
         let parsed_edge = PdfSerializer::parse(multiline_tj_comment_pdf).unwrap();
-        assert_eq!(parsed_edge.pages[0].body_text, "Hello World\nA\tLineCont");
+        assert_eq!(
+            parsed_edge.pages[0].body_text,
+            "Hello World\nA\tLineCont\n가"
+        );
 
         assert_eq!(PdfSerializer::decode_base64_bytes("YQ==YQ=="), None);
     }
