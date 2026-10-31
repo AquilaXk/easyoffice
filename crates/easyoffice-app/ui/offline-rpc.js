@@ -2,6 +2,7 @@
   "use strict";
 
   const {
+    normalizeA1Token,
     parseCellRefParts,
     colIndexToLetters,
     normalizeFormattedNumericCell,
@@ -396,8 +397,14 @@
       if (doc.cell !== undefined && doc.cell !== null && typeof doc.cell !== "string") {
         throw new Error("InvalidArgument: JSON 'cell' 필드는 문자열이어야 합니다.");
       }
-      const anchorCell =
-        typeof doc.cell === "string" && doc.cell.trim().length > 0 ? doc.cell.trim() : "A1";
+      let anchorCell = "A1";
+      if (typeof doc.cell === "string" && doc.cell.trim().length > 0) {
+        const normAnchor = normalizeA1Token(doc.cell.trim());
+        if (!normAnchor) {
+          throw new Error("InvalidArgument: 유효하지 않은 셀 좌표('cell')입니다.");
+        }
+        anchorCell = normAnchor;
+      }
       const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
       if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
         throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");

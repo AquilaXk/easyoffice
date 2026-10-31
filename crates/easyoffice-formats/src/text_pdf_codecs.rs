@@ -228,10 +228,8 @@ impl PdfSerializer {
             ));
         }
         if scanned.pages.is_empty() {
-            return Err(fail_corrupted_or_encrypted(
-                bytes,
-                false,
-                "PDF 페이지 스트림을 찾을 수 없습니다.",
+            return Err(EasyOfficeError::CorruptedContainer(
+                "PDF 페이지 스트림을 찾을 수 없습니다.".to_string(),
             ));
         }
         if scanned.trailer_b64_count > 1 {
@@ -334,10 +332,9 @@ impl PdfSerializer {
                 if let Some(decoded) = state.flate_cache.get(&(so, sg)) {
                     let slice = decoded.as_slice();
                     if !validate_balanced_pdf_literals(slice) {
-                        return Err(fail_corrupted_or_encrypted(
-                            state.bytes,
-                            false,
-                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다.",
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다."
+                                .to_string(),
                         ));
                     }
                     if !state.first_used_flate.insert((so, sg)) {
@@ -352,18 +349,16 @@ impl PdfSerializer {
                     Ok(slice)
                 } else {
                     if span_crosses_object_boundary(state.bytes, s_start, s_end) {
-                        return Err(fail_corrupted_or_encrypted(
-                            state.bytes,
-                            false,
-                            "PDF 페이지 스트림 내부에 닫히지 않은 객체 경계 토큰이 감지되었습니다.",
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "PDF 페이지 스트림 내부에 닫히지 않은 객체 경계 토큰이 감지되었습니다."
+                                .to_string(),
                         ));
                     }
                     let slice = &state.bytes[s_start..s_end];
                     if !validate_balanced_pdf_literals(slice) {
-                        return Err(fail_corrupted_or_encrypted(
-                            state.bytes,
-                            false,
-                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다.",
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "PDF 페이지 콘텐츠 스트림의 문자열 리터럴이 닫히지 않았습니다."
+                                .to_string(),
                         ));
                     }
                     let Some(next_b) = state.remaining_budget.checked_sub(slice.len()) else {
@@ -380,24 +375,18 @@ impl PdfSerializer {
         let mut push_ref =
             |out: &mut Vec<&'a [u8]>, so: u32, sg: u16| -> Result<(), EasyOfficeError> {
                 let Some(stream_obj) = state.objects.get(&(so, sg)) else {
-                    return Err(fail_corrupted_or_encrypted(
-                        state.bytes,
-                        false,
-                        "PDF /Contents 간접 스트림 객체를 찾을 수 없습니다.",
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "PDF /Contents 간접 스트림 객체를 찾을 수 없습니다.".to_string(),
                     ));
                 };
                 let Some((s_start, s_end)) = stream_obj.stream_range else {
-                    return Err(fail_corrupted_or_encrypted(
-                        state.bytes,
-                        false,
-                        "PDF /Contents 대상 객체에 stream 본문이 없습니다.",
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "PDF /Contents 대상 객체에 stream 본문이 없습니다.".to_string(),
                     ));
                 };
                 if !matches!(stream_obj.val, PdfObjValue::Dict(_)) {
-                    return Err(fail_corrupted_or_encrypted(
-                        state.bytes,
-                        false,
-                        "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.",
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "PDF 스트림 객체 헤더가 딕셔너리가 아닙니다.".to_string(),
                     ));
                 }
                 out.push(resolve_one(so, sg, s_start, s_end)?);
@@ -414,10 +403,8 @@ impl PdfSerializer {
             }
             Some(PdfObjValue::Ref(co, cg)) => {
                 let Some(target) = state.objects.get(&(*co, *cg)) else {
-                    return Err(fail_corrupted_or_encrypted(
-                        state.bytes,
-                        false,
-                        "PDF /Contents 간접 참조 대상을 찾을 수 없습니다.",
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "PDF /Contents 간접 참조 대상을 찾을 수 없습니다.".to_string(),
                     ));
                 };
                 if target.stream_range.is_some() {
@@ -436,20 +423,17 @@ impl PdfSerializer {
                             PdfObjValue::Ref(so, sg) => push_ref(&mut out, *so, *sg)?,
                             PdfObjValue::Null => {}
                             _ => {
-                                return Err(fail_corrupted_or_encrypted(
-                                    state.bytes,
-                                    false,
-                                    "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다.",
+                                return Err(EasyOfficeError::CorruptedContainer(
+                                    "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다."
+                                        .to_string(),
                                 ))
                             }
                         }
                     }
                     Ok(out)
                 } else {
-                    Err(fail_corrupted_or_encrypted(
-                        state.bytes,
-                        false,
-                        "PDF /Contents 참조 대상이 스트림 또는 배열이 아닙니다.",
+                    Err(EasyOfficeError::CorruptedContainer(
+                        "PDF /Contents 참조 대상이 스트림 또는 배열이 아닙니다.".to_string(),
                     ))
                 }
             }
@@ -465,20 +449,17 @@ impl PdfSerializer {
                         PdfObjValue::Ref(so, sg) => push_ref(&mut out, *so, *sg)?,
                         PdfObjValue::Null => {}
                         _ => {
-                            return Err(fail_corrupted_or_encrypted(
-                                state.bytes,
-                                false,
-                                "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다.",
+                            return Err(EasyOfficeError::CorruptedContainer(
+                                "PDF /Contents 배열 원소가 스트림 간접 참조가 아닙니다."
+                                    .to_string(),
                             ))
                         }
                     }
                 }
                 Ok(out)
             }
-            Some(_) => Err(fail_corrupted_or_encrypted(
-                state.bytes,
-                false,
-                "PDF /Page /Contents 항목 타입이 올바르지 않습니다.",
+            Some(_) => Err(EasyOfficeError::CorruptedContainer(
+                "PDF /Page /Contents 항목 타입이 올바르지 않습니다.".to_string(),
             )),
         }
     }
@@ -567,17 +548,13 @@ impl PdfSerializer {
                     ));
                 }
                 let Some(obj) = state.objects.get(&(on, gn)) else {
-                    return Err(fail_corrupted_or_encrypted(
-                        state.bytes,
-                        false,
-                        "PDF 페이지 트리 간접 객체를 찾을 수 없습니다.",
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "PDF 페이지 트리 간접 객체를 찾을 수 없습니다.".to_string(),
                     ));
                 };
                 let PdfObjValue::Dict(ref d) = obj.val else {
-                    return Err(fail_corrupted_or_encrypted(
-                        state.bytes,
-                        false,
-                        "PDF 페이지 트리 노드가 딕셔너리가 아닙니다.",
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "PDF 페이지 트리 노드가 딕셔너리가 아닙니다.".to_string(),
                     ));
                 };
                 (d.as_slice(), obj.stream_range.map(|r| ((on, gn), r)))
@@ -658,7 +635,7 @@ impl PdfSerializer {
                 let parsed_val =
                     parse_pdf_value(bytes, after_obj, bytes.len(), 0).map_err(|_| {
                         fail_corrupted_or_encrypted(
-                            bytes,
+                            &bytes[p..],
                             has_encrypt,
                             "PDF 간접 객체 구문이 손상되었거나 리터럴이 닫히지 않았습니다.",
                         )
@@ -676,7 +653,7 @@ impl PdfSerializer {
                 if is_standalone_pdf_kw(bytes, next_p, b"stream") {
                     let PdfObjValue::Dict(ref entries) = val else {
                         return Err(fail_corrupted_or_encrypted(
-                            bytes,
+                            &bytes[p..],
                             has_encrypt,
                             "PDF stream 앞에 객체 딕셔너리가 없습니다.",
                         ));
@@ -689,7 +666,7 @@ impl PdfSerializer {
                         resolve_stream_bounds(bytes, stream_start, len_hint)
                     else {
                         return Err(fail_corrupted_or_encrypted(
-                            bytes,
+                            &bytes[p..],
                             has_encrypt,
                             "PDF stream 블록에 대응하는 endstream 토큰이 누락되었거나 경계가 손상되었습니다.",
                         ));
@@ -700,7 +677,7 @@ impl PdfSerializer {
                 }
                 if !is_standalone_pdf_kw(bytes, next_p, b"endobj") {
                     return Err(fail_corrupted_or_encrypted(
-                        bytes,
+                        &bytes[p..],
                         has_encrypt,
                         "PDF 간접 객체에 대응하는 endobj 토큰이 누락되었습니다.",
                     ));
@@ -745,14 +722,14 @@ impl PdfSerializer {
             if is_standalone_pdf_kw(bytes, p, b"trailer") {
                 let parsed_tr = parse_pdf_value(bytes, p + 7, bytes.len(), 0).map_err(|_| {
                     fail_corrupted_or_encrypted(
-                        bytes,
+                        &bytes[p..],
                         has_encrypt,
                         "PDF trailer 딕셔너리가 손상되었습니다.",
                     )
                 })?;
                 let Some((PdfObjValue::Dict(tr_entries), next_p)) = parsed_tr else {
                     return Err(fail_corrupted_or_encrypted(
-                        bytes,
+                        &bytes[p..],
                         has_encrypt,
                         "PDF trailer 뒤에 딕셔너리가 없습니다.",
                     ));
@@ -765,6 +742,7 @@ impl PdfSerializer {
                 continue;
             }
             if is_standalone_pdf_kw(bytes, p, b"startxref") {
+                let sx_pos = p;
                 p = skip_pdf_ws_and_comments(bytes, p + 9, bytes.len());
                 let start_off = p;
                 while p < bytes.len() && bytes[p].is_ascii_digit() {
@@ -772,7 +750,7 @@ impl PdfSerializer {
                 }
                 if p == start_off {
                     return Err(fail_corrupted_or_encrypted(
-                        bytes,
+                        &bytes[sx_pos..],
                         has_encrypt,
                         "PDF startxref 오프셋 숫자가 누락되었습니다.",
                     ));
@@ -780,7 +758,7 @@ impl PdfSerializer {
                 continue;
             }
             return Err(fail_corrupted_or_encrypted(
-                bytes,
+                &bytes[p..],
                 has_encrypt,
                 "PDF 상위 구조에 해석할 수 없는 손상 토큰이 존재합니다.",
             ));

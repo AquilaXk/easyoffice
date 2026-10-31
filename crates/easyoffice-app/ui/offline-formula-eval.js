@@ -362,7 +362,7 @@
         sheetName = unquoteFormulaSheetTokenOnce(shRaw);
         if (!sheetName || sheetName.trim().length === 0) return { ok: false };
       } else {
-        if (/^[0-9.]/.test(shRaw) || /[\s'!"#%&()*+,\-/:;<=>?@[\\\]^`{|}~.]/.test(shRaw)) {
+        if (!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(shRaw)) {
           return { ok: false };
         }
         sheetName = shRaw;
@@ -785,6 +785,7 @@
   }
 
   host.__EASYOFFICE_OFFLINE_FORMULA_EVAL__ = {
+    normalizeA1Token,
     parseCellRefParts,
     colIndexToLetters,
     normalizeFormattedNumericCell,

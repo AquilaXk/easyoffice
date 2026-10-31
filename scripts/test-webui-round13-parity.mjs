@@ -148,6 +148,13 @@ test("digit-leading unquoted sheets fail with #VALUE!, INDIRECT resolves scalar 
     ).value,
     "5"
   );
+  assert.throws(
+    () =>
+      offlineRpc.evaluate_sheet(
+        JSON.stringify({ sheet: "Sheet1", cell: "NOT_A_CELL", expr: "=ROW()" })
+      ),
+    /InvalidArgument/
+  );
 });
 
 test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapshot so Undo preserves formatting and backend alignment", async () => {
@@ -240,7 +247,10 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
   const themeBtn = document.getElementById("btn-theme-toggle");
   f2.focus();
   assert.equal(document.activeElement, f2);
+  f2.textContent = "123";
+  f2.dispatchEvent({ type: "input", target: f2 });
   themeBtn.click();
+  await flushAsyncTurns(10);
   assert.equal(document.activeElement, f2);
   assert.equal(document.documentElement.dataset.theme, "dark");
 
@@ -251,12 +261,17 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
-  assert.equal(f2.textContent, baselineText);
+  assert.equal(f2.textContent, "123");
   assert.equal(document.documentElement.dataset.theme, "dark");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
   assert.equal(document.documentElement.dataset.theme, "light");
+  assert.equal(f2.textContent, "123");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns(10);
+  assert.equal(f2.textContent, baselineText);
 });
 
 test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target DOM SSOT independently", async () => {
@@ -312,6 +327,16 @@ test("DOC vs HWP and Slide 1 vs Slide 2 layout commands derive state from target
   userClick(document.querySelector('[data-command-id="hwp-mod-border"]'));
   await flushAsyncTurns();
   assert.equal(hwpTable.style.borderStyle, "double");
+
+  userClick(document.querySelector('[data-command-id="hwp-mod-manuscript"]'));
+  await flushAsyncTurns();
+  assert.equal(docEditor.classList.contains("manuscript-grid"), true);
+  assert.equal(document.getElementById("hwp-manuscript-preview").hidden, false);
+
+  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  await flushAsyncTurns();
+  assert.equal(docEditor.classList.contains("manuscript-grid"), false);
+  assert.equal(document.getElementById("hwp-manuscript-preview").hidden, true);
 
   userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
   await flushAsyncTurns();

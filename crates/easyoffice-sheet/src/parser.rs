@@ -123,6 +123,17 @@ fn looks_like_ascii_cell_token(s: &str) -> bool {
     letters > 0 && digits > 0
 }
 
+pub(crate) fn is_valid_unquoted_sheet_ident(raw_sheet: &str) -> bool {
+    let mut chars = raw_sheet.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_alphabetic() || first == '_' || first == '$') {
+        return false;
+    }
+    chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+}
+
 fn needs_sheet_quoting(raw_sheet: &str) -> bool {
     raw_sheet
         .chars()

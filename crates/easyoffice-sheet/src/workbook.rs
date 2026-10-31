@@ -129,10 +129,20 @@ impl WorkbookEngine {
     }
 
     pub fn evaluate_formula_on_sheet(&self, sheet_name: &str, formula: &str) -> EvaluatedCellValue {
+        self.evaluate_formula_on_sheet_at(sheet_name, None, formula)
+    }
+
+    pub fn evaluate_formula_on_sheet_at(
+        &self,
+        sheet_name: &str,
+        anchor: Option<PackedCellCoordinate>,
+        formula: &str,
+    ) -> EvaluatedCellValue {
         let Some(sheet) = self.sheet(sheet_name) else {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         };
         let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
+        ctx.current_coord = anchor;
         sheet.eval_raw_string_ctx(formula, &mut ctx, 0)
     }
 }

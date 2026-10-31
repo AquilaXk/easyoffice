@@ -386,40 +386,48 @@
     const btnRibbonStyle = document.getElementById("btn-ribbon-style");
     if (btnRibbonStyle) {
       btnRibbonStyle.addEventListener("click", () => {
-        const runSwitch = async () => {
-          activeRibbonStyle = activeRibbonStyle === "standard" ? "hangul" : "standard";
-          localRibbonState.ribbonStyle = activeRibbonStyle;
-          const res = await invokeIpc("switch_ribbon_style", activeRibbonStyle);
-          btnRibbonStyle.textContent =
-            activeRibbonStyle === "hangul" ? "리본: 한글(HWP) 7탭" : "리본: 표준 오피스";
-          const labels = res?.categories || RIBBON_STYLE_LABELS[activeRibbonStyle];
-          const keys = RIBBON_CATEGORY_ORDER;
-          let nextActiveCat = activeRibbonCategory;
-          document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b, idx) => {
-            if (labels[idx]) b.textContent = labels[idx];
-            if (keys[idx]) {
-              b.dataset.category = keys[idx];
-              if (b.classList.contains("active")) {
-                nextActiveCat = keys[idx];
+        void ribbonHistory
+          .enqueueWorkspaceHistoryOp(async () => {
+            await sheetController.commitPendingFocusedSheetCell(true);
+            activeRibbonStyle = activeRibbonStyle === "standard" ? "hangul" : "standard";
+            localRibbonState.ribbonStyle = activeRibbonStyle;
+            const res = await invokeIpc("switch_ribbon_style", activeRibbonStyle);
+            btnRibbonStyle.textContent =
+              activeRibbonStyle === "hangul" ? "리본: 한글(HWP) 7탭" : "리본: 표준 오피스";
+            const labels = res?.categories || RIBBON_STYLE_LABELS[activeRibbonStyle];
+            const keys = RIBBON_CATEGORY_ORDER;
+            let nextActiveCat = activeRibbonCategory;
+            document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b, idx) => {
+              if (labels[idx]) b.textContent = labels[idx];
+              if (keys[idx]) {
+                b.dataset.category = keys[idx];
+                if (b.classList.contains("active")) {
+                  nextActiveCat = keys[idx];
+                }
               }
-            }
-          });
-          await ribbonHistory.renderRibbonCategoryTools(nextActiveCat);
-        };
-        void runSwitch().catch(() => {});
+            });
+            await ribbonHistory.renderRibbonCategoryTools(nextActiveCat);
+            sheetController.refreshFocusedSheetCellPendingSnapshot();
+          })
+          .catch(() => {});
       });
     }
 
     const themeBtn = document.getElementById("btn-theme-toggle");
     if (themeBtn) {
       themeBtn.addEventListener("click", () => {
-        ribbonHistory.pushUndoSnapshot(false);
-        const html = document.documentElement;
-        const next = html.dataset.theme === "dark" ? "light" : "dark";
-        html.dataset.theme = next;
-        localRibbonState.darkThemeEnabled = next === "dark";
-        themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
-        sheetController.refreshFocusedSheetCellPendingSnapshot();
+        void ribbonHistory
+          .enqueueWorkspaceHistoryOp(async () => {
+            await sheetController.commitPendingFocusedSheetCell(true);
+            ribbonHistory.pushUndoSnapshot(false);
+            const html = document.documentElement;
+            const next = html.dataset.theme === "dark" ? "light" : "dark";
+            html.dataset.theme = next;
+            localRibbonState.darkThemeEnabled = next === "dark";
+            themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
+            sheetController.refreshFocusedSheetCellPendingSnapshot();
+          })
+          .catch(() => {});
       });
     }
   }

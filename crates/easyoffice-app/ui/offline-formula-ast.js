@@ -360,6 +360,7 @@
       if (end === i) return { error: "#VALUE!" };
       const word = src.slice(i, end);
       if (end < src.length && src[end] === "!") {
+        if (!/^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(word)) return { error: "#VALUE!" };
         if (!pushTok({ type: "sheet", name: word })) return { error: "#VALUE!" };
         i = end + 1;
       } else {

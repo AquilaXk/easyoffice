@@ -555,6 +555,7 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
 
   const themeBtn = document.getElementById("btn-theme-toggle");
   userClick(themeBtn);
+  await flushAsyncTurns();
   assert.equal(document.documentElement.dataset.theme, "dark");
 
   const boldBtn = document.querySelector('[data-command-id="document-home-bold"]');

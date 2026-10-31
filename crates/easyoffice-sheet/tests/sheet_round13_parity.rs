@@ -236,4 +236,29 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet("Main", "of:=SUM([A1.B1:A1.B2])"),
         EvaluatedCellValue::Number(187.0)
     );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"2026Q1!A1\")"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"'2026Q1'!A1\")"),
+        EvaluatedCellValue::Number(11.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"1분기!A1\")"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=INDIRECT(\"'1분기'!A1\")"),
+        EvaluatedCellValue::Number(33.0)
+    );
+    let c5 = easyoffice_sheet::PackedCellCoordinate::parse_a1("C5").unwrap();
+    assert_eq!(
+        wb.evaluate_formula_on_sheet_at("Main", Some(c5), "=ROW()"),
+        EvaluatedCellValue::Number(5.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet_at("Main", Some(c5), "=COLUMN()"),
+        EvaluatedCellValue::Number(3.0)
+    );
 }

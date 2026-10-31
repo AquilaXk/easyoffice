@@ -7,7 +7,8 @@ use easyoffice_layout::{
     RibbonLayoutStyle, SignatureLavenderPalette, SlideDeckTheme, SlideStageLayout,
 };
 use easyoffice_sheet::{
-    ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, WorkbookEngine,
+    ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PackedCellCoordinate,
+    WorkbookEngine,
 };
 
 pub mod benchmark;
@@ -402,6 +403,7 @@ impl EasyOfficeIpcRouter {
                 ));
             }
         }
+        let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
         let expr = match Self::optional_json_str(&entries, "expr")? {
             Some(s) => s,
             None => Self::optional_json_str(&entries, "query")?.unwrap_or("A1"),
@@ -409,7 +411,7 @@ impl EasyOfficeIpcRouter {
         .trim();
         let expr = if expr.is_empty() { "A1" } else { expr };
         let evaluated = if Self::is_formula_expr(expr) {
-            wb.evaluate_formula_on_sheet(default_sh, expr)
+            wb.evaluate_formula_on_sheet_at(default_sh, anchor_coord, expr)
         } else {
             wb.evaluate_cell(default_sh, expr)
         };
@@ -812,17 +814,37 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
+    fn resolve_optional_anchor_coord(
+        entries: &[(String, StrictJsonValue)],
+    ) -> Result<Option<PackedCellCoordinate>, EasyOfficeError> {
+        let Some(raw) = Self::optional_json_str(entries, "cell")? else {
+            return Ok(None);
+        };
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        PackedCellCoordinate::parse_a1(trimmed)
+            .map(Some)
+            .map_err(|_| {
+                EasyOfficeError::InvalidArgument(format!(
+                    "유효하지 않은 셀 좌표('cell'): {trimmed}"
+                ))
+            })
+    }
+
     fn handle_evaluate_workbook_formula(payload: &str) -> Result<String, EasyOfficeError> {
         let entries = Self::parse_rpc_json_object(payload)?;
         let active_sheet_owned = Self::resolve_default_sheet_from_entries(&entries)?;
         let active_sheet = active_sheet_owned.as_str();
+        let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
         let expr = Self::optional_json_str(&entries, "expr")?
             .filter(|s| !s.trim().is_empty())
             .unwrap_or("=Sheet2!A1+50")
             .trim();
         let wb = Self::build_workbook_from_json_entries(&entries, active_sheet, true)?;
         let val = if Self::is_formula_expr(expr) {
-            wb.evaluate_formula_on_sheet(active_sheet, expr)
+            wb.evaluate_formula_on_sheet_at(active_sheet, anchor_coord, expr)
         } else {
             wb.evaluate_cell(active_sheet, expr)
         };

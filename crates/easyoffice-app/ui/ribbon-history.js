@@ -112,8 +112,8 @@
       if (ctxBadge) ctxBadge.textContent = CONTEXTUAL_TOOL_BADGES[mod] || "표·개체 도구";
 
       const hwpNotice = document.getElementById("hwp-manuscript-preview");
-      if (hwpNotice) {
-        hwpNotice.hidden = mod !== "HWP" && !localRibbonState.manuscriptGridEnabled;
+      if (hwpNotice && mod !== "HWP") {
+        hwpNotice.hidden = true;
       }
     }
 
@@ -532,20 +532,15 @@
         return;
       }
       if (cmdId === "hwp-mod-manuscript" || cmdId.endsWith("-manuscript")) {
-        let gridOn;
-        if (execRes?.manuscriptGridEnabled === undefined) {
-          gridOn = !localRibbonState.manuscriptGridEnabled;
-          localRibbonState.manuscriptGridEnabled = gridOn;
-        } else {
-          gridOn = Boolean(execRes.manuscriptGridEnabled);
-        }
         const docEditorEl = document.getElementById("doc-editor");
+        const gridOn = docEditorEl ? !docEditorEl.classList.contains("manuscript-grid") : false;
+        localRibbonState.manuscriptGridEnabled = gridOn;
         if (docEditorEl) {
           docEditorEl.classList.toggle("manuscript-grid", gridOn);
         }
         const hwpNotice = document.getElementById("hwp-manuscript-preview");
         if (hwpNotice) {
-          hwpNotice.hidden = !gridOn;
+          hwpNotice.hidden = getActiveModule() !== "HWP" || !gridOn;
         }
         workspacePanels.saveActiveDocTabState();
         return;

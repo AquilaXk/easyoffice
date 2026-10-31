@@ -446,6 +446,21 @@ mod tests {
                 cleared_res.contains("\"value\":\"17\""),
                 "cmd={cmd} res={cleared_res}"
             );
+
+            let anchored_row = EasyOfficeIpcRouter::dispatch(
+                cmd,
+                r#"{"sheet":"Sheet1","cell":"C5","expr":"=ROW()"}"#,
+            )
+            .unwrap();
+            assert!(
+                anchored_row.contains("\"value\":\"5\""),
+                "cmd={cmd} res={anchored_row}"
+            );
+            assert!(EasyOfficeIpcRouter::dispatch(
+                cmd,
+                r#"{"sheet":"Sheet1","cell":"NOT_A_CELL","expr":"=ROW()"}"#,
+            )
+            .is_err());
         }
 
         let conv_json = EasyOfficeIpcRouter::dispatch(

@@ -874,3 +874,100 @@ pub(crate) fn validate_pdf_trailer_json(
     }
     None
 }
+
+pub(crate) struct DamagedPdfTables {
+    paren_close: Vec<usize>,
+    structural_endobjs: Vec<usize>,
+}
+
+impl DamagedPdfTables {
+    pub(crate) fn build(bytes: &[u8]) -> Self {
+        let len = bytes.len();
+        let mut paren_close = vec![0usize; len];
+        let mut stack: Vec<usize> = Vec::new();
+        let mut structural_endobjs: Vec<usize> = Vec::new();
+        let mut i = 0usize;
+        while i < len {
+            if stack.is_empty() && bytes[i] == b'%' {
+                while i < len && bytes[i] != b'\n' && bytes[i] != b'\r' {
+                    i += 1;
+                }
+                continue;
+            }
+            if is_standalone_pdf_kw(bytes, i, b"endobj")
+                && (i + 6 >= len || has_structural_after_endobj(bytes, i + 6))
+            {
+                structural_endobjs.push(i);
+            }
+            if bytes[i] == b'\\' {
+                i = (i + 2).min(len);
+                continue;
+            }
+            if bytes[i] == b'(' {
+                stack.push(i);
+            } else if bytes[i] == b')' {
+                if let Some(open_idx) = stack.pop() {
+                    paren_close[open_idx] = i + 1;
+                }
+            }
+            i += 1;
+        }
+        Self {
+            paren_close,
+            structural_endobjs,
+        }
+    }
+
+    fn crosses_structural_endobj(&self, inner_start: usize, inner_end: usize) -> bool {
+        if inner_start >= inner_end {
+            return false;
+        }
+        let idx = self
+            .structural_endobjs
+            .partition_point(|&e| e < inner_start);
+        self.structural_endobjs
+            .get(idx)
+            .is_some_and(|&e| e + 6 <= inner_end)
+    }
+}
+
+pub(crate) fn step_damaged_non_code(
+    bytes: &[u8],
+    tables: &DamagedPdfTables,
+    pos: usize,
+    limit: usize,
+) -> Option<usize> {
+    if pos >= limit {
+        return None;
+    }
+    if bytes[pos] == b'(' {
+        let next_idx = tables.paren_close[pos];
+        if next_idx == 0 || next_idx > limit {
+            return None;
+        }
+        if tables.crosses_structural_endobj(pos + 1, next_idx - 1) {
+            return None;
+        }
+        return Some(next_idx);
+    }
+    match step_pdf_non_code_token(&bytes[..limit], pos) {
+        Ok(Some(PdfNonCodeStep {
+            next_index,
+            kind: PdfNonCodeKind::Comment { .. } | PdfNonCodeKind::HexString { .. },
+        })) => Some(next_index),
+        _ => None,
+    }
+}
+
+pub(crate) fn skip_damaged_truncated_stream(bytes: &[u8], stream_start: usize) -> usize {
+    let mut q = stream_start;
+    while q < bytes.len() {
+        if is_standalone_pdf_kw(bytes, q, b"endobj")
+            && (q + 6 >= bytes.len() || has_structural_after_endobj(bytes, q + 6))
+        {
+            return q + 6;
+        }
+        q += 1;
+    }
+    bytes.len()
+}

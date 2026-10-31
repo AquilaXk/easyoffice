@@ -70,11 +70,10 @@ fn parse_indirect_sheet_token(sh_raw: &str) -> Result<String, FormulaError> {
     let sh_tok = sh_raw.trim();
     if sh_tok.starts_with('\'') {
         WorkbookEngine::unquote_formula_sheet_token(sh_tok).ok_or(FormulaError::Ref)
-    } else {
-        if sh_tok.is_empty() || sh_tok.contains('\'') || sh_tok.chars().any(char::is_whitespace) {
-            return Err(FormulaError::Ref);
-        }
+    } else if crate::parser::is_valid_unquoted_sheet_ident(sh_tok) {
         Ok(sh_tok.to_string())
+    } else {
+        Err(FormulaError::Ref)
     }
 }
 
