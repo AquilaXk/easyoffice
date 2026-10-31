@@ -123,8 +123,36 @@ pub(crate) struct PdfNonCodeStep {
     pub(crate) kind: PdfNonCodeKind,
 }
 
+pub(crate) fn is_pdf_ws(b: u8) -> bool {
+    matches!(b, 0x00 | 0x09 | 0x0A | 0x0C | 0x0D | 0x20)
+}
+
 pub(crate) fn is_pdf_delim_or_ws(b: u8) -> bool {
-    b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b)
+    is_pdf_ws(b) || b"()<>[]{}/%".contains(&b)
+}
+
+pub(crate) fn decode_pdf_name(raw_after_slash: &[u8]) -> String {
+    let mut out = Vec::with_capacity(raw_after_slash.len() + 1);
+    out.push(b'/');
+    let mut i = 0usize;
+    while i < raw_after_slash.len() {
+        if raw_after_slash[i] == b'#'
+            && i + 2 < raw_after_slash.len()
+            && raw_after_slash[i + 1].is_ascii_hexdigit()
+            && raw_after_slash[i + 2].is_ascii_hexdigit()
+        {
+            if let Ok(hex_str) = std::str::from_utf8(&raw_after_slash[i + 1..i + 3]) {
+                if let Ok(byte) = u8::from_str_radix(hex_str, 16) {
+                    out.push(byte);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(raw_after_slash[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 pub(crate) fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
@@ -142,7 +170,7 @@ pub(crate) fn is_standalone_pdf_kw(bytes: &[u8], pos: usize, kw: &[u8]) -> bool 
 
 pub(crate) fn skip_pdf_ws_and_comments(bytes: &[u8], mut p: usize, limit: usize) -> usize {
     while p < limit {
-        if bytes[p].is_ascii_whitespace() {
+        if is_pdf_ws(bytes[p]) {
             p += 1;
         } else if bytes[p] == b'%' {
             p += 1;
@@ -156,7 +184,11 @@ pub(crate) fn skip_pdf_ws_and_comments(bytes: &[u8], mut p: usize, limit: usize)
     p
 }
 
-pub(crate) fn match_indirect_obj_header(bytes: &[u8], pos: usize, limit: usize) -> Option<usize> {
+pub(crate) fn parse_indirect_obj_header(
+    bytes: &[u8],
+    pos: usize,
+    limit: usize,
+) -> Option<(u32, u16, usize)> {
     if pos >= limit
         || !bytes[pos].is_ascii_digit()
         || (pos > 0 && !is_pdf_delim_or_ws(bytes[pos - 1]))
@@ -167,6 +199,10 @@ pub(crate) fn match_indirect_obj_header(bytes: &[u8], pos: usize, limit: usize) 
     while q < limit && bytes[q].is_ascii_digit() {
         q += 1;
     }
+    let obj_num = std::str::from_utf8(&bytes[pos..q])
+        .ok()?
+        .parse::<u32>()
+        .ok()?;
     let q_gen = skip_pdf_ws_and_comments(bytes, q, limit);
     if q_gen == q || q_gen >= limit || !bytes[q_gen].is_ascii_digit() {
         return None;
@@ -175,32 +211,117 @@ pub(crate) fn match_indirect_obj_header(bytes: &[u8], pos: usize, limit: usize) 
     while r < limit && bytes[r].is_ascii_digit() {
         r += 1;
     }
+    let gen_num = std::str::from_utf8(&bytes[q_gen..r])
+        .ok()?
+        .parse::<u16>()
+        .ok()?;
     let r_obj = skip_pdf_ws_and_comments(bytes, r, limit);
-    if r_obj == r || r_obj + 3 > limit || !is_standalone_pdf_kw(bytes, r_obj, b"obj") {
+    if r_obj == r || r_obj + 3 > limit || !is_standalone_pdf_kw(&bytes[..limit], r_obj, b"obj") {
         return None;
     }
-    Some(r_obj + 3)
+    Some((obj_num, gen_num, r_obj + 3))
+}
+
+pub(crate) fn match_indirect_obj_header(bytes: &[u8], pos: usize, limit: usize) -> Option<usize> {
+    parse_indirect_obj_header(bytes, pos, limit).map(|(_, _, end)| end)
+}
+
+pub(crate) fn has_structural_after_endobj(slice: &[u8], after_endobj: usize) -> bool {
+    let len = slice.len();
+    if after_endobj >= len || (!is_pdf_ws(slice[after_endobj]) && slice[after_endobj] != b'%') {
+        return false;
+    }
+    let q = skip_pdf_ws_and_comments(slice, after_endobj, len);
+    if match_indirect_obj_header(slice, q, len).is_some() {
+        return true;
+    }
+    if q + 4 < len
+        && is_standalone_pdf_kw(slice, q, b"xref")
+        && (is_pdf_ws(slice[q + 4]) || slice[q + 4] == b'%')
+    {
+        return true;
+    }
+    if q + 7 < len && is_standalone_pdf_kw(slice, q, b"trailer") {
+        let qt = skip_pdf_ws_and_comments(slice, q + 7, len);
+        if qt + 1 < len && slice[qt] == b'<' && slice[qt + 1] == b'<' {
+            return true;
+        }
+    }
+    if q + 9 < len && is_standalone_pdf_kw(slice, q, b"startxref") {
+        let qs = skip_pdf_ws_and_comments(slice, q + 9, len);
+        if qs > q + 9 && qs < len && slice[qs].is_ascii_digit() {
+            return true;
+        }
+    }
+    false
+}
+
+pub(crate) fn raw_span_crosses_object_boundary(slice: &[u8]) -> bool {
+    let len = slice.len();
+    let mut p = 0usize;
+    while p < len {
+        if p + 9 <= len && is_standalone_pdf_kw(slice, p, b"endstream") {
+            let q = skip_pdf_ws_and_comments(slice, p + 9, len);
+            if (q + 6 <= len
+                && is_standalone_pdf_kw(slice, q, b"endobj")
+                && has_structural_after_endobj(slice, q + 6))
+                || match_indirect_obj_header(slice, q, len).is_some()
+            {
+                return true;
+            }
+        } else if p + 6 <= len
+            && is_standalone_pdf_kw(slice, p, b"endobj")
+            && has_structural_after_endobj(slice, p + 6)
+        {
+            return true;
+        }
+        p += 1;
+    }
+    false
 }
 
 pub(crate) fn span_crosses_object_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
-    let mut p = start;
-    while p < end {
-        if p + 9 <= end && is_standalone_pdf_kw(bytes, p, b"endstream") {
-            let q = skip_pdf_ws_and_comments(bytes, p + 9, end);
-            if (q + 6 <= end && is_standalone_pdf_kw(bytes, q, b"endobj"))
-                || match_indirect_obj_header(bytes, q, end).is_some()
+    if start >= end || end > bytes.len() {
+        return false;
+    }
+    let slice = &bytes[start..end];
+    let len = slice.len();
+    let mut p = 0usize;
+    while p < len {
+        match step_pdf_non_code_token(slice, p) {
+            Ok(Some(step)) => {
+                if let PdfNonCodeKind::ParenString {
+                    inner_start,
+                    inner_end,
+                } = step.kind
+                {
+                    if raw_span_crosses_object_boundary(&slice[inner_start..inner_end]) {
+                        return true;
+                    }
+                }
+                p = step.next_index;
+                continue;
+            }
+            Err(()) => {
+                p += 1;
+                continue;
+            }
+            Ok(None) => {}
+        }
+        if p + 9 <= len && is_standalone_pdf_kw(slice, p, b"endstream") {
+            let q = skip_pdf_ws_and_comments(slice, p + 9, len);
+            if (q + 6 <= len
+                && is_standalone_pdf_kw(slice, q, b"endobj")
+                && has_structural_after_endobj(slice, q + 6))
+                || match_indirect_obj_header(slice, q, len).is_some()
             {
                 return true;
             }
-        } else if p + 6 <= end && is_standalone_pdf_kw(bytes, p, b"endobj") {
-            let q = skip_pdf_ws_and_comments(bytes, p + 6, end);
-            if match_indirect_obj_header(bytes, q, end).is_some()
-                || (q + 4 <= end && is_standalone_pdf_kw(bytes, q, b"xref"))
-                || (q + 7 <= end && is_standalone_pdf_kw(bytes, q, b"trailer"))
-                || (q + 9 <= end && is_standalone_pdf_kw(bytes, q, b"startxref"))
-            {
-                return true;
-            }
+        } else if p + 6 <= len
+            && is_standalone_pdf_kw(slice, p, b"endobj")
+            && has_structural_after_endobj(slice, p + 6)
+        {
+            return true;
         }
         p += 1;
     }
@@ -212,13 +333,6 @@ pub(crate) fn validate_balanced_pdf_literals(stream_bytes: &[u8]) -> bool {
     while i < stream_bytes.len() {
         match step_pdf_non_code_token(stream_bytes, i) {
             Ok(Some(step)) => {
-                if matches!(
-                    step.kind,
-                    PdfNonCodeKind::ParenString { .. } | PdfNonCodeKind::HexString { .. }
-                ) && span_crosses_object_boundary(stream_bytes, i + 1, step.next_index)
-                {
-                    return false;
-                }
                 i = step.next_index;
             }
             Ok(None) => i += 1,
@@ -226,36 +340,6 @@ pub(crate) fn validate_balanced_pdf_literals(stream_bytes: &[u8]) -> bool {
         }
     }
     true
-}
-
-pub(crate) fn stream_has_top_level_token(stream_bytes: &[u8], target: &[u8]) -> bool {
-    let mut i = 0usize;
-    while i < stream_bytes.len() {
-        if stream_bytes[i].is_ascii_whitespace() {
-            i += 1;
-            continue;
-        }
-        match step_pdf_non_code_token(stream_bytes, i) {
-            Ok(Some(step)) => {
-                i = step.next_index;
-                continue;
-            }
-            Err(()) => return false,
-            Ok(None) => {}
-        }
-        if is_pdf_delim_or_ws(stream_bytes[i]) {
-            i += 1;
-            continue;
-        }
-        let start_tok = i;
-        while i < stream_bytes.len() && !is_pdf_delim_or_ws(stream_bytes[i]) {
-            i += 1;
-        }
-        if &stream_bytes[start_tok..i] == target {
-            return true;
-        }
-    }
-    false
 }
 
 pub(crate) fn advance_past_stream_eol(bytes: &[u8], mut i: usize) -> usize {
@@ -326,6 +410,9 @@ pub(crate) fn step_pdf_non_code_token(
         b'<' => {
             let mut j = i + 1;
             while j < bytes.len() && bytes[j] != b'>' {
+                if !bytes[j].is_ascii_hexdigit() && !is_pdf_ws(bytes[j]) {
+                    return Err(());
+                }
                 j += 1;
             }
             if j >= bytes.len() {
@@ -505,21 +592,13 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
                 }
             }
             "Tr" => {
-                if let Some(PdfStreamOperand::Num(m)) = operands
-                    .iter()
-                    .rev()
-                    .find(|op| matches!(op, PdfStreamOperand::Num(_)))
-                {
-                    gs.render_mode = *m as i32;
+                if let Some(m) = last_numeric_operand(&operands) {
+                    gs.render_mode = m as i32;
                 }
             }
             "TL" => {
-                if let Some(PdfStreamOperand::Num(tl)) = operands
-                    .iter()
-                    .rev()
-                    .find(|op| matches!(op, PdfStreamOperand::Num(_)))
-                {
-                    gs.leading = *tl;
+                if let Some(tl) = last_numeric_operand(&operands) {
+                    gs.leading = tl;
                 }
             }
             "Td" => {
@@ -549,13 +628,7 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
                     tlm_y = nums[nums.len() - 1];
                 }
             }
-            "'" if in_text_object => {
-                tlm_y -= gs.leading;
-                if let Some(text) = last_string_operand(&operands) {
-                    collector.record(text, gs, (tlm_x, tlm_y));
-                }
-            }
-            "\"" if in_text_object => {
+            "'" | "\"" if in_text_object => {
                 tlm_y -= gs.leading;
                 if let Some(text) = last_string_operand(&operands) {
                     collector.record(text, gs, (tlm_x, tlm_y));
@@ -579,6 +652,13 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
         operands.clear();
     }
     collector.finish()
+}
+
+fn last_numeric_operand(operands: &[PdfStreamOperand]) -> Option<f64> {
+    operands.iter().rev().find_map(|op| match op {
+        PdfStreamOperand::Num(n) => Some(*n),
+        _ => None,
+    })
 }
 
 fn extract_numeric_operands(operands: &[PdfStreamOperand]) -> Vec<f64> {
@@ -697,24 +777,17 @@ fn strip_ws(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
-fn wrap_line_64_raw(line: &str) -> Vec<String> {
-    let chars: Vec<char> = line.chars().collect();
-    if chars.len() <= 64 {
-        return vec![line.to_string()];
-    }
-    chars.chunks(64).map(|c| c.iter().collect()).collect()
-}
-
-fn wrap_line_64_swift_trimmed(line: &str) -> Vec<String> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
+fn wrap_line_64(s: &str, trim_blank: bool) -> Vec<String> {
+    let target = if trim_blank { s.trim() } else { s };
+    if trim_blank && target.is_empty() {
         return Vec::new();
     }
-    let chars: Vec<char> = trimmed.chars().collect();
+    let chars: Vec<char> = target.chars().collect();
     if chars.len() <= 64 {
-        return vec![trimmed.to_string()];
+        vec![target.to_string()]
+    } else {
+        chars.chunks(64).map(|c| c.iter().collect()).collect()
     }
-    chars.chunks(64).map(|c| c.iter().collect()).collect()
 }
 
 fn expand_logical_pages_to_chunks(logical_pages: &[&str], mode: u8) -> Vec<String> {
@@ -723,59 +796,50 @@ fn expand_logical_pages_to_chunks(logical_pages: &[&str], mode: u8) -> Vec<Strin
     for &text in logical_pages {
         let lines: Vec<String> = match mode {
             0 => text.split('\n').map(str::to_string).collect(),
-            1 => text.split('\n').flat_map(wrap_line_64_raw).collect(),
+            1 => text
+                .split('\n')
+                .flat_map(|l| wrap_line_64(l, false))
+                .collect(),
             _ => text
                 .split('\n')
-                .flat_map(wrap_line_64_swift_trimmed)
+                .flat_map(|l| wrap_line_64(l, true))
                 .collect(),
         };
         if lines.len() <= MAX_LINES_PER_PDF_PAGE {
             out.push(text.to_string());
         } else {
-            for chunk in lines.chunks(MAX_LINES_PER_PDF_PAGE) {
-                out.push(chunk.join("\n"));
-            }
+            out.extend(lines.chunks(MAX_LINES_PER_PDF_PAGE).map(|c| c.join("\n")));
         }
     }
     out
 }
 
+fn same_ws_stripped(a: &[&str], b: &[&str]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| strip_ws(x) == strip_ws(y))
+}
+
 fn matches_pages_1to1(logical_pages: &[&str], page_body_texts: &[&str]) -> bool {
-    if logical_pages.len() == page_body_texts.len() {
-        return logical_pages
-            .iter()
-            .zip(page_body_texts.iter())
-            .all(|(jt, bt)| strip_ws(jt) == strip_ws(bt));
+    if same_ws_stripped(logical_pages, page_body_texts) {
+        return true;
     }
-    for mode in [0u8, 1u8, 2u8] {
+    [0u8, 1u8, 2u8].into_iter().any(|mode| {
         let chunks = expand_logical_pages_to_chunks(logical_pages, mode);
-        if chunks.len() == page_body_texts.len()
-            && chunks
-                .iter()
-                .zip(page_body_texts.iter())
-                .all(|(ct, bt)| strip_ws(ct) == strip_ws(bt))
-        {
-            return true;
-        }
-    }
-    false
+        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        same_ws_stripped(&refs, page_body_texts)
+    })
 }
 
 fn extract_validated_page_text(p_entries: &[(String, crate::StrictJsonValue)]) -> Option<&str> {
-    let ext_val = crate::StrictJsonValue::get_field(p_entries, "extractedText");
-    let body_val = crate::StrictJsonValue::get_field(p_entries, "bodyText");
-    let ext_str = match ext_val {
+    let ext_str = match crate::StrictJsonValue::get_field(p_entries, "extractedText") {
         Some(v) => Some(v.as_str()?),
         None => None,
     };
-    let body_str = match body_val {
+    let body_str = match crate::StrictJsonValue::get_field(p_entries, "bodyText") {
         Some(v) => Some(v.as_str()?),
         None => None,
     };
-    if let (Some(a), Some(b)) = (ext_str, body_str) {
-        if a != b {
-            return None;
-        }
+    if matches!((ext_str, body_str), (Some(a), Some(b)) if a != b) {
+        return None;
     }
     ext_str.or(body_str)
 }

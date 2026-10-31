@@ -18,7 +18,7 @@ impl WorkbookEngine {
         Self { sheets: Vec::new() }
     }
 
-    fn unquote_balanced_single_quotes_once(s: &str) -> Option<String> {
+    pub fn unquote_formula_sheet_token(s: &str) -> Option<String> {
         if s.len() < 2 || !s.starts_with('\'') || !s.ends_with('\'') {
             return None;
         }
@@ -44,12 +44,11 @@ impl WorkbookEngine {
     }
 
     pub fn canonical_sheet_key(raw: &str) -> String {
-        let mut cur = raw.trim().to_string();
-        while let Some(unquoted) = Self::unquote_balanced_single_quotes_once(&cur) {
-            cur = unquoted.trim().to_string();
+        if raw.trim().is_empty() {
+            String::new()
+        } else {
+            raw.to_ascii_uppercase()
         }
-        cur.make_ascii_uppercase();
-        cur
     }
 
     pub fn is_same_sheet_identity(a: &str, b: &str) -> bool {
@@ -70,16 +69,17 @@ impl WorkbookEngine {
 
     pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
         let raw = name.into();
-        let trimmed = raw.trim();
-        let norm = if Self::canonical_sheet_key(trimmed).is_empty() {
+        let norm = if raw.trim().is_empty() {
             "Sheet1"
         } else {
-            trimmed
+            raw.as_str()
         };
         if let Some(pos) = self.find_sheet_index(norm) {
             return &mut self.sheets[pos];
         }
         let mut engine = SheetEngine::new(norm);
+        engine.name = norm.to_string();
+        engine.sheet_id = crate::compute_sheet_id(&engine.name);
         while engine.sheet_id == 0 || self.sheets.iter().any(|s| s.sheet_id == engine.sheet_id) {
             engine.sheet_id = engine.sheet_id.wrapping_add(1);
             if engine.sheet_id == 0 {

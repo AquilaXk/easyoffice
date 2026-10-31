@@ -149,12 +149,27 @@ impl EasyOfficeIpcRouter {
     }
 
     fn json_sheet_name_or_default<'a>(raw: &'a str, fallback: &'a str) -> &'a str {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
+        if raw.trim().is_empty() {
             fallback
         } else {
-            trimmed
+            raw
         }
+    }
+
+    fn is_formula_expr(expr: &str) -> bool {
+        let s = expr.trim_start();
+        if s.starts_with('=') {
+            return true;
+        }
+        if let Some((prefix, rest)) = s.split_once(':') {
+            if prefix.eq_ignore_ascii_case("of")
+                || prefix.eq_ignore_ascii_case("oooc")
+                || prefix.eq_ignore_ascii_case("msoxl")
+            {
+                return rest.trim_start().starts_with('=');
+            }
+        }
+        false
     }
 
     fn parse_rpc_json_object(
@@ -188,7 +203,7 @@ impl EasyOfficeIpcRouter {
     ) -> Result<String, EasyOfficeError> {
         if let Some(s) = Self::optional_json_str(entries, "sheet")? {
             if !s.trim().is_empty() {
-                return Ok(s.trim().to_string());
+                return Ok(s.to_string());
             }
         }
         if let Some(sheets_val) = StrictJsonValue::get_field(entries, "sheets") {
@@ -197,17 +212,23 @@ impl EasyOfficeIpcRouter {
                     "JSON 'sheets' 필드는 문자열 배열이어야 합니다.".to_string(),
                 )
             })?;
+            let mut first_sheet: Option<String> = None;
             for s_item in sheet_items {
                 let s_name = s_item.as_str().ok_or_else(|| {
                     EasyOfficeError::InvalidArgument(
                         "JSON 'sheets' 항목은 문자열이어야 합니다.".to_string(),
                     )
                 })?;
-                if !WorkbookEngine::canonical_sheet_key(s_name).is_empty() {
-                    return Ok(s_name.trim().to_string());
+                if s_name.trim().is_empty() {
+                    return Err(EasyOfficeError::InvalidArgument(
+                        "JSON 'sheets' 항목은 비어 있거나 공백만일 수 없습니다.".to_string(),
+                    ));
+                }
+                if first_sheet.is_none() {
+                    first_sheet = Some(s_name.to_string());
                 }
             }
-            return Ok(String::new());
+            return Ok(first_sheet.unwrap_or_default());
         }
         Ok("Sheet1".to_string())
     }
@@ -231,14 +252,19 @@ impl EasyOfficeIpcRouter {
                         "JSON 'sheets' 항목은 문자열이어야 합니다.".to_string(),
                     )
                 })?;
-                if !WorkbookEngine::canonical_sheet_key(s_name).is_empty() {
-                    wb.add_sheet(s_name.trim());
+                if s_name.trim().is_empty() {
+                    return Err(EasyOfficeError::InvalidArgument(
+                        "JSON 'sheets' 항목은 비어 있거나 공백만일 수 없습니다.".to_string(),
+                    ));
                 }
+                wb.add_sheet(s_name);
             }
         } else {
             wb.add_sheet("Sheet1");
             wb.add_sheet("Sheet2");
-            wb.add_sheet(default_sheet);
+            if !default_sheet.trim().is_empty() {
+                wb.add_sheet(default_sheet);
+            }
         }
         let mut seen_sheet1 = false;
         let mut seen_sheet2 = false;
@@ -294,7 +320,7 @@ impl EasyOfficeIpcRouter {
         }
         let has_explicit_sheets = explicit_sheets_val.is_some();
         for (sh, addr, val) in cell_triples {
-            if !has_explicit_sheets {
+            if !has_explicit_sheets && !sh.trim().is_empty() {
                 wb.add_sheet(&sh);
             }
             if wb.sheet(&sh).is_some() {
@@ -344,7 +370,7 @@ impl EasyOfficeIpcRouter {
                                 .to_string(),
                         ));
                     }
-                    let val = if expr.starts_with('=') {
+                    let val = if Self::is_formula_expr(expr) {
                         wb.evaluate_formula_on_sheet(sh, expr)
                     } else {
                         wb.evaluate_cell(sh, expr)
@@ -382,7 +408,7 @@ impl EasyOfficeIpcRouter {
         }
         .trim();
         let expr = if expr.is_empty() { "A1" } else { expr };
-        let evaluated = if expr.starts_with('=') {
+        let evaluated = if Self::is_formula_expr(expr) {
             wb.evaluate_formula_on_sheet(default_sh, expr)
         } else {
             wb.evaluate_cell(default_sh, expr)
@@ -511,12 +537,25 @@ impl EasyOfficeIpcRouter {
         can_redo: bool,
     ) -> String {
         let badge = state.active_contextual_tool().badge_title();
+        let active_mod = match state.active_module {
+            OfficeModuleKind::Document => "DOC",
+            OfficeModuleKind::Hwp => "HWP",
+            OfficeModuleKind::Sheet => "SHEET",
+            OfficeModuleKind::Slide => "SLIDE",
+            OfficeModuleKind::Pdf => "PDF",
+        };
+        let ribbon_style = match state.ribbon_style {
+            RibbonLayoutStyle::HangulHwp => "hangul",
+            RibbonLayoutStyle::StandardOffice => "standard",
+        };
         format!(
             concat!(
                 "{{",
                 "\"commandId\":\"{}\",",
                 "\"summary\":\"{}\",",
                 "\"contextualBadge\":\"{}\",",
+                "\"activeModule\":\"{}\",",
+                "\"ribbonStyle\":\"{}\",",
                 "\"catalogCount\":140,",
                 "\"isBold\":{},",
                 "\"isItalic\":{},",
@@ -569,6 +608,8 @@ impl EasyOfficeIpcRouter {
             Self::escape_json_str(&state.last_command_id),
             Self::escape_json_str(summary),
             Self::escape_json_str(badge),
+            active_mod,
+            ribbon_style,
             state.is_bold,
             state.is_italic,
             state.is_underline,
@@ -780,7 +821,7 @@ impl EasyOfficeIpcRouter {
             .unwrap_or("=Sheet2!A1+50")
             .trim();
         let wb = Self::build_workbook_from_json_entries(&entries, active_sheet, true)?;
-        let val = if expr.starts_with('=') {
+        let val = if Self::is_formula_expr(expr) {
             wb.evaluate_formula_on_sheet(active_sheet, expr)
         } else {
             wb.evaluate_cell(active_sheet, expr)

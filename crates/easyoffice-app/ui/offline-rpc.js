@@ -6,6 +6,8 @@
     colIndexToLetters,
     normalizeFormattedNumericCell,
     jsonSheetNameOrDefaultJs,
+    quoteFormulaSheetName,
+    isFormulaStringJs,
     resolveCanonicalSheetUpper,
     resolveDefaultSheetFromDocJs,
     buildLocalWorkbookFromJson,
@@ -326,6 +328,70 @@
       localRibbonState,
     } = ctx;
 
+    const backendState = Object.assign(
+      {
+        activeModule: "DOC",
+        ribbonStyle: "standard",
+        isBold: false,
+        isItalic: false,
+        isUnderline: false,
+        stylePresetIndex: 0,
+        insertedTableCount: 0,
+        insertedChartCount: 0,
+        insertedShapeCount: 0,
+        insertedLinkCount: 0,
+        paperSize: "A4",
+        columnCount: 1,
+        isLandscape: false,
+        marginPresetIndex: 0,
+        autosumAppliedCount: 0,
+        formulaWizardOpen: false,
+        sortAscending: true,
+        validationGuardEnabled: true,
+        tocGenerated: false,
+        footnoteCount: 0,
+        mailMergeAppliedCount: 0,
+        tableFormulaEvaluatedCount: 0,
+        manuscriptGridEnabled: false,
+        approvalHeaderEnabled: true,
+        clickHereFieldCount: 0,
+        doubleDiagonalBorderEnabled: false,
+        pivotSummaryEnabled: false,
+        conditionalFormatEnabled: false,
+        freezePanesEnabled: false,
+        masterLayoutIndex: 0,
+        snapGuideEnabled: true,
+        slideTransitionIndex: 0,
+        presenterModeActive: false,
+        pdfHighlightCount: 0,
+        pdfRotationDegrees: 0,
+        pdfSplitMergeCount: 0,
+        pdfConvertedToOfficeCount: 0,
+        trackChangesEnabled: false,
+        reviewCommentCount: 0,
+        securityVerifiedCount: 0,
+        statsInspectedCount: 0,
+        splitViewEnabled: false,
+        ribbonCollapsed: false,
+        darkThemeEnabled: false,
+        zoomPercent: 100,
+        executedCount: 0,
+      },
+      JSON.parse(JSON.stringify(localRibbonState || {}))
+    );
+    const backendUndoStack = [];
+    const backendRedoStack = [];
+    const MAX_BACKEND_HISTORY = 64;
+
+    function inferCommandModuleKey(cmdId) {
+      if (cmdId.startsWith("hwp-")) return "HWP";
+      if (cmdId.startsWith("sheet-")) return "SHEET";
+      if (cmdId.startsWith("slide-")) return "SLIDE";
+      if (cmdId.startsWith("pdf-")) return "PDF";
+      if (cmdId.startsWith("document-") || cmdId.startsWith("doc-")) return "DOC";
+      return getActiveModule();
+    }
+
     function evaluateSingleDocExpr(doc, seedDefaults) {
       const sheetName = resolveDefaultSheetFromDocJs(doc);
       const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
@@ -340,7 +406,7 @@
       if (!evalSheetUpper) {
         return { sheetName, expr: q, value: "#REF!" };
       }
-      if (q.startsWith("=")) {
+      if (isFormulaStringJs(q)) {
         return {
           sheetName,
           expr: q,
@@ -390,7 +456,7 @@
             const canonicalUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sh);
             let val = "#REF!";
             if (canonicalUpper) {
-              val = expr.startsWith("=")
+              val = isFormulaStringJs(expr)
                 ? String(evaluateFormulaExpression(expr, workbook, canonicalUpper, "A1"))
                 : formatFormulaValue(readWorkbookTypedCell(workbook, canonicalUpper, expr, 0));
             }
@@ -429,7 +495,10 @@
       ["-layout-columns", (s) => { s.columnCount = s.columnCount >= 3 ? 1 : s.columnCount + 1; }],
       ["-layout-margins", (s) => { s.marginPresetIndex = (s.marginPresetIndex + 1) % 3; }],
       ["-data-sort", (s) => { s.sortAscending = !s.sortAscending; }],
+      ["-data-validation", (s) => { s.validationGuardEnabled = !s.validationGuardEnabled; }],
       ["-review-track", (s) => { s.trackChangesEnabled = !s.trackChangesEnabled; }],
+      ["-review-verify", (s) => { s.securityVerifiedCount += 1; }],
+      ["-view-manuscript", (s) => { s.manuscriptGridEnabled = !s.manuscriptGridEnabled; }],
       ["-view-split", (s) => { s.splitViewEnabled = !s.splitViewEnabled; }],
       ["-view-ribbon", (s) => { s.ribbonCollapsed = !s.ribbonCollapsed; }],
       ["-view-theme", (s) => { s.darkThemeEnabled = !s.darkThemeEnabled; }],
@@ -438,21 +507,31 @@
 
     function localExecuteRibbonCommand(payload) {
       const cmdId = String(payload || "").trim();
-      localRibbonState.executedCount += 1;
+      const prevSnap = JSON.parse(JSON.stringify(backendState));
+      if (backendUndoStack.length >= MAX_BACKEND_HISTORY) {
+        backendUndoStack.shift();
+      }
+      backendUndoStack.push(prevSnap);
+      backendRedoStack.length = 0;
+
+      const mod = inferCommandModuleKey(cmdId);
+      backendState.activeModule = mod;
+      backendState.executedCount += 1;
       const exactFn = RIBBON_EXACT_MUTATORS[cmdId];
       if (exactFn) {
-        exactFn(localRibbonState);
+        exactFn(backendState);
       } else {
         const suffixPair = RIBBON_SUFFIX_MUTATORS.find(([sfx]) => cmdId.endsWith(sfx));
-        if (suffixPair) suffixPair[1](localRibbonState);
+        if (suffixPair) suffixPair[1](backendState);
       }
-      const mod = getActiveModule();
       return {
         commandId: cmdId,
         summary: "명령 실행 완료 (" + cmdId + ")",
         contextualBadge: contextualToolBadges[mod] || "표·개체 도구",
         catalogCount: 140,
-        ...localRibbonState,
+        ...JSON.parse(JSON.stringify(backendState)),
+        canUndo: backendUndoStack.length > 0,
+        canRedo: backendRedoStack.length > 0,
       };
     }
 
@@ -540,22 +619,51 @@
       audit_security: (payload) => localAuditSecurity(payload),
       switch_ribbon_style: (payload) => {
         const isHangul = String(payload).includes("hangul");
+        backendState.ribbonStyle = isHangul ? "hangul" : "standard";
         return {
           style: isHangul ? "한글(HWP) 7탭 모드" : "표준 오피스 7탭 모드",
           categories: isHangul ? ribbonStyleLabels.hangul : ribbonStyleLabels.standard,
         };
       },
       execute_ribbon_command: (payload) => localExecuteRibbonCommand(payload),
-      undo_ribbon_command: () => ({
-        commandId: "undo",
-        summary: "실행 취소 완료",
-        ...localRibbonState,
-      }),
-      redo_ribbon_command: () => ({
-        commandId: "redo",
-        summary: "다시 실행 완료",
-        ...localRibbonState,
-      }),
+      undo_ribbon_command: () => {
+        if (backendUndoStack.length > 0) {
+          const cur = JSON.parse(JSON.stringify(backendState));
+          if (backendRedoStack.length >= MAX_BACKEND_HISTORY) {
+            backendRedoStack.shift();
+          }
+          backendRedoStack.push(cur);
+          const prev = backendUndoStack.pop();
+          Object.assign(backendState, prev);
+        }
+        return {
+          commandId: "undo",
+          summary: "실행 취소 완료",
+          catalogCount: 140,
+          ...JSON.parse(JSON.stringify(backendState)),
+          canUndo: backendUndoStack.length > 0,
+          canRedo: backendRedoStack.length > 0,
+        };
+      },
+      redo_ribbon_command: () => {
+        if (backendRedoStack.length > 0) {
+          const cur = JSON.parse(JSON.stringify(backendState));
+          if (backendUndoStack.length >= MAX_BACKEND_HISTORY) {
+            backendUndoStack.shift();
+          }
+          backendUndoStack.push(cur);
+          const next = backendRedoStack.pop();
+          Object.assign(backendState, next);
+        }
+        return {
+          commandId: "redo",
+          summary: "다시 실행 완료",
+          catalogCount: 140,
+          ...JSON.parse(JSON.stringify(backendState)),
+          canUndo: backendUndoStack.length > 0,
+          canRedo: backendRedoStack.length > 0,
+        };
+      },
     };
   }
 
@@ -563,6 +671,8 @@
     parseCellRefParts,
     colIndexToLetters,
     normalizeFormattedNumericCell,
+    quoteFormulaSheetName,
+    isFormulaStringJs,
     localScrubPii,
   };
   host.__EASYOFFICE_CREATE_OFFLINE_RPC__ = createOfflineRpcHandlers;

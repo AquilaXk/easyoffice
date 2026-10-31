@@ -867,105 +867,126 @@ fn test_f12_canonical_122_coverage_completeness() {
 #[test]
 fn test_sheet_whitespace_trim_and_apostrophe_cross_sheet_lookup() {
     let mut wb = WorkbookEngine::new();
-    wb.add_sheet(" MySheet ");
-    wb.set_cell(" MySheet ", "A1", "125").unwrap();
+    wb.add_sheet(" 요약 ");
+    assert_eq!(wb.sheet_names(), vec![" 요약 "]);
+    wb.set_cell(" 요약 ", "A1", "125").unwrap();
     assert_eq!(
-        wb.evaluate_cell("MySheet", "A1"),
-        EvaluatedCellValue::Number(125.0)
+        wb.evaluate_cell("요약", "A1"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
     );
     assert_eq!(
-        wb.evaluate_cell(" MySheet ", "A1"),
+        wb.evaluate_cell(" 요약 ", "A1"),
         EvaluatedCellValue::Number(125.0)
     );
-
-    wb.add_sheet("'특수시트'");
-    wb.set_cell("'특수시트'", "A1", "250").unwrap();
-    wb.add_sheet("Sheet1");
-    wb.set_cell("Sheet1", "B1", "='특수시트'!A1+50").unwrap();
-    wb.set_cell("Sheet1", "B2", "='''특수시트'''!A1+50")
-        .unwrap();
+    wb.add_sheet("   ");
+    assert_eq!(wb.sheet_names(), vec![" 요약 ", "Sheet1"]);
+    wb.set_cell("Sheet1", "B1", "=' 요약 '!A1+25").unwrap();
+    wb.set_cell("Sheet1", "B2", "=요약!A1").unwrap();
     assert_eq!(
         wb.evaluate_cell("Sheet1", "B1"),
-        EvaluatedCellValue::Number(300.0)
+        EvaluatedCellValue::Number(150.0)
     );
     assert_eq!(
         wb.evaluate_cell("Sheet1", "B2"),
-        EvaluatedCellValue::Number(300.0)
-    );
-    assert_eq!(
-        wb.evaluate_cell("없는시트", "A1"),
         EvaluatedCellValue::Error(FormulaError::Ref)
     );
-    assert!(WorkbookEngine::is_same_sheet_identity(
-        "특수시트",
-        "'특수시트'"
-    ));
-    assert!(WorkbookEngine::is_same_sheet_identity(
-        "'특수시트'",
-        "'''특수시트'''"
-    ));
-    assert!(WorkbookEngine::is_same_sheet_identity(
-        "특수시트",
-        "'''특수시트'''"
-    ));
     assert!(!WorkbookEngine::is_same_sheet_identity("ß", "SS"));
+    assert!(!WorkbookEngine::is_same_sheet_identity("Main", " Main "));
+    assert!(WorkbookEngine::is_same_sheet_identity(" Main ", " main "));
+    assert!(!WorkbookEngine::is_same_sheet_identity(
+        "Summary",
+        "'Summary'"
+    ));
+    assert!(!WorkbookEngine::is_same_sheet_identity("A'B", "'A''B'"));
+    assert!(!WorkbookEngine::is_same_sheet_identity("   ", ""));
 
-    let mut wb_rev = WorkbookEngine::new();
-    wb_rev.add_sheet("특수시트");
-    wb_rev.add_sheet("'특수시트'");
-    wb_rev.set_cell("특수시트", "A1", "250").unwrap();
-    wb_rev.add_sheet("Sheet1");
-    wb_rev
-        .set_cell("Sheet1", "B2", "='''특수시트'''!A1+50")
-        .unwrap();
+    let mut wb_spaces = WorkbookEngine::new();
+    wb_spaces.add_sheet("Main");
+    wb_spaces.set_cell("Main", "A1", "10").unwrap();
+    wb_spaces.set_cell("Main", "B1", "=' Main '!A1").unwrap();
     assert_eq!(
-        wb_rev.evaluate_cell("Sheet1", "B2"),
-        EvaluatedCellValue::Number(300.0)
+        wb_spaces.evaluate_cell("Main", "B1"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    wb_spaces.add_sheet(" Main ");
+    assert_eq!(wb_spaces.sheet_count(), 2);
+    wb_spaces.set_cell(" Main ", "A1", "77").unwrap();
+    assert_eq!(
+        wb_spaces.evaluate_cell("Main", "B1"),
+        EvaluatedCellValue::Number(77.0)
+    );
+    assert_eq!(
+        wb_spaces.evaluate_formula_on_sheet("Main", "=INDIRECT(\"' Main '!A1\")"),
+        EvaluatedCellValue::Number(77.0)
+    );
+    assert_eq!(
+        wb_spaces.evaluate_formula_on_sheet("Main", "=INDIRECT(\"Main!A1\")"),
+        EvaluatedCellValue::Number(10.0)
     );
 
-    wb_rev.set_cell("특수시트", "A2", "75").unwrap();
-    wb_rev
-        .set_cell("Sheet1", "B3", "=SUM('특수시트'!A1:'''특수시트'''!A2)")
-        .unwrap();
+    let mut wb_quotes = WorkbookEngine::new();
+    wb_quotes.add_sheet("Summary");
+    wb_quotes.add_sheet("'Summary'");
+    assert_eq!(wb_quotes.sheet_count(), 2);
+    wb_quotes.set_cell("Summary", "A1", "20").unwrap();
+    wb_quotes.set_cell("Summary", "A2", "30").unwrap();
+    wb_quotes.set_cell("'Summary'", "A1", "200").unwrap();
+    wb_quotes.set_cell("'Summary'", "A2", "300").unwrap();
     assert_eq!(
-        wb_rev.evaluate_cell("Sheet1", "B3"),
-        EvaluatedCellValue::Number(325.0)
+        wb_quotes.evaluate_formula_on_sheet("Summary", "='''Summary'''!A1"),
+        EvaluatedCellValue::Number(200.0)
+    );
+    assert_eq!(
+        wb_quotes.evaluate_formula_on_sheet("Summary", "=SUM(Summary!A1:'''Summary'''!A2)"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb_quotes.evaluate_formula_on_sheet("Summary", "=SUM('''Summary'''!A1:'''Summary'''!A2)"),
+        EvaluatedCellValue::Number(500.0)
     );
 
-    assert!(WorkbookEngine::is_same_sheet_identity("A'B", "'A''B'"));
-    assert!(WorkbookEngine::is_same_sheet_identity(
-        "'A'B'",
-        "'''A''B'''"
-    ));
-    assert!(!WorkbookEngine::is_same_sheet_identity("A'B", "'A'B'"));
-    assert!(WorkbookEngine::is_same_sheet_identity(
-        "' Sheet1 '",
-        "Sheet1"
-    ));
-    assert!(!WorkbookEngine::is_same_sheet_identity("'   '", "''"));
-
-    let mut wb_distinct = WorkbookEngine::new();
-    wb_distinct.add_sheet("A'B");
-    wb_distinct.add_sheet("'A'B'");
-    assert_eq!(wb_distinct.sheet_count(), 2);
-    wb_distinct.set_cell("A'B", "A1", "11").unwrap();
-    wb_distinct.set_cell("'A'B'", "A1", "29").unwrap();
-    wb_distinct.add_sheet("Main");
-    wb_distinct.set_cell("Main", "A1", "='A''B'!A1").unwrap();
-    wb_distinct
-        .set_cell("Main", "A2", "='''A''B'''!A1")
-        .unwrap();
-    wb_distinct.set_cell("Main", "A3", "=' Main '!A1").unwrap();
+    let mut wb_apos = WorkbookEngine::new();
+    wb_apos.add_sheet("A'B");
+    wb_apos.add_sheet("'A''B'");
+    assert_eq!(wb_apos.sheet_count(), 2);
+    wb_apos.set_cell("A'B", "A1", "11").unwrap();
+    wb_apos.set_cell("'A''B'", "A1", "29").unwrap();
+    wb_apos.add_sheet("Driver");
     assert_eq!(
-        wb_distinct.evaluate_cell("Main", "A1"),
+        wb_apos.evaluate_formula_on_sheet("Driver", "='A''B'!A1"),
         EvaluatedCellValue::Number(11.0)
     );
     assert_eq!(
-        wb_distinct.evaluate_cell("Main", "A2"),
+        wb_apos.evaluate_formula_on_sheet("Driver", "='''A''''B'''!A1"),
         EvaluatedCellValue::Number(29.0)
     );
     assert_eq!(
-        wb_distinct.evaluate_cell("Main", "A3"),
+        wb_apos.evaluate_formula_on_sheet("Driver", "=INDIRECT(\"'A''B'!A1\")"),
         EvaluatedCellValue::Number(11.0)
+    );
+    assert_eq!(
+        wb_apos.evaluate_formula_on_sheet("Driver", "=INDIRECT(\"'''A''''B'''!A1\")"),
+        EvaluatedCellValue::Number(29.0)
+    );
+    assert_eq!(
+        wb_apos.evaluate_formula_on_sheet("Driver", "=INDIRECT(\"A'B!A1\")"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    for missing_formula in [
+        "=ROW(MissingSheet!A5)",
+        "=COLUMN(MissingSheet!A5)",
+        "=ROWS(MissingSheet!A1:A5)",
+        "=COLUMNS(MissingSheet!A1:B5)",
+    ] {
+        assert_eq!(
+            wb_apos.evaluate_formula_on_sheet("Driver", missing_formula),
+            EvaluatedCellValue::Error(FormulaError::Ref)
+        );
+    }
+    assert_eq!(WorkbookEngine::unquote_formula_sheet_token("Main"), None);
+    assert_eq!(WorkbookEngine::unquote_formula_sheet_token("'A'B'"), None);
+    assert_eq!(
+        WorkbookEngine::unquote_formula_sheet_token("'''A''''B'''").as_deref(),
+        Some("'A''B'")
     );
 }

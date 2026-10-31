@@ -1,6 +1,41 @@
 (function (host) {
   "use strict";
 
+  const astApi = host.__EASYOFFICE_FORMULA_AST__ || {};
+  function fallbackIsFormulaStr(raw) {
+    const s = String(raw ?? "").trim();
+    return s.startsWith("=") || /^(?:of|oooc|msoxl):\s*=/i.test(s);
+  }
+  function fallbackAsciiUpper(str) {
+    return String(str ?? "").replaceAll(/[a-z]/g, (c) =>
+      String.fromCodePoint(c.codePointAt(0) - 32)
+    );
+  }
+  function fallbackQuoteFormulaSheetName(sheetName) {
+    const raw = String(sheetName ?? "");
+    if (!raw) return "''";
+    const needsQuote =
+      raw !== raw.trim() ||
+      !/^[A-Za-z0-9_]+$/.test(raw) ||
+      /^[0-9]/.test(raw) ||
+      /^[A-Za-z]{1,3}[0-9]+$/.test(raw) ||
+      /^(?:TRUE|FALSE)$/i.test(raw);
+    if (needsQuote) {
+      return "'" + raw.replaceAll("'", "''") + "'";
+    }
+    return raw;
+  }
+  const isFormulaStr =
+    typeof astApi.isFormulaStringJs === "function"
+      ? astApi.isFormulaStringJs
+      : fallbackIsFormulaStr;
+  const asciiUpper =
+    typeof astApi.asciiUpperJs === "function" ? astApi.asciiUpperJs : fallbackAsciiUpper;
+  const quoteFormulaSheetName =
+    typeof astApi.quoteFormulaSheetName === "function"
+      ? astApi.quoteFormulaSheetName
+      : fallbackQuoteFormulaSheetName;
+
   function createSheetStoreHelpers(deps) {
     const {
       invokeIpc,
@@ -16,7 +51,7 @@
         Object.keys(snap).forEach((ref) => {
           const entry = snap[ref];
           if (!entry) return;
-          if ((entry.formula || "").startsWith("=")) {
+          if (isFormulaStr(entry.formula || "")) {
             formulaTargets.push({ sheet: shName, cell: ref, key: shName + "!" + ref });
           }
           if (entry.formula || entry.value) {
@@ -33,7 +68,7 @@
     function sheetMapHasAnyFormula(sheetsMap) {
       return Object.keys(sheetsMap || {}).some((shName) => {
         const snap = sheetsMap[shName] || {};
-        return Object.keys(snap).some((ref) => (snap[ref]?.formula || "").startsWith("="));
+        return Object.keys(snap).some((ref) => isFormulaStr(snap[ref]?.formula || ""));
       });
     }
 
@@ -79,7 +114,7 @@
       if (batchValues) {
         return (
           batchValues[target.key] ??
-          batchValues[target.sheet.toUpperCase() + "!" + target.cell.toUpperCase()]
+          batchValues[asciiUpper(target.sheet) + "!" + asciiUpper(target.cell)]
         );
       }
       if (totalTargets === 1 && rpcRes && rpcRes.value !== undefined) {
@@ -131,7 +166,7 @@
         );
         if (rawVal === undefined || rawVal === null) return;
         const storedEntry = sheets[target.sheet]?.[target.cell];
-        if (storedEntry && (storedEntry.formula || "").startsWith("=")) {
+        if (storedEntry && isFormulaStr(storedEntry.formula || "")) {
           storedEntry.value = String(rawVal);
         }
       });
@@ -185,7 +220,7 @@
           const entry = snap[ref];
           if (!entry) return;
           const formula = entry.formula || "";
-          if (formula.startsWith("=")) {
+          if (isFormulaStr(formula)) {
             const segments = tokenizeFormulaStringLiterals(formula);
             const literalSegs = segments.filter(
               (seg) => seg.isLiteral && seg.text.trim().length > 0
@@ -256,6 +291,8 @@
     }
 
     return {
+      quoteFormulaSheetName,
+      isFormulaStr,
       sheetMapHasAnyFormula,
       sheetCellDataChanged,
       extractEvaluatedTargetValue,

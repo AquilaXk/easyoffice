@@ -309,16 +309,30 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
     let html_asset = include_str!("../ui/index.html");
     let css_asset = include_str!("../ui/styles.css");
+    let offline_ast_asset = include_str!("../ui/offline-formula-ast.js");
     let offline_eval_asset = include_str!("../ui/offline-formula-eval.js");
+    let offline_rpc_asset = include_str!("../ui/offline-rpc.js");
     let pii_scrubber_asset = include_str!("../ui/pii-dom-scrubber.js");
     let sheet_store_asset = include_str!("../ui/sheet-store.js");
+    let ribbon_catalog_asset = include_str!("../ui/ribbon-catalog.js");
+    let workspace_tools_asset = include_str!("../ui/workspace-tools.js");
+    let workspace_panels_asset = include_str!("../ui/workspace-panels.js");
+    let sheet_controller_asset = include_str!("../ui/sheet-controller.js");
+    let ribbon_history_asset = include_str!("../ui/ribbon-history.js");
     let js_asset = include_str!("../ui/app.js");
     let tauri_conf = include_str!("../tauri.conf.json");
     if !html_asset.contains("EasyOffice")
         || !css_asset.contains("#5C6BC0")
+        || !offline_ast_asset.contains("__EASYOFFICE_FORMULA_AST__")
         || !offline_eval_asset.contains("__EASYOFFICE_OFFLINE_FORMULA_EVAL__")
+        || !offline_rpc_asset.contains("__EASYOFFICE_CREATE_OFFLINE_RPC__")
         || !pii_scrubber_asset.contains("__EASYOFFICE_CREATE_PII_SCRUBBER__")
         || !sheet_store_asset.contains("__EASYOFFICE_CREATE_SHEET_STORE__")
+        || !ribbon_catalog_asset.contains("__EASYOFFICE_RIBBON_CATALOG__")
+        || !workspace_tools_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_TOOLS__")
+        || !workspace_panels_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_PANELS__")
+        || !sheet_controller_asset.contains("__EASYOFFICE_CREATE_SHEET_CONTROLLER__")
+        || !ribbon_history_asset.contains("__EASYOFFICE_CREATE_RIBBON_HISTORY__")
         || !js_asset.contains("compositionstart")
         || !tauri_conf.contains("downloadBootstrapper")
     {
@@ -493,14 +507,14 @@ mod tests {
 
         let json_paren_comma_batch = EasyOfficeIpcRouter::dispatch(
             "evaluate_sheet",
-            r#"{"sheet":"Sheet1","targets":[{"sheet":"Sheet1","cell":"B1"},{"sheet":"'예산(안), Q1'","cell":"C1"},{"sheet":"미존재시트","cell":"A1"}],"cells":[{"sheet":"예산(안), Q1","cell":"A1","value":"250"},{"sheet":"예산(안), Q1","cell":"C1","value":"=A1*2"},{"sheet":"Sheet1","cell":"B1","value":"='예산(안), Q1'!C1+50"}]}"#,
+            r#"{"sheet":"Sheet1","targets":[{"sheet":"Sheet1","cell":"B1"},{"sheet":"예산(안), Q1","cell":"C1"},{"sheet":"미존재시트","cell":"A1"}],"cells":[{"sheet":"예산(안), Q1","cell":"A1","value":"250"},{"sheet":"예산(안), Q1","cell":"C1","value":"=A1*2"},{"sheet":"Sheet1","cell":"B1","value":"='예산(안), Q1'!C1+50"}]}"#,
         )
         .unwrap();
         assert!(json_paren_comma_batch.contains("\"targetValues\":[\"550\",\"500\",\"#REF!\"]"));
 
         let json_numeric_and_quote_sheet = EasyOfficeIpcRouter::dispatch(
             "evaluate_sheet",
-            r#"{"sheet":"'특수시트'","targets":[{"sheet":"특수시트","cell":"B1"},{"sheet":"Sheet!Bang","cell":"A1"}],"cells":[{"sheet":"'특수시트'","cell":"A1","value":250},{"sheet":"'특수시트'","cell":"A2","value":true},{"sheet":"'특수시트'","cell":"B1","value":"=IF(A2, '''특수시트'''!A1*3, 0)"},{"sheet":"Sheet!Bang","cell":"A1","value":42}]}"#,
+            r#"{"sheet":"'특수시트'","targets":[{"sheet":"'특수시트'","cell":"B1"},{"sheet":"Sheet!Bang","cell":"A1"}],"cells":[{"sheet":"'특수시트'","cell":"A1","value":250},{"sheet":"'특수시트'","cell":"A2","value":true},{"sheet":"'특수시트'","cell":"B1","value":"=IF(A2, '''특수시트'''!A1*3, 0)"},{"sheet":"Sheet!Bang","cell":"A1","value":42}]}"#,
         )
         .unwrap();
         assert!(json_numeric_and_quote_sheet.contains("\"targetValues\":[\"750\",\"42\"]"));
@@ -521,6 +535,11 @@ mod tests {
             r#"{"sheet":"Sheet1","cells":[{"sheet":"Sheet1","cell":"A1","value":{"bad":1}}]}"#,
         )
         .is_err());
+        assert!(EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheets":["   "],"expr":"=1+1"}"#,
+        )
+        .is_err());
 
         let safe_audit_json = EasyOfficeIpcRouter::dispatch(
             "audit_security",
@@ -536,7 +555,7 @@ mod tests {
 
         let symmetric_quote_sheet = EasyOfficeIpcRouter::dispatch(
             "evaluate_sheet",
-            r#"{"sheet":"특수시트","expr":"=SUM(A1:A2)","cells":[{"sheet":"특수시트","cell":"A1","value":200},{"sheet":"'특수시트'","cell":"A2","value":300}]}"#,
+            r#"{"sheet":"특수시트","expr":"='특수시트'!A1+A2","cells":[{"sheet":"특수시트","cell":"A1","value":200},{"sheet":"특수시트","cell":"A2","value":300}]}"#,
         )
         .unwrap();
         assert!(symmetric_quote_sheet.contains("\"value\":\"500\""));

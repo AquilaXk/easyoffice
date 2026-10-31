@@ -225,8 +225,7 @@ test("switching sheet tabs with structured JSON IPC and special sheet names avoi
       (c) => c.sheet === "Sheet1" && c.cell === "B2" && c.value === "2150"
     )
   );
-  assert.equal(document.querySelector('#pane-sheet td[data-cell="A1"]').textContent, "100");
-  assert.equal(document.querySelector('#pane-sheet td[data-cell="F2"]').textContent, "");
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="A1"]').textContent, "부문");
 
   pendingEvaluations[0].resolve({
     query: "F2",
@@ -236,8 +235,9 @@ test("switching sheet tabs with structured JSON IPC and special sheet names avoi
       "Sheet2!C1": "350",
     },
   });
-  await flushAsyncTurns();
+  await flushAsyncTurns(10);
 
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="A1"]').textContent, "100");
   assert.equal(document.querySelector('#pane-sheet td[data-cell="F2"]').textContent, "");
   assert.equal(document.querySelector('#pane-sheet td[data-cell="C1"]').textContent, "350");
 
@@ -795,7 +795,7 @@ test("focused formula undo-redo updates displayed result, missing sheet returns 
   assert.equal(undoRpcCalls, 1);
 });
 
-test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet quoting is symmetric, and concurrent harnesses isolate globals", async () => {
+test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet identity preserves literal quotes, and concurrent harnesses isolate globals", async () => {
   const baseHarness = await createWorkspaceHarness();
   const offlineRpc = baseHarness.sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
     getActiveModule: () => "SHEET",
@@ -812,6 +812,19 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet quo
       JSON.stringify({
         sheet: "특수시트",
         expr: "=SUM(A1:A2)",
+        cells: [
+          { sheet: "특수시트", cell: "A1", value: 200 },
+          { sheet: "'특수시트'", cell: "A2", value: 300 },
+        ],
+      })
+    ).value,
+    "200"
+  );
+  assert.equal(
+    offlineRpc.evaluate_sheet(
+      JSON.stringify({
+        sheet: "특수시트",
+        expr: "='특수시트'!A1+'''특수시트'''!A2",
         cells: [
           { sheet: "특수시트", cell: "A1", value: 200 },
           { sheet: "'특수시트'", cell: "A2", value: 300 },

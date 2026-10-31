@@ -281,7 +281,7 @@ fn test_f5_ods_xlsx_hwpx_and_pdf_standard_compatibility() {
         structural_body_model
     );
 
-    let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length 260 >>\nstream\n/F2 11 Tf\nBT /F1 12 Tf 54 760 Td [(Hel) -15 (lo )\n(World)] TJ ET\nBT [3 2] 0 d /Span << /MCID 0 /Lang (ko-KR) >> BDC (\\101\\tLine\\\nCont) Tj EMC ET\nBT /F2 11 Tf ET\nBT <AC00> Tj ET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
+    let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n3 0 obj << /Length 260 >>\nstream\n/F2 11 Tf\nBT /F1 12 Tf 54 760 Td [(Hel) -15 (lo )\n(World)] TJ ET\nBT [3 2] 0 d /Span << /MCID 0 /Lang (ko-KR) >> BDC (\\101\\tLine\\\nCont) Tj EMC ET\nBT /F2 11 Tf ET\nBT <AC00> Tj ET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
     let parsed_edge = PdfSerializer::parse(multiline_tj_comment_pdf).unwrap();
     assert_eq!(
         parsed_edge.pages[0].body_text,
@@ -296,7 +296,7 @@ fn test_pdf_single_line_stream_relative_td_ocr_3tr_and_swift_blank_line_paginati
         "%PDF-1.7\n",
         "1 0 obj << /Title (Report (2026)) /Type /Catalog >> endobj\n",
         "2 0 obj << /Type /Metadata >> endobj\n",
-        "3 0 obj << /Rotate 90 /PageNumber 1 /Type /Page >> endobj\n",
+        "3 0 obj << /Rotate 90 /PageNumber 1 /Type /Page /Contents 4 0 R >> endobj\n",
         "4 0 obj << /Length 120 >> stream BT 3 Tr /F1 11 Tf 100 200 Td (OCR Word1) Tj 0 0 Td (OCR Word2) Tj 286 404 Td ([STAMP] BodyLine) Tj ET endstream endobj\n",
         "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
     );
@@ -313,7 +313,7 @@ fn test_pdf_single_line_stream_relative_td_ocr_3tr_and_swift_blank_line_paginati
     let relative_stamp_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (RelativeTd) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 96 >>\nstream\n",
         "BT /F1 10 Tf 386 620 Td (Header) Tj 0 -16 Td ([STAMP] 결재승인) Tj ET\n",
         "endstream\nendobj\n",
@@ -373,7 +373,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let comment_paren_encrypted_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (EncryptedDoc) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 64 >>\nstream\n",
         "% comment with unmatched ( and <\n",
         "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
@@ -390,7 +390,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let missing_endstream_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (Truncated) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 64 >>\nstream\n",
         "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
         "xref\n0 4\ntrailer << /Root 1 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n"
@@ -403,7 +403,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let spoofed_in_page_stream_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (PageSpoof) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 96 >>\nstream\n",
         "%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlBhZ2VTcG9vZiIsImJvZHlUZXh0IjoiQm9keSJ9\n",
         "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
@@ -418,7 +418,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let non_page_streams_and_q_leading_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (NonPageAndLeading) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 140 >>\nstream\n",
         "BT /F1 10 Tf 386 620 Td 16 TL q 99 TL (Header) Tj Q T* ([STAMP] 정위치스탬프) Tj ET\n",
         "endstream\nendobj\n",
@@ -444,7 +444,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let tagged_dict_spoof_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (TaggedSpoof) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 94 >>\nstream\n",
         "BT /Span << /MCID 0\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mIn0=\n>> BDC (Body) Tj EMC ET\n",
         "endstream\nendobj\n",
@@ -458,7 +458,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let tagged_dict_valid_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (About /Encrypt Guide) /OpenAction << /S /URI /Title (SubIgnore) >> >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 /Resources << /Font << /F1 << /Type /Font >> >> >> >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Resources << /Font << /F1 << /Type /Font >> >> >> /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 85 >>\nstream\n",
         "BT /F1 12 Tf 72 720 Td /Span << /Alt (a > b\nendstream\n) >> BDC (TaggedBody) Tj EMC ET\n",
         "endstream\nendobj\n",
@@ -474,7 +474,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
         let mut raw = Vec::new();
         raw.extend_from_slice(
             format!(
-                "%PDF-1.7\n1 0 obj << /Type /Catalog /Title (LiteralEncrypt) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length {} >>\nstream\n",
+                "%PDF-1.7\n1 0 obj << /Type /Catalog /Title (LiteralEncrypt) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n3 0 obj << /Length {} >>\nstream\n",
                 body.len()
             )
             .as_bytes(),
@@ -495,7 +495,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let missing_endstream_before_xref_encrypt = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (MissingEndstreamEncrypt) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 12 >>\nstream\n",
         "cipher_bytes\n",
         "endobj\n",
@@ -532,7 +532,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
         let mut raw = Vec::new();
         raw.extend_from_slice(
             format!(
-                "%PDF-1.7\n1 0 obj << /Type /Catalog /Title (ForgedLen) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length {} >>\nstream\n",
+                "%PDF-1.7\n1 0 obj << /Type /Catalog /Title (ForgedLen) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n3 0 obj << /Length {} >>\nstream\n",
                 p1_part.len()
             )
             .as_bytes(),
@@ -551,7 +551,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let unclosed_nonstream_paren_after_page1 = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (UnclosedTail) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 36 >>\nstream\n",
         "BT /F1 12 Tf 72 720 Td (Page1) Tj ET\n",
         "endstream\nendobj\n",
@@ -569,7 +569,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let tounicode_without_type_cmap_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (ToUnicodeNoType) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 35 >>\nstream\n",
         "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
         "endstream\nendobj\n",
@@ -585,7 +585,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let tounicode_spoof_trailer_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (ToUnicodeSpoof) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 35 >>\nstream\n",
         "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
         "endstream\nendobj\n",
@@ -614,7 +614,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
         raw.extend_from_slice(&img_bytes);
         raw.extend_from_slice(b"\nendstream\nendobj\n");
         let page_stream = b"BT /F1 12 Tf 72 720 Td (ExactBinaryOffset) Tj ET";
-        raw.extend_from_slice(b"3 0 obj << /Type /Page /PageNumber 1 >> endobj\n");
+        raw.extend_from_slice(b"3 0 obj << /Type /Page /PageNumber 1 /Contents 4 0 R >> endobj\n");
         raw.extend_from_slice(
             format!("4 0 obj << /Length {} >>\nstream \t\r\n", page_stream.len()).as_bytes(),
         );
@@ -631,7 +631,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let ciphertext_paren_trailer_encrypt_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (CipherDoc) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 18 >>\nstream\n",
         "cipher(text<bytes!\n",
         "endstream\nendobj\n",
@@ -647,7 +647,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let ciphertext_xref_stream_encrypt_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (CipherXRef) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 12 >>\nstream\n",
         "cipher(open!\n",
         "endstream\nendobj\n",
@@ -666,7 +666,7 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     let cr_nonpage_spoof_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Type /Catalog /Title (CrSpoof) >> endobj\n",
-        "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
+        "2 0 obj << /Type /Page /PageNumber 1 /Contents 3 0 R >> endobj\n",
         "3 0 obj << /Length 36 >>\nstream\n",
         "BT /F1 12 Tf 72 720 Td (Body) Tj ET\n",
         "endstream\nendobj\n",
@@ -678,5 +678,227 @@ fn test_pdf_stream_comment_paren_encrypt_fail_closed_and_non_page_streams() {
     assert!(matches!(
         PdfSerializer::parse(cr_nonpage_spoof_pdf.as_bytes()),
         Err(EasyOfficeError::SecurityViolation(_))
+    ));
+}
+
+#[test]
+fn test_pdf_object_graph_contents_array_blank_pages_ordering_binary_streams_and_encrypt_edges() {
+    let contents_array_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (MergedArrayPage) >> endobj\n",
+        "2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n",
+        "3 0 obj << /Type /Page /Parent 2 0 R /Rotate 90 /MediaBox [0.0 0.0 595.28 841.89] /Contents [4 0 R 5 0 R] >> endobj\n",
+        "4 0 obj << /Length 42 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (Array Part 1) Tj ET\n",
+        "endstream\nendobj\n",
+        "5 0 obj << /Length 96 >>\nstream\n",
+        "BT /F1 12 Tf 72 700 Td (Array Part 2) Tj ET\nBT /F1 10 Tf 386 604 Td ([STAMP] 합본결재) Tj ET\n",
+        "endstream\nendobj\n",
+        "xref\n0 6\ntrailer << /Size 6 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+    );
+    let parsed_arr = PdfSerializer::parse(contents_array_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_arr.title, "MergedArrayPage");
+    assert_eq!(parsed_arr.pages.len(), 1);
+    assert_eq!(parsed_arr.pages[0].rotation_degrees, 90);
+    assert_eq!(parsed_arr.pages[0].body_text, "Array Part 1\nArray Part 2");
+    assert_eq!(
+        parsed_arr.pages[0].approval_stamp.as_deref(),
+        Some("합본결재")
+    );
+
+    let single_blank_page_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (SingleBlank) >> endobj\n",
+        "2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n",
+        "3 0 obj << /Type /Page /Parent 2 0 R >> endobj\n",
+        "xref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+    );
+    let parsed_blank = PdfSerializer::parse(single_blank_page_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_blank.title, "SingleBlank");
+    assert_eq!(parsed_blank.pages.len(), 1);
+    assert_eq!(parsed_blank.pages[0].rotation_degrees, 0);
+    assert_eq!(parsed_blank.pages[0].body_text, "");
+
+    let blank_rot90_then_rot0_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (BlankThenContent) >> endobj\n",
+        "2 0 obj << /Type /Pages /Count 2 /Kids [3 0 R 4 0 R] >> endobj\n",
+        "3 0 obj << /Type /Page /Parent 2 0 R /Rotate 90 >> endobj\n",
+        "4 0 obj << /Type /Page /Parent 2 0 R /Rotate 0 /Contents 5 0 R >> endobj\n",
+        "5 0 obj << /Length 42 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (PageTwoBody) Tj ET\n",
+        "endstream\nendobj\n",
+        "xref\n0 6\ntrailer << /Size 6 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+    );
+    let parsed_two = PdfSerializer::parse(blank_rot90_then_rot0_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_two.pages.len(), 2);
+    assert_eq!(parsed_two.pages[0].rotation_degrees, 90);
+    assert_eq!(parsed_two.pages[0].body_text, "");
+    assert_eq!(parsed_two.pages[1].rotation_degrees, 0);
+    assert_eq!(parsed_two.pages[1].body_text, "PageTwoBody");
+
+    let stream_before_page_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (PreplacedStream) >> endobj\n",
+        "2 0 obj << /Type /Pages /Count 1 /Kids [4 0 R] >> endobj\n",
+        "3 0 obj << /Length 50 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (PreplacedStreamBody) Tj ET\n",
+        "endstream\nendobj\n",
+        "4 0 obj << /Type /Page /Parent 2 0 R /Rotate 180 /Contents 3 0 R >> endobj\n",
+        "xref\n0 5\ntrailer << /Size 5 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+    );
+    let parsed_pre = PdfSerializer::parse(stream_before_page_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_pre.pages.len(), 1);
+    assert_eq!(parsed_pre.pages[0].rotation_degrees, 180);
+    assert_eq!(parsed_pre.pages[0].body_text, "PreplacedStreamBody");
+
+    let unreferenced_and_orphaned_streams_pdf = {
+        let icc_raw: &[u8] = b"\x00\x02\x10(icc_unbalanced_<0Fxyz";
+        let thumb_raw: &[u8] = b"\xFF\xD8(thumb_open_<badhex";
+        let fn_raw: &[u8] = b"\x80(func_type0_<unclosed";
+        let orphan_raw: &[u8] = b"orphan(inc_<bytes)tail)";
+        let page_raw: &[u8] = b"BT /F1 12 Tf 72 720 Td (CleanPageContent) Tj ET";
+        let mut raw = Vec::new();
+        raw.extend_from_slice(
+            b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /Title (ColorAndIncremental) >> endobj\n",
+        );
+        raw.extend_from_slice(b"2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n");
+        raw.extend_from_slice(
+            b"3 0 obj << /Type /Page /Parent 2 0 R /Thumb 7 0 R /Resources << /ColorSpace << /CS1 [/ICCBased 6 0 R] >> /Shading << /Sh1 << /ShadingType 2 /Function 8 0 R >> >> >> /Contents 4 0 R >> endobj\n",
+        );
+        raw.extend_from_slice(
+            format!("4 0 obj << /Length {} >>\nstream\n", page_raw.len()).as_bytes(),
+        );
+        raw.extend_from_slice(page_raw);
+        raw.extend_from_slice(b"\nendstream\nendobj\n");
+        raw.extend_from_slice(
+            format!(
+                "6 0 obj << /N 3 /Length {} >>\nstream\n",
+                icc_raw.len() + 50
+            )
+            .as_bytes(),
+        );
+        raw.extend_from_slice(icc_raw);
+        raw.extend_from_slice(b"\nendstream\nendobj\n");
+        raw.extend_from_slice(
+            b"7 0 obj << /Width 8 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 >>\nstream\n",
+        );
+        raw.extend_from_slice(thumb_raw);
+        raw.extend_from_slice(b"\nendstream\nendobj\n");
+        raw.extend_from_slice(
+            format!(
+                "8 0 obj << /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [2] /BitsPerSample 8 /Length {} >>\nstream\n",
+                fn_raw.len()
+            )
+            .as_bytes(),
+        );
+        raw.extend_from_slice(fn_raw);
+        raw.extend_from_slice(b"\nendstream\nendobj\n");
+        raw.extend_from_slice(
+            b"xref\n0 9\ntrailer << /Size 9 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
+        );
+        raw.extend_from_slice(
+            format!("9 0 obj << /Length {} >>\nstream\n", orphan_raw.len()).as_bytes(),
+        );
+        raw.extend_from_slice(orphan_raw);
+        raw.extend_from_slice(
+            b"\nendstream\nendobj\nxref\n0 1\n0000000000 65535 f \n9 1\n0000000400 00000 n \ntrailer << /Size 10 /Root 1 0 R /Prev 100 >>\nstartxref\n480\n%%EOF\n",
+        );
+        raw
+    };
+    let parsed_unreferenced = PdfSerializer::parse(&unreferenced_and_orphaned_streams_pdf).unwrap();
+    assert_eq!(parsed_unreferenced.title, "ColorAndIncremental");
+    assert_eq!(parsed_unreferenced.pages.len(), 1);
+    assert_eq!(parsed_unreferenced.pages[0].body_text, "CleanPageContent");
+
+    let false_positive_encrypt_and_boundary_strings_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Note: endobj xref) /Dests << /Encrypt [3 0 R] >> >> endobj\n",
+        "2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n",
+        "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+        "4 0 obj << >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (Example: endstream endobj) Tj ET\n",
+        "endstream\nendobj\n",
+        "5 0 obj << /Type /StructElem /S /Encrypt >> endobj\n",
+        "xref\n0 6\ntrailer << /Size 6 /Root 1 0 R /Dests << /Encrypt [3 0 R] >> >>\nstartxref\n0\n%%EOF\n"
+    );
+    let parsed_fp =
+        PdfSerializer::parse(false_positive_encrypt_and_boundary_strings_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_fp.title, "Note: endobj xref");
+    assert_eq!(parsed_fp.pages.len(), 1);
+    assert_eq!(parsed_fp.pages[0].body_text, "Example: endstream endobj");
+
+    let valid_with_trailer_encrypt_in_stream = PdfSerializer::serialize(&PdfDocumentModel {
+        title: "UnencryptedLiteral".to_string(),
+        pages: vec![
+            PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "trailer << /Encrypt 1 0 R >>".to_string(),
+                approval_stamp: None,
+            },
+            PdfPageModel {
+                page_number: 2,
+                rotation_degrees: 0,
+                body_text: "Second page".to_string(),
+                approval_stamp: None,
+            },
+        ],
+        watermark_text: None,
+    });
+    let truncated_mid_file =
+        &valid_with_trailer_encrypt_in_stream[..valid_with_trailer_encrypt_in_stream.len() - 60];
+    assert!(matches!(
+        PdfSerializer::parse(truncated_mid_file),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let truncated_stream_unencrypted_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (TruncatedUnenc) >> endobj\n",
+        "2 0 obj << /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >> endobj\n",
+        "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+        "4 0 obj << /Length 58 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (trailer << /Encrypt 1 0 R >>) Tj ET\n",
+        "endstream\nendobj\n",
+        "5 0 obj << /Type /Page /Parent 2 0 R /Contents 6 0 R >> endobj\n",
+        "6 0 obj << /Length 99 >>\nstream\n",
+        "BT /F1 12 Tf 72 720 Td (truncated_page2) Tj ET\n",
+        "endobj\n",
+        "xref\n0 7\ntrailer << /Size 7 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(truncated_stream_unencrypted_pdf.as_bytes()),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let note_stream_xref_encrypt_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (CipherNoteStream >> endobj\n",
+        "4 0 obj << /Note (stream) /Type /XRef /Encrypt 9 0 R /Length 4 >> stream\n",
+        "0123\n",
+        "endstream\nendobj\n",
+        "startxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(note_stream_xref_encrypt_pdf.as_bytes()),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
+    ));
+
+    let intact_note_stream_xref_encrypt_pdf = concat!(
+        "%PDF-1.7\n",
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        "4 0 obj << /Note (stream) /Type /XRef /Encrypt 9 0 R /Length 4 >> stream\n",
+        "0123\n",
+        "endstream\nendobj\n",
+        "startxref\n0\n%%EOF\n"
+    );
+    assert!(matches!(
+        PdfSerializer::parse(intact_note_stream_xref_encrypt_pdf.as_bytes()),
+        Err(EasyOfficeError::EncryptedDocumentUnsupported(
+            DocumentFormat::Pdf
+        ))
     ));
 }

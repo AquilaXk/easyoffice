@@ -1,26 +1,20 @@
 (function (host) {
   "use strict";
 
-  function parseCellRefParts(ref) {
-    const m = /^([A-Z]+)(\d+)$/.exec(String(ref || "").toUpperCase());
-    if (!m) return { col: 0, row: 1 };
-    let col = 0;
-    for (let i = 0; i < m[1].length; i++) {
-      col = col * 26 + (m[1].codePointAt(i) - 64);
-    }
-    return { col: col - 1, row: Number(m[2]) };
-  }
-
-  function colIndexToLetters(colIdx) {
-    let n = Math.max(0, Number(colIdx) || 0) + 1;
-    let out = "";
-    while (n > 0) {
-      const rem = (n - 1) % 26;
-      out = String.fromCodePoint(65 + rem) + out;
-      n = Math.floor((n - 1) / 26);
-    }
-    return out || "A";
-  }
+  const astApi = host.__EASYOFFICE_FORMULA_AST__;
+  const {
+    MAX_EXPANDED_CELL_COUNT,
+    asciiUpperJs,
+    jsonSheetNameOrDefaultJs,
+    canonicalSheetKeyJs,
+    isSameSheetIdentityJs,
+    quoteFormulaSheetName,
+    normalizeA1Token,
+    parseCellRefParts,
+    colIndexToLetters,
+    isFormulaStringJs,
+    parseFormulaAstJs,
+  } = astApi;
 
   function normalizeFormattedNumericCell(raw) {
     const trimmed = String(raw || "").trim();
@@ -30,82 +24,27 @@
     return trimmed;
   }
 
-  function jsonSheetNameOrDefaultJs(raw, fallback = "Sheet1") {
-    const trimmed = String(raw ?? "").trim();
-    return trimmed.length > 0 ? trimmed : fallback;
-  }
-
-  function asciiUpperJs(str) {
-    return String(str ?? "").replaceAll(/[a-z]/g, (c) =>
-      String.fromCodePoint(c.codePointAt(0) - 32)
-    );
-  }
-
-  function unquoteBalancedSingleQuotesOnceJs(s) {
-    if (s.length < 2 || !s.startsWith("'") || !s.endsWith("'")) return null;
-    const inner = s.slice(1, -1);
-    let out = "";
-    for (let i = 0; i < inner.length; i++) {
-      if (inner[i] === "'") {
-        if (i + 1 < inner.length && inner[i + 1] === "'") {
-          out += "'";
-          i += 1;
-        } else {
-          return null;
-        }
-      } else {
-        out += inner[i];
-      }
-    }
-    return out;
-  }
-
-  function canonicalSheetKeyJs(rawToken) {
-    let cur = String(rawToken ?? "").trim();
-    while (true) {
-      const unquoted = unquoteBalancedSingleQuotesOnceJs(cur);
-      if (unquoted === null) break;
-      cur = unquoted.trim();
-    }
-    return asciiUpperJs(cur);
-  }
-
-  function isSameSheetIdentityJs(a, b) {
-    const ka = canonicalSheetKeyJs(a);
-    const kb = canonicalSheetKeyJs(b);
-    return ka.length > 0 && ka === kb;
-  }
-
   function resolveCanonicalSheetUpper(knownSheets, rawName) {
     const targetKey = canonicalSheetKeyJs(rawName);
     if (!targetKey) return null;
-    for (const stored of knownSheets) {
-      if (canonicalSheetKeyJs(stored) === targetKey) return targetKey;
+    for (let i = 0; i < knownSheets.length; i += 1) {
+      if (canonicalSheetKeyJs(knownSheets[i]) === targetKey) {
+        return targetKey;
+      }
     }
     return null;
   }
 
-  function ensureKnownSheetUpper(knownSheets, name) {
-    const trimmed = String(name ?? "").trim();
-    const key = canonicalSheetKeyJs(trimmed);
+  function ensureKnownSheetUpper(knownSheets, rawName) {
+    const str = String(rawName ?? "");
+    if (str.trim().length === 0) return null;
+    const key = canonicalSheetKeyJs(str);
     if (!key) return null;
-    const existing = resolveCanonicalSheetUpper(knownSheets, trimmed);
+    const existing = resolveCanonicalSheetUpper(knownSheets, str);
     if (existing) return existing;
-    knownSheets.push(trimmed);
+    knownSheets.push(str);
     return key;
   }
-
-  const FORMULA_ERROR_LIST = [
-    "#DIV/0!",
-    "#VALUE!",
-    "#CYCLE!",
-    "#ERROR!",
-    "#NAME?",
-    "#NULL!",
-    "#REF!",
-    "#NUM!",
-    "#N/A",
-  ];
 
   function valEmpty() {
     return { kind: "empty" };
@@ -171,109 +110,6 @@
     return valText(raw);
   }
 
-  function normalizeA1Token(rawToken) {
-    const cleaned = asciiUpperJs(String(rawToken ?? "").trim()).replaceAll("$", "");
-    return /^[A-Z]+\d+$/.test(cleaned) ? cleaned : null;
-  }
-
-  function tokenizeFormulaJs(src) {
-    const tokens = [];
-    let i = 0;
-    while (i < src.length) {
-      const ch = src[i];
-      if (/\s/.test(ch)) {
-        i += 1;
-        continue;
-      }
-      if (ch === '"') {
-        i += 1;
-        let buf = "";
-        let closed = false;
-        while (i < src.length) {
-          if (src[i] === '"') {
-            if (i + 1 < src.length && src[i + 1] === '"') {
-              buf += '"';
-              i += 2;
-              continue;
-            }
-            i += 1;
-            closed = true;
-            break;
-          }
-          buf += src[i];
-          i += 1;
-        }
-        if (!closed) return { error: "#VALUE!" };
-        tokens.push({ type: "str", value: buf });
-        continue;
-      }
-      if (ch === "'") {
-        const start = i;
-        i += 1;
-        let closed = false;
-        while (i < src.length) {
-          if (src[i] === "'") {
-            if (i + 1 < src.length && src[i + 1] === "'") {
-              i += 2;
-              continue;
-            }
-            i += 1;
-            closed = true;
-            break;
-          }
-          i += 1;
-        }
-        if (!closed || i >= src.length || src[i] !== "!") return { error: "#VALUE!" };
-        const rawQuoted = src.slice(start, i);
-        i += 1;
-        tokens.push({ type: "sheet", name: rawQuoted });
-        continue;
-      }
-      if (ch === "#") {
-        const restUpper = asciiUpperJs(src.slice(i));
-        const errHit = FORMULA_ERROR_LIST.find((code) => restUpper.startsWith(code));
-        if (!errHit) return { error: "#VALUE!" };
-        tokens.push({ type: "err", code: errHit });
-        i += errHit.length;
-        continue;
-      }
-      const numMatch = /^\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(src.slice(i));
-      if (numMatch) {
-        const nextChar = src[i + numMatch[0].length] || "";
-        if (nextChar !== "!") {
-          tokens.push({ type: "num", value: Number(numMatch[0]) });
-          i += numMatch[0].length;
-          continue;
-        }
-      }
-      const twoChar = src.slice(i, i + 2);
-      if (twoChar === "<=" || twoChar === ">=" || twoChar === "<>") {
-        tokens.push({ type: "op", value: twoChar });
-        i += 2;
-        continue;
-      }
-      if ("+-*/^&=<>%(),:".includes(ch)) {
-        tokens.push({ type: "punct", value: ch });
-        i += 1;
-        continue;
-      }
-      let end = i;
-      while (end < src.length && !/[\s!+\-*/^&=<>%(),:'"#]/.test(src[end])) {
-        end += 1;
-      }
-      if (end === i) return { error: "#VALUE!" };
-      const word = src.slice(i, end);
-      if (end < src.length && src[end] === "!") {
-        tokens.push({ type: "sheet", name: word });
-        i = end + 1;
-      } else {
-        tokens.push({ type: "ident", value: word });
-        i = end;
-      }
-    }
-    return { tokens };
-  }
-
   function readWorkbookTypedCell(workbook, shKey, cellRef, depth = 0) {
     if (!shKey) return valErr("#REF!");
     const normRef = normalizeA1Token(cellRef);
@@ -324,17 +160,14 @@
     const nums = [];
     let countAll = 0;
     let countBlank = 0;
-    for (const item of argItems) {
+    for (let idx = 0; idx < argItems.length; idx += 1) {
+      const item = argItems[idx];
       if (item.kind === "range") {
         if (!item.sheetUpper) return valErr("#REF!");
-        const p1 = parseCellRefParts(item.startRef);
-        const p2 = parseCellRefParts(item.endRef);
-        const minR = Math.min(p1.row, p2.row);
-        const maxR = Math.max(p1.row, p2.row);
-        const minC = Math.min(p1.col, p2.col);
-        const maxC = Math.max(p1.col, p2.col);
-        for (let r = minR; r <= maxR; r++) {
-          for (let c = minC; c <= maxC; c++) {
+        const cellCount = (item.maxRow - item.minRow + 1) * (item.maxCol - item.minCol + 1);
+        if (cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
+        for (let r = item.minRow; r <= item.maxRow; r += 1) {
+          for (let c = item.minCol; c <= item.maxCol; c += 1) {
             const cellVal = readWorkbookTypedCell(
               workbook,
               item.sheetUpper,
@@ -367,321 +200,298 @@
     if (fnName === "COUNT") return valNum(nums.length);
     if (fnName === "COUNTA") return valNum(countAll);
     if (fnName === "COUNTBLANK") return valNum(countBlank);
-    if (fnName === "SUM") return valNum(nums.reduce((a, b) => a + b, 0));
-    if (fnName === "PRODUCT") {
-      return valNum(nums.length === 0 ? 0 : nums.reduce((a, b) => a * b, 1));
+    let sum = 0;
+    for (let i = 0; i < nums.length; i += 1) {
+      sum += nums[i];
     }
-    if (fnName === "MIN") return valNum(nums.length === 0 ? 0 : Math.min(...nums));
-    if (fnName === "MAX") return valNum(nums.length === 0 ? 0 : Math.max(...nums));
+    if (fnName === "SUM") return valNum(sum);
+    if (fnName === "PRODUCT") {
+      if (nums.length === 0) return valNum(0);
+      let prod = 1;
+      for (let i = 0; i < nums.length; i += 1) {
+        prod *= nums[i];
+      }
+      return valNum(prod);
+    }
+    if (fnName === "MIN") {
+      if (nums.length === 0) return valNum(0);
+      let minVal = nums[0];
+      for (let i = 1; i < nums.length; i += 1) {
+        if (nums[i] < minVal) minVal = nums[i];
+      }
+      return valNum(minVal);
+    }
+    if (fnName === "MAX") {
+      if (nums.length === 0) return valNum(0);
+      let maxVal = nums[0];
+      for (let i = 1; i < nums.length; i += 1) {
+        if (nums[i] > maxVal) maxVal = nums[i];
+      }
+      return valNum(maxVal);
+    }
     if (fnName === "AVERAGE" || fnName === "AVG") {
       if (nums.length === 0) return valErr("#DIV/0!");
-      return valNum(nums.reduce((a, b) => a + b, 0) / nums.length);
+      return valNum(sum / nums.length);
     }
     if (nums.length < 2) return valErr("#DIV/0!");
-    const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
-    const m2 = nums.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
+    const mean = sum / nums.length;
+    let m2 = 0;
+    for (let i = 0; i < nums.length; i += 1) {
+      const diff = nums[i] - mean;
+      m2 += diff * diff;
+    }
     const variance = m2 / (nums.length - 1);
     return valNum(fnName === "STDEV" ? Math.sqrt(variance) : variance);
   }
 
+  function evalLogicalFunction(fnName, argItems, workbook, depth) {
+    let trues = 0;
+    let seen = 0;
+    for (let idx = 0; idx < argItems.length; idx += 1) {
+      const item = argItems[idx];
+      if (item.kind === "range") {
+        if (!item.sheetUpper) return valErr("#REF!");
+        const cellCount = (item.maxRow - item.minRow + 1) * (item.maxCol - item.minCol + 1);
+        if (cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
+        for (let r = item.minRow; r <= item.maxRow; r += 1) {
+          for (let c = item.minCol; c <= item.maxCol; c += 1) {
+            const cellVal = readWorkbookTypedCell(
+              workbook,
+              item.sheetUpper,
+              colIndexToLetters(c) + r,
+              depth
+            );
+            if (cellVal.kind === "error") return cellVal;
+            if (cellVal.kind === "empty") continue;
+            const b = coerceScalarBool(cellVal);
+            if (b === null) return valErr("#VALUE!");
+            seen += 1;
+            if (b) trues += 1;
+          }
+        }
+      } else {
+        if (item.kind === "error") return item;
+        const b = coerceScalarBool(item);
+        if (b === null) return valErr("#VALUE!");
+        seen += 1;
+        if (b) trues += 1;
+      }
+    }
+    if (seen === 0) return valErr("#VALUE!");
+    if (fnName === "AND") return valBool(trues === seen);
+    if (fnName === "OR") return valBool(trues > 0);
+    return valBool(trues % 2 === 1);
+  }
+
+  function validateRefTargetSheet(refNode, workbook, currentSheetUpper) {
+    const resolved =
+      refNode.sheet === null
+        ? currentSheetUpper
+        : resolveCanonicalSheetUpper(workbook.knownSheets, refNode.sheet);
+    if (!resolved) return null;
+    if (refNode.kind === "Range" && refNode.endSheet !== null) {
+      const lhsId = refNode.sheet === null ? currentSheetUpper : refNode.sheet;
+      if (!isSameSheetIdentityJs(lhsId, refNode.endSheet)) return null;
+      if (!resolveCanonicalSheetUpper(workbook.knownSheets, refNode.endSheet)) return null;
+    }
+    return resolved;
+  }
+
+  const AGGREGATE_FN_SET = new Set([
+    "SUM",
+    "AVERAGE",
+    "AVG",
+    "MIN",
+    "MAX",
+    "COUNT",
+    "COUNTA",
+    "COUNTBLANK",
+    "PRODUCT",
+    "STDEV",
+    "VAR",
+  ]);
+
   function evaluateFormulaTyped(exprStr, workbook, currentSheetUpper, currentCellRef, depth = 0) {
     if (depth > 64) return valErr("#REF!");
-    const clean = String(exprStr ?? "").trim();
-    if (!clean.startsWith("=")) return parsePlainCellTyped(clean);
-    const body = clean.slice(1).trim();
-    if (!body) return valEmpty();
-    const lexed = tokenizeFormulaJs(body);
-    if (lexed.error) return valErr(lexed.error);
-    const tokens = lexed.tokens;
-    if (tokens.length === 0) return valEmpty();
-    let pos = 0;
+    const parsed = parseFormulaAstJs(exprStr);
+    if (parsed.kind === "Plain") return parsePlainCellTyped(parsed.raw);
+    if (parsed.kind === "FormulaError") return valErr(parsed.code);
 
-    const peek = () => tokens[pos] || null;
-    const next = () => {
-      const t = tokens[pos] || null;
-      pos += 1;
-      return t;
-    };
-    const ensureScalar = (v) => (v && v.kind === "range" ? valErr("#VALUE!") : v);
-
-    function parseComparison() {
-      let lhs = parseConcat();
-      while (true) {
-        const t = peek();
-        const isCmpPunct =
-          t && t.type === "punct" && (t.value === "=" || t.value === "<" || t.value === ">");
-        const isCmpOp = t && t.type === "op";
-        if (!isCmpPunct && !isCmpOp) break;
-        lhs = ensureScalar(lhs);
-        const op = next().value;
-        const rhs = ensureScalar(parseConcat());
-        if (lhs.kind === "error") return lhs;
-        if (rhs.kind === "error") return rhs;
-        const cmp = compareTypedValues(lhs, rhs);
-        if (op === "=") lhs = valBool(cmp === 0);
-        else if (op === "<>") lhs = valBool(cmp !== 0);
-        else if (op === "<") lhs = valBool(cmp < 0);
-        else if (op === "<=") lhs = valBool(cmp <= 0);
-        else if (op === ">") lhs = valBool(cmp > 0);
-        else lhs = valBool(cmp >= 0);
-      }
-      return lhs;
+    function ensureScalar(v) {
+      if (v && v.kind === "range") return valErr("#VALUE!");
+      return v;
     }
 
-    function parseConcat() {
-      let lhs = parseAdditive();
-      while (peek()?.type === "punct" && peek().value === "&") {
-        lhs = ensureScalar(lhs);
-        next();
-        const rhs = ensureScalar(parseAdditive());
-        if (lhs.kind === "error") return lhs;
-        if (rhs.kind === "error") return rhs;
-        lhs = valText(formatFormulaValue(lhs) + formatFormulaValue(rhs));
+    function evalAst(node) {
+      if (!node || node.kind === "Empty") return valEmpty();
+      if (node.kind === "Number") return valNum(node.value);
+      if (node.kind === "Str") return valText(node.value);
+      if (node.kind === "Bool") return valBool(node.value);
+      if (node.kind === "Error") return valErr(node.code);
+      if (node.kind === "Cell") {
+        const sheetUpper = validateRefTargetSheet(node, workbook, currentSheetUpper);
+        if (!sheetUpper) return valErr("#REF!");
+        return readWorkbookTypedCell(workbook, sheetUpper, node.ref, depth);
       }
-      return lhs;
-    }
-
-    function parseAdditive() {
-      let lhs = parseMultiplicative();
-      while (peek()?.type === "punct" && (peek().value === "+" || peek().value === "-")) {
-        lhs = ensureScalar(lhs);
-        const op = next().value;
-        const rhs = ensureScalar(parseMultiplicative());
-        if (lhs.kind === "error") return lhs;
-        if (rhs.kind === "error") return rhs;
-        const a = coerceScalarNumber(lhs);
-        const b = coerceScalarNumber(rhs);
-        if (a === null || b === null) return valErr("#VALUE!");
-        lhs = valNum(op === "+" ? a + b : a - b);
+      if (node.kind === "Range") {
+        const sheetUpper = validateRefTargetSheet(node, workbook, currentSheetUpper);
+        if (!sheetUpper) return valErr("#REF!");
+        if (node.cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
+        return {
+          kind: "range",
+          sheetUpper,
+          minCol: node.minCol,
+          maxCol: node.maxCol,
+          minRow: node.minRow,
+          maxRow: node.maxRow,
+          cellCount: node.cellCount,
+        };
       }
-      return lhs;
-    }
-
-    function parseMultiplicative() {
-      let lhs = parsePower();
-      while (peek()?.type === "punct" && (peek().value === "*" || peek().value === "/")) {
-        lhs = ensureScalar(lhs);
-        const op = next().value;
-        const rhs = ensureScalar(parsePower());
-        if (lhs.kind === "error") return lhs;
-        if (rhs.kind === "error") return rhs;
-        const a = coerceScalarNumber(lhs);
-        const b = coerceScalarNumber(rhs);
-        if (a === null || b === null) return valErr("#VALUE!");
-        if (op === "/" && b === 0) return valErr("#DIV/0!");
-        lhs = valNum(op === "*" ? a * b : a / b);
-      }
-      return lhs;
-    }
-
-    function parsePower() {
-      let lhs = parseUnary();
-      while (peek()?.type === "punct" && peek().value === "^") {
-        lhs = ensureScalar(lhs);
-        next();
-        const rhs = ensureScalar(parseUnary());
-        if (lhs.kind === "error") return lhs;
-        if (rhs.kind === "error") return rhs;
-        const a = coerceScalarNumber(lhs);
-        const b = coerceScalarNumber(rhs);
-        if (a === null || b === null) return valErr("#VALUE!");
-        lhs = valNum(a ** b);
-      }
-      return lhs;
-    }
-
-    function parseUnary() {
-      const t = peek();
-      if (t?.type === "punct" && (t.value === "+" || t.value === "-")) {
-        next();
-        const inner = ensureScalar(parseUnary());
+      if (node.kind === "Unary") {
+        const inner = ensureScalar(evalAst(node.expr));
         if (inner.kind === "error") return inner;
+        if (node.op === "group") return inner;
         const n = coerceScalarNumber(inner);
         if (n === null) return valErr("#VALUE!");
-        return valNum(t.value === "-" ? -n : n);
+        if (node.op === "-") return valNum(-n);
+        if (node.op === "+") return valNum(n);
+        return valNum(n / 100);
       }
-      let val = parsePrimary();
-      while (peek()?.type === "punct" && peek().value === "%") {
-        next();
-        val = ensureScalar(val);
-        if (val.kind === "error") return val;
-        const n = coerceScalarNumber(val);
-        if (n === null) return valErr("#VALUE!");
-        val = valNum(n / 100);
+      if (node.kind === "Concat") {
+        const lhs = ensureScalar(evalAst(node.lhs));
+        if (lhs.kind === "error") return lhs;
+        const rhs = ensureScalar(evalAst(node.rhs));
+        if (rhs.kind === "error") return rhs;
+        return valText(formatFormulaValue(lhs) + formatFormulaValue(rhs));
       }
-      return val;
-    }
-
-    function parseCellOrRange(explicitSheetToken, firstRefToken) {
-      const startRef = normalizeA1Token(firstRefToken);
-      if (!startRef) return valErr("#VALUE!");
-      const resolvedSheet =
-        explicitSheetToken === null
-          ? currentSheetUpper
-          : resolveCanonicalSheetUpper(workbook.knownSheets, explicitSheetToken);
-      if (peek()?.type === "punct" && peek().value === ":") {
-        next();
-        let endSheetToken = null;
-        if (peek()?.type === "sheet") {
-          endSheetToken = next().name;
+      if (node.kind === "Compare") {
+        const lhs = ensureScalar(evalAst(node.lhs));
+        if (lhs.kind === "error") return lhs;
+        const rhs = ensureScalar(evalAst(node.rhs));
+        if (rhs.kind === "error") return rhs;
+        const cmp = compareTypedValues(lhs, rhs);
+        if (node.op === "=") return valBool(cmp === 0);
+        if (node.op === "<>") return valBool(cmp !== 0);
+        if (node.op === "<") return valBool(cmp < 0);
+        if (node.op === "<=") return valBool(cmp <= 0);
+        if (node.op === ">") return valBool(cmp > 0);
+        return valBool(cmp >= 0);
+      }
+      if (node.kind === "Binary") {
+        const lhs = ensureScalar(evalAst(node.lhs));
+        if (lhs.kind === "error") return lhs;
+        const rhs = ensureScalar(evalAst(node.rhs));
+        if (rhs.kind === "error") return rhs;
+        const a = coerceScalarNumber(lhs);
+        const b = coerceScalarNumber(rhs);
+        if (a === null || b === null) return valErr("#VALUE!");
+        if (node.op === "+") return valNum(a + b);
+        if (node.op === "-") return valNum(a - b);
+        if (node.op === "*") return valNum(a * b);
+        if (node.op === "/") {
+          if (b === 0) return valErr("#DIV/0!");
+          return valNum(a / b);
         }
-        const endTok = next();
-        if (!endTok || endTok.type !== "ident") return valErr("#VALUE!");
-        const endRef = normalizeA1Token(endTok.value);
-        if (!endRef) return valErr("#VALUE!");
-        if (endSheetToken !== null) {
-          const lhsIdentity = explicitSheetToken === null ? currentSheetUpper : explicitSheetToken;
-          if (!isSameSheetIdentityJs(lhsIdentity, endSheetToken)) {
-            return valErr("#REF!");
+        return valNum(a ** b);
+      }
+      if (node.kind === "FuncCall") {
+        const fnUpper = node.name;
+        const args = node.args;
+        if (fnUpper === "IF") {
+          if (args.length < 2 || args.length > 3) return valErr("#VALUE!");
+          const cond = ensureScalar(evalAst(args[0]));
+          if (cond.kind === "error") return cond;
+          const flag = coerceScalarBool(cond);
+          if (flag === null) return valErr("#VALUE!");
+          if (flag) return ensureScalar(evalAst(args[1]));
+          if (args.length === 3) return ensureScalar(evalAst(args[2]));
+          return valBool(false);
+        }
+        if (fnUpper === "IFERROR") {
+          if (args.length !== 2) return valErr("#VALUE!");
+          const primary = ensureScalar(evalAst(args[0]));
+          if (primary.kind === "error") return ensureScalar(evalAst(args[1]));
+          return primary;
+        }
+        if (fnUpper === "ROW" || fnUpper === "COLUMN") {
+          if (args.length === 0) {
+            if (!currentSheetUpper) return valErr("#REF!");
+            const parts = parseCellRefParts(currentCellRef || "A1");
+            return valNum(fnUpper === "ROW" ? parts.row : parts.col + 1);
           }
-        }
-        return { kind: "range", sheetUpper: resolvedSheet, startRef, endRef };
-      }
-      return readWorkbookTypedCell(workbook, resolvedSheet, startRef, depth);
-    }
-
-    function parseFunctionCall(fnUpper) {
-      next();
-      if (fnUpper === "ROW" || fnUpper === "COLUMN") {
-        let targetRef = currentCellRef || "A1";
-        if (!(peek()?.type === "punct" && peek().value === ")")) {
-          if (peek()?.type === "sheet") next();
-          const refTok = next();
-          if (!refTok || refTok.type !== "ident") return valErr("#VALUE!");
-          const norm = normalizeA1Token(refTok.value);
-          if (!norm) return valErr("#VALUE!");
-          targetRef = norm;
-        }
-        if (!(peek()?.type === "punct" && peek().value === ")")) return valErr("#VALUE!");
-        next();
-        const parts = parseCellRefParts(targetRef);
-        return valNum(fnUpper === "ROW" ? parts.row : parts.col + 1);
-      }
-      if (fnUpper === "IF") {
-        const cond = ensureScalar(parseComparison());
-        if (!(peek()?.type === "punct" && peek().value === ",")) return valErr("#VALUE!");
-        next();
-        const whenTrue = ensureScalar(parseComparison());
-        let whenFalse = valBool(false);
-        if (peek()?.type === "punct" && peek().value === ",") {
-          next();
-          whenFalse = ensureScalar(parseComparison());
-        }
-        if (!(peek()?.type === "punct" && peek().value === ")")) return valErr("#VALUE!");
-        next();
-        if (cond.kind === "error") return cond;
-        const flag = coerceScalarBool(cond);
-        if (flag === null) return valErr("#VALUE!");
-        return flag ? whenTrue : whenFalse;
-      }
-      if (fnUpper === "IFERROR") {
-        const primary = ensureScalar(parseComparison());
-        if (!(peek()?.type === "punct" && peek().value === ",")) return valErr("#VALUE!");
-        next();
-        const fallback = ensureScalar(parseComparison());
-        if (!(peek()?.type === "punct" && peek().value === ")")) return valErr("#VALUE!");
-        next();
-        return primary.kind === "error" ? fallback : primary;
-      }
-      const args = [];
-      if (!(peek()?.type === "punct" && peek().value === ")")) {
-        while (true) {
-          args.push(parseComparison());
-          if (peek()?.type === "punct" && peek().value === ",") {
-            next();
-            continue;
+          if (args.length !== 1) return valErr("#VALUE!");
+          const target = args[0];
+          if (target.kind === "Error") return valErr(target.code);
+          if (target.kind === "Cell") {
+            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
+            return valNum(fnUpper === "ROW" ? target.row : target.col + 1);
           }
-          break;
+          if (target.kind === "Range") {
+            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
+            return valNum(fnUpper === "ROW" ? target.minRow : target.minCol + 1);
+          }
+          return valErr("#VALUE!");
         }
-      }
-      if (!(peek()?.type === "punct" && peek().value === ")")) return valErr("#VALUE!");
-      next();
-      const aggSet = new Set([
-        "SUM",
-        "AVERAGE",
-        "AVG",
-        "MIN",
-        "MAX",
-        "COUNT",
-        "COUNTA",
-        "COUNTBLANK",
-        "PRODUCT",
-        "STDEV",
-        "VAR",
-      ]);
-      if (aggSet.has(fnUpper)) {
-        return evalAggregateFunction(fnUpper, args, workbook, depth);
-      }
-      const scalarArgs = args.map(ensureScalar);
-      const firstErr = scalarArgs.find((a) => a.kind === "error");
-      if (firstErr) return firstErr;
-      if (fnUpper === "ABS" && scalarArgs.length === 1) {
-        const n = coerceScalarNumber(scalarArgs[0]);
-        return n === null ? valErr("#VALUE!") : valNum(Math.abs(n));
-      }
-      if (fnUpper === "ROUND" && (scalarArgs.length === 1 || scalarArgs.length === 2)) {
-        const n = coerceScalarNumber(scalarArgs[0]);
-        const digits = scalarArgs.length === 2 ? coerceScalarNumber(scalarArgs[1]) : 0;
-        if (n === null || digits === null) return valErr("#VALUE!");
-        const factor = 10 ** Math.trunc(digits);
-        return valNum(Math.round(n * factor) / factor);
-      }
-      if (fnUpper === "LEN" && scalarArgs.length === 1) {
-        return valNum(Array.from(formatFormulaValue(scalarArgs[0])).length);
-      }
-      if ((fnUpper === "AND" || fnUpper === "OR") && scalarArgs.length >= 1) {
-        const bools = [];
-        for (const a of scalarArgs) {
-          const b = coerceScalarBool(a);
+        if (fnUpper === "ROWS" || fnUpper === "COLUMNS") {
+          if (args.length !== 1) return valErr("#VALUE!");
+          const target = args[0];
+          if (target.kind === "Error") return valErr(target.code);
+          if (target.kind === "Cell") {
+            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
+            return valNum(1);
+          }
+          if (target.kind === "Range") {
+            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
+            const span =
+              fnUpper === "ROWS"
+                ? target.maxRow - target.minRow + 1
+                : target.maxCol - target.minCol + 1;
+            return valNum(span);
+          }
+          return valErr("#VALUE!");
+        }
+        const evaluatedArgs = [];
+        for (let i = 0; i < args.length; i += 1) {
+          evaluatedArgs.push(evalAst(args[i]));
+        }
+        if (AGGREGATE_FN_SET.has(fnUpper)) {
+          return evalAggregateFunction(fnUpper, evaluatedArgs, workbook, depth);
+        }
+        if ((fnUpper === "AND" || fnUpper === "OR" || fnUpper === "XOR") && evaluatedArgs.length >= 1) {
+          return evalLogicalFunction(fnUpper, evaluatedArgs, workbook, depth);
+        }
+        const scalarArgs = [];
+        for (let i = 0; i < evaluatedArgs.length; i += 1) {
+          const sv = ensureScalar(evaluatedArgs[i]);
+          if (sv.kind === "error") return sv;
+          scalarArgs.push(sv);
+        }
+        if (fnUpper === "ABS" && scalarArgs.length === 1) {
+          const n = coerceScalarNumber(scalarArgs[0]);
+          if (n === null) return valErr("#VALUE!");
+          return valNum(Math.abs(n));
+        }
+        if (fnUpper === "ROUND" && (scalarArgs.length === 1 || scalarArgs.length === 2)) {
+          const n = coerceScalarNumber(scalarArgs[0]);
+          const digits = scalarArgs.length === 2 ? coerceScalarNumber(scalarArgs[1]) : 0;
+          if (n === null || digits === null) return valErr("#VALUE!");
+          const factor = 10 ** Math.trunc(digits);
+          return valNum(Math.round(n * factor) / factor);
+        }
+        if (fnUpper === "LEN" && scalarArgs.length === 1) {
+          return valNum(Array.from(formatFormulaValue(scalarArgs[0])).length);
+        }
+        if (fnUpper === "NOT" && scalarArgs.length === 1) {
+          const b = coerceScalarBool(scalarArgs[0]);
           if (b === null) return valErr("#VALUE!");
-          bools.push(b);
-        }
-        return valBool(fnUpper === "AND" ? bools.every(Boolean) : bools.some(Boolean));
-      }
-      if (fnUpper === "NOT" && scalarArgs.length === 1) {
-        const b = coerceScalarBool(scalarArgs[0]);
-        return b === null ? valErr("#VALUE!") : valBool(!b);
-      }
-      return valErr("#NAME?");
-    }
-
-    function parsePrimary() {
-      const t = next();
-      if (!t) return valErr("#VALUE!");
-      if (t.type === "num") return valNum(t.value);
-      if (t.type === "str") return valText(t.value);
-      if (t.type === "err") return valErr(t.code);
-      if (t.type === "punct" && t.value === "(") {
-        const inner = ensureScalar(parseComparison());
-        if (!(peek()?.type === "punct" && peek().value === ")")) return valErr("#VALUE!");
-        next();
-        return inner;
-      }
-      if (t.type === "sheet") {
-        const refTok = next();
-        if (!refTok || refTok.type !== "ident") return valErr("#VALUE!");
-        return parseCellOrRange(t.name, refTok.value);
-      }
-      if (t.type === "ident") {
-        const up = asciiUpperJs(t.value);
-        if (peek()?.type === "punct" && peek().value === "(") {
-          return parseFunctionCall(up);
-        }
-        if (up === "TRUE") return valBool(true);
-        if (up === "FALSE") return valBool(false);
-        if (normalizeA1Token(up)) {
-          return parseCellOrRange(null, up);
+          return valBool(!b);
         }
         return valErr("#NAME?");
       }
       return valErr("#VALUE!");
     }
 
-    const out = ensureScalar(parseComparison());
-    if (pos < tokens.length) {
-      return out.kind === "error" ? out : valErr("#VALUE!");
-    }
-    return out;
+    return ensureScalar(evalAst(parsed.root));
   }
 
   function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {
@@ -698,23 +508,32 @@
     throw new Error("InvalidArgument: JSON 셀 'value'는 스칼라여야 합니다.");
   }
 
+  function validateExplicitSheetsArrayJs(sheetsArr) {
+    if (!Array.isArray(sheetsArr)) {
+      throw new Error("InvalidArgument: JSON 'sheets' 필드는 문자열 배열이어야 합니다.");
+    }
+    for (let i = 0; i < sheetsArr.length; i += 1) {
+      const s = sheetsArr[i];
+      if (typeof s !== "string") {
+        throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
+      }
+      if (s.trim().length === 0) {
+        throw new Error("InvalidArgument: JSON 'sheets' 항목은 비어 있거나 공백만일 수 없습니다.");
+      }
+    }
+  }
+
   function resolveDefaultSheetFromDocJs(doc) {
     if (doc.sheet !== undefined && doc.sheet !== null && typeof doc.sheet !== "string") {
       throw new Error("InvalidArgument: JSON 'sheet' 필드는 문자열이어야 합니다.");
     }
-    const explicitTop = String(doc.sheet ?? "").trim();
-    if (explicitTop) return explicitTop;
     if (doc.sheets !== undefined) {
-      if (!Array.isArray(doc.sheets)) {
-        throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
-      }
-      for (const s of doc.sheets) {
-        if (typeof s !== "string") {
-          throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
-        }
-        if (canonicalSheetKeyJs(s)) return s.trim();
-      }
-      return "";
+      validateExplicitSheetsArrayJs(doc.sheets);
+    }
+    const rawTop = String(doc.sheet ?? "");
+    if (rawTop.trim().length > 0) return rawTop;
+    if (doc.sheets !== undefined) {
+      return doc.sheets.length > 0 ? doc.sheets[0] : "";
     }
     return "Sheet1";
   }
@@ -723,14 +542,9 @@
     const knownSheets = [];
     const hasExplicitSheets = doc.sheets !== undefined;
     if (hasExplicitSheets) {
-      if (!Array.isArray(doc.sheets)) {
-        throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
-      }
-      for (const s of doc.sheets) {
-        if (typeof s !== "string") {
-          throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
-        }
-        if (s.trim()) ensureKnownSheetUpper(knownSheets, s.trim());
+      validateExplicitSheetsArrayJs(doc.sheets);
+      for (let i = 0; i < doc.sheets.length; i += 1) {
+        ensureKnownSheetUpper(knownSheets, doc.sheets[i]);
       }
     } else {
       ensureKnownSheetUpper(knownSheets, "Sheet1");
@@ -747,7 +561,8 @@
     let seenSheet2 = false;
     const triples = [];
 
-    for (const item of cells) {
+    for (let i = 0; i < cells.length; i += 1) {
+      const item = cells[i];
       if (!item || typeof item !== "object" || Array.isArray(item)) {
         throw new Error("InvalidArgument: JSON 'cells' 항목은 객체여야 합니다.");
       }
@@ -784,10 +599,11 @@
       }
     }
 
-    for (const { shUpper, addrUpper, strVal } of triples) {
+    for (let i = 0; i < triples.length; i += 1) {
+      const { shUpper, addrUpper, strVal } = triples[i];
       const fullKey = shUpper + "!" + addrUpper;
       rawValues[fullKey] = strVal;
-      if (strVal.trim().startsWith("=")) {
+      if (isFormulaStringJs(strVal)) {
         formulaEntries[fullKey] = strVal.trim();
       } else {
         delete formulaEntries[fullKey];
@@ -808,6 +624,10 @@
     colIndexToLetters,
     normalizeFormattedNumericCell,
     jsonSheetNameOrDefaultJs,
+    canonicalSheetKeyJs,
+    isSameSheetIdentityJs,
+    quoteFormulaSheetName,
+    isFormulaStringJs,
     resolveCanonicalSheetUpper,
     resolveDefaultSheetFromDocJs,
     buildLocalWorkbookFromJson,
