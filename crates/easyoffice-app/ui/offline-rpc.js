@@ -1,4 +1,4 @@
-(function () {
+(function (host) {
   "use strict";
 
   function parseCellRefParts(ref) {
@@ -43,35 +43,33 @@
     return null;
   }
 
+  function isSameSheetIdentityJs(a, b) {
+    const ta = String(a ?? "").trim();
+    const tb = String(b ?? "").trim();
+    if (!ta || !tb) return false;
+    if (ta.toUpperCase() === tb.toUpperCase()) return true;
+    const ua = unquoteSheetTokenStrictJs(ta);
+    const ub = unquoteSheetTokenStrictJs(tb);
+    if (ua !== null && ua.toUpperCase() === tb.toUpperCase()) return true;
+    if (ub !== null && ub.toUpperCase() === ta.toUpperCase()) return true;
+    return ua !== null && ub !== null && ua.toUpperCase() === ub.toUpperCase();
+  }
+
   function resolveCanonicalSheetUpper(knownSheets, rawName) {
     const trimmed = String(rawName ?? "").trim();
     if (!trimmed) return null;
-    const upper = trimmed.toUpperCase();
     for (const stored of knownSheets) {
-      if (stored.toUpperCase() === upper) return stored.toUpperCase();
-    }
-    const unquoted = unquoteSheetTokenStrictJs(trimmed);
-    if (unquoted !== null) {
-      const uqUpper = unquoted.toUpperCase();
-      for (const stored of knownSheets) {
-        if (stored.toUpperCase() === uqUpper) return stored.toUpperCase();
-      }
-    }
-    for (const stored of knownSheets) {
-      const storedUnquoted = unquoteSheetTokenStrictJs(stored);
-      if (storedUnquoted !== null && storedUnquoted.toUpperCase() === upper) {
-        return stored.toUpperCase();
-      }
+      if (isSameSheetIdentityJs(stored, trimmed)) return stored.toUpperCase();
     }
     return null;
   }
 
-  function addKnownSheet(knownSheets, name) {
+  function ensureKnownSheetUpper(knownSheets, name) {
     const trimmed = String(name ?? "").trim() || "Sheet1";
-    const upper = trimmed.toUpperCase();
-    if (!knownSheets.some((s) => s.toUpperCase() === upper)) {
-      knownSheets.push(trimmed);
-    }
+    const existing = resolveCanonicalSheetUpper(knownSheets, trimmed);
+    if (existing) return existing;
+    knownSheets.push(trimmed);
+    return trimmed.toUpperCase();
   }
 
   function collectRangeNumericValues(startRef, endRef, cellValues, canonicalSheetUpper) {
@@ -140,6 +138,59 @@
     return String(Math.round(res * 100) / 100);
   }
 
+  function maskFormulaLiteralsUpper(src) {
+    const literals = [];
+    let out = "";
+    let i = 0;
+    while (i < src.length) {
+      if (src[i] !== '"') {
+        out += src[i].toUpperCase();
+        i += 1;
+        continue;
+      }
+      i += 1;
+      let lit = "";
+      let closed = false;
+      while (i < src.length) {
+        if (src[i] === '"') {
+          if (i + 1 < src.length && src[i + 1] === '"') {
+            lit += '"';
+            i += 2;
+            continue;
+          }
+          i += 1;
+          closed = true;
+          break;
+        }
+        lit += src[i];
+        i += 1;
+      }
+      if (!closed) return null;
+      out += "\uE000" + literals.length + "\uE001";
+      literals.push(lit);
+    }
+    return { masked: out, literals };
+  }
+
+  function evalConcatSegment(seg, literals, workbook, currentSheetUpper, currentCellRef) {
+    const litMatch = /^\uE000(\d+)\uE001$/.exec(seg);
+    if (litMatch) return literals[Number(litMatch[1])];
+    const crossMatch = /^('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!([A-Z]+\d+)$/.exec(seg);
+    if (crossMatch) {
+      const shKey = resolveCanonicalSheetUpper(workbook.knownSheets, crossMatch[1]);
+      if (!shKey) return "#REF!";
+      return String(workbook.values[shKey + "!" + crossMatch[2]] ?? "");
+    }
+    if (/^[A-Z]+\d+$/.test(seg)) {
+      return String(workbook.values[currentSheetUpper + "!" + seg] ?? "");
+    }
+    const restored = seg.replaceAll(
+      /\uE000(\d+)\uE001/g,
+      (_, idx) => '"' + literals[Number(idx)].replaceAll('"', '""') + '"'
+    );
+    return evaluateFormulaExpression("=" + restored, workbook, currentSheetUpper, currentCellRef);
+  }
+
   function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {
     const { values, knownSheets } = workbook;
     const clean = String(exprStr || "").trim();
@@ -148,16 +199,29 @@
       const n = Number(normalized);
       return Number.isFinite(n) && normalized !== "" ? String(n) : clean;
     }
-    const body = clean
-      .slice(1)
-      .trim()
-      .toUpperCase()
+    const maskedRes = maskFormulaLiteralsUpper(clean.slice(1).trim());
+    if (!maskedRes) return "#ERROR!";
+    const { literals } = maskedRes;
+    const body = maskedRes.masked
       .replaceAll(/\bROW\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
         String(parseCellRefParts(ref || currentCellRef || "A1").row)
       )
       .replaceAll(/\bCOLUMN\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
         String(parseCellRefParts(ref || currentCellRef || "A1").col + 1)
       );
+    const singleLit = /^\uE000(\d+)\uE001$/.exec(body);
+    if (singleLit) return literals[Number(singleLit[1])];
+    if (body.includes("&")) {
+      const parts = body.split("&").map((s) => s.trim());
+      if (parts.some((p) => !p)) return "#ERROR!";
+      let joined = "";
+      for (const part of parts) {
+        const val = evalConcatSegment(part, literals, workbook, currentSheetUpper, currentCellRef);
+        if (val.startsWith("#")) return val;
+        joined += val;
+      }
+      return joined;
+    }
     const rangeMatch =
       /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:('(?:''|[^'])*'|[^\s!+\-*/^&=<>(),:]+)!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
         body
@@ -222,9 +286,11 @@
 
   function buildLocalWorkbookFromJson(doc, defaultSheet, seedDefaults) {
     const knownSheets = [];
-    addKnownSheet(knownSheets, "Sheet1");
-    addKnownSheet(knownSheets, "Sheet2");
-    addKnownSheet(knownSheets, defaultSheet);
+    if (doc.sheets === undefined) {
+      ensureKnownSheetUpper(knownSheets, "Sheet1");
+      ensureKnownSheetUpper(knownSheets, "Sheet2");
+    }
+    ensureKnownSheetUpper(knownSheets, defaultSheet);
     if (doc.sheets !== undefined) {
       if (!Array.isArray(doc.sheets)) {
         throw new Error("InvalidArgument: JSON 'sheets' 필드는 배열이어야 합니다.");
@@ -233,7 +299,7 @@
         if (typeof s !== "string") {
           throw new Error("InvalidArgument: JSON 'sheets' 항목은 문자열이어야 합니다.");
         }
-        if (s.trim()) addKnownSheet(knownSheets, s.trim());
+        if (s.trim()) ensureKnownSheetUpper(knownSheets, s.trim());
       }
     }
     if (doc.cells !== undefined && !Array.isArray(doc.cells)) {
@@ -259,19 +325,21 @@
       const shName = jsonSheetNameOrDefaultJs(item.sheet ?? defaultSheet, defaultSheet);
       const addrUpper = item.cell.trim().toUpperCase();
       const strVal = scalarJsonCellValue(item.value);
-      if (shName.toUpperCase() === "SHEET1") seenSheet1 = true;
-      if (shName.toUpperCase() === "SHEET2") seenSheet2 = true;
-      addKnownSheet(knownSheets, shName);
-      triples.push({ shUpper: shName.toUpperCase(), addrUpper, strVal });
+      if (isSameSheetIdentityJs(shName, "Sheet1")) seenSheet1 = true;
+      if (isSameSheetIdentityJs(shName, "Sheet2")) seenSheet2 = true;
+      const shUpper = ensureKnownSheetUpper(knownSheets, shName);
+      triples.push({ shUpper, addrUpper, strVal });
     }
 
     if (seedDefaults) {
-      if (!seenSheet1) {
-        values["SHEET1!A1"] = "1200";
-        values["SHEET1!B1"] = "850";
+      const s1Key = resolveCanonicalSheetUpper(knownSheets, "Sheet1");
+      if (!seenSheet1 && s1Key) {
+        values[s1Key + "!A1"] = "1200";
+        values[s1Key + "!B1"] = "850";
       }
-      if (!seenSheet2) {
-        values["SHEET2!A1"] = "100";
+      const s2Key = resolveCanonicalSheetUpper(knownSheets, "Sheet2");
+      if (!seenSheet2 && s2Key) {
+        values[s2Key + "!A1"] = "100";
       }
     }
 
@@ -564,12 +632,7 @@
     }
     const xmlPart = doc.xml ?? "";
     if (hasDangerousXmlDirective(xmlPart)) {
-      return {
-        status: "REJECTED",
-        xxeGuard: "BLOCKED",
-        zipGuard: "PASSED",
-        checkedEntries: 0,
-      };
+      throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
     }
     const entries = doc.entries === undefined ? [] : doc.entries;
     if (!Array.isArray(entries)) {
@@ -579,12 +642,7 @@
     const MAX_SINGLE_UNCOMPRESSED = 128 * 1024 * 1024;
     const MAX_TOTAL_UNCOMPRESSED = 512 * 1024 * 1024;
     if (entries.length > MAX_ENTRIES) {
-      return {
-        status: "REJECTED",
-        xxeGuard: "PASSED",
-        zipGuard: "BLOCKED",
-        checkedEntries: entries.length,
-      };
+      throw new Error("SecurityViolation: ZIP 엔트리 개수가 보안 한도를 초과했습니다.");
     }
     let totalUncompressed = 0;
     const seenPaths = new Set();
@@ -624,12 +682,7 @@
         (rawComp === 0 && rawUncomp > 0) ||
         (rawComp > 0 && rawUncomp / rawComp > 100);
       if (unsafe) {
-        return {
-          status: "REJECTED",
-          xxeGuard: "PASSED",
-          zipGuard: "BLOCKED",
-          checkedEntries: entries.length,
-        };
+        throw new Error("SecurityViolation: 안전하지 않은 ZIP 컨테이너 엔트리가 감지되었습니다: " + entryPath);
       }
       seenPaths.add(entryPath);
     }
@@ -647,7 +700,7 @@
     for (let i = 0; i < bytes.length; i++) {
       binary += String.fromCharCode(bytes[i]);
     }
-    return typeof globalThis.btoa === "function" ? globalThis.btoa(binary) : "";
+    return typeof host.btoa === "function" ? host.btoa(binary) : "";
   }
 
   const ZOOM_STEP_CYCLE = { 100: 125, 125: 150, 150: 90 };
@@ -805,18 +858,21 @@
     }
 
     return {
-      get_workspace_bootstrap: () => ({
-        platform: navigator.platform.includes("Mac") ? "macOS" : "Desktop",
-        shortcutModifier: navigator.platform.includes("Mac") ? "⌘" : "Ctrl",
-        recentFormatFilters: ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
-        openTabs: [
-          { id: "tab-doc", title: "분기_경영실적_보고서.docx", module: "DOC", isPinned: true },
-          { id: "tab-hwp", title: "행정안전부_기안문.hwpx", module: "HWP", isPinned: true },
-          { id: "tab-sheet", title: "예산집행_총괄표.xlsx", module: "SHEET", isPinned: false },
-          { id: "tab-slide", title: "전략기획_발표자료.pptx", module: "SLIDE", isPinned: false },
-          { id: "tab-pdf", title: "최종계약서_검토본.pdf", module: "PDF", isPinned: false },
-        ],
-      }),
+      get_workspace_bootstrap: () => {
+        const isMac = Boolean(host.navigator && String(host.navigator.platform || "").includes("Mac"));
+        return {
+          platform: isMac ? "macOS" : "Desktop",
+          shortcutModifier: isMac ? "⌘" : "Ctrl",
+          recentFormatFilters: ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
+          openTabs: [
+            { id: "tab-doc", title: "분기_경영실적_보고서.docx", module: "DOC", isPinned: true },
+            { id: "tab-hwp", title: "행정안전부_기안문.hwpx", module: "HWP", isPinned: true },
+            { id: "tab-sheet", title: "예산집행_총괄표.xlsx", module: "SHEET", isPinned: false },
+            { id: "tab-slide", title: "전략기획_발표자료.pptx", module: "SLIDE", isPinned: false },
+            { id: "tab-pdf", title: "최종계약서_검토본.pdf", module: "PDF", isPinned: false },
+          ],
+        };
+      },
       get_ribbon_category_commands: (payload) => {
         const [modPart, catPart] = String(payload || "DOC|home").split("|");
         const mKey = modPart === "CONV" ? "DOC" : modPart;
@@ -836,26 +892,9 @@
         const encoder = new TextEncoder();
         const rawBytes = encoder.encode(title + "\n" + body).length;
         const containerOverhead = {
-          docx: 640,
-          doc: 1024,
-          hwpx: 720,
-          hwtx: 720,
-          hwp: 1024,
-          hwt: 1024,
-          odt: 600,
-          xlsx: 680,
-          xls: 1024,
-          ods: 620,
-          pptx: 760,
-          ppsx: 760,
-          ppt: 1024,
-          odp: 640,
-          pdf: 480,
-          rtf: 180,
-          md: 16,
-          csv: 24,
-          tsv: 24,
-          txt: 0,
+          docx: 640, doc: 1024, hwpx: 720, hwtx: 720, hwp: 1024, hwt: 1024, odt: 600,
+          xlsx: 680, xls: 1024, ods: 620, pptx: 760, ppsx: 760, ppt: 1024, odp: 640,
+          pdf: 480, rtf: 180, md: 16, csv: 24, tsv: 24, txt: 0,
         };
         if (!(src in containerOverhead) || !(dst in containerOverhead)) {
           throw new Error("지원하지 않는 포맷: " + src + "->" + dst);
@@ -885,36 +924,11 @@
         iterations: 5,
         allEquivalent: true,
         suites: [
-          {
-            suiteId: "crc32_slicing_by_8",
-            baselineP50Us: 2068,
-            optimizedP50Us: 464,
-            speedupFactor: 4.46,
-          },
-          {
-            suiteId: "deflate_zlib_roundtrip",
-            baselineP50Us: 234,
-            optimizedP50Us: 59,
-            speedupFactor: 3.97,
-          },
-          {
-            suiteId: "utf16_swar_and_xml_unescape",
-            baselineP50Us: 50,
-            optimizedP50Us: 29,
-            speedupFactor: 1.72,
-          },
-          {
-            suiteId: "sheet_dag_bitset_eval",
-            baselineP50Us: 878,
-            optimizedP50Us: 308,
-            speedupFactor: 2.85,
-          },
-          {
-            suiteId: "swar_csv_xml_and_zero_alloc_range_agg",
-            baselineP50Us: 640,
-            optimizedP50Us: 195,
-            speedupFactor: 3.28,
-          },
+          { suiteId: "crc32_slicing_by_8", baselineP50Us: 2068, optimizedP50Us: 464, speedupFactor: 4.46 },
+          { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
+          { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 50, optimizedP50Us: 29, speedupFactor: 1.72 },
+          { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 878, optimizedP50Us: 308, speedupFactor: 2.85 },
+          { suiteId: "swar_csv_xml_and_zero_alloc_range_agg", baselineP50Us: 640, optimizedP50Us: 195, speedupFactor: 3.28 },
         ],
       }),
       run_smart_assistant: (payload) => localSmartAssistant(payload),
@@ -946,11 +960,11 @@
     };
   }
 
-  globalThis.__EASYOFFICE_SHEET_UTILS__ = {
+  host.__EASYOFFICE_SHEET_UTILS__ = {
     parseCellRefParts,
     colIndexToLetters,
     normalizeFormattedNumericCell,
     localScrubPii,
   };
-  globalThis.__EASYOFFICE_CREATE_OFFLINE_RPC__ = createOfflineRpcHandlers;
-})();
+  host.__EASYOFFICE_CREATE_OFFLINE_RPC__ = createOfflineRpcHandlers;
+})(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

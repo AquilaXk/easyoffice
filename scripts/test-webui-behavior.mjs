@@ -432,14 +432,25 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
     moduleSpecs: {},
     localRibbonState: {},
   });
-  assert.equal(
-    offlineRpc.audit_security(
-      JSON.stringify({
-        entries: [{ name: "word/document.xml", compressed: 0, uncompressed: 4096, encrypted: false }],
-        xml: "<doc/>",
-      })
-    ).status,
-    "REJECTED"
+  assert.throws(
+    () =>
+      offlineRpc.audit_security(
+        JSON.stringify({
+          entries: [{ name: "word/document.xml", compressed: 0, uncompressed: 4096, encrypted: false }],
+          xml: "<doc/>",
+        })
+      ),
+    /SecurityViolation/
+  );
+  assert.throws(
+    () =>
+      offlineRpc.audit_security(
+        JSON.stringify({
+          entries: [],
+          xml: '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><doc/>',
+        })
+      ),
+    /SecurityViolation/
   );
   assert.equal(
     offlineRpc.audit_security(JSON.stringify({ entries: [], xml: "<doc/>" })).checkedEntries,
@@ -637,11 +648,12 @@ test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and
   await flushAsyncTurns();
   assert.match(document.getElementById("pii-result-text").textContent, /1건 마스킹 완료/);
   assert.equal(a9.dataset.formula, '="담당자 ""김연구원"" 010-****-****"');
-  assert.ok(!a9.textContent.includes("010-1234-5678"));
+  assert.equal(a9.textContent, '담당자 "김연구원" 010-****-****');
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
   assert.equal(a9.dataset.formula, '="담당자 ""김연구원"" 010-1234-5678"');
+  assert.equal(a9.textContent, '담당자 "김연구원" 010-1234-5678');
 
   userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
   await flushAsyncTurns();
@@ -781,4 +793,176 @@ test("focused formula undo-redo updates displayed result, missing sheet returns 
   asyncHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
   assert.equal(undoRpcCalls, 1);
+});
+
+test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet quoting is symmetric, and concurrent harnesses isolate globals", async () => {
+  const baseHarness = await createWorkspaceHarness();
+  const offlineRpc = baseHarness.sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "SHEET",
+    getActiveSheetCellRef: () => "A1",
+    ribbonCategoryTools: { DOC: { home: [] } },
+    ribbonStyleLabels: { standard: [], hangul: [] },
+    contextualToolBadges: {},
+    moduleSpecs: {},
+    localRibbonState: {},
+  });
+
+  assert.equal(
+    offlineRpc.evaluate_sheet(
+      JSON.stringify({
+        sheet: "특수시트",
+        expr: "=SUM(A1:A2)",
+        cells: [
+          { sheet: "특수시트", cell: "A1", value: 200 },
+          { sheet: "'특수시트'", cell: "A2", value: 300 },
+        ],
+      })
+    ).value,
+    "500"
+  );
+  assert.equal(
+    offlineRpc.evaluate_sheet(
+      JSON.stringify({
+        sheet: "예산표",
+        sheets: ["예산표"],
+        expr: "=Sheet2!A1+10",
+        cells: [{ sheet: "예산표", cell: "A1", value: 300 }],
+      })
+    ).value,
+    "#REF!"
+  );
+  assert.equal(
+    offlineRpc.evaluate_sheet(
+      JSON.stringify({
+        sheet: "Sheet1",
+        expr: '="Room B2: " & B2',
+        cells: [{ sheet: "Sheet1", cell: "B2", value: 1150 }],
+      })
+    ).value,
+    "Room B2: 1150"
+  );
+
+  let failUndoOnce = true;
+  let failRedoOnce = true;
+  let failSheetEval = false;
+  const retryHarness = await createWorkspaceHarness({
+    tauriInvoke: (command) => {
+      if (command === "get_workspace_bootstrap") {
+        return {
+          platform: "Windows",
+          shortcutModifier: "Ctrl",
+          recentFormatFilters: ["전체"],
+          openTabs: [],
+        };
+      }
+      if (command === "get_ribbon_category_commands") {
+        return {
+          commands: [{ id: "document-home-bold", title: "굵게", shortcut: "Ctrl+B" }],
+        };
+      }
+      if (command === "execute_ribbon_command") {
+        return { commandId: "document-home-bold", summary: "굵게", isBold: true };
+      }
+      if (command === "undo_ribbon_command") {
+        if (failUndoOnce) {
+          failUndoOnce = false;
+          return Promise.reject(new Error("transient undo failure"));
+        }
+        return { commandId: "undo", summary: "실행 취소 완료" };
+      }
+      if (command === "redo_ribbon_command") {
+        if (failRedoOnce) {
+          failRedoOnce = false;
+          return Promise.reject(new Error("transient redo failure"));
+        }
+        return { commandId: "redo", summary: "다시 실행 완료" };
+      }
+      if (command === "evaluate_sheet") {
+        if (failSheetEval) {
+          return Promise.reject(new Error("sheet eval rejected"));
+        }
+        return { query: "F2", value: "4950", values: {}, targetValues: ["4950"] };
+      }
+      return { status: "ok" };
+    },
+  });
+
+  const boldBtn = retryHarness.document.querySelector('[data-command-id="document-home-bold"]');
+  retryHarness.userClick(boldBtn);
+  await flushAsyncTurns();
+  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "600");
+
+  retryHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "600");
+
+  retryHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "");
+
+  retryHarness.sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "");
+
+  retryHarness.sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "600");
+
+  retryHarness.userClick(retryHarness.document.querySelector('.mod-btn[data-module="SHEET"]'));
+  await flushAsyncTurns();
+  const f2 = retryHarness.document.querySelector('#pane-sheet td[data-cell="F2"]');
+  const formulaInput = retryHarness.document.getElementById("formula-input");
+  failSheetEval = true;
+  formulaInput.value = "=B2+999";
+  retryHarness.userClick(retryHarness.document.getElementById("btn-eval-formula"));
+  await flushAsyncTurns();
+  assert.equal(f2.dataset.formula, "=SUM(B2:E2)");
+  assert.equal(f2.textContent, "4950");
+
+  let resolveA = null;
+  let resolveB = null;
+  const hA = await createWorkspaceHarness({
+    tauriInvoke: (cmd) => {
+      if (cmd === "get_workspace_bootstrap") {
+        return { platform: "Windows", shortcutModifier: "Ctrl", recentFormatFilters: ["전체"], openTabs: [] };
+      }
+      if (cmd === "get_ribbon_category_commands") {
+        return { commands: [{ id: "document-home-bold", title: "굵게", shortcut: "Ctrl+B" }] };
+      }
+      if (cmd === "execute_ribbon_command") {
+        return new Promise((r) => {
+          resolveA = r;
+        });
+      }
+      return { status: "ok" };
+    },
+  });
+  const hB = await createWorkspaceHarness({
+    tauriInvoke: (cmd) => {
+      if (cmd === "get_workspace_bootstrap") {
+        return { platform: "macOS", shortcutModifier: "⌘", recentFormatFilters: ["전체"], openTabs: [] };
+      }
+      if (cmd === "get_ribbon_category_commands") {
+        return { commands: [{ id: "document-home-italic", title: "기울임", shortcut: "⌘I" }] };
+      }
+      if (cmd === "execute_ribbon_command") {
+        return new Promise((r) => {
+          resolveB = r;
+        });
+      }
+      return { status: "ok" };
+    },
+  });
+
+  hA.userClick(hA.document.querySelector('[data-command-id="document-home-bold"]'));
+  hB.userClick(hB.document.querySelector('[data-command-id="document-home-italic"]'));
+  await flushAsyncTurns();
+  resolveA({ commandId: "document-home-bold", summary: "굵게A", isBold: true });
+  resolveB({ commandId: "document-home-italic", summary: "기울임B", isItalic: true });
+  await flushAsyncTurns(10);
+
+  assert.equal(hA.document.querySelector("#doc-editor h1").style.fontWeight, "600");
+  assert.equal(hA.document.querySelector("#doc-editor h1").style.fontStyle, "");
+  assert.equal(hB.document.querySelector("#doc-editor h1").style.fontWeight, "");
+  assert.equal(hB.document.querySelector("#doc-editor h1").style.fontStyle, "italic");
 });

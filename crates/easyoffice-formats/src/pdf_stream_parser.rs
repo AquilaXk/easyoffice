@@ -3,6 +3,7 @@ struct PdfGraphicsState {
     font_utf16be: bool,
     font_size: f64,
     render_mode: i32,
+    leading: f64,
 }
 
 impl Default for PdfGraphicsState {
@@ -11,6 +12,7 @@ impl Default for PdfGraphicsState {
             font_utf16be: false,
             font_size: 12.0,
             render_mode: 0,
+            leading: 0.0,
         }
     }
 }
@@ -105,7 +107,6 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
     let mut gs_stack: Vec<PdfGraphicsState> = Vec::new();
     let mut tlm_x = 0.0f64;
     let mut tlm_y = 0.0f64;
-    let mut leading = 0.0f64;
     let mut dict_depth = 0usize;
     let mut in_array = false;
     let mut array_buf = String::new();
@@ -301,7 +302,7 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
                     .rev()
                     .find(|op| matches!(op, PdfStreamOperand::Num(_)))
                 {
-                    leading = *tl;
+                    gs.leading = *tl;
                 }
             }
             "Td" => {
@@ -316,13 +317,13 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
                 if nums.len() >= 2 {
                     let tx = nums[nums.len() - 2];
                     let ty = nums[nums.len() - 1];
-                    leading = -ty;
+                    gs.leading = -ty;
                     tlm_x += tx;
                     tlm_y += ty;
                 }
             }
             "T*" => {
-                tlm_y -= leading;
+                tlm_y -= gs.leading;
             }
             "Tm" => {
                 let nums = extract_numeric_operands(&operands);
@@ -332,13 +333,13 @@ pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
                 }
             }
             "'" if in_text_object => {
-                tlm_y -= leading;
+                tlm_y -= gs.leading;
                 if let Some(text) = last_string_operand(&operands) {
                     collector.record(text, gs, (tlm_x, tlm_y));
                 }
             }
             "\"" if in_text_object => {
-                tlm_y -= leading;
+                tlm_y -= gs.leading;
                 if let Some(text) = last_string_operand(&operands) {
                     collector.record(text, gs, (tlm_x, tlm_y));
                 }

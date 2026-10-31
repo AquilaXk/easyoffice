@@ -8,6 +8,7 @@ const INDEX_HTML_PATH = fileURLToPath(
   new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)
 );
 const OFFLINE_RPC_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/offline-rpc.js");
+const PII_SCRUBBER_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/pii-dom-scrubber.js");
 const APP_JS_RESOLVED = cjsRequire.resolve("../crates/easyoffice-app/ui/app.js");
 
 const VOID_TAGS = new Set(["meta", "link", "input", "br", "hr", "img"]);
@@ -394,7 +395,6 @@ class MiniElement extends MiniNode {
   }
 
   dispatchEvent(ev) {
-    this.ownerDocument?._activateGlobals?.();
     const eventObj = {
       type: ev.type,
       target: ev.target || this,
@@ -424,7 +424,6 @@ class MiniElement extends MiniNode {
 
   focus() {
     const doc = this.ownerDocument;
-    doc?._activateGlobals?.();
     if (doc.activeElement === this) {
       return;
     }
@@ -437,7 +436,6 @@ class MiniElement extends MiniNode {
 
   blur() {
     const doc = this.ownerDocument;
-    doc?._activateGlobals?.();
     if (doc.activeElement !== this) {
       return;
     }
@@ -446,7 +444,6 @@ class MiniElement extends MiniNode {
   }
 
   click() {
-    this.ownerDocument?._activateGlobals?.();
     this.dispatchEvent({ type: "click", target: this });
   }
 
@@ -553,7 +550,6 @@ class MiniDocument {
   constructor(htmlSource) {
     this.activeElement = null;
     this._listeners = new Map();
-    this._activateGlobals = null;
     const nodes = parseHtmlFragment(htmlSource, this);
     this.documentElement =
       nodes.find((n) => n.nodeType === 1 && n.tagName === "HTML") ||
@@ -589,38 +585,10 @@ class MiniDocument {
   }
 
   dispatchEvent(ev) {
-    this._activateGlobals?.();
     const fns = this._listeners.get(ev.type) || [];
     for (const fn of fns) {
       fn(ev);
     }
-  }
-}
-
-function defineGlobalBinding(key, value) {
-  Object.defineProperty(globalThis, key, {
-    value,
-    writable: true,
-    configurable: true,
-    enumerable: true,
-  });
-}
-
-function installBrowserGlobals(bindings) {
-  defineGlobalBinding("document", bindings.document);
-  defineGlobalBinding("navigator", bindings.navigator);
-  defineGlobalBinding("location", bindings.location);
-  defineGlobalBinding("atob", bindings.atob);
-  defineGlobalBinding("btoa", bindings.btoa);
-  defineGlobalBinding("URL", bindings.URL);
-  defineGlobalBinding("setTimeout", bindings.setTimeout);
-  defineGlobalBinding("clearTimeout", bindings.clearTimeout);
-  defineGlobalBinding("getSelection", bindings.getSelection);
-  defineGlobalBinding("addEventListener", bindings.addEventListener);
-  if (bindings.tauriInternals) {
-    defineGlobalBinding("__TAURI_INTERNALS__", bindings.tauriInternals);
-  } else {
-    delete globalThis.__TAURI_INTERNALS__;
   }
 }
 
@@ -655,7 +623,7 @@ export async function createWorkspaceHarness(options = {}) {
     }
   );
 
-  const bindings = {
+  const hostEnv = {
     document,
     navigator: { platform: options.platform || "Win32" },
     location: { protocol: "app:" },
@@ -673,7 +641,6 @@ export async function createWorkspaceHarness(options = {}) {
         setImmediate(() => {
           if (delayedTimers.has(id) && !cancelledTimers.has(id)) {
             delayedTimers.delete(id);
-            installBrowserGlobals(bindings);
             fn();
           }
         });
@@ -689,10 +656,8 @@ export async function createWorkspaceHarness(options = {}) {
       if (!windowListeners.has(type)) windowListeners.set(type, []);
       windowListeners.get(type).push(fn);
     },
-    tauriInternals: options.tauriInvoke ? { invoke: options.tauriInvoke } : null,
+    __TAURI_INTERNALS__: options.tauriInvoke ? { invoke: options.tauriInvoke } : undefined,
   };
-
-  document._activateGlobals = () => installBrowserGlobals(bindings);
 
   const origCreateElement = document.createElement.bind(document);
   document.createElement = (tag) => {
@@ -705,19 +670,24 @@ export async function createWorkspaceHarness(options = {}) {
     return el;
   };
 
-  installBrowserGlobals(bindings);
-  delete cjsRequire.cache[OFFLINE_RPC_RESOLVED];
-  delete cjsRequire.cache[APP_JS_RESOLVED];
-  cjsRequire("../crates/easyoffice-app/ui/offline-rpc.js");
-  cjsRequire("../crates/easyoffice-app/ui/app.js");
+  globalThis.__EASYOFFICE_HOST_ENV__ = hostEnv;
+  try {
+    delete cjsRequire.cache[OFFLINE_RPC_RESOLVED];
+    delete cjsRequire.cache[PII_SCRUBBER_RESOLVED];
+    delete cjsRequire.cache[APP_JS_RESOLVED];
+    cjsRequire("../crates/easyoffice-app/ui/offline-rpc.js");
+    cjsRequire("../crates/easyoffice-app/ui/pii-dom-scrubber.js");
+    cjsRequire("../crates/easyoffice-app/ui/app.js");
+  } finally {
+    delete globalThis.__EASYOFFICE_HOST_ENV__;
+  }
 
   const sandbox = {
-    setTimeout: bindings.setTimeout,
-    clearTimeout: bindings.clearTimeout,
-    __EASYOFFICE_SHEET_UTILS__: globalThis.__EASYOFFICE_SHEET_UTILS__,
-    __EASYOFFICE_CREATE_OFFLINE_RPC__: globalThis.__EASYOFFICE_CREATE_OFFLINE_RPC__,
+    setTimeout: hostEnv.setTimeout,
+    clearTimeout: hostEnv.clearTimeout,
+    __EASYOFFICE_SHEET_UTILS__: hostEnv.__EASYOFFICE_SHEET_UTILS__,
+    __EASYOFFICE_CREATE_OFFLINE_RPC__: hostEnv.__EASYOFFICE_CREATE_OFFLINE_RPC__,
     dispatchWindowKeydown: (ev) => {
-      installBrowserGlobals(bindings);
       const eventObj = {
         type: "keydown",
         key: ev.key,
@@ -742,7 +712,6 @@ export async function createWorkspaceHarness(options = {}) {
 
   function userClick(el) {
     if (!el) return;
-    installBrowserGlobals(bindings);
     const focusable =
       el.closest('button, input, select, textarea, a, [contenteditable="true"], [tabindex]') ||
       null;
@@ -760,7 +729,6 @@ export async function createWorkspaceHarness(options = {}) {
   }
 
   function advanceTimers(ms = 2000) {
-    installBrowserGlobals(bindings);
     const targetMs = virtualNowMs + Math.max(0, Number(ms) || 0);
     while (true) {
       let nextId = null;

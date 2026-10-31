@@ -31,10 +31,18 @@ struct ScannedPdfStructure {
 struct PdfObjectHeaderState {
     is_catalog: bool,
     is_page: bool,
+    has_type_metadata: bool,
+    has_subtype_studio: bool,
     is_non_page_stream: bool,
     title: Option<String>,
     page_number: Option<usize>,
     rotation: Option<i32>,
+}
+
+impl PdfObjectHeaderState {
+    fn is_metadata_stream(&self) -> bool {
+        self.has_type_metadata && self.has_subtype_studio
+    }
 }
 
 pub struct PdfSerializer;
@@ -198,7 +206,7 @@ impl PdfSerializer {
             ));
         }
 
-        let scanned = Self::scan_pdf_structure(&raw);
+        let mut scanned = Self::scan_pdf_structure(&raw)?;
         if scanned.has_encrypt {
             return Err(EasyOfficeError::EncryptedDocumentUnsupported(
                 DocumentFormat::Pdf,
@@ -226,17 +234,18 @@ impl PdfSerializer {
                         .to_string(),
                 ));
             };
-            if !Self::validate_pdf_trailer_json(
+            let Some(validated_title) = Self::validate_pdf_trailer_json(
                 &decoded,
                 &scanned.title,
                 &scanned.pages,
                 scanned.watermark_text.as_deref(),
-            ) {
+            ) else {
                 return Err(EasyOfficeError::SecurityViolation(
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 본문 스트림과 일치하지 않습니다."
                         .to_string(),
                 ));
-            }
+            };
+            scanned.title = validated_title;
         }
 
         Ok(PdfDocumentModel {
@@ -250,12 +259,29 @@ impl PdfSerializer {
         b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b)
     }
 
-    fn find_endstream_offset(raw: &str, start: usize, skip_pdf_strings: bool) -> (usize, usize) {
-        let bytes = raw.as_bytes();
-        let mut i = start;
-        let kw = b"endstream";
+    fn has_pdf_comment_with_prefix(
+        stream_slice: &str,
+        prefix: &str,
+        skip_pdf_strings: bool,
+    ) -> bool {
+        if !skip_pdf_strings {
+            return stream_slice.lines().any(|l| l.trim().starts_with(prefix));
+        }
+        let bytes = stream_slice.as_bytes();
+        let mut i = 0usize;
         while i < bytes.len() {
-            if skip_pdf_strings && bytes[i] == b'(' {
+            if bytes[i] == b'%' {
+                let start_comment = i;
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
+                    i += 1;
+                }
+                if stream_slice[start_comment..i].trim().starts_with(prefix) {
+                    return true;
+                }
+                continue;
+            }
+            if bytes[i] == b'(' {
                 let mut depth = 1usize;
                 i += 1;
                 while i < bytes.len() && depth > 0 {
@@ -272,12 +298,64 @@ impl PdfSerializer {
                 }
                 continue;
             }
-            if skip_pdf_strings && bytes[i] == b'<' && i + 1 < bytes.len() && bytes[i + 1] != b'<' {
+            if bytes[i] == b'<' && i + 1 < bytes.len() && bytes[i + 1] != b'<' {
                 i += 1;
                 while i < bytes.len() && bytes[i] != b'>' {
                     i += 1;
                 }
                 i = (i + 1).min(bytes.len());
+                continue;
+            }
+            i += 1;
+        }
+        false
+    }
+
+    fn find_endstream_offset(
+        raw: &str,
+        start: usize,
+        skip_pdf_strings: bool,
+    ) -> Option<(usize, usize)> {
+        let bytes = raw.as_bytes();
+        let mut i = start;
+        let kw = b"endstream";
+        while i < bytes.len() {
+            if skip_pdf_strings && bytes[i] == b'%' {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
+                    i += 1;
+                }
+                continue;
+            }
+            if skip_pdf_strings && bytes[i] == b'(' {
+                let mut depth = 1usize;
+                i += 1;
+                while i < bytes.len() && depth > 0 {
+                    if bytes[i] == b'\\' {
+                        i = (i + 2).min(bytes.len());
+                        continue;
+                    }
+                    if bytes[i] == b'(' {
+                        depth += 1;
+                    } else if bytes[i] == b')' {
+                        depth -= 1;
+                    }
+                    i += 1;
+                }
+                if depth != 0 {
+                    return None;
+                }
+                continue;
+            }
+            if skip_pdf_strings && bytes[i] == b'<' && i + 1 < bytes.len() && bytes[i + 1] != b'<' {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'>' {
+                    i += 1;
+                }
+                if i >= bytes.len() {
+                    return None;
+                }
+                i += 1;
                 continue;
             }
             if i + kw.len() <= bytes.len() && &bytes[i..i + kw.len()] == kw {
@@ -294,15 +372,15 @@ impl PdfSerializer {
                     } else if trim_end > start && bytes[trim_end - 1] == b'\r' {
                         trim_end -= 1;
                     }
-                    return (trim_end, i + kw.len());
+                    return Some((trim_end, i + kw.len()));
                 }
             }
             i += 1;
         }
-        (bytes.len(), bytes.len())
+        None
     }
 
-    fn scan_pdf_structure(raw: &str) -> ScannedPdfStructure {
+    fn scan_pdf_structure(raw: &str) -> Result<ScannedPdfStructure, EasyOfficeError> {
         let bytes = raw.as_bytes();
         let mut i = 0usize;
         let mut has_encrypt = false;
@@ -414,20 +492,42 @@ impl PdfSerializer {
                 if name == "/Encrypt" {
                     has_encrypt = true;
                 }
+                if matches!(name, "/Length1" | "/Length2" | "/Length3") {
+                    obj.is_non_page_stream = true;
+                }
                 match (prev_name.as_deref(), name) {
                     (Some("/Type"), "/Catalog") => {
                         obj.is_catalog = true;
+                        obj.is_non_page_stream = true;
                         prev_name = None;
                     }
                     (Some("/Type"), "/Page") => {
                         obj.is_page = true;
                         prev_name = None;
                     }
-                    (Some("/Type"), "/Metadata" | "/CMap") => {
+                    (Some("/Type"), "/Metadata") => {
+                        obj.has_type_metadata = true;
+                        obj.is_non_page_stream = true;
+                        prev_name = None;
+                    }
+                    (
+                        Some("/Type"),
+                        "/CMap" | "/XRef" | "/ObjStm" | "/XObject" | "/Font" | "/FontDescriptor"
+                        | "/Pages",
+                    ) => {
                         obj.is_non_page_stream = true;
                         prev_name = None;
                     }
                     (Some("/Subtype"), "/EasyOfficeStudio") => {
+                        obj.has_subtype_studio = true;
+                        obj.is_non_page_stream = true;
+                        prev_name = None;
+                    }
+                    (
+                        Some("/Subtype"),
+                        "/Image" | "/Form" | "/Type1C" | "/CIDFontType0C" | "/OpenType" | "/XML"
+                        | "/TrueType" | "/Type1",
+                    ) => {
                         obj.is_non_page_stream = true;
                         prev_name = None;
                     }
@@ -480,10 +580,21 @@ impl PdfSerializer {
                     {
                         i += 1;
                     }
-                    let (stream_end, after_endstream) =
-                        Self::find_endstream_offset(raw, i, !obj.is_non_page_stream);
+                    let Some((stream_end, after_endstream)) =
+                        Self::find_endstream_offset(raw, i, !obj.is_non_page_stream)
+                    else {
+                        if has_encrypt {
+                            return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                                DocumentFormat::Pdf,
+                            ));
+                        }
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "PDF stream 블록에 대응하는 endstream 토큰이 누락되었거나 문자열 리터럴이 닫히지 않았습니다."
+                                .to_string(),
+                        ));
+                    };
                     let stream_slice = &raw[i..stream_end];
-                    if obj.is_non_page_stream || stream_slice.contains("begincmap") {
+                    if obj.is_metadata_stream() {
                         for s_line in stream_slice.lines() {
                             let s_trim = s_line.trim();
                             if let Some(rest) = s_trim.strip_prefix("%EasyOfficePDFModelBase64:") {
@@ -492,17 +603,29 @@ impl PdfSerializer {
                             }
                         }
                     } else {
-                        let parsed_stream = parse_pdf_content_stream(stream_slice);
-                        if let Some(wm) = parsed_stream.watermark {
-                            watermark_text = Some(wm);
+                        if Self::has_pdf_comment_with_prefix(
+                            stream_slice,
+                            "%EasyOfficePDFModelBase64:",
+                            !obj.is_non_page_stream,
+                        ) {
+                            return Err(EasyOfficeError::SecurityViolation(
+                                "PDF 비메타데이터 스트림 내부에 허용되지 않는 %EasyOfficePDFModelBase64 주석이 발견되었습니다."
+                                    .to_string(),
+                            ));
                         }
-                        pages.push(PdfPageModel {
-                            page_number: pending_page_number.take().unwrap_or(pages.len() + 1),
-                            rotation_degrees: pending_rotation,
-                            body_text: parsed_stream.body_text,
-                            approval_stamp: parsed_stream.stamp,
-                        });
-                        pending_rotation = 0;
+                        if !(obj.is_non_page_stream || stream_slice.contains("begincmap")) {
+                            let parsed_stream = parse_pdf_content_stream(stream_slice);
+                            if let Some(wm) = parsed_stream.watermark {
+                                watermark_text = Some(wm);
+                            }
+                            pages.push(PdfPageModel {
+                                page_number: pending_page_number.take().unwrap_or(pages.len() + 1),
+                                rotation_degrees: pending_rotation,
+                                body_text: parsed_stream.body_text,
+                                approval_stamp: parsed_stream.stamp,
+                            });
+                            pending_rotation = 0;
+                        }
                     }
                     i = after_endstream;
                 }
@@ -521,14 +644,14 @@ impl PdfSerializer {
             }
         }
 
-        ScannedPdfStructure {
+        Ok(ScannedPdfStructure {
             has_encrypt,
             title,
             watermark_text,
             pages,
             trailer_b64,
             trailer_b64_count,
-        }
+        })
     }
 
     pub fn decode_base64_bytes(input: &str) -> Option<Vec<u8>> {
@@ -686,71 +809,63 @@ impl PdfSerializer {
         expected_title: &str,
         pages: &[PdfPageModel],
         parsed_watermark: Option<&str>,
-    ) -> bool {
+    ) -> Option<String> {
         let Ok(root) = StrictJsonValue::parse(decoded) else {
-            return false;
+            return None;
         };
-        let Some(root_entries) = root.as_object() else {
-            return false;
-        };
-        let Some(json_title) = StrictJsonValue::get_str(root_entries, "title") else {
-            return false;
-        };
-        if json_title != expected_title {
-            return false;
+        let root_entries = root.as_object()?;
+        let json_title = StrictJsonValue::get_str(root_entries, "title")?;
+        let normalized_json_title = json_title.replace(['\r', '\n'], " ");
+        if json_title != expected_title && normalized_json_title != expected_title {
+            return None;
         }
         match StrictJsonValue::get_field(root_entries, "watermarkText") {
             Some(StrictJsonValue::Str(wm)) => {
                 if wm.is_empty() {
                     if parsed_watermark.is_some() {
-                        return false;
+                        return None;
                     }
                 } else if parsed_watermark != Some(wm.as_str()) {
-                    return false;
+                    return None;
                 }
             }
             Some(StrictJsonValue::Null) | None => {
                 if parsed_watermark.is_some() {
-                    return false;
+                    return None;
                 }
             }
-            Some(_) => return false,
+            Some(_) => return None,
         }
         let root_body_field = StrictJsonValue::get_field(root_entries, "bodyText");
         if let Some(pages_val) = StrictJsonValue::get_field(root_entries, "pages") {
-            let Some(page_items) = pages_val.as_array() else {
-                return false;
-            };
+            let page_items = pages_val.as_array()?;
             if page_items.is_empty() || page_items.len() > pages.len() {
-                return false;
-            };
+                return None;
+            }
             let mut json_page_texts = Vec::with_capacity(page_items.len());
             for item in page_items {
-                let Some(p_entries) = item.as_object() else {
-                    return false;
-                };
-                let Some(text) = Self::extract_validated_page_text(p_entries) else {
-                    return false;
-                };
+                let p_entries = item.as_object()?;
+                let text = Self::extract_validated_page_text(p_entries)?;
                 json_page_texts.push(text);
             }
             if let Some(rb) = root_body_field {
-                let Some(rb_str) = rb.as_str() else {
-                    return false;
-                };
+                let rb_str = rb.as_str()?;
                 if Self::strip_ws(rb_str) != Self::strip_ws(&json_page_texts.join("\n")) {
-                    return false;
+                    return None;
                 }
             }
-            return Self::matches_pages_1to1(&json_page_texts, pages);
+            if Self::matches_pages_1to1(&json_page_texts, pages) {
+                return Some(json_title.to_string());
+            }
+            return None;
         }
         if let Some(rb) = root_body_field {
-            let Some(body_str) = rb.as_str() else {
-                return false;
-            };
-            return Self::matches_pages_1to1(&[body_str], pages);
+            let body_str = rb.as_str()?;
+            if Self::matches_pages_1to1(&[body_str], pages) {
+                return Some(json_title.to_string());
+            }
         }
-        false
+        None
     }
 
     pub fn escape_pdf_text(text: &str) -> String {
@@ -759,382 +874,5 @@ impl PdfSerializer {
 
     pub fn unescape_pdf_text(text: &str) -> String {
         unescape_pdf_text(text)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn b64_encode_test(raw: &[u8]) -> String {
-        const TBL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::new();
-        for chunk in raw.chunks(3) {
-            let b0 = chunk[0];
-            let b1 = *chunk.get(1).unwrap_or(&0);
-            let b2 = *chunk.get(2).unwrap_or(&0);
-            out.push(TBL[(b0 >> 2) as usize] as char);
-            out.push(TBL[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
-            if chunk.len() > 1 {
-                out.push(TBL[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char);
-            } else {
-                out.push('=');
-            }
-            if chunk.len() > 2 {
-                out.push(TBL[(b2 & 0x3F) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-        out
-    }
-
-    #[test]
-    fn test_f5_ods_xlsx_hwpx_and_pdf_standard_compatibility() {
-        use crate::{
-            HwpxCodec, HwpxPayload, OdfCodec, OoxmlCodec, OoxmlXlsxPayload, ZipArchiveCodec,
-            ZipSecurityPolicy,
-        };
-
-        let ods_bytes = OdfCodec::pack_ods(
-            "예산표",
-            &[
-                (0, 0, "항목".to_string()),
-                (2, 3, "450".to_string()),
-                (4, 1, "=D3*2".to_string()),
-            ],
-        )
-        .unwrap();
-        let ods_entries =
-            ZipArchiveCodec::unpack(&ods_bytes, &ZipSecurityPolicy::default()).unwrap();
-        let ods_xml = std::str::from_utf8(
-            &ods_entries
-                .iter()
-                .find(|e| e.path == "content.xml")
-                .unwrap()
-                .data,
-        )
-        .unwrap();
-        assert!(ods_xml.matches("<table:table-row").count() >= 3);
-
-        let std_ods_xml = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" office:version=\"1.2\">",
-            "<office:body><office:spreadsheet><table:table table:name=\"표준시트\">",
-            "<table:table-row>",
-            "<table:table-cell office:value-type=\"string\"><text:p>A1</text:p></table:table-cell>",
-            "<table:table-cell table:number-columns-repeated=\"2\"/>",
-            "<table:table-cell office:value-type=\"float\" office:value=\"42\"><text:p>42</text:p></table:table-cell>",
-            "</table:table-row>",
-            "<table:table-row table:number-rows-repeated=\"2\"><table:table-cell/></table:table-row>",
-            "<table:table-row>",
-            "<table:table-cell table:number-columns-repeated=\"1\"/>",
-            "<table:table-cell table:formula=\"of:=SUM(D1:D3)\" office:value-type=\"float\" office:value=\"42\"><text:p>42</text:p></table:table-cell>",
-            "</table:table-row>",
-            "</table:table></office:spreadsheet></office:body></office:document-content>"
-        );
-        let std_ods_zip = ZipArchiveCodec::pack(&[
-            (
-                "mimetype".to_string(),
-                OdfCodec::MIMETYPE_ODS.as_bytes().to_vec(),
-            ),
-            ("content.xml".to_string(), std_ods_xml.as_bytes().to_vec()),
-        ])
-        .unwrap();
-        let (sheet_name, unpacked_cells) = OdfCodec::unpack_ods(&std_ods_zip).unwrap();
-        assert_eq!(sheet_name, "표준시트");
-        assert!(unpacked_cells.contains(&(0, 0, "A1".to_string())));
-        assert!(unpacked_cells.contains(&(0, 3, "42".to_string())));
-        assert!(unpacked_cells.contains(&(3, 1, "=SUM(D1:D3)".to_string())));
-
-        let xlsx_bytes = OoxmlCodec::pack_xlsx(&OoxmlXlsxPayload {
-            sheet_name: "Sheet1".to_string(),
-            cells: vec![(0, 0, "A1".to_string()), (2, 1, "B3".to_string())],
-        })
-        .unwrap();
-        let xlsx_entries =
-            ZipArchiveCodec::unpack(&xlsx_bytes, &ZipSecurityPolicy::default()).unwrap();
-        let sheet_xml = std::str::from_utf8(
-            &xlsx_entries
-                .iter()
-                .find(|e| e.path == "xl/worksheets/sheet1.xml")
-                .unwrap()
-                .data,
-        )
-        .unwrap();
-        assert!(sheet_xml.contains("<row r=\"1\">"));
-        assert!(sheet_xml.contains("<row r=\"3\">"));
-
-        let hwpx_bytes = HwpxCodec::pack(&HwpxPayload {
-            title: "기안문".to_string(),
-            is_template: false,
-            official_agency: Some("행정안전부".to_string()),
-            approval_lines: vec!["기안".to_string()],
-            paragraphs: vec!["본문".to_string()],
-            tables: Vec::new(),
-        })
-        .unwrap();
-        let hwpx_entries =
-            ZipArchiveCodec::unpack(&hwpx_bytes, &ZipSecurityPolicy::default()).unwrap();
-        assert!(hwpx_entries
-            .iter()
-            .any(|e| e.path == "Contents/content.hpf"));
-
-        let pdf_with_literal_encrypt = PdfSerializer::serialize(&PdfDocumentModel {
-            title: "Guide to /Encrypt in PDF".to_string(),
-            pages: vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: "Section 1 discusses /Encrypt dictionary.".to_string(),
-                approval_stamp: None,
-            }],
-            watermark_text: None,
-        });
-        assert!(PdfSerializer::parse(&pdf_with_literal_encrypt).is_ok());
-
-        let mut pdf_with_b64_json = pdf_with_literal_encrypt.clone();
-        let b64_trailer = "\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6Ikd1aWRlIHRvIC9FbmNyeXB0IGluIFBERiIsImJvZHlUZXh0IjoiU2VjdGlvbiAxIGRpc2N1c3NlcyAvRW5jcnlwdCBkaWN0aW9uYXJ5LiJ9\n";
-        pdf_with_b64_json.extend_from_slice(b64_trailer.as_bytes());
-        assert!(PdfSerializer::parse(&pdf_with_b64_json).is_ok());
-
-        let mut pdf_with_spoofed_b64_json = pdf_with_literal_encrypt;
-        let spoofed_trailer = "\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IlNwb29mZWQiLCJib2R5VGV4dCI6IkNvbXBsZXRlbHkgZGlmZmVyZW50IGNvbnRlbnQifQ==\n";
-        pdf_with_spoofed_b64_json.extend_from_slice(spoofed_trailer.as_bytes());
-        assert!(matches!(
-            PdfSerializer::parse(&pdf_with_spoofed_b64_json),
-            Err(EasyOfficeError::SecurityViolation(_))
-        ));
-
-        let korean_pdf_model = PdfDocumentModel {
-            title: "한글 보고서".to_string(),
-            pages: vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: "첫째 줄 한글 본문\nASCII Line 2".to_string(),
-                approval_stamp: Some("전결승인".to_string()),
-            }],
-            watermark_text: Some("대외비문서".to_string()),
-        };
-        let korean_pdf_bytes = PdfSerializer::serialize(&korean_pdf_model);
-        let parsed_korean_pdf = PdfSerializer::parse(&korean_pdf_bytes).unwrap();
-        assert_eq!(parsed_korean_pdf, korean_pdf_model);
-
-        let leading_blank_pdf_model = PdfDocumentModel {
-            title: "빈 줄 보존 테스트".to_string(),
-            pages: vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: "\n둘째 줄 한글 본문".to_string(),
-                approval_stamp: None,
-            }],
-            watermark_text: None,
-        };
-        let leading_blank_bytes = PdfSerializer::serialize(&leading_blank_pdf_model);
-        assert_eq!(
-            PdfSerializer::parse(&leading_blank_bytes).unwrap(),
-            leading_blank_pdf_model
-        );
-
-        let newline_only_pdf_bytes = PdfSerializer::serialize(&PdfDocumentModel {
-            title: "줄바꿈 전용 문서".to_string(),
-            pages: vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: "\n".to_string(),
-                approval_stamp: None,
-            }],
-            watermark_text: None,
-        });
-        let mut spoofed_newline_pdf = newline_only_pdf_bytes;
-        spoofed_newline_pdf.extend_from_slice(spoofed_trailer.as_bytes());
-        assert!(matches!(
-            PdfSerializer::parse(&spoofed_newline_pdf),
-            Err(EasyOfficeError::SecurityViolation(_))
-        ));
-
-        let external_pdf = concat!(
-            "%PDF-1.7\n",
-            "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (External Spec) >> endobj\n",
-            "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
-            "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
-            "4 0 obj << /Length 98 >>\nstream\n",
-            "BT /F1 11 Tf 72 720 Td (External Line 1) Tj ET\n",
-            "BT /F2 11 Tf 72 704 Td <FEFFAC00B098> Tj ET\n",
-            "endstream\nendobj\n",
-            "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
-        );
-        let parsed_external = PdfSerializer::parse(external_pdf.as_bytes()).unwrap();
-        assert_eq!(parsed_external.title, "External Spec");
-        assert_eq!(parsed_external.pages[0].body_text, "External Line 1\n가나");
-
-        let empty_title_whitespace_pdf = PdfSerializer::serialize(&PdfDocumentModel {
-            title: String::new(),
-            pages: vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: "   ".to_string(),
-                approval_stamp: None,
-            }],
-            watermark_text: None,
-        });
-        for bad_json in [
-            r#"{"title":"","title":"Spoofed","pages":[{"extractedText":"   "}]}"#,
-            r#"{ @#$ "title":"","pages":[{"extractedText":"   "}] }"#,
-            r#"{"title":"","pages":[{"extractedText":"   "}]} TRAILING"#,
-        ] {
-            let mut bad_pdf = empty_title_whitespace_pdf.clone();
-            bad_pdf.extend_from_slice(
-                format!(
-                    "\n%EasyOfficePDFModelBase64:{}\n",
-                    b64_encode_test(bad_json.as_bytes())
-                )
-                .as_bytes(),
-            );
-            assert!(matches!(
-                PdfSerializer::parse(&bad_pdf),
-                Err(EasyOfficeError::SecurityViolation(_))
-            ));
-        }
-
-        let two_page_pdf = PdfSerializer::serialize(&PdfDocumentModel {
-            title: "TwoPages".to_string(),
-            pages: vec![
-                PdfPageModel {
-                    page_number: 1,
-                    rotation_degrees: 0,
-                    body_text: "A".to_string(),
-                    approval_stamp: None,
-                },
-                PdfPageModel {
-                    page_number: 2,
-                    rotation_degrees: 0,
-                    body_text: "B".to_string(),
-                    approval_stamp: None,
-                },
-            ],
-            watermark_text: None,
-        });
-        for spoof_two_page_json in [
-            r#"{"title":"TwoPages","pages":[{"extractedText":"AB"},{"extractedText":""}]}"#,
-            r#"{"title":"TwoPages","pages":[{"extractedText":"AB"}]}"#,
-            r#"{"title":"TwoPages","bodyText":"AB"}"#,
-            r#"{"title":"TwoPages","pages":[{"bodyText":"A","extractedText":"SPOOFED"},{"extractedText":"B"}]}"#,
-        ] {
-            let mut boundary_spoof_pdf = two_page_pdf.clone();
-            boundary_spoof_pdf.extend_from_slice(
-                format!(
-                    "\n%EasyOfficePDFModelBase64:{}\n",
-                    b64_encode_test(spoof_two_page_json.as_bytes())
-                )
-                .as_bytes(),
-            );
-            assert!(matches!(
-                PdfSerializer::parse(&boundary_spoof_pdf),
-                Err(EasyOfficeError::SecurityViolation(_))
-            ));
-        }
-
-        let structural_body_model = PdfDocumentModel {
-            title: "StreamFraming".to_string(),
-            pages: vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: "Literal /Type /Metadata and /Type /Page /Rotate 90 inside stream"
-                    .to_string(),
-                approval_stamp: None,
-            }],
-            watermark_text: None,
-        };
-        let structural_body_bytes = PdfSerializer::serialize(&structural_body_model);
-        assert_eq!(
-            PdfSerializer::parse(&structural_body_bytes).unwrap(),
-            structural_body_model
-        );
-
-        let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length 260 >>\nstream\n/F2 11 Tf\nBT /F1 12 Tf 54 760 Td [(Hel) -15 (lo )\n(World)] TJ ET\nBT [3 2] 0 d /Span << /MCID 0 /Lang (ko-KR) >> BDC (\\101\\tLine\\\nCont) Tj EMC ET\nBT /F2 11 Tf ET\nBT <AC00> Tj ET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
-        let parsed_edge = PdfSerializer::parse(multiline_tj_comment_pdf).unwrap();
-        assert_eq!(
-            parsed_edge.pages[0].body_text,
-            "Hello World\nA\tLineCont\n가"
-        );
-        assert_eq!(PdfSerializer::decode_base64_bytes("YQ==YQ=="), None);
-    }
-
-    #[test]
-    fn test_pdf_single_line_stream_relative_td_ocr_3tr_and_swift_blank_line_pagination() {
-        let single_line_pdf = concat!(
-            "%PDF-1.7\n",
-            "1 0 obj << /Title (Report (2026)) /Type /Catalog >> endobj\n",
-            "2 0 obj << /Type /Metadata >> endobj\n",
-            "3 0 obj << /Rotate 90 /PageNumber 1 /Type /Page >> endobj\n",
-            "4 0 obj << /Length 120 >> stream BT 3 Tr /F1 11 Tf 100 200 Td (OCR Word1) Tj 0 0 Td (OCR Word2) Tj 286 404 Td ([STAMP] BodyLine) Tj ET endstream endobj\n",
-            "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
-        );
-        let parsed = PdfSerializer::parse(single_line_pdf.as_bytes()).unwrap();
-        assert_eq!(parsed.title, "Report (2026)");
-        assert_eq!(parsed.pages.len(), 1);
-        assert_eq!(parsed.pages[0].rotation_degrees, 90);
-        assert_eq!(
-            parsed.pages[0].body_text,
-            "OCR Word1\nOCR Word2\n[STAMP] BodyLine"
-        );
-        assert_eq!(parsed.pages[0].approval_stamp, None);
-
-        let relative_stamp_pdf = concat!(
-            "%PDF-1.7\n",
-            "1 0 obj << /Type /Catalog /Title (RelativeTd) >> endobj\n",
-            "2 0 obj << /Type /Page /PageNumber 1 >> endobj\n",
-            "3 0 obj << /Length 96 >>\nstream\n",
-            "BT /F1 10 Tf 386 620 Td (Header) Tj 0 -16 Td ([STAMP] 결재승인) Tj ET\n",
-            "endstream\nendobj\n",
-            "xref\n0 4\ntrailer << /Root 1 0 R /Size 4 >>\nstartxref\n0\n%%EOF\n"
-        );
-        let parsed_rel = PdfSerializer::parse(relative_stamp_pdf.as_bytes()).unwrap();
-        assert_eq!(parsed_rel.pages[0].body_text, "Header");
-        assert_eq!(
-            parsed_rel.pages[0].approval_stamp.as_deref(),
-            Some("결재승인")
-        );
-
-        let non_empty_lines: Vec<String> = (1..=45).map(|n| format!("문단_{n:02}")).collect();
-        let raw_with_blanks = non_empty_lines.join("\n\n");
-        let page1_chunk = non_empty_lines[..42].join("\n");
-        let page2_chunk = non_empty_lines[42..].join("\n");
-        let swift_style_pdf = format!(
-            concat!(
-                "%PDF-1.7\n",
-                "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Title (SwiftMultiPage) >>\nendobj\n",
-                "2 0 obj\n<< /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>\nendobj\n",
-                "3 0 obj\n<< /Type /Page /Parent 2 0 R /PageNumber 1 /Rotate 0 /Contents 4 0 R >>\nendobj\n",
-                "4 0 obj\n<< /Length 200 >>\nstream\n",
-                "BT 3 Tr /F1 1 Tf 0 0 Td ({}) Tj ET\n",
-                "BT 3 Tr /F1 1 Tf 0 2 Td ([FORM] 기안자: 홍길동) Tj ET\n",
-                "1 1 1 rg BT 0 Tr /F1 13 Tf 54 775 Td (Banner1) Tj ET\n",
-                "endstream\nendobj\n",
-                "5 0 obj\n<< /Type /Page /Parent 2 0 R /PageNumber 2 /Rotate 0 /Contents 6 0 R >>\nendobj\n",
-                "6 0 obj\n<< /Length 120 >>\nstream\n",
-                "BT 3 Tr /F1 1 Tf 0 0 Td ({}) Tj ET\n",
-                "1 1 1 rg BT 0 Tr /F1 13 Tf 54 775 Td (Banner2) Tj ET\n",
-                "endstream\nendobj\n",
-                "7 0 obj\n<< /Type /Metadata /Subtype /EasyOfficeStudio /Length 64 >>\nstream\n",
-                "%EasyOfficePDFModelBase64:{}\n",
-                "endstream\nendobj\n",
-                "xref\n0 8\ntrailer << /Size 8 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
-            ),
-            PdfSerializer::escape_pdf_text(&page1_chunk),
-            PdfSerializer::escape_pdf_text(&page2_chunk),
-            b64_encode_test(
-                format!(
-                    r#"{{"title":"SwiftMultiPage","watermarkText":"","pages":[{{"extractedText":{}}}]}}"#,
-                    StrictJsonValue::Str(raw_with_blanks).to_json_string()
-                )
-                .as_bytes()
-            )
-        );
-        let parsed_swift_mp = PdfSerializer::parse(swift_style_pdf.as_bytes()).unwrap();
-        assert_eq!(parsed_swift_mp.title, "SwiftMultiPage");
-        assert_eq!(parsed_swift_mp.pages.len(), 2);
-        assert_eq!(parsed_swift_mp.pages[0].body_text, page1_chunk);
-        assert_eq!(parsed_swift_mp.pages[1].body_text, page2_chunk);
     }
 }

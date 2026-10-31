@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use crate::EasyOfficeError;
 
 const MAX_JSON_NESTING_DEPTH: usize = 32;
-const MAX_EXACT_F64_INT: f64 = 9_007_199_254_740_991.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrictJsonValue {
@@ -66,12 +65,78 @@ impl StrictJsonValue {
         if let Ok(v) = n.parse::<u64>() {
             return Some(v);
         }
-        let f = n.parse::<f64>().ok()?;
-        if f.is_finite() && (0.0..=MAX_EXACT_F64_INT).contains(&f) && f.fract() == 0.0 {
-            Some(f as u64)
-        } else {
-            None
+        let (is_neg, unsigned_str) = match n.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, n.as_str()),
+        };
+        let (mantissa, exp_opt) = match unsigned_str.find(['e', 'E']) {
+            Some(pos) => (&unsigned_str[..pos], Some(&unsigned_str[pos + 1..])),
+            None => (unsigned_str, None),
+        };
+        let (int_part, frac_part) = match mantissa.split_once('.') {
+            Some((ip, fp)) => {
+                if fp.is_empty() || !fp.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                (ip, fp)
+            }
+            None => (mantissa, ""),
+        };
+        if int_part.is_empty() || !int_part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
         }
+        let exp: i64 = match exp_opt {
+            Some(exp_raw) => {
+                let (exp_neg, exp_digits) = if let Some(r) = exp_raw.strip_prefix('-') {
+                    (true, r)
+                } else if let Some(r) = exp_raw.strip_prefix('+') {
+                    (false, r)
+                } else {
+                    (false, exp_raw)
+                };
+                if exp_digits.is_empty() || !exp_digits.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                let mut acc = 0i64;
+                for b in exp_digits.bytes() {
+                    acc = (acc.saturating_mul(10)).saturating_add(i64::from(b - b'0'));
+                    if acc > 1_000_000 {
+                        acc = 1_000_000;
+                        break;
+                    }
+                }
+                if exp_neg {
+                    -acc
+                } else {
+                    acc
+                }
+            }
+            None => 0,
+        };
+        let mut raw_digits: Vec<u8> = Vec::with_capacity(int_part.len() + frac_part.len());
+        raw_digits.extend_from_slice(int_part.as_bytes());
+        raw_digits.extend_from_slice(frac_part.as_bytes());
+        let Some(first_nz) = raw_digits.iter().position(|&b| b != b'0') else {
+            return Some(0);
+        };
+        if is_neg {
+            return None;
+        }
+        let last_nz = raw_digits.iter().rposition(|&b| b != b'0')?;
+        let trailing_zeros = (raw_digits.len() - 1 - last_nz) as i64;
+        let sig = &raw_digits[first_nz..=last_nz];
+        let scale = exp - (frac_part.len() as i64) + trailing_zeros;
+        if scale < 0 || (sig.len() as i64) + scale > 20 {
+            return None;
+        }
+        let mut val = 0u64;
+        for &b in sig {
+            val = val.checked_mul(10)?.checked_add(u64::from(b - b'0'))?;
+        }
+        for _ in 0..scale {
+            val = val.checked_mul(10)?;
+        }
+        Some(val)
     }
 
     pub fn to_scalar_string(&self) -> Option<String> {
@@ -394,6 +459,41 @@ mod tests {
             Some(10_000)
         );
         assert_eq!(StrictJsonValue::parse("-0").unwrap().as_u64(), Some(0));
+        assert_eq!(StrictJsonValue::parse("-0.0").unwrap().as_u64(), Some(0));
+        assert_eq!(
+            StrictJsonValue::parse("1500e-2").unwrap().as_u64(),
+            Some(15)
+        );
+        assert_eq!(
+            StrictJsonValue::parse("1e18").unwrap().as_u64(),
+            Some(1_000_000_000_000_000_000)
+        );
+        assert_eq!(
+            StrictJsonValue::parse("18446744073709551615")
+                .unwrap()
+                .as_u64(),
+            Some(u64::MAX)
+        );
+        assert_eq!(
+            StrictJsonValue::parse("18446744073709551616")
+                .unwrap()
+                .as_u64(),
+            None
+        );
+        assert_eq!(
+            StrictJsonValue::parse("4503599627370496.5")
+                .unwrap()
+                .as_u64(),
+            None
+        );
+        assert_eq!(
+            StrictJsonValue::parse("1.0000000000000001")
+                .unwrap()
+                .as_u64(),
+            None
+        );
+        assert_eq!(StrictJsonValue::parse("1e-400").unwrap().as_u64(), None);
+        assert_eq!(StrictJsonValue::parse("-1e-400").unwrap().as_u64(), None);
         assert_eq!(StrictJsonValue::parse("1.5").unwrap().as_u64(), None);
         assert_eq!(StrictJsonValue::parse("-1").unwrap().as_u64(), None);
         assert_eq!(StrictJsonValue::parse("1e25").unwrap().as_u64(), None);

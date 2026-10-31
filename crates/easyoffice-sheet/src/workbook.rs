@@ -26,6 +26,29 @@ impl WorkbookEngine {
         }
     }
 
+    pub fn is_same_sheet_identity(a: &str, b: &str) -> bool {
+        let ta = a.trim();
+        let tb = b.trim();
+        if ta.is_empty() || tb.is_empty() {
+            return false;
+        }
+        if ta.eq_ignore_ascii_case(tb) {
+            return true;
+        }
+        let ua = Self::unquote_sheet_token(ta);
+        let ub = Self::unquote_sheet_token(tb);
+        if ua.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(tb)) {
+            return true;
+        }
+        if ub.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(ta)) {
+            return true;
+        }
+        match (ua, ub) {
+            (Some(sa), Some(sb)) => sa.eq_ignore_ascii_case(&sb),
+            _ => false,
+        }
+    }
+
     fn find_sheet_index(&self, name: &str) -> Option<usize> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -38,18 +61,9 @@ impl WorkbookEngine {
         {
             return Some(pos);
         }
-        if let Some(unquoted) = Self::unquote_sheet_token(trimmed) {
-            if let Some(pos) = self
-                .sheets
-                .iter()
-                .position(|s| s.name.eq_ignore_ascii_case(&unquoted))
-            {
-                return Some(pos);
-            }
-        }
-        self.sheets.iter().position(|s| {
-            Self::unquote_sheet_token(&s.name).is_some_and(|su| su.eq_ignore_ascii_case(trimmed))
-        })
+        self.sheets
+            .iter()
+            .position(|s| Self::is_same_sheet_identity(&s.name, trimmed))
     }
 
     pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
@@ -60,11 +74,7 @@ impl WorkbookEngine {
         } else {
             trimmed
         };
-        if let Some(pos) = self
-            .sheets
-            .iter()
-            .position(|s| s.name.eq_ignore_ascii_case(norm))
-        {
+        if let Some(pos) = self.find_sheet_index(norm) {
             return &mut self.sheets[pos];
         }
         let mut engine = SheetEngine::new(norm);

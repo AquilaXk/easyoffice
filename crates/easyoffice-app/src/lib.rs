@@ -192,10 +192,13 @@ impl EasyOfficeIpcRouter {
         seed_defaults: bool,
     ) -> Result<WorkbookEngine, EasyOfficeError> {
         let mut wb = WorkbookEngine::new();
-        wb.add_sheet("Sheet1");
-        wb.add_sheet("Sheet2");
+        let explicit_sheets_val = StrictJsonValue::get_field(entries, "sheets");
+        if explicit_sheets_val.is_none() {
+            wb.add_sheet("Sheet1");
+            wb.add_sheet("Sheet2");
+        }
         wb.add_sheet(default_sheet);
-        if let Some(sheets_val) = StrictJsonValue::get_field(entries, "sheets") {
+        if let Some(sheets_val) = explicit_sheets_val {
             let sheet_items = sheets_val.as_array().ok_or_else(|| {
                 EasyOfficeError::InvalidArgument(
                     "JSON 'sheets' 필드는 문자열 배열이어야 합니다.".to_string(),
@@ -246,21 +249,21 @@ impl EasyOfficeIpcRouter {
                         )
                     })?,
                 };
-                if sh.eq_ignore_ascii_case("Sheet1") {
+                if WorkbookEngine::is_same_sheet_identity(sh, "Sheet1") {
                     seen_sheet1 = true;
                 }
-                if sh.eq_ignore_ascii_case("Sheet2") {
+                if WorkbookEngine::is_same_sheet_identity(sh, "Sheet2") {
                     seen_sheet2 = true;
                 }
                 cell_triples.push((sh.to_string(), addr.to_string(), val));
             }
         }
         if seed_defaults {
-            if !seen_sheet1 {
+            if !seen_sheet1 && wb.sheet("Sheet1").is_some() {
                 wb.set_cell("Sheet1", "A1", "1200")?;
                 wb.set_cell("Sheet1", "B1", "850")?;
             }
-            if !seen_sheet2 {
+            if !seen_sheet2 && wb.sheet("Sheet2").is_some() {
                 wb.set_cell("Sheet2", "A1", "100")?;
             }
         }
@@ -1330,10 +1333,12 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
     let html_asset = include_str!("../ui/index.html");
     let css_asset = include_str!("../ui/styles.css");
+    let pii_scrubber_asset = include_str!("../ui/pii-dom-scrubber.js");
     let js_asset = include_str!("../ui/app.js");
     let tauri_conf = include_str!("../tauri.conf.json");
     if !html_asset.contains("EasyOffice")
         || !css_asset.contains("#5C6BC0")
+        || !pii_scrubber_asset.contains("__EASYOFFICE_CREATE_PII_SCRUBBER__")
         || !js_asset.contains("compositionstart")
         || !tauri_conf.contains("downloadBootstrapper")
     {
@@ -1548,5 +1553,26 @@ mod tests {
             r#"{"entries":[{"name":"word/document.xml","compressed":128,"uncompressed":512}],"xml":"<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><w:document/>"}"#,
         )
         .is_err());
+
+        let symmetric_quote_sheet = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"특수시트","expr":"=SUM(A1:A2)","cells":[{"sheet":"특수시트","cell":"A1","value":200},{"sheet":"'특수시트'","cell":"A2","value":300}]}"#,
+        )
+        .unwrap();
+        assert!(symmetric_quote_sheet.contains("\"value\":\"500\""));
+
+        let explicit_sheets_missing_sheet2 = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"예산표","sheets":["예산표"],"expr":"=Sheet2!A1+10","cells":[{"sheet":"예산표","cell":"A1","value":300}]}"#,
+        )
+        .unwrap();
+        assert!(explicit_sheets_missing_sheet2.contains("\"value\":\"#REF!\""));
+
+        let quoted_sheet1_override = EasyOfficeIpcRouter::dispatch(
+            "evaluate_workbook_formula",
+            r#"{"sheet":"'Sheet1'","expr":"=A1","cells":[{"cell":"A1","value":500}]}"#,
+        )
+        .unwrap();
+        assert!(quoted_sheet1_override.contains("\"value\":\"500\""));
     }
 }

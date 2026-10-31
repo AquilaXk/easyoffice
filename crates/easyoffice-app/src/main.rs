@@ -12,6 +12,7 @@ use std::time::Duration;
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
 const OFFLINE_RPC_JS: &str = include_str!("../ui/offline-rpc.js");
+const PII_DOM_SCRUBBER_JS: &str = include_str!("../ui/pii-dom-scrubber.js");
 const APP_JS: &str = include_str!("../ui/app.js");
 const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
 const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
@@ -185,6 +186,11 @@ fn handle_http_connection(mut stream: TcpStream, port: u16) {
             "200 OK",
             "application/javascript; charset=utf-8",
             OFFLINE_RPC_JS.to_string(),
+        ),
+        ("GET", "/pii-dom-scrubber.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            PII_DOM_SCRUBBER_JS.to_string(),
         ),
         ("GET", "/app.js") => (
             "200 OK",
