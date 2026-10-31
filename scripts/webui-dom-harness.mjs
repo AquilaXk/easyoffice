@@ -4,6 +4,7 @@ import vm from "node:vm";
 
 const ROOT = process.cwd();
 const INDEX_HTML_PATH = path.join(ROOT, "crates/easyoffice-app/ui/index.html");
+const OFFLINE_RPC_JS_PATH = path.join(ROOT, "crates/easyoffice-app/ui/offline-rpc.js");
 const APP_JS_PATH = path.join(ROOT, "crates/easyoffice-app/ui/app.js");
 
 const VOID_TAGS = new Set(["meta", "link", "input", "br", "hr", "img"]);
@@ -42,6 +43,22 @@ class MiniTextNode extends MiniNode {
   constructor(text, ownerDocument) {
     super(3, ownerDocument);
     this._text = String(text ?? "");
+  }
+
+  get nodeValue() {
+    return this._text;
+  }
+
+  set nodeValue(val) {
+    this._text = String(val ?? "");
+  }
+
+  get data() {
+    return this._text;
+  }
+
+  set data(val) {
+    this._text = String(val ?? "");
   }
 
   get textContent() {
@@ -100,13 +117,18 @@ function matchesSimple(el, spec) {
   return true;
 }
 
-function tokenizeComplexSelector(sel, scopeEl) {
-  let working = sel.trim();
-  let anchoredToScope = false;
-  if (working.startsWith(":scope")) {
-    anchoredToScope = true;
-    working = working.slice(6).trim();
+function pushSelectorToken(tokens, rawBuf) {
+  const trimmed = rawBuf.trim();
+  if (!trimmed) return;
+  if (trimmed === ":scope") {
+    tokens.push({ type: "scope" });
+    return;
   }
+  tokens.push({ type: "sel", spec: parseSimpleSelector(trimmed) });
+}
+
+function tokenizeComplexSelector(sel, scopeEl) {
+  const working = sel.trim();
   const tokens = [];
   let buf = "";
   let bracketDepth = 0;
@@ -120,7 +142,7 @@ function tokenizeComplexSelector(sel, scopeEl) {
 
     if (bracketDepth === 0 && parenDepth === 0 && (ch === ">" || /\s/.test(ch))) {
       if (buf.trim()) {
-        tokens.push({ type: "sel", spec: parseSimpleSelector(buf) });
+        pushSelectorToken(tokens, buf);
         buf = "";
       }
       if (ch === ">") {
@@ -137,49 +159,39 @@ function tokenizeComplexSelector(sel, scopeEl) {
     buf += ch;
   }
   if (buf.trim()) {
-    tokens.push({ type: "sel", spec: parseSimpleSelector(buf) });
+    pushSelectorToken(tokens, buf);
   }
   if (tokens.length > 0 && tokens[tokens.length - 1].type === "comb") {
     tokens.pop();
   }
-  return { anchoredToScope, scopeEl, tokens };
+  return { scopeEl, tokens };
+}
+
+function matchesToken(el, tok, scopeEl) {
+  if (!el || el.nodeType !== 1 || !tok) return false;
+  if (tok.type === "scope") return el === scopeEl;
+  if (tok.type === "sel") return matchesSimple(el, tok.spec);
+  return false;
+}
+
+function matchChainAt(el, idx, tokens, scopeEl) {
+  if (idx < 0 || !matchesToken(el, tokens[idx], scopeEl)) return false;
+  if (idx === 0) return true;
+  const combTok = tokens[idx - 1];
+  if (!combTok || combTok.type !== "comb") return false;
+  if (combTok.comb === ">") {
+    return Boolean(el.parentElement) && matchChainAt(el.parentElement, idx - 2, tokens, scopeEl);
+  }
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (matchChainAt(p, idx - 2, tokens, scopeEl)) return true;
+  }
+  return false;
 }
 
 function matchesParsedChain(el, parsed) {
-  const { anchoredToScope, scopeEl, tokens } = parsed;
+  const { scopeEl, tokens } = parsed;
   if (tokens.length === 0) return false;
-  if (anchoredToScope) {
-    if (tokens[0].type === "comb" && tokens[0].comb === ">") {
-      if (tokens.length !== 2) return false;
-      return el.parentElement === scopeEl && matchesSimple(el, tokens[1].spec);
-    }
-  }
-  let idx = tokens.length - 1;
-  if (tokens[idx].type !== "sel" || !matchesSimple(el, tokens[idx].spec)) {
-    return false;
-  }
-  let cur = el;
-  idx -= 1;
-  while (idx >= 0) {
-    const comb = tokens[idx].comb;
-    const prevTok = tokens[idx - 1];
-    if (!prevTok || prevTok.type !== "sel") return false;
-    if (comb === ">") {
-      cur = cur.parentElement;
-      if (!cur || !matchesSimple(cur, prevTok.spec)) return false;
-    } else {
-      cur = cur.parentElement;
-      while (cur && !matchesSimple(cur, prevTok.spec)) {
-        cur = cur.parentElement;
-      }
-      if (!cur) return false;
-    }
-    idx -= 2;
-  }
-  if (anchoredToScope && scopeEl && cur !== scopeEl && !scopeEl.contains(cur)) {
-    return false;
-  }
-  return true;
+  return matchChainAt(el, tokens.length - 1, tokens, scopeEl);
 }
 
 function matchesSelectorList(el, selectorList, scopeEl) {
@@ -511,7 +523,10 @@ class MiniElement extends MiniNode {
 
   focus() {
     const doc = this.ownerDocument;
-    if (doc.activeElement && doc.activeElement !== this) {
+    if (doc.activeElement === this) {
+      return;
+    }
+    if (doc.activeElement && doc.activeElement !== doc.body) {
       doc.activeElement.blur();
     }
     doc.activeElement = this;
@@ -520,9 +535,10 @@ class MiniElement extends MiniNode {
 
   blur() {
     const doc = this.ownerDocument;
-    if (doc.activeElement === this) {
-      doc.activeElement = null;
+    if (doc.activeElement !== this) {
+      return;
     }
+    doc.activeElement = doc.body || null;
     this.dispatchEvent({ type: "blur", target: this });
   }
 
@@ -585,7 +601,8 @@ function parseAttributesInto(attrText, el) {
 function parseHtmlFragment(html, ownerDocument) {
   const root = { childNodes: [], _adopt: (n) => n, appendChild(n) { this.childNodes.push(n); } };
   const stack = [root];
-  const tagRe = /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([A-Za-z0-9-]+)\s*>|<([A-Za-z0-9-]+)([^>]*?)(\/?)>/gi;
+  const tagRe =
+    /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([A-Za-z0-9-]+)\s*>|<([A-Za-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
   let lastIdx = 0;
   let m;
   while ((m = tagRe.exec(html)) !== null) {
@@ -630,6 +647,7 @@ class MiniDocument {
       new MiniElement("html", this);
     this.body =
       this.documentElement.querySelector("body") || new MiniElement("body", this);
+    this.activeElement = this.body;
   }
 
   createElement(tag) {
@@ -673,10 +691,13 @@ export async function flushAsyncTurns(count = 6) {
 
 export async function createWorkspaceHarness(options = {}) {
   const html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
+  const offlineRpcCode = fs.readFileSync(OFFLINE_RPC_JS_PATH, "utf8");
   const jsCode = fs.readFileSync(APP_JS_PATH, "utf8");
   const document = new MiniDocument(html);
   const windowListeners = new Map();
   const downloads = [];
+  let nextTimerId = 1;
+  const cancelledTimers = new Set();
 
   const sandbox = {
     document,
@@ -707,10 +728,18 @@ export async function createWorkspaceHarness(options = {}) {
       revokeObjectURL: () => {},
     },
     setTimeout: (fn) => {
-      fn();
-      return 1;
+      const id = nextTimerId;
+      nextTimerId += 1;
+      setImmediate(() => {
+        if (!cancelledTimers.has(id)) {
+          fn();
+        }
+      });
+      return id;
     },
-    clearTimeout: () => {},
+    clearTimeout: (id) => {
+      cancelledTimers.add(id);
+    },
     getSelection: () => options.selection || null,
     addEventListener: (type, fn) => {
       if (!windowListeners.has(type)) windowListeners.set(type, []);
@@ -753,9 +782,29 @@ export async function createWorkspaceHarness(options = {}) {
 
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
+  vm.runInContext(offlineRpcCode, sandbox, { filename: "offline-rpc.js" });
   vm.runInContext(jsCode, sandbox, { filename: "app.js" });
   document.dispatchEvent({ type: "DOMContentLoaded" });
   await flushAsyncTurns();
 
-  return { document, sandbox, downloads };
+  function userClick(el) {
+    if (!el) return;
+    const focusable =
+      el.closest(
+        'button, input, select, textarea, a, [contenteditable="true"], [tabindex]'
+      ) || null;
+    if (
+      document.activeElement &&
+      document.activeElement !== document.body &&
+      document.activeElement !== focusable
+    ) {
+      document.activeElement.blur();
+    }
+    if (focusable && document.activeElement !== focusable) {
+      focusable.focus();
+    }
+    el.click();
+  }
+
+  return { document, sandbox, downloads, userClick };
 }

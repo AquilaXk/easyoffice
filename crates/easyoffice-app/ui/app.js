@@ -234,316 +234,28 @@
     },
   };
 
-  function localScrubPii(rawText) {
-    const text = String(rawText || "");
-    let residentCount = 0;
-    let phoneCount = 0;
-    let emailCount = 0;
-    const scrubbedText = text
-      .replace(/\b\d{6}-[1-4]\d{6}\b/g, () => {
-        residentCount += 1;
-        return "******-*******";
-      })
-      .replace(/\b\d{6}[1-4]\d{6}\b/g, () => {
-        residentCount += 1;
-        return "*************";
-      })
-      .replace(
-        /(?:\+82[-\s]?10|01[016789]|02|0[3-6][1-5])[-\s]\d{3,4}[-\s]\d{4}\b/g,
-        (match) => {
-          phoneCount += 1;
-          if (match.startsWith("+82")) return "+82-10-****-****";
-          if (match.startsWith("02")) return "02-****-****";
-          return "010-****-****";
-        }
-      )
-      .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, () => {
-        emailCount += 1;
-        return "***@***.***";
-      });
-    return {
-      scrubbedText,
-      maskedResidentIds: residentCount,
-      maskedPhoneNumbers: phoneCount,
-      maskedEmails: emailCount,
-      totalMasked: residentCount + phoneCount + emailCount,
-    };
-  }
-
-  function localSmartAssistant(rawText) {
-    const text = String(rawText || "").trim();
-    const chars = Array.from(text).length;
-    const words = text ? text.split(/\s+/).length : 0;
-    const sentences = text ? text.split(/[.!?。]+/).filter((s) => s.trim().length > 0).length : 0;
-    const readingTimeSeconds = Math.max(1, Math.ceil((words / 220) * 60));
-    const lines = text
-      ? text
-          .split(/\n+/)
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0)
-      : [];
-    const summaryLines = lines
-      .slice()
-      .sort((a, b) => b.length - a.length)
-      .slice(0, 2);
-    const actionItems = lines.filter(
-      (l) =>
-        l.startsWith("- [ ]") ||
-        l.startsWith("[TODO]") ||
-        l.startsWith("TODO:") ||
-        l.startsWith("할일:") ||
-        l.startsWith("조치:")
-    );
-    const styleSuggestions = [];
-    if (lines.some((l) => Array.from(l).length > 120)) {
-      styleSuggestions.push("120자를 초과하는 긴 문장이 있습니다. 두 문장으로 나누세요.");
-    }
-    return {
-      summaryCount: summaryLines.length,
-      charCount: chars,
-      wordCount: words,
-      sentenceCount: sentences,
-      readingTimeSeconds,
-      actionItemCount: actionItems.length,
-      suggestionCount: styleSuggestions.length,
-      summaryLines,
-      styleSuggestions,
-      actionItems,
-    };
-  }
-
-  function localAuditSecurity(payload) {
-    const raw = String(payload || "");
-    const pipeIdx = raw.indexOf("|");
-    const entriesPart = pipeIdx >= 0 ? raw.slice(0, pipeIdx) : "";
-    const xmlPart = pipeIdx >= 0 ? raw.slice(pipeIdx + 1) : raw;
-    const upperXml = (xmlPart || "").toUpperCase();
-    if (upperXml.includes("<!DOCTYPE") || upperXml.includes("<!ENTITY")) {
-      return {
-        status: "REJECTED",
-        xxeGuard: "BLOCKED",
-        zipGuard: "PASSED",
-        checkedEntries: 0,
-      };
-    }
-    const entries = (entriesPart || "")
-      .split(";")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    for (const item of entries) {
-      const cols = item.split(",").map((c) => c.trim());
-      const entryPath = cols[0] || "";
-      const comp = Number(cols[1] || 1);
-      const uncomp = Number(cols[2] || 0);
-      const enc = cols[3] === "true" || cols[3] === "1";
-      if (
-        entryPath.startsWith("/") ||
-        entryPath.includes("..") ||
-        entryPath.includes("\\") ||
-        enc ||
-        (comp > 0 && uncomp / comp > 100)
-      ) {
-        return {
-          status: "REJECTED",
-          xxeGuard: "PASSED",
-          zipGuard: "BLOCKED",
-          checkedEntries: entries.length,
-        };
-      }
-    }
-    return {
-      status: "SAFE",
-      xxeGuard: "PASSED",
-      zipGuard: "PASSED",
-      checkedEntries: entries.length || 1,
-    };
-  }
-
-  function localExecuteRibbonCommand(payload) {
-    const cmdId = String(payload || "").trim();
-    localRibbonState.executedCount += 1;
-    if (cmdId.endsWith("-home-bold")) {
-      localRibbonState.isBold = !localRibbonState.isBold;
-    } else if (cmdId.endsWith("-home-italic")) {
-      localRibbonState.isItalic = !localRibbonState.isItalic;
-    } else if (cmdId.endsWith("-home-underline")) {
-      localRibbonState.isUnderline = !localRibbonState.isUnderline;
-    } else if (cmdId.endsWith("-home-style")) {
-      localRibbonState.stylePresetIndex = (localRibbonState.stylePresetIndex + 1) % 4;
-    } else if (cmdId.endsWith("-layout-paper")) {
-      localRibbonState.paperSize = localRibbonState.paperSize === "A4" ? "Letter" : "A4";
-    } else if (cmdId.endsWith("-layout-orientation")) {
-      localRibbonState.isLandscape = !localRibbonState.isLandscape;
-    } else if (cmdId.endsWith("-layout-columns")) {
-      localRibbonState.columnCount =
-        localRibbonState.columnCount >= 3 ? 1 : localRibbonState.columnCount + 1;
-    } else if (cmdId.endsWith("-layout-margins")) {
-      localRibbonState.marginPresetIndex = (localRibbonState.marginPresetIndex + 1) % 3;
-    } else if (cmdId.endsWith("-data-sort")) {
-      localRibbonState.sortAscending = !localRibbonState.sortAscending;
-    } else if (cmdId === "hwp-mod-manuscript") {
-      localRibbonState.manuscriptGridEnabled = !localRibbonState.manuscriptGridEnabled;
-    } else if (cmdId === "hwp-mod-header") {
-      localRibbonState.approvalHeaderEnabled = !localRibbonState.approvalHeaderEnabled;
-    } else if (cmdId === "hwp-mod-border") {
-      localRibbonState.doubleDiagonalBorderEnabled = !localRibbonState.doubleDiagonalBorderEnabled;
-    } else if (cmdId.endsWith("-review-track")) {
-      localRibbonState.trackChangesEnabled = !localRibbonState.trackChangesEnabled;
-    } else if (cmdId.endsWith("-view-split")) {
-      localRibbonState.splitViewEnabled = !localRibbonState.splitViewEnabled;
-    } else if (cmdId.endsWith("-view-ribbon")) {
-      localRibbonState.ribbonCollapsed = !localRibbonState.ribbonCollapsed;
-    } else if (cmdId.endsWith("-view-theme")) {
-      localRibbonState.darkThemeEnabled = !localRibbonState.darkThemeEnabled;
-    } else if (cmdId.endsWith("-view-zoom")) {
-      localRibbonState.zoomPercent =
-        localRibbonState.zoomPercent === 100
-          ? 125
-          : localRibbonState.zoomPercent === 125
-            ? 150
-            : localRibbonState.zoomPercent === 150
-              ? 90
-              : 100;
-    } else if (cmdId === "pdf-mod-rotate") {
-      localRibbonState.pdfRotationDegrees = (localRibbonState.pdfRotationDegrees + 90) % 360;
-    }
-    return {
-      commandId: cmdId,
-      summary: "명령 실행 완료 (" + cmdId + ")",
-      contextualBadge: CONTEXTUAL_TOOL_BADGES[activeModule] || "표·개체 도구",
-      catalogCount: 140,
-      ...localRibbonState,
-    };
-  }
-
-  function encodeUtf8Base64(text) {
-    const bytes = new TextEncoder().encode(String(text || ""));
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return typeof globalThis.btoa === "function" ? globalThis.btoa(binary) : "";
-  }
-
-  const MOCK_IPC_HANDLERS = {
-    get_workspace_bootstrap: () => ({
-      platform: navigator.platform.includes("Mac") ? "macOS" : "Desktop",
-      shortcutModifier: navigator.platform.includes("Mac") ? "⌘" : "Ctrl",
-      recentFormatFilters: ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
-      openTabs: [
-        { id: "tab-doc", title: "분기_경영실적_보고서.docx", module: "DOC", isPinned: true },
-        { id: "tab-hwp", title: "행정안전부_기안문.hwpx", module: "HWP", isPinned: true },
-        { id: "tab-sheet", title: "예산집행_총괄표.xlsx", module: "SHEET", isPinned: false },
-        { id: "tab-slide", title: "전략기획_발표자료.pptx", module: "SLIDE", isPinned: false },
-        { id: "tab-pdf", title: "최종계약서_검토본.pdf", module: "PDF", isPinned: false },
-      ],
-    }),
-    get_ribbon_category_commands: (payload) => {
-      const [modPart, catPart] = String(payload || "DOC|home").split("|");
-      const mKey = modPart === "CONV" ? "DOC" : modPart;
-      const modMap = RIBBON_CATEGORY_TOOLS[mKey] || RIBBON_CATEGORY_TOOLS.DOC;
-      return { commands: modMap[catPart] || modMap.home };
-    },
-    convert_document_format: (payload) => {
-      const raw = String(payload || "docx->hwpx|문서|본문");
-      const firstPipe = raw.indexOf("|");
-      const firstSeg = firstPipe >= 0 ? raw.slice(0, firstPipe) : raw;
-      const restSeg = firstPipe >= 0 ? raw.slice(firstPipe + 1) : "통합_변환_문서|본문";
-      const secondPipe = restSeg.indexOf("|");
-      const [src, dst] = (firstSeg || "docx->hwpx").split("->");
-      const title = (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서";
-      const body = (secondPipe >= 0 ? restSeg.slice(secondPipe + 1) : "") || "본문 텍스트";
-      const encoder = new TextEncoder();
-      const rawBytes = encoder.encode(title + "\n" + body).length;
-      const containerOverhead = {
-        docx: 640,
-        doc: 1024,
-        hwpx: 720,
-        hwtx: 720,
-        hwp: 1024,
-        hwt: 1024,
-        odt: 600,
-        xlsx: 680,
-        xls: 1024,
-        ods: 620,
-        pptx: 760,
-        ppsx: 760,
-        ppt: 1024,
-        odp: 640,
-        pdf: 480,
-        rtf: 180,
-        md: 16,
-        csv: 24,
-        tsv: 24,
-        txt: 0,
-      };
-      if (!(src in containerOverhead) || !(dst in containerOverhead)) {
-        throw new Error("지원하지 않는 포맷: " + src + "->" + dst);
-      }
-      const srcBytes = rawBytes + (containerOverhead[src] ?? 256);
-      const dstBytes = rawBytes + (containerOverhead[dst] ?? 256);
-      const b64 = encodeUtf8Base64(title + "\n" + body);
-      const tableCount = body.includes("[[TABLE_ROW]]\t")
-        ? Math.max(1, (body.match(/\[\[TABLE_NEW\]\]/g) || []).length)
-        : 0;
-      return {
-        sourceFormat: src,
-        targetFormat: dst,
-        sourceBytes: srcBytes,
-        outputBytes: dstBytes,
-        targetBytes: dstBytes,
-        detectedTarget: dst,
-        tableCount,
-        specification: MODULE_SPECS[(dst || "").toUpperCase()] || "표준 문서 포맷",
-        converted_base64: b64,
-        convertedBase64: b64,
-        status: "OK",
-      };
-    },
-    run_engine_benchmark: () => ({
-      status: "ok",
-      iterations: 5,
-      allEquivalent: true,
-      suites: [
-        { suiteId: "crc32_slicing_by_8", baselineP50Us: 2068, optimizedP50Us: 464, speedupFactor: 4.46 },
-        { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
-        { suiteId: "utf16_swar_and_xml_unescape", baselineP50Us: 50, optimizedP50Us: 29, speedupFactor: 1.72 },
-        { suiteId: "sheet_dag_bitset_eval", baselineP50Us: 878, optimizedP50Us: 308, speedupFactor: 2.85 },
-        { suiteId: "swar_csv_xml_and_zero_alloc_range_agg", baselineP50Us: 640, optimizedP50Us: 195, speedupFactor: 3.28 },
-      ],
-    }),
-    run_smart_assistant: (payload) => localSmartAssistant(payload),
-    scrub_pii: (payload) => localScrubPii(payload),
-    evaluate_workbook_formula: (payload) => evaluateLocalWorkbookFormulaRpc(payload),
-    evaluate_sheet: (payload) => evaluateLocalSheetRpc(payload),
-    evaluate_sheet_formula: (payload) => ({
-      value: String(evaluateLocalSheetFormula(payload, false)),
-    }),
-    audit_security: (payload) => localAuditSecurity(payload),
-    switch_ribbon_style: (payload) => {
-      const isHangul = String(payload).includes("hangul");
-      return {
-        style: isHangul ? "한글(HWP) 7탭 모드" : "표준 오피스 7탭 모드",
-        categories: isHangul ? RIBBON_STYLE_LABELS.hangul : RIBBON_STYLE_LABELS.standard,
-      };
-    },
-    execute_ribbon_command: (payload) => localExecuteRibbonCommand(payload),
-    undo_ribbon_command: () => ({
-      commandId: "undo",
-      summary: "실행 취소 완료",
-      ...localRibbonState,
-    }),
-    redo_ribbon_command: () => ({
-      commandId: "redo",
-      summary: "다시 실행 완료",
-      ...localRibbonState,
-    }),
-  };
+  const { parseCellRefParts, normalizeFormattedNumericCell } =
+    globalThis.__EASYOFFICE_SHEET_UTILS__;
+  const MOCK_IPC_HANDLERS = globalThis.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => activeModule,
+    getActiveSheetCellRef: () => activeSheetCellRef,
+    ribbonCategoryTools: RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: RIBBON_STYLE_LABELS,
+    contextualToolBadges: CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: MODULE_SPECS,
+    localRibbonState,
+  });
 
   async function invokeIpc(command, payload) {
     if (globalThis.__TAURI_INTERNALS__ && typeof globalThis.__TAURI_INTERNALS__.invoke === "function") {
-      const raw = await globalThis.__TAURI_INTERNALS__.invoke(command, { payload });
-      return typeof raw === "string" ? JSON.parse(raw) : raw;
+      try {
+        const raw = await globalThis.__TAURI_INTERNALS__.invoke(command, { payload });
+        return typeof raw === "string" ? JSON.parse(raw) : raw;
+      } catch (tauriErr) {
+        const msg = tauriErr?.message || String(tauriErr);
+        reportIpcFailure(command, msg);
+        throw new Error(msg);
+      }
     }
     if (isHttpIpcTransportAvailable()) {
       return await invokeHttpIpc(command, payload);
@@ -607,6 +319,27 @@
   const sheetCellFocusState = new WeakMap();
   let latestSheetRecalcSeq = 0;
   let sheetSnapshotEpoch = 0;
+  let inFlightSheetWorkPromise = Promise.resolve();
+
+  function trackSheetAsyncWork(promise) {
+    const tracked = Promise.resolve(promise).catch(() => {});
+    inFlightSheetWorkPromise = tracked;
+    return promise;
+  }
+
+  function ensureSheetCellFocusEntry(td, sheetName) {
+    const initialText = (td.textContent || "").trim();
+    const entry = {
+      initialText,
+      initialRaw: td.dataset.formula || initialText,
+      pendingSnapshot: null,
+      snapshotPushed: false,
+      userEdited: false,
+      sheetName,
+    };
+    sheetCellFocusState.set(td, entry);
+    return entry;
+  }
 
   function syncSheetCellFocusBaseline(td, clearPending) {
     const st = sheetCellFocusState.get(td);
@@ -624,7 +357,16 @@
 
   function refreshFocusedSheetCellPendingSnapshot() {
     const activeEl = document.activeElement;
-    const st = activeEl ? sheetCellFocusState.get(activeEl) : null;
+    if (!activeEl) return;
+    let st = sheetCellFocusState.get(activeEl);
+    if (
+      !st &&
+      activeEl.nodeType === 1 &&
+      activeEl.dataset?.cell &&
+      document.getElementById("pane-sheet")?.contains(activeEl)
+    ) {
+      st = ensureSheetCellFocusEntry(activeEl, activeSheetName);
+    }
     if (st && !st.userEdited && !st.snapshotPushed) {
       st.sheetName = activeSheetName;
       st.pendingSnapshot = captureWorkspaceSnapshot(false);
@@ -650,165 +392,17 @@
         td.textContent = "";
         delete td.dataset.formula;
       }
-      syncSheetCellFocusBaseline(td, true);
+      if (sheetCellFocusState.has(td)) {
+        syncSheetCellFocusBaseline(td, true);
+      } else if (document.activeElement === td) {
+        ensureSheetCellFocusEntry(td, sheetName);
+      }
     });
   }
 
-  function normalizeFormattedNumericCell(raw) {
-    const trimmed = String(raw || "").trim();
-    if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(trimmed)) {
-      return trimmed.replaceAll(",", "");
-    }
-    return trimmed;
-  }
-
-  function escapeSemicolonToken(value) {
-    return String(value || "")
-      .replaceAll("\\", "\\\\")
-      .replaceAll(";", String.raw`\;`)
-      .replaceAll("?", String.raw`\?`);
-  }
-
-  function splitUnescapedQueryJs(raw) {
-    const str = String(raw || "");
-    for (let i = str.length - 1; i >= 0; i--) {
-      if (str[i] === "?") {
-        let bs = 0;
-        for (let k = i - 1; k >= 0 && str[k] === "\\"; k--) {
-          bs += 1;
-        }
-        if (bs % 2 === 0) {
-          return { cellsPart: str.slice(0, i), queryPart: str.slice(i + 1) };
-        }
-      }
-    }
-    return null;
-  }
-
-  function isCellKeyPrefixJs(str) {
-    const trimmed = String(str || "").trimStart();
-    const eqIdx = trimmed.indexOf("=");
-    if (eqIdx <= 0 || eqIdx > 64) return false;
-    const lhs = trimmed.slice(0, eqIdx).trim();
-    const bangIdx = lhs.indexOf("!");
-    const refPart = bangIdx >= 0 ? lhs.slice(bangIdx + 1).trim() : lhs;
-    return /^[A-Za-z]{1,3}\d+$/.test(refPart);
-  }
-
-  function splitEscapedCellAssignmentsJs(cellsPart) {
-    const src = String(cellsPart || "");
-    const items = [];
-    let current = "";
-    let seenEq = false;
-    let rhsStarted = false;
-    let inFormula = false;
-    let inQuotes = false;
-    let parenDepth = 0;
-
-    for (let i = 0; i < src.length; i++) {
-      const ch = src[i];
-      if (ch === "\\" && i + 1 < src.length) {
-        const nextCh = src[i + 1];
-        if (nextCh === ";" || nextCh === "?" || nextCh === "\\") {
-          if (seenEq && !rhsStarted && nextCh.trim() !== "") {
-            rhsStarted = true;
-          }
-          current += nextCh;
-          i += 1;
-          continue;
-        }
-      }
-      if (!seenEq && ch === "=") {
-        seenEq = true;
-        current += ch;
-        continue;
-      }
-      if (seenEq && !rhsStarted && ch.trim() !== "") {
-        rhsStarted = true;
-        if (ch === "=") {
-          inFormula = true;
-        }
-      }
-      if (inFormula && ch === '"') {
-        inQuotes = !inQuotes;
-        current += ch;
-        continue;
-      }
-      if (inFormula && !inQuotes) {
-        if (ch === "(") parenDepth += 1;
-        else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
-      }
-      const canSplit = inFormula ? !inQuotes && parenDepth === 0 : true;
-      if (ch === ";" && canSplit) {
-        const tail = src.slice(i + 1);
-        if (tail.trim() === "" || isCellKeyPrefixJs(tail)) {
-          const eqPos = current.indexOf("=");
-          if (eqPos > 0) {
-            items.push({
-              key: current.slice(0, eqPos).trim(),
-              value: current
-                .slice(eqPos + 1)
-                .trim()
-                .replaceAll("%3B", ";")
-                .replaceAll("%3F", "?"),
-            });
-          }
-          current = "";
-          seenEq = false;
-          rhsStarted = false;
-          inFormula = false;
-          inQuotes = false;
-          parenDepth = 0;
-          continue;
-        }
-      }
-      current += ch;
-    }
-    const lastEqPos = current.indexOf("=");
-    if (lastEqPos > 0) {
-      items.push({
-        key: current.slice(0, lastEqPos).trim(),
-        value: current
-          .slice(lastEqPos + 1)
-          .trim()
-          .replaceAll("%3B", ";")
-          .replaceAll("%3F", "?"),
-      });
-    }
-    return items;
-  }
-
-  function normalizeSheetTokenJs(raw) {
-    return String(raw || "")
-      .trim()
-      .replaceAll(/^'+|'+$/g, "")
-      .trim();
-  }
-
-  function extractActiveSheetAndExprJs(rawExpr, defaultSheet = "Sheet1") {
-    const trimmed = String(rawExpr || "").trim();
-    const pipeIdx = trimmed.indexOf("|");
-    if (pipeIdx > 0) {
-      const left = trimmed.slice(0, pipeIdx).trim();
-      if (left && !left.startsWith("=") && !left.includes("(")) {
-        const norm = normalizeSheetTokenJs(left);
-        return { sheet: norm || defaultSheet, expr: trimmed.slice(pipeIdx + 1).trim() };
-      }
-    }
-    const bangIdx = trimmed.indexOf("!");
-    if (bangIdx > 0) {
-      const left = trimmed.slice(0, bangIdx).trim();
-      if (left && !left.startsWith("=") && !left.includes("(")) {
-        const norm = normalizeSheetTokenJs(left);
-        return { sheet: norm || defaultSheet, expr: trimmed.slice(bangIdx + 1).trim() };
-      }
-    }
-    return { sheet: defaultSheet, expr: trimmed };
-  }
-
-  function collectSheetCellMap() {
+  function buildWorkbookCellsArray() {
     sheetDataStore[activeSheetName] = snapshotDomSheetCells();
-    const map = {};
+    const cells = [];
     Object.keys(sheetDataStore).forEach((shName) => {
       const snap = sheetDataStore[shName] || {};
       Object.keys(snap).forEach((ref) => {
@@ -817,273 +411,18 @@
           const val = entry.formula
             ? entry.formula
             : normalizeFormattedNumericCell(entry.value);
-          map[shName + "!" + ref] = escapeSemicolonToken(val);
+          cells.push({ sheet: shName, cell: ref, value: val });
         }
       });
     });
-    document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
-      const ref = td.dataset.cell;
-      const formula = td.dataset.formula;
-      const rawText = normalizeFormattedNumericCell(td.textContent || "");
-      const val = formula || rawText;
-      map[activeSheetName + "!" + ref] = escapeSemicolonToken(val);
+    return cells;
+  }
+
+  function workbookHasAnyFormula() {
+    return Object.keys(sheetDataStore).some((shName) => {
+      const snap = sheetDataStore[shName] || {};
+      return Object.keys(snap).some((ref) => (snap[ref]?.formula || "").startsWith("="));
     });
-    return map;
-  }
-
-  function parseCellRefParts(ref) {
-    const m = /^([A-Z]+)(\d+)$/.exec(String(ref || "").toUpperCase());
-    if (!m) return { col: 0, row: 1 };
-    let col = 0;
-    for (let i = 0; i < m[1].length; i++) {
-      col = col * 26 + (m[1].codePointAt(i) - 64);
-    }
-    return { col: col - 1, row: Number(m[2]) };
-  }
-
-  function colIndexToLetters(colIdx) {
-    let n = Math.max(0, Number(colIdx) || 0) + 1;
-    let out = "";
-    while (n > 0) {
-      const rem = (n - 1) % 26;
-      out = String.fromCodePoint(65 + rem) + out;
-      n = Math.floor((n - 1) / 26);
-    }
-    return out || "A";
-  }
-
-  function collectRangeNumericValues(startRef, endRef, cellValues, currentSheet) {
-    const shPrefix = String(currentSheet || "SHEET1").toUpperCase() + "!";
-    const p1 = parseCellRefParts(startRef);
-    const p2 = parseCellRefParts(endRef);
-    const nums = [];
-    for (let c = Math.min(p1.col, p2.col); c <= Math.max(p1.col, p2.col); c++) {
-      for (let r = Math.min(p1.row, p2.row); r <= Math.max(p1.row, p2.row); r++) {
-        const ref = colIndexToLetters(c) + r;
-        const raw = String(cellValues[shPrefix + ref] ?? "")
-          .replaceAll(",", "")
-          .trim();
-        const v = Number(raw);
-        if (raw !== "" && Number.isFinite(v)) nums.push(v);
-      }
-    }
-    return nums;
-  }
-
-  function evaluateRangeFunction(fnName, vals) {
-    if (fnName === "COUNT") return String(vals.length);
-    if (vals.length === 0) return "0";
-    if (fnName === "MAX") return String(Math.max(...vals));
-    if (fnName === "MIN") return String(Math.min(...vals));
-    const total = vals.reduce((acc, v) => acc + v, 0);
-    if (fnName === "SUM") return String(Math.round(total * 100) / 100);
-    if (fnName === "STDEV" || fnName === "VAR") {
-      if (vals.length < 2) return "#DIV/0!";
-      const mean = total / vals.length;
-      const m2 = vals.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
-      const variance = m2 / (vals.length - 1);
-      const out = fnName === "STDEV" ? Math.sqrt(variance) : variance;
-      return String(Math.round(out * 100) / 100);
-    }
-    return String(Math.round((total / vals.length) * 100) / 100);
-  }
-
-  function evaluateBinaryOpString(exprText) {
-    const src = String(exprText || "").trim();
-    let opIdx = -1;
-    let op = "";
-    for (let i = 1; i < src.length - 1; i++) {
-      const ch = src[i];
-      if (ch === "+" || ch === "-" || ch === "*" || ch === "/") {
-        opIdx = i;
-        op = ch;
-        break;
-      }
-    }
-    if (opIdx < 1) return null;
-    const lhs = src.slice(0, opIdx).trim();
-    const rhs = src.slice(opIdx + 1).trim();
-    if (!lhs || !rhs) return null;
-    const a = Number.parseFloat(lhs);
-    const b = Number.parseFloat(rhs);
-    if (!Number.isFinite(a) || !Number.isFinite(b) || Number(lhs) !== a || Number(rhs) !== b) {
-      return null;
-    }
-    if (op === "/" && b === 0) return "#DIV/0!";
-    let res = 0;
-    if (op === "+") res = a + b;
-    if (op === "-") res = a - b;
-    if (op === "*") res = a * b;
-    if (op === "/") res = a / b;
-    return String(Math.round(res * 100) / 100);
-  }
-
-  function evaluateFormulaExpression(exprStr, cellValues, currentSheet, currentCellRef) {
-    const shUpper = String(currentSheet || "SHEET1").toUpperCase();
-    const clean = String(exprStr || "").trim();
-    if (!clean.startsWith("=")) {
-      const normalized = clean.replaceAll(",", "");
-      const n = Number(normalized);
-      return Number.isFinite(n) && normalized !== "" ? String(n) : clean;
-    }
-    const body = clean
-      .slice(1)
-      .trim()
-      .toUpperCase()
-      .replaceAll(/\bROW\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
-        String(parseCellRefParts(ref || currentCellRef || "A1").row)
-      )
-      .replaceAll(/\bCOLUMN\(\s*([A-Z]+\d+)?\s*\)/g, (_, ref) =>
-        String(parseCellRefParts(ref || currentCellRef || "A1").col + 1)
-      );
-    const rangeMatch =
-      /^(SUM|AVERAGE|AVG|MAX|MIN|COUNT|STDEV|VAR)\((?:(?:'([^']+)'|([A-Z0-9_]+))!)?([A-Z]+\d+):([A-Z]+\d+)\)$/.exec(
-        body
-      );
-    if (rangeMatch) {
-      const rawSh = rangeMatch[2] || rangeMatch[3];
-      const rangeSheet = rawSh ? rawSh.trim().toUpperCase() : shUpper;
-      const vals = collectRangeNumericValues(rangeMatch[4], rangeMatch[5], cellValues, rangeSheet);
-      return evaluateRangeFunction(rangeMatch[1], vals);
-    }
-    const withCrossSheet = body.replaceAll(
-      /(?:'([^']+)'|\b([A-Z0-9_]+))!([A-Z]+\d+)\b/g,
-      (_, quotedSh, bareSh, ref) => {
-        const shKey = (quotedSh || bareSh || "").trim().toUpperCase();
-        const raw = String(cellValues[shKey + "!" + ref] ?? "")
-          .replaceAll(",", "")
-          .trim();
-        const v = Number(raw);
-        return raw !== "" && Number.isFinite(v) ? String(v) : "0";
-      }
-    );
-    const substituted = withCrossSheet.replaceAll(/\b([A-Z]+\d+)\b/g, (_, ref) => {
-      const raw = String(cellValues[shUpper + "!" + ref] ?? "")
-        .replaceAll(",", "")
-        .trim();
-      const v = Number(raw);
-      return raw !== "" && Number.isFinite(v) ? String(v) : "0";
-    });
-    const directNum = Number(substituted);
-    if (substituted !== "" && Number.isFinite(directNum)) {
-      return String(Math.round(directNum * 100) / 100);
-    }
-    const arithResult = evaluateBinaryOpString(substituted);
-    return arithResult ?? clean;
-  }
-
-  function buildLocalWorkbookValuesMap(cellsPart, defaultSheetUpper, seedDefaults) {
-    const values = {};
-    const formulaEntries = {};
-    const assignments = splitEscapedCellAssignmentsJs(cellsPart);
-    assignments.forEach(({ key, value }) => {
-      const bIdx = key.indexOf("!");
-      let shUpper = defaultSheetUpper;
-      let refUpper = "";
-      if (bIdx >= 0) {
-        shUpper = normalizeSheetTokenJs(key.slice(0, bIdx)).toUpperCase();
-        refUpper = key.slice(bIdx + 1).trim().toUpperCase();
-      } else {
-        refUpper = key.toUpperCase();
-      }
-      if (!shUpper || !refUpper) return;
-      const fullKey = shUpper + "!" + refUpper;
-      values[fullKey] = value;
-      if (String(value).startsWith("=")) {
-        formulaEntries[fullKey] = value;
-      } else {
-        delete formulaEntries[fullKey];
-      }
-    });
-    if (seedDefaults) {
-      if (!Object.keys(values).some((k) => k.startsWith("SHEET1!"))) {
-        values["SHEET1!A1"] = "1200";
-        values["SHEET1!B1"] = "850";
-      }
-      if (!Object.keys(values).some((k) => k.startsWith("SHEET2!"))) {
-        values["SHEET2!A1"] = "100";
-      }
-    }
-    for (let pass = 0; pass < 4; pass++) {
-      Object.keys(formulaEntries).forEach((k) => {
-        const [kSheet, kRef] = k.split("!");
-        values[k] = evaluateFormulaExpression(formulaEntries[k], values, kSheet, kRef);
-      });
-    }
-    return values;
-  }
-
-  function evaluateLocalSheetFormula(payload, seedDefaults = false) {
-    const raw = String(payload || "");
-    const splitRes = splitUnescapedQueryJs(raw);
-    const cellsPart = splitRes ? splitRes.cellsPart : seedDefaults ? "" : raw;
-    const rawQueryPart = splitRes
-      ? splitRes.queryPart.trim()
-      : seedDefaults
-        ? raw.trim() || "=Sheet2!A1+50"
-        : "A1";
-    const parsedTarget = extractActiveSheetAndExprJs(rawQueryPart, "Sheet1");
-    const evalSheet = parsedTarget.sheet.toUpperCase();
-    const q = parsedTarget.expr;
-    const values = buildLocalWorkbookValuesMap(cellsPart, evalSheet, seedDefaults);
-    if (q.startsWith("=")) {
-      return evaluateFormulaExpression(q, values, evalSheet, activeSheetCellRef || "A1");
-    }
-    const qUpper = q.toUpperCase();
-    return values[evalSheet + "!" + qUpper] ?? "";
-  }
-
-  function evaluateLocalWorkbookFormulaRpc(payload) {
-    const raw = String(payload || "");
-    const splitRes = splitUnescapedQueryJs(raw);
-    const exprCandidate = splitRes ? splitRes.queryPart.trim() : raw.trim();
-    const rawExpr = exprCandidate || "=Sheet2!A1+50";
-    const parsed = extractActiveSheetAndExprJs(rawExpr, "Sheet1");
-    const val = String(evaluateLocalSheetFormula(raw, true));
-    return { sheet: parsed.sheet, formula: parsed.expr, value: val };
-  }
-
-  function evaluateLocalSheetRpc(payload) {
-    const raw = String(payload || "");
-    const splitRes = splitUnescapedQueryJs(raw);
-    const cellsPart = splitRes ? splitRes.cellsPart : raw;
-    const trimmedQuery = (splitRes ? splitRes.queryPart : "A1").trim() || "A1";
-    const isBatch =
-      trimmedQuery.includes(",") && !trimmedQuery.includes("=") && !trimmedQuery.includes("(");
-    if (isBatch) {
-      const targets = trimmedQuery
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const firstParsed = extractActiveSheetAndExprJs(targets[0] || "A1", "Sheet1");
-      const values = buildLocalWorkbookValuesMap(
-        cellsPart,
-        firstParsed.sheet.toUpperCase(),
-        false
-      );
-      const outMap = {};
-      let firstExpr = "A1";
-      let firstVal = "";
-      targets.forEach((t, idx) => {
-        const parsed = extractActiveSheetAndExprJs(t, "Sheet1");
-        const shUpper = parsed.sheet.toUpperCase();
-        const refUpper = parsed.expr.toUpperCase();
-        const v = String(values[shUpper + "!" + refUpper] ?? "");
-        outMap[parsed.sheet + "!" + parsed.expr] = v;
-        if (idx === 0) {
-          firstExpr = parsed.expr;
-          firstVal = v;
-        }
-      });
-      return { query: firstExpr, value: firstVal, values: outMap };
-    }
-    const singleParsed = extractActiveSheetAndExprJs(trimmedQuery, "Sheet1");
-    const val = String(evaluateLocalSheetFormula(raw, false));
-    return {
-      query: singleParsed.expr,
-      value: val,
-      values: { [singleParsed.sheet + "!" + singleParsed.expr]: val },
-    };
   }
 
   function updateSheetSelectionAndAggregates(cellRef) {
@@ -1244,6 +583,34 @@
     }
     if (snap.activeSheetName) {
       activeSheetName = snap.activeSheetName;
+      const sheetTabBar = document.getElementById("sheet-tab-bar");
+      const addSheetBtn = document.getElementById("btn-add-sheet-tab");
+      if (sheetTabBar) {
+        const knownKeys = new Set(["Sheet1", "Sheet2", ...Object.keys(sheetDataStore)]);
+        sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
+          if (!knownKeys.has(btn.dataset.sheetTab)) {
+            btn.remove();
+          }
+        });
+        const renderedKeys = new Set(
+          Array.from(sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")).map(
+            (btn) => btn.dataset.sheetTab
+          )
+        );
+        Object.keys(sheetDataStore).forEach((shKey) => {
+          if (!renderedKeys.has(shKey) && addSheetBtn) {
+            const newTab = document.createElement("button");
+            newTab.className = "sheet-tab-btn";
+            newTab.dataset.sheetTab = shKey;
+            const numMatch = /^Sheet(\d+)$/.exec(shKey);
+            newTab.textContent = numMatch ? "시트 " + numMatch[1] : shKey;
+            addSheetBtn.before(newTab);
+          }
+        });
+        sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.sheetTab === activeSheetName);
+        });
+      }
       restoreDomSheetCells(activeSheetName);
       updateSheetSelectionAndAggregates(snap.activeSheetCellRef || "F2");
     }
@@ -1263,6 +630,7 @@
   }
 
   async function performWorkspaceUndo() {
+    await inFlightSheetWorkPromise;
     const fb = document.getElementById("status-command-feedback");
     if (workspaceUndoStack.length === 0) {
       if (fb) fb.textContent = "실행 취소할 작업이 없습니다";
@@ -1274,10 +642,17 @@
       await invokeIpc("undo_ribbon_command", "");
     }
     restoreWorkspaceSnapshot(prev);
+    if (workbookHasAnyFormula()) {
+      await recalculateActiveSheetFormulas();
+      if (activeModule === "SHEET") {
+        updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
+      }
+    }
     if (fb) fb.textContent = "실행 취소 완료 (" + activeModule + ")";
   }
 
   async function performWorkspaceRedo() {
+    await inFlightSheetWorkPromise;
     const fb = document.getElementById("status-command-feedback");
     if (workspaceRedoStack.length === 0) {
       if (fb) fb.textContent = "다시 실행할 작업이 없습니다";
@@ -1289,6 +664,12 @@
       await invokeIpc("redo_ribbon_command", "");
     }
     restoreWorkspaceSnapshot(next);
+    if (workbookHasAnyFormula()) {
+      await recalculateActiveSheetFormulas();
+      if (activeModule === "SHEET") {
+        updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
+      }
+    }
     if (fb) fb.textContent = "다시 실행 완료 (" + activeModule + ")";
   }
 
@@ -1418,16 +799,26 @@
     void renderRibbonCategoryTools(activeRibbonCategory);
   }
 
+  function findEditableDocBlock(node, docEditor) {
+    if (!node || !docEditor) return null;
+    let cur = node.nodeType === 1 ? node : node.parentElement;
+    while (cur && cur !== docEditor) {
+      if (cur.parentElement === docEditor) {
+        if (!isExcludedDocChromeElement(cur)) {
+          return cur;
+        }
+        return null;
+      }
+      cur = cur.parentElement;
+    }
+    return null;
+  }
+
   function getFocusedDocBlock(docEditor) {
     if (!docEditor) return null;
     const sel = globalThis.getSelection ? globalThis.getSelection() : null;
     if (sel && sel.anchorNode) {
-      const node = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
-      const block = node
-        ? node.closest(
-            "#doc-editor > h1, #doc-editor > h2, #doc-editor > h3, #doc-editor > p:not(#hwp-manuscript-preview), #doc-editor > div:not(.doc-table-toolbar)"
-          )
-        : null;
+      const block = findEditableDocBlock(sel.anchorNode, docEditor);
       if (block) {
         activeDocBlockEl = block;
         return block;
@@ -1436,11 +827,9 @@
     if (activeDocBlockEl && docEditor.contains(activeDocBlockEl)) {
       return activeDocBlockEl;
     }
-    return (
-      docEditor.querySelector(
-        ":scope > p:not(#hwp-manuscript-preview), :scope > div:not(.doc-table-toolbar), :scope > h2, :scope > h1, :scope > h3"
-      ) || docEditor
-    );
+    const children = Array.from(docEditor.children || []);
+    const firstBlock = children.find((el) => !isExcludedDocChromeElement(el));
+    return firstBlock || docEditor;
   }
 
   function appendDocTableRow() {
@@ -1883,34 +1272,96 @@
     }
   }
 
-  function isExcludedDocChromeElement(el) {
+  function isExcludedNonTableDocChrome(el) {
     if (!el || el.nodeType !== 1) return false;
     const tag = (el.tagName || "").toUpperCase();
-    if (tag === "TABLE" || tag === "FOOTER") return true;
+    if (tag === "FOOTER") return true;
     if (el.id === "hwp-manuscript-preview") return true;
     if (el.classList && el.classList.contains("doc-table-toolbar")) return true;
     return false;
   }
 
+  function isExcludedDocChromeElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = (el.tagName || "").toUpperCase();
+    if (tag === "TABLE") return true;
+    return isExcludedNonTableDocChrome(el);
+  }
+
+  function collectEditableDocTextNodes(rootEl, options = {}) {
+    const includeTables = Boolean(options.includeTables);
+    const skipNumericTableCells = Boolean(options.skipNumericTableCells);
+    const out = [];
+    function walk(node) {
+      if (!node) return;
+      if (node.nodeType === 3) {
+        out.push(node);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (isExcludedNonTableDocChrome(node)) return;
+      const tag = (node.tagName || "").toUpperCase();
+      if (tag === "TABLE" && !includeTables) return;
+      if (
+        skipNumericTableCells &&
+        tag === "TD" &&
+        node.dataset &&
+        node.dataset.docNum !== undefined
+      ) {
+        return;
+      }
+      Array.from(node.childNodes || []).forEach(walk);
+    }
+    walk(rootEl);
+    return out;
+  }
+
+  const DOC_BLOCK_TAGS = new Set([
+    "P",
+    "DIV",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "LI",
+    "UL",
+    "OL",
+    "BLOCKQUOTE",
+    "SECTION",
+    "ARTICLE",
+    "PRE",
+  ]);
+
   function extractEditableDocumentText(rootEl = document.getElementById("doc-editor")) {
     if (!rootEl) return "";
     const parts = [];
-    Array.from(rootEl.childNodes || []).forEach((node) => {
+    let inlineBuf = "";
+    function flushInline() {
+      const trimmed = inlineBuf.trim();
+      if (trimmed) parts.push(trimmed);
+      inlineBuf = "";
+    }
+    function walk(node) {
+      if (!node) return;
       if (node.nodeType === 3) {
-        const t = (node.textContent || "").trim();
-        if (t) parts.push(t);
+        inlineBuf += node.nodeValue || "";
         return;
       }
-      if (node.nodeType === 1) {
-        if (isExcludedDocChromeElement(node)) return;
-        const clone = node.cloneNode(true);
-        clone
-          .querySelectorAll(".doc-table-toolbar, table, #hwp-manuscript-preview, footer")
-          .forEach((child) => child.remove());
-        const t = (clone.textContent || "").trim();
-        if (t) parts.push(t);
+      if (node.nodeType !== 1 || isExcludedDocChromeElement(node)) return;
+      const tag = (node.tagName || "").toUpperCase();
+      if (tag === "BR") {
+        flushInline();
+        return;
       }
-    });
+      const isBlock = node !== rootEl && DOC_BLOCK_TAGS.has(tag);
+      if (isBlock) flushInline();
+      Array.from(node.childNodes || []).forEach(walk);
+      if (isBlock) flushInline();
+    }
+    walk(rootEl);
+    flushInline();
     return parts.join("\n");
   }
 
@@ -1957,10 +1408,9 @@
         if (docText) {
           lines.push(docText);
         }
-        const inlineTable = tempDiv.querySelector("table");
-        if (inlineTable) {
+        tempDiv.querySelectorAll("table").forEach((inlineTable) => {
           appendTableRowsFromTrList(Array.from(inlineTable.querySelectorAll("tr")), lines);
-        }
+        });
       }
     } else if (scope === "SHEET") {
       sheetDataStore[activeSheetName] = snapshotDomSheetCells();
@@ -2282,56 +1732,61 @@
     }
   }
 
-  async function recalculateActiveSheetFormulas() {
-    const epoch = sheetSnapshotEpoch;
-    const seq = latestSheetRecalcSeq + 1;
-    latestSheetRecalcSeq = seq;
-    const cellMap = collectSheetCellMap();
-    const pairs = Object.keys(cellMap)
-      .map((k) => k + "=" + cellMap[k])
-      .join(";");
-    const formulaTargets = [];
-    Object.keys(sheetDataStore).forEach((shName) => {
-      const snap = sheetDataStore[shName] || {};
-      Object.keys(snap).forEach((ref) => {
-        if ((snap[ref]?.formula || "").startsWith("=")) {
-          formulaTargets.push({ sheet: shName, ref, key: shName + "!" + ref });
+  function recalculateActiveSheetFormulas() {
+    const run = async () => {
+      const epoch = sheetSnapshotEpoch;
+      const seq = latestSheetRecalcSeq + 1;
+      latestSheetRecalcSeq = seq;
+      const cells = buildWorkbookCellsArray();
+      const formulaTargets = [];
+      Object.keys(sheetDataStore).forEach((shName) => {
+        const snap = sheetDataStore[shName] || {};
+        Object.keys(snap).forEach((ref) => {
+          if ((snap[ref]?.formula || "").startsWith("=")) {
+            formulaTargets.push({ sheet: shName, cell: ref, key: shName + "!" + ref });
+          }
+        });
+      });
+      if (formulaTargets.length === 0) {
+        return;
+      }
+      const rpcPayload = JSON.stringify({
+        sheet: activeSheetName,
+        targets: formulaTargets.map(({ sheet, cell }) => ({ sheet, cell })),
+        cells,
+      });
+      const rpcRes = await invokeIpc("evaluate_sheet", rpcPayload);
+      if (epoch !== sheetSnapshotEpoch || seq !== latestSheetRecalcSeq) {
+        return;
+      }
+      const batchValues =
+        rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
+      formulaTargets.forEach(({ sheet, cell: ref, key }) => {
+        let rawVal;
+        if (batchValues) {
+          rawVal =
+            batchValues[key] ?? batchValues[sheet.toUpperCase() + "!" + ref.toUpperCase()];
+        } else if (formulaTargets.length === 1 && rpcRes && rpcRes.value !== undefined) {
+          rawVal = rpcRes.value;
+        }
+        if (rawVal === undefined || rawVal === null) return;
+        const value = String(rawVal);
+        if (activeSheetName === sheet) {
+          const td = document.querySelector('#pane-sheet td[data-cell="' + ref + '"]');
+          const focusSt = td ? sheetCellFocusState.get(td) : null;
+          if (!td || !(td.dataset.formula || "").startsWith("=")) return;
+          if (focusSt?.userEdited || focusSt?.snapshotPushed) return;
+          td.textContent = value;
+          syncSheetCellFocusBaseline(td, false);
+        }
+        const storedEntry = sheetDataStore[sheet]?.[ref];
+        if (storedEntry && (storedEntry.formula || "").startsWith("=")) {
+          storedEntry.value = value;
         }
       });
-    });
-    if (formulaTargets.length === 0) {
-      return;
-    }
-    const queryList = formulaTargets.map((t) => t.sheet + "|" + t.ref).join(",");
-    const rpcRes = await invokeIpc("evaluate_sheet", pairs + "?" + queryList);
-    if (epoch !== sheetSnapshotEpoch || seq !== latestSheetRecalcSeq) {
-      return;
-    }
-    const batchValues =
-      rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
-    formulaTargets.forEach(({ sheet, ref, key }) => {
-      let rawVal;
-      if (batchValues) {
-        rawVal = batchValues[key] ?? batchValues[sheet.toUpperCase() + "!" + ref.toUpperCase()];
-      } else if (formulaTargets.length === 1 && rpcRes && rpcRes.value !== undefined) {
-        rawVal = rpcRes.value;
-      }
-      if (rawVal === undefined || rawVal === null) return;
-      const value = String(rawVal);
-      if (activeSheetName === sheet) {
-        const td = document.querySelector('#pane-sheet td[data-cell="' + ref + '"]');
-        const focusSt = td ? sheetCellFocusState.get(td) : null;
-        if (!td || !(td.dataset.formula || "").startsWith("=")) return;
-        if (focusSt?.userEdited || focusSt?.snapshotPushed) return;
-        td.textContent = value;
-        syncSheetCellFocusBaseline(td, false);
-      }
-      const storedEntry = sheetDataStore[sheet]?.[ref];
-      if (storedEntry && (storedEntry.formula || "").startsWith("=")) {
-        storedEntry.value = value;
-      }
-    });
-    refreshFocusedSheetCellPendingSnapshot();
+      refreshFocusedSheetCellPendingSnapshot();
+    };
+    return trackSheetAsyncWork(run());
   }
 
   async function evaluateActiveSheetFormulaBar(recordUndo) {
@@ -2356,6 +1811,7 @@
       syncSheetCellFocusBaseline(activeTd, true);
       refreshFocusedSheetCellPendingSnapshot();
       await recalculateActiveSheetFormulas();
+      await inFlightSheetWorkPromise;
       if (epoch !== sheetSnapshotEpoch) return;
       const computedValue =
         activeSheetName === targetSheet
@@ -2368,14 +1824,21 @@
       return;
     }
 
-    const cellMap = collectSheetCellMap();
-    cellMap[targetSheet + "!" + targetCellRef] = escapeSemicolonToken(rawFormula);
-    const pairs = Object.keys(cellMap)
-      .map((k) => k + "=" + cellMap[k])
-      .join(";");
-    const queryTarget = targetSheet + "|" + targetCellRef;
-    const rpcRes = await invokeIpc("evaluate_sheet", pairs + "?" + queryTarget);
+    const cells = buildWorkbookCellsArray().filter(
+      (c) => !(c.sheet === targetSheet && c.cell === targetCellRef)
+    );
+    cells.push({ sheet: targetSheet, cell: targetCellRef, value: rawFormula });
+    if (!sheetDataStore[targetSheet]) sheetDataStore[targetSheet] = {};
+    sheetDataStore[targetSheet][targetCellRef] = {
+      value: rawFormula.startsWith("=") ? "" : rawFormula,
+      formula: rawFormula.startsWith("=") ? rawFormula : "",
+    };
+    const rpcRes = await invokeIpc(
+      "evaluate_sheet",
+      JSON.stringify({ sheet: targetSheet, expr: targetCellRef, cells })
+    );
     await recalculateActiveSheetFormulas();
+    await inFlightSheetWorkPromise;
     if (epoch !== sheetSnapshotEpoch) return;
     if (activeSheetName === targetSheet) {
       out.textContent = "결과 (" + targetCellRef + "): " + rpcRes.value;
@@ -2409,11 +1872,11 @@
     st.snapshotPushed = true;
   }
 
-  async function commitSheetCellEdit(td, keepFocus) {
+  function commitSheetCellEdit(td, keepFocus) {
     const st = sheetCellFocusState.get(td);
     if (!st || st.sheetName !== activeSheetName) {
       if (!keepFocus) sheetCellFocusState.delete(td);
-      return false;
+      return Promise.resolve(false);
     }
     const editSheet = st.sheetName;
     const rawText = (td.textContent || "").trim();
@@ -2433,23 +1896,40 @@
       refreshFocusedSheetCellPendingSnapshot();
     } else {
       sheetCellFocusState.delete(td);
+      if (document.activeElement === td && typeof td.blur === "function") {
+        td.blur();
+      }
     }
-    if (shouldRecalc) {
-      sheetDataStore[editSheet] = snapshotDomSheetCells();
+    if (!shouldRecalc) {
+      return Promise.resolve(false);
+    }
+    sheetDataStore[editSheet] = snapshotDomSheetCells();
+    const commitRun = async () => {
       await recalculateActiveSheetFormulas();
       if (activeSheetName === editSheet) {
         updateSheetSelectionAndAggregates(activeSheetCellRef || td.dataset.cell);
       }
-    }
-    return shouldRecalc;
+      return true;
+    };
+    return trackSheetAsyncWork(commitRun());
   }
 
   async function commitPendingFocusedSheetCell(keepFocus) {
     const activeEl = document.activeElement;
-    if (!activeEl || !sheetCellFocusState.has(activeEl)) {
-      return false;
+    let committed = false;
+    if (activeEl && sheetCellFocusState.has(activeEl)) {
+      committed = await commitSheetCellEdit(activeEl, keepFocus);
+    } else if (
+      !keepFocus &&
+      activeEl &&
+      activeEl.nodeType === 1 &&
+      activeEl.dataset?.cell &&
+      typeof activeEl.blur === "function"
+    ) {
+      activeEl.blur();
     }
-    return await commitSheetCellEdit(activeEl, keepFocus);
+    await inFlightSheetWorkPromise;
+    return committed;
   }
 
   function bindSheetCellEvents(rootEl) {
@@ -2631,71 +2111,136 @@
     }
   }
 
-  function collectActiveModuleNodesForScrub() {
-    if (activeModule === "SHEET") {
-      return Array.from(document.querySelectorAll("#pane-sheet td[data-cell]")).filter(
-        (td) => !(td.dataset.formula || "").startsWith("=")
-      );
-    }
-    if (activeModule === "SLIDE") {
-      const nodes = [];
-      const titleZone = document.getElementById("slide-title-zone");
-      const lowerZone = document.getElementById("slide-lower-zone");
-      if (titleZone) nodes.push(titleZone);
-      if (lowerZone) nodes.push(lowerZone);
-      return nodes;
-    }
-    if (activeModule === "PDF") {
-      return Array.from(document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p"));
-    }
-    const editorEl = document.getElementById("doc-editor");
-    if (!editorEl) return [];
-    const docNodes = [];
-    Array.from(editorEl.childNodes || []).forEach((node) => {
-      if (node.nodeType === 3) {
-        if ((node.textContent || "").trim().length > 0) {
-          docNodes.push(node);
+  async function scrubEditableTextNodesInRoot(rootEl) {
+    if (!rootEl) return 0;
+    const textNodes = collectEditableDocTextNodes(rootEl, {
+      includeTables: true,
+      skipNumericTableCells: true,
+    }).filter((n) => (n.nodeValue || "").trim().length > 0);
+    if (textNodes.length === 0) return 0;
+    const results = await Promise.all(
+      textNodes.map((n) => invokeIpc("scrub_pii", n.nodeValue || ""))
+    );
+    let masked = 0;
+    results.forEach((res, idx) => {
+      if (res && typeof res.scrubbedText === "string") {
+        const count = Number(res.totalMasked || 0);
+        if (count > 0 && res.scrubbedText !== textNodes[idx].nodeValue) {
+          textNodes[idx].nodeValue = res.scrubbedText;
         }
-        return;
-      }
-      if (node.nodeType === 1 && !isExcludedDocChromeElement(node)) {
-        if (!node.querySelector(".doc-table-toolbar, table, #hwp-manuscript-preview, footer")) {
-          docNodes.push(node);
-        }
+        masked += count;
       }
     });
-    const tableCells = Array.from(
-      document.querySelectorAll("#doc-table-body td:not([data-doc-num])")
-    );
-    return docNodes.concat(tableCells);
+    return masked;
   }
 
   async function runPiiScrubAction(recordUndo) {
     const piiOut = document.getElementById("pii-result-text");
     if (!piiOut) return;
+    await commitPendingFocusedSheetCell(true);
     if (recordUndo) pushUndoSnapshot();
-    const targets = collectActiveModuleNodesForScrub();
-    const results = await Promise.all(
-      targets.map((node) => invokeIpc("scrub_pii", node.textContent || ""))
-    );
     let totalMasked = 0;
-    results.forEach((res, idx) => {
-      if (res && typeof res.scrubbedText === "string") {
-        targets[idx].textContent = res.scrubbedText;
-        totalMasked += Number(res.totalMasked || 0);
+
+    if (activeModule === "SHEET") {
+      sheetDataStore[activeSheetName] = snapshotDomSheetCells();
+      const entriesToScrub = [];
+      Object.keys(sheetDataStore).forEach((shName) => {
+        const snap = sheetDataStore[shName] || {};
+        Object.keys(snap).forEach((ref) => {
+          const entry = snap[ref];
+          if (entry && !(entry.formula || "").startsWith("=") && (entry.value || "").trim()) {
+            entriesToScrub.push(entry);
+          }
+        });
+      });
+      const results = await Promise.all(
+        entriesToScrub.map((entry) => invokeIpc("scrub_pii", entry.value))
+      );
+      results.forEach((res, idx) => {
+        if (res && typeof res.scrubbedText === "string") {
+          const count = Number(res.totalMasked || 0);
+          if (count > 0) entriesToScrub[idx].value = res.scrubbedText;
+          totalMasked += count;
+        }
+      });
+      restoreDomSheetCells(activeSheetName);
+      refreshFocusedSheetCellPendingSnapshot();
+      if (workbookHasAnyFormula()) {
+        await recalculateActiveSheetFormulas();
       }
-    });
-    if (activeModule === "SLIDE" && SLIDE_DECK_STATE[activeSlideIndex]) {
-      const notesInput = document.getElementById("slide-presenter-notes");
-      if (notesInput && notesInput.value) {
-        const noteRes = await invokeIpc("scrub_pii", notesInput.value);
-        if (noteRes && typeof noteRes.scrubbedText === "string") {
-          notesInput.value = noteRes.scrubbedText;
-          SLIDE_DECK_STATE[activeSlideIndex].notes = noteRes.scrubbedText;
-          totalMasked += Number(noteRes.totalMasked || 0);
+      updateSheetSelectionAndAggregates(activeSheetCellRef || "F2");
+    } else if (activeModule === "SLIDE") {
+      const fields = [];
+      SLIDE_DECK_STATE.forEach((slide) => {
+        ["title", "lower", "notes"].forEach((key) => {
+          if ((slide[key] || "").trim()) {
+            fields.push({ slide, key, text: slide[key] });
+          }
+        });
+      });
+      const results = await Promise.all(
+        fields.map((item) => invokeIpc("scrub_pii", item.text))
+      );
+      results.forEach((res, idx) => {
+        if (res && typeof res.scrubbedText === "string") {
+          const count = Number(res.totalMasked || 0);
+          if (count > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
+          totalMasked += count;
+        }
+      });
+      renderSlideDeck(activeSlideIndex);
+    } else if (activeModule === "PDF") {
+      const pdfNodes = Array.from(
+        document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p")
+      );
+      for (const el of pdfNodes) {
+        totalMasked += await scrubEditableTextNodesInRoot(el);
+      }
+      for (const inputId of ["pdf-form-applicant", "pdf-form-dept"]) {
+        const inp = document.getElementById(inputId);
+        if (inp && (inp.value || "").trim()) {
+          const res = await invokeIpc("scrub_pii", inp.value);
+          if (res && typeof res.scrubbedText === "string") {
+            const count = Number(res.totalMasked || 0);
+            if (count > 0) inp.value = res.scrubbedText;
+            totalMasked += count;
+          }
+        }
+      }
+    } else {
+      ensureDefaultDocTabStore();
+      const editorEl = document.getElementById("doc-editor");
+      if (activeModule === "DOC" || activeModule === "HWP") {
+        totalMasked += await scrubEditableTextNodesInRoot(editorEl);
+        saveActiveDocTabState();
+        const otherMod = activeModule === "DOC" ? "HWP" : "DOC";
+        if (docTabStore[otherMod]?.editorHtml) {
+          const tempDiv = document.createElement("div");
+          tempDiv.innerHTML = docTabStore[otherMod].editorHtml;
+          const otherMasked = await scrubEditableTextNodesInRoot(tempDiv);
+          if (otherMasked > 0) {
+            docTabStore[otherMod] = { editorHtml: tempDiv.innerHTML };
+          }
+          totalMasked += otherMasked;
+        }
+      } else {
+        for (const modKey of ["DOC", "HWP"]) {
+          if (docTabStore[modKey]?.editorHtml) {
+            const tempDiv = document.createElement("div");
+            tempDiv.innerHTML = docTabStore[modKey].editorHtml;
+            const modMasked = await scrubEditableTextNodesInRoot(tempDiv);
+            if (modMasked > 0) {
+              docTabStore[modKey] = { editorHtml: tempDiv.innerHTML };
+            }
+            totalMasked += modMasked;
+          }
+        }
+        if (editorEl) {
+          await scrubEditableTextNodesInRoot(editorEl);
         }
       }
     }
+
     piiOut.textContent =
       totalMasked > 0
         ? "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + activeModule + ")"
@@ -2709,9 +2254,7 @@
       document.getElementById("ime-badge") || document.getElementById("ime-indicator");
     if (editor) {
       editor.addEventListener("click", (ev) => {
-        const block = ev.target.closest(
-          "#doc-editor > h1, #doc-editor > h2, #doc-editor > h3, #doc-editor > p:not(#hwp-manuscript-preview), #doc-editor > div:not(.doc-table-toolbar)"
-        );
+        const block = findEditableDocBlock(ev.target, editor);
         if (block) activeDocBlockEl = block;
       });
       editor.addEventListener("compositionstart", () => {
@@ -2774,6 +2317,7 @@
     const auditBtn = document.getElementById("btn-run-security-audit");
     if (auditBtn) {
       auditBtn.addEventListener("click", async () => {
+        await commitPendingFocusedSheetCell(true);
         const bodyText = buildStructuredConversionBody(activeModule);
         const byteLen = new TextEncoder().encode(bodyText).length;
         const entryNameMap = {
@@ -2785,8 +2329,7 @@
           CONV: "package/content.xml",
         };
         const entryName = entryNameMap[activeModule] || "word/document.xml";
-        const xmlSnippet =
-          '<doc module="' + activeModule + '">' + bodyText.slice(0, 512) + "</doc>";
+        const xmlSnippet = '<doc module="' + activeModule + '">' + bodyText + "</doc>";
         const payload =
           entryName +
           "," +
@@ -2795,10 +2338,21 @@
           Math.max(128, byteLen) +
           ",false|" +
           xmlSnippet;
-        const res = await invokeIpc("audit_security", payload);
         const txt = document.getElementById("security-status-text");
-        if (txt && res) {
-          txt.textContent = "문서 보안 검사 완료 (" + activeModule + "): " + res.status;
+        try {
+          const res = await invokeIpc("audit_security", payload);
+          if (txt && res) {
+            txt.textContent = "문서 보안 검사 완료 (" + activeModule + "): " + res.status;
+          }
+        } catch (err) {
+          if (txt) {
+            txt.textContent =
+              "문서 보안 검사 완료 (" +
+              activeModule +
+              "): REJECTED (" +
+              (err?.message || String(err)) +
+              ")";
+          }
         }
       });
     }
@@ -2908,7 +2462,8 @@
       });
     }
     if (addSheetBtn && sheetTabBar) {
-      addSheetBtn.addEventListener("click", () => {
+      addSheetBtn.addEventListener("click", async () => {
+        await commitPendingFocusedSheetCell(false);
         pushUndoSnapshot();
         const count = sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").length + 1;
         const sheetKey = "Sheet" + count;

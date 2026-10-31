@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-test("focused cell undo then re-edit triggers recalculation and preserves undo history", async () => {
+
+test("focused cell edit supports undo, redo formula recalculation, and subsequent re-edit", async () => {
   const { document, sandbox } = await createWorkspaceHarness();
   document.querySelector('.mod-btn[data-module="SHEET"]').click();
   await flushAsyncTurns();
@@ -11,11 +12,34 @@ test("focused cell undo then re-edit triggers recalculation and preserves undo h
   const f7 = document.querySelector('#pane-sheet td[data-cell="F7"]');
   assert.equal(b2.textContent, "1150");
   assert.equal(f2.textContent, "4950");
+  assert.equal(f7.textContent, "17890");
 
   b2.focus();
   b2.textContent = "2000";
   b2.dispatchEvent({ type: "input", target: b2 });
+  b2.dispatchEvent({ type: "keydown", key: "Enter", target: b2 });
+  await flushAsyncTurns();
+  assert.equal(b2.textContent, "2000");
+  assert.equal(f2.textContent, "5800");
+  assert.equal(f7.textContent, "18740");
 
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(b2.textContent, "1150");
+  assert.equal(f2.textContent, "4950");
+  assert.equal(f7.textContent, "17890");
+
+  sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(b2.textContent, "2000");
+  assert.equal(f2.textContent, "5800");
+  assert.equal(f7.textContent, "18740");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  b2.focus();
+  b2.textContent = "3150";
+  b2.dispatchEvent({ type: "input", target: b2 });
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
   assert.equal(document.activeElement, b2);
@@ -25,16 +49,9 @@ test("focused cell undo then re-edit triggers recalculation and preserves undo h
   b2.dispatchEvent({ type: "input", target: b2 });
   b2.dispatchEvent({ type: "keydown", key: "Enter", target: b2 });
   await flushAsyncTurns();
-
   assert.equal(b2.textContent, "3150");
   assert.equal(f2.textContent, "6950");
   assert.equal(f7.textContent, "19890");
-
-  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
-  await flushAsyncTurns();
-  assert.equal(b2.textContent, "1150");
-  assert.equal(f2.textContent, "4950");
-  assert.equal(f7.textContent, "17890");
 });
 
 test("clicking formula cell while async recalculation is in flight preserves data-formula on blur", async () => {
@@ -72,6 +89,7 @@ test("clicking formula cell while async recalculation is in flight preserves dat
   const formulaInput = document.getElementById("formula-input");
 
   b2.focus();
+  b2.focus();
   b2.textContent = "3150";
   b2.dispatchEvent({ type: "input", target: b2 });
 
@@ -101,7 +119,70 @@ test("clicking formula cell while async recalculation is in flight preserves dat
   assert.equal(evaluateSheetCallCount, 1);
 });
 
-test("switching sheet tabs with unblurred edit and in-flight IPC avoids cross-sheet contamination", async () => {
+test("real userClick on save waits for blur-triggered async evaluate_sheet before exporting", async () => {
+  const pendingEvaluations = [];
+  const convertPayloads = [];
+
+  const { document, userClick } = await createWorkspaceHarness({
+    tauriInvoke: (command, args) => {
+      if (command === "get_workspace_bootstrap") {
+        return {
+          platform: "Windows",
+          shortcutModifier: "Ctrl",
+          recentFormatFilters: ["전체"],
+          openTabs: [],
+        };
+      }
+      if (command === "get_ribbon_category_commands") {
+        return { commands: [] };
+      }
+      if (command === "evaluate_sheet") {
+        return new Promise((resolve) => {
+          pendingEvaluations.push({ payload: args.payload, resolve });
+        });
+      }
+      if (command === "convert_document_format") {
+        convertPayloads.push(args.payload);
+        return {
+          status: "CONVERTED",
+          sourceFormat: "xlsx",
+          targetFormat: "xlsx",
+          sourceBytes: 128,
+          outputBytes: 256,
+          specification: "ECMA-376",
+          convertedBase64: "UEs=",
+        };
+      }
+      return { status: "ok" };
+    },
+  });
+
+  document.querySelector('.mod-btn[data-module="SHEET"]').click();
+  await flushAsyncTurns();
+
+  const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
+  b2.focus();
+  b2.textContent = "3150";
+  b2.dispatchEvent({ type: "input", target: b2 });
+
+  userClick(document.getElementById("qat-save"));
+  await flushAsyncTurns();
+
+  assert.equal(pendingEvaluations.length, 1);
+  assert.equal(convertPayloads.length, 0);
+
+  pendingEvaluations[0].resolve({
+    query: "F2",
+    value: "6950",
+    values: { "Sheet1!F2": "6950", "Sheet1!F7": "19890" },
+  });
+  await flushAsyncTurns();
+
+  assert.equal(convertPayloads.length, 1);
+  assert.match(convertPayloads[0], /\[\[TABLE_ROW\]\][^\n]*\t6950/);
+});
+
+test("switching sheet tabs with structured JSON IPC and special sheet names avoids contamination", async () => {
   const pendingEvaluations = [];
   const { document } = await createWorkspaceHarness({
     tauriInvoke: (command, args) => {
@@ -138,7 +219,12 @@ test("switching sheet tabs with unblurred edit and in-flight IPC avoids cross-sh
   await flushAsyncTurns();
 
   assert.equal(pendingEvaluations.length, 1);
-  assert.match(pendingEvaluations[0].payload, /Sheet1!B2=2150/);
+  const parsedRpc = JSON.parse(pendingEvaluations[0].payload);
+  assert.ok(
+    parsedRpc.cells.some(
+      (c) => c.sheet === "Sheet1" && c.cell === "B2" && c.value === "2150"
+    )
+  );
   assert.equal(document.querySelector('#pane-sheet td[data-cell="A1"]').textContent, "100");
   assert.equal(document.querySelector('#pane-sheet td[data-cell="F2"]').textContent, "");
 
@@ -163,9 +249,25 @@ test("switching sheet tabs with unblurred edit and in-flight IPC avoids cross-sh
   assert.equal(document.querySelector('#pane-sheet td[data-cell="F2"]').textContent, "5950");
 });
 
-test("trailing backslashes, quoted cross-sheet refs, and unblurred save work cleanly offline", async () => {
+test("trailing backslashes, special-character sheet names, and unblurred save work cleanly offline", async () => {
   const { document, downloads } = await createWorkspaceHarness();
   document.querySelector('.mod-btn[data-module="SHEET"]').click();
+  await flushAsyncTurns();
+
+  const sheetTabBar = document.getElementById("sheet-tab-bar");
+  const addSheetBtn = document.getElementById("btn-add-sheet-tab");
+  const customTab = document.createElement("button");
+  customTab.className = "sheet-tab-btn";
+  customTab.dataset.sheetTab = "예산(안), Q1";
+  customTab.textContent = "예산(안), Q1";
+  addSheetBtn.before(customTab);
+  customTab.click();
+  await flushAsyncTurns();
+
+  const customB1 = document.querySelector('#pane-sheet td[data-cell="B1"]');
+  assert.equal(customB1.textContent, "500");
+
+  sheetTabBar.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]').click();
   await flushAsyncTurns();
 
   const a9 = document.querySelector('#pane-sheet td[data-cell="A9"]');
@@ -177,79 +279,103 @@ test("trailing backslashes, quoted cross-sheet refs, and unblurred save work cle
 
   const b9 = document.querySelector('#pane-sheet td[data-cell="B9"]');
   b9.focus();
-  b9.textContent = "='Sheet2'!A1+50";
+  b9.textContent = "='예산(안), Q1'!B1+50";
   b9.dispatchEvent({ type: "input", target: b9 });
   b9.blur();
   await flushAsyncTurns();
-  assert.equal(b9.textContent, "150");
+  assert.equal(b9.textContent, "550");
 
-  const sheet2Btn = document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet2"]');
-  sheet2Btn.click();
+  customTab.click();
   await flushAsyncTurns();
-
-  const s2c3 = document.querySelector('#pane-sheet td[data-cell="C3"]');
-  s2c3.focus();
-  s2c3.textContent = "=B3+10";
-  s2c3.dispatchEvent({ type: "input", target: s2c3 });
-  s2c3.blur();
-  await flushAsyncTurns();
-  assert.equal(s2c3.textContent, "10");
-
-  const s2a1 = document.querySelector('#pane-sheet td[data-cell="A1"]');
-  s2a1.focus();
-  s2a1.textContent = "400";
-  s2a1.dispatchEvent({ type: "input", target: s2a1 });
+  const sCustomB1 = document.querySelector('#pane-sheet td[data-cell="B1"]');
+  sCustomB1.focus();
+  sCustomB1.textContent = "700";
+  sCustomB1.dispatchEvent({ type: "input", target: sCustomB1 });
 
   document.getElementById("qat-save").click();
   await flushAsyncTurns();
   assert.equal(downloads.length, 1);
 
-  const sheet1Btn = document.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]');
-  sheet1Btn.click();
+  sheetTabBar.querySelector('.sheet-tab-btn[data-sheet-tab="Sheet1"]').click();
   await flushAsyncTurns();
-
   assert.equal(document.querySelector('#pane-sheet td[data-cell="A9"]').textContent, "C:\\");
-  assert.equal(document.querySelector('#pane-sheet td[data-cell="B9"]').textContent, "450");
+  assert.equal(document.querySelector('#pane-sheet td[data-cell="B9"]').textContent, "750");
 });
 
-test("security audit blocks pipe-containing XXE doctype and PII scrub preserves inline table", async () => {
-  const { document } = await createWorkspaceHarness();
+test("security audit blocks >512-char XXE and handles Tauri rejection while PII scrub preserves inline markup and slides", async () => {
+  const { document, downloads } = await createWorkspaceHarness();
   const docEditor = document.getElementById("doc-editor");
 
+  const filler = "가나다라마바사아자차카타파하 ".repeat(50);
   docEditor.innerHTML =
+    '<div class="doc-wrapper" data-expr="A1>10"><p><strong>담당자</strong> 직통 010-1234-5678</p><p id="xxe-target"></p>' +
     '<div class="doc-table-toolbar" contenteditable="false"><button id="btn-doc-add-row">+행</button></div>' +
-    '<table id="doc-table"><tbody id="doc-table-body"><tr><td>기획팀</td><td>010-9876-5432</td><td data-doc-num="420">420</td></tr></tbody></table>' +
+    '<table id="doc-table"><tbody id="doc-table-body"><tr><td>기획팀</td><td>010-9876-5432</td><td data-doc-num="420">420</td></tr></tbody></table></div>' +
     '<p id="hwp-manuscript-preview" hidden>[원고지]</p>' +
     '<footer class="doc-page-footer">- 1 -</footer>';
-  const bareText = document.createTextNode("담당자 직통 010-1234-5678");
-  const divLine = document.createElement("div");
-  divLine.textContent =
-    '문의 메일 contact@example.org | A | B <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>';
-  const toolbar = docEditor.querySelector(".doc-table-toolbar");
-  toolbar.before(bareText);
-  toolbar.before(divLine);
+  document.getElementById("xxe-target").textContent =
+    filler +
+    '문의 메일 contact@example.org <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>';
+
+  assert.equal(docEditor.querySelectorAll(":scope > .doc-wrapper > p").length, 2);
 
   document.getElementById("btn-run-security-audit").click();
   await flushAsyncTurns();
   assert.match(document.getElementById("security-status-text").textContent, /REJECTED/);
 
-  document.getElementById("btn-smart-diagnose").click();
-  await flushAsyncTurns();
-  const summaryText = document.getElementById("smart-summary-output").textContent;
-  assert.match(summaryText, /010-1234-5678|contact@example\.org/);
-
   document.getElementById("btn-scrub-pii").click();
   await flushAsyncTurns();
 
   assert.match(document.getElementById("pii-result-text").textContent, /3건 마스킹 완료/);
+  assert.ok(docEditor.querySelector("strong"), "inline <strong> must survive PII scrub");
+  assert.equal(docEditor.querySelector("strong").textContent, "담당자");
   assert.ok(docEditor.querySelector("#doc-table"), "inline #doc-table must survive PII scrub");
-  assert.ok(
-    docEditor.querySelector(".doc-table-toolbar"),
-    "inline toolbar must survive PII scrub"
-  );
   assert.ok(!docEditor.textContent.includes("010-1234-5678"));
   assert.ok(!docEditor.textContent.includes("contact@example.org"));
   assert.ok(!docEditor.textContent.includes("010-9876-5432"));
   assert.ok(docEditor.textContent.includes("010-****-****"));
   assert.ok(docEditor.textContent.includes("***@***.***"));
+
+  document.querySelector('.mod-btn[data-module="SLIDE"]').click();
+  await flushAsyncTurns();
+  document.getElementById("btn-add-slide").click();
+  await flushAsyncTurns();
+  const slideNotes = document.getElementById("slide-presenter-notes");
+  slideNotes.value = "발표 문의 lead@example.com / 010-2222-3333";
+  slideNotes.dispatchEvent({ type: "input", target: slideNotes });
+  document.querySelector('#slide-thumb-list [data-slide-idx="0"]').click();
+  await flushAsyncTurns();
+
+  document.getElementById("btn-scrub-pii").click();
+  await flushAsyncTurns();
+  assert.match(document.getElementById("pii-result-text").textContent, /2건 마스킹 완료/);
+  document.getElementById("qat-save").click();
+  await flushAsyncTurns();
+  assert.equal(downloads.length, 1);
+
+  const tauriHarness = await createWorkspaceHarness({
+    tauriInvoke: (command) => {
+      if (command === "get_workspace_bootstrap") {
+        return {
+          platform: "Windows",
+          shortcutModifier: "Ctrl",
+          recentFormatFilters: ["전체"],
+          openTabs: [],
+        };
+      }
+      if (command === "get_ribbon_category_commands") {
+        return { commands: [] };
+      }
+      if (command === "audit_security") {
+        return Promise.reject(new Error("SecurityViolation: XXE DOCTYPE blocked"));
+      }
+      return { status: "ok" };
+    },
+  });
+  tauriHarness.document.getElementById("btn-run-security-audit").click();
+  await flushAsyncTurns();
+  assert.match(
+    tauriHarness.document.getElementById("security-status-text").textContent,
+    /REJECTED.*XXE DOCTYPE blocked/
+  );
 });

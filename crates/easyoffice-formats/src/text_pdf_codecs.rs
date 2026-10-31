@@ -712,6 +712,16 @@ pub struct PdfDocumentModel {
     pub watermark_text: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PdfTrailerJsonValue {
+    Null,
+    Bool,
+    Number,
+    Str(String),
+    Array(Vec<PdfTrailerJsonValue>),
+    Object(Vec<(String, PdfTrailerJsonValue)>),
+}
+
 /// ISO 32000-1 (`%PDF-1.4`) binary serializer and parser with byte-accurate `xref` table.
 pub struct PdfSerializer;
 
@@ -885,13 +895,10 @@ impl PdfSerializer {
         let mut current_page_number: Option<usize> = None;
         let mut current_rotation = 0;
         let mut current_body = String::new();
-        let mut fallback_body = String::new();
+        let mut fallback_stream_buf = String::new();
         let mut current_stamp: Option<String> = None;
         let mut in_stream = false;
-        let mut in_text_object = false;
-        let mut active_font_utf16be = false;
         let mut seen_body_line = false;
-        let mut seen_fallback_line = false;
         let mut is_metadata_obj = false;
         let mut trailer_b64: Option<String> = None;
         let mut trailer_b64_count = 0usize;
@@ -936,22 +943,37 @@ impl PdfSerializer {
             }
             if trimmed == "stream" {
                 in_stream = true;
-                in_text_object = false;
-                active_font_utf16be = false;
                 current_body.clear();
-                fallback_body.clear();
+                fallback_stream_buf.clear();
                 current_stamp = None;
                 seen_body_line = false;
-                seen_fallback_line = false;
                 continue;
             }
             if trimmed == "endstream" {
                 if in_stream {
                     if !is_metadata_obj {
+                        let mut fallback_body = String::new();
+                        let mut seen_fallback_line = false;
+                        for content in Self::extract_pdf_stream_text_segments(&fallback_stream_buf)
+                        {
+                            if let Some(wm) = content.strip_prefix("[WM] ") {
+                                watermark_text = Some(wm.to_string());
+                                continue;
+                            }
+                            if let Some(stamp) = content.strip_prefix("[STAMP] ") {
+                                current_stamp = Some(stamp.to_string());
+                                continue;
+                            }
+                            if seen_fallback_line {
+                                fallback_body.push('\n');
+                            }
+                            seen_fallback_line = true;
+                            fallback_body.push_str(&content);
+                        }
                         let page_body = if seen_body_line {
                             current_body.clone()
                         } else {
-                            fallback_body.clone()
+                            fallback_body
                         };
                         pages.push(PdfPageModel {
                             page_number: current_page_number.take().unwrap_or(pages.len() + 1),
@@ -962,8 +984,6 @@ impl PdfSerializer {
                     }
                     current_rotation = 0;
                     in_stream = false;
-                    in_text_object = false;
-                    active_font_utf16be = false;
                 }
                 continue;
             }
@@ -976,8 +996,7 @@ impl PdfSerializer {
                     continue;
                 }
                 if is_body_line {
-                    let uses_f2 = trimmed.contains("/F2 ");
-                    for content in Self::extract_bt_segments(trimmed, uses_f2) {
+                    for content in Self::extract_pdf_stream_text_segments(trimmed) {
                         if seen_body_line {
                             current_body.push('\n');
                         }
@@ -986,27 +1005,10 @@ impl PdfSerializer {
                     }
                     continue;
                 }
-                for (span, prefer_utf16be) in Self::split_pdf_text_object_spans(
-                    trimmed,
-                    &mut in_text_object,
-                    &mut active_font_utf16be,
-                ) {
-                    for content in Self::extract_bt_segments(&span, prefer_utf16be) {
-                        if let Some(wm) = content.strip_prefix("[WM] ") {
-                            watermark_text = Some(wm.to_string());
-                            continue;
-                        }
-                        if let Some(stamp) = content.strip_prefix("[STAMP] ") {
-                            current_stamp = Some(stamp.to_string());
-                            continue;
-                        }
-                        if seen_fallback_line {
-                            fallback_body.push('\n');
-                        }
-                        seen_fallback_line = true;
-                        fallback_body.push_str(&content);
-                    }
+                if !fallback_stream_buf.is_empty() {
+                    fallback_stream_buf.push('\n');
                 }
+                fallback_stream_buf.push_str(line);
             }
         }
 
@@ -1022,11 +1024,6 @@ impl PdfSerializer {
             ));
         }
         if let Some(b64) = trailer_b64 {
-            let visible_concat: String = pages
-                .iter()
-                .map(|p| p.body_text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
             if b64.is_empty() {
                 return Err(EasyOfficeError::SecurityViolation(
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 비어 있습니다.".to_string(),
@@ -1038,7 +1035,8 @@ impl PdfSerializer {
                         .to_string(),
                 ));
             };
-            if !Self::validate_pdf_trailer_json(&decoded, &title, &visible_concat) {
+            if !Self::validate_pdf_trailer_json(&decoded, &title, &pages, watermark_text.as_deref())
+            {
                 return Err(EasyOfficeError::SecurityViolation(
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 본문 스트림과 일치하지 않습니다."
                         .to_string(),
@@ -1188,6 +1186,9 @@ impl PdfSerializer {
             if c == '"' {
                 return Some(out);
             }
+            if (c as u32) < 0x20 {
+                return None;
+            }
             if c != '\\' {
                 out.push(c);
                 continue;
@@ -1235,110 +1236,261 @@ impl PdfSerializer {
         None
     }
 
-    fn extract_json_key_strings(json: &str) -> Option<(Vec<(String, String)>, bool)> {
-        let trimmed = json.trim();
-        if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
-            return None;
+    fn skip_json_ws(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+        while chars
+            .peek()
+            .is_some_and(|ch| matches!(ch, ' ' | '\t' | '\r' | '\n'))
+        {
+            let _ = chars.next();
         }
-        let mut chars = trimmed.chars().peekable();
-        let mut brace_depth: i32 = 0;
-        let mut bracket_depth: i32 = 0;
-        let mut pairs = Vec::new();
-        let mut has_pages_key = false;
+    }
 
-        while let Some(c) = chars.next() {
-            if c.is_whitespace() {
-                continue;
+    fn parse_json_number(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<()> {
+        if chars.peek() == Some(&'-') {
+            let _ = chars.next();
+        }
+        match chars.next()? {
+            '0' => {}
+            '1'..='9' => {
+                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                    let _ = chars.next();
+                }
             }
-            match c {
-                '{' => brace_depth += 1,
-                '}' => {
-                    brace_depth -= 1;
-                    if brace_depth < 0 {
-                        return None;
-                    }
-                }
-                '[' => bracket_depth += 1,
-                ']' => {
-                    bracket_depth -= 1;
-                    if bracket_depth < 0 {
-                        return None;
-                    }
-                }
-                '"' => {
-                    let s = Self::parse_json_string_literal(&mut chars)?;
-                    while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
-                        let _ = chars.next();
-                    }
-                    if chars.peek() == Some(&':') {
-                        let _ = chars.next();
-                        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
-                            let _ = chars.next();
-                        }
-                        if s == "pages" && chars.peek() == Some(&'[') {
-                            has_pages_key = true;
-                        }
-                        if chars.peek() == Some(&'"') {
-                            let _ = chars.next();
-                            let val = Self::parse_json_string_literal(&mut chars)?;
-                            pairs.push((s, val));
-                        }
-                    }
-                }
-                _ => {}
+            _ => return None,
+        }
+        if chars.peek() == Some(&'.') {
+            let _ = chars.next();
+            if !chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                let _ = chars.next();
             }
         }
-        if brace_depth != 0 || bracket_depth != 0 {
+        if chars.peek().is_some_and(|c| *c == 'e' || *c == 'E') {
+            let _ = chars.next();
+            if chars.peek().is_some_and(|c| *c == '+' || *c == '-') {
+                let _ = chars.next();
+            }
+            if !chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                let _ = chars.next();
+            }
+        }
+        Some(())
+    }
+
+    fn consume_json_keyword(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+        kw: &str,
+    ) -> Option<()> {
+        for expected in kw.chars() {
+            if chars.next()? != expected {
+                return None;
+            }
+        }
+        Some(())
+    }
+
+    fn parse_json_value(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+        depth: usize,
+    ) -> Option<PdfTrailerJsonValue> {
+        if depth > 32 {
             return None;
         }
-        Some((pairs, has_pages_key))
+        Self::skip_json_ws(chars);
+        let peek = *chars.peek()?;
+        match peek {
+            '"' => {
+                let _ = chars.next();
+                Some(PdfTrailerJsonValue::Str(Self::parse_json_string_literal(
+                    chars,
+                )?))
+            }
+            '{' => {
+                let _ = chars.next();
+                Self::skip_json_ws(chars);
+                let mut entries: Vec<(String, PdfTrailerJsonValue)> = Vec::new();
+                if chars.peek() == Some(&'}') {
+                    let _ = chars.next();
+                    return Some(PdfTrailerJsonValue::Object(entries));
+                }
+                loop {
+                    Self::skip_json_ws(chars);
+                    if chars.next()? != '"' {
+                        return None;
+                    }
+                    let key = Self::parse_json_string_literal(chars)?;
+                    if entries.iter().any(|(k, _)| k == &key) {
+                        return None;
+                    }
+                    Self::skip_json_ws(chars);
+                    if chars.next()? != ':' {
+                        return None;
+                    }
+                    let val = Self::parse_json_value(chars, depth + 1)?;
+                    entries.push((key, val));
+                    Self::skip_json_ws(chars);
+                    match chars.next()? {
+                        ',' => continue,
+                        '}' => break,
+                        _ => return None,
+                    }
+                }
+                Some(PdfTrailerJsonValue::Object(entries))
+            }
+            '[' => {
+                let _ = chars.next();
+                Self::skip_json_ws(chars);
+                let mut items = Vec::new();
+                if chars.peek() == Some(&']') {
+                    let _ = chars.next();
+                    return Some(PdfTrailerJsonValue::Array(items));
+                }
+                loop {
+                    let val = Self::parse_json_value(chars, depth + 1)?;
+                    items.push(val);
+                    Self::skip_json_ws(chars);
+                    match chars.next()? {
+                        ',' => continue,
+                        ']' => break,
+                        _ => return None,
+                    }
+                }
+                Some(PdfTrailerJsonValue::Array(items))
+            }
+            't' => {
+                Self::consume_json_keyword(chars, "true")?;
+                Some(PdfTrailerJsonValue::Bool)
+            }
+            'f' => {
+                Self::consume_json_keyword(chars, "false")?;
+                Some(PdfTrailerJsonValue::Bool)
+            }
+            'n' => {
+                Self::consume_json_keyword(chars, "null")?;
+                Some(PdfTrailerJsonValue::Null)
+            }
+            '-' | '0'..='9' => {
+                Self::parse_json_number(chars)?;
+                Some(PdfTrailerJsonValue::Number)
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_json_document(input: &str) -> Option<PdfTrailerJsonValue> {
+        let mut chars = input.chars().peekable();
+        let root = Self::parse_json_value(&mut chars, 0)?;
+        Self::skip_json_ws(&mut chars);
+        if chars.peek().is_some() {
+            return None;
+        }
+        Some(root)
+    }
+
+    fn strip_ws(s: &str) -> String {
+        s.chars().filter(|c| !c.is_whitespace()).collect()
     }
 
     fn validate_pdf_trailer_json(
         decoded: &str,
         expected_title: &str,
-        visible_concat: &str,
+        pages: &[PdfPageModel],
+        parsed_watermark: Option<&str>,
     ) -> bool {
-        let Some((pairs, has_pages_key)) = Self::extract_json_key_strings(decoded) else {
+        let Some(PdfTrailerJsonValue::Object(root_entries)) = Self::parse_json_document(decoded)
+        else {
             return false;
         };
-        let Some(json_title) = pairs
+        let Some(PdfTrailerJsonValue::Str(json_title)) = root_entries
             .iter()
             .find(|(k, _)| k == "title")
-            .map(|(_, v)| v.as_str())
+            .map(|(_, v)| v)
         else {
             return false;
         };
         if json_title != expected_title {
             return false;
         }
-        let body_parts: Vec<&str> = pairs
+        if let Some(PdfTrailerJsonValue::Str(wm)) = root_entries
             .iter()
-            .filter(|(k, _)| k == "extractedText" || k == "bodyText")
-            .map(|(_, v)| v.as_str())
-            .collect();
-        if body_parts.is_empty() && !has_pages_key {
-            return false;
+            .find(|(k, _)| k == "watermarkText")
+            .map(|(_, v)| v)
+        {
+            if !wm.is_empty() && parsed_watermark != Some(wm.as_str()) {
+                return false;
+            }
         }
-        let json_body = body_parts.join("\n");
-        let norm_visible: String = visible_concat
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
-        let norm_json: String = json_body.chars().filter(|c| !c.is_whitespace()).collect();
-        norm_visible == norm_json
+        if let Some(pages_val) = root_entries
+            .iter()
+            .find(|(k, _)| k == "pages")
+            .map(|(_, v)| v)
+        {
+            let PdfTrailerJsonValue::Array(page_items) = pages_val else {
+                return false;
+            };
+            if page_items.is_empty() || page_items.len() > pages.len() {
+                return false;
+            }
+            let mut json_page_texts = Vec::with_capacity(page_items.len());
+            for item in page_items {
+                let PdfTrailerJsonValue::Object(p_entries) = item else {
+                    return false;
+                };
+                let page_str = p_entries
+                    .iter()
+                    .find(|(k, _)| k == "extractedText" || k == "bodyText")
+                    .and_then(|(_, v)| match v {
+                        PdfTrailerJsonValue::Str(s) => Some(s.as_str()),
+                        _ => None,
+                    });
+                let Some(text) = page_str else {
+                    return false;
+                };
+                json_page_texts.push(text);
+            }
+            if json_page_texts.len() == pages.len() {
+                return json_page_texts
+                    .iter()
+                    .zip(pages.iter())
+                    .all(|(jt, p)| Self::strip_ws(jt) == Self::strip_ws(&p.body_text));
+            }
+            let visible_concat: String = pages
+                .iter()
+                .map(|p| p.body_text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Self::strip_ws(&json_page_texts.join("\n")) == Self::strip_ws(&visible_concat);
+        }
+        if let Some(PdfTrailerJsonValue::Str(body_str)) = root_entries
+            .iter()
+            .find(|(k, _)| k == "bodyText")
+            .map(|(_, v)| v)
+        {
+            let visible_concat: String = pages
+                .iter()
+                .map(|p| p.body_text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Self::strip_ws(body_str) == Self::strip_ws(&visible_concat);
+        }
+        false
     }
 
-    fn split_pdf_text_object_spans(
-        line: &str,
-        in_text_object: &mut bool,
-        active_font_utf16be: &mut bool,
-    ) -> Vec<(String, bool)> {
-        let bytes = line.as_bytes();
+    fn extract_pdf_stream_text_segments(stream: &str) -> Vec<String> {
+        let bytes = stream.as_bytes();
         let mut i = 0usize;
-        let mut span_start = if *in_text_object { 0usize } else { bytes.len() };
+        let mut in_text_object = false;
+        let mut active_font_utf16be = false;
         let mut last_slash_name: Option<&str> = None;
-        let mut spans = Vec::new();
+        let mut in_array = false;
+        let mut array_buf = String::new();
+        let mut array_has_text = false;
+        let mut segments = Vec::new();
 
         while i < bytes.len() {
             let b = bytes[i];
@@ -1347,20 +1499,61 @@ impl PdfSerializer {
                 continue;
             }
             if b == b'%' {
-                break;
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'\n' && bytes[i] != b'\r' {
+                    i += 1;
+                }
+                continue;
+            }
+            if b == b'[' {
+                if in_text_object {
+                    in_array = true;
+                    array_buf.clear();
+                    array_has_text = false;
+                }
+                i += 1;
+                continue;
+            }
+            if b == b']' {
+                if in_text_object && in_array {
+                    in_array = false;
+                    if array_has_text {
+                        segments.push(std::mem::take(&mut array_buf));
+                    } else {
+                        array_buf.clear();
+                    }
+                    array_has_text = false;
+                }
+                i += 1;
+                continue;
             }
             if b == b'(' {
-                let mut paren = 1usize;
+                let start_inner = i + 1;
+                let mut depth = 1usize;
                 i += 1;
-                while i < bytes.len() && paren > 0 {
+                while i < bytes.len() && depth > 0 {
                     if bytes[i] == b'\\' {
                         i = (i + 2).min(bytes.len());
                         continue;
                     }
                     if bytes[i] == b'(' {
-                        paren += 1;
+                        depth += 1;
                     } else if bytes[i] == b')' {
-                        paren -= 1;
+                        depth -= 1;
+                        if depth == 0 {
+                            let raw_lit = &stream[start_inner..i];
+                            if in_text_object {
+                                let decoded = Self::unescape_pdf_text(raw_lit);
+                                if in_array {
+                                    array_buf.push_str(&decoded);
+                                    array_has_text = true;
+                                } else {
+                                    segments.push(decoded);
+                                }
+                            }
+                            i += 1;
+                            break;
+                        }
                     }
                     i += 1;
                 }
@@ -1371,16 +1564,30 @@ impl PdfSerializer {
                     i += 2;
                     continue;
                 }
+                let start_hex = i + 1;
                 i += 1;
                 while i < bytes.len() && bytes[i] != b'>' {
                     i += 1;
                 }
                 if i < bytes.len() {
+                    let raw_hex = &stream[start_hex..i];
+                    if in_text_object {
+                        if let Some(decoded) =
+                            Self::decode_pdf_hex_string(raw_hex, active_font_utf16be)
+                        {
+                            if in_array {
+                                array_buf.push_str(&decoded);
+                                array_has_text = true;
+                            } else {
+                                segments.push(decoded);
+                            }
+                        }
+                    }
                     i += 1;
                 }
                 continue;
             }
-            if b == b'>' || b == b'[' || b == b']' || b == b'{' || b == b'}' {
+            if b == b'>' || b == b'{' || b == b'}' {
                 i += 1;
                 continue;
             }
@@ -1393,7 +1600,7 @@ impl PdfSerializer {
                 {
                     i += 1;
                 }
-                last_slash_name = Some(&line[start..i]);
+                last_slash_name = Some(&stream[start..i]);
                 continue;
             }
             let start = i;
@@ -1403,39 +1610,30 @@ impl PdfSerializer {
             {
                 i += 1;
             }
-            let tok = &line[start..i];
-            if !*in_text_object {
+            let tok = &stream[start..i];
+            if !in_text_object {
                 if tok == "BT" {
-                    *in_text_object = true;
-                    *active_font_utf16be = false;
+                    in_text_object = true;
+                    active_font_utf16be = false;
                     last_slash_name = None;
-                    span_start = i;
+                    in_array = false;
+                    array_buf.clear();
+                    array_has_text = false;
                 }
             } else if tok == "Tf" {
                 if let Some(font_name) = last_slash_name {
-                    if span_start < start {
-                        let prev = &line[span_start..start];
-                        if prev.contains('(') || prev.contains('<') {
-                            spans.push((prev.to_string(), *active_font_utf16be));
-                            span_start = i;
-                        }
-                    }
-                    *active_font_utf16be = font_name == "/F2";
+                    active_font_utf16be = font_name == "/F2";
                 }
             } else if tok == "ET" {
-                if span_start <= start {
-                    spans.push((line[span_start..start].to_string(), *active_font_utf16be));
-                }
-                *in_text_object = false;
-                *active_font_utf16be = false;
+                in_text_object = false;
+                active_font_utf16be = false;
                 last_slash_name = None;
-                span_start = bytes.len();
+                in_array = false;
+                array_buf.clear();
+                array_has_text = false;
             }
         }
-        if *in_text_object && span_start <= bytes.len() {
-            spans.push((line[span_start..].to_string(), *active_font_utf16be));
-        }
-        spans
+        segments
     }
 
     fn decode_pdf_hex_string(hex: &str, prefer_utf16be: bool) -> Option<String> {
@@ -1479,73 +1677,6 @@ impl PdfSerializer {
         }
     }
 
-    fn extract_bt_segments(fragment: &str, prefer_utf16be_hex: bool) -> Vec<String> {
-        let mut segments = Vec::new();
-        let mut in_tj_array = false;
-        let mut array_buf = String::new();
-        let mut chars = fragment.chars().peekable();
-
-        while let Some(c) = chars.next() {
-            if c == '[' {
-                in_tj_array = true;
-                array_buf.clear();
-            } else if c == ']' && in_tj_array {
-                in_tj_array = false;
-                segments.push(std::mem::take(&mut array_buf));
-            } else if c == '(' {
-                let mut token = String::new();
-                let mut depth = 1usize;
-                while let Some(inner) = chars.next() {
-                    if inner == '\\' {
-                        token.push('\\');
-                        if let Some(escaped) = chars.next() {
-                            token.push(escaped);
-                        }
-                    } else if inner == '(' {
-                        depth += 1;
-                        token.push('(');
-                    } else if inner == ')' {
-                        depth -= 1;
-                        if depth == 0 {
-                            let decoded = Self::unescape_pdf_text(&token);
-                            if in_tj_array {
-                                array_buf.push_str(&decoded);
-                            } else {
-                                segments.push(decoded);
-                            }
-                            break;
-                        }
-                        token.push(')');
-                    } else {
-                        token.push(inner);
-                    }
-                }
-            } else if c == '<' {
-                if chars.peek() == Some(&'<') {
-                    let _ = chars.next();
-                    continue;
-                }
-                let mut hex_str = String::new();
-                for inner in chars.by_ref() {
-                    if inner == '>' {
-                        if let Some(decoded) =
-                            Self::decode_pdf_hex_string(&hex_str, prefer_utf16be_hex)
-                        {
-                            if in_tj_array {
-                                array_buf.push_str(&decoded);
-                            } else {
-                                segments.push(decoded);
-                            }
-                        }
-                        break;
-                    }
-                    hex_str.push(inner);
-                }
-            }
-        }
-        segments
-    }
-
     fn extract_paren_token(line: &str, prefix: &str) -> Option<String> {
         let start = line.find(prefix)? + prefix.len();
         let rest = &line[start..];
@@ -1583,12 +1714,33 @@ impl PdfSerializer {
 
     pub fn unescape_pdf_text(text: &str) -> String {
         let mut out = String::with_capacity(text.len());
-        let mut chars = text.chars();
+        let mut chars = text.chars().peekable();
         while let Some(ch) = chars.next() {
             if ch == '\\' {
                 match chars.next() {
                     Some('n') => out.push('\n'),
                     Some('r') => out.push('\r'),
+                    Some('t') => out.push('\t'),
+                    Some('b') => out.push('\u{0008}'),
+                    Some('f') => out.push('\u{000C}'),
+                    Some('\r') => {
+                        if chars.peek() == Some(&'\n') {
+                            let _ = chars.next();
+                        }
+                    }
+                    Some('\n') => {}
+                    Some(oct @ '0'..='7') => {
+                        let mut val = (oct as u32) - ('0' as u32);
+                        for _ in 0..2 {
+                            if let Some(&next_oct @ '0'..='7') = chars.peek() {
+                                let _ = chars.next();
+                                val = (val * 8) + ((next_oct as u32) - ('0' as u32));
+                            } else {
+                                break;
+                            }
+                        }
+                        out.push(char::from((val & 0xFF) as u8));
+                    }
                     Some(escaped) => out.push(escaped),
                     None => out.push('\\'),
                 }
@@ -1917,11 +2069,110 @@ mod tests {
             Err(EasyOfficeError::SecurityViolation(_))
         ));
 
-        let mut valid_empty_pdf = empty_title_whitespace_pdf;
+        let mut valid_empty_pdf = empty_title_whitespace_pdf.clone();
         valid_empty_pdf.extend_from_slice(
             b"\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IiIsInBhZ2VzIjpbeyJleHRyYWN0ZWRUZXh0IjoiICAgIn1dfQ==\n",
         );
         assert!(PdfSerializer::parse(&valid_empty_pdf).is_ok());
+
+        let swift_outline_json = r#"{"annotations":[],"formFields":[],"id":"00000000-0000-0000-0000-000000000001","inkStrokes":[],"isRedacted":false,"outline":[{"children":[],"id":"00000000-0000-0000-0000-000000000002","targetPageNumber":1,"title":"1장 개요"}],"pages":[{"extractedText":"본문 단락","id":"00000000-0000-0000-0000-000000000003","pageNumber":1,"rotationDegrees":0}],"redactedPhrases":[],"title":"연간계약서","watermarkText":""}"#;
+        let mut swift_outline_pdf = PdfSerializer::serialize(&PdfDocumentModel {
+            title: "연간계약서".to_string(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "본문 단락".to_string(),
+                approval_stamp: None,
+            }],
+            watermark_text: None,
+        });
+        let b64_encode = |raw: &[u8]| -> String {
+            const TBL: &[u8; 64] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let mut out = String::new();
+            for chunk in raw.chunks(3) {
+                let b0 = chunk[0];
+                let b1 = *chunk.get(1).unwrap_or(&0);
+                let b2 = *chunk.get(2).unwrap_or(&0);
+                out.push(TBL[(b0 >> 2) as usize] as char);
+                out.push(TBL[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+                if chunk.len() > 1 {
+                    out.push(TBL[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+                if chunk.len() > 2 {
+                    out.push(TBL[(b2 & 0x3F) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+            }
+            out
+        };
+        swift_outline_pdf.extend_from_slice(
+            format!(
+                "\n%EasyOfficePDFModelBase64:{}\n",
+                b64_encode(swift_outline_json.as_bytes())
+            )
+            .as_bytes(),
+        );
+        assert!(PdfSerializer::parse(&swift_outline_pdf).is_ok());
+
+        for bad_json in [
+            r#"{"title":"","title":"Spoofed","pages":[{"extractedText":"   "}]}"#,
+            r#"{ @#$ "title":"","pages":[{"extractedText":"   "}] }"#,
+            r#"{"title":"","pages":[{"extractedText":"   "}]} TRAILING"#,
+        ] {
+            let mut bad_pdf = empty_title_whitespace_pdf.clone();
+            bad_pdf.extend_from_slice(
+                format!(
+                    "\n%EasyOfficePDFModelBase64:{}\n",
+                    b64_encode(bad_json.as_bytes())
+                )
+                .as_bytes(),
+            );
+            assert!(matches!(
+                PdfSerializer::parse(&bad_pdf),
+                Err(EasyOfficeError::SecurityViolation(_))
+            ));
+        }
+
+        let two_page_pdf = PdfSerializer::serialize(&PdfDocumentModel {
+            title: "TwoPages".to_string(),
+            pages: vec![
+                PdfPageModel {
+                    page_number: 1,
+                    rotation_degrees: 0,
+                    body_text: "A".to_string(),
+                    approval_stamp: None,
+                },
+                PdfPageModel {
+                    page_number: 2,
+                    rotation_degrees: 0,
+                    body_text: "B".to_string(),
+                    approval_stamp: None,
+                },
+            ],
+            watermark_text: None,
+        });
+        let mut boundary_spoof_pdf = two_page_pdf;
+        let boundary_json =
+            r#"{"title":"TwoPages","pages":[{"extractedText":"AB"},{"extractedText":""}]}"#;
+        boundary_spoof_pdf.extend_from_slice(
+            format!(
+                "\n%EasyOfficePDFModelBase64:{}\n",
+                b64_encode(boundary_json.as_bytes())
+            )
+            .as_bytes(),
+        );
+        assert!(matches!(
+            PdfSerializer::parse(&boundary_spoof_pdf),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+
+        let multiline_tj_comment_pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Title (StreamEdge) >> endobj\n2 0 obj << /Type /Page /PageNumber 1 >> endobj\n3 0 obj << /Length 160 >>\nstream\nBT\n[3 2] 0 d\n/F1 11 Tf\n[(Hel) -15 (lo )\n(World)] TJ % inline (FakeComment) ET\n(\\101\\tLine\\\nCont) Tj\nET\nendstream\nendobj\nxref\n0 4\ntrailer << /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
+        let parsed_edge = PdfSerializer::parse(multiline_tj_comment_pdf).unwrap();
+        assert_eq!(parsed_edge.pages[0].body_text, "Hello World\nA\tLineCont");
 
         assert_eq!(PdfSerializer::decode_base64_bytes("YQ==YQ=="), None);
     }

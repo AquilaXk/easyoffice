@@ -39,6 +39,16 @@ fn shared_ribbon_session() -> &'static std::sync::Mutex<SharedRibbonSession> {
     RIBBON_WORKSPACE_SESSION.get_or_init(|| std::sync::Mutex::new(SharedRibbonSession::default()))
 }
 
+#[derive(Debug, Clone)]
+enum SheetRpcJson {
+    Null,
+    Bool,
+    Number,
+    Str(String),
+    Array(Vec<SheetRpcJson>),
+    Object(Vec<(String, SheetRpcJson)>),
+}
+
 /// Tauri v2 compatible IPC router dispatching desktop workspace commands to pure Rust engines.
 pub struct EasyOfficeIpcRouter;
 
@@ -293,13 +303,19 @@ impl EasyOfficeIpcRouter {
     fn extract_active_sheet_and_expr(raw_expr: &str) -> (&str, &str) {
         if let Some((sh, rest)) = raw_expr.split_once('|') {
             let trimmed_sh = sh.trim();
-            if !trimmed_sh.is_empty() && !trimmed_sh.starts_with('=') && !trimmed_sh.contains('(') {
+            if !trimmed_sh.starts_with('=') {
+                if trimmed_sh.is_empty() {
+                    return ("Sheet1", rest.trim());
+                }
                 return (trimmed_sh, rest.trim());
             }
         }
         if let Some((sh, rest)) = raw_expr.split_once('!') {
             let trimmed_sh = sh.trim();
-            if !trimmed_sh.is_empty() && !trimmed_sh.starts_with('=') && !trimmed_sh.contains('(') {
+            if !trimmed_sh.starts_with('=') && !trimmed_sh.contains('(') {
+                if trimmed_sh.is_empty() {
+                    return ("Sheet1", rest.trim());
+                }
                 return (trimmed_sh, rest.trim());
             }
         }
@@ -319,6 +335,241 @@ impl EasyOfficeIpcRouter {
         }
     }
 
+    fn parse_rpc_json_string(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> Option<String> {
+        let mut out = String::new();
+        while let Some(c) = chars.next() {
+            if c == '"' {
+                return Some(out);
+            }
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            match chars.next()? {
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                '/' => out.push('/'),
+                'b' => out.push('\u{0008}'),
+                'f' => out.push('\u{000C}'),
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                'u' => {
+                    let mut hex4 = String::with_capacity(4);
+                    for _ in 0..4 {
+                        hex4.push(chars.next()?);
+                    }
+                    let hi = u16::from_str_radix(&hex4, 16).ok()?;
+                    if (0xD800..=0xDBFF).contains(&hi) {
+                        if chars.next()? != '\\' || chars.next()? != 'u' {
+                            return None;
+                        }
+                        let mut lo_hex = String::with_capacity(4);
+                        for _ in 0..4 {
+                            lo_hex.push(chars.next()?);
+                        }
+                        let lo = u16::from_str_radix(&lo_hex, 16).ok()?;
+                        if !(0xDC00..=0xDFFF).contains(&lo) {
+                            return None;
+                        }
+                        let cp = 0x10000 + (((hi as u32 - 0xD800) << 10) | (lo as u32 - 0xDC00));
+                        out.push(char::from_u32(cp)?);
+                    } else {
+                        out.push(char::from_u32(hi as u32)?);
+                    }
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    fn parse_rpc_json_value(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+        depth: usize,
+    ) -> Option<SheetRpcJson> {
+        if depth > 24 {
+            return None;
+        }
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            let _ = chars.next();
+        }
+        match *chars.peek()? {
+            '"' => {
+                let _ = chars.next();
+                Some(SheetRpcJson::Str(Self::parse_rpc_json_string(chars)?))
+            }
+            '{' => {
+                let _ = chars.next();
+                while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                    let _ = chars.next();
+                }
+                let mut entries = Vec::new();
+                if chars.peek() == Some(&'}') {
+                    let _ = chars.next();
+                    return Some(SheetRpcJson::Object(entries));
+                }
+                loop {
+                    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                        let _ = chars.next();
+                    }
+                    if chars.next()? != '"' {
+                        return None;
+                    }
+                    let key = Self::parse_rpc_json_string(chars)?;
+                    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                        let _ = chars.next();
+                    }
+                    if chars.next()? != ':' {
+                        return None;
+                    }
+                    let val = Self::parse_rpc_json_value(chars, depth + 1)?;
+                    entries.push((key, val));
+                    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                        let _ = chars.next();
+                    }
+                    match chars.next()? {
+                        ',' => continue,
+                        '}' => break,
+                        _ => return None,
+                    }
+                }
+                Some(SheetRpcJson::Object(entries))
+            }
+            '[' => {
+                let _ = chars.next();
+                while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                    let _ = chars.next();
+                }
+                let mut items = Vec::new();
+                if chars.peek() == Some(&']') {
+                    let _ = chars.next();
+                    return Some(SheetRpcJson::Array(items));
+                }
+                loop {
+                    items.push(Self::parse_rpc_json_value(chars, depth + 1)?);
+                    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                        let _ = chars.next();
+                    }
+                    match chars.next()? {
+                        ',' => continue,
+                        ']' => break,
+                        _ => return None,
+                    }
+                }
+                Some(SheetRpcJson::Array(items))
+            }
+            't' => {
+                for ch in "true".chars() {
+                    if chars.next()? != ch {
+                        return None;
+                    }
+                }
+                Some(SheetRpcJson::Bool)
+            }
+            'f' => {
+                for ch in "false".chars() {
+                    if chars.next()? != ch {
+                        return None;
+                    }
+                }
+                Some(SheetRpcJson::Bool)
+            }
+            'n' => {
+                for ch in "null".chars() {
+                    if chars.next()? != ch {
+                        return None;
+                    }
+                }
+                Some(SheetRpcJson::Null)
+            }
+            '-' | '0'..='9' => {
+                let _ = chars.next();
+                while chars
+                    .peek()
+                    .is_some_and(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
+                {
+                    let _ = chars.next();
+                }
+                Some(SheetRpcJson::Number)
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_rpc_json_doc(raw: &str) -> Option<Vec<(String, SheetRpcJson)>> {
+        let mut chars = raw.chars().peekable();
+        let SheetRpcJson::Object(entries) = Self::parse_rpc_json_value(&mut chars, 0)? else {
+            return None;
+        };
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            let _ = chars.next();
+        }
+        if chars.peek().is_some() {
+            return None;
+        }
+        Some(entries)
+    }
+
+    fn json_obj_str<'a>(entries: &'a [(String, SheetRpcJson)], key: &str) -> Option<&'a str> {
+        entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .and_then(|(_, v)| match v {
+                SheetRpcJson::Str(s) => Some(s.as_str()),
+                _ => None,
+            })
+    }
+
+    fn build_workbook_from_json_entries(
+        entries: &[(String, SheetRpcJson)],
+        default_sheet: &str,
+        seed_defaults: bool,
+    ) -> Result<WorkbookEngine, EasyOfficeError> {
+        let mut wb = WorkbookEngine::new();
+        wb.add_sheet("Sheet1");
+        wb.add_sheet("Sheet2");
+        wb.add_sheet(default_sheet);
+        let mut seen_sheet1 = false;
+        let mut seen_sheet2 = false;
+        let mut cell_triples: Vec<(&str, &str, &str)> = Vec::new();
+        if let Some((_, SheetRpcJson::Array(cells))) = entries.iter().find(|(k, _)| k == "cells") {
+            for item in cells {
+                if let SheetRpcJson::Object(c_entries) = item {
+                    let raw_sh = Self::json_obj_str(c_entries, "sheet").unwrap_or(default_sheet);
+                    let sh = Self::normalize_sheet_token_or_default(raw_sh);
+                    let addr = Self::json_obj_str(c_entries, "cell").unwrap_or("").trim();
+                    let val = Self::json_obj_str(c_entries, "value").unwrap_or("");
+                    if !addr.is_empty() {
+                        if sh.eq_ignore_ascii_case("Sheet1") {
+                            seen_sheet1 = true;
+                        }
+                        if sh.eq_ignore_ascii_case("Sheet2") {
+                            seen_sheet2 = true;
+                        }
+                        cell_triples.push((sh, addr, val));
+                    }
+                }
+            }
+        }
+        if seed_defaults {
+            if !seen_sheet1 {
+                wb.set_cell("Sheet1", "A1", "1200")?;
+                wb.set_cell("Sheet1", "B1", "850")?;
+            }
+            if !seen_sheet2 {
+                wb.set_cell("Sheet2", "A1", "100")?;
+            }
+        }
+        for (sh, addr, val) in cell_triples {
+            wb.add_sheet(sh);
+            wb.set_cell(sh, addr, val)?;
+        }
+        Ok(wb)
+    }
+
     fn build_workbook_from_cells(
         cells_part: Option<&str>,
         active_sheet: &str,
@@ -332,9 +583,9 @@ impl EasyOfficeIpcRouter {
             .unwrap_or_default();
         if seed_defaults {
             let has_sheet1 = assignments.iter().any(|(lhs, _)| {
-                let sh = lhs
-                    .split_once('!')
-                    .map_or(active_sheet, |(s, _)| Self::normalize_sheet_token(s));
+                let sh = lhs.split_once('!').map_or(active_sheet, |(s, _)| {
+                    Self::normalize_sheet_token_or_default(s)
+                });
                 sh.eq_ignore_ascii_case("Sheet1")
             });
             if !has_sheet1 {
@@ -342,9 +593,9 @@ impl EasyOfficeIpcRouter {
                 wb.set_cell("Sheet1", "B1", "850")?;
             }
             let has_sheet2 = assignments.iter().any(|(lhs, _)| {
-                let sh = lhs
-                    .split_once('!')
-                    .map_or(active_sheet, |(s, _)| Self::normalize_sheet_token(s));
+                let sh = lhs.split_once('!').map_or(active_sheet, |(s, _)| {
+                    Self::normalize_sheet_token_or_default(s)
+                });
                 sh.eq_ignore_ascii_case("Sheet2")
             });
             if !has_sheet2 {
@@ -356,7 +607,7 @@ impl EasyOfficeIpcRouter {
             let (sh, addr) = lhs
                 .split_once('!')
                 .map_or((active_sheet, lhs.as_str()), |(s, a)| {
-                    (Self::normalize_sheet_token(s), a)
+                    (Self::normalize_sheet_token_or_default(s), a)
                 });
             let addr_trim = addr.trim();
             if !sh.is_empty() && !addr_trim.is_empty() {
@@ -384,17 +635,92 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
-        let (cells_part, query_part) =
-            Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
-        let trimmed_query = query_part.trim();
-        let is_batch = trimmed_query.contains(',')
-            && !trimmed_query.contains('=')
-            && !trimmed_query.contains('(');
         let rule = ConditionalFormatRule::GreaterThan(100.0);
         let dv_rule = DataValidationRule::NumberRange {
             min: 0.0,
             max: 1_000_000.0,
         };
+        if payload.trim_start().starts_with('{') {
+            let entries = Self::parse_rpc_json_doc(payload).ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "유효하지 않은 evaluate_sheet JSON 페이로드".to_string(),
+                )
+            })?;
+            let raw_default_sh = Self::json_obj_str(&entries, "sheet").unwrap_or("Sheet1");
+            let default_sh = Self::normalize_sheet_token_or_default(raw_default_sh);
+            let mut wb = Self::build_workbook_from_json_entries(&entries, default_sh, false)?;
+            if let Some((_, SheetRpcJson::Array(targets))) =
+                entries.iter().find(|(k, _)| k == "targets")
+            {
+                if !targets.is_empty() {
+                    let mut first_expr = "A1".to_string();
+                    let mut first_eval = EvaluatedCellValue::Empty;
+                    let mut values_entries = Vec::with_capacity(targets.len());
+                    for (idx, item) in targets.iter().enumerate() {
+                        if let SheetRpcJson::Object(t_entries) = item {
+                            let sh = Self::normalize_sheet_token_or_default(
+                                Self::json_obj_str(t_entries, "sheet").unwrap_or(default_sh),
+                            );
+                            let expr = Self::json_obj_str(t_entries, "cell").unwrap_or("A1").trim();
+                            wb.add_sheet(sh);
+                            let val = if expr.starts_with('=') {
+                                wb.evaluate_formula_on_sheet(sh, expr)
+                            } else {
+                                wb.evaluate_cell(sh, expr)
+                            };
+                            let display = val.to_display_string();
+                            values_entries.push(format!(
+                                "\"{}!{}\":\"{}\"",
+                                Self::escape_json_str(sh),
+                                Self::escape_json_str(expr),
+                                Self::escape_json_str(&display)
+                            ));
+                            if idx == 0 {
+                                first_expr = expr.to_string();
+                                first_eval = val;
+                            }
+                        }
+                    }
+                    let cf_match = rule.matches(&first_eval, &[]);
+                    let dv_valid = dv_rule.validate(&first_eval);
+                    return Ok(format!(
+                        "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"conditionalMatch\":{},\"validationPassed\":{}}}",
+                        Self::escape_json_str(&first_expr),
+                        Self::escape_json_str(&first_eval.to_display_string()),
+                        values_entries.join(","),
+                        cf_match,
+                        dv_valid
+                    ));
+                }
+            }
+            let expr = Self::json_obj_str(&entries, "expr")
+                .or_else(|| Self::json_obj_str(&entries, "query"))
+                .unwrap_or("A1")
+                .trim();
+            let evaluated = if expr.starts_with('=') {
+                wb.evaluate_formula_on_sheet(default_sh, expr)
+            } else {
+                wb.evaluate_cell(default_sh, expr)
+            };
+            let cf_match = rule.matches(&evaluated, &[]);
+            let dv_valid = dv_rule.validate(&evaluated);
+            let display_val = evaluated.to_display_string();
+            return Ok(format!(
+                "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{\"{}!{}\":\"{}\"}},\"conditionalMatch\":{},\"validationPassed\":{}}}",
+                Self::escape_json_str(expr),
+                Self::escape_json_str(&display_val),
+                Self::escape_json_str(default_sh),
+                Self::escape_json_str(expr),
+                Self::escape_json_str(&display_val),
+                cf_match,
+                dv_valid
+            ));
+        }
+
+        let (cells_part, query_part) =
+            Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
+        let trimmed_query = query_part.trim();
+        let is_batch = trimmed_query.contains(',') && !trimmed_query.contains('=');
 
         if is_batch {
             let targets: Vec<&str> = trimmed_query
@@ -491,8 +817,10 @@ impl EasyOfficeIpcRouter {
 
     fn handle_audit_security(payload: &str) -> Result<String, EasyOfficeError> {
         let (entries_raw, xml_part) = match payload.split_once('|') {
-            Some((left, right)) => (Some(left.trim()), right.trim()),
-            None => (None, payload.trim()),
+            Some((left, right)) if !left.trim_start().starts_with('<') => {
+                (Some(left.trim()), right.trim())
+            }
+            _ => (None, payload.trim()),
         };
         if !xml_part.is_empty() {
             XmlSanitizer::validate_safe_xml(xml_part)?;
@@ -797,6 +1125,32 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_evaluate_workbook_formula(payload: &str) -> Result<String, EasyOfficeError> {
+        if payload.trim_start().starts_with('{') {
+            let entries = Self::parse_rpc_json_doc(payload).ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "유효하지 않은 evaluate_workbook_formula JSON 페이로드".to_string(),
+                )
+            })?;
+            let active_sheet = Self::normalize_sheet_token_or_default(
+                Self::json_obj_str(&entries, "sheet").unwrap_or("Sheet1"),
+            );
+            let expr = Self::json_obj_str(&entries, "expr")
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("=Sheet2!A1+50")
+                .trim();
+            let wb = Self::build_workbook_from_json_entries(&entries, active_sheet, true)?;
+            let val = if expr.starts_with('=') {
+                wb.evaluate_formula_on_sheet(active_sheet, expr)
+            } else {
+                wb.evaluate_cell(active_sheet, expr)
+            };
+            return Ok(format!(
+                "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\"}}",
+                Self::escape_json_str(active_sheet),
+                Self::escape_json_str(expr),
+                Self::escape_json_str(&val.to_display_string())
+            ));
+        }
         let (cells_part, expr_part) = match Self::split_unescaped_query(payload) {
             Some((c, e)) => (Some(c.trim()), e.trim()),
             None => (None, payload.trim()),
@@ -1575,6 +1929,21 @@ mod tests {
             empty_quoted_sheet.contains("\"value\":\"60\""),
             "res={empty_quoted_sheet}"
         );
+
+        let empty_pipe_and_lhs =
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", "''!A1=20?|=A1+50").unwrap();
+        assert!(
+            empty_pipe_and_lhs.contains("\"value\":\"70\""),
+            "res={empty_pipe_and_lhs}"
+        );
+
+        let json_paren_comma_batch = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","targets":[{"sheet":"Sheet1","cell":"B1"},{"sheet":"예산(안), Q1","cell":"C1"}],"cells":[{"sheet":"예산(안), Q1","cell":"A1","value":"250"},{"sheet":"예산(안), Q1","cell":"C1","value":"=A1*2"},{"sheet":"Sheet1","cell":"B1","value":"='예산(안), Q1'!C1+50"}]}"#,
+        )
+        .unwrap();
+        assert!(json_paren_comma_batch.contains("\"예산(안), Q1!C1\":\"500\""));
+        assert!(json_paren_comma_batch.contains("\"Sheet1!B1\":\"550\""));
 
         let backslash_batch = EasyOfficeIpcRouter::dispatch(
             "evaluate_sheet",

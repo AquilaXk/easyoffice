@@ -10,6 +10,7 @@ use std::time::Duration;
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
+const OFFLINE_RPC_JS: &str = include_str!("../ui/offline-rpc.js");
 const APP_JS: &str = include_str!("../ui/app.js");
 const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
 const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
@@ -200,6 +201,11 @@ fn handle_http_connection(mut stream: TcpStream, port: u16) {
             ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
         }
         ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
+        ("GET", "/offline-rpc.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            OFFLINE_RPC_JS.to_string(),
+        ),
         ("GET", "/app.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
