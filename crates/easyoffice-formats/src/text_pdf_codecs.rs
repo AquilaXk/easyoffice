@@ -888,6 +888,8 @@ impl PdfSerializer {
         let mut fallback_body = String::new();
         let mut current_stamp: Option<String> = None;
         let mut in_stream = false;
+        let mut in_text_object = false;
+        let mut active_font_utf16be = false;
         let mut seen_body_line = false;
         let mut seen_fallback_line = false;
         let mut is_metadata_obj = false;
@@ -934,6 +936,8 @@ impl PdfSerializer {
             }
             if trimmed == "stream" {
                 in_stream = true;
+                in_text_object = false;
+                active_font_utf16be = false;
                 current_body.clear();
                 fallback_body.clear();
                 current_stamp = None;
@@ -958,10 +962,12 @@ impl PdfSerializer {
                     }
                     current_rotation = 0;
                     in_stream = false;
+                    in_text_object = false;
+                    active_font_utf16be = false;
                 }
                 continue;
             }
-            if in_stream && !is_metadata_obj && trimmed.starts_with("BT ") {
+            if in_stream && !is_metadata_obj {
                 let is_body_line = trimmed.starts_with("BT /F1 12 Tf 54 ")
                     || trimmed.starts_with("BT /F2 12 Tf 54 ")
                     || trimmed.starts_with("BT 3 Tr /F1 1 Tf 0 0 Td ");
@@ -969,8 +975,23 @@ impl PdfSerializer {
                 if is_form_meta_line {
                     continue;
                 }
-                for content in Self::extract_all_bt_tokens(trimmed) {
-                    if !is_body_line {
+                if is_body_line {
+                    let uses_f2 = trimmed.contains("/F2 ");
+                    for content in Self::extract_bt_segments(trimmed, uses_f2) {
+                        if seen_body_line {
+                            current_body.push('\n');
+                        }
+                        seen_body_line = true;
+                        current_body.push_str(&content);
+                    }
+                    continue;
+                }
+                for (span, prefer_utf16be) in Self::split_pdf_text_object_spans(
+                    trimmed,
+                    &mut in_text_object,
+                    &mut active_font_utf16be,
+                ) {
+                    for content in Self::extract_bt_segments(&span, prefer_utf16be) {
                         if let Some(wm) = content.strip_prefix("[WM] ") {
                             watermark_text = Some(wm.to_string());
                             continue;
@@ -984,13 +1005,7 @@ impl PdfSerializer {
                         }
                         seen_fallback_line = true;
                         fallback_body.push_str(&content);
-                        continue;
                     }
-                    if seen_body_line {
-                        current_body.push('\n');
-                    }
-                    seen_body_line = true;
-                    current_body.push_str(&content);
                 }
             }
         }
@@ -1017,31 +1032,13 @@ impl PdfSerializer {
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 비어 있습니다.".to_string(),
                 ));
             }
-            let matches_trailer = if let Some(decoded) =
-                Self::decode_base64_utf8(&b64).filter(|s| s.trim_start().starts_with('{'))
-            {
-                let normalized = decoded
-                    .replace("\\n", "\n")
-                    .replace("\\r", "\r")
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\");
-                let non_empty_lines: Vec<&str> =
-                    visible_concat.lines().filter(|l| !l.is_empty()).collect();
-                if non_empty_lines.is_empty() {
-                    decoded.contains(&title) || normalized.contains(&title)
-                } else {
-                    non_empty_lines
-                        .into_iter()
-                        .all(|l| decoded.contains(l) || normalized.contains(l))
-                }
-            } else {
-                let unescaped_b64 = Self::unescape_pdf_text(&b64);
-                b64.contains(&visible_concat)
-                    || unescaped_b64.contains(&visible_concat)
-                    || b64 == title
-                    || unescaped_b64 == title
+            let Some(decoded) = Self::decode_base64_utf8(&b64) else {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "PDF 트레일러 주석(%EasyOfficePDFModelBase64)의 Base64/UTF-8 디코딩에 실패했습니다."
+                        .to_string(),
+                ));
             };
-            if !matches_trailer {
+            if !Self::validate_pdf_trailer_json(&decoded, &title, &visible_concat) {
                 return Err(EasyOfficeError::SecurityViolation(
                     "PDF 트레일러 주석(%EasyOfficePDFModelBase64)이 본문 스트림과 일치하지 않습니다."
                         .to_string(),
@@ -1183,48 +1180,362 @@ impl PdfSerializer {
         }
     }
 
-    fn decode_utf16be_hex(hex: &str) -> Option<String> {
-        let clean: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-        if clean.len() % 4 != 0 {
-            return None;
+    fn parse_json_string_literal(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> Option<String> {
+        let mut out = String::new();
+        while let Some(c) = chars.next() {
+            if c == '"' {
+                return Some(out);
+            }
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            match chars.next()? {
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                '/' => out.push('/'),
+                'b' => out.push('\u{0008}'),
+                'f' => out.push('\u{000C}'),
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                'u' => {
+                    let mut hex4 = String::with_capacity(4);
+                    for _ in 0..4 {
+                        hex4.push(chars.next()?);
+                    }
+                    let hi = u16::from_str_radix(&hex4, 16).ok()?;
+                    if (0xD800..=0xDBFF).contains(&hi) {
+                        if chars.peek() == Some(&'\\') {
+                            let _ = chars.next();
+                            if chars.peek() == Some(&'u') {
+                                let _ = chars.next();
+                                let mut lo_hex = String::with_capacity(4);
+                                for _ in 0..4 {
+                                    lo_hex.push(chars.next()?);
+                                }
+                                let lo = u16::from_str_radix(&lo_hex, 16).ok()?;
+                                if (0xDC00..=0xDFFF).contains(&lo) {
+                                    let cp = 0x10000
+                                        + (((hi as u32 - 0xD800) << 10) | (lo as u32 - 0xDC00));
+                                    out.push(char::from_u32(cp)?);
+                                    continue;
+                                }
+                            }
+                        }
+                        return None;
+                    }
+                    out.push(char::from_u32(hi as u32)?);
+                }
+                _ => return None,
+            }
         }
-        let mut units = Vec::with_capacity(clean.len() / 4);
-        let mut idx = 0usize;
-        while idx + 4 <= clean.len() {
-            let chunk = std::str::from_utf8(&clean[idx..idx + 4]).ok()?;
-            let code = u16::from_str_radix(chunk, 16).ok()?;
-            units.push(code);
-            idx += 4;
-        }
-        let slice = units.strip_prefix(&[0xFEFF]).unwrap_or(&units);
-        Some(String::from_utf16_lossy(slice))
+        None
     }
 
-    fn extract_all_bt_tokens(line: &str) -> Vec<String> {
-        let mut tokens = Vec::new();
-        let mut chars = line.chars();
+    fn extract_json_key_strings(json: &str) -> Option<(Vec<(String, String)>, bool)> {
+        let trimmed = json.trim();
+        if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+            return None;
+        }
+        let mut chars = trimmed.chars().peekable();
+        let mut brace_depth: i32 = 0;
+        let mut bracket_depth: i32 = 0;
+        let mut pairs = Vec::new();
+        let mut has_pages_key = false;
+
         while let Some(c) = chars.next() {
-            if c == '(' {
+            if c.is_whitespace() {
+                continue;
+            }
+            match c {
+                '{' => brace_depth += 1,
+                '}' => {
+                    brace_depth -= 1;
+                    if brace_depth < 0 {
+                        return None;
+                    }
+                }
+                '[' => bracket_depth += 1,
+                ']' => {
+                    bracket_depth -= 1;
+                    if bracket_depth < 0 {
+                        return None;
+                    }
+                }
+                '"' => {
+                    let s = Self::parse_json_string_literal(&mut chars)?;
+                    while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+                        let _ = chars.next();
+                    }
+                    if chars.peek() == Some(&':') {
+                        let _ = chars.next();
+                        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+                            let _ = chars.next();
+                        }
+                        if s == "pages" && chars.peek() == Some(&'[') {
+                            has_pages_key = true;
+                        }
+                        if chars.peek() == Some(&'"') {
+                            let _ = chars.next();
+                            let val = Self::parse_json_string_literal(&mut chars)?;
+                            pairs.push((s, val));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if brace_depth != 0 || bracket_depth != 0 {
+            return None;
+        }
+        Some((pairs, has_pages_key))
+    }
+
+    fn validate_pdf_trailer_json(
+        decoded: &str,
+        expected_title: &str,
+        visible_concat: &str,
+    ) -> bool {
+        let Some((pairs, has_pages_key)) = Self::extract_json_key_strings(decoded) else {
+            return false;
+        };
+        let Some(json_title) = pairs
+            .iter()
+            .find(|(k, _)| k == "title")
+            .map(|(_, v)| v.as_str())
+        else {
+            return false;
+        };
+        if json_title != expected_title {
+            return false;
+        }
+        let body_parts: Vec<&str> = pairs
+            .iter()
+            .filter(|(k, _)| k == "extractedText" || k == "bodyText")
+            .map(|(_, v)| v.as_str())
+            .collect();
+        if body_parts.is_empty() && !has_pages_key {
+            return false;
+        }
+        let json_body = body_parts.join("\n");
+        let norm_visible: String = visible_concat
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        let norm_json: String = json_body.chars().filter(|c| !c.is_whitespace()).collect();
+        norm_visible == norm_json
+    }
+
+    fn split_pdf_text_object_spans(
+        line: &str,
+        in_text_object: &mut bool,
+        active_font_utf16be: &mut bool,
+    ) -> Vec<(String, bool)> {
+        let bytes = line.as_bytes();
+        let mut i = 0usize;
+        let mut span_start = if *in_text_object { 0usize } else { bytes.len() };
+        let mut last_slash_name: Option<&str> = None;
+        let mut spans = Vec::new();
+
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b.is_ascii_whitespace() {
+                i += 1;
+                continue;
+            }
+            if b == b'%' {
+                break;
+            }
+            if b == b'(' {
+                let mut paren = 1usize;
+                i += 1;
+                while i < bytes.len() && paren > 0 {
+                    if bytes[i] == b'\\' {
+                        i = (i + 2).min(bytes.len());
+                        continue;
+                    }
+                    if bytes[i] == b'(' {
+                        paren += 1;
+                    } else if bytes[i] == b')' {
+                        paren -= 1;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            if b == b'<' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'<' {
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'>' {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1;
+                }
+                continue;
+            }
+            if b == b'>' || b == b'[' || b == b']' || b == b'{' || b == b'}' {
+                i += 1;
+                continue;
+            }
+            if b == b'/' {
+                let start = i;
+                i += 1;
+                while i < bytes.len()
+                    && !bytes[i].is_ascii_whitespace()
+                    && !b"()<>[]{}/%".contains(&bytes[i])
+                {
+                    i += 1;
+                }
+                last_slash_name = Some(&line[start..i]);
+                continue;
+            }
+            let start = i;
+            while i < bytes.len()
+                && !bytes[i].is_ascii_whitespace()
+                && !b"()<>[]{}/%".contains(&bytes[i])
+            {
+                i += 1;
+            }
+            let tok = &line[start..i];
+            if !*in_text_object {
+                if tok == "BT" {
+                    *in_text_object = true;
+                    *active_font_utf16be = false;
+                    last_slash_name = None;
+                    span_start = i;
+                }
+            } else if tok == "Tf" {
+                if let Some(font_name) = last_slash_name {
+                    if span_start < start {
+                        let prev = &line[span_start..start];
+                        if prev.contains('(') || prev.contains('<') {
+                            spans.push((prev.to_string(), *active_font_utf16be));
+                            span_start = i;
+                        }
+                    }
+                    *active_font_utf16be = font_name == "/F2";
+                }
+            } else if tok == "ET" {
+                if span_start <= start {
+                    spans.push((line[span_start..start].to_string(), *active_font_utf16be));
+                }
+                *in_text_object = false;
+                *active_font_utf16be = false;
+                last_slash_name = None;
+                span_start = bytes.len();
+            }
+        }
+        if *in_text_object && span_start <= bytes.len() {
+            spans.push((line[span_start..].to_string(), *active_font_utf16be));
+        }
+        spans
+    }
+
+    fn decode_pdf_hex_string(hex: &str, prefer_utf16be: bool) -> Option<String> {
+        let mut clean: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+        if clean.is_empty() {
+            return Some(String::new());
+        }
+        if !clean.iter().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        if clean.len() % 2 != 0 {
+            clean.push(b'0');
+        }
+        let mut bytes = Vec::with_capacity(clean.len() / 2);
+        let mut idx = 0usize;
+        while idx + 2 <= clean.len() {
+            let chunk = std::str::from_utf8(&clean[idx..idx + 2]).ok()?;
+            bytes.push(u8::from_str_radix(chunk, 16).ok()?);
+            idx += 2;
+        }
+        if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+            if rest.len() % 2 != 0 {
+                return None;
+            }
+            let units: Vec<u16> = rest
+                .chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .collect();
+            return Some(String::from_utf16_lossy(&units));
+        }
+        if prefer_utf16be && bytes.len() % 2 == 0 {
+            let units: Vec<u16> = bytes
+                .chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .collect();
+            return Some(String::from_utf16_lossy(&units));
+        }
+        match String::from_utf8(bytes) {
+            Ok(s) => Some(s),
+            Err(e) => Some(e.into_bytes().into_iter().map(char::from).collect()),
+        }
+    }
+
+    fn extract_bt_segments(fragment: &str, prefer_utf16be_hex: bool) -> Vec<String> {
+        let mut segments = Vec::new();
+        let mut in_tj_array = false;
+        let mut array_buf = String::new();
+        let mut chars = fragment.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '[' {
+                in_tj_array = true;
+                array_buf.clear();
+            } else if c == ']' && in_tj_array {
+                in_tj_array = false;
+                segments.push(std::mem::take(&mut array_buf));
+            } else if c == '(' {
                 let mut token = String::new();
+                let mut depth = 1usize;
                 while let Some(inner) = chars.next() {
                     if inner == '\\' {
                         token.push('\\');
                         if let Some(escaped) = chars.next() {
                             token.push(escaped);
                         }
+                    } else if inner == '(' {
+                        depth += 1;
+                        token.push('(');
                     } else if inner == ')' {
-                        tokens.push(Self::unescape_pdf_text(&token));
-                        break;
+                        depth -= 1;
+                        if depth == 0 {
+                            let decoded = Self::unescape_pdf_text(&token);
+                            if in_tj_array {
+                                array_buf.push_str(&decoded);
+                            } else {
+                                segments.push(decoded);
+                            }
+                            break;
+                        }
+                        token.push(')');
                     } else {
                         token.push(inner);
                     }
                 }
             } else if c == '<' {
+                if chars.peek() == Some(&'<') {
+                    let _ = chars.next();
+                    continue;
+                }
                 let mut hex_str = String::new();
                 for inner in chars.by_ref() {
                     if inner == '>' {
-                        if let Some(decoded) = Self::decode_utf16be_hex(&hex_str) {
-                            tokens.push(decoded);
+                        if let Some(decoded) =
+                            Self::decode_pdf_hex_string(&hex_str, prefer_utf16be_hex)
+                        {
+                            if in_tj_array {
+                                array_buf.push_str(&decoded);
+                            } else {
+                                segments.push(decoded);
+                            }
                         }
                         break;
                     }
@@ -1232,7 +1543,7 @@ impl PdfSerializer {
                 }
             }
         }
-        tokens
+        segments
     }
 
     fn extract_paren_token(line: &str, prefix: &str) -> Option<String> {
@@ -1545,6 +1856,72 @@ mod tests {
         let parsed_external = PdfSerializer::parse(external_pdf.as_bytes()).unwrap();
         assert_eq!(parsed_external.title, "External Spec");
         assert_eq!(parsed_external.pages[0].body_text, "External Line 1\n가나");
+
+        let multiline_external_pdf = concat!(
+            "%PDF-1.7\n",
+            "1 0 obj << /Type /Catalog /Pages 2 0 R /Title (Multi-Line External) >> endobj\n",
+            "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+            "3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n",
+            "4 0 obj << /Length 180 >>\nstream\n",
+            "q 0 0 0 rg BT /F1 11 Tf 72 740 Td (Prefixed Header) Tj ET Q\n",
+            "BT\n",
+            "/F1 11 Tf\n",
+            "72 720 Td\n",
+            "[(Hel) -15 (lo) 20 ( ) <576F726C64>] TJ\n",
+            "0 -16 Td\n",
+            "<48656C6C> Tj\n",
+            "0 -16 Td\n",
+            "<FEFFAC00B098> Tj\n",
+            "ET\n",
+            "endstream\nendobj\n",
+            "xref\n0 5\ntrailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
+        );
+        let parsed_multiline = PdfSerializer::parse(multiline_external_pdf.as_bytes()).unwrap();
+        assert_eq!(
+            parsed_multiline.pages[0].body_text,
+            "Prefixed Header\nHello World\nHell\n가나"
+        );
+
+        let empty_title_whitespace_pdf = PdfSerializer::serialize(&PdfDocumentModel {
+            title: String::new(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "   ".to_string(),
+                approval_stamp: None,
+            }],
+            watermark_text: None,
+        });
+        let mut non_json_trailer_pdf = empty_title_whitespace_pdf.clone();
+        non_json_trailer_pdf.extend_from_slice(b"\n%EasyOfficePDFModelBase64:SGVsbG8gV29ybGQ=\n");
+        assert!(matches!(
+            PdfSerializer::parse(&non_json_trailer_pdf),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+
+        let mut spoofed_empty_title_pdf = empty_title_whitespace_pdf.clone();
+        spoofed_empty_title_pdf.extend_from_slice(
+            b"\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IkluamVjdGVkIiwiYm9keVRleHQiOiIifQ==\n",
+        );
+        assert!(matches!(
+            PdfSerializer::parse(&spoofed_empty_title_pdf),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+
+        let mut spoofed_ws_body_pdf = empty_title_whitespace_pdf.clone();
+        spoofed_ws_body_pdf.extend_from_slice(
+            b"\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IiIsImJvZHlUZXh0IjoiU3Bvb2ZlZCJ9\n",
+        );
+        assert!(matches!(
+            PdfSerializer::parse(&spoofed_ws_body_pdf),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+
+        let mut valid_empty_pdf = empty_title_whitespace_pdf;
+        valid_empty_pdf.extend_from_slice(
+            b"\n%EasyOfficePDFModelBase64:eyJ0aXRsZSI6IiIsInBhZ2VzIjpbeyJleHRyYWN0ZWRUZXh0IjoiICAgIn1dfQ==\n",
+        );
+        assert!(PdfSerializer::parse(&valid_empty_pdf).is_ok());
 
         assert_eq!(PdfSerializer::decode_base64_bytes("YQ==YQ=="), None);
     }

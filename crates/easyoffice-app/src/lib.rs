@@ -292,29 +292,38 @@ impl EasyOfficeIpcRouter {
 
     fn extract_active_sheet_and_expr(raw_expr: &str) -> (&str, &str) {
         if let Some((sh, rest)) = raw_expr.split_once('|') {
-            if !sh.trim().is_empty() && !sh.starts_with('=') && !sh.contains('(') {
-                return (sh.trim(), rest.trim());
+            let trimmed_sh = sh.trim();
+            if !trimmed_sh.is_empty() && !trimmed_sh.starts_with('=') && !trimmed_sh.contains('(') {
+                return (trimmed_sh, rest.trim());
             }
         }
         if let Some((sh, rest)) = raw_expr.split_once('!') {
-            if !sh.trim().is_empty() && !sh.starts_with('=') && !sh.contains('(') {
-                return (sh.trim(), rest.trim());
+            let trimmed_sh = sh.trim();
+            if !trimmed_sh.is_empty() && !trimmed_sh.starts_with('=') && !trimmed_sh.contains('(') {
+                return (trimmed_sh, rest.trim());
             }
         }
         ("Sheet1", raw_expr.trim())
     }
 
     fn normalize_sheet_token(raw: &str) -> &str {
-        raw.trim().trim_matches('\'')
+        raw.trim().trim_matches('\'').trim()
     }
 
-    fn evaluate_workbook_query<'a>(
+    fn normalize_sheet_token_or_default(raw: &str) -> &str {
+        let normalized = Self::normalize_sheet_token(raw);
+        if normalized.is_empty() {
+            "Sheet1"
+        } else {
+            normalized
+        }
+    }
+
+    fn build_workbook_from_cells(
         cells_part: Option<&str>,
-        raw_query: &'a str,
+        active_sheet: &str,
         seed_defaults: bool,
-    ) -> Result<(&'a str, &'a str, EvaluatedCellValue), EasyOfficeError> {
-        let (raw_active_sheet, expr) = Self::extract_active_sheet_and_expr(raw_query.trim());
-        let active_sheet = Self::normalize_sheet_token(raw_active_sheet);
+    ) -> Result<WorkbookEngine, EasyOfficeError> {
         let mut wb = WorkbookEngine::new();
         wb.add_sheet("Sheet1");
         wb.add_sheet("Sheet2");
@@ -355,6 +364,17 @@ impl EasyOfficeIpcRouter {
                 wb.set_cell(sh, addr_trim, &val)?;
             }
         }
+        Ok(wb)
+    }
+
+    fn evaluate_workbook_query<'a>(
+        cells_part: Option<&str>,
+        raw_query: &'a str,
+        seed_defaults: bool,
+    ) -> Result<(&'a str, &'a str, EvaluatedCellValue), EasyOfficeError> {
+        let (raw_active_sheet, expr) = Self::extract_active_sheet_and_expr(raw_query.trim());
+        let active_sheet = Self::normalize_sheet_token_or_default(raw_active_sheet);
+        let wb = Self::build_workbook_from_cells(cells_part, active_sheet, seed_defaults)?;
         let evaluated = if expr.starts_with('=') {
             wb.evaluate_formula_on_sheet(active_sheet, expr)
         } else {
@@ -366,20 +386,72 @@ impl EasyOfficeIpcRouter {
     fn handle_evaluate_sheet(payload: &str) -> Result<String, EasyOfficeError> {
         let (cells_part, query_part) =
             Self::split_unescaped_query(payload).unwrap_or((payload, "A1"));
-        let (_, expr, evaluated) =
-            Self::evaluate_workbook_query(Some(cells_part), query_part, false)?;
+        let trimmed_query = query_part.trim();
+        let is_batch = trimmed_query.contains(',')
+            && !trimmed_query.contains('=')
+            && !trimmed_query.contains('(');
         let rule = ConditionalFormatRule::GreaterThan(100.0);
-        let cf_match = rule.matches(&evaluated, &[]);
         let dv_rule = DataValidationRule::NumberRange {
             min: 0.0,
             max: 1_000_000.0,
         };
+
+        if is_batch {
+            let targets: Vec<&str> = trimmed_query
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+            if let Some(&first_raw) = targets.first() {
+                let (first_raw_sh, _) = Self::extract_active_sheet_and_expr(first_raw);
+                let default_sh = Self::normalize_sheet_token_or_default(first_raw_sh);
+                let mut wb = Self::build_workbook_from_cells(Some(cells_part), default_sh, false)?;
+                let mut first_expr = "A1";
+                let mut first_eval = EvaluatedCellValue::Empty;
+                let mut values_entries = Vec::with_capacity(targets.len());
+                for (idx, target) in targets.into_iter().enumerate() {
+                    let (raw_sh, expr) = Self::extract_active_sheet_and_expr(target);
+                    let sh = Self::normalize_sheet_token_or_default(raw_sh);
+                    wb.add_sheet(sh);
+                    let val = wb.evaluate_cell(sh, expr);
+                    let display = val.to_display_string();
+                    values_entries.push(format!(
+                        "\"{}!{}\":\"{}\"",
+                        Self::escape_json_str(sh),
+                        Self::escape_json_str(expr),
+                        Self::escape_json_str(&display)
+                    ));
+                    if idx == 0 {
+                        first_expr = expr;
+                        first_eval = val;
+                    }
+                }
+                let cf_match = rule.matches(&first_eval, &[]);
+                let dv_valid = dv_rule.validate(&first_eval);
+                return Ok(format!(
+                    "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"conditionalMatch\":{},\"validationPassed\":{}}}",
+                    Self::escape_json_str(first_expr),
+                    Self::escape_json_str(&first_eval.to_display_string()),
+                    values_entries.join(","),
+                    cf_match,
+                    dv_valid
+                ));
+            }
+        }
+
+        let (active_sheet, expr, evaluated) =
+            Self::evaluate_workbook_query(Some(cells_part), trimmed_query, false)?;
+        let cf_match = rule.matches(&evaluated, &[]);
         let dv_valid = dv_rule.validate(&evaluated);
+        let display_val = evaluated.to_display_string();
 
         Ok(format!(
-            "{{\"query\":\"{}\",\"value\":\"{}\",\"conditionalMatch\":{},\"validationPassed\":{}}}",
+            "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{\"{}!{}\":\"{}\"}},\"conditionalMatch\":{},\"validationPassed\":{}}}",
             Self::escape_json_str(expr),
-            Self::escape_json_str(&evaluated.to_display_string()),
+            Self::escape_json_str(&display_val),
+            Self::escape_json_str(active_sheet),
+            Self::escape_json_str(expr),
+            Self::escape_json_str(&display_val),
             cf_match,
             dv_valid
         ))
@@ -1496,5 +1568,22 @@ mod tests {
         );
         assert_eq!(hangul_pii.masked_emails, 1);
         assert_eq!(hangul_pii.scrubbed_text, "담당자 이메일은***@***입니다.");
+
+        let empty_quoted_sheet =
+            EasyOfficeIpcRouter::dispatch("evaluate_sheet", "A1=10?''|=A1+50").unwrap();
+        assert!(
+            empty_quoted_sheet.contains("\"value\":\"60\""),
+            "res={empty_quoted_sheet}"
+        );
+
+        let backslash_batch = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            "Sheet1!A1=C:\\\\;Sheet1!B1=25;Sheet1!C1==B1*4;Sheet2!A1=D:\\\\;Sheet2!B1==Sheet1!C1+50?Sheet1|A1,Sheet1|C1,Sheet2|A1,Sheet2|B1",
+        )
+        .unwrap();
+        assert!(backslash_batch.contains("\"Sheet1!A1\":\"C:\\\\\""));
+        assert!(backslash_batch.contains("\"Sheet1!C1\":\"100\""));
+        assert!(backslash_batch.contains("\"Sheet2!A1\":\"D:\\\\\""));
+        assert!(backslash_batch.contains("\"Sheet2!B1\":\"150\""));
     }
 }

@@ -35,6 +35,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   ".github/workflows/ci.yml",
   ".github/workflows/automerge.yml",
   ".github/workflows/release.yml",
+  "scripts/webui-dom-harness.mjs",
+  "scripts/test-webui-behavior.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)
@@ -173,6 +175,18 @@ for (const file of files) {
   for (const regex of PROHIBITED_PATTERNS) {
     if (regex.test(content)) {
       errors.push(`Prohibited external brand or local-only reference detected in ${rel} (pattern: ${regex.source})`);
+    }
+  }
+
+  if (rel.endsWith(".js") || rel.endsWith(".mjs")) {
+    try {
+      execFileSync(process.execPath, ["--check", file], {
+        cwd: ROOT,
+        stdio: "pipe",
+      });
+    } catch (err) {
+      const stderr = err && err.stderr ? err.stderr.toString("utf8").trim() : String(err);
+      errors.push(`JavaScript syntax check failed in ${rel}: ${stderr}`);
     }
   }
 }
