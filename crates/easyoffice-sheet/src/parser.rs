@@ -707,18 +707,18 @@ impl Parser {
                         let Some(Token::Ident(s)) = self.next() else {
                             return Err(FormulaError::Ref);
                         };
-                        let end_ident = if matches!(self.peek(), Some(Token::Bang)) {
+                        let (end_ident, same_sheet) = if matches!(self.peek(), Some(Token::Bang)) {
                             self.next();
-                            if !crate::WorkbookEngine::is_same_sheet_identity(&s, &name) {
-                                return Err(FormulaError::Ref);
-                            }
                             let Some(Token::Ident(s2)) = self.next() else {
                                 return Err(FormulaError::Ref);
                             };
-                            s2
+                            (s2, crate::WorkbookEngine::is_same_sheet_identity(&s, &name))
                         } else {
-                            s
+                            (s, true)
                         };
+                        if !same_sheet {
+                            return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                        }
                         let (Ok(sc), Ok(ec)) =
                             (start_coord, PackedCellCoordinate::parse_a1(&end_ident))
                         else {

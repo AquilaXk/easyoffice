@@ -318,4 +318,36 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         wb.evaluate_formula_on_sheet("Main", "=IFERROR(A01, 99)"),
         EvaluatedCellValue::Number(99.0)
     );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=ROW(A01)"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=ROW(FOOBAR)"),
+        EvaluatedCellValue::Error(FormulaError::Name)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=OFFSET(A01, 0, 0)"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=COUNTIF(A01:B2, \"<>0\")"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=COUNTIF(A1:XFD1000000, \"<>0\")"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=IF(TRUE, 42, Main!A1:Ⅰ분기!B2)"),
+        EvaluatedCellValue::Number(42.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=IFERROR(Main!A1:'2026Q1'!B2, 99)"),
+        EvaluatedCellValue::Number(99.0)
+    );
+    assert_eq!(
+        wb.evaluate_formula_on_sheet("Main", "=Main!A1:Ⅰ분기!B2"),
+        EvaluatedCellValue::Error(FormulaError::Ref)
+    );
 }

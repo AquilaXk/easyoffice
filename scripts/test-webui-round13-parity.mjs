@@ -622,10 +622,9 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   await flushAsyncTurns(10);
   assert.equal(document.documentElement.dataset.theme, "light");
 
-  assert.equal(
-    sandbox.__EASYOFFICE_RIBBON_CATALOG__.DEFAULT_HWP_EDITOR_HTML.includes(
-      'id="hwp-manuscript-preview" class="manuscript-notice"'
-    ),
-    true
-  );
+  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  await flushAsyncTurns(10);
+  const hwpPreview = document.getElementById("hwp-manuscript-preview");
+  assert.ok(hwpPreview);
+  assert.equal(hwpPreview.classList.contains("manuscript-notice"), true);
 });

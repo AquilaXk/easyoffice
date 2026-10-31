@@ -3,8 +3,8 @@ mod pdf_damaged_encrypt;
 
 use crate::pdf_stream_parser::{
     contains_subslice, decode_pdf_hex_string, decode_pdf_name, has_structural_after_endobj,
-    is_paren_reset_boundary, is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
-    skip_pdf_ws_and_comments, span_crosses_object_boundary, step_indexed_non_code_token,
+    is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header, skip_pdf_ws_and_comments,
+    skip_pdf_ws_stopping_at_eof, span_crosses_object_boundary, step_indexed_non_code_token,
     step_pdf_non_code_token, unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable,
     PdfNonCodeKind, PdfNonCodeStep,
 };
@@ -53,43 +53,62 @@ pub(super) fn dict_has_non_null_key(entries: &[(String, PdfObjValue)], key: &str
     dict_get(entries, key).is_some_and(|v| !matches!(v, PdfObjValue::Null))
 }
 
-fn value_swallowed_structural_encrypt(val: &PdfObjValue) -> bool {
+pub(super) fn value_contains_encrypt_bytes(val: &PdfObjValue) -> bool {
     match val {
         PdfObjValue::ParenStr(raw) => {
-            contains_subslice(raw, b"/Encrypt")
-                && (0..raw.len()).any(|i| is_paren_reset_boundary(raw, i).is_some())
+            contains_subslice(raw, b"/Encrypt") || contains_subslice(raw, b"/#45")
         }
-        PdfObjValue::Array(items) => items.iter().any(value_swallowed_structural_encrypt),
-        PdfObjValue::Dict(entries) => entries
-            .iter()
-            .any(|(_, v)| value_swallowed_structural_encrypt(v)),
+        PdfObjValue::Array(items) => items.iter().any(value_contains_encrypt_bytes),
+        PdfObjValue::Dict(entries) => entries.iter().any(|(_, v)| value_contains_encrypt_bytes(v)),
         _ => false,
     }
 }
 
-pub(super) fn dict_has_suspicious_id(entries: &[(String, PdfObjValue)]) -> bool {
-    if entries
-        .iter()
-        .any(|(_, v)| value_swallowed_structural_encrypt(v))
-    {
+pub(super) fn value_contains_xref_and_encrypt(val: &PdfObjValue) -> bool {
+    match val {
+        PdfObjValue::ParenStr(raw) => {
+            (contains_subslice(raw, b"/XRef") || contains_subslice(raw, b"#58Ref"))
+                && (contains_subslice(raw, b"/Encrypt") || contains_subslice(raw, b"/#45"))
+        }
+        PdfObjValue::Array(items) => items.iter().any(value_contains_xref_and_encrypt),
+        PdfObjValue::Dict(entries) => entries
+            .iter()
+            .any(|(_, v)| value_contains_xref_and_encrypt(v)),
+        _ => false,
+    }
+}
+
+pub(super) fn trailer_or_xref_has_spliced_encrypt(
+    entries: &[(String, PdfObjValue)],
+    has_encrypt: bool,
+) -> bool {
+    if entries.iter().any(|(_, v)| value_contains_encrypt_bytes(v)) {
         return true;
     }
     let Some(val) = dict_get(entries, "/ID") else {
         return false;
     };
-    let PdfObjValue::Array(items) = val else {
-        return true;
-    };
-    if items.len() != 2 {
-        return true;
-    };
-    items.iter().any(|item| match item {
-        PdfObjValue::ParenStr(raw) => {
-            contains_subslice(raw, b"/Encrypt") || contains_subslice(raw, b"/Type")
-        }
-        PdfObjValue::HexStr(_) => false,
+    match val {
+        PdfObjValue::Ref(_, _) if !has_encrypt => false,
+        PdfObjValue::Array(items) if items.len() == 2 => items
+            .iter()
+            .any(|item| !matches!(item, PdfObjValue::ParenStr(_) | PdfObjValue::HexStr(_))),
         _ => true,
-    })
+    }
+}
+
+pub(super) fn indirect_dict_has_spliced_encrypt(entries: &[(String, PdfObjValue)]) -> bool {
+    if entries
+        .iter()
+        .any(|(_, v)| value_contains_xref_and_encrypt(v))
+    {
+        return true;
+    }
+    if dict_name_eq(entries, "/Type", "/XRef") {
+        let has_enc = dict_has_non_null_key(entries, "/Encrypt");
+        return trailer_or_xref_has_spliced_encrypt(entries, has_enc);
+    }
+    false
 }
 
 pub(super) fn dict_name_eq(entries: &[(String, PdfObjValue)], key: &str, expected: &str) -> bool {
@@ -449,9 +468,9 @@ pub(super) fn parse_direct_int_endobj(
     after_hdr: usize,
     limit: usize,
 ) -> Result<(usize, usize), usize> {
-    let p = skip_pdf_ws_and_comments(bytes, after_hdr, limit);
-    if p >= limit {
-        return Err(p);
+    let p = skip_pdf_ws_stopping_at_eof(bytes, after_hdr, limit);
+    if p >= limit || parse_indirect_obj_header(bytes, p, limit).is_some() {
+        return Err(p.max(after_hdr));
     }
     let mut d = p;
     if matches!(bytes[d], b'+' | b'-') {
@@ -464,7 +483,7 @@ pub(super) fn parse_direct_int_endobj(
     if d == digit_start || (d < limit && !is_pdf_delim_or_ws(bytes[d])) {
         return Err(d.max(after_hdr));
     }
-    let end_p = skip_pdf_ws_and_comments(bytes, d, limit);
+    let end_p = skip_pdf_ws_stopping_at_eof(bytes, d, limit);
     if !is_standalone_pdf_kw(&bytes[..limit], end_p, b"endobj") {
         return Err(end_p.max(after_hdr));
     }
@@ -499,7 +518,10 @@ fn lookup_forward_int_obj(
             if let Some((on, gn, after_hdr)) = parse_indirect_obj_header(bytes, q, bytes.len()) {
                 match parse_direct_int_endobj(bytes, after_hdr, bytes.len()) {
                     Ok((u, next_q)) => {
-                        if on == target_obj && gn == target_gen {
+                        if on == target_obj
+                            && gn == target_gen
+                            && q >= stream_start.saturating_add(u)
+                        {
                             if verify_direct_stream_bounds(bytes, stream_start, u).is_some() {
                                 return Some(u);
                             }

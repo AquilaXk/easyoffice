@@ -109,6 +109,7 @@ impl SheetEngine {
             return Err(FormulaError::Ref);
         }
         match expr {
+            Expr::ErrorLiteral(e) => Err(*e),
             Expr::Cell(c) => Ok(CellRange::new(*c, *c).ok().map(|r| (None, r, false))),
             Expr::Range(r) => Ok(Some((None, *r, false))),
             Expr::SheetCell { sheet, coord } => {

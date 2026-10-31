@@ -10,12 +10,12 @@ use crate::pdf_stream_parser::{
 };
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
 use pdf_object_graph::{
-    decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_has_suspicious_id,
-    dict_name_eq, fail_corrupted_or_encrypted, parse_pdf_value_with_table,
+    decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_name_eq,
+    fail_corrupted_or_encrypted, indirect_dict_has_spliced_encrypt, parse_pdf_value_with_table,
     resolve_catalog_and_pages_target, resolve_int, resolve_stream_bounds,
-    resolve_stream_length_hint, resolve_value, validate_pdf_trailer_json, PageNodeTarget,
-    PdfIndirectObject, PdfObjValue, MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH,
-    MAX_PDF_TOTAL_DECODED_BYTES,
+    resolve_stream_length_hint, resolve_value, trailer_or_xref_has_spliced_encrypt,
+    validate_pdf_trailer_json, PageNodeTarget, PdfIndirectObject, PdfObjValue,
+    MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH, MAX_PDF_TOTAL_DECODED_BYTES,
 };
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -620,7 +620,7 @@ impl PdfSerializer {
     }
 
     fn scan_pdf_structure(bytes: &[u8]) -> Result<ScannedPdfStructure, EasyOfficeError> {
-        let paren_table = ParenJumpTable::build(bytes);
+        let paren_table = ParenJumpTable::build_damaged(bytes);
         let mut objects: HashMap<(u32, u16), PdfIndirectObject> = HashMap::new();
         let mut trailers: Vec<Vec<(String, PdfObjValue)>> = Vec::new();
         let mut stream_spans: Vec<(usize, usize)> = Vec::new();
@@ -655,12 +655,12 @@ impl PdfSerializer {
                 })?;
                 let (val, mut next_p) = parsed_val.unwrap_or((PdfObjValue::Null, after_obj));
                 if let PdfObjValue::Dict(ref entries) = val {
-                    if dict_has_suspicious_id(entries) {
+                    if indirect_dict_has_spliced_encrypt(entries) {
                         return Err(fail_corrupted_or_encrypted(
                             bytes,
                             p,
                             has_encrypt,
-                            "PDF 간접 객체의 /ID 배열 구조가 손상되었습니다.",
+                            "PDF 상호참조 딕셔너리 구조가 손상되었습니다.",
                         ));
                     }
                     if dict_name_eq(entries, "/Type", "/XRef")
@@ -762,15 +762,16 @@ impl PdfSerializer {
                         "PDF trailer 뒤에 딕셔너리가 없습니다.",
                     ));
                 };
-                if dict_has_suspicious_id(&tr_entries) {
+                let tr_has_enc = dict_has_non_null_key(&tr_entries, "/Encrypt");
+                if trailer_or_xref_has_spliced_encrypt(&tr_entries, tr_has_enc) {
                     return Err(fail_corrupted_or_encrypted(
                         bytes,
                         p,
-                        has_encrypt,
+                        has_encrypt || tr_has_enc,
                         "PDF trailer /ID 배열 구조가 손상되었습니다.",
                     ));
                 }
-                if dict_has_non_null_key(&tr_entries, "/Encrypt") {
+                if tr_has_enc {
                     has_encrypt = true;
                 }
                 trailers.push(tr_entries);
