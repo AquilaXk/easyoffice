@@ -1,9 +1,12 @@
 use std::fmt;
 
+pub mod biff8_xls_codec;
 pub mod converter;
 pub mod csv_markdown_codecs;
 pub mod deflate;
+pub mod hwp5_codec;
 mod legacy_ole2_codec;
+pub mod odf_hwpx_codecs;
 pub mod office_codecs;
 pub mod ole2_codec;
 mod pdf_stream_parser;
@@ -28,6 +31,15 @@ pub use utf16_swar::{
     encode_utf16le_swar, encode_utf16le_swar_into, expand_ascii4_to_utf16le_u64, SectorBitset,
 };
 pub use zip_codec::*;
+
+pub const MAX_BIFF8_ROW: u32 = 65_535;
+pub const MAX_BIFF8_COL: u32 = 255;
+pub const MAX_BIFF8_RECORD_DATA_LEN: usize = 8_224;
+pub const MAX_HWP_TABLE_ROWS: usize = 4_096;
+pub const MAX_HWP_TABLE_COLS: usize = 256;
+pub const MAX_OLE2_DIR_ENTRIES: usize = 4_096;
+
+pub type FormatError = EasyOfficeError;
 
 /// Container technology family for supported document formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -595,22 +607,54 @@ impl ZipSecurityGuard {
         }
 
         let mut total_uncompressed: u64 = 0;
-        let mut seen_paths = std::collections::HashSet::with_capacity(entries.len());
+        let mut seen_lower_paths = std::collections::HashSet::with_capacity(entries.len());
+        let mut seen_files_lower = std::collections::HashSet::with_capacity(entries.len());
+        let mut seen_dirs_lower = std::collections::HashSet::with_capacity(entries.len());
+
         for entry in entries {
             Self::validate_entry_path(&entry.path)?;
-            if !seen_paths.insert(entry.path.as_str()) {
+            let is_dir = entry.path.ends_with('/');
+            let lower = entry.path.to_ascii_lowercase();
+            let trimmed_lower = lower.strip_suffix('/').unwrap_or(&lower).to_string();
+
+            if !seen_lower_paths.insert(trimmed_lower.clone()) {
                 return Err(EasyOfficeError::SecurityViolation(format!(
-                    "중복된 ZIP 엔트리 경로가 감지되었습니다: {}",
+                    "중복되거나 파일/디렉터리가 충돌하는 ZIP 엔트리 경로가 감지되었습니다: {}",
                     entry.path
                 )));
             }
-            if entry.path.ends_with('/')
-                && (entry.compressed_size > 0 || entry.uncompressed_size > 0)
-            {
-                return Err(EasyOfficeError::SecurityViolation(format!(
-                    "ZIP 디렉터리 엔트리({})는 데이터를 포함할 수 없습니다.",
-                    entry.path
-                )));
+            for (idx, _) in trimmed_lower.match_indices('/') {
+                let prefix = &trimmed_lower[..idx];
+                if seen_files_lower.contains(prefix) {
+                    return Err(EasyOfficeError::SecurityViolation(format!(
+                        "ZIP 파일 경로와 디렉터리 프리픽스 충돌이 감지되었습니다: {}",
+                        entry.path
+                    )));
+                }
+                seen_dirs_lower.insert(prefix.to_string());
+            }
+            if is_dir {
+                if seen_files_lower.contains(&trimmed_lower) {
+                    return Err(EasyOfficeError::SecurityViolation(format!(
+                        "ZIP 디렉터리와 기존 파일 경로 충돌: {}",
+                        entry.path
+                    )));
+                }
+                seen_dirs_lower.insert(trimmed_lower);
+                if entry.compressed_size > 0 || entry.uncompressed_size > 0 {
+                    return Err(EasyOfficeError::SecurityViolation(format!(
+                        "ZIP 디렉터리 엔트리({})는 데이터를 포함할 수 없습니다.",
+                        entry.path
+                    )));
+                }
+            } else {
+                if seen_dirs_lower.contains(&trimmed_lower) {
+                    return Err(EasyOfficeError::SecurityViolation(format!(
+                        "ZIP 파일과 기존 디렉터리 경로 충돌: {}",
+                        entry.path
+                    )));
+                }
+                seen_files_lower.insert(trimmed_lower);
             }
 
             if entry.is_encrypted {
@@ -795,6 +839,51 @@ impl XmlSanitizer {
         Ok(())
     }
 
+    #[inline]
+    fn handle_escape_hit(
+        text: &str,
+        bytes: &[u8],
+        hit: usize,
+        last: &mut usize,
+        out: &mut String,
+    ) -> usize {
+        match bytes[hit] {
+            b'&' | b'<' | b'>' | b'"' | b'\'' => {
+                if hit > *last {
+                    out.push_str(&text[*last..hit]);
+                }
+                match bytes[hit] {
+                    b'&' => out.push_str("&amp;"),
+                    b'<' => out.push_str("&lt;"),
+                    b'>' => out.push_str("&gt;"),
+                    b'"' => out.push_str("&quot;"),
+                    b'\'' => out.push_str("&apos;"),
+                    _ => unreachable!(),
+                }
+                *last = hit + 1;
+                hit + 1
+            }
+            b if Self::is_forbidden_xml_ctrl_byte(b) => {
+                if hit > *last {
+                    out.push_str(&text[*last..hit]);
+                }
+                *last = hit + 1;
+                hit + 1
+            }
+            0xEF if hit + 3 <= bytes.len()
+                && bytes[hit + 1] == 0xBF
+                && (bytes[hit + 2] == 0xBE || bytes[hit + 2] == 0xBF) =>
+            {
+                if hit > *last {
+                    out.push_str(&text[*last..hit]);
+                }
+                *last = hit + 3;
+                hit + 3
+            }
+            _ => hit + 1,
+        }
+    }
+
     pub fn escape(text: &str) -> String {
         let bytes = text.as_bytes();
         let mut out = String::with_capacity(bytes.len() + 16);
@@ -808,84 +897,12 @@ impl XmlSanitizer {
                 idx += 8;
             } else {
                 let hit = idx + ((mask.trailing_zeros() >> 3) as usize);
-                match bytes[hit] {
-                    b'&' | b'<' | b'>' | b'"' | b'\'' => {
-                        if hit > last {
-                            out.push_str(&text[last..hit]);
-                        }
-                        match bytes[hit] {
-                            b'&' => out.push_str("&amp;"),
-                            b'<' => out.push_str("&lt;"),
-                            b'>' => out.push_str("&gt;"),
-                            b'"' => out.push_str("&quot;"),
-                            b'\'' => out.push_str("&apos;"),
-                            _ => unreachable!(),
-                        }
-                        idx = hit + 1;
-                        last = idx;
-                    }
-                    b if Self::is_forbidden_xml_ctrl_byte(b) => {
-                        if hit > last {
-                            out.push_str(&text[last..hit]);
-                        }
-                        idx = hit + 1;
-                        last = idx;
-                    }
-                    0xEF if hit + 3 <= bytes.len()
-                        && bytes[hit + 1] == 0xBF
-                        && (bytes[hit + 2] == 0xBE || bytes[hit + 2] == 0xBF) =>
-                    {
-                        if hit > last {
-                            out.push_str(&text[last..hit]);
-                        }
-                        idx = hit + 3;
-                        last = idx;
-                    }
-                    _ => {
-                        idx = hit + 1;
-                    }
-                }
+                idx = Self::handle_escape_hit(text, bytes, hit, &mut last, &mut out);
             }
         }
 
         while idx < bytes.len() {
-            match bytes[idx] {
-                b'&' | b'<' | b'>' | b'"' | b'\'' => {
-                    if idx > last {
-                        out.push_str(&text[last..idx]);
-                    }
-                    match bytes[idx] {
-                        b'&' => out.push_str("&amp;"),
-                        b'<' => out.push_str("&lt;"),
-                        b'>' => out.push_str("&gt;"),
-                        b'"' => out.push_str("&quot;"),
-                        b'\'' => out.push_str("&apos;"),
-                        _ => unreachable!(),
-                    }
-                    idx += 1;
-                    last = idx;
-                }
-                b if Self::is_forbidden_xml_ctrl_byte(b) => {
-                    if idx > last {
-                        out.push_str(&text[last..idx]);
-                    }
-                    idx += 1;
-                    last = idx;
-                }
-                0xEF if idx + 3 <= bytes.len()
-                    && bytes[idx + 1] == 0xBF
-                    && (bytes[idx + 2] == 0xBE || bytes[idx + 2] == 0xBF) =>
-                {
-                    if idx > last {
-                        out.push_str(&text[last..idx]);
-                    }
-                    idx += 3;
-                    last = idx;
-                }
-                _ => {
-                    idx += 1;
-                }
-            }
+            idx = Self::handle_escape_hit(text, bytes, idx, &mut last, &mut out);
         }
 
         if last < bytes.len() {
@@ -913,158 +930,5 @@ impl XmlSanitizer {
     #[inline]
     pub fn unescape(text: &str) -> String {
         unescape_xml_single_pass(text)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_twenty_formats_and_magic_signature_detection() {
-        assert_eq!(DocumentFormat::ALL.len(), 20);
-        let det = |b: &[u8], h: Option<&str>| FormatDetector::detect(b, h).unwrap();
-        let zip_sample = b"PK\x03\x04\x14\x00\x00\x00word/document.xml";
-        assert_eq!(det(zip_sample, None), DocumentFormat::Docx);
-        for &(sample, expected) in &[
-            (&b"PK\x03\x04Contents/header.xml"[..], DocumentFormat::Hwpx),
-            (b"PK\x03\x04oasis.opendocument.text", DocumentFormat::Odt),
-            (
-                b"PK\x03\x04oasis.opendocument.spreadsheet",
-                DocumentFormat::Ods,
-            ),
-            (
-                b"PK\x03\x04oasis.opendocument.presentation",
-                DocumentFormat::Odp,
-            ),
-            (b"PK\x03\x04xl/workbook.xml", DocumentFormat::Xlsx),
-            (b"PK\x03\x04ppt/presentation.xml", DocumentFormat::Pptx),
-        ] {
-            assert_eq!(det(sample, None), expected);
-        }
-        assert_eq!(det(zip_sample, Some("report.docx")), DocumentFormat::Docx);
-        assert_eq!(det(zip_sample, Some("template.dotx")), DocumentFormat::Docx);
-        assert_eq!(det(zip_sample, Some("official.hwpx")), DocumentFormat::Hwpx);
-        assert_eq!(det(zip_sample, Some("template.hwtx")), DocumentFormat::Hwtx);
-        assert_eq!(det(zip_sample, Some("show.ppsx")), DocumentFormat::Ppsx);
-
-        let ole2_sample = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1HWP Document File";
-        assert_eq!(det(ole2_sample, Some("proposal.hwp")), DocumentFormat::Hwp);
-        assert_eq!(det(ole2_sample, Some("template.hwt")), DocumentFormat::Hwt);
-        let pdf_sample = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF";
-        assert_eq!(det(pdf_sample, Some("contract.pdf")), DocumentFormat::Pdf);
-        assert_eq!(
-            det(b"{\\rtf1\\ansi\\deff0 Hello}", Some("memo.rtf")),
-            DocumentFormat::Rtf
-        );
-        assert_eq!(
-            FormatDetector::detect(b"", Some("empty.docx")),
-            Err(EasyOfficeError::EmptyPayload)
-        );
-        assert!(matches!(
-            FormatDetector::detect(b"NOT_A_ZIP_FILE", Some("spoofed.xlsx")),
-            Err(EasyOfficeError::SignatureMismatch { .. })
-        ));
-        assert!(matches!(
-            FormatDetector::detect(zip_sample, Some("spoofed.csv")),
-            Err(EasyOfficeError::SignatureMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn test_zip_security_guard_blocks_traversal_and_decompression_bomb() {
-        let policy = ZipSecurityPolicy::default();
-        let chk = |p: &str, c: u64, u: u64| {
-            ZipSecurityGuard::validate_archive_entries(
-                &[ZipEntryDescriptor::new(p, c, u, false)],
-                &policy,
-            )
-        };
-        assert!(chk("[Content_Types].xml", 512, 2048).is_ok());
-        assert!(chk("word/document.xml", 1024, 4096).is_ok());
-        assert!(matches!(
-            chk("../../etc/passwd", 100, 200),
-            Err(EasyOfficeError::SecurityViolation(_))
-        ));
-        assert!(matches!(
-            chk("C:\\Windows\\win.ini", 100, 200),
-            Err(EasyOfficeError::SecurityViolation(_))
-        ));
-        assert!(matches!(
-            chk("word/document.xml", 100, 20_000),
-            Err(EasyOfficeError::DecompressionBombDetected { .. })
-        ));
-    }
-
-    #[test]
-    fn test_ole2_sector_cycle_and_hwp5_encryption_guard() {
-        let mut container = vec![0u8; 512 * 4];
-        container[..8].copy_from_slice(&FormatDetector::OLE2_MAGIC);
-        container[44..48].copy_from_slice(&1u32.to_le_bytes());
-
-        let cyclic_fat = vec![1u32, 0u32, Ole2SecurityGuard::END_OF_CHAIN];
-        assert!(matches!(
-            Ole2SecurityGuard::validate_sector_chain(&container, &cyclic_fat, 0),
-            Err(EasyOfficeError::SecurityViolation(_))
-        ));
-
-        let valid_fat = vec![1u32, 2u32, Ole2SecurityGuard::END_OF_CHAIN];
-        assert_eq!(
-            Ole2SecurityGuard::validate_sector_chain(&container, &valid_fat, 0).unwrap(),
-            vec![0, 1, 2]
-        );
-
-        let mut hwp_header = vec![0u8; 256];
-        hwp_header[..17].copy_from_slice(b"HWP Document File");
-        hwp_header[32..36].copy_from_slice(&0x0500_0300u32.to_le_bytes());
-        hwp_header[36..40].copy_from_slice(&0x02u32.to_le_bytes());
-        assert_eq!(
-            Ole2SecurityGuard::validate_hwp5_file_header(&hwp_header),
-            Err(EasyOfficeError::EncryptedDocumentUnsupported(
-                DocumentFormat::Hwp
-            ))
-        );
-    }
-
-    #[test]
-    fn test_xml_sanitizer_and_csv_commonmark_pdf_roundtrip() {
-        assert!(XmlSanitizer::validate_safe_xml(
-            "<w:document><w:body><w:p><w:t>안전한 문서</w:t></w:p></w:body></w:document>"
-        )
-        .is_ok());
-        assert_eq!(
-            XmlSanitizer::validate_safe_xml("<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"),
-            Err(EasyOfficeError::XxeOrExternalEntityDetected)
-        );
-        let escaped = XmlSanitizer::escape("A & B < C > \"D\" 'E'");
-        assert_eq!(XmlSanitizer::unescape(&escaped), "A & B < C > \"D\" 'E'");
-        let rows = vec![
-            vec!["부서".to_string(), "메모, 특이사항".to_string()],
-            vec!["연구개발".to_string(), "1행\n2행 \"강조\"".to_string()],
-        ];
-        assert_eq!(
-            CsvCodec::parse(&CsvCodec::serialize(&rows, ','), ',').unwrap(),
-            rows
-        );
-        let md_input =
-            "# 제품 아키텍처\n\n본문 첫 문단입니다.\n\n> 핵심 설계 원칙\n\n- 항목 1\n- 항목 2";
-        assert_eq!(
-            CommonMarkCodec::render(&CommonMarkCodec::parse(md_input).unwrap()),
-            md_input
-        );
-        let pdf_doc = PdfDocumentModel {
-            title: "분기 보안 감사 보고서".to_string(),
-            pages: vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: "ISO 32000-1 PDF 본문 텍스트\n2행 개행 보존".to_string(),
-                approval_stamp: Some("APPROVED".to_string()),
-            }],
-            watermark_text: Some("CONFIDENTIAL".to_string()),
-        };
-        assert_eq!(
-            PdfSerializer::parse(&PdfSerializer::serialize(&pdf_doc)).unwrap(),
-            pdf_doc
-        );
     }
 }

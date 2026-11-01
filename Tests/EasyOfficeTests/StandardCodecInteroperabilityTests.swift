@@ -704,12 +704,13 @@ final class StandardCodecInteroperabilityTests: XCTestCase {
   func testBIFF8ExtendedMetadataChunkingOver64KBAndFinancialWorkdayParity() throws {
     var largeSheet = WorksheetModel(name: "PrimarySheet")
     try largeSheet.setCell("A1", rawValue: "헤더")
-    let paddingNotes = String(repeating: "가나다라마바사아자차카타파하_0123456789_", count: 1500)
+    let paddingNotes = String(repeating: "가나다라마바사아자차카타파하_0123456789_", count: 1000)
     largeSheet.addSheetPage(
       named: "SecondSheetOver64KB",
       initialCells: [
         PackedCellCoordinate(row: 0, column: 0): paddingNotes,
         PackedCellCoordinate(row: 1, column: 0): "보존검증",
+        PackedCellCoordinate(row: 2, column: 0): paddingNotes + "_2",
       ]
     )
     let xlsBytes = try LegacyOLE2OfficeCodec.encodeBIFF8Worksheet(largeSheet)

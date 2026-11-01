@@ -87,7 +87,7 @@ public struct PDFInkStroke: Sendable, Codable, Equatable, Identifiable {
     self.pageNumber = max(1, pageNumber)
     self.points = points.filter { $0.x.isFinite && $0.y.isFinite }
     self.strokeHex = strokeHex
-    self.lineWidth = lineWidth.isFinite ? max(0.5, min(lineWidth, 12.0)) : 2.2
+    self.lineWidth = (lineWidth.isFinite && lineWidth > 0) ? max(0.5, min(lineWidth, 12.0)) : 1.0
     self.label = label
   }
 
@@ -860,3 +860,126 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     )
   }
 }
+
+extension PDFBinarySerializer {
+  /// Single-pass PDF string literal escaper normalizing newlines and Unicode line separators to spaces.
+  public static func escapePDFText(_ text: String) -> String {
+    var out = ""
+    out.reserveCapacity(text.count + 8)
+    for scalar in text.unicodeScalars {
+      switch scalar.value {
+      case 0x5C: out.append("\\\\")
+      case 0x28: out.append("\\(")
+      case 0x29: out.append("\\)")
+      case 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029:
+        out.append(" ")
+      default:
+        out.unicodeScalars.append(scalar)
+      }
+    }
+    return out
+  }
+
+  public static func escapePDFString(_ input: String) -> String {
+    var out = ""
+    out.reserveCapacity(input.count + 16)
+    for scalar in input.unicodeScalars {
+      switch scalar.value {
+      case 0x5C: out.append("\\\\")
+      case 0x28: out.append("\\(")
+      case 0x29: out.append("\\)")
+      case 0x08: out.append("\\b")
+      case 0x09: out.append("\\t")
+      case 0x0A: out.append("\\n")
+      case 0x0B: out.append("\\v")
+      case 0x0C: out.append("\\f")
+      case 0x0D: out.append("\\r")
+      case 0x85: out.append("\\u0085")
+      case 0x2028: out.append("\\u2028")
+      case 0x2029: out.append("\\u2029")
+      default:
+        out.unicodeScalars.append(scalar)
+      }
+    }
+    return out
+  }
+
+  public static func unescapePDFString(_ input: String) -> String {
+    var result = ""
+    result.reserveCapacity(input.count)
+    var index = input.startIndex
+    while index < input.endIndex {
+      let ch = input[index]
+      if ch == "\\" {
+        let nextIndex = input.index(after: index)
+        guard nextIndex < input.endIndex else {
+          result.append("\\")
+          break
+        }
+        let escaped = input[nextIndex]
+        switch escaped {
+        case "n":
+          result.append("\n")
+          index = input.index(after: nextIndex)
+        case "r":
+          result.append("\r")
+          index = input.index(after: nextIndex)
+        case "t":
+          result.append("\t")
+          index = input.index(after: nextIndex)
+        case "b":
+          result.append("\u{08}")
+          index = input.index(after: nextIndex)
+        case "f":
+          result.append("\u{0C}")
+          index = input.index(after: nextIndex)
+        case "v":
+          result.append("\u{0B}")
+          index = input.index(after: nextIndex)
+        case "(":
+          result.append("(")
+          index = input.index(after: nextIndex)
+        case ")":
+          result.append(")")
+          index = input.index(after: nextIndex)
+        case "\\":
+          result.append("\\")
+          index = input.index(after: nextIndex)
+        case "u":
+          let hexStart = input.index(after: nextIndex)
+          if let hexEnd = input.index(hexStart, offsetBy: 4, limitedBy: input.endIndex),
+            let code = UInt32(input[hexStart..<hexEnd], radix: 16),
+            let scalar = UnicodeScalar(code)
+          {
+            result.unicodeScalars.append(scalar)
+            index = hexEnd
+          } else {
+            result.append("u")
+            index = hexStart
+          }
+        case "0"..."7":
+          var octEnd = nextIndex
+          var octCount = 0
+          while octEnd < input.endIndex && octCount < 3
+            && input[octEnd] >= "0" && input[octEnd] <= "7"
+          {
+            octEnd = input.index(after: octEnd)
+            octCount += 1
+          }
+          if let byteVal = UInt8(input[nextIndex..<octEnd], radix: 8) {
+            result.unicodeScalars.append(UnicodeScalar(byteVal))
+          }
+          index = octEnd
+        default:
+          result.append(escaped)
+          index = input.index(after: nextIndex)
+        }
+      } else {
+        result.append(ch)
+        index = input.index(after: index)
+      }
+    }
+    return result
+  }
+}
+

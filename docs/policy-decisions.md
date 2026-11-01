@@ -825,3 +825,32 @@
   - 부동소수점 비교에서 임의의 고정 허용오차(`1e-12`)로 `0` 근처 양수를 `0`으로 간주하는 방식은 미소 과학 수치(`1E-15`)의 `>0` 집계를 왜곡하므로 평가·비교 단계는 IEEE 754 정밀도를 유지하고 표시 단계에서만 15자리 유효숫자 포맷을 적용.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `cargo test --workspace -- --test-threads=1`, `cargo clippy --workspace --all-targets -- -D warnings`, `swift build`, `swift test`
 - **Revisit when** 다중 스레드 병렬 DAG 레벨 평가기 또는 동적 배열 스필(Spill) 연산자(`#`)를 도입할 때.
+
+### 39. ZIP·OLE2 컨테이너 무결성, OOXML·ODF·HWP·BIFF8·PDF 표준 호환성 및 1,000줄 미만 코덱 분할 정책 (2026-11-01)
+
+- **Status** Implemented
+- **Decision (`PD-064`)**
+  1. **ZIP 및 OLE2 CFBF 컨테이너 경계 검증 강화 (`Sources/EasyOfficeCore/{BinaryContainerCodec.swift,OLE2AndHWP5Codec.swift}`, `crates/easyoffice-formats/src/{zip.rs,ole2.rs}`)**
+     - ZIP 패커·언패커는 `BitPacking.checkedUInt16` 및 `BitPacking.checkedUInt32` 범위 검사를 적용하여 정수 절단을 원천 차단하고, 대소문자를 무시한 중복 엔트리 경로(`word/document.xml` 대 `WORD/DOCUMENT.XML`)와 파일-디렉터리 경로 충돌(`a/b` 대 `a/b/c`)을 모두 거부하며, 로컬 파일 헤더(LFH)와 중앙 디렉터리(CD)의 파일명·압축 방식·비스트리밍 크기·CRC-32 일치 여부를 교차 검증합니다.
+     - OLE2 CFBF 코덱은 섹터 경계(`127`, `128`, `255`, `256` 섹터)에서 고정점 반복으로 `fatSectorCount`와 `difatSectorCount`를 계산하고 `109`개를 초과하는 FAT 섹터를 DIFAT 섹터 체인으로 연결하여 `20MB` 이상 대용량 스트림 라운드트립을 보장하며, OLE2 v3(`512B`)와 v4(`4096B`) 섹터 시프트, 명시적 스택 기반 디렉터리 트리 순회(`maxDirectoryEntries = 4,096`), 대소문자 무시 형제 스트림 중복 거부를 강제합니다.
+  2. **OOXML·ODF·HWPX 스키마 호환성 및 미디어 파일명 위생 처리 (`Sources/EasyOfficeCore/{StandardZipOfficeCodecs.swift,StandardZipSheetSlideCodecs.swift,ODFAndHWPXCodecs.swift}`)**
+     - OOXML 커스텀 확장 속성은 `xmlns:eo="https://easyoffice.local/ns/meta"` 및 `mc:Ignorable="eo"` 선언 아래 `eo:` 접두 속성으로 기록하고 레거시 비접두 속성은 읽기 시 하위 호환으로 함께 인식합니다.
+     - DOCX `<w:highlight w:val="..."/>`에는 ECMA-376 `ST_HighlightColor` 16색 열거형 이름만 기록하고 원본 16진수 색상은 `eo:highlightHex`에 보존하며, `word/_rels/document.xml.rels` 및 `<w:drawing>` 인라인 이미지 관계, XLSX `xl/_rels/workbook.xml.rels` 타깃 경로 해석과 `<rPh>` 후리가나 제거 및 빈 `<si/>` 보존, PPTX `ppt/slideMasters/slideMaster1.xml` 및 `ppt/slideLayouts/slideLayout1.xml` 필수 패키징을 수행합니다.
+     - ODF 코덱은 OpenFormula 수식 정규화(`of:=SUM([.A1:.B2])`와 `=SUM(A1:B2)` 상호 변환), `<table:covered-table-cell>` 열 오프셋 전진, ODT·ODP `meta.xml` `<dc:title>` 보존, ODP `<presentation:notes>` 및 `<text:page-number>` 본문 혼입 차단을 적용하며, 첨부 미디어 파일명은 경로 구분자와 제어문자를 제거하고 UTF-8 `255`바이트 이내 고유 이름으로 정규화합니다.
+  3. **HWP 5.0·Word97·PowerPoint97·BIFF8 XLS 및 ISO 32000-1 PDF 정합성 (`Sources/EasyOfficeCore/{HWP5DocumentCodec.swift,LegacyOLE2OfficeCodec.swift,LegacyBIFF8XLSCodec.swift,PDFBinarySerializer.swift,PDFEngine.swift}`)**
+     - HWP 5.0 코덱은 다중 섹션(`Section0..SectionN`) 읽기·쓰기와 표준 `HWPTAG_BEGIN(16)` 오프셋 기반 `HWPTAG_TABLE`(`tag 77`) + `HWPTAG_LIST_HEADER`(`tag 72`) + `HWPTAG_PARA_TEXT`(`tag 67`) (비표준 `61`/`56`/`51` 및 레거시 단일 레코드 표 읽기 하위 호환 포함), OpenFormula 따옴표 시트명(`['2026 [Q1]'.A1]`·`['Q1:Q2'.A1]`·3D 범위) 및 셀 경계 `of:=` 보존, PDF 본문·오버레이 비중첩 배치(`y = 445..626` 회피) 및 `\uXXXX`·`\v`·`beginbfrange` 배열 CMap, BIFF8 전 시트 `32,765` UTF-16 코드 유닛 한도 셀 트리 직렬화 및 `maxHWPTableRows = 4,096`(`EasyOfficeError.resourceBudgetExceeded`) 상한을 적용합니다.
+     - Word97 바이너리 코덱은 `1Table`/`0Table`의 CLX(`Prc` + `Pcdt` `PlcfPcd`) 조각 테이블(압축 8비트 Latin-1 및 16비트 UTF-16LE 혼합 조각)을 지원하고, PowerPoint97 코덱은 `Slide`(`0x03EE`) 컨테이너와 `SlidePersistAtom`(`0x03F3`) 경계를 모두 인식합니다.
+     - BIFF8 XLS 코덱은 `maxBIFF8Row = 65,535`, `maxBIFF8Col = 255`, `maxBIFF8RecordPayload = 8,224` 상한과 `FONT`·`XF`·`BOUNDSHEET`·`SST`+`CONTINUE`·`LABELSST` 레코드 분할·재조립 및 `fHighByte == 0` Latin-1 디코딩을 수행합니다.
+     - PDF 코덱은 리터럴·16진수 문자열 외부의 `/Encrypt` 이름 토큰만 감지하고, `/F2`용 `/ToUnicode` CMap과 비중첩 Y 대역(주석·양식 필드·서명 영역), 유한 양수 `lineWidth` 가드, 트레일러 모델과 실제 페이지·주석·양식·리댁션 상태의 정본 일치 검증 및 텍스트 스트림이 없는 비지원 외부 PDF 거부(`EasyOfficeError.unsupportedFormat`)를 수행합니다.
+  4. **코어 코덱 소스 파일 1,000줄 미만 분할 (`Sources/EasyOfficeCore/*.swift`)**
+     - `HWP5DocumentCodec.swift`, `LegacyBIFF8XLSCodec.swift`, `StandardZipSheetSlideCodecs.swift`를 분리하여 수정된 모든 Swift 코덱 파일을 1,000줄 미만으로 유지합니다.
+- **Why** 외부 오피스 구현체와의 상호운용성 결함(스키마 위반 속성, 누락된 마스터·스타일 레코드, 다중 섹션·조각 테이블·SST 연속 레코드 손실, PDF 좌표 겹침 및 암호화 오탐)과 컨테이너 경계 우회를 동시에 해소하기 위함입니다.
+- **Trade-offs**
+  1. PPTX 슬라이드 마스터·레이아웃 파트와 BIFF8 최소 `FONT`/`XF`/`SST` 레코드, PDF `/ToUnicode` CMap을 항상 포함하므로 최소 출력 파일 크기가 수백 바이트 증가하나 표준 뷰어 및 외부 오피스 도구의 열기 호환성을 보장합니다.
+  2. HWP 5.0 표 행 수(`4,096`행)와 BIFF8 그리드(`65,536 x 256`)를 초과하는 입력은 조용히 잘라내지 않고 즉시 `EasyOfficeError.resourceBudgetExceeded`로 거부하여 데이터 유실을 방지합니다.
+- **Alternatives rejected**
+  - BIFF8이 아닌 XML 텍스트를 `.xls` 스트림에 저장하거나 커스텀 HWP 표 태그(`tag 77`)만 출력하는 방식은 외부 표준 파서에서 열리지 않으므로 표준 레코드 출력으로 대체하고 읽기 시에만 레거시 호환을 유지.
+  - PDF 전체 바이트에서 단순 부분 문자열 검색으로 `/Encrypt`를 판정하는 방식은 본문 텍스트에 `/Encrypt` 단어가 포함된 정상 문서를 암호화 문서로 오탐하므로 문자열 리터럴 외부 토큰 파서로 교체.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `swift build`, `swift test`, `Tests/EasyOfficeTests/ContainerOOXMLODFLegacyPDFInteropTests.swift`
+- **Revisit when** PDF 2.0(ISO 32000-2) 확장 객체 스트림(`ObjStm`) 압축 파서 또는 BIFF12(`.xlsb`) 바이너리 워크북 코덱을 추가할 때.
+

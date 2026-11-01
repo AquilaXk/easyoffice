@@ -2,20 +2,21 @@
 mod pdf_object_graph;
 
 use crate::pdf_stream_parser::{
-    advance_past_stream_eol, contains_subslice, escape_pdf_text, is_pdf_delim_or_ws,
-    is_standalone_pdf_kw, parse_indirect_obj_header, parse_pdf_content_stream,
-    skip_pdf_ws_and_comments, span_crosses_object_boundary, step_pdf_non_code_token,
-    unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable, PdfNonCodeKind,
-    PdfNonCodeStep,
+    advance_past_stream_eol, contains_subslice, decode_base64_bytes_impl, encode_utf16be_hex_impl,
+    escape_pdf_text, is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
+    parse_pdf_content_stream_with_cmap, skip_pdf_ws_and_comments, span_crosses_object_boundary,
+    step_pdf_non_code_token, unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable,
+    PdfNonCodeKind, PdfNonCodeStep, PdfToUnicodeMap,
 };
 use crate::{ContainerFamily, DocumentFormat, EasyOfficeError, FormatDetector};
 use pdf_object_graph::{
     decode_and_validate_pdf_streams, dict_get, dict_has_non_null_key, dict_name_eq,
-    fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt, parse_pdf_value_with_table,
-    resolve_catalog_and_pages_target, resolve_int, resolve_stream_bounds,
-    resolve_stream_length_hint, resolve_value, trailer_or_xref_has_spliced_encrypt,
-    validate_pdf_trailer_json, IntObjIndex, PageNodeTarget, PdfIndirectObject, PdfObjValue,
-    MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH, MAX_PDF_TOTAL_DECODED_BYTES,
+    expand_pdf_object_streams, fail_corrupted_or_encrypted, indirect_val_has_spliced_encrypt,
+    parse_pdf_value_with_table, resolve_catalog_and_pages_target, resolve_int,
+    resolve_stream_bounds, resolve_stream_length_hint, resolve_value,
+    trailer_or_xref_has_spliced_encrypt, validate_pdf_trailer_json, IntObjIndex, PageNodeTarget,
+    PdfIndirectObject, PdfObjValue, MAX_PDF_CONTENTS_ARRAY_LEN, MAX_PDF_PAGE_TREE_DEPTH,
+    MAX_PDF_TOTAL_DECODED_BYTES,
 };
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -52,6 +53,7 @@ struct PageWalkState<'a> {
     bytes: &'a [u8],
     objects: &'a HashMap<(u32, u16), PdfIndirectObject>,
     flate_cache: &'a HashMap<(u32, u16), Vec<u8>>,
+    cmap: &'a PdfToUnicodeMap,
     first_used_flate: HashSet<(u32, u16)>,
     remaining_budget: usize,
     visited: HashSet<(u32, u16)>,
@@ -89,12 +91,16 @@ impl PdfSerializer {
             if lines.len() <= MAX_LINES_PER_PDF_PAGE {
                 effective_pages.push(page);
             } else {
-                for chunk in lines.chunks(MAX_LINES_PER_PDF_PAGE) {
+                for (c_idx, chunk) in lines.chunks(MAX_LINES_PER_PDF_PAGE).enumerate() {
                     effective_pages.push(PdfPageModel {
                         page_number: effective_pages.len() + 1,
                         rotation_degrees: page.rotation_degrees,
                         body_text: chunk.join("\n"),
-                        approval_stamp: page.approval_stamp.clone(),
+                        approval_stamp: if c_idx == 0 {
+                            page.approval_stamp.clone()
+                        } else {
+                            None
+                        },
                     });
                 }
             }
@@ -108,7 +114,8 @@ impl PdfSerializer {
             .join(" ");
 
         let cmap_obj = 3 + page_count * 2;
-        let total_objects = cmap_obj + 1;
+        let info_obj = cmap_obj + 1;
+        let total_objects = info_obj + 1;
         let mut offsets: Vec<usize> = vec![0; total_objects];
 
         offsets[1] = out.len();
@@ -187,6 +194,14 @@ impl PdfSerializer {
         push_line(&mut out, "endstream");
         push_line(&mut out, "endobj");
 
+        offsets[info_obj] = out.len();
+        push_line(&mut out, &format!("{info_obj} 0 obj"));
+        push_line(
+            &mut out,
+            &format!("<< /Title ({}) >>", Self::escape_pdf_text(&doc.title)),
+        );
+        push_line(&mut out, "endobj");
+
         let xref_offset = out.len();
         push_line(&mut out, "xref");
         push_line(&mut out, &format!("0 {total_objects}"));
@@ -197,7 +212,7 @@ impl PdfSerializer {
         push_line(&mut out, "trailer");
         push_line(
             &mut out,
-            &format!("<< /Size {total_objects} /Root 1 0 R >>"),
+            &format!("<< /Size {total_objects} /Root 1 0 R /Info {info_obj} 0 R >>"),
         );
         push_line(&mut out, "startxref");
         push_line(&mut out, &xref_offset.to_string());
@@ -214,7 +229,9 @@ impl PdfSerializer {
                 detail: "유효한 PDF 시그니처가 아닙니다.".to_string(),
             });
         }
-        if !contains_subslice(bytes, b"xref") || !contains_subslice(bytes, b"%%EOF") {
+        if (!contains_subslice(bytes, b"xref") && !contains_subslice(bytes, b"/XRef"))
+            || !contains_subslice(bytes, b"%%EOF")
+        {
             return Err(fail_corrupted_or_encrypted(
                 bytes,
                 0,
@@ -514,7 +531,7 @@ impl PdfSerializer {
             Cow::Owned(joined)
         };
         let stream_text = String::from_utf8_lossy(merged_cow.as_ref());
-        let parsed = parse_pdf_content_stream(&stream_text);
+        let parsed = parse_pdf_content_stream_with_cmap(&stream_text, Some(state.cmap));
         if let Some(wm) = parsed.watermark {
             state.watermark_text = Some(wm);
         }
@@ -844,6 +861,28 @@ impl PdfSerializer {
             &mut trailer_b64_count,
         )?;
 
+        expand_pdf_object_streams(bytes, &mut objects, &flate_cache, &mut order_seq);
+        let mut ordered_objs: Vec<((u32, u16), &PdfIndirectObject)> =
+            objects.iter().map(|(&id, o)| (id, o)).collect();
+        ordered_objs.sort_by_key(|(_, o)| o.order_seq);
+
+        let mut cmap = PdfToUnicodeMap::default();
+        for &(id, obj) in &ordered_objs {
+            let stream_slice: Option<&[u8]> = if let Some(dec) = flate_cache.get(&id) {
+                Some(dec.as_slice())
+            } else {
+                obj.stream_range.map(|(s, e)| &bytes[s..e])
+            };
+            if let Some(s_bytes) = stream_slice {
+                if contains_subslice(s_bytes, b"begincmap") {
+                    PdfToUnicodeMap::parse_cmap_stream(
+                        &String::from_utf8_lossy(s_bytes),
+                        &mut cmap,
+                    );
+                }
+            }
+        }
+
         let (title, pages_target) =
             resolve_catalog_and_pages_target(&objects, &ordered_objs, &trailers);
 
@@ -851,6 +890,7 @@ impl PdfSerializer {
             bytes,
             objects: &objects,
             flate_cache: &flate_cache,
+            cmap: &cmap,
             first_used_flate: HashSet::new(),
             remaining_budget,
             visited: HashSet::new(),
@@ -893,42 +933,7 @@ impl PdfSerializer {
     }
 
     pub fn decode_base64_bytes(input: &str) -> Option<Vec<u8>> {
-        let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-        if clean.is_empty() || (clean.len() & 3) != 0 {
-            return None;
-        }
-        let val = |b: u8| -> Option<u8> {
-            match b {
-                b'A'..=b'Z' => Some(b - b'A'),
-                b'a'..=b'z' => Some(b - b'a' + 26),
-                b'0'..=b'9' => Some(b - b'0' + 52),
-                b'+' => Some(62),
-                b'/' => Some(63),
-                _ => None,
-            }
-        };
-        let mut out = Vec::with_capacity((clean.len() / 4) * 3);
-        let mut idx = 0usize;
-        while idx + 4 <= clean.len() {
-            if (clean[idx + 2] == b'=' || clean[idx + 3] == b'=') && idx + 4 != clean.len() {
-                return None;
-            }
-            let a = val(clean[idx])?;
-            let b = val(clean[idx + 1])?;
-            out.push((a << 2) | (b >> 4));
-            if clean[idx + 2] != b'=' {
-                let c = val(clean[idx + 2])?;
-                out.push(((b & 0x0F) << 4) | (c >> 2));
-                if clean[idx + 3] != b'=' {
-                    let d = val(clean[idx + 3])?;
-                    out.push(((c & 0x03) << 6) | d);
-                }
-            } else if clean[idx + 3] != b'=' {
-                return None;
-            }
-            idx += 4;
-        }
-        Some(out)
+        decode_base64_bytes_impl(input)
     }
 
     fn decode_base64_utf8(input: &str) -> Option<String> {
@@ -936,15 +941,7 @@ impl PdfSerializer {
     }
 
     fn encode_utf16be_hex(text: &str) -> String {
-        const HEX: &[u8; 16] = b"0123456789ABCDEF";
-        let mut out = String::with_capacity(text.len() * 4);
-        for unit in text.encode_utf16() {
-            out.push(HEX[((unit >> 12) & 0x0F) as usize] as char);
-            out.push(HEX[((unit >> 8) & 0x0F) as usize] as char);
-            out.push(HEX[((unit >> 4) & 0x0F) as usize] as char);
-            out.push(HEX[(unit & 0x0F) as usize] as char);
-        }
-        out
+        encode_utf16be_hex_impl(text)
     }
 
     fn format_pdf_tj_operand(text: &str) -> (&'static str, String) {

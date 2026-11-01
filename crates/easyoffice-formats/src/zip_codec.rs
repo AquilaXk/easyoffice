@@ -421,6 +421,30 @@ impl ZipArchiveCodec {
                     "PKZIP 로컬 파일 헤더 시그니처(0x04034B50) 불일치".to_string(),
                 ));
             }
+            let local_flags = read_u16_le(bytes, local_offset + 6)?;
+            if (local_flags & 0x0001) != 0 {
+                return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                    crate::DocumentFormat::Docx,
+                ));
+            }
+            let local_method = read_u16_le(bytes, local_offset + 8)?;
+            let local_crc = read_u32_le(bytes, local_offset + 14)?;
+            let local_comp_size = read_u32_le(bytes, local_offset + 18)? as usize;
+            let local_uncomp_size = read_u32_le(bytes, local_offset + 22)? as usize;
+            if local_method != method {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "ZIP 로컬 파일 헤더와 Central Directory 압축 방식 불일치: {path}"
+                )));
+            }
+            if (local_flags & 0x0008) == 0
+                && (local_crc != expected_crc
+                    || local_comp_size != comp_size
+                    || local_uncomp_size != uncomp_size)
+            {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "ZIP 로컬 파일 헤더와 Central Directory 크기/CRC 메타데이터 불일치: {path}"
+                )));
+            }
             let local_name_len = read_u16_le(bytes, local_offset + 26)? as usize;
             let local_extra_len = read_u16_le(bytes, local_offset + 28)? as usize;
             let local_name_start = local_offset + 30;
@@ -585,5 +609,158 @@ mod tests {
             ZipArchiveCodec::pack(&bad_entries),
             Err(EasyOfficeError::SecurityViolation(_))
         ));
+    }
+
+    #[test]
+    fn test_twenty_formats_and_magic_signature_detection() {
+        use crate::{DocumentFormat, FormatDetector};
+        assert_eq!(DocumentFormat::ALL.len(), 20);
+        let det = |b: &[u8], h: Option<&str>| FormatDetector::detect(b, h).unwrap();
+        let zip_sample = b"PK\x03\x04\x14\x00\x00\x00word/document.xml";
+        assert_eq!(det(zip_sample, None), DocumentFormat::Docx);
+        for &(sample, expected) in &[
+            (&b"PK\x03\x04Contents/header.xml"[..], DocumentFormat::Hwpx),
+            (b"PK\x03\x04oasis.opendocument.text", DocumentFormat::Odt),
+            (
+                b"PK\x03\x04oasis.opendocument.spreadsheet",
+                DocumentFormat::Ods,
+            ),
+            (
+                b"PK\x03\x04oasis.opendocument.presentation",
+                DocumentFormat::Odp,
+            ),
+            (b"PK\x03\x04xl/workbook.xml", DocumentFormat::Xlsx),
+            (b"PK\x03\x04ppt/presentation.xml", DocumentFormat::Pptx),
+        ] {
+            assert_eq!(det(sample, None), expected);
+        }
+        assert_eq!(det(zip_sample, Some("report.docx")), DocumentFormat::Docx);
+        assert_eq!(det(zip_sample, Some("template.dotx")), DocumentFormat::Docx);
+        assert_eq!(det(zip_sample, Some("official.hwpx")), DocumentFormat::Hwpx);
+        assert_eq!(det(zip_sample, Some("template.hwtx")), DocumentFormat::Hwtx);
+        assert_eq!(det(zip_sample, Some("show.ppsx")), DocumentFormat::Ppsx);
+
+        let ole2_sample = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1HWP Document File";
+        assert_eq!(det(ole2_sample, Some("proposal.hwp")), DocumentFormat::Hwp);
+        assert_eq!(det(ole2_sample, Some("template.hwt")), DocumentFormat::Hwt);
+        let pdf_sample = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF";
+        assert_eq!(det(pdf_sample, Some("contract.pdf")), DocumentFormat::Pdf);
+        assert_eq!(
+            det(b"{\\rtf1\\ansi\\deff0 Hello}", Some("memo.rtf")),
+            DocumentFormat::Rtf
+        );
+        assert_eq!(
+            FormatDetector::detect(b"", Some("empty.docx")),
+            Err(EasyOfficeError::EmptyPayload)
+        );
+        assert!(matches!(
+            FormatDetector::detect(b"NOT_A_ZIP_FILE", Some("spoofed.xlsx")),
+            Err(EasyOfficeError::SignatureMismatch { .. })
+        ));
+        assert!(matches!(
+            FormatDetector::detect(zip_sample, Some("spoofed.csv")),
+            Err(EasyOfficeError::SignatureMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn test_zip_security_guard_blocks_traversal_and_decompression_bomb() {
+        let policy = ZipSecurityPolicy::default();
+        let chk = |p: &str, c: u64, u: u64| {
+            ZipSecurityGuard::validate_archive_entries(
+                &[ZipEntryDescriptor::new(p, c, u, false)],
+                &policy,
+            )
+        };
+        assert!(chk("[Content_Types].xml", 512, 2048).is_ok());
+        assert!(chk("word/document.xml", 1024, 4096).is_ok());
+        assert!(matches!(
+            chk("../../etc/passwd", 100, 200),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+        assert!(matches!(
+            chk("C:\\Windows\\win.ini", 100, 200),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+        assert!(matches!(
+            chk("word/document.xml", 100, 20_000),
+            Err(EasyOfficeError::DecompressionBombDetected { .. })
+        ));
+    }
+
+    #[test]
+    fn test_ole2_sector_cycle_and_hwp5_encryption_guard() {
+        use crate::{DocumentFormat, FormatDetector, Ole2SecurityGuard};
+        let mut container = vec![0u8; 512 * 4];
+        container[..8].copy_from_slice(&FormatDetector::OLE2_MAGIC);
+        container[44..48].copy_from_slice(&1u32.to_le_bytes());
+
+        let cyclic_fat = vec![1u32, 0u32, Ole2SecurityGuard::END_OF_CHAIN];
+        assert!(matches!(
+            Ole2SecurityGuard::validate_sector_chain(&container, &cyclic_fat, 0),
+            Err(EasyOfficeError::SecurityViolation(_))
+        ));
+
+        let valid_fat = vec![1u32, 2u32, Ole2SecurityGuard::END_OF_CHAIN];
+        assert_eq!(
+            Ole2SecurityGuard::validate_sector_chain(&container, &valid_fat, 0).unwrap(),
+            vec![0, 1, 2]
+        );
+
+        let mut hwp_header = vec![0u8; 256];
+        hwp_header[..17].copy_from_slice(b"HWP Document File");
+        hwp_header[32..36].copy_from_slice(&0x0500_0300u32.to_le_bytes());
+        hwp_header[36..40].copy_from_slice(&0x02u32.to_le_bytes());
+        assert_eq!(
+            Ole2SecurityGuard::validate_hwp5_file_header(&hwp_header),
+            Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                DocumentFormat::Hwp
+            ))
+        );
+    }
+
+    #[test]
+    fn test_xml_sanitizer_and_csv_commonmark_pdf_roundtrip() {
+        use crate::{
+            CommonMarkCodec, CsvCodec, PdfDocumentModel, PdfPageModel, PdfSerializer, XmlSanitizer,
+        };
+        assert!(XmlSanitizer::validate_safe_xml(
+            "<w:document><w:body><w:p><w:t>안전한 문서</w:t></w:p></w:body></w:document>"
+        )
+        .is_ok());
+        assert_eq!(
+            XmlSanitizer::validate_safe_xml("<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>"),
+            Err(EasyOfficeError::XxeOrExternalEntityDetected)
+        );
+        let escaped = XmlSanitizer::escape("A & B < C > \"D\" 'E'");
+        assert_eq!(XmlSanitizer::unescape(&escaped), "A & B < C > \"D\" 'E'");
+        let rows = vec![
+            vec!["부서".to_string(), "메모, 특이사항".to_string()],
+            vec!["연구개발".to_string(), "1행\n2행 \"강조\"".to_string()],
+        ];
+        assert_eq!(
+            CsvCodec::parse(&CsvCodec::serialize(&rows, ','), ',').unwrap(),
+            rows
+        );
+        let md_input =
+            "# 제품 아키텍처\n\n본문 첫 문단입니다.\n\n> 핵심 설계 원칙\n\n- 항목 1\n- 항목 2";
+        assert_eq!(
+            CommonMarkCodec::render(&CommonMarkCodec::parse(md_input).unwrap()),
+            md_input
+        );
+        let pdf_doc = PdfDocumentModel {
+            title: "분기 보안 감사 보고서".to_string(),
+            pages: vec![PdfPageModel {
+                page_number: 1,
+                rotation_degrees: 0,
+                body_text: "ISO 32000-1 PDF 본문 텍스트\n2행 개행 보존".to_string(),
+                approval_stamp: Some("APPROVED".to_string()),
+            }],
+            watermark_text: Some("CONFIDENTIAL".to_string()),
+        };
+        assert_eq!(
+            PdfSerializer::parse(&PdfSerializer::serialize(&pdf_doc)).unwrap(),
+            pdf_doc
+        );
     }
 }

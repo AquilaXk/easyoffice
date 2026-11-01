@@ -6,6 +6,7 @@ import PDFKit
 /// Deterministic ISO 32000-1 (`%PDF-1.7`) binary serializer and parser with byte-exact `xref` offsets and native `PDFKit` inspection.
 public enum PDFBinarySerializer {
   private static let modelStreamPrefix = "%EasyOfficePDFModelBase64:"
+  private static let trailerDocPrefix = "%EASYOFFICE_DOC:"
 
   private static let hexDigits: [UInt8] = Array("0123456789ABCDEF".utf8)
 
@@ -22,6 +23,82 @@ public enum PDFBinarySerializer {
       start = end
     }
     return wrapped
+  }
+
+  /// Checks whether a PDF line contains a name token (such as `/Encrypt`) outside literal `(...)` and hex `<...>` strings.
+  public static func containsPDFNameTokenOutsideStrings(_ line: String, token: String) -> Bool {
+    guard line.contains(token) else { return false }
+    var outside = ""
+    outside.reserveCapacity(line.count)
+    var parenDepth = 0
+    var inHexString = false
+    var index = line.startIndex
+
+    while index < line.endIndex {
+      let ch = line[index]
+      if parenDepth > 0 {
+        if ch == "\\" {
+          let next = line.index(after: index)
+          if next < line.endIndex {
+            index = line.index(after: next)
+            continue
+          }
+        } else if ch == "(" {
+          parenDepth += 1
+        } else if ch == ")" {
+          parenDepth -= 1
+        }
+        index = line.index(after: index)
+        continue
+      }
+      if inHexString {
+        if ch == ">" {
+          inHexString = false
+        }
+        index = line.index(after: index)
+        continue
+      }
+      if ch == "%" {
+        break
+      }
+      if ch == "(" {
+        parenDepth = 1
+        outside.append(" ")
+        index = line.index(after: index)
+        continue
+      }
+      if ch == "<" {
+        let next = line.index(after: index)
+        if next < line.endIndex && line[next] == "<" {
+          outside.append("<<")
+          index = line.index(after: next)
+          continue
+        } else {
+          inHexString = true
+          outside.append(" ")
+          index = next
+          continue
+        }
+      }
+      outside.append(ch)
+      index = line.index(after: index)
+    }
+
+    var searchStart = outside.startIndex
+    while let range = outside.range(of: token, range: searchStart..<outside.endIndex) {
+      let after = range.upperBound
+      if after == outside.endIndex {
+        return true
+      }
+      let nextChar = outside[after]
+      if nextChar.isWhitespace || nextChar == "/" || nextChar == "<" || nextChar == ">"
+        || nextChar == "[" || nextChar == "]" || nextChar == "(" || nextChar == ")"
+      {
+        return true
+      }
+      searchStart = after
+    }
+    return false
   }
 
   public static func encode(_ pdf: PDFStudioDocumentModel) -> Data {
@@ -75,7 +152,8 @@ public enum PDFBinarySerializer {
     let pageObjectNumbers = (0..<pageCount).map { 3 + ($0 * 2) }
     let kidsRefs = pageObjectNumbers.map { "\($0) 0 R" }.joined(separator: " ")
     let metadataObjNum = 3 + (pageCount * 2)
-    let outlinesObjNum = pdf.outline.isEmpty ? nil : (metadataObjNum + 1)
+    let toUnicodeObjNum = metadataObjNum + 1
+    let outlinesObjNum = pdf.outline.isEmpty ? nil : (toUnicodeObjNum + 1)
     let outlinesCatalogRef = outlinesObjNum.map { " /Outlines \($0) 0 R" } ?? ""
 
     var objectOffsets: [Int: Int] = [:]
@@ -132,11 +210,26 @@ public enum PDFBinarySerializer {
         )
       }
 
-      // 3. Body Paragraphs (24pt leading for <= 18 lines at y=668, 15pt leading for 19..42 lines at y=728)
+      let pageAnnotations =
+        isFirstSlice ? pdf.annotations.filter { $0.pageNumber == page.pageNumber } : []
+      let pageFormFields =
+        isFirstSlice ? pdf.formFields.filter { $0.pageNumber == page.pageNumber } : []
+      let pageStrokes =
+        isFirstSlice
+        ? pdf.inkStrokes.filter {
+          $0.pageNumber == page.pageNumber && $0.points.count >= 2
+        } : []
+      let hasOverlayBand =
+        !pageAnnotations.isEmpty || !pageFormFields.isEmpty || !pageStrokes.isEmpty
+
       var cursorY = visualLines.count <= 18 ? 668.0 : 728.0
       let lineLeading = visualLines.count <= 18 ? 24.0 : 15.0
+      let minBodyY = pageAnnotations.isEmpty ? 76.0 : 200.0
       for rawLine in visualLines {
-        guard cursorY >= 76.0 else { break }
+        if hasOverlayBand && cursorY <= 582.0 && cursorY > 432.0 {
+          cursorY = 432.0
+        }
+        guard cursorY >= minBodyY else { break }
         let yInt = XMLDocumentModelMapper.safeClampedInt(cursorY)
         let barWidth = min(480, max(60, rawLine.count * 9))
         let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
@@ -147,16 +240,13 @@ public enum PDFBinarySerializer {
         cursorY -= lineLeading
       }
 
-      // 4. Visual Annotations & Official Approval Stamp Badge (y = 576..626)
-      let pageAnnotations =
-        isFirstSlice ? pdf.annotations.filter { $0.pageNumber == page.pageNumber } : []
       for (aIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
-        let ay = 610.0 - Double(aIdx) * 16.0
+        let ay = 570.0 - Double(aIdx) * 12.0
         let pillFill = annotation.kind == .highlight ? "0.98 0.96 0.84" : "0.94 0.95 1.00"
-        streamLines.append(String(format: "%@ rg 48.0 %.1f 328.0 14.0 re f", pillFill, ay - 3.0))
+        streamLines.append(String(format: "%@ rg 48.0 %.1f 328.0 11.0 re f", pillFill, ay - 2.0))
         if annotation.kind == .underline {
           streamLines.append(
-            String(format: "0.361 0.420 0.753 rg 48.0 %.1f 328.0 1.5 re f", ay - 3.0)
+            String(format: "0.361 0.420 0.753 rg 48.0 %.1f 328.0 1.5 re f", ay - 2.0)
           )
         }
         let annLabel =
@@ -186,14 +276,11 @@ public enum PDFBinarySerializer {
         )
       }
 
-      // 5. AcroForm Interactive Field Boxes (y = 516..562)
-      let pageFormFields =
-        isFirstSlice ? pdf.formFields.filter { $0.pageNumber == page.pageNumber } : []
       for (fIdx, field) in pageFormFields.prefix(4).enumerated() {
         let col = fIdx % 2
         let row = fIdx / 2
         let fx = col == 0 ? 48.0 : 300.0
-        let fy = 540.0 - Double(row) * 24.0
+        let fy = 508.0 - Double(row) * 22.0
         let valText = field.isCheckbox ? (field.isChecked ? "[X]" : "[ ]") : field.value
         let formLine = "[FORM] \(field.name): \(valText)"
         let escapedForm = escapePDFString(formLine)
@@ -213,12 +300,6 @@ public enum PDFBinarySerializer {
         )
       }
 
-      // 6. Electronic Signature Box & Vector Ink Curve (y = 450..504)
-      let pageStrokes =
-        isFirstSlice
-        ? pdf.inkStrokes.filter {
-          $0.pageNumber == page.pageNumber && $0.points.count >= 2
-        } : []
       if !pageStrokes.isEmpty {
         streamLines.append("0.97 0.98 1.00 rg 0.45 0.50 0.78 RG 1.0 w 48 452 280 46 re B")
         let sigHeaderHex = hexEncodeUTF16BE(
@@ -228,35 +309,6 @@ public enum PDFBinarySerializer {
         streamLines.append(
           "BT /F2 7.5 Tf 0.22 0.27 0.55 rg 1 0 0 1 56 484 Tm <\(sigHeaderHex)> Tj ET"
         )
-        for stroke in pageStrokes {
-          let (r, g, b) = parseRGBHex(stroke.strokeHex)
-          let safeWidth = stroke.lineWidth.isFinite ? max(0.5, min(24.0, stroke.lineWidth)) : 2.0
-          var sigPathOps = String(
-            format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, safeWidth
-          )
-          if let first = stroke.points.first {
-            let fx = first.x.isFinite ? first.x : 56.0
-            let fy = first.y.isFinite ? first.y : 460.0
-            let drawX0 = max(56.0, min(318.0, fx))
-            let drawY0 =
-              fy < 400.0
-              ? (458.0 + (abs(fy).truncatingRemainder(dividingBy: 24.0)))
-              : min(480.0, max(456.0, fy))
-            sigPathOps += String(format: " %.2f %.2f m", drawX0, drawY0)
-            for pt in stroke.points.dropFirst() {
-              let px = pt.x.isFinite ? pt.x : 56.0
-              let py = pt.y.isFinite ? pt.y : 460.0
-              let drawX = max(56.0, min(318.0, px))
-              let drawY =
-                py < 400.0
-                ? (458.0 + (abs(py).truncatingRemainder(dividingBy: 24.0)))
-                : min(480.0, max(456.0, py))
-              sigPathOps += String(format: " %.2f %.2f l", drawX, drawY)
-            }
-            sigPathOps += " S Q"
-            streamLines.append(sigPathOps)
-          }
-        }
       }
 
       for (annIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
@@ -270,16 +322,23 @@ public enum PDFBinarySerializer {
       }
       for stroke in pageStrokes {
         let (r, g, b) = parseRGBHex(stroke.strokeHex)
+        let safeWidth =
+          (stroke.lineWidth.isFinite && stroke.lineWidth > 0)
+          ? max(0.5, min(24.0, stroke.lineWidth)) : 1.0
         var pathOps = String(
-          format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, stroke.lineWidth
+          format: "q %.3f %.3f %.3f RG %.2f w 1 J 1 j", r, g, b, safeWidth
         )
         if let first = stroke.points.first {
-          let px = max(20.0, min(575.0, first.x))
-          let py = max(20.0, min(820.0, first.y))
+          let fx = first.x.isFinite ? first.x : 56.0
+          let fy = first.y.isFinite ? first.y : 460.0
+          let px = max(20.0, min(575.0, fx))
+          let py = max(20.0, min(820.0, fy))
           pathOps += String(format: " %.2f %.2f m", px, py)
           for pt in stroke.points.dropFirst() {
-            let lx = max(20.0, min(575.0, pt.x))
-            let ly = max(20.0, min(820.0, pt.y))
+            let rx = pt.x.isFinite ? pt.x : 56.0
+            let ry = pt.y.isFinite ? pt.y : 460.0
+            let lx = max(20.0, min(575.0, rx))
+            let ly = max(20.0, min(820.0, ry))
             pathOps += String(format: " %.2f %.2f l", lx, ly)
           }
           pathOps += " S Q"
@@ -294,7 +353,7 @@ public enum PDFBinarySerializer {
       objectOffsets[pageObjNum] = buffer.count
       appendLine("\(pageObjNum) 0 obj")
       appendLine(
-        "<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /AppleSDGothicNeo-Regular /Encoding /UniKS-UTF16-H /DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /AppleSDGothicNeo-Regular /DW 1000 /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> >> ] >> >> >> /Contents \(contentObjNum) 0 R >>"
+        "<< /Type /Page /Parent 2 0 R /PageNumber \(page.pageNumber) /Rotate \(page.rotationDegrees) /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /AppleSDGothicNeo-Regular /Encoding /UniKS-UTF16-H /ToUnicode \(toUnicodeObjNum) 0 R /DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /AppleSDGothicNeo-Regular /DW 1000 /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> >> ] >> >> >> /Contents \(contentObjNum) 0 R >>"
       )
       appendLine("endobj")
 
@@ -322,7 +381,33 @@ public enum PDFBinarySerializer {
     appendLine("endstream")
     appendLine("endobj")
 
-    var nextObjId = metadataObjNum + 1
+    let toUnicodeStream = """
+      /CIDInit /ProcSet findresource begin
+      12 dict begin
+      begincmap
+      /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+      /CMapName /Adobe-Identity-UCS def
+      /CMapType 2 def
+      1 begincodespacerange
+      <0000> <FFFF>
+      endcodespacerange
+      1 beginbfrange
+      <0000> <FFFF> <0000>
+      endbfrange
+      endcmap
+      CMapName currentdict /CMap defineresource pop
+      end
+      end
+      """
+    objectOffsets[toUnicodeObjNum] = buffer.count
+    appendLine("\(toUnicodeObjNum) 0 obj")
+    appendLine("<< /Length \(toUnicodeStream.utf8.count) >>")
+    appendLine("stream")
+    appendLine(toUnicodeStream)
+    appendLine("endstream")
+    appendLine("endobj")
+
+    var nextObjId = toUnicodeObjNum + 1
     if let outlinesObjId = outlinesObjNum {
       nextObjId = outlinesObjId + 1
       var outlineEntries: [(objId: Int, dictLine: String)] = []
@@ -418,12 +503,17 @@ public enum PDFBinarySerializer {
       throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 객체(obj) 또는 %%EOF 트레일러가 없습니다.")
     }
 
-    let lines = rawText.components(separatedBy: .newlines)
+    let lines = rawText.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).map(String.init)
     var metadataBase64Payload: String?
+    var trailerDocBase64Payload: String?
     var metadataPayloadCount = 0
     var inMetadataObj = false
     var inMetadataStream = false
     var streamBodyChunks: [String] = []
+    var streamFormCount = 0
+    var streamAnnotationLineCount = 0
+    var catalogHasRedactedFlag: Bool? = nil
+
     for line in lines {
       let trimmed = line.trimmingCharacters(in: .whitespaces)
       if trimmed == "endobj" {
@@ -438,6 +528,13 @@ public enum PDFBinarySerializer {
       } else if trimmed == "endstream" && inMetadataStream {
         inMetadataStream = false
       }
+      if !inMetadataStream && trimmed.contains("/Type /Catalog") {
+        if trimmed.contains("/Redacted true") {
+          catalogHasRedactedFlag = true
+        } else if trimmed.contains("/Redacted false") {
+          catalogHasRedactedFlag = false
+        }
+      }
       if trimmed.hasPrefix(modelStreamPrefix) {
         metadataPayloadCount += 1
         guard inMetadataStream, metadataPayloadCount == 1 else {
@@ -447,6 +544,14 @@ public enum PDFBinarySerializer {
         metadataBase64Payload = String(trimmed.dropFirst(modelStreamPrefix.count))
         continue
       }
+      if trimmed.hasPrefix(trailerDocPrefix) {
+        guard trailerDocBase64Payload == nil else {
+          throw EasyOfficeError.securityViolation(
+            detail: "PDF 트레일러 주석(%EASYOFFICE_DOC:)이 중복 주입되었습니다.")
+        }
+        trailerDocBase64Payload = String(trimmed.dropFirst(trailerDocPrefix.count))
+        continue
+      }
       if trimmed.hasPrefix("BT 3 Tr /F1 1 Tf 0 0 Td ("),
         let openParen = trimmed.firstIndex(of: "("),
         let closeParen = trimmed.lastIndex(of: ")"),
@@ -454,12 +559,19 @@ public enum PDFBinarySerializer {
       {
         let inner = String(trimmed[trimmed.index(after: openParen)..<closeParen])
         streamBodyChunks.append(unescapePDFString(inner))
+      } else if trimmed.hasPrefix("BT 3 Tr /F1 1 Tf 0 2 Td (") {
+        streamFormCount += 1
+      } else if trimmed.hasPrefix("0.145 0.165 0.243 rg BT 0 Tr /F2 9 Tf 62 ") {
+        streamAnnotationLineCount += 1
       }
-      if !trimmed.hasPrefix("BT "), trimmed.contains("/Encrypt") {
+      if !trimmed.hasPrefix("BT "),
+        containsPDFNameTokenOutsideStrings(trimmed, token: "/Encrypt")
+      {
         throw EasyOfficeError.encryptedDocumentUnsupported(format: .pdf)
       }
     }
-    if let b64 = metadataBase64Payload {
+
+    if let b64 = metadataBase64Payload ?? trailerDocBase64Payload {
       guard let decodedBytes = Data(base64Encoded: b64) else {
         throw EasyOfficeError.corruptedContainer(detail: "PDF 메타데이터 스트림 Base64 디코딩에 실패했습니다.")
       }
@@ -490,6 +602,26 @@ public enum PDFBinarySerializer {
       guard expectedChunks == streamBodyChunks else {
         throw EasyOfficeError.securityViolation(
           detail: "PDF 메타데이터 스트림이 페이지 본문 스트림과 일치하지 않습니다.")
+      }
+      if let catalogRedacted = catalogHasRedactedFlag, catalogRedacted != decodedModel.isRedacted {
+        throw EasyOfficeError.securityViolation(
+          detail: "PDF 메타데이터의 리댁션 상태(isRedacted)가 카탈로그 객체와 일치하지 않습니다.")
+      }
+      var expectedRenderedForms = 0
+      var expectedRenderedAnnotations = 0
+      for page in decodedModel.pages {
+        let pageForms = decodedModel.formFields.filter { $0.pageNumber == page.pageNumber }
+        expectedRenderedForms += min(4, pageForms.count)
+        let pageAnns = decodedModel.annotations.filter { $0.pageNumber == page.pageNumber }
+        expectedRenderedAnnotations += min(4, pageAnns.count)
+      }
+      if metadataBase64Payload != nil {
+        guard expectedRenderedForms == streamFormCount,
+          expectedRenderedAnnotations == streamAnnotationLineCount
+        else {
+          throw EasyOfficeError.securityViolation(
+            detail: "PDF 메타데이터의 주석 또는 양식 필드 수가 페이지 렌더링 스트림과 일치하지 않습니다.")
+        }
       }
       return decodedModel
     }
@@ -684,24 +816,29 @@ public enum PDFBinarySerializer {
           }
         }
 
-        var outlineNodes: [PDFOutlineNode] = []
-        if let outlineRoot = pdfDoc.outlineRoot {
-          outlineNodes = extractOutlineNodes(from: outlineRoot, in: pdfDoc)
+        let hasReadableContent =
+          pages.contains(where: { !$0.extractedText.isEmpty }) || !annotations.isEmpty
+          || !fallbackFormFields.isEmpty
+        if hasReadableContent {
+          var outlineNodes: [PDFOutlineNode] = []
+          if let outlineRoot = pdfDoc.outlineRoot {
+            outlineNodes = extractOutlineNodes(from: outlineRoot, in: pdfDoc)
+          }
+
+          let docTitle =
+            (pdfDoc.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? fallbackTitle ?? "PDF 문서"
+
+          return PDFStudioDocumentModel(
+            title: docTitle,
+            pages: pages,
+            annotations: annotations,
+            outline: outlineNodes,
+            isRedacted: isRedactedCatalog,
+            formFields: fallbackFormFields,
+            watermarkText: fallbackWatermarkText
+          )
         }
-
-        let docTitle =
-          (pdfDoc.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String)
-          .flatMap { $0.isEmpty ? nil : $0 } ?? fallbackTitle ?? "PDF 문서"
-
-        return PDFStudioDocumentModel(
-          title: docTitle,
-          pages: pages,
-          annotations: annotations,
-          outline: outlineNodes,
-          isRedacted: isRedactedCatalog,
-          formFields: fallbackFormFields,
-          watermarkText: fallbackWatermarkText
-        )
       }
     }
 
@@ -709,8 +846,8 @@ public enum PDFBinarySerializer {
       guard sawPageObject || hasCompressedXRef else {
         throw EasyOfficeError.corruptedContainer(detail: "PDF 컨테이너에 유효한 페이지(/Type /Page) 객체가 없습니다.")
       }
-      fallbackPages.append(
-        PDFPageDescriptor(pageNumber: 1, rotationDegrees: currentRotate, extractedText: ""))
+      throw EasyOfficeError.unsupportedFormat(
+        detail: "외부 PDF 스트림에서 디코딩 가능한 텍스트 레이어를 찾을 수 없습니다.")
     }
     return PDFStudioDocumentModel(
       title: fallbackTitle ?? "PDF 문서",
@@ -749,18 +886,22 @@ public enum PDFBinarySerializer {
 
   private static func hexEncodeUTF16BE(_ input: String, maxChars: Int) -> String {
     let source = input.isEmpty ? " " : input
-    let limit = min(maxChars, source.utf16.count)
     var outBytes: [UInt8] = [0x46, 0x45, 0x46, 0x46]  // "FEFF"
-    outBytes.reserveCapacity(4 + limit * 4)
-    var count = 0
-    for unit in source.utf16 {
-      if count >= maxChars { break }
-      let normalized: UInt16 = (unit == 0x0009 || unit < 0x0020) ? 0x0020 : unit
-      outBytes.append(hexDigits[Int((normalized >> 12) & 0x0F)])
-      outBytes.append(hexDigits[Int((normalized >> 8) & 0x0F)])
-      outBytes.append(hexDigits[Int((normalized >> 4) & 0x0F)])
-      outBytes.append(hexDigits[Int(normalized & 0x0F)])
-      count += 1
+    outBytes.reserveCapacity(4 + min(maxChars, source.count) * 8)
+    var charCount = 0
+    for ch in source {
+      if charCount >= maxChars { break }
+      let s = String(ch)
+      for unit in s.utf16 {
+        let normalized: UInt16 =
+          (unit == 0x0009 || unit < 0x0020 || unit == 0x2028 || unit == 0x2029 || unit == 0x0085)
+          ? 0x0020 : unit
+        outBytes.append(hexDigits[Int((normalized >> 12) & 0x0F)])
+        outBytes.append(hexDigits[Int((normalized >> 8) & 0x0F)])
+        outBytes.append(hexDigits[Int((normalized >> 4) & 0x0F)])
+        outBytes.append(hexDigits[Int(normalized & 0x0F)])
+      }
+      charCount += 1
     }
     return String(decoding: outBytes, as: UTF8.self)
   }
@@ -799,85 +940,5 @@ public enum PDFBinarySerializer {
     }
     return String(decoding: outBytes, as: UTF8.self)
   }
-
-  /// Single-pass UTF-8 byte buffer PDF string literal escaper normalizing newlines to spaces.
-  public static func escapePDFText(_ text: String) -> String {
-    var out: [UInt8] = []
-    out.reserveCapacity(text.utf8.count + 8)
-    for byte in text.utf8 {
-      switch byte {
-      case 0x5C:  // '\'
-        out.append(0x5C)
-        out.append(0x5C)
-      case 0x28:  // '('
-        out.append(0x5C)
-        out.append(0x28)
-      case 0x29:  // ')'
-        out.append(0x5C)
-        out.append(0x29)
-      case 0x0A, 0x0D:  // '\n', '\r'
-        out.append(0x20)
-      default:
-        out.append(byte)
-      }
-    }
-    return String(decoding: out, as: UTF8.self)
-  }
-
-  private static func escapePDFString(_ input: String) -> String {
-    var out: [UInt8] = []
-    out.reserveCapacity(input.utf8.count + 8)
-    for byte in input.utf8 {
-      switch byte {
-      case 0x5C:  // '\'
-        out.append(0x5C)
-        out.append(0x5C)
-      case 0x28:  // '('
-        out.append(0x5C)
-        out.append(0x28)
-      case 0x29:  // ')'
-        out.append(0x5C)
-        out.append(0x29)
-      case 0x0D:  // '\r'
-        out.append(0x5C)
-        out.append(0x72)
-      case 0x0A:  // '\n'
-        out.append(0x5C)
-        out.append(0x6E)
-      default:
-        out.append(byte)
-      }
-    }
-    return String(decoding: out, as: UTF8.self)
-  }
-
-  private static func unescapePDFString(_ input: String) -> String {
-    var result = ""
-    result.reserveCapacity(input.count)
-    var index = input.startIndex
-    while index < input.endIndex {
-      let ch = input[index]
-      if ch == "\\" {
-        let nextIndex = input.index(after: index)
-        guard nextIndex < input.endIndex else {
-          result.append("\\")
-          break
-        }
-        let escaped = input[nextIndex]
-        switch escaped {
-        case "n": result.append("\n")
-        case "r": result.append("\r")
-        case "(": result.append("(")
-        case ")": result.append(")")
-        case "\\": result.append("\\")
-        default: result.append(escaped)
-        }
-        index = input.index(after: nextIndex)
-      } else {
-        result.append(ch)
-        index = input.index(after: index)
-      }
-    }
-    return result
-  }
 }
+
