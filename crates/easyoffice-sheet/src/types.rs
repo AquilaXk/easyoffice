@@ -201,8 +201,8 @@ impl CellRange {
         let rows = (max_r - min_r + 1) as usize;
         let cols = (max_c - min_c + 1) as usize;
         let count = rows.saturating_mul(cols);
-        let is_whole_col = min_r == 0 && max_r == PackedCellCoordinate::MAX_ROWS - 1 && cols <= 64;
-        let is_whole_row = min_c == 0 && max_c == PackedCellCoordinate::MAX_COLS - 1 && rows <= 64;
+        let is_whole_col = min_r == 0 && max_r == PackedCellCoordinate::MAX_ROWS - 1 && cols <= 256;
+        let is_whole_row = min_c == 0 && max_c == PackedCellCoordinate::MAX_COLS - 1 && rows <= 256;
         let is_1d_strip = rows == 1 || cols == 1;
         if count > Self::MAX_EXPANDED_CELL_COUNT && !is_whole_col && !is_whole_row && !is_1d_strip {
             return Err(EasyOfficeError::InvalidArgument(format!(

@@ -5,7 +5,7 @@ use crate::types::{
     CellRange, EvaluatedCellValue, FormulaError, PackedCellCoordinate, PackedWorkbookCoord,
 };
 use crate::{EvalContext, SheetEngine};
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 #[inline]
 pub fn is_valid_decimal_syntax(s: &str) -> bool {
@@ -391,13 +391,16 @@ impl SheetEngine {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn push_range_formula_deps(
         target_sheet: &SheetEngine,
         sheet_opt: &Option<String>,
         sid: u16,
         range: CellRange,
         ctx: &EvalContext<'_>,
-        visited: &HashSet<PackedWorkbookCoord>,
+        owner_key: PackedWorkbookCoord,
+        state: &HashMap<PackedWorkbookCoord, u8>,
+        cycle_keys: &mut Vec<PackedWorkbookCoord>,
         stack: &mut Vec<(Option<String>, u16, PackedCellCoordinate, bool)>,
     ) {
         let min_r = range.start.row().min(range.end.row());
@@ -412,7 +415,11 @@ impl SheetEngine {
                     };
                     if Self::is_true_formula_entry(target_sheet.compiled_asts.get(&dep_c)) {
                         let dep_key = PackedWorkbookCoord::new(sid, dep_c);
-                        if !ctx.memo.contains_key(&dep_key) && !visited.contains(&dep_key) {
+                        if state.get(&dep_key) == Some(&1) {
+                            cycle_keys.push(owner_key);
+                            cycle_keys.push(dep_key);
+                        } else if !ctx.memo.contains_key(&dep_key) && !state.contains_key(&dep_key)
+                        {
                             stack.push((sheet_opt.clone(), sid, dep_c, false));
                         }
                     }
@@ -427,7 +434,10 @@ impl SheetEngine {
                     && Self::is_true_formula_entry(Some(comp))
                 {
                     let dep_key = PackedWorkbookCoord::new(sid, dep_c);
-                    if !ctx.memo.contains_key(&dep_key) && !visited.contains(&dep_key) {
+                    if state.get(&dep_key) == Some(&1) {
+                        cycle_keys.push(owner_key);
+                        cycle_keys.push(dep_key);
+                    } else if !ctx.memo.contains_key(&dep_key) && !state.contains_key(&dep_key) {
                         stack.push((sheet_opt.clone(), sid, dep_c, false));
                     }
                 }
@@ -441,7 +451,8 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
     ) {
         let self_sid = self.resolved_sheet_id();
-        let mut visited: HashSet<PackedWorkbookCoord> = HashSet::new();
+        let mut state: HashMap<PackedWorkbookCoord, u8> = HashMap::new();
+        let mut cycle_keys: Vec<PackedWorkbookCoord> = Vec::new();
         let mut stack: Vec<(Option<String>, u16, PackedCellCoordinate, bool)> =
             Vec::with_capacity(roots.len().min(4096));
         for &coord in roots.iter().rev() {
@@ -454,92 +465,123 @@ impl SheetEngine {
         }
         while let Some((sheet_opt, sid, coord, expanded)) = stack.pop() {
             let key = PackedWorkbookCoord::new(sid, coord);
-            if ctx.memo.contains_key(&key) {
-                continue;
-            }
             if expanded {
-                ctx.steps = 0;
-                let _ = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, 0);
+                state.insert(key, 2);
+                if !ctx.memo.contains_key(&key) {
+                    ctx.steps = 0;
+                    let _ = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, 0);
+                }
                 continue;
             }
-            if !visited.insert(key) {
+            if ctx.memo.contains_key(&key) || state.contains_key(&key) {
                 continue;
             }
-            let Some(target_sheet) = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx) else {
-                continue;
-            };
-            let Some(Ok(ast)) = target_sheet.compiled_asts.get(&coord) else {
-                continue;
-            };
-            if matches!(ast, Expr::Number(_) | Expr::Boolean(_)) {
-                continue;
-            }
-            stack.push((sheet_opt.clone(), sid, coord, true));
-            let mut expr_stack: Vec<&Expr> = vec![ast];
-            while let Some(ex) = expr_stack.pop() {
-                match ex {
-                    Expr::Cell(dep_c) => {
-                        if Self::is_true_formula_entry(target_sheet.compiled_asts.get(dep_c)) {
-                            let dep_key = PackedWorkbookCoord::new(sid, *dep_c);
-                            if !ctx.memo.contains_key(&dep_key) && !visited.contains(&dep_key) {
-                                stack.push((sheet_opt.clone(), sid, *dep_c, false));
-                            }
-                        }
-                    }
-                    Expr::SheetCell {
-                        sheet,
-                        coord: dep_c,
-                    } => {
-                        if let Some(dep_ts) = self.resolve_sheet_ref(Some(sheet), ctx) {
-                            if Self::is_true_formula_entry(dep_ts.compiled_asts.get(dep_c)) {
-                                let dep_sid = dep_ts.resolved_sheet_id();
-                                let dep_key = PackedWorkbookCoord::new(dep_sid, *dep_c);
-                                if !ctx.memo.contains_key(&dep_key) && !visited.contains(&dep_key) {
-                                    stack.push((Some(sheet.clone()), dep_sid, *dep_c, false));
+            state.insert(key, 1);
+            cycle_keys.clear();
+            {
+                let Some(target_sheet) = self.resolve_sheet_ref(sheet_opt.as_deref(), ctx) else {
+                    state.insert(key, 2);
+                    continue;
+                };
+                let Some(Ok(ast)) = target_sheet.compiled_asts.get(&coord) else {
+                    state.insert(key, 2);
+                    continue;
+                };
+                if matches!(ast, Expr::Number(_) | Expr::Boolean(_)) {
+                    state.insert(key, 2);
+                    continue;
+                }
+                stack.push((sheet_opt.clone(), sid, coord, true));
+                let mut expr_stack: Vec<&Expr> = vec![ast];
+                while let Some(ex) = expr_stack.pop() {
+                    match ex {
+                        Expr::Cell(dep_c) => {
+                            if Self::is_true_formula_entry(target_sheet.compiled_asts.get(dep_c)) {
+                                let dep_key = PackedWorkbookCoord::new(sid, *dep_c);
+                                if state.get(&dep_key) == Some(&1) {
+                                    cycle_keys.push(key);
+                                    cycle_keys.push(dep_key);
+                                } else if !ctx.memo.contains_key(&dep_key)
+                                    && !state.contains_key(&dep_key)
+                                {
+                                    stack.push((sheet_opt.clone(), sid, *dep_c, false));
                                 }
                             }
                         }
-                    }
-                    Expr::Range(range) => {
-                        Self::push_range_formula_deps(
-                            target_sheet,
-                            &sheet_opt,
-                            sid,
-                            *range,
-                            ctx,
-                            &visited,
-                            &mut stack,
-                        );
-                    }
-                    Expr::SheetRange { sheet, range } => {
-                        if let Some(dep_ts) = self.resolve_sheet_ref(Some(sheet), ctx) {
-                            let dep_sid = dep_ts.resolved_sheet_id();
-                            let sh_opt = Some(sheet.clone());
+                        Expr::SheetCell {
+                            sheet,
+                            coord: dep_c,
+                        } => {
+                            if let Some(dep_ts) = self.resolve_sheet_ref(Some(sheet), ctx) {
+                                if Self::is_true_formula_entry(dep_ts.compiled_asts.get(dep_c)) {
+                                    let dep_sid = dep_ts.resolved_sheet_id();
+                                    let dep_key = PackedWorkbookCoord::new(dep_sid, *dep_c);
+                                    if state.get(&dep_key) == Some(&1) {
+                                        cycle_keys.push(key);
+                                        cycle_keys.push(dep_key);
+                                    } else if !ctx.memo.contains_key(&dep_key)
+                                        && !state.contains_key(&dep_key)
+                                    {
+                                        stack.push((Some(sheet.clone()), dep_sid, *dep_c, false));
+                                    }
+                                }
+                            }
+                        }
+                        Expr::Range(range) => {
                             Self::push_range_formula_deps(
-                                dep_ts, &sh_opt, dep_sid, *range, ctx, &visited, &mut stack,
+                                target_sheet,
+                                &sheet_opt,
+                                sid,
+                                *range,
+                                ctx,
+                                key,
+                                &state,
+                                &mut cycle_keys,
+                                &mut stack,
                             );
                         }
-                    }
-                    Expr::UnaryPlus(inner)
-                    | Expr::UnaryMinus(inner)
-                    | Expr::PostfixPercent(inner) => {
-                        expr_stack.push(inner);
-                    }
-                    Expr::Binary { lhs, rhs, .. } => {
-                        expr_stack.push(rhs);
-                        expr_stack.push(lhs);
-                    }
-                    Expr::FuncCall { args, .. } => {
-                        for a in args.iter().rev() {
-                            expr_stack.push(a);
+                        Expr::SheetRange { sheet, range } => {
+                            if let Some(dep_ts) = self.resolve_sheet_ref(Some(sheet), ctx) {
+                                let dep_sid = dep_ts.resolved_sheet_id();
+                                let sh_opt = Some(sheet.clone());
+                                Self::push_range_formula_deps(
+                                    dep_ts,
+                                    &sh_opt,
+                                    dep_sid,
+                                    *range,
+                                    ctx,
+                                    key,
+                                    &state,
+                                    &mut cycle_keys,
+                                    &mut stack,
+                                );
+                            }
                         }
+                        Expr::UnaryPlus(inner)
+                        | Expr::UnaryMinus(inner)
+                        | Expr::PostfixPercent(inner) => {
+                            expr_stack.push(inner);
+                        }
+                        Expr::Binary { lhs, rhs, .. } => {
+                            expr_stack.push(rhs);
+                            expr_stack.push(lhs);
+                        }
+                        Expr::FuncCall { args, .. } => {
+                            for a in args.iter().rev() {
+                                expr_stack.push(a);
+                            }
+                        }
+                        Expr::Number(_)
+                        | Expr::Text(_)
+                        | Expr::Boolean(_)
+                        | Expr::ErrorLiteral(_)
+                        | Expr::Missing => {}
                     }
-                    Expr::Number(_)
-                    | Expr::Text(_)
-                    | Expr::Boolean(_)
-                    | Expr::ErrorLiteral(_)
-                    | Expr::Missing => {}
                 }
+            }
+            for ck in &cycle_keys {
+                ctx.memo
+                    .insert(*ck, EvaluatedCellValue::Error(FormulaError::Cycle));
             }
         }
     }
@@ -590,29 +632,79 @@ impl SheetEngine {
         let (r_count, c_count) = expected_dims.ok_or(FormulaError::Value)?;
         let compiled_crits: Vec<CompiledCriteria> =
             crit_vals.iter().map(CompiledCriteria::compile).collect();
+        let total = r_count.saturating_mul(c_count);
 
         let mut sum = 0.0f64;
         let mut count = 0usize;
         let mut min_val: Option<f64> = None;
         let mut max_val: Option<f64> = None;
-        for dr in 0..r_count {
-            'cell_loop: for dc in 0..c_count {
-                for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
-                    let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
-                    if !cc.matches(&val) {
-                        continue 'cell_loop;
+        let sparse_idx = specs
+            .iter()
+            .zip(compiled_crits.iter())
+            .position(|(sp, cc)| !sp.5 && !cc.matches(&EvaluatedCellValue::Empty));
+        if total > 1024 && (sparse_idx.is_some() || target_spec.as_ref().is_some_and(|ts| !ts.5)) {
+            let anchor = if let Some(idx) = sparse_idx {
+                &specs[idx]
+            } else {
+                target_spec.as_ref().unwrap()
+            };
+            if let Some(anchor_sheet) = self.resolve_sheet_ref(anchor.0.as_deref(), ctx) {
+                let max_r = anchor.1 + (r_count as u32).saturating_sub(1);
+                let max_c = anchor.2 + (c_count as u32).saturating_sub(1);
+                let mut pop_coords: Vec<PackedCellCoordinate> = anchor_sheet
+                    .cells
+                    .keys()
+                    .copied()
+                    .filter(|c| {
+                        c.row() >= anchor.1
+                            && c.row() <= max_r
+                            && c.col() >= anchor.2
+                            && c.col() <= max_c
+                    })
+                    .collect();
+                pop_coords.sort_unstable();
+                'sparse_loop: for coord in pop_coords {
+                    let dr = (coord.row() - anchor.1) as usize;
+                    let dc = (coord.col() - anchor.2) as usize;
+                    for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
+                        let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
+                        if !cc.matches(&val) {
+                            continue 'sparse_loop;
+                        }
+                    }
+                    if let Some(ref ts) = target_spec {
+                        let tv = self.eval_streaming_cell(ts, dr, dc, ctx, depth)?;
+                        if let EvaluatedCellValue::Number(n) = tv {
+                            sum += n;
+                            count += 1;
+                            min_val = Some(min_val.map_or(n, |v| v.min(n)));
+                            max_val = Some(max_val.map_or(n, |v| v.max(n)));
+                        }
+                    } else {
+                        count += 1;
                     }
                 }
-                if let Some(ref ts) = target_spec {
-                    let tv = self.eval_streaming_cell(ts, dr, dc, ctx, depth)?;
-                    if let EvaluatedCellValue::Number(n) = tv {
-                        sum += n;
-                        count += 1;
-                        min_val = Some(min_val.map_or(n, |v| v.min(n)));
-                        max_val = Some(max_val.map_or(n, |v| v.max(n)));
+            }
+        } else {
+            for dr in 0..r_count {
+                'cell_loop: for dc in 0..c_count {
+                    for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
+                        let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
+                        if !cc.matches(&val) {
+                            continue 'cell_loop;
+                        }
                     }
-                } else {
-                    count += 1;
+                    if let Some(ref ts) = target_spec {
+                        let tv = self.eval_streaming_cell(ts, dr, dc, ctx, depth)?;
+                        if let EvaluatedCellValue::Number(n) = tv {
+                            sum += n;
+                            count += 1;
+                            min_val = Some(min_val.map_or(n, |v| v.min(n)));
+                            max_val = Some(max_val.map_or(n, |v| v.max(n)));
+                        }
+                    } else {
+                        count += 1;
+                    }
                 }
             }
         }

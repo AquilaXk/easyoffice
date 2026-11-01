@@ -18,7 +18,7 @@ extension WorksheetModel {
     roots: [PackedCellCoordinate],
     context: inout EvaluationContext
   ) {
-    var dagVisited: Set<PackedCellCoordinate> = []
+    var dagState: [PackedCellCoordinate: UInt8] = [:]
     var stack: [(coord: PackedCellCoordinate, expanded: Bool)] = []
     stack.reserveCapacity(min(roots.count, 4096))
     for coord in roots.reversed() {
@@ -29,19 +29,21 @@ extension WorksheetModel {
     }
     var exprStack: [FormulaAST] = []
     while let (coord, expanded) = stack.popLast() {
-      if context.memo[coord] != nil {
-        continue
-      }
       if expanded {
-        _ = evaluateInternal(at: coord, context: &context, depth: 0)
+        dagState[coord] = 2
+        if context.memo[coord] == nil {
+          _ = evaluateInternal(at: coord, context: &context, depth: 0)
+        }
         continue
       }
-      if !dagVisited.insert(coord).inserted {
+      if context.memo[coord] != nil || dagState[coord] != nil {
         continue
       }
+      dagState[coord] = 1
       guard let ast = compiledASTs[coord] ?? cellsByCoordinate[coord].map(Self.compileCellInput),
         Self.isTrueFormulaAST(ast)
       else {
+        dagState[coord] = 2
         continue
       }
       stack.append((coord, true))
@@ -50,11 +52,13 @@ extension WorksheetModel {
       while let ex = exprStack.popLast() {
         switch ex {
         case .cellRef(let dep):
-          if Self.isTrueFormulaAST(compiledASTs[dep]),
-            context.memo[dep] == nil,
-            !dagVisited.contains(dep)
-          {
-            stack.append((dep, false))
+          if Self.isTrueFormulaAST(compiledASTs[dep]) {
+            if dagState[dep] == 1 {
+              context.memo[coord] = .error("#CYCLE!")
+              context.memo[dep] = .error("#CYCLE!")
+            } else if context.memo[dep] == nil && dagState[dep] == nil {
+              stack.append((dep, false))
+            }
           }
         case .rangeRef(let range):
           let minR = min(range.start.row, range.end.row)
@@ -64,22 +68,26 @@ extension WorksheetModel {
           let span = (maxR - minR + 1) * (maxC - minC + 1)
           if span > 1024 {
             for dep in compiledASTs.keys where range.contains(dep) {
-              if Self.isTrueFormulaAST(compiledASTs[dep]),
-                context.memo[dep] == nil,
-                !dagVisited.contains(dep)
-              {
-                stack.append((dep, false))
+              if Self.isTrueFormulaAST(compiledASTs[dep]) {
+                if dagState[dep] == 1 {
+                  context.memo[coord] = .error("#CYCLE!")
+                  context.memo[dep] = .error("#CYCLE!")
+                } else if context.memo[dep] == nil && dagState[dep] == nil {
+                  stack.append((dep, false))
+                }
               }
             }
           } else {
             for r in minR...maxR {
               for c in minC...maxC {
                 let dep = PackedCellCoordinate(row: r, column: c)
-                if Self.isTrueFormulaAST(compiledASTs[dep]),
-                  context.memo[dep] == nil,
-                  !dagVisited.contains(dep)
-                {
-                  stack.append((dep, false))
+                if Self.isTrueFormulaAST(compiledASTs[dep]) {
+                  if dagState[dep] == 1 {
+                    context.memo[coord] = .error("#CYCLE!")
+                    context.memo[dep] = .error("#CYCLE!")
+                  } else if context.memo[dep] == nil && dagState[dep] == nil {
+                    stack.append((dep, false))
+                  }
                 }
               }
             }
@@ -350,7 +358,7 @@ extension WorksheetModel {
           additionalSheets: remainingSheets,
           activeSheetIndex: 0,
           namedRanges: namedRanges,
-          precompileAllCells: false
+          precompileAllCells: true
         )
         context.sheetModelCache[targetSheetUpper] = builtModel
         targetModel = builtModel
@@ -364,6 +372,20 @@ extension WorksheetModel {
       swap(&savedCount, &context.visitedCount)
       swap(&savedVisited, &context.visited)
       swap(&savedMemo, &context.memo)
+      targetModel.preEvaluateDAGIterative(roots: [packed], context: &context)
+      if let dagMemo = context.memo[packed] {
+        for (subCoord, subVal) in context.memo {
+          context.crossMemo[CrossSheetCellKey(sheetNameUpper: targetSheetUpper, coord: subCoord)] =
+            subVal
+        }
+        swap(&savedFast, &context.fastVisited)
+        swap(&savedCount, &context.visitedCount)
+        swap(&savedVisited, &context.visited)
+        swap(&savedMemo, &context.memo)
+        context.currentCoord = savedCoord
+        context.crossMemo[key] = dagMemo
+        return dagMemo
+      }
       context.currentCoord = packed
       _ = context.crossVisited.insert(key)
       context.markVisited(packed)

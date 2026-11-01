@@ -62,16 +62,23 @@ public enum SheetValueCoercion {
 
   public static func parseISODateSerial(_ raw: String) -> Double? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    let bytes = Array(trimmed.utf8)
-    guard bytes.count == 10, bytes[4] == 0x2D, bytes[7] == 0x2D else {
+    let hasDash = trimmed.contains("-")
+    let hasSlash = trimmed.contains("/")
+    guard (hasDash && !hasSlash) || (!hasDash && hasSlash) else {
       return nil
     }
-    for idx in [0, 1, 2, 3, 5, 6, 8, 9] {
-      guard bytes[idx] >= 0x30 && bytes[idx] <= 0x39 else { return nil }
-    }
-    guard let y = Int(String(decoding: bytes[0..<4], as: UTF8.self)),
-      let m = Int(String(decoding: bytes[5..<7], as: UTF8.self)),
-      let d = Int(String(decoding: bytes[8..<10], as: UTF8.self)),
+    let sep: Character = hasDash ? "-" : "/"
+    let parts = trimmed.split(separator: sep, omittingEmptySubsequences: false)
+    guard parts.count == 3,
+      parts[0].count == 4,
+      (1...2).contains(parts[1].count),
+      (1...2).contains(parts[2].count),
+      parts[0].allSatisfy(\.isASCII) && parts[0].allSatisfy(\.isNumber),
+      parts[1].allSatisfy(\.isASCII) && parts[1].allSatisfy(\.isNumber),
+      parts[2].allSatisfy(\.isASCII) && parts[2].allSatisfy(\.isNumber),
+      let y = Int(parts[0]),
+      let m = Int(parts[1]),
+      let d = Int(parts[2]),
       (1900...9999).contains(y),
       (1...12).contains(m)
     else {
@@ -197,7 +204,7 @@ public enum SheetValueCoercion {
     while digits.count > 1 && digits.last == 0x30 {
       digits.removeLast()
     }
-    if exp >= -4 && exp < 15 {
+    if exp >= -9 && exp < 15 {
       if exp < 0 {
         let zeros = String(repeating: "0", count: -1 - exp)
         let sig = String(decoding: digits, as: UTF8.self)

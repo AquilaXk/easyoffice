@@ -814,7 +814,7 @@ impl SheetEngine {
         };
         let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
         let compiled_crit = CompiledCriteria::compile(&crit_val);
-        let (ref sheet_opt, min_r, min_c, r_count, c_count, transposed) = range_spec;
+        let (_, _, _, r_count, c_count, transposed) = range_spec;
         let target_spec = if args.len() == 3 {
             let Some(mut ts) = self.extract_streaming_range_ctx(&args[2], ctx, depth)? else {
                 return Err(FormulaError::Value);
@@ -836,32 +836,43 @@ impl SheetEngine {
         };
 
         let total = r_count.saturating_mul(c_count);
-        if target_spec.is_none()
-            && !transposed
+        let anchor_spec = target_spec.as_ref().unwrap_or(&range_spec);
+        if !transposed
+            && !anchor_spec.5
             && total > 1024
             && self
-                .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                .resolve_sheet_ref(anchor_spec.0.as_deref(), ctx)
                 .is_some_and(|ts| total > ts.cells.len().saturating_mul(2))
         {
-            let max_r = min_r + (r_count as u32).saturating_sub(1);
-            let max_c = min_c + (c_count as u32).saturating_sub(1);
+            let max_r = anchor_spec.1 + (r_count as u32).saturating_sub(1);
+            let max_c = anchor_spec.2 + (c_count as u32).saturating_sub(1);
             let mut pop_coords: Vec<PackedCellCoordinate> = self
-                .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                .resolve_sheet_ref(anchor_spec.0.as_deref(), ctx)
                 .unwrap()
                 .cells
                 .keys()
                 .copied()
                 .filter(|c| {
-                    c.row() >= min_r && c.row() <= max_r && c.col() >= min_c && c.col() <= max_c
+                    c.row() >= anchor_spec.1
+                        && c.row() <= max_r
+                        && c.col() >= anchor_spec.2
+                        && c.col() <= max_c
                 })
                 .collect();
             pop_coords.sort_unstable();
             let mut sum = 0.0f64;
             let mut count = 0usize;
             for coord in pop_coords {
-                let val = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                let dr = (coord.row() - anchor_spec.1) as usize;
+                let dc = (coord.col() - anchor_spec.2) as usize;
+                let val = self.eval_streaming_cell_allow_error(&range_spec, dr, dc, ctx, depth)?;
                 if compiled_crit.matches(&val) {
-                    if let EvaluatedCellValue::Number(n) = val {
+                    let target_v = if let Some(ref ts) = target_spec {
+                        self.eval_streaming_cell(ts, dr, dc, ctx, depth)?
+                    } else {
+                        val
+                    };
+                    if let EvaluatedCellValue::Number(n) = target_v {
                         sum += n;
                         count += 1;
                     }

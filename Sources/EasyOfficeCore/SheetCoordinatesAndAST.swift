@@ -280,7 +280,15 @@ public struct CellRange: Sendable, Codable, Equatable, Hashable, CustomStringCon
     let rowSpan = abs(end.row - start.row) + 1
     let colSpan = abs(end.column - start.column) + 1
     let (area, overflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
-    guard !overflow, area <= Self.maxExpandedCellCount else {
+    let minRow = min(start.row, end.row)
+    let maxRow = max(start.row, end.row)
+    let minCol = min(start.column, end.column)
+    let maxCol = max(start.column, end.column)
+    let isWholeAxis =
+      (minRow == 0 && maxRow == CellAddress.maxZeroBasedRow && (maxCol - minCol + 1) <= 256)
+      || (minCol == 0 && maxCol == CellAddress.maxZeroBasedColumn && (maxRow - minRow + 1) <= 256)
+    let is1DStrip = rowSpan == 1 || colSpan == 1
+    guard !overflow, area <= Self.maxExpandedCellCount || isWholeAxis || is1DStrip else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
           codingPath: decoder.codingPath,
@@ -327,7 +335,10 @@ public struct CellRange: Sendable, Codable, Equatable, Hashable, CustomStringCon
     }
     let rowSpan = abs(end.row - start.row) + 1
     let colSpan = abs(end.column - start.column) + 1
-    guard rowSpan * colSpan <= Self.maxExpandedCellCount || isWholeColumnOrRow else {
+    guard
+      rowSpan * colSpan <= Self.maxExpandedCellCount || isWholeColumnOrRow || rowSpan == 1
+        || colSpan == 1
+    else {
       throw EasyOfficeError.invalidCellRange(notation)
     }
   }

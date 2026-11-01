@@ -767,7 +767,8 @@ extension WorksheetModel {
         && (needle.contains("*") || needle.contains("?") || needle.contains("~"))
       {
         let chars = Array(haystack)
-        let prefixPattern = needle.hasSuffix("*") ? needle : (needle + "*")
+        let trailingTildes = needle.reversed().prefix(while: { $0 == "~" }).count
+        let prefixPattern = (trailingTildes % 2 == 1) ? (needle + "~*") : (needle + "*")
         for pos in startOffset..<chars.count {
           let tail = String(chars[pos...])
           if Self.matchesWildcardPattern(text: tail, pattern: prefixPattern) {

@@ -193,6 +193,20 @@
     "target": "A3",
     "expectedType": "number",
     "expectedDisplay": "77"
+  },
+  {
+    "id": "general-number-1e-5-fixed-point",
+    "cells": { "A1": "=1E-5 & \"\"" },
+    "target": "A1",
+    "expectedType": "text",
+    "expectedDisplay": "0.00001"
+  },
+  {
+    "id": "slash-iso-date-coercion",
+    "cells": { "A1": "=\"2024/01/15\"+1" },
+    "target": "A1",
+    "expectedType": "number",
+    "expectedDisplay": "45307"
   }
 ]
 

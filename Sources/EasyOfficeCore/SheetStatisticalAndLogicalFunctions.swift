@@ -117,50 +117,88 @@ extension WorksheetModel {
     let totalCells = targetSpec?.totalCells ?? pairSpecs.first?.0.totalCells ?? 0
     var stats = CriteriaStreamStats()
 
-    if totalCells > 4096, let firstPair = pairSpecs.first,
-      !Self.matchesCriteriaValue(.empty, criteriaValue: firstPair.1)
-    {
-      let candidateCoords = populatedCoordinates(
-        onSheet: firstPair.0.sheetName,
-        minRow: firstPair.0.minRow,
-        maxRow: firstPair.0.minRow + firstPair.0.rowCount - 1,
-        minCol: firstPair.0.minCol,
-        maxCol: firstPair.0.minCol + firstPair.0.colCount - 1
-      )
-      for candidateCoord in candidateCoords {
-        guard let offset = firstPair.0.offset(for: candidateCoord) else { continue }
-        var allMatched = true
-        for (rangeSpec, critVal) in pairSpecs {
-          let coord = rangeSpec.coordinate(at: offset)
-          let cellVal =
-            rangeSpec.sheetName.map {
-              evaluateOnSheet(named: $0, at: coord, context: &frame.context, depth: frame.depth + 1)
-            } ?? evaluateInternal(at: coord, context: &frame.context, depth: frame.depth + 1)
-          if !Self.matchesCriteriaValue(cellVal, criteriaValue: critVal) {
-            allMatched = false
-            break
+    if totalCells > 4096 {
+      if let anchor = pairSpecs.first(where: { !Self.matchesCriteriaValue(.empty, criteriaValue: $0.1) })?.0
+        ?? targetSpec
+      {
+        let candidateCoords = populatedCoordinates(
+          onSheet: anchor.sheetName,
+          minRow: anchor.minRow,
+          maxRow: anchor.minRow + anchor.rowCount - 1,
+          minCol: anchor.minCol,
+          maxCol: anchor.minCol + anchor.colCount - 1
+        )
+        for candidateCoord in candidateCoords {
+          guard let offset = anchor.offset(for: candidateCoord) else { continue }
+          var allMatched = true
+          for (rangeSpec, critVal) in pairSpecs {
+            let coord = rangeSpec.coordinate(at: offset)
+            let cellVal =
+              rangeSpec.sheetName.map {
+                evaluateOnSheet(named: $0, at: coord, context: &frame.context, depth: frame.depth + 1)
+              } ?? evaluateInternal(at: coord, context: &frame.context, depth: frame.depth + 1)
+            if !Self.matchesCriteriaValue(cellVal, criteriaValue: critVal) {
+              allMatched = false
+              break
+            }
+          }
+          guard allMatched else { continue }
+          stats.matchCount += 1
+          if let tSpec = targetSpec {
+            let tCoord = tSpec.coordinate(at: offset)
+            let tVal =
+              tSpec.sheetName.map {
+                evaluateOnSheet(named: $0, at: tCoord, context: &frame.context, depth: frame.depth + 1)
+              } ?? evaluateInternal(at: tCoord, context: &frame.context, depth: frame.depth + 1)
+            if case .error(let code) = tVal {
+              return .failure(ErrorCode(code: code))
+            }
+            if case .number(let num) = tVal {
+              stats.numericCount += 1
+              stats.sum += num
+              stats.minVal = stats.minVal.map { min($0, num) } ?? num
+              stats.maxVal = stats.maxVal.map { max($0, num) } ?? num
+            }
           }
         }
-        guard allMatched else { continue }
-        stats.matchCount += 1
-        if let tSpec = targetSpec {
-          let tCoord = tSpec.coordinate(at: offset)
-          let tVal =
-            tSpec.sheetName.map {
-              evaluateOnSheet(named: $0, at: tCoord, context: &frame.context, depth: frame.depth + 1)
-            } ?? evaluateInternal(at: tCoord, context: &frame.context, depth: frame.depth + 1)
-          if case .error(let code) = tVal {
-            return .failure(ErrorCode(code: code))
-          }
-          if case .number(let num) = tVal {
-            stats.numericCount += 1
-            stats.sum += num
-            stats.minVal = stats.minVal.map { min($0, num) } ?? num
-            stats.maxVal = stats.maxVal.map { max($0, num) } ?? num
+        return .success(stats)
+      } else {
+        var popOffsets = Set<Int>()
+        for (rangeSpec, _) in pairSpecs {
+          let coords = populatedCoordinates(
+            onSheet: rangeSpec.sheetName,
+            minRow: rangeSpec.minRow,
+            maxRow: rangeSpec.minRow + rangeSpec.rowCount - 1,
+            minCol: rangeSpec.minCol,
+            maxCol: rangeSpec.minCol + rangeSpec.colCount - 1
+          )
+          for c in coords {
+            if let off = rangeSpec.offset(for: c) {
+              popOffsets.insert(off)
+            }
           }
         }
+        var nonMatchingPopCount = 0
+        for offset in popOffsets {
+          var allMatched = true
+          for (rangeSpec, critVal) in pairSpecs {
+            let coord = rangeSpec.coordinate(at: offset)
+            let cellVal =
+              rangeSpec.sheetName.map {
+                evaluateOnSheet(named: $0, at: coord, context: &frame.context, depth: frame.depth + 1)
+              } ?? evaluateInternal(at: coord, context: &frame.context, depth: frame.depth + 1)
+            if !Self.matchesCriteriaValue(cellVal, criteriaValue: critVal) {
+              allMatched = false
+              break
+            }
+          }
+          if !allMatched {
+            nonMatchingPopCount += 1
+          }
+        }
+        stats.matchCount = max(0, totalCells - nonMatchingPopCount)
+        return .success(stats)
       }
-      return .success(stats)
     }
 
     for offset in 0..<totalCells {
@@ -620,7 +658,10 @@ extension WorksheetModel {
         let pVal = pScalars[pIdx].value
         if pVal == 0x7E {
           let nextP = pScalars.index(after: pIdx)
-          if nextP < pScalars.endIndex {
+          if nextP < pScalars.endIndex,
+            pScalars[nextP].value == 0x2A || pScalars[nextP].value == 0x3F
+              || pScalars[nextP].value == 0x7E
+          {
             if foldScalar(tScalars[tIdx]) == foldScalar(pScalars[nextP]) {
               tIdx = tScalars.index(after: tIdx)
               pIdx = pScalars.index(after: nextP)
