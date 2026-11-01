@@ -163,13 +163,31 @@ public enum BitPacking {
     return out
   }
 
+  @inlinable
+  public static func checkedUInt16(_ value: Int, field: String) throws -> UInt16 {
+    guard value >= 0, value <= Int(UInt16.max) else {
+      throw EasyOfficeError.resourceBudgetExceeded(
+        detail: "\(field) 값(\(value))이 UInt16 한도(65,535)를 초과했습니다.")
+    }
+    return UInt16(value)
+  }
+
+  @inlinable
+  public static func checkedUInt32(_ value: Int, field: String) throws -> UInt32 {
+    guard value >= 0, Int64(value) <= Int64(UInt32.max) else {
+      throw EasyOfficeError.resourceBudgetExceeded(
+        detail: "\(field) 값(\(value))이 UInt32 한도(4,294,967,295)를 초과했습니다.")
+    }
+    return UInt32(value)
+  }
+
   /// Encodes a Swift String as UTF-16LE bytes prefixed with a 32-bit byte length.
   public static func appendLengthPrefixedUTF16LE(_ text: String, to data: inout Data) {
     let lengthOffset = data.count
     appendUInt32LE(0, to: &data)
     let payloadStart = data.count
     appendUTF16LE(text, to: &data)
-    let byteCount = UInt32(data.count - payloadStart)
+    let byteCount = UInt32(clamping: max(0, data.count - payloadStart))
     try? writeUInt32LE(byteCount, into: &data, at: lengthOffset)
   }
 
@@ -397,70 +415,6 @@ public enum CRC32Calculator {
   }
 }
 
-// MARK: - HWP 5.0 32-Bit Record Header Bitfield
-
-/// HWP 5.0 binary record header packing `tagID` (10 bits), `level` (10 bits), and `payloadSize` (12 bits or extended 32 bits).
-public struct HWP5RecordHeader: Sendable, Equatable {
-  public static let tagDocumentProperties: UInt16 = 16
-  public static let tagParaHeader: UInt16 = 66
-  public static let tagParaText: UInt16 = 67
-  public static let tagTableRecord: UInt16 = 77
-  public static let tagExtendedMetadata: UInt16 = 90
-
-  public static let tenBitMask: UInt32 = 0x03FF
-  public static let twelveBitMask: UInt32 = 0x0FFF
-  public static let extendedSizeMarker: UInt32 = 0x0FFF
-
-  public let tagID: UInt16
-  public let level: UInt16
-  public let payloadSize: UInt32
-
-  public init(tagID: UInt16, level: UInt16, payloadSize: UInt32) {
-    self.tagID = tagID
-    self.level = level
-    self.payloadSize = payloadSize
-  }
-
-  public static func encode(tagID: UInt16, level: UInt16, payloadSize: UInt32) throws -> Data {
-    guard UInt32(tagID) <= tenBitMask, UInt32(level) <= tenBitMask else {
-      throw EasyOfficeError.corruptedContainer(
-        detail: "HWP 5.0 레코드 헤더 10-bit 범위 초과 (tagID: \(tagID), level: \(level))")
-    }
-    var output = Data()
-    if payloadSize < extendedSizeMarker {
-      let word =
-        (UInt32(tagID) & tenBitMask) | ((UInt32(level) & tenBitMask) << 10)
-        | ((payloadSize & twelveBitMask) << 20)
-      BitPacking.appendUInt32LE(word, to: &output)
-    } else {
-      let word =
-        (UInt32(tagID) & tenBitMask) | ((UInt32(level) & tenBitMask) << 10)
-        | (extendedSizeMarker << 20)
-      BitPacking.appendUInt32LE(word, to: &output)
-      BitPacking.appendUInt32LE(payloadSize, to: &output)
-    }
-    return output
-  }
-
-  public static func decode(from data: Data, at offset: Int) throws -> (
-    header: HWP5RecordHeader, headerByteLength: Int
-  ) {
-    let word = try BitPacking.readUInt32LE(from: data, at: offset)
-    let tagID = UInt16(word & tenBitMask)
-    let level = UInt16((word >> 10) & tenBitMask)
-    let inlineSize = (word >> 20) & twelveBitMask
-
-    if inlineSize == extendedSizeMarker {
-      let extendedSize = try BitPacking.readUInt32LE(from: data, at: offset + 4)
-      let header = HWP5RecordHeader(tagID: tagID, level: level, payloadSize: extendedSize)
-      return (header, 8)
-    } else {
-      let header = HWP5RecordHeader(tagID: tagID, level: level, payloadSize: inlineSize)
-      return (header, 4)
-    }
-  }
-}
-
 // MARK: - ZIP Container Codec & Fail-Closed Security Policy
 
 /// Compression methods supported inside standard ZIP-XML office containers.
@@ -532,22 +486,65 @@ public enum ZipContainerCodec {
     }
   }
 
-  public static func pack(entries: [ZipContainerEntry]) throws -> Data {
-    guard entries.count <= Int(UInt16.max) else {
-      throw EasyOfficeError.corruptedContainer(
-        detail: "ZIP 엔트리 개수(\(entries.count))가 표준 EOCD 한도(65,535)를 초과합니다.")
+  private static func registerEntryPath(
+    _ path: String,
+    seenExplicitFoldedPaths: inout Set<String>,
+    seenFoldedFiles: inout Set<String>,
+    seenFoldedDirectories: inout Set<String>
+  ) throws {
+    try validateEntryPath(path)
+    let isDir = path.hasSuffix("/")
+    let trimmed = isDir ? String(path.dropLast()) : path
+    let folded = trimmed.lowercased()
+    guard seenExplicitFoldedPaths.insert(folded).inserted else {
+      throw EasyOfficeError.securityViolation(
+        detail: "중복되거나 대소문자/파일-디렉터리가 충돌하는 ZIP 엔트리 경로가 감지되었습니다: \(path)")
     }
+    let segments = folded.split(separator: "/", omittingEmptySubsequences: false)
+    if segments.count > 1 {
+      var prefix = ""
+      for idx in 0..<(segments.count - 1) {
+        prefix = prefix.isEmpty ? String(segments[idx]) : "\(prefix)/\(segments[idx])"
+        if seenFoldedFiles.contains(prefix) {
+          throw EasyOfficeError.securityViolation(
+            detail: "ZIP 엔트리 상위 경로가 기존 파일과 충돌합니다: \(path)")
+        }
+        seenFoldedDirectories.insert(prefix)
+      }
+    }
+    if isDir {
+      seenFoldedDirectories.insert(folded)
+    } else {
+      if seenFoldedDirectories.contains(folded) {
+        throw EasyOfficeError.securityViolation(
+          detail: "ZIP 파일 엔트리가 기존 디렉터리 경로와 충돌합니다: \(path)")
+      }
+      seenFoldedFiles.insert(folded)
+    }
+  }
+
+  public static func pack(entries: [ZipContainerEntry]) throws -> Data {
+    let entryCountU16 = try BitPacking.checkedUInt16(entries.count, field: "ZIP 엔트리 개수")
     var archive = Data()
     var centralDirectory = Data()
+    var seenExplicitFoldedPaths = Set<String>()
+    var seenFoldedFiles = Set<String>()
+    var seenFoldedDirectories = Set<String>()
 
     for entry in entries {
-      try validateEntryPath(entry.path)
-      let pathBytes = Data(entry.path.utf8)
-      guard pathBytes.count <= Int(UInt16.max) else {
-        throw EasyOfficeError.corruptedContainer(
-          detail: "ZIP 엔트리 경로 길이(\(pathBytes.count) 바이트)가 최대 한도(65,535)를 초과합니다.")
+      try registerEntryPath(
+        entry.path,
+        seenExplicitFoldedPaths: &seenExplicitFoldedPaths,
+        seenFoldedFiles: &seenFoldedFiles,
+        seenFoldedDirectories: &seenFoldedDirectories
+      )
+      if entry.path.hasSuffix("/") && !entry.data.isEmpty {
+        throw EasyOfficeError.securityViolation(
+          detail: "디렉터리 ZIP 엔트리는 파일 데이터를 가질 수 없습니다: \(entry.path)")
       }
-      let uncompressedSize = UInt32(entry.data.count)
+      let pathBytes = Data(entry.path.utf8)
+      let pathLengthU16 = try BitPacking.checkedUInt16(pathBytes.count, field: "ZIP 엔트리 경로 길이")
+      let uncompressedSize = try BitPacking.checkedUInt32(entry.data.count, field: "ZIP 원본 데이터 크기")
       let crc32 = CRC32Calculator.compute(for: entry.data)
 
       let payloadBytes: Data
@@ -566,8 +563,8 @@ public enum ZipContainerCodec {
         }
       }
 
-      let compressedSize = UInt32(payloadBytes.count)
-      let localHeaderOffset = UInt32(archive.count)
+      let compressedSize = try BitPacking.checkedUInt32(payloadBytes.count, field: "ZIP 압축 데이터 크기")
+      let localHeaderOffset = try BitPacking.checkedUInt32(archive.count, field: "ZIP Local Header 오프셋")
 
       // Local File Header (30 bytes + file name)
       BitPacking.appendUInt32LE(localFileHeaderSignature, to: &archive)
@@ -579,7 +576,7 @@ public enum ZipContainerCodec {
       BitPacking.appendUInt32LE(crc32, to: &archive)
       BitPacking.appendUInt32LE(compressedSize, to: &archive)
       BitPacking.appendUInt32LE(uncompressedSize, to: &archive)
-      BitPacking.appendUInt16LE(UInt16(pathBytes.count), to: &archive)
+      BitPacking.appendUInt16LE(pathLengthU16, to: &archive)
       BitPacking.appendUInt16LE(0, to: &archive)  // extra field length
       archive.append(pathBytes)
       archive.append(payloadBytes)
@@ -595,7 +592,7 @@ public enum ZipContainerCodec {
       BitPacking.appendUInt32LE(crc32, to: &centralDirectory)
       BitPacking.appendUInt32LE(compressedSize, to: &centralDirectory)
       BitPacking.appendUInt32LE(uncompressedSize, to: &centralDirectory)
-      BitPacking.appendUInt16LE(UInt16(pathBytes.count), to: &centralDirectory)
+      BitPacking.appendUInt16LE(pathLengthU16, to: &centralDirectory)
       BitPacking.appendUInt16LE(0, to: &centralDirectory)  // extra length
       BitPacking.appendUInt16LE(0, to: &centralDirectory)  // comment length
       BitPacking.appendUInt16LE(0, to: &centralDirectory)  // disk number
@@ -605,16 +602,16 @@ public enum ZipContainerCodec {
       centralDirectory.append(pathBytes)
     }
 
-    let centralDirOffset = UInt32(archive.count)
-    let centralDirSize = UInt32(centralDirectory.count)
+    let centralDirOffset = try BitPacking.checkedUInt32(archive.count, field: "ZIP Central Directory 오프셋")
+    let centralDirSize = try BitPacking.checkedUInt32(centralDirectory.count, field: "ZIP Central Directory 크기")
     archive.append(centralDirectory)
 
     // End of Central Directory Record (22 bytes)
     BitPacking.appendUInt32LE(endOfCentralDirectorySignature, to: &archive)
     BitPacking.appendUInt16LE(0, to: &archive)  // disk number
     BitPacking.appendUInt16LE(0, to: &archive)  // disk with CD
-    BitPacking.appendUInt16LE(UInt16(entries.count), to: &archive)
-    BitPacking.appendUInt16LE(UInt16(entries.count), to: &archive)
+    BitPacking.appendUInt16LE(entryCountU16, to: &archive)
+    BitPacking.appendUInt16LE(entryCountU16, to: &archive)
     BitPacking.appendUInt32LE(centralDirSize, to: &archive)
     BitPacking.appendUInt32LE(centralDirOffset, to: &archive)
     BitPacking.appendUInt16LE(0, to: &archive)  // comment length
@@ -651,8 +648,11 @@ public enum ZipContainerCodec {
 
     var results: [ZipContainerEntry] = []
     results.reserveCapacity(entryCount)
-    var seenPaths = Set<String>()
-    seenPaths.reserveCapacity(entryCount)
+    var seenExplicitFoldedPaths = Set<String>()
+    seenExplicitFoldedPaths.reserveCapacity(entryCount)
+    var seenFoldedFiles = Set<String>()
+    seenFoldedFiles.reserveCapacity(entryCount)
+    var seenFoldedDirectories = Set<String>()
 
     var cdCursor = centralDirOffset
     var totalUncompressedBytes = 0
@@ -691,10 +691,12 @@ public enum ZipContainerCodec {
       guard let path = String(data: nameData, encoding: .utf8) else {
         throw EasyOfficeError.corruptedContainer(detail: "ZIP 엔트리 파일명이 유효한 UTF-8이 아닙니다.")
       }
-      try validateEntryPath(path)
-      guard seenPaths.insert(path).inserted else {
-        throw EasyOfficeError.securityViolation(detail: "중복된 ZIP 엔트리 경로가 감지되었습니다: \(path)")
-      }
+      try registerEntryPath(
+        path,
+        seenExplicitFoldedPaths: &seenExplicitFoldedPaths,
+        seenFoldedFiles: &seenFoldedFiles,
+        seenFoldedDirectories: &seenFoldedDirectories
+      )
 
       guard uncompressedSize >= 0, uncompressedSize <= policy.maxSingleEntryUncompressedBytes else {
         throw EasyOfficeError.securityViolation(
@@ -725,6 +727,27 @@ public enum ZipContainerCodec {
       guard localSig == localFileHeaderSignature else {
         throw EasyOfficeError.corruptedContainer(detail: "Local File Header 시그니처 불일치")
       }
+      let localFlags = try BitPacking.readUInt16LE(from: data, at: localHeaderOffset + 6)
+      if (localFlags & 0x0001) != 0 {
+        throw EasyOfficeError.encryptedDocumentUnsupported(format: .docx)
+      }
+      let localMethod = try BitPacking.readUInt16LE(from: data, at: localHeaderOffset + 8)
+      guard localMethod == rawMethod else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "ZIP Local File Header 압축 방식(\(localMethod))과 Central Directory(\(rawMethod))가 일치하지 않습니다: \(path)")
+      }
+      if (localFlags & 0x0008) == 0 {
+        let localCRC32 = try BitPacking.readUInt32LE(from: data, at: localHeaderOffset + 14)
+        let localCompressedSize = Int(try BitPacking.readUInt32LE(from: data, at: localHeaderOffset + 18))
+        let localUncompressedSize = Int(try BitPacking.readUInt32LE(from: data, at: localHeaderOffset + 22))
+        guard localCRC32 == expectedCRC32,
+          localCompressedSize == compressedSize,
+          localUncompressedSize == uncompressedSize
+        else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "ZIP Local File Header 크기/CRC 메타데이터가 Central Directory와 일치하지 않습니다: \(path)")
+        }
+      }
       let localNameLen = Int(try BitPacking.readUInt16LE(from: data, at: localHeaderOffset + 26))
       let localExtraLen = Int(try BitPacking.readUInt16LE(from: data, at: localHeaderOffset + 28))
       guard localHeaderOffset >= 0,
@@ -746,7 +769,11 @@ public enum ZipContainerCodec {
         throw EasyOfficeError.corruptedContainer(detail: "ZIP 엔트리 '\(path)' 데이터 영역이 파일 경계를 벗어납니다.")
       }
 
-      if path.hasSuffix("/") && uncompressedSize == 0 {
+      if path.hasSuffix("/") {
+        guard uncompressedSize == 0, compressedSize == 0 else {
+          throw EasyOfficeError.corruptedContainer(
+            detail: "디렉터리 ZIP 엔트리에 파일 데이터가 포함되어 있습니다: \(path)")
+        }
         cdCursor = nameStart + nameLen + extraLen + commentLen
         continue
       }
