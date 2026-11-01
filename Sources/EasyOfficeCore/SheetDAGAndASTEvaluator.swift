@@ -18,12 +18,23 @@ extension WorksheetModel {
     roots: [PackedCellCoordinate],
     context: inout EvaluationContext
   ) {
+    let selfSheetUpper = name.uppercased()
+    func isMemoized(_ coord: PackedCellCoordinate) -> Bool {
+      if context.memo[coord] != nil { return true }
+      if let crossVal = context.crossMemo[
+        CrossSheetCellKey(sheetNameUpper: selfSheetUpper, coord: coord)]
+      {
+        context.memo[coord] = crossVal
+        return true
+      }
+      return false
+    }
     var dagState: [PackedCellCoordinate: UInt8] = [:]
     var stack: [(coord: PackedCellCoordinate, expanded: Bool)] = []
     stack.reserveCapacity(min(roots.count, 4096))
     for coord in roots.reversed() {
       let ast = compiledASTs[coord]
-      if Self.isTrueFormulaAST(ast) && context.memo[coord] == nil {
+      if Self.isTrueFormulaAST(ast) && !isMemoized(coord) {
         stack.append((coord, false))
       }
     }
@@ -31,12 +42,12 @@ extension WorksheetModel {
     while let (coord, expanded) = stack.popLast() {
       if expanded {
         dagState[coord] = 2
-        if context.memo[coord] == nil {
+        if !isMemoized(coord) {
           _ = evaluateInternal(at: coord, context: &context, depth: 0)
         }
         continue
       }
-      if context.memo[coord] != nil || dagState[coord] != nil {
+      if isMemoized(coord) || dagState[coord] != nil {
         continue
       }
       dagState[coord] = 1
@@ -55,8 +66,7 @@ extension WorksheetModel {
           if Self.isTrueFormulaAST(compiledASTs[dep]) {
             if dagState[dep] == 1 {
               context.memo[coord] = .error("#CYCLE!")
-              context.memo[dep] = .error("#CYCLE!")
-            } else if context.memo[dep] == nil && dagState[dep] == nil {
+            } else if !isMemoized(dep) && dagState[dep] == nil {
               stack.append((dep, false))
             }
           }
@@ -71,8 +81,7 @@ extension WorksheetModel {
               if Self.isTrueFormulaAST(compiledASTs[dep]) {
                 if dagState[dep] == 1 {
                   context.memo[coord] = .error("#CYCLE!")
-                  context.memo[dep] = .error("#CYCLE!")
-                } else if context.memo[dep] == nil && dagState[dep] == nil {
+                } else if !isMemoized(dep) && dagState[dep] == nil {
                   stack.append((dep, false))
                 }
               }
@@ -84,8 +93,7 @@ extension WorksheetModel {
                 if Self.isTrueFormulaAST(compiledASTs[dep]) {
                   if dagState[dep] == 1 {
                     context.memo[coord] = .error("#CYCLE!")
-                    context.memo[dep] = .error("#CYCLE!")
-                  } else if context.memo[dep] == nil && dagState[dep] == nil {
+                  } else if !isMemoized(dep) && dagState[dep] == nil {
                     stack.append((dep, false))
                   }
                 }
@@ -314,7 +322,45 @@ extension WorksheetModel {
     guard let raw = targetPage.cellsByCoordinate[packed], !raw.isEmpty else {
       return .empty
     }
-    let ast = Self.compileCellInput(raw)
+    let targetSheetUpper = targetPage.name.uppercased()
+    let targetModel: WorksheetModel
+    if let cachedModel = context.sheetModelCache[targetSheetUpper] {
+      targetModel = cachedModel
+    } else {
+      var remainingSheets = additionalSheets
+      remainingSheets.remove(at: pageIdx)
+      remainingSheets.append(
+        WorksheetSheetPage(
+          id: id,
+          name: name,
+          cellsByCoordinate: cellsByCoordinate,
+          cellStyles: cellStyles,
+          sheetComments: sheetComments,
+          mergedRanges: mergedRanges,
+          columnWidths: columnWidths,
+          rowHeights: rowHeights
+        )
+      )
+      let builtModel = WorksheetModel(
+        id: targetPage.id,
+        name: targetPage.name,
+        cellsByCoordinate: targetPage.cellsByCoordinate,
+        cellStyles: targetPage.cellStyles,
+        pageSetup: pageSetup,
+        sheetComments: targetPage.sheetComments,
+        mergedRanges: targetPage.mergedRanges,
+        columnWidths: targetPage.columnWidths,
+        rowHeights: targetPage.rowHeights,
+        trackChangesEnabled: trackChangesEnabled,
+        additionalSheets: remainingSheets,
+        activeSheetIndex: 0,
+        namedRanges: namedRanges,
+        precompileAllCells: true
+      )
+      context.sheetModelCache[targetSheetUpper] = builtModel
+      targetModel = builtModel
+    }
+    let ast = targetModel.compiledASTs[packed] ?? Self.compileCellInput(raw)
     switch ast {
     case .empty:
       return .empty
@@ -325,44 +371,6 @@ extension WorksheetModel {
     case .literalBoolean(let flag):
       return .boolean(flag)
     default:
-      let targetSheetUpper = targetPage.name.uppercased()
-      let targetModel: WorksheetModel
-      if let cachedModel = context.sheetModelCache[targetSheetUpper] {
-        targetModel = cachedModel
-      } else {
-        var remainingSheets = additionalSheets
-        remainingSheets.remove(at: pageIdx)
-        remainingSheets.append(
-          WorksheetSheetPage(
-            id: id,
-            name: name,
-            cellsByCoordinate: cellsByCoordinate,
-            cellStyles: cellStyles,
-            sheetComments: sheetComments,
-            mergedRanges: mergedRanges,
-            columnWidths: columnWidths,
-            rowHeights: rowHeights
-          )
-        )
-        let builtModel = WorksheetModel(
-          id: targetPage.id,
-          name: targetPage.name,
-          cellsByCoordinate: targetPage.cellsByCoordinate,
-          cellStyles: targetPage.cellStyles,
-          pageSetup: pageSetup,
-          sheetComments: targetPage.sheetComments,
-          mergedRanges: targetPage.mergedRanges,
-          columnWidths: targetPage.columnWidths,
-          rowHeights: targetPage.rowHeights,
-          trackChangesEnabled: trackChangesEnabled,
-          additionalSheets: remainingSheets,
-          activeSheetIndex: 0,
-          namedRanges: namedRanges,
-          precompileAllCells: true
-        )
-        context.sheetModelCache[targetSheetUpper] = builtModel
-        targetModel = builtModel
-      }
       var savedFast = FastCellBitset()
       var savedCount = 0
       var savedVisited: Set<PackedCellCoordinate> = []

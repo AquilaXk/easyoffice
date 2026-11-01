@@ -417,7 +417,6 @@ impl SheetEngine {
                         let dep_key = PackedWorkbookCoord::new(sid, dep_c);
                         if state.get(&dep_key) == Some(&1) {
                             cycle_keys.push(owner_key);
-                            cycle_keys.push(dep_key);
                         } else if !ctx.memo.contains_key(&dep_key) && !state.contains_key(&dep_key)
                         {
                             stack.push((sheet_opt.clone(), sid, dep_c, false));
@@ -436,7 +435,6 @@ impl SheetEngine {
                     let dep_key = PackedWorkbookCoord::new(sid, dep_c);
                     if state.get(&dep_key) == Some(&1) {
                         cycle_keys.push(owner_key);
-                        cycle_keys.push(dep_key);
                     } else if !ctx.memo.contains_key(&dep_key) && !state.contains_key(&dep_key) {
                         stack.push((sheet_opt.clone(), sid, dep_c, false));
                     }
@@ -500,7 +498,6 @@ impl SheetEngine {
                                 let dep_key = PackedWorkbookCoord::new(sid, *dep_c);
                                 if state.get(&dep_key) == Some(&1) {
                                     cycle_keys.push(key);
-                                    cycle_keys.push(dep_key);
                                 } else if !ctx.memo.contains_key(&dep_key)
                                     && !state.contains_key(&dep_key)
                                 {
@@ -518,7 +515,6 @@ impl SheetEngine {
                                     let dep_key = PackedWorkbookCoord::new(dep_sid, *dep_c);
                                     if state.get(&dep_key) == Some(&1) {
                                         cycle_keys.push(key);
-                                        cycle_keys.push(dep_key);
                                     } else if !ctx.memo.contains_key(&dep_key)
                                         && !state.contains_key(&dep_key)
                                     {
@@ -685,6 +681,36 @@ impl SheetEngine {
                     }
                 }
             }
+        } else if total > 1024 && target_spec.is_none() && specs.iter().all(|sp| !sp.5) {
+            let mut pop_offsets: Vec<(usize, usize)> = Vec::new();
+            for sp in &specs {
+                if let Some(sh) = self.resolve_sheet_ref(sp.0.as_deref(), ctx) {
+                    let max_r = sp.1 + (r_count as u32).saturating_sub(1);
+                    let max_c = sp.2 + (c_count as u32).saturating_sub(1);
+                    for &c in sh.cells.keys() {
+                        if c.row() >= sp.1
+                            && c.row() <= max_r
+                            && c.col() >= sp.2
+                            && c.col() <= max_c
+                        {
+                            pop_offsets.push(((c.row() - sp.1) as usize, (c.col() - sp.2) as usize));
+                        }
+                    }
+                }
+            }
+            pop_offsets.sort_unstable();
+            pop_offsets.dedup();
+            let mut non_matching_pop = 0usize;
+            for (dr, dc) in pop_offsets {
+                for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
+                    let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
+                    if !cc.matches(&val) {
+                        non_matching_pop += 1;
+                        break;
+                    }
+                }
+            }
+            count = total.saturating_sub(non_matching_pop);
         } else {
             for dr in 0..r_count {
                 'cell_loop: for dc in 0..c_count {

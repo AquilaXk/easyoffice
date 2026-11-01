@@ -334,9 +334,11 @@ extension WorksheetModel {
         year: comps.year ?? 2024, month: comps.month ?? 1, day: comps.day ?? 1),
         let serial = Self.excelSerialNumber(from: utcToday)
       {
-        let frac =
-          Double((comps.hour ?? 0) * 3600 + (comps.minute ?? 0) * 60 + (comps.second ?? 0))
-          / 86400.0
+        let hour: Int = comps.hour ?? 0
+        let minute: Int = comps.minute ?? 0
+        let second: Int = comps.second ?? 0
+        let totalSeconds: Int = hour * 3600 + minute * 60 + second
+        let frac: Double = Double(totalSeconds) / 86400.0
         return .number(serial + frac)
       }
       return .number(45292.0)

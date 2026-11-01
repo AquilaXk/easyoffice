@@ -277,18 +277,12 @@ public struct CellRange: Sendable, Codable, Equatable, Hashable, CustomStringCon
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let start = try container.decode(CellAddress.self, forKey: .start)
     let end = try container.decode(CellAddress.self, forKey: .end)
+    self.start = start
+    self.end = end
     let rowSpan = abs(end.row - start.row) + 1
     let colSpan = abs(end.column - start.column) + 1
     let (area, overflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
-    let minRow = min(start.row, end.row)
-    let maxRow = max(start.row, end.row)
-    let minCol = min(start.column, end.column)
-    let maxCol = max(start.column, end.column)
-    let isWholeAxis =
-      (minRow == 0 && maxRow == CellAddress.maxZeroBasedRow && (maxCol - minCol + 1) <= 256)
-      || (minCol == 0 && maxCol == CellAddress.maxZeroBasedColumn && (maxRow - minRow + 1) <= 256)
-    let is1DStrip = rowSpan == 1 || colSpan == 1
-    guard !overflow, area <= Self.maxExpandedCellCount || isWholeAxis || is1DStrip else {
+    guard !overflow, area <= Self.maxExpandedCellCount || isWholeColumnOrRow else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
           codingPath: decoder.codingPath,
@@ -297,8 +291,6 @@ public struct CellRange: Sendable, Codable, Equatable, Hashable, CustomStringCon
         )
       )
     }
-    self.start = start
-    self.end = end
   }
 
   public init(notation: String) throws {
@@ -335,10 +327,7 @@ public struct CellRange: Sendable, Codable, Equatable, Hashable, CustomStringCon
     }
     let rowSpan = abs(end.row - start.row) + 1
     let colSpan = abs(end.column - start.column) + 1
-    guard
-      rowSpan * colSpan <= Self.maxExpandedCellCount || isWholeColumnOrRow || rowSpan == 1
-        || colSpan == 1
-    else {
+    guard rowSpan * colSpan <= Self.maxExpandedCellCount || isWholeColumnOrRow else {
       throw EasyOfficeError.invalidCellRange(notation)
     }
   }
@@ -352,7 +341,8 @@ public struct CellRange: Sendable, Codable, Equatable, Hashable, CustomStringCon
     let maxRow = max(start.row, end.row)
     let minCol = min(start.column, end.column)
     let maxCol = max(start.column, end.column)
-    return (minRow == 0 && maxRow == CellAddress.maxZeroBasedRow && (maxCol - minCol + 1) <= 256)
+    return minRow == maxRow || minCol == maxCol
+      || (minRow == 0 && maxRow == CellAddress.maxZeroBasedRow && (maxCol - minCol + 1) <= 256)
       || (minCol == 0 && maxCol == CellAddress.maxZeroBasedColumn && (maxRow - minRow + 1) <= 256)
   }
 
