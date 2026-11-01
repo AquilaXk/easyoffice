@@ -213,10 +213,22 @@ impl PiiAuditResult {
     }
 }
 
+enum EmailScanOutcome {
+    Matched(usize),
+    Failed(usize),
+}
+
 pub struct DocumentSecurityAuditor;
 
 impl DocumentSecurityAuditor {
     pub fn scan_and_scrub_pii(text: &str) -> PiiAuditResult {
+        Self::scan_and_scrub_pii_with_metadata(text, &[])
+    }
+
+    pub fn scan_and_scrub_pii_with_metadata(
+        text: &str,
+        metadata_entries: &[(String, String)],
+    ) -> PiiAuditResult {
         let bytes = text.as_bytes();
         let mut scrubbed_text = String::with_capacity(text.len());
         let mut masked_resident_ids = 0usize;
@@ -225,19 +237,32 @@ impl DocumentSecurityAuditor {
         let mut spans: Vec<PiiReplacementSpan> = Vec::new();
         let mut idx = 0usize;
         let mut utf16_pos = 0usize;
+        let mut email_failed_until = 0usize;
 
         while idx < bytes.len() {
-            if let Some((matched_len, replacement)) = Self::match_email_at(bytes, idx) {
-                scrubbed_text.push_str(replacement);
-                spans.push(PiiReplacementSpan {
-                    start_utf16: utf16_pos,
-                    end_utf16: utf16_pos + matched_len,
-                    replacement: replacement.to_string(),
-                });
-                masked_emails += 1;
-                idx += matched_len;
-                utf16_pos += matched_len;
-                continue;
+            if idx >= email_failed_until {
+                match Self::scan_email_at(text, idx) {
+                    EmailScanOutcome::Matched(matched_len) => {
+                        let utf16_len: usize = text[idx..idx + matched_len]
+                            .chars()
+                            .map(char::len_utf16)
+                            .sum();
+                        let replacement = "***@***";
+                        scrubbed_text.push_str(replacement);
+                        spans.push(PiiReplacementSpan {
+                            start_utf16: utf16_pos,
+                            end_utf16: utf16_pos + utf16_len,
+                            replacement: replacement.to_string(),
+                        });
+                        masked_emails += 1;
+                        idx += matched_len;
+                        utf16_pos += utf16_len;
+                        continue;
+                    }
+                    EmailScanOutcome::Failed(skip_until) => {
+                        email_failed_until = skip_until;
+                    }
+                }
             }
             if let Some((matched_len, replacement)) = Self::match_resident_id_at(bytes, idx) {
                 scrubbed_text.push_str(replacement);
@@ -269,17 +294,19 @@ impl DocumentSecurityAuditor {
             utf16_pos += ch.len_utf16();
         }
 
+        let stripped_metadata_fields = metadata_entries
+            .iter()
+            .filter(|(k, v)| !k.trim().is_empty() && !v.trim().is_empty())
+            .map(|(k, _)| k.clone())
+            .collect();
+
         PiiAuditResult {
             scrubbed_text,
             masked_resident_ids,
             masked_phone_numbers,
             masked_emails,
             spans,
-            stripped_metadata_fields: vec![
-                "dc:creator".to_string(),
-                "cp:lastModifiedBy".to_string(),
-                "Company".to_string(),
-            ],
+            stripped_metadata_fields,
         }
     }
 
@@ -302,6 +329,7 @@ impl DocumentSecurityAuditor {
             && bytes[idx..idx + 6].iter().all(u8::is_ascii_digit)
             && bytes[idx + 6] == b'-'
             && bytes[idx + 7..idx + 14].iter().all(u8::is_ascii_digit)
+            && Self::is_valid_rrn_date_and_gender(&bytes[idx..idx + 6], bytes[idx + 7])
             && (idx + 14 == bytes.len() || !bytes[idx + 14].is_ascii_digit())
         {
             return Some((14, "******-*******"));
@@ -328,23 +356,39 @@ impl DocumentSecurityAuditor {
         }
     }
 
+    fn mobile_mask_for_third_digit(third: u8) -> Option<&'static str> {
+        match third {
+            b'0' => Some("010-****-****"),
+            b'1' => Some("011-****-****"),
+            b'6' => Some("016-****-****"),
+            b'7' => Some("017-****-****"),
+            b'8' => Some("018-****-****"),
+            b'9' => Some("019-****-****"),
+            _ => None,
+        }
+    }
+
+    fn is_phone_sep(b: u8) -> bool {
+        matches!(b, b'-' | b'.' | b' ')
+    }
+
     fn match_phone_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
         if idx > 0 && (bytes[idx - 1].is_ascii_digit() || bytes[idx - 1] == b'+') {
             return None;
         }
         if idx + 3 <= bytes.len() && &bytes[idx..idx + 3] == b"+82" {
             let mut p = idx + 3;
-            if p < bytes.len() && (bytes[p] == b'-' || bytes[p] == b' ') {
+            if p < bytes.len() && Self::is_phone_sep(bytes[p]) {
                 p += 1;
             }
             let p_area = Self::consume_digits(bytes, p, 1, 3)?;
             let mut p2 = p_area;
-            if p2 < bytes.len() && (bytes[p2] == b'-' || bytes[p2] == b' ') {
+            if p2 < bytes.len() && Self::is_phone_sep(bytes[p2]) {
                 p2 += 1;
             }
             let p_mid = Self::consume_digits(bytes, p2, 3, 4)?;
             let mut p3 = p_mid;
-            if p3 < bytes.len() && (bytes[p3] == b'-' || bytes[p3] == b' ') {
+            if p3 < bytes.len() && Self::is_phone_sep(bytes[p3]) {
                 p3 += 1;
             }
             let p_end = Self::consume_digits(bytes, p3, 4, 4)?;
@@ -353,35 +397,33 @@ impl DocumentSecurityAuditor {
             }
         }
 
-        if idx + 3 <= bytes.len()
-            && bytes[idx] == b'0'
-            && bytes[idx + 1] == b'1'
-            && matches!(bytes[idx + 2], b'0' | b'1' | b'6' | b'7' | b'8' | b'9')
-        {
-            let p = idx + 3;
-            if p < bytes.len() && (bytes[p] == b'-' || bytes[p] == b' ') {
-                let sep = bytes[p];
-                if let Some(p_mid) = Self::consume_digits(bytes, p + 1, 3, 4) {
-                    if p_mid < bytes.len() && bytes[p_mid] == sep {
-                        if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
-                            if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
-                                return Some((p_end - idx, "010-****-****"));
+        if idx + 3 <= bytes.len() && bytes[idx] == b'0' && bytes[idx + 1] == b'1' {
+            if let Some(mask) = Self::mobile_mask_for_third_digit(bytes[idx + 2]) {
+                let p = idx + 3;
+                if p < bytes.len() && Self::is_phone_sep(bytes[p]) {
+                    let sep = bytes[p];
+                    if let Some(p_mid) = Self::consume_digits(bytes, p + 1, 3, 4) {
+                        if p_mid < bytes.len() && bytes[p_mid] == sep {
+                            if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
+                                if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
+                                    return Some((p_end - idx, mask));
+                                }
                             }
                         }
                     }
+                } else if idx + 11 <= bytes.len()
+                    && bytes[idx..idx + 11].iter().all(u8::is_ascii_digit)
+                    && (idx + 11 == bytes.len() || !bytes[idx + 11].is_ascii_digit())
+                {
+                    return Some((11, mask));
                 }
-            } else if idx + 11 <= bytes.len()
-                && bytes[idx..idx + 11].iter().all(u8::is_ascii_digit)
-                && (idx + 11 == bytes.len() || !bytes[idx + 11].is_ascii_digit())
-            {
-                return Some((11, "010-****-****"));
             }
         }
 
         if idx + 3 <= bytes.len()
             && bytes[idx] == b'0'
             && bytes[idx + 1] == b'2'
-            && (bytes[idx + 2] == b'-' || bytes[idx + 2] == b' ')
+            && Self::is_phone_sep(bytes[idx + 2])
         {
             let sep = bytes[idx + 2];
             if let Some(p_mid) = Self::consume_digits(bytes, idx + 3, 3, 4) {
@@ -399,7 +441,7 @@ impl DocumentSecurityAuditor {
             && bytes[idx] == b'0'
             && (b'3'..=b'6').contains(&bytes[idx + 1])
             && (b'1'..=b'5').contains(&bytes[idx + 2])
-            && (bytes[idx + 3] == b'-' || bytes[idx + 3] == b' ')
+            && Self::is_phone_sep(bytes[idx + 3])
         {
             let sep = bytes[idx + 3];
             if let Some(p_mid) = Self::consume_digits(bytes, idx + 4, 3, 4) {
@@ -416,40 +458,151 @@ impl DocumentSecurityAuditor {
         None
     }
 
-    fn is_email_local_byte(b: u8) -> bool {
-        b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'+')
+    fn is_email_local_non_dot(ch: char) -> bool {
+        ch.is_alphanumeric() || matches!(ch, '_' | '%' | '+' | '-')
     }
 
-    fn is_email_domain_byte(b: u8) -> bool {
-        b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-')
-    }
-
-    fn match_email_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
-        if !bytes[idx].is_ascii_alphanumeric() {
-            return None;
-        }
-        let len = bytes.len();
-        let mut p = idx;
-        while p < len && Self::is_email_local_byte(bytes[p]) {
-            p += 1;
-        }
-        if p == idx || p >= len || bytes[p] != b'@' {
-            return None;
-        }
-        let dom_start = p + 1;
-        let mut q = dom_start;
-        while q < len && Self::is_email_domain_byte(bytes[q]) {
-            q += 1;
-        }
-        while q > dom_start && !bytes[q - 1].is_ascii_alphanumeric() {
-            q -= 1;
-        }
-        let domain = &bytes[dom_start..q];
-        if domain.len() >= 3 && domain[0].is_ascii_alphanumeric() && domain.contains(&b'.') {
-            Some((q - idx, "***@***"))
+    fn char_alpha_script(ch: char) -> u8 {
+        if ch.is_ascii_alphabetic() {
+            1
+        } else if !ch.is_ascii() && ch.is_alphabetic() {
+            2
         } else {
-            None
+            0
         }
+    }
+
+    fn scan_email_at(text: &str, idx: usize) -> EmailScanOutcome {
+        let Some(first_ch) = text[idx..].chars().next() else {
+            return EmailScanOutcome::Failed(text.len());
+        };
+        let step_one = idx + first_ch.len_utf8();
+        if !Self::is_email_local_non_dot(first_ch) {
+            return EmailScanOutcome::Failed(step_one);
+        }
+        if idx > 0 {
+            if let Some(prev_ch) = text[..idx].chars().next_back() {
+                if prev_ch == '.' || matches!(prev_ch, '_' | '%' | '+' | '-') {
+                    return EmailScanOutcome::Failed(step_one);
+                }
+                if prev_ch.is_alphanumeric() {
+                    let prev_script = Self::char_alpha_script(prev_ch);
+                    let cur_script = Self::char_alpha_script(first_ch);
+                    if prev_script == 0 || cur_script == 0 || prev_script == cur_script {
+                        return EmailScanOutcome::Failed(step_one);
+                    }
+                }
+            }
+        }
+
+        let mut p = idx;
+        let mut prev_was_dot = false;
+        let mut atom_script = 0u8;
+        while p < text.len() {
+            let ch = text[p..].chars().next().unwrap();
+            if ch == '.' {
+                if prev_was_dot {
+                    return EmailScanOutcome::Failed(p + 1);
+                }
+                prev_was_dot = true;
+                atom_script = 0;
+                p += 1;
+                continue;
+            }
+            if !Self::is_email_local_non_dot(ch) {
+                break;
+            }
+            let sc = Self::char_alpha_script(ch);
+            if sc != 0 {
+                if atom_script != 0 && atom_script != sc {
+                    return EmailScanOutcome::Failed(p);
+                }
+                atom_script = sc;
+            }
+            prev_was_dot = false;
+            p += ch.len_utf8();
+        }
+
+        if p >= text.len() || text.as_bytes()[p] != b'@' {
+            return EmailScanOutcome::Failed(p.max(step_one));
+        }
+        let at_pos = p;
+        if prev_was_dot {
+            return EmailScanOutcome::Failed(at_pos + 1);
+        }
+
+        let dom_start = at_pos + 1;
+        let Some(end_dom) = Self::scan_domain_after_at(text, dom_start) else {
+            return EmailScanOutcome::Failed(at_pos + 1);
+        };
+        EmailScanOutcome::Matched(end_dom - idx)
+    }
+
+    fn scan_domain_after_at(text: &str, dom_start: usize) -> Option<usize> {
+        if dom_start >= text.len() {
+            return None;
+        }
+        let mut cursor = dom_start;
+        let mut labels: Vec<(usize, usize, bool, usize)> = Vec::new();
+        while cursor < text.len() {
+            let label_start = cursor;
+            let mut label_chars = 0usize;
+            let mut all_alpha = true;
+            let mut prev_hyphen = false;
+            let mut label_script = 0u8;
+            while cursor < text.len() {
+                let ch = text[cursor..].chars().next().unwrap();
+                if ch == '-' {
+                    if cursor == label_start {
+                        break;
+                    }
+                    all_alpha = false;
+                    prev_hyphen = true;
+                    cursor += 1;
+                    label_chars += 1;
+                    continue;
+                }
+                if !ch.is_alphanumeric() {
+                    break;
+                }
+                let sc = Self::char_alpha_script(ch);
+                if sc != 0 {
+                    if label_script != 0 && label_script != sc {
+                        break;
+                    }
+                    label_script = sc;
+                } else {
+                    all_alpha = false;
+                }
+                prev_hyphen = false;
+                cursor += ch.len_utf8();
+                label_chars += 1;
+            }
+            if cursor == label_start || prev_hyphen {
+                break;
+            }
+            labels.push((label_start, cursor, all_alpha, label_chars));
+            if cursor < text.len() && text.as_bytes()[cursor] == b'.' {
+                let after_dot = cursor + 1;
+                if after_dot < text.len() {
+                    let next_ch = text[after_dot..].chars().next().unwrap();
+                    if next_ch.is_alphanumeric() {
+                        cursor = after_dot;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+
+        while labels.len() >= 2 {
+            let &(_, end_pos, all_alpha, char_count) = labels.last().unwrap();
+            if all_alpha && char_count >= 2 {
+                return Some(end_pos);
+            }
+            labels.pop();
+        }
+        None
     }
 }
 
@@ -512,5 +665,96 @@ mod tests {
         let huge_after: Vec<String> = (0..1000).map(|i| format!("문단_{i}")).collect();
         let capped_diff = LocalSmartAssistant::diff_documents_lcs(&huge_before, &huge_after);
         assert_eq!(capped_diff.len(), 512);
+    }
+
+    #[test]
+    fn test_shared_pii_vectors_and_linear_time_adversarial_inputs() {
+        use easyoffice_formats::StrictJsonValue;
+        use std::time::Instant;
+
+        let raw_vectors = include_str!("../../../fixtures/pii-scrub-vectors.json");
+        let parsed = StrictJsonValue::parse(raw_vectors).expect("valid vectors json");
+        let StrictJsonValue::Array(items) = parsed else {
+            panic!("expected top-level array");
+        };
+        assert!(items.len() >= 12);
+
+        for item in &items {
+            let StrictJsonValue::Object(fields) = item else {
+                panic!("expected object item");
+            };
+            let id = match StrictJsonValue::get_field(fields, "id") {
+                Some(StrictJsonValue::Str(s)) => s.as_str(),
+                _ => panic!("missing vector id"),
+            };
+            let input = match StrictJsonValue::get_field(fields, "input") {
+                Some(StrictJsonValue::Str(s)) => s.as_str(),
+                _ => panic!("missing input for {id}"),
+            };
+            let expected_count = match StrictJsonValue::get_field(fields, "expectedCount") {
+                Some(StrictJsonValue::Number(n)) => n.parse::<usize>().expect("valid usize"),
+                _ => panic!("missing expectedCount for {id}"),
+            };
+            let expected_masked = match StrictJsonValue::get_field(fields, "expectedRustJsMasked") {
+                Some(StrictJsonValue::Str(s)) => s.as_str(),
+                _ => panic!("missing expectedRustJsMasked for {id}"),
+            };
+            let audit = DocumentSecurityAuditor::scan_and_scrub_pii(input);
+            let total_masked =
+                audit.masked_resident_ids + audit.masked_phone_numbers + audit.masked_emails;
+            assert_eq!(
+                total_masked, expected_count,
+                "count mismatch on vector {id}"
+            );
+            assert_eq!(
+                audit.scrubbed_text, expected_masked,
+                "masked output mismatch on vector {id}"
+            );
+            assert!(
+                audit.stripped_metadata_fields.is_empty(),
+                "raw text scrub must report zero stripped metadata fields on {id}"
+            );
+            if let Some(StrictJsonValue::Array(forbidden)) =
+                StrictJsonValue::get_field(fields, "forbiddenSubstrings")
+            {
+                for sub in forbidden {
+                    if let StrictJsonValue::Str(token) = sub {
+                        assert!(
+                            !audit.scrubbed_text.contains(token.as_str()),
+                            "forbidden substring {token} leaked on {id}"
+                        );
+                    }
+                }
+            }
+        }
+
+        let with_meta = DocumentSecurityAuditor::scan_and_scrub_pii_with_metadata(
+            "담당자 011-123-4567",
+            &[
+                ("Author".to_string(), "홍길동".to_string()),
+                ("Company".to_string(), "".to_string()),
+                ("LastModifiedBy".to_string(), "보안팀".to_string()),
+            ],
+        );
+        assert_eq!(
+            with_meta.stripped_metadata_fields,
+            vec!["Author".to_string(), "LastModifiedBy".to_string()]
+        );
+
+        let adversarial_inputs = [
+            "a".repeat(262_144),
+            "1-".repeat(131_072),
+            format!("{}@", "a.".repeat(131_072)),
+        ];
+        for adv in &adversarial_inputs {
+            let started = Instant::now();
+            let res = DocumentSecurityAuditor::scan_and_scrub_pii(adv);
+            let elapsed = started.elapsed();
+            assert_eq!(res.spans.len(), 0);
+            assert!(
+                elapsed.as_millis() < 500,
+                "linear-time scanner exceeded budget: {elapsed:?}"
+            );
+        }
     }
 }

@@ -553,7 +553,7 @@
      - `crates/easyoffice-layout`: 시그니처 라벤더 팔레트(`#5C6BC0`, `#F7F8FC`, `#141724`), `DocumentPageLayout`(A4 가로/세로 스왑, 1~4단 다단 폭 계산, 200자 원고지 그리드, KS X 6101 행정 공문서 헤더 및 결재란), `SlideStageLayout`(`840.0 × 472.5 pt` 16:9 스테이지 및 상단 본문·하단 오브젝트 비겹침 영역 `y >= 240.0 pt`), `PdfStudioLayout`(`y = 804.0..452.0` 가시 좌표 및 결재 날인 박스)을 제공합니다.
   2. **Tauri v2 크로스플랫폼 데스크톱 IPC 라우터 및 WebUI(`crates/easyoffice-app`)**:
      - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `compute_layout`, `audit_security` 명령을 처리하고, `cargo run -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식을 1초 내에 검증합니다.
-     - `crates/easyoffice-app/tauri.conf.json`은 macOS(`.app`, `.dmg` — `WKWebView`)와 Windows(`.msi`, `.nsis` — `WebView2` `downloadBootstrapper`) 번들 설정을 정의하고, `crates/easyoffice-app/ui/{index.html,styles.css,app.js}`는 시그니처 라벤더 다크/라이트 워크스페이스, 플랫폼별 단축키(`Cmd` vs `Ctrl`) 자동 매핑, 한국어 두벌식 IME 조합(`compositionstart`/`compositionupdate`/`compositionend`) 무결성을 제공합니다.
+     - `crates/easyoffice-app/ui/{index.html,styles.css,app.js}`는 시그니처 라벤더 다크/라이트 워크스페이스, 플랫폼별 단축키(`Cmd` vs `Ctrl`) 자동 매핑, 한국어 두벌식 IME 조합(`compositionstart`/`compositionupdate`/`compositionend`) 무결성을 제공합니다(이후 `PD-062`에서 미사용 데스크톱 번들 설정 파일을 제거하고 루프백 `--serve` WebUI 프리뷰 패키징으로 일원화함).
   3. **문서/HWP 2차 포맷 바 다단·용지 방향 변경 시 실행 취소(`Undo`) 스냅샷 누락 보완 (`Sources/EasyOfficeApp/EditorDetailPanes.swift`)**:
      - 문서 및 HWP/HWPX 에디터 2차 포맷 바의 `다단 구성`(`1단`~`3단`)과 `용지 (세로/가로)` 메뉴 액션에서 페이로드 갱신 직전에 `viewModel.recordUndoSnapshot(for: tabID)`를 호출하여 인스펙터·리본과 동일한 실행 취소/다시 실행 무결성을 보장합니다.
 - **Why**: macOS 네이티브 Swift 엔진의 도메인 모델과 보안 상한을 Windows(`WebView2`)와 macOS(`WKWebView`) 공통 Rust 코어로 이식하여 크로스플랫폼 일관성을 확립하고, 오프라인/폐쇄망 빌드 환경에서도 즉시 컴파일·검증되도록 하기 위함입니다.
@@ -769,3 +769,33 @@
   - `deflate_raw`에서 입력 길이 전체 크기로 `prev` 벡터를 할당하는 방식은 대용량 스트림 압축 시 불필요한 `4 * N` 힙 할당을 유발하므로 32KB 고정 링버퍼로 교체.
 - **Verified by**: `swift build`, `swift test`, `cargo test --workspace`, `node scripts/check-repo-hygiene.mjs`, `.agents/skills/verify-easyoffice/scripts/eo.sh`
 - **Revisit when**: ARM64 NEON / x86_64 AVX2 명시적 SIMD 인트린직 경로를 별도 가속 모듈로 추가할 때.
+
+### 37. Fail-Closed IPC 경계, `--serve` 루프백 HTTP 보안 하드닝, 3대 엔진 선형 시간 PII·이미지 EXIF 비식별화 및 진실한 릴리스 패키징 정책 (2026-11-01)
+
+- **Decision (`PD-062`)**
+  1. **프로덕션 WebUI 모의 폴백 제거, 구조화된 JSON IPC 전환 및 Stored-XSS 원천 차단 (`crates/easyoffice-app/ui/*`, `scripts/test-support/offline-*.js`, `crates/easyoffice-app/src/{security_ipc.rs,convert_ipc.rs,lib.rs}`)**
+     - 프로덕션 `crates/easyoffice-app/ui/`에서 오프라인 모의 RPC 스크립트(`offline-formula-ast.js`, `offline-formula-eval.js`, `offline-rpc.js`)를 `scripts/test-support/`로 이동하고, 순수 클라이언트 좌표·수치 보조 유틸리티만 `crates/easyoffice-app/ui/sheet-utils.js`로 분리합니다.
+     - `invokeBackend`는 데스크톱 호스트 브리지나 로컬 `--serve` 서버가 연결되지 않은 환경에서 모의 결과로 대체하지 않고 즉시 실행을 거부하며, 편집 중인 문서·시트·슬라이드 DOM을 변이시키지 않습니다.
+     - `audit_security`는 빈 엔트리 입력을 `InvalidArgument`로 즉시 거부하고 실제 인코딩된 컨테이너(`containerBase64`)를 `FormatDetector`·`ZipArchiveCodec`·`Ole2ContainerCodec`·`Hwp5Codec`·`PdfSerializer`·`XmlSanitizer`로 검사하며, 모든 WebUI IPC 호출은 구분자 문자열 대신 구조화된 JSON 객체를 전달합니다.
+     - 프로덕션 `index.html`의 인라인 스타일 속성과 `ui/*.js`의 동적 `.innerHTML` 대입을 전수 제거하고 `scripts/check-repo-hygiene.mjs`에 구조적 가드로 고정합니다.
+  2. **루프백 `--serve` HTTP 서버 CSP 강제 및 Slowloris·패닉 복구 가드 (`crates/easyoffice-app/src/http_server.rs`, `tests/http_server_security.rs`)**
+     - 모든 HTTP 응답(`200`, `400`, `403`, `404`, `413`, `500`, `503`)에 `Content-Security-Policy` 헤더(`default-src 'self'`)를 강제합니다.
+     - RAII `ConnectionSlotGuard`(`MAX_CONCURRENT_HTTP_THREADS = 32`), 슬롯 포화 시 수락 스레드 블로킹 없는 즉시 `503` 응답, 워커 패닉 `catch_unwind` 복구(`500`), 연결당 총 `3초` 데드라인을 적용하여 부분 전송 연결에 의한 슬롯 고갈을 차단합니다.
+  3. **3대 엔진(Swift·Rust·JS) 선형 시간($O(n)$) PII 스캐너 통일, 바이너리 이미지 EXIF 제거 및 `Mirror` 전수 검증 (`fixtures/pii-scrub-vectors.json`, `crates/easyoffice-app/src/smart_tools.rs`, `Sources/EasyOfficeCore/{DocumentSecurityAuditor.swift,PDFEngine.swift}`, `Tests/EasyOfficeTests/PiiScrubAndSecurityCompletenessTests.swift`)**
+     - Rust 이메일 스캐너에 `email_failed_until` 전진 경계를 도입해 적대적 반복 문자열에서도 엄격한 $O(n)$ 선형 시간을 보장하고, 유니코드 IDN 이메일·통신사 접두 보존 휴대전화 번호(`010`/`011`/`016`~`019`)·외국인등록번호(7번째 자리 `1..=8`) 규칙을 `fixtures/pii-scrub-vectors.json` 공통 벡터로 Swift·Rust·JS 3대 엔진에서 동일하게 검증합니다.
+     - Swift `DocumentSecurityAuditor`는 4대 도메인 모델의 모든 사용자 문자열·수식 리터럴 필드와 첨부 JPEG(`APP1..APP15`, `COM`)·PNG(`tEXt`, `zTXt`, `iTXt`, `eXIf`, `tIME`)·TIFF(EXIF/GPS/XMP 태그) 바이너리 메타데이터를 제거하며, `Mirror` 리플렉션 전수 워커 테스트로 필드 누락을 구조적으로 방지합니다.
+  4. **Linux 플랫폼 식별자, macOS 20종 확장자 `Info.plist` 검증 및 진실한 Windows 프리뷰 패키징 (`crates/easyoffice-layout/src/lib.rs`, `scripts/{package-macos-release.sh,verify-macos-plist.mjs}`, `.github/workflows/{ci.yml,release.yml}`)**
+     - `DesktopPlatform::LinuxWebView`를 추가하여 Linux 빌드에서 정확한 플랫폼 레이블(`Linux (WebKitGTK)`)과 단축키 수식어(`Ctrl`)를 반환합니다.
+     - `scripts/package-macos-release.sh`는 비시스템 확장자가 `LSItemContentTypes`에 가려지지 않도록 `CFBundleDocumentTypes`를 분리 구성하고 `scripts/verify-macos-plist.mjs`로 20종 전체 확장자 매핑을 검증하며, 애드혹 서명 번들의 Gatekeeper 격리 속성 해제 명령을 문서화합니다.
+     - 미사용 데스크톱 번들 설정 파일을 삭제하고, `.github/workflows/release.yml`은 최소 권한(`contents: read`, 발행 잡만 `contents: write`), 정확한 커밋 SHA 바인딩(`--target`), Windows CLI 및 루프백 WebUI 프리뷰 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`)와 PowerShell `--serve` CSP 스모크 테스트를 수행합니다.
+- **Why** 오프라인 모의 폴백과 합성 감사 페이로드로 인해 실제 보안·연결 실패가 성공처럼 보이던 경계를 제거하고, 루프백 서버 자원 보호·3대 엔진 PII 완전성·릴리스 산출물 정직성을 코드와 CI 가드로 일치시키기 위함입니다.
+- **Trade-offs**
+  1. 프로덕션 UI를 백엔드 없이 정적 파일로 직접 열면 편집 명령이 거부되나, 테스트 환경은 `scripts/webui-dom-harness.mjs`의 명시적 주입 경로로 결정론적 검증을 유지하면서 실사용자 환경의 거짓 성공을 원천 차단합니다.
+  2. OWASP XXE 방어 및 ECMA-376 표준에 따라 문서 편집기 본문에 입력되어 `&lt;!DOCTYPE ...&gt;`로 XML 이스케이프된 일반 텍스트는 정상 문자열로 보존하고, 실제 컨테이너 내부 XML 파트의 엔티티 선언(`<!DOCTYPE`, `<!ENTITY`)만 `XmlSanitizer`로 차단하여 기술 문서 작성 시 오탐을 방지합니다.
+  3. RFC 5322 이메일 로컬 파트 스캔 시 아톰 내부 단일 스크립트 경계를 유지하여 한글 조사·명사가 영문 이메일 앞에 공백 없이 붙은 문장(`"문의:홍길동user@example.com"`)에서 앞쪽 한글 본문이 과도하게 마스킹되는 부작용을 막습니다.
+  4. 루프백(`127.0.0.1`) `--serve` 서버는 브라우저가 전송하는 `Host`/`Origin` 헤더가 존재할 때 루프백 일치 여부를 검증하되, `Origin` 헤더를 보내지 않는 로컬 CLI 및 CI 스모크 자동화 요청은 허용합니다.
+- **Alternatives rejected**
+  - 백엔드 오류 발생 시 클라이언트 정규식 치환이나 합성 수치로 폴백하는 방식은 미처리 개인정보와 미검증 컨테이너를 정상 처리된 것으로 오인하게 만들므로 기각.
+  - 본문 일반 텍스트의 이스케이프된 XML 구문까지 일괄 거부하는 방식은 정상적인 개발·보안 문서 편집을 가로막는 과검증이므로 기각.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node scripts/verify-macos-plist.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace -- --test-threads=1`, `swift test`
+- **Revisit when** Apple Developer ID 공증(Notarization) 인증서 또는 Windows 코드 서명 설치 관리자 파이프라인을 도입할 때.

@@ -179,7 +179,8 @@ test("real userClick on save waits for blur-triggered async evaluate_sheet befor
   await flushAsyncTurns();
 
   assert.equal(convertPayloads.length, 1);
-  assert.match(convertPayloads[0], /\[\[TABLE_ROW\]\][^\n]*\t6950/);
+  const parsedConvert = JSON.parse(convertPayloads[0]);
+  assert.match(parsedConvert.body, /\[\[TABLE_ROW\]\][^\n]*\t6950/);
 });
 
 test("switching sheet tabs with structured JSON IPC and special sheet names avoids contamination", async () => {
@@ -452,9 +453,9 @@ test("security audit blocks >512-char and whitespace XXE plus PDF inputs while P
       ),
     /SecurityViolation/
   );
-  assert.equal(
-    offlineRpc.audit_security(JSON.stringify({ entries: [], xml: "<doc/>" })).checkedEntries,
-    0
+  assert.throws(
+    () => offlineRpc.audit_security(JSON.stringify({ entries: [], xml: "<doc/>" })),
+    /InvalidArgument/
   );
   assert.throws(
     () => offlineRpc.audit_security("word/document.xml,0,4096,false|<doc/>"),
@@ -605,8 +606,9 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
   assert.equal(exportedBodies.length, 1);
   assert.equal(document.activeElement, e9);
   assert.equal(e9.textContent, "=400+100");
-  assert.match(exportedBodies[0], /\[\[SHEET_A1\]\]\tE9\t=400\+100/);
-  assert.match(exportedBodies[0], /\[\[TABLE_ROW\]\][^\n]*300\t500/);
+  const exportedConvert = JSON.parse(exportedBodies[0]);
+  assert.match(exportedConvert.body, /\[\[SHEET_A1\]\]\tE9\t=400\+100/);
+  assert.match(exportedConvert.body, /\[\[TABLE_ROW\]\][^\n]*300\t500/);
 });
 
 test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and multi-paragraph PDF undo preserve DOM structure", async () => {

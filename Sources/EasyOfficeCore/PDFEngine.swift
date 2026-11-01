@@ -243,14 +243,28 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
         of: trimmed, with: "████", options: [.caseInsensitive])
     }
     for idx in annotations.indices {
+      if annotations[idx].author.range(of: trimmed, options: [.caseInsensitive]) != nil {
+        annotations[idx].author = annotations[idx].author.replacingOccurrences(
+          of: trimmed, with: "████", options: [.caseInsensitive])
+      }
       if annotations[idx].content.range(of: trimmed, options: [.caseInsensitive]) != nil {
         annotations[idx].content = annotations[idx].content.replacingOccurrences(
           of: trimmed, with: "████", options: [.caseInsensitive])
       }
     }
     for idx in formFields.indices {
+      if formFields[idx].name.range(of: trimmed, options: [.caseInsensitive]) != nil {
+        formFields[idx].name = formFields[idx].name.replacingOccurrences(
+          of: trimmed, with: "████", options: [.caseInsensitive])
+      }
       if formFields[idx].value.range(of: trimmed, options: [.caseInsensitive]) != nil {
         formFields[idx].value = formFields[idx].value.replacingOccurrences(
+          of: trimmed, with: "████", options: [.caseInsensitive])
+      }
+    }
+    for idx in inkStrokes.indices {
+      if inkStrokes[idx].label.range(of: trimmed, options: [.caseInsensitive]) != nil {
+        inkStrokes[idx].label = inkStrokes[idx].label.replacingOccurrences(
           of: trimmed, with: "████", options: [.caseInsensitive])
       }
     }

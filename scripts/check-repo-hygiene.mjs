@@ -25,10 +25,9 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-sheet/src/lib.rs",
   "crates/easyoffice-layout/src/lib.rs",
   "crates/easyoffice-app/src/lib.rs",
-  "crates/easyoffice-app/tauri.conf.json",
-  "crates/easyoffice-app/ui/offline-formula-ast.js",
-  "crates/easyoffice-app/ui/offline-formula-eval.js",
-  "crates/easyoffice-app/ui/offline-rpc.js",
+  "crates/easyoffice-app/src/http_server.rs",
+  "crates/easyoffice-app/src/security_ipc.rs",
+  "crates/easyoffice-app/ui/sheet-utils.js",
   "crates/easyoffice-app/ui/pii-dom-scrubber.js",
   "crates/easyoffice-app/ui/sheet-store.js",
   "crates/easyoffice-app/ui/ribbon-catalog.js",
@@ -37,6 +36,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/sheet-controller.js",
   "crates/easyoffice-app/ui/ribbon-history.js",
   "crates/easyoffice-app/ui/app.js",
+  "Sources/EasyOfficeCore/DocumentSecurityAuditor.swift",
+  "fixtures/pii-scrub-vectors.json",
   "docs/policy-decisions.md",
   "docs/design-system.md",
   "docs/product-spec.md",
@@ -46,10 +47,15 @@ const REQUIRED_TRACKED_CONTRACTS = [
   ".github/workflows/ci.yml",
   ".github/workflows/automerge.yml",
   ".github/workflows/release.yml",
+  "scripts/verify-macos-plist.mjs",
+  "scripts/test-support/offline-formula-ast.js",
+  "scripts/test-support/offline-formula-eval.js",
+  "scripts/test-support/offline-rpc.js",
   "scripts/webui-dom-harness.mjs",
   "scripts/test-webui-behavior.mjs",
   "scripts/test-webui-sheet-atomicity.mjs",
   "scripts/test-webui-round13-parity.mjs",
+  "scripts/test-webui-security-ipc.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)
@@ -251,10 +257,30 @@ for (const uiRel of ["crates/easyoffice-app/ui/index.html", ...webuiJsRels]) {
       errors.push(`Forbidden internal gate/spec copy "${phrase}" detected in ${uiRel}`);
     }
   }
+  if (uiRel.endsWith(".html")) {
+    if (/\sstyle\s*=/i.test(uiText)) {
+      errors.push(`Inline HTML style= attribute detected in ${uiRel} (violates CSP default-src 'self')`);
+    }
+    if (/offline-(?:formula-ast|formula-eval|rpc)\.js/i.test(uiText)) {
+      errors.push(`Production HTML ${uiRel} must not load offline test-support scripts`);
+    }
+  }
   if (uiRel.endsWith(".js")) {
     const lineCount = uiText.split("\n").length - (uiText.endsWith("\n") ? 1 : 0);
     if (lineCount >= 1000) {
       errors.push(`WebUI JS file ${uiRel} exceeds 1,000-line ceiling (${lineCount} lines)`);
+    }
+    if (/\.innerHTML\s*\+=/u.test(uiText)) {
+      errors.push(`Prohibited .innerHTML += mutation detected in ${uiRel}`);
+    }
+    for (const match of uiText.matchAll(/\.innerHTML\s*=\s*([^\n;]+)/g)) {
+      const rhs = match[1].trim();
+      if (rhs !== '""' && rhs !== "''") {
+        errors.push(`Dynamic .innerHTML assignment detected in ${uiRel}: ${match[0].trim()}`);
+      }
+    }
+    if (/\.setAttribute\(\s*["']style["']/i.test(uiText)) {
+      errors.push(`Prohibited setAttribute("style", ...) detected in ${uiRel} (violates CSP default-src 'self')`);
     }
   }
 }
@@ -327,6 +353,101 @@ for (const file of files) {
   }
 }
 
+const formatSwiftPath = path.join(ROOT, "Sources/EasyOfficeCore/DocumentFormat.swift");
+const sheetSwiftPath = path.join(ROOT, "Sources/EasyOfficeCore/SheetEngine.swift");
+const ribbonCatalogJsPath = path.join(ROOT, "crates/easyoffice-app/ui/ribbon-catalog.js");
+const rustIpcLibPath = path.join(ROOT, "crates/easyoffice-app/src/lib.rs");
+
+if (
+  fs.existsSync(formatSwiftPath) &&
+  fs.existsSync(sheetSwiftPath) &&
+  fs.existsSync(ribbonCatalogJsPath) &&
+  fs.existsSync(rustIpcLibPath)
+) {
+  const formatSwift = fs.readFileSync(formatSwiftPath, "utf8");
+  const enumSection = formatSwift.split("public var id:")[0].split("public enum DocumentFormat")[1] || "";
+  const formatCount = enumSection
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("case ")).length;
+
+  const sheetSwift = fs.readFileSync(sheetSwiftPath, "utf8");
+  const fnMatch = sheetSwift.match(/supportedFunctionNames:\s*\[String\]\s*=\s*\[([\s\S]*?)\]\.sorted\(\)/);
+  const functionCount = fnMatch ? (fnMatch[1].match(/"[A-Z0-9]+"/g) || []).length : 0;
+
+  const ribbonCatalogJs = fs.readFileSync(ribbonCatalogJsPath, "utf8");
+  const commonSpecCount = (ribbonCatalogJs.match(/\{\s*suffix:\s*"/g) || []).length;
+  const modSpecSection = ribbonCatalogJs.split("function buildRibbonCatalog")[0].split("MODULE_SPECIFIC_SPECS")[1] || "";
+  const modSpecCount = (modSpecSection.match(/\{\s*id:\s*"/g) || []).length;
+  const ribbonCommandCount = commonSpecCount * 5 + modSpecCount;
+
+  const rustIpcLib = fs.readFileSync(rustIpcLibPath, "utf8");
+  const dispatchBlock = (rustIpcLib.split("pub fn dispatch(")[1] || "").split("fn handle_workspace_bootstrap")[0] || "";
+  const ipcCommandCount = dispatchBlock
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('"') && line.includes("=>")).length;
+
+  if (formatCount !== 20) {
+    errors.push(`Expected 20 DocumentFormat cases in DocumentFormat.swift, found ${formatCount}`);
+  }
+  if (functionCount !== 122) {
+    errors.push(`Expected 122 built-in functions in SheetEngine.swift, found ${functionCount}`);
+  }
+  if (ribbonCommandCount !== 140) {
+    errors.push(`Expected 140 ribbon commands in ribbon-catalog.js, found ${ribbonCommandCount}`);
+  }
+  if (ipcCommandCount !== 15) {
+    errors.push(`Expected 15 IPC dispatch arms in crates/easyoffice-app/src/lib.rs, found ${ipcCommandCount}`);
+  }
+
+  const STALE_DOC_TOKENS = [
+    "77 functions",
+    "77 sheet functions",
+    "77 Functions",
+    "77종",
+    "13종 IPC",
+    "13종 명령",
+    "tauri.conf.json",
+    ".msi",
+    ".nsis",
+  ];
+  const DOC_SYNC_TARGETS = [
+    "README.md",
+    "README.ko.md",
+    "docs/architecture.md",
+    "docs/product-spec.md",
+    "docs/policy-decisions.md",
+  ];
+
+  for (const docRel of DOC_SYNC_TARGETS) {
+    const docFull = path.join(ROOT, docRel);
+    if (!fs.existsSync(docFull)) continue;
+    const docText = fs.readFileSync(docFull, "utf8");
+    for (const stale of STALE_DOC_TOKENS) {
+      if (docText.includes(stale)) {
+        errors.push(`Stale specification claim "${stale}" detected in ${docRel}`);
+      }
+    }
+    if (docRel !== "docs/policy-decisions.md") {
+      if (!docText.includes(String(formatCount))) {
+        errors.push(`Doc ${docRel} does not reference verified format count ${formatCount}`);
+      }
+      if (!docText.includes(String(functionCount))) {
+        errors.push(`Doc ${docRel} does not reference verified sheet function count ${functionCount}`);
+      }
+    }
+  }
+
+  const archText = fs.readFileSync(path.join(ROOT, "docs/architecture.md"), "utf8");
+  if (!archText.includes(`${ribbonCommandCount}종`)) {
+    errors.push(`docs/architecture.md does not reference verified ribbon command count ${ribbonCommandCount}종`);
+  }
+  if (!archText.includes(`${ipcCommandCount}종 명령`)) {
+    errors.push(`docs/architecture.md does not reference verified IPC command count ${ipcCommandCount}종 명령`);
+  }
+}
+
 if (errors.length > 0) {
   console.error("Repository hygiene check failed:");
   for (const err of errors) {
@@ -336,5 +457,5 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `Repository hygiene check passed (${files.length} repository files inspected, ${REQUIRED_TRACKED_CONTRACTS.length} required contracts verified, 0 local-only files tracked, WebUI & anti-slop guards verified).`
+  `Repository hygiene check passed (${files.length} repository files inspected, ${REQUIRED_TRACKED_CONTRACTS.length} required contracts verified, 0 local-only files tracked, WebUI CSP/XSS & numeric doc-sync guards verified).`
 );

@@ -1,7 +1,4 @@
-use easyoffice_formats::{
-    EasyOfficeError, FormatDetector, StrictJsonValue, XmlSanitizer, ZipEntryDescriptor,
-    ZipSecurityGuard, ZipSecurityPolicy,
-};
+use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use easyoffice_layout::{
     DesktopPlatform, DocumentPageLayout, OfficeModuleKind, PageOrientation, PdfStudioLayout,
     RibbonLayoutStyle, SignatureLavenderPalette, SlideDeckTheme, SlideStageLayout,
@@ -14,12 +11,18 @@ use easyoffice_sheet::{
 pub mod benchmark;
 mod convert_ipc;
 pub mod ffi;
+pub mod http_server;
 pub mod ribbon;
+mod security_ipc;
 pub mod self_test;
 pub mod smart_tools;
 
 pub use benchmark::*;
 pub use ffi::*;
+pub use http_server::{
+    serve_http_on_listener, serve_http_on_listener_with_handler, serve_webui, ConnectionSlotGuard,
+    MAX_CONCURRENT_HTTP_THREADS, MAX_CONNECTION_DURATION,
+};
 pub use ribbon::*;
 pub use self_test::run_self_test;
 pub use smart_tools::*;
@@ -126,29 +129,6 @@ impl EasyOfficeIpcRouter {
         Ok(json)
     }
 
-    /// Payload format: `<extension_hint>|<hex_or_utf8_payload>` (e.g. `docx|HEX:504B0304` or `csv|a,b,c`)
-    fn handle_detect_format(payload: &str) -> Result<String, EasyOfficeError> {
-        let (hint_part, data_part) = payload.split_once('|').unwrap_or(("", payload));
-        let bytes = if let Some(hex_str) = data_part.strip_prefix("HEX:") {
-            Self::decode_hex(hex_str)?
-        } else {
-            data_part.as_bytes().to_vec()
-        };
-        let hint = if hint_part.trim().is_empty() {
-            None
-        } else {
-            Some(hint_part.trim())
-        };
-        let fmt = FormatDetector::detect(&bytes, hint)?;
-        Ok(format!(
-            "{{\"format\":\"{}\",\"containerFamily\":\"{}\",\"specification\":\"{}\",\"byteCount\":{}}}",
-            Self::escape_json_str(fmt.extension()),
-            Self::escape_json_str(fmt.container_family().as_str()),
-            Self::escape_json_str(fmt.standard_specification()),
-            bytes.len()
-        ))
-    }
-
     fn json_sheet_name_or_default<'a>(raw: &'a str, fallback: &'a str) -> &'a str {
         if raw.trim().is_empty() {
             fallback
@@ -173,7 +153,7 @@ impl EasyOfficeIpcRouter {
         false
     }
 
-    fn parse_rpc_json_object(
+    pub(crate) fn parse_rpc_json_object(
         payload: &str,
     ) -> Result<Vec<(String, StrictJsonValue)>, EasyOfficeError> {
         let clean = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
@@ -186,7 +166,7 @@ impl EasyOfficeIpcRouter {
         }
     }
 
-    fn optional_json_str<'a>(
+    pub(crate) fn optional_json_str<'a>(
         entries: &'a [(String, StrictJsonValue)],
         key: &str,
     ) -> Result<Option<&'a str>, EasyOfficeError> {
@@ -466,77 +446,6 @@ impl EasyOfficeIpcRouter {
         ))
     }
 
-    fn handle_audit_security(payload: &str) -> Result<String, EasyOfficeError> {
-        let policy = ZipSecurityPolicy::default();
-        let entries = Self::parse_rpc_json_object(payload)?;
-        if let Some(xml_str) = Self::optional_json_str(&entries, "xml")? {
-            if !xml_str.trim().is_empty() {
-                XmlSanitizer::validate_safe_xml(xml_str)?;
-            }
-        }
-        let mut parsed_entries: Vec<ZipEntryDescriptor> = Vec::new();
-        if let Some(entries_val) = StrictJsonValue::get_field(&entries, "entries") {
-            let items = entries_val.as_array().ok_or_else(|| {
-                EasyOfficeError::InvalidArgument(
-                    "JSON 'entries' 필드는 배열이어야 합니다.".to_string(),
-                )
-            })?;
-            for item in items {
-                let obj = item.as_object().ok_or_else(|| {
-                    EasyOfficeError::InvalidArgument(
-                        "JSON 'entries' 항목은 객체여야 합니다.".to_string(),
-                    )
-                })?;
-                let name = match Self::optional_json_str(obj, "name")? {
-                    Some(n) => n,
-                    None => Self::optional_json_str(obj, "path")?.unwrap_or(""),
-                }
-                .trim();
-                if name.is_empty() {
-                    return Err(EasyOfficeError::InvalidArgument(
-                        "ZIP 엔트리 이름('name')이 비어 있습니다.".to_string(),
-                    ));
-                }
-                let compressed = StrictJsonValue::get_field(obj, "compressed")
-                    .or_else(|| StrictJsonValue::get_field(obj, "compressedSize"))
-                    .and_then(StrictJsonValue::as_u64)
-                    .ok_or_else(|| {
-                        EasyOfficeError::InvalidArgument(
-                            "유효하지 않은 compressed_size".to_string(),
-                        )
-                    })?;
-                let uncompressed = StrictJsonValue::get_field(obj, "uncompressed")
-                    .or_else(|| StrictJsonValue::get_field(obj, "uncompressedSize"))
-                    .and_then(StrictJsonValue::as_u64)
-                    .ok_or_else(|| {
-                        EasyOfficeError::InvalidArgument(
-                            "유효하지 않은 uncompressed_size".to_string(),
-                        )
-                    })?;
-                let encrypted = match StrictJsonValue::get_field(obj, "encrypted") {
-                    None | Some(StrictJsonValue::Null) => false,
-                    Some(StrictJsonValue::Bool(b)) => *b,
-                    Some(_) => {
-                        return Err(EasyOfficeError::InvalidArgument(
-                            "유효하지 않은 encrypted 불리언 값".to_string(),
-                        ))
-                    }
-                };
-                parsed_entries.push(ZipEntryDescriptor::new(
-                    name,
-                    compressed,
-                    uncompressed,
-                    encrypted,
-                ));
-            }
-        }
-        ZipSecurityGuard::validate_archive_entries(&parsed_entries, &policy)?;
-        Ok(format!(
-            "{{\"status\":\"SAFE\",\"xxeGuard\":\"PASSED\",\"zipGuard\":\"PASSED\",\"checkedEntries\":{}}}",
-            parsed_entries.len()
-        ))
-    }
-
     fn format_ribbon_state_json(
         state: &RibbonWorkspaceState,
         summary: &str,
@@ -667,11 +576,24 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
+        let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
+        let cmd_id_owned = if trimmed.starts_with('{') {
+            let entries = Self::parse_rpc_json_object(trimmed)?;
+            match Self::optional_json_str(&entries, "commandId")? {
+                Some(id) => id.trim().to_string(),
+                None => Self::optional_json_str(&entries, "id")?
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+            }
+        } else {
+            trimmed.to_string()
+        };
         let mut session = shared_ribbon_session()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let snapshot = session.state.clone();
-        let summary = RibbonCommandRouter::execute_command(payload.trim(), &mut session.state)?;
+        let summary = RibbonCommandRouter::execute_command(&cmd_id_owned, &mut session.state)?;
         session.history.push_state(snapshot);
         Ok(Self::format_ribbon_state_json(
             &session.state,
@@ -714,7 +636,17 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_switch_ribbon_style(payload: &str) -> Result<String, EasyOfficeError> {
-        let style = match payload.trim().to_ascii_lowercase().as_str() {
+        let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
+        let raw_style = if trimmed.starts_with('{') {
+            let entries = Self::parse_rpc_json_object(trimmed)?;
+            Self::optional_json_str(&entries, "style")?
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        } else {
+            trimmed.to_string()
+        };
+        let style = match raw_style.to_ascii_lowercase().as_str() {
             "hangul" | "hwp" | "hangul_hwp" | "한글" => RibbonLayoutStyle::HangulHwp,
             "standard" | "standard_office" | "표준" => RibbonLayoutStyle::StandardOffice,
             other => {
@@ -740,13 +672,30 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_run_smart_assistant(payload: &str) -> Result<String, EasyOfficeError> {
-        let paragraphs: Vec<String> = payload
+        let trimmed = payload
+            .strip_prefix('\u{FEFF}')
+            .unwrap_or(payload)
+            .trim_start();
+        let text_owned: Option<String> = if trimmed.starts_with('{') {
+            Self::parse_rpc_json_object(trimmed)
+                .ok()
+                .and_then(
+                    |entries| match StrictJsonValue::get_field(&entries, "text") {
+                        Some(StrictJsonValue::Str(s)) => Some(s.clone()),
+                        _ => None,
+                    },
+                )
+        } else {
+            None
+        };
+        let doc_text = text_owned.as_deref().unwrap_or(payload);
+        let paragraphs: Vec<String> = doc_text
             .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect();
         let summary = LocalSmartAssistant::summarize_document(&paragraphs, 2);
-        let diag = LocalSmartAssistant::diagnose_writing(payload);
+        let diag = LocalSmartAssistant::diagnose_writing(doc_text);
         let actions = LocalSmartAssistant::extract_action_items(&paragraphs);
         let summary_json = summary
             .iter()
@@ -789,33 +738,6 @@ impl EasyOfficeIpcRouter {
             summary_json,
             suggestions_json,
             actions_json
-        ))
-    }
-
-    fn handle_scrub_pii(payload: &str) -> Result<String, EasyOfficeError> {
-        let audit = DocumentSecurityAuditor::scan_and_scrub_pii(payload);
-        let escaped = Self::escape_json_str(&audit.scrubbed_text);
-        let spans_json = audit
-            .spans
-            .iter()
-            .map(|sp| {
-                format!(
-                    "{{\"start\":{},\"end\":{},\"replacement\":\"{}\"}}",
-                    sp.start_utf16,
-                    sp.end_utf16,
-                    Self::escape_json_str(&sp.replacement)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        Ok(format!(
-            "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"totalMasked\":{},\"spans\":[{}]}}",
-            escaped,
-            audit.masked_resident_ids,
-            audit.masked_phone_numbers,
-            audit.masked_emails,
-            audit.total_masked_count(),
-            spans_json
         ))
     }
 
@@ -867,15 +789,30 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_get_ribbon_category_commands(payload: &str) -> Result<String, EasyOfficeError> {
-        let (mod_str, cat_str) = payload.split_once('|').unwrap_or(("DOC", payload.trim()));
-        let module = match mod_str.trim().to_ascii_uppercase().as_str() {
+        let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
+        let (mod_owned, cat_owned) = if trimmed.starts_with('{') {
+            let entries = Self::parse_rpc_json_object(trimmed)?;
+            let m = Self::optional_json_str(&entries, "module")?
+                .unwrap_or("DOC")
+                .trim()
+                .to_string();
+            let c = Self::optional_json_str(&entries, "category")?
+                .unwrap_or("home")
+                .trim()
+                .to_string();
+            (m, c)
+        } else {
+            let (m, c) = payload.split_once('|').unwrap_or(("DOC", trimmed));
+            (m.trim().to_string(), c.trim().to_string())
+        };
+        let module = match mod_owned.to_ascii_uppercase().as_str() {
             "HWP" | "HWPX" => OfficeModuleKind::Hwp,
             "SHEET" | "XLSX" | "XLS" => OfficeModuleKind::Sheet,
             "SLIDE" | "PPTX" | "PPT" => OfficeModuleKind::Slide,
             "PDF" => OfficeModuleKind::Pdf,
             _ => OfficeModuleKind::Document,
         };
-        let (category_key, category_label) = match cat_str.trim().to_ascii_lowercase().as_str() {
+        let (category_key, category_label) = match cat_owned.to_ascii_lowercase().as_str() {
             "home" | "홈" | "편집" => ("home", "홈"),
             "insert" | "삽입" | "입력" => ("insert", "삽입"),
             "layout" | "레이아웃" | "쪽·원고지" => ("layout", "레이아웃"),
@@ -904,7 +841,7 @@ impl EasyOfficeIpcRouter {
         Ok(format!(
             "{{\"module\":\"{:?}\",\"category\":\"{}\",\"commands\":[{}]}}",
             module,
-            Self::escape_json_str(cat_str.trim()),
+            Self::escape_json_str(&cat_owned),
             items.join(",")
         ))
     }
@@ -927,7 +864,7 @@ impl EasyOfficeIpcRouter {
         out
     }
 
-    fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
+    pub(crate) fn decode_hex(hex: &str) -> Result<Vec<u8>, EasyOfficeError> {
         let cleaned: Vec<u8> = hex.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
         if cleaned.len() % 2 != 0 {
             return Err(EasyOfficeError::InvalidArgument(

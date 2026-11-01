@@ -7,10 +7,23 @@ const cjsRequire = createRequire(import.meta.url);
 const INDEX_HTML_PATH = fileURLToPath(
   new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)
 );
-const UI_SCRIPT_MODULES = [
-  "../crates/easyoffice-app/ui/offline-formula-ast.js",
-  "../crates/easyoffice-app/ui/offline-formula-eval.js",
-  "../crates/easyoffice-app/ui/offline-rpc.js",
+const PROD_PRE_SCRIPTS = [
+  "../crates/easyoffice-app/ui/sheet-utils.js",
+].map((relPath) => ({
+  relPath,
+  resolvedPath: cjsRequire.resolve(relPath),
+}));
+
+const TEST_SUPPORT_MODULES = [
+  "./test-support/offline-formula-ast.js",
+  "./test-support/offline-formula-eval.js",
+  "./test-support/offline-rpc.js",
+].map((relPath) => ({
+  relPath,
+  resolvedPath: cjsRequire.resolve(relPath),
+}));
+
+const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/pii-dom-scrubber.js",
   "../crates/easyoffice-app/ui/sheet-store.js",
   "../crates/easyoffice-app/ui/ribbon-catalog.js",
@@ -254,6 +267,20 @@ class MiniElement extends MiniNode {
   set hidden(v) {
     if (v) this._attrs.set("hidden", "");
     else this._attrs.delete("hidden");
+  }
+
+  getAttribute(name) {
+    const k = String(name || "").toLowerCase();
+    return this._attrs.has(k) ? this._attrs.get(k) : null;
+  }
+
+  setAttribute(name, value) {
+    const k = String(name || "").toLowerCase();
+    const strVal = String(value ?? "");
+    this._attrs.set(k, strVal);
+    if (k === "colspan") {
+      this.colSpan = Math.max(1, Number(strVal) || 1);
+    }
   }
 
   get value() {
@@ -636,10 +663,20 @@ export async function createWorkspaceHarness(options = {}) {
     }
   );
 
+  let defaultProtocol = "app:";
+  if (options.protocol) {
+    defaultProtocol = options.protocol;
+  } else if (options.httpFetch) {
+    defaultProtocol = "http:";
+  } else if (options.disconnectedHost) {
+    defaultProtocol = "file:";
+  }
+
   const hostEnv = {
     document,
     navigator: { platform: options.platform || "Win32" },
-    location: { protocol: "app:" },
+    location: { protocol: defaultProtocol },
+    fetch: options.httpFetch || undefined,
     atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
     btoa: (bin) => Buffer.from(bin, "binary").toString("base64"),
     URL: urlShim,
@@ -672,6 +709,25 @@ export async function createWorkspaceHarness(options = {}) {
     __TAURI_INTERNALS__: options.tauriInvoke ? { invoke: options.tauriInvoke } : undefined,
   };
 
+  let offlineHandlers = null;
+  function getDefaultOfflineHandlers() {
+    if (!offlineHandlers) {
+      const cat = hostEnv.__EASYOFFICE_RIBBON_CATALOG__;
+      offlineHandlers = hostEnv.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+        getActiveModule: () => {
+          const activeBtn = document.querySelector(".nav-btn.active, .tab-item.active");
+          return activeBtn?.dataset?.module || "DOC";
+        },
+        ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+        ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+        contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+        moduleSpecs: cat.MODULE_SPECS,
+        localRibbonState: cat.createDefaultRibbonState(),
+      });
+    }
+    return offlineHandlers;
+  }
+
   const origCreateElement = document.createElement.bind(document);
   document.createElement = (tag) => {
     const el = origCreateElement(tag);
@@ -683,12 +739,31 @@ export async function createWorkspaceHarness(options = {}) {
     return el;
   };
 
+  const modulesToLoad = [...PROD_PRE_SCRIPTS];
+  if (!options.disconnectedHost) {
+    modulesToLoad.push(...TEST_SUPPORT_MODULES);
+  }
+  modulesToLoad.push(...PROD_APP_SCRIPTS);
+
+  if (!options.disconnectedHost && !options.tauriInvoke && !options.httpFetch) {
+    hostEnv.__EASYOFFICE_TEST_IPC__ =
+      options.testIpc ||
+      (async (command, payload) => {
+        const handlers = getDefaultOfflineHandlers();
+        const fn = handlers[command];
+        if (typeof fn !== "function") {
+          throw new Error("알 수 없는 IPC 명령: " + command);
+        }
+        return await fn(payload);
+      });
+  }
+
   globalThis.__EASYOFFICE_HOST_ENV__ = hostEnv;
   try {
-    for (const mod of UI_SCRIPT_MODULES) {
+    for (const mod of modulesToLoad) {
       delete cjsRequire.cache[mod.resolvedPath];
     }
-    for (const mod of UI_SCRIPT_MODULES) {
+    for (const mod of modulesToLoad) {
       cjsRequire(mod.relPath);
     }
   } finally {
@@ -704,6 +779,7 @@ export async function createWorkspaceHarness(options = {}) {
     __EASYOFFICE_CREATE_OFFLINE_RPC__: hostEnv.__EASYOFFICE_CREATE_OFFLINE_RPC__,
     __EASYOFFICE_CREATE_SHEET_STORE__: hostEnv.__EASYOFFICE_CREATE_SHEET_STORE__,
     __EASYOFFICE_RIBBON_CATALOG__: hostEnv.__EASYOFFICE_RIBBON_CATALOG__,
+    __EASYOFFICE_INVOKE_BACKEND__: hostEnv.__EASYOFFICE_INVOKE_BACKEND__,
     dispatchWindowKeydown: (ev) => {
       const eventObj = {
         type: "keydown",
@@ -776,4 +852,8 @@ export async function createWorkspaceHarness(options = {}) {
   }
 
   return { document, sandbox, downloads, revokedUrls, userClick, advanceTimers };
+}
+
+export async function createWebUiDom(options = {}) {
+  return createWorkspaceHarness(options);
 }

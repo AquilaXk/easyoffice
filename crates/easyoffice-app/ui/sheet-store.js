@@ -1,7 +1,7 @@
 (function (host) {
   "use strict";
 
-  const astApi = host.__EASYOFFICE_FORMULA_AST__ || {};
+  const astApi = host.__EASYOFFICE_SHEET_UTILS__ || {};
   function fallbackIsFormulaStr(raw) {
     const s = String(raw ?? "").trim();
     return s.startsWith("=") || /^(?:of|oooc|msoxl):\s*=/i.test(s);
@@ -244,13 +244,30 @@
         Promise.all(literalInputs.map((seg) => invokeIpc("scrub_pii", seg.text))),
       ]);
 
+      function assertValidScrubResponse(origText, res) {
+        if (
+          !res ||
+          typeof res.scrubbedText !== "string" ||
+          (origText.length > 0 && res.scrubbedText.length === 0)
+        ) {
+          throw new Error("개인정보 마스킹 응답 검증에 실패했습니다.");
+        }
+      }
+
+      plainResults.forEach((res, idx) => {
+        assertValidScrubResponse(plainEntries[idx].value, res);
+      });
+      literalResults.forEach((res, idx) => {
+        assertValidScrubResponse(literalInputs[idx].text, res);
+      });
+
       let totalMasked = 0;
       plainResults.forEach((res, idx) => {
-        if (res && typeof res.scrubbedText === "string") {
-          const count = Number(res.totalMasked || 0);
-          if (count > 0) plainEntries[idx].value = res.scrubbedText;
-          totalMasked += count;
+        const count = Number(res.totalMasked || 0);
+        if (count > 0 && res.scrubbedText !== plainEntries[idx].value) {
+          plainEntries[idx].value = res.scrubbedText;
         }
+        totalMasked += count;
       });
 
       let litOffset = 0;
@@ -259,14 +276,12 @@
         job.literalSegs.forEach((seg) => {
           const res = literalResults[litOffset];
           litOffset += 1;
-          if (res && typeof res.scrubbedText === "string") {
-            const count = Number(res.totalMasked || 0);
-            if (count > 0 && res.scrubbedText !== seg.text) {
-              seg.text = res.scrubbedText;
-              changed = true;
-            }
-            totalMasked += count;
+          const count = Number(res.totalMasked || 0);
+          if (count > 0 && res.scrubbedText !== seg.text) {
+            seg.text = res.scrubbedText;
+            changed = true;
           }
+          totalMasked += count;
         });
         if (changed) {
           job.entry.formula = job.segments
@@ -280,6 +295,10 @@
           job.entry.value = "";
         }
       });
+
+      if (totalMasked === 0) {
+        return { nextSheets: baseSheets, totalMasked: 0 };
+      }
 
       let nextSheets = candidateSheets;
       if (sheetMapHasAnyFormula(candidateSheets)) {

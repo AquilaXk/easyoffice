@@ -10,7 +10,7 @@
 | :--- | :--- | :--- | :--- |
 | **Document (워드)** | `.docx`, `.doc`, `.odt`, `.rtf`, `.md`, `.txt` | ECMA-376 OOXML WordprocessingML (`zipXML`), OLE2 Word (`ole2Compound`), ISO/IEC 26300 ODF Text (`zipXML`), RTF 1.9 (`rtfText`), CommonMark (`plainText`), UTF-8 (`plainText`) | `OOXMLContainerCodec`, `OLE2ContainerCodec`, `ODFContainerCodec`, `RTFCodec`, `CommonMarkCodec` 기반 열람 · 편집 · 라운드트립 직렬화 · PDF/MD/TXT/HWPX 변환 |
 | **HWP (한글 문서)** | `.hwp`, `.hwpx`, `.hwt`, `.hwtx` | HWP 5.0 Binary (`ole2Compound`: `FileHeader` / `DocInfo` / `BodyText/Section0`), KS X 6101 OWPML (`zipXML`: `Contents/section0.xml`) | `HWP5BinaryCodec` (`HWP5RecordHeader`), `HWPXContainerCodec` 기반 열람 · 편집 · 서식 양식(`.hwt`/`.hwtx`) · HWP ↔ HWPX/DOCX/PDF 변환 |
-| **Sheet (스프레드시트)** | `.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv` | ECMA-376 SpreadsheetML (`zipXML`), OLE2 BIFF8 (`ole2Compound`), ISO/IEC 26300 ODF Spreadsheet (`zipXML`), RFC 4180 CSV/TSV (`plainText`) | `OOXMLContainerCodec`, `OLE2ContainerCodec`, `ODFContainerCodec`, `CSVStateMachineCodec` 기반 열람 · 편집 · 77종 수식 연산 · 피벗/차트 · CSV/TSV/PDF 변환 |
+| **Sheet (스프레드시트)** | `.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv` | ECMA-376 SpreadsheetML (`zipXML`), OLE2 BIFF8 (`ole2Compound`), ISO/IEC 26300 ODF Spreadsheet (`zipXML`), RFC 4180 CSV/TSV (`plainText`) | `OOXMLContainerCodec`, `OLE2ContainerCodec`, `ODFContainerCodec`, `CSVStateMachineCodec` 기반 열람 · 편집 · 122종 수식 연산 · 피벗/차트 · CSV/TSV/PDF 변환 |
 | **Slide (프레젠테이션)** | `.pptx`, `.ppt`, `.ppsx`, `.odp` | ECMA-376 PresentationML (`zipXML`), OLE2 Presentation (`ole2Compound`), ISO/IEC 26300 ODF Presentation (`zipXML`) | `OOXMLContainerCodec`, `OLE2ContainerCodec`, `ODFContainerCodec` 기반 열람 · 편집 · 슬라이드 마스터 · 발표자 뷰 · PDF 변환 |
 | **PDF Studio** | `.pdf` | ISO 32000-1 / 32000-2 (`pdfBinary`: `%PDF-1.x` / `%PDF-2.0`) | `PDFBinarySerializer` 기반 벡터 열람 · 5종 주석/서명 · 페이지 병합/분할/재배치/회전 · Office ↔ PDF 양방향 변환 |
 
@@ -35,15 +35,15 @@
 - **64비트 비트패킹 좌표 및 고성능 그리드 (`PackedCellCoordinate`)**:
   - 행(상위 32비트)과 열(하위 32비트)을 단일 `UInt64`에 패킹한 `PackedCellCoordinate`와 ECMA-376 경계(`maxZeroBasedColumn = 16,383`, `maxZeroBasedRow = 1,048,575`)를 검증하는 `CellAddress`, 범위 확장 상한(`maxExpandedCellCount = 100,000`)을 강제하는 `CellRange`를 제공합니다.
   - 범위 그리드 일괄 평가(`evaluateGrid(in:)`), 열 기준 정렬(`sortedRows(in:byColumnOffset:ascending:)`), 조건 필터링(`filteredRows(in:byColumnOffset:predicate:)`), 조건부 서식(`ConditionalFormatRule`: `greaterThan`, `lessThan`, `between`, `containsText`, `duplicateValues`), 데이터 유효성 검사(`DataValidationRule`: `numberRange`, `allowedList`, `nonEmptyText`, `maxTextLength`)를 지원합니다.
-- **결정론적 수식 엔진 (77종 내장 함수, `WorksheetModel.supportedFunctionNames`)**:
-  - **수학/삼각 및 집계 (27종)**: `ABS`, `AVERAGE`, `AVERAGEIF`, `CEILING`, `COUNT`, `COUNTA`, `COUNTBLANK`, `COUNTIF`, `EXP`, `FLOOR`, `INT`, `LN`, `LOG10`, `MAX`, `MIN`, `MOD`, `POWER`, `PRODUCT`, `ROUND`, `ROUNDDOWN`, `ROUNDUP`, `SIGN`, `SQRT`, `SUM`, `SUMIF`, `SUMPRODUCT`, `TRUNC`
-  - **통계 (7종)**: `LARGE`, `MEDIAN`, `MODE`, `RANK`, `SMALL`, `STDEV`, `VAR`
-  - **논리 (10종)**: `AND`, `FALSE`, `IF`, `IFERROR`, `IFS`, `NOT`, `OR`, `SWITCH`, `TRUE`, `XOR`
-  - **찾기/참조 (8종)**: `CHOOSE`, `COLUMN`, `HLOOKUP`, `INDEX`, `MATCH`, `ROW`, `VLOOKUP`, `XLOOKUP`
-  - **텍스트 (16종)**: `CONCAT`, `CONCATENATE`, `EXACT`, `FIND`, `LEFT`, `LEN`, `LOWER`, `MID`, `PROPER`, `REPT`, `RIGHT`, `SUBSTITUTE`, `TEXT`, `TRIM`, `UPPER`, `VALUE`
-  - **재무 (4종)**: `FV`, `NPV`, `PMT`, `PV`
-  - **날짜/시간 (5종)**: `DATE`, `DAY`, `DAYS`, `MONTH`, `YEAR`
-  - 방문 집합 추적 및 최대 재귀 깊이(`maxRecursionDepth = 64`), 문자열 반복 상한(`maxReptResultUTF16Units = 65_536`) 가드로 순환 참조 및 수식 오류(`EvaluatedCellValue.error`)를 크래시 없이 결정론적으로 반환합니다.
+- **결정론적 수식 엔진 (122종 내장 함수, `WorksheetModel.supportedFunctionNames`)**
+  - 수학/삼각 및 조건부 집계 (36종) `ABS`, `AVERAGE`, `AVERAGEIF`, `AVERAGEIFS`, `CEILING`, `COUNT`, `COUNTA`, `COUNTBLANK`, `COUNTIF`, `COUNTIFS`, `EXP`, `FLOOR`, `INT`, `LN`, `LOG10`, `MAX`, `MAXIFS`, `MIN`, `MINIFS`, `MOD`, `MROUND`, `PI`, `POWER`, `PRODUCT`, `QUOTIENT`, `ROUND`, `ROUNDDOWN`, `ROUNDUP`, `SIGN`, `SQRT`, `SUM`, `SUMIF`, `SUMIFS`, `SUMPRODUCT`, `SUMSQ`, `TRUNC`
+  - 통계 (18종) `AVEDEV`, `CORREL`, `FORECAST`, `GEOMEAN`, `HARMEAN`, `INTERCEPT`, `LARGE`, `MEDIAN`, `MODE`, `PERCENTILE`, `QUARTILE`, `RANK`, `SLOPE`, `SMALL`, `STDEV`, `STDEVP`, `VAR`, `VARP`
+  - 논리 및 정보 (15종) `AND`, `FALSE`, `IF`, `IFERROR`, `IFNA`, `IFS`, `ISBLANK`, `ISERROR`, `ISNUMBER`, `ISTEXT`, `NOT`, `OR`, `SWITCH`, `TRUE`, `XOR`
+  - 찾기/참조 (11종) `CHOOSE`, `COLUMN`, `COLUMNS`, `HLOOKUP`, `INDEX`, `MATCH`, `OFFSET`, `ROW`, `ROWS`, `VLOOKUP`, `XLOOKUP`
+  - 텍스트 (19종) `CONCAT`, `CONCATENATE`, `EXACT`, `FIND`, `LEFT`, `LEN`, `LOWER`, `MID`, `PROPER`, `REPLACE`, `REPT`, `RIGHT`, `SEARCH`, `SUBSTITUTE`, `TEXT`, `TEXTJOIN`, `TRIM`, `UPPER`, `VALUE`
+  - 재무 (11종) `EFFECT`, `FV`, `IRR`, `NOMINAL`, `NPER`, `NPV`, `PMT`, `PV`, `RATE`, `SLN`, `SYD`
+  - 날짜/시간 (12종) `DATE`, `DATEDIF`, `DAY`, `DAYS`, `EDATE`, `EOMONTH`, `MONTH`, `NETWORKDAYS`, `WEEKDAY`, `WEEKNUM`, `WORKDAY`, `YEAR`
+  - 방문 집합 추적 및 최대 재귀 깊이(`maxRecursionDepth = 64`), 문자열 반복 상한(`maxReptResultUTF16Units = 65_536`), 셀 문자열 상한(`maxCellTextLength = 32_767`) 가드로 순환 참조 및 수식 오류(`EvaluatedCellValue.error`)를 크래시 없이 결정론적으로 반환합니다.
 - **피벗 테이블 및 차트 엔진 (`PivotTableEngine`, `SheetChartBuilder`)**:
   - `PivotTableConfiguration` 기반 행·열 그룹별 집계(`PivotAggregationFunction`: `sum`, `average`, `count`, `min`, `max`) 및 행/열 소계·총합계 산출(`PivotTableSummary`, `PivotTableEngine.compute`).
   - `SheetChartBuilder.buildChart`를 통한 7종 차트(`SheetChartKind`: `column`, `bar`, `line`, `area`, `pie`, `scatter`, `stackedColumn`) 시리즈(`SheetChartSeries`) 생성.
@@ -66,7 +66,7 @@
   - 페이지 90도 단위 회전(`rotatePage(at:clockwiseDegrees:)`), 빈 페이지 삽입(`insertBlankPage(at:)`), 페이지 삭제(`deletePage(at:)`), 순서 재배치(`reorderPage(from:to:)`), 지정 페이지 추출(`extractPages(oneBasedPageNumbers:newTitle:)`), 분할(`split(atOneBasedPage:)`), 다중 PDF 병합(`merge(documents:mergedTitle:)`).
   - `convertToEditableDocument(targetFormat:)`, `convertToPresentation()`, `fromDocument(_:)`, `fromWorksheet(_:range:)`, `fromPresentation(_:)`를 통한 오피스 문서·시트·슬라이드 ↔ PDF 양방향 변환.
 
-### 2.5 통합 워크스페이스 허브 & 오프라인 스마트 생산성 도구 (`SmartProductivityTools.swift`, `WorkspaceHub.swift`)
+### 2.5 통합 워크스페이스 허브 & 오프라인 스마트 생산성 도구 (`SmartProductivityTools.swift`, `DocumentSecurityAuditor.swift`, `WorkspaceHub.swift`)
 - **통합 홈 허브 및 멀티 탭/스플릿 뷰 워크스페이스 (`WorkspaceViewModel`)**:
   - 6대 허브 섹션(`HubSection`: `home`, `recent`, `pinned`, `templates`, `converter`, `smartAssistant`), 8종 내장 템플릿 및 사용자 정의 템플릿(`OfficeTemplateDescriptor`), 열려 있는 모든 탭의 파일명·본문·수식·발표자 노트·PDF 주석을 아우르는 전문 색인 검색(`WorkspaceHubCatalog.searchTabs`, `filterTabs`).
   - 단일 윈도우 좌우 분할 보기(`splitSecondaryTabID`), 7대 컨텍스트 리본 카테고리(`RibbonCategory`), 5대 모듈별 인터랙티브 상세 에디터 패널(`EditorDetailPanes.swift`).
@@ -74,5 +74,6 @@
   - 20종 전 포맷 간 단건(`convert(_:)`) 및 배치(`executeBatch(_:)`) 변환을 수행하며, 모든 출력 페이로드에 대해 `FormatDetector.verify` 매직 바이트 시그니처 무결성을 검증합니다.
 - **100% 오프라인 로컬 스마트 문서 보조 도구 (`LocalSmartDocumentAssistant`)**:
   - 외부 서버 통신 없이 온디바이스에서 핵심 문장 추출 요약(`summarize(_:maxSentences:)`), 문장 길이·피동 표현·중복 수식어 교정 제안(`analyzeWritingQuality(_:)`), 기한·예산·핵심 수치·조치 항목 추출(`extractActionItemsAndEntities(_:)`), 시트 수치 범위 Z-Score 이상치(`|z| >= 1.8`) 및 추세 분석(`analyzeWorksheetInsights(_:range:)`), 최대 2,048 문단 상한 동적 계획법(LCS) 문서 비교(`compareDocuments(baseline:revised:)`)를 수행합니다.
-- **문서 메타데이터 비식별화 및 컨테이너 보안 감사 (`DocumentSecurityAuditor`)**:
-  - 공유 전 머리말/꼬리말 PII 제거, 변경 이력 작성자 `"Redacted"` 익명화, 코멘트 삭제(`scrubMetadata(from:)`) 및 컨테이너 매직 시그니처·ZIP 압축 폭탄·경로 순회·XXE·암호화 종합 감사(`auditContainer(data:fileName:)`)를 제공합니다.
+- **문서·이미지 메타데이터 비식별화 및 컨테이너 보안 감사 (`DocumentSecurityAuditor`)**
+  - 공유 전 문서(`OfficeDocumentModel`), 시트(`WorksheetModel` 수식 문자열 리터럴·시트 메모·조건부 서식·유효성 검사 포함), 슬라이드(`PresentationDeckModel` 캔버스 도형 제목·본문 포함), PDF(`PDFStudioDocumentModel` 주석 작성자·양식 필드명·펜 레이블·북마크 트리 포함) 전 영역의 주민등록번호·외국인등록번호·연락처·이메일 PII를 비식별화합니다.
+  - 첨부 및 보존 미디어 스트림의 JPEG(`APP1..APP15`, `COM`), PNG(`tEXt`, `zTXt`, `iTXt`, `eXIf`, `tIME`), TIFF(EXIF/GPS/XMP 태그) 바이너리 메타데이터를 제거(`stripBinaryImageMetadata`)하며, 컨테이너 매직 시그니처·ZIP 압축 폭탄·경로 순회·XXE·암호화 종합 감사(`auditContainer(data:fileName:)`)를 수행합니다.

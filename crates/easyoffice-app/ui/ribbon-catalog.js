@@ -201,25 +201,66 @@
     ];
   }
 
-  const DEFAULT_HWP_TABLE_ROWS =
-    '<tr><td>표준화 총괄과</td><td>김민준 서기관</td><td data-doc-num="520">520</td></tr>' +
-    '<tr><td>정보보호 감사팀</td><td>박서연 사무관</td><td data-doc-num="340">340</td></tr>' +
-    '<tr id="doc-table-sum-row"><td>합계 (=SUM(ABOVE))</td><td>자동 집계</td><td id="doc-table-sum-cell" data-doc-num="860">860</td></tr>';
+  function textSpec(v) {
+    return { t: "text", v };
+  }
 
-  const DEFAULT_HWP_EDITOR_HTML =
-    "<h1>행정안전부 전자결재 표준 기안문 (KS X 6101 HWPX)</h1>" +
-    "<p>문서번호: 기획재정담당관-2026-0418 · 시행일자: 2026. 10. 25. · 공개구분: 대국민 공개</p>" +
-    "<h2>1. 추진 배경 및 목적</h2>" +
-    "<p>공공기관 행정 문서의 HWP 5.0(OLE2 CFBF) 및 HWPX(OWPML) 상호운용성 표준을 준수하고 다중 표·누름틀·원고지 조판 정합성을 확보합니다.</p>" +
-    '<div class="doc-table-toolbar" contenteditable="false">' +
-    '<button id="btn-doc-add-row" class="secondary-btn">+행 추가</button>' +
-    '<button id="btn-doc-merge-toggle" class="secondary-btn">셀 병합 토글</button>' +
-    '<button id="btn-doc-eval-table" class="secondary-btn">=SUM(ABOVE)</button>' +
-    "</div>" +
-    '<table id="doc-table" class="sheet-table doc-inline-table"><thead><tr><th>소관 부서</th><th>담당자</th><th>집행액(백만원)</th></tr></thead><tbody id="doc-table-body">' +
-    DEFAULT_HWP_TABLE_ROWS +
-    "</tbody></table>" +
-    '<p id="hwp-manuscript-preview" class="manuscript-notice" hidden>한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성</p>';
+  function elSpec(tag, attrs, data, children) {
+    return { t: "el", tag, attrs: attrs || {}, data: data || {}, children: children || [] };
+  }
+
+  const DEFAULT_HWP_EDITOR_NODES = [
+    elSpec("h1", {}, {}, [textSpec("행정안전부 전자결재 표준 기안문 (KS X 6101 HWPX)")]),
+    elSpec("p", {}, {}, [
+      textSpec("문서번호: 기획재정담당관-2026-0418 · 시행일자: 2026. 10. 25. · 공개구분: 대국민 공개"),
+    ]),
+    elSpec("h2", {}, {}, [textSpec("1. 추진 배경 및 목적")]),
+    elSpec("p", {}, {}, [
+      textSpec(
+        "공공기관 행정 문서의 HWP 5.0(OLE2 CFBF) 및 HWPX(OWPML) 상호운용성 표준을 준수하고 다중 표·누름틀·원고지 조판 정합성을 확보합니다."
+      ),
+    ]),
+    elSpec("div", { class: "doc-table-toolbar", contenteditable: "false" }, {}, [
+      elSpec("button", { id: "btn-doc-add-row", class: "secondary-btn" }, {}, [
+        textSpec("+행 추가"),
+      ]),
+      elSpec("button", { id: "btn-doc-merge-toggle", class: "secondary-btn" }, {}, [
+        textSpec("셀 병합 토글"),
+      ]),
+      elSpec("button", { id: "btn-doc-eval-table", class: "secondary-btn" }, {}, [
+        textSpec("=SUM(ABOVE)"),
+      ]),
+    ]),
+    elSpec("table", { id: "doc-table", class: "sheet-table doc-inline-table" }, {}, [
+      elSpec("thead", {}, {}, [
+        elSpec("tr", {}, {}, [
+          elSpec("th", {}, {}, [textSpec("소관 부서")]),
+          elSpec("th", {}, {}, [textSpec("담당자")]),
+          elSpec("th", {}, {}, [textSpec("집행액(백만원)")]),
+        ]),
+      ]),
+      elSpec("tbody", { id: "doc-table-body" }, {}, [
+        elSpec("tr", {}, {}, [
+          elSpec("td", {}, {}, [textSpec("표준화 총괄과")]),
+          elSpec("td", {}, {}, [textSpec("김민준 서기관")]),
+          elSpec("td", {}, { docNum: "520" }, [textSpec("520")]),
+        ]),
+        elSpec("tr", {}, {}, [
+          elSpec("td", {}, {}, [textSpec("정보보호 감사팀")]),
+          elSpec("td", {}, {}, [textSpec("박서연 사무관")]),
+          elSpec("td", {}, { docNum: "340" }, [textSpec("340")]),
+        ]),
+        elSpec("tr", { id: "doc-table-sum-row" }, {}, [
+          elSpec("td", {}, {}, [textSpec("합계 (=SUM(ABOVE))")]),
+          elSpec("td", {}, {}, [textSpec("자동 집계")]),
+          elSpec("td", { id: "doc-table-sum-cell" }, { docNum: "860" }, [textSpec("860")]),
+        ]),
+      ]),
+    ]),
+    elSpec("p", { id: "hwp-manuscript-preview", class: "manuscript-notice", hidden: "" }, {}, [
+      textSpec("한글(HWP/HWPX) 전용 조판 영역: 결재란 · 누름틀 · 200자 원고지 격자 활성"),
+    ]),
+  ];
 
   function createDefaultRibbonState() {
     return {
@@ -321,7 +362,7 @@
     RIBBON_STYLE_LABELS,
     RIBBON_CATEGORY_ORDER,
     RIBBON_CATEGORY_TOOLS,
-    DEFAULT_HWP_EDITOR_HTML,
+    DEFAULT_HWP_EDITOR_NODES,
     createEmptySlideStyleFields,
     createInitialSlideDeckState,
     createDefaultRibbonState,

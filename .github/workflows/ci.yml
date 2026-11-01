@@ -31,8 +31,11 @@ jobs:
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
 
-      - name: Run WebUI behavioral regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-sheet-atomicity.mjs
+      - name: Verify macOS LaunchServices Info.plist coverage
+        run: node scripts/verify-macos-plist.mjs
+
+      - name: Run WebUI behavioral and security regression suite
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
 
       - name: Check Swift toolchain version
         run: swift --version
@@ -49,7 +52,7 @@ jobs:
       - name: Run Rust cross-platform workspace test suite
         run: cargo test --workspace
 
-      - name: Run Rust Tauri v2 desktop host self-test
+      - name: Run Rust desktop host self-test
         run: cargo run -p easyoffice-app -- --self-test
 
       - name: Build all Swift targets
@@ -77,8 +80,8 @@ jobs:
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
 
-      - name: Run WebUI behavioral regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-sheet-atomicity.mjs
+      - name: Run WebUI behavioral and security regression suite
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
@@ -92,5 +95,35 @@ jobs:
       - name: Run Rust cross-platform workspace test suite (Windows)
         run: cargo test --workspace
 
-      - name: Run Rust Tauri v2 desktop host self-test (Windows)
+      - name: Run Rust desktop host self-test (Windows)
         run: cargo run -p easyoffice-app -- --self-test
+
+      - name: Smoke test Windows x64 --serve loopback WebUI and CSP header
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "target/debug/easyoffice-app.exe" -ArgumentList @("--serve", "18787") -PassThru -NoNewWindow
+          try {
+            $resp = $null
+            for ($i = 0; $i -lt 20; $i++) {
+              try {
+                $candidate = Invoke-WebRequest -Uri "http://127.0.0.1:18787/" -UseBasicParsing -TimeoutSec 2
+                if ($candidate.StatusCode -eq 200) {
+                  $resp = $candidate
+                  break
+                }
+              } catch {
+                Start-Sleep -Milliseconds 250
+              }
+            }
+            if ($null -eq $resp -or $resp.StatusCode -ne 200) {
+              throw "Windows --serve loopback smoke test failed to return HTTP 200"
+            }
+            $csp = ($resp.Headers["Content-Security-Policy"] -join ", ").Trim()
+            if ($csp -ne "default-src 'self'") {
+              throw "Unexpected Content-Security-Policy header: '$csp'"
+            }
+          } finally {
+            if ($null -ne $proc -and -not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force
+            }
+          }

@@ -57,10 +57,11 @@ EasyOffice/
 │   │   ├── BinaryContainerCodec.swift             # BitPacking, CRC32Calculator, ZIP/OOXML/ODF/HWPX/OLE2/HWP5 codecs
 │   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
 │   │   ├── DocumentEngine.swift                   # OfficeDocumentModel, sections, tables, revisions, mail merge
-│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, 77 functions, PivotTableEngine, charts
+│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, 122 built-in functions, PivotTableEngine
 │   │   ├── SlideEngine.swift                      # PresentationDeckModel, SnapGuideCalculator, PresenterSession
 │   │   ├── PDFEngine.swift                        # PDFStudioDocumentModel, annotations, split/merge, Office ↔ PDF
-│   │   ├── SmartProductivityTools.swift           # PDFBinarySerializer, conversion studio, offline assistant, security auditor
+│   │   ├── SmartProductivityTools.swift           # PDFBinarySerializer, conversion studio, offline assistant
+│   │   ├── DocumentSecurityAuditor.swift          # Container security auditor, 3-engine PII & image EXIF scrubber
 │   │   └── WorkspaceHub.swift                     # WorkspaceViewModel, 7-category ribbon catalog, templates, search
 │   └── EasyOfficeApp/                             # Native macOS SwiftUI + AppKit workspace application
 │       ├── EasyOfficeApp.swift                    # @main application entry point & macOS menu commands
@@ -70,12 +71,14 @@ EasyOffice/
 │   └── EasyOfficeTests/                           # Deterministic unit, security, UI parity & benchmark suite
 │       ├── EasyOfficeTests.swift                  # Core tokens, format catalog & baseline engine tests
 │       ├── BinaryContainerCodecTests.swift        # BitPacking, CRC32, ZIP/OLE2/HWP5/CSV/MD/RTF & security guards
-│       ├── EditorEnginesParityTests.swift         # 77 sheet functions, pivot/chart, document/HWP, slide & PDF parity
+│       ├── EditorEnginesParityTests.swift         # 122 sheet functions, pivot/chart, document/HWP, slide & PDF parity
 │       ├── SmartProductivityToolsTests.swift      # Batch conversion, offline smart assistant & security auditor tests
+│       ├── PiiScrubAndSecurityCompletenessTests.swift # Shared 3-engine PII vectors, image EXIF strip & Mirror guard
 │       ├── WorkspaceUIParityTests.swift           # Split view, 7x5 ribbon matrix, WCAG AA & accessibility tests
 │       └── CommercialParityBenchmarkTests.swift   # 20-format round-trip matrix & bit-level throughput benchmarks
 ├── scripts/
 │   ├── check-repo-hygiene.mjs                     # Repository hygiene & specification integrity verifier
+│   ├── verify-macos-plist.mjs                     # LaunchServices 20-extension Info.plist verifier
 │   └── package-macos-release.sh                   # Universal macOS .app bundle, .dmg, .zip, and SHA256SUMS builder
 └── docs/
     ├── architecture.md                            # System architecture, codecs & fail-closed security boundaries
@@ -89,8 +92,8 @@ EasyOffice/
 ## Requirements & Quick Start
 
 ### System Requirements
-- **OS**: macOS 14.0 (Sonoma) or later (Apple Silicon `arm64` & Intel `x86_64` Universal)
-- **Toolchain**: Xcode 16+ / Swift 6.0+
+- macOS 14.0 (Sonoma) or later on Apple Silicon (`arm64`) and Intel (`x86_64`)
+- Xcode 16+ and Swift 6.0+ for native macOS builds, plus Rust 1.85+ for cross-platform core and local WebUI server builds
 
 ### Build, Verify & Run Locally
 
@@ -110,6 +113,16 @@ swift run EasyOfficeApp
 # 5. Package a release macOS .app bundle, .dmg, .zip archive, and SHA256SUMS.txt
 bash scripts/package-macos-release.sh 1.0.0
 ```
+
+### Release Artifacts & First Launch
+
+Unsigned or ad-hoc signed macOS release archives carry the download quarantine attribute. Clear the quarantine flag once after copying `EasyOffice.app` to `/Applications` before opening it.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/EasyOffice.app
+```
+
+Windows release archives (`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`) ship the standalone Rust engine CLI and loopback WebUI server. Run `easyoffice-app.exe --self-test` to verify the engine or run `easyoffice-app.exe --serve 8787` to open the local WebUI workspace at `http://127.0.0.1:8787/`.
 
 ---
 

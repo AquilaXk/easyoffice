@@ -86,10 +86,17 @@
 
     function buildGridRowElement(rowIdx, defaultCellText) {
       const tr = document.createElement("tr");
-      const cellsHtml = GRID_COL_LETTERS.map(
-        (c) => '<td contenteditable="true" data-cell="' + c + rowIdx + '">' + defaultCellText + "</td>"
-      ).join("");
-      tr.innerHTML = '<th data-row="' + rowIdx + '">' + rowIdx + "</th>" + cellsHtml;
+      const th = document.createElement("th");
+      th.dataset.row = String(rowIdx);
+      th.textContent = String(rowIdx);
+      tr.appendChild(th);
+      GRID_COL_LETTERS.forEach((c) => {
+        const td = document.createElement("td");
+        td.setAttribute("contenteditable", "true");
+        td.dataset.cell = c + rowIdx;
+        td.textContent = defaultCellText;
+        tr.appendChild(td);
+      });
       return tr;
     }
 

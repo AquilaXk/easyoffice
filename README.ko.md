@@ -57,10 +57,11 @@ EasyOffice/
 │   │   ├── BinaryContainerCodec.swift             # BitPacking, CRC32Calculator, ZIP/OOXML/ODF/HWPX/OLE2/HWP5 코덱
 │   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
 │   │   ├── DocumentEngine.swift                   # OfficeDocumentModel, 구역 조판, 표 계산식, 변경 추적, 메일 머지
-│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, 77종 함수, PivotTableEngine, 차트 빌더
+│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, 122종 내장 함수, PivotTableEngine, 차트 빌더
 │   │   ├── SlideEngine.swift                      # PresentationDeckModel, SnapGuideCalculator, PresenterSession
 │   │   ├── PDFEngine.swift                        # PDFStudioDocumentModel, 주석, 분할/병합, 오피스 ↔ PDF 변환
-│   │   ├── SmartProductivityTools.swift           # PDFBinarySerializer, 일괄 변환 스튜디오, 오프라인 보조 도구, 보안 감사
+│   │   ├── SmartProductivityTools.swift           # PDFBinarySerializer, 일괄 변환 스튜디오, 오프라인 보조 도구
+│   │   ├── DocumentSecurityAuditor.swift          # 컨테이너 보안 감사기, 3대 엔진 PII 및 이미지 EXIF 제거기
 │   │   └── WorkspaceHub.swift                     # WorkspaceViewModel, 7대 리본 카탈로그, 템플릿, 통합 색인 검색
 │   └── EasyOfficeApp/                             # macOS 네이티브 SwiftUI + AppKit 워크스페이스 애플리케이션
 │       ├── EasyOfficeApp.swift                    # @main 앱 엔트리포인트 및 macOS 메뉴바 커맨드
@@ -70,12 +71,14 @@ EasyOffice/
 │   └── EasyOfficeTests/                           # 결정론적 단위·보안·UI 패리티 및 벤치마크 검증 스위트
 │       ├── EasyOfficeTests.swift                  # 디자인 토큰, 포맷 카탈로그 및 기본 엔진 검증
 │       ├── BinaryContainerCodecTests.swift        # BitPacking, CRC32, ZIP/OLE2/HWP5/CSV/MD/RTF 및 보안 가드 검증
-│       ├── EditorEnginesParityTests.swift         # 77종 시트 수식, 피벗/차트, 문서/HWP, 슬라이드, PDF 패리티 검증
+│       ├── EditorEnginesParityTests.swift         # 122종 시트 수식, 피벗/차트, 문서/HWP, 슬라이드, PDF 패리티 검증
 │       ├── SmartProductivityToolsTests.swift      # 일괄 변환, 오프라인 스마트 보조 도구 및 보안 감사기 검증
+│       ├── PiiScrubAndSecurityCompletenessTests.swift # 3대 엔진 공통 PII 벡터, 이미지 EXIF 제거 및 Mirror 검증
 │       ├── WorkspaceUIParityTests.swift           # 스플릿 뷰, 7x5 리본 매트릭스, WCAG AA 및 접근성 검증
 │       └── CommercialParityBenchmarkTests.swift   # 20종 포맷 라운드트립 매트릭스 및 비트 수준 처리량 벤치마크
 ├── scripts/
 │   ├── check-repo-hygiene.mjs                     # 저장소 위생 및 명세 무결성 검증 가드
+│   ├── verify-macos-plist.mjs                     # LaunchServices 20종 확장자 Info.plist 검증기
 │   └── package-macos-release.sh                   # macOS 유니버설 .app 번들, .dmg, .zip, SHA256SUMS 생성기
 └── docs/
     ├── architecture.md                            # 시스템 아키텍처, 코덱 계층 및 Fail-Closed 보안 경계
@@ -89,8 +92,8 @@ EasyOffice/
 ## 빠른 시작 (Quick Start)
 
 ### 시스템 요구 사항
-- **운영체제**: macOS 14.0 (Sonoma) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 지원)
-- **개발 도구**: Xcode 16+ / Swift 6.0+
+- macOS 14.0 (Sonoma) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 지원)
+- Xcode 16+ 및 Swift 6.0+ (크로스플랫폼 코어 및 로컬 WebUI 서버 빌드는 Rust 1.85+ 사용)
 
 ### 로컬 위생 검증 · 빌드 · 테스트 · 실행
 
@@ -110,6 +113,16 @@ swift run EasyOfficeApp
 # 5. 배포용 EasyOffice.app 번들, .dmg, .zip 및 SHA256SUMS.txt 패키징
 bash scripts/package-macos-release.sh 1.0.0
 ```
+
+### 릴리스 실행 안내
+
+애드혹 서명된 macOS 배포본을 내려받은 뒤 Gatekeeper 경고가 표시되면 `/Applications/EasyOffice.app`에서 격리 속성을 한 번 제거한 뒤 실행합니다.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/EasyOffice.app
+```
+
+Windows 배포 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`)는 독립 실행형 Rust 코어 CLI와 로컬 루프백 WebUI 서버를 제공합니다. `easyoffice-app.exe --self-test`로 엔진 무결성을 검증하거나 `easyoffice-app.exe --serve 8787`을 실행해 브라우저에서 `http://127.0.0.1:8787/` 워크스페이스를 열 수 있습니다.
 
 ---
 
