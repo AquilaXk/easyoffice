@@ -693,7 +693,8 @@ impl SheetEngine {
                             && c.col() >= sp.2
                             && c.col() <= max_c
                         {
-                            pop_offsets.push(((c.row() - sp.1) as usize, (c.col() - sp.2) as usize));
+                            pop_offsets
+                                .push(((c.row() - sp.1) as usize, (c.col() - sp.2) as usize));
                         }
                     }
                 }
