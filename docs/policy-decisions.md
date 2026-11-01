@@ -799,3 +799,29 @@
   - 본문 일반 텍스트의 이스케이프된 XML 구문까지 일괄 거부하는 방식은 정상적인 개발·보안 문서 편집을 가로막는 과검증이므로 기각.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node scripts/verify-macos-plist.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace -- --test-threads=1`, `swift test`
 - **Revisit when** Apple Developer ID 공증(Notarization) 인증서 또는 Windows 코드 서명 설치 관리자 파이프라인을 도입할 때.
+
+### 38. 스프레드시트 DAG 위상 정렬 재계산, 단일 강제 변환 헬퍼, IEEE 754 유효숫자 포맷 및 Rust·Swift 수식 엔진 동등성 정책 (2026-11-01)
+
+- **Decision (`PD-063`)**
+  1. **비재귀 DAG 위상 정렬 재계산 및 부분 합산 없는 평가 예산 강제 (`crates/easyoffice-sheet/src/{lib.rs,evaluator.rs,coordinates.rs,parser.rs}`, `Sources/EasyOfficeCore/{SheetEngine.swift,SheetBuiltInFunctions.swift,SheetStatisticalAndLogicalFunctions.swift,SheetCoordinatesAndAST.swift,SheetFormulaCompiler.swift}`)**
+     - 스프레드시트 재계산 경로를 재귀 호출 대신 명시적 작업 스택 기반 후위 위상 정렬(Kahn/Tarjan 비재귀 순회)과 워크북 세대 캐시(`EvaluationContext`)로 전환하여 `2,000`셀 이상의 정방향·역방향 의존 체인을 호출 스택 오버플로 없이 $O(V + E)$에 평가합니다.
+     - 범위 집계(`SUM`, `AVERAGE`, `COUNT`, `COUNTIF`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `COUNTIFS`) 시 `MAX_RANGE_EXPANSION_CELLS`(`100,000`) 상한은 실제 식에서 참조한 셀 영역 단위로 검사하되, 희소 인덱스 스트리밍(`4,096`셀 초과 범위)을 통해 `99,999`개 채워진 셀에 대한 다중 집계 수식이 하나의 시트에서 부분 합산(silent truncation) 없이 정확한 결과를 반환하도록 보장합니다. 예산 초과 시에는 부분 합산 대신 즉시 `#REF!` 또는 `#VALUE!`를 반환합니다.
+     - 전체 열·행 참조(`A:A`, `B:C`, `1:1`, `2:3`)를 `1..1,048,576`행(`MAX_ROWS`) 및 `1..16,384`열(`XFD`, `MAX_COLS`)로 정규화하고, 수식 토큰 상한을 `8,192`개로 확장하여 `1,025`개 이상의 항을 가진 수식을 지원합니다.
+  2. **단일 값 강제 변환(Coercion) 테이블, 평가 출구 유한성 가드 및 IEEE 754 15자리 유효숫자 포맷 (`crates/easyoffice-sheet/src/{coercion.rs,chart_pivot.rs}`, `Sources/EasyOfficeCore/SheetValueCoercion.swift`, `fixtures/sheet-coercion-parity.json`)**
+     - 직접 스칼라 산술·인자 강제 변환(`Empty -> 0`, `Boolean -> 1/0`, 숫자·통화·백분율·회계 괄호·ISO 날짜 문자열 파싱, 그 외 `#VALUE!`), 범위 참조 집계(숫자만 집계하고 텍스트·논리값·빈 셀 무시), 비교 연산(`Number < Text < Boolean` 타입 순위, 대소문자 무시 텍스트 비교, 빈 셀은 `0` 또는 `""`와 동치)을 Rust(`coercion.rs`)와 Swift(`SheetValueCoercion.swift`) 양쪽의 단일 헬퍼로 일원화하고 `fixtures/sheet-coercion-parity.json` 공통 벡터로 검증합니다.
+     - 모든 수식 평가 출구에서 `NaN` 및 `±Infinity`를 검사하여 `#NUM!`으로 정규화하고, 일반 수치 포맷(`format_general_number` / `formatGeneralNumber`)은 IEEE 754 배정밀도 유효숫자 15자리 반올림으로 `0.1 + 0.2 -> "0.3"`을 출력하며, 조건부 집계(`>0`)는 `1e-12` 데드존 없이 엄격한 `0.0` 비교를 수행합니다.
+     - SVG 차트 렌더러(`render_chart_svg` / `ChartEngine`)는 비유한 값을 필터링하고 유효 데이터에 유한 클램프(`[-1e12, 1e12]`)를 적용하여 어떠한 입력에서도 `NaN`/`Inf` 좌표가 없는 유효한 SVG 마크업을 보장합니다.
+     - Swift `safeInt` 헬퍼는 하한을 엄격한 부등호(`t > -9223372036854775808.0`)로 제한하여 `-2^63`(`Int.min`) 입력이 후속 부호 반전(`abs`, `-x`, `%`)에서 산술 오버플로 트랩을 일으키지 않고 `#NUM!`을 반환하도록 고정합니다.
+  3. **수식 문법·재무·와일드카드·피벗·내장 함수 패리티 및 모듈당 1,000줄 미만 분할 (`crates/easyoffice-sheet/src/functions_*.rs`, `Sources/EasyOfficeCore/Sheet*.swift`, `Sources/EasyOfficeApp/WorkspaceRibbonCommandRouter.swift`)**
+     - 생략된 인자(`=IF(TRUE, , 5)`, `=XLOOKUP("x", A1:A2, B1:B2, , 0)`)를 `Missing` AST 노드로 보존하고, 에러 리터럴(`#N/A+1`), 중첩 비교(`=3>2>1`), `~*`/`~?`/`~~` 와일드카드 이스케이프(`COUNTIF`, `SUMIF`, `MATCH`, `SEARCH`, `VLOOKUP`, `XLOOKUP`), 기초 납입(`type=1`) `IPMT`/`PPMT` 및 거대 원금 `RATE` 수렴, 음수 유의값 `FLOOR`/`CEILING`, `SUBTOTAL` 중첩 더블카운팅 제외, `INDIRECT` 시트 반복 범위(`'Summary'!A1:'Summary'!A2`) 및 `a1` 불리언 인자 검증을 양쪽 엔진에 동일하게 구현합니다.
+     - 날짜 직렬 함수를 포함하는 수식 셀은 표시 형식이 `.general`일 때 자동으로 ISO 날짜(`YYYY-MM-DD`)로 렌더링하며, 피벗 테이블 생성 시 기존 `"피벗 요약"` 시트를 재사용하고 소수 값을 보존합니다.
+     - `Sources/EasyOfficeCore/Sheet*.swift`(12개 모듈)와 `crates/easyoffice-sheet/src/*.rs`(10개 모듈)의 모든 소스 파일을 예외 없이 1,000줄 미만으로 분할하고 `scripts/check-repo-hygiene.mjs`로 강제합니다.
+- **Why** 대규모 스프레드시트 체인의 스택 한계와 희소 범위 집계 오류를 제거하고, ECMA-376 및 OpenFormula 표준에 부합하는 수치·날짜·재무·조회 연산 동등성을 Rust와 Swift 코어 전반에 확립하기 위함입니다.
+- **Trade-offs**
+  1. `A:A`나 `1:1` 같은 전체 열·행 참조를 허용하되 실제 순회는 채워진 희소 셀 인덱스(`populatedCoordinates` / `BTreeMap`)로 수행하고, 밀집 2차원 배열 물질화가 필요한 연산(`TRANSPOSE`, `MUNIT` 등)은 `MAX_RANGE_EXPANSION_CELLS`(`100,000`) 상한으로 방어하여 호환성과 메모리 안전성을 동시에 확보합니다.
+  2. `INDIRECT`는 파서 복잡도와 보안 경계를 단순하게 유지하기 위해 A1 표기법(`a1 = TRUE` 또는 `1`)만 허용하고 `R1C1`(`a1 = FALSE` 또는 `0`) 모드는 명시적 `#VALUE!`로 거부합니다.
+- **Alternatives rejected**
+  - 재귀 평가기의 호출 깊이 상수만 늘리는 방식은 OS 스레드 스택 크기에 종속되어 깊은 체인에서 프로세스 크래시를 유발하므로 비재귀 위상 정렬로 교체.
+  - 부동소수점 비교에서 임의의 고정 허용오차(`1e-12`)로 `0` 근처 양수를 `0`으로 간주하는 방식은 미소 과학 수치(`1E-15`)의 `>0` 집계를 왜곡하므로 평가·비교 단계는 IEEE 754 정밀도를 유지하고 표시 단계에서만 15자리 유효숫자 포맷을 적용.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `cargo test --workspace -- --test-threads=1`, `cargo clippy --workspace --all-targets -- -D warnings`, `swift build`, `swift test`
+- **Revisit when** 다중 스레드 병렬 DAG 레벨 평가기 또는 동적 배열 스필(Spill) 연산자(`#`)를 도입할 때.

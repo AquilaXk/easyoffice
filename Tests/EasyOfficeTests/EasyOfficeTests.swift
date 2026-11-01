@@ -181,7 +181,7 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(sheet.evaluate(at: "B9"), .number(50))
     XCTAssertEqual(sheet.evaluate(at: "B10"), .error("#DIV/0!"))
     XCTAssertEqual(sheet.evaluate(at: "B11"), .error("#NAME?"))
-    XCTAssertEqual(sheet.evaluate(at: "C1"), .error("#REF!"))
+    XCTAssertEqual(sheet.evaluate(at: "C1"), .error("#CYCLE!"))
   }
 
   func testSlideDeckOrderingSmartGuidesAndPDFConversion() {
@@ -416,7 +416,7 @@ final class EasyOfficeTests: XCTestCase {
     try sheet1.setCell("B1", rawValue: "=C1")
     try sheet1.setCell("C1", rawValue: "=B1")
     XCTAssertEqual(sheet1.evaluate(at: "A1"), .number(550))
-    XCTAssertEqual(sheet1.evaluate(at: "B1"), .error("#REF!"))
+    XCTAssertEqual(sheet1.evaluate(at: "B1"), .error("#CYCLE!"))
 
     let vm = WorkspaceViewModel()
     vm.openNewSampleTab(for: .sheet)

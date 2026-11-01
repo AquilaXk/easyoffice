@@ -69,9 +69,9 @@ public struct PivotTableEngine: Sendable {
     let dataRows = hasHeaderRow ? Array(allRows.dropFirst()) : allRows
 
     var rowKeys: [String] = []
-    var rowKeySet = Set<String>()
+    var rowKeyCanonical: [String: String] = [:]
     var colKeys: [String] = []
-    var colKeySet = Set<String>()
+    var colKeyCanonical: [String: String] = [:]
     var buckets: [String: [String: [Double]]] = [:]
     var rowBuckets: [String: [Double]] = [:]
     var colBuckets: [String: [Double]] = [:]
@@ -87,35 +87,50 @@ public struct PivotTableEngine: Sendable {
       }
       guard !row.allSatisfy({ $0 == .empty || $0.description.isEmpty }) else { continue }
       let rawRKey = row[configuration.rowFieldColumnIndex].description
-      let rKey = rawRKey.isEmpty ? "(빈 값)" : rawRKey
-      let cKey: String
+      let displayRKey = rawRKey.isEmpty ? "(빈 값)" : rawRKey
+      let rFolded = displayRKey.lowercased()
+      let rKey: String
+      if let existing = rowKeyCanonical[rFolded] {
+        rKey = existing
+      } else {
+        rowKeyCanonical[rFolded] = displayRKey
+        rowKeys.append(displayRKey)
+        rKey = displayRKey
+      }
+
+      let displayCKey: String
       if let colField = configuration.columnFieldColumnIndex,
         colField >= 0,
         colField < row.count
       {
         let rawCKey = row[colField].description
-        cKey = rawCKey.isEmpty ? "(빈 값)" : rawCKey
+        displayCKey = rawCKey.isEmpty ? "(빈 값)" : rawCKey
       } else {
-        cKey = "Total"
+        displayCKey = "Total"
+      }
+      let cFolded = displayCKey.lowercased()
+      let cKey: String
+      if let existing = colKeyCanonical[cFolded] {
+        cKey = existing
+      } else {
+        colKeyCanonical[cFolded] = displayCKey
+        colKeys.append(displayCKey)
+        cKey = displayCKey
       }
 
-      if rowKeySet.insert(rKey).inserted { rowKeys.append(rKey) }
-      if colKeySet.insert(cKey).inserted { colKeys.append(cKey) }
-
       let valCell = row[configuration.valueFieldColumnIndex]
-      if let val = valCell.numericValue {
+      if configuration.aggregation == .count {
+        if valCell != .empty && !valCell.description.isEmpty {
+          buckets[rKey, default: [:]][cKey, default: []].append(1.0)
+          rowBuckets[rKey, default: []].append(1.0)
+          colBuckets[cKey, default: []].append(1.0)
+          allValues.append(1.0)
+        }
+      } else if case .number(let val) = valCell, val.isFinite {
         buckets[rKey, default: [:]][cKey, default: []].append(val)
         rowBuckets[rKey, default: []].append(val)
         colBuckets[cKey, default: []].append(val)
         allValues.append(val)
-      } else if configuration.aggregation == .count,
-        valCell != .empty,
-        !valCell.description.isEmpty
-      {
-        buckets[rKey, default: [:]][cKey, default: []].append(1.0)
-        rowBuckets[rKey, default: []].append(1.0)
-        colBuckets[cKey, default: []].append(1.0)
-        allValues.append(1.0)
       }
     }
 

@@ -43,12 +43,13 @@ fn test_all_122_canonical_functions_evaluated() {
         s.evaluate_formula_str("=CEILING(4.2, 2)+FLOOR(4.9, 2)+QUOTIENT(17, 5)"),
         EvaluatedCellValue::Number(13.0)
     );
-    assert_eq!(
-        s.evaluate_formula_str(
-            "=ROUND(LN(EXP(2))+LOG10(100)+LOG(8,2)+SIN(0)+COS(0)+TAN(0)+RAND(), 2)"
-        ),
-        EvaluatedCellValue::Number(8.5)
-    );
+    let trig_rand = s
+        .evaluate_formula_str(
+            "=ROUND(LN(EXP(2))+LOG10(100)+LOG(8,2)+SIN(0)+COS(0)+TAN(0)+RAND(), 6)",
+        )
+        .as_number()
+        .unwrap();
+    assert!((8.0..9.0).contains(&trig_rand));
     assert!(
         (s.evaluate_formula_str("=PI()").as_number().unwrap() - std::f64::consts::PI).abs() < 1e-9
     );
@@ -437,7 +438,7 @@ fn test_zero_alloc_streaming_range_aggregations_and_budget_guard() {
 
 #[test]
 fn test_zero_alloc_xlookup_match_welford_stdev_rank_averagea_and_wildcard_escapes() {
-    use crate::functions_date_fin::{wildcard_match, wildcard_match_alloc_baseline};
+    use crate::coercion::{wildcard_match, wildcard_match_alloc_baseline};
 
     let cases = [
         ("Report_2026_Final.xlsx", "report*final.xlsx", true),

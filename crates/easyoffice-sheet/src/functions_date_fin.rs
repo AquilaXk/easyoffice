@@ -40,7 +40,7 @@ impl SheetEngine {
                 let serial = serial_from_civil(adj_y, adj_m, 1)
                     .checked_add(d - 1)
                     .ok_or(FormulaError::Num)?;
-                if !(1..=2_958_465).contains(&serial) {
+                if !(0..=2_958_465).contains(&serial) {
                     return Err(FormulaError::Num);
                 }
                 Ok(EvaluatedCellValue::Number(serial as f64))
@@ -126,7 +126,7 @@ impl SheetEngine {
                 )?;
                 Ok(EvaluatedCellValue::Number((end_d - start_d) as f64))
             }
-            "EDATE" => {
+            "EDATE" | "EOMONTH" => {
                 if args.len() != 2 {
                     return Err(FormulaError::Value);
                 }
@@ -145,12 +145,187 @@ impl SheetEngine {
                     .ok_or(FormulaError::Num)?;
                 let ny = total_m.div_euclid(12);
                 let nm = total_m.rem_euclid(12) + 1;
-                let nd = d.min(days_in_month(ny, nm));
+                let max_d = days_in_month(ny, nm);
+                let nd = if name == "EOMONTH" {
+                    max_d
+                } else {
+                    d.min(max_d)
+                };
                 let serial = serial_from_civil(ny, nm, nd);
                 if !(1..=2_958_465).contains(&serial) {
                     return Err(FormulaError::Num);
                 }
                 Ok(EvaluatedCellValue::Number(serial as f64))
+            }
+            "TODAY" | "NOW" => {
+                if !args.is_empty() {
+                    return Err(FormulaError::Value);
+                }
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(1_704_067_200);
+                let days = 25_569.0 + ((secs / 86_400) as f64);
+                Ok(EvaluatedCellValue::Number(if name == "TODAY" {
+                    days
+                } else {
+                    days + ((secs % 86_400) as f64) / 86_400.0
+                }))
+            }
+            "DATEVALUE" => {
+                if args.len() != 1 {
+                    return Err(FormulaError::Value);
+                }
+                let EvaluatedCellValue::Text(s) = self.eval_arg_val(&args[0], ctx, depth)? else {
+                    return Err(FormulaError::Value);
+                };
+                parse_iso_date_serial(&s)
+                    .map(EvaluatedCellValue::Number)
+                    .ok_or(FormulaError::Value)
+            }
+            "WEEKDAY" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(FormulaError::Value);
+                }
+                let serial = checked_f64_to_i64(
+                    self.eval_arg_num(&args[0], ctx, depth)?.floor(),
+                    0.0,
+                    2_958_465.0,
+                )?;
+                let ret_type = if args.len() == 2 {
+                    checked_f64_to_i64(self.eval_arg_num(&args[1], ctx, depth)?, 1.0, 3.0)?
+                } else {
+                    1
+                };
+                let w = match ret_type {
+                    1 => (serial - 1).rem_euclid(7) + 1,
+                    2 => (serial - 2).rem_euclid(7) + 1,
+                    3 => (serial - 2).rem_euclid(7),
+                    _ => return Err(FormulaError::Num),
+                };
+                Ok(EvaluatedCellValue::Number(w as f64))
+            }
+            "DATEDIF" => {
+                if args.len() != 3 {
+                    return Err(FormulaError::Value);
+                }
+                let s1 = checked_f64_to_i64(
+                    self.eval_arg_num(&args[0], ctx, depth)?.floor(),
+                    0.0,
+                    2_958_465.0,
+                )?;
+                let s2 = checked_f64_to_i64(
+                    self.eval_arg_num(&args[1], ctx, depth)?.floor(),
+                    0.0,
+                    2_958_465.0,
+                )?;
+                if s1 > s2 {
+                    return Err(FormulaError::Num);
+                }
+                let EvaluatedCellValue::Text(u_raw) = self.eval_arg_val(&args[2], ctx, depth)?
+                else {
+                    return Err(FormulaError::Value);
+                };
+                let (y1, m1, d1) = civil_from_serial(s1);
+                let (y2, m2, d2) = civil_from_serial(s2);
+                let diff = match u_raw.trim().to_ascii_uppercase().as_str() {
+                    "D" => s2 - s1,
+                    "M" => (y2 - y1) * 12 + (m2 - m1) - i64::from(d2 < d1),
+                    "Y" => (y2 - y1) - i64::from((m2, d2) < (m1, d1)),
+                    "YM" => ((m2 - m1) - i64::from(d2 < d1)).rem_euclid(12),
+                    "MD" => {
+                        if d2 >= d1 {
+                            d2 - d1
+                        } else {
+                            let (py, pm) = if m2 == 1 { (y2 - 1, 12) } else { (y2, m2 - 1) };
+                            days_in_month(py, pm) - d1 + d2
+                        }
+                    }
+                    "YD" => {
+                        let mut cand = serial_from_civil(y2, m1, d1);
+                        if cand > s2 {
+                            cand = serial_from_civil(y2 - 1, m1, d1);
+                        }
+                        s2 - cand
+                    }
+                    _ => return Err(FormulaError::Num),
+                };
+                Ok(EvaluatedCellValue::Number(diff as f64))
+            }
+            "WORKDAY" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(FormulaError::Value);
+                }
+                let mut cur = checked_f64_to_i64(
+                    self.eval_arg_num(&args[0], ctx, depth)?.floor(),
+                    1.0,
+                    2_958_465.0,
+                )?;
+                let mut rem = checked_f64_to_i64(
+                    self.eval_arg_num(&args[1], ctx, depth)?,
+                    -1_000_000.0,
+                    1_000_000.0,
+                )?;
+                let mut holidays = std::collections::HashSet::new();
+                if args.len() == 3 {
+                    for v in self.eval_range_vec(&args[2], ctx, depth)? {
+                        if let Some(n) = v.as_number() {
+                            holidays.insert(n.floor() as i64);
+                        }
+                    }
+                }
+                let step = if rem >= 0 { 1 } else { -1 };
+                rem = rem.abs();
+                while rem > 0 {
+                    cur += step;
+                    let wd = (cur - 2).rem_euclid(7) + 1;
+                    if wd <= 5 && !holidays.contains(&cur) {
+                        rem -= 1;
+                    }
+                }
+                if !(1..=2_958_465).contains(&cur) {
+                    return Err(FormulaError::Num);
+                }
+                Ok(EvaluatedCellValue::Number(cur as f64))
+            }
+            "NETWORKDAYS" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(FormulaError::Value);
+                }
+                let s1 = checked_f64_to_i64(
+                    self.eval_arg_num(&args[0], ctx, depth)?.floor(),
+                    1.0,
+                    2_958_465.0,
+                )?;
+                let s2 = checked_f64_to_i64(
+                    self.eval_arg_num(&args[1], ctx, depth)?.floor(),
+                    1.0,
+                    2_958_465.0,
+                )?;
+                let mut holidays = std::collections::HashSet::new();
+                if args.len() == 3 {
+                    for v in self.eval_range_vec(&args[2], ctx, depth)? {
+                        if let Some(n) = v.as_number() {
+                            holidays.insert(n.floor() as i64);
+                        }
+                    }
+                }
+                let (lo, hi, sign) = if s1 <= s2 {
+                    (s1, s2, 1i64)
+                } else {
+                    (s2, s1, -1i64)
+                };
+                if hi - lo > 1_000_000 {
+                    return Err(FormulaError::Num);
+                }
+                let mut cnt = 0i64;
+                for d in lo..=hi {
+                    let wd = (d - 2).rem_euclid(7) + 1;
+                    if wd <= 5 && !holidays.contains(&d) {
+                        cnt += 1;
+                    }
+                }
+                Ok(EvaluatedCellValue::Number((cnt * sign) as f64))
             }
             _ => Err(FormulaError::Name),
         }
@@ -208,8 +383,8 @@ impl SheetEngine {
                 let ipmt = if (per - 1.0).abs() < 1e-9 && t != 0.0 {
                     0.0
                 } else {
-                    let p = if t != 0.0 { per - 2.0 } else { per - 1.0 };
-                    calc_fv(rate, p, pmt, pv, t)? * rate / (if t != 0.0 { 1.0 + rate } else { 1.0 })
+                    calc_fv(rate, per - 1.0, pmt, pv, t)? * rate
+                        / (if t != 0.0 { 1.0 + rate } else { 1.0 })
                 };
                 Ok(EvaluatedCellValue::Number(if name == "IPMT" {
                     ipmt
@@ -392,6 +567,8 @@ impl SheetEngine {
                 if nper <= 0.0 {
                     return Err(FormulaError::Num);
                 }
+                let scale = pv.abs().max(fv.abs()).max(pmt.abs() * nper).max(1.0);
+                let f_tol = 1e-9 * scale;
                 for _ in 0..100 {
                     if r <= -0.999_999 || !r.is_finite() {
                         break;
@@ -400,18 +577,26 @@ impl SheetEngine {
                         break;
                     };
                     let f = fv_r - fv;
-                    if f.abs() < 1e-7 {
+                    if f.abs() <= f_tol {
                         return Ok(EvaluatedCellValue::Number(r));
                     }
-                    let eps = 1e-6;
+                    let eps = 1e-7 * r.abs().max(1.0);
                     let Ok(fv_eps) = calc_fv(r + eps, nper, pmt, pv, t) else {
                         break;
                     };
                     let df = (fv_eps - fv - f) / eps;
-                    if df.abs() < 1e-15 {
+                    if !df.is_finite() || df.abs() < 1e-15 {
                         break;
                     }
-                    r -= f / df;
+                    let step = f / df;
+                    r -= step;
+                    if step.abs() <= 1e-12 * r.abs().max(1e-6) {
+                        if let Ok(fv_chk) = calc_fv(r, nper, pmt, pv, t) {
+                            if (fv_chk - fv).abs() <= 1e-6 * scale {
+                                return Ok(EvaluatedCellValue::Number(r));
+                            }
+                        }
+                    }
                 }
                 let mut lo = -0.99_f64;
                 let mut hi = 10.0_f64;
@@ -427,7 +612,9 @@ impl SheetEngine {
                                 break;
                             };
                             let f_mid = fv_mid - fv;
-                            if f_mid.abs() < 1e-9 || (hi - lo).abs() < 1e-12 {
+                            if f_mid.abs() <= f_tol
+                                || (hi - lo).abs() <= 1e-12 * mid.abs().max(1e-6)
+                            {
                                 return Ok(EvaluatedCellValue::Number(mid));
                             }
                             if f_lo * f_mid <= 0.0 {
@@ -552,6 +739,47 @@ impl SheetEngine {
                 }
                 Ok(EvaluatedCellValue::Number(dep))
             }
+            "SYD" => {
+                if args.len() != 4 {
+                    return Err(FormulaError::Value);
+                }
+                let cost = self.eval_arg_num(&args[0], ctx, depth)?;
+                let salvage = self.eval_arg_num(&args[1], ctx, depth)?;
+                let life = self.eval_arg_num(&args[2], ctx, depth)?;
+                let per = self.eval_arg_num(&args[3], ctx, depth)?;
+                if life <= 0.0 || per <= 0.0 || per > life {
+                    return Err(FormulaError::Num);
+                }
+                Ok(EvaluatedCellValue::Number(
+                    (cost - salvage) * (life - per + 1.0) * 2.0 / (life * (life + 1.0)),
+                ))
+            }
+            "EFFECT" => {
+                if args.len() != 2 {
+                    return Err(FormulaError::Value);
+                }
+                let nominal = self.eval_arg_num(&args[0], ctx, depth)?;
+                let npery = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
+                if nominal <= 0.0 || npery < 1.0 {
+                    return Err(FormulaError::Num);
+                }
+                Ok(EvaluatedCellValue::Number(
+                    (1.0 + nominal / npery).powf(npery) - 1.0,
+                ))
+            }
+            "NOMINAL" => {
+                if args.len() != 2 {
+                    return Err(FormulaError::Value);
+                }
+                let effect = self.eval_arg_num(&args[0], ctx, depth)?;
+                let npery = self.eval_arg_num(&args[1], ctx, depth)?.trunc();
+                if effect <= 0.0 || npery < 1.0 {
+                    return Err(FormulaError::Num);
+                }
+                Ok(EvaluatedCellValue::Number(
+                    ((effect + 1.0).powf(1.0 / npery) - 1.0) * npery,
+                ))
+            }
             _ => Err(FormulaError::Name),
         }
     }
@@ -648,110 +876,11 @@ pub(crate) fn parse_iso_date_serial(s: &str) -> Option<f64> {
     Some(serial_from_civil(y, m, d) as f64)
 }
 
-#[inline]
-fn next_pattern_token(pattern: &str, p_idx: usize) -> Option<(char, bool, usize)> {
-    let mut chars = pattern[p_idx..].chars();
-    let ch = chars.next()?;
-    let after_first = p_idx + ch.len_utf8();
-    if ch == '~' {
-        if let Some(escaped) = chars.next() {
-            if matches!(escaped, '*' | '?' | '~') {
-                return Some((escaped, true, after_first + escaped.len_utf8()));
-            }
-        }
+pub(crate) fn ymd_to_excel_serial(y: i64, m: i64, d: i64) -> Result<i64, FormulaError> {
+    if !(1900..=9999).contains(&y) || !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) {
+        return Err(FormulaError::Value);
     }
-    Some((ch, false, after_first))
-}
-
-#[inline]
-fn chars_eq_case_insensitive(a: char, b: char) -> bool {
-    if a == b {
-        return true;
-    }
-    if a.is_ascii() && b.is_ascii() {
-        return a.eq_ignore_ascii_case(&b);
-    }
-    a.to_lowercase().eq(b.to_lowercase())
-}
-
-/// Zero-allocation two-pointer backtracking wildcard matcher (`*`, `?`, `~*`, `~?`, `~~`)
-/// operating directly on UTF-8 `&str` slices with case-insensitive comparison.
-pub fn wildcard_match(text: &str, pattern: &str) -> bool {
-    let mut t_idx = 0usize;
-    let mut p_idx = 0usize;
-    let mut star_p: Option<usize> = None;
-    let mut match_t = 0usize;
-
-    while t_idx < text.len() {
-        if let Some((p_ch, is_escaped, next_p)) = next_pattern_token(pattern, p_idx) {
-            if !is_escaped && p_ch == '*' {
-                star_p = Some(next_p);
-                match_t = t_idx;
-                p_idx = next_p;
-                continue;
-            }
-            let t_ch = text[t_idx..].chars().next().unwrap();
-            if (!is_escaped && p_ch == '?') || chars_eq_case_insensitive(p_ch, t_ch) {
-                t_idx += t_ch.len_utf8();
-                p_idx = next_p;
-                continue;
-            }
-        }
-        if let Some(sp) = star_p {
-            p_idx = sp;
-            let skip_ch = text[match_t..].chars().next().unwrap();
-            match_t += skip_ch.len_utf8();
-            t_idx = match_t;
-        } else {
-            return false;
-        }
-    }
-
-    while let Some((p_ch, is_escaped, next_p)) = next_pattern_token(pattern, p_idx) {
-        if !is_escaped && p_ch == '*' {
-            p_idx = next_p;
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
-/// Baseline 2D heap-allocated DP wildcard matcher retained for 1:1 benchmark verification.
-pub fn wildcard_match_alloc_baseline(text: &str, pattern: &str) -> bool {
-    let t: Vec<char> = text.to_lowercase().chars().collect();
-    let pat_lower = pattern.to_lowercase();
-    let mut p: Vec<(char, bool)> = Vec::with_capacity(pat_lower.len());
-    let mut chars = pat_lower.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '~' {
-            if let Some(&next) = chars.peek() {
-                if matches!(next, '*' | '?' | '~') {
-                    p.push((chars.next().unwrap(), true));
-                    continue;
-                }
-            }
-        }
-        p.push((ch, false));
-    }
-    let mut dp = vec![vec![false; p.len() + 1]; t.len() + 1];
-    dp[0][0] = true;
-    for j in 1..=p.len() {
-        if !p[j - 1].1 && p[j - 1].0 == '*' {
-            dp[0][j] = dp[0][j - 1];
-        }
-    }
-    for i in 1..=t.len() {
-        for j in 1..=p.len() {
-            let (pch, escaped) = p[j - 1];
-            if !escaped && pch == '*' {
-                dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
-            } else if (!escaped && pch == '?') || pch == t[i - 1] {
-                dp[i][j] = dp[i - 1][j - 1];
-            }
-        }
-    }
-    dp[t.len()][p.len()]
+    Ok(serial_from_civil(y, m, d))
 }
 
 #[inline]
@@ -762,7 +891,7 @@ fn checked_f64_to_i64(n: f64, min: f64, max: f64) -> Result<i64, FormulaError> {
     Ok(n.trunc() as i64)
 }
 
-fn serial_from_civil(y: i64, m: i64, d: i64) -> i64 {
+pub(crate) fn serial_from_civil(y: i64, m: i64, d: i64) -> i64 {
     if y == 1900 && m == 2 && d == 29 {
         return 60;
     }
@@ -780,7 +909,7 @@ fn serial_from_civil(y: i64, m: i64, d: i64) -> i64 {
     }
 }
 
-fn civil_from_serial(serial: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_serial(serial: i64) -> (i64, i64, i64) {
     if serial == 60 {
         return (1900, 2, 29);
     }
