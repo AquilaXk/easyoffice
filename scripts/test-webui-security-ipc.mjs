@@ -254,7 +254,7 @@ test("PII scrub fails closed on HTTP 400 or empty scrubbedText, makes zero DOM w
 
 test("structured JSON IPC preserves ? and %3B in cross-sheet formulas, literals, and real container security audits", async () => {
   const capturedCalls = [];
-  const { document, sandbox, userClick } = await createWebUiDom();
+  const { document, sandbox } = await createWebUiDom();
   const origInvoke = sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
     getActiveModule: () => "SHEET",
     ribbonCategoryTools: sandbox.__EASYOFFICE_RIBBON_CATALOG__.RIBBON_CATEGORY_TOOLS,

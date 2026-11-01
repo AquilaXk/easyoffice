@@ -86,7 +86,7 @@
       }
       if (!docTabStore.HWP) {
         docTabStore.HWP = {
-          editorNodes: JSON.parse(JSON.stringify(defaultHwpEditorNodes || [])),
+          editorNodes: structuredClone(defaultHwpEditorNodes || []),
           layoutStyle: captureDocLayoutStyle(null),
         };
       }

@@ -366,7 +366,10 @@ if (
 ) {
   const formatSwift = fs.readFileSync(formatSwiftPath, "utf8");
   const enumSection = formatSwift.split("public var id:")[0].split("public enum DocumentFormat")[1] || "";
-  const formatCount = (enumSection.match(/^\s*case\s+[a-z0-9]+\b/gm) || []).length;
+  const formatCount = enumSection
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("case ")).length;
 
   const sheetSwift = fs.readFileSync(sheetSwiftPath, "utf8");
   const fnMatch = sheetSwift.match(/supportedFunctionNames:\s*\[String\]\s*=\s*\[([\s\S]*?)\]\.sorted\(\)/);
@@ -380,7 +383,10 @@ if (
 
   const rustIpcLib = fs.readFileSync(rustIpcLibPath, "utf8");
   const dispatchBlock = (rustIpcLib.split("pub fn dispatch(")[1] || "").split("fn handle_workspace_bootstrap")[0] || "";
-  const ipcCommandCount = (dispatchBlock.match(/^\s*"[a-z_]+"(?:\s*\|\s*"[a-z_]+")*\s*=>/gm) || []).length;
+  const ipcCommandCount = dispatchBlock
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('"') && line.includes("=>")).length;
 
   if (formatCount !== 20) {
     errors.push(`Expected 20 DocumentFormat cases in DocumentFormat.swift, found ${formatCount}`);

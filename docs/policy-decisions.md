@@ -789,8 +789,13 @@
      - `scripts/package-macos-release.sh`는 비시스템 확장자가 `LSItemContentTypes`에 가려지지 않도록 `CFBundleDocumentTypes`를 분리 구성하고 `scripts/verify-macos-plist.mjs`로 20종 전체 확장자 매핑을 검증하며, 애드혹 서명 번들의 Gatekeeper 격리 속성 해제 명령을 문서화합니다.
      - 미사용 데스크톱 번들 설정 파일을 삭제하고, `.github/workflows/release.yml`은 최소 권한(`contents: read`, 발행 잡만 `contents: write`), 정확한 커밋 SHA 바인딩(`--target`), Windows CLI 및 루프백 WebUI 프리뷰 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`)와 PowerShell `--serve` CSP 스모크 테스트를 수행합니다.
 - **Why** 오프라인 모의 폴백과 합성 감사 페이로드로 인해 실제 보안·연결 실패가 성공처럼 보이던 경계를 제거하고, 루프백 서버 자원 보호·3대 엔진 PII 완전성·릴리스 산출물 정직성을 코드와 CI 가드로 일치시키기 위함입니다.
-- **Trade-offs** 프로덕션 UI를 백엔드 없이 정적 파일로 직접 열면 편집 명령이 거부되나, 테스트 환경은 `scripts/webui-dom-harness.mjs`의 명시적 주입 경로로 결정론적 검증을 유지하면서 실사용자 환경의 거짓 성공을 원천 차단합니다.
+- **Trade-offs**
+  1. 프로덕션 UI를 백엔드 없이 정적 파일로 직접 열면 편집 명령이 거부되나, 테스트 환경은 `scripts/webui-dom-harness.mjs`의 명시적 주입 경로로 결정론적 검증을 유지하면서 실사용자 환경의 거짓 성공을 원천 차단합니다.
+  2. OWASP XXE 방어 및 ECMA-376 표준에 따라 문서 편집기 본문에 입력되어 `&lt;!DOCTYPE ...&gt;`로 XML 이스케이프된 일반 텍스트는 정상 문자열로 보존하고, 실제 컨테이너 내부 XML 파트의 엔티티 선언(`<!DOCTYPE`, `<!ENTITY`)만 `XmlSanitizer`로 차단하여 기술 문서 작성 시 오탐을 방지합니다.
+  3. RFC 5322 이메일 로컬 파트 스캔 시 아톰 내부 단일 스크립트 경계를 유지하여 한글 조사·명사가 영문 이메일 앞에 공백 없이 붙은 문장(`"문의:홍길동user@example.com"`)에서 앞쪽 한글 본문이 과도하게 마스킹되는 부작용을 막습니다.
+  4. 루프백(`127.0.0.1`) `--serve` 서버는 브라우저가 전송하는 `Host`/`Origin` 헤더가 존재할 때 루프백 일치 여부를 검증하되, `Origin` 헤더를 보내지 않는 로컬 CLI 및 CI 스모크 자동화 요청은 허용합니다.
 - **Alternatives rejected**
   - 백엔드 오류 발생 시 클라이언트 정규식 치환이나 합성 수치로 폴백하는 방식은 미처리 개인정보와 미검증 컨테이너를 정상 처리된 것으로 오인하게 만들므로 기각.
+  - 본문 일반 텍스트의 이스케이프된 XML 구문까지 일괄 거부하는 방식은 정상적인 개발·보안 문서 편집을 가로막는 과검증이므로 기각.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node scripts/verify-macos-plist.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace -- --test-threads=1`, `swift test`
 - **Revisit when** Apple Developer ID 공증(Notarization) 인증서 또는 Windows 코드 서명 설치 관리자 파이프라인을 도입할 때.

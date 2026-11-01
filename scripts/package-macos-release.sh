@@ -159,7 +159,7 @@ echo "==> [3/4] Signing and verifying ${APP_BUNDLE}..."
 codesign --force --deep --sign - "${APP_BUNDLE}"
 codesign --verify --deep --strict "${APP_BUNDLE}"
 plutil -lint "${APP_BUNDLE}/Contents/Info.plist"
-node scripts/verify-macos-plist.mjs "${APP_BUNDLE}/Contents/Info.plist"
+node scripts/verify-macos-plist.mjs
 
 if [[ "$MODE" == "--verify-only" ]]; then
   echo "==> Bundle verification succeeded (--verify-only). Cleaning temporary dist/ directory."
