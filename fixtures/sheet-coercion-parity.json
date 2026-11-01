@@ -1,0 +1,198 @@
+[
+  {
+    "id": "literal-nan-text",
+    "cells": { "A1": "NaN" },
+    "target": "A1",
+    "expectedType": "text",
+    "expectedDisplay": "NaN"
+  },
+  {
+    "id": "literal-inf-text",
+    "cells": { "A1": "inf" },
+    "target": "A1",
+    "expectedType": "text",
+    "expectedDisplay": "inf"
+  },
+  {
+    "id": "literal-infinity-text",
+    "cells": { "A1": "-Infinity" },
+    "target": "A1",
+    "expectedType": "text",
+    "expectedDisplay": "-Infinity"
+  },
+  {
+    "id": "literal-hex-text",
+    "cells": { "A1": "0x1A" },
+    "target": "A1",
+    "expectedType": "text",
+    "expectedDisplay": "0x1A"
+  },
+  {
+    "id": "value-nan-error",
+    "cells": { "A1": "=VALUE(\"NaN\")" },
+    "target": "A1",
+    "expectedType": "error",
+    "expectedDisplay": "#VALUE!"
+  },
+  {
+    "id": "value-inf-error",
+    "cells": { "A1": "=VALUE(\"inf\")" },
+    "target": "A1",
+    "expectedType": "error",
+    "expectedDisplay": "#VALUE!"
+  },
+  {
+    "id": "value-hex-error",
+    "cells": { "A1": "=VALUE(\"0x1A\")" },
+    "target": "A1",
+    "expectedType": "error",
+    "expectedDisplay": "#VALUE!"
+  },
+  {
+    "id": "value-currency-percent",
+    "cells": {
+      "A1": "=VALUE(\"$1,234.50\")",
+      "A2": "=VALUE(\"(250)\")",
+      "A3": "=VALUE(\"12.5%\")",
+      "A4": "=A1+A2+A3"
+    },
+    "target": "A4",
+    "expectedType": "number",
+    "expectedDisplay": "984.625"
+  },
+  {
+    "id": "sum-ignores-range-text-and-bool",
+    "cells": {
+      "A1": "10",
+      "A2": "'20",
+      "A3": "TRUE",
+      "B1": "=SUM(A1:A3)"
+    },
+    "target": "B1",
+    "expectedType": "number",
+    "expectedDisplay": "10"
+  },
+  {
+    "id": "sum-coerces-scalar-args",
+    "cells": { "A1": "=SUM(\"5\", TRUE, 10)" },
+    "target": "A1",
+    "expectedType": "number",
+    "expectedDisplay": "16"
+  },
+  {
+    "id": "iso-date-text-plus-one",
+    "cells": { "A1": "=\"2024-01-15\" + 1" },
+    "target": "A1",
+    "expectedType": "number",
+    "expectedDisplay": "45307"
+  },
+  {
+    "id": "round-large-digits",
+    "cells": { "A1": "=ROUND(5, 400)" },
+    "target": "A1",
+    "expectedType": "number",
+    "expectedDisplay": "5"
+  },
+  {
+    "id": "round-negative-large-digits",
+    "cells": { "A1": "=ROUND(5, -400)" },
+    "target": "A1",
+    "expectedType": "number",
+    "expectedDisplay": "0"
+  },
+  {
+    "id": "float-15-sig-digits-01-plus-02",
+    "cells": { "A1": "=0.1 + 0.2 & \"\"" },
+    "target": "A1",
+    "expectedType": "text",
+    "expectedDisplay": "0.3"
+  },
+  {
+    "id": "float-15-sig-digits-large-decimal",
+    "cells": { "A1": "123456789012.1" },
+    "target": "A1",
+    "expectedType": "number",
+    "expectedDisplay": "123456789012.1"
+  },
+  {
+    "id": "negative-zero-normalized",
+    "cells": {
+      "A1": "=-0",
+      "A2": "=A1 & \"\""
+    },
+    "target": "A2",
+    "expectedType": "text",
+    "expectedDisplay": "0"
+  },
+  {
+    "id": "scientific-exponent-format",
+    "cells": { "A1": "=10^300 & \"\"" },
+    "target": "A1",
+    "expectedType": "text",
+    "expectedDisplay": "1E+300"
+  },
+  {
+    "id": "power-overflow-num-error",
+    "cells": { "A1": "=10^309" },
+    "target": "A1",
+    "expectedType": "error",
+    "expectedDisplay": "#NUM!"
+  },
+  {
+    "id": "countif-exact-zero-excludes-2e-13",
+    "cells": {
+      "A1": "0",
+      "A2": "0.0000000000002",
+      "B1": "=COUNTIF(A1:A2, 0)"
+    },
+    "target": "B1",
+    "expectedType": "number",
+    "expectedDisplay": "1"
+  },
+  {
+    "id": "sumif-exact-zero-excludes-2e-13",
+    "cells": {
+      "A1": "0",
+      "A2": "0.0000000000002",
+      "B1": "100",
+      "B2": "200",
+      "C1": "=SUMIF(A1:A2, \"=0\", B1:B2)"
+    },
+    "target": "C1",
+    "expectedType": "number",
+    "expectedDisplay": "100"
+  },
+  {
+    "id": "mod-tiny-divisor",
+    "cells": { "A1": "=MOD(1E-20, 1E-16)" },
+    "target": "A1",
+    "expectedType": "number",
+    "expectedDisplay": "1E-20"
+  },
+  {
+    "id": "empty-cell-comparisons-and-concat",
+    "cells": {
+      "B1": "=A1=0",
+      "B2": "=A1=\"\"",
+      "B3": "=A1=FALSE",
+      "B4": "=IF(AND(B1, B2, B3), A1 & \"X\", \"FAIL\")"
+    },
+    "target": "B4",
+    "expectedType": "text",
+    "expectedDisplay": "X"
+  },
+  {
+    "id": "missing-arg-if-and-vlookup",
+    "cells": {
+      "A1": "=IF(TRUE, , 9)",
+      "A2": "=IF(FALSE, 9, )",
+      "A5": "Key",
+      "B5": "77",
+      "A3": "=IF(AND(A1=0, A2=0), VLOOKUP(\"Key\", A5:B5, 2, ), -1)"
+    },
+    "target": "A3",
+    "expectedType": "number",
+    "expectedDisplay": "77"
+  }
+]
+

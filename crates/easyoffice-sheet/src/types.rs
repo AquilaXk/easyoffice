@@ -5,7 +5,7 @@ use std::fmt;
 pub struct PackedCellCoordinate(pub u64);
 
 impl PackedCellCoordinate {
-    pub const MAX_ROWS: u32 = 1_000_000;
+    pub const MAX_ROWS: u32 = 1_048_576;
     pub const MAX_COLS: u32 = 16_384;
 
     #[inline]
@@ -28,6 +28,63 @@ impl PackedCellCoordinate {
     #[inline]
     pub const fn col(self) -> u32 {
         (self.0 & 0xFFFF_FFFF) as u32
+    }
+
+    pub fn parse_col_only(input: &str) -> Result<u32, EasyOfficeError> {
+        let trimmed = input.trim();
+        let bytes = trimmed.as_bytes();
+        let i = if bytes.first() == Some(&b'$') { 1 } else { 0 };
+        let letter_slice = &bytes[i..];
+        if letter_slice.is_empty()
+            || letter_slice.len() > 3
+            || !letter_slice.iter().all(u8::is_ascii_alphabetic)
+        {
+            return Err(EasyOfficeError::InvalidArgument(format!(
+                "유효하지 않은 열 주소: {input}"
+            )));
+        }
+        let mut col_acc: u32 = 0;
+        for &b in letter_slice {
+            col_acc = col_acc * 26 + ((b.to_ascii_uppercase() - b'A') as u32 + 1);
+        }
+        let col = col_acc - 1;
+        if col >= Self::MAX_COLS {
+            return Err(EasyOfficeError::InvalidArgument(format!(
+                "열 범위 초과: {input}"
+            )));
+        }
+        Ok(col)
+    }
+
+    pub fn parse_row_only(input: &str) -> Result<u32, EasyOfficeError> {
+        let trimmed = input.trim();
+        let bytes = trimmed.as_bytes();
+        let i = if bytes.first() == Some(&b'$') { 1 } else { 0 };
+        let row_digits = &bytes[i..];
+        if row_digits.is_empty()
+            || row_digits[0] == b'0'
+            || !row_digits.iter().all(u8::is_ascii_digit)
+        {
+            return Err(EasyOfficeError::InvalidArgument(format!(
+                "유효하지 않은 행 주소: {input}"
+            )));
+        }
+        let mut row_acc: u32 = 0;
+        for &b in row_digits {
+            row_acc = row_acc
+                .checked_mul(10)
+                .and_then(|v| v.checked_add((b - b'0') as u32))
+                .ok_or_else(|| {
+                    EasyOfficeError::InvalidArgument(format!("셀 행 번호 오버플로: {input}"))
+                })?;
+        }
+        let row = row_acc - 1;
+        if row >= Self::MAX_ROWS {
+            return Err(EasyOfficeError::InvalidArgument(format!(
+                "행 범위 초과: {input}"
+            )));
+        }
+        Ok(row)
     }
 
     pub fn parse_a1(input: &str) -> Result<Self, EasyOfficeError> {
@@ -124,6 +181,15 @@ impl CellRange {
         rows.saturating_mul(cols)
     }
 
+    #[inline]
+    pub fn contains(&self, coord: PackedCellCoordinate) -> bool {
+        let min_r = self.start.row().min(self.end.row());
+        let max_r = self.start.row().max(self.end.row());
+        let min_c = self.start.col().min(self.end.col());
+        let max_c = self.start.col().max(self.end.col());
+        coord.row() >= min_r && coord.row() <= max_r && coord.col() >= min_c && coord.col() <= max_c
+    }
+
     pub fn new(
         start: PackedCellCoordinate,
         end: PackedCellCoordinate,
@@ -135,7 +201,10 @@ impl CellRange {
         let rows = (max_r - min_r + 1) as usize;
         let cols = (max_c - min_c + 1) as usize;
         let count = rows.saturating_mul(cols);
-        if count > Self::MAX_EXPANDED_CELL_COUNT {
+        let is_whole_col = min_r == 0 && max_r == PackedCellCoordinate::MAX_ROWS - 1 && cols <= 64;
+        let is_whole_row = min_c == 0 && max_c == PackedCellCoordinate::MAX_COLS - 1 && rows <= 64;
+        let is_1d_strip = rows == 1 || cols == 1;
+        if count > Self::MAX_EXPANDED_CELL_COUNT && !is_whole_col && !is_whole_row && !is_1d_strip {
             return Err(EasyOfficeError::InvalidArgument(format!(
                 "셀 범위 확장 개수({count})가 상한({})을 초과했습니다.",
                 Self::MAX_EXPANDED_CELL_COUNT
@@ -146,9 +215,33 @@ impl CellRange {
 
     pub fn parse(notation: &str) -> Result<Self, EasyOfficeError> {
         if let Some((lhs, rhs)) = notation.split_once(':') {
-            let start = PackedCellCoordinate::parse_a1(lhs)?;
-            let end = PackedCellCoordinate::parse_a1(rhs)?;
-            Self::new(start, end)
+            if let (Ok(start), Ok(end)) = (
+                PackedCellCoordinate::parse_a1(lhs),
+                PackedCellCoordinate::parse_a1(rhs),
+            ) {
+                return Self::new(start, end);
+            }
+            if let (Ok(c1), Ok(c2)) = (
+                PackedCellCoordinate::parse_col_only(lhs),
+                PackedCellCoordinate::parse_col_only(rhs),
+            ) {
+                let start = PackedCellCoordinate::new(0, c1.min(c2))?;
+                let end =
+                    PackedCellCoordinate::new(PackedCellCoordinate::MAX_ROWS - 1, c1.max(c2))?;
+                return Self::new(start, end);
+            }
+            if let (Ok(r1), Ok(r2)) = (
+                PackedCellCoordinate::parse_row_only(lhs),
+                PackedCellCoordinate::parse_row_only(rhs),
+            ) {
+                let start = PackedCellCoordinate::new(r1.min(r2), 0)?;
+                let end =
+                    PackedCellCoordinate::new(r1.max(r2), PackedCellCoordinate::MAX_COLS - 1)?;
+                return Self::new(start, end);
+            }
+            Err(EasyOfficeError::InvalidArgument(format!(
+                "유효하지 않은 셀 범위: {notation}"
+            )))
         } else {
             let single = PackedCellCoordinate::parse_a1(notation)?;
             Self::new(single, single)
@@ -209,6 +302,19 @@ impl FormulaError {
             Self::Num => "#NUM!",
         }
     }
+
+    pub fn from_code(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_uppercase().as_str() {
+            "#DIV/0!" => Some(Self::DivByZero),
+            "#VALUE!" | "#NULL!" => Some(Self::Value),
+            "#REF!" => Some(Self::Ref),
+            "#NAME?" => Some(Self::Name),
+            "#N/A" => Some(Self::Na),
+            "#NUM!" => Some(Self::Num),
+            "#CYCLE!" => Some(Self::Cycle),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for FormulaError {
@@ -229,41 +335,19 @@ pub enum EvaluatedCellValue {
 impl EvaluatedCellValue {
     pub fn as_number(&self) -> Option<f64> {
         match self {
-            Self::Number(v) => Some(*v),
-            Self::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
-            Self::Text(s) => s.trim().parse::<f64>().ok(),
-            Self::Empty | Self::Error(_) => None,
+            Self::Empty => None,
+            _ => crate::coercion::coerce_to_number(self).ok(),
         }
     }
 
     pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            Self::Boolean(b) => Some(*b),
-            Self::Number(n) => Some(*n != 0.0),
-            Self::Text(s) => {
-                if s.eq_ignore_ascii_case("TRUE") {
-                    Some(true)
-                } else if s.eq_ignore_ascii_case("FALSE") {
-                    Some(false)
-                } else {
-                    None
-                }
-            }
-            Self::Empty => Some(false),
-            Self::Error(_) => None,
-        }
+        crate::coercion::coerce_to_bool(self).ok()
     }
 
     pub fn to_display_string(&self) -> String {
         match self {
             Self::Empty => String::new(),
-            Self::Number(n) => {
-                if n.fract() == 0.0 {
-                    format!("{n:.0}")
-                } else {
-                    format!("{n}")
-                }
-            }
+            Self::Number(n) => crate::coercion::format_general_number(*n),
             Self::Text(s) => s.clone(),
             Self::Boolean(b) => {
                 if *b {

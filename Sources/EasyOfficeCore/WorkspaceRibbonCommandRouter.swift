@@ -296,21 +296,23 @@ extension WorkspaceViewModel {
           PackedCellCoordinate(row: 0, column: 0): "구분",
           PackedCellCoordinate(row: 0, column: 1): "집계 값 (\(agg.rawValue.uppercased()))",
         ]
+        let formatPivotValue = { (value: Double) -> String in
+          SheetValueCoercion.formatGeneralNumber((value * 100.0).rounded() / 100.0)
+        }
         for (rIdx, rowKey) in summary.rowKeys.enumerated() {
           let rowTotal = summary.rowTotals.indices.contains(rIdx) ? summary.rowTotals[rIdx] : 0.0
           pivotCells[PackedCellCoordinate(row: rIdx + 1, column: 0)] = rowKey
-          pivotCells[PackedCellCoordinate(row: rIdx + 1, column: 1)] = String(
-            format: "%.0f", rowTotal)
+          pivotCells[PackedCellCoordinate(row: rIdx + 1, column: 1)] = formatPivotValue(rowTotal)
         }
         let totalRow = summary.rowKeys.count + 1
+        let formattedGrandTotal = formatPivotValue(summary.grandTotal)
         pivotCells[PackedCellCoordinate(row: totalRow, column: 0)] = "총계"
-        pivotCells[PackedCellCoordinate(row: totalRow, column: 1)] = String(
-          format: "%.0f", summary.grandTotal)
+        pivotCells[PackedCellCoordinate(row: totalRow, column: 1)] = formattedGrandTotal
         sheet.addSheetPage(named: "피벗 요약", initialCells: pivotCells)
         openTabs[idx].payload = .sheet(sheet)
         openTabs[idx].isModified = true
         lastExecutedCommandSummary =
-          "피벗 테이블 요약 집계 완료 (\(range.a1Range), 총계 \(String(format: "%.0f", summary.grandTotal)))"
+          "피벗 테이블 요약 집계 완료 (\(range.a1Range), 총계 \(formattedGrandTotal))"
       } else {
         lastExecutedCommandSummary = "피벗 테이블 요약 집계 완료"
       }

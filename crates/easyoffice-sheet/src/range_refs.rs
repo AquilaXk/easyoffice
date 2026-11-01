@@ -1,4 +1,5 @@
-use crate::functions_date_fin::{parse_iso_date_serial, wildcard_match};
+use crate::coercion::wildcard_match;
+use crate::functions_date_fin::parse_iso_date_serial;
 use crate::{
     CellRange, EvalContext, EvaluatedCellValue, Expr, FormulaError, PackedCellCoordinate,
     SheetEngine, WorkbookEngine,
@@ -147,8 +148,18 @@ impl SheetEngine {
                     return Err(FormulaError::Ref);
                 }
                 if let Some((lhs_raw, rhs_raw)) = split_once_unquoted_colon(trimmed)? {
-                    let (lhs_sh, start_coord) = parse_indirect_endpoint(lhs_raw)?;
-                    let (rhs_sh, end_coord) = parse_indirect_endpoint(rhs_raw)?;
+                    let (lhs_sh, lhs_tok) = match split_indirect_sheet_bang(lhs_raw.trim())? {
+                        Some((sh_raw, pt)) => {
+                            (Some(parse_indirect_sheet_token(sh_raw)?), pt.trim())
+                        }
+                        None => (None, lhs_raw.trim()),
+                    };
+                    let (rhs_sh, rhs_tok) = match split_indirect_sheet_bang(rhs_raw.trim())? {
+                        Some((sh_raw, pt)) => {
+                            (Some(parse_indirect_sheet_token(sh_raw)?), pt.trim())
+                        }
+                        None => (None, rhs_raw.trim()),
+                    };
                     if let Some(ref rs) = rhs_sh {
                         let Some(ref ls) = lhs_sh else {
                             return Err(FormulaError::Ref);
@@ -157,8 +168,8 @@ impl SheetEngine {
                             return Err(FormulaError::Ref);
                         }
                     }
-                    let range =
-                        CellRange::new(start_coord, end_coord).map_err(|_| FormulaError::Ref)?;
+                    let range = CellRange::parse(&format!("{lhs_tok}:{rhs_tok}"))
+                        .map_err(|_| FormulaError::Ref)?;
                     if let Some(sh_clean) = lhs_sh {
                         if sh_clean.is_empty() || !self.has_sheet_in_ctx(&sh_clean, ctx) {
                             return Err(FormulaError::Ref);
@@ -224,6 +235,23 @@ impl SheetEngine {
         }
     }
 
+    #[inline]
+    pub(crate) fn resolve_sheet_ref<'b>(
+        &'b self,
+        sheet_opt: Option<&str>,
+        ctx: &'b EvalContext<'_>,
+    ) -> Option<&'b SheetEngine> {
+        match sheet_opt {
+            None => Some(self),
+            Some(target_name)
+                if WorkbookEngine::is_same_sheet_identity(target_name, &self.name) =>
+            {
+                Some(self)
+            }
+            Some(target_name) => ctx.workbook.and_then(|wb| wb.sheet(target_name)),
+        }
+    }
+
     pub(crate) fn extract_streaming_range_ctx<'b>(
         &self,
         expr: &'b Expr,
@@ -235,9 +263,6 @@ impl SheetEngine {
         else {
             return Ok(None);
         };
-        if range.cell_count() > CellRange::MAX_EXPANDED_CELLS {
-            return Err(FormulaError::Ref);
-        }
         let min_r = range.start.row().min(range.end.row());
         let max_r = range.start.row().max(range.end.row());
         let min_c = range.start.col().min(range.end.col());
@@ -299,11 +324,43 @@ impl SheetEngine {
     {
         for arg in args {
             if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                let (_, _, _, rows, cols, _) = spec;
-                for dr in 0..rows {
-                    for dc in 0..cols {
-                        let v = self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?;
+                let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
+                let total = rows.saturating_mul(cols);
+                if !transposed
+                    && total > 1024
+                    && self
+                        .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                        .is_some_and(|ts| total > ts.cells.len().saturating_mul(2))
+                {
+                    let max_r = min_r + (rows as u32).saturating_sub(1);
+                    let max_c = min_c + (cols as u32).saturating_sub(1);
+                    let mut pop_coords: Vec<PackedCellCoordinate> = self
+                        .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                        .unwrap()
+                        .cells
+                        .keys()
+                        .copied()
+                        .filter(|c| {
+                            c.row() >= min_r
+                                && c.row() <= max_r
+                                && c.col() >= min_c
+                                && c.col() <= max_c
+                        })
+                        .collect();
+                    pop_coords.sort_unstable();
+                    for coord in pop_coords {
+                        let v = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                        if let EvaluatedCellValue::Error(e) = v {
+                            return Err(e);
+                        }
                         f(v)?;
+                    }
+                } else {
+                    for dr in 0..rows {
+                        for dc in 0..cols {
+                            let v = self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?;
+                            f(v)?;
+                        }
                     }
                 }
             } else {
@@ -325,7 +382,7 @@ impl SheetEngine {
 }
 
 #[derive(Clone, Copy)]
-enum CritNumOp {
+pub(crate) enum CritNumOp {
     Ge,
     Le,
     Ne,
@@ -334,7 +391,7 @@ enum CritNumOp {
     Eq,
 }
 
-enum CompiledCriteria {
+pub(crate) enum CompiledCriteria {
     Number(f64),
     NumericCmp(CritNumOp, f64),
     IsoDateEq(f64),
@@ -343,11 +400,17 @@ enum CompiledCriteria {
     TextNe(String),
     TextOrd(CritNumOp, String),
     Wildcard(String),
+    NotWildcard(String),
 }
 
 impl CompiledCriteria {
     #[inline]
-    fn compile(crit: &EvaluatedCellValue) -> Self {
+    fn has_wildcard_meta(s: &str) -> bool {
+        s.contains('*') || s.contains('?') || s.contains('~')
+    }
+
+    #[inline]
+    pub(crate) fn compile(crit: &EvaluatedCellValue) -> Self {
         match crit {
             EvaluatedCellValue::Number(cn) => Self::Number(*cn),
             EvaluatedCellValue::Empty => Self::TextEq(String::new()),
@@ -367,11 +430,20 @@ impl CompiledCriteria {
                 ] {
                     if let Some(rhs) = trimmed.strip_prefix(op_str) {
                         let rhs_trim = rhs.trim();
-                        if let Ok(rhs_num) = rhs_trim.parse::<f64>() {
+                        if let Some(rhs_num) = crate::coercion::parse_strict_number(rhs_trim) {
                             return Self::NumericCmp(op_kind, rhs_num);
                         }
                         if let Some(rhs_serial) = parse_iso_date_serial(rhs_trim) {
                             return Self::IsoDateCmp(op_kind, rhs_serial);
+                        }
+                        if matches!(op_kind, CritNumOp::Eq | CritNumOp::Ne)
+                            && Self::has_wildcard_meta(rhs_trim)
+                        {
+                            return if matches!(op_kind, CritNumOp::Eq) {
+                                Self::Wildcard(rhs_trim.to_string())
+                            } else {
+                                Self::NotWildcard(rhs_trim.to_string())
+                            };
                         }
                         let rhs_lower = rhs_trim.to_lowercase();
                         return match op_kind {
@@ -381,13 +453,13 @@ impl CompiledCriteria {
                         };
                     }
                 }
-                if let Ok(rhs_num) = trimmed.parse::<f64>() {
+                if let Some(rhs_num) = crate::coercion::parse_strict_number(trimmed) {
                     return Self::Number(rhs_num);
                 }
                 if let Some(rhs_serial) = parse_iso_date_serial(trimmed) {
                     return Self::IsoDateEq(rhs_serial);
                 }
-                if trimmed.contains('*') || trimmed.contains('?') || trimmed.contains('~') {
+                if Self::has_wildcard_meta(trimmed) {
                     Self::Wildcard(trimmed.to_string())
                 } else {
                     Self::TextEq(trimmed.to_lowercase())
@@ -432,37 +504,59 @@ impl CompiledCriteria {
     }
 
     #[inline]
-    fn cmp_f64(op: CritNumOp, lhs_num: f64, rhs_num: f64) -> bool {
-        match op {
-            CritNumOp::Ge => lhs_num >= rhs_num - 1e-12,
-            CritNumOp::Le => lhs_num <= rhs_num + 1e-12,
-            CritNumOp::Ne => (lhs_num - rhs_num).abs() >= 1e-12,
-            CritNumOp::Gt => lhs_num > rhs_num,
-            CritNumOp::Lt => lhs_num < rhs_num,
-            CritNumOp::Eq => (lhs_num - rhs_num).abs() < 1e-12,
+    fn num_eq(lhs_num: f64, rhs_num: f64) -> bool {
+        if lhs_num == 0.0 || rhs_num == 0.0 {
+            lhs_num == rhs_num
+        } else {
+            (lhs_num - rhs_num).abs() <= 1e-12 * lhs_num.abs().max(rhs_num.abs())
         }
     }
 
     #[inline]
-    fn matches(&self, cell: &EvaluatedCellValue) -> bool {
+    fn cmp_f64(op: CritNumOp, lhs_num: f64, rhs_num: f64) -> bool {
+        match op {
+            CritNumOp::Ge => lhs_num > rhs_num || Self::num_eq(lhs_num, rhs_num),
+            CritNumOp::Le => lhs_num < rhs_num || Self::num_eq(lhs_num, rhs_num),
+            CritNumOp::Ne => !Self::num_eq(lhs_num, rhs_num),
+            CritNumOp::Gt => lhs_num > rhs_num && !Self::num_eq(lhs_num, rhs_num),
+            CritNumOp::Lt => lhs_num < rhs_num && !Self::num_eq(lhs_num, rhs_num),
+            CritNumOp::Eq => Self::num_eq(lhs_num, rhs_num),
+        }
+    }
+
+    #[inline]
+    fn cell_numeric_for_criteria(cell: &EvaluatedCellValue) -> Option<f64> {
+        match cell {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            EvaluatedCellValue::Text(s) => crate::coercion::parse_strict_number(s),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn matches(&self, cell: &EvaluatedCellValue) -> bool {
         if let EvaluatedCellValue::Error(e) = cell {
             return match *self {
                 Self::TextEq(ref rhs_lower) => Self::str_eq_lowercase(e.code(), rhs_lower),
                 Self::TextNe(ref rhs_lower) => !Self::str_eq_lowercase(e.code(), rhs_lower),
-                Self::NumericCmp(CritNumOp::Ne, _) | Self::IsoDateCmp(CritNumOp::Ne, _) => true,
+                Self::NumericCmp(CritNumOp::Ne, _)
+                | Self::IsoDateCmp(CritNumOp::Ne, _)
+                | Self::NotWildcard(_) => true,
                 _ => false,
             };
         }
         match *self {
-            Self::Number(cn) => cell.as_number().is_some_and(|v| (v - cn).abs() < 1e-9),
+            Self::Number(cn) => {
+                Self::cell_numeric_for_criteria(cell).is_some_and(|v| Self::num_eq(v, cn))
+            }
             Self::NumericCmp(op, rhs_num) => {
-                let Some(lhs_num) = cell.as_number() else {
+                let Some(lhs_num) = Self::cell_numeric_for_criteria(cell) else {
                     return matches!(op, CritNumOp::Ne);
                 };
                 Self::cmp_f64(op, lhs_num, rhs_num)
             }
             Self::IsoDateEq(rhs_serial) => Self::cell_iso_date_serial(cell)
-                .is_some_and(|lhs_num| (lhs_num - rhs_serial).abs() < 1e-9),
+                .is_some_and(|lhs_num| Self::num_eq(lhs_num, rhs_serial)),
             Self::IsoDateCmp(op, rhs_serial) => {
                 let Some(lhs_num) = Self::cell_iso_date_serial(cell) else {
                     return matches!(op, CritNumOp::Ne);
@@ -489,11 +583,83 @@ impl CompiledCriteria {
                 EvaluatedCellValue::Text(s) => wildcard_match(s, pat),
                 _ => false,
             },
+            Self::NotWildcard(ref pat) => match cell {
+                EvaluatedCellValue::Text(s) => !wildcard_match(s, pat),
+                _ => true,
+            },
         }
     }
 }
 
 impl SheetEngine {
+    fn eval_expr_2d_grid(
+        &self,
+        expr: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<(usize, usize, Vec<EvaluatedCellValue>, bool), FormulaError> {
+        if let Some(spec) = self.extract_streaming_range_ctx(expr, ctx, depth)? {
+            let (_, _, _, rows, cols, _) = spec;
+            let mut vals = Vec::with_capacity(rows.saturating_mul(cols));
+            for dr in 0..rows {
+                for dc in 0..cols {
+                    vals.push(self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?);
+                }
+            }
+            return Ok((rows, cols, vals, false));
+        }
+        match expr {
+            Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) => {
+                let is_neg = matches!(expr, Expr::UnaryMinus(_));
+                let (r, c, vals, _) = self.eval_expr_2d_grid(inner, ctx, depth + 1)?;
+                let mut out = Vec::with_capacity(vals.len());
+                for v in vals {
+                    if let EvaluatedCellValue::Error(e) = v {
+                        return Err(e);
+                    }
+                    let n = v.as_number().ok_or(FormulaError::Value)?;
+                    out.push(EvaluatedCellValue::Number(if is_neg { -n } else { n }));
+                }
+                Ok((r, c, out, true))
+            }
+            Expr::Binary { op, lhs, rhs } => {
+                let (r1, c1, v1, _) = self.eval_expr_2d_grid(lhs, ctx, depth + 1)?;
+                let (r2, c2, v2, _) = self.eval_expr_2d_grid(rhs, ctx, depth + 1)?;
+                let (rows, cols) = if (r1, c1) == (1, 1) {
+                    (r2, c2)
+                } else if (r2, c2) == (1, 1) || (r1, c1) == (r2, c2) {
+                    (r1, c1)
+                } else {
+                    return Err(FormulaError::Value);
+                };
+                let total = rows.saturating_mul(cols);
+                let mut out = Vec::with_capacity(total);
+                for idx in 0..total {
+                    let lv = if v1.len() == 1 {
+                        v1[0].clone()
+                    } else {
+                        v1[idx].clone()
+                    };
+                    let rv = if v2.len() == 1 {
+                        v2[0].clone()
+                    } else {
+                        v2[idx].clone()
+                    };
+                    let res = Self::apply_binary_op(*op, lv, rv);
+                    if let EvaluatedCellValue::Error(e) = res {
+                        return Err(e);
+                    }
+                    out.push(res);
+                }
+                Ok((rows, cols, out, true))
+            }
+            _ => {
+                let v = self.eval_arg_val(expr, ctx, depth)?;
+                Ok((1, 1, vec![v], false))
+            }
+        }
+    }
+
     pub(crate) fn eval_sumproduct_streaming(
         &self,
         args: &[Expr],
@@ -503,22 +669,12 @@ impl SheetEngine {
         if args.is_empty() {
             return Err(FormulaError::Value);
         }
-        let Some(first_spec) = self.extract_streaming_range_ctx(&args[0], ctx, depth)? else {
-            let mut prod = 1.0f64;
-            for arg in args {
-                if self.extract_streaming_range_ctx(arg, ctx, depth)?.is_some() {
-                    return Err(FormulaError::Value);
-                }
-                prod *= self
-                    .eval_arg_val(arg, ctx, depth)?
-                    .as_number()
-                    .unwrap_or(0.0);
-            }
-            return Ok(EvaluatedCellValue::Number(prod));
-        };
-        let (_, _, _, r_count, c_count, _) = first_spec;
         if args.len() == 2 {
-            if let Some(second_spec) = self.extract_streaming_range_ctx(&args[1], ctx, depth)? {
+            if let (Some(first_spec), Some(second_spec)) = (
+                self.extract_streaming_range_ctx(&args[0], ctx, depth)?,
+                self.extract_streaming_range_ctx(&args[1], ctx, depth)?,
+            ) {
+                let (_, _, _, r_count, c_count, _) = first_spec;
                 if second_spec.3 != r_count || second_spec.4 != c_count {
                     return Err(FormulaError::Value);
                 }
@@ -550,36 +706,33 @@ impl SheetEngine {
                 return Ok(EvaluatedCellValue::Number((acc0 + acc1) + (acc2 + acc3)));
             }
         }
-        for arg in &args[1..] {
-            let Some((_, _, _, r, c, _)) = self.extract_streaming_range_ctx(arg, ctx, depth)?
-            else {
-                if r_count != 1 || c_count != 1 {
+        let mut grids = Vec::with_capacity(args.len());
+        let mut expected_dims: Option<(usize, usize)> = None;
+        for arg in args {
+            let (r, c, vals, is_comp) = self.eval_expr_2d_grid(arg, ctx, depth)?;
+            if let Some(exp) = expected_dims {
+                if (r, c) != exp {
                     return Err(FormulaError::Value);
                 }
-                continue;
-            };
-            if r != r_count || c != c_count {
-                return Err(FormulaError::Value);
+            } else {
+                expected_dims = Some((r, c));
             }
+            grids.push((vals, is_comp));
         }
+        let (r_count, c_count) = expected_dims.unwrap_or((0, 0));
+        let total = r_count.saturating_mul(c_count);
         let mut sum = 0.0f64;
-        for dr in 0..r_count {
-            for dc in 0..c_count {
-                let mut row_prod = 1.0f64;
-                for arg in args {
-                    let v = if let Some(sp) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                        self.eval_streaming_cell(&sp, dr, dc, ctx, depth)?
-                    } else {
-                        self.eval_arg_val(arg, ctx, depth)?
-                    };
-                    let n = match v {
-                        EvaluatedCellValue::Number(n) => n,
-                        _ => 0.0,
-                    };
-                    row_prod *= n;
-                }
-                sum += row_prod;
+        for idx in 0..total {
+            let mut row_prod = 1.0f64;
+            for (vals, is_comp) in &grids {
+                let n = match &vals[idx] {
+                    EvaluatedCellValue::Number(n) => *n,
+                    EvaluatedCellValue::Boolean(b) if *is_comp => u8::from(*b) as f64,
+                    _ => 0.0,
+                };
+                row_prod *= n;
             }
+            sum += row_prod;
         }
         Ok(EvaluatedCellValue::Number(sum))
     }
@@ -607,7 +760,39 @@ impl SheetEngine {
             };
             let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
             let compiled_crit = CompiledCriteria::compile(&crit_val);
-            let (_, _, _, r_count, c_count, _) = range_spec;
+            let (ref sheet_opt, min_r, min_c, r_count, c_count, transposed) = range_spec;
+            let total = r_count.saturating_mul(c_count);
+            if !transposed
+                && total > 1024
+                && self
+                    .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                    .is_some_and(|ts| total > ts.cells.len().saturating_mul(2))
+            {
+                let max_r = min_r + (r_count as u32).saturating_sub(1);
+                let max_c = min_c + (c_count as u32).saturating_sub(1);
+                let pop_coords: Vec<PackedCellCoordinate> = self
+                    .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                    .unwrap()
+                    .cells
+                    .keys()
+                    .copied()
+                    .filter(|c| {
+                        c.row() >= min_r && c.row() <= max_r && c.col() >= min_c && c.col() <= max_c
+                    })
+                    .collect();
+                let pop_len = pop_coords.len();
+                let mut cnt = 0usize;
+                for coord in pop_coords {
+                    let val = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                    if compiled_crit.matches(&val) {
+                        cnt += 1;
+                    }
+                }
+                if compiled_crit.matches(&EvaluatedCellValue::Empty) {
+                    cnt += total.saturating_sub(pop_len);
+                }
+                return Ok(EvaluatedCellValue::Number(cnt as f64));
+            }
             let mut cnt = 0usize;
             for dr in 0..r_count {
                 for dc in 0..c_count {
@@ -629,18 +814,69 @@ impl SheetEngine {
         };
         let crit_val = self.eval_arg_val(&args[1], ctx, depth)?;
         let compiled_crit = CompiledCriteria::compile(&crit_val);
-        let (_, _, _, r_count, c_count, _) = range_spec;
+        let (ref sheet_opt, min_r, min_c, r_count, c_count, transposed) = range_spec;
         let target_spec = if args.len() == 3 {
-            let Some(ts) = self.extract_streaming_range_ctx(&args[2], ctx, depth)? else {
+            let Some(mut ts) = self.extract_streaming_range_ctx(&args[2], ctx, depth)? else {
                 return Err(FormulaError::Value);
             };
-            if ts.3 != r_count || ts.4 != c_count {
+            if ts.3 == 1 && ts.4 == 1 && (r_count != 1 || c_count != 1) {
+                if ts.1 as usize + r_count > PackedCellCoordinate::MAX_ROWS as usize
+                    || ts.2 as usize + c_count > PackedCellCoordinate::MAX_COLS as usize
+                {
+                    return Err(FormulaError::Ref);
+                }
+                ts.3 = r_count;
+                ts.4 = c_count;
+            } else if ts.3 != r_count || ts.4 != c_count {
                 return Err(FormulaError::Value);
             }
             Some(ts)
         } else {
             None
         };
+
+        let total = r_count.saturating_mul(c_count);
+        if target_spec.is_none()
+            && !transposed
+            && total > 1024
+            && self
+                .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                .is_some_and(|ts| total > ts.cells.len().saturating_mul(2))
+        {
+            let max_r = min_r + (r_count as u32).saturating_sub(1);
+            let max_c = min_c + (c_count as u32).saturating_sub(1);
+            let mut pop_coords: Vec<PackedCellCoordinate> = self
+                .resolve_sheet_ref(sheet_opt.as_deref(), ctx)
+                .unwrap()
+                .cells
+                .keys()
+                .copied()
+                .filter(|c| {
+                    c.row() >= min_r && c.row() <= max_r && c.col() >= min_c && c.col() <= max_c
+                })
+                .collect();
+            pop_coords.sort_unstable();
+            let mut sum = 0.0f64;
+            let mut count = 0usize;
+            for coord in pop_coords {
+                let val = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
+                if compiled_crit.matches(&val) {
+                    if let EvaluatedCellValue::Number(n) = val {
+                        sum += n;
+                        count += 1;
+                    }
+                }
+            }
+            return if name == "AVERAGEIF" {
+                if count == 0 {
+                    Err(FormulaError::DivByZero)
+                } else {
+                    Ok(EvaluatedCellValue::Number(sum / (count as f64)))
+                }
+            } else {
+                Ok(EvaluatedCellValue::Number(sum))
+            };
+        }
 
         let mut sum = 0.0f64;
         let mut count = 0usize;
@@ -668,220 +904,6 @@ impl SheetEngine {
             Ok(EvaluatedCellValue::Number(sum / (count as f64)))
         } else {
             Ok(EvaluatedCellValue::Number(sum))
-        }
-    }
-
-    pub(crate) fn eval_multi_criteria_streaming(
-        &self,
-        name: &str,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        let (target_spec, crit_args) = if name == "COUNTIFS" {
-            if args.len() < 2 || (args.len() & 1) != 0 {
-                return Err(FormulaError::Value);
-            }
-            (None, args)
-        } else {
-            if args.len() < 3 || (args.len() & 1) == 0 {
-                return Err(FormulaError::Value);
-            }
-            let Some(ts) = self.extract_streaming_range_ctx(&args[0], ctx, depth)? else {
-                return Err(FormulaError::Value);
-            };
-            (Some(ts), &args[1..])
-        };
-
-        let pair_count = crit_args.len() / 2;
-        let mut specs = Vec::with_capacity(pair_count);
-        let mut crit_vals = Vec::with_capacity(pair_count);
-        let mut expected_dims: Option<(usize, usize)> = target_spec.as_ref().map(|ts| (ts.3, ts.4));
-
-        for pair in crit_args.chunks(2) {
-            let Some(sp) = self.extract_streaming_range_ctx(&pair[0], ctx, depth)? else {
-                return Err(FormulaError::Value);
-            };
-            let dims = (sp.3, sp.4);
-            if let Some(exp) = expected_dims {
-                if dims != exp {
-                    return Err(FormulaError::Value);
-                }
-            } else {
-                expected_dims = Some(dims);
-            }
-            specs.push(sp);
-            crit_vals.push(self.eval_arg_val(&pair[1], ctx, depth)?);
-        }
-
-        let (r_count, c_count) = expected_dims.ok_or(FormulaError::Value)?;
-        let compiled_crits: Vec<CompiledCriteria> =
-            crit_vals.iter().map(CompiledCriteria::compile).collect();
-
-        let mut sum = 0.0f64;
-        let mut count = 0usize;
-        let mut min_val: Option<f64> = None;
-        let mut max_val: Option<f64> = None;
-        for dr in 0..r_count {
-            'cell_loop: for dc in 0..c_count {
-                for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
-                    let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
-                    if !cc.matches(&val) {
-                        continue 'cell_loop;
-                    }
-                }
-                if let Some(ref ts) = target_spec {
-                    let tv = self.eval_streaming_cell(ts, dr, dc, ctx, depth)?;
-                    if let EvaluatedCellValue::Number(n) = tv {
-                        sum += n;
-                        count += 1;
-                        min_val = Some(min_val.map_or(n, |v| v.min(n)));
-                        max_val = Some(max_val.map_or(n, |v| v.max(n)));
-                    }
-                } else {
-                    count += 1;
-                }
-            }
-        }
-
-        match name {
-            "COUNTIFS" => Ok(EvaluatedCellValue::Number(count as f64)),
-            "AVERAGEIFS" => {
-                if count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(sum / (count as f64)))
-                }
-            }
-            "MINIFS" => Ok(EvaluatedCellValue::Number(min_val.unwrap_or(0.0))),
-            "MAXIFS" => Ok(EvaluatedCellValue::Number(max_val.unwrap_or(0.0))),
-            _ => Ok(EvaluatedCellValue::Number(sum)),
-        }
-    }
-
-    pub(crate) fn eval_subtotal(
-        &self,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        if args.len() < 2 {
-            return Err(FormulaError::Value);
-        }
-        let fn_code = self.eval_arg_num(&args[0], ctx, depth)?.trunc() as i32;
-        let base_code = if (101..=111).contains(&fn_code) {
-            fn_code - 100
-        } else {
-            fn_code
-        };
-        if !(1..=11).contains(&base_code) {
-            return Err(FormulaError::Value);
-        }
-
-        let mut sum = 0.0f64;
-        let mut product = 1.0f64;
-        let mut num_count = 0usize;
-        let mut non_empty_count = 0usize;
-        let mut min_val: Option<f64> = None;
-        let mut max_val: Option<f64> = None;
-        let mut mean = 0.0f64;
-        let mut m2 = 0.0f64;
-
-        let mut fold_val = |v: EvaluatedCellValue| -> Result<(), FormulaError> {
-            match v {
-                EvaluatedCellValue::Error(e) => return Err(e),
-                EvaluatedCellValue::Empty => {}
-                EvaluatedCellValue::Number(n) => {
-                    non_empty_count += 1;
-                    sum += n;
-                    product *= n;
-                    num_count += 1;
-                    min_val = Some(min_val.map_or(n, |m| m.min(n)));
-                    max_val = Some(max_val.map_or(n, |m| m.max(n)));
-                    let delta = n - mean;
-                    mean += delta / (num_count as f64);
-                    m2 += delta * (n - mean);
-                }
-                EvaluatedCellValue::Boolean(_) | EvaluatedCellValue::Text(_) => {
-                    non_empty_count += 1;
-                }
-            }
-            Ok(())
-        };
-
-        for arg in &args[1..] {
-            if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
-                for dr in 0..rows {
-                    for dc in 0..cols {
-                        let (r, c) = if transposed {
-                            (min_r + dc as u32, min_c + dr as u32)
-                        } else {
-                            (min_r + dr as u32, min_c + dc as u32)
-                        };
-                        let coord =
-                            PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
-                        if self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx) {
-                            continue;
-                        }
-                        let v = self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth);
-                        fold_val(v)?;
-                    }
-                }
-            } else if !crate::expr_contains_subtotal(arg) {
-                fold_val(self.eval_arg_val(arg, ctx, depth)?)?;
-            }
-        }
-
-        match base_code {
-            1 => {
-                if num_count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(sum / (num_count as f64)))
-                }
-            }
-            2 => Ok(EvaluatedCellValue::Number(num_count as f64)),
-            3 => Ok(EvaluatedCellValue::Number(non_empty_count as f64)),
-            4 => Ok(EvaluatedCellValue::Number(max_val.unwrap_or(0.0))),
-            5 => Ok(EvaluatedCellValue::Number(min_val.unwrap_or(0.0))),
-            6 => Ok(EvaluatedCellValue::Number(if num_count == 0 {
-                0.0
-            } else {
-                product
-            })),
-            7 => {
-                if num_count < 2 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(
-                        (m2 / ((num_count - 1) as f64)).sqrt(),
-                    ))
-                }
-            }
-            8 => {
-                if num_count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number((m2 / (num_count as f64)).sqrt()))
-                }
-            }
-            9 => Ok(EvaluatedCellValue::Number(sum)),
-            10 => {
-                if num_count < 2 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(m2 / ((num_count - 1) as f64)))
-                }
-            }
-            11 => {
-                if num_count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(m2 / (num_count as f64)))
-                }
-            }
-            _ => Err(FormulaError::Value),
         }
     }
 }

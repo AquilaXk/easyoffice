@@ -38,6 +38,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/app.js",
   "Sources/EasyOfficeCore/DocumentSecurityAuditor.swift",
   "fixtures/pii-scrub-vectors.json",
+  "fixtures/sheet-coercion-parity.json",
   "docs/policy-decisions.md",
   "docs/design-system.md",
   "docs/product-spec.md",
@@ -322,6 +323,7 @@ if (fs.existsSync(swiftAppDir)) {
 }
 
 const UNCHECKED_SWIFT_FLOAT_INT_REGEX = /\b(Int|UInt32|UInt16)\((floor|ceil|round)\(/;
+let foundSafeIntStrictBound = false;
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
   if (rel.startsWith("Sources/") && rel.endsWith(".swift")) {
@@ -331,7 +333,35 @@ for (const file of files) {
         `Unchecked float-to-integer conversion detected in ${rel}; use safeInt/checkedInteger/safeClampedInt instead.`
       );
     }
+    if (rel.startsWith("Sources/EasyOfficeCore/") && text.includes("func safeInt(")) {
+      if (text.includes(">= -9223372036854775808.0")) {
+        errors.push(
+          `safeInt in ${rel} must exclude Int.min (-9223372036854775808.0) via strict '>' to prevent negation trap.`
+        );
+      }
+      if (text.includes("> -9223372036854775808.0")) {
+        foundSafeIntStrictBound = true;
+      }
+    }
+    if (rel.startsWith("Sources/EasyOfficeCore/Sheet")) {
+      const lineCount = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+      if (lineCount >= 1000) {
+        errors.push(`Swift sheet module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
+      }
+    }
   }
+  if (rel.startsWith("crates/easyoffice-sheet/src/") && rel.endsWith(".rs")) {
+    const rsText = fs.readFileSync(file, "utf8");
+    const lineCount = rsText.split("\n").length - (rsText.endsWith("\n") ? 1 : 0);
+    if (lineCount >= 1000) {
+      errors.push(`Rust sheet module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
+    }
+  }
+}
+if (!foundSafeIntStrictBound) {
+  errors.push(
+    "Missing safeInt strict lower bound (> -9223372036854775808.0) in Sources/EasyOfficeCore/."
+  );
 }
 
 const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".floor_char_boundary("];

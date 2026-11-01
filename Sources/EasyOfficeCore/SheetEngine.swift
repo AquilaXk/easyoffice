@@ -2,50 +2,36 @@ import Foundation
 
 public typealias SheetEngine = WorksheetModel
 
-/// Worksheet model storing cell inputs keyed by `PackedCellCoordinate`, pre-compiling `FormulaAST`,
-/// and evaluating formulas with $O(V + E)$ DAG memoization and cross-sheet reference resolution.
 public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
-  /// ECMA-376 SpreadsheetML maximum characters in a single cell text output.
   public static let maxCellTextLength = 32_767
-  /// Maximum output characters permitted for `REPT` to prevent memory exhaustion.
   public static let maxReptOutputCharacters = maxCellTextLength
-  /// Maximum formula evaluation recursion depth before returning `#REF!`.
   public static let maxFormulaRecursionDepth = 256
+  public static let maxEvaluationSteps = 2_097_152
 
   public let id: UUID
   public var name: String
-  /// Primary coordinate-keyed storage (`PackedCellCoordinate -> rawString`).
   public internal(set) var cellsByCoordinate: [PackedCellCoordinate: String] = [:]
-  /// Per-cell style and number formatting table for the active sheet.
   public var cellStyles: [PackedCellCoordinate: CellStyle] = [:]
-  /// Page setup and print configuration for the workbook/worksheet.
   public var pageSetup: WorksheetPageSetup = WorksheetPageSetup()
-  /// Cell review comments keyed by cell coordinate on the active sheet.
   public var sheetComments: [PackedCellCoordinate: String] = [:]
-  /// Merged cell ranges on the active sheet.
   public var mergedRanges: [CellRange] = []
-  /// Custom column widths (in points) keyed by zero-based column index on the active sheet.
   public var columnWidths: [Int: Double] = [:]
-  /// Custom row heights (in points) keyed by zero-based row index on the active sheet.
   public var rowHeights: [Int: Double] = [:]
-  /// Whether revision tracking is enabled for this worksheet.
   public var trackChangesEnabled: Bool = false
-  /// Non-active worksheet pages in the workbook.
   public var additionalSheets: [WorksheetSheetPage] = []
-  /// Zero-based index of the active sheet among all sheets (`0 ... additionalSheets.count`).
   public var activeSheetIndex: Int = 0
-  /// Workbook/worksheet named ranges mapping normalized identifier names to A1 cell or range notation.
   public var namedRanges: [String: String] = [:]
-  /// Active worksheet conditional formatting rules.
   public var conditionalFormatRules: [SheetConditionalFormatRule] = []
-  /// Active worksheet data validation rule.
   public var dataValidationRule: SheetDataValidationRule? = nil
-  /// Passthrough archive entries preserved across round-trip open/save for container formats.
   public var preservedArchiveEntries: [String: Data] = [:]
-  /// Pre-compiled AST cache keyed by `PackedCellCoordinate`.
   internal var compiledASTs: [PackedCellCoordinate: FormulaAST] = [:]
 
-  /// Backward-compatible A1-notation dictionary view over `cellsByCoordinate`.
+  @inline(__always)
+  internal static func exceedsCellTextLength(_ text: String) -> Bool {
+    guard text.utf8.count > maxCellTextLength else { return false }
+    return text.utf16.count > maxCellTextLength
+  }
+
   public var rawCells: [String: String] {
     get {
       var result: [String: String] = [:]
@@ -62,13 +48,14 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         if let addr = try? CellAddress(a1Notation: key) {
           let coord = addr.packedCoordinate
           cellsByCoordinate[coord] = val
-          compiledASTs[coord] = Self.compileCellInput(val)
+          let ast = Self.compileCellInput(val)
+          compiledASTs[coord] = ast
+          applyAutoDateFormatIfNeeded(for: ast, at: coord)
         }
       }
     }
   }
 
-  /// Ordered list of all sheet names in the workbook, including the active sheet at `activeSheetIndex`.
   public var allSheetNames: [String] {
     var names = additionalSheets.map(\.name)
     let insertionIndex = min(max(0, activeSheetIndex), names.count)
@@ -76,7 +63,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     return names
   }
 
-  /// Sorted list of all built-in spreadsheet functions supported by the formula engine.
   public static let supportedFunctionNames: [String] = [
     "ABS", "AND", "AVEDEV", "AVERAGE", "AVERAGEIF", "AVERAGEIFS",
     "CEILING", "CHOOSE", "COLUMN", "COLUMNS", "CONCAT", "CONCATENATE", "CORREL", "COUNT", "COUNTA",
@@ -107,10 +93,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
   internal static let lazyOrRefFunctions: Set<String> = [
     "IF", "IFS", "IFERROR", "IFNA", "SWITCH", "CHOOSE",
-    "OFFSET", "ROW", "COLUMN", "ROWS", "COLUMNS",
-    "ISBLANK", "ISERROR", "ISNUMBER", "ISTEXT",
+    "OFFSET", "INDIRECT", "SUBTOTAL", "ROW", "COLUMN", "ROWS", "COLUMNS",
+    "ISBLANK", "ISERR", "ISERROR", "ISNA", "ISNUMBER", "ISTEXT", "ISLOGICAL", "ISNONTEXT", "TYPE",
+    "N", "T",
     "SUMIF", "COUNTIF", "AVERAGEIF",
     "SUMIFS", "COUNTIFS", "AVERAGEIFS", "MINIFS", "MAXIFS",
+    "VLOOKUP", "HLOOKUP", "XLOOKUP", "INDEX", "MATCH",
   ]
 
   public init(
@@ -148,7 +136,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       if let addr = try? CellAddress(a1Notation: key) {
         let coord = addr.packedCoordinate
         self.cellsByCoordinate[coord] = val
-        self.compiledASTs[coord] = Self.compileCellInput(val)
+        let ast = Self.compileCellInput(val)
+        self.compiledASTs[coord] = ast
+        applyAutoDateFormatIfNeeded(for: ast, at: coord)
       }
     }
   }
@@ -188,7 +178,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     self.dataValidationRule = dataValidationRule
     if precompileAllCells {
       for (coord, val) in cellsByCoordinate where !val.isEmpty {
-        self.compiledASTs[coord] = Self.compileCellInput(val)
+        let ast = Self.compileCellInput(val)
+        self.compiledASTs[coord] = ast
+        applyAutoDateFormatIfNeeded(for: ast, at: coord)
       }
     }
   }
@@ -216,12 +208,17 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     self.id = try container.decode(UUID.self, forKey: .id)
     self.name = try container.decode(String.self, forKey: .name)
+    self.cellStyles =
+      try container.decodeIfPresent([PackedCellCoordinate: CellStyle].self, forKey: .cellStyles)
+      ?? [:]
     if let byCoord = try container.decodeIfPresent(
       [PackedCellCoordinate: String].self, forKey: .cellsByCoordinate)
     {
       self.cellsByCoordinate = byCoord
       for (coord, val) in byCoord {
-        self.compiledASTs[coord] = Self.compileCellInput(val)
+        let ast = Self.compileCellInput(val)
+        self.compiledASTs[coord] = ast
+        applyAutoDateFormatIfNeeded(for: ast, at: coord)
       }
     } else if let legacyRaw = try container.decodeIfPresent(
       [String: String].self, forKey: .rawCells)
@@ -230,13 +227,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
         if let addr = try? CellAddress(a1Notation: key) {
           let coord = addr.packedCoordinate
           self.cellsByCoordinate[coord] = val
-          self.compiledASTs[coord] = Self.compileCellInput(val)
+          let ast = Self.compileCellInput(val)
+          self.compiledASTs[coord] = ast
+          applyAutoDateFormatIfNeeded(for: ast, at: coord)
         }
       }
     }
-    self.cellStyles =
-      try container.decodeIfPresent([PackedCellCoordinate: CellStyle].self, forKey: .cellStyles)
-      ?? [:]
     self.pageSetup =
       try container.decodeIfPresent(WorksheetPageSetup.self, forKey: .pageSetup)
       ?? WorksheetPageSetup()
@@ -292,8 +288,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       && lhs.dataValidationRule == rhs.dataValidationRule
   }
 
-  // MARK: - Named Ranges, Multi-Sheet Management, Cell Merging & Style Helpers
-
   public mutating func setNamedRange(_ name: String, rangeOrCellNotation: String) {
     let key = name.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     let val = rangeOrCellNotation.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -314,13 +308,28 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     return namedRanges.first(where: { $0.key.caseInsensitiveCompare(key) == .orderedSame })?.value
   }
 
-  /// Appends a new sheet tab to the workbook while keeping the current active sheet selected.
   public mutating func addSheetPage(
     named sheetName: String,
     initialCells: [PackedCellCoordinate: String] = [:]
   ) {
     let trimmed = sheetName.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedName = trimmed.isEmpty ? "Sheet\(allSheetNames.count + 1)" : trimmed
+    if !initialCells.isEmpty && name.caseInsensitiveCompare(resolvedName) == .orderedSame {
+      cellsByCoordinate = initialCells
+      compiledASTs.removeAll(keepingCapacity: true)
+      for (coord, rawVal) in cellsByCoordinate where !rawVal.isEmpty {
+        let ast = Self.compileCellInput(rawVal)
+        compiledASTs[coord] = ast
+        applyAutoDateFormatIfNeeded(for: ast, at: coord)
+      }
+      return
+    }
+    if let existingIdx = additionalSheets.firstIndex(where: {
+      $0.name.caseInsensitiveCompare(resolvedName) == .orderedSame
+    }) {
+      additionalSheets[existingIdx].cellsByCoordinate = initialCells
+      return
+    }
     additionalSheets.append(
       WorksheetSheetPage(
         name: resolvedName,
@@ -334,7 +343,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     )
   }
 
-  /// Switches the active worksheet tab to `newIndex` (`0 ..< allSheetNames.count`), preserving per-sheet comments, merged ranges, custom dimensions, and tab order.
   public mutating func switchActiveSheet(to newIndex: Int) {
     var allPages = additionalSheets
     let currentInsertionIndex = min(max(0, activeSheetIndex), allPages.count)
@@ -369,11 +377,12 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
 
     self.compiledASTs.removeAll(keepingCapacity: true)
     for (coord, rawVal) in self.cellsByCoordinate where !rawVal.isEmpty {
-      self.compiledASTs[coord] = Self.compileCellInput(rawVal)
+      let ast = Self.compileCellInput(rawVal)
+      self.compiledASTs[coord] = ast
+      applyAutoDateFormatIfNeeded(for: ast, at: coord)
     }
   }
 
-  /// Returns ordered `WorksheetSheetPage` snapshots for all tabs in the workbook.
   public func orderedSheetPages() -> [WorksheetSheetPage] {
     var allPages = additionalSheets
     let currentInsertionIndex = min(max(0, activeSheetIndex), allPages.count)
@@ -393,7 +402,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     return allPages
   }
 
-  /// Toggles cell merging for `range` on the active sheet.
   public mutating func toggleMergeCells(_ range: CellRange) {
     if let existingIdx = mergedRanges.firstIndex(where: { $0 == range || $0.overlaps(range) }) {
       mergedRanges.remove(at: existingIdx)
@@ -402,7 +410,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     }
   }
 
-  /// Returns `true` if `coord` lies within any merged cell range on the active sheet.
   public func isCellMerged(_ coord: PackedCellCoordinate) -> Bool {
     mergedRanges.contains { $0.contains(coord) }
   }
@@ -429,7 +436,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     cellStyles[coord] ?? CellStyle()
   }
 
-  /// Formats the evaluated display string for `address`, optionally reading from a pre-evaluated batch grid dictionary.
   public func formattedDisplayValue(
     at address: CellAddress,
     using preEvaluated: [PackedCellCoordinate: EvaluatedCellValue]? = nil
@@ -440,7 +446,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     return style.format(val)
   }
 
-  /// Automatically detects the bounding `CellRange` of all non-empty cells in the active sheet (falling back to `A1:D5` if empty).
   public func detectedDataRange() -> CellRange {
     guard !cellsByCoordinate.isEmpty else {
       let start = CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
@@ -462,7 +467,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     return CellRange(start: start, end: end)
   }
 
-  /// Automatically detects the bounding `CellRange` of all numeric-valued cells in the active sheet (falling back to `detectedDataRange()`).
   public func detectedNumericRange() -> CellRange {
     var context = EvaluationContext()
     var minRow = Int.max
@@ -486,6 +490,18 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     return CellRange(start: start, end: end)
   }
 
+  internal mutating func applyAutoDateFormatIfNeeded(
+    for ast: FormulaAST,
+    at coord: PackedCellCoordinate
+  ) {
+    guard SheetValueCoercion.isAutoDateFormula(ast) else { return }
+    var style = cellStyles[coord] ?? CellStyle()
+    if style.numberFormat == .general {
+      style.numberFormat = .dateISO
+      cellStyles[coord] = style
+    }
+  }
+
   public mutating func setCell(_ a1: String, rawValue: String) throws {
     let addr = try CellAddress(a1Notation: a1)
     let coord = addr.packedCoordinate
@@ -494,7 +510,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       compiledASTs.removeValue(forKey: coord)
     } else {
       cellsByCoordinate[coord] = rawValue
-      compiledASTs[coord] = Self.compileCellInput(rawValue)
+      let ast = Self.compileCellInput(rawValue)
+      compiledASTs[coord] = ast
+      applyAutoDateFormatIfNeeded(for: ast, at: coord)
     }
   }
 
@@ -506,7 +524,9 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       compiledASTs.removeValue(forKey: coord)
     } else {
       cellsByCoordinate[coord] = rawValue
-      compiledASTs[coord] = Self.compileCellInput(rawValue)
+      let ast = Self.compileCellInput(rawValue)
+      compiledASTs[coord] = ast
+      applyAutoDateFormatIfNeeded(for: ast, at: coord)
     }
   }
 
@@ -519,9 +539,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     cellsByCoordinate[packed] ?? ""
   }
 
-  // MARK: - Evaluation Context & Public Entrypoints
-
-  /// 1,024-cell (`64 rows × 16 columns`) stack-inline bitset (`16 × UInt64`) for zero-allocation single-sheet cycle tracking.
   public struct FastCellBitset: Sendable, Equatable {
     public var words:
       (
@@ -621,6 +638,14 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
     var crossVisited: Set<CrossSheetCellKey> = []
     var crossMemo: [CrossSheetCellKey: EvaluatedCellValue] = [:]
     var sheetModelCache: [String: WorksheetModel] = [:]
+    var currentCoord: PackedCellCoordinate? = nil
+    var rngState: UInt64 = 0x853C_49E6_748F_EA9B
+
+    mutating func nextRandomUnit() -> Double {
+      rngState = rngState &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+      let bits = rngState >> 11
+      return Double(bits) * (1.0 / 9_007_199_254_740_992.0)
+    }
 
     @inline(__always)
     func isVisited(_ coord: PackedCellCoordinate) -> Bool {
@@ -665,575 +690,6 @@ public struct WorksheetModel: Sendable, Codable, Equatable, Identifiable {
       return all
     }
   }
-
-  public func evaluate(at a1: String) -> EvaluatedCellValue {
-    guard let address = try? CellAddress(a1Notation: a1) else {
-      return .error("#REF!")
-    }
-    var context = EvaluationContext()
-    return evaluateInternal(at: address.packedCoordinate, context: &context, depth: 0)
-  }
-
-  public func evaluate(at packed: PackedCellCoordinate) -> EvaluatedCellValue {
-    guard packed.column >= 0, packed.column <= CellAddress.maxZeroBasedColumn,
-      packed.row >= 0, packed.row <= CellAddress.maxZeroBasedRow
-    else {
-      return .error("#REF!")
-    }
-    var context = EvaluationContext()
-    return evaluateInternal(at: packed, context: &context, depth: 0)
-  }
-
-  /// Evaluates an entire rectangular grid of `rows` and `columns` sharing a single `EvaluationContext` memo table.
-  public func evaluateGrid(
-    rows: ClosedRange<Int>,
-    columns: ClosedRange<Int>
-  ) -> [PackedCellCoordinate: EvaluatedCellValue] {
-    var context = EvaluationContext()
-    var result: [PackedCellCoordinate: EvaluatedCellValue] = [:]
-    result.reserveCapacity(min(cellsByCoordinate.count, rows.count * columns.count))
-    for r in rows where r >= 0 && r <= CellAddress.maxZeroBasedRow {
-      for c in columns where c >= 0 && c <= CellAddress.maxZeroBasedColumn {
-        let coord = PackedCellCoordinate(row: r, column: c)
-        guard cellsByCoordinate[coord] != nil else { continue }
-        result[coord] = evaluateInternal(at: coord, context: &context, depth: 0)
-      }
-    }
-    return result
-  }
-
-  /// Evaluates and sorts rows within `range` by the zero-based `colOffset` relative to `range`, breaking ties with optional `secondaryColumnOffset`.
-  public func sortedRows(
-    in range: CellRange,
-    byColumnOffset colOffset: Int,
-    ascending: Bool = true,
-    secondaryColumnOffset: Int? = nil,
-    secondaryAscending: Bool = true
-  ) -> [[EvaluatedCellValue]] {
-    let rows = evaluateGrid(in: range)
-    guard let firstRow = rows.first, colOffset >= 0, colOffset < firstRow.count else {
-      return rows
-    }
-    return rows.sorted { lhs, rhs in
-      let a = lhs[colOffset]
-      let b = rhs[colOffset]
-      if let aNum = a.numericValue, let bNum = b.numericValue {
-        if aNum != bNum {
-          return ascending ? (aNum < bNum) : (aNum > bNum)
-        }
-      } else if a.description != b.description {
-        return ascending ? (a.description < b.description) : (a.description > b.description)
-      }
-      if let secCol = secondaryColumnOffset, secCol >= 0, secCol < firstRow.count {
-        let sa = lhs[secCol]
-        let sb = rhs[secCol]
-        if let saNum = sa.numericValue, let sbNum = sb.numericValue {
-          if saNum != sbNum {
-            return secondaryAscending ? (saNum < sbNum) : (saNum > sbNum)
-          }
-        } else if sa.description != sb.description {
-          return secondaryAscending
-            ? (sa.description < sb.description)
-            : (sa.description > sb.description)
-        }
-      }
-      return false
-    }
-  }
-
-  /// Evaluates and filters rows within `range` by applying `predicate` to the column at `colOffset`.
-  public func filteredRows(
-    in range: CellRange,
-    byColumnOffset colOffset: Int,
-    predicate: (EvaluatedCellValue) -> Bool
-  ) -> [[EvaluatedCellValue]] {
-    let rows = evaluateGrid(in: range)
-    guard let firstRow = rows.first, colOffset >= 0, colOffset < firstRow.count else {
-      return []
-    }
-    return rows.filter { predicate($0[colOffset]) }
-  }
-
-  public func evaluateGrid(in range: CellRange) -> [[EvaluatedCellValue]] {
-    var context = EvaluationContext()
-    return evaluateGridInternal(in: range, context: &context, depth: 0)
-  }
-
-  internal func evaluateGridInternal(
-    onSheet targetSheetName: String? = nil,
-    in range: CellRange,
-    context: inout EvaluationContext,
-    depth: Int
-  ) -> [[EvaluatedCellValue]] {
-    guard let bounds = rangeBounds(range) else {
-      return []
-    }
-
-    var grid: [[EvaluatedCellValue]] = []
-    grid.reserveCapacity(bounds.rowCount)
-    for r in bounds.minRow...bounds.maxRow {
-      var rowVals: [EvaluatedCellValue] = []
-      rowVals.reserveCapacity(bounds.colCount)
-      for c in bounds.minCol...bounds.maxCol {
-        let packed = PackedCellCoordinate(row: r, column: c)
-        if let targetSheetName {
-          rowVals.append(
-            evaluateOnSheet(named: targetSheetName, at: packed, context: &context, depth: depth + 1)
-          )
-        } else {
-          rowVals.append(evaluateInternal(at: packed, context: &context, depth: depth + 1))
-        }
-      }
-      grid.append(rowVals)
-    }
-    return grid
-  }
-
-  // MARK: - AST Evaluator with DAG Memoization & Cross-Sheet Resolution
-
-  internal func hasSheet(named targetSheetName: String) -> Bool {
-    if name.caseInsensitiveCompare(targetSheetName) == .orderedSame {
-      return true
-    }
-    return additionalSheets.contains {
-      $0.name.caseInsensitiveCompare(targetSheetName) == .orderedSame
-    }
-  }
-
-  internal func evaluateOnSheet(
-    named targetSheetName: String,
-    at packed: PackedCellCoordinate,
-    context: inout EvaluationContext,
-    depth: Int
-  ) -> EvaluatedCellValue {
-    guard depth <= Self.maxFormulaRecursionDepth,
-      packed.column >= 0, packed.column <= CellAddress.maxZeroBasedColumn,
-      packed.row >= 0, packed.row <= CellAddress.maxZeroBasedRow
-    else {
-      return .error("#REF!")
-    }
-    if name.caseInsensitiveCompare(targetSheetName) == .orderedSame {
-      return evaluateInternal(at: packed, context: &context, depth: depth)
-    }
-    guard
-      let pageIdx = additionalSheets.firstIndex(where: {
-        $0.name.caseInsensitiveCompare(targetSheetName) == .orderedSame
-      })
-    else {
-      return .error("#REF!")
-    }
-    let targetPage = additionalSheets[pageIdx]
-    let key = CrossSheetCellKey(sheetNameUpper: targetPage.name.uppercased(), coord: packed)
-
-    let activeSheetUpper = name.uppercased()
-    var newlyInsertedActiveKeys: [CrossSheetCellKey] = []
-    for activeCoord in context.allVisitedCoordinates() {
-      let activeKey = CrossSheetCellKey(sheetNameUpper: activeSheetUpper, coord: activeCoord)
-      if context.crossVisited.insert(activeKey).inserted {
-        newlyInsertedActiveKeys.append(activeKey)
-      }
-    }
-    defer {
-      for activeKey in newlyInsertedActiveKeys {
-        context.crossVisited.remove(activeKey)
-      }
-    }
-    if context.crossVisited.contains(key)
-      || context.crossVisited.count > Self.maxFormulaRecursionDepth
-    {
-      return .error("#REF!")
-    }
-    if let cached = context.crossMemo[key] {
-      return cached
-    }
-    guard let raw = targetPage.cellsByCoordinate[packed], !raw.isEmpty else {
-      return .empty
-    }
-    let ast = Self.compileCellInput(raw)
-    switch ast {
-    case .empty:
-      return .empty
-    case .literalNumber(let num):
-      return .number(num)
-    case .literalText(let str):
-      return .text(str)
-    case .literalBoolean(let flag):
-      return .boolean(flag)
-    default:
-      let targetSheetUpper = targetPage.name.uppercased()
-      let targetModel: WorksheetModel
-      if let cachedModel = context.sheetModelCache[targetSheetUpper] {
-        targetModel = cachedModel
-      } else {
-        var remainingSheets = additionalSheets
-        remainingSheets.remove(at: pageIdx)
-        remainingSheets.append(
-          WorksheetSheetPage(
-            id: id,
-            name: name,
-            cellsByCoordinate: cellsByCoordinate,
-            cellStyles: cellStyles,
-            sheetComments: sheetComments,
-            mergedRanges: mergedRanges,
-            columnWidths: columnWidths,
-            rowHeights: rowHeights
-          )
-        )
-        let builtModel = WorksheetModel(
-          id: targetPage.id,
-          name: targetPage.name,
-          cellsByCoordinate: targetPage.cellsByCoordinate,
-          cellStyles: targetPage.cellStyles,
-          pageSetup: pageSetup,
-          sheetComments: targetPage.sheetComments,
-          mergedRanges: targetPage.mergedRanges,
-          columnWidths: targetPage.columnWidths,
-          rowHeights: targetPage.rowHeights,
-          trackChangesEnabled: trackChangesEnabled,
-          additionalSheets: remainingSheets,
-          activeSheetIndex: 0,
-          namedRanges: namedRanges,
-          precompileAllCells: false
-        )
-        context.sheetModelCache[targetSheetUpper] = builtModel
-        targetModel = builtModel
-      }
-      var subContext = EvaluationContext(
-        memo: [:],
-        crossVisited: context.crossVisited.union([key]),
-        crossMemo: context.crossMemo,
-        sheetModelCache: context.sheetModelCache
-      )
-      subContext.markVisited(packed)
-      var evaluated = targetModel.evaluateAST(ast, context: &subContext, depth: depth + 1)
-      if case .text(let str) = evaluated, str.count > Self.maxCellTextLength {
-        evaluated = .error(.value)
-      }
-      for (subCoord, subVal) in subContext.memo {
-        subContext.crossMemo[CrossSheetCellKey(sheetNameUpper: targetSheetUpper, coord: subCoord)] =
-          subVal
-      }
-      context.crossMemo = subContext.crossMemo
-      context.sheetModelCache = subContext.sheetModelCache
-      context.crossMemo[key] = evaluated
-      return evaluated
-    }
-  }
-
-  internal func evaluateInternal(
-    at packed: PackedCellCoordinate,
-    context: inout EvaluationContext,
-    depth: Int
-  ) -> EvaluatedCellValue {
-    guard depth <= Self.maxFormulaRecursionDepth,
-      context.visitedCount <= Self.maxFormulaRecursionDepth
-    else {
-      return .error("#REF!")
-    }
-    if context.isVisited(packed) {
-      return .error("#REF!")
-    }
-    let selfSheetUpper = name.uppercased()
-    if !context.crossVisited.isEmpty,
-      context.crossVisited.contains(
-        CrossSheetCellKey(sheetNameUpper: selfSheetUpper, coord: packed))
-    {
-      return .error("#REF!")
-    }
-    if let memoized = context.memo[packed] {
-      return memoized
-    }
-    if !context.crossMemo.isEmpty,
-      let crossCached = context.crossMemo[
-        CrossSheetCellKey(sheetNameUpper: selfSheetUpper, coord: packed)]
-    {
-      context.memo[packed] = crossCached
-      return crossCached
-    }
-    let ast: FormulaAST
-    if let precompiled = compiledASTs[packed] {
-      ast = precompiled
-    } else if let raw = cellsByCoordinate[packed], !raw.isEmpty {
-      ast = Self.compileCellInput(raw)
-    } else {
-      return .empty
-    }
-
-    switch ast {
-    case .empty:
-      return .empty
-    case .literalNumber(let num):
-      return .number(num)
-    case .literalText(let str):
-      return .text(str)
-    case .literalBoolean(let flag):
-      return .boolean(flag)
-    default:
-      context.markVisited(packed)
-      var evaluated = evaluateAST(ast, context: &context, depth: depth + 1)
-      if case .text(let str) = evaluated, str.count > Self.maxCellTextLength {
-        evaluated = .error(.value)
-      }
-      context.unmarkVisited(packed)
-      context.memo[packed] = evaluated
-      return evaluated
-    }
-  }
-
-  internal func evaluateAST(
-    _ ast: FormulaAST,
-    context: inout EvaluationContext,
-    depth: Int
-  ) -> EvaluatedCellValue {
-    guard depth <= Self.maxFormulaRecursionDepth,
-      context.visitedCount <= Self.maxFormulaRecursionDepth
-    else {
-      return .error("#REF!")
-    }
-
-    switch ast {
-    case .empty:
-      return .empty
-    case .literalNumber(let num), .number(let num):
-      return .number(num)
-    case .literalText(let str), .text(let str):
-      return .text(str)
-    case .literalBoolean(let flag), .boolean(let flag):
-      return .boolean(flag)
-    case .error(let err):
-      return .error(err.rawValue)
-    case .cellRef(let coord):
-      let resolved = evaluateInternal(at: coord, context: &context, depth: depth + 1)
-      if case .empty = resolved {
-        return .number(0.0)
-      }
-      return resolved
-    case .rangeRef:
-      return .error("#VALUE!")
-    case .namedRangeRef(let rangeName):
-      guard let targetNotation = resolveNamedRange(rangeName) else {
-        return .error("#NAME?")
-      }
-      if let addr = try? CellAddress(a1Notation: targetNotation) {
-        let resolved = evaluateInternal(
-          at: addr.packedCoordinate, context: &context, depth: depth + 1)
-        if case .empty = resolved { return .number(0.0) }
-        return resolved
-      } else if let range = try? CellRange(notation: targetNotation) {
-        let resolved = evaluateInternal(
-          at: range.start.packedCoordinate, context: &context, depth: depth + 1)
-        if case .empty = resolved { return .number(0.0) }
-        return resolved
-      }
-      return .error("#REF!")
-    case .sheetCellRef(let sheetName, let coord):
-      let resolved = evaluateOnSheet(
-        named: sheetName, at: coord, context: &context, depth: depth + 1)
-      if case .empty = resolved {
-        return .number(0.0)
-      }
-      return resolved
-    case .sheetRangeRef(let sheetName, _):
-      guard hasSheet(named: sheetName) else { return .error("#REF!") }
-      return .error("#VALUE!")
-    case .unaryMinus(let inner):
-      let val = evaluateAST(inner, context: &context, depth: depth + 1)
-      if case .error = val { return val }
-      guard let num = val.numericValue else { return .error("#VALUE!") }
-      return .number(-num)
-    case .binaryOp:
-      var chain: [(op: String, rhs: FormulaAST)] = []
-      var cursor = ast
-      while case .binaryOp(let op, let l, let r) = cursor {
-        chain.append((op: op, rhs: r))
-        cursor = l
-      }
-      var accVal: EvaluatedCellValue
-      if chain.last?.op == "&" {
-        accVal = evaluateASTPreservingEmpty(cursor, context: &context, depth: depth)
-      } else {
-        accVal = evaluateAST(cursor, context: &context, depth: depth + 1)
-      }
-      if case .error = accVal { return accVal }
-
-      for (op, rhs) in chain.reversed() {
-        if op == "&" {
-          let rhsVal = evaluateASTPreservingEmpty(rhs, context: &context, depth: depth)
-          if case .error = rhsVal { return rhsVal }
-          let leftText = accVal.description
-          let rightText = rhsVal.description
-          guard leftText.count + rightText.count <= Self.maxCellTextLength else {
-            return .error(.value)
-          }
-          accVal = .text(leftText + rightText)
-          continue
-        }
-        let lhsVal = accVal
-        let rhsVal = evaluateAST(rhs, context: &context, depth: depth + 1)
-        if case .error = rhsVal { return rhsVal }
-        if let lNum = lhsVal.numericValue, let rNum = rhsVal.numericValue {
-          let result: Double
-          switch op {
-          case "+": result = lNum + rNum
-          case "-": result = lNum - rNum
-          case "*": result = lNum * rNum
-          case "/":
-            guard rNum != 0.0 else { return .error("#DIV/0!") }
-            result = lNum / rNum
-          case "^":
-            result = pow(lNum, rNum)
-          default:
-            return .error("#VALUE!")
-          }
-          guard result.isFinite else { return .error("#NUM!") }
-          accVal = .number(result)
-          continue
-        }
-        if op == "+" {
-          if let lDate = Self.parseDateValue(lhsVal),
-            let rNum = rhsVal.numericValue,
-            let days = Self.safeInt(trunc(rNum)),
-            abs(Double(days)) <= 10_000_000,
-            let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: lDate)
-          {
-            accVal = .text(Self.formatUTCDate(shifted))
-            continue
-          }
-          if let rDate = Self.parseDateValue(rhsVal),
-            let lNum = lhsVal.numericValue,
-            let days = Self.safeInt(trunc(lNum)),
-            abs(Double(days)) <= 10_000_000,
-            let shifted = Self.utcCalendar.date(byAdding: .day, value: days, to: rDate)
-          {
-            accVal = .text(Self.formatUTCDate(shifted))
-            continue
-          }
-        } else if op == "-" {
-          if let lDate = Self.parseDateValue(lhsVal),
-            let rNum = rhsVal.numericValue,
-            let days = Self.safeInt(trunc(rNum)),
-            abs(Double(days)) <= 10_000_000,
-            let shifted = Self.utcCalendar.date(byAdding: .day, value: -days, to: lDate)
-          {
-            accVal = .text(Self.formatUTCDate(shifted))
-            continue
-          }
-          if let lDate = Self.parseDateValue(lhsVal),
-            let rDate = Self.parseDateValue(rhsVal)
-          {
-            let diff = Self.utcCalendar.dateComponents([.day], from: rDate, to: lDate).day ?? 0
-            accVal = .number(Double(diff))
-            continue
-          }
-        }
-        return .error("#VALUE!")
-      }
-      return accVal
-
-    case .comparisonOp(let op, let lhs, let rhs):
-      var lVal = evaluateASTPreservingEmpty(lhs, context: &context, depth: depth)
-      if case .error = lVal { return lVal }
-      var rVal = evaluateASTPreservingEmpty(rhs, context: &context, depth: depth)
-      if case .error = rVal { return rVal }
-
-      if lVal == .empty {
-        switch rVal {
-        case .text: lVal = .text("")
-        case .boolean: lVal = .boolean(false)
-        default: lVal = .number(0.0)
-        }
-      }
-      if rVal == .empty {
-        switch lVal {
-        case .text: rVal = .text("")
-        case .boolean: rVal = .boolean(false)
-        default: rVal = .number(0.0)
-        }
-      }
-
-      if case .number(let lNum) = lVal, case .number(let rNum) = rVal {
-        switch op {
-        case ">=": return .boolean(lNum >= rNum)
-        case "<=": return .boolean(lNum <= rNum)
-        case "<>": return .boolean(lNum != rNum)
-        case "=": return .boolean(lNum == rNum)
-        case ">": return .boolean(lNum > rNum)
-        case "<": return .boolean(lNum < rNum)
-        default: return .error("#VALUE!")
-        }
-      } else if case .text(let lStr) = lVal, case .text(let rStr) = rVal {
-        let cmp = lStr.caseInsensitiveCompare(rStr)
-        switch op {
-        case "=": return .boolean(cmp == .orderedSame)
-        case "<>": return .boolean(cmp != .orderedSame)
-        case ">": return .boolean(cmp == .orderedDescending)
-        case "<": return .boolean(cmp == .orderedAscending)
-        case ">=": return .boolean(cmp == .orderedSame || cmp == .orderedDescending)
-        case "<=": return .boolean(cmp == .orderedSame || cmp == .orderedAscending)
-        default: return .error("#VALUE!")
-        }
-      } else if case .boolean(let lBool) = lVal, case .boolean(let rBool) = rVal {
-        let lInt = lBool ? 1 : 0
-        let rInt = rBool ? 1 : 0
-        switch op {
-        case "=": return .boolean(lInt == rInt)
-        case "<>": return .boolean(lInt != rInt)
-        case ">": return .boolean(lInt > rInt)
-        case "<": return .boolean(lInt < rInt)
-        case ">=": return .boolean(lInt >= rInt)
-        case "<=": return .boolean(lInt <= rInt)
-        default: return .error("#VALUE!")
-        }
-      } else {
-        func typeRank(_ v: EvaluatedCellValue) -> Int {
-          switch v {
-          case .number, .empty: return 1
-          case .text: return 2
-          case .boolean: return 3
-          case .error: return 4
-          }
-        }
-        let lRank = typeRank(lVal)
-        let rRank = typeRank(rVal)
-        switch op {
-        case "=": return .boolean(false)
-        case "<>": return .boolean(true)
-        case ">": return .boolean(lRank > rRank)
-        case "<": return .boolean(lRank < rRank)
-        case ">=": return .boolean(lRank >= rRank)
-        case "<=": return .boolean(lRank <= rRank)
-        default: return .error("#VALUE!")
-        }
-      }
-
-    case .functionCall(let name, let args):
-      return evaluateFunction(name: name, args: args, context: &context, depth: depth + 1)
-    }
-  }
-
-  private func evaluateASTPreservingEmpty(
-    _ ast: FormulaAST,
-    context: inout EvaluationContext,
-    depth: Int
-  ) -> EvaluatedCellValue {
-    switch ast {
-    case .cellRef(let coord):
-      return evaluateInternal(at: coord, context: &context, depth: depth + 1)
-    case .sheetCellRef(let sheetName, let coord):
-      return evaluateOnSheet(named: sheetName, at: coord, context: &context, depth: depth + 1)
-    case .namedRangeRef(let rangeName):
-      guard let notation = resolveNamedRange(rangeName) else {
-        return .error("#NAME?")
-      }
-      if let addr = try? CellAddress(a1Notation: notation) {
-        return evaluateInternal(at: addr.packedCoordinate, context: &context, depth: depth + 1)
-      }
-      return .error("#REF!")
-    default:
-      return evaluateAST(ast, context: &context, depth: depth + 1)
-    }
-  }
 }
 
 public typealias FastCellBitset = WorksheetModel.FastCellBitset
-

@@ -793,7 +793,7 @@ final class EditorEnginesParityTests: XCTestCase {
     let c1 = PackedCellCoordinate(row: 0, column: 2)
     workbook.additionalSheets[0].cellsByCoordinate[c1] = "=요약시트!C1"
     try workbook.setCell("C1", rawValue: "=Sheet2!C1")
-    XCTAssertEqual(workbook.evaluate(at: "C1"), .error("#REF!"))
+    XCTAssertEqual(workbook.evaluate(at: "C1"), .error("#CYCLE!"))
 
     // 2. Per-sheet sheetComments and mergedRanges + toggleMergeCells / isCellMerged
     let mergeRange = try CellRange(notation: "D1:E2")
