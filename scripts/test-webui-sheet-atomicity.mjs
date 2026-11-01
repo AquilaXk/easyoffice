@@ -333,7 +333,10 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
       }
       if (command === "get_ribbon_category_commands") {
         const payload = String(args.payload || "");
-        if (payload.endsWith("|insert")) {
+        const isInsertCategory =
+          payload.endsWith("|insert") ||
+          (payload.startsWith("{") && JSON.parse(payload).category === "insert");
+        if (isInsertCategory) {
           return new Promise((resolve) => {
             deferredReviewCategoryResolve = () =>
               resolve({

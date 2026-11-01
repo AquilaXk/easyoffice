@@ -327,7 +327,7 @@
             <div class="formula-bar slide-toolbar">
               <button id="btn-add-slide" class="secondary-btn">+ 슬라이드 추가</button>
               <label for="slide-transition-select">화면 전환</label>
-              <select id="slide-transition-select" class="cmd-input" style="width:150px;margin:0;padding:4px 8px">
+              <select id="slide-transition-select" class="cmd-input slide-transition-select">
                 <option value="none">없음</option>
                 <option value="fade" selected>페이드</option>
                 <option value="push">밀어내기</option>
@@ -369,7 +369,7 @@
             <div class="formula-bar pdf-toolbar">
               <button id="btn-pdf-rotate" class="secondary-btn">↻ 90° 회전</button>
               <label for="pdf-stamp-select">결재 스탬프</label>
-              <select id="pdf-stamp-select" class="cmd-input" style="width:140px;margin:0;padding:4px 8px">
+              <select id="pdf-stamp-select" class="cmd-input pdf-stamp-select">
                 <option value="승인필" selected>승인 완료</option>
                 <option value="대외비">대외비</option>
                 <option value="초안">초안</option>
@@ -378,9 +378,9 @@
               <input
                 id="pdf-watermark-input"
                 type="text"
+                class="pdf-watermark-input"
                 value="대외비 · 기획조정실"
                 aria-label="워터마크 문구"
-                style="max-width:200px"
               />
               <button id="btn-pdf-apply" class="primary-btn">양식·스탬프 적용</button>
               <span id="pdf-rotation-badge" class="ctx-badge">회전: 0°</span>
@@ -472,11 +472,11 @@
           <div class="inspector-section">
             <h3>테마 색상</h3>
             <div class="token-row">
-              <span class="swatch" style="background: var(--eo-primary)"></span>
+              <span class="swatch swatch-primary"></span>
               <span>기본 강조색</span>
             </div>
             <div class="token-row">
-              <span class="swatch" id="module-swatch" style="background: var(--eo-module-active)"></span>
+              <span class="swatch swatch-module" id="module-swatch"></span>
               <span id="module-accent-label">모듈 색상: 문서</span>
             </div>
           </div>
@@ -506,6 +506,7 @@
         <span id="status-format-spec">포맷: DOCX 문서</span>
         <span id="status-sheet-agg">선택 집계 · 합계 1,300 · 평균 650 · 개수 2 · 최대 1,000</span>
         <span id="ime-badge">IME: 완료</span>
+        <span id="status-engine">엔진: 연결 대기</span>
         <span id="status-command-feedback">준비 완료</span>
       </footer>
     </div>
@@ -524,9 +525,7 @@
       </div>
     </dialog>
 
-    <script src="./offline-formula-ast.js"></script>
-    <script src="./offline-formula-eval.js"></script>
-    <script src="./offline-rpc.js"></script>
+    <script src="./sheet-utils.js"></script>
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-store.js"></script>
     <script src="./ribbon-catalog.js"></script>

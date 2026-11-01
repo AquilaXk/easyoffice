@@ -37,13 +37,15 @@
     editor.classList.toggle("manuscript-grid", Boolean(ls.manuscriptGrid));
   }
 
+  const { serializeDomChildren, restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
+
   function createWorkspacePanels(deps) {
     const {
       document,
       docTabStore,
       sheetDataStore,
       slideDeckState,
-      defaultHwpEditorHtml,
+      defaultHwpEditorNodes,
       createEmptySlideStyleFields,
       isExcludedDocChromeElement,
       sheetController,
@@ -65,7 +67,7 @@
       const editor = document.getElementById("doc-editor");
       if (!editor) return;
       docTabStore[mod] = {
-        editorHtml: editor.innerHTML,
+        editorNodes: serializeDomChildren(editor),
         layoutStyle: captureDocLayoutStyle(editor),
       };
     }
@@ -78,13 +80,13 @@
       const editor = document.getElementById("doc-editor");
       if (!docTabStore.DOC && editor) {
         docTabStore.DOC = {
-          editorHtml: editor.innerHTML,
+          editorNodes: serializeDomChildren(editor),
           layoutStyle: captureDocLayoutStyle(editor),
         };
       }
       if (!docTabStore.HWP) {
         docTabStore.HWP = {
-          editorHtml: defaultHwpEditorHtml,
+          editorNodes: JSON.parse(JSON.stringify(defaultHwpEditorNodes || [])),
           layoutStyle: captureDocLayoutStyle(null),
         };
       }
@@ -245,6 +247,7 @@
       const bodyParagraphs = Array.from(
         document.querySelectorAll("#pdf-page-card p:not(#pdf-form-status)")
       );
+      const headingEl = document.querySelector("#pdf-page-card h3");
       return {
         stampValue: document.getElementById("pdf-stamp-select")?.value ?? "승인필",
         stampBadge: document.getElementById("pdf-stamp-badge")?.textContent ?? "승인필",
@@ -252,8 +255,8 @@
         watermarkLayer: document.getElementById("pdf-watermark-layer")?.textContent ?? "",
         applicant: document.getElementById("pdf-form-applicant")?.value ?? "",
         dept: document.getElementById("pdf-form-dept")?.value ?? "",
-        cardHeadingHtml: document.querySelector("#pdf-page-card h3")?.innerHTML ?? "",
-        cardBodyParagraphsHtml: bodyParagraphs.map((p) => p.innerHTML),
+        cardHeadingNodes: headingEl ? serializeDomChildren(headingEl) : [],
+        cardBodyParagraphsNodes: bodyParagraphs.map((p) => serializeDomChildren(p)),
         formStatus: document.getElementById("pdf-form-status")?.textContent ?? "",
       };
     }
@@ -282,19 +285,19 @@
       if (appInput && pdfStudio.applicant !== undefined) appInput.value = pdfStudio.applicant;
       if (deptInput && pdfStudio.dept !== undefined) deptInput.value = pdfStudio.dept;
       if (cardHeading) {
-        if (pdfStudio.cardHeadingHtml !== undefined) {
-          cardHeading.innerHTML = pdfStudio.cardHeadingHtml;
+        if (Array.isArray(pdfStudio.cardHeadingNodes)) {
+          restoreDomChildren(cardHeading, pdfStudio.cardHeadingNodes, document);
         } else if (pdfStudio.cardHeading !== undefined) {
           cardHeading.textContent = pdfStudio.cardHeading;
         }
       }
-      if (Array.isArray(pdfStudio.cardBodyParagraphsHtml) && card) {
+      if (Array.isArray(pdfStudio.cardBodyParagraphsNodes) && card) {
         const existingPs = Array.from(card.querySelectorAll("p:not(#pdf-form-status)"));
-        while (existingPs.length > pdfStudio.cardBodyParagraphsHtml.length) {
+        while (existingPs.length > pdfStudio.cardBodyParagraphsNodes.length) {
           const extra = existingPs.pop();
           extra.remove();
         }
-        while (existingPs.length < pdfStudio.cardBodyParagraphsHtml.length) {
+        while (existingPs.length < pdfStudio.cardBodyParagraphsNodes.length) {
           const newP = document.createElement("p");
           if (formStatus && formStatus.parentElement === card) {
             formStatus.before(newP);
@@ -303,8 +306,8 @@
           }
           existingPs.push(newP);
         }
-        pdfStudio.cardBodyParagraphsHtml.forEach((html, idx) => {
-          existingPs[idx].innerHTML = html;
+        pdfStudio.cardBodyParagraphsNodes.forEach((nodes, idx) => {
+          restoreDomChildren(existingPs[idx], nodes, document);
         });
       } else if (pdfStudio.cardBody !== undefined) {
         const firstBody = document.querySelector("#pdf-page-card p:not(#pdf-form-status)");
@@ -456,7 +459,7 @@
       if (!saved) return;
       const editor = document.getElementById("doc-editor");
       if (editor) {
-        editor.innerHTML = saved.editorHtml;
+        restoreDomChildren(editor, saved.editorNodes || [], document);
         applyDocLayoutStyle(editor, saved.layoutStyle);
       }
       activeDocBlockEl = null;
@@ -501,7 +504,16 @@
       const tbody = document.getElementById("doc-table-body");
       if (!tbody) return;
       const tr = document.createElement("tr");
-      tr.innerHTML = '<td>신규 사업부</td><td>담당 연구원</td><td data-doc-num="150">150</td>';
+      const tdDept = document.createElement("td");
+      tdDept.textContent = "신규 사업부";
+      const tdOwner = document.createElement("td");
+      tdOwner.textContent = "담당 연구원";
+      const tdAmount = document.createElement("td");
+      tdAmount.dataset.docNum = "150";
+      tdAmount.textContent = "150";
+      tr.appendChild(tdDept);
+      tr.appendChild(tdOwner);
+      tr.appendChild(tdAmount);
       const sumRow = document.getElementById("doc-table-sum-row");
       if (sumRow) {
         sumRow.before(tr);

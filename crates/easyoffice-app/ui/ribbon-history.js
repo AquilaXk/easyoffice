@@ -173,7 +173,10 @@
       if (!strip) return;
       const curMod = getActiveModule();
       const modKey = curMod === "CONV" ? "DOC" : curMod;
-      const res = await invokeIpc("get_ribbon_category_commands", modKey + "|" + catKey);
+      const res = await invokeIpc(
+        "get_ribbon_category_commands",
+        JSON.stringify({ module: modKey, category: catKey })
+      );
       if (seq !== ribbonRenderSeq) return;
       const cmds = (res && Array.isArray(res.commands) && res.commands) || [];
       strip.innerHTML = "";
@@ -181,8 +184,13 @@
         const btn = document.createElement("button");
         btn.className = "ribbon-tool-btn";
         btn.dataset.commandId = cmd.id;
-        btn.innerHTML =
-          "<span>" + cmd.title + "</span> <small>(" + (cmd.shortcut || "") + ")</small>";
+        const span = document.createElement("span");
+        span.textContent = cmd.title || "";
+        const small = document.createElement("small");
+        small.textContent = "(" + (cmd.shortcut || "") + ")";
+        btn.appendChild(span);
+        btn.appendChild(document.createTextNode(" "));
+        btn.appendChild(small);
         btn.addEventListener("click", () => {
           void executeTrackedRibbonCommand(cmd.id, { fallbackTitle: cmd.title }).catch(() => {});
         });
@@ -508,8 +516,7 @@
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
       if (cmdId.endsWith("-review-verify") || cmdId.endsWith("-data-validation")) {
-        const payload = workspacePanels.buildSecurityAuditPayload(effectiveModule);
-        await invokeIpc("audit_security", payload);
+        await workspacePanels.runModuleSecurityAudit(effectiveModule);
         return { kind: "securityAudit", auditOutcome: { ok: true, errorMessage: "" } };
       }
       if (cmdId.endsWith("-review-stats")) {

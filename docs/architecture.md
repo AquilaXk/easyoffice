@@ -17,7 +17,7 @@ flowchart TD
     end
 
     subgraph CoreLayer["Domain, Codec & Engine Layer (Pure Deterministic Swift)"]
-        EasyOfficeCore["EasyOfficeCore (Library)\n- FormatDetector & DocumentFormat (20-Format Registry & Magic-Byte Guard)\n- BinaryContainerCodec (BitPacking, CRC32, ZIP/OOXML/ODF/HWPX/OLE2/HWP5)\n- TabularAndMarkupCodec (CSVStateMachineCodec, CommonMarkCodec, RTFCodec)\n- DocumentEngine (Sections, Styles, Spanned Tables, Revisions, Mail Merge)\n- SheetEngine (PackedCellCoordinate, 77 Functions, PivotTableEngine, Charts)\n- SlideEngine (Master Layouts, SnapGuideCalculator, PresenterSession)\n- PDFEngine & PDFBinarySerializer (Annotations, Split/Merge, Office ↔ PDF)\n- SmartProductivityTools (Batch Conversion, Offline Smart Assistant, Security Auditor)\n- WorkspaceHub (WorkspaceViewModel, 7x5 Ribbon Catalog, Templates, Search)"]
+        EasyOfficeCore["EasyOfficeCore (Library)\n- FormatDetector & DocumentFormat (20-Format Registry & Magic-Byte Guard)\n- BinaryContainerCodec (BitPacking, CRC32, ZIP/OOXML/ODF/HWPX/OLE2/HWP5)\n- TabularAndMarkupCodec (CSVStateMachineCodec, CommonMarkCodec, RTFCodec)\n- DocumentEngine (Sections, Styles, Spanned Tables, Revisions, Mail Merge)\n- SheetEngine (PackedCellCoordinate, 122 Functions, PivotTableEngine, Charts)\n- SlideEngine (Master Layouts, SnapGuideCalculator, PresenterSession)\n- PDFEngine & PDFBinarySerializer (Annotations, Split/Merge, Office ↔ PDF)\n- SmartProductivityTools & DocumentSecurityAuditor (Batch Conversion, Offline Assistant, PII/EXIF Scrubber)\n- WorkspaceHub (WorkspaceViewModel, 7x5 Ribbon Catalog, Templates, Search)"]
     end
 
     EasyOfficeApp --> EasyOfficeDesignSystem
@@ -42,12 +42,13 @@ EasyOffice/
 │   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
 │   │   ├── DocumentEngine.swift                   # 워드/한글(HWP/HWPX) 문서 모델, 인라인 런/이미지, 표 수식, 변경 추적, 메일 머지
 │   │   ├── SheetEngine.swift                      # PackedCellCoordinate, FormulaAST, CellStyle, 다중 시트, evaluateGrid
-│   │   ├── SheetBuiltInFunctions.swift            # 77종 스프레드시트 내장 함수 평가기 (수학·통계·논리·참조·텍스트·재무/날짜)
+│   │   ├── SheetBuiltInFunctions.swift            # 122종 스프레드시트 내장 함수 평가기 (수학·통계·논리·참조·텍스트·재무·날짜)
 │   │   ├── SheetAnalyticsAndPivot.swift           # PivotTableEngine, SheetChartBuilder, 조건부 서식 및 유효성 검사
 │   │   ├── SlideEngine.swift                      # 슬라이드/마스터, SnapGuideCalculator, PresenterSession 엔진
 │   │   ├── PDFEngine.swift                        # 다중 페이지 PDF 분할/병합, 주석, 북마크, 양방향 변환 엔진
 │   │   ├── PDFBinarySerializer.swift              # ISO 32000-1 바이트 정밀 xref 직렬화, 다중 줄 가시 스트림 및 PDFKit 브리지
-│   │   ├── SmartProductivityTools.swift           # 일괄 변환 오케스트레이터 및 컨테이너 보안 감사기
+│   │   ├── SmartProductivityTools.swift           # 일괄 변환 오케스트레이터
+│   │   ├── DocumentSecurityAuditor.swift          # 컨테이너 보안 감사기, 4대 모델 PII 비식별화 및 이미지 EXIF 제거기
 │   │   ├── LocalSmartAssistant.swift              # 100% 오프라인 스마트 문서 보조 도구 (요약, 문장 진단, 액션 추출, LCS 비교)
 │   │   ├── WorkspaceHub.swift                     # WorkspaceViewModel, Undo Coalescing, 파일 I/O, 찾기 및 바꾸기
 │   │   └── WorkspaceRibbonCommandRouter.swift     # 140종 컨텍스트 리본 도메인 명령 라우터 (Zero-Slop 상태 변이)
@@ -61,18 +62,20 @@ EasyOffice/
 │   └── EasyOfficeTests/                           # 결정론적 단위·보안·UI 패리티 및 벤치마크 검증 스위트
 │       ├── EasyOfficeTests.swift                  # 디자인 토큰, 포맷 카탈로그 및 기본 엔진 검증
 │       ├── BinaryContainerCodecTests.swift        # BitPacking, CRC32, ZIP/OLE2/HWP5/CSV/MD/RTF 및 보안 가드 검증
-│       ├── EditorEnginesParityTests.swift         # 77종 시트 함수, 피벗/차트, 문서/HWP, 슬라이드, PDF 패리티 검증
+│       ├── EditorEnginesParityTests.swift         # 122종 시트 함수, 피벗/차트, 문서/HWP, 슬라이드, PDF 패리티 검증
 │       ├── SmartProductivityToolsTests.swift      # 일괄 변환, 오프라인 스마트 보조 도구 및 보안 감사기 검증
+│       ├── PiiScrubAndSecurityCompletenessTests.swift # 3대 엔진 공통 PII 벡터, 이미지 EXIF 제거 및 Mirror 전수 검증
 │       ├── WorkspaceUIParityTests.swift           # 스플릿 뷰, 7x5 리본 매트릭스, WCAG AA 및 접근성 검증
 │       └── CommercialParityBenchmarkTests.swift   # 20종 포맷 라운드트립 매트릭스 및 비트 수준 처리량 벤치마크
-├── Cargo.toml                                     # Rust 멀티 크레이트 워크스페이스 매니페스트 (macOS / Windows 공통 코어)
+├── Cargo.toml                                     # Rust 멀티 크레이트 워크스페이스 매니페스트 (macOS / Windows / Linux 공통 코어)
 ├── crates/
 │   ├── easyoffice-formats/                        # 20종 포맷 시그니처 검증, ZIP/OLE2/HWP5/XML 보안 가드, CSV/MD/PDF 코덱
 │   ├── easyoffice-sheet/                          # 64-bit 패킹 셀 좌표, 순환 참조 탐지 수식 파서/평가기, 피벗 요약 엔진
 │   ├── easyoffice-layout/                         # 시그니처 라벤더 토큰, A4 다단/원고지, KS X 6101 공문서, 슬라이드/PDF 레이아웃
-│   └── easyoffice-app/                            # Tauri v2 IPC 라우터, 크로스플랫폼 번들 설정(tauri.conf.json), WebUI(ui/)
+│   └── easyoffice-app/                            # 15종 IPC 라우터, 루프백 HTTP 서버(--serve), C-ABI FFI, WebUI(ui/)
 ├── scripts/
-│   ├── check-repo-hygiene.mjs                     # 외부 서비스명·AI 흔적·필수 문서 무결성 가드
+│   ├── check-repo-hygiene.mjs                     # 외부 서비스명·AI 흔적·수치 정합성·XSS 가드
+│   ├── verify-macos-plist.mjs                     # LaunchServices 20종 확장자 Info.plist 검증기
 │   └── package-macos-release.sh                   # EasyOffice.app / .dmg / .zip / SHA256SUMS 생성기
 ├── docs/
 │   ├── policy-decisions.md                        # 정책 결정 기록 (SSOT)
@@ -84,57 +87,57 @@ EasyOffice/
     ├── PULL_REQUEST_TEMPLATE.md                   # 자기완결 PR 표준 템플릿
     ├── ISSUE_TEMPLATE/                            # Epic / Task / Bug 이슈 폼 템플릿
     └── workflows/
-        ├── ci.yml                                 # 위생 가드 + macOS Swift/Rust 빌드 + 테스트 게이트 (verify)
+        ├── ci.yml                                 # 위생 가드 + macOS Swift/Rust + Windows 빌드·테스트 게이트
         ├── automerge.yml                          # automerge 라벨 기반 스쿼시 병합 및 이슈 자동 종료
-        └── release.yml                            # 태그 기반 macOS .app/.dmg/.zip GitHub Release 발행
+        └── release.yml                            # macOS .app/.dmg/.zip 및 Windows CLI/WebUI 프리뷰 GitHub Release 발행
 ```
 
 ---
 
-## 2. Mac·Windows 크로스플랫폼 Rust 멀티 크레이트 코어 및 Tauri v2 데스크톱 아키텍처
+## 2. 크로스플랫폼 Rust 멀티 크레이트 코어 및 루프백 WebUI 서버 아키텍처
 
-macOS와 Windows 양대 데스크톱 환경에서 동일한 문서 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 불변식을 공유하기 위해 외부 런타임 의존성이 없는 순수 Rust 표준 라이브러리(`std`) 기반 4개 워크스페이스 크레이트와 Tauri v2 데스크톱 셸 계층을 함께 제공합니다.
+macOS, Windows, Linux 데스크톱 환경에서 동일한 문서 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 불변식을 공유하기 위해 외부 런타임 의존성이 없는 순수 Rust 표준 라이브러리(`std`) 기반 4개 워크스페이스 크레이트와 로컬 루프백 WebUI 계층을 제공합니다.
 
-1. **`crates/easyoffice-formats` (20종 포맷 레지스트리·RFC 1951/1950 DEFLATE·Slicing-by-8 CRC-32·SWAR UTF-16LE 코덱)**:
+1. **`crates/easyoffice-formats` (20종 포맷 레지스트리·RFC 1951/1950 DEFLATE·Slicing-by-8 CRC-32·SWAR UTF-16LE 코덱)**
    - 20종 `DocumentFormat` 및 `ContainerFamily` 메타데이터, 확장자-매직 바이트(`PK\x03\x04`, `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1`, `%PDF-`, `{\rtf1`, UTF-8) 교차 검증(`FormatDetector::detect`, 최대 입력 `512 MiB`)을 수행합니다.
-   - `IeeeCrc32`는 컴파일 타임 생성 `TABLES: [[u32; 256]; 8]` Slicing-by-8 테이블을 사용해 8바이트 단위로 IEEE 802.3 CRC-32를 계산하며, `deflate` 모듈은 64비트 워드 리필 `BitReader`, 9비트 1단계 `fast_lut: [u16; 512]` 고정/동적 허프만 디코더, `distance == 1` 바이트 반복(`out.resize`) 및 비겹침(`out.extend_from_within`) 고속 경로, 8바이트 `u64` SWAR XOR + `trailing_zeros() >> 3` LZ77 매처, $O(1)$ `LENGTH_CODE_LUT`·`DIST_CODE_LUT`, RFC 1950 `NMAX = 5552` 지연 모듈로 `adler32` 및 `deflate_zlib`·`inflate_zlib`을 제공합니다.
+   - `IeeeCrc32`는 컴파일 타임 생성 `TABLES` Slicing-by-8 테이블을 사용해 8바이트 단위로 IEEE 802.3 CRC-32를 계산하며, `deflate` 모듈은 64비트 워드 리필 `BitReader`, 9비트 1단계 `fast_lut` 고정/동적 허프만 디코더, `distance == 1` 바이트 반복(`out.resize`) 및 비겹침(`out.extend_from_within`) 고속 경로, 8바이트 `u64` SWAR XOR LZ77 매처, $O(1)$ `LENGTH_CODE_LUT`·`DIST_CODE_LUT`, RFC 1950 `NMAX = 5552` 지연 모듈로 `adler32` 및 `deflate_zlib`·`inflate_zlib`을 제공합니다.
    - `ZipSecurityGuard::validate_archive_entries`는 엔트리 수(`4,096`), 단일 엔트리(`128 MiB`), 전체 해제 용량(`512 MiB`), 압축비(`100:1`), 경로 순회(`..`, 선행 `/`, `\`, NUL 바이트, Windows 드라이브 문자 `C:`)를 검증합니다.
    - `Ole2SecurityGuard`와 `Ole2ContainerCodec`은 `SectorBitset`(`Vec<u64>`, 1비트=1섹터)으로 힙 할당 없이 FAT 체인 순환 참조를 $O(1)$에 탐지하고, HWP 5.0 `FileHeader` 암호화(`0x02`)·배포용 문서(`0x04`) 비트를 차단합니다. `LegacyOle2Codec::pack_xls`는 `HashMap<String, u32>`로 BIFF8 공유 문자열 테이블(SST)을 $O(1)$에 인덱싱합니다.
-   - `rtf_xml_helpers`는 64비트 SWAR ASCII 배치 경로(`u64 & 0xFF80_FF80_FF80_FF80 == 0`) 기반 `decode_utf16le_swar`·`encode_utf16le_swar`와 단일 패스 엔티티 디코더 `unescape_xml_single_pass`를 제공하며, `XmlSanitizer`(`<!ENTITY` 및 외부 DTD `SYSTEM`/`PUBLIC`/`[` 차단), `CsvCodec`(RFC 4180 상태 기계), `CommonMarkCodec`, `PdfSerializer`(`%PDF-1.4` 바이트 오프셋 `xref` 직렬화)를 포함합니다.
-2. **`crates/easyoffice-sheet` (64-bit 패킹 좌표·사전 컴파일 AST·비트셋 DAG 평가기)**:
-   - `PackedCellCoordinate`는 `(row: 32bit, col: 32bit)`를 단일 `u64`에 패킹하고(`MAX_ROWS = 1,000,000`, `MAX_COLS = 16,384`), `CellRange::expand`는 단일 범위 확장 상한(`100,000`셀)을 강제합니다.
+   - `rtf_xml_helpers`는 64비트 SWAR ASCII 배치 경로 기반 `decode_utf16le_swar`·`encode_utf16le_swar`와 단일 패스 엔티티 디코더 `unescape_xml_single_pass`를 제공하며, `XmlSanitizer`(`<!ENTITY` 및 외부 DTD `SYSTEM`/`PUBLIC`/`[` 차단), `CsvCodec`(RFC 4180 상태 기계), `CommonMarkCodec`, `PdfSerializer`(`%PDF-1.4` 바이트 오프셋 `xref` 직렬화)를 포함합니다.
+2. **`crates/easyoffice-sheet` (64-bit 패킹 좌표·사전 컴파일 AST·비트셋 DAG 평가기)**
+   - `PackedCellCoordinate`는 `(row, col)` 32비트 쌍을 단일 `u64`에 패킹하고(`MAX_ROWS = 1,000,000`, `MAX_COLS = 16,384`), `CellRange::expand`는 단일 범위 확장 상한(`100,000`셀)을 강제합니다.
    - `tokenize_formula`는 `Vec<char>` 할당 없는 제로카피 바이트 슬라이스 스캐너로 동작하며, `SheetEngine::set_cell`이 수식 입력 시점에 `compiled_asts`로 AST를 사전 컴파일합니다.
    - `EvalContext`는 시트 ID(대소문자 무시 16비트 FNV-1a)와 셀 좌표를 결합한 `PackedWorkbookCoord(u64)` 키로 문자열 힙 할당을 제거하고, 1,024셀 인라인 비트셋 `[u64; 16]` 기반 `VisitingTracker`로 순환 참조 탐지(`FormulaError::Cycle`)와 재귀 상한(`MAX_RECURSION_DEPTH = 64`)을 $O(1)$에 수행합니다. ECMA-376 호환 122종 내장 함수, 다중 시트 워크북(`WorkbookEngine`), `PivotTableSummary` 집계를 제공합니다.
-3. **`crates/easyoffice-layout` (시그니처 라벤더 토큰·5대 모듈 도메인 엔진·조판 레이아웃)**:
-   - `SignatureLavenderPalette`(`#5C6BC0` Primary Accent, `#F7F8FC` Light Canvas, `#141724` Dark Canvas), 플랫폼 렌더러 식별자(`MacOsWkWebView` / `WindowsWebView2`), 리본 레이아웃 모드(`RibbonLayoutStyle { StandardOffice, HangulHwp }`), 모듈별 자동 개체 도구 배지(`ContextualObjectToolKind`)를 정의합니다.
+3. **`crates/easyoffice-layout` (시그니처 라벤더 토큰·5대 모듈 도메인 엔진·조판 레이아웃)**
+   - `SignatureLavenderPalette`(`#5C6BC0` Primary Accent, `#F7F8FC` Light Canvas, `#141724` Dark Canvas), 플랫폼 렌더러 식별자(`MacOsWkWebView` / `WindowsWebView2` / `LinuxWebView`), 리본 레이아웃 모드(`RibbonLayoutStyle`), 모듈별 자동 개체 도구 배지(`ContextualObjectToolKind`)를 정의합니다.
    - `DocumentPageLayout`(A4 가로/세로 스왑, 1~4단 다단 폭 계산, 200자 원고지 그리드, KS X 6101 행정 공문서 헤더 및 결재란), `DocumentDomainEngine`(병합 표 모델 `DocumentTableModel` 및 `=SUM(ABOVE)`·`=AVERAGE(LEFT)` 표 수식, 변경 내용 추적 `RevisionRecord`, 각주·미주 `FootnoteEntry`, 1~3단계 자동 목차 생성, `{{필드}}` 메일 머지), `SlideDomainEngine`(5종 마스터 레이아웃, 전환 타이밍, 발표자 레이저 포인터·자유곡선 펜 `PresenterSessionState`), `PdfDomainEngine`(90도 페이지 회전, 페이지 분할·병합, 결재 스탬프, 워터마크, AcroForm 위젯)을 제공합니다.
-4. **`crates/easyoffice-app` (Tauri v2 13종 IPC 라우터·결정론적 벤치마크 하니스·140종 리본·C-ABI FFI·WebUI 셸)**:
-   - `RibbonCommandRouter`가 7개 카테고리 × 20개 명령(`140`종) 카탈로그와 64단계 `UndoRedoStack`을 제공하며, `LocalSmartAssistant`(TF 가중 핵심 문장 요약, 문장 진단, 액션 아이템 추출, LCS 문서 비교), `DocumentSecurityAuditor`(주민등록번호·휴대전화·이메일 PII 마스킹 및 메타데이터 제거), `benchmark::run_deterministic_benchmarks`(4대 코어 엔진 A/B 교차 측정 및 동등성 검증), C-ABI 브리지(`easyoffice_ffi_version`, `easyoffice_ffi_dispatch_json`, `easyoffice_ffi_free_string`)를 내장합니다.
-   - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `evaluate_workbook_formula`, `compute_layout`, `audit_security`, `execute_ribbon_command`, `switch_ribbon_style`, `run_smart_assistant`, `scrub_pii`, `convert_document_format`, `get_ribbon_category_commands`, `run_engine_benchmark` 총 13종 명령을 라우팅하며, `cargo run --release -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식과 5회 반복 `p50` 벤치마크 요약을 자체 검증합니다.
-   - `tauri.conf.json`은 macOS(`.app`, `.dmg`, `WKWebView`)와 Windows(`.msi`, `.nsis`, `WebView2` `downloadBootstrapper`) 번들 타겟을 정의하고, `ui/{index.html,styles.css,app.js}`는 5행 그리드 레이아웃, 빠른 실행 도구 모음(QAT), 실시간 명령 팔레트 검색, 시트 행/열 하이라이트 및 상태바 선택 영역 실시간 집계(`합계`·`평균`·`개수`), 슬라이드 썸네일 전환·발표자 레이저·발표자 노트, PDF 90도 회전·결재 날인·워터마크·AcroForm 양식 입력, 한글 두벌식 IME 조합(`compositionstart`/`compositionend`) 무결성을 지원합니다.
+4. **`crates/easyoffice-app` (15종 IPC 라우터·루프백 HTTP 서버·결정론적 벤치마크 하니스·140종 리본·C-ABI FFI·WebUI)**
+   - `RibbonCommandRouter`가 7개 카테고리 × 20개 명령(`140`종) 카탈로그와 64단계 `UndoRedoStack`을 제공하며, `LocalSmartAssistant`(TF 가중 핵심 문장 요약, 문장 진단, 액션 아이템 추출, LCS 문서 비교), 선형 시간($O(n)$) `PiiScrubber`(주민등록번호·외국인등록번호·휴대전화·유니코드 IDN 이메일 마스킹 및 실제 제거된 메타데이터 필드 보고), `benchmark::run_deterministic_benchmarks`, C-ABI 브리지(`easyoffice_ffi_version`, `easyoffice_ffi_dispatch_json`, `easyoffice_ffi_free_string`)를 내장합니다.
+   - `EasyOfficeIpcRouter::dispatch`가 `get_workspace_bootstrap`, `detect_format`, `evaluate_sheet`, `evaluate_workbook_formula`, `compute_layout`, `audit_security`, `execute_ribbon_command`, `undo_ribbon_command`, `redo_ribbon_command`, `switch_ribbon_style`, `run_smart_assistant`, `scrub_pii`, `convert_document_format`, `get_ribbon_category_commands`, `run_engine_benchmark` 총 15종 명령을 라우팅하며, `cargo run --release -p easyoffice-app -- --self-test`로 전 크레이트 통합 불변식과 5회 반복 `p50` 벤치마크 요약을 자체 검증합니다.
+   - `http_server` 모듈(`--serve <port>`)은 `127.0.0.1` 루프백 전용 HTTP 서버를 구동하며, 모든 응답 상태코드(`200`, `400`, `403`, `404`, `413`, `500`, `503`)에 `Content-Security-Policy` 헤더(`default-src 'self'`)를 강제하고 `ConnectionSlotGuard`(동시 32슬롯 상한, 슬롯 포화 시 즉시 `503` 반환, 패닉 발생 시 `catch_unwind` 복구)와 연결당 3초 데드라인으로 Slowloris 점유를 방어합니다. 프로덕션 `ui/` 계층은 엔진 미연결 환경에서 모의 응답으로 대체하지 않고 즉시 실행을 거부합니다.
 
 ---
 
 ## 3. 보안 및 Fail-Closed 경계 (Security Boundaries)
 
-1. **입구 시그니처 검증 (`FormatDetector`)**:
+1. **입구 시그니처 검증 (`FormatDetector`)**
    - 모든 파일 입력은 확장자와 무관하게 바이트 헤더(`PK\x03\x04`, `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1`, `%PDF-`, UTF-8 유효성)를 대조합니다.
    - 빈 파일(`emptyPayload`), 최대 허용 크기 초과(`payloadTooLarge`), 확장자-헤더 불일치(`signatureMismatch`)는 즉시 `EasyOfficeError`를 던져 차단합니다.
-2. **ZIP/OLE2 압축 폭탄·경로 순회·XXE 원천 차단 (`ZipContainerCodec`, `OLE2ContainerCodec`, `XMLSanitizer`)**:
+2. **ZIP/OLE2 압축 폭탄·경로 순회·XXE 원천 차단 (`ZipContainerCodec`, `OLE2ContainerCodec`, `XMLSanitizer`)**
    - `ZipContainerSecurityPolicy`는 엔트리 수 상한(`4,096`), 단일 엔트리 해제 상한(`128 MiB`), 전체 해제 상한(`512 MiB`), 최대 압축 비율(`100:1`)을 강제하며, `..`·선행 `/`·`\`·NUL 바이트 경로를 `EasyOfficeError.securityViolation`으로, 압축 비율/용량 초과를 `EasyOfficeError.decompressionBombDetected`로 즉시 차단합니다.
    - `XMLSanitizer`는 컨테이너 내부 XML 파싱 전 `<!ENTITY` 선언 및 외부 DTD(`SYSTEM`/`PUBLIC`/내부 서브셋 `[`)를 검사하여 `EasyOfficeError.xxeOrExternalEntityDetected`로 차단합니다.
    - `OLE2ContainerCodec`과 `HWP5BinaryCodec`은 512바이트 섹터 FAT 체인 순환 루프를 방어하고, `FileHeader` 암호화 비트(`0x02`) 및 배포용 문서 비트(`0x04`) 감지 시 `EasyOfficeError.encryptedDocumentUnsupported`로 Fail-Closed 처리합니다.
-3. **수식·범위 경계 및 스크립트 격리 (`SheetEngine`)**:
+3. **수식·범위 경계 및 스크립트 격리 (`SheetEngine`)**
    - 스프레드시트 수식 평가기는 외부 셸 호출이나 네트워크 접근 권한이 없는 순수 메모리 내 평가기로 동작하며, `PackedCellCoordinate` 방문 집합과 재귀 상한(`maxRecursionDepth = 64`), 단일 범위 확장 상한(`maxExpandedCellCount = 100,000`)으로 무한 루프와 메모리 고갈을 차단합니다.
-4. **메타데이터 비식별화 및 제로 외부 텔레메트리 (`DocumentSecurityAuditor`, `LocalSmartDocumentAssistant`)**:
-   - 문서 요약, 문장 교정, 액션 아이템 추출, 시트 이상치 분석, 문서 비교(LCS), 일괄 변환, PII 비식별화(`scrubMetadata`)는 모두 100% 온디바이스 결정론적 알고리즘으로 수행되며 외부 네트워크 호출이나 텔레메트리 전송이 전혀 없습니다.
+4. **메타데이터·이미지 EXIF 비식별화 및 제로 외부 텔레메트리 (`DocumentSecurityAuditor`, `LocalSmartDocumentAssistant`)**
+   - 문서·시트·슬라이드·PDF 4대 도메인 모델의 모든 사용자 텍스트 필드와 첨부 JPEG(`APP1..APP15`, `COM`)·PNG(`tEXt`, `zTXt`, `iTXt`, `eXIf`, `tIME`)·TIFF(EXIF/GPS/XMP 태그) 바이너리 메타데이터 비식별화는 100% 온디바이스 결정론적 알고리즘으로 수행되며 외부 네트워크 호출이나 텔레메트리 전송이 없습니다.
 
 ---
 
 ## 4. macOS 및 Windows 릴리스 패키징 파이프라인 (`scripts/package-macos-release.sh`, `.github/workflows/release.yml`)
 
-GitHub Release 발행 시 macOS(`release-macos`)와 Windows(`build-windows-release`) 병렬 파이프라인이 다음 단계를 결정론적으로 수행합니다:
+GitHub Release 발행 시 macOS(`release-macos`)와 Windows(`build-windows-release`) 병렬 파이프라인이 다음 단계를 결정론적으로 수행합니다.
 1. `swift build -c release` 및 `cargo build --workspace --release`로 최적화된 네이티브 실행 바이너리를 컴파일합니다.
-2. 표준 macOS 애플리케이션 번들 구조(`EasyOffice.app/Contents/{MacOS,Resources,Info.plist,PkgInfo}`)를 생성하고 문서 확장자 연결(`CFBundleDocumentTypes`: `docx`, `xlsx`, `pptx`, `hwp`, `hwpx`, `pdf`, `odt`, `ods`, `odp`, `csv`, `md`, `txt`) 및 고해상도 Retina 속성(`NSHighResolutionCapable`)을 주입합니다.
-3. 로컬 코드 서명(`codesign --force --deep --sign -` 또는 Developer ID 인증서) 및 번들 구조 검증을 수행합니다.
-4. macOS 배포용 디스크 이미지(`EasyOffice-<version>-macos.dmg`)·압축 아카이브(`EasyOffice-<version>-macos.zip`)·`SHA256SUMS.txt`와 Windows x64 배포 아카이브(`EasyOffice-<version>-windows-x64.zip`)·`SHA256SUMS-windows-x64.txt`를 생성하여 GitHub Release 자산으로 함께 업로드합니다.
+2. 표준 macOS 애플리케이션 번들 구조(`EasyOffice.app/Contents/{MacOS,Resources,Info.plist,PkgInfo}`)를 생성하고 20종 전체 지원 확장자에 대한 문서 연결(`CFBundleDocumentTypes`)과 고해상도 Retina 속성(`NSHighResolutionCapable`)을 주입한 뒤 `scripts/verify-macos-plist.mjs`와 `plutil -lint`로 검증합니다.
+3. 코드 서명(`codesign --force --deep --sign -` 또는 Developer ID 인증서) 및 번들 구조 검증을 수행합니다. 애드혹 서명 배포본은 최초 실행 전 `xattr -dr com.apple.quarantine /Applications/EasyOffice.app`으로 격리 속성을 해제할 수 있습니다.
+4. macOS 배포용 디스크 이미지(`EasyOffice-<version>-macos.dmg`), 압축 아카이브(`EasyOffice-<version>-macos.zip`), `SHA256SUMS.txt`와 Windows x64 CLI 및 루프백 WebUI 서버 프리뷰 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`), `SHA256SUMS-windows-x64.txt`를 빌드 대상 커밋 SHA(`--target`)에 고정하여 GitHub Release 자산으로 업로드합니다.

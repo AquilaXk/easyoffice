@@ -1,6 +1,8 @@
 (function (host) {
   "use strict";
 
+  const { serializeDomChildren, restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
+
   function createWorkspaceTools(deps, panelHooks) {
     const {
       document,
@@ -70,7 +72,7 @@
         const saved = docTabStore[scope];
         if (saved) {
           const tempDiv = document.createElement("div");
-          tempDiv.innerHTML = saved.editorHtml || "";
+          restoreDomChildren(tempDiv, saved.editorNodes || [], document);
           const docText = extractEditableDocumentText(tempDiv);
           if (docText) {
             lines.push(docText);
@@ -212,7 +214,12 @@
         const title = "EasyOffice_" + curMod + "_문서";
         const res = await invokeIpc(
           "convert_document_format",
-          srcExt + "->" + dstExt + "|" + title + "|" + body
+          JSON.stringify({
+            sourceFormat: srcExt,
+            targetFormat: dstExt,
+            title,
+            body,
+          })
         );
         const fb = document.getElementById("status-command-feedback");
         if (res && res.convertedBase64) {
@@ -285,41 +292,47 @@
       applySmartDiagnoseDom(res, true);
     }
 
-    function buildSecurityAuditPayload(targetMod) {
+    function resolveModuleContainerExt(targetMod) {
       const effectiveMod = targetMod || getActiveModule();
-      let auditSource = effectiveMod;
-      if (effectiveMod === "CONV") {
-        auditSource = document.getElementById("conv-src-fmt")?.value || "docx";
-      }
-      const bodyText = buildStructuredConversionBody(auditSource);
-      const byteLen = new TextEncoder().encode(bodyText).length;
-      const entryNameMap = {
-        DOC: "word/document.xml",
-        HWP: "Contents/section0.xml",
-        SHEET: "xl/worksheets/sheet1.xml",
-        SLIDE: "ppt/slides/slide1.xml",
-        PDF: "Catalog/Pages.pdf",
-        CONV: "package/content.xml",
+      const extMap = {
+        DOC: "docx",
+        HWP: "hwpx",
+        SHEET: "xlsx",
+        SLIDE: "pptx",
+        PDF: "pdf",
+        CONV: document.getElementById("conv-src-fmt")?.value || "docx",
       };
-      const entryName = entryNameMap[effectiveMod] || "word/document.xml";
-      const xmlSnippet = '<doc module="' + effectiveMod + '">' + bodyText + "</doc>";
-      return JSON.stringify({
-        entries: [
-          {
-            name: entryName,
-            compressed: Math.max(64, Math.floor(byteLen / 2)),
-            uncompressed: Math.max(128, byteLen),
-            encrypted: false,
-          },
-        ],
-        xml: xmlSnippet,
-      });
+      return extMap[effectiveMod] || "docx";
+    }
+
+    async function runModuleSecurityAudit(targetMod) {
+      const effectiveMod = targetMod || getActiveModule();
+      const ext = resolveModuleContainerExt(effectiveMod);
+      const sourceTarget = effectiveMod === "CONV" ? ext : effectiveMod;
+      const body = buildStructuredConversionBody(sourceTarget);
+      const title = "SecurityAudit_" + effectiveMod;
+      const convRes = await invokeIpc(
+        "convert_document_format",
+        JSON.stringify({
+          sourceFormat: ext,
+          targetFormat: ext,
+          title,
+          body,
+        })
+      );
+      const containerBase64 = String(convRes?.convertedBase64 || convRes?.converted_base64 || "");
+      return await invokeIpc(
+        "audit_security",
+        JSON.stringify({
+          fileName: title + "." + ext,
+          containerBase64,
+        })
+      );
     }
 
     async function fetchSecurityAuditOutcome(targetMod) {
-      const payload = buildSecurityAuditPayload(targetMod);
       try {
-        await invokeIpc("audit_security", payload);
+        await runModuleSecurityAudit(targetMod);
         return { ok: true, errorMessage: "" };
       } catch (err) {
         return { ok: false, errorMessage: err?.message || String(err) };
@@ -333,6 +346,11 @@
       const curMod = getActiveModule();
       if (outcome.ok) {
         txt.textContent = "문서 보안 검사 완료 (" + curMod + "): SAFE";
+      } else if (
+        outcome.errorMessage.startsWith("엔진 미연결:") ||
+        outcome.errorMessage.startsWith("IPC 네트워크 오류:")
+      ) {
+        txt.textContent = "[요청 거부] " + outcome.errorMessage;
       } else {
         txt.textContent =
           "문서 보안 검사 완료 (" + curMod + "): REJECTED (" + outcome.errorMessage + ")";
@@ -376,6 +394,28 @@
       }
     }
 
+    function assertValidScrubResult(origText, res) {
+      if (
+        !res ||
+        typeof res.scrubbedText !== "string" ||
+        (origText.length > 0 && res.scrubbedText.length === 0)
+      ) {
+        const msg = "개인정보 마스킹 응답 검증에 실패했습니다.";
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = "[요청 거부] " + msg;
+        throw new Error(msg);
+      }
+    }
+
+    function countPendingGroupMasks(activeGroups, results) {
+      let total = 0;
+      results.forEach((res, idx) => {
+        assertValidScrubResult(activeGroups[idx].origText, res);
+        total += Number(res.totalMasked || 0);
+      });
+      return total;
+    }
+
     async function scrubPdfDom(preSnapshot) {
       const pdfNodes = Array.from(
         document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)")
@@ -417,9 +457,32 @@
         appPromise,
         deptPromise,
       ]);
+
+      let pendingTotal = countPendingGroupMasks(nodeGroups, groupResults);
+      if (wmInput && wmInputRes !== null) {
+        assertValidScrubResult(wmInput.value, wmInputRes);
+        pendingTotal += Number(wmInputRes.totalMasked || 0);
+      }
+      if (scrubSeparateLayer && wmLayer && wmLayerRes !== null) {
+        assertValidScrubResult(wmLayer.textContent, wmLayerRes);
+        pendingTotal += Number(wmLayerRes.totalMasked || 0);
+      }
+      if (appInput && appRes !== null) {
+        assertValidScrubResult(appInput.value, appRes);
+        pendingTotal += Number(appRes.totalMasked || 0);
+      }
+      if (deptInput && deptRes !== null) {
+        assertValidScrubResult(deptInput.value, deptRes);
+        pendingTotal += Number(deptRes.totalMasked || 0);
+      }
+
+      if (pendingTotal === 0) {
+        return 0;
+      }
+
       commitDeferredUndoSnapshot(preSnapshot);
       let totalMasked = applyScrubResultsToGroups(nodeGroups, groupResults);
-      if (wmInput && wmInputRes && typeof wmInputRes.scrubbedText === "string") {
+      if (wmInput && wmInputRes) {
         const count = Number(wmInputRes.totalMasked || 0);
         if (count > 0) wmInput.value = wmInputRes.scrubbedText;
         totalMasked += count;
@@ -427,18 +490,18 @@
       if (wmLayer) {
         if (wmInput && wmLayer.textContent === prevWmInputVal) {
           wmLayer.textContent = wmInput.value;
-        } else if (wmLayerRes && typeof wmLayerRes.scrubbedText === "string") {
+        } else if (wmLayerRes) {
           const count = Number(wmLayerRes.totalMasked || 0);
           if (count > 0) wmLayer.textContent = wmLayerRes.scrubbedText;
           totalMasked += count;
         }
       }
-      if (appInput && appRes && typeof appRes.scrubbedText === "string") {
+      if (appInput && appRes) {
         const count = Number(appRes.totalMasked || 0);
         if (count > 0) appInput.value = appRes.scrubbedText;
         totalMasked += count;
       }
-      if (deptInput && deptRes && typeof deptRes.scrubbedText === "string") {
+      if (deptInput && deptRes) {
         const count = Number(deptRes.totalMasked || 0);
         if (count > 0) deptInput.value = deptRes.scrubbedText;
         totalMasked += count;
@@ -468,17 +531,28 @@
         if (targetScope === "SHEET") {
           const curSheet = getActiveSheetName();
           sheetDataStore[curSheet] = sheetController.snapshotDomSheetCells();
-          const scrubbed = await scrubSheetStoreMap(
-            sheetDataStore,
-            curSheet,
-            sheetController.trackSheetAsyncWork
-          );
+          let scrubbed;
+          try {
+            scrubbed = await scrubSheetStoreMap(
+              sheetDataStore,
+              curSheet,
+              sheetController.trackSheetAsyncWork
+            );
+          } catch (sheetScrubErr) {
+            const fb = document.getElementById("status-command-feedback");
+            if (fb && !String(fb.textContent || "").startsWith("[요청 거부]")) {
+              fb.textContent = "[요청 거부] " + (sheetScrubErr?.message || String(sheetScrubErr));
+            }
+            throw sheetScrubErr;
+          }
           totalMasked = scrubbed.totalMasked;
-          commitDeferredUndoSnapshot(preSnapshot);
-          sheetController.replaceLiveSheetDataStore(scrubbed.nextSheets);
-          sheetController.restoreDomSheetCells(curSheet);
-          sheetController.refreshFocusedSheetCellPendingSnapshot();
-          sheetController.updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+          if (totalMasked > 0) {
+            commitDeferredUndoSnapshot(preSnapshot);
+            sheetController.replaceLiveSheetDataStore(scrubbed.nextSheets);
+            sheetController.restoreDomSheetCells(curSheet);
+            sheetController.refreshFocusedSheetCellPendingSnapshot();
+            sheetController.updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+          }
         } else if (targetScope === "SLIDE") {
           const fields = [];
           slideDeckState.forEach((slide) => {
@@ -491,15 +565,18 @@
           const results = await Promise.all(
             fields.map((item) => invokeIpc("scrub_pii", item.text))
           );
-          commitDeferredUndoSnapshot(preSnapshot);
           results.forEach((res, idx) => {
-            if (res && typeof res.scrubbedText === "string") {
+            assertValidScrubResult(fields[idx].text, res);
+            totalMasked += Number(res.totalMasked || 0);
+          });
+          if (totalMasked > 0) {
+            commitDeferredUndoSnapshot(preSnapshot);
+            results.forEach((res, idx) => {
               const count = Number(res.totalMasked || 0);
               if (count > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
-              totalMasked += count;
-            }
-          });
-          renderSlideDeck(getActiveSlideIndex());
+            });
+            renderSlideDeck(getActiveSlideIndex());
+          }
         } else if (targetScope === "PDF") {
           totalMasked = await scrubPdfDom(preSnapshot);
         } else {
@@ -510,26 +587,32 @@
             const groupResults = await Promise.all(
               activeGroups.map((g) => invokeIpc("scrub_pii", g.origText))
             );
-            commitDeferredUndoSnapshot(preSnapshot);
-            totalMasked += applyScrubResultsToGroups(activeGroups, groupResults);
-            computeDocTableSummary();
-            saveActiveDocTabState();
-          } else if (docTabStore[targetScope]?.editorHtml) {
+            const pendingCount = countPendingGroupMasks(activeGroups, groupResults);
+            if (pendingCount > 0) {
+              commitDeferredUndoSnapshot(preSnapshot);
+              totalMasked += applyScrubResultsToGroups(activeGroups, groupResults);
+              computeDocTableSummary();
+              saveActiveDocTabState();
+            }
+          } else if (Array.isArray(docTabStore[targetScope]?.editorNodes)) {
             const tempDiv = document.createElement("div");
-            tempDiv.innerHTML = docTabStore[targetScope].editorHtml;
+            restoreDomChildren(tempDiv, docTabStore[targetScope].editorNodes, document);
             const activeGroups = collectActiveScrubGroups(tempDiv);
             const groupResults = await Promise.all(
               activeGroups.map((g) => invokeIpc("scrub_pii", g.origText))
             );
-            commitDeferredUndoSnapshot(preSnapshot);
-            const modMasked = applyScrubResultsToGroups(activeGroups, groupResults);
-            if (modMasked > 0) {
-              docTabStore[targetScope] = {
-                ...docTabStore[targetScope],
-                editorHtml: tempDiv.innerHTML,
-              };
+            const pendingCount = countPendingGroupMasks(activeGroups, groupResults);
+            if (pendingCount > 0) {
+              commitDeferredUndoSnapshot(preSnapshot);
+              const modMasked = applyScrubResultsToGroups(activeGroups, groupResults);
+              if (modMasked > 0) {
+                docTabStore[targetScope] = {
+                  ...docTabStore[targetScope],
+                  editorNodes: serializeDomChildren(tempDiv),
+                };
+              }
+              totalMasked += modMasked;
             }
-            totalMasked += modMasked;
           }
         }
 
@@ -552,7 +635,7 @@
       computeSmartStats,
       applySmartDiagnoseDom,
       runSmartDiagnoseAction,
-      buildSecurityAuditPayload,
+      runModuleSecurityAudit,
       fetchSecurityAuditOutcome,
       applySecurityAuditDom,
       runSecurityAuditAction,

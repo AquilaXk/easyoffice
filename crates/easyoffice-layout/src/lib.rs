@@ -3,19 +3,22 @@ use easyoffice_formats::EasyOfficeError;
 pub mod domain;
 pub use domain::*;
 
-/// Target desktop WebView host platform for Tauri v2 cross-platform shell.
+/// Target desktop WebView host platform for cross-platform shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesktopPlatform {
     MacOsWkWebView,
     WindowsWebView2,
+    LinuxWebView,
 }
 
 impl DesktopPlatform {
     pub fn current() -> Self {
         if cfg!(target_os = "windows") {
             Self::WindowsWebView2
-        } else {
+        } else if cfg!(target_os = "macos") {
             Self::MacOsWkWebView
+        } else {
+            Self::LinuxWebView
         }
     }
 
@@ -23,13 +26,14 @@ impl DesktopPlatform {
         match self {
             Self::MacOsWkWebView => "macOS (WKWebView)",
             Self::WindowsWebView2 => "Windows (WebView2)",
+            Self::LinuxWebView => "Linux (WebKitGTK)",
         }
     }
 
     pub fn primary_shortcut_modifier(&self) -> &'static str {
         match self {
             Self::MacOsWkWebView => "Cmd",
-            Self::WindowsWebView2 => "Ctrl",
+            Self::WindowsWebView2 | Self::LinuxWebView => "Ctrl",
         }
     }
 }
@@ -660,5 +664,33 @@ mod tests {
         assert!(clamped_tiny.width >= 40.0);
         assert!(clamped_tiny.height >= 32.0);
         assert!(clamped_tiny.x >= 24.0);
+    }
+
+    #[test]
+    fn test_desktop_platform_linux_webview_labels() {
+        assert_eq!(
+            DesktopPlatform::MacOsWkWebView.os_label(),
+            "macOS (WKWebView)"
+        );
+        assert_eq!(
+            DesktopPlatform::MacOsWkWebView.primary_shortcut_modifier(),
+            "Cmd"
+        );
+        assert_eq!(
+            DesktopPlatform::WindowsWebView2.os_label(),
+            "Windows (WebView2)"
+        );
+        assert_eq!(
+            DesktopPlatform::WindowsWebView2.primary_shortcut_modifier(),
+            "Ctrl"
+        );
+        assert_eq!(
+            DesktopPlatform::LinuxWebView.os_label(),
+            "Linux (WebKitGTK)"
+        );
+        assert_eq!(
+            DesktopPlatform::LinuxWebView.primary_shortcut_modifier(),
+            "Ctrl"
+        );
     }
 }
