@@ -206,7 +206,7 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
 }
 
 #[inline]
-fn strip_open_formula_prefix(raw_src: &str) -> Option<&str> {
+pub(crate) fn strip_open_formula_prefix(raw_src: &str) -> Option<&str> {
     let trimmed = raw_src.trim();
     let after_ns = if trimmed
         .get(..3)
@@ -231,16 +231,7 @@ fn strip_open_formula_prefix(raw_src: &str) -> Option<&str> {
 
 #[inline]
 pub(crate) fn strip_formula_prefix(raw_src: &str) -> Option<&str> {
-    let trimmed = raw_src.trim();
-    if let Some(rest) = trimmed.strip_prefix('=') {
-        return Some(rest);
-    }
-    if let Some(rest) = strip_open_formula_prefix(trimmed) {
-        if rest.contains('[') && rest.contains('.') && rest.contains(']') {
-            return Some(rest);
-        }
-    }
-    None
+    raw_src.trim().strip_prefix('=')
 }
 
 fn normalize_open_formula_body(stripped: &str) -> std::borrow::Cow<'_, str> {

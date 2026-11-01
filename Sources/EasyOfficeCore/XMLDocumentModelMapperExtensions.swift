@@ -774,15 +774,187 @@ extension XMLDocumentModelMapper {
         continue
       }
 
+      let openTagPrefix = "<\(tagName)"
       let closeTag = "</\(tagName)>"
-      guard let closeRange = rowInnerXML.range(of: closeTag, range: afterGt..<rowInnerXML.endIndex)
-      else {
-        break
+      var depth = 1
+      var searchPos = afterGt
+      var matchingClose: Range<String.Index>? = nil
+      while searchPos < rowInnerXML.endIndex && depth > 0 {
+        let nextOpen = rowInnerXML.range(of: openTagPrefix, range: searchPos..<rowInnerXML.endIndex)
+        let nextClose = rowInnerXML.range(of: closeTag, range: searchPos..<rowInnerXML.endIndex)
+        guard let cRange = nextClose else { break }
+        if let oRange = nextOpen, oRange.lowerBound < cRange.lowerBound {
+          let afterOpenName = oRange.upperBound
+          let isBoundary: Bool
+          if afterOpenName < rowInnerXML.endIndex {
+            let ch = rowInnerXML[afterOpenName]
+            isBoundary = ch == " " || ch == ">" || ch == "/" || ch == "\t" || ch == "\n" || ch == "\r"
+          } else {
+            isBoundary = false
+          }
+          if isBoundary {
+            var innerScan = afterOpenName
+            var innerQuote: Character? = nil
+            var innerGt: String.Index? = nil
+            while innerScan < rowInnerXML.endIndex {
+              let ch = rowInnerXML[innerScan]
+              if let q = innerQuote {
+                if ch == q { innerQuote = nil }
+              } else if ch == "\"" || ch == "'" {
+                innerQuote = ch
+              } else if ch == ">" {
+                innerGt = innerScan
+                break
+              }
+              innerScan = rowInnerXML.index(after: innerScan)
+            }
+            if let gt = innerGt {
+              if !XMLSanitizer.isSelfClosingTag(rowInnerXML[afterOpenName..<gt]) {
+                depth += 1
+              }
+              searchPos = rowInnerXML.index(after: gt)
+              continue
+            }
+          }
+          searchPos = afterOpenName
+          continue
+        }
+        depth -= 1
+        if depth == 0 {
+          matchingClose = cRange
+          break
+        }
+        searchPos = cRange.upperBound
       }
+      guard let closeRange = matchingClose else { break }
       let inner = String(rowInnerXML[afterGt..<closeRange.lowerBound])
       results.append((isCovered: isCovered, attributes: attrs, innerXML: inner))
       cursor = closeRange.upperBound
     }
     return results
+  }
+
+  /// Converts an EasyOffice `=...` formula into an OASIS OpenFormula `of:=...` expression with bracketed `[.A1:.B2]` / `[.A1]` references.
+  public static func toOpenFormulaExpression(_ rawFormula: String) -> String {
+    let trimmed = rawFormula.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.lowercased().hasPrefix("of:") || trimmed.lowercased().hasPrefix("oooc:") {
+      return trimmed
+    }
+    let body = trimmed.hasPrefix("=") ? String(trimmed.dropFirst()) : trimmed
+    var out = "of:="
+    out.reserveCapacity(body.count + 16)
+
+    var inQuotes = false
+    var idx = body.startIndex
+
+    while idx < body.endIndex {
+      let ch = body[idx]
+      if ch == "\"" {
+        inQuotes.toggle()
+        out.append(ch)
+        idx = body.index(after: idx)
+        continue
+      }
+      if inQuotes {
+        out.append(ch)
+        idx = body.index(after: idx)
+        continue
+      }
+      if ch == "[" {
+        var closeIdx = body.index(after: idx)
+        var inSq = false
+        while closeIdx < body.endIndex {
+          if body[closeIdx] == "'" {
+            inSq.toggle()
+          } else if body[closeIdx] == "]" && !inSq {
+            closeIdx = body.index(after: closeIdx)
+            break
+          }
+          closeIdx = body.index(after: closeIdx)
+        }
+        out.append(contentsOf: body[idx..<closeIdx])
+        idx = closeIdx
+        continue
+      }
+
+      if ch.isLetter || ch == "$" || ch == "'" {
+        var tokenEnd = idx
+        var inSingleQuote = false
+        while tokenEnd < body.endIndex {
+          let c = body[tokenEnd]
+          if c == "'" {
+            inSingleQuote.toggle()
+            tokenEnd = body.index(after: tokenEnd)
+            continue
+          }
+          if inSingleQuote {
+            tokenEnd = body.index(after: tokenEnd)
+            continue
+          }
+          if c.isLetter || c.isNumber || c == "$" || c == "!" || c == ":" || c == "_" || c == "." {
+            tokenEnd = body.index(after: tokenEnd)
+          } else {
+            break
+          }
+        }
+        let token = String(body[idx..<tokenEnd])
+        var lookahead = tokenEnd
+        while lookahead < body.endIndex && body[lookahead].isWhitespace {
+          lookahead = body.index(after: lookahead)
+        }
+        let isFunctionCall = (lookahead < body.endIndex && body[lookahead] == "(")
+        if !isFunctionCall, let bracketed = convertA1TokenToOpenFormulaBracketed(token) {
+          out.append(bracketed)
+        } else {
+          out.append(token)
+        }
+        idx = tokenEnd
+        continue
+      }
+
+      out.append(ch)
+      idx = body.index(after: idx)
+    }
+    return out
+  }
+
+  private static func convertA1TokenToOpenFormulaBracketed(_ token: String) -> String? {
+    func parseSingleRef(_ part: String) -> (sheet: String?, cell: String)? {
+      let sheet: String?
+      let cellPart: String
+      if let (rawLeft, rawRight) = splitOnceUnquoted(part, delimiter: "!") {
+        var unq = rawLeft.trimmingCharacters(in: .whitespaces)
+        if unq.count >= 2 && unq.hasPrefix("'") && unq.hasSuffix("'") {
+          unq = String(unq.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'")
+        }
+        sheet = unq.isEmpty ? nil : unq
+        cellPart = rawRight
+      } else {
+        sheet = nil
+        cellPart = part
+      }
+      let strippedDollars = cellPart.replacingOccurrences(of: "$", with: "")
+      guard (try? CellAddress(a1Notation: strippedDollars)) != nil else {
+        return nil
+      }
+      return (sheet, cellPart)
+    }
+
+    if let (lhsStr, rhsStr) = splitOnceUnquoted(token, delimiter: ":") {
+      guard let left = parseSingleRef(lhsStr), let right = parseSingleRef(rhsStr) else {
+        return nil
+      }
+      let leftPrefix = left.sheet.map(formatOpenFormulaSheetPrefix) ?? "."
+      let rightPrefix: String
+      if let rSheet = right.sheet, rSheet != left.sheet {
+        rightPrefix = formatOpenFormulaSheetPrefix(rSheet)
+      } else {
+        rightPrefix = "."
+      }
+      return "[\(leftPrefix)\(left.cell):\(rightPrefix)\(right.cell)]"
+    }
+    guard let single = parseSingleRef(token) else { return nil }
+    let prefix = single.sheet.map(formatOpenFormulaSheetPrefix) ?? "."
+    return "[\(prefix)\(single.cell)]"
   }
 }

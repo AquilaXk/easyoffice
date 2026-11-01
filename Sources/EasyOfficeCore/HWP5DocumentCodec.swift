@@ -312,7 +312,7 @@ public enum HWP5BinaryCodec {
         BitPacking.appendUInt16LE(UInt16(table.rows[rIdx].count), to: &tableControlPayload)
       }
       let tableControlRec = try HWP5RecordHeader.encode(
-        tagID: HWP5RecordHeader.tagTableControlStandard,
+        tagID: HWP5RecordHeader.tagTableRecord,
         level: 1,
         payloadSize: UInt32(tableControlPayload.count)
       )
@@ -329,7 +329,7 @@ public enum HWP5BinaryCodec {
           BitPacking.appendUInt16LE(UInt16(rIdx), to: &listHeaderPayload)
           BitPacking.appendUInt16LE(0, to: &listHeaderPayload)
           let listRec = try HWP5RecordHeader.encode(
-            tagID: HWP5RecordHeader.tagListHeaderStandard,
+            tagID: HWP5RecordHeader.tagListHeader,
             level: 2,
             payloadSize: UInt32(listHeaderPayload.count)
           )
@@ -338,7 +338,7 @@ public enum HWP5BinaryCodec {
 
           let cellTextBytes = BitPacking.encodeUTF16LE(row[cIdx])
           let cellTextRec = try HWP5RecordHeader.encode(
-            tagID: HWP5RecordHeader.tagParaTextStandard,
+            tagID: HWP5RecordHeader.tagParaText,
             level: 3,
             payloadSize: try BitPacking.checkedUInt32(cellTextBytes.count, field: "HWP 5.0 셀 텍스트 크기")
           )
@@ -556,36 +556,41 @@ public enum HWP5BinaryCodec {
           paragraphs.append(ParagraphBlock(text: text))
         }
 
-      case HWP5RecordHeader.tagTableControlStandard:
+      case HWP5RecordHeader.tagTableControlStandard, HWP5RecordHeader.tagTableRecord:
         if let prev = pendingParagraph {
           paragraphs.append(prev)
           pendingParagraph = nil
         }
-        var nextOffset = payloadEnd
-        let table = try decodeStandardTableControl(
-          from: section0,
-          payloadStart: payloadStart,
-          payloadEnd: payloadEnd,
-          nextOffset: &nextOffset,
-          totalDecodedRecords: &totalDecodedRecords,
-          totalDecodedTableCells: &totalDecodedTableCells
-        )
-        tables.append(table)
-        offset = nextOffset
-        continue
-
-      case HWP5RecordHeader.tagTableRecord:
-        if let prev = pendingParagraph {
-          paragraphs.append(prev)
-          pendingParagraph = nil
+        let nextTagID: UInt16? =
+          (payloadEnd < section0.count)
+          ? (try? HWP5RecordHeader.decode(from: section0, at: payloadEnd).header.tagID)
+          : nil
+        let isStandardTable =
+          recHeader.tagID == HWP5RecordHeader.tagTableControlStandard
+          || nextTagID == HWP5RecordHeader.tagListHeaderStandard
+          || nextTagID == HWP5RecordHeader.tagListHeader
+        if isStandardTable {
+          var nextOffset = payloadEnd
+          let table = try decodeStandardTableControl(
+            from: section0,
+            payloadStart: payloadStart,
+            payloadEnd: payloadEnd,
+            nextOffset: &nextOffset,
+            totalDecodedRecords: &totalDecodedRecords,
+            totalDecodedTableCells: &totalDecodedTableCells
+          )
+          tables.append(table)
+          offset = nextOffset
+          continue
+        } else {
+          let table = try decodeLegacyTableRecord(
+            from: section0,
+            payloadStart: payloadStart,
+            payloadEnd: payloadEnd,
+            totalDecodedTableCells: &totalDecodedTableCells
+          )
+          tables.append(table)
         }
-        let table = try decodeLegacyTableRecord(
-          from: section0,
-          payloadStart: payloadStart,
-          payloadEnd: payloadEnd,
-          totalDecodedTableCells: &totalDecodedTableCells
-        )
-        tables.append(table)
 
       default:
         break
@@ -731,36 +736,47 @@ public enum HWP5BinaryCodec {
           throw EasyOfficeError.securityViolation(
             detail: "HWP 5.0 레코드 개수가 허용 상한(\(maxHWP5Records))을 초과했습니다.")
         }
+        let paraCount =
+          pLen >= 2
+          ? max(1, min(256, Int((try? BitPacking.readUInt16LE(from: section0, at: pStart)) ?? 1)))
+          : 1
         nextOffset = pEnd
-        var cellText = ""
-        if nextOffset < section0.count {
-          let (subHeader, subLen) = try HWP5RecordHeader.decode(from: section0, at: nextOffset)
-          let subStart = nextOffset + subLen
-          let subEnd = subStart + Int(subHeader.payloadSize)
-          if subEnd <= section0.count,
-            subHeader.tagID == HWP5RecordHeader.tagParaHeaderStandard
-              || subHeader.tagID == HWP5RecordHeader.tagParaHeader
-          {
-            totalDecodedRecords += 1
-            nextOffset = subEnd
+        var cellParas: [String] = []
+        for _ in 0..<paraCount {
+          if nextOffset < section0.count {
+            let (subHeader, subLen) = try HWP5RecordHeader.decode(from: section0, at: nextOffset)
+            let subStart = nextOffset + subLen
+            let subEnd = subStart + Int(subHeader.payloadSize)
+            if subEnd <= section0.count,
+              subHeader.tagID == HWP5RecordHeader.tagParaHeaderStandard
+                || subHeader.tagID == HWP5RecordHeader.tagParaHeader
+            {
+              totalDecodedRecords += 1
+              nextOffset = subEnd
+            }
+          }
+          if nextOffset < section0.count {
+            let (txtHeader, txtLen) = try HWP5RecordHeader.decode(from: section0, at: nextOffset)
+            let txtStart = nextOffset + txtLen
+            let txtPayloadLen = Int(txtHeader.payloadSize)
+            let txtEnd = txtStart + txtPayloadLen
+            if txtEnd <= section0.count,
+              txtHeader.tagID == HWP5RecordHeader.tagParaTextStandard
+                || txtHeader.tagID == HWP5RecordHeader.tagParaText
+            {
+              totalDecodedRecords += 1
+              let paraTxt = try decodeParaTextPayload(
+                from: section0, at: txtStart, byteLength: txtPayloadLen)
+              cellParas.append(paraTxt)
+              nextOffset = txtEnd
+            } else {
+              break
+            }
+          } else {
+            break
           }
         }
-        if nextOffset < section0.count {
-          let (txtHeader, txtLen) = try HWP5RecordHeader.decode(from: section0, at: nextOffset)
-          let txtStart = nextOffset + txtLen
-          let txtPayloadLen = Int(txtHeader.payloadSize)
-          let txtEnd = txtStart + txtPayloadLen
-          if txtEnd <= section0.count,
-            txtHeader.tagID == HWP5RecordHeader.tagParaTextStandard
-              || txtHeader.tagID == HWP5RecordHeader.tagParaText
-          {
-            totalDecodedRecords += 1
-            cellText = try decodeParaTextPayload(
-              from: section0, at: txtStart, byteLength: txtPayloadLen)
-            nextOffset = txtEnd
-          }
-        }
-        collectedCells.append(cellText)
+        collectedCells.append(cellParas.joined(separator: "\n"))
       } else if peekHeader.tagID == HWP5RecordHeader.tagParaTextStandard
         || peekHeader.tagID == HWP5RecordHeader.tagParaText
       {

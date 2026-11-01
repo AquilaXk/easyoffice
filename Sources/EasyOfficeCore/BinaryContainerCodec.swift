@@ -824,7 +824,11 @@ public enum ZipContainerCodec {
       for offset in stride(from: rawBuffer.count - 22, through: minOffset, by: -1) {
         let word = rawBuffer.loadUnaligned(fromByteOffset: offset, as: UInt32.self).littleEndian
         if word == eocdSig {
-          return offset
+          let commentLen = Int(
+            rawBuffer.loadUnaligned(fromByteOffset: offset + 20, as: UInt16.self).littleEndian)
+          if offset + 22 + commentLen == rawBuffer.count {
+            return offset
+          }
         }
       }
       return nil

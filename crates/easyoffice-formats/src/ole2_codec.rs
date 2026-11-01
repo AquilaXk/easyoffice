@@ -538,6 +538,11 @@ impl Ole2ContainerCodec {
                     Ole2SecurityGuard::validate_sector_chain(bytes, &fat, first_minifat_sector)?;
                 minifat.reserve(mf_chain.len() * fat_entries_per_sector);
                 for sec in mf_chain {
+                    if !claimed_sectors.insert(sec) {
+                        return Err(EasyOfficeError::SecurityViolation(format!(
+                            "OLE2 MiniFAT 섹터({sec})가 다른 스트림과 중복 점유되었습니다."
+                        )));
+                    }
                     let offset = (1 + sec as usize) * sector_size;
                     for entry_idx in 0..fat_entries_per_sector {
                         minifat.push(read_u32_le(bytes, offset + entry_idx * 4)?);
@@ -545,11 +550,9 @@ impl Ole2ContainerCodec {
                 }
             }
         }
-
         let total_mini_sectors = mini_stream.len().div_ceil(MINI_SECTOR_SIZE);
         let mut claimed_mini_sectors = SectorBitset::with_capacity(total_mini_sectors);
         let mut visited_dir = SectorBitset::with_capacity(entry_count);
-
         let mut extract_stream = |idx: usize,
                                   full_name: String|
          -> Result<Ole2StreamEntry, EasyOfficeError> {
@@ -692,29 +695,29 @@ impl Ole2ContainerCodec {
                 }
             }
         }
-
-        for idx in 0..entry_count {
-            if !visited_dir.insert(idx as u32) {
-                continue;
+        if streams.is_empty() {
+            for idx in 0..entry_count {
+                if !visited_dir.insert(idx as u32) {
+                    continue;
+                }
+                let base = idx * Self::DIR_ENTRY_SIZE;
+                if dir_bytes[base + 66] != Self::OBJ_TYPE_STREAM {
+                    continue;
+                }
+                let name = read_entry_name(idx)?;
+                let siblings = seen_names_per_prefix.entry(String::new()).or_default();
+                if siblings
+                    .iter()
+                    .any(|e| Self::cmp_cfb_dir_names(e, &name) == std::cmp::Ordering::Equal)
+                {
+                    return Err(EasyOfficeError::SecurityViolation(format!(
+                        "OLE2 디렉터리 내 대소문자 구분 없는 중복 이름이 감지되었습니다: {name}"
+                    )));
+                }
+                siblings.push(name.clone());
+                streams.push(extract_stream(idx, name)?);
             }
-            let base = idx * Self::DIR_ENTRY_SIZE;
-            let obj_type = dir_bytes[base + 66];
-            if obj_type != Self::OBJ_TYPE_STREAM {
-                continue;
-            }
-            let name = read_entry_name(idx)?;
-            let siblings = seen_names_per_prefix.entry(String::new()).or_default();
-            if siblings.iter().any(|existing| {
-                Self::cmp_cfb_dir_names(existing, &name) == std::cmp::Ordering::Equal
-            }) {
-                return Err(EasyOfficeError::SecurityViolation(format!(
-                    "OLE2 디렉터리 내 대소문자 구분 없는 중복 이름이 감지되었습니다: {name}"
-                )));
-            }
-            siblings.push(name.clone());
-            streams.push(extract_stream(idx, name)?);
         }
-
         Ok(streams)
     }
 

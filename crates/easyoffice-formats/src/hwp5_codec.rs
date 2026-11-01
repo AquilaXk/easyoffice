@@ -175,21 +175,44 @@ impl Hwp5Codec {
         }
 
         for tbl in std::iter::once(&payload.table_cells).chain(extra_tables.iter()) {
-            if !tbl.is_empty() {
-                let mut tbl_buf = Vec::new();
-                tbl_buf.extend_from_slice(&(tbl.len() as u16).to_le_bytes());
+            let n_rows = tbl.len();
+            let n_cols = tbl.iter().map(|r| r.len()).max().unwrap_or(0);
+            if n_rows > 0 && n_cols > 0 {
+                let mut tbl_hdr = Vec::with_capacity(8 + n_rows * 2);
+                tbl_hdr.extend_from_slice(&0u32.to_le_bytes());
+                tbl_hdr.extend_from_slice(&(n_rows as u16).to_le_bytes());
+                tbl_hdr.extend_from_slice(&(n_cols as u16).to_le_bytes());
                 for row in tbl {
-                    tbl_buf.extend_from_slice(&(row.len() as u16).to_le_bytes());
-                    for cell in row {
-                        append_len_prefixed_utf16le(&mut tbl_buf, cell);
-                    }
+                    tbl_hdr.extend_from_slice(&(row.len() as u16).to_le_bytes());
                 }
                 section0.extend_from_slice(&Self::encode_record_header(
-                    Self::HWPTAG_TABLE_RECORD,
-                    0,
-                    tbl_buf.len(),
+                    Self::HWPTAG_TABLE,
+                    1,
+                    tbl_hdr.len(),
                 ));
-                section0.extend_from_slice(&tbl_buf);
+                section0.extend_from_slice(&tbl_hdr);
+                for (r_idx, row) in tbl.iter().enumerate() {
+                    for (c_idx, cell) in row.iter().enumerate() {
+                        let mut list_hdr = Vec::with_capacity(8);
+                        list_hdr.extend_from_slice(&1u16.to_le_bytes());
+                        list_hdr.extend_from_slice(&(c_idx as u16).to_le_bytes());
+                        list_hdr.extend_from_slice(&(r_idx as u16).to_le_bytes());
+                        list_hdr.extend_from_slice(&0u16.to_le_bytes());
+                        section0.extend_from_slice(&Self::encode_record_header(
+                            Self::ALT_HWPTAG_LIST_HEADER,
+                            2,
+                            list_hdr.len(),
+                        ));
+                        section0.extend_from_slice(&list_hdr);
+                        let cell_utf16 = encode_utf16le(cell);
+                        section0.extend_from_slice(&Self::encode_record_header(
+                            Self::HWPTAG_PARA_TEXT,
+                            3,
+                            cell_utf16.len(),
+                        ));
+                        section0.extend_from_slice(&cell_utf16);
+                    }
+                }
             }
         }
 
@@ -419,16 +442,14 @@ impl Hwp5Codec {
                         next_tag,
                         Some(Self::STD_HWPTAG_LIST_HEADER | Self::ALT_HWPTAG_LIST_HEADER)
                     ) {
-                        let (n_rows, n_cols) =
-                            Self::extract_std_table_dims(&section_bytes[start..end])?;
+                        let row_lengths = Self::extract_std_table_dims(&section_bytes[start..end])?;
                         offset = end;
                         let parsed_rows = Self::consume_std_table_cells(
                             section_bytes,
                             &mut offset,
                             total_records,
                             level,
-                            n_rows,
-                            n_cols,
+                            &row_lengths,
                             total_table_cells,
                         )?;
                         if !parsed_rows.is_empty() {
@@ -453,7 +474,7 @@ impl Hwp5Codec {
         Ok(())
     }
 
-    fn extract_std_table_dims(slice: &[u8]) -> Result<(usize, usize), EasyOfficeError> {
+    fn extract_std_table_dims(slice: &[u8]) -> Result<Vec<usize>, EasyOfficeError> {
         let (rows, cols) = if slice.len() >= 8 {
             let r4 = read_u16_le(slice, 4)? as usize;
             let c6 = read_u16_le(slice, 6)? as usize;
@@ -480,7 +501,22 @@ impl Hwp5Codec {
                 "HWP 5.0 표 행·열 개수가 보안 상한을 초과했습니다.".to_string(),
             ));
         }
-        Ok((rows, cols))
+        let mut row_lengths = vec![cols; rows];
+        if slice.len() >= 8 + rows.saturating_mul(2) {
+            let mut parsed = Vec::with_capacity(rows);
+            for r in 0..rows {
+                let c = read_u16_le(slice, 8 + r * 2)? as usize;
+                if c > 0 && c <= crate::MAX_HWP_TABLE_COLS {
+                    parsed.push(c);
+                } else {
+                    break;
+                }
+            }
+            if parsed.len() == rows {
+                row_lengths = parsed;
+            }
+        }
+        Ok(row_lengths)
     }
 
     fn consume_std_table_cells(
@@ -488,13 +524,10 @@ impl Hwp5Codec {
         offset: &mut usize,
         total_records: &mut usize,
         table_level: u16,
-        n_rows: usize,
-        n_cols: usize,
+        row_lengths: &[usize],
         total_table_cells: &mut usize,
     ) -> Result<Vec<Vec<String>>, EasyOfficeError> {
-        let expected_cells = n_rows.checked_mul(n_cols).ok_or_else(|| {
-            EasyOfficeError::ResourceBudgetExceeded("HWP 5.0 표 셀 오버플로".to_string())
-        })?;
+        let expected_cells: usize = row_lengths.iter().copied().sum();
         if total_table_cells.saturating_add(expected_cells) > Self::MAX_TOTAL_HWP5_TABLE_CELLS {
             return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                 "HWP 5.0 누적 표 셀 개수가 보안 상한({})을 초과했습니다.",
@@ -597,14 +630,14 @@ impl Hwp5Codec {
             *offset = end;
         }
 
-        if n_rows == 0 || n_cols == 0 {
+        if expected_cells == 0 {
             return Ok(Vec::new());
         }
-        let mut rows = Vec::with_capacity(n_rows);
+        let mut rows = Vec::with_capacity(row_lengths.len());
         let mut iter = flat_cells.into_iter().map(|p| p.join("\n"));
-        for _ in 0..n_rows {
-            let mut row = Vec::with_capacity(n_cols);
-            for _ in 0..n_cols {
+        for &r_len in row_lengths {
+            let mut row = Vec::with_capacity(r_len);
+            for _ in 0..r_len {
                 row.push(iter.next().unwrap_or_default());
             }
             rows.push(row);

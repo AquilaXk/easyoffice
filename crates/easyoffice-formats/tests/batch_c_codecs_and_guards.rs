@@ -692,4 +692,34 @@ fn test_zip_and_deflate_security_and_rfc1951_guards() {
     assert!(compressed_zeroes.len() < 1500);
     let decompressed = inflate_raw(&compressed_zeroes, 250_000).expect("inflate zeroes");
     assert_eq!(decompressed.len(), 200_000);
+
+    let packed_ods_q = OdfCodec::pack_ods(
+        "QuotedSheets",
+        &[(0, 0, "='2026 [Q1]'!A1+'Q1:Q2'!B2+'A.B'!C1:D2".to_string())],
+    )
+    .expect("pack quoted ods");
+    let (_, unpacked_cells_q) = OdfCodec::unpack_ods(&packed_ods_q).expect("unpack quoted ods");
+    assert_eq!(
+        unpacked_cells_q[0].2,
+        "='2026 [Q1]'!A1+'Q1:Q2'!B2+'A.B'!C1:D2"
+    );
+
+    let hwp_tbl_doc = Hwp5DocumentPayload {
+        version: (5, 0, 3, 0),
+        is_template: false,
+        agency_name: "표준기관".to_string(),
+        document_number: "DOC-77".to_string(),
+        paragraphs: vec![Hwp5ParagraphRecord {
+            text: "표 본문".to_string(),
+            style_name: "본문".to_string(),
+            is_official_header: false,
+        }],
+        table_cells: vec![
+            vec!["항목".to_string(), "값".to_string()],
+            vec!["A".to_string(), "100".to_string()],
+        ],
+    };
+    let packed_hwp_tbl = Hwp5Codec::pack(&hwp_tbl_doc).expect("pack standard hwp table");
+    let unpacked_hwp_tbl = Hwp5Codec::unpack(&packed_hwp_tbl).expect("unpack standard hwp table");
+    assert_eq!(unpacked_hwp_tbl.table_cells, hwp_tbl_doc.table_cells);
 }

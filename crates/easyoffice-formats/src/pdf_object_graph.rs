@@ -926,7 +926,7 @@ pub(super) fn validate_pdf_trailer_json(
         .map(|c| {
             if matches!(
                 c,
-                '\r' | '\n' | '\x0B' | '\x0C' | '\u{0085}' | '\u{2028}' | '\u{2029}'
+                '\t' | '\r' | '\n' | '\x0B' | '\x0C' | '\u{0085}' | '\u{2028}' | '\u{2029}'
             ) {
                 ' '
             } else {

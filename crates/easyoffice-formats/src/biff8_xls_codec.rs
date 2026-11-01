@@ -238,13 +238,19 @@ impl LegacyOle2Codec {
             return Err(EasyOfficeError::EmptyPayload);
         }
         for sheet in sheets {
-            for &(row, col, _) in &sheet.cells {
+            for &(row, col, ref val) in &sheet.cells {
                 if row > crate::MAX_BIFF8_ROW || col > crate::MAX_BIFF8_COL {
                     return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
                         "BIFF8 셀 좌표(row={row}, col={col})가 명세 상한(row<={}, col<={})을 초과했습니다.",
                         crate::MAX_BIFF8_ROW,
                         crate::MAX_BIFF8_COL
                     )));
+                }
+                if val.encode_utf16().count() > 32_765 {
+                    return Err(EasyOfficeError::ResourceBudgetExceeded(
+                        "BIFF8 셀 문자열 길이가 32,765 UTF-16 코드 유닛 한도를 초과했습니다."
+                            .to_string(),
+                    ));
                 }
             }
         }

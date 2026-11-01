@@ -2,7 +2,7 @@ use crate::office_codecs::validate_zip_xml_entries;
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_balanced_elements,
     extract_odf_blocks_in_order, extract_odf_inline_text, extract_ods_cells_from_row,
-    extract_tag_bodies, strip_tag_blocks,
+    extract_tag_bodies, scan_single_a1_coord, strip_tag_blocks, to_open_formula_syntax_impl,
 };
 use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
@@ -27,186 +27,134 @@ impl OdfCodec {
     pub const MAX_COLS: u32 = 16_383;
 
     pub fn to_open_formula_syntax(formula_without_eq: &str) -> String {
-        let bytes = formula_without_eq.as_bytes();
-        let mut out = String::with_capacity(formula_without_eq.len() + 16);
-        let mut i = 0usize;
-        let mut in_quotes = false;
-
-        while i < bytes.len() {
-            if bytes[i] == b'"' {
-                in_quotes = !in_quotes;
-                out.push('"');
-                i += 1;
-                continue;
-            }
-            if in_quotes || bytes[i] == b'[' {
-                out.push(formula_without_eq[i..].chars().next().unwrap());
-                i += formula_without_eq[i..].chars().next().unwrap().len_utf8();
-                continue;
-            }
-            if let Some((consumed, formatted)) =
-                Self::try_convert_a1_or_sheet_ref(&formula_without_eq[i..])
-            {
-                let prev_is_ident = i > 0
-                    && (bytes[i - 1].is_ascii_alphanumeric()
-                        || bytes[i - 1] == b'_'
-                        || bytes[i - 1] == b'.');
-                if !prev_is_ident {
-                    out.push_str(&formatted);
-                    i += consumed;
-                    continue;
-                }
-            }
-            let ch = formula_without_eq[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
-        }
-        out
-    }
-
-    fn try_convert_a1_or_sheet_ref(s: &str) -> Option<(usize, String)> {
-        let bytes = s.as_bytes();
-        let mut pos = 0usize;
-        let mut sheet_prefix: Option<&str> = None;
-
-        if let Some(bang_pos) = s.find('!') {
-            let candidate = &s[..bang_pos];
-            let is_quoted =
-                candidate.len() >= 2 && candidate.starts_with('\'') && candidate.ends_with('\'');
-            let is_ident =
-                !candidate.is_empty() && candidate.chars().all(|c| c.is_alphanumeric() || c == '_');
-            if is_quoted || is_ident {
-                sheet_prefix = Some(candidate);
-                pos = bang_pos + 1;
-            }
-        }
-
-        let (c1_len, c1_str) = Self::scan_single_a1_coord(&bytes[pos..])?;
-        let mut end_pos = pos + c1_len;
-        if end_pos < bytes.len() && bytes[end_pos] == b'(' {
-            return None;
-        }
-
-        if end_pos < bytes.len() && bytes[end_pos] == b':' {
-            if let Some((c2_len, c2_str)) = Self::scan_single_a1_coord(&bytes[end_pos + 1..]) {
-                let after_range = end_pos + 1 + c2_len;
-                if after_range >= bytes.len() || !bytes[after_range].is_ascii_alphanumeric() {
-                    end_pos = after_range;
-                    let formatted = if let Some(sh) = sheet_prefix {
-                        format!("[{sh}.{c1_str}:.{c2_str}]")
-                    } else {
-                        format!("[.{c1_str}:.{c2_str}]")
-                    };
-                    return Some((end_pos, formatted));
-                }
-            }
-        }
-
-        let formatted = if let Some(sh) = sheet_prefix {
-            format!("[{sh}.{c1_str}]")
-        } else {
-            format!("[.{c1_str}]")
-        };
-        Some((end_pos, formatted))
-    }
-
-    fn scan_single_a1_coord(bytes: &[u8]) -> Option<(usize, String)> {
-        let mut idx = 0usize;
-        let mut out = String::new();
-        if idx < bytes.len() && bytes[idx] == b'$' {
-            out.push('$');
-            idx += 1;
-        }
-        let col_start = idx;
-        while idx < bytes.len() && bytes[idx].is_ascii_alphabetic() {
-            out.push(bytes[idx] as char);
-            idx += 1;
-        }
-        let col_len = idx - col_start;
-        if col_len == 0 || col_len > 3 {
-            return None;
-        }
-        if idx < bytes.len() && bytes[idx] == b'$' {
-            out.push('$');
-            idx += 1;
-        }
-        let row_start = idx;
-        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
-            out.push(bytes[idx] as char);
-            idx += 1;
-        }
-        if idx == row_start || idx - row_start > 7 {
-            return None;
-        }
-        if idx < bytes.len() && (bytes[idx].is_ascii_alphanumeric() || bytes[idx] == b'_') {
-            return None;
-        }
-        Some((idx, out))
+        to_open_formula_syntax_impl(formula_without_eq)
     }
 
     pub fn normalize_ods_formula(raw: &str) -> String {
         let trimmed = raw.trim();
-        let stripped = trimmed
-            .strip_prefix("of:")
-            .or_else(|| trimmed.strip_prefix("oooc:"))
-            .or_else(|| trimmed.strip_prefix("msoxl:"))
+        let stripped = ["of:", "oooc:", "msoxl:"]
+            .into_iter()
+            .find_map(|pfx| {
+                trimmed
+                    .get(..pfx.len())
+                    .filter(|s| s.eq_ignore_ascii_case(pfx))
+                    .map(|_| trimmed[pfx.len()..].trim_start())
+            })
             .unwrap_or(trimmed);
         let body = stripped.strip_prefix('=').unwrap_or(stripped);
-
         let mut out = String::with_capacity(body.len() + 1);
         out.push('=');
-        let bytes = body.as_bytes();
-        let mut i = 0usize;
-        let mut in_quotes = false;
-        while i < bytes.len() {
-            if bytes[i] == b'"' {
-                in_quotes = !in_quotes;
-                out.push('"');
-                i += 1;
-                continue;
-            }
-            if !in_quotes && bytes[i] == b'[' {
-                if let Some(rel_close) = body[i + 1..].find(']') {
-                    let inner = &body[i + 1..i + 1 + rel_close];
-                    let converted = Self::convert_openformula_bracket_inner(inner);
-                    out.push_str(&converted);
-                    i += 1 + rel_close + 1;
-                    continue;
+        let mut in_dq = false;
+        let mut in_sq = false;
+        let mut chars = body.char_indices().peekable();
+        while let Some((idx, ch)) = chars.next() {
+            if ch == '"' && !in_sq {
+                in_dq = !in_dq;
+                out.push(ch);
+            } else if ch == '\'' && !in_dq {
+                if in_sq && chars.peek().is_some_and(|&(_, n)| n == '\'') {
+                    out.push_str("''");
+                    chars.next();
+                } else {
+                    in_sq = !in_sq;
+                    out.push(ch);
                 }
+            } else if !in_dq && !in_sq && ch == '[' {
+                let start = idx + ch.len_utf8();
+                let mut close_idx = None;
+                let mut b_sq = false;
+                while let Some(&(c_idx, c_ch)) = chars.peek() {
+                    chars.next();
+                    if c_ch == '\'' {
+                        b_sq = !b_sq;
+                    } else if c_ch == ']' && !b_sq {
+                        close_idx = Some(c_idx);
+                        break;
+                    }
+                }
+                if let Some(end) = close_idx {
+                    out.push_str(&Self::convert_openformula_bracket_inner(&body[start..end]));
+                } else {
+                    out.push('[');
+                    out.push_str(&body[start..]);
+                    break;
+                }
+            } else {
+                out.push(ch);
             }
-            let ch = body[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
         }
         out
     }
 
-    fn convert_openformula_bracket_inner(inner: &str) -> String {
-        let convert_endpoint = |ep: &str, is_rhs: bool| -> String {
+    fn convert_openformula_bracket_inner<'a>(inner: &'a str) -> String {
+        let is_simple_ident = |s: &str| {
+            s.chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
+                && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && !s.eq_ignore_ascii_case("TRUE")
+                && !s.eq_ignore_ascii_case("FALSE")
+                && scan_single_a1_coord(s.as_bytes()).is_none()
+        };
+        let split_ep = |ep: &'a str| -> (Option<String>, &'a str) {
             let ep = ep.trim();
             if let Some(rest) = ep.strip_prefix('.') {
-                rest.to_string()
-            } else if let Some((sheet, cell)) = ep.split_once('.') {
-                let unquoted = sheet.trim_matches('\'');
-                if is_rhs || unquoted.is_empty() {
-                    cell.to_string()
-                } else if unquoted.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    format!("{unquoted}!{cell}")
-                } else {
-                    format!("'{unquoted}'!{cell}")
-                }
-            } else {
-                ep.to_string()
+                return (None, rest.trim());
             }
+            let (mut in_sq, mut last_dot) = (false, None);
+            for (idx, ch) in ep.char_indices() {
+                if ch == '\'' {
+                    in_sq = !in_sq;
+                } else if ch == '.' && !in_sq {
+                    last_dot = Some(idx);
+                }
+            }
+            let Some(dot) = last_dot else {
+                return (None, ep);
+            };
+            let raw_sh = ep[..dot].trim().trim_start_matches('$');
+            let cell = ep[dot + 1..].trim();
+            if raw_sh.is_empty() {
+                return (None, cell);
+            }
+            let fmt = if raw_sh.len() >= 2 && raw_sh.starts_with('\'') && raw_sh.ends_with('\'') {
+                let unq = &raw_sh[1..raw_sh.len() - 1];
+                if is_simple_ident(unq) {
+                    unq.to_string()
+                } else {
+                    raw_sh.to_string()
+                }
+            } else if is_simple_ident(raw_sh) {
+                raw_sh.to_string()
+            } else {
+                format!("'{}'", raw_sh.replace('\'', "''"))
+            };
+            (Some(fmt), cell)
         };
-        if let Some((lhs, rhs)) = inner.split_once(':') {
-            format!(
-                "{}:{}",
-                convert_endpoint(lhs, false),
-                convert_endpoint(rhs, true)
-            )
+        let (mut in_sq, mut colon) = (false, None);
+        for (idx, ch) in inner.char_indices() {
+            if ch == '\'' {
+                in_sq = !in_sq;
+            } else if ch == ':' && !in_sq {
+                colon = Some(idx);
+                break;
+            }
+        }
+        if let Some(c_idx) = colon {
+            let (ls, lc) = split_ep(&inner[..c_idx]);
+            let (rs, rc) = split_ep(&inner[c_idx + 1..]);
+            let lp = ls
+                .as_ref()
+                .map_or_else(|| lc.to_string(), |s| format!("{s}!{lc}"));
+            let rp = match (&ls, &rs) {
+                (_, None) => rc.to_string(),
+                (Some(l), Some(r)) if l == r => rc.to_string(),
+                (_, Some(r)) => format!("{r}!{rc}"),
+            };
+            format!("{lp}:{rp}")
         } else {
-            convert_endpoint(inner, false)
+            let (sh, c) = split_ep(inner);
+            sh.map_or_else(|| c.to_string(), |s| format!("{s}!{c}"))
         }
     }
 
@@ -937,7 +885,13 @@ impl HwpxCodec {
 
             for tbl_body in extract_tag_bodies(sec_xml, "hp:tbl") {
                 let mut rows = Vec::new();
-                for tr_body in extract_tag_bodies(tbl_body, "hp:tr") {
+                let tr_bodies = extract_tag_bodies(tbl_body, "hp:tr");
+                let row_slices = if !tr_bodies.is_empty() {
+                    tr_bodies
+                } else {
+                    vec![tbl_body]
+                };
+                for tr_body in row_slices {
                     let mut cells = Vec::new();
                     for tc_body in extract_tag_bodies(tr_body, "hp:tc") {
                         let cell_paras = extract_tag_bodies(tc_body, "hp:p");
@@ -954,7 +908,13 @@ impl HwpxCodec {
                                 .collect::<Vec<_>>()
                                 .join("\n")
                         } else {
-                            extract_tag_bodies(tc_body, "hp:t")
+                            let direct_t = extract_tag_bodies(tc_body, "hp:t");
+                            let text_nodes = if !direct_t.is_empty() {
+                                direct_t
+                            } else {
+                                extract_tag_bodies(tc_body, "hp:cellText")
+                            };
+                            text_nodes
                                 .into_iter()
                                 .map(XmlSanitizer::unescape)
                                 .collect::<Vec<_>>()

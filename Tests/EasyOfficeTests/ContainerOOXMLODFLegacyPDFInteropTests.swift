@@ -569,5 +569,11 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
         return XCTFail("Expected unsupportedFormat, got \(error)")
       }
     }
+
+    let ofExpr = XMLDocumentModelMapper.toOpenFormulaExpression(
+      "='2026 [Q1]'!A1+'Q1:Q2'!B2+'A.B'!C1:D2")
+    XCTAssertEqual(ofExpr, "of:=['2026 [Q1]'.A1]+['Q1:Q2'.B2]+['A.B'.C1:.D2]")
+    let backA1 = XMLDocumentModelMapper.normalizeOpenFormulaExpression(ofExpr)
+    XCTAssertEqual(backA1, "='2026 [Q1]'!A1+'Q1:Q2'!B2+'A.B'!C1:D2")
   }
 }

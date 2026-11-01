@@ -210,11 +210,26 @@ public enum PDFBinarySerializer {
         )
       }
 
-      // 3. Body Paragraphs (24pt leading for <= 18 lines at y=668, 15pt leading for 19..42 lines at y=728)
+      let pageAnnotations =
+        isFirstSlice ? pdf.annotations.filter { $0.pageNumber == page.pageNumber } : []
+      let pageFormFields =
+        isFirstSlice ? pdf.formFields.filter { $0.pageNumber == page.pageNumber } : []
+      let pageStrokes =
+        isFirstSlice
+        ? pdf.inkStrokes.filter {
+          $0.pageNumber == page.pageNumber && $0.points.count >= 2
+        } : []
+      let hasOverlayBand =
+        !pageAnnotations.isEmpty || !pageFormFields.isEmpty || !pageStrokes.isEmpty
+
       var cursorY = visualLines.count <= 18 ? 668.0 : 728.0
       let lineLeading = visualLines.count <= 18 ? 24.0 : 15.0
+      let minBodyY = pageAnnotations.isEmpty ? 76.0 : 200.0
       for rawLine in visualLines {
-        guard cursorY >= 76.0 else { break }
+        if hasOverlayBand && cursorY <= 582.0 && cursorY > 432.0 {
+          cursorY = 432.0
+        }
+        guard cursorY >= minBodyY else { break }
         let yInt = XMLDocumentModelMapper.safeClampedInt(cursorY)
         let barWidth = min(480, max(60, rawLine.count * 9))
         let visibleLineHex = hexEncodeUTF16BE(rawLine, maxChars: 64)
@@ -225,9 +240,6 @@ public enum PDFBinarySerializer {
         cursorY -= lineLeading
       }
 
-      // 4. Visual Annotations & Official Approval Stamp Badge (y = 576..626)
-      let pageAnnotations =
-        isFirstSlice ? pdf.annotations.filter { $0.pageNumber == page.pageNumber } : []
       for (aIdx, annotation) in pageAnnotations.prefix(4).enumerated() {
         let ay = 570.0 - Double(aIdx) * 12.0
         let pillFill = annotation.kind == .highlight ? "0.98 0.96 0.84" : "0.94 0.95 1.00"
@@ -264,9 +276,6 @@ public enum PDFBinarySerializer {
         )
       }
 
-      // 5. AcroForm Interactive Field Boxes (y = 470..516)
-      let pageFormFields =
-        isFirstSlice ? pdf.formFields.filter { $0.pageNumber == page.pageNumber } : []
       for (fIdx, field) in pageFormFields.prefix(4).enumerated() {
         let col = fIdx % 2
         let row = fIdx / 2
@@ -291,12 +300,6 @@ public enum PDFBinarySerializer {
         )
       }
 
-      // 6. Electronic Signature Box & Vector Ink Curve (y = 400..456)
-      let pageStrokes =
-        isFirstSlice
-        ? pdf.inkStrokes.filter {
-          $0.pageNumber == page.pageNumber && $0.points.count >= 2
-        } : []
       if !pageStrokes.isEmpty {
         streamLines.append("0.97 0.98 1.00 rg 0.45 0.50 0.78 RG 1.0 w 48 452 280 46 re B")
         let sigHeaderHex = hexEncodeUTF16BE(

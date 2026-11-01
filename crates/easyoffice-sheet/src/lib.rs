@@ -398,7 +398,9 @@ impl SheetEngine {
             return EvaluatedCellValue::Empty;
         }
         let trimmed = raw.trim();
-        let mut res = if let Some(formula_body) = crate::parser::strip_formula_prefix(trimmed) {
+        let mut res = if let Some(formula_body) = crate::parser::strip_formula_prefix(trimmed)
+            .or_else(|| crate::parser::strip_open_formula_prefix(trimmed))
+        {
             let expr_src = formula_body.trim();
             if expr_src.is_empty() {
                 return EvaluatedCellValue::Empty;

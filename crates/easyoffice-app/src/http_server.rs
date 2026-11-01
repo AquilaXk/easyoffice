@@ -114,6 +114,15 @@ fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str,
     );
     let _ = stream.write_all(resp.as_bytes());
     let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(20)));
+    let mut drain = [0u8; 1024];
+    for _ in 0..4 {
+        match stream.read(&mut drain) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+    }
 }
 
 fn write_http_413(stream: &mut TcpStream) {

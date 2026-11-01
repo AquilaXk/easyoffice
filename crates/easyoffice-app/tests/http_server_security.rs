@@ -20,7 +20,7 @@ fn send_raw_http_request(port: u16, raw_request: &[u8], timeout: Duration) -> St
         .expect("set write timeout");
     stream.write_all(raw_request).expect("write HTTP request");
     stream.flush().expect("flush HTTP request");
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(4096);
     let _ = stream.read_to_end(&mut out);
     String::from_utf8_lossy(&out).into_owned()
 }

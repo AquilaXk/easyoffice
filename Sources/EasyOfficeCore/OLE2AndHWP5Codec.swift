@@ -807,9 +807,10 @@ public enum OLE2ContainerCodec {
     var claimedMiniWords = [UInt64](repeating: 0, count: (totalMiniSectorsCapacity + 63) / 64)
     var cumulativeExtractedBytes = 0
 
+    let hasTreePaths = !resolvedStreamPaths.isEmpty
     for idx in 0..<entryCount {
       guard let node = dirNodes[idx], node.objectType == objectTypeStream else { continue }
-      let name = resolvedStreamPaths[idx] ?? node.name
+      guard let name = hasTreePaths ? resolvedStreamPaths[idx] : node.name else { continue }
       let foldedPath = name.split(separator: "/", omittingEmptySubsequences: false).map {
         foldCFBName(String($0))
       }

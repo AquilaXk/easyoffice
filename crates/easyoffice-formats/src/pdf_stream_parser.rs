@@ -41,21 +41,78 @@ impl PdfToUnicodeMap {
                 break;
             };
             let block = &after[..end_pos];
-            let tokens = Self::extract_hex_tokens(block);
-            for triple in tokens.chunks_exact(3) {
-                let (Some((lo, len_lo)), Some((hi, _)), Some((dst_base, _))) = (
-                    Self::parse_code_hex(triple[0]),
-                    Self::parse_code_hex(triple[1]),
-                    Self::parse_code_hex(triple[2]),
-                ) else {
-                    continue;
-                };
-                if lo == 0x0000 && hi == 0xFFFF && dst_base == 0x0000 {
-                    continue;
+            Self::parse_bfrange_block(block, out);
+            rest_range = &after[end_pos + "endbfrange".len()..];
+        }
+    }
+
+    fn parse_bfrange_block(block: &str, out: &mut PdfToUnicodeMap) {
+        let bytes = block.as_bytes();
+        let mut i = 0usize;
+        let next_hex = |idx: &mut usize| -> Option<&str> {
+            while *idx < bytes.len() {
+                if bytes[*idx] == b'<' {
+                    if let Some(close) = block[*idx + 1..].find('>') {
+                        let s = &block[*idx + 1..*idx + 1 + close];
+                        *idx += close + 2;
+                        return Some(s);
+                    }
                 }
-                if hi >= lo && (hi - lo) <= 4096 {
-                    if len_lo == 2 {
-                        out.is_two_byte = true;
+                *idx += 1;
+            }
+            None
+        };
+        while i < bytes.len() {
+            let Some(lo_hex) = next_hex(&mut i) else {
+                break;
+            };
+            let Some(hi_hex) = next_hex(&mut i) else {
+                break;
+            };
+            let (Some((lo, len_lo)), Some((hi, _))) =
+                (Self::parse_code_hex(lo_hex), Self::parse_code_hex(hi_hex))
+            else {
+                continue;
+            };
+            if hi < lo {
+                continue;
+            }
+            if len_lo == 2 {
+                out.is_two_byte = true;
+            }
+            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == b'[' {
+                i += 1;
+                let mut code = lo;
+                while i < bytes.len() {
+                    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    if i < bytes.len() && bytes[i] == b']' {
+                        i += 1;
+                        break;
+                    }
+                    if bytes[i] == b'<' {
+                        if let Some(close) = block[i + 1..].find('>') {
+                            let dst_hex = &block[i + 1..i + 1 + close];
+                            i += close + 2;
+                            if code <= hi {
+                                if let Some(dst) = decode_pdf_hex_string(dst_hex, true) {
+                                    out.map.insert(code, dst);
+                                }
+                                code = code.saturating_add(1);
+                            }
+                            continue;
+                        }
+                    }
+                    i += 1;
+                }
+            } else if let Some(dst_hex) = next_hex(&mut i) {
+                if let Some((dst_base, _)) = Self::parse_code_hex(dst_hex) {
+                    if lo == 0x0000 && hi == 0xFFFF && dst_base == 0x0000 {
+                        continue;
                     }
                     for offset in 0..=(hi - lo) {
                         if let Some(ch) = char::from_u32(u32::from(dst_base) + u32::from(offset)) {
@@ -64,7 +121,6 @@ impl PdfToUnicodeMap {
                     }
                 }
             }
-            rest_range = &after[end_pos + "endbfrange".len()..];
         }
     }
 
@@ -589,6 +645,61 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
                 Some('t') => out.push('\t'),
                 Some('b') => out.push('\u{0008}'),
                 Some('f') => out.push('\u{000C}'),
+                Some('v') => out.push('\u{000B}'),
+                Some('u') => {
+                    let mut hex = String::with_capacity(4);
+                    let mut cloned = chars.clone();
+                    for _ in 0..4 {
+                        if let Some(c) = cloned.next() {
+                            if c.is_ascii_hexdigit() {
+                                hex.push(c);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if hex.len() == 4 {
+                        for _ in 0..4 {
+                            let _ = chars.next();
+                        }
+                        if let Ok(code) = u16::from_str_radix(&hex, 16) {
+                            if (0xD800..=0xDBFF).contains(&code) {
+                                let mut look = chars.clone();
+                                if look.next() == Some('\\') && look.next() == Some('u') {
+                                    let mut low_hex = String::with_capacity(4);
+                                    for _ in 0..4 {
+                                        if let Some(lc) = look.next() {
+                                            if lc.is_ascii_hexdigit() {
+                                                low_hex.push(lc);
+                                            }
+                                        }
+                                    }
+                                    if low_hex.len() == 4 {
+                                        if let Ok(low) = u16::from_str_radix(&low_hex, 16) {
+                                            if (0xDC00..=0xDFFF).contains(&low) {
+                                                for _ in 0..6 {
+                                                    let _ = chars.next();
+                                                }
+                                                let scalar = 0x10000
+                                                    + (((u32::from(code) - 0xD800) << 10)
+                                                        | (u32::from(low) - 0xDC00));
+                                                if let Some(sc) = char::from_u32(scalar) {
+                                                    out.push(sc);
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(sc) = char::from_u32(u32::from(code)) {
+                                out.push(sc);
+                            }
+                        }
+                    } else {
+                        out.push('u');
+                    }
+                }
                 Some('\r') => {
                     if chars.peek() == Some(&'\n') {
                         let _ = chars.next();

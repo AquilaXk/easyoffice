@@ -136,7 +136,7 @@ extension LegacyOLE2OfficeCodec {
     var sstIndexByString: [String: UInt32] = [:]
     var totalSSTReferences: UInt32 = 0
 
-    for (pageIdx, page) in allPages.enumerated() {
+    for page in allPages {
       let nameUnitsCount = page.name.utf16.count
       guard nameUnitsCount <= 255 else {
         throw EasyOfficeError.resourceBudgetExceeded(
@@ -156,13 +156,11 @@ extension LegacyOLE2OfficeCodec {
         if !raw.hasPrefix("="), let num = Double(raw), num.isFinite {
           continue
         }
-        if pageIdx == 0 && raw.utf16.count > 32_765 {
+        if raw.utf16.count > 32_765 {
           throw EasyOfficeError.resourceBudgetExceeded(
             detail: "BIFF8 셀 문자열 길이가 32,765 UTF-16 코드 유닛 한도를 초과했습니다.")
         }
-        let sstValue =
-          raw.utf16.count > 32_765
-          ? String(decoding: raw.utf16.prefix(32_765), as: UTF16.self) : raw
+        let sstValue = raw
         totalSSTReferences &+= 1
         if sstIndexByString[sstValue] == nil {
           let newIndex = UInt32(sstStrings.count)

@@ -351,7 +351,10 @@ for (const file of files) {
     }
     if (
       (rel === "Sources/EasyOfficeCore/BinaryContainerCodec.swift" ||
-        rel === "Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift") &&
+        rel === "Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift" ||
+        rel === "Sources/EasyOfficeCore/HWP5DocumentCodec.swift" ||
+        rel === "Sources/EasyOfficeCore/LegacyBIFF8XLSCodec.swift" ||
+        rel === "Sources/EasyOfficeCore/LegacyBinaryDocPptCodecs.swift") &&
       (text.includes("abs(Int.min)") ||
         (/\bInt\(Double\(/.test(text) && !text.includes("maxRatio: Double = 100.0")))
     ) {

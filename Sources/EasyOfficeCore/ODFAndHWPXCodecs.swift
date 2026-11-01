@@ -43,7 +43,7 @@ public enum ODFContainerCodec {
       let spansXML = XMLDocumentModelMapper.serializeTableSpans(tbl)
       let rowsXML = tbl.rows.map { row in
         let cells = row.map {
-          "<table:table-cell><text:value>\(XMLSanitizer.escape($0))</text:value></table:table-cell>"
+          "<table:table-cell><text:p>\(XMLSanitizer.escape($0))</text:p></table:table-cell>"
         }.joined()
         return "<table:table-row>\(cells)</table:table-row>"
       }.joined(separator: "\n        ")
@@ -670,7 +670,7 @@ public enum HWPXContainerCodec {
       let spansXML = XMLDocumentModelMapper.serializeTableSpans(tbl)
       let rows = tbl.rows.map { row in
         let cells = row.map {
-          "<hp:tc><hp:cellText>\(XMLSanitizer.escape($0))</hp:cellText></hp:tc>"
+          "<hp:tc><hp:p><hp:run><hp:t>\(XMLSanitizer.escape($0))</hp:t></hp:run></hp:p><hp:cellText>\(XMLSanitizer.escape($0))</hp:cellText></hp:tc>"
         }.joined()
         return "<hp:tr>\(cells)</hp:tr>"
       }.joined(separator: "\n    ")
@@ -812,5 +812,163 @@ public enum HWPXContainerCodec {
     )
     decodedDoc.preservedArchiveEntries = preservedEntries
     return decodedDoc
+  }
+}
+
+extension XMLDocumentModelMapper {
+  static func formatOpenFormulaSheetPrefix(_ rawSheet: String) -> String {
+    let isSimple =
+      !rawSheet.isEmpty
+      && (rawSheet.first?.isLetter == true || rawSheet.first == "_")
+      && rawSheet.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+      && rawSheet.uppercased() != "TRUE"
+      && rawSheet.uppercased() != "FALSE"
+      && (try? CellAddress(a1Notation: rawSheet)) == nil
+    if isSimple {
+      return "\(rawSheet)."
+    }
+    return "'\(rawSheet.replacingOccurrences(of: "'", with: "''"))'."
+  }
+
+  static func formatA1SheetPrefix(_ rawSheet: String) -> String {
+    let isSimple =
+      !rawSheet.isEmpty
+      && (rawSheet.first?.isLetter == true || rawSheet.first == "_")
+      && rawSheet.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+      && rawSheet.uppercased() != "TRUE"
+      && rawSheet.uppercased() != "FALSE"
+      && (try? CellAddress(a1Notation: rawSheet)) == nil
+    if isSimple {
+      return rawSheet
+    }
+    return "'\(rawSheet.replacingOccurrences(of: "'", with: "''"))'"
+  }
+
+  static func splitOnceUnquoted(_ text: String, delimiter: Character) -> (String, String)? {
+    var inSq = false
+    var idx = text.startIndex
+    while idx < text.endIndex {
+      let c = text[idx]
+      if c == "'" {
+        inSq.toggle()
+      } else if c == delimiter && !inSq {
+        return (String(text[..<idx]), String(text[text.index(after: idx)...]))
+      }
+      idx = text.index(after: idx)
+    }
+    return nil
+  }
+
+  public static func normalizeOpenFormulaExpression(_ rawFormula: String) -> String {
+    var expr = rawFormula.trimmingCharacters(in: .whitespacesAndNewlines)
+    if expr.lowercased().hasPrefix("of:") {
+      expr = String(expr.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+    } else if expr.lowercased().hasPrefix("oooc:") {
+      expr = String(expr.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+    } else if expr.lowercased().hasPrefix("msoxl:") {
+      expr = String(expr.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+    }
+    if !expr.hasPrefix("=") {
+      expr = "=" + expr
+    }
+    var normalized = ""
+    normalized.reserveCapacity(expr.count)
+    var inQuotes = false
+    var inSingleQuotes = false
+    var idx = expr.startIndex
+    while idx < expr.endIndex {
+      let ch = expr[idx]
+      if ch == "\"" && !inSingleQuotes {
+        inQuotes.toggle()
+        normalized.append(ch)
+        idx = expr.index(after: idx)
+        continue
+      }
+      if ch == "'" && !inQuotes {
+        inSingleQuotes.toggle()
+        normalized.append(ch)
+        idx = expr.index(after: idx)
+        continue
+      }
+      if !inQuotes && !inSingleQuotes {
+        if ch == "[" {
+          var closeIdx = expr.index(after: idx)
+          var bracketSq = false
+          while closeIdx < expr.endIndex {
+            if expr[closeIdx] == "'" {
+              bracketSq.toggle()
+            } else if expr[closeIdx] == "]" && !bracketSq {
+              break
+            }
+            closeIdx = expr.index(after: closeIdx)
+          }
+          if closeIdx < expr.endIndex {
+            let inner = String(expr[expr.index(after: idx)..<closeIdx])
+            normalized.append(normalizeBracketedOpenFormulaRef(inner))
+            idx = expr.index(after: closeIdx)
+            continue
+          }
+        } else if ch == ";" {
+          normalized.append(",")
+          idx = expr.index(after: idx)
+          continue
+        }
+      }
+      normalized.append(ch)
+      idx = expr.index(after: idx)
+    }
+    return normalized
+  }
+
+  private static func normalizeBracketedOpenFormulaRef(_ inner: String) -> String {
+    func splitSheetAndCell(_ part: String) -> (sheet: String?, cell: String) {
+      let trimmed = part.trimmingCharacters(in: .whitespaces)
+      if trimmed.hasPrefix(".") {
+        return (nil, String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces))
+      }
+      var inSq = false
+      var lastDot: String.Index?
+      var scan = trimmed.startIndex
+      while scan < trimmed.endIndex {
+        if trimmed[scan] == "'" {
+          inSq.toggle()
+        } else if trimmed[scan] == "." && !inSq {
+          lastDot = scan
+        }
+        scan = trimmed.index(after: scan)
+      }
+      if let dotIdx = lastDot {
+        var rawSheet = String(trimmed[..<dotIdx]).trimmingCharacters(in: .whitespaces)
+        if rawSheet.hasPrefix("$") {
+          rawSheet = String(rawSheet.dropFirst())
+        }
+        if rawSheet.count >= 2 && rawSheet.hasPrefix("'") && rawSheet.hasSuffix("'") {
+          rawSheet = String(rawSheet.dropFirst().dropLast()).replacingOccurrences(
+            of: "''", with: "'")
+        }
+        let cellPart = String(trimmed[trimmed.index(after: dotIdx)...]).trimmingCharacters(
+          in: .whitespaces)
+        return (rawSheet.isEmpty ? nil : formatA1SheetPrefix(rawSheet), cellPart)
+      }
+      return (nil, trimmed)
+    }
+
+    if let (lhsStr, rhsStr) = splitOnceUnquoted(inner, delimiter: ":") {
+      let left = splitSheetAndCell(lhsStr)
+      let right = splitSheetAndCell(rhsStr)
+      let leftStr = left.sheet.map { "\($0)!\(left.cell)" } ?? left.cell
+      let rightStr: String
+      if let rSheet = right.sheet, rSheet != left.sheet {
+        rightStr = "\(rSheet)!\(right.cell)"
+      } else {
+        rightStr = right.cell
+      }
+      return "\(leftStr):\(rightStr)"
+    }
+    let single = splitSheetAndCell(inner)
+    if let sheet = single.sheet {
+      return "\(sheet)!\(single.cell)"
+    }
+    return single.cell
   }
 }
