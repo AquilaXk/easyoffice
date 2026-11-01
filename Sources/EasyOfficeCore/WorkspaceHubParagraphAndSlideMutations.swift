@@ -883,16 +883,39 @@ extension WorkspaceViewModel {
       let oldMiddle = Array(oldParagraphs[prefixCount..<oldMiddleEnd])
       let newMiddle = Array(lines[prefixCount..<newMiddleEnd])
 
-      for (midIdx, line) in newMiddle.enumerated() {
-        if oldMiddle.indices.contains(midIdx) {
-          var existing = oldMiddle[midIdx]
-          if existing.text != line {
-            existing.text = line
-            existing.runs = []
-          }
-          updatedParagraphs.append(existing)
+      var consumedOldIndices = Set<Int>()
+      var searchFloor = 0
+      var matchedOldIndexForNew: [Int: Int] = [:]
+      for (newIdx, line) in newMiddle.enumerated() {
+        if let foundOldIdx = (searchFloor..<oldMiddle.count).first(where: {
+          !consumedOldIndices.contains($0) && oldMiddle[$0].text == line
+        }) {
+          matchedOldIndexForNew[newIdx] = foundOldIdx
+          consumedOldIndices.insert(foundOldIdx)
+          searchFloor = foundOldIdx + 1
+        }
+      }
+
+      var unconsumedSequentialIdx = 0
+      for (newIdx, line) in newMiddle.enumerated() {
+        if let matchedOldIdx = matchedOldIndexForNew[newIdx] {
+          updatedParagraphs.append(oldMiddle[matchedOldIdx])
         } else {
-          updatedParagraphs.append(ParagraphBlock(style: .body, alignment: .leading, text: line))
+          while unconsumedSequentialIdx < oldMiddle.count
+            && consumedOldIndices.contains(unconsumedSequentialIdx)
+          {
+            unconsumedSequentialIdx += 1
+          }
+          if unconsumedSequentialIdx < oldMiddle.count {
+            var mutated = oldMiddle[unconsumedSequentialIdx]
+            consumedOldIndices.insert(unconsumedSequentialIdx)
+            unconsumedSequentialIdx += 1
+            mutated.text = line
+            mutated.runs = []
+            updatedParagraphs.append(mutated)
+          } else {
+            updatedParagraphs.append(ParagraphBlock(style: .body, alignment: .leading, text: line))
+          }
         }
       }
 
@@ -901,14 +924,15 @@ extension WorkspaceViewModel {
         updatedParagraphs.append(contentsOf: oldParagraphs[suffixStart..<oldParagraphs.count])
       }
 
-      if oldMiddle.count > newMiddle.count, !updatedParagraphs.isEmpty {
+      if !updatedParagraphs.isEmpty {
         let fallbackAnchorID: UUID =
           if prefixCount + newMiddle.count > 0 {
             updatedParagraphs[prefixCount + newMiddle.count - 1].id
           } else {
             updatedParagraphs[0].id
           }
-        for removedParagraph in oldMiddle[newMiddle.count..<oldMiddle.count] {
+        for (oldIdx, removedParagraph) in oldMiddle.enumerated()
+        where !consumedOldIndices.contains(oldIdx) {
           Self.relinkParagraphAnchors(in: &doc, from: removedParagraph.id, to: fallbackAnchorID)
         }
       }

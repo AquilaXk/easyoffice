@@ -65,18 +65,18 @@ public struct SheetVectorChartCanvasView: View {
 
   private var seriesPaletteColors: [Color] {
     [
-      EasyOfficeDesignTokens.brand700.swiftUIColor,
+      EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor,
       EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark).swiftUIColor,
       EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor,
       EasyOfficeDesignTokens.brand500.swiftUIColor,
-      EasyOfficeDesignTokens.statusInfo.swiftUIColor,
+      EasyOfficeDesignTokens.statusInfoToken(isDark: palette.isDark).swiftUIColor,
       EasyOfficeDesignTokens.accentToken(for: .hwp, isDark: palette.isDark).swiftUIColor,
     ]
   }
 
   public var body: some View {
     let points = primaryPoints
-    let primaryAccent = EasyOfficeDesignTokens.brand700.swiftUIColor
+    let primaryAccent = EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
 
     VStack(alignment: .leading, spacing: 8) {
       switch chartSpec.kind {

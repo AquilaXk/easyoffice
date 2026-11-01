@@ -58,13 +58,15 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
     let rawCol = try container.decode(Int.self, forKey: .columnIndex)
     let rawRowSpan = try container.decodeIfPresent(Int.self, forKey: .rowSpan) ?? 1
     let rawColSpan = try container.decodeIfPresent(Int.self, forKey: .columnSpan) ?? 1
-    let clampedRowSpan = min(max(1, rawRowSpan), Self.maxSpan)
-    let clampedColSpan = min(max(1, rawColSpan), Self.maxSpan)
-    let (_, rowOverflow) = rawRow.addingReportingOverflow(clampedRowSpan)
-    let (_, colOverflow) = rawCol.addingReportingOverflow(clampedColSpan)
-    guard rawRow >= 0, rawRow <= min(Self.maxIndex, CellAddress.maxZeroBasedRow),
-      rawCol >= 0, rawCol <= min(Self.maxIndex, CellAddress.maxZeroBasedColumn),
-      !rowOverflow, !colOverflow
+    let (endRow, rowOverflow) = rawRow.addingReportingOverflow(rawRowSpan)
+    let (endCol, colOverflow) = rawCol.addingReportingOverflow(rawColSpan)
+    guard rawRow >= 0, rawRow <= Self.maxIndex,
+      rawCol >= 0, rawCol <= Self.maxIndex,
+      rawRowSpan >= 1, rawRowSpan <= Self.maxSpan,
+      rawColSpan >= 1, rawColSpan <= Self.maxSpan,
+      !rowOverflow, !colOverflow,
+      endRow <= Self.maxIndex + Self.maxSpan,
+      endCol <= Self.maxIndex + Self.maxSpan
     else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
@@ -78,8 +80,8 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
       try container.decodeIfPresent(TableCellBorderStyle.self, forKey: .borderStyle) ?? .solid
     self.rowIndex = rawRow
     self.columnIndex = rawCol
-    self.rowSpan = clampedRowSpan
-    self.columnSpan = clampedColSpan
+    self.rowSpan = rawRowSpan
+    self.columnSpan = rawColSpan
     self.borderStyle = border
   }
 }

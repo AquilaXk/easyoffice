@@ -97,7 +97,9 @@ extension WorkspaceViewModel {
     }
 
     if commandID.hasSuffix("-layout-paper") || commandID.hasSuffix("-layout-size") {
-      recordUndoSnapshot(for: tabID)
+      if openTabs[idx].moduleKind != .pdf {
+        recordUndoSnapshot(for: tabID)
+      }
       applyLayoutCommand(at: idx, kind: .paperSize)
       lastExecutedCommandSummary = "용지 및 화면 규격 전환 완료"
       return
@@ -109,7 +111,9 @@ extension WorkspaceViewModel {
       return
     }
     if commandID.hasSuffix("-layout-columns") {
-      recordUndoSnapshot(for: tabID)
+      if openTabs[idx].moduleKind != .pdf {
+        recordUndoSnapshot(for: tabID)
+      }
       applyLayoutCommand(at: idx, kind: .columns)
       lastExecutedCommandSummary = "다단 레이아웃 전환 완료"
       return

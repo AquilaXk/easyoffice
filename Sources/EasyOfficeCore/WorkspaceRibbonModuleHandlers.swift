@@ -631,12 +631,7 @@ extension WorkspaceViewModel {
   }
 
   public func runBatchConversionForOpenTabs() {
-    let jobs = openTabs.map { tab in
-      ConversionJobRequest(
-        sourceFileName: tab.fileName, sourceFormat: tab.format, targetFormat: batchTargetFormat,
-        payload: tab.payload)
-    }
-    lastBatchConversionReport = DocumentConversionOrchestrator.executeBatch(jobs)
+    runAllBatchConversions()
   }
 
   public func runSecurityAuditOnActiveTab() {

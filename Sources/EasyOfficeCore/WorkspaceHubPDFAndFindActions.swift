@@ -701,6 +701,7 @@ extension WorkspaceViewModel {
     if let targetFormat {
       batchTargetFormat = targetFormat
     }
+    batchQueueGeneration &+= 1
     lastBatchConversionReport = nil
     var enqueuedCount = 0
     for url in urls {
@@ -743,12 +744,14 @@ extension WorkspaceViewModel {
     if openTabs.contains(where: { $0.id == id }) {
       excludedOpenTabBatchIDs.insert(id)
     }
+    batchQueueGeneration &+= 1
     lastBatchConversionReport = nil
   }
 
   public func clearBatchConversionQueue() {
     additionalBatchJobs.removeAll()
     excludedOpenTabBatchIDs = Set(openTabs.map(\.id))
+    batchQueueGeneration &+= 1
     lastBatchConversionReport = nil
     lastExecutedCommandSummary = "일괄 변환 대기열 초기화 완료"
   }
@@ -797,6 +800,7 @@ extension WorkspaceViewModel {
   }
 
   public func runAllBatchConversions(outputDirectory: URL? = nil) {
+    batchQueueGeneration &+= 1
     let jobs = buildDeduplicatedBatchJobs()
     let resolvedDir = outputDirectory ?? batchOutputDirectoryURL
     lastBatchConversionReport = DocumentConversionOrchestrator.executeBatch(
@@ -806,13 +810,17 @@ extension WorkspaceViewModel {
   }
 
   public func runAllBatchConversionsAsync(outputDirectory: URL? = nil) async {
+    batchQueueGeneration &+= 1
+    let generationSnapshot = batchQueueGeneration
     let jobs = buildDeduplicatedBatchJobs()
     let resolvedDir = outputDirectory ?? batchOutputDirectoryURL
     let report = await DocumentConversionOrchestrator.executeBatchAsync(
       jobs,
       outputDirectory: resolvedDir
     )
-    lastBatchConversionReport = report
+    if batchQueueGeneration == generationSnapshot {
+      lastBatchConversionReport = report
+    }
   }
 
   public var batchConversionQueue: [BatchConversionQueueItem] {

@@ -18,6 +18,13 @@ public struct RibbonCommandDescriptor: Sendable, Equatable, Identifiable {
 
 public typealias WorkspaceRibbonCategory = RibbonCategory
 
+internal struct TabMetadataSnapshot: Sendable, Equatable {
+  var format: DocumentFormat
+  var fileName: String
+  var fileURL: URL?
+  var isLosslessNativeOrigin: Bool
+}
+
 /// Ribbon layout style supporting both global standard office and Korean HWP page/manuscript modes.
 public enum RibbonLayoutStyle: String, CaseIterable, Sendable, Identifiable {
   case standardOffice = "표준 오피스"

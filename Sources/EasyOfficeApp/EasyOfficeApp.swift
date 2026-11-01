@@ -48,6 +48,7 @@ final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
           return .terminateCancel
         }
       }
+      vm.cancelCloseTab()
       return .terminateNow
     case .alertSecondButtonReturn:
       vm.cancelCloseTab()

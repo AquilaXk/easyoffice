@@ -689,14 +689,18 @@ public struct MainWorkspaceWindowView: View {
             }
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            .foregroundStyle(
+              EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+            )
 
             Button("저장 안 함") {
-              viewModel.confirmCloseTab(id: pendingID)
+              viewModel.confirmDiscardAndClosePendingTab()
             }
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+            .foregroundStyle(
+              EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor
+            )
 
             Button("취소") {
               viewModel.cancelCloseTab()

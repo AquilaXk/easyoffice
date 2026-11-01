@@ -69,6 +69,9 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     )
 
     vm.undo()
+    XCTAssertEqual(vm.activeTab?.format, .docx)
+    XCTAssertEqual(vm.activeTab?.fileName, "external-original.docx")
+    XCTAssertEqual(vm.activeTab?.fileURL?.standardizedFileURL, externalURL.standardizedFileURL)
     XCTAssertEqual(vm.activeDocument?.paragraphs.count, richParagraphCountBeforeTxt)
     XCTAssertEqual(vm.activeDocument?.paragraphs.first?.fontName, "Georgia")
   }
@@ -83,8 +86,18 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     let validURL = tempDir.appendingPathComponent("valid-recent.docx")
     let blankTab = vm.openNewBlankTab(for: .document)
     try vm.saveTabToDisk(id: blankTab.id, to: validURL)
+    vm.closeTab(id: blankTab.id)
 
     try Data([0x00, 0xFF, 0x13, 0x37]).write(to: validURL, options: .atomic)
+    XCTAssertNil(
+      vm.reopenLastClosedTab(),
+      "reopenLastClosedTab must fail closed and return nil when the closed tab's disk file is unreadable"
+    )
+    XCTAssertFalse(
+      vm.openTabs.contains(where: {
+        $0.fileURL?.standardizedFileURL.path == validURL.standardizedFileURL.path
+      })
+    )
 
     let freshVM = WorkspaceViewModel()
     freshVM.restorePersistedRecentDocuments()
@@ -477,6 +490,11 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
       EasyOfficeDesignTokens.darkText,
       EasyOfficeDesignTokens.darkMuted,
       EasyOfficeDesignTokens.brand300,
+      EasyOfficeDesignTokens.brandAccentToken(isDark: true),
+      EasyOfficeDesignTokens.statusSuccessToken(isDark: true),
+      EasyOfficeDesignTokens.statusWarningToken(isDark: true),
+      EasyOfficeDesignTokens.statusDangerToken(isDark: true),
+      EasyOfficeDesignTokens.statusInfoToken(isDark: true),
     ] + OfficeModuleKind.allCases.map { EasyOfficeDesignTokens.accentToken(for: $0, isDark: true) }
 
     for surface in darkSurfaces {
@@ -552,5 +570,10 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     XCTAssertEqual(clampedSpan.columnIndex, 0)
     XCTAssertEqual(clampedSpan.rowSpan, TableCellSpan.maxSpan)
     XCTAssertEqual(clampedSpan.columnSpan, 1)
+
+    let invalidSpanJSON = Data(#"{"rowIndex":0,"columnIndex":0,"rowSpan":999,"columnSpan":1}"#.utf8)
+    XCTAssertThrowsError(try JSONDecoder().decode(TableCellSpan.self, from: invalidSpanJSON))
+    let zeroSpanJSON = Data(#"{"rowIndex":0,"columnIndex":0,"rowSpan":0,"columnSpan":1}"#.utf8)
+    XCTAssertThrowsError(try JSONDecoder().decode(TableCellSpan.self, from: zeroSpanJSON))
   }
 }

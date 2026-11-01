@@ -877,7 +877,7 @@ public struct SlideEditorDetailPaneView: View {
           .font(.system(size: 10, weight: .bold))
           .foregroundStyle(Color.white)
           .frame(width: 16, height: 16)
-          .background(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
+          .background(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: false).swiftUIColor)
           .clipShape(Circle())
           .offset(x: 0, y: -(elemH / 2.0) - 14.0)
           .help("회전 핸들 (↻)")
@@ -1814,7 +1814,11 @@ public struct PDFStudioDetailPaneView: View {
         }
       }
     }
-    .frame(maxWidth: 620, minHeight: 720, alignment: .topLeading)
+    .frame(
+      maxWidth: viewModel.pdfPaperSizePreset == .letter ? 640 : 620,
+      minHeight: viewModel.pdfPaperSizePreset == .letter ? 700 : 720,
+      alignment: .topLeading
+    )
     .background(palette.cardSurface.swiftUIColor)
     .border(palette.border.swiftUIColor, width: 1)
     .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
@@ -1914,11 +1918,28 @@ public struct PDFStudioDetailPaneView: View {
               .frame(minHeight: 360, maxHeight: .infinity)
               .border(palette.border.swiftUIColor, width: 1)
             } else if let page = activePage {
-              pdfNativePageSheetView(
-                page: page,
-                pageNumber: currentPageNum,
-                palette: palette
-              )
+              if viewModel.pdfPageColumnCount == 2,
+                pdf.pages.indices.contains(safeIdx + 1)
+              {
+                HStack(alignment: .top, spacing: 16) {
+                  pdfNativePageSheetView(
+                    page: page,
+                    pageNumber: currentPageNum,
+                    palette: palette
+                  )
+                  pdfNativePageSheetView(
+                    page: pdf.pages[safeIdx + 1],
+                    pageNumber: pdf.pages[safeIdx + 1].pageNumber,
+                    palette: palette
+                  )
+                }
+              } else {
+                pdfNativePageSheetView(
+                  page: page,
+                  pageNumber: currentPageNum,
+                  palette: palette
+                )
+              }
             }
 
             if isPrimaryPane

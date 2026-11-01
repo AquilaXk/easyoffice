@@ -265,8 +265,9 @@ public final class WorkspaceViewModel {
 
   internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
   internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
-  internal var undoFormatStacks: [UUID: [DocumentFormat]] = [:]
-  internal var redoFormatStacks: [UUID: [DocumentFormat]] = [:]
+  internal var undoMetadataStacks: [UUID: [TabMetadataSnapshot]] = [:]
+  internal var redoMetadataStacks: [UUID: [TabMetadataSnapshot]] = [:]
+  internal var batchQueueGeneration: Int = 0
   internal var customTemplatePayloads: [String: OpenTabPayload] = [:]
   internal var knownEasyOfficeSavedFilePaths: Set<String> = []
   internal var activeInlineEditTargetKey: String? = nil
@@ -467,13 +468,20 @@ public final class WorkspaceViewModel {
     undoStacks[tabID] = stack
     redoStacks[tabID] = []
 
-    var fmtStack = undoFormatStacks[tabID] ?? []
-    fmtStack.append(openTabs[idx].format)
-    if fmtStack.count > Self.maxUndoDepth {
-      fmtStack.removeFirst(fmtStack.count - Self.maxUndoDepth)
+    var metaStack = undoMetadataStacks[tabID] ?? []
+    metaStack.append(
+      TabMetadataSnapshot(
+        format: openTabs[idx].format,
+        fileName: openTabs[idx].fileName,
+        fileURL: openTabs[idx].fileURL,
+        isLosslessNativeOrigin: openTabs[idx].isLosslessNativeOrigin
+      )
+    )
+    if metaStack.count > Self.maxUndoDepth {
+      metaStack.removeFirst(metaStack.count - Self.maxUndoDepth)
     }
-    undoFormatStacks[tabID] = fmtStack
-    redoFormatStacks[tabID] = []
+    undoMetadataStacks[tabID] = metaStack
+    redoMetadataStacks[tabID] = []
   }
 
   public func undo() {
@@ -488,12 +496,22 @@ public final class WorkspaceViewModel {
     rStack.append(openTabs[idx].payload)
     redoStacks[tabID] = rStack
 
-    if var fmtStack = undoFormatStacks[tabID], let previousFormat = fmtStack.popLast() {
-      undoFormatStacks[tabID] = fmtStack
-      var rFmtStack = redoFormatStacks[tabID] ?? []
-      rFmtStack.append(openTabs[idx].format)
-      redoFormatStacks[tabID] = rFmtStack
-      openTabs[idx].format = previousFormat
+    if var metaStack = undoMetadataStacks[tabID], let previousMeta = metaStack.popLast() {
+      undoMetadataStacks[tabID] = metaStack
+      var rMetaStack = redoMetadataStacks[tabID] ?? []
+      rMetaStack.append(
+        TabMetadataSnapshot(
+          format: openTabs[idx].format,
+          fileName: openTabs[idx].fileName,
+          fileURL: openTabs[idx].fileURL,
+          isLosslessNativeOrigin: openTabs[idx].isLosslessNativeOrigin
+        )
+      )
+      redoMetadataStacks[tabID] = rMetaStack
+      openTabs[idx].format = previousMeta.format
+      openTabs[idx].fileName = previousMeta.fileName
+      openTabs[idx].fileURL = previousMeta.fileURL
+      openTabs[idx].isLosslessNativeOrigin = previousMeta.isLosslessNativeOrigin
     }
 
     openTabs[idx].payload = previousPayload
@@ -514,12 +532,22 @@ public final class WorkspaceViewModel {
     uStack.append(openTabs[idx].payload)
     undoStacks[tabID] = uStack
 
-    if var rFmtStack = redoFormatStacks[tabID], let nextFormat = rFmtStack.popLast() {
-      redoFormatStacks[tabID] = rFmtStack
-      var uFmtStack = undoFormatStacks[tabID] ?? []
-      uFmtStack.append(openTabs[idx].format)
-      undoFormatStacks[tabID] = uFmtStack
-      openTabs[idx].format = nextFormat
+    if var rMetaStack = redoMetadataStacks[tabID], let nextMeta = rMetaStack.popLast() {
+      redoMetadataStacks[tabID] = rMetaStack
+      var uMetaStack = undoMetadataStacks[tabID] ?? []
+      uMetaStack.append(
+        TabMetadataSnapshot(
+          format: openTabs[idx].format,
+          fileName: openTabs[idx].fileName,
+          fileURL: openTabs[idx].fileURL,
+          isLosslessNativeOrigin: openTabs[idx].isLosslessNativeOrigin
+        )
+      )
+      undoMetadataStacks[tabID] = uMetaStack
+      openTabs[idx].format = nextMeta.format
+      openTabs[idx].fileName = nextMeta.fileName
+      openTabs[idx].fileURL = nextMeta.fileURL
+      openTabs[idx].isLosslessNativeOrigin = nextMeta.isLosslessNativeOrigin
     }
 
     openTabs[idx].payload = nextPayload
@@ -535,69 +563,6 @@ public final class WorkspaceViewModel {
   public func redoActiveTab() {
     redo()
   }
-
-
-  public func handleIncomingOpenURLs(_ urls: [URL]) {
-    guard !urls.isEmpty else { return }
-    if !isWorkspaceReadyForOpenURLs {
-      for url in urls where !pendingLaunchURLs.contains(url) {
-        pendingLaunchURLs.append(url)
-      }
-      return
-    }
-    for url in urls {
-      do {
-        _ = try importDocumentFromDisk(url: url)
-      } catch {
-        lastErrorMessage = error.localizedDescription
-      }
-    }
-  }
-
-  public func markWorkspaceReadyAndDrainOpenURLs() {
-    isWorkspaceReadyForOpenURLs = true
-    guard !pendingLaunchURLs.isEmpty else { return }
-    let queued = pendingLaunchURLs
-    pendingLaunchURLs.removeAll()
-    handleIncomingOpenURLs(queued)
-  }
-
-  public var dirtyOpenTabs: [WorkspaceTabItem] {
-    openTabs.filter(\.isModified)
-  }
-
-  @discardableResult
-  public func requestApplicationTermination() -> Bool {
-    let dirtyTabs = dirtyOpenTabs
-    guard let firstDirty = dirtyTabs.first else {
-      isPendingApplicationTermination = false
-      pendingCloseConfirmTabID = nil
-      return true
-    }
-    isPendingApplicationTermination = true
-    isShowingHomeHub = false
-    activeTabID = firstDirty.id
-    pendingCloseConfirmTabID = firstDirty.id
-    lastExecutedCommandSummary =
-      "종료 전 저장 확인 필요 (\(dirtyTabs.count)개 미저장 탭): '\(firstDirty.fileName)'에 저장되지 않은 변경 사항이 있습니다"
-    return false
-  }
-
-  internal func advancePendingTerminationConfirmationIfNeeded() {
-    guard isPendingApplicationTermination else { return }
-    if let nextDirty = dirtyOpenTabs.first {
-      isShowingHomeHub = false
-      activeTabID = nextDirty.id
-      pendingCloseConfirmTabID = nextDirty.id
-      lastExecutedCommandSummary =
-        "종료 전 저장 확인 필요 (\(dirtyOpenTabs.count)개 미저장 탭): '\(nextDirty.fileName)'"
-    } else {
-      isPendingApplicationTermination = false
-      pendingCloseConfirmTabID = nil
-      lastExecutedCommandSummary = "모든 미저장 탭 확인 완료"
-    }
-  }
-
 
   @discardableResult
   public func openNewSampleTab(for module: OfficeModuleKind) -> WorkspaceTabItem {
@@ -779,10 +744,23 @@ public final class WorkspaceViewModel {
   public func reopenLastClosedTab() -> WorkspaceTabItem? {
     guard !recentlyClosedTabs.isEmpty else { return nil }
     var restored = recentlyClosedTabs.removeFirst()
-    if restored.isMetadataOnlyPlaceholder, let url = restored.fileURL {
-      if let reloaded = try? loadFromDisk(url: url) {
+    if restored.isMetadataOnlyPlaceholder {
+      guard let url = restored.fileURL else { return nil }
+      do {
+        let reloaded = try loadFromDisk(url: url)
         lastExecutedCommandSummary = "최근 닫은 탭 복원: \(reloaded.fileName)"
         return reloaded
+      } catch {
+        let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        lastErrorMessage = "닫은 탭 파일을 다시 열 수 없습니다 (\(restored.fileName)): \(desc)"
+        lastExecutedCommandSummary = "최근 닫은 탭 복원 실패: \(restored.fileName)"
+        if let rIdx = recentDocumentRecords.firstIndex(where: {
+          $0.id == restored.id
+            || ($0.fileURL?.standardizedFileURL.path == url.standardizedFileURL.path)
+        }) {
+          recentDocumentRecords[rIdx].isUnreadable = true
+        }
+        return nil
       }
     }
     restored.isMetadataOnlyPlaceholder = false
@@ -818,8 +796,8 @@ public final class WorkspaceViewModel {
     openTabs.removeAll { $0.id == id }
     undoStacks.removeValue(forKey: id)
     redoStacks.removeValue(forKey: id)
-    undoFormatStacks.removeValue(forKey: id)
-    redoFormatStacks.removeValue(forKey: id)
+    undoMetadataStacks.removeValue(forKey: id)
+    redoMetadataStacks.removeValue(forKey: id)
     mergedSheetRangesByTab.removeValue(forKey: id)
     if splitSecondaryTabID == id { splitSecondaryTabID = nil }
     if activeTabID == id { activeTabID = openTabs.first?.id }
@@ -835,8 +813,13 @@ public final class WorkspaceViewModel {
 
     for closingTab in unmodifiedToClose {
       recordRecentDocument(closingTab, isOpenInWorkspace: false)
+      var snapshotForClosed = closingTab
+      if !closingTab.isModified, closingTab.fileURL != nil {
+        snapshotForClosed.payload = Self.lightweightPlaceholderPayload(for: closingTab.format)
+        snapshotForClosed.isMetadataOnlyPlaceholder = true
+      }
       recentlyClosedTabs.removeAll { $0.id == closingTab.id }
-      recentlyClosedTabs.insert(closingTab, at: 0)
+      recentlyClosedTabs.insert(snapshotForClosed, at: 0)
       if recentlyClosedTabs.count > 10 {
         recentlyClosedTabs.removeLast(recentlyClosedTabs.count - 10)
       }
@@ -847,8 +830,8 @@ public final class WorkspaceViewModel {
     for removedID in removedIDs {
       undoStacks.removeValue(forKey: removedID)
       redoStacks.removeValue(forKey: removedID)
-      undoFormatStacks.removeValue(forKey: removedID)
-      redoFormatStacks.removeValue(forKey: removedID)
+      undoMetadataStacks.removeValue(forKey: removedID)
+      redoMetadataStacks.removeValue(forKey: removedID)
       mergedSheetRangesByTab.removeValue(forKey: removedID)
     }
 

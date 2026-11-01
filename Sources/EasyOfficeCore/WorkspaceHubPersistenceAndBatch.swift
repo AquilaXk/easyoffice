@@ -20,6 +20,67 @@ extension WorkspaceViewModel {
   internal static let recentMetadataDefaultsKey = "eo.recentDocumentMetadataV1"
   internal static let customTemplatesDefaultsKey = "eo.customTemplatesV1"
 
+  public func handleIncomingOpenURLs(_ urls: [URL]) {
+    guard !urls.isEmpty else { return }
+    if !isWorkspaceReadyForOpenURLs {
+      for url in urls where !pendingLaunchURLs.contains(url) {
+        pendingLaunchURLs.append(url)
+      }
+      return
+    }
+    for url in urls {
+      do {
+        _ = try importDocumentFromDisk(url: url)
+      } catch {
+        lastErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  public func markWorkspaceReadyAndDrainOpenURLs() {
+    isWorkspaceReadyForOpenURLs = true
+    guard !pendingLaunchURLs.isEmpty else { return }
+    let queued = pendingLaunchURLs
+    pendingLaunchURLs.removeAll()
+    handleIncomingOpenURLs(queued)
+  }
+
+  public var dirtyOpenTabs: [WorkspaceTabItem] {
+    openTabs.filter(\.isModified)
+  }
+
+  @discardableResult
+  public func requestApplicationTermination() -> Bool {
+    let dirtyTabs = dirtyOpenTabs
+    guard let firstDirty = dirtyTabs.first else {
+      isPendingApplicationTermination = false
+      pendingCloseConfirmTabID = nil
+      return true
+    }
+    isPendingApplicationTermination = true
+    isShowingHomeHub = false
+    activeTabID = firstDirty.id
+    pendingCloseConfirmTabID = firstDirty.id
+    lastExecutedCommandSummary =
+      "종료 전 저장 확인 필요 (\(dirtyTabs.count)개 미저장 탭): '\(firstDirty.fileName)'에 저장되지 않은 변경 사항이 있습니다"
+    return false
+  }
+
+  internal func advancePendingTerminationConfirmationIfNeeded() {
+    guard isPendingApplicationTermination else { return }
+    if let nextDirty = dirtyOpenTabs.first {
+      isShowingHomeHub = false
+      activeTabID = nextDirty.id
+      pendingCloseConfirmTabID = nextDirty.id
+      lastExecutedCommandSummary =
+        "종료 전 저장 확인 필요 (\(dirtyOpenTabs.count)개 미저장 탭): '\(nextDirty.fileName)'"
+    } else {
+      isPendingApplicationTermination = false
+      pendingCloseConfirmTabID = nil
+      lastExecutedCommandSummary = "모든 미저장 탭 확인 완료"
+    }
+  }
+
   internal static func lightweightPlaceholderPayload(for format: DocumentFormat) -> OpenTabPayload {
     switch format.moduleKind {
     case .document, .hwp:
@@ -74,14 +135,12 @@ extension WorkspaceViewModel {
 
   public func persistRecentDocumentMetadata(to defaults: UserDefaults = .standard) {
     var seenPaths = Set<String>()
-    var seenIDs = Set<String>()
     var metadataList: [PersistedRecentRecordMetadata] = []
     for item in recentDocumentRecords {
-      if let stdPath = item.fileURL?.standardizedFileURL.path {
-        if !seenPaths.insert(stdPath).inserted { continue }
-      } else {
-        if !seenIDs.insert(item.id.uuidString).inserted { continue }
+      guard let stdPath = item.fileURL?.standardizedFileURL.path, !stdPath.isEmpty else {
+        continue
       }
+      if !seenPaths.insert(stdPath).inserted { continue }
       metadataList.append(
         PersistedRecentRecordMetadata(
           idString: item.id.uuidString,
@@ -90,7 +149,7 @@ extension WorkspaceViewModel {
           lastOpenedISO8601: item.lastOpenedISO8601,
           isPinned: item.isPinned,
           isFavorite: item.isFavorite,
-          filePath: item.fileURL?.standardizedFileURL.path
+          filePath: stdPath
         )
       )
     }
@@ -111,42 +170,33 @@ extension WorkspaceViewModel {
     var seenIDs = Set<UUID>()
 
     for meta in decodedList.prefix(24) {
-      let resolvedID = UUID(uuidString: meta.idString) ?? UUID()
-      let resolvedURL = meta.filePath.map { URL(fileURLWithPath: $0) }
-      let stdPath = resolvedURL?.standardizedFileURL.path
-      if let stdPath {
-        if !seenPaths.insert(stdPath).inserted { continue }
+      guard let filePath = meta.filePath, !filePath.isEmpty,
+        let fmt = DocumentFormat(rawValue: meta.formatRawValue)
+      else {
+        continue
       }
+      let resolvedID = UUID(uuidString: meta.idString) ?? UUID()
+      let resolvedURL = URL(fileURLWithPath: filePath)
+      let stdPath = resolvedURL.standardizedFileURL.path
+      if !seenPaths.insert(stdPath).inserted { continue }
       if !seenIDs.insert(resolvedID).inserted { continue }
 
-      if let existingIdx = recentDocumentRecords.firstIndex(where: {
-        $0.id == resolvedID
-          || ($0.fileURL != nil && $0.fileURL?.standardizedFileURL.path == stdPath)
-      }), resolvedURL == nil {
-        var existing = recentDocumentRecords[existingIdx]
-        existing.isPinned = meta.isPinned
-        existing.isFavorite = meta.isFavorite
-        existing.lastOpenedISO8601 = meta.lastOpenedISO8601
-        restored.append(existing)
-      } else if let fmt = DocumentFormat(rawValue: meta.formatRawValue) {
-        let isPlaceholder = resolvedURL != nil
-        restored.append(
-          WorkspaceTabItem(
-            id: resolvedID,
-            fileName: meta.fileName,
-            format: fmt,
-            isPinned: meta.isPinned,
-            isFavorite: meta.isFavorite,
-            isModified: false,
-            lastOpenedISO8601: meta.lastOpenedISO8601,
-            fileURL: resolvedURL,
-            payload: Self.lightweightPlaceholderPayload(for: fmt),
-            isLosslessNativeOrigin: false,
-            isMetadataOnlyPlaceholder: isPlaceholder,
-            isUnreadable: false
-          )
+      restored.append(
+        WorkspaceTabItem(
+          id: resolvedID,
+          fileName: meta.fileName,
+          format: fmt,
+          isPinned: meta.isPinned,
+          isFavorite: meta.isFavorite,
+          isModified: false,
+          lastOpenedISO8601: meta.lastOpenedISO8601,
+          fileURL: resolvedURL,
+          payload: Self.lightweightPlaceholderPayload(for: fmt),
+          isLosslessNativeOrigin: false,
+          isMetadataOnlyPlaceholder: true,
+          isUnreadable: false
         )
-      }
+      )
     }
 
     for existing in recentDocumentRecords {
@@ -430,7 +480,6 @@ extension WorkspaceViewModel {
       case .sheet(let sheet) = openTabs[idx].payload
     else { return }
     activeInlineEditTargetKey = nil
-    let previousPayload = openTabs[idx].payload
     var updatedSheet = sheet
     do {
       try updatedSheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
@@ -445,13 +494,7 @@ extension WorkspaceViewModel {
           return
         }
       }
-      var stack = undoStacks[activeTabID] ?? []
-      stack.append(previousPayload)
-      if stack.count > Self.maxUndoDepth {
-        stack.removeFirst(stack.count - Self.maxUndoDepth)
-      }
-      undoStacks[activeTabID] = stack
-      redoStacks[activeTabID] = []
+      recordUndoSnapshot(for: activeTabID)
       openTabs[idx].payload = .sheet(updatedSheet)
       openTabs[idx].isModified = true
       lastErrorMessage = nil

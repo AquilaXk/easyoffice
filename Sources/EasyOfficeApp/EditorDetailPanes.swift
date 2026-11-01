@@ -215,12 +215,38 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       let targetCaret = max(0, min(viewModel.pendingCaretUTF16Offset ?? 0, utf16Len))
       context.coordinator.isUpdatingProgrammatically = true
       textView.setSelectedRange(NSRange(location: targetCaret, length: 0))
-      context.coordinator.isUpdatingProgrammatically = false
-      if let win = textView.window, win.firstResponder !== textView {
-        win.makeFirstResponder(textView)
+      if let win = textView.window {
+        if win.firstResponder !== textView {
+          win.makeFirstResponder(textView)
+        }
+        textView.setSelectedRange(NSRange(location: targetCaret, length: 0))
+        context.coordinator.isUpdatingProgrammatically = false
+        let expectedID = paragraph.id
+        DispatchQueue.main.async {
+          if viewModel.pendingFocusParagraphID == expectedID {
+            viewModel.pendingFocusParagraphID = nil
+            viewModel.pendingCaretUTF16Offset = nil
+          }
+        }
+      } else {
+        context.coordinator.isUpdatingProgrammatically = false
+        let expectedID = paragraph.id
+        DispatchQueue.main.async {
+          guard viewModel.pendingFocusParagraphID == expectedID,
+            let win = textView.window
+          else { return }
+          context.coordinator.isUpdatingProgrammatically = true
+          if win.firstResponder !== textView {
+            win.makeFirstResponder(textView)
+          }
+          let len = (textView.string as NSString).length
+          let caret = max(0, min(viewModel.pendingCaretUTF16Offset ?? targetCaret, len))
+          textView.setSelectedRange(NSRange(location: caret, length: 0))
+          context.coordinator.isUpdatingProgrammatically = false
+          viewModel.pendingFocusParagraphID = nil
+          viewModel.pendingCaretUTF16Offset = nil
+        }
       }
-      viewModel.pendingFocusParagraphID = nil
-      viewModel.pendingCaretUTF16Offset = nil
     }
   }
 
@@ -1084,7 +1110,9 @@ public struct DocumentEditorDetailPaneView: View {
               .font(.system(size: 10, weight: .semibold))
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
-              .foregroundStyle(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
+              .foregroundStyle(
+                EasyOfficeDesignTokens.statusWarningToken(isDark: palette.isDark).swiftUIColor
+              )
           }
         }
         .padding(.horizontal, 8)
