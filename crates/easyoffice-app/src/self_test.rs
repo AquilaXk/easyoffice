@@ -309,9 +309,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
     let html_asset = include_str!("../ui/index.html");
     let css_asset = include_str!("../ui/styles.css");
-    let offline_ast_asset = include_str!("../ui/offline-formula-ast.js");
-    let offline_eval_asset = include_str!("../ui/offline-formula-eval.js");
-    let offline_rpc_asset = include_str!("../ui/offline-rpc.js");
+    let sheet_utils_asset = include_str!("../ui/sheet-utils.js");
     let pii_scrubber_asset = include_str!("../ui/pii-dom-scrubber.js");
     let sheet_store_asset = include_str!("../ui/sheet-store.js");
     let ribbon_catalog_asset = include_str!("../ui/ribbon-catalog.js");
@@ -320,12 +318,9 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let sheet_controller_asset = include_str!("../ui/sheet-controller.js");
     let ribbon_history_asset = include_str!("../ui/ribbon-history.js");
     let js_asset = include_str!("../ui/app.js");
-    let tauri_conf = include_str!("../tauri.conf.json");
     if !html_asset.contains("EasyOffice")
         || !css_asset.contains("#5C6BC0")
-        || !offline_ast_asset.contains("__EASYOFFICE_FORMULA_AST__")
-        || !offline_eval_asset.contains("__EASYOFFICE_OFFLINE_FORMULA_EVAL__")
-        || !offline_rpc_asset.contains("__EASYOFFICE_CREATE_OFFLINE_RPC__")
+        || !sheet_utils_asset.contains("__EASYOFFICE_SHEET_UTILS__")
         || !pii_scrubber_asset.contains("__EASYOFFICE_CREATE_PII_SCRUBBER__")
         || !sheet_store_asset.contains("__EASYOFFICE_CREATE_SHEET_STORE__")
         || !ribbon_catalog_asset.contains("__EASYOFFICE_RIBBON_CATALOG__")
@@ -334,10 +329,9 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !sheet_controller_asset.contains("__EASYOFFICE_CREATE_SHEET_CONTROLLER__")
         || !ribbon_history_asset.contains("__EASYOFFICE_CREATE_RIBBON_HISTORY__")
         || !js_asset.contains("compositionstart")
-        || !tauri_conf.contains("downloadBootstrapper")
     {
         return Err(EasyOfficeError::CorruptedContainer(
-            "Tauri v2 UI 또는 번들 설정 자산 무결성 검증 실패".to_string(),
+            "내장 WebUI 자산 무결성 검증 실패".to_string(),
         ));
     }
 
@@ -659,5 +653,47 @@ mod tests {
             r#"{"sheet":"Sheet1","cell":"A01","expr":"=ROW()"}"#,
         )
         .is_err());
+
+        assert!(EasyOfficeIpcRouter::dispatch("audit_security", "").is_err());
+        assert!(EasyOfficeIpcRouter::dispatch("audit_security", ",,").is_err());
+        assert!(EasyOfficeIpcRouter::dispatch("audit_security", r#"{"entries":[]}"#).is_err());
+        assert!(
+            EasyOfficeIpcRouter::dispatch("audit_security", r#"{"containerBase64":""}"#).is_err()
+        );
+
+        let real_container_audit = EasyOfficeIpcRouter::dispatch(
+            "audit_security",
+            &format!(r#"{{"fileName":"예산보고서.xlsx","containerBase64":"{b64_str}"}}"#),
+        )
+        .unwrap();
+        assert!(real_container_audit.contains("\"verdict\":\"SAFE\""));
+        assert!(real_container_audit.contains("\"format\":\"xlsx\""));
+
+        let special_sheet_json = EasyOfficeIpcRouter::dispatch(
+            "evaluate_sheet",
+            r#"{"sheet":"Sheet1","sheets":["Sheet1","Sheet2"],"targets":[{"sheet":"Sheet1","cell":"A1"},{"sheet":"Sheet1","cell":"B1"}],"cells":[{"sheet":"Sheet1","cell":"A1","value":"=IF(Sheet2!A1>1,\"a?b\",0)"},{"sheet":"Sheet1","cell":"B1","value":"100%3B"},{"sheet":"Sheet2","cell":"A1","value":5}]}"#,
+        )
+        .unwrap();
+        assert!(
+            special_sheet_json.contains("\"targetValues\":[\"a?b\",\"100%3B\"]"),
+            "special_sheet_json={special_sheet_json}"
+        );
+
+        let structured_conv = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"xlsx","targetFormat":"xlsx","title":"특수문자검증","body":"[[SHEET_A1]]\tA1\t100%3B\n[[SHEET_A1]]\tB1\t=IF(Sheet2!A1>1,\"a?b\",0)"}"#,
+        )
+        .unwrap();
+        let sc_start = structured_conv.find(b64_marker).unwrap() + b64_marker.len();
+        let sc_end = structured_conv[sc_start..].find('"').unwrap() + sc_start;
+        let sc_bytes =
+            EasyOfficeIpcRouter::decode_base64(&structured_conv[sc_start..sc_end]).unwrap();
+        let (_, sc_decoded) = UniversalFormatConverter::decode(&sc_bytes, Some("xlsx")).unwrap();
+        assert!(sc_decoded
+            .sheet_cells
+            .contains(&(0, 0, "100%3B".to_string())));
+        assert!(sc_decoded
+            .sheet_cells
+            .contains(&(0, 1, "=IF(Sheet2!A1>1,\"a?b\",0)".to_string())));
     }
 }

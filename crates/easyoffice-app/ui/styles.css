@@ -697,3 +697,28 @@ button {
 .cmd-list li:hover {
   background: var(--eo-primary-soft);
 }
+
+.slide-transition-select {
+  width: 150px;
+  margin: 0;
+  padding: 4px 8px;
+}
+
+.pdf-stamp-select {
+  width: 140px;
+  margin: 0;
+  padding: 4px 8px;
+}
+
+.pdf-watermark-input {
+  max-width: 200px;
+}
+
+.swatch-primary {
+  background: var(--eo-primary);
+}
+
+.swatch-module {
+  background: var(--eo-module-active);
+}
+

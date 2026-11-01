@@ -492,7 +492,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
   assert.equal(eventLog[0], "undo_ribbon_command");
   assert.equal(
     eventLog.filter((entry) => entry.startsWith("convert:")).length,
-    2
+    3
   );
   assert.equal(eventLog[eventLog.length - 1], "audit_security");
 });

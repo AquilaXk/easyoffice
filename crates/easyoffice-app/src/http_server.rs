@@ -1,0 +1,474 @@
+use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::EasyOfficeIpcRouter;
+
+const INDEX_HTML: &str = include_str!("../ui/index.html");
+const STYLES_CSS: &str = include_str!("../ui/styles.css");
+const SHEET_UTILS_JS: &str = include_str!("../ui/sheet-utils.js");
+const PII_DOM_SCRUBBER_JS: &str = include_str!("../ui/pii-dom-scrubber.js");
+const SHEET_STORE_JS: &str = include_str!("../ui/sheet-store.js");
+const RIBBON_CATALOG_JS: &str = include_str!("../ui/ribbon-catalog.js");
+const WORKSPACE_TOOLS_JS: &str = include_str!("../ui/workspace-tools.js");
+const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
+const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
+const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
+const APP_JS: &str = include_str!("../ui/app.js");
+
+pub const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
+pub const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
+pub const MAX_CONNECTION_DURATION: Duration = Duration::from_secs(3);
+
+pub type IpcDispatchFn =
+    dyn Fn(&str, &str) -> Result<String, EasyOfficeError> + Send + Sync + 'static;
+
+pub struct ConnectionSlotGuard {
+    active: Arc<AtomicUsize>,
+}
+
+impl ConnectionSlotGuard {
+    pub fn try_acquire(active: &Arc<AtomicUsize>, max: usize) -> Option<Self> {
+        let mut current = active.load(Ordering::Acquire);
+        loop {
+            if current >= max {
+                return None;
+            }
+            match active.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(Self {
+                        active: Arc::clone(active),
+                    });
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+impl Drop for ConnectionSlotGuard {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::Release);
+    }
+}
+
+pub fn parse_ipc_http_body(body: &str) -> Result<(String, String), EasyOfficeError> {
+    let trimmed = body.strip_prefix('\u{FEFF}').unwrap_or(body).trim();
+    if trimmed.starts_with('{') {
+        let root = StrictJsonValue::parse(trimmed)?;
+        let entries = root.as_object().ok_or_else(|| {
+            EasyOfficeError::InvalidArgument(
+                "IPC HTTP 요청 본문은 JSON 객체여야 합니다.".to_string(),
+            )
+        })?;
+        let cmd = StrictJsonValue::get_str(entries, "command")
+            .ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(
+                    "IPC JSON 요청에 문자열 'command' 필드가 필요합니다.".to_string(),
+                )
+            })?
+            .to_string();
+        let payload = match StrictJsonValue::get_field(entries, "payload") {
+            Some(v) => v.to_scalar_string().unwrap_or_else(|| v.to_json_string()),
+            None => String::new(),
+        };
+        Ok((cmd, payload))
+    } else if let Some((c, p)) = trimmed.split_once('|') {
+        Ok((c.trim().to_string(), p.to_string()))
+    } else {
+        Ok((trimmed.to_string(), String::new()))
+    }
+}
+
+pub fn is_allowed_host(host: &str, port: u16) -> bool {
+    let h = host.trim();
+    h.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
+        || h.eq_ignore_ascii_case(&format!("localhost:{port}"))
+        || h.eq_ignore_ascii_case(&format!("[::1]:{port}"))
+        || h.eq_ignore_ascii_case("127.0.0.1")
+        || h.eq_ignore_ascii_case("localhost")
+        || h.eq_ignore_ascii_case("[::1]")
+}
+
+pub fn is_allowed_origin(origin: &str, port: u16) -> bool {
+    let o = origin.trim().trim_end_matches('/');
+    o.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
+        || o.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
+        || o.eq_ignore_ascii_case(&format!("http://[::1]:{port}"))
+}
+
+fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
+    let resp = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nContent-Security-Policy: default-src 'self'\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(resp.as_bytes());
+    let _ = stream.flush();
+}
+
+fn write_http_413(stream: &mut TcpStream) {
+    write_http_response(
+        stream,
+        "413 Payload Too Large",
+        "application/json; charset=utf-8",
+        "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(1MB)를 초과했습니다.\"}",
+    );
+}
+
+fn apply_remaining_read_timeout(stream: &TcpStream, deadline: Instant) -> bool {
+    let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        return false;
+    };
+    if remaining.is_zero() {
+        return false;
+    }
+    let step_timeout = remaining.min(Duration::from_millis(1500));
+    stream.set_read_timeout(Some(step_timeout)).is_ok()
+}
+
+fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDispatchFn) {
+    let deadline = Instant::now() + MAX_CONNECTION_DURATION;
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(1500)));
+
+    let mut buf = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        if !apply_remaining_read_timeout(stream, deadline) {
+            return;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+                if buf.len() > MAX_HTTP_BODY_BYTES {
+                    write_http_413(stream);
+                    return;
+                }
+            }
+        }
+    };
+
+    let header_str = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+    let mut lines = header_str.lines();
+    let Some(req_line) = lines.next() else {
+        return;
+    };
+    let mut parts = req_line.split_whitespace();
+    let method = parts.next().unwrap_or("GET");
+    let path = parts.next().unwrap_or("/");
+
+    let mut content_length = 0usize;
+    let mut host_header: Option<String> = None;
+    let mut origin_header: Option<String> = None;
+    for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            let key = k.trim();
+            if key.eq_ignore_ascii_case("content-length") {
+                match v.trim().parse::<usize>() {
+                    Ok(raw_len) if raw_len <= MAX_HTTP_BODY_BYTES => {
+                        content_length = raw_len;
+                    }
+                    _ => {
+                        write_http_413(stream);
+                        return;
+                    }
+                }
+            } else if key.eq_ignore_ascii_case("host") {
+                host_header = Some(v.trim().to_string());
+            } else if key.eq_ignore_ascii_case("origin") {
+                origin_header = Some(v.trim().to_string());
+            }
+        }
+    }
+
+    if let Some(ref host) = host_header {
+        if !is_allowed_host(host, port) {
+            write_http_response(
+                stream,
+                "403 Forbidden",
+                "application/json; charset=utf-8",
+                "{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Host 헤더입니다.\"}",
+            );
+            return;
+        }
+    }
+
+    if method == "POST" {
+        if let Some(ref origin) = origin_header {
+            if !is_allowed_origin(origin, port) {
+                write_http_response(
+                    stream,
+                    "403 Forbidden",
+                    "application/json; charset=utf-8",
+                    "{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Origin 헤더입니다.\"}",
+                );
+                return;
+            }
+        }
+    }
+
+    while buf.len() < header_end + content_length {
+        if !apply_remaining_read_timeout(stream, deadline) {
+            return;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > header_end + MAX_HTTP_BODY_BYTES {
+                    write_http_413(stream);
+                    return;
+                }
+            }
+        }
+    }
+
+    let body_slice = &buf[header_end..header_end + content_length];
+
+    let (status, content_type, response_body) = match (method, path) {
+        ("GET", "/" | "/index.html") => {
+            ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
+        }
+        ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
+        ("GET", "/sheet-utils.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            SHEET_UTILS_JS.to_string(),
+        ),
+        ("GET", "/pii-dom-scrubber.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            PII_DOM_SCRUBBER_JS.to_string(),
+        ),
+        ("GET", "/sheet-store.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            SHEET_STORE_JS.to_string(),
+        ),
+        ("GET", "/ribbon-catalog.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            RIBBON_CATALOG_JS.to_string(),
+        ),
+        ("GET", "/workspace-tools.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            WORKSPACE_TOOLS_JS.to_string(),
+        ),
+        ("GET", "/workspace-panels.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            WORKSPACE_PANELS_JS.to_string(),
+        ),
+        ("GET", "/sheet-controller.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            SHEET_CONTROLLER_JS.to_string(),
+        ),
+        ("GET", "/ribbon-history.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            RIBBON_HISTORY_JS.to_string(),
+        ),
+        ("GET", "/app.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            APP_JS.to_string(),
+        ),
+        ("POST", "/api/ipc") => {
+            let dispatched = std::str::from_utf8(body_slice)
+                .map_err(|_| {
+                    EasyOfficeError::InvalidArgument(
+                        "HTTP 본문이 유효한 UTF-8 문자열이 아닙니다.".to_string(),
+                    )
+                })
+                .and_then(parse_ipc_http_body)
+                .and_then(|(cmd, payload)| ipc_handler(&cmd, &payload));
+            match dispatched {
+                Ok(json) => ("200 OK", "application/json; charset=utf-8", json),
+                Err(err) => {
+                    let escaped = EasyOfficeIpcRouter::escape_json_str(&err.to_string());
+                    (
+                        "400 Bad Request",
+                        "application/json; charset=utf-8",
+                        format!(
+                            "{{\"status\":\"error\",\"error\":\"{escaped}\",\"message\":\"{escaped}\"}}"
+                        ),
+                    )
+                }
+            }
+        }
+        _ => (
+            "404 Not Found",
+            "application/json; charset=utf-8",
+            "{\"status\":\"not_found\"}".to_string(),
+        ),
+    };
+
+    write_http_response(stream, status, content_type, &response_body);
+}
+
+pub fn serve_http_on_listener(listener: TcpListener, stop: Arc<AtomicBool>) {
+    serve_http_on_listener_with_handler(listener, stop, Arc::new(EasyOfficeIpcRouter::dispatch));
+}
+
+pub fn serve_http_on_listener_with_handler(
+    listener: TcpListener,
+    stop: Arc<AtomicBool>,
+    ipc_handler: Arc<IpcDispatchFn>,
+) {
+    let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(8787);
+    let _ = listener.set_nonblocking(true);
+    let active_threads = Arc::new(AtomicUsize::new(0));
+    let mut workers: Vec<thread::JoinHandle<()>> = Vec::new();
+
+    while !stop.load(Ordering::Acquire) {
+        let mut idx = 0usize;
+        while idx < workers.len() {
+            if workers[idx].is_finished() {
+                let _ = workers.swap_remove(idx).join();
+            } else {
+                idx += 1;
+            }
+        }
+
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                // BSD/macOS sockets inherit O_NONBLOCK from the listener; restore blocking mode so timeouts apply.
+                let _ = stream.set_nonblocking(false);
+                if let Some(slot_guard) =
+                    ConnectionSlotGuard::try_acquire(&active_threads, MAX_CONCURRENT_HTTP_THREADS)
+                {
+                    let handler = Arc::clone(&ipc_handler);
+                    workers.push(thread::spawn(move || {
+                        let _guard = slot_guard;
+                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handle_http_connection(&mut stream, bound_port, &*handler);
+                        }));
+                        if outcome.is_err() {
+                            let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+                            write_http_response(
+                                &mut stream,
+                                "500 Internal Server Error",
+                                "application/json; charset=utf-8",
+                                "{\"status\":\"internal_error\",\"message\":\"내부 요청 처리 중 오류가 발생했습니다.\"}",
+                            );
+                        }
+                    }));
+                } else {
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+                    write_http_response(
+                        &mut stream,
+                        "503 Service Unavailable",
+                        "application/json; charset=utf-8",
+                        "{\"status\":\"service_unavailable\",\"message\":\"동시 요청 한도를 초과했습니다.\"}",
+                    );
+                }
+            }
+            Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(15));
+            }
+            Err(_) => {
+                thread::sleep(Duration::from_millis(15));
+            }
+        }
+    }
+
+    for worker in workers {
+        let _ = worker.join();
+    }
+}
+
+fn bind_with_fallback(preferred_port: u16) -> std::io::Result<TcpListener> {
+    if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{preferred_port}")) {
+        return Ok(listener);
+    }
+    if preferred_port == 8787 {
+        for candidate in 8788..=8800 {
+            if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{candidate}")) {
+                return Ok(listener);
+            }
+        }
+    }
+    TcpListener::bind("127.0.0.1:0")
+}
+
+fn try_open_desktop_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
+pub fn serve_webui(preferred_port: u16, open_browser: bool) -> ExitCode {
+    let listener = match bind_with_fallback(preferred_port) {
+        Ok(l) => l,
+        Err(err) => {
+            eprintln!("Failed to bind 127.0.0.1:{preferred_port}: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let bound_port = listener
+        .local_addr()
+        .map(|a| a.port())
+        .unwrap_or(preferred_port);
+    let url = format!("http://127.0.0.1:{bound_port}");
+    println!("EasyOffice WebUI Server listening on {url}");
+    if open_browser {
+        try_open_desktop_browser(&url);
+    }
+    serve_http_on_listener(listener, Arc::new(AtomicBool::new(false)));
+    ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ipc_http_body_unicode_escapes_and_host_origin_guards() {
+        let json = r#"{"command":"evaluate_sheet","payload":"\uAC00\uB098\uB2E4\uD83D\uDE00\/A1=10\nB1=20"}"#;
+        let (cmd, payload) = parse_ipc_http_body(json).unwrap();
+        assert_eq!(cmd, "evaluate_sheet");
+        assert_eq!(payload, "가나다😀/A1=10\nB1=20");
+
+        let nested = r#"{"command":"evaluate_sheet","payload":{"sheet":"Sheet1","cells":[{"cell":"A1","value":42}],"expr":"A1"}}"#;
+        let (nested_cmd, nested_payload) = parse_ipc_http_body(nested).unwrap();
+        assert_eq!(nested_cmd, "evaluate_sheet");
+        let dispatched = EasyOfficeIpcRouter::dispatch(&nested_cmd, &nested_payload).unwrap();
+        assert!(dispatched.contains("\"value\":\"42\""));
+
+        assert!(parse_ipc_http_body(r#"{"command":"scrub_pii","payload":"\ud83d"}"#).is_err());
+        assert!(parse_ipc_http_body(r#"{"command":"evaluate_sheet","command":"dup"}"#).is_err());
+        assert!(is_allowed_host("127.0.0.1:8787", 8787));
+        assert!(is_allowed_host("[::1]:8787", 8787));
+        assert!(is_allowed_host("[::1]", 8787));
+        assert!(!is_allowed_host("evil.example.com", 8787));
+        assert!(is_allowed_origin("http://localhost:8787/", 8787));
+        assert!(is_allowed_origin("http://[::1]:8787/", 8787));
+        assert!(!is_allowed_origin("http://evil.example.com", 8787));
+    }
+}

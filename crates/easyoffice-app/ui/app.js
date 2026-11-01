@@ -6,12 +6,9 @@
 
   const ribbonCatalog = host.__EASYOFFICE_RIBBON_CATALOG__;
   const {
-    MODULE_SPECS,
-    CONTEXTUAL_TOOL_BADGES,
-    MODULE_SHORT_BADGES,
-    RIBBON_STYLE_LABELS,
     RIBBON_CATEGORY_TOOLS,
-    DEFAULT_HWP_EDITOR_HTML,
+    MODULE_SHORT_BADGES,
+    DEFAULT_HWP_EDITOR_NODES,
     createEmptySlideStyleFields,
     createInitialSlideDeckState,
     createDefaultRibbonState,
@@ -68,20 +65,27 @@
     tokenizeFormulaStringLiterals,
   } = host.__EASYOFFICE_CREATE_PII_SCRUBBER__({ document, localScrubPii });
 
-  const MOCK_IPC_HANDLERS = host.__EASYOFFICE_CREATE_OFFLINE_RPC__({
-    getActiveModule: () => activeModule,
-    getActiveSheetCellRef: () => activeSheetCellRef,
-    ribbonCategoryTools: RIBBON_CATEGORY_TOOLS,
-    ribbonStyleLabels: RIBBON_STYLE_LABELS,
-    contextualToolBadges: CONTEXTUAL_TOOL_BADGES,
-    moduleSpecs: MODULE_SPECS,
-    localRibbonState,
-  });
+  function setEngineStatusText(text) {
+    const engineEl = document.getElementById("status-engine");
+    if (engineEl) engineEl.textContent = text;
+  }
 
   async function invokeIpc(command, payload) {
+    if (typeof host.__EASYOFFICE_TEST_IPC__ === "function") {
+      try {
+        const raw = await host.__EASYOFFICE_TEST_IPC__(command, payload);
+        setEngineStatusText("엔진: 테스트 하네스");
+        return typeof raw === "string" ? JSON.parse(raw) : raw;
+      } catch (testErr) {
+        const msg = testErr?.message || String(testErr);
+        reportIpcFailure(command, msg);
+        throw new Error(msg);
+      }
+    }
     if (host.__TAURI_INTERNALS__ && typeof host.__TAURI_INTERNALS__.invoke === "function") {
       try {
         const raw = await host.__TAURI_INTERNALS__.invoke(command, { payload });
+        setEngineStatusText("엔진: 데스크톱 연결됨");
         return typeof raw === "string" ? JSON.parse(raw) : raw;
       } catch (tauriErr) {
         const msg = tauriErr?.message || String(tauriErr);
@@ -90,18 +94,18 @@
       }
     }
     if (isHttpIpcTransportAvailable()) {
-      return await invokeHttpIpc(command, payload);
+      const res = await invokeHttpIpc(command, payload);
+      setEngineStatusText("엔진: 로컬 서버 연결됨");
+      return res;
     }
-    const handler = MOCK_IPC_HANDLERS[command];
-    if (!handler) return { status: "ok" };
-    try {
-      return await handler(payload);
-    } catch (offlineErr) {
-      const msg = offlineErr?.message || String(offlineErr);
-      reportIpcFailure(command, msg);
-      throw new Error(msg);
-    }
+    const disconnectedMsg =
+      "엔진 미연결: 데스크톱 호스트 또는 로컬 서버(--serve) 연결이 필요합니다.";
+    setEngineStatusText("엔진: 미연결 · " + disconnectedMsg);
+    reportIpcFailure(command, disconnectedMsg);
+    throw new Error(disconnectedMsg);
   }
+
+  host.__EASYOFFICE_INVOKE_BACKEND__ = invokeIpc;
 
   function isHttpIpcTransportAvailable() {
     const proto = host.location?.protocol;
@@ -111,12 +115,14 @@
   function reportIpcFailure(command, msg) {
     const fb = document.getElementById("status-command-feedback");
     if (fb) fb.textContent = "[요청 거부] " + msg;
-    let targetId = null;
-    if (command === "convert_document_format") {
-      targetId = "conv-result-box";
-    } else if (command === "audit_security") {
-      targetId = "security-status-text";
-    }
+    const targetMap = {
+      convert_document_format: "conv-result-box",
+      audit_security: "security-status-text",
+      scrub_pii: "pii-result-text",
+      run_smart_assistant: "smart-summary-output",
+      run_engine_benchmark: "bench-result-box",
+    };
+    const targetId = targetMap[command];
     const targetEl = targetId ? document.getElementById(targetId) : null;
     if (targetEl) targetEl.textContent = "[요청 거부] " + msg;
   }
@@ -131,6 +137,7 @@
       });
     } catch (netErr) {
       const msg = "백엔드 IPC 네트워크 오류: " + (netErr?.message || String(netErr));
+      setEngineStatusText("엔진: 연결 오류");
       reportIpcFailure(command, msg);
       throw new Error(msg);
     }
@@ -219,7 +226,7 @@
     sheetDataStore,
     slideDeckState,
     localRibbonState,
-    defaultHwpEditorHtml: DEFAULT_HWP_EDITOR_HTML,
+    defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES,
     createEmptySlideStyleFields,
     parseCellRefParts,
     isExcludedDocChromeElement,
@@ -339,7 +346,9 @@
         filterBox.appendChild(chip);
       });
     }
+  }
 
+  function setupStaticNavigationHandlers() {
     document.querySelectorAll(".mod-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         void ribbonHistory.activatePane(btn.dataset.module).catch(() => {});
@@ -483,7 +492,12 @@
             const body = workspacePanels.buildStructuredConversionBody(src);
             const res = await invokeIpc(
               "convert_document_format",
-              src + "->" + dst + "|통합_변환_문서|" + body
+              JSON.stringify({
+                sourceFormat: src,
+                targetFormat: dst,
+                title: "통합_변환_문서",
+                body,
+              })
             );
             const box = document.getElementById("conv-result-box");
             if (res && res.convertedBase64) {
@@ -725,18 +739,19 @@
     sheetDataStore.Sheet1 = snapshotDomSheetCells();
     sheetRowCounts.Sheet1 = sheetController.getSheetRowCount("Sheet1");
     sheetRowCounts.Sheet2 = sheetController.getSheetRowCount("Sheet2");
-    const boot = await invokeIpc("get_workspace_bootstrap", "");
-    setupTabsAndRibbonChrome(boot);
-    workspacePanels.renderModuleOutline("DOC");
-    void ribbonHistory.renderRibbonCategoryTools("home").catch(() => {});
-    sheetController.updateSheetSelectionAndAggregates("F2");
-    workspacePanels.renderSlideDeck(0);
+    setupStaticNavigationHandlers();
     setupQatAndRibbonActions();
     setupDocTableAndSheetTabHandlers();
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();
     setupCommandPaletteHandlers();
+    workspacePanels.renderModuleOutline("DOC");
+    sheetController.updateSheetSelectionAndAggregates("F2");
+    workspacePanels.renderSlideDeck(0);
+    const boot = await invokeIpc("get_workspace_bootstrap", "");
+    setupTabsAndRibbonChrome(boot);
+    void ribbonHistory.renderRibbonCategoryTools("home").catch(() => {});
   }
 
   document.addEventListener("DOMContentLoaded", () => {

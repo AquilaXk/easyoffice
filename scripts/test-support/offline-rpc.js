@@ -3,11 +3,7 @@
 
   const {
     normalizeA1Token,
-    parseCellRefParts,
-    colIndexToLetters,
-    normalizeFormattedNumericCell,
     jsonSheetNameOrDefaultJs,
-    quoteFormulaSheetName,
     isFormulaStringJs,
     resolveCanonicalSheetUpper,
     resolveDefaultSheetFromDocJs,
@@ -16,173 +12,29 @@
     formatFormulaValue,
     evaluateFormulaExpression,
   } = host.__EASYOFFICE_OFFLINE_FORMULA_EVAL__;
+  const { localScrubPii } = host.__EASYOFFICE_SHEET_UTILS__;
 
-  function isAsciiDigitCode(c) {
-    return c >= 48 && c <= 57;
-  }
-
-  function isAsciiAlphaNumCode(c) {
-    return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
-  }
-
-  function consumeDigitsJs(str, pos, minLen, maxLen) {
-    let end = pos;
-    while (end < str.length && end - pos < maxLen && isAsciiDigitCode(str.charCodeAt(end))) {
-      end += 1;
-    }
-    return end - pos >= minLen ? end : -1;
-  }
-
-  function matchEmailAtJs(str, idx) {
-    if (!isAsciiAlphaNumCode(str.charCodeAt(idx))) return null;
-    let p = idx;
-    while (p < str.length) {
-      const c = str.charCodeAt(p);
-      if (isAsciiAlphaNumCode(c) || c === 46 || c === 95 || c === 45 || c === 43) {
-        p += 1;
-      } else {
-        break;
-      }
-    }
-    if (p === idx || p >= str.length || str.charCodeAt(p) !== 64) return null;
-    const domStart = p + 1;
-    let q = domStart;
-    while (q < str.length) {
-      const c = str.charCodeAt(q);
-      if (isAsciiAlphaNumCode(c) || c === 46 || c === 45) {
-        q += 1;
-      } else {
-        break;
-      }
-    }
-    while (q > domStart && !isAsciiAlphaNumCode(str.charCodeAt(q - 1))) {
-      q -= 1;
-    }
-    const domain = str.slice(domStart, q);
-    if (domain.length >= 3 && isAsciiAlphaNumCode(domain.charCodeAt(0)) && domain.includes(".")) {
-      return { len: q - idx, replacement: "***@***" };
-    }
-    return null;
-  }
-
-  function matchRrnAtJs(str, idx) {
-    if (idx > 0 && isAsciiDigitCode(str.charCodeAt(idx - 1))) return null;
-    if (
-      idx + 14 <= str.length &&
-      /^\d{6}-\d{7}$/.test(str.slice(idx, idx + 14)) &&
-      (idx + 14 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 14)))
-    ) {
-      return { len: 14, replacement: "******-*******" };
-    }
-    if (
-      idx + 13 <= str.length &&
-      /^\d{13}$/.test(str.slice(idx, idx + 13)) &&
-      (idx + 13 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 13)))
-    ) {
-      const month = Number(str.slice(idx + 2, idx + 4));
-      const day = Number(str.slice(idx + 4, idx + 6));
-      const gender = Number(str[idx + 6]);
-      if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && gender >= 1 && gender <= 8) {
-        return { len: 13, replacement: "******-*******" };
-      }
-    }
-    return null;
-  }
-
-  function matchPhoneAtJs(str, idx) {
-    if (idx > 0 && (isAsciiDigitCode(str.charCodeAt(idx - 1)) || str[idx - 1] === "+")) {
+  function tryParseAssistantEnvelope(rawText) {
+    if (!rawText.trimStart().startsWith("{")) {
       return null;
     }
-    if (str.startsWith("+82", idx)) {
-      let p = idx + 3;
-      if (p < str.length && (str[p] === "-" || str[p] === " ")) p += 1;
-      const pArea = consumeDigitsJs(str, p, 1, 3);
-      if (pArea > 0) {
-        let p2 = pArea;
-        if (p2 < str.length && (str[p2] === "-" || str[p2] === " ")) p2 += 1;
-        const pMid = consumeDigitsJs(str, p2, 3, 4);
-        if (pMid > 0) {
-          let p3 = pMid;
-          if (p3 < str.length && (str[p3] === "-" || str[p3] === " ")) p3 += 1;
-          const pEnd = consumeDigitsJs(str, p3, 4, 4);
-          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
-            return { len: pEnd - idx, replacement: "+82-**-****-****" };
-          }
-        }
-      }
+    try {
+      const parsed = JSON.parse(rawText);
+      return parsed && typeof parsed === "object" && typeof parsed.text === "string"
+        ? parsed.text
+        : null;
+    } catch (_err) {
+      return null;
     }
-    if (/^01[016789]/.test(str.slice(idx, idx + 3))) {
-      const p = idx + 3;
-      if (p < str.length && (str[p] === "-" || str[p] === " ")) {
-        const sep = str[p];
-        const pMid = consumeDigitsJs(str, p + 1, 3, 4);
-        if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
-          const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
-          if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
-            return { len: pEnd - idx, replacement: "010-****-****" };
-          }
-        }
-      } else if (
-        idx + 11 <= str.length &&
-        /^\d{11}$/.test(str.slice(idx, idx + 11)) &&
-        (idx + 11 === str.length || !isAsciiDigitCode(str.charCodeAt(idx + 11)))
-      ) {
-        return { len: 11, replacement: "010-****-****" };
-      }
-    }
-    const landlineMatch = /^(02|0[3-6][1-5])([-\s])/.exec(str.slice(idx, idx + 4));
-    if (landlineMatch) {
-      const area = landlineMatch[1];
-      const sep = landlineMatch[2];
-      const pMid = consumeDigitsJs(str, idx + area.length + 1, 3, 4);
-      if (pMid > 0 && pMid < str.length && str[pMid] === sep) {
-        const pEnd = consumeDigitsJs(str, pMid + 1, 4, 4);
-        if (pEnd > 0 && (pEnd === str.length || !isAsciiDigitCode(str.charCodeAt(pEnd)))) {
-          return { len: pEnd - idx, replacement: area === "02" ? "02-****-****" : "***-****-****" };
-        }
-      }
-    }
-    return null;
   }
 
-  function localScrubPii(rawText) {
-    const text = String(rawText ?? "");
-    let scrubbedText = "";
-    let residentCount = 0;
-    let phoneCount = 0;
-    let emailCount = 0;
-    const spans = [];
-    let idx = 0;
-    while (idx < text.length) {
-      const em = matchEmailAtJs(text, idx);
-      const rrn = em ? null : matchRrnAtJs(text, idx);
-      const ph = em || rrn ? null : matchPhoneAtJs(text, idx);
-      const hit = em || rrn || ph;
-      if (hit) {
-        scrubbedText += hit.replacement;
-        spans.push({ start: idx, end: idx + hit.len, replacement: hit.replacement });
-        if (em) emailCount += 1;
-        else if (rrn) residentCount += 1;
-        else phoneCount += 1;
-        idx += hit.len;
-        continue;
-      }
-      const step = text.codePointAt(idx) > 0xffff ? 2 : 1;
-      scrubbedText += text.slice(idx, idx + step);
-      idx += step;
+  function localSmartAssistant(rawInput) {
+    let rawText = String(rawInput ?? "");
+    const envelopeText = tryParseAssistantEnvelope(rawText);
+    if (envelopeText !== null) {
+      rawText = envelopeText;
     }
-    return {
-      scrubbedText,
-      maskedResidentIds: residentCount,
-      maskedPhoneNumbers: phoneCount,
-      maskedEmails: emailCount,
-      totalMasked: residentCount + phoneCount + emailCount,
-      spans,
-    };
-  }
-
-  function localSmartAssistant(rawText) {
-    const text = String(rawText || "").trim();
+    const text = rawText.trim();
     const chars = Array.from(text).length;
     const words = text ? text.split(/\s+/).length : 0;
     const sentences = text ? text.split(/[.!?。]+/).filter((s) => s.trim().length > 0).length : 0;
@@ -238,22 +90,13 @@
     return doc;
   }
 
-  function localAuditSecurity(payload) {
-    const doc = parseRequiredRpcJsonObject(payload);
-    if (doc.xml !== undefined && doc.xml !== null && typeof doc.xml !== "string") {
-      throw new Error("InvalidArgument: audit_security 'xml' 필드는 문자열이어야 합니다.");
-    }
-    const xmlPart = doc.xml ?? "";
-    if (hasDangerousXmlDirective(xmlPart)) {
-      throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
-    }
-    const entries = doc.entries === undefined ? [] : doc.entries;
-    if (!Array.isArray(entries)) {
-      throw new Error("InvalidArgument: audit_security 'entries' 필드는 배열이어야 합니다.");
-    }
+  function validateZipEntriesList(entries) {
     const MAX_ENTRIES = 4096;
     const MAX_SINGLE_UNCOMPRESSED = 128 * 1024 * 1024;
     const MAX_TOTAL_UNCOMPRESSED = 512 * 1024 * 1024;
+    if (entries.length === 0) {
+      throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
+    }
     if (entries.length > MAX_ENTRIES) {
       throw new Error("SecurityViolation: ZIP 엔트리 개수가 보안 한도를 초과했습니다.");
     }
@@ -299,11 +142,100 @@
       }
       seenPaths.add(entryPath);
     }
+  }
+
+  function localAuditSecurity(payload) {
+    const trimmed = String(payload ?? "")
+      .replace(/^\uFEFF/, "")
+      .trim();
+    if (!trimmed) {
+      throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
+    }
+    if (!trimmed.startsWith("{")) {
+      const pipeIdx = trimmed.indexOf("|");
+      const entryPart = pipeIdx >= 0 ? trimmed.slice(0, pipeIdx) : trimmed;
+      const xmlPart = pipeIdx >= 0 ? trimmed.slice(pipeIdx + 1) : "";
+      if (hasDangerousXmlDirective(xmlPart)) {
+        throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
+      }
+      const rawItems = entryPart
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (rawItems.length === 0) {
+        throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
+      }
+      const parsedEntries = rawItems.map((tok) => {
+        const parts = tok.split(":");
+        if (parts.length !== 4) {
+          throw new Error("InvalidArgument: 잘못된 보안 감사 엔트리 구문");
+        }
+        const comp = Number(parts[1]);
+        const uncomp = Number(parts[2]);
+        if (!Number.isSafeInteger(comp) || !Number.isSafeInteger(uncomp)) {
+          throw new Error("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
+        }
+        if (parts[3] !== "true" && parts[3] !== "false") {
+          throw new Error("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
+        }
+        return {
+          name: parts[0],
+          compressed: comp,
+          uncompressed: uncomp,
+          encrypted: parts[3] === "true",
+        };
+      });
+      validateZipEntriesList(parsedEntries);
+      return {
+        status: "SAFE",
+        verdict: "SAFE",
+        xxeGuard: "PASSED",
+        zipGuard: "PASSED",
+        checkedEntries: parsedEntries.length,
+      };
+    }
+
+    const doc = parseRequiredRpcJsonObject(trimmed);
+    if (doc.xml !== undefined && doc.xml !== null && typeof doc.xml !== "string") {
+      throw new Error("InvalidArgument: audit_security 'xml' 필드는 문자열이어야 합니다.");
+    }
+    if (hasDangerousXmlDirective(doc.xml ?? "")) {
+      throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
+    }
+    if (doc.containerBase64 !== undefined && doc.containerBase64 !== null) {
+      if (typeof doc.containerBase64 !== "string" || !doc.containerBase64.trim()) {
+        throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
+      }
+      let decoded = "";
+      try {
+        decoded = typeof host.atob === "function" ? host.atob(doc.containerBase64.trim()) : "";
+      } catch (_err) {
+        throw new Error("InvalidArgument: 유효하지 않은 Base64 컨테이너 데이터입니다.");
+      }
+      if (!decoded) {
+        throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
+      }
+      if (hasDangerousXmlDirective(decoded)) {
+        throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
+      }
+      return {
+        status: "SAFE",
+        verdict: "SAFE",
+        xxeGuard: "PASSED",
+        zipGuard: "PASSED",
+        checkedEntries: 1,
+      };
+    }
+    if (!Array.isArray(doc.entries)) {
+      throw new Error("InvalidArgument: audit_security 'entries' 필드는 배열이어야 합니다.");
+    }
+    validateZipEntriesList(doc.entries);
     return {
       status: "SAFE",
+      verdict: "SAFE",
       xxeGuard: "PASSED",
       zipGuard: "PASSED",
-      checkedEntries: entries.length,
+      checkedEntries: doc.entries.length,
     };
   }
 
@@ -523,7 +455,11 @@
     ];
 
     function localExecuteRibbonCommand(payload) {
-      const cmdId = String(payload || "").trim();
+      let cmdId = String(payload || "").trim();
+      if (cmdId.startsWith("{")) {
+        const parsed = parseRequiredRpcJsonObject(cmdId);
+        cmdId = String(parsed.commandId || parsed.id || "").trim();
+      }
       const prevSnap = JSON.parse(JSON.stringify(backendState));
       if (backendUndoStack.length >= MAX_BACKEND_HISTORY) {
         backendUndoStack.shift();
@@ -569,21 +505,62 @@
         };
       },
       get_ribbon_category_commands: (payload) => {
-        const [modPart, catPart] = String(payload || "DOC|home").split("|");
+        const raw = String(payload || "DOC|home").trim();
+        let modPart = "DOC";
+        let catPart = "home";
+        if (raw.startsWith("{")) {
+          const parsed = parseRequiredRpcJsonObject(raw);
+          modPart = String(parsed.module || "DOC").trim();
+          catPart = String(parsed.category || "home").trim();
+        } else {
+          const parts = raw.split("|");
+          modPart = parts[0] || "DOC";
+          catPart = parts[1] || "home";
+        }
         const mKey = modPart === "CONV" ? "DOC" : modPart;
         const modMap = ribbonCategoryTools[mKey] || ribbonCategoryTools.DOC;
         return { commands: modMap[catPart] || modMap.home };
       },
+      detect_format: (payload) => {
+        const raw = String(payload || "").trim();
+        let fileName = "document.docx";
+        if (raw.startsWith("{")) {
+          const parsed = parseRequiredRpcJsonObject(raw);
+          fileName = String(parsed.fileName || "document.docx");
+        } else {
+          fileName = raw.split("|")[0] || "document.docx";
+        }
+        const dotIdx = fileName.lastIndexOf(".");
+        const ext = dotIdx >= 0 ? fileName.slice(dotIdx + 1).toLowerCase() : "docx";
+        return {
+          format: ext.toUpperCase(),
+          extension: ext,
+          specification: moduleSpecs[ext.toUpperCase()] || "표준 문서 포맷",
+        };
+      },
       convert_document_format: (payload) => {
         const raw = String(payload || "docx->hwpx|문서|본문");
-        const firstPipe = raw.indexOf("|");
-        const firstSeg = firstPipe >= 0 ? raw.slice(0, firstPipe) : raw;
-        const restSeg = firstPipe >= 0 ? raw.slice(firstPipe + 1) : "통합_변환_문서|본문";
-        const secondPipe = restSeg.indexOf("|");
-        const [src, dst] = (firstSeg || "docx->hwpx").split("->");
-        const title =
-          (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서";
-        const body = (secondPipe >= 0 ? restSeg.slice(secondPipe + 1) : "") || "본문 텍스트";
+        let src = "docx";
+        let dst = "hwpx";
+        let title = "통합_변환_문서";
+        let body = "본문 텍스트";
+        if (raw.trimStart().startsWith("{")) {
+          const parsed = parseRequiredRpcJsonObject(raw);
+          src = String(parsed.sourceFormat || "docx").trim().toLowerCase();
+          dst = String(parsed.targetFormat || "hwpx").trim().toLowerCase();
+          title = String(parsed.title || "통합_변환_문서");
+          body = String(parsed.body || "본문 텍스트");
+        } else {
+          const firstPipe = raw.indexOf("|");
+          const firstSeg = firstPipe >= 0 ? raw.slice(0, firstPipe) : raw;
+          const restSeg = firstPipe >= 0 ? raw.slice(firstPipe + 1) : "통합_변환_문서|본문";
+          const secondPipe = restSeg.indexOf("|");
+          const pair = (firstSeg || "docx->hwpx").split("->");
+          src = (pair[0] || "docx").trim().toLowerCase();
+          dst = (pair[1] || "hwpx").trim().toLowerCase();
+          title = (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서";
+          body = (secondPipe >= 0 ? restSeg.slice(secondPipe + 1) : "") || "본문 텍스트";
+        }
         const encoder = new TextEncoder();
         const rawBytes = encoder.encode(title + "\n" + body).length;
         const containerOverhead = {
@@ -635,7 +612,12 @@
       }),
       audit_security: (payload) => localAuditSecurity(payload),
       switch_ribbon_style: (payload) => {
-        const isHangul = String(payload).includes("hangul");
+        let styleVal = String(payload || "");
+        if (styleVal.trimStart().startsWith("{")) {
+          const parsed = parseRequiredRpcJsonObject(styleVal);
+          styleVal = String(parsed.style || "");
+        }
+        const isHangul = styleVal.includes("hangul");
         backendState.ribbonStyle = isHangul ? "hangul" : "standard";
         return {
           style: isHangul ? "한글(HWP) 7탭 모드" : "표준 오피스 7탭 모드",
@@ -684,13 +666,5 @@
     };
   }
 
-  host.__EASYOFFICE_SHEET_UTILS__ = {
-    parseCellRefParts,
-    colIndexToLetters,
-    normalizeFormattedNumericCell,
-    quoteFormulaSheetName,
-    isFormulaStringJs,
-    localScrubPii,
-  };
   host.__EASYOFFICE_CREATE_OFFLINE_RPC__ = createOfflineRpcHandlers;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

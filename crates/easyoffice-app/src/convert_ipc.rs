@@ -7,26 +7,78 @@ use crate::EasyOfficeIpcRouter;
 
 impl EasyOfficeIpcRouter {
     pub(crate) fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
-        let (src_ext, dst_ext, title, body) = if let Some((first, rest)) = payload.split_once('|') {
+        let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
+        let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
+            let entries = Self::parse_rpc_json_object(trimmed)?;
+            let src = match Self::optional_json_str(&entries, "sourceFormat")? {
+                Some(s) => s,
+                None => Self::optional_json_str(&entries, "source")?.unwrap_or("docx"),
+            }
+            .trim()
+            .to_string();
+            let dst = match Self::optional_json_str(&entries, "targetFormat")? {
+                Some(d) => d,
+                None => Self::optional_json_str(&entries, "target")?.unwrap_or("hwpx"),
+            }
+            .trim()
+            .to_string();
+            let t = Self::optional_json_str(&entries, "title")?
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let b = Self::optional_json_str(&entries, "body")?
+                .unwrap_or("본문 텍스트")
+                .trim()
+                .to_string();
+            (src, dst, t, b)
+        } else if let Some((first, rest)) = payload.split_once('|') {
             if let Some((s, d)) = first.split_once("->") {
                 let (t, b) = rest.split_once('|').unwrap_or((rest, ""));
-                (s.trim(), d.trim(), t.trim(), b.trim())
+                (
+                    s.trim().to_string(),
+                    d.trim().to_string(),
+                    t.trim().to_string(),
+                    b.trim().to_string(),
+                )
             } else if let Some((second, rest2)) = rest.split_once('|') {
                 let (t, b) = rest2.split_once('|').unwrap_or((rest2, ""));
-                (first.trim(), second.trim(), t.trim(), b.trim())
+                (
+                    first.trim().to_string(),
+                    second.trim().to_string(),
+                    t.trim().to_string(),
+                    b.trim().to_string(),
+                )
             } else {
-                (first.trim(), rest.trim(), "변환_문서", "본문 텍스트")
+                (
+                    first.trim().to_string(),
+                    rest.trim().to_string(),
+                    "변환_문서".to_string(),
+                    "본문 텍스트".to_string(),
+                )
             }
         } else if let Some((s, d)) = payload.split_once("->") {
-            (s.trim(), d.trim(), "변환_문서", "본문 텍스트")
+            (
+                s.trim().to_string(),
+                d.trim().to_string(),
+                "변환_문서".to_string(),
+                "본문 텍스트".to_string(),
+            )
         } else {
-            ("docx", "hwpx", "변환_문서", "본문 텍스트")
+            (
+                "docx".to_string(),
+                "hwpx".to_string(),
+                "변환_문서".to_string(),
+                "본문 텍스트".to_string(),
+            )
         };
 
-        let title = if title.is_empty() {
+        let src_ext = src_owned.as_str();
+        let dst_ext = dst_owned.as_str();
+        let body = body_owned.as_str();
+        let title = if title_owned.is_empty() {
             "변환_문서"
         } else {
-            title
+            title_owned.as_str()
         };
 
         let src_fmt = DocumentFormat::from_extension(src_ext).ok_or_else(|| {
