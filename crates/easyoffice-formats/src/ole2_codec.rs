@@ -1,3 +1,5 @@
+pub use crate::hwp5_codec::*;
+pub use crate::legacy_ole2_codec::*;
 pub(crate) use crate::rtf_xml_helpers::*;
 use crate::{ContainerFamily, EasyOfficeError, FormatDetector, Ole2SecurityGuard};
 
@@ -17,7 +19,7 @@ impl Ole2StreamEntry {
     }
 }
 
-/// 512-byte sector-aligned OLE2 CFBF (`D0 CF 11 E0 A1 B1 1A E1`) container packer and unpacker.
+/// 512-byte/4096-byte sector-aligned OLE2 CFBF (`D0 CF 11 E0 A1 B1 1A E1`) container packer and unpacker.
 pub struct Ole2ContainerCodec;
 
 #[derive(Debug, Clone)]
@@ -41,7 +43,9 @@ impl Ole2ContainerCodec {
     pub const DIR_ENTRY_SIZE: usize = 128;
     pub const ENTRIES_PER_SECTOR: usize = Self::SECTOR_SIZE / Self::DIR_ENTRY_SIZE;
     pub const FAT_ENTRIES_PER_SECTOR: usize = Self::SECTOR_SIZE / 4;
+    pub const DIFAT_ENTRIES_PER_SECTOR: usize = Self::FAT_ENTRIES_PER_SECTOR - 1;
     pub const FAT_SECTOR_MARKER: u32 = 0xFFFF_FFFD;
+    pub const DIFAT_SECTOR_MARKER: u32 = 0xFFFF_FFFC;
     pub const END_OF_CHAIN: u32 = Ole2SecurityGuard::END_OF_CHAIN;
     pub const FREE_SECTOR: u32 = Ole2SecurityGuard::FREE_SECTOR;
 
@@ -50,7 +54,7 @@ impl Ole2ContainerCodec {
     const OBJ_TYPE_ROOT: u8 = 5;
 
     #[inline]
-    fn fold_cfb_utf16_unit(u: u16) -> u16 {
+    pub(crate) fn fold_cfb_utf16_unit(u: u16) -> u16 {
         if u >= u16::from(b'a') && u <= u16::from(b'z') {
             u - 32
         } else if u < 0x80 {
@@ -68,7 +72,7 @@ impl Ole2ContainerCodec {
         }
     }
 
-    fn cmp_cfb_dir_names(a: &str, b: &str) -> std::cmp::Ordering {
+    pub(crate) fn cmp_cfb_dir_names(a: &str, b: &str) -> std::cmp::Ordering {
         let a_len = a.encode_utf16().count();
         let b_len = b.encode_utf16().count();
         a_len.cmp(&b_len).then_with(|| {
@@ -136,13 +140,29 @@ impl Ole2ContainerCodec {
                         "OLE2 스토리지 이름은 비어 있을 수 없습니다.".to_string(),
                     ));
                 }
+                if nodes[parent_idx].children.iter().any(|&c_idx| {
+                    nodes[c_idx].obj_type != Self::OBJ_TYPE_STORAGE
+                        && Self::cmp_cfb_dir_names(&nodes[c_idx].name, part_trimmed)
+                            == std::cmp::Ordering::Equal
+                }) {
+                    return Err(EasyOfficeError::SecurityViolation(format!(
+                        "OLE2 디렉터리 내 대소문자 구분 없는 이름 충돌이 감지되었습니다: {part_trimmed}"
+                    )));
+                }
                 let existing = nodes[parent_idx].children.iter().copied().find(|&c_idx| {
                     nodes[c_idx].obj_type == Self::OBJ_TYPE_STORAGE
-                        && nodes[c_idx].name.eq_ignore_ascii_case(part_trimmed)
+                        && Self::cmp_cfb_dir_names(&nodes[c_idx].name, part_trimmed)
+                            == std::cmp::Ordering::Equal
                 });
                 if let Some(c_idx) = existing {
                     parent_idx = c_idx;
                 } else {
+                    if nodes.len() >= crate::MAX_OLE2_DIR_ENTRIES {
+                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                            "OLE2 디렉터리 엔트리 개수가 보안 상한({})을 초과했습니다.",
+                            crate::MAX_OLE2_DIR_ENTRIES
+                        )));
+                    }
                     let new_idx = nodes.len();
                     nodes.push(Ole2DirNode {
                         name: part_trimmed.to_string(),
@@ -166,6 +186,19 @@ impl Ole2ContainerCodec {
                 return Err(EasyOfficeError::InvalidArgument(
                     "OLE2 스트림 이름은 비어 있을 수 없습니다.".to_string(),
                 ));
+            }
+            if nodes[parent_idx].children.iter().any(|&c_idx| {
+                Self::cmp_cfb_dir_names(&nodes[c_idx].name, leaf_name) == std::cmp::Ordering::Equal
+            }) {
+                return Err(EasyOfficeError::SecurityViolation(format!(
+                    "OLE2 동일 스토리지 내 중복 스트림 이름(대소문자 무시)이 감지되었습니다: {leaf_name}"
+                )));
+            }
+            if nodes.len() >= crate::MAX_OLE2_DIR_ENTRIES {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "OLE2 디렉터리 엔트리 개수가 보안 상한({})을 초과했습니다.",
+                    crate::MAX_OLE2_DIR_ENTRIES
+                )));
             }
             let new_idx = nodes.len();
             nodes.push(Ole2DirNode {
@@ -277,16 +310,28 @@ impl Ole2ContainerCodec {
         };
 
         let content_sector_count = next_sector_idx as usize;
-        let fat_sector_count = content_sector_count
+        let mut fat_sector_count = content_sector_count
             .div_ceil(Self::FAT_ENTRIES_PER_SECTOR)
             .max(1);
-        if fat_sector_count > Ole2SecurityGuard::MAX_FAT_SECTORS {
-            return Err(EasyOfficeError::SecurityViolation(
-                "OLE2 DIFAT 109 섹터 한도를 초과했습니다.".to_string(),
-            ));
+        let mut difat_sector_count = 0usize;
+        loop {
+            let needed_difat = if fat_sector_count > Ole2SecurityGuard::MAX_FAT_SECTORS {
+                (fat_sector_count - Ole2SecurityGuard::MAX_FAT_SECTORS)
+                    .div_ceil(Self::DIFAT_ENTRIES_PER_SECTOR)
+            } else {
+                0
+            };
+            let total_secs = content_sector_count + fat_sector_count + needed_difat;
+            let needed_fat = total_secs.div_ceil(Self::FAT_ENTRIES_PER_SECTOR).max(1);
+            if needed_fat == fat_sector_count && needed_difat == difat_sector_count {
+                break;
+            }
+            fat_sector_count = needed_fat;
+            difat_sector_count = needed_difat;
         }
 
         let first_fat_sector_idx = content_sector_count;
+        let first_difat_sector_idx = content_sector_count + fat_sector_count;
         let mut fat = vec![Self::FREE_SECTOR; fat_sector_count * Self::FAT_ENTRIES_PER_SECTOR];
 
         for (sec, slot) in fat.iter_mut().enumerate().take(dir_sector_count) {
@@ -315,8 +360,14 @@ impl Ole2ContainerCodec {
                 fat[slot] = Self::FAT_SECTOR_MARKER;
             }
         }
+        for d_idx in 0..difat_sector_count {
+            let slot = first_difat_sector_idx + d_idx;
+            if slot < fat.len() {
+                fat[slot] = Self::DIFAT_SECTOR_MARKER;
+            }
+        }
 
-        let total_sectors = content_sector_count + fat_sector_count;
+        let total_sectors = content_sector_count + fat_sector_count + difat_sector_count;
         let mut container = vec![0u8; Self::SECTOR_SIZE];
         container[..8].copy_from_slice(&FormatDetector::OLE2_MAGIC);
         write_u16_le(&mut container, 24, 0x003E); // minor version
@@ -329,8 +380,13 @@ impl Ole2ContainerCodec {
         write_u32_le(&mut container, 56, Self::MINI_STREAM_CUTOFF as u32);
         write_u32_le(&mut container, 60, first_minifat_sector);
         write_u32_le(&mut container, 64, minifat_sector_count);
-        write_u32_le(&mut container, 68, Self::END_OF_CHAIN);
-        write_u32_le(&mut container, 72, 0);
+        let first_difat_header = if difat_sector_count > 0 {
+            first_difat_sector_idx as u32
+        } else {
+            Self::END_OF_CHAIN
+        };
+        write_u32_le(&mut container, 68, first_difat_header);
+        write_u32_le(&mut container, 72, difat_sector_count as u32);
 
         for slot in 0..Ole2SecurityGuard::MAX_FAT_SECTORS {
             let val = if slot < fat_sector_count {
@@ -379,6 +435,32 @@ impl Ole2ContainerCodec {
             container.extend_from_slice(&entry.to_le_bytes());
         }
 
+        for d_idx in 0..difat_sector_count {
+            let mut difat_sec = [0u8; Self::SECTOR_SIZE];
+            let base_fat_slot =
+                Ole2SecurityGuard::MAX_FAT_SECTORS + d_idx * Self::DIFAT_ENTRIES_PER_SECTOR;
+            for slot in 0..Self::DIFAT_ENTRIES_PER_SECTOR {
+                let fat_slot = base_fat_slot + slot;
+                let val = if fat_slot < fat_sector_count {
+                    (first_fat_sector_idx + fat_slot) as u32
+                } else {
+                    Self::FREE_SECTOR
+                };
+                write_u32_le(&mut difat_sec, slot * 4, val);
+            }
+            let next_difat = if d_idx + 1 < difat_sector_count {
+                (first_difat_sector_idx + d_idx + 1) as u32
+            } else {
+                Self::END_OF_CHAIN
+            };
+            write_u32_le(
+                &mut difat_sec,
+                Self::DIFAT_ENTRIES_PER_SECTOR * 4,
+                next_difat,
+            );
+            container.extend_from_slice(&difat_sec);
+        }
+
         debug_assert_eq!(container.len(), (1 + total_sectors) * Self::SECTOR_SIZE);
         Ok(container)
     }
@@ -386,20 +468,33 @@ impl Ole2ContainerCodec {
     pub fn unpack(bytes: &[u8]) -> Result<Vec<Ole2StreamEntry>, EasyOfficeError> {
         const MINI_SECTOR_SIZE: usize = 64;
         let fat = Ole2SecurityGuard::validate_header_and_fat(bytes)?;
+        let sector_shift = read_u16_le(bytes, 30)? as usize;
+        let sector_size = 1usize << sector_shift;
+        let fat_entries_per_sector = sector_size / 4;
         let first_dir_sector = read_u32_le(bytes, 48)?;
         let mini_cutoff = read_u32_le(bytes, 56)? as usize;
         let first_minifat_sector = read_u32_le(bytes, 60)?;
         let dir_chain = Ole2SecurityGuard::validate_sector_chain(bytes, &fat, first_dir_sector)?;
 
-        let mut dir_bytes = Vec::with_capacity(dir_chain.len() * Self::SECTOR_SIZE);
+        let mut dir_bytes = Vec::with_capacity(dir_chain.len() * sector_size);
         for &sec in &dir_chain {
-            let start = (1 + sec as usize) * Self::SECTOR_SIZE;
-            dir_bytes.extend_from_slice(&bytes[start..start + Self::SECTOR_SIZE]);
+            let start = (1 + sec as usize) * sector_size;
+            dir_bytes.extend_from_slice(&bytes[start..start + sector_size]);
         }
 
         let entry_count = dir_bytes.len() / Self::DIR_ENTRY_SIZE;
+        let active_entries = (0..entry_count)
+            .filter(|&i| dir_bytes[i * Self::DIR_ENTRY_SIZE + 66] != 0)
+            .count();
+        if active_entries > crate::MAX_OLE2_DIR_ENTRIES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                "OLE2 디렉터리 엔트리 개수({active_entries})가 보안 상한({})을 초과했습니다.",
+                crate::MAX_OLE2_DIR_ENTRIES
+            )));
+        }
+
         let mut streams: Vec<Ole2StreamEntry> = Vec::new();
-        let total_sectors = (bytes.len() / Self::SECTOR_SIZE).saturating_sub(1);
+        let total_sectors = (bytes.len() / sector_size).saturating_sub(1);
         let mut claimed_sectors = SectorBitset::with_capacity(total_sectors);
         for &sec in &dir_chain {
             claimed_sectors.insert(sec);
@@ -422,15 +517,15 @@ impl Ole2ContainerCodec {
                     ));
                 }
                 let root_chain = Ole2SecurityGuard::validate_sector_chain(bytes, &fat, root_start)?;
-                mini_stream.reserve(root_chain.len() * Self::SECTOR_SIZE);
+                mini_stream.reserve(root_chain.len() * sector_size);
                 for sec in root_chain {
                     if !claimed_sectors.insert(sec) {
                         return Err(EasyOfficeError::SecurityViolation(
                             "OLE2 Root MiniStream 섹터 중복 참조가 감지되었습니다.".to_string(),
                         ));
                     }
-                    let offset = (1 + sec as usize) * Self::SECTOR_SIZE;
-                    mini_stream.extend_from_slice(&bytes[offset..offset + Self::SECTOR_SIZE]);
+                    let offset = (1 + sec as usize) * sector_size;
+                    mini_stream.extend_from_slice(&bytes[offset..offset + sector_size]);
                 }
                 if mini_stream.len() < root_size {
                     return Err(EasyOfficeError::CorruptedContainer(
@@ -441,20 +536,23 @@ impl Ole2ContainerCodec {
 
                 let mf_chain =
                     Ole2SecurityGuard::validate_sector_chain(bytes, &fat, first_minifat_sector)?;
-                minifat.reserve(mf_chain.len() * Self::FAT_ENTRIES_PER_SECTOR);
+                minifat.reserve(mf_chain.len() * fat_entries_per_sector);
                 for sec in mf_chain {
-                    let offset = (1 + sec as usize) * Self::SECTOR_SIZE;
-                    for entry_idx in 0..Self::FAT_ENTRIES_PER_SECTOR {
+                    if !claimed_sectors.insert(sec) {
+                        return Err(EasyOfficeError::SecurityViolation(format!(
+                            "OLE2 MiniFAT 섹터({sec})가 다른 스트림과 중복 점유되었습니다."
+                        )));
+                    }
+                    let offset = (1 + sec as usize) * sector_size;
+                    for entry_idx in 0..fat_entries_per_sector {
                         minifat.push(read_u32_le(bytes, offset + entry_idx * 4)?);
                     }
                 }
             }
         }
-
         let total_mini_sectors = mini_stream.len().div_ceil(MINI_SECTOR_SIZE);
         let mut claimed_mini_sectors = SectorBitset::with_capacity(total_mini_sectors);
         let mut visited_dir = SectorBitset::with_capacity(entry_count);
-
         let mut extract_stream = |idx: usize,
                                   full_name: String|
          -> Result<Ole2StreamEntry, EasyOfficeError> {
@@ -501,15 +599,15 @@ impl Ole2ContainerCodec {
                 Ok(Ole2StreamEntry::new(full_name, payload))
             } else {
                 let chain = Ole2SecurityGuard::validate_sector_chain(bytes, &fat, start_sector)?;
-                let mut payload = Vec::with_capacity(chain.len() * Self::SECTOR_SIZE);
+                let mut payload = Vec::with_capacity(chain.len() * sector_size);
                 for sec in chain {
                     if !claimed_sectors.insert(sec) {
                         return Err(EasyOfficeError::SecurityViolation(
                             "OLE2 스트림 간 섹터 공유 또는 중복 참조가 감지되었습니다.".to_string(),
                         ));
                     }
-                    let offset = (1 + sec as usize) * Self::SECTOR_SIZE;
-                    payload.extend_from_slice(&bytes[offset..offset + Self::SECTOR_SIZE]);
+                    let offset = (1 + sec as usize) * sector_size;
+                    payload.extend_from_slice(&bytes[offset..offset + sector_size]);
                 }
                 if payload.len() < stream_size {
                     return Err(EasyOfficeError::CorruptedContainer(format!(
@@ -531,6 +629,9 @@ impl Ole2ContainerCodec {
             }
             decode_utf16le(&dir_bytes[base..base + name_byte_len - 2])
         };
+
+        let mut seen_names_per_prefix: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
 
         if entry_count > 0 && dir_bytes[66] == Self::OBJ_TYPE_ROOT {
             visited_dir.insert(0);
@@ -562,19 +663,30 @@ impl Ole2ContainerCodec {
                         stack.push((right_sib, prefix.clone()));
                     }
 
-                    if obj_type == Self::OBJ_TYPE_STORAGE {
+                    if obj_type == Self::OBJ_TYPE_STORAGE || obj_type == Self::OBJ_TYPE_STREAM {
                         let name = read_entry_name(idx)?;
-                        if child_id != Self::FREE_SECTOR && child_id != Self::END_OF_CHAIN {
-                            stack.push((child_id, format!("{prefix}{name}/")));
+                        let siblings = seen_names_per_prefix.entry(prefix.clone()).or_default();
+                        if siblings.iter().any(|existing| {
+                            Self::cmp_cfb_dir_names(existing, &name) == std::cmp::Ordering::Equal
+                        }) {
+                            return Err(EasyOfficeError::SecurityViolation(format!(
+                                "OLE2 디렉터리 내 대소문자 구분 없는 중복 이름이 감지되었습니다: {prefix}{name}"
+                            )));
                         }
-                    } else if obj_type == Self::OBJ_TYPE_STREAM {
-                        let name = read_entry_name(idx)?;
-                        let full_name = if prefix.is_empty() {
-                            name
+                        siblings.push(name.clone());
+
+                        if obj_type == Self::OBJ_TYPE_STORAGE {
+                            if child_id != Self::FREE_SECTOR && child_id != Self::END_OF_CHAIN {
+                                stack.push((child_id, format!("{prefix}{name}/")));
+                            }
                         } else {
-                            format!("{prefix}{name}")
-                        };
-                        streams.push(extract_stream(idx, full_name)?);
+                            let full_name = if prefix.is_empty() {
+                                name
+                            } else {
+                                format!("{prefix}{name}")
+                            };
+                            streams.push(extract_stream(idx, full_name)?);
+                        }
                     }
 
                     if left_sib != Self::FREE_SECTOR && left_sib != Self::END_OF_CHAIN {
@@ -583,20 +695,29 @@ impl Ole2ContainerCodec {
                 }
             }
         }
-
-        for idx in 0..entry_count {
-            if !visited_dir.insert(idx as u32) {
-                continue;
+        if streams.is_empty() {
+            for idx in 0..entry_count {
+                if !visited_dir.insert(idx as u32) {
+                    continue;
+                }
+                let base = idx * Self::DIR_ENTRY_SIZE;
+                if dir_bytes[base + 66] != Self::OBJ_TYPE_STREAM {
+                    continue;
+                }
+                let name = read_entry_name(idx)?;
+                let siblings = seen_names_per_prefix.entry(String::new()).or_default();
+                if siblings
+                    .iter()
+                    .any(|e| Self::cmp_cfb_dir_names(e, &name) == std::cmp::Ordering::Equal)
+                {
+                    return Err(EasyOfficeError::SecurityViolation(format!(
+                        "OLE2 디렉터리 내 대소문자 구분 없는 중복 이름이 감지되었습니다: {name}"
+                    )));
+                }
+                siblings.push(name.clone());
+                streams.push(extract_stream(idx, name)?);
             }
-            let base = idx * Self::DIR_ENTRY_SIZE;
-            let obj_type = dir_bytes[base + 66];
-            if obj_type != Self::OBJ_TYPE_STREAM {
-                continue;
-            }
-            let name = read_entry_name(idx)?;
-            streams.push(extract_stream(idx, name)?);
         }
-
         Ok(streams)
     }
 
@@ -623,8 +744,7 @@ impl Ole2ContainerCodec {
         for (i, &u) in units.iter().enumerate() {
             write_u16_le(dir_bytes, base + i * 2, u);
         }
-        let name_byte_len = ((units.len() + 1) * 2) as u16;
-        write_u16_le(dir_bytes, base + 64, name_byte_len);
+        write_u16_le(dir_bytes, base + 64, ((units.len() + 1) * 2) as u16);
         dir_bytes[base + 66] = obj_type;
         dir_bytes[base + 67] = color;
         write_u32_le(dir_bytes, base + 68, left_sibling_id);
@@ -636,663 +756,11 @@ impl Ole2ContainerCodec {
     }
 }
 
-/// Paragraph record inside an HWP 5.0 `BodyText/Section0` stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hwp5ParagraphRecord {
-    pub text: String,
-    pub style_name: String,
-    pub is_official_header: bool,
-}
-
-/// Decoded HWP 5.0 (`.hwp`) or HWT (`.hwt`) document payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hwp5DocumentPayload {
-    pub version: (u8, u8, u8, u8),
-    pub is_template: bool,
-    pub agency_name: String,
-    pub document_number: String,
-    pub paragraphs: Vec<Hwp5ParagraphRecord>,
-    pub table_cells: Vec<Vec<String>>,
-}
-
-pub type DocumentCodecPayload = Hwp5DocumentPayload;
-pub type Hwp5TableGrid = Vec<Vec<String>>;
-
-/// HWP 5.0 (`.hwp`) and HWT (`.hwt`) OLE2 container codec using 32-bit HWP record headers.
-pub struct Hwp5Codec;
-
-impl Hwp5Codec {
-    pub const HWPTAG_DOCUMENT_PROPERTIES: u16 = 16;
-    pub const HWPTAG_PARA_HEADER: u16 = 66;
-    pub const HWPTAG_PARA_TEXT: u16 = 67;
-    pub const HWPTAG_TABLE: u16 = 77;
-    pub const HWPTAG_TABLE_RECORD: u16 = 77;
-    pub const HWT_TEMPLATE_MARKER: &'static [u8; 12] = b"HWT_TEMPLATE";
-    pub const MAX_HWP5_RECORDS: usize = 524_288;
-    pub const MAX_TOTAL_HWP5_TABLE_CELLS: usize = 65_536;
-
-    pub fn encode_record_header(tag_id: u16, level: u16, size: usize) -> Vec<u8> {
-        let tag_bits = (tag_id as u32) & 0x03FF;
-        let level_bits = ((level as u32) & 0x03FF) << 10;
-        let mut out = Vec::with_capacity(8);
-        if size < 0x0FFF {
-            let word = tag_bits | level_bits | (((size as u32) & 0x0FFF) << 20);
-            out.extend_from_slice(&word.to_le_bytes());
-        } else {
-            let word = tag_bits | level_bits | (0x0FFFu32 << 20);
-            out.extend_from_slice(&word.to_le_bytes());
-            out.extend_from_slice(&(size as u32).to_le_bytes());
-        }
-        out
-    }
-
-    pub fn decode_record_header(
-        bytes: &[u8],
-        offset: usize,
-    ) -> Result<(u16, u16, usize, usize), EasyOfficeError> {
-        let word = read_u32_le(bytes, offset)?;
-        let tag_id = (word & 0x03FF) as u16;
-        let level = ((word >> 10) & 0x03FF) as u16;
-        let inline_size = ((word >> 20) & 0x0FFF) as usize;
-        if inline_size == 0x0FFF {
-            let ext_size = read_u32_le(bytes, offset + 4)? as usize;
-            Ok((tag_id, level, ext_size, 8))
-        } else {
-            Ok((tag_id, level, inline_size, 4))
-        }
-    }
-
-    pub fn pack(payload: &Hwp5DocumentPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_with_compression_and_tables(payload, &[], false)
-    }
-
-    pub fn pack_multi_tables(
-        payload: &Hwp5DocumentPayload,
-        extra_tables: &[Hwp5TableGrid],
-    ) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_with_compression_and_tables(payload, extra_tables, false)
-    }
-
-    pub fn pack_compressed(payload: &Hwp5DocumentPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_with_compression_and_tables(payload, &[], true)
-    }
-
-    fn pack_with_compression_and_tables(
-        payload: &Hwp5DocumentPayload,
-        extra_tables: &[Hwp5TableGrid],
-        compressed: bool,
-    ) -> Result<Vec<u8>, EasyOfficeError> {
-        let mut file_header = vec![0u8; Ole2SecurityGuard::HWP5_FILE_HEADER_LEN];
-        file_header[..17].copy_from_slice(b"HWP Document File");
-        file_header[32] = payload.version.3;
-        file_header[33] = payload.version.2;
-        file_header[34] = payload.version.1;
-        file_header[35] = payload.version.0;
-        let flags = if compressed {
-            Ole2SecurityGuard::HWP5_FLAG_COMPRESSED
-        } else {
-            0x0000_0000
-        };
-        write_u32_le(&mut file_header, 36, flags);
-        if payload.is_template {
-            file_header[40..52].copy_from_slice(Self::HWT_TEMPLATE_MARKER);
-        }
-
-        let mut doc_props = Vec::new();
-        append_len_prefixed_utf16le(&mut doc_props, &payload.agency_name);
-        append_len_prefixed_utf16le(&mut doc_props, &payload.document_number);
-        let mut doc_info_stream =
-            Self::encode_record_header(Self::HWPTAG_DOCUMENT_PROPERTIES, 0, doc_props.len());
-        doc_info_stream.extend_from_slice(&doc_props);
-
-        let mut section0 = Vec::new();
-        for para in &payload.paragraphs {
-            let mut p_header = Vec::new();
-            append_len_prefixed_utf16le(&mut p_header, &para.style_name);
-            p_header.push(if para.is_official_header { 1 } else { 0 });
-            section0.extend_from_slice(&Self::encode_record_header(
-                Self::HWPTAG_PARA_HEADER,
-                0,
-                p_header.len(),
-            ));
-            section0.extend_from_slice(&p_header);
-
-            let text_utf16 = encode_utf16le(&para.text);
-            section0.extend_from_slice(&Self::encode_record_header(
-                Self::HWPTAG_PARA_TEXT,
-                1,
-                text_utf16.len(),
-            ));
-            section0.extend_from_slice(&text_utf16);
-        }
-
-        for tbl in std::iter::once(&payload.table_cells).chain(extra_tables.iter()) {
-            if !tbl.is_empty() {
-                let mut tbl_buf = Vec::new();
-                tbl_buf.extend_from_slice(&(tbl.len() as u16).to_le_bytes());
-                for row in tbl {
-                    tbl_buf.extend_from_slice(&(row.len() as u16).to_le_bytes());
-                    for cell in row {
-                        append_len_prefixed_utf16le(&mut tbl_buf, cell);
-                    }
-                }
-                section0.extend_from_slice(&Self::encode_record_header(
-                    Self::HWPTAG_TABLE_RECORD,
-                    0,
-                    tbl_buf.len(),
-                ));
-                section0.extend_from_slice(&tbl_buf);
-            }
-        }
-
-        let (final_doc_info, final_section0) = if compressed {
-            (
-                crate::deflate::deflate_raw(&doc_info_stream),
-                crate::deflate::deflate_raw(&section0),
-            )
-        } else {
-            (doc_info_stream, section0)
-        };
-
-        Ole2ContainerCodec::pack(&[
-            ("FileHeader".to_string(), file_header),
-            ("DocInfo".to_string(), final_doc_info),
-            ("BodyText/Section0".to_string(), final_section0),
-        ])
-    }
-
-    pub fn unpack(bytes: &[u8]) -> Result<Hwp5DocumentPayload, EasyOfficeError> {
-        Ok(Self::unpack_multi_tables(bytes)?.0)
-    }
-
-    pub fn unpack_multi_tables(
-        bytes: &[u8],
-    ) -> Result<(Hwp5DocumentPayload, Vec<Hwp5TableGrid>), EasyOfficeError> {
-        let streams = Ole2ContainerCodec::unpack(bytes)?;
-        let file_header = streams
-            .iter()
-            .find(|s| s.name == "FileHeader")
-            .ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer(
-                    "HWP 5.0 필수 스트림 'FileHeader'가 누락되었습니다.".to_string(),
-                )
-            })?;
-
-        let raw_ver = Ole2SecurityGuard::validate_hwp5_file_header(&file_header.data)?;
-        let version = (
-            ((raw_ver >> 24) & 0xFF) as u8,
-            ((raw_ver >> 16) & 0xFF) as u8,
-            ((raw_ver >> 8) & 0xFF) as u8,
-            (raw_ver & 0xFF) as u8,
-        );
-        let flags = read_u32_le(&file_header.data, 36)?;
-        let is_compressed = (flags & Ole2SecurityGuard::HWP5_FLAG_COMPRESSED) != 0;
-        let is_template =
-            file_header.data.len() >= 52 && &file_header.data[40..52] == Self::HWT_TEMPLATE_MARKER;
-
-        let mut total_records = 0usize;
-        let mut total_table_cells = 0usize;
-        let mut agency_name = String::new();
-        let mut document_number = String::new();
-        if let Some(doc_info) = streams.iter().find(|s| s.name == "DocInfo") {
-            if !doc_info.data.is_empty() {
-                let doc_info_bytes: std::borrow::Cow<'_, [u8]> = if is_compressed {
-                    std::borrow::Cow::Owned(crate::deflate::inflate_auto(
-                        &doc_info.data,
-                        crate::ZipSecurityGuard::MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
-                    )?)
-                } else {
-                    std::borrow::Cow::Borrowed(&doc_info.data)
-                };
-
-                let mut offset = 0usize;
-                while offset < doc_info_bytes.len() {
-                    total_records += 1;
-                    if total_records > Self::MAX_HWP5_RECORDS {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                            "HWP 5.0 레코드 개수가 보안 상한({})을 초과했습니다.",
-                            Self::MAX_HWP5_RECORDS
-                        )));
-                    }
-                    let (tag_id, _level, size, hdr_len) =
-                        Self::decode_record_header(&doc_info_bytes, offset)?;
-                    let start = offset + hdr_len;
-                    let end = start.checked_add(size).ok_or_else(|| {
-                        EasyOfficeError::CorruptedContainer(
-                            "HWP DocInfo 레코드 오버플로".to_string(),
-                        )
-                    })?;
-                    if end > doc_info_bytes.len() {
-                        return Err(EasyOfficeError::CorruptedContainer(
-                            "HWP DocInfo 레코드 경계 초과".to_string(),
-                        ));
-                    }
-                    if tag_id == Self::HWPTAG_DOCUMENT_PROPERTIES {
-                        Self::parse_doc_properties(
-                            &doc_info_bytes,
-                            start,
-                            end,
-                            &mut agency_name,
-                            &mut document_number,
-                        )?;
-                    }
-                    offset = end;
-                }
-            }
-        }
-
-        let section0 = streams
-            .iter()
-            .find(|s| s.name == "BodyText/Section0" || s.name == "Section0")
-            .ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer(
-                    "HWP 5.0 필수 스트림 'BodyText/Section0'가 누락되었습니다.".to_string(),
-                )
-            })?;
-
-        let section0_bytes: std::borrow::Cow<'_, [u8]> = if is_compressed {
-            std::borrow::Cow::Owned(crate::deflate::inflate_auto(
-                &section0.data,
-                crate::ZipSecurityGuard::MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
-            )?)
-        } else {
-            std::borrow::Cow::Borrowed(&section0.data)
-        };
-
-        let mut paragraphs: Vec<Hwp5ParagraphRecord> = Vec::new();
-        let mut table_cells: Vec<Vec<String>> = Vec::new();
-        let mut all_tables: Vec<Vec<Vec<String>>> = Vec::new();
-        let mut pending_meta: Option<(String, bool)> = None;
-        let mut offset = 0usize;
-
-        while offset < section0_bytes.len() {
-            total_records += 1;
-            if total_records > Self::MAX_HWP5_RECORDS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                    "HWP 5.0 레코드 개수가 보안 상한({})을 초과했습니다.",
-                    Self::MAX_HWP5_RECORDS
-                )));
-            }
-            let (tag_id, _level, size, hdr_len) =
-                Self::decode_record_header(&section0_bytes, offset)?;
-            let start = offset + hdr_len;
-            let end = start.checked_add(size).ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer("HWP Section0 레코드 오버플로".to_string())
-            })?;
-            if end > section0_bytes.len() {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "HWP Section0 레코드 경계 초과".to_string(),
-                ));
-            }
-
-            match tag_id {
-                Self::HWPTAG_PARA_HEADER => {
-                    pending_meta = Some(Self::parse_para_header(&section0_bytes, start, end)?);
-                }
-                Self::HWPTAG_PARA_TEXT => {
-                    let text = Self::decode_hwp5_para_text(&section0_bytes[start..end])?;
-                    let (style_name, is_official_header) = pending_meta
-                        .take()
-                        .unwrap_or_else(|| ("본문".to_string(), false));
-                    paragraphs.push(Hwp5ParagraphRecord {
-                        text,
-                        style_name,
-                        is_official_header,
-                    });
-                }
-                Self::HWPTAG_TABLE_RECORD => {
-                    let parsed_rows = Self::parse_table_record(
-                        &section0_bytes,
-                        start,
-                        end,
-                        &mut total_table_cells,
-                    )?;
-                    if !parsed_rows.is_empty() {
-                        table_cells.extend(parsed_rows.iter().cloned());
-                        all_tables.push(parsed_rows);
-                    }
-                }
-                _ => {}
-            }
-            offset = end;
-        }
-
-        Ok((
-            Hwp5DocumentPayload {
-                version,
-                is_template,
-                agency_name,
-                document_number,
-                paragraphs,
-                table_cells,
-            },
-            all_tables,
-        ))
-    }
-
-    fn decode_hwp5_para_text(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-        if bytes.len() % 2 != 0 {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "HWP 5.0 문단 텍스트 페이로드 길이가 2바이트(WCHAR) 배수가 아닙니다.".to_string(),
-            ));
-        }
-        let has_control = bytes
-            .chunks_exact(2)
-            .any(|c| u16::from_le_bytes([c[0], c[1]]) < 0x0020);
-        if !has_control {
-            return decode_utf16le(bytes);
-        }
-
-        let mut filtered = Vec::with_capacity(bytes.len());
-        let mut cursor = 0usize;
-        while cursor < bytes.len() {
-            let code = u16::from_le_bytes([bytes[cursor], bytes[cursor + 1]]);
-            if code < 0x0020 {
-                match code {
-                    0x0009 => {
-                        filtered.extend_from_slice(&0x0009u16.to_le_bytes());
-                        if cursor + 16 <= bytes.len()
-                            && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]])
-                                == 0x0009
-                            && bytes[cursor + 2..cursor + 14].iter().all(|&b| b == 0)
-                        {
-                            cursor += 16;
-                        } else {
-                            cursor += 2;
-                        }
-                    }
-                    0x000A => {
-                        filtered.extend_from_slice(&0x000Au16.to_le_bytes());
-                        cursor += 2;
-                    }
-                    0x000D => {
-                        if cursor + 2 < bytes.len() {
-                            filtered.extend_from_slice(&0x000Au16.to_le_bytes());
-                        }
-                        cursor += 2;
-                    }
-                    0x0001..=0x0008 | 0x000B..=0x000C | 0x000E..=0x0017
-                        if cursor + 16 <= bytes.len()
-                            && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]])
-                                == code =>
-                    {
-                        cursor += 16;
-                    }
-                    _ => {
-                        cursor += 2;
-                    }
-                }
-            } else {
-                filtered.push(bytes[cursor]);
-                filtered.push(bytes[cursor + 1]);
-                cursor += 2;
-            }
-        }
-        decode_utf16le(&filtered)
-    }
-
-    fn parse_doc_properties(
-        data: &[u8],
-        start: usize,
-        end: usize,
-        agency_name: &mut String,
-        document_number: &mut String,
-    ) -> Result<(), EasyOfficeError> {
-        let mut cursor = start;
-        if let Ok(s1) = read_len_prefixed_utf16le(data, &mut cursor, end) {
-            if let Ok(s2) = read_len_prefixed_utf16le(data, &mut cursor, end) {
-                if cursor == end {
-                    *agency_name = s1;
-                    *document_number = s2;
-                    return Ok(());
-                }
-                if let Ok(s3) = read_len_prefixed_utf16le(data, &mut cursor, end) {
-                    if read_len_prefixed_utf16le(data, &mut cursor, end).is_ok() && cursor < end {
-                        *agency_name = s1;
-                        *document_number = if !s3.is_empty() { s3 } else { s2 };
-                        return Ok(());
-                    }
-                }
-            }
-        }
-        let slice = &data[start..end];
-        if slice.len() >= 4 {
-            let n = read_u32_le(slice, 0)? as usize;
-            if 4 + n == slice.len() && n % 2 == 0 {
-                *agency_name = decode_utf16le(&slice[4..])?;
-                return Ok(());
-            }
-            if 4 + n * 2 <= slice.len() {
-                *agency_name = decode_utf16le(&slice[4..4 + n * 2])?;
-                return Ok(());
-            }
-        }
-        if slice.len() % 2 == 0 {
-            *agency_name = decode_utf16le(slice)?;
-        }
-        Ok(())
-    }
-
-    fn parse_para_header(
-        data: &[u8],
-        start: usize,
-        end: usize,
-    ) -> Result<(String, bool), EasyOfficeError> {
-        if end - start == 4 {
-            return Ok(("본문".to_string(), data[start + 1] != 0));
-        }
-        let mut cursor = start;
-        if let Ok(style) = read_len_prefixed_utf16le(data, &mut cursor, end) {
-            if cursor + 1 == end {
-                return Ok((style, data[cursor] != 0));
-            }
-            if read_len_prefixed_utf16le(data, &mut cursor, end).is_ok()
-                && read_len_prefixed_utf16le(data, &mut cursor, end).is_ok()
-                && cursor + 9 <= end
-            {
-                let flags_or_bold = data[cursor + 8];
-                let is_official =
-                    (flags_or_bold & 0x01) != 0 || style.contains("표제") || style.contains("제목");
-                return Ok((style, is_official));
-            }
-        }
-        Ok(("본문".to_string(), false))
-    }
-
-    fn try_parse_u16_rows(
-        data: &[u8],
-        start: usize,
-        end: usize,
-        total_table_cells: &mut usize,
-    ) -> Result<Option<Vec<Vec<String>>>, EasyOfficeError> {
-        if start + 4 > end {
-            return Ok(None);
-        }
-        let mut cur = start;
-        let Ok(row_count_u16) = read_u16_le(data, cur) else {
-            return Ok(None);
-        };
-        let Ok(first_col_u16) = read_u16_le(data, cur + 2) else {
-            return Ok(None);
-        };
-        let row_count = row_count_u16 as usize;
-        let first_col = first_col_u16 as usize;
-        cur += 2;
-        if row_count == 0 || first_col == 0 {
-            return Ok(None);
-        }
-        if row_count > 4096
-            || first_col > 256
-            || row_count.saturating_mul(first_col) > Self::MAX_TOTAL_HWP5_TABLE_CELLS
-        {
-            return Err(EasyOfficeError::ResourceBudgetExceeded(
-                "HWP 5.0 표 행·열·셀 개수가 보안 상한을 초과했습니다.".to_string(),
-            ));
-        }
-        if row_count.saturating_mul(6) > end.saturating_sub(cur) {
-            return Ok(None);
-        }
-        let mut rows = Vec::with_capacity(row_count.min(256));
-        let mut local_cells = 0usize;
-        for _ in 0..row_count {
-            let Ok(col_count_u16) = read_u16_le(data, cur) else {
-                return Ok(None);
-            };
-            let col_count = col_count_u16 as usize;
-            cur += 2;
-            if col_count == 0 {
-                return Ok(None);
-            }
-            if col_count > 256 {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "HWP 5.0 표 열 개수가 보안 상한(256)을 초과했습니다.".to_string(),
-                ));
-            }
-            if col_count.saturating_mul(4) > end.saturating_sub(cur) {
-                return Ok(None);
-            }
-            local_cells = local_cells.saturating_add(col_count);
-            if total_table_cells.saturating_add(local_cells) > Self::MAX_TOTAL_HWP5_TABLE_CELLS {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                    "HWP 5.0 누적 표 셀 개수가 보안 상한({})을 초과했습니다.",
-                    Self::MAX_TOTAL_HWP5_TABLE_CELLS
-                )));
-            }
-            let mut row = Vec::with_capacity(col_count.min(256));
-            for _ in 0..col_count {
-                let Ok(cell) = read_len_prefixed_utf16le(data, &mut cur, end) else {
-                    return Ok(None);
-                };
-                row.push(cell);
-            }
-            rows.push(row);
-        }
-        if cur == end {
-            *total_table_cells += local_cells;
-            Ok(Some(rows))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn parse_table_record(
-        data: &[u8],
-        start: usize,
-        end: usize,
-        total_table_cells: &mut usize,
-    ) -> Result<Vec<Vec<String>>, EasyOfficeError> {
-        if let Some(rows) = Self::try_parse_u16_rows(data, start, end, total_table_cells)? {
-            return Ok(rows);
-        }
-        let mut cur = start;
-        if read_len_prefixed_utf16le(data, &mut cur, end).is_ok() && cur < end {
-            let _has_header = data[cur] != 0;
-            cur += 1;
-            if let Some(rows) = Self::try_parse_u16_rows(data, cur, end, total_table_cells)? {
-                return Ok(rows);
-            }
-            if cur + 8 <= end {
-                let row_count = read_u32_le(data, cur)? as usize;
-                let col_count = read_u32_le(data, cur + 4)? as usize;
-                cur += 8;
-                let table_cells = row_count.saturating_mul(col_count);
-                if row_count == 0
-                    || col_count == 0
-                    || row_count > 4096
-                    || col_count > 256
-                    || table_cells.saturating_mul(4) > end.saturating_sub(cur)
-                    || total_table_cells.saturating_add(table_cells)
-                        > Self::MAX_TOTAL_HWP5_TABLE_CELLS
-                {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "HWP 5.0 표 행·열 개수가 보안 상한을 초과했습니다.".to_string(),
-                    ));
-                }
-                let mut rows = Vec::with_capacity(row_count.min(256));
-                let mut ok = true;
-                for _ in 0..row_count {
-                    let mut row = Vec::with_capacity(col_count.min(256));
-                    for _ in 0..col_count {
-                        if let Ok(cell) = read_len_prefixed_utf16le(data, &mut cur, end) {
-                            row.push(cell);
-                        } else {
-                            ok = false;
-                            break;
-                        }
-                    }
-                    if !ok {
-                        break;
-                    }
-                    rows.push(row);
-                }
-                if ok && cur == end {
-                    *total_table_cells += table_cells;
-                    return Ok(rows);
-                }
-            }
-        }
-        if start + 4 <= end && (end - (start + 4)) % 2 == 0 {
-            let payload_slice = &data[start + 4..end];
-            if payload_slice.len() > 65_536 {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "HWP 5.0 표 텍스트 페이로드가 보안 상한을 초과했습니다.".to_string(),
-                ));
-            }
-            if payload_slice
-                .chunks_exact(2)
-                .any(|c| c[0] == 0 && c[1] == 0)
-            {
-                return Err(EasyOfficeError::ResourceBudgetExceeded(
-                    "HWP 5.0 표 레코드 셀 한도 초과 또는 비정상 바이너리 구조입니다.".to_string(),
-                ));
-            }
-            let txt = decode_utf16le(payload_slice)?;
-            let mut rows = Vec::new();
-            let mut local_cells = 0usize;
-            for r in txt.split('\n') {
-                if rows.len() >= 4096 {
-                    return Err(EasyOfficeError::ResourceBudgetExceeded(
-                        "HWP 5.0 표 행 개수가 보안 상한(4096)을 초과했습니다.".to_string(),
-                    ));
-                }
-                let mut row = Vec::new();
-                for c in r.split('\t') {
-                    if row.len() >= 256 {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "HWP 5.0 표 열 개수가 보안 상한(256)을 초과했습니다.".to_string(),
-                        ));
-                    }
-                    local_cells += 1;
-                    if total_table_cells.saturating_add(local_cells)
-                        > Self::MAX_TOTAL_HWP5_TABLE_CELLS
-                    {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-                            "HWP 5.0 누적 표 셀 개수가 보안 상한({})을 초과했습니다.",
-                            Self::MAX_TOTAL_HWP5_TABLE_CELLS
-                        )));
-                    }
-                    row.push(c.to_string());
-                }
-                rows.push(row);
-            }
-            *total_table_cells += local_cells;
-            return Ok(rows);
-        }
-        Err(EasyOfficeError::CorruptedContainer(
-            "HWP 5.0 표 레코드(HWPTAG_TABLE) 구조가 손상되었습니다.".to_string(),
-        ))
-    }
-}
-
-pub use crate::legacy_ole2_codec::*;
-
 impl Ole2SecurityGuard {
-    pub fn validate_header_and_fat(container_bytes: &[u8]) -> Result<Vec<u32>, EasyOfficeError> {
-        if container_bytes.len() < Self::SECTOR_SIZE * 2
-            || container_bytes.len() % Self::SECTOR_SIZE != 0
-        {
+    fn parse_and_validate_sector_size(container_bytes: &[u8]) -> Result<usize, EasyOfficeError> {
+        if container_bytes.len() < Self::SECTOR_SIZE * 2 {
             return Err(EasyOfficeError::CorruptedContainer(
-                "OLE2 컨테이너 크기가 512바이트 섹터 배수가 아닙니다.".to_string(),
+                "OLE2 컨테이너 크기가 최소 섹터 크기보다 작습니다.".to_string(),
             ));
         }
         if !container_bytes.starts_with(&FormatDetector::OLE2_MAGIC) {
@@ -1301,34 +769,72 @@ impl Ole2SecurityGuard {
                 detail: "OLE2 CFBF 시그니처 불일치".to_string(),
             });
         }
+        let major_ver = read_u16_le(container_bytes, 26)?;
         let sector_shift = read_u16_le(container_bytes, 30)?;
         let mini_shift = read_u16_le(container_bytes, 32)?;
-        if sector_shift != 9 || mini_shift != 6 {
-            return Err(EasyOfficeError::CorruptedContainer(format!(
-                "유효하지 않은 OLE2 섹터 시프트({sector_shift}/{mini_shift})"
-            )));
+        let valid_v3 = (major_ver == 3 || major_ver == 4) && sector_shift == 9 && mini_shift == 6;
+        let valid_v4 = major_ver == 4 && sector_shift == 12 && mini_shift == 6;
+        if !valid_v3 && !valid_v4 {
+            return Err(EasyOfficeError::CorruptedContainer(format!("유효하지 않은 OLE2 버전/섹터 시프트(v{major_ver}, shift={sector_shift}/{mini_shift})")));
         }
+        let sector_size = 1usize << (sector_shift as usize);
+        if container_bytes.len() < sector_size * 2 || container_bytes.len() % sector_size != 0 {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "OLE2 컨테이너 크기가 섹터 크기 배수가 아닙니다.".to_string(),
+            ));
+        }
+        Ok(sector_size)
+    }
+
+    pub fn validate_header_and_fat(container_bytes: &[u8]) -> Result<Vec<u32>, EasyOfficeError> {
+        let sector_size = Self::parse_and_validate_sector_size(container_bytes)?;
+        let entries_per_fat_sector = sector_size / 4;
+        let difat_entries_per_sector = entries_per_fat_sector - 1;
         let fat_sector_count = read_u32_le(container_bytes, 44)? as usize;
         let first_difat_sector = read_u32_le(container_bytes, 68)?;
         let num_difat_sectors = read_u32_le(container_bytes, 72)? as usize;
-        let max_allowed_fat_sectors = Self::MAX_FAT_SECTORS + num_difat_sectors.min(64) * 127;
-        if fat_sector_count == 0
-            || fat_sector_count > max_allowed_fat_sectors
-            || (fat_sector_count > Self::MAX_FAT_SECTORS && num_difat_sectors == 0)
-        {
-            return Err(EasyOfficeError::SecurityViolation(format!(
-                "OLE2 DIFAT 섹터 개수({fat_sector_count})가 허용 범위(1..={})를 벗어났습니다.",
-                Self::MAX_FAT_SECTORS
-            )));
+        let total_sectors = (container_bytes.len() / sector_size) - 1;
+
+        if fat_sector_count == 0 || fat_sector_count > total_sectors {
+            return Err(EasyOfficeError::SecurityViolation(format!("OLE2 FAT 섹터 개수({fat_sector_count})가 허용 범위(1..={total_sectors})를 벗어났습니다.")));
+        }
+        if fat_sector_count <= Self::MAX_FAT_SECTORS {
+            if num_difat_sectors != 0
+                || (first_difat_sector != Self::END_OF_CHAIN
+                    && first_difat_sector != Self::FREE_SECTOR)
+            {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "OLE2 헤더 DIFAT 섹터 수와 FAT 섹터 수가 불일치합니다.".to_string(),
+                ));
+            }
+        } else {
+            let max_difat_capacity = Self::MAX_FAT_SECTORS
+                .saturating_add(num_difat_sectors.saturating_mul(difat_entries_per_sector));
+            if num_difat_sectors == 0
+                || num_difat_sectors > total_sectors
+                || first_difat_sector == Self::END_OF_CHAIN
+                || first_difat_sector == Self::FREE_SECTOR
+                || fat_sector_count > max_difat_capacity
+            {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "OLE2 DIFAT 체인 헤더 정보가 유효하지 않습니다.".to_string(),
+                ));
+            }
         }
 
-        let total_sectors = (container_bytes.len() / Self::SECTOR_SIZE) - 1;
         let mut fat_sector_indices = Vec::with_capacity(fat_sector_count);
+        let mut fat_sector_visited = SectorBitset::with_capacity(total_sectors);
         for slot in 0..fat_sector_count.min(Self::MAX_FAT_SECTORS) {
-            let fat_sec_idx = read_u32_le(container_bytes, 76 + slot * 4)? as usize;
+            let fat_sec_u32 = read_u32_le(container_bytes, 76 + slot * 4)?;
+            let fat_sec_idx = fat_sec_u32 as usize;
             if fat_sec_idx >= total_sectors {
                 return Err(EasyOfficeError::CorruptedContainer(
                     "OLE2 FAT 섹터 인덱스가 파일 범위를 벗어났습니다.".to_string(),
+                ));
+            }
+            if !fat_sector_visited.insert(fat_sec_u32) {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "OLE2 헤더 DIFAT에 중복된 FAT 섹터 인덱스가 있습니다.".to_string(),
                 ));
             }
             fat_sector_indices.push(fat_sec_idx);
@@ -1337,45 +843,59 @@ impl Ole2SecurityGuard {
         let mut difat_sec = first_difat_sector;
         let mut difat_visited = SectorBitset::with_capacity(total_sectors);
         let mut difat_steps = 0usize;
-        while fat_sector_indices.len() < fat_sector_count
-            && difat_sec != Self::END_OF_CHAIN
-            && difat_sec != Self::FREE_SECTOR
-        {
-            if difat_steps >= num_difat_sectors.min(64) {
-                break;
-            }
-            let d_idx = difat_sec as usize;
-            if d_idx >= total_sectors || !difat_visited.insert(difat_sec) {
-                return Err(EasyOfficeError::SecurityViolation(
-                    "OLE2 DIFAT 체인이 유효하지 않거나 순환합니다.".to_string(),
+        while difat_steps < num_difat_sectors {
+            if difat_sec == Self::END_OF_CHAIN || difat_sec == Self::FREE_SECTOR {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "OLE2 DIFAT 체인이 조기 종료되었습니다.".to_string(),
                 ));
             }
-            let d_offset = (1 + d_idx) * Self::SECTOR_SIZE;
-            for slot in 0..127 {
-                if fat_sector_indices.len() >= fat_sector_count {
-                    break;
-                }
-                let fat_sec = read_u32_le(container_bytes, d_offset + slot * 4)?;
-                if fat_sec == Self::FREE_SECTOR || fat_sec == Self::END_OF_CHAIN {
-                    continue;
-                }
-                if (fat_sec as usize) >= total_sectors {
-                    return Err(EasyOfficeError::CorruptedContainer(
-                        "OLE2 DIFAT 내 FAT 섹터 인덱스가 범위를 벗어났습니다.".to_string(),
-                    ));
-                }
-                fat_sector_indices.push(fat_sec as usize);
+            let d_idx = difat_sec as usize;
+            if d_idx >= total_sectors
+                || !difat_visited.insert(difat_sec)
+                || !fat_sector_visited.insert(difat_sec)
+            {
+                return Err(EasyOfficeError::SecurityViolation(
+                    "OLE2 DIFAT 체인이 유효하지 않거나 순환/중복됩니다.".to_string(),
+                ));
             }
-            difat_sec = read_u32_le(container_bytes, d_offset + 127 * 4)?;
+            let d_offset = (1 + d_idx) * sector_size;
+            for slot in 0..difat_entries_per_sector {
+                let fat_sec = read_u32_le(container_bytes, d_offset + slot * 4)?;
+                if fat_sector_indices.len() < fat_sector_count {
+                    if fat_sec == Self::FREE_SECTOR || fat_sec == Self::END_OF_CHAIN {
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "OLE2 DIFAT 섹터 내 필수 FAT 인덱스가 비어 있습니다.".to_string(),
+                        ));
+                    }
+                    if (fat_sec as usize) >= total_sectors || !fat_sector_visited.insert(fat_sec) {
+                        return Err(EasyOfficeError::SecurityViolation(
+                            "OLE2 DIFAT 내 FAT 섹터 인덱스가 범위를 벗어났거나 중복됩니다."
+                                .to_string(),
+                        ));
+                    }
+                    fat_sector_indices.push(fat_sec as usize);
+                }
+            }
+            difat_sec = read_u32_le(container_bytes, d_offset + difat_entries_per_sector * 4)?;
             difat_steps += 1;
         }
 
-        let mut fat = Vec::with_capacity(fat_sector_indices.len() * 128);
+        if difat_sec != Self::END_OF_CHAIN && difat_sec != Self::FREE_SECTOR {
+            return Err(EasyOfficeError::SecurityViolation(
+                "OLE2 DIFAT 체인이 END_OF_CHAIN으로 끝나지 않았습니다.".to_string(),
+            ));
+        }
+        if fat_sector_indices.len() != fat_sector_count {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "OLE2 FAT 섹터 인덱스 수집 개수가 헤더와 일치하지 않습니다.".to_string(),
+            ));
+        }
+
+        let mut fat = Vec::with_capacity(fat_sector_indices.len() * entries_per_fat_sector);
         for fat_sec_idx in fat_sector_indices {
-            let sec_offset = (1 + fat_sec_idx) * Self::SECTOR_SIZE;
-            for entry_idx in 0..128 {
-                let val = read_u32_le(container_bytes, sec_offset + entry_idx * 4)?;
-                fat.push(val);
+            let sec_offset = (1 + fat_sec_idx) * sector_size;
+            for entry_idx in 0..entries_per_fat_sector {
+                fat.push(read_u32_le(container_bytes, sec_offset + entry_idx * 4)?);
             }
         }
 
@@ -1389,11 +909,9 @@ impl Ole2SecurityGuard {
         fat: &[u32],
         start_sector: u32,
     ) -> Result<Vec<u32>, EasyOfficeError> {
-        if container_bytes.len() < Self::SECTOR_SIZE * 2
-            || container_bytes.len() % Self::SECTOR_SIZE != 0
-        {
+        if container_bytes.len() < Self::SECTOR_SIZE * 2 {
             return Err(EasyOfficeError::CorruptedContainer(
-                "OLE2 컨테이너 크기가 512바이트 섹터 배수가 아닙니다.".to_string(),
+                "OLE2 컨테이너 크기가 최소 섹터 크기보다 작습니다.".to_string(),
             ));
         }
         if !container_bytes.starts_with(&FormatDetector::OLE2_MAGIC) {
@@ -1402,18 +920,37 @@ impl Ole2SecurityGuard {
                 detail: "OLE2 CFBF 헤더 시그니처 불일치".to_string(),
             });
         }
+        let sector_shift = read_u16_le(container_bytes, 30)?;
+        let sector_size = match sector_shift {
+            0 | 9 => Self::SECTOR_SIZE,
+            12 => 4096,
+            _ => {
+                return Err(EasyOfficeError::CorruptedContainer(format!(
+                    "유효하지 않은 OLE2 섹터 시프트({sector_shift})"
+                )))
+            }
+        };
+        if container_bytes.len() < sector_size * 2 || container_bytes.len() % sector_size != 0 {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "OLE2 컨테이너 크기가 섹터 크기 배수가 아닙니다.".to_string(),
+            ));
+        }
 
+        let total_sectors = (container_bytes.len() / sector_size) - 1;
         let fat_sector_count = read_u32_le(container_bytes, 44)? as usize;
         let num_difat_sectors = read_u32_le(container_bytes, 72)? as usize;
-        let max_allowed = Self::MAX_FAT_SECTORS + num_difat_sectors.min(64) * 127;
-        if fat_sector_count == 0 || fat_sector_count > max_allowed {
+        let difat_entries_per_sector = (sector_size / 4) - 1;
+        let max_allowed = Self::MAX_FAT_SECTORS
+            .saturating_add(num_difat_sectors.saturating_mul(difat_entries_per_sector));
+        if fat_sector_count == 0
+            || fat_sector_count > total_sectors
+            || fat_sector_count > max_allowed
+        {
             return Err(EasyOfficeError::SecurityViolation(format!(
-                "OLE2 DIFAT 섹터 개수({fat_sector_count})가 허용 범위(1..={})를 벗어났습니다.",
-                Self::MAX_FAT_SECTORS
+                "OLE2 FAT 섹터 개수({fat_sector_count})가 허용 범위를 벗어났습니다."
             )));
         }
 
-        let total_sectors = (container_bytes.len() / Self::SECTOR_SIZE) - 1;
         let mut visited = SectorBitset::with_capacity(total_sectors);
         let mut chain: Vec<u32> = Vec::new();
         let mut current = start_sector;
@@ -1458,93 +995,5 @@ impl Ole2SecurityGuard {
             ));
         }
         Ok(version)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::DocumentFormat;
-
-    #[test]
-    fn test_ole2_hwp5_and_legacy_codecs_roundtrip() {
-        let hwp_payload = Hwp5DocumentPayload {
-            version: (5, 0, 3, 0),
-            is_template: false,
-            agency_name: "행정안전부 디지털정부실".to_string(),
-            document_number: "고시 제2026-42호".to_string(),
-            paragraphs: vec![
-                Hwp5ParagraphRecord {
-                    text: "1. 표준 전자문서 호환성 검증".to_string(),
-                    style_name: "기관표제".to_string(),
-                    is_official_header: true,
-                },
-                Hwp5ParagraphRecord {
-                    text: "가. 32비트 레코드 헤더 및 UTF-16LE 본문 보존".to_string(),
-                    style_name: "본문".to_string(),
-                    is_official_header: false,
-                },
-            ],
-            table_cells: vec![vec!["항목".to_string(), "상태".to_string()]],
-        };
-        let hwp_bytes = Hwp5Codec::pack(&hwp_payload).unwrap();
-        assert_eq!(
-            FormatDetector::detect(&hwp_bytes, Some("test.hwp")).unwrap(),
-            DocumentFormat::Hwp
-        );
-        let decoded_hwp = Hwp5Codec::unpack(&hwp_bytes).unwrap();
-        assert_eq!(decoded_hwp, hwp_payload);
-
-        let xls_payload = LegacyXlsPayload {
-            sheet_name: "예산시트".to_string(),
-            cells: vec![
-                (0, 0, "항목".to_string()),
-                (0, 1, "1500".to_string()),
-                (0, 2, "=B1*2".to_string()),
-            ],
-        };
-        let xls_bytes = LegacyOle2Codec::pack_xls(&xls_payload).unwrap();
-        let decoded_xls = LegacyOle2Codec::unpack_xls(&xls_bytes).unwrap();
-        assert_eq!(decoded_xls, xls_payload);
-    }
-
-    #[test]
-    fn test_hwp5_para_text_control_chars_and_cfb_dir_cmp() {
-        assert_eq!(
-            Ole2ContainerCodec::cmp_cfb_dir_names("DocInfo", "docinfo"),
-            std::cmp::Ordering::Equal
-        );
-        assert_eq!(
-            Ole2ContainerCodec::cmp_cfb_dir_names("a", "BB"),
-            std::cmp::Ordering::Less
-        );
-
-        const HWP5_CTRL_SECTION_COL: u16 = 0x0002;
-        const HWP5_CTRL_DRAWING_TABLE: u16 = 0x000B;
-        const HWP5_CTRL_INLINE_TAB: u16 = 0x0009;
-        const HWP5_CTRL_HYPHEN: u16 = 0x0018;
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&encode_utf16le("문단앞"));
-        payload.extend_from_slice(&HWP5_CTRL_SECTION_COL.to_le_bytes());
-        for i in 0..6u16 {
-            payload.extend_from_slice(&(0xAC00 + i).to_le_bytes());
-        }
-        payload.extend_from_slice(&HWP5_CTRL_SECTION_COL.to_le_bytes());
-        payload.extend_from_slice(&HWP5_CTRL_DRAWING_TABLE.to_le_bytes());
-        for i in 0..6u16 {
-            payload.extend_from_slice(&(0xAC00 + i).to_le_bytes());
-        }
-        payload.extend_from_slice(&HWP5_CTRL_DRAWING_TABLE.to_le_bytes());
-        payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
-        payload.extend_from_slice(&[0u8; 12]);
-        payload.extend_from_slice(&HWP5_CTRL_INLINE_TAB.to_le_bytes());
-        payload.extend_from_slice(&HWP5_CTRL_HYPHEN.to_le_bytes());
-        payload.extend_from_slice(&encode_utf16le("문단뒤"));
-        payload.extend_from_slice(&0x000Au16.to_le_bytes());
-        payload.extend_from_slice(&encode_utf16le("둘째줄"));
-        payload.extend_from_slice(&0x000Du16.to_le_bytes());
-
-        let decoded = Hwp5Codec::decode_hwp5_para_text(&payload).unwrap();
-        assert_eq!(decoded, "문단앞\t문단뒤\n둘째줄");
     }
 }

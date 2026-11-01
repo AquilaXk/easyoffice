@@ -1,115 +1,5 @@
 import Foundation
 
-// MARK: - Extended Document Metadata Envelope (Lossless Round-Trip Support)
-
-internal typealias HWP5ExtendedMetadata = ExtendedDocumentMetadataEnvelope
-
-internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
-  var paragraphs: [ParagraphBlock]
-  var tables: [DocumentTableBlock]
-  var sections: [DocumentSectionLayout]
-  var footnotes: [FootnoteItem]
-  var revisions: [TrackedRevision]
-  var comments: [DocumentCommentThread]
-  var bookmarks: [String: UUID]
-  var images: [EmbeddedImageAttachment]
-  var equations: [DocumentEquationBlock]
-  var watermarkText: String?
-
-  init(from doc: OfficeDocumentModel) {
-    self.paragraphs = doc.paragraphs
-    self.tables = doc.tables
-    self.sections = doc.sections
-    self.footnotes = doc.footnotes
-    self.revisions = doc.revisions
-    self.comments = doc.comments
-    self.bookmarks = doc.bookmarks
-    self.images = doc.images
-    self.equations = doc.equations
-    self.watermarkText = doc.watermarkText
-  }
-
-  private enum CodingKeys: String, CodingKey {
-    case paragraphs, tables, sections, footnotes, revisions, comments, bookmarks, images, equations,
-      watermarkText
-  }
-
-  init(from decoder: Decoder) throws {
-    let c = try decoder.container(keyedBy: CodingKeys.self)
-    self.paragraphs = try c.decodeIfPresent([ParagraphBlock].self, forKey: .paragraphs) ?? []
-    self.tables = try c.decodeIfPresent([DocumentTableBlock].self, forKey: .tables) ?? []
-    self.sections = try c.decodeIfPresent([DocumentSectionLayout].self, forKey: .sections) ?? []
-    self.footnotes = try c.decodeIfPresent([FootnoteItem].self, forKey: .footnotes) ?? []
-    self.revisions = try c.decodeIfPresent([TrackedRevision].self, forKey: .revisions) ?? []
-    self.comments = try c.decodeIfPresent([DocumentCommentThread].self, forKey: .comments) ?? []
-    self.bookmarks = try c.decodeIfPresent([String: UUID].self, forKey: .bookmarks) ?? [:]
-    self.images = try c.decodeIfPresent([EmbeddedImageAttachment].self, forKey: .images) ?? []
-    self.equations = try c.decodeIfPresent([DocumentEquationBlock].self, forKey: .equations) ?? []
-    self.watermarkText = try c.decodeIfPresent(String.self, forKey: .watermarkText)
-  }
-
-  func apply(to doc: inout OfficeDocumentModel) {
-    for idx in doc.paragraphs.indices where idx < paragraphs.count {
-      let p = doc.paragraphs[idx]
-      let metaP = paragraphs[idx]
-      let resolvedListKind = metaP.listKind != .none ? metaP.listKind : p.listKind
-      let resolvedListLevel = metaP.listKind != .none ? metaP.listLevel : p.listLevel
-      let resolvedText =
-        (metaP.listKind != .none && !metaP.text.isEmpty) ? metaP.text : p.text
-      let resolvedRuns: [DocumentTextRun]
-      if !metaP.runs.isEmpty {
-        resolvedRuns = metaP.runs
-      } else if p.runs.map(\.text).joined() == resolvedText {
-        resolvedRuns = p.runs
-      } else {
-        resolvedRuns = []
-      }
-      doc.paragraphs[idx] = ParagraphBlock(
-        id: metaP.id,
-        style: p.style,
-        alignment: p.alignment,
-        text: resolvedText,
-        runs: resolvedRuns,
-        fontName: p.fontName,
-        fontSizePt: p.fontSizePt,
-        isBold: p.isBold,
-        isItalic: p.isItalic,
-        isUnderlined: p.isUnderlined,
-        lineSpacingPercent: p.lineSpacingPercent,
-        firstLineIndentPt: metaP.firstLineIndentPt != 0
-          ? metaP.firstLineIndentPt : p.firstLineIndentPt,
-        leftIndentPt: metaP.leftIndentPt != 0 ? metaP.leftIndentPt : p.leftIndentPt,
-        listKind: resolvedListKind,
-        listLevel: resolvedListLevel,
-        letterSpacingPercent: metaP.letterSpacingPercent != 0.0
-          ? metaP.letterSpacingPercent : p.letterSpacingPercent,
-        charWidthScalePercent: metaP.charWidthScalePercent != 100.0
-          ? metaP.charWidthScalePercent : p.charWidthScalePercent
-      )
-    }
-    for idx in doc.tables.indices where idx < tables.count {
-      let t = doc.tables[idx]
-      let metaT = tables[idx]
-      doc.tables[idx] = DocumentTableBlock(
-        id: metaT.id,
-        caption: t.caption,
-        rows: t.rows,
-        hasHeaderRow: t.hasHeaderRow,
-        cellSpans: metaT.cellSpans.isEmpty ? t.cellSpans : metaT.cellSpans,
-        borderStyle: metaT.borderStyle
-      )
-    }
-    if !sections.isEmpty { doc.sections = sections }
-    if !footnotes.isEmpty { doc.footnotes = footnotes }
-    if !revisions.isEmpty { doc.revisions = revisions }
-    if !comments.isEmpty { doc.comments = comments }
-    if !bookmarks.isEmpty { doc.bookmarks = bookmarks }
-    if !images.isEmpty { doc.images = images }
-    if !equations.isEmpty { doc.equations = equations }
-    if let watermarkText, !watermarkText.isEmpty { doc.watermarkText = watermarkText }
-  }
-}
-
 // MARK: - OLE2 Compound File Binary Format (CFBF) Container Codec
 
 /// Named stream inside an OLE2 Compound File Binary container.
@@ -168,7 +58,7 @@ public struct OLE2SectorTable: Sendable, Equatable {
   }
 }
 
-/// 512-byte sector OLE2 Compound File Binary Format (`D0 CF 11 E0 A1 B1 1A E1`) container codec.
+/// OLE2 Compound File Binary Format (`D0 CF 11 E0 A1 B1 1A E1`) container codec supporting v3 (512B) and v4 (4096B) sectors and DIFAT chains.
 public enum OLE2ContainerCodec {
   public static let sectorSize = 512
   public static let miniSectorSize = 64
@@ -176,10 +66,13 @@ public enum OLE2ContainerCodec {
   public static let directoryEntrySize = 128
   public static let entriesPerSector = sectorSize / directoryEntrySize  // 4
   public static let fatEntriesPerSector = sectorSize / 4  // 128
+  public static let difatEntriesPerSector = fatEntriesPerSector - 1  // 127
+  public static let maxDirectoryEntries = 4_096
 
   public static let freeSector: UInt32 = 0xFFFF_FFFF
   public static let endOfChain: UInt32 = 0xFFFF_FFFE
   public static let fatSectorMarker: UInt32 = 0xFFFF_FFFD
+  public static let difatSectorMarker: UInt32 = 0xFFFF_FFFC
   public static let maxTotalExtractedBytes = 64 * 1024 * 1024
 
   private static let objectTypeUnallocated: UInt8 = 0
@@ -202,6 +95,10 @@ public enum OLE2ContainerCodec {
       }
     }
     return unit
+  }
+
+  private static func foldCFBName(_ name: String) -> [UInt16] {
+    name.utf16.map(foldCFBCodeUnit)
   }
 
   private static func compareCFBNames(_ lhs: String, _ rhs: String) -> Bool {
@@ -246,7 +143,7 @@ public enum OLE2ContainerCodec {
       maxDepth: maxDepth,
       links: &links
     )
-    let color: UInt8 = (depth > 0 && depth == maxDepth) ? 0 : 1  // 0 = red on deepest incomplete level, 1 = black
+    let color: UInt8 = (depth > 0 && depth == maxDepth) ? 0 : 1
     links[entryID] = (left: leftChild, right: rightChild, color: color)
     return UInt32(entryID)
   }
@@ -263,12 +160,17 @@ public enum OLE2ContainerCodec {
   }
 
   public static func pack(streams: [OLE2StreamEntry]) throws -> Data {
-    // Decompose hierarchical stream names ("Storage/Stream") into storage + leaf stream
     var storageNames: [String] = []
+    var storageCanonicalByFolded: [[UInt16]: String] = [:]
+    var rootStreamFoldedNames = Set<[[UInt16]]>()
+    var storageChildrenFoldedNames: [[UInt16]: Set<[UInt16]>] = [:]
     var streamLeafNames: [String] = []
     var streamParentStorageName: [String?] = []
 
     for stream in streams {
+      guard !stream.name.isEmpty else {
+        throw EasyOfficeError.corruptedContainer(detail: "비어 있는 OLE2 스트림 이름은 허용되지 않습니다.")
+      }
       if let slashIdx = stream.name.firstIndex(of: "/") {
         let storageName = String(stream.name[..<slashIdx])
         let leafName = String(stream.name[stream.name.index(after: slashIdx)...])
@@ -276,21 +178,46 @@ public enum OLE2ContainerCodec {
           throw EasyOfficeError.corruptedContainer(
             detail: "유효하지 않은 OLE2 계층 스트림 경로: \(stream.name)")
         }
-        if !storageNames.contains(storageName) {
+        let foldedStorage = foldCFBName(storageName)
+        let foldedLeaf = foldCFBName(leafName)
+        if rootStreamFoldedNames.contains([foldedStorage]) {
+          throw EasyOfficeError.securityViolation(
+            detail: "OLE2 스토리지 이름이 기존 루트 스트림과 충돌합니다: \(stream.name)")
+        }
+        let canonicalStorage: String
+        if let existing = storageCanonicalByFolded[foldedStorage] {
+          canonicalStorage = existing
+        } else {
+          storageCanonicalByFolded[foldedStorage] = storageName
           storageNames.append(storageName)
+          canonicalStorage = storageName
+        }
+        guard storageChildrenFoldedNames[foldedStorage, default: []].insert(foldedLeaf).inserted else {
+          throw EasyOfficeError.securityViolation(
+            detail: "OLE2 동일 스토리지 내 중복된 스트림 이름이 감지되었습니다: \(stream.name)")
         }
         streamLeafNames.append(leafName)
-        streamParentStorageName.append(storageName)
+        streamParentStorageName.append(canonicalStorage)
       } else {
+        let foldedStream = foldCFBName(stream.name)
+        if storageCanonicalByFolded[foldedStream] != nil {
+          throw EasyOfficeError.securityViolation(
+            detail: "OLE2 루트 스트림 이름이 기존 스토리지와 충돌합니다: \(stream.name)")
+        }
+        guard rootStreamFoldedNames.insert([foldedStream]).inserted else {
+          throw EasyOfficeError.securityViolation(
+            detail: "OLE2 동일 스토리지 내 중복된 스트림 이름이 감지되었습니다: \(stream.name)")
+        }
         streamLeafNames.append(stream.name)
         streamParentStorageName.append(nil)
       }
     }
 
-    // Entry 0: Root Entry
-    // Entries 1..streams.count: Stream entries
-    // Entries (streams.count + 1)..<(1 + streams.count + storageNames.count): Storage entries
     let totalDirEntries = 1 + streams.count + storageNames.count
+    guard totalDirEntries <= maxDirectoryEntries else {
+      throw EasyOfficeError.resourceBudgetExceeded(
+        detail: "OLE2 디렉터리 엔트리 개수(\(totalDirEntries))가 허용 상한(\(maxDirectoryEntries))을 초과했습니다.")
+    }
     let dirSectorCount = max(1, (totalDirEntries + entriesPerSector - 1) / entriesPerSector)
 
     var nextSectorIndex = UInt32(dirSectorCount)
@@ -321,7 +248,7 @@ public enum OLE2ContainerCodec {
         let count = (stream.data.count + sectorSize - 1) / sectorSize
         streamStartSectors[idx] = nextSectorIndex
         regularStreamSectorCounts[idx] = count
-        nextSectorIndex += UInt32(count)
+        nextSectorIndex += try BitPacking.checkedUInt32(count, field: "OLE2 스트림 섹터 개수")
       }
     }
 
@@ -345,14 +272,22 @@ public enum OLE2ContainerCodec {
     }
 
     let contentSectorCount = Int(nextSectorIndex)
-    let fatSectorCount = max(
-      1, (contentSectorCount + fatEntriesPerSector - 1) / fatEntriesPerSector)
-    guard fatSectorCount <= 109 else {
-      throw EasyOfficeError.corruptedContainer(detail: "OLE2 DIFAT 109 섹터 한도를 초과했습니다.")
+    var fatSectorCount = max(1, (contentSectorCount + fatEntriesPerSector - 1) / fatEntriesPerSector)
+    var difatSectorCount =
+      fatSectorCount > 109
+      ? ((fatSectorCount - 109 + difatEntriesPerSector - 1) / difatEntriesPerSector)
+      : 0
+    while contentSectorCount + fatSectorCount + difatSectorCount > fatSectorCount * fatEntriesPerSector {
+      fatSectorCount += 1
+      difatSectorCount =
+        fatSectorCount > 109
+        ? ((fatSectorCount - 109 + difatEntriesPerSector - 1) / difatEntriesPerSector)
+        : 0
     }
 
-    let firstFatSectorIndex = Int(nextSectorIndex)
-    let totalSectors = contentSectorCount + fatSectorCount
+    let firstFatSectorIndex = contentSectorCount
+    let firstDifatSectorIndex = firstFatSectorIndex + fatSectorCount
+    let totalSectors = contentSectorCount + fatSectorCount + difatSectorCount
 
     var fat: [UInt32] = Array(repeating: freeSector, count: fatSectorCount * fatEntriesPerSector)
 
@@ -390,6 +325,10 @@ public enum OLE2ContainerCodec {
       fat[firstFatSectorIndex + fIdx] = fatSectorMarker
     }
 
+    for dIdx in 0..<difatSectorCount {
+      fat[firstDifatSectorIndex + dIdx] = difatSectorMarker
+    }
+
     var container = Data(repeating: 0, count: sectorSize)
     for (i, byte) in FormatDetector.ole2Magic.enumerated() {
       container[i] = byte
@@ -399,20 +338,33 @@ public enum OLE2ContainerCodec {
     try BitPacking.writeUInt16LE(0xFFFE, into: &container, at: 28)
     try BitPacking.writeUInt16LE(0x0009, into: &container, at: 30)
     try BitPacking.writeUInt16LE(0x0006, into: &container, at: 32)
-    try BitPacking.writeUInt32LE(UInt32(fatSectorCount), into: &container, at: 44)
+    try BitPacking.writeUInt32LE(
+      try BitPacking.checkedUInt32(fatSectorCount, field: "OLE2 FAT 섹터 개수"),
+      into: &container,
+      at: 44
+    )
     try BitPacking.writeUInt32LE(0, into: &container, at: 48)
     try BitPacking.writeUInt32LE(UInt32(miniStreamCutoffSize), into: &container, at: 56)
     try BitPacking.writeUInt32LE(firstMiniFatSector, into: &container, at: 60)
-    try BitPacking.writeUInt32LE(UInt32(miniFatSectorCount), into: &container, at: 64)
-    try BitPacking.writeUInt32LE(endOfChain, into: &container, at: 68)
-    try BitPacking.writeUInt32LE(0, into: &container, at: 72)
+    try BitPacking.writeUInt32LE(
+      try BitPacking.checkedUInt32(miniFatSectorCount, field: "OLE2 MiniFAT 섹터 개수"),
+      into: &container,
+      at: 64
+    )
+    let headerFirstDifat: UInt32 =
+      difatSectorCount > 0 ? UInt32(firstDifatSectorIndex) : endOfChain
+    try BitPacking.writeUInt32LE(headerFirstDifat, into: &container, at: 68)
+    try BitPacking.writeUInt32LE(
+      try BitPacking.checkedUInt32(difatSectorCount, field: "OLE2 DIFAT 섹터 개수"),
+      into: &container,
+      at: 72
+    )
 
     for slot in 0..<109 {
       let value = (slot < fatSectorCount) ? UInt32(firstFatSectorIndex + slot) : freeSector
       try BitPacking.writeUInt32LE(value, into: &container, at: 76 + slot * 4)
     }
 
-    // Build Red-Black BST links for Root Entry children and each Storage's children
     var entryNamesByID: [Int: String] = [0: "Root Entry"]
     var rootChildEntryIDs: [Int] = []
     var storageChildEntryIDs: [String: [Int]] = [:]
@@ -508,7 +460,6 @@ public enum OLE2ContainerCodec {
 
     container.append(directoryBytes)
 
-    // Append regular streams (>= 4096 bytes)
     for (idx, stream) in streams.enumerated() where regularStreamSectorCounts[idx] > 0 {
       container.append(stream.data)
       let remainder = stream.data.count % sectorSize
@@ -517,7 +468,6 @@ public enum OLE2ContainerCodec {
       }
     }
 
-    // Append MiniFAT sectors and Root Entry MiniStream sectors if present
     if miniFatSectorCount > 0 {
       var miniFatBytes = Data(count: miniFat.count * 4)
       miniFatBytes.withUnsafeMutableBytes { rawBuffer in
@@ -542,22 +492,55 @@ public enum OLE2ContainerCodec {
     }
     container.append(fatBytes)
 
+    if difatSectorCount > 0 {
+      var difatBytes = Data(repeating: 0xFF, count: difatSectorCount * sectorSize)
+      for dIdx in 0..<difatSectorCount {
+        let sectorBase = dIdx * sectorSize
+        for slot in 0..<difatEntriesPerSector {
+          let fatOrdinal = 109 + dIdx * difatEntriesPerSector + slot
+          let val: UInt32 =
+            (fatOrdinal < fatSectorCount) ? UInt32(firstFatSectorIndex + fatOrdinal) : freeSector
+          try BitPacking.writeUInt32LE(val, into: &difatBytes, at: sectorBase + slot * 4)
+        }
+        let nextDifat: UInt32 =
+          (dIdx + 1 < difatSectorCount) ? UInt32(firstDifatSectorIndex + dIdx + 1) : endOfChain
+        try BitPacking.writeUInt32LE(
+          nextDifat, into: &difatBytes, at: sectorBase + difatEntriesPerSector * 4)
+      }
+      container.append(difatBytes)
+    }
+
     assert(container.count == (1 + totalSectors) * sectorSize)
     return container
   }
 
   public static func unpack(from data: Data) throws -> [OLE2StreamEntry] {
-    guard data.count >= sectorSize * 2, data.count % sectorSize == 0 else {
-      throw EasyOfficeError.corruptedContainer(detail: "OLE2 컨테이너 크기가 512-byte 섹터 배수가 아닙니다.")
+    guard data.count >= sectorSize * 2 else {
+      throw EasyOfficeError.corruptedContainer(detail: "OLE2 컨테이너 크기가 최소 섹터 크기보다 작습니다.")
     }
     guard data.starts(with: FormatDetector.ole2Magic) else {
       throw EasyOfficeError.signatureMismatch(expected: .ole2Compound, fileName: "ole2")
     }
 
+    let majorVersion = try BitPacking.readUInt16LE(from: data, at: 26)
     let sectorShift = try BitPacking.readUInt16LE(from: data, at: 30)
-    guard sectorShift == 9 else {
+    guard sectorShift == 9 || sectorShift == 12 else {
       throw EasyOfficeError.corruptedContainer(detail: "지원하지 않는 OLE2 섹터 시프트 값: \(sectorShift)")
     }
+    if majorVersion == 3 && sectorShift != 9 {
+      throw EasyOfficeError.corruptedContainer(detail: "OLE2 v3 헤더의 섹터 시프트(\(sectorShift))가 9가 아닙니다.")
+    }
+    if majorVersion == 4 && sectorShift != 12 {
+      throw EasyOfficeError.corruptedContainer(detail: "OLE2 v4 헤더의 섹터 시프트(\(sectorShift))가 12가 아닙니다.")
+    }
+
+    let actualSectorSize = 1 << Int(sectorShift)
+    guard data.count >= actualSectorSize * 2, data.count % actualSectorSize == 0 else {
+      throw EasyOfficeError.corruptedContainer(
+        detail: "OLE2 컨테이너 크기가 섹터 크기(\(actualSectorSize) bytes) 배수가 아닙니다.")
+    }
+    let actualFatEntriesPerSector = actualSectorSize / 4
+    let actualDifatSlotsPerSector = actualFatEntriesPerSector - 1
 
     let fatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 44))
     let firstDirSector = try BitPacking.readUInt32LE(from: data, at: 48)
@@ -566,7 +549,7 @@ public enum OLE2ContainerCodec {
     let miniFatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 64))
     let firstDifatSector = try BitPacking.readUInt32LE(from: data, at: 68)
     let difatSectorCount = Int(try BitPacking.readUInt32LE(from: data, at: 72))
-    let totalSectorsInFile = (data.count / sectorSize) - 1
+    let totalSectorsInFile = (data.count / actualSectorSize) - 1
 
     guard fatSectorCount > 0, fatSectorCount <= totalSectorsInFile else {
       throw EasyOfficeError.corruptedContainer(detail: "유효하지 않은 OLE2 FAT 섹터 개수: \(fatSectorCount)")
@@ -576,58 +559,96 @@ public enum OLE2ContainerCodec {
     fatSectorIndices.reserveCapacity(fatSectorCount)
     let headerSlots = min(fatSectorCount, 109)
     for slot in 0..<headerSlots {
-      let fatSecIndex = Int(try BitPacking.readUInt32LE(from: data, at: 76 + slot * 4))
-      fatSectorIndices.append(fatSecIndex)
+      let rawSec = try BitPacking.readUInt32LE(from: data, at: 76 + slot * 4)
+      guard rawSec != freeSector, rawSec != endOfChain else {
+        throw EasyOfficeError.corruptedContainer(detail: "OLE2 헤더 DIFAT 슬롯(\(slot))이 비어 있습니다.")
+      }
+      fatSectorIndices.append(Int(rawSec))
     }
 
+    var visitedDifat = Set<UInt32>()
     if fatSectorCount > 109 {
+      guard difatSectorCount > 0, difatSectorCount <= totalSectorsInFile,
+        firstDifatSector != endOfChain, firstDifatSector != freeSector
+      else {
+        throw EasyOfficeError.corruptedContainer(detail: "OLE2 DIFAT 체인 헤더가 누락되었거나 손상되었습니다.")
+      }
       var currentDifat = firstDifatSector
-      var remainingDifatSectors = max(0, difatSectorCount)
-      var visitedDifat = Set<UInt32>()
+      var walkedDifatSectors = 0
       while currentDifat != endOfChain && currentDifat != freeSector
-        && fatSectorIndices.count < fatSectorCount && remainingDifatSectors > 0
+        && walkedDifatSectors < difatSectorCount
       {
-        guard Int(currentDifat) < totalSectorsInFile, visitedDifat.insert(currentDifat).inserted
+        guard Int(currentDifat) >= 0, Int(currentDifat) < totalSectorsInFile,
+          visitedDifat.insert(currentDifat).inserted
         else {
-          throw EasyOfficeError.corruptedContainer(detail: "OLE2 DIFAT 체인이 손상되었습니다.")
+          throw EasyOfficeError.corruptedContainer(detail: "OLE2 DIFAT 체인이 손상되었거나 순환합니다.")
         }
-        let difatOffset = (1 + Int(currentDifat)) * sectorSize
-        for slot in 0..<127 where fatSectorIndices.count < fatSectorCount {
+        let difatOffset = (1 + Int(currentDifat)) * actualSectorSize
+        for slot in 0..<actualDifatSlotsPerSector where fatSectorIndices.count < fatSectorCount {
           let secIdx = try BitPacking.readUInt32LE(from: data, at: difatOffset + slot * 4)
-          if secIdx != freeSector {
-            fatSectorIndices.append(Int(secIdx))
+          guard secIdx != freeSector, secIdx != endOfChain else {
+            throw EasyOfficeError.corruptedContainer(detail: "OLE2 DIFAT 섹터 내 필수 FAT 인덱스가 누락되었습니다.")
           }
+          fatSectorIndices.append(Int(secIdx))
         }
-        currentDifat = try BitPacking.readUInt32LE(from: data, at: difatOffset + 127 * 4)
-        remainingDifatSectors -= 1
+        currentDifat = try BitPacking.readUInt32LE(
+          from: data, at: difatOffset + actualDifatSlotsPerSector * 4)
+        walkedDifatSectors += 1
+      }
+      guard walkedDifatSectors == difatSectorCount,
+        fatSectorIndices.count == fatSectorCount,
+        currentDifat == endOfChain || currentDifat == freeSector
+      else {
+        throw EasyOfficeError.corruptedContainer(detail: "OLE2 DIFAT 체인 길이 또는 종단 마커가 일치하지 않습니다.")
       }
     }
 
+    let wordCount = max(
+      1, (max(fatSectorIndices.count * actualFatEntriesPerSector, totalSectorsInFile) + 63) >> 6)
+    var claimedWords = [UInt64](repeating: 0, count: wordCount)
+
+    for difatSec in visitedDifat {
+      let idx = Int(difatSec)
+      claimedWords[idx >> 6] |= (1 << UInt64(idx & 63))
+    }
+
     var fat: [UInt32] = []
-    fat.reserveCapacity(fatSectorIndices.count * fatEntriesPerSector)
+    fat.reserveCapacity(fatSectorIndices.count * actualFatEntriesPerSector)
     for fatSecIndex in fatSectorIndices {
       guard fatSecIndex >= 0, fatSecIndex < totalSectorsInFile else {
         throw EasyOfficeError.corruptedContainer(detail: "OLE2 FAT 섹터 인덱스가 파일 범위를 벗어납니다.")
       }
-      let secOffset = (1 + fatSecIndex) * sectorSize
-      for entryIdx in 0..<fatEntriesPerSector {
+      let wordIdx = fatSecIndex >> 6
+      let mask: UInt64 = 1 << UInt64(fatSecIndex & 63)
+      guard (claimedWords[wordIdx] & mask) == 0 else {
+        throw EasyOfficeError.corruptedContainer(detail: "OLE2 FAT 섹터 인덱스가 중복 참조되었습니다.")
+      }
+      claimedWords[wordIdx] |= mask
+
+      let secOffset = (1 + fatSecIndex) * actualSectorSize
+      for entryIdx in 0..<actualFatEntriesPerSector {
         let val = try BitPacking.readUInt32LE(from: data, at: secOffset + entryIdx * 4)
         fat.append(val)
       }
     }
 
-    let wordCount = max(1, (max(fat.count, totalSectorsInFile) + 63) >> 6)
-    var claimedWords = [UInt64](repeating: 0, count: wordCount)
     let directoryData = try readSectorChain(
       startSector: firstDirSector,
       fat: fat,
       data: data,
+      sectorSize: actualSectorSize,
       totalSectors: totalSectorsInFile,
       claimedWords: &claimedWords,
-      expectedByteCount: sectorSize
+      expectedByteCount: actualSectorSize
     )
     guard !directoryData.isEmpty else {
       throw EasyOfficeError.corruptedContainer(detail: "OLE2 디렉터리 섹터 체인이 비어 있습니다.")
+    }
+
+    let entryCount = directoryData.count / directoryEntrySize
+    guard entryCount <= maxDirectoryEntries else {
+      throw EasyOfficeError.resourceBudgetExceeded(
+        detail: "OLE2 디렉터리 엔트리 개수(\(entryCount))가 허용 한도(\(maxDirectoryEntries))를 초과했습니다.")
     }
 
     var miniFat: [UInt32] = []
@@ -643,9 +664,10 @@ public enum OLE2ContainerCodec {
         startSector: firstMiniFatSector,
         fat: fat,
         data: data,
+        sectorSize: actualSectorSize,
         totalSectors: totalSectorsInFile,
         claimedWords: &claimedWords,
-        expectedByteCount: miniFatSectorCount * sectorSize
+        expectedByteCount: miniFatSectorCount * actualSectorSize
       )
       let count = miniFatBytes.count / 4
       miniFat.reserveCapacity(count)
@@ -672,6 +694,7 @@ public enum OLE2ContainerCodec {
             startSector: rootStartSector,
             fat: fat,
             data: data,
+            sectorSize: actualSectorSize,
             totalSectors: totalSectorsInFile,
             claimedWords: &claimedWords,
             expectedByteCount: rootStreamSize
@@ -683,7 +706,6 @@ public enum OLE2ContainerCodec {
       }
     }
 
-    let entryCount = directoryData.count / directoryEntrySize
     struct ParsedDirNode {
       let objectType: UInt8
       let name: String
@@ -710,7 +732,9 @@ public enum OLE2ContainerCodec {
       let startSector = try BitPacking.readUInt32LE(from: directoryData, at: entryBase + 116)
       let rawStreamSize = try BitPacking.readUInt64LE(from: directoryData, at: entryBase + 120)
       if objectType == objectTypeStream {
-        guard rawStreamSize <= UInt64(data.count) else {
+        guard rawStreamSize <= UInt64(data.count),
+          rawStreamSize <= UInt64(maxTotalExtractedBytes)
+        else {
           throw EasyOfficeError.corruptedContainer(
             detail: "OLE2 스트림 '\(name)' 크기 오류: \(rawStreamSize)")
         }
@@ -726,37 +750,81 @@ public enum OLE2ContainerCodec {
       )
     }
 
-    // Reconstruct hierarchical paths from Storage -> Child BST
+    enum TraversalStep {
+      case enter(entryID: UInt32, prefix: String)
+      case visit(idx: Int, prefix: String)
+    }
+
     var resolvedStreamPaths: [Int: String] = [:]
     var visitedDirIDs = Set<Int>()
-    func traverseDirectorySubtree(entryID: UInt32, prefix: String) {
-      guard entryID != freeSector, entryID != endOfChain else { return }
-      let idx = Int(entryID)
-      guard idx > 0, idx < entryCount, let node = dirNodes[idx],
-        visitedDirIDs.insert(idx).inserted
-      else { return }
-      traverseDirectorySubtree(entryID: node.leftSiblingID, prefix: prefix)
-      let fullPath = prefix.isEmpty ? node.name : "\(prefix)/\(node.name)"
-      if node.objectType == objectTypeStream {
-        resolvedStreamPaths[idx] = fullPath
-      } else if node.objectType == objectTypeStorage {
-        traverseDirectorySubtree(entryID: node.childID, prefix: fullPath)
-      }
-      traverseDirectorySubtree(entryID: node.rightSiblingID, prefix: prefix)
-    }
+    var seenSiblingsByPrefix: [String: Set<[UInt16]>] = [:]
+    var traversalSteps = 0
+
     if let rootNode = dirNodes[0] {
-      traverseDirectorySubtree(entryID: rootNode.childID, prefix: "")
+      var stack: [TraversalStep] = [.enter(entryID: rootNode.childID, prefix: "")]
+      while let step = stack.popLast() {
+        switch step {
+        case .enter(let entryID, let prefix):
+          guard entryID != freeSector, entryID != endOfChain else { continue }
+          traversalSteps += 1
+          guard traversalSteps <= maxDirectoryEntries else {
+            throw EasyOfficeError.resourceBudgetExceeded(
+              detail: "OLE2 디렉터리 트리 순회 횟수가 허용 한도(\(maxDirectoryEntries))를 초과했습니다.")
+          }
+          let idx = Int(entryID)
+          guard idx > 0, idx < entryCount, let node = dirNodes[idx] else {
+            throw EasyOfficeError.corruptedContainer(
+              detail: "OLE2 디렉터리 트리가 유효하지 않은 엔트리(\(entryID))를 참조합니다.")
+          }
+          guard visitedDirIDs.insert(idx).inserted else {
+            throw EasyOfficeError.corruptedContainer(
+              detail: "OLE2 디렉터리 트리에서 순환 참조가 감지되었습니다.")
+          }
+          stack.append(.enter(entryID: node.rightSiblingID, prefix: prefix))
+          stack.append(.visit(idx: idx, prefix: prefix))
+          stack.append(.enter(entryID: node.leftSiblingID, prefix: prefix))
+
+        case .visit(let idx, let prefix):
+          guard let node = dirNodes[idx] else { continue }
+          let folded = foldCFBName(node.name)
+          guard seenSiblingsByPrefix[prefix, default: []].insert(folded).inserted else {
+            throw EasyOfficeError.corruptedContainer(
+              detail: "OLE2 동일 스토리지 내 중복된 엔트리 이름이 감지되었습니다: \(node.name)")
+          }
+          let fullPath = prefix.isEmpty ? node.name : "\(prefix)/\(node.name)"
+          if node.objectType == objectTypeStream {
+            resolvedStreamPaths[idx] = fullPath
+          } else if node.objectType == objectTypeStorage {
+            stack.append(.enter(entryID: node.childID, prefix: fullPath))
+          }
+        }
+      }
     }
 
     var streams: [OLE2StreamEntry] = []
+    var seenResolvedStreamFoldedPaths = Set<[[UInt16]]>()
     let totalMiniSectorsCapacity = max(miniStreamData.count / miniSectorSize, miniFat.count)
     var claimedMiniWords = [UInt64](repeating: 0, count: (totalMiniSectorsCapacity + 63) / 64)
+    var cumulativeExtractedBytes = 0
 
+    let hasTreePaths = !resolvedStreamPaths.isEmpty
     for idx in 0..<entryCount {
       guard let node = dirNodes[idx], node.objectType == objectTypeStream else { continue }
-      let name = resolvedStreamPaths[idx] ?? node.name
+      guard let name = hasTreePaths ? resolvedStreamPaths[idx] : node.name else { continue }
+      let foldedPath = name.split(separator: "/", omittingEmptySubsequences: false).map {
+        foldCFBName(String($0))
+      }
+      guard seenResolvedStreamFoldedPaths.insert(foldedPath).inserted else {
+        throw EasyOfficeError.corruptedContainer(
+          detail: "OLE2 동일 스토리지 내 중복된 스트림 이름이 감지되었습니다: \(name)")
+      }
       let startSector = node.startSector
       let streamSize = node.streamSize
+      cumulativeExtractedBytes += streamSize
+      guard cumulativeExtractedBytes <= maxTotalExtractedBytes else {
+        throw EasyOfficeError.resourceBudgetExceeded(
+          detail: "OLE2 누적 추출 스트림 크기(\(cumulativeExtractedBytes))가 허용 상한(\(maxTotalExtractedBytes))을 초과했습니다.")
+      }
 
       if streamSize == 0 {
         streams.append(OLE2StreamEntry(name: name, data: Data()))
@@ -771,7 +839,7 @@ public enum OLE2ContainerCodec {
           guard Int(current) < totalMiniSectors, Int(current) < miniFat.count else {
             throw EasyOfficeError.corruptedContainer(
               detail: "OLE2 MiniFAT 체인이 유효하지 않거나 중복된 미니섹터(\(current))를 참조합니다.")
-          }
+            }
           let miniIdx = Int(current)
           let miniWordIdx = miniIdx >> 6
           let miniBitMask: UInt64 = 1 << (miniIdx & 63)
@@ -799,6 +867,7 @@ public enum OLE2ContainerCodec {
           startSector: startSector,
           fat: fat,
           data: data,
+          sectorSize: actualSectorSize,
           totalSectors: totalSectorsInFile,
           claimedWords: &claimedWords,
           expectedByteCount: streamSize
@@ -818,6 +887,7 @@ public enum OLE2ContainerCodec {
     startSector: UInt32,
     fat: [UInt32],
     data: Data,
+    sectorSize: Int,
     totalSectors: Int,
     claimedWords: inout [UInt64],
     expectedByteCount: Int? = nil
@@ -882,543 +952,5 @@ public enum OLE2ContainerCodec {
     try BitPacking.writeUInt32LE(childID, into: &directoryBytes, at: base + 76)
     try BitPacking.writeUInt32LE(startSector, into: &directoryBytes, at: base + 116)
     try BitPacking.writeUInt64LE(streamSize, into: &directoryBytes, at: base + 120)
-  }
-}
-
-// MARK: - HWP 5.0 Binary Document Codec (Compressed & Uncompressed Streams)
-
-/// HWP 5.0 binary document codec built on top of `OLE2ContainerCodec` and `HWP5RecordHeader`.
-public enum HWP5BinaryCodec {
-  public static let fileHeaderByteLength = 256
-  public static let signatureString = "HWP Document File"
-  public static let defaultVersion: UInt32 = 0x0500_0300  // 5.0.3.0
-  public static let flagCompressed: UInt32 = 0x0000_0001
-  public static let flagEncrypted: UInt32 = 0x0000_0002
-  public static let flagDistribution: UInt32 = 0x0000_0004
-  public static let maxHWP5Records = 524_288
-  public static let maxTotalHWP5TableCells = 65_536
-  public static let maxHWP5TableRows = 4096
-  public static let maxHWP5TableColumns = 256
-
-  private static func safeClampedUInt32(
-    _ value: Double, min minVal: UInt32 = 0, max maxVal: UInt32 = 100_000_000
-  ) -> UInt32 {
-    guard value.isFinite else { return minVal }
-    let clamped = Swift.max(Double(minVal), Swift.min(Double(maxVal), value.rounded()))
-    return UInt32(clamped)
-  }
-
-  private static func safeClampedInt32(
-    _ value: Double, min minVal: Int32 = -100_000_000, max maxVal: Int32 = 100_000_000
-  ) -> Int32 {
-    guard value.isFinite else { return 0 }
-    let clamped = Swift.max(Double(minVal), Swift.min(Double(maxVal), value.rounded()))
-    return Int32(clamped)
-  }
-
-  public static func encodeDocument(_ doc: OfficeDocumentModel, compressed: Bool = true) throws
-    -> Data
-  {
-    var fileHeader = Data(repeating: 0, count: fileHeaderByteLength)
-    let sigBytes = Array(signatureString.utf8)
-    for (idx, b) in sigBytes.enumerated() {
-      fileHeader[idx] = b
-    }
-    try BitPacking.writeUInt32LE(defaultVersion, into: &fileHeader, at: 32)
-    let headerFlags: UInt32 = compressed ? flagCompressed : 0
-    try BitPacking.writeUInt32LE(headerFlags, into: &fileHeader, at: 36)
-
-    var docPropsPayload = Data()
-    BitPacking.appendLengthPrefixedUTF16LE(doc.title, to: &docPropsPayload)
-    BitPacking.appendLengthPrefixedUTF16LE(doc.paperSize.rawValue, to: &docPropsPayload)
-    BitPacking.appendLengthPrefixedUTF16LE(doc.headerText, to: &docPropsPayload)
-    BitPacking.appendLengthPrefixedUTF16LE(doc.footerText, to: &docPropsPayload)
-    docPropsPayload.append(doc.trackChangesEnabled ? 1 : 0)
-
-    var rawDocInfoStream = try HWP5RecordHeader.encode(
-      tagID: HWP5RecordHeader.tagDocumentProperties,
-      level: 0,
-      payloadSize: UInt32(docPropsPayload.count)
-    )
-    rawDocInfoStream.append(docPropsPayload)
-
-    let extEnvelope = ExtendedDocumentMetadataEnvelope(from: doc)
-    if let extPayload = try? JSONEncoder().encode(extEnvelope), !extPayload.isEmpty {
-      let extRec = try HWP5RecordHeader.encode(
-        tagID: HWP5RecordHeader.tagExtendedMetadata,
-        level: 0,
-        payloadSize: UInt32(extPayload.count)
-      )
-      rawDocInfoStream.append(extRec)
-      rawDocInfoStream.append(extPayload)
-    }
-
-    var rawSection0Stream = Data()
-
-    for paragraph in doc.paragraphs {
-      var paraHeaderPayload = Data()
-      BitPacking.appendLengthPrefixedUTF16LE(paragraph.style.rawValue, to: &paraHeaderPayload)
-      BitPacking.appendLengthPrefixedUTF16LE(paragraph.alignment.rawValue, to: &paraHeaderPayload)
-      BitPacking.appendLengthPrefixedUTF16LE(paragraph.fontName, to: &paraHeaderPayload)
-      BitPacking.appendUInt32LE(
-        safeClampedUInt32(paragraph.fontSizePt * 100.0, min: 100, max: 1_000_000),
-        to: &paraHeaderPayload)
-      BitPacking.appendUInt32LE(
-        safeClampedUInt32(paragraph.lineSpacingPercent * 100.0, min: 5_000, max: 1_000_000),
-        to: &paraHeaderPayload)
-      var styleFlags: UInt8 = 0
-      if paragraph.isBold { styleFlags |= 0x01 }
-      if paragraph.isItalic { styleFlags |= 0x02 }
-      if paragraph.isUnderlined { styleFlags |= 0x04 }
-      paraHeaderPayload.append(styleFlags)
-      BitPacking.appendUInt32LE(
-        UInt32(bitPattern: safeClampedInt32(paragraph.letterSpacingPercent * 100.0)),
-        to: &paraHeaderPayload)
-      BitPacking.appendUInt32LE(
-        safeClampedUInt32(paragraph.charWidthScalePercent * 100.0, min: 1_000, max: 1_000_000),
-        to: &paraHeaderPayload)
-
-      let headerRec = try HWP5RecordHeader.encode(
-        tagID: HWP5RecordHeader.tagParaHeader,
-        level: 0,
-        payloadSize: UInt32(paraHeaderPayload.count)
-      )
-      rawSection0Stream.append(headerRec)
-      rawSection0Stream.append(paraHeaderPayload)
-
-      let textPayload = BitPacking.encodeUTF16LE(paragraph.text)
-      let textRec = try HWP5RecordHeader.encode(
-        tagID: HWP5RecordHeader.tagParaText,
-        level: 1,
-        payloadSize: UInt32(textPayload.count)
-      )
-      rawSection0Stream.append(textRec)
-      rawSection0Stream.append(textPayload)
-    }
-
-    for table in doc.tables {
-      guard table.rows.count <= maxHWP5TableRows else {
-        throw EasyOfficeError.corruptedContainer(
-          detail: "HWP 5.0 표 행 개수(\(table.rows.count))가 허용 상한(\(maxHWP5TableRows))을 초과했습니다.")
-      }
-      var tablePayload = Data()
-      BitPacking.appendLengthPrefixedUTF16LE(table.caption, to: &tablePayload)
-      tablePayload.append(table.hasHeaderRow ? 1 : 0)
-      BitPacking.appendUInt16LE(UInt16(table.rows.count), to: &tablePayload)
-      for row in table.rows {
-        guard row.count <= maxHWP5TableColumns else {
-          throw EasyOfficeError.corruptedContainer(
-            detail: "HWP 5.0 표 열 개수(\(row.count))가 허용 상한(\(maxHWP5TableColumns))을 초과했습니다.")
-        }
-        BitPacking.appendUInt16LE(UInt16(row.count), to: &tablePayload)
-        for cell in row {
-          BitPacking.appendLengthPrefixedUTF16LE(cell, to: &tablePayload)
-        }
-      }
-      let tableRec = try HWP5RecordHeader.encode(
-        tagID: HWP5RecordHeader.tagTableRecord,
-        level: 0,
-        payloadSize: UInt32(tablePayload.count)
-      )
-      rawSection0Stream.append(tableRec)
-      rawSection0Stream.append(tablePayload)
-    }
-
-    let docInfoStream: Data
-    let section0Stream: Data
-    if compressed {
-      docInfoStream =
-        rawDocInfoStream.isEmpty
-        ? Data() : try ZipContainerCodec.compressRawDeflate(rawDocInfoStream)
-      section0Stream =
-        rawSection0Stream.isEmpty
-        ? Data() : try ZipContainerCodec.compressRawDeflate(rawSection0Stream)
-    } else {
-      docInfoStream = rawDocInfoStream
-      section0Stream = rawSection0Stream
-    }
-
-    return try OLE2ContainerCodec.pack(streams: [
-      OLE2StreamEntry(name: "FileHeader", data: fileHeader),
-      OLE2StreamEntry(name: "DocInfo", data: docInfoStream),
-      OLE2StreamEntry(name: "BodyText/Section0", data: section0Stream),
-    ])
-  }
-
-  public static func decodeDocument(from data: Data) throws -> OfficeDocumentModel {
-    let streams = try OLE2ContainerCodec.unpack(from: data)
-    var streamMap: [String: Data] = [:]
-    for stream in streams {
-      streamMap[stream.name] = stream.data
-    }
-
-    guard let fileHeader = streamMap["FileHeader"], fileHeader.count >= 40 else {
-      throw EasyOfficeError.corruptedContainer(
-        detail: "HWP 5.0 필수 스트림 'FileHeader'가 누락되었거나 손상되었습니다.")
-    }
-
-    let expectedSig = Data(signatureString.utf8)
-    guard fileHeader.prefix(expectedSig.count) == expectedSig else {
-      throw EasyOfficeError.corruptedContainer(
-        detail: "HWP 5.0 'HWP Document File' 시그니처가 일치하지 않습니다.")
-    }
-
-    let flags = try BitPacking.readUInt32LE(from: fileHeader, at: 36)
-    if (flags & (flagEncrypted | flagDistribution)) != 0 {
-      throw EasyOfficeError.encryptedDocumentUnsupported(format: .hwp)
-    }
-    let isCompressed = (flags & flagCompressed) != 0
-
-    var title = "제목 없음"
-    var paperSize: PaperSizePreset = .a4
-    var headerText = ""
-    var footerText = ""
-    var trackChanges = false
-    var extendedEnvelope: ExtendedDocumentMetadataEnvelope?
-    var totalDecodedRecords = 0
-    var totalDecodedTableCells = 0
-
-    if let rawDocInfo = streamMap["DocInfo"], !rawDocInfo.isEmpty {
-      let docInfo =
-        isCompressed ? try ZipContainerCodec.decompressRawDeflateStream(rawDocInfo) : rawDocInfo
-      var docOffset = 0
-      var parsedDocProps = false
-      while docOffset < docInfo.count {
-        totalDecodedRecords += 1
-        guard totalDecodedRecords <= maxHWP5Records else {
-          throw EasyOfficeError.securityViolation(
-            detail: "HWP 5.0 레코드 개수가 허용 상한(\(maxHWP5Records))을 초과했습니다.")
-        }
-        let (recHeader, headerLen) = try HWP5RecordHeader.decode(from: docInfo, at: docOffset)
-        let payloadStart = docOffset + headerLen
-        let recordEnd = payloadStart + Int(recHeader.payloadSize)
-        guard recordEnd <= docInfo.count else {
-          throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 DocInfo 레코드가 손상되었습니다.")
-        }
-        if recHeader.tagID == HWP5RecordHeader.tagDocumentProperties {
-          let firstU32 = (try? BitPacking.readUInt32LE(from: docInfo, at: payloadStart)) ?? 0
-          if recHeader.payloadSize == 26 && (firstU32 == 0 || firstU32 > 18 || firstU32 % 2 != 0) {
-            let sectionCount = try BitPacking.readUInt16LE(from: docInfo, at: payloadStart)
-            guard sectionCount >= 1 else {
-              throw EasyOfficeError.corruptedContainer(
-                detail: "HWP 5.0 표준 문서 속성 레코드의 구역 개수가 유효하지 않습니다.")
-            }
-            parsedDocProps = true
-          } else {
-            var cursor = payloadStart
-            title = try BitPacking.readLengthPrefixedUTF16LE(
-              from: docInfo, offset: &cursor, limit: recordEnd)
-            let paperRaw = try BitPacking.readLengthPrefixedUTF16LE(
-              from: docInfo, offset: &cursor, limit: recordEnd)
-            if cursor == recordEnd {
-              paperSize = .a4
-              headerText = paperRaw
-            } else {
-              paperSize = PaperSizePreset(rawValue: paperRaw) ?? .a4
-              headerText = try BitPacking.readLengthPrefixedUTF16LE(
-                from: docInfo, offset: &cursor, limit: recordEnd)
-              footerText = try BitPacking.readLengthPrefixedUTF16LE(
-                from: docInfo, offset: &cursor, limit: recordEnd)
-              if cursor < recordEnd {
-                trackChanges = docInfo[docInfo.startIndex + cursor] != 0
-              }
-            }
-            parsedDocProps = true
-          }
-        } else if recHeader.tagID == HWP5RecordHeader.tagExtendedMetadata {
-          let slice = Data(
-            docInfo[(docInfo.startIndex + payloadStart)..<(docInfo.startIndex + recordEnd)])
-          extendedEnvelope = try? JSONDecoder().decode(
-            ExtendedDocumentMetadataEnvelope.self, from: slice)
-        }
-        docOffset = recordEnd
-      }
-      if !parsedDocProps {
-        throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 DocInfo 문서 속성 레코드가 누락되었습니다.")
-      }
-    }
-
-    guard let rawSection0 = streamMap["BodyText/Section0"] ?? streamMap["Section0"] else {
-      throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 'BodyText/Section0' 스트림이 누락되었습니다.")
-    }
-    let section0 =
-      (isCompressed && !rawSection0.isEmpty)
-      ? try ZipContainerCodec.decompressRawDeflateStream(rawSection0)
-      : rawSection0
-
-    var paragraphs: [ParagraphBlock] = []
-    var tables: [DocumentTableBlock] = []
-    var pendingParagraph: ParagraphBlock?
-    var offset = 0
-
-    while offset < section0.count {
-      totalDecodedRecords += 1
-      guard totalDecodedRecords <= maxHWP5Records else {
-        throw EasyOfficeError.securityViolation(
-          detail: "HWP 5.0 레코드 개수가 허용 상한(\(maxHWP5Records))을 초과했습니다.")
-      }
-      let (recHeader, headerLen) = try HWP5RecordHeader.decode(from: section0, at: offset)
-      let payloadStart = offset + headerLen
-      let payloadLen = Int(recHeader.payloadSize)
-      let payloadEnd = payloadStart + payloadLen
-      guard payloadLen >= 0, payloadEnd <= section0.count else {
-        throw EasyOfficeError.corruptedContainer(
-          detail: "HWP 5.0 Section0 레코드 페이로드가 스트림 경계를 초과합니다.")
-      }
-
-      switch recHeader.tagID {
-      case HWP5RecordHeader.tagParaHeader:
-        if let prev = pendingParagraph {
-          paragraphs.append(prev)
-        }
-        if payloadLen == 22 || payloadLen == 24 {
-          pendingParagraph = ParagraphBlock(text: "")
-        } else {
-          var pCursor = payloadStart
-          let styleRaw = try BitPacking.readLengthPrefixedUTF16LE(
-            from: section0, offset: &pCursor, limit: payloadEnd)
-          if pCursor + 1 == payloadEnd {
-            let isOfficial = section0[section0.startIndex + pCursor] != 0
-            let resolvedStyle: ParagraphStyleRole =
-              isOfficial ? .officialHeader : (ParagraphStyleRole(rawValue: styleRaw) ?? .body)
-            pendingParagraph = ParagraphBlock(
-              style: resolvedStyle,
-              text: ""
-            )
-          } else {
-            let alignRaw = try BitPacking.readLengthPrefixedUTF16LE(
-              from: section0, offset: &pCursor, limit: payloadEnd)
-            let fontName = try BitPacking.readLengthPrefixedUTF16LE(
-              from: section0, offset: &pCursor, limit: payloadEnd)
-            guard pCursor + 9 <= payloadEnd else {
-              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 문단 헤더 레코드 길이가 부족합니다.")
-            }
-            let fontSizeX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-            pCursor += 4
-            let lineSpacingX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-            pCursor += 4
-            let styleFlags = section0[section0.startIndex + pCursor]
-            pCursor += 1
-            var letterSpacingPct = 0.0
-            var charWidthScalePct = 100.0
-            if pCursor + 8 <= payloadEnd {
-              let letterSpacingBits = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-              pCursor += 4
-              let charScaleX100 = try BitPacking.readUInt32LE(from: section0, at: pCursor)
-              pCursor += 4
-              letterSpacingPct = Double(Int32(bitPattern: letterSpacingBits)) / 100.0
-              charWidthScalePct = Double(charScaleX100) / 100.0
-            }
-            pendingParagraph = ParagraphBlock(
-              style: ParagraphStyleRole(rawValue: styleRaw) ?? .body,
-              alignment: TextAlignmentMode(rawValue: alignRaw) ?? .justified,
-              text: "",
-              fontName: fontName,
-              fontSizePt: Double(fontSizeX100) / 100.0,
-              isBold: (styleFlags & 0x01) != 0,
-              isItalic: (styleFlags & 0x02) != 0,
-              isUnderlined: (styleFlags & 0x04) != 0,
-              lineSpacingPercent: Double(lineSpacingX100) / 100.0,
-              letterSpacingPercent: letterSpacingPct,
-              charWidthScalePercent: charWidthScalePct
-            )
-          }
-        }
-
-      case HWP5RecordHeader.tagParaText:
-        let text = try decodeParaTextPayload(
-          from: section0, at: payloadStart, byteLength: payloadLen)
-        if var current = pendingParagraph {
-          current.text = text
-          paragraphs.append(current)
-          pendingParagraph = nil
-        } else {
-          paragraphs.append(ParagraphBlock(text: text))
-        }
-
-      case HWP5RecordHeader.tagTableRecord:
-        let savedCellTotal = totalDecodedTableCells
-        var decodedTable: DocumentTableBlock?
-        var budgetExceededError: EasyOfficeError?
-        do {
-          var tCursor = payloadStart
-          let caption = try BitPacking.readLengthPrefixedUTF16LE(
-            from: section0, offset: &tCursor, limit: payloadEnd)
-          guard tCursor + 3 <= payloadEnd else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
-          }
-          let hasHeader = section0[section0.startIndex + tCursor] != 0
-          tCursor += 1
-          let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
-          tCursor += 2
-          guard rowCount <= maxHWP5TableRows, rowCount <= (payloadEnd - tCursor) / 2 else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
-          }
-          var rows: [[String]] = []
-          rows.reserveCapacity(rowCount)
-          for _ in 0..<rowCount {
-            guard tCursor + 2 <= payloadEnd else {
-              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
-            }
-            let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: tCursor))
-            tCursor += 2
-            guard colCount <= maxHWP5TableColumns, colCount * 4 <= payloadEnd - tCursor else {
-              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
-            }
-            totalDecodedTableCells += colCount
-            guard totalDecodedTableCells <= maxTotalHWP5TableCells else {
-              let err = EasyOfficeError.corruptedContainer(
-                detail: "HWP 5.0 누적 표 셀 개수(\(totalDecodedTableCells))가 허용 상한(\(maxTotalHWP5TableCells))을 초과했습니다."
-              )
-              budgetExceededError = err
-              throw err
-            }
-            var rowCells: [String] = []
-            rowCells.reserveCapacity(colCount)
-            for _ in 0..<colCount {
-              let cell = try BitPacking.readLengthPrefixedUTF16LE(
-                from: section0, offset: &tCursor, limit: payloadEnd)
-              rowCells.append(cell)
-            }
-            rows.append(rowCells)
-          }
-          guard tCursor == payloadEnd else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 잔여 바이트 불일치")
-          }
-          decodedTable = DocumentTableBlock(caption: caption, rows: rows, hasHeaderRow: hasHeader)
-        } catch {
-          if let budgetErr = budgetExceededError {
-            throw budgetErr
-          }
-          totalDecodedTableCells = savedCellTotal
-        }
-        if let table = decodedTable {
-          tables.append(table)
-        } else {
-          var rCursor = payloadStart
-          guard rCursor + 2 <= payloadEnd else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 레코드 헤더 길이가 부족합니다.")
-          }
-          let rowCount = Int(try BitPacking.readUInt16LE(from: section0, at: rCursor))
-          rCursor += 2
-          guard rowCount <= maxHWP5TableRows, rowCount <= (payloadEnd - rCursor) / 2 else {
-            throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
-          }
-          var rows: [[String]] = []
-          rows.reserveCapacity(rowCount)
-          for _ in 0..<rowCount {
-            guard rCursor + 2 <= payloadEnd else {
-              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 행 헤더 길이가 부족합니다.")
-            }
-            let colCount = Int(try BitPacking.readUInt16LE(from: section0, at: rCursor))
-            rCursor += 2
-            guard colCount <= maxHWP5TableColumns, colCount * 4 <= payloadEnd - rCursor else {
-              throw EasyOfficeError.corruptedContainer(detail: "HWP 5.0 표 열 개수가 허용 범위 또는 페이로드 길이를 초과합니다.")
-            }
-            totalDecodedTableCells += colCount
-            guard totalDecodedTableCells <= maxTotalHWP5TableCells else {
-              throw EasyOfficeError.corruptedContainer(
-                detail: "HWP 5.0 누적 표 셀 개수(\(totalDecodedTableCells))가 허용 상한(\(maxTotalHWP5TableCells))을 초과했습니다."
-              )
-            }
-            var rowCells: [String] = []
-            rowCells.reserveCapacity(colCount)
-            for _ in 0..<colCount {
-              let cell = try BitPacking.readLengthPrefixedUTF16LE(
-                from: section0, offset: &rCursor, limit: payloadEnd)
-              rowCells.append(cell)
-            }
-            rows.append(rowCells)
-          }
-          tables.append(DocumentTableBlock(caption: "", rows: rows, hasHeaderRow: true))
-        }
-
-      default:
-        break
-      }
-
-      offset = payloadEnd
-    }
-
-    if let trailing = pendingParagraph {
-      paragraphs.append(trailing)
-    }
-
-    var docModel = OfficeDocumentModel(
-      title: title,
-      format: .hwp,
-      paperSize: paperSize,
-      headerText: headerText,
-      footerText: footerText,
-      paragraphs: paragraphs,
-      tables: tables,
-      trackChangesEnabled: trackChanges
-    )
-    extendedEnvelope?.apply(to: &docModel)
-    return docModel
-  }
-
-  private static func decodeParaTextPayload(
-    from data: Data,
-    at offset: Int,
-    byteLength: Int
-  ) throws -> String {
-    guard byteLength >= 0, byteLength % 2 == 0, offset >= 0, offset + byteLength <= data.count else {
-      throw EasyOfficeError.corruptedContainer(
-        detail: "HWP 5.0 문단 텍스트 페이로드 길이가 2바이트(WCHAR) 배수가 아니거나 범위를 초과합니다.")
-    }
-    let payloadEnd = offset + byteLength
-    var units: [UInt16] = []
-    units.reserveCapacity(byteLength / 2)
-
-    data.withUnsafeBytes { rawBuffer in
-      var cursor = offset
-      while cursor < payloadEnd {
-        let code = rawBuffer.loadUnaligned(fromByteOffset: cursor, as: UInt16.self).littleEndian
-        if code < 0x0020 {
-          if code == 0x0009 {
-            units.append(0x0009)
-            if cursor + 16 <= payloadEnd,
-              rawBuffer.loadUnaligned(fromByteOffset: cursor + 14, as: UInt16.self).littleEndian
-                == 0x0009
-            {
-              var allZeroAttrs = true
-              for attrOff in stride(from: 2, through: 12, by: 2) {
-                if rawBuffer.loadUnaligned(fromByteOffset: cursor + attrOff, as: UInt16.self)
-                  .littleEndian != 0
-                {
-                  allZeroAttrs = false
-                  break
-                }
-              }
-              cursor += allZeroAttrs ? 16 : 2
-            } else {
-              cursor += 2
-            }
-          } else if code == 0x000A {
-            units.append(0x000A)
-            cursor += 2
-          } else if code == 0x000D {
-            if cursor + 2 < payloadEnd {
-              units.append(0x000D)
-            }
-            cursor += 2
-          } else if code == 0x0000 {
-            cursor += 2
-          } else if code <= 0x0017, cursor + 16 <= payloadEnd,
-            rawBuffer.loadUnaligned(fromByteOffset: cursor + 14, as: UInt16.self).littleEndian == code
-          {
-            cursor += 16
-          } else {
-            cursor += 2
-          }
-        } else {
-          units.append(code)
-          cursor += 2
-        }
-      }
-    }
-
-    return String(decoding: units, as: UTF16.self)
   }
 }

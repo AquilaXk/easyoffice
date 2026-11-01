@@ -16,9 +16,19 @@ public enum EasyOfficeError: Error, Sendable, Equatable, LocalizedError {
   case xxeOrExternalEntityDetected
   case decompressionBombDetected(ratio: Double, maxRatio: Double)
   case resourceExhausted(limitName: String, limitValue: Int, actualValue: Int)
+  case resourceBudgetExceeded(detail: String)
+  case unsupportedFormat(detail: String)
 
   public static func malformedContainer(detail: String) -> EasyOfficeError {
     .corruptedContainer(detail: detail)
+  }
+
+  public static func resourceBudgetExceeded(_ detail: String) -> EasyOfficeError {
+    .resourceBudgetExceeded(detail: detail)
+  }
+
+  public static func unsupportedFormat(_ detail: String) -> EasyOfficeError {
+    .unsupportedFormat(detail: detail)
   }
 
   public var errorDescription: String? {
@@ -53,6 +63,10 @@ public enum EasyOfficeError: Error, Sendable, Equatable, LocalizedError {
         ratio, maxRatio)
     case .resourceExhausted(let limitName, let limitValue, let actualValue):
       return "리소스 허용 한도(\(limitName): 최대 \(limitValue), 실제 \(actualValue))를 초과하여 처리를 차단했습니다 (Fail-Closed)."
+    case .resourceBudgetExceeded(let detail):
+      return "리소스 예산 한도를 초과하여 처리를 차단했습니다 (Fail-Closed): \(detail)"
+    case .unsupportedFormat(let detail):
+      return "지원하지 않는 문서 포맷 또는 스트림 구조입니다 (Fail-Closed): \(detail)"
     }
   }
 }

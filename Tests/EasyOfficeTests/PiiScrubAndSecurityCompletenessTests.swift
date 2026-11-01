@@ -83,7 +83,7 @@ final class PiiScrubAndSecurityCompletenessTests: XCTestCase {
     let pngWithExif = Self.buildSamplePngWithTextAndExif()
     let tiffWithExif = Self.buildSampleTiffWithExifAndArtist()
 
-    var para = ParagraphBlock(
+    let para = ParagraphBlock(
       text: "본문 연락처 011-987-6543 및 메일 홍길동@회사.kr",
       runs: [
         DocumentTextRun(

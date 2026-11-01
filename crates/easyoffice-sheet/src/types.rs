@@ -1,3 +1,4 @@
+pub use crate::parser::normalize_open_formula_references;
 use easyoffice_formats::EasyOfficeError;
 use std::fmt;
 
@@ -602,12 +603,39 @@ mod tests {
 
         sheet.set_cell("A1", "10").unwrap();
         sheet.set_cell("A2", "20").unwrap();
-        sheet.set_cell("B1", "of:=SUM([.A1:.A2])").unwrap();
-        sheet.set_cell("B2", "oooc:=SUM([.A1:.A2])").unwrap();
-        sheet.set_cell("B3", "msoxl:=SUM(A1:A2)").unwrap();
+        sheet
+            .set_cell(
+                "B1",
+                normalize_open_formula_references("of:=SUM([.A1:.A2])"),
+            )
+            .unwrap();
+        sheet
+            .set_cell(
+                "B2",
+                normalize_open_formula_references("oooc:=SUM([.A1:.A2])"),
+            )
+            .unwrap();
+        sheet
+            .set_cell("B3", normalize_open_formula_references("msoxl:=SUM(A1:A2)"))
+            .unwrap();
+        sheet.set_cell("Z1", "of:=1+1").unwrap();
+        sheet.set_cell("Z2", "oooc:=1+1").unwrap();
+        sheet.set_cell("Z3", "msoxl:=1+1").unwrap();
         assert_eq!(sheet.evaluate_cell("B1"), EvaluatedCellValue::Number(30.0));
         assert_eq!(sheet.evaluate_cell("B2"), EvaluatedCellValue::Number(30.0));
         assert_eq!(sheet.evaluate_cell("B3"), EvaluatedCellValue::Number(30.0));
+        assert_eq!(
+            sheet.evaluate_cell("Z1"),
+            EvaluatedCellValue::Text("of:=1+1".to_string())
+        );
+        assert_eq!(
+            sheet.evaluate_cell("Z2"),
+            EvaluatedCellValue::Text("oooc:=1+1".to_string())
+        );
+        assert_eq!(
+            sheet.evaluate_cell("Z3"),
+            EvaluatedCellValue::Text("msoxl:=1+1".to_string())
+        );
 
         let mut wb = WorkbookEngine::new();
         wb.add_sheet("2026 [Q1]").set_cell("A1", "42").unwrap();
@@ -621,15 +649,26 @@ mod tests {
             let main_sheet = wb.add_sheet("요약");
             main_sheet.set_cell("A1", "=['2026 [Q1]'!A1]").unwrap();
             main_sheet.set_cell("A2", "='2026 [Q1]'!A1").unwrap();
-            main_sheet.set_cell("A3", "of:=['Q1:Q2'.A1]").unwrap();
             main_sheet
-                .set_cell("A4", "of:=SUM(['A.B'.C1:.D2])")
+                .set_cell("A3", normalize_open_formula_references("of:=['Q1:Q2'.A1]"))
                 .unwrap();
             main_sheet
-                .set_cell("A5", "of:=SUM(['Q1:Q2'.A1:'A.B'.D2])")
+                .set_cell(
+                    "A4",
+                    normalize_open_formula_references("of:=SUM(['A.B'.C1:.D2])"),
+                )
                 .unwrap();
             main_sheet
-                .set_cell("A6", "of:=SUM([.A1:'A.B'.D2])")
+                .set_cell(
+                    "A5",
+                    normalize_open_formula_references("of:=SUM(['Q1:Q2'.A1:'A.B'.D2])"),
+                )
+                .unwrap();
+            main_sheet
+                .set_cell(
+                    "A6",
+                    normalize_open_formula_references("of:=SUM([.A1:'A.B'.D2])"),
+                )
                 .unwrap();
         }
         assert_eq!(

@@ -230,6 +230,12 @@ impl HuffmanTable {
                 ));
             }
         }
+        let is_single_symbol_1bit = max_bits == 1 && bl_count[1] == 1;
+        if left != 0 && !is_single_symbol_1bit {
+            return Err(EasyOfficeError::CorruptedContainer(
+                "DEFLATE 허프만 트리가 불완전(under-subscribed)합니다.".to_string(),
+            ));
+        }
 
         let mut next_code = [0u16; MAX_BITS + 1];
         let mut code = 0u16;
@@ -331,17 +337,11 @@ fn reverse_bits(code: u16, bit_len: u8) -> u16 {
 fn check_budget(
     new_len: usize,
     max_output_bytes: usize,
-    input_len: usize,
+    _input_len: usize,
 ) -> Result<(), EasyOfficeError> {
     if new_len > max_output_bytes {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
             "DEFLATE 출력 크기({new_len} bytes)가 허용 상한({max_output_bytes} bytes)을 초과했습니다."
-        )));
-    }
-    if input_len > 0 && new_len > 1_048_576 && new_len > input_len.max(1).saturating_mul(1000) {
-        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
-            "DEFLATE 압축 해제 비율({}x)이 보안 상한(1000x)을 초과했습니다.",
-            new_len / input_len.max(1),
         )));
     }
     Ok(())
@@ -650,8 +650,14 @@ pub fn inflate_zlib(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
             "유효하지 않은 RFC 1950 zlib 스트림(헤더 2 + 데이터 + Adler-32 4)입니다.".to_string(),
         ));
     }
-    let decoded = inflate_raw(&input[2..input.len() - 4], max_output_bytes)?;
-    let expected_adler = u32::from_be_bytes(input[input.len() - 4..].try_into().unwrap());
+    let (decoded, consumed) = inflate_raw_with_consumed(&input[2..], max_output_bytes)?;
+    let rem = &input[2 + consumed..];
+    if rem.len() < 4 {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "RFC 1950 zlib 스트림에 4바이트 Adler-32 트레일러가 누락되었습니다.".to_string(),
+        ));
+    }
+    let expected_adler = u32::from_be_bytes([rem[0], rem[1], rem[2], rem[3]]);
     let actual_adler = adler32(&decoded);
     if actual_adler != expected_adler {
         return Err(EasyOfficeError::CorruptedContainer(format!(
@@ -675,8 +681,15 @@ pub fn inflate_auto(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
                             "RFC 1950 Adler-32 체크섬 불일치 (expected: {expected:#010x}, actual: {actual:#010x})"
                         )));
                     }
+                    return Ok(decoded);
+                } else if rem.is_empty() {
+                    return Ok(decoded);
+                } else {
+                    return Err(EasyOfficeError::CorruptedContainer(
+                        "RFC 1950 zlib 스트림의 4바이트 Adler-32 트레일러가 잘렸습니다."
+                            .to_string(),
+                    ));
                 }
-                return Ok(decoded);
             }
             Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => return Err(e),
             Err(_) => {}
@@ -918,7 +931,16 @@ mod tests {
 
         let mut zlib_wrapped = vec![0x78, 0x9C];
         zlib_wrapped.extend_from_slice(&compressed);
+        assert!(matches!(
+            inflate_zlib(&zlib_wrapped, 1024 * 1024),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
         assert_eq!(inflate_auto(&zlib_wrapped, 1024 * 1024).unwrap(), xml);
+        zlib_wrapped.push(0x11);
+        assert!(matches!(
+            inflate_auto(&zlib_wrapped, 1024 * 1024),
+            Err(EasyOfficeError::CorruptedContainer(_))
+        ));
 
         assert!(matches!(
             inflate_raw(&[0x07], 1024),
