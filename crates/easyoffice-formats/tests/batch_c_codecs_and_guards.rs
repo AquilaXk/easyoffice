@@ -13,7 +13,6 @@ use easyoffice_formats::{
 fn test_ooxml_xlsx_pptx_opc_and_multi_sheet_and_limits() {
     let policy = ZipSecurityPolicy::default();
 
-    // 1. Multi-sheet XLSX roundtrip and OPC relationship / styles parts
     let sheets = vec![
         (
             "Revenue".to_string(),
@@ -46,7 +45,6 @@ fn test_ooxml_xlsx_pptx_opc_and_multi_sheet_and_limits() {
     assert_eq!(decoded.title, "Revenue");
     assert_eq!(decoded.tables.len(), 2);
 
-    // 2. Empty <si/> and <rPh> phonetic guide stripping and <sheets> vs <sheet> tag disambiguation
     let custom_xlsx = ZipArchiveCodec::pack(&[
         (
             "[Content_Types].xml".to_string(),
@@ -77,7 +75,6 @@ fn test_ooxml_xlsx_pptx_opc_and_multi_sheet_and_limits() {
         vec![(0, 0, "".to_string()), (0, 1, "Base".to_string())]
     );
 
-    // 3. MAX_XLSX_ROWS and MAX_XLSX_COLS limit enforcement in pack_xlsx
     let oversized_row_sheet = OoxmlXlsxPayload {
         sheet_name: "TooTall".to_string(),
         cells: vec![(OoxmlCodec::MAX_XLSX_ROWS, 0, "x".to_string())],
@@ -95,7 +92,6 @@ fn test_ooxml_xlsx_pptx_opc_and_multi_sheet_and_limits() {
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 
-    // 4. PPTX OPC structure, <p:sldIdLst> order, and <a:p> run concatenation
     let pptx_payload = OoxmlPptxPayload {
         title: "Deck".to_string(),
         is_slideshow: false,
@@ -149,7 +145,6 @@ fn test_ooxml_xlsx_pptx_opc_and_multi_sheet_and_limits() {
 
 #[test]
 fn test_odf_and_hwpx_nesting_multi_sheet_openformula_and_sections() {
-    // 1. ODT with meta.xml <dc:title>, <text:h>, nested <text:p>, <text:span>, <text:s>, <text:tab/>, <text:line-break/>
     let custom_odt = ZipArchiveCodec::pack(&[
         (
             "mimetype".to_string(),
@@ -177,7 +172,6 @@ fn test_odf_and_hwpx_nesting_multi_sheet_openformula_and_sections() {
         ]
     );
 
-    // 2. Multi-sheet ODS with OpenFormula normalization, covered-table-cell, and trailing repeat trimming
     let ods_sheets = vec![
         (
             "Summary".to_string(),
@@ -214,7 +208,6 @@ fn test_odf_and_hwpx_nesting_multi_sheet_openformula_and_sections() {
         vec![(0, 0, "Merged".to_string()), (0, 2, "ColC".to_string())]
     );
 
-    // 3. ODP filters out <presentation:notes> (into notes field, not bullets) and <text:page-number>
     let custom_odp = ZipArchiveCodec::pack(&[
         (
             "mimetype".to_string(),
@@ -233,7 +226,6 @@ fn test_odf_and_hwpx_nesting_multi_sheet_openformula_and_sections() {
     assert_eq!(odp_slides[0].1, vec!["Bullet One".to_string()]);
     assert_eq!(odp_slides[0].2, "Speaker Notes Secret");
 
-    // 4. HWPX multi-section reading (section0.xml + section1.xml)
     let custom_hwpx = ZipArchiveCodec::pack(&[
         ("mimetype".to_string(), b"application/hwp+zip".to_vec()),
         (
@@ -260,7 +252,6 @@ fn test_odf_and_hwpx_nesting_multi_sheet_openformula_and_sections() {
 
 #[test]
 fn test_hwp5_limits_multi_section_doc_properties_and_standard_table_records() {
-    // 1. Dimension limits in Hwp5Codec::pack
     let oversized_rows_hwp = Hwp5DocumentPayload {
         version: (5, 0, 3, 0),
         is_template: false,
@@ -286,7 +277,6 @@ fn test_hwp5_limits_multi_section_doc_properties_and_standard_table_records() {
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 
-    // 2. Binary HWPTAG_DOCUMENT_PROPERTIES (tag 16, 26 bytes) skipped + multi-section + standard HWPTAG_TABLE (tag 77)
     fn encode_record(tag_id: u16, level: u16, payload: &[u8]) -> Vec<u8> {
         let header: u32 = (tag_id as u32 & 0x3FF)
             | ((level as u32 & 0x3FF) << 10)
@@ -355,7 +345,6 @@ fn test_hwp5_limits_multi_section_doc_properties_and_standard_table_records() {
 
 #[test]
 fn test_biff8_xls_continue_latin1_multisheet_and_legacy_doc_ppt_and_ole2_guards() {
-    // 1. BIFF8 XLS dimension limits
     let bad_row_xls = LegacyXlsPayload {
         sheet_name: "Sheet1".to_string(),
         cells: vec![(MAX_BIFF8_ROW + 1, 0, "1".to_string())],
@@ -373,7 +362,6 @@ fn test_biff8_xls_continue_latin1_multisheet_and_legacy_doc_ppt_and_ole2_guards(
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
     ));
 
-    // 2. BIFF8 XLS multi-sheet + SST CONTINUE (> 8224 bytes) + Latin-1 ('é')
     let long_latin1_a = format!("Café_{}", "A".repeat(4500));
     let long_unicode_b = format!("한글_{}", "B".repeat(3000));
     let xls_sheets = vec![
@@ -394,7 +382,6 @@ fn test_biff8_xls_continue_latin1_multisheet_and_legacy_doc_ppt_and_ole2_guards(
     let unpacked_xls = LegacyOle2Codec::unpack_xls_multi(&xls_bytes).expect("unpack multi xls");
     assert_eq!(unpacked_xls, xls_sheets);
 
-    // 3. Legacy DOC with CLX piece table (1Table) and 8-bit CP1252 piece
     let mut word_doc = vec![0u8; 512];
     word_doc[0..2].copy_from_slice(&0xA5ECu16.to_le_bytes()); // wIdent
     word_doc[2..4].copy_from_slice(&0x00C1u16.to_le_bytes()); // nFib
@@ -427,7 +414,6 @@ fn test_biff8_xls_continue_latin1_multisheet_and_legacy_doc_ppt_and_ole2_guards(
         vec!["PieceOne".to_string(), "PieceTwo".to_string()]
     );
 
-    // 4. Legacy PPT multi-slide splitting via SlidePersistAtom (0x03F3)
     fn ppt_atom(ver_inst: u16, rec_type: u16, data: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&ver_inst.to_le_bytes());
@@ -456,7 +442,6 @@ fn test_biff8_xls_continue_latin1_multisheet_and_legacy_doc_ppt_and_ole2_guards(
     );
     assert_eq!(unpacked_ppt.slides[1].title, "Slide 2 Title");
 
-    // 5. OLE2 case-insensitive duplicate directory entry rejection and v4 (4096B sector) unpacking
     let dup_streams = vec![
         ("Workbook".to_string(), vec![1, 2, 3]),
         ("WORKBOOK".to_string(), vec![4, 5, 6]),
@@ -532,7 +517,6 @@ fn test_biff8_xls_continue_latin1_multisheet_and_legacy_doc_ppt_and_ole2_guards(
 
 #[test]
 fn test_pdf_xref_stream_objstm_tounicode_kerning_and_title_and_stamp() {
-    // 1. PDF 1.5+ /XRef stream + /ObjStm + /ToUnicode CMap + TJ kerning + UTF-16BE BOM text
     let cmap_stream = b"/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n1 begincodespacerange\n<00> <FF>\nendcodespacerange\n2 beginbfchar\n<01> <0048>\n<02> <0069>\nendbfchar\n1 beginbfrange\n<10> <11> <0041>\nendbfrange\nendcmap";
     let content_stream =
         br#"BT /F1 12 Tf 72 720 Td [<0102> -220 <1011>] TJ 40 0 Td (\376\377\000!\000?) Tj ET"#;
@@ -627,7 +611,6 @@ fn test_pdf_xref_stream_objstm_tounicode_kerning_and_title_and_stamp() {
     assert_eq!(unpacked_pdf.pages.len(), 1);
     assert_eq!(unpacked_pdf.pages[0].body_text, "Hi AB!?");
 
-    // 2. Split page approval_stamp only on first chunk
     let long_body = (0..60)
         .map(|i| format!("Line {i}"))
         .collect::<Vec<_>>()
@@ -666,7 +649,6 @@ fn test_pdf_xref_stream_objstm_tounicode_kerning_and_title_and_stamp() {
 fn test_zip_and_deflate_security_and_rfc1951_guards() {
     let policy = ZipSecurityPolicy::default();
 
-    // 1. Case-insensitive duplicate path rejection in ZIP
     let dup_entries = vec![
         ("word/document.xml".to_string(), b"a".to_vec()),
         ("WORD/DOCUMENT.XML".to_string(), b"b".to_vec()),
@@ -676,7 +658,6 @@ fn test_zip_and_deflate_security_and_rfc1951_guards() {
         Err(EasyOfficeError::SecurityViolation(_))
     ));
 
-    // 2. File-vs-directory collision rejection in ZIP
     let collision_entries = vec![
         ("word/media".to_string(), b"file".to_vec()),
         ("word/media/image1.png".to_string(), b"nested".to_vec()),
@@ -686,7 +667,6 @@ fn test_zip_and_deflate_security_and_rfc1951_guards() {
         Err(EasyOfficeError::SecurityViolation(_))
     ));
 
-    // 3. LFH vs CD uncompressed_size mismatch rejection in ZIP
     let mut valid_zip =
         ZipArchiveCodec::pack(&[("hello.txt".to_string(), b"Hello World".to_vec())])
             .expect("pack valid zip");
@@ -696,7 +676,6 @@ fn test_zip_and_deflate_security_and_rfc1951_guards() {
         Err(EasyOfficeError::SecurityViolation(_))
     ));
 
-    // 4. Truncated zlib Adler-32 trailer rejected by inflate_zlib and inflate_auto
     let valid_zlib = deflate_zlib(b"Test Adler-32 trailer enforcement");
     let truncated_zlib = &valid_zlib[..valid_zlib.len() - 2];
     assert!(matches!(
@@ -708,7 +687,6 @@ fn test_zip_and_deflate_security_and_rfc1951_guards() {
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
 
-    // 5. High-ratio all-zero payload succeeds when within max_output_len
     let zeroes = vec![0u8; 200_000];
     let compressed_zeroes = deflate_raw(&zeroes);
     assert!(compressed_zeroes.len() < 1500);

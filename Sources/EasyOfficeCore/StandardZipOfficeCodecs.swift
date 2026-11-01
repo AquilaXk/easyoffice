@@ -1,6 +1,5 @@
 import Foundation
 
-// MARK: - Resolved Media Entry
 
 /// Resolved media attachment descriptor computed once per archive pack operation so XML metadata, relationships, and ZIP entries never diverge.
 public struct ResolvedMediaEntry: Sendable, Equatable {
@@ -10,7 +9,6 @@ public struct ResolvedMediaEntry: Sendable, Equatable {
   public let archivePath: String
 }
 
-// MARK: - Shared XML Document, Worksheet & Presentation Model Mapper
 
 /// Shared mapper eliminating duplicate paragraph, run, image, table, worksheet, slide, and metadata XML serialization across OOXML, ODF, and HWPX.
 public enum XMLDocumentModelMapper {
@@ -664,12 +662,10 @@ public enum XMLDocumentModelMapper {
   }
 }
 
-// MARK: - OOXML Container Codec (ECMA-376 DOCX, XLSX, PPTX)
 
 /// ECMA-376 / ISO/IEC 29500 OOXML container encoder and decoder for `.docx`, `.xlsx`, and `.pptx`.
 public enum OOXMLContainerCodec {
 
-  // MARK: DOCX (WordprocessingML)
 
   public static func encodeDocument(_ doc: OfficeDocumentModel) throws -> Data {
     let resolvedMedia = XMLDocumentModelMapper.resolveUniqueMediaEntries(

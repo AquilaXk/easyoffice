@@ -209,11 +209,6 @@ impl PdfStreamCollector {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn parse_pdf_content_stream(stream: &str) -> ParsedPdfContentStream {
-    parse_pdf_content_stream_with_cmap(stream, None)
-}
-
 pub(crate) fn parse_pdf_content_stream_with_cmap(
     stream: &str,
     cmap: Option<&PdfToUnicodeMap>,

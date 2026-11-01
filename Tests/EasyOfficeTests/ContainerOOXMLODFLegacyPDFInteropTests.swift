@@ -5,7 +5,6 @@ import XCTest
 
 final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
 
-  // MARK: - #77 Checked BitPacking & ZIP Container Integrity
 
   func testCheckedBitPackingRejectsIntegerOverflowAndAcceptsBoundaries() throws {
     XCTAssertEqual(try BitPacking.checkedUInt16(0, field: "u16.min"), 0)
@@ -67,7 +66,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
       ZipContainerEntry(path: "content.xml", data: Data("hello-world-12345".utf8))
     ])
 
-    // 1. Mutate LFH filename first byte ('c' -> 'x') while leaving Central Directory intact
     var tamperedName = validArchive
     tamperedName[30] = UInt8(ascii: "x")
     XCTAssertThrowsError(try ZipContainerCodec.unpack(from: tamperedName)) { error in
@@ -77,7 +75,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
       XCTAssertTrue(detail.contains("일치하지 않습니다"))
     }
 
-    // 2. Mutate LFH CRC-32 (offset 14..18) when bit 3 is not set
     var tamperedCRC = validArchive
     tamperedCRC[14] ^= 0xFF
     XCTAssertThrowsError(try ZipContainerCodec.unpack(from: tamperedCRC)) { error in
@@ -87,7 +84,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
       XCTAssertTrue(detail.contains("CRC"))
     }
 
-    // 3. Mutate LFH compression method (offset 8..10: default is 8/.deflate, change to 0/.store)
     var tamperedMethod = validArchive
     tamperedMethod[8] = 0
     tamperedMethod[9] = 0
@@ -99,7 +95,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
     }
   }
 
-  // MARK: - #78 OLE2 CFBF Container Integrity & Large DIFAT
 
   func testOLE2RejectsDuplicateSiblingNamesAndRoundTripsBoundaryAnd20MBStreams() throws {
     XCTAssertThrowsError(
@@ -145,7 +140,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
     XCTAssertEqual(map["Stream_0299"], Data("val-299".utf8))
   }
 
-  // MARK: - #82 OOXML (DOCX, XLSX, PPTX) Schema Compliance & Media Deduplication
 
   func testDOCXHighlightEnumIgnorableNamespaceAndMediaDrawingRoundTrip() throws {
     let pngBytes = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02])
@@ -290,7 +284,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
     XCTAssertTrue(presXML.contains("<p:sldMasterIdLst>"))
   }
 
-  // MARK: - #83 ODF (ODT, ODS, ODP) OpenFormula, Covered Cells & Metadata
 
   func testODSOpenFormulaNormalizationAndCoveredCellColumnAdvance() throws {
     var sheet = WorksheetModel(name: "예산표")
@@ -377,7 +370,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
     XCTAssertFalse(elementTexts.contains(where: { $0.contains("발표자 전용 비밀 노트") }))
   }
 
-  // MARK: - #84 HWP 5.0 Multi-Section, Table Tag 61 & Resource Budget
 
   func testHWP5MultiSectionTableTag61AndMaxTableRowsBudget() throws {
     let table = DocumentTableBlock(
@@ -424,7 +416,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
     }
   }
 
-  // MARK: - #85 Word97 CLX Piece Table & PowerPoint97 Slide Containers
 
   func testWord97CLXPieceTableRoundTripAndMixedCompressedPieces() throws {
     let doc = OfficeDocumentModel(
@@ -477,7 +468,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
     XCTAssertEqual(decoded.slides[1].title, "두 번째 슬라이드")
   }
 
-  // MARK: - #86 BIFF8 XLS SST+CONTINUE, Latin-1 & Coordinate Limits
 
   func testBIFF8XLSSSTContinueSplittingLatin1AndCoordinateBudget() throws {
     var sheet = WorksheetModel(name: "대용량문자열")
@@ -520,7 +510,6 @@ final class ContainerOOXMLODFLegacyPDFInteropTests: XCTestCase {
     }
   }
 
-  // MARK: - #87 PDF String Escaping, /Encrypt Outside Strings, /ToUnicode & Canonical Model
 
   func testPDFStringEscapingEncryptDetectionToUnicodeAndCanonicalVerification() throws {
     let originalText = "줄바꿈\u{2028}문단\u{2029}다음줄\u{0085}탭\t끝"

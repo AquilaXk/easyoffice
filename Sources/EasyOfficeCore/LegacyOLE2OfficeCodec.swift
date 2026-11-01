@@ -1,11 +1,9 @@
 import Foundation
 
-// MARK: - Legacy OLE2 Office Binary Codecs (.doc FibBase + CLX, .ppt Record Stream)
 
 /// Genuine binary record codecs for legacy OLE2 document (`.doc`), spreadsheet (`.xls`), and presentation (`.ppt`) streams.
 public enum LegacyOLE2OfficeCodec {
 
-  // MARK: 1. Word Binary (.doc) — FibBase (0xA5EC) + CLX Piece Table + UTF-16LE Character Stream
 
   public static let wordFibMagic: UInt16 = 0xA5EC
   public static let wordFibVersion97: UInt16 = 0x00C1
@@ -496,7 +494,6 @@ public enum LegacyOLE2OfficeCodec {
     )
   }
 
-  // MARK: 2. Presentation Binary (.ppt) — RT_Document (1000) / RT_Slide (1006) / SlidePersistAtom (1011)
 
   public static let pptRecordDocument: UInt16 = 1000
   public static let pptRecordSlide: UInt16 = 1006

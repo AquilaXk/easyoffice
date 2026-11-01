@@ -1,6 +1,5 @@
 import Foundation
 
-// MARK: - Worksheet & Presentation XML Mapper Extensions
 
 extension XMLDocumentModelMapper {
 
@@ -206,11 +205,9 @@ extension XMLDocumentModelMapper {
   }
 }
 
-// MARK: - OOXML Container Codec: XLSX & PPTX
 
 extension OOXMLContainerCodec {
 
-  // MARK: XLSX (SpreadsheetML)
 
   public static func encodeWorksheet(_ sheet: WorksheetModel) throws -> Data {
     let orderedPages = sheet.orderedSheetPages()
@@ -548,7 +545,6 @@ extension OOXMLContainerCodec {
     return primary
   }
 
-  // MARK: PPTX (PresentationML)
 
   public static func encodePresentation(_ deck: PresentationDeckModel) throws -> Data {
     var entries: [ZipContainerEntry] = []

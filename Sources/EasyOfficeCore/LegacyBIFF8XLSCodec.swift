@@ -1,6 +1,5 @@
 import Foundation
 
-// MARK: - BIFF8 Spreadsheet (.xls) Codec
 
 internal struct BIFF8ExtendedMetadataEnvelope: Codable, Sendable {
   var cellStyles: [PackedCellCoordinate: CellStyle]
@@ -175,7 +174,6 @@ extension LegacyOLE2OfficeCodec {
 
     var stream = Data()
 
-    // 1. Workbook Globals Substream: BOF record (0x0809, length 16, dt = 0x0005)
     BitPacking.appendUInt16LE(biff8OpcodeBOF, to: &stream)
     BitPacking.appendUInt16LE(16, to: &stream)
     BitPacking.appendUInt16LE(0x0600, to: &stream)  // BIFF8 version
@@ -185,7 +183,6 @@ extension LegacyOLE2OfficeCodec {
     BitPacking.appendUInt32LE(0, to: &stream)
     BitPacking.appendUInt32LE(0x0006, to: &stream)
 
-    // 2. Minimal FONT (0x0031) and XF (0x00E0) records for standard reader compatibility
     var fontPayload = Data()
     BitPacking.appendUInt16LE(200, to: &fontPayload)  // dyHeight = 10pt
     BitPacking.appendUInt16LE(0, to: &fontPayload)  // grbit
@@ -211,7 +208,6 @@ extension LegacyOLE2OfficeCodec {
     BitPacking.appendUInt16LE(UInt16(xfPayload.count), to: &stream)
     stream.append(xfPayload)
 
-    // 3. BOUNDSHEET records (0x0085) for each worksheet
     var lbPlyPosOffsets: [Int] = []
     for page in allPages {
       let safeSheetName = page.name.isEmpty ? "Sheet1" : page.name
@@ -229,7 +225,6 @@ extension LegacyOLE2OfficeCodec {
       stream.append(nameBytes)
     }
 
-    // 4. Shared String Table: SST (0x00FC) + CONTINUE (0x003C) records capped at 8,224 bytes
     if !sstStrings.isEmpty {
       try appendBIFF8SharedStringTable(
         sstStrings: sstStrings,
@@ -238,11 +233,9 @@ extension LegacyOLE2OfficeCodec {
       )
     }
 
-    // 5. Workbook Globals EOF record (0x000A, length 0)
     BitPacking.appendUInt16LE(biff8OpcodeEOF, to: &stream)
     BitPacking.appendUInt16LE(0, to: &stream)
 
-    // 6. Worksheet Substreams
     for (pageIdx, page) in allPages.enumerated() {
       let worksheetSubstreamOffset = try BitPacking.checkedUInt32(
         stream.count, field: "BIFF8 BOUNDSHEET lbPlyPos")

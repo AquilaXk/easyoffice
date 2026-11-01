@@ -1,6 +1,5 @@
 import Foundation
 
-// MARK: - XMLDocumentModelMapper Shared Extensions
 
 extension XMLDocumentModelMapper {
 

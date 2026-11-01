@@ -1,6 +1,5 @@
 import Foundation
 
-// MARK: - Extended Document Metadata Envelope (Lossless Round-Trip Support)
 
 internal typealias HWP5ExtendedMetadata = ExtendedDocumentMetadataEnvelope
 
@@ -110,7 +109,6 @@ internal struct ExtendedDocumentMetadataEnvelope: Codable, Sendable {
   }
 }
 
-// MARK: - HWP 5.0 32-Bit Record Header Bitfield
 
 /// HWP 5.0 binary record header packing `tagID` (10 bits), `level` (10 bits), and `payloadSize` (12 bits or extended 32 bits).
 public struct HWP5RecordHeader: Sendable, Equatable {
@@ -179,7 +177,6 @@ public struct HWP5RecordHeader: Sendable, Equatable {
   }
 }
 
-// MARK: - HWP 5.0 Binary Document Codec (Compressed & Uncompressed Streams)
 
 /// HWP 5.0 binary document codec built on top of `OLE2ContainerCodec` and `HWP5RecordHeader`.
 public enum HWP5BinaryCodec {
