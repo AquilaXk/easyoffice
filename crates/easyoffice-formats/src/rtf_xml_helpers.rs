@@ -620,6 +620,102 @@ pub(crate) fn strip_tag_blocks(xml: &str, tag: &str) -> String {
     out
 }
 
+pub(crate) fn extract_balanced_elements<'a>(xml: &'a str, tag: &str) -> Vec<(&'a str, &'a str)> {
+    extract_tags_or_self_closing_with_attrs(xml, tag)
+}
+
+pub(crate) fn extract_odf_blocks_in_order<'a>(
+    xml: &'a str,
+    tags: &[&'a str],
+) -> Vec<(&'a str, &'a str, &'a str)> {
+    let bytes = xml.as_bytes();
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+
+    while cursor < bytes.len() {
+        let mut best: Option<(&'a str, usize, usize)> = None;
+        for &tag in tags {
+            if let Some((open_pos, gt_pos)) = find_valid_open_tag(bytes, cursor, tag.as_bytes()) {
+                if best.is_none_or(|(_, best_pos, _)| open_pos < best_pos) {
+                    best = Some((tag, open_pos, gt_pos));
+                }
+            }
+        }
+        let Some((tag, open_pos, gt_pos)) = best else {
+            break;
+        };
+        let tag_bytes = tag.as_bytes();
+        let after_tag = open_pos + 1 + tag_bytes.len();
+        if is_self_closing_open_tag(bytes, after_tag, gt_pos) {
+            let mut attr_end = gt_pos;
+            while attr_end > after_tag && is_xml_ws(bytes[attr_end - 1]) {
+                attr_end -= 1;
+            }
+            if attr_end > after_tag && bytes[attr_end - 1] == b'/' {
+                attr_end -= 1;
+            }
+            out.push((tag, &xml[after_tag..attr_end], ""));
+            cursor = gt_pos + 1;
+            continue;
+        }
+        let attrs = &xml[after_tag..gt_pos];
+        let body_start = gt_pos + 1;
+        let Some((body_end, next_cursor)) = find_matching_close_tag(bytes, body_start, tag_bytes)
+        else {
+            break;
+        };
+        out.push((tag, attrs, &xml[body_start..body_end]));
+        cursor = next_cursor;
+    }
+    out
+}
+
+pub(crate) fn extract_odf_inline_text(xml_fragment: &str) -> String {
+    let bytes = xml_fragment.as_bytes();
+    let mut out = String::with_capacity(xml_fragment.len());
+    let mut cursor = 0usize;
+
+    while cursor < bytes.len() {
+        let Some(lt) = crate::XmlSanitizer::find_byte_swar(bytes, cursor, b'<') else {
+            out.push_str(&crate::XmlSanitizer::unescape(&xml_fragment[cursor..]));
+            break;
+        };
+        if lt > cursor {
+            out.push_str(&crate::XmlSanitizer::unescape(&xml_fragment[cursor..lt]));
+        }
+        let Some(gt) = find_tag_close_gt(bytes, lt + 1) else {
+            out.push_str(&crate::XmlSanitizer::unescape(&xml_fragment[lt..]));
+            break;
+        };
+        let tag_inner = &bytes[lt + 1..gt];
+        if !tag_inner.starts_with(b"/") {
+            if tag_inner.starts_with(b"text:s")
+                && (tag_inner.len() == 6 || is_tag_name_boundary(tag_inner[6]))
+            {
+                let attrs_frag = &xml_fragment[lt + 1 + 6..gt];
+                let count = extract_attr_from_fragment(attrs_frag, "text:c")
+                    .or_else(|| extract_attr_from_fragment(attrs_frag, "c"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(1)
+                    .min(4096);
+                for _ in 0..count {
+                    out.push(' ');
+                }
+            } else if tag_inner.starts_with(b"text:tab")
+                && (tag_inner.len() == 8 || is_tag_name_boundary(tag_inner[8]))
+            {
+                out.push('\t');
+            } else if tag_inner.starts_with(b"text:line-break")
+                && (tag_inner.len() == 15 || is_tag_name_boundary(tag_inner[15]))
+            {
+                out.push('\n');
+            }
+        }
+        cursor = gt + 1;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

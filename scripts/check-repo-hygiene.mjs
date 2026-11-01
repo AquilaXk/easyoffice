@@ -349,12 +349,25 @@ for (const file of files) {
         errors.push(`Swift sheet module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
       }
     }
+    if (
+      (rel === "Sources/EasyOfficeCore/BinaryContainerCodec.swift" ||
+        rel === "Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift") &&
+      (text.includes("abs(Int.min)") ||
+        (/\bInt\(Double\(/.test(text) && !text.includes("maxRatio: Double = 100.0")))
+    ) {
+      errors.push(`Unguarded Int(Double( or abs(Int.min) trap detected in ${rel}.`);
+    }
   }
-  if (rel.startsWith("crates/easyoffice-sheet/src/") && rel.endsWith(".rs")) {
+  if (
+    (rel.startsWith("crates/easyoffice-sheet/src/") ||
+      rel.startsWith("crates/easyoffice-formats/src/") ||
+      rel.startsWith("crates/easyoffice-layout/src/")) &&
+    rel.endsWith(".rs")
+  ) {
     const rsText = fs.readFileSync(file, "utf8");
     const lineCount = rsText.split("\n").length - (rsText.endsWith("\n") ? 1 : 0);
     if (lineCount >= 1000) {
-      errors.push(`Rust sheet module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
+      errors.push(`Rust module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
     }
   }
 }

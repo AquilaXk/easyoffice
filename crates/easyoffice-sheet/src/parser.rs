@@ -206,9 +206,9 @@ fn normalize_bracketed_open_formula_ref(inner: &str) -> String {
 }
 
 #[inline]
-fn strip_formula_namespace(raw_src: &str) -> &str {
+fn strip_open_formula_prefix(raw_src: &str) -> Option<&str> {
     let trimmed = raw_src.trim();
-    if trimmed
+    let after_ns = if trimmed
         .get(..3)
         .is_some_and(|s| s.eq_ignore_ascii_case("of:"))
     {
@@ -225,18 +225,25 @@ fn strip_formula_namespace(raw_src: &str) -> &str {
         trimmed[6..].trim_start()
     } else {
         trimmed
-    }
+    };
+    after_ns.strip_prefix('=')
 }
 
 #[inline]
 pub(crate) fn strip_formula_prefix(raw_src: &str) -> Option<&str> {
-    strip_formula_namespace(raw_src).strip_prefix('=')
+    let trimmed = raw_src.trim();
+    if let Some(rest) = trimmed.strip_prefix('=') {
+        return Some(rest);
+    }
+    if let Some(rest) = strip_open_formula_prefix(trimmed) {
+        if rest.contains('[') && rest.contains('.') && rest.contains(']') {
+            return Some(rest);
+        }
+    }
+    None
 }
 
-/// Normalizes ODF OpenFormula (`of:=`, `[.A1:.B2]`, `['Sheet 1'.A1:.B2]`, `[Sheet1.A1]`) references into standard A1 syntax.
-pub fn normalize_open_formula_references(raw_src: &str) -> std::borrow::Cow<'_, str> {
-    let after_ns = strip_formula_namespace(raw_src);
-    let stripped = after_ns.strip_prefix('=').unwrap_or(after_ns);
+fn normalize_open_formula_body(stripped: &str) -> std::borrow::Cow<'_, str> {
     if !stripped.contains('[') {
         return std::borrow::Cow::Borrowed(stripped);
     }
@@ -289,11 +296,21 @@ pub fn normalize_open_formula_references(raw_src: &str) -> std::borrow::Cow<'_, 
     std::borrow::Cow::Owned(out)
 }
 
+/// Normalizes ODF OpenFormula (`of:=`, `[.A1:.B2]`, `['Sheet 1'.A1:.B2]`, `[Sheet1.A1]`) references into standard A1 syntax.
+pub fn normalize_open_formula_references(raw_src: &str) -> String {
+    if let Some(stripped) = strip_open_formula_prefix(raw_src) {
+        let body = normalize_open_formula_body(stripped);
+        format!("={body}")
+    } else {
+        normalize_open_formula_body(raw_src.trim()).into_owned()
+    }
+}
+
 pub(crate) fn tokenize_formula(raw_src: &str) -> Result<Vec<Token>, FormulaError> {
     if raw_src.len() > MAX_FORMULA_LEN {
         return Err(FormulaError::Value);
     }
-    let normalized = normalize_open_formula_references(raw_src);
+    let normalized = normalize_open_formula_body(raw_src);
     let src: &str = normalized.as_ref();
     if src.len() > MAX_FORMULA_LEN {
         return Err(FormulaError::Value);

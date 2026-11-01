@@ -310,16 +310,19 @@ impl UniversalFormatConverter {
                 Self::from_doc(p.title, p.paragraphs, p.tables, p.official_agency)
             }
             DocumentFormat::Xlsx => {
-                let p = OoxmlCodec::unpack_xlsx(bytes)?;
-                Self::from_sheet(p.sheet_name, p.cells)
+                let sheets = OoxmlCodec::unpack_xlsx_multi(bytes)?;
+                Self::from_sheets(sheets)
             }
             DocumentFormat::Xls => {
-                let p = LegacyOle2Codec::unpack_xls(bytes)?;
-                Self::from_sheet(p.sheet_name, p.cells)
+                let sheets = LegacyOle2Codec::unpack_xls_multi(bytes)?
+                    .into_iter()
+                    .map(|s| (s.sheet_name, s.cells))
+                    .collect();
+                Self::from_sheets(sheets)
             }
             DocumentFormat::Ods => {
-                let (sheet_name, cells) = OdfCodec::unpack_ods(bytes)?;
-                Self::from_sheet(sheet_name, cells)
+                let sheets = OdfCodec::unpack_ods_multi(bytes)?;
+                Self::from_sheets(sheets)
             }
             DocumentFormat::Csv | DocumentFormat::Tsv => {
                 let delim = if format == DocumentFormat::Csv {
@@ -414,32 +417,41 @@ impl UniversalFormatConverter {
         sheet_name: String,
         sheet_cells: Vec<(u32, u32, String)>,
     ) -> UniversalDocumentModel {
-        let paragraphs: Vec<String> = sheet_cells.iter().map(|(_, _, v)| v.clone()).collect();
-        let tables = if sheet_cells.is_empty() {
-            Vec::new()
-        } else {
-            let max_r = sheet_cells
-                .iter()
-                .map(|(r, _, _)| *r)
-                .max()
-                .unwrap_or(0)
-                .min(512) as usize;
-            let max_c = sheet_cells
-                .iter()
-                .map(|(_, c, _)| *c)
-                .max()
-                .unwrap_or(0)
-                .min(64) as usize;
+        Self::from_sheets(vec![(sheet_name, sheet_cells)])
+    }
+
+    fn from_sheets(sheets: Vec<crate::OdsUnpacked>) -> UniversalDocumentModel {
+        let mut iter = sheets.into_iter();
+        let (sheet_name, sheet_cells) = iter
+            .next()
+            .unwrap_or_else(|| ("시트1".to_string(), Vec::new()));
+        let mut paragraphs: Vec<String> = sheet_cells.iter().map(|(_, _, v)| v.clone()).collect();
+        let mut tables = Vec::new();
+        let build_grid = |cells: &[(u32, u32, String)]| -> Option<Vec<Vec<String>>> {
+            if cells.is_empty() {
+                return None;
+            }
+            let max_r = cells.iter().map(|(r, _, _)| *r).max().unwrap_or(0).min(512) as usize;
+            let max_c = cells.iter().map(|(_, c, _)| *c).max().unwrap_or(0).min(64) as usize;
             let mut grid = vec![vec![String::new(); max_c + 1]; max_r + 1];
-            for (r, c, val) in &sheet_cells {
+            for (r, c, val) in cells {
                 let ri = *r as usize;
                 let ci = *c as usize;
                 if ri <= max_r && ci <= max_c {
                     grid[ri][ci] = val.clone();
                 }
             }
-            vec![grid]
+            Some(grid)
         };
+        if let Some(g) = build_grid(&sheet_cells) {
+            tables.push(g);
+        }
+        for (_, extra_cells) in iter {
+            paragraphs.extend(extra_cells.iter().map(|(_, _, v)| v.clone()));
+            if let Some(g) = build_grid(&extra_cells) {
+                tables.push(g);
+            }
+        }
         let slides = vec![(sheet_name.clone(), paragraphs.clone(), String::new())];
         UniversalDocumentModel {
             title: sheet_name,

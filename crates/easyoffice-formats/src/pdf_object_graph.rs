@@ -144,10 +144,37 @@ pub(super) fn resolve_catalog_and_pages_target<'a>(
         });
 
     let mut title = String::from("PDF 문서");
+    let mut found_cat_title = false;
     if let Some(cat) = catalog_entries {
         if let Some(t_val) = dict_get(cat, "/Title") {
             if let Some(decoded_t) = decode_text_value(t_val, objects) {
                 title = decoded_t;
+                found_cat_title = true;
+            }
+        }
+    }
+    if !found_cat_title {
+        let info_val = trailers
+            .iter()
+            .rev()
+            .find_map(|tr| dict_get(tr, "/Info"))
+            .or_else(|| {
+                ordered_objs.iter().rev().find_map(|(_, o)| {
+                    if let PdfObjValue::Dict(ref d) = o.val {
+                        if dict_name_eq(d, "/Type", "/XRef") {
+                            return dict_get(d, "/Info");
+                        }
+                    }
+                    None
+                })
+            });
+        if let Some(iv) = info_val {
+            if let Some(PdfObjValue::Dict(info_dict)) = resolve_value(iv, objects) {
+                if let Some(t_val) = dict_get(info_dict, "/Title") {
+                    if let Some(decoded_t) = decode_text_value(t_val, objects) {
+                        title = decoded_t;
+                    }
+                }
             }
         }
     }
@@ -712,6 +739,71 @@ pub(super) fn decode_and_validate_pdf_streams(
     Ok(flate_cache)
 }
 
+pub(super) fn expand_pdf_object_streams(
+    bytes: &[u8],
+    objects: &mut HashMap<(u32, u16), PdfIndirectObject>,
+    flate_cache: &HashMap<(u32, u16), Vec<u8>>,
+    next_order_seq: &mut usize,
+) {
+    type ObjStmHeader = ((u32, u16), usize, usize, Option<(usize, usize)>, usize);
+    let mut obj_stms: Vec<ObjStmHeader> = objects
+        .iter()
+        .filter_map(|(&id, obj)| {
+            let PdfObjValue::Dict(ref d) = obj.val else {
+                return None;
+            };
+            if !dict_name_eq(d, "/Type", "/ObjStm") {
+                return None;
+            }
+            let n = usize::try_from(resolve_int(dict_get(d, "/N")?, objects)?).ok()?;
+            let first = usize::try_from(resolve_int(dict_get(d, "/First")?, objects)?).ok()?;
+            Some((id, n, first, obj.stream_range, obj.order_seq))
+        })
+        .collect();
+    obj_stms.sort_by_key(|x| x.4);
+
+    for (id, n, first, stream_range, _) in obj_stms {
+        let stream_slice: &[u8] = if let Some(decoded) = flate_cache.get(&id) {
+            decoded.as_slice()
+        } else if let Some((s, e)) = stream_range {
+            &bytes[s..e]
+        } else {
+            continue;
+        };
+        if first > stream_slice.len() || n > 4096 {
+            continue;
+        }
+        let header_str = String::from_utf8_lossy(&stream_slice[..first]);
+        let nums: Vec<usize> = header_str
+            .split_ascii_whitespace()
+            .filter_map(|tok| tok.parse::<usize>().ok())
+            .collect();
+        if nums.len() < n * 2 {
+            continue;
+        }
+        for i in 0..n {
+            let emb_obj_num = nums[i * 2] as u32;
+            let rel_off = nums[i * 2 + 1];
+            let obj_start = first.saturating_add(rel_off);
+            if obj_start >= stream_slice.len() {
+                continue;
+            }
+            if let Ok(Some((val, _))) =
+                parse_pdf_value_with_table(stream_slice, None, obj_start, stream_slice.len(), 0)
+            {
+                *next_order_seq += 1;
+                objects
+                    .entry((emb_obj_num, 0))
+                    .or_insert(PdfIndirectObject {
+                        val,
+                        stream_range: None,
+                        order_seq: *next_order_seq,
+                    });
+            }
+        }
+    }
+}
+
 fn has_pdf_comment_with_prefix(stream_bytes: &[u8], prefix: &[u8], skip_pdf_strings: bool) -> bool {
     if !skip_pdf_strings {
         return contains_subslice(stream_bytes, prefix);
@@ -829,7 +921,19 @@ pub(super) fn validate_pdf_trailer_json(
     };
     let root_entries = root.as_object()?;
     let json_title = crate::StrictJsonValue::get_str(root_entries, "title")?;
-    let normalized_json_title = json_title.replace(['\r', '\n'], " ");
+    let normalized_json_title: String = json_title
+        .chars()
+        .map(|c| {
+            if matches!(
+                c,
+                '\r' | '\n' | '\x0B' | '\x0C' | '\u{0085}' | '\u{2028}' | '\u{2029}'
+            ) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
     if json_title != expected_title && normalized_json_title != expected_title {
         return None;
     }
