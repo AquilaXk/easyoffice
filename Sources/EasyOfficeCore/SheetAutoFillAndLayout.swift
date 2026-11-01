@@ -196,7 +196,7 @@ extension WorksheetModel {
     return String(decoding: outBytes, as: UTF8.self)
   }
 
-  private static func consumeQuotedLiteral(
+  internal static func consumeQuotedLiteral(
     in bytes: [UInt8],
     from start: Int,
     into outBytes: inout [UInt8]
@@ -220,7 +220,7 @@ extension WorksheetModel {
     return i
   }
 
-  private static func isIdentifierOrDollarByte(_ b: UInt8) -> Bool {
+  internal static func isIdentifierOrDollarByte(_ b: UInt8) -> Bool {
     (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || (b >= 0x30 && b <= 0x39) || b == 0x5F
       || b == 0x24
   }
@@ -239,12 +239,13 @@ extension WorksheetModel {
       !(respectAnchors && parsed.colAnchored) && (minCol.map { parsed.col >= $0 } ?? true)
     let canShiftRow =
       !(respectAnchors && parsed.rowAnchored) && (minRow.map { parsed.row >= $0 } ?? true)
-    let newCol =
-      canShiftCol
-      ? min(max(0, parsed.col + columnDelta), CellAddress.maxZeroBasedColumn) : parsed.col
-    let newRow =
-      canShiftRow
-      ? min(max(0, parsed.row + rowDelta), CellAddress.maxZeroBasedRow) : parsed.row
+    let newCol = canShiftCol ? (parsed.col + columnDelta) : parsed.col
+    let newRow = canShiftRow ? (parsed.row + rowDelta) : parsed.row
+    guard newCol >= 0, newCol <= CellAddress.maxZeroBasedColumn,
+      newRow >= 0, newRow <= CellAddress.maxZeroBasedRow
+    else {
+      return ("#REF!", parsed.nextIndex)
+    }
     return (parsed.formatted(col: newCol, row: newRow), parsed.nextIndex)
   }
 
@@ -350,11 +351,12 @@ extension WorksheetModel {
       return shiftFormulaReferences(raw, rowDelta: rowDelta, columnDelta: columnDelta)
     }
     if allNumeric {
-      let extrapolated = baseVal + Double(stepFromStart) * linearDelta
+      let rawExtrapolated = baseVal + Double(stepFromStart) * linearDelta
+      let extrapolated = Double(String(format: "%.12g", rawExtrapolated)) ?? rawExtrapolated
       if extrapolated.rounded() == extrapolated, let intVal = safeInt(extrapolated) {
         return String(intVal)
       }
-      return String(extrapolated)
+      return SheetValueCoercion.formatGeneralNumber(extrapolated)
     }
     return incrementTrailingIntegerLabel(raw, delta: deltaFromSource) ?? raw
   }
@@ -524,7 +526,7 @@ extension WorksheetModel {
     }
   }
 
-  private struct ParsedCellRef {
+  internal struct ParsedCellRef {
     let col: Int
     let row: Int
     let colAnchored: Bool
@@ -539,7 +541,7 @@ extension WorksheetModel {
     }
   }
 
-  private static func parseRawCellRef(in bytes: [UInt8], at start: Int) -> ParsedCellRef? {
+  internal static func parseRawCellRef(in bytes: [UInt8], at start: Int) -> ParsedCellRef? {
     var cursor = start
     let colAnchored = (cursor < bytes.count && bytes[cursor] == 0x24)
     if colAnchored { cursor += 1 }
@@ -727,382 +729,5 @@ extension WorksheetModel {
     return isRowAxis
       ? ref.formatted(col: ref.col, row: nextAxisVal)
       : ref.formatted(col: nextAxisVal, row: ref.row)
-  }
-
-  // MARK: - Enterprise Data Cleansing & Multi-Column Row Sorting
-
-  /// Sorts data rows in the active worksheet by `primaryColumn` (`ascending`) and optional `secondaryColumn` (`secondaryAscending`), preserving row 0 when `hasHeader` is `true`.
-  public mutating func sortRows(
-    primaryColumn: Int,
-    ascending: Bool = true,
-    secondaryColumn: Int? = nil,
-    secondaryAscending: Bool = true,
-    hasHeader: Bool = true
-  ) {
-    sortRows(
-      byColumn: primaryColumn,
-      ascending: ascending,
-      hasHeader: hasHeader,
-      secondaryColumn: secondaryColumn,
-      secondaryAscending: secondaryAscending
-    )
-  }
-
-  /// Sorts data rows in the active worksheet by `column` (`ascending`), breaking ties with optional `secondaryColumn` (`secondaryAscending`), and preserving row 0 when `hasHeader` is `true`.
-  public mutating func sortRows(
-    byColumn column: Int,
-    ascending: Bool = true,
-    hasHeader: Bool = true,
-    secondaryColumn: Int? = nil,
-    secondaryAscending: Bool = true
-  ) {
-    guard !cellsByCoordinate.isEmpty,
-      column >= 0,
-      column <= CellAddress.maxZeroBasedColumn
-    else {
-      return
-    }
-    let bounds = detectedDataRange()
-    let minRow = max(0, min(bounds.start.row, bounds.end.row))
-    let maxRow = min(CellAddress.maxZeroBasedRow, max(bounds.start.row, bounds.end.row))
-    let startRow = hasHeader ? (minRow + 1) : minRow
-    guard startRow < maxRow else { return }
-    let (rowCount, overflow) = (maxRow - startRow).addingReportingOverflow(1)
-    guard !overflow, rowCount > 1, rowCount <= CellRange.maxExpandedCellCount else {
-      return
-    }
-
-    let rowIndices = Array(startRow...maxRow)
-    var context = EvaluationContext()
-    var primaryValues: [Int: EvaluatedCellValue] = [:]
-    primaryValues.reserveCapacity(rowCount)
-    var secondaryValues: [Int: EvaluatedCellValue] = [:]
-    let validSecondaryCol: Int? =
-      if let secCol = secondaryColumn, secCol >= 0, secCol <= CellAddress.maxZeroBasedColumn {
-        secCol
-      } else {
-        nil
-      }
-    if validSecondaryCol != nil {
-      secondaryValues.reserveCapacity(rowCount)
-    }
-
-    for r in rowIndices {
-      let pCoord = PackedCellCoordinate(row: r, column: column)
-      primaryValues[r] =
-        cellsByCoordinate[pCoord] != nil
-        ? evaluateInternal(at: pCoord, context: &context, depth: 0)
-        : .empty
-      if let secCol = validSecondaryCol {
-        let sCoord = PackedCellCoordinate(row: r, column: secCol)
-        secondaryValues[r] =
-          cellsByCoordinate[sCoord] != nil
-          ? evaluateInternal(at: sCoord, context: &context, depth: 0)
-          : .empty
-      }
-    }
-
-    let sortedRowIndices = rowIndices.sorted { rA, rB in
-      let vA = primaryValues[rA] ?? .empty
-      let vB = primaryValues[rB] ?? .empty
-      let primaryOrder = Self.compareEvaluatedValuesForSort(vA, vB, ascending: ascending)
-      if primaryOrder != .orderedSame {
-        return primaryOrder == .orderedAscending
-      }
-      if validSecondaryCol != nil {
-        let sA = secondaryValues[rA] ?? .empty
-        let sB = secondaryValues[rB] ?? .empty
-        let secondaryOrder = Self.compareEvaluatedValuesForSort(
-          sA,
-          sB,
-          ascending: secondaryAscending
-        )
-        if secondaryOrder != .orderedSame {
-          return secondaryOrder == .orderedAscending
-        }
-      }
-      return rA < rB
-    }
-
-    guard sortedRowIndices != rowIndices else { return }
-
-    var oldToNewRow: [Int: Int] = [:]
-    oldToNewRow.reserveCapacity(rowCount)
-    for (offset, oldRow) in sortedRowIndices.enumerated() {
-      oldToNewRow[oldRow] = startRow + offset
-    }
-
-    var nextCells: [PackedCellCoordinate: String] = [:]
-    nextCells.reserveCapacity(cellsByCoordinate.count)
-    for (coord, rawVal) in cellsByCoordinate {
-      let targetRow = oldToNewRow[coord.row] ?? coord.row
-      let rowDelta = targetRow - coord.row
-      if rowDelta != 0 && rawVal.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("=") {
-        nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] =
-          Self.shiftFormulaReferences(rawVal, rowDelta: rowDelta, columnDelta: 0)
-      } else {
-        nextCells[PackedCellCoordinate(row: targetRow, column: coord.column)] = rawVal
-      }
-    }
-    cellsByCoordinate = nextCells
-
-    var nextStyles: [PackedCellCoordinate: CellStyle] = [:]
-    nextStyles.reserveCapacity(cellStyles.count)
-    for (coord, style) in cellStyles {
-      let targetRow = oldToNewRow[coord.row] ?? coord.row
-      nextStyles[PackedCellCoordinate(row: targetRow, column: coord.column)] = style
-    }
-    cellStyles = nextStyles
-
-    var nextComments: [PackedCellCoordinate: String] = [:]
-    nextComments.reserveCapacity(sheetComments.count)
-    for (coord, comment) in sheetComments {
-      let targetRow = oldToNewRow[coord.row] ?? coord.row
-      nextComments[PackedCellCoordinate(row: targetRow, column: coord.column)] = comment
-    }
-    sheetComments = nextComments
-
-    var nextRowHeights: [Int: Double] = [:]
-    nextRowHeights.reserveCapacity(rowHeights.count)
-    for (r, height) in rowHeights {
-      let targetRow = oldToNewRow[r] ?? r
-      nextRowHeights[targetRow] = height
-    }
-    rowHeights = nextRowHeights
-
-    compiledASTs.removeAll(keepingCapacity: true)
-    for (coord, rawVal) in cellsByCoordinate where !rawVal.isEmpty {
-      compiledASTs[coord] = Self.compileCellInput(rawVal)
-    }
-  }
-
-  private static func compareEvaluatedValuesForSort(
-    _ lhs: EvaluatedCellValue,
-    _ rhs: EvaluatedCellValue,
-    ascending: Bool
-  ) -> ComparisonResult {
-    if lhs == .empty && rhs == .empty {
-      return .orderedSame
-    }
-    if lhs == .empty {
-      return .orderedDescending
-    }
-    if rhs == .empty {
-      return .orderedAscending
-    }
-    if let lNum = lhs.numericValue, let rNum = rhs.numericValue {
-      if lNum == rNum {
-        return .orderedSame
-      }
-      if ascending {
-        return lNum < rNum ? .orderedAscending : .orderedDescending
-      } else {
-        return lNum > rNum ? .orderedAscending : .orderedDescending
-      }
-    }
-    let lText = lhs.description
-    let rText = rhs.description
-    let cmp = lText.caseInsensitiveCompare(rText)
-    if cmp == .orderedSame {
-      return .orderedSame
-    }
-    if ascending {
-      return cmp
-    } else {
-      return cmp == .orderedAscending ? .orderedDescending : .orderedAscending
-    }
-  }
-
-  /// Removes duplicate rows within `range` (or `detectedDataRange()` when `nil`), preserving the first occurrence of each non-empty row signature and returning the number of deleted rows.
-  @discardableResult
-  public mutating func removeDuplicateRows(in range: CellRange? = nil) -> Int {
-    let target = range ?? detectedDataRange()
-    let minRow = max(0, min(target.start.row, target.end.row))
-    let maxRow = min(CellAddress.maxZeroBasedRow, max(target.start.row, target.end.row))
-    let minCol = max(0, min(target.start.column, target.end.column))
-    let maxCol = min(CellAddress.maxZeroBasedColumn, max(target.start.column, target.end.column))
-    guard minRow <= maxRow, minCol <= maxCol else { return 0 }
-    let (rowSpan, rowOverflow) = (maxRow - minRow).addingReportingOverflow(1)
-    let (colSpan, colOverflow) = (maxCol - minCol).addingReportingOverflow(1)
-    let (totalCells, mulOverflow) = rowSpan.multipliedReportingOverflow(by: colSpan)
-    guard !rowOverflow, !colOverflow, !mulOverflow,
-      totalCells > 0, totalCells <= CellRange.maxExpandedCellCount
-    else {
-      return 0
-    }
-
-    var seenKeys: Set<[String]> = []
-    var duplicateRowsToDelete: [Int] = []
-
-    for r in minRow...maxRow {
-      let key = (minCol...maxCol).map { c in
-        (cellsByCoordinate[PackedCellCoordinate(row: r, column: c)] ?? "")
-          .trimmingCharacters(in: .whitespacesAndNewlines)
-      }
-      if key.allSatisfy(\.isEmpty) {
-        continue
-      }
-      if seenKeys.contains(key) {
-        duplicateRowsToDelete.append(r)
-      } else {
-        seenKeys.insert(key)
-      }
-    }
-
-    for r in duplicateRowsToDelete.sorted(by: >) {
-      deleteRow(at: r)
-    }
-    return duplicateRowsToDelete.count
-  }
-
-  /// Splits text cells in `column` by `delimiter` across adjacent columns to the right and returns the number of split rows.
-  @discardableResult
-  public mutating func splitColumnByDelimiter(
-    column: Int,
-    delimiter: String,
-    maxRow: Int? = nil
-  ) -> Int {
-    guard !delimiter.isEmpty,
-      column >= 0,
-      column <= CellAddress.maxZeroBasedColumn
-    else {
-      return 0
-    }
-    let rawUpperRow = maxRow ?? detectedDataRange().end.row
-    let upperRow = min(
-      max(0, rawUpperRow),
-      min(CellAddress.maxZeroBasedRow, CellRange.maxExpandedCellCount - 1)
-    )
-    var splitRowCount = 0
-
-    for r in 0...upperRow {
-      let coord = PackedCellCoordinate(row: r, column: column)
-      guard let raw = cellsByCoordinate[coord],
-        !raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("="),
-        raw.contains(delimiter)
-      else {
-        continue
-      }
-      let parts = raw.components(separatedBy: delimiter).map {
-        $0.trimmingCharacters(in: .whitespacesAndNewlines)
-      }
-      guard parts.count > 1 else { continue }
-      for (offset, part) in parts.enumerated()
-      where column + offset <= CellAddress.maxZeroBasedColumn {
-        let safePart = part.hasPrefix("=") ? ("'" + part) : part
-        cellsByCoordinate[PackedCellCoordinate(row: r, column: column + offset)] = safePart
-      }
-      splitRowCount += 1
-    }
-
-    if splitRowCount > 0 {
-      compiledASTs.removeAll(keepingCapacity: true)
-      for (coord, rawVal) in cellsByCoordinate where !rawVal.isEmpty {
-        compiledASTs[coord] = Self.compileCellInput(rawVal)
-      }
-    }
-    return splitRowCount
-  }
-
-  // MARK: - Goal Seek Numerical Solver & Sparkline Normalization
-
-  /// Solves for the numeric input in `variableCell` that makes `targetCell` evaluate to `targetValue` within `tolerance`.
-  @discardableResult
-  public mutating func goalSeek(
-    targetCell: String,
-    targetValue: Double,
-    variableCell: String,
-    maxIterations: Int = 80,
-    tolerance: Double = 1e-6
-  ) throws -> Double? {
-    let targetCoord = try CellAddress(a1Notation: targetCell).packedCoordinate
-    let varCoord = try CellAddress(a1Notation: variableCell).packedCoordinate
-    let originalRaw = cellsByCoordinate[varCoord] ?? ""
-
-    func evaluateError(at x: Double) -> Double? {
-      cellsByCoordinate[varCoord] = String(x)
-      compiledASTs[varCoord] = .literalNumber(x)
-      guard let y = evaluate(at: targetCoord).numericValue, y.isFinite else { return nil }
-      return y - targetValue
-    }
-
-    let x0 = evaluate(at: varCoord).numericValue ?? 0.0
-    guard var prevErr = evaluateError(at: x0) else {
-      try setCell(variableCell, rawValue: originalRaw)
-      return nil
-    }
-    if abs(prevErr) <= tolerance {
-      let solved = Self.cleanSolvedDouble(x0, tolerance: tolerance)
-      try setCell(variableCell, rawValue: Self.formatSolvedDouble(solved))
-      return solved
-    }
-
-    var prevX = x0
-    var currX = abs(x0) > 1e-3 ? x0 * 1.1 : 10.0
-
-    for _ in 0..<max(1, maxIterations) {
-      guard let currErr = evaluateError(at: currX) else { break }
-      if abs(currErr) <= tolerance {
-        let candidate = Self.cleanSolvedDouble(currX, tolerance: tolerance)
-        let finalX =
-          (evaluateError(at: candidate).map { abs($0) <= tolerance } ?? false) ? candidate : currX
-        try setCell(variableCell, rawValue: Self.formatSolvedDouble(finalX))
-        return finalX
-      }
-
-      let denom = currErr - prevErr
-      let nextX: Double
-      if abs(denom) > 1e-14 {
-        nextX = currX - currErr * (currX - prevX) / denom
-      } else {
-        nextX = currX + (currX == 0 ? 1.0 : currX * 0.5)
-      }
-      guard nextX.isFinite else { break }
-      prevX = currX
-      prevErr = currErr
-      currX = nextX
-    }
-
-    try setCell(variableCell, rawValue: originalRaw)
-    return nil
-  }
-
-  private static func cleanSolvedDouble(_ value: Double, tolerance: Double) -> Double {
-    let rounded = value.rounded()
-    if abs(value - rounded) <= max(tolerance, 1e-7) {
-      return rounded
-    }
-    return value
-  }
-
-  private static func formatSolvedDouble(_ value: Double) -> String {
-    if value.rounded() == value, let intVal = safeInt(value) {
-      return String(intVal)
-    }
-    return String(value)
-  }
-
-  /// Collects all numeric values in `range` (in coordinate order) and normalizes them into `0.0...1.0`.
-  public func sparklineNormalizedValues(
-    for range: CellRange,
-    using preEvaluated: [PackedCellCoordinate: EvaluatedCellValue]? = nil
-  ) -> [Double] {
-    var context = EvaluationContext()
-    var nums: [Double] = []
-    range.forEachCoordinate { coord in
-      let evaluated =
-        preEvaluated?[coord]
-        ?? (cellsByCoordinate[coord] != nil
-          ? evaluateInternal(at: coord, context: &context, depth: 0) : .empty)
-      if case .number(let num) = evaluated, num.isFinite {
-        nums.append(num)
-      }
-    }
-    guard let minVal = nums.min(), let maxVal = nums.max() else { return [] }
-    let span = maxVal - minVal
-    guard span > 1e-9 else {
-      return Array(repeating: 0.5, count: nums.count)
-    }
-    return nums.map { ($0 - minVal) / span }
   }
 }

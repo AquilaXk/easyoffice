@@ -32,6 +32,7 @@ pub enum Expr {
     Text(String),
     Boolean(bool),
     ErrorLiteral(FormulaError),
+    Missing,
     Cell(PackedCellCoordinate),
     Range(CellRange),
     SheetCell {
@@ -73,7 +74,7 @@ pub enum BinaryOp {
 }
 
 pub const MAX_FORMULA_LEN: usize = 8_192;
-pub const MAX_TOKENS: usize = 2_048;
+pub const MAX_TOKENS: usize = 8_192;
 pub const MAX_PARSE_DEPTH: usize = 64;
 
 fn split_once_unquoted(s: &str, delimiter: char) -> Option<(&str, &str)> {
@@ -436,9 +437,34 @@ pub(crate) fn tokenize_formula(raw_src: &str) -> Result<Vec<Token>, FormulaError
             }
             b'#' => {
                 let start = i;
+                let rest = &src[start..];
+                if rest.len() >= 4
+                    && rest[..4].eq_ignore_ascii_case("#N/A")
+                    && !rest.as_bytes().get(4).is_some_and(|c| {
+                        c.is_ascii_alphanumeric() || matches!(c, b'_' | b'!' | b'?')
+                    })
+                {
+                    i += 4;
+                    tokens.push(Token::ErrorLiteral(FormulaError::Na));
+                    continue;
+                }
                 while i < bytes.len()
                     && !bytes[i].is_ascii_whitespace()
-                    && !matches!(bytes[i], b')' | b',' | b';')
+                    && !matches!(
+                        bytes[i],
+                        b')' | b'('
+                            | b','
+                            | b';'
+                            | b'+'
+                            | b'-'
+                            | b'*'
+                            | b'^'
+                            | b'&'
+                            | b'='
+                            | b'<'
+                            | b'>'
+                            | b'%'
+                    )
                 {
                     let c = bytes[i];
                     i += 1;
@@ -680,12 +706,39 @@ impl Parser {
         Ok(expr)
     }
 
+    fn next_range_endpoint_string(&mut self) -> Option<String> {
+        match self.next() {
+            Some(Token::Ident(s)) => Some(s),
+            Some(Token::Number(n)) if n.fract() == 0.0 && n >= 1.0 => Some(format!("{}", n as u64)),
+            _ => None,
+        }
+    }
+
     fn parse_primary(&mut self, depth: usize) -> Result<Expr, FormulaError> {
         if depth > MAX_PARSE_DEPTH {
             return Err(FormulaError::Value);
         }
         match self.next() {
-            Some(Token::Number(n)) => Ok(Expr::Number(n)),
+            Some(Token::Number(n)) => {
+                if matches!(self.peek(), Some(Token::Colon)) {
+                    self.next();
+                    if n.fract() != 0.0 || n < 1.0 {
+                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                    }
+                    let Some(end_str) = self.next_range_endpoint_string() else {
+                        return Err(FormulaError::Ref);
+                    };
+                    if matches!(self.peek(), Some(Token::Bang)) {
+                        return Err(FormulaError::Ref);
+                    }
+                    let notation = format!("{}:{end_str}", n as u64);
+                    let Ok(range) = CellRange::parse(&notation) else {
+                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+                    };
+                    return Ok(Expr::Range(range));
+                }
+                Ok(Expr::Number(n))
+            }
             Some(Token::Text(s)) => Ok(Expr::Text(s)),
             Some(Token::ErrorLiteral(e)) => Ok(Expr::ErrorLiteral(e)),
             Some(Token::LParen) => {
@@ -698,18 +751,17 @@ impl Parser {
             Some(Token::Ident(name)) => {
                 if matches!(self.peek(), Some(Token::Bang)) {
                     self.next();
-                    let Some(Token::Ident(cell_ident)) = self.next() else {
+                    let Some(cell_ident) = self.next_range_endpoint_string() else {
                         return Err(FormulaError::Ref);
                     };
-                    let start_coord = PackedCellCoordinate::parse_a1(&cell_ident);
                     if matches!(self.peek(), Some(Token::Colon)) {
                         self.next();
-                        let Some(Token::Ident(s)) = self.next() else {
+                        let Some(s) = self.next_range_endpoint_string() else {
                             return Err(FormulaError::Ref);
                         };
                         let (end_ident, same_sheet) = if matches!(self.peek(), Some(Token::Bang)) {
                             self.next();
-                            let Some(Token::Ident(s2)) = self.next() else {
+                            let Some(s2) = self.next_range_endpoint_string() else {
                                 return Err(FormulaError::Ref);
                             };
                             (s2, crate::WorkbookEngine::is_same_sheet_identity(&s, &name))
@@ -719,17 +771,13 @@ impl Parser {
                         if !same_sheet {
                             return Ok(Expr::ErrorLiteral(FormulaError::Ref));
                         }
-                        let (Ok(sc), Ok(ec)) =
-                            (start_coord, PackedCellCoordinate::parse_a1(&end_ident))
-                        else {
-                            return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                        };
-                        let Ok(range) = CellRange::new(sc, ec) else {
+                        let notation = format!("{cell_ident}:{end_ident}");
+                        let Ok(range) = CellRange::parse(&notation) else {
                             return Ok(Expr::ErrorLiteral(FormulaError::Ref));
                         };
                         return Ok(Expr::SheetRange { sheet: name, range });
                     }
-                    let Ok(sc) = start_coord else {
+                    let Ok(sc) = PackedCellCoordinate::parse_a1(&cell_ident) else {
                         return Ok(Expr::ErrorLiteral(FormulaError::Ref));
                     };
                     return Ok(Expr::SheetCell {
@@ -743,9 +791,17 @@ impl Parser {
                     let mut args = Vec::new();
                     if !matches!(self.peek(), Some(Token::RParen)) {
                         loop {
-                            args.push(self.parse_expression(depth + 1)?);
+                            if matches!(self.peek(), Some(Token::Comma) | Some(Token::RParen)) {
+                                args.push(Expr::Missing);
+                            } else {
+                                args.push(self.parse_expression(depth + 1)?);
+                            }
                             if matches!(self.peek(), Some(Token::Comma)) {
                                 self.next();
+                                if matches!(self.peek(), Some(Token::RParen)) {
+                                    args.push(Expr::Missing);
+                                    break;
+                                }
                             } else {
                                 break;
                             }
@@ -767,25 +823,21 @@ impl Parser {
                     return Ok(Expr::Boolean(false));
                 }
 
-                let start_coord = PackedCellCoordinate::parse_a1(&name);
                 if matches!(self.peek(), Some(Token::Colon)) {
                     self.next();
-                    let Some(Token::Ident(end_name)) = self.next() else {
+                    let Some(end_name) = self.next_range_endpoint_string() else {
                         return Err(FormulaError::Ref);
                     };
                     if matches!(self.peek(), Some(Token::Bang)) {
                         return Err(FormulaError::Ref);
                     }
-                    let (Ok(sc), Ok(ec)) = (start_coord, PackedCellCoordinate::parse_a1(&end_name))
-                    else {
-                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                    };
-                    let Ok(range) = CellRange::new(sc, ec) else {
+                    let notation = format!("{name}:{end_name}");
+                    let Ok(range) = CellRange::parse(&notation) else {
                         return Ok(Expr::ErrorLiteral(FormulaError::Ref));
                     };
                     return Ok(Expr::Range(range));
                 }
-                let Ok(sc) = start_coord else {
+                let Ok(sc) = PackedCellCoordinate::parse_a1(&name) else {
                     return Ok(Expr::ErrorLiteral(classify_failed_a1_token(&name)));
                 };
                 Ok(Expr::Cell(sc))
@@ -803,147 +855,4 @@ pub fn compile_formula_expr(expr_src: &str) -> Result<Expr, FormulaError> {
         return Err(FormulaError::Value);
     }
     Ok(expr)
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::*;
-
-    #[test]
-    fn test_packed_cell_coordinate_and_a1_roundtrip() {
-        let c = PackedCellCoordinate::parse_a1("B12").unwrap();
-        assert_eq!(c.row(), 11);
-        assert_eq!(c.col(), 1);
-        assert_eq!(c.to_a1(), "B12");
-
-        let xfd = PackedCellCoordinate::parse_a1("$XFD$1000000").unwrap();
-        assert_eq!(xfd.row(), 999_999);
-        assert_eq!(xfd.col(), 16_383);
-        assert_eq!(xfd.to_a1(), "XFD1000000");
-
-        let a1 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A1").unwrap());
-        let a2 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A2").unwrap());
-        let a70000 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A70000").unwrap());
-        assert_ne!(a1, a2);
-        assert_ne!(a1, a70000);
-        assert_ne!(a2, a70000);
-        assert_eq!(a70000.sheet_id(), 7);
-        assert_eq!(a70000.row(), 69_999);
-        assert_eq!(a70000.col(), 0);
-
-        assert!(PackedCellCoordinate::new(1_000_000, 0).is_err());
-        assert!(PackedCellCoordinate::new(0, 16_384).is_err());
-    }
-
-    #[test]
-    fn test_formula_evaluation_operators_isblank_and_functions() {
-        let mut sheet = SheetEngine::new("재무시트");
-        sheet.set_cell("A1", "100").unwrap();
-        sheet.set_cell("A2", "200").unwrap();
-        sheet.set_cell("A3", "=+$A$1+A2*15%").unwrap();
-        sheet.set_cell("B1", "=\"\"").unwrap();
-        sheet.set_cell("B2", "=ISBLANK(C1)").unwrap();
-        sheet.set_cell("B3", "=ISBLANK(B1)").unwrap();
-        sheet.set_cell("D1", "=SUM(A1:A3)").unwrap();
-        sheet.set_cell("D2", "=AVERAGE(A1:A2)").unwrap();
-        sheet
-            .set_cell("D3", "=IF(D1>200, UPPER(\"pass\"), \"fail\")")
-            .unwrap();
-
-        assert_eq!(sheet.evaluate_cell("A3"), EvaluatedCellValue::Number(130.0));
-        let all = sheet.recalculate_all();
-        assert_eq!(
-            all.get(&PackedCellCoordinate::parse_a1("D1").unwrap()),
-            Some(&EvaluatedCellValue::Number(430.0))
-        );
-        assert_eq!(sheet.evaluate_cell("B2"), EvaluatedCellValue::Boolean(true));
-        assert_eq!(
-            sheet.evaluate_cell("B3"),
-            EvaluatedCellValue::Boolean(false)
-        );
-        assert_eq!(sheet.evaluate_cell("D1"), EvaluatedCellValue::Number(430.0));
-        assert_eq!(sheet.evaluate_cell("D2"), EvaluatedCellValue::Number(150.0));
-        assert_eq!(
-            sheet.evaluate_cell("D3"),
-            EvaluatedCellValue::Text("PASS".to_string())
-        );
-    }
-
-    #[test]
-    fn test_cycle_detection_lookup_npv_and_pivot() {
-        let mut sheet = SheetEngine::new("분석시트");
-        sheet.set_cell("A1", "=B1+1").unwrap();
-        sheet.set_cell("B1", "=A1+1").unwrap();
-        assert_eq!(
-            sheet.evaluate_cell("A1"),
-            EvaluatedCellValue::Error(FormulaError::Cycle)
-        );
-
-        sheet.set_cell("A1", "부서").unwrap();
-        sheet.set_cell("B1", "매출").unwrap();
-        sheet.set_cell("A2", "플랫폼").unwrap();
-        sheet.set_cell("B2", "1200").unwrap();
-        sheet.set_cell("A3", "코어엔진").unwrap();
-        sheet.set_cell("B3", "1800").unwrap();
-        sheet.set_cell("A4", "플랫폼").unwrap();
-        sheet.set_cell("B4", "800").unwrap();
-
-        sheet
-            .set_cell("C1", "=VLOOKUP(\"코어엔진\", A2:B4, 2, FALSE)")
-            .unwrap();
-        sheet.set_cell("C2", "=INDEX(A2:B4, 2, 2)").unwrap();
-        sheet
-            .set_cell("C3", "=MATCH(\"코어엔진\", A2:A4, 0)")
-            .unwrap();
-        sheet.set_cell("C4", "=ROUND(NPV(0.1, B2:B3), 2)").unwrap();
-        sheet
-            .set_cell("C5", "=SQRT(16)+POWER(2,3)+MOD(10,3)")
-            .unwrap();
-        sheet.set_cell("C6", "=CONCAT(A2, \"-\", A3)").unwrap();
-        sheet.set_cell("C7", "=MEDIAN(B2:B4)").unwrap();
-        sheet.set_cell("C8", "=ROUND(STDEV(B2:B4), 2)").unwrap();
-        sheet
-            .set_cell("C9", "=VLOOKUP(\"코어엔진\", A2:B4, 1/0, FALSE)")
-            .unwrap();
-
-        assert_eq!(
-            sheet.evaluate_cell("C1"),
-            EvaluatedCellValue::Number(1800.0)
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C2"),
-            EvaluatedCellValue::Number(1800.0)
-        );
-        assert_eq!(sheet.evaluate_cell("C3"), EvaluatedCellValue::Number(2.0));
-        assert_eq!(
-            sheet.evaluate_cell("C4"),
-            EvaluatedCellValue::Number(2578.51)
-        );
-        assert_eq!(sheet.evaluate_cell("C5"), EvaluatedCellValue::Number(13.0));
-        assert_eq!(
-            sheet.evaluate_cell("C6"),
-            EvaluatedCellValue::Text("플랫폼-코어엔진".to_string())
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C7"),
-            EvaluatedCellValue::Number(1200.0)
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C8"),
-            EvaluatedCellValue::Number(503.32)
-        );
-        assert_eq!(
-            sheet.evaluate_cell("C9"),
-            EvaluatedCellValue::Error(FormulaError::DivByZero)
-        );
-
-        let range = CellRange::parse("A1:B4").unwrap();
-        let pivot = sheet.compute_pivot(&range, true, 0, 1, PivotAggregation::Sum);
-        assert_eq!(
-            pivot.row_keys,
-            vec!["플랫폼".to_string(), "코어엔진".to_string()]
-        );
-        assert_eq!(pivot.row_totals, vec![2000.0, 1800.0]);
-        assert_eq!(pivot.grand_total, 3800.0);
-    }
 }

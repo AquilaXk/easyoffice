@@ -1,5 +1,5 @@
 #[path = "range_refs.rs"]
-mod range_refs;
+pub(crate) mod range_refs;
 
 use crate::{EvalContext, EvaluatedCellValue, Expr, FormulaError, SheetEngine};
 
@@ -218,17 +218,40 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let num = self.eval_arg_num(&args[0], ctx, depth)?;
+                if num == 0.0 {
+                    return Ok(EvaluatedCellValue::Number(0.0));
+                }
                 let digits = if args.len() == 2 {
                     self.eval_arg_num(&args[1], ctx, depth)?
                 } else {
                     0.0
                 };
-                let exp = digits.trunc().clamp(-300.0, 300.0) as i32;
-                let factor = 10f64.powi(exp);
-                if !factor.is_finite() || factor == 0.0 {
+                let d_trunc = digits.trunc();
+                if d_trunc >= 300.0 {
                     return Ok(EvaluatedCellValue::Number(num));
                 }
+                if d_trunc <= -309.0 {
+                    return if name == "ROUNDUP" {
+                        Err(FormulaError::Num)
+                    } else {
+                        Ok(EvaluatedCellValue::Number(0.0))
+                    };
+                }
+                let exp = d_trunc as i32;
+                let factor = 10f64.powi(exp);
+                if !factor.is_finite() || factor == 0.0 {
+                    return if exp > 0 {
+                        Ok(EvaluatedCellValue::Number(num))
+                    } else if name == "ROUNDUP" {
+                        Err(FormulaError::Num)
+                    } else {
+                        Ok(EvaluatedCellValue::Number(0.0))
+                    };
+                }
                 let scaled = num * factor;
+                if !scaled.is_finite() {
+                    return Ok(EvaluatedCellValue::Number(num));
+                }
                 let rounded = match name {
                     "ROUND" => {
                         if exp > 0 {
@@ -239,42 +262,85 @@ impl SheetEngine {
                         }
                     }
                     "ROUNDUP" => {
-                        if num == 0.0 {
-                            0.0
+                        let abs_s = scaled.abs();
+                        let snapped = if exp > 0
+                            && (abs_s - abs_s.round()).abs() <= abs_s * f64::EPSILON * 4.0
+                        {
+                            abs_s.round()
                         } else {
-                            let abs_s = scaled.abs();
-                            let snapped = if exp > 0
-                                && (abs_s - abs_s.round()).abs() <= abs_s * f64::EPSILON * 4.0
-                            {
-                                abs_s.round()
-                            } else {
-                                abs_s.ceil()
-                            };
-                            snapped.copysign(num)
-                        }
+                            abs_s.ceil()
+                        };
+                        snapped.copysign(num)
                     }
                     _ => {
-                        if num == 0.0 {
-                            0.0
+                        let abs_s = scaled.abs();
+                        let snapped = if exp > 0
+                            && (abs_s.round() - abs_s).abs() <= abs_s * f64::EPSILON * 4.0
+                        {
+                            abs_s.round()
                         } else {
-                            let abs_s = scaled.abs();
-                            let snapped = if exp > 0
-                                && (abs_s.round() - abs_s).abs() <= abs_s * f64::EPSILON * 4.0
-                            {
-                                abs_s.round()
-                            } else {
-                                abs_s.floor()
-                            };
-                            snapped.copysign(num)
-                        }
+                            abs_s.floor()
+                        };
+                        snapped.copysign(num)
                     }
                 };
                 let res = rounded / factor;
+                if !res.is_finite() {
+                    return Err(FormulaError::Num);
+                }
                 Ok(EvaluatedCellValue::Number(if res == 0.0 {
                     0.0
                 } else {
                     res
                 }))
+            }
+            "MROUND" => {
+                if args.len() != 2 {
+                    return Err(FormulaError::Value);
+                }
+                let num = self.eval_arg_num(&args[0], ctx, depth)?;
+                let mult = self.eval_arg_num(&args[1], ctx, depth)?;
+                if mult == 0.0 || num == 0.0 {
+                    return Ok(EvaluatedCellValue::Number(0.0));
+                }
+                if (num > 0.0 && mult < 0.0) || (num < 0.0 && mult > 0.0) {
+                    return Err(FormulaError::Num);
+                }
+                let q = num / mult;
+                let nudge = q.abs() * f64::EPSILON * 2.0;
+                let res = (q + nudge.copysign(q)).round() * mult;
+                Ok(EvaluatedCellValue::Number(if res == 0.0 {
+                    0.0
+                } else {
+                    res
+                }))
+            }
+            "FACT" => {
+                if args.len() != 1 {
+                    return Err(FormulaError::Value);
+                }
+                let n = self.eval_arg_num(&args[0], ctx, depth)?.trunc();
+                if !(0.0..=170.0).contains(&n) {
+                    return Err(FormulaError::Num);
+                }
+                let mut acc = 1.0f64;
+                for i in 2..=(n as u32) {
+                    acc *= i as f64;
+                }
+                Ok(EvaluatedCellValue::Number(acc))
+            }
+            "RANDBETWEEN" => {
+                if args.len() != 2 {
+                    return Err(FormulaError::Value);
+                }
+                let lo = self.eval_arg_num(&args[0], ctx, depth)?.ceil();
+                let hi = self.eval_arg_num(&args[1], ctx, depth)?.floor();
+                if lo > hi {
+                    return Err(FormulaError::Num);
+                }
+                let span = (hi - lo) + 1.0;
+                let r = (lo + (ctx.next_rand_f64() * span).floor()).min(hi);
+                Ok(EvaluatedCellValue::Number(if r == 0.0 { 0.0 } else { r }))
             }
             "INT" => {
                 if args.len() != 1 {
@@ -303,7 +369,7 @@ impl SheetEngine {
                         Ok(EvaluatedCellValue::Number(0.0))
                     };
                 }
-                if (num > 0.0 && sig < 0.0) || (num < 0.0 && sig > 0.0 && name == "FLOOR") {
+                if num > 0.0 && sig < 0.0 {
                     return Err(FormulaError::Num);
                 }
                 let q = num / sig;
@@ -324,7 +390,7 @@ impl SheetEngine {
                 }
                 let num = self.eval_arg_num(&args[0], ctx, depth)?;
                 let div = self.eval_arg_num(&args[1], ctx, depth)?;
-                if div.abs() < 1e-15 {
+                if div == 0.0 {
                     return Err(FormulaError::DivByZero);
                 }
                 Ok(EvaluatedCellValue::Number(if name == "MOD" {
@@ -398,16 +464,45 @@ impl SheetEngine {
                 Ok(EvaluatedCellValue::Number(if name == "PI" {
                     std::f64::consts::PI
                 } else {
-                    0.5
+                    ctx.next_rand_f64()
                 }))
+            }
+            "NA" => {
+                if !args.is_empty() {
+                    return Err(FormulaError::Value);
+                }
+                Err(FormulaError::Na)
+            }
+            "N" => {
+                if args.len() != 1 {
+                    return Err(FormulaError::Value);
+                }
+                match self.eval_expr_ctx(&args[0], ctx, depth) {
+                    EvaluatedCellValue::Number(n) => Ok(EvaluatedCellValue::Number(n)),
+                    EvaluatedCellValue::Boolean(b) => {
+                        Ok(EvaluatedCellValue::Number(if b { 1.0 } else { 0.0 }))
+                    }
+                    EvaluatedCellValue::Error(e) => Err(e),
+                    _ => Ok(EvaluatedCellValue::Number(0.0)),
+                }
+            }
+            "T" => {
+                if args.len() != 1 {
+                    return Err(FormulaError::Value);
+                }
+                match self.eval_expr_ctx(&args[0], ctx, depth) {
+                    EvaluatedCellValue::Text(s) => Ok(EvaluatedCellValue::Text(s)),
+                    EvaluatedCellValue::Error(e) => Err(e),
+                    _ => Ok(EvaluatedCellValue::Text(String::new())),
+                }
             }
             "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK" => {
                 self.eval_streaming_range_agg_ctx(name, args, ctx, depth)
             }
-            "STDEV" | "STDEVP" | "VAR" | "VARP" => {
+            "STDEV" | "STDEVP" | "VAR" | "VARP" | "STDEV.S" | "STDEV.P" | "VAR.S" | "VAR.P" => {
                 self.eval_welford_variance_streaming(name, args, ctx, depth)
             }
-            "MEDIAN" | "MODE" => self.eval_stat_basic(name, args, ctx, depth),
+            "MEDIAN" | "MODE" | "MODE.SNGL" => self.eval_stat_basic(name, args, ctx, depth),
             "AVERAGEA" => {
                 let mut sum = 0.0;
                 let mut count = 0usize;
@@ -434,9 +529,8 @@ impl SheetEngine {
             }
             "AVERAGEIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
             "AVERAGEIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
-            "SMALL" | "LARGE" | "RANK" | "PERCENTILE" | "QUARTILE" => {
-                self.eval_stat_order(name, args, ctx, depth)
-            }
+            "SMALL" | "LARGE" | "RANK" | "PERCENTILE" | "QUARTILE" | "PERCENTILE.INC"
+            | "QUARTILE.INC" => self.eval_stat_order(name, args, ctx, depth),
             "COUNTIF" => self.eval_single_criteria_streaming(name, args, ctx, depth),
             "COUNTIFS" => self.eval_multi_criteria_streaming(name, args, ctx, depth),
             "IF" | "IFS" | "AND" | "OR" | "XOR" | "NOT" | "IFERROR" | "IFNA" | "SWITCH"
@@ -447,13 +541,16 @@ impl SheetEngine {
             }
             "LEN" | "TRIM" | "UPPER" | "LOWER" | "PROPER" | "VALUE" | "CHAR" | "CODE"
             | "CONCAT" | "CONCATENATE" | "TEXTJOIN" | "LEFT" | "RIGHT" | "MID" | "SUBSTITUTE"
-            | "REPLACE" | "FIND" | "SEARCH" | "EXACT" | "REPT" | "TEXT" => {
+            | "REPLACE" | "FIND" | "SEARCH" | "EXACT" | "REPT" | "TEXT" | "FIXED" | "CLEAN" => {
                 self.eval_text_func(name, args, ctx, depth)
             }
             "DATE" | "YEAR" | "MONTH" | "DAY" | "TIME" | "HOUR" | "MINUTE" | "SECOND" | "DAYS"
-            | "EDATE" => self.eval_date_func(name, args, ctx, depth),
+            | "EDATE" | "EOMONTH" | "DATEDIF" | "TODAY" | "NOW" | "WEEKDAY" | "DATEVALUE"
+            | "WORKDAY" | "NETWORKDAYS" => self.eval_date_func(name, args, ctx, depth),
             "PMT" | "IPMT" | "PPMT" | "FV" | "PV" | "NPV" | "IRR" | "RATE" | "NPER" | "SLN"
-            | "DB" | "DDB" => self.eval_financial_func(name, args, ctx, depth),
+            | "DB" | "DDB" | "SYD" | "EFFECT" | "NOMINAL" => {
+                self.eval_financial_func(name, args, ctx, depth)
+            }
             "ISBLANK" | "ISNUMBER" | "ISTEXT" | "ISLOGICAL" | "ISERR" | "ISERROR" | "ISNA"
             | "ISEVEN" | "ISODD" | "TYPE" => self.eval_info_func(name, args, ctx, depth),
             _ => Err(FormulaError::Name),
@@ -480,7 +577,7 @@ impl SheetEngine {
             }
             Ok(())
         })?;
-        let is_sample = name == "STDEV" || name == "VAR";
+        let is_sample = matches!(name, "STDEV" | "VAR" | "STDEV.S" | "VAR.S");
         if count == 0 || (is_sample && count < 2) {
             return Err(FormulaError::DivByZero);
         }
@@ -526,7 +623,7 @@ impl SheetEngine {
                 };
                 Ok(EvaluatedCellValue::Number(med))
             }
-            "MODE" => {
+            "MODE" | "MODE.SNGL" => {
                 if nums.is_empty() {
                     return Err(FormulaError::Na);
                 }
@@ -625,7 +722,7 @@ impl SheetEngine {
                 }
                 let vals = self.eval_range_vec(&args[0], ctx, depth)?;
                 let param = self.eval_arg_num(&args[1], ctx, depth)?;
-                let p = if name == "QUARTILE" {
+                let p = if name == "QUARTILE" || name == "QUARTILE.INC" {
                     let q = param.trunc() as i32;
                     if !(0..=4).contains(&q) {
                         return Err(FormulaError::Num);

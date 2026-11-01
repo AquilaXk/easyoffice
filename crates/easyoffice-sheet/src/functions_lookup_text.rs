@@ -107,7 +107,7 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let lookup_val = self.eval_arg_val(&args[0], ctx, depth)?;
-                let match_mode = if args.len() >= 5 {
+                let match_mode = if args.len() >= 5 && !matches!(args[4], Expr::Missing) {
                     self.eval_arg_num(&args[4], ctx, depth)?.trunc() as i32
                 } else {
                     0
@@ -115,7 +115,7 @@ impl SheetEngine {
                 if !matches!(match_mode, -1..=2) {
                     return Err(FormulaError::Value);
                 }
-                let search_mode = if args.len() >= 6 {
+                let search_mode = if args.len() >= 6 && !matches!(args[5], Expr::Missing) {
                     self.eval_arg_num(&args[5], ctx, depth)?.trunc() as i32
                 } else {
                     1
@@ -209,7 +209,7 @@ impl SheetEngine {
                             depth,
                         );
                     }
-                    return if args.len() >= 4 {
+                    return if args.len() >= 4 && !matches!(args[3], Expr::Missing) {
                         Ok(self.eval_expr_ctx(&args[3], ctx, depth))
                     } else {
                         Err(FormulaError::Na)
@@ -237,7 +237,7 @@ impl SheetEngine {
                 if let Some((best_idx, _)) = best_approx {
                     return Ok(return_arr[best_idx].clone());
                 }
-                if args.len() >= 4 {
+                if args.len() >= 4 && !matches!(args[3], Expr::Missing) {
                     Ok(self.eval_expr_ctx(&args[3], ctx, depth))
                 } else {
                     Err(FormulaError::Na)
@@ -712,16 +712,25 @@ impl SheetEngine {
                 } else {
                     1
                 };
-                let hay_chars: Vec<char> = if name == "SEARCH" {
-                    hay_raw.to_lowercase().chars().collect()
-                } else {
-                    hay_raw.chars().collect()
-                };
-                let needle_chars: Vec<char> = if name == "SEARCH" {
-                    needle_raw.to_lowercase().chars().collect()
-                } else {
-                    needle_raw.chars().collect()
-                };
+                if name == "SEARCH" {
+                    let byte_indices: Vec<usize> = hay_raw.char_indices().map(|(i, _)| i).collect();
+                    if start < 1 || (start as usize) > byte_indices.len().max(1) {
+                        return Err(FormulaError::Value);
+                    }
+                    let st = (start - 1) as usize;
+                    if needle_raw.is_empty() {
+                        return Ok(EvaluatedCellValue::Number(start as f64));
+                    }
+                    for (char_idx, &byte_pos) in byte_indices.iter().enumerate().skip(st) {
+                        if crate::coercion::wildcard_prefix_match(&hay_raw[byte_pos..], &needle_raw)
+                        {
+                            return Ok(EvaluatedCellValue::Number((char_idx + 1) as f64));
+                        }
+                    }
+                    return Err(FormulaError::Value);
+                }
+                let hay_chars: Vec<char> = hay_raw.chars().collect();
+                let needle_chars: Vec<char> = needle_raw.chars().collect();
                 if start < 1 || (start as usize) > hay_chars.len().max(1) {
                     return Err(FormulaError::Value);
                 }
@@ -761,17 +770,7 @@ impl SheetEngine {
                     return Err(FormulaError::Value);
                 }
                 let v = self.eval_arg_val(&args[0], ctx, depth)?;
-                if let Some(n) = v.as_number() {
-                    return Ok(EvaluatedCellValue::Number(n));
-                }
-                let cleaned = v.to_display_string().trim().replace([',', '$'], "");
-                if let Some(pct) = cleaned.strip_suffix('%') {
-                    let n = pct.trim().parse::<f64>().map_err(|_| FormulaError::Value)?;
-                    Ok(EvaluatedCellValue::Number(n / 100.0))
-                } else {
-                    let n = cleaned.parse::<f64>().map_err(|_| FormulaError::Value)?;
-                    Ok(EvaluatedCellValue::Number(n))
-                }
+                crate::coercion::coerce_to_number(&v).map(EvaluatedCellValue::Number)
             }
             "TEXT" => {
                 if args.len() != 2 {
@@ -780,31 +779,46 @@ impl SheetEngine {
                 let val = self.eval_arg_val(&args[0], ctx, depth)?;
                 let fmt_str = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
                 let out = if let Some(num) = val.as_number() {
-                    if fmt_str.ends_with('%') {
-                        let decimals = fmt_str.split('.').nth(1).map_or(0, |d| {
-                            d.trim_end_matches('%')
-                                .chars()
-                                .take_while(|&c| c == '0' || c == '#')
-                                .count()
-                                .min(10)
-                        });
-                        format!("{:.prec$}%", num * 100.0, prec = decimals)
-                    } else if let Some((_, after_dot)) = fmt_str.split_once('.') {
-                        let decimals = after_dot
-                            .chars()
-                            .take_while(|&c| c == '0' || c == '#')
-                            .count()
-                            .min(10);
-                        format!("{num:.prec$}", prec = decimals)
-                    } else {
-                        format!("{:.0}", num.round())
-                    }
+                    crate::coercion::format_text_pattern(num, &fmt_str)
                 } else {
                     val.to_display_string()
                 };
                 if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
                     return Err(FormulaError::Value);
                 }
+                Ok(EvaluatedCellValue::Text(out))
+            }
+            "FIXED" => {
+                if args.is_empty() || args.len() > 3 {
+                    return Err(FormulaError::Value);
+                }
+                let num = self.eval_arg_num(&args[0], ctx, depth)?;
+                let decimals = if args.len() >= 2 && !matches!(args[1], Expr::Missing) {
+                    self.eval_arg_num(&args[1], ctx, depth)?
+                        .trunc()
+                        .clamp(-100.0, 20.0) as i32
+                } else {
+                    2
+                };
+                let no_commas = if args.len() == 3 && !matches!(args[2], Expr::Missing) {
+                    self.eval_arg_val(&args[2], ctx, depth)?
+                        .as_bool()
+                        .ok_or(FormulaError::Value)?
+                } else {
+                    false
+                };
+                let out = crate::coercion::format_fixed_number(num, decimals, !no_commas);
+                if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
+                    return Err(FormulaError::Value);
+                }
+                Ok(EvaluatedCellValue::Text(out))
+            }
+            "CLEAN" => {
+                if args.len() != 1 {
+                    return Err(FormulaError::Value);
+                }
+                let s = self.eval_arg_val(&args[0], ctx, depth)?.to_display_string();
+                let out: String = s.chars().filter(|&c| (c as u32) >= 0x20).collect();
                 Ok(EvaluatedCellValue::Text(out))
             }
             "CHAR" => {

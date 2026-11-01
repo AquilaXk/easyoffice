@@ -446,3 +446,471 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
         EvaluatedCellValue::Error(FormulaError::Value)
     );
 }
+
+#[test]
+fn test_packed_cell_coordinate_and_a1_roundtrip() {
+    use easyoffice_sheet::{PackedCellCoordinate, PackedWorkbookCoord};
+    let c = PackedCellCoordinate::parse_a1("B12").unwrap();
+    assert_eq!(c.row(), 11);
+    assert_eq!(c.col(), 1);
+    assert_eq!(c.to_a1(), "B12");
+
+    let xfd = PackedCellCoordinate::parse_a1("$XFD$1048576").unwrap();
+    assert_eq!(xfd.row(), 1_048_575);
+    assert_eq!(xfd.col(), 16_383);
+    assert_eq!(xfd.to_a1(), "XFD1048576");
+
+    let a1 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A1").unwrap());
+    let a2 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A2").unwrap());
+    let a70000 = PackedWorkbookCoord::new(7, PackedCellCoordinate::parse_a1("A70000").unwrap());
+    assert_ne!(a1, a2);
+    assert_ne!(a1, a70000);
+    assert_ne!(a2, a70000);
+    assert_eq!(a70000.sheet_id(), 7);
+    assert_eq!(a70000.row(), 69_999);
+    assert_eq!(a70000.col(), 0);
+
+    assert!(PackedCellCoordinate::new(1_048_576, 0).is_err());
+    assert!(PackedCellCoordinate::new(0, 16_384).is_err());
+}
+
+#[test]
+fn test_formula_evaluation_operators_isblank_and_functions() {
+    use easyoffice_sheet::PackedCellCoordinate;
+    let mut sheet = SheetEngine::new("재무시트");
+    sheet.set_cell("A1", "100").unwrap();
+    sheet.set_cell("A2", "200").unwrap();
+    sheet.set_cell("A3", "=+$A$1+A2*15%").unwrap();
+    sheet.set_cell("B1", "=\"\"").unwrap();
+    sheet.set_cell("B2", "=ISBLANK(C1)").unwrap();
+    sheet.set_cell("B3", "=ISBLANK(B1)").unwrap();
+    sheet.set_cell("D1", "=SUM(A1:A3)").unwrap();
+    sheet.set_cell("D2", "=AVERAGE(A1:A2)").unwrap();
+    sheet
+        .set_cell("D3", "=IF(D1>200, UPPER(\"pass\"), \"fail\")")
+        .unwrap();
+
+    assert_eq!(sheet.evaluate_cell("A3"), EvaluatedCellValue::Number(130.0));
+    let all = sheet.recalculate_all();
+    assert_eq!(
+        all.get(&PackedCellCoordinate::parse_a1("D1").unwrap()),
+        Some(&EvaluatedCellValue::Number(430.0))
+    );
+    assert_eq!(sheet.evaluate_cell("B2"), EvaluatedCellValue::Boolean(true));
+    assert_eq!(
+        sheet.evaluate_cell("B3"),
+        EvaluatedCellValue::Boolean(false)
+    );
+    assert_eq!(sheet.evaluate_cell("D1"), EvaluatedCellValue::Number(430.0));
+    assert_eq!(sheet.evaluate_cell("D2"), EvaluatedCellValue::Number(150.0));
+    assert_eq!(
+        sheet.evaluate_cell("D3"),
+        EvaluatedCellValue::Text("PASS".to_string())
+    );
+}
+
+#[test]
+fn test_cycle_detection_lookup_npv_and_pivot() {
+    use easyoffice_sheet::{CellRange, PivotAggregation};
+    let mut sheet = SheetEngine::new("분석시트");
+    sheet.set_cell("A1", "=B1+1").unwrap();
+    sheet.set_cell("B1", "=A1+1").unwrap();
+    assert_eq!(
+        sheet.evaluate_cell("A1"),
+        EvaluatedCellValue::Error(FormulaError::Cycle)
+    );
+
+    sheet.set_cell("A1", "부서").unwrap();
+    sheet.set_cell("B1", "매출").unwrap();
+    sheet.set_cell("A2", "플랫폼").unwrap();
+    sheet.set_cell("B2", "1200").unwrap();
+    sheet.set_cell("A3", "코어엔진").unwrap();
+    sheet.set_cell("B3", "1800").unwrap();
+    sheet.set_cell("A4", "플랫폼").unwrap();
+    sheet.set_cell("B4", "800").unwrap();
+
+    sheet
+        .set_cell("C1", "=VLOOKUP(\"코어엔진\", A2:B4, 2, FALSE)")
+        .unwrap();
+    sheet.set_cell("C2", "=INDEX(A2:B4, 2, 2)").unwrap();
+    sheet
+        .set_cell("C3", "=MATCH(\"코어엔진\", A2:A4, 0)")
+        .unwrap();
+    sheet.set_cell("C4", "=ROUND(NPV(0.1, B2:B3), 2)").unwrap();
+    sheet
+        .set_cell("C5", "=SQRT(16)+POWER(2,3)+MOD(10,3)")
+        .unwrap();
+    sheet.set_cell("C6", "=CONCAT(A2, \"-\", A3)").unwrap();
+    sheet.set_cell("C7", "=MEDIAN(B2:B4)").unwrap();
+    sheet.set_cell("C8", "=ROUND(STDEV(B2:B4), 2)").unwrap();
+    sheet
+        .set_cell("C9", "=VLOOKUP(\"코어엔진\", A2:B4, 1/0, FALSE)")
+        .unwrap();
+
+    assert_eq!(
+        sheet.evaluate_cell("C1"),
+        EvaluatedCellValue::Number(1800.0)
+    );
+    assert_eq!(
+        sheet.evaluate_cell("C2"),
+        EvaluatedCellValue::Number(1800.0)
+    );
+    assert_eq!(sheet.evaluate_cell("C3"), EvaluatedCellValue::Number(2.0));
+    assert_eq!(
+        sheet.evaluate_cell("C4"),
+        EvaluatedCellValue::Number(2578.51)
+    );
+    assert_eq!(sheet.evaluate_cell("C5"), EvaluatedCellValue::Number(13.0));
+    assert_eq!(
+        sheet.evaluate_cell("C6"),
+        EvaluatedCellValue::Text("플랫폼-코어엔진".to_string())
+    );
+    assert_eq!(
+        sheet.evaluate_cell("C7"),
+        EvaluatedCellValue::Number(1200.0)
+    );
+    assert_eq!(
+        sheet.evaluate_cell("C8"),
+        EvaluatedCellValue::Number(503.32)
+    );
+    assert_eq!(
+        sheet.evaluate_cell("C9"),
+        EvaluatedCellValue::Error(FormulaError::DivByZero)
+    );
+
+    let range = CellRange::parse("A1:B4").unwrap();
+    let pivot = sheet.compute_pivot(&range, true, 0, 1, PivotAggregation::Sum);
+    assert_eq!(
+        pivot.row_keys,
+        vec!["플랫폼".to_string(), "코어엔진".to_string()]
+    );
+    assert_eq!(pivot.row_totals, vec![2000.0, 1800.0]);
+    assert_eq!(pivot.grand_total, 3800.0);
+}
+
+#[test]
+fn test_shared_coercion_parity_fixture_vectors() {
+    use easyoffice_formats::StrictJsonValue;
+
+    let raw_json = include_str!("../../../fixtures/sheet-coercion-parity.json");
+    let parsed = StrictJsonValue::parse(raw_json).expect("valid sheet-coercion-parity.json");
+    let StrictJsonValue::Array(items) = parsed else {
+        panic!("expected top-level array in sheet-coercion-parity.json");
+    };
+    assert!(items.len() >= 23);
+
+    for item in &items {
+        let StrictJsonValue::Object(fields) = item else {
+            panic!("expected object entry");
+        };
+        let id = match StrictJsonValue::get_field(fields, "id") {
+            Some(StrictJsonValue::Str(s)) => s.as_str(),
+            _ => panic!("missing id"),
+        };
+        let target = match StrictJsonValue::get_field(fields, "target") {
+            Some(StrictJsonValue::Str(s)) => s.as_str(),
+            _ => panic!("missing target for {id}"),
+        };
+        let expected_type = match StrictJsonValue::get_field(fields, "expectedType") {
+            Some(StrictJsonValue::Str(s)) => s.as_str(),
+            _ => panic!("missing expectedType for {id}"),
+        };
+        let expected_display = match StrictJsonValue::get_field(fields, "expectedDisplay") {
+            Some(StrictJsonValue::Str(s)) => s.as_str(),
+            _ => panic!("missing expectedDisplay for {id}"),
+        };
+        let Some(StrictJsonValue::Object(cell_entries)) =
+            StrictJsonValue::get_field(fields, "cells")
+        else {
+            panic!("missing cells object for {id}");
+        };
+
+        let mut sheet = SheetEngine::new("Parity");
+        for (addr, raw_val) in cell_entries {
+            let StrictJsonValue::Str(s) = raw_val else {
+                panic!("cell value must be string for {id}");
+            };
+            sheet.set_cell(addr, s).unwrap();
+        }
+        let val = sheet.evaluate_cell(target);
+        let actual_type = match &val {
+            EvaluatedCellValue::Empty => "empty",
+            EvaluatedCellValue::Number(_) => "number",
+            EvaluatedCellValue::Text(_) => "text",
+            EvaluatedCellValue::Boolean(_) => "boolean",
+            EvaluatedCellValue::Error(_) => "error",
+        };
+        assert_eq!(actual_type, expected_type, "type mismatch on fixture {id}");
+        assert_eq!(
+            val.to_display_string(),
+            expected_display,
+            "display mismatch on fixture {id}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_88_dag_chains_99999_budget_whole_col_row_and_max_limits() {
+    use easyoffice_sheet::PackedCellCoordinate;
+
+    assert_eq!(PackedCellCoordinate::MAX_ROWS, 1_048_576);
+    assert_eq!(PackedCellCoordinate::MAX_COLS, 16_384);
+    let max_addr = PackedCellCoordinate::parse_a1("XFD1048576").expect("XFD1048576 must parse");
+    assert_eq!(max_addr.col(), 16_383);
+    assert_eq!(max_addr.row(), 1_048_575);
+    assert_eq!(max_addr.to_a1(), "XFD1048576");
+    assert!(PackedCellCoordinate::parse_a1("XFD1048577").is_err());
+
+    let mut fwd = SheetEngine::new("Forward2000");
+    fwd.set_cell("A1", "1").unwrap();
+    for r in 2..=2000 {
+        fwd.set_cell(&format!("A{r}"), format!("=A{}+1", r - 1))
+            .unwrap();
+    }
+    assert_eq!(
+        fwd.evaluate_cell("A2000"),
+        EvaluatedCellValue::Number(2000.0)
+    );
+    let fwd_all = fwd.recalculate_all();
+    assert_eq!(
+        fwd_all.get(&PackedCellCoordinate::parse_a1("A2000").unwrap()),
+        Some(&EvaluatedCellValue::Number(2000.0))
+    );
+
+    let mut bwd = SheetEngine::new("Backward2000");
+    bwd.set_cell("A2000", "1").unwrap();
+    for r in (1..2000).rev() {
+        bwd.set_cell(&format!("A{r}"), format!("=A{}+1", r + 1))
+            .unwrap();
+    }
+    assert_eq!(bwd.evaluate_cell("A1"), EvaluatedCellValue::Number(2000.0));
+    let bwd_all = bwd.recalculate_all();
+    assert_eq!(
+        bwd_all.get(&PackedCellCoordinate::parse_a1("A1").unwrap()),
+        Some(&EvaluatedCellValue::Number(2000.0))
+    );
+
+    let mut wb = WorkbookEngine::new();
+    {
+        let s = wb.add_sheet("Chain");
+        s.set_cell("A2000", "1").unwrap();
+        for r in (1..2000).rev() {
+            s.set_cell(&format!("A{r}"), format!("=A{}+1", r + 1))
+                .unwrap();
+        }
+    }
+    assert_eq!(
+        wb.evaluate_cell("Chain", "A1"),
+        EvaluatedCellValue::Number(2000.0)
+    );
+
+    let mut large = SheetEngine::new("LargeRange");
+    for r in 1..=99_999u32 {
+        large.set_cell(&format!("A{r}"), "1").unwrap();
+    }
+    large.set_cell("B1", "=SUM(A1:A99999)").unwrap();
+    large.set_cell("B2", "=COUNTIF(A1:A99999, \">0\")").unwrap();
+    large.set_cell("B3", "=SUMIF(A1:A99999, \">0\")").unwrap();
+    let b1_eval = large.evaluate_cell("B1");
+    let b2_eval = large.evaluate_cell("B2");
+    let b3_eval = large.evaluate_cell("B3");
+    assert_eq!(b1_eval, EvaluatedCellValue::Number(99_999.0));
+    assert_eq!(b2_eval, EvaluatedCellValue::Number(99_999.0));
+    assert_eq!(b3_eval, EvaluatedCellValue::Number(99_999.0));
+    let large_all = large.recalculate_all();
+    assert_eq!(
+        large_all.get(&PackedCellCoordinate::parse_a1("B1").unwrap()),
+        Some(&b1_eval)
+    );
+    assert_eq!(
+        large_all.get(&PackedCellCoordinate::parse_a1("B2").unwrap()),
+        Some(&b2_eval)
+    );
+    assert_eq!(
+        large_all.get(&PackedCellCoordinate::parse_a1("B3").unwrap()),
+        Some(&b3_eval)
+    );
+
+    let mut whole = SheetEngine::new("WholeAxis");
+    whole.set_cell("A1", "10").unwrap();
+    whole.set_cell("A1048576", "90").unwrap();
+    whole.set_cell("B2", "25").unwrap();
+    whole.set_cell("C3", "75").unwrap();
+    whole.set_cell("D5", "=SUM(A:A)").unwrap();
+    whole.set_cell("D6", "=SUM(B:C)").unwrap();
+    whole.set_cell("D7", "=SUM(1:1)").unwrap();
+    whole.set_cell("D8", "=SUM(2:3)").unwrap();
+    assert_eq!(whole.evaluate_cell("D5"), EvaluatedCellValue::Number(100.0));
+    assert_eq!(whole.evaluate_cell("D6"), EvaluatedCellValue::Number(100.0));
+    assert_eq!(whole.evaluate_cell("D7"), EvaluatedCellValue::Number(10.0));
+    assert_eq!(whole.evaluate_cell("D8"), EvaluatedCellValue::Number(100.0));
+
+    let terms = vec!["1"; 1025].join("+");
+    let formula_1025 = format!("={terms}");
+    assert_eq!(
+        whole.evaluate_formula_str(&formula_1025),
+        EvaluatedCellValue::Number(1025.0)
+    );
+}
+
+#[test]
+fn test_issue_89_and_90_chart_svg_dates_wildcards_error_literals_pivot_and_functions() {
+    use easyoffice_sheet::{
+        compute_sheet_id, CellRange, ChartSeriesBuilder, ChartType, PivotAggregation,
+    };
+
+    let mut chart_sheet = SheetEngine::new("ChartGuard");
+    chart_sheet.set_cell("A1", "Q1").unwrap();
+    chart_sheet.set_cell("A2", "Q2").unwrap();
+    chart_sheet.set_cell("A3", "Q3").unwrap();
+    chart_sheet.set_cell("B1", "=1E308").unwrap();
+    chart_sheet.set_cell("B2", "=-1E308").unwrap();
+    chart_sheet.set_cell("B3", "=1/0").unwrap();
+    let chart = ChartSeriesBuilder::build(
+        &chart_sheet,
+        ChartType::Line,
+        CellRange::parse("A1:A3").unwrap(),
+        CellRange::parse("B1:B3").unwrap(),
+    )
+    .unwrap();
+    assert!(!chart.svg_path.contains("NaN"));
+    assert!(!chart.svg_path.contains("inf"));
+    assert!(!chart.svg_path.contains("Inf"));
+    for pt in &chart.points {
+        assert!(pt.normalized_x.is_finite());
+        assert!(pt.normalized_y.is_finite());
+        assert!(pt.pie_share.is_finite());
+    }
+
+    let mut sheet = SheetEngine::new("Sheet1");
+    sheet.set_cell("A1", "=DATE(2024, 1, 15)").unwrap();
+    assert_eq!(sheet.formatted_cell("A1"), "2024-01-15");
+
+    assert_ne!(compute_sheet_id("A-B"), compute_sheet_id("A_B"));
+
+    assert_eq!(
+        sheet.evaluate_formula_str("=IFERROR(#N/A, 42)"),
+        EvaluatedCellValue::Number(42.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=IFNA(#N/A, 99)"),
+        EvaluatedCellValue::Number(99.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=IFNA(#DIV/0!, 99)"),
+        EvaluatedCellValue::Error(FormulaError::DivByZero)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=ISNA(#N/A)"),
+        EvaluatedCellValue::Boolean(true)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=ISERR(#N/A)"),
+        EvaluatedCellValue::Boolean(false)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=ISERR(#VALUE!)"),
+        EvaluatedCellValue::Boolean(true)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=ISERROR(#CYCLE!)"),
+        EvaluatedCellValue::Boolean(true)
+    );
+
+    assert_eq!(
+        sheet.evaluate_formula_str("=IPMT(0.05/12, 0, 12, -1000)"),
+        EvaluatedCellValue::Error(FormulaError::Num)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=PPMT(0.05/12, 13, 12, -1000)"),
+        EvaluatedCellValue::Error(FormulaError::Num)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=ROUND(PMT(0.06/12, 12, -1200) - (IPMT(0.06/12, 3, 12, -1200) + PPMT(0.06/12, 3, 12, -1200)), 8)"),
+        EvaluatedCellValue::Number(0.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=RATE(10, -100, -1000)"),
+        EvaluatedCellValue::Error(FormulaError::Num)
+    );
+
+    sheet.set_cell("W1", "ab*cd").unwrap();
+    sheet.set_cell("W2", "abXcd").unwrap();
+    sheet.set_cell("W3", "ab?cd").unwrap();
+    assert_eq!(
+        sheet.evaluate_formula_str("=COUNTIF(W1:W3, \"ab~*cd\")"),
+        EvaluatedCellValue::Number(1.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=COUNTIF(W1:W3, \"ab*cd\")"),
+        EvaluatedCellValue::Number(3.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=MATCH(\"ab~?cd\", W1:W3, 0)"),
+        EvaluatedCellValue::Number(3.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=SEARCH(\"~*\", \"ab*cd\")"),
+        EvaluatedCellValue::Number(3.0)
+    );
+
+    sheet.set_cell("P1", "Key").unwrap();
+    sheet.set_cell("Q1", "Col").unwrap();
+    sheet.set_cell("R1", "Val").unwrap();
+    sheet.set_cell("P2", "1.5").unwrap();
+    sheet.set_cell("Q2", "East").unwrap();
+    sheet.set_cell("R2", "10").unwrap();
+    sheet.set_cell("P3", "=TEXT(1.5, \"0.00\")").unwrap();
+    sheet.set_cell("Q3", "West").unwrap();
+    sheet.set_cell("R3", "20").unwrap();
+    let p_range = CellRange::parse("P1:R3").unwrap();
+    let pivot = sheet.compute_pivot_grid(&p_range, true, 0, Some(1), 2, PivotAggregation::Sum);
+    assert_eq!(pivot.row_keys, vec!["1.5".to_string()]);
+    assert_eq!(
+        pivot.column_keys,
+        vec!["East".to_string(), "West".to_string()]
+    );
+    assert_eq!(pivot.matrix, vec![vec![10.0, 20.0]]);
+    assert_eq!(pivot.grand_total, 30.0);
+
+    assert_eq!(
+        sheet.evaluate_formula_str("=SUMIFS(R2:R3, P2:P3, 1.5, Q2:Q3, \"West\")"),
+        EvaluatedCellValue::Number(20.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=CHOOSE(2, \"A\", \"B\", \"C\")"),
+        EvaluatedCellValue::Text("B".to_string())
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=MROUND(10, 3)"),
+        EvaluatedCellValue::Number(9.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=QUOTIENT(10, 3)"),
+        EvaluatedCellValue::Number(3.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=SIGN(-5)"),
+        EvaluatedCellValue::Number(-1.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=FACT(5)"),
+        EvaluatedCellValue::Number(120.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=SLN(1000, 100, 5)"),
+        EvaluatedCellValue::Number(180.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=FLOOR(-2.5, 2)"),
+        EvaluatedCellValue::Number(-4.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=DATE(1900, 1, 0)"),
+        EvaluatedCellValue::Number(0.0)
+    );
+    assert_eq!(
+        sheet.evaluate_formula_str("=SUMIF(P2:P3, 1.5, R2)"),
+        EvaluatedCellValue::Number(30.0)
+    );
+}

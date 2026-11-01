@@ -84,6 +84,7 @@ impl WorkbookEngine {
                 engine.sheet_id = 1;
             }
         }
+        engine.has_workbook_assigned_id = true;
         self.sheets.push(engine);
         self.sheets.last_mut().unwrap()
     }
@@ -125,6 +126,8 @@ impl WorkbookEngine {
             return EvaluatedCellValue::Error(FormulaError::Ref);
         };
         let mut ctx = EvalContext::with_workbook(self, sheet.resolved_sheet_id());
+        sheet.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), &mut ctx);
+        ctx.steps = 0;
         sheet.eval_coord_ctx(coord, &mut ctx, 0)
     }
 
@@ -248,11 +251,49 @@ impl SheetEngine {
         Ok(())
     }
 
+    pub fn formatted_cell(&self, a1: &str) -> String {
+        let Ok(coord) = PackedCellCoordinate::parse_a1(a1) else {
+            return "#REF!".to_string();
+        };
+        let val = self.evaluate_cell(a1);
+        if let EvaluatedCellValue::Number(n) = val {
+            if let Some(Ok(crate::Expr::FuncCall { name, .. })) = self.compiled_asts.get(&coord) {
+                if matches!(
+                    name.to_uppercase().as_str(),
+                    "DATE" | "EDATE" | "EOMONTH" | "WORKDAY" | "TODAY" | "DATEVALUE" | "오늘"
+                ) && (1.0..=2_958_465.999_999).contains(&n)
+                {
+                    return crate::coercion::format_text_pattern(n, "yyyy-mm-dd");
+                }
+            }
+        }
+        val.to_display_string()
+    }
+
     pub fn compute_pivot(
         &self,
         range: &CellRange,
         has_header_row: bool,
         row_field_col_offset: usize,
+        value_field_col_offset: usize,
+        aggregation: PivotAggregation,
+    ) -> PivotTableSummary {
+        self.compute_pivot_grid(
+            range,
+            has_header_row,
+            row_field_col_offset,
+            None,
+            value_field_col_offset,
+            aggregation,
+        )
+    }
+
+    pub fn compute_pivot_grid(
+        &self,
+        range: &CellRange,
+        has_header_row: bool,
+        row_field_col_offset: usize,
+        column_field_col_offset: Option<usize>,
         value_field_col_offset: usize,
         aggregation: PivotAggregation,
     ) -> PivotTableSummary {
@@ -264,53 +305,143 @@ impl SheetEngine {
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         let mut row_keys: Vec<String> = Vec::new();
         let mut row_key_set: HashSet<String> = HashSet::new();
-        let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
+        let mut col_keys: Vec<String> = Vec::new();
+        let mut col_key_set: HashSet<String> = HashSet::new();
+        let mut cell_buckets: HashMap<(String, String), Vec<f64>> = HashMap::new();
+        let mut row_buckets: HashMap<String, Vec<f64>> = HashMap::new();
+        let mut col_buckets: HashMap<String, Vec<f64>> = HashMap::new();
         let mut all_values: Vec<f64> = Vec::new();
+
+        let normalize_pivot_key = |v: EvaluatedCellValue| -> (String, String) {
+            let disp = match v {
+                EvaluatedCellValue::Number(n) => crate::coercion::format_general_number(n),
+                EvaluatedCellValue::Text(s) => {
+                    if let Some(n) = crate::coercion::parse_strict_number(&s) {
+                        crate::coercion::format_general_number(n)
+                    } else {
+                        s
+                    }
+                }
+                other => other.to_display_string(),
+            };
+            let canon = disp.to_lowercase();
+            (disp, canon)
+        };
 
         if row_field_col_offset < col_count && value_field_col_offset < col_count {
             let key_col = min_c + row_field_col_offset as u32;
             let val_col = min_c + value_field_col_offset as u32;
+            let opt_col_col = column_field_col_offset
+                .filter(|&c| c < col_count)
+                .map(|c| min_c + c as u32);
             for r_off in start_row_idx..row_count {
                 let row_idx = min_r + r_off as u32;
                 if let (Ok(kc), Ok(vc)) = (
                     PackedCellCoordinate::new(row_idx, key_col),
                     PackedCellCoordinate::new(row_idx, val_col),
                 ) {
-                    let key_str = self.eval_coord_ctx(kc, &mut ctx, 0).to_display_string();
+                    let (key_str, canonical_row) =
+                        normalize_pivot_key(self.eval_coord_ctx(kc, &mut ctx, 0));
                     if key_str.is_empty() {
                         continue;
                     }
-                    if row_key_set.insert(key_str.clone()) {
-                        row_keys.push(key_str.clone());
+                    if row_key_set.insert(canonical_row.clone()) {
+                        row_keys.push(key_str);
                     }
+                    let (col_str, canonical_col) = if let Some(cc_idx) = opt_col_col {
+                        if let Ok(cc) = PackedCellCoordinate::new(row_idx, cc_idx) {
+                            let (cs, cc_canon) =
+                                normalize_pivot_key(self.eval_coord_ctx(cc, &mut ctx, 0));
+                            if cs.is_empty() {
+                                ("(Blank)".to_string(), "(blank)".to_string())
+                            } else {
+                                (cs, cc_canon)
+                            }
+                        } else {
+                            ("Total".to_string(), "total".to_string())
+                        }
+                    } else {
+                        ("Total".to_string(), "total".to_string())
+                    };
+                    if col_key_set.insert(canonical_col.clone()) {
+                        col_keys.push(col_str);
+                    }
+
                     let val = self.eval_coord_ctx(vc, &mut ctx, 0);
-                    if let Some(num) = val.as_number() {
-                        buckets.entry(key_str).or_default().push(num);
-                        all_values.push(num);
+                    let pushed_num = if let EvaluatedCellValue::Number(num) = val {
+                        Some(num)
                     } else if aggregation == PivotAggregation::Count
                         && !matches!(val, EvaluatedCellValue::Empty)
                         && !val.to_display_string().is_empty()
                     {
-                        buckets.entry(key_str).or_default().push(1.0);
-                        all_values.push(1.0);
+                        Some(1.0)
+                    } else {
+                        None
+                    };
+                    if let Some(num) = pushed_num {
+                        cell_buckets
+                            .entry((canonical_row.clone(), canonical_col.clone()))
+                            .or_default()
+                            .push(num);
+                        row_buckets.entry(canonical_row).or_default().push(num);
+                        col_buckets.entry(canonical_col).or_default().push(num);
+                        all_values.push(num);
                     }
                 }
             }
         }
+        if col_keys.is_empty() {
+            col_keys.push("Total".to_string());
+        }
 
         let row_totals: Vec<f64> = row_keys
             .iter()
-            .map(|k| Self::aggregate_slice(buckets.get(k).map_or(&[], Vec::as_slice), aggregation))
+            .map(|k| {
+                Self::aggregate_slice(
+                    row_buckets
+                        .get(&k.to_lowercase())
+                        .map_or(&[], Vec::as_slice),
+                    aggregation,
+                )
+            })
             .collect();
-        let matrix: Vec<Vec<f64>> = row_totals.iter().map(|v| vec![*v]).collect();
+        let column_totals: Vec<f64> = col_keys
+            .iter()
+            .map(|ck| {
+                Self::aggregate_slice(
+                    col_buckets
+                        .get(&ck.to_lowercase())
+                        .map_or(&[], Vec::as_slice),
+                    aggregation,
+                )
+            })
+            .collect();
+        let matrix: Vec<Vec<f64>> = row_keys
+            .iter()
+            .map(|rk| {
+                let r_canon = rk.to_lowercase();
+                col_keys
+                    .iter()
+                    .map(|ck| {
+                        let c_canon = ck.to_lowercase();
+                        Self::aggregate_slice(
+                            cell_buckets
+                                .get(&(r_canon.clone(), c_canon))
+                                .map_or(&[], Vec::as_slice),
+                            aggregation,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
         let grand_total = Self::aggregate_slice(&all_values, aggregation);
 
         PivotTableSummary {
             row_keys,
-            column_keys: vec!["Total".to_string()],
+            column_keys: col_keys,
             matrix,
             row_totals,
-            column_totals: vec![grand_total],
+            column_totals,
             grand_total,
         }
     }
@@ -356,7 +487,7 @@ impl SheetEngine {
         };
 
         let mut x0 = initial_guess;
-        let Some(mut f0) = eval_at(self, x0) else {
+        let Some(f0) = eval_at(self, x0) else {
             restore_cell(self, var_coord, original_raw);
             return Err(EasyOfficeError::FormulaError(
                 "목표 셀이 수치로 평가되지 않습니다.".to_string(),
@@ -373,6 +504,7 @@ impl SheetEngine {
                 "목표값 찾기 초기 구간 평가에 실패했습니다.".to_string(),
             ));
         };
+        let mut f0 = f0;
 
         for _ in 0..100 {
             if f1.abs() < 1e-6 {
@@ -606,20 +738,30 @@ impl ChartSeriesBuilder {
         let mut values = Vec::with_capacity(value_coords.len());
         for (&lc, &vc) in label_coords.iter().zip(value_coords.iter()) {
             labels.push(sheet.eval_coord_ctx(lc, &mut ctx, 0).to_display_string());
-            values.push(
-                sheet
-                    .eval_coord_ctx(vc, &mut ctx, 0)
-                    .as_number()
-                    .unwrap_or(0.0),
-            );
+            let v = sheet
+                .eval_coord_ctx(vc, &mut ctx, 0)
+                .as_number()
+                .unwrap_or(0.0);
+            values.push(if v.is_finite() { v } else { 0.0 });
         }
 
         let min_value = values.iter().copied().fold(f64::INFINITY, f64::min);
         let max_value = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let total_abs: f64 = values.iter().map(|v| v.abs()).sum();
-        let total_value: f64 = values.iter().sum();
-        let span = (max_value - min_value.min(0.0)).max(1e-9);
-        let base_min = min_value.min(0.0);
+        let max_abs = min_value.abs().max(max_value.abs());
+        let scale = if max_abs > 1e150 && max_abs.is_finite() {
+            1.0 / max_abs
+        } else {
+            1.0
+        };
+        let total_abs: f64 = values.iter().map(|v| v.abs() * scale).sum();
+        let raw_total: f64 = values.iter().sum();
+        let total_value = if raw_total.is_finite() {
+            raw_total
+        } else {
+            raw_total.signum() * f64::MAX
+        };
+        let scaled_base_min = (min_value * scale).min(0.0);
+        let scaled_span = ((max_value * scale) - scaled_base_min).max(1e-9);
 
         let n = values.len();
         let mut points = Vec::with_capacity(n);
@@ -631,9 +773,19 @@ impl ChartSeriesBuilder {
             } else {
                 (i as f64) / ((n - 1) as f64)
             };
-            let normalized_y = ((raw_value - base_min) / span).clamp(0.0, 1.0);
-            let pie_share = if total_abs > 1e-12 {
-                (raw_value.abs() / total_abs).clamp(0.0, 1.0)
+            let raw_ny = ((raw_value * scale) - scaled_base_min) / scaled_span;
+            let normalized_y = if raw_ny.is_finite() {
+                raw_ny.clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
+            let raw_pie = if total_abs > 1e-12 && total_abs.is_finite() {
+                (raw_value.abs() * scale) / total_abs
+            } else {
+                0.0
+            };
+            let pie_share = if raw_pie.is_finite() {
+                raw_pie.clamp(0.0, 1.0)
             } else {
                 0.0
             };
