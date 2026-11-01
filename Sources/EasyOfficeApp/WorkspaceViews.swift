@@ -488,6 +488,37 @@ public enum WorkspaceFileDialogPresenter {
       viewModel.lastErrorMessage = error.localizedDescription
       return false
     }
+    if viewModel.pendingLossyOverwriteConfirmationTabID == targetTab.id,
+      let fileURL = targetTab.fileURL,
+      NSApp.keyWindow != nil
+    {
+      let alert = NSAlert()
+      alert.alertStyle = .warning
+      alert.messageText = "외부 원본 문서를 덮어쓰시겠습니까?"
+      alert.informativeText =
+        "'\(fileURL.lastPathComponent)'은(는) 외부에서 가져온 문서입니다. 덮어쓰기 시 기존 파일의 백업본(.bak)이 자동 생성됩니다."
+      alert.addButton(withTitle: "백업 생성 후 덮어쓰기")
+      alert.addButton(withTitle: "다른 이름으로 저장...")
+      alert.addButton(withTitle: "취소")
+      switch alert.runModal() {
+      case .alertFirstButtonReturn:
+        do {
+          return try viewModel.saveTabOverwriteIfBackedByFile(
+            id: targetTab.id,
+            allowExternalOverwrite: true
+          )
+        } catch {
+          viewModel.lastErrorMessage = error.localizedDescription
+          return false
+        }
+      case .alertSecondButtonReturn:
+        viewModel.pendingLossyOverwriteConfirmationTabID = nil
+        return presentSaveAsPanel(viewModel: viewModel, tabID: targetTab.id)
+      default:
+        viewModel.pendingLossyOverwriteConfirmationTabID = nil
+        return false
+      }
+    }
     return presentSaveAsPanel(viewModel: viewModel, tabID: targetTab.id)
   }
 
@@ -499,7 +530,17 @@ public enum WorkspaceFileDialogPresenter {
     else { return false }
     let panel = NSSavePanel()
     panel.title = "다른 이름으로 문서 저장"
-    panel.nameFieldStringValue = targetTab.fileName
+    let baseName = (targetTab.fileName as NSString).deletingPathExtension
+    let safeBase = baseName.isEmpty ? "새 문서" : baseName
+    let suggestedName: String =
+      switch targetTab.format {
+      case .hwp: "\(safeBase).hwpx"
+      case .doc: "\(safeBase).docx"
+      case .xls: "\(safeBase).xlsx"
+      case .ppt: "\(safeBase).pptx"
+      default: targetTab.fileName
+      }
+    panel.nameFieldStringValue = suggestedName
     panel.canCreateDirectories = true
     if panel.runModal() == .OK, let url = panel.url {
       do {
@@ -517,9 +558,12 @@ public enum WorkspaceFileDialogPresenter {
     guard let activeTab = viewModel.activeTab else { return }
     do {
       let pdfBytes = try viewModel.exportTabData(id: activeTab.id, targetFormat: .pdf)
-      if let pdfDoc = PDFDocument(data: pdfBytes),
-        let printOp = pdfDoc.printOperation(
-          for: .shared, scalingMode: .pageScaleToFit, autoRotate: true)
+      guard let pdfDoc = PDFDocument(data: pdfBytes), pdfDoc.pageCount > 0 else {
+        viewModel.lastErrorMessage = "인쇄 가능한 PDF 문서를 생성하지 못했습니다."
+        return
+      }
+      if let printOp = pdfDoc.printOperation(
+        for: .shared, scalingMode: .pageScaleToFit, autoRotate: true)
       {
         printOp.jobTitle = activeTab.fileName
         if NSApp.keyWindow != nil { printOp.run() }
@@ -872,7 +916,8 @@ struct TopDocumentTabStripView: View {
           ForEach(viewModel.openTabs) { tab in
             let isSelected = !viewModel.isShowingHomeHub && viewModel.activeTabID == tab.id
             let isSecondarySplit = viewModel.splitSecondaryTabID == tab.id
-            let accent = EasyOfficeDesignTokens.accentToken(for: tab.moduleKind)
+            let accent = EasyOfficeDesignTokens.accentToken(
+              for: tab.moduleKind, isDark: palette.isDark)
             HStack(spacing: 6) {
               if tab.isPinned {
                 Image(systemName: "pin.fill")
@@ -1044,7 +1089,9 @@ struct ContextRibbonBarView: View {
     let actions = RibbonCategory.actions(for: viewModel.activeRibbonCategory, module: activeModule)
     let primaryActions = Array(actions.prefix(2))
     let secondaryActions = Array(actions.dropFirst(2))
-    let moduleAccent = EasyOfficeDesignTokens.accentToken(for: activeModule).swiftUIColor
+    let moduleAccent = EasyOfficeDesignTokens.accentToken(
+      for: activeModule, isDark: palette.isDark
+    ).swiftUIColor
 
     VStack(alignment: .leading, spacing: 6) {
       HStack(spacing: 8) {
@@ -1759,7 +1806,8 @@ private struct SlideMiniaturePreviewCard: View {
     let themeTextColor = EasyOfficeDesignTokens.contrastingTextColor(
       forFillHex: deckTheme.primaryFillHex
     )
-    let slideAccent = EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor
+    let slideAccent = EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark)
+      .swiftUIColor
 
     VStack(alignment: .leading, spacing: 4) {
       VStack(alignment: .leading, spacing: 4) {
@@ -1932,12 +1980,16 @@ public struct LeftNavigatorPanelView: View {
               HStack(spacing: 6) {
                 Image(systemName: isSelectedSheet ? "tablecells.fill" : "tablecells")
                   .font(.system(size: 10))
-                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                  .foregroundStyle(
+                    EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark)
+                      .swiftUIColor
+                  )
                 Text(sheetName)
                   .font(.system(size: 12, weight: isSelectedSheet ? .bold : .regular))
                   .foregroundStyle(
                     isSelectedSheet
-                      ? EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor
+                      ? EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark)
+                        .swiftUIColor
                       : palette.primaryText.swiftUIColor
                   )
                 Spacer()
@@ -1988,7 +2040,10 @@ public struct LeftNavigatorPanelView: View {
             } label: {
               Text("+ 추가")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+                .foregroundStyle(
+                  EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark)
+                    .swiftUIColor
+                )
             }
             .buttonStyle(.plain)
 
@@ -2050,7 +2105,8 @@ public struct LeftNavigatorPanelView: View {
             let pageAnnotations = pdf.annotations.filter { $0.pageNumber == page.pageNumber }
             let pageFields = pdf.formFields.filter { $0.pageNumber == page.pageNumber }
             let hasSignature = pdf.inkStrokes.contains(where: { $0.pageNumber == page.pageNumber })
-            let pdfAccent = EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor
+            let pdfAccent = EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark)
+              .swiftUIColor
 
             Button {
               viewModel.selectedPDFPageIndex = idx

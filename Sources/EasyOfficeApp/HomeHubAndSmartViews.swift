@@ -85,7 +85,10 @@ struct HomeHubWorkspaceView: View {
 
               HStack(spacing: 12) {
                 ForEach(OfficeModuleKind.allCases) { module in
-                  let accent = EasyOfficeDesignTokens.accentToken(for: module)
+                  let accent = EasyOfficeDesignTokens.accentToken(
+                    for: module,
+                    isDark: palette.isDark
+                  )
                   VStack(alignment: .leading, spacing: 0) {
                     Rectangle()
                       .fill(accent.swiftUIColor)
@@ -232,14 +235,31 @@ struct HomeHubWorkspaceView: View {
                       Text(tpl.format.rawValue.uppercased())
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(
-                          EasyOfficeDesignTokens.accentToken(for: tpl.moduleKind).swiftUIColor
+                          EasyOfficeDesignTokens.accentToken(
+                            for: tpl.moduleKind,
+                            isDark: palette.isDark
+                          ).swiftUIColor
                         )
                       if tpl.isCustomUserTemplate {
                         Text("사용자 템플릿")
                           .font(.system(size: 9, weight: .bold))
-                          .foregroundStyle(EasyOfficeDesignTokens.statusInfo.swiftUIColor)
+                          .foregroundStyle(
+                            EasyOfficeDesignTokens.statusInfoToken(isDark: palette.isDark)
+                              .swiftUIColor
+                          )
                       }
                       Spacer()
+                      if tpl.isCustomUserTemplate {
+                        Button("삭제") {
+                          viewModel.removeCustomTemplate(id: tpl.id)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(
+                          EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark)
+                            .swiftUIColor
+                        )
+                      }
                     }
                     Text(tpl.title)
                       .font(.system(size: 13, weight: .semibold))
@@ -309,8 +329,11 @@ struct HomeHubWorkspaceView: View {
 
               VStack(spacing: 0) {
                 ForEach(filteredRecentTabs) { tab in
-                  let moduleAccent = EasyOfficeDesignTokens.accentToken(for: tab.moduleKind)
-                    .swiftUIColor
+                  let moduleAccent = EasyOfficeDesignTokens.accentToken(
+                    for: tab.moduleKind,
+                    isDark: palette.isDark
+                  )
+                  .swiftUIColor
                   VStack(spacing: 0) {
                     HStack(spacing: 12) {
                       Image(systemName: tab.moduleKind.systemSymbolName)
@@ -413,7 +436,8 @@ private struct TemplateMiniaturePreviewHeader: View {
   )
 
   var body: some View {
-    let accent = EasyOfficeDesignTokens.accentToken(for: module).swiftUIColor
+    let accent = EasyOfficeDesignTokens.accentToken(for: module, isDark: palette.isDark)
+      .swiftUIColor
 
     ZStack(alignment: .topTrailing) {
       Rectangle()
@@ -1056,7 +1080,10 @@ struct SmartDocumentAssistantHubView: View {
           VStack(alignment: .leading, spacing: 4) {
             Text("시트 통계 요약 (\(insight.trendClassification))")
               .font(.system(size: 11, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+              .foregroundStyle(
+                EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark)
+                  .swiftUIColor
+              )
             Text(
               "평균 \(String(format: "%.1f", insight.mean)) · 표준편차 \(String(format: "%.1f", insight.standardDeviation)) · 증감률 \(String(format: "%.1f", insight.growthRatePercent))%"
             )
@@ -1066,31 +1093,26 @@ struct SmartDocumentAssistantHubView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        if let primaryDoc = activeDoc {
-          let (baselineDoc, revisedDoc): (OfficeDocumentModel, OfficeDocumentModel) = {
-            if documentModels.count >= 2 {
-              return (documentModels[0], documentModels[1])
-            }
-            let baselineParagraphs = Array(primaryDoc.paragraphs.dropLast(1))
-            let fallbackBaseline = OfficeDocumentModel(
-              title: "\(primaryDoc.title) (기준본)",
-              paragraphs: baselineParagraphs.isEmpty ? primaryDoc.paragraphs : baselineParagraphs
-            )
-            return (fallbackBaseline, primaryDoc)
-          }()
-          let diff = SmartAssistantAnalysisMemoizer.compareDocuments(
-            baseline: baselineDoc,
-            revised: revisedDoc
-          )
+        if activeDoc != nil {
           VStack(alignment: .leading, spacing: 4) {
             Text("문서 비교")
               .font(.system(size: 11, weight: .bold))
               .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-            Text(
-              "추가 +\(diff.addedCount) · 삭제 -\(diff.removedCount) · 수정 ~\(diff.modifiedCount) · 동일 =\(diff.unchangedCount)"
-            )
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            if documentModels.count >= 2 {
+              let diff = SmartAssistantAnalysisMemoizer.compareDocuments(
+                baseline: documentModels[0],
+                revised: documentModels[1]
+              )
+              Text(
+                "추가 +\(diff.addedCount) · 삭제 -\(diff.removedCount) · 수정 ~\(diff.modifiedCount) · 동일 =\(diff.unchangedCount)\(diff.isTruncated ? " · 상위 \(diff.truncatedAtParagraphLimit ?? 300)문단 기준 요약" : "")"
+              )
+              .font(.system(size: 11, design: .monospaced))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            } else {
+              Text("비교할 두 번째 문서 탭을 열면 문단별 변경점(추가·삭제·수정)을 비교합니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }

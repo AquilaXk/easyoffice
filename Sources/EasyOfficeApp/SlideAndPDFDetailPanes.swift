@@ -219,7 +219,7 @@ public struct SlideEditorDetailPaneView: View {
         Spacer(minLength: 0)
         Text("\(slide.elements.count)개체")
           .font(.system(size: 8, design: .monospaced))
-          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
       }
       .frame(width: 160)
     }
@@ -263,7 +263,7 @@ public struct SlideEditorDetailPaneView: View {
               .font(.system(size: 11, weight: .semibold, design: .monospaced))
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
-              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
 
             if isPrimaryPane {
               Divider().frame(height: 14)
@@ -275,7 +275,7 @@ public struct SlideEditorDetailPaneView: View {
                   .font(.system(size: 11, weight: .semibold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
-                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
               }
               .buttonStyle(.plain)
               .fixedSize(horizontal: true, vertical: false)
@@ -419,7 +419,7 @@ public struct SlideEditorDetailPaneView: View {
                   .font(.system(size: 11, weight: .semibold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
-                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
               }
               .buttonStyle(.plain)
               .fixedSize(horizontal: true, vertical: false)
@@ -877,7 +877,7 @@ public struct SlideEditorDetailPaneView: View {
           .font(.system(size: 10, weight: .bold))
           .foregroundStyle(Color.white)
           .frame(width: 16, height: 16)
-          .background(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+          .background(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
           .clipShape(Circle())
           .offset(x: 0, y: -(elemH / 2.0) - 14.0)
           .help("회전 핸들 (↻)")
@@ -945,7 +945,7 @@ public struct SlideEditorDetailPaneView: View {
           systemImage: "square.grid.3x2.fill"
         )
         .font(.system(size: 12, weight: .bold))
-        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
         Spacer()
         Text("슬라이드를 선택하거나 순서를 재배열합니다.")
           .font(.system(size: 11))
@@ -959,7 +959,7 @@ public struct SlideEditorDetailPaneView: View {
             HStack {
               Text("#\(idx + 1)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor)
 
               Text(slide.transition.rawValue)
                 .font(.system(size: 9, weight: .semibold))
@@ -1159,7 +1159,7 @@ public struct PDFStudioDetailPaneView: View {
 
           Text("\(currentPageNum) / \(max(1, pdf.pages.count))")
             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
 
@@ -1229,7 +1229,7 @@ public struct PDFStudioDetailPaneView: View {
             .font(.system(size: 11, weight: .semibold))
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
@@ -1273,7 +1273,7 @@ public struct PDFStudioDetailPaneView: View {
       HStack(spacing: 12) {
         Label("워터마크", systemImage: "checkmark.shield.fill")
           .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
@@ -1290,7 +1290,7 @@ public struct PDFStudioDetailPaneView: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
       }
       .padding(.horizontal, 12)
@@ -1309,7 +1309,7 @@ public struct PDFStudioDetailPaneView: View {
       HStack(spacing: 12) {
         Label("보안 마스킹 · 양식 · 병합", systemImage: "eye.slash.fill")
           .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
@@ -1373,7 +1373,7 @@ public struct PDFStudioDetailPaneView: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+        .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
         Divider().frame(height: 14)
@@ -1514,7 +1514,7 @@ public struct PDFStudioDetailPaneView: View {
             HStack(spacing: 8) {
               Text(fileName)
                 .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
 
               Text("제\(page.pageNumber)쪽 / 전체 \(totalPageCount)쪽")
                 .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
@@ -1858,7 +1858,7 @@ public struct PDFStudioDetailPaneView: View {
                   HStack(spacing: 10) {
                     Text("P\(field.pageNumber)")
                       .font(.system(size: 9, weight: .bold, design: .monospaced))
-                      .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+                      .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor)
 
                     Text(field.name)
                       .font(.system(size: 11, weight: .semibold))

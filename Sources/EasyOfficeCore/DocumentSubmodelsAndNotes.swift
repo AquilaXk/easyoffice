@@ -56,25 +56,30 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let rawRow = try container.decode(Int.self, forKey: .rowIndex)
     let rawCol = try container.decode(Int.self, forKey: .columnIndex)
-    guard rawRow >= 0, rawRow <= CellAddress.maxZeroBasedRow,
-      rawCol >= 0, rawCol <= CellAddress.maxZeroBasedColumn
+    let rawRowSpan = try container.decodeIfPresent(Int.self, forKey: .rowSpan) ?? 1
+    let rawColSpan = try container.decodeIfPresent(Int.self, forKey: .columnSpan) ?? 1
+    let clampedRowSpan = min(max(1, rawRowSpan), Self.maxSpan)
+    let clampedColSpan = min(max(1, rawColSpan), Self.maxSpan)
+    let (_, rowOverflow) = rawRow.addingReportingOverflow(clampedRowSpan)
+    let (_, colOverflow) = rawCol.addingReportingOverflow(clampedColSpan)
+    guard rawRow >= 0, rawRow <= min(Self.maxIndex, CellAddress.maxZeroBasedRow),
+      rawCol >= 0, rawCol <= min(Self.maxIndex, CellAddress.maxZeroBasedColumn),
+      !rowOverflow, !colOverflow
     else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
           codingPath: decoder.codingPath,
           debugDescription:
-            "TableCellSpan coordinate out of bounds: rowIndex=\(rawRow), columnIndex=\(rawCol)"
+            "TableCellSpan coordinate/span out of bounds: rowIndex=\(rawRow), columnIndex=\(rawCol), rowSpan=\(rawRowSpan), columnSpan=\(rawColSpan)"
         )
       )
     }
-    let rawRowSpan = try container.decodeIfPresent(Int.self, forKey: .rowSpan) ?? 1
-    let rawColSpan = try container.decodeIfPresent(Int.self, forKey: .columnSpan) ?? 1
     let border =
       try container.decodeIfPresent(TableCellBorderStyle.self, forKey: .borderStyle) ?? .solid
     self.rowIndex = rawRow
     self.columnIndex = rawCol
-    self.rowSpan = min(max(1, rawRowSpan), Self.maxSpan)
-    self.columnSpan = min(max(1, rawColSpan), Self.maxSpan)
+    self.rowSpan = clampedRowSpan
+    self.columnSpan = clampedColSpan
     self.borderStyle = border
   }
 }

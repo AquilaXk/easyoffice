@@ -247,7 +247,8 @@ public struct SlideElementShapeContentView: View {
               .fill(
                 idx % 2 == 0
                   ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                  : EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor
+                  : EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark)
+                    .swiftUIColor
               )
               .frame(maxWidth: .infinity)
               .frame(height: max(8.0, 26.0 * ratio))
@@ -598,14 +599,16 @@ public struct PDFInteractiveInkOverlayView: View {
     let pageStrokes = pdfDocument.inkStrokes.filter { $0.pageNumber == currentPageNumber }
     let activeColor = EasyOfficeDesignTokens.resolveHexColor(
       viewModel.pdfInkStrokeColorHex,
-      fallback: EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor
+      fallback: EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor
     )
 
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 10) {
         Label("자유곡선 펜 · 본문 하이라이트", systemImage: "scribble.variable")
           .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+          .foregroundStyle(
+            EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor
+          )
 
         Text(viewModel.isPDFInkDrawingModeEnabled ? "펜 활성" : "펜 대기")
           .font(.system(size: 10, weight: .semibold))
@@ -651,7 +654,9 @@ public struct PDFInteractiveInkOverlayView: View {
         } label: {
           Label("구절 하이라이트", systemImage: "highlighter")
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor)
+            .foregroundStyle(
+              EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark).swiftUIColor
+            )
         }
         .buttonStyle(.plain)
 
@@ -671,7 +676,8 @@ public struct PDFInteractiveInkOverlayView: View {
             .fill(palette.elevatedSurface.swiftUIColor)
             .border(
               viewModel.isPDFInkDrawingModeEnabled
-                ? EasyOfficeDesignTokens.accentToken(for: .pdf).swiftUIColor.opacity(0.65)
+                ? EasyOfficeDesignTokens.accentToken(for: .pdf, isDark: palette.isDark)
+                  .swiftUIColor.opacity(0.65)
                 : palette.border.swiftUIColor,
               width: 1
             )

@@ -66,11 +66,11 @@ public struct SheetVectorChartCanvasView: View {
   private var seriesPaletteColors: [Color] {
     [
       EasyOfficeDesignTokens.brand700.swiftUIColor,
-      EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor,
-      EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark).swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor,
       EasyOfficeDesignTokens.brand500.swiftUIColor,
       EasyOfficeDesignTokens.statusInfo.swiftUIColor,
-      EasyOfficeDesignTokens.accentToken(for: .hwp).swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .hwp, isDark: palette.isDark).swiftUIColor,
     ]
   }
 
@@ -168,7 +168,7 @@ public struct SheetVectorChartCanvasView: View {
                 .lineLimit(1)
 
               Rectangle()
-                .fill(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                .fill(EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark).swiftUIColor)
                 .frame(width: max(14.0, CGFloat(pt.normalizedRatio) * 160.0), height: 14)
 
               Text(Self.formatMetric(pt.value))
@@ -386,7 +386,9 @@ public struct SheetEditorDetailPaneView: View {
     palette: WorkspaceThemePalette,
     action: @escaping () -> Void
   ) -> some View {
-    let activeColor = accent ?? EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor
+    let activeColor =
+      accent
+      ?? EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark).swiftUIColor
     return Button(action: action) {
       Text(title)
         .font(.system(size: 11, weight: isActive ? .bold : .medium))
@@ -428,7 +430,8 @@ public struct SheetEditorDetailPaneView: View {
 
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
-    let sheetAccent = EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor
+    let sheetAccent = EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark)
+      .swiftUIColor
     let bounds = gridBounds(for: sheet)
     let maxRow = bounds.rows
     let maxCol = bounds.cols

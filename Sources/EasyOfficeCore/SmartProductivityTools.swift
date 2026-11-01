@@ -6,6 +6,7 @@ import Foundation
 public struct ConversionJobRequest: Sendable, Equatable, Identifiable {
   public let id: UUID
   public var sourceFileName: String
+  public var sourceFileURL: URL?
   public var sourceFormat: DocumentFormat
   public var targetFormat: DocumentFormat
   public var payload: OpenTabPayload
@@ -13,12 +14,14 @@ public struct ConversionJobRequest: Sendable, Equatable, Identifiable {
   public init(
     id: UUID = UUID(),
     sourceFileName: String,
+    sourceFileURL: URL? = nil,
     sourceFormat: DocumentFormat,
     targetFormat: DocumentFormat,
     payload: OpenTabPayload
   ) {
     self.id = id
     self.sourceFileName = sourceFileName
+    self.sourceFileURL = sourceFileURL
     self.sourceFormat = sourceFormat
     self.targetFormat = targetFormat
     self.payload = payload
@@ -66,6 +69,8 @@ public struct BatchConversionReport: Sendable {
   public let succeededResults: [ConversionJobResult]
   public let failedErrors: [(jobID: UUID, errorDescription: String)]
 
+  public var succeeded: [ConversionJobResult] { succeededResults }
+
   public init(
     totalJobs: Int,
     succeededResults: [ConversionJobResult],
@@ -79,6 +84,30 @@ public struct BatchConversionReport: Sendable {
 
 /// Bidirectional format conversion studio orchestrating document, sheet, slide, HWP/HWPX, and PDF codecs with Fail-Closed signature verification.
 public enum DocumentConversionOrchestrator {
+
+  public static func disambiguateOutputFileName(
+    _ proposedFileName: String,
+    usedLowercasedNames: inout Set<String>
+  ) -> String {
+    let lower = proposedFileName.lowercased()
+    if !usedLowercasedNames.contains(lower) {
+      usedLowercasedNames.insert(lower)
+      return proposedFileName
+    }
+    let nsName = proposedFileName as NSString
+    let stem = nsName.deletingPathExtension
+    let ext = nsName.pathExtension
+    var counter = 2
+    while true {
+      let candidate = ext.isEmpty ? "\(stem)_\(counter)" : "\(stem)_\(counter).\(ext)"
+      let candidateLower = candidate.lowercased()
+      if !usedLowercasedNames.contains(candidateLower) {
+        usedLowercasedNames.insert(candidateLower)
+        return candidate
+      }
+      counter += 1
+    }
+  }
 
   public static func convert(_ request: ConversionJobRequest) throws -> ConversionJobResult {
     if request.sourceFileName.utf8.contains(0x00) {
@@ -164,30 +193,32 @@ public enum DocumentConversionOrchestrator {
   ) -> BatchConversionReport {
     var succeeded: [ConversionJobResult] = []
     var failed: [(jobID: UUID, errorDescription: String)] = []
+    var usedOutputNamesLowercased: Set<String> = []
     let targetDir =
       outputDirectory
       ?? FileManager.default.temporaryDirectory.appendingPathComponent(
         "EasyOfficeBatchOutput", isDirectory: true)
-    try? FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
 
     for job in jobs {
       do {
         let converted = try convert(job)
-        let fileURL = targetDir.appendingPathComponent(converted.outputFileName)
-        var writtenURL: URL? = nil
-        if (try? converted.outputBytes.write(to: fileURL, options: .atomic)) != nil {
-          writtenURL = fileURL
-        }
+        let uniqueOutputName = disambiguateOutputFileName(
+          converted.outputFileName,
+          usedLowercasedNames: &usedOutputNamesLowercased
+        )
+        try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+        let fileURL = targetDir.appendingPathComponent(uniqueOutputName)
+        try converted.outputBytes.write(to: fileURL, options: .atomic)
         let result = ConversionJobResult(
           id: converted.id,
           sourceFileName: converted.sourceFileName,
-          outputFileName: converted.outputFileName,
+          outputFileName: uniqueOutputName,
           sourceFormat: converted.sourceFormat,
           targetFormat: converted.targetFormat,
           outputBytes: converted.outputBytes,
           convertedPayload: converted.convertedPayload,
           verifiedSignature: converted.verifiedSignature,
-          outputFileURL: writtenURL
+          outputFileURL: fileURL
         )
         succeeded.append(result)
       } catch {
@@ -201,6 +232,15 @@ public enum DocumentConversionOrchestrator {
       succeededResults: succeeded,
       failedErrors: failed
     )
+  }
+
+  public static func executeBatchAsync(
+    _ jobs: [ConversionJobRequest],
+    outputDirectory: URL? = nil
+  ) async -> BatchConversionReport {
+    await Task.detached(priority: .userInitiated) {
+      executeBatch(jobs, outputDirectory: outputDirectory)
+    }.value
   }
 
   // MARK: Cross-Domain Model Adapters
