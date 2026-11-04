@@ -629,7 +629,7 @@ public struct SlideEditorDetailPaneView: View {
             if let nextSlide = presenterSession.nextSlide {
               Text("다음 슬라이드: \(nextSlide.title)")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
             }
             HStack(spacing: 10) {
               Button(viewModel.isPresenterTimerRunning ? "타이머 일시정지" : "타이머 시작") {
@@ -656,7 +656,7 @@ public struct SlideEditorDetailPaneView: View {
               }
               .buttonStyle(.plain)
               .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               .disabled(activeIdx + 1 >= deck.slides.count)
             }
           }
@@ -969,7 +969,7 @@ public struct SlideEditorDetailPaneView: View {
 
               Text("개체 \(slide.elements.count)개")
                 .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -981,7 +981,7 @@ public struct SlideEditorDetailPaneView: View {
               if !slide.subtitle.isEmpty {
                 Text(slide.subtitle)
                   .font(.system(size: 10))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                   .lineLimit(1)
               }
 
@@ -1031,7 +1031,7 @@ public struct SlideEditorDetailPaneView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor)
                 .disabled(deck.slides.count <= 1)
               }
             }
@@ -1326,7 +1326,7 @@ public struct PDFStudioDetailPaneView: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+        .foregroundStyle(EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
         Divider().frame(height: 14)
@@ -1413,7 +1413,7 @@ public struct PDFStudioDetailPaneView: View {
         if pdf.isRedacted {
           Text("마스킹 적용됨")
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -1434,7 +1434,7 @@ public struct PDFStudioDetailPaneView: View {
       HStack(spacing: 12) {
         Label("책갈피", systemImage: "bookmark.fill")
           .font(.system(size: 11, weight: .semibold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
 
@@ -1451,7 +1451,7 @@ public struct PDFStudioDetailPaneView: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+        .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
         .fixedSize(horizontal: true, vertical: false)
 
         if !pdf.outline.isEmpty {
@@ -1523,7 +1523,7 @@ public struct PDFStudioDetailPaneView: View {
               if page.rotationDegrees != 0 {
                 Text("회전 \(page.rotationDegrees)°")
                   .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               }
             }
 
@@ -1538,7 +1538,7 @@ public struct PDFStudioDetailPaneView: View {
           if let stampText = primaryStampLabel {
             Text(stampText)
               .font(.system(size: 10, weight: .bold, design: .monospaced))
-              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor)
               .padding(.horizontal, 8)
               .padding(.vertical, 3)
               .border(EasyOfficeDesignTokens.statusDanger.swiftUIColor, width: 1)
@@ -1636,7 +1636,7 @@ public struct PDFStudioDetailPaneView: View {
                         systemName: field.isChecked ? "checkmark.square.fill" : "square"
                       )
                       .font(.system(size: 10, weight: .semibold))
-                      .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                      .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                       Text("\(field.name) (\(field.isChecked ? "예" : "아니오"))")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -1763,7 +1763,7 @@ public struct PDFStudioDetailPaneView: View {
                 )
                 return (stroke.points, c, stroke.lineWidth)
               }
-            if activePageInkPoints.count >= 2 {
+            if page.pageNumber == viewModel.selectedPDFPageNumber, activePageInkPoints.count >= 2 {
               liveList.append(
                 (activePageInkPoints, activeStrokeColor, viewModel.pdfInkLineWidth))
             }
@@ -1794,6 +1794,11 @@ public struct PDFStudioDetailPaneView: View {
           .gesture(
             DragGesture(minimumDistance: 1)
               .onChanged { value in
+                let targetIdx = max(0, page.pageNumber - 1)
+                if viewModel.selectedPDFPageIndex != targetIdx {
+                  viewModel.selectedPDFPageIndex = targetIdx
+                  activePageInkPoints.removeAll(keepingCapacity: true)
+                }
                 let normX = max(0.0, min(1.0, Double(value.location.x / sheetW)))
                 let normY = max(0.0, min(1.0, Double(1.0 - (value.location.y / sheetH))))
                 let pdfX = 20.0 + normX * 555.0
@@ -1802,6 +1807,7 @@ public struct PDFStudioDetailPaneView: View {
               }
               .onEnded { _ in
                 if activePageInkPoints.count >= 2 {
+                  viewModel.selectedPDFPageIndex = max(0, page.pageNumber - 1)
                   viewModel.addInkStrokeToActivePDFPage(
                     points: activePageInkPoints,
                     strokeHex: viewModel.pdfInkStrokeColorHex,
@@ -1815,8 +1821,10 @@ public struct PDFStudioDetailPaneView: View {
       }
     }
     .frame(
-      maxWidth: viewModel.pdfPaperSizePreset == .letter ? 640 : 620,
-      minHeight: viewModel.pdfPaperSizePreset == .letter ? 700 : 720,
+      maxWidth: viewModel.pdfPaperSizePreset == .letter
+        ? 640 : (viewModel.pdfPaperSizePreset == .b5 ? 560 : 620),
+      minHeight: viewModel.pdfPaperSizePreset == .letter
+        ? 700 : (viewModel.pdfPaperSizePreset == .b5 ? 660 : 720),
       alignment: .topLeading
     )
     .background(palette.cardSurface.swiftUIColor)

@@ -405,7 +405,7 @@ public struct SlideshowFullScreenOverlayView: View {
           }
           .buttonStyle(.plain)
           .font(.system(size: 12, weight: .semibold))
-          .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.statusDangerToken(isDark: true).swiftUIColor)
           .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 24)

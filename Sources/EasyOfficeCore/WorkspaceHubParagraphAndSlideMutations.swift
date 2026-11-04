@@ -883,30 +883,51 @@ extension WorkspaceViewModel {
       let oldMiddle = Array(oldParagraphs[prefixCount..<oldMiddleEnd])
       let newMiddle = Array(lines[prefixCount..<newMiddleEnd])
 
-      var consumedOldIndices = Set<Int>()
-      var searchFloor = 0
       var matchedOldIndexForNew: [Int: Int] = [:]
-      for (newIdx, line) in newMiddle.enumerated() {
-        if let foundOldIdx = (searchFloor..<oldMiddle.count).first(where: {
-          !consumedOldIndices.contains($0) && oldMiddle[$0].text == line
-        }) {
-          matchedOldIndexForNew[newIdx] = foundOldIdx
-          consumedOldIndices.insert(foundOldIdx)
-          searchFloor = foundOldIdx + 1
+      if !oldMiddle.isEmpty && !newMiddle.isEmpty && oldMiddle.count * newMiddle.count <= 65_536 {
+        let m = oldMiddle.count
+        let n = newMiddle.count
+        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
+        for i in stride(from: m - 1, through: 0, by: -1) {
+          for j in stride(from: n - 1, through: 0, by: -1) {
+            if oldMiddle[i].text == newMiddle[j] {
+              dp[i][j] = 1 + dp[i + 1][j + 1]
+            } else {
+              dp[i][j] = max(dp[i + 1][j], dp[i][j + 1])
+            }
+          }
+        }
+        var i = 0
+        var j = 0
+        while i < m && j < n {
+          if oldMiddle[i].text == newMiddle[j] {
+            matchedOldIndexForNew[j] = i
+            i += 1
+            j += 1
+          } else if dp[i + 1][j] >= dp[i][j + 1] {
+            i += 1
+          } else {
+            j += 1
+          }
         }
       }
 
+      var consumedOldIndices = Set(matchedOldIndexForNew.values)
       var unconsumedSequentialIdx = 0
       for (newIdx, line) in newMiddle.enumerated() {
         if let matchedOldIdx = matchedOldIndexForNew[newIdx] {
           updatedParagraphs.append(oldMiddle[matchedOldIdx])
+          unconsumedSequentialIdx = max(unconsumedSequentialIdx, matchedOldIdx + 1)
         } else {
-          while unconsumedSequentialIdx < oldMiddle.count
+          let nextOldBoundary =
+            ((newIdx + 1)..<newMiddle.count).compactMap { matchedOldIndexForNew[$0] }.first
+            ?? oldMiddle.count
+          while unconsumedSequentialIdx < nextOldBoundary
             && consumedOldIndices.contains(unconsumedSequentialIdx)
           {
             unconsumedSequentialIdx += 1
           }
-          if unconsumedSequentialIdx < oldMiddle.count {
+          if unconsumedSequentialIdx < nextOldBoundary {
             var mutated = oldMiddle[unconsumedSequentialIdx]
             consumedOldIndices.insert(unconsumedSequentialIdx)
             unconsumedSequentialIdx += 1

@@ -80,7 +80,7 @@ struct HomeHubWorkspaceView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               }
 
               HStack(spacing: 12) {
@@ -191,7 +191,7 @@ struct HomeHubWorkspaceView: View {
                   }
                   .buttonStyle(.plain)
                   .font(.system(size: 11, weight: .semibold))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                 }
 
                 HStack(spacing: 14) {
@@ -358,7 +358,7 @@ struct HomeHubWorkspaceView: View {
                       if tab.isModified {
                         Text("수정됨")
                           .font(.system(size: 10, weight: .semibold))
-                          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                       }
 
                       Spacer()
@@ -406,7 +406,7 @@ struct HomeHubWorkspaceView: View {
                       }
                       .buttonStyle(.plain)
                       .font(.system(size: 11, weight: .medium))
-                      .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
+                      .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                     }
                     .padding(.vertical, 10)
                     .padding(.horizontal, 4)
@@ -751,6 +751,16 @@ struct BatchConversionStudioHubView: View {
             .font(.system(size: 12))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
             Spacer()
+            if !viewModel.excludedOpenTabBatchIDs.isEmpty {
+              Button("열린 탭 다시 담기") {
+                viewModel.enqueueOpenTabsIntoBatchConversion()
+              }
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(
+                EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+              )
+            }
             if !pendingQueue.isEmpty {
               Button("대기열 비우기") {
                 viewModel.clearBatchConversionQueue()

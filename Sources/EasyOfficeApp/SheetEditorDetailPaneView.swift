@@ -590,7 +590,7 @@ public struct SheetEditorDetailPaneView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
             }
 
             if viewModel.isFirstColumnFrozen {
@@ -605,7 +605,7 @@ public struct SheetEditorDetailPaneView: View {
               .font(.system(size: 11, weight: .bold, design: .monospaced))
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           }
           .padding(.horizontal, 10)
           .frame(minHeight: EasyOfficeDesignTokens.LayoutMetrics.formulaBarHeight)
@@ -807,7 +807,7 @@ public struct SheetEditorDetailPaneView: View {
                   .font(.system(size: 11, weight: .bold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
 
                 FlatUnderlineTextField(
                   placeholder: "이름 (예: 상반기매출)",
@@ -1338,7 +1338,7 @@ public struct SheetEditorDetailPaneView: View {
                 Spacer()
                 Text(String(format: "%.0f", pivotSummary.grandTotal))
                   .font(.system(size: 11, weight: .bold, design: .monospaced))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               }
             }
             .padding(12)
@@ -1351,13 +1351,13 @@ public struct SheetEditorDetailPaneView: View {
                 HStack(spacing: 8) {
                   Image(systemName: "chart.bar.xaxis")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
 
                   Text(chartModel.title)
                     .font(.system(size: 12, weight: .bold))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
-                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
 
                   Spacer(minLength: 4)
 

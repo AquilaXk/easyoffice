@@ -135,12 +135,14 @@ extension WorkspaceViewModel {
 
   public func persistRecentDocumentMetadata(to defaults: UserDefaults = .standard) {
     var seenPaths = Set<String>()
+    var seenIDs = Set<UUID>()
     var metadataList: [PersistedRecentRecordMetadata] = []
     for item in recentDocumentRecords {
-      guard let stdPath = item.fileURL?.standardizedFileURL.path, !stdPath.isEmpty else {
-        continue
+      if !seenIDs.insert(item.id).inserted { continue }
+      let stdPath = item.fileURL?.standardizedFileURL.path
+      if let stdPath, !stdPath.isEmpty {
+        if !seenPaths.insert(stdPath).inserted { continue }
       }
-      if !seenPaths.insert(stdPath).inserted { continue }
       metadataList.append(
         PersistedRecentRecordMetadata(
           idString: item.id.uuidString,
@@ -170,16 +172,23 @@ extension WorkspaceViewModel {
     var seenIDs = Set<UUID>()
 
     for meta in decodedList.prefix(24) {
-      guard let filePath = meta.filePath, !filePath.isEmpty,
-        let fmt = DocumentFormat(rawValue: meta.formatRawValue)
-      else {
+      guard let fmt = DocumentFormat(rawValue: meta.formatRawValue) else {
         continue
       }
       let resolvedID = UUID(uuidString: meta.idString) ?? UUID()
-      let resolvedURL = URL(fileURLWithPath: filePath)
-      let stdPath = resolvedURL.standardizedFileURL.path
-      if !seenPaths.insert(stdPath).inserted { continue }
       if !seenIDs.insert(resolvedID).inserted { continue }
+      let resolvedURL: URL?
+      if let filePath = meta.filePath, !filePath.isEmpty {
+        let url = URL(fileURLWithPath: filePath)
+        let stdPath = url.standardizedFileURL.path
+        if !seenPaths.insert(stdPath).inserted { continue }
+        resolvedURL = url
+      } else {
+        resolvedURL = nil
+      }
+      let existingPayload =
+        recentDocumentRecords.first(where: { $0.id == resolvedID })?.payload
+        ?? Self.lightweightPlaceholderPayload(for: fmt)
 
       restored.append(
         WorkspaceTabItem(
@@ -191,9 +200,9 @@ extension WorkspaceViewModel {
           isModified: false,
           lastOpenedISO8601: meta.lastOpenedISO8601,
           fileURL: resolvedURL,
-          payload: Self.lightweightPlaceholderPayload(for: fmt),
-          isLosslessNativeOrigin: false,
-          isMetadataOnlyPlaceholder: true,
+          payload: existingPayload,
+          isLosslessNativeOrigin: resolvedURL == nil,
+          isMetadataOnlyPlaceholder: resolvedURL != nil,
           isUnreadable: false
         )
       )
@@ -411,8 +420,28 @@ extension WorkspaceViewModel {
     let result = try convertTab(id: id, targetFormat: fmt)
     try result.outputBytes.write(to: url, options: .atomic)
     if fmt.moduleKind == openTabs[idx].format.moduleKind {
+      let oldFileURL = openTabs[idx].fileURL
       if openTabs[idx].format != fmt || openTabs[idx].payload != result.convertedPayload {
         recordUndoSnapshot(for: id)
+      } else {
+        if var undoMetas = undoMetadataStacks[id] {
+          for mIdx in undoMetas.indices
+          where undoMetas[mIdx].format == fmt && undoMetas[mIdx].fileURL == oldFileURL {
+            undoMetas[mIdx].fileName = url.lastPathComponent
+            undoMetas[mIdx].fileURL = url
+            undoMetas[mIdx].isLosslessNativeOrigin = true
+          }
+          undoMetadataStacks[id] = undoMetas
+        }
+        if var redoMetas = redoMetadataStacks[id] {
+          for mIdx in redoMetas.indices
+          where redoMetas[mIdx].format == fmt && redoMetas[mIdx].fileURL == oldFileURL {
+            redoMetas[mIdx].fileName = url.lastPathComponent
+            redoMetas[mIdx].fileURL = url
+            redoMetas[mIdx].isLosslessNativeOrigin = true
+          }
+          redoMetadataStacks[id] = redoMetas
+        }
       }
       openTabs[idx].payload = result.convertedPayload
       openTabs[idx].isModified = false

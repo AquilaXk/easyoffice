@@ -58,12 +58,12 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
     let rawCol = try container.decode(Int.self, forKey: .columnIndex)
     let rawRowSpan = try container.decodeIfPresent(Int.self, forKey: .rowSpan) ?? 1
     let rawColSpan = try container.decodeIfPresent(Int.self, forKey: .columnSpan) ?? 1
-    let (endRow, rowOverflow) = rawRow.addingReportingOverflow(rawRowSpan)
-    let (endCol, colOverflow) = rawCol.addingReportingOverflow(rawColSpan)
+    let clampedRowSpan = min(max(1, rawRowSpan), Self.maxSpan)
+    let clampedColSpan = min(max(1, rawColSpan), Self.maxSpan)
+    let (endRow, rowOverflow) = rawRow.addingReportingOverflow(clampedRowSpan)
+    let (endCol, colOverflow) = rawCol.addingReportingOverflow(clampedColSpan)
     guard rawRow >= 0, rawRow <= Self.maxIndex,
       rawCol >= 0, rawCol <= Self.maxIndex,
-      rawRowSpan >= 1, rawRowSpan <= Self.maxSpan,
-      rawColSpan >= 1, rawColSpan <= Self.maxSpan,
       !rowOverflow, !colOverflow,
       endRow <= Self.maxIndex + Self.maxSpan,
       endCol <= Self.maxIndex + Self.maxSpan
@@ -72,7 +72,7 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
         DecodingError.Context(
           codingPath: decoder.codingPath,
           debugDescription:
-            "TableCellSpan coordinate/span out of bounds: rowIndex=\(rawRow), columnIndex=\(rawCol), rowSpan=\(rawRowSpan), columnSpan=\(rawColSpan)"
+            "TableCellSpan coordinate/span out of bounds: rowIndex=\(rawRow), columnIndex=\(rawCol)"
         )
       )
     }
@@ -80,8 +80,8 @@ public struct TableCellSpan: Sendable, Codable, Equatable {
       try container.decodeIfPresent(TableCellBorderStyle.self, forKey: .borderStyle) ?? .solid
     self.rowIndex = rawRow
     self.columnIndex = rawCol
-    self.rowSpan = rawRowSpan
-    self.columnSpan = rawColSpan
+    self.rowSpan = clampedRowSpan
+    self.columnSpan = clampedColSpan
     self.borderStyle = border
   }
 }

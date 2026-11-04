@@ -41,7 +41,7 @@ extension WorkspaceViewModel {
 
 extension WorkspaceThemePalette {
   public var primaryAccent: RGBColorToken {
-    EasyOfficeDesignTokens.brand700
+    EasyOfficeDesignTokens.brandAccentToken(isDark: isDark)
   }
 
   public var hairlineBorder: Color {
@@ -264,7 +264,7 @@ struct FlatUnderlineTextField: View {
       if let symbolName {
         Image(systemName: symbolName)
           .font(.system(size: 10, weight: .semibold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
       }
       if isSnapshotMode || envSnapshotMode {
         Text(text.isEmpty ? placeholder : text)
@@ -926,12 +926,12 @@ struct TopDocumentTabStripView: View {
               if tab.isPinned {
                 Image(systemName: "pin.fill")
                   .font(.system(size: 9))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               }
               if tab.isFavorite {
                 Image(systemName: "star.fill")
                   .font(.system(size: 9))
-                  .foregroundStyle(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.statusWarningToken(isDark: palette.isDark).swiftUIColor)
               }
 
               Circle()
@@ -1025,7 +1025,7 @@ struct TopDocumentTabStripView: View {
           } label: {
             Image(systemName: "plus")
               .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               .frame(width: 26, height: 24)
           }
           .buttonStyle(.plain)
@@ -1693,7 +1693,7 @@ struct FindAndReplaceBarView: View {
         HStack(spacing: 10) {
           Label("찾기 및 바꾸기", systemImage: "magnifyingglass")
             .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
             .fixedSize(horizontal: true, vertical: false)
 
           FlatUnderlineTextField(
@@ -1766,7 +1766,7 @@ struct FindAndReplaceBarView: View {
           } label: {
             Text("모두 바꾸기")
               .font(.system(size: 11, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           }
           .buttonStyle(.plain)
           .fixedSize(horizontal: true, vertical: false)
@@ -1897,7 +1897,7 @@ private struct PDFOutlineNodeRowView: View {
         } label: {
           Image(systemName: "trash")
             .font(.system(size: 9))
-            .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor)
         }
         .buttonStyle(.plain)
         .help("책갈피 삭제")
@@ -2256,7 +2256,7 @@ struct EditorCanvasSinglePaneView: View {
           } label: {
             Text("편집 전환")
               .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           }
           .buttonStyle(.plain)
         }
@@ -2393,7 +2393,7 @@ struct BottomWorkspaceStatusBarView: View {
             Divider().frame(height: 14)
             Text("스플릿 뷰: \(secondary.fileName)")
               .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               .fixedSize(horizontal: true, vertical: false)
           }
 
@@ -2401,13 +2401,13 @@ struct BottomWorkspaceStatusBarView: View {
             Divider().frame(height: 14)
             Text("오류: \(errorMessage)")
               .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor)
               .lineLimit(1)
           } else if let summary = viewModel.lastExecutedCommandSummary, !summary.isEmpty {
             Divider().frame(height: 14)
             Text(summary)
               .font(.system(size: 11, weight: .medium))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               .lineLimit(1)
           }
         }

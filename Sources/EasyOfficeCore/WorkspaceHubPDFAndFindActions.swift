@@ -691,6 +691,7 @@ extension WorkspaceViewModel {
       batchTargetFormat = targetFormat
     }
     excludedOpenTabBatchIDs.removeAll()
+    batchQueueGeneration &+= 1
     lastBatchConversionReport = nil
   }
 

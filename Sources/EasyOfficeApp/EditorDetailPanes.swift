@@ -407,7 +407,7 @@ public struct DocumentHorizontalRulerView: View {
 
         Text("▽")
           .font(.system(size: 9, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .position(
             x: min(
               totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt + firstLineOffsetPt),
@@ -432,7 +432,7 @@ public struct DocumentHorizontalRulerView: View {
 
         Text("△")
           .font(.system(size: 9, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .position(
             x: min(totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt),
             y: 19
@@ -1409,7 +1409,7 @@ public struct DocumentEditorDetailPaneView: View {
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                        .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                       Rectangle()
                         .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.6))
                         .frame(height: 1)
@@ -1574,7 +1574,7 @@ public struct DocumentEditorDetailPaneView: View {
       if let listPrefix {
         Text(listPrefix)
           .font(.system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
       }
       Text(buildRichParagraphAttributedText(for: paragraph, palette: palette))
         .tracking(kernPt)
@@ -1605,7 +1605,7 @@ public struct DocumentEditorDetailPaneView: View {
                 .font(
                   .system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced)
                 )
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                 .padding(.leading, CGFloat(paragraph.listLevel) * 14.0)
                 .padding(.top, 2)
             }
@@ -1637,7 +1637,7 @@ public struct DocumentEditorDetailPaneView: View {
           } label: {
             Label("링크", systemImage: "link")
               .font(.system(size: 9, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
           }
@@ -1690,7 +1690,7 @@ public struct DocumentEditorDetailPaneView: View {
       } else {
         Image(systemName: "photo.artframe")
           .font(.system(size: 16))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .frame(width: 44, height: 34)
       }
 
@@ -1718,7 +1718,7 @@ public struct DocumentEditorDetailPaneView: View {
         } label: {
           Text("배치 전환")
             .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -1852,7 +1852,7 @@ public struct DocumentEditorDetailPaneView: View {
       HStack(spacing: 8) {
         Image(systemName: "list.bullet.indent")
           .font(.system(size: 11, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
         Text("문서 윤곽 계층")
           .font(.system(size: 11, weight: .bold))
           .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -1905,7 +1905,7 @@ public struct DocumentEditorDetailPaneView: View {
             } label: {
               Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                 .frame(width: 14, height: 14)
             }
             .buttonStyle(.plain)

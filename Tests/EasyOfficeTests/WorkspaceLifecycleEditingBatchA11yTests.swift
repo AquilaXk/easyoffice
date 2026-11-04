@@ -571,9 +571,11 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     XCTAssertEqual(clampedSpan.rowSpan, TableCellSpan.maxSpan)
     XCTAssertEqual(clampedSpan.columnSpan, 1)
 
-    let invalidSpanJSON = Data(#"{"rowIndex":0,"columnIndex":0,"rowSpan":999,"columnSpan":1}"#.utf8)
-    XCTAssertThrowsError(try JSONDecoder().decode(TableCellSpan.self, from: invalidSpanJSON))
-    let zeroSpanJSON = Data(#"{"rowIndex":0,"columnIndex":0,"rowSpan":0,"columnSpan":1}"#.utf8)
-    XCTAssertThrowsError(try JSONDecoder().decode(TableCellSpan.self, from: zeroSpanJSON))
+    let invalidRowJSON = Data(#"{"rowIndex":200000,"columnIndex":0,"rowSpan":1,"columnSpan":1}"#.utf8)
+    XCTAssertThrowsError(try JSONDecoder().decode(TableCellSpan.self, from: invalidRowJSON))
+    let clampedSpanJSON = Data(#"{"rowIndex":0,"columnIndex":0,"rowSpan":999,"columnSpan":0}"#.utf8)
+    let decodedClamped = try JSONDecoder().decode(TableCellSpan.self, from: clampedSpanJSON)
+    XCTAssertEqual(decodedClamped.rowSpan, TableCellSpan.maxSpan)
+    XCTAssertEqual(decodedClamped.columnSpan, 1)
   }
 }

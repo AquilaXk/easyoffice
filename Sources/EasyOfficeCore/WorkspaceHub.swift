@@ -199,6 +199,7 @@ public final class WorkspaceViewModel {
   public var batchTargetFormat: DocumentFormat = .pdf {
     didSet {
       if batchTargetFormat != oldValue {
+        batchQueueGeneration &+= 1
         lastBatchConversionReport = nil
       }
     }
@@ -745,23 +746,14 @@ public final class WorkspaceViewModel {
     guard !recentlyClosedTabs.isEmpty else { return nil }
     var restored = recentlyClosedTabs.removeFirst()
     if restored.isMetadataOnlyPlaceholder {
-      guard let url = restored.fileURL else { return nil }
-      do {
-        let reloaded = try loadFromDisk(url: url)
-        lastExecutedCommandSummary = "최근 닫은 탭 복원: \(reloaded.fileName)"
-        return reloaded
-      } catch {
-        let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        lastErrorMessage = "닫은 탭 파일을 다시 열 수 없습니다 (\(restored.fileName)): \(desc)"
+      guard restored.fileURL != nil else { return nil }
+      let reopened = activateOrReopenRecentTab(restored)
+      guard !reopened.isUnreadable else {
         lastExecutedCommandSummary = "최근 닫은 탭 복원 실패: \(restored.fileName)"
-        if let rIdx = recentDocumentRecords.firstIndex(where: {
-          $0.id == restored.id
-            || ($0.fileURL?.standardizedFileURL.path == url.standardizedFileURL.path)
-        }) {
-          recentDocumentRecords[rIdx].isUnreadable = true
-        }
         return nil
       }
+      lastExecutedCommandSummary = "최근 닫은 탭 복원: \(reopened.fileName)"
+      return reopened
     }
     restored.isMetadataOnlyPlaceholder = false
     openTabs.append(restored)
@@ -812,27 +804,7 @@ public final class WorkspaceViewModel {
     let modifiedCandidates = candidates.filter { $0.isModified }
 
     for closingTab in unmodifiedToClose {
-      recordRecentDocument(closingTab, isOpenInWorkspace: false)
-      var snapshotForClosed = closingTab
-      if !closingTab.isModified, closingTab.fileURL != nil {
-        snapshotForClosed.payload = Self.lightweightPlaceholderPayload(for: closingTab.format)
-        snapshotForClosed.isMetadataOnlyPlaceholder = true
-      }
-      recentlyClosedTabs.removeAll { $0.id == closingTab.id }
-      recentlyClosedTabs.insert(snapshotForClosed, at: 0)
-      if recentlyClosedTabs.count > 10 {
-        recentlyClosedTabs.removeLast(recentlyClosedTabs.count - 10)
-      }
-    }
-
-    let removedIDs = Set(unmodifiedToClose.map(\.id))
-    openTabs.removeAll { removedIDs.contains($0.id) }
-    for removedID in removedIDs {
-      undoStacks.removeValue(forKey: removedID)
-      redoStacks.removeValue(forKey: removedID)
-      undoMetadataStacks.removeValue(forKey: removedID)
-      redoMetadataStacks.removeValue(forKey: removedID)
-      mergedSheetRangesByTab.removeValue(forKey: removedID)
+      closeTab(id: closingTab.id)
     }
 
     if let firstModified = modifiedCandidates.first {
