@@ -104,16 +104,20 @@ public struct DocumentDiffReport: Sendable, Codable, Equatable {
   public let removedCount: Int
   public let modifiedCount: Int
   public let unchangedCount: Int
+  public let isTruncated: Bool
+  public let truncatedAtParagraphLimit: Int?
 
   public init(
     entries: [DocumentDiffEntry], addedCount: Int, removedCount: Int, modifiedCount: Int,
-    unchangedCount: Int
+    unchangedCount: Int, isTruncated: Bool = false, truncatedAtParagraphLimit: Int? = nil
   ) {
     self.entries = entries
     self.addedCount = addedCount
     self.removedCount = removedCount
     self.modifiedCount = modifiedCount
     self.unchangedCount = unchangedCount
+    self.isTruncated = isTruncated
+    self.truncatedAtParagraphLimit = truncatedAtParagraphLimit
   }
 }
 
@@ -488,12 +492,18 @@ public enum LocalSmartDocumentAssistant {
       }
     }
 
+    let wasTruncated =
+      baseline.paragraphs.count > maxDiffParagraphCount
+      || revised.paragraphs.count > maxDiffParagraphCount
+
     return DocumentDiffReport(
       entries: entries,
       addedCount: entries.filter { $0.kind == .added }.count,
       removedCount: entries.filter { $0.kind == .removed }.count,
       modifiedCount: entries.filter { $0.kind == .modified }.count,
-      unchangedCount: entries.filter { $0.kind == .unchanged }.count
+      unchangedCount: entries.filter { $0.kind == .unchanged }.count,
+      isTruncated: wasTruncated,
+      truncatedAtParagraphLimit: wasTruncated ? maxDiffParagraphCount : nil
     )
   }
 

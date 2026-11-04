@@ -7,13 +7,14 @@ import Observation
 @MainActor
 @Observable
 public final class WorkspaceViewModel {
-  private static let maxUndoDepth = 50
+  internal static let maxUndoDepth = 50
 
   public var openTabs: [WorkspaceTabItem]
   public var activeTabID: UUID? {
     didSet {
       activeInlineEditTargetKey = nil
       if let activeTabID, splitSecondaryTabID == activeTabID { splitSecondaryTabID = nil }
+      clampSelectionIndicesForActiveTab()
       syncSheetRulesFromActiveTab()
     }
   }
@@ -39,6 +40,10 @@ public final class WorkspaceViewModel {
   public var searchQuery: String = ""
   public var zoomPercent: Double = 100.0
   public var selectedSheetCell: String = "D2"
+  public var selectedCellAddress: String {
+    get { selectedSheetCell }
+    set { selectedSheetCell = newValue }
+  }
   public var selectedSlideIndex: Int = 0
   public var selectedPDFPageIndex: Int = 0
   public var formulaBarDraft: String = ""
@@ -46,8 +51,7 @@ public final class WorkspaceViewModel {
   public var workspaceViewMode: WorkspaceViewMode = .editView
   public var activeInspectorSubTab: InspectorSubTab = .propertiesAndLayout
 
-  // Interactive editing, undo/redo, and studio state
-  private var storedSelectedParagraphIndex: Int = 0
+  internal var storedSelectedParagraphIndex: Int = 0
   public var selectedParagraphID: UUID? = nil {
     didSet {
       if let selectedParagraphID,
@@ -88,6 +92,8 @@ public final class WorkspaceViewModel {
     }
   }
   public var selectedParagraphUTF16Range: Range<Int>? = nil
+  public var pendingFocusParagraphID: UUID? = nil
+  public var pendingCaretUTF16Offset: Int? = nil
   public var paragraphDraftText: String = ""
   public var inlineRunTargetPhrase: String = ""
   public var equationDraftText: String = "\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}"
@@ -101,7 +107,7 @@ public final class WorkspaceViewModel {
   public var selectedChartKind: SheetChartKind = .column
   public var isHeaderRowFrozen: Bool = false
   public var mergedSheetRangesByTab: [UUID: [String]] = [:]
-  private var isSyncingSheetRulesState: Bool = false
+  internal var isSyncingSheetRulesState: Bool = false
   public var activeConditionalFormatRule: ConditionalFormatRule? = nil {
     didSet {
       guard !isSyncingSheetRulesState else { return }
@@ -115,7 +121,7 @@ public final class WorkspaceViewModel {
     }
   }
   public var isSnapGuidesEnabled: Bool = true
-  public var presenterElapsedSeconds: Int = 95
+  public var presenterElapsedSeconds: Int = 0
   public var isPresenterTimerRunning: Bool = false
   public var isFullScreenSlideshowActive: Bool = false
   public var isLaserPointerEnabled: Bool = false
@@ -124,9 +130,12 @@ public final class WorkspaceViewModel {
   public var isPDFInkDrawingModeEnabled: Bool = false
   public var pdfInkStrokeColorHex: String = "#5C6BC0"
   public var pdfInkLineWidth: Double = 2.4
+  public var pdfPaperSizePreset: PaperSizePreset = .a4
+  public var pdfPageColumnCount: Int = 1
+  public var selectedFunctionWizardName: String = "AVERAGE"
   public var lastPivotGrandTotal: Double = 0
   public var authorName: String = "표준 문서 작성자"
-  private var isSyncingFindReplaceState: Bool = false
+  internal var isSyncingFindReplaceState: Bool = false
   public var findQueryText: String = "" {
     didSet {
       if findQueryText != oldValue {
@@ -187,8 +196,17 @@ public final class WorkspaceViewModel {
     set { isFindReplaceBarVisible = newValue }
   }
   public var lastFindReplaceCount: Int = 0
-  public var batchTargetFormat: DocumentFormat = .pdf
+  public var batchTargetFormat: DocumentFormat = .pdf {
+    didSet {
+      if batchTargetFormat != oldValue {
+        batchQueueGeneration &+= 1
+        lastBatchConversionReport = nil
+      }
+    }
+  }
+  public var batchOutputDirectoryURL: URL? = nil
   public var additionalBatchJobs: [ConversionJobRequest] = []
+  public var excludedOpenTabBatchIDs: Set<UUID> = []
   public var lastBatchConversionReport: BatchConversionReport? = nil
   public var lastSecurityAuditReport: SecurityAuditReport? = nil
   public var lastScrubbedMetadataCount: Int = 0
@@ -239,27 +257,23 @@ public final class WorkspaceViewModel {
   public var documentHorizontalPadding: Double = 28.0
   public var collapsedOutlineParagraphIDs: Set<UUID> = []
   public var pendingCloseConfirmTabID: UUID? = nil
+  public var pendingLossyOverwriteConfirmationTabID: UUID? = nil
+  public var isPendingApplicationTermination: Bool = false
+  public var isWorkspaceReadyForOpenURLs: Bool = true
+  public var pendingLaunchURLs: [URL] = []
   public var recentlyClosedTabs: [WorkspaceTabItem] = []
   public var recentDocumentRecords: [WorkspaceTabItem] = []
 
   internal var undoStacks: [UUID: [OpenTabPayload]] = [:]
   internal var redoStacks: [UUID: [OpenTabPayload]] = [:]
+  internal var undoMetadataStacks: [UUID: [TabMetadataSnapshot]] = [:]
+  internal var redoMetadataStacks: [UUID: [TabMetadataSnapshot]] = [:]
+  internal var batchQueueGeneration: Int = 0
   internal var customTemplatePayloads: [String: OpenTabPayload] = [:]
+  internal var knownEasyOfficeSavedFilePaths: Set<String> = []
   internal var activeInlineEditTargetKey: String? = nil
   internal var blankTabCounter: Int = 0
   public internal(set) var sheetSortAscending: Bool = false
-
-  private struct PersistedRecentRecordMetadata: Codable {
-    let idString: String
-    let fileName: String
-    let formatRawValue: String
-    let lastOpenedISO8601: String
-    let isPinned: Bool
-    let isFavorite: Bool
-    let filePath: String?
-  }
-
-  private static let recentMetadataDefaultsKey = "eo.recentDocumentMetadataV1"
 
   public init() {
     let initialTabs = OfficeModuleKind.allCases.map {
@@ -271,115 +285,46 @@ public final class WorkspaceViewModel {
     self.formulaBarDraft = "=SUM(B2:C2)"
   }
 
-  internal func recordRecentDocument(_ tab: WorkspaceTabItem) {
-    var updated = tab
-    updated.lastOpenedISO8601 = OfficeDocumentModel.currentISO8601Timestamp()
-    recentDocumentRecords.removeAll { existing in
-      if existing.id == updated.id { return true }
-      if let u1 = existing.fileURL, let u2 = updated.fileURL, u1 == u2 { return true }
-      return false
-    }
-    recentDocumentRecords.insert(updated, at: 0)
-    if recentDocumentRecords.count > 24 {
-      recentDocumentRecords.removeLast(recentDocumentRecords.count - 24)
-    }
-    persistRecentDocumentMetadata()
-  }
-
-  public func persistRecentDocumentMetadata(to defaults: UserDefaults = .standard) {
-    let metadataList = recentDocumentRecords.map { item in
-      PersistedRecentRecordMetadata(
-        idString: item.id.uuidString,
-        fileName: item.fileName,
-        formatRawValue: item.format.rawValue,
-        lastOpenedISO8601: item.lastOpenedISO8601,
-        isPinned: item.isPinned,
-        isFavorite: item.isFavorite,
-        filePath: item.fileURL?.path
-      )
-    }
-    if let encoded = try? JSONEncoder().encode(metadataList) {
-      defaults.set(encoded, forKey: Self.recentMetadataDefaultsKey)
-    }
-  }
-
-  public func restorePersistedRecentDocuments(from defaults: UserDefaults = .standard) {
-    guard let rawData = defaults.data(forKey: Self.recentMetadataDefaultsKey),
-      let decodedList = try? JSONDecoder().decode([PersistedRecentRecordMetadata].self, from: rawData)
-    else {
+  internal func clampSelectionIndicesForActiveTab() {
+    guard let tab = activeTab else {
+      selectedSlideIndex = 0
+      selectedSlideElementID = nil
+      selectedPDFPageIndex = 0
       return
     }
-    var restored: [WorkspaceTabItem] = []
-    for meta in decodedList.prefix(24) {
-      let resolvedID = UUID(uuidString: meta.idString) ?? UUID()
-      if let existingIdx = recentDocumentRecords.firstIndex(where: {
-        $0.id == resolvedID || ($0.fileURL != nil && $0.fileURL?.path == meta.filePath)
-      }) {
-        var existing = recentDocumentRecords[existingIdx]
-        existing.isPinned = meta.isPinned
-        existing.isFavorite = meta.isFavorite
-        existing.lastOpenedISO8601 = meta.lastOpenedISO8601
-        restored.append(existing)
-      } else if let filePath = meta.filePath,
-        FileManager.default.fileExists(atPath: filePath),
-        let diskTab = try? loadFromDisk(url: URL(fileURLWithPath: filePath))
+    switch tab.payload {
+    case .slide(let deck):
+      if deck.slides.isEmpty {
+        selectedSlideIndex = 0
+        selectedSlideElementID = nil
+      } else {
+        selectedSlideIndex = min(max(0, selectedSlideIndex), deck.slides.count - 1)
+        let currentElements = deck.slides[selectedSlideIndex].elements
+        if let selID = selectedSlideElementID, !currentElements.contains(where: { $0.id == selID })
+        {
+          selectedSlideElementID = nil
+        }
+      }
+      selectedPDFPageIndex = 0
+    case .pdf(let pdfDoc):
+      selectedPDFPageIndex =
+        pdfDoc.pages.isEmpty ? 0 : min(max(0, selectedPDFPageIndex), pdfDoc.pages.count - 1)
+      selectedSlideIndex = 0
+      selectedSlideElementID = nil
+    case .document(let doc):
+      if let selParaID = selectedParagraphID,
+        !doc.paragraphs.contains(where: { $0.id == selParaID })
       {
-        restored.append(
-          WorkspaceTabItem(
-            id: resolvedID,
-            fileName: meta.fileName,
-            format: diskTab.format,
-            isPinned: meta.isPinned,
-            isFavorite: meta.isFavorite,
-            isModified: false,
-            lastOpenedISO8601: meta.lastOpenedISO8601,
-            fileURL: URL(fileURLWithPath: filePath),
-            payload: diskTab.payload
-          )
-        )
-      } else if let fmt = DocumentFormat(rawValue: meta.formatRawValue) {
-        let blankTab = WorkspaceHubCatalog.instantiateBlankTab(
-          for: fmt.moduleKind,
-          indexSuffix: 1
-        )
-        restored.append(
-          WorkspaceTabItem(
-            id: resolvedID,
-            fileName: meta.fileName,
-            format: fmt,
-            isPinned: meta.isPinned,
-            isFavorite: meta.isFavorite,
-            isModified: false,
-            lastOpenedISO8601: meta.lastOpenedISO8601,
-            fileURL: meta.filePath.map { URL(fileURLWithPath: $0) },
-            payload: blankTab.payload
-          )
-        )
+        selectedParagraphID = doc.paragraphs.first?.id
       }
+      selectedSlideIndex = 0
+      selectedSlideElementID = nil
+      selectedPDFPageIndex = 0
+    case .sheet:
+      selectedSlideIndex = 0
+      selectedSlideElementID = nil
+      selectedPDFPageIndex = 0
     }
-    for existing in recentDocumentRecords where !restored.contains(where: { $0.id == existing.id }) {
-      if restored.count < 24 {
-        restored.append(existing)
-      }
-    }
-    recentDocumentRecords = restored
-  }
-
-  internal var combinedRecentPool: [WorkspaceTabItem] {
-    var seenIDs = Set<UUID>()
-    var merged: [WorkspaceTabItem] = []
-    for tab in openTabs {
-      seenIDs.insert(tab.id)
-      merged.append(tab)
-    }
-    for record in recentDocumentRecords where !seenIDs.contains(record.id) {
-      if let url = record.fileURL, openTabs.contains(where: { $0.fileURL == url }) {
-        continue
-      }
-      seenIDs.insert(record.id)
-      merged.append(record)
-    }
-    return merged
   }
 
   internal func syncSheetRulesFromActiveTab() {
@@ -413,6 +358,36 @@ public final class WorkspaceViewModel {
   public var activeTab: WorkspaceTabItem? {
     guard let activeTabID else { return openTabs.first }
     return openTabs.first(where: { $0.id == activeTabID })
+  }
+
+  public var activeDocument: OfficeDocumentModel? {
+    guard let tab = activeTab, case .document(let doc) = tab.payload else { return nil }
+    return doc
+  }
+
+  public var activeWorksheet: WorksheetModel? {
+    guard let tab = activeTab, case .sheet(let sheet) = tab.payload else { return nil }
+    return sheet
+  }
+
+  public var activePresentation: PresentationDeckModel? {
+    guard let tab = activeTab, case .slide(let deck) = tab.payload else { return nil }
+    return deck
+  }
+
+  public var activePDFDocument: PDFStudioDocumentModel? {
+    guard let tab = activeTab, case .pdf(let pdf) = tab.payload else { return nil }
+    return pdf
+  }
+
+  public func updateActiveTabPayload(_ payload: OpenTabPayload, markModified: Bool = true) {
+    guard let tabID = activeTab?.id,
+      let idx = openTabs.firstIndex(where: { $0.id == tabID })
+    else { return }
+    openTabs[idx].payload = payload
+    if markModified {
+      openTabs[idx].isModified = true
+    }
   }
 
   public func toggleRibbonLayoutStyle() {
@@ -469,7 +444,6 @@ public final class WorkspaceViewModel {
     set { selectedPDFPageIndex = max(0, newValue - 1) }
   }
 
-  // MARK: - Undo / Redo Stack
 
   public var canUndo: Bool {
     guard let id = activeTab?.id else { return false }
@@ -494,6 +468,21 @@ public final class WorkspaceViewModel {
     if stack.count > Self.maxUndoDepth { stack.removeFirst(stack.count - Self.maxUndoDepth) }
     undoStacks[tabID] = stack
     redoStacks[tabID] = []
+
+    var metaStack = undoMetadataStacks[tabID] ?? []
+    metaStack.append(
+      TabMetadataSnapshot(
+        format: openTabs[idx].format,
+        fileName: openTabs[idx].fileName,
+        fileURL: openTabs[idx].fileURL,
+        isLosslessNativeOrigin: openTabs[idx].isLosslessNativeOrigin
+      )
+    )
+    if metaStack.count > Self.maxUndoDepth {
+      metaStack.removeFirst(metaStack.count - Self.maxUndoDepth)
+    }
+    undoMetadataStacks[tabID] = metaStack
+    redoMetadataStacks[tabID] = []
   }
 
   public func undo() {
@@ -507,6 +496,25 @@ public final class WorkspaceViewModel {
     var rStack = redoStacks[tabID] ?? []
     rStack.append(openTabs[idx].payload)
     redoStacks[tabID] = rStack
+
+    if var metaStack = undoMetadataStacks[tabID], let previousMeta = metaStack.popLast() {
+      undoMetadataStacks[tabID] = metaStack
+      var rMetaStack = redoMetadataStacks[tabID] ?? []
+      rMetaStack.append(
+        TabMetadataSnapshot(
+          format: openTabs[idx].format,
+          fileName: openTabs[idx].fileName,
+          fileURL: openTabs[idx].fileURL,
+          isLosslessNativeOrigin: openTabs[idx].isLosslessNativeOrigin
+        )
+      )
+      redoMetadataStacks[tabID] = rMetaStack
+      openTabs[idx].format = previousMeta.format
+      openTabs[idx].fileName = previousMeta.fileName
+      openTabs[idx].fileURL = previousMeta.fileURL
+      openTabs[idx].isLosslessNativeOrigin = previousMeta.isLosslessNativeOrigin
+    }
+
     openTabs[idx].payload = previousPayload
     openTabs[idx].isModified = true
     syncSheetRulesFromActiveTab()
@@ -524,6 +532,25 @@ public final class WorkspaceViewModel {
     var uStack = undoStacks[tabID] ?? []
     uStack.append(openTabs[idx].payload)
     undoStacks[tabID] = uStack
+
+    if var rMetaStack = redoMetadataStacks[tabID], let nextMeta = rMetaStack.popLast() {
+      redoMetadataStacks[tabID] = rMetaStack
+      var uMetaStack = undoMetadataStacks[tabID] ?? []
+      uMetaStack.append(
+        TabMetadataSnapshot(
+          format: openTabs[idx].format,
+          fileName: openTabs[idx].fileName,
+          fileURL: openTabs[idx].fileURL,
+          isLosslessNativeOrigin: openTabs[idx].isLosslessNativeOrigin
+        )
+      )
+      undoMetadataStacks[tabID] = uMetaStack
+      openTabs[idx].format = nextMeta.format
+      openTabs[idx].fileName = nextMeta.fileName
+      openTabs[idx].fileURL = nextMeta.fileURL
+      openTabs[idx].isLosslessNativeOrigin = nextMeta.isLosslessNativeOrigin
+    }
+
     openTabs[idx].payload = nextPayload
     openTabs[idx].isModified = true
     syncSheetRulesFromActiveTab()
@@ -538,16 +565,17 @@ public final class WorkspaceViewModel {
     redo()
   }
 
-  // MARK: - Tab & Template Management
-
-  public func openNewSampleTab(for module: OfficeModuleKind) {
+  @discardableResult
+  public func openNewSampleTab(for module: OfficeModuleKind) -> WorkspaceTabItem {
     activeInlineEditTargetKey = nil
     var newTab = WorkspaceHubCatalog.instantiateSampleTab(for: module)
     newTab.lastOpenedISO8601 = OfficeDocumentModel.currentISO8601Timestamp()
+    newTab.isLosslessNativeOrigin = true
     openTabs.append(newTab)
     recordRecentDocument(newTab)
     activeTabID = newTab.id
     isShowingHomeHub = false
+    return newTab
   }
 
   @discardableResult
@@ -559,6 +587,7 @@ public final class WorkspaceViewModel {
       indexSuffix: blankTabCounter
     )
     newTab.lastOpenedISO8601 = OfficeDocumentModel.currentISO8601Timestamp()
+    newTab.isLosslessNativeOrigin = true
     openTabs.append(newTab)
     recordRecentDocument(newTab)
     activeTabID = newTab.id
@@ -587,12 +616,52 @@ public final class WorkspaceViewModel {
       recordRecentDocument(openTabs[existingIdx])
       return openTabs[existingIdx]
     }
-    if let url = tab.fileURL, FileManager.default.fileExists(atPath: url.path),
-      let loaded = try? loadFromDisk(url: url)
-    {
-      return loaded
+    if let url = tab.fileURL {
+      do {
+        let rawData = try Data(contentsOf: url)
+        let decoded = try decodeDocumentPayload(data: rawData, fileName: url.lastPathComponent)
+        let stdPath = url.standardizedFileURL.path
+        let isNativeOrigin = knownEasyOfficeSavedFilePaths.contains(stdPath)
+        let reopened = WorkspaceTabItem(
+          id: tab.id,
+          fileName: url.lastPathComponent,
+          format: decoded.format,
+          isPinned: tab.isPinned,
+          isFavorite: tab.isFavorite,
+          isModified: false,
+          lastOpenedISO8601: OfficeDocumentModel.currentISO8601Timestamp(),
+          fileURL: url,
+          payload: decoded.payload,
+          isLosslessNativeOrigin: isNativeOrigin,
+          isMetadataOnlyPlaceholder: false,
+          isUnreadable: false
+        )
+        recentlyClosedTabs.removeAll { $0.id == reopened.id }
+        openTabs.append(reopened)
+        recordRecentDocument(reopened)
+        activeTabID = reopened.id
+        isShowingHomeHub = false
+        lastErrorMessage = nil
+        return reopened
+      } catch {
+        if let rIdx = recentDocumentRecords.firstIndex(where: {
+          $0.id == tab.id
+            || ($0.fileURL?.standardizedFileURL.path == url.standardizedFileURL.path)
+        }) {
+          recentDocumentRecords[rIdx].isUnreadable = true
+        }
+        let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        lastErrorMessage = "최근 문서를 열 수 없습니다 (\(tab.fileName)): \(desc)"
+        lastExecutedCommandSummary = "최근 문서 열기 실패: \(tab.fileName)"
+        var safeUnbackedFallback = tab
+        safeUnbackedFallback.fileURL = nil
+        safeUnbackedFallback.isUnreadable = true
+        return safeUnbackedFallback
+      }
     }
     var restored = tab
+    restored.fileURL = nil
+    restored.isMetadataOnlyPlaceholder = false
     restored.lastOpenedISO8601 = OfficeDocumentModel.currentISO8601Timestamp()
     recentlyClosedTabs.removeAll { $0.id == restored.id }
     openTabs.append(restored)
@@ -607,7 +676,8 @@ public final class WorkspaceViewModel {
     if let savedPayload = customTemplatePayloads[template.id] {
       let newTab = WorkspaceTabItem(
         fileName: "\(template.title).\(template.format.rawValue)", format: template.format,
-        lastOpenedISO8601: OfficeDocumentModel.currentISO8601Timestamp(), payload: savedPayload)
+        lastOpenedISO8601: OfficeDocumentModel.currentISO8601Timestamp(), payload: savedPayload,
+        isLosslessNativeOrigin: true)
       openTabs.append(newTab)
       recordRecentDocument(newTab)
       activeTabID = newTab.id
@@ -625,7 +695,7 @@ public final class WorkspaceViewModel {
     }
     let instantiated = WorkspaceTabItem(
       fileName: sample.fileName, format: sample.format, lastOpenedISO8601: sample.lastOpenedISO8601,
-      payload: sample.payload)
+      payload: sample.payload, isLosslessNativeOrigin: true)
     openTabs.append(instantiated)
     recordRecentDocument(instantiated)
     activeTabID = instantiated.id
@@ -656,22 +726,36 @@ public final class WorkspaceViewModel {
       }
     }
     closeTab(id: id)
+    advancePendingTerminationConfirmationIfNeeded()
   }
 
   public func confirmDiscardAndClosePendingTab() {
     guard let id = pendingCloseConfirmTabID else { return }
     pendingCloseConfirmTabID = nil
     closeTab(id: id)
+    advancePendingTerminationConfirmationIfNeeded()
   }
 
   public func cancelCloseTab() {
     pendingCloseConfirmTabID = nil
+    isPendingApplicationTermination = false
   }
 
   @discardableResult
   public func reopenLastClosedTab() -> WorkspaceTabItem? {
     guard !recentlyClosedTabs.isEmpty else { return nil }
-    let restored = recentlyClosedTabs.removeFirst()
+    var restored = recentlyClosedTabs.removeFirst()
+    if restored.isMetadataOnlyPlaceholder {
+      guard restored.fileURL != nil else { return nil }
+      let reopened = activateOrReopenRecentTab(restored)
+      guard !reopened.isUnreadable else {
+        lastExecutedCommandSummary = "최근 닫은 탭 복원 실패: \(restored.fileName)"
+        return nil
+      }
+      lastExecutedCommandSummary = "최근 닫은 탭 복원: \(reopened.fileName)"
+      return reopened
+    }
+    restored.isMetadataOnlyPlaceholder = false
     openTabs.append(restored)
     recordRecentDocument(restored)
     activeTabID = restored.id
@@ -683,9 +767,14 @@ public final class WorkspaceViewModel {
   public func closeTab(id: UUID) {
     activeInlineEditTargetKey = nil
     if let closingTab = openTabs.first(where: { $0.id == id }) {
-      recordRecentDocument(closingTab)
+      recordRecentDocument(closingTab, isOpenInWorkspace: false)
+      var snapshotForClosed = closingTab
+      if !closingTab.isModified, closingTab.fileURL != nil {
+        snapshotForClosed.payload = Self.lightweightPlaceholderPayload(for: closingTab.format)
+        snapshotForClosed.isMetadataOnlyPlaceholder = true
+      }
       recentlyClosedTabs.removeAll { $0.id == closingTab.id }
-      recentlyClosedTabs.insert(closingTab, at: 0)
+      recentlyClosedTabs.insert(snapshotForClosed, at: 0)
       if recentlyClosedTabs.count > 10 {
         recentlyClosedTabs.removeLast(recentlyClosedTabs.count - 10)
       }
@@ -693,9 +782,14 @@ public final class WorkspaceViewModel {
     if pendingCloseConfirmTabID == id {
       pendingCloseConfirmTabID = nil
     }
+    if pendingLossyOverwriteConfirmationTabID == id {
+      pendingLossyOverwriteConfirmationTabID = nil
+    }
     openTabs.removeAll { $0.id == id }
     undoStacks.removeValue(forKey: id)
     redoStacks.removeValue(forKey: id)
+    undoMetadataStacks.removeValue(forKey: id)
+    redoMetadataStacks.removeValue(forKey: id)
     mergedSheetRangesByTab.removeValue(forKey: id)
     if splitSecondaryTabID == id { splitSecondaryTabID = nil }
     if activeTabID == id { activeTabID = openTabs.first?.id }
@@ -710,20 +804,7 @@ public final class WorkspaceViewModel {
     let modifiedCandidates = candidates.filter { $0.isModified }
 
     for closingTab in unmodifiedToClose {
-      recordRecentDocument(closingTab)
-      recentlyClosedTabs.removeAll { $0.id == closingTab.id }
-      recentlyClosedTabs.insert(closingTab, at: 0)
-      if recentlyClosedTabs.count > 10 {
-        recentlyClosedTabs.removeLast(recentlyClosedTabs.count - 10)
-      }
-    }
-
-    let removedIDs = Set(unmodifiedToClose.map(\.id))
-    openTabs.removeAll { removedIDs.contains($0.id) }
-    for removedID in removedIDs {
-      undoStacks.removeValue(forKey: removedID)
-      redoStacks.removeValue(forKey: removedID)
-      mergedSheetRangesByTab.removeValue(forKey: removedID)
+      closeTab(id: closingTab.id)
     }
 
     if let firstModified = modifiedCandidates.first {
@@ -812,7 +893,8 @@ public final class WorkspaceViewModel {
     let duplicated = WorkspaceTabItem(
       fileName: "\(baseName)_사본.\(ext)", format: source.format, isPinned: source.isPinned,
       isFavorite: source.isFavorite, isModified: true,
-      lastOpenedISO8601: OfficeDocumentModel.currentISO8601Timestamp(), payload: source.payload)
+      lastOpenedISO8601: OfficeDocumentModel.currentISO8601Timestamp(), payload: source.payload,
+      isLosslessNativeOrigin: true)
     openTabs.append(duplicated)
     activeTabID = duplicated.id
     isShowingHomeHub = false
@@ -828,776 +910,8 @@ public final class WorkspaceViewModel {
     self.splitSecondaryTabID = secondaryTabID
   }
 
-  public func saveActiveTabAsCustomTemplate(
-    title: String? = nil, subtitle: String = "현재 활성 문서 기반 커스텀 템플릿"
-  ) {
-    guard let current = activeTab else { return }
-    let draft = customTemplateTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    let explicitTitle = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedTitle: String
-    if !draft.isEmpty && (explicitTitle.isEmpty || explicitTitle == "사용자 정의 표준 양식") {
-      resolvedTitle = draft
-      customTemplateTitleDraft = ""
-    } else if !explicitTitle.isEmpty {
-      resolvedTitle = explicitTitle
-    } else {
-      resolvedTitle = "사용자 정의 표준 양식"
-    }
-    let descriptor = OfficeTemplateDescriptor(
-      id: "custom-\(UUID().uuidString.lowercased())", title: resolvedTitle, subtitle: subtitle,
-      format: current.format, isCustomUserTemplate: true)
-    customTemplatePayloads[descriptor.id] = current.payload
-    customTemplates.insert(descriptor, at: 0)
-    lastExecutedCommandSummary = "사용자 템플릿 저장 완료: \(resolvedTitle)"
-  }
-
   public func setZoom(_ percent: Double) {
     guard percent.isFinite else { return }
     zoomPercent = min(400.0, max(25.0, percent))
-  }
-
-  // MARK: - Real File Open / Export / Save I/O
-
-  internal func decodeDocumentPayload(data: Data, fileName: String) throws -> (
-    format: DocumentFormat, payload: OpenTabPayload
-  ) {
-    let verified = try FormatDetector.verify(data: data, fileName: fileName)
-    let format = verified.format
-    let payload: OpenTabPayload
-
-    switch format {
-    case .docx:
-      var doc = try OOXMLContainerCodec.decodeDocument(from: data)
-      doc.format = format
-      payload = .document(doc)
-    case .odt:
-      var doc = try ODFContainerCodec.decodeDocument(from: data)
-      doc.format = format
-      payload = .document(doc)
-    case .hwpx, .hwtx:
-      var doc = try HWPXContainerCodec.decodeDocument(from: data)
-      doc.format = format
-      payload = .document(doc)
-    case .hwp, .hwt:
-      var doc = try HWP5BinaryCodec.decodeDocument(from: data)
-      doc.format = format
-      payload = .document(doc)
-    case .doc:
-      var doc = try LegacyOLE2OfficeCodec.decodeWordBinary(from: data)
-      doc.format = format
-      payload = .document(doc)
-    case .rtf:
-      var doc = try RTFCodec.decodeDocument(from: data)
-      doc.format = format
-      payload = .document(doc)
-    case .md, .txt:
-      var doc = try CommonMarkCodec.decodeDocument(from: data, title: fileName)
-      doc.format = format
-      payload = .document(doc)
-    case .xlsx: payload = .sheet(try OOXMLContainerCodec.decodeWorksheet(from: data))
-    case .xls:
-      payload = .sheet(try LegacyOLE2OfficeCodec.decodeBIFF8Worksheet(from: data, name: fileName))
-    case .ods: payload = .sheet(try ODFContainerCodec.decodeWorksheet(from: data))
-    case .csv:
-      payload = .sheet(
-        try CSVStateMachineCodec.decodeWorksheet(from: data, name: fileName, delimiter: ","))
-    case .tsv:
-      payload = .sheet(
-        try CSVStateMachineCodec.decodeWorksheet(from: data, name: fileName, delimiter: "\t"))
-    case .pptx, .ppsx: payload = .slide(try OOXMLContainerCodec.decodePresentation(from: data))
-    case .ppt: payload = .slide(try LegacyOLE2OfficeCodec.decodePowerPointBinary(from: data))
-    case .odp: payload = .slide(try ODFContainerCodec.decodePresentation(from: data))
-    case .pdf: payload = .pdf(try PDFBinarySerializer.decode(from: data))
-    }
-    return (format, payload)
-  }
-
-  @discardableResult
-  public func openDocument(data: Data, fileName: String, fileURL: URL? = nil) throws
-    -> WorkspaceTabItem
-  {
-    let decoded = try decodeDocumentPayload(data: data, fileName: fileName)
-    let newTab = WorkspaceTabItem(
-      fileName: fileName, format: decoded.format,
-      lastOpenedISO8601: OfficeDocumentModel.currentISO8601Timestamp(), fileURL: fileURL,
-      payload: decoded.payload)
-    openTabs.append(newTab)
-    activeTabID = newTab.id
-    isShowingHomeHub = false
-    lastErrorMessage = nil
-    recordRecentDocument(newTab)
-    return newTab
-  }
-
-  @discardableResult
-  public func loadFromDisk(url: URL) throws -> WorkspaceTabItem {
-    try openDocument(data: try Data(contentsOf: url), fileName: url.lastPathComponent, fileURL: url)
-  }
-
-  @discardableResult
-  public func importDocumentFromDisk(url: URL) throws -> WorkspaceTabItem {
-    try loadFromDisk(url: url)
-  }
-
-  private func convertTab(id: UUID, targetFormat: DocumentFormat? = nil) throws
-    -> ConversionJobResult
-  {
-    guard let tab = openTabs.first(where: { $0.id == id }) else {
-      throw EasyOfficeError.emptyPayload
-    }
-    let fmt = targetFormat ?? tab.format
-    let safeSourceName =
-      tab.fileName.contains(".") ? tab.fileName : "\(tab.fileName).\(tab.format.fileExtension)"
-    return try DocumentConversionOrchestrator.convert(
-      ConversionJobRequest(
-        sourceFileName: safeSourceName, sourceFormat: tab.format, targetFormat: fmt,
-        payload: tab.payload))
-  }
-
-  public func exportTabData(id: UUID, targetFormat: DocumentFormat? = nil) throws -> Data {
-    try convertTab(id: id, targetFormat: targetFormat).outputBytes
-  }
-
-  public func saveTabToDisk(id: UUID, to url: URL, targetFormat: DocumentFormat? = nil) throws {
-    guard let idx = openTabs.firstIndex(where: { $0.id == id }) else {
-      throw EasyOfficeError.emptyPayload
-    }
-    let fmt =
-      targetFormat ?? DocumentFormat.from(fileNameOrExtension: url.lastPathComponent)
-      ?? openTabs[idx].format
-    let result = try convertTab(id: id, targetFormat: fmt)
-    try result.outputBytes.write(to: url, options: .atomic)
-    if fmt.moduleKind == openTabs[idx].format.moduleKind {
-      openTabs[idx].payload = result.convertedPayload
-      openTabs[idx].isModified = false
-      openTabs[idx].fileURL = url
-      openTabs[idx].fileName = url.lastPathComponent
-      openTabs[idx].format = fmt
-      openTabs[idx].lastOpenedISO8601 = OfficeDocumentModel.currentISO8601Timestamp()
-      recordRecentDocument(openTabs[idx])
-      lastExecutedCommandSummary = "저장 완료: \(url.lastPathComponent)"
-    } else {
-      lastExecutedCommandSummary = "포맷 내보내기 완료: \(url.lastPathComponent)"
-    }
-    lastErrorMessage = nil
-  }
-
-  @discardableResult
-  public func saveTabOverwriteIfBackedByFile(id: UUID) throws -> Bool {
-    guard let idx = openTabs.firstIndex(where: { $0.id == id }),
-      let existingURL = openTabs[idx].fileURL
-    else {
-      return false
-    }
-    try saveTabToDisk(id: id, to: existingURL, targetFormat: openTabs[idx].format)
-    return true
-  }
-
-  @discardableResult
-  public func saveActiveTabOverwriteIfBackedByFile() throws -> Bool {
-    guard let activeTabID else { return false }
-    return try saveTabOverwriteIfBackedByFile(id: activeTabID)
-  }
-
-  // MARK: - Interactive Document, Sheet, Slide, and PDF Mutations
-
-  public func applyFormulaBarEdit() {
-    guard let activeTabID,
-      let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(let sheet) = openTabs[idx].payload
-    else { return }
-    activeInlineEditTargetKey = nil
-    let previousPayload = openTabs[idx].payload
-    var updatedSheet = sheet
-    do {
-      try updatedSheet.setCell(selectedSheetCell, rawValue: formulaBarDraft)
-      if let rule = activeDataValidationRule {
-        let trimmed = formulaBarDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isValid =
-          trimmed.hasPrefix("=")
-          ? rule.validate(updatedSheet.evaluate(at: selectedSheetCell))
-          : rule.validate(rawValue: formulaBarDraft)
-        guard isValid else {
-          lastErrorMessage = "데이터 유효성 검사 실패: 입력값 '\(formulaBarDraft)'이(가) 허용 범위를 벗어났습니다."
-          return
-        }
-      }
-      var stack = undoStacks[activeTabID] ?? []
-      stack.append(previousPayload)
-      if stack.count > Self.maxUndoDepth {
-        stack.removeFirst(stack.count - Self.maxUndoDepth)
-      }
-      undoStacks[activeTabID] = stack
-      redoStacks[activeTabID] = []
-      openTabs[idx].payload = .sheet(updatedSheet)
-      openTabs[idx].isModified = true
-      lastErrorMessage = nil
-    } catch {
-      lastErrorMessage = error.localizedDescription
-    }
-  }
-
-  public func commitSheetFormulaBarEdit() {
-    applyFormulaBarEdit()
-  }
-
-  public func setSelectedSheetCellNumberFormat(_ format: CellNumberFormat) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let coord =
-      (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate
-      ?? PackedCellCoordinate(row: 0, column: 0)
-    var style = sheet.cellStyle(at: coord)
-    style.numberFormat = format
-    sheet.setCellStyle(style, at: coord)
-    if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
-      sheet.updateCellStyleInRange(range) { $0.numberFormat = format }
-    }
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "셀 숫자 서식 적용: \(format.rawValue)"
-  }
-
-  public func setSelectedSheetCellAlignment(_ alignment: CellHorizontalAlignment) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let coord =
-      (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate
-      ?? PackedCellCoordinate(row: 0, column: 0)
-    var style = sheet.cellStyle(at: coord)
-    style.alignment = alignment
-    sheet.setCellStyle(style, at: coord)
-    if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
-      sheet.updateCellStyleInRange(range) { $0.alignment = alignment }
-    }
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "셀 가로 정렬 적용: \(alignment.rawValue)"
-  }
-
-  public func selectSheetCellOrRange(primaryCell: String, rangeNotation: String? = nil) {
-    activeInlineEditTargetKey = nil
-    selectedSheetCell = primaryCell
-    selectedSheetRange = rangeNotation ?? primaryCell
-    if let tab = activeTab, case .sheet(let sheet) = tab.payload {
-      formulaBarDraft = sheet.rawValue(at: primaryCell)
-    } else {
-      formulaBarDraft = ""
-    }
-  }
-
-  public func extendSheetSelection(to endCell: String) {
-    selectedSheetRange =
-      (selectedSheetCell == endCell) ? selectedSheetCell : "\(selectedSheetCell):\(endCell)"
-  }
-
-  public func performAutoFillOnActiveSheet(
-    sourceRangeNotation: String? = nil, targetRangeNotation: String
-  ) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    let srcStr = sourceRangeNotation ?? selectedSheetRange
-    do {
-      let srcRange = try CellRange(notation: srcStr)
-      let dstRange = try CellRange(notation: targetRangeNotation)
-      try sheet.autofill(sourceRange: srcRange, targetRange: dstRange)
-      recordUndoSnapshot(for: activeTabID)
-      selectedSheetRange = dstRange.a1Range
-      openTabs[idx].payload = .sheet(sheet)
-      openTabs[idx].isModified = true
-      lastErrorMessage = nil
-      lastExecutedCommandSummary = "시트 자동 채우기 완료 (\(srcRange.a1Range) → \(dstRange.a1Range))"
-    } catch {
-      lastErrorMessage = error.localizedDescription
-    }
-  }
-
-  public func updateActiveSheetColumnWidth(column: Int, width: Double) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "colw:\(activeTabID):\(column)")
-    sheet.setColumnWidth(width, at: column)
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary =
-      "열 너비 조정 (\(CellAddress.columnLabel(for: max(0, column)))열: \(Int(sheet.columnWidth(at: column)))pt)"
-  }
-
-  public func updateActiveSheetRowHeight(row: Int, height: Double) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "rowh:\(activeTabID):\(row)")
-    sheet.setRowHeight(height, at: row)
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "행 높이 조정 (\(row + 1)행: \(Int(sheet.rowHeight(at: row)))pt)"
-  }
-
-  public func setSelectedSheetCellComment(_ comment: String) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    let coord =
-      (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate
-      ?? PackedCellCoordinate(row: 0, column: 0)
-    let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
-    let existing = sheet.sheetComments[coord] ?? ""
-    guard existing != trimmed else { return }
-    recordUndoSnapshot(
-      for: activeTabID,
-      coalescingTargetKey: "sheet-comment-\(activeTabID.uuidString)-\(coord.rawValue)")
-    if trimmed.isEmpty {
-      sheet.sheetComments.removeValue(forKey: coord)
-    } else {
-      sheet.sheetComments[coord] = trimmed
-    }
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = trimmed.isEmpty ? "셀 메모 삭제 완료" : "셀 메모 저장 완료"
-  }
-
-  public func mergedSheetRanges(for tabID: UUID) -> [String] {
-    var combined = mergedSheetRangesByTab[tabID] ?? []
-    if let tab = openTabs.first(where: { $0.id == tabID }), case .sheet(let sheet) = tab.payload {
-      for r in sheet.mergedRanges {
-        let a1 = r.a1Range
-        if !combined.contains(a1) { combined.append(a1) }
-      }
-    }
-    return combined
-  }
-
-  public func toggleMergeOnSelectedSheetCell(targetRange: String? = nil) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let resolvedRange: String
-    if let targetRange, !targetRange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      resolvedRange = targetRange.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-    } else if selectedSheetRange.contains(":"),
-      let range = try? CellRange(notation: selectedSheetRange),
-      range.start != range.end
-    {
-      resolvedRange = range.a1Range
-    } else if let addr = try? CellAddress(a1Notation: selectedSheetCell),
-      let nextAddr = try? CellAddress(
-        column: min(CellAddress.maxZeroBasedColumn, addr.column + 1), row: addr.row)
-    {
-      resolvedRange = "\(addr.a1Notation):\(nextAddr.a1Notation)"
-    } else {
-      resolvedRange = "\(selectedSheetCell.uppercased()):\(selectedSheetCell.uppercased())"
-    }
-    if let parsedRange = try? CellRange(notation: resolvedRange) {
-      sheet.toggleMergeCells(parsedRange)
-    }
-    var ranges = mergedSheetRangesByTab[activeTabID] ?? []
-    if let existingIdx = ranges.firstIndex(of: resolvedRange) {
-      ranges.remove(at: existingIdx)
-      lastExecutedCommandSummary = "셀 병합 해제: \(resolvedRange)"
-    } else {
-      ranges.append(resolvedRange)
-      let topLeftA1 = resolvedRange.components(separatedBy: ":").first ?? selectedSheetCell
-      let coord =
-        (try? CellAddress(a1Notation: topLeftA1))?.packedCoordinate
-        ?? PackedCellCoordinate(row: 0, column: 0)
-      var style = sheet.cellStyle(at: coord)
-      style.alignment = .center
-      sheet.setCellStyle(style, at: coord)
-      lastExecutedCommandSummary = "셀 병합 적용: \(resolvedRange)"
-    }
-    openTabs[idx].payload = .sheet(sheet)
-    mergedSheetRangesByTab[activeTabID] = ranges
-    openTabs[idx].isModified = true
-  }
-
-  public func addWorksheetTab(named: String? = nil) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let resolvedName = named ?? "Sheet\(sheet.allSheetNames.count + 1)"
-    sheet.addSheetPage(
-      named: resolvedName,
-      initialCells: [
-        PackedCellCoordinate(row: 0, column: 0): "항목", PackedCellCoordinate(row: 0, column: 1): "값",
-      ])
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "새 시트 탭 추가: \(resolvedName)"
-  }
-
-  public func selectWorksheetTab(index: Int) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    activeInlineEditTargetKey = nil
-    sheet.switchActiveSheet(to: index)
-    formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
-    openTabs[idx].payload = .sheet(sheet)
-    syncSheetRulesFromActiveTab()
-    lastExecutedCommandSummary = "시트 탭 전환: \(sheet.name)"
-  }
-
-  public func renameWorksheetTab(at index: Int, to newName: String) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    recordUndoSnapshot(for: activeTabID)
-    sheet.renameSheetPage(at: index, to: trimmed)
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "시트 탭 이름 변경: \(trimmed)"
-  }
-
-  public func deleteWorksheetTab(at index: Int) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload,
-      sheet.allSheetNames.count > 1
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    sheet.deleteSheetPage(at: index)
-    formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    syncSheetRulesFromActiveTab()
-    lastExecutedCommandSummary = "시트 탭 삭제 완료"
-  }
-
-  public func copySelectedSheetRangeAsTSV() -> String {
-    guard let tab = activeTab, case .sheet(let sheet) = tab.payload else { return "" }
-    let originAddress = CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    let fallbackRange =
-      (try? CellAddress(a1Notation: selectedSheetCell)).map { CellRange(start: $0, end: $0) }
-      ?? CellRange(start: originAddress, end: originAddress)
-    let range = (try? CellRange(notation: selectedSheetRange)) ?? fallbackRange
-    let minR = min(range.start.row, range.end.row)
-    let maxR = max(range.start.row, range.end.row)
-    let minC = min(range.start.column, range.end.column)
-    let maxC = max(range.start.column, range.end.column)
-
-    var rowStrings: [String] = []
-    for r in minR...maxR {
-      var colStrings: [String] = []
-      for c in minC...maxC {
-        let addr = CellAddress(packed: PackedCellCoordinate(row: r, column: c))
-        let raw = sheet.rawValue(at: addr.a1Notation)
-        let cellStr = raw.hasPrefix("=") ? sheet.formattedDisplayValue(at: addr) : raw
-        colStrings.append(cellStr)
-      }
-      rowStrings.append(colStrings.joined(separator: "\t"))
-    }
-    return rowStrings.joined(separator: "\n")
-  }
-
-  public func pasteSheetCellsFromTSV(_ tsvText: String) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    let normalized = tsvText.replacingOccurrences(of: "\r\n", with: "\n")
-    var lines = normalized.components(separatedBy: "\n")
-    if lines.count > 1 && lines.last == "" {
-      lines.removeLast()
-    }
-    guard !lines.isEmpty else { return }
-
-    let startAddr =
-      (try? CellAddress(a1Notation: selectedSheetCell))
-      ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    recordUndoSnapshot(for: activeTabID)
-
-    var maxRowOffset = 0
-    var maxColOffset = 0
-    for (rOffset, line) in lines.enumerated() {
-      let cols = line.components(separatedBy: "\t")
-      maxRowOffset = max(maxRowOffset, rOffset)
-      for (cOffset, val) in cols.enumerated() {
-        maxColOffset = max(maxColOffset, cOffset)
-        let targetRow = min(CellAddress.maxZeroBasedRow, startAddr.row + rOffset)
-        let targetCol = min(CellAddress.maxZeroBasedColumn, startAddr.column + cOffset)
-        try? sheet.setCell(row: targetRow, column: targetCol, rawValue: val)
-      }
-    }
-
-    let endRow = min(CellAddress.maxZeroBasedRow, startAddr.row + maxRowOffset)
-    let endCol = min(CellAddress.maxZeroBasedColumn, startAddr.column + maxColOffset)
-    let endAddr = CellAddress(packed: PackedCellCoordinate(row: endRow, column: endCol))
-    selectedSheetRange =
-      (startAddr == endAddr)
-      ? startAddr.a1Notation : "\(startAddr.a1Notation):\(endAddr.a1Notation)"
-    formulaBarDraft = sheet.rawValue(at: selectedSheetCell)
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "TSV 셀 범위 붙여넣기 완료 (\(selectedSheetRange))"
-  }
-
-  public func moveSheetSelection(
-    rowDelta: Int,
-    columnDelta: Int,
-    extendSelection: Bool = false
-  ) {
-    let baseNotation: String
-    if extendSelection, selectedSheetRange.contains(":") {
-      baseNotation = selectedSheetRange.components(separatedBy: ":").last ?? selectedSheetCell
-    } else {
-      baseNotation = selectedSheetCell
-    }
-    let currentAddr =
-      (try? CellAddress(a1Notation: baseNotation))
-      ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    let nextRow = max(0, min(CellAddress.maxZeroBasedRow, currentAddr.row + rowDelta))
-    let nextCol = max(0, min(CellAddress.maxZeroBasedColumn, currentAddr.column + columnDelta))
-    let nextAddr = CellAddress(packed: PackedCellCoordinate(row: nextRow, column: nextCol))
-    if extendSelection {
-      extendSheetSelection(to: nextAddr.a1Notation)
-    } else {
-      selectSheetCellOrRange(primaryCell: nextAddr.a1Notation)
-    }
-  }
-
-  public func clearSelectedSheetRange() {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    let originAddress = CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    let fallbackRange =
-      (try? CellAddress(a1Notation: selectedSheetCell)).map { CellRange(start: $0, end: $0) }
-      ?? CellRange(start: originAddress, end: originAddress)
-    let range = (try? CellRange(notation: selectedSheetRange)) ?? fallbackRange
-    recordUndoSnapshot(for: activeTabID)
-    range.forEachCoordinate { coord in
-      sheet.cellsByCoordinate.removeValue(forKey: coord)
-      sheet.compiledASTs.removeValue(forKey: coord)
-      sheet.sheetComments.removeValue(forKey: coord)
-    }
-    formulaBarDraft = ""
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "선택 셀 값 지우기 (\(selectedSheetRange))"
-  }
-
-  public func setSelectedSheetCellColors(
-    fillHex: String? = nil,
-    textHex: String? = nil,
-    clearFill: Bool = false,
-    clearText: Bool = false
-  ) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let coord =
-      (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate
-      ?? PackedCellCoordinate(row: 0, column: 0)
-    var style = sheet.cellStyle(at: coord)
-    if clearFill {
-      style.fillHex = nil
-    } else if let fillHex {
-      style.fillHex = fillHex
-    }
-    if clearText {
-      style.textHex = nil
-    } else if let textHex {
-      style.textHex = textHex
-    }
-    sheet.setCellStyle(style, at: coord)
-    if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
-      sheet.updateCellStyleInRange(range) { cellStyle in
-        if clearFill {
-          cellStyle.fillHex = nil
-        } else if let fillHex {
-          cellStyle.fillHex = fillHex
-        }
-        if clearText {
-          cellStyle.textHex = nil
-        } else if let textHex {
-          cellStyle.textHex = textHex
-        }
-      }
-    }
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "셀 배경·글자 색상 서식 적용"
-  }
-
-  public var isTrackChangesEnabled: Bool {
-    get {
-      guard let tab = activeTab else { return false }
-      switch tab.payload {
-      case .document(let d): return d.trackChangesEnabled
-      case .sheet(let s): return s.trackChangesEnabled
-      case .slide, .pdf: return false
-      }
-    }
-    set {
-      guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }) else {
-        return
-      }
-      switch openTabs[idx].payload {
-      case .document(var d):
-        d.trackChangesEnabled = newValue
-        openTabs[idx].payload = .document(d)
-      case .sheet(var s):
-        s.trackChangesEnabled = newValue
-        openTabs[idx].payload = .sheet(s)
-      case .slide, .pdf:
-        break
-      }
-    }
-  }
-
-  public func enqueueOpenTabsIntoBatchConversion(targetFormat: DocumentFormat? = nil) {
-    if let targetFormat {
-      batchTargetFormat = targetFormat
-    }
-  }
-
-  public func enqueueFilesFromDiskIntoBatchConversion(
-    urls: [URL],
-    targetFormat: DocumentFormat? = nil
-  ) {
-    if let targetFormat {
-      batchTargetFormat = targetFormat
-    }
-    var enqueuedCount = 0
-    for url in urls {
-      do {
-        let rawData = try Data(contentsOf: url)
-        let fileName = url.lastPathComponent
-        let decoded = try decodeDocumentPayload(data: rawData, fileName: fileName)
-        let safeSourceName =
-          fileName.contains(".") ? fileName : "\(fileName).\(decoded.format.fileExtension)"
-        additionalBatchJobs.append(
-          ConversionJobRequest(
-            sourceFileName: safeSourceName,
-            sourceFormat: decoded.format,
-            targetFormat: batchTargetFormat,
-            payload: decoded.payload
-          )
-        )
-        enqueuedCount += 1
-      } catch {
-        lastErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-      }
-    }
-    if enqueuedCount > 0 {
-      lastExecutedCommandSummary = "일괄 변환 대기열 파일 추가: \(enqueuedCount)건"
-    }
-    isShowingHomeHub = true
-    activeHubSection = .converter
-  }
-
-  public func runAllBatchConversions() {
-    var jobs: [ConversionJobRequest] = openTabs.map { tab in
-      let safeSourceName =
-        tab.fileName.contains(".") ? tab.fileName : "\(tab.fileName).\(tab.format.fileExtension)"
-      return ConversionJobRequest(
-        id: tab.id,
-        sourceFileName: safeSourceName,
-        sourceFormat: tab.format,
-        targetFormat: batchTargetFormat,
-        payload: tab.payload
-      )
-    }
-    for extra in additionalBatchJobs {
-      if !jobs.contains(where: { $0.sourceFileName == extra.sourceFileName }) {
-        jobs.append(
-          ConversionJobRequest(
-            id: extra.id,
-            sourceFileName: extra.sourceFileName,
-            sourceFormat: extra.sourceFormat,
-            targetFormat: batchTargetFormat,
-            payload: extra.payload
-          )
-        )
-      }
-    }
-    lastBatchConversionReport = DocumentConversionOrchestrator.executeBatch(jobs)
-  }
-
-  public var batchConversionQueue: [BatchConversionQueueItem] {
-    guard let report = lastBatchConversionReport else {
-      var pendingItems = openTabs.map { tab in
-        BatchConversionQueueItem(
-          id: tab.id,
-          sourceFileName: tab.fileName,
-          sourceFormat: tab.format,
-          targetFormat: batchTargetFormat,
-          status: .pending
-        )
-      }
-      for extra in additionalBatchJobs
-      where !pendingItems.contains(where: { $0.sourceFileName == extra.sourceFileName }) {
-        pendingItems.append(
-          BatchConversionQueueItem(
-            id: extra.id,
-            sourceFileName: extra.sourceFileName,
-            sourceFormat: extra.sourceFormat,
-            targetFormat: batchTargetFormat,
-            status: .pending
-          )
-        )
-      }
-      return pendingItems
-    }
-    var items: [BatchConversionQueueItem] = report.succeededResults.map { res in
-      BatchConversionQueueItem(
-        id: res.id,
-        sourceFileName: res.sourceFileName,
-        sourceFormat: res.sourceFormat,
-        targetFormat: res.targetFormat,
-        status: .completed,
-        convertedPayloadBytes: res.outputBytes,
-        result: res
-      )
-    }
-    for failed in report.failedErrors {
-      let matchedTab = openTabs.first(where: { $0.id == failed.jobID })
-      let matchedExtra = additionalBatchJobs.first(where: { $0.id == failed.jobID })
-      items.append(
-        BatchConversionQueueItem(
-          id: failed.jobID,
-          sourceFileName: matchedTab?.fileName ?? matchedExtra?.sourceFileName ?? "변환 작업",
-          sourceFormat: matchedTab?.format ?? matchedExtra?.sourceFormat ?? .docx,
-          targetFormat: batchTargetFormat,
-          status: .failed,
-          errorDescription: failed.errorDescription
-        )
-      )
-    }
-    return items
-  }
-
-  public func exportBatchConversionItem(result: ConversionJobResult, to url: URL) throws {
-    try result.outputBytes.write(to: url, options: .atomic)
-    lastExecutedCommandSummary = "변환 결과 파일 저장 완료: \(url.lastPathComponent)"
-    lastErrorMessage = nil
-  }
-
-  @discardableResult
-  public func exportAllCompletedBatchItems(toDirectory directoryURL: URL) throws -> [URL] {
-    if lastBatchConversionReport == nil {
-      runAllBatchConversions()
-    }
-    guard let report = lastBatchConversionReport else { return [] }
-    try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-    var writtenURLs: [URL] = []
-    for result in report.succeededResults {
-      let outURL = directoryURL.appendingPathComponent(result.outputFileName)
-      try result.outputBytes.write(to: outURL, options: .atomic)
-      writtenURLs.append(outURL)
-    }
-    lastExecutedCommandSummary = "일괄 변환 결과 \(writtenURLs.count)건 폴더 저장 완료"
-    lastErrorMessage = nil
-    return writtenURLs
   }
 }

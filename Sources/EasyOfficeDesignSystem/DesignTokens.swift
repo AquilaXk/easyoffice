@@ -223,7 +223,7 @@ public enum EasyOfficeDesignTokens {
   public static let brand300 = RGBColorToken(red: 0xCC, green: 0xD2, blue: 0xFC, hex: "#CCD2FC")
   public static let brand400 = RGBColorToken(red: 0xB4, green: 0xBC, blue: 0xFB, hex: "#B4BCFB")
   public static let brand500 = RGBColorToken(red: 0x8E, green: 0x9C, blue: 0xE6, hex: "#8E9CE6")
-  public static let brand600 = RGBColorToken(red: 0x74, green: 0x80, blue: 0xD2, hex: "#7480D2")
+  public static let brand600 = RGBColorToken(red: 0x52, green: 0x61, blue: 0xB4, hex: "#5261B4")
   public static let brand700 = RGBColorToken(red: 0x5C, green: 0x6B, blue: 0xC0, hex: "#5C6BC0")
   public static let brand800 = RGBColorToken(red: 0x4A, green: 0x58, blue: 0xA9, hex: "#4A58A9")
   public static let brand900 = RGBColorToken(red: 0x3B, green: 0x48, blue: 0x90, hex: "#3B4890")
@@ -233,7 +233,7 @@ public enum EasyOfficeDesignTokens {
   public static let lightWhite = RGBColorToken(red: 0xFF, green: 0xFF, blue: 0xFF, hex: "#FFFFFF")
   public static let lightScaffold = RGBColorToken(
     red: 0xF7, green: 0xF8, blue: 0xFC, hex: "#F7F8FC")
-  public static let lightSubtle = RGBColorToken(red: 0xF0, green: 0xF2, blue: 0xF7, hex: "#F0F2F7")
+  public static let lightSubtle = RGBColorToken(red: 0xF6, green: 0xF7, blue: 0xFB, hex: "#F6F7FB")
   public static let lightBorder = RGBColorToken(red: 0xE1, green: 0xE4, blue: 0xEE, hex: "#E1E4EE")
 
   public static let inkPrimary = RGBColorToken(red: 0x1F, green: 0x23, blue: 0x40, hex: "#1F2340")
@@ -277,13 +277,42 @@ public enum EasyOfficeDesignTokens {
     relativeLuminance(forHex: hex) > 0.42
   }
 
-  // MARK: - Semantic Status Tokens (WCAG 2.1 AA Verified >= 4.5 on White & Light Surfaces)
+  // MARK: - Semantic Status Tokens (WCAG 2.1 AA Verified >= 4.5 on Light & Dark Surfaces)
   public static let statusSuccess = RGBColorToken(
     red: 0x0A, green: 0x70, blue: 0x5A, hex: "#0A705A")
   public static let statusWarning = RGBColorToken(
     red: 0xB4, green: 0x53, blue: 0x09, hex: "#B45309")
   public static let statusDanger = RGBColorToken(red: 0xC8, green: 0x1E, blue: 0x1E, hex: "#C81E1E")
   public static let statusInfo = RGBColorToken(red: 0x4A, green: 0x58, blue: 0xA9, hex: "#4A58A9")
+
+  public static let statusSuccessDark = RGBColorToken(
+    red: 0x6E, green: 0xE7, blue: 0xB7, hex: "#6EE7B7")
+  public static let statusWarningDark = RGBColorToken(
+    red: 0xFC, green: 0xD3, blue: 0x4D, hex: "#FCD34D")
+  public static let statusDangerDark = RGBColorToken(
+    red: 0xFC, green: 0xA5, blue: 0xA5, hex: "#FCA5A5")
+  public static let statusInfoDark = RGBColorToken(
+    red: 0xC7, green: 0xD2, blue: 0xFE, hex: "#C7D2FE")
+
+  public static func brandAccentToken(isDark: Bool = false) -> RGBColorToken {
+    isDark ? brand300 : brand700
+  }
+
+  public static func statusSuccessToken(isDark: Bool = false) -> RGBColorToken {
+    isDark ? statusSuccessDark : statusSuccess
+  }
+
+  public static func statusWarningToken(isDark: Bool = false) -> RGBColorToken {
+    isDark ? statusWarningDark : statusWarning
+  }
+
+  public static func statusDangerToken(isDark: Bool = false) -> RGBColorToken {
+    isDark ? statusDangerDark : statusDanger
+  }
+
+  public static func statusInfoToken(isDark: Bool = false) -> RGBColorToken {
+    isDark ? statusInfoDark : statusInfo
+  }
 
   public static func accentToken(for module: OfficeModuleKind, isDark: Bool = false)
     -> RGBColorToken
