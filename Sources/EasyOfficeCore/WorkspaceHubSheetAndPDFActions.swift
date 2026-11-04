@@ -381,16 +381,18 @@ extension WorkspaceViewModel {
     points: [PDFInkPoint],
     strokeHex: String? = nil,
     lineWidth: Double? = nil,
-    label: String = "자유곡선 전자서명"
+    label: String = "자유곡선 전자서명",
+    pageNumber: Int? = nil
   ) {
     guard !points.isEmpty,
       let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .pdf(var pdfDoc) = openTabs[idx].payload
     else { return }
+    let targetPage = pageNumber ?? selectedPDFPageNumber
     recordUndoSnapshot(for: activeTabID)
     pdfDoc.addInkStroke(
-      pageNumber: selectedPDFPageNumber,
+      pageNumber: targetPage,
       points: points,
       strokeHex: strokeHex ?? pdfInkStrokeColorHex,
       lineWidth: lineWidth ?? pdfInkLineWidth,
@@ -398,7 +400,7 @@ extension WorkspaceViewModel {
     )
     openTabs[idx].payload = .pdf(pdfDoc)
     openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "PDF 자유곡선 벡터 서명 추가 (\(selectedPDFPageNumber)p)"
+    lastExecutedCommandSummary = "PDF 자유곡선 벡터 서명 추가 (\(targetPage)p)"
   }
 
   public func clearInkStrokesOnActivePDFPage() {

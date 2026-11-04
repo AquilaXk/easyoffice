@@ -1127,6 +1127,7 @@ public struct PDFStudioDetailPaneView: View {
   let isPrimaryPane: Bool
   @State private var showRawPDFKitView: Bool = false
   @State private var activePageInkPoints: [PDFInkPoint] = []
+  @State private var activeInkPageNumber: Int? = nil
 
   public init(
     viewModel: WorkspaceViewModel, pdf: PDFStudioDocumentModel, isPrimaryPane: Bool = true
@@ -1763,7 +1764,7 @@ public struct PDFStudioDetailPaneView: View {
                 )
                 return (stroke.points, c, stroke.lineWidth)
               }
-            if page.pageNumber == viewModel.selectedPDFPageNumber, activePageInkPoints.count >= 2 {
+            if page.pageNumber == activeInkPageNumber, activePageInkPoints.count >= 2 {
               liveList.append(
                 (activePageInkPoints, activeStrokeColor, viewModel.pdfInkLineWidth))
             }
@@ -1794,9 +1795,8 @@ public struct PDFStudioDetailPaneView: View {
           .gesture(
             DragGesture(minimumDistance: 1)
               .onChanged { value in
-                let targetIdx = max(0, page.pageNumber - 1)
-                if viewModel.selectedPDFPageIndex != targetIdx {
-                  viewModel.selectedPDFPageIndex = targetIdx
+                if activeInkPageNumber != page.pageNumber {
+                  activeInkPageNumber = page.pageNumber
                   activePageInkPoints.removeAll(keepingCapacity: true)
                 }
                 let normX = max(0.0, min(1.0, Double(value.location.x / sheetW)))
@@ -1806,14 +1806,15 @@ public struct PDFStudioDetailPaneView: View {
                 activePageInkPoints.append(PDFInkPoint(x: pdfX, y: pdfY))
               }
               .onEnded { _ in
-                if activePageInkPoints.count >= 2 {
-                  viewModel.selectedPDFPageIndex = max(0, page.pageNumber - 1)
+                if activeInkPageNumber == page.pageNumber, activePageInkPoints.count >= 2 {
                   viewModel.addInkStrokeToActivePDFPage(
                     points: activePageInkPoints,
                     strokeHex: viewModel.pdfInkStrokeColorHex,
-                    lineWidth: viewModel.pdfInkLineWidth
+                    lineWidth: viewModel.pdfInkLineWidth,
+                    pageNumber: page.pageNumber
                   )
                 }
+                activeInkPageNumber = nil
                 activePageInkPoints.removeAll(keepingCapacity: true)
               }
           )
