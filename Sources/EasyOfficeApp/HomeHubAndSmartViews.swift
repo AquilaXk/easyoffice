@@ -80,12 +80,15 @@ struct HomeHubWorkspaceView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               }
 
               HStack(spacing: 12) {
                 ForEach(OfficeModuleKind.allCases) { module in
-                  let accent = EasyOfficeDesignTokens.accentToken(for: module)
+                  let accent = EasyOfficeDesignTokens.accentToken(
+                    for: module,
+                    isDark: palette.isDark
+                  )
                   VStack(alignment: .leading, spacing: 0) {
                     Rectangle()
                       .fill(accent.swiftUIColor)
@@ -188,7 +191,7 @@ struct HomeHubWorkspaceView: View {
                   }
                   .buttonStyle(.plain)
                   .font(.system(size: 11, weight: .semibold))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                 }
 
                 HStack(spacing: 14) {
@@ -232,14 +235,31 @@ struct HomeHubWorkspaceView: View {
                       Text(tpl.format.rawValue.uppercased())
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(
-                          EasyOfficeDesignTokens.accentToken(for: tpl.moduleKind).swiftUIColor
+                          EasyOfficeDesignTokens.accentToken(
+                            for: tpl.moduleKind,
+                            isDark: palette.isDark
+                          ).swiftUIColor
                         )
                       if tpl.isCustomUserTemplate {
                         Text("사용자 템플릿")
                           .font(.system(size: 9, weight: .bold))
-                          .foregroundStyle(EasyOfficeDesignTokens.statusInfo.swiftUIColor)
+                          .foregroundStyle(
+                            EasyOfficeDesignTokens.statusInfoToken(isDark: palette.isDark)
+                              .swiftUIColor
+                          )
                       }
                       Spacer()
+                      if tpl.isCustomUserTemplate {
+                        Button("삭제") {
+                          viewModel.removeCustomTemplate(id: tpl.id)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(
+                          EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark)
+                            .swiftUIColor
+                        )
+                      }
                     }
                     Text(tpl.title)
                       .font(.system(size: 13, weight: .semibold))
@@ -309,8 +329,11 @@ struct HomeHubWorkspaceView: View {
 
               VStack(spacing: 0) {
                 ForEach(filteredRecentTabs) { tab in
-                  let moduleAccent = EasyOfficeDesignTokens.accentToken(for: tab.moduleKind)
-                    .swiftUIColor
+                  let moduleAccent = EasyOfficeDesignTokens.accentToken(
+                    for: tab.moduleKind,
+                    isDark: palette.isDark
+                  )
+                  .swiftUIColor
                   VStack(spacing: 0) {
                     HStack(spacing: 12) {
                       Image(systemName: tab.moduleKind.systemSymbolName)
@@ -335,7 +358,7 @@ struct HomeHubWorkspaceView: View {
                       if tab.isModified {
                         Text("수정됨")
                           .font(.system(size: 10, weight: .semibold))
-                          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                       }
 
                       Spacer()
@@ -383,7 +406,7 @@ struct HomeHubWorkspaceView: View {
                       }
                       .buttonStyle(.plain)
                       .font(.system(size: 11, weight: .medium))
-                      .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
+                      .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                     }
                     .padding(.vertical, 10)
                     .padding(.horizontal, 4)
@@ -413,7 +436,8 @@ private struct TemplateMiniaturePreviewHeader: View {
   )
 
   var body: some View {
-    let accent = EasyOfficeDesignTokens.accentToken(for: module).swiftUIColor
+    let accent = EasyOfficeDesignTokens.accentToken(for: module, isDark: palette.isDark)
+      .swiftUIColor
 
     ZStack(alignment: .topTrailing) {
       Rectangle()
@@ -596,12 +620,16 @@ struct BatchConversionStudioHubView: View {
           }
         }
 
-        Button("열린 탭 전체 변환 실행") {
-          viewModel.runAllBatchConversions()
+        Button("대기열 전체 변환 실행") {
+          Task {
+            await viewModel.runAllBatchConversionsAsync()
+          }
         }
         .buttonStyle(.plain)
         .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
+        .foregroundStyle(
+          EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+        )
       }
 
       Divider()
@@ -612,12 +640,14 @@ struct BatchConversionStudioHubView: View {
             .font(.system(size: 12, weight: .semibold))
           Text("성공 \(report.succeededResults.count)건")
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+            .foregroundStyle(
+              EasyOfficeDesignTokens.statusSuccessToken(isDark: palette.isDark).swiftUIColor
+            )
           Text("실패 \(report.failedErrors.count)건")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(
               !report.failedErrors.isEmpty
-                ? EasyOfficeDesignTokens.statusDanger.swiftUIColor
+                ? EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor
                 : palette.secondaryText.swiftUIColor
             )
           Spacer()
@@ -639,7 +669,9 @@ struct BatchConversionStudioHubView: View {
             }
             .buttonStyle(.plain)
             .font(.system(size: 11.5, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            .foregroundStyle(
+              EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+            )
           }
         }
 
@@ -655,7 +687,9 @@ struct BatchConversionStudioHubView: View {
               HStack(spacing: 12) {
                 Text("\(srcExt) → \(dstExt)")
                   .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(
+                    EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+                  )
                   .frame(width: 96, alignment: .leading)
 
                 Text(item.sourceFileName)
@@ -670,7 +704,9 @@ struct BatchConversionStudioHubView: View {
                 Spacer()
                 Text("완료 · \(item.outputBytes.count) B")
                   .font(.system(size: 11, design: .monospaced))
-                  .foregroundStyle(EasyOfficeDesignTokens.statusSuccess.swiftUIColor)
+                  .foregroundStyle(
+                    EasyOfficeDesignTokens.statusSuccessToken(isDark: palette.isDark).swiftUIColor
+                  )
 
                 Button("디스크에 저장...") {
                   let panel = NSSavePanel()
@@ -687,7 +723,9 @@ struct BatchConversionStudioHubView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(
+                  EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+                )
               }
               .padding(.vertical, 8)
 
@@ -699,31 +737,63 @@ struct BatchConversionStudioHubView: View {
         ForEach(Array(report.failedErrors.enumerated()), id: \.offset) { _, err in
           Text("거부됨: \(err.errorDescription)")
             .font(.system(size: 11))
-            .foregroundStyle(EasyOfficeDesignTokens.statusDanger.swiftUIColor)
+            .foregroundStyle(
+              EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor
+            )
         }
       } else {
+        let pendingQueue = viewModel.batchConversionQueue
         VStack(alignment: .leading, spacing: 8) {
-          Text(
-            "열려 있는 모든 문서 탭(\(viewModel.openTabs.count)건)을 선택한 포맷으로 일괄 변환합니다."
-          )
-          .font(.system(size: 12))
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
+          HStack {
+            Text(
+              "변환 대기열(\(pendingQueue.count)건)을 선택한 포맷으로 일괄 변환합니다."
+            )
+            .font(.system(size: 12))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            Spacer()
+            if !viewModel.excludedOpenTabBatchIDs.isEmpty {
+              Button("열린 탭 다시 담기") {
+                viewModel.enqueueOpenTabsIntoBatchConversion()
+              }
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(
+                EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+              )
+            }
+            if !pendingQueue.isEmpty {
+              Button("대기열 비우기") {
+                viewModel.clearBatchConversionQueue()
+              }
+              .buttonStyle(.plain)
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
+          }
 
           VStack(spacing: 0) {
-            ForEach(viewModel.openTabs) { tab in
-              let srcExt = tab.format.rawValue.uppercased()
+            ForEach(pendingQueue) { job in
+              let srcExt = job.sourceFormat.rawValue.uppercased()
               let dstExt = viewModel.batchTargetFormat.rawValue.uppercased()
               VStack(spacing: 0) {
                 HStack(spacing: 12) {
                   Text("\(srcExt) → \(dstExt)")
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .foregroundStyle(
+                      EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+                    )
                     .frame(width: 96, alignment: .leading)
-                  Text(tab.fileName)
+                  Text(job.sourceFileName)
                     .font(.system(size: 12))
                     .foregroundStyle(palette.primaryText.swiftUIColor)
                     .lineLimit(1)
                   Spacer()
+                  Button("제외") {
+                    viewModel.removeBatchConversionJob(id: job.id)
+                  }
+                  .buttonStyle(.plain)
+                  .font(.system(size: 11))
+                  .foregroundStyle(palette.secondaryText.swiftUIColor)
                 }
                 .padding(.vertical, 7)
 
@@ -763,12 +833,12 @@ struct BatchConversionStudioHubView: View {
   private func batchPipelineSummarySection(palette: WorkspaceThemePalette) -> some View {
     let report = viewModel.lastBatchConversionReport
     let totalOutputBytes = report?.succeededResults.reduce(0) { $0 + $1.outputBytes.count } ?? 0
-    let jobCount = report?.totalJobs ?? viewModel.openTabs.count
+    let jobCount = report?.totalJobs ?? viewModel.batchConversionQueue.count
     let succeededCount = report?.succeededResults.count ?? 0
     let statusLabel = succeededCount > 0 ? "검증 완료" : "대기 중"
     let statusColor =
       succeededCount > 0
-      ? EasyOfficeDesignTokens.statusSuccess.swiftUIColor
+      ? EasyOfficeDesignTokens.statusSuccessToken(isDark: palette.isDark).swiftUIColor
       : palette.secondaryText.swiftUIColor
     let familyRows: [(title: String, detail: String)] = [
       ("문서/공문서 조판", "DOCX · HWP · HWPX · ODT 단락·표·각주 보존"),
@@ -796,7 +866,9 @@ struct BatchConversionStudioHubView: View {
             Spacer()
             Text(targetStandardDescription)
               .font(.system(size: 11, weight: .semibold, design: .monospaced))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(
+                EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+              )
           }
 
           Rectangle()
@@ -990,7 +1062,9 @@ struct SmartDocumentAssistantHubView: View {
         }
         .buttonStyle(.plain)
         .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(EasyOfficeDesignTokens.brand600.swiftUIColor)
+        .foregroundStyle(
+          EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+        )
       }
 
       Divider()
@@ -1016,7 +1090,9 @@ struct SmartDocumentAssistantHubView: View {
         if !summary.keywords.isEmpty {
           Text("핵심 키워드: \(summary.keywords.joined(separator: ", "))")
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            .foregroundStyle(
+              EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+            )
         }
 
         Divider()
@@ -1056,7 +1132,10 @@ struct SmartDocumentAssistantHubView: View {
           VStack(alignment: .leading, spacing: 4) {
             Text("시트 통계 요약 (\(insight.trendClassification))")
               .font(.system(size: 11, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+              .foregroundStyle(
+                EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark)
+                  .swiftUIColor
+              )
             Text(
               "평균 \(String(format: "%.1f", insight.mean)) · 표준편차 \(String(format: "%.1f", insight.standardDeviation)) · 증감률 \(String(format: "%.1f", insight.growthRatePercent))%"
             )
@@ -1066,31 +1145,28 @@ struct SmartDocumentAssistantHubView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
         }
 
-        if let primaryDoc = activeDoc {
-          let (baselineDoc, revisedDoc): (OfficeDocumentModel, OfficeDocumentModel) = {
-            if documentModels.count >= 2 {
-              return (documentModels[0], documentModels[1])
-            }
-            let baselineParagraphs = Array(primaryDoc.paragraphs.dropLast(1))
-            let fallbackBaseline = OfficeDocumentModel(
-              title: "\(primaryDoc.title) (기준본)",
-              paragraphs: baselineParagraphs.isEmpty ? primaryDoc.paragraphs : baselineParagraphs
-            )
-            return (fallbackBaseline, primaryDoc)
-          }()
-          let diff = SmartAssistantAnalysisMemoizer.compareDocuments(
-            baseline: baselineDoc,
-            revised: revisedDoc
-          )
+        if activeDoc != nil {
           VStack(alignment: .leading, spacing: 4) {
             Text("문서 비교")
               .font(.system(size: 11, weight: .bold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
-            Text(
-              "추가 +\(diff.addedCount) · 삭제 -\(diff.removedCount) · 수정 ~\(diff.modifiedCount) · 동일 =\(diff.unchangedCount)"
-            )
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
+              .foregroundStyle(
+                EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+              )
+            if documentModels.count >= 2 {
+              let diff = SmartAssistantAnalysisMemoizer.compareDocuments(
+                baseline: documentModels[0],
+                revised: documentModels[1]
+              )
+              Text(
+                "추가 +\(diff.addedCount) · 삭제 -\(diff.removedCount) · 수정 ~\(diff.modifiedCount) · 동일 =\(diff.unchangedCount)\(diff.isTruncated ? " · 상위 \(diff.truncatedAtParagraphLimit ?? 300)문단 기준 요약" : "")"
+              )
+              .font(.system(size: 11, design: .monospaced))
+              .foregroundStyle(palette.secondaryText.swiftUIColor)
+            } else {
+              Text("비교할 두 번째 문서 탭을 열면 문단별 변경점(추가·삭제·수정)을 비교합니다.")
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondaryText.swiftUIColor)
+            }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1105,8 +1181,8 @@ struct SmartDocumentAssistantHubView: View {
             )
             .foregroundStyle(
               audit.isPassed
-                ? EasyOfficeDesignTokens.statusSuccess.swiftUIColor
-                : EasyOfficeDesignTokens.statusDanger.swiftUIColor
+                ? EasyOfficeDesignTokens.statusSuccessToken(isDark: palette.isDark).swiftUIColor
+                : EasyOfficeDesignTokens.statusDangerToken(isDark: palette.isDark).swiftUIColor
             )
             Text(
               "파일 무결성 점검: \(audit.detectedFormat?.rawValue.uppercased() ?? "UNKNOWN") · \(audit.isPassed ? "안전" : "위험 감지")"
@@ -1116,7 +1192,9 @@ struct SmartDocumentAssistantHubView: View {
           if viewModel.lastScrubbedMetadataCount > 0 {
             Text("· 정리된 메타데이터 \(viewModel.lastScrubbedMetadataCount)건")
               .font(.system(size: 11, weight: .medium))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(
+                EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+              )
           }
         }
       }

@@ -63,10 +63,11 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
         if NSEvent.modifierFlags.contains(.shift) {
           return false
         }
-        let loc = textView.selectedRange().location
+        let sel = textView.selectedRange()
         _ = parent.viewModel.splitParagraph(
           paragraphID: parent.paragraph.id,
-          atUTF16Offset: loc
+          atUTF16Offset: sel.location,
+          selectionLength: sel.length
         )
         return true
       }
@@ -208,6 +209,45 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       context.coordinator.lastFontSizePt = paragraph.fontSizePt
       context.coordinator.isUpdatingProgrammatically = false
     }
+
+    if viewModel.pendingFocusParagraphID == paragraph.id {
+      let utf16Len = (textView.string as NSString).length
+      let targetCaret = max(0, min(viewModel.pendingCaretUTF16Offset ?? 0, utf16Len))
+      context.coordinator.isUpdatingProgrammatically = true
+      textView.setSelectedRange(NSRange(location: targetCaret, length: 0))
+      if let win = textView.window {
+        if win.firstResponder !== textView {
+          win.makeFirstResponder(textView)
+        }
+        textView.setSelectedRange(NSRange(location: targetCaret, length: 0))
+        context.coordinator.isUpdatingProgrammatically = false
+        let expectedID = paragraph.id
+        DispatchQueue.main.async {
+          if viewModel.pendingFocusParagraphID == expectedID {
+            viewModel.pendingFocusParagraphID = nil
+            viewModel.pendingCaretUTF16Offset = nil
+          }
+        }
+      } else {
+        context.coordinator.isUpdatingProgrammatically = false
+        let expectedID = paragraph.id
+        DispatchQueue.main.async {
+          guard viewModel.pendingFocusParagraphID == expectedID,
+            let win = textView.window
+          else { return }
+          context.coordinator.isUpdatingProgrammatically = true
+          if win.firstResponder !== textView {
+            win.makeFirstResponder(textView)
+          }
+          let len = (textView.string as NSString).length
+          let caret = max(0, min(viewModel.pendingCaretUTF16Offset ?? targetCaret, len))
+          textView.setSelectedRange(NSRange(location: caret, length: 0))
+          context.coordinator.isUpdatingProgrammatically = false
+          viewModel.pendingFocusParagraphID = nil
+          viewModel.pendingCaretUTF16Offset = nil
+        }
+      }
+    }
   }
 
   public func buildAttributedString(from targetParagraph: ParagraphBlock? = nil)
@@ -244,9 +284,13 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
     for run in para.effectiveRuns {
       let fontSize = CGFloat(run.fontSizePt ?? para.fontSizePt)
       let fontFamily = run.fontName ?? para.fontName
-      var font =
-        NSFont(name: fontFamily, size: fontSize)
-        ?? NSFont.systemFont(ofSize: fontSize, weight: run.isBold ? .bold : .regular)
+      var font: NSFont =
+        if run.isCode {
+          NSFont.monospacedSystemFont(ofSize: fontSize, weight: run.isBold ? .bold : .regular)
+        } else {
+          NSFont(name: fontFamily, size: fontSize)
+            ?? NSFont.systemFont(ofSize: fontSize, weight: run.isBold ? .bold : .regular)
+        }
       if run.isBold {
         font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
       }
@@ -266,6 +310,11 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
       }
       if run.isStrikethrough {
         attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+      }
+      if run.isSuperscript {
+        attrs[.superscript] = 1
+      } else if run.isSubscript {
+        attrs[.superscript] = -1
       }
       if let bgHex = run.backgroundHex, let bgColor = resolveOptionalNSColor(bgHex) {
         attrs[.backgroundColor] = bgColor
@@ -358,7 +407,7 @@ public struct DocumentHorizontalRulerView: View {
 
         Text("▽")
           .font(.system(size: 9, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .position(
             x: min(
               totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt + firstLineOffsetPt),
@@ -383,7 +432,7 @@ public struct DocumentHorizontalRulerView: View {
 
         Text("△")
           .font(.system(size: 9, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .position(
             x: min(totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt),
             y: 19
@@ -678,7 +727,8 @@ public struct DocumentEditorDetailPaneView: View {
 
   @ViewBuilder
   private func hwpOfficialHeaderBanner(palette: WorkspaceThemePalette) -> some View {
-    let hwpAccent = EasyOfficeDesignTokens.accentToken(for: .hwp).swiftUIColor
+    let hwpAccent = EasyOfficeDesignTokens.accentToken(for: .hwp, isDark: palette.isDark)
+      .swiftUIColor
     let officialHeaderText =
       document.paragraphs.first(where: { $0.style == .officialHeader })?.text
       ?? (document.headerText.isEmpty ? "행정기관 표준 공문서 · 문서번호 기안-2026-0201" : document.headerText)
@@ -1060,7 +1110,9 @@ public struct DocumentEditorDetailPaneView: View {
               .font(.system(size: 10, weight: .semibold))
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
-              .foregroundStyle(EasyOfficeDesignTokens.statusWarning.swiftUIColor)
+              .foregroundStyle(
+                EasyOfficeDesignTokens.statusWarningToken(isDark: palette.isDark).swiftUIColor
+              )
           }
         }
         .padding(.horizontal, 8)
@@ -1357,7 +1409,7 @@ public struct DocumentEditorDetailPaneView: View {
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                        .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                       Rectangle()
                         .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.6))
                         .frame(height: 1)
@@ -1522,7 +1574,7 @@ public struct DocumentEditorDetailPaneView: View {
       if let listPrefix {
         Text(listPrefix)
           .font(.system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
       }
       Text(buildRichParagraphAttributedText(for: paragraph, palette: palette))
         .tracking(kernPt)
@@ -1553,7 +1605,7 @@ public struct DocumentEditorDetailPaneView: View {
                 .font(
                   .system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced)
                 )
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                 .padding(.leading, CGFloat(paragraph.listLevel) * 14.0)
                 .padding(.top, 2)
             }
@@ -1585,7 +1637,7 @@ public struct DocumentEditorDetailPaneView: View {
           } label: {
             Label("링크", systemImage: "link")
               .font(.system(size: 9, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
           }
@@ -1638,7 +1690,7 @@ public struct DocumentEditorDetailPaneView: View {
       } else {
         Image(systemName: "photo.artframe")
           .font(.system(size: 16))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .frame(width: 44, height: 34)
       }
 
@@ -1666,7 +1718,7 @@ public struct DocumentEditorDetailPaneView: View {
         } label: {
           Text("배치 전환")
             .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+            .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -1800,7 +1852,7 @@ public struct DocumentEditorDetailPaneView: View {
       HStack(spacing: 8) {
         Image(systemName: "list.bullet.indent")
           .font(.system(size: 11, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
         Text("문서 윤곽 계층")
           .font(.system(size: 11, weight: .bold))
           .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -1853,7 +1905,7 @@ public struct DocumentEditorDetailPaneView: View {
             } label: {
               Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
                 .frame(width: 14, height: 14)
             }
             .buttonStyle(.plain)

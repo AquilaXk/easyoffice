@@ -6,13 +6,27 @@ import SwiftUI
 @MainActor
 final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
   var viewModel: WorkspaceViewModel?
+  private var pendingOpenURLs: [URL] = []
+
+  func bind(viewModel: WorkspaceViewModel) {
+    self.viewModel = viewModel
+    let queued = pendingOpenURLs
+    pendingOpenURLs.removeAll()
+    if !queued.isEmpty {
+      viewModel.handleIncomingOpenURLs(queued)
+    }
+    viewModel.markWorkspaceReadyAndDrainOpenURLs()
+  }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     if ProcessInfo.processInfo.environment["EO_HEADLESS_QUIT"] == "1" {
       return .terminateNow
     }
     guard let vm = viewModel else { return .terminateNow }
-    let modifiedTabs = vm.openTabs.filter(\.isModified)
+    if vm.requestApplicationTermination() {
+      return .terminateNow
+    }
+    let modifiedTabs = vm.dirtyOpenTabs
     guard !modifiedTabs.isEmpty else { return .terminateNow }
 
     let alert = NSAlert()
@@ -30,46 +44,38 @@ final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
       for tab in modifiedTabs {
         WorkspaceFileDialogPresenter.presentSavePanel(viewModel: vm, tabID: tab.id)
         if vm.openTabs.first(where: { $0.id == tab.id })?.isModified == true {
+          vm.cancelCloseTab()
           return .terminateCancel
         }
       }
+      vm.cancelCloseTab()
       return .terminateNow
     case .alertSecondButtonReturn:
+      vm.cancelCloseTab()
       return .terminateCancel
     default:
+      vm.cancelCloseTab()
       return .terminateNow
     }
   }
 
   func application(_ sender: NSApplication, openFiles filenames: [String]) {
+    let urls = filenames.map { URL(fileURLWithPath: $0) }
     guard let vm = viewModel else {
-      sender.reply(toOpenOrPrint: .failure)
+      pendingOpenURLs.append(contentsOf: urls)
+      sender.reply(toOpenOrPrint: .success)
       return
     }
-    var allSucceeded = true
-    for path in filenames {
-      let url = URL(fileURLWithPath: path)
-      do {
-        _ = try vm.importDocumentFromDisk(url: url)
-      } catch {
-        vm.lastErrorMessage =
-          (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        allSucceeded = false
-      }
-    }
-    sender.reply(toOpenOrPrint: allSucceeded ? .success : .failure)
+    vm.handleIncomingOpenURLs(urls)
+    sender.reply(toOpenOrPrint: vm.lastErrorMessage == nil ? .success : .failure)
   }
 
   func application(_ _: NSApplication, open urls: [URL]) {
-    guard let vm = viewModel else { return }
-    for url in urls {
-      do {
-        _ = try vm.importDocumentFromDisk(url: url)
-      } catch {
-        vm.lastErrorMessage =
-          (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-      }
+    guard let vm = viewModel else {
+      pendingOpenURLs.append(contentsOf: urls)
+      return
     }
+    vm.handleIncomingOpenURLs(urls)
   }
 }
 
@@ -77,6 +83,20 @@ final class EasyOfficeAppDelegate: NSObject, NSApplicationDelegate {
 struct EasyOfficeApplication: App {
   @NSApplicationDelegateAdaptor(EasyOfficeAppDelegate.self) private var appDelegate
   @State private var viewModel = WorkspaceViewModel()
+
+  @MainActor
+  private func syncActiveTextViewSelectionIfNeeded() {
+    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+      let coordinator = textView.delegate as? SelectableParagraphTextView.Coordinator
+    else { return }
+    let nsRange = textView.selectedRange()
+    let utf16Range: Range<Int>? =
+      nsRange.length > 0 ? (nsRange.location..<(nsRange.location + nsRange.length)) : nil
+    viewModel.updateSelectedParagraphSelection(
+      paragraphID: coordinator.parent.paragraph.id,
+      utf16Range: utf16Range
+    )
+  }
 
   var body: some Scene {
     WindowGroup("EasyOffice") {
@@ -86,16 +106,12 @@ struct EasyOfficeApplication: App {
           minHeight: EasyOfficeDesignTokens.LayoutMetrics.minimumWindowHeight
         )
         .onAppear {
-          appDelegate.viewModel = viewModel
           viewModel.restorePersistedRecentDocuments()
+          viewModel.restorePersistedCustomTemplates()
+          appDelegate.bind(viewModel: viewModel)
         }
         .onOpenURL { url in
-          do {
-            _ = try viewModel.importDocumentFromDisk(url: url)
-          } catch {
-            viewModel.lastErrorMessage =
-              (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-          }
+          viewModel.handleIncomingOpenURLs([url])
         }
     }
     .commands {
@@ -178,6 +194,7 @@ struct EasyOfficeApplication: App {
       }
       CommandMenu("서식 및 단축키") {
         Button("굵게 (⌘B)") {
+          syncActiveTextViewSelectionIfNeeded()
           if let m = viewModel.activeTab?.moduleKind {
             viewModel.executeRibbonCommand("\(m.rawValue)-home-bold")
           }
@@ -186,6 +203,7 @@ struct EasyOfficeApplication: App {
         .disabled(viewModel.activeTab == nil)
 
         Button("기울임 (⌘I)") {
+          syncActiveTextViewSelectionIfNeeded()
           if let m = viewModel.activeTab?.moduleKind {
             viewModel.executeRibbonCommand("\(m.rawValue)-home-italic")
           }
@@ -194,6 +212,7 @@ struct EasyOfficeApplication: App {
         .disabled(viewModel.activeTab == nil)
 
         Button("밑줄 (⌘U)") {
+          syncActiveTextViewSelectionIfNeeded()
           if let m = viewModel.activeTab?.moduleKind {
             viewModel.executeRibbonCommand("\(m.rawValue)-home-underline")
           }
@@ -202,6 +221,7 @@ struct EasyOfficeApplication: App {
         .disabled(viewModel.activeTab == nil)
 
         Button("책갈피·링크 삽입 (⌘K)") {
+          syncActiveTextViewSelectionIfNeeded()
           if let m = viewModel.activeTab?.moduleKind {
             viewModel.executeRibbonCommand("\(m.rawValue)-insert-link")
           }

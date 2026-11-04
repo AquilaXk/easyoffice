@@ -91,12 +91,15 @@ public func currentISO8601Timestamp() -> String {
 
 /// Inline styled text run within a paragraph block.
 public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
-  public let id: UUID
+  public var id: UUID
   public var text: String
   public var isBold: Bool
   public var isItalic: Bool
   public var isUnderlined: Bool
   public var isStrikethrough: Bool = false
+  public var isSuperscript: Bool = false
+  public var isSubscript: Bool = false
+  public var isCode: Bool = false
   public var fontName: String?
   public var fontSizePt: Double?
   public var foregroundHex: String?
@@ -105,8 +108,10 @@ public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
 
   public init(
     id: UUID = UUID(), text: String, isBold: Bool = false, isItalic: Bool = false,
-    isUnderlined: Bool = false, isStrikethrough: Bool = false, fontName: String? = nil,
-    fontSizePt: Double? = nil, foregroundHex: String? = nil, backgroundHex: String? = nil,
+    isUnderlined: Bool = false, isStrikethrough: Bool = false,
+    isSuperscript: Bool = false, isSubscript: Bool = false, isCode: Bool = false,
+    fontName: String? = nil, fontSizePt: Double? = nil,
+    foregroundHex: String? = nil, backgroundHex: String? = nil,
     linkURL: String? = nil
   ) {
     self.id = id
@@ -115,6 +120,9 @@ public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
     self.isItalic = isItalic
     self.isUnderlined = isUnderlined
     self.isStrikethrough = isStrikethrough
+    self.isSuperscript = isSuperscript
+    self.isSubscript = isSubscript
+    self.isCode = isCode
     self.fontName = fontName
     self.fontSizePt = fontSizePt
     self.foregroundHex = foregroundHex
@@ -135,8 +143,54 @@ public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
     )
   }
 
+  public func withText(_ newText: String) -> DocumentTextRun {
+    DocumentTextRun(
+      text: newText,
+      isBold: isBold,
+      isItalic: isItalic,
+      isUnderlined: isUnderlined,
+      isStrikethrough: isStrikethrough,
+      isSuperscript: isSuperscript,
+      isSubscript: isSubscript,
+      isCode: isCode,
+      fontName: fontName,
+      fontSizePt: fontSizePt,
+      foregroundHex: foregroundHex,
+      backgroundHex: backgroundHex,
+      linkURL: linkURL
+    )
+  }
+
+  public func hasSameStyle(as other: DocumentTextRun) -> Bool {
+    isBold == other.isBold
+      && isItalic == other.isItalic
+      && isUnderlined == other.isUnderlined
+      && isStrikethrough == other.isStrikethrough
+      && isSuperscript == other.isSuperscript
+      && isSubscript == other.isSubscript
+      && isCode == other.isCode
+      && fontName == other.fontName
+      && fontSizePt == other.fontSizePt
+      && foregroundHex == other.foregroundHex
+      && backgroundHex == other.backgroundHex
+      && linkURL == other.linkURL
+  }
+
+  public static func coalesceAdjacentRuns(_ runs: [DocumentTextRun]) -> [DocumentTextRun] {
+    var coalesced: [DocumentTextRun] = []
+    for run in runs where !run.text.isEmpty {
+      if let last = coalesced.last, last.hasSameStyle(as: run) {
+        coalesced[coalesced.count - 1].text += run.text
+      } else {
+        coalesced.append(run)
+      }
+    }
+    return coalesced
+  }
+
   private enum CodingKeys: String, CodingKey {
     case id, text, isBold, isItalic, isUnderlined, isStrikethrough
+    case isSuperscript, isSubscript, isCode
     case fontName, fontSizePt, foregroundHex, backgroundHex, linkURL
   }
 
@@ -148,6 +202,9 @@ public struct DocumentTextRun: Sendable, Codable, Equatable, Identifiable {
     self.isItalic = try c.decodeIfPresent(Bool.self, forKey: .isItalic) ?? false
     self.isUnderlined = try c.decodeIfPresent(Bool.self, forKey: .isUnderlined) ?? false
     self.isStrikethrough = try c.decodeIfPresent(Bool.self, forKey: .isStrikethrough) ?? false
+    self.isSuperscript = try c.decodeIfPresent(Bool.self, forKey: .isSuperscript) ?? false
+    self.isSubscript = try c.decodeIfPresent(Bool.self, forKey: .isSubscript) ?? false
+    self.isCode = try c.decodeIfPresent(Bool.self, forKey: .isCode) ?? false
     self.fontName = try c.decodeIfPresent(String.self, forKey: .fontName)
     self.fontSizePt = try c.decodeIfPresent(Double.self, forKey: .fontSizePt)
     self.foregroundHex = try c.decodeIfPresent(String.self, forKey: .foregroundHex)
@@ -272,6 +329,88 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
     ]
   }
 
+  /// Resolves a UTF-16 code unit offset into a safe extended grapheme cluster boundary `String.Index` (never splitting inside Surrogate pairs, Emoji ZWJ sequences, or NFD Hangul syllables).
+  public static func safeGraphemeClusterIndex(in string: String, utf16Offset: Int) -> String.Index {
+    let clamped = max(0, min(utf16Offset, string.utf16.count))
+    if clamped == 0 { return string.startIndex }
+    if clamped >= string.utf16.count { return string.endIndex }
+
+    let u16Idx = string.utf16.index(string.utf16.startIndex, offsetBy: clamped)
+    let clusterRange = string.rangeOfComposedCharacterSequence(at: u16Idx)
+    if u16Idx > clusterRange.lowerBound {
+      return clusterRange.upperBound
+    }
+    return clusterRange.lowerBound
+  }
+
+  /// Splits `text` and `runs` at a UTF-16 offset (optionally deleting an active selection first) while preserving inline run attributes and grapheme cluster boundaries.
+  public func splitContentAndRuns(
+    atUTF16Offset utf16Offset: Int,
+    deletingUTF16Length deleteLength: Int = 0
+  ) -> (
+    leftText: String,
+    rightText: String,
+    leftRuns: [DocumentTextRun],
+    rightRuns: [DocumentTextRun]
+  ) {
+    let splitStartIdx = Self.safeGraphemeClusterIndex(in: text, utf16Offset: utf16Offset)
+    let splitEndIdx =
+      deleteLength > 0
+      ? Self.safeGraphemeClusterIndex(in: text, utf16Offset: utf16Offset + deleteLength)
+      : splitStartIdx
+    let resolvedEndIdx = max(splitStartIdx, splitEndIdx)
+
+    let leftText = String(text[..<splitStartIdx])
+    let rightText = String(text[resolvedEndIdx...])
+
+    guard !runs.isEmpty, runs.map(\.text).joined() == text else {
+      return (leftText: leftText, rightText: rightText, leftRuns: [], rightRuns: [])
+    }
+
+    let startCharOffset = text.distance(from: text.startIndex, to: splitStartIdx)
+    let endCharOffset = text.distance(from: text.startIndex, to: resolvedEndIdx)
+
+    var leftRuns: [DocumentTextRun] = []
+    var rightRuns: [DocumentTextRun] = []
+    var currentCharOffset = 0
+
+    for run in runs {
+      let runCharLen = run.text.count
+      let runStart = currentCharOffset
+      let runEnd = currentCharOffset + runCharLen
+      currentCharOffset = runEnd
+      guard runCharLen > 0 else { continue }
+
+      if runStart < startCharOffset {
+        let prefixLen = min(runCharLen, startCharOffset - runStart)
+        if prefixLen > 0 {
+          let prefixEnd = run.text.index(run.text.startIndex, offsetBy: prefixLen)
+          var leftCopy = run
+          leftCopy.text = String(run.text[..<prefixEnd])
+          leftRuns.append(leftCopy)
+        }
+      }
+
+      if runEnd > endCharOffset {
+        let skipLen = max(0, endCharOffset - runStart)
+        if skipLen < runCharLen {
+          let suffixStart = run.text.index(run.text.startIndex, offsetBy: skipLen)
+          var rightCopy = run
+          rightCopy.id = UUID()
+          rightCopy.text = String(run.text[suffixStart...])
+          rightRuns.append(rightCopy)
+        }
+      }
+    }
+
+    return (
+      leftText: leftText,
+      rightText: rightText,
+      leftRuns: DocumentTextRun.coalesceAdjacentRuns(leftRuns),
+      rightRuns: DocumentTextRun.coalesceAdjacentRuns(rightRuns)
+    )
+  }
+
   /// Splits and updates inline `runs` over `range` within `text` with the specified character attributes.
   public mutating func applyRunFormatting(
     range: Range<String.Index>? = nil, isBold: Bool? = nil, isItalic: Bool? = nil,
@@ -308,14 +447,7 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
       if runStart < targetStart {
         let prefixLen = targetStart - runStart
         let prefixEndIdx = run.text.index(run.text.startIndex, offsetBy: prefixLen)
-        splitRuns.append(
-          DocumentTextRun(
-            text: String(run.text[run.text.startIndex..<prefixEndIdx]),
-            isBold: run.isBold, isItalic: run.isItalic, isUnderlined: run.isUnderlined,
-            isStrikethrough: run.isStrikethrough, fontName: run.fontName,
-            fontSizePt: run.fontSizePt,
-            foregroundHex: run.foregroundHex, backgroundHex: run.backgroundHex, linkURL: run.linkURL
-          ))
+        splitRuns.append(run.withText(String(run.text[run.text.startIndex..<prefixEndIdx])))
       }
 
       let overlapStart = max(runStart, targetStart) - runStart
@@ -328,6 +460,8 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
           isBold: isBold ?? run.isBold, isItalic: isItalic ?? run.isItalic,
           isUnderlined: isUnderlined ?? run.isUnderlined,
           isStrikethrough: isStrikethrough ?? run.isStrikethrough,
+          isSuperscript: run.isSuperscript, isSubscript: run.isSubscript,
+          isCode: run.isCode,
           fontName: run.fontName, fontSizePt: fontSizePt ?? run.fontSizePt,
           foregroundHex: foregroundHex ?? run.foregroundHex,
           backgroundHex: backgroundHex == "" ? nil : (backgroundHex ?? run.backgroundHex),
@@ -337,33 +471,11 @@ public struct ParagraphBlock: Sendable, Codable, Equatable, Identifiable {
       if runEnd > targetEnd {
         let suffixStart = targetEnd - runStart
         let suffixStartIdx = run.text.index(run.text.startIndex, offsetBy: suffixStart)
-        splitRuns.append(
-          DocumentTextRun(
-            text: String(run.text[suffixStartIdx..<run.text.endIndex]),
-            isBold: run.isBold, isItalic: run.isItalic, isUnderlined: run.isUnderlined,
-            isStrikethrough: run.isStrikethrough, fontName: run.fontName,
-            fontSizePt: run.fontSizePt,
-            foregroundHex: run.foregroundHex, backgroundHex: run.backgroundHex, linkURL: run.linkURL
-          ))
+        splitRuns.append(run.withText(String(run.text[suffixStartIdx..<run.text.endIndex])))
       }
     }
 
-    // Coalesce adjacent runs that share identical formatting attributes.
-    var coalesced: [DocumentTextRun] = []
-    for run in splitRuns where !run.text.isEmpty {
-      if let last = coalesced.last,
-        last.isBold == run.isBold, last.isItalic == run.isItalic,
-        last.isUnderlined == run.isUnderlined, last.isStrikethrough == run.isStrikethrough,
-        last.fontName == run.fontName, last.fontSizePt == run.fontSizePt,
-        last.foregroundHex == run.foregroundHex, last.backgroundHex == run.backgroundHex,
-        last.linkURL == run.linkURL
-      {
-        coalesced[coalesced.count - 1].text += run.text
-      } else {
-        coalesced.append(run)
-      }
-    }
-
+    let coalesced = DocumentTextRun.coalesceAdjacentRuns(splitRuns)
     self.runs = coalesced
     self.text = coalesced.map(\.text).joined()
   }

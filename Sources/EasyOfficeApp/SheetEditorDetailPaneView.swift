@@ -65,18 +65,18 @@ public struct SheetVectorChartCanvasView: View {
 
   private var seriesPaletteColors: [Color] {
     [
-      EasyOfficeDesignTokens.brand700.swiftUIColor,
-      EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor,
-      EasyOfficeDesignTokens.accentToken(for: .slide).swiftUIColor,
+      EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark).swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark).swiftUIColor,
       EasyOfficeDesignTokens.brand500.swiftUIColor,
-      EasyOfficeDesignTokens.statusInfo.swiftUIColor,
-      EasyOfficeDesignTokens.accentToken(for: .hwp).swiftUIColor,
+      EasyOfficeDesignTokens.statusInfoToken(isDark: palette.isDark).swiftUIColor,
+      EasyOfficeDesignTokens.accentToken(for: .hwp, isDark: palette.isDark).swiftUIColor,
     ]
   }
 
   public var body: some View {
     let points = primaryPoints
-    let primaryAccent = EasyOfficeDesignTokens.brand700.swiftUIColor
+    let primaryAccent = EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
 
     VStack(alignment: .leading, spacing: 8) {
       switch chartSpec.kind {
@@ -168,7 +168,7 @@ public struct SheetVectorChartCanvasView: View {
                 .lineLimit(1)
 
               Rectangle()
-                .fill(EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor)
+                .fill(EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark).swiftUIColor)
                 .frame(width: max(14.0, CGFloat(pt.normalizedRatio) * 160.0), height: 14)
 
               Text(Self.formatMetric(pt.value))
@@ -386,7 +386,9 @@ public struct SheetEditorDetailPaneView: View {
     palette: WorkspaceThemePalette,
     action: @escaping () -> Void
   ) -> some View {
-    let activeColor = accent ?? EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor
+    let activeColor =
+      accent
+      ?? EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark).swiftUIColor
     return Button(action: action) {
       Text(title)
         .font(.system(size: 11, weight: isActive ? .bold : .medium))
@@ -428,7 +430,8 @@ public struct SheetEditorDetailPaneView: View {
 
   public var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
-    let sheetAccent = EasyOfficeDesignTokens.accentToken(for: .sheet).swiftUIColor
+    let sheetAccent = EasyOfficeDesignTokens.accentToken(for: .sheet, isDark: palette.isDark)
+      .swiftUIColor
     let bounds = gridBounds(for: sheet)
     let maxRow = bounds.rows
     let maxCol = bounds.cols
@@ -587,7 +590,7 @@ public struct SheetEditorDetailPaneView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
             }
 
             if viewModel.isFirstColumnFrozen {
@@ -602,7 +605,7 @@ public struct SheetEditorDetailPaneView: View {
               .font(.system(size: 11, weight: .bold, design: .monospaced))
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
-              .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+              .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           }
           .padding(.horizontal, 10)
           .frame(minHeight: EasyOfficeDesignTokens.LayoutMetrics.formulaBarHeight)
@@ -804,7 +807,7 @@ public struct SheetEditorDetailPaneView: View {
                   .font(.system(size: 11, weight: .bold))
                   .lineLimit(1)
                   .fixedSize(horizontal: true, vertical: false)
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
 
                 FlatUnderlineTextField(
                   placeholder: "이름 (예: 상반기매출)",
@@ -1335,7 +1338,7 @@ public struct SheetEditorDetailPaneView: View {
                 Spacer()
                 Text(String(format: "%.0f", pivotSummary.grandTotal))
                   .font(.system(size: 11, weight: .bold, design: .monospaced))
-                  .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                  .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
               }
             }
             .padding(12)
@@ -1348,13 +1351,13 @@ public struct SheetEditorDetailPaneView: View {
                 HStack(spacing: 8) {
                   Image(systemName: "chart.bar.xaxis")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
 
                   Text(chartModel.title)
                     .font(.system(size: 12, weight: .bold))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
-                    .foregroundStyle(EasyOfficeDesignTokens.brand700.swiftUIColor)
+                    .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
 
                   Spacer(minLength: 4)
 

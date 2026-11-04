@@ -838,7 +838,7 @@
      - DOCX `<w:highlight w:val="..."/>`에는 ECMA-376 `ST_HighlightColor` 16색 열거형 이름만 기록하고 원본 16진수 색상은 `eo:highlightHex`에 보존하며, `word/_rels/document.xml.rels` 및 `<w:drawing>` 인라인 이미지 관계, XLSX `xl/_rels/workbook.xml.rels` 타깃 경로 해석과 `<rPh>` 후리가나 제거 및 빈 `<si/>` 보존, PPTX `ppt/slideMasters/slideMaster1.xml` 및 `ppt/slideLayouts/slideLayout1.xml` 필수 패키징을 수행합니다.
      - ODF 코덱은 OpenFormula 수식 정규화(`of:=SUM([.A1:.B2])`와 `=SUM(A1:B2)` 상호 변환), `<table:covered-table-cell>` 열 오프셋 전진, ODT·ODP `meta.xml` `<dc:title>` 보존, ODP `<presentation:notes>` 및 `<text:page-number>` 본문 혼입 차단을 적용하며, 첨부 미디어 파일명은 경로 구분자와 제어문자를 제거하고 UTF-8 `255`바이트 이내 고유 이름으로 정규화합니다.
   3. **HWP 5.0·Word97·PowerPoint97·BIFF8 XLS 및 ISO 32000-1 PDF 정합성 (`Sources/EasyOfficeCore/{HWP5DocumentCodec.swift,LegacyOLE2OfficeCodec.swift,LegacyBIFF8XLSCodec.swift,PDFBinarySerializer.swift,PDFEngine.swift}`)**
-     - HWP 5.0 코덱은 다중 섹션(`Section0..SectionN`) 읽기·쓰기와 표준 `HWPTAG_BEGIN(16)` 오프셋 기반 `HWPTAG_TABLE`(`tag 77`) + `HWPTAG_LIST_HEADER`(`tag 72`) + `HWPTAG_PARA_TEXT`(`tag 67`) (비표준 `61`/`56`/`51` 및 레거시 단일 레코드 표 읽기 하위 호환 포함), OpenFormula 따옴표 시트명(`['2026 [Q1]'.A1]`·`['Q1:Q2'.A1]`·3D 범위) 및 셀 경계 `of:=` 보존, PDF 본문·오버레이 비중첩 배치(`y = 445..626` 회피) 및 `\uXXXX`·`\v`·`beginbfrange` 배열 CMap, BIFF8 전 시트 `32,765` UTF-16 코드 유닛 한도 셀 트리 직렬화 및 `maxHWPTableRows = 4,096`(`EasyOfficeError.resourceBudgetExceeded`) 상한을 적용합니다.
+     - HWP 5.0 코덱은 다중 섹션(`Section0..SectionN`) 읽기·쓰기와 표준 `HWPTAG_BEGIN(16)` 오프셋 기반 `HWPTAG_TABLE`(`tag 77`) + `HWPTAG_LIST_HEADER`(`tag 72`) + `HWPTAG_PARA_TEXT`(`tag 67`) (비표준 `61`/`56`/`51` 및 레거시 단일 레코드 표 읽기 하위 호환 포함), OpenFormula 따옴표 시트명(`['2026 [Q1]'.A1]`·`['Q1:Q2'.A1]`·3D 범위) 및 셀 경계 `of:=` 보존, PDF 본문·오버레이 비중첩 배치(`y = 445..582` 회피) 및 `\uXXXX`·`\v`·`beginbfrange` 배열 CMap, BIFF8 전 시트 `32,765` UTF-16 코드 유닛 한도 셀 트리 직렬화 및 `maxHWPTableRows = 4,096`(`EasyOfficeError.resourceBudgetExceeded`) 상한을 적용합니다.
      - Word97 바이너리 코덱은 `1Table`/`0Table`의 CLX(`Prc` + `Pcdt` `PlcfPcd`) 조각 테이블(압축 8비트 Latin-1 및 16비트 UTF-16LE 혼합 조각)을 지원하고, PowerPoint97 코덱은 `Slide`(`0x03EE`) 컨테이너와 `SlidePersistAtom`(`0x03F3`) 경계를 모두 인식합니다.
      - BIFF8 XLS 코덱은 `maxBIFF8Row = 65,535`, `maxBIFF8Col = 255`, `maxBIFF8RecordPayload = 8,224` 상한과 `FONT`·`XF`·`BOUNDSHEET`·`SST`+`CONTINUE`·`LABELSST` 레코드 분할·재조립 및 `fHighByte == 0` Latin-1 디코딩을 수행합니다.
      - PDF 코덱은 리터럴·16진수 문자열 외부의 `/Encrypt` 이름 토큰만 감지하고, `/F2`용 `/ToUnicode` CMap과 비중첩 Y 대역(주석·양식 필드·서명 영역), 유한 양수 `lineWidth` 가드, 트레일러 모델과 실제 페이지·주석·양식·리댁션 상태의 정본 일치 검증 및 텍스트 스트림이 없는 비지원 외부 PDF 거부(`EasyOfficeError.unsupportedFormat`)를 수행합니다.
@@ -853,4 +853,34 @@
   - PDF 전체 바이트에서 단순 부분 문자열 검색으로 `/Encrypt`를 판정하는 방식은 본문 텍스트에 `/Encrypt` 단어가 포함된 정상 문서를 암호화 문서로 오탐하므로 문자열 리터럴 외부 토큰 파서로 교체.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `swift build`, `swift test`, `Tests/EasyOfficeTests/ContainerOOXMLODFLegacyPDFInteropTests.swift`
 - **Revisit when** PDF 2.0(ISO 32000-2) 확장 객체 스트림(`ObjStm`) 압축 파서 또는 BIFF12(`.xlsb`) 바이너리 워크북 코덱을 추가할 때.
+
+### 40. macOS 워크스페이스 비파괴 파일 수명주기, 자소 안전 문단 분할·병합, 비동기 일괄 변환, WCAG 2.1 AA 명암비 및 1,000줄 미만 모듈 분할 정책 (2026-11-01)
+
+- **Status** Implemented
+- **Decision (`PD-065`)**
+  1. **비파괴 외부 파일 저장, 동일 모듈 손실 변환 Undo 보존 및 지연 최근 문서 복원 (`WorkspaceHub.swift`, `WorkspaceHubPersistenceAndBatch.swift`, `WorkspaceTabAndSessionModels.swift`, `WorkspaceViews.swift`)**
+     - 디스크에서 가져온 외부 문서(`isLosslessNativeOrigin == false`)에서 `⌘S`(`saveTabOverwriteIfBackedByFile`)를 실행할 때는 즉시 원본 파일을 덮어쓰지 않고 `pendingLossyOverwriteConfirmationTabID`를 설정해 덮어쓰기 확인 대화상자 또는 다른 이름으로 저장으로 분기합니다. 사용자가 덮어쓰기를 승인하면 기존 파일 바이트를 `<원본>.bak`으로 먼저 백업한 뒤 저장하고 `isLosslessNativeOrigin = true`로 전환합니다.
+     - `saveTabToDisk`에서 동일 모듈 내 손실 포맷 변환(`.docx` -> `.txt`/`.md`, `.xlsx` -> `.csv` 등)으로 활성 탭 페이로드가 교체될 때는 교체 직전에 `recordUndoSnapshot(for:)`을 기록하여 `⌘Z` 한 번으로 서식과 다중 시트 구조를 복원할 수 있게 합니다.
+     - `restorePersistedRecentDocuments`는 앱 시작 시 디스크 전체 파일을 즉시 디코딩하지 않고 경량 메타데이터 플레이스홀더(`isMetadataOnlyPlaceholder = true`)만 복원하며, 실제 열람 시점(`activateOrReopenRecentTab`)에 디코딩이 실패하면 빈 탭을 열거나 `fileURL`을 연결하지 않고 실패 사유를 `lastErrorMessage`에 기록한 뒤 해당 항목을 `isUnreadable = true`로 표시합니다.
+  2. **유니코드 자소 클러스터 안전 문단 분할·병합, 5대 앵커 재연결 및 원고지 비파괴 편집 (`DocumentEngine.swift`, `WorkspaceHubParagraphAndSlideMutations.swift`, `EditorDetailPanes.swift`)**
+     - `ParagraphBlock.safeGraphemeClusterIndex`와 `splitContentAndRuns`는 UTF-16 오프셋을 `rangeOfComposedCharacterSequences` 경계로 정렬하여 한글 자모(NFD)나 다중 스칼라 이모지 ZWJ 시퀀스 내부가 깨지지 않도록 보호하고, 활성 선택 범위(`selectedParagraphUTF16Range`)가 있을 때 `Enter` 입력 시 선택 구간을 삭제하면서 양쪽 `DocumentTextRun` 서식(`isBold`, `isItalic`, `isUnderlined`, `isStrikethrough`, `isSuperscript`, `isSubscript`, `isCode`, `fontName`, `fontSizePt`, `foregroundHex`, `backgroundHex`, `linkURL`)을 보존합니다.
+     - `mergeParagraphWithPrevious`는 인접 동일 스타일 런을 `DocumentTextRun.coalesceAdjacentRuns`로 병합하고, 두 번째 문단에 연결된 `images`, `footnotes`, `comments`, `revisions`, `bookmarks` 5대 앵커를 모두 앞 문단 ID로 재연결하며, `pendingFocusParagraphID`와 `pendingCaretUTF16Offset`으로 `NSTextView` 포커스와 캐럿 위치를 정확히 인계합니다.
+     - `updateActiveDocumentManuscriptFullText`는 공통 접두·접미 문단과 동일 텍스트 중간 문단의 ID·스타일·런·앵커를 그대로 보존하고 변경된 문단만 갱신합니다.
+  3. **일괄 변환 전체 경로 중복 제거, 파일명 충돌 회피, 쓰기 실패 집계 및 비동기 실행 (`SmartProductivityTools.swift`, `WorkspaceHubPDFAndFindActions.swift`, `HomeHubAndSmartViews.swift`)**
+     - `enqueueFilesFromDiskIntoBatchConversion`은 파일명이 같더라도 서로 다른 폴더에 위치한 파일들이 누락되지 않도록 `standardizedFileURL.path` 기준으로 중복을 제거하며, 큐 변경·초기화 시 이전 `lastBatchConversionReport`를 즉시 무효화합니다.
+     - `DocumentConversionOrchestrator.executeBatch` 및 `executeBatchAsync`는 출력 디렉터리 내 동일 파일명 충돌 시 `_2`, `_3` 접미사를 부여(`disambiguateOutputFileName`)하고, 디스크 쓰기(`write(to:options:.atomic)`)가 실패한 작업은 `succeededResults`에서 제외하고 `failedErrors`에 기록합니다.
+     - 문서 비교(`compareOpenDocumentTabs` 및 `SmartDocumentAssistantHubView`)는 최소 2개 이상의 문서 탭이 열려 있을 때만 비교를 수행하며, `2,048`문단 상한 초과 시 `isTruncated = true`와 `truncatedAtParagraphLimit = 2_048`을 명시합니다.
+  4. **콜드 런치 URL 큐, 다중 미저장 탭 종료 확인, 시트 경계 붙여넣기 보호, 리본 의미 분리 및 WCAG 2.1 AA 명암비 (`EasyOfficeApp.swift`, `WorkspaceHub.swift`, `WorkspaceRibbonModuleHandlers.swift`, `DesignTokens.swift`, `DocumentSubmodelsAndNotes.swift`)**
+     - `EasyOfficeAppDelegate`와 `WorkspaceViewModel`은 워크스페이스 준비 전 수신된 파일 열기 요청을 `pendingLaunchURLs`에 큐잉하고, 앱 종료 시 모든 미저장 탭을 순회 확인하며, 시트 우하단 경계(`XFD1048576`) 바깥으로 넘어가는 TSV 붙여넣기 셀은 마지막 셀에 덮어쓰지 않고 건너뛴 뒤 경고를 표시합니다.
+     - PDF 리본의 용지 크기(`pdfPaperSizePreset`)와 다단(`pdfPageColumnCount`) 명령을 배율(`zoomPercent`) 및 열람 전용 모드(`workspaceViewMode`)와 분리하고, 슬라이드 개체 삭제(`deleteActiveSlideElement`)는 명시적으로 선택된 개체(`selectedSlideElementID != nil`)가 있을 때만 동작하며, `TableCellSpan` 역직렬화 시 `addingReportingOverflow`로 정수 오버플로를 차단합니다.
+     - `Sources/EasyOfficeCore/*.swift` 전체 34개 파일을 모두 1,000줄 미만으로 분할하고 `scripts/check-repo-hygiene.mjs`로 강제합니다.
+- **Why** 외부 원본 파일의 의도치 않은 덮어쓰기나 손실 변환, 문단 분할·병합 시 인라인 서식과 주석·책갈피 유실, 일괄 변환 시 동명 파일 누락과 쓰기 오류 은폐, 다크·라이트 테마 저대비 문제를 근본 원인으로 제거하기 위함입니다.
+- **Trade-offs**
+  1. 외부 디스크 문서를 최초 `⌘S`로 덮어쓸 때 1회 확인 단계와 `.bak` 백업 파일이 생성되나, 세션 내 저장이 확인된 이후(`isLosslessNativeOrigin == true`)에는 추가 확인 없이 즉시 저장됩니다.
+  2. 최근 문서 목록을 시작 시점에 메타데이터 플레이스홀더로 복원하므로 첫 클릭 시점에 디스크 I/O가 수행되나, 앱 초기 구동 속도를 높이고 손상된 파일이 시작 시점에 빈 탭으로 열리는 문제를 원천 차단합니다.
+- **Alternatives rejected**
+  - 최근 문서 열기 실패 시 빈 문서를 생성해 원본 `fileURL`을 연결하는 방식은 이후 저장 시 원본 파일을 빈 문서로 덮어쓰는 데이터 손실을 유발하므로 기각.
+  - 단일 문서 탭만 열려 있을 때 마지막 문단을 제거한 가짜 기준본과 비교하는 방식은 사용자에게 허위 변경 통계를 보여주므로 기각.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `swift build`, `swift test --filter WorkspaceLifecycleEditingBatchA11yTests`, `swift test`
+- **Revisit when** 실시간 파일시스템 이벤트(`FSEvents`) 기반 외부 파일 변경 자동 감지 알림을 추가할 때.
 

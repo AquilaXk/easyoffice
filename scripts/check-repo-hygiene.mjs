@@ -343,10 +343,10 @@ for (const file of files) {
         foundSafeIntStrictBound = true;
       }
     }
-    if (rel.startsWith("Sources/EasyOfficeCore/Sheet")) {
+    if (rel.startsWith("Sources/EasyOfficeCore/") && rel.endsWith(".swift")) {
       const lineCount = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
       if (lineCount >= 1000) {
-        errors.push(`Swift sheet module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
+        errors.push(`Swift core module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
       }
     }
     if (
@@ -354,7 +354,7 @@ for (const file of files) {
         rel === "Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift" ||
         rel === "Sources/EasyOfficeCore/HWP5DocumentCodec.swift" ||
         rel === "Sources/EasyOfficeCore/LegacyBIFF8XLSCodec.swift" ||
-        rel === "Sources/EasyOfficeCore/LegacyBinaryDocPptCodecs.swift") &&
+        rel === "Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift") &&
       (text.includes("abs(Int.min)") ||
         (/\bInt\(Double\(/.test(text) && !text.includes("maxRatio: Double = 100.0")))
     ) {
