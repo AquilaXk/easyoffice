@@ -693,4 +693,46 @@ extension WorkspaceViewModel {
       secondaryAscending: secondaryAscending
     )
   }
+
+  public func performFindNext() {
+    let trimmedSearch = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedFind = findQueryText.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !isShowingHomeHub {
+      if !trimmedSearch.isEmpty && (hasPendingTopSearchQuery || trimmedFind.isEmpty) {
+        findQueryText = searchQuery
+      }
+      hasPendingTopSearchQuery = false
+      if !findQueryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        isFindReplaceBarVisible = true
+      }
+    }
+    findNextMatch()
+  }
+
+  public func selectDocumentTable(index: Int) {
+    selectedDocumentTableIndex = max(0, index)
+    selectedDocumentTableCell = nil
+  }
+
+  public func selectDocumentTableCell(tableIndex: Int, row: Int, column: Int) {
+    selectedDocumentTableIndex = max(0, tableIndex)
+    selectedDocumentTableCell = (row: max(0, row), column: max(0, column))
+  }
+
+  internal func resolvedFormulaTargetColumn(for table: DocumentTableBlock) -> Int {
+    let colCount = max(1, table.columnCount)
+    let rawCol = selectedDocumentTableCell?.column ?? (colCount - 1)
+    return colCount > 1 && rawCol == 0 ? (colCount - 1) : min(max(0, rawCol), colCount - 1)
+  }
+
+  public func removeRecentDocumentRecord(id: UUID) {
+    if openTabs.contains(where: { $0.id == id }) {
+      closeTab(id: id)
+    } else {
+      recentDocumentRecords.removeAll { $0.id == id }
+      recentlyClosedTabs.removeAll { $0.id == id }
+      persistRecentDocumentMetadata()
+      lastExecutedCommandSummary = "최근 문서 목록에서 항목 제거 완료"
+    }
+  }
 }

@@ -39,14 +39,14 @@
       </header>
 
       <nav class="ribbon-bar" aria-label="컨텍스트 리본 탭">
-        <div class="ribbon-tabs" id="ribbon-tabs">
-          <button class="ribbon-btn active" data-category="home">홈</button>
-          <button class="ribbon-btn" data-category="insert">삽입</button>
-          <button class="ribbon-btn" data-category="layout">레이아웃</button>
-          <button class="ribbon-btn" data-category="formulasAndData">수식·데이터</button>
-          <button class="ribbon-btn" data-category="moduleSpecific">모듈 전용</button>
-          <button class="ribbon-btn" data-category="review">검토</button>
-          <button class="ribbon-btn" data-category="view">보기</button>
+        <div class="ribbon-tabs" id="ribbon-tabs" role="tablist" aria-label="리본 카테고리 탭">
+          <button class="ribbon-btn active" role="tab" aria-selected="true" data-category="home">홈</button>
+          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="insert">삽입</button>
+          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="layout">레이아웃</button>
+          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="formulasAndData">수식·데이터</button>
+          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="moduleSpecific">모듈 전용</button>
+          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="review">검토</button>
+          <button class="ribbon-btn" role="tab" aria-selected="false" data-category="view">보기</button>
         </div>
         <div class="ribbon-meta">
           <span id="contextual-tool-badge" class="ctx-badge">표·개체 도구</span>
@@ -316,8 +316,8 @@
                 </tbody>
               </table>
               <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
-                <button class="sheet-tab-btn active" data-sheet-tab="Sheet1">2026 분기별 실적</button>
-                <button class="sheet-tab-btn" data-sheet-tab="Sheet2">부문별 요약</button>
+                <button class="sheet-tab-btn active" role="tab" aria-selected="true" data-sheet-tab="Sheet1">2026 분기별 실적</button>
+                <button class="sheet-tab-btn" role="tab" aria-selected="false" data-sheet-tab="Sheet2">부문별 요약</button>
                 <button id="btn-add-sheet-tab" class="sheet-tab-btn">+ 시트 추가</button>
               </div>
             </div>
@@ -505,6 +505,11 @@
         <span id="status-module">모듈: 문서 (DOCX)</span>
         <span id="status-format-spec">포맷: DOCX 문서</span>
         <span id="status-sheet-agg">선택 집계 · 합계 1,300 · 평균 650 · 개수 2 · 최대 1,000</span>
+        <span class="statusbar-zoom-group" aria-label="화면 배율 조절">
+          <button id="btn-zoom-out" class="statusbar-zoom-btn" type="button" title="배율 축소">−</button>
+          <span id="status-zoom-label">100%</span>
+          <button id="btn-zoom-in" class="statusbar-zoom-btn" type="button" title="배율 확대">+</button>
+        </span>
         <span id="ime-badge">IME: 완료</span>
         <span id="status-engine">엔진: 연결 대기</span>
         <span id="status-command-feedback">준비 완료</span>

@@ -49,9 +49,15 @@
     const workspaceUndoStack = [];
     const workspaceRedoStack = [];
     let ribbonRenderSeq = 0;
+    let historyMutationEpoch = 0;
+
+    function getHistoryMutationEpoch() {
+      return historyMutationEpoch;
+    }
 
     function pushRawUndoSnapshot(snap) {
       if (!snap) return;
+      historyMutationEpoch += 1;
       workspaceUndoStack.push(snap);
       if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
         workspaceUndoStack.shift();
@@ -169,6 +175,12 @@
       setActiveRibbonCategory(categoryKey || "home");
       const catKey = getActiveRibbonCategory();
       localRibbonState.activeCategory = catKey;
+      document.querySelectorAll("#ribbon-tabs .ribbon-btn").forEach((b) => {
+        const isAct = b.dataset.category === catKey;
+        b.classList.toggle("active", isAct);
+        b.setAttribute("role", "tab");
+        b.setAttribute("aria-selected", isAct ? "true" : "false");
+      });
       const strip = document.getElementById("ribbon-tool-strip");
       if (!strip) return;
       const curMod = getActiveModule();
@@ -199,6 +211,7 @@
     }
 
     async function activatePaneInternal(mod, skipTabBufferSync) {
+      historyMutationEpoch += 1;
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
       const curMod = getActiveModule();
@@ -234,7 +247,10 @@
         btn.classList.toggle("active", btn.dataset.module === mod);
       });
       document.querySelectorAll(".tab-pill").forEach((tab) => {
-        tab.classList.toggle("active", tab.dataset.module === mod);
+        const isAct = tab.dataset.module === mod;
+        tab.classList.toggle("active", isAct);
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", isAct ? "true" : "false");
       });
       workspacePanels.renderModuleOutline(mod);
       await renderRibbonCategoryTools(getActiveRibbonCategory()).catch(() => {});
@@ -322,6 +338,7 @@
             if (!renderedKeys.has(shKey) && addSheetBtn) {
               const newTab = document.createElement("button");
               newTab.className = "sheet-tab-btn";
+              newTab.setAttribute("role", "tab");
               newTab.dataset.sheetTab = shKey;
               const numMatch = /^Sheet(\d+)$/.exec(shKey);
               newTab.textContent = numMatch ? "시트 " + numMatch[1] : shKey;
@@ -329,7 +346,10 @@
             }
           });
           sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
-            btn.classList.toggle("active", btn.dataset.sheetTab === snap.activeSheetName);
+            const isAct = btn.dataset.sheetTab === snap.activeSheetName;
+            btn.classList.toggle("active", isAct);
+            btn.setAttribute("role", "tab");
+            btn.setAttribute("aria-selected", isAct ? "true" : "false");
           });
         }
         sheetController.restoreDomSheetCells(snap.activeSheetName);
@@ -356,6 +376,7 @@
           if (fb) fb.textContent = emptyMsg;
           return;
         }
+        historyMutationEpoch += 1;
         const targetSnap = sourceStack[sourceStack.length - 1];
         const currentSnap = captureWorkspaceSnapshot(Boolean(targetSnap.isRibbon));
         let evaluatedSheets = null;
@@ -462,16 +483,23 @@
         return true;
       }
       if (
-        cmdId.endsWith("-insert-chart") ||
-        cmdId.endsWith("-insert-shape") ||
-        cmdId.endsWith("-insert-link") ||
-        cmdId.endsWith("-data-fn-browser") ||
-        cmdId.endsWith("-review-comment") ||
         cmdId === "doc-mod-toc" ||
         cmdId === "doc-mod-footnote" ||
         cmdId === "doc-mod-mailmerge" ||
         cmdId === "hwp-mod-header" ||
         cmdId === "hwp-mod-field"
+      ) {
+        workspacePanels.applyDocModuleSpecificDomEffect(cmdId, docEditor, execRes);
+        workspacePanels.computeSmartStats();
+        workspacePanels.renderModuleOutline(getActiveModule());
+        return true;
+      }
+      if (
+        cmdId.endsWith("-insert-chart") ||
+        cmdId.endsWith("-insert-shape") ||
+        cmdId.endsWith("-insert-link") ||
+        cmdId.endsWith("-data-fn-browser") ||
+        cmdId.endsWith("-review-comment")
       ) {
         const p = document.createElement("p");
         p.textContent = "[" + (execRes?.summary || cmdId) + "]";
@@ -528,7 +556,9 @@
         effectiveModule !== "DOC" &&
         effectiveModule !== "HWP"
       ) {
-        const formulaPrep = await sheetController.prepareFormulaBarEvaluation();
+        const formulaPrep = await sheetController.prepareFormulaBarEvaluation({
+          autoSum: cmdId === "sheet-data-autosum",
+        });
         return { kind: "sheetFormula", formulaPrep };
       }
       return null;
@@ -558,6 +588,8 @@
         }
         const stage = document.querySelector(".canvas-stage");
         if (stage) stage.style.zoom = zoom + "%";
+        const zoomLabel = document.getElementById("status-zoom-label");
+        if (zoomLabel) zoomLabel.textContent = zoom + "%";
         return;
       }
       if (cmdId.endsWith("-view-ribbon")) {
@@ -580,6 +612,7 @@
               ? Boolean(execRes.splitViewEnabled)
               : stage.dataset.splitView !== "true";
           stage.dataset.splitView = nextSplit ? "true" : "false";
+          workspacePanels.syncSplitComparePane(stage);
         }
         return;
       }
@@ -628,6 +661,7 @@
       if (cmdId.startsWith("sheet-")) {
         const cellRef = getActiveSheetCellRef();
         const activeTd = document.querySelector('#pane-sheet td[data-cell="' + cellRef + '"]');
+        const out = document.getElementById("sheet-eval-result");
         if (cmdId === "sheet-home-bold" && activeTd) {
           const boldOn = activeTd.style.fontWeight !== "600";
           activeTd.style.fontWeight = boldOn ? "600" : "";
@@ -650,9 +684,23 @@
           sheetController.commitPreparedFormulaBarEvaluation(preparedEffect?.formulaPrep, null);
         } else if (cmdId === "sheet-insert-table") {
           sheetController.appendSheetRow();
-        } else {
-          const out = document.getElementById("sheet-eval-result");
+        } else if (cmdId === "sheet-data-sort") {
+          sheetController.sortActiveSheetByColumnB();
           if (out && execRes?.summary) out.textContent = execRes.summary;
+        } else if (cmdId === "sheet-mod-pivot") {
+          sheetController.applySheetPivotOrChartSummary("pivot", execRes);
+        } else if (cmdId === "sheet-mod-chart" || cmdId === "sheet-insert-chart") {
+          sheetController.applySheetPivotOrChartSummary("chart", execRes);
+        } else if (cmdId === "sheet-mod-condfmt") {
+          const condOn = !document.querySelector("#pane-sheet td.condfmt-high");
+          sheetController.toggleSheetConditionalFormatting(condOn);
+          if (out && execRes?.summary) out.textContent = execRes.summary;
+        } else if (cmdId === "sheet-mod-freeze") {
+          const freezeOn = !document.querySelector("#pane-sheet thead.frozen-header");
+          sheetController.toggleSheetFreezePanes(freezeOn);
+          if (out && execRes?.summary) out.textContent = execRes.summary;
+        } else if (out && execRes?.summary) {
+          out.textContent = execRes.summary;
         }
         return;
       }
@@ -687,7 +735,7 @@
           cmdId === "slide-insert-chart" ||
           cmdId === "slide-insert-shape"
         ) {
-          workspacePanels.appendNewSlideDeckItem();
+          workspacePanels.insertSlideStageObject(cmdId, execRes);
         } else if (
           cmdId === "slide-insert-link" ||
           cmdId === "slide-data-autosum" ||
@@ -699,11 +747,7 @@
             const prefix = curSlide.lower ? curSlide.lower + " · " : "";
             curSlide.lower = prefix + tag;
           }
-          if (lowerZone && curSlide) {
-            const p = document.createElement("p");
-            p.textContent = curSlide.lower;
-            lowerZone.replaceChildren(p);
-          }
+          workspacePanels.renderSlideDeck(curIdx);
         } else if (cmdId === "slide-data-sort" && curSlide && curSlide.lower) {
           const asc = Boolean(execRes?.sortAscending);
           const parts = curSlide.lower
@@ -714,6 +758,11 @@
           curSlide.lower = parts.join(" · ");
           workspacePanels.renderSlideDeck(curIdx);
         } else if (cmdId === "slide-mod-presenter") {
+          if (stageBox) {
+            const nextPres = stageBox.dataset.presenterMode !== "true";
+            stageBox.dataset.presenterMode = nextPres ? "true" : "false";
+            workspacePanels.syncActiveSlideDomStylesToDeck();
+          }
           document.getElementById("btn-slide-laser")?.click();
         } else if (cmdId === "slide-mod-transition") {
           const sel = document.getElementById("slide-transition-select");
@@ -769,6 +818,27 @@
         await activatePaneInternal("CONV", false);
         return;
       }
+      if (cmdId === "pdf-mod-highlight") {
+        const card = document.getElementById("pdf-page-card");
+        if (card) {
+          const existing = card.querySelector(".pdf-highlight-badge");
+          const hl = existing || document.createElement("span");
+          hl.className = "pdf-highlight-badge";
+          hl.dataset.pdfHighlight = "true";
+          hl.textContent = execRes?.summary || "형광펜 주석 강조 적용";
+          if (!existing) card.appendChild(hl);
+        }
+      } else if (cmdId === "pdf-mod-splitmerge") {
+        const card = document.getElementById("pdf-page-card");
+        if (card) {
+          const existing = card.querySelector(".pdf-splitmerge-badge");
+          const sm = existing || document.createElement("span");
+          sm.className = "pdf-splitmerge-badge";
+          sm.dataset.pdfSplitmerge = "true";
+          sm.textContent = execRes?.summary || "페이지 분할·병합 준비 완료";
+          if (!existing) card.appendChild(sm);
+        }
+      }
       if (cmdId.startsWith("pdf-")) {
         workspacePanels.applyPdfStudioFormState();
       }
@@ -805,10 +875,12 @@
 
     return {
       enqueueWorkspaceHistoryOp,
+      getHistoryMutationEpoch,
       pushRawUndoSnapshot,
       commitDeferredUndoSnapshot,
       captureWorkspaceSnapshot,
       pushUndoSnapshot,
+      pushRibbonUndoSnapshot: pushUndoSnapshot,
       restoreWorkspaceSnapshot,
       performWorkspaceUndo,
       performWorkspaceRedo,

@@ -217,58 +217,71 @@ extension WorkspaceViewModel {
   }
 
   public func mergeActiveDocumentTableCells(
-    tableIndex: Int = 0,
-    row: Int = 0,
-    column: Int = 0,
+    tableIndex: Int? = nil,
+    row: Int? = nil,
+    column: Int? = nil,
     rowSpan: Int = 1,
     columnSpan: Int = 2
   ) {
     guard let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload,
-      doc.tables.indices.contains(tableIndex)
+      !doc.tables.isEmpty
     else { return }
+    let resolvedIdx = min(max(0, tableIndex ?? selectedDocumentTableIndex), doc.tables.count - 1)
+    let targetRow = row ?? selectedDocumentTableCell?.row ?? 0
+    let targetCol = column ?? selectedDocumentTableCell?.column ?? 0
     recordUndoSnapshot(for: activeTabID)
-    doc.tables[tableIndex].mergeCells(
-      row: row,
-      column: column,
+    doc.tables[resolvedIdx].mergeCells(
+      row: targetRow,
+      column: targetCol,
       rowSpan: rowSpan,
       columnSpan: columnSpan
     )
     openTabs[idx].payload = .document(doc)
     openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "표 셀 병합 완료 (\(row + 1)행 \(column + 1)열, \(rowSpan)×\(columnSpan))"
+    lastExecutedCommandSummary =
+      "표 셀 병합 완료 (\(targetRow + 1)행 \(targetCol + 1)열, \(rowSpan)×\(columnSpan))"
   }
 
   public func splitActiveDocumentTableCell(
-    tableIndex: Int = 0,
+    tableIndex: Int? = nil,
     row: Int? = nil,
     column: Int? = nil
   ) {
     guard let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload,
-      doc.tables.indices.contains(tableIndex)
+      !doc.tables.isEmpty
     else { return }
+    let resolvedIdx = min(max(0, tableIndex ?? selectedDocumentTableIndex), doc.tables.count - 1)
     recordUndoSnapshot(for: activeTabID)
     if let r = row, let c = column {
-      doc.tables[tableIndex].unmergeCell(row: r, column: c)
-    } else if let lastSpan = doc.tables[tableIndex].cellSpans.last {
-      doc.tables[tableIndex].unmergeCell(row: lastSpan.row, column: lastSpan.column)
+      doc.tables[resolvedIdx].unmergeCell(row: r, column: c)
+    } else if let cell = selectedDocumentTableCell,
+      doc.tables[resolvedIdx].cellSpans.contains(where: {
+        cell.row >= $0.rowIndex && cell.row < ($0.rowIndex + $0.rowSpan)
+          && cell.column >= $0.columnIndex && cell.column < ($0.columnIndex + $0.columnSpan)
+      })
+    {
+      doc.tables[resolvedIdx].unmergeCell(row: cell.row, column: cell.column)
+    } else if let lastSpan = doc.tables[resolvedIdx].cellSpans.last {
+      doc.tables[resolvedIdx].unmergeCell(row: lastSpan.row, column: lastSpan.column)
     }
     openTabs[idx].payload = .document(doc)
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = "표 병합 셀 분할 완료"
   }
 
-  public func setActiveDocumentTableBorderStyle(_ style: TableBorderStyle, tableIndex: Int = 0) {
+  public func setActiveDocumentTableBorderStyle(_ style: TableBorderStyle, tableIndex: Int? = nil) {
     guard let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload,
-      doc.tables.indices.contains(tableIndex)
+      !doc.tables.isEmpty
     else { return }
+    let resolvedIdx = min(max(0, tableIndex ?? selectedDocumentTableIndex), doc.tables.count - 1)
     recordUndoSnapshot(for: activeTabID)
-    doc.tables[tableIndex].borderStyle = style
+    doc.tables[resolvedIdx].borderStyle = style
     openTabs[idx].payload = .document(doc)
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = "표 테두리 스타일 변경: \(style.rawValue)"
@@ -372,9 +385,11 @@ extension WorkspaceViewModel {
       case .document(var doc) = openTabs[idx].payload,
       let tIdx = doc.tables.firstIndex(where: { $0.id == tableID }),
       doc.tables[tIdx].rows.indices.contains(row),
-      doc.tables[tIdx].rows[row].indices.contains(column),
-      doc.tables[tIdx].rows[row][column] != newValue
+      doc.tables[tIdx].rows[row].indices.contains(column)
     else { return }
+    selectedDocumentTableIndex = tIdx
+    selectedDocumentTableCell = (row: row, column: column)
+    guard doc.tables[tIdx].rows[row][column] != newValue else { return }
     recordUndoSnapshot(
       for: activeTabID,
       coalescingTargetKey: "table-\(activeTabID.uuidString)-\(tableID.uuidString)-\(row)-\(column)"
@@ -869,51 +884,61 @@ extension WorkspaceViewModel {
   }
 
   private func mutateActiveDocumentTable(
-    tableIndex: Int,
+    tableIndex: Int? = nil,
     summary: (DocumentTableBlock) -> String,
     mutation: (inout DocumentTableBlock) -> Void
   ) {
     guard let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload,
-      doc.tables.indices.contains(tableIndex)
+      !doc.tables.isEmpty
     else { return }
+    let resolvedIndex = min(max(0, tableIndex ?? selectedDocumentTableIndex), doc.tables.count - 1)
+    selectedDocumentTableIndex = resolvedIndex
     recordUndoSnapshot(for: activeTabID)
-    mutation(&doc.tables[tableIndex])
+    mutation(&doc.tables[resolvedIndex])
+    if let cell = selectedDocumentTableCell, doc.tables[resolvedIndex].rowCount > 0,
+      doc.tables[resolvedIndex].columnCount > 0
+    {
+      selectedDocumentTableCell = (
+        row: min(max(0, cell.row), doc.tables[resolvedIndex].rowCount - 1),
+        column: min(max(0, cell.column), doc.tables[resolvedIndex].columnCount - 1)
+      )
+    }
     openTabs[idx].payload = .document(doc)
     openTabs[idx].isModified = true
-    lastExecutedCommandSummary = summary(doc.tables[tableIndex])
+    lastExecutedCommandSummary = summary(doc.tables[resolvedIndex])
   }
 
-  public func insertRowInDocumentTable(tableIndex: Int = 0, at rowIndex: Int? = nil) {
+  public func insertRowInDocumentTable(tableIndex: Int? = nil, at rowIndex: Int? = nil) {
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 행 삽입 완료 (총 \($0.rowCount)행)" },
-      mutation: { $0.insertRow(at: rowIndex) }
+      mutation: { $0.insertRow(at: rowIndex ?? self.selectedDocumentTableCell.map { $0.row + 1 }) }
     )
   }
 
-  public func deleteRowInDocumentTable(tableIndex: Int = 0, at rowIndex: Int? = nil) {
+  public func deleteRowInDocumentTable(tableIndex: Int? = nil, at rowIndex: Int? = nil) {
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 행 삭제 완료 (총 \($0.rowCount)행)" },
-      mutation: { $0.deleteRow(at: rowIndex) }
+      mutation: { $0.deleteRow(at: rowIndex ?? self.selectedDocumentTableCell?.row) }
     )
   }
 
-  public func insertColumnInDocumentTable(tableIndex: Int = 0, at columnIndex: Int? = nil) {
+  public func insertColumnInDocumentTable(tableIndex: Int? = nil, at columnIndex: Int? = nil) {
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 열 삽입 완료 (총 \($0.columnCount)열)" },
-      mutation: { $0.insertColumn(at: columnIndex) }
+      mutation: { $0.insertColumn(at: columnIndex ?? self.selectedDocumentTableCell.map { $0.column + 1 }) }
     )
   }
 
-  public func deleteColumnInDocumentTable(tableIndex: Int = 0, at columnIndex: Int? = nil) {
+  public func deleteColumnInDocumentTable(tableIndex: Int? = nil, at columnIndex: Int? = nil) {
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 열 삭제 완료 (총 \($0.columnCount)열)" },
-      mutation: { $0.deleteColumn(at: columnIndex) }
+      mutation: { $0.deleteColumn(at: columnIndex ?? self.selectedDocumentTableCell?.column) }
     )
   }
 

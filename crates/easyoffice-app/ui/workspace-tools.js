@@ -30,6 +30,7 @@
       saveActiveDocTabState,
       ensureDefaultDocTabStore,
       computeDocTableSummary,
+      syncActiveSlideDomStylesToDeck,
       renderSlideDeck,
       applyPdfStudioFormState,
     } = panelHooks;
@@ -120,10 +121,21 @@
             });
         }
       } else if (scope === "SLIDE") {
+        if (getActiveModule() === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {
+          syncActiveSlideDomStylesToDeck();
+        }
         slideDeckState.forEach((s) => {
           const title = (s.title || "").trim().replaceAll("\t", " ").replaceAll("\n", " ");
-          const bullets = (s.lower || "")
-            .split(/\n+|·/)
+          let extraText = "";
+          if (Array.isArray(s.insertedNodes) && s.insertedNodes.length > 0) {
+            const extraDiv = document.createElement("div");
+            extraDiv.className = "sheet-table";
+            restoreDomChildren(extraDiv, s.insertedNodes, document);
+            extraText = extractEditableDocumentText(extraDiv);
+          }
+          const combinedLower = [s.lower || "", extraText].filter(Boolean).join("\n");
+          const bullets = combinedLower
+            .split(/\n+/)
             .map((item) => item.trim().replaceAll("\t", " "))
             .filter(Boolean)
             .join(";;");
@@ -270,9 +282,11 @@
       if (summaryEl) {
         const lines = Array.isArray(res.summaryLines) ? res.summaryLines : [];
         const actions = Array.isArray(res.actionItems) ? res.actionItems : [];
+        const suggestions = Array.isArray(res.styleSuggestions) ? res.styleSuggestions : [];
         const summaryText = lines.length > 0 ? lines.join(" / ") : "핵심 문장 요약 완료";
         const actionSuffix = actions.length > 0 ? " · 조치: " + actions.join(", ") : "";
-        summaryEl.textContent = "요약: " + summaryText + actionSuffix;
+        const styleSuffix = suggestions.length > 0 ? " · 교정: " + suggestions.join(" / ") : "";
+        summaryEl.textContent = "요약: " + summaryText + actionSuffix + styleSuffix;
       }
       if (fb && updateFeedback) {
         fb.textContent =
@@ -554,26 +568,53 @@
             sheetController.updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
           }
         } else if (targetScope === "SLIDE") {
+          if (curMod === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {
+            syncActiveSlideDomStylesToDeck();
+          }
           const fields = [];
+          const slideNodeJobs = [];
           slideDeckState.forEach((slide) => {
             ["title", "lower", "notes"].forEach((key) => {
               if ((slide[key] || "").trim()) {
                 fields.push({ slide, key, text: slide[key] });
               }
             });
+            if (Array.isArray(slide.insertedNodes) && slide.insertedNodes.length > 0) {
+              const tempDiv = document.createElement("div");
+              restoreDomChildren(tempDiv, slide.insertedNodes, document);
+              const groups = collectActiveScrubGroups(tempDiv);
+              if (groups.length > 0) {
+                slideNodeJobs.push({ slide, tempDiv, groups });
+              }
+            }
           });
-          const results = await Promise.all(
-            fields.map((item) => invokeIpc("scrub_pii", item.text))
-          );
+          const [results, nodeJobResults] = await Promise.all([
+            Promise.all(fields.map((item) => invokeIpc("scrub_pii", item.text))),
+            Promise.all(
+              slideNodeJobs.map((job) =>
+                Promise.all(job.groups.map((g) => invokeIpc("scrub_pii", g.origText)))
+              )
+            ),
+          ]);
           results.forEach((res, idx) => {
             assertValidScrubResult(fields[idx].text, res);
             totalMasked += Number(res.totalMasked || 0);
+          });
+          nodeJobResults.forEach((groupRes, jIdx) => {
+            totalMasked += countPendingGroupMasks(slideNodeJobs[jIdx].groups, groupRes);
           });
           if (totalMasked > 0) {
             commitDeferredUndoSnapshot(preSnapshot);
             results.forEach((res, idx) => {
               const count = Number(res.totalMasked || 0);
               if (count > 0) fields[idx].slide[fields[idx].key] = res.scrubbedText;
+            });
+            nodeJobResults.forEach((groupRes, jIdx) => {
+              const job = slideNodeJobs[jIdx];
+              const modCount = applyScrubResultsToGroups(job.groups, groupRes);
+              if (modCount > 0) {
+                job.slide.insertedNodes = serializeDomChildren(job.tempDiv);
+              }
             });
             renderSlideDeck(getActiveSlideIndex());
           }

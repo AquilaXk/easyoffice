@@ -30,10 +30,10 @@
 
   const CONTEXTUAL_TOOL_BADGES = {
     DOC: "표·개체 도구",
-    HWP: "한글 표·원고지·누름틀",
+    HWP: "쪽·결재·원고지 도구",
     SHEET: "수식·피벗 분석",
-    SLIDE: "도형·애니메이션 스테이지",
-    PDF: "PDF 주석·양식·결재",
+    SLIDE: "발표자·레이저 도구",
+    PDF: "전자결재·주석 도구",
     CONV: "포맷 일괄 변환",
   };
 
@@ -83,7 +83,7 @@
     formulasAndData: [
       { suffix: "data-autosum", title: "자동 합계 (SUM)", shortcut: "⇧⌘T" },
       { suffix: "data-fn-browser", title: "함수 마법사", shortcut: "⇧F3" },
-      { suffix: "data-sort", title: "오름차순·내림차순 정렬", shortcut: "⌥⌘R" },
+      { suffix: "data-sort", title: "오름차순·내림차순 정렬", shortcut: "⌃⌥S" },
       { suffix: "data-validation", title: "데이터 유효성 검사", shortcut: "⌥⌘V" },
     ],
     review: [

@@ -306,12 +306,33 @@
     if (pill) pill.textContent = boot.platform + " · " + boot.shortcutModifier;
     if (hint) hint.textContent = boot.shortcutModifier + "K";
 
+    if (boot.moduleAccents && typeof boot.moduleAccents === "object") {
+      const rootStyle = document.documentElement.style;
+      const accentKeyMap = {
+        DOC: "--eo-accent-doc",
+        HWP: "--eo-accent-hwp",
+        SHEET: "--eo-accent-sheet",
+        SLIDE: "--eo-accent-slide",
+        PDF: "--eo-accent-pdf",
+      };
+      Object.keys(accentKeyMap).forEach((modKey) => {
+        const val = boot.moduleAccents[modKey];
+        if (typeof val === "string" && val.trim()) {
+          rootStyle.setProperty(accentKeyMap[modKey], val.trim());
+        }
+      });
+    }
+    ribbonHistory.applyModuleAccent(activeModule);
+
     const tabStrip = document.getElementById("tab-strip");
     if (tabStrip && Array.isArray(boot.openTabs)) {
       tabStrip.innerHTML = "";
       boot.openTabs.forEach((t, idx) => {
         const btn = document.createElement("button");
-        btn.className = "tab-pill" + (idx === 0 ? " active" : "");
+        const isAct = idx === 0;
+        btn.className = "tab-pill" + (isAct ? " active" : "");
+        btn.setAttribute("role", "tab");
+        btn.setAttribute("aria-selected", isAct ? "true" : "false");
         btn.dataset.module = t.module;
         btn.textContent = t.title;
         btn.addEventListener("click", () => {
@@ -324,20 +345,24 @@
     const filterBox = document.getElementById("format-filters");
     if (filterBox && Array.isArray(boot.recentFormatFilters)) {
       filterBox.innerHTML = "";
+      filterBox.dataset.activeFilter = "ALL";
       boot.recentFormatFilters.forEach((f, idx) => {
         const chip = document.createElement("button");
         chip.className = "filter-chip" + (idx === 0 ? " active" : "");
+        chip.dataset.filter = f;
         chip.textContent = f;
         chip.addEventListener("click", () => {
           document.querySelectorAll(".filter-chip").forEach((c) => c.classList.remove("active"));
           chip.classList.add("active");
+          filterBox.dataset.activeFilter = f === "전체" ? "ALL" : f;
           const map = {
+            전체: "DOC",
             DOCX: "DOC",
+            ODF: "DOC",
             "HWP/HWPX": "HWP",
             XLSX: "SHEET",
             PPTX: "SLIDE",
             PDF: "PDF",
-            ODF: "CONV",
           };
           if (map[f]) {
             void ribbonHistory.activatePane(map[f]).catch(() => {});
@@ -346,6 +371,20 @@
         filterBox.appendChild(chip);
       });
     }
+  }
+
+  function applyZoomStepDelta(delta) {
+    const steps = [75, 90, 100, 125, 150];
+    const curZoom = Number(localRibbonState.zoomPercent || 100);
+    let idx = steps.indexOf(curZoom);
+    if (idx < 0) idx = 2;
+    const nextIdx = Math.max(0, Math.min(steps.length - 1, idx + delta));
+    const nextZoom = steps[nextIdx];
+    localRibbonState.zoomPercent = nextZoom;
+    const stage = document.querySelector(".canvas-stage");
+    if (stage) stage.style.zoom = nextZoom + "%";
+    const zoomLabel = document.getElementById("status-zoom-label");
+    if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
   }
 
   function setupStaticNavigationHandlers() {
@@ -357,11 +396,24 @@
 
     document.querySelectorAll(".ribbon-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        document.querySelectorAll(".ribbon-btn").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
+        document.querySelectorAll(".ribbon-btn").forEach((b) => {
+          const isAct = b === btn;
+          b.classList.toggle("active", isAct);
+          b.setAttribute("role", "tab");
+          b.setAttribute("aria-selected", isAct ? "true" : "false");
+        });
         void ribbonHistory.renderRibbonCategoryTools(btn.dataset.category).catch(() => {});
       });
     });
+
+    const zoomOutBtn = document.getElementById("btn-zoom-out");
+    const zoomInBtn = document.getElementById("btn-zoom-in");
+    if (zoomOutBtn) {
+      zoomOutBtn.addEventListener("click", () => applyZoomStepDelta(-1));
+    }
+    if (zoomInBtn) {
+      zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
+    }
   }
 
   function setupQatAndRibbonActions() {
@@ -563,9 +615,38 @@
         workspacePanels.renderSlideDeck(activeSlideIndex);
       });
     }
+    let slideTypingSnapshotEpoch = -1;
+    let slideTypingTarget = null;
+    let slideTypingSlideIndex = -1;
+    function resetSlideTypingSnapshotState() {
+      slideTypingSnapshotEpoch = -1;
+      slideTypingTarget = null;
+      slideTypingSlideIndex = -1;
+    }
+    function ensureSlideTypingSnapshot(targetEl) {
+      if (
+        slideTypingTarget !== targetEl ||
+        slideTypingSlideIndex !== activeSlideIndex ||
+        slideTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch()
+      ) {
+        const prevSlides = JSON.parse(JSON.stringify(slideDeckState));
+        const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
+        preSnap.slides = prevSlides;
+        ribbonHistory.pushRawUndoSnapshot(preSnap);
+        slideTypingSnapshotEpoch = ribbonHistory.getHistoryMutationEpoch();
+        slideTypingTarget = targetEl;
+        slideTypingSlideIndex = activeSlideIndex;
+      }
+    }
     const slideNotesInput = document.getElementById("slide-presenter-notes");
     if (slideNotesInput) {
+      slideNotesInput.addEventListener("focus", resetSlideTypingSnapshotState);
+      slideNotesInput.addEventListener("blur", resetSlideTypingSnapshotState);
+      slideNotesInput.addEventListener("beforeinput", () => {
+        ensureSlideTypingSnapshot(slideNotesInput);
+      });
       slideNotesInput.addEventListener("input", () => {
+        ensureSlideTypingSnapshot(slideNotesInput);
         if (slideDeckState[activeSlideIndex]) {
           slideDeckState[activeSlideIndex].notes = slideNotesInput.value;
         }
@@ -573,7 +654,13 @@
     }
     const slideTitleZone = document.getElementById("slide-title-zone");
     if (slideTitleZone) {
+      slideTitleZone.addEventListener("focus", resetSlideTypingSnapshotState);
+      slideTitleZone.addEventListener("blur", resetSlideTypingSnapshotState);
+      slideTitleZone.addEventListener("beforeinput", () => {
+        ensureSlideTypingSnapshot(slideTitleZone);
+      });
       slideTitleZone.addEventListener("input", () => {
+        ensureSlideTypingSnapshot(slideTitleZone);
         if (slideDeckState[activeSlideIndex]) {
           slideDeckState[activeSlideIndex].title = slideTitleZone.textContent || "";
         }
@@ -581,9 +668,15 @@
     }
     const slideLowerZone = document.getElementById("slide-lower-zone");
     if (slideLowerZone) {
+      slideLowerZone.addEventListener("focus", resetSlideTypingSnapshotState);
+      slideLowerZone.addEventListener("blur", resetSlideTypingSnapshotState);
+      slideLowerZone.addEventListener("beforeinput", () => {
+        ensureSlideTypingSnapshot(slideLowerZone);
+      });
       slideLowerZone.addEventListener("input", () => {
+        ensureSlideTypingSnapshot(slideLowerZone);
         if (slideDeckState[activeSlideIndex]) {
-          slideDeckState[activeSlideIndex].lower = slideLowerZone.textContent || "";
+          workspacePanels.syncActiveSlideDomStylesToDeck();
         }
       });
     }
@@ -631,7 +724,29 @@
     const editor = document.getElementById("doc-editor");
     const imeBadge =
       document.getElementById("ime-badge") || document.getElementById("ime-indicator");
+    let docTypingSnapshotEpoch = -1;
+    function ensureDocTypingSnapshot() {
+      if (activeModule !== "DOC" && activeModule !== "HWP") return;
+      if (
+        docTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch() &&
+        docTabStore[activeModule]
+      ) {
+        const prevDocTab = JSON.parse(JSON.stringify(docTabStore[activeModule]));
+        const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
+        preSnap.docTabs[activeModule] = prevDocTab;
+        ribbonHistory.pushRawUndoSnapshot(preSnap);
+        docTypingSnapshotEpoch = ribbonHistory.getHistoryMutationEpoch();
+      }
+    }
     if (editor) {
+      editor.addEventListener("focus", () => {
+        docTypingSnapshotEpoch = -1;
+        workspacePanels.saveActiveDocTabState();
+      });
+      editor.addEventListener("blur", () => {
+        docTypingSnapshotEpoch = -1;
+        workspacePanels.saveActiveDocTabState();
+      });
       editor.addEventListener("click", (ev) => {
         const block = workspacePanels.findEditableDocBlock(ev.target, editor);
         if (block) workspacePanels.setActiveDocBlock(block);
@@ -645,7 +760,14 @@
         if (imeBadge) imeBadge.textContent = "IME: 완료";
         workspacePanels.computeSmartStats();
       });
+      editor.addEventListener("beforeinput", () => {
+        ensureDocTypingSnapshot();
+      });
       editor.addEventListener("input", () => {
+        if (activeModule === "DOC" || activeModule === "HWP") {
+          ensureDocTypingSnapshot();
+          workspacePanels.saveActiveDocTabState();
+        }
         if (!isImeComposing) workspacePanels.computeSmartStats();
       });
       workspacePanels.computeSmartStats();

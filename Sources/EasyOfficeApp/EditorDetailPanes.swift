@@ -809,7 +809,8 @@ public struct DocumentEditorDetailPaneView: View {
     let colCount = document.sections.first?.columnCount ?? 1
     let currentOrientation = document.sections.first?.orientation ?? .portrait
     let isLandscape = currentOrientation == .landscape
-    let paperMaxWidth: CGFloat = isLandscape ? 980 : 840
+    let zoomScale = CGFloat(max(50.0, min(200.0, viewModel.zoomPercent))) / 100.0
+    let paperMaxWidth: CGFloat = (isLandscape ? 980.0 : 840.0) * zoomScale
     let isHWPModule =
       viewModel.activeTab?.moduleKind == .hwp
       || viewModel.activeTab?.format == .hwp
@@ -1069,7 +1070,7 @@ public struct DocumentEditorDetailPaneView: View {
                 viewModel.paragraphDraftText = ""
               }
               Button("표 행 추가") {
-                viewModel.insertRowInDocumentTable(tableIndex: 0)
+                viewModel.insertRowInDocumentTable()
               }
               Button("각주 추가") {
                 viewModel.executeRibbonCommand("doc-insert-footnote")
@@ -1274,7 +1275,7 @@ public struct DocumentEditorDetailPaneView: View {
               document: document,
               selectedParagraph: selectedParagraph,
               palette: palette,
-              viewModel: viewModel
+              viewModel: isPrimaryPane ? viewModel : nil
             )
             .frame(maxWidth: paperMaxWidth)
           }
@@ -1300,7 +1301,7 @@ public struct DocumentEditorDetailPaneView: View {
                   HWPManuscriptGridPaperView(
                     document: document,
                     palette: palette,
-                    viewModel: viewModel
+                    viewModel: isPrimaryPane ? viewModel : nil
                   )
                 } else {
                   if viewModel.workspaceViewMode == .outlineView {
@@ -1731,7 +1732,7 @@ public struct DocumentEditorDetailPaneView: View {
   @ViewBuilder
   private func documentTableView(
     for table: DocumentTableBlock,
-    tableIndex _: Int,
+    tableIndex tIdx: Int,
     palette: WorkspaceThemePalette
   ) -> some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -1739,6 +1740,10 @@ public struct DocumentEditorDetailPaneView: View {
         .font(.system(size: 10, weight: .semibold))
         .lineLimit(1)
         .foregroundStyle(palette.secondaryText.swiftUIColor)
+        .onTapGesture {
+          guard isPrimaryPane else { return }
+          viewModel.selectDocumentTable(index: tIdx)
+        }
 
       VStack(spacing: 0) {
         ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIdx, row in
@@ -1759,6 +1764,11 @@ public struct DocumentEditorDetailPaneView: View {
                       text: Binding(
                         get: { cell },
                         set: { updated in
+                          viewModel.selectDocumentTableCell(
+                            tableIndex: tIdx,
+                            row: rowIdx,
+                            column: colIdx
+                          )
                           viewModel.updateTableCell(
                             tableID: table.id,
                             row: rowIdx,
@@ -1798,6 +1808,17 @@ public struct DocumentEditorDetailPaneView: View {
                 .layoutPriority(Double(span?.columnSpan ?? 1))
                 .padding(.horizontal, 6)
                 .background(cellBg)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                  TapGesture().onEnded {
+                    guard isPrimaryPane else { return }
+                    viewModel.selectDocumentTableCell(
+                      tableIndex: tIdx,
+                      row: rowIdx,
+                      column: colIdx
+                    )
+                  }
+                )
                 .overlay(
                   tableCellBorderOverlay(
                     style: borderStyle,
@@ -1940,12 +1961,14 @@ public struct DocumentEditorDetailPaneView: View {
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-          flatToolbarButton("◀ 승격", palette: palette) {
-            viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: -1)
-          }
+          if isPrimaryPane {
+            flatToolbarButton("◀ 승격", palette: palette) {
+              viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: -1)
+            }
 
-          flatToolbarButton("강등 ▶", palette: palette) {
-            viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: 1)
+            flatToolbarButton("강등 ▶", palette: palette) {
+              viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: 1)
+            }
           }
         }
         .padding(.vertical, 2)

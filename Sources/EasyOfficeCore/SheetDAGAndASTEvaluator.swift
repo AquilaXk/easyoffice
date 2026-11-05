@@ -2,7 +2,6 @@ import Foundation
 
 extension WorksheetModel {
 
-
   @inline(__always)
   private static func isTrueFormulaAST(_ ast: FormulaAST?) -> Bool {
     guard let ast else { return false }
@@ -40,6 +39,10 @@ extension WorksheetModel {
     }
     var exprStack: [FormulaAST] = []
     while let (coord, expanded) = stack.popLast() {
+      guard context.consumeEvaluationSteps(1) else {
+        context.memo[coord] = .error(.value)
+        return
+      }
       if expanded {
         dagState[coord] = 2
         if !isMemoized(coord) {
@@ -61,6 +64,10 @@ extension WorksheetModel {
       exprStack.removeAll(keepingCapacity: true)
       exprStack.append(ast)
       while let ex = exprStack.popLast() {
+        guard context.consumeEvaluationSteps(1) else {
+          context.memo[coord] = .error(.value)
+          return
+        }
         switch ex {
         case .cellRef(let dep):
           if Self.isTrueFormulaAST(compiledASTs[dep]) {
@@ -161,6 +168,10 @@ extension WorksheetModel {
     var result: [PackedCellCoordinate: EvaluatedCellValue] = [:]
     result.reserveCapacity(coordsToEval.count)
     for coord in coordsToEval {
+      guard context.consumeEvaluationSteps(1) else {
+        result[coord] = .error(.value)
+        continue
+      }
       result[coord] = evaluateInternal(at: coord, context: &context, depth: 0)
     }
     return result
@@ -249,6 +260,10 @@ extension WorksheetModel {
       var rowVals: [EvaluatedCellValue] = []
       rowVals.reserveCapacity(bounds.colCount)
       for c in bounds.minCol...bounds.maxCol {
+        guard context.consumeEvaluationSteps(1) else {
+          rowVals.append(.error(.value))
+          continue
+        }
         let packed = PackedCellCoordinate(row: r, column: c)
         if let targetSheetName {
           rowVals.append(
@@ -372,7 +387,7 @@ extension WorksheetModel {
       return .boolean(flag)
     default:
       var savedFast = FastCellBitset()
-      var savedCount = 0
+      var savedCount = context.evaluationSteps << 32
       var savedVisited: Set<PackedCellCoordinate> = []
       var savedMemo: [PackedCellCoordinate: EvaluatedCellValue] = [:]
       let savedCoord = context.currentCoord
@@ -386,6 +401,7 @@ extension WorksheetModel {
           context.crossMemo[CrossSheetCellKey(sheetNameUpper: targetSheetUpper, coord: subCoord)] =
             subVal
         }
+        savedCount = (context.evaluationSteps << 32) | (savedCount & 0xFFFF_FFFF)
         swap(&savedFast, &context.fastVisited)
         swap(&savedCount, &context.visitedCount)
         swap(&savedVisited, &context.visited)
@@ -407,6 +423,7 @@ extension WorksheetModel {
           subVal
       }
       context.crossVisited.remove(key)
+      savedCount = (context.evaluationSteps << 32) | (savedCount & 0xFFFF_FFFF)
       swap(&savedFast, &context.fastVisited)
       swap(&savedCount, &context.visitedCount)
       swap(&savedVisited, &context.visited)
@@ -422,6 +439,9 @@ extension WorksheetModel {
     context: inout EvaluationContext,
     depth: Int
   ) -> EvaluatedCellValue {
+    if context.evaluationSteps > Self.maxEvaluationSteps {
+      return .error(.value)
+    }
     if context.isVisited(packed) {
       return .error("#CYCLE!")
     }
@@ -443,7 +463,7 @@ extension WorksheetModel {
       return crossCached
     }
     guard depth <= Self.maxFormulaRecursionDepth,
-      context.visitedCount <= Self.maxFormulaRecursionDepth
+      context.activeVisitedDepth <= Self.maxFormulaRecursionDepth
     else {
       return .error("#REF!")
     }
@@ -487,9 +507,12 @@ extension WorksheetModel {
     depth: Int
   ) -> EvaluatedCellValue {
     guard depth <= Self.maxFormulaRecursionDepth,
-      context.visitedCount <= Self.maxFormulaRecursionDepth
+      context.activeVisitedDepth <= Self.maxFormulaRecursionDepth
     else {
       return .error("#REF!")
+    }
+    guard context.consumeEvaluationSteps(1) else {
+      return .error(.value)
     }
 
     let rawResult: EvaluatedCellValue
@@ -751,12 +774,18 @@ extension WorksheetModel {
         guard let bounds = rangeBounds(cellRange) else {
           return .failure(ErrorCode(code: "#REF!"))
         }
+        guard bounds.rowCount * bounds.colCount <= Self.maxEvaluationSteps else {
+          return .failure(ErrorCode(code: "#VALUE!"))
+        }
         var grid: [[EvaluatedCellValue]] = []
         grid.reserveCapacity(bounds.rowCount)
         for r in bounds.minRow...bounds.maxRow {
           var rowVals: [EvaluatedCellValue] = []
           rowVals.reserveCapacity(bounds.colCount)
           for c in bounds.minCol...bounds.maxCol {
+            guard frame.context.consumeEvaluationSteps(1) else {
+              return .failure(ErrorCode(code: "#VALUE!"))
+            }
             let coord = PackedCellCoordinate(row: r, column: c)
             let v =
               sheetName.map {
@@ -852,5 +881,25 @@ extension WorksheetModel {
       if case .error(let code) = v { return .failure(ErrorCode(code: code)) }
       return .success(([[v]], false))
     }
+  }
+}
+
+extension WorksheetModel.EvaluationContext {
+  @inline(__always)
+  internal var activeVisitedDepth: Int {
+    visitedCount & 0xFFFF_FFFF
+  }
+
+  @inline(__always)
+  internal var evaluationSteps: Int {
+    get { visitedCount >> 32 }
+    set { visitedCount = (newValue << 32) | (visitedCount & 0xFFFF_FFFF) }
+  }
+
+  @inline(__always)
+  internal mutating func consumeEvaluationSteps(_ delta: Int = 1) -> Bool {
+    let next = evaluationSteps + max(1, delta)
+    evaluationSteps = next
+    return next <= WorksheetModel.maxEvaluationSteps
   }
 }
