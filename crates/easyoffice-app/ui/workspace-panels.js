@@ -699,15 +699,30 @@
       tools.computeSmartStats();
     }
 
+    function isNonParagraphStudioContainer(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (isExcludedDocChromeElement(el)) return true;
+      const tag = (el.tagName || "").toUpperCase();
+      if (tag === "HEADER" || tag === "NAV" || tag === "ASIDE") return true;
+      return Boolean(
+        el.classList &&
+          (el.classList.contains("eo-hwp-header") ||
+            el.classList.contains("eo-doc-toc") ||
+            el.classList.contains("eo-doc-footnote") ||
+            el.classList.contains("eo-process-flow") ||
+            el.classList.contains("eo-criteria-panel"))
+      );
+    }
+
     function findEditableDocBlock(node, docEditor) {
       if (!node || !docEditor) return null;
       let cur = node.nodeType === 1 ? node : node.parentElement;
       while (cur && cur !== docEditor) {
+        if ((cur.tagName || "").toUpperCase() === "LI" && docEditor.contains(cur)) {
+          return cur;
+        }
         if (cur.parentElement === docEditor) {
-          if (!isExcludedDocChromeElement(cur)) {
-            return cur;
-          }
-          return null;
+          return !isNonParagraphStudioContainer(cur) ? cur : null;
         }
         cur = cur.parentElement;
       }
@@ -724,11 +739,15 @@
           return block;
         }
       }
-      if (activeDocBlockEl && docEditor.contains(activeDocBlockEl)) {
+      if (
+        activeDocBlockEl &&
+        docEditor.contains(activeDocBlockEl) &&
+        !isNonParagraphStudioContainer(activeDocBlockEl)
+      ) {
         return activeDocBlockEl;
       }
       const children = Array.from(docEditor.children || []);
-      const firstBlock = children.find((el) => !isExcludedDocChromeElement(el));
+      const firstBlock = children.find((el) => !isNonParagraphStudioContainer(el));
       return firstBlock || docEditor;
     }
 

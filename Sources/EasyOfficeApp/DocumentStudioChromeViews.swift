@@ -483,8 +483,15 @@ struct TopDocumentTabStripView: View {
         }
         topMenuBarItem("보기", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .view
-          isStudioPanelsExpanded.toggle()
-          viewModel.showLeftNavigator = isStudioPanelsExpanded; viewModel.showRightInspector = isStudioPanelsExpanded
+          if isDocumentStudio {
+            isStudioPanelsExpanded.toggle()
+            if isStudioPanelsExpanded {
+              viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+            }
+          } else {
+            let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
+            viewModel.showLeftNavigator = nextVisible; viewModel.showRightInspector = nextVisible
+          }
         }
         topMenuBarItem("입력", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert
@@ -720,8 +727,10 @@ struct TopDocumentTabStripView: View {
       Button {
         if isDocumentStudio {
           isStudioPanelsExpanded.toggle()
-          viewModel.showLeftNavigator = isStudioPanelsExpanded
-          viewModel.showRightInspector = isStudioPanelsExpanded
+          if isStudioPanelsExpanded {
+            viewModel.showLeftNavigator = true
+            viewModel.showRightInspector = true
+          }
         } else {
           let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
           viewModel.showLeftNavigator = nextVisible

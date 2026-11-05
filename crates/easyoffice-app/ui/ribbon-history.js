@@ -653,6 +653,11 @@
         if (docEditorEl) {
           docEditorEl.classList.toggle("manuscript-grid", gridOn);
         }
+        const gridBtn = document.getElementById("btn-toggle-doc-grid");
+        if (gridBtn) {
+          gridBtn.classList.toggle("active", gridOn);
+          gridBtn.setAttribute("aria-pressed", gridOn ? "true" : "false");
+        }
         const hwpNotice = document.getElementById("hwp-manuscript-preview");
         if (hwpNotice) {
           hwpNotice.hidden = getActiveModule() !== "HWP" || !gridOn;
