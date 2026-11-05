@@ -276,8 +276,6 @@
     paletteFilteredItems.forEach((item, idx) => {
       const li = document.createElement("li");
       li.className = idx === paletteSelectedIdx ? "cp-item cp-item--selected" : "cp-item";
-      li.setAttribute("role", "option");
-      li.setAttribute("aria-selected", idx === paletteSelectedIdx ? "true" : "false");
       const labelSpan = document.createElement("span");
       labelSpan.className = "cp-item-label";
       labelSpan.textContent = item.title;
@@ -496,6 +494,41 @@
     return mod === "DOC" || mod === "CONV" ? "document" : String(mod || "DOC").toLowerCase();
   }
 
+  function toggleDocTableCellMerge(mergeBtn) {
+    const tbody = document.getElementById("doc-table-body");
+    if (!tbody) return;
+    const sumRow = document.getElementById("doc-table-sum-row");
+    const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
+    if (cells.length < 2) return;
+    ribbonHistory.pushUndoSnapshot(false);
+    const isMerged = cells[0].colSpan > 1;
+    cells[0].colSpan = isMerged ? 1 : 2;
+    cells[1].hidden = !isMerged;
+    mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
+    workspacePanels.saveActiveDocTabState();
+    const fb = document.getElementById("status-command-feedback");
+    if (fb) fb.textContent = isMerged ? "문서 표 셀 분할 완료" : "문서 표 셀 합치기 완료";
+  }
+
+  function handleDocEditorTableClick(e) {
+    if (activeModule !== "DOC" && activeModule !== "HWP") return;
+    if (e.target.closest("#btn-doc-add-row")) {
+      ribbonHistory.pushUndoSnapshot(false);
+      workspacePanels.appendDocTableRow();
+      workspacePanels.saveActiveDocTabState();
+      return;
+    }
+    const mergeBtn = e.target.closest("#btn-doc-merge-toggle");
+    if (mergeBtn) {
+      toggleDocTableCellMerge(mergeBtn);
+      return;
+    }
+    if (e.target.closest("#btn-doc-eval-table")) {
+      workspacePanels.computeDocTableSummary();
+      workspacePanels.saveActiveDocTabState();
+    }
+  }
+
   function setupDocTableAndSheetTabHandlers() {
     [
       ["btn-stylebar-bold", "bold"],
@@ -514,38 +547,7 @@
     });
     const docEditor = document.getElementById("doc-editor");
     if (docEditor) {
-      docEditor.addEventListener("click", (e) => {
-        if (activeModule !== "DOC" && activeModule !== "HWP") return;
-        const addRowBtn = e.target.closest("#btn-doc-add-row");
-        if (addRowBtn) {
-          ribbonHistory.pushUndoSnapshot(false);
-          workspacePanels.appendDocTableRow();
-          workspacePanels.saveActiveDocTabState();
-          return;
-        }
-        const mergeBtn = e.target.closest("#btn-doc-merge-toggle");
-        if (mergeBtn) {
-          const tbody = document.getElementById("doc-table-body");
-          if (!tbody) return;
-          const sumRow = document.getElementById("doc-table-sum-row");
-          const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
-          if (cells.length < 2) return;
-          ribbonHistory.pushUndoSnapshot(false);
-          const isMerged = cells[0].colSpan > 1;
-          cells[0].colSpan = isMerged ? 1 : 2;
-          cells[1].hidden = !isMerged;
-          mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
-          workspacePanels.saveActiveDocTabState();
-          const fb = document.getElementById("status-command-feedback");
-          if (fb) fb.textContent = isMerged ? "문서 표 셀 분할 완료" : "문서 표 셀 합치기 완료";
-          return;
-        }
-        const evalDocBtn = e.target.closest("#btn-doc-eval-table");
-        if (evalDocBtn) {
-          workspacePanels.computeDocTableSummary();
-          workspacePanels.saveActiveDocTabState();
-        }
-      });
+      docEditor.addEventListener("click", handleDocEditorTableClick);
     }
 
     const sheetTabBar = document.getElementById("sheet-tab-bar");
@@ -861,6 +863,59 @@
     }
   }
 
+  function handleOpenPaletteKeydown(e, modal, cmdSearchInput) {
+    if (e.key === "Escape") return void modal.close?.();
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      return void modal.close?.();
+    }
+    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (step !== 0 && paletteFilteredItems.length > 0) {
+      e.preventDefault();
+      paletteSelectedIdx = Math.max(0, Math.min(paletteFilteredItems.length - 1, paletteSelectedIdx + step));
+      renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
+      return;
+    }
+    if (e.key === "Enter" && paletteFilteredItems[paletteSelectedIdx]) {
+      e.preventDefault();
+      executePaletteItem(paletteFilteredItems[paletteSelectedIdx]);
+    }
+  }
+
+  function handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput) {
+    if (!e.metaKey && !e.ctrlKey) return;
+    const keyLower = e.key.toLowerCase();
+    const modPrefix = getRibbonModulePrefix(activeModule);
+    if (e.altKey) {
+      if (!e.shiftKey && keyLower === "d") {
+        e.preventDefault();
+        void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-theme").catch(() => {});
+      }
+      return;
+    }
+    if (e.shiftKey) {
+      if (keyLower === "z") {
+        e.preventDefault();
+        void ribbonHistory.performWorkspaceRedo().catch(() => {});
+      }
+      return;
+    }
+    const plainHandlers = {
+      k: () => togglePaletteModal(modal, cmdSearchInput),
+      s: () => void workspacePanels.saveActiveModuleDocument().catch(() => {}),
+      z: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
+      y: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
+      0: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-zoom").catch(() => {}),
+      b: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-bold").catch(() => {}),
+      i: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-italic").catch(() => {}),
+      u: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-underline").catch(() => {}),
+    };
+    if (plainHandlers[keyLower]) {
+      e.preventDefault();
+      plainHandlers[keyLower]();
+    }
+  }
+
   function setupCommandPaletteHandlers() {
     const modal = document.getElementById("cmd-palette-modal");
     const openPaletteBtn = document.getElementById("btn-command-palette");
@@ -881,59 +936,10 @@
     host.addEventListener("keydown", (e) => {
       if (e.isComposing || isImeComposing) return;
       if (modal?.open) {
-        if (e.key === "Escape" && typeof modal.close === "function") return void modal.close();
-        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
-          e.preventDefault();
-          return void modal.close?.();
-        }
-        if (e.key === "ArrowDown" && paletteFilteredItems.length > 0) {
-          e.preventDefault();
-          paletteSelectedIdx = Math.min(paletteFilteredItems.length - 1, paletteSelectedIdx + 1);
-          renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
-          return;
-        }
-        if (e.key === "ArrowUp" && paletteFilteredItems.length > 0) {
-          e.preventDefault();
-          paletteSelectedIdx = Math.max(0, paletteSelectedIdx - 1);
-          renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
-          return;
-        }
-        if (e.key === "Enter" && paletteFilteredItems[paletteSelectedIdx]) {
-          e.preventDefault();
-          executePaletteItem(paletteFilteredItems[paletteSelectedIdx]);
-          return;
-        }
+        handleOpenPaletteKeydown(e, modal, cmdSearchInput);
         return;
       }
-      if (!e.metaKey && !e.ctrlKey) return;
-      const keyLower = e.key.toLowerCase();
-      const modPrefix = getRibbonModulePrefix(activeModule);
-      if (e.altKey && !e.shiftKey && keyLower === "d") {
-        e.preventDefault();
-        void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-theme").catch(() => {});
-        return;
-      }
-      if (e.altKey) return;
-      if (e.shiftKey && keyLower === "z") {
-        e.preventDefault();
-        void ribbonHistory.performWorkspaceRedo().catch(() => {});
-        return;
-      }
-      if (e.shiftKey) return;
-      const plainHandlers = {
-        k: () => togglePaletteModal(modal, cmdSearchInput),
-        s: () => void workspacePanels.saveActiveModuleDocument().catch(() => {}),
-        z: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
-        y: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
-        0: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-zoom").catch(() => {}),
-        b: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-bold").catch(() => {}),
-        i: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-italic").catch(() => {}),
-        u: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-underline").catch(() => {}),
-      };
-      if (plainHandlers[keyLower]) {
-        e.preventDefault();
-        plainHandlers[keyLower]();
-      }
+      handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput);
     });
   }
 

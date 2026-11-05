@@ -731,17 +731,19 @@
       return true;
     }
 
+    const PARA_PREFIX_CMDS = { "para-numbering": { prefix: "1. ", label: "문단 번호 서식 적용 완료" }, "para-bullet": { prefix: "○ ", label: "글머리표 서식 적용 완료" } };
+    const PARA_INDENT_CMDS = { "indent-in": { delta: 16, label: "한 수준 증가 적용 완료" }, "indent-out": { delta: -16, label: "한 수준 감소 적용 완료" } };
     function execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod) {
-      if (cmd !== "para-numbering" && cmd !== "para-bullet" && cmd !== "indent-in" && cmd !== "indent-out" && cmd !== "para-shape") return false;
+      const pfx = PARA_PREFIX_CMDS[cmd];
+      const ind = PARA_INDENT_CMDS[cmd];
+      if (!pfx && !ind && cmd !== "para-shape") return false;
       if (!isDocMod) return true;
-      if (cmd === "para-numbering" || cmd === "para-bullet") {
-        const isNum = cmd === "para-numbering";
-        withDocStyleUndo(() => { toggleBlockPrefix(textTarget, isNum ? "1. " : "○ "); computeSmartStats(); });
-        if (fb) fb.textContent = isNum ? "문단 번호 서식 적용 완료" : "글머리표 서식 적용 완료";
-      } else if (cmd === "indent-in" || cmd === "indent-out") {
-        const isIn = cmd === "indent-in";
-        withDocStyleUndo(() => shiftBlockIndent(blk, isIn ? 16 : -16));
-        if (fb) fb.textContent = isIn ? "한 수준 증가 적용 완료" : "한 수준 감소 적용 완료";
+      if (pfx) {
+        withDocStyleUndo(() => { toggleBlockPrefix(textTarget, pfx.prefix); computeSmartStats(); });
+        if (fb) fb.textContent = pfx.label;
+      } else if (ind) {
+        withDocStyleUndo(() => shiftBlockIndent(blk, ind.delta));
+        if (fb) fb.textContent = ind.label;
       } else {
         document.getElementById("btn-align-justify")?.click();
         if (fb) fb.textContent = "문단 모양 정렬 적용 완료";
