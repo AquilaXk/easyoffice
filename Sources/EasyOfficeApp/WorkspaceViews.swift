@@ -2302,6 +2302,7 @@ struct BottomWorkspaceStatusBarView: View {
   @Environment(\.colorScheme) private var colorScheme
   @Bindable var viewModel: WorkspaceViewModel
   let tab: WorkspaceTabItem
+  @State private var isOvertypeMode: Bool = false
 
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
@@ -2336,11 +2337,30 @@ struct BottomWorkspaceStatusBarView: View {
             let manuscriptPages = max(1, (chars + 199) / 200)
             let readingMinutes = max(1, (words + 199) / 200)
             let sectionCount = max(1, doc.sections.count)
-            Text(
-              "1/\(doc.estimatedPageCount) 쪽 · 구역 1/\(sectionCount) · 삽입 · 단어 \(words) · 글자 \(chars)자 · 원고지 \(manuscriptPages)매 · 읽기 약 \(readingMinutes)분"
-            )
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
-            .foregroundStyle(palette.primaryText.swiftUIColor)
+            HStack(spacing: 6) {
+              Text("1 / \(doc.estimatedPageCount) 쪽 | 구역: 1 / \(sectionCount) |")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+
+              Button {
+                isOvertypeMode.toggle()
+              } label: {
+                Text(isOvertypeMode ? "수정" : "삽입")
+                  .font(.system(size: 11, weight: .bold, design: .monospaced))
+                  .foregroundStyle(
+                    isOvertypeMode
+                      ? EasyOfficeDesignTokens.statusWarningToken(isDark: palette.isDark)
+                        .swiftUIColor
+                      : EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
+                  )
+              }
+              .buttonStyle(.plain)
+              .help("삽입 / 수정 입력 모드 전환")
+
+              Text("| 단어 \(words) · 글자 \(chars)자 · 원고지 \(manuscriptPages)매 · 읽기 약 \(readingMinutes)분")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(palette.primaryText.swiftUIColor)
+            }
             .fixedSize(horizontal: true, vertical: false)
 
           case .sheet:
@@ -2450,11 +2470,29 @@ struct BottomWorkspaceStatusBarView: View {
 
         Divider().frame(height: 14)
 
-        Button("-") { viewModel.setZoom(viewModel.zoomPercent - 25.0) }.buttonStyle(.plain)
-        Text("배율 \(Int(viewModel.zoomPercent))%")
+        Button {
+          viewModel.applyQuickZoomPreset(100.0)
+        } label: {
+          Text("폭 맞춤")
+            .font(.system(size: 10, weight: Int(viewModel.zoomPercent) == 100 ? .bold : .medium))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+        }
+        .buttonStyle(.plain)
+
+        Button {
+          viewModel.applyQuickZoomPreset(90.0)
+        } label: {
+          Text("쪽 맞춤")
+            .font(.system(size: 10, weight: Int(viewModel.zoomPercent) == 90 ? .bold : .medium))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+        }
+        .buttonStyle(.plain)
+
+        Button("-") { viewModel.setZoom(viewModel.zoomPercent - 10.0) }.buttonStyle(.plain)
+        Text("\(Int(viewModel.zoomPercent))%")
           .font(.system(size: 11, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-        Button("+") { viewModel.setZoom(viewModel.zoomPercent + 25.0) }.buttonStyle(.plain)
+        Button("+") { viewModel.setZoom(viewModel.zoomPercent + 10.0) }.buttonStyle(.plain)
 
         ForEach([75, 100, 125], id: \.self) { preset in
           let isCurrentZoom = Int(viewModel.zoomPercent) == preset

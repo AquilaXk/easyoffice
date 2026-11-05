@@ -5,6 +5,7 @@ pub mod converter;
 pub mod csv_markdown_codecs;
 pub mod deflate;
 pub mod hwp5_codec;
+pub mod hwp_eqedit;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
 pub mod office_codecs;
@@ -19,6 +20,7 @@ pub mod zip_codec;
 pub use converter::*;
 pub use csv_markdown_codecs::*;
 pub use deflate::*;
+pub use hwp_eqedit::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use rtf_xml_helpers::{

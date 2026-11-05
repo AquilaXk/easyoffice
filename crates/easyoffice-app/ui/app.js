@@ -395,18 +395,27 @@
     }
   }
 
+  function applyZoomPercent(pct, fitMode) {
+    const nextZoom = Math.max(50, Math.min(200, Math.round(Number(pct) || 100)));
+    localRibbonState.zoomPercent = nextZoom;
+    const stage = document.querySelector(".canvas-stage");
+    if (stage) {
+      stage.style.zoom = nextZoom + "%";
+      if (fitMode) stage.dataset.zoomFit = fitMode;
+    }
+    const zoomLabel = document.getElementById("status-zoom-label");
+    if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
+    const zoomSlider = document.getElementById("status-zoom-slider");
+    if (zoomSlider) zoomSlider.value = String(nextZoom);
+  }
+
   function applyZoomStepDelta(delta) {
     const steps = [75, 90, 100, 125, 150];
     const curZoom = Number(localRibbonState.zoomPercent || 100);
     let idx = steps.indexOf(curZoom);
     if (idx < 0) idx = 2;
     const nextIdx = Math.max(0, Math.min(steps.length - 1, idx + delta));
-    const nextZoom = steps[nextIdx];
-    localRibbonState.zoomPercent = nextZoom;
-    const stage = document.querySelector(".canvas-stage");
-    if (stage) stage.style.zoom = nextZoom + "%";
-    const zoomLabel = document.getElementById("status-zoom-label");
-    if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
+    applyZoomPercent(steps[nextIdx]);
   }
 
   function setupStaticNavigationHandlers() {
@@ -436,6 +445,7 @@
     if (zoomInBtn) {
       zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
     }
+    workspacePanels.setupStudioChromeControls(applyZoomPercent);
   }
 
   function setupQatAndRibbonActions() {

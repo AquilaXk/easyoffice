@@ -1202,5 +1202,181 @@ final class EasyOfficeTests: XCTestCase {
     XCTAssertEqual(decodedRustHwp.paragraphs.first?.text, "러스트 호환 본문")
     XCTAssertEqual(decodedRustHwp.tables.first?.rows, [["셀1", "셀2"]])
   }
+
+  func testHWPEqEditToLaTeXConversion() throws {
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("{a+1} over {b-1}"),
+      "\\frac{a+1}{b-1}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("sqrt {x^2 + 1}"),
+      "\\sqrt{x^2+1}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("root 3 of x"),
+      "\\sqrt[3]{x}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("sum from {i=1} to {n}"),
+      "\\sum_{i=1}^{n}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("int from 0 to infty e^{-x} dx"),
+      "\\int_0^{\\infty}e^{-x}dx"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("pmatrix {1 & 2 # 3 & 4}"),
+      "\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("alpha + beta = gamma"),
+      "\\alpha+\\beta=\\gamma"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("Gamma + Delta = Omega"),
+      "\\Gamma+\\Delta=\\Omega"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("hat x + vec v + bar y"),
+      "\\hat{x}+\\vec{v}+\\overline{y}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("binom n k"),
+      "\\binom{n}{k}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("left ( {a over b} right )"),
+      "\\left( \\frac{a}{b} \\right)"
+    )
+  }
+
+  func testHWPEqEditFailClosedUnbalancedBracesAndExcessiveDepth() {
+    XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX("{a + b")) { err in
+      guard case EasyOfficeError.corruptedContainer = err else {
+        XCTFail("Expected corruptedContainer, got \(err)")
+        return
+      }
+    }
+    XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX("a + b}")) { err in
+      guard case EasyOfficeError.corruptedContainer = err else {
+        XCTFail("Expected corruptedContainer, got \(err)")
+        return
+      }
+    }
+    let deepBraces = String(repeating: "{", count: 70) + "x" + String(repeating: "}", count: 70)
+    XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX(deepBraces)) { err in
+      guard case EasyOfficeError.resourceBudgetExceeded = err else {
+        XCTFail("Expected resourceBudgetExceeded, got \(err)")
+        return
+      }
+    }
+    let deepRoots = String(repeating: "sqrt ", count: 70) + "x"
+    XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX(deepRoots)) { err in
+      guard case EasyOfficeError.resourceBudgetExceeded = err else {
+        XCTFail("Expected resourceBudgetExceeded, got \(err)")
+        return
+      }
+    }
+  }
+
+  func testHWP5EqEditBinaryRecordDecodingAndSectionIntegration() throws {
+    var fh = Data(repeating: 0, count: HWP5BinaryCodec.fileHeaderByteLength)
+    for (idx, b) in Array(HWP5BinaryCodec.signatureString.utf8).enumerated() {
+      fh[idx] = b
+    }
+    try BitPacking.writeUInt32LE(HWP5BinaryCodec.defaultVersion, into: &fh, at: 32)
+    try BitPacking.writeUInt32LE(0, into: &fh, at: 36)
+
+    var stdDocProps = Data(repeating: 0, count: 26)
+    try BitPacking.writeUInt16LE(1, into: &stdDocProps, at: 0)
+    var docInfo = try HWP5RecordHeader.encode(
+      tagID: HWP5RecordHeader.tagDocumentProperties,
+      level: 0,
+      payloadSize: 26
+    )
+    docInfo.append(stdDocProps)
+
+    var sec0 = try HWP5RecordHeader.encode(
+      tagID: HWP5RecordHeader.tagParaHeader,
+      level: 0,
+      payloadSize: 24
+    )
+    sec0.append(Data(repeating: 0, count: 24))
+    let paraBytes = BitPacking.encodeUTF16LE("수식 포함 문서")
+    sec0.append(
+      try HWP5RecordHeader.encode(
+        tagID: HWP5RecordHeader.tagParaText,
+        level: 1,
+        payloadSize: UInt32(paraBytes.count)
+      )
+    )
+    sec0.append(paraBytes)
+
+    let eqScript = "{a+1} over {b-1}"
+    let eqScriptUTF16 = Array(eqScript.utf16)
+    var eqPayload = Data()
+    BitPacking.appendUInt32LE(0, to: &eqPayload)
+    BitPacking.appendUInt16LE(UInt16(eqScriptUTF16.count), to: &eqPayload)
+    for unit in eqScriptUTF16 {
+      BitPacking.appendUInt16LE(unit, to: &eqPayload)
+    }
+    sec0.append(
+      try HWP5RecordHeader.encode(
+        tagID: HWP5RecordHeader.tagEqEditStandard,
+        level: 1,
+        payloadSize: UInt32(eqPayload.count)
+      )
+    )
+    sec0.append(eqPayload)
+
+    let packed = try OLE2ContainerCodec.pack(streams: [
+      OLE2StreamEntry(name: "FileHeader", data: fh),
+      OLE2StreamEntry(name: "DocInfo", data: docInfo),
+      OLE2StreamEntry(name: "BodyText/Section0", data: sec0),
+    ])
+    let decoded = try HWP5BinaryCodec.decodeDocument(from: packed)
+    XCTAssertEqual(decoded.equations.count, 1)
+    XCTAssertEqual(decoded.equations.first?.latexSource, "\\frac{a+1}{b-1}")
+
+    XCTAssertThrowsError(
+      try HWPEquationCodec.decodeHWP5EqEditRecord(from: Data([0, 1, 2]), at: 0, byteLength: 3)
+    )
+  }
+
+  func testHWP5ParaTextControlCharactersAndPUASymbolMapping() throws {
+    var payload = Data()
+    BitPacking.appendUInt16LE(UInt16(("가" as UnicodeScalar).value), to: &payload)
+    var tabCtrl = Data(repeating: 0, count: 16)
+    try BitPacking.writeUInt16LE(0x0009, into: &tabCtrl, at: 0)
+    try BitPacking.writeUInt16LE(1200, into: &tabCtrl, at: 2)
+    try BitPacking.writeUInt16LE(0, into: &tabCtrl, at: 12)
+    try BitPacking.writeUInt16LE(0x0009, into: &tabCtrl, at: 14)
+    payload.append(tabCtrl)
+    var autoNumCtrl = Data(repeating: 0, count: 16)
+    try BitPacking.writeUInt16LE(0x0012, into: &autoNumCtrl, at: 0)
+    try BitPacking.writeUInt16LE(0x0012, into: &autoNumCtrl, at: 14)
+    payload.append(autoNumCtrl)
+    BitPacking.appendUInt16LE(0x0018, to: &payload)
+    BitPacking.appendUInt16LE(0x0019, to: &payload)
+    BitPacking.appendUInt16LE(0x001E, to: &payload)
+    BitPacking.appendUInt16LE(0x001F, to: &payload)
+    BitPacking.appendUInt16LE(0xD800, to: &payload)
+    BitPacking.appendUInt16LE(UInt16(("나" as UnicodeScalar).value), to: &payload)
+
+    let decoded = try HWPEquationCodec.decodeParaTextPayload(
+      from: payload,
+      at: 0,
+      byteLength: payload.count
+    )
+    XCTAssertEqual(decoded, "가\t \u{00AD} \u{00A0}\u{2007}□나")
+
+    XCTAssertEqual(HWPEquationCodec.puaBMPSymbols.count, 53)
+    XCTAssertEqual(HWPEquationCodec.hwp5SymbolToPlane15(0xA0E1), 0xFA0E1)
+    XCTAssertEqual(HWPEquationCodec.hwp5SymbolToPlane15(0xA855), 0xFA855)
+    XCTAssertNil(HWPEquationCodec.hwp5SymbolToPlane15(0x0041))
+    XCTAssertEqual(HWPEquationCodec.plane15ToHWP5Symbol(0xFA0E1), 0xA0E1)
+    XCTAssertEqual(HWPEquationCodec.plane15ToHWP5Symbol(0xFA855), 0xA855)
+    XCTAssertNil(HWPEquationCodec.plane15ToHWP5Symbol(0xFA000))
+  }
 }
 

@@ -414,6 +414,67 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-pressed"), "true");
   assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 쪽 · 구역: 1 \/ \d+ · 삽입/);
 
+  const docEditor = document.getElementById("doc-editor");
+  const styleSelect = document.getElementById("doc-style-select");
+  styleSelect.value = "개요 1";
+  styleSelect.dispatchEvent({ type: "change" });
+  assert.equal(document.getElementById("doc-style-role-badge").textContent, "개요 1");
+  assert.equal(docEditor.dataset.styleRole, "개요 1");
+
+  const fontSelect = document.getElementById("doc-font-select");
+  fontSelect.value = "함초롬바탕";
+  fontSelect.dispatchEvent({ type: "change" });
+  assert.equal(document.getElementById("doc-style-font-badge").textContent, "함초롬바탕");
+  assert.equal(docEditor.style.fontFamily, "함초롬바탕");
+
+  userClick(document.getElementById("btn-size-up"));
+  assert.equal(document.getElementById("doc-font-size-input").value, "12.0");
+  assert.equal(document.getElementById("doc-style-size-badge").textContent, "12.0 pt");
+  assert.equal(docEditor.style.fontSize, "12.0pt");
+  userClick(document.getElementById("btn-size-down"));
+  assert.equal(document.getElementById("doc-font-size-input").value, "11.0");
+
+  userClick(document.getElementById("btn-ls-up"));
+  assert.equal(document.getElementById("doc-linespacing-select").value, "180");
+  assert.equal(docEditor.dataset.lineSpacing, "180");
+  userClick(document.getElementById("btn-ls-down"));
+  assert.equal(document.getElementById("doc-linespacing-select").value, "160");
+
+  userClick(document.getElementById("btn-align-distribute"));
+  assert.equal(document.getElementById("btn-align-distribute").classList.contains("active"), true);
+  assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), false);
+  assert.equal(docEditor.dataset.textAlign, "distribute");
+
+  userClick(document.getElementById("btn-toggle-ctrl-marks"));
+  assert.equal(docEditor.dataset.showCtrlMarks, "true");
+  assert.equal(docEditor.dataset.showParaMarks, "true");
+  userClick(document.getElementById("btn-toggle-para-marks"));
+  assert.equal(docEditor.dataset.showParaMarks, "false");
+
+  assert.equal(document.getElementById("ruler-corner").textContent, "mm");
+  assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-first-indent"));
+  assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-left-margin"));
+  assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-right-margin"));
+  assert.equal(document.getElementById("v-ruler").querySelectorAll("span").length, 13);
+
+  const insertBtn = document.getElementById("status-insert-mode");
+  assert.equal(insertBtn.textContent, "삽입");
+  userClick(insertBtn);
+  assert.equal(insertBtn.textContent, "수정");
+  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 쪽 · 구역: 1 \/ \d+ · 수정/);
+  sandbox.dispatchWindowKeydown({ key: "Insert" });
+  assert.equal(insertBtn.textContent, "삽입");
+  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 쪽 · 구역: 1 \/ \d+ · 삽입/);
+
+  const zoomSlider = document.getElementById("status-zoom-slider");
+  zoomSlider.value = "135";
+  zoomSlider.dispatchEvent({ type: "input" });
+  assert.equal(document.getElementById("status-zoom-label").textContent, "135%");
+  userClick(document.getElementById("btn-zoom-fit-width"));
+  assert.equal(document.getElementById("status-zoom-label").textContent, "120%");
+  userClick(document.getElementById("btn-zoom-fit-page"));
+  assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
+
   userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
   await flushAsyncTurns();
   userClick(document.getElementById("btn-pdf-rotate"));
@@ -421,3 +482,4 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("pdf-page-card").dataset.rotatedQuarter, "true");
   assert.match(document.getElementById("pdf-form-status").textContent, /회전:\s*90°/);
 });
+

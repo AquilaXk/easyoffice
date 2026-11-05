@@ -411,10 +411,8 @@ extension WorkspaceViewModel {
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload
     else { return }
-    let candidate = (expression ?? equationDraftText).trimmingCharacters(
-      in: .whitespacesAndNewlines
-    )
-    let expr = candidate.isEmpty ? "E = mc^2" : candidate
+    let candidate = (expression ?? equationDraftText).trimmingCharacters(in: .whitespacesAndNewlines)
+    let expr = candidate.isEmpty ? "E = mc^2" : HWPEquationCodec.normalizeToLaTeXIfNeeded(candidate)
     recordUndoSnapshot(for: activeTabID)
     doc.insertEquation(rawExpression: expr, caption: caption)
     openTabs[idx].payload = .document(doc)
@@ -423,14 +421,15 @@ extension WorkspaceViewModel {
   }
 
   public func updateDocumentEquation(id: UUID, newExpression: String) {
+    let normalized = HWPEquationCodec.normalizeToLaTeXIfNeeded(newExpression)
     guard let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload,
       let eqIdx = doc.equations.firstIndex(where: { $0.id == id }),
-      doc.equations[eqIdx].rawExpression != newExpression
+      doc.equations[eqIdx].rawExpression != normalized
     else { return }
     recordUndoSnapshot(for: activeTabID, coalescingTargetKey: "eq:\(activeTabID):\(id)")
-    doc.updateEquation(id: id, rawExpression: newExpression)
+    doc.updateEquation(id: id, rawExpression: normalized)
     openTabs[idx].payload = .document(doc)
     openTabs[idx].isModified = true
     lastExecutedCommandSummary = "수식 표현식 수정 완료"

@@ -656,6 +656,9 @@ public struct DocumentEditorDetailPaneView: View {
   @Bindable var viewModel: WorkspaceViewModel
   let document: OfficeDocumentModel
   let isPrimaryPane: Bool
+  @State private var selectedLanguageCategory: String = "대표"
+  @State private var showParagraphMarks: Bool = true
+  @State private var showFormattingMarks: Bool = false
 
   public init(
     viewModel: WorkspaceViewModel, document: OfficeDocumentModel, isPrimaryPane: Bool = true
@@ -695,13 +698,13 @@ public struct DocumentEditorDetailPaneView: View {
     case .title:
       return "제목"
     case .heading1:
-      return "제목 1"
+      return "개요 1"
     case .heading2:
-      return "제목 2"
+      return "개요 2"
     case .heading3:
-      return "제목 3"
+      return "개요 3"
     case .body:
-      return "본문"
+      return "바탕글"
     case .quote:
       return "인용문"
     case .officialHeader:
@@ -835,13 +838,22 @@ public struct DocumentEditorDetailPaneView: View {
       ?? document.paragraphs.first
     let isSplitActive = viewModel.splitSecondaryTab != nil
 
+    let paperPalette =
+      viewModel.isManuscriptGridModeEnabled
+      ? palette
+      : WorkspaceThemeMode.lightLavender.surfacePalette(isSystemDark: false)
+    let scrollBackdropColor =
+      palette.isDark
+      ? EasyOfficeDesignTokens.resolveHexColor("#1F2329", fallback: palette.background.swiftUIColor)
+      : EasyOfficeDesignTokens.resolveHexColor("#E0E3EC", fallback: palette.background.swiftUIColor)
+
     VStack(alignment: .leading, spacing: 6) {
       AdaptiveScrollContainer(
         axes: .horizontal,
         showsIndicators: false,
         isSnapshotMode: viewModel.isCanvasSnapshotMode
       ) {
-        HStack(spacing: isSplitActive ? 6 : 10) {
+        HStack(spacing: isSplitActive ? 6 : 8) {
           Text("A4 \(isLandscape ? "가로" : "세로") · \(colCount)단 · \(totalPages)쪽")
             .font(.system(size: 10, weight: .semibold, design: .monospaced))
             .lineLimit(1)
@@ -851,84 +863,150 @@ public struct DocumentEditorDetailPaneView: View {
           Divider().frame(height: 14)
 
           if isPrimaryPane {
-            FlatToolbarMenu(
-              title: shortStyleTitle(for: selectedParagraph?.style ?? .body),
-              symbolName: "textformat.size",
-              palette: palette,
-              isSnapshotMode: viewModel.isCanvasSnapshotMode
-            ) {
-              ForEach(
-                [
-                  ParagraphStyleRole.title,
-                  .heading1,
-                  .heading2,
-                  .body,
-                  .quote,
-                  .officialHeader,
-                ],
-                id: \.self
-              ) { role in
-                Button(role.rawValue) {
-                  viewModel.setActiveParagraphStyle(role)
+            HStack(spacing: 6) {
+              FlatToolbarMenu(
+                title: shortStyleTitle(for: selectedParagraph?.style ?? .body),
+                symbolName: "textformat.size",
+                palette: palette,
+                isSnapshotMode: viewModel.isCanvasSnapshotMode
+              ) {
+                Button("바탕글") { viewModel.setActiveParagraphStyle(.body) }
+                Button("본문") { viewModel.setActiveParagraphStyle(.body) }
+                Button("개요 1") { viewModel.setActiveParagraphStyle(.heading1) }
+                Button("개요 2") { viewModel.setActiveParagraphStyle(.heading2) }
+                Button("제목") { viewModel.setActiveParagraphStyle(.title) }
+                Button("인용문") { viewModel.setActiveParagraphStyle(.quote) }
+                Button("공문서 두문") { viewModel.setActiveParagraphStyle(.officialHeader) }
+              }
+
+              FlatToolbarMenu(
+                title: selectedLanguageCategory,
+                symbolName: "character.book.closed",
+                palette: palette,
+                isSnapshotMode: viewModel.isCanvasSnapshotMode
+              ) {
+                ForEach(["대표", "한글", "영문", "한자", "기호"], id: \.self) { lang in
+                  Button(lang) {
+                    selectedLanguageCategory = lang
+                  }
+                }
+              }
+
+              FlatToolbarMenu(
+                title: selectedParagraph?.fontName ?? "함초롬바탕",
+                symbolName: "textformat",
+                palette: palette,
+                isSnapshotMode: viewModel.isCanvasSnapshotMode
+              ) {
+                ForEach(
+                  [
+                    "함초롬바탕",
+                    "함초롬돋움",
+                    "Pretendard",
+                    "AppleSDGothicNeo-Regular",
+                    "NanumMyeongjo",
+                    "Menlo",
+                  ],
+                  id: \.self
+                ) { family in
+                  Button(family) {
+                    viewModel.setActiveParagraphFont(fontName: family)
+                  }
+                }
+              }
+
+              HStack(spacing: 1) {
+                FlatToolbarMenu(
+                  title: String(format: "%.1f pt", selectedParagraph?.fontSizePt ?? 11.0),
+                  symbolName: "textformat.size.larger",
+                  palette: palette,
+                  isSnapshotMode: viewModel.isCanvasSnapshotMode
+                ) {
+                  ForEach([9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 32.0], id: \.self) {
+                    pt in
+                    Button(String(format: "%.1f pt", pt)) {
+                      viewModel.setActiveParagraphFont(fontSizePt: pt)
+                    }
+                  }
+                }
+                flatToolbarButton("▲", palette: palette) {
+                  let cur = selectedParagraph?.fontSizePt ?? 11.0
+                  viewModel.setActiveParagraphFont(fontSizePt: min(72.0, cur + 1.0))
+                }
+                flatToolbarButton("▼", palette: palette) {
+                  let cur = selectedParagraph?.fontSizePt ?? 11.0
+                  viewModel.setActiveParagraphFont(fontSizePt: max(6.0, cur - 1.0))
+                }
+              }
+
+              HStack(spacing: 1) {
+                FlatToolbarMenu(
+                  title: "\(Int(selectedParagraph?.lineSpacingPercent ?? 160))%",
+                  symbolName: "arrow.up.and.down.text.horizontal",
+                  palette: palette,
+                  isSnapshotMode: viewModel.isCanvasSnapshotMode
+                ) {
+                  ForEach([100.0, 115.0, 130.0, 160.0, 180.0, 200.0], id: \.self) { pct in
+                    Button("\(Int(pct))%") {
+                      viewModel.setActiveParagraphLineSpacing(pct)
+                    }
+                  }
+                }
+                flatToolbarButton("▲", palette: palette) {
+                  let cur = selectedParagraph?.lineSpacingPercent ?? 160.0
+                  viewModel.setActiveParagraphLineSpacing(min(300.0, cur + 10.0))
+                }
+                flatToolbarButton("▼", palette: palette) {
+                  let cur = selectedParagraph?.lineSpacingPercent ?? 160.0
+                  viewModel.setActiveParagraphLineSpacing(max(80.0, cur - 10.0))
                 }
               }
             }
 
-            FlatToolbarMenu(
-              title: selectedParagraph?.fontName ?? "Pretendard",
-              symbolName: "textformat",
-              palette: palette,
-              isSnapshotMode: viewModel.isCanvasSnapshotMode
-            ) {
-              ForEach(
-                [
-                  "Pretendard",
-                  "AppleSDGothicNeo-Regular",
-                  "NanumMyeongjo",
-                  "Menlo",
-                  "Helvetica Neue",
-                ],
-                id: \.self
-              ) { family in
-                Button(family) {
-                  viewModel.setActiveParagraphFont(fontName: family)
-                }
-              }
-            }
-
-            FlatToolbarMenu(
-              title: "\(Int(selectedParagraph?.fontSizePt ?? 11))pt",
-              symbolName: "textformat.size.larger",
-              palette: palette,
-              isSnapshotMode: viewModel.isCanvasSnapshotMode
-            ) {
-              ForEach([9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 32.0], id: \.self) {
-                pt in
-                Button("\(Int(pt))pt") {
-                  viewModel.setActiveParagraphFont(fontSizePt: pt)
-                }
-              }
-            }
+            Divider().frame(height: 14)
 
             if !isSplitActive {
               HStack(spacing: 2) {
-                flatToolbarButton("가 굵게", palette: palette) {
+                flatToolbarButton(
+                  "가 굵게",
+                  isProminent: selectedParagraph?.isBold == true,
+                  palette: palette
+                ) {
                   viewModel.executeRibbonCommand(
                     isHWPModule ? "hwp-home-bold" : "document-home-bold"
                   )
                 }
-                flatToolbarButton("가 기울임", palette: palette) {
+                flatToolbarButton(
+                  "가 기울임",
+                  isProminent: selectedParagraph?.isItalic == true,
+                  palette: palette
+                ) {
                   viewModel.executeRibbonCommand(
                     isHWPModule ? "hwp-home-italic" : "document-home-italic"
                   )
                 }
-                flatToolbarButton("가̲ 밑줄", palette: palette) {
+                flatToolbarButton(
+                  "간 밑줄",
+                  isProminent: selectedParagraph?.isUnderlined == true,
+                  palette: palette
+                ) {
                   viewModel.executeRibbonCommand(
                     isHWPModule ? "hwp-home-underline" : "document-home-underline"
                   )
                 }
+                flatToolbarButton("가 취소선", palette: palette) {
+                  viewModel.toggleStrikethroughOnActiveParagraph()
+                }
+                flatToolbarButton("가 글자색", palette: palette) {
+                  viewModel.applyInlineRunFormattingToActiveParagraph(foregroundHex: "#5C6BC0")
+                }
+                flatToolbarButton("✏ 형광펜", palette: palette) {
+                  viewModel.toggleHighlightOnActiveParagraph()
+                }
               }
             }
+
+            Divider().frame(height: 14)
 
             if isSplitActive {
               FlatToolbarMenu(
@@ -937,48 +1015,53 @@ public struct DocumentEditorDetailPaneView: View {
                 palette: palette,
                 isSnapshotMode: viewModel.isCanvasSnapshotMode
               ) {
-                Button("좌측 정렬") {
-                  viewModel.setActiveParagraphAlignment(.leading)
-                }
-                Button("가운데 정렬") {
-                  viewModel.setActiveParagraphAlignment(.center)
-                }
-                Button("우측 정렬") {
-                  viewModel.setActiveParagraphAlignment(.trailing)
-                }
-                Button("양쪽 정렬") {
-                  viewModel.setActiveParagraphAlignment(.justified)
-                }
+                Button("왼쪽") { viewModel.setActiveParagraphAlignment(.leading) }
+                Button("가운데") { viewModel.setActiveParagraphAlignment(.center) }
+                Button("오른쪽") { viewModel.setActiveParagraphAlignment(.trailing) }
+                Button("양쪽") { viewModel.setActiveParagraphAlignment(.justified) }
+                Button("배분") { viewModel.setActiveParagraphAlignment(.justified) }
+                Button("나눔") { viewModel.setActiveParagraphAlignment(.justified) }
               }
             } else {
-              HStack(spacing: 4) {
-                flatToolbarButton("좌", palette: palette) {
+              HStack(spacing: 2) {
+                flatToolbarButton(
+                  "왼쪽",
+                  isProminent: selectedParagraph?.alignment == .leading,
+                  palette: palette
+                ) {
                   viewModel.setActiveParagraphAlignment(.leading)
                 }
-                flatToolbarButton("중", palette: palette) {
+                flatToolbarButton(
+                  "가운데",
+                  isProminent: selectedParagraph?.alignment == .center,
+                  palette: palette
+                ) {
                   viewModel.setActiveParagraphAlignment(.center)
                 }
-                flatToolbarButton("우", palette: palette) {
+                flatToolbarButton(
+                  "오른쪽",
+                  isProminent: selectedParagraph?.alignment == .trailing,
+                  palette: palette
+                ) {
                   viewModel.setActiveParagraphAlignment(.trailing)
                 }
-                flatToolbarButton("양쪽", palette: palette) {
+                flatToolbarButton(
+                  "양쪽",
+                  isProminent: selectedParagraph?.alignment == .justified,
+                  palette: palette
+                ) {
+                  viewModel.setActiveParagraphAlignment(.justified)
+                }
+                flatToolbarButton("배분", palette: palette) {
+                  viewModel.setActiveParagraphAlignment(.justified)
+                }
+                flatToolbarButton("나눔", palette: palette) {
                   viewModel.setActiveParagraphAlignment(.justified)
                 }
               }
             }
 
-            FlatToolbarMenu(
-              title: "줄 \(Int(selectedParagraph?.lineSpacingPercent ?? 160))%",
-              symbolName: "arrow.up.and.down.text.horizontal",
-              palette: palette,
-              isSnapshotMode: viewModel.isCanvasSnapshotMode
-            ) {
-              ForEach([100.0, 115.0, 160.0, 200.0], id: \.self) { pct in
-                Button("\(Int(pct))%") {
-                  viewModel.setActiveParagraphLineSpacing(pct)
-                }
-              }
-            }
+            Divider().frame(height: 14)
 
             FlatToolbarMenu(
               title: "목록",
@@ -1110,6 +1193,22 @@ public struct DocumentEditorDetailPaneView: View {
             }
 
             Divider().frame(height: 14)
+
+            flatToolbarButton(
+              "↵ 문단부호",
+              isProminent: showParagraphMarks,
+              palette: palette
+            ) {
+              showParagraphMarks.toggle()
+            }
+
+            flatToolbarButton(
+              "¶ 조판부호",
+              isProminent: showFormattingMarks,
+              palette: palette
+            ) {
+              showFormattingMarks.toggle()
+            }
 
             flatToolbarButton(
               viewModel.isManuscriptGridModeEnabled ? "일반 용지" : "원고지",
@@ -1285,7 +1384,7 @@ public struct DocumentEditorDetailPaneView: View {
               .fill(palette.elevatedSurface.swiftUIColor)
               .frame(width: 22, height: 24)
               .overlay(
-                Text("cm")
+                Text("mm")
                   .font(.system(size: 7, weight: .bold, design: .monospaced))
                   .foregroundStyle(palette.secondaryText.swiftUIColor)
               )
@@ -1308,13 +1407,13 @@ public struct DocumentEditorDetailPaneView: View {
                 HStack {
                   Text(resolvedHeaderText)
                     .font(.system(size: 10, weight: .regular))
-                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    .foregroundStyle(paperPalette.secondaryText.swiftUIColor)
                   Spacer()
                 }
                 Divider()
 
                 if isHWPModule {
-                  hwpOfficialHeaderBanner(palette: palette)
+                  hwpOfficialHeaderBanner(palette: paperPalette)
                 }
 
                 if viewModel.isManuscriptGridModeEnabled {
@@ -1325,7 +1424,7 @@ public struct DocumentEditorDetailPaneView: View {
                   )
                 } else {
                   if viewModel.workspaceViewMode == .outlineView {
-                    documentOutlineTreePanel(palette: palette)
+                    documentOutlineTreePanel(palette: paperPalette)
                   }
                   if !tocEntries.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1334,7 +1433,7 @@ public struct DocumentEditorDetailPaneView: View {
                           .font(.system(size: 10, weight: .bold))
                           .lineLimit(1)
                           .fixedSize(horizontal: true, vertical: false)
-                          .foregroundStyle(palette.secondaryText.swiftUIColor)
+                          .foregroundStyle(paperPalette.secondaryText.swiftUIColor)
 
                         AdaptiveScrollContainer(
                           axes: .horizontal,
@@ -1361,8 +1460,10 @@ public struct DocumentEditorDetailPaneView: View {
                                 .lineLimit(1)
                                 .foregroundStyle(
                                   viewModel.selectedParagraphID == entry.paragraphID
-                                    ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
-                                    : palette.secondaryText.swiftUIColor
+                                    ? EasyOfficeDesignTokens.brandAccentToken(
+                                      isDark: paperPalette.isDark
+                                    ).swiftUIColor
+                                    : paperPalette.secondaryText.swiftUIColor
                                 )
                               }
                               .buttonStyle(.plain)
@@ -1401,14 +1502,14 @@ public struct DocumentEditorDetailPaneView: View {
                         VStack(alignment: .leading, spacing: 4) {
                           ForEach(colSlice, id: \.1.id) { idx, paragraph in
                             paragraphBlockView(
-                              for: paragraph, paragraphIndex: idx, palette: palette)
+                              for: paragraph, paragraphIndex: idx, palette: paperPalette)
                           }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                         if colIdx + 1 < effectiveCols {
                           Rectangle()
-                            .fill(palette.border.swiftUIColor)
+                            .fill(paperPalette.border.swiftUIColor)
                             .frame(width: 1)
                         }
                       }
@@ -1416,7 +1517,8 @@ public struct DocumentEditorDetailPaneView: View {
                   } else {
                     VStack(alignment: .leading, spacing: 4) {
                       ForEach(visibleParagraphs, id: \.1.id) { idx, paragraph in
-                        paragraphBlockView(for: paragraph, paragraphIndex: idx, palette: palette)
+                        paragraphBlockView(
+                          for: paragraph, paragraphIndex: idx, palette: paperPalette)
                       }
                     }
                   }
@@ -1430,7 +1532,9 @@ public struct DocumentEditorDetailPaneView: View {
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
+                        .foregroundStyle(
+                          EasyOfficeDesignTokens.brandAccentToken(isDark: paperPalette.isDark)
+                            .swiftUIColor)
                       Rectangle()
                         .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.6))
                         .frame(height: 1)
@@ -1442,7 +1546,7 @@ public struct DocumentEditorDetailPaneView: View {
                 if !document.equations.isEmpty {
                   VStack(alignment: .center, spacing: 4) {
                     ForEach(document.equations) { eq in
-                      compactEquationCardView(for: eq, palette: palette)
+                      compactEquationCardView(for: eq, palette: paperPalette)
                     }
                   }
                   .frame(maxWidth: .infinity)
@@ -1452,32 +1556,32 @@ public struct DocumentEditorDetailPaneView: View {
                 if !unanchoredImages.isEmpty {
                   VStack(alignment: .leading, spacing: 4) {
                     ForEach(unanchoredImages) { img in
-                      imageWrapCardView(for: img, palette: palette)
+                      imageWrapCardView(for: img, palette: paperPalette)
                     }
                   }
                 }
 
                 ForEach(Array(document.tables.enumerated()), id: \.element.id) { tIdx, table in
-                  documentTableView(for: table, tableIndex: tIdx, palette: palette)
+                  documentTableView(for: table, tableIndex: tIdx, palette: paperPalette)
                 }
 
                 if !footnoteItems.isEmpty || !endnoteItems.isEmpty {
                   VStack(alignment: .leading, spacing: 4) {
                     Rectangle()
-                      .fill(palette.secondaryText.swiftUIColor.opacity(0.45))
+                      .fill(paperPalette.secondaryText.swiftUIColor.opacity(0.45))
                       .frame(width: 120, height: 0.8)
 
                     ForEach(footnoteItems) { note in
                       Text("\(note.number)) \(note.text)")
                         .font(.system(size: 9.5))
-                        .foregroundStyle(palette.secondaryText.swiftUIColor)
+                        .foregroundStyle(paperPalette.secondaryText.swiftUIColor)
                         .lineLimit(1)
                     }
 
                     ForEach(endnoteItems) { note in
                       Text("미주 \(note.number)) \(note.text)")
                         .font(.system(size: 9.5))
-                        .foregroundStyle(palette.secondaryText.swiftUIColor)
+                        .foregroundStyle(paperPalette.secondaryText.swiftUIColor)
                         .lineLimit(1)
                     }
                   }
@@ -1486,7 +1590,7 @@ public struct DocumentEditorDetailPaneView: View {
                 if let mailMergePreviewLine {
                   Text("메일 머지 미리보기 · \(mailMergePreviewLine)")
                     .font(.system(size: 10))
-                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    .foregroundStyle(paperPalette.secondaryText.swiftUIColor)
                     .lineLimit(1)
                 }
 
@@ -1495,16 +1599,16 @@ public struct DocumentEditorDetailPaneView: View {
                   Spacer()
                   Text(resolvedFooterText)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(palette.secondaryText.swiftUIColor)
+                    .foregroundStyle(paperPalette.secondaryText.swiftUIColor)
                   Spacer()
                 }
               }
               .padding(.horizontal, CGFloat(viewModel.documentHorizontalPadding))
               .padding(.vertical, 20)
-              .background(palette.cardSurface.swiftUIColor)
-              .border(palette.border.swiftUIColor, width: 1)
+              .background(paperPalette.cardSurface.swiftUIColor)
+              .border(paperPalette.border.swiftUIColor, width: 1)
               .shadow(
-                color: Color.black.opacity(palette.isDark ? 0.25 : 0.05),
+                color: Color.black.opacity(palette.isDark ? 0.35 : 0.06),
                 radius: 6,
                 x: 0,
                 y: 2
@@ -1515,7 +1619,7 @@ public struct DocumentEditorDetailPaneView: View {
                   let inset: CGFloat = 14.0
                   let arm: CGFloat = 12.0
                   let thick: CGFloat = 1.2
-                  let cropColor = palette.secondaryText.swiftUIColor.opacity(0.45)
+                  let cropColor = paperPalette.secondaryText.swiftUIColor.opacity(0.45)
                   let rects = [
                     CGRect(x: inset, y: inset, width: arm, height: thick),
                     CGRect(x: inset, y: inset, width: thick, height: arm),
@@ -1554,7 +1658,9 @@ public struct DocumentEditorDetailPaneView: View {
             .frame(maxWidth: paperMaxWidth)
           }
         }
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .center)
+        .background(scrollBackdropColor)
       }
     }
   }
@@ -1609,6 +1715,15 @@ public struct DocumentEditorDetailPaneView: View {
         segment.strikethroughStyle = .single
       }
       combined.append(segment)
+    }
+    if showParagraphMarks {
+      var mark = AttributedString(" ↵")
+      mark.font = Font.system(size: max(9.0, CGFloat(paragraph.fontSizePt) - 1.5), weight: .semibold)
+      mark.foregroundColor = EasyOfficeDesignTokens.resolveHexColor(
+        "#0284C7",
+        fallback: palette.secondaryText.swiftUIColor
+      )
+      combined.append(mark)
     }
     return combined
   }
@@ -1675,6 +1790,15 @@ public struct DocumentEditorDetailPaneView: View {
               palette: palette
             )
             .frame(height: rowHeight)
+            if showParagraphMarks {
+              Text("↵")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(
+                  EasyOfficeDesignTokens.resolveHexColor(
+                    "#0284C7", fallback: palette.secondaryText.swiftUIColor)
+                )
+                .padding(.top, 4)
+            }
           }
         } else {
           paragraphRow(for: paragraph, paragraphIndex: paragraphIndex, palette: palette)

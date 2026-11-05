@@ -250,6 +250,8 @@
       });
     }
 
+    let insertModeLabel = "삽입";
+
     function computeSmartStats() {
       const statsEl = document.getElementById("smart-stats");
       if (!statsEl) return;
@@ -261,7 +263,7 @@
       const zoneEl = document.getElementById("doc-page-zone-indicator");
       if (zoneEl) {
         const estPages = Math.max(1, Math.ceil(chars / 1200));
-        zoneEl.textContent = "1 / " + estPages + " 쪽 · 구역: 1 / 1 · 삽입";
+        zoneEl.textContent = "1 / " + estPages + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
       }
     }
 
@@ -673,6 +675,183 @@
       });
     }
 
+    function setupStudioChromeControls(applyZoomPercent) {
+      const editor = document.getElementById("doc-editor");
+      const styleSelect = document.getElementById("doc-style-select");
+      const roleBadge = document.getElementById("doc-style-role-badge");
+      if (styleSelect && editor) {
+        styleSelect.addEventListener("change", () => {
+          if (roleBadge) roleBadge.textContent = styleSelect.value;
+          editor.dataset.styleRole = styleSelect.value;
+        });
+      }
+      const fontLang = document.getElementById("doc-font-lang");
+      if (fontLang && editor) {
+        fontLang.addEventListener("change", () => {
+          editor.dataset.fontLang = fontLang.value;
+        });
+      }
+      const fontSelect = document.getElementById("doc-font-select");
+      const fontBadge = document.getElementById("doc-style-font-badge");
+      if (fontSelect && editor) {
+        fontSelect.addEventListener("change", () => {
+          if (fontBadge) fontBadge.textContent = fontSelect.value;
+          editor.style.fontFamily = fontSelect.value;
+        });
+      }
+      const sizeInput = document.getElementById("doc-font-size-input");
+      const sizeBadge = document.getElementById("doc-style-size-badge");
+      function applyFontSize(pt) {
+        const clamped = Math.max(6, Math.min(72, Number.isFinite(pt) ? pt : 11));
+        const formatted = clamped.toFixed(1);
+        if (sizeInput) sizeInput.value = formatted;
+        if (sizeBadge) sizeBadge.textContent = formatted + " pt";
+        if (editor) editor.style.fontSize = formatted + "pt";
+      }
+      if (sizeInput) {
+        sizeInput.addEventListener("change", () => applyFontSize(parseFloat(sizeInput.value)));
+      }
+      const btnSizeUp = document.getElementById("btn-size-up");
+      const btnSizeDown = document.getElementById("btn-size-down");
+      if (btnSizeUp) {
+        btnSizeUp.addEventListener("click", () =>
+          applyFontSize(parseFloat(sizeInput ? sizeInput.value : "11") + 1)
+        );
+      }
+      if (btnSizeDown) {
+        btnSizeDown.addEventListener("click", () =>
+          applyFontSize(parseFloat(sizeInput ? sizeInput.value : "11") - 1)
+        );
+      }
+      const lsSelect = document.getElementById("doc-linespacing-select");
+      const lsSteps = [100, 130, 160, 180, 200, 300];
+      function applyLineSpacing(pct) {
+        const clamped = Math.max(100, Math.min(300, Number.isFinite(pct) ? pct : 160));
+        if (lsSelect) lsSelect.value = String(clamped);
+        if (editor) {
+          editor.dataset.lineSpacing = String(clamped);
+          editor.style.lineHeight = (clamped / 100).toFixed(2);
+        }
+      }
+      if (lsSelect) {
+        lsSelect.addEventListener("change", () => applyLineSpacing(parseInt(lsSelect.value, 10)));
+      }
+      const btnLsUp = document.getElementById("btn-ls-up");
+      const btnLsDown = document.getElementById("btn-ls-down");
+      if (btnLsUp) {
+        btnLsUp.addEventListener("click", () => {
+          const cur = parseInt(lsSelect ? lsSelect.value : "160", 10) || 160;
+          const next = lsSteps.find((s) => s > cur) || 300;
+          applyLineSpacing(next);
+        });
+      }
+      if (btnLsDown) {
+        btnLsDown.addEventListener("click", () => {
+          const cur = parseInt(lsSelect ? lsSelect.value : "160", 10) || 160;
+          const prev = [...lsSteps].reverse().find((s) => s < cur) || 100;
+          applyLineSpacing(prev);
+        });
+      }
+      [
+        ["btn-stylebar-strike", "strike"],
+        ["btn-stylebar-charfx", "charfx"],
+        ["btn-stylebar-textcolor", "textcolor"],
+        ["btn-stylebar-highlight", "highlight"],
+      ].forEach(([id, key]) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+          btn.addEventListener("click", () => {
+            const next = !btn.classList.contains("active");
+            btn.classList.toggle("active", next);
+            btn.setAttribute("aria-pressed", next ? "true" : "false");
+            if (editor) editor.dataset[key] = next ? "true" : "false";
+          });
+        }
+      });
+      const alignMap = [
+        ["btn-align-left", "left", "left"],
+        ["btn-align-center", "center", "center"],
+        ["btn-align-right", "right", "right"],
+        ["btn-align-justify", "justify", "justify"],
+        ["btn-align-distribute", "distribute", "justify"],
+        ["btn-align-divide", "divide", "justify"],
+      ];
+      alignMap.forEach(([id, mode, cssAlign]) => {
+        const btn = document.getElementById(id);
+        if (btn) {
+          btn.addEventListener("click", () => {
+            alignMap.forEach(([otherId]) => {
+              const other = document.getElementById(otherId);
+              if (other) {
+                const isTarget = otherId === id;
+                other.classList.toggle("active", isTarget);
+                other.setAttribute("aria-pressed", isTarget ? "true" : "false");
+              }
+            });
+            if (editor) {
+              editor.dataset.textAlign = mode;
+              editor.style.textAlign = cssAlign;
+            }
+          });
+        }
+      });
+      const ctrlMarksBtn = document.getElementById("btn-toggle-ctrl-marks");
+      if (ctrlMarksBtn && editor) {
+        ctrlMarksBtn.addEventListener("click", () => {
+          const next = !ctrlMarksBtn.classList.contains("active");
+          ctrlMarksBtn.classList.toggle("active", next);
+          ctrlMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
+          editor.dataset.showCtrlMarks = next ? "true" : "false";
+        });
+      }
+      const paraMarksBtn = document.getElementById("btn-toggle-para-marks");
+      if (paraMarksBtn && editor) {
+        paraMarksBtn.addEventListener("click", () => {
+          const next = !paraMarksBtn.classList.contains("active");
+          paraMarksBtn.classList.toggle("active", next);
+          paraMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
+          editor.dataset.showParaMarks = next ? "true" : "false";
+        });
+      }
+      const docGridBtn = document.getElementById("btn-toggle-doc-grid");
+      if (docGridBtn && editor) {
+        docGridBtn.addEventListener("click", () => {
+          const next = !docGridBtn.classList.contains("active");
+          docGridBtn.classList.toggle("active", next);
+          docGridBtn.setAttribute("aria-pressed", next ? "true" : "false");
+          editor.classList.toggle("manuscript-grid", next);
+        });
+      }
+      const insertBtn = document.getElementById("status-insert-mode");
+      function toggleInsertMode() {
+        insertModeLabel = insertModeLabel === "삽입" ? "수정" : "삽입";
+        if (insertBtn) insertBtn.textContent = insertModeLabel;
+        computeSmartStats();
+      }
+      if (insertBtn) {
+        insertBtn.addEventListener("click", toggleInsertMode);
+      }
+      host.addEventListener("keydown", (ev) => {
+        if (ev.key === "Insert") {
+          toggleInsertMode();
+        }
+      });
+      const zoomSlider = document.getElementById("status-zoom-slider");
+      if (zoomSlider && typeof applyZoomPercent === "function") {
+        const onSlide = () => applyZoomPercent(Number(zoomSlider.value) || 100);
+        zoomSlider.addEventListener("input", onSlide);
+        zoomSlider.addEventListener("change", onSlide);
+      }
+      const fitWidthBtn = document.getElementById("btn-zoom-fit-width");
+      if (fitWidthBtn && typeof applyZoomPercent === "function") {
+        fitWidthBtn.addEventListener("click", () => applyZoomPercent(120, "width"));
+      }
+      const fitPageBtn = document.getElementById("btn-zoom-fit-page");
+      if (fitPageBtn && typeof applyZoomPercent === "function") {
+        fitPageBtn.addEventListener("click", () => applyZoomPercent(100, "page"));
+      }
+    }
+
     return {
       resolveSourceScopeKind,
       buildStructuredConversionBody,
@@ -687,6 +866,7 @@
       runSecurityAuditAction,
       runBenchmarkAction,
       runPiiScrubAction,
+      setupStudioChromeControls,
     };
   }
 

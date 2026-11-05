@@ -121,6 +121,7 @@ public struct HWP5RecordHeader: Sendable, Equatable {
   public static let tagParaText: UInt16 = 67
   public static let tagListHeader: UInt16 = 72
   public static let tagTableRecord: UInt16 = 77
+  public static let tagEqEditStandard: UInt16 = HWPEquationCodec.tagEqEditStandard
   public static let tagExtendedMetadata: UInt16 = 90
 
   public static let tenBitMask: UInt32 = 0x03FF
@@ -478,6 +479,7 @@ public enum HWP5BinaryCodec {
 
     var paragraphs: [ParagraphBlock] = []
     var tables: [DocumentTableBlock] = []
+    var equations: [DocumentEquationBlock] = []
 
     for rawSection in rawSectionStreams {
       let sectionData =
@@ -488,6 +490,7 @@ public enum HWP5BinaryCodec {
         sectionData,
         paragraphs: &paragraphs,
         tables: &tables,
+        equations: &equations,
         totalDecodedRecords: &totalDecodedRecords,
         totalDecodedTableCells: &totalDecodedTableCells
       )
@@ -501,7 +504,8 @@ public enum HWP5BinaryCodec {
       footerText: footerText,
       paragraphs: paragraphs,
       tables: tables,
-      trackChangesEnabled: trackChanges
+      trackChangesEnabled: trackChanges,
+      equations: equations
     )
     if rawSectionStreams.count > 1 && docModel.sections.count < rawSectionStreams.count {
       docModel.sections = (0..<rawSectionStreams.count).map { _ in
@@ -516,6 +520,7 @@ public enum HWP5BinaryCodec {
     _ section0: Data,
     paragraphs: inout [ParagraphBlock],
     tables: inout [DocumentTableBlock],
+    equations: inout [DocumentEquationBlock],
     totalDecodedRecords: inout Int,
     totalDecodedTableCells: inout Int
   ) throws {
@@ -591,6 +596,14 @@ public enum HWP5BinaryCodec {
           )
           tables.append(table)
         }
+
+      case HWP5RecordHeader.tagEqEditStandard:
+        let eqBlock = try HWPEquationCodec.decodeHWP5EqEditRecord(
+          from: section0,
+          at: payloadStart,
+          byteLength: payloadLen
+        )
+        equations.append(eqBlock)
 
       default:
         break
@@ -918,62 +931,6 @@ public enum HWP5BinaryCodec {
     at offset: Int,
     byteLength: Int
   ) throws -> String {
-    guard byteLength >= 0, byteLength % 2 == 0, offset >= 0, offset + byteLength <= data.count else {
-      throw EasyOfficeError.corruptedContainer(
-        detail: "HWP 5.0 문단 텍스트 페이로드 길이가 2바이트(WCHAR) 배수가 아니거나 범위를 초과합니다.")
-    }
-    let payloadEnd = offset + byteLength
-    var units: [UInt16] = []
-    units.reserveCapacity(byteLength / 2)
-
-    data.withUnsafeBytes { rawBuffer in
-      var cursor = offset
-      while cursor < payloadEnd {
-        let code = rawBuffer.loadUnaligned(fromByteOffset: cursor, as: UInt16.self).littleEndian
-        if code < 0x0020 {
-          if code == 0x0009 {
-            units.append(0x0009)
-            if cursor + 16 <= payloadEnd,
-              rawBuffer.loadUnaligned(fromByteOffset: cursor + 14, as: UInt16.self).littleEndian
-                == 0x0009
-            {
-              var allZeroAttrs = true
-              for attrOff in stride(from: 2, through: 12, by: 2) {
-                if rawBuffer.loadUnaligned(fromByteOffset: cursor + attrOff, as: UInt16.self)
-                  .littleEndian != 0
-                {
-                  allZeroAttrs = false
-                  break
-                }
-              }
-              cursor += allZeroAttrs ? 16 : 2
-            } else {
-              cursor += 2
-            }
-          } else if code == 0x000A {
-            units.append(0x000A)
-            cursor += 2
-          } else if code == 0x000D {
-            if cursor + 2 < payloadEnd {
-              units.append(0x000D)
-            }
-            cursor += 2
-          } else if code == 0x0000 {
-            cursor += 2
-          } else if code <= 0x0017, cursor + 16 <= payloadEnd,
-            rawBuffer.loadUnaligned(fromByteOffset: cursor + 14, as: UInt16.self).littleEndian == code
-          {
-            cursor += 16
-          } else {
-            cursor += 2
-          }
-        } else {
-          units.append(code)
-          cursor += 2
-        }
-      }
-    }
-
-    return String(decoding: units, as: UTF16.self)
+    try HWPEquationCodec.decodeParaTextPayload(from: data, at: offset, byteLength: byteLength)
   }
 }
