@@ -22,7 +22,6 @@
         </div>
 
         <div class="brand-group">
-          <span class="brand-badge">EO</span>
           <span class="brand-title">EasyOffice</span>
           <span id="platform-pill" class="platform-pill">macOS · ⌘</span>
           <div class="qat-group" role="toolbar" aria-label="빠른 실행 도구 모음">
@@ -109,9 +108,9 @@
           <div id="pane-doc" class="editor-pane active">
             <div id="icon-toolbar" class="eo-icon-toolbar" role="toolbar" aria-label="표준 도구 상자">
               <div class="tb-group">
-                <button type="button" class="tb-btn" data-studio-cmd="home-style" title="오려두기 (Ctrl+X)" aria-label="오려두기">✂</button>
-                <button type="button" class="tb-btn" data-studio-cmd="home-style" title="복사하기 (Ctrl+C)" aria-label="복사하기">📄</button>
-                <button type="button" class="tb-btn" data-studio-cmd="home-style" title="붙이기 (Ctrl+V)" aria-label="붙이기">📋</button>
+                <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="오려두기 (Ctrl+X)" aria-label="오려두기">✂</button>
+                <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사하기 (Ctrl+C)" aria-label="복사하기">📄</button>
+                <button type="button" class="tb-btn" data-studio-cmd="clip-paste" title="붙이기 (Ctrl+V)" aria-label="붙이기">📋</button>
                 <button type="button" class="tb-btn" data-studio-cmd="home-style" title="모양 복사 (Alt+C)" aria-label="모양복사">🖌</button>
               </div>
               <span class="tb-sep" aria-hidden="true"></span>
@@ -269,13 +268,12 @@
                   spellcheck="false"
                   aria-label="문서 편집 영역"
                 >
-                  <h1 class="eo-doc-sr-title">2026년도 디지털행정혁신 종합 추진계획 보고</h1>
-                  <h2>1 &nbsp; 선정절차</h2>
+                  <h1 class="eo-boxed-heading"><span class="eo-h-num">1</span><span class="eo-h-title"> 선정절차</span></h1>
                   <p class="eo-lead-square">□ 선정절차</p>
                   <p class="eo-lead-circle">
                     ○ 제출서류 적합성검토 및 서류·발표 평가(평가위원회)를 통해 과제 선정 후, 사업비 심의·조정(사업비검토위원회), 중복심의를 거쳐 최종 확정
                   </p>
-                  <div class="eo-process-flow doc-table-toolbar" contenteditable="false">
+                  <div class="eo-process-flow">
                     <div class="eo-pf-caption">&lt; 선정 절차 &gt;</div>
                     <div class="eo-pf-track">
                       <div class="eo-pf-step">
@@ -305,7 +303,7 @@
                   <p class="eo-lead-circled-num">
                     ① (적합성 검토) 기본요건(신청자격, 제출서류, 참여제한 여부 등) 검토
                   </p>
-                  <div class="eo-criteria-panel doc-table-toolbar" contenteditable="false">
+                  <div class="eo-criteria-panel">
                     <div class="eo-criteria-badge">적합성 검토 탈락기준</div>
                     <ul class="eo-criteria-list">
                       <li>○ 공급기업 POOL(붙임5) 미등록 공급기업과 매칭하여 과제 신청하는 경우</li>
@@ -316,7 +314,7 @@
                       <li>○ 수요기업과 공급기업이 허용된 최대 지원 과제수 초과 신청 시 접수순 후순위(접수시간) 과제탈락(분과 우선적용)</li>
                     </ul>
                   </div>
-                  <h2>2 &nbsp; 분기별 핵심 성과 요약</h2>
+                  <h2 class="eo-boxed-heading"><span class="eo-h-num">2</span><span class="eo-h-title"> 분기별 핵심 성과 요약</span></h2>
                   <p>
                     주요 부서별 분기 예산 집행 현황과 중점 과제 달성률을 아래와 같이 집계합니다.
                   </p>
@@ -351,7 +349,7 @@
                       </tr>
                     </tbody>
                   </table>
-                  <h2>3 &nbsp; 향후 실행 계획</h2>
+                  <h2 class="eo-boxed-heading"><span class="eo-h-num">3</span><span class="eo-h-title"> 향후 실행 계획</span></h2>
                   <p>
                     하반기 중 기관 간 표준 전자문서 유통 검증을 완료하고 전 부서 업무 환경에 단계적으로 적용합니다.
                   </p>
@@ -718,7 +716,7 @@
       <footer id="status-bar" class="statusbar" role="contentinfo">
         <span class="statusbar-left-group">
           <span id="doc-page-zone-indicator" class="eo-style-zone" hidden>1 / 1 쪽 · 구역: 1 / 1 · 삽입</span>
-          <span class="statusbar-pos-metrics" aria-hidden="true">1/1 쪽 &nbsp; 1단 &nbsp; 14줄 &nbsp; 29칸</span>
+          <span id="status-studio-pos" class="statusbar-pos-metrics" aria-hidden="true">1/1 쪽 &nbsp; 1단 &nbsp; 14줄 &nbsp; 29칸</span>
           <button id="status-insert-mode" class="statusbar-mode-btn" type="button" title="입력 모드 전환 (Insert)">삽입</button>
           <span id="status-doc-filename" class="statusbar-doc-path">[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).hwp — 1페이지</span>
         </span>

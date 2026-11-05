@@ -20,7 +20,7 @@ const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
 const APP_JS: &str = include_str!("../ui/app.js");
-const FAVICON_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#5C6BC0\"/><text x=\"16\" y=\"21\" text-anchor=\"middle\" fill=\"#FFFFFF\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">EO</text></svg>";
+const FAVICON_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#5C6BC0\"/><path d=\"M9 7h10l4 4v14H9V7z\" fill=\"#FFFFFF\"/><path d=\"M19 7v4h4\" fill=\"#DDE2F6\"/><rect x=\"12\" y=\"14\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/><rect x=\"12\" y=\"18\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/></svg>";
 
 pub const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
 pub const MAX_CONCURRENT_HTTP_THREADS: usize = 32;

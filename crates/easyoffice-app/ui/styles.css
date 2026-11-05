@@ -91,7 +91,6 @@ html[data-theme="dark"] .menu-toolbox-toggle { color: #c9d1d9; }
 .app-shell:not([data-panels-expanded="true"]) .sidebar-left,
 .app-shell:not([data-panels-expanded="true"]) .inspector-right { display: none; }
 .brand-group { display: flex; align-items: center; gap: 8px; flex-shrink: 0; white-space: nowrap; }
-.brand-badge { background: var(--eo-primary-brand); color: var(--eo-primary-on); font-weight: 700; font-size: 12px; padding: 3px 7px; border-radius: 4px; }
 .brand-title { font-weight: 700; font-size: 15px; }
 .platform-pill { font-size: 11px; padding: 2px 6px; color: var(--eo-text-muted); white-space: nowrap; }
 .qat-group { display: flex; align-items: center; gap: 2px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--eo-border); flex-shrink: 0; }
@@ -135,8 +134,9 @@ html[data-theme="dark"] .menu-toolbox-toggle { color: #c9d1d9; }
 .outline-item.active { font-weight: 600; color: var(--eo-primary); }
 .security-card, .inspector-section { padding: 10px 0; border-bottom: 1px solid var(--eo-border); font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
 .security-card h3, .inspector-section h3 { font-size: 12px; font-weight: 600; color: var(--eo-text); }
-.canvas-stage { padding: 0; overflow-y: auto; background: #e0e0e0; }
+.canvas-stage { padding: 0; overflow-y: auto; background: #e0e0e0; height: 100%; min-height: 0; }
 html[data-theme="dark"] .canvas-stage { background: #1f2329; }
+#pane-doc:not([hidden]) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .eo-icon-toolbar { display: flex; align-items: center; height: 32px; padding: 0 8px; gap: 2px; background: #f5f5f5; border-bottom: 1px solid #c0c0c0; overflow-x: auto; scrollbar-width: none; }
 html[data-theme="dark"] .eo-icon-toolbar { background: #2f343c; border-bottom-color: #3d444d; }
 .tb-group { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
@@ -175,7 +175,7 @@ html[data-theme="dark"] .eo-glyph-btn:hover, html[data-theme="dark"] .eo-glyph-b
 .sb-highlight-btn { border-bottom: 3px solid #fbbc04; }
 .eo-style-zone { font-size: 11px; color: #333333; white-space: nowrap; }
 html[data-theme="dark"] .eo-style-zone { color: #c9d1d9; }
-.doc-studio-grid { display: grid; grid-template-columns: 20px 1fr; grid-template-rows: 20px 1fr; max-width: none; width: 100%; height: calc(100vh - 117px); margin: 0; }
+.doc-studio-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 20px 1fr; grid-template-rows: 20px 1fr; max-width: none; width: 100%; margin: 0; }
 .ruler-corner { display: flex; align-items: center; justify-content: center; font-size: 9px; color: #666666; background: #e4e4e4; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; }
 .page-ruler { display: flex; align-items: center; justify-content: center; gap: 3px; padding: 0; font-size: 9px; color: #555555; background: #d4d4d4; border-bottom: 1px solid #c0c0c0; overflow: hidden; white-space: nowrap; }
 .ruler-pin { font-size: 9px; color: #777777; user-select: none; }
@@ -244,18 +244,43 @@ html[data-theme="dark"] #doc-editor {
     calc(100% - 38px) calc(100% - 44px), calc(100% - 52px) calc(100% - 30px);
 }
 
-.eo-doc-sr-title {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
+.eo-boxed-heading {
+  display: flex;
+  align-items: stretch;
+  margin: 6px 0 14px;
+  padding: 0;
+  background: #f5e6d3;
+  outline: 1px solid #b8a082;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
 }
 
-#doc-editor h2 {
+.eo-boxed-heading:not(:has(.eo-h-title)) {
+  padding: 7px 14px;
+}
+
+.eo-h-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  padding: 7px 10px;
+  background: #e8e6e1;
+  border-right: 1px solid #b8a082;
+}
+
+.eo-h-title {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  padding: 7px 14px;
+}
+
+#doc-editor h2:not(.eo-boxed-heading) {
   margin: 6px 0 14px;
-  padding: 7px 14px 7px 13px;
-  background: linear-gradient(to right, #e8e6e1 0, #e8e6e1 36px, #b8a082 36px, #b8a082 37px, #f5e6d3 37px, #f5e6d3 100%);
+  padding: 7px 14px;
+  background: #f5e6d3;
   outline: 1px solid #b8a082;
   font-size: 16px;
   font-weight: 700;
@@ -276,7 +301,7 @@ html[data-theme="dark"] #doc-editor {
   color: #111827;
 }
 
-.eo-process-flow.doc-table-toolbar {
+.eo-process-flow {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -341,7 +366,7 @@ html[data-theme="dark"] #doc-editor {
   color: #111827;
 }
 
-.eo-criteria-panel.doc-table-toolbar {
+.eo-criteria-panel {
   position: relative;
   display: flex;
   flex-direction: column;

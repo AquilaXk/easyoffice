@@ -260,10 +260,28 @@
       const words = text ? text.split(/\s+/).length : 0;
       const secs = Math.max(1, Math.ceil((words / 220) * 60));
       statsEl.textContent = "문자: " + chars + " · 단어: " + words + " · 읽기 시간: " + secs + "초";
+      const estPages = Math.max(1, Math.ceil(chars / 1200));
       const zoneEl = document.getElementById("doc-page-zone-indicator");
       if (zoneEl) {
-        const estPages = Math.max(1, Math.ceil(chars / 1200));
         zoneEl.textContent = "1 / " + estPages + " 쪽 · 구역: 1 / 1 · " + insertModeLabel;
+      }
+      const posEl = document.getElementById("status-studio-pos");
+      if (posEl) {
+        const editor = document.getElementById("doc-editor");
+        const cols = Number.parseInt(editor?.style?.columnCount || "1", 10) || 1;
+        const lineCount = Math.max(1, text ? text.split(/\n+/).length : 1);
+        const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
+        posEl.textContent =
+          "1/" + estPages + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸";
+      }
+      const fileEl = document.getElementById("status-doc-filename");
+      if (fileEl) {
+        const curMod = getActiveModule();
+        const baseName =
+          curMod === "HWP"
+            ? "[붙임2] 행정안전부 전자결재 표준 기안문.hwpx"
+            : "[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).hwp";
+        fileEl.textContent = baseName + " — " + estPages + "페이지";
       }
     }
 
@@ -675,8 +693,69 @@
       });
     }
 
-    function setupStudioChromeControls(applyZoomPercent) {
+    function setupStudioChromeControls(applyZoomPercent, onStudioCmd) {
       const editor = document.getElementById("doc-editor");
+      const chromeToggleBtn = document.getElementById("btn-chrome-toggle");
+      if (chromeToggleBtn) {
+        chromeToggleBtn.addEventListener("click", () => {
+          const shell = document.getElementById("app") || document.querySelector(".app-shell");
+          if (!shell) return;
+          const next = shell.dataset.chromeExpanded !== "true";
+          shell.dataset.chromeExpanded = next ? "true" : "false";
+          shell.dataset.panelsExpanded = next ? "true" : "false";
+          chromeToggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
+          chromeToggleBtn.textContent = next ? "▴" : "▾";
+        });
+      }
+      document.querySelectorAll(".studio-menu-item[data-menu-cat]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (btn.dataset.menuCat === "file") {
+            document.getElementById("qat-save")?.click();
+            return;
+          }
+          const shell = document.getElementById("app") || document.querySelector(".app-shell");
+          if (shell && shell.dataset.chromeExpanded !== "true") {
+            shell.dataset.chromeExpanded = "true";
+            shell.dataset.panelsExpanded = "true";
+            if (chromeToggleBtn) {
+              chromeToggleBtn.setAttribute("aria-expanded", "true");
+              chromeToggleBtn.textContent = "▴";
+            }
+          }
+          const rBtn = document.querySelector('.ribbon-btn[data-category="' + btn.dataset.menuCat + '"]');
+          if (rBtn) rBtn.click();
+        });
+      });
+      let studioClipboardText = "";
+      document.querySelectorAll("#icon-toolbar [data-studio-cmd]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const cmd = btn.dataset.studioCmd;
+          if (!cmd) return;
+          if (cmd === "palette") {
+            document.getElementById("btn-command-palette")?.click();
+            return;
+          }
+          const fb = document.getElementById("status-command-feedback");
+          const firstPara = document.querySelector("#doc-editor p");
+          if (cmd === "clip-copy") {
+            studioClipboardText = (firstPara?.textContent || "").trim();
+            if (fb) fb.textContent = "선택 문단 클립보드 복사 완료";
+            return;
+          }
+          if (cmd === "clip-cut") {
+            studioClipboardText = (firstPara?.textContent || "").trim();
+            if (fb) fb.textContent = "선택 문단 오려두기 완료";
+            if (typeof onStudioCmd === "function") onStudioCmd("home-style");
+            return;
+          }
+          if (cmd === "clip-paste") {
+            if (fb) fb.textContent = "클립보드 문단 붙이기 완료 (" + (studioClipboardText || "기본 문단").slice(0, 18) + ")";
+            if (typeof onStudioCmd === "function") onStudioCmd("home-style");
+            return;
+          }
+          if (typeof onStudioCmd === "function") onStudioCmd(cmd);
+        });
+      });
       function withDocStyleUndo(mutateFn) {
         const pre =
           typeof captureWorkspaceSnapshot === "function"

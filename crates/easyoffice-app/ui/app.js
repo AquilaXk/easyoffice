@@ -445,43 +445,12 @@
     if (zoomInBtn) {
       zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
     }
-    const chromeToggleBtn = document.getElementById("btn-chrome-toggle");
-    if (chromeToggleBtn) {
-      chromeToggleBtn.addEventListener("click", () => {
-        const shell = document.getElementById("app") || document.querySelector(".app-shell");
-        if (!shell) return;
-        const next = shell.dataset.chromeExpanded !== "true";
-        shell.dataset.chromeExpanded = next ? "true" : "false";
-        shell.dataset.panelsExpanded = next ? "true" : "false";
-        chromeToggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
-        chromeToggleBtn.textContent = next ? "▴" : "▾";
-      });
-    }
-    document.querySelectorAll(".studio-menu-item[data-menu-cat]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (btn.dataset.menuCat === "file") {
-          document.getElementById("qat-save")?.click();
-          return;
-        }
-        const rBtn = document.querySelector('.ribbon-btn[data-category="' + btn.dataset.menuCat + '"]');
-        if (rBtn) rBtn.click();
-      });
+    workspacePanels.setupStudioChromeControls(applyZoomPercent, (cmd) => {
+      const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
+      const fullCmd =
+        cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd;
+      void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
     });
-    document.querySelectorAll("#icon-toolbar [data-studio-cmd]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const cmd = btn.dataset.studioCmd;
-        if (!cmd) return;
-        if (cmd === "palette") {
-          document.getElementById("btn-command-palette")?.click();
-          return;
-        }
-        const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
-        const fullCmd =
-          cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd;
-        void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
-      });
-    });
-    workspacePanels.setupStudioChromeControls(applyZoomPercent);
   }
 
   function setupQatAndRibbonActions() {

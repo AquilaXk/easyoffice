@@ -633,7 +633,7 @@
       const fontLang = document.getElementById("doc-font-lang");
       if (fontLang) fontLang.value = editor?.dataset?.fontLang || "대표";
       const fontSelect = document.getElementById("doc-font-select");
-      const fontVal = editor?.style?.fontFamily || "Pretendard";
+      const fontVal = editor?.style?.fontFamily || "휴먼명조";
       if (fontSelect) fontSelect.value = fontVal;
       const fontBadge = document.getElementById("doc-style-font-badge");
       if (fontBadge) fontBadge.textContent = fontVal;

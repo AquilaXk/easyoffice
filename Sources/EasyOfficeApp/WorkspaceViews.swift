@@ -839,6 +839,7 @@ struct TopDocumentTabStripView: View {
         topMenuBarItem("편집", palette: palette) {
           viewModel.isShowingHomeHub = false
           viewModel.activeRibbonCategory = .home
+          isStudioPanelsExpanded = true
         }
         topMenuBarItem("보기", palette: palette) {
           viewModel.isShowingHomeHub = false
@@ -848,22 +849,27 @@ struct TopDocumentTabStripView: View {
         topMenuBarItem("입력", palette: palette) {
           viewModel.isShowingHomeHub = false
           viewModel.activeRibbonCategory = .insert
+          isStudioPanelsExpanded = true
         }
         topMenuBarItem("서식", palette: palette) {
           viewModel.isShowingHomeHub = false
           viewModel.activeRibbonCategory = .home
+          isStudioPanelsExpanded = true
         }
         topMenuBarItem("쪽", palette: palette) {
           viewModel.isShowingHomeHub = false
           viewModel.activeRibbonCategory = .layout
+          isStudioPanelsExpanded = true
         }
         topMenuBarItem("표", palette: palette) {
           viewModel.isShowingHomeHub = false
           viewModel.activeRibbonCategory = .formulasAndData
+          isStudioPanelsExpanded = true
         }
         topMenuBarItem("도구", palette: palette) {
           viewModel.isShowingHomeHub = false
           viewModel.activeRibbonCategory = .review
+          isStudioPanelsExpanded = true
         }
       }
       .fixedSize(horizontal: true, vertical: false)
@@ -2310,12 +2316,19 @@ struct BottomWorkspaceStatusBarView: View {
           switch tab.payload {
           case .document(let doc):
             let sectionCount = max(1, doc.sections.count)
+            let colCount = max(1, doc.sections.first?.columnCount ?? 1)
+            let lineCount = max(1, doc.paragraphs.count)
+            let activeParaChars = max(
+              1,
+              (doc.paragraphs.first(where: { $0.id == viewModel.selectedParagraphID })
+                ?? doc.paragraphs.first)?.text.count ?? 1
+            )
             let fileNameAccent = EasyOfficeDesignTokens.resolveHexColor(
               palette.isDark ? "#8BB8FF" : "#6182D6",
               fallback: palette.primaryText.swiftUIColor
             )
             HStack(spacing: 8) {
-              Text("1 / \(doc.estimatedPageCount) 쪽")
+              Text("1/\(doc.estimatedPageCount) 쪽   \(colCount)단   \(lineCount)줄   \(activeParaChars)칸")
                 .font(.system(size: 11, weight: .regular))
                 .foregroundStyle(palette.primaryText.swiftUIColor)
 

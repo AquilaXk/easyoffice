@@ -332,337 +332,6 @@ public struct SelectableParagraphTextView: NSViewRepresentable {
   }
 }
 
-public struct DocumentHorizontalRulerView: View {
-  public let document: OfficeDocumentModel
-  public let selectedParagraph: ParagraphBlock?
-  public let palette: WorkspaceThemePalette
-  public var viewModel: WorkspaceViewModel?
-
-  public init(
-    document: OfficeDocumentModel,
-    selectedParagraph: ParagraphBlock?,
-    palette: WorkspaceThemePalette,
-    viewModel: WorkspaceViewModel? = nil
-  ) {
-    self.document = document
-    self.selectedParagraph = selectedParagraph
-    self.palette = palette
-    self.viewModel = viewModel
-  }
-
-  public var body: some View {
-    let customPadding = viewModel?.documentHorizontalPadding ?? 28.0
-    let leftMarginPt: CGFloat = max(24.0, min(96.0, CGFloat(customPadding + 26.0)))
-    let rightMarginPt: CGFloat = leftMarginPt
-    let firstLineOffsetPt = CGFloat(selectedParagraph?.firstLineIndentPt ?? 0.0)
-    let leftIndentOffsetPt = CGFloat(selectedParagraph?.leftIndentPt ?? 0.0)
-    let rulerBg = EasyOfficeDesignTokens.resolveHexColor(
-      palette.isDark ? "#25292F" : "#FFFFFF",
-      fallback: palette.cardSurface.swiftUIColor
-    )
-    let marginShade = EasyOfficeDesignTokens.resolveHexColor(
-      palette.isDark ? "#1F2329" : "#D4D4D4",
-      fallback: palette.elevatedSurface.swiftUIColor
-    )
-
-    GeometryReader { geo in
-      let totalWidth = max(240.0, geo.size.width)
-      let bodyWidth = max(80.0, totalWidth - leftMarginPt - rightMarginPt)
-      let cmStep = bodyWidth / 16.0
-
-      ZStack(alignment: .topLeading) {
-        Rectangle()
-          .fill(rulerBg)
-
-        Rectangle()
-          .fill(marginShade)
-          .frame(width: leftMarginPt, height: 20)
-
-        Rectangle()
-          .fill(marginShade)
-          .frame(width: rightMarginPt, height: 20)
-          .offset(x: totalWidth - rightMarginPt)
-
-        Canvas { context, size in
-          let tickColor = palette.secondaryText.swiftUIColor
-          for mmIndex in 0...160 {
-            let xPos = leftMarginPt + (CGFloat(mmIndex) / 10.0) * cmStep
-            guard xPos <= totalWidth - rightMarginPt + 1.0 else { continue }
-            let isCm = (mmIndex % 10 == 0)
-            let isHalfCm = (mmIndex % 5 == 0) && !isCm
-            let tickHeight: CGFloat = isCm ? 7.5 : (isHalfCm ? 5.0 : 2.5)
-            let tickWidth: CGFloat = isCm ? 1.0 : 0.6
-            let rect = CGRect(
-              x: xPos - tickWidth * 0.5,
-              y: size.height - tickHeight,
-              width: tickWidth,
-              height: tickHeight
-            )
-            context.fill(
-              Path(rect),
-              with: .color(tickColor.opacity(isCm ? 0.85 : 0.45))
-            )
-          }
-        }
-
-        ForEach(0...16, id: \.self) { cm in
-          let xPos = leftMarginPt + CGFloat(cm) * cmStep
-          if xPos <= totalWidth - rightMarginPt + 4.0 {
-            Text("\(cm)")
-              .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
-              .position(x: xPos, y: 6)
-          }
-        }
-
-        Text("▽")
-          .font(.system(size: 8.5, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
-          .position(
-            x: min(
-              totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt + firstLineOffsetPt),
-            y: 4.5
-          )
-          .gesture(
-            DragGesture(minimumDistance: 2)
-              .onChanged { drag in
-                let newFirst = max(
-                  0.0,
-                  min(144.0, Double(drag.location.x - leftMarginPt - leftIndentOffsetPt))
-                )
-                viewModel?.setActiveParagraphIndent(firstLineIndentPt: newFirst)
-              }
-          )
-          .onTapGesture {
-            let currentFirst = Double(firstLineOffsetPt)
-            let nextFirst = currentFirst >= 24.0 ? 0.0 : (currentFirst + 12.0)
-            viewModel?.setActiveParagraphIndent(firstLineIndentPt: nextFirst)
-          }
-          .help("첫 줄 들여쓰기 마커 (\(Int(firstLineOffsetPt))pt)")
-
-        Text("△")
-          .font(.system(size: 8.5, weight: .bold))
-          .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
-          .position(
-            x: min(totalWidth - rightMarginPt, leftMarginPt + leftIndentOffsetPt),
-            y: 15.5
-          )
-          .gesture(
-            DragGesture(minimumDistance: 2)
-              .onChanged { drag in
-                let newLeft = max(0.0, min(144.0, Double(drag.location.x - leftMarginPt)))
-                viewModel?.setActiveParagraphIndent(leftIndentPt: newLeft)
-              }
-          )
-          .onTapGesture {
-            let currentLeft = Double(leftIndentOffsetPt)
-            let nextLeft = currentLeft >= 36.0 ? 0.0 : (currentLeft + 18.0)
-            viewModel?.setActiveParagraphIndent(leftIndentPt: nextLeft)
-          }
-          .help("좌측 단락 들여쓰기 마커 (\(Int(leftIndentOffsetPt))pt)")
-
-        Text("▽")
-          .font(.system(size: 8.5, weight: .bold))
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
-          .position(x: totalWidth - rightMarginPt, y: 15.5)
-          .gesture(
-            DragGesture(minimumDistance: 2)
-              .onChanged { drag in
-                let distFromRight = max(24.0, min(96.0, Double(totalWidth - drag.location.x)))
-                viewModel?.setDocumentHorizontalPadding(max(16.0, distFromRight - 26.0))
-              }
-          )
-          .help("오른쪽 여백 경계 (\(Int(rightMarginPt))pt)")
-      }
-      .border(palette.border.swiftUIColor, width: 1)
-    }
-    .frame(height: 20)
-  }
-}
-
-public struct DocumentVerticalRulerView: View {
-  public let palette: WorkspaceThemePalette
-
-  public init(palette: WorkspaceThemePalette) {
-    self.palette = palette
-  }
-
-  public var body: some View {
-    let rulerBg = EasyOfficeDesignTokens.resolveHexColor(
-      palette.isDark ? "#25292F" : "#FFFFFF",
-      fallback: palette.cardSurface.swiftUIColor
-    )
-    let marginShade = EasyOfficeDesignTokens.resolveHexColor(
-      palette.isDark ? "#1F2329" : "#D4D4D4",
-      fallback: palette.elevatedSurface.swiftUIColor
-    )
-
-    VStack(spacing: 0) {
-      ZStack(alignment: .bottomTrailing) {
-        Rectangle()
-          .fill(marginShade)
-          .frame(width: 20, height: 34)
-
-        Text("0")
-          .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
-          .frame(width: 14, alignment: .center)
-          .offset(x: -4, y: -2)
-
-        Rectangle()
-          .fill(palette.hairlineBorder)
-          .frame(height: 0.8)
-      }
-
-      ForEach(1...36, id: \.self) { cm in
-        ZStack(alignment: .topTrailing) {
-          Rectangle()
-            .fill(palette.secondaryText.swiftUIColor.opacity(0.75))
-            .frame(width: 5.5, height: 0.9)
-
-          Text("\(cm)")
-            .font(.system(size: 7.5, weight: .semibold, design: .monospaced))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
-            .frame(width: 14, alignment: .center)
-            .offset(x: -4, y: 1)
-
-          Rectangle()
-            .fill(palette.hairlineBorder)
-            .frame(width: 3.0, height: 0.7)
-            .offset(y: 10)
-        }
-        .frame(width: 20, height: 20)
-      }
-
-      Spacer(minLength: 0)
-    }
-    .frame(width: 20)
-    .frame(maxHeight: .infinity, alignment: .top)
-    .background(rulerBg)
-    .border(palette.hairlineBorder, width: 1)
-  }
-}
-
-
-public struct HWPManuscriptGridPaperView: View {
-  public let document: OfficeDocumentModel
-  public let palette: WorkspaceThemePalette
-  public var viewModel: WorkspaceViewModel?
-
-  public init(
-    document: OfficeDocumentModel,
-    palette: WorkspaceThemePalette,
-    viewModel: WorkspaceViewModel? = nil
-  ) {
-    self.document = document
-    self.palette = palette
-    self.viewModel = viewModel
-  }
-
-  private var manuscriptPages: [[String]] {
-    let rawText = document.paragraphs.map(\.text).joined(separator: "\n")
-    var cells: [String] = []
-    for ch in rawText {
-      if ch == "\n" {
-        let remainder = cells.count % 20
-        if remainder != 0 {
-          let padCount = 20 - remainder
-          for _ in 0..<padCount {
-            cells.append(" ")
-          }
-        }
-      } else {
-        cells.append(String(ch))
-      }
-    }
-    if cells.isEmpty {
-      cells = Array(repeating: " ", count: 200)
-    }
-    var pages: [[String]] = []
-    var offset = 0
-    while offset < cells.count {
-      let end = min(cells.count, offset + 200)
-      var slice = Array(cells[offset..<end])
-      if slice.count < 200 {
-        slice.append(contentsOf: Array(repeating: " ", count: 200 - slice.count))
-      }
-      pages.append(slice)
-      offset += 200
-    }
-    return pages
-  }
-
-  public var body: some View {
-    let pages = manuscriptPages
-    let gridStrokeColor = EasyOfficeDesignTokens.resolveHexColor(
-      palette.isDark ? "#D97706" : "#C84B31",
-      fallback: palette.border.swiftUIColor
-    )
-    let fullText = document.paragraphs.map(\.text).joined(separator: "\n")
-
-    VStack(alignment: .leading, spacing: 14) {
-      if let vm = viewModel, !vm.isCanvasSnapshotMode {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("원고지 본문 직접 편집 (입력 즉시 200자 원고지 격자에 반영)")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
-          TextEditor(
-            text: Binding(
-              get: { fullText },
-              set: { vm.updateActiveDocumentManuscriptFullText($0) }
-            )
-          )
-          .font(.system(size: 12, design: .monospaced))
-          .frame(minHeight: 68, maxHeight: 110)
-          .padding(6)
-          .background(palette.cardSurface.swiftUIColor)
-          .border(gridStrokeColor.opacity(0.6), width: 1)
-        }
-      }
-
-      ForEach(Array(pages.enumerated()), id: \.offset) { pageIdx, pageCells in
-        VStack(alignment: .leading, spacing: 6) {
-          HStack {
-            Label(
-              "원고지 \(pageIdx + 1)매 / 총 \(pages.count)매 (20×10 = 200자)",
-              systemImage: "squareshape.split.3x3"
-            )
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(gridStrokeColor)
-
-            Spacer()
-
-            Text(document.title)
-              .font(.system(size: 10, weight: .medium))
-              .foregroundStyle(palette.secondaryText.swiftUIColor)
-          }
-
-          VStack(spacing: 3) {
-            ForEach(0..<10, id: \.self) { rowIdx in
-              HStack(spacing: 0) {
-                ForEach(0..<20, id: \.self) { colIdx in
-                  let cellIdx = rowIdx * 20 + colIdx
-                  let ch = pageCells.indices.contains(cellIdx) ? pageCells[cellIdx] : " "
-                  Text(ch)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(palette.primaryText.swiftUIColor)
-                    .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
-                    .background(palette.cardSurface.swiftUIColor)
-                    .border(gridStrokeColor.opacity(0.65), width: 0.7)
-                }
-              }
-              .border(gridStrokeColor, width: 1.0)
-            }
-          }
-          .padding(8)
-          .background(palette.elevatedSurface.swiftUIColor)
-          .border(gridStrokeColor, width: 1.6)
-        }
-      }
-    }
-  }
-}
-
 /// Rich interactive editor pane for Document (.docx/.odt/.md) and Korean Office (.hwp/.hwpx) modules.
 public struct DocumentEditorDetailPaneView: View {
   @Environment(\.colorScheme) private var colorScheme
@@ -969,53 +638,13 @@ public struct DocumentEditorDetailPaneView: View {
     guard paragraphIndex >= 0 && paragraphIndex < document.paragraphs.count else { return 1 }
     var count = 0
     for idx in 0...paragraphIndex {
-      let st = document.paragraphs[idx].style
-      if st == .heading1 || st == .heading2 {
+      let p = document.paragraphs[idx]
+      let trimmed = p.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      if (p.style == .heading1 || p.style == .heading2) && !trimmed.hasPrefix("제목:") {
         count += 1
       }
     }
     return max(1, count)
-  }
-
-  @ViewBuilder
-  private func processFlowDiagramView() -> some View {
-    let boxFill = EasyOfficeDesignTokens.resolveHexColor("#F5E6D3", fallback: Color.orange.opacity(0.15))
-    let borderColor = EasyOfficeDesignTokens.resolveHexColor("#B8A082", fallback: Color.gray)
-    let textColor = EasyOfficeDesignTokens.resolveHexColor("#1F2937", fallback: .black)
-    let steps = [
-      "① 적합성검토",
-      "② 선정평가(평가위원회)",
-      "③ 사업비 심의·조정",
-      "④ 중복 심의",
-    ]
-    VStack(alignment: .center, spacing: 6) {
-      Text("< 선정 및 처리 절차 >")
-        .font(.system(size: 11, weight: .bold))
-        .foregroundStyle(textColor)
-        .frame(maxWidth: .infinity, alignment: .center)
-
-      HStack(spacing: 6) {
-        ForEach(Array(steps.enumerated()), id: \.offset) { idx, label in
-          ZStack {
-            boxFill
-            Text(label)
-              .font(.system(size: 10.5, weight: .semibold))
-              .foregroundStyle(textColor)
-              .lineLimit(1)
-              .padding(.horizontal, 8)
-          }
-          .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28)
-          .border(borderColor, width: 1)
-
-          if idx + 1 < steps.count {
-            Text("▸")
-              .font(.system(size: 11, weight: .bold))
-              .foregroundStyle(borderColor)
-          }
-        }
-      }
-    }
-    .padding(.vertical, 6)
   }
 
   public var body: some View {
@@ -1086,14 +715,29 @@ public struct DocumentEditorDetailPaneView: View {
           ) {
             HStack(spacing: 4) {
               HStack(spacing: 2) {
-                studioIconButton("✂", tooltip: "오려두기", palette: palette) {
-                  if let text = selectedParagraph?.text, !text.isEmpty {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
+                studioIconButton("💾", tooltip: "문서 저장", palette: palette) {
+                  if !viewModel.isCanvasSnapshotMode {
+                    _ = WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
+                  } else {
+                    viewModel.lastExecutedCommandSummary = "문서 저장 완료"
                   }
-                  viewModel.executeRibbonCommand(
-                    isHWPModule ? "hwp-home-style" : "document-home-style"
-                  )
+                }
+                studioIconButton("↩", tooltip: "실행 취소", palette: palette) {
+                  viewModel.undoActiveTab()
+                }
+                studioIconButton("↪", tooltip: "다시 실행", palette: palette) {
+                  viewModel.redoActiveTab()
+                }
+                Divider().frame(height: 16)
+                studioIconButton("✂", tooltip: "오려두기", palette: palette) {
+                  if let p = selectedParagraph, !p.text.isEmpty {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(p.text, forType: .string)
+                    if document.paragraphs.count > 1 {
+                      viewModel.updateParagraphText(paragraphID: p.id, newText: "")
+                    }
+                  }
+                  viewModel.lastExecutedCommandSummary = "선택 문단 오려두기 완료"
                 }
                 studioIconButton("📄", tooltip: "복사하기", palette: palette) {
                   if let text = selectedParagraph?.text, !text.isEmpty {
@@ -1690,6 +1334,7 @@ public struct DocumentEditorDetailPaneView: View {
           document: document,
           selectedParagraph: selectedParagraph,
           palette: palette,
+          paperMaxWidth: paperMaxWidth,
           viewModel: isPrimaryPane ? viewModel : nil
         )
       }
@@ -1862,8 +1507,14 @@ public struct DocumentEditorDetailPaneView: View {
                   }
                 }
 
-                if !document.tables.isEmpty {
-                  processFlowDiagramView()
+                let shouldShowProposalDiagram =
+                  !isHWPModule
+                  && !document.tables.isEmpty
+                  && document.paragraphs.contains(where: {
+                    $0.text.contains("아키텍처") || $0.text.contains("선정") || $0.text.contains("로드맵")
+                  })
+                if shouldShowProposalDiagram {
+                  StudioProcessFlowDiagramView()
                 }
 
                 ForEach(Array(document.tables.enumerated()), id: \.element.id) { tIdx, table in
@@ -2050,47 +1701,72 @@ public struct DocumentEditorDetailPaneView: View {
   @ViewBuilder
   private func boxedSectionHeadingView(
     for paragraph: ParagraphBlock,
-    paragraphIndex: Int
+    paragraphIndex: Int,
+    isEditing: Bool,
+    palette: WorkspaceThemePalette
   ) -> some View {
     let number = headingOrderNumber(upTo: paragraphIndex)
     let rawTitle = paragraph.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let showNumberCell = !rawTitle.hasPrefix("제목:")
     let prefixCandidate = "\(number). "
     let displayTitle =
-      rawTitle.hasPrefix(prefixCandidate)
+      (showNumberCell && rawTitle.hasPrefix(prefixCandidate))
       ? String(rawTitle.dropFirst(prefixCandidate.count))
       : rawTitle
+    let displayParagraph: ParagraphBlock = {
+      var copy = paragraph
+      if displayTitle != paragraph.text && paragraph.inlineRuns.isEmpty {
+        copy.text = displayTitle
+      }
+      return copy
+    }()
     let borderColor = EasyOfficeDesignTokens.resolveHexColor("#B8A082", fallback: Color.gray)
     let numberBg = EasyOfficeDesignTokens.resolveHexColor("#F2F2F2", fallback: Color.gray.opacity(0.15))
     let titleBg = EasyOfficeDesignTokens.resolveHexColor("#F5E6D3", fallback: Color.orange.opacity(0.15))
     let textColor = EasyOfficeDesignTokens.resolveHexColor("#111827", fallback: .black)
 
     HStack(spacing: 0) {
-      ZStack {
-        numberBg
-        Text("\(number)")
-          .font(.system(size: 13, weight: .bold))
-          .foregroundStyle(textColor)
-      }
-      .frame(width: 28, height: 28)
+      if showNumberCell {
+        ZStack {
+          numberBg
+          Text("\(number)")
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(textColor)
+        }
+        .frame(width: 28, height: 28)
 
-      Rectangle()
-        .fill(borderColor)
-        .frame(width: 1, height: 28)
+        Rectangle()
+          .fill(borderColor)
+          .frame(width: 1, height: 28)
+      }
 
       ZStack(alignment: .leading) {
         titleBg
-        HStack(spacing: 4) {
-          Text(displayTitle)
-            .font(.system(size: 12.5, weight: .bold))
-            .foregroundStyle(textColor)
-            .lineLimit(1)
-          if showParagraphMarks {
-            Text("↵")
-              .font(.system(size: 10, weight: .semibold))
-              .foregroundStyle(EasyOfficeDesignTokens.resolveHexColor("#0284C7", fallback: .blue))
+        if isEditing {
+          HStack(spacing: 4) {
+            SelectableParagraphTextView(
+              viewModel: viewModel,
+              paragraph: paragraph,
+              palette: palette
+            )
+            .frame(height: 24)
+            if showFormattingMarks {
+              Text(" ¶")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(EasyOfficeDesignTokens.resolveHexColor("#D97706", fallback: .orange))
+            }
+            if showParagraphMarks {
+              Text("↵")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(EasyOfficeDesignTokens.resolveHexColor("#0284C7", fallback: .blue))
+            }
           }
+          .padding(.horizontal, 8)
+        } else {
+          Text(buildRichParagraphAttributedText(for: displayParagraph, palette: palette))
+            .lineLimit(1)
+            .padding(.horizontal, 10)
         }
-        .padding(.horizontal, 10)
       }
       .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .leading)
     }
@@ -2112,7 +1788,12 @@ public struct DocumentEditorDetailPaneView: View {
     let isSectionHeading = (paragraph.style == .heading1 || paragraph.style == .heading2)
 
     if isSectionHeading {
-      boxedSectionHeadingView(for: paragraph, paragraphIndex: paragraphIndex)
+      boxedSectionHeadingView(
+        for: paragraph,
+        paragraphIndex: paragraphIndex,
+        isEditing: false,
+        palette: palette
+      )
     } else {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
         if let listPrefix {
@@ -2145,7 +1826,19 @@ public struct DocumentEditorDetailPaneView: View {
 
     VStack(alignment: .leading, spacing: 4) {
       HStack(alignment: .center, spacing: 6) {
-        if isPrimaryPane && isSelectedParagraph && !viewModel.isCanvasSnapshotMode && !isSectionHeading {
+        if isSectionHeading {
+          boxedSectionHeadingView(
+            for: paragraph,
+            paragraphIndex: paragraphIndex,
+            isEditing: isPrimaryPane && isSelectedParagraph && !viewModel.isCanvasSnapshotMode,
+            palette: palette
+          )
+          .contentShape(Rectangle())
+          .onTapGesture {
+            guard isPrimaryPane else { return }
+            viewModel.updateSelectedParagraphSelection(paragraphID: paragraph.id, utf16Range: nil)
+          }
+        } else if isPrimaryPane && isSelectedParagraph && !viewModel.isCanvasSnapshotMode {
           HStack(alignment: .top, spacing: 6) {
             if let listPrefix {
               Text(listPrefix)
