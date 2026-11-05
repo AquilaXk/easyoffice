@@ -49,9 +49,15 @@
     const workspaceUndoStack = [];
     const workspaceRedoStack = [];
     let ribbonRenderSeq = 0;
+    let historyMutationEpoch = 0;
+
+    function getHistoryMutationEpoch() {
+      return historyMutationEpoch;
+    }
 
     function pushRawUndoSnapshot(snap) {
       if (!snap) return;
+      historyMutationEpoch += 1;
       workspaceUndoStack.push(snap);
       if (workspaceUndoStack.length > MAX_UNDO_SNAPSHOTS) {
         workspaceUndoStack.shift();
@@ -205,6 +211,7 @@
     }
 
     async function activatePaneInternal(mod, skipTabBufferSync) {
+      historyMutationEpoch += 1;
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
       const curMod = getActiveModule();
@@ -369,6 +376,7 @@
           if (fb) fb.textContent = emptyMsg;
           return;
         }
+        historyMutationEpoch += 1;
         const targetSnap = sourceStack[sourceStack.length - 1];
         const currentSnap = captureWorkspaceSnapshot(Boolean(targetSnap.isRibbon));
         let evaluatedSheets = null;
@@ -867,10 +875,12 @@
 
     return {
       enqueueWorkspaceHistoryOp,
+      getHistoryMutationEpoch,
       pushRawUndoSnapshot,
       commitDeferredUndoSnapshot,
       captureWorkspaceSnapshot,
       pushUndoSnapshot,
+      pushRibbonUndoSnapshot: pushUndoSnapshot,
       restoreWorkspaceSnapshot,
       performWorkspaceUndo,
       performWorkspaceRedo,

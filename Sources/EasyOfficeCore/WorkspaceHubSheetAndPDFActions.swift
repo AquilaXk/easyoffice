@@ -694,17 +694,8 @@ extension WorkspaceViewModel {
     )
   }
 
-  public var isFindBarVisible: Bool {
-    get { isFindReplaceBarVisible }
-    set { isFindReplaceBarVisible = newValue }
-  }
-
   public func performFindNext() {
     if !isShowingHomeHub {
-      let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !trimmed.isEmpty && findQueryText != searchQuery {
-        findQueryText = searchQuery
-      }
       if !findQueryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         isFindReplaceBarVisible = true
       }

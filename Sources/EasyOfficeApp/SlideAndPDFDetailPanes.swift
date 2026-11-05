@@ -465,11 +465,16 @@ public struct SlideEditorDetailPaneView: View {
                 let slideZoomScale =
                   CGFloat(max(50.0, min(200.0, viewModel.zoomPercent))) / 100.0
                 let slideStageHeight: CGFloat = 360.0 * slideZoomScale
+                let aspectFactor =
+                  CGFloat(max(1.0, deck.aspectRatio.widthPoints))
+                  / CGFloat(max(1.0, deck.aspectRatio.heightPoints))
+                let slideStageWidth: CGFloat = slideStageHeight * aspectFactor
 
                 VStack(alignment: .leading, spacing: 8) {
                   HStack(spacing: 6) {
                     Color.clear.frame(width: 22, height: 20)
                     slideStageHorizontalRuler(palette: palette)
+                      .frame(maxWidth: slideStageWidth)
                   }
 
                   HStack(alignment: .top, spacing: 6) {
@@ -573,7 +578,11 @@ public struct SlideEditorDetailPaneView: View {
                       .border(palette.border.swiftUIColor, width: 1)
                       .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
                     }
-                    .frame(height: slideStageHeight)
+                    .frame(
+                      maxWidth: slideStageWidth,
+                      minHeight: slideStageHeight,
+                      maxHeight: slideStageHeight
+                    )
                   }
                 }
                 .padding(16)

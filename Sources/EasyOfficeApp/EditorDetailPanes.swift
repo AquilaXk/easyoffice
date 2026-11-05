@@ -1961,12 +1961,14 @@ public struct DocumentEditorDetailPaneView: View {
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
 
-          flatToolbarButton("◀ 승격", palette: palette) {
-            viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: -1)
-          }
+          if isPrimaryPane {
+            flatToolbarButton("◀ 승격", palette: palette) {
+              viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: -1)
+            }
 
-          flatToolbarButton("강등 ▶", palette: palette) {
-            viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: 1)
+            flatToolbarButton("강등 ▶", palette: palette) {
+              viewModel.promoteOrDemoteParagraphOutlineLevel(paragraphID: p.id, delta: 1)
+            }
           }
         }
         .padding(.vertical, 2)

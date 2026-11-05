@@ -54,6 +54,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-support/offline-rpc.js",
   "scripts/webui-dom-harness.mjs",
   "scripts/test-webui-behavior.mjs",
+  "scripts/test-webui-ux-ergonomics.mjs",
   "scripts/test-webui-sheet-atomicity.mjs",
   "scripts/test-webui-round13-parity.mjs",
   "scripts/test-webui-security-ipc.mjs",

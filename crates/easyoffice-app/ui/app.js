@@ -615,23 +615,34 @@
         workspacePanels.renderSlideDeck(activeSlideIndex);
       });
     }
-    let slideTypingSnapshotPushed = false;
-    function ensureSlideTypingSnapshot() {
-      if (!slideTypingSnapshotPushed) {
-        ribbonHistory.pushUndoSnapshot(false);
-        slideTypingSnapshotPushed = true;
+    let slideTypingSnapshotEpoch = -1;
+    let slideTypingTarget = null;
+    function resetSlideTypingSnapshotState() {
+      slideTypingSnapshotEpoch = -1;
+      slideTypingTarget = null;
+    }
+    function ensureSlideTypingSnapshot(targetEl) {
+      if (
+        slideTypingTarget !== targetEl ||
+        slideTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch()
+      ) {
+        const prevSlides = JSON.parse(JSON.stringify(slideDeckState));
+        const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
+        preSnap.slides = prevSlides;
+        ribbonHistory.pushRawUndoSnapshot(preSnap);
+        slideTypingSnapshotEpoch = ribbonHistory.getHistoryMutationEpoch();
+        slideTypingTarget = targetEl;
       }
     }
     const slideNotesInput = document.getElementById("slide-presenter-notes");
     if (slideNotesInput) {
-      slideNotesInput.addEventListener("focus", () => {
-        slideTypingSnapshotPushed = false;
-      });
-      slideNotesInput.addEventListener("blur", () => {
-        slideTypingSnapshotPushed = false;
+      slideNotesInput.addEventListener("focus", resetSlideTypingSnapshotState);
+      slideNotesInput.addEventListener("blur", resetSlideTypingSnapshotState);
+      slideNotesInput.addEventListener("beforeinput", () => {
+        ensureSlideTypingSnapshot(slideNotesInput);
       });
       slideNotesInput.addEventListener("input", () => {
-        ensureSlideTypingSnapshot();
+        ensureSlideTypingSnapshot(slideNotesInput);
         if (slideDeckState[activeSlideIndex]) {
           slideDeckState[activeSlideIndex].notes = slideNotesInput.value;
         }
@@ -639,14 +650,13 @@
     }
     const slideTitleZone = document.getElementById("slide-title-zone");
     if (slideTitleZone) {
-      slideTitleZone.addEventListener("focus", () => {
-        slideTypingSnapshotPushed = false;
-      });
-      slideTitleZone.addEventListener("blur", () => {
-        slideTypingSnapshotPushed = false;
+      slideTitleZone.addEventListener("focus", resetSlideTypingSnapshotState);
+      slideTitleZone.addEventListener("blur", resetSlideTypingSnapshotState);
+      slideTitleZone.addEventListener("beforeinput", () => {
+        ensureSlideTypingSnapshot(slideTitleZone);
       });
       slideTitleZone.addEventListener("input", () => {
-        ensureSlideTypingSnapshot();
+        ensureSlideTypingSnapshot(slideTitleZone);
         if (slideDeckState[activeSlideIndex]) {
           slideDeckState[activeSlideIndex].title = slideTitleZone.textContent || "";
         }
@@ -654,16 +664,17 @@
     }
     const slideLowerZone = document.getElementById("slide-lower-zone");
     if (slideLowerZone) {
-      slideLowerZone.addEventListener("focus", () => {
-        slideTypingSnapshotPushed = false;
-      });
-      slideLowerZone.addEventListener("blur", () => {
-        slideTypingSnapshotPushed = false;
+      slideLowerZone.addEventListener("focus", resetSlideTypingSnapshotState);
+      slideLowerZone.addEventListener("blur", resetSlideTypingSnapshotState);
+      slideLowerZone.addEventListener("beforeinput", () => {
+        ensureSlideTypingSnapshot(slideLowerZone);
       });
       slideLowerZone.addEventListener("input", () => {
-        ensureSlideTypingSnapshot();
+        ensureSlideTypingSnapshot(slideLowerZone);
         if (slideDeckState[activeSlideIndex]) {
-          slideDeckState[activeSlideIndex].lower = slideLowerZone.textContent || "";
+          const p = slideLowerZone.querySelector("p");
+          slideDeckState[activeSlideIndex].lower = p ? p.textContent || "" : "";
+          workspacePanels.syncActiveSlideDomStylesToDeck();
         }
       });
     }
@@ -711,14 +722,27 @@
     const editor = document.getElementById("doc-editor");
     const imeBadge =
       document.getElementById("ime-badge") || document.getElementById("ime-indicator");
-    let docTypingSnapshotPushed = false;
+    let docTypingSnapshotEpoch = -1;
+    function ensureDocTypingSnapshot() {
+      if (activeModule !== "DOC" && activeModule !== "HWP") return;
+      if (
+        docTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch() &&
+        docTabStore[activeModule]
+      ) {
+        const prevDocTab = JSON.parse(JSON.stringify(docTabStore[activeModule]));
+        const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
+        preSnap.docTabs[activeModule] = prevDocTab;
+        ribbonHistory.pushRawUndoSnapshot(preSnap);
+        docTypingSnapshotEpoch = ribbonHistory.getHistoryMutationEpoch();
+      }
+    }
     if (editor) {
       editor.addEventListener("focus", () => {
-        docTypingSnapshotPushed = false;
+        docTypingSnapshotEpoch = -1;
         workspacePanels.saveActiveDocTabState();
       });
       editor.addEventListener("blur", () => {
-        docTypingSnapshotPushed = false;
+        docTypingSnapshotEpoch = -1;
         workspacePanels.saveActiveDocTabState();
       });
       editor.addEventListener("click", (ev) => {
@@ -734,15 +758,12 @@
         if (imeBadge) imeBadge.textContent = "IME: 완료";
         workspacePanels.computeSmartStats();
       });
+      editor.addEventListener("beforeinput", () => {
+        ensureDocTypingSnapshot();
+      });
       editor.addEventListener("input", () => {
         if (activeModule === "DOC" || activeModule === "HWP") {
-          if (!docTypingSnapshotPushed && docTabStore[activeModule]) {
-            const prevDocTab = JSON.parse(JSON.stringify(docTabStore[activeModule]));
-            const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
-            preSnap.docTabs[activeModule] = prevDocTab;
-            ribbonHistory.pushRawUndoSnapshot(preSnap);
-            docTypingSnapshotPushed = true;
-          }
+          ensureDocTypingSnapshot();
           workspacePanels.saveActiveDocTabState();
         }
         if (!isImeComposing) workspacePanels.computeSmartStats();

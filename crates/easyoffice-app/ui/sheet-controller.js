@@ -134,6 +134,10 @@
       const curSheet = getActiveSheetName();
       const prevSnap = sheetDataStore[curSheet] || {};
       const snap = {};
+      const frozenPanes = Boolean(
+        document.querySelector("#pane-sheet thead.frozen-header") ||
+          document.querySelector("#pane-sheet table")?.dataset?.frozenPanes === "true"
+      );
       document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
         const ref = td.dataset.cell;
         const textVal = (td.textContent || "").trim();
@@ -154,9 +158,15 @@
         const fontStyle = td.style.fontStyle || "";
         const textDecoration = td.style.textDecoration || "";
         const fontSize = td.style.fontSize || "";
-        if (fontWeight || fontStyle || textDecoration || fontSize) {
+        const condfmtHigh = td.classList.contains("condfmt-high");
+        const entryFrozen = ref === "A1" && frozenPanes;
+        if (fontWeight || fontStyle || textDecoration || fontSize || condfmtHigh || entryFrozen) {
           cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
+          if (condfmtHigh) cellEntry.style.condfmtHigh = true;
+          if (entryFrozen) cellEntry.style.frozenPanes = true;
         }
+        if (condfmtHigh) cellEntry.condfmtHigh = true;
+        if (entryFrozen) cellEntry.frozenPanes = true;
         snap[ref] = cellEntry;
       });
       return snap;
@@ -225,6 +235,10 @@
       const targetRowCount = getSheetRowCount(sheetName);
       ensureSheetGridRowCount(targetRowCount);
       const targetSnap = sheetDataStore[sheetName] || {};
+      const targetFrozen = Boolean(
+        targetSnap.A1?.frozenPanes || targetSnap.A1?.style?.frozenPanes
+      );
+      toggleSheetFreezePanes(targetFrozen, true);
       document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
         const ref = td.dataset.cell;
         const entry = targetSnap[ref];
@@ -244,6 +258,10 @@
         td.style.fontStyle = cellStyle?.fontStyle || "";
         td.style.textDecoration = cellStyle?.textDecoration || "";
         td.style.fontSize = cellStyle?.fontSize || "";
+        td.classList.toggle(
+          "condfmt-high",
+          Boolean(entry?.condfmtHigh || cellStyle?.condfmtHigh)
+        );
         if (sheetCellFocusState.has(td)) {
           syncSheetCellFocusBaseline(td, true);
         } else if (document.activeElement === td) {
@@ -314,8 +332,6 @@
 
       const refBadge = document.getElementById("active-cell-ref");
       if (refBadge) refBadge.textContent = cellRef;
-      const coordAlias = document.getElementById("sheet-cell-coord");
-      if (coordAlias) coordAlias.textContent = cellRef;
       const formulaInput = document.getElementById("formula-input");
       if (formulaInput && activeTd && document.activeElement !== formulaInput) {
         const activeFocusSt = sheetCellFocusState.get(activeTd);
@@ -325,10 +341,6 @@
         } else {
           formulaInput.value = activeTd.dataset.formula || liveCellText;
         }
-      }
-      const formulaAlias = document.getElementById("sheet-formula-input");
-      if (formulaAlias && formulaInput) {
-        formulaAlias.value = formulaInput.value;
       }
 
       const aggEl = document.getElementById("status-sheet-agg");
@@ -653,6 +665,8 @@
           });
         });
         td.addEventListener("keydown", (ev) => {
+          const st = sheetCellFocusState.get(td);
+          const isEditingCell = Boolean(st && st.userEdited);
           if (ev.key === "Enter") {
             ev.preventDefault();
             td.blur();
@@ -669,13 +683,17 @@
             return;
           }
           if (ev.key === "ArrowLeft") {
-            ev.preventDefault();
-            moveCellFocusByDelta(td, -1, 0);
+            if (!isEditingCell) {
+              ev.preventDefault();
+              moveCellFocusByDelta(td, -1, 0);
+            }
             return;
           }
           if (ev.key === "ArrowRight") {
-            ev.preventDefault();
-            moveCellFocusByDelta(td, 1, 0);
+            if (!isEditingCell) {
+              ev.preventDefault();
+              moveCellFocusByDelta(td, 1, 0);
+            }
             return;
           }
           if (ev.key === "Tab") {
@@ -683,14 +701,13 @@
             moveCellFocusByDelta(td, ev.shiftKey ? -1 : 1, 0);
             return;
           }
-          if (ev.key === "Delete") {
+          if (ev.key === "Delete" && !isEditingCell) {
             ev.preventDefault();
-            const st =
-              sheetCellFocusState.get(td) || ensureSheetCellFocusEntry(td, getActiveSheetName());
+            const focusSt = st || ensureSheetCellFocusEntry(td, getActiveSheetName());
             td.textContent = "";
             delete td.dataset.formula;
-            st.userEdited = true;
-            pushCellUndoSnapshotIfNeeded(td, st, "");
+            focusSt.userEdited = true;
+            pushCellUndoSnapshotIfNeeded(td, focusSt, "");
             const formulaInput = document.getElementById("formula-input");
             if (formulaInput && getActiveSheetCellRef() === td.dataset.cell) {
               formulaInput.value = "";
@@ -725,32 +742,54 @@
 
     function sortActiveSheetByColumnB() {
       const curSheet = getActiveSheetName();
-      const rowData = [];
+      const populatedRows = [];
+      const blankRows = [];
       for (let r = 2; r <= 6; r += 1) {
         const bTd = document.querySelector('#pane-sheet td[data-cell="B' + r + '"]');
         if (!bTd) continue;
-        const bNum = Number((bTd.textContent || "").replaceAll(",", "").trim());
         const cells = {};
+        let isBlankRow = true;
         GRID_COL_LETTERS.forEach((col) => {
           const td = document.querySelector('#pane-sheet td[data-cell="' + col + r + '"]');
           if (td) {
+            const text = td.textContent || "";
+            const formula = td.dataset.formula || "";
+            if (text.trim() !== "" || formula.trim() !== "") {
+              isBlankRow = false;
+            }
             cells[col] = {
-              text: td.textContent || "",
-              formula: td.dataset.formula || "",
+              text,
+              formula,
+              fontWeight: td.style.fontWeight || "",
+              fontStyle: td.style.fontStyle || "",
+              textDecoration: td.style.textDecoration || "",
+              fontSize: td.style.fontSize || "",
+              condfmtHigh: td.classList.contains("condfmt-high"),
             };
           }
         });
-        rowData.push({ origRow: r, bNum: Number.isFinite(bNum) ? bNum : 0, cells });
+        if (isBlankRow) {
+          blankRows.push({ origRow: r, bNum: 0, cells });
+        } else {
+          const bRaw = (bTd.textContent || "").replaceAll(",", "").trim();
+          const bParsed = bRaw === "" ? Number.NaN : Number(bRaw);
+          populatedRows.push({
+            origRow: r,
+            bNum: Number.isFinite(bParsed) ? bParsed : 0,
+            cells,
+          });
+        }
       }
-      if (rowData.length < 2) return;
+      if (populatedRows.length < 2) return;
       let isAscending = true;
-      for (let i = 1; i < rowData.length; i += 1) {
-        if (rowData[i].bNum < rowData[i - 1].bNum) {
+      for (let i = 1; i < populatedRows.length; i += 1) {
+        if (populatedRows[i].bNum < populatedRows[i - 1].bNum) {
           isAscending = false;
           break;
         }
       }
-      rowData.sort((a, b) => (isAscending ? b.bNum - a.bNum : a.bNum - b.bNum));
+      populatedRows.sort((a, b) => (isAscending ? b.bNum - a.bNum : a.bNum - b.bNum));
+      const rowData = [...populatedRows, ...blankRows];
       rowData.forEach((item, idx) => {
         const targetRow = idx + 2;
         GRID_COL_LETTERS.forEach((col) => {
@@ -766,9 +805,16 @@
           } else {
             delete td.dataset.formula;
           }
+          td.style.fontWeight = src.fontWeight || "";
+          td.style.fontStyle = src.fontStyle || "";
+          td.style.textDecoration = src.textDecoration || "";
+          td.style.fontSize = src.fontSize || "";
+          td.classList.toggle("condfmt-high", Boolean(src.condfmtHigh));
+          syncSheetCellFocusBaseline(td, true);
         });
       });
       sheetDataStore[curSheet] = snapshotDomSheetCells();
+      refreshFocusedSheetCellPendingSnapshot();
       updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
     }
 
@@ -826,9 +872,10 @@
         const isHigh = Number.isFinite(n) && (td.textContent || "").trim() !== "" && n >= avg;
         td.classList.toggle("condfmt-high", isHigh);
       });
+      saveActiveSheetCellsToWorkbook();
     }
 
-    function toggleSheetFreezePanes(enabled) {
+    function toggleSheetFreezePanes(enabled, skipSave = false) {
       const thead = document.querySelector("#pane-sheet table thead");
       const table = document.querySelector("#pane-sheet table");
       if (thead) {
@@ -840,6 +887,9 @@
         } else {
           delete table.dataset.frozenPanes;
         }
+      }
+      if (!skipSave) {
+        saveActiveSheetCellsToWorkbook();
       }
     }
 

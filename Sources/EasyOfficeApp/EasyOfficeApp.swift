@@ -253,7 +253,6 @@ struct EasyOfficeApplication: App {
           guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
           viewModel.clearSelectedSheetRange()
         }
-        .keyboardShortcut(.deleteForward, modifiers: [])
         .disabled(viewModel.activeTab?.moduleKind != .sheet || viewModel.isShowingHomeHub)
       }
       CommandMenu("문서 생성") {

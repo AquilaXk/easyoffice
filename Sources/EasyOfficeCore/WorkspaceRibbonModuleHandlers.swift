@@ -416,13 +416,15 @@ extension WorkspaceViewModel {
               caption: "표 1. 데이터 검산 표", rows: [["항목", "수치"], ["기초값", "100"], ["증분값", "150"]]))
         }
         let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
-        let lastCol = max(0, doc.tables[tIdx].columnCount - 1)
+        let targetCol = min(
+          max(0, selectedDocumentTableCell?.column ?? (doc.tables[tIdx].columnCount - 1)),
+          max(0, doc.tables[tIdx].columnCount - 1))
         let sum =
           doc.tables[tIdx].evaluateTableFormula(
-            "=SUM(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: lastCol) ?? 0.0
+            "=SUM(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: targetCol) ?? 0.0
         var summaryRow = Array(repeating: "", count: max(1, doc.tables[tIdx].columnCount))
         summaryRow[0] = "합계 (=SUM(ABOVE))"
-        summaryRow[lastCol] = sum.isFinite ? String(format: "%.0f", sum) : "0"
+        summaryRow[targetCol] = sum.isFinite ? String(format: "%.0f", sum) : "0"
         doc.tables[tIdx].rows.append(summaryRow)
       case .functionWizard:
         if doc.tables.isEmpty {
@@ -431,26 +433,31 @@ extension WorkspaceViewModel {
               caption: "표 1. 데이터 검산 표", rows: [["항목", "수치"], ["기초값", "100"], ["증분값", "150"]]))
         }
         let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
-        let lastCol = max(0, doc.tables[tIdx].columnCount - 1)
+        let targetCol = min(
+          max(0, selectedDocumentTableCell?.column ?? (doc.tables[tIdx].columnCount - 1)),
+          max(0, doc.tables[tIdx].columnCount - 1))
         let formulaExpr = "=\(wizardFnName)(ABOVE)"
         let evaluated =
           doc.tables[tIdx].evaluateTableFormula(
-            formulaExpr, atRow: doc.tables[tIdx].rowCount, column: lastCol)
+            formulaExpr, atRow: doc.tables[tIdx].rowCount, column: targetCol)
           ?? doc.tables[tIdx].evaluateTableFormula(
-            "=AVERAGE(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: lastCol) ?? 0.0
+            "=AVERAGE(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: targetCol) ?? 0.0
         var fnRow = Array(repeating: "", count: max(1, doc.tables[tIdx].columnCount))
         fnRow[0] = wizardFnName == "AVERAGE" ? "평균 (=AVERAGE(ABOVE))" : "함수 (\(formulaExpr))"
-        fnRow[lastCol] = String(format: "%.1f", evaluated)
+        fnRow[targetCol] = String(format: "%.1f", evaluated)
         doc.tables[tIdx].rows.append(fnRow)
       case .sort:
         sheetSortAscending.toggle()
         let tIdx = doc.tables.isEmpty ? 0 : min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
         if !doc.tables.isEmpty, doc.tables[tIdx].rows.count > 2 {
+          let sortCol = min(
+            max(0, selectedDocumentTableCell?.column ?? 0),
+            max(0, doc.tables[tIdx].columnCount - 1))
           let header = doc.tables[tIdx].rows[0]
           let body = Array(doc.tables[tIdx].rows.dropFirst())
           let sortedBody = body.sorted { lhs, rhs in
-            let lVal = lhs.first ?? ""
-            let rVal = rhs.first ?? ""
+            let lVal = lhs.indices.contains(sortCol) ? lhs[sortCol] : (lhs.first ?? "")
+            let rVal = rhs.indices.contains(sortCol) ? rhs[sortCol] : (rhs.first ?? "")
             return sheetSortAscending ? (lVal < rVal) : (lVal > rVal)
           }
           doc.tables[tIdx].rows = [header] + sortedBody

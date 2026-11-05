@@ -420,10 +420,20 @@
     function captureWorkspaceViewState() {
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
+      const sheetTable = document.querySelector("#pane-sheet table");
+      const sheetThead = sheetTable?.querySelector("thead");
+      const sheetCondfmtCells = Array.from(
+        document.querySelectorAll("#pane-sheet td.condfmt-high[data-cell]")
+      ).map((td) => td.dataset.cell);
       return {
         ribbonStripHidden: Boolean(strip?.hidden),
         canvasZoom: stage?.style?.zoom || "",
         canvasSplit: stage?.dataset?.splitView || "",
+        sheetFrozenPanes: Boolean(
+          sheetThead?.classList?.contains("frozen-header") ||
+            sheetTable?.dataset?.frozenPanes === "true"
+        ),
+        sheetCondfmtCells,
       };
     }
 
@@ -446,6 +456,15 @@
       const zoomLabel = document.getElementById("status-zoom-label");
       if (zoomLabel) {
         zoomLabel.textContent = viewState.canvasZoom || "100%";
+      }
+      if (viewState.sheetFrozenPanes !== undefined) {
+        sheetController.toggleSheetFreezePanes(Boolean(viewState.sheetFrozenPanes), true);
+      }
+      if (Array.isArray(viewState.sheetCondfmtCells)) {
+        const condSet = new Set(viewState.sheetCondfmtCells);
+        document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
+          td.classList.toggle("condfmt-high", condSet.has(td.dataset.cell));
+        });
       }
     }
 
@@ -529,6 +548,7 @@
       saveActiveDocTabState,
       ensureDefaultDocTabStore,
       computeDocTableSummary,
+      syncActiveSlideDomStylesToDeck,
       renderSlideDeck,
       applyPdfStudioFormState,
     });

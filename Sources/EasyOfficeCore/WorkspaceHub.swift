@@ -39,11 +39,12 @@ public final class WorkspaceViewModel {
   public var showRightInspector: Bool = true
   public var searchQuery: String = "" {
     didSet {
-      if !isShowingHomeHub {
+      guard !isShowingHomeHub, !isSyncingFindReplaceState else { return }
+      if findQueryText != searchQuery {
         findQueryText = searchQuery
-        if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-          isFindReplaceBarVisible = true
-        }
+      }
+      if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        isFindReplaceBarVisible = true
       }
     }
   }
@@ -158,6 +159,9 @@ public final class WorkspaceViewModel {
       if findQueryDraft != findQueryText {
         findQueryDraft = findQueryText
       }
+      if !isShowingHomeHub, searchQuery != findQueryText {
+        searchQuery = findQueryText
+      }
     }
   }
   public var replaceQueryText: String = "" {
@@ -180,6 +184,9 @@ public final class WorkspaceViewModel {
       defer { isSyncingFindReplaceState = false }
       if findQueryText != findQueryDraft {
         findQueryText = findQueryDraft
+      }
+      if !isShowingHomeHub, searchQuery != findQueryDraft {
+        searchQuery = findQueryDraft
       }
     }
   }

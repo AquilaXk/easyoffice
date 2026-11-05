@@ -1420,73 +1420,118 @@ public struct SheetEditorDetailPaneView: View {
         }
       }
       .overlay(alignment: .topLeading) {
-        sheetKeyboardNavigationShortcuts
+        if isPrimaryPane && !viewModel.isCanvasSnapshotMode {
+          SheetKeyEventMonitorRepresentable(
+            isEnabled: isPrimaryPane && inlineEditingCoord == nil && !viewModel.isCanvasSnapshotMode,
+            viewModel: viewModel
+          )
+          .frame(width: 0, height: 0)
+          .accessibilityHidden(true)
+        }
       }
     }
   }
 
-  @ViewBuilder
-  private var sheetKeyboardNavigationShortcuts: some View {
-    if isPrimaryPane && inlineEditingCoord == nil && !viewModel.isCanvasSnapshotMode {
-      HStack(spacing: 0) {
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: -1, columnDelta: 0, extendSelection: false)
-        }
-        .keyboardShortcut(.upArrow, modifiers: [])
+  private struct SheetKeyEventMonitorRepresentable: NSViewRepresentable {
+    let isEnabled: Bool
+    let viewModel: WorkspaceViewModel
 
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: 1, columnDelta: 0, extendSelection: false)
-        }
-        .keyboardShortcut(.downArrow, modifiers: [])
+    final class Coordinator {
+      var isEnabled: Bool
+      var viewModel: WorkspaceViewModel
+      private var monitorToken: Any?
 
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: -1, extendSelection: false)
-        }
-        .keyboardShortcut(.leftArrow, modifiers: [])
-
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: 1, extendSelection: false)
-        }
-        .keyboardShortcut(.rightArrow, modifiers: [])
-
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: -1, columnDelta: 0, extendSelection: true)
-        }
-        .keyboardShortcut(.upArrow, modifiers: [.shift])
-
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: 1, columnDelta: 0, extendSelection: true)
-        }
-        .keyboardShortcut(.downArrow, modifiers: [.shift])
-
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: -1, extendSelection: true)
-        }
-        .keyboardShortcut(.leftArrow, modifiers: [.shift])
-
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: 1, extendSelection: true)
-        }
-        .keyboardShortcut(.rightArrow, modifiers: [.shift])
-
-        Button("") {
-          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-          viewModel.clearSelectedSheetRange()
-        }
-        .keyboardShortcut(.delete, modifiers: [])
+      init(isEnabled: Bool, viewModel: WorkspaceViewModel) {
+        self.isEnabled = isEnabled
+        self.viewModel = viewModel
       }
-      .buttonStyle(.plain)
-      .frame(width: 0, height: 0)
-      .opacity(0.001)
-      .accessibilityHidden(true)
+
+      @MainActor
+      func installIfNeeded() {
+        guard monitorToken == nil, !viewModel.isCanvasSnapshotMode else { return }
+        monitorToken = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+          let keyCode = event.keyCode
+          let modifiers = event.modifierFlags
+          let consumed: Bool = MainActor.assumeIsolated {
+            guard let self,
+              self.isEnabled,
+              !self.viewModel.isCanvasSnapshotMode,
+              self.viewModel.activeTab?.moduleKind == .sheet,
+              !self.viewModel.isShowingHomeHub
+            else {
+              return false
+            }
+            guard let window = NSApp.keyWindow,
+              !(window.firstResponder is NSTextView)
+            else {
+              return false
+            }
+            let disallowed: NSEvent.ModifierFlags = [.command, .control, .option]
+            guard modifiers.intersection(disallowed).isEmpty else {
+              return false
+            }
+            let extendSelection = modifiers.contains(.shift)
+            switch keyCode {
+            case 126:
+              self.viewModel.moveSheetSelection(
+                rowDelta: -1, columnDelta: 0, extendSelection: extendSelection)
+              return true
+            case 125:
+              self.viewModel.moveSheetSelection(
+                rowDelta: 1, columnDelta: 0, extendSelection: extendSelection)
+              return true
+            case 123:
+              self.viewModel.moveSheetSelection(
+                rowDelta: 0, columnDelta: -1, extendSelection: extendSelection)
+              return true
+            case 124:
+              self.viewModel.moveSheetSelection(
+                rowDelta: 0, columnDelta: 1, extendSelection: extendSelection)
+              return true
+            case 51, 117:
+              guard !extendSelection else { return false }
+              self.viewModel.clearSelectedSheetRange()
+              return true
+            default:
+              return false
+            }
+          }
+          return consumed ? nil : event
+        }
+      }
+
+      func tearDown() {
+        if let token = monitorToken {
+          NSEvent.removeMonitor(token)
+          monitorToken = nil
+        }
+      }
+
+      deinit {
+        tearDown()
+      }
+    }
+
+    func makeCoordinator() -> Coordinator {
+      Coordinator(isEnabled: isEnabled, viewModel: viewModel)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+      let view = NSView(frame: .zero)
+      context.coordinator.installIfNeeded()
+      return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+      context.coordinator.isEnabled = isEnabled
+      context.coordinator.viewModel = viewModel
+      if isEnabled {
+        context.coordinator.installIfNeeded()
+      }
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+      coordinator.tearDown()
     }
   }
 
@@ -1514,7 +1559,8 @@ public struct SheetEditorDetailPaneView: View {
 
       ForEach(Array(columnIndices), id: \.self) { colIdx in
         let colLabel = columnLabels[colIdx]
-        let colWidth = CGFloat(sheet.columnWidth(at: colIdx)) * zoomScale
+        let baseColWidth = sheet.columnWidth(at: colIdx)
+        let colWidth = CGFloat(baseColWidth) * zoomScale
         let isColSelected = (colIdx >= selMinCol && colIdx <= selMaxCol)
         ZStack(alignment: .trailing) {
           Text(colLabel)
@@ -1537,7 +1583,7 @@ public struct SheetEditorDetailPaneView: View {
                   .frame(height: 2)
               }
             }
-            .help("\(colLabel)열 (너비: \(Int(colWidth))pt)")
+            .help("\(colLabel)열 (너비: \(Int(baseColWidth))pt)")
 
           if isPrimaryPane {
             Rectangle()
@@ -1546,10 +1592,9 @@ public struct SheetEditorDetailPaneView: View {
               .gesture(
                 DragGesture(minimumDistance: 1)
                   .onEnded { value in
-                    let baseWidth = sheet.columnWidth(at: colIdx)
                     viewModel.updateActiveSheetColumnWidth(
                       column: colIdx,
-                      width: baseWidth + Double(value.translation.width)
+                      width: baseColWidth + Double(value.translation.width) / Double(zoomScale)
                     )
                   }
               )
@@ -1619,7 +1664,7 @@ public struct SheetEditorDetailPaneView: View {
                     let baseHeight = Double(rowHeightPt / zoomScale)
                     viewModel.updateActiveSheetRowHeight(
                       row: zeroRow,
-                      height: baseHeight + Double(value.translation.height)
+                      height: baseHeight + Double(value.translation.height) / Double(zoomScale)
                     )
                   }
               )

@@ -621,11 +621,14 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     if let docTab = vm.openTabs.first(where: { $0.moduleKind == .document }) {
       vm.activeTabID = docTab.id
     }
-    vm.isFindBarVisible = false
+    vm.isFindReplaceBarVisible = false
     vm.searchQuery = "이지오피스"
     XCTAssertEqual(vm.findQueryText, "이지오피스")
-    XCTAssertTrue(vm.isFindBarVisible)
+    XCTAssertTrue(vm.isFindReplaceBarVisible)
+    vm.findQueryText = "문서"
+    XCTAssertEqual(vm.searchQuery, "문서")
     vm.performFindNext()
+    XCTAssertEqual(vm.findQueryText, "문서")
     XCTAssertFalse((vm.lastExecutedCommandSummary ?? "").isEmpty)
 
     if let sheetTab = vm.openTabs.first(where: { $0.moduleKind == .sheet }) {
@@ -685,6 +688,16 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
         XCTAssertNil(afterSplitAndDelete.tables[1].originSpan(atRow: 0, column: 0))
         XCTAssertEqual(afterSplitAndDelete.tables[1].rowCount, 2)
         XCTAssertEqual(afterSplitAndDelete.tables[1].columnCount, 3)
+      }
+
+      vm.selectDocumentTableCell(tableIndex: 1, row: 1, column: 1)
+      vm.executeRibbonCommand("doc-mod-tableformula")
+      vm.executeRibbonCommand("hwp-mod-border")
+      if case .document(let afterTableCommands) = vm.activeTab?.payload {
+        XCTAssertEqual(afterTableCommands.tables[0].rowCount, table0InitialRows)
+        XCTAssertEqual(afterTableCommands.tables[1].rowCount, 3)
+        XCTAssertEqual(afterTableCommands.tables[1].rows.last?[1], "100")
+        XCTAssertEqual(afterTableCommands.tables[1].borderStyle, .doubleLine)
       }
     }
 
