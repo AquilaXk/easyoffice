@@ -1260,6 +1260,22 @@ final class EasyOfficeTests: XCTestCase {
       try HWPEquationCodec.convertEqEditToLaTeX("left ( {a over b} right )"),
       "\\left( \\frac{a}{b} \\right)"
     )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("x lsub 1 lsup 2"),
+      "{}^2{}_1x"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.normalizeToLaTeXIfNeeded("x lsub 1 lsup 2"),
+      "{}^2{}_1x"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("sum from i=-1 to n x_i"),
+      "\\sum_{i=-1}^{n} x_{i}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("lim from x rarrow 0 f(x)"),
+      "\\lim_{x \\rightarrow 0} f(x)"
+    )
   }
 
   func testHWPEqEditFailClosedUnbalancedBracesAndExcessiveDepth() throws {

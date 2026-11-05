@@ -201,8 +201,9 @@ public enum HWPEquationCodec {
   }
 
   private static let eqEditTriggerKeywords: Set<String> = [
-    "over", "atop", "choose", "sqrt", "root", "of", "from", "to", "sup", "sub",
-    "sum", "prod", "int", "oint", "lim", "matrix", "pmatrix", "bmatrix", "dmatrix", "cases",
+    "over", "atop", "choose", "sqrt", "root", "of", "from", "to", "sup", "sub", "lsup", "lsub",
+    "sum", "prod", "coprod", "int", "oint", "dint", "tint", "bigcup", "bigcap", "lim",
+    "matrix", "pmatrix", "bmatrix", "dmatrix", "cases", "pile", "lpile", "cpile", "rpile",
     "left", "right", "binom", "bar", "hat", "vec", "dot", "ddot", "tilde", "acute", "grave",
     "check", "breve", "overline", "underline", "overbrace", "underbrace", "rm", "it", "bold",
     "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta",
@@ -299,6 +300,8 @@ private indirect enum EqExpr: Equatable {
   case atop(EqExpr, EqExpr)
   case sqrt(index: EqExpr?, radicand: EqExpr)
   case script(base: EqExpr, sub: EqExpr?, sup: EqExpr?)
+  case leftSub(base: EqExpr, sub: EqExpr)
+  case leftSup(base: EqExpr, sup: EqExpr)
   case bigOp(op: String, lower: EqExpr?, upper: EqExpr?)
   case delimited(left: String, body: EqExpr, right: String)
   case matrix(style: MatrixStyle, rows: [[EqExpr]])
@@ -487,7 +490,29 @@ private struct EqEditParser {
     var sup: EqExpr?
     var chainCount = 0
     while true {
-      if peek() == .underscore || peekKeyword("sub") || peekKeyword("lsub") {
+      if peekKeyword("lsub") {
+        chainCount += 1
+        try checkDepth(depth + chainCount)
+        _ = next()
+        let arg = try parseAtom(depth: depth + chainCount)
+        if sub != nil || sup != nil {
+          base = .script(base: base, sub: sub, sup: sup)
+          sub = nil
+          sup = nil
+        }
+        base = .leftSub(base: base, sub: arg)
+      } else if peekKeyword("lsup") {
+        chainCount += 1
+        try checkDepth(depth + chainCount)
+        _ = next()
+        let arg = try parseAtom(depth: depth + chainCount)
+        if sub != nil || sup != nil {
+          base = .script(base: base, sub: sub, sup: sup)
+          sub = nil
+          sup = nil
+        }
+        base = .leftSup(base: base, sup: arg)
+      } else if peek() == .underscore || peekKeyword("sub") {
         chainCount += 1
         try checkDepth(depth + chainCount)
         _ = next()
@@ -498,7 +523,7 @@ private struct EqEditParser {
           sup = nil
         }
         sub = arg
-      } else if peek() == .caret || peekKeyword("sup") || peekKeyword("lsup") {
+      } else if peek() == .caret || peekKeyword("sup") {
         chainCount += 1
         try checkDepth(depth + chainCount)
         _ = next()
@@ -533,8 +558,25 @@ private struct EqEditParser {
         break
       }
       items.append(try parseAtom(depth: depth))
-      if items.count == 1, case .symbol(_) = peek() { continue }
-      if items.count == 2, case .symbol(_) = items[1] { continue }
+      if items.count == 1 {
+        if case .symbol(_) = peek() { continue }
+        if peekKeyword("rarrow") || peekKeyword("rightarrow") || peekKeyword("larrow")
+          || peekKeyword("leftarrow")
+        {
+          continue
+        }
+      }
+      if items.count == 2 {
+        if case .symbol(_) = items[1] { continue }
+        if case .ident(let op) = items[1],
+          ["rarrow", "rightarrow", "larrow", "leftarrow"].contains(op.lowercased())
+        {
+          continue
+        }
+      }
+      if items.count == 3, case .symbol(let s) = items[2], s == "-" || s == "+" {
+        continue
+      }
       break
     }
     switch items.count {
@@ -770,6 +812,14 @@ private func emitExpr(_ expr: EqExpr, into out: inout String) {
       out.append("^")
       emitBraced(p, into: &out)
     }
+  case .leftSub(let base, let sub):
+    out.append("{}_")
+    emitBraced(sub, into: &out)
+    emitExpr(base, into: &out)
+  case .leftSup(let base, let sup):
+    out.append("{}^")
+    emitBraced(sup, into: &out)
+    emitExpr(base, into: &out)
   case .bigOp(let op, let lower, let upper):
     out.append(mapBigOp(op))
     if let l = lower {
@@ -892,66 +942,34 @@ private func mapBigOp(_ op: String) -> String {
 }
 
 private let capitalizedGreekMap: [String: String] = [
-  "gamma": "\\Gamma", "delta": "\\Delta", "theta": "\\Theta", "lambda": "\\Lambda",
-  "xi": "\\Xi", "pi": "\\Pi", "sigma": "\\Sigma", "upsilon": "\\Upsilon",
-  "phi": "\\Phi", "psi": "\\Psi", "omega": "\\Omega",
+  "gamma": "\\Gamma", "delta": "\\Delta", "theta": "\\Theta", "lambda": "\\Lambda", "xi": "\\Xi", "pi": "\\Pi", "sigma": "\\Sigma", "upsilon": "\\Upsilon", "phi": "\\Phi", "psi": "\\Psi", "omega": "\\Omega",
 ]
 
 private let lowerIdentMap: [String: String] = [
-  "alpha": "\\alpha", "beta": "\\beta", "gamma": "\\gamma", "delta": "\\delta",
-  "epsilon": "\\epsilon", "varepsilon": "\\varepsilon", "zeta": "\\zeta", "eta": "\\eta",
-  "theta": "\\theta", "vartheta": "\\vartheta", "iota": "\\iota", "kappa": "\\kappa",
-  "lambda": "\\lambda", "mu": "\\mu", "nu": "\\nu", "xi": "\\xi", "omicron": "o",
-  "pi": "\\pi", "varpi": "\\varpi", "rho": "\\rho", "varrho": "\\varrho",
-  "sigma": "\\sigma", "varsigma": "\\varsigma", "tau": "\\tau", "upsilon": "\\upsilon",
-  "phi": "\\phi", "varphi": "\\varphi", "chi": "\\chi", "psi": "\\psi", "omega": "\\omega",
-  "aleph": "\\aleph", "hbar": "\\hbar", "imath": "\\imath", "jmath": "\\jmath",
-  "ell": "\\ell", "wp": "\\wp", "re": "\\Re", "im": "\\Im", "mho": "\\mho",
-  "prime": "\\prime", "emptyset": "\\emptyset", "empty": "\\emptyset",
-  "nabla": "\\nabla", "grad": "\\nabla", "partial": "\\partial", "del": "\\partial",
-  "infty": "\\infty", "inf": "\\infty", "infin": "\\infty",
-  "forall": "\\forall", "exist": "\\exists", "exists": "\\exists",
-  "neg": "\\neg", "not": "\\neg", "lnot": "\\neg",
-  "flat": "\\flat", "natural": "\\natural", "sharp": "\\sharp",
-  "clubsuit": "\\clubsuit", "diamondsuit": "\\diamondsuit",
-  "heartsuit": "\\heartsuit", "spadesuit": "\\spadesuit",
-  "angle": "\\angle", "triangle": "\\triangle", "perp": "\\perp", "bot": "\\bot",
-  "top": "\\top", "parallel": "\\parallel",
-  "therefore": "\\therefore", "because": "\\because",
-  "times": "\\times", "div": "\\div", "divide": "\\div", "cdot": "\\cdot", "centerdot": "\\cdot",
-  "pm": "\\pm", "plusminus": "\\pm", "mp": "\\mp", "minusplus": "\\mp",
-  "circ": "\\circ", "bullet": "\\bullet", "star": "\\star", "ast": "\\ast",
-  "oplus": "\\oplus", "ominus": "\\ominus", "otimes": "\\otimes", "oslash": "\\oslash",
-  "odot": "\\odot", "dagger": "\\dagger", "ddagger": "\\ddagger", "amalg": "\\amalg",
-  "cap": "\\cap", "inter": "\\cap", "cup": "\\cup", "union": "\\cup",
-  "sqcap": "\\sqcap", "sqcup": "\\sqcup", "vee": "\\vee", "or": "\\vee",
-  "wedge": "\\wedge", "and": "\\wedge", "setminus": "\\setminus", "wr": "\\wr",
-  "leq": "\\leq", "le": "\\leq", "geq": "\\geq", "ge": "\\geq",
-  "neq": "\\neq", "ne": "\\neq", "equiv": "\\equiv", "approx": "\\approx",
-  "sim": "\\sim", "simeq": "\\simeq", "cong": "\\cong", "propto": "\\propto",
-  "prec": "\\prec", "succ": "\\succ", "preceq": "\\preceq", "succeq": "\\succeq",
-  "ll": "\\ll", "gg": "\\gg", "subset": "\\subset", "supset": "\\supset",
-  "subseteq": "\\subseteq", "supseteq": "\\supseteq",
-  "sqsubset": "\\sqsubset", "sqsupset": "\\sqsupset",
-  "sqsubseteq": "\\sqsubseteq", "sqsupseteq": "\\sqsupseteq",
-  "in": "\\in", "owns": "\\ni", "ni": "\\ni", "notin": "\\notin",
-  "vdash": "\\vdash", "dashv": "\\dashv", "models": "\\models", "mid": "\\mid", "doteq": "\\doteq",
-  "larrow": "\\leftarrow", "leftarrow": "\\leftarrow", "gets": "\\leftarrow",
-  "rarrow": "\\rightarrow", "rightarrow": "\\rightarrow", "to": "\\rightarrow",
-  "lrarrow": "\\leftrightarrow", "leftrightarrow": "\\leftrightarrow",
-  "uparrow": "\\uparrow", "downarrow": "\\downarrow", "updownarrow": "\\updownarrow",
-  "nearrow": "\\nearrow", "searrow": "\\searrow", "swarrow": "\\swarrow", "nwarrow": "\\nwarrow",
-  "mapsto": "\\mapsto", "hookleftarrow": "\\hookleftarrow", "hookrightarrow": "\\hookrightarrow",
-  "cdots": "\\cdots", "ldots": "\\ldots", "vdots": "\\vdots", "ddots": "\\ddots", "dots": "\\dots",
-  "sin": "\\sin", "cos": "\\cos", "tan": "\\tan", "cot": "\\cot", "sec": "\\sec", "csc": "\\csc",
-  "arcsin": "\\arcsin", "arccos": "\\arccos", "arctan": "\\arctan",
-  "sinh": "\\sinh", "cosh": "\\cosh", "tanh": "\\tanh", "coth": "\\coth",
-  "ln": "\\ln", "log": "\\log", "lg": "\\lg", "exp": "\\exp",
-  "det": "\\det", "dim": "\\dim", "ker": "\\ker", "hom": "\\hom", "deg": "\\deg", "gcd": "\\gcd",
-  "max": "\\max", "min": "\\min", "arg": "\\arg", "lim": "\\lim",
-  "liminf": "\\liminf", "limsup": "\\limsup", "infimum": "\\inf", "supremum": "\\sup",
-  "mod": "\\bmod", "pmod": "\\pmod",
-  "quad": "\\quad", "qquad": "\\qquad", "it": "", "rm": "", "bold": "",
+  "alpha": "\\alpha", "beta": "\\beta", "gamma": "\\gamma", "delta": "\\delta", "epsilon": "\\epsilon", "varepsilon": "\\varepsilon", "zeta": "\\zeta", "eta": "\\eta",
+  "theta": "\\theta", "vartheta": "\\vartheta", "iota": "\\iota", "kappa": "\\kappa", "lambda": "\\lambda", "mu": "\\mu", "nu": "\\nu", "xi": "\\xi", "omicron": "o",
+  "pi": "\\pi", "varpi": "\\varpi", "rho": "\\rho", "varrho": "\\varrho", "sigma": "\\sigma", "varsigma": "\\varsigma", "tau": "\\tau", "upsilon": "\\upsilon",
+  "phi": "\\phi", "varphi": "\\varphi", "chi": "\\chi", "psi": "\\psi", "omega": "\\omega", "aleph": "\\aleph", "hbar": "\\hbar", "imath": "\\imath", "jmath": "\\jmath",
+  "ell": "\\ell", "wp": "\\wp", "re": "\\Re", "im": "\\Im", "mho": "\\mho", "prime": "\\prime", "emptyset": "\\emptyset", "empty": "\\emptyset",
+  "nabla": "\\nabla", "grad": "\\nabla", "partial": "\\partial", "del": "\\partial", "infty": "\\infty", "inf": "\\infty", "infin": "\\infty",
+  "forall": "\\forall", "exist": "\\exists", "exists": "\\exists", "neg": "\\neg", "not": "\\neg", "lnot": "\\neg", "flat": "\\flat", "natural": "\\natural", "sharp": "\\sharp",
+  "clubsuit": "\\clubsuit", "diamondsuit": "\\diamondsuit", "heartsuit": "\\heartsuit", "spadesuit": "\\spadesuit", "angle": "\\angle", "triangle": "\\triangle", "perp": "\\perp", "bot": "\\bot",
+  "top": "\\top", "parallel": "\\parallel", "therefore": "\\therefore", "because": "\\because", "times": "\\times", "div": "\\div", "divide": "\\div", "cdot": "\\cdot", "centerdot": "\\cdot",
+  "pm": "\\pm", "plusminus": "\\pm", "mp": "\\mp", "minusplus": "\\mp", "circ": "\\circ", "bullet": "\\bullet", "star": "\\star", "ast": "\\ast",
+  "oplus": "\\oplus", "ominus": "\\ominus", "otimes": "\\otimes", "oslash": "\\oslash", "odot": "\\odot", "dagger": "\\dagger", "ddagger": "\\ddagger", "amalg": "\\amalg",
+  "cap": "\\cap", "inter": "\\cap", "cup": "\\cup", "union": "\\cup", "sqcap": "\\sqcap", "sqcup": "\\sqcup", "vee": "\\vee", "or": "\\vee",
+  "wedge": "\\wedge", "and": "\\wedge", "setminus": "\\setminus", "wr": "\\wr", "leq": "\\leq", "le": "\\leq", "geq": "\\geq", "ge": "\\geq",
+  "neq": "\\neq", "ne": "\\neq", "equiv": "\\equiv", "approx": "\\approx", "sim": "\\sim", "simeq": "\\simeq", "cong": "\\cong", "propto": "\\propto",
+  "prec": "\\prec", "succ": "\\succ", "preceq": "\\preceq", "succeq": "\\succeq", "ll": "\\ll", "gg": "\\gg", "subset": "\\subset", "supset": "\\supset",
+  "subseteq": "\\subseteq", "supseteq": "\\supseteq", "sqsubset": "\\sqsubset", "sqsupset": "\\sqsupset", "sqsubseteq": "\\sqsubseteq", "sqsupseteq": "\\sqsupseteq",
+  "in": "\\in", "owns": "\\ni", "ni": "\\ni", "notin": "\\notin", "vdash": "\\vdash", "dashv": "\\dashv", "models": "\\models", "mid": "\\mid", "doteq": "\\doteq",
+  "larrow": "\\leftarrow", "leftarrow": "\\leftarrow", "gets": "\\leftarrow", "rarrow": "\\rightarrow", "rightarrow": "\\rightarrow", "to": "\\rightarrow",
+  "lrarrow": "\\leftrightarrow", "leftrightarrow": "\\leftrightarrow", "uparrow": "\\uparrow", "downarrow": "\\downarrow", "updownarrow": "\\updownarrow",
+  "nearrow": "\\nearrow", "searrow": "\\searrow", "swarrow": "\\swarrow", "nwarrow": "\\nwarrow", "mapsto": "\\mapsto", "hookleftarrow": "\\hookleftarrow", "hookrightarrow": "\\hookrightarrow",
+  "cdots": "\\cdots", "ldots": "\\ldots", "vdots": "\\vdots", "ddots": "\\ddots", "dots": "\\dots", "sin": "\\sin", "cos": "\\cos", "tan": "\\tan", "cot": "\\cot", "sec": "\\sec", "csc": "\\csc",
+  "arcsin": "\\arcsin", "arccos": "\\arccos", "arctan": "\\arctan", "sinh": "\\sinh", "cosh": "\\cosh", "tanh": "\\tanh", "coth": "\\coth", "ln": "\\ln", "log": "\\log", "lg": "\\lg", "exp": "\\exp",
+  "det": "\\det", "dim": "\\dim", "ker": "\\ker", "hom": "\\hom", "deg": "\\deg", "gcd": "\\gcd", "max": "\\max", "min": "\\min", "arg": "\\arg", "lim": "\\lim",
+  "liminf": "\\liminf", "limsup": "\\limsup", "infimum": "\\inf", "supremum": "\\sup", "mod": "\\bmod", "pmod": "\\pmod", "quad": "\\quad", "qquad": "\\qquad", "it": "", "rm": "", "bold": "",
 ]
 
 private func mapIdent(_ word: String) -> String {

@@ -406,11 +406,33 @@ impl EqParser {
     fn parse_bound_group(&mut self, depth: usize) -> Result<Vec<EqExpr>, EasyOfficeError> {
         let is_braced = matches!(self.peek(), Some(EqToken::LBrace));
         let mut grp = self.parse_group(depth)?;
-        if !is_braced && matches!(self.peek(), Some(EqToken::Symbol('='))) {
-            self.pos += 1;
-            grp.push(EqExpr::Raw("=".to_string()));
-            let rhs = self.parse_group(depth)?;
-            grp.extend(rhs);
+        if !is_braced {
+            let rel_op = match self.peek() {
+                Some(EqToken::Symbol(op @ ('=' | '<' | '>'))) => Some(op.to_string()),
+                Some(EqToken::Command(c))
+                    if c.eq_ignore_ascii_case("rarrow")
+                        || c.eq_ignore_ascii_case("rightarrow") =>
+                {
+                    Some("\\rightarrow".to_string())
+                }
+                Some(EqToken::Command(c))
+                    if c.eq_ignore_ascii_case("larrow")
+                        || c.eq_ignore_ascii_case("leftarrow") =>
+                {
+                    Some("\\leftarrow".to_string())
+                }
+                _ => None,
+            };
+            if let Some(op_str) = rel_op {
+                self.pos += 1;
+                grp.push(EqExpr::Raw(op_str));
+                if let Some(&EqToken::Symbol(sign @ ('-' | '+'))) = self.peek() {
+                    self.pos += 1;
+                    grp.push(EqExpr::Raw(sign.to_string()));
+                }
+                let rhs = self.parse_group(depth)?;
+                grp.extend(rhs);
+            }
         }
         Ok(grp)
     }
@@ -715,10 +737,9 @@ impl EqParser {
                 };
                 Ok(Some(EqExpr::LeftRight(open, body, close)))
             }
-            "right" => {
-                let _ = self.parse_delimiter();
-                Ok(None)
-            }
+            "right" => Err(EasyOfficeError::CorruptedContainer(
+                "짝이 맞지 않는 right 구분자입니다.".to_string(),
+            )),
             "matrix" | "pile" | "cpile" | "lpile" | "rpile" => {
                 self.parse_matrix_rows("matrix", next_depth).map(Some)
             }

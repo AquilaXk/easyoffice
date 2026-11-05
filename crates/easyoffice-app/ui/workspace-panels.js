@@ -34,6 +34,7 @@
       fontSize: editor.style.fontSize || "",
       lineHeight: editor.style.lineHeight || "",
       textAlign: editor.style.textAlign || "",
+      textAlignMode: editor.dataset.textAlign || "",
       paperSize: editor.dataset.paperSize || "",
       styleRole: editor.dataset.styleRole || "",
       fontLang: editor.dataset.fontLang || "",
@@ -59,6 +60,11 @@
     editor.style.fontSize = ls.fontSize || "";
     editor.style.lineHeight = ls.lineHeight || "";
     editor.style.textAlign = ls.textAlign || "";
+    if (ls.textAlignMode) {
+      editor.dataset.textAlign = ls.textAlignMode;
+    } else {
+      delete editor.dataset.textAlign;
+    }
     [
       "paperSize",
       "styleRole",
@@ -622,9 +628,14 @@
       const roleBadge = document.getElementById("doc-style-role-badge");
       if (roleBadge) roleBadge.textContent = roleVal;
       const styleSelect = document.getElementById("doc-style-select");
-      if (styleSelect && editor?.dataset?.styleRole) styleSelect.value = editor.dataset.styleRole;
+      if (styleSelect) styleSelect.value = roleVal;
+      const fontLang = document.getElementById("doc-font-lang");
+      if (fontLang) fontLang.value = editor?.dataset?.fontLang || "대표";
       const fontSelect = document.getElementById("doc-font-select");
-      if (fontSelect) fontSelect.value = editor?.style?.fontFamily || "Pretendard";
+      const fontVal = editor?.style?.fontFamily || "Pretendard";
+      if (fontSelect) fontSelect.value = fontVal;
+      const fontBadge = document.getElementById("doc-style-font-badge");
+      if (fontBadge) fontBadge.textContent = fontVal;
       const lsSelect = document.getElementById("doc-linespacing-select");
       if (lsSelect) lsSelect.value = editor?.dataset?.lineSpacing || "160";
       [
@@ -632,6 +643,8 @@
         ["btn-stylebar-charfx", "charfx"],
         ["btn-stylebar-textcolor", "textcolor"],
         ["btn-stylebar-highlight", "highlight"],
+        ["btn-toggle-ctrl-marks", "showCtrlMarks"],
+        ["btn-toggle-para-marks", "showParaMarks"],
       ].forEach(([id, key]) => {
         const btn = document.getElementById(id);
         const on = editor?.dataset?.[key] === "true";
@@ -640,9 +653,24 @@
           btn.setAttribute("aria-pressed", on ? "true" : "false");
         }
       });
+      const isGrid = Boolean(editor?.classList?.contains("manuscript-grid"));
+      const gridBtn = document.getElementById("btn-toggle-doc-grid");
+      if (gridBtn) {
+        gridBtn.classList.toggle("active", isGrid);
+        gridBtn.setAttribute("aria-pressed", isGrid ? "true" : "false");
+      }
+      const alignMode = editor?.dataset?.textAlign || editor?.style?.textAlign || "justify";
+      ["left", "center", "right", "justify", "distribute", "divide"].forEach((m) => {
+        const b = document.getElementById("btn-align-" + m);
+        const on = m === alignMode;
+        if (b) {
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+        }
+      });
       const hwpPreview = document.getElementById("hwp-manuscript-preview");
       if (hwpPreview) {
-        hwpPreview.classList.toggle("manuscript-grid", Boolean(editor?.classList?.contains("manuscript-grid")));
+        hwpPreview.classList.toggle("manuscript-grid", isGrid);
       }
       activeDocBlockEl = null;
       const firstBlock = editor ? getFocusedDocBlock(editor) : null;

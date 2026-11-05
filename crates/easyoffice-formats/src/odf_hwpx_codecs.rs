@@ -936,8 +936,19 @@ impl HwpxCodec {
                 if !text.is_empty() || !p_body.contains("<hp:equation") {
                     paragraphs.push(text);
                 }
+                for eq_body in extract_tag_bodies(p_body, "hp:equation") {
+                    for raw_script in extract_tag_bodies(eq_body, "hp:script") {
+                        let script = XmlSanitizer::unescape(raw_script);
+                        let trimmed = script.trim();
+                        if !trimmed.is_empty() {
+                            let latex = crate::hwp_eqedit::convert_eqedit_to_latex(trimmed)?;
+                            paragraphs.push(format!("$${latex}$$"));
+                        }
+                    }
+                }
             }
-            for eq_body in extract_tag_bodies(sec_xml, "hp:equation") {
+            let sec_without_paras = strip_tag_blocks(&sec_without_tables, "hp:p");
+            for eq_body in extract_tag_bodies(&sec_without_paras, "hp:equation") {
                 for raw_script in extract_tag_bodies(eq_body, "hp:script") {
                     let script = XmlSanitizer::unescape(raw_script);
                     let trimmed = script.trim();

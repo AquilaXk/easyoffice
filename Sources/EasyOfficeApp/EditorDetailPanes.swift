@@ -1812,14 +1812,6 @@ public struct DocumentEditorDetailPaneView: View {
           .fill(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
           .frame(width: 3, height: 13)
       }
-      if showFormattingMarks {
-        Text(" ¶")
-          .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-          .foregroundStyle(
-            EasyOfficeDesignTokens.resolveHexColor(
-              "#D97706", fallback: palette.secondaryText.swiftUIColor)
-          )
-      }
       if let listPrefix {
         Text(listPrefix)
           .font(.system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced))

@@ -277,16 +277,29 @@ fn hwpx_unpack_converts_hp_equation_scripts_and_fails_closed_on_malformed_equati
     };
 
     let valid_bytes = build_hwpx_with_section(
-        "<hp:p><hp:run><hp:t>본문</hp:t></hp:run></hp:p><hp:p><hp:run><hp:equation><hp:script>left langle x right rangle = {1 over 2}</hp:script></hp:equation></hp:run></hp:p>",
+        "<hp:p><hp:run><hp:t>문단1</hp:t></hp:run></hp:p><hp:p><hp:run><hp:equation><hp:script>left langle x right rangle = {1 over 2}</hp:script></hp:equation></hp:run></hp:p><hp:p><hp:run><hp:t>문단2</hp:t></hp:run></hp:p>",
     );
     let unpacked = HwpxCodec::unpack(&valid_bytes).unwrap();
     assert_eq!(
         unpacked.paragraphs,
         vec![
-            "본문".to_string(),
-            "$$\\left\\langle x\\right\\rangle = \\frac{1}{2}$$".to_string()
+            "문단1".to_string(),
+            "$$\\left\\langle x\\right\\rangle = \\frac{1}{2}$$".to_string(),
+            "문단2".to_string(),
         ]
     );
+    assert_eq!(
+        convert_eqedit_to_latex("sum from i=-1 to n x_i").unwrap(),
+        "\\sum_{i = - 1}^n x_i"
+    );
+    assert_eq!(
+        convert_eqedit_to_latex("lim from x rarrow 0 f(x)").unwrap(),
+        "\\lim_{x\\rightarrow 0} f(x)"
+    );
+    assert!(matches!(
+        convert_eqedit_to_latex("{ a + right }"),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
 
     let broken_bytes = build_hwpx_with_section(
         "<hp:p><hp:run><hp:equation><hp:script>sqrt { x + 1</hp:script></hp:equation></hp:run></hp:p>",
