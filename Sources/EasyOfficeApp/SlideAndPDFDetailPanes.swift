@@ -478,11 +478,7 @@ public struct SlideEditorDetailPaneView: View {
                   }
 
                   HStack(alignment: .top, spacing: 6) {
-                    SlideVerticalRulerView(
-                      maxHeightPoints: deck.aspectRatio.heightPoints,
-                      palette: palette
-                    )
-                    .frame(width: 22, height: slideStageHeight)
+                    Color.clear.frame(width: 22, height: 1)
 
                     GeometryReader { geo in
                       let stageW = max(1.0, deck.aspectRatio.widthPoints)
@@ -577,11 +573,20 @@ public struct SlideEditorDetailPaneView: View {
                       }
                       .border(palette.border.swiftUIColor, width: 1)
                       .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+                      .overlay(alignment: .topLeading) {
+                        SlideVerticalRulerView(
+                          maxHeightPoints: deck.aspectRatio.heightPoints,
+                          palette: palette
+                        )
+                        .frame(width: 22, height: geo.size.height)
+                        .offset(x: -28)
+                      }
                     }
                     .aspectRatio(aspectFactor, contentMode: .fit)
                     .frame(
                       maxWidth: slideStageWidth,
-                      maxHeight: slideStageHeight
+                      maxHeight: slideStageHeight,
+                      alignment: .topLeading
                     )
                   }
                 }

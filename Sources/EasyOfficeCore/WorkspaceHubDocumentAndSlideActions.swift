@@ -911,38 +911,34 @@ extension WorkspaceViewModel {
   }
 
   public func insertRowInDocumentTable(tableIndex: Int? = nil, at rowIndex: Int? = nil) {
-    let targetRow = rowIndex ?? selectedDocumentTableCell.map { $0.row + 1 }
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 행 삽입 완료 (총 \($0.rowCount)행)" },
-      mutation: { $0.insertRow(at: targetRow) }
+      mutation: { $0.insertRow(at: rowIndex ?? self.selectedDocumentTableCell.map { $0.row + 1 }) }
     )
   }
 
   public func deleteRowInDocumentTable(tableIndex: Int? = nil, at rowIndex: Int? = nil) {
-    let targetRow = rowIndex ?? selectedDocumentTableCell?.row
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 행 삭제 완료 (총 \($0.rowCount)행)" },
-      mutation: { $0.deleteRow(at: targetRow) }
+      mutation: { $0.deleteRow(at: rowIndex ?? self.selectedDocumentTableCell?.row) }
     )
   }
 
   public func insertColumnInDocumentTable(tableIndex: Int? = nil, at columnIndex: Int? = nil) {
-    let targetCol = columnIndex ?? selectedDocumentTableCell.map { $0.column + 1 }
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 열 삽입 완료 (총 \($0.columnCount)열)" },
-      mutation: { $0.insertColumn(at: targetCol) }
+      mutation: { $0.insertColumn(at: columnIndex ?? self.selectedDocumentTableCell.map { $0.column + 1 }) }
     )
   }
 
   public func deleteColumnInDocumentTable(tableIndex: Int? = nil, at columnIndex: Int? = nil) {
-    let targetCol = columnIndex ?? selectedDocumentTableCell?.column
     mutateActiveDocumentTable(
       tableIndex: tableIndex,
       summary: { "표 열 삭제 완료 (총 \($0.columnCount)열)" },
-      mutation: { $0.deleteColumn(at: targetCol) }
+      mutation: { $0.deleteColumn(at: columnIndex ?? self.selectedDocumentTableCell?.column) }
     )
   }
 

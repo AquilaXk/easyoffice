@@ -37,12 +37,19 @@ public final class WorkspaceViewModel {
   public var customTemplates: [OfficeTemplateDescriptor] = []
   public var showLeftNavigator: Bool = true
   public var showRightInspector: Bool = true
+  internal var hasPendingTopSearchQuery: Bool = false
   public var searchQuery: String = "" {
     didSet {
       let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !isShowingHomeHub, !isSyncingFindReplaceState, !trimmed.isEmpty else { return }
+      hasPendingTopSearchQuery = true
+      isSyncingFindReplaceState = true
+      defer { isSyncingFindReplaceState = false }
       if findQueryText != searchQuery {
         findQueryText = searchQuery
+      }
+      if findQueryDraft != searchQuery {
+        findQueryDraft = searchQuery
       }
       isFindReplaceBarVisible = true
     }
@@ -55,7 +62,13 @@ public final class WorkspaceViewModel {
   }
   public var selectedSlideIndex: Int = 0
   public var selectedPDFPageIndex: Int = 0
-  public var selectedDocumentTableIndex: Int = 0
+  public var selectedDocumentTableIndex: Int = 0 {
+    didSet {
+      if selectedDocumentTableIndex != oldValue {
+        selectedDocumentTableCell = nil
+      }
+    }
+  }
   public var selectedDocumentTableCell: (row: Int, column: Int)? = nil
   public var formulaBarDraft: String = ""
   public var isPresenterModeActive: Bool = false
@@ -153,6 +166,7 @@ public final class WorkspaceViewModel {
         currentFindMatchIndex = 0
       }
       guard !isSyncingFindReplaceState else { return }
+      hasPendingTopSearchQuery = false
       isSyncingFindReplaceState = true
       defer { isSyncingFindReplaceState = false }
       if findQueryDraft != findQueryText {
@@ -176,6 +190,7 @@ public final class WorkspaceViewModel {
         currentFindMatchIndex = 0
       }
       guard !isSyncingFindReplaceState else { return }
+      hasPendingTopSearchQuery = false
       isSyncingFindReplaceState = true
       defer { isSyncingFindReplaceState = false }
       if findQueryText != findQueryDraft {

@@ -696,10 +696,12 @@ extension WorkspaceViewModel {
 
   public func performFindNext() {
     let trimmedSearch = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedFind = findQueryText.trimmingCharacters(in: .whitespacesAndNewlines)
     if !isShowingHomeHub {
-      if !trimmedSearch.isEmpty && findQueryText != searchQuery {
+      if !trimmedSearch.isEmpty && (hasPendingTopSearchQuery || trimmedFind.isEmpty) {
         findQueryText = searchQuery
       }
+      hasPendingTopSearchQuery = false
       if !findQueryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         isFindReplaceBarVisible = true
       }
@@ -715,6 +717,12 @@ extension WorkspaceViewModel {
   public func selectDocumentTableCell(tableIndex: Int, row: Int, column: Int) {
     selectedDocumentTableIndex = max(0, tableIndex)
     selectedDocumentTableCell = (row: max(0, row), column: max(0, column))
+  }
+
+  internal func resolvedFormulaTargetColumn(for table: DocumentTableBlock) -> Int {
+    let colCount = max(1, table.columnCount)
+    let rawCol = selectedDocumentTableCell?.column ?? (colCount - 1)
+    return colCount > 1 && rawCol == 0 ? (colCount - 1) : min(max(0, rawCol), colCount - 1)
   }
 
   public func removeRecentDocumentRecord(id: UUID) {

@@ -627,9 +627,9 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     XCTAssertTrue(vm.isFindReplaceBarVisible)
     vm.findQueryText = "문서"
     XCTAssertEqual(vm.searchQuery, "이지오피스")
-    vm.searchQuery = ""
     vm.performFindNext()
     XCTAssertEqual(vm.findQueryText, "문서")
+    XCTAssertEqual(vm.searchQuery, "이지오피스")
     XCTAssertFalse((vm.lastExecutedCommandSummary ?? "").isEmpty)
 
     if let sheetTab = vm.openTabs.first(where: { $0.moduleKind == .sheet }) {

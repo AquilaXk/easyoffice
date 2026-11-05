@@ -202,9 +202,7 @@ extension WorkspaceViewModel {
         if !doc.tables.isEmpty {
           let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
           let colCount = max(1, doc.tables[tIdx].columnCount)
-          let rawCol = selectedDocumentTableCell?.column ?? (colCount - 1)
-          let targetCol =
-            colCount > 1 && rawCol == 0 ? (colCount - 1) : min(max(0, rawCol), colCount - 1)
+          let targetCol = resolvedFormulaTargetColumn(for: doc.tables[tIdx])
           if let val = doc.tables[tIdx].evaluateTableFormula(
             "=SUM(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: targetCol)
           {

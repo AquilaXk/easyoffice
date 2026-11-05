@@ -159,7 +159,7 @@
             extraHolder.appendChild(node.cloneNode(true));
           } else {
             const txt = node.textContent || "";
-            if (txt) bodyParts.push(txt);
+            if (node.nodeType === 3 ? txt.trim() : txt) bodyParts.push(txt);
           }
         });
         slide.lower = bodyParts.join("\n");
