@@ -457,9 +457,9 @@ struct TopDocumentTabStripView: View {
 
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
-    let isDocumentStudio =
-      !viewModel.isShowingHomeHub
-      && (viewModel.activeTab?.moduleKind == .document || viewModel.activeTab?.moduleKind == .hwp)
+    let isActiveTabDocumentStudio =
+      viewModel.activeTab?.moduleKind == .document || viewModel.activeTab?.moduleKind == .hwp
+    let isDocumentStudio = !viewModel.isShowingHomeHub && isActiveTabDocumentStudio
     let rowBg = EasyOfficeDesignTokens.resolveHexColor(
       palette.isDark ? "#2B3037" : "#F5F5F5",
       fallback: palette.elevatedSurface.swiftUIColor
@@ -479,11 +479,12 @@ struct TopDocumentTabStripView: View {
         }
         topMenuBarItem("편집", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .home
-          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
+          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("보기", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .view
-          if isDocumentStudio {
+          if isActiveTabDocumentStudio {
             isStudioPanelsExpanded.toggle()
             if isStudioPanelsExpanded {
               viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
@@ -495,23 +496,28 @@ struct TopDocumentTabStripView: View {
         }
         topMenuBarItem("입력", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert
-          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
+          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("서식", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
+          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("쪽", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
+          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("표", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .formulasAndData
-          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
+          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("도구", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .review
-          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
+          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
       }
       .fixedSize(horizontal: true, vertical: false)

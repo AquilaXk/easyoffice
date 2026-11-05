@@ -717,12 +717,16 @@
     function findEditableDocBlock(node, docEditor) {
       if (!node || !docEditor) return null;
       let cur = node.nodeType === 1 ? node : node.parentElement;
+      let candidateLi = null;
       while (cur && cur !== docEditor) {
-        if ((cur.tagName || "").toUpperCase() === "LI" && docEditor.contains(cur)) {
-          return cur;
+        if (!candidateLi && (cur.tagName || "").toUpperCase() === "LI" && docEditor.contains(cur)) {
+          candidateLi = cur;
         }
         if (cur.parentElement === docEditor) {
-          return !isNonParagraphStudioContainer(cur) ? cur : null;
+          if (candidateLi && cur.classList && cur.classList.contains("eo-criteria-panel")) {
+            return candidateLi;
+          }
+          return !isNonParagraphStudioContainer(cur) ? candidateLi || cur : null;
         }
         cur = cur.parentElement;
       }

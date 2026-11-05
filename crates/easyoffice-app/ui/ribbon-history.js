@@ -660,6 +660,7 @@
         }
         const hwpNotice = document.getElementById("hwp-manuscript-preview");
         if (hwpNotice) {
+          hwpNotice.classList.toggle("manuscript-grid", gridOn);
           hwpNotice.hidden = getActiveModule() !== "HWP" || !gridOn;
         }
         workspacePanels.saveActiveDocTabState();

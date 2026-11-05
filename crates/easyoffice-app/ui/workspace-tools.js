@@ -707,7 +707,9 @@
             withDocStyleUndo(() => {
               const p = document.createElement("p");
               p.textContent = studioClipboardText || "붙여넣기 문단";
-              if (blk?.parentNode === editor) blk.insertAdjacentElement("afterend", p);
+              let topBlk = blk;
+              while (topBlk && topBlk.parentNode && topBlk.parentNode !== editor) topBlk = topBlk.parentNode;
+              if (topBlk?.parentNode === editor) topBlk.insertAdjacentElement("afterend", p);
               else editor?.appendChild(p);
               computeSmartStats();
             });
