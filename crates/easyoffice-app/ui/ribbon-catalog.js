@@ -353,6 +353,21 @@
     return localRibbonState;
   }
 
+  function formatPlatformShortcut(rawShortcut, shortcutModifier) {
+    const text = String(rawShortcut || "");
+    if (!text || shortcutModifier !== "Ctrl") return text;
+    return text
+      .replaceAll("⌃⌘", "Ctrl+Alt+")
+      .replace(/\bCtrl\+Cmd\+/g, "Ctrl+Alt+")
+      .replaceAll("⌘", "Ctrl+")
+      .replaceAll("⌃", "Ctrl+")
+      .replaceAll("⌥", "Alt+")
+      .replaceAll("⇧", "Shift+")
+      .replace(/\bCmd\+/g, "Ctrl+")
+      .replace(/\bOption\+/g, "Alt+")
+      .replaceAll("Ctrl+Ctrl+", "Ctrl+");
+  }
+
   host.__EASYOFFICE_RIBBON_CATALOG__ = {
     MODULE_ACCENTS,
     MODULE_LABELS,
@@ -367,5 +382,6 @@
     createInitialSlideDeckState,
     createDefaultRibbonState,
     syncLocalRibbonStateFromBackend,
+    formatPlatformShortcut,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

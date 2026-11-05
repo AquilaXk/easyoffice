@@ -339,7 +339,6 @@ public struct SlideshowFullScreenOverlayView: View {
 
     ZStack {
       EasyOfficeDesignTokens.darkScaffold.swiftUIColor
-        .opacity(0.97)
         .ignoresSafeArea()
 
       VStack(spacing: 16) {

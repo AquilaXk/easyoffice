@@ -389,6 +389,31 @@ impl Hwp5Codec {
         Some((word & 0x03FF) as u16)
     }
 
+    fn append_eqedit_record(
+        slice: &[u8],
+        paragraphs: &mut Vec<Hwp5ParagraphRecord>,
+    ) -> Result<(), EasyOfficeError> {
+        let latex = crate::hwp_eqedit::decode_hwp5_eqedit_script(slice)?;
+        if latex.is_empty() {
+            return Ok(());
+        }
+        let eq = format!("[수식] ${latex}$");
+        if let Some(last) = paragraphs.last_mut() {
+            last.text = if last.text.is_empty() {
+                eq
+            } else {
+                format!("{} {eq}", last.text)
+            };
+        } else {
+            paragraphs.push(Hwp5ParagraphRecord {
+                text: eq,
+                style_name: "본문".to_string(),
+                is_official_header: false,
+            });
+        }
+        Ok(())
+    }
+
     fn parse_section_records(
         section_bytes: &[u8],
         total_records: &mut usize,
@@ -438,37 +463,34 @@ impl Hwp5Codec {
                 }
                 Self::HWPTAG_TABLE_RECORD | Self::STD_HWPTAG_TABLE => {
                     let next_tag = Self::peek_next_tag_id(section_bytes, end);
-                    if matches!(
+                    let parsed_rows = if matches!(
                         next_tag,
                         Some(Self::STD_HWPTAG_LIST_HEADER | Self::ALT_HWPTAG_LIST_HEADER)
                     ) {
                         let row_lengths = Self::extract_std_table_dims(&section_bytes[start..end])?;
                         offset = end;
-                        let parsed_rows = Self::consume_std_table_cells(
+                        Self::consume_std_table_cells(
                             section_bytes,
                             &mut offset,
                             total_records,
                             level,
                             &row_lengths,
                             total_table_cells,
-                        )?;
-                        if !parsed_rows.is_empty() {
-                            table_cells.extend(parsed_rows.iter().cloned());
-                            all_tables.push(parsed_rows);
-                        }
+                        )?
                     } else {
-                        let parsed_rows =
-                            Self::parse_table_record(section_bytes, start, end, total_table_cells)?;
-                        if !parsed_rows.is_empty() {
-                            table_cells.extend(parsed_rows.iter().cloned());
-                            all_tables.push(parsed_rows);
-                        }
                         offset = end;
+                        Self::parse_table_record(section_bytes, start, end, total_table_cells)?
+                    };
+                    if !parsed_rows.is_empty() {
+                        table_cells.extend(parsed_rows.iter().cloned());
+                        all_tables.push(parsed_rows);
                     }
                 }
-                _ => {
+                crate::hwp_eqedit::HWPTAG_EQEDIT => {
+                    Self::append_eqedit_record(&section_bytes[start..end], paragraphs)?;
                     offset = end;
                 }
+                _ => offset = end,
             }
         }
         Ok(())
@@ -646,65 +668,8 @@ impl Hwp5Codec {
         Ok(rows)
     }
 
-    pub(crate) fn decode_hwp5_para_text(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-        if bytes.len() % 2 != 0 {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "HWP 5.0 문단 텍스트 페이로드 길이가 2바이트(WCHAR) 배수가 아닙니다.".to_string(),
-            ));
-        }
-        let has_control = bytes
-            .chunks_exact(2)
-            .any(|c| u16::from_le_bytes([c[0], c[1]]) < 0x0020);
-        if !has_control {
-            return decode_utf16le(bytes);
-        }
-
-        let mut filtered = Vec::with_capacity(bytes.len());
-        let mut cursor = 0usize;
-        while cursor < bytes.len() {
-            let code = u16::from_le_bytes([bytes[cursor], bytes[cursor + 1]]);
-            if code < 0x0020 {
-                match code {
-                    0x0009 => {
-                        filtered.extend_from_slice(&0x0009u16.to_le_bytes());
-                        if cursor + 16 <= bytes.len()
-                            && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]])
-                                == 0x0009
-                            && bytes[cursor + 2..cursor + 14].iter().all(|&b| b == 0)
-                        {
-                            cursor += 16;
-                        } else {
-                            cursor += 2;
-                        }
-                    }
-                    0x000A => {
-                        filtered.extend_from_slice(&0x000Au16.to_le_bytes());
-                        cursor += 2;
-                    }
-                    0x000D => {
-                        if cursor + 2 < bytes.len() {
-                            filtered.extend_from_slice(&0x000Au16.to_le_bytes());
-                        }
-                        cursor += 2;
-                    }
-                    0x0001..=0x0008 | 0x000B..=0x000C | 0x000E..=0x0017
-                        if cursor + 16 <= bytes.len()
-                            && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]])
-                                == code =>
-                    {
-                        cursor += 16;
-                    }
-                    _ => {
-                        cursor += 2;
-                    }
-                }
-            } else {
-                filtered.push(bytes[cursor]);
-                filtered.push(bytes[cursor + 1]);
-                cursor += 2;
-            }
-        }
-        decode_utf16le(&filtered)
+    pub fn decode_hwp5_para_text(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+        crate::hwp_eqedit::decode_hwp5_para_text_bytes(bytes)
     }
 
     fn is_printable_text(s: &str) -> bool {

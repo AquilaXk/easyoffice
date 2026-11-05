@@ -485,6 +485,9 @@
       "borderStyle",
       "columnCount",
       "padding",
+      "paddingLeft",
+      "lineHeight",
+      "textAlign",
       "outline",
       "transform",
     ];

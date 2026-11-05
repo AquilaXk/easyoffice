@@ -333,9 +333,21 @@ extension WorkspaceViewModel {
       var doc = try RTFCodec.decodeDocument(from: data)
       doc.format = format
       payload = .document(doc)
-    case .md, .txt:
+    case .md:
       var doc = try CommonMarkCodec.decodeDocument(from: data, title: fileName)
       doc.format = format
+      payload = .document(doc)
+    case .txt:
+      let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+      let normalized = text
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\r", with: "\n")
+      let rawLines = normalized.components(separatedBy: "\n")
+      var paragraphs = rawLines.map { DocumentParagraph(style: .body, text: $0) }
+      if paragraphs.isEmpty {
+        paragraphs = [DocumentParagraph(style: .body, text: "")]
+      }
+      let doc = OfficeDocumentModel(title: fileName, format: .txt, paragraphs: paragraphs)
       payload = .document(doc)
     case .xlsx: payload = .sheet(try OOXMLContainerCodec.decodeWorksheet(from: data))
     case .xls:
@@ -362,7 +374,30 @@ extension WorkspaceViewModel {
     let decoded = try decodeDocumentPayload(data: data, fileName: fileName)
     let isNativeOrigin: Bool
     if let fileURL {
-      isNativeOrigin = knownEasyOfficeSavedFilePaths.contains(fileURL.standardizedFileURL.path)
+      let standardizedTarget = fileURL.standardizedFileURL.path
+      isNativeOrigin = knownEasyOfficeSavedFilePaths.contains(standardizedTarget)
+      if let existingIdx = openTabs.firstIndex(where: {
+        $0.fileURL?.standardizedFileURL.path == standardizedTarget
+      }) {
+        if openTabs[existingIdx].isModified {
+          recordUndoSnapshot(for: openTabs[existingIdx].id)
+        }
+        openTabs[existingIdx].fileName = fileName
+        openTabs[existingIdx].format = decoded.format
+        openTabs[existingIdx].lastOpenedISO8601 = OfficeDocumentModel.currentISO8601Timestamp()
+        openTabs[existingIdx].fileURL = fileURL
+        openTabs[existingIdx].payload = decoded.payload
+        openTabs[existingIdx].isModified = false
+        openTabs[existingIdx].isLosslessNativeOrigin = isNativeOrigin
+        openTabs[existingIdx].isMetadataOnlyPlaceholder = false
+        openTabs[existingIdx].isUnreadable = false
+        let updatedTab = openTabs[existingIdx]
+        activeTabID = updatedTab.id
+        isShowingHomeHub = false
+        lastErrorMessage = nil
+        recordRecentDocument(updatedTab)
+        return updatedTab
+      }
     } else {
       isNativeOrigin = true
     }
@@ -860,121 +895,6 @@ extension WorkspaceViewModel {
     } else {
       lastErrorMessage = nil
       lastExecutedCommandSummary = "TSV 셀 범위 붙여넣기 완료 (\(selectedSheetRange))"
-    }
-  }
-
-  public func moveSheetSelection(
-    rowDelta: Int,
-    columnDelta: Int,
-    extendSelection: Bool = false
-  ) {
-    let baseNotation: String
-    if extendSelection, selectedSheetRange.contains(":") {
-      baseNotation = selectedSheetRange.components(separatedBy: ":").last ?? selectedSheetCell
-    } else {
-      baseNotation = selectedSheetCell
-    }
-    let currentAddr =
-      (try? CellAddress(a1Notation: baseNotation))
-      ?? CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    let nextRow = max(0, min(CellAddress.maxZeroBasedRow, currentAddr.row + rowDelta))
-    let nextCol = max(0, min(CellAddress.maxZeroBasedColumn, currentAddr.column + columnDelta))
-    let nextAddr = CellAddress(packed: PackedCellCoordinate(row: nextRow, column: nextCol))
-    if extendSelection {
-      extendSheetSelection(to: nextAddr.a1Notation)
-    } else {
-      selectSheetCellOrRange(primaryCell: nextAddr.a1Notation)
-    }
-  }
-
-  public func clearSelectedSheetRange() {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    let originAddress = CellAddress(packed: PackedCellCoordinate(row: 0, column: 0))
-    let fallbackRange =
-      (try? CellAddress(a1Notation: selectedSheetCell)).map { CellRange(start: $0, end: $0) }
-      ?? CellRange(start: originAddress, end: originAddress)
-    let range = (try? CellRange(notation: selectedSheetRange)) ?? fallbackRange
-    recordUndoSnapshot(for: activeTabID)
-    range.forEachCoordinate { coord in
-      sheet.cellsByCoordinate.removeValue(forKey: coord)
-      sheet.compiledASTs.removeValue(forKey: coord)
-      sheet.sheetComments.removeValue(forKey: coord)
-    }
-    formulaBarDraft = ""
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "선택 셀 값 지우기 (\(selectedSheetRange))"
-  }
-
-  public func setSelectedSheetCellColors(
-    fillHex: String? = nil,
-    textHex: String? = nil,
-    clearFill: Bool = false,
-    clearText: Bool = false
-  ) {
-    guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
-      case .sheet(var sheet) = openTabs[idx].payload
-    else { return }
-    recordUndoSnapshot(for: activeTabID)
-    let coord =
-      (try? CellAddress(a1Notation: selectedSheetCell))?.packedCoordinate
-      ?? PackedCellCoordinate(row: 0, column: 0)
-    var style = sheet.cellStyle(at: coord)
-    if clearFill {
-      style.fillHex = nil
-    } else if let fillHex {
-      style.fillHex = fillHex
-    }
-    if clearText {
-      style.textHex = nil
-    } else if let textHex {
-      style.textHex = textHex
-    }
-    sheet.setCellStyle(style, at: coord)
-    if let range = try? CellRange(notation: selectedSheetRange), range.start != range.end {
-      sheet.updateCellStyleInRange(range) { cellStyle in
-        if clearFill {
-          cellStyle.fillHex = nil
-        } else if let fillHex {
-          cellStyle.fillHex = fillHex
-        }
-        if clearText {
-          cellStyle.textHex = nil
-        } else if let textHex {
-          cellStyle.textHex = textHex
-        }
-      }
-    }
-    openTabs[idx].payload = .sheet(sheet)
-    openTabs[idx].isModified = true
-    lastExecutedCommandSummary = "셀 배경·글자 색상 서식 적용"
-  }
-
-  public var isTrackChangesEnabled: Bool {
-    get {
-      guard let tab = activeTab else { return false }
-      switch tab.payload {
-      case .document(let d): return d.trackChangesEnabled
-      case .sheet(let s): return s.trackChangesEnabled
-      case .slide, .pdf: return false
-      }
-    }
-    set {
-      guard let activeTabID, let idx = openTabs.firstIndex(where: { $0.id == activeTabID }) else {
-        return
-      }
-      switch openTabs[idx].payload {
-      case .document(var d):
-        d.trackChangesEnabled = newValue
-        openTabs[idx].payload = .document(d)
-      case .sheet(var s):
-        s.trackChangesEnabled = newValue
-        openTabs[idx].payload = .sheet(s)
-      case .slide, .pdf:
-        break
-      }
     }
   }
 }

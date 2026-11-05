@@ -939,3 +939,38 @@
   - 일괄 변환 시 모든 변환 결과 바이트를 누적 상한 없이 인메모리 배열에 적재하는 방식은 다수의 대용량 문서 변환 시 OOM 크래시를 유발하므로 기각.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace`, `swift test`
 - **Revisit when** 스트리밍 디스크 플러시 기반 무제한 배치 변환 모드를 추가할 때.
+
+## 43. Windows(WebView2)·macOS(AppKit/WKWebView) 실런타임 구동 감사 기반 플랫폼 단축키·PDF 회전 레이아웃·크로스스택 122종 수식 카탈로그 정합성 (PD-068)
+
+- **Status** Implemented
+- **Context** macOS 네이티브 앱(`EasyOfficeApp`)과 Windows/macOS WebUI(`easyoffice-app --serve`)를 실제 런타임에서 구동하여 전 모듈(`DOC`, `HWP`, `SHEET`, `SLIDE`, `PDF`, `CONV`), 라이트·다크 테마, 명령 팔레트, PDF 회전·양식, 일괄 변환을 교차 점검한 결과 도출된 플랫폼 단축키 표기, 레이아웃 줄바꿈·겹침, 탭 중복 개설, Swift/Rust 122종 수식 카탈로그 집합 차이를 일괄 정비합니다.
+- **Decision (`PD-068`)**
+  1. **Windows(`Ctrl`)·macOS(`⌘`/`Cmd`) 단축키 표기 정규화 및 키보드 바인딩 (`crates/easyoffice-app/ui/{ribbon-catalog.js,ribbon-history.js,app.js}`)**
+     - `formatPlatformShortcut(rawShortcut, shortcutModifier)`를 도입하여 `shortcutModifier === "Ctrl"`(Windows/Linux 런타임)일 때 리본 버튼, 명령 팔레트, 빠른 실행 툴바(`#qat-save`, `#qat-undo`, `#qat-redo`)의 단축키 표기를 `Ctrl+B`, `Ctrl+I`, `Ctrl+U`, `Ctrl+Alt+S`, `Ctrl+Shift+P` 등 Windows 표준 표기로 변환하고, `#shortcut-hint` 배지가 `"CtrlK"` 대신 `"Ctrl+K"`(`"⌘"`일 때는 `"⌘K"`)로 표시되도록 정규화합니다.
+     - 전역 `keydown` 핸들러에 `Ctrl/Cmd+B`, `Ctrl/Cmd+I`, `Ctrl/Cmd+U`, `Ctrl/Cmd+0`, `Ctrl+Alt+D` 단축키를 바인딩하여 현재 활성 모듈의 리본 명령을 직접 실행합니다.
+  2. **WebUI 상단바·상태바 줄바꿈 방지, PDF 90° 회전 겹침 해소, 다크 모드 셀렉트 토큰 및 파비콘 (`crates/easyoffice-app/ui/{styles.css,index.html}`, `crates/easyoffice-app/src/http_server.rs`)**
+     - `.topbar`, `.tab-pill`, `.action-btn`, `.statusbar` 요소에 `white-space: nowrap; flex-shrink: 0;`과 `#status-command-feedback` 말줄임(`text-overflow: ellipsis`)을 적용해 Windows/macOS 창 크기에서 한글 단어 중간 줄바꿈을 방지합니다.
+     - PDF 90°/270° 회전 시 `.pdf-page-card[data-rotated-quarter="true"]` 상하 여백을 확보하여 회전된 용지가 상단 툴바 및 하단 입력 폼을 침범하지 않도록 하고, `pdf-mod-rotate` 실행 즉시 `#pdf-form-status` 회전 각도 요약을 갱신하며, `#btn-pdf-apply`를 `enqueueWorkspaceHistoryOp` 직렬 큐로 감쌉니다.
+     - `#conv-src-fmt`·`#conv-dst-fmt`에 `.cmd-input.conv-fmt-select` 다크 표면 스타일을 적용하고, `http_server.rs`에 `/favicon.ico` SVG 응답을 추가해 브라우저 콘솔 `404` 오류를 제거합니다.
+  3. **macOS 네이티브 발표 스테이지 불투명도, PDF 주석 접두어 제거, `.txt` 평문 디코딩 및 동일 `fileURL` 탭 중복 방지 (`Sources/EasyOfficeApp/{SlideshowAndPDFCanvasOverlays.swift,SlideAndPDFDetailPanes.swift}`, `Sources/EasyOfficeCore/WorkspaceHubPersistenceAndBatch.swift`)**
+     - 전체화면 발표 스테이지(`SlideshowFullScreenOverlayView`) 배경의 `.opacity(0.97)`을 제거하여 100% 불투명 다크 스테이지로 렌더링하고 하위 편집 크롬 비침을 차단합니다.
+     - PDF 스튜디오 검토 주석 표시(`SlideAndPDFDetailPanes.swift`)에서 중복 접두어(`하이라이트 하이라이트:`)를 제거하고, `.txt` 파일 열기 시 CommonMark 마크다운 파서 대신 UTF-8 줄 단위 평문(`.body`)으로 디코딩하며, `openDocument(data:fileName:fileURL:)` 호출 시 동일한 `standardizedFileURL.path`를 가진 열린 탭이 있으면 중복 탭을 생성하지 않고 기존 탭을 갱신·포커스합니다.
+  4. **Swift(`SheetEngine.swift`)·Rust(`functions.rs`) 122종 수식 카탈로그 1:1 집합 일치 및 위생 가드 (`Sources/EasyOfficeCore/{SheetEngine.swift,SheetLookupAndTextFunctions.swift,SheetDateAndFinancialFunctions.swift}`, `scripts/check-repo-hygiene.mjs`)**
+     - Swift 시트 엔진에 `DDB`(이중체감법 감가상각)와 `TRANSPOSE`(범위 전치 참조) 평가 분기를 추가하고, `SheetEngine.supportedFunctionNames`를 Rust `CANONICAL_122_FUNCTIONS`와 동일한 122개 함수 이름 집합으로 정렬하며(기존 확장 통계·재무·날짜 함수들은 평가기에서 계속 지원), `scripts/check-repo-hygiene.mjs`에서 양쪽 122개 함수 집합의 1:1 동등성을 자동 검증합니다.
+  5. **한국어 워드프로세서 2단 서식 도구막대·2×2 밀리미터 눈금자 스튜디오 그리드·다크 모드 백색 용지 불변식 및 조판 부호·배율 슬라이더 통합 (`crates/easyoffice-app/ui/{index.html,styles.css,app.js,workspace-tools.js}`, `Sources/EasyOfficeApp/{EditorDetailPanes.swift,WorkspaceViews.swift}`)**
+     - WebUI(`#doc-style-bar`)와 macOS 네이티브(`DocumentEditorDetailPaneView`) 상단 서식줄을 상단 필드 트랙(`.sb-field-grid`의 `개요`, `스타일`, `글꼴`, `크기`, `장평 100%`, `자간 0%`, `줄간격 160%`)과 하단 명령 트랙(`.sb-command-track`의 `가 굵게`, `가 기울임`, `가̲ 밑줄`, `가̶ 취소선`, 정렬 4종, `¶ 조판 부호`, `↵ 문단 부호`, `# 격자`) 2단 구조로 구성합니다.
+     - 문서 편집 영역을 좌상단 코너(`#ruler-corner`, `24×24px`), 상단 가로 눈금자(`#h-ruler`), 좌측 세로 눈금자(`#v-ruler`), 중앙 용지 스크롤 영역(`.doc-scroll-container`)의 2×2 스튜디오 그리드로 배치하고, A4 용지 4모서리에 본문 여백 경계를 안내하는 L자형 여백 표시자(`┌`, `┐`, `└`, `┘`)와 문단 끝 하늘색 엔터 부호(`↵`, `#4ea8de`)를 렌더링합니다.
+     - 다크 테마(`html[data-theme="dark"]`)에서도 실제 인쇄물 조판 대비를 유지하기 위해 주변 작업대 배경은 다크 슬레이트(`#1f2329`)로 전환하되 A4 용지 표면(`#doc-editor`)은 백색(`#ffffff`)과 흑색 본문(`#111318`)을 유지하며, 하단 상태 표시줄에 `N / M 쪽`, `구역`, 클릭 가능한 `삽입`/`수정` 토글, `폭 맞춤`·`쪽 맞춤` 프리셋과 연속 배율 슬라이더(`50%`~`200%`)를 배치합니다.
+  6. **HWP 5.0 및 KS X 6101 HWPX 수식 스크립트(`HWPTAG_EQEDIT`) AST 기반 LaTeX 변환기, Plane 15 PUA 기호 매핑 및 16바이트 제어문자·서로게이트 복구 (`crates/easyoffice-formats/src/{hwp_eqedit.rs,hwp5_codec.rs}`, `Sources/EasyOfficeCore/{HWPEquationCodec.swift,HWP5DocumentCodec.swift,ODFAndHWPXCodecs.swift}`)**
+     - HWP 수식 편집기 스크립트(`OVER`, `SQRT`, `SUM`/`INT`/`PROD`, `SUP`/`SUB`/`LSUP`/`LSUB`, `LEFT`/`RIGHT`, `MATRIX`/`PMATRIX`/`BMATRIX`/`CASES`, `PILE`, `CHOOSE`, `HAT`/`BAR`/`VEC`/`TILDE`, 그리스 문자 및 연산자 사전, `#`/`&`/`~`/`` ` `` 조판 토큰)를 재귀 하강 AST 파서(`MAX_EQEDIT_DEPTH = 64` 깊이 예산 초과 시 Fail-Closed 거부)로 구문 분석하여 표준 LaTeX(`$$...$$`) 수식으로 변환하고, HWP 5.0 바이너리의 표준 `HWPTAG_EQEDIT`(`tag 88`, `HWPTAG_BEGIN + 72`) 레코드와 HWPX `<hp:equation><hp:script>` 요소를 양방향으로 디코딩합니다.
+     - HWP 5.0 전용 문자표의 Plane 15 보충 사설 영역(`U+F00E1..U+F0855`) 및 레거시 PUA 코드포인트를 53종 실측 BMP 기호 테이블(`HWP5_PUA_BMP_SYMBOLS` / `puaBMPSymbols`)로 양방향 매핑합니다.
+     - `HWPTAG_PARA_TEXT` 16바이트 확장 제어 구간에서 탭(`0x0009`)은 `'\t'`를 보존하고 자동 번호(`0x0012`)는 공백(`' '`)을 방출하며, 인라인 2바이트 제어인 하이픈(`0x0018` -> `\u{00AD}`), 묶음 빈칸(`0x001E` -> `\u{00A0}`), 고정폭 빈칸(`0x001F` -> `\u{2007}`)을 유니코드 표준 문자로 보존하고, 짝이 맞지 않는 단독 UTF-16 서로게이트(`0xD800..0xDFFF`)는 스트림 전체를 폐기하지 않고 `'□'`(`\u{25A1}`)로 치환하여 문단 손실을 방지합니다.
+- **Trade-offs**
+  1. `openDocument`가 동일 `fileURL`에 대해 기존 탭을 인플레이스 갱신하므로 동일 파일의 별도 사본 탭이 필요한 경우 다른 파일명으로 저장 후 열어야 하나, 반복 열기나 자동화 드라이버 실행 시 동일 파일 탭이 중복 누적되는 UX 결함을 원천 방지합니다.
+  2. Swift `supportedFunctionNames`를 Rust `CANONICAL_122_FUNCTIONS`와 1:1로 일치시키면서 기존 추가 함수(`AVEDEV`, `CORREL`, `DATEDIF`, `EFFECT`, `EOMONTH`, `SYD` 등)는 카탈로그 배열 외부의 평가기 분기로 유지하여 수식 호환성과 크로스스택 카탈로그 계약을 동시에 만족합니다.
+  3. 수식 스크립트 AST 중첩 깊이를 `64`단계(`MAX_EQEDIT_DEPTH = 64`)로 제한하므로 비정상적으로 깊은 중첩 수식은 거부되나, 악의적으로 조작된 중첩 수식 입력에 의한 호출 스택 오버플로를 결정론적으로 차단합니다.
+- **Alternatives rejected**
+  - 리본 카탈로그의 원본 단축키 문자열 자체를 `Ctrl+`로 덮어쓰는 방식은 macOS 네이티브 및 기존 macOS 기준 테스트 계약을 깨뜨리므로 런타임 `shortcutModifier` 기반 포매터(`formatPlatformShortcut`)로 해결.
+  - PDF 90° 회전 겹침을 축소 배율(`scale(0.6)`)로만 처리하면 본문 가독성이 저하되므로 카드 최대 폭 조정과 쿼터 회전(`90°`/`270°`) 상하 여백 확장 방식을 채택.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace`, `swift test`, `.agents/skills/verify-easyoffice/scripts/eo.sh`
+- **Revisit when** Linux Wayland 전용 시스템 트레이 및 글로벌 단축키 포털 연동이 필요할 때.
