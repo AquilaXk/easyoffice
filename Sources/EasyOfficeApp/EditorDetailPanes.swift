@@ -1087,16 +1087,32 @@ public struct DocumentEditorDetailPaneView: View {
             HStack(spacing: 4) {
               HStack(spacing: 2) {
                 studioIconButton("✂", tooltip: "오려두기", palette: palette) {
-                  viewModel.lastExecutedCommandSummary = "오려두기 실행"
+                  if let text = selectedParagraph?.text, !text.isEmpty {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                  }
+                  viewModel.executeRibbonCommand(
+                    isHWPModule ? "hwp-home-style" : "document-home-style"
+                  )
                 }
                 studioIconButton("📄", tooltip: "복사하기", palette: palette) {
-                  viewModel.lastExecutedCommandSummary = "복사하기 실행"
+                  if let text = selectedParagraph?.text, !text.isEmpty {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                  }
+                  viewModel.lastExecutedCommandSummary = "선택 문단 클립보드 복사 완료"
                 }
                 studioIconButton("📋", tooltip: "붙이기", palette: palette) {
-                  viewModel.lastExecutedCommandSummary = "붙이기 실행"
+                  let pasted =
+                    NSPasteboard.general.string(forType: .string)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                  let textToPaste = pasted.isEmpty ? (selectedParagraph?.text ?? "붙여넣기 문단") : pasted
+                  viewModel.appendParagraphToActiveDocument(text: textToPaste, style: .body)
                 }
                 studioIconButton("🖌", tooltip: "모양복사", palette: palette) {
-                  viewModel.lastExecutedCommandSummary = "모양복사 실행"
+                  viewModel.executeRibbonCommand(
+                    isHWPModule ? "hwp-home-style" : "document-home-style"
+                  )
                 }
               }
 
@@ -1212,10 +1228,21 @@ public struct DocumentEditorDetailPaneView: View {
 
               HStack(spacing: 2) {
                 studioIconButton("▤", tooltip: "머리말", palette: palette) {
-                  viewModel.lastExecutedCommandSummary = "머리말 편집"
+                  viewModel.executeRibbonCommand(
+                    isHWPModule ? "hwp-mod-header" : "doc-mod-header"
+                  )
                 }
                 studioIconButton("▥", tooltip: "꼬리말", palette: palette) {
-                  viewModel.lastExecutedCommandSummary = "꼬리말 편집"
+                  if let tabID = viewModel.activeTabID,
+                    let idx = viewModel.openTabs.firstIndex(where: { $0.id == tabID }),
+                    case .document(var d) = viewModel.openTabs[idx].payload
+                  {
+                    viewModel.recordUndoSnapshot(for: tabID)
+                    d.footerText = "\(viewModel.openTabs[idx].fileName) — \(d.estimatedPageCount)페이지"
+                    viewModel.openTabs[idx].payload = .document(d)
+                    viewModel.openTabs[idx].isModified = true
+                  }
+                  viewModel.lastExecutedCommandSummary = "꼬리말 갱신 완료"
                 }
                 studioIconButton("[1]", tooltip: "각주", palette: palette) {
                   viewModel.executeRibbonCommand("doc-insert-footnote")
@@ -1881,9 +1908,9 @@ public struct DocumentEditorDetailPaneView: View {
                   Spacer()
                 }
               }
-              .padding(.horizontal, 48)
+              .padding(.horizontal, CGFloat(viewModel.documentHorizontalPadding))
               .padding(.vertical, 38)
-              .background(Color.white)
+              .background(paperPalette.cardSurface.swiftUIColor)
               .border(
                 EasyOfficeDesignTokens.resolveHexColor("#C8C8C8", fallback: Color.gray),
                 width: 1
@@ -1897,7 +1924,7 @@ public struct DocumentEditorDetailPaneView: View {
 
               if !viewModel.isManuscriptGridModeEnabled {
                 Canvas { context, size in
-                  let x: CGFloat = 38.0
+                  let x: CGFloat = max(20.0, CGFloat(viewModel.documentHorizontalPadding) - 6.0)
                   let y: CGFloat = 32.0
                   let arm: CGFloat = 16.0
                   let thick: CGFloat = 1.0
