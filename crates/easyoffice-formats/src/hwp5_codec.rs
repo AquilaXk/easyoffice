@@ -467,13 +467,22 @@ impl Hwp5Codec {
                     }
                 }
                 crate::hwp_eqedit::HWPTAG_EQEDIT => {
-                    let latex = crate::hwp_eqedit::decode_hwp5_eqedit_script(&section_bytes[start..end])?;
+                    let latex =
+                        crate::hwp_eqedit::decode_hwp5_eqedit_script(&section_bytes[start..end])?;
                     if !latex.is_empty() {
                         let eq = format!("[수식] ${latex}$");
                         if let Some(last) = paragraphs.last_mut() {
-                            last.text = if last.text.is_empty() { eq } else { format!("{} {eq}", last.text) };
+                            last.text = if last.text.is_empty() {
+                                eq
+                            } else {
+                                format!("{} {eq}", last.text)
+                            };
                         } else {
-                            paragraphs.push(Hwp5ParagraphRecord { text: eq, style_name: "본문".to_string(), is_official_header: false });
+                            paragraphs.push(Hwp5ParagraphRecord {
+                                text: eq,
+                                style_name: "본문".to_string(),
+                                is_official_header: false,
+                            });
                         }
                     }
                     offset = end;

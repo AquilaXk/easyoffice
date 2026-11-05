@@ -12,6 +12,7 @@
         fontSize: "",
         lineHeight: "",
         textAlign: "",
+        textAlignMode: "",
         paperSize: "",
         styleRole: "",
         fontLang: "",

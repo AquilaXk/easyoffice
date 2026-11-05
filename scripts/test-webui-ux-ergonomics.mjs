@@ -474,6 +474,33 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   userClick(document.getElementById("btn-toggle-para-marks"));
   assert.equal(docEditor.dataset.showParaMarks, "false");
 
+  const fontLang = document.getElementById("doc-font-lang");
+  fontLang.value = "한글";
+  fontLang.dispatchEvent({ type: "change" });
+  assert.equal(docEditor.dataset.fontLang, "한글");
+
+  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  await flushAsyncTurns();
+  assert.equal(styleSelect.value, "공문서 바탕글");
+  assert.ok(
+    Array.from(styleSelect.querySelectorAll("option")).some((o) => o.value === "공문서 바탕글")
+  );
+  assert.equal(fontLang.value, "대표");
+  assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), false);
+  assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), true);
+  assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), false);
+  assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), true);
+
+  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  await flushAsyncTurns();
+  assert.equal(styleSelect.value, "개요 1");
+  assert.equal(fontLang.value, "한글");
+  assert.equal(document.getElementById("doc-style-font-badge").textContent, "함초롬바탕");
+  assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), true);
+  assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), false);
+  assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), true);
+  assert.equal(document.getElementById("btn-align-distribute").classList.contains("active"), true);
+
   assert.equal(document.getElementById("ruler-corner").textContent, "mm");
   assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-first-indent"));
   assert.ok(document.getElementById("h-ruler").querySelector("#ruler-pin-left-margin"));

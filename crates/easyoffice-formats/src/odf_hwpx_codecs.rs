@@ -894,35 +894,49 @@ impl HwpxCodec {
                     for tc_body in extract_tag_bodies(tr_body, "hp:tc") {
                         let cell_paras = extract_tag_bodies(tc_body, "hp:p");
                         let cell_text = if !cell_paras.is_empty() {
-                            cell_paras
-                                .into_iter()
-                                .map(|p| {
-                                    extract_tag_bodies(p, "hp:t")
-                                        .into_iter()
-                                        .map(XmlSanitizer::unescape)
-                                        .collect::<Vec<_>>()
-                                        .join("")
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n")
+                            let mut parts = Vec::new();
+                            for p in cell_paras {
+                                let p_no_eq = strip_tag_blocks(p, "hp:equation");
+                                let t = extract_tag_bodies(&p_no_eq, "hp:t")
+                                    .into_iter()
+                                    .map(XmlSanitizer::unescape)
+                                    .collect::<Vec<_>>()
+                                    .join("");
+                                if !t.is_empty() || !p.contains("<hp:equation") {
+                                    parts.push(t);
+                                }
+                                append_hwpx_equations(p, &mut parts)?;
+                            }
+                            let tc_no_p = strip_tag_blocks(tc_body, "hp:p");
+                            append_hwpx_equations(&tc_no_p, &mut parts)?;
+                            parts.join("\n")
                         } else {
-                            let direct_t = extract_tag_bodies(tc_body, "hp:t");
+                            let tc_no_eq = strip_tag_blocks(tc_body, "hp:equation");
+                            let direct_t = extract_tag_bodies(&tc_no_eq, "hp:t");
                             let text_nodes = if !direct_t.is_empty() {
                                 direct_t
                             } else {
-                                extract_tag_bodies(tc_body, "hp:cellText")
+                                extract_tag_bodies(&tc_no_eq, "hp:cellText")
                             };
-                            text_nodes
+                            let mut parts = Vec::new();
+                            let t = text_nodes
                                 .into_iter()
                                 .map(XmlSanitizer::unescape)
                                 .collect::<Vec<_>>()
-                                .join("")
+                                .join("");
+                            if !t.is_empty() || !tc_body.contains("<hp:equation") {
+                                parts.push(t);
+                            }
+                            append_hwpx_equations(tc_body, &mut parts)?;
+                            parts.join("\n")
                         };
                         cells.push(cell_text);
                     }
                     rows.push(cells);
                 }
                 tables.push(rows);
+                let tbl_without_tc = strip_tag_blocks(tbl_body, "hp:tc");
+                append_hwpx_equations(&tbl_without_tc, &mut paragraphs)?;
             }
 
             let sec_without_tables = strip_tag_blocks(sec_xml, "hp:tbl");
@@ -936,28 +950,10 @@ impl HwpxCodec {
                 if !text.is_empty() || !p_body.contains("<hp:equation") {
                     paragraphs.push(text);
                 }
-                for eq_body in extract_tag_bodies(p_body, "hp:equation") {
-                    for raw_script in extract_tag_bodies(eq_body, "hp:script") {
-                        let script = XmlSanitizer::unescape(raw_script);
-                        let trimmed = script.trim();
-                        if !trimmed.is_empty() {
-                            let latex = crate::hwp_eqedit::convert_eqedit_to_latex(trimmed)?;
-                            paragraphs.push(format!("$${latex}$$"));
-                        }
-                    }
-                }
+                append_hwpx_equations(p_body, &mut paragraphs)?;
             }
             let sec_without_paras = strip_tag_blocks(&sec_without_tables, "hp:p");
-            for eq_body in extract_tag_bodies(&sec_without_paras, "hp:equation") {
-                for raw_script in extract_tag_bodies(eq_body, "hp:script") {
-                    let script = XmlSanitizer::unescape(raw_script);
-                    let trimmed = script.trim();
-                    if !trimmed.is_empty() {
-                        let latex = crate::hwp_eqedit::convert_eqedit_to_latex(trimmed)?;
-                        paragraphs.push(format!("$${latex}$$"));
-                    }
-                }
-            }
+            append_hwpx_equations(&sec_without_paras, &mut paragraphs)?;
         }
 
         Ok(HwpxPayload {
@@ -969,4 +965,18 @@ impl HwpxCodec {
             tables,
         })
     }
+}
+
+fn append_hwpx_equations(xml: &str, out: &mut Vec<String>) -> Result<(), EasyOfficeError> {
+    for eq_body in extract_tag_bodies(xml, "hp:equation") {
+        for raw_script in extract_tag_bodies(eq_body, "hp:script") {
+            let script = XmlSanitizer::unescape(raw_script);
+            let trimmed = script.trim();
+            if !trimmed.is_empty() {
+                let latex = crate::hwp_eqedit::convert_eqedit_to_latex(trimmed)?;
+                out.push(format!("$${latex}$$"));
+            }
+        }
+    }
+    Ok(())
 }

@@ -459,26 +459,20 @@ private struct EqEditParser {
       var upper: EqExpr?
       var chainCount = 0
       while true {
-        if peekKeyword("from") {
+        if peekKeyword("from") || peek() == .underscore || peekKeyword("sub")
+          || peekKeyword("lsub")
+        {
           chainCount += 1
           try checkDepth(depth + chainCount)
           _ = next()
           lower = try parseScriptArg(depth: depth + chainCount)
-        } else if peekKeyword("to") {
+        } else if peekKeyword("to") || peek() == .caret || peekKeyword("sup")
+          || peekKeyword("lsup")
+        {
           chainCount += 1
           try checkDepth(depth + chainCount)
           _ = next()
-          upper = try parseAtom(depth: depth + chainCount)
-        } else if peek() == .underscore || peekKeyword("sub") || peekKeyword("lsub") {
-          chainCount += 1
-          try checkDepth(depth + chainCount)
-          _ = next()
-          lower = try parseAtom(depth: depth + chainCount)
-        } else if peek() == .caret || peekKeyword("sup") || peekKeyword("lsup") {
-          chainCount += 1
-          try checkDepth(depth + chainCount)
-          _ = next()
-          upper = try parseAtom(depth: depth + chainCount)
+          upper = try parseScriptArg(depth: depth + chainCount)
         } else {
           break
         }
@@ -546,44 +540,29 @@ private struct EqEditParser {
 
   mutating func parseScriptArg(depth: Int) throws -> EqExpr {
     try checkDepth(depth)
-    if peek() == .lBrace {
-      return try parseAtom(depth: depth)
-    }
+    if peek() == .lBrace { return try parseAtom(depth: depth) }
     var items: [EqExpr] = []
-    while let tok = peek() {
-      if tok == .rBrace || tok == .amp || tok == .hash || peekKeyword("to")
-        || peekKeyword("over") || peekKeyword("atop") || peekKeyword("choose")
-        || peekKeyword("right")
-      {
-        break
-      }
+    if case .symbol(let s) = peek(), s == "-" || s == "+" {
       items.append(try parseAtom(depth: depth))
-      if items.count == 1 {
-        if case .symbol(_) = peek() { continue }
-        if peekKeyword("rarrow") || peekKeyword("rightarrow") || peekKeyword("larrow")
-          || peekKeyword("leftarrow")
-        {
-          continue
-        }
-      }
-      if items.count == 2 {
-        if case .symbol(_) = items[1] { continue }
-        if case .ident(let op) = items[1],
-          ["rarrow", "rightarrow", "larrow", "leftarrow"].contains(op.lowercased())
-        {
-          continue
-        }
-      }
-      if items.count == 3, case .symbol(let s) = items[2], s == "-" || s == "+" {
-        continue
-      }
-      break
     }
-    switch items.count {
-    case 0: return .empty
-    case 1: return items[0]
-    default: return .seq(items)
+    items.append(try parseAtom(depth: depth))
+    let isRelOp: Bool = {
+      if case .symbol(let s) = peek(), s == "=" || s == "<" || s == ">" { return true }
+      return peekKeyword("rarrow") || peekKeyword("rightarrow") || peekKeyword("larrow")
+        || peekKeyword("leftarrow")
+    }()
+    if isRelOp {
+      items.append(try parseAtom(depth: depth))
+      if case .symbol(let s) = peek(), s == "-" || s == "+" {
+        items.append(try parseAtom(depth: depth))
+      }
+      if let tok = peek(), tok != .rBrace, tok != .amp, tok != .hash, !peekKeyword("to"),
+        !peekKeyword("over"), !peekKeyword("atop"), !peekKeyword("choose"), !peekKeyword("right")
+      {
+        items.append(try parseAtom(depth: depth))
+      }
     }
+    return items.count == 1 ? items[0] : .seq(items)
   }
 
   mutating func parseAtom(depth: Int) throws -> EqExpr {
@@ -632,6 +611,8 @@ private struct EqEditParser {
         r = "."
       }
       return .delimited(left: l, body: body, right: r)
+    case "right":
+      throw EasyOfficeError.corruptedContainer(detail: "HWP EqEdit 수식에 짝이 맞지 않는 right 구분자가 있습니다.")
     case "matrix", "pile", "lpile", "cpile", "rpile":
       return try parseMatrix(style: .plain, depth: depth + 1)
     case "pmatrix": return try parseMatrix(style: .paren, depth: depth + 1)

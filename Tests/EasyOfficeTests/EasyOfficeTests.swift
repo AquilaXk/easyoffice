@@ -1276,10 +1276,24 @@ final class EasyOfficeTests: XCTestCase {
       try HWPEquationCodec.convertEqEditToLaTeX("lim from x rarrow 0 f(x)"),
       "\\lim_{x \\rightarrow 0} f(x)"
     )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("int from D (x + 1)"),
+      "\\int_{D}(x+1)"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("int from -1 to 1 x dx"),
+      "\\int_{-1}^1xdx"
+    )
   }
 
   func testHWPEqEditFailClosedUnbalancedBracesAndExcessiveDepth() throws {
     XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX("{a + b")) { err in
+      guard case EasyOfficeError.corruptedContainer = err else {
+        XCTFail("Expected corruptedContainer, got \(err)")
+        return
+      }
+    }
+    XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX("{ a + right }")) { err in
       guard case EasyOfficeError.corruptedContainer = err else {
         XCTFail("Expected corruptedContainer, got \(err)")
         return

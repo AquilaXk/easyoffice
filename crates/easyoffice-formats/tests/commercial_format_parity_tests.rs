@@ -11,10 +11,7 @@ fn eqedit_fractions_radicals_and_scripts_convert_to_latex() {
         convert_eqedit_to_latex("{x + 1} over {x - 1}").unwrap(),
         "\\frac{x + 1}{x - 1}"
     );
-    assert_eq!(
-        convert_eqedit_to_latex("a atop b").unwrap(),
-        "{a \\atop b}"
-    );
+    assert_eq!(convert_eqedit_to_latex("a atop b").unwrap(), "{a \\atop b}");
     assert_eq!(
         convert_eqedit_to_latex("sqrt {x + 1}").unwrap(),
         "\\sqrt{x + 1}"
@@ -296,8 +293,33 @@ fn hwpx_unpack_converts_hp_equation_scripts_and_fails_closed_on_malformed_equati
         convert_eqedit_to_latex("lim from x rarrow 0 f(x)").unwrap(),
         "\\lim_{x\\rightarrow 0} f(x)"
     );
+    assert_eq!(
+        convert_eqedit_to_latex("int from D (x + 1)").unwrap(),
+        "\\int_D(x + 1)"
+    );
+    assert_eq!(
+        convert_eqedit_to_latex("int from -1 to 1 x dx").unwrap(),
+        "\\int_{- 1}^1 xdx"
+    );
     assert!(matches!(
         convert_eqedit_to_latex("{ a + right }"),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let tbl_eq_bytes = build_hwpx_with_section(
+        "<hp:tbl><hp:tr><hp:tc><hp:p><hp:run><hp:t>셀</hp:t></hp:run></hp:p><hp:p><hp:run><hp:equation><hp:script>a over b</hp:script></hp:equation></hp:run></hp:p></hp:tc></hp:tr></hp:tbl>",
+    );
+    let tbl_unpacked = HwpxCodec::unpack(&tbl_eq_bytes).unwrap();
+    assert_eq!(
+        tbl_unpacked.tables,
+        vec![vec![vec!["셀\n$$\\frac{a}{b}$$".to_string()]]]
+    );
+
+    let broken_tbl_eq_bytes = build_hwpx_with_section(
+        "<hp:tbl><hp:tr><hp:tc><hp:p><hp:run><hp:equation><hp:script>sqrt { x + 1</hp:script></hp:equation></hp:run></hp:p></hp:tc></hp:tr></hp:tbl>",
+    );
+    assert!(matches!(
+        HwpxCodec::unpack(&broken_tbl_eq_bytes),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
 

@@ -7,11 +7,11 @@ const PLANE15_PUA_BASE: u32 = 0x0F_0000;
 const UNPAIRED_SURROGATE_REPLACEMENT: char = '\u{25A1}';
 
 pub const HWP5_PUA_BMP_SYMBOLS: &[u16] = &[
-    0xA0E1, 0xA12B, 0xA289, 0xA28A, 0xA292, 0xA293, 0xA294, 0xA295, 0xA296, 0xA297, 0xA298,
-    0xA299, 0xA29A, 0xA29B, 0xA2B1, 0xA2B2, 0xA2B3, 0xA2B4, 0xA2B5, 0xA2B6, 0xA2B7, 0xA2B8,
-    0xA2B9, 0xA2BA, 0xA2BB, 0xA2BC, 0xA2BD, 0xA2BE, 0xA2BF, 0xA2C0, 0xA2C3, 0xA2C4, 0xA2C5,
-    0xA2C6, 0xA2C7, 0xA2C8, 0xA2C9, 0xA2CA, 0xA2CB, 0xA2CC, 0xA2FC, 0xA3C5, 0xA807, 0xA80A,
-    0xA80E, 0xA80F, 0xA810, 0xA81A, 0xA832, 0xA852, 0xA853, 0xA854, 0xA855,
+    0xA0E1, 0xA12B, 0xA289, 0xA28A, 0xA292, 0xA293, 0xA294, 0xA295, 0xA296, 0xA297, 0xA298, 0xA299,
+    0xA29A, 0xA29B, 0xA2B1, 0xA2B2, 0xA2B3, 0xA2B4, 0xA2B5, 0xA2B6, 0xA2B7, 0xA2B8, 0xA2B9, 0xA2BA,
+    0xA2BB, 0xA2BC, 0xA2BD, 0xA2BE, 0xA2BF, 0xA2C0, 0xA2C3, 0xA2C4, 0xA2C5, 0xA2C6, 0xA2C7, 0xA2C8,
+    0xA2C9, 0xA2CA, 0xA2CB, 0xA2CC, 0xA2FC, 0xA3C5, 0xA807, 0xA80A, 0xA80E, 0xA80F, 0xA810, 0xA81A,
+    0xA832, 0xA852, 0xA853, 0xA854, 0xA855,
 ];
 
 pub fn hwp5_symbol_to_plane15(unit: u16) -> Option<u32> {
@@ -151,34 +151,26 @@ enum EqToken {
     Symbol(char),
 }
 
-const KNOWN_COMMANDS: &[&str] = &[
-    "over", "atop", "sqrt", "root", "of", "sup", "sub", "lsub", "lsup", "from", "to", "left",
-    "right", "sum", "prod", "coprod", "int", "oint", "dint", "tint", "bigcup", "bigcap", "lim",
-    "matrix", "pmatrix", "bmatrix", "dmatrix", "cases", "pile", "lpile", "rpile", "cpile", "hat",
-    "bar", "vec", "dot", "ddot", "tilde", "acute", "grave", "check", "breve", "overline",
-    "underline", "widehat", "widetilde", "overbrace", "underbrace", "overrightarrow", "mathring",
-    "rm", "it", "bold", "binom", "choose", "sin", "cos", "tan", "csc", "sec", "cot", "arcsin",
-    "arccos", "arctan", "sinh", "cosh", "tanh", "log", "ln", "lg", "exp", "max", "min", "det",
-    "dim", "gcd", "lcm", "mod", "deg", "ker", "hom", "arg", "inf", "alpha", "beta", "gamma",
-    "delta", "epsilon", "varepsilon", "zeta", "eta", "theta", "vartheta", "iota", "kappa",
-    "lambda", "mu", "nu", "xi", "omicron", "pi", "varpi", "rho", "varrho", "sigma", "varsigma",
-    "tau", "upsilon", "phi", "varphi", "chi", "psi", "omega", "times", "div", "cdot", "pm", "mp",
-    "circ", "bullet", "star", "ast", "oplus", "otimes", "odot", "leq", "le", "geq", "ge", "neq",
-    "ne", "approx", "equiv", "sim", "simeq", "cong", "propto", "ll", "gg", "subset", "supset",
-    "subseteq", "supseteq", "in", "notin", "ni", "cup", "cap", "emptyset", "nothing", "rarrow",
-    "rightarrow", "larrow", "leftarrow", "lrarrow", "leftrightarrow", "uparrow", "downarrow",
-    "uarrow", "darrow", "mapsto", "implies", "iff", "infty", "infin", "partial", "nabla", "forall",
-    "exists", "exist", "neg", "lnot", "land", "lor", "therefore", "because", "dots", "cdots",
-    "ldots", "vdots", "ddots", "prime", "aleph", "hbar", "ell", "wp", "re", "im", "angle",
-    "triangle", "perp", "parallel", "mid", "scale", "color", "langle", "rangle", "lfloor",
-    "rfloor", "lceil", "rceil", "vert", "dvert", "line", "dline",
-];
-
 const FONT_PREFIXES: &[&str] = &["bold", "rm", "it"];
 
+const KNOWN_COMMANDS_LIST: &str = "over atop sqrt root of sup sub lsub lsup from to left right \
+sum prod coprod int oint dint tint bigcup bigcap lim matrix pmatrix bmatrix dmatrix cases pile \
+lpile rpile cpile hat bar vec dot ddot tilde acute grave check breve overline underline widehat \
+widetilde overbrace underbrace overrightarrow mathring rm it bold binom choose sin cos tan csc \
+sec cot arcsin arccos arctan sinh cosh tanh log ln lg exp max min det dim gcd lcm mod deg ker \
+hom arg inf alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda \
+mu nu xi omicron pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi psi omega times \
+div cdot pm mp circ bullet star ast oplus otimes odot leq le geq ge neq ne approx equiv sim \
+simeq cong propto ll gg subset supset subseteq supseteq in notin ni cup cap emptyset nothing \
+rarrow rightarrow larrow leftarrow lrarrow leftrightarrow uparrow downarrow uarrow darrow \
+mapsto implies iff infty infin partial nabla forall exists exist neg lnot land lor therefore \
+because dots cdots ldots vdots ddots prime aleph hbar ell wp re im angle triangle perp parallel \
+mid scale color langle rangle lfloor rfloor lceil rceil vert dvert line dline";
+
 fn is_known_command(word: &str) -> bool {
-    let lower = word.to_ascii_lowercase();
-    KNOWN_COMMANDS.contains(&lower.as_str())
+    KNOWN_COMMANDS_LIST
+        .split_ascii_whitespace()
+        .any(|w| w.eq_ignore_ascii_case(word))
 }
 
 fn tokenize_eqedit(input: &str) -> Result<Vec<EqToken>, EasyOfficeError> {
@@ -249,9 +241,10 @@ fn tokenize_eqedit(input: &str) -> Result<Vec<EqToken>, EasyOfficeError> {
                 let word: String = chars[start..i].iter().collect();
                 if is_known_command(&word) {
                     tokens.push(EqToken::Command(word));
-                } else if let Some(prefix) = FONT_PREFIXES.iter().find(|&&p| {
-                    word.len() > p.len() && word[..p.len()].eq_ignore_ascii_case(p)
-                }) {
+                } else if let Some(prefix) = FONT_PREFIXES
+                    .iter()
+                    .find(|&&p| word.len() > p.len() && word[..p.len()].eq_ignore_ascii_case(p))
+                {
                     tokens.push(EqToken::Command(word[..prefix.len()].to_string()));
                     let rest = &word[prefix.len()..];
                     if is_known_command(rest) {
@@ -341,8 +334,7 @@ impl EqParser {
                     "EqEdit 수식에 짝이 맞지 않는 닫는 중괄호 '}'가 포함되어 있습니다.".to_string(),
                 ));
             }
-            if stop_matrix_sep
-                && matches!(self.peek(), Some(EqToken::Ampersand | EqToken::Newline))
+            if stop_matrix_sep && matches!(self.peek(), Some(EqToken::Ampersand | EqToken::Newline))
             {
                 break;
             }
@@ -404,35 +396,37 @@ impl EqParser {
     }
 
     fn parse_bound_group(&mut self, depth: usize) -> Result<Vec<EqExpr>, EasyOfficeError> {
-        let is_braced = matches!(self.peek(), Some(EqToken::LBrace));
-        let mut grp = self.parse_group(depth)?;
-        if !is_braced {
-            let rel_op = match self.peek() {
-                Some(EqToken::Symbol(op @ ('=' | '<' | '>'))) => Some(op.to_string()),
-                Some(EqToken::Command(c))
-                    if c.eq_ignore_ascii_case("rarrow")
-                        || c.eq_ignore_ascii_case("rightarrow") =>
-                {
-                    Some("\\rightarrow".to_string())
-                }
-                Some(EqToken::Command(c))
-                    if c.eq_ignore_ascii_case("larrow")
-                        || c.eq_ignore_ascii_case("leftarrow") =>
-                {
-                    Some("\\leftarrow".to_string())
-                }
-                _ => None,
-            };
-            if let Some(op_str) = rel_op {
-                self.pos += 1;
-                grp.push(EqExpr::Raw(op_str));
-                if let Some(&EqToken::Symbol(sign @ ('-' | '+'))) = self.peek() {
-                    self.pos += 1;
-                    grp.push(EqExpr::Raw(sign.to_string()));
-                }
-                let rhs = self.parse_group(depth)?;
-                grp.extend(rhs);
+        if matches!(self.peek(), Some(EqToken::LBrace)) {
+            return self.parse_group(depth);
+        }
+        let mut grp = Vec::new();
+        if let Some(&EqToken::Symbol(sign @ ('-' | '+'))) = self.peek() {
+            self.pos += 1;
+            grp.push(EqExpr::Raw(sign.to_string()));
+        }
+        grp.extend(self.parse_group(depth)?);
+        let rel_op = match self.peek() {
+            Some(EqToken::Symbol(op @ ('=' | '<' | '>'))) => Some(op.to_string()),
+            Some(EqToken::Command(c))
+                if c.eq_ignore_ascii_case("rarrow") || c.eq_ignore_ascii_case("rightarrow") =>
+            {
+                Some("\\rightarrow".to_string())
             }
+            Some(EqToken::Command(c))
+                if c.eq_ignore_ascii_case("larrow") || c.eq_ignore_ascii_case("leftarrow") =>
+            {
+                Some("\\leftarrow".to_string())
+            }
+            _ => None,
+        };
+        if let Some(op_str) = rel_op {
+            self.pos += 1;
+            grp.push(EqExpr::Raw(op_str));
+            if let Some(&EqToken::Symbol(sign @ ('-' | '+'))) = self.peek() {
+                self.pos += 1;
+                grp.push(EqExpr::Raw(sign.to_string()));
+            }
+            grp.extend(self.parse_group(depth)?);
         }
         Ok(grp)
     }
@@ -445,8 +439,10 @@ impl EqParser {
                 || matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("sup"));
             let is_sub = matches!(self.peek(), Some(EqToken::Subscript))
                 || matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("sub"));
-            let is_lsup = matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("lsup"));
-            let is_lsub = matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("lsub"));
+            let is_lsup =
+                matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("lsup"));
+            let is_lsub =
+                matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("lsub"));
 
             if is_sup {
                 chain_depth += 1;
@@ -693,14 +689,15 @@ impl EqParser {
                             if c.eq_ignore_ascii_case("to") && upper_bd.is_none() =>
                         {
                             self.pos += 1;
-                            upper_bd = Some(self.parse_group(next_depth)?);
+                            upper_bd = Some(self.parse_bound_group(next_depth)?);
                         }
                         Some(EqToken::Subscript) if lower_bd.is_none() => {
                             self.pos += 1;
                             lower_bd = Some(self.parse_bound_group(next_depth)?);
                         }
                         Some(EqToken::Command(c))
-                            if (c.eq_ignore_ascii_case("sub") || c.eq_ignore_ascii_case("lsub"))
+                            if (c.eq_ignore_ascii_case("sub")
+                                || c.eq_ignore_ascii_case("lsub"))
                                 && lower_bd.is_none() =>
                         {
                             self.pos += 1;
@@ -708,14 +705,15 @@ impl EqParser {
                         }
                         Some(EqToken::Superscript) if upper_bd.is_none() => {
                             self.pos += 1;
-                            upper_bd = Some(self.parse_group(next_depth)?);
+                            upper_bd = Some(self.parse_bound_group(next_depth)?);
                         }
                         Some(EqToken::Command(c))
-                            if (c.eq_ignore_ascii_case("sup") || c.eq_ignore_ascii_case("lsup"))
+                            if (c.eq_ignore_ascii_case("sup")
+                                || c.eq_ignore_ascii_case("lsup"))
                                 && upper_bd.is_none() =>
                         {
                             self.pos += 1;
-                            upper_bd = Some(self.parse_group(next_depth)?);
+                            upper_bd = Some(self.parse_bound_group(next_depth)?);
                         }
                         _ => break,
                     }
@@ -747,78 +745,39 @@ impl EqParser {
             "bmatrix" => self.parse_matrix_rows("bmatrix", next_depth).map(Some),
             "dmatrix" => self.parse_matrix_rows("vmatrix", next_depth).map(Some),
             "cases" => self.parse_matrix_rows("cases", next_depth).map(Some),
-            "hat" => Ok(Some(EqExpr::Accent("\\hat", self.parse_group(next_depth)?))),
-            "widehat" => Ok(Some(EqExpr::Accent(
-                "\\widehat",
-                self.parse_group(next_depth)?,
-            ))),
-            "bar" => Ok(Some(EqExpr::Accent("\\bar", self.parse_group(next_depth)?))),
-            "overline" => Ok(Some(EqExpr::Accent(
-                "\\overline",
-                self.parse_group(next_depth)?,
-            ))),
-            "underline" => Ok(Some(EqExpr::Accent(
-                "\\underline",
-                self.parse_group(next_depth)?,
-            ))),
-            "vec" => Ok(Some(EqExpr::Accent("\\vec", self.parse_group(next_depth)?))),
-            "overrightarrow" => Ok(Some(EqExpr::Accent(
-                "\\overrightarrow",
-                self.parse_group(next_depth)?,
-            ))),
-            "dot" => Ok(Some(EqExpr::Accent("\\dot", self.parse_group(next_depth)?))),
-            "ddot" => Ok(Some(EqExpr::Accent(
-                "\\ddot",
-                self.parse_group(next_depth)?,
-            ))),
-            "tilde" => Ok(Some(EqExpr::Accent(
-                "\\tilde",
-                self.parse_group(next_depth)?,
-            ))),
-            "widetilde" => Ok(Some(EqExpr::Accent(
-                "\\widetilde",
-                self.parse_group(next_depth)?,
-            ))),
-            "acute" => Ok(Some(EqExpr::Accent(
-                "\\acute",
-                self.parse_group(next_depth)?,
-            ))),
-            "grave" => Ok(Some(EqExpr::Accent(
-                "\\grave",
-                self.parse_group(next_depth)?,
-            ))),
-            "check" => Ok(Some(EqExpr::Accent(
-                "\\check",
-                self.parse_group(next_depth)?,
-            ))),
-            "breve" => Ok(Some(EqExpr::Accent(
-                "\\breve",
-                self.parse_group(next_depth)?,
-            ))),
-            "mathring" => Ok(Some(EqExpr::Accent(
-                "\\mathring",
-                self.parse_group(next_depth)?,
-            ))),
-            "overbrace" => Ok(Some(EqExpr::Accent(
-                "\\overbrace",
-                self.parse_group(next_depth)?,
-            ))),
-            "underbrace" => Ok(Some(EqExpr::Accent(
-                "\\underbrace",
-                self.parse_group(next_depth)?,
-            ))),
-            "rm" => Ok(Some(EqExpr::Font(
-                "\\mathrm",
-                self.parse_group(next_depth)?,
-            ))),
-            "it" => Ok(Some(EqExpr::Font(
-                "\\mathit",
-                self.parse_group(next_depth)?,
-            ))),
-            "bold" => Ok(Some(EqExpr::Font(
-                "\\mathbf",
-                self.parse_group(next_depth)?,
-            ))),
+            "hat" | "widehat" | "bar" | "overline" | "underline" | "vec" | "overrightarrow"
+            | "dot" | "ddot" | "tilde" | "widetilde" | "acute" | "grave" | "check" | "breve"
+            | "mathring" | "overbrace" | "underbrace" => {
+                let tag = match lower.as_str() {
+                    "hat" => "\\hat",
+                    "widehat" => "\\widehat",
+                    "bar" => "\\bar",
+                    "overline" => "\\overline",
+                    "underline" => "\\underline",
+                    "vec" => "\\vec",
+                    "overrightarrow" => "\\overrightarrow",
+                    "dot" => "\\dot",
+                    "ddot" => "\\ddot",
+                    "tilde" => "\\tilde",
+                    "widetilde" => "\\widetilde",
+                    "acute" => "\\acute",
+                    "grave" => "\\grave",
+                    "check" => "\\check",
+                    "breve" => "\\breve",
+                    "mathring" => "\\mathring",
+                    "overbrace" => "\\overbrace",
+                    _ => "\\underbrace",
+                };
+                Ok(Some(EqExpr::Accent(tag, self.parse_group(next_depth)?)))
+            }
+            "rm" | "it" | "bold" => {
+                let tag = match lower.as_str() {
+                    "rm" => "\\mathrm",
+                    "it" => "\\mathit",
+                    _ => "\\mathbf",
+                };
+                Ok(Some(EqExpr::Font(tag, self.parse_group(next_depth)?)))
+            }
             "binom" => {
                 let n = self.parse_group(next_depth)?;
                 let k = self.parse_group(next_depth)?;
