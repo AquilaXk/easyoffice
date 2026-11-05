@@ -407,6 +407,14 @@ struct HomeHubWorkspaceView: View {
                       .buttonStyle(.plain)
                       .font(.system(size: 11, weight: .medium))
                       .foregroundStyle(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
+
+                      let isOpenTab = viewModel.openTabs.contains(where: { $0.id == tab.id })
+                      Button(isOpenTab ? "닫기" : "목록 제거") {
+                        viewModel.removeRecentDocumentRecord(id: tab.id)
+                      }
+                      .buttonStyle(.plain)
+                      .font(.system(size: 11, weight: .medium))
+                      .foregroundStyle(palette.secondaryText.swiftUIColor)
                     }
                     .padding(.vertical, 10)
                     .padding(.horizontal, 4)

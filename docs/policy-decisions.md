@@ -884,3 +884,29 @@
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `swift build`, `swift test --filter WorkspaceLifecycleEditingBatchA11yTests`, `swift test`
 - **Revisit when** 실시간 파일시스템 이벤트(`FSEvents`) 기반 외부 파일 변경 자동 감지 알림을 추가할 때.
 
+### 41. 상용 데스크톱·웹 오피스 스위트 UI/UX 비교 감사 기반 macOS 네이티브 및 크로스플랫폼 WebUI 인간공학·종단 간 기능 정합성 정책 (2026-11-05)
+
+- **Status** Implemented
+- **Decision (`PD-066`)**
+  1. **macOS 네이티브 시트 키보드 내비게이션, 전 모듈 배율 스케일링, 다중 표 선택 추적 및 스플릿 뷰 보조 창 격리 (`Sources/EasyOfficeCore/Workspace*.swift`, `Sources/EasyOfficeApp/*.swift`)**
+     - 시트 그리드에서 인라인 편집 중이 아닐 때 방향키(`↑`, `↓`, `←`, `→`), `Shift` 범위 확장, `Delete` 범위 지우기 단축키를 `moveSheetSelection`과 `clearSelectedSheetRange`에 바인딩하고, 리본 `sheet-data-sort` 단축키 캡션을 리본 접기(`⌥⌘R`)와 충돌하지 않는 `⌃⌥S`로 분리합니다.
+     - 하단 상태바 및 보기 리본의 `zoomPercent`(`50%`~`200%`)를 PDF 원본 뷰뿐 아니라 문서 용지 폭, 시트 행·열 헤더 및 셀 치수, 슬라이드 스테이지 높이, PDF 구조화 시트 폭에 일관되게 반영합니다.
+     - 상단 탭 스트립의 `통합 검색` 입력창을 편집 모드(`isShowingHomeHub == false`)에서 본문 인라인 찾기(`findQueryText`, `isFindReplaceBarVisible = true`, Enter 시 `performFindNext()`)와 실시간 연동합니다.
+     - `WorkspaceViewModel`에 `selectedDocumentTableIndex`와 `selectedDocumentTableCell`을 추가해 다중 표 문서에서 셀 클릭·편집 시 활성 표와 셀 좌표를 추적하고, 툴바·인스펙터·리본의 행·열 삽입·삭제·병합·분할·테두리·자동합계가 선택된 표와 셀을 대상으로 동작하도록 보장합니다.
+     - 스플릿 뷰 보조 패널(`isPrimaryPane == false`)에서 `DocumentHorizontalRulerView`, `HWPManuscriptGridPaperView`, PDF 양식 필드 컨트롤이 주 활성 탭(`activeTabID`)을 변이시키지 못하도록 차단하고, 홈 허브 최근 문서 행의 우측 버튼을 열린 탭 `닫기`와 닫힌 기록 `목록 제거`(`removeRecentDocumentRecord`)로 분기하며, 전체화면 슬라이드쇼 오버레이에 좌우 화살표(`←`, `→`) 슬라이드 전환 단축키를 바인딩합니다.
+  2. **크로스플랫폼 및 Windows WebUI 디자인 토큰·ARIA·포커스 링·스플릿 뷰·원고지 격자 및 5대 모듈 실동작 DOM 정합성 (`crates/easyoffice-app/ui/*`, `scripts/test-webui-behavior.mjs`)**
+     - `styles.css`의 컬러 토큰을 디자인 시스템 정본(`--eo-primary-brand: #5C6BC0`, `--eo-accent-hwp: #6E56CF` / 다크 `#D6CCFF`, `--eo-accent-sheet: #0A705A`, `--eo-accent-slide: #D96B27`, `--eo-accent-pdf: #D9383A`)과 일치시키고, `:focus-visible` 라벤더 포커스 링, `.canvas-stage[data-split-view="true"]` 2단 비교 레이아웃, `#doc-editor.manuscript-grid` 20칸 원고지 격자, `#status-bar` 배율 조절(`#btn-zoom-out`, `#status-zoom-label`, `#btn-zoom-in`), 탭 컴포넌트 ARIA(`role="tablist"`, `role="tab"`, `aria-selected`)를 완비합니다.
+     - 문서·한글 리본의 자동 목차(`doc-mod-toc`), 각주(`doc-mod-footnote`), 메일 머지(`doc-mod-mailmerge`), 공문서 표제부(`hwp-mod-header`), 누름틀(`hwp-mod-field`) 명령이 요약 문구만 추가하지 않고 실제 구조화된 DOM 요소(`nav`, `aside`, `header`, `span`)를 생성하도록 연결하며, `#doc-editor` 및 슬라이드 입력 영역 직접 타이핑 시 사전 Undo 스냅샷을 기록해 `Ctrl+Z`/`⌘Z` 시 타이핑 유실을 방지합니다.
+     - 시트 그리드 셀에 방향키·`Tab`·`Delete` 키보드 탐색을 바인딩하고, 정렬(`sheet-data-sort`), 피벗(`sheet-mod-pivot`), 차트(`sheet-mod-chart`), 조건부 서식(`sheet-mod-condfmt`), 틀 고정(`sheet-mod-freeze`), 자동 합계(`sheet-data-autosum`)가 실제 시트 테이블과 집계 상태를 갱신하도록 구현합니다.
+     - 슬라이드 표·차트·도형 삽입(`slide-insert-table`, `slide-insert-chart`, `slide-insert-shape`)을 새 슬라이드 추가(`slide-insert-slide`)와 분리해 현재 슬라이드 스테이지 내부 개체로 삽입·보존하고, 스마트 보조 도구가 현재 활성 모듈(`DOC`/`HWP`/`SHEET`/`SLIDE`/`PDF`)의 텍스트를 추출해 `styleSuggestions`까지 렌더링하도록 개선합니다.
+- **Why** 상용 데스크톱·웹 오피스 스위트의 표준 인터랙션(2모드 시트 키보드 탐색, 전 모듈 줌, 다중 표 컨텍스트 유지, 스플릿 뷰 읽기 전용 격리, 리본 명령의 즉시 시각 피드백)과 비교했을 때 남아 있던 UI/UX 및 기능 단절을 양대 런타임 표면(macOS 네이티브 및 Windows/Linux/macOS WebUI)에서 일거에 해소하기 위함입니다.
+- **Trade-offs**
+  1. 스플릿 뷰 우측 보조 패널(`isPrimaryPane == false`)을 양방향 동시 편집 대신 참조·비교 전용으로 격리하여 두 패널이 단일 `activeTabID` 상태를 경합하며 주 탭 데이터를 덮어쓰는 사고를 원천 차단합니다.
+  2. WebUI의 직접 타이핑 Undo 스냅샷은 매 키 입력마다 전체 DOM을 복제하면 메모리와 지연이 증가하므로 입력 세션 시작(`focusin`/`beforeinput`) 시점과 리본 명령 직전에 스냅샷을 기록해 응답성과 데이터 보존을 양립합니다.
+- **Alternatives rejected**
+  - 시트 그리드나 슬라이드·문서 캔버스 배율을 CSS `transform: scale()` 단일 래퍼로만 처리하면 스크롤 영역 경계와 히트 테스트 좌표가 어긋나므로 각 모듈의 레이아웃 폭·높이 및 `zoom` 속성에 직접 반영.
+  - WebUI에서 동적 `.innerHTML` 문자열 결합으로 목차나 슬라이드 개체를 삽입하는 방식은 CSP 및 Stored-XSS 방어 불변식을 위반하므로 `document.createElement`와 텍스트 노드로만 구성.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo run -p easyoffice-app -- --self-test`, `swift build`, `swift test`, `.agents/skills/verify-easyoffice/scripts/eo.sh`
+- **Revisit when** 스플릿 뷰 보조 패널에 독립적인 2번째 활성 커서 세션(`secondaryActiveTabID` 변이 라우팅)을 도입할 때.
+
+

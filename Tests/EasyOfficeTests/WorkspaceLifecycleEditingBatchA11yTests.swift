@@ -608,4 +608,93 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     )
     XCTAssertEqual(secondPart.outline.map(\.targetPageNumber), [2, 1])
   }
+
+  @MainActor
+  func testMacOSWorkspaceUXErgonomicsAndDisconnectFixes() {
+    let vm = WorkspaceViewModel()
+
+    let sheetFormulasCommands = RibbonCategory.actions(for: .formulasAndData, module: .sheet)
+    let sortCommand = sheetFormulasCommands.first(where: { $0.id == "\(OfficeModuleKind.sheet.rawValue)-data-sort" })
+    XCTAssertEqual(sortCommand?.shortcutHint, "⌃⌥S")
+
+    vm.isShowingHomeHub = false
+    if let docTab = vm.openTabs.first(where: { $0.moduleKind == .document }) {
+      vm.activeTabID = docTab.id
+    }
+    vm.isFindBarVisible = false
+    vm.searchQuery = "이지오피스"
+    XCTAssertEqual(vm.findQueryText, "이지오피스")
+    XCTAssertTrue(vm.isFindBarVisible)
+    vm.performFindNext()
+    XCTAssertFalse((vm.lastExecutedCommandSummary ?? "").isEmpty)
+
+    if let sheetTab = vm.openTabs.first(where: { $0.moduleKind == .sheet }) {
+      vm.activeTabID = sheetTab.id
+      vm.selectSheetCellOrRange(primaryCell: "B2")
+      vm.moveSheetSelection(rowDelta: 1, columnDelta: 1, extendSelection: false)
+      XCTAssertEqual(vm.selectedSheetCell, "C3")
+      vm.moveSheetSelection(rowDelta: 1, columnDelta: 0, extendSelection: true)
+      XCTAssertEqual(vm.selectedSheetRange, "C3:C4")
+      vm.clearSelectedSheetRange()
+      if case .sheet(let updatedSheet) = vm.activeTab?.payload {
+        XCTAssertNil(updatedSheet.cellsByCoordinate[PackedCellCoordinate(row: 2, column: 2)])
+        XCTAssertNil(updatedSheet.cellsByCoordinate[PackedCellCoordinate(row: 3, column: 2)])
+      }
+    }
+
+    if let docIdx = vm.openTabs.firstIndex(where: { $0.moduleKind == .document }),
+      case .document(var doc) = vm.openTabs[docIdx].payload
+    {
+      vm.activeTabID = vm.openTabs[docIdx].id
+      let secondTable = DocumentTableBlock(
+        caption: "표 2. 부서별 세부 집행표",
+        rows: [
+          ["부서", "예산", "집행"],
+          ["연구개발", "100", "90"],
+        ],
+        hasHeaderRow: true
+      )
+      doc.tables.append(secondTable)
+      vm.openTabs[docIdx].payload = .document(doc)
+
+      let table0InitialRows = doc.tables[0].rowCount
+      let table0InitialCols = doc.tables[0].columnCount
+
+      vm.selectDocumentTableCell(tableIndex: 1, row: 0, column: 0)
+      XCTAssertEqual(vm.selectedDocumentTableIndex, 1)
+      XCTAssertEqual(vm.selectedDocumentTableCell?.row, 0)
+      XCTAssertEqual(vm.selectedDocumentTableCell?.column, 0)
+
+      vm.insertRowInDocumentTable()
+      vm.insertColumnInDocumentTable()
+      vm.mergeActiveDocumentTableCells()
+
+      if case .document(let afterInsertAndMerge) = vm.activeTab?.payload {
+        XCTAssertEqual(afterInsertAndMerge.tables[0].rowCount, table0InitialRows)
+        XCTAssertEqual(afterInsertAndMerge.tables[0].columnCount, table0InitialCols)
+        XCTAssertEqual(afterInsertAndMerge.tables[1].rowCount, 3)
+        XCTAssertEqual(afterInsertAndMerge.tables[1].columnCount, 4)
+        XCTAssertNotNil(afterInsertAndMerge.tables[1].originSpan(atRow: 0, column: 0))
+      }
+
+      vm.splitActiveDocumentTableCell()
+      vm.deleteRowInDocumentTable()
+      vm.deleteColumnInDocumentTable()
+
+      if case .document(let afterSplitAndDelete) = vm.activeTab?.payload {
+        XCTAssertNil(afterSplitAndDelete.tables[1].originSpan(atRow: 0, column: 0))
+        XCTAssertEqual(afterSplitAndDelete.tables[1].rowCount, 2)
+        XCTAssertEqual(afterSplitAndDelete.tables[1].columnCount, 3)
+      }
+    }
+
+    let extraTab = vm.openNewBlankTab(for: .document)
+    XCTAssertTrue(vm.openTabs.contains(where: { $0.id == extraTab.id }))
+    vm.removeRecentDocumentRecord(id: extraTab.id)
+    XCTAssertFalse(vm.openTabs.contains(where: { $0.id == extraTab.id }))
+    XCTAssertTrue(vm.recentDocumentRecords.contains(where: { $0.id == extraTab.id }))
+
+    vm.removeRecentDocumentRecord(id: extraTab.id)
+    XCTAssertFalse(vm.recentDocumentRecords.contains(where: { $0.id == extraTab.id }))
+  }
 }

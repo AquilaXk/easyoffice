@@ -375,6 +375,7 @@ public struct SlideshowFullScreenOverlayView: View {
           .font(.system(size: 12, weight: .medium))
           .foregroundStyle(EasyOfficeDesignTokens.darkText.swiftUIColor)
           .disabled(activeIdx == 0)
+          .keyboardShortcut(.leftArrow, modifiers: [])
 
           Button("다음 슬라이드") {
             isStageAnimatedIn = false
@@ -387,6 +388,7 @@ public struct SlideshowFullScreenOverlayView: View {
           .font(.system(size: 12, weight: .semibold))
           .foregroundStyle(EasyOfficeDesignTokens.brand200.swiftUIColor)
           .disabled(activeIdx + 1 >= deck.slides.count)
+          .keyboardShortcut(.rightArrow, modifiers: [])
 
           Button("슬라이드쇼 종료 (ESC)") {
             viewModel.toggleFullScreenSlideshow()

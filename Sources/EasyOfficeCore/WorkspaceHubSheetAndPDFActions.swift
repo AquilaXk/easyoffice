@@ -693,4 +693,38 @@ extension WorkspaceViewModel {
       secondaryAscending: secondaryAscending
     )
   }
+
+  public var isFindBarVisible: Bool {
+    get { isFindReplaceBarVisible }
+    set { isFindReplaceBarVisible = newValue }
+  }
+
+  public func performFindNext() {
+    if !isShowingHomeHub {
+      let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty && findQueryText != searchQuery {
+        findQueryText = searchQuery
+      }
+      if !findQueryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        isFindReplaceBarVisible = true
+      }
+    }
+    findNextMatch()
+  }
+
+  public func selectDocumentTableCell(tableIndex: Int, row: Int, column: Int) {
+    selectedDocumentTableIndex = max(0, tableIndex)
+    selectedDocumentTableCell = (row: max(0, row), column: max(0, column))
+  }
+
+  public func removeRecentDocumentRecord(id: UUID) {
+    if openTabs.contains(where: { $0.id == id }) {
+      closeTab(id: id)
+    } else {
+      recentDocumentRecords.removeAll { $0.id == id }
+      recentlyClosedTabs.removeAll { $0.id == id }
+      persistRecentDocumentMetadata()
+      lastExecutedCommandSummary = "최근 문서 목록에서 항목 제거 완료"
+    }
+  }
 }

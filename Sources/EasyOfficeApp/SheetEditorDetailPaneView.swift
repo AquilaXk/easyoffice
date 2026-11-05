@@ -409,10 +409,14 @@ public struct SheetEditorDetailPaneView: View {
     gridBounds(for: sheet)
   }
 
+  private var zoomScale: CGFloat {
+    CGFloat(max(50.0, min(200.0, viewModel.zoomPercent))) / 100.0
+  }
+
   private func tableSliceWidth(columnIndices: Range<Int>, includeRowHeader: Bool) -> CGFloat {
-    let headerWidth: CGFloat = includeRowHeader ? 36.0 : 0.0
+    let headerWidth: CGFloat = includeRowHeader ? 36.0 * zoomScale : 0.0
     let columnsWidth = columnIndices.reduce(CGFloat(0.0)) { acc, colIdx in
-      acc + CGFloat(sheet.columnWidth(at: colIdx))
+      acc + CGFloat(sheet.columnWidth(at: colIdx)) * zoomScale
     }
     return headerWidth + columnsWidth
   }
@@ -698,6 +702,10 @@ public struct SheetEditorDetailPaneView: View {
 
                 flatSheetButton("-열", palette: palette) {
                   viewModel.deleteSheetColumnAtSelection()
+                }
+
+                flatSheetButton("값 지우기", palette: palette) {
+                  viewModel.clearSelectedSheetRange()
                 }
               }
 
@@ -1411,6 +1419,74 @@ public struct SheetEditorDetailPaneView: View {
           }
         }
       }
+      .overlay(alignment: .topLeading) {
+        sheetKeyboardNavigationShortcuts
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var sheetKeyboardNavigationShortcuts: some View {
+    if isPrimaryPane && inlineEditingCoord == nil && !viewModel.isCanvasSnapshotMode {
+      HStack(spacing: 0) {
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: -1, columnDelta: 0, extendSelection: false)
+        }
+        .keyboardShortcut(.upArrow, modifiers: [])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: 1, columnDelta: 0, extendSelection: false)
+        }
+        .keyboardShortcut(.downArrow, modifiers: [])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: -1, extendSelection: false)
+        }
+        .keyboardShortcut(.leftArrow, modifiers: [])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: 1, extendSelection: false)
+        }
+        .keyboardShortcut(.rightArrow, modifiers: [])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: -1, columnDelta: 0, extendSelection: true)
+        }
+        .keyboardShortcut(.upArrow, modifiers: [.shift])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: 1, columnDelta: 0, extendSelection: true)
+        }
+        .keyboardShortcut(.downArrow, modifiers: [.shift])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: -1, extendSelection: true)
+        }
+        .keyboardShortcut(.leftArrow, modifiers: [.shift])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.moveSheetSelection(rowDelta: 0, columnDelta: 1, extendSelection: true)
+        }
+        .keyboardShortcut(.rightArrow, modifiers: [.shift])
+
+        Button("") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.clearSelectedSheetRange()
+        }
+        .keyboardShortcut(.delete, modifiers: [])
+      }
+      .buttonStyle(.plain)
+      .frame(width: 0, height: 0)
+      .opacity(0.001)
+      .accessibilityHidden(true)
     }
   }
 
@@ -1424,20 +1500,21 @@ public struct SheetEditorDetailPaneView: View {
   ) -> some View {
     let selMinCol = min(activeRange.start.column, activeRange.end.column)
     let selMaxCol = max(activeRange.start.column, activeRange.end.column)
+    let headerHeight = 26.0 * zoomScale
 
     HStack(spacing: 0) {
       if includeRowHeader {
         Text("#")
           .font(.system(size: 10, weight: .bold, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
-          .frame(width: 36, height: 26)
+          .frame(width: 36 * zoomScale, height: headerHeight)
           .background(palette.elevatedSurface.swiftUIColor)
           .border(palette.border.swiftUIColor.opacity(0.65), width: 0.5)
       }
 
       ForEach(Array(columnIndices), id: \.self) { colIdx in
         let colLabel = columnLabels[colIdx]
-        let colWidth = CGFloat(sheet.columnWidth(at: colIdx))
+        let colWidth = CGFloat(sheet.columnWidth(at: colIdx)) * zoomScale
         let isColSelected = (colIdx >= selMinCol && colIdx <= selMaxCol)
         ZStack(alignment: .trailing) {
           Text(colLabel)
@@ -1446,7 +1523,7 @@ public struct SheetEditorDetailPaneView: View {
               isColSelected
                 ? palette.primaryAccent.swiftUIColor : palette.primaryText.swiftUIColor
             )
-            .frame(width: colWidth, height: 26)
+            .frame(width: colWidth, height: headerHeight)
             .background(
               isColSelected
                 ? palette.primaryAccent.swiftUIColor.opacity(0.20)
@@ -1465,7 +1542,7 @@ public struct SheetEditorDetailPaneView: View {
           if isPrimaryPane {
             Rectangle()
               .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.45))
-              .frame(width: 4, height: 22)
+              .frame(width: 4, height: 22 * zoomScale)
               .gesture(
                 DragGesture(minimumDistance: 1)
                   .onEnded { value in
@@ -1500,8 +1577,8 @@ public struct SheetEditorDetailPaneView: View {
       sheet.cellStyle(at: PackedCellCoordinate(row: zeroRow, column: colIdx)).wrapText
     }
     let defaultAdjustedHeight: Double = abs(rawHeight - 46.0) < 0.1 ? 30.0 : rawHeight
-    let rowHeightPt = CGFloat(
-      hasWrappedCell ? max(defaultAdjustedHeight, 44.0) : defaultAdjustedHeight)
+    let rowHeightPt =
+      CGFloat(hasWrappedCell ? max(defaultAdjustedHeight, 44.0) : defaultAdjustedHeight) * zoomScale
     let selMinRow = min(activeRange.start.row, activeRange.end.row)
     let selMaxRow = max(activeRange.start.row, activeRange.end.row)
     let selMinCol = min(activeRange.start.column, activeRange.end.column)
@@ -1517,7 +1594,7 @@ public struct SheetEditorDetailPaneView: View {
               isRowSelected
                 ? palette.primaryAccent.swiftUIColor : palette.secondaryText.swiftUIColor
             )
-            .frame(width: 36, height: rowHeightPt)
+            .frame(width: 36 * zoomScale, height: rowHeightPt)
             .background(
               isRowSelected
                 ? palette.primaryAccent.swiftUIColor.opacity(0.20)
@@ -1535,11 +1612,11 @@ public struct SheetEditorDetailPaneView: View {
           if isPrimaryPane {
             Rectangle()
               .fill(EasyOfficeDesignTokens.brand400.swiftUIColor.opacity(0.45))
-              .frame(width: 32, height: 3)
+              .frame(width: 32 * zoomScale, height: 3)
               .gesture(
                 DragGesture(minimumDistance: 1)
                   .onEnded { value in
-                    let baseHeight = Double(rowHeightPt)
+                    let baseHeight = Double(rowHeightPt / zoomScale)
                     viewModel.updateActiveSheetRowHeight(
                       row: zeroRow,
                       height: baseHeight + Double(value.translation.height)
@@ -1616,15 +1693,15 @@ public struct SheetEditorDetailPaneView: View {
     let matchingMergedRange = sheet.mergedRanges.first(where: { $0.contains(coord) })
     let colWidthPt: CGFloat = {
       guard let merged = matchingMergedRange else {
-        return CGFloat(sheet.columnWidth(at: colIdx))
+        return CGFloat(sheet.columnWidth(at: colIdx)) * zoomScale
       }
       let startC = max(columnIndices.lowerBound, min(merged.start.column, merged.end.column))
       let endC = min(columnIndices.upperBound - 1, max(merged.start.column, merged.end.column))
       guard colIdx == startC, endC >= startC else {
-        return CGFloat(sheet.columnWidth(at: colIdx))
+        return CGFloat(sheet.columnWidth(at: colIdx)) * zoomScale
       }
       return (startC...endC).reduce(CGFloat(0.0)) { acc, c in
-        acc + CGFloat(sheet.columnWidth(at: c))
+        acc + CGFloat(sheet.columnWidth(at: c)) * zoomScale
       }
     }()
     let isNonAnchorMergedRow: Bool = {

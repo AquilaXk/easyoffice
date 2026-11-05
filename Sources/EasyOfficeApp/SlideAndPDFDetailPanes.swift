@@ -462,6 +462,10 @@ public struct SlideEditorDetailPaneView: View {
 
             if let slide = currentSlide {
               VStack(alignment: .leading, spacing: 0) {
+                let slideZoomScale =
+                  CGFloat(max(50.0, min(200.0, viewModel.zoomPercent))) / 100.0
+                let slideStageHeight: CGFloat = 360.0 * slideZoomScale
+
                 VStack(alignment: .leading, spacing: 8) {
                   HStack(spacing: 6) {
                     Color.clear.frame(width: 22, height: 20)
@@ -473,7 +477,7 @@ public struct SlideEditorDetailPaneView: View {
                       maxHeightPoints: deck.aspectRatio.heightPoints,
                       palette: palette
                     )
-                    .frame(width: 22, height: 360)
+                    .frame(width: 22, height: slideStageHeight)
 
                     GeometryReader { geo in
                       let stageW = max(1.0, deck.aspectRatio.widthPoints)
@@ -569,7 +573,7 @@ public struct SlideEditorDetailPaneView: View {
                       .border(palette.border.swiftUIColor, width: 1)
                       .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
                     }
-                    .frame(height: 360)
+                    .frame(height: slideStageHeight)
                   }
                 }
                 .padding(16)
@@ -1630,6 +1634,7 @@ public struct PDFStudioDetailPaneView: View {
               HStack(spacing: 6) {
                 if field.isCheckbox {
                   Button {
+                    guard isPrimaryPane else { return }
                     viewModel.updatePDFFormField(id: field.id, isChecked: !field.isChecked)
                   } label: {
                     HStack(spacing: 4) {
@@ -1645,6 +1650,7 @@ public struct PDFStudioDetailPaneView: View {
                     }
                   }
                   .buttonStyle(.plain)
+                  .disabled(!isPrimaryPane)
                 } else {
                   Text("\(field.name)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -1652,7 +1658,7 @@ public struct PDFStudioDetailPaneView: View {
                     .lineLimit(1)
 
                   VStack(alignment: .leading, spacing: 1) {
-                    if viewModel.isCanvasSnapshotMode {
+                    if !isPrimaryPane || viewModel.isCanvasSnapshotMode {
                       Text(field.value)
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundStyle(palette.primaryText.swiftUIColor)
@@ -1663,6 +1669,7 @@ public struct PDFStudioDetailPaneView: View {
                         text: Binding(
                           get: { field.value },
                           set: { updated in
+                            guard isPrimaryPane else { return }
                             viewModel.updatePDFFormField(id: field.id, value: updated)
                           }
                         )
@@ -1671,6 +1678,7 @@ public struct PDFStudioDetailPaneView: View {
                       .font(.system(size: 10, weight: .semibold, design: .monospaced))
                       .foregroundStyle(palette.primaryText.swiftUIColor)
                       .frame(width: 96)
+                      .disabled(!isPrimaryPane)
                     }
                     Rectangle()
                       .fill(palette.border.swiftUIColor)
@@ -1822,10 +1830,12 @@ public struct PDFStudioDetailPaneView: View {
       }
     }
     .frame(
-      maxWidth: viewModel.pdfPaperSizePreset == .letter
-        ? 640 : (viewModel.pdfPaperSizePreset == .b5 ? 560 : 620),
-      minHeight: viewModel.pdfPaperSizePreset == .letter
-        ? 700 : (viewModel.pdfPaperSizePreset == .b5 ? 660 : 720),
+      maxWidth: (viewModel.pdfPaperSizePreset == .letter
+        ? 640.0 : (viewModel.pdfPaperSizePreset == .b5 ? 560.0 : 620.0))
+        * (CGFloat(max(50.0, min(200.0, viewModel.zoomPercent))) / 100.0),
+      minHeight: (viewModel.pdfPaperSizePreset == .letter
+        ? 700.0 : (viewModel.pdfPaperSizePreset == .b5 ? 660.0 : 720.0))
+        * (CGFloat(max(50.0, min(200.0, viewModel.zoomPercent))) / 100.0),
       alignment: .topLeading
     )
     .background(palette.cardSurface.swiftUIColor)

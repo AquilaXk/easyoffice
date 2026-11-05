@@ -37,7 +37,16 @@ public final class WorkspaceViewModel {
   public var customTemplates: [OfficeTemplateDescriptor] = []
   public var showLeftNavigator: Bool = true
   public var showRightInspector: Bool = true
-  public var searchQuery: String = ""
+  public var searchQuery: String = "" {
+    didSet {
+      if !isShowingHomeHub {
+        findQueryText = searchQuery
+        if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+          isFindReplaceBarVisible = true
+        }
+      }
+    }
+  }
   public var zoomPercent: Double = 100.0
   public var selectedSheetCell: String = "D2"
   public var selectedCellAddress: String {
@@ -46,6 +55,8 @@ public final class WorkspaceViewModel {
   }
   public var selectedSlideIndex: Int = 0
   public var selectedPDFPageIndex: Int = 0
+  public var selectedDocumentTableIndex: Int = 0
+  public var selectedDocumentTableCell: (row: Int, column: Int)? = nil
   public var formulaBarDraft: String = ""
   public var isPresenterModeActive: Bool = false
   public var workspaceViewMode: WorkspaceViewMode = .editView
@@ -306,16 +317,35 @@ public final class WorkspaceViewModel {
         }
       }
       selectedPDFPageIndex = 0
+      selectedDocumentTableIndex = 0
+      selectedDocumentTableCell = nil
     case .pdf(let pdfDoc):
       selectedPDFPageIndex =
         pdfDoc.pages.isEmpty ? 0 : min(max(0, selectedPDFPageIndex), pdfDoc.pages.count - 1)
       selectedSlideIndex = 0
       selectedSlideElementID = nil
+      selectedDocumentTableIndex = 0
+      selectedDocumentTableCell = nil
     case .document(let doc):
       if let selParaID = selectedParagraphID,
         !doc.paragraphs.contains(where: { $0.id == selParaID })
       {
         selectedParagraphID = doc.paragraphs.first?.id
+      }
+      if doc.tables.isEmpty {
+        selectedDocumentTableIndex = 0
+        selectedDocumentTableCell = nil
+      } else {
+        selectedDocumentTableIndex = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
+        let table = doc.tables[selectedDocumentTableIndex]
+        if let cell = selectedDocumentTableCell, table.rowCount > 0, table.columnCount > 0 {
+          selectedDocumentTableCell = (
+            row: min(max(0, cell.row), table.rowCount - 1),
+            column: min(max(0, cell.column), table.columnCount - 1)
+          )
+        } else {
+          selectedDocumentTableCell = nil
+        }
       }
       selectedSlideIndex = 0
       selectedSlideElementID = nil
@@ -324,6 +354,8 @@ public final class WorkspaceViewModel {
       selectedSlideIndex = 0
       selectedSlideElementID = nil
       selectedPDFPageIndex = 0
+      selectedDocumentTableIndex = 0
+      selectedDocumentTableCell = nil
     }
   }
 

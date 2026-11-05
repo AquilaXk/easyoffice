@@ -270,9 +270,11 @@
       if (summaryEl) {
         const lines = Array.isArray(res.summaryLines) ? res.summaryLines : [];
         const actions = Array.isArray(res.actionItems) ? res.actionItems : [];
+        const suggestions = Array.isArray(res.styleSuggestions) ? res.styleSuggestions : [];
         const summaryText = lines.length > 0 ? lines.join(" / ") : "핵심 문장 요약 완료";
         const actionSuffix = actions.length > 0 ? " · 조치: " + actions.join(", ") : "";
-        summaryEl.textContent = "요약: " + summaryText + actionSuffix;
+        const styleSuffix = suggestions.length > 0 ? " · 교정: " + suggestions.join(" / ") : "";
+        summaryEl.textContent = "요약: " + summaryText + actionSuffix + styleSuffix;
       }
       if (fb && updateFeedback) {
         fb.textContent =

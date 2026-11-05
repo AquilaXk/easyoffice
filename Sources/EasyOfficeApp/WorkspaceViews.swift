@@ -1079,7 +1079,11 @@ struct TopDocumentTabStripView: View {
         width: 102,
         palette: palette,
         isSnapshotMode: viewModel.isCanvasSnapshotMode
-      )
+      ) {
+        if !viewModel.isShowingHomeHub {
+          viewModel.performFindNext()
+        }
+      }
     }
     .padding(.horizontal, 12)
     .frame(height: EasyOfficeDesignTokens.LayoutMetrics.tabStripHeight + 6)

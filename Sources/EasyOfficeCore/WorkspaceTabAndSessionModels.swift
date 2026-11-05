@@ -140,7 +140,7 @@ public enum RibbonCategory: String, CaseIterable, Sendable, Identifiable {
           shortcutHint: "⇧F3"),
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-data-sort", title: "오름차순·내림차순 정렬",
-          symbolName: "arrow.up.arrow.down.square", shortcutHint: "⌥⌘R"),
+          symbolName: "arrow.up.arrow.down.square", shortcutHint: "⌃⌥S"),
         RibbonCommandDescriptor(
           id: "\(module.rawValue)-data-validation", title: "데이터 유효성 검사",
           symbolName: "checkmark.shield", shortcutHint: "⌥⌘V"),

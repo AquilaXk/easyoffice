@@ -238,6 +238,23 @@ struct EasyOfficeApplication: App {
         }
         .keyboardShortcut("=", modifiers: [.option, .shift])
         .disabled(viewModel.activeTab == nil)
+
+        Button("오름차순·내림차순 정렬 (⌃⌥S)") {
+          if let m = viewModel.activeTab?.moduleKind {
+            viewModel.executeRibbonCommand("\(m.rawValue)-data-sort")
+          }
+        }
+        .keyboardShortcut("s", modifiers: [.control, .option])
+        .disabled(viewModel.activeTab == nil)
+
+        Divider()
+
+        Button("시트 선택 범위 값 지우기 (⌦)") {
+          guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+          viewModel.clearSelectedSheetRange()
+        }
+        .keyboardShortcut(.deleteForward, modifiers: [])
+        .disabled(viewModel.activeTab?.moduleKind != .sheet || viewModel.isShowingHomeHub)
       }
       CommandMenu("문서 생성") {
         ForEach(OfficeModuleKind.allCases) { module in

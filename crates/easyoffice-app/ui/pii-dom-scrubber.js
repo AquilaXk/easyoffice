@@ -246,8 +246,8 @@
       });
     }
 
-    function extractEditableDocumentText(rootEl = document.getElementById("doc-editor")) {
-      if (!rootEl) return "";
+    function extractWalkableText(targetRoot, allowTables) {
+      if (!targetRoot) return "";
       const parts = [];
       let inlineBuf = "";
       function flushInline() {
@@ -261,20 +261,73 @@
           inlineBuf += node.nodeValue || "";
           return;
         }
-        if (node.nodeType !== 1 || isExcludedDocChromeElement(node)) return;
+        if (node.nodeType !== 1) return;
+        if (allowTables ? isExcludedNonTableDocChrome(node) : isExcludedDocChromeElement(node)) {
+          return;
+        }
         const tag = (node.tagName || "").toUpperCase();
         if (tag === "BR") {
           flushInline();
           return;
         }
-        const isBlock = node !== rootEl && DOC_BLOCK_TAGS.has(tag);
+        const isBlock =
+          node !== targetRoot &&
+          (DOC_BLOCK_TAGS.has(tag) || (allowTables && (tag === "TR" || tag === "TD" || tag === "TH")));
         if (isBlock) flushInline();
         Array.from(node.childNodes || []).forEach(walk);
         if (isBlock) flushInline();
       }
-      walk(rootEl);
+      walk(targetRoot);
       flushInline();
       return parts.join("\n");
+    }
+
+    function extractEditableDocumentText(rootEl) {
+      if (rootEl !== undefined) {
+        if (!rootEl) return "";
+        const tag = (rootEl.tagName || "").toUpperCase();
+        const allowTables =
+          tag === "TABLE" ||
+          rootEl.id === "pane-sheet" ||
+          Boolean(rootEl.classList?.contains("sheet-table"));
+        return extractWalkableText(rootEl, allowTables);
+      }
+
+      const paneSheet = document.getElementById("pane-sheet");
+      if (paneSheet && !paneSheet.hidden) {
+        const rowTexts = [];
+        paneSheet.querySelectorAll("tbody tr").forEach((tr) => {
+          const vals = Array.from(tr.querySelectorAll("td[data-cell]"))
+            .map((td) => (td.textContent || "").trim())
+            .filter(Boolean);
+          if (vals.length > 0) rowTexts.push(vals.join(" "));
+        });
+        return rowTexts.join("\n");
+      }
+
+      const paneSlide = document.getElementById("pane-slide");
+      if (paneSlide && !paneSlide.hidden) {
+        const slideParts = [];
+        const stageText = extractWalkableText(document.getElementById("slide-stage-box"), true);
+        if (stageText) slideParts.push(stageText);
+        const notesVal = (document.getElementById("slide-presenter-notes")?.value || "").trim();
+        if (notesVal) slideParts.push(notesVal);
+        return slideParts.join("\n");
+      }
+
+      const panePdf = document.getElementById("pane-pdf");
+      if (panePdf && !panePdf.hidden) {
+        const pdfParts = [];
+        const cardText = extractWalkableText(document.getElementById("pdf-page-card"), true);
+        if (cardText) pdfParts.push(cardText);
+        ["pdf-watermark-input", "pdf-form-applicant", "pdf-form-dept"].forEach((id) => {
+          const val = (document.getElementById(id)?.value || "").trim();
+          if (val) pdfParts.push(val);
+        });
+        return pdfParts.join("\n");
+      }
+
+      return extractWalkableText(document.getElementById("doc-editor"), false);
     }
 
     function collectActiveScrubGroups(rootEl) {
