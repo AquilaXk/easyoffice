@@ -869,7 +869,7 @@
       e.preventDefault();
       return void modal.close?.();
     }
-    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key] || 0;
     if (step !== 0 && paletteFilteredItems.length > 0) {
       e.preventDefault();
       paletteSelectedIdx = Math.max(0, Math.min(paletteFilteredItems.length - 1, paletteSelectedIdx + step));
