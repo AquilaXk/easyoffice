@@ -17,20 +17,27 @@ extension WorksheetModel {
     let minCol: Int
     let rowCount: Int
     let colCount: Int
+    let isTransposed: Bool
     var totalCells: Int { rowCount * colCount }
+    var physicalRowCount: Int { isTransposed ? colCount : rowCount }
+    var physicalColCount: Int { isTransposed ? rowCount : colCount }
 
     @inline(__always)
     func coordinate(at offset: Int) -> PackedCellCoordinate {
-      PackedCellCoordinate(
-        row: minRow + (offset / colCount),
-        column: minCol + (offset % colCount)
+      let r = offset / colCount
+      let c = offset % colCount
+      return PackedCellCoordinate(
+        row: minRow + (isTransposed ? c : r),
+        column: minCol + (isTransposed ? r : c)
       )
     }
 
     @inline(__always)
     func offset(for coord: PackedCellCoordinate) -> Int? {
-      let r = coord.row - minRow
-      let c = coord.column - minCol
+      let physR = coord.row - minRow
+      let physC = coord.column - minCol
+      let r = isTransposed ? physC : physR
+      let c = isTransposed ? physR : physC
       guard r >= 0 && r < rowCount && c >= 0 && c < colCount else { return nil }
       return r * colCount + c
     }
@@ -40,7 +47,8 @@ extension WorksheetModel {
     at argIndex: Int,
     frame: inout EvalFrame
   ) -> Result<CriteriaRangeSpec, ErrorCode> {
-    switch resolveRangeArgument(from: frame.args[argIndex], frame: &frame) {
+    let resolved = resolveRangeArgumentWithTranspose(from: frame.args[argIndex], frame: &frame)
+    switch resolved.result {
     case .failure(let err):
       return .failure(ErrorCode(code: err))
     case .success(let sheetName, let resolvedRange):
@@ -52,8 +60,9 @@ extension WorksheetModel {
           sheetName: sheetName,
           minRow: bounds.minRow,
           minCol: bounds.minCol,
-          rowCount: bounds.rowCount,
-          colCount: bounds.colCount
+          rowCount: resolved.isTransposed ? bounds.colCount : bounds.rowCount,
+          colCount: resolved.isTransposed ? bounds.rowCount : bounds.colCount,
+          isTransposed: resolved.isTransposed
         )
       )
     }
@@ -102,7 +111,8 @@ extension WorksheetModel {
             minRow: tSpec.minRow,
             minCol: tSpec.minCol,
             rowCount: spec.rowCount,
-            colCount: spec.colCount
+            colCount: spec.colCount,
+            isTransposed: false
           )
         }
         let expectedRows = targetSpec?.rowCount ?? pairSpecs.first?.0.rowCount ?? spec.rowCount
@@ -124,9 +134,9 @@ extension WorksheetModel {
         let candidateCoords = populatedCoordinates(
           onSheet: anchor.sheetName,
           minRow: anchor.minRow,
-          maxRow: anchor.minRow + anchor.rowCount - 1,
+          maxRow: anchor.minRow + anchor.physicalRowCount - 1,
           minCol: anchor.minCol,
-          maxCol: anchor.minCol + anchor.colCount - 1
+          maxCol: anchor.minCol + anchor.physicalColCount - 1
         )
         for candidateCoord in candidateCoords {
           guard let offset = anchor.offset(for: candidateCoord) else { continue }
@@ -168,9 +178,9 @@ extension WorksheetModel {
           let coords = populatedCoordinates(
             onSheet: rangeSpec.sheetName,
             minRow: rangeSpec.minRow,
-            maxRow: rangeSpec.minRow + rangeSpec.rowCount - 1,
+            maxRow: rangeSpec.minRow + rangeSpec.physicalRowCount - 1,
             minCol: rangeSpec.minCol,
-            maxCol: rangeSpec.minCol + rangeSpec.colCount - 1
+            maxCol: rangeSpec.minCol + rangeSpec.physicalColCount - 1
           )
           for c in coords {
             if let off = rangeSpec.offset(for: c) {

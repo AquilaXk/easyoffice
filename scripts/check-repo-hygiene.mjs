@@ -420,7 +420,28 @@ if (
 
   const sheetSwift = fs.readFileSync(sheetSwiftPath, "utf8");
   const fnMatch = sheetSwift.match(/supportedFunctionNames:\s*\[String\]\s*=\s*\[([\s\S]*?)\]\.sorted\(\)/);
-  const functionCount = fnMatch ? (fnMatch[1].match(/"[A-Z0-9]+"/g) || []).length : 0;
+  const swiftFnNames = fnMatch
+    ? (fnMatch[1].match(/"[A-Z0-9]+"/g) || []).map((s) => s.replaceAll('"', ""))
+    : [];
+  const functionCount = swiftFnNames.length;
+
+  const rustSheetFunctionsPath = path.join(ROOT, "crates/easyoffice-sheet/src/functions.rs");
+  if (fs.existsSync(rustSheetFunctionsPath)) {
+    const rustSheetFnText = fs.readFileSync(rustSheetFunctionsPath, "utf8");
+    const rustFnMatch = rustSheetFnText.match(
+      /CANONICAL_122_FUNCTIONS:\s*\[&str;\s*122\]\s*=\s*\[([\s\S]*?)\];/
+    );
+    const rustFnNames = rustFnMatch
+      ? (rustFnMatch[1].match(/"[A-Z0-9]+"/g) || []).map((s) => s.replaceAll('"', ""))
+      : [];
+    const swiftSorted = [...swiftFnNames].sort((a, b) => a.localeCompare(b)).join(",");
+    const rustSorted = [...rustFnNames].sort((a, b) => a.localeCompare(b)).join(",");
+    if (swiftSorted !== rustSorted) {
+      errors.push(
+        "Swift supportedFunctionNames in SheetEngine.swift and Rust CANONICAL_122_FUNCTIONS in functions.rs do not match 1:1"
+      );
+    }
+  }
 
   const ribbonCatalogJs = fs.readFileSync(ribbonCatalogJsPath, "utf8");
   const commonSpecCount = (ribbonCatalogJs.match(/\{\s*suffix:\s*"/g) || []).length;

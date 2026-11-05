@@ -27,6 +27,7 @@
       getActiveSlideIndex,
       getPdfRotationDeg,
       setPdfRotationDeg,
+      getShortcutModifier,
       enqueueWorkspaceHistoryOp,
     } = deps;
 
@@ -38,6 +39,7 @@
       RIBBON_STYLE_LABELS,
       RIBBON_CATEGORY_ORDER,
       syncLocalRibbonStateFromBackend,
+      formatPlatformShortcut,
     } = ribbonCatalog;
 
     const {
@@ -104,6 +106,8 @@
     function applyModuleAccent(mod) {
       setActiveModule(mod);
       localRibbonState.activeModule = mod;
+      const shell = document.getElementById("app") || document.querySelector(".app-shell");
+      if (shell) shell.dataset.module = mod;
       const accent = MODULE_ACCENTS[mod] || "var(--eo-primary)";
       document.documentElement.style.setProperty("--eo-module-active", accent);
       const swatch = document.getElementById("module-swatch");
@@ -199,7 +203,12 @@
         const span = document.createElement("span");
         span.textContent = cmd.title || "";
         const small = document.createElement("small");
-        small.textContent = "(" + (cmd.shortcut || "") + ")";
+        const activeModKey = typeof getShortcutModifier === "function" ? getShortcutModifier() : "⌘";
+        const formattedShortcut =
+          typeof formatPlatformShortcut === "function"
+            ? formatPlatformShortcut(cmd.shortcut || "", activeModKey)
+            : cmd.shortcut || "";
+        small.textContent = "(" + formattedShortcut + ")";
         btn.appendChild(span);
         btn.appendChild(document.createTextNode(" "));
         btn.appendChild(small);
@@ -225,9 +234,6 @@
       if (!skipTabBufferSync && (curMod === "DOC" || curMod === "HWP") && mod !== curMod) {
         workspacePanels.saveActiveDocTabState();
       }
-      if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== curMod) {
-        workspacePanels.restoreDocTabState(mod);
-      }
       applyModuleAccent(mod);
       const panes = {
         DOC: document.getElementById("pane-doc"),
@@ -252,6 +258,9 @@
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", isAct ? "true" : "false");
       });
+      if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== curMod) {
+        workspacePanels.restoreDocTabState(mod);
+      }
       workspacePanels.renderModuleOutline(mod);
       await renderRibbonCategoryTools(getActiveRibbonCategory()).catch(() => {});
     }
@@ -299,7 +308,10 @@
       const badge = document.getElementById("pdf-rotation-badge");
       const card = document.getElementById("pdf-page-card");
       if (badge) badge.textContent = "회전: " + nextRot + "°";
-      if (card) card.style.transform = "rotate(" + nextRot + "deg)";
+      if (card) {
+        card.style.transform = "rotate(" + nextRot + "deg)";
+        card.dataset.rotatedQuarter = nextRot % 180 !== 0 ? "true" : "false";
+      }
       workspacePanels.restorePdfStudioState(snap.pdfStudio);
       workspacePanels.restoreWorkspaceViewState(snap.viewState);
 
@@ -415,6 +427,10 @@
       return performWorkspaceHistoryStep(false);
     }
 
+    function syncDocStyleBarFromTarget(targetEl) {
+      getWorkspacePanels().syncDocStyleBarFromTarget(targetEl);
+    }
+
     function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
       if (!docEditor) return false;
       const workspacePanels = getWorkspacePanels();
@@ -422,16 +438,19 @@
       if (cmdId.endsWith("-home-bold")) {
         const boldOn = targetEl.style.fontWeight !== "600";
         targetEl.style.fontWeight = boldOn ? "600" : "";
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-home-italic")) {
         const italicOn = targetEl.style.fontStyle !== "italic";
         targetEl.style.fontStyle = italicOn ? "italic" : "";
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-home-underline")) {
         const underOn = targetEl.style.textDecoration !== "underline";
         targetEl.style.textDecoration = underOn ? "underline" : "";
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-home-style")) {
@@ -439,6 +458,7 @@
         const curIdx = sizes.indexOf(targetEl.style.fontSize);
         const presetIdx = curIdx >= 0 ? (curIdx + 1) % sizes.length : 1;
         targetEl.style.fontSize = sizes[presetIdx];
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-review-track")) {
@@ -590,6 +610,8 @@
         if (stage) stage.style.zoom = zoom + "%";
         const zoomLabel = document.getElementById("status-zoom-label");
         if (zoomLabel) zoomLabel.textContent = zoom + "%";
+        const slider = document.getElementById("status-zoom-slider");
+        if (slider) slider.value = String(zoom);
         return;
       }
       if (cmdId.endsWith("-view-ribbon")) {
@@ -631,8 +653,14 @@
         if (docEditorEl) {
           docEditorEl.classList.toggle("manuscript-grid", gridOn);
         }
+        const gridBtn = document.getElementById("btn-toggle-doc-grid");
+        if (gridBtn) {
+          gridBtn.classList.toggle("active", gridOn);
+          gridBtn.setAttribute("aria-pressed", gridOn ? "true" : "false");
+        }
         const hwpNotice = document.getElementById("hwp-manuscript-preview");
         if (hwpNotice) {
+          hwpNotice.classList.toggle("manuscript-grid", gridOn);
           hwpNotice.hidden = getActiveModule() !== "HWP" || !gridOn;
         }
         workspacePanels.saveActiveDocTabState();
@@ -811,7 +839,11 @@
         const badge = document.getElementById("pdf-rotation-badge");
         const card = document.getElementById("pdf-page-card");
         if (badge) badge.textContent = "회전: " + nextRot + "°";
-        if (card) card.style.transform = "rotate(" + nextRot + "deg)";
+        if (card) {
+          card.style.transform = "rotate(" + nextRot + "deg)";
+          card.dataset.rotatedQuarter = nextRot % 180 !== 0 ? "true" : "false";
+        }
+        workspacePanels.applyPdfStudioFormState();
         return;
       }
       if (cmdId === "pdf-mod-tooffice") {

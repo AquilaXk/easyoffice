@@ -798,6 +798,26 @@ extension WorksheetModel {
         }
         return .success((grid, true))
       }
+    case .functionCall("TRANSPOSE", let fnArgs):
+      guard fnArgs.count == 1 else { return .failure(ErrorCode(code: "#VALUE!")) }
+      switch evaluateASTAs2DArray(fnArgs[0], frame: &frame) {
+      case .failure(let err): return .failure(err)
+      case .success((let grid, let isRef)):
+        let rowCount = grid.count
+        let colCount = grid.first?.count ?? 0
+        guard rowCount > 0, colCount > 0 else { return .success((grid, isRef)) }
+        var transposed: [[EvaluatedCellValue]] = []
+        transposed.reserveCapacity(colCount)
+        for c in 0..<colCount {
+          var newRow: [EvaluatedCellValue] = []
+          newRow.reserveCapacity(rowCount)
+          for r in 0..<rowCount {
+            newRow.append(grid[r][c])
+          }
+          transposed.append(newRow)
+        }
+        return .success((transposed, isRef))
+      }
     case .unaryMinus(let inner):
       switch evaluateASTAs2DArray(inner, frame: &frame) {
       case .failure(let err): return .failure(err)

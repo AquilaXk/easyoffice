@@ -307,7 +307,9 @@ extension WorksheetModel {
       guard (2...3).contains(frame.count) else { return .error("#VALUE!") }
       let sheetName: String?
       let range: CellRange
-      switch resolveRangeArgument(from: frame.args[0], frame: &frame) {
+      let resolved = resolveRangeArgumentWithTranspose(from: frame.args[0], frame: &frame)
+      let isTransposed = resolved.isTransposed
+      switch resolved.result {
       case .failure(let err):
         return .error(err)
       case .success(let s, let r):
@@ -321,47 +323,49 @@ extension WorksheetModel {
       guard let rawColIdx = Self.safeInt(colNumVal),
         let bounds = rangeBounds(range, allowWholeColumnOrRow: true)
       else { return .error("#VALUE!") }
+      let effectiveRowCount = isTransposed ? bounds.colCount : bounds.rowCount
+      let effectiveColCount = isTransposed ? bounds.rowCount : bounds.colCount
       let rIdx = rawRowIdx - 1
       let cIdx = rawColIdx - 1
       if frame.count == 2,
-        bounds.rowCount == 1,
-        bounds.colCount > 1,
+        effectiveRowCount == 1,
+        effectiveColCount > 1,
         rIdx >= 0,
-        rIdx < bounds.colCount
+        rIdx < effectiveColCount
       {
         return evaluateSingleCellInRange(
           onSheet: sheetName,
-          row: bounds.minRow,
-          column: bounds.minCol + rIdx,
+          row: bounds.minRow + (isTransposed ? rIdx : 0),
+          column: bounds.minCol + (isTransposed ? 0 : rIdx),
           context: &frame.context,
           depth: frame.depth + 1
         )
       }
-      if frame.count == 3, rawRowIdx == 0, cIdx >= 0, cIdx < bounds.colCount {
+      if frame.count == 3, rawRowIdx == 0, cIdx >= 0, cIdx < effectiveColCount {
         return evaluateSingleCellInRange(
           onSheet: sheetName,
-          row: bounds.minRow,
-          column: bounds.minCol + cIdx,
+          row: bounds.minRow + (isTransposed ? cIdx : 0),
+          column: bounds.minCol + (isTransposed ? 0 : cIdx),
           context: &frame.context,
           depth: frame.depth + 1
         )
       }
-      if frame.count == 3, rawColIdx == 0, rIdx >= 0, rIdx < bounds.rowCount {
+      if frame.count == 3, rawColIdx == 0, rIdx >= 0, rIdx < effectiveRowCount {
         return evaluateSingleCellInRange(
           onSheet: sheetName,
-          row: bounds.minRow + rIdx,
-          column: bounds.minCol,
+          row: bounds.minRow + (isTransposed ? 0 : rIdx),
+          column: bounds.minCol + (isTransposed ? rIdx : 0),
           context: &frame.context,
           depth: frame.depth + 1
         )
       }
-      guard rIdx >= 0, rIdx < bounds.rowCount, cIdx >= 0, cIdx < bounds.colCount else {
+      guard rIdx >= 0, rIdx < effectiveRowCount, cIdx >= 0, cIdx < effectiveColCount else {
         return .error("#REF!")
       }
       return evaluateSingleCellInRange(
         onSheet: sheetName,
-        row: bounds.minRow + rIdx,
-        column: bounds.minCol + cIdx,
+        row: bounds.minRow + (isTransposed ? cIdx : rIdx),
+        column: bounds.minCol + (isTransposed ? rIdx : cIdx),
         context: &frame.context,
         depth: frame.depth + 1
       )
@@ -545,9 +549,14 @@ extension WorksheetModel {
 
     case "ROWS":
       guard frame.count == 1 else { return .error("#VALUE!") }
-      switch resolveRangeArgument(from: frame.args[0], frame: &frame) {
+      let resolved = resolveRangeArgumentWithTranspose(from: frame.args[0], frame: &frame)
+      switch resolved.result {
       case .success(_, let range):
-        return .number(Double(abs(range.end.row - range.start.row) + 1))
+        let count =
+          resolved.isTransposed
+          ? abs(range.end.column - range.start.column) + 1
+          : abs(range.end.row - range.start.row) + 1
+        return .number(Double(count))
       case .failure(let err):
         if err != "#VALUE!" { return .error(err) }
         let evaluated = frame.arg(0, in: self)
@@ -557,14 +566,42 @@ extension WorksheetModel {
 
     case "COLUMNS":
       guard frame.count == 1 else { return .error("#VALUE!") }
-      switch resolveRangeArgument(from: frame.args[0], frame: &frame) {
+      let resolved = resolveRangeArgumentWithTranspose(from: frame.args[0], frame: &frame)
+      switch resolved.result {
       case .success(_, let range):
-        return .number(Double(abs(range.end.column - range.start.column) + 1))
+        let count =
+          resolved.isTransposed
+          ? abs(range.end.row - range.start.row) + 1
+          : abs(range.end.column - range.start.column) + 1
+        return .number(Double(count))
       case .failure(let err):
         if err != "#VALUE!" { return .error(err) }
         let evaluated = frame.arg(0, in: self)
         if case .error = evaluated { return evaluated }
         return .number(1.0)
+      }
+
+    case "TRANSPOSE":
+      guard frame.count == 1 else { return .error("#VALUE!") }
+      switch evaluateASTAs2DArray(frame.args[0], frame: &frame) {
+      case .failure(let err):
+        return .error(err.code)
+      case .success((let grid, _)):
+        let rCount = grid.count
+        let cCount = grid.first?.count ?? 0
+        if rCount <= 1 && cCount <= 1 {
+          let first = grid.first?.first ?? .empty
+          return first == .empty ? .number(0.0) : first
+        }
+        var flat: [String] = []
+        flat.reserveCapacity(rCount * cCount)
+        for c in 0..<cCount {
+          for r in 0..<rCount {
+            let v = grid[r][c]
+            flat.append(v == .empty ? "0" : v.description)
+          }
+        }
+        return .text(flat.joined(separator: ","))
       }
 
     default:

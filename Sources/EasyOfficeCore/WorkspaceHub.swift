@@ -657,7 +657,10 @@ public final class WorkspaceViewModel {
 
   @discardableResult
   public func activateOrReopenRecentTab(_ tab: WorkspaceTabItem) -> WorkspaceTabItem {
-    if let existingIdx = openTabs.firstIndex(where: { $0.id == tab.id }) {
+    let targetPath = tab.fileURL?.standardizedFileURL.path
+    if let existingIdx = openTabs.firstIndex(where: {
+      $0.id == tab.id || (targetPath != nil && $0.fileURL?.standardizedFileURL.path == targetPath)
+    }) {
       activeTabID = openTabs[existingIdx].id
       isShowingHomeHub = false
       recordRecentDocument(openTabs[existingIdx])

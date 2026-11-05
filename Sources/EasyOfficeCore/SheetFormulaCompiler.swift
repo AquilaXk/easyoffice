@@ -732,11 +732,24 @@ extension WorksheetModel {
       case .success(let s, let r, _):
         return .success(sheetName: s, range: r)
       }
+    case .functionCall(let fnName, let fnArgs) where fnName == "TRANSPOSE" && fnArgs.count == 1:
+      return resolveRangeArgument(from: fnArgs[0], frame: &frame)
     case .error(let err):
       return .failure(err.rawValue)
     default:
       return .failure("#VALUE!")
     }
+  }
+
+  internal func resolveRangeArgumentWithTranspose(
+    from ast: FormulaAST,
+    frame: inout EvalFrame
+  ) -> (result: OffsetResolutionResult, isTransposed: Bool) {
+    if case .functionCall(let fnName, let fnArgs) = ast, fnName == "TRANSPOSE", fnArgs.count == 1 {
+      let inner = resolveRangeArgumentWithTranspose(from: fnArgs[0], frame: &frame)
+      return (inner.result, !inner.isTransposed)
+    }
+    return (resolveRangeArgument(from: ast, frame: &frame), false)
   }
 
   internal func resolveOffsetRange(

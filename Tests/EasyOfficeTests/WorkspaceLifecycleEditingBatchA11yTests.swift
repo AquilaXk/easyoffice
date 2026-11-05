@@ -740,5 +740,65 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
       record: ["A": "{{B}}", "B": "노출금지"]
     )
     XCTAssertEqual(singlePassMerged.paragraphs.first?.text, "값: {{B}}")
+
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+    let txtURL = tempDir.appendingPathComponent("plain-note.txt")
+    let rawTxt = "# 제목기호유지\n**별표유지**"
+    try Data(rawTxt.utf8).write(to: txtURL)
+
+    let tabCountBeforeTxt = vm.openTabs.count
+    let openedTxt1 = try vm.loadFromDisk(url: txtURL)
+    XCTAssertEqual(vm.openTabs.count, tabCountBeforeTxt + 1)
+    if case .document(let txtDoc) = openedTxt1.payload {
+      XCTAssertEqual(txtDoc.paragraphs.count, 2)
+      XCTAssertEqual(txtDoc.paragraphs[0].style, .body)
+      XCTAssertEqual(txtDoc.paragraphs[0].text, "# 제목기호유지")
+      XCTAssertEqual(txtDoc.paragraphs[1].text, "**별표유지**")
+    } else {
+      XCTFail("Expected .document payload for .txt file")
+    }
+
+    let openedTxt2 = try vm.loadFromDisk(url: txtURL)
+    XCTAssertEqual(vm.openTabs.count, tabCountBeforeTxt + 1)
+    XCTAssertEqual(openedTxt2.id, openedTxt1.id)
+    XCTAssertEqual(vm.canUndo, false)
+    try vm.saveTabToDisk(id: openedTxt1.id, to: txtURL)
+    let savedTxtString = try String(contentsOf: txtURL, encoding: .utf8)
+    XCTAssertEqual(savedTxtString, rawTxt)
+
+    vm.appendParagraphToActiveDocument(text: "수정문단", style: .body)
+    XCTAssertEqual(vm.activeTab?.isModified, true)
+    let reloadedTxt = try vm.loadFromDisk(url: txtURL)
+    XCTAssertEqual(reloadedTxt.isModified, false)
+    XCTAssertEqual(vm.canUndo, true)
+
+    var finSheet = WorksheetModel(
+      name: "함수집합동기화",
+      rawCells: ["B2": "42", "C2": "84", "B3": "10", "C3": "20"]
+    )
+    try finSheet.setCell("A1", rawValue: "=DDB(2400, 300, 10, 1)")
+    try finSheet.setCell("A2", rawValue: "=TRANSPOSE(B2:C2)")
+    try finSheet.setCell("A3", rawValue: "=DDB(2400, 300, 10, 1, \"bad\")")
+    try finSheet.setCell("A4", rawValue: "=DDB(2400, 300, 100000, 50000)")
+    try finSheet.setCell("A5", rawValue: "=ROWS(TRANSPOSE(B2:C2))")
+    try finSheet.setCell("A6", rawValue: "=COLUMNS(TRANSPOSE(B2:C2))")
+    try finSheet.setCell("A7", rawValue: "=SUM(TRANSPOSE(B2:C2))")
+    try finSheet.setCell("A8", rawValue: "=INDEX(TRANSPOSE(B2:C2), 2, 1)")
+    try finSheet.setCell("A9", rawValue: "=TEXTJOIN(\",\", TRUE, TRANSPOSE(B2:C3))")
+    try finSheet.setCell("A10", rawValue: "=SUMIFS(B2:B3, TRANSPOSE(B2:C2), \">50\")")
+    try finSheet.setCell("A11", rawValue: "=SUM(TRANSPOSE(B:C))")
+    XCTAssertEqual(finSheet.evaluate(at: "A1"), .number(480.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A2"), .text("42,84"))
+    XCTAssertEqual(finSheet.evaluate(at: "A3"), .error("#VALUE!"))
+    XCTAssertEqual(finSheet.evaluate(at: "A4"), .error("#NUM!"))
+    XCTAssertEqual(finSheet.evaluate(at: "A5"), .number(2.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A6"), .number(1.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A7"), .number(126.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A8"), .number(84.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A9"), .text("42,10,84,20"))
+    XCTAssertEqual(finSheet.evaluate(at: "A10"), .number(10.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A11"), .number(156.0))
   }
 }

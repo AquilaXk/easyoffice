@@ -12,6 +12,7 @@
     createEmptySlideStyleFields,
     createInitialSlideDeckState,
     createDefaultRibbonState,
+    formatPlatformShortcut,
   } = ribbonCatalog;
 
   const slideDeckState = createInitialSlideDeckState();
@@ -25,6 +26,7 @@
   let activeSlideIndex = 0;
   let slideLaserActive = false;
   let pdfRotationDeg = 0;
+  let activeShortcutModifier = "⌘";
   let workspaceHistoryQueue = Promise.resolve();
 
   const docTabStore = {
@@ -194,6 +196,7 @@
     setPdfRotationDeg: (next) => {
       pdfRotationDeg = next;
     },
+    getShortcutModifier: () => activeShortcutModifier,
     enqueueWorkspaceHistoryOp,
   });
 
@@ -258,10 +261,14 @@
       const koBadge = MODULE_SHORT_BADGES[mod] || mod;
       Object.keys(cats).forEach((cat) => {
         cats[cat].forEach((c) => {
+          const dispShortcut =
+            typeof formatPlatformShortcut === "function"
+              ? formatPlatformShortcut(c.shortcut, activeShortcutModifier)
+              : c.shortcut;
           allItems.push({
             id: c.id,
             module: mod,
-            label: "[" + koBadge + "] " + c.title + " (" + c.shortcut + ")",
+            label: "[" + koBadge + "] " + c.title + " (" + dispShortcut + ")",
           });
         });
       });
@@ -300,11 +307,26 @@
       });
   }
 
+  function syncQatShortcutTitles(modifier) {
+    if (modifier !== "Ctrl") return;
+    const qatSave = document.getElementById("qat-save");
+    const qatUndo = document.getElementById("qat-undo");
+    const qatRedo = document.getElementById("qat-redo");
+    if (qatSave) qatSave.title = "저장 (Ctrl+S)";
+    if (qatUndo) qatUndo.title = "실행 취소 (Ctrl+Z)";
+    if (qatRedo) qatRedo.title = "다시 실행 (Ctrl+Y)";
+  }
+
   function setupTabsAndRibbonChrome(boot) {
+    activeShortcutModifier = boot.shortcutModifier || "⌘";
     const pill = document.getElementById("platform-pill");
     const hint = document.getElementById("shortcut-hint");
-    if (pill) pill.textContent = boot.platform + " · " + boot.shortcutModifier;
-    if (hint) hint.textContent = boot.shortcutModifier + "K";
+    if (pill) pill.textContent = boot.platform + " · " + activeShortcutModifier;
+    if (hint) {
+      hint.textContent =
+        activeShortcutModifier === "⌘" ? "⌘K" : activeShortcutModifier + "+K";
+    }
+    syncQatShortcutTitles(activeShortcutModifier);
 
     if (boot.moduleAccents && typeof boot.moduleAccents === "object") {
       const rootStyle = document.documentElement.style;
@@ -373,18 +395,27 @@
     }
   }
 
+  function applyZoomPercent(pct, fitMode) {
+    const nextZoom = Math.max(50, Math.min(200, Math.round(Number(pct) || 100)));
+    localRibbonState.zoomPercent = nextZoom;
+    const stage = document.querySelector(".canvas-stage");
+    if (stage) {
+      stage.style.zoom = nextZoom + "%";
+      if (fitMode) stage.dataset.zoomFit = fitMode;
+    }
+    const zoomLabel = document.getElementById("status-zoom-label");
+    if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
+    const zoomSlider = document.getElementById("status-zoom-slider");
+    if (zoomSlider) zoomSlider.value = String(nextZoom);
+  }
+
   function applyZoomStepDelta(delta) {
     const steps = [75, 90, 100, 125, 150];
     const curZoom = Number(localRibbonState.zoomPercent || 100);
     let idx = steps.indexOf(curZoom);
     if (idx < 0) idx = 2;
     const nextIdx = Math.max(0, Math.min(steps.length - 1, idx + delta));
-    const nextZoom = steps[nextIdx];
-    localRibbonState.zoomPercent = nextZoom;
-    const stage = document.querySelector(".canvas-stage");
-    if (stage) stage.style.zoom = nextZoom + "%";
-    const zoomLabel = document.getElementById("status-zoom-label");
-    if (zoomLabel) zoomLabel.textContent = nextZoom + "%";
+    applyZoomPercent(steps[nextIdx]);
   }
 
   function setupStaticNavigationHandlers() {
@@ -414,6 +445,12 @@
     if (zoomInBtn) {
       zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
     }
+    workspacePanels.setupStudioChromeControls(applyZoomPercent, (cmd) => {
+      const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
+      const fullCmd =
+        cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd;
+      void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
+    });
   }
 
   function setupQatAndRibbonActions() {
@@ -468,7 +505,26 @@
     }
   }
 
+  function getRibbonModulePrefix(mod) {
+    return mod === "DOC" || mod === "CONV" ? "document" : String(mod || "DOC").toLowerCase();
+  }
+
   function setupDocTableAndSheetTabHandlers() {
+    [
+      ["btn-stylebar-bold", "bold"],
+      ["btn-stylebar-italic", "italic"],
+      ["btn-stylebar-underline", "underline"],
+    ].forEach(([btnId, cmdSuffix]) => {
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.addEventListener("click", () => {
+          const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
+          void ribbonHistory
+            .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdSuffix)
+            .catch(() => {});
+        });
+      }
+    });
     const docEditor = document.getElementById("doc-editor");
     if (docEditor) {
       docEditor.addEventListener("click", (e) => {
@@ -714,8 +770,12 @@
     const btnPdfApply = document.getElementById("btn-pdf-apply");
     if (btnPdfApply) {
       btnPdfApply.addEventListener("click", () => {
-        ribbonHistory.pushUndoSnapshot(false);
-        workspacePanels.applyPdfStudioFormState();
+        void ribbonHistory
+          .enqueueWorkspaceHistoryOp(() => {
+            ribbonHistory.pushUndoSnapshot(false);
+            workspacePanels.applyPdfStudioFormState();
+          })
+          .catch(() => {});
       });
     }
   }
@@ -834,24 +894,38 @@
 
     host.addEventListener("keydown", (e) => {
       if (e.isComposing || isImeComposing) return;
+      if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
+        modal.close();
+        return;
+      }
+      if (!e.metaKey && !e.ctrlKey) return;
       const keyLower = e.key.toLowerCase();
-      if ((e.metaKey || e.ctrlKey) && keyLower === "k") {
+      const modPrefix = getRibbonModulePrefix(activeModule);
+      if (e.altKey && !e.shiftKey && keyLower === "d") {
         e.preventDefault();
-        togglePaletteModal(modal, cmdSearchInput);
-      } else if ((e.metaKey || e.ctrlKey) && keyLower === "s") {
-        e.preventDefault();
-        void workspacePanels.saveActiveModuleDocument().catch(() => {});
-      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && keyLower === "z") {
-        e.preventDefault();
-        void ribbonHistory.performWorkspaceUndo().catch(() => {});
-      } else if (
-        (e.metaKey || e.ctrlKey) &&
-        (keyLower === "y" || (e.shiftKey && keyLower === "z"))
-      ) {
+        void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-theme").catch(() => {});
+        return;
+      }
+      if (e.altKey) return;
+      if (e.shiftKey && keyLower === "z") {
         e.preventDefault();
         void ribbonHistory.performWorkspaceRedo().catch(() => {});
-      } else if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
-        modal.close();
+        return;
+      }
+      if (e.shiftKey) return;
+      const plainHandlers = {
+        k: () => togglePaletteModal(modal, cmdSearchInput),
+        s: () => void workspacePanels.saveActiveModuleDocument().catch(() => {}),
+        z: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
+        y: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
+        0: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-zoom").catch(() => {}),
+        b: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-bold").catch(() => {}),
+        i: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-italic").catch(() => {}),
+        u: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-underline").catch(() => {}),
+      };
+      if (plainHandlers[keyLower]) {
+        e.preventDefault();
+        plainHandlers[keyLower]();
       }
     });
   }

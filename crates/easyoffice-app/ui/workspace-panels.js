@@ -1,6 +1,12 @@
 (function (host) {
   "use strict";
 
+  function syncDatasetFlag(el, key, val) {
+    if (!el || typeof val !== "string") return;
+    if (val) el.dataset[key] = val;
+    else delete el.dataset[key];
+  }
+
   function captureDocLayoutStyle(editor) {
     if (!editor) {
       return {
@@ -8,7 +14,21 @@
         maxWidth: "",
         padding: "",
         minHeight: "",
+        fontFamily: "",
+        fontSize: "",
+        lineHeight: "",
+        textAlign: "",
+        textAlignMode: "",
         paperSize: "",
+        styleRole: "",
+        fontLang: "",
+        lineSpacing: "",
+        showCtrlMarks: "",
+        showParaMarks: "true",
+        strike: "",
+        charfx: "",
+        textcolor: "",
+        highlight: "",
         manuscriptGrid: false,
       };
     }
@@ -17,7 +37,21 @@
       maxWidth: editor.style.maxWidth || "",
       padding: editor.style.padding || "",
       minHeight: editor.style.minHeight || "",
+      fontFamily: editor.style.fontFamily || "",
+      fontSize: editor.style.fontSize || "",
+      lineHeight: editor.style.lineHeight || "",
+      textAlign: editor.style.textAlign || "",
+      textAlignMode: editor.dataset.textAlign || "",
       paperSize: editor.dataset.paperSize || "",
+      styleRole: editor.dataset.styleRole || "",
+      fontLang: editor.dataset.fontLang || "",
+      lineSpacing: editor.dataset.lineSpacing || "",
+      showCtrlMarks: editor.dataset.showCtrlMarks || "",
+      showParaMarks: editor.dataset.showParaMarks || "",
+      strike: editor.dataset.strike || "",
+      charfx: editor.dataset.charfx || "",
+      textcolor: editor.dataset.textcolor || "",
+      highlight: editor.dataset.highlight || "",
       manuscriptGrid: editor.classList.contains("manuscript-grid"),
     };
   }
@@ -29,11 +63,33 @@
     editor.style.maxWidth = ls.maxWidth || "";
     editor.style.padding = ls.padding || "";
     editor.style.minHeight = ls.minHeight || "";
-    if (ls.paperSize) {
-      editor.dataset.paperSize = ls.paperSize;
+    editor.style.fontFamily = ls.fontFamily || "";
+    editor.style.fontSize = ls.fontSize || "";
+    editor.style.lineHeight = ls.lineHeight || "";
+    editor.style.textAlign = ls.textAlign || "";
+    if (ls.textAlignMode) {
+      editor.dataset.textAlign = ls.textAlignMode;
     } else {
-      delete editor.dataset.paperSize;
+      delete editor.dataset.textAlign;
     }
+    [
+      "paperSize",
+      "styleRole",
+      "fontLang",
+      "lineSpacing",
+      "showCtrlMarks",
+      "showParaMarks",
+      "strike",
+      "charfx",
+      "textcolor",
+      "highlight",
+    ].forEach((k) => {
+      if (ls[k]) {
+        editor.dataset[k] = ls[k];
+      } else {
+        delete editor.dataset[k];
+      }
+    });
     editor.classList.toggle("manuscript-grid", Boolean(ls.manuscriptGrid));
   }
 
@@ -58,8 +114,28 @@
 
     let activeDocBlockEl = null;
 
+    function syncDocStyleBarFromTarget(targetEl) {
+      const docEditor = document.getElementById("doc-editor");
+      const boldBtn = document.getElementById("btn-stylebar-bold");
+      const italicBtn = document.getElementById("btn-stylebar-italic");
+      const underBtn = document.getElementById("btn-stylebar-underline");
+      const sizeBadge = document.getElementById("doc-style-size-badge");
+      const sizeInput = document.getElementById("doc-font-size-input");
+      if (boldBtn) boldBtn.setAttribute("aria-pressed", targetEl?.style?.fontWeight === "600" ? "true" : "false");
+      if (italicBtn) italicBtn.setAttribute("aria-pressed", targetEl?.style?.fontStyle === "italic" ? "true" : "false");
+      if (underBtn) underBtn.setAttribute("aria-pressed", targetEl?.style?.textDecoration === "underline" ? "true" : "false");
+      const rawSize = targetEl?.style?.fontSize || docEditor?.style?.fontSize || "11.0pt";
+      const parsedNum = Number.parseFloat(rawSize);
+      const formattedNum = Number.isFinite(parsedNum) ? parsedNum.toFixed(1) : "11.0";
+      if (sizeInput) sizeInput.value = formattedNum;
+      if (sizeBadge) {
+        sizeBadge.textContent = rawSize.endsWith("px") ? rawSize : formattedNum + " pt";
+      }
+    }
+
     function setActiveDocBlock(el) {
       activeDocBlockEl = el;
+      syncDocStyleBarFromTarget(el);
     }
 
     function saveDocTabStateForModule(mod) {
@@ -425,10 +501,13 @@
     function captureWorkspaceViewState() {
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
+      const shell = document.getElementById("app") || document.querySelector(".app-shell");
       return {
         ribbonStripHidden: Boolean(strip?.hidden),
         canvasZoom: stage?.style?.zoom || "",
         canvasSplit: stage?.dataset?.splitView || "",
+        chromeExpanded: shell?.dataset?.chromeExpanded || "",
+        panelsExpanded: shell?.dataset?.panelsExpanded || "",
       };
     }
 
@@ -436,22 +515,26 @@
       if (!viewState) return;
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
-      if (strip) {
-        strip.hidden = Boolean(viewState.ribbonStripHidden);
+      const shell = document.getElementById("app") || document.querySelector(".app-shell");
+      syncDatasetFlag(shell, "chromeExpanded", viewState.chromeExpanded);
+      syncDatasetFlag(shell, "panelsExpanded", viewState.panelsExpanded);
+      const toggleBtn = document.getElementById("btn-chrome-toggle");
+      if (toggleBtn && typeof viewState.chromeExpanded === "string") {
+        const isExp = viewState.chromeExpanded === "true";
+        toggleBtn.setAttribute("aria-expanded", isExp ? "true" : "false");
+        toggleBtn.textContent = isExp ? "▴" : "▾";
       }
+      if (strip) strip.hidden = Boolean(viewState.ribbonStripHidden);
       if (stage) {
         stage.style.zoom = viewState.canvasZoom || "";
-        if (viewState.canvasSplit) {
-          stage.dataset.splitView = viewState.canvasSplit;
-        } else {
-          delete stage.dataset.splitView;
-        }
+        syncDatasetFlag(stage, "splitView", viewState.canvasSplit || "");
         syncSplitComparePane(stage);
       }
+      const zoomText = viewState.canvasZoom || "100%";
       const zoomLabel = document.getElementById("status-zoom-label");
-      if (zoomLabel) {
-        zoomLabel.textContent = viewState.canvasZoom || "100%";
-      }
+      if (zoomLabel) zoomLabel.textContent = zoomText;
+      const zoomSlider = document.getElementById("status-zoom-slider");
+      if (zoomSlider) zoomSlider.value = String(Number.parseInt(zoomText, 10) || 100);
     }
 
     function renderModuleOutline(mod) {
@@ -533,11 +616,24 @@
     const tools = host.__EASYOFFICE_CREATE_WORKSPACE_TOOLS__(deps, {
       saveActiveDocTabState,
       ensureDefaultDocTabStore,
+      getFocusedDocBlock,
       computeDocTableSummary,
       syncActiveSlideDomStylesToDeck,
       renderSlideDeck,
       applyPdfStudioFormState,
     });
+
+    function syncBtnPressed(id, on) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+
+    function setElField(id, prop, val) {
+      const el = document.getElementById(id);
+      if (el) el[prop] = val;
+    }
 
     function restoreDocTabState(mod) {
       if (mod !== "DOC" && mod !== "HWP") return;
@@ -549,20 +645,62 @@
         restoreDomChildren(editor, saved.editorNodes || [], document);
         applyDocLayoutStyle(editor, saved.layoutStyle);
       }
+      const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");
+      setElField("doc-style-role-badge", "textContent", roleVal);
+      setElField("doc-style-select", "value", roleVal);
+      setElField("doc-font-lang", "value", editor?.dataset?.fontLang || "대표");
+      const fontVal = editor?.style?.fontFamily || "휴먼명조";
+      setElField("doc-font-select", "value", fontVal);
+      setElField("doc-style-font-badge", "textContent", fontVal);
+      setElField("doc-linespacing-select", "value", editor?.dataset?.lineSpacing || "160");
+      [
+        ["btn-stylebar-strike", "strike"],
+        ["btn-stylebar-charfx", "charfx"],
+        ["btn-stylebar-textcolor", "textcolor"],
+        ["btn-stylebar-highlight", "highlight"],
+        ["btn-toggle-ctrl-marks", "showCtrlMarks"],
+        ["btn-toggle-para-marks", "showParaMarks"],
+      ].forEach(([id, key]) => syncBtnPressed(id, editor?.dataset?.[key] === "true"));
+      const isGrid = Boolean(editor?.classList?.contains("manuscript-grid"));
+      syncBtnPressed("btn-toggle-doc-grid", isGrid);
+      const alignMode = editor?.dataset?.textAlign || editor?.style?.textAlign || "justify";
+      ["left", "center", "right", "justify", "distribute", "divide"].forEach((m) =>
+        syncBtnPressed("btn-align-" + m, m === alignMode)
+      );
+      document.getElementById("hwp-manuscript-preview")?.classList.toggle("manuscript-grid", isGrid);
       activeDocBlockEl = null;
+      syncDocStyleBarFromTarget(editor ? getFocusedDocBlock(editor) : null);
       computeDocTableSummary();
       tools.computeSmartStats();
+    }
+
+    const STUDIO_CONTAINER_CLASSES = [
+      "eo-hwp-header",
+      "eo-doc-toc",
+      "eo-doc-footnote",
+      "eo-process-flow",
+      "eo-criteria-panel",
+    ];
+
+    function isNonParagraphStudioContainer(el) {
+      if (el?.nodeType !== 1) return false;
+      if (isExcludedDocChromeElement(el)) return true;
+      const tag = (el.tagName || "").toUpperCase();
+      if (tag === "HEADER" || tag === "NAV" || tag === "ASIDE") return true;
+      return STUDIO_CONTAINER_CLASSES.some((cls) => el.classList?.contains(cls));
     }
 
     function findEditableDocBlock(node, docEditor) {
       if (!node || !docEditor) return null;
       let cur = node.nodeType === 1 ? node : node.parentElement;
+      let candidateLi = null;
       while (cur && cur !== docEditor) {
+        if (!candidateLi && (cur.tagName || "").toUpperCase() === "LI") {
+          candidateLi = cur;
+        }
         if (cur.parentElement === docEditor) {
-          if (!isExcludedDocChromeElement(cur)) {
-            return cur;
-          }
-          return null;
+          if (cur.classList?.contains("eo-criteria-panel")) return candidateLi;
+          return isNonParagraphStudioContainer(cur) ? null : candidateLi || cur;
         }
         cur = cur.parentElement;
       }
@@ -579,11 +717,15 @@
           return block;
         }
       }
-      if (activeDocBlockEl && docEditor.contains(activeDocBlockEl)) {
+      if (
+        activeDocBlockEl &&
+        docEditor.contains(activeDocBlockEl) &&
+        !isNonParagraphStudioContainer(activeDocBlockEl)
+      ) {
         return activeDocBlockEl;
       }
       const children = Array.from(docEditor.children || []);
-      const firstBlock = children.find((el) => !isExcludedDocChromeElement(el));
+      const firstBlock = children.find((el) => !isNonParagraphStudioContainer(el));
       return firstBlock || docEditor;
     }
 
@@ -788,6 +930,7 @@
 
     return {
       setActiveDocBlock,
+      syncDocStyleBarFromTarget,
       saveDocTabStateForModule,
       saveActiveDocTabState,
       ensureDefaultDocTabStore,

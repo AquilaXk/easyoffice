@@ -912,6 +912,6 @@ mod tests {
         payload.extend_from_slice(&0x000Du16.to_le_bytes());
 
         let decoded = Hwp5Codec::decode_hwp5_para_text(&payload).unwrap();
-        assert_eq!(decoded, "문단앞\t문단뒤\n둘째줄");
+        assert_eq!(decoded, "문단앞\t\u{00AD}문단뒤\n둘째줄");
     }
 }

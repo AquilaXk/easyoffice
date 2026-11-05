@@ -81,6 +81,7 @@ extension WorksheetModel {
       _ cellRange: CellRange,
       onSheet sheetName: String? = nil,
       in sheet: WorksheetModel,
+      isTransposed: Bool = false,
       onSkippedEmptyCount: ((Int) -> Void)? = nil,
       _ body: (EvaluatedCellValue) -> Void
     ) -> String? {
@@ -95,13 +96,19 @@ extension WorksheetModel {
       }
 
       if count > 4096 {
-        let coords = sheet.populatedCoordinates(
+        var coords = sheet.populatedCoordinates(
           onSheet: sheetName,
           minRow: minRow,
           maxRow: maxRow,
           minCol: minCol,
           maxCol: maxCol
         )
+        if isTransposed {
+          coords.sort { a, b in
+            if a.column != b.column { return a.column < b.column }
+            return a.row < b.row
+          }
+        }
         for coord in coords {
           let v =
             sheetName.map {
@@ -114,9 +121,14 @@ extension WorksheetModel {
         return nil
       }
 
-      for r in minRow...maxRow {
-        for c in minCol...maxCol {
-          let coord = PackedCellCoordinate(row: r, column: c)
+      let outerRange = isTransposed ? (minCol...maxCol) : (minRow...maxRow)
+      let innerRange = isTransposed ? (minRow...maxRow) : (minCol...maxCol)
+      for outer in outerRange {
+        for inner in innerRange {
+          let coord = PackedCellCoordinate(
+            row: isTransposed ? inner : outer,
+            column: isTransposed ? outer : inner
+          )
           let v =
             sheetName.map {
               sheet.evaluateOnSheet(named: $0, at: coord, context: &context, depth: depth + 1)
@@ -223,6 +235,35 @@ extension WorksheetModel {
             } else {
               if let err = streamRangeCells(
                 resolvedRange, in: sheet, onSkippedEmptyCount: onSkippedEmptyCount,
+                { body($0, true) })
+              {
+                return err
+              }
+            }
+          }
+        case .functionCall(let fnName, let fnArgs) where fnName == "TRANSPOSE" && fnArgs.count == 1:
+          let resolved = sheet.resolveRangeArgumentWithTranspose(from: args[idx], frame: &self)
+          switch resolved.result {
+          case .failure(let err):
+            if err != "#VALUE!" { return err }
+            let v = arg(idx, in: sheet)
+            if case .error(let code) = v { return code }
+            body(v, false)
+          case .success(let sheetName, let resolvedRange):
+            if let sheetName {
+              guard sheet.hasSheet(named: sheetName) else { return "#REF!" }
+              if let err = streamRangeCells(
+                resolvedRange, onSheet: sheetName, in: sheet,
+                isTransposed: resolved.isTransposed,
+                onSkippedEmptyCount: onSkippedEmptyCount, { body($0, true) })
+              {
+                return err
+              }
+            } else {
+              if let err = streamRangeCells(
+                resolvedRange, in: sheet,
+                isTransposed: resolved.isTransposed,
+                onSkippedEmptyCount: onSkippedEmptyCount,
                 { body($0, true) })
               {
                 return err
@@ -415,7 +456,8 @@ extension WorksheetModel {
         switch item {
         case .rangeRef, .sheetRangeRef, .missing:
           continue
-        case .functionCall(let fnName, _) where fnName == "OFFSET" || fnName == "INDIRECT":
+        case .functionCall(let fnName, _)
+        where fnName == "OFFSET" || fnName == "INDIRECT" || fnName == "TRANSPOSE":
           continue
         case .namedRangeRef(let rangeName):
           guard resolveNamedRange(rangeName) != nil else { return .error("#NAME?") }
