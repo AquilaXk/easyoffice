@@ -886,9 +886,18 @@ public struct DocumentEditorDetailPaneView: View {
 
               HStack(spacing: 2) {
                 studioIconButton("▤", tooltip: "머리말", palette: palette) {
-                  viewModel.executeRibbonCommand(
-                    isHWPModule ? "hwp-mod-header" : "doc-mod-header"
-                  )
+                  if isHWPModule {
+                    viewModel.executeRibbonCommand("hwp-mod-header")
+                  } else if let tabID = viewModel.activeTabID,
+                    let idx = viewModel.openTabs.firstIndex(where: { $0.id == tabID }),
+                    case .document(var d) = viewModel.openTabs[idx].payload
+                  {
+                    viewModel.recordUndoSnapshot(for: tabID)
+                    d.headerText = "[\(d.title)] — 구역 1 머리글"
+                    viewModel.openTabs[idx].payload = .document(d)
+                    viewModel.openTabs[idx].isModified = true
+                    viewModel.lastExecutedCommandSummary = "머리말 갱신 완료"
+                  }
                 }
                 studioIconButton("▥", tooltip: "꼬리말", palette: palette) {
                   if let tabID = viewModel.activeTabID,
@@ -1349,7 +1358,7 @@ public struct DocumentEditorDetailPaneView: View {
           selectedParagraph: selectedParagraph,
           palette: palette,
           paperMaxWidth: paperMaxWidth,
-          viewModel: viewModel
+          viewModel: isPrimaryPane ? viewModel : nil
         )
       }
 
@@ -1523,9 +1532,11 @@ public struct DocumentEditorDetailPaneView: View {
 
                 let shouldShowProposalDiagram =
                   !document.tables.isEmpty
-                  && (document.title.contains("아키텍처 및 보안 감사 보고서")
+                  && (document.title.contains("아키텍처")
                     || document.title.contains("국정과제 추진계획")
-                    || document.title.contains("디지털행정혁신"))
+                    || document.title.contains("디지털행정혁신")
+                    || document.title.contains("표준 업무 협조전")
+                    || document.title.contains("제품 기획서"))
                 if shouldShowProposalDiagram {
                   StudioProcessFlowDiagramView()
                 }

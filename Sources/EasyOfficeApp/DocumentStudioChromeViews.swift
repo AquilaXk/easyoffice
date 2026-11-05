@@ -478,25 +478,33 @@ struct TopDocumentTabStripView: View {
           }
         }
         topMenuBarItem("편집", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .home; isStudioPanelsExpanded = true
+          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .home
+          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("보기", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .view; isStudioPanelsExpanded.toggle()
+          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .view
+          isStudioPanelsExpanded.toggle()
+          viewModel.showLeftNavigator = isStudioPanelsExpanded; viewModel.showRightInspector = isStudioPanelsExpanded
         }
         topMenuBarItem("입력", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert; isStudioPanelsExpanded = true
+          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert
+          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("서식", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout; isStudioPanelsExpanded = true
+          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
+          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("쪽", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout; isStudioPanelsExpanded = true
+          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
+          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("표", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .formulasAndData; isStudioPanelsExpanded = true
+          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .formulasAndData
+          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
         topMenuBarItem("도구", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .review; isStudioPanelsExpanded = true
+          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .review
+          isStudioPanelsExpanded = true; viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
         }
       }
       .fixedSize(horizontal: true, vertical: false)
@@ -522,7 +530,11 @@ struct TopDocumentTabStripView: View {
             width: 96,
             palette: palette,
             isSnapshotMode: viewModel.isCanvasSnapshotMode
-          )
+          ) {
+            if !viewModel.isShowingHomeHub {
+              viewModel.performFindNext()
+            }
+          }
         }
         .fixedSize(horizontal: true, vertical: false)
       }
@@ -702,14 +714,21 @@ struct TopDocumentTabStripView: View {
         }
       }
 
+      let isExpandedChevron = isDocumentStudio
+        ? isStudioPanelsExpanded
+        : (viewModel.showLeftNavigator || viewModel.showRightInspector)
       Button {
-        isStudioPanelsExpanded.toggle()
-        if !isDocumentStudio {
+        if isDocumentStudio {
+          isStudioPanelsExpanded.toggle()
           viewModel.showLeftNavigator = isStudioPanelsExpanded
           viewModel.showRightInspector = isStudioPanelsExpanded
+        } else {
+          let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
+          viewModel.showLeftNavigator = nextVisible
+          viewModel.showRightInspector = nextVisible
         }
       } label: {
-        Text(isStudioPanelsExpanded ? "▴" : "▾")
+        Text(isExpandedChevron ? "▴" : "▾")
           .font(.system(size: 11, weight: .bold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)
           .frame(width: 20, height: 20)

@@ -513,6 +513,12 @@
       if (shell && typeof viewState.chromeExpanded === "string") {
         if (viewState.chromeExpanded) shell.dataset.chromeExpanded = viewState.chromeExpanded;
         else delete shell.dataset.chromeExpanded;
+        const toggleBtn = document.getElementById("btn-chrome-toggle");
+        if (toggleBtn) {
+          const isExp = viewState.chromeExpanded === "true";
+          toggleBtn.setAttribute("aria-expanded", isExp ? "true" : "false");
+          toggleBtn.textContent = isExp ? "▴" : "▾";
+        }
       }
       if (shell && typeof viewState.panelsExpanded === "string") {
         if (viewState.panelsExpanded) shell.dataset.panelsExpanded = viewState.panelsExpanded;
@@ -621,6 +627,7 @@
     const tools = host.__EASYOFFICE_CREATE_WORKSPACE_TOOLS__(deps, {
       saveActiveDocTabState,
       ensureDefaultDocTabStore,
+      getFocusedDocBlock,
       computeDocTableSummary,
       syncActiveSlideDomStylesToDeck,
       renderSlideDeck,

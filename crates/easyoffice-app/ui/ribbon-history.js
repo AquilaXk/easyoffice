@@ -106,6 +106,8 @@
     function applyModuleAccent(mod) {
       setActiveModule(mod);
       localRibbonState.activeModule = mod;
+      const shell = document.getElementById("app") || document.querySelector(".app-shell");
+      if (shell) shell.dataset.module = mod;
       const accent = MODULE_ACCENTS[mod] || "var(--eo-primary)";
       document.documentElement.style.setProperty("--eo-module-active", accent);
       const swatch = document.getElementById("module-swatch");
@@ -232,9 +234,6 @@
       if (!skipTabBufferSync && (curMod === "DOC" || curMod === "HWP") && mod !== curMod) {
         workspacePanels.saveActiveDocTabState();
       }
-      if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== curMod) {
-        workspacePanels.restoreDocTabState(mod);
-      }
       applyModuleAccent(mod);
       const panes = {
         DOC: document.getElementById("pane-doc"),
@@ -259,6 +258,9 @@
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", isAct ? "true" : "false");
       });
+      if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== curMod) {
+        workspacePanels.restoreDocTabState(mod);
+      }
       workspacePanels.renderModuleOutline(mod);
       await renderRibbonCategoryTools(getActiveRibbonCategory()).catch(() => {});
     }

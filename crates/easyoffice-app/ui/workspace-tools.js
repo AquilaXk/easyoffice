@@ -29,6 +29,7 @@
     const {
       saveActiveDocTabState,
       ensureDefaultDocTabStore,
+      getFocusedDocBlock,
       computeDocTableSummary,
       syncActiveSlideDomStylesToDeck,
       renderSlideDeck,
@@ -270,18 +271,7 @@
       const summaryEl = document.getElementById("smart-summary-output");
       const fb = document.getElementById("status-command-feedback");
       if (statsEl) {
-        statsEl.textContent =
-          "문자: " +
-          res.charCount +
-          " · 단어: " +
-          res.wordCount +
-          " · 문장: " +
-          res.sentenceCount +
-          " · 읽기: " +
-          res.readingTimeSeconds +
-          "초 · 요약: " +
-          res.summaryCount +
-          "건";
+        statsEl.textContent = `문자: ${res.charCount} · 단어: ${res.wordCount} · 문장: ${res.sentenceCount} · 읽기: ${res.readingTimeSeconds}초 · 요약: ${res.summaryCount}건`;
       }
       if (summaryEl) {
         const lines = Array.isArray(res.summaryLines) ? res.summaryLines : [];
@@ -293,59 +283,32 @@
         summaryEl.textContent = "요약: " + summaryText + actionSuffix + styleSuffix;
       }
       if (fb && updateFeedback) {
-        fb.textContent =
-          "문장 진단 완료 · 요약 " +
-          res.summaryCount +
-          "건 · 실행 항목 " +
-          res.actionItemCount +
-          "건 · 교정 제안 " +
-          res.suggestionCount +
-          "건";
+        fb.textContent = `문장 진단 완료 · 요약 ${res.summaryCount}건 · 실행 항목 ${res.actionItemCount}건 · 교정 제안 ${res.suggestionCount}건`;
       }
     }
 
     async function runSmartDiagnoseAction() {
-      const bodyText = extractEditableDocumentText();
-      const res = await invokeIpc("run_smart_assistant", bodyText);
+      const res = await invokeIpc("run_smart_assistant", extractEditableDocumentText());
       applySmartDiagnoseDom(res, true);
     }
 
     function resolveModuleContainerExt(targetMod) {
       const effectiveMod = targetMod || getActiveModule();
-      const extMap = {
-        DOC: "docx",
-        HWP: "hwpx",
-        SHEET: "xlsx",
-        SLIDE: "pptx",
-        PDF: "pdf",
-        CONV: document.getElementById("conv-src-fmt")?.value || "docx",
-      };
+      const extMap = { DOC: "docx", HWP: "hwpx", SHEET: "xlsx", SLIDE: "pptx", PDF: "pdf", CONV: document.getElementById("conv-src-fmt")?.value || "docx" };
       return extMap[effectiveMod] || "docx";
     }
 
     async function runModuleSecurityAudit(targetMod) {
       const effectiveMod = targetMod || getActiveModule();
       const ext = resolveModuleContainerExt(effectiveMod);
-      const sourceTarget = effectiveMod === "CONV" ? ext : effectiveMod;
-      const body = buildStructuredConversionBody(sourceTarget);
+      const body = buildStructuredConversionBody(effectiveMod === "CONV" ? ext : effectiveMod);
       const title = "SecurityAudit_" + effectiveMod;
       const convRes = await invokeIpc(
         "convert_document_format",
-        JSON.stringify({
-          sourceFormat: ext,
-          targetFormat: ext,
-          title,
-          body,
-        })
+        JSON.stringify({ sourceFormat: ext, targetFormat: ext, title, body })
       );
       const containerBase64 = String(convRes?.convertedBase64 || convRes?.converted_base64 || "");
-      return await invokeIpc(
-        "audit_security",
-        JSON.stringify({
-          fileName: title + "." + ext,
-          containerBase64,
-        })
-      );
+      return await invokeIpc("audit_security", JSON.stringify({ fileName: title + "." + ext, containerBase64 }));
     }
 
     async function fetchSecurityAuditOutcome(targetMod) {
@@ -713,10 +676,7 @@
         if (pre && typeof commitDeferredUndoSnapshot === "function") commitDeferredUndoSnapshot(pre);
       }
       function resolveActiveDocBlock() {
-        const selNode = host.getSelection?.()?.anchorNode;
-        const el = selNode?.nodeType === 1 ? selNode : selNode?.parentElement;
-        const inEditor = el?.closest?.("#doc-editor p, #doc-editor h1, #doc-editor h2");
-        return inEditor || editor?.querySelector("p") || null;
+        return (typeof getFocusedDocBlock === "function" && getFocusedDocBlock(editor)) || editor?.querySelector("p") || null;
       }
       document.querySelectorAll("#icon-toolbar [data-studio-cmd]").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -728,15 +688,16 @@
           if (cmd === "studio-redo") return void document.getElementById("qat-redo")?.click();
           const fb = document.getElementById("status-command-feedback");
           const blk = resolveActiveDocBlock();
+          const textTarget = blk?.querySelector?.(".eo-h-title") || blk;
           if (cmd === "clip-copy") {
-            studioClipboardText = (blk?.textContent || "").trim();
+            studioClipboardText = (textTarget?.textContent || "").trim();
             if (fb) fb.textContent = "선택 문단 클립보드 복사 완료 (" + studioClipboardText.length + "자)";
             return;
           }
           if (cmd === "clip-cut") {
             withDocStyleUndo(() => {
-              studioClipboardText = (blk?.textContent || "").trim();
-              if (blk) blk.textContent = "";
+              studioClipboardText = (textTarget?.textContent || "").trim();
+              if (textTarget) textTarget.textContent = "";
               computeSmartStats();
             });
             if (fb) fb.textContent = "선택 문단 오려두기 완료";
@@ -746,7 +707,7 @@
             withDocStyleUndo(() => {
               const p = document.createElement("p");
               p.textContent = studioClipboardText || "붙여넣기 문단";
-              if (blk?.parentNode) blk.insertAdjacentElement("afterend", p);
+              if (blk?.parentNode === editor) blk.insertAdjacentElement("afterend", p);
               else editor?.appendChild(p);
               computeSmartStats();
             });
@@ -756,9 +717,9 @@
           if (cmd === "para-numbering" || cmd === "para-bullet") {
             const prefix = cmd === "para-numbering" ? "1. " : "○ ";
             withDocStyleUndo(() => {
-              if (blk) {
-                const cur = blk.textContent || "";
-                blk.textContent = cur.startsWith(prefix) ? cur.slice(prefix.length) : prefix + cur;
+              if (textTarget) {
+                const cur = textTarget.textContent || "";
+                textTarget.textContent = cur.startsWith(prefix) ? cur.slice(prefix.length) : prefix + cur;
               }
               computeSmartStats();
             });
@@ -785,18 +746,39 @@
           if (cmd === "mod-symbol") {
             if (isHwp && typeof onStudioCmd === "function") return void onStudioCmd("hwp-mod-field");
             withDocStyleUndo(() => {
-              if (blk) blk.textContent = (blk.textContent || "") + " ※";
+              if (textTarget) textTarget.textContent = (textTarget.textContent || "") + " ※";
               computeSmartStats();
             });
             if (fb) fb.textContent = "문자표 기호 삽입 완료";
             return;
           }
           if (cmd === "mod-header") {
-            if (typeof onStudioCmd === "function") onStudioCmd(isHwp ? "hwp-mod-header" : "layout-margins");
+            if (isHwp && typeof onStudioCmd === "function") return void onStudioCmd("hwp-mod-header");
+            withDocStyleUndo(() => {
+              const hdr = editor?.querySelector(".eo-hwp-header") || document.createElement("header");
+              hdr.className = "eo-hwp-header";
+              hdr.dataset.hwpHeader = "true";
+              const p = document.createElement("p");
+              p.textContent = "문서 머리말 · 꼬리말 (표준 양식)";
+              hdr.replaceChildren(p);
+              if (!hdr.parentElement && editor) editor.prepend(hdr);
+              computeSmartStats();
+            });
+            if (fb) fb.textContent = "머리말 · 꼬리말 적용 완료";
             return;
           }
           if (cmd === "mod-footnote") {
-            if (typeof onStudioCmd === "function") onStudioCmd(isHwp ? "hwp-mod-manuscript" : "doc-mod-footnote");
+            if (!isHwp && typeof onStudioCmd === "function") return void onStudioCmd("doc-mod-footnote");
+            withDocStyleUndo(() => {
+              const idx = (editor?.querySelectorAll(".eo-doc-footnote").length || 0) + 1;
+              const aside = document.createElement("aside");
+              aside.className = "eo-doc-footnote";
+              aside.dataset.docFootnote = "true";
+              aside.textContent = "각주 " + idx + ") 표준 행정 문서 관리 지침 및 근거 조항 참조";
+              editor?.appendChild(aside);
+              computeSmartStats();
+            });
+            if (fb) fb.textContent = "각주 · 미주 삽입 완료";
             return;
           }
           if (typeof onStudioCmd === "function") onStudioCmd(cmd);
@@ -924,7 +906,11 @@
             docGridBtn.classList.toggle("active", next);
             docGridBtn.setAttribute("aria-pressed", next ? "true" : "false");
             editor.classList.toggle("manuscript-grid", next);
-            document.getElementById("hwp-manuscript-preview")?.classList.toggle("manuscript-grid", next);
+            const hwpPreview = document.getElementById("hwp-manuscript-preview");
+            if (hwpPreview) {
+              hwpPreview.classList.toggle("manuscript-grid", next);
+              hwpPreview.hidden = getActiveModule() !== "HWP" || !next;
+            }
           })
         );
       }
