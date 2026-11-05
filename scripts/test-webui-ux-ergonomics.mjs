@@ -372,4 +372,29 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.ok(!pdfCard.querySelector(".pdf-splitmerge-badge"));
   assert.ok(pdfCard.querySelector(".pdf-highlight-badge"));
+
+  const utils = sandbox.__EASYOFFICE_SHEET_UTILS__;
+  const holder = document.createElement("div");
+  const td = document.createElement("td");
+  td.rowSpan = 2;
+  td.colSpan = 3;
+  td.textContent = "병합 셀";
+  holder.appendChild(td);
+  const specs = utils.serializeDomChildren(holder);
+  assert.equal(specs[0].attrs.rowspan, "2");
+  assert.equal(specs[0].rowSpan, 2);
+  const restoredHolder = document.createElement("div");
+  utils.restoreDomChildren(restoredHolder, specs, document);
+  assert.equal(restoredHolder.childNodes[0].rowSpan, 2);
+  assert.equal(restoredHolder.childNodes[0].getAttribute("rowspan"), "2");
+
+  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  await flushAsyncTurns();
+  lowerZone.querySelector("p").textContent = "추진 배경·목적\n세부 실행 계획";
+  lowerZone.dispatchEvent({ type: "input", target: lowerZone.querySelector("p") });
+  userClick(document.querySelector('.slide-thumb[data-slide-idx="1"]'));
+  await flushAsyncTurns();
+  userClick(document.querySelector('.slide-thumb[data-slide-idx="0"]'));
+  await flushAsyncTurns();
+  assert.match(lowerZone.querySelector("p").textContent, /추진 배경·목적/);
 });

@@ -187,6 +187,8 @@ public enum DocumentConversionOrchestrator {
     )
   }
 
+  public static let maxCumulativeBatchBytes = 512 * 1024 * 1024
+
   public static func executeBatch(
     _ jobs: [ConversionJobRequest],
     outputDirectory: URL? = nil
@@ -194,6 +196,7 @@ public enum DocumentConversionOrchestrator {
     var succeeded: [ConversionJobResult] = []
     var failed: [(jobID: UUID, errorDescription: String)] = []
     var usedOutputNamesLowercased: Set<String> = []
+    var cumulativeOutputBytes = 0
     let targetDir =
       outputDirectory
       ?? FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -202,20 +205,29 @@ public enum DocumentConversionOrchestrator {
     for job in jobs {
       do {
         let converted = try convert(job)
+        let outData = converted.outputBytes
+        if cumulativeOutputBytes + outData.count > maxCumulativeBatchBytes {
+          throw EasyOfficeError.resourceExhausted(
+            limitName: "batchTotalOutputBytes",
+            observed: cumulativeOutputBytes + outData.count,
+            maximum: maxCumulativeBatchBytes
+          )
+        }
+        cumulativeOutputBytes += outData.count
         let uniqueOutputName = disambiguateOutputFileName(
           converted.outputFileName,
           usedLowercasedNames: &usedOutputNamesLowercased
         )
         try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
         let fileURL = targetDir.appendingPathComponent(uniqueOutputName)
-        try converted.outputBytes.write(to: fileURL, options: .atomic)
+        try outData.write(to: fileURL, options: .atomic)
         let result = ConversionJobResult(
           id: converted.id,
           sourceFileName: converted.sourceFileName,
           outputFileName: uniqueOutputName,
           sourceFormat: converted.sourceFormat,
           targetFormat: converted.targetFormat,
-          outputBytes: converted.outputBytes,
+          outputBytes: outData,
           convertedPayload: converted.convertedPayload,
           verifiedSignature: converted.verifiedSignature,
           outputFileURL: fileURL
@@ -521,5 +533,15 @@ public enum DocumentConversionOrchestrator {
     default:
       throw EasyOfficeError.unsupportedExtension(format.rawValue)
     }
+  }
+}
+
+extension EasyOfficeError {
+  public static func resourceExhausted(
+    limitName: String,
+    observed: Int,
+    maximum: Int
+  ) -> EasyOfficeError {
+    .resourceExhausted(limitName: limitName, limitValue: maximum, actualValue: observed)
   }
 }

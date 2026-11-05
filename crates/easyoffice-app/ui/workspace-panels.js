@@ -658,19 +658,42 @@
           "{{기관명}}": "행정안전부",
           "{{일자}}": "2026-10-25",
         };
+        let replaced = 0;
         function replaceTokens(node) {
           if (!node) return;
           if (node.nodeType === 3) {
-            let val = node.nodeValue || "";
-            Object.keys(mergeMap).forEach((k) => {
-              if (val.includes(k)) val = val.replaceAll(k, mergeMap[k]);
+            const val = node.nodeValue || "";
+            if (!val.includes("{{")) return;
+            const nextVal = val.replace(/\{\{[^}]+\}\}/g, (m) => {
+              if (Object.prototype.hasOwnProperty.call(mergeMap, m)) {
+                replaced += 1;
+                return mergeMap[m];
+              }
+              return m;
             });
-            node.nodeValue = val;
+            if (nextVal !== val) node.nodeValue = nextVal;
             return;
           }
           Array.from(node.childNodes || []).forEach(replaceTokens);
         }
         replaceTokens(docEditor);
+        docEditor
+          .querySelectorAll(
+            "#doc-editor p, #doc-editor li, #doc-editor td, #doc-editor th, #doc-editor div"
+          )
+          .forEach((el) => {
+            if (el.querySelector("p, li, td, th, div")) return;
+            const raw = el.textContent || "";
+            if (!/\{\{[^}]+\}\}/.test(raw)) return;
+            const nextText = raw.replace(/\{\{[^}]+\}\}/g, (m) => {
+              if (Object.prototype.hasOwnProperty.call(mergeMap, m)) {
+                replaced += 1;
+                return mergeMap[m];
+              }
+              return m;
+            });
+            if (nextText !== raw) el.textContent = nextText;
+          });
         const box =
           docEditor.querySelector(".eo-doc-mailmerge") || document.createElement("div");
         box.className = "eo-doc-mailmerge";

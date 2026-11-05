@@ -135,7 +135,7 @@
           }
           const combinedLower = [s.lower || "", extraText].filter(Boolean).join("\n");
           const bullets = combinedLower
-            .split(/\n+|·/)
+            .split(/\n+/)
             .map((item) => item.trim().replaceAll("\t", " "))
             .filter(Boolean)
             .join(";;");

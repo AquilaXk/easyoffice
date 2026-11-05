@@ -83,7 +83,7 @@
     formulasAndData: [
       { suffix: "data-autosum", title: "자동 합계 (SUM)", shortcut: "⇧⌘T" },
       { suffix: "data-fn-browser", title: "함수 마법사", shortcut: "⇧F3" },
-      { suffix: "data-sort", title: "오름차순·내림차순 정렬", shortcut: "⌥⌘R" },
+      { suffix: "data-sort", title: "오름차순·내림차순 정렬", shortcut: "⌃⌥S" },
       { suffix: "data-validation", title: "데이터 유효성 검사", shortcut: "⌥⌘V" },
     ],
     review: [

@@ -610,7 +610,7 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
   }
 
   @MainActor
-  func testMacOSWorkspaceUXErgonomicsAndDisconnectFixes() {
+  func testMacOSWorkspaceUXErgonomicsAndDisconnectFixes() throws {
     let vm = WorkspaceViewModel()
 
     let sheetFormulasCommands = RibbonCategory.actions(for: .formulasAndData, module: .sheet)
@@ -712,5 +712,33 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
 
     vm.removeRecentDocumentRecord(id: extraTab.id)
     XCTAssertFalse(vm.recentDocumentRecords.contains(where: { $0.id == extraTab.id }))
+
+    let decodedCommonMark = try CommonMarkCodec.decodeDocument(
+      from: Data("**강조1** 일반 **강조2**\n".utf8)
+    )
+    XCTAssertEqual(decodedCommonMark.paragraphs.first?.text, "**강조1** 일반 **강조2**")
+
+    let multilineTableDoc = OfficeDocumentModel(
+      title: "개행 표 테스트",
+      format: .md,
+      paragraphs: [ParagraphBlock(style: .body, text: "표 본문")],
+      tables: [DocumentTableBlock(caption: "표1", rows: [["헤더1", "헤더2"], ["줄1\n줄2", "값|2"]])]
+    )
+    let encodedMD = try CommonMarkCodec.decodeDocument(
+      from: CommonMarkCodec.encodeDocument(multilineTableDoc)
+    )
+    XCTAssertEqual(encodedMD.tables.first?.rows.count, 2)
+    XCTAssertEqual(encodedMD.tables.first?.rows[1][0], "줄1 줄2")
+    XCTAssertEqual(encodedMD.tables.first?.rows[1][1], "값|2")
+
+    let mergeSourceDoc = OfficeDocumentModel(
+      title: "단일 패스 병합",
+      format: .docx,
+      paragraphs: [ParagraphBlock(style: .body, text: "값: {{A}}")]
+    )
+    let singlePassMerged = mergeSourceDoc.applyingMailMerge(
+      record: ["A": "{{B}}", "B": "노출금지"]
+    )
+    XCTAssertEqual(singlePassMerged.paragraphs.first?.text, "값: {{B}}")
   }
 }

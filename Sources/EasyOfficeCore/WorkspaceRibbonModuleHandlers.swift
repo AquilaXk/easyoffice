@@ -569,6 +569,11 @@ extension WorkspaceViewModel {
           doc.paragraphs[pIdx].runs[rIdx].text = doc.paragraphs[pIdx].runs[rIdx].text
             .replacingOccurrences(of: query, with: replacement, options: options)
         }
+        if let firstRun = doc.paragraphs[pIdx].runs.first,
+          doc.paragraphs[pIdx].runs.map(\.text).joined() != doc.paragraphs[pIdx].text
+        {
+          doc.paragraphs[pIdx].runs = [firstRun.withText(doc.paragraphs[pIdx].text)]
+        }
       }
       for tIdx in doc.tables.indices {
         for rIdx in doc.tables[tIdx].rows.indices {

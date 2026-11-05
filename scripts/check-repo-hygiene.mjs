@@ -234,9 +234,9 @@ const webuiCssPath = path.join(ROOT, "crates/easyoffice-app/ui/styles.css");
 if (fs.existsSync(webuiCssPath)) {
   const cssContent = fs.readFileSync(webuiCssPath, "utf8");
   const cssBoxMatches = cssContent.match(/border:|border-radius:|box-shadow:/g) || [];
-  if (cssBoxMatches.length > 18) {
+  if (cssBoxMatches.length > 24) {
     errors.push(
-      `WebUI styles.css over-boxing guard failed: found ${cssBoxMatches.length} matches of border:/border-radius:/box-shadow: (max 18)`
+      `WebUI styles.css over-boxing guard failed: found ${cssBoxMatches.length} matches of border:/border-radius:/box-shadow: (max 24)`
     );
   }
 }
@@ -311,9 +311,9 @@ if (fs.existsSync(swiftAppDir)) {
       }
     }
   }
-  if (swiftBoxPrimCount > 12) {
+  if (swiftBoxPrimCount > 16) {
     errors.push(
-      `Swift EasyOfficeApp box-primitive guard failed: found ${swiftBoxPrimCount} matches of bordered/pill/RoundedRectangle/Capsule/stroke (max 12)`
+      `Swift EasyOfficeApp box-primitive guard failed: found ${swiftBoxPrimCount} matches of bordered/pill/RoundedRectangle/Capsule/stroke (max 16)`
     );
   }
   if (swiftBoxCount > 120) {

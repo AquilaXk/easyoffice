@@ -268,40 +268,24 @@ public enum CommonMarkCodec {
       if !p.runs.isEmpty && p.runs.map(\.text).joined() == p.text {
         formattedInline = p.runs.map {
           formatInline(
-            text: $0.text,
-            isBold: $0.isBold,
-            isItalic: $0.isItalic,
-            isUnderlined: $0.isUnderlined,
-            isStrikethrough: $0.isStrikethrough,
-            linkURL: $0.linkURL
-          )
+            text: $0.text, isBold: $0.isBold, isItalic: $0.isItalic,
+            isUnderlined: $0.isUnderlined, isStrikethrough: $0.isStrikethrough, linkURL: $0.linkURL)
         }.joined()
       } else {
         formattedInline = formatInline(
-          text: p.text,
-          isBold: p.isBold,
-          isItalic: p.isItalic,
-          isUnderlined: p.isUnderlined
-        )
+          text: p.text, isBold: p.isBold, isItalic: p.isItalic, isUnderlined: p.isUnderlined)
       }
       switch p.style {
-      case .title:
-        blocks.append("# \(p.text)")
-      case .heading1:
-        blocks.append("## \(p.text)")
-      case .heading2:
-        blocks.append("### \(p.text)")
-      case .heading3, .officialHeader:
-        blocks.append("#### \(p.text)")
-      case .quote:
-        blocks.append("> \(p.text)")
+      case .title: blocks.append("# \(p.text)")
+      case .heading1: blocks.append("## \(p.text)")
+      case .heading2: blocks.append("### \(p.text)")
+      case .heading3, .officialHeader: blocks.append("#### \(p.text)")
+      case .quote: blocks.append("> \(p.text)")
       case .body:
         let indentSpaces = String(repeating: "  ", count: max(0, min(3, p.listLevel)))
         switch p.listKind {
-        case .none:
-          blocks.append(formattedInline)
-        case .bullet:
-          blocks.append("\(indentSpaces)- \(formattedInline)")
+        case .none: blocks.append(formattedInline)
+        case .bullet: blocks.append("\(indentSpaces)- \(formattedInline)")
         case .numbered, .koreanOfficial:
           let prefix = doc.formattedListPrefix(forParagraphAt: pIdx) ?? "1."
           blocks.append("\(indentSpaces)\(prefix) \(formattedInline)")
@@ -311,11 +295,14 @@ public enum CommonMarkCodec {
 
     for table in doc.tables where !table.rows.isEmpty {
       var tableLines: [String] = []
-      if !table.caption.isEmpty {
-        tableLines.append("<!-- caption: \(table.caption) -->")
-      }
+      if !table.caption.isEmpty { tableLines.append("<!-- caption: \(table.caption) -->") }
       for (rIdx, row) in table.rows.enumerated() {
-        let escapedCells = row.map { $0.replacingOccurrences(of: "|", with: "\\|") }
+        let escapedCells = row.map {
+          $0.replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "|", with: "\\|")
+        }
         tableLines.append("| " + escapedCells.joined(separator: " | ") + " |")
         if rIdx == 0 {
           let separator = Array(repeating: "---", count: row.count).joined(separator: " | ")
@@ -542,7 +529,9 @@ public enum CommonMarkCodec {
     var changed = true
     while changed {
       changed = false
-      if working.hasPrefix("<u>") && working.hasSuffix("</u>") && working.count > 7 {
+      if working.hasPrefix("<u>") && working.hasSuffix("</u>") && working.count > 7
+        && !working.dropFirst(3).dropLast(4).lowercased().contains("</u>")
+      {
         working = String(working.dropFirst(3).dropLast(4))
         isUnderlined = true
         changed = true
@@ -554,16 +543,22 @@ public enum CommonMarkCodec {
         isStrikethrough = true
         changed = true
       }
-      if working.hasPrefix("***") && working.hasSuffix("***") && working.count > 6 {
+      if working.hasPrefix("***") && working.hasSuffix("***") && working.count > 6
+        && !working.dropFirst(3).dropLast(3).contains("***")
+      {
         working = String(working.dropFirst(3).dropLast(3))
         isBold = true
         isItalic = true
         changed = true
-      } else if working.hasPrefix("**") && working.hasSuffix("**") && working.count > 4 {
+      } else if working.hasPrefix("**") && working.hasSuffix("**") && working.count > 4
+        && !working.dropFirst(2).dropLast(2).contains("**")
+      {
         working = String(working.dropFirst(2).dropLast(2))
         isBold = true
         changed = true
-      } else if working.hasPrefix("*") && working.hasSuffix("*") && working.count > 2 {
+      } else if working.hasPrefix("*") && working.hasSuffix("*") && working.count > 2
+        && !working.dropFirst(1).dropLast(1).contains("*")
+      {
         working = String(working.dropFirst(1).dropLast(1))
         isItalic = true
         changed = true
@@ -950,12 +945,8 @@ public enum RTFCodec {
       isStrikethrough
       ? [
         DocumentTextRun(
-          text: unescaped,
-          isBold: isBold,
-          isItalic: isItalic,
-          isUnderlined: isUnderlined,
-          isStrikethrough: true
-        )
+          text: unescaped, isBold: isBold, isItalic: isItalic,
+          isUnderlined: isUnderlined, isStrikethrough: true)
       ] : []
     let firstIndent = Double(extractControlInt("\\fi", in: controlPrefix) ?? 0) / 20.0
     let leftIndent = Double(extractControlInt("\\li", in: controlPrefix) ?? 0) / 20.0
@@ -963,16 +954,9 @@ public enum RTFCodec {
     let charScale = Double(extractControlInt("\\charscalex", in: controlPrefix) ?? 100)
 
     return ParagraphBlock(
-      style: role,
-      text: unescaped,
-      runs: runs,
-      isBold: isBold,
-      isItalic: isItalic,
-      isUnderlined: isUnderlined,
-      firstLineIndentPt: firstIndent,
-      leftIndentPt: leftIndent,
-      letterSpacingPercent: letterSpacing,
-      charWidthScalePercent: charScale
+      style: role, text: unescaped, runs: runs, isBold: isBold, isItalic: isItalic,
+      isUnderlined: isUnderlined, firstLineIndentPt: firstIndent, leftIndentPt: leftIndent,
+      letterSpacingPercent: letterSpacing, charWidthScalePercent: charScale
     )
   }
 
