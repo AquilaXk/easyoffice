@@ -160,60 +160,35 @@
   }
 
   const sheetStoreHelpers = host.__EASYOFFICE_CREATE_SHEET_STORE__({
-    invokeIpc,
-    normalizeFormattedNumericCell,
-    tokenizeFormulaStringLiterals,
+    invokeIpc, normalizeFormattedNumericCell, tokenizeFormulaStringLiterals,
   });
 
   const ribbonHistory = host.__EASYOFFICE_CREATE_RIBBON_HISTORY__({
-    document,
-    invokeIpc,
-    docTabStore,
-    sheetDataStore,
-    sheetRowCounts,
-    slideDeckState,
-    localRibbonState,
-    ribbonCatalog,
-    sheetStoreHelpers,
-    extractEditableDocumentText,
+    document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
+    localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
     getWorkspacePanels: () => workspacePanels,
     getActiveModule: () => activeModule,
-    setActiveModule: (next) => {
-      activeModule = next;
-    },
+    setActiveModule: (next) => { activeModule = next; },
     getActiveRibbonCategory: () => activeRibbonCategory,
-    setActiveRibbonCategory: (next) => {
-      activeRibbonCategory = next;
-    },
+    setActiveRibbonCategory: (next) => { activeRibbonCategory = next; },
     getActiveSheetName: () => activeSheetName,
-    setActiveSheetName: (next) => {
-      activeSheetName = next;
-    },
+    setActiveSheetName: (next) => { activeSheetName = next; },
     getActiveSheetCellRef: () => activeSheetCellRef,
     getActiveSlideIndex: () => activeSlideIndex,
     getPdfRotationDeg: () => pdfRotationDeg,
-    setPdfRotationDeg: (next) => {
-      pdfRotationDeg = next;
-    },
+    setPdfRotationDeg: (next) => { pdfRotationDeg = next; },
     getShortcutModifier: () => activeShortcutModifier,
     enqueueWorkspaceHistoryOp,
   });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
-    document,
-    sheetDataStore,
-    sheetRowCounts,
-    sheetStoreHelpers,
+    document, sheetDataStore, sheetRowCounts, sheetStoreHelpers,
     getActiveModule: () => activeModule,
     getActiveSheetName: () => activeSheetName,
-    setActiveSheetName: (next) => {
-      activeSheetName = next;
-    },
+    setActiveSheetName: (next) => { activeSheetName = next; },
     getActiveSheetCellRef: () => activeSheetCellRef,
-    setActiveSheetCellRef: (next) => {
-      activeSheetCellRef = next;
-    },
+    setActiveSheetCellRef: (next) => { activeSheetCellRef = next; },
     enqueueWorkspaceHistoryOp,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
@@ -222,89 +197,99 @@
   });
 
   workspacePanels = host.__EASYOFFICE_CREATE_WORKSPACE_PANELS__({
-    document,
-    URL,
-    invokeIpc,
-    docTabStore,
-    sheetDataStore,
-    slideDeckState,
-    localRibbonState,
-    defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES,
-    createEmptySlideStyleFields,
-    parseCellRefParts,
-    isExcludedDocChromeElement,
-    extractEditableDocumentText,
-    collectActiveScrubGroups,
-    applyScrubResultsToGroups,
-    scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap,
-    sheetController,
+    document, URL, invokeIpc, docTabStore, sheetDataStore, slideDeckState, localRibbonState,
+    defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
+    parseCellRefParts, isExcludedDocChromeElement, extractEditableDocumentText,
+    collectActiveScrubGroups, applyScrubResultsToGroups,
+    scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
     getActiveModule: () => activeModule,
     getActiveSheetName: () => activeSheetName,
     getActiveSheetCellRef: () => activeSheetCellRef,
     getActiveSlideIndex: () => activeSlideIndex,
-    setActiveSlideIndex: (next) => {
-      activeSlideIndex = next;
-    },
+    setActiveSlideIndex: (next) => { activeSlideIndex = next; },
     getPdfRotationDeg: () => pdfRotationDeg,
     enqueueWorkspaceHistoryOp,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
   });
 
+  let paletteSelectedIdx = 0;
+  let paletteFilteredItems = [];
+
+  function executePaletteItem(item) {
+    if (!item) return;
+    const modal = document.getElementById("cmd-palette-modal");
+    if (modal && typeof modal.close === "function") modal.close();
+    if (item.id === "bench-run") {
+      void workspacePanels.runBenchmarkAction().catch(() => {});
+    } else if (item.id === "studio-save") {
+      void workspacePanels.saveActiveModuleDocument().catch(() => {});
+    } else if (item.id === "studio-undo") {
+      void ribbonHistory.performWorkspaceUndo().catch(() => {});
+    } else if (item.id === "studio-redo") {
+      void ribbonHistory.performWorkspaceRedo().catch(() => {});
+    } else {
+      void ribbonHistory.executeTrackedRibbonCommand(item.id, { targetModule: item.module }).catch(() => {});
+    }
+  }
+
+  function collectCommandPaletteItems() {
+    const fmt = (sc) => (typeof formatPlatformShortcut === "function" ? formatPlatformShortcut(sc, activeShortcutModifier) : sc);
+    const items = [
+      { id: "studio-save", module: activeModule, title: "저장", shortcut: fmt("⌘S"), searchKey: "파일 저장 save " + fmt("⌘S") },
+      { id: "studio-undo", module: activeModule, title: "실행 취소", shortcut: fmt("⌘Z"), searchKey: "편집 실행 취소 undo " + fmt("⌘Z") },
+      { id: "studio-redo", module: activeModule, title: "다시 실행", shortcut: fmt("⌘Y"), searchKey: "편집 다시 실행 redo " + fmt("⌘Y") },
+    ];
+    const modOrder = [activeModule, ...Object.keys(RIBBON_CATEGORY_TOOLS).filter((m) => m !== activeModule)];
+    for (const mod of modOrder) {
+      const cats = RIBBON_CATEGORY_TOOLS[mod];
+      if (!cats) continue;
+      const koBadge = MODULE_SHORT_BADGES[mod] || mod;
+      for (const cat of Object.keys(cats)) {
+        for (const c of cats[cat]) {
+          const dispShortcut = fmt(c.shortcut);
+          const title = mod === activeModule ? c.title : koBadge + " · " + c.title;
+          items.push({ id: c.id, module: mod, title, shortcut: dispShortcut, searchKey: (koBadge + " " + c.title + " " + dispShortcut + " " + c.id + " " + mod).toLowerCase() });
+        }
+      }
+    }
+    items.push({ id: "bench-run", module: activeModule, title: "문서 엔진 성능 진단 실행", shortcut: "F9", searchKey: "성능 문서 엔진 성능 진단 실행 bench-run f9" });
+    return items;
+  }
+
   function renderCommandPaletteList(filterText) {
     const listEl = document.getElementById("cmd-palette-list");
     if (!listEl) return;
     const q = String(filterText || "").trim().toLowerCase();
-    const allItems = [];
-    Object.keys(RIBBON_CATEGORY_TOOLS).forEach((mod) => {
-      const cats = RIBBON_CATEGORY_TOOLS[mod];
-      const koBadge = MODULE_SHORT_BADGES[mod] || mod;
-      Object.keys(cats).forEach((cat) => {
-        cats[cat].forEach((c) => {
-          const dispShortcut =
-            typeof formatPlatformShortcut === "function"
-              ? formatPlatformShortcut(c.shortcut, activeShortcutModifier)
-              : c.shortcut;
-          allItems.push({
-            id: c.id,
-            module: mod,
-            label: "[" + koBadge + "] " + c.title + " (" + dispShortcut + ")",
-          });
-        });
-      });
-    });
-    allItems.push({
-      id: "bench-run",
-      module: activeModule,
-      label: "[성능] 문서 엔진 성능 진단 실행",
-    });
-
+    paletteFilteredItems = collectCommandPaletteItems()
+      .filter((item) => !q || item.searchKey.toLowerCase().includes(q) || item.title.toLowerCase().includes(q))
+      .slice(0, 18);
+    if (paletteSelectedIdx >= paletteFilteredItems.length) paletteSelectedIdx = 0;
     listEl.innerHTML = "";
-    allItems
-      .filter(
-        (item) =>
-          !q ||
-          item.label.toLowerCase().includes(q) ||
-          item.id.toLowerCase().includes(q) ||
-          item.module.toLowerCase().includes(q)
-      )
-      .slice(0, 18)
-      .forEach((item) => {
-        const li = document.createElement("li");
-        li.textContent = item.label;
-        li.addEventListener("click", () => {
-          const modal = document.getElementById("cmd-palette-modal");
-          if (modal && typeof modal.close === "function") modal.close();
-          if (item.id === "bench-run") {
-            void workspacePanels.runBenchmarkAction().catch(() => {});
-          } else {
-            void ribbonHistory
-              .executeTrackedRibbonCommand(item.id, { targetModule: item.module })
-              .catch(() => {});
-          }
-        });
-        listEl.appendChild(li);
-      });
+    if (paletteFilteredItems.length === 0) {
+      const emptyLi = document.createElement("li");
+      emptyLi.className = "cp-empty";
+      emptyLi.textContent = "검색 결과 없음";
+      listEl.appendChild(emptyLi);
+      return;
+    }
+    paletteFilteredItems.forEach((item, idx) => {
+      const li = document.createElement("li");
+      li.className = idx === paletteSelectedIdx ? "cp-item cp-item--selected" : "cp-item";
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "cp-item-label";
+      labelSpan.textContent = item.title;
+      li.appendChild(labelSpan);
+      if (item.shortcut) {
+        const scSpan = document.createElement("span");
+        scSpan.className = "cp-item-shortcut";
+        scSpan.textContent = item.shortcut;
+        li.appendChild(scSpan);
+      }
+      li.addEventListener("click", () => executePaletteItem(item));
+      listEl.appendChild(li);
+      if (idx === paletteSelectedIdx) li.scrollIntoView?.({ block: "nearest" });
+    });
   }
 
   function syncQatShortcutTitles(modifier) {
@@ -446,7 +431,7 @@
       zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
     }
     workspacePanels.setupStudioChromeControls(applyZoomPercent, (cmd) => {
-      const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
+      const modPrefix = getRibbonModulePrefix(activeModule);
       const fullCmd =
         cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd;
       void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
@@ -509,6 +494,41 @@
     return mod === "DOC" || mod === "CONV" ? "document" : String(mod || "DOC").toLowerCase();
   }
 
+  function toggleDocTableCellMerge(mergeBtn) {
+    const tbody = document.getElementById("doc-table-body");
+    if (!tbody) return;
+    const sumRow = document.getElementById("doc-table-sum-row");
+    const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
+    if (cells.length < 2) return;
+    ribbonHistory.pushUndoSnapshot(false);
+    const isMerged = cells[0].colSpan > 1;
+    cells[0].colSpan = isMerged ? 1 : 2;
+    cells[1].hidden = !isMerged;
+    mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
+    workspacePanels.saveActiveDocTabState();
+    const fb = document.getElementById("status-command-feedback");
+    if (fb) fb.textContent = isMerged ? "문서 표 셀 분할 완료" : "문서 표 셀 합치기 완료";
+  }
+
+  function handleDocEditorTableClick(e) {
+    if (activeModule !== "DOC" && activeModule !== "HWP") return;
+    if (e.target.closest("#btn-doc-add-row")) {
+      ribbonHistory.pushUndoSnapshot(false);
+      workspacePanels.appendDocTableRow();
+      workspacePanels.saveActiveDocTabState();
+      return;
+    }
+    const mergeBtn = e.target.closest("#btn-doc-merge-toggle");
+    if (mergeBtn) {
+      toggleDocTableCellMerge(mergeBtn);
+      return;
+    }
+    if (e.target.closest("#btn-doc-eval-table")) {
+      workspacePanels.computeDocTableSummary();
+      workspacePanels.saveActiveDocTabState();
+    }
+  }
+
   function setupDocTableAndSheetTabHandlers() {
     [
       ["btn-stylebar-bold", "bold"],
@@ -518,7 +538,7 @@
       const btn = document.getElementById(btnId);
       if (btn) {
         btn.addEventListener("click", () => {
-          const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
+          const modPrefix = getRibbonModulePrefix(activeModule);
           void ribbonHistory
             .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdSuffix)
             .catch(() => {});
@@ -527,32 +547,7 @@
     });
     const docEditor = document.getElementById("doc-editor");
     if (docEditor) {
-      docEditor.addEventListener("click", (e) => {
-        const addRowBtn = e.target.closest("#btn-doc-add-row");
-        if (addRowBtn) {
-          ribbonHistory.pushUndoSnapshot(false);
-          workspacePanels.appendDocTableRow();
-          return;
-        }
-        const mergeBtn = e.target.closest("#btn-doc-merge-toggle");
-        if (mergeBtn) {
-          const tbody = document.getElementById("doc-table-body");
-          if (!tbody) return;
-          const sumRow = document.getElementById("doc-table-sum-row");
-          const cells = sumRow ? sumRow.querySelectorAll("td") : tbody.querySelectorAll("tr td");
-          if (cells.length < 2) return;
-          ribbonHistory.pushUndoSnapshot(false);
-          const isMerged = cells[0].colSpan > 1;
-          cells[0].colSpan = isMerged ? 1 : 2;
-          cells[1].hidden = !isMerged;
-          mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
-          return;
-        }
-        const evalDocBtn = e.target.closest("#btn-doc-eval-table");
-        if (evalDocBtn) {
-          workspacePanels.computeDocTableSummary();
-        }
-      });
+      docEditor.addEventListener("click", handleDocEditorTableClick);
     }
 
     const sheetTabBar = document.getElementById("sheet-tab-bar");
@@ -859,74 +854,92 @@
 
   function togglePaletteModal(modal, cmdSearchInput) {
     if (!modal) return;
-    if (modal.open && typeof modal.close === "function") {
-      modal.close();
-      return;
-    }
+    if (modal.open && typeof modal.close === "function") return void modal.close();
     if (typeof modal.showModal === "function") {
+      paletteSelectedIdx = 0;
       renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
       modal.showModal();
       if (cmdSearchInput) cmdSearchInput.focus();
     }
   }
 
+  function handleOpenPaletteKeydown(e, modal, cmdSearchInput) {
+    if (e.key === "Escape") return void modal.close?.();
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      return void modal.close?.();
+    }
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key] || 0;
+    if (step !== 0 && paletteFilteredItems.length > 0) {
+      e.preventDefault();
+      paletteSelectedIdx = Math.max(0, Math.min(paletteFilteredItems.length - 1, paletteSelectedIdx + step));
+      renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
+      return;
+    }
+    if (e.key === "Enter" && paletteFilteredItems[paletteSelectedIdx]) {
+      e.preventDefault();
+      executePaletteItem(paletteFilteredItems[paletteSelectedIdx]);
+    }
+  }
+
+  function handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput) {
+    if (!e.metaKey && !e.ctrlKey) return;
+    const keyLower = e.key.toLowerCase();
+    const modPrefix = getRibbonModulePrefix(activeModule);
+    if (e.altKey) {
+      if (!e.shiftKey && keyLower === "d") {
+        e.preventDefault();
+        void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-theme").catch(() => {});
+      }
+      return;
+    }
+    if (e.shiftKey) {
+      if (keyLower === "z") {
+        e.preventDefault();
+        void ribbonHistory.performWorkspaceRedo().catch(() => {});
+      }
+      return;
+    }
+    const plainHandlers = {
+      k: () => togglePaletteModal(modal, cmdSearchInput),
+      s: () => void workspacePanels.saveActiveModuleDocument().catch(() => {}),
+      z: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
+      y: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
+      0: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-zoom").catch(() => {}),
+      b: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-bold").catch(() => {}),
+      i: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-italic").catch(() => {}),
+      u: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-underline").catch(() => {}),
+    };
+    if (plainHandlers[keyLower]) {
+      e.preventDefault();
+      plainHandlers[keyLower]();
+    }
+  }
+
   function setupCommandPaletteHandlers() {
     const modal = document.getElementById("cmd-palette-modal");
     const openPaletteBtn = document.getElementById("btn-command-palette");
-    const closePaletteBtn = document.getElementById("btn-close-palette");
     const cmdSearchInput = document.getElementById("cmd-search-input");
     if (openPaletteBtn && modal) {
-      openPaletteBtn.addEventListener("click", () => {
-        renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
-        if (typeof modal.showModal === "function") modal.showModal();
-      });
+      openPaletteBtn.addEventListener("click", () => togglePaletteModal(modal, cmdSearchInput));
     }
     if (cmdSearchInput) {
       cmdSearchInput.addEventListener("input", () => {
+        paletteSelectedIdx = 0;
         renderCommandPaletteList(cmdSearchInput.value);
       });
     }
-    if (closePaletteBtn && modal) {
-      closePaletteBtn.addEventListener("click", () => {
-        if (typeof modal.close === "function") modal.close();
-      });
-    }
+    modal?.addEventListener?.("click", (ev) => {
+      if (ev.target === modal && typeof modal.close === "function") modal.close();
+    });
 
     host.addEventListener("keydown", (e) => {
       if (e.isComposing || isImeComposing) return;
-      if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
-        modal.close();
+      if (modal?.open) {
+        handleOpenPaletteKeydown(e, modal, cmdSearchInput);
         return;
       }
-      if (!e.metaKey && !e.ctrlKey) return;
-      const keyLower = e.key.toLowerCase();
-      const modPrefix = getRibbonModulePrefix(activeModule);
-      if (e.altKey && !e.shiftKey && keyLower === "d") {
-        e.preventDefault();
-        void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-theme").catch(() => {});
-        return;
-      }
-      if (e.altKey) return;
-      if (e.shiftKey && keyLower === "z") {
-        e.preventDefault();
-        void ribbonHistory.performWorkspaceRedo().catch(() => {});
-        return;
-      }
-      if (e.shiftKey) return;
-      const plainHandlers = {
-        k: () => togglePaletteModal(modal, cmdSearchInput),
-        s: () => void workspacePanels.saveActiveModuleDocument().catch(() => {}),
-        z: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
-        y: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
-        0: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-zoom").catch(() => {}),
-        b: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-bold").catch(() => {}),
-        i: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-italic").catch(() => {}),
-        u: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-underline").catch(() => {}),
-      };
-      if (plainHandlers[keyLower]) {
-        e.preventDefault();
-        plainHandlers[keyLower]();
-      }
+      handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput);
     });
   }
 
