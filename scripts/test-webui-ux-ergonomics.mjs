@@ -400,10 +400,19 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   const catalog = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
   assert.equal(catalog.formatPlatformShortcut("⌘B", "Ctrl"), "Ctrl+B");
+  assert.equal(catalog.formatPlatformShortcut("⌃⌘C", "Ctrl"), "Ctrl+Alt+C");
+  assert.equal(catalog.formatPlatformShortcut("⌃⌘S", "Ctrl"), "Ctrl+Alt+S");
   assert.equal(catalog.formatPlatformShortcut("⌃⌥S", "Ctrl"), "Ctrl+Alt+S");
   assert.equal(catalog.formatPlatformShortcut("⇧⌘P", "Ctrl"), "Shift+Ctrl+P");
   assert.equal(catalog.formatPlatformShortcut("⌘B", "⌘"), "⌘B");
   assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+K");
+
+  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-stylebar-bold"));
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-pressed"), "true");
+  assert.match(document.getElementById("doc-page-zone-indicator").textContent, /1 \/ \d+ 쪽 · 구역: 1 \/ \d+ · 삽입/);
 
   userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
   await flushAsyncTurns();

@@ -229,6 +229,31 @@ extension WorksheetModel {
               }
             }
           }
+        case .functionCall(let fnName, let fnArgs) where fnName == "TRANSPOSE" && fnArgs.count == 1:
+          switch sheet.resolveRangeArgument(from: fnArgs[0], frame: &self) {
+          case .failure(let err):
+            if err != "#VALUE!" { return err }
+            let v = arg(idx, in: sheet)
+            if case .error(let code) = v { return code }
+            body(v, false)
+          case .success(let sheetName, let resolvedRange):
+            if let sheetName {
+              guard sheet.hasSheet(named: sheetName) else { return "#REF!" }
+              if let err = streamRangeCells(
+                resolvedRange, onSheet: sheetName, in: sheet,
+                onSkippedEmptyCount: onSkippedEmptyCount, { body($0, true) })
+              {
+                return err
+              }
+            } else {
+              if let err = streamRangeCells(
+                resolvedRange, in: sheet, onSkippedEmptyCount: onSkippedEmptyCount,
+                { body($0, true) })
+              {
+                return err
+              }
+            }
+          }
         case .error(let err):
           return err.rawValue
         default:

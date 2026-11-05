@@ -763,6 +763,15 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     let openedTxt2 = try vm.loadFromDisk(url: txtURL)
     XCTAssertEqual(vm.openTabs.count, tabCountBeforeTxt + 1)
     XCTAssertEqual(openedTxt2.id, openedTxt1.id)
+    try vm.saveTabToDisk(id: openedTxt1.id, to: txtURL)
+    let savedTxtString = try String(contentsOf: txtURL, encoding: .utf8)
+    XCTAssertEqual(savedTxtString, rawTxt)
+
+    vm.appendParagraphToActiveDocument(text: "수정문단", style: .body)
+    XCTAssertEqual(vm.activeTab?.isModified, true)
+    let reloadedTxt = try vm.loadFromDisk(url: txtURL)
+    XCTAssertEqual(reloadedTxt.isModified, false)
+    XCTAssertEqual(vm.canUndo, true)
 
     var finSheet = WorksheetModel(
       name: "함수집합동기화",
@@ -770,7 +779,19 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     )
     try finSheet.setCell("A1", rawValue: "=DDB(2400, 300, 10, 1)")
     try finSheet.setCell("A2", rawValue: "=TRANSPOSE(B2:C2)")
+    try finSheet.setCell("A3", rawValue: "=DDB(2400, 300, 10, 1, \"bad\")")
+    try finSheet.setCell("A4", rawValue: "=DDB(2400, 300, 100000, 50000)")
+    try finSheet.setCell("A5", rawValue: "=ROWS(TRANSPOSE(B2:C2))")
+    try finSheet.setCell("A6", rawValue: "=COLUMNS(TRANSPOSE(B2:C2))")
+    try finSheet.setCell("A7", rawValue: "=SUM(TRANSPOSE(B2:C2))")
+    try finSheet.setCell("A8", rawValue: "=INDEX(TRANSPOSE(B2:C2), 2, 1)")
     XCTAssertEqual(finSheet.evaluate(at: "A1"), .number(480.0))
-    XCTAssertEqual(finSheet.evaluate(at: "A2"), .number(42.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A2"), .text("42,84"))
+    XCTAssertEqual(finSheet.evaluate(at: "A3"), .error("#VALUE!"))
+    XCTAssertEqual(finSheet.evaluate(at: "A4"), .error("#NUM!"))
+    XCTAssertEqual(finSheet.evaluate(at: "A5"), .number(2.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A6"), .number(1.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A7"), .number(126.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A8"), .number(84.0))
   }
 }

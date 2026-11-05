@@ -425,6 +425,18 @@
       return performWorkspaceHistoryStep(false);
     }
 
+    function syncDocStyleBarFromTarget(targetEl) {
+      if (!targetEl) return;
+      const boldBtn = document.getElementById("btn-stylebar-bold");
+      const italicBtn = document.getElementById("btn-stylebar-italic");
+      const underBtn = document.getElementById("btn-stylebar-underline");
+      const sizeBadge = document.getElementById("doc-style-size-badge");
+      if (boldBtn) boldBtn.setAttribute("aria-pressed", targetEl.style.fontWeight === "600" ? "true" : "false");
+      if (italicBtn) italicBtn.setAttribute("aria-pressed", targetEl.style.fontStyle === "italic" ? "true" : "false");
+      if (underBtn) underBtn.setAttribute("aria-pressed", targetEl.style.textDecoration === "underline" ? "true" : "false");
+      if (sizeBadge) sizeBadge.textContent = targetEl.style.fontSize || "11.0 pt";
+    }
+
     function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
       if (!docEditor) return false;
       const workspacePanels = getWorkspacePanels();
@@ -432,16 +444,19 @@
       if (cmdId.endsWith("-home-bold")) {
         const boldOn = targetEl.style.fontWeight !== "600";
         targetEl.style.fontWeight = boldOn ? "600" : "";
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-home-italic")) {
         const italicOn = targetEl.style.fontStyle !== "italic";
         targetEl.style.fontStyle = italicOn ? "italic" : "";
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-home-underline")) {
         const underOn = targetEl.style.textDecoration !== "underline";
         targetEl.style.textDecoration = underOn ? "underline" : "";
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-home-style")) {
@@ -449,6 +464,7 @@
         const curIdx = sizes.indexOf(targetEl.style.fontSize);
         const presetIdx = curIdx >= 0 ? (curIdx + 1) % sizes.length : 1;
         targetEl.style.fontSize = sizes[presetIdx];
+        syncDocStyleBarFromTarget(targetEl);
         return true;
       }
       if (cmdId.endsWith("-review-track")) {

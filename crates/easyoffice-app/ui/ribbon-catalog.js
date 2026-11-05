@@ -357,6 +357,8 @@
     const text = String(rawShortcut || "");
     if (!text || shortcutModifier !== "Ctrl") return text;
     return text
+      .replace(/⌃⌘/g, "Ctrl+Alt+")
+      .replace(/\bCtrl\+Cmd\+/g, "Ctrl+Alt+")
       .replace(/⌘/g, "Ctrl+")
       .replace(/⌃/g, "Ctrl+")
       .replace(/⌥/g, "Alt+")

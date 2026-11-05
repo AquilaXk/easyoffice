@@ -913,16 +913,18 @@ public struct DocumentEditorDetailPaneView: View {
             if !isSplitActive {
               HStack(spacing: 2) {
                 flatToolbarButton("가 굵게", palette: palette) {
-                  viewModel.executeRibbonCommand(isHWPModule ? "hwp-home-bold" : "doc-home-bold")
+                  viewModel.executeRibbonCommand(
+                    isHWPModule ? "hwp-home-bold" : "document-home-bold"
+                  )
                 }
                 flatToolbarButton("가 기울임", palette: palette) {
                   viewModel.executeRibbonCommand(
-                    isHWPModule ? "hwp-home-italic" : "doc-home-italic"
+                    isHWPModule ? "hwp-home-italic" : "document-home-italic"
                   )
                 }
                 flatToolbarButton("가̲ 밑줄", palette: palette) {
                   viewModel.executeRibbonCommand(
-                    isHWPModule ? "hwp-home-underline" : "doc-home-underline"
+                    isHWPModule ? "hwp-home-underline" : "document-home-underline"
                   )
                 }
               }

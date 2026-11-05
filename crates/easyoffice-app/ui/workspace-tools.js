@@ -258,6 +258,11 @@
       const words = text ? text.split(/\s+/).length : 0;
       const secs = Math.max(1, Math.ceil((words / 220) * 60));
       statsEl.textContent = "문자: " + chars + " · 단어: " + words + " · 읽기 시간: " + secs + "초";
+      const zoneEl = document.getElementById("doc-page-zone-indicator");
+      if (zoneEl) {
+        const estPages = Math.max(1, Math.ceil(chars / 1200));
+        zoneEl.textContent = "1 / " + estPages + " 쪽 · 구역: 1 / 1 · 삽입";
+      }
     }
 
     function applySmartDiagnoseDom(res, updateFeedback) {

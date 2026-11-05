@@ -554,6 +554,17 @@
         roleBadge.textContent = mod === "HWP" ? "공문서 바탕글" : "바탕글";
       }
       activeDocBlockEl = null;
+      const firstBlock = editor ? getFocusedDocBlock(editor) : null;
+      const sizeBadge = document.getElementById("doc-style-size-badge");
+      if (sizeBadge) {
+        sizeBadge.textContent = firstBlock?.style?.fontSize || "11.0 pt";
+      }
+      const boldBtn = document.getElementById("btn-stylebar-bold");
+      const italicBtn = document.getElementById("btn-stylebar-italic");
+      const underBtn = document.getElementById("btn-stylebar-underline");
+      if (boldBtn) boldBtn.setAttribute("aria-pressed", firstBlock?.style?.fontWeight === "600" ? "true" : "false");
+      if (italicBtn) italicBtn.setAttribute("aria-pressed", firstBlock?.style?.fontStyle === "italic" ? "true" : "false");
+      if (underBtn) underBtn.setAttribute("aria-pressed", firstBlock?.style?.textDecoration === "underline" ? "true" : "false");
       computeDocTableSummary();
       tools.computeSmartStats();
     }

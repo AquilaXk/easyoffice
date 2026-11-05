@@ -481,10 +481,10 @@ public enum DocumentConversionOrchestrator {
       return CommonMarkCodec.encodeDocument(doc)
     case .txt:
       var lines: [String] = []
-      if !doc.title.isEmpty {
+      if doc.format != .txt, !doc.title.isEmpty, doc.paragraphs.first?.text != doc.title {
         lines.append(doc.title)
       }
-      for p in doc.paragraphs where !p.text.isEmpty {
+      for p in doc.paragraphs {
         lines.append(p.text)
       }
       for tbl in doc.tables {

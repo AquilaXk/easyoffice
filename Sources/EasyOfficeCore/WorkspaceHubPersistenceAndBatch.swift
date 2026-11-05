@@ -383,11 +383,15 @@ extension WorkspaceViewModel {
       if let existingIdx = openTabs.firstIndex(where: {
         $0.fileURL?.standardizedFileURL.path == standardizedTarget
       }) {
+        if openTabs[existingIdx].payload != decoded.payload {
+          recordUndoSnapshot(for: openTabs[existingIdx].id)
+        }
         openTabs[existingIdx].fileName = fileName
         openTabs[existingIdx].format = decoded.format
         openTabs[existingIdx].lastOpenedISO8601 = OfficeDocumentModel.currentISO8601Timestamp()
         openTabs[existingIdx].fileURL = fileURL
         openTabs[existingIdx].payload = decoded.payload
+        openTabs[existingIdx].isModified = false
         openTabs[existingIdx].isLosslessNativeOrigin = isNativeOrigin
         openTabs[existingIdx].isMetadataOnlyPlaceholder = false
         openTabs[existingIdx].isUnreadable = false

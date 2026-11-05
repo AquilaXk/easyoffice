@@ -487,6 +487,10 @@
     }
   }
 
+  function getRibbonModulePrefix(mod) {
+    return mod === "DOC" || mod === "CONV" ? "document" : String(mod || "DOC").toLowerCase();
+  }
+
   function setupDocTableAndSheetTabHandlers() {
     [
       ["btn-stylebar-bold", "bold"],
@@ -496,7 +500,7 @@
       const btn = document.getElementById(btnId);
       if (btn) {
         btn.addEventListener("click", () => {
-          const modPrefix = activeModule === "HWP" ? "hwp" : "doc";
+          const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
           void ribbonHistory
             .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdSuffix)
             .catch(() => {});
@@ -873,30 +877,31 @@
     host.addEventListener("keydown", (e) => {
       if (e.isComposing || isImeComposing) return;
       const keyLower = e.key.toLowerCase();
-      if ((e.metaKey || e.ctrlKey) && keyLower === "k") {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "k") {
         e.preventDefault();
         togglePaletteModal(modal, cmdSearchInput);
-      } else if ((e.metaKey || e.ctrlKey) && keyLower === "s") {
+      } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "s") {
         e.preventDefault();
         void workspacePanels.saveActiveModuleDocument().catch(() => {});
-      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && keyLower === "z") {
+      } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "z") {
         e.preventDefault();
         void ribbonHistory.performWorkspaceUndo().catch(() => {});
       } else if (
         (e.metaKey || e.ctrlKey) &&
-        (keyLower === "y" || (e.shiftKey && keyLower === "z"))
+        !e.altKey &&
+        ((!e.shiftKey && keyLower === "y") || (e.shiftKey && keyLower === "z"))
       ) {
         e.preventDefault();
         void ribbonHistory.performWorkspaceRedo().catch(() => {});
-      } else if ((e.metaKey || e.ctrlKey) && e.altKey && keyLower === "d") {
+      } else if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey && keyLower === "d") {
         e.preventDefault();
-        const modPrefix = (activeModule === "CONV" ? "DOC" : activeModule).toLowerCase();
+        const modPrefix = getRibbonModulePrefix(activeModule);
         void ribbonHistory
-          .executeTrackedRibbonCommand(modPrefix + "-view-dark")
+          .executeTrackedRibbonCommand(modPrefix + "-view-theme")
           .catch(() => {});
       } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "0") {
         e.preventDefault();
-        const modPrefix = (activeModule === "CONV" ? "DOC" : activeModule).toLowerCase();
+        const modPrefix = getRibbonModulePrefix(activeModule);
         void ribbonHistory
           .executeTrackedRibbonCommand(modPrefix + "-view-zoom")
           .catch(() => {});
@@ -907,7 +912,7 @@
         (keyLower === "b" || keyLower === "i" || keyLower === "u")
       ) {
         e.preventDefault();
-        const modPrefix = (activeModule === "CONV" ? "DOC" : activeModule).toLowerCase();
+        const modPrefix = getRibbonModulePrefix(activeModule);
         const cmdMap = { b: "bold", i: "italic", u: "underline" };
         void ribbonHistory
           .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdMap[keyLower])

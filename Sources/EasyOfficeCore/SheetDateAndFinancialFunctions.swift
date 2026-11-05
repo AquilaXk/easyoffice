@@ -314,26 +314,39 @@ extension WorksheetModel {
       return result.isFinite ? .number(result) : .error("#NUM!")
 
     case "DDB":
-      guard (4...5).contains(frame.count),
-        let cost = frame.arg(0, in: self).numericValue,
+      guard (4...5).contains(frame.count) else { return .error("#VALUE!") }
+      for idx in 0..<frame.count {
+        let evaluated = frame.arg(idx, in: self)
+        if case .error = evaluated { return evaluated }
+      }
+      guard let cost = frame.arg(0, in: self).numericValue,
         let salvage = frame.arg(1, in: self).numericValue,
         let life = frame.arg(2, in: self).numericValue,
         let period = frame.arg(3, in: self).numericValue
       else {
         return .error("#VALUE!")
       }
-      let factor = frame.count == 5 ? (frame.arg(4, in: self).numericValue ?? 2.0) : 2.0
-      guard cost >= 0.0, salvage >= 0.0, life > 0.0, period >= 1.0, period <= life, factor > 0.0
+      let factor: Double
+      if frame.count == 5 {
+        guard let fVal = frame.arg(4, in: self).numericValue else {
+          return .error("#VALUE!")
+        }
+        factor = fVal
+      } else {
+        factor = 2.0
+      }
+      guard cost >= 0.0, salvage >= 0.0, life > 0.0, period >= 1.0, period <= life, factor > 0.0,
+        let pFloor = Self.safeInt(floor(period)), (1...10_000).contains(pFloor)
       else {
         return .error("#NUM!")
       }
       let rate = min(1.0, factor / life)
-      guard let pFloor = Self.safeInt(floor(period)), pFloor >= 1 else {
-        return .error("#NUM!")
-      }
       var bookValue = cost
       var dep = 0.0
       for _ in 1...pFloor {
+        guard frame.context.consumeEvaluationSteps(1) else {
+          return .error("#VALUE!")
+        }
         let maxDep = max(0.0, bookValue - salvage)
         dep = min(bookValue * rate, maxDep)
         bookValue -= dep
