@@ -200,14 +200,16 @@ extension WorkspaceViewModel {
       recordUndoSnapshot(for: tabID)
       if case .document(var doc) = openTabs[idx].payload {
         if !doc.tables.isEmpty {
-          let lastCol = max(0, doc.tables[0].columnCount - 1)
-          if let val = doc.tables[0].evaluateTableFormula(
-            "=SUM(ABOVE)", atRow: doc.tables[0].rowCount, column: lastCol)
+          let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
+          let colCount = max(1, doc.tables[tIdx].columnCount)
+          let targetCol = resolvedFormulaTargetColumn(for: doc.tables[tIdx])
+          if let val = doc.tables[tIdx].evaluateTableFormula(
+            "=SUM(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: targetCol)
           {
-            var summaryRow = Array(repeating: "", count: max(1, doc.tables[0].columnCount))
+            var summaryRow = Array(repeating: "", count: colCount)
             summaryRow[0] = "합계 (=SUM(ABOVE))"
-            summaryRow[lastCol] = val.isFinite ? String(format: "%.0f", val) : "0"
-            doc.tables[0].rows.append(summaryRow)
+            summaryRow[targetCol] = val.isFinite ? String(format: "%.0f", val) : "0"
+            doc.tables[tIdx].rows.append(summaryRow)
           }
         } else {
           doc.headerText = "표준 기술 문서 머리말"
@@ -252,8 +254,9 @@ extension WorkspaceViewModel {
               caption: "결재란 표", rows: [["담당", "검토", "승인"], ["결재", "결재", "결재"]],
               borderStyle: .doubleLine))
         } else {
-          let current = doc.tables[0].borderStyle
-          doc.tables[0].borderStyle = (current == .doubleLine) ? .diagonalDown : .doubleLine
+          let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
+          let current = doc.tables[tIdx].borderStyle
+          doc.tables[tIdx].borderStyle = (current == .doubleLine) ? .diagonalDown : .doubleLine
         }
         openTabs[idx].payload = .document(doc)
         openTabs[idx].isModified = true

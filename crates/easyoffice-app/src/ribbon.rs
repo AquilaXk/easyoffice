@@ -254,7 +254,7 @@ impl RibbonCommandRouter {
                     "formulasAndData" => [
                         ("data-autosum", "자동 합계 (SUM)", "Shift+Cmd+T"),
                         ("data-fn-browser", "함수 마법사", "Shift+F3"),
-                        ("data-sort", "오름차순·내림차순 정렬", "Alt+Cmd+R"),
+                        ("data-sort", "오름차순·내림차순 정렬", "Ctrl+Alt+S"),
                         ("data-validation", "데이터 유효성 검사", "Alt+Cmd+V"),
                     ],
                     "moduleSpecific" => match module {

@@ -489,9 +489,26 @@ struct RightContextInspectorView: View {
 
     VStack(alignment: .leading, spacing: 8) {
       if !doc.tables.isEmpty {
-        Text("표 행·열 및 셀 편집")
-          .font(.system(size: 10, weight: .semibold))
-          .foregroundStyle(palette.secondaryText.swiftUIColor)
+        let clampedTableIdx = min(max(0, viewModel.selectedDocumentTableIndex), doc.tables.count - 1)
+        HStack {
+          Text(doc.tables.count > 1 ? "표 행·열 및 셀 편집 (표 #\(clampedTableIdx + 1))" : "표 행·열 및 셀 편집")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(palette.secondaryText.swiftUIColor)
+          Spacer()
+          if doc.tables.count > 1 {
+            FlatToolbarMenu(
+              title: "표 #\(clampedTableIdx + 1)",
+              systemImage: "tablecells",
+              palette: palette
+            ) {
+              ForEach(doc.tables.indices, id: \.self) { tIdx in
+                Button("표 #\(tIdx + 1) · \(doc.tables[tIdx].caption)") {
+                  viewModel.selectDocumentTable(index: tIdx)
+                }
+              }
+            }
+          }
+        }
         HStack(spacing: 8) {
           inspectorButton("+행", showsChevron: false, palette: palette) {
             viewModel.insertRowInDocumentTable()

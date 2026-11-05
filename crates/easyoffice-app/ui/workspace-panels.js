@@ -97,6 +97,7 @@
         "#doc-table-body tr:not(#doc-table-sum-row) [data-doc-num]"
       );
       let total = 0;
+      let count = 0;
       numCells.forEach((cell) => {
         const textCandidate = (cell.textContent || "").trim();
         const raw = (textCandidate || cell.dataset.docNum || "0").replaceAll(",", "");
@@ -104,21 +105,32 @@
         if (!Number.isNaN(val)) {
           cell.dataset.docNum = String(val);
           total += val;
+          count += 1;
         } else if (textCandidate !== "") {
           cell.dataset.docNum = "0";
         }
       });
+      const avg = count > 0 ? Math.round((total / count) * 100) / 100 : 0;
       const sumCell = document.getElementById("doc-table-sum-cell");
       if (sumCell) {
         sumCell.textContent = String(total);
         sumCell.dataset.docNum = String(total);
+        sumCell.dataset.docAvg = String(avg);
+        sumCell.dataset.docCount = String(count);
       }
       const statusEl =
         document.getElementById("doc-table-summary") ||
         document.getElementById("status-message") ||
         document.getElementById("status-command-feedback");
       if (statusEl) {
-        statusEl.textContent = "표 =SUM(ABOVE) 합계: " + total + "백만원";
+        statusEl.textContent =
+          "표 =SUM(ABOVE) 합계: " +
+          total +
+          "백만원 · 평균(AVERAGE): " +
+          avg +
+          "백만원 · 개수(COUNT): " +
+          count +
+          "건";
       }
     }
 
@@ -140,11 +152,24 @@
       }
       if (lowerZone) {
         slide.lowerColumnCount = lowerZone.style.columnCount || "";
+        const extraHolder = document.createElement("div");
+        const bodyParts = [];
+        Array.from(lowerZone.childNodes || []).forEach((node) => {
+          if (node.nodeType === 1 && node.dataset?.slideObject) {
+            extraHolder.appendChild(node.cloneNode(true));
+          } else {
+            const txt = node.textContent || "";
+            if (node.nodeType === 3 ? txt.trim() : txt) bodyParts.push(txt);
+          }
+        });
+        slide.lower = bodyParts.join("\n");
+        slide.insertedNodes = serializeDomChildren(extraHolder);
       }
       if (stageBox) {
         slide.stagePadding = stageBox.style.padding || "";
         slide.stageOutline = stageBox.style.outline || "";
         slide.stageLayoutState = stageBox.dataset.layoutState || "";
+        slide.presenterMode = stageBox.dataset.presenterMode || "";
       }
     }
 
@@ -170,6 +195,11 @@
           stageBox.dataset.layoutState = slide.stageLayoutState;
         } else {
           delete stageBox.dataset.layoutState;
+        }
+        if (slide?.presenterMode) {
+          stageBox.dataset.presenterMode = slide.presenterMode;
+        } else {
+          delete stageBox.dataset.presenterMode;
         }
       }
     }
@@ -197,6 +227,13 @@
         const p = document.createElement("p");
         p.textContent = slide.lower || "";
         lowerZone.replaceChildren(p);
+        if (Array.isArray(slide.insertedNodes) && slide.insertedNodes.length > 0) {
+          const extraHolder = document.createElement("div");
+          restoreDomChildren(extraHolder, slide.insertedNodes, document);
+          Array.from(extraHolder.childNodes).forEach((node) => {
+            lowerZone.appendChild(node);
+          });
+        }
       }
       applySlideDomStyles(slide);
       if (notesInput) notesInput.value = slide.notes;
@@ -248,6 +285,7 @@
         document.querySelectorAll("#pdf-page-card p:not(#pdf-form-status)")
       );
       const headingEl = document.querySelector("#pdf-page-card h3");
+      const card = document.getElementById("pdf-page-card");
       return {
         stampValue: document.getElementById("pdf-stamp-select")?.value ?? "승인필",
         stampBadge: document.getElementById("pdf-stamp-badge")?.textContent ?? "승인필",
@@ -258,6 +296,8 @@
         cardHeadingNodes: headingEl ? serializeDomChildren(headingEl) : [],
         cardBodyParagraphsNodes: bodyParagraphs.map((p) => serializeDomChildren(p)),
         formStatus: document.getElementById("pdf-form-status")?.textContent ?? "",
+        highlightText: card?.querySelector(".pdf-highlight-badge")?.textContent ?? "",
+        splitMergeText: card?.querySelector(".pdf-splitmerge-badge")?.textContent ?? "",
       };
     }
 
@@ -313,6 +353,28 @@
         const firstBody = document.querySelector("#pdf-page-card p:not(#pdf-form-status)");
         if (firstBody) firstBody.textContent = pdfStudio.cardBody;
       }
+      if (card) {
+        const existingHl = card.querySelector(".pdf-highlight-badge");
+        if (pdfStudio.highlightText) {
+          const hl = existingHl || document.createElement("span");
+          hl.className = "pdf-highlight-badge";
+          hl.dataset.pdfHighlight = "true";
+          hl.textContent = pdfStudio.highlightText;
+          if (!existingHl) card.appendChild(hl);
+        } else if (existingHl) {
+          existingHl.remove();
+        }
+        const existingSm = card.querySelector(".pdf-splitmerge-badge");
+        if (pdfStudio.splitMergeText) {
+          const sm = existingSm || document.createElement("span");
+          sm.className = "pdf-splitmerge-badge";
+          sm.dataset.pdfSplitmerge = "true";
+          sm.textContent = pdfStudio.splitMergeText;
+          if (!existingSm) card.appendChild(sm);
+        } else if (existingSm) {
+          existingSm.remove();
+        }
+      }
       if (formStatus && pdfStudio.formStatus !== undefined) {
         formStatus.textContent = pdfStudio.formStatus;
       }
@@ -341,6 +403,25 @@
       }
     }
 
+    function syncSplitComparePane(stage) {
+      if (!stage) return;
+      const existing = stage.querySelector(".split-compare-pane");
+      if (stage.dataset.splitView === "true") {
+        const pane = existing || document.createElement("aside");
+        pane.className = "split-compare-pane";
+        pane.dataset.splitCompare = "true";
+        const heading = document.createElement("h3");
+        heading.textContent = "화면 분할 참조 보기";
+        const body = document.createElement("p");
+        const docHeading = document.querySelector("#doc-editor h1")?.textContent || "활성 문서";
+        body.textContent = "참조 비교 영역 · " + docHeading.trim();
+        pane.replaceChildren(heading, body);
+        if (!existing) stage.appendChild(pane);
+      } else if (existing) {
+        existing.remove();
+      }
+    }
+
     function captureWorkspaceViewState() {
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
@@ -365,6 +446,11 @@
         } else {
           delete stage.dataset.splitView;
         }
+        syncSplitComparePane(stage);
+      }
+      const zoomLabel = document.getElementById("status-zoom-label");
+      if (zoomLabel) {
+        zoomLabel.textContent = viewState.canvasZoom || "100%";
       }
     }
 
@@ -448,6 +534,7 @@
       saveActiveDocTabState,
       ensureDefaultDocTabStore,
       computeDocTableSummary,
+      syncActiveSlideDomStylesToDeck,
       renderSlideDeck,
       applyPdfStudioFormState,
     });
@@ -524,6 +611,181 @@
       tools.computeSmartStats();
     }
 
+    function insertBeforeDocFooter(docEditor, el) {
+      const footer = docEditor.querySelector("footer.doc-page-footer");
+      if (footer && footer.parentElement === docEditor) {
+        footer.before(el);
+      } else {
+        docEditor.appendChild(el);
+      }
+    }
+
+    function applyDocModuleSpecificDomEffect(cmdId, docEditor, execRes) {
+      if (!docEditor) return false;
+      const summary = execRes?.summary || cmdId;
+      if (cmdId === "doc-mod-toc") {
+        const headings = Array.from(docEditor.querySelectorAll("h1, h2, h3"))
+          .map((h) => (h.textContent || "").trim())
+          .filter(Boolean);
+        const nav = docEditor.querySelector(".eo-doc-toc") || document.createElement("nav");
+        nav.className = "eo-doc-toc";
+        nav.dataset.docToc = "true";
+        const titleP = document.createElement("p");
+        titleP.textContent = "[자동 목차 생성 (" + summary + ")]";
+        const ol = document.createElement("ol");
+        (headings.length > 0 ? headings : ["1. 문서 개요"]).forEach((hText) => {
+          const li = document.createElement("li");
+          li.textContent = hText;
+          ol.appendChild(li);
+        });
+        nav.replaceChildren(titleP, ol);
+        if (!nav.parentElement) insertBeforeDocFooter(docEditor, nav);
+        return true;
+      }
+      if (cmdId === "doc-mod-footnote") {
+        const idx = docEditor.querySelectorAll(".eo-doc-footnote").length + 1;
+        const aside = document.createElement("aside");
+        aside.className = "eo-doc-footnote";
+        aside.dataset.docFootnote = "true";
+        aside.textContent =
+          "각주 " + idx + ") [" + summary + "] 표준 문서 관리 지침 및 근거 조항 참조";
+        insertBeforeDocFooter(docEditor, aside);
+        return true;
+      }
+      if (cmdId === "doc-mod-mailmerge") {
+        const mergeMap = {
+          "{{성명}}": "이수현",
+          "{{기관명}}": "행정안전부",
+          "{{일자}}": "2026-10-25",
+        };
+        let replaced = 0;
+        function replaceTokens(node) {
+          if (!node) return;
+          if (node.nodeType === 3) {
+            const val = node.nodeValue || "";
+            if (!val.includes("{{")) return;
+            const nextVal = val.replace(/\{\{[^}]+\}\}/g, (m) => {
+              if (Object.prototype.hasOwnProperty.call(mergeMap, m)) {
+                replaced += 1;
+                return mergeMap[m];
+              }
+              return m;
+            });
+            if (nextVal !== val) node.nodeValue = nextVal;
+            return;
+          }
+          Array.from(node.childNodes || []).forEach(replaceTokens);
+        }
+        replaceTokens(docEditor);
+        docEditor
+          .querySelectorAll(
+            "#doc-editor p, #doc-editor li, #doc-editor td, #doc-editor th, #doc-editor div"
+          )
+          .forEach((el) => {
+            if (el.querySelector("p, li, td, th, div")) return;
+            const raw = el.textContent || "";
+            if (!/\{\{[^}]+\}\}/.test(raw)) return;
+            const nextText = raw.replace(/\{\{[^}]+\}\}/g, (m) => {
+              if (Object.prototype.hasOwnProperty.call(mergeMap, m)) {
+                replaced += 1;
+                return mergeMap[m];
+              }
+              return m;
+            });
+            if (nextText !== raw) el.textContent = nextText;
+          });
+        const box =
+          docEditor.querySelector(".eo-doc-mailmerge") || document.createElement("div");
+        box.className = "eo-doc-mailmerge";
+        box.dataset.docMailmerge = "true";
+        box.textContent =
+          "[메일 머지 필드 병합 (" +
+          summary +
+          ") · 성명: 이수현 · 기관명: 행정안전부 · 일자: 2026-10-25]";
+        if (!box.parentElement) insertBeforeDocFooter(docEditor, box);
+        return true;
+      }
+      if (cmdId === "hwp-mod-header") {
+        const hdr =
+          docEditor.querySelector(".eo-hwp-header") || document.createElement("header");
+        hdr.className = "eo-hwp-header";
+        hdr.dataset.hwpHeader = "true";
+        const titleP = document.createElement("p");
+        titleP.textContent = "행정안전부 공문서 표제부 및 결재선 (" + summary + ")";
+        const lineP = document.createElement("p");
+        lineP.textContent = "[결재: 담당 이수현 / 팀장 박지훈 / 과장 김현우 / 실장 최민석]";
+        hdr.replaceChildren(titleP, lineP);
+        if (!hdr.parentElement) {
+          const firstChild = docEditor.childNodes?.[0];
+          if (firstChild && typeof firstChild.before === "function") {
+            firstChild.before(hdr);
+          } else {
+            docEditor.appendChild(hdr);
+          }
+        }
+        return true;
+      }
+      if (cmdId === "hwp-mod-field") {
+        const rowP = document.createElement("p");
+        rowP.className = "eo-hwp-field-row";
+        const span = document.createElement("span");
+        span.className = "eo-hwp-field";
+        span.dataset.hwpField = "true";
+        span.textContent = "[누름틀 입력: {{성명}} / {{기관명}}]";
+        const tail = document.createTextNode(" (" + summary + ")");
+        rowP.appendChild(span);
+        rowP.appendChild(tail);
+        insertBeforeDocFooter(docEditor, rowP);
+        return true;
+      }
+      return false;
+    }
+
+    function insertSlideStageObject(cmdId, execRes) {
+      const lowerZone = document.getElementById("slide-lower-zone");
+      const curSlide = slideDeckState[getActiveSlideIndex()];
+      const summary = execRes?.summary || cmdId;
+      if (!lowerZone || !curSlide) return false;
+      if (cmdId === "slide-insert-table") {
+        const tbl = document.createElement("table");
+        tbl.className = "sheet-table slide-table-obj";
+        tbl.dataset.slideObject = "table";
+        const tbody = document.createElement("tbody");
+        const r1 = document.createElement("tr");
+        ["구분", "목표", "달성"].forEach((txt) => {
+          const th = document.createElement("th");
+          th.textContent = txt;
+          r1.appendChild(th);
+        });
+        const r2 = document.createElement("tr");
+        ["분기 지표 (" + summary + ")", "100%", "115%"].forEach((txt) => {
+          const td = document.createElement("td");
+          td.textContent = txt;
+          r2.appendChild(td);
+        });
+        tbody.appendChild(r1);
+        tbody.appendChild(r2);
+        tbl.appendChild(tbody);
+        lowerZone.appendChild(tbl);
+      } else if (cmdId === "slide-insert-chart") {
+        const chartDiv = document.createElement("div");
+        chartDiv.className = "slide-chart-obj";
+        chartDiv.dataset.slideObject = "chart";
+        chartDiv.textContent = "[슬라이드 차트 개체 · 분기 실적 추이 (" + summary + ")]";
+        lowerZone.appendChild(chartDiv);
+      } else if (cmdId === "slide-insert-shape") {
+        const shapeDiv = document.createElement("div");
+        shapeDiv.className = "slide-shape-obj";
+        shapeDiv.dataset.slideObject = "shape";
+        shapeDiv.textContent = "[슬라이드 도형·프로세스 블록 (" + summary + ")]";
+        lowerZone.appendChild(shapeDiv);
+      } else {
+        return false;
+      }
+      syncActiveSlideDomStylesToDeck();
+      return true;
+    }
+
     return {
       setActiveDocBlock,
       saveDocTabStateForModule,
@@ -534,6 +796,8 @@
       getFocusedDocBlock,
       computeDocTableSummary,
       appendDocTableRow,
+      applyDocModuleSpecificDomEffect,
+      insertSlideStageObject,
       syncActiveSlideDomStylesToDeck,
       applySlideDomStyles,
       renderSlideDeck,
@@ -541,6 +805,7 @@
       capturePdfStudioState,
       restorePdfStudioState,
       applyPdfStudioFormState,
+      syncSplitComparePane,
       captureWorkspaceViewState,
       restoreWorkspaceViewState,
       renderModuleOutline,
@@ -550,3 +815,4 @@
 
   host.__EASYOFFICE_CREATE_WORKSPACE_PANELS__ = createWorkspacePanels;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
+

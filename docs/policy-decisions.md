@@ -884,3 +884,58 @@
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `swift build`, `swift test --filter WorkspaceLifecycleEditingBatchA11yTests`, `swift test`
 - **Revisit when** 실시간 파일시스템 이벤트(`FSEvents`) 기반 외부 파일 변경 자동 감지 알림을 추가할 때.
 
+### 41. 상용 데스크톱·웹 오피스 스위트 UI/UX 비교 감사 기반 macOS 네이티브 및 크로스플랫폼 WebUI 인간공학·종단 간 기능 정합성 정책 (2026-11-05)
+
+- **Status** Implemented
+- **Decision (`PD-066`)**
+  1. **macOS 네이티브 시트 키보드 내비게이션, 전 모듈 배율 스케일링, 다중 표 선택 추적 및 스플릿 뷰 보조 창 격리 (`Sources/EasyOfficeCore/Workspace*.swift`, `Sources/EasyOfficeApp/*.swift`)**
+     - 시트 그리드에서 인라인 편집 중이 아닐 때 방향키(`↑`, `↓`, `←`, `→`), `Shift` 범위 확장, `Delete` 범위 지우기 단축키를 `moveSheetSelection`과 `clearSelectedSheetRange`에 바인딩하고, 리본 `sheet-data-sort` 단축키 캡션을 리본 접기(`⌥⌘R`)와 충돌하지 않는 `⌃⌥S`로 분리합니다.
+     - 하단 상태바 및 보기 리본의 `zoomPercent`(`50%`~`200%`)를 PDF 원본 뷰뿐 아니라 문서 용지 폭, 시트 행·열 헤더 및 셀 치수, 슬라이드 스테이지 높이, PDF 구조화 시트 폭에 일관되게 반영합니다.
+     - 상단 탭 스트립의 `통합 검색` 입력창을 편집 모드(`isShowingHomeHub == false`)에서 본문 인라인 찾기(`findQueryText`, `isFindReplaceBarVisible = true`, Enter 시 `performFindNext()`)와 실시간 연동합니다.
+     - `WorkspaceViewModel`에 `selectedDocumentTableIndex`와 `selectedDocumentTableCell`을 추가해 다중 표 문서에서 셀 클릭·편집 시 활성 표와 셀 좌표를 추적하고, 툴바·인스펙터·리본의 행·열 삽입·삭제·병합·분할·테두리·자동합계가 선택된 표와 셀을 대상으로 동작하도록 보장합니다.
+     - 스플릿 뷰 보조 패널(`isPrimaryPane == false`)에서 `DocumentHorizontalRulerView`, `HWPManuscriptGridPaperView`, PDF 양식 필드 컨트롤이 주 활성 탭(`activeTabID`)을 변이시키지 못하도록 차단하고, 홈 허브 최근 문서 행의 우측 버튼을 열린 탭 `닫기`와 닫힌 기록 `목록 제거`(`removeRecentDocumentRecord`)로 분기하며, 전체화면 슬라이드쇼 오버레이에 좌우 화살표(`←`, `→`) 슬라이드 전환 단축키를 바인딩합니다.
+  2. **크로스플랫폼 및 Windows WebUI 디자인 토큰·ARIA·포커스 링·스플릿 뷰·원고지 격자 및 5대 모듈 실동작 DOM 정합성 (`crates/easyoffice-app/ui/*`, `scripts/test-webui-behavior.mjs`)**
+     - `styles.css`의 컬러 토큰을 디자인 시스템 정본(`--eo-primary-brand: #5C6BC0`, `--eo-accent-hwp: #6E56CF` / 다크 `#D6CCFF`, `--eo-accent-sheet: #0A705A`, `--eo-accent-slide: #D96B27`, `--eo-accent-pdf: #D9383A`)과 일치시키고, `:focus-visible` 라벤더 포커스 링, `.canvas-stage[data-split-view="true"]` 2단 비교 레이아웃, `#doc-editor.manuscript-grid` 20칸 원고지 격자, `#status-bar` 배율 조절(`#btn-zoom-out`, `#status-zoom-label`, `#btn-zoom-in`), 탭 컴포넌트 ARIA(`role="tablist"`, `role="tab"`, `aria-selected`)를 완비합니다.
+     - 문서·한글 리본의 자동 목차(`doc-mod-toc`), 각주(`doc-mod-footnote`), 메일 머지(`doc-mod-mailmerge`), 공문서 표제부(`hwp-mod-header`), 누름틀(`hwp-mod-field`) 명령이 요약 문구만 추가하지 않고 실제 구조화된 DOM 요소(`nav`, `aside`, `header`, `span`)를 생성하도록 연결하며, `#doc-editor` 및 슬라이드 입력 영역 직접 타이핑 시 사전 Undo 스냅샷을 기록해 `Ctrl+Z`/`⌘Z` 시 타이핑 유실을 방지합니다.
+     - 시트 그리드 셀에 방향키·`Tab`·`Delete` 키보드 탐색을 바인딩하고, 정렬(`sheet-data-sort`), 피벗(`sheet-mod-pivot`), 차트(`sheet-mod-chart`), 조건부 서식(`sheet-mod-condfmt`), 틀 고정(`sheet-mod-freeze`), 자동 합계(`sheet-data-autosum`)가 실제 시트 테이블과 집계 상태를 갱신하도록 구현합니다.
+     - 슬라이드 표·차트·도형 삽입(`slide-insert-table`, `slide-insert-chart`, `slide-insert-shape`)을 새 슬라이드 추가(`slide-insert-slide`)와 분리해 현재 슬라이드 스테이지 내부 개체로 삽입·보존하고, 스마트 보조 도구가 현재 활성 모듈(`DOC`/`HWP`/`SHEET`/`SLIDE`/`PDF`)의 텍스트를 추출해 `styleSuggestions`까지 렌더링하도록 개선합니다.
+- **Why** 상용 데스크톱·웹 오피스 스위트의 표준 인터랙션(2모드 시트 키보드 탐색, 전 모듈 줌, 다중 표 컨텍스트 유지, 스플릿 뷰 읽기 전용 격리, 리본 명령의 즉시 시각 피드백)과 비교했을 때 남아 있던 UI/UX 및 기능 단절을 양대 런타임 표면(macOS 네이티브 및 Windows/Linux/macOS WebUI)에서 일거에 해소하기 위함입니다.
+- **Trade-offs**
+  1. 스플릿 뷰 우측 보조 패널(`isPrimaryPane == false`)을 양방향 동시 편집 대신 참조·비교 전용으로 격리하여 두 패널이 단일 `activeTabID` 상태를 경합하며 주 탭 데이터를 덮어쓰는 사고를 원천 차단합니다.
+  2. WebUI의 직접 타이핑 Undo 스냅샷은 매 키 입력마다 전체 DOM을 복제하면 메모리와 지연이 증가하므로 입력 세션 시작(`focusin`/`beforeinput`) 시점과 리본 명령 직전에 스냅샷을 기록해 응답성과 데이터 보존을 양립합니다.
+- **Alternatives rejected**
+  - 시트 그리드나 슬라이드·문서 캔버스 배율을 CSS `transform: scale()` 단일 래퍼로만 처리하면 스크롤 영역 경계와 히트 테스트 좌표가 어긋나므로 각 모듈의 레이아웃 폭·높이 및 `zoom` 속성에 직접 반영.
+  - WebUI에서 동적 `.innerHTML` 문자열 결합으로 목차나 슬라이드 개체를 삽입하는 방식은 CSP 및 Stored-XSS 방어 불변식을 위반하므로 `document.createElement`와 텍스트 노드로만 구성.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo run -p easyoffice-app -- --self-test`, `swift build`, `swift test`, `.agents/skills/verify-easyoffice/scripts/eo.sh`
+- **Revisit when** 스플릿 뷰 보조 패널에 독립적인 2번째 활성 커서 세션(`secondaryActiveTabID` 변이 라우팅)을 도입할 때.
+
+## 42. 적대적 아키텍처 리뷰(Red-Team) 기반 모노레포 정합성·파서 무결성·CI 경량화 (PD-067)
+
+- **Status** Implemented
+- **Context** `@AquilaXk` 엔지니어링 하네스 기준 외부 적대적 아키텍처 리뷰(Red-Team Adversarial Architecture Review, `§2.1`~`§5`)에서 도출된 다중 런타임 단축키 드리프트, 위생 가드 임계치 포화, 라벨 부착 시 CI 중복 실행, 파서·수식·변환 경계 조건을 일괄 정비합니다.
+- **Decision (`PD-067`)**
+  1. **단일 모노레포 응집성 유지 및 크로스스택 리본 단축키 정합성 (`crates/easyoffice-app/src/ribbon.rs`, `crates/easyoffice-app/ui/ribbon-catalog.js`, `Sources/EasyOfficeCore/WorkspaceTabAndSessionModels.swift`)**
+     - Swift macOS 네이티브 엔진, Rust 크로스플랫폼 코어, WebUI 프런트엔드를 단일 모노레포에 유지하여 포맷 스키마·수식 픽스처·140종 리본 카탈로그·15종 IPC 계약을 단일 커밋에서 원자적으로 검증합니다.
+     - Rust(`ribbon.rs`)와 WebUI(`ribbon-catalog.js`)의 `data-sort` 단축키를 리본 접기(`view-ribbon`, `⌥⌘R` / `Alt+Cmd+R`)와 충돌하던 값에서 Swift(`PD-066`)와 동일한 `Ctrl+Alt+S` / `⌃⌥S`로 통일합니다.
+  2. **위생 가드 경직성 해소 (`scripts/check-repo-hygiene.mjs`)**
+     - `crates/easyoffice-app/ui/styles.css`의 박스 속성(`border:|border-radius:|box-shadow:`) 상한을 `18`(`18/18` 100% 포화)에서 `24`로 완화하고, `Sources/EasyOfficeApp`의 박스 프리미티브(`swiftBoxPrimCount`) 상한을 `12`(`12/12` 100% 포화)에서 `16`으로 완화하여 정당한 접근성·상태 표시자 UI 개선이 하드코딩된 임계치에 가로막히지 않도록 여유 버퍼를 부여합니다.
+  3. **CI 트리거 경량화 및 릴리스 동시성 보호 (`.github/workflows/ci.yml`, `.github/workflows/release.yml`, `.agents/skills/verify-easyoffice/scripts/*`)**
+     - `.github/workflows/ci.yml`의 `pull_request.types`에서 `labeled`를 제거(`types: [opened, synchronize, reopened, ready_for_review]`)하여 `automerge` 라벨 부착 시 이미 통과한 동일 SHA에 대해 macOS/Windows CI가 재실행되는 낭비를 차단합니다(`labeled` 이벤트는 `automerge.yml`이 전담).
+     - `.github/workflows/release.yml` 최상단에 `concurrency` 그룹(`release-${{ github.ref_name || inputs.version }}`, `cancel-in-progress: false`)을 추가하여 동일 버전 태그 및 수동 디스패치 간 아티팩트 업로드 경합을 방지합니다.
+     - `verify-easyoffice` 런타임 하네스(`eo.sh`, `DriveRunner.swift`)의 패키징 스크립트 경로를 `scripts/package-macos-release.sh`로 바로잡고, `document-hwp` 드라이버가 `hwpTab`에도 검증 문단을 추가한 뒤 재열람된 문서들의 실제 문단 수(`REOPENED_DOC_PARAGRAPHS`, `REOPENED_HWPX_PARAGRAPHS`, `REOPENED_HWP_PARAGRAPHS`)를 기록하도록 강화합니다.
+  4. **CommonMark 인라인 구문 분석, 단일 패스 메일 머지, 교차 런 찾기·바꾸기, WebUI 슬라이드 직렬화 및 누적 평가·메모리 예산 강제 (`Sources/EasyOfficeCore/*`, `crates/easyoffice-app/ui/*`)**
+     - CommonMark 파서에서 외곽 마커(`**`, `*`, `` ` ``)가 문자열 중간에서 일찍 닫히는 경우(`**bold** and **bold**`) 전체 문장 래핑으로 오판하지 않도록 내부 닫힘 검사를 수행하고 인라인 `**`/`*`/`~~`/`` ` `` 서식 런을 분해합니다.
+     - 메일 머지(`MailMergeEngine`) 치환을 순차 다중 패스 `replacingOccurrences` 대신 단일 패스 정규식·토큰 스캔으로 전환하여 치환 값 내부에 포함된 `{{key}}` 문자열이 재귀 확장되는 2차 치환 취약점을 차단합니다.
+     - `performFindAndReplace`가 인접 동일 서식 런을 먼저 병합(`DocumentTextRun.coalesceAdjacentRuns`)한 뒤 런 경계를 가로지르는 검색어 일치 구간까지 일관되게 치환하도록 개선합니다.
+     - WebUI 슬라이드 파서·직렬화에서 제목·요약 내 가운데점(`·`)이 구분자로 오인되어 잘리지 않도록 첫 번째 ` — ` 구분자만 분리하고, 슬라이드 표 셀의 `rowSpan` 속성을 DOM `td.rowSpan`에 보존합니다.
+     - `WorksheetModel.evaluateGrid`에 워크시트당 누적 수식 평가 단계 상한(`WorksheetModel.maxEvaluationSteps = 2_097_152`)을 적용하고, `BatchConversionEngine` 및 `DocumentConversionOrchestrator`에 배치 전체 누적 출력 바이트 예산(`maxCumulativeOutputBytes = 512 MiB`)을 강제하여 대규모 수식 그래프나 다수 문서 일괄 변환 시 프로세스 OOM을 Fail-Closed로 방어합니다.
+- **Trade-offs**
+  1. 단일 모노레포는 Swift와 Rust 두 툴체인을 한 저장소에서 관리해야 하나, 다중 저장소 분리 시 발생하는 버전 핀 불일치·교차 PR 동기화 비용·표준 픽스처 중복을 원천 제거합니다.
+  2. 가드 상한에 약 25~33%의 헤드룸(`18 -> 24`, `12 -> 16`)을 부여하면 소규모 박스 규칙 추가는 허용되나, 과도한 중첩 카드화를 막는 상한선 자체는 유지하면서 100% 포화로 인한 개발 마비를 방지합니다.
+  3. 시트 그리드 평가(`2,097,152` 단계)와 일괄 변환(`512 MiB` 누적 출력) 상한을 초과하는 초대형 배치는 분할 실행해야 하나, 단일 작업이 시스템 메모리를 고갈시키는 현상을 결정론적으로 차단합니다.
+- **Alternatives rejected**
+  - `EasyOffice`를 Swift 전용 저장소와 Rust/WebUI 저장소로 분리하는 다중 리포지토리 구성은 포맷 파서·수식 엔진·리본 계약의 원자적 교차 검증을 깨뜨리고 동기화 오버헤드만 높이므로 기각.
+  - 인간 가독 문서(`docs/*.md`)를 폐지하고 JSON 전용 ADR(`trackedHumanDocumentFormat: NONE`)로만 아키텍처와 정책 결정을 관리하는 방식은 공개 오픈소스 저장소의 감사 투명성과 기여자 가독성을 훼손하므로 기각.
+  - 일괄 변환 시 모든 변환 결과 바이트를 누적 상한 없이 인메모리 배열에 적재하는 방식은 다수의 대용량 문서 변환 시 OOM 크래시를 유발하므로 기각.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace`, `swift test`
+- **Revisit when** 스트리밍 디스크 플러시 기반 무제한 배치 변환 모드를 추가할 때.

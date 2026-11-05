@@ -507,8 +507,15 @@
       if (serialized) children.push(serialized);
     }
     const spec = { t: "el", tag, attrs, data, style, children };
-    if (typeof node.colSpan === "number" && node.colSpan > 1) {
-      spec.colSpan = node.colSpan;
+    const cs = Number(node.getAttribute?.("colspan") || node.colSpan || 1);
+    if (cs > 1) {
+      attrs.colspan = String(cs);
+      spec.colSpan = cs;
+    }
+    const rs = Number(node.getAttribute?.("rowspan") || node.rowSpan || 1);
+    if (rs > 1) {
+      attrs.rowspan = String(rs);
+      spec.rowSpan = rs;
     }
     return spec;
   }
@@ -546,6 +553,9 @@
     });
     if (typeof spec.colSpan === "number" && spec.colSpan > 1) {
       el.colSpan = spec.colSpan;
+    }
+    if (typeof spec.rowSpan === "number" && spec.rowSpan > 1) {
+      el.rowSpan = spec.rowSpan;
     }
     if (spec.style && el.style) {
       Object.keys(spec.style).forEach((prop) => {

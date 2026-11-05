@@ -134,6 +134,10 @@
       const curSheet = getActiveSheetName();
       const prevSnap = sheetDataStore[curSheet] || {};
       const snap = {};
+      const frozenPanes = Boolean(
+        document.querySelector("#pane-sheet thead.frozen-header") ||
+          document.querySelector("#pane-sheet table")?.dataset?.frozenPanes === "true"
+      );
       document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
         const ref = td.dataset.cell;
         const textVal = (td.textContent || "").trim();
@@ -154,8 +158,12 @@
         const fontStyle = td.style.fontStyle || "";
         const textDecoration = td.style.textDecoration || "";
         const fontSize = td.style.fontSize || "";
-        if (fontWeight || fontStyle || textDecoration || fontSize) {
+        const condfmtHigh = td.classList.contains("condfmt-high");
+        const entryFrozen = ref === "A1" && frozenPanes;
+        if (fontWeight || fontStyle || textDecoration || fontSize || condfmtHigh || entryFrozen) {
           cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
+          if (condfmtHigh) cellEntry.style.condfmtHigh = true;
+          if (entryFrozen) cellEntry.style.frozenPanes = true;
         }
         snap[ref] = cellEntry;
       });
@@ -225,6 +233,8 @@
       const targetRowCount = getSheetRowCount(sheetName);
       ensureSheetGridRowCount(targetRowCount);
       const targetSnap = sheetDataStore[sheetName] || {};
+      const targetFrozen = Boolean(targetSnap.A1?.style?.frozenPanes);
+      toggleSheetFreezePanes(targetFrozen, true);
       document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
         const ref = td.dataset.cell;
         const entry = targetSnap[ref];
@@ -244,6 +254,7 @@
         td.style.fontStyle = cellStyle?.fontStyle || "";
         td.style.textDecoration = cellStyle?.textDecoration || "";
         td.style.fontSize = cellStyle?.fontSize || "";
+        td.classList.toggle("condfmt-high", Boolean(cellStyle?.condfmtHigh));
         if (sheetCellFocusState.has(td)) {
           syncSheetCellFocusBaseline(td, true);
         } else if (document.activeElement === td) {
@@ -403,7 +414,25 @@
       return trackSheetAsyncWork(run());
     }
 
-    async function prepareFormulaBarEvaluation() {
+    function inferAutoSumFormulaForCell(cellRef, sheetMap) {
+      const m = /^([A-Z]+)(\d+)$/.exec(String(cellRef || "F2").toUpperCase());
+      const col = m ? m[1] : "B";
+      const row = m ? Number(m[2]) : 7;
+      if (row >= 3) {
+        let lastPlainRow = row - 1;
+        for (let r = row - 1; r >= 2; r -= 1) {
+          const entry = sheetMap?.[col + r];
+          if (entry && !isFormulaStr(entry.formula || "") && entry.value !== "") {
+            lastPlainRow = r;
+            break;
+          }
+        }
+        return "=SUM(" + col + "2:" + col + Math.max(2, lastPlainRow) + ")";
+      }
+      return "=SUM(B" + row + ":E" + row + ")";
+    }
+
+    async function prepareFormulaBarEvaluation(options = {}) {
       const input = document.getElementById("formula-input");
       const out = document.getElementById("sheet-eval-result");
       if (!input || !out) return null;
@@ -415,9 +444,16 @@
       if (!candidateSheets[targetSheet]) {
         candidateSheets[targetSheet] = {};
       }
-      const rawFormula = input.value.trim();
-      const isFormula = isFormulaStr(rawFormula);
       const prevCell = candidateSheets[targetSheet][targetCellRef];
+      let rawFormula = input.value.trim();
+      if (options.autoSum) {
+        const cellBaseline = (prevCell?.formula || prevCell?.value || "").trim();
+        if (rawFormula === cellBaseline && !isFormulaStr(rawFormula)) {
+          rawFormula = inferAutoSumFormulaForCell(targetCellRef, candidateSheets[targetSheet]);
+          input.value = rawFormula;
+        }
+      }
+      const isFormula = isFormulaStr(rawFormula);
       const nextCell = {
         value: isFormula ? "" : rawFormula,
         formula: isFormula ? rawFormula : "",
@@ -587,6 +623,25 @@
       return committed;
     }
 
+    function moveCellFocusByDelta(td, dCol, dRow) {
+      const m = /^([A-Z]+)(\d+)$/.exec(String(td.dataset?.cell || "").toUpperCase());
+      if (!m) return;
+      const colIdx = GRID_COL_LETTERS.indexOf(m[1]);
+      const rowNum = Number(m[2]);
+      if (colIdx < 0 || !Number.isFinite(rowNum)) return;
+      const maxRow = getSheetRowCount(getActiveSheetName());
+      const nextColIdx = Math.max(0, Math.min(GRID_COL_LETTERS.length - 1, colIdx + dCol));
+      const nextRowNum = Math.max(1, Math.min(maxRow, rowNum + dRow));
+      const nextRef = GRID_COL_LETTERS[nextColIdx] + nextRowNum;
+      const nextTd = document.querySelector('#pane-sheet td[data-cell="' + nextRef + '"]');
+      if (nextTd) {
+        if (nextTd !== td && typeof nextTd.focus === "function") {
+          nextTd.focus();
+        }
+        updateSheetSelectionAndAggregates(nextRef);
+      }
+    }
+
     function bindSheetCellEvents(rootEl) {
       rootEl.querySelectorAll("td[data-cell]").forEach((td) => {
         td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
@@ -603,9 +658,55 @@
           });
         });
         td.addEventListener("keydown", (ev) => {
+          const st = sheetCellFocusState.get(td);
+          const isEditingCell = Boolean(st && st.userEdited);
           if (ev.key === "Enter") {
             ev.preventDefault();
             td.blur();
+            return;
+          }
+          if (ev.key === "ArrowUp") {
+            ev.preventDefault();
+            moveCellFocusByDelta(td, 0, -1);
+            return;
+          }
+          if (ev.key === "ArrowDown") {
+            ev.preventDefault();
+            moveCellFocusByDelta(td, 0, 1);
+            return;
+          }
+          if (ev.key === "ArrowLeft") {
+            if (!isEditingCell) {
+              ev.preventDefault();
+              moveCellFocusByDelta(td, -1, 0);
+            }
+            return;
+          }
+          if (ev.key === "ArrowRight") {
+            if (!isEditingCell) {
+              ev.preventDefault();
+              moveCellFocusByDelta(td, 1, 0);
+            }
+            return;
+          }
+          if (ev.key === "Tab") {
+            ev.preventDefault();
+            moveCellFocusByDelta(td, ev.shiftKey ? -1 : 1, 0);
+            return;
+          }
+          if (ev.key === "Delete" && !isEditingCell) {
+            ev.preventDefault();
+            const focusSt = st || ensureSheetCellFocusEntry(td, getActiveSheetName());
+            td.textContent = "";
+            delete td.dataset.formula;
+            focusSt.userEdited = true;
+            pushCellUndoSnapshotIfNeeded(td, focusSt, "");
+            const formulaInput = document.getElementById("formula-input");
+            if (formulaInput && getActiveSheetCellRef() === td.dataset.cell) {
+              formulaInput.value = "";
+            }
+            void commitSheetCellEdit(td, true).catch(() => {});
+            updateSheetSelectionAndAggregates(td.dataset.cell);
           }
         });
         td.addEventListener("blur", () => {
@@ -632,6 +733,159 @@
       });
     }
 
+    function sortActiveSheetByColumnB() {
+      const curSheet = getActiveSheetName();
+      const populatedRows = [];
+      const blankRows = [];
+      for (let r = 2; r <= 6; r += 1) {
+        const bTd = document.querySelector('#pane-sheet td[data-cell="B' + r + '"]');
+        if (!bTd) continue;
+        const cells = {};
+        let isBlankRow = true;
+        GRID_COL_LETTERS.forEach((col) => {
+          const td = document.querySelector('#pane-sheet td[data-cell="' + col + r + '"]');
+          if (td) {
+            const text = td.textContent || "";
+            const formula = td.dataset.formula || "";
+            if (text.trim() !== "" || formula.trim() !== "") {
+              isBlankRow = false;
+            }
+            cells[col] = {
+              text,
+              formula,
+              fontWeight: td.style.fontWeight || "",
+              fontStyle: td.style.fontStyle || "",
+              textDecoration: td.style.textDecoration || "",
+              fontSize: td.style.fontSize || "",
+              condfmtHigh: td.classList.contains("condfmt-high"),
+            };
+          }
+        });
+        if (isBlankRow) {
+          blankRows.push({ origRow: r, bNum: 0, cells });
+        } else {
+          const bRaw = (bTd.textContent || "").replaceAll(",", "").trim();
+          const bParsed = bRaw === "" ? Number.NaN : Number(bRaw);
+          populatedRows.push({
+            origRow: r,
+            bNum: Number.isFinite(bParsed) ? bParsed : 0,
+            cells,
+          });
+        }
+      }
+      if (populatedRows.length < 2) return;
+      let isAscending = true;
+      for (let i = 1; i < populatedRows.length; i += 1) {
+        if (populatedRows[i].bNum < populatedRows[i - 1].bNum) {
+          isAscending = false;
+          break;
+        }
+      }
+      populatedRows.sort((a, b) => (isAscending ? b.bNum - a.bNum : a.bNum - b.bNum));
+      const rowData = [...populatedRows, ...blankRows];
+      rowData.forEach((item, idx) => {
+        const targetRow = idx + 2;
+        GRID_COL_LETTERS.forEach((col) => {
+          const td = document.querySelector('#pane-sheet td[data-cell="' + col + targetRow + '"]');
+          const src = item.cells[col];
+          if (!td || !src) return;
+          td.textContent = src.text;
+          if (src.formula) {
+            td.dataset.formula = src.formula.replace(
+              new RegExp("([A-Z]+)" + item.origRow + "\\b", "g"),
+              "$1" + targetRow
+            );
+          } else {
+            delete td.dataset.formula;
+          }
+          td.style.fontWeight = src.fontWeight || "";
+          td.style.fontStyle = src.fontStyle || "";
+          td.style.textDecoration = src.textDecoration || "";
+          td.style.fontSize = src.fontSize || "";
+          td.classList.toggle("condfmt-high", Boolean(src.condfmtHigh));
+          syncSheetCellFocusBaseline(td, true);
+        });
+      });
+      sheetDataStore[curSheet] = snapshotDomSheetCells();
+      refreshFocusedSheetCellPendingSnapshot();
+      updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+    }
+
+    function applySheetPivotOrChartSummary(mode, execRes) {
+      const nums = [];
+      for (let r = 2; r <= 6; r += 1) {
+        ["B", "C", "D", "E"].forEach((col) => {
+          const td = document.querySelector('#pane-sheet td[data-cell="' + col + r + '"]');
+          const n = Number((td?.textContent || "").replaceAll(",", "").trim());
+          if (Number.isFinite(n) && (td?.textContent || "").trim() !== "") {
+            nums.push(n);
+          }
+        });
+      }
+      const sum = nums.reduce((acc, v) => acc + v, 0);
+      const avg = nums.length > 0 ? Math.round((sum / nums.length) * 10) / 10 : 0;
+      const maxVal = nums.length > 0 ? Math.max(...nums) : 0;
+      const prefix = mode === "pivot" ? "피벗 집계" : "차트 데이터 요약";
+      const summaryToken = execRes?.summary || mode;
+      const summaryLine =
+        prefix +
+        " · 합계 " +
+        sum +
+        " · 평균 " +
+        avg +
+        " · 최대 " +
+        maxVal +
+        " (" +
+        summaryToken +
+        ")";
+      const out = document.getElementById("sheet-eval-result");
+      if (out) out.textContent = summaryLine;
+      const smartOut = document.getElementById("smart-summary-output");
+      if (smartOut) smartOut.textContent = summaryLine;
+    }
+
+    function toggleSheetConditionalFormatting(enabled) {
+      const allTds = Array.from(document.querySelectorAll("#pane-sheet td[data-cell]"));
+      const dataNums = [];
+      allTds.forEach((td) => {
+        const ref = td.dataset.cell || "";
+        const m = /^([B-E])([2-6])$/.exec(ref);
+        if (!m) return;
+        const n = Number((td.textContent || "").replaceAll(",", "").trim());
+        if (Number.isFinite(n)) dataNums.push(n);
+      });
+      const avg =
+        dataNums.length > 0 ? dataNums.reduce((a, b) => a + b, 0) / dataNums.length : 800;
+      allTds.forEach((td) => {
+        if (!enabled) {
+          td.classList.remove("condfmt-high");
+          return;
+        }
+        const n = Number((td.textContent || "").replaceAll(",", "").trim());
+        const isHigh = Number.isFinite(n) && (td.textContent || "").trim() !== "" && n >= avg;
+        td.classList.toggle("condfmt-high", isHigh);
+      });
+      saveActiveSheetCellsToWorkbook();
+    }
+
+    function toggleSheetFreezePanes(enabled, skipSave = false) {
+      const thead = document.querySelector("#pane-sheet table thead");
+      const table = document.querySelector("#pane-sheet table");
+      if (thead) {
+        thead.classList.toggle("frozen-header", Boolean(enabled));
+      }
+      if (table) {
+        if (enabled) {
+          table.dataset.frozenPanes = "true";
+        } else {
+          delete table.dataset.frozenPanes;
+        }
+      }
+      if (!skipSave) {
+        saveActiveSheetCellsToWorkbook();
+      }
+    }
+
     async function performSwitchSheetTabAsync(targetSheetName) {
       await flushFocusedSheetCellBeforeSwitch();
       if (!sheetDataStore.Sheet1 && getActiveSheetName() === "Sheet1") {
@@ -653,7 +907,10 @@
       const sheetTabBar = document.getElementById("sheet-tab-bar");
       if (sheetTabBar) {
         sheetTabBar.querySelectorAll(".sheet-tab-btn[data-sheet-tab]").forEach((b) => {
-          b.classList.toggle("active", b.dataset.sheetTab === targetSheetName);
+          const isAct = b.dataset.sheetTab === targetSheetName;
+          b.classList.toggle("active", isAct);
+          b.setAttribute("role", "tab");
+          b.setAttribute("aria-selected", isAct ? "true" : "false");
         });
       }
       const defaultRef = targetSheetName === "Sheet1" ? "F2" : "C1";
@@ -691,6 +948,10 @@
       flushFocusedSheetCellBeforeSwitch,
       commitPendingFocusedSheetCell,
       bindSheetCellEvents,
+      sortActiveSheetByColumnB,
+      applySheetPivotOrChartSummary,
+      toggleSheetConditionalFormatting,
+      toggleSheetFreezePanes,
       performSwitchSheetTabAsync,
       switchSheetTab,
     };
@@ -698,3 +959,4 @@
 
   host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__ = createSheetController;
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
+

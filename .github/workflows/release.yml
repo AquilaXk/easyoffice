@@ -11,6 +11,10 @@ on:
         required: true
         default: "1.0.0"
 
+concurrency:
+  group: release-${{ github.ref_name || inputs.version }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -40,7 +44,7 @@ jobs:
         run: node scripts/verify-macos-plist.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
 
       - name: Run deterministic test suite before packaging
         run: swift test
@@ -95,7 +99,7 @@ jobs:
         run: node scripts/check-repo-hygiene.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
 
       - name: Run Rust workspace test suite and self-test
         run: |

@@ -864,8 +864,10 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
           r.text = replaceAll(in: run.text, countReplacements: false)
           return r
         }
-        if updated.runs.map(\.text).joined() != updated.text {
-          updated.runs.removeAll()
+        if let firstRun = updated.runs.first,
+          updated.runs.map(\.text).joined() != updated.text
+        {
+          updated.runs = [firstRun.withText(updated.text)]
         }
       }
       return updated
@@ -881,41 +883,63 @@ public struct OfficeDocumentModel: Sendable, Codable, Equatable, Identifiable {
     return (copy, totalCount)
   }
 
+  private func replaceMailMergeTokens(in text: String, using record: [String: String]) -> String {
+    guard !record.isEmpty, text.contains("{{") else { return text }
+    var output = ""
+    var cursor = text.startIndex
+    while cursor < text.endIndex,
+      let openRange = text.range(of: "{{", range: cursor..<text.endIndex)
+    {
+      guard let closeRange = text.range(of: "}}", range: openRange.upperBound..<text.endIndex)
+      else {
+        break
+      }
+      let keySlice = text[openRange.upperBound..<closeRange.lowerBound]
+      if keySlice.isEmpty || keySlice.contains("{") || keySlice.contains("}") {
+        let stepAfter = text.index(after: openRange.lowerBound)
+        output += text[cursor..<stepAfter]
+        cursor = stepAfter
+        continue
+      }
+      output += text[cursor..<openRange.lowerBound]
+      if let replacement = record[String(keySlice)] {
+        output += replacement
+      } else {
+        output += text[openRange.lowerBound..<closeRange.upperBound]
+      }
+      cursor = closeRange.upperBound
+    }
+    output += text[cursor..<text.endIndex]
+    return output
+  }
+
   /// Performs deterministic Mail Merge substitution of `{{key}}` placeholders across paragraphs, headers, and tables.
   public func applyingMailMerge(record: [String: String]) -> OfficeDocumentModel {
-    func replacePlaceholders(in source: String) -> String {
-      var output = source
-      for key in record.keys.sorted() {
-        if let value = record[key] {
-          output = output.replacingOccurrences(of: "{{\(key)}}", with: value)
-        }
-      }
-      return output
-    }
-
     var copy = self
-    copy.headerText = replacePlaceholders(in: copy.headerText)
-    copy.footerText = replacePlaceholders(in: copy.footerText)
+    copy.headerText = replaceMailMergeTokens(in: copy.headerText, using: record)
+    copy.footerText = replaceMailMergeTokens(in: copy.footerText, using: record)
     copy.paragraphs = copy.paragraphs.map { block in
       var updated = block
-      updated.text = replacePlaceholders(in: block.text)
+      updated.text = replaceMailMergeTokens(in: block.text, using: record)
       if !updated.runs.isEmpty {
         updated.runs = updated.runs.map { run in
           var r = run
-          r.text = replacePlaceholders(in: run.text)
+          r.text = replaceMailMergeTokens(in: run.text, using: record)
           return r
         }
-        if updated.runs.map(\.text).joined() != updated.text {
-          updated.runs.removeAll()
+        if let firstRun = updated.runs.first,
+          updated.runs.map(\.text).joined() != updated.text
+        {
+          updated.runs = [firstRun.withText(updated.text)]
         }
       }
       return updated
     }
     copy.tables = copy.tables.map { table in
       var updatedTable = table
-      updatedTable.caption = replacePlaceholders(in: updatedTable.caption)
+      updatedTable.caption = replaceMailMergeTokens(in: updatedTable.caption, using: record)
       updatedTable.rows = updatedTable.rows.map { row in
-        row.map { replacePlaceholders(in: $0) }
+        row.map { replaceMailMergeTokens(in: $0, using: record) }
       }
       return updatedTable
     }
