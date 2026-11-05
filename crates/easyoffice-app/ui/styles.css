@@ -800,6 +800,10 @@ html[data-theme="dark"] .cp-item-shortcut {
   color: #555555;
   text-align: center;
 }
+
+html[data-theme="dark"] .cp-empty {
+  color: #b8c2ce;
+}
 .slide-transition-select { width: 150px; margin: 0; padding: 4px 8px; }
 .pdf-stamp-select, .conv-fmt-select { width: 140px; margin: 0; padding: 4px 8px; }
 .pdf-watermark-input { width: 200px; margin: 0; padding: 4px 8px; }
