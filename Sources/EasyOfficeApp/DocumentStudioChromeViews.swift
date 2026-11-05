@@ -455,6 +455,42 @@ struct TopDocumentTabStripView: View {
     .fixedSize(horizontal: true, vertical: false)
   }
 
+  @ViewBuilder
+  private func topStudioMenu<MenuItems: View>(
+    _ title: String,
+    palette: WorkspaceThemePalette,
+    snapshotAction: @escaping () -> Void,
+    @ViewBuilder items: () -> MenuItems
+  ) -> some View {
+    if viewModel.isCanvasSnapshotMode {
+      topMenuBarItem(title, palette: palette, action: snapshotAction)
+    } else {
+      Menu {
+        items()
+      } label: {
+        Text(title)
+          .font(.system(size: 12.5, weight: .regular))
+          .foregroundStyle(palette.primaryText.swiftUIColor)
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+      }
+      .menuStyle(.borderlessButton)
+      .fixedSize(horizontal: true, vertical: false)
+    }
+  }
+
+  @ViewBuilder
+  private func ribbonCategoryMenuItems(_ category: RibbonCategory) -> some View {
+    let mod = viewModel.activeTab?.moduleKind ?? .document
+    ForEach(RibbonCategory.actions(for: category, module: mod)) { cmd in
+      Button("\(cmd.title) (\(cmd.shortcutHint))") {
+        viewModel.isShowingHomeHub = false
+        viewModel.activeRibbonCategory = category
+        viewModel.executeRibbonCommand(cmd.id)
+      }
+    }
+  }
+
   var body: some View {
     let palette = viewModel.themeMode.surfacePalette(isSystemDark: colorScheme == .dark)
     let isActiveTabDocumentStudio =
@@ -467,59 +503,62 @@ struct TopDocumentTabStripView: View {
 
     HStack(spacing: 4) {
       HStack(spacing: 0) {
-        topMenuBarItem("파일", palette: palette) {
-          viewModel.activeRibbonCategory = .home
-          if !viewModel.isCanvasSnapshotMode {
-            if !viewModel.isShowingHomeHub && viewModel.activeTab != nil {
-              _ = WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
-            } else {
-              WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
-            }
-          }
+        topStudioMenu("파일", palette: palette, snapshotAction: { viewModel.activeRibbonCategory = .home }) {
+          Button("새 문서") { _ = viewModel.openNewBlankTab(for: viewModel.activeTab?.moduleKind ?? .document) }
+          Button("열기...") { WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel) }
+          Button("저장") { _ = WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel) }
+          Divider()
+          Button("인쇄...") { WorkspaceFileDialogPresenter.presentPrintPanel(viewModel: viewModel) }
         }
-        topMenuBarItem("편집", palette: palette) {
+        topStudioMenu("편집", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .home
-          if !isActiveTabDocumentStudio {
-            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-          }
+          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+        }) {
+          Button("실행 취소") { viewModel.undoActiveTab() }.disabled(!viewModel.canUndo)
+          Button("다시 실행") { viewModel.redoActiveTab() }.disabled(!viewModel.canRedo)
+          Divider()
+          Button("찾기 및 바꾸기...") { viewModel.isFindReplaceBarVisible.toggle() }
+          Divider()
+          ribbonCategoryMenuItems(.home)
         }
-        topMenuBarItem("보기", palette: palette) {
+        topStudioMenu("보기", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .view
           if !isActiveTabDocumentStudio {
             let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
             viewModel.showLeftNavigator = nextVisible; viewModel.showRightInspector = nextVisible
           }
+        }) {
+          ForEach(WorkspaceViewMode.allCases) { mode in
+            Button(mode.rawValue) { viewModel.setWorkspaceViewMode(mode) }
+          }
+          Divider()
+          Button(isStudioPanelsExpanded ? "보조 패널 접기" : "보조 패널 펼치기") {
+            isStudioPanelsExpanded.toggle()
+            if isStudioPanelsExpanded { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+          }
+          Divider()
+          ribbonCategoryMenuItems(.view)
         }
-        topMenuBarItem("입력", palette: palette) {
+        topStudioMenu("입력", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert
-          if !isActiveTabDocumentStudio {
-            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-          }
-        }
-        topMenuBarItem("서식", palette: palette) {
+          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+        }) { ribbonCategoryMenuItems(.insert) }
+        topStudioMenu("서식", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if !isActiveTabDocumentStudio {
-            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-          }
-        }
-        topMenuBarItem("쪽", palette: palette) {
+          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+        }) { ribbonCategoryMenuItems(.layout) }
+        topStudioMenu("쪽", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if !isActiveTabDocumentStudio {
-            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-          }
-        }
-        topMenuBarItem("표", palette: palette) {
+          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+        }) { ribbonCategoryMenuItems(.moduleSpecific) }
+        topStudioMenu("표", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .formulasAndData
-          if !isActiveTabDocumentStudio {
-            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-          }
-        }
-        topMenuBarItem("도구", palette: palette) {
+          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+        }) { ribbonCategoryMenuItems(.formulasAndData) }
+        topStudioMenu("도구", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .review
-          if !isActiveTabDocumentStudio {
-            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-          }
-        }
+          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+        }) { ribbonCategoryMenuItems(.review) }
       }
       .fixedSize(horizontal: true, vertical: false)
 

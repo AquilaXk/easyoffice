@@ -547,6 +547,18 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   sandbox.dispatchWindowKeydown({ key: "Escape" });
   assert.equal(editMenuWrap.classList.contains("open"), false);
 
+  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  await flushAsyncTurns();
+  const docTableBody = document.getElementById("doc-table-body");
+  const initialRowCount = docTableBody.querySelectorAll("tr").length;
+  userClick(document.querySelector('[data-studio-menu-cmd="table-add-row"]'));
+  await flushAsyncTurns();
+  assert.equal(docTableBody.querySelectorAll("tr").length, initialRowCount + 1);
+
+  userClick(document.querySelector('[data-studio-menu-cmd="security-audit"]'));
+  await flushAsyncTurns();
+  assert.match(document.getElementById("status-command-feedback").textContent, /보안|감사/);
+
   userClick(document.getElementById("btn-command-palette"));
   const paletteModal = document.getElementById("cmd-palette-modal");
   assert.equal(paletteModal.open, true);
@@ -556,6 +568,11 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(cpItems[0].classList.contains("cp-item--selected"), true);
   assert.equal(cpItems[0].querySelector(".cp-item-label")?.textContent, "저장");
   assert.equal(cpItems[0].querySelector(".cp-item-shortcut")?.textContent, "Ctrl+S");
+
+  const feedbackBeforeModalBold = document.getElementById("status-command-feedback").textContent;
+  sandbox.dispatchWindowKeydown({ key: "b", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("status-command-feedback").textContent, feedbackBeforeModalBold);
 
   sandbox.dispatchWindowKeydown({ key: "ArrowDown" });
   const cpItemsAfterDown = paletteModal.querySelectorAll("#cmd-palette-list .cp-item");
@@ -568,7 +585,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(paletteModal.querySelector("#cmd-palette-list .cp-empty")?.textContent, "검색 결과 없음");
   cmdInput.value = "";
   cmdInput.dispatchEvent({ type: "input" });
-  sandbox.dispatchWindowKeydown({ key: "Escape" });
+  sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
   assert.equal(paletteModal.open, false);
 });
 

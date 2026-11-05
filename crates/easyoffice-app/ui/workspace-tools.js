@@ -8,8 +8,8 @@
     palette: "btn-command-palette", "studio-save": "qat-save", "studio-undo": "qat-undo", "studio-redo": "qat-redo",
     "zoom-in": "btn-zoom-in", "zoom-out": "btn-zoom-out", "zoom-fit-page": "btn-zoom-fit-page", "zoom-fit-width": "btn-zoom-fit-width",
     "ctrl-marks": "btn-toggle-ctrl-marks", "para-marks": "btn-toggle-para-marks", "doc-grid": "btn-toggle-doc-grid",
-    "table-add-row": "btn-doc-table-add-row", "table-merge": "btn-doc-table-merge", "table-sum": "btn-doc-table-sum",
-    "smart-diagnose": "btn-smart-diagnose", "scrub-pii": "btn-scrub-pii", "security-audit": "btn-security-audit", "view-theme": "btn-theme-toggle",
+    "table-add-row": "btn-doc-add-row", "table-merge": "btn-doc-merge-toggle", "table-sum": "btn-doc-eval-table",
+    "smart-diagnose": "btn-smart-diagnose", "scrub-pii": "btn-scrub-pii", "security-audit": "btn-run-security-audit", "view-theme": "btn-theme-toggle",
   };
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { hwp: true, target: "hwp-mod-field", label: "문자표 기호 삽입 완료" },
@@ -354,15 +354,13 @@
       const curMod = getActiveModule();
       if (outcome.ok) {
         txt.textContent = "문서 보안 검사 완료 (" + curMod + "): SAFE";
-      } else if (
-        outcome.errorMessage.startsWith("엔진 미연결:") ||
-        outcome.errorMessage.startsWith("IPC 네트워크 오류:")
-      ) {
+      } else if (outcome.errorMessage.startsWith("엔진 미연결:") || outcome.errorMessage.startsWith("IPC 네트워크 오류:")) {
         txt.textContent = "[요청 거부] " + outcome.errorMessage;
       } else {
-        txt.textContent =
-          "문서 보안 검사 완료 (" + curMod + "): REJECTED (" + outcome.errorMessage + ")";
+        txt.textContent = "문서 보안 검사 완료 (" + curMod + "): REJECTED (" + outcome.errorMessage + ")";
       }
+      const fb = document.getElementById("status-command-feedback");
+      if (fb) fb.textContent = txt.textContent;
     }
 
     function runSecurityAuditAction() {
@@ -652,12 +650,12 @@
         }
 
         if (totalMasked > 0) {
-          piiOut.textContent =
-            "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + curMod + ")";
+          piiOut.textContent = "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + curMod + ")";
         } else {
-          piiOut.textContent =
-            "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + curMod + ")";
+          piiOut.textContent = "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + curMod + ")";
         }
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = piiOut.textContent;
         computeSmartStats();
       });
     }
@@ -665,6 +663,8 @@
     let studioClipboardText = "";
 
     function withDocStyleUndo(mutateFn) {
+      const curMod = getActiveModule();
+      if (curMod !== "DOC" && curMod !== "HWP") return;
       const pre = typeof captureWorkspaceSnapshot === "function" ? captureWorkspaceSnapshot(false) : null;
       mutateFn();
       saveActiveDocTabState();
@@ -912,8 +912,10 @@
             closeAllStudioMenus();
             menuItem.classList.add("open");
             menuItem.dataset.openedByHover = "true";
+            host.setTimeout?.(() => { delete menuItem.dataset.openedByHover; }, 80);
           }
         });
+        menuItem?.addEventListener?.("mouseleave", () => { delete menuItem.dataset.openedByHover; });
       }
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
         item.addEventListener("click", (ev) => {

@@ -290,6 +290,7 @@
       }
       li.addEventListener("click", () => executePaletteItem(item));
       listEl.appendChild(li);
+      if (idx === paletteSelectedIdx) li.scrollIntoView?.({ block: "nearest" });
     });
   }
 
@@ -301,11 +302,6 @@
     if (qatSave) qatSave.title = "저장 (Ctrl+S)";
     if (qatUndo) qatUndo.title = "실행 취소 (Ctrl+Z)";
     if (qatRedo) qatRedo.title = "다시 실행 (Ctrl+Y)";
-    for (const sc of document.querySelectorAll(".md-shortcut")) {
-      if (typeof formatPlatformShortcut === "function" && sc.textContent) {
-        sc.textContent = formatPlatformShortcut(sc.textContent, modifier);
-      }
-    }
   }
 
   function setupTabsAndRibbonChrome(boot) {
@@ -437,7 +433,7 @@
       zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
     }
     workspacePanels.setupStudioChromeControls(applyZoomPercent, (cmd) => {
-      const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
+      const modPrefix = getRibbonModulePrefix(activeModule);
       const fullCmd =
         cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd;
       void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
@@ -509,7 +505,7 @@
       const btn = document.getElementById(btnId);
       if (btn) {
         btn.addEventListener("click", () => {
-          const modPrefix = getRibbonModulePrefix(activeModule === "HWP" ? "HWP" : "DOC");
+          const modPrefix = getRibbonModulePrefix(activeModule);
           void ribbonHistory
             .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdSuffix)
             .catch(() => {});
@@ -862,25 +858,14 @@
   function setupCommandPaletteHandlers() {
     const modal = document.getElementById("cmd-palette-modal");
     const openPaletteBtn = document.getElementById("btn-command-palette");
-    const closePaletteBtn = document.getElementById("btn-close-palette");
     const cmdSearchInput = document.getElementById("cmd-search-input");
     if (openPaletteBtn && modal) {
-      openPaletteBtn.addEventListener("click", () => {
-        paletteSelectedIdx = 0;
-        renderCommandPaletteList(cmdSearchInput ? cmdSearchInput.value : "");
-        if (typeof modal.showModal === "function") modal.showModal();
-        if (cmdSearchInput) cmdSearchInput.focus();
-      });
+      openPaletteBtn.addEventListener("click", () => togglePaletteModal(modal, cmdSearchInput));
     }
     if (cmdSearchInput) {
       cmdSearchInput.addEventListener("input", () => {
         paletteSelectedIdx = 0;
         renderCommandPaletteList(cmdSearchInput.value);
-      });
-    }
-    if (closePaletteBtn && modal) {
-      closePaletteBtn.addEventListener("click", () => {
-        if (typeof modal.close === "function") modal.close();
       });
     }
     modal?.addEventListener?.("click", (ev) => {
@@ -891,6 +876,10 @@
       if (e.isComposing || isImeComposing) return;
       if (modal?.open) {
         if (e.key === "Escape" && typeof modal.close === "function") return void modal.close();
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+          e.preventDefault();
+          return void modal.close?.();
+        }
         if (e.key === "ArrowDown" && paletteFilteredItems.length > 0) {
           e.preventDefault();
           paletteSelectedIdx = Math.min(paletteFilteredItems.length - 1, paletteSelectedIdx + 1);
@@ -908,6 +897,7 @@
           executePaletteItem(paletteFilteredItems[paletteSelectedIdx]);
           return;
         }
+        return;
       }
       if (!e.metaKey && !e.ctrlKey) return;
       const keyLower = e.key.toLowerCase();
