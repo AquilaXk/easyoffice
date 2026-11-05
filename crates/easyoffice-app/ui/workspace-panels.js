@@ -549,6 +549,10 @@
         restoreDomChildren(editor, saved.editorNodes || [], document);
         applyDocLayoutStyle(editor, saved.layoutStyle);
       }
+      const roleBadge = document.getElementById("doc-style-role-badge");
+      if (roleBadge) {
+        roleBadge.textContent = mod === "HWP" ? "공문서 바탕글" : "바탕글";
+      }
       activeDocBlockEl = null;
       computeDocTableSummary();
       tools.computeSmartStats();

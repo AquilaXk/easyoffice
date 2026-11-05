@@ -910,6 +910,24 @@ public struct DocumentEditorDetailPaneView: View {
               }
             }
 
+            if !isSplitActive {
+              HStack(spacing: 2) {
+                flatToolbarButton("가 굵게", palette: palette) {
+                  viewModel.executeRibbonCommand(isHWPModule ? "hwp-home-bold" : "doc-home-bold")
+                }
+                flatToolbarButton("가 기울임", palette: palette) {
+                  viewModel.executeRibbonCommand(
+                    isHWPModule ? "hwp-home-italic" : "doc-home-italic"
+                  )
+                }
+                flatToolbarButton("가̲ 밑줄", palette: palette) {
+                  viewModel.executeRibbonCommand(
+                    isHWPModule ? "hwp-home-underline" : "doc-home-underline"
+                  )
+                }
+              }
+            }
+
             if isSplitActive {
               FlatToolbarMenu(
                 title: "정렬",
@@ -1490,6 +1508,39 @@ public struct DocumentEditorDetailPaneView: View {
                 y: 2
               )
 
+              if !viewModel.isManuscriptGridModeEnabled {
+                Canvas { context, size in
+                  let inset: CGFloat = 14.0
+                  let arm: CGFloat = 12.0
+                  let thick: CGFloat = 1.2
+                  let cropColor = palette.secondaryText.swiftUIColor.opacity(0.45)
+                  let rects = [
+                    CGRect(x: inset, y: inset, width: arm, height: thick),
+                    CGRect(x: inset, y: inset, width: thick, height: arm),
+                    CGRect(x: size.width - inset - arm, y: inset, width: arm, height: thick),
+                    CGRect(x: size.width - inset - thick, y: inset, width: thick, height: arm),
+                    CGRect(x: inset, y: size.height - inset - thick, width: arm, height: thick),
+                    CGRect(x: inset, y: size.height - inset - arm, width: thick, height: arm),
+                    CGRect(
+                      x: size.width - inset - arm,
+                      y: size.height - inset - thick,
+                      width: arm,
+                      height: thick
+                    ),
+                    CGRect(
+                      x: size.width - inset - thick,
+                      y: size.height - inset - arm,
+                      width: thick,
+                      height: arm
+                    ),
+                  ]
+                  for r in rects {
+                    context.fill(Path(r), with: .color(cropColor))
+                  }
+                }
+                .allowsHitTesting(false)
+              }
+
               if !watermarkText.isEmpty {
                 Text(watermarkText)
                   .font(.system(size: 38, weight: .black, design: .rounded))
@@ -1570,8 +1621,14 @@ public struct DocumentEditorDetailPaneView: View {
     let listPrefix = document.formattedListPrefix(forParagraphAt: paragraphIndex)
     let listIndentPt = paragraph.listKind == .none ? 0.0 : CGFloat(paragraph.listLevel) * 14.0
     let kernPt = CGFloat(paragraph.fontSizePt * (paragraph.letterSpacingPercent / 100.0))
+    let isSectionHeading = (paragraph.style == .heading1 || paragraph.style == .heading2)
 
     HStack(alignment: .firstTextBaseline, spacing: 6) {
+      if isSectionHeading {
+        Rectangle()
+          .fill(EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor)
+          .frame(width: 3, height: 13)
+      }
       if let listPrefix {
         Text(listPrefix)
           .font(.system(size: CGFloat(paragraph.fontSizePt), weight: .bold, design: .monospaced))

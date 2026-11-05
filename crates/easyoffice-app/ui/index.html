@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EasyOffice — 통합 오피스 워크스페이스</title>
+    <link rel="icon" href="/favicon.ico" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -85,6 +86,26 @@
 
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
+            <div id="doc-style-bar" class="eo-doc-style-bar" role="toolbar" aria-label="문단 및 글자 서식 도구줄">
+              <span id="doc-style-role-badge" class="eo-style-chip">바탕글</span>
+              <span class="eo-style-sep" aria-hidden="true">|</span>
+              <span id="doc-style-font-badge" class="eo-style-chip">Pretendard</span>
+              <span class="eo-style-sep" aria-hidden="true">|</span>
+              <span id="doc-style-size-badge" class="eo-style-chip">11.0 pt</span>
+              <span class="eo-style-sep" aria-hidden="true">|</span>
+              <button id="btn-stylebar-bold" class="eo-glyph-btn" type="button" title="굵게 (가)">
+                <strong>가</strong> 굵게
+              </button>
+              <button id="btn-stylebar-italic" class="eo-glyph-btn" type="button" title="기울임 (가)">
+                <em>가</em> 기울임
+              </button>
+              <button id="btn-stylebar-underline" class="eo-glyph-btn" type="button" title="밑줄 (가)">
+                <u>가</u> 밑줄
+              </button>
+              <span class="eo-style-sep" aria-hidden="true">|</span>
+              <span class="eo-style-chip">줄간격 160%</span>
+              <span id="doc-page-zone-indicator" class="eo-style-zone">1 / 1 쪽 · 구역: 1 / 1 · 삽입</span>
+            </div>
             <div class="page-ruler" aria-label="문서 가로 눈금자">
               <span>0 · 20 · 40 · 60 · 80 · 100 · 120 · 140 · 160 (mm)</span>
               <span>A4 세로 · 좌우 여백 54pt · 본문 487pt</span>
@@ -378,7 +399,7 @@
               <input
                 id="pdf-watermark-input"
                 type="text"
-                class="pdf-watermark-input"
+                class="cmd-input pdf-watermark-input"
                 value="대외비 · 기획조정실"
                 aria-label="워터마크 문구"
               />
@@ -412,7 +433,7 @@
               </p>
               <div class="formula-bar">
                 <label for="conv-src-fmt">원본</label>
-                <select id="conv-src-fmt" aria-label="원본 포맷">
+                <select id="conv-src-fmt" class="cmd-input conv-fmt-select" aria-label="원본 포맷">
                   <option value="docx" selected>DOCX</option>
                   <option value="doc">DOC</option>
                   <option value="hwpx">HWPX</option>
@@ -436,7 +457,7 @@
                 </select>
                 <span>→</span>
                 <label for="conv-dst-fmt">대상</label>
-                <select id="conv-dst-fmt" aria-label="대상 포맷">
+                <select id="conv-dst-fmt" class="cmd-input conv-fmt-select" aria-label="대상 포맷">
                   <option value="hwpx" selected>HWPX</option>
                   <option value="hwtx">HWTX</option>
                   <option value="hwp">HWP 5.0</option>

@@ -27,6 +27,7 @@
       getActiveSlideIndex,
       getPdfRotationDeg,
       setPdfRotationDeg,
+      getShortcutModifier,
       enqueueWorkspaceHistoryOp,
     } = deps;
 
@@ -38,6 +39,7 @@
       RIBBON_STYLE_LABELS,
       RIBBON_CATEGORY_ORDER,
       syncLocalRibbonStateFromBackend,
+      formatPlatformShortcut,
     } = ribbonCatalog;
 
     const {
@@ -199,7 +201,12 @@
         const span = document.createElement("span");
         span.textContent = cmd.title || "";
         const small = document.createElement("small");
-        small.textContent = "(" + (cmd.shortcut || "") + ")";
+        const activeModKey = typeof getShortcutModifier === "function" ? getShortcutModifier() : "⌘";
+        const formattedShortcut =
+          typeof formatPlatformShortcut === "function"
+            ? formatPlatformShortcut(cmd.shortcut || "", activeModKey)
+            : cmd.shortcut || "";
+        small.textContent = "(" + formattedShortcut + ")";
         btn.appendChild(span);
         btn.appendChild(document.createTextNode(" "));
         btn.appendChild(small);
@@ -299,7 +306,10 @@
       const badge = document.getElementById("pdf-rotation-badge");
       const card = document.getElementById("pdf-page-card");
       if (badge) badge.textContent = "회전: " + nextRot + "°";
-      if (card) card.style.transform = "rotate(" + nextRot + "deg)";
+      if (card) {
+        card.style.transform = "rotate(" + nextRot + "deg)";
+        card.dataset.rotatedQuarter = nextRot % 180 !== 0 ? "true" : "false";
+      }
       workspacePanels.restorePdfStudioState(snap.pdfStudio);
       workspacePanels.restoreWorkspaceViewState(snap.viewState);
 
@@ -811,7 +821,11 @@
         const badge = document.getElementById("pdf-rotation-badge");
         const card = document.getElementById("pdf-page-card");
         if (badge) badge.textContent = "회전: " + nextRot + "°";
-        if (card) card.style.transform = "rotate(" + nextRot + "deg)";
+        if (card) {
+          card.style.transform = "rotate(" + nextRot + "deg)";
+          card.dataset.rotatedQuarter = nextRot % 180 !== 0 ? "true" : "false";
+        }
+        workspacePanels.applyPdfStudioFormState();
         return;
       }
       if (cmdId === "pdf-mod-tooffice") {

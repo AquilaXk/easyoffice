@@ -12,6 +12,7 @@
     createEmptySlideStyleFields,
     createInitialSlideDeckState,
     createDefaultRibbonState,
+    formatPlatformShortcut,
   } = ribbonCatalog;
 
   const slideDeckState = createInitialSlideDeckState();
@@ -25,6 +26,7 @@
   let activeSlideIndex = 0;
   let slideLaserActive = false;
   let pdfRotationDeg = 0;
+  let activeShortcutModifier = "⌘";
   let workspaceHistoryQueue = Promise.resolve();
 
   const docTabStore = {
@@ -194,6 +196,7 @@
     setPdfRotationDeg: (next) => {
       pdfRotationDeg = next;
     },
+    getShortcutModifier: () => activeShortcutModifier,
     enqueueWorkspaceHistoryOp,
   });
 
@@ -258,10 +261,14 @@
       const koBadge = MODULE_SHORT_BADGES[mod] || mod;
       Object.keys(cats).forEach((cat) => {
         cats[cat].forEach((c) => {
+          const dispShortcut =
+            typeof formatPlatformShortcut === "function"
+              ? formatPlatformShortcut(c.shortcut, activeShortcutModifier)
+              : c.shortcut;
           allItems.push({
             id: c.id,
             module: mod,
-            label: "[" + koBadge + "] " + c.title + " (" + c.shortcut + ")",
+            label: "[" + koBadge + "] " + c.title + " (" + dispShortcut + ")",
           });
         });
       });
@@ -301,10 +308,22 @@
   }
 
   function setupTabsAndRibbonChrome(boot) {
+    activeShortcutModifier = boot.shortcutModifier || "⌘";
     const pill = document.getElementById("platform-pill");
     const hint = document.getElementById("shortcut-hint");
-    if (pill) pill.textContent = boot.platform + " · " + boot.shortcutModifier;
-    if (hint) hint.textContent = boot.shortcutModifier + "K";
+    if (pill) pill.textContent = boot.platform + " · " + activeShortcutModifier;
+    if (hint) {
+      hint.textContent =
+        activeShortcutModifier === "⌘" ? "⌘K" : activeShortcutModifier + "+K";
+    }
+    if (activeShortcutModifier === "Ctrl") {
+      const qatSave = document.getElementById("qat-save");
+      const qatUndo = document.getElementById("qat-undo");
+      const qatRedo = document.getElementById("qat-redo");
+      if (qatSave) qatSave.title = "저장 (Ctrl+S)";
+      if (qatUndo) qatUndo.title = "실행 취소 (Ctrl+Z)";
+      if (qatRedo) qatRedo.title = "다시 실행 (Ctrl+Y)";
+    }
 
     if (boot.moduleAccents && typeof boot.moduleAccents === "object") {
       const rootStyle = document.documentElement.style;
@@ -469,6 +488,21 @@
   }
 
   function setupDocTableAndSheetTabHandlers() {
+    [
+      ["btn-stylebar-bold", "bold"],
+      ["btn-stylebar-italic", "italic"],
+      ["btn-stylebar-underline", "underline"],
+    ].forEach(([btnId, cmdSuffix]) => {
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.addEventListener("click", () => {
+          const modPrefix = activeModule === "HWP" ? "hwp" : "doc";
+          void ribbonHistory
+            .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdSuffix)
+            .catch(() => {});
+        });
+      }
+    });
     const docEditor = document.getElementById("doc-editor");
     if (docEditor) {
       docEditor.addEventListener("click", (e) => {
@@ -714,8 +748,12 @@
     const btnPdfApply = document.getElementById("btn-pdf-apply");
     if (btnPdfApply) {
       btnPdfApply.addEventListener("click", () => {
-        ribbonHistory.pushUndoSnapshot(false);
-        workspacePanels.applyPdfStudioFormState();
+        void ribbonHistory
+          .enqueueWorkspaceHistoryOp(() => {
+            ribbonHistory.pushUndoSnapshot(false);
+            workspacePanels.applyPdfStudioFormState();
+          })
+          .catch(() => {});
       });
     }
   }
@@ -850,6 +888,30 @@
       ) {
         e.preventDefault();
         void ribbonHistory.performWorkspaceRedo().catch(() => {});
+      } else if ((e.metaKey || e.ctrlKey) && e.altKey && keyLower === "d") {
+        e.preventDefault();
+        const modPrefix = (activeModule === "CONV" ? "DOC" : activeModule).toLowerCase();
+        void ribbonHistory
+          .executeTrackedRibbonCommand(modPrefix + "-view-dark")
+          .catch(() => {});
+      } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "0") {
+        e.preventDefault();
+        const modPrefix = (activeModule === "CONV" ? "DOC" : activeModule).toLowerCase();
+        void ribbonHistory
+          .executeTrackedRibbonCommand(modPrefix + "-view-zoom")
+          .catch(() => {});
+      } else if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (keyLower === "b" || keyLower === "i" || keyLower === "u")
+      ) {
+        e.preventDefault();
+        const modPrefix = (activeModule === "CONV" ? "DOC" : activeModule).toLowerCase();
+        const cmdMap = { b: "bold", i: "italic", u: "underline" };
+        void ribbonHistory
+          .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdMap[keyLower])
+          .catch(() => {});
       } else if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
         modal.close();
       }

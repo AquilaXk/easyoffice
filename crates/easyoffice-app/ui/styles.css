@@ -91,6 +91,8 @@ select:focus-visible,
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .brand-badge {
@@ -111,6 +113,7 @@ select:focus-visible,
   font-size: 11px;
   padding: 2px 6px;
   color: var(--eo-text-muted);
+  white-space: nowrap;
 }
 
 .qat-group {
@@ -120,12 +123,15 @@ select:focus-visible,
   margin-left: 6px;
   padding-left: 8px;
   border-left: 1px solid var(--eo-border);
+  flex-shrink: 0;
 }
 
 .qat-btn {
   padding: 4px 8px;
   font-size: 11px;
   color: var(--eo-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .qat-btn:hover {
@@ -140,8 +146,11 @@ select:focus-visible,
 
 .tab-strip {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 2px;
   overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .tab-pill {
@@ -153,6 +162,7 @@ select:focus-visible,
   color: var(--eo-text-muted);
   border-bottom: 2px solid transparent;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab-pill:hover {
@@ -168,7 +178,9 @@ select:focus-visible,
 
 .topbar-actions {
   display: flex;
+  align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .action-btn,
@@ -177,6 +189,8 @@ select:focus-visible,
   font-size: 12px;
   color: var(--eo-text);
   background: transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .action-btn:hover,
@@ -191,6 +205,8 @@ select:focus-visible,
   font-weight: 600;
   background: var(--eo-primary);
   color: var(--eo-primary-on);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .primary-btn:hover {
@@ -387,6 +403,52 @@ select:focus-visible,
   background: var(--eo-bg);
 }
 
+.eo-doc-style-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 760px;
+  margin: 0 auto 6px;
+  padding: 4px 12px;
+  background: var(--eo-surface);
+  border-bottom: 1px solid var(--eo-border);
+  font-size: 11px;
+  color: var(--eo-text);
+}
+
+.eo-style-chip {
+  font-weight: 600;
+  color: var(--eo-text);
+  white-space: nowrap;
+}
+
+.eo-style-sep {
+  color: var(--eo-border);
+  user-select: none;
+}
+
+.eo-glyph-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--eo-text);
+  background: transparent;
+  white-space: nowrap;
+}
+
+.eo-glyph-btn:hover {
+  background: var(--eo-primary-soft);
+  color: var(--eo-primary);
+}
+
+.eo-style-zone {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--eo-module-active);
+  white-space: nowrap;
+}
+
 .page-ruler {
   display: flex;
   justify-content: space-between;
@@ -407,6 +469,45 @@ select:focus-visible,
   border: 1px solid var(--eo-border);
   border-radius: 6px;
   line-height: 1.65;
+}
+
+#doc-editor:not(.manuscript-grid) {
+  background-image:
+    linear-gradient(var(--eo-border), var(--eo-border)),
+    linear-gradient(var(--eo-border), var(--eo-border)),
+    linear-gradient(var(--eo-border), var(--eo-border)),
+    linear-gradient(var(--eo-border), var(--eo-border)),
+    linear-gradient(var(--eo-border), var(--eo-border)),
+    linear-gradient(var(--eo-border), var(--eo-border)),
+    linear-gradient(var(--eo-border), var(--eo-border)),
+    linear-gradient(var(--eo-border), var(--eo-border));
+  background-repeat: no-repeat;
+  background-size:
+    12px 1.5px,
+    1.5px 12px,
+    12px 1.5px,
+    1.5px 12px,
+    12px 1.5px,
+    1.5px 12px,
+    12px 1.5px,
+    1.5px 12px;
+  background-position:
+    14px 14px,
+    14px 14px,
+    calc(100% - 14px) 14px,
+    calc(100% - 14px) 14px,
+    14px calc(100% - 14px),
+    14px calc(100% - 14px),
+    calc(100% - 14px) calc(100% - 14px),
+    calc(100% - 14px) calc(100% - 14px);
+}
+
+#doc-editor h2 {
+  margin: 12px 0 6px;
+  padding: 4px 10px;
+  background: var(--eo-surface-elevated);
+  border-left: 3px solid var(--eo-module-active);
+  font-size: 14px;
 }
 
 .doc-meta-line {
@@ -600,6 +701,16 @@ select:focus-visible,
   gap: 14px;
 }
 
+.pdf-page-card {
+  max-width: 460px;
+  min-height: 280px;
+  margin: 16px auto;
+}
+
+.pdf-page-card[data-rotated-quarter="true"] {
+  margin: 110px auto;
+}
+
 .slide-lower-zone {
   padding-top: 12px;
   border-top: 1px solid var(--eo-border);
@@ -663,11 +774,28 @@ select:focus-visible,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 0 14px;
   font-size: 11px;
   background: var(--eo-surface);
   border-top: 1px solid var(--eo-border);
   color: var(--eo-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.statusbar > span {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#status-command-feedback {
+  flex: 1 1 auto;
+  min-width: 80px;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
 }
 
 .cmd-modal {
@@ -715,14 +843,17 @@ select:focus-visible,
   padding: 4px 8px;
 }
 
-.pdf-stamp-select {
+.pdf-stamp-select,
+.conv-fmt-select {
   width: 140px;
   margin: 0;
   padding: 4px 8px;
 }
 
 .pdf-watermark-input {
-  max-width: 200px;
+  width: 200px;
+  margin: 0;
+  padding: 4px 8px;
 }
 
 .swatch-primary {

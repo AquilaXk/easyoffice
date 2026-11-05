@@ -20,6 +20,7 @@ const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
 const APP_JS: &str = include_str!("../ui/app.js");
+const FAVICON_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#5C6BC0\"/><text x=\"16\" y=\"21\" text-anchor=\"middle\" fill=\"#FFFFFF\" font-family=\"sans-serif\" font-size=\"14\" font-weight=\"700\">EO</text></svg>";
 
 pub const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
 pub const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
@@ -251,6 +252,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
         ("GET", "/" | "/index.html") => {
             ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
         }
+        ("GET", "/favicon.ico" | "/favicon.svg") => (
+            "200 OK",
+            "image/svg+xml; charset=utf-8",
+            FAVICON_SVG.to_string(),
+        ),
         ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
         ("GET", "/sheet-utils.js") => (
             "200 OK",

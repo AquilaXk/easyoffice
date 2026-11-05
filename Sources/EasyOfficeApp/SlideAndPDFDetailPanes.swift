@@ -1633,7 +1633,12 @@ public struct PDFStudioDetailPaneView: View {
               .foregroundStyle(palette.secondaryText.swiftUIColor)
 
             ForEach(pageAnnotations.prefix(4)) { annot in
-              Text("· \(annot.kind.rawValue) \(annot.content)")
+              let cleanedContent = annot.content
+                .replacingOccurrences(of: "\(annot.kind.rawValue): ", with: "")
+                .replacingOccurrences(of: "\(annot.kind.rawValue) ", with: "")
+                .replacingOccurrences(of: "하이라이트: ", with: "")
+                .replacingOccurrences(of: "[결재 스탬프] ", with: "")
+              Text("· \(annot.kind.rawValue): \(cleanedContent)")
                 .font(.system(size: 10))
                 .foregroundStyle(palette.secondaryText.swiftUIColor)
                 .lineLimit(1)

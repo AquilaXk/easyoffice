@@ -567,6 +567,24 @@ extension WorksheetModel {
         return .number(1.0)
       }
 
+    case "TRANSPOSE":
+      guard frame.count == 1 else { return .error("#VALUE!") }
+      switch resolveRangeArgument(from: frame.args[0], frame: &frame) {
+      case .success(let sheetName, let range):
+        let coord = range.start.packedCoordinate
+        let val: EvaluatedCellValue
+        if let sheetName {
+          val = evaluateOnSheet(
+            named: sheetName, at: coord, context: &frame.context, depth: frame.depth + 1)
+        } else {
+          val = evaluateInternal(at: coord, context: &frame.context, depth: frame.depth + 1)
+        }
+        return val == .empty ? .number(0.0) : val
+      case .failure(let err):
+        if err != "#VALUE!" { return .error(err) }
+        return frame.arg(0, in: self)
+      }
+
     default:
       return nil
     }

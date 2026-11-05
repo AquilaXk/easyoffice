@@ -397,4 +397,18 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   userClick(document.querySelector('.slide-thumb[data-slide-idx="0"]'));
   await flushAsyncTurns();
   assert.match(lowerZone.querySelector("p").textContent, /추진 배경·목적/);
+
+  const catalog = sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  assert.equal(catalog.formatPlatformShortcut("⌘B", "Ctrl"), "Ctrl+B");
+  assert.equal(catalog.formatPlatformShortcut("⌃⌥S", "Ctrl"), "Ctrl+Alt+S");
+  assert.equal(catalog.formatPlatformShortcut("⇧⌘P", "Ctrl"), "Shift+Ctrl+P");
+  assert.equal(catalog.formatPlatformShortcut("⌘B", "⌘"), "⌘B");
+  assert.equal(document.getElementById("shortcut-hint").textContent, "Ctrl+K");
+
+  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  await flushAsyncTurns();
+  userClick(document.getElementById("btn-pdf-rotate"));
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("pdf-page-card").dataset.rotatedQuarter, "true");
+  assert.match(document.getElementById("pdf-form-status").textContent, /회전:\s*90°/);
 });

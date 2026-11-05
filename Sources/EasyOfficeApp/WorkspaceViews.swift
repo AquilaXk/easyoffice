@@ -2335,8 +2335,9 @@ struct BottomWorkspaceStatusBarView: View {
             let chars = doc.characterCountIncludingSpaces
             let manuscriptPages = max(1, (chars + 199) / 200)
             let readingMinutes = max(1, (words + 199) / 200)
+            let sectionCount = max(1, doc.sections.count)
             Text(
-              "쪽 1/\(doc.estimatedPageCount) · 단어 \(words) · 글자 \(chars)자 · 원고지 \(manuscriptPages)매 · 읽기 약 \(readingMinutes)분"
+              "1/\(doc.estimatedPageCount) 쪽 · 구역 1/\(sectionCount) · 삽입 · 단어 \(words) · 글자 \(chars)자 · 원고지 \(manuscriptPages)매 · 읽기 약 \(readingMinutes)분"
             )
             .font(.system(size: 11, weight: .medium, design: .monospaced))
             .foregroundStyle(palette.primaryText.swiftUIColor)

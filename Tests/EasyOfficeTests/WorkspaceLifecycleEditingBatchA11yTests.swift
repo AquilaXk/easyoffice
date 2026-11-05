@@ -740,5 +740,37 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
       record: ["A": "{{B}}", "B": "노출금지"]
     )
     XCTAssertEqual(singlePassMerged.paragraphs.first?.text, "값: {{B}}")
+
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+    let txtURL = tempDir.appendingPathComponent("plain-note.txt")
+    let rawTxt = "# 제목기호유지\n**별표유지**"
+    try Data(rawTxt.utf8).write(to: txtURL)
+
+    let tabCountBeforeTxt = vm.openTabs.count
+    let openedTxt1 = try vm.loadFromDisk(url: txtURL)
+    XCTAssertEqual(vm.openTabs.count, tabCountBeforeTxt + 1)
+    if case .document(let txtDoc) = openedTxt1.payload {
+      XCTAssertEqual(txtDoc.paragraphs.count, 2)
+      XCTAssertEqual(txtDoc.paragraphs[0].style, .body)
+      XCTAssertEqual(txtDoc.paragraphs[0].text, "# 제목기호유지")
+      XCTAssertEqual(txtDoc.paragraphs[1].text, "**별표유지**")
+    } else {
+      XCTFail("Expected .document payload for .txt file")
+    }
+
+    let openedTxt2 = try vm.loadFromDisk(url: txtURL)
+    XCTAssertEqual(vm.openTabs.count, tabCountBeforeTxt + 1)
+    XCTAssertEqual(openedTxt2.id, openedTxt1.id)
+
+    var finSheet = WorksheetModel(
+      name: "함수집합동기화",
+      rawCells: ["B2": "42", "C2": "84"]
+    )
+    try finSheet.setCell("A1", rawValue: "=DDB(2400, 300, 10, 1)")
+    try finSheet.setCell("A2", rawValue: "=TRANSPOSE(B2:C2)")
+    XCTAssertEqual(finSheet.evaluate(at: "A1"), .number(480.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A2"), .number(42.0))
   }
 }

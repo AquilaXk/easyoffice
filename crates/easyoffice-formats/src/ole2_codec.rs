@@ -36,6 +36,29 @@ struct Ole2DirNode<'a> {
     stream_size: u64,
 }
 
+impl<'a> Ole2DirNode<'a> {
+    fn new(
+        name: String,
+        obj_type: u8,
+        data: Option<&'a [u8]>,
+        start_sector: u32,
+        stream_size: u64,
+    ) -> Self {
+        Self {
+            name,
+            obj_type,
+            children: Vec::new(),
+            data,
+            left_sibling: Ole2ContainerCodec::FREE_SECTOR,
+            right_sibling: Ole2ContainerCodec::FREE_SECTOR,
+            child_id: Ole2ContainerCodec::FREE_SECTOR,
+            color: 1,
+            start_sector,
+            stream_size,
+        }
+    }
+}
+
 impl Ole2ContainerCodec {
     pub const SECTOR_SIZE: usize = 512;
     pub const MINI_SECTOR_SIZE: usize = 64;
@@ -111,18 +134,13 @@ impl Ole2ContainerCodec {
         }
 
         let mut nodes: Vec<Ole2DirNode<'_>> = Vec::with_capacity(1 + streams.len() * 2);
-        nodes.push(Ole2DirNode {
-            name: "Root Entry".to_string(),
-            obj_type: Self::OBJ_TYPE_ROOT,
-            children: Vec::new(),
-            data: None,
-            left_sibling: Self::FREE_SECTOR,
-            right_sibling: Self::FREE_SECTOR,
-            child_id: Self::FREE_SECTOR,
-            color: 1,
-            start_sector: Self::END_OF_CHAIN,
-            stream_size: 0,
-        });
+        nodes.push(Ole2DirNode::new(
+            "Root Entry".to_string(),
+            Self::OBJ_TYPE_ROOT,
+            None,
+            Self::END_OF_CHAIN,
+            0,
+        ));
 
         for (name, data) in streams {
             let trimmed = name.trim().trim_matches('/');
@@ -164,18 +182,13 @@ impl Ole2ContainerCodec {
                         )));
                     }
                     let new_idx = nodes.len();
-                    nodes.push(Ole2DirNode {
-                        name: part_trimmed.to_string(),
-                        obj_type: Self::OBJ_TYPE_STORAGE,
-                        children: Vec::new(),
-                        data: None,
-                        left_sibling: Self::FREE_SECTOR,
-                        right_sibling: Self::FREE_SECTOR,
-                        child_id: Self::FREE_SECTOR,
-                        color: 1,
-                        start_sector: 0,
-                        stream_size: 0,
-                    });
+                    nodes.push(Ole2DirNode::new(
+                        part_trimmed.to_string(),
+                        Self::OBJ_TYPE_STORAGE,
+                        None,
+                        0,
+                        0,
+                    ));
                     nodes[parent_idx].children.push(new_idx);
                     parent_idx = new_idx;
                 }
@@ -201,18 +214,13 @@ impl Ole2ContainerCodec {
                 )));
             }
             let new_idx = nodes.len();
-            nodes.push(Ole2DirNode {
-                name: leaf_name.to_string(),
-                obj_type: Self::OBJ_TYPE_STREAM,
-                children: Vec::new(),
-                data: Some(data.as_slice()),
-                left_sibling: Self::FREE_SECTOR,
-                right_sibling: Self::FREE_SECTOR,
-                child_id: Self::FREE_SECTOR,
-                color: 1,
-                start_sector: Self::END_OF_CHAIN,
-                stream_size: data.len() as u64,
-            });
+            nodes.push(Ole2DirNode::new(
+                leaf_name.to_string(),
+                Self::OBJ_TYPE_STREAM,
+                Some(data.as_slice()),
+                Self::END_OF_CHAIN,
+                data.len() as u64,
+            ));
             nodes[parent_idx].children.push(new_idx);
         }
 
@@ -399,18 +407,7 @@ impl Ole2ContainerCodec {
 
         let mut dir_bytes = vec![0u8; dir_sector_count * Self::SECTOR_SIZE];
         for (entry_idx, node) in nodes.iter().enumerate() {
-            Self::write_dir_entry(
-                &mut dir_bytes,
-                entry_idx,
-                &node.name,
-                node.obj_type,
-                node.color,
-                node.left_sibling,
-                node.right_sibling,
-                node.child_id,
-                node.start_sector,
-                node.stream_size,
-            )?;
+            Self::write_dir_entry(&mut dir_bytes, entry_idx, node)?;
         }
         container.extend_from_slice(&dir_bytes);
 
@@ -721,37 +718,30 @@ impl Ole2ContainerCodec {
         Ok(streams)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn write_dir_entry(
         dir_bytes: &mut [u8],
         entry_idx: usize,
-        name: &str,
-        obj_type: u8,
-        color: u8,
-        left_sibling_id: u32,
-        right_sibling_id: u32,
-        child_id: u32,
-        start_sector: u32,
-        stream_size: u64,
+        node: &Ole2DirNode<'_>,
     ) -> Result<(), EasyOfficeError> {
         let base = entry_idx * Self::DIR_ENTRY_SIZE;
-        let units: Vec<u16> = name.encode_utf16().collect();
+        let units: Vec<u16> = node.name.encode_utf16().collect();
         if units.len() > 31 {
             return Err(EasyOfficeError::InvalidArgument(format!(
-                "OLE2 디렉터리 이름 길이(31 UTF-16 코드 유닛) 초과: {name}"
+                "OLE2 디렉터리 이름 길이(31 UTF-16 코드 유닛) 초과: {}",
+                node.name
             )));
         }
         for (i, &u) in units.iter().enumerate() {
             write_u16_le(dir_bytes, base + i * 2, u);
         }
         write_u16_le(dir_bytes, base + 64, ((units.len() + 1) * 2) as u16);
-        dir_bytes[base + 66] = obj_type;
-        dir_bytes[base + 67] = color;
-        write_u32_le(dir_bytes, base + 68, left_sibling_id);
-        write_u32_le(dir_bytes, base + 72, right_sibling_id);
-        write_u32_le(dir_bytes, base + 76, child_id);
-        write_u32_le(dir_bytes, base + 116, start_sector);
-        write_u64_le(dir_bytes, base + 120, stream_size);
+        dir_bytes[base + 66] = node.obj_type;
+        dir_bytes[base + 67] = node.color;
+        write_u32_le(dir_bytes, base + 68, node.left_sibling);
+        write_u32_le(dir_bytes, base + 72, node.right_sibling);
+        write_u32_le(dir_bytes, base + 76, node.child_id);
+        write_u32_le(dir_bytes, base + 116, node.start_sector);
+        write_u64_le(dir_bytes, base + 120, node.stream_size);
         Ok(())
     }
 }
