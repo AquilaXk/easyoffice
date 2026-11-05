@@ -383,7 +383,7 @@ extension WorkspaceViewModel {
       if let existingIdx = openTabs.firstIndex(where: {
         $0.fileURL?.standardizedFileURL.path == standardizedTarget
       }) {
-        if openTabs[existingIdx].payload != decoded.payload {
+        if openTabs[existingIdx].isModified {
           recordUndoSnapshot(for: openTabs[existingIdx].id)
         }
         openTabs[existingIdx].fileName = fileName

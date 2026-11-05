@@ -81,6 +81,7 @@ extension WorksheetModel {
       _ cellRange: CellRange,
       onSheet sheetName: String? = nil,
       in sheet: WorksheetModel,
+      isTransposed: Bool = false,
       onSkippedEmptyCount: ((Int) -> Void)? = nil,
       _ body: (EvaluatedCellValue) -> Void
     ) -> String? {
@@ -94,7 +95,7 @@ extension WorksheetModel {
         return "#REF!"
       }
 
-      if count > 4096 {
+      if count > 4096 && !isTransposed {
         let coords = sheet.populatedCoordinates(
           onSheet: sheetName,
           minRow: minRow,
@@ -114,9 +115,14 @@ extension WorksheetModel {
         return nil
       }
 
-      for r in minRow...maxRow {
-        for c in minCol...maxCol {
-          let coord = PackedCellCoordinate(row: r, column: c)
+      let outerRange = isTransposed ? (minCol...maxCol) : (minRow...maxRow)
+      let innerRange = isTransposed ? (minRow...maxRow) : (minCol...maxCol)
+      for outer in outerRange {
+        for inner in innerRange {
+          let coord = PackedCellCoordinate(
+            row: isTransposed ? inner : outer,
+            column: isTransposed ? outer : inner
+          )
           let v =
             sheetName.map {
               sheet.evaluateOnSheet(named: $0, at: coord, context: &context, depth: depth + 1)
@@ -230,7 +236,8 @@ extension WorksheetModel {
             }
           }
         case .functionCall(let fnName, let fnArgs) where fnName == "TRANSPOSE" && fnArgs.count == 1:
-          switch sheet.resolveRangeArgument(from: fnArgs[0], frame: &self) {
+          let resolved = sheet.resolveRangeArgumentWithTranspose(from: args[idx], frame: &self)
+          switch resolved.result {
           case .failure(let err):
             if err != "#VALUE!" { return err }
             let v = arg(idx, in: sheet)
@@ -241,13 +248,16 @@ extension WorksheetModel {
               guard sheet.hasSheet(named: sheetName) else { return "#REF!" }
               if let err = streamRangeCells(
                 resolvedRange, onSheet: sheetName, in: sheet,
+                isTransposed: resolved.isTransposed,
                 onSkippedEmptyCount: onSkippedEmptyCount, { body($0, true) })
               {
                 return err
               }
             } else {
               if let err = streamRangeCells(
-                resolvedRange, in: sheet, onSkippedEmptyCount: onSkippedEmptyCount,
+                resolvedRange, in: sheet,
+                isTransposed: resolved.isTransposed,
+                onSkippedEmptyCount: onSkippedEmptyCount,
                 { body($0, true) })
               {
                 return err

@@ -146,7 +146,11 @@ public enum DocumentConversionOrchestrator {
         docModel.preservedArchiveEntries = [:]
       }
       convertedPayload = .document(docModel)
-      outputBytes = try encodeDocumentModel(docModel, as: request.targetFormat)
+      outputBytes = try encodeDocumentModel(
+        docModel,
+        as: request.targetFormat,
+        sourceFormat: request.sourceFormat
+      )
 
     case .xlsx, .xls, .ods, .csv, .tsv:
       var sheetModel = try convertPayloadToWorksheet(request.payload)
@@ -461,9 +465,11 @@ public enum DocumentConversionOrchestrator {
 
   // MARK: Format Encoders
 
-  private static func encodeDocumentModel(_ doc: OfficeDocumentModel, as format: DocumentFormat)
-    throws -> Data
-  {
+  private static func encodeDocumentModel(
+    _ doc: OfficeDocumentModel,
+    as format: DocumentFormat,
+    sourceFormat: DocumentFormat? = nil
+  ) throws -> Data {
     switch format {
     case .docx:
       return try OOXMLContainerCodec.encodeDocument(doc)
@@ -481,7 +487,8 @@ public enum DocumentConversionOrchestrator {
       return CommonMarkCodec.encodeDocument(doc)
     case .txt:
       var lines: [String] = []
-      if doc.format != .txt, !doc.title.isEmpty, doc.paragraphs.first?.text != doc.title {
+      let effectiveSource = sourceFormat ?? doc.format
+      if effectiveSource != .txt, !doc.title.isEmpty, doc.paragraphs.first?.text != doc.title {
         lines.append(doc.title)
       }
       for p in doc.paragraphs {

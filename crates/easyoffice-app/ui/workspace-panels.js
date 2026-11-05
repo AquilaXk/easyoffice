@@ -58,8 +58,20 @@
 
     let activeDocBlockEl = null;
 
+    function syncDocStyleBarFromTarget(targetEl) {
+      const boldBtn = document.getElementById("btn-stylebar-bold");
+      const italicBtn = document.getElementById("btn-stylebar-italic");
+      const underBtn = document.getElementById("btn-stylebar-underline");
+      const sizeBadge = document.getElementById("doc-style-size-badge");
+      if (boldBtn) boldBtn.setAttribute("aria-pressed", targetEl?.style?.fontWeight === "600" ? "true" : "false");
+      if (italicBtn) italicBtn.setAttribute("aria-pressed", targetEl?.style?.fontStyle === "italic" ? "true" : "false");
+      if (underBtn) underBtn.setAttribute("aria-pressed", targetEl?.style?.textDecoration === "underline" ? "true" : "false");
+      if (sizeBadge) sizeBadge.textContent = targetEl?.style?.fontSize || "11.0 pt";
+    }
+
     function setActiveDocBlock(el) {
       activeDocBlockEl = el;
+      syncDocStyleBarFromTarget(el);
     }
 
     function saveDocTabStateForModule(mod) {
@@ -555,16 +567,7 @@
       }
       activeDocBlockEl = null;
       const firstBlock = editor ? getFocusedDocBlock(editor) : null;
-      const sizeBadge = document.getElementById("doc-style-size-badge");
-      if (sizeBadge) {
-        sizeBadge.textContent = firstBlock?.style?.fontSize || "11.0 pt";
-      }
-      const boldBtn = document.getElementById("btn-stylebar-bold");
-      const italicBtn = document.getElementById("btn-stylebar-italic");
-      const underBtn = document.getElementById("btn-stylebar-underline");
-      if (boldBtn) boldBtn.setAttribute("aria-pressed", firstBlock?.style?.fontWeight === "600" ? "true" : "false");
-      if (italicBtn) italicBtn.setAttribute("aria-pressed", firstBlock?.style?.fontStyle === "italic" ? "true" : "false");
-      if (underBtn) underBtn.setAttribute("aria-pressed", firstBlock?.style?.textDecoration === "underline" ? "true" : "false");
+      syncDocStyleBarFromTarget(firstBlock);
       computeDocTableSummary();
       tools.computeSmartStats();
     }
@@ -803,6 +806,7 @@
 
     return {
       setActiveDocBlock,
+      syncDocStyleBarFromTarget,
       saveDocTabStateForModule,
       saveActiveDocTabState,
       ensureDefaultDocTabStore,

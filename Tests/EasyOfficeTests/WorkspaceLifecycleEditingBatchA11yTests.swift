@@ -763,6 +763,7 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     let openedTxt2 = try vm.loadFromDisk(url: txtURL)
     XCTAssertEqual(vm.openTabs.count, tabCountBeforeTxt + 1)
     XCTAssertEqual(openedTxt2.id, openedTxt1.id)
+    XCTAssertEqual(vm.canUndo, false)
     try vm.saveTabToDisk(id: openedTxt1.id, to: txtURL)
     let savedTxtString = try String(contentsOf: txtURL, encoding: .utf8)
     XCTAssertEqual(savedTxtString, rawTxt)
@@ -775,7 +776,7 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
 
     var finSheet = WorksheetModel(
       name: "함수집합동기화",
-      rawCells: ["B2": "42", "C2": "84"]
+      rawCells: ["B2": "42", "C2": "84", "B3": "10", "C3": "20"]
     )
     try finSheet.setCell("A1", rawValue: "=DDB(2400, 300, 10, 1)")
     try finSheet.setCell("A2", rawValue: "=TRANSPOSE(B2:C2)")
@@ -785,6 +786,8 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     try finSheet.setCell("A6", rawValue: "=COLUMNS(TRANSPOSE(B2:C2))")
     try finSheet.setCell("A7", rawValue: "=SUM(TRANSPOSE(B2:C2))")
     try finSheet.setCell("A8", rawValue: "=INDEX(TRANSPOSE(B2:C2), 2, 1)")
+    try finSheet.setCell("A9", rawValue: "=TEXTJOIN(\",\", TRUE, TRANSPOSE(B2:C3))")
+    try finSheet.setCell("A10", rawValue: "=SUMIFS(B2:B3, TRANSPOSE(B2:C2), \">50\")")
     XCTAssertEqual(finSheet.evaluate(at: "A1"), .number(480.0))
     XCTAssertEqual(finSheet.evaluate(at: "A2"), .text("42,84"))
     XCTAssertEqual(finSheet.evaluate(at: "A3"), .error("#VALUE!"))
@@ -793,5 +796,7 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     XCTAssertEqual(finSheet.evaluate(at: "A6"), .number(1.0))
     XCTAssertEqual(finSheet.evaluate(at: "A7"), .number(126.0))
     XCTAssertEqual(finSheet.evaluate(at: "A8"), .number(84.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A9"), .text("42,10,84,20"))
+    XCTAssertEqual(finSheet.evaluate(at: "A10"), .number(10.0))
   }
 }
