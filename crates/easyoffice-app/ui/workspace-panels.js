@@ -495,10 +495,13 @@
     function captureWorkspaceViewState() {
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
+      const shell = document.getElementById("app") || document.querySelector(".app-shell");
       return {
         ribbonStripHidden: Boolean(strip?.hidden),
         canvasZoom: stage?.style?.zoom || "",
         canvasSplit: stage?.dataset?.splitView || "",
+        chromeExpanded: shell?.dataset?.chromeExpanded || "",
+        panelsExpanded: shell?.dataset?.panelsExpanded || "",
       };
     }
 
@@ -506,6 +509,15 @@
       if (!viewState) return;
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
+      const shell = document.getElementById("app") || document.querySelector(".app-shell");
+      if (shell && typeof viewState.chromeExpanded === "string") {
+        if (viewState.chromeExpanded) shell.dataset.chromeExpanded = viewState.chromeExpanded;
+        else delete shell.dataset.chromeExpanded;
+      }
+      if (shell && typeof viewState.panelsExpanded === "string") {
+        if (viewState.panelsExpanded) shell.dataset.panelsExpanded = viewState.panelsExpanded;
+        else delete shell.dataset.panelsExpanded;
+      }
       if (strip) {
         strip.hidden = Boolean(viewState.ribbonStripHidden);
       }

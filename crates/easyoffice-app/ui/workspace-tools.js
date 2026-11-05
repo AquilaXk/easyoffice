@@ -89,14 +89,8 @@
         const rowMap = new Map();
         Object.keys(sheetObj).forEach((ref) => {
           const entry = sheetObj[ref];
-          const rawVal = (entry?.formula || entry?.value || "")
-            .trim()
-            .replaceAll("\t", " ")
-            .replaceAll("\n", " ");
-          const dispVal = (entry?.value || entry?.formula || "")
-            .trim()
-            .replaceAll("\t", " ")
-            .replaceAll("\n", " ");
+          const rawVal = (entry?.formula || entry?.value || "").trim().replaceAll("\t", " ").replaceAll("\n", " ");
+          const dispVal = (entry?.value || entry?.formula || "").trim().replaceAll("\t", " ").replaceAll("\n", " ");
           if (!rawVal && !dispVal) return;
           lines.push("[[SHEET_A1]]\t" + ref + "\t" + (rawVal || dispVal));
           const p = parseCellRefParts(ref);
@@ -111,13 +105,8 @@
             .sort((a, b) => a - b)
             .forEach((rIdx) => {
               const rowArr = rowMap.get(rIdx) || [];
-              const dense = [];
-              for (let i = 0; i < rowArr.length; i += 1) {
-                dense.push(rowArr[i] || "");
-              }
-              if (dense.length > 0) {
-                lines.push("[[TABLE_ROW]]\t" + dense.join("\t"));
-              }
+              const dense = Array.from({ length: rowArr.length }, (_, i) => rowArr[i] || "");
+              if (dense.length > 0) lines.push("[[TABLE_ROW]]\t" + dense.join("\t"));
             });
         }
       } else if (scope === "SLIDE") {
@@ -143,39 +132,25 @@
           lines.push("[[SLIDE]]\t" + title + "\t" + bullets + "\t" + notes);
         });
       } else if (scope === "PDF") {
-        document
-          .querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)")
-          .forEach((el) => {
-            const t = (el.textContent || "").trim();
-            if (t) lines.push(t);
-          });
+        document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)").forEach((el) => {
+          const t = (el.textContent || "").trim();
+          if (t) lines.push(t);
+        });
         const wmInputVal = (document.getElementById("pdf-watermark-input")?.value || "").trim();
-        const wmLayerVal = (
-          document.getElementById("pdf-watermark-layer")?.textContent || ""
-        ).trim();
+        const wmLayerVal = (document.getElementById("pdf-watermark-layer")?.textContent || "").trim();
         const wmVal = wmInputVal || wmLayerVal;
-        if (wmVal) {
-          lines.push("워터마크: " + wmVal);
-        }
-        if (wmLayerVal && wmLayerVal !== wmVal) {
-          lines.push("워터마크 레이어: " + wmLayerVal);
-        }
+        if (wmVal) lines.push("워터마크: " + wmVal);
+        if (wmLayerVal && wmLayerVal !== wmVal) lines.push("워터마크 레이어: " + wmLayerVal);
         const stampVal = (
           document.getElementById("pdf-stamp-select")?.value ||
           document.getElementById("pdf-stamp-badge")?.textContent ||
           ""
         ).trim();
-        if (stampVal) {
-          lines.push("결재 스탬프: " + stampVal);
-        }
+        if (stampVal) lines.push("결재 스탬프: " + stampVal);
         const applicantVal = (document.getElementById("pdf-form-applicant")?.value || "").trim();
-        if (applicantVal) {
-          lines.push("신청인: " + applicantVal);
-        }
+        if (applicantVal) lines.push("신청인: " + applicantVal);
         const deptVal = (document.getElementById("pdf-form-dept")?.value || "").trim();
-        if (deptVal) {
-          lines.push("부서: " + deptVal);
-        }
+        if (deptVal) lines.push("부서: " + deptVal);
       }
 
       return lines.join("\n") || "본문 텍스트";
@@ -272,16 +247,20 @@
         const lineCount = Math.max(1, text ? text.split(/\n+/).length : 1);
         const colChars = Math.max(1, chars % 60 || Math.min(60, chars));
         posEl.textContent =
-          "1/" + estPages + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸";
+          "1/" + estPages + " 쪽   " + cols + "단   " + lineCount + "줄   " + colChars + "칸 | 구역: 1 / 1 |";
       }
       const fileEl = document.getElementById("status-doc-filename");
       if (fileEl) {
+        const activeTabTitle = document
+          .querySelector(".tab-strip .tab-pill.active")
+          ?.textContent?.replace(/×$/, "")
+          ?.trim();
         const curMod = getActiveModule();
-        const baseName =
+        const fallbackName =
           curMod === "HWP"
             ? "[붙임2] 행정안전부 전자결재 표준 기안문.hwpx"
-            : "[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).hwp";
-        fileEl.textContent = baseName + " — " + estPages + "페이지";
+            : "[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).docx";
+        fileEl.textContent = (activeTabTitle || fallbackName) + " — " + estPages + "페이지";
       }
     }
 
@@ -727,46 +706,102 @@
         });
       });
       let studioClipboardText = "";
+      function withDocStyleUndo(mutateFn) {
+        const pre = typeof captureWorkspaceSnapshot === "function" ? captureWorkspaceSnapshot(false) : null;
+        mutateFn();
+        saveActiveDocTabState();
+        if (pre && typeof commitDeferredUndoSnapshot === "function") commitDeferredUndoSnapshot(pre);
+      }
+      function resolveActiveDocBlock() {
+        const selNode = host.getSelection?.()?.anchorNode;
+        const el = selNode?.nodeType === 1 ? selNode : selNode?.parentElement;
+        const inEditor = el?.closest?.("#doc-editor p, #doc-editor h1, #doc-editor h2");
+        return inEditor || editor?.querySelector("p") || null;
+      }
       document.querySelectorAll("#icon-toolbar [data-studio-cmd]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const cmd = btn.dataset.studioCmd;
           if (!cmd) return;
-          if (cmd === "palette") {
-            document.getElementById("btn-command-palette")?.click();
-            return;
-          }
+          if (cmd === "palette") return void document.getElementById("btn-command-palette")?.click();
+          if (cmd === "studio-save") return void document.getElementById("qat-save")?.click();
+          if (cmd === "studio-undo") return void document.getElementById("qat-undo")?.click();
+          if (cmd === "studio-redo") return void document.getElementById("qat-redo")?.click();
           const fb = document.getElementById("status-command-feedback");
-          const firstPara = document.querySelector("#doc-editor p");
+          const blk = resolveActiveDocBlock();
           if (cmd === "clip-copy") {
-            studioClipboardText = (firstPara?.textContent || "").trim();
-            if (fb) fb.textContent = "선택 문단 클립보드 복사 완료";
+            studioClipboardText = (blk?.textContent || "").trim();
+            if (fb) fb.textContent = "선택 문단 클립보드 복사 완료 (" + studioClipboardText.length + "자)";
             return;
           }
           if (cmd === "clip-cut") {
-            studioClipboardText = (firstPara?.textContent || "").trim();
+            withDocStyleUndo(() => {
+              studioClipboardText = (blk?.textContent || "").trim();
+              if (blk) blk.textContent = "";
+              computeSmartStats();
+            });
             if (fb) fb.textContent = "선택 문단 오려두기 완료";
-            if (typeof onStudioCmd === "function") onStudioCmd("home-style");
             return;
           }
           if (cmd === "clip-paste") {
-            if (fb) fb.textContent = "클립보드 문단 붙이기 완료 (" + (studioClipboardText || "기본 문단").slice(0, 18) + ")";
-            if (typeof onStudioCmd === "function") onStudioCmd("home-style");
+            withDocStyleUndo(() => {
+              const p = document.createElement("p");
+              p.textContent = studioClipboardText || "붙여넣기 문단";
+              if (blk?.parentNode) blk.insertAdjacentElement("afterend", p);
+              else editor?.appendChild(p);
+              computeSmartStats();
+            });
+            if (fb) fb.textContent = "클립보드 문단 붙이기 완료";
+            return;
+          }
+          if (cmd === "para-numbering" || cmd === "para-bullet") {
+            const prefix = cmd === "para-numbering" ? "1. " : "○ ";
+            withDocStyleUndo(() => {
+              if (blk) {
+                const cur = blk.textContent || "";
+                blk.textContent = cur.startsWith(prefix) ? cur.slice(prefix.length) : prefix + cur;
+              }
+              computeSmartStats();
+            });
+            if (fb) fb.textContent = cmd === "para-numbering" ? "문단 번호 서식 적용 완료" : "글머리표 서식 적용 완료";
+            return;
+          }
+          if (cmd === "indent-in" || cmd === "indent-out") {
+            withDocStyleUndo(() => {
+              if (blk) {
+                const curPx = Number.parseInt(blk.style.paddingLeft || "0", 10) || 0;
+                const nextPx = Math.max(0, Math.min(96, curPx + (cmd === "indent-in" ? 16 : -16)));
+                blk.style.paddingLeft = nextPx ? nextPx + "px" : "";
+              }
+            });
+            if (fb) fb.textContent = cmd === "indent-in" ? "한 수준 증가 적용 완료" : "한 수준 감소 적용 완료";
+            return;
+          }
+          if (cmd === "para-shape") {
+            document.getElementById("btn-align-justify")?.click();
+            if (fb) fb.textContent = "문단 모양 정렬 적용 완료";
+            return;
+          }
+          const isHwp = getActiveModule() === "HWP";
+          if (cmd === "mod-symbol") {
+            if (isHwp && typeof onStudioCmd === "function") return void onStudioCmd("hwp-mod-field");
+            withDocStyleUndo(() => {
+              if (blk) blk.textContent = (blk.textContent || "") + " ※";
+              computeSmartStats();
+            });
+            if (fb) fb.textContent = "문자표 기호 삽입 완료";
+            return;
+          }
+          if (cmd === "mod-header") {
+            if (typeof onStudioCmd === "function") onStudioCmd(isHwp ? "hwp-mod-header" : "layout-margins");
+            return;
+          }
+          if (cmd === "mod-footnote") {
+            if (typeof onStudioCmd === "function") onStudioCmd(isHwp ? "hwp-mod-manuscript" : "doc-mod-footnote");
             return;
           }
           if (typeof onStudioCmd === "function") onStudioCmd(cmd);
         });
       });
-      function withDocStyleUndo(mutateFn) {
-        const pre =
-          typeof captureWorkspaceSnapshot === "function"
-            ? captureWorkspaceSnapshot(false)
-            : null;
-        mutateFn();
-        saveActiveDocTabState();
-        if (pre && typeof commitDeferredUndoSnapshot === "function") {
-          commitDeferredUndoSnapshot(pre);
-        }
-      }
       const styleSelect = document.getElementById("doc-style-select");
       const roleBadge = document.getElementById("doc-style-role-badge");
       if (styleSelect && editor) {
@@ -779,11 +814,7 @@
       }
       const fontLang = document.getElementById("doc-font-lang");
       if (fontLang && editor) {
-        fontLang.addEventListener("change", () =>
-          withDocStyleUndo(() => {
-            editor.dataset.fontLang = fontLang.value;
-          })
-        );
+        fontLang.addEventListener("change", () => withDocStyleUndo(() => { editor.dataset.fontLang = fontLang.value; }));
       }
       const fontSelect = document.getElementById("doc-font-select");
       const fontBadge = document.getElementById("doc-style-font-badge");
@@ -799,28 +830,15 @@
       const sizeBadge = document.getElementById("doc-style-size-badge");
       function applyFontSize(pt) {
         withDocStyleUndo(() => {
-          const clamped = Math.max(6, Math.min(72, Number.isFinite(pt) ? pt : 11));
-          const formatted = clamped.toFixed(1);
+          const formatted = Math.max(6, Math.min(72, Number.isFinite(pt) ? pt : 11)).toFixed(1);
           if (sizeInput) sizeInput.value = formatted;
           if (sizeBadge) sizeBadge.textContent = formatted + " pt";
           if (editor) editor.style.fontSize = formatted + "pt";
         });
       }
-      if (sizeInput) {
-        sizeInput.addEventListener("change", () => applyFontSize(parseFloat(sizeInput.value)));
-      }
-      const btnSizeUp = document.getElementById("btn-size-up");
-      const btnSizeDown = document.getElementById("btn-size-down");
-      if (btnSizeUp) {
-        btnSizeUp.addEventListener("click", () =>
-          applyFontSize(parseFloat(sizeInput ? sizeInput.value : "11") + 1)
-        );
-      }
-      if (btnSizeDown) {
-        btnSizeDown.addEventListener("click", () =>
-          applyFontSize(parseFloat(sizeInput ? sizeInput.value : "11") - 1)
-        );
-      }
+      sizeInput?.addEventListener("change", () => applyFontSize(parseFloat(sizeInput.value)));
+      document.getElementById("btn-size-up")?.addEventListener("click", () => applyFontSize(parseFloat(sizeInput?.value || "11") + 1));
+      document.getElementById("btn-size-down")?.addEventListener("click", () => applyFontSize(parseFloat(sizeInput?.value || "11") - 1));
       const lsSelect = document.getElementById("doc-linespacing-select");
       const lsSteps = [100, 130, 160, 180, 200, 300];
       function applyLineSpacing(pct) {
@@ -833,25 +851,15 @@
           }
         });
       }
-      if (lsSelect) {
-        lsSelect.addEventListener("change", () => applyLineSpacing(parseInt(lsSelect.value, 10)));
-      }
-      const btnLsUp = document.getElementById("btn-ls-up");
-      const btnLsDown = document.getElementById("btn-ls-down");
-      if (btnLsUp) {
-        btnLsUp.addEventListener("click", () => {
-          const cur = parseInt(lsSelect ? lsSelect.value : "160", 10) || 160;
-          const next = lsSteps.find((s) => s > cur) || 300;
-          applyLineSpacing(next);
-        });
-      }
-      if (btnLsDown) {
-        btnLsDown.addEventListener("click", () => {
-          const cur = parseInt(lsSelect ? lsSelect.value : "160", 10) || 160;
-          const prev = [...lsSteps].reverse().find((s) => s < cur) || 100;
-          applyLineSpacing(prev);
-        });
-      }
+      lsSelect?.addEventListener("change", () => applyLineSpacing(parseInt(lsSelect.value, 10)));
+      document.getElementById("btn-ls-up")?.addEventListener("click", () => {
+        const cur = parseInt(lsSelect?.value || "160", 10) || 160;
+        applyLineSpacing(lsSteps.find((s) => s > cur) || 300);
+      });
+      document.getElementById("btn-ls-down")?.addEventListener("click", () => {
+        const cur = parseInt(lsSelect?.value || "160", 10) || 160;
+        applyLineSpacing([...lsSteps].reverse().find((s) => s < cur) || 100);
+      });
       [
         ["btn-stylebar-strike", "strike"],
         ["btn-stylebar-charfx", "charfx"],
@@ -859,16 +867,14 @@
         ["btn-stylebar-highlight", "highlight"],
       ].forEach(([id, key]) => {
         const btn = document.getElementById(id);
-        if (btn) {
-          btn.addEventListener("click", () =>
-            withDocStyleUndo(() => {
-              const next = !btn.classList.contains("active");
-              btn.classList.toggle("active", next);
-              btn.setAttribute("aria-pressed", next ? "true" : "false");
-              if (editor) editor.dataset[key] = next ? "true" : "false";
-            })
-          );
-        }
+        btn?.addEventListener("click", () =>
+          withDocStyleUndo(() => {
+            const next = !btn.classList.contains("active");
+            btn.classList.toggle("active", next);
+            btn.setAttribute("aria-pressed", next ? "true" : "false");
+            if (editor) editor.dataset[key] = next ? "true" : "false";
+          })
+        );
       });
       const alignMap = [
         ["btn-align-left", "left", "left"],
@@ -879,48 +885,37 @@
         ["btn-align-divide", "divide", "justify"],
       ];
       alignMap.forEach(([id, mode, cssAlign]) => {
+        document.getElementById(id)?.addEventListener("click", () =>
+          withDocStyleUndo(() => {
+            alignMap.forEach(([otherId]) => {
+              const other = document.getElementById(otherId);
+              if (other) {
+                other.classList.toggle("active", otherId === id);
+                other.setAttribute("aria-pressed", otherId === id ? "true" : "false");
+              }
+            });
+            if (editor) {
+              editor.dataset.textAlign = mode;
+              editor.style.textAlign = cssAlign;
+            }
+          })
+        );
+      });
+      const bindToggleMark = (id, key) => {
         const btn = document.getElementById(id);
-        if (btn) {
+        if (btn && editor) {
           btn.addEventListener("click", () =>
             withDocStyleUndo(() => {
-              alignMap.forEach(([otherId]) => {
-                const other = document.getElementById(otherId);
-                if (other) {
-                  const isTarget = otherId === id;
-                  other.classList.toggle("active", isTarget);
-                  other.setAttribute("aria-pressed", isTarget ? "true" : "false");
-                }
-              });
-              if (editor) {
-                editor.dataset.textAlign = mode;
-                editor.style.textAlign = cssAlign;
-              }
+              const next = !btn.classList.contains("active");
+              btn.classList.toggle("active", next);
+              btn.setAttribute("aria-pressed", next ? "true" : "false");
+              editor.dataset[key] = next ? "true" : "false";
             })
           );
         }
-      });
-      const ctrlMarksBtn = document.getElementById("btn-toggle-ctrl-marks");
-      if (ctrlMarksBtn && editor) {
-        ctrlMarksBtn.addEventListener("click", () =>
-          withDocStyleUndo(() => {
-            const next = !ctrlMarksBtn.classList.contains("active");
-            ctrlMarksBtn.classList.toggle("active", next);
-            ctrlMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
-            editor.dataset.showCtrlMarks = next ? "true" : "false";
-          })
-        );
-      }
-      const paraMarksBtn = document.getElementById("btn-toggle-para-marks");
-      if (paraMarksBtn && editor) {
-        paraMarksBtn.addEventListener("click", () =>
-          withDocStyleUndo(() => {
-            const next = !paraMarksBtn.classList.contains("active");
-            paraMarksBtn.classList.toggle("active", next);
-            paraMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
-            editor.dataset.showParaMarks = next ? "true" : "false";
-          })
-        );
-      }
+      };
+      bindToggleMark("btn-toggle-ctrl-marks", "showCtrlMarks");
+      bindToggleMark("btn-toggle-para-marks", "showParaMarks");
       const docGridBtn = document.getElementById("btn-toggle-doc-grid");
       if (docGridBtn && editor) {
         docGridBtn.addEventListener("click", () =>
@@ -929,10 +924,7 @@
             docGridBtn.classList.toggle("active", next);
             docGridBtn.setAttribute("aria-pressed", next ? "true" : "false");
             editor.classList.toggle("manuscript-grid", next);
-            const hwpPreview = document.getElementById("hwp-manuscript-preview");
-            if (hwpPreview) {
-              hwpPreview.classList.toggle("manuscript-grid", next);
-            }
+            document.getElementById("hwp-manuscript-preview")?.classList.toggle("manuscript-grid", next);
           })
         );
       }
@@ -942,13 +934,9 @@
         if (insertBtn) insertBtn.textContent = insertModeLabel;
         computeSmartStats();
       }
-      if (insertBtn) {
-        insertBtn.addEventListener("click", toggleInsertMode);
-      }
+      insertBtn?.addEventListener("click", toggleInsertMode);
       host.addEventListener("keydown", (ev) => {
-        if (ev.key === "Insert") {
-          toggleInsertMode();
-        }
+        if (ev.key === "Insert") toggleInsertMode();
       });
       const zoomSlider = document.getElementById("status-zoom-slider");
       if (zoomSlider && typeof applyZoomPercent === "function") {
@@ -956,14 +944,8 @@
         zoomSlider.addEventListener("input", onSlide);
         zoomSlider.addEventListener("change", onSlide);
       }
-      const fitWidthBtn = document.getElementById("btn-zoom-fit-width");
-      if (fitWidthBtn && typeof applyZoomPercent === "function") {
-        fitWidthBtn.addEventListener("click", () => applyZoomPercent(120, "width"));
-      }
-      const fitPageBtn = document.getElementById("btn-zoom-fit-page");
-      if (fitPageBtn && typeof applyZoomPercent === "function") {
-        fitPageBtn.addEventListener("click", () => applyZoomPercent(100, "page"));
-      }
+      document.getElementById("btn-zoom-fit-width")?.addEventListener("click", () => applyZoomPercent?.(120, "width"));
+      document.getElementById("btn-zoom-fit-page")?.addEventListener("click", () => applyZoomPercent?.(100, "page"));
     }
 
     return {

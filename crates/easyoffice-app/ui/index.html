@@ -108,6 +108,9 @@
           <div id="pane-doc" class="editor-pane active">
             <div id="icon-toolbar" class="eo-icon-toolbar" role="toolbar" aria-label="표준 도구 상자">
               <div class="tb-group">
+                <button type="button" class="tb-btn" data-studio-cmd="studio-save" title="저장하기 (Ctrl+S)" aria-label="저장">💾</button>
+                <button type="button" class="tb-btn" data-studio-cmd="studio-undo" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소">↩</button>
+                <button type="button" class="tb-btn" data-studio-cmd="studio-redo" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행">↪</button>
                 <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="오려두기 (Ctrl+X)" aria-label="오려두기">✂</button>
                 <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사하기 (Ctrl+C)" aria-label="복사하기">📄</button>
                 <button type="button" class="tb-btn" data-studio-cmd="clip-paste" title="붙이기 (Ctrl+V)" aria-label="붙이기">📋</button>
@@ -122,14 +125,14 @@
               <span class="tb-sep" aria-hidden="true"></span>
               <div class="tb-group">
                 <button type="button" class="tb-btn tb-char-shape" data-studio-cmd="home-style" title="글자 모양 (Alt+L)">가/가</button>
-                <button type="button" class="tb-btn tb-para-shape" data-studio-cmd="layout-margins" title="문단 모양 (Alt+T)">≡✓</button>
+                <button type="button" class="tb-btn tb-para-shape" data-studio-cmd="para-shape" title="문단 모양 (Alt+T)">≡✓</button>
               </div>
               <span class="tb-sep" aria-hidden="true"></span>
               <div class="tb-group">
-                <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="doc-mod-toc" title="문단 번호">1.</button>
-                <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="home-style" title="글머리표">●</button>
-                <button type="button" class="tb-btn" data-studio-cmd="layout-margins" title="한 수준 감소">⇤</button>
-                <button type="button" class="tb-btn" data-studio-cmd="layout-margins" title="한 수준 증가">⇥</button>
+                <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-numbering" title="문단 번호">1.</button>
+                <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-bullet" title="글머리표">●</button>
+                <button type="button" class="tb-btn" data-studio-cmd="indent-out" title="한 수준 감소">⇤</button>
+                <button type="button" class="tb-btn" data-studio-cmd="indent-in" title="한 수준 증가">⇥</button>
               </div>
               <span class="tb-sep" aria-hidden="true"></span>
               <div class="tb-group">
@@ -140,15 +143,15 @@
               <span class="tb-sep" aria-hidden="true"></span>
               <div class="tb-group">
                 <button type="button" class="tb-btn" data-studio-cmd="layout-paper" title="개체 속성">⊡</button>
-                <button type="button" class="tb-btn" data-studio-cmd="hwp-mod-field" title="문자표 (Ctrl+F10)">※</button>
+                <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" title="문자표 (Ctrl+F10)">※</button>
                 <button type="button" class="tb-btn" data-studio-cmd="insert-link" title="하이퍼링크 (Ctrl+K,H)">🌐</button>
               </div>
               <span class="tb-sep" aria-hidden="true"></span>
               <div class="tb-group">
-                <button type="button" class="tb-btn" data-studio-cmd="hwp-mod-header" title="머리말">▤</button>
-                <button type="button" class="tb-btn" data-studio-cmd="hwp-mod-header" title="꼬리말">▥</button>
-                <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="doc-mod-footnote" title="각주">[1]</button>
-                <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="doc-mod-footnote" title="미주">[i]</button>
+                <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="머리말">▤</button>
+                <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="꼬리말">▥</button>
+                <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="각주">[1]</button>
+                <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="미주">[i]</button>
                 <button type="button" class="tb-btn" data-studio-cmd="palette" title="찾기/바꾸기">🔭▾</button>
               </div>
             </div>
@@ -224,12 +227,12 @@
                 </div>
                 <span class="eo-style-sep" aria-hidden="true">|</span>
                 <div class="sb-align-group">
-                  <button id="btn-align-left" class="eo-glyph-btn" type="button" title="왼쪽 정렬 (Ctrl+Shift+L)">≡</button>
-                  <button id="btn-align-center" class="eo-glyph-btn" type="button" title="가운데 정렬 (Ctrl+Shift+C)">≡</button>
-                  <button id="btn-align-right" class="eo-glyph-btn" type="button" title="오른쪽 정렬 (Ctrl+Shift+R)">≡</button>
+                  <button id="btn-align-left" class="eo-glyph-btn" type="button" title="왼쪽 정렬 (Ctrl+Shift+L)">⫷</button>
+                  <button id="btn-align-center" class="eo-glyph-btn" type="button" title="가운데 정렬 (Ctrl+Shift+C)">⫶</button>
+                  <button id="btn-align-right" class="eo-glyph-btn" type="button" title="오른쪽 정렬 (Ctrl+Shift+R)">⫸</button>
                   <button id="btn-align-justify" class="eo-glyph-btn active" type="button" title="양쪽 정렬 (Ctrl+Shift+M)">≡</button>
-                  <button id="btn-align-distribute" class="eo-glyph-btn" type="button" title="배분 정렬 (Ctrl+Shift+T)">≡</button>
-                  <button id="btn-align-divide" class="eo-glyph-btn" type="button" title="나눔 정렬 (Ctrl+Shift+J)">≡</button>
+                  <button id="btn-align-distribute" class="eo-glyph-btn" type="button" title="배분 정렬 (Ctrl+Shift+T)">▤</button>
+                  <button id="btn-align-divide" class="eo-glyph-btn" type="button" title="나눔 정렬 (Ctrl+Shift+J)">▥</button>
                 </div>
                 <span class="eo-style-sep" aria-hidden="true">|</span>
                 <div class="sb-ls-group">
@@ -716,9 +719,10 @@
       <footer id="status-bar" class="statusbar" role="contentinfo">
         <span class="statusbar-left-group">
           <span id="doc-page-zone-indicator" class="eo-style-zone" hidden>1 / 1 쪽 · 구역: 1 / 1 · 삽입</span>
-          <span id="status-studio-pos" class="statusbar-pos-metrics" aria-hidden="true">1/1 쪽 &nbsp; 1단 &nbsp; 14줄 &nbsp; 29칸</span>
+          <span id="status-studio-pos" class="statusbar-pos-metrics">1/1 쪽 &nbsp; 1단 &nbsp; 14줄 &nbsp; 29칸 | 구역: 1 / 1 |</span>
           <button id="status-insert-mode" class="statusbar-mode-btn" type="button" title="입력 모드 전환 (Insert)">삽입</button>
-          <span id="status-doc-filename" class="statusbar-doc-path">[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).hwp — 1페이지</span>
+          <span class="eo-style-sep" aria-hidden="true">|</span>
+          <span id="status-doc-filename" class="statusbar-doc-path">[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).docx — 1페이지</span>
         </span>
         <span class="statusbar-diag-group">
           <span id="status-module">모듈: 문서 (DOCX)</span>

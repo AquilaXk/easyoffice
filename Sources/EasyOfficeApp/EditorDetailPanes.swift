@@ -722,6 +722,13 @@ public struct DocumentEditorDetailPaneView: View {
                     viewModel.lastExecutedCommandSummary = "문서 저장 완료"
                   }
                 }
+                studioIconButton("🖨", tooltip: "문서 인쇄", palette: palette) {
+                  if !viewModel.isCanvasSnapshotMode {
+                    WorkspaceFileDialogPresenter.presentPrintPanel(viewModel: viewModel)
+                  } else {
+                    viewModel.lastExecutedCommandSummary = "문서 인쇄 준비 완료"
+                  }
+                }
                 studioIconButton("↩", tooltip: "실행 취소", palette: palette) {
                   viewModel.undoActiveTab()
                 }
@@ -733,9 +740,7 @@ public struct DocumentEditorDetailPaneView: View {
                   if let p = selectedParagraph, !p.text.isEmpty {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(p.text, forType: .string)
-                    if document.paragraphs.count > 1 {
-                      viewModel.updateParagraphText(paragraphID: p.id, newText: "")
-                    }
+                    viewModel.updateParagraphText(paragraphID: p.id, newText: "")
                   }
                   viewModel.lastExecutedCommandSummary = "선택 문단 오려두기 완료"
                 }
@@ -750,8 +755,11 @@ public struct DocumentEditorDetailPaneView: View {
                   let pasted =
                     NSPasteboard.general.string(forType: .string)?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                  let textToPaste = pasted.isEmpty ? (selectedParagraph?.text ?? "붙여넣기 문단") : pasted
-                  viewModel.appendParagraphToActiveDocument(text: textToPaste, style: .body)
+                  if !pasted.isEmpty {
+                    viewModel.appendParagraphToActiveDocument(text: pasted, style: .body)
+                  } else {
+                    viewModel.lastExecutedCommandSummary = "클립보드가 비어 있습니다"
+                  }
                 }
                 studioIconButton("🖌", tooltip: "모양복사", palette: palette) {
                   viewModel.executeRibbonCommand(
@@ -844,7 +852,13 @@ public struct DocumentEditorDetailPaneView: View {
 
               HStack(spacing: 2) {
                 studioIconButton("⊞▾", tooltip: "표 추가", palette: palette) {
-                  viewModel.insertRowInDocumentTable()
+                  if document.tables.isEmpty {
+                    viewModel.executeRibbonCommand(
+                      isHWPModule ? "hwp-insert-table" : "document-insert-table"
+                    )
+                  } else {
+                    viewModel.insertRowInDocumentTable()
+                  }
                 }
                 studioIconButton("△□▾", tooltip: "도형/다이어그램", palette: palette) {
                   viewModel.insertSampleImageAttachment()
@@ -1335,7 +1349,7 @@ public struct DocumentEditorDetailPaneView: View {
           selectedParagraph: selectedParagraph,
           palette: palette,
           paperMaxWidth: paperMaxWidth,
-          viewModel: isPrimaryPane ? viewModel : nil
+          viewModel: viewModel
         )
       }
 
@@ -1508,11 +1522,10 @@ public struct DocumentEditorDetailPaneView: View {
                 }
 
                 let shouldShowProposalDiagram =
-                  !isHWPModule
-                  && !document.tables.isEmpty
-                  && document.paragraphs.contains(where: {
-                    $0.text.contains("아키텍처") || $0.text.contains("선정") || $0.text.contains("로드맵")
-                  })
+                  !document.tables.isEmpty
+                  && (document.title.contains("아키텍처 및 보안 감사 보고서")
+                    || document.title.contains("국정과제 추진계획")
+                    || document.title.contains("디지털행정혁신"))
                 if shouldShowProposalDiagram {
                   StudioProcessFlowDiagramView()
                 }
@@ -1715,8 +1728,12 @@ public struct DocumentEditorDetailPaneView: View {
       : rawTitle
     let displayParagraph: ParagraphBlock = {
       var copy = paragraph
-      if displayTitle != paragraph.text && paragraph.inlineRuns.isEmpty {
+      if displayTitle != paragraph.text {
         copy.text = displayTitle
+        if var firstRun = copy.inlineRuns.first, firstRun.text.hasPrefix(prefixCandidate) {
+          firstRun.text = String(firstRun.text.dropFirst(prefixCandidate.count))
+          copy.inlineRuns[0] = firstRun
+        }
       }
       return copy
     }()
@@ -1726,7 +1743,7 @@ public struct DocumentEditorDetailPaneView: View {
     let textColor = EasyOfficeDesignTokens.resolveHexColor("#111827", fallback: .black)
 
     HStack(spacing: 0) {
-      if showNumberCell {
+      if showNumberCell && !isEditing {
         ZStack {
           numberBg
           Text("\(number)")
