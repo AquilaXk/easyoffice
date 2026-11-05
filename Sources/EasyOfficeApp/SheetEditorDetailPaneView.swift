@@ -520,7 +520,7 @@ public struct SheetEditorDetailPaneView: View {
                 flatSheetButton(
                   "✓",
                   isActive: true,
-                  accent: EasyOfficeDesignTokens.statusSuccess.swiftUIColor,
+                  accent: EasyOfficeDesignTokens.statusSuccessToken(isDark: palette.isDark).swiftUIColor,
                   palette: palette
                 ) {
                   viewModel.applyFormulaBarEdit()

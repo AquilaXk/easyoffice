@@ -75,8 +75,49 @@ public struct SlideElementShapeContentView: View {
     if element.animation != .none {
       Text("✦ \(element.animation.rawValue)")
         .font(.system(size: 8, weight: .bold))
-        .foregroundStyle(palette.accentBadgeText.swiftUIColor)
+        .foregroundStyle(elementTextColor)
     }
+  }
+
+  private func rectangularShapeCard(
+    accentBarWidth: CGFloat,
+    titleFontSize: CGFloat,
+    frameAlignment: Alignment
+  ) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Rectangle()
+        .fill(strokeColor)
+        .frame(width: accentBarWidth)
+        .padding(.vertical, 2)
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 4) {
+          Text(element.title)
+            .font(.system(size: titleFontSize, weight: element.isBold ? .heavy : .bold))
+            .italic(element.isItalic)
+            .underline(element.isUnderlined)
+            .foregroundStyle(elementTextColor)
+            .lineLimit(1)
+          Spacer(minLength: 2)
+          animationBadgeView
+        }
+
+        Text(element.bodyText)
+          .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
+          .italic(element.isItalic)
+          .underline(element.isUnderlined)
+          .foregroundStyle(elementSecondaryTextColor)
+          .lineLimit(2)
+      }
+    }
+    .padding(.vertical, 8)
+    .padding(.horizontal, 10)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frameAlignment)
+    .background(fillColor.opacity(0.95))
+    .border(
+      isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : palette.border.swiftUIColor,
+      width: isSelected ? 1.5 : 0.8
+    )
   }
 
   public var body: some View {
@@ -157,39 +198,10 @@ public struct SlideElementShapeContentView: View {
       }
 
     case .calloutShape:
-      HStack(alignment: .top, spacing: 8) {
-        Rectangle()
-          .fill(strokeColor)
-          .frame(width: 2.5)
-          .padding(.vertical, 2)
-
-        VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 4) {
-            Text(element.title)
-              .font(.system(size: 11, weight: element.isBold ? .heavy : .bold))
-              .italic(element.isItalic)
-              .underline(element.isUnderlined)
-              .foregroundStyle(strokeColor)
-              .lineLimit(1)
-            Spacer(minLength: 2)
-            animationBadgeView
-          }
-
-          Text(element.bodyText)
-            .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
-            .italic(element.isItalic)
-            .underline(element.isUnderlined)
-            .foregroundStyle(palette.primaryText.swiftUIColor)
-            .lineLimit(2)
-        }
-      }
-      .padding(.vertical, 8)
-      .padding(.horizontal, 10)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-      .background(Color(red: 0.97, green: 0.98, blue: 0.99))
-      .border(
-        isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : palette.border.swiftUIColor,
-        width: isSelected ? 1.5 : 0.8
+      rectangularShapeCard(
+        accentBarWidth: 2.5,
+        titleFontSize: 11,
+        frameAlignment: .topLeading
       )
 
     case .tableGrid:
@@ -197,7 +209,7 @@ public struct SlideElementShapeContentView: View {
         HStack {
           Label(element.title, systemImage: "tablecells")
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(strokeColor)
+            .foregroundStyle(elementTextColor)
             .lineLimit(1)
           Spacer(minLength: 2)
           animationBadgeView
@@ -227,15 +239,17 @@ public struct SlideElementShapeContentView: View {
       }
       .padding(4)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .background(fillColor.opacity(0.95))
       .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
 
     case .chartEmbed:
       let barRatios: [CGFloat] = [0.45, 0.82, 0.64, 0.95]
+      let isDarkFill = !EasyOfficeDesignTokens.isLightFill(hex: element.fillHex)
       VStack(alignment: .leading, spacing: 4) {
         HStack {
           Label(element.title, systemImage: "chart.bar.fill")
             .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(strokeColor)
+            .foregroundStyle(elementTextColor)
             .lineLimit(1)
           Spacer(minLength: 2)
           animationBadgeView
@@ -246,8 +260,8 @@ public struct SlideElementShapeContentView: View {
             Rectangle()
               .fill(
                 idx % 2 == 0
-                  ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                  : EasyOfficeDesignTokens.accentToken(for: .slide, isDark: palette.isDark)
+                  ? EasyOfficeDesignTokens.brandAccentToken(isDark: isDarkFill).swiftUIColor
+                  : EasyOfficeDesignTokens.accentToken(for: .slide, isDark: isDarkFill)
                     .swiftUIColor
               )
               .frame(maxWidth: .infinity)
@@ -259,47 +273,20 @@ public struct SlideElementShapeContentView: View {
         if !element.bodyText.isEmpty {
           Text(element.bodyText)
             .font(.system(size: 8, design: .monospaced))
-            .foregroundStyle(palette.secondaryText.swiftUIColor)
+            .foregroundStyle(elementSecondaryTextColor)
             .lineLimit(1)
         }
       }
       .padding(6)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .background(fillColor.opacity(0.95))
       .border(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : Color.clear, width: 1)
 
     case .roundedRectangleShape, .rectangleShape, .textBox:
-      HStack(alignment: .top, spacing: 8) {
-        Rectangle()
-          .fill(strokeColor)
-          .frame(width: 2)
-          .padding(.vertical, 2)
-
-        VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 4) {
-            Text(element.title)
-              .font(.system(size: 11.5, weight: element.isBold ? .heavy : .bold))
-              .italic(element.isItalic)
-              .underline(element.isUnderlined)
-              .foregroundStyle(strokeColor)
-              .lineLimit(1)
-            Spacer(minLength: 2)
-            animationBadgeView
-          }
-          Text(element.bodyText)
-            .font(.system(size: 10, weight: element.isBold ? .semibold : .regular))
-            .italic(element.isItalic)
-            .underline(element.isUnderlined)
-            .foregroundStyle(palette.primaryText.swiftUIColor)
-            .lineLimit(2)
-        }
-      }
-      .padding(.vertical, 8)
-      .padding(.horizontal, 10)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-      .background(Color(red: 0.97, green: 0.98, blue: 0.99))
-      .border(
-        isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : palette.border.swiftUIColor,
-        width: isSelected ? 1.5 : 0.8
+      rectangularShapeCard(
+        accentBarWidth: 2,
+        titleFontSize: 11.5,
+        frameAlignment: .leading
       )
     }
   }
@@ -332,6 +319,7 @@ public struct SlideshowFullScreenOverlayView: View {
   }
 
   public var body: some View {
+    let stagePalette = WorkspaceThemeMode.darkIndigo.surfacePalette(isSystemDark: true)
     let deck =
       activeDeck
       ?? PresentationDeckModel(
@@ -371,7 +359,7 @@ public struct SlideshowFullScreenOverlayView: View {
             title: "레이저 포인터",
             systemImage: "laser.burst",
             isOn: $viewModel.isLaserPointerEnabled,
-            palette: palette
+            palette: stagePalette
           )
 
           Spacer()
