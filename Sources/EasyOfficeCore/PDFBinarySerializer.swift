@@ -940,5 +940,47 @@ public enum PDFBinarySerializer {
     }
     return String(decoding: outBytes, as: UTF8.self)
   }
+
+  /// Single-pass PDF string literal escaper normalizing newlines and Unicode line separators to spaces.
+  public static func escapePDFText(_ text: String) -> String {
+    var out = ""
+    out.reserveCapacity(text.count + 8)
+    for scalar in text.unicodeScalars {
+      switch scalar.value {
+      case 0x5C: out.append("\\\\")
+      case 0x28: out.append("\\(")
+      case 0x29: out.append("\\)")
+      case 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029:
+        out.append(" ")
+      default:
+        out.unicodeScalars.append(scalar)
+      }
+    }
+    return out
+  }
+
+  public static func escapePDFString(_ input: String) -> String {
+    var out = ""
+    out.reserveCapacity(input.count + 16)
+    for scalar in input.unicodeScalars {
+      switch scalar.value {
+      case 0x5C: out.append("\\\\")
+      case 0x28: out.append("\\(")
+      case 0x29: out.append("\\)")
+      case 0x08: out.append("\\b")
+      case 0x09: out.append("\\t")
+      case 0x0A: out.append("\\n")
+      case 0x0B: out.append("\\v")
+      case 0x0C: out.append("\\f")
+      case 0x0D: out.append("\\r")
+      case 0x85: out.append("\\u0085")
+      case 0x2028: out.append("\\u2028")
+      case 0x2029: out.append("\\u2029")
+      default:
+        out.unicodeScalars.append(scalar)
+      }
+    }
+    return out
+  }
 }
 
