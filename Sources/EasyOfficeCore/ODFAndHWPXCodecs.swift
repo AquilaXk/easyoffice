@@ -808,7 +808,8 @@ public enum HWPXContainerCodec {
       paragraphs: paragraphs, tables: tables, trackChangesEnabled: trackChanges,
       sections: meta.sections, footnotes: meta.footnotes, revisions: meta.revisions,
       comments: meta.comments, bookmarks: meta.bookmarks, images: resolvedImages,
-      equations: HWPEquationCodec.extractHWPXEquations(from: sectionXML, existing: meta.equations),
+      equations: try HWPEquationCodec.extractHWPXEquations(
+        from: sectionXML, existing: meta.equations),
       watermarkText: meta.watermarkText
     )
     decodedDoc.preservedArchiveEntries = preservedEntries

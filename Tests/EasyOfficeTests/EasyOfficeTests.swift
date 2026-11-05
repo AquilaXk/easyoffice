@@ -1221,6 +1221,10 @@ final class EasyOfficeTests: XCTestCase {
       "\\sum_{i=1}^{n}"
     )
     XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("sum from i=1 to n x_i"),
+      "\\sum_{i=1}^{n} x_{i}"
+    )
+    XCTAssertEqual(
       try HWPEquationCodec.convertEqEditToLaTeX("int from 0 to infty e^{-x} dx"),
       "\\int_0^{\\infty}e^{-x}dx"
     )
@@ -1245,12 +1249,20 @@ final class EasyOfficeTests: XCTestCase {
       "\\binom{n}{k}"
     )
     XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("n choose k"),
+      "\\binom{n}{k}"
+    )
+    XCTAssertEqual(
+      try HWPEquationCodec.convertEqEditToLaTeX("{x to 0}"),
+      "{x \\rightarrow 0}"
+    )
+    XCTAssertEqual(
       try HWPEquationCodec.convertEqEditToLaTeX("left ( {a over b} right )"),
       "\\left( \\frac{a}{b} \\right)"
     )
   }
 
-  func testHWPEqEditFailClosedUnbalancedBracesAndExcessiveDepth() {
+  func testHWPEqEditFailClosedUnbalancedBracesAndExcessiveDepth() throws {
     XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX("{a + b")) { err in
       guard case EasyOfficeError.corruptedContainer = err else {
         XCTFail("Expected corruptedContainer, got \(err)")
@@ -1263,7 +1275,10 @@ final class EasyOfficeTests: XCTestCase {
         return
       }
     }
-    let deepBraces = String(repeating: "{", count: 70) + "x" + String(repeating: "}", count: 70)
+    let fiftyBraces = String(repeating: "{", count: 50) + "x" + String(repeating: "}", count: 50)
+    XCTAssertNoThrow(try HWPEquationCodec.convertEqEditToLaTeX(fiftyBraces))
+
+    let deepBraces = String(repeating: "{", count: 66) + "x" + String(repeating: "}", count: 66)
     XCTAssertThrowsError(try HWPEquationCodec.convertEqEditToLaTeX(deepBraces)) { err in
       guard case EasyOfficeError.resourceBudgetExceeded = err else {
         XCTFail("Expected resourceBudgetExceeded, got \(err)")
@@ -1277,6 +1292,49 @@ final class EasyOfficeTests: XCTestCase {
         return
       }
     }
+
+    let badSectionXML = """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <hs:sec xmlns:hs="http://www.owpml.org/owpml/2011/section" xmlns:hp="http://www.owpml.org/owpml/2011/paragraph">
+        <hp:p><hp:t>본문</hp:t></hp:p>
+        <hp:equation><hp:script>\(deepBraces)</hp:script></hp:equation>
+      </hs:sec>
+      """
+    let badHwpxEntries: [ZipContainerEntry] = [
+      ZipContainerEntry(
+        path: "mimetype",
+        data: Data(HWPXContainerCodec.hwpxMimeType.utf8),
+        compressionMethod: .store
+      ),
+      ZipContainerEntry(
+        path: "Contents/content.hpf",
+        data: Data("<opf:package><opf:title>수식한도검증</opf:title></opf:package>".utf8),
+        compressionMethod: .deflate
+      ),
+      ZipContainerEntry(
+        path: "Contents/header.xml",
+        data: Data("<hh:head paperSize=\"A4\"/>".utf8),
+        compressionMethod: .deflate
+      ),
+      ZipContainerEntry(
+        path: "Contents/section0.xml",
+        data: Data(badSectionXML.utf8),
+        compressionMethod: .deflate
+      ),
+    ]
+    let badHwpxData = try ZipContainerCodec.pack(entries: badHwpxEntries)
+    XCTAssertThrowsError(try HWPXContainerCodec.decodeDocument(from: badHwpxData)) { err in
+      guard case EasyOfficeError.resourceBudgetExceeded = err else {
+        XCTFail("Expected resourceBudgetExceeded, got \(err)")
+        return
+      }
+    }
+  }
+
+  func testHWPEqEditToLaTeXAndHWP5Record88Decoding() throws {
+    try testHWPEqEditToLaTeXConversion()
+    try testHWPEqEditFailClosedUnbalancedBracesAndExcessiveDepth()
+    try testHWP5EqEditBinaryRecordDecodingAndSectionIntegration()
   }
 
   func testHWP5EqEditBinaryRecordDecodingAndSectionIntegration() throws {
@@ -1361,6 +1419,8 @@ final class EasyOfficeTests: XCTestCase {
     BitPacking.appendUInt16LE(0x001E, to: &payload)
     BitPacking.appendUInt16LE(0x001F, to: &payload)
     BitPacking.appendUInt16LE(0xD800, to: &payload)
+    BitPacking.appendUInt16LE(0xDB80, to: &payload)
+    BitPacking.appendUInt16LE(0xDCE1, to: &payload)
     BitPacking.appendUInt16LE(UInt16(("나" as UnicodeScalar).value), to: &payload)
 
     let decoded = try HWPEquationCodec.decodeParaTextPayload(
@@ -1368,15 +1428,15 @@ final class EasyOfficeTests: XCTestCase {
       at: 0,
       byteLength: payload.count
     )
-    XCTAssertEqual(decoded, "가\t \u{00AD} \u{00A0}\u{2007}□나")
+    XCTAssertEqual(decoded, "가\t \u{00AD} \u{00A0}\u{2007}□\u{A0E1}나")
 
     XCTAssertEqual(HWPEquationCodec.puaBMPSymbols.count, 53)
-    XCTAssertEqual(HWPEquationCodec.hwp5SymbolToPlane15(0xA0E1), 0xFA0E1)
-    XCTAssertEqual(HWPEquationCodec.hwp5SymbolToPlane15(0xA855), 0xFA855)
+    XCTAssertEqual(HWPEquationCodec.hwp5SymbolToPlane15(0xA0E1), 0xF00E1)
+    XCTAssertEqual(HWPEquationCodec.hwp5SymbolToPlane15(0xA855), 0xF0855)
     XCTAssertNil(HWPEquationCodec.hwp5SymbolToPlane15(0x0041))
-    XCTAssertEqual(HWPEquationCodec.plane15ToHWP5Symbol(0xFA0E1), 0xA0E1)
-    XCTAssertEqual(HWPEquationCodec.plane15ToHWP5Symbol(0xFA855), 0xA855)
-    XCTAssertNil(HWPEquationCodec.plane15ToHWP5Symbol(0xFA000))
+    XCTAssertEqual(HWPEquationCodec.plane15ToHWP5Symbol(0xF00E1), 0xA0E1)
+    XCTAssertEqual(HWPEquationCodec.plane15ToHWP5Symbol(0xF0855), 0xA855)
+    XCTAssertNil(HWPEquationCodec.plane15ToHWP5Symbol(0xF0000))
   }
 }
 

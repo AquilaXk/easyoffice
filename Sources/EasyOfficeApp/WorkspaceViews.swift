@@ -2471,24 +2471,26 @@ struct BottomWorkspaceStatusBarView: View {
         Divider().frame(height: 14)
 
         Button {
-          viewModel.applyQuickZoomPreset(100.0)
+          viewModel.applyQuickZoomPreset(120.0)
         } label: {
           Text("폭 맞춤")
-            .font(.system(size: 10, weight: Int(viewModel.zoomPercent) == 100 ? .bold : .medium))
+            .font(.system(size: 10, weight: Int(viewModel.zoomPercent) == 120 ? .bold : .medium))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
         }
         .buttonStyle(.plain)
 
         Button {
-          viewModel.applyQuickZoomPreset(90.0)
+          viewModel.applyQuickZoomPreset(100.0)
         } label: {
           Text("쪽 맞춤")
-            .font(.system(size: 10, weight: Int(viewModel.zoomPercent) == 90 ? .bold : .medium))
+            .font(.system(size: 10, weight: Int(viewModel.zoomPercent) == 100 ? .bold : .medium))
             .foregroundStyle(palette.secondaryText.swiftUIColor)
         }
         .buttonStyle(.plain)
 
         Button("-") { viewModel.setZoom(viewModel.zoomPercent - 10.0) }.buttonStyle(.plain)
+        Slider(value: $viewModel.zoomPercent, in: 50...200)
+          .frame(width: 72)
         Text("\(Int(viewModel.zoomPercent))%")
           .font(.system(size: 11, design: .monospaced))
           .foregroundStyle(palette.secondaryText.swiftUIColor)

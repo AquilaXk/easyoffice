@@ -8,7 +8,20 @@
         maxWidth: "",
         padding: "",
         minHeight: "",
+        fontFamily: "",
+        fontSize: "",
+        lineHeight: "",
+        textAlign: "",
         paperSize: "",
+        styleRole: "",
+        fontLang: "",
+        lineSpacing: "",
+        showCtrlMarks: "",
+        showParaMarks: "true",
+        strike: "",
+        charfx: "",
+        textcolor: "",
+        highlight: "",
         manuscriptGrid: false,
       };
     }
@@ -17,7 +30,20 @@
       maxWidth: editor.style.maxWidth || "",
       padding: editor.style.padding || "",
       minHeight: editor.style.minHeight || "",
+      fontFamily: editor.style.fontFamily || "",
+      fontSize: editor.style.fontSize || "",
+      lineHeight: editor.style.lineHeight || "",
+      textAlign: editor.style.textAlign || "",
       paperSize: editor.dataset.paperSize || "",
+      styleRole: editor.dataset.styleRole || "",
+      fontLang: editor.dataset.fontLang || "",
+      lineSpacing: editor.dataset.lineSpacing || "",
+      showCtrlMarks: editor.dataset.showCtrlMarks || "",
+      showParaMarks: editor.dataset.showParaMarks || "",
+      strike: editor.dataset.strike || "",
+      charfx: editor.dataset.charfx || "",
+      textcolor: editor.dataset.textcolor || "",
+      highlight: editor.dataset.highlight || "",
       manuscriptGrid: editor.classList.contains("manuscript-grid"),
     };
   }
@@ -29,11 +55,28 @@
     editor.style.maxWidth = ls.maxWidth || "";
     editor.style.padding = ls.padding || "";
     editor.style.minHeight = ls.minHeight || "";
-    if (ls.paperSize) {
-      editor.dataset.paperSize = ls.paperSize;
-    } else {
-      delete editor.dataset.paperSize;
-    }
+    editor.style.fontFamily = ls.fontFamily || "";
+    editor.style.fontSize = ls.fontSize || "";
+    editor.style.lineHeight = ls.lineHeight || "";
+    editor.style.textAlign = ls.textAlign || "";
+    [
+      "paperSize",
+      "styleRole",
+      "fontLang",
+      "lineSpacing",
+      "showCtrlMarks",
+      "showParaMarks",
+      "strike",
+      "charfx",
+      "textcolor",
+      "highlight",
+    ].forEach((k) => {
+      if (ls[k]) {
+        editor.dataset[k] = ls[k];
+      } else {
+        delete editor.dataset[k];
+      }
+    });
     editor.classList.toggle("manuscript-grid", Boolean(ls.manuscriptGrid));
   }
 
@@ -59,14 +102,22 @@
     let activeDocBlockEl = null;
 
     function syncDocStyleBarFromTarget(targetEl) {
+      const docEditor = document.getElementById("doc-editor");
       const boldBtn = document.getElementById("btn-stylebar-bold");
       const italicBtn = document.getElementById("btn-stylebar-italic");
       const underBtn = document.getElementById("btn-stylebar-underline");
       const sizeBadge = document.getElementById("doc-style-size-badge");
+      const sizeInput = document.getElementById("doc-font-size-input");
       if (boldBtn) boldBtn.setAttribute("aria-pressed", targetEl?.style?.fontWeight === "600" ? "true" : "false");
       if (italicBtn) italicBtn.setAttribute("aria-pressed", targetEl?.style?.fontStyle === "italic" ? "true" : "false");
       if (underBtn) underBtn.setAttribute("aria-pressed", targetEl?.style?.textDecoration === "underline" ? "true" : "false");
-      if (sizeBadge) sizeBadge.textContent = targetEl?.style?.fontSize || "11.0 pt";
+      const rawSize = targetEl?.style?.fontSize || docEditor?.style?.fontSize || "11.0pt";
+      const parsedNum = Number.parseFloat(rawSize);
+      const formattedNum = Number.isFinite(parsedNum) ? parsedNum.toFixed(1) : "11.0";
+      if (sizeInput) sizeInput.value = formattedNum;
+      if (sizeBadge) {
+        sizeBadge.textContent = rawSize.endsWith("px") ? rawSize : formattedNum + " pt";
+      }
     }
 
     function setActiveDocBlock(el) {
@@ -460,9 +511,15 @@
         }
         syncSplitComparePane(stage);
       }
+      const zoomText = viewState.canvasZoom || "100%";
       const zoomLabel = document.getElementById("status-zoom-label");
       if (zoomLabel) {
-        zoomLabel.textContent = viewState.canvasZoom || "100%";
+        zoomLabel.textContent = zoomText;
+      }
+      const zoomSlider = document.getElementById("status-zoom-slider");
+      if (zoomSlider) {
+        const zoomVal = Number.parseInt(zoomText, 10) || 100;
+        zoomSlider.value = String(zoomVal);
       }
     }
 
@@ -561,9 +618,31 @@
         restoreDomChildren(editor, saved.editorNodes || [], document);
         applyDocLayoutStyle(editor, saved.layoutStyle);
       }
+      const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");
       const roleBadge = document.getElementById("doc-style-role-badge");
-      if (roleBadge) {
-        roleBadge.textContent = mod === "HWP" ? "공문서 바탕글" : "바탕글";
+      if (roleBadge) roleBadge.textContent = roleVal;
+      const styleSelect = document.getElementById("doc-style-select");
+      if (styleSelect && editor?.dataset?.styleRole) styleSelect.value = editor.dataset.styleRole;
+      const fontSelect = document.getElementById("doc-font-select");
+      if (fontSelect) fontSelect.value = editor?.style?.fontFamily || "Pretendard";
+      const lsSelect = document.getElementById("doc-linespacing-select");
+      if (lsSelect) lsSelect.value = editor?.dataset?.lineSpacing || "160";
+      [
+        ["btn-stylebar-strike", "strike"],
+        ["btn-stylebar-charfx", "charfx"],
+        ["btn-stylebar-textcolor", "textcolor"],
+        ["btn-stylebar-highlight", "highlight"],
+      ].forEach(([id, key]) => {
+        const btn = document.getElementById(id);
+        const on = editor?.dataset?.[key] === "true";
+        if (btn) {
+          btn.classList.toggle("active", on);
+          btn.setAttribute("aria-pressed", on ? "true" : "false");
+        }
+      });
+      const hwpPreview = document.getElementById("hwp-manuscript-preview");
+      if (hwpPreview) {
+        hwpPreview.classList.toggle("manuscript-grid", Boolean(editor?.classList?.contains("manuscript-grid")));
       }
       activeDocBlockEl = null;
       const firstBlock = editor ? getFocusedDocBlock(editor) : null;

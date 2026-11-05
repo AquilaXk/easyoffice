@@ -25,7 +25,7 @@ pub fn plane15_to_hwp5_symbol(cp: u32) -> Option<u16> {
         return None;
     }
     let unit = 0xA000u16 | u16::try_from(cp & 0x0FFF).ok()?;
-    HWP5_PUA_BMP_SYMBOLS.contains(&unit).then_some(unit)
+    (hwp5_symbol_to_plane15(unit) == Some(cp)).then_some(unit)
 }
 
 pub fn decode_hwp5_para_text_bytes(bytes: &[u8]) -> Result<String, EasyOfficeError> {
@@ -66,8 +66,8 @@ pub fn decode_hwp5_para_text_bytes(bytes: &[u8]) -> Result<String, EasyOfficeErr
             cursor += 16;
         } else if code < 0x0020 {
             match code {
+                0x0012 | 0x0019 => out.push(' '),
                 0x0018 => out.push('\u{00AD}'),
-                0x0019 => out.push(' '),
                 0x001E => out.push('\u{00A0}'),
                 0x001F => out.push('\u{2007}'),
                 _ => {}
@@ -78,7 +78,8 @@ pub fn decode_hwp5_para_text_bytes(bytes: &[u8]) -> Result<String, EasyOfficeErr
                 let low = u16::from_le_bytes([bytes[cursor + 2], bytes[cursor + 3]]);
                 if (0xDC00..=0xDFFF).contains(&low) {
                     let cp = 0x10000 + ((code as u32 - 0xD800) << 10) + (low as u32 - 0xDC00);
-                    out.push(char::from_u32(cp).unwrap_or(UNPAIRED_SURROGATE_REPLACEMENT));
+                    let mapped = plane15_to_hwp5_symbol(cp).map_or(cp, u32::from);
+                    out.push(char::from_u32(mapped).unwrap_or(UNPAIRED_SURROGATE_REPLACEMENT));
                     cursor += 4;
                     continue;
                 }
@@ -117,7 +118,8 @@ pub fn decode_hwp5_eqedit_script(data: &[u8]) -> Result<String, EasyOfficeError>
             let low = u16::from_le_bytes([slice[idx + 2], slice[idx + 3]]);
             if (0xDC00..=0xDFFF).contains(&low) {
                 let cp = 0x10000 + ((u as u32 - 0xD800) << 10) + (low as u32 - 0xDC00);
-                script.push(char::from_u32(cp).unwrap_or(UNPAIRED_SURROGATE_REPLACEMENT));
+                let mapped = plane15_to_hwp5_symbol(cp).map_or(cp, u32::from);
+                script.push(char::from_u32(mapped).unwrap_or(UNPAIRED_SURROGATE_REPLACEMENT));
                 idx += 4;
                 continue;
             }
@@ -150,24 +152,26 @@ enum EqToken {
 }
 
 const KNOWN_COMMANDS: &[&str] = &[
-    "over", "atop", "sqrt", "root", "of", "sup", "sub", "from", "to", "left", "right", "sum",
-    "prod", "int", "oint", "lim", "matrix", "pmatrix", "bmatrix", "dmatrix", "cases", "pile",
-    "lpile", "rpile", "cpile", "hat", "bar", "vec", "dot", "ddot", "tilde", "acute", "grave",
-    "check", "breve", "overline", "underline", "widehat", "widetilde", "overbrace", "underbrace",
-    "overrightarrow", "mathring", "rm", "it", "bold", "binom", "choose", "sin", "cos", "tan",
-    "csc", "sec", "cot", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "log", "ln", "lg",
-    "exp", "max", "min", "det", "dim", "gcd", "lcm", "mod", "deg", "ker", "hom", "arg", "inf",
-    "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta", "vartheta",
-    "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "varpi", "rho", "varrho",
-    "sigma", "varsigma", "tau", "upsilon", "phi", "varphi", "chi", "psi", "omega", "times", "div",
-    "cdot", "pm", "mp", "circ", "bullet", "star", "ast", "oplus", "otimes", "odot", "leq", "le",
-    "geq", "ge", "neq", "ne", "approx", "equiv", "sim", "simeq", "cong", "propto", "ll", "gg",
-    "subset", "supset", "subseteq", "supseteq", "in", "notin", "ni", "cup", "cap", "emptyset",
-    "nothing", "rarrow", "rightarrow", "larrow", "leftarrow", "lrarrow", "leftrightarrow",
-    "uparrow", "downarrow", "uarrow", "darrow", "mapsto", "implies", "iff", "infty", "infin",
-    "partial", "nabla", "forall", "exists", "exist", "neg", "lnot", "land", "lor", "therefore",
-    "because", "dots", "cdots", "ldots", "vdots", "ddots", "prime", "aleph", "hbar", "ell", "wp",
-    "re", "im", "angle", "triangle", "perp", "parallel", "mid", "scale", "color",
+    "over", "atop", "sqrt", "root", "of", "sup", "sub", "lsub", "lsup", "from", "to", "left",
+    "right", "sum", "prod", "coprod", "int", "oint", "dint", "tint", "bigcup", "bigcap", "lim",
+    "matrix", "pmatrix", "bmatrix", "dmatrix", "cases", "pile", "lpile", "rpile", "cpile", "hat",
+    "bar", "vec", "dot", "ddot", "tilde", "acute", "grave", "check", "breve", "overline",
+    "underline", "widehat", "widetilde", "overbrace", "underbrace", "overrightarrow", "mathring",
+    "rm", "it", "bold", "binom", "choose", "sin", "cos", "tan", "csc", "sec", "cot", "arcsin",
+    "arccos", "arctan", "sinh", "cosh", "tanh", "log", "ln", "lg", "exp", "max", "min", "det",
+    "dim", "gcd", "lcm", "mod", "deg", "ker", "hom", "arg", "inf", "alpha", "beta", "gamma",
+    "delta", "epsilon", "varepsilon", "zeta", "eta", "theta", "vartheta", "iota", "kappa",
+    "lambda", "mu", "nu", "xi", "omicron", "pi", "varpi", "rho", "varrho", "sigma", "varsigma",
+    "tau", "upsilon", "phi", "varphi", "chi", "psi", "omega", "times", "div", "cdot", "pm", "mp",
+    "circ", "bullet", "star", "ast", "oplus", "otimes", "odot", "leq", "le", "geq", "ge", "neq",
+    "ne", "approx", "equiv", "sim", "simeq", "cong", "propto", "ll", "gg", "subset", "supset",
+    "subseteq", "supseteq", "in", "notin", "ni", "cup", "cap", "emptyset", "nothing", "rarrow",
+    "rightarrow", "larrow", "leftarrow", "lrarrow", "leftrightarrow", "uparrow", "downarrow",
+    "uarrow", "darrow", "mapsto", "implies", "iff", "infty", "infin", "partial", "nabla", "forall",
+    "exists", "exist", "neg", "lnot", "land", "lor", "therefore", "because", "dots", "cdots",
+    "ldots", "vdots", "ddots", "prime", "aleph", "hbar", "ell", "wp", "re", "im", "angle",
+    "triangle", "perp", "parallel", "mid", "scale", "color", "langle", "rangle", "lfloor",
+    "rfloor", "lceil", "rceil", "vert", "dvert", "line", "dline",
 ];
 
 const FONT_PREFIXES: &[&str] = &["bold", "rm", "it"];
@@ -284,6 +288,8 @@ enum EqExpr {
     Sup(Box<EqExpr>, Vec<EqExpr>),
     Sub(Box<EqExpr>, Vec<EqExpr>),
     SubSup(Box<EqExpr>, Vec<EqExpr>, Vec<EqExpr>),
+    LeftSub(Box<EqExpr>, Vec<EqExpr>),
+    LeftSup(Box<EqExpr>, Vec<EqExpr>),
     BigOp(String, Option<Vec<EqExpr>>, Option<Vec<EqExpr>>),
     LeftRight(String, Vec<EqExpr>, String),
     Matrix(&'static str, Vec<Vec<Vec<EqExpr>>>),
@@ -320,6 +326,7 @@ impl EqParser {
         &mut self,
         stop_rbrace: bool,
         stop_right: bool,
+        stop_matrix_sep: bool,
         depth: usize,
     ) -> Result<Vec<EqExpr>, EasyOfficeError> {
         Self::check_depth(depth)?;
@@ -334,6 +341,11 @@ impl EqParser {
                     "EqEdit 수식에 짝이 맞지 않는 닫는 중괄호 '}'가 포함되어 있습니다.".to_string(),
                 ));
             }
+            if stop_matrix_sep
+                && matches!(self.peek(), Some(EqToken::Ampersand | EqToken::Newline))
+            {
+                break;
+            }
             if stop_right {
                 if let Some(EqToken::Command(cmd)) = self.peek() {
                     if cmd.eq_ignore_ascii_case("right") {
@@ -346,7 +358,8 @@ impl EqParser {
                     let is_choose = cmd.eq_ignore_ascii_case("choose");
                     self.pos += 1;
                     let num = std::mem::take(&mut items);
-                    let den = self.parse_expr_until(stop_rbrace, stop_right, depth + 1)?;
+                    let den =
+                        self.parse_expr_until(stop_rbrace, stop_right, stop_matrix_sep, depth + 1)?;
                     items.push(if is_choose {
                         EqExpr::Binom(num, den)
                     } else {
@@ -357,13 +370,14 @@ impl EqParser {
                 if cmd.eq_ignore_ascii_case("atop") {
                     self.pos += 1;
                     let top = std::mem::take(&mut items);
-                    let bot = self.parse_expr_until(stop_rbrace, stop_right, depth + 1)?;
+                    let bot =
+                        self.parse_expr_until(stop_rbrace, stop_right, stop_matrix_sep, depth + 1)?;
                     items.push(EqExpr::Atop(top, bot));
                     continue;
                 }
             }
-            if let Some(atom) = self.parse_atom(depth + 1)? {
-                let expr = self.parse_postfix(atom, depth + 1)?;
+            if let Some(atom) = self.parse_atom(depth)? {
+                let expr = self.parse_postfix(atom, depth)?;
                 items.push(expr);
             }
         }
@@ -374,7 +388,7 @@ impl EqParser {
         Self::check_depth(depth)?;
         if matches!(self.peek(), Some(EqToken::LBrace)) {
             self.pos += 1;
-            let inner = self.parse_expr_until(true, false, depth + 1)?;
+            let inner = self.parse_expr_until(true, false, false, depth + 1)?;
             if !matches!(self.peek(), Some(EqToken::RBrace)) {
                 return Err(EasyOfficeError::CorruptedContainer(
                     "EqEdit 수식의 여는 중괄호 '{'가 닫히지 않았습니다.".to_string(),
@@ -382,11 +396,23 @@ impl EqParser {
             }
             self.pos += 1;
             Ok(inner)
-        } else if let Some(atom) = self.parse_atom(depth + 1)? {
+        } else if let Some(atom) = self.parse_atom(depth)? {
             Ok(vec![atom])
         } else {
             Ok(Vec::new())
         }
+    }
+
+    fn parse_bound_group(&mut self, depth: usize) -> Result<Vec<EqExpr>, EasyOfficeError> {
+        let is_braced = matches!(self.peek(), Some(EqToken::LBrace));
+        let mut grp = self.parse_group(depth)?;
+        if !is_braced && matches!(self.peek(), Some(EqToken::Symbol('='))) {
+            self.pos += 1;
+            grp.push(EqExpr::Raw("=".to_string()));
+            let rhs = self.parse_group(depth)?;
+            grp.extend(rhs);
+        }
+        Ok(grp)
     }
 
     fn parse_postfix(&mut self, mut base: EqExpr, depth: usize) -> Result<EqExpr, EasyOfficeError> {
@@ -397,6 +423,8 @@ impl EqParser {
                 || matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("sup"));
             let is_sub = matches!(self.peek(), Some(EqToken::Subscript))
                 || matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("sub"));
+            let is_lsup = matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("lsup"));
+            let is_lsub = matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("lsub"));
 
             if is_sup {
                 chain_depth += 1;
@@ -430,6 +458,18 @@ impl EqParser {
                 } else {
                     base = EqExpr::Sub(Box::new(base), sub_arg);
                 }
+            } else if is_lsup {
+                chain_depth += 1;
+                Self::check_depth(chain_depth)?;
+                self.pos += 1;
+                let sup_arg = self.parse_group(chain_depth)?;
+                base = EqExpr::LeftSup(Box::new(base), sup_arg);
+            } else if is_lsub {
+                chain_depth += 1;
+                Self::check_depth(chain_depth)?;
+                self.pos += 1;
+                let sub_arg = self.parse_group(chain_depth)?;
+                base = EqExpr::LeftSub(Box::new(base), sub_arg);
             } else {
                 break;
             }
@@ -464,7 +504,7 @@ impl EqParser {
                     }
                     "rangle" => {
                         self.pos += 1;
-                        "\\rangle ".to_string()
+                        "\\rangle".to_string()
                     }
                     "lfloor" => {
                         self.pos += 1;
@@ -472,7 +512,7 @@ impl EqParser {
                     }
                     "rfloor" => {
                         self.pos += 1;
-                        "\\rfloor ".to_string()
+                        "\\rfloor".to_string()
                     }
                     "lceil" => {
                         self.pos += 1;
@@ -480,7 +520,15 @@ impl EqParser {
                     }
                     "rceil" => {
                         self.pos += 1;
-                        "\\rceil ".to_string()
+                        "\\rceil".to_string()
+                    }
+                    "vert" | "line" => {
+                        self.pos += 1;
+                        "|".to_string()
+                    }
+                    "dvert" | "dline" => {
+                        self.pos += 1;
+                        "\\|".to_string()
                     }
                     _ => ".".to_string(),
                 }
@@ -501,31 +549,25 @@ impl EqParser {
         self.pos += 1;
         let mut rows = Vec::new();
         let mut current_row = Vec::new();
-        let mut current_cell = Vec::new();
 
         while self.pos < self.tokens.len() {
+            let cell = self.parse_expr_until(true, false, true, depth)?;
+            current_row.push(cell);
             match self.peek() {
                 Some(EqToken::RBrace) => {
                     self.pos += 1;
-                    current_row.push(current_cell);
                     rows.push(current_row);
                     return Ok(EqExpr::Matrix(env, rows));
                 }
                 Some(EqToken::Ampersand) => {
                     self.pos += 1;
-                    current_row.push(std::mem::take(&mut current_cell));
                 }
                 Some(EqToken::Newline) => {
                     self.pos += 1;
-                    current_row.push(std::mem::take(&mut current_cell));
                     rows.push(std::mem::take(&mut current_row));
                 }
-                _ => {
-                    if let Some(atom) = self.parse_atom(depth + 1)? {
-                        let expr = self.parse_postfix(atom, depth + 1)?;
-                        current_cell.push(expr);
-                    }
-                }
+                None => break,
+                _ => {}
             }
         }
         Err(EasyOfficeError::CorruptedContainer(
@@ -582,7 +624,7 @@ impl EqParser {
             }
             Some(EqToken::Command(cmd)) => {
                 self.pos += 1;
-                self.parse_command(&cmd, depth + 1)
+                self.parse_command(&cmd, depth)
             }
         }
     }
@@ -594,44 +636,64 @@ impl EqParser {
     ) -> Result<Option<EqExpr>, EasyOfficeError> {
         Self::check_depth(depth)?;
         let lower = cmd.to_ascii_lowercase();
+        let next_depth = depth + 1;
         match lower.as_str() {
             "sqrt" => {
-                let rad = self.parse_group(depth)?;
+                let rad = self.parse_group(next_depth)?;
                 Ok(Some(EqExpr::Sqrt(None, rad)))
             }
             "root" => {
-                let idx = self.parse_group(depth)?;
+                let idx = self.parse_group(next_depth)?;
                 if let Some(EqToken::Command(c)) = self.peek() {
                     if c.eq_ignore_ascii_case("of") {
                         self.pos += 1;
                     }
                 }
-                let rad = self.parse_group(depth)?;
+                let rad = self.parse_group(next_depth)?;
                 Ok(Some(EqExpr::Sqrt(Some(idx), rad)))
             }
-            "sum" | "prod" | "int" | "oint" | "lim" => {
-                let latex_op = format!("\\{lower}");
+            "sum" | "prod" | "coprod" | "int" | "oint" | "dint" | "tint" | "bigcup" | "bigcap"
+            | "lim" => {
+                let latex_op = match lower.as_str() {
+                    "dint" => "\\iint".to_string(),
+                    "tint" => "\\iiint".to_string(),
+                    _ => format!("\\{lower}"),
+                };
                 let mut lower_bd = None;
                 let mut upper_bd = None;
                 loop {
                     match self.peek() {
                         Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("from") => {
                             self.pos += 1;
-                            lower_bd = Some(self.parse_group(depth)?);
+                            lower_bd = Some(self.parse_bound_group(next_depth)?);
                         }
                         Some(EqToken::Command(c))
-                            if c.eq_ignore_ascii_case("to") && lower_bd.is_some() =>
+                            if c.eq_ignore_ascii_case("to") && upper_bd.is_none() =>
                         {
                             self.pos += 1;
-                            upper_bd = Some(self.parse_group(depth)?);
+                            upper_bd = Some(self.parse_group(next_depth)?);
                         }
                         Some(EqToken::Subscript) if lower_bd.is_none() => {
                             self.pos += 1;
-                            lower_bd = Some(self.parse_group(depth)?);
+                            lower_bd = Some(self.parse_bound_group(next_depth)?);
+                        }
+                        Some(EqToken::Command(c))
+                            if (c.eq_ignore_ascii_case("sub") || c.eq_ignore_ascii_case("lsub"))
+                                && lower_bd.is_none() =>
+                        {
+                            self.pos += 1;
+                            lower_bd = Some(self.parse_bound_group(next_depth)?);
                         }
                         Some(EqToken::Superscript) if upper_bd.is_none() => {
                             self.pos += 1;
-                            upper_bd = Some(self.parse_group(depth)?);
+                            upper_bd = Some(self.parse_group(next_depth)?);
+                        }
+                        Some(EqToken::Command(c))
+                            if (c.eq_ignore_ascii_case("sup") || c.eq_ignore_ascii_case("lsup"))
+                                && upper_bd.is_none() =>
+                        {
+                            self.pos += 1;
+                            upper_bd = Some(self.parse_group(next_depth)?);
                         }
                         _ => break,
                     }
@@ -640,7 +702,7 @@ impl EqParser {
             }
             "left" => {
                 let open = self.parse_delimiter();
-                let body = self.parse_expr_until(false, true, depth)?;
+                let body = self.parse_expr_until(false, true, false, next_depth)?;
                 let close = if let Some(EqToken::Command(c)) = self.peek() {
                     if c.eq_ignore_ascii_case("right") {
                         self.pos += 1;
@@ -658,56 +720,92 @@ impl EqParser {
                 Ok(None)
             }
             "matrix" | "pile" | "cpile" | "lpile" | "rpile" => {
-                self.parse_matrix_rows("matrix", depth).map(Some)
+                self.parse_matrix_rows("matrix", next_depth).map(Some)
             }
-            "pmatrix" => self.parse_matrix_rows("pmatrix", depth).map(Some),
-            "bmatrix" => self.parse_matrix_rows("bmatrix", depth).map(Some),
-            "dmatrix" => self.parse_matrix_rows("vmatrix", depth).map(Some),
-            "cases" => self.parse_matrix_rows("cases", depth).map(Some),
-            "hat" => Ok(Some(EqExpr::Accent("\\hat", self.parse_group(depth)?))),
-            "widehat" => Ok(Some(EqExpr::Accent("\\widehat", self.parse_group(depth)?))),
-            "bar" => Ok(Some(EqExpr::Accent("\\bar", self.parse_group(depth)?))),
-            "overline" => Ok(Some(EqExpr::Accent("\\overline", self.parse_group(depth)?))),
+            "pmatrix" => self.parse_matrix_rows("pmatrix", next_depth).map(Some),
+            "bmatrix" => self.parse_matrix_rows("bmatrix", next_depth).map(Some),
+            "dmatrix" => self.parse_matrix_rows("vmatrix", next_depth).map(Some),
+            "cases" => self.parse_matrix_rows("cases", next_depth).map(Some),
+            "hat" => Ok(Some(EqExpr::Accent("\\hat", self.parse_group(next_depth)?))),
+            "widehat" => Ok(Some(EqExpr::Accent(
+                "\\widehat",
+                self.parse_group(next_depth)?,
+            ))),
+            "bar" => Ok(Some(EqExpr::Accent("\\bar", self.parse_group(next_depth)?))),
+            "overline" => Ok(Some(EqExpr::Accent(
+                "\\overline",
+                self.parse_group(next_depth)?,
+            ))),
             "underline" => Ok(Some(EqExpr::Accent(
                 "\\underline",
-                self.parse_group(depth)?,
+                self.parse_group(next_depth)?,
             ))),
-            "vec" => Ok(Some(EqExpr::Accent("\\vec", self.parse_group(depth)?))),
+            "vec" => Ok(Some(EqExpr::Accent("\\vec", self.parse_group(next_depth)?))),
             "overrightarrow" => Ok(Some(EqExpr::Accent(
                 "\\overrightarrow",
-                self.parse_group(depth)?,
+                self.parse_group(next_depth)?,
             ))),
-            "dot" => Ok(Some(EqExpr::Accent("\\dot", self.parse_group(depth)?))),
-            "ddot" => Ok(Some(EqExpr::Accent("\\ddot", self.parse_group(depth)?))),
-            "tilde" => Ok(Some(EqExpr::Accent("\\tilde", self.parse_group(depth)?))),
+            "dot" => Ok(Some(EqExpr::Accent("\\dot", self.parse_group(next_depth)?))),
+            "ddot" => Ok(Some(EqExpr::Accent(
+                "\\ddot",
+                self.parse_group(next_depth)?,
+            ))),
+            "tilde" => Ok(Some(EqExpr::Accent(
+                "\\tilde",
+                self.parse_group(next_depth)?,
+            ))),
             "widetilde" => Ok(Some(EqExpr::Accent(
                 "\\widetilde",
-                self.parse_group(depth)?,
+                self.parse_group(next_depth)?,
             ))),
-            "acute" => Ok(Some(EqExpr::Accent("\\acute", self.parse_group(depth)?))),
-            "grave" => Ok(Some(EqExpr::Accent("\\grave", self.parse_group(depth)?))),
-            "check" => Ok(Some(EqExpr::Accent("\\check", self.parse_group(depth)?))),
-            "breve" => Ok(Some(EqExpr::Accent("\\breve", self.parse_group(depth)?))),
-            "mathring" => Ok(Some(EqExpr::Accent("\\mathring", self.parse_group(depth)?))),
+            "acute" => Ok(Some(EqExpr::Accent(
+                "\\acute",
+                self.parse_group(next_depth)?,
+            ))),
+            "grave" => Ok(Some(EqExpr::Accent(
+                "\\grave",
+                self.parse_group(next_depth)?,
+            ))),
+            "check" => Ok(Some(EqExpr::Accent(
+                "\\check",
+                self.parse_group(next_depth)?,
+            ))),
+            "breve" => Ok(Some(EqExpr::Accent(
+                "\\breve",
+                self.parse_group(next_depth)?,
+            ))),
+            "mathring" => Ok(Some(EqExpr::Accent(
+                "\\mathring",
+                self.parse_group(next_depth)?,
+            ))),
             "overbrace" => Ok(Some(EqExpr::Accent(
                 "\\overbrace",
-                self.parse_group(depth)?,
+                self.parse_group(next_depth)?,
             ))),
             "underbrace" => Ok(Some(EqExpr::Accent(
                 "\\underbrace",
-                self.parse_group(depth)?,
+                self.parse_group(next_depth)?,
             ))),
-            "rm" => Ok(Some(EqExpr::Font("\\mathrm", self.parse_group(depth)?))),
-            "it" => Ok(Some(EqExpr::Font("\\mathit", self.parse_group(depth)?))),
-            "bold" => Ok(Some(EqExpr::Font("\\mathbf", self.parse_group(depth)?))),
+            "rm" => Ok(Some(EqExpr::Font(
+                "\\mathrm",
+                self.parse_group(next_depth)?,
+            ))),
+            "it" => Ok(Some(EqExpr::Font(
+                "\\mathit",
+                self.parse_group(next_depth)?,
+            ))),
+            "bold" => Ok(Some(EqExpr::Font(
+                "\\mathbf",
+                self.parse_group(next_depth)?,
+            ))),
             "binom" => {
-                let n = self.parse_group(depth)?;
-                let k = self.parse_group(depth)?;
+                let n = self.parse_group(next_depth)?;
+                let k = self.parse_group(next_depth)?;
                 Ok(Some(EqExpr::Binom(n, k)))
             }
             "scale" | "color" => {
-                let _ = self.parse_group(depth)?;
-                let body = self.parse_group(depth)?;
+                let _ = self.parse_group(next_depth)?;
+                let body = self.parse_group(next_depth)?;
                 Ok(Some(EqExpr::Group(body)))
             }
             _ => Ok(Some(EqExpr::Raw(command_to_latex_symbol(cmd)))),
@@ -747,7 +845,12 @@ fn command_to_latex_symbol(cmd: &str) -> String {
         | "cap" | "emptyset" | "uparrow" | "downarrow" | "mapsto" | "partial" | "nabla"
         | "forall" | "exists" | "neg" | "land" | "lor" | "therefore" | "because" | "cdots"
         | "ldots" | "vdots" | "ddots" | "aleph" | "hbar" | "ell" | "wp" | "angle" | "triangle"
-        | "perp" | "parallel" | "mid" => return format!("\\{lower}"),
+        | "perp" | "parallel" | "mid" | "langle" | "rangle" | "lfloor" | "rfloor" | "lceil"
+        | "rceil" | "coprod" | "bigcup" | "bigcap" => return format!("\\{lower}"),
+        "dint" => "\\iint",
+        "tint" => "\\iiint",
+        "vert" | "line" => "|",
+        "dvert" | "dline" => "\\|",
         "omicron" => "o",
         "lcm" => "\\operatorname{lcm}",
         "mod" => "\\bmod",
@@ -794,6 +897,8 @@ fn expr_to_latex(expr: &EqExpr) -> String {
                 wrap_script(sup)
             )
         }
+        EqExpr::LeftSub(b, s) => format!("{{}}_{}{}", wrap_script(s), expr_to_latex(b)),
+        EqExpr::LeftSup(b, s) => format!("{{}}^{}{}", wrap_script(s), expr_to_latex(b)),
         EqExpr::BigOp(op, l, u) => {
             let mut out = op.clone();
             if let Some(lo) = l {
@@ -861,6 +966,6 @@ fn exprs_to_latex(exprs: &[EqExpr]) -> String {
 pub fn convert_eqedit_to_latex(script: &str) -> Result<String, EasyOfficeError> {
     let tokens = tokenize_eqedit(script)?;
     let mut parser = EqParser::new(tokens);
-    let exprs = parser.parse_expr_until(false, false, 0)?;
+    let exprs = parser.parse_expr_until(false, false, false, 0)?;
     Ok(exprs_to_latex(&exprs))
 }

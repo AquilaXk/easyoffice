@@ -608,6 +608,8 @@
         if (stage) stage.style.zoom = zoom + "%";
         const zoomLabel = document.getElementById("status-zoom-label");
         if (zoomLabel) zoomLabel.textContent = zoom + "%";
+        const slider = document.getElementById("status-zoom-slider");
+        if (slider) slider.value = String(zoom);
         return;
       }
       if (cmdId.endsWith("-view-ribbon")) {

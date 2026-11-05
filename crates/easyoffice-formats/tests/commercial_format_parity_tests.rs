@@ -1,7 +1,7 @@
 use easyoffice_formats::{
     convert_eqedit_to_latex, decode_hwp5_eqedit_script, decode_hwp5_para_text_bytes,
-    hwp5_symbol_to_plane15, plane15_to_hwp5_symbol, EasyOfficeError, HWP5_PUA_BMP_SYMBOLS,
-    HWPTAG_EQEDIT, MAX_EQEDIT_DEPTH,
+    hwp5_symbol_to_plane15, plane15_to_hwp5_symbol, EasyOfficeError, Hwp5Codec, HwpxCodec,
+    ZipArchiveCodec, HWP5_PUA_BMP_SYMBOLS, HWPTAG_EQEDIT, MAX_EQEDIT_DEPTH,
 };
 
 #[test]
@@ -31,6 +31,10 @@ fn eqedit_fractions_radicals_and_scripts_convert_to_latex() {
         convert_eqedit_to_latex("a sup 2 + b sub k").unwrap(),
         "a^2 + b_k"
     );
+    assert_eq!(
+        convert_eqedit_to_latex("x lsub 1 lsup 2").unwrap(),
+        "{}^2{}_1x"
+    );
 }
 
 #[test]
@@ -40,8 +44,21 @@ fn eqedit_big_operators_matrices_delimiters_and_accents_convert() {
         "\\sum_{i = 1}^n x_i"
     );
     assert_eq!(
+        convert_eqedit_to_latex("sum from i=1 to n x_i").unwrap(),
+        "\\sum_{i = 1}^n x_i"
+    );
+    assert_eq!(
         convert_eqedit_to_latex("int from 0 to infty e^{-x}").unwrap(),
         "\\int_0^{\\infty} e^{- x}"
+    );
+    assert_eq!(
+        convert_eqedit_to_latex("int to infty e^{-x}").unwrap(),
+        "\\int^{\\infty} e^{- x}"
+    );
+    assert_eq!(
+        convert_eqedit_to_latex("dint_D f + tint_V g + coprod_i A_i + bigcup_k U_k + bigcap_k V_k")
+            .unwrap(),
+        "\\iint_D f + \\iiint_V g + \\coprod_i A_i + \\bigcup_k U_k + \\bigcap_k V_k"
     );
     assert_eq!(
         convert_eqedit_to_latex("matrix{a & b # c & d}").unwrap(),
@@ -50,6 +67,10 @@ fn eqedit_big_operators_matrices_delimiters_and_accents_convert() {
     assert_eq!(
         convert_eqedit_to_latex("pmatrix{1 & 0 # 0 & 1}").unwrap(),
         "\\begin{pmatrix}1 & 0 \\\\ 0 & 1\\end{pmatrix}"
+    );
+    assert_eq!(
+        convert_eqedit_to_latex("pmatrix{1 over 2 & 0 # 0 & 1}").unwrap(),
+        "\\begin{pmatrix}\\frac{1}{2} & 0 \\\\ 0 & 1\\end{pmatrix}"
     );
     assert_eq!(
         convert_eqedit_to_latex("bmatrix{1 & 2 # 3 & 4}").unwrap(),
@@ -70,6 +91,14 @@ fn eqedit_big_operators_matrices_delimiters_and_accents_convert() {
     assert_eq!(
         convert_eqedit_to_latex("left { x + 1 right }").unwrap(),
         "\\left\\{x + 1\\right\\}"
+    );
+    assert_eq!(
+        convert_eqedit_to_latex("left langle x right rangle").unwrap(),
+        "\\left\\langle x\\right\\rangle"
+    );
+    assert_eq!(
+        convert_eqedit_to_latex("left lfloor x right rfloor + left lceil y right rceil").unwrap(),
+        "\\left\\lfloor x\\right\\rfloor + \\left\\lceil y\\right\\rceil"
     );
     assert_eq!(
         convert_eqedit_to_latex("bar x + hat y + vec v + dot t + tilde a").unwrap(),
@@ -135,8 +164,12 @@ fn eqedit_fails_closed_on_unbalanced_braces_and_excessive_depth() {
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
 
-    let deep_open = "{ ".repeat(MAX_EQEDIT_DEPTH + 4) + "x" + &" }".repeat(MAX_EQEDIT_DEPTH + 4);
-    let depth_err = convert_eqedit_to_latex(&deep_open);
+    assert_eq!(MAX_EQEDIT_DEPTH, 64);
+    let ok_50 = "{ ".repeat(50) + "x" + &" }".repeat(50);
+    assert_eq!(convert_eqedit_to_latex(&ok_50).unwrap(), "x");
+
+    let deep_66 = "{ ".repeat(66) + "x" + &" }".repeat(66);
+    let depth_err = convert_eqedit_to_latex(&deep_66);
     assert!(matches!(
         depth_err,
         Err(EasyOfficeError::ResourceBudgetExceeded(_))
@@ -195,6 +228,7 @@ fn hwp5_para_text_handles_16byte_tabs_autonumber_spaces_and_unpaired_surrogates(
     bytes.extend_from_slice(&0x0012u16.to_le_bytes());
     bytes.extend_from_slice(&[0x01; 12]);
     bytes.extend_from_slice(&0x0012u16.to_le_bytes());
+    bytes.extend_from_slice(&0x0012u16.to_le_bytes());
     bytes.extend_from_slice(&0x0018u16.to_le_bytes());
     bytes.extend_from_slice(&0x001Eu16.to_le_bytes());
     bytes.extend_from_slice(&0x001Fu16.to_le_bytes());
@@ -202,7 +236,72 @@ fn hwp5_para_text_handles_16byte_tabs_autonumber_spaces_and_unpaired_surrogates(
     bytes.extend_from_slice(&0xDB80u16.to_le_bytes());
     bytes.extend_from_slice(&0xD83Du16.to_le_bytes());
     bytes.extend_from_slice(&0xDE00u16.to_le_bytes());
+    bytes.extend_from_slice(&0xDB80u16.to_le_bytes());
+    bytes.extend_from_slice(&0xDCE1u16.to_le_bytes());
 
     let decoded = decode_hwp5_para_text_bytes(&bytes).unwrap();
-    assert_eq!(decoded, "가\t \u{00AD}\u{00A0}\u{2007}□□😀");
+    assert_eq!(decoded, "가\t  \u{00AD}\u{00A0}\u{2007}□□😀\u{A0E1}");
+    let via_codec = Hwp5Codec::decode_hwp5_para_text(&bytes).unwrap();
+    assert_eq!(via_codec, "가\t  \u{00AD}\u{00A0}\u{2007}□□😀\u{A0E1}");
+}
+
+#[test]
+fn hwpx_unpack_converts_hp_equation_scripts_and_fails_closed_on_malformed_equations() {
+    let build_hwpx_with_section = |sec_body: &str| -> Vec<u8> {
+        let container_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ocf:container xmlns:ocf=\"urn:oasis:names:tc:opendocument:xmlns:container\"><ocf:rootfiles><ocf:rootfile full-path=\"Contents/content.hpf\" media-type=\"application/hwpml-package+xml\"/></ocf:rootfiles></ocf:container>";
+        let content_hpf = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><opf:package xmlns:opf=\"http://www.idpf.org/2007/opf/\" version=\"1.0\"><opf:metadata><opf:title>수식문서</opf:title></opf:metadata></opf:package>";
+        let header_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><hh:head xmlns:hh=\"http://www.owpml.org/owpml/2011/head\" version=\"1.4\" title=\"수식문서\"/>";
+        let sec_xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><hs:sec xmlns:hs=\"http://www.owpml.org/owpml/2011/section\" xmlns:hp=\"http://www.owpml.org/owpml/2011/paragraph\">{sec_body}</hs:sec>"
+        );
+        ZipArchiveCodec::pack(&[
+            (
+                "mimetype".to_string(),
+                HwpxCodec::MIMETYPE_HWPX.as_bytes().to_vec(),
+            ),
+            (
+                "META-INF/container.xml".to_string(),
+                container_xml.as_bytes().to_vec(),
+            ),
+            (
+                "Contents/content.hpf".to_string(),
+                content_hpf.as_bytes().to_vec(),
+            ),
+            (
+                "Contents/header.xml".to_string(),
+                header_xml.as_bytes().to_vec(),
+            ),
+            ("Contents/section0.xml".to_string(), sec_xml.into_bytes()),
+        ])
+        .unwrap()
+    };
+
+    let valid_bytes = build_hwpx_with_section(
+        "<hp:p><hp:run><hp:t>본문</hp:t></hp:run></hp:p><hp:p><hp:run><hp:equation><hp:script>left langle x right rangle = {1 over 2}</hp:script></hp:equation></hp:run></hp:p>",
+    );
+    let unpacked = HwpxCodec::unpack(&valid_bytes).unwrap();
+    assert_eq!(
+        unpacked.paragraphs,
+        vec![
+            "본문".to_string(),
+            "$$\\left\\langle x\\right\\rangle = \\frac{1}{2}$$".to_string()
+        ]
+    );
+
+    let broken_bytes = build_hwpx_with_section(
+        "<hp:p><hp:run><hp:equation><hp:script>sqrt { x + 1</hp:script></hp:equation></hp:run></hp:p>",
+    );
+    assert!(matches!(
+        HwpxCodec::unpack(&broken_bytes),
+        Err(EasyOfficeError::CorruptedContainer(_))
+    ));
+
+    let deep_script = "{ ".repeat(66) + "x" + &" }".repeat(66);
+    let deep_bytes = build_hwpx_with_section(&format!(
+        "<hp:p><hp:run><hp:equation><hp:script>{deep_script}</hp:script></hp:equation></hp:run></hp:p>"
+    ));
+    assert!(matches!(
+        HwpxCodec::unpack(&deep_bytes),
+        Err(EasyOfficeError::ResourceBudgetExceeded(_))
+    ));
 }

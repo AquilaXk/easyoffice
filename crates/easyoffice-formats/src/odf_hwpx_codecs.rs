@@ -724,7 +724,6 @@ impl OdfCodec {
     }
 }
 
-/// KS X 6101 OWPML payload for `.hwpx` and `.hwtx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HwpxPayload {
     pub title: String,
@@ -735,7 +734,6 @@ pub struct HwpxPayload {
     pub tables: Vec<Vec<Vec<String>>>,
 }
 
-/// KS X 6101 OWPML container codec for `.hwpx` and `.hwtx`.
 pub struct HwpxCodec;
 
 impl HwpxCodec {
@@ -929,12 +927,25 @@ impl HwpxCodec {
 
             let sec_without_tables = strip_tag_blocks(sec_xml, "hp:tbl");
             for p_body in extract_tag_bodies(&sec_without_tables, "hp:p") {
-                let text = extract_tag_bodies(p_body, "hp:t")
+                let p_without_eq = strip_tag_blocks(p_body, "hp:equation");
+                let text = extract_tag_bodies(&p_without_eq, "hp:t")
                     .into_iter()
                     .map(XmlSanitizer::unescape)
                     .collect::<Vec<_>>()
                     .join("");
-                paragraphs.push(text);
+                if !text.is_empty() || !p_body.contains("<hp:equation") {
+                    paragraphs.push(text);
+                }
+            }
+            for eq_body in extract_tag_bodies(sec_xml, "hp:equation") {
+                for raw_script in extract_tag_bodies(eq_body, "hp:script") {
+                    let script = XmlSanitizer::unescape(raw_script);
+                    let trimmed = script.trim();
+                    if !trimmed.is_empty() {
+                        let latex = crate::hwp_eqedit::convert_eqedit_to_latex(trimmed)?;
+                        paragraphs.push(format!("$${latex}$$"));
+                    }
+                }
             }
         }
 

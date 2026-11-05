@@ -412,7 +412,7 @@ extension WorkspaceViewModel {
       case .document(var doc) = openTabs[idx].payload
     else { return }
     let candidate = (expression ?? equationDraftText).trimmingCharacters(in: .whitespacesAndNewlines)
-    let expr = candidate.isEmpty ? "E = mc^2" : HWPEquationCodec.normalizeToLaTeXIfNeeded(candidate)
+    let expr = candidate.isEmpty ? "E = mc^2" : ((try? HWPEquationCodec.normalizeToLaTeXIfNeeded(candidate)) ?? candidate)
     recordUndoSnapshot(for: activeTabID)
     doc.insertEquation(rawExpression: expr, caption: caption)
     openTabs[idx].payload = .document(doc)
@@ -421,7 +421,7 @@ extension WorkspaceViewModel {
   }
 
   public func updateDocumentEquation(id: UUID, newExpression: String) {
-    let normalized = HWPEquationCodec.normalizeToLaTeXIfNeeded(newExpression)
+    let normalized = (try? HWPEquationCodec.normalizeToLaTeXIfNeeded(newExpression)) ?? newExpression
     guard let activeTabID,
       let idx = openTabs.firstIndex(where: { $0.id == activeTabID }),
       case .document(var doc) = openTabs[idx].payload,

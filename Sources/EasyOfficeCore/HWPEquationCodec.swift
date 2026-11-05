@@ -18,12 +18,12 @@ public enum HWPEquationCodec {
 
   public static func hwp5SymbolToPlane15(_ unit: UInt16) -> UInt32? {
     guard puaBMPSymbols.contains(unit) else { return nil }
-    return UInt32(unit) + 0xF0000
+    return 0x0F_0000 | UInt32(unit & 0x0FFF)
   }
 
   public static func plane15ToHWP5Symbol(_ codePoint: UInt32) -> UInt16? {
-    guard codePoint >= 0xFA0E1, codePoint <= 0xFA855 else { return nil }
-    let unit = UInt16(codePoint - 0xF0000)
+    guard (codePoint & 0xFF_F000) == 0x0F_0000 else { return nil }
+    let unit = UInt16(0xA000) | UInt16(codePoint & 0x0FFF)
     return puaBMPSymbols.contains(unit) ? unit : nil
   }
 
@@ -104,8 +104,16 @@ public enum HWPEquationCodec {
             let low =
               rawBuffer.loadUnaligned(fromByteOffset: cursor + 2, as: UInt16.self).littleEndian
             if (0xDC00...0xDFFF).contains(low) {
-              units.append(code)
-              units.append(low)
+              let cp = 0x10000 + ((UInt32(code) - 0xD800) << 10) + (UInt32(low) - 0xDC00)
+              if (cp & 0xFF_F000) == 0x0F_0000,
+                let bmp = plane15ToHWP5Symbol(cp),
+                UnicodeScalar(bmp) != nil
+              {
+                units.append(bmp)
+              } else {
+                units.append(code)
+                units.append(low)
+              }
               cursor += 4
             } else {
               units.append(0x25A1)
@@ -152,8 +160,31 @@ public enum HWPEquationCodec {
       while cursor < scriptEnd {
         let ch = rawBuffer.loadUnaligned(fromByteOffset: cursor, as: UInt16.self).littleEndian
         if ch == 0 { break }
-        units.append(ch)
-        cursor += 2
+        if (0xD800...0xDBFF).contains(ch) {
+          if cursor + 4 <= scriptEnd {
+            let low =
+              rawBuffer.loadUnaligned(fromByteOffset: cursor + 2, as: UInt16.self).littleEndian
+            if (0xDC00...0xDFFF).contains(low) {
+              let cp = 0x10000 + ((UInt32(ch) - 0xD800) << 10) + (UInt32(low) - 0xDC00)
+              if let bmp = plane15ToHWP5Symbol(cp) {
+                units.append(bmp)
+              } else {
+                units.append(ch)
+                units.append(low)
+              }
+              cursor += 4
+              continue
+            }
+          }
+          units.append(0x25A1)
+          cursor += 2
+        } else if (0xDC00...0xDFFF).contains(ch) {
+          units.append(0x25A1)
+          cursor += 2
+        } else {
+          units.append(ch)
+          cursor += 2
+        }
       }
     }
     let rawScript = String(decoding: units, as: UTF16.self)
@@ -162,15 +193,15 @@ public enum HWPEquationCodec {
     return DocumentEquationBlock(latexSource: latex)
   }
 
-  public static func normalizeToLaTeXIfNeeded(_ raw: String) -> String {
+  public static func normalizeToLaTeXIfNeeded(_ raw: String) throws -> String {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, !trimmed.contains("\\") else { return raw }
     guard containsEqEditKeyword(trimmed) else { return raw }
-    return (try? convertEqEditToLaTeX(trimmed)) ?? raw
+    return try convertEqEditToLaTeX(trimmed)
   }
 
   private static let eqEditTriggerKeywords: Set<String> = [
-    "over", "atop", "sqrt", "root", "of", "from", "to", "sup", "sub",
+    "over", "atop", "choose", "sqrt", "root", "of", "from", "to", "sup", "sub",
     "sum", "prod", "int", "oint", "lim", "matrix", "pmatrix", "bmatrix", "dmatrix", "cases",
     "left", "right", "binom", "bar", "hat", "vec", "dot", "ddot", "tilde", "acute", "grave",
     "check", "breve", "overline", "underline", "overbrace", "underbrace", "rm", "it", "bold",
@@ -204,14 +235,19 @@ public enum HWPEquationCodec {
   public static func extractHWPXEquations(
     from sectionXML: String,
     existing: [DocumentEquationBlock]
-  ) -> [DocumentEquationBlock] {
-    var result = existing.map { eq in
-      DocumentEquationBlock(
-        id: eq.id,
-        displayTitle: eq.displayTitle,
-        rawExpression: normalizeToLaTeXIfNeeded(eq.rawExpression)
+  ) throws -> [DocumentEquationBlock] {
+    var result: [DocumentEquationBlock] = []
+    result.reserveCapacity(existing.count)
+    for eq in existing {
+      result.append(
+        DocumentEquationBlock(
+          id: eq.id,
+          displayTitle: eq.displayTitle,
+          rawExpression: try normalizeToLaTeXIfNeeded(eq.rawExpression)
+        )
       )
     }
+    let existingExpressions = Set(result.map(\.rawExpression))
     for eqElem in XMLSanitizer.extractElements(named: "hp:equation", in: sectionXML) {
       let scriptRaw =
         XMLSanitizer.extractElements(named: "hp:script", in: eqElem.innerXML).first?.innerXML
@@ -219,8 +255,8 @@ public enum HWPEquationCodec {
       let unescaped = XMLSanitizer.unescape(scriptRaw).trimmingCharacters(
         in: .whitespacesAndNewlines)
       guard !unescaped.isEmpty else { continue }
-      let converted = (try? convertEqEditToLaTeX(unescaped)) ?? unescaped
-      if !result.contains(where: { $0.rawExpression == converted }) {
+      let converted = try convertEqEditToLaTeX(unescaped)
+      if !existingExpressions.contains(converted) {
         result.append(DocumentEquationBlock(latexSource: converted))
       }
     }
@@ -231,8 +267,9 @@ public enum HWPEquationCodec {
     let tokens = try tokenizeEqEdit(script)
     var parser = EqEditParser(tokens: tokens)
     let expr = try parser.parseExpr(depth: 0)
-    if parser.pos < parser.tokens.count, case .rBrace = parser.tokens[parser.pos] {
-      throw EasyOfficeError.corruptedContainer(detail: "HWP EqEdit 수식 중괄호 쌍이 맞지 않습니다.")
+    guard parser.pos == parser.tokens.count else {
+      throw EasyOfficeError.corruptedContainer(
+        detail: "HWP EqEdit 수식에 닫는 중괄호가 누락되었거나 구문이 잘못되었습니다.")
     }
     var out = ""
     emitExpr(expr, into: &out)
@@ -375,26 +412,34 @@ private struct EqEditParser {
     return s.caseInsensitiveCompare(kw) == .orderedSame
   }
 
-  mutating func parseExpr(depth: Int) throws -> EqExpr {
+  mutating func parseExpr(
+    depth: Int,
+    stopOnRight: Bool = false,
+    stopOnMatrixDelim: Bool = false
+  ) throws -> EqExpr {
     try checkDepth(depth)
     var items: [EqExpr] = []
     while let tok = peek() {
-      if tok == .rBrace || tok == .amp || tok == .hash || peekKeyword("right") {
+      if tok == .rBrace || (stopOnRight && peekKeyword("right"))
+        || (stopOnMatrixDelim && (tok == .amp || tok == .hash))
+      {
         break
       }
-      if peekKeyword("over") || peekKeyword("atop") {
+      if peekKeyword("over") || peekKeyword("atop") || peekKeyword("choose") {
         let isOver = peekKeyword("over")
+        let isChoose = peekKeyword("choose")
         _ = next()
         let lhs: EqExpr =
           items.isEmpty ? .empty : (items.count == 1 ? items.removeFirst() : .seq(items))
         items.removeAll(keepingCapacity: true)
-        let rhs = try parseExpr(depth: depth + 1)
-        return isOver ? .frac(lhs, rhs) : .atop(lhs, rhs)
+        let rhs = try parseExpr(
+          depth: depth + 1,
+          stopOnRight: stopOnRight,
+          stopOnMatrixDelim: stopOnMatrixDelim
+        )
+        return isOver ? .frac(lhs, rhs) : (isChoose ? .binom(lhs, rhs) : .atop(lhs, rhs))
       }
-      if peekKeyword("to") {
-        break
-      }
-      items.append(try parseScript(depth: depth + 1))
+      items.append(try parseScript(depth: depth))
     }
     switch items.count {
     case 0: return .empty
@@ -405,7 +450,7 @@ private struct EqEditParser {
 
   mutating func parseScript(depth: Int) throws -> EqExpr {
     try checkDepth(depth)
-    var base = try parseAtom(depth: depth + 1)
+    var base = try parseAtom(depth: depth)
     if case .ident(let name) = base, isBigOp(name) {
       var lower: EqExpr?
       var upper: EqExpr?
@@ -477,19 +522,19 @@ private struct EqEditParser {
   mutating func parseScriptArg(depth: Int) throws -> EqExpr {
     try checkDepth(depth)
     if peek() == .lBrace {
-      return try parseAtom(depth: depth + 1)
+      return try parseAtom(depth: depth)
     }
     var items: [EqExpr] = []
     while let tok = peek() {
       if tok == .rBrace || tok == .amp || tok == .hash || peekKeyword("to")
-        || peekKeyword("over") || peekKeyword("atop") || peekKeyword("right")
+        || peekKeyword("over") || peekKeyword("atop") || peekKeyword("choose")
+        || peekKeyword("right")
       {
         break
       }
-      items.append(try parseAtom(depth: depth + 1))
-      if items.count == 1, case .symbol(_) = peek() {
-        continue
-      }
+      items.append(try parseAtom(depth: depth))
+      if items.count == 1, case .symbol(_) = peek() { continue }
+      if items.count == 2, case .symbol(_) = items[1] { continue }
       break
     }
     switch items.count {
@@ -512,26 +557,16 @@ private struct EqEditParser {
       return .group(inner)
     case .rBrace:
       throw EasyOfficeError.corruptedContainer(detail: "HWP EqEdit 수식에 예기치 않은 닫는 중괄호가 있습니다.")
-    case .number(let n):
-      return .number(n)
-    case .text(let s):
-      return .text(s)
-    case .tilde:
-      return .space("~")
-    case .backtick:
-      return .space("`")
-    case .symbol(let c):
-      return .symbol(c)
-    case .caret:
-      return .symbol("^")
-    case .underscore:
-      return .symbol("_")
-    case .amp:
-      return .symbol("&")
-    case .hash:
-      return .symbol("#")
-    case .ident(let word):
-      return try parseIdentCommand(word, depth: depth)
+    case .number(let n): return .number(n)
+    case .text(let s): return .text(s)
+    case .tilde: return .space("~")
+    case .backtick: return .space("`")
+    case .symbol(let c): return .symbol(c)
+    case .caret: return .symbol("^")
+    case .underscore: return .symbol("_")
+    case .amp: return .symbol("&")
+    case .hash: return .symbol("#")
+    case .ident(let word): return try parseIdentCommand(word, depth: depth)
     }
   }
 
@@ -539,16 +574,14 @@ private struct EqEditParser {
     let lower = word.lowercased()
     switch lower {
     case "sqrt":
-      let rad = try parseAtom(depth: depth + 1)
-      return .sqrt(index: nil, radicand: rad)
+      return .sqrt(index: nil, radicand: try parseAtom(depth: depth + 1))
     case "root":
       let idx = try parseAtom(depth: depth + 1)
       if peekKeyword("of") { _ = next() }
-      let rad = try parseAtom(depth: depth + 1)
-      return .sqrt(index: idx, radicand: rad)
+      return .sqrt(index: idx, radicand: try parseAtom(depth: depth + 1))
     case "left":
       let l = parseDelimiter()
-      let body = try parseExpr(depth: depth + 1)
+      let body = try parseExpr(depth: depth + 1, stopOnRight: true)
       let r: String
       if peekKeyword("right") {
         _ = next()
@@ -557,29 +590,19 @@ private struct EqEditParser {
         r = "."
       }
       return .delimited(left: l, body: body, right: r)
-    case "matrix":
+    case "matrix", "pile", "lpile", "cpile", "rpile":
       return try parseMatrix(style: .plain, depth: depth + 1)
-    case "pmatrix":
-      return try parseMatrix(style: .paren, depth: depth + 1)
-    case "bmatrix":
-      return try parseMatrix(style: .bracket, depth: depth + 1)
-    case "dmatrix":
-      return try parseMatrix(style: .det, depth: depth + 1)
-    case "cases":
-      return try parseMatrix(style: .cases, depth: depth + 1)
-    case "pile", "lpile", "cpile", "rpile":
-      return try parseMatrix(style: .plain, depth: depth + 1)
+    case "pmatrix": return try parseMatrix(style: .paren, depth: depth + 1)
+    case "bmatrix": return try parseMatrix(style: .bracket, depth: depth + 1)
+    case "dmatrix": return try parseMatrix(style: .det, depth: depth + 1)
+    case "cases": return try parseMatrix(style: .cases, depth: depth + 1)
     case "binom":
-      let a = try parseAtom(depth: depth + 1)
-      let b = try parseAtom(depth: depth + 1)
-      return .binom(a, b)
+      return .binom(try parseAtom(depth: depth + 1), try parseAtom(depth: depth + 1))
     case "bar", "hat", "vec", "dot", "ddot", "tilde", "acute", "grave", "check", "breve",
       "overline", "underline", "overbrace", "underbrace", "dyad", "under", "arch":
-      let body = try parseAtom(depth: depth + 1)
-      return .accent(kind: lower, body: body)
+      return .accent(kind: lower, body: try parseAtom(depth: depth + 1))
     case "rm", "it", "bold":
-      let body = try parseAtom(depth: depth + 1)
-      return .font(kind: lower, body: body)
+      return .font(kind: lower, body: try parseAtom(depth: depth + 1))
     case "scale", "color", "size":
       _ = try parseAtom(depth: depth + 1)
       return try parseAtom(depth: depth + 1)
@@ -593,12 +616,9 @@ private struct EqEditParser {
   mutating func parseDelimiter() -> String {
     guard let tok = next() else { return "." }
     switch tok {
-    case .symbol(let c):
-      return String(c)
-    case .lBrace:
-      return "\\{"
-    case .rBrace:
-      return "\\}"
+    case .symbol(let c): return String(c)
+    case .lBrace: return "\\{"
+    case .rBrace: return "\\}"
     case .ident(let s):
       switch s.lowercased() {
       case "lfloor": return "\\lfloor"
@@ -612,8 +632,7 @@ private struct EqEditParser {
       case "none", "nothing": return "."
       default: return s
       }
-    default:
-      return "."
+    default: return "."
     }
   }
 
@@ -631,7 +650,11 @@ private struct EqEditParser {
       if !expectBrace && (tok == .rBrace || peekKeyword("right")) {
         break
       }
-      let cell = try parseExpr(depth: depth + 1)
+      let cell = try parseExpr(
+        depth: depth,
+        stopOnRight: !expectBrace,
+        stopOnMatrixDelim: true
+      )
       currentRow.append(cell)
       if peek() == .amp {
         _ = next()
@@ -668,6 +691,14 @@ private struct EqEditParser {
   }
 }
 
+private func emitUnbraced(_ expr: EqExpr, into out: inout String) {
+  if case .group(let inner) = expr {
+    emitExpr(inner, into: &out)
+  } else {
+    emitExpr(expr, into: &out)
+  }
+}
+
 private func emitExpr(_ expr: EqExpr, into out: inout String) {
   switch expr {
   case .empty:
@@ -680,46 +711,47 @@ private func emitExpr(_ expr: EqExpr, into out: inout String) {
       emitExpr(item, into: &out)
     }
   case .group(let inner):
+    out.append("{")
     emitExpr(inner, into: &out)
+    out.append("}")
   case .number(let n):
     out.append(n)
   case .ident(let word):
     out.append(mapIdent(word))
   case .text(let s):
     if s.isEmpty { return }
-    out.append("\\text{")
-    out.append(s)
-    out.append("}")
+    out.append("\\text{\(s)}")
   case .symbol(let c):
     switch c {
     case "{": out.append("\\{")
     case "}": out.append("\\}")
     case "%": out.append("\\%")
+    case "#": out.append("\\\\")
     default: out.append(c)
     }
   case .space(let c):
     out.append(c == "~" ? "\\ " : "\\,")
   case .frac(let a, let b):
     out.append("\\frac{")
-    emitExpr(a, into: &out)
+    emitUnbraced(a, into: &out)
     out.append("}{")
-    emitExpr(b, into: &out)
+    emitUnbraced(b, into: &out)
     out.append("}")
   case .atop(let a, let b):
     out.append("{")
-    emitExpr(a, into: &out)
+    emitUnbraced(a, into: &out)
     out.append(" \\atop ")
-    emitExpr(b, into: &out)
+    emitUnbraced(b, into: &out)
     out.append("}")
   case .sqrt(let index, let rad):
     out.append("\\sqrt")
     if let idx = index {
       out.append("[")
-      emitExpr(idx, into: &out)
+      emitUnbraced(idx, into: &out)
       out.append("]")
     }
     out.append("{")
-    emitExpr(rad, into: &out)
+    emitUnbraced(rad, into: &out)
     out.append("}")
   case .script(let base, let sub, let sup):
     let wrapBase: Bool
@@ -728,7 +760,7 @@ private func emitExpr(_ expr: EqExpr, into out: inout String) {
     default: wrapBase = false
     }
     if wrapBase { out.append("{") }
-    emitExpr(base, into: &out)
+    emitUnbraced(base, into: &out)
     if wrapBase { out.append("}") }
     if let s = sub {
       out.append("_")
@@ -749,12 +781,9 @@ private func emitExpr(_ expr: EqExpr, into out: inout String) {
       emitBraced(u, into: &out)
     }
   case .delimited(let left, let body, let right):
-    out.append("\\left")
-    out.append(left)
-    out.append(" ")
-    emitExpr(body, into: &out)
-    out.append(" \\right")
-    out.append(right)
+    out.append("\\left\(left) ")
+    emitUnbraced(body, into: &out)
+    out.append(" \\right\(right)")
   case .matrix(let style, let rows):
     let env: String
     switch style {
@@ -764,19 +793,15 @@ private func emitExpr(_ expr: EqExpr, into out: inout String) {
     case .det: env = "vmatrix"
     case .cases: env = "cases"
     }
-    out.append("\\begin{")
-    out.append(env)
-    out.append("}")
+    out.append("\\begin{\(env)}")
     for (rIdx, row) in rows.enumerated() {
       if rIdx > 0 { out.append(" \\\\ ") }
       for (cIdx, cell) in row.enumerated() {
         if cIdx > 0 { out.append(" & ") }
-        emitExpr(cell, into: &out)
+        emitUnbraced(cell, into: &out)
       }
     }
-    out.append("\\end{")
-    out.append(env)
-    out.append("}")
+    out.append("\\end{\(env)}")
   case .accent(let kind, let body):
     let cmd: String
     switch kind {
@@ -797,26 +822,19 @@ private func emitExpr(_ expr: EqExpr, into out: inout String) {
     case "underbrace": cmd = "\\underbrace"
     default: cmd = "\\bar"
     }
-    out.append(cmd)
-    out.append("{")
-    emitExpr(body, into: &out)
+    out.append("\(cmd){")
+    emitUnbraced(body, into: &out)
     out.append("}")
   case .font(let kind, let body):
-    let cmd: String
-    switch kind {
-    case "rm": cmd = "\\mathrm"
-    case "bold": cmd = "\\mathbf"
-    default: cmd = "\\mathit"
-    }
-    out.append(cmd)
-    out.append("{")
-    emitExpr(body, into: &out)
+    let cmd = (kind == "rm") ? "\\mathrm" : (kind == "bold" ? "\\mathbf" : "\\mathit")
+    out.append("\(cmd){")
+    emitUnbraced(body, into: &out)
     out.append("}")
   case .binom(let a, let b):
     out.append("\\binom{")
-    emitExpr(a, into: &out)
+    emitUnbraced(a, into: &out)
     out.append("}{")
-    emitExpr(b, into: &out)
+    emitUnbraced(b, into: &out)
     out.append("}")
   }
 }
@@ -825,7 +843,6 @@ private func emitBraced(_ expr: EqExpr, into out: inout String) {
   let isSingle: Bool
   switch expr {
   case .number(let n): isSingle = (n.count == 1)
-  case .ident(let id): isSingle = (id.count == 1)
   case .symbol(_): isSingle = true
   default: isSingle = false
   }
@@ -833,21 +850,27 @@ private func emitBraced(_ expr: EqExpr, into out: inout String) {
     emitExpr(expr, into: &out)
   } else {
     out.append("{")
-    emitExpr(expr, into: &out)
+    emitUnbraced(expr, into: &out)
     out.append("}")
   }
 }
 
 private func needsSpaceBetween(_ a: EqExpr, _ b: EqExpr) -> Bool {
+  if case .bigOp(let op, _, _) = a {
+    switch op {
+    case "int", "oint", "dint", "tint": return false
+    default: return true
+    }
+  }
   var buf = ""
   emitExpr(a, into: &buf)
-  guard buf.contains("\\"), let lastA = buf.last, lastA.isASCII && lastA.isLetter else {
-    return false
-  }
   var bufB = ""
   emitExpr(b, into: &bufB)
-  guard let firstB = bufB.first else { return false }
-  return firstB.isASCII && (firstB.isLetter || firstB.isNumber)
+  guard let lastA = buf.last, let firstB = bufB.first else { return false }
+  if buf.contains("\\") && lastA.isASCII && lastA.isLetter {
+    return firstB.isASCII && (firstB.isLetter || firstB.isNumber)
+  }
+  return lastA.isASCII && (lastA.isLetter || lastA.isNumber) && firstB == "\\"
 }
 
 private func mapBigOp(_ op: String) -> String {
@@ -869,17 +892,9 @@ private func mapBigOp(_ op: String) -> String {
 }
 
 private let capitalizedGreekMap: [String: String] = [
-  "gamma": "\\Gamma",
-  "delta": "\\Delta",
-  "theta": "\\Theta",
-  "lambda": "\\Lambda",
-  "xi": "\\Xi",
-  "pi": "\\Pi",
-  "sigma": "\\Sigma",
-  "upsilon": "\\Upsilon",
-  "phi": "\\Phi",
-  "psi": "\\Psi",
-  "omega": "\\Omega",
+  "gamma": "\\Gamma", "delta": "\\Delta", "theta": "\\Theta", "lambda": "\\Lambda",
+  "xi": "\\Xi", "pi": "\\Pi", "sigma": "\\Sigma", "upsilon": "\\Upsilon",
+  "phi": "\\Phi", "psi": "\\Psi", "omega": "\\Omega",
 ]
 
 private let lowerIdentMap: [String: String] = [
@@ -922,7 +937,7 @@ private let lowerIdentMap: [String: String] = [
   "in": "\\in", "owns": "\\ni", "ni": "\\ni", "notin": "\\notin",
   "vdash": "\\vdash", "dashv": "\\dashv", "models": "\\models", "mid": "\\mid", "doteq": "\\doteq",
   "larrow": "\\leftarrow", "leftarrow": "\\leftarrow", "gets": "\\leftarrow",
-  "rarrow": "\\rightarrow", "rightarrow": "\\rightarrow",
+  "rarrow": "\\rightarrow", "rightarrow": "\\rightarrow", "to": "\\rightarrow",
   "lrarrow": "\\leftrightarrow", "leftrightarrow": "\\leftrightarrow",
   "uparrow": "\\uparrow", "downarrow": "\\downarrow", "updownarrow": "\\updownarrow",
   "nearrow": "\\nearrow", "searrow": "\\searrow", "swarrow": "\\swarrow", "nwarrow": "\\nwarrow",
@@ -933,7 +948,7 @@ private let lowerIdentMap: [String: String] = [
   "sinh": "\\sinh", "cosh": "\\cosh", "tanh": "\\tanh", "coth": "\\coth",
   "ln": "\\ln", "log": "\\log", "lg": "\\lg", "exp": "\\exp",
   "det": "\\det", "dim": "\\dim", "ker": "\\ker", "hom": "\\hom", "deg": "\\deg", "gcd": "\\gcd",
-  "max": "\\max", "min": "\\min", "arg": "\\arg", " lim": "\\lim",
+  "max": "\\max", "min": "\\min", "arg": "\\arg", "lim": "\\lim",
   "liminf": "\\liminf", "limsup": "\\limsup", "infimum": "\\inf", "supremum": "\\sup",
   "mod": "\\bmod", "pmod": "\\pmod",
   "quad": "\\quad", "qquad": "\\qquad", "it": "", "rm": "", "bold": "",

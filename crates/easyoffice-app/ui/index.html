@@ -98,7 +98,7 @@
                   <option value="머리말">머리말</option>
                   <option value="각주">각주</option>
                 </select>
-                <span id="doc-style-role-badge" class="eo-style-chip">바탕글</span>
+                <span id="doc-style-role-badge" class="eo-style-chip" hidden>바탕글</span>
                 <select id="doc-font-lang" class="sb-select sb-lang-select" aria-label="언어별 글꼴 범주">
                   <option value="대표" selected>대표</option>
                   <option value="한글">한글</option>
@@ -122,7 +122,8 @@
                 <span id="doc-style-font-badge" class="eo-style-chip" hidden>Pretendard</span>
                 <div class="sb-size-group">
                   <input id="doc-font-size-input" class="sb-size-input" type="text" value="11.0" aria-label="글자 크기" />
-                  <span id="doc-style-size-badge" class="sb-size-unit">11.0 pt</span>
+                  <span class="sb-size-unit">pt</span>
+                  <span id="doc-style-size-badge" class="sb-size-unit" hidden>11.0 pt</span>
                   <button id="btn-size-up" type="button" class="sb-step-btn" title="글자 크기 크게 (Alt+Shift+E)">▲</button>
                   <button id="btn-size-down" type="button" class="sb-step-btn" title="글자 크기 작게 (Alt+Shift+R)">▼</button>
                 </div>

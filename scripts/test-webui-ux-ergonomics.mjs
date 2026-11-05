@@ -445,6 +445,29 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("btn-align-justify").classList.contains("active"), false);
   assert.equal(docEditor.dataset.textAlign, "distribute");
 
+  userClick(document.getElementById("btn-stylebar-strike"));
+  assert.equal(docEditor.dataset.strike, "true");
+  userClick(document.getElementById("btn-stylebar-charfx"));
+  assert.equal(docEditor.dataset.charfx, "true");
+  userClick(document.getElementById("btn-stylebar-textcolor"));
+  assert.equal(docEditor.dataset.textcolor, "true");
+  userClick(document.getElementById("btn-stylebar-highlight"));
+  assert.equal(docEditor.dataset.highlight, "true");
+
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.notEqual(docEditor.dataset.highlight, "true");
+  sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(docEditor.dataset.highlight, "true");
+
+  userClick(document.getElementById("btn-toggle-doc-grid"));
+  assert.equal(docEditor.classList.contains("manuscript-grid"), true);
+  assert.equal(
+    document.getElementById("hwp-manuscript-preview").classList.contains("manuscript-grid"),
+    true
+  );
+
   userClick(document.getElementById("btn-toggle-ctrl-marks"));
   assert.equal(docEditor.dataset.showCtrlMarks, "true");
   assert.equal(docEditor.dataset.showParaMarks, "true");
@@ -472,8 +495,10 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(document.getElementById("status-zoom-label").textContent, "135%");
   userClick(document.getElementById("btn-zoom-fit-width"));
   assert.equal(document.getElementById("status-zoom-label").textContent, "120%");
+  assert.equal(zoomSlider.value, "120");
   userClick(document.getElementById("btn-zoom-fit-page"));
   assert.equal(document.getElementById("status-zoom-label").textContent, "100%");
+  assert.equal(zoomSlider.value, "100");
 
   userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
   await flushAsyncTurns();

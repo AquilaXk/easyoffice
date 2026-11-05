@@ -656,8 +656,8 @@ impl Hwp5Codec {
         Ok(rows)
     }
 
-    pub(crate) fn decode_hwp5_para_text(bytes: &[u8]) -> Result<String, EasyOfficeError> {
-        crate::hwp_eqedit::decode_hwp5_para_text_bytes(bytes).map(|s| s.replace('\u{00AD}', ""))
+    pub fn decode_hwp5_para_text(bytes: &[u8]) -> Result<String, EasyOfficeError> {
+        crate::hwp_eqedit::decode_hwp5_para_text_bytes(bytes)
     }
 
     fn is_printable_text(s: &str) -> bool {

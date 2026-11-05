@@ -677,36 +677,55 @@
 
     function setupStudioChromeControls(applyZoomPercent) {
       const editor = document.getElementById("doc-editor");
+      function withDocStyleUndo(mutateFn) {
+        const pre =
+          typeof captureWorkspaceSnapshot === "function"
+            ? captureWorkspaceSnapshot(false)
+            : null;
+        mutateFn();
+        saveActiveDocTabState();
+        if (pre && typeof commitDeferredUndoSnapshot === "function") {
+          commitDeferredUndoSnapshot(pre);
+        }
+      }
       const styleSelect = document.getElementById("doc-style-select");
       const roleBadge = document.getElementById("doc-style-role-badge");
       if (styleSelect && editor) {
-        styleSelect.addEventListener("change", () => {
-          if (roleBadge) roleBadge.textContent = styleSelect.value;
-          editor.dataset.styleRole = styleSelect.value;
-        });
+        styleSelect.addEventListener("change", () =>
+          withDocStyleUndo(() => {
+            if (roleBadge) roleBadge.textContent = styleSelect.value;
+            editor.dataset.styleRole = styleSelect.value;
+          })
+        );
       }
       const fontLang = document.getElementById("doc-font-lang");
       if (fontLang && editor) {
-        fontLang.addEventListener("change", () => {
-          editor.dataset.fontLang = fontLang.value;
-        });
+        fontLang.addEventListener("change", () =>
+          withDocStyleUndo(() => {
+            editor.dataset.fontLang = fontLang.value;
+          })
+        );
       }
       const fontSelect = document.getElementById("doc-font-select");
       const fontBadge = document.getElementById("doc-style-font-badge");
       if (fontSelect && editor) {
-        fontSelect.addEventListener("change", () => {
-          if (fontBadge) fontBadge.textContent = fontSelect.value;
-          editor.style.fontFamily = fontSelect.value;
-        });
+        fontSelect.addEventListener("change", () =>
+          withDocStyleUndo(() => {
+            if (fontBadge) fontBadge.textContent = fontSelect.value;
+            editor.style.fontFamily = fontSelect.value;
+          })
+        );
       }
       const sizeInput = document.getElementById("doc-font-size-input");
       const sizeBadge = document.getElementById("doc-style-size-badge");
       function applyFontSize(pt) {
-        const clamped = Math.max(6, Math.min(72, Number.isFinite(pt) ? pt : 11));
-        const formatted = clamped.toFixed(1);
-        if (sizeInput) sizeInput.value = formatted;
-        if (sizeBadge) sizeBadge.textContent = formatted + " pt";
-        if (editor) editor.style.fontSize = formatted + "pt";
+        withDocStyleUndo(() => {
+          const clamped = Math.max(6, Math.min(72, Number.isFinite(pt) ? pt : 11));
+          const formatted = clamped.toFixed(1);
+          if (sizeInput) sizeInput.value = formatted;
+          if (sizeBadge) sizeBadge.textContent = formatted + " pt";
+          if (editor) editor.style.fontSize = formatted + "pt";
+        });
       }
       if (sizeInput) {
         sizeInput.addEventListener("change", () => applyFontSize(parseFloat(sizeInput.value)));
@@ -726,12 +745,14 @@
       const lsSelect = document.getElementById("doc-linespacing-select");
       const lsSteps = [100, 130, 160, 180, 200, 300];
       function applyLineSpacing(pct) {
-        const clamped = Math.max(100, Math.min(300, Number.isFinite(pct) ? pct : 160));
-        if (lsSelect) lsSelect.value = String(clamped);
-        if (editor) {
-          editor.dataset.lineSpacing = String(clamped);
-          editor.style.lineHeight = (clamped / 100).toFixed(2);
-        }
+        withDocStyleUndo(() => {
+          const clamped = Math.max(100, Math.min(300, Number.isFinite(pct) ? pct : 160));
+          if (lsSelect) lsSelect.value = String(clamped);
+          if (editor) {
+            editor.dataset.lineSpacing = String(clamped);
+            editor.style.lineHeight = (clamped / 100).toFixed(2);
+          }
+        });
       }
       if (lsSelect) {
         lsSelect.addEventListener("change", () => applyLineSpacing(parseInt(lsSelect.value, 10)));
@@ -760,12 +781,14 @@
       ].forEach(([id, key]) => {
         const btn = document.getElementById(id);
         if (btn) {
-          btn.addEventListener("click", () => {
-            const next = !btn.classList.contains("active");
-            btn.classList.toggle("active", next);
-            btn.setAttribute("aria-pressed", next ? "true" : "false");
-            if (editor) editor.dataset[key] = next ? "true" : "false";
-          });
+          btn.addEventListener("click", () =>
+            withDocStyleUndo(() => {
+              const next = !btn.classList.contains("active");
+              btn.classList.toggle("active", next);
+              btn.setAttribute("aria-pressed", next ? "true" : "false");
+              if (editor) editor.dataset[key] = next ? "true" : "false";
+            })
+          );
         }
       });
       const alignMap = [
@@ -779,48 +802,60 @@
       alignMap.forEach(([id, mode, cssAlign]) => {
         const btn = document.getElementById(id);
         if (btn) {
-          btn.addEventListener("click", () => {
-            alignMap.forEach(([otherId]) => {
-              const other = document.getElementById(otherId);
-              if (other) {
-                const isTarget = otherId === id;
-                other.classList.toggle("active", isTarget);
-                other.setAttribute("aria-pressed", isTarget ? "true" : "false");
+          btn.addEventListener("click", () =>
+            withDocStyleUndo(() => {
+              alignMap.forEach(([otherId]) => {
+                const other = document.getElementById(otherId);
+                if (other) {
+                  const isTarget = otherId === id;
+                  other.classList.toggle("active", isTarget);
+                  other.setAttribute("aria-pressed", isTarget ? "true" : "false");
+                }
+              });
+              if (editor) {
+                editor.dataset.textAlign = mode;
+                editor.style.textAlign = cssAlign;
               }
-            });
-            if (editor) {
-              editor.dataset.textAlign = mode;
-              editor.style.textAlign = cssAlign;
-            }
-          });
+            })
+          );
         }
       });
       const ctrlMarksBtn = document.getElementById("btn-toggle-ctrl-marks");
       if (ctrlMarksBtn && editor) {
-        ctrlMarksBtn.addEventListener("click", () => {
-          const next = !ctrlMarksBtn.classList.contains("active");
-          ctrlMarksBtn.classList.toggle("active", next);
-          ctrlMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
-          editor.dataset.showCtrlMarks = next ? "true" : "false";
-        });
+        ctrlMarksBtn.addEventListener("click", () =>
+          withDocStyleUndo(() => {
+            const next = !ctrlMarksBtn.classList.contains("active");
+            ctrlMarksBtn.classList.toggle("active", next);
+            ctrlMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
+            editor.dataset.showCtrlMarks = next ? "true" : "false";
+          })
+        );
       }
       const paraMarksBtn = document.getElementById("btn-toggle-para-marks");
       if (paraMarksBtn && editor) {
-        paraMarksBtn.addEventListener("click", () => {
-          const next = !paraMarksBtn.classList.contains("active");
-          paraMarksBtn.classList.toggle("active", next);
-          paraMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
-          editor.dataset.showParaMarks = next ? "true" : "false";
-        });
+        paraMarksBtn.addEventListener("click", () =>
+          withDocStyleUndo(() => {
+            const next = !paraMarksBtn.classList.contains("active");
+            paraMarksBtn.classList.toggle("active", next);
+            paraMarksBtn.setAttribute("aria-pressed", next ? "true" : "false");
+            editor.dataset.showParaMarks = next ? "true" : "false";
+          })
+        );
       }
       const docGridBtn = document.getElementById("btn-toggle-doc-grid");
       if (docGridBtn && editor) {
-        docGridBtn.addEventListener("click", () => {
-          const next = !docGridBtn.classList.contains("active");
-          docGridBtn.classList.toggle("active", next);
-          docGridBtn.setAttribute("aria-pressed", next ? "true" : "false");
-          editor.classList.toggle("manuscript-grid", next);
-        });
+        docGridBtn.addEventListener("click", () =>
+          withDocStyleUndo(() => {
+            const next = !docGridBtn.classList.contains("active");
+            docGridBtn.classList.toggle("active", next);
+            docGridBtn.setAttribute("aria-pressed", next ? "true" : "false");
+            editor.classList.toggle("manuscript-grid", next);
+            const hwpPreview = document.getElementById("hwp-manuscript-preview");
+            if (hwpPreview) {
+              hwpPreview.classList.toggle("manuscript-grid", next);
+            }
+          })
+        );
       }
       const insertBtn = document.getElementById("status-insert-mode");
       function toggleInsertMode() {
