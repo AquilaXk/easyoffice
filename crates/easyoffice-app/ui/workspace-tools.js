@@ -2,6 +2,32 @@
   "use strict";
 
   const { serializeDomChildren, restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
+  const LS_STEPS = [100, 130, 160, 180, 200, 300];
+  const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
+  const STUDIO_QUICK_REDIRECT = {
+    palette: "btn-command-palette",
+    "studio-save": "qat-save",
+    "studio-undo": "qat-undo",
+    "studio-redo": "qat-redo",
+  };
+  const INSERT_MOD_DISPATCH = {
+    "mod-symbol": { hwp: true, target: "hwp-mod-field", label: "문자표 기호 삽입 완료" },
+    "mod-header": { hwp: true, target: "hwp-mod-header", label: "머리말 · 꼬리말 적용 완료" },
+    "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주 · 미주 삽입 완료" },
+  };
+
+  function toggleBlockPrefix(textTarget, prefix) {
+    if (!textTarget) return;
+    const cur = textTarget.textContent || "";
+    textTarget.textContent = cur.startsWith(prefix) ? cur.slice(prefix.length) : prefix + cur;
+  }
+
+  function shiftBlockIndent(blk, deltaPx) {
+    if (!blk) return;
+    const curPx = Number.parseInt(blk.style.paddingLeft || "0", 10) || 0;
+    const nextPx = Math.max(0, Math.min(96, curPx + deltaPx));
+    blk.style.paddingLeft = nextPx ? nextPx + "px" : "";
+  }
 
   function createWorkspaceTools(deps, panelHooks) {
     const {
@@ -707,19 +733,6 @@
       return false;
     }
 
-    function toggleBlockPrefix(textTarget, prefix) {
-      if (!textTarget) return;
-      const cur = textTarget.textContent || "";
-      textTarget.textContent = cur.startsWith(prefix) ? cur.slice(prefix.length) : prefix + cur;
-    }
-
-    function shiftBlockIndent(blk, deltaPx) {
-      if (!blk) return;
-      const curPx = Number.parseInt(blk.style.paddingLeft || "0", 10) || 0;
-      const nextPx = Math.max(0, Math.min(96, curPx + deltaPx));
-      blk.style.paddingLeft = nextPx ? nextPx + "px" : "";
-    }
-
     function execStudioParaCmd(cmd, blk, textTarget, fb) {
       if (cmd === "para-numbering" || cmd === "para-bullet") {
         const isNum = cmd === "para-numbering";
@@ -765,49 +778,28 @@
       computeSmartStats();
     }
 
-    function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd) {
-      const isHwp = getActiveModule() === "HWP";
-      if (cmd === "mod-symbol") {
-        if (isHwp && typeof onStudioCmd === "function") {
-          onStudioCmd("hwp-mod-field");
-          return true;
-        }
-        withDocStyleUndo(() => {
-          if (textTarget) textTarget.textContent = (textTarget.textContent || "") + " ※";
-          computeSmartStats();
-        });
-        if (fb) fb.textContent = "문자표 기호 삽입 완료";
-        return true;
+    function applyFallbackInsertMod(cmd, editor, textTarget) {
+      if (cmd === "mod-symbol" && textTarget) {
+        textTarget.textContent = (textTarget.textContent || "") + " ※";
+        computeSmartStats();
+      } else if (cmd === "mod-header") {
+        upsertDocHeaderBlock(editor);
+      } else if (cmd === "mod-footnote") {
+        appendDocFootnoteBlock(editor);
       }
-      if (cmd === "mod-header") {
-        if (isHwp && typeof onStudioCmd === "function") {
-          onStudioCmd("hwp-mod-header");
-          return true;
-        }
-        withDocStyleUndo(() => upsertDocHeaderBlock(editor));
-        if (fb) fb.textContent = "머리말 · 꼬리말 적용 완료";
-        return true;
-      }
-      if (cmd === "mod-footnote") {
-        if (!isHwp && typeof onStudioCmd === "function") {
-          onStudioCmd("doc-mod-footnote");
-          return true;
-        }
-        withDocStyleUndo(() => appendDocFootnoteBlock(editor));
-        if (fb) fb.textContent = "각주 · 미주 삽입 완료";
-        return true;
-      }
-      return false;
     }
 
-    const LS_STEPS = [100, 130, 160, 180, 200, 300];
-    const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
-    const STUDIO_QUICK_REDIRECT = {
-      palette: "btn-command-palette",
-      "studio-save": "qat-save",
-      "studio-undo": "qat-undo",
-      "studio-redo": "qat-redo",
-    };
+    function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd) {
+      const spec = INSERT_MOD_DISPATCH[cmd];
+      if (!spec) return false;
+      if ((getActiveModule() === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
+        onStudioCmd(spec.target);
+        return true;
+      }
+      withDocStyleUndo(() => applyFallbackInsertMod(cmd, editor, textTarget));
+      if (fb) fb.textContent = spec.label;
+      return true;
+    }
 
     function dispatchStudioIconCmd(cmd, editor, onStudioCmd) {
       if (!cmd) return;

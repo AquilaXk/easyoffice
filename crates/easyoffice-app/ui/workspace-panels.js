@@ -1,6 +1,12 @@
 (function (host) {
   "use strict";
 
+  function syncDatasetFlag(el, key, val) {
+    if (!el || typeof val !== "string") return;
+    if (val) el.dataset[key] = val;
+    else delete el.dataset[key];
+  }
+
   function captureDocLayoutStyle(editor) {
     if (!editor) {
       return {
@@ -503,12 +509,6 @@
         chromeExpanded: shell?.dataset?.chromeExpanded || "",
         panelsExpanded: shell?.dataset?.panelsExpanded || "",
       };
-    }
-
-    function syncDatasetFlag(el, key, val) {
-      if (!el || typeof val !== "string") return;
-      if (val) el.dataset[key] = val;
-      else delete el.dataset[key];
     }
 
     function restoreWorkspaceViewState(viewState) {
