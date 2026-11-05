@@ -695,12 +695,21 @@ extension WorkspaceViewModel {
   }
 
   public func performFindNext() {
+    let trimmedSearch = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     if !isShowingHomeHub {
+      if !trimmedSearch.isEmpty && findQueryText != searchQuery {
+        findQueryText = searchQuery
+      }
       if !findQueryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         isFindReplaceBarVisible = true
       }
     }
     findNextMatch()
+  }
+
+  public func selectDocumentTable(index: Int) {
+    selectedDocumentTableIndex = max(0, index)
+    selectedDocumentTableCell = nil
   }
 
   public func selectDocumentTableCell(tableIndex: Int, row: Int, column: Int) {

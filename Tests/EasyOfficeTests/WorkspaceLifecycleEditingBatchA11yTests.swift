@@ -626,7 +626,8 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     XCTAssertEqual(vm.findQueryText, "이지오피스")
     XCTAssertTrue(vm.isFindReplaceBarVisible)
     vm.findQueryText = "문서"
-    XCTAssertEqual(vm.searchQuery, "문서")
+    XCTAssertEqual(vm.searchQuery, "이지오피스")
+    vm.searchQuery = ""
     vm.performFindNext()
     XCTAssertEqual(vm.findQueryText, "문서")
     XCTAssertFalse((vm.lastExecutedCommandSummary ?? "").isEmpty)
@@ -690,13 +691,15 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
         XCTAssertEqual(afterSplitAndDelete.tables[1].columnCount, 3)
       }
 
-      vm.selectDocumentTableCell(tableIndex: 1, row: 1, column: 1)
+      vm.selectDocumentTable(index: 1)
+      XCTAssertNil(vm.selectedDocumentTableCell)
       vm.executeRibbonCommand("doc-mod-tableformula")
       vm.executeRibbonCommand("hwp-mod-border")
       if case .document(let afterTableCommands) = vm.activeTab?.payload {
         XCTAssertEqual(afterTableCommands.tables[0].rowCount, table0InitialRows)
         XCTAssertEqual(afterTableCommands.tables[1].rowCount, 3)
-        XCTAssertEqual(afterTableCommands.tables[1].rows.last?[1], "100")
+        XCTAssertEqual(afterTableCommands.tables[1].rows.last?[0], "합계 (=SUM(ABOVE))")
+        XCTAssertEqual(afterTableCommands.tables[1].rows.last?[2], "90")
         XCTAssertEqual(afterTableCommands.tables[1].borderStyle, .doubleLine)
       }
     }

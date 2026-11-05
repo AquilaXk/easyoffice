@@ -503,7 +503,7 @@ struct RightContextInspectorView: View {
             ) {
               ForEach(doc.tables.indices, id: \.self) { tIdx in
                 Button("표 #\(tIdx + 1) · \(doc.tables[tIdx].caption)") {
-                  viewModel.selectDocumentTableCell(tableIndex: tIdx, row: 0, column: 0)
+                  viewModel.selectDocumentTable(index: tIdx)
                 }
               }
             }

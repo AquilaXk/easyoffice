@@ -165,8 +165,6 @@
           if (condfmtHigh) cellEntry.style.condfmtHigh = true;
           if (entryFrozen) cellEntry.style.frozenPanes = true;
         }
-        if (condfmtHigh) cellEntry.condfmtHigh = true;
-        if (entryFrozen) cellEntry.frozenPanes = true;
         snap[ref] = cellEntry;
       });
       return snap;
@@ -235,9 +233,7 @@
       const targetRowCount = getSheetRowCount(sheetName);
       ensureSheetGridRowCount(targetRowCount);
       const targetSnap = sheetDataStore[sheetName] || {};
-      const targetFrozen = Boolean(
-        targetSnap.A1?.frozenPanes || targetSnap.A1?.style?.frozenPanes
-      );
+      const targetFrozen = Boolean(targetSnap.A1?.style?.frozenPanes);
       toggleSheetFreezePanes(targetFrozen, true);
       document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
         const ref = td.dataset.cell;
@@ -258,10 +254,7 @@
         td.style.fontStyle = cellStyle?.fontStyle || "";
         td.style.textDecoration = cellStyle?.textDecoration || "";
         td.style.fontSize = cellStyle?.fontSize || "";
-        td.classList.toggle(
-          "condfmt-high",
-          Boolean(entry?.condfmtHigh || cellStyle?.condfmtHigh)
-        );
+        td.classList.toggle("condfmt-high", Boolean(cellStyle?.condfmtHigh));
         if (sheetCellFocusState.has(td)) {
           syncSheetCellFocusBaseline(td, true);
         } else if (document.activeElement === td) {

@@ -153,11 +153,16 @@
       if (lowerZone) {
         slide.lowerColumnCount = lowerZone.style.columnCount || "";
         const extraHolder = document.createElement("div");
-        Array.from(lowerZone.children || []).forEach((child, cIdx) => {
-          if (cIdx > 0 || (child.tagName || "").toUpperCase() !== "P") {
-            extraHolder.appendChild(child.cloneNode(true));
+        const bodyParts = [];
+        Array.from(lowerZone.childNodes || []).forEach((node) => {
+          if (node.nodeType === 1 && node.dataset?.slideObject) {
+            extraHolder.appendChild(node.cloneNode(true));
+          } else {
+            const txt = node.textContent || "";
+            if (txt) bodyParts.push(txt);
           }
         });
+        slide.lower = bodyParts.join("\n");
         slide.insertedNodes = serializeDomChildren(extraHolder);
       }
       if (stageBox) {
@@ -420,20 +425,10 @@
     function captureWorkspaceViewState() {
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
-      const sheetTable = document.querySelector("#pane-sheet table");
-      const sheetThead = sheetTable?.querySelector("thead");
-      const sheetCondfmtCells = Array.from(
-        document.querySelectorAll("#pane-sheet td.condfmt-high[data-cell]")
-      ).map((td) => td.dataset.cell);
       return {
         ribbonStripHidden: Boolean(strip?.hidden),
         canvasZoom: stage?.style?.zoom || "",
         canvasSplit: stage?.dataset?.splitView || "",
-        sheetFrozenPanes: Boolean(
-          sheetThead?.classList?.contains("frozen-header") ||
-            sheetTable?.dataset?.frozenPanes === "true"
-        ),
-        sheetCondfmtCells,
       };
     }
 
@@ -456,15 +451,6 @@
       const zoomLabel = document.getElementById("status-zoom-label");
       if (zoomLabel) {
         zoomLabel.textContent = viewState.canvasZoom || "100%";
-      }
-      if (viewState.sheetFrozenPanes !== undefined) {
-        sheetController.toggleSheetFreezePanes(Boolean(viewState.sheetFrozenPanes), true);
-      }
-      if (Array.isArray(viewState.sheetCondfmtCells)) {
-        const condSet = new Set(viewState.sheetCondfmtCells);
-        document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
-          td.classList.toggle("condfmt-high", condSet.has(td.dataset.cell));
-        });
       }
     }
 

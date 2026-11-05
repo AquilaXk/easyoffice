@@ -1742,7 +1742,7 @@ public struct DocumentEditorDetailPaneView: View {
         .foregroundStyle(palette.secondaryText.swiftUIColor)
         .onTapGesture {
           guard isPrimaryPane else { return }
-          viewModel.selectDocumentTableCell(tableIndex: tIdx, row: 0, column: 0)
+          viewModel.selectDocumentTable(index: tIdx)
         }
 
       VStack(spacing: 0) {

@@ -1439,6 +1439,7 @@ public struct SheetEditorDetailPaneView: View {
     final class Coordinator {
       var isEnabled: Bool
       var viewModel: WorkspaceViewModel
+      weak var hostView: NSView?
       private var monitorToken: Any?
 
       init(isEnabled: Bool, viewModel: WorkspaceViewModel) {
@@ -1461,8 +1462,12 @@ public struct SheetEditorDetailPaneView: View {
             else {
               return false
             }
-            guard let window = NSApp.keyWindow,
-              !(window.firstResponder is NSTextView)
+            guard let hostWindow = self.hostView?.window,
+              event.window === hostWindow,
+              hostWindow.isKeyWindow,
+              hostWindow.attachedSheet == nil,
+              NSApp.modalWindow == nil,
+              !(hostWindow.firstResponder is NSTextView)
             else {
               return false
             }
@@ -1518,11 +1523,13 @@ public struct SheetEditorDetailPaneView: View {
 
     func makeNSView(context: Context) -> NSView {
       let view = NSView(frame: .zero)
+      context.coordinator.hostView = view
       context.coordinator.installIfNeeded()
       return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
+      context.coordinator.hostView = nsView
       context.coordinator.isEnabled = isEnabled
       context.coordinator.viewModel = viewModel
       if isEnabled {

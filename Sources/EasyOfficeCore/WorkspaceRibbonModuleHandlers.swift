@@ -416,13 +416,14 @@ extension WorkspaceViewModel {
               caption: "표 1. 데이터 검산 표", rows: [["항목", "수치"], ["기초값", "100"], ["증분값", "150"]]))
         }
         let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
-        let targetCol = min(
-          max(0, selectedDocumentTableCell?.column ?? (doc.tables[tIdx].columnCount - 1)),
-          max(0, doc.tables[tIdx].columnCount - 1))
+        let colCount = max(1, doc.tables[tIdx].columnCount)
+        let rawCol = selectedDocumentTableCell?.column ?? (colCount - 1)
+        let targetCol =
+          colCount > 1 && rawCol == 0 ? (colCount - 1) : min(max(0, rawCol), colCount - 1)
         let sum =
           doc.tables[tIdx].evaluateTableFormula(
             "=SUM(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: targetCol) ?? 0.0
-        var summaryRow = Array(repeating: "", count: max(1, doc.tables[tIdx].columnCount))
+        var summaryRow = Array(repeating: "", count: colCount)
         summaryRow[0] = "합계 (=SUM(ABOVE))"
         summaryRow[targetCol] = sum.isFinite ? String(format: "%.0f", sum) : "0"
         doc.tables[tIdx].rows.append(summaryRow)
@@ -433,16 +434,17 @@ extension WorkspaceViewModel {
               caption: "표 1. 데이터 검산 표", rows: [["항목", "수치"], ["기초값", "100"], ["증분값", "150"]]))
         }
         let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
-        let targetCol = min(
-          max(0, selectedDocumentTableCell?.column ?? (doc.tables[tIdx].columnCount - 1)),
-          max(0, doc.tables[tIdx].columnCount - 1))
+        let colCount = max(1, doc.tables[tIdx].columnCount)
+        let rawCol = selectedDocumentTableCell?.column ?? (colCount - 1)
+        let targetCol =
+          colCount > 1 && rawCol == 0 ? (colCount - 1) : min(max(0, rawCol), colCount - 1)
         let formulaExpr = "=\(wizardFnName)(ABOVE)"
         let evaluated =
           doc.tables[tIdx].evaluateTableFormula(
             formulaExpr, atRow: doc.tables[tIdx].rowCount, column: targetCol)
           ?? doc.tables[tIdx].evaluateTableFormula(
             "=AVERAGE(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: targetCol) ?? 0.0
-        var fnRow = Array(repeating: "", count: max(1, doc.tables[tIdx].columnCount))
+        var fnRow = Array(repeating: "", count: colCount)
         fnRow[0] = wizardFnName == "AVERAGE" ? "평균 (=AVERAGE(ABOVE))" : "함수 (\(formulaExpr))"
         fnRow[targetCol] = String(format: "%.1f", evaluated)
         doc.tables[tIdx].rows.append(fnRow)

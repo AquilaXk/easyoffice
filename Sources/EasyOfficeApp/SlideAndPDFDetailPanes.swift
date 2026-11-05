@@ -578,9 +578,9 @@ public struct SlideEditorDetailPaneView: View {
                       .border(palette.border.swiftUIColor, width: 1)
                       .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
                     }
+                    .aspectRatio(aspectFactor, contentMode: .fit)
                     .frame(
                       maxWidth: slideStageWidth,
-                      minHeight: slideStageHeight,
                       maxHeight: slideStageHeight
                     )
                   }

@@ -617,13 +617,16 @@
     }
     let slideTypingSnapshotEpoch = -1;
     let slideTypingTarget = null;
+    let slideTypingSlideIndex = -1;
     function resetSlideTypingSnapshotState() {
       slideTypingSnapshotEpoch = -1;
       slideTypingTarget = null;
+      slideTypingSlideIndex = -1;
     }
     function ensureSlideTypingSnapshot(targetEl) {
       if (
         slideTypingTarget !== targetEl ||
+        slideTypingSlideIndex !== activeSlideIndex ||
         slideTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch()
       ) {
         const prevSlides = JSON.parse(JSON.stringify(slideDeckState));
@@ -632,6 +635,7 @@
         ribbonHistory.pushRawUndoSnapshot(preSnap);
         slideTypingSnapshotEpoch = ribbonHistory.getHistoryMutationEpoch();
         slideTypingTarget = targetEl;
+        slideTypingSlideIndex = activeSlideIndex;
       }
     }
     const slideNotesInput = document.getElementById("slide-presenter-notes");
@@ -672,8 +676,6 @@
       slideLowerZone.addEventListener("input", () => {
         ensureSlideTypingSnapshot(slideLowerZone);
         if (slideDeckState[activeSlideIndex]) {
-          const p = slideLowerZone.querySelector("p");
-          slideDeckState[activeSlideIndex].lower = p ? p.textContent || "" : "";
           workspacePanels.syncActiveSlideDomStylesToDeck();
         }
       });

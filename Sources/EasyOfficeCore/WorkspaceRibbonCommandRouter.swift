@@ -201,13 +201,14 @@ extension WorkspaceViewModel {
       if case .document(var doc) = openTabs[idx].payload {
         if !doc.tables.isEmpty {
           let tIdx = min(max(0, selectedDocumentTableIndex), doc.tables.count - 1)
-          let targetCol = min(
-            max(0, selectedDocumentTableCell?.column ?? (doc.tables[tIdx].columnCount - 1)),
-            max(0, doc.tables[tIdx].columnCount - 1))
+          let colCount = max(1, doc.tables[tIdx].columnCount)
+          let rawCol = selectedDocumentTableCell?.column ?? (colCount - 1)
+          let targetCol =
+            colCount > 1 && rawCol == 0 ? (colCount - 1) : min(max(0, rawCol), colCount - 1)
           if let val = doc.tables[tIdx].evaluateTableFormula(
             "=SUM(ABOVE)", atRow: doc.tables[tIdx].rowCount, column: targetCol)
           {
-            var summaryRow = Array(repeating: "", count: max(1, doc.tables[tIdx].columnCount))
+            var summaryRow = Array(repeating: "", count: colCount)
             summaryRow[0] = "합계 (=SUM(ABOVE))"
             summaryRow[targetCol] = val.isFinite ? String(format: "%.0f", val) : "0"
             doc.tables[tIdx].rows.append(summaryRow)

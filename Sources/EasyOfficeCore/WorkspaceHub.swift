@@ -39,13 +39,12 @@ public final class WorkspaceViewModel {
   public var showRightInspector: Bool = true
   public var searchQuery: String = "" {
     didSet {
-      guard !isShowingHomeHub, !isSyncingFindReplaceState else { return }
+      let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !isShowingHomeHub, !isSyncingFindReplaceState, !trimmed.isEmpty else { return }
       if findQueryText != searchQuery {
         findQueryText = searchQuery
       }
-      if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        isFindReplaceBarVisible = true
-      }
+      isFindReplaceBarVisible = true
     }
   }
   public var zoomPercent: Double = 100.0
@@ -159,9 +158,6 @@ public final class WorkspaceViewModel {
       if findQueryDraft != findQueryText {
         findQueryDraft = findQueryText
       }
-      if !isShowingHomeHub, searchQuery != findQueryText {
-        searchQuery = findQueryText
-      }
     }
   }
   public var replaceQueryText: String = "" {
@@ -184,9 +180,6 @@ public final class WorkspaceViewModel {
       defer { isSyncingFindReplaceState = false }
       if findQueryText != findQueryDraft {
         findQueryText = findQueryDraft
-      }
-      if !isShowingHomeHub, searchQuery != findQueryDraft {
-        searchQuery = findQueryDraft
       }
     }
   }
