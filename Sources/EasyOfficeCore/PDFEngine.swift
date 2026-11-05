@@ -408,6 +408,7 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
     var extractedAnnotations: [PDFAnnotationItem] = []
     var extractedInkStrokes: [PDFInkStroke] = []
     var extractedFormFields: [PDFFormField] = []
+    var pageMap: [Int: Int] = [:]
 
     for requestedPage in oneBasedPageNumbers {
       guard requestedPage >= 1 else { continue }
@@ -417,6 +418,9 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
       let newPageNumber = extractedPages.count + 1
       pageCopy.pageNumber = newPageNumber
       extractedPages.append(pageCopy)
+      if pageMap[requestedPage] == nil {
+        pageMap[requestedPage] = newPageNumber
+      }
 
       for ann in annotations where ann.pageNumber == requestedPage {
         var annCopy = ann
@@ -435,16 +439,33 @@ public struct PDFStudioDocumentModel: Sendable, Codable, Equatable, Identifiable
       }
     }
 
+    let extractedOutline = Self.extractOutlineNodes(from: outline, using: pageMap)
+
     return PDFStudioDocumentModel(
       title: newTitle,
       pages: extractedPages,
       annotations: extractedAnnotations,
+      outline: extractedOutline,
       isRedacted: isRedacted,
       inkStrokes: extractedInkStrokes,
       formFields: extractedFormFields,
       redactedPhrases: redactedPhrases,
       watermarkText: watermarkText
     )
+  }
+
+  private static func extractOutlineNodes(
+    from nodes: [PDFOutlineNode], using pageMap: [Int: Int]
+  ) -> [PDFOutlineNode] {
+    nodes.flatMap { node -> [PDFOutlineNode] in
+      let extractedChildren = extractOutlineNodes(from: node.children, using: pageMap)
+      guard let mappedTarget = pageMap[node.targetPageNumber] else { return extractedChildren }
+      return [
+        PDFOutlineNode(
+          id: node.id, title: node.title, targetPageNumber: mappedTarget,
+          children: extractedChildren)
+      ]
+    }
   }
 
   public func extractingPage(at oneBasedPage: Int) -> PDFStudioDocumentModel {
@@ -918,33 +939,15 @@ extension PDFBinarySerializer {
         }
         let escaped = input[nextIndex]
         switch escaped {
-        case "n":
-          result.append("\n")
-          index = input.index(after: nextIndex)
-        case "r":
-          result.append("\r")
-          index = input.index(after: nextIndex)
-        case "t":
-          result.append("\t")
-          index = input.index(after: nextIndex)
-        case "b":
-          result.append("\u{08}")
-          index = input.index(after: nextIndex)
-        case "f":
-          result.append("\u{0C}")
-          index = input.index(after: nextIndex)
-        case "v":
-          result.append("\u{0B}")
-          index = input.index(after: nextIndex)
-        case "(":
-          result.append("(")
-          index = input.index(after: nextIndex)
-        case ")":
-          result.append(")")
-          index = input.index(after: nextIndex)
-        case "\\":
-          result.append("\\")
-          index = input.index(after: nextIndex)
+        case "n": result.append("\n"); index = input.index(after: nextIndex)
+        case "r": result.append("\r"); index = input.index(after: nextIndex)
+        case "t": result.append("\t"); index = input.index(after: nextIndex)
+        case "b": result.append("\u{08}"); index = input.index(after: nextIndex)
+        case "f": result.append("\u{0C}"); index = input.index(after: nextIndex)
+        case "v": result.append("\u{0B}"); index = input.index(after: nextIndex)
+        case "(": result.append("("); index = input.index(after: nextIndex)
+        case ")": result.append(")"); index = input.index(after: nextIndex)
+        case "\\": result.append("\\"); index = input.index(after: nextIndex)
         case "u":
           let hexStart = input.index(after: nextIndex)
           if let hexEnd = input.index(hexStart, offsetBy: 4, limitedBy: input.endIndex),

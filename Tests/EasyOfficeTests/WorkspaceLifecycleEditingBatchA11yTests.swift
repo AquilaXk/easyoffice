@@ -577,5 +577,35 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     let decodedClamped = try JSONDecoder().decode(TableCellSpan.self, from: clampedSpanJSON)
     XCTAssertEqual(decodedClamped.rowSpan, TableCellSpan.maxSpan)
     XCTAssertEqual(decodedClamped.columnSpan, 1)
+
+    let pdfWithOutline = PDFStudioDocumentModel(
+      title: "북마크 분할 검증",
+      pages: [
+        PDFPageDescriptor(pageNumber: 1, rotationDegrees: 0, extractedText: "1장 서론"),
+        PDFPageDescriptor(pageNumber: 2, rotationDegrees: 0, extractedText: "2장 본론"),
+        PDFPageDescriptor(pageNumber: 3, rotationDegrees: 0, extractedText: "2.1절 세부"),
+      ],
+      outline: [
+        PDFOutlineNode(
+          title: "1장",
+          targetPageNumber: 1,
+          children: [
+            PDFOutlineNode(title: "2.1절(상위 1장 아래 하위 북마크)", targetPageNumber: 3)
+          ]
+        ),
+        PDFOutlineNode(title: "2장", targetPageNumber: 2),
+      ]
+    )
+    let (firstPart, secondPart) = pdfWithOutline.split(atOneBasedPage: 1)
+    XCTAssertEqual(firstPart.outline.map(\.title), ["1장"])
+    XCTAssertEqual(firstPart.outline.first?.targetPageNumber, 1)
+    XCTAssertTrue(firstPart.outline.first?.children.isEmpty ?? false)
+
+    XCTAssertEqual(
+      secondPart.outline.map(\.title),
+      ["2.1절(상위 1장 아래 하위 북마크)", "2장"],
+      "Extracted/split PDF part must preserve and remap outline bookmarks targeting extracted pages"
+    )
+    XCTAssertEqual(secondPart.outline.map(\.targetPageNumber), [2, 1])
   }
 }

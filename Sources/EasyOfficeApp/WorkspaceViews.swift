@@ -128,7 +128,7 @@ struct FlatToolbarMenu<MenuContent: View>: View {
   @Environment(\.isCanvasSnapshotMode) private var envSnapshotMode
   let title: String
   var symbolName: String? = nil
-  var accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor
+  var accent: Color
   let palette: WorkspaceThemePalette
   var isSnapshotMode: Bool = false
   var minWidth: CGFloat? = nil
@@ -137,7 +137,7 @@ struct FlatToolbarMenu<MenuContent: View>: View {
   init(
     title: String,
     symbolName: String? = nil,
-    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    accent: Color? = nil,
     palette: WorkspaceThemePalette,
     isSnapshotMode: Bool = false,
     minWidth: CGFloat? = nil,
@@ -145,7 +145,8 @@ struct FlatToolbarMenu<MenuContent: View>: View {
   ) {
     self.title = title
     self.symbolName = symbolName
-    self.accent = accent
+    self.accent =
+      accent ?? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
     self.palette = palette
     self.isSnapshotMode = isSnapshotMode
     self.minWidth = minWidth
@@ -155,7 +156,7 @@ struct FlatToolbarMenu<MenuContent: View>: View {
   init(
     title: String,
     systemImage: String?,
-    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    accent: Color? = nil,
     palette: WorkspaceThemePalette,
     isSnapshotMode: Bool = false,
     minWidth: CGFloat? = nil,
@@ -163,7 +164,8 @@ struct FlatToolbarMenu<MenuContent: View>: View {
   ) {
     self.title = title
     self.symbolName = systemImage
-    self.accent = accent
+    self.accent =
+      accent ?? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
     self.palette = palette
     self.isSnapshotMode = isSnapshotMode
     self.minWidth = minWidth
@@ -310,20 +312,21 @@ struct FlatToggleControl: View {
   let title: String
   @Binding var isOn: Bool
   var symbolName: String? = nil
-  var accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor
+  var accent: Color
   let palette: WorkspaceThemePalette
 
   init(
     title: String,
     isOn: Binding<Bool>,
     symbolName: String? = nil,
-    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    accent: Color? = nil,
     palette: WorkspaceThemePalette
   ) {
     self.title = title
     self._isOn = isOn
     self.symbolName = symbolName
-    self.accent = accent
+    self.accent =
+      accent ?? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
     self.palette = palette
   }
 
@@ -331,13 +334,14 @@ struct FlatToggleControl: View {
     title: String,
     systemImage: String?,
     isOn: Binding<Bool>,
-    accent: Color = EasyOfficeDesignTokens.brand700.swiftUIColor,
+    accent: Color? = nil,
     palette: WorkspaceThemePalette
   ) {
     self.title = title
     self._isOn = isOn
     self.symbolName = systemImage
-    self.accent = accent
+    self.accent =
+      accent ?? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
     self.palette = palette
   }
 
@@ -796,7 +800,7 @@ struct TopDocumentTabStripView: View {
         .font(.system(size: 12, weight: isActive ? .bold : .medium))
         .foregroundStyle(
           isActive
-            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+            ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
             : (isDisabled
               ? palette.secondaryText.swiftUIColor.opacity(0.4)
               : palette.primaryText.swiftUIColor)
@@ -804,7 +808,7 @@ struct TopDocumentTabStripView: View {
         .frame(width: 24, height: 24)
         .background(
           isActive
-            ? EasyOfficeDesignTokens.brand700.swiftUIColor.opacity(0.14)
+            ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor.opacity(0.14)
             : Color.clear
         )
     }
@@ -830,7 +834,7 @@ struct TopDocumentTabStripView: View {
         .padding(.vertical, 5)
         .foregroundStyle(
           viewModel.isShowingHomeHub
-            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+            ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
             : palette.primaryText.swiftUIColor
         )
         .overlay(alignment: .bottom) {
@@ -1959,7 +1963,7 @@ public struct LeftNavigatorPanelView: View {
                 )
                 .foregroundStyle(
                   viewModel.selectedParagraphID == heading.id
-                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                    ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
                     : palette.primaryText.swiftUIColor
                 )
                 .lineLimit(2)
@@ -2023,7 +2027,7 @@ public struct LeftNavigatorPanelView: View {
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundStyle(
                       isSelectedCell
-                        ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                        ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
                         : palette.primaryText.swiftUIColor
                     )
                   Text(sheet.rawValue(at: addr))
@@ -2429,7 +2433,7 @@ struct BottomWorkspaceStatusBarView: View {
             }
             .foregroundStyle(
               isSelectedMode
-                ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
                 : palette.secondaryText.swiftUIColor
             )
             .padding(.horizontal, 4)
@@ -2456,7 +2460,7 @@ struct BottomWorkspaceStatusBarView: View {
               .font(.system(size: 10, weight: isCurrentZoom ? .bold : .medium, design: .monospaced))
               .foregroundStyle(
                 isCurrentZoom
-                  ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                  ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
                   : palette.secondaryText.swiftUIColor
               )
               .padding(.horizontal, 3)

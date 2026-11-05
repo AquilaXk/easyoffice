@@ -388,7 +388,7 @@ struct HomeHubWorkspaceView: View {
                           .font(.system(size: 11, weight: .semibold))
                           .foregroundStyle(
                             tab.isPinned
-                              ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                              ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
                               : palette.secondaryText.swiftUIColor
                           )
                       }
