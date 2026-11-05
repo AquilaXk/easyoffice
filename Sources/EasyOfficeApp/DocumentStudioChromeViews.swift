@@ -439,43 +439,23 @@ struct TopDocumentTabStripView: View {
     self._isStudioPanelsExpanded = isStudioPanelsExpanded
   }
 
-  private func topMenuBarItem(
-    _ title: String,
-    palette: WorkspaceThemePalette,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Text(title)
-        .font(.system(size: 12.5, weight: .regular))
-        .foregroundStyle(palette.primaryText.swiftUIColor)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-    }
-    .buttonStyle(.plain)
-    .fixedSize(horizontal: true, vertical: false)
+  private func topMenuLabel(_ title: String, palette: WorkspaceThemePalette) -> some View {
+    Text(title).font(.system(size: 12.5, weight: .regular)).foregroundStyle(palette.primaryText.swiftUIColor)
+      .padding(.horizontal, 8).padding(.vertical, 4)
+  }
+
+  private func topMenuBarItem(_ title: String, palette: WorkspaceThemePalette, action: @escaping () -> Void) -> some View {
+    Button(action: action) { topMenuLabel(title, palette: palette) }.buttonStyle(.plain).fixedSize(horizontal: true, vertical: false)
   }
 
   @ViewBuilder
   private func topStudioMenu<MenuItems: View>(
-    _ title: String,
-    palette: WorkspaceThemePalette,
-    snapshotAction: @escaping () -> Void,
-    @ViewBuilder items: () -> MenuItems
+    _ title: String, palette: WorkspaceThemePalette, snapshotAction: @escaping () -> Void, @ViewBuilder items: () -> MenuItems
   ) -> some View {
     if viewModel.isCanvasSnapshotMode {
       topMenuBarItem(title, palette: palette, action: snapshotAction)
     } else {
-      Menu {
-        items()
-      } label: {
-        Text(title)
-          .font(.system(size: 12.5, weight: .regular))
-          .foregroundStyle(palette.primaryText.swiftUIColor)
-          .padding(.horizontal, 8)
-          .padding(.vertical, 4)
-      }
-      .menuStyle(.borderlessButton)
-      .fixedSize(horizontal: true, vertical: false)
+      Menu { items() } label: { topMenuLabel(title, palette: palette) }.menuStyle(.borderlessButton).fixedSize(horizontal: true, vertical: false)
     }
   }
 
@@ -484,11 +464,18 @@ struct TopDocumentTabStripView: View {
     let mod = viewModel.activeTab?.moduleKind ?? .document
     ForEach(RibbonCategory.actions(for: category, module: mod)) { cmd in
       Button("\(cmd.title) (\(cmd.shortcutHint))") {
-        viewModel.isShowingHomeHub = false
-        viewModel.activeRibbonCategory = category
-        viewModel.executeRibbonCommand(cmd.id)
+        viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = category; viewModel.executeRibbonCommand(cmd.id)
       }
     }
+  }
+
+  private func topCategoryMenu(
+    _ title: String, category: RibbonCategory, menuCategory: RibbonCategory? = nil, palette: WorkspaceThemePalette, isDocStudio: Bool
+  ) -> some View {
+    topStudioMenu(title, palette: palette, snapshotAction: {
+      viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = category
+      if !isDocStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+    }) { ribbonCategoryMenuItems(menuCategory ?? category) }
   }
 
   var body: some View {
@@ -528,9 +515,7 @@ struct TopDocumentTabStripView: View {
             viewModel.showLeftNavigator = nextVisible; viewModel.showRightInspector = nextVisible
           }
         }) {
-          ForEach(WorkspaceViewMode.allCases) { mode in
-            Button(mode.rawValue) { viewModel.setWorkspaceViewMode(mode) }
-          }
+          ForEach(WorkspaceViewMode.allCases) { mode in Button(mode.rawValue) { viewModel.setWorkspaceViewMode(mode) } }
           Divider()
           Button(isStudioPanelsExpanded ? "보조 패널 접기" : "보조 패널 펼치기") {
             isStudioPanelsExpanded.toggle()
@@ -539,26 +524,11 @@ struct TopDocumentTabStripView: View {
           Divider()
           ribbonCategoryMenuItems(.view)
         }
-        topStudioMenu("입력", palette: palette, snapshotAction: {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert
-          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
-        }) { ribbonCategoryMenuItems(.insert) }
-        topStudioMenu("서식", palette: palette, snapshotAction: {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
-        }) { ribbonCategoryMenuItems(.layout) }
-        topStudioMenu("쪽", palette: palette, snapshotAction: {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
-        }) { ribbonCategoryMenuItems(.moduleSpecific) }
-        topStudioMenu("표", palette: palette, snapshotAction: {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .formulasAndData
-          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
-        }) { ribbonCategoryMenuItems(.formulasAndData) }
-        topStudioMenu("도구", palette: palette, snapshotAction: {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .review
-          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
-        }) { ribbonCategoryMenuItems(.review) }
+        topCategoryMenu("입력", category: .insert, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("서식", category: .layout, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("쪽", category: .layout, menuCategory: .moduleSpecific, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("표", category: .formulasAndData, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("도구", category: .review, palette: palette, isDocStudio: isActiveTabDocumentStudio)
       }
       .fixedSize(horizontal: true, vertical: false)
 
