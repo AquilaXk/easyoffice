@@ -439,20 +439,53 @@ struct TopDocumentTabStripView: View {
     self._isStudioPanelsExpanded = isStudioPanelsExpanded
   }
 
-  private func topMenuBarItem(
-    _ title: String,
-    palette: WorkspaceThemePalette,
-    action: @escaping () -> Void
+  private func topMenuLabel(_ title: String, palette: WorkspaceThemePalette) -> some View {
+    Text(title).font(.system(size: 12.5, weight: .regular)).foregroundStyle(palette.primaryText.swiftUIColor)
+      .padding(.horizontal, 8).padding(.vertical, 4)
+  }
+
+  private func topMenuBarItem(_ title: String, palette: WorkspaceThemePalette, action: @escaping () -> Void) -> some View {
+    Button(action: action) { topMenuLabel(title, palette: palette) }.buttonStyle(.plain).fixedSize(horizontal: true, vertical: false)
+  }
+
+  @ViewBuilder
+  private func topStudioMenu<MenuItems: View>(
+    _ title: String, palette: WorkspaceThemePalette, snapshotAction: @escaping () -> Void, @ViewBuilder items: () -> MenuItems
   ) -> some View {
-    Button(action: action) {
-      Text(title)
-        .font(.system(size: 12.5, weight: .regular))
-        .foregroundStyle(palette.primaryText.swiftUIColor)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+    if viewModel.isCanvasSnapshotMode {
+      topMenuBarItem(title, palette: palette, action: snapshotAction)
+    } else {
+      Menu { items() } label: { topMenuLabel(title, palette: palette) }.menuStyle(.borderlessButton).fixedSize(horizontal: true, vertical: false)
     }
-    .buttonStyle(.plain)
-    .fixedSize(horizontal: true, vertical: false)
+  }
+
+  @ViewBuilder
+  private func ribbonCategoryMenuItems(_ category: RibbonCategory) -> some View {
+    let mod = viewModel.activeTab?.moduleKind ?? .document
+    ForEach(RibbonCategory.actions(for: category, module: mod)) { cmd in
+      Button("\(cmd.title) (\(cmd.shortcutHint))") {
+        viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = category; viewModel.executeRibbonCommand(cmd.id)
+      }
+    }
+  }
+
+  private func topCategoryMenu(
+    _ title: String, category: RibbonCategory, palette: WorkspaceThemePalette, isDocStudio: Bool
+  ) -> some View {
+    topStudioMenu(title, palette: palette, snapshotAction: {
+      viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = category
+      if !isDocStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+    }) { ribbonCategoryMenuItems(category) }
+  }
+
+  private func toggleWorkspaceSidePanels(isDocStudio: Bool) {
+    if isDocStudio {
+      isStudioPanelsExpanded.toggle()
+      if isStudioPanelsExpanded { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+    } else {
+      let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
+      viewModel.showLeftNavigator = nextVisible; viewModel.showRightInspector = nextVisible
+    }
   }
 
   var body: some View {
@@ -460,6 +493,9 @@ struct TopDocumentTabStripView: View {
     let isActiveTabDocumentStudio =
       viewModel.activeTab?.moduleKind == .document || viewModel.activeTab?.moduleKind == .hwp
     let isDocumentStudio = !viewModel.isShowingHomeHub && isActiveTabDocumentStudio
+    let isExpandedChevron = isDocumentStudio
+      ? isStudioPanelsExpanded
+      : (viewModel.showLeftNavigator || viewModel.showRightInspector)
     let rowBg = EasyOfficeDesignTokens.resolveHexColor(
       palette.isDark ? "#2B3037" : "#F5F5F5",
       fallback: palette.elevatedSurface.swiftUIColor
@@ -467,58 +503,44 @@ struct TopDocumentTabStripView: View {
 
     HStack(spacing: 4) {
       HStack(spacing: 0) {
-        topMenuBarItem("파일", palette: palette) {
-          viewModel.activeRibbonCategory = .home
-          if !viewModel.isCanvasSnapshotMode {
-            if !viewModel.isShowingHomeHub && viewModel.activeTab != nil {
-              _ = WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel)
-            } else {
-              WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel)
-            }
-          }
+        topStudioMenu("파일", palette: palette, snapshotAction: { viewModel.activeRibbonCategory = .home }) {
+          Button("새 문서") { _ = viewModel.openNewBlankTab(for: viewModel.activeTab?.moduleKind ?? .document) }
+          Button("열기...") { WorkspaceFileDialogPresenter.presentOpenPanel(viewModel: viewModel) }
+          Button("저장") { _ = WorkspaceFileDialogPresenter.presentSavePanel(viewModel: viewModel) }
+          Divider()
+          Button("인쇄...") { WorkspaceFileDialogPresenter.presentPrintPanel(viewModel: viewModel) }
         }
-        topMenuBarItem("편집", palette: palette) {
+        topStudioMenu("편집", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .home
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if !isActiveTabDocumentStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+        }) {
+          Button("실행 취소") { viewModel.undoActiveTab() }.disabled(!viewModel.canUndo)
+          Button("다시 실행") { viewModel.redoActiveTab() }.disabled(!viewModel.canRedo)
+          Divider()
+          Button("찾기 및 바꾸기...") { viewModel.isFindReplaceBarVisible.toggle() }
+          Divider()
+          ribbonCategoryMenuItems(.home)
         }
-        topMenuBarItem("보기", palette: palette) {
+        topStudioMenu("보기", palette: palette, snapshotAction: {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .view
-          if isActiveTabDocumentStudio {
-            isStudioPanelsExpanded.toggle()
-            if isStudioPanelsExpanded {
-              viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-            }
-          } else {
+          if !isActiveTabDocumentStudio {
             let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
             viewModel.showLeftNavigator = nextVisible; viewModel.showRightInspector = nextVisible
           }
+        }) {
+          ForEach(WorkspaceViewMode.allCases) { mode in Button(mode.rawValue) { viewModel.setWorkspaceViewMode(mode) } }
+          Divider()
+          Button(isExpandedChevron ? "보조 패널 접기" : "보조 패널 펼치기") {
+            toggleWorkspaceSidePanels(isDocStudio: isDocumentStudio)
+          }
+          Divider()
+          ribbonCategoryMenuItems(.view)
         }
-        topMenuBarItem("입력", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-        }
-        topMenuBarItem("서식", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-        }
-        topMenuBarItem("쪽", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-        }
-        topMenuBarItem("표", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .formulasAndData
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-        }
-        topMenuBarItem("도구", palette: palette) {
-          viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .review
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-        }
+        topCategoryMenu("입력", category: .insert, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("서식", category: .home, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("쪽", category: .layout, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("표", category: .formulasAndData, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("도구", category: .review, palette: palette, isDocStudio: isActiveTabDocumentStudio)
       }
       .fixedSize(horizontal: true, vertical: false)
 
@@ -722,22 +744,7 @@ struct TopDocumentTabStripView: View {
         }
       }
 
-      let isExpandedChevron = isDocumentStudio
-        ? isStudioPanelsExpanded
-        : (viewModel.showLeftNavigator || viewModel.showRightInspector)
-      Button {
-        if isDocumentStudio {
-          isStudioPanelsExpanded.toggle()
-          if isStudioPanelsExpanded {
-            viewModel.showLeftNavigator = true
-            viewModel.showRightInspector = true
-          }
-        } else {
-          let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
-          viewModel.showLeftNavigator = nextVisible
-          viewModel.showRightInspector = nextVisible
-        }
-      } label: {
+      Button { toggleWorkspaceSidePanels(isDocStudio: isDocumentStudio) } label: {
         Text(isExpandedChevron ? "▴" : "▾")
           .font(.system(size: 11, weight: .bold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)

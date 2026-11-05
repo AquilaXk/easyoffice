@@ -533,5 +533,83 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.equal(document.getElementById("pdf-page-card").dataset.rotatedQuarter, "true");
   assert.match(document.getElementById("pdf-form-status").textContent, /회전:\s*90°/);
+
+  const appShell = document.getElementById("app");
+  assert.equal(document.getElementById("menu-bar").parentElement, appShell);
+  assert.equal(document.getElementById("icon-toolbar").parentElement, appShell);
+  assert.equal(document.getElementById("doc-style-bar").parentElement, appShell);
+
+  const editMenuBtn = document.querySelector('.studio-menu-item[data-menu-cat="home"]');
+  const editMenuWrap = editMenuBtn.parentElement;
+  userClick(editMenuBtn);
+  assert.equal(editMenuWrap.classList.contains("open"), true);
+  assert.notEqual(appShell.dataset.chromeExpanded, "true");
+  sandbox.dispatchWindowKeydown({ key: "Escape" });
+  assert.equal(editMenuWrap.classList.contains("open"), false);
+
+  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  await flushAsyncTurns();
+  const docTableBody = document.getElementById("doc-table-body");
+  const initialRowCount = docTableBody.querySelectorAll("tr").length;
+  userClick(document.querySelector('[data-studio-menu-cmd="table-add-row"]'));
+  await flushAsyncTurns();
+  assert.equal(docTableBody.querySelectorAll("tr").length, initialRowCount + 1);
+
+  docEditor.focus();
+  const p0 = docEditor.querySelector("p");
+  const prevP0Text = p0.textContent;
+  docEditor.dispatchEvent({ type: "beforeinput", target: p0 });
+  p0.textContent = "표 행 추가 후 본문 타이핑";
+  docEditor.dispatchEvent({ type: "input", target: p0 });
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(docEditor.querySelector("p").textContent, prevP0Text);
+  assert.equal(
+    document.getElementById("doc-table-body").querySelectorAll("tr").length,
+    initialRowCount + 1
+  );
+
+  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  await flushAsyncTurns();
+  const rowCountInPdf = document.getElementById("doc-table-body").querySelectorAll("tr").length;
+  userClick(document.querySelector('[data-studio-menu-cmd="table-add-row"]'));
+  userClick(document.querySelector('[data-studio-menu-cmd="mod-footnote"]'));
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("doc-table-body").querySelectorAll("tr").length, rowCountInPdf);
+
+  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  await flushAsyncTurns();
+  userClick(document.querySelector('[data-studio-menu-cmd="security-audit"]'));
+  await flushAsyncTurns();
+  assert.match(document.getElementById("status-command-feedback").textContent, /보안|감사/);
+
+  userClick(document.getElementById("btn-command-palette"));
+  const paletteModal = document.getElementById("cmd-palette-modal");
+  assert.equal(paletteModal.open, true);
+  assert.equal(paletteModal.querySelector(".cp-slash")?.textContent, "/");
+  const cpItems = paletteModal.querySelectorAll("#cmd-palette-list .cp-item");
+  assert.ok(cpItems.length > 0);
+  assert.equal(cpItems[0].classList.contains("cp-item--selected"), true);
+  assert.equal(cpItems[0].querySelector(".cp-item-label")?.textContent, "저장");
+  assert.equal(cpItems[0].querySelector(".cp-item-shortcut")?.textContent, "Ctrl+S");
+
+  const feedbackBeforeModalBold = document.getElementById("status-command-feedback").textContent;
+  sandbox.dispatchWindowKeydown({ key: "b", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("status-command-feedback").textContent, feedbackBeforeModalBold);
+
+  sandbox.dispatchWindowKeydown({ key: "ArrowDown" });
+  const cpItemsAfterDown = paletteModal.querySelectorAll("#cmd-palette-list .cp-item");
+  assert.equal(cpItemsAfterDown[0].classList.contains("cp-item--selected"), false);
+  assert.equal(cpItemsAfterDown[1].classList.contains("cp-item--selected"), true);
+
+  const cmdInput = document.getElementById("cmd-search-input");
+  cmdInput.value = "__non_existent_command_query__";
+  cmdInput.dispatchEvent({ type: "input" });
+  assert.equal(paletteModal.querySelector("#cmd-palette-list .cp-empty")?.textContent, "검색 결과 없음");
+  cmdInput.value = "";
+  cmdInput.dispatchEvent({ type: "input" });
+  sandbox.dispatchWindowKeydown({ key: "k", ctrlKey: true });
+  assert.equal(paletteModal.open, false);
 });
 

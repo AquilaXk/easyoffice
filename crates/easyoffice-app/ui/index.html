@@ -9,16 +9,111 @@
   </head>
   <body>
     <div id="app" class="app-shell" data-module="DOC">
-      <header class="topbar" role="banner">
+      <header id="menu-bar" class="topbar" role="banner">
         <div class="studio-menubar" role="menubar" aria-label="스튜디오 주 메뉴">
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="file">파일</button>
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="home">편집</button>
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="view">보기</button>
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="insert">입력</button>
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="layout">서식</button>
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="layout">쪽</button>
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="formulasAndData">표</button>
-          <button type="button" class="studio-menu-item" role="menuitem" data-menu-cat="review">도구</button>
+          <div class="menu-item" data-menu="file">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="file">파일</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="module:DOC"><span class="md-label">새 문서 (DOCX)</span><span class="md-shortcut">Alt+N</span></div>
+              <div class="md-item" data-studio-menu-cmd="module:HWP"><span class="md-label">한글 문서 (HWP/HWPX)</span><span class="md-shortcut">Ctrl+N</span></div>
+              <div class="md-item" data-studio-menu-cmd="module:SHEET"><span class="md-label">스프레드시트 (XLSX)</span></div>
+              <div class="md-item" data-studio-menu-cmd="module:SLIDE"><span class="md-label">프레젠테이션 (PPTX)</span></div>
+              <div class="md-item" data-studio-menu-cmd="module:PDF"><span class="md-label">PDF 스튜디오</span></div>
+              <div class="md-item" data-studio-menu-cmd="module:CONV"><span class="md-label">통합 포맷 변환기</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="studio-save"><span class="md-label">저장</span><span class="md-shortcut">Ctrl+S</span></div>
+              <div class="md-item" data-studio-menu-cmd="layout-paper"><span class="md-label">편집 용지</span><span class="md-shortcut">F7</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="edit">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="home">편집</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="studio-undo"><span class="md-label">되돌리기</span><span class="md-shortcut">Ctrl+Z</span></div>
+              <div class="md-item" data-studio-menu-cmd="studio-redo"><span class="md-label">다시 실행</span><span class="md-shortcut">Ctrl+Shift+Z</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="clip-cut"><span class="md-label">오려 두기</span><span class="md-shortcut">Ctrl+X</span></div>
+              <div class="md-item" data-studio-menu-cmd="clip-copy"><span class="md-label">복사하기</span><span class="md-shortcut">Ctrl+C</span></div>
+              <div class="md-item" data-studio-menu-cmd="clip-paste"><span class="md-label">붙이기</span><span class="md-shortcut">Ctrl+V</span></div>
+              <div class="md-item" data-studio-menu-cmd="home-style"><span class="md-label">모양 복사</span><span class="md-shortcut">Alt+C</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="palette"><span class="md-label">찾기(F)</span><span class="md-shortcut">Ctrl+F</span></div>
+              <div class="md-item" data-studio-menu-cmd="palette"><span class="md-label">찾아 바꾸기(E)</span><span class="md-shortcut">Ctrl+F2</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="view">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="view">보기</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="zoom-in"><span class="md-label">확대</span><span class="md-shortcut">Shift+Num +</span></div>
+              <div class="md-item" data-studio-menu-cmd="zoom-out"><span class="md-label">축소</span><span class="md-shortcut">Shift+Num -</span></div>
+              <div class="md-item" data-studio-menu-cmd="zoom-fit-page"><span class="md-label">쪽 맞춤</span><span class="md-shortcut">Ctrl+G,P</span></div>
+              <div class="md-item" data-studio-menu-cmd="zoom-fit-width"><span class="md-label">폭 맞춤</span><span class="md-shortcut">Ctrl+G,W</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="view-theme"><span class="md-label">테마 전환 (밝게/어둡게)</span><span class="md-shortcut">Ctrl+Alt+D</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="ctrl-marks"><span class="md-label">조판 부호</span><span class="md-shortcut">Ctrl+G,C</span></div>
+              <div class="md-item" data-studio-menu-cmd="para-marks"><span class="md-label">문단 부호</span><span class="md-shortcut">Ctrl+G,T</span></div>
+              <div class="md-item" data-studio-menu-cmd="doc-grid"><span class="md-label">격자 설정</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="insert">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="insert">입력</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="insert-shape"><span class="md-label">도형</span></div>
+              <div class="md-item" data-studio-menu-cmd="insert-chart"><span class="md-label">그림</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="mod-footnote"><span class="md-label">각주</span><span class="md-shortcut">Ctrl+N,N</span></div>
+              <div class="md-item" data-studio-menu-cmd="mod-symbol"><span class="md-label">문자표</span><span class="md-shortcut">Ctrl+F10</span></div>
+              <div class="md-item" data-studio-menu-cmd="insert-link"><span class="md-label">하이퍼링크</span><span class="md-shortcut">Ctrl+K,H</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="layout-paper"><span class="md-label">개체 속성</span><span class="md-shortcut">P</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="format">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="layout">서식</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="home-bold"><span class="md-label">진하게</span><span class="md-shortcut">Ctrl+B</span></div>
+              <div class="md-item" data-studio-menu-cmd="home-italic"><span class="md-label">기울임</span><span class="md-shortcut">Ctrl+I</span></div>
+              <div class="md-item" data-studio-menu-cmd="home-underline"><span class="md-label">밑줄</span><span class="md-shortcut">Ctrl+U</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="home-style"><span class="md-label">글자 모양</span><span class="md-shortcut">Alt+L</span></div>
+              <div class="md-item" data-studio-menu-cmd="para-shape"><span class="md-label">문단 모양</span><span class="md-shortcut">Alt+T</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="para-numbering"><span class="md-label">문단 번호 모양</span></div>
+              <div class="md-item" data-studio-menu-cmd="para-bullet"><span class="md-label">글머리표 모양</span></div>
+              <div class="md-item" data-studio-menu-cmd="indent-in"><span class="md-label">한 수준 증가</span><span class="md-shortcut">Ctrl+Num +</span></div>
+              <div class="md-item" data-studio-menu-cmd="indent-out"><span class="md-label">한 수준 감소</span><span class="md-shortcut">Ctrl+Num -</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="page">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="layout">쪽</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="layout-paper"><span class="md-label">편집 용지</span><span class="md-shortcut">F7</span></div>
+              <div class="md-item" data-studio-menu-cmd="layout-orientation"><span class="md-label">용지 방향 전환</span></div>
+              <div class="md-item" data-studio-menu-cmd="layout-margins"><span class="md-label">여백 전환</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="mod-header"><span class="md-label">머리말/꼬리말</span><span class="md-shortcut">Ctrl+N,H</span></div>
+              <div class="md-item" data-studio-menu-cmd="layout-columns"><span class="md-label">다단 설정</span><span class="md-shortcut">Alt+U</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="table">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="formulasAndData">표</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="insert-table"><span class="md-label">표 만들기</span><span class="md-shortcut">Ctrl+N,T</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-add-row"><span class="md-label">아래쪽에 줄 추가하기</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-merge"><span class="md-label">셀 합치기</span><span class="md-shortcut">M</span></div>
+              <div class="md-item" data-studio-menu-cmd="table-sum"><span class="md-label">블록 합계</span><span class="md-shortcut">Ctrl+Shift+S</span></div>
+            </div>
+          </div>
+          <div class="menu-item" data-menu="tool">
+            <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="review">도구</button>
+            <div class="menu-dropdown" role="menu">
+              <div class="md-item" data-studio-menu-cmd="smart-diagnose"><span class="md-label">문장 진단 및 요약</span></div>
+              <div class="md-item" data-studio-menu-cmd="scrub-pii"><span class="md-label">개인정보 스캔/마스킹</span></div>
+              <div class="md-item" data-studio-menu-cmd="security-audit"><span class="md-label">문서 보안 검사</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="palette"><span class="md-label">환경 설정 및 커맨드 검색</span><span class="md-shortcut">/</span></div>
+            </div>
+          </div>
         </div>
 
         <div class="brand-group">
@@ -58,6 +153,153 @@
           ▾
         </button>
       </header>
+
+      <div id="icon-toolbar" class="eo-icon-toolbar" role="toolbar" aria-label="표준 도구 상자">
+        <div class="tb-group">
+          <button type="button" class="tb-btn" data-studio-cmd="studio-save" title="저장하기 (Ctrl+S)" aria-label="저장">💾</button>
+          <button type="button" class="tb-btn" data-studio-cmd="studio-undo" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소">↩</button>
+          <button type="button" class="tb-btn" data-studio-cmd="studio-redo" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행">↪</button>
+          <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="오려두기 (Ctrl+X)" aria-label="오려두기">✂</button>
+          <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사하기 (Ctrl+C)" aria-label="복사하기">📄</button>
+          <button type="button" class="tb-btn" data-studio-cmd="clip-paste" title="붙이기 (Ctrl+V)" aria-label="붙이기">📋</button>
+          <button type="button" class="tb-btn" data-studio-cmd="home-style" title="모양 복사 (Alt+C)" aria-label="모양복사">🖌</button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group sb-viewmark-group">
+          <button id="btn-toggle-ctrl-marks" class="tb-btn tb-mark-blue eo-glyph-btn" type="button" title="조판 부호 표시 (Ctrl+G,C)">¶</button>
+          <button id="btn-toggle-para-marks" class="tb-btn tb-mark-blue eo-glyph-btn active" type="button" aria-pressed="true" title="문단 부호 표시 (Ctrl+G,T)">↵</button>
+          <button id="btn-toggle-doc-grid" class="tb-btn eo-glyph-btn" type="button" title="격자 보기">#</button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn tb-char-shape" data-studio-cmd="home-style" title="글자 모양 (Alt+L)">가/가</button>
+          <button type="button" class="tb-btn tb-para-shape" data-studio-cmd="para-shape" title="문단 모양 (Alt+T)">≡✓</button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-numbering" title="문단 번호">1.</button>
+          <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-bullet" title="글머리표">●</button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-out" title="한 수준 감소">⇤</button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-in" title="한 수준 증가">⇥</button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 만들기">⊞▾</button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-shape" title="도형 삽입">△□▾</button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-chart" title="그림 삽입">🖼</button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn" data-studio-cmd="layout-paper" title="개체 속성">⊡</button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" title="문자표 (Ctrl+F10)">※</button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-link" title="하이퍼링크 (Ctrl+K,H)">🌐</button>
+        </div>
+        <span class="tb-sep" aria-hidden="true"></span>
+        <div class="tb-group">
+          <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="머리말">▤</button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="꼬리말">▥</button>
+          <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="각주">[1]</button>
+          <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="미주">[i]</button>
+          <button type="button" class="tb-btn" data-studio-cmd="palette" title="찾기/바꾸기">🔭▾</button>
+        </div>
+      </div>
+
+      <div id="doc-style-bar" class="eo-doc-style-bar" role="toolbar" aria-label="문단 및 글자 서식 도구줄">
+        <div class="sb-field-grid">
+          <select id="doc-style-select" class="sb-select sb-style-select" aria-label="스타일 선택">
+            <option value="바탕글" selected>바탕글</option>
+            <option value="공문서 바탕글">공문서 바탕글</option>
+            <option value="본문">본문</option>
+            <option value="개요 1">개요 1</option>
+            <option value="개요 2">개요 2</option>
+            <option value="개요 3">개요 3</option>
+            <option value="쪽 번호">쪽 번호</option>
+            <option value="머리말">머리말</option>
+            <option value="각주">각주</option>
+          </select>
+          <span id="doc-style-role-badge" class="eo-style-chip" hidden>바탕글</span>
+          <select id="doc-font-lang" class="sb-select sb-lang-select" aria-label="언어별 글꼴 범주">
+            <option value="대표" selected>대표</option>
+            <option value="한글">한글</option>
+            <option value="영문">영문</option>
+            <option value="한자">한자</option>
+            <option value="일어">일어</option>
+            <option value="외국어">외국어</option>
+            <option value="기호">기호</option>
+            <option value="사용자">사용자</option>
+          </select>
+          <select id="doc-font-select" class="sb-select sb-font-select" aria-label="글꼴 선택">
+            <option value="휴먼명조" selected>휴먼명조</option>
+            <option value="함초롬바탕">함초롬바탕</option>
+            <option value="함초롬돋움">함초롬돋움</option>
+            <option value="Pretendard">Pretendard</option>
+            <option value="맑은 고딕">맑은 고딕</option>
+            <option value="나눔고딕">나눔고딕</option>
+            <option value="바탕">바탕</option>
+            <option value="돋움">돋움</option>
+            <option value="궁서">궁서</option>
+          </select>
+          <span id="doc-style-font-badge" class="eo-style-chip" hidden>휴먼명조</span>
+          <div class="sb-size-group">
+            <input id="doc-font-size-input" class="sb-size-input" type="text" value="11.0" aria-label="글자 크기" />
+            <span class="sb-size-unit">pt</span>
+            <span id="doc-style-size-badge" class="sb-size-unit" hidden>11.0 pt</span>
+            <span class="sb-stepper-col">
+              <button id="btn-size-up" type="button" class="sb-step-btn" title="글자 크기 크게 (Alt+Shift+E)">▲</button>
+              <button id="btn-size-down" type="button" class="sb-step-btn" title="글자 크기 작게 (Alt+Shift+R)">▼</button>
+            </span>
+          </div>
+        </div>
+        <span class="eo-style-sep" aria-hidden="true">|</span>
+        <div class="sb-command-track">
+          <div class="sb-character-group">
+            <button id="btn-stylebar-bold" class="eo-glyph-btn" type="button" title="굵게 (가)">
+              <strong>가</strong>
+            </button>
+            <button id="btn-stylebar-italic" class="eo-glyph-btn" type="button" title="기울임 (가)">
+              <em>가</em>
+            </button>
+            <button id="btn-stylebar-underline" class="eo-glyph-btn" type="button" title="밑줄 (간)">
+              <u>간</u>
+            </button>
+            <button id="btn-stylebar-strike" class="eo-glyph-btn" type="button" title="취소선 (가)">
+              <s>가</s>
+            </button>
+            <button id="btn-stylebar-charfx" class="eo-glyph-btn" type="button" title="글자 효과">
+              가▾
+            </button>
+          </div>
+          <span class="eo-style-sep" aria-hidden="true">|</span>
+          <div class="sb-color-group">
+            <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" title="글자 색">간▾</button>
+            <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" title="형광펜">✏▾</button>
+          </div>
+          <span class="eo-style-sep" aria-hidden="true">|</span>
+          <div class="sb-align-group">
+            <button id="btn-align-left" class="eo-glyph-btn" type="button" title="왼쪽 정렬 (Ctrl+Shift+L)">⫷</button>
+            <button id="btn-align-center" class="eo-glyph-btn" type="button" title="가운데 정렬 (Ctrl+Shift+C)">⫶</button>
+            <button id="btn-align-right" class="eo-glyph-btn" type="button" title="오른쪽 정렬 (Ctrl+Shift+R)">⫸</button>
+            <button id="btn-align-justify" class="eo-glyph-btn active" type="button" title="양쪽 정렬 (Ctrl+Shift+M)">≡</button>
+            <button id="btn-align-distribute" class="eo-glyph-btn" type="button" title="배분 정렬 (Ctrl+Shift+T)">▤</button>
+            <button id="btn-align-divide" class="eo-glyph-btn" type="button" title="나눔 정렬 (Ctrl+Shift+J)">▥</button>
+          </div>
+          <span class="eo-style-sep" aria-hidden="true">|</span>
+          <div class="sb-ls-group">
+            <select id="doc-linespacing-select" class="sb-select sb-ls-select" aria-label="줄 간격">
+              <option value="100">100 %</option>
+              <option value="130">130 %</option>
+              <option value="160" selected>160 %</option>
+              <option value="180">180 %</option>
+              <option value="200">200 %</option>
+              <option value="300">300 %</option>
+            </select>
+            <span class="sb-stepper-col">
+              <button id="btn-ls-up" type="button" class="sb-step-btn" title="줄 간격 넓게 (Alt+Shift+Z)">▲</button>
+              <button id="btn-ls-down" type="button" class="sb-step-btn" title="줄 간격 좁게 (Alt+Shift+A)">▼</button>
+            </span>
+          </div>
+        </div>
+      </div>
 
       <nav class="ribbon-bar" aria-label="컨텍스트 리본 탭">
         <div class="ribbon-tabs" id="ribbon-tabs" role="tablist" aria-label="리본 카테고리 탭">
@@ -106,151 +348,6 @@
 
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
-            <div id="icon-toolbar" class="eo-icon-toolbar" role="toolbar" aria-label="표준 도구 상자">
-              <div class="tb-group">
-                <button type="button" class="tb-btn" data-studio-cmd="studio-save" title="저장하기 (Ctrl+S)" aria-label="저장">💾</button>
-                <button type="button" class="tb-btn" data-studio-cmd="studio-undo" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소">↩</button>
-                <button type="button" class="tb-btn" data-studio-cmd="studio-redo" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행">↪</button>
-                <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="오려두기 (Ctrl+X)" aria-label="오려두기">✂</button>
-                <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사하기 (Ctrl+C)" aria-label="복사하기">📄</button>
-                <button type="button" class="tb-btn" data-studio-cmd="clip-paste" title="붙이기 (Ctrl+V)" aria-label="붙이기">📋</button>
-                <button type="button" class="tb-btn" data-studio-cmd="home-style" title="모양 복사 (Alt+C)" aria-label="모양복사">🖌</button>
-              </div>
-              <span class="tb-sep" aria-hidden="true"></span>
-              <div class="tb-group sb-viewmark-group">
-                <button id="btn-toggle-ctrl-marks" class="tb-btn tb-mark-blue eo-glyph-btn" type="button" title="조판 부호 표시 (Ctrl+G,C)">¶</button>
-                <button id="btn-toggle-para-marks" class="tb-btn tb-mark-blue eo-glyph-btn active" type="button" aria-pressed="true" title="문단 부호 표시 (Ctrl+G,T)">↵</button>
-                <button id="btn-toggle-doc-grid" class="tb-btn eo-glyph-btn" type="button" title="격자 보기">#</button>
-              </div>
-              <span class="tb-sep" aria-hidden="true"></span>
-              <div class="tb-group">
-                <button type="button" class="tb-btn tb-char-shape" data-studio-cmd="home-style" title="글자 모양 (Alt+L)">가/가</button>
-                <button type="button" class="tb-btn tb-para-shape" data-studio-cmd="para-shape" title="문단 모양 (Alt+T)">≡✓</button>
-              </div>
-              <span class="tb-sep" aria-hidden="true"></span>
-              <div class="tb-group">
-                <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-numbering" title="문단 번호">1.</button>
-                <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-bullet" title="글머리표">●</button>
-                <button type="button" class="tb-btn" data-studio-cmd="indent-out" title="한 수준 감소">⇤</button>
-                <button type="button" class="tb-btn" data-studio-cmd="indent-in" title="한 수준 증가">⇥</button>
-              </div>
-              <span class="tb-sep" aria-hidden="true"></span>
-              <div class="tb-group">
-                <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 만들기">⊞▾</button>
-                <button type="button" class="tb-btn" data-studio-cmd="insert-shape" title="도형 삽입">△□▾</button>
-                <button type="button" class="tb-btn" data-studio-cmd="insert-chart" title="그림 삽입">🖼</button>
-              </div>
-              <span class="tb-sep" aria-hidden="true"></span>
-              <div class="tb-group">
-                <button type="button" class="tb-btn" data-studio-cmd="layout-paper" title="개체 속성">⊡</button>
-                <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" title="문자표 (Ctrl+F10)">※</button>
-                <button type="button" class="tb-btn" data-studio-cmd="insert-link" title="하이퍼링크 (Ctrl+K,H)">🌐</button>
-              </div>
-              <span class="tb-sep" aria-hidden="true"></span>
-              <div class="tb-group">
-                <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="머리말">▤</button>
-                <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="꼬리말">▥</button>
-                <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="각주">[1]</button>
-                <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="미주">[i]</button>
-                <button type="button" class="tb-btn" data-studio-cmd="palette" title="찾기/바꾸기">🔭▾</button>
-              </div>
-            </div>
-            <div id="doc-style-bar" class="eo-doc-style-bar" role="toolbar" aria-label="문단 및 글자 서식 도구줄">
-              <div class="sb-field-grid">
-                <select id="doc-style-select" class="sb-select sb-style-select" aria-label="스타일 선택">
-                  <option value="바탕글" selected>바탕글</option>
-                  <option value="공문서 바탕글">공문서 바탕글</option>
-                  <option value="본문">본문</option>
-                  <option value="개요 1">개요 1</option>
-                  <option value="개요 2">개요 2</option>
-                  <option value="개요 3">개요 3</option>
-                  <option value="쪽 번호">쪽 번호</option>
-                  <option value="머리말">머리말</option>
-                  <option value="각주">각주</option>
-                </select>
-                <span id="doc-style-role-badge" class="eo-style-chip" hidden>바탕글</span>
-                <select id="doc-font-lang" class="sb-select sb-lang-select" aria-label="언어별 글꼴 범주">
-                  <option value="대표" selected>대표</option>
-                  <option value="한글">한글</option>
-                  <option value="영문">영문</option>
-                  <option value="한자">한자</option>
-                  <option value="일어">일어</option>
-                  <option value="외국어">외국어</option>
-                  <option value="기호">기호</option>
-                  <option value="사용자">사용자</option>
-                </select>
-                <select id="doc-font-select" class="sb-select sb-font-select" aria-label="글꼴 선택">
-                  <option value="휴먼명조" selected>휴먼명조</option>
-                  <option value="함초롬바탕">함초롬바탕</option>
-                  <option value="함초롬돋움">함초롬돋움</option>
-                  <option value="Pretendard">Pretendard</option>
-                  <option value="맑은 고딕">맑은 고딕</option>
-                  <option value="나눔고딕">나눔고딕</option>
-                  <option value="바탕">바탕</option>
-                  <option value="돋움">돋움</option>
-                  <option value="궁서">궁서</option>
-                </select>
-                <span id="doc-style-font-badge" class="eo-style-chip" hidden>휴먼명조</span>
-                <div class="sb-size-group">
-                  <input id="doc-font-size-input" class="sb-size-input" type="text" value="11.0" aria-label="글자 크기" />
-                  <span class="sb-size-unit">pt</span>
-                  <span id="doc-style-size-badge" class="sb-size-unit" hidden>11.0 pt</span>
-                  <span class="sb-stepper-col">
-                    <button id="btn-size-up" type="button" class="sb-step-btn" title="글자 크기 크게 (Alt+Shift+E)">▲</button>
-                    <button id="btn-size-down" type="button" class="sb-step-btn" title="글자 크기 작게 (Alt+Shift+R)">▼</button>
-                  </span>
-                </div>
-              </div>
-              <span class="eo-style-sep" aria-hidden="true">|</span>
-              <div class="sb-command-track">
-                <div class="sb-character-group">
-                  <button id="btn-stylebar-bold" class="eo-glyph-btn" type="button" title="굵게 (가)">
-                    <strong>가</strong>
-                  </button>
-                  <button id="btn-stylebar-italic" class="eo-glyph-btn" type="button" title="기울임 (가)">
-                    <em>가</em>
-                  </button>
-                  <button id="btn-stylebar-underline" class="eo-glyph-btn" type="button" title="밑줄 (간)">
-                    <u>간</u>
-                  </button>
-                  <button id="btn-stylebar-strike" class="eo-glyph-btn" type="button" title="취소선 (가)">
-                    <s>가</s>
-                  </button>
-                  <button id="btn-stylebar-charfx" class="eo-glyph-btn" type="button" title="글자 효과">
-                    가▾
-                  </button>
-                </div>
-                <span class="eo-style-sep" aria-hidden="true">|</span>
-                <div class="sb-color-group">
-                  <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" title="글자 색">간▾</button>
-                  <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" title="형광펜">✏▾</button>
-                </div>
-                <span class="eo-style-sep" aria-hidden="true">|</span>
-                <div class="sb-align-group">
-                  <button id="btn-align-left" class="eo-glyph-btn" type="button" title="왼쪽 정렬 (Ctrl+Shift+L)">⫷</button>
-                  <button id="btn-align-center" class="eo-glyph-btn" type="button" title="가운데 정렬 (Ctrl+Shift+C)">⫶</button>
-                  <button id="btn-align-right" class="eo-glyph-btn" type="button" title="오른쪽 정렬 (Ctrl+Shift+R)">⫸</button>
-                  <button id="btn-align-justify" class="eo-glyph-btn active" type="button" title="양쪽 정렬 (Ctrl+Shift+M)">≡</button>
-                  <button id="btn-align-distribute" class="eo-glyph-btn" type="button" title="배분 정렬 (Ctrl+Shift+T)">▤</button>
-                  <button id="btn-align-divide" class="eo-glyph-btn" type="button" title="나눔 정렬 (Ctrl+Shift+J)">▥</button>
-                </div>
-                <span class="eo-style-sep" aria-hidden="true">|</span>
-                <div class="sb-ls-group">
-                  <select id="doc-linespacing-select" class="sb-select sb-ls-select" aria-label="줄 간격">
-                    <option value="100">100 %</option>
-                    <option value="130">130 %</option>
-                    <option value="160" selected>160 %</option>
-                    <option value="180">180 %</option>
-                    <option value="200">200 %</option>
-                    <option value="300">300 %</option>
-                  </select>
-                  <span class="sb-stepper-col">
-                    <button id="btn-ls-up" type="button" class="sb-step-btn" title="줄 간격 넓게 (Alt+Shift+Z)">▲</button>
-                    <button id="btn-ls-down" type="button" class="sb-step-btn" title="줄 간격 좁게 (Alt+Shift+A)">▼</button>
-                  </span>
-                </div>
-              </div>
-            </div>
             <div class="doc-studio-grid">
               <div id="ruler-corner" class="ruler-corner" aria-hidden="true">mm</div>
               <div id="h-ruler" class="page-ruler h-ruler" aria-label="문서 가로 눈금자">
@@ -743,17 +840,21 @@
       </footer>
     </div>
 
-    <dialog id="cmd-palette-modal" class="cmd-modal" aria-label="명령 팔레트">
-      <div class="cmd-modal-inner">
-        <label for="cmd-search-input">명령 및 기능 검색</label>
-        <input
-          id="cmd-search-input"
-          type="text"
-          class="cmd-input"
-          placeholder="명령 또는 기능 검색 (예: 원고지, 피벗, 목표값, PDF, 변환)..."
-        />
-        <ul id="cmd-palette-list" class="cmd-list"></ul>
-        <button id="btn-close-palette" class="secondary-btn">닫기 (Esc)</button>
+    <dialog id="cmd-palette-modal" class="cmd-modal cp-overlay" aria-label="명령 팔레트">
+      <div class="cmd-modal-inner cp-panel">
+        <div class="cp-input-wrap">
+          <span class="cp-slash" aria-hidden="true">/</span>
+          <input
+            id="cmd-search-input"
+            type="text"
+            class="cmd-input cp-input"
+            placeholder="커맨드 검색..."
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="커맨드 검색"
+          />
+        </div>
+        <ul id="cmd-palette-list" class="cmd-list cp-list" aria-label="커맨드 목록"></ul>
       </div>
     </dialog>
 

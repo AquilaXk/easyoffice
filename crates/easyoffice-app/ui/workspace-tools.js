@@ -5,10 +5,11 @@
   const LS_STEPS = [100, 130, 160, 180, 200, 300];
   const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
   const STUDIO_QUICK_REDIRECT = {
-    palette: "btn-command-palette",
-    "studio-save": "qat-save",
-    "studio-undo": "qat-undo",
-    "studio-redo": "qat-redo",
+    palette: "btn-command-palette", "studio-save": "qat-save", "studio-undo": "qat-undo", "studio-redo": "qat-redo",
+    "zoom-in": "btn-zoom-in", "zoom-out": "btn-zoom-out", "zoom-fit-page": "btn-zoom-fit-page", "zoom-fit-width": "btn-zoom-fit-width",
+    "ctrl-marks": "btn-toggle-ctrl-marks", "para-marks": "btn-toggle-para-marks", "doc-grid": "btn-toggle-doc-grid",
+    "table-add-row": "btn-doc-add-row", "table-merge": "btn-doc-merge-toggle", "table-sum": "btn-doc-eval-table",
+    "smart-diagnose": "btn-smart-diagnose", "scrub-pii": "btn-scrub-pii", "security-audit": "btn-run-security-audit", "view-theme": "btn-theme-toggle",
   };
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { hwp: true, target: "hwp-mod-field", label: "문자표 기호 삽입 완료" },
@@ -353,15 +354,13 @@
       const curMod = getActiveModule();
       if (outcome.ok) {
         txt.textContent = "문서 보안 검사 완료 (" + curMod + "): SAFE";
-      } else if (
-        outcome.errorMessage.startsWith("엔진 미연결:") ||
-        outcome.errorMessage.startsWith("IPC 네트워크 오류:")
-      ) {
+      } else if (outcome.errorMessage.startsWith("엔진 미연결:") || outcome.errorMessage.startsWith("IPC 네트워크 오류:")) {
         txt.textContent = "[요청 거부] " + outcome.errorMessage;
       } else {
-        txt.textContent =
-          "문서 보안 검사 완료 (" + curMod + "): REJECTED (" + outcome.errorMessage + ")";
+        txt.textContent = "문서 보안 검사 완료 (" + curMod + "): REJECTED (" + outcome.errorMessage + ")";
       }
+      const fb = document.getElementById("status-command-feedback");
+      if (fb) fb.textContent = txt.textContent;
     }
 
     function runSecurityAuditAction() {
@@ -651,12 +650,12 @@
         }
 
         if (totalMasked > 0) {
-          piiOut.textContent =
-            "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + curMod + ")";
+          piiOut.textContent = "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + curMod + ")";
         } else {
-          piiOut.textContent =
-            "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + curMod + ")";
+          piiOut.textContent = "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + curMod + ")";
         }
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = piiOut.textContent;
         computeSmartStats();
       });
     }
@@ -664,6 +663,8 @@
     let studioClipboardText = "";
 
     function withDocStyleUndo(mutateFn) {
+      const curMod = getActiveModule();
+      if (curMod !== "DOC" && curMod !== "HWP") return;
       const pre = typeof captureWorkspaceSnapshot === "function" ? captureWorkspaceSnapshot(false) : null;
       mutateFn();
       saveActiveDocTabState();
@@ -710,51 +711,44 @@
       computeSmartStats();
     }
 
-    function execStudioClipboardCmd(cmd, editor, blk, textTarget, fb) {
+    function execStudioClipboardCmd(cmd, editor, blk, textTarget, fb, isDocMod) {
+      if (!cmd.startsWith("clip-")) return false;
+      if (!isDocMod) return true;
       if (cmd === "clip-copy") {
         studioClipboardText = (textTarget?.textContent || "").trim();
         if (fb) fb.textContent = "선택 문단 클립보드 복사 완료 (" + studioClipboardText.length + "자)";
-        return true;
-      }
-      if (cmd === "clip-cut") {
+      } else if (cmd === "clip-cut") {
         withDocStyleUndo(() => {
           studioClipboardText = (textTarget?.textContent || "").trim();
           if (textTarget) textTarget.textContent = "";
           computeSmartStats();
         });
         if (fb) fb.textContent = "선택 문단 오려두기 완료";
-        return true;
-      }
-      if (cmd === "clip-paste") {
+      } else if (cmd === "clip-paste") {
         withDocStyleUndo(() => pasteStudioParagraph(editor, blk));
         if (fb) fb.textContent = "클립보드 문단 붙이기 완료";
-        return true;
       }
-      return false;
+      return true;
     }
 
-    function execStudioParaCmd(cmd, blk, textTarget, fb) {
-      if (cmd === "para-numbering" || cmd === "para-bullet") {
-        const isNum = cmd === "para-numbering";
-        withDocStyleUndo(() => {
-          toggleBlockPrefix(textTarget, isNum ? "1. " : "○ ");
-          computeSmartStats();
-        });
-        if (fb) fb.textContent = isNum ? "문단 번호 서식 적용 완료" : "글머리표 서식 적용 완료";
-        return true;
-      }
-      if (cmd === "indent-in" || cmd === "indent-out") {
-        const isIn = cmd === "indent-in";
-        withDocStyleUndo(() => shiftBlockIndent(blk, isIn ? 16 : -16));
-        if (fb) fb.textContent = isIn ? "한 수준 증가 적용 완료" : "한 수준 감소 적용 완료";
-        return true;
-      }
-      if (cmd === "para-shape") {
+    const PARA_PREFIX_CMDS = { "para-numbering": { prefix: "1. ", label: "문단 번호 서식 적용 완료" }, "para-bullet": { prefix: "○ ", label: "글머리표 서식 적용 완료" } };
+    const PARA_INDENT_CMDS = { "indent-in": { delta: 16, label: "한 수준 증가 적용 완료" }, "indent-out": { delta: -16, label: "한 수준 감소 적용 완료" } };
+    function execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod) {
+      const pfx = PARA_PREFIX_CMDS[cmd];
+      const ind = PARA_INDENT_CMDS[cmd];
+      if (!pfx && !ind && cmd !== "para-shape") return false;
+      if (!isDocMod) return true;
+      if (pfx) {
+        withDocStyleUndo(() => { toggleBlockPrefix(textTarget, pfx.prefix); computeSmartStats(); });
+        if (fb) fb.textContent = pfx.label;
+      } else if (ind) {
+        withDocStyleUndo(() => shiftBlockIndent(blk, ind.delta));
+        if (fb) fb.textContent = ind.label;
+      } else {
         document.getElementById("btn-align-justify")?.click();
         if (fb) fb.textContent = "문단 모양 정렬 적용 완료";
-        return true;
       }
-      return false;
+      return true;
     }
 
     function upsertDocHeaderBlock(editor) {
@@ -789,10 +783,11 @@
       }
     }
 
-    function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd) {
+    function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod) {
       const spec = INSERT_MOD_DISPATCH[cmd];
       if (!spec) return false;
-      if ((getActiveModule() === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
+      if (!isDocMod) return true;
+      if ((curMod === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
         onStudioCmd(spec.target);
         return true;
       }
@@ -803,14 +798,17 @@
 
     function dispatchStudioIconCmd(cmd, editor, onStudioCmd) {
       if (!cmd) return;
+      if (cmd.startsWith("module:")) return void document.querySelector('.mod-btn[data-module="' + cmd.slice(7) + '"]')?.click();
       const redirectId = STUDIO_QUICK_REDIRECT[cmd];
       if (redirectId) return void document.getElementById(redirectId)?.click();
+      const curMod = getActiveModule();
+      const isDocMod = curMod === "DOC" || curMod === "HWP";
       const fb = document.getElementById("status-command-feedback");
       const blk = resolveActiveDocBlock(editor);
       const textTarget = blk?.querySelector?.(".eo-h-title") || blk;
-      if (execStudioClipboardCmd(cmd, editor, blk, textTarget, fb)) return;
-      if (execStudioParaCmd(cmd, blk, textTarget, fb)) return;
-      if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd)) return;
+      if (execStudioClipboardCmd(cmd, editor, blk, textTarget, fb, isDocMod)) return;
+      if (execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod)) return;
+      if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
 
@@ -885,16 +883,46 @@
       });
     }
 
-    function handleStudioMenuClick(btn, chromeToggleBtn) {
-      if (btn.dataset.menuCat === "file") return void document.getElementById("qat-save")?.click();
-      const shell = document.getElementById("app") || document.querySelector(".app-shell");
-      if (shell && shell.dataset.chromeExpanded !== "true") {
-        shell.dataset.chromeExpanded = "true";
-        shell.dataset.panelsExpanded = "true";
-        chromeToggleBtn?.setAttribute("aria-expanded", "true");
-        if (chromeToggleBtn) chromeToggleBtn.textContent = "▴";
+    function closeAllStudioMenus() {
+      for (const el of document.querySelectorAll(".menu-item.open")) {
+        el.classList.remove("open");
+        delete el.dataset.openedByHover;
       }
-      document.querySelector('.ribbon-btn[data-category="' + btn.dataset.menuCat + '"]')?.click();
+    }
+
+    function bindStudioMenuBar(editor, onStudioCmd) {
+      for (const btn of document.querySelectorAll(".studio-menu-item[data-menu-cat]")) {
+        const menuItem = btn.closest?.(".menu-item") || btn.parentElement;
+        btn.addEventListener("click", (ev) => {
+          ev.stopPropagation?.();
+          if (menuItem?.dataset?.openedByHover === "true") {
+            delete menuItem.dataset.openedByHover;
+            return;
+          }
+          const wasOpen = menuItem?.classList?.contains("open");
+          closeAllStudioMenus();
+          if (menuItem && !wasOpen) menuItem.classList.add("open");
+        });
+        menuItem?.addEventListener?.("mouseenter", () => {
+          if (document.querySelector(".menu-item.open") && !menuItem.classList.contains("open")) {
+            closeAllStudioMenus();
+            menuItem.classList.add("open");
+            menuItem.dataset.openedByHover = "true";
+            host.setTimeout?.(() => { delete menuItem.dataset.openedByHover; }, 80);
+          }
+        });
+        menuItem?.addEventListener?.("mouseleave", () => { delete menuItem.dataset.openedByHover; });
+      }
+      for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
+        item.addEventListener("click", (ev) => {
+          ev.stopPropagation?.();
+          closeAllStudioMenus();
+          dispatchStudioIconCmd(item.dataset.studioMenuCmd, editor, onStudioCmd);
+        });
+      }
+      document.addEventListener?.("click", (ev) => {
+        if (!ev?.target?.closest?.(".studio-menubar")) closeAllStudioMenus();
+      });
     }
 
     function toggleStudioInsertMode(insertBtn) {
@@ -915,44 +943,33 @@
         chromeToggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
         chromeToggleBtn.textContent = next ? "▴" : "▾";
       });
-      for (const btn of document.querySelectorAll(".studio-menu-item[data-menu-cat]")) {
-        btn.addEventListener("click", () => handleStudioMenuClick(btn, chromeToggleBtn));
-      }
+      bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) {
         btn.addEventListener("click", () => dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd));
       }
       bindStudioTypographyControls(editor);
       for (const [id, key] of [
-        ["btn-stylebar-strike", "strike"],
-        ["btn-stylebar-charfx", "charfx"],
-        ["btn-stylebar-textcolor", "textcolor"],
-        ["btn-stylebar-highlight", "highlight"],
-        ["btn-toggle-ctrl-marks", "showCtrlMarks"],
-        ["btn-toggle-para-marks", "showParaMarks"],
+        ["btn-stylebar-strike", "strike"], ["btn-stylebar-charfx", "charfx"],
+        ["btn-stylebar-textcolor", "textcolor"], ["btn-stylebar-highlight", "highlight"],
+        ["btn-toggle-ctrl-marks", "showCtrlMarks"], ["btn-toggle-para-marks", "showParaMarks"],
       ]) {
         const btn = document.getElementById(id);
         btn?.addEventListener("click", () => toggleEditorDatasetBtn(btn, editor, key));
       }
       const alignMap = [
-        ["btn-align-left", "left", "left"],
-        ["btn-align-center", "center", "center"],
-        ["btn-align-right", "right", "right"],
-        ["btn-align-justify", "justify", "justify"],
-        ["btn-align-distribute", "distribute", "justify"],
-        ["btn-align-divide", "divide", "justify"],
+        ["btn-align-left", "left", "left"], ["btn-align-center", "center", "center"],
+        ["btn-align-right", "right", "right"], ["btn-align-justify", "justify", "justify"],
+        ["btn-align-distribute", "distribute", "justify"], ["btn-align-divide", "divide", "justify"],
       ];
       for (const [id, mode, cssAlign] of alignMap) {
-        document.getElementById(id)?.addEventListener("click", () =>
-          applyEditorAlignment(id, mode, cssAlign, editor, alignMap)
-        );
+        document.getElementById(id)?.addEventListener("click", () => applyEditorAlignment(id, mode, cssAlign, editor, alignMap));
       }
       const docGridBtn = document.getElementById("btn-toggle-doc-grid");
-      if (docGridBtn && editor) {
-        docGridBtn.addEventListener("click", () => toggleDocManuscriptGrid(docGridBtn, editor));
-      }
+      if (docGridBtn && editor) docGridBtn.addEventListener("click", () => toggleDocManuscriptGrid(docGridBtn, editor));
       const insertBtn = document.getElementById("status-insert-mode");
       insertBtn?.addEventListener("click", () => toggleStudioInsertMode(insertBtn));
       host.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") closeAllStudioMenus();
         if (ev.key === "Insert") toggleStudioInsertMode(insertBtn);
       });
       const zoomSlider = document.getElementById("status-zoom-slider");
@@ -966,20 +983,10 @@
     }
 
     return {
-      resolveSourceScopeKind,
-      buildStructuredConversionBody,
-      triggerBase64Download,
-      saveActiveModuleDocument,
-      computeSmartStats,
-      applySmartDiagnoseDom,
-      runSmartDiagnoseAction,
-      runModuleSecurityAudit,
-      fetchSecurityAuditOutcome,
-      applySecurityAuditDom,
-      runSecurityAuditAction,
-      runBenchmarkAction,
-      runPiiScrubAction,
-      setupStudioChromeControls,
+      resolveSourceScopeKind, buildStructuredConversionBody, triggerBase64Download, saveActiveModuleDocument,
+      computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
+      fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
+      runPiiScrubAction, setupStudioChromeControls,
     };
   }
 
