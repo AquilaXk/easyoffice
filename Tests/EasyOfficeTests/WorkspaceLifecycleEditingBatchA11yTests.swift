@@ -788,6 +788,7 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     try finSheet.setCell("A8", rawValue: "=INDEX(TRANSPOSE(B2:C2), 2, 1)")
     try finSheet.setCell("A9", rawValue: "=TEXTJOIN(\",\", TRUE, TRANSPOSE(B2:C3))")
     try finSheet.setCell("A10", rawValue: "=SUMIFS(B2:B3, TRANSPOSE(B2:C2), \">50\")")
+    try finSheet.setCell("A11", rawValue: "=SUM(TRANSPOSE(B:C))")
     XCTAssertEqual(finSheet.evaluate(at: "A1"), .number(480.0))
     XCTAssertEqual(finSheet.evaluate(at: "A2"), .text("42,84"))
     XCTAssertEqual(finSheet.evaluate(at: "A3"), .error("#VALUE!"))
@@ -798,5 +799,6 @@ final class WorkspaceLifecycleEditingBatchA11yTests: XCTestCase {
     XCTAssertEqual(finSheet.evaluate(at: "A8"), .number(84.0))
     XCTAssertEqual(finSheet.evaluate(at: "A9"), .text("42,10,84,20"))
     XCTAssertEqual(finSheet.evaluate(at: "A10"), .number(10.0))
+    XCTAssertEqual(finSheet.evaluate(at: "A11"), .number(156.0))
   }
 }

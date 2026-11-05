@@ -95,14 +95,20 @@ extension WorksheetModel {
         return "#REF!"
       }
 
-      if count > 4096 && !isTransposed {
-        let coords = sheet.populatedCoordinates(
+      if count > 4096 {
+        var coords = sheet.populatedCoordinates(
           onSheet: sheetName,
           minRow: minRow,
           maxRow: maxRow,
           minCol: minCol,
           maxCol: maxCol
         )
+        if isTransposed {
+          coords.sort { a, b in
+            if a.column != b.column { return a.column < b.column }
+            return a.row < b.row
+          }
+        }
         for coord in coords {
           let v =
             sheetName.map {
@@ -450,7 +456,8 @@ extension WorksheetModel {
         switch item {
         case .rangeRef, .sheetRangeRef, .missing:
           continue
-        case .functionCall(let fnName, _) where fnName == "OFFSET" || fnName == "INDIRECT":
+        case .functionCall(let fnName, _)
+        where fnName == "OFFSET" || fnName == "INDIRECT" || fnName == "TRANSPOSE":
           continue
         case .namedRangeRef(let rangeName):
           guard resolveNamedRange(rangeName) != nil else { return .error("#NAME?") }
