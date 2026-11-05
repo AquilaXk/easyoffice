@@ -615,14 +615,9 @@ struct TopDocumentTabStripView: View {
               isSelected ? palette.cardSurface.swiftUIColor : Color.clear
             )
             .overlay(alignment: .bottom) {
+              let barFill = isSecondarySplit ? EasyOfficeDesignTokens.brand400.swiftUIColor : Color.clear
               Rectangle()
-                .fill(
-                  isSelected
-                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
-                    : (isSecondarySplit
-                      ? EasyOfficeDesignTokens.brand400.swiftUIColor
-                      : Color.clear)
-                )
+                .fill(isSelected ? EasyOfficeDesignTokens.brand700.swiftUIColor : barFill)
                 .frame(height: 1.5)
             }
             .fixedSize(horizontal: true, vertical: false)

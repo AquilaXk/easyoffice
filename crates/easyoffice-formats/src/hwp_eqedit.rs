@@ -28,6 +28,19 @@ pub fn plane15_to_hwp5_symbol(cp: u32) -> Option<u16> {
     (hwp5_symbol_to_plane15(unit) == Some(cp)).then_some(unit)
 }
 
+fn decode_surrogate_pair(bytes: &[u8], cursor: usize, high: u16) -> Option<char> {
+    if !(0xD800..=0xDBFF).contains(&high) || cursor + 3 >= bytes.len() {
+        return None;
+    }
+    let low = u16::from_le_bytes([bytes[cursor + 2], bytes[cursor + 3]]);
+    if !(0xDC00..=0xDFFF).contains(&low) {
+        return None;
+    }
+    let cp = 0x10000 + ((high as u32 - 0xD800) << 10) + (low as u32 - 0xDC00);
+    let mapped = plane15_to_hwp5_symbol(cp).map_or(cp, u32::from);
+    Some(char::from_u32(mapped).unwrap_or(UNPAIRED_SURROGATE_REPLACEMENT))
+}
+
 pub fn decode_hwp5_para_text_bytes(bytes: &[u8]) -> Result<String, EasyOfficeError> {
     if bytes.len() % 2 != 0 {
         return Err(EasyOfficeError::CorruptedContainer(
@@ -40,14 +53,10 @@ pub fn decode_hwp5_para_text_bytes(bytes: &[u8]) -> Result<String, EasyOfficeErr
         let code = u16::from_le_bytes([bytes[cursor], bytes[cursor + 1]]);
         if code == 0x0009 {
             out.push('\t');
-            if cursor + 16 <= bytes.len()
+            let is_ext_tab = cursor + 16 <= bytes.len()
                 && u16::from_le_bytes([bytes[cursor + 14], bytes[cursor + 15]]) == 0x0009
-                && u16::from_le_bytes([bytes[cursor + 12], bytes[cursor + 13]]) == 0
-            {
-                cursor += 16;
-            } else {
-                cursor += 2;
-            }
+                && u16::from_le_bytes([bytes[cursor + 12], bytes[cursor + 13]]) == 0;
+            cursor += if is_ext_tab { 16 } else { 2 };
         } else if code == 0x000A {
             out.push('\n');
             cursor += 2;
@@ -65,25 +74,20 @@ pub fn decode_hwp5_para_text_bytes(bytes: &[u8]) -> Result<String, EasyOfficeErr
             }
             cursor += 16;
         } else if code < 0x0020 {
-            match code {
-                0x0012 | 0x0019 => out.push(' '),
-                0x0018 => out.push('\u{00AD}'),
-                0x001E => out.push('\u{00A0}'),
-                0x001F => out.push('\u{2007}'),
-                _ => {}
+            if let Some(ch) = match code {
+                0x0012 | 0x0019 => Some(' '),
+                0x0018 => Some('\u{00AD}'),
+                0x001E => Some('\u{00A0}'),
+                0x001F => Some('\u{2007}'),
+                _ => None,
+            } {
+                out.push(ch);
             }
             cursor += 2;
+        } else if let Some(ch) = decode_surrogate_pair(bytes, cursor, code) {
+            out.push(ch);
+            cursor += 4;
         } else {
-            if (0xD800..=0xDBFF).contains(&code) && cursor + 3 < bytes.len() {
-                let low = u16::from_le_bytes([bytes[cursor + 2], bytes[cursor + 3]]);
-                if (0xDC00..=0xDFFF).contains(&low) {
-                    let cp = 0x10000 + ((code as u32 - 0xD800) << 10) + (low as u32 - 0xDC00);
-                    let mapped = plane15_to_hwp5_symbol(cp).map_or(cp, u32::from);
-                    out.push(char::from_u32(mapped).unwrap_or(UNPAIRED_SURROGATE_REPLACEMENT));
-                    cursor += 4;
-                    continue;
-                }
-            }
             out.push(char::from_u32(code as u32).unwrap_or(UNPAIRED_SURROGATE_REPLACEMENT));
             cursor += 2;
         }
@@ -173,6 +177,25 @@ fn is_known_command(word: &str) -> bool {
         .any(|w| w.eq_ignore_ascii_case(word))
 }
 
+fn push_eqedit_word_tokens(word: String, tokens: &mut Vec<EqToken>) {
+    if is_known_command(&word) {
+        tokens.push(EqToken::Command(word));
+    } else if let Some(prefix) = FONT_PREFIXES
+        .iter()
+        .find(|&&p| word.len() > p.len() && word[..p.len()].eq_ignore_ascii_case(p))
+    {
+        tokens.push(EqToken::Command(word[..prefix.len()].to_string()));
+        let rest = &word[prefix.len()..];
+        if is_known_command(rest) {
+            tokens.push(EqToken::Command(rest.to_string()));
+        } else {
+            tokens.extend(rest.chars().map(|ch| EqToken::Text(ch.to_string())));
+        }
+    } else {
+        tokens.extend(word.chars().map(|ch| EqToken::Text(ch.to_string())));
+    }
+}
+
 fn tokenize_eqedit(input: &str) -> Result<Vec<EqToken>, EasyOfficeError> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = input.chars().collect();
@@ -238,29 +261,7 @@ fn tokenize_eqedit(input: &str) -> Result<Vec<EqToken>, EasyOfficeError> {
                 while i < len && chars[i].is_ascii_alphabetic() {
                     i += 1;
                 }
-                let word: String = chars[start..i].iter().collect();
-                if is_known_command(&word) {
-                    tokens.push(EqToken::Command(word));
-                } else if let Some(prefix) = FONT_PREFIXES
-                    .iter()
-                    .find(|&&p| word.len() > p.len() && word[..p.len()].eq_ignore_ascii_case(p))
-                {
-                    tokens.push(EqToken::Command(word[..prefix.len()].to_string()));
-                    let rest = &word[prefix.len()..];
-                    if is_known_command(rest) {
-                        tokens.push(EqToken::Command(rest.to_string()));
-                    } else {
-                        for ch in rest.chars() {
-                            tokens.push(EqToken::Text(ch.to_string()));
-                        }
-                    }
-                } else if word.len() == 1 {
-                    tokens.push(EqToken::Text(word));
-                } else {
-                    for ch in word.chars() {
-                        tokens.push(EqToken::Text(ch.to_string()));
-                    }
-                }
+                push_eqedit_word_tokens(chars[start..i].iter().collect(), &mut tokens);
             }
             c => {
                 tokens.push(EqToken::Symbol(c));
@@ -315,6 +316,21 @@ impl EqParser {
         Ok(())
     }
 
+    fn peek_infix_frac_kind(&self) -> Option<&'static str> {
+        let Some(EqToken::Command(cmd)) = self.peek() else {
+            return None;
+        };
+        if cmd.eq_ignore_ascii_case("over") {
+            Some("over")
+        } else if cmd.eq_ignore_ascii_case("choose") {
+            Some("choose")
+        } else if cmd.eq_ignore_ascii_case("atop") {
+            Some("atop")
+        } else {
+            None
+        }
+    }
+
     fn parse_expr_until(
         &mut self,
         stop_rbrace: bool,
@@ -334,43 +350,28 @@ impl EqParser {
                     "EqEdit 수식에 짝이 맞지 않는 닫는 중괄호 '}'가 포함되어 있습니다.".to_string(),
                 ));
             }
-            if stop_matrix_sep && matches!(self.peek(), Some(EqToken::Ampersand | EqToken::Newline))
+            if (stop_matrix_sep
+                && matches!(self.peek(), Some(EqToken::Ampersand | EqToken::Newline)))
+                || (stop_right
+                    && matches!(self.peek(), Some(EqToken::Command(c)) if c.eq_ignore_ascii_case("right")))
             {
                 break;
             }
-            if stop_right {
-                if let Some(EqToken::Command(cmd)) = self.peek() {
-                    if cmd.eq_ignore_ascii_case("right") {
-                        break;
-                    }
-                }
-            }
-            if let Some(EqToken::Command(cmd)) = self.peek() {
-                if cmd.eq_ignore_ascii_case("over") || cmd.eq_ignore_ascii_case("choose") {
-                    let is_choose = cmd.eq_ignore_ascii_case("choose");
-                    self.pos += 1;
-                    let num = std::mem::take(&mut items);
-                    let den =
-                        self.parse_expr_until(stop_rbrace, stop_right, stop_matrix_sep, depth + 1)?;
-                    items.push(if is_choose {
-                        EqExpr::Binom(num, den)
-                    } else {
-                        EqExpr::Frac(num, den)
-                    });
-                    continue;
-                }
-                if cmd.eq_ignore_ascii_case("atop") {
-                    self.pos += 1;
-                    let top = std::mem::take(&mut items);
-                    let bot =
-                        self.parse_expr_until(stop_rbrace, stop_right, stop_matrix_sep, depth + 1)?;
-                    items.push(EqExpr::Atop(top, bot));
-                    continue;
-                }
+            if let Some(kind) = self.peek_infix_frac_kind() {
+                self.pos += 1;
+                let num = std::mem::take(&mut items);
+                let den =
+                    self.parse_expr_until(stop_rbrace, stop_right, stop_matrix_sep, depth + 1)?;
+                let node = match kind {
+                    "choose" => EqExpr::Binom(num, den),
+                    "atop" => EqExpr::Atop(num, den),
+                    _ => EqExpr::Frac(num, den),
+                };
+                items.push(node);
+                continue;
             }
             if let Some(atom) = self.parse_atom(depth)? {
-                let expr = self.parse_postfix(atom, depth)?;
-                items.push(expr);
+                items.push(self.parse_postfix(atom, depth)?);
             }
         }
         Ok(items)
@@ -406,7 +407,7 @@ impl EqParser {
         }
         grp.extend(self.parse_group(depth)?);
         let rel_op = match self.peek() {
-            Some(EqToken::Symbol(op @ ('=' | '<' | '>'))) => Some(op.to_string()),
+            Some(EqToken::Symbol(op @ '<'..='>')) => Some(op.to_string()),
             Some(EqToken::Command(c))
                 if c.eq_ignore_ascii_case("rarrow") || c.eq_ignore_ascii_case("rightarrow") =>
             {

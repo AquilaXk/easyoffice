@@ -565,12 +565,14 @@ public struct DocumentEditorDetailPaneView: View {
     palette: WorkspaceThemePalette,
     action: @escaping () -> Void
   ) -> some View {
+    let idleFg =
+      palette.isDark
+      ? EasyOfficeDesignTokens.resolveHexColor("#E5E7EB", fallback: .white)
+      : EasyOfficeDesignTokens.resolveHexColor("#222222", fallback: .black)
     let fgColor =
       isActive
       ? EasyOfficeDesignTokens.resolveHexColor("#2563EB", fallback: .blue)
-      : (palette.isDark
-        ? EasyOfficeDesignTokens.resolveHexColor("#E5E7EB", fallback: .white)
-        : EasyOfficeDesignTokens.resolveHexColor("#222222", fallback: .black))
+      : idleFg
     let activeBg =
       palette.isDark
       ? Color.white.opacity(0.14)
@@ -609,12 +611,14 @@ public struct DocumentEditorDetailPaneView: View {
     palette: WorkspaceThemePalette,
     action: @escaping () -> Void
   ) -> some View {
+    let idleFg =
+      palette.isDark
+      ? EasyOfficeDesignTokens.resolveHexColor("#E5E7EB", fallback: .white)
+      : EasyOfficeDesignTokens.resolveHexColor("#333333", fallback: .black)
     let fgColor =
       isActive
       ? EasyOfficeDesignTokens.resolveHexColor("#2563EB", fallback: .blue)
-      : (palette.isDark
-        ? EasyOfficeDesignTokens.resolveHexColor("#E5E7EB", fallback: .white)
-        : EasyOfficeDesignTokens.resolveHexColor("#333333", fallback: .black))
+      : idleFg
     let activeBg =
       palette.isDark
       ? Color.white.opacity(0.14)

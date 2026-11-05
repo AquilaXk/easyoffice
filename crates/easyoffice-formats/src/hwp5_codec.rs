@@ -389,6 +389,31 @@ impl Hwp5Codec {
         Some((word & 0x03FF) as u16)
     }
 
+    fn append_eqedit_record(
+        slice: &[u8],
+        paragraphs: &mut Vec<Hwp5ParagraphRecord>,
+    ) -> Result<(), EasyOfficeError> {
+        let latex = crate::hwp_eqedit::decode_hwp5_eqedit_script(slice)?;
+        if latex.is_empty() {
+            return Ok(());
+        }
+        let eq = format!("[수식] ${latex}$");
+        if let Some(last) = paragraphs.last_mut() {
+            last.text = if last.text.is_empty() {
+                eq
+            } else {
+                format!("{} {eq}", last.text)
+            };
+        } else {
+            paragraphs.push(Hwp5ParagraphRecord {
+                text: eq,
+                style_name: "본문".to_string(),
+                is_official_header: false,
+            });
+        }
+        Ok(())
+    }
+
     fn parse_section_records(
         section_bytes: &[u8],
         total_records: &mut usize,
@@ -438,53 +463,31 @@ impl Hwp5Codec {
                 }
                 Self::HWPTAG_TABLE_RECORD | Self::STD_HWPTAG_TABLE => {
                     let next_tag = Self::peek_next_tag_id(section_bytes, end);
-                    if matches!(
+                    let parsed_rows = if matches!(
                         next_tag,
                         Some(Self::STD_HWPTAG_LIST_HEADER | Self::ALT_HWPTAG_LIST_HEADER)
                     ) {
                         let row_lengths = Self::extract_std_table_dims(&section_bytes[start..end])?;
                         offset = end;
-                        let parsed_rows = Self::consume_std_table_cells(
+                        Self::consume_std_table_cells(
                             section_bytes,
                             &mut offset,
                             total_records,
                             level,
                             &row_lengths,
                             total_table_cells,
-                        )?;
-                        if !parsed_rows.is_empty() {
-                            table_cells.extend(parsed_rows.iter().cloned());
-                            all_tables.push(parsed_rows);
-                        }
+                        )?
                     } else {
-                        let parsed_rows =
-                            Self::parse_table_record(section_bytes, start, end, total_table_cells)?;
-                        if !parsed_rows.is_empty() {
-                            table_cells.extend(parsed_rows.iter().cloned());
-                            all_tables.push(parsed_rows);
-                        }
                         offset = end;
+                        Self::parse_table_record(section_bytes, start, end, total_table_cells)?
+                    };
+                    if !parsed_rows.is_empty() {
+                        table_cells.extend(parsed_rows.iter().cloned());
+                        all_tables.push(parsed_rows);
                     }
                 }
                 crate::hwp_eqedit::HWPTAG_EQEDIT => {
-                    let latex =
-                        crate::hwp_eqedit::decode_hwp5_eqedit_script(&section_bytes[start..end])?;
-                    if !latex.is_empty() {
-                        let eq = format!("[수식] ${latex}$");
-                        if let Some(last) = paragraphs.last_mut() {
-                            last.text = if last.text.is_empty() {
-                                eq
-                            } else {
-                                format!("{} {eq}", last.text)
-                            };
-                        } else {
-                            paragraphs.push(Hwp5ParagraphRecord {
-                                text: eq,
-                                style_name: "본문".to_string(),
-                                is_official_header: false,
-                            });
-                        }
-                    }
+                    Self::append_eqedit_record(&section_bytes[start..end], paragraphs)?;
                     offset = end;
                 }
                 _ => offset = end,

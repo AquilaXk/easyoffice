@@ -505,47 +505,36 @@
       };
     }
 
+    function syncDatasetFlag(el, key, val) {
+      if (!el || typeof val !== "string") return;
+      if (val) el.dataset[key] = val;
+      else delete el.dataset[key];
+    }
+
     function restoreWorkspaceViewState(viewState) {
       if (!viewState) return;
       const strip = document.getElementById("ribbon-tool-strip");
       const stage = document.querySelector(".canvas-stage");
       const shell = document.getElementById("app") || document.querySelector(".app-shell");
-      if (shell && typeof viewState.chromeExpanded === "string") {
-        if (viewState.chromeExpanded) shell.dataset.chromeExpanded = viewState.chromeExpanded;
-        else delete shell.dataset.chromeExpanded;
-        const toggleBtn = document.getElementById("btn-chrome-toggle");
-        if (toggleBtn) {
-          const isExp = viewState.chromeExpanded === "true";
-          toggleBtn.setAttribute("aria-expanded", isExp ? "true" : "false");
-          toggleBtn.textContent = isExp ? "▴" : "▾";
-        }
+      syncDatasetFlag(shell, "chromeExpanded", viewState.chromeExpanded);
+      syncDatasetFlag(shell, "panelsExpanded", viewState.panelsExpanded);
+      const toggleBtn = document.getElementById("btn-chrome-toggle");
+      if (toggleBtn && typeof viewState.chromeExpanded === "string") {
+        const isExp = viewState.chromeExpanded === "true";
+        toggleBtn.setAttribute("aria-expanded", isExp ? "true" : "false");
+        toggleBtn.textContent = isExp ? "▴" : "▾";
       }
-      if (shell && typeof viewState.panelsExpanded === "string") {
-        if (viewState.panelsExpanded) shell.dataset.panelsExpanded = viewState.panelsExpanded;
-        else delete shell.dataset.panelsExpanded;
-      }
-      if (strip) {
-        strip.hidden = Boolean(viewState.ribbonStripHidden);
-      }
+      if (strip) strip.hidden = Boolean(viewState.ribbonStripHidden);
       if (stage) {
         stage.style.zoom = viewState.canvasZoom || "";
-        if (viewState.canvasSplit) {
-          stage.dataset.splitView = viewState.canvasSplit;
-        } else {
-          delete stage.dataset.splitView;
-        }
+        syncDatasetFlag(stage, "splitView", viewState.canvasSplit || "");
         syncSplitComparePane(stage);
       }
       const zoomText = viewState.canvasZoom || "100%";
       const zoomLabel = document.getElementById("status-zoom-label");
-      if (zoomLabel) {
-        zoomLabel.textContent = zoomText;
-      }
+      if (zoomLabel) zoomLabel.textContent = zoomText;
       const zoomSlider = document.getElementById("status-zoom-slider");
-      if (zoomSlider) {
-        const zoomVal = Number.parseInt(zoomText, 10) || 100;
-        zoomSlider.value = String(zoomVal);
-      }
+      if (zoomSlider) zoomSlider.value = String(Number.parseInt(zoomText, 10) || 100);
     }
 
     function renderModuleOutline(mod) {
@@ -634,6 +623,18 @@
       applyPdfStudioFormState,
     });
 
+    function syncBtnPressed(id, on) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+
+    function setElField(id, prop, val) {
+      const el = document.getElementById(id);
+      if (el) el[prop] = val;
+    }
+
     function restoreDocTabState(mod) {
       if (mod !== "DOC" && mod !== "HWP") return;
       ensureDefaultDocTabStore();
@@ -645,19 +646,13 @@
         applyDocLayoutStyle(editor, saved.layoutStyle);
       }
       const roleVal = editor?.dataset?.styleRole || (mod === "HWP" ? "공문서 바탕글" : "바탕글");
-      const roleBadge = document.getElementById("doc-style-role-badge");
-      if (roleBadge) roleBadge.textContent = roleVal;
-      const styleSelect = document.getElementById("doc-style-select");
-      if (styleSelect) styleSelect.value = roleVal;
-      const fontLang = document.getElementById("doc-font-lang");
-      if (fontLang) fontLang.value = editor?.dataset?.fontLang || "대표";
-      const fontSelect = document.getElementById("doc-font-select");
+      setElField("doc-style-role-badge", "textContent", roleVal);
+      setElField("doc-style-select", "value", roleVal);
+      setElField("doc-font-lang", "value", editor?.dataset?.fontLang || "대표");
       const fontVal = editor?.style?.fontFamily || "휴먼명조";
-      if (fontSelect) fontSelect.value = fontVal;
-      const fontBadge = document.getElementById("doc-style-font-badge");
-      if (fontBadge) fontBadge.textContent = fontVal;
-      const lsSelect = document.getElementById("doc-linespacing-select");
-      if (lsSelect) lsSelect.value = editor?.dataset?.lineSpacing || "160";
+      setElField("doc-font-select", "value", fontVal);
+      setElField("doc-style-font-badge", "textContent", fontVal);
+      setElField("doc-linespacing-select", "value", editor?.dataset?.lineSpacing || "160");
       [
         ["btn-stylebar-strike", "strike"],
         ["btn-stylebar-charfx", "charfx"],
@@ -665,53 +660,34 @@
         ["btn-stylebar-highlight", "highlight"],
         ["btn-toggle-ctrl-marks", "showCtrlMarks"],
         ["btn-toggle-para-marks", "showParaMarks"],
-      ].forEach(([id, key]) => {
-        const btn = document.getElementById(id);
-        const on = editor?.dataset?.[key] === "true";
-        if (btn) {
-          btn.classList.toggle("active", on);
-          btn.setAttribute("aria-pressed", on ? "true" : "false");
-        }
-      });
+      ].forEach(([id, key]) => syncBtnPressed(id, editor?.dataset?.[key] === "true"));
       const isGrid = Boolean(editor?.classList?.contains("manuscript-grid"));
-      const gridBtn = document.getElementById("btn-toggle-doc-grid");
-      if (gridBtn) {
-        gridBtn.classList.toggle("active", isGrid);
-        gridBtn.setAttribute("aria-pressed", isGrid ? "true" : "false");
-      }
+      syncBtnPressed("btn-toggle-doc-grid", isGrid);
       const alignMode = editor?.dataset?.textAlign || editor?.style?.textAlign || "justify";
-      ["left", "center", "right", "justify", "distribute", "divide"].forEach((m) => {
-        const b = document.getElementById("btn-align-" + m);
-        const on = m === alignMode;
-        if (b) {
-          b.classList.toggle("active", on);
-          b.setAttribute("aria-pressed", on ? "true" : "false");
-        }
-      });
-      const hwpPreview = document.getElementById("hwp-manuscript-preview");
-      if (hwpPreview) {
-        hwpPreview.classList.toggle("manuscript-grid", isGrid);
-      }
+      ["left", "center", "right", "justify", "distribute", "divide"].forEach((m) =>
+        syncBtnPressed("btn-align-" + m, m === alignMode)
+      );
+      document.getElementById("hwp-manuscript-preview")?.classList.toggle("manuscript-grid", isGrid);
       activeDocBlockEl = null;
-      const firstBlock = editor ? getFocusedDocBlock(editor) : null;
-      syncDocStyleBarFromTarget(firstBlock);
+      syncDocStyleBarFromTarget(editor ? getFocusedDocBlock(editor) : null);
       computeDocTableSummary();
       tools.computeSmartStats();
     }
 
+    const STUDIO_CONTAINER_CLASSES = [
+      "eo-hwp-header",
+      "eo-doc-toc",
+      "eo-doc-footnote",
+      "eo-process-flow",
+      "eo-criteria-panel",
+    ];
+
     function isNonParagraphStudioContainer(el) {
-      if (!el || el.nodeType !== 1) return false;
+      if (el?.nodeType !== 1) return false;
       if (isExcludedDocChromeElement(el)) return true;
       const tag = (el.tagName || "").toUpperCase();
       if (tag === "HEADER" || tag === "NAV" || tag === "ASIDE") return true;
-      return Boolean(
-        el.classList &&
-          (el.classList.contains("eo-hwp-header") ||
-            el.classList.contains("eo-doc-toc") ||
-            el.classList.contains("eo-doc-footnote") ||
-            el.classList.contains("eo-process-flow") ||
-            el.classList.contains("eo-criteria-panel"))
-      );
+      return STUDIO_CONTAINER_CLASSES.some((cls) => el.classList?.contains(cls));
     }
 
     function findEditableDocBlock(node, docEditor) {
@@ -719,14 +695,12 @@
       let cur = node.nodeType === 1 ? node : node.parentElement;
       let candidateLi = null;
       while (cur && cur !== docEditor) {
-        if (!candidateLi && (cur.tagName || "").toUpperCase() === "LI" && docEditor.contains(cur)) {
+        if (!candidateLi && (cur.tagName || "").toUpperCase() === "LI") {
           candidateLi = cur;
         }
         if (cur.parentElement === docEditor) {
-          if (candidateLi && cur.classList && cur.classList.contains("eo-criteria-panel")) {
-            return candidateLi;
-          }
-          return !isNonParagraphStudioContainer(cur) ? candidateLi || cur : null;
+          if (cur.classList?.contains("eo-criteria-panel")) return candidateLi;
+          return isNonParagraphStudioContainer(cur) ? null : candidateLi || cur;
         }
         cur = cur.parentElement;
       }

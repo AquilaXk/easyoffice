@@ -432,15 +432,20 @@ private struct EqEditParser {
         let isOver = peekKeyword("over")
         let isChoose = peekKeyword("choose")
         _ = next()
-        let lhs: EqExpr =
-          items.isEmpty ? .empty : (items.count == 1 ? items.removeFirst() : .seq(items))
+        let lhs: EqExpr
+        switch items.count {
+        case 0: lhs = .empty
+        case 1: lhs = items.removeFirst()
+        default: lhs = .seq(items)
+        }
         items.removeAll(keepingCapacity: true)
         let rhs = try parseExpr(
           depth: depth + 1,
           stopOnRight: stopOnRight,
           stopOnMatrixDelim: stopOnMatrixDelim
         )
-        return isOver ? .frac(lhs, rhs) : (isChoose ? .binom(lhs, rhs) : .atop(lhs, rhs))
+        let fallbackFrac: EqExpr = isChoose ? .binom(lhs, rhs) : .atop(lhs, rhs)
+        return isOver ? .frac(lhs, rhs) : fallbackFrac
       }
       items.append(try parseScript(depth: depth))
     }
@@ -857,7 +862,8 @@ private func emitExpr(_ expr: EqExpr, into out: inout String) {
     emitUnbraced(body, into: &out)
     out.append("}")
   case .font(let kind, let body):
-    let cmd = (kind == "rm") ? "\\mathrm" : (kind == "bold" ? "\\mathbf" : "\\mathit")
+    let nonRmCmd = (kind == "bold") ? "\\mathbf" : "\\mathit"
+    let cmd = (kind == "rm") ? "\\mathrm" : nonRmCmd
     out.append("\(cmd){")
     emitUnbraced(body, into: &out)
     out.append("}")
