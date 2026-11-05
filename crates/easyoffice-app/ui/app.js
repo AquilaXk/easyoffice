@@ -515,10 +515,12 @@
     const docEditor = document.getElementById("doc-editor");
     if (docEditor) {
       docEditor.addEventListener("click", (e) => {
+        if (activeModule !== "DOC" && activeModule !== "HWP") return;
         const addRowBtn = e.target.closest("#btn-doc-add-row");
         if (addRowBtn) {
           ribbonHistory.pushUndoSnapshot(false);
           workspacePanels.appendDocTableRow();
+          workspacePanels.saveActiveDocTabState();
           return;
         }
         const mergeBtn = e.target.closest("#btn-doc-merge-toggle");
@@ -533,11 +535,15 @@
           cells[0].colSpan = isMerged ? 1 : 2;
           cells[1].hidden = !isMerged;
           mergeBtn.textContent = isMerged ? "셀 병합 토글" : "셀 병합 해제";
+          workspacePanels.saveActiveDocTabState();
+          const fb = document.getElementById("status-command-feedback");
+          if (fb) fb.textContent = isMerged ? "문서 표 셀 분할 완료" : "문서 표 셀 합치기 완료";
           return;
         }
         const evalDocBtn = e.target.closest("#btn-doc-eval-table");
         if (evalDocBtn) {
           workspacePanels.computeDocTableSummary();
+          workspacePanels.saveActiveDocTabState();
         }
       });
     }

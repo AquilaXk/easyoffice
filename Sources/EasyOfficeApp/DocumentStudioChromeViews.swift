@@ -470,12 +470,22 @@ struct TopDocumentTabStripView: View {
   }
 
   private func topCategoryMenu(
-    _ title: String, category: RibbonCategory, menuCategory: RibbonCategory? = nil, palette: WorkspaceThemePalette, isDocStudio: Bool
+    _ title: String, category: RibbonCategory, palette: WorkspaceThemePalette, isDocStudio: Bool
   ) -> some View {
     topStudioMenu(title, palette: palette, snapshotAction: {
       viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = category
       if !isDocStudio { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
-    }) { ribbonCategoryMenuItems(menuCategory ?? category) }
+    }) { ribbonCategoryMenuItems(category) }
+  }
+
+  private func toggleWorkspaceSidePanels(isDocStudio: Bool) {
+    if isDocStudio {
+      isStudioPanelsExpanded.toggle()
+      if isStudioPanelsExpanded { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+    } else {
+      let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
+      viewModel.showLeftNavigator = nextVisible; viewModel.showRightInspector = nextVisible
+    }
   }
 
   var body: some View {
@@ -483,6 +493,9 @@ struct TopDocumentTabStripView: View {
     let isActiveTabDocumentStudio =
       viewModel.activeTab?.moduleKind == .document || viewModel.activeTab?.moduleKind == .hwp
     let isDocumentStudio = !viewModel.isShowingHomeHub && isActiveTabDocumentStudio
+    let isExpandedChevron = isDocumentStudio
+      ? isStudioPanelsExpanded
+      : (viewModel.showLeftNavigator || viewModel.showRightInspector)
     let rowBg = EasyOfficeDesignTokens.resolveHexColor(
       palette.isDark ? "#2B3037" : "#F5F5F5",
       fallback: palette.elevatedSurface.swiftUIColor
@@ -517,16 +530,15 @@ struct TopDocumentTabStripView: View {
         }) {
           ForEach(WorkspaceViewMode.allCases) { mode in Button(mode.rawValue) { viewModel.setWorkspaceViewMode(mode) } }
           Divider()
-          Button(isStudioPanelsExpanded ? "보조 패널 접기" : "보조 패널 펼치기") {
-            isStudioPanelsExpanded.toggle()
-            if isStudioPanelsExpanded { viewModel.showLeftNavigator = true; viewModel.showRightInspector = true }
+          Button(isExpandedChevron ? "보조 패널 접기" : "보조 패널 펼치기") {
+            toggleWorkspaceSidePanels(isDocStudio: isDocumentStudio)
           }
           Divider()
           ribbonCategoryMenuItems(.view)
         }
         topCategoryMenu("입력", category: .insert, palette: palette, isDocStudio: isActiveTabDocumentStudio)
-        topCategoryMenu("서식", category: .layout, palette: palette, isDocStudio: isActiveTabDocumentStudio)
-        topCategoryMenu("쪽", category: .layout, menuCategory: .moduleSpecific, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("서식", category: .home, palette: palette, isDocStudio: isActiveTabDocumentStudio)
+        topCategoryMenu("쪽", category: .layout, palette: palette, isDocStudio: isActiveTabDocumentStudio)
         topCategoryMenu("표", category: .formulasAndData, palette: palette, isDocStudio: isActiveTabDocumentStudio)
         topCategoryMenu("도구", category: .review, palette: palette, isDocStudio: isActiveTabDocumentStudio)
       }
@@ -732,22 +744,7 @@ struct TopDocumentTabStripView: View {
         }
       }
 
-      let isExpandedChevron = isDocumentStudio
-        ? isStudioPanelsExpanded
-        : (viewModel.showLeftNavigator || viewModel.showRightInspector)
-      Button {
-        if isDocumentStudio {
-          isStudioPanelsExpanded.toggle()
-          if isStudioPanelsExpanded {
-            viewModel.showLeftNavigator = true
-            viewModel.showRightInspector = true
-          }
-        } else {
-          let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
-          viewModel.showLeftNavigator = nextVisible
-          viewModel.showRightInspector = nextVisible
-        }
-      } label: {
+      Button { toggleWorkspaceSidePanels(isDocStudio: isDocumentStudio) } label: {
         Text(isExpandedChevron ? "▴" : "▾")
           .font(.system(size: 11, weight: .bold))
           .foregroundStyle(palette.secondaryText.swiftUIColor)

@@ -711,51 +711,42 @@
       computeSmartStats();
     }
 
-    function execStudioClipboardCmd(cmd, editor, blk, textTarget, fb) {
+    function execStudioClipboardCmd(cmd, editor, blk, textTarget, fb, isDocMod) {
+      if (!cmd.startsWith("clip-")) return false;
+      if (!isDocMod) return true;
       if (cmd === "clip-copy") {
         studioClipboardText = (textTarget?.textContent || "").trim();
         if (fb) fb.textContent = "선택 문단 클립보드 복사 완료 (" + studioClipboardText.length + "자)";
-        return true;
-      }
-      if (cmd === "clip-cut") {
+      } else if (cmd === "clip-cut") {
         withDocStyleUndo(() => {
           studioClipboardText = (textTarget?.textContent || "").trim();
           if (textTarget) textTarget.textContent = "";
           computeSmartStats();
         });
         if (fb) fb.textContent = "선택 문단 오려두기 완료";
-        return true;
-      }
-      if (cmd === "clip-paste") {
+      } else if (cmd === "clip-paste") {
         withDocStyleUndo(() => pasteStudioParagraph(editor, blk));
         if (fb) fb.textContent = "클립보드 문단 붙이기 완료";
-        return true;
       }
-      return false;
+      return true;
     }
 
-    function execStudioParaCmd(cmd, blk, textTarget, fb) {
+    function execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod) {
+      if (cmd !== "para-numbering" && cmd !== "para-bullet" && cmd !== "indent-in" && cmd !== "indent-out" && cmd !== "para-shape") return false;
+      if (!isDocMod) return true;
       if (cmd === "para-numbering" || cmd === "para-bullet") {
         const isNum = cmd === "para-numbering";
-        withDocStyleUndo(() => {
-          toggleBlockPrefix(textTarget, isNum ? "1. " : "○ ");
-          computeSmartStats();
-        });
+        withDocStyleUndo(() => { toggleBlockPrefix(textTarget, isNum ? "1. " : "○ "); computeSmartStats(); });
         if (fb) fb.textContent = isNum ? "문단 번호 서식 적용 완료" : "글머리표 서식 적용 완료";
-        return true;
-      }
-      if (cmd === "indent-in" || cmd === "indent-out") {
+      } else if (cmd === "indent-in" || cmd === "indent-out") {
         const isIn = cmd === "indent-in";
         withDocStyleUndo(() => shiftBlockIndent(blk, isIn ? 16 : -16));
         if (fb) fb.textContent = isIn ? "한 수준 증가 적용 완료" : "한 수준 감소 적용 완료";
-        return true;
-      }
-      if (cmd === "para-shape") {
+      } else {
         document.getElementById("btn-align-justify")?.click();
         if (fb) fb.textContent = "문단 모양 정렬 적용 완료";
-        return true;
       }
-      return false;
+      return true;
     }
 
     function upsertDocHeaderBlock(editor) {
@@ -790,10 +781,11 @@
       }
     }
 
-    function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd) {
+    function execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod) {
       const spec = INSERT_MOD_DISPATCH[cmd];
       if (!spec) return false;
-      if ((getActiveModule() === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
+      if (!isDocMod) return true;
+      if ((curMod === "HWP") === spec.hwp && typeof onStudioCmd === "function") {
         onStudioCmd(spec.target);
         return true;
       }
@@ -807,12 +799,14 @@
       if (cmd.startsWith("module:")) return void document.querySelector('.mod-btn[data-module="' + cmd.slice(7) + '"]')?.click();
       const redirectId = STUDIO_QUICK_REDIRECT[cmd];
       if (redirectId) return void document.getElementById(redirectId)?.click();
+      const curMod = getActiveModule();
+      const isDocMod = curMod === "DOC" || curMod === "HWP";
       const fb = document.getElementById("status-command-feedback");
       const blk = resolveActiveDocBlock(editor);
       const textTarget = blk?.querySelector?.(".eo-h-title") || blk;
-      if (execStudioClipboardCmd(cmd, editor, blk, textTarget, fb)) return;
-      if (execStudioParaCmd(cmd, blk, textTarget, fb)) return;
-      if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd)) return;
+      if (execStudioClipboardCmd(cmd, editor, blk, textTarget, fb, isDocMod)) return;
+      if (execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod)) return;
+      if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
 

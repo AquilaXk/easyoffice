@@ -555,6 +555,30 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.equal(docTableBody.querySelectorAll("tr").length, initialRowCount + 1);
 
+  docEditor.focus();
+  const p0 = docEditor.querySelector("p");
+  const prevP0Text = p0.textContent;
+  docEditor.dispatchEvent({ type: "beforeinput", target: p0 });
+  p0.textContent = "표 행 추가 후 본문 타이핑";
+  docEditor.dispatchEvent({ type: "input", target: p0 });
+  sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  assert.equal(docEditor.querySelector("p").textContent, prevP0Text);
+  assert.equal(
+    document.getElementById("doc-table-body").querySelectorAll("tr").length,
+    initialRowCount + 1
+  );
+
+  userClick(document.querySelector('.mod-btn[data-module="PDF"]'));
+  await flushAsyncTurns();
+  const rowCountInPdf = document.getElementById("doc-table-body").querySelectorAll("tr").length;
+  userClick(document.querySelector('[data-studio-menu-cmd="table-add-row"]'));
+  userClick(document.querySelector('[data-studio-menu-cmd="mod-footnote"]'));
+  await flushAsyncTurns();
+  assert.equal(document.getElementById("doc-table-body").querySelectorAll("tr").length, rowCountInPdf);
+
+  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  await flushAsyncTurns();
   userClick(document.querySelector('[data-studio-menu-cmd="security-audit"]'));
   await flushAsyncTurns();
   assert.match(document.getElementById("status-command-feedback").textContent, /보안|감사/);
