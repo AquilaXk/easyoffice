@@ -445,6 +445,28 @@
     if (zoomInBtn) {
       zoomInBtn.addEventListener("click", () => applyZoomStepDelta(1));
     }
+    const chromeToggleBtn = document.getElementById("btn-chrome-toggle");
+    if (chromeToggleBtn) {
+      chromeToggleBtn.addEventListener("click", () => {
+        const shell = document.getElementById("app-shell");
+        if (!shell) return;
+        const next = shell.dataset.chromeExpanded !== "true";
+        shell.dataset.chromeExpanded = next ? "true" : "false";
+        chromeToggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
+      });
+    }
+    document.querySelectorAll(".studio-menu-item[data-menu-cat]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const rBtn = document.querySelector('.ribbon-btn[data-category="' + btn.dataset.menuCat + '"]');
+        if (rBtn) rBtn.click();
+      });
+    });
+    document.querySelectorAll("#icon-toolbar [data-studio-cmd]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cmd = btn.dataset.studioCmd;
+        if (cmd) void ribbonHistory.triggerStudioRibbonCommand(cmd).catch(() => {});
+      });
+    });
     workspacePanels.setupStudioChromeControls(applyZoomPercent);
   }
 
