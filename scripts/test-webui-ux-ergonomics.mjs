@@ -533,5 +533,42 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.equal(document.getElementById("pdf-page-card").dataset.rotatedQuarter, "true");
   assert.match(document.getElementById("pdf-form-status").textContent, /회전:\s*90°/);
+
+  const appShell = document.getElementById("app");
+  assert.equal(document.getElementById("menu-bar").parentElement, appShell);
+  assert.equal(document.getElementById("icon-toolbar").parentElement, appShell);
+  assert.equal(document.getElementById("doc-style-bar").parentElement, appShell);
+
+  const editMenuBtn = document.querySelector('.studio-menu-item[data-menu-cat="home"]');
+  const editMenuWrap = editMenuBtn.parentElement;
+  userClick(editMenuBtn);
+  assert.equal(editMenuWrap.classList.contains("open"), true);
+  assert.notEqual(appShell.dataset.chromeExpanded, "true");
+  sandbox.dispatchWindowKeydown({ key: "Escape" });
+  assert.equal(editMenuWrap.classList.contains("open"), false);
+
+  userClick(document.getElementById("btn-command-palette"));
+  const paletteModal = document.getElementById("cmd-palette-modal");
+  assert.equal(paletteModal.open, true);
+  assert.equal(paletteModal.querySelector(".cp-slash")?.textContent, "/");
+  const cpItems = paletteModal.querySelectorAll("#cmd-palette-list .cp-item");
+  assert.ok(cpItems.length > 0);
+  assert.equal(cpItems[0].classList.contains("cp-item--selected"), true);
+  assert.equal(cpItems[0].querySelector(".cp-item-label")?.textContent, "저장");
+  assert.equal(cpItems[0].querySelector(".cp-item-shortcut")?.textContent, "Ctrl+S");
+
+  sandbox.dispatchWindowKeydown({ key: "ArrowDown" });
+  const cpItemsAfterDown = paletteModal.querySelectorAll("#cmd-palette-list .cp-item");
+  assert.equal(cpItemsAfterDown[0].classList.contains("cp-item--selected"), false);
+  assert.equal(cpItemsAfterDown[1].classList.contains("cp-item--selected"), true);
+
+  const cmdInput = document.getElementById("cmd-search-input");
+  cmdInput.value = "__non_existent_command_query__";
+  cmdInput.dispatchEvent({ type: "input" });
+  assert.equal(paletteModal.querySelector("#cmd-palette-list .cp-empty")?.textContent, "검색 결과 없음");
+  cmdInput.value = "";
+  cmdInput.dispatchEvent({ type: "input" });
+  sandbox.dispatchWindowKeydown({ key: "Escape" });
+  assert.equal(paletteModal.open, false);
 });
 

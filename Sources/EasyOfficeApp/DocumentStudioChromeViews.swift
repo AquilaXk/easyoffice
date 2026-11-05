@@ -479,45 +479,46 @@ struct TopDocumentTabStripView: View {
         }
         topMenuBarItem("편집", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .home
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if !isActiveTabDocumentStudio {
+            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          }
         }
         topMenuBarItem("보기", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .view
-          if isActiveTabDocumentStudio {
-            isStudioPanelsExpanded.toggle()
-            if isStudioPanelsExpanded {
-              viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
-            }
-          } else {
+          if !isActiveTabDocumentStudio {
             let nextVisible = !(viewModel.showLeftNavigator || viewModel.showRightInspector)
             viewModel.showLeftNavigator = nextVisible; viewModel.showRightInspector = nextVisible
           }
         }
         topMenuBarItem("입력", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .insert
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if !isActiveTabDocumentStudio {
+            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          }
         }
         topMenuBarItem("서식", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if !isActiveTabDocumentStudio {
+            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          }
         }
         topMenuBarItem("쪽", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .layout
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if !isActiveTabDocumentStudio {
+            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          }
         }
         topMenuBarItem("표", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .formulasAndData
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if !isActiveTabDocumentStudio {
+            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          }
         }
         topMenuBarItem("도구", palette: palette) {
           viewModel.isShowingHomeHub = false; viewModel.activeRibbonCategory = .review
-          if isActiveTabDocumentStudio { isStudioPanelsExpanded = true }
-          viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          if !isActiveTabDocumentStudio {
+            viewModel.showLeftNavigator = true; viewModel.showRightInspector = true
+          }
         }
       }
       .fixedSize(horizontal: true, vertical: false)

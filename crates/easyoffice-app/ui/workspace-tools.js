@@ -5,10 +5,11 @@
   const LS_STEPS = [100, 130, 160, 180, 200, 300];
   const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
   const STUDIO_QUICK_REDIRECT = {
-    palette: "btn-command-palette",
-    "studio-save": "qat-save",
-    "studio-undo": "qat-undo",
-    "studio-redo": "qat-redo",
+    palette: "btn-command-palette", "studio-save": "qat-save", "studio-undo": "qat-undo", "studio-redo": "qat-redo",
+    "zoom-in": "btn-zoom-in", "zoom-out": "btn-zoom-out", "zoom-fit-page": "btn-zoom-fit-page", "zoom-fit-width": "btn-zoom-fit-width",
+    "ctrl-marks": "btn-toggle-ctrl-marks", "para-marks": "btn-toggle-para-marks", "doc-grid": "btn-toggle-doc-grid",
+    "table-add-row": "btn-doc-table-add-row", "table-merge": "btn-doc-table-merge", "table-sum": "btn-doc-table-sum",
+    "smart-diagnose": "btn-smart-diagnose", "scrub-pii": "btn-scrub-pii", "security-audit": "btn-security-audit", "view-theme": "btn-theme-toggle",
   };
   const INSERT_MOD_DISPATCH = {
     "mod-symbol": { hwp: true, target: "hwp-mod-field", label: "문자표 기호 삽입 완료" },
@@ -803,6 +804,7 @@
 
     function dispatchStudioIconCmd(cmd, editor, onStudioCmd) {
       if (!cmd) return;
+      if (cmd.startsWith("module:")) return void document.querySelector('.mod-btn[data-module="' + cmd.slice(7) + '"]')?.click();
       const redirectId = STUDIO_QUICK_REDIRECT[cmd];
       if (redirectId) return void document.getElementById(redirectId)?.click();
       const fb = document.getElementById("status-command-feedback");
@@ -885,16 +887,44 @@
       });
     }
 
-    function handleStudioMenuClick(btn, chromeToggleBtn) {
-      if (btn.dataset.menuCat === "file") return void document.getElementById("qat-save")?.click();
-      const shell = document.getElementById("app") || document.querySelector(".app-shell");
-      if (shell && shell.dataset.chromeExpanded !== "true") {
-        shell.dataset.chromeExpanded = "true";
-        shell.dataset.panelsExpanded = "true";
-        chromeToggleBtn?.setAttribute("aria-expanded", "true");
-        if (chromeToggleBtn) chromeToggleBtn.textContent = "▴";
+    function closeAllStudioMenus() {
+      for (const el of document.querySelectorAll(".menu-item.open")) {
+        el.classList.remove("open");
+        delete el.dataset.openedByHover;
       }
-      document.querySelector('.ribbon-btn[data-category="' + btn.dataset.menuCat + '"]')?.click();
+    }
+
+    function bindStudioMenuBar(editor, onStudioCmd) {
+      for (const btn of document.querySelectorAll(".studio-menu-item[data-menu-cat]")) {
+        const menuItem = btn.closest?.(".menu-item") || btn.parentElement;
+        btn.addEventListener("click", (ev) => {
+          ev.stopPropagation?.();
+          if (menuItem?.dataset?.openedByHover === "true") {
+            delete menuItem.dataset.openedByHover;
+            return;
+          }
+          const wasOpen = menuItem?.classList?.contains("open");
+          closeAllStudioMenus();
+          if (menuItem && !wasOpen) menuItem.classList.add("open");
+        });
+        menuItem?.addEventListener?.("mouseenter", () => {
+          if (document.querySelector(".menu-item.open") && !menuItem.classList.contains("open")) {
+            closeAllStudioMenus();
+            menuItem.classList.add("open");
+            menuItem.dataset.openedByHover = "true";
+          }
+        });
+      }
+      for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
+        item.addEventListener("click", (ev) => {
+          ev.stopPropagation?.();
+          closeAllStudioMenus();
+          dispatchStudioIconCmd(item.dataset.studioMenuCmd, editor, onStudioCmd);
+        });
+      }
+      document.addEventListener?.("click", (ev) => {
+        if (!ev?.target?.closest?.(".studio-menubar")) closeAllStudioMenus();
+      });
     }
 
     function toggleStudioInsertMode(insertBtn) {
@@ -915,44 +945,33 @@
         chromeToggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
         chromeToggleBtn.textContent = next ? "▴" : "▾";
       });
-      for (const btn of document.querySelectorAll(".studio-menu-item[data-menu-cat]")) {
-        btn.addEventListener("click", () => handleStudioMenuClick(btn, chromeToggleBtn));
-      }
+      bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) {
         btn.addEventListener("click", () => dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd));
       }
       bindStudioTypographyControls(editor);
       for (const [id, key] of [
-        ["btn-stylebar-strike", "strike"],
-        ["btn-stylebar-charfx", "charfx"],
-        ["btn-stylebar-textcolor", "textcolor"],
-        ["btn-stylebar-highlight", "highlight"],
-        ["btn-toggle-ctrl-marks", "showCtrlMarks"],
-        ["btn-toggle-para-marks", "showParaMarks"],
+        ["btn-stylebar-strike", "strike"], ["btn-stylebar-charfx", "charfx"],
+        ["btn-stylebar-textcolor", "textcolor"], ["btn-stylebar-highlight", "highlight"],
+        ["btn-toggle-ctrl-marks", "showCtrlMarks"], ["btn-toggle-para-marks", "showParaMarks"],
       ]) {
         const btn = document.getElementById(id);
         btn?.addEventListener("click", () => toggleEditorDatasetBtn(btn, editor, key));
       }
       const alignMap = [
-        ["btn-align-left", "left", "left"],
-        ["btn-align-center", "center", "center"],
-        ["btn-align-right", "right", "right"],
-        ["btn-align-justify", "justify", "justify"],
-        ["btn-align-distribute", "distribute", "justify"],
-        ["btn-align-divide", "divide", "justify"],
+        ["btn-align-left", "left", "left"], ["btn-align-center", "center", "center"],
+        ["btn-align-right", "right", "right"], ["btn-align-justify", "justify", "justify"],
+        ["btn-align-distribute", "distribute", "justify"], ["btn-align-divide", "divide", "justify"],
       ];
       for (const [id, mode, cssAlign] of alignMap) {
-        document.getElementById(id)?.addEventListener("click", () =>
-          applyEditorAlignment(id, mode, cssAlign, editor, alignMap)
-        );
+        document.getElementById(id)?.addEventListener("click", () => applyEditorAlignment(id, mode, cssAlign, editor, alignMap));
       }
       const docGridBtn = document.getElementById("btn-toggle-doc-grid");
-      if (docGridBtn && editor) {
-        docGridBtn.addEventListener("click", () => toggleDocManuscriptGrid(docGridBtn, editor));
-      }
+      if (docGridBtn && editor) docGridBtn.addEventListener("click", () => toggleDocManuscriptGrid(docGridBtn, editor));
       const insertBtn = document.getElementById("status-insert-mode");
       insertBtn?.addEventListener("click", () => toggleStudioInsertMode(insertBtn));
       host.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") closeAllStudioMenus();
         if (ev.key === "Insert") toggleStudioInsertMode(insertBtn);
       });
       const zoomSlider = document.getElementById("status-zoom-slider");
@@ -966,20 +985,10 @@
     }
 
     return {
-      resolveSourceScopeKind,
-      buildStructuredConversionBody,
-      triggerBase64Download,
-      saveActiveModuleDocument,
-      computeSmartStats,
-      applySmartDiagnoseDom,
-      runSmartDiagnoseAction,
-      runModuleSecurityAudit,
-      fetchSecurityAuditOutcome,
-      applySecurityAuditDom,
-      runSecurityAuditAction,
-      runBenchmarkAction,
-      runPiiScrubAction,
-      setupStudioChromeControls,
+      resolveSourceScopeKind, buildStructuredConversionBody, triggerBase64Download, saveActiveModuleDocument,
+      computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
+      fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
+      runPiiScrubAction, setupStudioChromeControls,
     };
   }
 
