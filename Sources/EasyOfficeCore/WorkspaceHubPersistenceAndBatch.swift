@@ -374,12 +374,8 @@ extension WorkspaceViewModel {
     let decoded = try decodeDocumentPayload(data: data, fileName: fileName)
     let isNativeOrigin: Bool
     if let fileURL {
-      isNativeOrigin = knownEasyOfficeSavedFilePaths.contains(fileURL.standardizedFileURL.path)
-    } else {
-      isNativeOrigin = true
-    }
-    if let fileURL {
       let standardizedTarget = fileURL.standardizedFileURL.path
+      isNativeOrigin = knownEasyOfficeSavedFilePaths.contains(standardizedTarget)
       if let existingIdx = openTabs.firstIndex(where: {
         $0.fileURL?.standardizedFileURL.path == standardizedTarget
       }) {
@@ -402,6 +398,8 @@ extension WorkspaceViewModel {
         recordRecentDocument(updatedTab)
         return updatedTab
       }
+    } else {
+      isNativeOrigin = true
     }
     let newTab = WorkspaceTabItem(
       fileName: fileName, format: decoded.format,

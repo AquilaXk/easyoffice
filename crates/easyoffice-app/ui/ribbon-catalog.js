@@ -357,15 +357,15 @@
     const text = String(rawShortcut || "");
     if (!text || shortcutModifier !== "Ctrl") return text;
     return text
-      .replace(/⌃⌘/g, "Ctrl+Alt+")
+      .replaceAll("⌃⌘", "Ctrl+Alt+")
       .replace(/\bCtrl\+Cmd\+/g, "Ctrl+Alt+")
-      .replace(/⌘/g, "Ctrl+")
-      .replace(/⌃/g, "Ctrl+")
-      .replace(/⌥/g, "Alt+")
-      .replace(/⇧/g, "Shift+")
+      .replaceAll("⌘", "Ctrl+")
+      .replaceAll("⌃", "Ctrl+")
+      .replaceAll("⌥", "Alt+")
+      .replaceAll("⇧", "Shift+")
       .replace(/\bCmd\+/g, "Ctrl+")
       .replace(/\bOption\+/g, "Alt+")
-      .replace(/Ctrl\+Ctrl\+/g, "Ctrl+");
+      .replaceAll("Ctrl+Ctrl+", "Ctrl+");
   }
 
   host.__EASYOFFICE_RIBBON_CATALOG__ = {

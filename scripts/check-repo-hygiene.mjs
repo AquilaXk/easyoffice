@@ -434,8 +434,8 @@ if (
     const rustFnNames = rustFnMatch
       ? (rustFnMatch[1].match(/"[A-Z0-9]+"/g) || []).map((s) => s.replaceAll('"', ""))
       : [];
-    const swiftSorted = [...swiftFnNames].sort().join(",");
-    const rustSorted = [...rustFnNames].sort().join(",");
+    const swiftSorted = [...swiftFnNames].sort((a, b) => a.localeCompare(b)).join(",");
+    const rustSorted = [...rustFnNames].sort((a, b) => a.localeCompare(b)).join(",");
     if (swiftSorted !== rustSorted) {
       errors.push(
         "Swift supportedFunctionNames in SheetEngine.swift and Rust CANONICAL_122_FUNCTIONS in functions.rs do not match 1:1"

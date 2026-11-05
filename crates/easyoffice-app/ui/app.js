@@ -307,6 +307,16 @@
       });
   }
 
+  function syncQatShortcutTitles(modifier) {
+    if (modifier !== "Ctrl") return;
+    const qatSave = document.getElementById("qat-save");
+    const qatUndo = document.getElementById("qat-undo");
+    const qatRedo = document.getElementById("qat-redo");
+    if (qatSave) qatSave.title = "저장 (Ctrl+S)";
+    if (qatUndo) qatUndo.title = "실행 취소 (Ctrl+Z)";
+    if (qatRedo) qatRedo.title = "다시 실행 (Ctrl+Y)";
+  }
+
   function setupTabsAndRibbonChrome(boot) {
     activeShortcutModifier = boot.shortcutModifier || "⌘";
     const pill = document.getElementById("platform-pill");
@@ -316,14 +326,7 @@
       hint.textContent =
         activeShortcutModifier === "⌘" ? "⌘K" : activeShortcutModifier + "+K";
     }
-    if (activeShortcutModifier === "Ctrl") {
-      const qatSave = document.getElementById("qat-save");
-      const qatUndo = document.getElementById("qat-undo");
-      const qatRedo = document.getElementById("qat-redo");
-      if (qatSave) qatSave.title = "저장 (Ctrl+S)";
-      if (qatUndo) qatUndo.title = "실행 취소 (Ctrl+Z)";
-      if (qatRedo) qatRedo.title = "다시 실행 (Ctrl+Y)";
-    }
+    syncQatShortcutTitles(activeShortcutModifier);
 
     if (boot.moduleAccents && typeof boot.moduleAccents === "object") {
       const rootStyle = document.documentElement.style;
@@ -876,49 +879,38 @@
 
     host.addEventListener("keydown", (e) => {
       if (e.isComposing || isImeComposing) return;
+      if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
+        modal.close();
+        return;
+      }
+      if (!e.metaKey && !e.ctrlKey) return;
       const keyLower = e.key.toLowerCase();
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "k") {
+      const modPrefix = getRibbonModulePrefix(activeModule);
+      if (e.altKey && !e.shiftKey && keyLower === "d") {
         e.preventDefault();
-        togglePaletteModal(modal, cmdSearchInput);
-      } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "s") {
-        e.preventDefault();
-        void workspacePanels.saveActiveModuleDocument().catch(() => {});
-      } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "z") {
-        e.preventDefault();
-        void ribbonHistory.performWorkspaceUndo().catch(() => {});
-      } else if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.altKey &&
-        ((!e.shiftKey && keyLower === "y") || (e.shiftKey && keyLower === "z"))
-      ) {
+        void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-theme").catch(() => {});
+        return;
+      }
+      if (e.altKey) return;
+      if (e.shiftKey && keyLower === "z") {
         e.preventDefault();
         void ribbonHistory.performWorkspaceRedo().catch(() => {});
-      } else if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey && keyLower === "d") {
+        return;
+      }
+      if (e.shiftKey) return;
+      const plainHandlers = {
+        k: () => togglePaletteModal(modal, cmdSearchInput),
+        s: () => void workspacePanels.saveActiveModuleDocument().catch(() => {}),
+        z: () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
+        y: () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
+        0: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-view-zoom").catch(() => {}),
+        b: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-bold").catch(() => {}),
+        i: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-italic").catch(() => {}),
+        u: () => void ribbonHistory.executeTrackedRibbonCommand(modPrefix + "-home-underline").catch(() => {}),
+      };
+      if (plainHandlers[keyLower]) {
         e.preventDefault();
-        const modPrefix = getRibbonModulePrefix(activeModule);
-        void ribbonHistory
-          .executeTrackedRibbonCommand(modPrefix + "-view-theme")
-          .catch(() => {});
-      } else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === "0") {
-        e.preventDefault();
-        const modPrefix = getRibbonModulePrefix(activeModule);
-        void ribbonHistory
-          .executeTrackedRibbonCommand(modPrefix + "-view-zoom")
-          .catch(() => {});
-      } else if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.altKey &&
-        !e.shiftKey &&
-        (keyLower === "b" || keyLower === "i" || keyLower === "u")
-      ) {
-        e.preventDefault();
-        const modPrefix = getRibbonModulePrefix(activeModule);
-        const cmdMap = { b: "bold", i: "italic", u: "underline" };
-        void ribbonHistory
-          .executeTrackedRibbonCommand(modPrefix + "-home-" + cmdMap[keyLower])
-          .catch(() => {});
-      } else if (e.key === "Escape" && modal?.open && typeof modal.close === "function") {
-        modal.close();
+        plainHandlers[keyLower]();
       }
     });
   }
