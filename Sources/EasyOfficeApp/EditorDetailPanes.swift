@@ -793,7 +793,7 @@ public struct DocumentEditorDetailPaneView: View {
         .fixedSize(horizontal: true, vertical: false)
         .foregroundStyle(
           isProminent
-            ? EasyOfficeDesignTokens.brand700.swiftUIColor
+            ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
             : palette.primaryText.swiftUIColor
         )
         .padding(.horizontal, 4)
@@ -1340,7 +1340,7 @@ public struct DocumentEditorDetailPaneView: View {
                                 .lineLimit(1)
                                 .foregroundStyle(
                                   viewModel.selectedParagraphID == entry.paragraphID
-                                    ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                                    ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
                                     : palette.secondaryText.swiftUIColor
                                 )
                               }
@@ -1920,7 +1920,7 @@ public struct DocumentEditorDetailPaneView: View {
             .font(.system(size: 9, weight: .bold, design: .monospaced))
             .foregroundStyle(
               isHeading
-                ? EasyOfficeDesignTokens.brand700.swiftUIColor
+                ? EasyOfficeDesignTokens.brandAccentToken(isDark: palette.isDark).swiftUIColor
                 : palette.secondaryText.swiftUIColor
             )
 
