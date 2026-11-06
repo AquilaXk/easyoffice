@@ -331,6 +331,20 @@ impl RibbonCommandRouter {
         catalog
     }
 
+    /// Resolves the owning office module of a catalog command ID (e.g. `sheet-home-italic` → Sheet).
+    pub fn module_for_command(command_id: &str) -> Result<OfficeModuleKind, EasyOfficeError> {
+        let trimmed = command_id.trim();
+        Self::all_commands()
+            .iter()
+            .find(|c| c.id == trimmed)
+            .map(|c| c.module)
+            .ok_or_else(|| {
+                EasyOfficeError::InvalidArgument(format!(
+                    "등록되지 않은 리본 명령 ID입니다: {trimmed}"
+                ))
+            })
+    }
+
     /// Executes any of the 140 catalog commands deterministically against `RibbonWorkspaceState`.
     pub fn execute_command(
         command_id: &str,

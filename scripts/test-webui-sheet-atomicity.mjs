@@ -362,7 +362,7 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
       }
       if (command === "execute_ribbon_command") {
         executeRibbonCalls += 1;
-        const cmdId = String(args.payload || "");
+        const cmdId = String(JSON.parse(args.payload).commandId || "");
         const prevBold = backendIsBold;
         if (cmdId.endsWith("-home-bold")) {
           backendIsBold = !backendIsBold;
@@ -746,7 +746,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
         });
       }
       if (command === "execute_ribbon_command") {
-        const cmdId = String(args.payload || "");
+        const cmdId = String(JSON.parse(args.payload).commandId || "");
         rustUndo.push(JSON.parse(JSON.stringify(rustState)));
         rustRedo.length = 0;
         rustState.executedCount += 1;

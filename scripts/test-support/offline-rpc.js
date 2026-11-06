@@ -260,7 +260,7 @@
       localRibbonState,
     } = ctx;
 
-    const backendState = Object.assign(
+    const backendBaseState = Object.assign(
       {
         activeModule: "DOC",
         ribbonStyle: "standard",
@@ -311,9 +311,98 @@
       },
       JSON.parse(JSON.stringify(localRibbonState || {}))
     );
-    const backendUndoStack = [];
-    const backendRedoStack = [];
     const MAX_BACKEND_HISTORY = 64;
+    // Mirrors crates/easyoffice-app/src/ribbon_session.rs: ribbon state and undo/redo stacks are
+    // kept per client session (`sessionId`, missing → "default") and per module within a session.
+    const DEFAULT_RIBBON_SESSION_ID = "default";
+    const MAX_RIBBON_SESSIONS = 32;
+    const RIBBON_MODULE_KEYS = ["DOC", "HWP", "SHEET", "SLIDE", "PDF"];
+    const ribbonSessions = new Map();
+
+    function normalizeRibbonModuleKey(raw) {
+      const key = String(raw || "").trim().toUpperCase();
+      if (key === "CONV" || key === "DOCUMENT") return "DOC";
+      if (RIBBON_MODULE_KEYS.includes(key)) return key;
+      throw new Error("InvalidArgument: 지원하지 않는 리본 모듈입니다: " + key);
+    }
+
+    function normalizeRibbonSessionId(raw) {
+      if (raw !== undefined && raw !== null && typeof raw !== "string") {
+        throw new Error("InvalidArgument: JSON 'sessionId' 필드는 문자열이어야 합니다.");
+      }
+      const sid = String(raw || "").trim();
+      if (!sid) return DEFAULT_RIBBON_SESSION_ID;
+      if (sid.length > 64 || !/^[A-Za-z0-9_-]+$/.test(sid)) {
+        throw new Error("InvalidArgument: 리본 세션 식별자 형식이 올바르지 않습니다.");
+      }
+      return sid;
+    }
+
+    function ribbonSession(sessionId) {
+      let session = ribbonSessions.get(sessionId);
+      if (session) {
+        ribbonSessions.delete(sessionId);
+      } else {
+        if (ribbonSessions.size >= MAX_RIBBON_SESSIONS) {
+          ribbonSessions.delete(ribbonSessions.keys().next().value);
+        }
+        session = {
+          ribbonStyle: backendBaseState.ribbonStyle || "standard",
+          lastModule: "DOC",
+          slots: {},
+        };
+      }
+      ribbonSessions.set(sessionId, session);
+      return session;
+    }
+
+    function ribbonSlot(session, mod) {
+      if (!session.slots[mod]) {
+        session.slots[mod] = {
+          state: { ...JSON.parse(JSON.stringify(backendBaseState)), activeModule: mod },
+          undo: [],
+          redo: [],
+        };
+      }
+      session.slots[mod].state.ribbonStyle = session.ribbonStyle;
+      return session.slots[mod];
+    }
+
+    function ribbonStateResponse(slot, extra) {
+      return {
+        ...extra,
+        catalogCount: 140,
+        ...JSON.parse(JSON.stringify(slot.state)),
+        canUndo: slot.undo.length > 0,
+        canRedo: slot.redo.length > 0,
+      };
+    }
+
+    function parseRibbonPayloadFields(payload) {
+      const raw = String(payload || "").trim();
+      return raw.startsWith("{") ? parseRequiredRpcJsonObject(raw) : null;
+    }
+
+    function localRibbonHistoryStep(payload, isUndo) {
+      const raw = String(payload || "").trim();
+      const parsed = parseRibbonPayloadFields(raw);
+      const session = ribbonSession(normalizeRibbonSessionId(parsed ? parsed.sessionId : ""));
+      const moduleRaw = parsed ? parsed.module : raw;
+      const mod = moduleRaw ? normalizeRibbonModuleKey(moduleRaw) : session.lastModule;
+      const slot = ribbonSlot(session, mod);
+      const from = isUndo ? slot.undo : slot.redo;
+      const to = isUndo ? slot.redo : slot.undo;
+      if (from.length > 0) {
+        if (to.length >= MAX_BACKEND_HISTORY) to.shift();
+        to.push(JSON.parse(JSON.stringify(slot.state)));
+        slot.state = from.pop();
+        slot.state.ribbonStyle = session.ribbonStyle;
+      }
+      return ribbonStateResponse(slot, {
+        commandId: isUndo ? "undo" : "redo",
+        summary: isUndo ? "실행 취소 완료" : "다시 실행 완료",
+      });
+    }
 
     function inferCommandModuleKey(cmdId) {
       if (cmdId.startsWith("hwp-")) return "HWP";
@@ -456,18 +545,21 @@
 
     function localExecuteRibbonCommand(payload) {
       let cmdId = String(payload || "").trim();
-      if (cmdId.startsWith("{")) {
-        const parsed = parseRequiredRpcJsonObject(cmdId);
+      const parsed = parseRibbonPayloadFields(cmdId);
+      if (parsed) {
         cmdId = String(parsed.commandId || parsed.id || "").trim();
       }
-      const prevSnap = JSON.parse(JSON.stringify(backendState));
-      if (backendUndoStack.length >= MAX_BACKEND_HISTORY) {
-        backendUndoStack.shift();
+      const session = ribbonSession(normalizeRibbonSessionId(parsed ? parsed.sessionId : ""));
+      const mod = normalizeRibbonModuleKey(inferCommandModuleKey(cmdId));
+      session.lastModule = mod;
+      const slot = ribbonSlot(session, mod);
+      const backendState = slot.state;
+      if (slot.undo.length >= MAX_BACKEND_HISTORY) {
+        slot.undo.shift();
       }
-      backendUndoStack.push(prevSnap);
-      backendRedoStack.length = 0;
+      slot.undo.push(JSON.parse(JSON.stringify(backendState)));
+      slot.redo.length = 0;
 
-      const mod = inferCommandModuleKey(cmdId);
       backendState.activeModule = mod;
       backendState.executedCount += 1;
       const exactFn = RIBBON_EXACT_MUTATORS[cmdId];
@@ -477,15 +569,11 @@
         const suffixPair = RIBBON_SUFFIX_MUTATORS.find(([sfx]) => cmdId.endsWith(sfx));
         if (suffixPair) suffixPair[1](backendState);
       }
-      return {
+      return ribbonStateResponse(slot, {
         commandId: cmdId,
         summary: "명령 실행 완료 (" + cmdId + ")",
         contextualBadge: contextualToolBadges[mod] || "표·개체 도구",
-        catalogCount: 140,
-        ...JSON.parse(JSON.stringify(backendState)),
-        canUndo: backendUndoStack.length > 0,
-        canRedo: backendRedoStack.length > 0,
-      };
+      });
     }
 
     return {
@@ -613,56 +701,21 @@
       audit_security: (payload) => localAuditSecurity(payload),
       switch_ribbon_style: (payload) => {
         let styleVal = String(payload || "");
-        if (styleVal.trimStart().startsWith("{")) {
-          const parsed = parseRequiredRpcJsonObject(styleVal);
+        const parsed = parseRibbonPayloadFields(styleVal);
+        if (parsed) {
           styleVal = String(parsed.style || "");
         }
         const isHangul = styleVal.includes("hangul");
-        backendState.ribbonStyle = isHangul ? "hangul" : "standard";
+        const session = ribbonSession(normalizeRibbonSessionId(parsed ? parsed.sessionId : ""));
+        session.ribbonStyle = isHangul ? "hangul" : "standard";
         return {
           style: isHangul ? "한글(HWP) 7탭 모드" : "표준 오피스 7탭 모드",
           categories: isHangul ? ribbonStyleLabels.hangul : ribbonStyleLabels.standard,
         };
       },
       execute_ribbon_command: (payload) => localExecuteRibbonCommand(payload),
-      undo_ribbon_command: () => {
-        if (backendUndoStack.length > 0) {
-          const cur = JSON.parse(JSON.stringify(backendState));
-          if (backendRedoStack.length >= MAX_BACKEND_HISTORY) {
-            backendRedoStack.shift();
-          }
-          backendRedoStack.push(cur);
-          const prev = backendUndoStack.pop();
-          Object.assign(backendState, prev);
-        }
-        return {
-          commandId: "undo",
-          summary: "실행 취소 완료",
-          catalogCount: 140,
-          ...JSON.parse(JSON.stringify(backendState)),
-          canUndo: backendUndoStack.length > 0,
-          canRedo: backendRedoStack.length > 0,
-        };
-      },
-      redo_ribbon_command: () => {
-        if (backendRedoStack.length > 0) {
-          const cur = JSON.parse(JSON.stringify(backendState));
-          if (backendUndoStack.length >= MAX_BACKEND_HISTORY) {
-            backendUndoStack.shift();
-          }
-          backendUndoStack.push(cur);
-          const next = backendRedoStack.pop();
-          Object.assign(backendState, next);
-        }
-        return {
-          commandId: "redo",
-          summary: "다시 실행 완료",
-          catalogCount: 140,
-          ...JSON.parse(JSON.stringify(backendState)),
-          canUndo: backendUndoStack.length > 0,
-          canRedo: backendRedoStack.length > 0,
-        };
-      },
+      undo_ribbon_command: (payload) => localRibbonHistoryStep(payload, true),
+      redo_ribbon_command: (payload) => localRibbonHistoryStep(payload, false),
     };
   }
 
