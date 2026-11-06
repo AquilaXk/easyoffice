@@ -422,7 +422,7 @@ impl OoxmlCodec {
             }
         }
 
-        ZipArchiveCodec::pack(&entries)
+        ZipArchiveCodec::pack_compressed(&entries)
     }
 
     pub fn unpack_pptx(bytes: &[u8]) -> Result<OoxmlPptxPayload, EasyOfficeError> {
