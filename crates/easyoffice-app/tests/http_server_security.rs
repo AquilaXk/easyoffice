@@ -197,3 +197,126 @@ fn test_http_slowloris_overflow_and_deadline_eviction_preserve_fast_get() {
     stop.store(true, Ordering::Release);
     server_handle.join().expect("join server thread");
 }
+
+fn start_server() -> (u16, Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+    let port = listener.local_addr().unwrap().port();
+    let stop = Arc::new(AtomicBool::new(false));
+    let server_stop = Arc::clone(&stop);
+    let handle = thread::spawn(move || serve_http_on_listener(listener, server_stop));
+    (port, stop, handle)
+}
+
+fn get(port: u16, path: &str) -> Vec<u8> {
+    let raw = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream.write_all(raw.as_bytes()).unwrap();
+    let mut out = Vec::new();
+    let _ = stream.read_to_end(&mut out);
+    out
+}
+
+fn split_response(raw: &[u8]) -> (String, Vec<u8>) {
+    let end = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("header end")
+        + 4;
+    (
+        String::from_utf8_lossy(&raw[..end]).into_owned(),
+        raw[end..].to_vec(),
+    )
+}
+
+#[test]
+fn test_bundle_routes_never_leave_the_bundle_directory() {
+    let (port, stop, handle) = start_server();
+    for path in [
+        "/hwp-studio/../Cargo.toml",
+        "/hwp-studio/%2e%2e/Cargo.toml",
+        "/hwp-studio/%2e%2e%2f%2e%2e%2fCargo.toml",
+        "/hwp-studio/..%5cCargo.toml",
+        "/hwp-studio/assets/../../ui/index.html",
+        "/hwp-studio/C:/Windows/win.ini",
+        "/hwp-studio/nope.js",
+    ] {
+        let (head, body) = split_response(&get(port, path));
+        assert!(
+            head.starts_with("HTTP/1.1 404 Not Found\r\n"),
+            "{path}: {head}"
+        );
+        assert!(
+            !String::from_utf8_lossy(&body).contains("[package]"),
+            "{path} leaked a file outside the bundle"
+        );
+    }
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_bundle_files_are_binary_exact_with_mime_and_iframe_csp() {
+    let bundle = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/hwp-studio");
+    if !bundle.join("index.html").is_file() {
+        eprintln!("hwp-studio bundle not built; skipping the bundle-serving assertions");
+        return;
+    }
+    let (port, stop, handle) = start_server();
+    let (head, body) = split_response(&get(port, "/hwp-studio/index.html?x=1"));
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+    assert!(head.contains("Content-Type: text/html; charset=utf-8\r\n"));
+    assert!(head.contains("Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'\r\n"));
+    assert_eq!(body, std::fs::read(bundle.join("index.html")).unwrap());
+
+    let wasm = std::fs::read_dir(bundle.join("assets"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().ends_with(".wasm"))
+        .expect("bundle has a wasm module");
+    let (head, body) = split_response(&get(
+        port,
+        &format!("/hwp-studio/assets/{}", wasm.file_name().to_string_lossy()),
+    ));
+    assert!(
+        head.contains("Content-Type: application/wasm\r\n"),
+        "{head}"
+    );
+    assert_eq!(&body[..4], b"\0asm");
+    assert_eq!(
+        body,
+        std::fs::read(wasm.path()).unwrap(),
+        "binary body must be byte exact"
+    );
+
+    let font = std::fs::read_dir(bundle.join("fonts"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().ends_with(".woff2"))
+        .expect("bundle has a font");
+    let (head, _) = split_response(&get(
+        port,
+        &format!("/hwp-studio/fonts/{}", font.file_name().to_string_lossy()),
+    ));
+    assert!(head.contains("Content-Type: font/woff2\r\n"), "{head}");
+
+    let (head, _) = split_response(&get(port, "/"));
+    assert!(
+        head.contains("Content-Security-Policy: default-src 'self'\r\n"),
+        "main page keeps its CSP: {head}"
+    );
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}
+
+#[test]
+fn test_main_page_loads_the_hwp_host_script() {
+    let (port, stop, handle) = start_server();
+    let (head, body) = split_response(&get(port, "/hwp-host.js"));
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(String::from_utf8_lossy(&body).contains("__EASYOFFICE_CREATE_HWP_HOST__"));
+    stop.store(true, Ordering::Release);
+    handle.join().unwrap();
+}

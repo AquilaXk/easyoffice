@@ -17,6 +17,7 @@ mod convert_open;
 mod convert_structured;
 pub mod ffi;
 pub mod http_server;
+pub mod hwp_bundle;
 mod pii_identifiers;
 pub mod ribbon;
 mod ribbon_session;

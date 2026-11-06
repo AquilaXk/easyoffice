@@ -328,6 +328,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let slide_studio_asset = include_str!("../ui/slide-studio.js");
     let doc_runs_asset = include_str!("../ui/doc-runs.js");
     let doc_runs_ui_asset = include_str!("../ui/doc-runs-ui.js");
+    let hwp_host_asset = include_str!("../ui/hwp-host.js");
     let js_asset = include_str!("../ui/app.js");
     if !html_asset.contains("EasyOffice")
         || !css_asset.contains("#5C6BC0")
@@ -350,11 +351,18 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !slide_studio_asset.contains("__EASYOFFICE_CREATE_SLIDE_STUDIO__")
         || !doc_runs_asset.contains("__EASYOFFICE_DOC_RUNS__")
         || !doc_runs_ui_asset.contains("__EASYOFFICE_CREATE_DOC_RUNS_UI__")
+        || !hwp_host_asset.contains("__EASYOFFICE_CREATE_HWP_HOST__")
+        || !html_asset.contains("id=\"pane-hwp\"")
+        || !html_asset.contains("./hwp-host.js")
         || !js_asset.contains("compositionstart")
     {
         return Err(EasyOfficeError::CorruptedContainer(
             "내장 WebUI 자산 무결성 검증 실패".to_string(),
         ));
+    }
+
+    if let Some(reason) = crate::hwp_bundle::embedded_integrity_error() {
+        return Err(EasyOfficeError::CorruptedContainer(reason));
     }
 
     let mut bench_report = run_deterministic_benchmarks(5);
