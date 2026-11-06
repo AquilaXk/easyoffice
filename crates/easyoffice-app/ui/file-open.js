@@ -61,6 +61,12 @@
         if (idx > 0) out.push(elSpec("br"));
         if (!line) return;
         let spec = textSpec(line);
+        const runs = host.__EASYOFFICE_DOC_RUNS__;
+        const fmt = runs ? runs.fromModelRun(run) : {};
+        if (fmt.size || fmt.font || fmt.color || fmt.highlight) {
+          out.push(runs.buildRunSpec(fmt, [spec]));
+          return;
+        }
         [["strike", "s"], ["underline", "u"], ["italic", "em"], ["bold", "strong"]].forEach(([flag, tag]) => {
           if (run[flag] === true) spec = elSpec(tag, [spec]);
         });

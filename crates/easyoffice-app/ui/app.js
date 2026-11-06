@@ -48,8 +48,8 @@
   };
 
   const sheetRowCounts = {};
-
   let workspaceSession = null;
+  let docRunsUi = null;
 
   function chainWorkspaceQueue(opFn) {
     const run = workspaceHistoryQueue.then(opFn, opFn);
@@ -177,7 +177,7 @@
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
-    getWorkspacePanels: () => workspacePanels,
+    getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi,
     getActiveModule: () => activeModule,
     setActiveModule: (next) => { activeModule = next; },
     getActiveRibbonCategory: () => activeRibbonCategory,
@@ -191,6 +191,12 @@
     getShortcutModifier: () => activeShortcutModifier,
     enqueueWorkspaceHistoryOp,
     onModuleApplied: (mod) => workspaceSession?.applyModuleContext(mod),
+  });
+
+  docRunsUi = host.__EASYOFFICE_CREATE_DOC_RUNS_UI__({
+    document, getActiveModule: () => activeModule, saveDocState: () => workspacePanels.saveActiveDocTabState(),
+    captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
+    commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
   });
 
   sheetController = host.__EASYOFFICE_CREATE_SHEET_CONTROLLER__({
@@ -209,7 +215,7 @@
 
   workspacePanels = host.__EASYOFFICE_CREATE_WORKSPACE_PANELS__({
     document, URL, invokeIpc, docTabStore, sheetDataStore, slideDeckState, localRibbonState,
-    defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
+    getDocRuns: () => docRunsUi, defaultHwpEditorNodes: DEFAULT_HWP_EDITOR_NODES, createEmptySlideStyleFields,
     parseCellRefParts, isExcludedDocChromeElement, extractEditableDocumentText,
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
@@ -901,6 +907,7 @@
     setupStaticNavigationHandlers();
     setupQatAndRibbonActions();
     setupDocTableAndSheetTabHandlers();
+    docRunsUi.bind();
     setupSheetAndConverterHandlers();
     setupSlideAndPdfHandlers();
     setupSmartAndSecurityHandlers();

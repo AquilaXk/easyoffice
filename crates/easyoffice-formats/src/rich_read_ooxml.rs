@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use crate::office_codecs::validate_zip_xml_entries;
+use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
 use crate::rich_xml::{
     attr, heading_level_from_name, push_run, skip_subtree, toggle_on, tokenize, CharFmt, XmlEvent,
 };
@@ -253,6 +254,28 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
                         "w:i" => fmt.italic = toggle_on(attr(attrs, "w:val")),
                         "w:strike" | "w:dstrike" => fmt.strike = toggle_on(attr(attrs, "w:val")),
                         "w:u" => fmt.underline = toggle_on(attr(attrs, "w:val")),
+                        "w:rFonts" => {
+                            fmt.font = ["w:ascii", "w:hAnsi", "w:eastAsia"]
+                                .iter()
+                                .find_map(|k| attr(attrs, k))
+                                .filter(|f| !f.trim().is_empty())
+                                .map(str::to_string);
+                        }
+                        "w:sz" => {
+                            fmt.size_half_pt = attr(attrs, "w:val")
+                                .and_then(|v| v.parse::<u16>().ok())
+                                .filter(|v| *v > 0);
+                        }
+                        "w:color" => fmt.color = attr(attrs, "w:val").and_then(normalize_hex_color),
+                        "w:highlight" => {
+                            fmt.highlight = attr(attrs, "w:val").and_then(highlight_name_to_hex);
+                        }
+                        "w:shd" => {
+                            if let Some(fill) = attr(attrs, "w:fill").and_then(normalize_hex_color)
+                            {
+                                fmt.highlight = Some(fill);
+                            }
+                        }
                         _ => {}
                     }
                 } else if in_run && !in_ppr {
@@ -278,7 +301,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
                 "w:pPr" => in_ppr = false,
                 "w:r" => {
                     if let Some(top) = paras.last_mut() {
-                        push_run(&mut top.runs, &cur_text, fmt);
+                        push_run(&mut top.runs, &cur_text, &fmt);
                     }
                     cur_text.clear();
                     in_run = false;

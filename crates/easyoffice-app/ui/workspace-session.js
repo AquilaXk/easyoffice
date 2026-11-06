@@ -302,7 +302,7 @@
 
     function installActivityTracking() {
       const root = document.documentElement;
-      for (const type of ["input", "change", "click"]) {
+      for (const type of ["input", "change", "click", "eo-doc-mutated"]) {
         root?.addEventListener?.(type, () => noteActivity());
       }
       host.addEventListener?.("pagehide", () => flushAutosaveNow());

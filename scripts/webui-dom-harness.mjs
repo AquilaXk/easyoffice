@@ -28,6 +28,8 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-store.js",
   "../crates/easyoffice-app/ui/ribbon-catalog.js",
   "../crates/easyoffice-app/ui/save-payload.js",
+  "../crates/easyoffice-app/ui/doc-runs.js",
+  "../crates/easyoffice-app/ui/doc-runs-ui.js",
   "../crates/easyoffice-app/ui/desktop-bridge.js",
   "../crates/easyoffice-app/ui/workspace-tools.js",
   "../crates/easyoffice-app/ui/workspace-panels.js",
@@ -115,6 +117,24 @@ class MiniNode {
     this.ownerDocument = ownerDocument;
     this.parentElement = null;
   }
+
+  get parentNode() {
+    return this.parentElement;
+  }
+
+  get nextSibling() {
+    const p = this.parentElement;
+    return p ? (p.childNodes[p.childNodes.indexOf(this) + 1] ?? null) : null;
+  }
+
+  get previousSibling() {
+    const p = this.parentElement;
+    return p ? (p.childNodes[p.childNodes.indexOf(this) - 1] ?? null) : null;
+  }
+
+  remove() {
+    if (this.parentElement) this.parentElement._removeChildRef(this);
+  }
 }
 
 class MiniTextNode extends MiniNode {
@@ -149,6 +169,17 @@ class MiniTextNode extends MiniNode {
 
   cloneNode() {
     return new MiniTextNode(this._text, this.ownerDocument);
+  }
+
+  splitText(offset) {
+    const tail = new MiniTextNode(this._text.slice(offset), this.ownerDocument);
+    this._text = this._text.slice(0, offset);
+    const p = this.parentElement;
+    if (p) {
+      tail.parentElement = p;
+      p.childNodes.splice(p.childNodes.indexOf(this) + 1, 0, tail);
+    }
+    return tail;
   }
 }
 
@@ -368,6 +399,27 @@ class MiniElement extends MiniNode {
 
   appendChild(node) {
     this.childNodes.push(this._adopt(node));
+    return node;
+  }
+
+  get firstChild() {
+    return this.childNodes[0] ?? null;
+  }
+
+  get lastChild() {
+    return this.childNodes[this.childNodes.length - 1] ?? null;
+  }
+
+  insertBefore(newNode, refNode) {
+    if (!refNode) return this.appendChild(newNode);
+    newNode.parentElement?._removeChildRef(newNode);
+    newNode.parentElement = this;
+    this.childNodes.splice(this.childNodes.indexOf(refNode), 0, newNode);
+    return newNode;
+  }
+
+  removeChild(node) {
+    this._removeChildRef(node);
     return node;
   }
 
@@ -632,6 +684,26 @@ class MiniDocument {
     return new MiniTextNode(text, this);
   }
 
+  createRange() {
+    return {
+      startContainer: null,
+      startOffset: 0,
+      endContainer: null,
+      endOffset: 0,
+      setStart(node, offset) {
+        this.startContainer = node;
+        this.startOffset = offset;
+      },
+      setEnd(node, offset) {
+        this.endContainer = node;
+        this.endOffset = offset;
+      },
+      get collapsed() {
+        return this.startContainer === this.endContainer && this.startOffset === this.endOffset;
+      },
+    };
+  }
+
   getElementById(id) {
     return this.documentElement.querySelector(`#${id}`);
   }
@@ -831,6 +903,7 @@ export async function createWorkspaceHarness(options = {}) {
     __EASYOFFICE_DESKTOP_BRIDGE__: hostEnv.__EASYOFFICE_DESKTOP_BRIDGE__,
     __EASYOFFICE_WORKSPACE_API__: hostEnv.__EASYOFFICE_WORKSPACE_API__,
     __EASYOFFICE_FILE_OPEN_UTILS__: hostEnv.__EASYOFFICE_FILE_OPEN_UTILS__,
+    __EASYOFFICE_DOC_RUNS__: hostEnv.__EASYOFFICE_DOC_RUNS__,
     dispatchWindowKeydown: (ev) => {
       const eventObj = {
         type: "keydown",

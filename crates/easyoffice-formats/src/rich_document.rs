@@ -49,6 +49,57 @@ pub struct RichRun {
     pub italic: bool,
     pub underline: bool,
     pub strike: bool,
+    /// Font size in half-points (`w:sz` unit); `None` inherits the document default.
+    pub size_half_pt: Option<u16>,
+    /// Font family name; `None` inherits the document default.
+    pub font: Option<String>,
+    /// Text color as six upper-case hex digits (`RRGGBB`, no `#`).
+    pub color: Option<String>,
+    /// Highlight/shading color as six upper-case hex digits.
+    pub highlight: Option<String>,
+}
+
+/// Normalizes `#rrggbb`/`RRGGBB` to upper-case `RRGGBB`; anything else (including `auto`) is
+/// `None`.
+pub fn normalize_hex_color(raw: &str) -> Option<String> {
+    let hex = raw.trim().trim_start_matches('#');
+    (hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then(|| hex.to_ascii_uppercase())
+}
+
+/// Named highlight colors of `w:highlight` and their RGB values.
+const WORD_HIGHLIGHTS: [(&str, &str); 16] = [
+    ("yellow", "FFFF00"),
+    ("green", "00FF00"),
+    ("cyan", "00FFFF"),
+    ("magenta", "FF00FF"),
+    ("blue", "0000FF"),
+    ("red", "FF0000"),
+    ("darkBlue", "000080"),
+    ("darkCyan", "008080"),
+    ("darkGreen", "008000"),
+    ("darkMagenta", "800080"),
+    ("darkRed", "800000"),
+    ("darkYellow", "808000"),
+    ("darkGray", "808080"),
+    ("lightGray", "C0C0C0"),
+    ("black", "000000"),
+    ("white", "FFFFFF"),
+];
+
+/// RGB of a `w:highlight` color name (`none` and unknown names are `None`).
+pub(crate) fn highlight_name_to_hex(name: &str) -> Option<String> {
+    WORD_HIGHLIGHTS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, hex)| (*hex).to_string())
+}
+
+/// `w:highlight` name for an RGB value that is exactly one of the named colors.
+pub(crate) fn hex_to_highlight_name(hex: &str) -> Option<&'static str> {
+    WORD_HIGHLIGHTS
+        .iter()
+        .find(|(_, h)| *h == hex)
+        .map(|(n, _)| *n)
 }
 
 impl RichRun {

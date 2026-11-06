@@ -4,6 +4,10 @@
 //! for the target syntax and never parsed.
 
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph};
+use crate::rich_run_writers::{
+    docx_run_properties, has_extra_run_format, odt_font_face_decls, odt_text_key,
+    odt_text_key_is_plain, odt_text_style_xml, OdtTextKey, RtfRunTables,
+};
 use crate::{
     CommonMarkCodec, EasyOfficeError, MarkdownBlock, OdfCodec, PdfDocumentModel, PdfPageModel,
     PdfSerializer, RtfCodec, XmlSanitizer, ZipArchiveCodec,
@@ -12,7 +16,7 @@ use crate::{
 /// Heading font sizes in half-points for levels 1–6.
 const HEADING_HALF_POINTS: [u32; 6] = [32, 28, 26, 24, 22, 22];
 
-fn heading_half_points(level: u8) -> u32 {
+pub(crate) fn heading_half_points(level: u8) -> u32 {
     HEADING_HALF_POINTS[usize::from(level.clamp(1, 6)) - 1]
 }
 
@@ -103,22 +107,7 @@ fn push_docx_paragraph(out: &mut String, p: &RichParagraph) {
             continue;
         }
         out.push_str("<w:r>");
-        if run.bold || run.italic || run.strike || run.underline {
-            out.push_str("<w:rPr>");
-            if run.bold {
-                out.push_str("<w:b/>");
-            }
-            if run.italic {
-                out.push_str("<w:i/>");
-            }
-            if run.strike {
-                out.push_str("<w:strike/>");
-            }
-            if run.underline {
-                out.push_str("<w:u w:val=\"single\"/>");
-            }
-            out.push_str("</w:rPr>");
-        }
+        out.push_str(&docx_run_properties(run));
         push_docx_text(out, &run.text);
         out.push_str("</w:r>");
     }
@@ -227,7 +216,6 @@ impl<K: PartialEq + Clone> StyleTable<K> {
     }
 }
 
-type OdtTextKey = (bool, bool, bool, bool);
 type OdtParaKey = (Option<RichAlignment>, u8, bool);
 
 fn push_odt_text(out: &mut String, text: &str) {
@@ -273,8 +261,8 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
                     body.push_str(&format!("<text:p{style_attr}>"));
                 }
                 for run in &p.runs {
-                    let key = (run.bold, run.italic, run.underline, run.strike);
-                    if key == (false, false, false, false) {
+                    let key = odt_text_key(run);
+                    if odt_text_key_is_plain(&key) {
                         push_odt_text(&mut body, &run.text);
                     } else {
                         let t = text_styles.intern(&key);
@@ -331,26 +319,11 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         }
         styles.push_str("</style:style>");
     }
-    for (idx, (bold, italic, underline, strike)) in text_styles.keys.iter().enumerate() {
-        styles.push_str(&format!(
-            "<style:style style:name=\"T{}\" style:family=\"text\"><style:text-properties",
-            idx + 1
-        ));
-        if *bold {
-            styles.push_str(" fo:font-weight=\"bold\"");
-        }
-        if *italic {
-            styles.push_str(" fo:font-style=\"italic\"");
-        }
-        if *underline {
-            styles.push_str(" style:text-underline-style=\"solid\" style:text-underline-width=\"auto\" style:text-underline-color=\"font-color\"");
-        }
-        if *strike {
-            styles.push_str(" style:text-line-through-style=\"solid\"");
-        }
-        styles.push_str("/></style:style>");
+    for (idx, key) in text_styles.keys.iter().enumerate() {
+        styles.push_str(&odt_text_style_xml(idx + 1, key));
     }
     styles.push_str("</office:automatic-styles>");
+    let styles = format!("{}{styles}", odt_font_face_decls(&text_styles.keys));
 
     let content = format!(
         concat!(
@@ -360,6 +333,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
             "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" ",
             "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" ",
             "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" ",
+            "xmlns:svg=\"urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0\" ",
             "office:version=\"1.2\" title=\"{}\">{}<office:body><office:text>{}</office:text></office:body></office:document-content>"
         ),
         XmlSanitizer::escape(&doc.display_title()),
@@ -383,7 +357,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
 // ---------------------------------------------------------------- RTF
 
 /// Formatting control words the RTF writer emits (each followed by one delimiter space).
-const RTF_FORMAT_WORDS: [&str; 15] = [
+const RTF_FORMAT_WORDS: [&str; 18] = [
     "pard",
     "ql",
     "qc",
@@ -399,6 +373,9 @@ const RTF_FORMAT_WORDS: [&str; 15] = [
     "outlinelevel",
     "plain",
     "s",
+    "f",
+    "cf",
+    "highlight",
 ];
 
 /// Removes the formatting control words written by [`encode_rtf_rich`] (alignment, bold, italic,
@@ -456,6 +433,11 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
         "{{\\info{{\\title {}}}}}",
         RtfCodec::escape_rtf_text(&doc.display_title())
     ));
+    let tables = RtfRunTables::collect(doc.blocks.iter().flat_map(|b| match b {
+        RichBlock::Paragraph(p) => p.runs.iter(),
+        RichBlock::Table(_) => [].iter(),
+    }));
+    lines.extend(tables.header_lines());
     let mut table_idx = 0usize;
     for block in &doc.blocks {
         match block {
@@ -491,7 +473,12 @@ pub(crate) fn encode_rtf_rich(doc: &RichDocument) -> String {
                             line.push_str(open);
                         }
                     }
+                    line.push_str(&tables.run_words(run));
                     line.push_str(&RtfCodec::escape_rtf_text(&run.text));
+                    if has_extra_run_format(run) {
+                        line.push_str("\\plain ");
+                        continue;
+                    }
                     for (on, _, close) in toggles {
                         if on {
                             line.push_str(close);

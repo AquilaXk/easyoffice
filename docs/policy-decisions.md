@@ -1091,7 +1091,7 @@
   7. 새 UI 모듈 `save-payload.js`를 `--serve` 정적 자산, 자가 진단 자산 무결성 검사, 저장소 필수 파일 목록에 추가하고, 오프라인 테스트 백엔드(`scripts/test-support/offline-rpc.js`)도 구조화 필드를 받습니다.
 - **Why** 저장한 파일에 편집한 서식·표 위치·표 계산값·모든 시트가 남아야 하고, 사용자 입력은 어떤 내용이든 문서 구조를 바꿀 수 없어야 하며, 실패를 성공으로 표시하거나 매번 같은 이름으로 사본을 쌓지 않기 위함입니다.
 - **Trade-offs**
-  1. 글꼴 이름·크기·색상, 셀 병합, 이미지는 아직 구조화 페이로드에 포함하지 않습니다(제목 수준의 크기만 반영).
+  1. 글꼴 이름·크기·색상, 셀 병합, 이미지는 아직 구조화 페이로드에 포함하지 않습니다(제목 수준의 크기만 반영). **→ 글꼴·크기·글자 색·형광펜은 PD-077(#134)에서 해소되었습니다(런 스키마 `sizeHalfPt`/`font`/`color`/`highlight`). 셀 병합·이미지·표 셀 안 서식은 여전히 제외입니다.**
   2. DOC·HWP 5.0 바이너리와 시트·슬라이드 대상은 서식 없이 평탄화되며, 이 경로의 표는 여전히 문단 뒤에 기록됩니다.
   3. HWPX 제목은 번호 매기기 정의가 필요한 `OUTLINE` 문단 머리 대신 `개요 N` 스타일과 굵은·큰 글자 모양으로 표현합니다.
   4. 서버는 시트 셀 값을 다시 계산하므로 WebUI에 표시된 값과 엔진 계산값이 다르면 엔진 값이 저장됩니다.
@@ -1153,7 +1153,7 @@
   8. 새 UI 모듈 `file-open.js`를 `--serve` 정적 자산, 자가 진단 자산 무결성 검사, 저장소 필수 파일 목록, 하니스 스크립트 목록에 추가하고, 새 테스트 `scripts/test-webui-file-open.mjs`를 CI의 두 `node --test` 줄에 추가했습니다. 오프라인 테스트 백엔드(`offline-rpc.js`)는 `sourceBase64`를 받아 텍스트 형식은 실제로 디코딩하고 바이너리는 `EOFIXTURE:`+JSON 모델 또는 손상 오류로 응답합니다.
 - **Why** 사용자의 실제 파일을 열어 편집·저장·변환할 수 있어야 하고, 열기·변환이 저장 경로와 같은 구조화 모델·보안 가드를 공유해야 라운드트립이 보장되며, 새 IPC 명령 없이 기존 계약을 유지하기 위함입니다.
 - **Trade-offs**
-  1. 형식별 손실(위 3항): 글꼴·크기·색·그림·도형·머리말·각주·셀 서식은 열고 저장하면 사라집니다. DOC·HWP 5.0·RTF·PDF는 서식과 표 위치를 잃습니다.
+  1. 형식별 손실(위 3항): 글꼴·크기·색·그림·도형·머리말·각주·셀 서식은 열고 저장하면 사라집니다. DOC·HWP 5.0·RTF·PDF는 서식과 표 위치를 잃습니다. **→ DOCX·HWPX·ODT·RTF의 글꼴·크기·글자 색·형광펜과 RTF의 서식·표 위치는 PD-077(#134)에서 가져옵니다.**
   2. 편집기 시트는 A~H 열·1000행으로 제한됩니다(초과 셀은 알리고 제외). CSV는 UTF-8만 지원합니다.
   3. HWPX의 번호 목록은 글머리로, 양쪽 정렬은 기본값으로 다시 읽힙니다. 문서 제목(`dc:title`)은 편집기에 표시하지 않고 저장 시 탭 제목(파일 이름)으로 대체됩니다.
   4. 한 번에 한 파일만 열며(여러 개를 끌어 놓으면 첫 번째만), 열기 직후의 상태도 자동 저장·이탈 경고 대상(수정됨)입니다.
@@ -1185,6 +1185,37 @@
   - 위생 가드에서 금지 토큰 검사를 완화: 기존 규칙을 약화시키므로 기각(제외는 서드파티 경로 하나로 한정).
 - **Verified by** `node --test scripts/test-rhwp-upstream.mjs`(미체크아웃 통과, gitlink 변조·URL 변조·버전 불일치·작업 트리 수정 실패, 위생 가드의 루트 금지 파일 추적 실패와 `third_party/rhwp`만 제외), `node scripts/verify-rhwp-upstream.mjs`, `node scripts/check-repo-hygiene.mjs`
 - **Revisit when** upstream를 갱신하거나 `vendor/rhwp-core`·`apps/hwp-studio` 산출물이 추가되어 제외 경로를 늘려야 할 때.
+
+## 52. 문서 모듈 글자 단위 런 모델: 선택 범위 글자 크기·글꼴·색·형광펜·굵게·기울임·밑줄·취소선 (PD-077, #134)
+
+- **Status** Implemented
+- **Context** 글자 크기를 바꾸면 편집기 전체(`editor.style.fontSize`)가 커지고, 굵게·기울임·밑줄은 커서가 있는 문단 전체의 인라인 스타일로 적용되었으며(`ribbon-history.js`의 `targetEl.style.fontWeight` 등), 글꼴도 편집기 전체에 걸렸습니다(#134). 글꼴·크기·색은 저장 페이로드와 디코더에도 없어(PD-073 트레이드오프 1, PD-075 트레이드오프 1) 열고 저장하면 사라졌습니다. DOCX·ODT·RTF는 HWP 편집기용 라이브러리 대상이 아니므로 DOC 모듈이 자체 글자 단위 런 모델을 가져야 합니다.
+- **Decision (`PD-077`)**
+  1. **런 엔진 (`crates/easyoffice-app/ui/doc-runs.js`, 새 모듈)**: 런은 `<span class="eo-run">` 하나이며 속성은 `dataset`(`eoSize`=반포인트, `eoFont`, `eoColor`, `eoHighlight`=`RRGGBB`, `eoBold`/`eoItalic`/`eoUnderline`/`eoStrike`=`true`)과 같은 값을 반영하는 CSSOM `style` 속성으로만 기록합니다(`execCommand`·`innerHTML`·사용자 입력으로 만든 스타일 문자열 없음). 값은 먼저 검증합니다(색 `#RRGGBB`/`#RGB`/`rgb()`, 글꼴 제어·따옴표·`;{}<>` 없는 64자 이하, 크기 2~1638 반포인트). `applyFormat(root, range, patch)`는 범위 경계에서 텍스트 노드를 `splitText`로 나누고, 선택된 글자만 런으로 감싸며(기존 `strong`/`em`/`u`/`s`/붙여넣은 `span style` 조상은 `liftOut`으로 쪼개 효과 서식을 런으로 옮김), 같은 서식의 이웃 런 병합·속성 없는 런 풀기·빈 런·빈 텍스트 노드 제거를 수행하며, 문단·표 셀 여러 개에 걸친 선택, 클래스가 있는 구조용 `span`(예: `eo-h-title`)과 링크 범위를 보존합니다. 선택 범위는 텍스트 오프셋으로 복원합니다. 노드 비교는 인덱스 경로로 하고 오프셋은 범위를 담은 컨테이너 안에서만 계산해, 2000문단 전체 선택 적용 63 ms·큰 문서의 작은 선택 1 ms·넓은 선택 조회 13 ms입니다.
+  2. **커서만 있을 때의 규칙 (`doc-runs-ui.js`)**: 커서가 단어 한가운데(양쪽이 글자·숫자·`_`)면 그 **단어**에 적용하고, 단어 경계·빈 문단이면 **대기(pending) 서식**으로 두었다가 다음에 입력하는 글자(`beforeinput` `insertText`)에만 적용합니다(커서가 옮겨지면 폐기, 한 글자 입력 후에는 새 런 안에서 이어 입력). 선택도 커서도 없으면 `서식을 적용할 글자를 먼저 선택하세요`를 표시하고 아무것도 바꾸지 않습니다(전체 문서 크기 변경은 없어짐).
+  3. **적용 대상**: 글자 크기(입력 칸·▲/▼·메뉴), 글꼴 목록, 글자 색(버튼은 마지막 색을 적용/해제, 옆 `<input type="color">`는 색 선택), 형광펜(같은 방식), 굵게·기울임·밑줄(툴바·리본·`Ctrl+B/I/U`는 모두 `executeTrackedRibbonCommand` → 같은 엔진), 취소선. 문서와 한글 모듈이 같은 편집기를 쓰므로 둘 다 적용되며 이후 HWP 편집기 교체와 무관합니다. 토글은 선택 전체가 이미 켜져 있으면 끄고, 일부만 켜져 있으면 켭니다.
+  4. **툴바 상태**: 선택/커서의 서식을 `queryFormat`으로 읽어 굵게·기울임·밑줄·취소선 버튼의 `aria-pressed`(`true`/`false`/`mixed`), 크기 칸(여러 크기면 빈 칸 + `혼합`, 런 없는 글자는 문서 기본 11.0), 글꼴 목록, 색 버튼의 아래 줄을 갱신합니다. 크기·글꼴 컨트롤을 쓴 뒤에는 편집기로 포커스를 돌려 입력과 `Ctrl+Z`가 편집기에서 동작합니다.
+  5. **실행 취소·자동 저장**: 서식 동작 하나가 기존 작업 영역 스냅샷 이력의 한 단계입니다(리본 경로는 `executeTrackedRibbonCommand`의 한 스냅샷, 툴바 경로는 `captureWorkspaceSnapshot` → 변경 → `commitDeferredUndoSnapshot`). 변경 알림은 `input`이 아닌 `eo-doc-mutated` 이벤트로 보내 입력 추적기가 두 번째 실행 취소 단계를 만들지 않게 했습니다. 스냅샷 직렬화에 `fontFamily`·`textIndent`·`paddingRight`를 추가해 런의 `dataset`+`style`이 자동 저장·복원됩니다.
+  6. **저장·열기 충실도**: #104 구조화 런 스키마에 `sizeHalfPt`(2~1638), `font`, `color`, `highlight`(`#RRGGBB`/`RRGGBB`)를 더했습니다(필드가 없는 기존 페이로드는 그대로 동작, 형식 오류는 `InvalidArgument`). DOCX는 `w:rFonts`(ascii/hAnsi/eastAsia/cs)·`w:color`·`w:sz`+`w:szCs`·이름 있는 형광색은 `w:highlight`, 그 밖의 색은 `w:shd w:fill`(스키마 순서 준수), HWPX는 서식 조합마다 `charPr`의 `height`(1/100pt)·`textColor`·`shadeColor`·`fontRef`와 글꼴 목록(`fontface`), ODT는 자동 텍스트 스타일(`fo:font-size`·`style:font-name`+`office:font-face-decls`·`fo:color`·`fo:background-color`), RTF는 글꼴 표 `{\fonttbl…}`·색 표 `{\colortbl;…}`와 `\f`·`\fs`·`\cf`·`\highlight`(런 끝은 `\plain`)로 기록합니다. 읽기는 #111 `decode_rich` 경로(`rich_read_ooxml`/`_hwpx`/`_odt`)가 같은 속성을 `RichRun`으로 되돌리고, 디코드 응답 JSON의 런에도 같은 필드를 싣습니다. RTF는 줄 단위 평문 디코더 대신 새 `rich_read_rtf.rs`(그룹 스택 기반, `\fonttbl`·`\colortbl`·`\info\title`·`\u`·`\'hh`·`\trowd` 표·정렬·개요 수준, 알 수 없는 대상과 `\*`는 건너뜀, 중첩 256 상한)가 런·표 위치까지 읽습니다. 제목 문단은 제목 기본 크기와 같은 값을, HWPX 본문은 기본 글자 높이와 같은 값을 "상속"으로 보아 `size` 없이 읽습니다. 이 때문에 HWPX 쓰기 기본 글자 높이를 10 pt에서 편집기 기본과 같은 **11 pt(1100)**로 올렸습니다.
+  7. **열기 반영 (`file-open.js`)**: 디코드된 런에 크기·글꼴·색·형광펜이 있으면 `doc-runs.js`의 `buildRunSpec`으로 런 노드를 적재해 열기 → 편집 → 저장 → 다시 열기에서 런이 유지됩니다. 저장은 `save-payload.js`가 런 `dataset`과 붙여넣은 `span style`/`font`에서 같은 필드를 읽습니다(안쪽 요소 우선, 인접 같은 서식 병합).
+  8. **들여쓰기·눈금자 (`doc-runs-ui.js`)**: `indent-in/out` 메뉴와 눈금자 핀(첫 줄 `textIndent`, 왼쪽 `paddingLeft`, 오른쪽 `paddingRight`, 4 px 단위 드래그, 한 번의 실행 취소)이 선택이 닿는 문단(표 셀 포함, 빈 문단 포함)에만 적용되고 핀 위치는 현재 문단의 값을 따릅니다. 번호·글머리 접두사 토글은 문단을 `textContent`로 다시 쓰지 않고 텍스트 노드만 넣고 빼서 런이 지워지지 않습니다. 탭 정지는 눈금자 핀(`ruler-pin-*`)이 문단 단위 들여쓰기만 담당하며 별도 탭 정지 모델은 아직 없습니다.
+  9. 새 UI 모듈 `doc-runs.js`·`doc-runs-ui.js`를 `--serve` 정적 자산, 자가 진단 자산 무결성 검사, 저장소 필수 파일 목록, 하니스 스크립트 목록, `index.html`에 추가하고 새 테스트 `scripts/test-webui-doc-runs.mjs`를 CI의 두 `node --test` 줄에 추가했습니다. IPC 명령 수는 15종 그대로입니다.
+- **Why** 서식은 선택한 글자에만 적용되어야 하고, 한 번의 동작은 한 번의 실행 취소여야 하며, 편집한 런이 저장·열기를 거쳐도 남아야 합니다. DOCX·ODT·RTF는 외부 편집기 엔진이 대신해 주지 않으므로 DOM 범위 기반 자체 런 모델을 택했습니다.
+- **Trade-offs**
+  1. 표 셀 안의 글자 서식은 편집기에서는 적용되지만 저장 모델의 표가 셀 텍스트만 가지므로 파일에는 기록되지 않습니다. 셀 병합·이미지는 여전히 제외입니다.
+  2. 하나의 런 모델에는 위·아래 첨자, 자간, 장평, 글꼴 언어 슬롯별 구분이 없습니다(글꼴은 모든 언어 슬롯에 같은 이름으로 기록, 읽을 때는 한글/ASCII 슬롯 우선).
+  3. 가져오기는 스타일 상속을 해석하지 않습니다(DOCX `styles.xml`·ODT 이름 있는 스타일의 크기·글꼴은 무시, 런·자동 스타일에 직접 지정된 값만). HWPX는 기본 글자 높이(11 pt)와 검정 글자색, 기본 글꼴과 같은 값은 "미지정"으로 읽습니다. 제목·표 머리 같은 CSS 기본 굵기는 `Ctrl+B`로 끌 수 없습니다.
+  4. HWPX 쓰기 기본 글자 높이가 10 pt에서 11 pt로 바뀌어 일반 문서의 본문 크기가 한글 프로그램에서 11 pt로 보입니다.
+  5. 마크다운·TXT·PDF·레거시 DOC/HWP 5.0은 글자 크기·글꼴·색을 기록하지 않습니다(굵게 등 기존 서식은 이전과 같음). RTF의 목록 들여쓰기는 글머리/번호 구분 없이 들여쓰기만 읽습니다.
+  6. IME 조합 입력(`insertCompositionText`)에는 대기 서식을 적용하지 않습니다(조합 후 한글 입력은 일반 입력 경로).
+- **Alternatives rejected**
+  - `document.execCommand`(`bold`/`fontSize`/`foreColor`): 폐기 예정 API이며 `<font size=1..7>`·브라우저별 태그를 만들어 포인트 단위 크기와 병합·정규화를 보장할 수 없고 CSP·XSS 규칙의 속성 화이트리스트 검증과 맞지 않아 기각.
+  - 블록 요소에 스타일 덧씌우기(기존 방식): 선택 범위에만 적용한다는 요구를 만족할 수 없어 기각.
+  - 선택 자체를 `Range.surroundContents`로 감싸기: 여러 문단·표 셀·기존 인라인 요소에 걸치면 예외가 나고 병합 규칙이 없어 기각.
+  - 글자 색·형광펜을 자체 팝업 팔레트로 구현: 색상 입력(`<input type="color">`)이 접근성·플랫폼 통합이 좋고 코드가 작아 기각.
+  - 새 IPC 명령 추가: 15종 계약을 유지하기 위해 기존 `convert_document_format` 런 스키마를 확장.
+- **Verified by** `node --test scripts/test-webui-doc-runs.mjs`(문단 일부 크기·굵게·색 적용 시 나머지 글자 불변, 글꼴·형광펜·기울임·밑줄·취소선, 여러 문단·표 셀 선택, 인접 런 병합·빈 런 제거, 레거시 `strong` 보존, 잘못된 값 거부, 서식 한 번 = 실행 취소 한 단계와 다시 실행 복원, 크기 칸 혼합 표시, 굵게 `mixed` 상태·토글, 단어 적용/대기 서식·다음 입력에만 적용, 저장 페이로드 런 필드, 자동 저장 스냅샷의 런, 문단 단위 들여쓰기·눈금자 핀, 선택 없음 거부), 갱신한 `test-webui-behavior.mjs`·`test-webui-ux-ergonomics.mjs`(선택 범위 기반 서식·실행 취소), `cargo test -p easyoffice-formats --test rich_run_formatting`(DOCX/HWPX/ODT/RTF 크기·글꼴·색·형광펜 런 왕복과 원시 XML 속성, 제목 런 크기 재정의, RTF 평문·표 왕복), `cargo test -p easyoffice-app convert_open`(14 pt·굵게·빨강 런이 DOCX로 저장되어 다시 열면 같은 런·필드, 잘못된 값 거부, 필드 없는 기존 페이로드), 실서버 `--serve 8871` + 헤드리스 Chrome에서 실제 마우스 드래그 선택(`Input.dispatchMouseEvent` 누름/이동/놓음) 후 크기 20 pt 적용(선택한 글자만 커지고 편집기 전체 크기 불변), 실제 `Ctrl+B`·색 버튼·`Ctrl+Z`/`Ctrl+Y` 세 단계 정확히 되돌림, 다중 문단 드래그 후 16 pt, 대기 굵게 후 입력, 2000문단 성능 측정, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
+- **Revisit when** 표 셀 서식·셀 병합 저장, 위·아래 첨자·자간·장평, 스타일 상속 가져오기, IME 조합 중 서식, 별도 탭 정지 모델, HWP 편집기를 rhwp로 교체할 때.
 
 ## 54. ZIP 기반 출력 DEFLATE 압축·변환 응답 단일 base64·실제 경로 벤치마크 (PD-079, #124)
 - **Context** 모든 ZIP 기반 출력(DOCX·XLSX·PPTX·PPSX·ODT·ODS·ODP·HWPX·HWTX)이 무압축 `ZipArchiveCodec::pack`만 사용해 약 1MB 텍스트(9,700문단)가 DOCX 1,480,838바이트, HWPX 2,330,134바이트가 되었고, 변환 응답은 같은 base64를 `converted_base64`와 `convertedBase64`에 두 번 담았으며, 벤치마크는 작은 합성 입력만 측정했습니다.

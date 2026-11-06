@@ -9,8 +9,8 @@
 
 use crate::hwpx_parts::{
     header_xml, header_xml_with, manifest_xml, section_properties_xml, HwpxCharShape,
-    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, LIST_LEFT_MARGIN, NS_PARAGRAPH,
-    NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
+    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, DEFAULT_CHAR_HEIGHT, LIST_LEFT_MARGIN,
+    NS_PARAGRAPH, NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
 };
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
@@ -175,6 +175,10 @@ impl HwpxCodec {
         let mut char_shapes = vec![HwpxCharShape::default()];
         let mut para_shapes = vec![HwpxParaShape::default()];
         let mut styles: Vec<HwpxStyle> = Vec::new();
+        let mut fonts: Vec<String> = Vec::new();
+        fn hex_rgb(hex: &str) -> Option<u32> {
+            u32::from_str_radix(hex, 16).ok()
+        }
         fn intern<T: PartialEq + Copy>(table: &mut Vec<T>, item: T) -> usize {
             table.iter().position(|x| *x == item).unwrap_or_else(|| {
                 table.push(item);
@@ -214,7 +218,7 @@ impl HwpxCodec {
                 height: [1600, 1400, 1300, 1200, 1100, 1000]
                     .get(usize::from(level).wrapping_sub(1))
                     .copied()
-                    .unwrap_or(1000),
+                    .unwrap_or(DEFAULT_CHAR_HEIGHT),
                 ..HwpxCharShape::default()
             };
             let style = if level > 0 {
@@ -243,19 +247,28 @@ impl HwpxCodec {
                 sec.run(char_pr, "");
             }
             for run in runs {
+                let font = run.font.as_ref().map_or(0, |f| {
+                    1 + fonts.iter().position(|x| x == f).unwrap_or_else(|| {
+                        fonts.push(f.clone());
+                        fonts.len() - 1
+                    })
+                });
                 let shape = HwpxCharShape {
                     bold: base.bold || run.bold,
                     italic: run.italic,
                     underline: run.underline,
                     strike: run.strike,
-                    height: base.height,
+                    height: run.size_half_pt.map_or(base.height, |s| u32::from(s) * 50),
+                    font,
+                    text_color: run.color.as_deref().and_then(hex_rgb),
+                    shade_color: run.highlight.as_deref().and_then(hex_rgb),
                 };
                 let char_pr = intern(&mut char_shapes, shape);
                 sec.run(char_pr, &run.text);
             }
             sec.xml.push_str("</hp:p>");
         }
-        let header = header_xml_with(&char_shapes, &para_shapes, &styles);
+        let header = header_xml_with(&char_shapes, &para_shapes, &styles, &fonts);
         let meta = HwpxPayload {
             title: doc.display_title(),
             is_template,

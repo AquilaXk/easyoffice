@@ -27,7 +27,7 @@ pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
     };
     macro_rules! flush {
         () => {
-            push_run(&mut runs, &buf, fmt);
+            push_run(&mut runs, &buf, &fmt);
             buf.clear();
         };
     }
