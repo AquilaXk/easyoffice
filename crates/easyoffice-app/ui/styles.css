@@ -991,3 +991,32 @@ html[data-theme="dark"] .cp-empty {
 .app-shell.eo-drop-active { outline: 3px dashed var(--eo-primary); outline-offset: -6px; }
 .slide-lower-zone p { white-space: pre-line; }
 .conv-source-row { gap: 8px; flex-wrap: wrap; }
+
+/* Sheet editor: virtualized grid with fixed column widths, frozen headers and range selection */
+#pane-sheet:not([hidden]) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+#pane-sheet .formula-bar { flex: 0 0 auto; flex-wrap: nowrap; margin: 0; padding: 6px 12px; background: var(--eo-surface); }
+#pane-sheet #formula-input { min-width: 120px; }
+#pane-sheet .formula-result { flex: 0 1 auto; min-width: 0; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pane-sheet .sheet-surface { flex: 1 1 auto; min-height: 0; max-width: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; border-width: 0; }
+.sheet-viewport { flex: 1 1 auto; min-height: 220px; overflow: auto; position: relative; background: var(--eo-surface); border-width: 1px; border-style: solid; border-color: var(--eo-border); outline: none; }
+.sheet-table.sheet-grid { width: auto; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.sheet-grid th, .sheet-grid td { box-sizing: border-box; height: 24px; padding: 0 6px; border-width: 0 1px 1px 0; line-height: 23px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sheet-grid thead th { position: sticky; top: 0; z-index: 3; height: 26px; line-height: 25px; user-select: none; }
+.sheet-grid tbody th { position: sticky; left: 0; z-index: 2; width: 56px; user-select: none; }
+.sheet-grid thead th.sheet-corner { left: 0; z-index: 5; width: 56px; }
+.sheet-grid td { caret-color: transparent; cursor: cell; user-select: none; }
+.sheet-grid td:focus { outline: none; }
+.sheet-grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet-grid td.in-range { background: var(--eo-primary-soft); }
+.sheet-grid td.selected-cell { outline: 2px solid var(--eo-primary); outline-offset: -2px; background: var(--eo-surface); }
+.sheet-grid td.in-range.selected-cell { background: var(--eo-surface); }
+.sheet-grid td.editing { caret-color: auto; cursor: text; user-select: text; text-overflow: clip; text-align: left; }
+.sheet-grid td.condfmt-high { background: rgba(10, 112, 90, 0.14); }
+.sheet-grid .col-resizer { position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 6; }
+.sheet-grid .col-resizer:hover { background: var(--eo-primary); opacity: 0.45; }
+.sheet-grid tr.sheet-spacer td, .sheet-grid td.sheet-spacer-y { padding: 0; border-width: 0; line-height: 0; }
+.sheet-grid td.sheet-spacer-x, .sheet-grid th.sheet-spacer-head { padding: 0; }
+
+#icon-toolbar [hidden] { display: none !important; }
+
+.sheet-grid th.active-axis { background-color: var(--eo-surface-elevated); background-image: linear-gradient(var(--eo-primary-soft), var(--eo-primary-soft)); }

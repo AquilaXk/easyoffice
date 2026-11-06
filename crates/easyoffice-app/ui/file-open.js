@@ -9,7 +9,7 @@
 
   const MAX_FILE_BYTES = 10 * 1024 * 1024; // base64 inflates 4/3; the HTTP IPC body limit is 16 MiB
   const MAX_FILE_LABEL = "10 MiB";
-  const GRID_LIMITS = { maxRows: 1000, maxCols: 8 }; // the sheet editor grid (A-H)
+  const GRID_LIMITS = { maxRows: 1048576, maxCols: 16384 }; // the sheet editor addresses the full XLSX grid (A..XFD)
   const MODULE_LABELS = { DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF 스튜디오" };
   const SUPPORTED_EXTENSIONS = [
     "docx", "doc", "odt", "rtf", "md", "markdown", "txt",

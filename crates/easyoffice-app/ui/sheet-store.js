@@ -36,6 +36,11 @@
       ? astApi.quoteFormulaSheetName
       : fallbackQuoteFormulaSheetName;
 
+  function cloneStore(sheets) {
+    const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
+    return typeof fast === "function" ? fast(sheets || {}) : JSON.parse(JSON.stringify(sheets || {}));
+  }
+
   function createSheetStoreHelpers(deps) {
     const {
       invokeIpc,
@@ -124,7 +129,7 @@
     }
 
     async function computeEvaluatedSheetStore(baseSheets, defaultSheet, extraTarget = null) {
-      const sheets = JSON.parse(JSON.stringify(baseSheets || {}));
+      const sheets = cloneStore(baseSheets);
       const { cells, formulaTargets } = buildCellsAndFormulaTargets(sheets);
       const rpcTargets = [];
       if (extraTarget) {
@@ -193,6 +198,7 @@
     }
 
     async function evaluateLiveFormulaTargets(sheetsMap, defaultSheet) {
+      if (!sheetMapHasAnyFormula(sheetsMap)) return null;
       const { cells, formulaTargets } = buildCellsAndFormulaTargets(sheetsMap);
       if (formulaTargets.length === 0) {
         return null;
@@ -211,7 +217,7 @@
     }
 
     async function scrubSheetStoreMap(baseSheets, activeSheetName, trackAsyncFn) {
-      const candidateSheets = JSON.parse(JSON.stringify(baseSheets || {}));
+      const candidateSheets = cloneStore(baseSheets);
       const plainEntries = [];
       const formulaJobs = [];
       Object.keys(candidateSheets).forEach((shName) => {

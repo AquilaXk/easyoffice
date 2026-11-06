@@ -494,10 +494,11 @@
               <span id="sheet-eval-result" class="formula-result">결과: 4950</span>
             </div>
             <div class="editor-surface sheet-surface">
-              <table class="sheet-table" aria-label="스프레드시트 그리드">
+              <div id="sheet-viewport" class="sheet-viewport" tabindex="-1">
+              <table id="sheet-grid" class="sheet-table sheet-grid" aria-label="스프레드시트 그리드">
                 <thead>
                   <tr>
-                    <th>#</th>
+                    <th class="sheet-corner">#</th>
                     <th data-col="A">A</th>
                     <th data-col="B">B</th>
                     <th data-col="C">C</th>
@@ -643,6 +644,7 @@
                   </tr>
                 </tbody>
               </table>
+              </div>
               <div id="sheet-tab-bar" class="sheet-tab-bar" role="tablist" aria-label="시트 탭 전환">
                 <button class="sheet-tab-btn active" role="tab" aria-selected="true" data-sheet-tab="Sheet1">2026 분기별 실적</button>
                 <button class="sheet-tab-btn" role="tab" aria-selected="false" data-sheet-tab="Sheet2">부문별 요약</button>
@@ -926,6 +928,10 @@
     <script src="./desktop-bridge.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
+    <script src="./sheet-grid.js"></script>
+    <script src="./sheet-clipboard.js"></script>
+    <script src="./sheet-input.js"></script>
+    <script src="./sheet-ops.js"></script>
     <script src="./sheet-controller.js"></script>
     <script src="./ribbon-history.js"></script>
     <script src="./workspace-session.js"></script>
