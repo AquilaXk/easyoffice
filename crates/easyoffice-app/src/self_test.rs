@@ -286,7 +286,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         "docx->hwpx|기관보고서|1. 개요\n2. 세부 계획",
     )?;
     if !conv_json.contains("\"targetFormat\":\"hwpx\"")
-        || !conv_json.contains("\"converted_base64\":\"")
+        || !conv_json.contains("\"convertedBase64\":\"")
         || !conv_json.contains("\"status\":\"OK\"")
     {
         return Err(EasyOfficeError::InvalidArgument(
@@ -343,7 +343,13 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         ));
     }
 
-    let bench_report = run_deterministic_benchmarks(5);
+    let mut bench_report = run_deterministic_benchmarks(5);
+    bench_report.real_paths = crate::benchmark_real::run_real_path_benchmarks();
+    if let Err(reason) = crate::benchmark_real::real_path_gate(&bench_report.real_paths) {
+        return Err(EasyOfficeError::CorruptedContainer(format!(
+            "실제 경로 벤치마크 검증 실패: {reason}"
+        )));
+    }
     if !bench_report.all_equivalent || bench_report.suites.len() != 5 {
         return Err(EasyOfficeError::CorruptedContainer(
             "엔진 저수준 최적화 벤치마크 동등성 검증 실패".to_string(),

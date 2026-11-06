@@ -1164,3 +1164,19 @@
   - 분할 전송: 10 MiB 한도에서 단일 요청으로 충분하고 서버 상태·재조립 복잡도가 늘어 기각.
 - **Verified by** `cargo test -p easyoffice-formats --test rich_decode_roundtrip`(DOCX·HWPX·ODT·Markdown·TXT·XLSX 다중 시트 수식·BOM CSV·PPTX 디코드→인코드→디코드 동치, 레거시·PDF 평문 적재, 매직 바이트 우선, Word 스타일 제목·번호 목록, DOCX/XLSX/PPTX/HWPX/ODT XXE·ZIP 폭탄·경로 순회·손상 입력 거부), `cargo test -p easyoffice-app convert_open`(decode 응답·모듈 라우팅·격자 절단·원본 바이트 변환·보안 거부), `crates/easyoffice-formats/src/{rich_xml.rs,rich_read_text.rs}` 단위 테스트, `node --test scripts/test-webui-file-open.mjs`(`Ctrl+O`·메뉴·accept, 입력·끌어 놓기, 모듈 라우팅, 수정 확인, 크기·손상 오류, 탭 제목, 실행 취소/다시 실행, 자동 저장 복원, 열기→저장 라운드트립, 변환기 원본), 실서버 `--serve 8795` + 헤드리스 Chrome에서 DOCX·XLSX 열기, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 글꼴·그림·머리말 가져오기, 시트 격자 확장, 비UTF-8 CSV(CP949) 지원, 다중 문서 탭, 데스크톱 셸의 파일 연결 열기(PD-074)가 추가될 때.
+
+## 54. ZIP 기반 출력 DEFLATE 압축·변환 응답 단일 base64·실제 경로 벤치마크 (PD-079, #124)
+- **Context** 모든 ZIP 기반 출력(DOCX·XLSX·PPTX·PPSX·ODT·ODS·ODP·HWPX·HWTX)이 무압축 `ZipArchiveCodec::pack`만 사용해 약 1MB 텍스트(9,700문단)가 DOCX 1,480,838바이트, HWPX 2,330,134바이트가 되었고, 변환 응답은 같은 base64를 `converted_base64`와 `convertedBase64`에 두 번 담았으며, 벤치마크는 작은 합성 입력만 측정했습니다.
+- **Decision (`PD-079`)**
+  1. **항목별 압축 정책 (`zip_codec.rs`)**: 모든 ZIP 작성기는 `ZipArchiveCodec::pack_compressed`를 사용합니다. 기존 저장소 내 DEFLATE(`deflate::deflate_raw`, 고정 허프만 + 해시 체인 64단계)를 그대로 쓰고, 압축 결과가 원본보다 작지 않은 항목은 무압축으로 둡니다. `ZipArchiveCodec::must_store`가 `mimetype`(ODF/HWPX는 첫 엔트리·무압축·오프셋 30 고정)와 이미 압축된 형식(png·jpg·jpeg·gif·webp·zip·jar·gz·mp3·mp4)을 항상 무압축으로 유지합니다. `pack_deflate`도 같은 예외를 따릅니다. 인코더 프로파일링 결과 압축 비용이 변환 전체의 약 15ms/MB 수준이라 인코더 알고리즘은 바꾸지 않았고, CRC32·시트 DAG 최적화는 #135로 남깁니다.
+  2. **응답 필드**: `convert_document_format` 응답은 `convertedBase64` 하나만 보냅니다(`converted_base64` 제거, 응답 크기 약 2.7배 → 1배). UI·오프라인 RPC·자가 진단은 `convertedBase64`만 읽습니다.
+  3. **실제 경로 벤치마크 (`benchmark_real.rs`)**: `run_engine_benchmark` 응답과 `--self-test`에 `realPaths`(DOCX→DOCX·DOCX→HWPX 9,700문단 디코드+인코드, 1,000x104셀 XLSX 패킹·언패킹, 5,000 타깃 재계산)를 추가해 시간과 출력 크기를 보고합니다. 동등성(라운드트립 문단·셀 일치)과 출력 크기 상한(문서 500,000바이트, XLSX 3MB)은 항상 검증하고, 시간 상한(10초)은 release 빌드에서만, 느슨하게 검증합니다. debug 빌드는 `timingGated:false`로 수치만 출력합니다.
+- **Measured (release)**
+  - DOCX 1,480,838 → 184,948바이트, HWPX 2,330,134 → 234,482바이트, XLSX(104k셀) 3,641,911 → 746,161바이트.
+  - 변환 시간(디코드+인코드) DOCX ≈24 → ≈40ms, HWPX ≈28 → ≈45ms, XLSX ≈139 → ≈190ms, 재계산 ≈5ms(변화 없음).
+- **Alternatives**
+  - 새 DEFLATE 인코더(동적 허프만·지연 매칭): 크기가 이미 기준(0.5MB)의 절반 이하이고 시간 병목이 아니어서 보류.
+  - 응답에 두 필드 유지: 호환 소비자가 저장소 안에 없고 전송량이 2배라 기각.
+  - 벤치마크 시간 비율 단정: 공유 러너에서 불안정해 기각.
+- **Verified by** `cargo test -p easyoffice-formats --test zip_deflate_outputs`(크기 상한, `mimetype` 첫 엔트리·무압축, 9개 ZIP 형식 왕복·CRC, 항목별 정책), `cargo test -p easyoffice-app --lib convert_ipc`(응답 단일 필드), `benchmark_real` 테스트, `--self-test`, .NET `ZipFile`과 `Expand-Archive`로 생성물 열기.
+- **Revisit when** 그림 등 미디어 파트 출력이 추가되거나, 동적 허프만이 필요한 더 큰 문서·시간 병목(#135)이 확인될 때.
