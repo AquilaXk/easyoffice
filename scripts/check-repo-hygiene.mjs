@@ -49,6 +49,9 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/ribbon-history.js",
   "crates/easyoffice-app/ui/workspace-session.js",
   "crates/easyoffice-app/ui/file-open.js",
+  "crates/easyoffice-app/ui/icons.js",
+  "crates/easyoffice-app/ui/window-bridge.js",
+  "crates/easyoffice-app/ui/shell.css",
   "crates/easyoffice-app/ui/slide-studio.js",
   "crates/easyoffice-app/ui/doc-runs.js",
   "crates/easyoffice-app/ui/doc-runs-ui.js",
@@ -60,6 +63,10 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-desktop/Cargo.toml",
   "crates/easyoffice-desktop/build.rs",
   "crates/easyoffice-desktop/src/main.rs",
+  "crates/easyoffice-desktop/src/app_commands.rs",
+  "crates/easyoffice-desktop/src/windows.rs",
+  "crates/easyoffice-desktop/src/window_commands.rs",
+  "crates/easyoffice-desktop/src/recent.rs",
   "crates/easyoffice-desktop/tauri.conf.json",
   "crates/easyoffice-desktop/capabilities/main-window.json",
   "crates/easyoffice-desktop/icons/icon.ico",
@@ -93,6 +100,11 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-webui-slide-show.mjs",
   "scripts/test-webui-hwp-host.mjs",
   "scripts/test-webui-hwp-session.mjs",
+  "scripts/test-webui-windows.mjs",
+  "scripts/test-webui-shell-chrome.mjs",
+  "scripts/test-webui-hwp-shortcuts.mjs",
+  "scripts/test-support/modules.mjs",
+  "apps/hwp-studio/src/embed/shell-shortcuts.ts",
   ".gitmodules",
   "config/rhwp-upstream.json",
   "scripts/verify-rhwp-upstream.mjs",
@@ -553,7 +565,15 @@ const DESKTOP_SHELL_CSP = {
   "frame-src": "'self'",
   "connect-src": "'self' ipc: http://ipc.localhost",
 };
-const DESKTOP_SHELL_PERMISSIONS = new Set(["allow-ipc-dispatch", "allow-save-document-file"]);
+// The app commands live in one Rust list (shared by build.rs and the crate); the capability file may
+// grant exactly those (PD-088: engine IPC, save, and the narrow window commands; none takes a path).
+const APP_COMMANDS_FILE = "crates/easyoffice-desktop/src/app_commands.rs";
+const appCommandsText = fs.existsSync(path.join(ROOT, APP_COMMANDS_FILE))
+  ? fs.readFileSync(path.join(ROOT, APP_COMMANDS_FILE), "utf8")
+  : "";
+const DESKTOP_SHELL_PERMISSIONS = new Set(
+  [...appCommandsText.matchAll(/^\s*"([a-z_]+)",$/gm)].map((m) => `allow-${m[1].replaceAll("_", "-")}`)
+);
 
 // Desktop shell guard (PD-074): embedded assets only, the WebUI CSP plus the shell IPC origin,
 // no file associations before document opening exists (#111), and capabilities limited to the
@@ -595,9 +615,14 @@ if (fs.existsSync(desktopConfigFull)) {
     for (const perm of cap.permissions || []) {
       const id = typeof perm === "string" ? perm : perm?.identifier;
       if (!DESKTOP_SHELL_PERMISSIONS.has(id)) {
-        errors.push(`${capRel} grants permission '${id}' beyond the two EasyOffice shell commands`);
+        errors.push(`${capRel} grants permission '${id}' beyond the EasyOffice app commands (${APP_COMMANDS_FILE})`);
       }
     }
+    const granted = new Set((cap.permissions || []).map((perm) => (typeof perm === "string" ? perm : perm?.identifier)));
+    for (const wanted of DESKTOP_SHELL_PERMISSIONS) {
+      if (!granted.has(wanted)) errors.push(`${capRel} does not grant '${wanted}' although it is an app command`);
+    }
+    if (DESKTOP_SHELL_PERMISSIONS.size < 9) errors.push(`${APP_COMMANDS_FILE} must list the app commands (found ${DESKTOP_SHELL_PERMISSIONS.size})`);
   }
 }
 const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".floor_char_boundary("];

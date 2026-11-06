@@ -48,6 +48,7 @@
       getShortcutModifier,
       enqueueWorkspaceHistoryOp,
       onModuleApplied,
+      getWindowBridge,
     } = deps;
 
     const {
@@ -93,26 +94,13 @@
       pushRawUndoSnapshot(preSnapshot);
     }
 
-    // Document tab titles (opened file names) are part of the undoable workspace state.
-    let appliedTabTitles = null;
+    // Document names (opened or saved file names) are part of the undoable workspace state; the
+    // window bridge owns them because they also feed the window title.
     function readTabTitles() {
-      const out = {};
-      document.querySelectorAll(".tab-strip .tab-pill").forEach((tab) => {
-        if (tab.dataset.module) out[tab.dataset.module] = tab.textContent || "";
-      });
-      return out;
-    }
-    // The tab strip is rebuilt after the backend bootstrap; titles restored earlier are re-applied.
-    function reapplyTabTitles() {
-      applyTabTitles(appliedTabTitles);
+      return getWindowBridge ? getWindowBridge().getTitles() : {};
     }
     function applyTabTitles(titles) {
-      if (!titles || typeof titles !== "object") return;
-      appliedTabTitles = { ...titles };
-      document.querySelectorAll(".tab-strip .tab-pill").forEach((tab) => {
-        const title = titles[tab.dataset.module];
-        if (typeof title === "string" && title) tab.textContent = title;
-      });
+      if (getWindowBridge) getWindowBridge().applyTitles(titles);
     }
 
     function cloneSheets(sheets) {
@@ -300,15 +288,7 @@
       const target = panes[mod] || panes.DOC;
       if (target) target.hidden = false;
 
-      document.querySelectorAll(".mod-btn").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.module === mod);
-      });
-      document.querySelectorAll(".tab-pill").forEach((tab) => {
-        const isAct = tab.dataset.module === mod;
-        tab.classList.toggle("active", isAct);
-        tab.setAttribute("role", "tab");
-        tab.setAttribute("aria-selected", isAct ? "true" : "false");
-      });
+      getWindowBridge?.()?.refresh();
       if (!skipTabBufferSync && (mod === "DOC" || mod === "HWP") && mod !== curMod) {
         workspacePanels.restoreDocTabState(mod);
       }
@@ -373,7 +353,7 @@
         document.documentElement.dataset.theme = snap.theme;
         const themeBtn = document.getElementById("btn-theme-toggle");
         if (themeBtn) {
-          themeBtn.textContent = snap.theme === "dark" ? "라이트 모드" : "다크 모드";
+          host.__EASYOFFICE_ICONS__.syncThemeToggle(document, snap.theme);
         }
       }
       localRibbonState.darkThemeEnabled = document.documentElement.dataset.theme === "dark";
@@ -638,7 +618,7 @@
         html.dataset.theme = next;
         localRibbonState.darkThemeEnabled = next === "dark";
         const themeBtn = document.getElementById("btn-theme-toggle");
-        if (themeBtn) themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
+        if (themeBtn) host.__EASYOFFICE_ICONS__.syncThemeToggle(document, next);
         return;
       }
       if (cmdId.endsWith("-view-zoom")) {
@@ -956,7 +936,6 @@
       pushUndoSnapshot,
       pushRibbonUndoSnapshot: pushUndoSnapshot,
       restoreWorkspaceSnapshot,
-      reapplyTabTitles,
       performWorkspaceUndo,
       performWorkspaceRedo,
       applyModuleAccent,

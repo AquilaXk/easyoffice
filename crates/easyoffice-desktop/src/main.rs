@@ -4,15 +4,21 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_commands;
+mod recent;
 mod save_file;
 mod smoke;
+mod window_commands;
+mod windows;
 
 use easyoffice_app::EasyOfficeIpcRouter;
 use save_file::{write_document_bytes, SaveOutcome, SaveRequest};
 use serde::Serialize;
-use smoke::{SmokeProbe, SMOKE_INIT_SCRIPT, SMOKE_TIMEOUT};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use smoke::{SmokeProbe, SMOKE_TIMEOUT};
+use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
+use window_commands::AppWindows;
+use windows::WindowKind;
 
 /// Error shape returned to the WebView. It matches the `--serve` HTTP error body
 /// (`{"status":"error","message":...}`) so the UI reports both transports identically.
@@ -93,11 +99,12 @@ async fn save_document_file(
     .await
     .map_err(|err| IpcError::new(format!("파일을 쓰지 못했습니다: {err}")))?
     .map_err(IpcError::new)?;
+    window_commands::note_saved_path(&app, window.label(), &written.0);
     Ok(SaveOutcome::saved(&written.0, written.1))
 }
 
 /// Only the embedded app origin may be displayed; any other navigation is refused.
-fn is_app_origin(url: &tauri::Url) -> bool {
+pub(crate) fn is_app_origin(url: &tauri::Url) -> bool {
     url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost")
 }
 
@@ -105,22 +112,29 @@ fn main() {
     let smoke_mode = std::env::args().skip(1).any(|arg| arg == "--smoke");
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![ipc_dispatch, save_document_file])
+        .invoke_handler(tauri::generate_handler![
+            ipc_dispatch,
+            save_document_file,
+            window_commands::open_document_window,
+            window_commands::open_file_in_new_window,
+            window_commands::take_pending_open,
+            window_commands::report_window_state,
+            window_commands::close_current_window,
+            window_commands::list_recent_documents,
+            window_commands::open_recent_document,
+        ])
         .setup(move |app| {
+            app.manage(AppWindows::new(app.path().app_data_dir().ok()));
+            let handle = app.handle().clone();
             if smoke_mode {
                 app.manage(SmokeProbe::start(SMOKE_TIMEOUT));
+                // The smoke run drives the HWP editor, so its first window is an HWP document window.
+                window_commands::create_primary_window(&handle, WindowKind::Hwp)
+                    .map_err(std::io::Error::other)?;
+            } else if !window_commands::open_startup_files(&handle, std::env::args().skip(1)) {
+                window_commands::create_primary_window(&handle, WindowKind::Start)
+                    .map_err(std::io::Error::other)?;
             }
-            let mut window =
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("EasyOffice")
-                    .inner_size(1440.0, 900.0)
-                    .min_inner_size(1024.0, 680.0)
-                    .center()
-                    .on_navigation(is_app_origin);
-            if smoke_mode {
-                window = window.initialization_script(SMOKE_INIT_SCRIPT);
-            }
-            window.build()?;
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -145,6 +159,49 @@ mod tests {
         assert!(!ok("https://example.com/"));
         assert!(!ok("http://127.0.0.1:8787/"));
         assert!(!ok("file:///C:/Windows/win.ini"));
+    }
+
+    #[test]
+    fn capability_grants_exactly_the_app_commands_to_document_windows() {
+        let value: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main-window.json")).unwrap();
+        let mut granted: Vec<String> = value["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap().to_string())
+            .collect();
+        let mut expected: Vec<String> = app_commands::APP_COMMANDS
+            .iter()
+            .map(|c| format!("allow-{}", c.replace('_', "-")))
+            .collect();
+        granted.sort();
+        expected.sort();
+        assert_eq!(
+            granted, expected,
+            "capability file and command list must match exactly"
+        );
+        assert!(
+            granted.iter().all(|p| !p.contains(':')),
+            "no core or plugin permission is granted"
+        );
+        assert_eq!(value["windows"], serde_json::json!(["main", "doc-*"]));
+        assert_eq!(value["local"], serde_json::json!(true));
+        assert_eq!(app_commands::APP_COMMANDS.len(), 9);
+    }
+
+    #[test]
+    fn only_the_main_window_capability_is_attached() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            conf["app"]["security"]["capabilities"],
+            serde_json::json!(["main-window"])
+        );
+        assert!(
+            conf["app"]["windows"].as_array().unwrap().is_empty(),
+            "windows are created in Rust"
+        );
     }
 
     #[test]

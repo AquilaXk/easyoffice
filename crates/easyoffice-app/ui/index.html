@@ -3,29 +3,63 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EasyOffice — 통합 오피스 워크스페이스</title>
+    <title>EasyOffice</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./shell.css" />
   </head>
   <body>
-    <div id="app" class="app-shell" data-module="DOC">
+    <div id="app" class="app-shell" data-module="DOC" data-window-kind="document">
+      <section id="start-screen" class="start-screen" aria-label="시작 화면" hidden>
+        <header class="start-header">
+          <h1 class="start-title">EasyOffice</h1>
+          <p class="start-subtitle">새 문서를 만들거나 파일을 열어 시작하세요. 문서마다 별도 창에서 열립니다.</p>
+        </header>
+        <div class="start-actions" role="group" aria-label="새 문서 만들기">
+          <button type="button" class="start-card" data-window-new="DOC"><span class="start-card-icon" data-icon="file"></span><span class="start-card-text"><strong>문서</strong><small>DOCX</small></span></button>
+          <button type="button" class="start-card" data-window-new="HWP"><span class="start-card-icon" data-icon="file"></span><span class="start-card-text"><strong>한글 문서</strong><small>HWP · HWPX</small></span></button>
+          <button type="button" class="start-card" data-window-new="SHEET"><span class="start-card-icon" data-icon="table"></span><span class="start-card-text"><strong>스프레드시트</strong><small>XLSX</small></span></button>
+          <button type="button" class="start-card" data-window-new="SLIDE"><span class="start-card-icon" data-icon="image"></span><span class="start-card-text"><strong>프레젠테이션</strong><small>PPTX</small></span></button>
+          <button type="button" class="start-card" data-window-new="PDF"><span class="start-card-icon" data-icon="file"></span><span class="start-card-text"><strong>PDF 스튜디오</strong><small>PDF</small></span></button>
+          <button type="button" class="start-card" data-window-new="CONV"><span class="start-card-icon" data-icon="activity"></span><span class="start-card-text"><strong>포맷 변환기</strong><small>변환</small></span></button>
+        </div>
+        <button type="button" id="start-open" class="start-open" data-file-open="true"><span class="icon-slot" data-icon="folder-open"></span>파일 열기…<span class="start-open-hint">Ctrl+O</span></button>
+        <section id="start-recent" class="start-recent" aria-label="최근 문서" hidden>
+          <h2 class="start-recent-title">최근 문서</h2>
+          <div id="start-recent-list" class="start-recent-list"></div>
+        </section>
+      </section>
       <header id="menu-bar" class="topbar" role="banner">
         <div class="studio-menubar" role="menubar" aria-label="스튜디오 주 메뉴">
           <div class="menu-item" data-menu="file">
             <button type="button" class="studio-menu-item menu-title" role="menuitem" data-menu-cat="file">파일</button>
             <div class="menu-dropdown" role="menu">
-              <div class="md-item" data-studio-menu-cmd="module:DOC"><span class="md-label">문서 (DOCX) 탭으로 전환</span></div>
-              <div class="md-item" data-studio-menu-cmd="module:HWP"><span class="md-label">한글 문서 (HWP/HWPX) 탭으로 전환</span></div>
-              <div class="md-item" data-studio-menu-cmd="module:SHEET"><span class="md-label">스프레드시트 (XLSX) 탭으로 전환</span></div>
-              <div class="md-item" data-studio-menu-cmd="module:SLIDE"><span class="md-label">프레젠테이션 (PPTX) 탭으로 전환</span></div>
-              <div class="md-item" data-studio-menu-cmd="module:PDF"><span class="md-label">PDF 스튜디오로 전환</span></div>
-              <div class="md-item" data-studio-menu-cmd="module:CONV"><span class="md-label">통합 포맷 변환기로 전환</span></div>
-              <div class="md-sep"></div>
+              <div class="md-item md-has-sub" role="menuitem" aria-haspopup="menu" tabindex="0">
+                <span class="md-label">새 문서</span><span class="md-shortcut">Ctrl+N</span><span class="md-caret" data-icon="chevron-right"></span>
+                <div class="menu-dropdown md-submenu" role="menu" aria-label="새 문서 종류">
+                  <button type="button" class="md-item" role="menuitem" data-window-new="DOC"><span class="md-label">문서 (DOCX)</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-window-new="HWP"><span class="md-label">한글 문서 (HWP)</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-window-new="SHEET"><span class="md-label">스프레드시트 (XLSX)</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-window-new="SLIDE"><span class="md-label">프레젠테이션 (PPTX)</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-window-new="PDF"><span class="md-label">PDF 스튜디오</span></button>
+                  <button type="button" class="md-item" role="menuitem" data-window-new="CONV"><span class="md-label">포맷 변환기</span></button>
+                </div>
+              </div>
               <div class="md-item" data-file-open="true" role="menuitem"><span class="md-label">열기…</span><span class="md-shortcut">Ctrl+O</span></div>
-              <div class="md-item" data-studio-menu-cmd="studio-save"><span class="md-label">저장</span><span class="md-shortcut">Ctrl+S</span></div>
-              <div class="md-item" data-hwp-save-as="hwp" role="menuitem"><span class="md-label">한글 문서로 저장 (HWP)…</span></div>
-              <div class="md-item" data-hwp-save-as="hwpx" role="menuitem"><span class="md-label">한글 문서로 저장 (HWPX)…</span></div>
-              <div class="md-item" data-studio-menu-cmd="layout-paper"><span class="md-label">편집 용지</span></div>
+              <div class="md-item md-has-sub" role="menuitem" aria-haspopup="menu" tabindex="0">
+                <span class="md-label">최근 문서</span><span class="md-caret" data-icon="chevron-right"></span>
+                <div id="recent-menu-list" class="menu-dropdown md-submenu" role="menu" aria-label="최근 문서 목록">
+                  <div id="recent-menu-empty" class="md-item md-empty" role="menuitem" aria-disabled="true"><span class="md-label">최근 문서가 없습니다</span></div>
+                </div>
+              </div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-studio-menu-cmd="studio-save" role="menuitem"><span class="md-label">저장</span><span class="md-shortcut">Ctrl+S</span></div>
+              <div class="md-item" data-studio-menu-cmd="studio-save" data-save-as-generic="true" role="menuitem"><span class="md-label">다른 이름으로 저장</span></div>
+              <div class="md-item" data-hwp-save-as="hwp" role="menuitem"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWP</span></div>
+              <div class="md-item" data-hwp-save-as="hwpx" role="menuitem"><span class="md-label">다른 이름으로 저장</span><span class="md-hint">HWPX</span></div>
+              <div class="md-item" data-studio-menu-cmd="layout-paper" role="menuitem"><span class="md-label">편집 용지</span></div>
+              <div class="md-sep"></div>
+              <div class="md-item" data-window-close="true" role="menuitem"><span class="md-label">닫기</span><span class="md-shortcut">Ctrl+W</span></div>
             </div>
           </div>
           <div class="menu-item" data-menu="edit">
@@ -119,42 +153,18 @@
           </div>
         </div>
 
-        <div class="brand-group">
-          <span class="brand-title">EasyOffice</span>
-          <span id="platform-pill" class="platform-pill">플랫폼 확인 중</span>
-          <div class="qat-group" role="toolbar" aria-label="빠른 실행 도구 모음">
-            <button id="qat-save" class="qat-btn" title="문서 저장 (⌘S)">저장</button>
-            <button id="qat-undo" class="qat-btn" title="실행 취소 (⌘Z)">실행 취소</button>
-            <button id="qat-redo" class="qat-btn" title="다시 실행 (⇧⌘Z)">다시 실행</button>
-            <button id="btn-run-benchmark" class="qat-btn qat-accent" title="문서 처리 성능 진단 실행">
-              성능 진단
-            </button>
+        <div class="topbar-actions" role="toolbar" aria-label="창 도구">
+          <div class="qat-group" role="group" aria-label="빠른 실행 도구">
+            <button id="qat-save" class="icon-btn qat-btn" type="button" data-icon="save" title="저장 (Ctrl+S)" aria-label="저장"></button>
+            <button id="qat-undo" class="icon-btn qat-btn" type="button" data-icon="undo" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소"></button>
+            <button id="qat-redo" class="icon-btn qat-btn" type="button" data-icon="redo" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행"></button>
           </div>
+          <button id="btn-command-palette" class="palette-btn" type="button" title="명령 팔레트 (Ctrl+K)" aria-label="명령 팔레트 열기">
+            <span class="icon-slot" data-icon="search"></span><span class="palette-label">명령 검색</span><kbd id="shortcut-hint">Ctrl+K</kbd>
+          </button>
+          <button id="btn-theme-toggle" class="icon-btn" type="button" data-icon="moon" title="다크 모드로 전환" aria-label="다크 모드로 전환"></button>
+          <button id="btn-chrome-toggle" class="icon-btn menu-toolbox-toggle" type="button" data-icon="chevron-down" title="리본 및 사이드 패널 펼치기/접기" aria-label="도구 상자 접기/펼치기" aria-expanded="false"></button>
         </div>
-
-        <div id="tab-strip" class="tab-strip" role="tablist" aria-label="열린 문서 탭"></div>
-
-        <div class="topbar-actions">
-          <button id="btn-ribbon-style" class="action-btn" title="표준 오피스 7탭 / 한글(HWP) 7탭 전환">
-            리본: 표준 오피스
-          </button>
-          <button id="btn-command-palette" class="action-btn" title="명령 팔레트 (⌘K / Ctrl+K)">
-            명령 팔레트 <kbd id="shortcut-hint">⌘K</kbd>
-          </button>
-          <button id="btn-theme-toggle" class="action-btn" title="라이트 / 다크 모드 전환">
-            다크 모드
-          </button>
-        </div>
-
-        <button
-          id="btn-chrome-toggle"
-          class="menu-toolbox-toggle"
-          type="button"
-          title="리본 및 사이드 패널 펼치기/접기"
-          aria-label="도구 상자 접기/펼치기"
-        >
-          ▾
-        </button>
       </header>
 
       <input
@@ -172,51 +182,48 @@
 
       <div id="icon-toolbar" class="eo-icon-toolbar" role="toolbar" aria-label="표준 도구 상자">
         <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="studio-save" title="저장하기 (Ctrl+S)" aria-label="저장">💾</button>
-          <button type="button" class="tb-btn" data-studio-cmd="studio-undo" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소">↩</button>
-          <button type="button" class="tb-btn" data-studio-cmd="studio-redo" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행">↪</button>
-          <button type="button" class="tb-btn" data-studio-cmd="clip-cut" title="오려두기 (Ctrl+X)" aria-label="오려두기">✂</button>
-          <button type="button" class="tb-btn" data-studio-cmd="clip-copy" title="복사하기 (Ctrl+C)" aria-label="복사하기">📄</button>
-          <button type="button" class="tb-btn" data-studio-cmd="clip-paste" title="붙이기 (Ctrl+V)" aria-label="붙이기">📋</button>
-          <button type="button" class="tb-btn" data-studio-cmd="home-style" title="모양 복사" aria-label="모양복사">🖌</button>
+          <button type="button" class="tb-btn" data-studio-cmd="clip-cut" data-icon="cut" title="오려두기 (Ctrl+X)" aria-label="오려두기"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="clip-copy" data-icon="copy" title="복사하기 (Ctrl+C)" aria-label="복사하기"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="clip-paste" data-icon="paste" title="붙이기 (Ctrl+V)" aria-label="붙이기"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="home-style" data-icon="format-paint" title="모양 복사" aria-label="모양 복사"></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group sb-viewmark-group">
-          <button id="btn-toggle-ctrl-marks" class="tb-btn tb-mark-blue eo-glyph-btn" type="button" title="조판 부호 표시">¶</button>
-          <button id="btn-toggle-para-marks" class="tb-btn tb-mark-blue eo-glyph-btn active" type="button" aria-pressed="true" title="문단 부호 표시">↵</button>
-          <button id="btn-toggle-doc-grid" class="tb-btn eo-glyph-btn" type="button" title="격자 보기">#</button>
+          <button id="btn-toggle-ctrl-marks" class="tb-btn" type="button" data-icon="pilcrow" title="조판 부호 표시" aria-label="조판 부호 표시"></button>
+          <button id="btn-toggle-para-marks" class="tb-btn active" type="button" data-icon="return-mark" aria-pressed="true" title="문단 부호 표시" aria-label="문단 부호 표시"></button>
+          <button id="btn-toggle-doc-grid" class="tb-btn" type="button" data-icon="grid" title="격자 보기" aria-label="격자 보기"></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
-          <button type="button" class="tb-btn tb-char-shape" data-studio-cmd="home-style" title="글자 모양">가/가</button>
-          <button type="button" class="tb-btn tb-para-shape" data-studio-cmd="para-shape" title="문단 모양">≡✓</button>
+          <button type="button" class="tb-btn" data-studio-cmd="home-style" data-icon="char-shape" title="글자 모양" aria-label="글자 모양"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="para-shape" data-icon="para-shape" title="문단 모양" aria-label="문단 모양"></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
-          <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-numbering" title="문단 번호">1.</button>
-          <button type="button" class="tb-btn tb-mark-blue" data-studio-cmd="para-bullet" title="글머리표">●</button>
-          <button type="button" class="tb-btn" data-studio-cmd="indent-out" title="한 수준 감소">⇤</button>
-          <button type="button" class="tb-btn" data-studio-cmd="indent-in" title="한 수준 증가">⇥</button>
+          <button type="button" class="tb-btn" data-studio-cmd="para-numbering" data-icon="list-numbered" title="문단 번호" aria-label="문단 번호"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="para-bullet" data-icon="list-bullet" title="글머리표" aria-label="글머리표"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-out" data-icon="outdent" title="한 수준 감소" aria-label="한 수준 감소"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="indent-in" data-icon="indent" title="한 수준 증가" aria-label="한 수준 증가"></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="insert-table" title="표 만들기">⊞▾</button>
-          <button type="button" class="tb-btn" data-studio-cmd="insert-shape" title="도형 삽입">△□▾</button>
-          <button type="button" class="tb-btn" data-studio-cmd="insert-chart" title="그림 삽입">🖼</button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-table" data-icon="table" title="표 만들기" aria-label="표 만들기"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-shape" data-icon="shapes" title="도형 삽입" aria-label="도형 삽입"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-chart" data-icon="image" title="그림 삽입" aria-label="그림 삽입"></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="layout-paper" title="개체 속성">⊡</button>
-          <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" title="문자표">※</button>
-          <button type="button" class="tb-btn" data-studio-cmd="insert-link" title="하이퍼링크">🌐</button>
+          <button type="button" class="tb-btn" data-studio-cmd="layout-paper" data-icon="object-props" title="개체 속성" aria-label="개체 속성"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-symbol" data-icon="symbols" title="문자표" aria-label="문자표"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="insert-link" data-icon="link" title="하이퍼링크" aria-label="하이퍼링크"></button>
         </div>
         <span class="tb-sep" aria-hidden="true"></span>
         <div class="tb-group">
-          <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="머리말">▤</button>
-          <button type="button" class="tb-btn" data-studio-cmd="mod-header" title="꼬리말">▥</button>
-          <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="각주">[1]</button>
-          <button type="button" class="tb-btn tb-note-btn" data-studio-cmd="mod-footnote" title="미주">[i]</button>
-          <button type="button" class="tb-btn" data-studio-cmd="palette" title="찾기/바꾸기 (Ctrl+F)">🔭▾</button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-header" data-icon="header" title="머리말" aria-label="머리말"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-header" data-icon="footer" title="꼬리말" aria-label="꼬리말"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" data-icon="footnote" title="각주" aria-label="각주"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="mod-footnote" data-icon="endnote" title="미주" aria-label="미주"></button>
+          <button type="button" class="tb-btn" data-studio-cmd="palette" data-icon="find" title="찾기/바꾸기 (Ctrl+F)" aria-label="찾기/바꾸기"></button>
         </div>
       </div>
 
@@ -261,45 +268,35 @@
             <span class="sb-size-unit">pt</span>
             <span id="doc-style-size-badge" class="sb-size-unit" hidden>11.0 pt</span>
             <span class="sb-stepper-col">
-              <button id="btn-size-up" type="button" class="sb-step-btn" title="글자 크기 크게">▲</button>
-              <button id="btn-size-down" type="button" class="sb-step-btn" title="글자 크기 작게">▼</button>
+              <button id="btn-size-up" type="button" class="sb-step-btn" data-icon="chevron-up" title="글자 크기 크게" aria-label="글자 크기 크게"></button>
+              <button id="btn-size-down" type="button" class="sb-step-btn" data-icon="chevron-down" title="글자 크기 작게" aria-label="글자 크기 작게"></button>
             </span>
           </div>
         </div>
         <span class="eo-style-sep" aria-hidden="true">|</span>
         <div class="sb-command-track">
           <div class="sb-character-group">
-            <button id="btn-stylebar-bold" class="eo-glyph-btn" type="button" title="굵게 (가)">
-              <strong>가</strong>
-            </button>
-            <button id="btn-stylebar-italic" class="eo-glyph-btn" type="button" title="기울임 (가)">
-              <em>가</em>
-            </button>
-            <button id="btn-stylebar-underline" class="eo-glyph-btn" type="button" title="밑줄 (가)">
-              <u>가</u>
-            </button>
-            <button id="btn-stylebar-strike" class="eo-glyph-btn" type="button" title="취소선 (가)">
-              <s>가</s>
-            </button>
-            <button id="btn-stylebar-charfx" class="eo-glyph-btn" type="button" title="글자 효과">
-              가▾
-            </button>
+            <button id="btn-stylebar-bold" class="eo-glyph-btn" type="button" data-icon="bold" title="굵게 (Ctrl+B)" aria-label="굵게"></button>
+            <button id="btn-stylebar-italic" class="eo-glyph-btn" type="button" data-icon="italic" title="기울임 (Ctrl+I)" aria-label="기울임"></button>
+            <button id="btn-stylebar-underline" class="eo-glyph-btn" type="button" data-icon="underline" title="밑줄 (Ctrl+U)" aria-label="밑줄"></button>
+            <button id="btn-stylebar-strike" class="eo-glyph-btn" type="button" data-icon="strikethrough" title="취소선" aria-label="취소선"></button>
+            <button id="btn-stylebar-charfx" class="eo-glyph-btn" type="button" data-icon="char-shape" title="글자 효과" aria-label="글자 효과"></button>
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-color-group">
-            <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" title="글자 색 (선택한 글자에만 적용)">가</button>
+            <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" data-icon="text-color" title="글자 색 (선택한 글자에만 적용)" aria-label="글자 색 적용"></button>
             <input id="doc-textcolor-input" class="sb-color-input" type="color" value="#ff0000" aria-label="글자 색 선택" title="글자 색 선택" />
-            <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" title="형광펜 (선택한 글자에만 적용)">✏</button>
+            <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" data-icon="highlighter" title="형광펜 (선택한 글자에만 적용)" aria-label="형광펜 적용"></button>
             <input id="doc-highlight-input" class="sb-color-input" type="color" value="#ffff00" aria-label="형광펜 색 선택" title="형광펜 색 선택" />
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-align-group">
-            <button id="btn-align-left" class="eo-glyph-btn" type="button" title="왼쪽 정렬">⫷</button>
-            <button id="btn-align-center" class="eo-glyph-btn" type="button" title="가운데 정렬">⫶</button>
-            <button id="btn-align-right" class="eo-glyph-btn" type="button" title="오른쪽 정렬">⫸</button>
-            <button id="btn-align-justify" class="eo-glyph-btn active" type="button" title="양쪽 정렬">≡</button>
-            <button id="btn-align-distribute" class="eo-glyph-btn" type="button" title="배분 정렬">▤</button>
-            <button id="btn-align-divide" class="eo-glyph-btn" type="button" title="나눔 정렬">▥</button>
+            <button id="btn-align-left" class="eo-glyph-btn" type="button" data-icon="align-left" title="왼쪽 정렬" aria-label="왼쪽 정렬"></button>
+            <button id="btn-align-center" class="eo-glyph-btn" type="button" data-icon="align-center" title="가운데 정렬" aria-label="가운데 정렬"></button>
+            <button id="btn-align-right" class="eo-glyph-btn" type="button" data-icon="align-right" title="오른쪽 정렬" aria-label="오른쪽 정렬"></button>
+            <button id="btn-align-justify" class="eo-glyph-btn active" type="button" data-icon="align-justify" title="양쪽 정렬" aria-label="양쪽 정렬"></button>
+            <button id="btn-align-distribute" class="eo-glyph-btn" type="button" data-icon="align-distribute" title="배분 정렬" aria-label="배분 정렬"></button>
+            <button id="btn-align-divide" class="eo-glyph-btn" type="button" data-icon="align-divide" title="나눔 정렬" aria-label="나눔 정렬"></button>
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-ls-group">
@@ -312,8 +309,8 @@
               <option value="300">300 %</option>
             </select>
             <span class="sb-stepper-col">
-              <button id="btn-ls-up" type="button" class="sb-step-btn" title="줄 간격 넓게">▲</button>
-              <button id="btn-ls-down" type="button" class="sb-step-btn" title="줄 간격 좁게">▼</button>
+              <button id="btn-ls-up" type="button" class="sb-step-btn" data-icon="chevron-up" title="줄 간격 넓게" aria-label="줄 간격 넓게"></button>
+              <button id="btn-ls-down" type="button" class="sb-step-btn" data-icon="chevron-down" title="줄 간격 좁게" aria-label="줄 간격 좁게"></button>
             </span>
           </div>
         </div>
@@ -331,22 +328,10 @@
         </div>
         <div class="ribbon-meta">
           <span id="contextual-tool-badge" class="ctx-badge">표·개체 도구</span>
-          <span class="matrix-badge">리본 도구</span>
+          <button id="btn-ribbon-style" class="ribbon-style-btn" type="button" title="표준 오피스 7탭 / 한글(HWP) 7탭 전환">리본: 표준 오피스</button>
         </div>
         <div id="ribbon-tool-strip" class="ribbon-tool-strip" role="toolbar" aria-label="활성 리본 명령 도구"></div>
       </nav>
-
-      <section class="filter-bar" aria-label="포맷 필터 및 모듈 전환">
-        <div id="format-filters" class="filter-chips"></div>
-        <div class="module-switcher" aria-label="편집기 모듈 선택">
-          <button class="mod-btn active" data-module="DOC">문서 (DOCX)</button>
-          <button class="mod-btn" data-module="HWP">한글 (HWP/HWPX)</button>
-          <button class="mod-btn" data-module="SHEET">시트 (XLSX)</button>
-          <button class="mod-btn" data-module="SLIDE">슬라이드 (PPTX)</button>
-          <button class="mod-btn" data-module="PDF">PDF 스튜디오</button>
-          <button class="mod-btn" data-module="CONV">일괄 변환기</button>
-        </div>
-      </section>
 
       <main class="workspace-grid">
         <aside class="panel sidebar-left" aria-label="문서 개요 및 최근 문서">
@@ -662,16 +647,16 @@
               <button id="btn-add-slide" class="secondary-btn" title="빈 슬라이드를 맨 뒤에 추가">+ 슬라이드 추가</button>
               <button id="btn-slide-duplicate" class="secondary-btn" title="현재 슬라이드 복제">복제</button>
               <button id="btn-slide-delete" class="secondary-btn" title="현재 슬라이드 삭제 · Delete (목록에서)">삭제</button>
-              <button id="btn-slide-move-up" class="secondary-btn" title="위로 이동 · Alt+↑ (목록에서)">▲</button>
-              <button id="btn-slide-move-down" class="secondary-btn" title="아래로 이동 · Alt+↓ (목록에서)">▼</button>
+              <button id="btn-slide-move-up" class="secondary-btn icon-btn" type="button" data-icon="arrow-up" title="위로 이동 · Alt+↑ (목록에서)" aria-label="슬라이드 위로 이동"></button>
+              <button id="btn-slide-move-down" class="secondary-btn icon-btn" type="button" data-icon="arrow-down" title="아래로 이동 · Alt+↓ (목록에서)" aria-label="슬라이드 아래로 이동"></button>
               <label for="slide-aspect-select">비율</label>
               <select id="slide-aspect-select" class="cmd-input slide-aspect-select">
                 <option value="16:9" selected>16:9</option>
                 <option value="4:3">4:3</option>
                 <option value="A4">A4</option>
               </select>
-              <button id="btn-slide-show" class="secondary-btn" title="처음부터 슬라이드 쇼 (F5)">▶ 처음부터</button>
-              <button id="btn-slide-show-current" class="secondary-btn" title="현재 슬라이드부터 슬라이드 쇼 (Shift+F5)">▶ 현재 슬라이드</button>
+              <button id="btn-slide-show" class="secondary-btn" title="처음부터 슬라이드 쇼 (F5)"><span class="icon-slot" data-icon="play"></span>처음부터</button>
+              <button id="btn-slide-show-current" class="secondary-btn" title="현재 슬라이드부터 슬라이드 쇼 (Shift+F5)"><span class="icon-slot" data-icon="play"></span>현재 슬라이드</button>
               <label for="slide-transition-select">화면 전환</label>
               <select id="slide-transition-select" class="cmd-input slide-transition-select">
                 <option value="none">없음</option>
@@ -710,7 +695,7 @@
 
           <div id="pane-pdf" class="editor-pane" hidden>
             <div class="formula-bar pdf-toolbar">
-              <button id="btn-pdf-rotate" class="secondary-btn">↻ 90° 회전</button>
+              <button id="btn-pdf-rotate" class="secondary-btn"><span class="icon-slot" data-icon="rotate-cw"></span>90° 회전</button>
               <label for="pdf-stamp-select">결재 스탬프</label>
               <select id="pdf-stamp-select" class="cmd-input pdf-stamp-select">
                 <option value="승인필" selected>승인 완료</option>
@@ -852,7 +837,8 @@
 
           <div class="inspector-section">
             <h3>성능 진단 결과</h3>
-            <p id="bench-result-box">상단 [성능 진단] 버튼을 눌러 측정하세요.</p>
+            <p id="bench-result-box">[성능 진단] 버튼을 눌러 측정하세요.</p>
+            <button id="btn-run-benchmark" class="secondary-btn" type="button" title="문서 처리 성능 진단 실행">성능 진단</button>
           </div>
         </aside>
       </main>
@@ -866,6 +852,7 @@
           <span id="status-doc-filename" class="statusbar-doc-path">[붙임2] 2026년 디지털행정혁신 종합 추진계획(안).docx — 1페이지</span>
         </span>
         <span class="statusbar-diag-group">
+          <span id="platform-pill" class="platform-pill">플랫폼 확인 중</span>
           <span id="status-module">모듈: 문서 (DOCX)</span>
           <span id="status-format-spec">포맷: DOCX 문서</span>
           <span id="status-sheet-agg">선택 집계 · 합계 1,300 · 평균 650 · 개수 2 · 최대 1,000</span>
@@ -874,12 +861,12 @@
           <span id="status-command-feedback">준비 완료</span>
         </span>
         <span class="statusbar-zoom-group" aria-label="화면 배율 조절">
-          <button id="btn-zoom-fit-width" class="statusbar-zoom-btn" type="button" title="폭 맞춤">↔</button>
-          <button id="btn-zoom-fit-page" class="statusbar-zoom-btn" type="button" title="쪽 맞춤">□</button>
+          <button id="btn-zoom-fit-width" class="statusbar-zoom-btn" type="button" data-icon="fit-width" title="폭 맞춤" aria-label="폭 맞춤"></button>
+          <button id="btn-zoom-fit-page" class="statusbar-zoom-btn" type="button" data-icon="fit-page" title="쪽 맞춤" aria-label="쪽 맞춤"></button>
           <span id="status-zoom-label">100%</span>
-          <button id="btn-zoom-out" class="statusbar-zoom-btn" type="button" title="배율 축소">−</button>
+          <button id="btn-zoom-out" class="statusbar-zoom-btn" type="button" data-icon="minus" title="배율 축소" aria-label="배율 축소"></button>
           <input id="status-zoom-slider" class="stb-zoom-slider" type="range" min="50" max="200" step="5" value="100" aria-label="화면 배율 슬라이더" />
-          <button id="btn-zoom-in" class="statusbar-zoom-btn" type="button" title="배율 확대">+</button>
+          <button id="btn-zoom-in" class="statusbar-zoom-btn" type="button" data-icon="plus" title="배율 확대" aria-label="배율 확대"></button>
         </span>
       </footer>
     </div>
@@ -887,7 +874,7 @@
     <dialog id="cmd-palette-modal" class="cmd-modal cp-overlay" aria-label="명령 팔레트">
       <div class="cmd-modal-inner cp-panel">
         <div class="cp-input-wrap">
-          <span class="cp-slash" aria-hidden="true">/</span>
+          <span class="cp-slash" data-icon="search" aria-hidden="true"></span>
           <input
             id="cmd-search-input"
             type="text"
@@ -902,6 +889,18 @@
       </div>
     </dialog>
 
+    <dialog id="close-confirm-dialog" class="close-dialog" aria-labelledby="close-dialog-title" aria-describedby="close-dialog-text">
+      <form method="dialog" class="close-dialog-panel">
+        <h2 id="close-dialog-title" class="close-dialog-title">저장하지 않은 변경 사항</h2>
+        <p id="close-dialog-text" class="close-dialog-text">이 창을 닫기 전에 변경 내용을 저장할까요?</p>
+        <div class="close-dialog-actions">
+          <button type="button" id="btn-close-save" class="primary-btn">저장</button>
+          <button type="button" id="btn-close-discard" class="secondary-btn">저장 안 함</button>
+          <button type="button" id="btn-close-cancel" class="secondary-btn">취소</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="slide-context-menu" class="slide-context-menu" role="menu" aria-label="슬라이드 메뉴" hidden>
       <button type="button" role="menuitem" data-slide-action="new">새 슬라이드</button>
       <button type="button" role="menuitem" data-slide-action="duplicate">복제</button>
@@ -913,7 +912,7 @@
     <div id="slide-show-overlay" class="slide-show" role="dialog" aria-modal="true" aria-label="슬라이드 쇼" tabindex="-1" hidden>
       <div id="slide-show-viewport" class="slide-show-viewport" data-aspect="16:9"></div>
       <span id="slide-show-counter" class="slide-show-counter" aria-live="polite">1 / 1</span>
-      <button id="slide-show-exit" class="slide-show-exit" type="button" aria-label="슬라이드 쇼 종료 (Esc)">✕</button>
+      <button id="slide-show-exit" class="slide-show-exit" type="button" aria-label="슬라이드 쇼 종료 (Esc)" data-icon="close"></button>
       <p class="slide-show-hint">→ Space 다음 · ← 이전 · Home End · B W 화면 가리기 · P 발표자 보기 · Esc 종료</p>
       <aside id="slide-show-presenter" class="slide-show-presenter" aria-label="발표자 보기" hidden>
         <p class="slide-show-presenter-row"><strong>경과 시간</strong> <span id="slide-show-timer">00:00</span></p>
@@ -923,6 +922,7 @@
       </aside>
     </div>
 
+    <script src="./icons.js"></script>
     <script src="./sheet-utils.js"></script>
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-store.js"></script>
@@ -931,6 +931,7 @@
     <script src="./doc-runs-ui.js"></script>
     <script src="./save-payload.js"></script>
     <script src="./desktop-bridge.js"></script>
+    <script src="./window-bridge.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>
     <script src="./sheet-grid.js"></script>

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 // HWP host (PD-083): a fake iframe + MessageChannel stands in for the embedded rhwp-studio. The
 // fake editor answers the embed protocol (`rhwp-connect` handshake, `rhwp-request` -> response).
@@ -92,7 +93,7 @@ function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
   return { requests, state, FakeMessageChannel, attachWindow };
 }
 
-function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeouts = {} } = {}) {
+function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeouts = {}, extraDeps = {} } = {}) {
   const document = createFakeDocument();
   const studio = createFakeStudio(studioOptions);
   const timersFired = [];
@@ -113,6 +114,7 @@ function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeout
   const hostApi = env.__EASYOFFICE_CREATE_HWP_HOST__({
     document, env, getActiveModule: () => mod, invokeIpc: async (cmd, payload) => { ipcCalls.push({ cmd, payload }); return {}; }, onStateChange: () => states.push(hostApi.getStatus()),
     ...timeouts,
+    ...extraDeps,
   });
   document.createElementOriginal = document.createElement;
   const origCreate = document.createElement;
@@ -290,7 +292,7 @@ test("webui: the HWP module is hosted by #pane-hwp and the document-only toolbar
   await flushAsyncTurns(8);
   const styleBar = document.getElementById("doc-style-bar");
   assert.equal(styleBar.hidden, false, "DOC shows the style bar");
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns(20);
   assert.equal(frames.length, 1, "frame is created on the first HWP activation");
   assert.equal(document.getElementById("pane-hwp").hidden, false);
@@ -298,26 +300,28 @@ test("webui: the HWP module is hosted by #pane-hwp and the document-only toolbar
   assert.equal(styleBar.hidden, true, "document style bar is hidden for the embedded editor");
   const toolbarBtn = document.querySelector('#icon-toolbar button[data-studio-cmd="insert-table"]');
   assert.equal(toolbarBtn.disabled, true, "document-only toolbar items are disabled");
-  assert.equal(document.querySelector('#icon-toolbar button[data-studio-cmd="studio-save"]').disabled, false);
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  assert.equal(document.getElementById("qat-save").disabled, false);
+  assert.equal(document.getElementById("app").dataset.hwpEmbed, "true", "only the editor's own toolbar is shown");
+  switchModule(document, "DOC");
   await flushAsyncTurns(8);
   assert.equal(document.getElementById("pane-hwp").hidden, true);
   assert.equal(document.getElementById("pane-doc").hidden, false);
   assert.equal(styleBar.hidden, false);
+  assert.equal(document.getElementById("app").dataset.hwpEmbed, "false");
   assert.ok(studio.requests.length >= 0);
 });
 
 test("webui: without the bundle the old editor stays usable with the explanatory notice", async () => {
   const { document, userClick, frames } = await createIntegration({ bundle: false });
   await flushAsyncTurns(8);
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns(20);
   assert.equal(frames.length, 0);
   assert.equal(document.getElementById("pane-doc").hidden, false);
   assert.equal(document.getElementById("pane-hwp").hidden, true);
   assert.equal(document.getElementById("hwp-fallback-notice").hidden, false);
   assert.equal(document.getElementById("doc-style-bar").hidden, false, "text-only editor keeps its style bar");
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns(8);
   assert.equal(document.getElementById("hwp-fallback-notice").hidden, true);
 });
@@ -340,4 +344,30 @@ test("whenSettled resolves with the failure status when the editor cannot connec
   const settled = hostApi.whenSettled(5000);
   await hostApi.onModuleActivated("HWP");
   assert.equal(await settled, "error");
+});
+
+test("shell shortcuts: the frame URL names the combos and forwarded combos reach only the shortcut listeners", async () => {
+  const { hostApi, document, studio, constants } = loadHost({ extraDeps: { shellShortcuts: ["Ctrl+S", "Ctrl+O", 42, "Ctrl+K"] } });
+  const changes = [];
+  const shortcuts = [];
+  hostApi.onChange((ev) => changes.push(ev));
+  hostApi.onShortcut((combo) => shortcuts.push(combo));
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  assert.equal(document.frames[0].getAttribute("src"), constants.STUDIO_SRC + "?shellKeys=" + encodeURIComponent("Ctrl+S,Ctrl+O,Ctrl+K"));
+  const event = (payload) => studio.state.port2.postMessage({ type: "rhwp-event", version: 1, sessionId: "session-1", event: "documentChanged", payload });
+  event({ schemaVersion: 1, reason: "shell_shortcut", shortcut: "Ctrl+S" });
+  event({ schemaVersion: 1, reason: "shell_shortcut", shortcut: { evil: true } });
+  event({ schemaVersion: 1, reason: "edited" });
+  await settle();
+  assert.deepEqual(shortcuts, ["Ctrl+S"], "only string combos are delivered");
+  assert.equal(changes.length, 1, "a forwarded shortcut is never treated as an edit (no autosave, no dirty state)");
+  assert.equal(changes[0].payload.reason, "edited");
+});
+
+test("shell shortcuts: without a shortcut table the frame URL stays plain", async () => {
+  const { hostApi, document, constants } = loadHost();
+  await hostApi.onModuleActivated("HWP");
+  await settle();
+  assert.equal(document.frames[0].getAttribute("src"), constants.STUDIO_SRC);
 });

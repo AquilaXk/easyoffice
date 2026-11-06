@@ -63,6 +63,7 @@
       commitDeferredUndoSnapshot,
       runStudioClipboardCommand,
       getDocRuns,
+      getWindowBridge,
     } = deps;
 
     const {
@@ -140,8 +141,13 @@
 
     // Download file name from the module's document tab title (PD-073).
     function resolveSaveFileBase(mod) {
-      const tab = Array.from(document.querySelectorAll(".tab-strip .tab-pill")).find((t) => t.dataset.module === mod);
-      return savePayload.sanitizeFileBaseName(tab?.textContent, "EasyOffice_" + mod + "_문서");
+      const name = getWindowBridge?.()?.getDocumentName(mod);
+      return savePayload.sanitizeFileBaseName(name, "EasyOffice_" + mod + "_문서");
+    }
+
+    // A saved document takes the name of the file it was saved as (converter output does not).
+    function noteSavedName(path) {
+      if (getActiveModule() !== "CONV" && path) getWindowBridge?.()?.setDocumentName(path);
     }
 
     function describeConversionSpec(res) {
@@ -204,6 +210,7 @@
       const fb = document.getElementById("status-command-feedback");
       const result = await session.save({ deliver: deliverSavedFile, baseName: resolveSaveFileBase("HWP") });
       if (fb) fb.textContent = result.message;
+      if (result.ok) noteSavedName(result.path);
       return result.ok;
     }
 
@@ -258,6 +265,7 @@
             "문서 저장 완료 (" + delivery.path + " · " + (res.outputBytes || 0) + "B · " +
             describeConversionSpec(res) + ")";
         }
+        noteSavedName(delivery.path);
         return true;
       });
     }
@@ -288,10 +296,7 @@
       }
       const fileEl = document.getElementById("status-doc-filename");
       if (fileEl) {
-        const activeTabTitle = document
-          .querySelector(".tab-strip .tab-pill.active")
-          ?.textContent?.replace(/×$/, "")
-          ?.trim();
+        const activeTabTitle = getWindowBridge?.()?.getDocumentName(getActiveModule());
         const curMod = getActiveModule();
         const fallbackName =
           curMod === "HWP"
@@ -789,7 +794,6 @@
 
     function dispatchStudioIconCmd(cmd, editor, onStudioCmd) {
       if (!cmd) return;
-      if (cmd.startsWith("module:")) return void document.querySelector('.mod-btn[data-module="' + cmd.slice(7) + '"]')?.click();
       const redirectId = STUDIO_QUICK_REDIRECT[cmd];
       if (redirectId) return void document.getElementById(redirectId)?.click();
       const curMod = getActiveModule();
@@ -931,7 +935,7 @@
         shell.dataset.chromeExpanded = next ? "true" : "false";
         shell.dataset.panelsExpanded = next ? "true" : "false";
         chromeToggleBtn.setAttribute("aria-expanded", next ? "true" : "false");
-        chromeToggleBtn.textContent = next ? "▴" : "▾";
+        host.__EASYOFFICE_ICONS__.setIcon(document, chromeToggleBtn, next ? "chevron-up" : "chevron-down");
       });
       bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) {

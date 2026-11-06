@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 // Desktop shell (Tauri v2 / WebView2) bridge: a fake `__TAURI_INTERNALS__` stands in for the
 // WebView IPC. The Rust side registers exactly two commands, `ipc_dispatch` (returns the engine's
@@ -172,7 +173,7 @@ test("converter output is saved through the shell and reports cancellation hones
       return outcome;
     },
   });
-  userClick(document.querySelector('.mod-btn[data-module="CONV"]'));
+  switchModule(document, "CONV");
   await flushAsyncTurns(6);
   userClick(document.getElementById("btn-run-convert"));
   await flushAsyncTurns(12);

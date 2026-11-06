@@ -1,0 +1,443 @@
+(function (host) {
+  "use strict";
+
+  // Per-document windows (PD-088). Every window hosts exactly one document, the converter, or the
+  // start screen, chosen by its launch parameters (`?module=DOC|HWP|SHEET|SLIDE|PDF|CONV|START` and a
+  // window id `win`). In the desktop shell the Rust side creates windows, shows the native open
+  // dialog, reads files and tracks paths; this page only ever sees display names, kinds and bytes.
+  // In the developer-only `--serve` mode the same model is emulated with `window.open`.
+
+  const MODULES = Object.freeze(["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"]);
+  const START = "START";
+  const APP_TITLE = "EasyOffice";
+  const UNTITLED = "제목 없음";
+  const DIRTY_MARK = "● ";
+  const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+  const EXTENSION_KINDS = Object.freeze({
+    DOC: ["docx", "doc", "odt", "rtf", "md", "markdown", "txt"],
+    HWP: ["hwp", "hwpx", "hwt", "hwtx"],
+    SHEET: ["xlsx", "xls", "ods", "csv", "tsv"],
+    SLIDE: ["pptx", "ppt", "ppsx", "odp"],
+    PDF: ["pdf"],
+  });
+  const POPUP_FEATURES = "popup=yes,width=1280,height=860";
+
+  function kindForFileName(name) {
+    const m = /\.([A-Za-z0-9]+)$/.exec(String(name || ""));
+    const ext = m ? m[1].toLowerCase() : "";
+    return Object.keys(EXTENSION_KINDS).find((kind) => EXTENSION_KINDS[kind].includes(ext)) || null;
+  }
+
+  function parseLaunch(search) {
+    const params = new URLSearchParams(String(search || ""));
+    const raw = String(params.get("module") || "").toUpperCase();
+    const windowId = String(params.get("win") || "");
+    const handoff = String(params.get("handoff") || "");
+    return {
+      module: MODULES.includes(raw) || raw === START ? raw : null,
+      windowId: ID_PATTERN.test(windowId) ? windowId : "",
+      handoff: ID_PATTERN.test(handoff) ? handoff : "",
+    };
+  }
+
+  function formatWindowTitle(name, dirty) {
+    const shown = String(name || "").trim() || UNTITLED;
+    return (dirty ? DIRTY_MARK : "") + shown + " — " + APP_TITLE;
+  }
+
+  function baseName(raw) {
+    return String(raw || "").split(/[\\/]/).pop().trim();
+  }
+
+  function randomId(env) {
+    const c = env.crypto;
+    if (c && typeof c.randomUUID === "function") return "w" + c.randomUUID().replaceAll("-", "").slice(0, 16);
+    return "w" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function isRecentEntry(item) {
+    return Boolean(item) && ID_PATTERN.test(String(item.id)) && typeof item.name === "string" &&
+      item.name !== "" && MODULES.includes(item.kind);
+  }
+
+  function createWindowBridge(deps) {
+    const { document } = deps;
+    const env = deps.env || host;
+    const desktop = deps.desktopBridge;
+    const search = env.location && typeof env.location.search === "string" ? env.location.search : null;
+    // A host without a query string (unit-test hosts) behaves as one unmanaged document window.
+    const managed = search !== null;
+    const launch = managed ? parseLaunch(search) : { module: null, windowId: "", handoff: "" };
+    const module = launch.module || (managed ? START : "DOC");
+    const isStart = module === START;
+    const handoffs = new Map();
+    // Document names (opened or saved file names) per module; a managed window only ever has its own.
+    let titles = {};
+    let dirty = false;
+    let lastReported = "";
+    let closePrompt = null;
+
+    // Window commands exist only for managed windows; an unmanaged host never calls them.
+    const desktopAvailable = () => managed && Boolean(desktop && desktop.isAvailable());
+    const popupAvailable = () => {
+      const proto = env.location && env.location.protocol;
+      return managed && (proto === "http:" || proto === "https:") && typeof env.open === "function";
+    };
+    const canSpawnWindows = () => managed && (desktopAvailable() || popupAvailable());
+    const shell = (key, args) => desktop.windowCommand(key, args);
+
+    function feedback(message) {
+      if (typeof deps.setFeedback === "function") deps.setFeedback(message);
+    }
+
+    function closeMenus() {
+      for (const el of document.querySelectorAll(".menu-item.open")) el.classList.remove("open");
+    }
+
+    // ---- title and state -------------------------------------------------------------------
+
+    const activeKind = () => (typeof deps.getActiveModule === "function" ? deps.getActiveModule() : module);
+
+    // Managed windows name an unsaved document "제목 없음"; the unmanaged single-page host keeps
+    // the older fallback so saved files still get their module-specific default name.
+    function getDocumentName(mod) {
+      return titles[mod || activeKind()] || (managed ? UNTITLED : "");
+    }
+
+    function refresh() {
+      const name = getDocumentName() || UNTITLED;
+      document.title = isStart ? APP_TITLE : formatWindowTitle(name, dirty);
+      if (isStart || !desktopAvailable()) return;
+      const key = JSON.stringify([name, dirty]);
+      if (key === lastReported) return;
+      lastReported = key;
+      void shell("reportWindowState", { name, dirty }).catch(() => {
+        lastReported = "";
+      });
+    }
+
+    function setDocumentName(next, mod) {
+      const cleaned = baseName(next);
+      titles = { ...titles, [mod || activeKind()]: cleaned };
+      if (!cleaned) delete titles[mod || activeKind()];
+      refresh();
+    }
+
+    // Undo/redo and restored sessions carry the names with the rest of the document state.
+    const getTitles = () => ({ ...titles });
+    function applyTitles(next) {
+      if (!next || typeof next !== "object") return;
+      titles = {};
+      for (const [mod, title] of Object.entries(next)) {
+        if (typeof title === "string" && title) titles[mod] = baseName(title);
+      }
+      refresh();
+    }
+
+    function setDirty(next) {
+      dirty = Boolean(next);
+      refresh();
+    }
+
+    // ---- spawning windows ------------------------------------------------------------------
+
+    function popupUrl(kind, id, handoff) {
+      return "?module=" + kind + "&win=" + id + (handoff ? "&handoff=" + handoff : "");
+    }
+
+    function openPopup(kind, handoff) {
+      const id = randomId(env);
+      env.open(popupUrl(kind, id, handoff), "eo-" + id, POPUP_FEATURES);
+    }
+
+    // The start window has done its job once a document window exists.
+    function finishStartWindow() {
+      if (isStart && desktopAvailable()) void closeWindow();
+    }
+
+    async function newDocument(kind) {
+      const wanted = String(kind || "").toUpperCase();
+      if (!MODULES.includes(wanted)) throw new Error("알 수 없는 문서 종류입니다: " + kind);
+      if (desktopAvailable()) {
+        await shell("openDocumentWindow", { kind: wanted });
+        finishStartWindow();
+        return true;
+      }
+      if (popupAvailable()) {
+        openPopup(wanted, "");
+        return true;
+      }
+      return false;
+    }
+
+    async function spawnWithFile(file) {
+      const fileName = baseName(file && file.name);
+      const kind = kindForFileName(fileName);
+      if (!kind) throw new Error("지원하지 않는 파일 형식입니다 (" + (fileName || "이름 없음") + ")");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const handoff = randomId(env);
+      handoffs.set(handoff, { name: fileName, bytes });
+      openPopup(kind, handoff);
+    }
+
+    function pickFileForPopup() {
+      return new Promise((resolve, reject) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.addEventListener("change", () => {
+          const file = input.files && input.files[0];
+          if (!file) return resolve({ status: "cancelled" });
+          spawnWithFile(file).then(() => resolve({ status: "opened" }), reject);
+          return undefined;
+        });
+        input.click();
+      });
+    }
+
+    async function openFile() {
+      if (desktopAvailable()) {
+        const res = await shell("openFileInNewWindow", {});
+        if (res && (res.status === "opened" || res.status === "focused")) finishStartWindow();
+        return res;
+      }
+      if (popupAvailable()) return pickFileForPopup();
+      return null;
+    }
+
+    async function openRecent(id) {
+      if (!desktopAvailable()) return null;
+      const res = await shell("openRecentDocument", { id: String(id) });
+      if (res && (res.status === "opened" || res.status === "focused")) finishStartWindow();
+      return res;
+    }
+
+    // Serve-mode child windows pick their bytes up from the opener; the desktop shell queues them in Rust.
+    async function takePendingOpen() {
+      if (desktopAvailable()) {
+        const res = await shell("takePendingOpen", {});
+        if (!res || typeof res.base64 !== "string" || !res.name) return null;
+        const bin = env.atob(res.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        return { name: baseName(res.name), bytes };
+      }
+      const opener = env.opener;
+      if (!launch.handoff || !opener || typeof opener.__EASYOFFICE_TAKE_HANDOFF__ !== "function") return null;
+      return opener.__EASYOFFICE_TAKE_HANDOFF__(launch.handoff) || null;
+    }
+
+    function takeHandoff(id) {
+      const entry = handoffs.get(id);
+      handoffs.delete(id);
+      return entry || null;
+    }
+
+    // ---- recent documents ------------------------------------------------------------------
+
+    function renderRecentButtons(container, entries, className) {
+      for (const old of Array.from(container.querySelectorAll("[data-recent-id]"))) old.remove();
+      for (const entry of entries) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = className;
+        btn.dataset.recentId = entry.id;
+        btn.title = entry.name;
+        btn.textContent = entry.name;
+        btn.addEventListener("click", (ev) => {
+          if (ev.stopPropagation) ev.stopPropagation();
+          closeMenus();
+          openRecent(entry.id).catch((err) => feedback("최근 문서 열기 실패: " + (err.message || err)));
+        });
+        container.appendChild(btn);
+      }
+    }
+
+    async function refreshRecents() {
+      let entries = [];
+      if (desktopAvailable()) {
+        try {
+          const list = await shell("listRecentDocuments", {});
+          entries = Array.isArray(list) ? list.filter(isRecentEntry).slice(0, 10) : [];
+        } catch {
+          entries = [];
+        }
+      }
+      const menuList = document.getElementById("recent-menu-list");
+      if (menuList) {
+        renderRecentButtons(menuList, entries, "md-item md-recent");
+        const empty = document.getElementById("recent-menu-empty");
+        if (empty) empty.hidden = entries.length > 0;
+      }
+      const startList = document.getElementById("start-recent-list");
+      if (startList) renderRecentButtons(startList, entries, "start-recent-item");
+      const startSection = document.getElementById("start-recent");
+      if (startSection) startSection.hidden = entries.length === 0;
+      return entries;
+    }
+
+    // ---- closing ---------------------------------------------------------------------------
+
+    async function closeWindow() {
+      if (typeof deps.discardStoredState === "function") deps.discardStoredState();
+      if (desktopAvailable()) await shell("closeCurrentWindow", {});
+      else if (typeof env.close === "function") env.close();
+      return true;
+    }
+
+    function askCloseChoice() {
+      const dialog = document.getElementById("close-confirm-dialog");
+      if (!dialog || typeof dialog.showModal !== "function") {
+        const ok = typeof env.confirm === "function" ? env.confirm("저장하지 않은 변경 사항이 있습니다. 저장하지 않고 닫을까요?") : true;
+        return Promise.resolve(ok ? "discard" : "cancel");
+      }
+      return new Promise((resolve) => {
+        let settled = false;
+        const cleanups = [];
+        const finish = (choice) => {
+          if (settled) return;
+          settled = true;
+          for (const off of cleanups) off();
+          if (dialog.open) dialog.close();
+          resolve(choice);
+        };
+        for (const [id, choice] of [["btn-close-save", "save"], ["btn-close-discard", "discard"], ["btn-close-cancel", "cancel"]]) {
+          const btn = document.getElementById(id);
+          if (!btn) continue;
+          const onClick = () => finish(choice);
+          btn.addEventListener("click", onClick);
+          cleanups.push(() => btn.removeEventListener?.("click", onClick));
+        }
+        const onClose = () => finish("cancel");
+        dialog.addEventListener("close", onClose);
+        cleanups.push(() => dialog.removeEventListener?.("close", onClose));
+        dialog.showModal();
+      });
+    }
+
+    async function runCloseRequest() {
+      if (!deps.isDirty()) return closeWindow();
+      const choice = await askCloseChoice();
+      if (choice === "cancel") return false;
+      if (choice === "save") {
+        const saved = await deps.save();
+        if (saved === false) {
+          feedback("저장하지 못해 창을 닫지 않았습니다");
+          return false;
+        }
+      }
+      return closeWindow();
+    }
+
+    // One prompt at a time: a second close request while the dialog is open returns the same answer.
+    function requestClose() {
+      if (closePrompt) return closePrompt;
+      closePrompt = runCloseRequest().finally(() => {
+        closePrompt = null;
+      });
+      return closePrompt;
+    }
+
+    // ---- DOM -------------------------------------------------------------------------------
+
+    function report(promise, label) {
+      promise.catch((err) => feedback(label + ": " + ((err && err.message) || String(err))));
+    }
+
+    function bindUi() {
+      for (const el of document.querySelectorAll("[data-window-new]")) {
+        el.addEventListener("click", (ev) => {
+          if (ev.stopPropagation) ev.stopPropagation();
+          closeMenus();
+          report(newDocument(el.dataset.windowNew), "새 문서를 열지 못했습니다");
+        });
+      }
+      for (const el of document.querySelectorAll("[data-window-close]")) {
+        el.addEventListener("click", (ev) => {
+          if (ev.stopPropagation) ev.stopPropagation();
+          closeMenus();
+          report(requestClose(), "창을 닫지 못했습니다");
+        });
+      }
+      env.__EASYOFFICE_CLOSE_REQUEST__ = managed ? () => requestClose() : undefined;
+      if (typeof env.__EASYOFFICE_TAKE_HANDOFF__ === "undefined") env.__EASYOFFICE_TAKE_HANDOFF__ = takeHandoff;
+    }
+
+    // Menu, start screen and Ctrl+O open files in a NEW window (returns whether the bridge handled it).
+    function requestOpenFile() {
+      if (!canSpawnWindows()) return false;
+      openFile().catch((err) => feedback("파일 열기 실패: " + ((err && err.message) || String(err))));
+      return true;
+    }
+
+    // Picker and drop in the --serve emulation spawn a window too; the desktop shell handles drops in Rust.
+    function routeFile(file) {
+      if (!canSpawnWindows() || desktopAvailable()) return false;
+      spawnWithFile(file).catch((err) => feedback("파일 열기 실패: " + ((err && err.message) || String(err))));
+      return true;
+    }
+
+    // A window shows the one module chosen at launch (or the start screen); no module switcher exists.
+    async function applyLaunch(activatePane) {
+      if (!isStart) {
+        if (module !== activeKind()) await activatePane(module);
+        return;
+      }
+      const shellEl = document.getElementById("app");
+      if (shellEl) shellEl.dataset.windowKind = "start";
+      const screen = document.getElementById("start-screen");
+      if (screen) screen.hidden = false;
+    }
+
+    // The desktop shell queues the bytes of the file this window was opened for; take them once.
+    async function loadPending(openBytes) {
+      if (isStart) return;
+      const pending = await takePendingOpen().catch(() => null);
+      if (pending) await openBytes(pending.name, pending.bytes);
+    }
+
+    // Long status texts are clipped with an ellipsis; hovering or focusing one shows the full text.
+    function bindStatusTooltips() {
+      const bar = document.getElementById("status-bar");
+      for (const type of ["mouseover", "focusin"]) {
+        if (!bar) break;
+        bar.addEventListener(type, (ev) => {
+          const el = ev.target;
+          if (el && el.tagName === "SPAN" && el.id && el.textContent) el.setAttribute("title", el.textContent.trim());
+        });
+      }
+    }
+
+    // `EasyOffice.exe --smoke`: the first window runs the HWP round trip and then opens a second
+    // window; that window reports that it loaded and closes itself again.
+    async function runSmoke({ invokeIpc, runHwpSmoke }) {
+      const role = env.__EASYOFFICE_SMOKE__;
+      if (!role) return;
+      if (role === "secondary") {
+        await invokeIpc("scrub_pii", "EASYOFFICE_SMOKE_WINDOW_OK " + module).catch(() => null);
+        await closeWindow();
+        return;
+      }
+      await runHwpSmoke();
+      await newDocument("DOC").catch((err) =>
+        invokeIpc("scrub_pii", "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_FAIL 두 번째 창: " + ((err && err.message) || String(err))).catch(() => null)
+      );
+    }
+
+    async function start() {
+      bindUi();
+      refresh();
+      await refreshRecents();
+    }
+
+    return {
+      launch, module, isStart, isManaged: () => managed, canSpawnWindows, desktopAvailable,
+      start, bindUi, refresh, setDocumentName, setDirty, getDocumentName, getTitles, applyTitles,
+      newDocument, openFile, openRecent, spawnWithFile, takePendingOpen, refreshRecents,
+      requestClose, closeWindow, requestOpenFile, routeFile, applyLaunch, loadPending, bindStatusTooltips, runSmoke,
+    };
+  }
+
+  host.__EASYOFFICE_WINDOW_BRIDGE__ = {
+    MODULES, START, UNTITLED, createWindowBridge, parseLaunch, formatWindowTitle, kindForFileName,
+  };
+})(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

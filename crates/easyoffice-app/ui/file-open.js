@@ -368,7 +368,10 @@
       document.querySelectorAll(".menu-item.open").forEach((el) => el.classList.remove("open"));
     }
 
+    // In a managed window (PD-088) opening a file means a new window: `onOpenRequest` handles the
+    // menu/shortcut entry and `routeFile` the picker/drop entry; both fall through to in-place open.
     function openFilePicker() {
+      if (deps.onOpenRequest?.()) return;
       const input = document.getElementById("file-open-input");
       if (!input) return setFeedback("파일 열기 입력을 찾을 수 없습니다");
       input.click();
@@ -379,7 +382,7 @@
       input?.addEventListener("change", () => {
         const file = input.files && input.files[0];
         input.value = "";
-        if (file) void openFile(file);
+        if (file && !deps.routeFile?.(file)) void openFile(file);
       });
       document.querySelectorAll("[data-file-open]").forEach((el) => {
         el.addEventListener("click", (ev) => {
@@ -410,6 +413,7 @@
         shell.classList.remove("eo-drop-active");
         const files = Array.from(ev.dataTransfer.files || []);
         if (files.length === 0) return;
+        if (getActiveModule() !== "CONV" && deps.routeFile?.(files[0])) return;
         const pending = getActiveModule() === "CONV" ? setConverterSource(files[0]) : openFile(files[0]);
         void pending.then(() => {
           if (files.length > 1) {

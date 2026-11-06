@@ -315,6 +315,9 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     }
     let html_asset = include_str!("../ui/index.html");
     let css_asset = include_str!("../ui/styles.css");
+    let shell_css_asset = include_str!("../ui/shell.css");
+    let icons_asset = include_str!("../ui/icons.js");
+    let window_bridge_asset = include_str!("../ui/window-bridge.js");
     let sheet_utils_asset = include_str!("../ui/sheet-utils.js");
     let pii_scrubber_asset = include_str!("../ui/pii-dom-scrubber.js");
     let sheet_store_asset = include_str!("../ui/sheet-store.js");
@@ -340,6 +343,12 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let js_asset = include_str!("../ui/app.js");
     if !html_asset.contains("EasyOffice")
         || !css_asset.contains("#5C6BC0")
+        || !shell_css_asset.contains("--eo-chrome-bg")
+        || !icons_asset.contains("__EASYOFFICE_ICONS__")
+        || !window_bridge_asset.contains("__EASYOFFICE_WINDOW_BRIDGE__")
+        || !html_asset.contains("./shell.css")
+        || !html_asset.contains("./icons.js")
+        || !html_asset.contains("./window-bridge.js")
         || !sheet_utils_asset.contains("__EASYOFFICE_SHEET_UTILS__")
         || !pii_scrubber_asset.contains("__EASYOFFICE_CREATE_PII_SCRUBBER__")
         || !sheet_store_asset.contains("__EASYOFFICE_CREATE_SHEET_STORE__")

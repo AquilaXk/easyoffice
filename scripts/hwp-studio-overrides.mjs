@@ -19,7 +19,13 @@ export const UPSTREAM_STUDIO_REL = "third_party/rhwp/rhwp-studio";
 const STRATEGIES = new Set(["extension", "fork", "contribution"]);
 const SHA256_RE = /^[0-9a-f]{64}$/;
 /** Overlay source files that are not upstream overrides. */
-const OVERLAY_NON_OVERRIDE = new Set(["src/eo-overrides.css", "src/style.css", "src/vite-env.d.ts"]);
+const OVERLAY_NON_OVERRIDE = new Set([
+  "src/eo-overrides.css",
+  "src/style.css",
+  "src/vite-env.d.ts",
+  // EasyOffice-only module (no upstream counterpart): shell shortcut forwarding over the embed port.
+  "src/embed/shell-shortcuts.ts",
+]);
 
 export function normalizedSha256(file) {
   const text = fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
