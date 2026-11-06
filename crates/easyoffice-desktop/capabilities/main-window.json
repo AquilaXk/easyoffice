@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "The EasyOffice main window may only call the engine IPC dispatcher and the save-file command. No core, shell, file-system, HTTP, or dialog permissions are exposed to the WebView.",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["allow-ipc-dispatch", "allow-save-document-file"]
+}

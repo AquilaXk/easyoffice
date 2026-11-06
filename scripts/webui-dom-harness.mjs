@@ -28,6 +28,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-store.js",
   "../crates/easyoffice-app/ui/ribbon-catalog.js",
   "../crates/easyoffice-app/ui/save-payload.js",
+  "../crates/easyoffice-app/ui/desktop-bridge.js",
   "../crates/easyoffice-app/ui/workspace-tools.js",
   "../crates/easyoffice-app/ui/workspace-panels.js",
   "../crates/easyoffice-app/ui/sheet-controller.js",
@@ -657,6 +658,22 @@ export async function flushAsyncTurns(count = 6) {
   }
 }
 
+// Desktop shell stub. `tauriInternals` installs a raw `__TAURI_INTERNALS__` object (bridge tests);
+// `tauriInvoke(command, { payload })` is a per-engine-command convenience handler that is routed
+// through the shell's single `ipc_dispatch` command exactly like the real WebView bridge.
+function resolveShellInternals(options) {
+  if (options.tauriInternals) return options.tauriInternals;
+  if (!options.tauriInvoke) return undefined;
+  return {
+    invoke: async (shellCommand, args = {}) => {
+      if (shellCommand !== "ipc_dispatch") {
+        throw { status: "error", message: "등록되지 않은 데스크톱 셸 명령: " + shellCommand };
+      }
+      return options.tauriInvoke(args.command, { payload: args.payload });
+    },
+  };
+}
+
 export async function createWorkspaceHarness(options = {}) {
   const html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
   const document = new MiniDocument(html);
@@ -731,7 +748,7 @@ export async function createWorkspaceHarness(options = {}) {
       const idx = fns.indexOf(fn);
       if (idx >= 0) fns.splice(idx, 1);
     },
-    __TAURI_INTERNALS__: options.tauriInvoke ? { invoke: options.tauriInvoke } : undefined,
+    __TAURI_INTERNALS__: resolveShellInternals(options),
   };
 
   let offlineHandlers = null;
@@ -770,7 +787,7 @@ export async function createWorkspaceHarness(options = {}) {
   }
   modulesToLoad.push(...PROD_APP_SCRIPTS);
 
-  if (!options.disconnectedHost && !options.tauriInvoke && !options.httpFetch) {
+  if (!options.disconnectedHost && !options.tauriInvoke && !options.tauriInternals && !options.httpFetch) {
     hostEnv.__EASYOFFICE_TEST_IPC__ =
       options.testIpc ||
       (async (command, payload) => {
@@ -805,6 +822,7 @@ export async function createWorkspaceHarness(options = {}) {
     __EASYOFFICE_CREATE_SHEET_STORE__: hostEnv.__EASYOFFICE_CREATE_SHEET_STORE__,
     __EASYOFFICE_RIBBON_CATALOG__: hostEnv.__EASYOFFICE_RIBBON_CATALOG__,
     __EASYOFFICE_INVOKE_BACKEND__: hostEnv.__EASYOFFICE_INVOKE_BACKEND__,
+    __EASYOFFICE_DESKTOP_BRIDGE__: hostEnv.__EASYOFFICE_DESKTOP_BRIDGE__,
     dispatchWindowKeydown: (ev) => {
       const eventObj = {
         type: "keydown",

@@ -1,4 +1,4 @@
-name: Release macOS Package
+name: Release Packages
 
 on:
   push:
@@ -44,7 +44,7 @@ jobs:
         run: node scripts/verify-macos-plist.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs
 
       - name: Run deterministic test suite before packaging
         run: swift test
@@ -81,16 +81,16 @@ jobs:
           if-no-files-found: error
 
   build-windows-release:
-    name: Build Windows x64 Release Artifacts
+    name: Build Windows x64 Installer & Release Artifacts
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js for repository hygiene guard
+      - name: Setup Node.js for repository hygiene guard and the Tauri CLI
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -99,15 +99,12 @@ jobs:
         run: node scripts/check-repo-hygiene.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs
 
       - name: Run Rust workspace test suite and self-test
         run: |
           cargo test --workspace
           cargo run -p easyoffice-app -- --self-test
-
-      - name: Build optimized Rust release binaries
-        run: cargo build --workspace --release
 
       - name: Resolve release version and tag
         id: meta
@@ -126,21 +123,53 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Stage Windows x64 CLI and local WebUI preview bundle
+      # Prebuilt Tauri CLI (major 2) from npm; it builds crates/easyoffice-desktop in release mode
+      # with the WebUI embedded and packages it with NSIS. The release version overrides the
+      # installer version so the asset name, installer metadata, and tag agree.
+      - name: Build EasyOffice desktop shell and NSIS installer
+        working-directory: crates/easyoffice-desktop
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: npx --yes @tauri-apps/cli@2 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}"
+
+      - name: Smoke test desktop shell window (embedded WebUI + in-process IPC round trip)
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "target/release/EasyOffice.exe" -ArgumentList @("--smoke") -PassThru
+          $null = $proc.Handle # cache the process handle so ExitCode stays readable after exit
+          if (-not $proc.WaitForExit(90000)) {
+            Stop-Process -Id $proc.Id -Force
+            throw "Desktop shell smoke test timed out"
+          }
+          if ($proc.ExitCode -ne 0) {
+            throw "Desktop shell smoke test failed with exit code $($proc.ExitCode)"
+          }
+
+      - name: Build optimized engine CLI for the developer preview archive
+        run: cargo build -p easyoffice-app --release
+
+      - name: Stage Windows installer and developer CLI preview bundle
         shell: bash
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           mkdir -p dist/windows-stage/ui
+          INSTALLER="$(ls target/release/bundle/nsis/EasyOffice_*_x64-setup.exe | head -n 1)"
+          test -n "$INSTALLER"
+          cp "$INSTALLER" "dist/EasyOffice-${VERSION}-windows-x64-setup.exe"
           cp target/release/easyoffice-app.exe dist/windows-stage/
           cp -R crates/easyoffice-app/ui/* dist/windows-stage/ui/
           cat > dist/windows-stage/README-WINDOWS.txt <<EOF
-          EasyOffice v${VERSION} Windows x64 CLI & Local WebUI Preview
+          EasyOffice v${VERSION} Windows x64 Developer CLI & Local WebUI Preview
+
+          End users should install EasyOffice-${VERSION}-windows-x64-setup.exe instead and
+          start EasyOffice from the Start menu. This archive is for developers.
 
           1. Run deterministic engine self-test
              .\easyoffice-app.exe --self-test
 
-          2. Start loopback WebUI workspace server (binds 127.0.0.1 only)
+          2. Start loopback WebUI preview server (binds 127.0.0.1 only)
              .\easyoffice-app.exe --serve 8787
              Open http://127.0.0.1:8787/ in a modern desktop browser.
           EOF
@@ -175,20 +204,22 @@ jobs:
             }
           }
 
-      - name: Package EasyOffice Windows x64 CLI & serve preview archive and SHA-256 checksum
+      - name: Package developer CLI preview archive and SHA-256 checksums
         shell: bash
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
+          INSTALLER="EasyOffice-${VERSION}-windows-x64-setup.exe"
           ARCHIVE="EasyOffice-${VERSION}-windows-x64-cli-serve-preview.zip"
           powershell -NoProfile -Command "Compress-Archive -Path 'dist/windows-stage/*' -DestinationPath 'dist/${ARCHIVE}' -Force"
-          (cd dist && sha256sum "${ARCHIVE}" > "SHA256SUMS-windows-x64.txt")
+          (cd dist && sha256sum "${INSTALLER}" "${ARCHIVE}" > "SHA256SUMS-windows-x64.txt")
 
       - name: Upload Windows x64 release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-artifacts
           path: |
+            dist/EasyOffice-${{ steps.meta.outputs.version }}-windows-x64-setup.exe
             dist/EasyOffice-${{ steps.meta.outputs.version }}-windows-x64-cli-serve-preview.zip
             dist/SHA256SUMS-windows-x64.txt
           if-no-files-found: error
@@ -214,23 +245,20 @@ jobs:
           VERSION: ${{ needs.release-macos.outputs.version }}
           TARGET_SHA: ${{ github.sha }}
         run: |
+          ASSETS=(
+            "release-assets/EasyOffice-${VERSION}-macos.dmg"
+            "release-assets/EasyOffice-${VERSION}-macos.zip"
+            "release-assets/SHA256SUMS.txt"
+            "release-assets/EasyOffice-${VERSION}-windows-x64-setup.exe"
+            "release-assets/EasyOffice-${VERSION}-windows-x64-cli-serve-preview.zip"
+            "release-assets/SHA256SUMS-windows-x64.txt"
+          )
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" \
-              "release-assets/EasyOffice-${VERSION}-macos.dmg" \
-              "release-assets/EasyOffice-${VERSION}-macos.zip" \
-              "release-assets/SHA256SUMS.txt" \
-              "release-assets/EasyOffice-${VERSION}-windows-x64-cli-serve-preview.zip" \
-              "release-assets/SHA256SUMS-windows-x64.txt" \
-              --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" \
-              "release-assets/EasyOffice-${VERSION}-macos.dmg" \
-              "release-assets/EasyOffice-${VERSION}-macos.zip" \
-              "release-assets/SHA256SUMS.txt" \
-              "release-assets/EasyOffice-${VERSION}-windows-x64-cli-serve-preview.zip" \
-              "release-assets/SHA256SUMS-windows-x64.txt" \
+            gh release create "$TAG" "${ASSETS[@]}" \
               --target "$TARGET_SHA" \
-              --title "EasyOffice v${VERSION} (macOS & Windows CLI/WebUI Preview)" \
+              --title "EasyOffice v${VERSION} (macOS & Windows)" \
               --generate-notes \
               --repo "$GITHUB_REPOSITORY"
           fi

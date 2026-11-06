@@ -32,12 +32,20 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/sheet-store.js",
   "crates/easyoffice-app/ui/ribbon-catalog.js",
   "crates/easyoffice-app/ui/save-payload.js",
+  "crates/easyoffice-app/ui/desktop-bridge.js",
   "crates/easyoffice-app/ui/workspace-tools.js",
   "crates/easyoffice-app/ui/workspace-panels.js",
   "crates/easyoffice-app/ui/sheet-controller.js",
   "crates/easyoffice-app/ui/ribbon-history.js",
   "crates/easyoffice-app/ui/workspace-session.js",
   "crates/easyoffice-app/ui/app.js",
+  "crates/easyoffice-desktop/Cargo.toml",
+  "crates/easyoffice-desktop/build.rs",
+  "crates/easyoffice-desktop/src/main.rs",
+  "crates/easyoffice-desktop/tauri.conf.json",
+  "crates/easyoffice-desktop/capabilities/main-window.json",
+  "crates/easyoffice-desktop/icons/icon.ico",
+  "scripts/generate-desktop-icons.mjs",
   "Sources/EasyOfficeCore/DocumentSecurityAuditor.swift",
   "fixtures/pii-scrub-vectors.json",
   "fixtures/sheet-coercion-parity.json",
@@ -62,6 +70,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-webui-security-ipc.mjs",
   "scripts/test-webui-session-context.mjs",
   "scripts/test-webui-save-fidelity.mjs",
+  "scripts/test-webui-desktop-bridge.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)
@@ -385,12 +394,69 @@ if (!foundSafeIntStrictBound) {
   );
 }
 
+const DESKTOP_SHELL_MANIFEST = "crates/easyoffice-desktop/Cargo.toml";
+const DESKTOP_SHELL_CONFIG = "crates/easyoffice-desktop/tauri.conf.json";
+const DESKTOP_SHELL_CSP = { "default-src": "'self'", "connect-src": "'self' ipc: http://ipc.localhost" };
+const DESKTOP_SHELL_PERMISSIONS = new Set(["allow-ipc-dispatch", "allow-save-document-file"]);
+
+// Desktop shell guard (PD-074): embedded assets only, the WebUI CSP plus the shell IPC origin,
+// no file associations before document opening exists (#111), and capabilities limited to the
+// two app commands (no core/shell/fs/http/dialog permissions reach the WebView).
+const desktopConfigFull = path.join(ROOT, DESKTOP_SHELL_CONFIG);
+if (fs.existsSync(desktopConfigFull)) {
+  let conf = null;
+  try {
+    conf = JSON.parse(fs.readFileSync(desktopConfigFull, "utf8"));
+  } catch (err) {
+    errors.push(`${DESKTOP_SHELL_CONFIG} is not valid JSON: ${err.message}`);
+  }
+  if (conf) {
+    const security = conf.app?.security || {};
+    if (JSON.stringify(security.csp) !== JSON.stringify(DESKTOP_SHELL_CSP)) {
+      errors.push(`${DESKTOP_SHELL_CONFIG} CSP must be exactly ${JSON.stringify(DESKTOP_SHELL_CSP)}`);
+    }
+    if (security.dangerousDisableAssetCspModification || conf.app?.withGlobalTauri) {
+      errors.push(`${DESKTOP_SHELL_CONFIG} must not disable CSP injection or expose the global shell API`);
+    }
+    if (conf.build?.devUrl || conf.build?.frontendDist !== "../easyoffice-app/ui") {
+      errors.push(`${DESKTOP_SHELL_CONFIG} must load only the embedded ../easyoffice-app/ui assets (no devUrl)`);
+    }
+    if (Array.isArray(conf.bundle?.fileAssociations) && conf.bundle.fileAssociations.length > 0) {
+      errors.push(`${DESKTOP_SHELL_CONFIG} registers file associations before document opening is supported (#111)`);
+    }
+  }
+  const capDir = path.join(ROOT, "crates/easyoffice-desktop/capabilities");
+  for (const name of fs.existsSync(capDir) ? fs.readdirSync(capDir) : []) {
+    const capRel = `crates/easyoffice-desktop/capabilities/${name}`;
+    let cap = null;
+    try {
+      cap = JSON.parse(fs.readFileSync(path.join(capDir, name), "utf8"));
+    } catch (err) {
+      errors.push(`${capRel} is not valid JSON: ${err.message}`);
+      continue;
+    }
+    if (cap.remote) errors.push(`${capRel} must not grant IPC to remote URLs`);
+    for (const perm of cap.permissions || []) {
+      const id = typeof perm === "string" ? perm : perm?.identifier;
+      if (!DESKTOP_SHELL_PERMISSIONS.has(id)) {
+        errors.push(`${capRel} grants permission '${id}' beyond the two EasyOffice shell commands`);
+      }
+    }
+  }
+}
 const POST_185_RUST_APIS = [".is_multiple_of(", ".as_chunks(", ".floor_char_boundary("];
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
   if (rel.startsWith("crates/") && rel.endsWith("/Cargo.toml")) {
     const tomlText = fs.readFileSync(file, "utf8");
-    if (!tomlText.includes("rust-version.workspace = true")) {
+    if (rel === DESKTOP_SHELL_MANIFEST) {
+      // The desktop shell's floor is set by its Tauri v2 dependencies, not by the engine crates;
+      // it must declare that floor explicitly and may never go below the workspace MSRV (PD-074).
+      const declared = tomlText.match(/^rust-version\s*=\s*"(\d+)\.(\d+)"/m);
+      if (!declared || Number(declared[1]) !== 1 || Number(declared[2]) < 85) {
+        errors.push(`Crate manifest ${rel} must declare an explicit rust-version >= 1.85 (Tauri toolchain floor).`);
+      }
+    } else if (!tomlText.includes("rust-version.workspace = true")) {
       errors.push(`Crate manifest ${rel} is missing 'rust-version.workspace = true' for MSRV 1.85 enforcement.`);
     }
   }
@@ -480,10 +546,13 @@ if (
     "77종",
     "13종 IPC",
     "13종 명령",
-    "tauri.conf.json",
     ".msi",
     ".nsis",
   ];
+  // Docs may name the shell configuration only while it actually exists (PD-074).
+  if (!fs.existsSync(path.join(ROOT, DESKTOP_SHELL_CONFIG))) {
+    STALE_DOC_TOKENS.push("tauri.conf.json");
+  }
   const DOC_SYNC_TARGETS = [
     "README.md",
     "README.ko.md",

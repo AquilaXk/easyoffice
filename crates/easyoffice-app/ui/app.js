@@ -5,6 +5,7 @@
   const URL = host.URL;
 
   const ribbonCatalog = host.__EASYOFFICE_RIBBON_CATALOG__;
+  const desktopBridge = host.__EASYOFFICE_DESKTOP_BRIDGE__;
   const {
     RIBBON_CATEGORY_TOOLS,
     MODULE_SHORT_BADGES,
@@ -92,13 +93,13 @@
         throw new Error(msg);
       }
     }
-    if (host.__TAURI_INTERNALS__ && typeof host.__TAURI_INTERNALS__.invoke === "function") {
+    if (desktopBridge.isAvailable()) {
       try {
-        const raw = await host.__TAURI_INTERNALS__.invoke(command, { payload });
+        const res = await desktopBridge.invokeIpc(command, payload);
         setEngineStatusText("엔진: 데스크톱 연결됨");
-        return typeof raw === "string" ? JSON.parse(raw) : raw;
-      } catch (tauriErr) {
-        const msg = tauriErr?.message || String(tauriErr);
+        return res;
+      } catch (shellErr) {
+        const msg = shellErr?.message || String(shellErr);
         reportIpcFailure(command, msg);
         throw new Error(msg);
       }
@@ -607,9 +608,7 @@
               JSON.stringify({ sourceFormat: src, targetFormat: dst, title: "통합_변환_문서", ...content })
             );
             const box = document.getElementById("conv-result-box");
-            const downloaded =
-              Boolean(res?.convertedBase64) &&
-              workspacePanels.triggerBase64Download(res.convertedBase64, "통합_변환_문서", dst);
+            const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, "통합_변환_문서", dst);
             if (box && res) {
               box.textContent =
                 "[" +
@@ -624,7 +623,7 @@
                 res.outputBytes +
                 "B) · " +
                 workspacePanels.describeConversionSpec(res) +
-                (downloaded ? "" : " · 다운로드 실패: 변환 결과 파일을 받지 못했습니다");
+                workspacePanels.describeDeliveryFailure(delivery, " · ");
             }
           });
         void runConvert().catch(() => {});

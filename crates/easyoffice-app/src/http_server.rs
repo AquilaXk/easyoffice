@@ -16,13 +16,14 @@ const PII_DOM_SCRUBBER_JS: &str = include_str!("../ui/pii-dom-scrubber.js");
 const SHEET_STORE_JS: &str = include_str!("../ui/sheet-store.js");
 const RIBBON_CATALOG_JS: &str = include_str!("../ui/ribbon-catalog.js");
 const SAVE_PAYLOAD_JS: &str = include_str!("../ui/save-payload.js");
+const DESKTOP_BRIDGE_JS: &str = include_str!("../ui/desktop-bridge.js");
 const WORKSPACE_TOOLS_JS: &str = include_str!("../ui/workspace-tools.js");
 const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
 const WORKSPACE_SESSION_JS: &str = include_str!("../ui/workspace-session.js");
 const APP_JS: &str = include_str!("../ui/app.js");
-const FAVICON_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#5C6BC0\"/><path d=\"M9 7h10l4 4v14H9V7z\" fill=\"#FFFFFF\"/><path d=\"M19 7v4h4\" fill=\"#DDE2F6\"/><rect x=\"12\" y=\"14\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/><rect x=\"12\" y=\"18\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/></svg>";
+const FAVICON_SVG: &str = include_str!("../ui/favicon.svg");
 
 /// Body ceiling for static routes and the request-header block.
 pub const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
@@ -300,6 +301,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             SAVE_PAYLOAD_JS.to_string(),
+        ),
+        ("GET", "/desktop-bridge.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            DESKTOP_BRIDGE_JS.to_string(),
         ),
         ("GET", "/workspace-tools.js") => (
             "200 OK",

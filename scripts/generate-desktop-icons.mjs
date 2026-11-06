@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+/**
+ * Generates the Windows desktop shell icons (PNG + multi-size ICO) from the EasyOffice favicon
+ * design (`crates/easyoffice-app/ui/favicon.svg`: lavender #5C6BC0 tile with a white document
+ * glyph). The glyph is rasterized analytically with 8x8 supersampling, so no image toolchain is
+ * needed and the output is byte-for-byte deterministic.
+ *
+ *   node scripts/generate-desktop-icons.mjs          # (re)write crates/easyoffice-desktop/icons
+ *   node scripts/generate-desktop-icons.mjs --check  # fail if committed icons are out of date
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import zlib from "node:zlib";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ICON_DIR = path.join(ROOT, "crates/easyoffice-desktop/icons");
+
+const LAVENDER = [0x5c, 0x6b, 0xc0];
+const WHITE = [0xff, 0xff, 0xff];
+const FOLD = [0xdd, 0xe2, 0xf6];
+
+// Same geometry as favicon.svg (32x32 viewBox), evaluated front-to-back.
+function sampleColor(x, y) {
+  const inLine = (top) => x >= 12 && x <= 20 && y >= top && y <= top + 1.8;
+  const inPage = x >= 9 && x <= 23 && y >= 7 && y <= 25 && x - y <= 12;
+  if (inPage && (inLine(14) || inLine(18))) return LAVENDER;
+  if (inPage && x >= 19 && y <= 11) return FOLD;
+  if (inPage) return WHITE;
+  if (insideRoundedTile(x, y)) return LAVENDER;
+  return null;
+}
+
+function insideRoundedTile(x, y) {
+  const r = 6;
+  if (x < 0 || y < 0 || x > 32 || y > 32) return false;
+  const cx = x < r ? r : x > 32 - r ? 32 - r : x;
+  const cy = y < r ? r : y > 32 - r ? 32 - r : y;
+  return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
+}
+
+function rasterize(size) {
+  const ss = 8;
+  const rgba = Buffer.alloc(size * size * 4);
+  const scale = 32 / size;
+  for (let py = 0; py < size; py += 1) {
+    for (let px = 0; px < size; px += 1) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let covered = 0;
+      for (let sy = 0; sy < ss; sy += 1) {
+        for (let sx = 0; sx < ss; sx += 1) {
+          const c = sampleColor((px + (sx + 0.5) / ss) * scale, (py + (sy + 0.5) / ss) * scale);
+          if (!c) continue;
+          r += c[0];
+          g += c[1];
+          b += c[2];
+          covered += 1;
+        }
+      }
+      const o = (py * size + px) * 4;
+      if (covered > 0) {
+        rgba[o] = Math.round(r / covered);
+        rgba[o + 1] = Math.round(g / covered);
+        rgba[o + 2] = Math.round(b / covered);
+        rgba[o + 3] = Math.round((covered / (ss * ss)) * 255);
+      }
+    }
+  }
+  return rgba;
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const typed = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(typed));
+  return Buffer.concat([len, typed, crc]);
+}
+
+function scanlines(size) {
+  const rgba = rasterize(size);
+  const raw = Buffer.alloc(size * (size * 4 + 1));
+  for (let y = 0; y < size; y += 1) {
+    raw[y * (size * 4 + 1)] = 0;
+    rgba.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
+  }
+  return raw;
+}
+
+// Decoded IHDR + scanlines of a PNG produced by this script. Comparing decoded pixels (not the
+// compressed bytes) keeps `--check` stable across zlib builds of different Node.js versions.
+function decodePngPixels(png) {
+  let pos = 8;
+  let ihdr = null;
+  const idat = [];
+  while (pos + 8 <= png.length) {
+    const len = png.readUInt32BE(pos);
+    const type = png.toString("ascii", pos + 4, pos + 8);
+    const data = png.subarray(pos + 8, pos + 8 + len);
+    if (type === "IHDR") ihdr = Buffer.from(data);
+    if (type === "IDAT") idat.push(data);
+    pos += 12 + len;
+  }
+  return Buffer.concat([ihdr || Buffer.alloc(0), zlib.inflateSync(Buffer.concat(idat))]);
+}
+
+function decodeIcoPixels(ico) {
+  const count = ico.readUInt16LE(4);
+  // Directory entries without their byte-size/offset fields (those depend on compression).
+  const parts = [ico.subarray(0, 6 + 16 * count).map((b, i) => (i >= 6 && (i - 6) % 16 >= 8 ? 0 : b))];
+  for (let i = 0; i < count; i += 1) {
+    const len = ico.readUInt32LE(6 + 16 * i + 8);
+    const off = ico.readUInt32LE(6 + 16 * i + 12);
+    parts.push(decodePngPixels(ico.subarray(off, off + len)));
+  }
+  return Buffer.concat(parts);
+}
+
+function encodePng(size) {
+  const raw = scanlines(size);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw, { level: 9 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+// ICO container with PNG-compressed entries (supported by Windows Vista and later).
+function encodeIco(sizes) {
+  const images = sizes.map((s) => ({ size: s, data: encodePng(s) }));
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  let offset = 6 + 16 * images.length;
+  const entries = images.map(({ size, data }) => {
+    const e = Buffer.alloc(16);
+    e[0] = size >= 256 ? 0 : size;
+    e[1] = size >= 256 ? 0 : size;
+    e.writeUInt16LE(1, 4); // planes
+    e.writeUInt16LE(32, 6); // bits per pixel
+    e.writeUInt32LE(data.length, 8);
+    e.writeUInt32LE(offset, 12);
+    offset += data.length;
+    return e;
+  });
+  return Buffer.concat([header, ...entries, ...images.map((i) => i.data)]);
+}
+
+const OUTPUTS = {
+  "32x32.png": () => encodePng(32),
+  "128x128.png": () => encodePng(128),
+  "128x128@2x.png": () => encodePng(256),
+  "icon.png": () => encodePng(512),
+  "icon.ico": () => encodeIco([16, 24, 32, 48, 64, 128, 256]),
+};
+
+const checkOnly = process.argv.includes("--check");
+const stale = [];
+fs.mkdirSync(ICON_DIR, { recursive: true });
+for (const [name, build] of Object.entries(OUTPUTS)) {
+  const target = path.join(ICON_DIR, name);
+  const bytes = build();
+  if (checkOnly) {
+    const decode = name.endsWith(".ico") ? decodeIcoPixels : decodePngPixels;
+    if (!fs.existsSync(target) || !decode(fs.readFileSync(target)).equals(decode(bytes))) stale.push(name);
+  } else {
+    fs.writeFileSync(target, bytes);
+    console.log(`wrote ${path.relative(ROOT, target).replaceAll("\\", "/")} (${bytes.length} bytes)`);
+  }
+}
+if (stale.length > 0) {
+  console.error(`Desktop icons are out of date: ${stale.join(", ")}. Run node scripts/generate-desktop-icons.mjs`);
+  process.exit(1);
+}
+if (checkOnly) console.log(`Desktop icons are up to date (${Object.keys(OUTPUTS).length} files).`);

@@ -19,7 +19,7 @@ use crate::{
     EasyOfficeIpcRouter, RibbonCommandRouter, RibbonWorkspaceState,
 };
 
-/// Executes deterministic end-to-end self-tests across all 4 crates and embedded Tauri UI assets.
+/// Executes deterministic end-to-end self-tests across all 4 crates and embedded WebUI assets.
 pub fn run_self_test() -> Result<String, EasyOfficeError> {
     if DocumentFormat::ALL.len() != 20 {
         return Err(EasyOfficeError::CorruptedContainer(
@@ -314,6 +314,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let sheet_store_asset = include_str!("../ui/sheet-store.js");
     let ribbon_catalog_asset = include_str!("../ui/ribbon-catalog.js");
     let save_payload_asset = include_str!("../ui/save-payload.js");
+    let desktop_bridge_asset = include_str!("../ui/desktop-bridge.js");
     let workspace_tools_asset = include_str!("../ui/workspace-tools.js");
     let workspace_panels_asset = include_str!("../ui/workspace-panels.js");
     let sheet_controller_asset = include_str!("../ui/sheet-controller.js");
@@ -327,6 +328,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !sheet_store_asset.contains("__EASYOFFICE_CREATE_SHEET_STORE__")
         || !ribbon_catalog_asset.contains("__EASYOFFICE_RIBBON_CATALOG__")
         || !save_payload_asset.contains("__EASYOFFICE_SAVE_PAYLOAD__")
+        || !desktop_bridge_asset.contains("__EASYOFFICE_DESKTOP_BRIDGE__")
         || !workspace_tools_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_TOOLS__")
         || !workspace_panels_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_PANELS__")
         || !sheet_controller_asset.contains("__EASYOFFICE_CREATE_SHEET_CONTROLLER__")
