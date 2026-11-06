@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { verifyUpstream } from "./verify-rhwp-upstream.mjs";
 
 const ROOT = process.cwd();
 
@@ -75,6 +76,13 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-webui-desktop-bridge.mjs",
   "scripts/test-webui-file-open.mjs",
   "scripts/test-webui-slide-show.mjs",
+  ".gitmodules",
+  "config/rhwp-upstream.json",
+  "scripts/verify-rhwp-upstream.mjs",
+  "scripts/checkout-rhwp.mjs",
+  "scripts/test-rhwp-upstream.mjs",
+  "THIRD_PARTY_NOTICES.md",
+  "docs/rhwp-integration-design.md",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)
@@ -137,6 +145,11 @@ const IGNORED_DIRS = new Set([
 
 const IGNORED_ROOT_FILES = new Set(FORBIDDEN_GIT_PATHS);
 
+// Root-relative paths excluded from the disk walk (PD-076): the read-only rhwp upstream submodule
+// is not EasyOffice-authored; its integrity is pinned by scripts/verify-rhwp-upstream.mjs instead.
+// Nothing else is excluded, and forbidden files are still rejected anywhere in EasyOffice itself.
+const IGNORED_ROOT_PATHS = new Set(["third_party/rhwp"]);
+
 const TEXT_EXTENSIONS = new Set([
   ".md",
   ".swift",
@@ -159,7 +172,7 @@ function walkTrackedCandidateFiles(dir, collected = []) {
     if (IGNORED_DIRS.has(entry.name)) continue;
     const fullPath = path.join(dir, entry.name);
     const relPath = path.relative(ROOT, fullPath).replaceAll("\\", "/");
-    if (IGNORED_ROOT_FILES.has(relPath)) continue;
+    if (IGNORED_ROOT_FILES.has(relPath) || IGNORED_ROOT_PATHS.has(relPath)) continue;
 
     if (entry.isDirectory()) {
       walkTrackedCandidateFiles(fullPath, collected);
@@ -195,13 +208,17 @@ try {
 
   for (const tracked of trackedList) {
     for (const forbidden of FORBIDDEN_GIT_PATHS) {
-      if (tracked === forbidden || tracked.startsWith(forbidden)) {
+      if (tracked === forbidden || tracked.startsWith(forbidden) || tracked.includes(`/${forbidden}`)) {
         errors.push(`Forbidden local-only file is tracked by Git: ${tracked}`);
       }
     }
   }
 } catch {
   // Ignore if git is not initialized
+}
+
+for (const upstreamError of verifyUpstream(ROOT)) {
+  errors.push(`rhwp upstream: ${upstreamError}`);
 }
 
 const files = walkTrackedCandidateFiles(ROOT);

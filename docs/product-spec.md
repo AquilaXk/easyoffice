@@ -17,7 +17,7 @@
 ### 1.1 출력 컨테이너 규격 및 쓰기 호환성 (Rust 변환 엔진, `PD-071`)
 - **XLSX**: `<c>`에는 스키마 속성(`r`, `t`)만 기록하고, 수식 셀의 `<v>`에는 시트 엔진이 계산한 결과를 캐시하며(계산값이 없으면 생략), `workbook.xml`은 `<calcPr fullCalcOnLoad="1"/>`로 열 때 재계산을 요청합니다.
 - **PPTX/PPSX**: 테마(`ppt/theme/theme1.xml`), 마스터 `p:clrMap`, 도형 비시각 속성(`p:nvSpPr`/`p:spPr`/`p:txBody`)을 포함하고, 슬라이드 제목은 제목 개체 틀, 발표자 노트는 노트 슬라이드, 문서 제목은 `docProps/core.xml`에 저장합니다.
-- **HWPX/HWTX**: `mimetype`(첫 엔트리, 무압축), `version.xml`, `settings.xml`, 글꼴·글자/문단 모양·스타일을 정의한 `header.xml`, 첫 문단 `hp:secPr`, `paraPrIDRef`/`charPrIDRef` 참조, `hp:p > hp:run > hp:tbl` 표 구조를 기록합니다.
+- **HWPX/HWTX**: `mimetype`(첫 엔트리, 무압축; 나머지 파트는 DEFLATE, PD-079), `version.xml`, `settings.xml`, 글꼴·글자/문단 모양·스타일을 정의한 `header.xml`, 첫 문단 `hp:secPr`, `paraPrIDRef`/`charPrIDRef` 참조, `hp:p > hp:run > hp:tbl` 표 구조를 기록합니다.
 - **DOCX**: 제목은 `docProps/core.xml`에 기록하고 표마다 `w:tblPr`·`w:tblGrid`를 둡니다.
 - **WebUI 저장 서식 보존 (`PD-073`)**: 문서·한글 저장은 문단 런 서식(굵게·기울임·밑줄·취소선), 문단 정렬·제목 수준·목록과 문서 내 위치의 표를 구조화 블록으로 보내며, DOCX(`w:rPr`/`w:pPr`/`w:pStyle` 제목 스타일), HWPX(`charPr`/`paraPr`/`개요 N` 스타일), ODT·RTF·Markdown은 각 형식의 서식으로 기록합니다. 표 수식 셀(`=SUM(ABOVE)` 등)은 계산값으로 저장하고, 발신 기관 명칭을 임의로 넣지 않습니다. 시트 저장은 모든 시트를 담고, 변환 결과가 없거나 내려받기에 실패하면 "문서 저장 실패"를 표시하며, 파일명은 문서 탭 제목(Windows/macOS 금지 문자·예약 이름 정리)을 따릅니다. 글꼴 이름·크기·색상은 아직 저장하지 않습니다.
 - **WebUI 슬라이드 쇼·슬라이드 관리 (`PD-080`)**: 슬라이드 모듈에서 `F5`는 처음부터, `Shift+F5`는 현재 슬라이드부터 전체 화면 슬라이드 쇼를 시작합니다(전체 화면을 쓸 수 없으면 창 안에서 동작, 텍스트 입력 중에는 브라우저 새로 고침 유지). `→`/`Space`/`PageDown`/클릭 다음, `←`/`PageUp` 이전, `Home`/`End`, `B`/`W` 화면 가리기, `P` 발표자 보기(노트·다음 슬라이드·타이머), `Esc` 종료. 슬라이드 추가(빈 개체 틀)·복제·삭제(실행 취소 가능)·끌어 놓기/`Alt+↑/↓`/우클릭 메뉴 순서 변경, 편집이 즉시 반영되는 썸네일(말줄임·툴팁), 16:9·4:3·A4 비율을 유지하는 스테이지를 제공합니다.

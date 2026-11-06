@@ -35,6 +35,12 @@ jobs:
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
 
+      - name: Verify rhwp upstream pin (no submodule checkout)
+        run: node scripts/verify-rhwp-upstream.mjs
+
+      - name: Run rhwp upstream guard tests
+        run: node --test scripts/test-rhwp-upstream.mjs
+
       - name: Verify macOS LaunchServices Info.plist coverage
         run: node scripts/verify-macos-plist.mjs
 
@@ -83,6 +89,12 @@ jobs:
 
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
+
+      - name: Verify rhwp upstream pin (no submodule checkout)
+        run: node scripts/verify-rhwp-upstream.mjs
+
+      - name: Run rhwp upstream guard tests
+        run: node --test scripts/test-rhwp-upstream.mjs
 
       - name: Verify desktop icons match the generator
         run: node scripts/generate-desktop-icons.mjs --check

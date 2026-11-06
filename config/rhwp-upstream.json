@@ -1,0 +1,24 @@
+{
+  "name": "rhwp",
+  "url": "https://github.com/edwardkim/rhwp.git",
+  "path": "third_party/rhwp",
+  "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+  "version": "0.8.7",
+  "rustToolchain": "1.93.1",
+  "license": "MIT",
+  "sparse": [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/rust-toolchain.toml",
+    "/LICENSE",
+    "/THIRD_PARTY_LICENSES.md",
+    "/src/",
+    "/crates/",
+    "/vendor/svg2pdf/",
+    "/rhwp-studio/",
+    "/assets/fonts/",
+    "/ttfs/opensource/*.txt",
+    "/ttfs/opensource/*.md",
+    "/npm/editor/"
+  ]
+}

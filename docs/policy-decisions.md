@@ -1165,6 +1165,43 @@
 - **Verified by** `cargo test -p easyoffice-formats --test rich_decode_roundtrip`(DOCX·HWPX·ODT·Markdown·TXT·XLSX 다중 시트 수식·BOM CSV·PPTX 디코드→인코드→디코드 동치, 레거시·PDF 평문 적재, 매직 바이트 우선, Word 스타일 제목·번호 목록, DOCX/XLSX/PPTX/HWPX/ODT XXE·ZIP 폭탄·경로 순회·손상 입력 거부), `cargo test -p easyoffice-app convert_open`(decode 응답·모듈 라우팅·격자 절단·원본 바이트 변환·보안 거부), `crates/easyoffice-formats/src/{rich_xml.rs,rich_read_text.rs}` 단위 테스트, `node --test scripts/test-webui-file-open.mjs`(`Ctrl+O`·메뉴·accept, 입력·끌어 놓기, 모듈 라우팅, 수정 확인, 크기·손상 오류, 탭 제목, 실행 취소/다시 실행, 자동 저장 복원, 열기→저장 라운드트립, 변환기 원본), 실서버 `--serve 8795` + 헤드리스 Chrome에서 DOCX·XLSX 열기, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 글꼴·그림·머리말 가져오기, 시트 격자 확장, 비UTF-8 CSV(CP949) 지원, 다중 문서 탭, 데스크톱 셸의 파일 연결 열기(PD-074)가 추가될 때.
 
+## 51. rhwp upstream 경계: 읽기 전용 서브모듈·위생 가드 제외·라이선스 고지 (PD-076, #128)
+- **Decision (`PD-076`)**
+  1. **읽기 전용 upstream**: rhwp는 `third_party/rhwp`의 서브모듈(`.gitmodules`의 `https://github.com/edwardkim/rhwp.git`, `shallow = true`)로만 가져오며 EasyOffice가 수정하지 않습니다. 고정 대상(커밋 `1a76570e833917d15817415a53c09ad61ab3203f`, 버전 0.8.7, 툴체인 1.93.1)과 sparse 목록은 `config/rhwp-upstream.json`이 유일한 기준입니다. 필요한 변경은 EasyOffice 쪽 오버레이로 처리하고(이후 단계), 서브모듈 안에서 고치지 않습니다.
+  2. **얕은·부분 체크아웃**: upstream 전체는 약 5.3 GB(문서·PDF·샘플·도구)이므로 `scripts/checkout-rhwp.mjs`가 `--depth 1`과 `--filter=blob:none`으로 고정 커밋만 받고 sparse 목록(소스·`rhwp-studio`·라이선스 파일)만 작업 트리에 둡니다. AI 도구 규칙 파일과 `.mcp.json`은 목록에 없어 디스크에도 생기지 않습니다. CI의 기본 체크아웃은 서브모듈을 받지 않습니다(`actions/checkout` 기본값 유지).
+  3. **fail-closed 검증 (`scripts/verify-rhwp-upstream.mjs`, Node 내장 모듈만)**: 설정 형식, `.gitmodules`(허용 항목은 고정 URL·경로·`shallow = true` 하나뿐), `git ls-files -s`의 gitlink(모드 `160000`, 커밋 = 설정), 작업 트리가 있으면 HEAD·원격 URL·`Cargo.toml` 버전·`rust-toolchain.toml` 채널 일치와 `git status --porcelain` 비어 있음(추적·미추적 변경 모두 실패)을 확인합니다. 체크아웃이 없으면 상위 저장소 기록만 검사하므로 CI 기본 상태에서 통과합니다. 위생 가드가 같은 로직을 호출합니다.
+  4. **위생 가드 제외 범위 (`scripts/check-repo-hygiene.mjs`)**: 디스크 순회에서 루트 기준 경로 `third_party/rhwp` 하나만 제외합니다(이름 기준 `IGNORED_DIRS`와 별도 집합 `IGNORED_ROOT_PATHS`). upstream의 AI 도구 문서·브랜드 토큰·수천 개 JS 파일은 EasyOffice가 작성하지 않았고 위 3항으로 무결성이 고정되기 때문입니다. 그 외 모든 경로는 그대로 검사하고, 금지된 로컬 전용 파일이 EasyOffice 안(루트뿐 아니라 하위 경로)에서 추적되면 계속 실패합니다. 새 필수 파일(`.gitmodules`, 설정, 검증·체크아웃 스크립트, 테스트, 고지, 설계 문서)이 계약 목록에 추가되었습니다.
+  5. **업데이트 절차**: (a) 새 커밋·버전을 검토한 뒤 `config/rhwp-upstream.json`의 `commit`·`version`·`rustToolchain`·sparse 목록을 수정하고, (b) `third_party/rhwp`를 그 커밋으로 이동해 gitlink를 갱신하며, (c) `node scripts/verify-rhwp-upstream.mjs`와 위생 가드를 통과시키고, (d) `THIRD_PARTY_NOTICES.md`(Rust 의존성·글꼴 고지)를 다시 확인합니다. 설정과 gitlink는 같은 PR에서만 함께 바꿉니다.
+  6. **라이선스 고지**: `THIRD_PARTY_NOTICES.md`에 rhwp MIT 고지(저작권 표기 포함)를 두고, WASM에 컴파일되는 Rust 의존성과 글꼴 고지는 자리만 마련해 2단계에서 완성합니다. hop은 패턴만 따랐고 복사한 코드가 없음을 명시합니다.
+  7. 이 단계는 런타임 동작을 바꾸지 않습니다(빌드·UI·IPC 15종 명령 변화 없음). 설계 전문은 `docs/rhwp-integration-design.md`입니다.
+- **Why** upstream을 고정·무수정으로 두어야 출처와 라이선스를 증명할 수 있고, 저장소 위생 규칙을 약화시키지 않으면서 수 GB 서드파티 트리가 CI 시간과 규칙 검사를 망치지 않게 해야 하기 때문입니다.
+- **Trade-offs**
+  1. 위생 가드가 upstream 내용을 검사하지 않으므로 무결성은 커밋 고정과 clean 검사에 의존합니다.
+  2. sparse 목록이 부족하면 이후 빌드가 실패하며 2단계에서 확정합니다.
+  3. 서브모듈 체크아웃은 별도 스크립트가 필요해 `git submodule update --init` 단독으로는 전체(5.3 GB)를 받게 됩니다.
+- **Alternatives rejected**
+  - 전체 서브모듈 체크아웃(`submodules: true`): 5.3 GB와 수만 개 파일로 CI·위생 가드가 느려지고 실패해 기각.
+  - upstream 소스를 저장소에 복사: 출처 고정·갱신 검증이 어렵고 라이선스 추적이 약해져 기각.
+  - 위생 가드에서 금지 토큰 검사를 완화: 기존 규칙을 약화시키므로 기각(제외는 서드파티 경로 하나로 한정).
+- **Verified by** `node --test scripts/test-rhwp-upstream.mjs`(미체크아웃 통과, gitlink 변조·URL 변조·버전 불일치·작업 트리 수정 실패, 위생 가드의 루트 금지 파일 추적 실패와 `third_party/rhwp`만 제외), `node scripts/verify-rhwp-upstream.mjs`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when** upstream를 갱신하거나 `vendor/rhwp-core`·`apps/hwp-studio` 산출물이 추가되어 제외 경로를 늘려야 할 때.
+
+## 54. ZIP 기반 출력 DEFLATE 압축·변환 응답 단일 base64·실제 경로 벤치마크 (PD-079, #124)
+- **Context** 모든 ZIP 기반 출력(DOCX·XLSX·PPTX·PPSX·ODT·ODS·ODP·HWPX·HWTX)이 무압축 `ZipArchiveCodec::pack`만 사용해 약 1MB 텍스트(9,700문단)가 DOCX 1,480,838바이트, HWPX 2,330,134바이트가 되었고, 변환 응답은 같은 base64를 `converted_base64`와 `convertedBase64`에 두 번 담았으며, 벤치마크는 작은 합성 입력만 측정했습니다.
+- **Decision (`PD-079`)**
+  1. **항목별 압축 정책 (`zip_codec.rs`)**: 모든 ZIP 작성기는 `ZipArchiveCodec::pack_compressed`를 사용합니다. 기존 저장소 내 DEFLATE(`deflate::deflate_raw`, 고정 허프만 + 해시 체인 64단계)를 그대로 쓰고, 압축 결과가 원본보다 작지 않은 항목은 무압축으로 둡니다. `ZipArchiveCodec::must_store`가 `mimetype`(ODF/HWPX는 첫 엔트리·무압축·오프셋 30 고정)와 이미 압축된 형식(png·jpg·jpeg·gif·webp·zip·jar·gz·mp3·mp4)을 항상 무압축으로 유지합니다. `pack_deflate`도 같은 예외를 따릅니다. 인코더 프로파일링 결과 압축 비용이 변환 전체의 약 15ms/MB 수준이라 인코더 알고리즘은 바꾸지 않았고, CRC32·시트 DAG 최적화는 #135로 남깁니다.
+  2. **응답 필드**: `convert_document_format` 응답은 `convertedBase64` 하나만 보냅니다(`converted_base64` 제거, 응답 크기 약 2.7배 → 1배). UI·오프라인 RPC·자가 진단은 `convertedBase64`만 읽습니다.
+  3. **실제 경로 벤치마크 (`benchmark_real.rs`)**: `run_engine_benchmark` 응답과 `--self-test`에 `realPaths`(DOCX→DOCX·DOCX→HWPX 9,700문단 디코드+인코드, 1,000x104셀 XLSX 패킹·언패킹, 5,000 타깃 재계산)를 추가해 시간과 출력 크기를 보고합니다. 동등성(라운드트립 문단·셀 일치)과 출력 크기 상한(문서 500,000바이트, XLSX 3MB)은 항상 검증하고, 시간 상한(10초)은 release 빌드에서만, 느슨하게 검증합니다. debug 빌드는 `timingGated:false`로 수치만 출력합니다.
+- **Measured (release)**
+  - DOCX 1,480,838 → 184,948바이트, HWPX 2,330,134 → 234,482바이트, XLSX(104k셀) 3,641,911 → 746,161바이트.
+  - 변환 시간(디코드+인코드) DOCX ≈24 → ≈40ms, HWPX ≈28 → ≈45ms, XLSX ≈139 → ≈190ms, 재계산 ≈5ms(변화 없음).
+- **Alternatives**
+  - 새 DEFLATE 인코더(동적 허프만·지연 매칭): 크기가 이미 기준(0.5MB)의 절반 이하이고 시간 병목이 아니어서 보류.
+  - 응답에 두 필드 유지: 호환 소비자가 저장소 안에 없고 전송량이 2배라 기각.
+  - 벤치마크 시간 비율 단정: 공유 러너에서 불안정해 기각.
+- **Verified by** `cargo test -p easyoffice-formats --test zip_deflate_outputs`(크기 상한, `mimetype` 첫 엔트리·무압축, 9개 ZIP 형식 왕복·CRC, 항목별 정책), `cargo test -p easyoffice-app --lib convert_ipc`(응답 단일 필드), `benchmark_real` 테스트, `--self-test`, .NET `ZipFile`과 `Expand-Archive`로 생성물 열기.
+- **Revisit when** 그림 등 미디어 파트 출력이 추가되거나, 동적 허프만이 필요한 더 큰 문서·시간 병목(#135)이 확인될 때.
+
 ## 55. 슬라이드 발표자 모드·슬라이드 관리·실시간 썸네일·덱 화면 비율 (PD-080, #125)
 
 - **Status** Implemented

@@ -152,3 +152,9 @@ GitHub Release 발행 시 macOS(`release-macos`)와 Windows(`build-windows-relea
 2. 표준 macOS 애플리케이션 번들 구조(`EasyOffice.app/Contents/{MacOS,Resources,Info.plist,PkgInfo}`)를 생성하고 20종 전체 지원 확장자에 대한 문서 연결(`CFBundleDocumentTypes`)과 고해상도 Retina 속성(`NSHighResolutionCapable`)을 주입한 뒤 `scripts/verify-macos-plist.mjs`와 `plutil -lint`로 검증합니다.
 3. 코드 서명(`codesign --force --deep --sign -` 또는 Developer ID 인증서) 및 번들 구조 검증을 수행합니다. 애드혹 서명 배포본은 최초 실행 전 `xattr -dr com.apple.quarantine /Applications/EasyOffice.app`으로 격리 속성을 해제할 수 있습니다.
 4. macOS 배포용 디스크 이미지(`EasyOffice-<version>-macos.dmg`), 압축 아카이브(`EasyOffice-<version>-macos.zip`), `SHA256SUMS.txt`와 Windows x64 설치 프로그램(`EasyOffice-<version>-windows-x64-setup.exe`), 개발자용 CLI 및 루프백 WebUI 서버 프리뷰 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`), `SHA256SUMS-windows-x64.txt`를 빌드 대상 커밋 SHA(`--target`)에 고정하여 GitHub Release 자산으로 업로드합니다.
+
+---
+
+## 5. 서드파티 upstream 경계 (`third_party/rhwp`, PD-076)
+
+HWP 엔진·편집기의 기반인 rhwp는 수정하지 않는 읽기 전용 서브모듈로만 가져옵니다. 고정 커밋·버전·sparse 목록은 `config/rhwp-upstream.json`이 기준이고, `scripts/verify-rhwp-upstream.mjs`가 `.gitmodules` URL, gitlink 커밋, 작업 트리 clean 상태, 버전 일치를 fail-closed로 검사합니다(체크아웃이 없는 CI 기본 상태에서도 통과). `scripts/checkout-rhwp.mjs`는 약 5.3 GB인 upstream을 얕은·부분 체크아웃으로만 받으며, 위생 가드(`scripts/check-repo-hygiene.mjs`)는 디스크 순회에서 `third_party/rhwp`(루트 기준) 하나만 제외합니다. 이 단계는 런타임 동작을 바꾸지 않으며, 고지는 `THIRD_PARTY_NOTICES.md`, 설계 전문은 `docs/rhwp-integration-design.md`에 있습니다.

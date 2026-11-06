@@ -294,7 +294,6 @@ impl EasyOfficeIpcRouter {
                 "\"paragraphCount\":{},",
                 "\"tableCount\":{},",
                 "\"title\":\"{}\",",
-                "\"converted_base64\":\"{}\",",
                 "\"convertedBase64\":\"{}\",",
                 "\"warnings\":[{}],",
                 "\"status\":\"OK\"",
@@ -313,7 +312,6 @@ impl EasyOfficeIpcRouter {
             decoded.paragraphs.len(),
             decoded.tables.len(),
             Self::escape_json_str(&decoded.title),
-            b64,
             b64,
             warnings_json
         ))
@@ -365,6 +363,33 @@ mod tests {
         assert!(sheet.contains("<c r=\"B2\"><f>A3/0</f></c>"), "{sheet}");
         assert!(json.contains("\"compatibility\":\"standard\""));
         assert!(json.contains("\"compatibilityWarning\":null"));
+    }
+
+    #[test]
+    fn conversion_response_carries_base64_exactly_once_under_camel_case_key() {
+        let json = EasyOfficeIpcRouter::dispatch("convert_document_format", "docx->hwpx|제목|본문")
+            .unwrap();
+        assert!(!json.contains("converted_base64"), "{json}");
+        assert_eq!(json.matches("\"convertedBase64\":\"").count(), 1);
+        let b64 = json_str_field(&json, "convertedBase64");
+        assert!(
+            json.len() < b64.len() + 1_000,
+            "response duplicates payload"
+        );
+        let bytes = EasyOfficeIpcRouter::decode_base64(b64).unwrap();
+        assert_eq!(
+            bytes.len().to_string(),
+            json_num_field(&json, "outputBytes")
+        );
+    }
+
+    fn json_num_field(json: &str, key: &str) -> String {
+        let marker = format!("\"{key}\":");
+        let start = json.find(&marker).unwrap() + marker.len();
+        json[start..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect()
     }
 
     #[test]

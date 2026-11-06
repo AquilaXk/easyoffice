@@ -220,7 +220,7 @@
         } catch (err) {
           failure = err?.message || String(err);
         }
-        const b64 = String(res?.convertedBase64 || res?.converted_base64 || "");
+        const b64 = String(res?.convertedBase64 || "");
         if (!failure && !b64) failure = "변환 결과가 비어 있습니다";
         const delivery = failure ? null : await deliverSavedFile(b64, title, dstExt);
         if (delivery?.cancelled) {
@@ -322,7 +322,7 @@
         "convert_document_format",
         JSON.stringify({ sourceFormat: ext, targetFormat: ext, title, ...content })
       );
-      const containerBase64 = String(convRes?.convertedBase64 || convRes?.converted_base64 || "");
+      const containerBase64 = String(convRes?.convertedBase64 || "");
       return await invokeIpc("audit_security", JSON.stringify({ fileName: title + "." + ext, containerBase64 }));
     }
 
@@ -378,9 +378,13 @@
               "x)"
           )
           .join(" · ");
+        const real = (Array.isArray(res.realPaths) ? res.realPaths : [])
+          .map((r) => r.caseId + " " + r.elapsedUs + "µs/" + r.outputBytes + "B")
+          .join(" · ");
         if (box) {
           const eqLabel = res.allEquivalent ? "결과 일치" : "불일치";
-          box.textContent = "성능 진단 완료 (" + eqLabel + ") · " + summary;
+          box.textContent =
+            "성능 진단 완료 (" + eqLabel + ") · " + summary + (real ? " · 실제 경로: " + real : "");
         }
         if (fb) {
           fb.textContent = "성능 진단 완료 · " + summary;
