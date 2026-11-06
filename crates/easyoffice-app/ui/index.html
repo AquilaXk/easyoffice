@@ -285,8 +285,10 @@
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-color-group">
-            <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" title="글자 색">간▾</button>
-            <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" title="형광펜">✏▾</button>
+            <button id="btn-stylebar-textcolor" class="eo-glyph-btn sb-textcolor-btn" type="button" title="글자 색 (선택한 글자에만 적용)">간</button>
+            <input id="doc-textcolor-input" class="sb-color-input" type="color" value="#ff0000" aria-label="글자 색 선택" title="글자 색 선택" />
+            <button id="btn-stylebar-highlight" class="eo-glyph-btn sb-highlight-btn" type="button" title="형광펜 (선택한 글자에만 적용)">✏</button>
+            <input id="doc-highlight-input" class="sb-color-input" type="color" value="#ffff00" aria-label="형광펜 색 선택" title="형광펜 색 선택" />
           </div>
           <span class="eo-style-sep" aria-hidden="true">|</span>
           <div class="sb-align-group">
@@ -918,6 +920,8 @@
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-store.js"></script>
     <script src="./ribbon-catalog.js"></script>
+    <script src="./doc-runs.js"></script>
+    <script src="./doc-runs-ui.js"></script>
     <script src="./save-payload.js"></script>
     <script src="./desktop-bridge.js"></script>
     <script src="./workspace-tools.js"></script>

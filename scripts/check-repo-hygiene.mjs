@@ -41,6 +41,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/workspace-session.js",
   "crates/easyoffice-app/ui/file-open.js",
   "crates/easyoffice-app/ui/slide-studio.js",
+  "crates/easyoffice-app/ui/doc-runs.js",
+  "crates/easyoffice-app/ui/doc-runs-ui.js",
   "crates/easyoffice-app/ui/app.js",
   "crates/easyoffice-desktop/Cargo.toml",
   "crates/easyoffice-desktop/build.rs",
@@ -83,6 +85,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-rhwp-upstream.mjs",
   "THIRD_PARTY_NOTICES.md",
   "docs/rhwp-integration-design.md",
+  "scripts/test-webui-doc-runs.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)

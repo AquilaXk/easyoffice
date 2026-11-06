@@ -13,6 +13,12 @@
     return "eo-" + Date.now().toString(36);
   }
 
+  const DOC_RUN_COMMANDS = [
+    ["-home-bold", "bold"],
+    ["-home-italic", "italic"],
+    ["-home-underline", "underline"],
+  ];
+
   function createRibbonHistory(deps) {
     const {
       document,
@@ -27,6 +33,7 @@
       extractEditableDocumentText,
       getSheetController,
       getWorkspacePanels,
+      getDocRuns,
       getActiveModule,
       setActiveModule,
       getActiveRibbonCategory,
@@ -477,22 +484,10 @@
       if (!docEditor) return false;
       const workspacePanels = getWorkspacePanels();
       const targetEl = workspacePanels.getFocusedDocBlock(docEditor);
-      if (cmdId.endsWith("-home-bold")) {
-        const boldOn = targetEl.style.fontWeight !== "600";
-        targetEl.style.fontWeight = boldOn ? "600" : "";
-        syncDocStyleBarFromTarget(targetEl);
-        return true;
-      }
-      if (cmdId.endsWith("-home-italic")) {
-        const italicOn = targetEl.style.fontStyle !== "italic";
-        targetEl.style.fontStyle = italicOn ? "italic" : "";
-        syncDocStyleBarFromTarget(targetEl);
-        return true;
-      }
-      if (cmdId.endsWith("-home-underline")) {
-        const underOn = targetEl.style.textDecoration !== "underline";
-        targetEl.style.textDecoration = underOn ? "underline" : "";
-        syncDocStyleBarFromTarget(targetEl);
+      const runProp = DOC_RUN_COMMANDS.find(([suffix]) => cmdId.endsWith(suffix));
+      if (runProp) {
+        // Character formatting applies to the selection only (run model, PD-077).
+        getDocRuns().toggle(runProp[1], { undo: false });
         return true;
       }
       if (cmdId.endsWith("-home-style")) {

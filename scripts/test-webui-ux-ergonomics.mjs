@@ -292,7 +292,8 @@ test("SHEET supports keyboard arrow/Tab/Delete cell navigation, inline editing k
 });
 
 test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node PII scrub, presenter mode, and PDF badges work end-to-end", async () => {
-  const { document, sandbox, userClick } = await createWorkspaceHarness();
+  const docSelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
+  const { document, sandbox, userClick } = await createWorkspaceHarness({ selection: docSelection });
 
   userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
   await flushAsyncTurns();
@@ -409,6 +410,8 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
 
   userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
   await flushAsyncTurns();
+  const boldText = document.querySelector("#doc-editor .eo-h-title").childNodes[0];
+  docSelection.addRange({ startContainer: boldText, startOffset: 1, endContainer: boldText, endOffset: 4, collapsed: false });
   userClick(document.getElementById("btn-stylebar-bold"));
   await flushAsyncTurns();
   assert.equal(document.getElementById("btn-stylebar-bold").getAttribute("aria-pressed"), "true");
@@ -425,12 +428,14 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   fontSelect.value = "함초롬바탕";
   fontSelect.dispatchEvent({ type: "change" });
   assert.equal(document.getElementById("doc-style-font-badge").textContent, "함초롬바탕");
-  assert.equal(docEditor.style.fontFamily, "함초롬바탕");
+  assert.equal(docEditor.style.fontFamily, "", "font applies to the selection only, not the whole document");
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoFont, "함초롬바탕");
 
   userClick(document.getElementById("btn-size-up"));
   assert.equal(document.getElementById("doc-font-size-input").value, "12.0");
   assert.equal(document.getElementById("doc-style-size-badge").textContent, "12.0 pt");
-  assert.equal(docEditor.style.fontSize, "12.0pt");
+  assert.equal(docEditor.style.fontSize, "", "size applies to the selection only, not the whole document");
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoSize, "24");
   userClick(document.getElementById("btn-size-down"));
   assert.equal(document.getElementById("doc-font-size-input").value, "11.0");
 
@@ -446,20 +451,23 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   assert.equal(docEditor.dataset.textAlign, "distribute");
 
   userClick(document.getElementById("btn-stylebar-strike"));
-  assert.equal(docEditor.dataset.strike, "true");
+  await flushAsyncTurns();
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoStrike, "true");
   userClick(document.getElementById("btn-stylebar-charfx"));
   assert.equal(docEditor.dataset.charfx, "true");
   userClick(document.getElementById("btn-stylebar-textcolor"));
-  assert.equal(docEditor.dataset.textcolor, "true");
+  await flushAsyncTurns();
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoColor, "FF0000");
   userClick(document.getElementById("btn-stylebar-highlight"));
-  assert.equal(docEditor.dataset.highlight, "true");
+  await flushAsyncTurns();
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoHighlight, "FFFF00");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
-  assert.notEqual(docEditor.dataset.highlight, "true");
+  assert.equal(docEditor.querySelector(".eo-run")?.dataset.eoHighlight, undefined, "undo removes the highlight run property");
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(docEditor.dataset.highlight, "true");
+  assert.equal(docEditor.querySelector(".eo-run").dataset.eoHighlight, "FFFF00", "redo restores it");
 
   userClick(document.getElementById("btn-toggle-doc-grid"));
   assert.equal(docEditor.classList.contains("manuscript-grid"), true);
@@ -495,7 +503,7 @@ test("SLIDE object insertion, non-duplicating lower-zone typing, inserted-node P
   await flushAsyncTurns();
   assert.equal(styleSelect.value, "개요 1");
   assert.equal(fontLang.value, "한글");
-  assert.equal(document.getElementById("doc-style-font-badge").textContent, "함초롬바탕");
+  assert.equal(document.getElementById("doc-style-font-badge").textContent, "휴먼명조", "the font box shows the document default until a selection carries a run font");
   assert.equal(document.getElementById("btn-toggle-ctrl-marks").classList.contains("active"), true);
   assert.equal(document.getElementById("btn-toggle-para-marks").classList.contains("active"), false);
   assert.equal(document.getElementById("btn-toggle-doc-grid").classList.contains("active"), true);

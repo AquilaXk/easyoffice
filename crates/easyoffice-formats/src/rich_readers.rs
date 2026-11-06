@@ -8,10 +8,11 @@
 use crate::rich_read_hwpx::read_hwpx;
 use crate::rich_read_odt::read_odt;
 use crate::rich_read_ooxml::read_docx;
+use crate::rich_read_rtf::read_rtf;
 use crate::rich_read_text::{read_markdown, read_plain_text};
 use crate::{
     ContainerFamily, CsvCodec, DocumentFormat, EasyOfficeError, FormatDetector, LegacyOle2Codec,
-    OdfCodec, OdsUnpacked, OoxmlCodec, RichBlock, RichDocument, RichParagraph, RichRun, RtfCodec,
+    OdfCodec, OdsUnpacked, OoxmlCodec, RichBlock, RichDocument, RichParagraph, RichRun,
     UniversalFormatConverter,
 };
 
@@ -187,21 +188,18 @@ impl UniversalFormatConverter {
                     official_agency: None,
                 })
             }
+            DocumentFormat::Rtf => {
+                let (doc, w) = read_rtf(bytes)?;
+                warnings = w;
+                DecodedContent::Document(doc)
+            }
             DocumentFormat::Doc
             | DocumentFormat::Hwp
             | DocumentFormat::Hwt
-            | DocumentFormat::Rtf
             | DocumentFormat::Pdf => {
-                let (title, paragraphs, tables, agency) = match format {
-                    DocumentFormat::Rtf => {
-                        let p = RtfCodec::decode(bytes)?;
-                        (p.title, p.paragraphs, p.tables, None)
-                    }
-                    _ => {
-                        let (_, m) = Self::decode(bytes, Some(format.extension()))?;
-                        (m.title, m.paragraphs, m.tables, m.official_agency)
-                    }
-                };
+                let (_, m) = Self::decode(bytes, Some(format.extension()))?;
+                let (title, paragraphs, tables, agency) =
+                    (m.title, m.paragraphs, m.tables, m.official_agency);
                 warnings.push(if format == DocumentFormat::Pdf {
                     "PDF는 텍스트만 추출합니다(레이아웃·그림·서식 제외).".to_string()
                 } else {

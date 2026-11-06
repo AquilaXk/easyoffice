@@ -190,6 +190,8 @@ html[data-theme="dark"] .eo-glyph-btn { color: #e6edf3; }
 html[data-theme="dark"] .eo-glyph-btn:hover, html[data-theme="dark"] .eo-glyph-btn.active { background: #334361; outline: 1px solid #5878b3; color: #9fc2ff; }
 .sb-textcolor-btn { border-bottom: 3px solid #d93025; }
 .sb-highlight-btn { border-bottom: 3px solid #fbbc04; }
+.sb-color-input { width: 18px; height: 22px; padding: 0; border: 1px solid #c0c0c0; background: none; cursor: pointer; }
+.eo-glyph-btn[aria-pressed="mixed"] { background: repeating-linear-gradient(45deg, #e4e4e4, #e4e4e4 3px, #f5f5f5 3px, #f5f5f5 6px); }
 .eo-style-zone { font-size: 11px; color: #333333; white-space: nowrap; }
 html[data-theme="dark"] .eo-style-zone { color: #c9d1d9; }
 .doc-studio-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 20px 1fr; grid-template-rows: 20px 1fr; max-width: none; width: 100%; margin: 0; overflow: hidden; }

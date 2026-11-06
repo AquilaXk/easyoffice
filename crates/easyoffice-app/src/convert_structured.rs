@@ -2,7 +2,8 @@
 //!
 //! Instead of the legacy line markup in `body` (`[[TABLE_ROW]]`, `[[SLIDE]]`, …), the WebUI sends
 //! one of:
-//! - `blocks`: ordered `{"type":"paragraph","runs":[{"text","bold","italic","underline","strike"}],
+//! - `blocks`: ordered `{"type":"paragraph","runs":[{"text","bold","italic","underline","strike",
+//!   "sizeHalfPt","font","color","highlight"}],
 //!   "align","heading","list"}` and `{"type":"table","rows":[[{"text","value"}]]}` items;
 //! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)"}]}]` for every workbook sheet;
 //! - `slides`: `[{"title","bullets":[...],"notes"}]`.
@@ -12,9 +13,10 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    evaluate_table_formulas, DocumentFormat, EasyOfficeError, OdfCodec, OdsUnpacked, OoxmlCodec,
-    RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun, StrictJsonValue,
-    UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
+    evaluate_table_formulas, normalize_hex_color, DocumentFormat, EasyOfficeError, OdfCodec,
+    OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
+    RichRun, StrictJsonValue, UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue,
+    XlsxFormulaCache,
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine};
 
@@ -63,6 +65,44 @@ fn opt_bool(obj: &JsonObject, key: &str) -> Result<bool, EasyOfficeError> {
         v.as_bool()
             .ok_or_else(|| invalid(format!("구조화 저장: '{key}'는 true/false여야 합니다.")))
     })
+}
+
+/// Run size in half-points (`w:sz` unit): an integer from 2 (1 pt) to 1638 (819 pt).
+fn opt_size_half_pt(obj: &JsonObject) -> Result<Option<u16>, EasyOfficeError> {
+    field(obj, "sizeHalfPt")
+        .map(|v| {
+            v.as_u64()
+                .filter(|n| (2..=1638).contains(n))
+                .map(|n| n as u16)
+                .ok_or_else(|| invalid("구조화 저장: 'sizeHalfPt'는 2~1638 정수여야 합니다."))
+        })
+        .transpose()
+}
+
+/// Font family name: 1-64 characters without control characters.
+fn opt_font(obj: &JsonObject) -> Result<Option<String>, EasyOfficeError> {
+    match opt_str(obj, "font")?
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+    {
+        None => Ok(None),
+        Some(f) if f.chars().count() <= 64 && !f.chars().any(char::is_control) => {
+            Ok(Some(f.to_string()))
+        }
+        Some(_) => Err(invalid(
+            "구조화 저장: 'font'는 제어 문자 없는 64자 이하 이름이어야 합니다.",
+        )),
+    }
+}
+
+/// `#RRGGBB` or `RRGGBB` color, stored as upper-case `RRGGBB`.
+fn opt_color(obj: &JsonObject, key: &str) -> Result<Option<String>, EasyOfficeError> {
+    match opt_str(obj, key)?.map(str::trim).filter(|c| !c.is_empty()) {
+        None => Ok(None),
+        Some(c) => normalize_hex_color(c)
+            .map(Some)
+            .ok_or_else(|| invalid(format!("구조화 저장: '{key}'는 #RRGGBB 색이어야 합니다."))),
+    }
 }
 
 fn as_array<'a>(
@@ -135,6 +175,10 @@ fn parse_paragraph(
                 italic: opt_bool(run, "italic")?,
                 underline: opt_bool(run, "underline")?,
                 strike: opt_bool(run, "strike")?,
+                size_half_pt: opt_size_half_pt(run)?,
+                font: opt_font(run)?,
+                color: opt_color(run, "color")?,
+                highlight: opt_color(run, "highlight")?,
             });
         }
     }

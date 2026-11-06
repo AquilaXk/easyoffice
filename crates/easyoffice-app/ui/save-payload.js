@@ -12,6 +12,10 @@
   const CSS_ALIGN = { left: "left", start: "left", center: "center", right: "right", end: "right", justify: "justify" };
   const TABLE_FUNCS = new Set(["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "PRODUCT"]);
   const TABLE_DIRS = new Set(["ABOVE", "BELOW", "LEFT", "RIGHT"]);
+  const BOOL_KEYS = ["bold", "italic", "underline", "strike"];
+  const VALUE_KEYS = ["size", "font", "color", "highlight"];
+  // Run fields of the structured payload (PD-077): `size` is sent as `sizeHalfPt`.
+  const RUN_FIELDS = { size: "sizeHalfPt", font: "font", color: "color", highlight: "highlight" };
   const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
   function isSkippedElement(el) {
@@ -31,12 +35,31 @@
     const st = el.style || {};
     const weight = String(st.fontWeight || "").trim().toLowerCase();
     const deco = String(st.textDecoration || st.textDecorationLine || "").toLowerCase();
-    return {
+    const next = {
       bold: fmt.bold || tag === "STRONG" || tag === "B" || weight === "bold" || weight === "bolder" || Number(weight) >= 600,
       italic: fmt.italic || tag === "EM" || tag === "I" || String(st.fontStyle || "").toLowerCase() === "italic",
       underline: fmt.underline || tag === "U" || tag === "INS" || deco.includes("underline"),
       strike: fmt.strike || tag === "S" || tag === "STRIKE" || tag === "DEL" || deco.includes("line-through"),
     };
+    return mergeRunValues(el, fmt, next);
+  }
+
+  // Character-run values (size in half-points, font, color, highlight) from run spans and pasted
+  // inline styles; the innermost element wins.
+  function mergeRunValues(el, outer, next) {
+    const runs = host.__EASYOFFICE_DOC_RUNS__;
+    VALUE_KEYS.forEach((k) => {
+      if (outer[k] !== undefined) next[k] = outer[k];
+    });
+    if (!runs) return next;
+    const own = runs.isRunElement(el) ? runs.readRunFormat(el) : runs.readLegacyFormat(el);
+    VALUE_KEYS.forEach((k) => {
+      if (own[k] !== undefined) next[k] = own[k];
+    });
+    BOOL_KEYS.forEach((k) => {
+      if (own[k]) next[k] = true;
+    });
+    return next;
   }
 
   function parseTableNumber(text) {
@@ -133,14 +156,18 @@
       if (!text) return;
       if (!cur) cur = { ctx, runs: [] };
       const last = cur.runs[cur.runs.length - 1];
-      const same = last && ["bold", "italic", "underline", "strike"].every((k) => Boolean(last[k]) === fmt[k]);
+      const same = last && BOOL_KEYS.every((k) => Boolean(last[k]) === Boolean(fmt[k]))
+        && VALUE_KEYS.every((k) => last[RUN_FIELDS[k]] === fmt[k]);
       if (same) {
         last.text += text;
         return;
       }
       const run = { text };
-      ["bold", "italic", "underline", "strike"].forEach((k) => {
+      BOOL_KEYS.forEach((k) => {
         if (fmt[k]) run[k] = true;
+      });
+      VALUE_KEYS.forEach((k) => {
+        if (fmt[k] !== undefined) run[RUN_FIELDS[k]] = fmt[k];
       });
       cur.runs.push(run);
     }

@@ -35,24 +35,37 @@ pub(crate) fn toggle_on(value: Option<&str>) -> bool {
     )
 }
 
-/// Character format toggles shared by every reader.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Character format shared by every reader: the four toggles plus size, font, and colors.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CharFmt {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
     pub strike: bool,
+    pub size_half_pt: Option<u16>,
+    pub font: Option<String>,
+    pub color: Option<String>,
+    pub highlight: Option<String>,
+}
+
+impl CharFmt {
+    fn matches_run(&self, run: &RichRun) -> bool {
+        (self.bold, self.italic, self.underline, self.strike)
+            == (run.bold, run.italic, run.underline, run.strike)
+            && self.size_half_pt == run.size_half_pt
+            && self.font == run.font
+            && self.color == run.color
+            && self.highlight == run.highlight
+    }
 }
 
 /// Appends `text` as a run, merging it into the previous run when the format is identical.
-pub(crate) fn push_run(runs: &mut Vec<RichRun>, text: &str, fmt: CharFmt) {
+pub(crate) fn push_run(runs: &mut Vec<RichRun>, text: &str, fmt: &CharFmt) {
     if text.is_empty() {
         return;
     }
     if let Some(last) = runs.last_mut() {
-        if (last.bold, last.italic, last.underline, last.strike)
-            == (fmt.bold, fmt.italic, fmt.underline, fmt.strike)
-        {
+        if fmt.matches_run(last) {
             last.text.push_str(text);
             return;
         }
@@ -63,9 +76,12 @@ pub(crate) fn push_run(runs: &mut Vec<RichRun>, text: &str, fmt: CharFmt) {
         italic: fmt.italic,
         underline: fmt.underline,
         strike: fmt.strike,
+        size_half_pt: fmt.size_half_pt,
+        font: fmt.font.clone(),
+        color: fmt.color.clone(),
+        highlight: fmt.highlight.clone(),
     });
 }
-
 /// Heading level from a style name such as `heading 2`, `Heading2`, `제목 3`, `개요 1`, `Title`.
 pub(crate) fn heading_level_from_name(name: &str) -> u8 {
     let lower = name.trim().to_lowercase().replace(['_', '-'], " ");

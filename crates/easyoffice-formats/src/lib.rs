@@ -21,8 +21,10 @@ pub mod rich_document;
 mod rich_read_hwpx;
 mod rich_read_odt;
 mod rich_read_ooxml;
+mod rich_read_rtf;
 mod rich_read_text;
 pub mod rich_readers;
+mod rich_run_writers;
 mod rich_writers;
 mod rich_xml;
 pub mod rtf_xml_helpers;
@@ -39,8 +41,8 @@ pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
 pub use rich_document::{
-    evaluate_table_formulas, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
-    RichRun,
+    evaluate_table_formulas, normalize_hex_color, RichAlignment, RichBlock, RichDocument,
+    RichListKind, RichParagraph, RichRun,
 };
 pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rtf_xml_helpers::{
