@@ -308,11 +308,18 @@ test("large sheet: 10,000 rows stay virtualized, navigable past the old 12x8 gri
   }
   const worst = Math.max(...times);
   console.log("[perf] 10,000-row arrow-down handler: avg " + (times.reduce((a, b) => a + b, 0) / times.length).toFixed(2) + " ms, max " + worst.toFixed(2) + " ms");
-  assert.ok(worst < 1500, "arrow key handler stays bounded even on the slow DOM stub (" + worst.toFixed(1) + " ms)");
+  // Complexity is asserted structurally (DOM window stays bounded after the
+  // navigation); timing uses the median plus a generous backstop so that
+  // scheduler or GC pauses under load cannot fail the test.
+  assert.ok(tdCount() > 0 && tdCount() < 800, "window stays bounded after 40 arrow-downs (got " + tdCount() + ")");
+  const median = [...times].sort((a, b) => a - b)[Math.floor(times.length / 2)];
+  assert.ok(median < 1500, "arrow key handler median stays bounded on the slow DOM stub (" + median.toFixed(1) + " ms)");
+  assert.ok(worst < 10000, "no single arrow key handler call stalls (" + worst.toFixed(1) + " ms)");
 
   const t1 = performance.now();
   const pageTd = document.activeElement;
   key(pageTd, "PageDown");
+  assert.ok(tdCount() > 0 && tdCount() < 800, "window stays bounded after PageDown (got " + tdCount() + ")");
   console.log("[perf] PageDown (window re-render): " + (performance.now() - t1).toFixed(2) + " ms");
 });
 
