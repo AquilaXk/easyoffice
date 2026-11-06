@@ -13,14 +13,18 @@ pub const CLI_USAGE: &str = "\
 Usage: easyoffice-app [OPTIONS]
 
 Options:
-  --serve [PORT]   Serve the WebUI on http://127.0.0.1:PORT (1-65535).
+  --serve [PORT]   [Developer/testing only - not for end users / 개발·테스트 전용]
+                   Serve the WebUI on http://127.0.0.1:PORT (1-65535).
                    Without PORT the default 8787 is used and, if busy,
                    8788-8800 are tried. An explicit PORT never falls back.
-  --open           Open the WebUI in the default browser (implies --serve).
+  --open           Open the WebUI in the default browser (implies --serve;
+                   developer/testing only / 개발·테스트 전용).
   --self-test      Run the engine integrity self-test (alias: --doctor).
   --bootstrap      Print the workspace bootstrap JSON and exit (alias: --headless).
   -h, --help       Print this help and exit.
 
+End users: install the EasyOffice desktop app; --serve is for development and
+automated UI verification only. / 일반 사용자는 설치형 앱을 사용하세요.
 Opening documents from the command line is not supported yet.";
 
 /// Which port the WebUI server should bind.

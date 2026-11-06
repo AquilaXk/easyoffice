@@ -44,7 +44,7 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs
 
       - name: Verify macOS LaunchServices Info.plist coverage
         run: node scripts/verify-macos-plist.mjs
@@ -106,7 +106,7 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs
 
       # hwp-studio (PD-081, PD-083): the editor bundle is generated from the committed WASM package, the
       # pinned sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. The desktop shell
