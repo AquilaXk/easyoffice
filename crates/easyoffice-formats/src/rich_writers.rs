@@ -190,7 +190,7 @@ pub(crate) fn pack_docx_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeEr
         XmlSanitizer::validate_safe_xml(xml)?;
     }
 
-    ZipArchiveCodec::pack(&[
+    ZipArchiveCodec::pack_compressed(&[
         (
             "[Content_Types].xml".to_string(),
             content_types.into_bytes(),
@@ -367,7 +367,7 @@ pub(crate) fn pack_odt_rich(doc: &RichDocument) -> Result<Vec<u8>, EasyOfficeErr
         body
     );
     XmlSanitizer::validate_safe_xml(&content)?;
-    ZipArchiveCodec::pack(&[
+    ZipArchiveCodec::pack_compressed(&[
         (
             "mimetype".to_string(),
             OdfCodec::MIMETYPE_ODT.as_bytes().to_vec(),

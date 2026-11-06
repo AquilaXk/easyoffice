@@ -167,8 +167,32 @@ impl ZipArchiveCodec {
         Self::pack_internal(entries, false)
     }
 
+    /// Packs with DEFLATE per entry, except the entries `must_store` names, which stay stored.
     pub fn pack_deflate<E: AsZipEntry>(entries: &[E]) -> Result<Vec<u8>, EasyOfficeError> {
         Self::pack_internal(entries, true)
+    }
+
+    /// Writer entry point for every ZIP-based output format: DEFLATE per entry with the
+    /// stored-entry exceptions of [`Self::must_store`]. Entries whose compressed form is not
+    /// smaller are also stored.
+    pub fn pack_compressed<E: AsZipEntry>(entries: &[E]) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_internal(entries, true)
+    }
+
+    /// Entries that must never be compressed: the ODF/HWPX `mimetype` marker (readers sniff it at
+    /// a fixed offset) and payloads that are already compressed images or archives.
+    pub fn must_store(path: &str) -> bool {
+        if path == "mimetype" {
+            return true;
+        }
+        let ext = match path.rsplit_once('.') {
+            Some((_, ext)) => ext.to_ascii_lowercase(),
+            None => return false,
+        };
+        matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "zip" | "jar" | "gz" | "mp3" | "mp4"
+        )
     }
 
     fn pack_internal<E: AsZipEntry>(
@@ -220,7 +244,7 @@ impl ZipArchiveCodec {
             let name_len = path_bytes.len() as u16;
 
             let (method, compressed_payload): (u16, std::borrow::Cow<'_, [u8]>) =
-                if use_deflate && !data.is_empty() {
+                if use_deflate && !data.is_empty() && !Self::must_store(path) {
                     let deflated = crate::deflate::deflate_raw(data);
                     if deflated.len() < data.len() {
                         (Self::METHOD_DEFLATE, std::borrow::Cow::Owned(deflated))

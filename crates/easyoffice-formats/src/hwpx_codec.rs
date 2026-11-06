@@ -320,7 +320,7 @@ impl HwpxCodec {
             XmlSanitizer::validate_safe_xml(xml)?;
         }
 
-        ZipArchiveCodec::pack(&[
+        ZipArchiveCodec::pack_compressed(&[
             (
                 "mimetype".to_string(),
                 Self::MIMETYPE_HWPX.as_bytes().to_vec(),

@@ -12,6 +12,8 @@ use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
 use std::time::Instant;
 
+use crate::benchmark_real::{RealPathResult, RELEASE_GATING};
+
 /// Single benchmark suite result following the 7-point `benchmark-checklist` contract.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BenchmarkSuiteResult {
@@ -38,6 +40,8 @@ pub struct EngineBenchmarkReport {
     pub iterations: usize,
     pub all_equivalent: bool,
     pub suites: Vec<BenchmarkSuiteResult>,
+    /// Real-workload cases (#124); empty until `run_real_path_benchmarks` results are attached.
+    pub real_paths: Vec<RealPathResult>,
 }
 
 impl EngineBenchmarkReport {
@@ -52,11 +56,17 @@ impl EngineBenchmarkReport {
                 )
             })
             .collect();
+        let real: Vec<String> = self
+            .real_paths
+            .iter()
+            .map(RealPathResult::summary)
+            .collect();
         format!(
-            "bench_rounds={} eq={} [{}]",
+            "bench_rounds={} eq={} [{}] real[{}]",
             self.iterations,
             self.all_equivalent,
-            parts.join(", ")
+            parts.join(", "),
+            real.join(", ")
         )
     }
 
@@ -74,11 +84,20 @@ impl EngineBenchmarkReport {
                 )
             })
             .collect();
+        let real_json: Vec<String> = self
+            .real_paths
+            .iter()
+            .map(RealPathResult::to_json)
+            .collect();
+        let profile = if RELEASE_GATING { "release" } else { "debug" };
         format!(
-            "{{\"status\":\"ok\",\"iterations\":{},\"allEquivalent\":{},\"suites\":[{}]}}",
+            "{{\"status\":\"ok\",\"iterations\":{},\"allEquivalent\":{},\"buildProfile\":\"{}\",\"timingGated\":{},\"suites\":[{}],\"realPaths\":[{}]}}",
             self.iterations,
             self.all_equivalent,
-            suites_json.join(",")
+            profile,
+            RELEASE_GATING,
+            suites_json.join(","),
+            real_json.join(",")
         )
     }
 }
@@ -722,6 +741,7 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         iterations: rounds,
         all_equivalent,
         suites,
+        real_paths: Vec::new(),
     }
 }
 
