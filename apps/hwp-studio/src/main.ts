@@ -1,6 +1,7 @@
 import { setHostFontProvider, onHostFontsChanged, hasHostFontProvider, prepareHostFontCatalog, getHostFontState, localFontFaceKey, type LocalFontRecord } from '@/core/local-fonts';
 import { collectHostFontRequests } from '@/core/host-font-requests';
 import { WasmBridge } from '@/core/wasm-bridge';
+import { HwpDocument } from '@wasm/rhwp.js';
 import { installDocumentTitle } from '@/ui/document-title';
 import type { DocumentInfo, PageInfo } from '@/core/types';
 import { EventBus } from '@/core/event-bus';
@@ -1398,7 +1399,19 @@ const initPromise = initialize();
 installEmbedRuntime({
   hostWindow: window,
   parentWindow: window.parent,
-  subscribeDocumentChanged: (listener) => eventBus.on('document-agent-changed', listener),
+  // EasyOffice: besides agent changes, the host is told about dirty-state transitions and every
+  // edit (reason 'dirty_changed' / 'edited'), so it can drive its unsaved-changes guard and autosave.
+  subscribeDocumentChanged: (listener) => {
+    const offs = [
+      eventBus.on('document-agent-changed', listener),
+      eventBus.on('document-dirty-changed', (change) => {
+        listener({ schemaVersion: 1, reason: 'dirty_changed', dirty: (change as { dirty?: boolean })?.dirty === true });
+      }),
+      eventBus.on('document-mutated', () => listener({ schemaVersion: 1, reason: 'edited' })),
+      eventBus.on('document-changed', () => listener({ schemaVersion: 1, reason: 'edited' })),
+    ];
+    return () => offs.forEach((off) => off());
+  },
   handlers: {
     async ready() {
       await initPromise;
@@ -1515,6 +1528,17 @@ installEmbedRuntime({
       }
       await createNewDocument();
       return { pageCount: wasm.pageCount };
+    },
+    // EasyOffice extension (verify-bytes-v1): parse exported bytes in a throw-away document so the
+    // host can refuse to deliver a file that this build cannot read back.
+    async verifyBytes(data) {
+      await initPromise;
+      const probe = new HwpDocument(data);
+      try {
+        return { ok: true, pageCount: probe.pageCount(), format: probe.getSourceFormat() };
+      } finally {
+        probe.free();
+      }
     },
     async chromeGet() { return getChromeVisibility(); },
     async chromeSet(next) { return setChromeVisibility(next as Partial<ChromeVisibility>); },
