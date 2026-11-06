@@ -364,7 +364,12 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
             "실제 경로 벤치마크 검증 실패: {reason}"
         )));
     }
-    if !bench_report.all_equivalent || bench_report.suites.len() != 5 {
+    if let Err(reason) = crate::benchmark_large::performance_gate(&bench_report) {
+        return Err(EasyOfficeError::CorruptedContainer(format!(
+            "엔진 성능 게이트 실패: {reason}"
+        )));
+    }
+    if !bench_report.all_equivalent || bench_report.suites.len() != 7 {
         return Err(EasyOfficeError::CorruptedContainer(
             "엔진 저수준 최적화 벤치마크 동등성 검증 실패".to_string(),
         ));

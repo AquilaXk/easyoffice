@@ -9,6 +9,7 @@ use easyoffice_sheet::{
 };
 
 pub mod benchmark;
+pub mod benchmark_large;
 pub mod benchmark_real;
 pub mod cli_args;
 mod convert_ipc;

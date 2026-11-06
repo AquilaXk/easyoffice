@@ -51,20 +51,18 @@ impl WorkbookEngine {
         }
     }
 
+    /// Same identity as comparing canonical_sheet_keys, without allocating.
     pub fn is_same_sheet_identity(a: &str, b: &str) -> bool {
-        let ka = Self::canonical_sheet_key(a);
-        let kb = Self::canonical_sheet_key(b);
-        !ka.is_empty() && ka == kb
+        !a.trim().is_empty() && a.eq_ignore_ascii_case(b)
     }
 
     fn find_sheet_index(&self, name: &str) -> Option<usize> {
-        let key = Self::canonical_sheet_key(name);
-        if key.is_empty() {
+        if name.trim().is_empty() {
             return None;
         }
         self.sheets
             .iter()
-            .position(|s| Self::canonical_sheet_key(&s.name) == key)
+            .position(|s| !s.name.trim().is_empty() && s.name.eq_ignore_ascii_case(name))
     }
 
     pub fn add_sheet(&mut self, name: impl Into<String>) -> &mut SheetEngine {
