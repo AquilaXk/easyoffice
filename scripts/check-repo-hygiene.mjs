@@ -43,6 +43,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/sheet-clipboard.js",
   "crates/easyoffice-app/ui/sheet-input.js",
   "crates/easyoffice-app/ui/sheet-ops.js",
+  "crates/easyoffice-app/ui/sheet-format.js",
   "crates/easyoffice-app/ui/sheet-controller.js",
   "crates/easyoffice-app/ui/ribbon-history.js",
   "crates/easyoffice-app/ui/workspace-session.js",
@@ -117,6 +118,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-hwp-studio.mjs",
   "scripts/sort-comparator-rule.mjs",
   "scripts/test-sort-comparator-rule.mjs",
+  "scripts/test-webui-sheet-format.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)

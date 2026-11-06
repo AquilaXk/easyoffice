@@ -737,6 +737,8 @@
       hasValue: (r, c) => hasCellContent(entryAt(gridUtils.refOf(r, c))),
       setActiveSheetCellRef,
       getActiveSheetCellRef,
+      onSelectionChanged: () => format.scheduleToolbarSync(),
+      onFormatKey: (kind) => void format.formatRange(kind).catch(() => {}),
       commitSheetCellEdit,
       ensureSheetCellFocusEntry,
       syncSheetCellFocusBaseline,
@@ -777,6 +779,24 @@
       refreshFocusedSheetCellPendingSnapshot,
       updateSheetSelectionAndAggregates,
       hasCellContent,
+    });
+
+    const format = host.__EASYOFFICE_CREATE_SHEET_FORMAT__({
+      document,
+      gridUtils,
+      sheetDataStore,
+      getActiveSheetName,
+      getActiveModule,
+      getRange: () => input.getRange(),
+      getSelection: () => input.getSelection(),
+      getExtent: () => getSheetExtent(getActiveSheetName()),
+      snapshotDomSheetCells,
+      saveActiveSheetCellsToWorkbook,
+      refreshWindowFromModel,
+      enqueueWorkspaceHistoryOp,
+      drainInFlightSheetWork,
+      pushRawUndoSnapshot,
+      captureWorkspaceSnapshot,
     });
 
     function toggleSheetFreezePanes(enabled, skipSave = false) {
@@ -862,6 +882,9 @@
       sortActiveSheetByColumnB: ops.sortActiveSheetByColumnB,
       applySheetPivotOrChartSummary: ops.applySheetPivotOrChartSummary,
       toggleSheetConditionalFormatting: ops.toggleSheetConditionalFormatting,
+      applySheetFormatCommand: format.applyCommand,
+      formatSheetRange: format.formatRange,
+      syncSheetFormatToolbar: format.syncToolbar,
       toggleSheetFreezePanes,
       performSwitchSheetTabAsync,
       switchSheetTab,

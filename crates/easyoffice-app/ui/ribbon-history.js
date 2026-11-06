@@ -267,6 +267,7 @@
         });
         strip.appendChild(btn);
       });
+      getSheetController()?.syncSheetFormatToolbar?.();
     }
 
     async function activatePaneInternal(mod, skipTabBufferSync) {
@@ -731,27 +732,10 @@
         return;
       }
       if (cmdId.startsWith("sheet-")) {
-        const cellRef = getActiveSheetCellRef();
-        const activeTd = document.querySelector('#pane-sheet td[data-cell="' + cellRef + '"]');
         const out = document.getElementById("sheet-eval-result");
-        if (cmdId === "sheet-home-bold" && activeTd) {
-          const boldOn = activeTd.style.fontWeight !== "600";
-          activeTd.style.fontWeight = boldOn ? "600" : "";
-          sheetController.saveActiveSheetCellsToWorkbook();
-        } else if (cmdId === "sheet-home-italic" && activeTd) {
-          const italicOn = activeTd.style.fontStyle !== "italic";
-          activeTd.style.fontStyle = italicOn ? "italic" : "";
-          sheetController.saveActiveSheetCellsToWorkbook();
-        } else if (cmdId === "sheet-home-underline" && activeTd) {
-          const underOn = activeTd.style.textDecoration !== "underline";
-          activeTd.style.textDecoration = underOn ? "underline" : "";
-          sheetController.saveActiveSheetCellsToWorkbook();
-        } else if (cmdId === "sheet-home-style" && activeTd) {
-          const sizes = ["13px", "15px", "17px", "12px"];
-          const curIdx = sizes.indexOf(activeTd.style.fontSize);
-          const presetIdx = curIdx >= 0 ? (curIdx + 1) % sizes.length : 1;
-          activeTd.style.fontSize = sizes[presetIdx];
-          sheetController.saveActiveSheetCellsToWorkbook();
+        // Cell formatting (bold/italic/underline/strike/size) applies to the whole selected range.
+        if (sheetController.applySheetFormatCommand(cmdId)) {
+          // handled by sheet-format.js (model-level, one undo step through the tracked op)
         } else if (cmdId === "sheet-data-autosum" || cmdId === "sheet-data-fn-browser") {
           sheetController.commitPreparedFormulaBarEvaluation(preparedEffect?.formulaPrep, null);
         } else if (cmdId === "sheet-insert-table") {
