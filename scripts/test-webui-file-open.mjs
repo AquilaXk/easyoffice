@@ -155,7 +155,7 @@ test("opening a DOCX-style model loads formatted blocks into the DOC module and 
   const decode = JSON.parse(calls.find((c) => c.command === "convert_document_format").payload);
   assert.equal(decode.action, "decode");
   assert.equal(decode.fileName, "보고서.docx");
-  assert.deepEqual([decode.maxRows, decode.maxCols], [1000, 8]);
+  assert.deepEqual([decode.maxRows, decode.maxCols], [1048576, 16384]);
   assert.ok(decode.sourceBase64.length > 10);
 });
 

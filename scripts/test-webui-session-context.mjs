@@ -372,7 +372,7 @@ test("document toolbars and menus are disabled outside DOC/HWP and the status ba
   await flushAsyncTurns();
   assert.equal(styleBar.hidden, true);
   assert.equal(paraNumBtn.disabled, true);
-  assert.equal(cutBtn.disabled, true);
+  assert.equal(cutBtn.disabled, false, "cut/paste act on the selected cell range in SHEET");
   assert.equal(ctrlMarks.disabled, true);
   assert.equal(saveBtn.disabled, false);
   assert.equal(paraMenu.getAttribute("aria-disabled"), "true");

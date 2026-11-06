@@ -239,6 +239,7 @@
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     runExclusive: chainWorkspaceQueue,
     getWorkspacePanels: () => workspacePanels,
+    getSheetController: () => sheetController,
   });
 
   slideStudio = host.__EASYOFFICE_CREATE_SLIDE_STUDIO__({
