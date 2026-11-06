@@ -4,6 +4,7 @@ use easyoffice_formats::{
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
 
+use crate::convert_structured::{encode_structured, parse_structured_content, StructuredContent};
 use crate::EasyOfficeIpcRouter;
 
 /// Evaluates every formula cell XLSX output will contain with the sheet engine, so the written
@@ -48,8 +49,10 @@ pub(crate) fn compute_xlsx_formula_cache(model: &UniversalDocumentModel) -> Xlsx
 impl EasyOfficeIpcRouter {
     pub(crate) fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
         let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
+        let mut structured: Option<StructuredContent> = None;
         let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
+            structured = parse_structured_content(&entries)?;
             let src = match Self::optional_json_str(&entries, "sourceFormat")? {
                 Some(s) => s,
                 None => Self::optional_json_str(&entries, "source")?.unwrap_or("docx"),
@@ -128,6 +131,38 @@ impl EasyOfficeIpcRouter {
             EasyOfficeError::InvalidArgument(format!("지원하지 않는 대상 포맷: {dst_ext}"))
         })?;
 
+        let (src_bytes, dst_bytes) = if let Some(content) = &structured {
+            (
+                encode_structured(content, src_fmt, title)?,
+                encode_structured(content, dst_fmt, title)?,
+            )
+        } else {
+            let model = Self::legacy_body_model(body, title);
+            let formula_cache =
+                if src_fmt == DocumentFormat::Xlsx || dst_fmt == DocumentFormat::Xlsx {
+                    Some(compute_xlsx_formula_cache(&model))
+                } else {
+                    None
+                };
+            (
+                UniversalFormatConverter::encode_with_formula_cache(
+                    &model,
+                    src_fmt,
+                    formula_cache.as_ref(),
+                )?,
+                UniversalFormatConverter::encode_with_formula_cache(
+                    &model,
+                    dst_fmt,
+                    formula_cache.as_ref(),
+                )?,
+            )
+        };
+        Self::conversion_response(src_fmt, dst_fmt, &src_bytes, &dst_bytes)
+    }
+
+    /// Legacy text-markup `body` (`[[TABLE_ROW]]`, `[[SHEET_A1]]`, `[[SLIDE]]`, `[[AGENCY]]` lines).
+    /// Kept for backward compatibility; the WebUI sends structured `blocks`/`sheets`/`slides`.
+    fn legacy_body_model(body: &str, title: &str) -> UniversalDocumentModel {
         let mut paragraphs: Vec<String> = Vec::new();
         let mut tables: Vec<Vec<Vec<String>>> = Vec::new();
         let mut current_table: Vec<Vec<String>> = Vec::new();
@@ -204,33 +239,25 @@ impl EasyOfficeIpcRouter {
             paragraphs.push(title.to_string());
         }
 
-        let model = UniversalDocumentModel {
+        UniversalDocumentModel {
             title: title.to_string(),
             paragraphs,
             tables,
             sheet_cells,
             slides,
             official_agency,
-        };
+        }
+    }
 
-        let formula_cache = if src_fmt == DocumentFormat::Xlsx || dst_fmt == DocumentFormat::Xlsx {
-            Some(compute_xlsx_formula_cache(&model))
-        } else {
-            None
-        };
-        let src_bytes = UniversalFormatConverter::encode_with_formula_cache(
-            &model,
-            src_fmt,
-            formula_cache.as_ref(),
-        )?;
-        let dst_bytes = UniversalFormatConverter::encode_with_formula_cache(
-            &model,
-            dst_fmt,
-            formula_cache.as_ref(),
-        )?;
+    fn conversion_response(
+        src_fmt: DocumentFormat,
+        dst_fmt: DocumentFormat,
+        src_bytes: &[u8],
+        dst_bytes: &[u8],
+    ) -> Result<String, EasyOfficeError> {
         let (detected_dst, decoded) =
-            UniversalFormatConverter::decode(&dst_bytes, Some(dst_fmt.extension()))?;
-        let b64 = Self::encode_base64(&dst_bytes);
+            UniversalFormatConverter::decode(dst_bytes, Some(dst_fmt.extension()))?;
+        let b64 = Self::encode_base64(dst_bytes);
         let compatibility = dst_fmt.output_compatibility();
         let compatibility_warning = compatibility.warning().map_or_else(
             || "null".to_string(),

@@ -637,12 +637,32 @@
         let dst = "hwpx";
         let title = "통합_변환_문서";
         let body = "본문 텍스트";
+        let structuredTables = null;
         if (raw.trimStart().startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
           src = String(parsed.sourceFormat || "docx").trim().toLowerCase();
           dst = String(parsed.targetFormat || "hwpx").trim().toLowerCase();
           title = String(parsed.title || "통합_변환_문서");
           body = String(parsed.body || "본문 텍스트");
+          // Structured save payload (PD-073): literal text only, never parsed as markup.
+          if (Array.isArray(parsed.blocks)) {
+            structuredTables = parsed.blocks.filter((b) => b && b.type === "table").length;
+            body = parsed.blocks
+              .map((b) =>
+                b && b.type === "table"
+                  ? (b.rows || []).map((r) => r.map((c) => (typeof c === "string" ? c : c.value || c.text || "")).join("\t")).join("\n")
+                  : ((b && b.runs) || []).map((r) => String(r.text || "")).join("")
+              )
+              .join("\n");
+          } else if (Array.isArray(parsed.sheets)) {
+            structuredTables = 0;
+            body = parsed.sheets.map((s) => (s.cells || []).map((c) => c.ref + "=" + c.raw).join("\n")).join("\n");
+          } else if (Array.isArray(parsed.slides)) {
+            structuredTables = 0;
+            body = parsed.slides.map((s) => [s.title, ...(s.bullets || []), s.notes].join("\n")).join("\n");
+          } else if (parsed.blocks !== undefined || parsed.sheets !== undefined || parsed.slides !== undefined) {
+            throw new Error("InvalidArgument: 구조화 저장 필드는 배열이어야 합니다.");
+          }
         } else {
           const firstPipe = raw.indexOf("|");
           const firstSeg = firstPipe >= 0 ? raw.slice(0, firstPipe) : raw;
@@ -667,7 +687,7 @@
         const srcBytes = rawBytes + (containerOverhead[src] ?? 256);
         const dstBytes = rawBytes + (containerOverhead[dst] ?? 256);
         const b64 = encodeUtf8Base64(title + "\n" + body);
-        const tableCount = body.includes("[[TABLE_ROW]]\t")
+        const tableCount = structuredTables !== null ? structuredTables : body.includes("[[TABLE_ROW]]\t")
           ? Math.max(1, (body.match(/\[\[TABLE_NEW\]\]/g) || []).length)
           : 0;
         return {

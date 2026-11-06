@@ -1,0 +1,279 @@
+//! Ordered, formatted document model used by structured saves.
+//!
+//! A [`RichDocument`] is a sequence of blocks: paragraphs (formatted runs plus alignment, heading
+//! level, and list kind) and tables at their position in the document. Run text is always literal;
+//! no part of it is interpreted as markup. Formats with native run/paragraph formatting (DOCX,
+//! HWPX, ODT, RTF, Markdown) are written by [`crate::rich_writers`]; every other format receives
+//! the flattened [`UniversalDocumentModel`].
+
+use crate::{
+    DocumentFormat, EasyOfficeError, HwpxCodec, UniversalDocumentModel, UniversalFormatConverter,
+    XlsxFormulaCache,
+};
+
+/// Horizontal paragraph alignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RichAlignment {
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
+impl RichAlignment {
+    /// Parses CSS/OOXML-style alignment tokens (`left`, `start`, `center`, `right`, `end`,
+    /// `justify`, `both`).
+    pub fn parse(token: &str) -> Option<Self> {
+        match token.trim().to_ascii_lowercase().as_str() {
+            "left" | "start" => Some(Self::Left),
+            "center" | "centre" => Some(Self::Center),
+            "right" | "end" => Some(Self::Right),
+            "justify" | "both" | "distribute" => Some(Self::Justify),
+            _ => None,
+        }
+    }
+}
+
+/// List paragraph kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RichListKind {
+    Bullet,
+    Ordered,
+}
+
+/// A span of literal text sharing one character format.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RichRun {
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+}
+
+impl RichRun {
+    pub fn plain(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ..Self::default()
+        }
+    }
+}
+
+/// A paragraph: runs plus paragraph properties. `heading_level` 0 is body text, 1–6 headings.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RichParagraph {
+    pub runs: Vec<RichRun>,
+    pub alignment: Option<RichAlignment>,
+    pub heading_level: u8,
+    pub list: Option<RichListKind>,
+}
+
+impl RichParagraph {
+    pub fn plain_text(&self) -> String {
+        self.runs.iter().map(|r| r.text.as_str()).collect()
+    }
+}
+
+/// One block of a [`RichDocument`], in document order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RichBlock {
+    Paragraph(RichParagraph),
+    /// Table rows of final cell text (formula cells already replaced by their values).
+    Table(Vec<Vec<String>>),
+}
+
+/// Ordered, formatted document.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RichDocument {
+    pub title: String,
+    pub blocks: Vec<RichBlock>,
+    pub official_agency: Option<String>,
+}
+
+impl RichDocument {
+    pub(crate) fn display_title(&self) -> String {
+        if self.title.trim().is_empty() {
+            "문서".to_string()
+        } else {
+            self.title.clone()
+        }
+    }
+
+    /// Flattens to the plain model for formats without native formatting support.
+    pub fn to_universal_model(&self) -> UniversalDocumentModel {
+        let mut paragraphs = Vec::new();
+        let mut tables = Vec::new();
+        for block in &self.blocks {
+            match block {
+                RichBlock::Paragraph(p) => paragraphs.push(p.plain_text()),
+                RichBlock::Table(rows) => tables.push(rows.clone()),
+            }
+        }
+        UniversalDocumentModel {
+            title: self.title.clone(),
+            paragraphs,
+            tables,
+            sheet_cells: Vec::new(),
+            slides: Vec::new(),
+            official_agency: self.official_agency.clone(),
+        }
+    }
+}
+
+const TABLE_FORMULA_FUNCS: [&str; 6] = ["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "PRODUCT"];
+
+fn parse_table_formula(text: &str) -> Option<(&'static str, &'static str)> {
+    let body = text.trim().strip_prefix('=')?.trim();
+    let open = body.find('(')?;
+    let func_raw = body[..open].trim().to_ascii_uppercase();
+    let arg_raw = body[open + 1..]
+        .trim()
+        .strip_suffix(')')?
+        .trim()
+        .to_ascii_uppercase();
+    let func = TABLE_FORMULA_FUNCS.into_iter().find(|f| *f == func_raw)?;
+    let dir = ["ABOVE", "BELOW", "LEFT", "RIGHT"]
+        .into_iter()
+        .find(|d| *d == arg_raw)?;
+    Some((func, dir))
+}
+
+fn parse_table_number(text: &str) -> Option<f64> {
+    let cleaned: String = text
+        .trim()
+        .chars()
+        .filter(|c| *c != ',' && !c.is_whitespace())
+        .collect();
+    if cleaned.is_empty() {
+        return None;
+    }
+    cleaned.parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+/// Formats a computed table value: integers without a fraction, otherwise up to 10 decimals.
+pub fn format_table_number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        return format!("{}", n as i64);
+    }
+    let s = format!("{n:.10}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Replaces word-processor table formulas (`=SUM(ABOVE)`, `=AVERAGE(LEFT)`, … with SUM, AVERAGE,
+/// COUNT, MAX, MIN, PRODUCT over ABOVE, BELOW, LEFT, RIGHT) by their computed values, row by row.
+/// Non-numeric cells are skipped; unrecognized formulas are left as text.
+pub fn evaluate_table_formulas(rows: &mut [Vec<String>]) {
+    for r in 0..rows.len() {
+        for c in 0..rows[r].len() {
+            let Some((func, dir)) = parse_table_formula(&rows[r][c]) else {
+                continue;
+            };
+            let cell_at = |rr: usize, cc: usize| rows.get(rr).and_then(|row| row.get(cc));
+            let operands: Vec<f64> = match dir {
+                "ABOVE" => (0..r).filter_map(|rr| cell_at(rr, c)).collect::<Vec<_>>(),
+                "BELOW" => (r + 1..rows.len())
+                    .filter_map(|rr| cell_at(rr, c))
+                    .collect(),
+                "LEFT" => rows[r][..c].iter().collect(),
+                _ => rows[r][c + 1..].iter().collect(),
+            }
+            .into_iter()
+            .filter_map(|s| parse_table_number(s))
+            .collect();
+            let value = match func {
+                "SUM" => operands.iter().sum(),
+                "COUNT" => operands.len() as f64,
+                "AVERAGE" if !operands.is_empty() => {
+                    operands.iter().sum::<f64>() / operands.len() as f64
+                }
+                "MAX" if !operands.is_empty() => operands.iter().copied().fold(f64::MIN, f64::max),
+                "MIN" if !operands.is_empty() => operands.iter().copied().fold(f64::MAX, f64::min),
+                "PRODUCT" if !operands.is_empty() => operands.iter().product(),
+                _ => 0.0,
+            };
+            rows[r][c] = format_table_number(value);
+        }
+    }
+}
+
+impl UniversalFormatConverter {
+    /// Encodes a [`RichDocument`]. DOCX, HWPX/HWTX, ODT, RTF, Markdown, TXT, and PDF keep block
+    /// order (and formatting where the format has it); other formats get the flattened model.
+    pub fn encode_rich(
+        doc: &RichDocument,
+        format: DocumentFormat,
+        formula_cache: Option<&XlsxFormulaCache>,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        use crate::rich_writers as w;
+        match format {
+            DocumentFormat::Docx => w::pack_docx_rich(doc),
+            DocumentFormat::Hwpx | DocumentFormat::Hwtx => {
+                HwpxCodec::pack_rich(doc, format == DocumentFormat::Hwtx)
+            }
+            DocumentFormat::Odt => w::pack_odt_rich(doc),
+            DocumentFormat::Rtf => Ok(w::encode_rtf_rich(doc).into_bytes()),
+            DocumentFormat::Markdown => Ok(w::render_markdown_rich(doc).into_bytes()),
+            DocumentFormat::Txt => Ok(w::render_plain_text(doc, "\t", true).into_bytes()),
+            DocumentFormat::Pdf => Ok(w::serialize_pdf_rich(doc)),
+            _ => Self::encode_with_formula_cache(&doc.to_universal_model(), format, formula_cache),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn grid(rows: &[&[&str]]) -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|r| r.iter().map(|s| s.to_string()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn table_formulas_evaluate_in_every_direction() {
+        let mut rows = grid(&[
+            &["항목", "1,000", "=SUM(RIGHT)", "2", "3"],
+            &["a", "20", "x", "", ""],
+            &["합계", "=sum(above)", "=COUNT(LEFT)", "", ""],
+            &["평균", "=AVERAGE(ABOVE)", "=MAX(BELOW)", "", ""],
+            &["", "=PRODUCT(LEFT)", "7", "", ""],
+        ]);
+        evaluate_table_formulas(&mut rows);
+        assert_eq!(rows[0][2], "5");
+        assert_eq!(rows[2][1], "1020");
+        assert_eq!(rows[2][2], "1");
+        assert_eq!(rows[3][1], "680");
+        assert_eq!(rows[3][2], "7");
+        assert_eq!(rows[4][1], "0");
+    }
+
+    #[test]
+    fn unrecognized_formulas_and_fractions() {
+        let mut rows = grid(&[&["1"], &["2"], &["=AVERAGE(ABOVE)"], &["=FOO(ABOVE)"]]);
+        evaluate_table_formulas(&mut rows);
+        assert_eq!(rows[2][0], "1.5");
+        assert_eq!(rows[3][0], "=FOO(ABOVE)");
+        assert_eq!(format_table_number(1.0 / 3.0), "0.3333333333");
+    }
+
+    #[test]
+    fn flattening_keeps_block_text_and_tables() {
+        let doc = RichDocument {
+            title: "t".into(),
+            blocks: vec![
+                RichBlock::Paragraph(RichParagraph {
+                    runs: vec![RichRun::plain("가"), RichRun::plain("나")],
+                    ..RichParagraph::default()
+                }),
+                RichBlock::Table(grid(&[&["1"]])),
+            ],
+            official_agency: None,
+        };
+        let model = doc.to_universal_model();
+        assert_eq!(model.paragraphs, vec!["가나".to_string()]);
+        assert_eq!(model.tables.len(), 1);
+        assert_eq!(model.official_agency, None);
+    }
+}

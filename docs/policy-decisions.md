@@ -1073,3 +1073,31 @@
   - 브라우저 예약 키를 `preventDefault`로 강제 점유: 새 창·탭 닫기 등은 페이지가 가로챌 수 없고 사용자 기대와도 충돌하므로 라벨에서 제거.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`(`scripts/test-webui-session-context.mjs` 포함), `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 서버 측 문서 저장소(다중 문서·버전 기록)를 도입하여 로컬 자동 저장본을 서버 초안으로 대체할 때.
+
+## 48. 저장 서식·표 위치·표 계산값·다중 시트 보존, 저장 실패 표시 및 문서 제목 파일명 (PD-073, #104)
+
+- **Status** Implemented
+- **Context** WebUI에서 `Ctrl+S`로 저장한 파일을 풀어 확인한 결과(#104), 문서·한글 저장 본문이 `extractEditableDocumentText` 평문이어서 DOCX에 `w:rPr`/`w:pPr`가 하나도 없고(굵게·기울임·밑줄·정렬·제목 수준 유실), 본문 중간 표가 문서 끝으로 이동하며, 표 셀 `=SUM(ABOVE)`가 계산값 대신 문자열로 저장되었습니다. 한글 저장은 항상 `[[AGENCY]] 행정안전부`를 넣었고, 사용자가 `[[SLIDE]]`·`[[TABLE_ROW]]`로 시작하는 문단을 쓰면 서버가 구조 마크업으로 해석했습니다. 시트는 활성 시트만 저장되었고, `convertedBase64`가 없어도 "문서 저장 완료"를 표시했으며, 파일명은 항상 `EasyOffice_<모듈>_문서.<확장자>`였습니다.
+- **Decision (`PD-073`)**
+  1. **구조화 저장 페이로드 (`crates/easyoffice-app/ui/{save-payload.js,workspace-tools.js,app.js}`)**: `convert_document_format` JSON에 텍스트 마크업 `body` 대신 다음 필드 하나를 보냅니다. IPC 명령 수(15종)는 그대로입니다.
+     - `blocks`: 문서 순서의 `{"type":"paragraph","runs":[{"text","bold","italic","underline","strike"}],"align","heading","list"}`와 `{"type":"table","rows":[[{"text","value"}]]}`. 런 서식은 `strong/b`·`em/i`·`u/ins`·`s/strike/del` 태그와 인라인 `font-weight`(600 이상)·`font-style`·`text-decoration`에서, 정렬은 블록 `text-align` 또는 편집기 정렬에서, 제목 수준은 `h1`~`h6`, 목록은 `ul`/`ol > li`에서 읽습니다. 표 수식 셀(`=SUM|AVERAGE|COUNT|MAX|MIN|PRODUCT(ABOVE|BELOW|LEFT|RIGHT)`)은 계산값을 `value`로 함께 보냅니다. PDF 모듈도 평문 문단 블록으로 보냅니다.
+     - `sheets`: 시트 탭 순서의 모든 시트 `{"name","cells":[{"ref":"A1","raw"}]}`(`raw`는 수식이 있으면 수식, 없으면 값). 시트 이름은 수식이 참조하는 시트 키입니다.
+     - `slides`: `{"title","bullets":[...],"notes"}`.
+  2. **서버 구조화 경로 (`crates/easyoffice-app/src/convert_structured.rs`, `convert_ipc.rs`)**: `blocks`/`sheets`/`slides`가 있으면 모든 문자열을 그대로의 내용으로 취급하고 마크업으로 해석하지 않습니다. 형식 오류(알 수 없는 블록 유형·정렬·목록, 0~6 밖의 제목 수준, 문자열이 아닌 런 텍스트, 중복·빈 시트 이름, 잘못된 셀 주소)는 `InvalidArgument`로 거부하고, 항목 수(50만)·시트 수(256)·문서용 값 표 셀 수(200만)에 상한을 둡니다. 셀의 `value`가 있으면 그 값을, 없으면 `evaluate_table_formulas`로 서버에서 계산한 값을 씁니다. `sheets`는 모든 시트를 `WorkbookEngine`에 올려 시트 간 참조까지 계산한 시트별 수식 캐시로 `pack_xlsx_multi_with_formula_cache`에 전달하고(ODS는 `pack_ods_multi`), 문서 형식 대상이면 시트 이름 제목 + 계산값 표로 기록합니다. 구조화 필드가 없을 때만 기존 `body` 마크업을 하위 호환으로 해석합니다.
+  3. **서식 작성기 (`crates/easyoffice-formats/src/{rich_document.rs,rich_writers.rs,hwpx_codec.rs,hwpx_parts.rs}`)**: `RichDocument`를 블록 순서대로 기록합니다. DOCX는 런 `w:rPr`(`w:b`/`w:i`/`w:strike`/`w:u`), 문단 `w:pPr`(`w:pStyle` `Heading1`~`Heading6`·`ListBullet`/`ListNumber`, `w:jc`)와 이를 정의하는 `word/styles.xml`(관계·콘텐츠 형식 포함)을, HWPX는 서식 조합마다 `charPr`(`hh:bold`/`hh:italic`/`hh:underline type="BOTTOM"`/`hh:strikeout shape="SOLID"`, 제목 글자 크기)과 정렬·들여쓰기마다 `paraPr`, 제목 수준마다 `개요 N` 스타일을 `header.xml`에 추가합니다. ODT는 자동 스타일(`fo:font-weight`, `fo:font-style`, 밑줄·취소선, `fo:text-align`)과 `text:h text:outline-level`, RTF는 `\b`·`\i`·`\ul`·`\strike`·`\qc` 등 제어어(디코더는 이 제어어를 걸러 냄), Markdown은 `**`·`*`·`~~`·`<u>`·`#`(사용자 텍스트의 Markdown 특수 문자는 역슬래시 이스케이프), TXT·PDF는 순서 보존 텍스트를 기록합니다. 그 외 형식(DOC, HWP 5.0, 시트·슬라이드 대상)은 평탄화 모델로 기록합니다.
+  4. **고정 기관명 제거**: 저장 페이로드에 발신 기관을 넣지 않으며, 구조화 경로의 HWPX `content.hpf`에는 `officialAgency` 메타가 기록되지 않습니다.
+  5. **저장 결과 표시와 수정 상태 (`workspace-tools.js`, `app.js`)**: IPC 오류, 빈 `convertedBase64`, 다운로드 시작 실패를 모두 `문서 저장 실패 (<형식>): <사유>`로 표시하고 `false`를 반환하며, 이때는 수정 상태 기준선(PD-072)을 갱신하지 않습니다. 변환기 결과 상자도 내려받지 못하면 그 사실을 덧붙입니다.
+  6. **파일명**: 모듈의 문서 탭 제목에서 확장자를 떼고 Windows/macOS 금지 문자(`<>:"/\|?*`, 제어 문자)를 `_`로 바꾸며, 앞뒤 점·공백 제거, 예약 장치 이름(`CON`, `PRN`, `AUX`, `NUL`, `COM1`~`9`, `LPT1`~`9`) 앞 `_`, 120자 상한을 적용합니다. 탭이 없거나 결과가 비면 `EasyOffice_<모듈>_문서`를 씁니다. 같은 이름을 서버 `title`로도 보냅니다.
+  7. 새 UI 모듈 `save-payload.js`를 `--serve` 정적 자산, 자가 진단 자산 무결성 검사, 저장소 필수 파일 목록에 추가하고, 오프라인 테스트 백엔드(`scripts/test-support/offline-rpc.js`)도 구조화 필드를 받습니다.
+- **Why** 저장한 파일에 편집한 서식·표 위치·표 계산값·모든 시트가 남아야 하고, 사용자 입력은 어떤 내용이든 문서 구조를 바꿀 수 없어야 하며, 실패를 성공으로 표시하거나 매번 같은 이름으로 사본을 쌓지 않기 위함입니다.
+- **Trade-offs**
+  1. 글꼴 이름·크기·색상, 셀 병합, 이미지는 아직 구조화 페이로드에 포함하지 않습니다(제목 수준의 크기만 반영).
+  2. DOC·HWP 5.0 바이너리와 시트·슬라이드 대상은 서식 없이 평탄화되며, 이 경로의 표는 여전히 문단 뒤에 기록됩니다.
+  3. HWPX 제목은 번호 매기기 정의가 필요한 `OUTLINE` 문단 머리 대신 `개요 N` 스타일과 굵은·큰 글자 모양으로 표현합니다.
+  4. 서버는 시트 셀 값을 다시 계산하므로 WebUI에 표시된 값과 엔진 계산값이 다르면 엔진 값이 저장됩니다.
+- **Alternatives rejected**
+  - 기존 마크업에 이스케이프 규칙 추가: 줄 단위 텍스트 프로토콜은 런 서식·블록 순서를 표현할 수 없고 주입 경계가 계속 문자열 규칙에 의존하므로 기각.
+  - 편집기 HTML을 그대로 전송해 서버에서 파싱: 서버에 HTML 파서와 정화 규칙이 필요하고 공격 표면이 커져 기각.
+  - 새 IPC 명령 추가: 15종 명령 계약을 유지하기 위해 기존 `convert_document_format` 페이로드를 확장.
+- **Verified by** `cargo test -p easyoffice-app --test structured_save_fidelity`(DOCX/HWPX 서식 요소·표 순서·계산값·마크업 비해석·고정 기관명 부재, ODT/RTF/Markdown 서식, 다중 시트 XLSX 시트 간 캐시, 형식 오류 거부), `crates/easyoffice-formats/src/{rich_document.rs,rich_writers.rs}` 단위 테스트, `node --test scripts/test-webui-save-fidelity.mjs`(블록 페이로드, 전 시트 전송, 저장 실패 표시, 파일명 정리), `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
+- **Revisit when** 글꼴·크기·색상·셀 병합·이미지 저장을 추가하거나, DOC/HWP 5.0 바이너리 작성기가 문단 서식과 표 위치를 지원하게 될 때.

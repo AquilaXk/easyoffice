@@ -8,10 +8,12 @@
 //! Document metadata (template flag, issuing agency, approval lines) lives in OPF `opf:meta`.
 
 use crate::hwpx_parts::{
-    header_xml, manifest_xml, section_properties_xml, CELL_HEIGHT, CONTAINER_XML, NS_PARAGRAPH,
-    NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
+    header_xml, header_xml_with, manifest_xml, section_properties_xml, HwpxCharShape,
+    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML,
+    TEXT_WIDTH, VERSION_XML,
 };
 use crate::office_codecs::validate_zip_xml_entries;
+use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
 use crate::rtf_xml_helpers::{
     extract_attr, extract_attr_from_fragment, extract_tag_bodies,
     extract_tags_or_self_closing_with_attrs, extract_tags_with_attrs, strip_tag_blocks,
@@ -46,9 +48,34 @@ struct SectionWriter {
 }
 
 impl SectionWriter {
+    fn new() -> Self {
+        Self {
+            xml: format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hs:sec xmlns:hs=\"{NS_SECTION}\" xmlns:hp=\"{NS_PARAGRAPH}\">"
+            ),
+            next_para_id: 0,
+            next_table_id: 1,
+            sec_pr_pending: true,
+        }
+    }
+
+    fn finish(mut self) -> String {
+        if self.sec_pr_pending {
+            // Empty document: a carrier paragraph still holds the section properties.
+            self.open_paragraph();
+            self.xml.push_str("</hp:p>");
+        }
+        self.xml.push_str("</hs:sec>");
+        self.xml
+    }
+
     fn open_paragraph(&mut self) {
+        self.open_paragraph_with(0, 0);
+    }
+
+    fn open_paragraph_with(&mut self, para_pr: usize, style: usize) {
         self.xml.push_str(&format!(
-            "<hp:p id=\"{}\" paraPrIDRef=\"0\" styleIDRef=\"0\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">",
+            "<hp:p id=\"{}\" paraPrIDRef=\"{para_pr}\" styleIDRef=\"{style}\" pageBreak=\"0\" columnBreak=\"0\" merged=\"0\">",
             self.next_para_id
         ));
         self.next_para_id += 1;
@@ -62,9 +89,15 @@ impl SectionWriter {
 
     fn text_paragraph(&mut self, text: &str) {
         self.open_paragraph();
-        self.xml.push_str("<hp:run charPrIDRef=\"0\"><hp:t>");
+        self.run(0, text);
+        self.xml.push_str("</hp:p>");
+    }
+
+    fn run(&mut self, char_pr: usize, text: &str) {
+        self.xml
+            .push_str(&format!("<hp:run charPrIDRef=\"{char_pr}\"><hp:t>"));
         self.xml.push_str(&XmlSanitizer::escape(text));
-        self.xml.push_str("</hp:t></hp:run></hp:p>");
+        self.xml.push_str("</hp:t></hp:run>");
     }
 
     fn table_paragraph(&mut self, rows: &[Vec<String>]) {
@@ -126,6 +159,115 @@ impl HwpxCodec {
     pub const MIMETYPE_HWPX: &'static str = "application/hwp+zip";
 
     pub fn pack(payload: &HwpxPayload) -> Result<Vec<u8>, EasyOfficeError> {
+        let mut sec = SectionWriter::new();
+        for p in &payload.paragraphs {
+            sec.text_paragraph(p);
+        }
+        for tbl in &payload.tables {
+            sec.table_paragraph(tbl);
+        }
+        Self::pack_package(payload, header_xml(), sec.finish())
+    }
+
+    /// Writes a [`RichDocument`] in block order: each distinct run format becomes a `charPr`,
+    /// each distinct alignment/indent a `paraPr`, and heading levels use "개요 N" styles.
+    pub fn pack_rich(doc: &RichDocument, is_template: bool) -> Result<Vec<u8>, EasyOfficeError> {
+        let mut char_shapes = vec![HwpxCharShape::default()];
+        let mut para_shapes = vec![HwpxParaShape::default()];
+        let mut styles: Vec<HwpxStyle> = Vec::new();
+        fn intern<T: PartialEq + Copy>(table: &mut Vec<T>, item: T) -> usize {
+            table.iter().position(|x| *x == item).unwrap_or_else(|| {
+                table.push(item);
+                table.len() - 1
+            })
+        }
+        let mut sec = SectionWriter::new();
+        for block in &doc.blocks {
+            let RichBlock::Paragraph(p) = block else {
+                if let RichBlock::Table(rows) = block {
+                    sec.table_paragraph(rows);
+                }
+                continue;
+            };
+            let level = if (1..=6).contains(&p.heading_level) {
+                p.heading_level
+            } else {
+                0
+            };
+            let para = HwpxParaShape {
+                align: match p.alignment {
+                    None => HwpxParaShape::default().align,
+                    Some(RichAlignment::Left) => "LEFT",
+                    Some(RichAlignment::Center) => "CENTER",
+                    Some(RichAlignment::Right) => "RIGHT",
+                    Some(RichAlignment::Justify) => "JUSTIFY",
+                },
+                left_margin: if p.list.is_some() { 2000 } else { 0 },
+            };
+            let para_pr = intern(&mut para_shapes, para);
+            let base = HwpxCharShape {
+                bold: level > 0,
+                height: [1600, 1400, 1300, 1200, 1100, 1000]
+                    .get(usize::from(level).wrapping_sub(1))
+                    .copied()
+                    .unwrap_or(1000),
+                ..HwpxCharShape::default()
+            };
+            let style = if level > 0 {
+                let char_pr = intern(&mut char_shapes, base);
+                let name = format!("개요 {level}");
+                styles
+                    .iter()
+                    .position(|s| s.name == name)
+                    .unwrap_or_else(|| {
+                        styles.push(HwpxStyle {
+                            name,
+                            eng_name: format!("Outline {level}"),
+                            para_pr,
+                            char_pr,
+                        });
+                        styles.len() - 1
+                    })
+                    + 1
+            } else {
+                0
+            };
+            sec.open_paragraph_with(para_pr, style);
+            let runs: Vec<_> = p.runs.iter().filter(|r| !r.text.is_empty()).collect();
+            if runs.is_empty() {
+                let char_pr = intern(&mut char_shapes, base);
+                sec.run(char_pr, "");
+            }
+            for run in runs {
+                let shape = HwpxCharShape {
+                    bold: base.bold || run.bold,
+                    italic: run.italic,
+                    underline: run.underline,
+                    strike: run.strike,
+                    height: base.height,
+                };
+                let char_pr = intern(&mut char_shapes, shape);
+                sec.run(char_pr, &run.text);
+            }
+            sec.xml.push_str("</hp:p>");
+        }
+        let header = header_xml_with(&char_shapes, &para_shapes, &styles);
+        let meta = HwpxPayload {
+            title: doc.display_title(),
+            is_template,
+            official_agency: doc.official_agency.clone(),
+            approval_lines: vec!["기안".to_string(), "검토".to_string(), "결재".to_string()],
+            paragraphs: Vec::new(),
+            tables: Vec::new(),
+        };
+        Self::pack_package(&meta, header, sec.finish())
+    }
+
+    fn pack_package(
+        payload: &HwpxPayload,
+        header: String,
+        section: String,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         let mut metadata = format!(
             "<opf:title>{}</opf:title><opf:language>ko</opf:language><opf:meta name=\"creator\" content=\"text\">EasyOffice</opf:meta>",
             XmlSanitizer::escape(&payload.title)
@@ -161,28 +303,6 @@ impl HwpxCodec {
             metadata
         );
 
-        let mut sec = SectionWriter {
-            xml: format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hs:sec xmlns:hs=\"{NS_SECTION}\" xmlns:hp=\"{NS_PARAGRAPH}\">"
-            ),
-            next_para_id: 0,
-            next_table_id: 1,
-            sec_pr_pending: true,
-        };
-        for p in &payload.paragraphs {
-            sec.text_paragraph(p);
-        }
-        for tbl in &payload.tables {
-            sec.table_paragraph(tbl);
-        }
-        if sec.sec_pr_pending {
-            // Empty document: a carrier paragraph still holds the section properties.
-            sec.open_paragraph();
-            sec.xml.push_str("</hp:p>");
-        }
-        sec.xml.push_str("</hs:sec>");
-
-        let header = header_xml();
         let part_names = [
             "version.xml",
             "Contents/content.hpf",
@@ -192,7 +312,7 @@ impl HwpxCodec {
         ];
         let manifest = manifest_xml(Self::MIMETYPE_HWPX, &part_names);
 
-        for xml in [&content_hpf, &header, &sec.xml, &manifest] {
+        for xml in [&content_hpf, &header, &section, &manifest] {
             XmlSanitizer::validate_safe_xml(xml)?;
         }
 
@@ -209,7 +329,7 @@ impl HwpxCodec {
             ("META-INF/manifest.xml".to_string(), manifest.into_bytes()),
             ("Contents/content.hpf".to_string(), content_hpf.into_bytes()),
             ("Contents/header.xml".to_string(), header.into_bytes()),
-            ("Contents/section0.xml".to_string(), sec.xml.into_bytes()),
+            ("Contents/section0.xml".to_string(), section.into_bytes()),
             ("settings.xml".to_string(), SETTINGS_XML.as_bytes().to_vec()),
         ])
     }

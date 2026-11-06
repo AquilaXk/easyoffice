@@ -1,8 +1,9 @@
 //! Static KS X 6101 (OWPML) package parts used by the HWPX writer.
 //!
-//! `header.xml` defines one font per language slot, one character shape (`charPr id="0"`), one
-//! paragraph shape (`paraPr id="0"`), two border fills, and the default style (`style id="0"`);
-//! every paragraph and run in `section0.xml` refers to these IDs.
+//! `header.xml` defines one font per language slot, the character shapes (`charPr`, id 0 is the
+//! default), paragraph shapes (`paraPr`, id 0 is the default), two border fills, and the default
+//! style (`style id="0"`) plus optional heading styles; every paragraph and run in
+//! `section0.xml` refers to these IDs.
 
 use crate::XmlSanitizer;
 
@@ -46,8 +47,121 @@ fn border_fill(id: u32, line_type: &str) -> String {
     xml
 }
 
-/// `Contents/header.xml` with font faces, character/paragraph shapes, and styles.
+/// Character shape (`hh:charPr`) written to `header.xml`; `height` is in 1/100 pt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HwpxCharShape {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+    pub height: u32,
+}
+
+impl Default for HwpxCharShape {
+    fn default() -> Self {
+        Self {
+            bold: false,
+            italic: false,
+            underline: false,
+            strike: false,
+            height: 1000,
+        }
+    }
+}
+
+/// Paragraph shape (`hh:paraPr`): OWPML horizontal alignment and left margin (HWPUNIT).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HwpxParaShape {
+    pub align: &'static str,
+    pub left_margin: u32,
+}
+
+impl Default for HwpxParaShape {
+    fn default() -> Self {
+        Self {
+            align: "JUSTIFY",
+            left_margin: 0,
+        }
+    }
+}
+
+/// Paragraph style (`hh:style`) referencing a paragraph and a character shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HwpxStyle {
+    pub name: String,
+    pub eng_name: String,
+    pub para_pr: usize,
+    pub char_pr: usize,
+}
+
+fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
+    let mut xml = format!(
+        "<hh:charPr id=\"{id}\" height=\"{}\" textColor=\"#000000\" shadeColor=\"none\" useFontSpace=\"0\" useKerning=\"0\" symMark=\"NONE\" borderFillIDRef=\"1\">",
+        shape.height
+    );
+    xml.push_str(&format!("<hh:fontRef {}/>", per_lang_attrs("0")));
+    xml.push_str(&format!("<hh:ratio {}/>", per_lang_attrs("100")));
+    xml.push_str(&format!("<hh:spacing {}/>", per_lang_attrs("0")));
+    xml.push_str(&format!("<hh:relSz {}/>", per_lang_attrs("100")));
+    xml.push_str(&format!("<hh:offset {}/>", per_lang_attrs("0")));
+    if shape.italic {
+        xml.push_str("<hh:italic/>");
+    }
+    if shape.bold {
+        xml.push_str("<hh:bold/>");
+    }
+    xml.push_str(&format!(
+        "<hh:underline type=\"{}\" shape=\"SOLID\" color=\"#000000\"/>",
+        if shape.underline { "BOTTOM" } else { "NONE" }
+    ));
+    xml.push_str(&format!(
+        "<hh:strikeout shape=\"{}\" color=\"#000000\"/>",
+        if shape.strike { "SOLID" } else { "NONE" }
+    ));
+    xml.push_str(concat!(
+        "<hh:outline type=\"NONE\"/>",
+        "<hh:shadow type=\"NONE\" color=\"#C0C0C0\" offsetX=\"10\" offsetY=\"10\"/>",
+        "</hh:charPr>"
+    ));
+    xml
+}
+
+fn para_pr_xml(id: usize, shape: &HwpxParaShape) -> String {
+    format!(
+        concat!(
+            "<hh:paraPr id=\"{id}\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"0\">",
+            "<hh:align horizontal=\"{align}\" vertical=\"BASELINE\"/>",
+            "<hh:heading type=\"NONE\" idRef=\"0\" level=\"0\"/>",
+            "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
+            "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
+            "<hh:margin><hc:intent value=\"0\" unit=\"HWPUNIT\"/><hc:left value=\"{left}\" unit=\"HWPUNIT\"/>",
+            "<hc:right value=\"0\" unit=\"HWPUNIT\"/><hc:prev value=\"0\" unit=\"HWPUNIT\"/><hc:next value=\"0\" unit=\"HWPUNIT\"/></hh:margin>",
+            "<hh:lineSpacing type=\"PERCENT\" value=\"160\" unit=\"HWPUNIT\"/>",
+            "<hh:border borderFillIDRef=\"1\" offsetLeft=\"0\" offsetRight=\"0\" offsetTop=\"0\" offsetBottom=\"0\" connect=\"0\" ignoreMargin=\"0\"/>",
+            "</hh:paraPr>"
+        ),
+        id = id,
+        align = shape.align,
+        left = shape.left_margin
+    )
+}
+
+/// `Contents/header.xml` with the default shapes only (`charPr`/`paraPr`/`style` id 0).
 pub(crate) fn header_xml() -> String {
+    header_xml_with(
+        &[HwpxCharShape::default()],
+        &[HwpxParaShape::default()],
+        &[],
+    )
+}
+
+/// `Contents/header.xml` with font faces, the given character/paragraph shape tables (index =
+/// ID; index 0 is the default), and the default style followed by `extra_styles`.
+pub(crate) fn header_xml_with(
+    char_shapes: &[HwpxCharShape],
+    para_shapes: &[HwpxParaShape],
+    extra_styles: &[HwpxStyle],
+) -> String {
     let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hh:head xmlns:hh=\"{NS_HEAD}\" xmlns:hc=\"{NS_CORE}\" version=\"1.4\" secCnt=\"1\">"
     );
@@ -70,33 +184,39 @@ pub(crate) fn header_xml() -> String {
     xml.push_str(&border_fill(2, "SOLID"));
     xml.push_str("</hh:borderFills>");
 
-    xml.push_str("<hh:charProperties itemCnt=\"1\">");
-    xml.push_str("<hh:charPr id=\"0\" height=\"1000\" textColor=\"#000000\" shadeColor=\"none\" useFontSpace=\"0\" useKerning=\"0\" symMark=\"NONE\" borderFillIDRef=\"1\">");
-    xml.push_str(&format!("<hh:fontRef {}/>", per_lang_attrs("0")));
-    xml.push_str(&format!("<hh:ratio {}/>", per_lang_attrs("100")));
-    xml.push_str(&format!("<hh:spacing {}/>", per_lang_attrs("0")));
-    xml.push_str(&format!("<hh:relSz {}/>", per_lang_attrs("100")));
-    xml.push_str(&format!("<hh:offset {}/>", per_lang_attrs("0")));
+    xml.push_str(&format!(
+        "<hh:charProperties itemCnt=\"{}\">",
+        char_shapes.len()
+    ));
+    for (id, shape) in char_shapes.iter().enumerate() {
+        xml.push_str(&char_pr_xml(id, shape));
+    }
+    xml.push_str("</hh:charProperties>");
+    xml.push_str("<hh:tabProperties itemCnt=\"1\"><hh:tabPr id=\"0\" autoTabLeft=\"0\" autoTabRight=\"0\"/></hh:tabProperties>");
+    xml.push_str(&format!(
+        "<hh:paraProperties itemCnt=\"{}\">",
+        para_shapes.len()
+    ));
+    for (id, shape) in para_shapes.iter().enumerate() {
+        xml.push_str(&para_pr_xml(id, shape));
+    }
+    xml.push_str("</hh:paraProperties>");
+    xml.push_str(&format!(
+        "<hh:styles itemCnt=\"{}\">",
+        extra_styles.len() + 1
+    ));
+    xml.push_str("<hh:style id=\"0\" type=\"PARA\" name=\"바탕글\" engName=\"Normal\" paraPrIDRef=\"0\" charPrIDRef=\"0\" nextStyleIDRef=\"0\" langID=\"1042\" lockForm=\"0\"/>");
+    for (idx, style) in extra_styles.iter().enumerate() {
+        xml.push_str(&format!(
+            "<hh:style id=\"{}\" type=\"PARA\" name=\"{}\" engName=\"{}\" paraPrIDRef=\"{}\" charPrIDRef=\"{}\" nextStyleIDRef=\"0\" langID=\"1042\" lockForm=\"0\"/>",
+            idx + 1,
+            XmlSanitizer::escape(&style.name),
+            XmlSanitizer::escape(&style.eng_name),
+            style.para_pr,
+            style.char_pr
+        ));
+    }
     xml.push_str(concat!(
-        "<hh:underline type=\"NONE\" shape=\"SOLID\" color=\"#000000\"/>",
-        "<hh:strikeout shape=\"NONE\" color=\"#000000\"/>",
-        "<hh:outline type=\"NONE\"/>",
-        "<hh:shadow type=\"NONE\" color=\"#C0C0C0\" offsetX=\"10\" offsetY=\"10\"/>",
-        "</hh:charPr></hh:charProperties>",
-        "<hh:tabProperties itemCnt=\"1\"><hh:tabPr id=\"0\" autoTabLeft=\"0\" autoTabRight=\"0\"/></hh:tabProperties>",
-        "<hh:paraProperties itemCnt=\"1\">",
-        "<hh:paraPr id=\"0\" tabPrIDRef=\"0\" condense=\"0\" fontLineHeight=\"0\" snapToGrid=\"1\" suppressLineNumbers=\"0\" checked=\"0\">",
-        "<hh:align horizontal=\"JUSTIFY\" vertical=\"BASELINE\"/>",
-        "<hh:heading type=\"NONE\" idRef=\"0\" level=\"0\"/>",
-        "<hh:breakSetting breakLatinWord=\"KEEP_WORD\" breakNonLatinWord=\"KEEP_WORD\" widowOrphan=\"0\" keepWithNext=\"0\" keepLines=\"0\" pageBreakBefore=\"0\" lineWrap=\"BREAK\"/>",
-        "<hh:autoSpacing eAsianEng=\"0\" eAsianNum=\"0\"/>",
-        "<hh:margin><hc:intent value=\"0\" unit=\"HWPUNIT\"/><hc:left value=\"0\" unit=\"HWPUNIT\"/>",
-        "<hc:right value=\"0\" unit=\"HWPUNIT\"/><hc:prev value=\"0\" unit=\"HWPUNIT\"/><hc:next value=\"0\" unit=\"HWPUNIT\"/></hh:margin>",
-        "<hh:lineSpacing type=\"PERCENT\" value=\"160\" unit=\"HWPUNIT\"/>",
-        "<hh:border borderFillIDRef=\"1\" offsetLeft=\"0\" offsetRight=\"0\" offsetTop=\"0\" offsetBottom=\"0\" connect=\"0\" ignoreMargin=\"0\"/>",
-        "</hh:paraPr></hh:paraProperties>",
-        "<hh:styles itemCnt=\"1\">",
-        "<hh:style id=\"0\" type=\"PARA\" name=\"바탕글\" engName=\"Normal\" paraPrIDRef=\"0\" charPrIDRef=\"0\" nextStyleIDRef=\"0\" langID=\"1042\" lockForm=\"0\"/>",
         "</hh:styles></hh:refList>",
         "<hh:compatibleDocument targetProgram=\"HWP201X\"><hh:layoutCompatibility/></hh:compatibleDocument>",
         "<hh:docOption><hh:linkinfo path=\"\" pageInherit=\"0\" footnoteInherit=\"0\"/></hh:docOption>",

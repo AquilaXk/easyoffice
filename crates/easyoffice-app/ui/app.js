@@ -233,7 +233,10 @@
   });
 
   function saveWorkspaceDocument() {
-    return workspacePanels.saveActiveModuleDocument().then(() => workspaceSession.markSaved());
+    return workspacePanels.saveActiveModuleDocument().then((saved) => {
+      if (saved !== false) workspaceSession.markSaved();
+      return saved;
+    });
   }
 
   let paletteSelectedIdx = 0;
@@ -598,20 +601,15 @@
             await sheetController.commitPendingFocusedSheetCell(true);
             const src = document.getElementById("conv-src-fmt").value;
             const dst = document.getElementById("conv-dst-fmt").value;
-            const body = workspacePanels.buildStructuredConversionBody(src);
+            const content = workspacePanels.buildConversionContent(src);
             const res = await invokeIpc(
               "convert_document_format",
-              JSON.stringify({
-                sourceFormat: src,
-                targetFormat: dst,
-                title: "통합_변환_문서",
-                body,
-              })
+              JSON.stringify({ sourceFormat: src, targetFormat: dst, title: "통합_변환_문서", ...content })
             );
             const box = document.getElementById("conv-result-box");
-            if (res && res.convertedBase64) {
+            const downloaded =
+              Boolean(res?.convertedBase64) &&
               workspacePanels.triggerBase64Download(res.convertedBase64, "통합_변환_문서", dst);
-            }
             if (box && res) {
               box.textContent =
                 "[" +
@@ -625,7 +623,8 @@
                 " (" +
                 res.outputBytes +
                 "B) · " +
-                workspacePanels.describeConversionSpec(res);
+                workspacePanels.describeConversionSpec(res) +
+                (downloaded ? "" : " · 다운로드 실패: 변환 결과 파일을 받지 못했습니다");
             }
           });
         void runConvert().catch(() => {});
