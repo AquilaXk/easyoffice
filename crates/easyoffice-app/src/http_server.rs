@@ -407,15 +407,20 @@ pub fn serve_http_on_listener_with_handler(
     }
 }
 
-fn bind_with_fallback(preferred_port: u16) -> std::io::Result<TcpListener> {
-    if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{preferred_port}")) {
-        return Ok(listener);
+/// Binds the loopback listener. A user-specified port (`allow_fallback == false`)
+/// is bound exactly or the error is returned; only the default port may move to
+/// 8788..=8800 and finally an ephemeral port.
+pub(crate) fn bind_with_fallback(
+    preferred_port: u16,
+    allow_fallback: bool,
+) -> std::io::Result<TcpListener> {
+    let first = TcpListener::bind(format!("127.0.0.1:{preferred_port}"));
+    if first.is_ok() || !allow_fallback {
+        return first;
     }
-    if preferred_port == 8787 {
-        for candidate in 8788..=8800 {
-            if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{candidate}")) {
-                return Ok(listener);
-            }
+    for candidate in 8788..=8800 {
+        if let Ok(listener) = TcpListener::bind(format!("127.0.0.1:{candidate}")) {
+            return Ok(listener);
         }
     }
     TcpListener::bind("127.0.0.1:0")
@@ -438,9 +443,19 @@ fn try_open_desktop_browser(url: &str) {
     }
 }
 
-pub fn serve_webui(preferred_port: u16, open_browser: bool) -> ExitCode {
-    let listener = match bind_with_fallback(preferred_port) {
+pub fn serve_webui(port: crate::cli_args::ServePort, open_browser: bool) -> ExitCode {
+    let preferred_port = port.port();
+    let listener = match bind_with_fallback(preferred_port, port.allows_fallback()) {
         Ok(l) => l,
+        Err(err) if !port.allows_fallback() => {
+            eprintln!(
+                "error: port {preferred_port} on 127.0.0.1 is unavailable ({err}). \
+                 Choose another port with --serve <PORT>, or use --serve without a port \
+                 to try the default {} with automatic fallback.",
+                crate::cli_args::DEFAULT_SERVE_PORT
+            );
+            return ExitCode::FAILURE;
+        }
         Err(err) => {
             eprintln!("Failed to bind 127.0.0.1:{preferred_port}: {err}");
             return ExitCode::FAILURE;
