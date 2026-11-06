@@ -94,5 +94,133 @@
     "forbiddenSubstrings": [],
     "expectedRustJsMasked": "plain text without pii 일반 결재 기안문",
     "expectedSwiftMasked": "plain text without pii 일반 결재 기안문"
+  },
+  {
+    "id": "card-hyphen-grouped",
+    "input": "카드 1234-5678-9012-3456 결제",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["1234-5678-9012-3456", "9012-3456"],
+    "expectedRustJsMasked": "카드 ****-****-****-**** 결제",
+    "expectedSwiftMasked": "카드 [카드번호 비식별] 결제"
+  },
+  {
+    "id": "card-space-grouped",
+    "input": "카드 4111 1111 1111 1111 승인",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["4111 1111 1111 1111", "1111 1111"],
+    "expectedRustJsMasked": "카드 **** **** **** **** 승인",
+    "expectedSwiftMasked": "카드 [카드번호 비식별] 승인"
+  },
+  {
+    "id": "card-contiguous-luhn-valid",
+    "input": "카드번호 4111111111111111 확인",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["4111111111111111", "11111111"],
+    "expectedRustJsMasked": "카드번호 **************** 확인",
+    "expectedSwiftMasked": "카드번호 [카드번호 비식별] 확인"
+  },
+  {
+    "id": "negative-contiguous-luhn-invalid",
+    "input": "주문번호 4111111111111112 처리",
+    "expectedCount": 0,
+    "forbiddenSubstrings": [],
+    "expectedRustJsMasked": "주문번호 4111111111111112 처리",
+    "expectedSwiftMasked": "주문번호 4111111111111112 처리"
+  },
+  {
+    "id": "negative-contiguous-non-card-prefix",
+    "input": "문서번호 1234567890123 보관",
+    "expectedCount": 0,
+    "forbiddenSubstrings": [],
+    "expectedRustJsMasked": "문서번호 1234567890123 보관",
+    "expectedSwiftMasked": "문서번호 1234567890123 보관"
+  },
+  {
+    "id": "bank-account-3-3-6",
+    "input": "급여계좌 110-123-456789 입금",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["110-123-456789", "456789"],
+    "expectedRustJsMasked": "급여계좌 ***-***-****** 입금",
+    "expectedSwiftMasked": "급여계좌 [계좌번호 비식별] 입금"
+  },
+  {
+    "id": "bank-account-4-3-6",
+    "input": "이체 1002-123-456789 완료",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["1002-123-456789", "456789"],
+    "expectedRustJsMasked": "이체 ****-***-****** 완료",
+    "expectedSwiftMasked": "이체 [계좌번호 비식별] 완료"
+  },
+  {
+    "id": "bank-account-6-2-6",
+    "input": "출금 123456-78-901234 확인",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["123456-78-901234", "901234"],
+    "expectedRustJsMasked": "출금 ******-**-****** 확인",
+    "expectedSwiftMasked": "출금 [계좌번호 비식별] 확인"
+  },
+  {
+    "id": "bank-account-3-4-4-2",
+    "input": "송금 352-1234-5678-13 요청",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["352-1234-5678-13", "1234-5678"],
+    "expectedRustJsMasked": "송금 ***-****-****-** 요청",
+    "expectedSwiftMasked": "송금 [계좌번호 비식별] 요청"
+  },
+  {
+    "id": "driver-license",
+    "input": "면허 11-12-345678-90 갱신",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["11-12-345678-90", "345678"],
+    "expectedRustJsMasked": "면허 **-**-******-** 갱신",
+    "expectedSwiftMasked": "면허 [운전면허 비식별] 갱신"
+  },
+  {
+    "id": "passport-legacy",
+    "input": "여권 M12345678 발급",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["M12345678", "12345678"],
+    "expectedRustJsMasked": "여권 ********* 발급",
+    "expectedSwiftMasked": "여권 [여권번호 비식별] 발급"
+  },
+  {
+    "id": "passport-new-format",
+    "input": "여권 M123A4567 발급",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["M123A4567", "A4567"],
+    "expectedRustJsMasked": "여권 ********* 발급",
+    "expectedSwiftMasked": "여권 [여권번호 비식별] 발급"
+  },
+  {
+    "id": "business-registration",
+    "input": "사업자 123-45-67890 등록",
+    "expectedCount": 1,
+    "forbiddenSubstrings": ["123-45-67890", "67890"],
+    "expectedRustJsMasked": "사업자 ***-**-***** 등록",
+    "expectedSwiftMasked": "사업자 [사업자번호 비식별] 등록"
+  },
+  {
+    "id": "phones-stay-phones-next-to-account",
+    "input": "대표 02-1234-5678 / 휴대 010-1234-5678 / 계좌 110-123-456789",
+    "expectedCount": 3,
+    "forbiddenSubstrings": ["1234-5678", "456789"],
+    "expectedRustJsMasked": "대표 02-****-**** / 휴대 010-****-**** / 계좌 ***-***-******",
+    "expectedSwiftMasked": "대표 [연락처 비식별] / 휴대 [연락처 비식별] / 계좌 [계좌번호 비식별]"
+  },
+  {
+    "id": "negative-date-amount-version",
+    "input": "2026-11-06 결제 금액 1,234,567원 버전 v2.10.3 반영",
+    "expectedCount": 0,
+    "forbiddenSubstrings": [],
+    "expectedRustJsMasked": "2026-11-06 결제 금액 1,234,567원 버전 v2.10.3 반영",
+    "expectedSwiftMasked": "2026-11-06 결제 금액 1,234,567원 버전 v2.10.3 반영"
+  },
+  {
+    "id": "negative-short-hyphen-groups",
+    "input": "문서번호 123-4567 및 12-34-56 분류 A1234567",
+    "expectedCount": 0,
+    "forbiddenSubstrings": [],
+    "expectedRustJsMasked": "문서번호 123-4567 및 12-34-56 분류 A1234567",
+    "expectedSwiftMasked": "문서번호 123-4567 및 12-34-56 분류 A1234567"
   }
 ]

@@ -650,9 +650,9 @@
         }
 
         if (totalMasked > 0) {
-          piiOut.textContent = "주민번호·전화번호·이메일 " + totalMasked + "건 마스킹 완료 (" + curMod + ")";
+          piiOut.textContent = "개인정보(주민번호·연락처·이메일·카드·계좌·여권·면허·사업자번호) " + totalMasked + "건 마스킹 완료 (" + curMod + ")";
         } else {
-          piiOut.textContent = "주민번호·전화번호·이메일 스캔 완료 (감지 0건 · " + curMod + ")";
+          piiOut.textContent = "개인정보(주민번호·연락처·이메일·카드·계좌·여권·면허·사업자번호) 스캔 완료 (감지 0건 · " + curMod + ")";
         }
         const fb = document.getElementById("status-command-feedback");
         if (fb) fb.textContent = piiOut.textContent;
