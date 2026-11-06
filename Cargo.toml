@@ -5,6 +5,15 @@ members = [
     "crates/easyoffice-sheet",
     "crates/easyoffice-layout",
     "crates/easyoffice-app",
+    "crates/easyoffice-desktop",
+]
+# Plain `cargo build`/`cargo test` cover the cross-platform engine crates. The Windows desktop shell
+# (Tauri v2 / WebView2) is built with `-p easyoffice-desktop` or `--workspace` on the MSVC toolchain.
+default-members = [
+    "crates/easyoffice-formats",
+    "crates/easyoffice-sheet",
+    "crates/easyoffice-layout",
+    "crates/easyoffice-app",
 ]
 
 [workspace.package]

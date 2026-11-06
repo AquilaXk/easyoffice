@@ -33,7 +33,9 @@ pub use ribbon::*;
 pub use self_test::run_self_test;
 pub use smart_tools::*;
 
-/// Tauri v2 compatible IPC router dispatching desktop workspace commands to pure Rust engines.
+/// IPC router dispatching the 15 workspace commands to the pure Rust engines. Shared by the Windows
+/// desktop shell (`crates/easyoffice-desktop`, in-process `ipc_dispatch`) and the `--serve`
+/// developer preview (`POST /api/ipc`).
 pub struct EasyOfficeIpcRouter;
 
 impl EasyOfficeIpcRouter {
@@ -68,7 +70,7 @@ impl EasyOfficeIpcRouter {
             "get_ribbon_category_commands" => Self::handle_get_ribbon_category_commands(payload),
             "run_engine_benchmark" => Self::handle_run_engine_benchmark(payload),
             other => Err(EasyOfficeError::InvalidArgument(format!(
-                "알 수 없는 Tauri IPC 명령입니다: {other}"
+                "알 수 없는 IPC 명령입니다: {other}"
             ))),
         }
     }

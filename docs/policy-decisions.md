@@ -1101,3 +1101,32 @@
   - 새 IPC 명령 추가: 15종 명령 계약을 유지하기 위해 기존 `convert_document_format` 페이로드를 확장.
 - **Verified by** `cargo test -p easyoffice-app --test structured_save_fidelity`(DOCX/HWPX 서식 요소·표 순서·계산값·마크업 비해석·고정 기관명 부재, ODT/RTF/Markdown 서식, 다중 시트 XLSX 시트 간 캐시, 형식 오류 거부), `crates/easyoffice-formats/src/{rich_document.rs,rich_writers.rs}` 단위 테스트, `node --test scripts/test-webui-save-fidelity.mjs`(블록 페이로드, 전 시트 전송, 저장 실패 표시, 파일명 정리), `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 글꼴·크기·색상·셀 병합·이미지 저장을 추가하거나, DOC/HWP 5.0 바이너리 작성기가 문단 서식과 표 위치를 지원하게 될 때.
+
+## 49. Windows 설치형 데스크톱 앱: WebView2 셸·프로세스 내 IPC·NSIS 설치 프로그램 (PD-074, #119)
+
+- **Status** Implemented
+- **Context** 제품은 서버 없이 설치해 쓰는 오프라인 데스크톱 프로그램이지만, Windows 배포물은 `easyoffice-app.exe --serve 8787`을 명령줄에서 실행한 뒤 브라우저로 접속하는 CLI 아카이브뿐이었습니다(#119). 데스크톱 창 의존성이 없었고 UI는 `fetch("/api/ipc")`로만 엔진을 호출했으며, 설치 프로그램·시작 메뉴 등록이 없었습니다. 그런데 `lib.rs` 주석("Tauri v2 compatible"), IPC 오류 문구("Tauri IPC 명령"), CI 작업 이름("Tauri Shell")은 데스크톱 셸이 있는 것처럼 표기했습니다.
+- **Decision (`PD-074`)**
+  1. **데스크톱 셸 크레이트 (`crates/easyoffice-desktop`)**: Tauri v2(WebView2) 바이너리 `EasyOffice.exe`를 추가합니다. `tauri.conf.json`의 `frontendDist`(`../easyoffice-app/ui`)를 빌드 시 실행 파일에 포함하고(`devUrl` 없음), 창은 내장 출처만 표시합니다(`on_navigation`이 `tauri.localhost` 외 이동 거부). `--serve` 서버 모드는 개발·미리보기 경로로 유지합니다.
+  2. **프로세스 내 IPC (`ipc_dispatch`)**: 셸 명령 하나가 `EasyOfficeIpcRouter::dispatch`의 15종 명령을 그대로 호출해(블로킹 작업 스레드에서 실행) JSON 문자열을 돌려줍니다. 실패는 `--serve`의 HTTP 400 본문과 같은 `{"status":"error","message"}`로 거부해 UI의 오류 표시 경로가 두 전송 방식에서 같게 동작합니다. IPC 명령 수(15종)는 바뀌지 않습니다.
+  3. **UI 브리지 (`ui/desktop-bridge.js`)**: `window.__TAURI_INTERNALS__.invoke`가 있으면 `invoke("ipc_dispatch", {command, payload})`를, 없으면 기존 `fetch("/api/ipc")`를 씁니다. 전역 셸 API(`withGlobalTauri`)는 노출하지 않습니다. 새 모듈은 `--serve` 정적 자산, 자가 진단 자산 검사, 저장소 필수 파일 목록에 추가합니다.
+  4. **저장 (`save_document_file`)**: WebView2의 Blob 다운로드는 알림 없이 실패할 수 있으므로, 셸에서는 Rust가 기본 저장 대화상자(`tauri-plugin-dialog`, 주 창에 모달)를 열고 사용자가 고른 경로에 임시 파일 기록 후 이름 바꾸기로 씁니다. WebView는 파일 이름과 Base64 바이트만 보내며 경로를 지정할 수 없습니다(파일 이름은 마지막 경로 요소만 사용, 확장자 영숫자 1~8자, 256MiB 상한). 결과는 `saved`(경로 포함)·`cancelled`·오류이며, UI는 `문서 저장 완료 (<경로> …)`, `문서 저장 취소 (<형식>): 저장 위치를 선택하지 않았습니다`, `문서 저장 실패 (<형식>): <사유>`로 표시하고 취소·실패 시 수정 상태 기준선(PD-072)을 갱신하지 않습니다. 변환기 결과 상자도 같은 경로를 씁니다. `--serve` 미리보기는 Blob 다운로드를 유지합니다.
+  5. **보안 경계**: CSP는 WebUI와 같은 `default-src 'self'`에 셸 IPC 출처만 더한 `connect-src 'self' ipc: http://ipc.localhost`입니다. `build.rs`의 `AppManifest`가 두 앱 명령을 기본 거부로 선언하고 `capabilities/main-window.json`이 `main` 창에만 `allow-ipc-dispatch`·`allow-save-document-file`을 허용합니다. core·shell·fs·http·dialog 플러그인 권한은 WebView에 주지 않습니다(대화상자는 Rust에서만 엽니다). `scripts/check-repo-hygiene.mjs`가 CSP 정확값, `devUrl`·전역 API·CSP 수정 비활성화 금지, 파일 연결 미등록, 두 권한 외 권한 부여 금지를 검사합니다.
+  6. **설치 프로그램**: Tauri 번들러로 NSIS 설치 프로그램(제품명 EasyOffice, 버전은 워크스페이스 `1.0.0` 또는 릴리스 태그, 사용자 단위 설치, 시작 메뉴 바로 가기, 제거 프로그램, 한국어·영어)을 만듭니다. 아이콘은 `scripts/generate-desktop-icons.mjs`가 파비콘 디자인(`ui/favicon.svg`, 라벤더 `#5C6BC0` 문서 글리프)을 8×8 슈퍼샘플링으로 직접 래스터화해 PNG·다중 크기 ICO로 생성하고 저장소에 커밋합니다(`--check`로 CI에서 일치 검증). 문서 파일 연결은 파일 열기(#111)가 없으므로 등록하지 않습니다. WebView2 런타임이 없는 PC에서만 설치 프로그램이 부트스트래퍼를 내려받습니다.
+  7. **CI·릴리스**: macOS·Windows의 엔진 게이트는 `cargo clippy/test --workspace --exclude easyoffice-desktop`으로 같게 실행하고, Windows 작업("Verify Rust Core & Tauri Shell")이 데스크톱 셸 Clippy·단위 테스트, 프리빌트 Tauri CLI(`npx @tauri-apps/cli@2 build --bundles nsis`, 매 실행 소스 컴파일 회피)로 설치 프로그램 빌드, `EasyOffice.exe --smoke`(실제 창에서 내장 WebUI가 `get_workspace_bootstrap` → `get_ribbon_category_commands` 왕복을 마치면 종료 코드 0)를 수행합니다. 릴리스는 `EasyOffice-<version>-windows-x64-setup.exe`를 주 자산으로, CLI 프리뷰 zip을 보조 자산으로 올리고 두 파일의 SHA-256을 `SHA256SUMS-windows-x64.txt`에 기록합니다. 워크스페이스 `default-members`는 엔진 4개 크레이트로 두어 일반 `cargo build`/`cargo test`에는 셸이 포함되지 않습니다.
+  8. **표기 정리**: `lib.rs` 라우터 주석과 오류 문구("알 수 없는 IPC 명령입니다"), self-test 주석을 실제 구현에 맞추고, CI 작업 이름 "Tauri Shell"은 이제 실제로 셸을 빌드·실행하므로 유지합니다. `DesktopPlatform::WindowsWebView2`("Windows (WebView2)")는 데스크톱 셸이 생겨 실제와 일치합니다.
+  9. **MSRV**: 엔진 크레이트는 워크스페이스 MSRV 1.85를 유지하고, 데스크톱 셸 크레이트만 Tauri 2.x(tauri·tauri-build·tauri-plugin-dialog)가 요구하는 `rust-version = "1.90"`을 명시합니다. 위생 가드는 이 크레이트에 한해 1.85 이상의 명시값을 요구합니다.
+- **Why** Windows 사용자가 명령줄·브라우저 없이 설치해 시작 메뉴에서 여는 오프라인 앱을 받고, 셸 안에서도 기존 WebUI 보안 경계(CSP, 원격 콘텐츠 금지)와 15종 IPC 계약을 그대로 유지하며, 저장 성공·취소·실패를 정직하게 표시하기 위함입니다.
+- **Trade-offs**
+  1. 데스크톱 셸 빌드에는 MSVC 툴체인(Visual Studio Build Tools)과 Node.js(Tauri CLI)가 필요합니다. MinGW 바이너리 유틸리티(`dlltool`이 호출하는 어셈블러)가 없는 windows-gnu 환경에서는 셸 크레이트를 빌드할 수 없으므로 엔진 게이트에서 제외하고 Windows CI에서 검증합니다.
+  2. 설치 프로그램은 코드 서명되지 않아 SmartScreen 경고가 표시될 수 있습니다.
+  3. 저장 대화상자가 열려 있는 동안 작업 큐의 다른 편집 작업은 대기합니다.
+  4. WebView2 런타임이 없는 오프라인 PC에서는 설치 시 런타임을 받을 수 없습니다(Windows 11과 최신 Windows 10에는 기본 포함).
+- **Alternatives rejected**
+  - 셸에서 루프백 HTTP 서버를 띄우고 WebView로 접속: 포트 점유·다른 로컬 프로세스의 접근 표면이 남아 기각.
+  - 엔진 명령마다 셸 명령 15개 등록: 라우터 계약이 두 곳으로 갈라지고 권한 목록이 커져 단일 `ipc_dispatch`로 대체.
+  - WebView에 `dialog:allow-save`·`fs:allow-write-file` 권한 부여 후 JS에서 경로 지정: WebView가 임의 경로 쓰기 기능을 갖게 되어 기각. 경로는 Rust가 연 대화상자에서만 나옵니다.
+  - MSI(WiX) 설치 프로그램: 사용자 단위 설치·관리자 권한 불필요 측면에서 NSIS가 단순해 우선 NSIS만 제공.
+  - 지원 확장자 파일 연결 동시 등록: 셸이 아직 파일을 열지 못해 더블클릭 시 빈 작업 공간이 열리는 오해를 만들어 #111로 미룸.
+- **Verified by** `node --test scripts/test-webui-desktop-bridge.mjs`(가짜 `__TAURI_INTERNALS__`로 `ipc_dispatch` 단일 경로·문자열 페이로드·`fetch` 미사용, 셸 거부와 HTTP 400의 동일 표시, 네이티브 저장 명령 사용·경로 미전송·Blob 미사용, 저장 취소·실패 표시, 변환기 저장, 셸 부재 시 HTTP·Blob 유지), 기존 WebUI 스위트 7종, `crates/easyoffice-desktop` 단위 테스트(파일 이름 정리·Base64·원자적 쓰기·직렬화 형태·탐색 출처·스모크 상태 전이), Windows CI의 셸 Clippy·NSIS 빌드·`--smoke`, `node scripts/generate-desktop-icons.mjs --check`, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
+- **Revisit when** 파일 열기(#111)가 구현되어 파일 연결을 등록할 때, 코드 서명 인증서를 도입할 때, 또는 macOS·Linux에도 같은 셸을 배포하기로 할 때.

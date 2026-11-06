@@ -94,6 +94,7 @@ EasyOffice/
 ### System Requirements
 - macOS 14.0 (Sonoma) or later on Apple Silicon (`arm64`) and Intel (`x86_64`)
 - Xcode 16+ and Swift 6.0+ for native macOS builds, plus Rust 1.85+ for cross-platform core and local WebUI server builds
+- Windows 10/11 x64 with the WebView2 runtime for the installed Windows desktop app (building the desktop shell needs Rust 1.90+ with the MSVC toolchain)
 
 ### Build, Verify & Run Locally
 
@@ -122,7 +123,18 @@ Unsigned or ad-hoc signed macOS release archives carry the download quarantine a
 xattr -dr com.apple.quarantine /Applications/EasyOffice.app
 ```
 
-Windows release archives (`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`) ship the standalone Rust engine CLI and loopback WebUI server. Run `easyoffice-app.exe --self-test` to verify the engine or run `easyoffice-app.exe --serve 8787` to open the local WebUI workspace at `http://127.0.0.1:8787/`. Run `easyoffice-app.exe --help` for all options. `--serve` without a port uses 8787 and falls back to 8788-8800 when it is busy; an explicit port (`--serve 18787`) is bound exactly or the command fails. Invalid ports, unknown options, and file paths (opening documents from the command line is not supported yet) exit with a non-zero status.
+#### Windows
+
+Windows releases ship an installer, `EasyOffice-<version>-windows-x64-setup.exe` (NSIS, per-user install, no administrator rights required). Run it, then start **EasyOffice** from the Start menu. `EasyOffice.exe` is a desktop window on the built-in Windows WebView2 runtime (Tauri v2 shell, `crates/easyoffice-desktop`): the WebUI is embedded in the executable and every command runs in-process on the Rust engine, so no local HTTP server, browser, or network connection is involved. Saving opens the native Save dialog. Uninstall from Settings > Apps or the uninstaller in the Start menu folder. WebView2 is part of Windows 11 and current Windows 10; only if it is missing does the installer download the runtime bootstrapper. Document file associations (opening `.docx`/`.hwpx`/... by double-click) are intentionally not registered yet because opening files in the app is tracked separately (#111).
+
+To build the installer from source on Windows (MSVC Rust toolchain 1.90+, Visual Studio Build Tools, Node.js):
+
+```powershell
+cd crates/easyoffice-desktop
+npx @tauri-apps/cli@2 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
+```
+
+**Developer preview (`--serve`).** The secondary archive `EasyOffice-<version>-windows-x64-cli-serve-preview.zip` ships the standalone Rust engine CLI and loopback WebUI server for development and testing. Run `easyoffice-app.exe --self-test` to verify the engine or run `easyoffice-app.exe --serve 8787` to open the local WebUI workspace at `http://127.0.0.1:8787/` in a browser. Run `easyoffice-app.exe --help` for all options. `--serve` without a port uses 8787 and falls back to 8788-8800 when it is busy; an explicit port (`--serve 18787`) is bound exactly or the command fails. Invalid ports, unknown options, and file paths (opening documents from the command line is not supported yet) exit with a non-zero status.
 
 ---
 

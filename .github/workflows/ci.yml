@@ -14,6 +14,10 @@ concurrency:
 permissions:
   contents: read
 
+# The Windows desktop shell crate (crates/easyoffice-desktop, Tauri v2 / WebView2) is excluded from
+# the cross-platform engine gates and verified on its own in the Windows job: it is not shipped on
+# macOS (the macOS app is native Swift) and its build needs the MSVC toolchain (PD-074).
+
 jobs:
   verify:
     name: verify
@@ -35,7 +39,7 @@ jobs:
         run: node scripts/verify-macos-plist.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs
 
       - name: Check Swift toolchain version
         run: swift --version
@@ -46,13 +50,13 @@ jobs:
       - name: Check Rust formatting across workspace
         run: cargo fmt --all -- --check
 
-      - name: Run Rust Clippy lint gate across workspace
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Run Rust Clippy lint gate across engine crates
+        run: cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings
 
-      - name: Run Rust cross-platform workspace test suite
-        run: cargo test --workspace
+      - name: Run Rust cross-platform engine test suite
+        run: cargo test --workspace --exclude easyoffice-desktop
 
-      - name: Run Rust desktop host self-test
+      - name: Run Rust engine self-test
         run: cargo run -p easyoffice-app -- --self-test
 
       - name: Build all Swift targets
@@ -67,7 +71,7 @@ jobs:
   verify-windows:
     name: Verify Rust Core & Tauri Shell (Windows x64)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -80,8 +84,11 @@ jobs:
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
 
+      - name: Verify desktop icons match the generator
+        run: node scripts/generate-desktop-icons.mjs --check
+
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
@@ -89,13 +96,13 @@ jobs:
       - name: Check Rust formatting across workspace
         run: cargo fmt --all -- --check
 
-      - name: Run Rust Clippy lint gate across workspace
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Run Rust Clippy lint gate across engine crates
+        run: cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings
 
-      - name: Run Rust cross-platform workspace test suite (Windows)
-        run: cargo test --workspace
+      - name: Run Rust cross-platform engine test suite (Windows)
+        run: cargo test --workspace --exclude easyoffice-desktop
 
-      - name: Run Rust desktop host self-test (Windows)
+      - name: Run Rust engine self-test (Windows)
         run: cargo run -p easyoffice-app -- --self-test
 
       - name: Smoke test Windows x64 --serve loopback WebUI and CSP header
@@ -127,3 +134,48 @@ jobs:
               Stop-Process -Id $proc.Id -Force
             }
           }
+
+      - name: Run Rust Clippy lint gate for the desktop shell
+        run: cargo clippy -p easyoffice-desktop --all-targets -- -D warnings
+
+      - name: Run desktop shell unit tests
+        run: cargo test -p easyoffice-desktop
+
+      # The prebuilt Tauri CLI from npm (major 2) avoids compiling tauri-cli from source on every
+      # run (several minutes); it downloads the NSIS toolset itself.
+      - name: Build desktop shell release binary and NSIS installer
+        working-directory: crates/easyoffice-desktop
+        run: npx --yes @tauri-apps/cli@2 build --ci --bundles nsis
+
+      - name: Verify NSIS installer output
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -Path "target/release/bundle/nsis" -Filter "EasyOffice_*_x64-setup.exe")
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one EasyOffice NSIS installer, found $($installers.Count)"
+          }
+          if ($installers[0].Length -lt 1MB) {
+            throw "NSIS installer is unexpectedly small: $($installers[0].Length) bytes"
+          }
+          Write-Output "Installer: $($installers[0].Name) ($($installers[0].Length) bytes)"
+
+      - name: Smoke test desktop shell window (embedded WebUI + in-process IPC round trip)
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "target/release/EasyOffice.exe" -ArgumentList @("--smoke") -PassThru
+          $null = $proc.Handle # cache the process handle so ExitCode stays readable after exit
+          if (-not $proc.WaitForExit(90000)) {
+            Stop-Process -Id $proc.Id -Force
+            throw "Desktop shell smoke test timed out"
+          }
+          if ($proc.ExitCode -ne 0) {
+            throw "Desktop shell smoke test failed with exit code $($proc.ExitCode)"
+          }
+
+      - name: Upload NSIS installer for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: easyoffice-windows-installer-ci
+          path: target/release/bundle/nsis/EasyOffice_*_x64-setup.exe
+          retention-days: 7
+          if-no-files-found: error
