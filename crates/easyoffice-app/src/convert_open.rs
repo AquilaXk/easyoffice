@@ -529,4 +529,120 @@ mod tests {
         )
         .is_err());
     }
+
+    fn pb_varint(mut v: u64, out: &mut Vec<u8>) {
+        loop {
+            let b = (v & 0x7F) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                return;
+            }
+            out.push(b | 0x80);
+        }
+    }
+
+    fn pb_field(num: u64, wire: u64, body: &[u8], out: &mut Vec<u8>) {
+        pb_varint((num << 3) | wire, out);
+        if wire == 2 {
+            pb_varint(body.len() as u64, out);
+        }
+        out.extend_from_slice(body);
+    }
+
+    fn record(id: u64, type_id: u64, payload: &[u8]) -> Vec<u8> {
+        let mut mi = Vec::new();
+        pb_field(
+            1,
+            0,
+            &{
+                let mut v = Vec::new();
+                pb_varint(type_id, &mut v);
+                v
+            },
+            &mut mi,
+        );
+        pb_field(
+            3,
+            0,
+            &{
+                let mut v = Vec::new();
+                pb_varint(payload.len() as u64, &mut v);
+                v
+            },
+            &mut mi,
+        );
+        let mut info = Vec::new();
+        pb_field(
+            1,
+            0,
+            &{
+                let mut v = Vec::new();
+                pb_varint(id, &mut v);
+                v
+            },
+            &mut info,
+        );
+        pb_field(2, 2, &mi, &mut info);
+        let mut rec = Vec::new();
+        pb_varint(info.len() as u64, &mut rec);
+        rec.extend(info);
+        rec.extend_from_slice(payload);
+        rec
+    }
+
+    fn tiny_pages() -> Vec<u8> {
+        let mut storage = Vec::new();
+        pb_field(3, 2, "첫 줄\n둘째 줄".as_bytes(), &mut storage);
+        let mut reference = Vec::new();
+        pb_field(1, 0, &[2], &mut reference);
+        let mut root = Vec::new();
+        pb_field(4, 2, &reference, &mut root);
+        let mut stream = record(1, 10000, &root);
+        stream.extend(record(2, 2001, &storage));
+        // one literal-only Snappy block in one IWA chunk
+        let mut block = Vec::new();
+        pb_varint(stream.len() as u64, &mut block);
+        let n = stream.len() - 1;
+        block.push(61 << 2);
+        block.extend_from_slice(&(n as u16).to_le_bytes());
+        block.extend_from_slice(&stream);
+        let mut iwa = vec![0u8];
+        iwa.extend_from_slice(&(block.len() as u32).to_le_bytes()[..3]);
+        iwa.extend(block);
+        easyoffice_formats::ZipArchiveCodec::pack(&[("Index/Document.iwa".to_string(), iwa)])
+            .unwrap()
+    }
+
+    #[test]
+    fn pages_opens_through_the_decode_action_and_is_never_a_target() {
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), "메모.pages", &tiny_pages(), ""),
+        )
+        .unwrap();
+        assert!(json.contains("\"module\":\"DOC\""), "{json}");
+        assert!(json.contains("\"format\":\"pages\""), "{json}");
+        assert!(json.contains("첫 줄") && json.contains("둘째 줄"), "{json}");
+        assert!(json.contains("warnings"), "{json}");
+        let to_pages = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(None, "a.docx", &docx_bytes(), ",\"targetFormat\":\"pages\""),
+        );
+        assert!(
+            to_pages.is_err(),
+            "Pages must be rejected as a conversion target"
+        );
+        let legacy = easyoffice_formats::ZipArchiveCodec::pack(&[(
+            "index.xml".to_string(),
+            b"<sl:document/>".to_vec(),
+        )])
+        .unwrap();
+        let err = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), "old.pages", &legacy, ""),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("index.xml"), "{err}");
+    }
 }

@@ -8,6 +8,7 @@
 use crate::rich_read_hwpx::read_hwpx;
 use crate::rich_read_odt::read_odt;
 use crate::rich_read_ooxml::read_docx;
+use crate::rich_read_pages::read_pages;
 use crate::rich_read_rtf::read_rtf;
 use crate::rich_read_text::{read_markdown, read_plain_text};
 use crate::{
@@ -44,7 +45,13 @@ impl DocumentFormat {
     /// Workspace module that edits this format: `DOC`, `HWP`, `SHEET`, `SLIDE`, or `PDF`.
     pub fn editor_module(&self) -> &'static str {
         match self {
-            Self::Docx | Self::Doc | Self::Odt | Self::Rtf | Self::Markdown | Self::Txt => "DOC",
+            Self::Docx
+            | Self::Doc
+            | Self::Odt
+            | Self::Rtf
+            | Self::Markdown
+            | Self::Txt
+            | Self::Pages => "DOC",
             Self::Hwp | Self::Hwpx | Self::Hwt | Self::Hwtx => "HWP",
             Self::Xlsx | Self::Xls | Self::Ods | Self::Csv | Self::Tsv => "SHEET",
             Self::Pptx | Self::Ppt | Self::Ppsx | Self::Odp => "SLIDE",
@@ -164,6 +171,11 @@ impl UniversalFormatConverter {
             }
             DocumentFormat::Hwpx | DocumentFormat::Hwtx => {
                 let (doc, w) = read_hwpx(bytes)?;
+                warnings = w;
+                DecodedContent::Document(doc)
+            }
+            DocumentFormat::Pages => {
+                let (doc, w) = read_pages(bytes)?;
                 warnings = w;
                 DecodedContent::Document(doc)
             }
