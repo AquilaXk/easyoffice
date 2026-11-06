@@ -26,7 +26,9 @@ pub(crate) const CELL_HEIGHT: u32 = 1_000;
 const FONT_LANGS: [&str; 7] = [
     "HANGUL", "LATIN", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER",
 ];
-const DEFAULT_FONT_FACE: &str = "맑은 고딕";
+pub(crate) const DEFAULT_FONT_FACE: &str = "맑은 고딕";
+/// Body text height (1/100 pt) of the default character shape: 11 pt, the editor default.
+pub(crate) const DEFAULT_CHAR_HEIGHT: u32 = 1100;
 
 fn per_lang_attrs(value: &str) -> String {
     format!(
@@ -49,7 +51,8 @@ fn border_fill(id: u32, line_type: &str) -> String {
     xml
 }
 
-/// Character shape (`hh:charPr`) written to `header.xml`; `height` is in 1/100 pt.
+/// Character shape (`hh:charPr`) written to `header.xml`; `height` is in 1/100 pt, `font` indexes
+/// the font table (0 is the default face), and the colors are `0xRRGGBB`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HwpxCharShape {
     pub bold: bool,
@@ -57,6 +60,9 @@ pub(crate) struct HwpxCharShape {
     pub underline: bool,
     pub strike: bool,
     pub height: u32,
+    pub font: usize,
+    pub text_color: Option<u32>,
+    pub shade_color: Option<u32>,
 }
 
 impl Default for HwpxCharShape {
@@ -66,7 +72,10 @@ impl Default for HwpxCharShape {
             italic: false,
             underline: false,
             strike: false,
-            height: 1000,
+            height: DEFAULT_CHAR_HEIGHT,
+            font: 0,
+            text_color: None,
+            shade_color: None,
         }
     }
 }
@@ -97,11 +106,18 @@ pub(crate) struct HwpxStyle {
 }
 
 fn char_pr_xml(id: usize, shape: &HwpxCharShape) -> String {
+    let shade = shape
+        .shade_color
+        .map_or_else(|| "none".to_string(), |c| format!("#{c:06X}"));
     let mut xml = format!(
-        "<hh:charPr id=\"{id}\" height=\"{}\" textColor=\"#000000\" shadeColor=\"none\" useFontSpace=\"0\" useKerning=\"0\" symMark=\"NONE\" borderFillIDRef=\"1\">",
-        shape.height
+        "<hh:charPr id=\"{id}\" height=\"{}\" textColor=\"#{:06X}\" shadeColor=\"{shade}\" useFontSpace=\"0\" useKerning=\"0\" symMark=\"NONE\" borderFillIDRef=\"1\">",
+        shape.height,
+        shape.text_color.unwrap_or(0)
     );
-    xml.push_str(&format!("<hh:fontRef {}/>", per_lang_attrs("0")));
+    xml.push_str(&format!(
+        "<hh:fontRef {}/>",
+        per_lang_attrs(&shape.font.to_string())
+    ));
     xml.push_str(&format!("<hh:ratio {}/>", per_lang_attrs("100")));
     xml.push_str(&format!("<hh:spacing {}/>", per_lang_attrs("0")));
     xml.push_str(&format!("<hh:relSz {}/>", per_lang_attrs("100")));
@@ -154,15 +170,18 @@ pub(crate) fn header_xml() -> String {
         &[HwpxCharShape::default()],
         &[HwpxParaShape::default()],
         &[],
+        &[],
     )
 }
 
 /// `Contents/header.xml` with font faces, the given character/paragraph shape tables (index =
-/// ID; index 0 is the default), and the default style followed by `extra_styles`.
+/// ID; index 0 is the default), and the default style followed by `extra_styles`. `extra_fonts`
+/// are declared after the default face (font ids 1..).
 pub(crate) fn header_xml_with(
     char_shapes: &[HwpxCharShape],
     para_shapes: &[HwpxParaShape],
     extra_styles: &[HwpxStyle],
+    extra_fonts: &[String],
 ) -> String {
     let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><hh:head xmlns:hh=\"{NS_HEAD}\" xmlns:hc=\"{NS_CORE}\" version=\"1.4\" secCnt=\"1\">"
@@ -175,9 +194,19 @@ pub(crate) fn header_xml_with(
     xml.push_str(&format!("<hh:fontfaces itemCnt=\"{}\">", FONT_LANGS.len()));
     for lang in FONT_LANGS {
         xml.push_str(&format!(
-            "<hh:fontface lang=\"{lang}\" fontCnt=\"1\"><hh:font id=\"0\" face=\"{}\" type=\"TTF\" isEmbedded=\"0\"/></hh:fontface>",
-            XmlSanitizer::escape(DEFAULT_FONT_FACE)
+            "<hh:fontface lang=\"{lang}\" fontCnt=\"{}\">",
+            extra_fonts.len() + 1
         ));
+        for (id, face) in std::iter::once(DEFAULT_FONT_FACE)
+            .chain(extra_fonts.iter().map(String::as_str))
+            .enumerate()
+        {
+            xml.push_str(&format!(
+                "<hh:font id=\"{id}\" face=\"{}\" type=\"TTF\" isEmbedded=\"0\"/>",
+                XmlSanitizer::escape(face)
+            ));
+        }
+        xml.push_str("</hh:fontface>");
     }
     xml.push_str("</hh:fontfaces>");
 

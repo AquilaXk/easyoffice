@@ -116,6 +116,8 @@
     let activeDocBlockEl = null;
 
     function syncDocStyleBarFromTarget(targetEl) {
+      // With a live selection the character state (run model) wins over the block fallback below.
+      if (deps.getDocRuns?.()?.syncToolbar()) return;
       const docEditor = document.getElementById("doc-editor");
       const boldBtn = document.getElementById("btn-stylebar-bold");
       const italicBtn = document.getElementById("btn-stylebar-italic");
@@ -632,10 +634,7 @@
       setElField("doc-style-font-badge", "textContent", fontVal);
       setElField("doc-linespacing-select", "value", editor?.dataset?.lineSpacing || "160");
       [
-        ["btn-stylebar-strike", "strike"],
         ["btn-stylebar-charfx", "charfx"],
-        ["btn-stylebar-textcolor", "textcolor"],
-        ["btn-stylebar-highlight", "highlight"],
         ["btn-toggle-ctrl-marks", "showCtrlMarks"],
         ["btn-toggle-para-marks", "showParaMarks"],
       ].forEach(([id, key]) => syncBtnPressed(id, editor?.dataset?.[key] === "true"));

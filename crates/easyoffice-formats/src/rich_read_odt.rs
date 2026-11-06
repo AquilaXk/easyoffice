@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use crate::office_codecs::validate_zip_xml_entries;
+use crate::rich_document::normalize_hex_color;
 use crate::rich_xml::{attr, push_run, skip_subtree, tokenize, CharFmt, XmlEvent};
 use crate::{
     EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
@@ -22,6 +23,13 @@ struct StyleProps {
 
 fn off(value: Option<&str>) -> bool {
     value.is_none_or(|v| v == "none")
+}
+
+/// `14pt`/`9.5pt` to half-points; other units are ignored.
+fn parse_points(value: &str) -> Option<u16> {
+    let pt: f32 = value.trim().strip_suffix("pt")?.parse().ok()?;
+    let half = (pt * 2.0).round();
+    (half >= 1.0 && half <= f32::from(u16::MAX)).then_some(half as u16)
 }
 
 fn read_styles(
@@ -53,6 +61,14 @@ fn read_styles(
                                 .is_some_and(|s| s == "italic" || s == "oblique"),
                             underline: !off(attr(attrs, "style:text-underline-style")),
                             strike: !off(attr(attrs, "style:text-line-through-style")),
+                            size_half_pt: attr(attrs, "fo:font-size").and_then(parse_points),
+                            font: attr(attrs, "style:font-name")
+                                .or_else(|| attr(attrs, "fo:font-family"))
+                                .map(|f| f.trim().trim_matches('\'').to_string())
+                                .filter(|f| !f.is_empty()),
+                            color: attr(attrs, "fo:color").and_then(normalize_hex_color),
+                            highlight: attr(attrs, "fo:background-color")
+                                .and_then(normalize_hex_color),
                         };
                     }
                 }
@@ -166,10 +182,10 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
                     let base = if outline > 0 {
                         CharFmt::default()
                     } else {
-                        style.fmt
+                        style.fmt.clone()
                     };
                     span_fmts.clear();
-                    span_fmts.push(base);
+                    span_fmts.push(base.clone());
                     paras.push(Para {
                         runs: Vec::new(),
                         style,
@@ -178,16 +194,20 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
                     });
                 }
                 "text:span" if !paras.is_empty() => {
-                    let cur = span_fmts.last().copied().unwrap_or_default();
+                    let cur = span_fmts.last().cloned().unwrap_or_default();
                     let add = attr(attrs, "text:style-name")
                         .and_then(|n| styles.get(n))
-                        .map(|s| s.fmt)
+                        .map(|s| s.fmt.clone())
                         .unwrap_or_default();
                     span_fmts.push(CharFmt {
                         bold: cur.bold || add.bold,
                         italic: cur.italic || add.italic,
                         underline: cur.underline || add.underline,
                         strike: cur.strike || add.strike,
+                        size_half_pt: add.size_half_pt.or(cur.size_half_pt),
+                        font: add.font.or(cur.font),
+                        color: add.color.or(cur.color),
+                        highlight: add.highlight.or(cur.highlight),
                     });
                 }
                 "text:tab" => push_inline(&mut paras, &span_fmts, "\t"),
@@ -253,7 +273,11 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
                             }));
                         }
                         span_fmts.clear();
-                        span_fmts.push(paras.last().map_or(CharFmt::default(), |q| q.base));
+                        span_fmts.push(
+                            paras
+                                .last()
+                                .map_or_else(CharFmt::default, |q| q.base.clone()),
+                        );
                     }
                 }
                 "table:table-cell" if tbl_depth == 1 => {
@@ -301,7 +325,7 @@ fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], text: &str) {
         push_run(
             &mut p.runs,
             text,
-            span_fmts.last().copied().unwrap_or_default(),
+            &span_fmts.last().cloned().unwrap_or_default(),
         );
     }
 }

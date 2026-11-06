@@ -19,17 +19,24 @@
     "mod-footnote": { hwp: false, target: "doc-mod-footnote", label: "각주 · 미주 삽입 완료" },
   };
 
-  function toggleBlockPrefix(textTarget, prefix) {
-    if (!textTarget) return;
-    const cur = textTarget.textContent || "";
-    textTarget.textContent = cur.startsWith(prefix) ? cur.slice(prefix.length) : prefix + cur;
+  function firstTextNodeOf(node) {
+    for (const child of node.childNodes) {
+      if (child.nodeType === 3 && String(child.data).length > 0) return child;
+      const inner = child.nodeType === 1 ? firstTextNodeOf(child) : null;
+      if (inner) return inner;
+    }
+    return null;
   }
 
-  function shiftBlockIndent(blk, deltaPx) {
-    if (!blk) return;
-    const curPx = Number.parseInt(blk.style.paddingLeft || "0", 10) || 0;
-    const nextPx = Math.max(0, Math.min(96, curPx + deltaPx));
-    blk.style.paddingLeft = nextPx ? nextPx + "px" : "";
+  // Adds or removes a list prefix without rebuilding the paragraph, so character runs survive.
+  function toggleBlockPrefix(textTarget, prefix) {
+    if (!textTarget) return;
+    const first = firstTextNodeOf(textTarget);
+    if (first && String(first.data).startsWith(prefix)) {
+      first.data = String(first.data).slice(prefix.length);
+      return;
+    }
+    textTarget.insertBefore(textTarget.ownerDocument.createTextNode(prefix), textTarget.childNodes[0] ?? null);
   }
 
   function createWorkspaceTools(deps, panelHooks) {
@@ -53,6 +60,7 @@
       captureWorkspaceSnapshot,
       commitDeferredUndoSnapshot,
       runStudioClipboardCommand,
+      getDocRuns,
     } = deps;
 
     const {
@@ -712,7 +720,7 @@
         withDocStyleUndo(() => { toggleBlockPrefix(textTarget, pfx.prefix); computeSmartStats(); });
         if (fb) fb.textContent = pfx.label;
       } else if (ind) {
-        withDocStyleUndo(() => shiftBlockIndent(blk, ind.delta));
+        getDocRuns().shiftIndent(ind.delta);
         if (fb) fb.textContent = ind.label;
       } else {
         document.getElementById("btn-align-justify")?.click();
@@ -782,14 +790,6 @@
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
     }
 
-    function applyStudioFontSize(editor, sizeInput, sizeBadge, pt) {
-      withDocStyleUndo(() => {
-        const formatted = Math.max(6, Math.min(72, Number.isFinite(pt) ? pt : 11)).toFixed(1);
-        if (sizeInput) sizeInput.value = formatted;
-        if (sizeBadge) sizeBadge.textContent = formatted + " pt";
-        if (editor) editor.style.fontSize = formatted + "pt";
-      });
-    }
 
     function applyStudioLineSpacing(editor, lsSelect, pct) {
       withDocStyleUndo(() => {
@@ -807,6 +807,21 @@
       selectEl.addEventListener("change", () => withDocStyleUndo(() => onApply(selectEl.value)));
     }
 
+    // Font, size, color, highlight and strikethrough act on the selection only (run model).
+    function bindCharacterRunControls() {
+      const runs = () => getDocRuns();
+      const sizeInput = document.getElementById("doc-font-size-input");
+      document.getElementById("doc-font-select")?.addEventListener("change", (ev) => runs().setFont(ev.target.value));
+      sizeInput?.addEventListener("change", () => runs().setSize(Number.parseFloat(sizeInput.value)));
+      document.getElementById("btn-size-up")?.addEventListener("click", () => runs().bumpSize(1));
+      document.getElementById("btn-size-down")?.addEventListener("click", () => runs().bumpSize(-1));
+      document.getElementById("btn-stylebar-strike")?.addEventListener("click", () => runs().toggle("strike"));
+      [["btn-stylebar-textcolor", "doc-textcolor-input", "color"], ["btn-stylebar-highlight", "doc-highlight-input", "highlight"]].forEach(([btnId, inputId, prop]) => {
+        document.getElementById(btnId)?.addEventListener("click", () => runs().toggleColor(prop));
+        document.getElementById(inputId)?.addEventListener("change", (ev) => runs().setColor(prop, ev.target.value));
+      });
+    }
+
     function bindStudioTypographyControls(editor) {
       const styleSelect = document.getElementById("doc-style-select");
       const roleBadge = document.getElementById("doc-style-role-badge");
@@ -817,16 +832,7 @@
       bindSelectUndo(document.getElementById("doc-font-lang"), editor, (val) => {
         editor.dataset.fontLang = val;
       });
-      const fontBadge = document.getElementById("doc-style-font-badge");
-      bindSelectUndo(document.getElementById("doc-font-select"), editor, (val) => {
-        if (fontBadge) fontBadge.textContent = val;
-        editor.style.fontFamily = val;
-      });
-      const sizeInput = document.getElementById("doc-font-size-input");
-      const sizeBadge = document.getElementById("doc-style-size-badge");
-      sizeInput?.addEventListener("change", () => applyStudioFontSize(editor, sizeInput, sizeBadge, Number.parseFloat(sizeInput.value)));
-      document.getElementById("btn-size-up")?.addEventListener("click", () => applyStudioFontSize(editor, sizeInput, sizeBadge, Number.parseFloat(sizeInput?.value || "11") + 1));
-      document.getElementById("btn-size-down")?.addEventListener("click", () => applyStudioFontSize(editor, sizeInput, sizeBadge, Number.parseFloat(sizeInput?.value || "11") - 1));
+      bindCharacterRunControls();
       const lsSelect = document.getElementById("doc-linespacing-select");
       lsSelect?.addEventListener("change", () => applyStudioLineSpacing(editor, lsSelect, Number.parseInt(lsSelect.value, 10)));
       document.getElementById("btn-ls-up")?.addEventListener("click", () => {
@@ -922,8 +928,7 @@
       }
       bindStudioTypographyControls(editor);
       for (const [id, key] of [
-        ["btn-stylebar-strike", "strike"], ["btn-stylebar-charfx", "charfx"],
-        ["btn-stylebar-textcolor", "textcolor"], ["btn-stylebar-highlight", "highlight"],
+        ["btn-stylebar-charfx", "charfx"],
         ["btn-toggle-ctrl-marks", "showCtrlMarks"], ["btn-toggle-para-marks", "showParaMarks"],
       ]) {
         const btn = document.getElementById(id);

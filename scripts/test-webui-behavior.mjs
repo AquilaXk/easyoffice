@@ -865,7 +865,9 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   let failUndoOnce = true;
   let failRedoOnce = true;
   let failSheetEval = false;
+  const retrySelection = { _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } };
   const retryHarness = await createWorkspaceHarness({
+    selection: retrySelection,
     tauriInvoke: (command) => {
       if (command === "get_workspace_bootstrap") {
         return {
@@ -908,25 +910,29 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   });
 
   const boldBtn = retryHarness.document.querySelector('[data-command-id="document-home-bold"]');
+  const heading = () => retryHarness.document.querySelector("#doc-editor h1");
+  const headingBold = () => heading().querySelector(".eo-run")?.dataset.eoBold ?? "";
+  const titleText = heading().querySelector(".eo-h-title").childNodes[0];
+  retrySelection.addRange({ startContainer: titleText, startOffset: 1, endContainer: titleText, endOffset: 4, collapsed: false });
   retryHarness.userClick(boldBtn);
   await flushAsyncTurns();
-  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "600");
+  assert.equal(headingBold(), "true");
 
   retryHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "600");
+  assert.equal(headingBold(), "true");
 
   retryHarness.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "");
+  assert.equal(headingBold(), "");
 
   retryHarness.sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "");
+  assert.equal(headingBold(), "");
 
   retryHarness.sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns();
-  assert.equal(retryHarness.document.querySelector("#doc-editor h1").style.fontWeight, "600");
+  assert.equal(headingBold(), "true");
 
   retryHarness.userClick(retryHarness.document.querySelector('.mod-btn[data-module="SHEET"]'));
   await flushAsyncTurns();
@@ -941,7 +947,11 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
 
   let resolveA = null;
   let resolveB = null;
+  const makeSelection = () => ({ _range: null, get rangeCount() { return this._range ? 1 : 0; }, getRangeAt() { return this._range; }, removeAllRanges() { this._range = null; }, addRange(r) { this._range = r; } });
+  const selA = makeSelection();
+  const selB = makeSelection();
   const hA = await createWorkspaceHarness({
+    selection: selA,
     tauriInvoke: (cmd) => {
       if (cmd === "get_workspace_bootstrap") {
         return { platform: "Windows", shortcutModifier: "Ctrl", recentFormatFilters: ["전체"], openTabs: [] };
@@ -958,6 +968,7 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
     },
   });
   const hB = await createWorkspaceHarness({
+    selection: selB,
     tauriInvoke: (cmd) => {
       if (cmd === "get_workspace_bootstrap") {
         return { platform: "macOS", shortcutModifier: "⌘", recentFormatFilters: ["전체"], openTabs: [] };
@@ -974,6 +985,10 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
     },
   });
 
+  for (const [h, sel] of [[hA, selA], [hB, selB]]) {
+    const title = h.document.querySelector("#doc-editor h1 .eo-h-title").childNodes[0];
+    sel.addRange({ startContainer: title, startOffset: 1, endContainer: title, endOffset: 4, collapsed: false });
+  }
   hA.userClick(hA.document.querySelector('[data-command-id="document-home-bold"]'));
   hB.userClick(hB.document.querySelector('[data-command-id="document-home-italic"]'));
   await flushAsyncTurns();
@@ -981,10 +996,11 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   resolveB({ commandId: "document-home-italic", summary: "기울임B", isItalic: true });
   await flushAsyncTurns(10);
 
-  assert.equal(hA.document.querySelector("#doc-editor h1").style.fontWeight, "600");
-  assert.equal(hA.document.querySelector("#doc-editor h1").style.fontStyle, "");
-  assert.equal(hB.document.querySelector("#doc-editor h1").style.fontWeight, "");
-  assert.equal(hB.document.querySelector("#doc-editor h1").style.fontStyle, "italic");
+  const runData = (h) => h.document.querySelector("#doc-editor h1 .eo-run")?.dataset ?? {};
+  assert.equal(runData(hA).eoBold, "true");
+  assert.equal(runData(hA).eoItalic, undefined);
+  assert.equal(runData(hB).eoBold, undefined);
+  assert.equal(runData(hB).eoItalic, "true");
 });
 
 test("ribbon IPC sends a per-window session id and the undo target module (#106)", async () => {

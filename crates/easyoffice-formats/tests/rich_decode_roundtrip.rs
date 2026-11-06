@@ -14,6 +14,7 @@ fn run(text: &str, bold: bool, italic: bool, underline: bool, strike: bool) -> R
         italic,
         underline,
         strike,
+        ..RichRun::default()
     }
 }
 

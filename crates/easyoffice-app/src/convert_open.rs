@@ -56,6 +56,18 @@ fn paragraph_json(p: &RichParagraph) -> String {
                     out.push_str(&format!(",\"{key}\":true"));
                 }
             }
+            if let Some(size) = r.size_half_pt {
+                out.push_str(&format!(",\"sizeHalfPt\":{size}"));
+            }
+            for (value, key) in [
+                (&r.font, "font"),
+                (&r.color, "color"),
+                (&r.highlight, "highlight"),
+            ] {
+                if let Some(v) = value {
+                    out.push_str(&format!(",\"{key}\":{}", json_str(v)));
+                }
+            }
             out.push('}');
             out
         })
@@ -288,7 +300,9 @@ impl EasyOfficeIpcRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easyoffice_formats::{OoxmlCodec, RichDocument, RichParagraph, RichRun, ZipArchiveCodec};
+    use easyoffice_formats::{
+        OoxmlCodec, RichDocument, RichParagraph, RichRun, ZipArchiveCodec, ZipSecurityPolicy,
+    };
 
     fn request(action: Option<&str>, file: &str, bytes: &[u8], extra: &str) -> String {
         let action = action.map_or(String::new(), |a| format!("\"action\":\"{a}\","));
@@ -320,6 +334,72 @@ mod tests {
             official_agency: None,
         };
         UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap()
+    }
+
+    fn json_field<'a>(json: &'a str, key: &str) -> &'a str {
+        let start = json.find(&format!("\"{key}\":\"")).unwrap() + key.len() + 4;
+        &json[start..start + json[start..].find('"').unwrap()]
+    }
+
+    const RUN_PAYLOAD: &str = concat!(
+        "{\"targetFormat\":\"docx\",\"title\":\"런\",\"blocks\":[{\"type\":\"paragraph\",\"runs\":[",
+        "{\"text\":\"앞 \"},",
+        "{\"text\":\"강조\",\"bold\":true,\"sizeHalfPt\":28,\"color\":\"#ff0000\",\"font\":\"함초롬바탕\",\"highlight\":\"FFFF00\"},",
+        "{\"text\":\" 뒤\"}]}]}"
+    );
+
+    #[test]
+    fn structured_runs_with_size_color_font_survive_docx_save_and_reopen() {
+        let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", RUN_PAYLOAD).unwrap();
+        let bytes =
+            EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+        let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+        let xml = String::from_utf8(
+            entries
+                .iter()
+                .find(|e| e.path == "word/document.xml")
+                .unwrap()
+                .data
+                .clone(),
+        )
+        .unwrap();
+        assert!(
+            xml.contains("<w:color w:val=\"FF0000\"/><w:sz w:val=\"28\"/>"),
+            "{xml}"
+        );
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), "런.docx", &bytes, ""),
+        )
+        .unwrap();
+        assert!(json.contains("{\"text\":\"앞 \"},"), "{json}");
+        assert!(
+            json.contains("{\"text\":\"강조\",\"bold\":true,\"sizeHalfPt\":28,\"font\":\"함초롬바탕\",\"color\":\"FF0000\",\"highlight\":\"FFFF00\"}"),
+            "{json}"
+        );
+        assert!(json.contains("{\"text\":\" 뒤\"}"), "{json}");
+    }
+
+    #[test]
+    fn invalid_run_properties_are_rejected_and_old_payloads_still_work() {
+        for bad in [
+            "\"sizeHalfPt\":1",
+            "\"sizeHalfPt\":99999",
+            "\"sizeHalfPt\":\"큼\"",
+            "\"color\":\"red\"",
+            "\"highlight\":\"#12\"",
+            "\"font\":\"a\\u0007b\"",
+        ] {
+            let payload = format!(
+                "{{\"targetFormat\":\"docx\",\"blocks\":[{{\"type\":\"paragraph\",\"runs\":[{{\"text\":\"x\",{bad}}}]}}]}}"
+            );
+            assert!(
+                EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err(),
+                "{bad}"
+            );
+        }
+        let old = "{\"targetFormat\":\"docx\",\"blocks\":[{\"type\":\"paragraph\",\"runs\":[{\"text\":\"x\",\"bold\":true}]}]}";
+        assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", old).is_ok());
     }
 
     #[test]

@@ -4,8 +4,9 @@
 
 use std::collections::HashMap;
 
-use crate::hwpx_parts::LIST_LEFT_MARGIN;
+use crate::hwpx_parts::{DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, LIST_LEFT_MARGIN};
 use crate::office_codecs::validate_zip_xml_entries;
+use crate::rich_document::normalize_hex_color;
 use crate::rich_xml::{
     attr, heading_level_from_name, push_run, skip_subtree, tokenize, CharFmt, XmlEvent,
 };
@@ -32,6 +33,8 @@ struct StyleInfo {
 
 #[derive(Default)]
 struct Header {
+    /// Hangul-slot font faces by id (the writer repeats the same face in every language slot).
+    fonts: HashMap<String, String>,
     chars: HashMap<String, CharFmt>,
     paras: HashMap<String, ParaShape>,
     styles: HashMap<String, StyleInfo>,
@@ -41,11 +44,40 @@ fn read_header(xml: &str) -> Result<Header, EasyOfficeError> {
     let mut h = Header::default();
     let mut cur_char: Option<(String, CharFmt)> = None;
     let mut cur_para: Option<(String, ParaShape, bool)> = None;
+    let mut hangul_slot = false;
     for ev in tokenize(xml)? {
         match ev {
             XmlEvent::Start { name, attrs } => match name.as_str() {
+                "hh:fontface" => hangul_slot = attr(&attrs, "lang") == Some("HANGUL"),
+                "hh:font" if hangul_slot => {
+                    if let (Some(id), Some(face)) = (attr(&attrs, "id"), attr(&attrs, "face")) {
+                        h.fonts.insert(id.to_string(), face.to_string());
+                    }
+                }
                 "hh:charPr" => {
-                    cur_char = attr(&attrs, "id").map(|id| (id.to_string(), CharFmt::default()));
+                    cur_char = attr(&attrs, "id").map(|id| {
+                        let fmt = CharFmt {
+                            size_half_pt: attr(&attrs, "height")
+                                .and_then(|v| v.parse::<u32>().ok())
+                                .map(|v| v / 50)
+                                .and_then(|v| u16::try_from(v).ok())
+                                .filter(|v| *v > 0),
+                            color: attr(&attrs, "textColor")
+                                .and_then(normalize_hex_color)
+                                .filter(|c| c != "000000"),
+                            highlight: attr(&attrs, "shadeColor").and_then(normalize_hex_color),
+                            ..CharFmt::default()
+                        };
+                        (id.to_string(), fmt)
+                    });
+                }
+                "hh:fontRef" => {
+                    if let Some((_, f)) = cur_char.as_mut() {
+                        f.font = attr(&attrs, "hangul")
+                            .and_then(|id| h.fonts.get(id))
+                            .filter(|face| face.as_str() != DEFAULT_FONT_FACE)
+                            .cloned();
+                    }
                 }
                 "hh:bold" => {
                     if let Some((_, f)) = cur_char.as_mut() {
@@ -173,24 +205,28 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         Some("DISTRIBUTE" | "DISTRIBUTE_SPACE") => Some(RichAlignment::Justify),
         _ => None,
     };
-    let mut runs = p.runs;
-    // Heading styles are bold by definition, so the flag is not user formatting there.
-    let style_bold = style.is_some_and(|s| header.chars.get(&s.char_pr).is_some_and(|f| f.bold));
-    if heading > 0 && style_bold {
-        let mut merged: Vec<RichRun> = Vec::new();
-        for r in runs {
-            push_run(
-                &mut merged,
-                &r.text,
-                CharFmt {
-                    bold: false,
-                    italic: r.italic,
-                    underline: r.underline,
-                    strike: r.strike,
-                },
-            );
-        }
-        runs = merged;
+    // Heading styles are bold and sized by definition, so those are not user formatting there;
+    // body text at the writer's default height inherits the default size.
+    let style_fmt = style.and_then(|s| header.chars.get(&s.char_pr));
+    let style_bold = style_fmt.is_some_and(|f| f.bold);
+    let inherited_size = if heading > 0 {
+        style_fmt.and_then(|f| f.size_half_pt)
+    } else {
+        u16::try_from(DEFAULT_CHAR_HEIGHT / 50).ok()
+    };
+    let mut runs: Vec<RichRun> = Vec::new();
+    for r in p.runs {
+        let fmt = CharFmt {
+            bold: r.bold && !(heading > 0 && style_bold),
+            italic: r.italic,
+            underline: r.underline,
+            strike: r.strike,
+            size_half_pt: r.size_half_pt.filter(|s| Some(*s) != inherited_size),
+            font: r.font,
+            color: r.color,
+            highlight: r.highlight,
+        };
+        push_run(&mut runs, &r.text, &fmt);
     }
     RichParagraph {
         runs,
@@ -280,9 +316,9 @@ fn read_section(
                 "hp:t" => t_depth = t_depth.saturating_sub(1),
                 "hp:run" => {
                     if let Some(run) = runs.pop() {
-                        let fmt = header.chars.get(&run.char_pr).copied().unwrap_or_default();
+                        let fmt = header.chars.get(&run.char_pr).cloned().unwrap_or_default();
                         if let Some(top) = paras.last_mut() {
-                            push_run(&mut top.runs, &run.text, fmt);
+                            push_run(&mut top.runs, &run.text, &fmt);
                         }
                     }
                 }
