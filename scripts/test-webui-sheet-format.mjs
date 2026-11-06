@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-
-const enc = new TextEncoder();
+import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 
 async function openModule(module, options = {}) {
   const h = await createWorkspaceHarness(options);
@@ -25,22 +24,6 @@ async function selectRange(d, from, toKeys) {
 async function press(sandbox, k) {
   sandbox.dispatchWindowKeydown({ key: k, ctrlKey: true });
   await flushAsyncTurns(14);
-}
-
-function makeFixtureFile(name, model) {
-  const bytes = enc.encode("EOFIXTURE:" + JSON.stringify(model));
-  return {
-    name,
-    size: bytes.length,
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  };
-}
-
-async function pickFile(document, file) {
-  const input = document.getElementById("file-open-input");
-  input.files = [file];
-  input.dispatchEvent({ type: "change", target: input });
-  await flushAsyncTurns(60);
 }
 
 function bigSheetModel(rows, cols = 8) {
