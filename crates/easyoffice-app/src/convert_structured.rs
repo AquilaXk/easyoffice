@@ -5,7 +5,7 @@
 //! - `blocks`: ordered `{"type":"paragraph","runs":[{"text","bold","italic","underline","strike",
 //!   "sizeHalfPt","font","color","highlight"}],
 //!   "align","heading","list"}` and `{"type":"table","rows":[[{"text","value"}]]}` items;
-//! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)"}]}]` for every workbook sheet;
+//! - `sheets`: `[{"name","cells":[{"ref":"A1","raw":"=SUM(A1:A2)","style":{"bold":true,"sizePt":11.25}}],`n//!   "columns":[{"index":1,"widthPx":120}]}]` for every workbook sheet (`style` and `columns` are optional,`n//!   PD-089; `index` is the 1-based column number);
 //! - `slides`: `[{"title","bullets":[...],"notes"}]`.
 //!
 //! Every string is literal content; nothing in it is parsed as markup.
@@ -13,10 +13,11 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    evaluate_table_formulas, normalize_hex_color, DocumentFormat, EasyOfficeError, OdfCodec,
-    OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
-    RichRun, StrictJsonValue, UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue,
-    XlsxFormulaCache,
+    evaluate_table_formulas, normalize_hex_color, CellStyle, DocumentFormat, EasyOfficeError,
+    OdfCodec, OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock, RichDocument, RichListKind,
+    RichParagraph, RichRun, SheetStyling, StrictJsonValue, UniversalDocumentModel,
+    UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache, MAX_COLUMN_PX, MAX_SIZE_PT,
+    MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine};
 
@@ -25,6 +26,8 @@ use crate::convert_ipc::compute_xlsx_formula_cache;
 /// Upper bound on runs + table cells + sheet cells + slide items in one payload.
 const MAX_STRUCTURED_ITEMS: usize = 500_000;
 const MAX_SHEETS: usize = 256;
+/// Upper bound on custom column widths of one sheet (the XLSX grid has 16,384 columns).
+const MAX_COLUMN_ENTRIES: usize = 16_384;
 /// Upper bound on cells of the value grids rendered when a workbook is saved to a document format.
 const MAX_GRID_CELLS: usize = 2_000_000;
 
@@ -34,7 +37,8 @@ type ValueGrid = Vec<Vec<String>>;
 
 pub(crate) enum StructuredContent {
     Document(RichDocument),
-    Workbook(Vec<OdsUnpacked>),
+    /// Sheets plus their cell formatting and column widths (one SheetStyling per sheet).
+    Workbook(Vec<OdsUnpacked>, Vec<SheetStyling>),
     Slides(Vec<SlideTriple>),
 }
 
@@ -147,7 +151,7 @@ pub(crate) fn parse_structured_content(
     }
     if let Some(v) = field(entries, "sheets") {
         return parse_sheets(as_array(v, "sheets")?, &mut budget)
-            .map(|s| Some(StructuredContent::Workbook(s)));
+            .map(|(sheets, styling)| Some(StructuredContent::Workbook(sheets, styling)));
     }
     if let Some(v) = field(entries, "slides") {
         return parse_slides(as_array(v, "slides")?, &mut budget)
@@ -261,16 +265,88 @@ fn parse_blocks(
     Ok(blocks)
 }
 
+/// Optional finite number field.
+fn opt_number(obj: &JsonObject, key: &str) -> Result<Option<f64>, EasyOfficeError> {
+    field(obj, key)
+        .map(|v| match v {
+            StrictJsonValue::Number(text) => text
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite())
+                .ok_or_else(|| invalid(format!("구조화 저장: '{key}'는 유한한 수여야 합니다."))),
+            _ => Err(invalid(format!("구조화 저장: '{key}'는 숫자여야 합니다."))),
+        })
+        .transpose()
+}
+
+/// Cell format of the sheet editor (PD-084/PD-089): `{"bold","italic","underline","strike",
+/// "sizePt"}`; `sizePt` is 1 to 409 points and is stored with two decimals.
+fn parse_cell_style(obj: &JsonObject) -> Result<CellStyle, EasyOfficeError> {
+    let size_pt = opt_number(obj, "sizePt")?
+        .map(|pt| {
+            if (MIN_SIZE_PT..=MAX_SIZE_PT).contains(&pt) {
+                Ok((pt * 100.0).round() / 100.0)
+            } else {
+                Err(invalid(format!(
+                    "구조화 저장: 'sizePt'는 {MIN_SIZE_PT}~{MAX_SIZE_PT} 사이여야 합니다."
+                )))
+            }
+        })
+        .transpose()?;
+    Ok(CellStyle {
+        bold: opt_bool(obj, "bold")?,
+        italic: opt_bool(obj, "italic")?,
+        underline: opt_bool(obj, "underline")?,
+        strike: opt_bool(obj, "strike")?,
+        size_pt,
+    })
+}
+
+/// `columns`: `[{"index": 1-based column, "widthPx": 8..=2000}]`, at most one entry per column
+/// of the sheet grid.
+fn parse_columns(
+    items: &[StrictJsonValue],
+    budget: &mut Budget,
+) -> Result<BTreeMap<u32, u32>, EasyOfficeError> {
+    if items.len() > MAX_COLUMN_ENTRIES {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "열 너비 항목 수가 한도({MAX_COLUMN_ENTRIES})를 초과했습니다."
+        )));
+    }
+    let mut columns = BTreeMap::new();
+    for item in items {
+        budget.take(1)?;
+        let obj = as_object(item, "columns")?;
+        let index = field(obj, "index")
+            .and_then(StrictJsonValue::as_u64)
+            .filter(|n| (1..=u64::from(OoxmlCodec::MAX_XLSX_COLS)).contains(n))
+            .ok_or_else(|| invalid("구조화 저장: 열 'index'는 1~16384 정수여야 합니다."))?;
+        let width = field(obj, "widthPx")
+            .and_then(StrictJsonValue::as_u64)
+            .filter(|n| (u64::from(MIN_COLUMN_PX)..=u64::from(MAX_COLUMN_PX)).contains(n))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "구조화 저장: 'widthPx'는 {MIN_COLUMN_PX}~{MAX_COLUMN_PX} 정수여야 합니다."
+                ))
+            })?;
+        columns.insert(index as u32 - 1, width as u32);
+    }
+    Ok(columns)
+}
+
+type ParsedSheets = (Vec<OdsUnpacked>, Vec<SheetStyling>);
+
 fn parse_sheets(
     items: &[StrictJsonValue],
     budget: &mut Budget,
-) -> Result<Vec<OdsUnpacked>, EasyOfficeError> {
+) -> Result<ParsedSheets, EasyOfficeError> {
     if items.len() > MAX_SHEETS {
         return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
             "시트 수가 한도({MAX_SHEETS})를 초과했습니다."
         )));
     }
     let mut sheets: Vec<OdsUnpacked> = Vec::with_capacity(items.len());
+    let mut stylings: Vec<SheetStyling> = Vec::with_capacity(items.len());
     for item in items {
         let obj = as_object(item, "sheets")?;
         let name = opt_str(obj, "name")?.unwrap_or("").trim().to_string();
@@ -286,6 +362,7 @@ fn parse_sheets(
             )));
         }
         let mut cells: BTreeMap<(u32, u32), String> = BTreeMap::new();
+        let mut styling = SheetStyling::default();
         if let Some(v) = field(obj, "cells") {
             for cell_v in as_array(v, "cells")? {
                 budget.take(1)?;
@@ -293,21 +370,30 @@ fn parse_sheets(
                 let a1 = opt_str(cell, "ref")?.unwrap_or("");
                 let coord = PackedCellCoordinate::parse_a1(a1.trim())
                     .map_err(|_| invalid(format!("구조화 저장: 잘못된 셀 주소 '{a1}'")))?;
-                let raw = opt_str(cell, "raw")?.unwrap_or("");
-                if raw.is_empty() {
-                    continue;
+                let key = (coord.row(), coord.col());
+                if let Some(style_v) = field(cell, "style") {
+                    let style = parse_cell_style(as_object(style_v, "style")?)?;
+                    if !style.is_plain() {
+                        styling.cells.insert(key, style);
+                    }
                 }
-                cells.insert((coord.row(), coord.col()), raw.to_string());
+                let raw = opt_str(cell, "raw")?.unwrap_or("");
+                if !raw.is_empty() {
+                    cells.insert(key, raw.to_string());
+                }
             }
+        }
+        if let Some(v) = field(obj, "columns") {
+            styling.columns = parse_columns(as_array(v, "columns")?, budget)?;
         }
         sheets.push((
             name,
             cells.into_iter().map(|((r, c), raw)| (r, c, raw)).collect(),
         ));
+        stylings.push(styling);
     }
-    Ok(sheets)
+    Ok((sheets, stylings))
 }
-
 fn parse_slides(
     items: &[StrictJsonValue],
     budget: &mut Budget,
@@ -419,12 +505,12 @@ pub(crate) fn encode_structured(
                 .then(|| compute_xlsx_formula_cache(&doc.to_universal_model()));
             UniversalFormatConverter::encode_rich(&doc, format, cache.as_ref())
         }
-        StructuredContent::Workbook(sheets) => match format {
+        StructuredContent::Workbook(sheets, stylings) => match format {
             DocumentFormat::Xlsx => {
                 let (caches, _) = evaluate_workbook(sheets, false)?;
-                OoxmlCodec::pack_xlsx_multi_with_formula_cache(sheets, &caches)
+                OoxmlCodec::pack_xlsx_multi_styled(sheets, &caches, stylings)
             }
-            DocumentFormat::Ods => OdfCodec::pack_ods_multi(sheets),
+            DocumentFormat::Ods => OdfCodec::pack_ods_multi_styled(sheets, stylings),
             DocumentFormat::Xls | DocumentFormat::Csv | DocumentFormat::Tsv => {
                 let model = UniversalDocumentModel {
                     title: title.to_string(),

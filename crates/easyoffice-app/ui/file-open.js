@@ -113,30 +113,50 @@
     return nodes;
   }
 
+  // `{ [1-based column]: px }` from a decoded sheet's `columns` (PD-089); invalid entries are skipped.
+  function columnWidthMap(columns) {
+    const widths = {};
+    (Array.isArray(columns) ? columns : []).forEach((col) => {
+      const index = Number(col?.index);
+      const px = Number(col?.widthPx);
+      if (Number.isInteger(index) && index >= 1 && Number.isFinite(px) && px > 0) widths[index] = px;
+    });
+    return widths;
+  }
+
+  // Cell entries keep the decoded `style` (bold/italic/underline/strike/size) so a file's formatting
+  // shows after opening and is written again by the next save; styled blank cells are kept too.
   function buildSheetStore(sheets) {
+    const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
     const store = {};
     const rowCounts = {};
+    const columnWidths = {};
     (sheets || []).forEach((sheet) => {
       const map = {};
       let maxRow = 0;
       (sheet.cells || []).forEach((cell) => {
         const raw = String(cell.raw ?? "");
-        if (!raw) return;
-        map[cell.ref] = raw.startsWith("=") ? { value: "", formula: raw } : { value: raw, formula: "" };
+        const style = codec ? codec.styleFromPayload(cell.style) : null;
+        if (!raw && !style) return;
+        const entry = raw.startsWith("=") ? { value: "", formula: raw } : { value: raw, formula: "" };
+        if (style) entry.style = style;
+        map[cell.ref] = entry;
         const m = /(\d+)$/.exec(cell.ref);
         if (m) maxRow = Math.max(maxRow, Number(m[1]));
       });
       store[sheet.name] = map;
       rowCounts[sheet.name] = Math.max(12, maxRow);
+      const widths = columnWidthMap(sheet.columns);
+      if (Object.keys(widths).length > 0) columnWidths[sheet.name] = widths;
     });
-    return { store, rowCounts };
+    return { store, rowCounts, columnWidths };
   }
 
   function createFileOpen(deps) {
     const {
       document, invokeIpc, enqueueOp, runExclusive, captureWorkspaceSnapshot, pushRawUndoSnapshot,
       restoreWorkspaceSnapshot, commitPendingSheetCell, computeEvaluatedSheetStore,
-      createEmptySlideStyleFields, getActiveModule,
+      createEmptySlideStyleFields, getActiveModule, replaceColumnWidths,
     } = deps;
     const hasHwpRoute = () => Boolean(deps.getHwpSession?.());
     const confirmFn = deps.confirm || ((msg) => (typeof host.confirm === "function" ? host.confirm(msg) : true));
@@ -200,13 +220,14 @@
         };
       } else if (mod === "SHEET") {
         const sheets = Array.isArray(res.sheets) && res.sheets.length > 0 ? res.sheets : [{ name: "Sheet1", cells: [] }];
-        const { store, rowCounts } = buildSheetStore(sheets);
+        const { store, rowCounts, columnWidths } = buildSheetStore(sheets);
         const first = sheets[0].name;
         const evaluated = await computeEvaluatedSheetStore(store, first, null);
         next.sheets = evaluated.sheets;
         next.sheetRowCounts = rowCounts;
         next.activeSheetName = first;
         next.activeSheetCellRef = "A1";
+        if (typeof replaceColumnWidths === "function") replaceColumnWidths(columnWidths);
       } else if (mod === "SLIDE") {
         const slides = Array.isArray(res.slides) ? res.slides : [];
         next.slides = (slides.length > 0 ? slides : [{ title: "", bullets: [], notes: "" }]).map((s) => ({

@@ -226,7 +226,7 @@
 
   // Every sheet in tab order (then any stored sheet without a tab); keys are the formula-visible
   // sheet names. `raw` is the formula when present, otherwise the typed value.
-  function buildSheetsPayload(sheetKeys, sheetDataStore) {
+  function buildSheetsPayload(sheetKeys, sheetDataStore, columnWidths) {
     const ordered = [];
     const seen = new Set();
     [...sheetKeys, ...Object.keys(sheetDataStore || {})].forEach((key) => {
@@ -237,15 +237,29 @@
     });
     return ordered.map((name) => {
       const store = sheetDataStore?.[name] || {};
+      const codec = host.__EASYOFFICE_SHEET_STYLE_CODEC__;
       const cells = Object.keys(store)
         .map((ref) => {
           const entry = store[ref];
           const raw = String(entry?.formula || entry?.value || "").trim();
-          return raw ? { ref, raw } : null;
+          const style = codec ? codec.styleToPayload(entry?.style) : null;
+          if (!raw && !style) return null;
+          return style ? { ref, raw, style } : { ref, raw };
         })
         .filter(Boolean);
-      return { name, cells };
+      const columns = buildColumnsPayload(columnWidths?.[name]);
+      return columns.length > 0 ? { name, cells, columns } : { name, cells };
     });
+  }
+
+  // Custom column widths of one sheet (`{ [1-based column]: px }`) as `[{ index, widthPx }]`, in
+  // column order (PD-089).
+  function buildColumnsPayload(widths) {
+    return Object.keys(widths || {})
+      .map(Number)
+      .filter((index) => Number.isInteger(index) && index >= 1 && Number(widths[index]) > 0)
+      .sort((a, b) => a - b)
+      .map((index) => ({ index, widthPx: Math.round(Number(widths[index])) }));
   }
 
   // File name from the document/tab title, safe on Windows and macOS: no extension, no reserved
@@ -270,6 +284,7 @@
     plainParagraphBlocks,
     evaluateDocTableFormulas,
     buildSheetsPayload,
+    buildColumnsPayload,
     sanitizeFileBaseName,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

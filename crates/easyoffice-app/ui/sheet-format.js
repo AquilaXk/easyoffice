@@ -47,6 +47,40 @@
     }
   }
 
+  // Editor style <-> save payload `style` (PD-089). The editor keeps CSS strings in the model
+  // (`fontWeight`, `fontStyle`, `textDecoration`, `fontSize` in px); the payload carries flags and
+  // `sizePt` (1 px = 0.75 pt).
+  const PT_PER_PX = 0.75;
+  const FLAG_KINDS = ["bold", "italic", "underline", "strike"];
+  const MIN_SIZE_PT = 1;
+  const MAX_SIZE_PT = 409;
+
+  function styleToPayload(style) {
+    if (!style) return null;
+    const out = {};
+    FLAG_KINDS.forEach((kind) => {
+      if (hasFlag({ style }, kind)) out[kind] = true;
+    });
+    const px = /^(\d+(?:\.\d+)?)px$/.exec(String(style.fontSize || "").trim());
+    if (px) {
+      const pt = Math.round(Number(px[1]) * PT_PER_PX * 100) / 100;
+      if (pt >= MIN_SIZE_PT && pt <= MAX_SIZE_PT) out.sizePt = pt;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  }
+
+  function styleFromPayload(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "" };
+    FLAG_KINDS.forEach((kind) => {
+      if (payload[kind] === true) writeFlag(style, kind, true);
+    });
+    if (Number.isFinite(payload.sizePt) && payload.sizePt > 0) {
+      style.fontSize = Math.round((payload.sizePt / PT_PER_PX) * 100) / 100 + "px";
+    }
+    return Object.values(style).some(Boolean) ? style : null;
+  }
+
   function createSheetFormat(api) {
     const {
       document,
@@ -212,4 +246,5 @@
   }
 
   host.__EASYOFFICE_CREATE_SHEET_FORMAT__ = createSheetFormat;
+  host.__EASYOFFICE_SHEET_STYLE_CODEC__ = { styleToPayload, styleFromPayload };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

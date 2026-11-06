@@ -103,7 +103,7 @@
         const keys = Array.from(document.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")).map(
           (b) => b.dataset.sheetTab
         );
-        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore) };
+        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore, sheetController.getColumnWidths()) };
       }
       if (scope === "SLIDE") {
         if (getActiveModule() === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {

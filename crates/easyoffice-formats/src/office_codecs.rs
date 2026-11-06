@@ -1,5 +1,9 @@
 pub use crate::odf_hwpx_codecs::*;
 pub use crate::rtf_xml_helpers::*;
+use crate::sheet_styling::xlsx_styles::{
+    cols_xml, parse_cell_xf_styles, parse_worksheet_styling, XlsxStyleTable,
+};
+use crate::sheet_styling::SheetStyling;
 use crate::{EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Payload for OOXML WordprocessingML (`.docx`).
@@ -185,6 +189,18 @@ impl OoxmlCodec {
         sheets: &[OdsUnpacked],
         caches: &[XlsxFormulaCache],
     ) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_xlsx_multi_styled(sheets, caches, &[])
+    }
+
+    /// Like [`Self::pack_xlsx_multi_with_formula_cache`], additionally writing `stylings[i]` (cell
+    /// formatting and column widths, PD-089) for sheet `i`: deduplicated `fonts`/`cellXfs` in
+    /// `xl/styles.xml`, the `s` attribute on styled cells (blank styled cells included), and
+    /// `<cols>`.
+    pub fn pack_xlsx_multi_styled(
+        sheets: &[OdsUnpacked],
+        caches: &[XlsxFormulaCache],
+        stylings: &[SheetStyling],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         let default_sheet = vec![("Sheet1".to_string(), Vec::new())];
         let active_sheets = if sheets.is_empty() {
             default_sheet.as_slice()
@@ -203,6 +219,26 @@ impl OoxmlCodec {
                 }
             }
         }
+        for styling in stylings {
+            let cell = styling
+                .cells
+                .keys()
+                .copied()
+                .find(|&(r, c)| r >= Self::MAX_XLSX_ROWS || c >= Self::MAX_XLSX_COLS);
+            let column = styling
+                .columns
+                .keys()
+                .find(|&&c| c >= Self::MAX_XLSX_COLS)
+                .map(|&c| (0, c));
+            if let Some((row, col)) = cell.or(column) {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+                    "XLSX 서식 좌표({row}, {col})가 ECMA-376 허용 범위({}x{})를 초과했습니다.",
+                    Self::MAX_XLSX_ROWS,
+                    Self::MAX_XLSX_COLS
+                )));
+            }
+        }
+        let style_table = XlsxStyleTable::build(stylings);
 
         let mut content_types = String::from(concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
@@ -261,16 +297,7 @@ impl OoxmlCodec {
             "<Relationship Id=\"rId{sst_rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>"
         ));
 
-        let styles_xml = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
-            "<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>",
-            "<fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills>",
-            "<borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders>",
-            "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>",
-            "<cellXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/></cellXfs>",
-            "</styleSheet>"
-        );
+        let styles_xml = style_table.to_xml();
 
         let mut shared_strings: Vec<&str> = Vec::new();
         let mut sst_map: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
@@ -314,50 +341,76 @@ impl OoxmlCodec {
                 "xl/_rels/workbook.xml.rels".to_string(),
                 wb_rels_xml.into_bytes(),
             ),
-            ("xl/styles.xml".to_string(), styles_xml.as_bytes().to_vec()),
+            ("xl/styles.xml".to_string(), styles_xml.into_bytes()),
             ("xl/sharedStrings.xml".to_string(), sst_xml.into_bytes()),
         ];
 
         for (i, (_, cells)) in active_sheets.iter().enumerate() {
             let cache = caches.get(i);
+            let styling = stylings.get(i);
+            let blank = String::new();
             let mut rows_map: std::collections::BTreeMap<u32, Vec<(u32, &String)>> =
                 std::collections::BTreeMap::new();
             for (row, col, raw) in cells {
                 rows_map.entry(*row).or_default().push((*col, raw));
             }
+            // Styled cells without a value are still written (`<c r=".." s=".."/>`).
+            if let Some(st) = styling {
+                let valued: std::collections::HashSet<(u32, u32)> =
+                    cells.iter().map(|(r, c, _)| (*r, *c)).collect();
+                for (&(row, col), style) in &st.cells {
+                    if !style.is_plain() && !valued.contains(&(row, col)) {
+                        rows_map.entry(row).or_default().push((col, &blank));
+                    }
+                }
+            }
 
             let mut sheet_xml = String::from(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
             );
+            if let Some(st) = styling {
+                sheet_xml.push_str(&cols_xml(&st.columns));
+            }
+            sheet_xml.push_str("<sheetData>");
             for (row, mut row_cells) in rows_map {
                 row_cells.sort_by_key(|(col, _)| *col);
                 let row_num = row.saturating_add(1);
                 sheet_xml.push_str(&format!("<row r=\"{row_num}\">"));
                 for (col, raw) in row_cells {
                     let a1 = format!("{}{}", format_col_letters(col), row_num);
-                    if let Some(formula) = raw.strip_prefix('=') {
+                    let xf = styling
+                        .and_then(|st| st.cells.get(&(row, col)))
+                        .map_or(0, |style| style_table.xf_index(style));
+                    let s = if xf > 0 {
+                        format!(" s=\"{xf}\"")
+                    } else {
+                        String::new()
+                    };
+                    if raw.is_empty() {
+                        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}/>"));
+                    } else if let Some(formula) = raw.strip_prefix('=') {
                         let f = XmlSanitizer::escape(formula);
                         match cache.and_then(|c| c.get(&(row, col))) {
                             Some(XlsxCachedValue::Number(n)) if n.is_finite() => sheet_xml
-                                .push_str(&format!("<c r=\"{a1}\"><f>{f}</f><v>{n}</v></c>")),
-                            Some(XlsxCachedValue::Text(s)) => sheet_xml.push_str(&format!(
-                                "<c r=\"{a1}\" t=\"str\"><f>{f}</f><v>{}</v></c>",
-                                XmlSanitizer::escape(s)
+                                .push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f><v>{n}</v></c>")),
+                            Some(XlsxCachedValue::Text(text)) => sheet_xml.push_str(&format!(
+                                "<c r=\"{a1}\"{s} t=\"str\"><f>{f}</f><v>{}</v></c>",
+                                XmlSanitizer::escape(text)
                             )),
                             Some(XlsxCachedValue::Boolean(b)) => sheet_xml.push_str(&format!(
-                                "<c r=\"{a1}\" t=\"b\"><f>{f}</f><v>{}</v></c>",
+                                "<c r=\"{a1}\"{s} t=\"b\"><f>{f}</f><v>{}</v></c>",
                                 u8::from(*b)
                             )),
-                            _ => sheet_xml.push_str(&format!("<c r=\"{a1}\"><f>{f}</f></c>")),
+                            _ => sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f></c>")),
                         }
                     } else if raw.parse::<f64>().is_ok() {
                         sheet_xml.push_str(&format!(
-                            "<c r=\"{a1}\" t=\"n\"><v>{}</v></c>",
+                            "<c r=\"{a1}\"{s} t=\"n\"><v>{}</v></c>",
                             XmlSanitizer::escape(raw)
                         ));
                     } else {
                         let idx = sst_map.get(raw.as_str()).copied().unwrap_or(0);
-                        sheet_xml.push_str(&format!("<c r=\"{a1}\" t=\"s\"><v>{idx}</v></c>"));
+                        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s} t=\"s\"><v>{idx}</v></c>"));
                     }
                 }
                 sheet_xml.push_str("</row>");
@@ -384,6 +437,21 @@ impl OoxmlCodec {
     }
 
     pub fn unpack_xlsx_multi(bytes: &[u8]) -> Result<Vec<OdsUnpacked>, EasyOfficeError> {
+        Ok(Self::unpack_xlsx_inner(bytes, false)?.0)
+    }
+
+    /// Cell formatting and column widths of every sheet, keyed by sheet name (PD-089).
+    pub fn unpack_xlsx_styling(
+        bytes: &[u8],
+    ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
+        Ok(Self::unpack_xlsx_inner(bytes, true)?.1)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn unpack_xlsx_inner(
+        bytes: &[u8],
+        with_styling: bool,
+    ) -> Result<(Vec<OdsUnpacked>, Vec<(String, SheetStyling)>), EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
         validate_zip_xml_entries(&entries)?;
         let wb_entry = entries
@@ -462,6 +530,17 @@ impl OoxmlCodec {
             sheet_specs.push(("Sheet1".to_string(), "xl/worksheets/sheet1.xml".to_string()));
         }
 
+        let xf_styles = if with_styling {
+            entries
+                .iter()
+                .find(|e| e.path == "xl/styles.xml")
+                .and_then(|e| std::str::from_utf8(&e.data).ok())
+                .map(parse_cell_xf_styles)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut stylings = Vec::new();
         let mut parsed_sheets = Vec::with_capacity(sheet_specs.len());
         for (idx, (sheet_name, target_path)) in sheet_specs.into_iter().enumerate() {
             let sheet_entry = entries.iter().find(|e| e.path == target_path).or_else(|| {
@@ -480,11 +559,17 @@ impl OoxmlCodec {
                 EasyOfficeError::InvalidUtf8("xl/worksheets/sheet.xml UTF-8 오류".to_string())
             })?;
             XmlSanitizer::validate_safe_xml(sheet_xml)?;
+            if with_styling {
+                stylings.push((
+                    sheet_name.clone(),
+                    parse_worksheet_styling(sheet_xml, &xf_styles),
+                ));
+            }
             let cells = Self::parse_xlsx_worksheet_cells(sheet_xml, &shared_strings)?;
             parsed_sheets.push((sheet_name, cells));
         }
 
-        Ok(parsed_sheets)
+        Ok((parsed_sheets, stylings))
     }
 
     fn parse_xlsx_worksheet_cells(

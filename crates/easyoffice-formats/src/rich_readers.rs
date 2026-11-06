@@ -151,6 +151,8 @@ const NOTE_FLAT: &str =
     "서식(굵게·정렬 등)과 표 위치는 가져오지 않고 본문 텍스트 뒤에 표를 순서대로 붙입니다.";
 const NOTE_SHEET: &str =
     "셀 서식·열 너비·차트·그림은 가져오지 않습니다. 수식 결과는 다시 계산하며 날짜는 일련번호로 표시됩니다.";
+const NOTE_SHEET_STYLED: &str =
+    "굵게·기울임·밑줄·취소선·글자 크기와 열 너비는 가져오지만 글꼴 이름·색·채우기·테두리·정렬·숫자 서식·차트·그림은 가져오지 않습니다. 수식 결과는 다시 계산하며 날짜는 일련번호로 표시됩니다.";
 const NOTE_SLIDE: &str =
     "슬라이드 제목·글머리·발표자 노트만 가져오며 도형·이미지·서식은 제외됩니다.";
 
@@ -222,7 +224,7 @@ impl UniversalFormatConverter {
                 DecodedContent::Document(doc)
             }
             DocumentFormat::Xlsx => {
-                warnings.push(NOTE_SHEET.to_string());
+                warnings.push(NOTE_SHEET_STYLED.to_string());
                 DecodedContent::Workbook(normalize_sheets(OoxmlCodec::unpack_xlsx_multi(bytes)?))
             }
             DocumentFormat::Xls => {
@@ -234,7 +236,7 @@ impl UniversalFormatConverter {
                 DecodedContent::Workbook(normalize_sheets(sheets))
             }
             DocumentFormat::Ods => {
-                warnings.push(NOTE_SHEET.to_string());
+                warnings.push(NOTE_SHEET_STYLED.to_string());
                 DecodedContent::Workbook(normalize_sheets(OdfCodec::unpack_ods_multi(bytes)?))
             }
             DocumentFormat::Csv | DocumentFormat::Tsv => {

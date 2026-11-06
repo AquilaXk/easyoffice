@@ -125,6 +125,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/release-serve-rule.mjs",
   "scripts/test-release-serve-rule.mjs",
   "scripts/test-webui-sheet-format.mjs",
+  "scripts/test-webui-sheet-styles.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)
