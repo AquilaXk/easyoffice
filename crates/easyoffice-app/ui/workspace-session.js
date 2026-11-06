@@ -74,6 +74,18 @@
     return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
   }
 
+  // Fingerprint of one module's document only (file open asks before replacing edited content).
+  function moduleFingerprint(snap, mod) {
+    const parts = {
+      DOC: [snap.docTabs?.DOC],
+      HWP: [snap.docTabs?.HWP],
+      SHEET: [snap.sheets, snap.sheetRowCounts],
+      SLIDE: [snap.slides],
+      PDF: [snap.pdfStudio, snap.pdfRotationDeg],
+    }[mod] || [];
+    return hashFingerprint(JSON.stringify(canonicalizeContent(parts, "")));
+  }
+
   function isSafeNodeSpecList(specs, depth) {
     if (specs === undefined || specs === null) return true;
     if (!Array.isArray(specs) || depth > MAX_NODE_SPEC_DEPTH) return false;
@@ -505,5 +517,6 @@
     shortcutComboFromEvent,
     guessClientPlatform,
     isRestorableSnapshot,
+    moduleFingerprint,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

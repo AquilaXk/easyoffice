@@ -889,3 +889,7 @@ html[data-theme="dark"] .cp-empty {
 .statusbar-zoom-group { display: inline-flex; align-items: center; gap: 4px; }
 .statusbar-zoom-btn, .statusbar-mode-btn { padding: 1px 6px; font-size: 11px; font-weight: 700; color: var(--eo-text); background: var(--eo-surface-elevated); }
 .stb-zoom-slider { width: 76px; height: 14px; accent-color: var(--eo-primary); }
+
+.app-shell.eo-drop-active { outline: 3px dashed var(--eo-primary); outline-offset: -6px; }
+.slide-lower-zone p { white-space: pre-line; }
+.conv-source-row { gap: 8px; flex-wrap: wrap; }

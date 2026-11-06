@@ -597,10 +597,20 @@ fn render_markdown_runs(p: &RichParagraph) -> String {
 }
 
 pub(crate) fn render_markdown_rich(doc: &RichDocument) -> String {
-    let mut parts: Vec<String> = vec![format!(
-        "# {}",
-        escape_markdown_inline(&doc.display_title())
-    )];
+    // A document that already opens with a level-1 heading (e.g. an opened Markdown file) keeps
+    // that heading as its title instead of gaining a duplicate title line.
+    let opens_with_h1 = matches!(
+        doc.blocks.first(),
+        Some(RichBlock::Paragraph(p)) if p.heading_level == 1
+    );
+    let mut parts: Vec<String> = if opens_with_h1 {
+        Vec::new()
+    } else {
+        vec![format!(
+            "# {}",
+            escape_markdown_inline(&doc.display_title())
+        )]
+    };
     let mut list_buf: Vec<String> = Vec::new();
     let mut ordinal = 0usize;
     let flush = |parts: &mut Vec<String>, list_buf: &mut Vec<String>| {

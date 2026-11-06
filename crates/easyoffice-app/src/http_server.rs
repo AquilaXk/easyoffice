@@ -22,6 +22,7 @@ const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
 const WORKSPACE_SESSION_JS: &str = include_str!("../ui/workspace-session.js");
+const FILE_OPEN_JS: &str = include_str!("../ui/file-open.js");
 const APP_JS: &str = include_str!("../ui/app.js");
 const FAVICON_SVG: &str = include_str!("../ui/favicon.svg");
 
@@ -331,6 +332,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             WORKSPACE_SESSION_JS.to_string(),
+        ),
+        ("GET", "/file-open.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            FILE_OPEN_JS.to_string(),
         ),
         ("GET", "/app.js") => (
             "200 OK",

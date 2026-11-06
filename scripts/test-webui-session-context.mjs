@@ -11,9 +11,10 @@ const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
 
 // Shortcuts a web page cannot (or must not) take over from the browser: new window/tab,
 // close tab, reload, devtools, history, address bar, downloads, print, caret browsing.
+// Ctrl+O is intentionally absent: file open (PD-075) owns it and the page may preventDefault it.
 const BROWSER_RESERVED_SHORTCUTS = new Set([
   "Ctrl+N", "Ctrl+T", "Ctrl+W", "Ctrl+R", "Ctrl+L", "Ctrl+D", "Ctrl+H", "Ctrl+J", "Ctrl+P",
-  "Ctrl+O", "Ctrl+E", "Ctrl+Tab", "Ctrl+F4", "Ctrl+F5", "Ctrl+Shift+N", "Ctrl+Shift+T",
+  "Ctrl+E", "Ctrl+Tab", "Ctrl+F4", "Ctrl+F5", "Ctrl+Shift+N", "Ctrl+Shift+T",
   "Ctrl+Shift+W", "Ctrl+Shift+R", "Ctrl+Shift+J", "Ctrl+Shift+C", "Ctrl+Shift+I",
   "Ctrl+Shift+B", "Ctrl+Shift+Delete", "F5", "F6", "F7", "F11", "F12", "Alt+F", "Alt+D",
   "Alt+E", "Alt+F4", "Alt+Home", "Alt+Left", "Alt+Right",

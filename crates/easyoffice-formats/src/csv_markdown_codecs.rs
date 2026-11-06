@@ -462,7 +462,7 @@ pub enum MarkdownBlock {
 pub struct CommonMarkCodec;
 
 impl CommonMarkCodec {
-    fn parse_markdown_table_row(inner: &str) -> Vec<String> {
+    pub(crate) fn parse_markdown_table_row(inner: &str) -> Vec<String> {
         let mut cells = Vec::new();
         let mut cur = String::new();
         let mut chars = inner.chars().peekable();
