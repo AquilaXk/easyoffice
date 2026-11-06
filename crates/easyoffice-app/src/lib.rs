@@ -9,6 +9,7 @@ use easyoffice_sheet::{
 };
 
 pub mod benchmark;
+pub mod cli_args;
 mod convert_ipc;
 pub mod ffi;
 pub mod http_server;

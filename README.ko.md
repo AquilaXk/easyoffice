@@ -122,7 +122,7 @@ bash scripts/package-macos-release.sh 1.0.0
 xattr -dr com.apple.quarantine /Applications/EasyOffice.app
 ```
 
-Windows 배포 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`)는 독립 실행형 Rust 코어 CLI와 로컬 루프백 WebUI 서버를 제공합니다. `easyoffice-app.exe --self-test`로 엔진 무결성을 검증하거나 `easyoffice-app.exe --serve 8787`을 실행해 브라우저에서 `http://127.0.0.1:8787/` 워크스페이스를 열 수 있습니다.
+Windows 배포 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`)는 독립 실행형 Rust 코어 CLI와 로컬 루프백 WebUI 서버를 제공합니다. `easyoffice-app.exe --self-test`로 엔진 무결성을 검증하거나 `easyoffice-app.exe --serve 8787`을 실행해 브라우저에서 `http://127.0.0.1:8787/` 워크스페이스를 열 수 있습니다. 전체 옵션은 `easyoffice-app.exe --help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로(명령줄에서 문서 열기는 아직 지원하지 않음)는 0이 아닌 종료 코드로 끝납니다.
 
 ---
 
