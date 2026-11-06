@@ -39,6 +39,7 @@
       setPdfRotationDeg,
       getShortcutModifier,
       enqueueWorkspaceHistoryOp,
+      onModuleApplied,
     } = deps;
 
     const {
@@ -50,6 +51,7 @@
       RIBBON_CATEGORY_ORDER,
       syncLocalRibbonStateFromBackend,
       formatPlatformShortcut,
+      resolveRibbonShortcutLabel,
     } = ribbonCatalog;
 
     const {
@@ -141,6 +143,7 @@
         hwpNotice.hidden =
           mod !== "HWP" || !Boolean(docEditorEl?.classList.contains("manuscript-grid"));
       }
+      if (typeof onModuleApplied === "function") onModuleApplied(mod);
     }
 
     function normalizeRibbonStyleKey(rawStyle) {
@@ -214,16 +217,15 @@
         btn.dataset.commandId = cmd.id;
         const span = document.createElement("span");
         span.textContent = cmd.title || "";
-        const small = document.createElement("small");
-        const activeModKey = typeof getShortcutModifier === "function" ? getShortcutModifier() : "⌘";
-        const formattedShortcut =
-          typeof formatPlatformShortcut === "function"
-            ? formatPlatformShortcut(cmd.shortcut || "", activeModKey)
-            : cmd.shortcut || "";
-        small.textContent = "(" + formattedShortcut + ")";
         btn.appendChild(span);
-        btn.appendChild(document.createTextNode(" "));
-        btn.appendChild(small);
+        const boundShortcut = resolveRibbonShortcutLabel(cmd.id, cmd.shortcut);
+        if (boundShortcut) {
+          const small = document.createElement("small");
+          const activeModKey = typeof getShortcutModifier === "function" ? getShortcutModifier() : "⌘";
+          small.textContent = "(" + formatPlatformShortcut(boundShortcut, activeModKey) + ")";
+          btn.appendChild(document.createTextNode(" "));
+          btn.appendChild(small);
+        }
         btn.addEventListener("click", () => {
           void executeTrackedRibbonCommand(cmd.id, { fallbackTitle: cmd.title }).catch(() => {});
         });

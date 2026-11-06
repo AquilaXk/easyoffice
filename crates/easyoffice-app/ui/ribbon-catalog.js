@@ -368,7 +368,42 @@
       .replaceAll("Ctrl+Ctrl+", "Ctrl+");
   }
 
+  // Single source of truth for every shortcut label the WebUI renders (menus, tooltips, ribbon,
+  // palette). Each entry is dispatched by app.js `handleWorkspaceShortcutKeydown`, except
+  // `native` entries (browser editing keys left untouched) and `external` entries (handled by
+  // workspace-tools.js). Browser-reserved keys (Ctrl+N/T/W/R, Ctrl+Shift+R/T/J/C/N/I, F5, ...)
+  // must never be listed here.
+  const WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
+    { keys: "Ctrl+S", action: "studio-save" },
+    { keys: "Ctrl+Z", action: "studio-undo" },
+    { keys: "Ctrl+Y", action: "studio-redo" },
+    { keys: "Ctrl+Shift+Z", action: "studio-redo" },
+    { keys: "Ctrl+K", action: "palette" },
+    { keys: "Ctrl+F", action: "palette" },
+    { keys: "Ctrl+B", action: "home-bold", ribbon: true },
+    { keys: "Ctrl+I", action: "home-italic", ribbon: true },
+    { keys: "Ctrl+U", action: "home-underline", ribbon: true },
+    { keys: "Ctrl+0", action: "view-zoom", ribbon: true },
+    { keys: "Ctrl+Alt+D", action: "view-theme", ribbon: true },
+    { keys: "Ctrl+X", action: "clip-cut", native: true },
+    { keys: "Ctrl+C", action: "clip-copy", native: true },
+    { keys: "Ctrl+V", action: "clip-paste", native: true },
+    { keys: "/", action: "palette", bareKey: true },
+    { keys: "Insert", action: "insert-mode", bareKey: true, external: true },
+  ]);
+
+  function resolveRibbonShortcutLabel(commandId, rawShortcut) {
+    const suffix = String(commandId || "").replace(/^[a-z]+-/, "");
+    const normalized = formatPlatformShortcut(String(rawShortcut || ""), "Ctrl");
+    const bound = WORKSPACE_SHORTCUT_BINDINGS.some(
+      (b) => b.ribbon && b.action === suffix && b.keys === normalized
+    );
+    return bound ? String(rawShortcut) : "";
+  }
+
   host.__EASYOFFICE_RIBBON_CATALOG__ = {
+    WORKSPACE_SHORTCUT_BINDINGS,
+    resolveRibbonShortcutLabel,
     MODULE_ACCENTS,
     MODULE_LABELS,
     MODULE_SPECS,
