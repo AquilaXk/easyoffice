@@ -976,3 +976,21 @@
   - PDF 90° 회전 겹침을 축소 배율(`scale(0.6)`)로만 처리하면 본문 가독성이 저하되므로 카드 최대 폭 조정과 쿼터 회전(`90°`/`270°`) 상하 여백 확장 방식을 채택.
 - **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`, `cargo test --workspace`, `swift test`, `.agents/skills/verify-easyoffice/scripts/eo.sh`
 - **Revisit when** Linux Wayland 전용 시스템 트레이 및 글로벌 단축키 포털 연동이 필요할 때.
+
+## 44. 리본 서식 상태·실행 취소 스택의 클라이언트 세션별·모듈별 분리 (PD-069, #106)
+
+- **Status** Implemented
+- **Context** `--serve` 서버가 전역 `SharedRibbonSession` 하나(서식 플래그 1벌, 실행 취소 스택 1벌)를 공유하여 `document-home-bold` 다음 `sheet-home-italic`을 실행하면 SHEET 응답에 DOC의 굵게가 넘어가고, `undo_ribbon_command`가 방금 한 SHEET 작업이 아닌 DOC 작업을 취소했으며, 브라우저 창 두 개가 같은 스택을 공유했습니다.
+- **Decision (`PD-069`)**
+  1. **세션·모듈 2단 키 레지스트리 (`crates/easyoffice-app/src/ribbon_session.rs`)**
+     - 리본 상태와 `UndoRedoStack`을 `sessionId` → 모듈(`DOC`/`HWP`/`SHEET`/`SLIDE`/`PDF`) 2단 키로 보관합니다. `execute_ribbon_command`는 명령 ID가 속한 모듈의 상태·스택만 변경하고, `undo_ribbon_command`/`redo_ribbon_command`는 페이로드의 `module`(생략 시 해당 세션에서 마지막으로 실행한 모듈)의 스택만 되돌립니다. 리본 레이아웃 모드(`switch_ribbon_style`)는 세션 단위로 유지합니다.
+     - 세션 맵은 최대 `32`개(`MAX_RIBBON_SESSIONS`)로 제한하고 초과 시 가장 오래 사용되지 않은 세션(LRU)을 제거합니다. `sessionId`는 영문·숫자·`-`·`_` 조합 `64`자 이하만 허용하며(위반 시 `InvalidArgument`), 생략 시 `default` 세션을 사용해 기존 문자열 페이로드·C-ABI·자체 검증과 하위 호환됩니다.
+     - IPC 명령 수는 15종 그대로 유지하고 기존 4개 리본 명령의 JSON 페이로드에 `sessionId`/`module` 필드만 추가합니다.
+  2. **WebUI 페이지 단위 세션 식별자 (`crates/easyoffice-app/ui/ribbon-history.js`, `scripts/test-support/offline-rpc.js`)**
+     - 페이지 로드마다 `crypto.getRandomValues` 128비트 난수로 `eo-<32 hex>` 세션 식별자를 1회 생성해 리본 실행·실행 취소·다시 실행·레이아웃 전환 페이로드에 싣고, 리본 스냅샷에 실행 모듈(`ribbonModule`)을 기록해 `Ctrl+Z`/`Ctrl+Y` 시 해당 모듈을 함께 전송합니다. 오프라인 RPC 에뮬레이터도 동일한 세션·모듈 분리 의미론을 따릅니다.
+- **Trade-offs** 세션 식별자는 인증 토큰이 아닌 상태 네임스페이스이므로 동일 식별자를 아는 클라이언트는 같은 스택에 접근할 수 있으나, 서버는 루프백 전용이며 문서 내용이 아닌 리본 토글 상태만 보관합니다. 최악의 경우 메모리는 `32 세션 × 5 모듈 × 128 스냅샷`으로 상한이 고정됩니다.
+- **Alternatives rejected**
+  - 세션·모듈별 전용 IPC 명령을 추가하는 방식은 15종 IPC 계약과 위생 검사를 깨뜨리므로 기존 페이로드 확장으로 해결.
+  - 상한 없는 세션 맵은 장시간 구동 서버에서 창을 열 때마다 메모리가 증가하므로 LRU 축출로 기각.
+- **Verified by** `cargo test -p easyoffice-app ribbon_session`(이슈 재현 순서, 두 세션 격리, 형식 오류 거부, LRU 상한), `node --test scripts/test-webui-behavior.mjs`(`ribbon IPC sends a per-window session id and the undo target module (#106)`), `node scripts/check-repo-hygiene.mjs`
+- **Revisit when** 서버가 루프백 외 원격 다중 사용자 접속을 지원하여 세션 식별자에 인증·소유권 검증이 필요해질 때.

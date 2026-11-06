@@ -13,6 +13,7 @@ mod convert_ipc;
 pub mod ffi;
 pub mod http_server;
 pub mod ribbon;
+mod ribbon_session;
 mod security_ipc;
 pub mod self_test;
 pub mod smart_tools;
@@ -26,19 +27,6 @@ pub use http_server::{
 pub use ribbon::*;
 pub use self_test::run_self_test;
 pub use smart_tools::*;
-
-#[derive(Default)]
-struct SharedRibbonSession {
-    state: RibbonWorkspaceState,
-    history: UndoRedoStack<RibbonWorkspaceState>,
-}
-
-static RIBBON_WORKSPACE_SESSION: std::sync::OnceLock<std::sync::Mutex<SharedRibbonSession>> =
-    std::sync::OnceLock::new();
-
-fn shared_ribbon_session() -> &'static std::sync::Mutex<SharedRibbonSession> {
-    RIBBON_WORKSPACE_SESSION.get_or_init(|| std::sync::Mutex::new(SharedRibbonSession::default()))
-}
 
 /// Tauri v2 compatible IPC router dispatching desktop workspace commands to pure Rust engines.
 pub struct EasyOfficeIpcRouter;
@@ -66,8 +54,8 @@ impl EasyOfficeIpcRouter {
             "compute_layout" => Self::handle_compute_layout(payload),
             "audit_security" => Self::handle_audit_security(payload),
             "execute_ribbon_command" => Self::handle_execute_ribbon_command(payload),
-            "undo_ribbon_command" => Self::handle_undo_ribbon_command(),
-            "redo_ribbon_command" => Self::handle_redo_ribbon_command(),
+            "undo_ribbon_command" => Self::handle_ribbon_history_step(payload, true),
+            "redo_ribbon_command" => Self::handle_ribbon_history_step(payload, false),
             "switch_ribbon_style" => Self::handle_switch_ribbon_style(payload),
             "run_smart_assistant" => Self::handle_run_smart_assistant(payload),
             "scrub_pii" => Self::handle_scrub_pii(payload),
@@ -575,76 +563,20 @@ impl EasyOfficeIpcRouter {
         )
     }
 
-    fn handle_execute_ribbon_command(payload: &str) -> Result<String, EasyOfficeError> {
-        let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
-        let cmd_id_owned = if trimmed.starts_with('{') {
-            let entries = Self::parse_rpc_json_object(trimmed)?;
-            match Self::optional_json_str(&entries, "commandId")? {
-                Some(id) => id.trim().to_string(),
-                None => Self::optional_json_str(&entries, "id")?
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-            }
-        } else {
-            trimmed.to_string()
-        };
-        let mut session = shared_ribbon_session()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let snapshot = session.state.clone();
-        let summary = RibbonCommandRouter::execute_command(&cmd_id_owned, &mut session.state)?;
-        session.history.push_state(snapshot);
-        Ok(Self::format_ribbon_state_json(
-            &session.state,
-            &summary,
-            session.history.can_undo(),
-            session.history.can_redo(),
-        ))
-    }
-
-    fn handle_undo_ribbon_command() -> Result<String, EasyOfficeError> {
-        let mut session = shared_ribbon_session()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let current = session.state.clone();
-        if let Some(prev) = session.history.undo(current) {
-            session.state = prev;
-        }
-        Ok(Self::format_ribbon_state_json(
-            &session.state,
-            "실행 취소 완료",
-            session.history.can_undo(),
-            session.history.can_redo(),
-        ))
-    }
-
-    fn handle_redo_ribbon_command() -> Result<String, EasyOfficeError> {
-        let mut session = shared_ribbon_session()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let current = session.state.clone();
-        if let Some(next) = session.history.redo(current) {
-            session.state = next;
-        }
-        Ok(Self::format_ribbon_state_json(
-            &session.state,
-            "다시 실행 완료",
-            session.history.can_undo(),
-            session.history.can_redo(),
-        ))
-    }
-
     fn handle_switch_ribbon_style(payload: &str) -> Result<String, EasyOfficeError> {
         let trimmed = payload.strip_prefix('\u{FEFF}').unwrap_or(payload).trim();
-        let raw_style = if trimmed.starts_with('{') {
+        let (raw_style, session_id) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
-            Self::optional_json_str(&entries, "style")?
+            let style = Self::optional_json_str(&entries, "style")?
                 .unwrap_or("")
                 .trim()
-                .to_string()
+                .to_string();
+            (style, ribbon_session::session_id_from_entries(&entries)?)
         } else {
-            trimmed.to_string()
+            (
+                trimmed.to_string(),
+                ribbon_session::DEFAULT_RIBBON_SESSION_ID.to_string(),
+            )
         };
         let style = match raw_style.to_ascii_lowercase().as_str() {
             "hangul" | "hwp" | "hangul_hwp" | "한글" => RibbonLayoutStyle::HangulHwp,
@@ -655,9 +587,7 @@ impl EasyOfficeIpcRouter {
                 )))
             }
         };
-        if let Ok(mut session) = shared_ribbon_session().lock() {
-            session.state.ribbon_style = style;
-        }
+        ribbon_session::set_session_ribbon_style(&session_id, style);
         let cats = style
             .category_titles()
             .iter()

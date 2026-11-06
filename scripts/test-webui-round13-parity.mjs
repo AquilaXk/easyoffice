@@ -180,7 +180,7 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
       }
       if (command === "execute_ribbon_command") {
         executeRibbonCalls += 1;
-        const cmdId = String(args.payload || "");
+        const cmdId = String(JSON.parse(args.payload).commandId || "");
         const prevBold = backendIsBold;
         if (cmdId === "sheet-home-bold") {
           backendIsBold = !backendIsBold;
@@ -413,7 +413,7 @@ test("concurrent switchSheetTab and performWorkspaceUndo serialize ahead of qat-
         return { query: "F2", value: "5800", values: {}, targetValues: ["5800"] };
       }
       if (command === "execute_ribbon_command") {
-        return { commandId: String(args.payload || ""), summary: "ok", isBold: true };
+        return { commandId: JSON.parse(args.payload).commandId, summary: "ok", isBold: true };
       }
       if (command === "undo_ribbon_command") {
         if (undoGateResolve) {
