@@ -12,13 +12,17 @@ const AUTOSAVE_KEY = "easyoffice.workspace.autosave.v1";
 // Shortcuts a web page cannot (or must not) take over from the browser: new window/tab,
 // close tab, reload, devtools, history, address bar, downloads, print, caret browsing.
 // Ctrl+O is intentionally absent: file open (PD-075) owns it and the page may preventDefault it.
+// Plain F5 (reload) is absent as well: PD-080 binds it only in the slide module outside text fields,
+// and that exception is pinned by SLIDE_SCOPED_BROWSER_KEYS below.
 const BROWSER_RESERVED_SHORTCUTS = new Set([
   "Ctrl+N", "Ctrl+T", "Ctrl+W", "Ctrl+R", "Ctrl+L", "Ctrl+D", "Ctrl+H", "Ctrl+J", "Ctrl+P",
   "Ctrl+E", "Ctrl+Tab", "Ctrl+F4", "Ctrl+F5", "Ctrl+Shift+N", "Ctrl+Shift+T",
   "Ctrl+Shift+W", "Ctrl+Shift+R", "Ctrl+Shift+J", "Ctrl+Shift+C", "Ctrl+Shift+I",
-  "Ctrl+Shift+B", "Ctrl+Shift+Delete", "F5", "F6", "F7", "F11", "F12", "Alt+F", "Alt+D",
+  "Ctrl+Shift+B", "Ctrl+Shift+Delete", "F6", "F7", "F11", "F12", "Alt+F", "Alt+D",
   "Alt+E", "Alt+F4", "Alt+Home", "Alt+Left", "Alt+Right",
 ]);
+
+const SLIDE_SCOPED_BROWSER_KEYS = new Set(["F5"]);
 
 function createMemoryStorage(seed = {}) {
   const map = new Map(Object.entries(seed));
@@ -152,6 +156,10 @@ test("index.html menu and tooltip shortcut labels map 1:1 onto registered handle
   const bound = new Set(catalog.WORKSPACE_SHORTCUT_BINDINGS.map((b) => b.keys));
   for (const b of catalog.WORKSPACE_SHORTCUT_BINDINGS) {
     assert.ok(!BROWSER_RESERVED_SHORTCUTS.has(b.keys), "registry must not bind reserved key " + b.keys);
+    if (SLIDE_SCOPED_BROWSER_KEYS.has(b.keys)) {
+      assert.equal(b.module, "SLIDE", b.keys + " may only be taken over inside the slide module");
+      assert.equal(b.bareKey, true, b.keys + " must never fire from a text field");
+    }
   }
   const labels = collectIndexHtmlShortcutLabels();
   assert.ok(labels.length >= 10);

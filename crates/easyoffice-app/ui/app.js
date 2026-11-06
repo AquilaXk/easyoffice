@@ -163,6 +163,7 @@
 
   let sheetController = null;
   let workspacePanels = null;
+  let slideStudio = null;
 
   function snapshotDomSheetCells() {
     return sheetController.snapshotDomSheetCells();
@@ -218,6 +219,7 @@
     getActiveSlideIndex: () => activeSlideIndex,
     setActiveSlideIndex: (next) => { activeSlideIndex = next; },
     getPdfRotationDeg: () => pdfRotationDeg,
+    onSlideRendered: (idx) => slideStudio?.afterRender(idx),
     enqueueWorkspaceHistoryOp,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     commitDeferredUndoSnapshot: ribbonHistory.commitDeferredUndoSnapshot,
@@ -231,6 +233,16 @@
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     runExclusive: chainWorkspaceQueue,
     getWorkspacePanels: () => workspacePanels,
+  });
+
+  slideStudio = host.__EASYOFFICE_CREATE_SLIDE_STUDIO__({
+    document, slideDeckState, getActiveModule: () => activeModule,
+    getActiveSlideIndex: () => activeSlideIndex, getPanels: () => workspacePanels,
+    pushUndoSnapshot: ribbonHistory.pushUndoSnapshot,
+    captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
+    pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
+    getHistoryMutationEpoch: ribbonHistory.getHistoryMutationEpoch,
+    noteActivity: () => workspaceSession?.noteActivity(),
   });
 
   const fileOpen = host.__EASYOFFICE_CREATE_FILE_OPEN__({
@@ -666,13 +678,7 @@
   }
 
   function setupSlideAndPdfHandlers() {
-    const btnAddSlide = document.getElementById("btn-add-slide");
-    if (btnAddSlide) {
-      btnAddSlide.addEventListener("click", () => {
-        ribbonHistory.pushUndoSnapshot(false);
-        workspacePanels.appendNewSlideDeckItem();
-      });
-    }
+    document.getElementById("btn-add-slide")?.addEventListener("click", () => slideStudio.addSlide());
     const slideTransSelect = document.getElementById("slide-transition-select");
     if (slideTransSelect) {
       slideTransSelect.addEventListener("change", () => {
@@ -681,71 +687,6 @@
           slideDeckState[activeSlideIndex].transition = slideTransSelect.value;
         }
         workspacePanels.renderSlideDeck(activeSlideIndex);
-      });
-    }
-    let slideTypingSnapshotEpoch = -1;
-    let slideTypingTarget = null;
-    let slideTypingSlideIndex = -1;
-    function resetSlideTypingSnapshotState() {
-      slideTypingSnapshotEpoch = -1;
-      slideTypingTarget = null;
-      slideTypingSlideIndex = -1;
-    }
-    function ensureSlideTypingSnapshot(targetEl) {
-      if (
-        slideTypingTarget !== targetEl ||
-        slideTypingSlideIndex !== activeSlideIndex ||
-        slideTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch()
-      ) {
-        const prevSlides = JSON.parse(JSON.stringify(slideDeckState));
-        const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
-        preSnap.slides = prevSlides;
-        ribbonHistory.pushRawUndoSnapshot(preSnap);
-        slideTypingSnapshotEpoch = ribbonHistory.getHistoryMutationEpoch();
-        slideTypingTarget = targetEl;
-        slideTypingSlideIndex = activeSlideIndex;
-      }
-    }
-    const slideNotesInput = document.getElementById("slide-presenter-notes");
-    if (slideNotesInput) {
-      slideNotesInput.addEventListener("focus", resetSlideTypingSnapshotState);
-      slideNotesInput.addEventListener("blur", resetSlideTypingSnapshotState);
-      slideNotesInput.addEventListener("beforeinput", () => {
-        ensureSlideTypingSnapshot(slideNotesInput);
-      });
-      slideNotesInput.addEventListener("input", () => {
-        ensureSlideTypingSnapshot(slideNotesInput);
-        if (slideDeckState[activeSlideIndex]) {
-          slideDeckState[activeSlideIndex].notes = slideNotesInput.value;
-        }
-      });
-    }
-    const slideTitleZone = document.getElementById("slide-title-zone");
-    if (slideTitleZone) {
-      slideTitleZone.addEventListener("focus", resetSlideTypingSnapshotState);
-      slideTitleZone.addEventListener("blur", resetSlideTypingSnapshotState);
-      slideTitleZone.addEventListener("beforeinput", () => {
-        ensureSlideTypingSnapshot(slideTitleZone);
-      });
-      slideTitleZone.addEventListener("input", () => {
-        ensureSlideTypingSnapshot(slideTitleZone);
-        if (slideDeckState[activeSlideIndex]) {
-          slideDeckState[activeSlideIndex].title = slideTitleZone.textContent || "";
-        }
-      });
-    }
-    const slideLowerZone = document.getElementById("slide-lower-zone");
-    if (slideLowerZone) {
-      slideLowerZone.addEventListener("focus", resetSlideTypingSnapshotState);
-      slideLowerZone.addEventListener("blur", resetSlideTypingSnapshotState);
-      slideLowerZone.addEventListener("beforeinput", () => {
-        ensureSlideTypingSnapshot(slideLowerZone);
-      });
-      slideLowerZone.addEventListener("input", () => {
-        ensureSlideTypingSnapshot(slideLowerZone);
-        if (slideDeckState[activeSlideIndex]) {
-          workspacePanels.syncActiveSlideDomStylesToDeck();
-        }
       });
     }
     const slideStageBox = document.getElementById("slide-stage-box");
@@ -906,7 +847,13 @@
   // Dispatch is driven by ribbonCatalog.WORKSPACE_SHORTCUT_BINDINGS so every advertised label
   // has exactly one handler here; unlisted (browser-reserved) combos are never intercepted.
   function handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput) {
+    if (slideStudio.handleKeydown(e)) return;
     workspaceSession.handleShortcutKeydown(e, {
+      "slide-show-start": () => slideStudio.startShow(false),
+      "slide-show-current": () => slideStudio.startShow(true),
+      "slide-move-up": () => slideStudio.moveUp(),
+      "slide-move-down": () => slideStudio.moveDown(),
+      "slide-delete": () => slideStudio.removeSlide(),
       palette: () => togglePaletteModal(modal, cmdSearchInput),
       "file-open": () => fileOpen.openFilePicker(),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
@@ -960,6 +907,7 @@
     setupCommandPaletteHandlers();
     workspacePanels.renderModuleOutline("DOC");
     sheetController.updateSheetSelectionAndAggregates("F2");
+    slideStudio.bind();
     workspacePanels.renderSlideDeck(0);
     activeShortcutModifier = workspaceSession.applyPlatformChrome(
       host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.guessClientPlatform()

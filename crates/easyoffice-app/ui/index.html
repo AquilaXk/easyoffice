@@ -651,7 +651,19 @@
 
           <div id="pane-slide" class="editor-pane" hidden>
             <div class="formula-bar slide-toolbar">
-              <button id="btn-add-slide" class="secondary-btn">+ 슬라이드 추가</button>
+              <button id="btn-add-slide" class="secondary-btn" title="빈 슬라이드를 맨 뒤에 추가">+ 슬라이드 추가</button>
+              <button id="btn-slide-duplicate" class="secondary-btn" title="현재 슬라이드 복제">복제</button>
+              <button id="btn-slide-delete" class="secondary-btn" title="현재 슬라이드 삭제 · Delete (목록에서)">삭제</button>
+              <button id="btn-slide-move-up" class="secondary-btn" title="위로 이동 · Alt+↑ (목록에서)">▲</button>
+              <button id="btn-slide-move-down" class="secondary-btn" title="아래로 이동 · Alt+↓ (목록에서)">▼</button>
+              <label for="slide-aspect-select">비율</label>
+              <select id="slide-aspect-select" class="cmd-input slide-aspect-select">
+                <option value="16:9" selected>16:9</option>
+                <option value="4:3">4:3</option>
+                <option value="A4">A4</option>
+              </select>
+              <button id="btn-slide-show" class="secondary-btn" title="처음부터 슬라이드 쇼 (F5)">▶ 처음부터</button>
+              <button id="btn-slide-show-current" class="secondary-btn" title="현재 슬라이드부터 슬라이드 쇼 (Shift+F5)">▶ 현재 슬라이드</button>
               <label for="slide-transition-select">화면 전환</label>
               <select id="slide-transition-select" class="cmd-input slide-transition-select">
                 <option value="none">없음</option>
@@ -663,11 +675,7 @@
               <span id="slide-meta-status" class="formula-result">슬라이드 1 / 3 · 전환: 페이드</span>
             </div>
             <div class="slide-workspace">
-              <div id="slide-thumb-list" class="slide-thumb-list" aria-label="슬라이드 목록">
-                <button class="slide-thumb active" data-slide-idx="0">1. 발표 개요</button>
-                <button class="slide-thumb" data-slide-idx="1">2. 포맷 호환성</button>
-                <button class="slide-thumb" data-slide-idx="2">3. 성능 요약</button>
-              </div>
+              <div id="slide-thumb-list" class="slide-thumb-list" role="group" aria-label="슬라이드 목록"></div>
               <div class="slide-main-col">
                 <div class="slide-stage" id="slide-stage-box">
                   <div class="slide-title-zone" id="slide-title-zone" contenteditable="true">
@@ -684,6 +692,7 @@
                     id="slide-presenter-notes"
                     type="text"
                     class="cmd-input"
+                    placeholder="발표자 노트를 입력하세요"
                     value="핵심 메시지: 주요 문서 포맷 호환성과 수식 계산 결과를 요약하여 전달합니다."
                   />
                 </div>
@@ -884,6 +893,27 @@
       </div>
     </dialog>
 
+    <div id="slide-context-menu" class="slide-context-menu" role="menu" aria-label="슬라이드 메뉴" hidden>
+      <button type="button" role="menuitem" data-slide-action="new">새 슬라이드</button>
+      <button type="button" role="menuitem" data-slide-action="duplicate">복제</button>
+      <button type="button" role="menuitem" data-slide-action="delete">삭제</button>
+      <button type="button" role="menuitem" data-slide-action="up">위로 이동</button>
+      <button type="button" role="menuitem" data-slide-action="down">아래로 이동</button>
+    </div>
+
+    <div id="slide-show-overlay" class="slide-show" role="dialog" aria-modal="true" aria-label="슬라이드 쇼" tabindex="-1" hidden>
+      <div id="slide-show-viewport" class="slide-show-viewport" data-aspect="16:9"></div>
+      <span id="slide-show-counter" class="slide-show-counter" aria-live="polite">1 / 1</span>
+      <button id="slide-show-exit" class="slide-show-exit" type="button" aria-label="슬라이드 쇼 종료 (Esc)">✕</button>
+      <p class="slide-show-hint">→ Space 다음 · ← 이전 · Home End · B W 화면 가리기 · P 발표자 보기 · Esc 종료</p>
+      <aside id="slide-show-presenter" class="slide-show-presenter" aria-label="발표자 보기" hidden>
+        <p class="slide-show-presenter-row"><strong>경과 시간</strong> <span id="slide-show-timer">00:00</span></p>
+        <p class="slide-show-presenter-row"><strong>다음 슬라이드</strong> <span id="slide-show-next"></span></p>
+        <p class="slide-show-presenter-row"><strong>발표자 노트</strong></p>
+        <p id="slide-show-notes" class="slide-show-notes"></p>
+      </aside>
+    </div>
+
     <script src="./sheet-utils.js"></script>
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-store.js"></script>
@@ -896,6 +926,7 @@
     <script src="./ribbon-history.js"></script>
     <script src="./workspace-session.js"></script>
     <script src="./file-open.js"></script>
+    <script src="./slide-studio.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
