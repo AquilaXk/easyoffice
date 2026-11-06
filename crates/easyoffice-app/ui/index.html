@@ -23,6 +23,8 @@
               <div class="md-sep"></div>
               <div class="md-item" data-file-open="true" role="menuitem"><span class="md-label">열기…</span><span class="md-shortcut">Ctrl+O</span></div>
               <div class="md-item" data-studio-menu-cmd="studio-save"><span class="md-label">저장</span><span class="md-shortcut">Ctrl+S</span></div>
+              <div class="md-item" data-hwp-save-as="hwp" role="menuitem"><span class="md-label">한글 문서로 저장 (HWP)…</span></div>
+              <div class="md-item" data-hwp-save-as="hwpx" role="menuitem"><span class="md-label">한글 문서로 저장 (HWPX)…</span></div>
               <div class="md-item" data-studio-menu-cmd="layout-paper"><span class="md-label">편집 용지</span></div>
             </div>
           </div>
@@ -364,7 +366,7 @@
 
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
-            <p id="hwp-fallback-notice" class="manuscript-notice" role="status" hidden>한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.</p>
+            <p id="hwp-fallback-notice" class="manuscript-notice" role="status" hidden><span id="hwp-fallback-text">한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.</span> <button type="button" id="btn-hwp-use-embed" class="tb-btn" hidden>한글 편집기로 돌아가기</button></p>
             <div class="doc-studio-grid">
               <div id="ruler-corner" class="ruler-corner" aria-hidden="true">mm</div>
               <div id="h-ruler" class="page-ruler h-ruler" aria-label="문서 가로 눈금자">
@@ -940,6 +942,7 @@
     <script src="./file-open.js"></script>
     <script src="./slide-studio.js"></script>
     <script src="./hwp-host.js"></script>
+    <script src="./hwp-session.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

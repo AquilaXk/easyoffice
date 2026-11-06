@@ -43,6 +43,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/file-open.js",
   "../crates/easyoffice-app/ui/slide-studio.js",
   "../crates/easyoffice-app/ui/hwp-host.js",
+  "../crates/easyoffice-app/ui/hwp-session.js",
   "../crates/easyoffice-app/ui/app.js",
 ].map((relPath) => ({
   relPath,

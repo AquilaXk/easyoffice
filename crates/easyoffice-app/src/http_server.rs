@@ -32,6 +32,7 @@ const SLIDE_STUDIO_JS: &str = include_str!("../ui/slide-studio.js");
 const DOC_RUNS_JS: &str = include_str!("../ui/doc-runs.js");
 const DOC_RUNS_UI_JS: &str = include_str!("../ui/doc-runs-ui.js");
 const HWP_HOST_JS: &str = include_str!("../ui/hwp-host.js");
+const HWP_SESSION_JS: &str = include_str!("../ui/hwp-session.js");
 const APP_JS: &str = include_str!("../ui/app.js");
 const FAVICON_SVG: &str = include_str!("../ui/favicon.svg");
 
@@ -431,6 +432,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             HWP_HOST_JS.to_string(),
+        ),
+        ("GET", "/hwp-session.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            HWP_SESSION_JS.to_string(),
         ),
         ("GET", "/app.js") => (
             "200 OK",

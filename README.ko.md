@@ -9,7 +9,7 @@ EasyOffice (`v1.0.0`)는 Swift 6, SwiftUI, AppKit 기반으로 설계된 **100% 
 ## 핵심 특징
 
 - **5대 오피스 모듈 올인원 통합 워크스페이스 (`WorkspaceViewModel`)**:
-  - 한글 모듈은 rhwp 기반 한글 편집기를 Windows 데스크톱 셸과 `--serve`에 같은 출처 iframe(IPC 권한 없음)으로 임베드하며, 생성된 편집기 번들이 없는 빌드는 텍스트 전용 편집기로 대체됩니다. 데스크톱 셸을 빌드하기 전에 `node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs`를 실행하세요 (PD-083).
+  - 한글 모듈은 rhwp 기반 한글 편집기를 Windows 데스크톱 셸과 `--serve`에 같은 출처 iframe(IPC 권한 없음)으로 임베드하며, 생성된 편집기 번들이 없는 빌드는 텍스트 전용 편집기로 대체됩니다. 데스크톱 셸을 빌드하기 전에 `node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs`를 실행하세요 (PD-083). HWP·HWPX·HWT·HWTX 파일을 이 편집기에서 열 수 있고(최대 64 MiB, 편집기가 읽지 못하는 파일은 안내와 함께 텍스트만 열림) 내보낸 바이트를 다시 파싱해 검증한 뒤 HWP 또는 HWPX로 저장하며, 수정 상태를 추적하고 새로고침 후 복원할 수 있도록 IndexedDB에 자동 저장합니다 (PD-085).
 - 문서 작성, 한글(HWP 5.0/HWPX) 공문서 편집, 표 계산 및 피벗 분석, 슬라이드 발표자료 제작, PDF 주석 및 변환을 하나의 네이티브 macOS 앱에서 탭으로 전환하며 수행합니다.
   - 두 문서를 좌우로 나란히 비교·편집하는 **분할 보기(Split View, `splitSecondaryTabID`, 최소 너비 `420pt`)**, **접이식 7대 카테고리 컨텍스트 리본(`Cmd+Option+R`)**, **좌측 구조 내비게이터**, **우측 세부 속성 인스펙터**, **5대 인터랙티브 에디터 상세 패널(`DocumentEditorDetailPaneView`, `SheetEditorDetailPaneView`, `SlideEditorDetailPaneView`, `PDFStudioEditorDetailPaneView`)**을 지원합니다.
 - **20종 문서·템플릿 포맷 바이너리 라운드트립 코덱**:

@@ -13,7 +13,7 @@
   const CAPABILITIES = [
     "transferable-array-buffer", "document-state-v1", "document-change-events-v1", "notify-saved-v1",
   ];
-  const LONG_METHODS = new Set(["ready", "loadFile", "createBlankDocument", "exportHwp", "exportHwpx"]);
+  const LONG_METHODS = new Set(["ready", "loadFile", "createBlankDocument", "exportHwp", "exportHwpx", "verifyBytes"]);
   const SHORT_TIMEOUT_MS = 15000;
   const LONG_TIMEOUT_MS = 60000;
   const CONNECT_TIMEOUT_MS = 60000;
@@ -66,6 +66,8 @@
     let ui = null;
     const pending = new Map();
     const changeListeners = new Set();
+    const statusListeners = new Set();
+    let returnBound = false;
 
     function pane() {
       return document.getElementById("pane-hwp");
@@ -141,6 +143,14 @@
       parts.legacyBtn.hidden = status !== "error";
       const notice = document.getElementById("hwp-fallback-notice");
       if (notice) notice.hidden = !(usesLegacy() && isHwpActive());
+      const back = document.getElementById("btn-hwp-use-embed");
+      if (back) {
+        back.hidden = status !== "legacy";
+        if (!returnBound) {
+          returnBound = true;
+          back.addEventListener("click", () => void reconnect());
+        }
+      }
     }
 
     function setStatus(next, error) {
@@ -148,6 +158,28 @@
       lastError = error || "";
       render();
       if (typeof deps.onStateChange === "function") deps.onStateChange();
+      for (const listener of statusListeners) listener(next);
+    }
+
+    function onStatus(listener) {
+      statusListeners.add(listener);
+      return () => statusListeners.delete(listener);
+    }
+
+    // Resolves with the status once the editor is ready or has definitively failed / is unavailable.
+    function whenSettled(timeoutMs) {
+      const settled = () => status === "ready" || status === "error" || usesLegacy();
+      if (settled()) return Promise.resolve(status);
+      return new Promise((resolve) => {
+        let off = () => {};
+        const timer = timers.set(() => { off(); resolve(status); }, timeoutMs || limits.connect + limits.long);
+        off = onStatus(() => {
+          if (!settled()) return;
+          timers.clear(timer);
+          off();
+          resolve(status);
+        });
+      });
     }
 
     function showActivePane() {
@@ -338,6 +370,7 @@
       closeConnection("다시 연결합니다.");
       status = "idle";
       await start();
+      if (isHwpActive()) showActivePane();
     }
 
     function useLegacyEditor() {
@@ -346,6 +379,14 @@
       setStatus("legacy");
       if (isHwpActive()) showActivePane();
       notify(MSG_UNAVAILABLE);
+    }
+
+    async function exportBytes(format) {
+      const method = format === "hwpx" ? "exportHwpx" : "exportHwp";
+      const bytes = await call(method);
+      if (bytes instanceof Uint8Array) return bytes;
+      if (bytes instanceof env.ArrayBuffer) return new Uint8Array(bytes);
+      throw new Error("한글 편집기가 올바른 " + format.toUpperCase() + " 바이트를 돌려주지 않았습니다.");
     }
 
     async function exportHwp() {
@@ -435,7 +476,7 @@
 
     return {
       onModuleActivated, paneForModule, isEmbedActive, usesLegacy, call, reconnect, useLegacyEditor,
-      exportHwp, exportHwpBase64, saveDocument, isDirty, onChange, runSmoke,
+      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onStatus, whenSettled, runSmoke,
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,

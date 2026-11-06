@@ -166,6 +166,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     let baselineHash = null;
     let dirty = false;
+    let externalDirty = false; // unsaved changes owned by another editor (the embedded HWP editor)
     let pendingActivity = false;
     let guardRegistered = false;
     let restoring = false;
@@ -190,16 +191,16 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
 
     function handleBeforeUnload(ev) {
       flushAutosaveNow();
-      if (!dirty) return undefined;
+      if (!dirty && !externalDirty) return undefined;
       ev.preventDefault?.();
       ev.returnValue = "";
       return "";
     }
 
     function syncUnloadGuard() {
-      const want = dirty || pendingActivity;
+      const want = dirty || pendingActivity || externalDirty;
       const shell = document.getElementById("app");
-      if (shell) shell.dataset.dirty = dirty ? "true" : "false";
+      if (shell) shell.dataset.dirty = dirty || externalDirty ? "true" : "false";
       if (want === guardRegistered) return;
       guardRegistered = want;
       if (want) host.addEventListener?.("beforeunload", handleBeforeUnload);
@@ -295,6 +296,11 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       const hash = contentFingerprint(snap);
       baselineHash = typeof restoredRecord?.baseline === "string" ? restoredRecord.baseline : hash;
       dirty = hash !== baselineHash;
+      syncUnloadGuard();
+    }
+
+    function setExternalDirty(next) {
+      externalDirty = Boolean(next);
       syncUnloadGuard();
     }
 
@@ -569,6 +575,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       flushAutosaveNow,
       establishBaseline,
       markSaved,
+      setExternalDirty,
       restoreFromStorage,
       installActivityTracking,
       applyModuleContext,
@@ -577,7 +584,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       applyPlatformChrome,
       showBootstrapError,
       hideBootstrapError,
-      isDirty: () => dirty,
+      isDirty: () => dirty || externalDirty,
     };
   }
 

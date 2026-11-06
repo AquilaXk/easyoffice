@@ -51,6 +51,7 @@
   let workspaceSession = null;
   let docRunsUi = null;
   let hwpHost = null;
+  let hwpSession = null;
 
   function chainWorkspaceQueue(opFn) {
     const run = workspaceHistoryQueue.then(opFn, opFn);
@@ -220,7 +221,7 @@
     parseCellRefParts, isExcludedDocChromeElement, extractEditableDocumentText,
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
-    getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
+    getActiveModule: () => activeModule, getHwpHost: () => hwpHost, getHwpSession: () => hwpSession,
     getActiveSheetName: () => activeSheetName,
     getActiveSheetCellRef: () => activeSheetCellRef,
     getActiveSlideIndex: () => activeSlideIndex,
@@ -255,6 +256,7 @@
 
   const fileOpen = host.__EASYOFFICE_CREATE_FILE_OPEN__({
     document, invokeIpc, createEmptySlideStyleFields, getActiveModule: () => activeModule,
+    getHwpSession: () => hwpSession,
     enqueueOp: enqueueWorkspaceHistoryOp, runExclusive: chainWorkspaceQueue,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
@@ -266,6 +268,15 @@
   hwpHost = host.__EASYOFFICE_CREATE_HWP_HOST__({
     document, invokeIpc, getActiveModule: () => activeModule,
     onStateChange: () => workspaceSession.applyModuleContext(activeModule),
+  });
+
+  hwpSession = host.__EASYOFFICE_CREATE_HWP_SESSION__({
+    document, hwpHost, invokeIpc, getActiveModule: () => activeModule,
+    activateHwp: () => ribbonHistory.activatePane("HWP"),
+    deliverSavedFile: (base64, name, ext) => workspacePanels.deliverSavedFile(base64, name, ext),
+    resolveBaseName: () => workspacePanels.resolveSaveFileBase("HWP"),
+    onDirtyChange: (dirty) => workspaceSession.setExternalDirty(dirty),
+    defaultNotice: host.__EASYOFFICE_HWP_HOST_CONSTANTS__.MSG_UNAVAILABLE,
   });
 
   function saveWorkspaceDocument() {
@@ -638,7 +649,7 @@
             await sheetController.commitPendingFocusedSheetCell(true);
             const src = document.getElementById("conv-src-fmt").value;
             const dst = document.getElementById("conv-dst-fmt").value;
-            const fileSrc = fileOpen.getConverterSource();
+            const fileSrc = fileOpen.getConverterSource() || (await hwpSession.getConverterSource(src));
             const convTitle = fileSrc ? fileSrc.baseName : "통합_변환_문서";
             const content = fileSrc ? fileSrc.fields : workspacePanels.buildConversionContent(src);
             const res = await invokeIpc(
@@ -931,8 +942,10 @@
     workspaceSession.establishBaseline(restoredRecord);
     workspaceSession.installActivityTracking();
     fileOpen.bindUi();
+    hwpSession.bindUi();
     await fileOpen.captureBaselines();
     await loadWorkspaceBootstrap();
+    void hwpSession.restore().catch(() => {});
     if (host.__EASYOFFICE_SMOKE__) void hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP"));
   }
 

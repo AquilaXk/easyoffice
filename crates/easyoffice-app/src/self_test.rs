@@ -329,6 +329,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let doc_runs_asset = include_str!("../ui/doc-runs.js");
     let doc_runs_ui_asset = include_str!("../ui/doc-runs-ui.js");
     let hwp_host_asset = include_str!("../ui/hwp-host.js");
+    let hwp_session_asset = include_str!("../ui/hwp-session.js");
     let js_asset = include_str!("../ui/app.js");
     if !html_asset.contains("EasyOffice")
         || !css_asset.contains("#5C6BC0")
@@ -353,7 +354,9 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !doc_runs_ui_asset.contains("__EASYOFFICE_CREATE_DOC_RUNS_UI__")
         || !hwp_host_asset.contains("__EASYOFFICE_CREATE_HWP_HOST__")
         || !html_asset.contains("id=\"pane-hwp\"")
+        || !hwp_session_asset.contains("__EASYOFFICE_CREATE_HWP_SESSION__")
         || !html_asset.contains("./hwp-host.js")
+        || !html_asset.contains("./hwp-session.js")
         || !js_asset.contains("compositionstart")
     {
         return Err(EasyOfficeError::CorruptedContainer(

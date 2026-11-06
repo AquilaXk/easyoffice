@@ -75,6 +75,7 @@ function createFakeStudio({ answer = true, failMethods = new Set() } = {}) {
       ready: true,
       createBlankDocument: { pageCount: 1 },
       exportHwp: new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 1, 2, 3]),
+      exportHwpx: new Uint8Array([0x50, 0x4b, 3, 4]),
       getDocumentState: { dirty: true },
       notifySaved: null,
     };
@@ -323,4 +324,24 @@ test("webui: without the bundle the old editor stays usable with the explanatory
   userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
   await flushAsyncTurns(8);
   assert.equal(document.getElementById("hwp-fallback-notice").hidden, true);
+});
+test("onStatus and whenSettled report the connection outcome; exportBytes picks the export method", async () => {
+  const { hostApi, studio } = loadHost();
+  const seen = [];
+  hostApi.onStatus((s) => seen.push(s));
+  const settled = hostApi.whenSettled(5000);
+  await hostApi.onModuleActivated("HWP");
+  assert.equal(await settled, "ready");
+  assert.deepEqual(seen.slice(-1), ["ready"]);
+  assert.equal((await hostApi.exportBytes("hwp")).length, 7);
+  await hostApi.exportBytes("hwpx");
+  assert.deepEqual(studio.requests.map((r) => r.method).filter((m) => m.startsWith("export")), ["exportHwp", "exportHwpx"]);
+  assert.equal(await hostApi.whenSettled(5000), "ready", "already settled resolves immediately");
+});
+
+test("whenSettled resolves with the failure status when the editor cannot connect", async () => {
+  const { hostApi } = loadHost({ studioOptions: { answer: false }, timeouts: { connectTimeoutMs: 20 } });
+  const settled = hostApi.whenSettled(5000);
+  await hostApi.onModuleActivated("HWP");
+  assert.equal(await settled, "error");
 });
