@@ -100,6 +100,9 @@ impl UniversalFormatConverter {
         let slides = model.effective_slides();
 
         match format {
+            DocumentFormat::Pages => Err(EasyOfficeError::InvalidArgument(
+                "Pages(.pages)는 읽기 전용 형식이라 저장·변환 대상으로 쓸 수 없습니다.".to_string(),
+            )),
             DocumentFormat::Docx => OoxmlCodec::pack_docx(&OoxmlDocxPayload {
                 title,
                 paragraphs,
@@ -245,6 +248,17 @@ impl UniversalFormatConverter {
     ) -> Result<(DocumentFormat, UniversalDocumentModel), EasyOfficeError> {
         let format = FormatDetector::detect(bytes, format_hint)?;
         let model = match format {
+            DocumentFormat::Pages => {
+                let doc = Self::decode_rich(bytes, Some("pages"))?;
+                match doc.content {
+                    crate::DecodedContent::Document(rich) => rich.to_universal_model(),
+                    _ => {
+                        return Err(EasyOfficeError::CorruptedContainer(
+                            "Pages 문서 본문을 읽지 못했습니다.".to_string(),
+                        ))
+                    }
+                }
+            }
             DocumentFormat::Docx => {
                 let p = OoxmlCodec::unpack_docx(bytes)?;
                 Self::from_doc(p.title, p.paragraphs, p.tables, None)

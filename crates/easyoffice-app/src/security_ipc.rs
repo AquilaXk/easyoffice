@@ -235,7 +235,10 @@ impl EasyOfficeIpcRouter {
         }
         let fmt = FormatDetector::detect(bytes, file_name)?;
         let checked_entries = match fmt.container_family() {
-            ContainerFamily::ZipOoxml | ContainerFamily::ZipOdf | ContainerFamily::ZipHwpx => {
+            ContainerFamily::ZipOoxml
+            | ContainerFamily::ZipOdf
+            | ContainerFamily::ZipHwpx
+            | ContainerFamily::ZipIwork => {
                 let unpacked = ZipArchiveCodec::unpack(bytes, policy)?;
                 if unpacked.is_empty() {
                     return Err(EasyOfficeError::InvalidArgument(

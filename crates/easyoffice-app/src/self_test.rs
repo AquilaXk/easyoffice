@@ -26,6 +26,12 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
             "지원 포맷 수가 20종이 아닙니다.".to_string(),
         ));
     }
+    if !DocumentFormat::Pages.is_read_only() || DocumentFormat::ALL.contains(&DocumentFormat::Pages)
+    {
+        return Err(EasyOfficeError::CorruptedContainer(
+            "Pages는 읽기 전용 원본 형식이어야 합니다.".to_string(),
+        ));
+    }
     let zip_bytes = b"PK\x03\x04\x14\x00\x00\x00word/document.xml";
     let detected_docx = FormatDetector::detect(zip_bytes, Some("report.docx"))?;
     if detected_docx != DocumentFormat::Docx {
