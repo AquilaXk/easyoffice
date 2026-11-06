@@ -148,6 +148,59 @@ impl WorkbookEngine {
         ctx.current_coord = anchor;
         sheet.eval_raw_string_ctx(formula, &mut ctx, 0)
     }
+
+    /// Evaluates many targets (cell addresses or `=` formulas) in one shared memoized pass, so
+    /// formula cells referenced by several targets are computed once, and reports whether any
+    /// circular reference was encountered.
+    pub fn evaluate_targets(&self, targets: &[WorkbookEvalTarget<'_>]) -> WorkbookBatchEvaluation {
+        let primary_id = targets
+            .first()
+            .and_then(|t| self.sheet(t.sheet))
+            .map_or(0, SheetEngine::resolved_sheet_id);
+        let mut ctx = EvalContext::with_workbook(self, primary_id);
+        let mut values = Vec::with_capacity(targets.len());
+        for target in targets {
+            let Some(sheet) = self.sheet(target.sheet) else {
+                values.push(EvaluatedCellValue::Error(FormulaError::Ref));
+                continue;
+            };
+            ctx.steps = 0;
+            let expr = target.expr.trim();
+            let val = if crate::parser::strip_open_formula_prefix(expr).is_some() {
+                ctx.current_coord = target.anchor;
+                let v = sheet.eval_raw_string_ctx(expr, &mut ctx, 0);
+                ctx.current_coord = None;
+                v
+            } else if let Ok(coord) = PackedCellCoordinate::parse_a1(expr) {
+                sheet.pre_evaluate_dag_iterative(std::slice::from_ref(&coord), &mut ctx);
+                ctx.steps = 0;
+                sheet.eval_coord_ctx(coord, &mut ctx, 0)
+            } else {
+                EvaluatedCellValue::Error(FormulaError::Ref)
+            };
+            values.push(val);
+        }
+        WorkbookBatchEvaluation {
+            values,
+            circular: ctx.circular,
+        }
+    }
+}
+
+/// One `evaluate_targets` request: a cell address or `=` formula evaluated on `sheet`,
+/// with an optional anchor cell for `ROW()`/`COLUMN()` in formulas.
+#[derive(Debug, Clone, Copy)]
+pub struct WorkbookEvalTarget<'a> {
+    pub sheet: &'a str,
+    pub expr: &'a str,
+    pub anchor: Option<PackedCellCoordinate>,
+}
+
+/// Values for each `WorkbookEvalTarget` plus a circular-reference flag (cycles display `#NUM!`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkbookBatchEvaluation {
+    pub values: Vec<EvaluatedCellValue>,
+    pub circular: bool,
 }
 
 impl SheetEngine {

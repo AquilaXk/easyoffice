@@ -151,7 +151,7 @@ mod tests {
             r#"{"sheet":"Sheet1","expr":"=Sheet2!A1+50","cells":[]}"#,
         )
         .unwrap();
-        assert!(wb_res.contains("\"value\":\"150\""));
+        assert!(wb_res.contains("\"value\":\"#REF!\""));
 
         let wb_dyn_res = EasyOfficeIpcRouter::dispatch(
             "evaluate_workbook_formula",

@@ -257,7 +257,8 @@ test("offline AST parser and evaluator enforce lazy IF/IFERROR, strict A1 bounds
   assert.equal(strictCoordAndBudgetRes.targetValues[2], "#REF!");
   assert.equal(strictCoordAndBudgetRes.targetValues[3], "#REF!");
   assert.equal(strictCoordAndBudgetRes.targetValues[4], "777");
-  assert.equal(strictCoordAndBudgetRes.targetValues[5], "#REF!");
+  // Wide in-bounds ranges are valid references; aggregates stream populated cells only (#107).
+  assert.equal(strictCoordAndBudgetRes.targetValues[5], "0");
   assert.equal(strictCoordAndBudgetRes.targetValues[6], "#REF!");
 
   const syntaxAndRangeFnsRes = offlineRpc.evaluate_sheet(
@@ -895,4 +896,74 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
   await flushAsyncTurns(8);
   assert.equal(document.querySelector('#pane-sheet td[data-cell="D2"]').textContent, "777");
   assert.ok(evalLog.length >= 2);
+});
+
+test("issue #107: offline evaluator mirrors #NUM! circular flag, no demo seed, and sparse wide-range aggregates", async () => {
+  const { sandbox } = await createWorkspaceHarness();
+  const offlineRpc = makeStandaloneOfflineRpc(sandbox);
+
+  const cyc = offlineRpc.evaluate_sheet(
+    JSON.stringify({
+      sheet: "Sheet1",
+      targets: [{ cell: "A1" }, { cell: "C1" }],
+      cells: [
+        { cell: "A1", value: "=B1+1" },
+        { cell: "B1", value: "=A1+1" },
+        { cell: "C1", value: "=5" },
+      ],
+    })
+  );
+  assert.deepEqual(cyc.targetValues, ["#NUM!", "5"]);
+  assert.equal(cyc.circular, true);
+  assert.ok(!JSON.stringify(cyc).includes("#CYCLE!"));
+
+  const noCycle = offlineRpc.evaluate_sheet(
+    JSON.stringify({ sheet: "Sheet1", targets: [{ cell: "=1+1" }], cells: [] })
+  );
+  assert.equal(noCycle.circular, false);
+
+  for (const payload of [
+    { sheet: "Data", expr: "=Sheet2!A1", cells: [{ sheet: "Data", cell: "A1", value: 5 }] },
+    { sheet: "Data", sheets: ["Data"], expr: "=Sheet2!A1" },
+    { sheet: "Data", expr: "=Sheet1!A1+Sheet1!B1" },
+  ]) {
+    assert.equal(offlineRpc.evaluate_workbook_formula(JSON.stringify(payload)).value, "#REF!");
+  }
+
+  const wide = offlineRpc.evaluate_sheet(
+    JSON.stringify({
+      sheet: "Sheet1",
+      targets: [
+        { cell: "=SUM(A1:Z10000)" },
+        { cell: "=COUNT(A1:Z10000)" },
+        { cell: "=COUNTA(A1:Z10000)" },
+        { cell: "=MAX(A1:Z10000)" },
+        { cell: "=COUNTBLANK(A1:Z10000)" },
+      ],
+      cells: [
+        { cell: "A1", value: 10 },
+        { cell: "Z10000", value: 20 },
+        { cell: "M5000", value: "가나다" },
+        { cell: "C3", value: "=A1*3" },
+      ],
+    })
+  );
+  assert.deepEqual(wide.targetValues, ["60", "3", "4", "30", String(260000 - 4)]);
+});
+
+test("issue #107: circular reference shows #NUM! in the grid and a status-bar warning", async () => {
+  const { document, userClick } = await createWorkspaceHarness();
+  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  await flushAsyncTurns();
+
+  const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');
+  const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
+  b2.focus();
+  b2.textContent = "=F2";
+  b2.dispatchEvent({ type: "input", target: b2 });
+  b2.dispatchEvent({ type: "keydown", key: "Enter", target: b2 });
+  await flushAsyncTurns(10);
+
+  assert.equal(f2.textContent, "#NUM!");
+  assert.match(document.getElementById("status-command-feedback").textContent, /순환 참조/);
 });
