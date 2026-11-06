@@ -321,6 +321,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let sheet_clipboard_asset = include_str!("../ui/sheet-clipboard.js");
     let sheet_input_asset = include_str!("../ui/sheet-input.js");
     let sheet_ops_asset = include_str!("../ui/sheet-ops.js");
+    let sheet_format_asset = include_str!("../ui/sheet-format.js");
     let sheet_controller_asset = include_str!("../ui/sheet-controller.js");
     let ribbon_history_asset = include_str!("../ui/ribbon-history.js");
     let workspace_session_asset = include_str!("../ui/workspace-session.js");
@@ -343,6 +344,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !sheet_clipboard_asset.contains("__EASYOFFICE_CREATE_SHEET_CLIPBOARD__")
         || !sheet_input_asset.contains("__EASYOFFICE_CREATE_SHEET_INPUT__")
         || !sheet_ops_asset.contains("__EASYOFFICE_CREATE_SHEET_OPS__")
+        || !sheet_format_asset.contains("__EASYOFFICE_CREATE_SHEET_FORMAT__")
         || !sheet_controller_asset.contains("__EASYOFFICE_CREATE_SHEET_CONTROLLER__")
         || !ribbon_history_asset.contains("__EASYOFFICE_CREATE_RIBBON_HISTORY__")
         || !workspace_session_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_SESSION__")

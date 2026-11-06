@@ -23,6 +23,7 @@ const SHEET_GRID_JS: &str = include_str!("../ui/sheet-grid.js");
 const SHEET_CLIPBOARD_JS: &str = include_str!("../ui/sheet-clipboard.js");
 const SHEET_INPUT_JS: &str = include_str!("../ui/sheet-input.js");
 const SHEET_OPS_JS: &str = include_str!("../ui/sheet-ops.js");
+const SHEET_FORMAT_JS: &str = include_str!("../ui/sheet-format.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
 const WORKSPACE_SESSION_JS: &str = include_str!("../ui/workspace-session.js");
@@ -344,6 +345,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             SHEET_OPS_JS.to_string(),
+        ),
+        ("GET", "/sheet-format.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            SHEET_FORMAT_JS.to_string(),
         ),
         ("GET", "/sheet-controller.js") => (
             "200 OK",
