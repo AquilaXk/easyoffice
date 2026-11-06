@@ -450,7 +450,9 @@
       const combo = shortcutComboFromEvent(e);
       const binding = shortcutBindings.find((b) => b.keys === combo);
       if (!binding || binding.native || binding.external) return false;
+      if (binding.module && getActiveModule() !== binding.module) return false;
       if (binding.bareKey && isTextEntryTarget(document.activeElement)) return false;
+      if (binding.scope && !document.activeElement?.closest?.(binding.scope)) return false;
       const run = binding.ribbon ? () => actions.ribbon(binding.action) : actions[binding.action];
       if (typeof run !== "function") return false;
       e.preventDefault();

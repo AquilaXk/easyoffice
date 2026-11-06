@@ -110,6 +110,7 @@
       getActiveSlideIndex,
       setActiveSlideIndex,
       getPdfRotationDeg,
+      onSlideRendered,
     } = deps;
 
     let activeDocBlockEl = null;
@@ -285,7 +286,8 @@
       renderSlideDeck(idx);
     }
 
-    function renderSlideDeck(idx) {
+    function renderSlideDeck(requestedIdx) {
+      const idx = Math.max(0, Math.min(Number(requestedIdx) || 0, slideDeckState.length - 1));
       setActiveSlideIndex(idx);
       const slide = slideDeckState[idx] || slideDeckState[0];
       const titleZone = document.getElementById("slide-title-zone");
@@ -326,34 +328,10 @@
           "슬라이드 " + (idx + 1) + " / " + slideDeckState.length + " · 전환: " + transitionLabel;
       }
 
-      const thumbList = document.getElementById("slide-thumb-list");
-      if (thumbList) {
-        thumbList.innerHTML = "";
-        slideDeckState.forEach((s, i) => {
-          const btn = document.createElement("button");
-          btn.className = "slide-thumb" + (i === idx ? " active" : "");
-          btn.dataset.slideIdx = String(i);
-          btn.textContent = i + 1 + ". " + s.title.slice(0, 14);
-          btn.addEventListener("click", () => switchToSlideIndex(i));
-          thumbList.appendChild(btn);
-        });
-      }
+      onSlideRendered?.(idx);
       if (getActiveModule() === "SLIDE") {
         renderModuleOutline("SLIDE");
       }
-    }
-
-    function appendNewSlideDeckItem() {
-      syncActiveSlideDomStylesToDeck();
-      const nextNum = slideDeckState.length + 1;
-      slideDeckState.push({
-        title: "새 슬라이드 #" + nextNum + " (16:9 와이드)",
-        lower: "핵심 요약 및 다이어그램 영역",
-        notes: "발표자 노트를 입력하세요.",
-        transition: "fade",
-        ...createEmptySlideStyleFields(),
-      });
-      renderSlideDeck(slideDeckState.length - 1);
     }
 
     function capturePdfStudioState() {
@@ -944,7 +922,7 @@
       syncActiveSlideDomStylesToDeck,
       applySlideDomStyles,
       renderSlideDeck,
-      appendNewSlideDeckItem,
+      switchToSlideIndex,
       capturePdfStudioState,
       restorePdfStudioState,
       applyPdfStudioFormState,
