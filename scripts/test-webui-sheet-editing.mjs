@@ -166,7 +166,7 @@ test("range selection by Shift+arrows, Shift+click, drag and Ctrl+A with a visib
   b2.focus();
   key(b2, "ArrowRight", { shiftKey: true });
   key(b2, "ArrowDown", { shiftKey: true });
-  const inRange = () => [...document.querySelectorAll("#pane-sheet td.in-range")].map((t) => t.dataset.cell).sort();
+  const inRange = () => [...document.querySelectorAll("#pane-sheet td.in-range")].map((t) => t.dataset.cell).sort((a, b) => a.localeCompare(b));
   assert.deepEqual(inRange(), ["B2", "B3", "C2", "C3"]);
   assert.equal(activeRef(document), "B2", "the anchor stays the active cell");
 

@@ -525,7 +525,6 @@ class MiniElement extends MiniNode {
       isComposing: Boolean(ev.isComposing),
       dataTransfer: ev.dataTransfer,
       clipboardData: ev.clipboardData,
-      altKey: Boolean(ev.altKey),
       button: ev.button ?? 0,
       inputType: ev.inputType || "",
       data: ev.data ?? null,
