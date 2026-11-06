@@ -9,6 +9,9 @@
 
   const MAX_FILE_BYTES = 10 * 1024 * 1024; // base64 inflates 4/3; the HTTP IPC body limit is 16 MiB
   const MAX_FILE_LABEL = "10 MiB";
+  const MAX_HWP_BYTES = 64 * 1024 * 1024; // HWP bytes go straight to the editor frame, not through the IPC body
+  const MAX_HWP_LABEL = "64 MiB";
+  const HWP_EXTENSIONS = new Set(["hwp", "hwpx", "hwt", "hwtx"]);
   const GRID_LIMITS = { maxRows: 1048576, maxCols: 16384 }; // the sheet editor addresses the full XLSX grid (A..XFD)
   const MODULE_LABELS = { DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF 스튜디오" };
   const SUPPORTED_EXTENSIONS = [
@@ -37,11 +40,12 @@
     return btoaFn(bin);
   }
 
-  function validateFile(name, size) {
+  function validateFile(name, size, hwpRoute) {
     if (!name) return "파일 이름을 확인할 수 없습니다";
     if (size === 0) return "빈 파일은 열 수 없습니다";
-    if (size > MAX_FILE_BYTES) {
-      return "파일이 너무 큽니다 (" + (size / 1048576).toFixed(1) + " MiB). 최대 " + MAX_FILE_LABEL + "까지 열 수 있습니다";
+    const hwp = hwpRoute === true && HWP_EXTENSIONS.has(extensionOf(name));
+    if (size > (hwp ? MAX_HWP_BYTES : MAX_FILE_BYTES)) {
+      return "파일이 너무 큽니다 (" + (size / 1048576).toFixed(1) + " MiB). 최대 " + (hwp ? MAX_HWP_LABEL : MAX_FILE_LABEL) + "까지 열 수 있습니다";
     }
     return "";
   }
@@ -134,6 +138,7 @@
       restoreWorkspaceSnapshot, commitPendingSheetCell, computeEvaluatedSheetStore,
       createEmptySlideStyleFields, getActiveModule,
     } = deps;
+    const hasHwpRoute = () => Boolean(deps.getHwpSession?.());
     const confirmFn = deps.confirm || ((msg) => (typeof host.confirm === "function" ? host.confirm(msg) : true));
     const btoaFn = (bin) => host.btoa(bin);
     const baselines = {};
@@ -238,9 +243,16 @@
     }
 
     // The one entry point: file picker, drag and drop, and the desktop shell all call this.
-    async function openDocumentFromBytes(fileName, bytes) {
+    // HWP family files go to the embedded editor (hwp-session.js) unless `textOnly` forces the decode path.
+    async function openDocumentFromBytes(fileName, bytes, options) {
       const name = baseName(fileName);
       const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+      const hwpSession = options?.textOnly ? null : deps.getHwpSession?.();
+      if (hwpSession && HWP_EXTENSIONS.has(extensionOf(name))) {
+        return hwpSession.openFromBytes(name, data, {
+          textFallback: () => openDocumentFromBytes(name, data, { textOnly: true }),
+        });
+      }
       const invalid = validateFile(name, data.length);
       if (invalid) return fail(invalid + (name ? " (" + name + ")" : ""));
       const convBox = document.getElementById("conv-result-box");
@@ -285,7 +297,7 @@
     }
 
     async function readFileBytes(file) {
-      const invalid = validateFile(baseName(file?.name), Number(file?.size ?? 0));
+      const invalid = validateFile(baseName(file?.name), Number(file?.size ?? 0), hasHwpRoute());
       if (invalid) return { error: invalid };
       try {
         return { bytes: new Uint8Array(await file.arrayBuffer()) };
@@ -420,6 +432,6 @@
 
   host.__EASYOFFICE_CREATE_FILE_OPEN__ = createFileOpen;
   host.__EASYOFFICE_FILE_OPEN_UTILS__ = {
-    MAX_FILE_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore, bytesToBase64,
+    MAX_FILE_BYTES, MAX_HWP_BYTES, SUPPORTED_EXTENSIONS, GRID_LIMITS, buildEditorNodes, buildSheetStore, bytesToBase64,
   };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

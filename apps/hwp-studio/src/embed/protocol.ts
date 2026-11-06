@@ -18,6 +18,8 @@ export const EMBED_CAPABILITIES = [
   'document-change-events-v1',
   // EasyOffice extension: createBlankDocument RPC.
   'blank-document-v1',
+  // EasyOffice extension: verifyBytes RPC.
+  'verify-bytes-v1',
 ] as const;
 
 export interface EmbedConnectAttempt {
