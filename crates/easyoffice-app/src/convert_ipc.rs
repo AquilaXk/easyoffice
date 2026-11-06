@@ -52,6 +52,14 @@ impl EasyOfficeIpcRouter {
         let mut structured: Option<StructuredContent> = None;
         let (src_owned, dst_owned, title_owned, body_owned) = if trimmed.starts_with('{') {
             let entries = Self::parse_rpc_json_object(trimmed)?;
+            if let Some(b64) = Self::optional_json_str(&entries, "sourceBase64")? {
+                return Self::handle_source_file_request(&entries, b64);
+            }
+            if Self::optional_json_str(&entries, "action")? == Some("decode") {
+                return Err(EasyOfficeError::InvalidArgument(
+                    "decode 요청에는 sourceBase64가 필요합니다.".to_string(),
+                ));
+            }
             structured = parse_structured_content(&entries)?;
             let src = match Self::optional_json_str(&entries, "sourceFormat")? {
                 Some(s) => s,
@@ -157,7 +165,7 @@ impl EasyOfficeIpcRouter {
                 )?,
             )
         };
-        Self::conversion_response(src_fmt, dst_fmt, &src_bytes, &dst_bytes)
+        Self::conversion_response(src_fmt, dst_fmt, &src_bytes, &dst_bytes, &[])
     }
 
     /// Legacy text-markup `body` (`[[TABLE_ROW]]`, `[[SHEET_A1]]`, `[[SLIDE]]`, `[[AGENCY]]` lines).
@@ -249,12 +257,18 @@ impl EasyOfficeIpcRouter {
         }
     }
 
-    fn conversion_response(
+    pub(crate) fn conversion_response(
         src_fmt: DocumentFormat,
         dst_fmt: DocumentFormat,
         src_bytes: &[u8],
         dst_bytes: &[u8],
+        warnings: &[String],
     ) -> Result<String, EasyOfficeError> {
+        let warnings_json = warnings
+            .iter()
+            .map(|w| format!("\"{}\"", Self::escape_json_str(w)))
+            .collect::<Vec<_>>()
+            .join(",");
         let (detected_dst, decoded) =
             UniversalFormatConverter::decode(dst_bytes, Some(dst_fmt.extension()))?;
         let b64 = Self::encode_base64(dst_bytes);
@@ -282,6 +296,7 @@ impl EasyOfficeIpcRouter {
                 "\"title\":\"{}\",",
                 "\"converted_base64\":\"{}\",",
                 "\"convertedBase64\":\"{}\",",
+                "\"warnings\":[{}],",
                 "\"status\":\"OK\"",
                 "}}"
             ),
@@ -299,7 +314,8 @@ impl EasyOfficeIpcRouter {
             decoded.tables.len(),
             Self::escape_json_str(&decoded.title),
             b64,
-            b64
+            b64,
+            warnings_json
         ))
     }
 }

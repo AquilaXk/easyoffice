@@ -85,6 +85,28 @@
       pushRawUndoSnapshot(preSnapshot);
     }
 
+    // Document tab titles (opened file names) are part of the undoable workspace state.
+    let appliedTabTitles = null;
+    function readTabTitles() {
+      const out = {};
+      document.querySelectorAll(".tab-strip .tab-pill").forEach((tab) => {
+        if (tab.dataset.module) out[tab.dataset.module] = tab.textContent || "";
+      });
+      return out;
+    }
+    // The tab strip is rebuilt after the backend bootstrap; titles restored earlier are re-applied.
+    function reapplyTabTitles() {
+      applyTabTitles(appliedTabTitles);
+    }
+    function applyTabTitles(titles) {
+      if (!titles || typeof titles !== "object") return;
+      appliedTabTitles = { ...titles };
+      document.querySelectorAll(".tab-strip .tab-pill").forEach((tab) => {
+        const title = titles[tab.dataset.module];
+        if (typeof title === "string" && title) tab.textContent = title;
+      });
+    }
+
     function captureWorkspaceSnapshot(isRibbon = false) {
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
@@ -110,6 +132,7 @@
         sheetRowCounts: JSON.parse(JSON.stringify(sheetRowCounts)),
         slides: JSON.parse(JSON.stringify(slideDeckState)),
         ribbonState: JSON.parse(JSON.stringify(localRibbonState)),
+        tabTitles: readTabTitles(),
       };
     }
 
@@ -339,6 +362,7 @@
         }
       }
       localRibbonState.darkThemeEnabled = document.documentElement.dataset.theme === "dark";
+      applyTabTitles(snap.tabTitles);
 
       const targetMod = snap.activeModule || getActiveModule();
       if (targetMod === "DOC" || targetMod === "HWP") {
@@ -936,6 +960,7 @@
       pushUndoSnapshot,
       pushRibbonUndoSnapshot: pushUndoSnapshot,
       restoreWorkspaceSnapshot,
+      reapplyTabTitles,
       performWorkspaceUndo,
       performWorkspaceRedo,
       applyModuleAccent,

@@ -1130,3 +1130,37 @@
   - 지원 확장자 파일 연결 동시 등록: 셸이 아직 파일을 열지 못해 더블클릭 시 빈 작업 공간이 열리는 오해를 만들어 #111로 미룸.
 - **Verified by** `node --test scripts/test-webui-desktop-bridge.mjs`(가짜 `__TAURI_INTERNALS__`로 `ipc_dispatch` 단일 경로·문자열 페이로드·`fetch` 미사용, 셸 거부와 HTTP 400의 동일 표시, 네이티브 저장 명령 사용·경로 미전송·Blob 미사용, 저장 취소·실패 표시, 변환기 저장, 셸 부재 시 HTTP·Blob 유지), 기존 WebUI 스위트 7종, `crates/easyoffice-desktop` 단위 테스트(파일 이름 정리·Base64·원자적 쓰기·직렬화 형태·탐색 출처·스모크 상태 전이), Windows CI의 셸 Clippy·NSIS 빌드·`--smoke`, `node scripts/generate-desktop-icons.mjs --check`, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 파일 열기(#111)가 구현되어 파일 연결을 등록할 때, 코드 서명 인증서를 도입할 때, 또는 macOS·Linux에도 같은 셸을 배포하기로 할 때.
+
+## 50. WebUI 파일 열기·가져오기와 실제 원본 파일 기반 변환 (PD-075, #111)
+
+- **Status** Implemented
+- **Context** WebUI에는 파일 입력도 `FileReader`도 없어 사용자가 자신의 문서를 열 수 없었고, 통합 포맷 변환기는 편집기 텍스트(`body`)만으로 출력을 만들어 "DOCX → HWPX"가 실제 DOCX를 읽지 않았습니다(#111). 기존 디코더(`UniversalFormatConverter::decode`)는 문단과 표를 따로 평탄화하므로 서식·표 위치·모든 시트를 편집기 모델로 되돌릴 수 없었습니다.
+- **Decision (`PD-075`)**
+  1. **IPC 설계 — 명령 추가 없음 (`crates/easyoffice-app/src/{convert_open.rs,convert_ipc.rs}`)**: IPC 명령 수는 15종 그대로이며 `convert_document_format` 페이로드를 확장합니다. `sourceBase64`(원본 바이트)가 있으면 편집기 텍스트를 쓰지 않습니다. `"action":"decode"`는 구조화 편집기 모델(`blocks`/`sheets`/`slides`, #104 저장 페이로드와 같은 모양)과 `format`·`module`·`kind`·`itemCount`·`warnings`를 돌려주고, `action` 생략 또는 `"convert"`는 같은 디코딩 결과를 `targetFormat`으로 인코딩합니다(응답의 `sourceBytes`는 실제 원본 크기, `warnings` 추가). 새 명령 대신 확장을 택한 이유는 15종 계약(해시·문서·자가 진단)을 유지하고, 변환과 열기가 같은 디코딩·보안 경로를 공유하게 하기 위해서입니다. `decode` 요청의 `maxRows`/`maxCols`는 편집기 격자(WebUI는 1000행 × 8열) 밖의 셀을 응답에서 제외하고 개수를 `warnings`로 알립니다.
+  2. **형식 판별과 디코딩 (`crates/easyoffice-formats/src/{rich_readers.rs,rich_read_*.rs,rich_xml.rs}`)**: `UniversalFormatConverter::decode_rich`는 ZIP·OLE2·PDF·RTF는 매직 바이트로, 텍스트 형식(CSV/TSV/MD/TXT)만 확장자로 결정합니다(예: `.docx`로 이름 붙은 XLSX는 XLSX로 열림, 바이너리 확장자의 일반 텍스트는 서명 오류로 거부). 모든 ZIP 경로는 `ZipArchiveCodec::unpack`(항목 수·크기·압축 비율 상한, 경로 순회 거부)과 `validate_zip_xml_entries`/`XmlSanitizer::validate_safe_xml`(DOCTYPE·외부 엔티티·XXE 거부)을 읽기 전에 거치며, 새 XML 토크나이저는 엔티티를 해석하지 않고 이벤트 수에 상한(600만)을 둡니다.
+  3. **형식별 보존 범위**: 아래 표와 같습니다. 모델이 표현하지 못하는 항목은 응답 `warnings`로 사용자에게 표시합니다.
+     - **DOCX**: 런 굵게·기울임·밑줄·취소선(`w:b`/`w:i`/`w:u`/`w:strike`, `val=0/none`은 해제), 정렬(`w:jc`), 제목 수준(`styles.xml` 스타일 이름 `heading N`/`제목 N`/`Title`, `w:outlineLvl`), 목록(`ListBullet`/`ListNumber` 스타일, `w:numPr` → `numbering.xml`의 첫 수준 `numFmt`로 글머리/번호), 본문 중간 표(셀 안 여러 문단은 줄바꿈으로 결합, 중첩 표는 바깥 셀로 평탄화), `w:br`/`w:tab`. 삭제된 변경 내용(`w:del`)·변경 이력 속성·`mc:Fallback`은 건너뜁니다. 제외: 그림·도형·OLE, 머리말·꼬리말, 글꼴·크기·색, 각주, 셀 병합.
+     - **HWPX/HWTX**: `hh:charPr`(굵게·기울임·밑줄·취소선), `hh:paraPr`(정렬, `hh:heading` 글머리/번호, 쓰기 도구의 목록 들여쓰기 2000), 스타일 이름 `개요 N`·`Outline N` 또는 `OUTLINE` 수준의 제목, `hp:tbl` 표 위치, `hp:tab`/`hp:lineBreak`. 제목 스타일의 기본 굵기는 사용자 서식으로 취급하지 않습니다. 제외: 그림·도형·수식·머리말/꼬리말, 글꼴·크기·색, 번호 매기기 정의, 번호 목록(HWPX 쓰기는 글머리만 표현), 양쪽 정렬과 기본값 구분.
+     - **ODT**: 자동 스타일의 `fo:font-weight`/`fo:font-style`/밑줄/취소선, `fo:text-align`, `text:h text:outline-level`, `text:list`와 쓰기 도구의 목록 여백, 표 위치. 제외: 그림·도형, 이름 있는 스타일(`styles.xml`) 상속, 각주.
+     - **Markdown/TXT**: Markdown은 ATX 제목, 글머리·번호 목록, 파이프 표, 인용(문단), 코드 블록(일반 문단), `**`·`*`/`_`·`~~`·`<u>`, 링크·그림은 표시 텍스트, 역슬래시 이스케이프를 읽습니다(HTML·각주·중첩 목록 수준은 제외). TXT는 비어 있지 않은 줄마다 한 문단입니다. 첫 `#` 제목은 본문 블록으로 유지하며, Markdown 쓰기는 문서가 `#` 제목으로 시작하면 제목 줄을 중복해서 쓰지 않습니다.
+     - **DOC·HWP·HWT·RTF·PDF**: 서식과 표 위치 없이 본문 문단 뒤에 표를 순서대로 붙입니다(`UniversalFormatConverter::decode` 경로). PDF는 텍스트만 추출하며 PDF 모듈 카드에 적재합니다.
+     - **XLSX/XLS/ODS**: 모든 시트(이름·순서)와 수식(`=...`)·값. 수식 결과는 엔진이 다시 계산하며 캐시 값·셀 서식·열 너비·차트·그림은 가져오지 않습니다(날짜는 일련번호). **CSV/TSV**: UTF-8(BOM은 제거)만 지원하며 단일 `Sheet1`입니다(CP949 등 비UTF-8은 거부).
+     - **PPTX/PPSX/PPT/ODP**: 슬라이드 제목·글머리·발표자 노트. 제외: 도형·이미지·서식·전환.
+  4. **WebUI 열기 (`crates/easyoffice-app/ui/file-open.js`, 새 모듈)**: 파일 메뉴 "열기…"와 `Ctrl+O`(`ribbon-catalog.js`의 단일 단축키 표에 `file-open`으로 등록되어 라벨과 핸들러가 함께 결정됨, 이전 테스트의 "브라우저 예약 키" 목록에서 `Ctrl+O` 제외), 작업 영역 끌어 놓기(변환기 모듈이 활성이면 변환 원본으로 선택)를 지원하며 숨김 `<input type="file">`의 `accept`는 지원 확장자와 일치합니다. 모든 경로는 단일 진입점 `openDocumentFromBytes(fileName, Uint8Array)`(`window.__EASYOFFICE_WORKSPACE_API__`)로 모이며 데스크톱 셸도 같은 함수를 호출합니다. 디코딩된 모델은 `docTabs`(`blocks` → `h1`~`h6`/`ul`·`ol`/`p`+`strong`·`em`·`u`·`s`/표 노드), `sheets`(값/수식 + `evaluate_sheet`로 수식 결과 계산, 기본 `Sheet1`/`Sheet2` 탭 제거), `slides`(`lower` = 글머리 줄바꿈 결합), PDF 카드(제목 `h3` + 본문 문단, 기존 워터마크·스탬프·양식 값 초기화)로 적재됩니다.
+  5. **되돌리기·확인·저장 연계**: 열기는 `captureWorkspaceSnapshot`으로 이전 상태를 실행 취소 스택에 넣은 뒤 `restoreWorkspaceSnapshot`으로 적용하는 하나의 작업이며, 탭 제목(파일 이름, 스냅샷의 `tabTitles`)도 같은 상태에 포함되어 실행 취소/다시 실행과 자동 저장 복원(PD-072)이 그대로 동작하고, 저장 파일명(PD-073)은 이 탭 제목을 따릅니다. 대상 모듈에 저장하지 않은 편집이 있으면(모듈별 기준선 `moduleFingerprint`, 초기·열기·저장 시 갱신) `confirm`으로 확인하고 취소하면 아무것도 바꾸지 않습니다. 디코딩 실패(손상·미지원 확장자·보안 차단)와 크기 초과는 `파일 열기 실패: …`를 표시하고 문서 상태·변환기 결과 상자를 바꾸지 않습니다.
+  6. **크기 한도와 HTTP 본문 (#111 체크리스트)**: 원본은 Base64로 4/3 팽창하므로 WebUI 한도를 파일당 10 MiB(Base64 약 13.4 MiB < `MAX_IPC_HTTP_BODY_BYTES` 16 MiB), 서버 디코딩 한도를 12 MiB로 두었습니다. 한도를 넘으면 요청 전에 `파일이 너무 큽니다 (…). 최대 10 MiB까지 열 수 있습니다`를 표시합니다. 분할 전송이나 본문 한도 상향은 하지 않습니다. 시트 편집 격자(1000행 × 8열) 밖의 셀은 가져오지 않고 개수를 알립니다.
+  7. **변환기 원본 파일 (`index.html`, `app.js`)**: 변환기 패널의 "원본 파일"을 고르면 `sourceBase64`/`fileName`/`title`(파일 이름에서 확장자 제거)을 보내 파일 바이트를 변환하고 다운로드 이름도 그에 따릅니다. 선택하지 않으면 기존처럼 편집기 구조화 내용을 변환합니다.
+  8. 새 UI 모듈 `file-open.js`를 `--serve` 정적 자산, 자가 진단 자산 무결성 검사, 저장소 필수 파일 목록, 하니스 스크립트 목록에 추가하고, 새 테스트 `scripts/test-webui-file-open.mjs`를 CI의 두 `node --test` 줄에 추가했습니다. 오프라인 테스트 백엔드(`offline-rpc.js`)는 `sourceBase64`를 받아 텍스트 형식은 실제로 디코딩하고 바이너리는 `EOFIXTURE:`+JSON 모델 또는 손상 오류로 응답합니다.
+- **Why** 사용자의 실제 파일을 열어 편집·저장·변환할 수 있어야 하고, 열기·변환이 저장 경로와 같은 구조화 모델·보안 가드를 공유해야 라운드트립이 보장되며, 새 IPC 명령 없이 기존 계약을 유지하기 위함입니다.
+- **Trade-offs**
+  1. 형식별 손실(위 3항): 글꼴·크기·색·그림·도형·머리말·각주·셀 서식은 열고 저장하면 사라집니다. DOC·HWP 5.0·RTF·PDF는 서식과 표 위치를 잃습니다.
+  2. 편집기 시트는 A~H 열·1000행으로 제한됩니다(초과 셀은 알리고 제외). CSV는 UTF-8만 지원합니다.
+  3. HWPX의 번호 목록은 글머리로, 양쪽 정렬은 기본값으로 다시 읽힙니다. 문서 제목(`dc:title`)은 편집기에 표시하지 않고 저장 시 탭 제목(파일 이름)으로 대체됩니다.
+  4. 한 번에 한 파일만 열며(여러 개를 끌어 놓으면 첫 번째만), 열기 직후의 상태도 자동 저장·이탈 경고 대상(수정됨)입니다.
+- **Alternatives rejected**
+  - 새 IPC 명령(`open_document`) 추가: 명령 수 15종 계약(해시·README·아키텍처·자가 진단)을 모두 바꾸어야 하고 변환과 열기의 디코딩 경로가 갈라져 기각.
+  - 기존 `decode`(평탄화 모델)로 편집기에 적재: 서식·표 위치·다중 시트가 사라져 열기→편집→저장 라운드트립이 불가능해 기각.
+  - 브라우저에서 파일을 직접 파싱: JS ZIP/XML 파서와 별도 보안 가드가 필요하고 변환과 로직이 중복되어 기각.
+  - 분할 전송: 10 MiB 한도에서 단일 요청으로 충분하고 서버 상태·재조립 복잡도가 늘어 기각.
+- **Verified by** `cargo test -p easyoffice-formats --test rich_decode_roundtrip`(DOCX·HWPX·ODT·Markdown·TXT·XLSX 다중 시트 수식·BOM CSV·PPTX 디코드→인코드→디코드 동치, 레거시·PDF 평문 적재, 매직 바이트 우선, Word 스타일 제목·번호 목록, DOCX/XLSX/PPTX/HWPX/ODT XXE·ZIP 폭탄·경로 순회·손상 입력 거부), `cargo test -p easyoffice-app convert_open`(decode 응답·모듈 라우팅·격자 절단·원본 바이트 변환·보안 거부), `crates/easyoffice-formats/src/{rich_xml.rs,rich_read_text.rs}` 단위 테스트, `node --test scripts/test-webui-file-open.mjs`(`Ctrl+O`·메뉴·accept, 입력·끌어 놓기, 모듈 라우팅, 수정 확인, 크기·손상 오류, 탭 제목, 실행 취소/다시 실행, 자동 저장 복원, 열기→저장 라운드트립, 변환기 원본), 실서버 `--serve 8795` + 헤드리스 Chrome에서 DOCX·XLSX 열기, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
+- **Revisit when** 글꼴·그림·머리말 가져오기, 시트 격자 확장, 비UTF-8 CSV(CP949) 지원, 다중 문서 탭, 데스크톱 셸의 파일 연결 열기(PD-074)가 추가될 때.
