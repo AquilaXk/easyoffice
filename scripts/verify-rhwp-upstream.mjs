@@ -7,7 +7,8 @@
  *  - .gitmodules lists anything but the pinned URL / path / shallow entry,
  *  - the recorded gitlink (git ls-files -s) is missing, not a gitlink, or not the pinned commit,
  *  - the submodule work tree is checked out and its remote, HEAD, version or toolchain differ,
- *    or it contains any local modification (tracked or untracked).
+ *    or it contains any local modification (tracked or untracked),
+ *  - the vendored WASM package (vendor/rhwp-core, PD-081) is missing, tampered with or unlisted.
  * With no checkout (the CI default) only the superproject records are verified.
  * Uses Node built-in modules only.
  */
@@ -16,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { checkVendorCore } from "./verify-rhwp-core.mjs";
 
 export const CONFIG_REL = "config/rhwp-upstream.json";
 export const SUBMODULE_PATH = "third_party/rhwp";
@@ -75,6 +77,7 @@ export function checkConfig(config) {
   if (!SHA_RE.test(String(config.commit))) errors.push(`${CONFIG_REL}: commit must be a full 40-hex SHA`);
   if (!SEMVER_RE.test(String(config.version))) errors.push(`${CONFIG_REL}: version must be x.y.z`);
   if (!SEMVER_RE.test(String(config.rustToolchain))) errors.push(`${CONFIG_REL}: rustToolchain must be x.y.z`);
+  if (!SEMVER_RE.test(String(config.wasmPackVersion))) errors.push(`${CONFIG_REL}: wasmPackVersion must be x.y.z`);
   const sparse = config.sparse;
   if (!Array.isArray(sparse) || sparse.length === 0 || !sparse.every((p) => typeof p === "string" && p.startsWith("/"))) {
     errors.push(`${CONFIG_REL}: sparse must be a non-empty list of root-anchored patterns`);
@@ -199,6 +202,7 @@ export function verifyUpstream(root) {
     errors.push(`git ls-files failed: ${String(err.stderr || err.message).trim()}`);
   }
   errors.push(...checkWorktree(root, config));
+  errors.push(...checkVendorCore(root, config));
   return errors;
 }
 

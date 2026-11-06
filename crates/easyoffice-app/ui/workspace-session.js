@@ -45,6 +45,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     return (STUDIO_COMMAND_MODULES[cmd] || DOC_MODULES).includes(mod);
   }
 
+  // Default string order (UTF-16 code units) as an explicit comparator; keeps fingerprints stable.
+  function compareCodeUnits(a, b) {
+    if (a < b) return -1;
+    return a > b ? 1 : 0;
+  }
+
   function hashFingerprint(text) {
     let h = 0x811c9dc5;
     for (let i = 0; i < text.length; i += 1) {
@@ -63,7 +69,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
     if (value && typeof value === "object") {
       const out = {};
-      for (const k of Object.keys(value).sort()) {
+      for (const k of Object.keys(value).sort(compareCodeUnits)) {
         if (key === "data" && (k === "docNum" || k === "docAvg" || k === "docCount")) continue;
         const c = canonicalizeContent(value[k], k);
         if (c !== undefined) out[k] = c;

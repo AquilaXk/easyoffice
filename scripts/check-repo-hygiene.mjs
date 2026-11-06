@@ -11,7 +11,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { verifyUpstream } from "./verify-rhwp-upstream.mjs";
+import { readConfig, resolveGitExecutable, verifyUpstream } from "./verify-rhwp-upstream.mjs";
+import { verifyOverrides } from "./hwp-studio-overrides.mjs";
+import { checkFonts } from "./verify-fonts.mjs";
+import { findBareSorts, isSortRuleScoped } from "./sort-comparator-rule.mjs";
 
 const ROOT = process.cwd();
 
@@ -91,6 +94,25 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "docs/rhwp-integration-design.md",
   "scripts/test-webui-doc-runs.mjs",
   "scripts/test-webui-sheet-editing.mjs",
+  "vendor/rhwp-core/PROVENANCE.json",
+  "vendor/rhwp-core/rhwp_bg.wasm",
+  "scripts/verify-rhwp-core.mjs",
+  "scripts/vendor-rhwp-core.mjs",
+  "config/rhwp-studio-overrides.json",
+  "apps/hwp-studio/package.json",
+  "apps/hwp-studio/package-lock.json",
+  "apps/hwp-studio/vite.config.ts",
+  "apps/hwp-studio/src/main.ts",
+  "assets/fonts/fonts.json",
+  "assets/fonts/FONTS.md",
+  "scripts/hwp-studio-overrides.mjs",
+  "scripts/verify-fonts.mjs",
+  "scripts/build-hwp-studio.mjs",
+  "scripts/check-hwp-studio-bundle.mjs",
+  "scripts/hwp-studio-harness.mjs",
+  "scripts/test-hwp-studio.mjs",
+  "scripts/sort-comparator-rule.mjs",
+  "scripts/test-sort-comparator-rule.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)
@@ -153,10 +175,14 @@ const IGNORED_DIRS = new Set([
 
 const IGNORED_ROOT_FILES = new Set(FORBIDDEN_GIT_PATHS);
 
-// Root-relative paths excluded from the disk walk (PD-076): the read-only rhwp upstream submodule
-// is not EasyOffice-authored; its integrity is pinned by scripts/verify-rhwp-upstream.mjs instead.
-// Nothing else is excluded, and forbidden files are still rejected anywhere in EasyOffice itself.
-const IGNORED_ROOT_PATHS = new Set(["third_party/rhwp"]);
+// Root-relative paths excluded from the content and JS syntax scans (PD-076, PD-081). None of them is
+// hand-written EasyOffice source, and each is pinned another way instead:
+//  - third_party/rhwp: read-only upstream submodule (scripts/verify-rhwp-upstream.mjs),
+//  - vendor/rhwp-core: prebuilt WASM package, size and SHA-256 per file (scripts/verify-rhwp-core.mjs),
+//  - crates/easyoffice-app/ui/hwp-studio: generated editor bundle, never tracked (checked below) and
+//    statically checked after every build (scripts/check-hwp-studio-bundle.mjs).
+// Forbidden local-only files are still rejected anywhere by the tracked-file check.
+const IGNORED_ROOT_PATHS = new Set(["third_party/rhwp", "vendor/rhwp-core", "crates/easyoffice-app/ui/hwp-studio"]);
 
 const TEXT_EXTENSIONS = new Set([
   ".md",
@@ -173,7 +199,44 @@ const TEXT_EXTENSIONS = new Set([
   ".sh",
   ".txt",
   ".plist",
+  ".ts",
 ]);
+
+/**
+ * Candidate files are what Git would track: tracked files plus untracked files that are not ignored.
+ * Ignored build output (target*, generated bundles, node_modules, Tauri gen/permissions) is therefore
+ * never scanned, while a new file is checked before it is added. Returns null without a work tree.
+ */
+function listGitCandidateFiles() {
+  try {
+    const raw = execFileSync(resolveGitExecutable(), ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const collected = [];
+    for (const rel of new Set(raw.split("\0").filter(Boolean))) {
+      const segments = rel.split("/");
+      if (segments.some((s) => IGNORED_DIRS.has(s))) continue;
+      if (IGNORED_ROOT_FILES.has(rel)) continue;
+      if ([...IGNORED_ROOT_PATHS].some((p) => rel === p || rel.startsWith(`${p}/`))) continue;
+      const full = path.join(ROOT, rel);
+      let stat;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        continue; // tracked but deleted in the work tree
+      }
+      if (!stat.isFile()) continue; // gitlinks (submodules) are directories
+      const ext = path.extname(rel);
+      if (TEXT_EXTENSIONS.has(ext) || path.basename(rel) === "LICENSE") collected.push(full);
+    }
+    return collected;
+  } catch {
+    return null;
+  }
+}
 
 function walkTrackedCandidateFiles(dir, collected = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -194,6 +257,12 @@ function walkTrackedCandidateFiles(dir, collected = []) {
   return collected;
 }
 
+/** Default sort order (UTF-16 code units) written as an explicit comparator. */
+function compareCodeUnits(a, b) {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 const errors = [];
 
 for (const rel of REQUIRED_TRACKED_CONTRACTS) {
@@ -205,7 +274,7 @@ for (const rel of REQUIRED_TRACKED_CONTRACTS) {
 
 // Verify git tracked files never include local-only files
 try {
-  const trackedRaw = execFileSync("git", ["ls-files"], {
+  const trackedRaw = execFileSync(resolveGitExecutable(), ["ls-files"], {
     cwd: ROOT,
     encoding: "utf8",
   });
@@ -229,7 +298,27 @@ for (const upstreamError of verifyUpstream(ROOT)) {
   errors.push(`rhwp upstream: ${upstreamError}`);
 }
 
-const files = walkTrackedCandidateFiles(ROOT);
+// PD-081: hwp-studio overlay inputs. The override manifest and the bundled fonts are checked here
+// (structure and hashes; upstream baselines only when the sparse checkout exists); the generated
+// editor bundle must never be committed.
+try {
+  for (const overlayError of verifyOverrides(ROOT, readConfig(ROOT))) errors.push(`hwp-studio overrides: ${overlayError}`);
+} catch (err) {
+  errors.push(`hwp-studio overrides: ${err.message}`);
+}
+for (const fontError of checkFonts(ROOT)) errors.push(`bundled fonts: ${fontError}`);
+try {
+  const generated = execFileSync(resolveGitExecutable(), ["ls-files", "--", "crates/easyoffice-app/ui/hwp-studio"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  if (generated) errors.push("crates/easyoffice-app/ui/hwp-studio is a build output and must not be tracked by Git");
+} catch {
+  // not a git work tree
+}
+
+const files = listGitCandidateFiles() ?? walkTrackedCandidateFiles(ROOT);
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
   if (rel === "scripts/check-repo-hygiene.mjs") continue;
@@ -238,6 +327,12 @@ for (const file of files) {
   for (const regex of PROHIBITED_PATTERNS) {
     if (regex.test(content)) {
       errors.push(`Prohibited external brand or local-only reference detected in ${rel} (pattern: ${regex.source})`);
+    }
+  }
+
+  if (isSortRuleScoped(rel)) {
+    for (const line of findBareSorts(content)) {
+      errors.push(`.sort() without a comparator in ${rel}:${line} (pass an explicit compare function)`);
     }
   }
 
