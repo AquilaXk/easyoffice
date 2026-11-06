@@ -94,6 +94,7 @@ EasyOffice/
 ### 시스템 요구 사항
 - macOS 14.0 (Sonoma) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 지원)
 - Xcode 16+ 및 Swift 6.0+ (크로스플랫폼 코어 및 로컬 WebUI 서버 빌드는 Rust 1.85+ 사용)
+- Windows 설치형 데스크톱 앱: Windows 10/11 x64 및 WebView2 런타임 (데스크톱 셸 빌드는 MSVC 툴체인의 Rust 1.90+ 필요)
 
 ### 로컬 위생 검증 · 빌드 · 테스트 · 실행
 
@@ -122,7 +123,18 @@ bash scripts/package-macos-release.sh 1.0.0
 xattr -dr com.apple.quarantine /Applications/EasyOffice.app
 ```
 
-Windows 배포 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`)는 독립 실행형 Rust 코어 CLI와 로컬 루프백 WebUI 서버를 제공합니다. `easyoffice-app.exe --self-test`로 엔진 무결성을 검증하거나 `easyoffice-app.exe --serve 8787`을 실행해 브라우저에서 `http://127.0.0.1:8787/` 워크스페이스를 열 수 있습니다. 전체 옵션은 `easyoffice-app.exe --help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로(명령줄에서 문서 열기는 아직 지원하지 않음)는 0이 아닌 종료 코드로 끝납니다.
+#### Windows
+
+Windows 릴리스는 설치 프로그램 `EasyOffice-<version>-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 관리자 권한 불필요)로 배포됩니다. 설치한 뒤 시작 메뉴에서 **EasyOffice**를 실행합니다. `EasyOffice.exe`는 Windows 내장 WebView2 런타임 위의 데스크톱 창(Tauri v2 셸, `crates/easyoffice-desktop`)으로, WebUI가 실행 파일에 포함되어 있고 모든 명령을 프로세스 안에서 Rust 엔진으로 바로 처리합니다. 로컬 HTTP 서버, 브라우저, 네트워크 연결을 쓰지 않습니다. 저장하면 Windows 기본 저장 대화상자가 열립니다. 제거는 설정 > 앱 또는 시작 메뉴 폴더의 제거 프로그램으로 합니다. WebView2는 Windows 11과 최신 Windows 10에 기본 포함되어 있으며, 없을 때만 설치 프로그램이 런타임 부트스트래퍼를 내려받습니다. 문서 파일 연결(`.docx`/`.hwpx` 등 더블클릭으로 열기)은 앱에서 파일 열기 기능(#111)이 준비될 때까지 일부러 등록하지 않습니다.
+
+소스에서 설치 프로그램을 빌드하려면 Windows에서 MSVC Rust 툴체인 1.90+, Visual Studio Build Tools, Node.js가 필요합니다.
+
+```powershell
+cd crates/easyoffice-desktop
+npx @tauri-apps/cli@2 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
+```
+
+**개발자 미리보기(`--serve`).** 보조 아카이브 `EasyOffice-<version>-windows-x64-cli-serve-preview.zip`은 개발·테스트용 독립 실행형 Rust 코어 CLI와 로컬 루프백 WebUI 서버를 제공합니다. `easyoffice-app.exe --self-test`로 엔진 무결성을 검증하거나 `easyoffice-app.exe --serve 8787`을 실행해 브라우저에서 `http://127.0.0.1:8787/` 워크스페이스를 열 수 있습니다. 전체 옵션은 `easyoffice-app.exe --help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로(명령줄에서 문서 열기는 아직 지원하지 않음)는 0이 아닌 종료 코드로 끝납니다.
 
 ---
 

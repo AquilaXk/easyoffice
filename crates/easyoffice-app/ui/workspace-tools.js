@@ -3,6 +3,7 @@
 
   const { serializeDomChildren, restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
   const savePayload = host.__EASYOFFICE_SAVE_PAYLOAD__;
+  const desktopBridge = host.__EASYOFFICE_DESKTOP_BRIDGE__;
   const LS_STEPS = [100, 130, 160, 180, 200, 300];
   const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
   const STUDIO_QUICK_REDIRECT = {
@@ -161,6 +162,32 @@
       }
     }
 
+    // Hands saved bytes to the user: the native save dialog inside the desktop shell (WebView2
+    // downloads can be silent), the Blob download in the `--serve` browser preview. Never throws;
+    // resolves { ok, cancelled, path, error }.
+    async function deliverSavedFile(base64Data, baseFilename, ext) {
+      const fileName = baseFilename + "." + String(ext).toLowerCase();
+      if (!base64Data) return { ok: false, cancelled: false, path: "", error: "" };
+      if (desktopBridge?.isAvailable()) {
+        try {
+          const res = await desktopBridge.saveFile(base64Data, fileName);
+          if (res.status === "cancelled") return { ok: false, cancelled: true, path: "", error: "" };
+          return { ok: true, cancelled: false, path: String(res.path || fileName), error: "" };
+        } catch (err) {
+          return { ok: false, cancelled: false, path: "", error: err?.message || String(err) };
+        }
+      }
+      const ok = triggerBase64Download(base64Data, baseFilename, ext);
+      return { ok, cancelled: false, path: ok ? fileName : "", error: "" };
+    }
+
+    function describeDeliveryFailure(delivery, prefix) {
+      if (delivery?.ok) return "";
+      if (delivery?.cancelled) return prefix + "저장 취소: 저장 위치를 선택하지 않았습니다";
+      if (delivery?.error) return prefix + "파일 저장 실패: " + delivery.error;
+      return prefix + "다운로드 실패: 변환 결과 파일을 받지 못했습니다";
+    }
+
     function saveActiveModuleDocument() {
       return enqueueWorkspaceHistoryOp(async () => {
         await sheetController.commitPendingFocusedSheetCell(true);
@@ -194,14 +221,19 @@
         }
         const b64 = String(res?.convertedBase64 || res?.converted_base64 || "");
         if (!failure && !b64) failure = "변환 결과가 비어 있습니다";
-        if (!failure && !triggerBase64Download(b64, title, dstExt)) failure = "파일 다운로드를 시작하지 못했습니다";
+        const delivery = failure ? null : await deliverSavedFile(b64, title, dstExt);
+        if (delivery?.cancelled) {
+          if (fb) fb.textContent = "문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다";
+          return false;
+        }
+        if (!failure && !delivery.ok) failure = delivery.error || "파일 다운로드를 시작하지 못했습니다";
         if (failure) {
           if (fb) fb.textContent = "문서 저장 실패 (" + dstExt.toUpperCase() + "): " + failure;
           return false;
         }
         if (fb) {
           fb.textContent =
-            "문서 저장 완료 (" + title + "." + dstExt.toLowerCase() + " · " + (res.outputBytes || 0) + "B · " +
+            "문서 저장 완료 (" + delivery.path + " · " + (res.outputBytes || 0) + "B · " +
             describeConversionSpec(res) + ")";
         }
         return true;
@@ -919,7 +951,8 @@
     }
 
     return {
-      resolveSourceScopeKind, buildConversionContent, resolveSaveFileBase, triggerBase64Download, describeConversionSpec, saveActiveModuleDocument,
+      resolveSourceScopeKind, buildConversionContent, resolveSaveFileBase, triggerBase64Download, deliverSavedFile,
+      describeDeliveryFailure, describeConversionSpec, saveActiveModuleDocument,
       computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
       runPiiScrubAction, setupStudioChromeControls,

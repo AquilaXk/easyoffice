@@ -34,3 +34,6 @@ release-build/
 tmp/
 *.log
 *.local.md
+
+# Tauri build-time schema output
+crates/easyoffice-desktop/gen/

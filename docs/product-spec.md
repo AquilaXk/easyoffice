@@ -87,3 +87,10 @@
 - **문서·이미지 메타데이터 비식별화 및 컨테이너 보안 감사 (`DocumentSecurityAuditor`)**
   - 공유 전 문서(`OfficeDocumentModel`), 시트(`WorksheetModel` 수식 문자열 리터럴·시트 메모·조건부 서식·유효성 검사 포함), 슬라이드(`PresentationDeckModel` 캔버스 도형 제목·본문 포함), PDF(`PDFStudioDocumentModel` 주석 작성자·양식 필드명·펜 레이블·북마크 트리 포함) 전 영역의 주민등록번호·외국인등록번호·연락처·이메일·신용카드(Luhn 검증)·은행 계좌·여권·운전면허·사업자등록번호 PII를 비식별화합니다.
   - 첨부 및 보존 미디어 스트림의 JPEG(`APP1..APP15`, `COM`), PNG(`tEXt`, `zTXt`, `iTXt`, `eXIf`, `tIME`), TIFF(EXIF/GPS/XMP 태그) 바이너리 메타데이터를 제거(`stripBinaryImageMetadata`)하며, 컨테이너 매직 시그니처·ZIP 압축 폭탄·경로 순회·XXE·암호화 종합 감사(`auditContainer(data:fileName:)`)를 수행합니다.
+
+---
+
+## 3. 플랫폼 배포 형태 (Platform Delivery, `PD-074`)
+- **macOS**: 네이티브 Swift 앱(`EasyOffice.app`, `.dmg`/`.zip`)으로 배포합니다.
+- **Windows**: 설치 프로그램 `EasyOffice-<version>-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 시작 메뉴 바로 가기, 제거 프로그램)로 배포합니다. 설치된 `EasyOffice.exe`는 Windows 내장 WebView2 위의 데스크톱 창(Tauri v2 셸)이며, 실행 파일에 포함된 WebUI가 프로세스 안의 Rust 엔진(15종 IPC 명령)을 직접 호출합니다. 로컬 HTTP 서버·브라우저·네트워크 연결 없이 동작하고, 저장은 Windows 기본 저장 대화상자로 위치를 고릅니다(취소·실패는 저장 상태 표시에 그대로 보고). 문서 파일 연결(더블클릭으로 열기)은 파일 열기 기능(#111)이 준비될 때까지 등록하지 않습니다.
+- **개발자 미리보기**: `easyoffice-app.exe --serve [PORT]`는 같은 WebUI를 `127.0.0.1` 루프백 서버로 브라우저에 띄우는 개발·테스트 경로이며, 보조 아카이브 `EasyOffice-<version>-windows-x64-cli-serve-preview.zip`으로 배포합니다.
