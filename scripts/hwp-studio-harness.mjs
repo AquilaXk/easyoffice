@@ -136,26 +136,81 @@ export function findChrome() {
   return found;
 }
 
+const CHROME_ENDPOINT_TIMEOUT_MS = 60000;
+const CHROME_LAUNCH_ATTEMPTS = 3;
+
+/** Chrome writes "<port>\n<browser path>" to DevToolsActivePort once the endpoint is live. */
+function readActivePortFile(profileDir) {
+  try {
+    const [port, wsPath] = fs.readFileSync(path.join(profileDir, "DevToolsActivePort"), "utf8").split(/\r?\n/);
+    if (/^\d+$/.test(port) && wsPath?.startsWith("/devtools/browser/")) return `ws://127.0.0.1:${port}${wsPath}`;
+  } catch {
+    // Not written yet.
+  }
+  return null;
+}
+
 function launchChrome(profileDir) {
   const child = spawn(
     findChrome(),
     ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profileDir}`, "--no-first-run", "--disable-gpu", "--window-size=1280,800", "about:blank"],
     { stdio: ["ignore", "ignore", "pipe"] },
   );
+  // The endpoint is taken from stderr or from the DevToolsActivePort file, whichever appears
+  // first: on loaded CI runners the stderr line can arrive late or not at all.
   const endpoint = new Promise((resolve, reject) => {
     let buffer = "";
-    const timer = setTimeout(() => reject(new Error("Chrome did not report a DevTools endpoint")), 30000);
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("Chrome did not report a DevTools endpoint")), CHROME_ENDPOINT_TIMEOUT_MS);
+    const poll = setInterval(() => {
+      const fromFile = readActivePortFile(profileDir);
+      if (fromFile) finish(resolve, fromFile);
+    }, 250);
     child.stderr.on("data", (chunk) => {
       buffer += chunk.toString();
       const m = /DevTools listening on (ws:\/\/[^\s]+)/.exec(buffer);
-      if (m) {
-        clearTimeout(timer);
-        resolve(m[1]);
-      }
+      if (m) finish(resolve, m[1]);
     });
-    child.on("exit", (code) => reject(new Error(`Chrome exited early (${code})`)));
+    child.on("exit", (code) => finish(reject, new Error(`Chrome exited early (${code})`)));
   });
   return { child, endpoint };
+}
+
+/** Best-effort removal of a temporary Chrome profile; a profile still locked by an exiting Chrome
+ * must not turn a passing harness run into a failure. */
+function removeProfile(profileDir, log) {
+  try {
+    fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (err) {
+    log(`note: temporary profile not removed (${err.code || err.message}): ${profileDir}`);
+  }
+}
+
+/** Launches Chrome with a fresh profile, retrying when the DevTools endpoint never appears. */
+async function startChrome(log) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= CHROME_LAUNCH_ATTEMPTS; attempt += 1) {
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), "eo-hwp-harness-"));
+    const chrome = launchChrome(profile);
+    try {
+      const browserWs = await chrome.endpoint;
+      return { chrome, profile, browserWs };
+    } catch (err) {
+      lastError = err;
+      log(`Chrome start attempt ${attempt}/${CHROME_LAUNCH_ATTEMPTS} failed: ${err.message}`);
+      chrome.child.kill();
+      await sleep(500);
+      removeProfile(profile, log);
+    }
+  }
+  throw lastError;
 }
 
 class Cdp {
@@ -257,13 +312,12 @@ export async function runHarness({ log = console.log } = {}) {
   }
   const wasm = await loadVendoredWasm();
   const server = await startServer();
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "eo-hwp-harness-"));
-  const chrome = launchChrome(profile);
   const problems = [];
   let cdp = null;
+  let started = null;
   try {
-    const browserWs = await chrome.endpoint;
-    cdp = new Cdp(browserWs);
+    started = await startChrome(log);
+    cdp = new Cdp(started.browserWs);
     await cdp.opened;
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
@@ -347,10 +401,10 @@ export async function runHarness({ log = console.log } = {}) {
     log(`requests: ${requests.length}, all local: ${foreign.length === 0}`);
   } finally {
     cdp?.close();
-    chrome.child.kill();
+    started?.chrome.child.kill();
     server.close();
     await sleep(300);
-    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (started) removeProfile(started.profile, log);
   }
   return problems;
 }
