@@ -2,7 +2,9 @@
 //! recalculation paths (including DEFLATE compression) instead of small synthetic inputs, and
 //! report both elapsed time and output size.
 
-use easyoffice_formats::{DocumentFormat, UniversalDocumentModel, UniversalFormatConverter};
+use easyoffice_formats::{
+    DocumentFormat, IeeeCrc32, UniversalDocumentModel, UniversalFormatConverter,
+};
 use easyoffice_sheet::SheetEngine;
 use std::hint::black_box;
 use std::time::Instant;
@@ -182,6 +184,63 @@ fn recalc_case() -> RealPathResult {
     }
 }
 
+fn recalc_10k_case() -> RealPathResult {
+    let rows = 10_000u32;
+    let sheet = crate::benchmark_large::build_recalc_sheet(rows);
+    let t0 = Instant::now();
+    let results = black_box(&sheet).recalculate_all();
+    let elapsed_us = t0.elapsed().as_micros() as u64;
+    let expected_d = |r: u32| {
+        let a = f64::from(r) * 10.0;
+        let b = a * 1.15 + 10.0;
+        let c = if b > 100.0 { a + b } else { b * 2.0 };
+        (a + b + c) / 3.0
+    };
+    let expected_e: f64 = (rows - 9..=rows).map(expected_d).sum();
+    let e_last = sheet
+        .evaluate_cell(&format!("E{rows}"))
+        .as_number()
+        .is_some_and(|v| (v - expected_e).abs() <= 1e-9 * expected_e.abs());
+    RealPathResult {
+        case_id: "sheet_recalc_10k_rows",
+        workload: format!("{rows} rows x 5 columns with windowed SUM ranges, full recalculation"),
+        input_bytes: 0,
+        output_bytes: results.len(),
+        elapsed_us: elapsed_us.max(1),
+        equivalence_verified: results.len() == (rows * 5) as usize && e_last,
+    }
+}
+
+fn crc_case(case_id: &'static str, bytes: usize, passes: usize) -> RealPathResult {
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let payload: Vec<u8> = (0..bytes)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 16) as u8
+        })
+        .collect();
+    let expected = IeeeCrc32::checksum_byte_by_byte_baseline(&payload);
+    let t0 = Instant::now();
+    let mut last = 0u32;
+    for _ in 0..passes {
+        last = IeeeCrc32::checksum(black_box(&payload));
+    }
+    let elapsed_us = t0.elapsed().as_micros() as u64;
+    RealPathResult {
+        case_id,
+        workload: format!(
+            "{bytes} bytes x {passes} passes, CRC-32 ({})",
+            IeeeCrc32::hardware_path_name()
+        ),
+        input_bytes: bytes * passes,
+        output_bytes: 4,
+        elapsed_us: elapsed_us.max(1),
+        equivalence_verified: last == expected,
+    }
+}
+
 /// Runs the real-path cases once each. Total runtime stays well under 10 s in release builds.
 pub fn run_real_path_benchmarks() -> Vec<RealPathResult> {
     let model = big_document_model();
@@ -202,6 +261,9 @@ pub fn run_real_path_benchmarks() -> Vec<RealPathResult> {
         ),
         xlsx_case(),
         recalc_case(),
+        recalc_10k_case(),
+        crc_case("crc32_64kib_x64", 65_536, 64),
+        crc_case("crc32_1mib_x8", 1 << 20, 8),
     ]
 }
 
@@ -232,7 +294,7 @@ mod tests {
         for r in &results {
             eprintln!("{}", r.to_json());
         }
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.len(), 7);
         real_path_gate(&results).unwrap();
         let docx = &results[0];
         assert!(docx.output_bytes < DOC_OUTPUT_CEILING_BYTES, "{docx:?}");

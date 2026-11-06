@@ -1252,3 +1252,41 @@
   - 스테이지 너비를 `vw` 고정 px로 계산: 레이아웃 변경마다 어긋나 `aspect-ratio`와 컨테이너 단위로 대체.
 - **Verified by** `node --test scripts/test-webui-slide-show.mjs`(단축키 표 등록·모듈/텍스트 안전, F5·Shift+F5 시작 위치, 이동·화면 가리기·종료 키, 전환·전체 화면 성공/거부/미지원/해제, 발표자 보기, 빈 새 슬라이드, 복제·삭제·실행 취소·재실행·이동·키보드·끌어 놓기·우클릭 메뉴, 디바운스 썸네일·말줄임·툴팁, 비율 16:9/4:3/A4와 실행 취소, 자동 저장·저장 페이로드 순서), `node --test scripts/test-webui-session-context.mjs`(F5 예외 고정), 실서버 `--serve 8837` + 헤드리스 Chrome 1024×680·1440×900·1920×1080 실제 키·마우스 입력과 스크린샷(스테이지 비율 1.778/1.333/1.414, F5 전체 화면 진입, 슬라이드 쇼 레터박스), `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 프로젝터용 별도 발표자 창, 슬라이드 크기 PPTX 반영, 레이아웃 선택·개체 틀 편집, 레이저 포인터의 쇼 화면 연동이 추가될 때.
+
+## 57. 엔진 저수준 성능: CRC-32 하드웨어 가속·시트 슬롯 메모/DAG 계획 캐시·대형 워크로드 벤치와 release 게이트 (PD-082, #135)
+- **Context** release 기준 최적화 경로가 기준선 대비 1.6~4.1배였으나 debug에서 CRC-32 0.85배·시트 DAG 0.92배였고, 시트 "최적화" 경로는 위상 사전 평가 뒤 재평가·스택마다 시트 이름 `String` 복제·셀당 SipHash 조회 여러 번·메모 적중마다 값 복제로 오히려 일을 더 했습니다(설계 `docs/rhwp-integration-design.md` §6.2, 작업 8).
+- **Decision (`PD-082`)**
+  1. **CRC-32 (`crc32.rs`)**: 조회 표를 연관 `const`가 아닌 `static CRC32_TABLES: [[u32; 256]; 16]`로 두고 `chunks_exact(16)` slicing-by-16 스칼라 코어를 쓴다. 입력이 64바이트 이상이면 실행 시간 검출로 x86_64 PCLMULQDQ 폴딩(`is_x86_feature_detected!("pclmulqdq")` + `sse4.1`, `#[target_feature]` 함수 하나)이나 aarch64 `crc` 명령(`is_aarch64_feature_detected!("crc")`)을 쓰고, 그 외에는 항상 스칼라로 폴백한다. `unsafe`는 두 개의 `#[target_feature]` 함수와 그 호출(SAFETY 주석: 검출 직후 호출, 16바이트 경계 검사)로 한정한다. 결과는 기존과 바이트 단위로 같다(`update(crc, bytes)`로 증분 계산 가능). aarch64 경로는 `cargo check --target aarch64-pc-windows-msvc`로 컴파일만 검증했고 이 저장소 CI에서 실행되지는 않는다.
+  2. **시트 엔진 (`memo.rs`, `dag.rs`, `agg_stream.rs`)**: ①메모를 `HashMap` 대신 32x16 페이지 단위 슬롯 인덱스(`u32` 아레나 인덱스, 기본 시트 앞 16열)로 두고 그 밖의 셀만 시드된 곱셈 해셔(`CoordHasher`, 프로세스별 난수 시드로 충돌 유도 방지) 맵을 쓴다. ②순환 탐지 방문 집합과 사전 평가의 DFS 상태를 비트셋(방문 1비트, DFS 2비트/셀)으로 바꾼다. ③사전 평가 스택은 시트 이름 `String` 대신 `u16` 슬롯 번호를 담고 이름→시트 해석은 AST 토큰 포인터로 캐시한다(시트 ID는 이미 `u16`). ④큰 범위(256셀 초과)의 의존성은 열별로 정렬된 수식 셀 행 목록(`FormulaIndex`)을 이진 탐색해 빈 셀·리터럴을 건너뛴다. ⑤`recalculate_all`은 첫 실행에서 사전 평가를 하며 후위 순서와 순환 소유자를 `RecalcPlan`으로 기록하고, 이후에는 편집(`set_cell`·`set_coord_number`·`rebuild_compiled_asts`)·이름 변경 전까지 기록된 순서를 재생해 그래프를 다시 걷지 않는다. ⑥메모 적중과 집계 범위 순회는 값을 복제하지 않고 빌려 쓴다(`with_coord_value`). ⑦`IF` 핫 경로·2항 연산 무할당 경로·`dense_numbers` 16,384행 확장·`is_same_sheet_identity`/시트 조회 무할당화를 추가했다. 의미(오류값, PD-070 `#NUM!` 순환 플래그, INDIRECT, 시트 간 참조, 평가 단계·재귀 예산, 4레인 합산 순서)는 바꾸지 않는다.
+  3. **순서 결정성**: 큰 범위에서 종전에는 `HashMap` 순회 순서(프로세스마다 무작위)로 의존 셀을 스택에 넣었다. 이제 항상 행 우선 오름차순이므로 순환 참조가 겹친 시트의 결과가 실행마다 달라지지 않는다. 비순환 시트의 값은 순서와 무관하다.
+  4. **벤치 하니스**: `benchmark_large.rs`가 `crc32_hardware_1mib`(1 MiB, 검출 경로명을 digest에 기록)와 `sheet_recalc_10k_rows`(1만 행x5열, 5만 셀)를 A/B 교대 순서(라운드마다 뒤집음)로 추가하고, 실제 경로에 `sheet_recalc_10k_rows`·`crc32_64kib_x64`·`crc32_1mib_x8`을 더한다. 동등성은 항상 검증하고, 속도 하한(`crc32_slicing_by_8` 2.0배, `crc32_hardware_1mib` 2.0배, `sheet_dag_bitset_eval` 1.1배, `sheet_recalc_10k_rows` 2.0배)은 release 빌드의 `--self-test`에서만 느슨하게 판정한다. debug는 수치만 출력한다(`timingGated:false`).
+  5. **DEFLATE 인코더는 바꾸지 않는다**: 1.27MB 문서 XML 기준 압축 11.2ms(114MB/s), 압축률 11.9%, 해제 1.6ms로 DOCX 디코드+인코드 29ms 중 약 38%이고 이미 크기 상한의 1/3 수준이다. 해시 체인·지연 매칭은 크기를 소폭 줄이는 대신 느려지고, 출력이 바뀌면 `deflate_zlib_roundtrip` 기준선과의 바이트 동등성 검증이 깨지므로 보류한다.
+- **Measured (release, `--self-test` 3회 중앙값, x86_64 i7-1165G7, 이전은 `8e550ae` 기준 동일 하니스)**
+
+| 항목 | 이전 기준선→최적화 (배) | 이후 기준선→최적화 (배) |
+|---|---|---|
+| `crc32_slicing_by_8` (64KiB x16, 스칼라) | 1,879→452µs (4.16x) | 1,866→302µs (6.13x) |
+| `crc32_hardware_1mib` (PCLMULQDQ) | 1,975→501µs (4.01x) | 2,112→34µs (61.9x) |
+| `deflate_zlib_roundtrip` | 277→76µs (3.70x) | 279→74µs (3.74x) |
+| `utf16_swar_and_xml_unescape` | 164→78µs (2.09x) | 146→82µs (1.78x, 코드 변경 없음, 잡음) |
+| `sheet_dag_bitset_eval` (200셀) | 1,865→1,133µs (1.68x) | 2,051→242µs (8.52x) |
+| `swar_csv_xml_and_zero_alloc_range_agg` | 1,124→430µs (2.61x) | 1,095→336µs (3.26x) |
+| `sheet_recalc_10k_rows` (5만 셀) | 92,834→48,920µs (1.81x) | 87,609→10,845µs (7.94x) |
+
+| 실제 경로 | 이전 | 이후 |
+|---|---|---|
+| `docx_to_docx_1mb` | 37.8ms / 184,948B | 37.2ms / 184,948B |
+| `docx_to_hwpx_1mb` | 46.8ms / 234,482B | 42.1ms / 234,482B |
+| `xlsx_100k_cells_pack_unpack` | 164.9ms / 746,161B | 166.3ms / 746,161B |
+| `sheet_recalc_5000_targets` | 4.5ms | 2.4ms |
+| `sheet_recalc_10k_rows` | 49.6ms | 16.4ms |
+| `crc32_64kib_x64` | 2.00ms | 0.14ms |
+| `crc32_1mib_x8` | 3.82ms | 0.28ms |
+
+  debug 빌드에서는 CRC-32 스칼라 0.94배(검사 비용 때문에 의미 있는 지표 아님), 시트 200셀 7.6배, 1만 행 7.4배이며 비율은 판정하지 않는다.
+- **Alternatives**
+  - 평가 결과를 `Rc<str>` 텍스트로 바꿔 복제를 O(1)로: `EvaluatedCellValue::Text(String)`이 공개 API 전반(테스트·IPC)에 쓰여 파급이 커서 기각하고, 집계 경로는 참조로 빌려 쓰는 방식으로 대체했다.
+  - 결과 맵(`recalculate_all` 반환형)을 고속 해시맵으로 교체: 공개 반환형이 바뀌어 기각(5만 셀 삽입 약 2ms).
+  - SSE4.2 `crc32` 명령: Castagnoli 다항식이라 ZIP CRC에 쓸 수 없어 기각.
+- **Verified by** `cargo test -p easyoffice-formats --test crc32_equivalence`(무작위 길이 0~4,200·정렬 오프셋 64종·0~700 전 길이·증분 분할·1MiB를 비트 단위 기준 구현과 대조, 하드웨어 경로 포함), `cargo test -p easyoffice-sheet --test sheet_slot_memo_and_plan_cache`(구 엔진에서도 같은 단언이 통과하는 특성화 테스트: 반복 재계산·편집 무효화·순환·깊은 사슬·1만 행·열 인덱스·오버플로 경로·시트 간 참조), 임시 400시드 무작위 시트(재계산·셀 평가·2시트 워크북, 순환 포함)를 구 엔진과 대조해 출력 일치(구 엔진의 큰 범위 순회를 정렬 순서로 고정해 비교, 재생 결과도 첫 실행과 일치), `cargo run --release -p easyoffice-app -- --self-test`(성능 게이트), `benchmark_large` 테스트.
+- **Revisit when** 하드웨어 경로가 없는 CPU에서 스칼라 6배 미만으로 떨어지거나, 시트 공개 API를 바꿀 수 있어 결과 맵·텍스트 값 표현을 교체할 때, 문서 압축이 변환 시간의 지배 요인이 될 때.

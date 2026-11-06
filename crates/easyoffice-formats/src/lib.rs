@@ -2,6 +2,7 @@ use std::fmt;
 
 pub mod biff8_xls_codec;
 pub mod converter;
+mod crc32;
 pub mod csv_markdown_codecs;
 pub mod deflate;
 pub mod hwp5_codec;
@@ -34,6 +35,7 @@ pub mod utf16_swar;
 pub mod zip_codec;
 
 pub use converter::*;
+pub use crc32::IeeeCrc32;
 pub use csv_markdown_codecs::*;
 pub use deflate::*;
 pub use hwp_eqedit::*;
