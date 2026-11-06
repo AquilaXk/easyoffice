@@ -3,6 +3,16 @@
 
   const MAX_UNDO_SNAPSHOTS = 64;
 
+  // Per-page-load client id so the backend keeps ribbon state/undo stacks per browser window.
+  function createRibbonSessionId() {
+    const cryptoApi = host.crypto || globalThis.crypto;
+    if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+      const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+      return "eo-" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    return "eo-" + Date.now().toString(36);
+  }
+
   function createRibbonHistory(deps) {
     const {
       document,
@@ -48,6 +58,8 @@
       computeEvaluatedSheetStore,
     } = sheetStoreHelpers;
 
+    const ribbonSessionId = createRibbonSessionId();
+    const ribbonIpcPayload = (fields) => JSON.stringify({ ...fields, sessionId: ribbonSessionId });
     const workspaceUndoStack = [];
     const workspaceRedoStack = [];
     let ribbonRenderSeq = 0;
@@ -165,7 +177,7 @@
         const preSnapshot = captureWorkspaceSnapshot(false);
         const curStyle = normalizeRibbonStyleKey(localRibbonState.ribbonStyle);
         const nextStyle = curStyle === "standard" ? "hangul" : "standard";
-        const res = await invokeIpc("switch_ribbon_style", nextStyle);
+        const res = await invokeIpc("switch_ribbon_style", ribbonIpcPayload({ style: nextStyle }));
         const nextActiveCat = applyRibbonStyleDom(nextStyle, res?.categories);
         await renderRibbonCategoryTools(nextActiveCat);
         commitDeferredUndoSnapshot(preSnapshot);
@@ -301,7 +313,9 @@
       if (backendSyncRes) {
         syncLocalRibbonStateFromBackend(localRibbonState, backendSyncRes);
       }
-      await invokeIpc("switch_ribbon_style", targetStyle).catch(() => null);
+      await invokeIpc("switch_ribbon_style", ribbonIpcPayload({ style: targetStyle })).catch(
+        () => null
+      );
       applyRibbonStyleDom(targetStyle);
       const nextRot = typeof snap.pdfRotationDeg === "number" ? snap.pdfRotationDeg : 0;
       setPdfRotationDeg(nextRot);
@@ -391,6 +405,7 @@
         historyMutationEpoch += 1;
         const targetSnap = sourceStack[sourceStack.length - 1];
         const currentSnap = captureWorkspaceSnapshot(Boolean(targetSnap.isRibbon));
+        currentSnap.ribbonModule = targetSnap.ribbonModule;
         let evaluatedSheets = null;
         if (
           sheetCellDataChanged(currentSnap.sheets, targetSnap.sheets) &&
@@ -407,7 +422,8 @@
         }
         let backendSyncRes = null;
         if (targetSnap.isRibbon === true) {
-          backendSyncRes = await invokeIpc(ipcCmd, "");
+          const ribbonModule = targetSnap.ribbonModule || targetSnap.activeModule;
+          backendSyncRes = await invokeIpc(ipcCmd, ribbonIpcPayload({ module: ribbonModule }));
         }
         sourceStack.pop();
         destStack.push(currentSnap);
@@ -884,7 +900,11 @@
         const effectiveModule = options.targetModule || getActiveModule();
         const preparedEffect = await prepareRibbonAsyncEffect(cmdId, effectiveModule);
         const currentStyle = normalizeRibbonStyleKey(localRibbonState.ribbonStyle);
-        const execRes = await invokeIpc("execute_ribbon_command", cmdId);
+        const execRes = await invokeIpc(
+          "execute_ribbon_command",
+          ribbonIpcPayload({ commandId: cmdId })
+        );
+        preSnapshot.ribbonModule = execRes?.activeModule || effectiveModule;
         syncLocalRibbonStateFromBackend(localRibbonState, execRes);
         localRibbonState.ribbonStyle = currentStyle;
         localRibbonState.darkThemeEnabled = document.documentElement.dataset.theme === "dark";

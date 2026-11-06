@@ -982,3 +982,73 @@ test("failed undo-redo and formula-bar IPC keep stacks intact, offline sheet ide
   assert.equal(hB.document.querySelector("#doc-editor h1").style.fontWeight, "");
   assert.equal(hB.document.querySelector("#doc-editor h1").style.fontStyle, "italic");
 });
+
+test("ribbon IPC sends a per-window session id and the undo target module (#106)", async () => {
+  const probe = await createWorkspaceHarness();
+  const cat = probe.sandbox.__EASYOFFICE_RIBBON_CATALOG__;
+  const sharedBackend = probe.sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
+    getActiveModule: () => "DOC",
+    ribbonCategoryTools: cat.RIBBON_CATEGORY_TOOLS,
+    ribbonStyleLabels: cat.RIBBON_STYLE_LABELS,
+    contextualToolBadges: cat.CONTEXTUAL_TOOL_BADGES,
+    moduleSpecs: cat.MODULE_SPECS,
+    localRibbonState: cat.createDefaultRibbonState(),
+  });
+  const ribbonCalls = [];
+  const sharedIpc = (win) => async (command, payload) => {
+    const res = await sharedBackend[command](payload);
+    if (command.includes("ribbon_command") || command === "switch_ribbon_style") {
+      ribbonCalls.push({ win, command, req: JSON.parse(String(payload)), res });
+    }
+    return res;
+  };
+  const hA = await createWorkspaceHarness({ testIpc: sharedIpc("A") });
+  const hB = await createWorkspaceHarness({ testIpc: sharedIpc("B") });
+
+  hA.userClick(hA.document.querySelector('[data-command-id="document-home-bold"]'));
+  await flushAsyncTurns();
+  hA.userClick(hA.document.querySelector('.mod-btn[data-module="SHEET"]'));
+  await flushAsyncTurns();
+  hA.userClick(hA.document.querySelector('[data-command-id="sheet-home-italic"]'));
+  await flushAsyncTurns();
+  hB.userClick(hB.document.querySelector('[data-command-id="document-home-italic"]'));
+  await flushAsyncTurns();
+
+  const sheetExec = ribbonCalls.find((c) => c.req.commandId === "sheet-home-italic");
+  assert.equal(sheetExec.res.activeModule, "SHEET");
+  assert.equal(sheetExec.res.isBold, false, "DOC bold must not leak into SHEET");
+  const bExec = ribbonCalls.find((c) => c.win === "B" && c.command === "execute_ribbon_command");
+  assert.equal(bExec.res.isBold, false, "window A state must not leak into window B");
+
+  hA.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  const undoA1 = ribbonCalls.filter((c) => c.command === "undo_ribbon_command")[0];
+  assert.equal(undoA1.win, "A");
+  assert.equal(undoA1.req.module, "SHEET");
+  assert.equal(undoA1.res.activeModule, "SHEET");
+  assert.equal(undoA1.res.isItalic, false);
+
+  hA.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  const undoA2 = ribbonCalls.filter((c) => c.command === "undo_ribbon_command")[1];
+  assert.equal(undoA2.req.module, "DOC");
+  assert.equal(undoA2.res.isBold, false);
+  assert.equal(undoA2.res.isItalic, false, "window A undo must not see window B's italic");
+
+  hB.sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
+  await flushAsyncTurns();
+  const undoB = ribbonCalls.filter((c) => c.command === "undo_ribbon_command")[2];
+  assert.equal(undoB.win, "B");
+  assert.equal(undoB.req.module, "DOC");
+  assert.equal(undoB.res.isItalic, false, "window B still owns its own undo entry");
+
+  const idsA = new Set(ribbonCalls.filter((c) => c.win === "A").map((c) => c.req.sessionId));
+  const idsB = new Set(ribbonCalls.filter((c) => c.win === "B").map((c) => c.req.sessionId));
+  assert.equal(idsA.size, 1);
+  assert.equal(idsB.size, 1);
+  const [sidA] = idsA;
+  const [sidB] = idsB;
+  assert.match(sidA, /^eo-[0-9a-f]{32}$/);
+  assert.match(sidB, /^eo-[0-9a-f]{32}$/);
+  assert.notEqual(sidA, sidB);
+});

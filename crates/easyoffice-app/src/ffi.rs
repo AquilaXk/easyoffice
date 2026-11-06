@@ -187,8 +187,11 @@ mod tests {
         assert!(sec_res.contains("\"status\":\"SAFE\""));
         assert!(sec_res.contains("\"checkedEntries\":1"));
 
-        let rib_res =
-            EasyOfficeIpcRouter::dispatch("execute_ribbon_command", "doc-mod-toc").unwrap();
+        let rib_res = EasyOfficeIpcRouter::dispatch(
+            "execute_ribbon_command",
+            r#"{"commandId":"doc-mod-toc","sessionId":"ffi-router-test"}"#,
+        )
+        .unwrap();
         assert!(rib_res.contains("\"catalogCount\":140"));
         assert!(rib_res.contains("표·개체 도구"));
 
