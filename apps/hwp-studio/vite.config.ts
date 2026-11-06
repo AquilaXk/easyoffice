@@ -87,7 +87,14 @@ function easyOfficeStaticAssets(): Plugin {
   };
   return {
     name: 'easyoffice-static-assets',
-    generateBundle() {
+    generateBundle(_options, bundle) {
+      // The upstream stylesheet points the toolbar icon sprite at the site root (`/images/...`); the
+      // bundle is hosted below /hwp-studio/, so the stylesheet (assets/*.css) reaches it as ../images/.
+      for (const file of Object.values(bundle)) {
+        if (file.type === 'asset' && file.fileName.endsWith('.css') && typeof file.source === 'string') {
+          file.source = file.source.replaceAll('url(/images/', 'url(../images/');
+        }
+      }
       for (const rel of manifest.verbatimAssets as string[]) {
         emit(this, rel.replace(/^public\//, ''), resolve(upstreamStudio, rel));
       }

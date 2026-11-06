@@ -364,6 +364,7 @@
 
         <section class="canvas-stage" aria-label="편집 캔버스">
           <div id="pane-doc" class="editor-pane active">
+            <p id="hwp-fallback-notice" class="manuscript-notice" role="status" hidden>한글 편집기 구성 요소가 포함되지 않은 빌드입니다. 텍스트 전용 편집기로 대체합니다.</p>
             <div class="doc-studio-grid">
               <div id="ruler-corner" class="ruler-corner" aria-hidden="true">mm</div>
               <div id="h-ruler" class="page-ruler h-ruler" aria-label="문서 가로 눈금자">
@@ -481,6 +482,7 @@
             </div>
           </div>
 
+          <div id="pane-hwp" class="editor-pane" hidden></div>
           <div id="pane-sheet" class="editor-pane" hidden>
             <div class="formula-bar">
               <span class="cell-ref" id="active-cell-ref">F2</span>
@@ -937,6 +939,7 @@
     <script src="./workspace-session.js"></script>
     <script src="./file-open.js"></script>
     <script src="./slide-studio.js"></script>
+    <script src="./hwp-host.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

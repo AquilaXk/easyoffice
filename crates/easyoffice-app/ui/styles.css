@@ -1020,3 +1020,9 @@ html[data-theme="dark"] .cp-empty {
 #icon-toolbar [hidden] { display: none !important; }
 
 .sheet-grid th.active-axis { background-color: var(--eo-surface-elevated); background-image: linear-gradient(var(--eo-primary-soft), var(--eo-primary-soft)); }
+
+#pane-hwp:not([hidden]) { display: flex; flex-direction: column; position: relative; height: 100%; min-height: 0; overflow: hidden; }
+.hwp-frame { flex: 1; width: 100%; min-height: 0; border-width: 0; background: var(--eo-surface); }
+.hwp-host-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: var(--eo-surface); color: var(--eo-text); font-size: 14px; }
+.hwp-host-status[hidden], .hwp-host-status-actions [hidden] { display: none; }
+.hwp-host-status-actions { display: flex; gap: 8px; }
