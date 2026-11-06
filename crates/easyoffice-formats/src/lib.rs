@@ -6,11 +6,17 @@ pub mod csv_markdown_codecs;
 pub mod deflate;
 pub mod hwp5_codec;
 pub mod hwp_eqedit;
+pub mod hwpx_codec;
+mod hwpx_parts;
 mod legacy_ole2_codec;
 pub mod odf_hwpx_codecs;
 pub mod office_codecs;
 pub mod ole2_codec;
+mod ooxml_presentation;
+mod ooxml_shared_parts;
+mod output_compatibility;
 mod pdf_stream_parser;
+mod pdf_writer;
 pub mod rtf_xml_helpers;
 pub mod strict_json;
 pub mod text_pdf_codecs;
@@ -23,6 +29,7 @@ pub use deflate::*;
 pub use hwp_eqedit::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
+pub use output_compatibility::OutputCompatibility;
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };
@@ -324,13 +331,18 @@ impl FormatDetector {
             if Self::slice_contains(bytes, b"Contents/header.xml")
                 || Self::slice_contains(bytes, b"version.xml")
             {
-                if Self::slice_contains(bytes, b"isTemplate=\"1\"") {
+                let template_meta = hwpx_codec::HWPX_TEMPLATE_META_MARKER.as_bytes();
+                if Self::slice_contains(bytes, b"isTemplate=\"1\"")
+                    || Self::slice_contains(bytes, template_meta)
+                {
                     return Ok(DocumentFormat::Hwtx);
                 }
                 if let Ok(entries) = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default()) {
                     if entries.iter().any(|e| {
-                        e.path == "Contents/header.xml"
-                            && Self::slice_contains(&e.data, b"isTemplate=\"1\"")
+                        (e.path == "Contents/header.xml"
+                            && Self::slice_contains(&e.data, b"isTemplate=\"1\""))
+                            || (e.path == "Contents/content.hpf"
+                                && Self::slice_contains(&e.data, template_meta))
                     }) {
                         return Ok(DocumentFormat::Hwtx);
                     }

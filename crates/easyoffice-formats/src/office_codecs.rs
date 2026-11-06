@@ -25,6 +25,17 @@ pub struct OoxmlPptxPayload {
     pub slides: Vec<(String, Vec<String>, String)>,
 }
 
+/// Computed result of a formula cell, written as the SpreadsheetML cached value (`<v>`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum XlsxCachedValue {
+    Number(f64),
+    Text(String),
+    Boolean(bool),
+}
+
+/// Per-sheet formula cache keyed by zero-based `(row, col)`.
+pub type XlsxFormulaCache = std::collections::HashMap<(u32, u32), XlsxCachedValue>;
+
 /// ECMA-376 OOXML container codec for `.docx`, `.xlsx`, `.pptx`, and `.ppsx`.
 pub struct OoxmlCodec;
 
@@ -39,29 +50,31 @@ impl OoxmlCodec {
             "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
             "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
             "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>",
+            "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/>",
             "</Types>"
         );
         let rels = concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
             "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>",
+            "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/>",
             "</Relationships>"
         );
+        let core_xml = crate::ooxml_shared_parts::core_properties_xml(&payload.title);
 
         let mut body = String::with_capacity(512);
         body.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        body.push_str("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" title=\"");
-        body.push_str(&XmlSanitizer::escape(&payload.title));
-        body.push_str("\"><w:body>");
+        body.push_str("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>");
 
         for p in &payload.paragraphs {
-            body.push_str("<w:p><w:r><w:t>");
+            body.push_str("<w:p><w:r><w:t xml:space=\"preserve\">");
             body.push_str(&XmlSanitizer::escape(p));
             body.push_str("</w:t></w:r></w:p>");
         }
 
         for tbl in &payload.tables {
             body.push_str("<w:tbl>");
+            crate::ooxml_shared_parts::push_docx_table_properties(&mut body, tbl);
             for row in tbl {
                 body.push_str("<w:tr>");
                 for cell in row {
@@ -78,6 +91,7 @@ impl OoxmlCodec {
         body.push_str("</w:body></w:document>");
 
         XmlSanitizer::validate_safe_xml(&body)?;
+        XmlSanitizer::validate_safe_xml(&core_xml)?;
 
         ZipArchiveCodec::pack(&[
             (
@@ -86,6 +100,7 @@ impl OoxmlCodec {
             ),
             ("_rels/.rels".to_string(), rels.as_bytes().to_vec()),
             ("word/document.xml".to_string(), body.into_bytes()),
+            ("docProps/core.xml".to_string(), core_xml.into_bytes()),
         ])
     }
 
@@ -160,6 +175,16 @@ impl OoxmlCodec {
     }
 
     pub fn pack_xlsx_multi(sheets: &[OdsUnpacked]) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_xlsx_multi_with_formula_cache(sheets, &[])
+    }
+
+    /// Packs sheets, writing `caches[i]` (zero-based `(row, col)` → computed value) as the cached
+    /// `<v>` of formula cells in sheet `i`. Formula cells without a cached value carry no `<v>`;
+    /// `workbook.xml` always sets `<calcPr fullCalcOnLoad="1"/>` so consumers recalculate on open.
+    pub fn pack_xlsx_multi_with_formula_cache(
+        sheets: &[OdsUnpacked],
+        caches: &[XlsxFormulaCache],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         let default_sheet = vec![("Sheet1".to_string(), Vec::new())];
         let active_sheets = if sheets.is_empty() {
             default_sheet.as_slice()
@@ -225,7 +250,8 @@ impl OoxmlCodec {
                 "<Relationship Id=\"rId{num}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{num}.xml\"/>"
             ));
         }
-        workbook_xml.push_str("</sheets></workbook>");
+        workbook_xml
+            .push_str("</sheets><calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
         let styles_rid = active_sheets.len() + 1;
         let sst_rid = active_sheets.len() + 2;
         wb_rels_xml.push_str(&format!(
@@ -293,6 +319,7 @@ impl OoxmlCodec {
         ];
 
         for (i, (_, cells)) in active_sheets.iter().enumerate() {
+            let cache = caches.get(i);
             let mut rows_map: std::collections::BTreeMap<u32, Vec<(u32, &String)>> =
                 std::collections::BTreeMap::new();
             for (row, col, raw) in cells {
@@ -309,20 +336,28 @@ impl OoxmlCodec {
                 for (col, raw) in row_cells {
                     let a1 = format!("{}{}", format_col_letters(col), row_num);
                     if let Some(formula) = raw.strip_prefix('=') {
-                        sheet_xml.push_str(&format!(
-                            "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\"><f>{}</f><v>0</v></c>",
-                            XmlSanitizer::escape(formula)
-                        ));
+                        let f = XmlSanitizer::escape(formula);
+                        match cache.and_then(|c| c.get(&(row, col))) {
+                            Some(XlsxCachedValue::Number(n)) if n.is_finite() => sheet_xml
+                                .push_str(&format!("<c r=\"{a1}\"><f>{f}</f><v>{n}</v></c>")),
+                            Some(XlsxCachedValue::Text(s)) => sheet_xml.push_str(&format!(
+                                "<c r=\"{a1}\" t=\"str\"><f>{f}</f><v>{}</v></c>",
+                                XmlSanitizer::escape(s)
+                            )),
+                            Some(XlsxCachedValue::Boolean(b)) => sheet_xml.push_str(&format!(
+                                "<c r=\"{a1}\" t=\"b\"><f>{f}</f><v>{}</v></c>",
+                                u8::from(*b)
+                            )),
+                            _ => sheet_xml.push_str(&format!("<c r=\"{a1}\"><f>{f}</f></c>")),
+                        }
                     } else if raw.parse::<f64>().is_ok() {
                         sheet_xml.push_str(&format!(
-                            "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\" t=\"n\"><v>{}</v></c>",
+                            "<c r=\"{a1}\" t=\"n\"><v>{}</v></c>",
                             XmlSanitizer::escape(raw)
                         ));
                     } else {
                         let idx = sst_map.get(raw.as_str()).copied().unwrap_or(0);
-                        sheet_xml.push_str(&format!(
-                            "<c r=\"{a1}\" row=\"{row}\" col=\"{col}\" t=\"s\"><v>{idx}</v></c>"
-                        ));
+                        sheet_xml.push_str(&format!("<c r=\"{a1}\" t=\"s\"><v>{idx}</v></c>"));
                     }
                 }
                 sheet_xml.push_str("</row>");
@@ -503,285 +538,6 @@ impl OoxmlCodec {
             }
         }
         Ok(cells)
-    }
-
-    pub fn pack_pptx(payload: &OoxmlPptxPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        let main_ct = if payload.is_slideshow {
-            "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml"
-        } else {
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
-        };
-        let mut content_types = format!(
-            concat!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-                "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
-                "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
-                "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
-                "<Override PartName=\"/ppt/presentation.xml\" ContentType=\"{}\"/>",
-                "<Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/>",
-                "<Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/>"
-            ),
-            main_ct
-        );
-        for idx in 1..=payload.slides.len() {
-            content_types.push_str(&format!(
-                "<Override PartName=\"/ppt/slides/slide{idx}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>"
-            ));
-        }
-        content_types.push_str("</Types>");
-
-        let root_rels = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
-            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"ppt/presentation.xml\"/>",
-            "</Relationships>"
-        );
-
-        let mut pres_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><p:presentation xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" title=\"{}\" slideshow=\"{}\"><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rIdMaster1\"/></p:sldMasterIdLst><p:sldIdLst count=\"{}\">",
-            XmlSanitizer::escape(&payload.title),
-            if payload.is_slideshow { "1" } else { "0" },
-            payload.slides.len()
-        );
-        let mut pres_rels = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rIdMaster1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster\" Target=\"slideMasters/slideMaster1.xml\"/>",
-        );
-        for idx in 1..=payload.slides.len() {
-            let sld_id = 255 + idx;
-            pres_xml.push_str(&format!("<p:sldId id=\"{sld_id}\" r:id=\"rId{idx}\"/>"));
-            pres_rels.push_str(&format!(
-                "<Relationship Id=\"rId{idx}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide{idx}.xml\"/>"
-            ));
-        }
-        pres_xml.push_str("</p:sldIdLst><p:sldSz cx=\"9144000\" cy=\"6858000\"/></p:presentation>");
-        pres_rels.push_str("</Relationships>");
-
-        XmlSanitizer::validate_safe_xml(&pres_xml)?;
-        XmlSanitizer::validate_safe_xml(&pres_rels)?;
-
-        let slide_master_xml = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<p:sldMaster xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">",
-            "<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>",
-            "<p:sldLayoutIdLst><p:sldLayoutId id=\"2147483649\" r:id=\"rId1\"/></p:sldLayoutIdLst>",
-            "</p:sldMaster>"
-        );
-        let slide_master_rels = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
-            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/slideLayout1.xml\"/>",
-            "</Relationships>"
-        );
-        let slide_layout_xml = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<p:sldLayout xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">",
-            "<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld>",
-            "</p:sldLayout>"
-        );
-        let slide_layout_rels = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
-            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster\" Target=\"../slideMasters/slideMaster1.xml\"/>",
-            "</Relationships>"
-        );
-        let slide_rel_xml = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
-            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/slideLayout1.xml\"/>",
-            "</Relationships>"
-        );
-
-        let mut entries = vec![
-            (
-                "[Content_Types].xml".to_string(),
-                content_types.into_bytes(),
-            ),
-            ("ppt/presentation.xml".to_string(), pres_xml.into_bytes()),
-            ("_rels/.rels".to_string(), root_rels.as_bytes().to_vec()),
-            (
-                "ppt/_rels/presentation.xml.rels".to_string(),
-                pres_rels.into_bytes(),
-            ),
-            (
-                "ppt/slideMasters/slideMaster1.xml".to_string(),
-                slide_master_xml.as_bytes().to_vec(),
-            ),
-            (
-                "ppt/slideMasters/_rels/slideMaster1.xml.rels".to_string(),
-                slide_master_rels.as_bytes().to_vec(),
-            ),
-            (
-                "ppt/slideLayouts/slideLayout1.xml".to_string(),
-                slide_layout_xml.as_bytes().to_vec(),
-            ),
-            (
-                "ppt/slideLayouts/_rels/slideLayout1.xml.rels".to_string(),
-                slide_layout_rels.as_bytes().to_vec(),
-            ),
-        ];
-
-        for (idx, (s_title, bullets, notes)) in payload.slides.iter().enumerate() {
-            let mut sld_xml = format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" title=\"{}\" notes=\"{}\"><p:cSld><p:spTree><p:sp><p:txBody>",
-                XmlSanitizer::escape(s_title),
-                XmlSanitizer::escape(notes)
-            );
-            for b in bullets {
-                sld_xml.push_str("<a:p><a:r><a:t>");
-                sld_xml.push_str(&XmlSanitizer::escape(b));
-                sld_xml.push_str("</a:t></a:r></a:p>");
-            }
-            sld_xml.push_str("</p:txBody></p:sp></p:spTree></p:cSld></p:sld>");
-            XmlSanitizer::validate_safe_xml(&sld_xml)?;
-            entries.push((
-                format!("ppt/slides/slide{}.xml", idx + 1),
-                sld_xml.into_bytes(),
-            ));
-            entries.push((
-                format!("ppt/slides/_rels/slide{}.xml.rels", idx + 1),
-                slide_rel_xml.as_bytes().to_vec(),
-            ));
-        }
-
-        ZipArchiveCodec::pack(&entries)
-    }
-
-    pub fn unpack_pptx(bytes: &[u8]) -> Result<OoxmlPptxPayload, EasyOfficeError> {
-        let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
-        validate_zip_xml_entries(&entries)?;
-        let pres_entry = entries
-            .iter()
-            .find(|e| e.path == "ppt/presentation.xml")
-            .ok_or_else(|| {
-                EasyOfficeError::CorruptedContainer(
-                    "PPTX 필수 엔트리 'ppt/presentation.xml'이 누락되었습니다.".to_string(),
-                )
-            })?;
-        let pres_xml = std::str::from_utf8(&pres_entry.data).map_err(|_| {
-            EasyOfficeError::InvalidUtf8("ppt/presentation.xml UTF-8 오류".to_string())
-        })?;
-        XmlSanitizer::validate_safe_xml(pres_xml)?;
-
-        let title = extract_attr(pres_xml, "<p:presentation", "title")
-            .or_else(|| extract_attr(pres_xml, "<p:presentation", "name"))
-            .map(|s| XmlSanitizer::unescape(&s))
-            .unwrap_or_else(|| "발표자료".to_string());
-        let is_slideshow = extract_attr(pres_xml, "<p:presentation", "slideshow")
-            .map(|s| s == "1")
-            .unwrap_or(false);
-
-        let mut rel_targets: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        if let Some(rels_entry) = entries
-            .iter()
-            .find(|e| e.path == "ppt/_rels/presentation.xml.rels")
-        {
-            let rels_xml = std::str::from_utf8(&rels_entry.data).map_err(|_| {
-                EasyOfficeError::InvalidUtf8(
-                    "ppt/_rels/presentation.xml.rels UTF-8 오류".to_string(),
-                )
-            })?;
-            XmlSanitizer::validate_safe_xml(rels_xml)?;
-            for (r_attrs, _) in extract_balanced_elements(rels_xml, "Relationship") {
-                if let (Some(id), Some(target)) = (
-                    extract_attr_from_fragment(r_attrs, "Id"),
-                    extract_attr_from_fragment(r_attrs, "Target"),
-                ) {
-                    let normalized = if let Some(stripped) = target.strip_prefix('/') {
-                        stripped.to_string()
-                    } else if target.starts_with("ppt/") {
-                        target
-                    } else {
-                        format!("ppt/{target}")
-                    };
-                    rel_targets.insert(id, normalized);
-                }
-            }
-        }
-
-        let mut ordered_slide_entries: Vec<&crate::ZipArchiveEntry> = Vec::new();
-        for (sld_id_attrs, _) in extract_balanced_elements(pres_xml, "p:sldId") {
-            if let Some(rid) = extract_attr_from_fragment(sld_id_attrs, "r:id")
-                .or_else(|| extract_attr_from_fragment(sld_id_attrs, "id"))
-            {
-                if let Some(target_path) = rel_targets.get(&rid) {
-                    if let Some(entry) = entries.iter().find(|e| &e.path == target_path) {
-                        ordered_slide_entries.push(entry);
-                    }
-                }
-            }
-        }
-
-        if ordered_slide_entries.is_empty() {
-            let mut slide_entries: Vec<_> = entries
-                .iter()
-                .filter(|e| e.path.starts_with("ppt/slides/slide") && e.path.ends_with(".xml"))
-                .collect();
-            slide_entries.sort_by(|a, b| {
-                let num_a = a
-                    .path
-                    .strip_prefix("ppt/slides/slide")
-                    .and_then(|s| s.strip_suffix(".xml"))
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(usize::MAX);
-                let num_b = b
-                    .path
-                    .strip_prefix("ppt/slides/slide")
-                    .and_then(|s| s.strip_suffix(".xml"))
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(usize::MAX);
-                num_a.cmp(&num_b).then_with(|| a.path.cmp(&b.path))
-            });
-            ordered_slide_entries = slide_entries;
-        }
-
-        let mut slides = Vec::new();
-        for s_entry in ordered_slide_entries {
-            let s_xml = std::str::from_utf8(&s_entry.data).map_err(|_| {
-                EasyOfficeError::InvalidUtf8("ppt/slides/slide.xml UTF-8 오류".to_string())
-            })?;
-            XmlSanitizer::validate_safe_xml(s_xml)?;
-
-            let a_p_blocks = extract_tag_bodies(s_xml, "a:p");
-            let mut bullets: Vec<String> = if !a_p_blocks.is_empty() {
-                a_p_blocks
-                    .into_iter()
-                    .map(|p_inner| {
-                        extract_tag_bodies(p_inner, "a:t")
-                            .into_iter()
-                            .map(XmlSanitizer::unescape)
-                            .collect::<Vec<_>>()
-                            .join("")
-                    })
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            } else {
-                extract_tag_bodies(s_xml, "a:t")
-                    .into_iter()
-                    .map(XmlSanitizer::unescape)
-                    .collect()
-            };
-
-            let s_title = extract_attr(s_xml, "<p:sld", "title")
-                .map(|s| XmlSanitizer::unescape(&s))
-                .unwrap_or_else(|| {
-                    if !bullets.is_empty() {
-                        bullets.remove(0)
-                    } else {
-                        String::new()
-                    }
-                });
-            let notes = extract_attr(s_xml, "<p:sld", "notes")
-                .map(|s| XmlSanitizer::unescape(&s))
-                .unwrap_or_default();
-            slides.push((s_title, bullets, notes));
-        }
-
-        Ok(OoxmlPptxPayload {
-            title,
-            is_slideshow,
-            slides,
-        })
     }
 }
 

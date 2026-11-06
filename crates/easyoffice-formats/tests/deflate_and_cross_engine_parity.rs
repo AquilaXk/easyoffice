@@ -693,8 +693,12 @@ fn test_biff8_xls_multi_substream_sst_rk_mulrk_and_ppt_recursive_containers() {
         multi_pdf_text.contains("/Count 2"),
         "60 lines must paginate into 2 PDF /Page objects"
     );
+    // Font metrics (e.g. /Descent) are legitimately negative; only text positioning must not be.
     assert!(
-        !multi_pdf_text.contains(" -"),
+        multi_pdf_text
+            .lines()
+            .filter(|l| l.contains(" Td "))
+            .all(|l| !l.contains(" -")),
         "No negative y coordinates allowed in PDF stream"
     );
     let reparsed_multi = PdfSerializer::parse(&multi_pdf_bytes).unwrap();

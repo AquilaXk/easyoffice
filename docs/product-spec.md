@@ -14,6 +14,15 @@
 | **Slide (프레젠테이션)** | `.pptx`, `.ppt`, `.ppsx`, `.odp` | ECMA-376 PresentationML (`zipXML`), OLE2 Presentation (`ole2Compound`), ISO/IEC 26300 ODF Presentation (`zipXML`) | `OOXMLContainerCodec`, `OLE2ContainerCodec`, `ODFContainerCodec` 기반 열람 · 편집 · 슬라이드 마스터 · 발표자 뷰 · PDF 변환 |
 | **PDF Studio** | `.pdf` | ISO 32000-1 / 32000-2 (`pdfBinary`: `%PDF-1.x` / `%PDF-2.0`) | `PDFBinarySerializer` 기반 벡터 열람 · 5종 주석/서명 · 페이지 병합/분할/재배치/회전 · Office ↔ PDF 양방향 변환 |
 
+### 1.1 출력 컨테이너 규격 및 쓰기 호환성 (Rust 변환 엔진, `PD-071`)
+- **XLSX**: `<c>`에는 스키마 속성(`r`, `t`)만 기록하고, 수식 셀의 `<v>`에는 시트 엔진이 계산한 결과를 캐시하며(계산값이 없으면 생략), `workbook.xml`은 `<calcPr fullCalcOnLoad="1"/>`로 열 때 재계산을 요청합니다.
+- **PPTX/PPSX**: 테마(`ppt/theme/theme1.xml`), 마스터 `p:clrMap`, 도형 비시각 속성(`p:nvSpPr`/`p:spPr`/`p:txBody`)을 포함하고, 슬라이드 제목은 제목 개체 틀, 발표자 노트는 노트 슬라이드, 문서 제목은 `docProps/core.xml`에 저장합니다.
+- **HWPX/HWTX**: `mimetype`(첫 엔트리, 무압축), `version.xml`, `settings.xml`, 글꼴·글자/문단 모양·스타일을 정의한 `header.xml`, 첫 문단 `hp:secPr`, `paraPrIDRef`/`charPrIDRef` 참조, `hp:p > hp:run > hp:tbl` 표 구조를 기록합니다.
+- **DOCX**: 제목은 `docProps/core.xml`에 기록하고 표마다 `w:tblPr`·`w:tblGrid`를 둡니다.
+- **PDF**: 한글은 사전 정의 CJK 글꼴 참조(`HYGoThic-Medium`, `Adobe-Korea1`, `UniKS-UCS2-H`)로 기록하여 뷰어가 설치된 한글 글꼴로 표시하며, 비ASCII `/Title`은 BOM을 붙인 UTF-16BE로 기록합니다.
+- **CSV/TSV**: 출력에 UTF-8 BOM을 붙이고, 입력의 BOM은 제거하여 읽습니다.
+- **DOC/PPT 쓰기 호환성 제한**: `.doc`/`.ppt` 출력은 EasyOffice가 다시 읽을 수 있는 OLE2 스트림 하위 집합이며(`.doc`: `1Table`/`0Table` 없음, `.ppt`: `Current User`·persist directory 없음) 다른 프로그램에서 열리지 않을 수 있습니다. 변환 응답은 `"compatibility":"limited"`와 `"compatibilityWarning"`을 반환하고 변환 결과·저장 상태 메시지에 경고를 표시합니다. 호환 저장에는 `.docx`/`.pptx`를 사용합니다(규격 바이너리 작성기는 #112).
+
 ---
 
 ## 2. 모듈별 세부 기능 명세 (Core Module Capabilities)

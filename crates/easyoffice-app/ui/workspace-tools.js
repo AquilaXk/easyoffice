@@ -184,6 +184,11 @@
       return lines.join("\n") || "본문 텍스트";
     }
 
+    function describeConversionSpec(res) {
+      const limited = res?.compatibility === "limited" ? " · 호환성 제한: " + (res.compatibilityWarning || "") : "";
+      return (res?.specification || "") + limited;
+    }
+
     function triggerBase64Download(base64Data, baseFilename, ext) {
       if (!base64Data) return false;
       try {
@@ -247,7 +252,7 @@
             " · " +
             (res.outputBytes || 0) +
             "B · " +
-            (res.specification || "") +
+            describeConversionSpec(res) +
             ")";
         }
       });
@@ -983,7 +988,7 @@
     }
 
     return {
-      resolveSourceScopeKind, buildStructuredConversionBody, triggerBase64Download, saveActiveModuleDocument,
+      resolveSourceScopeKind, buildStructuredConversionBody, triggerBase64Download, describeConversionSpec, saveActiveModuleDocument,
       computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
       runPiiScrubAction, setupStudioChromeControls,

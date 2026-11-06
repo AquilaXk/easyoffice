@@ -2,8 +2,8 @@
 mod pdf_object_graph;
 
 use crate::pdf_stream_parser::{
-    advance_past_stream_eol, contains_subslice, decode_base64_bytes_impl, encode_utf16be_hex_impl,
-    escape_pdf_text, is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
+    advance_past_stream_eol, contains_subslice, decode_base64_bytes_impl, escape_pdf_text,
+    is_pdf_delim_or_ws, is_standalone_pdf_kw, parse_indirect_obj_header,
     parse_pdf_content_stream_with_cmap, skip_pdf_ws_and_comments, span_crosses_object_boundary,
     step_pdf_non_code_token, unescape_pdf_text, validate_balanced_pdf_literals, ParenJumpTable,
     PdfNonCodeKind, PdfNonCodeStep, PdfToUnicodeMap,
@@ -65,162 +65,6 @@ struct PageWalkState<'a> {
 pub struct PdfSerializer;
 
 impl PdfSerializer {
-    pub fn serialize(doc: &PdfDocumentModel) -> Vec<u8> {
-        let mut out: Vec<u8> = Vec::with_capacity(2048);
-        let push_line = |buf: &mut Vec<u8>, line: &str| {
-            buf.extend_from_slice(line.as_bytes());
-            buf.push(b'\n');
-        };
-
-        push_line(&mut out, "%PDF-1.4");
-
-        const MAX_LINES_PER_PDF_PAGE: usize = 42;
-        let source_pages: Vec<PdfPageModel> = if doc.pages.is_empty() {
-            vec![PdfPageModel {
-                page_number: 1,
-                rotation_degrees: 0,
-                body_text: String::new(),
-                approval_stamp: None,
-            }]
-        } else {
-            doc.pages.clone()
-        };
-        let mut effective_pages: Vec<PdfPageModel> = Vec::with_capacity(source_pages.len());
-        for page in source_pages {
-            let lines: Vec<&str> = page.body_text.split('\n').collect();
-            if lines.len() <= MAX_LINES_PER_PDF_PAGE {
-                effective_pages.push(page);
-            } else {
-                for (c_idx, chunk) in lines.chunks(MAX_LINES_PER_PDF_PAGE).enumerate() {
-                    effective_pages.push(PdfPageModel {
-                        page_number: effective_pages.len() + 1,
-                        rotation_degrees: page.rotation_degrees,
-                        body_text: chunk.join("\n"),
-                        approval_stamp: if c_idx == 0 {
-                            page.approval_stamp.clone()
-                        } else {
-                            None
-                        },
-                    });
-                }
-            }
-        }
-        let page_count = effective_pages.len();
-        let page_obj_ids: Vec<usize> = (0..page_count).map(|i| 3 + i * 2).collect();
-        let kids_refs = page_obj_ids
-            .iter()
-            .map(|id| format!("{id} 0 R"))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let cmap_obj = 3 + page_count * 2;
-        let info_obj = cmap_obj + 1;
-        let total_objects = info_obj + 1;
-        let mut offsets: Vec<usize> = vec![0; total_objects];
-
-        offsets[1] = out.len();
-        push_line(&mut out, "1 0 obj");
-        push_line(
-            &mut out,
-            &format!(
-                "<< /Type /Catalog /Pages 2 0 R /Title ({}) >>",
-                Self::escape_pdf_text(&doc.title)
-            ),
-        );
-        push_line(&mut out, "endobj");
-
-        offsets[2] = out.len();
-        push_line(&mut out, "2 0 obj");
-        push_line(
-            &mut out,
-            &format!("<< /Type /Pages /Count {page_count} /Kids [{kids_refs}] >>"),
-        );
-        push_line(&mut out, "endobj");
-
-        for (idx, page) in effective_pages.iter().enumerate() {
-            let page_obj = 3 + idx * 2;
-            let content_obj = page_obj + 1;
-
-            let mut stream_lines: Vec<String> = Vec::new();
-            for (l_idx, line_str) in page.body_text.split('\n').enumerate() {
-                let y = 760 - (l_idx as i32) * 16;
-                let (font_tag, operand) = Self::format_pdf_tj_operand(line_str);
-                stream_lines.push(format!("BT {font_tag} 12 Tf 54 {y} Td {operand} Tj ET"));
-            }
-            if let Some(stamp) = &page.approval_stamp {
-                let stamp_text = format!("[STAMP] {stamp}");
-                let (font_tag, operand) = Self::format_pdf_tj_operand(&stamp_text);
-                stream_lines.push(format!("BT {font_tag} 10 Tf 386 604 Td {operand} Tj ET"));
-            }
-            if let Some(wm) = &doc.watermark_text {
-                let wm_text = format!("[WM] {wm}");
-                let (font_tag, operand) = Self::format_pdf_tj_operand(&wm_text);
-                stream_lines.push(format!("BT {font_tag} 10 Tf 320 746 Td {operand} Tj ET"));
-            }
-            let stream_body = stream_lines.join("\n");
-
-            offsets[page_obj] = out.len();
-            push_line(&mut out, &format!("{page_obj} 0 obj"));
-            push_line(
-                &mut out,
-                &format!(
-                    "<< /Type /Page /Parent 2 0 R /PageNumber {} /Rotate {} /MediaBox [0 0 595 842] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type0 /BaseFont /EasyOfficeGothic-Medium /Encoding /Identity-H /DescendantFonts [ << /Type /Font /Subtype /CIDFontType2 /BaseFont /EasyOfficeGothic-Medium /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /DW 1000 >> ] /ToUnicode {cmap_obj} 0 R >> >> >> /Contents {content_obj} 0 R >>",
-                    page.page_number, page.rotation_degrees
-                ),
-            );
-            push_line(&mut out, "endobj");
-
-            offsets[content_obj] = out.len();
-            push_line(&mut out, &format!("{content_obj} 0 obj"));
-            push_line(&mut out, &format!("<< /Length {} >>", stream_body.len()));
-            push_line(&mut out, "stream");
-            push_line(&mut out, &stream_body);
-            push_line(&mut out, "endstream");
-            push_line(&mut out, "endobj");
-        }
-
-        let cmap_stream = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n1 beginbfrange\n<0000> <FFFF> <0000>\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend";
-        offsets[cmap_obj] = out.len();
-        push_line(&mut out, &format!("{cmap_obj} 0 obj"));
-        push_line(
-            &mut out,
-            &format!(
-                "<< /Type /CMap /CMapName /Adobe-Identity-UCS /Length {} >>",
-                cmap_stream.len()
-            ),
-        );
-        push_line(&mut out, "stream");
-        push_line(&mut out, cmap_stream);
-        push_line(&mut out, "endstream");
-        push_line(&mut out, "endobj");
-
-        offsets[info_obj] = out.len();
-        push_line(&mut out, &format!("{info_obj} 0 obj"));
-        push_line(
-            &mut out,
-            &format!("<< /Title ({}) >>", Self::escape_pdf_text(&doc.title)),
-        );
-        push_line(&mut out, "endobj");
-
-        let xref_offset = out.len();
-        push_line(&mut out, "xref");
-        push_line(&mut out, &format!("0 {total_objects}"));
-        push_line(&mut out, "0000000000 65535 f ");
-        for offset in offsets.iter().skip(1) {
-            push_line(&mut out, &format!("{offset:010} 00000 n "));
-        }
-        push_line(&mut out, "trailer");
-        push_line(
-            &mut out,
-            &format!("<< /Size {total_objects} /Root 1 0 R /Info {info_obj} 0 R >>"),
-        );
-        push_line(&mut out, "startxref");
-        push_line(&mut out, &xref_offset.to_string());
-        push_line(&mut out, "%%EOF");
-
-        out
-    }
-
     pub fn parse(bytes: &[u8]) -> Result<PdfDocumentModel, EasyOfficeError> {
         let detected = FormatDetector::detect(bytes, Some("pdf"))?;
         if detected != DocumentFormat::Pdf {
@@ -939,19 +783,6 @@ impl PdfSerializer {
     fn decode_base64_utf8(input: &str) -> Option<String> {
         Self::decode_base64_bytes(input).and_then(|bytes| String::from_utf8(bytes).ok())
     }
-
-    fn encode_utf16be_hex(text: &str) -> String {
-        encode_utf16be_hex_impl(text)
-    }
-
-    fn format_pdf_tj_operand(text: &str) -> (&'static str, String) {
-        if text.is_ascii() {
-            ("/F1", format!("({})", Self::escape_pdf_text(text)))
-        } else {
-            ("/F2", format!("<{}>", Self::encode_utf16be_hex(text)))
-        }
-    }
-
     pub fn escape_pdf_text(text: &str) -> String {
         escape_pdf_text(text)
     }

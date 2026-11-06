@@ -227,7 +227,21 @@ impl CsvCodec {
         Ok((row_idx, max_cols))
     }
 
+    /// UTF-8 byte-order mark written before CSV/TSV output so spreadsheet applications on
+    /// Korean-locale systems decode the text as UTF-8 rather than the legacy code page.
+    pub const UTF8_BOM: &'static [u8] = &[0xEF, 0xBB, 0xBF];
+
+    /// Serializes rows and prefixes the UTF-8 BOM ([`Self::UTF8_BOM`]).
+    pub fn serialize_with_bom(rows: &[Vec<String>], delimiter: char) -> Vec<u8> {
+        let body = Self::serialize(rows, delimiter);
+        let mut out = Vec::with_capacity(Self::UTF8_BOM.len() + body.len());
+        out.extend_from_slice(Self::UTF8_BOM);
+        out.extend_from_slice(body.as_bytes());
+        out
+    }
+
     pub fn parse(input: &str, delimiter: char) -> Result<Vec<Vec<String>>, EasyOfficeError> {
+        let input = input.strip_prefix('\u{FEFF}').unwrap_or(input);
         if input.is_empty() {
             return Ok(Vec::new());
         }
@@ -253,6 +267,7 @@ impl CsvCodec {
         input: &str,
         delimiter: char,
     ) -> Result<Vec<Vec<String>>, EasyOfficeError> {
+        let input = input.strip_prefix('\u{FEFF}').unwrap_or(input);
         if input.is_empty() {
             return Ok(Vec::new());
         }

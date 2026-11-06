@@ -994,3 +994,28 @@
   - 상한 없는 세션 맵은 장시간 구동 서버에서 창을 열 때마다 메모리가 증가하므로 LRU 축출로 기각.
 - **Verified by** `cargo test -p easyoffice-app ribbon_session`(이슈 재현 순서, 두 세션 격리, 형식 오류 거부, LRU 상한), `node --test scripts/test-webui-behavior.mjs`(`ribbon IPC sends a per-window session id and the undo target module (#106)`), `node scripts/check-repo-hygiene.mjs`
 - **Revisit when** 서버가 루프백 외 원격 다중 사용자 접속을 지원하여 세션 식별자에 인증·소유권 검증이 필요해질 때.
+
+## 46. 출력 컨테이너 필수 파트·스키마 정합화, 표준 한글 CID 글꼴 참조 및 DOC/PPT 쓰기 호환성 제한 표시 (PD-071, #105)
+
+- **Status** Implemented
+- **Context** `convert_document_format` 출력을 풀어 각 규격과 대조한 결과(#105), XLSX 셀의 비표준 `row`/`col` 속성과 항상 `0`인 수식 캐시값, PPTX 테마·`p:clrMap`·도형 비시각 속성 누락 및 `<p:sld title notes>` 비표준 속성, 빈 HWPX `header.xml`과 `version.xml`/`settings.xml`/`secPr` 누락, DOCX `<w:document title>` 비표준 속성과 `w:tblPr`/`w:tblGrid` 누락, PDF 한글 글꼴(`EasyOfficeGothic-Medium`)의 프로그램 없는 참조와 UTF-8 바이트 그대로의 `/Title`, BOM 없는 CSV, 규격 구현처럼 표시되는 `.doc`/`.ppt` 출력이 확인되었습니다.
+- **Decision (`PD-071`)**
+  1. **XLSX (`crates/easyoffice-formats/src/office_codecs.rs`, `crates/easyoffice-app/src/convert_ipc.rs`)**: `<c>`에는 스키마 속성(`r`, `t`)만 기록합니다. `easyoffice-sheet`가 `easyoffice-formats`에 의존하므로 포맷 크레이트는 시트 엔진을 호출할 수 없어(순환 의존), 앱 계층이 시트 엔진(`SheetEngine::recalculate_all`)으로 계산한 결과를 `XlsxFormulaCache`로 넘기고 `OoxmlCodec::pack_xlsx_multi_with_formula_cache`가 수치·문자열(`t="str"`)·논리(`t="b"`) 캐시값을 `<v>`에 씁니다. 계산값이 없거나 오류인 수식 셀은 `<v>`를 생략하고, `workbook.xml`은 항상 `<calcPr fullCalcOnLoad="1"/>`을 지정해 소비자가 열 때 재계산합니다.
+  2. **PPTX (`ooxml_presentation.rs`, `ooxml_shared_parts.rs`)**: `ppt/theme/theme1.xml`(색·글꼴·서식 체계)과 마스터→테마 관계, 마스터 `p:clrMap`, 모든 `p:spTree`의 `p:nvGrpSpPr`/`p:grpSpPr`, 모든 `p:sp`의 `p:nvSpPr`/`p:spPr`/`p:txBody`를 기록합니다. 슬라이드 제목은 `p:ph type="title"` 도형, 발표자 노트는 노트 마스터(`theme2.xml`)를 둔 `ppt/notesSlides/notesSlideN.xml`, 프레젠테이션 제목은 `docProps/core.xml`에 저장하고 쇼 여부는 콘텐츠 형식(`slideshow.main+xml`)으로만 표현합니다. 모든 파트는 `[Content_Types].xml` Override와 일치합니다.
+  3. **HWPX (`hwpx_codec.rs`, `hwpx_parts.rs`)**: `mimetype`을 첫 엔트리로 무압축 저장하고, `version.xml`, `settings.xml`, 글꼴·글자 모양(`charPr id="0"`)·문단 모양(`paraPr id="0"`)·테두리·스타일(`style id="0"`)을 정의한 `header.xml`을 기록합니다. `section0.xml` 첫 문단 첫 런에 `hp:secPr`(+`hp:colPr`)를 두고 모든 문단·런에 `paraPrIDRef`/`charPrIDRef`를 지정하며, 표는 `hp:p > hp:run > hp:tbl`, 셀은 `hp:tc > hp:subList > hp:p > hp:run > hp:t`로 감쌉니다. 서식 여부·발신 기관·결재선은 `hh:head` 비표준 속성 대신 `content.hpf`의 `opf:meta`에 저장하고, `META-INF/manifest.xml`과 `content.hpf`가 모든 파트를 나열합니다. 이전 출력의 `hh:head` 속성은 읽기 호환을 위해 계속 해석합니다.
+  4. **DOCX**: `<w:document>`의 `title` 속성을 제거하고 제목을 `docProps/core.xml`(관계·콘텐츠 형식 포함)에 기록하며, 표마다 `w:tblPr`(자동 너비·단선 테두리)과 열 수만큼의 `w:gridCol`을 가진 `w:tblGrid`를 첫 행 앞에 둡니다.
+  5. **PDF 한글 글꼴 (`pdf_writer.rs`)**: 글꼴 바이너리를 저장소·배포물에 포함하지 않고 PDF 1.4 사전 정의 CJK 참조를 사용합니다. `/F2`는 `Type0` 글꼴(`/BaseFont /HYGoThic-Medium-UniKS-UCS2-H`, `/Encoding /UniKS-UCS2-H`)이며, 하위 `CIDFontType0` `HYGoThic-Medium`은 `Adobe-Korea1-1` 문자 모음과 `FontDescriptor`(메트릭)를 가집니다. `UniKS-UCS2-H`는 기존 본문 코드(UTF-16BE 코드 단위)를 그대로 Adobe-Korea1 CID로 사상하는 사전 정의 CMap이므로 콘텐츠 스트림은 바뀌지 않고, `/ToUnicode` CMap으로 텍스트 추출 정확도를 유지합니다. 문서 정보 사전의 `/Title`은 ASCII면 PDFDocEncoding 리터럴, 그 외에는 BOM(`FEFF`)을 붙인 UTF-16BE 16진 문자열로 기록하고, 카탈로그의 비표준 `/Title` 키는 제거합니다.
+  6. **CSV/TSV**: 출력 앞에 UTF-8 BOM(`EF BB BF`)을 붙이고(`CsvCodec::serialize_with_bom`), `CsvCodec::parse`/`parse_scalar_baseline`은 입력 앞 BOM을 제거하여 라운드트립을 유지합니다.
+  7. **DOC/PPT 쓰기 호환성 표시 (`lib.rs`, `convert_ipc.rs`, `ui/{workspace-tools.js,app.js}`)**: 규격을 충족하는 워드·프레젠테이션 바이너리 작성기는 후속 과제(#112)로 분리하고, `DocumentFormat::output_compatibility()`가 `.doc`/`.ppt`에 `Limited(사유)`를 반환합니다. 변환 응답은 `"specification"`을 `"… 하위 집합 (호환성 제한)"`으로 표시하고 `"compatibility":"limited"`와 `"compatibilityWarning"`을 함께 반환하며, 변환 결과 상자와 저장 상태 메시지가 경고 문구를 그대로 노출합니다.
+- **Why** 저장·변환한 파일이 해당 형식을 지원하는 편집기에서 복구 경고 없이 열리고, 계산하지 않는 뷰어에서도 올바른 수식 결과가 보이며, 지원하지 못하는 형식은 사용자가 그 사실을 알 수 있게 하기 위함입니다.
+- **Trade-offs**
+  1. 한글 글꼴을 임베딩하지 않으므로 글리프 모양은 뷰어가 대체하는 설치 글꼴에 따르며, 사전 정의 CJK 글꼴 대체를 지원하지 않는 최소 구현 뷰어에서는 한글이 표시되지 않을 수 있습니다. 대신 배포물 크기와 글꼴 라이선스 부담이 없습니다. `UniKS-UCS2-H`는 BMP 밖 문자(서로게이트 쌍)를 표현하지 못합니다.
+  2. 포맷 크레이트 단독 호출(`UniversalFormatConverter::encode`)은 수식 캐시값을 쓰지 않고 `fullCalcOnLoad`에 의존합니다.
+  3. 출력 파트가 늘어 최소 PPTX/HWPX 크기가 수 KB 증가합니다.
+- **Alternatives rejected**
+  - 공개 한글 TrueType 글꼴 서브셋 임베딩(`CIDFontType2` + `FontFile2`): 글꼴 파서·서브세터와 수 MB 바이너리 번들이 필요해 이번 범위에서 기각(재검토 조건 참조).
+  - `Adobe-Identity-0` + 임의 글꼴명 유지: 뷰어가 글꼴을 해석할 근거가 없어 한글 미표시가 지속되므로 기각.
+  - 수식 셀에 `0`을 계속 캐시: 재계산하지 않는 뷰어에서 잘못된 값을 보여 주므로 기각.
+  - DOC/PPT 출력을 거부: 기존 EasyOffice 왕복 저장과 상호 변환 경로를 깨므로, 출력은 유지하고 호환성 제한을 명시하는 방식을 채택.
+- **Verified by** `crates/easyoffice-formats/tests/output_container_spec_validity.rs`, `crates/easyoffice-app/src/convert_ipc.rs` 단위 테스트, `scripts/test-webui-behavior.mjs`(호환성 제한 표시), `cargo test --workspace`
+- **Revisit when** 공개 라이선스 한글 글꼴 서브셋 임베딩 또는 규격 충족 워드·프레젠테이션 바이너리 작성기(#112)를 도입할 때.
