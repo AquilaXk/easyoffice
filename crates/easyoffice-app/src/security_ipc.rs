@@ -388,11 +388,12 @@ impl EasyOfficeIpcRouter {
             .collect::<Vec<_>>()
             .join(",");
         Ok(format!(
-            "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"totalMasked\":{},\"spans\":[{}],\"strippedMetadataFields\":[{}]}}",
+            "{{\"scrubbedText\":\"{}\",\"maskedResidentIds\":{},\"maskedPhoneNumbers\":{},\"maskedEmails\":{},\"maskedIdentifierNumbers\":{},\"totalMasked\":{},\"spans\":[{}],\"strippedMetadataFields\":[{}]}}",
             escaped,
             audit.masked_resident_ids,
             audit.masked_phone_numbers,
             audit.masked_emails,
+            audit.masked_identifier_numbers,
             audit.total_masked_count(),
             spans_json,
             stripped_json

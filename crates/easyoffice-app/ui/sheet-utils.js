@@ -367,6 +367,92 @@
     return null;
   }
 
+  // Card / bank account / passport / driver's licence / business registration numbers.
+  // Mirrors crates/easyoffice-app/src/pii_identifiers.rs and the Swift regex rules.
+  const BANK_ACCOUNT_GROUPS = [
+    [3, 2, 6], [3, 3, 6], [3, 6, 3], [3, 6, 5], [4, 3, 6], [4, 2, 7], [6, 2, 6], [3, 4, 4, 2], [3, 6, 2, 3],
+  ];
+  const isHyphenChar = (ch) => ch === "-";
+  const isCardSepChar = (ch) => ch === "-" || ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f";
+  const isAsciiUpperChar = (ch) => ch !== undefined && ch >= "A" && ch <= "Z";
+  const isAsciiAlnumChar = (ch) =>
+    ch !== undefined && (isAsciiUpperChar(ch) || (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9"));
+  // Card 4-4-4-4, driver's licence 2-2-6-2, business registration 3-2-5, then bank accounts.
+  const IDENTIFIER_DIGIT_LAYOUTS = [
+    [[4, 4, 4, 4], isCardSepChar],
+    [[2, 2, 6, 2], isHyphenChar],
+    [[3, 2, 5], isHyphenChar],
+    ...BANK_ACCOUNT_GROUPS.map((groups) => [groups, isHyphenChar]),
+  ];
+
+  function allDigitsJs(str, from, len) {
+    if (from + len > str.length) return false;
+    for (let i = from; i < from + len; i += 1) {
+      if (!isAsciiDigitCode(str.charCodeAt(i))) return false;
+    }
+    return true;
+  }
+
+  function matchDigitGroupsJs(str, idx, groups, isSep) {
+    let p = idx;
+    for (let i = 0; i < groups.length; i += 1) {
+      if (i > 0) {
+        if (p >= str.length || !isSep(str[p])) return 0;
+        p += 1;
+      }
+      if (!allDigitsJs(str, p, groups[i])) return 0;
+      p += groups[i];
+    }
+    if (p < str.length && isAsciiDigitCode(str.charCodeAt(p))) return 0;
+    return p - idx;
+  }
+
+  function passesLuhnJs(digits) {
+    let sum = 0;
+    for (let i = 0; i < digits.length; i += 1) {
+      let v = digits.charCodeAt(digits.length - 1 - i) - 48;
+      if (i % 2 === 1) {
+        v *= 2;
+        if (v > 9) v -= 9;
+      }
+      sum += v;
+    }
+    return sum % 10 === 0;
+  }
+
+  function matchContiguousCardJs(str, idx) {
+    if (!/[2-69]/.test(str[idx])) return 0;
+    let end = idx;
+    while (end < str.length && end - idx < 20 && isAsciiDigitCode(str.charCodeAt(end))) end += 1;
+    const len = end - idx;
+    if (len < 13 || len > 19 || (end < str.length && isAsciiDigitCode(str.charCodeAt(end)))) return 0;
+    return passesLuhnJs(str.slice(idx, end)) ? len : 0;
+  }
+
+  function matchPassportJs(str, idx) {
+    if ((idx > 0 && isAsciiAlnumChar(str[idx - 1])) || idx + 9 > str.length) return 0;
+    const isType = "MSRODG".includes(str[idx]);
+    const legacy = isType && allDigitsJs(str, idx + 1, 8);
+    const newFormat =
+      isType && allDigitsJs(str, idx + 1, 3) && isAsciiUpperChar(str[idx + 4]) && allDigitsJs(str, idx + 5, 4);
+    const twoLetter = isAsciiUpperChar(str[idx]) && isAsciiUpperChar(str[idx + 1]) && allDigitsJs(str, idx + 2, 7);
+    if (!(legacy || newFormat || twoLetter)) return 0;
+    if (idx + 9 < str.length && isAsciiAlnumChar(str[idx + 9])) return 0;
+    return 9;
+  }
+
+  function matchIdentifierAtJs(str, idx) {
+    if (isAsciiUpperChar(str[idx])) return matchPassportJs(str, idx);
+    if (!isAsciiDigitCode(str.charCodeAt(idx)) || (idx > 0 && isAsciiDigitCode(str.charCodeAt(idx - 1)))) {
+      return 0;
+    }
+    for (const [groups, isSep] of IDENTIFIER_DIGIT_LAYOUTS) {
+      const len = matchDigitGroupsJs(str, idx, groups, isSep);
+      if (len > 0) return len;
+    }
+    return matchContiguousCardJs(str, idx);
+  }
+
   function tryParseJsonEnvelope(rawText) {
     if (!rawText.trimStart().startsWith("{")) {
       return null;
@@ -395,6 +481,7 @@
     let residentCount = 0;
     let phoneCount = 0;
     let emailCount = 0;
+    let identifierCount = 0;
     const spans = [];
     let idx = 0;
     let emailFailedUntil = 0;
@@ -427,6 +514,15 @@
         idx += ph.len;
         continue;
       }
+      const idLen = matchIdentifierAtJs(text, idx);
+      if (idLen > 0) {
+        const idMask = text.slice(idx, idx + idLen).replace(/[A-Za-z0-9]/g, "*");
+        scrubbedText += idMask;
+        spans.push({ start: idx, end: idx + idLen, replacement: idMask });
+        identifierCount += 1;
+        idx += idLen;
+        continue;
+      }
       const step = text.codePointAt(idx) > 0xffff ? 2 : 1;
       scrubbedText += text.slice(idx, idx + step);
       idx += step;
@@ -447,7 +543,8 @@
       maskedResidentIds: residentCount,
       maskedPhoneNumbers: phoneCount,
       maskedEmails: emailCount,
-      totalMasked: residentCount + phoneCount + emailCount,
+      maskedIdentifierNumbers: identifierCount,
+      totalMasked: residentCount + phoneCount + emailCount + identifierCount,
       spans,
       strippedMetadataFields,
     };
