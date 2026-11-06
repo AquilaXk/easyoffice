@@ -14,7 +14,9 @@
       "index.html": "15cc17c2acf2864d4eb4e0ece92559f2603f5dcc4e361b1c28b118cce00a6fea",
       "public/print.html": "930907863afbafcc76099d386f6a995bc6c69387cb56838b18e4cdaf6eea6b79",
       "public/theme-init.js": "5a3afcc0139187bfe509414cd60fde2a0dfea72fd72751c4e6e696cdc0f6c587",
-      "public/locale-init.js": "633d47a6a53b2211cf816769f8c084b097c1b60b6ab263803d8610c0531539fa"
+      "public/locale-init.js": "633d47a6a53b2211cf816769f8c084b097c1b60b6ab263803d8610c0531539fa",
+      "public/images/icon_small_ko.svg": "a0ac1200a41b6a75e9afb30cda5bb850276087d45c2f25870605888238ba9b39",
+      "public/images/icon_small_ko_dark.svg": "9d02ea0b8c1d399a89290d97613759826f19f3e3f392b6d79dcf6109e7e15fa6"
     }
   },
   "overrides": [
@@ -60,6 +62,8 @@
   ],
   "verbatimAssets": [
     "public/theme-init.js",
-    "public/locale-init.js"
+    "public/locale-init.js",
+    "public/images/icon_small_ko.svg",
+    "public/images/icon_small_ko_dark.svg"
   ]
 }

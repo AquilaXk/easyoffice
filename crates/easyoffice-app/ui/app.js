@@ -50,6 +50,7 @@
   const sheetRowCounts = {};
   let workspaceSession = null;
   let docRunsUi = null;
+  let hwpHost = null;
 
   function chainWorkspaceQueue(opFn) {
     const run = workspaceHistoryQueue.then(opFn, opFn);
@@ -178,7 +179,7 @@
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
     getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi,
-    getActiveModule: () => activeModule,
+    getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     setActiveModule: (next) => { activeModule = next; },
     getActiveRibbonCategory: () => activeRibbonCategory,
     setActiveRibbonCategory: (next) => { activeRibbonCategory = next; },
@@ -219,7 +220,7 @@
     parseCellRefParts, isExcludedDocChromeElement, extractEditableDocumentText,
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
-    getActiveModule: () => activeModule,
+    getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     getActiveSheetName: () => activeSheetName,
     getActiveSheetCellRef: () => activeSheetCellRef,
     getActiveSlideIndex: () => activeSlideIndex,
@@ -234,7 +235,7 @@
 
   workspaceSession = host.__EASYOFFICE_CREATE_WORKSPACE_SESSION__({
     document, shortcutBindings: ribbonCatalog.WORKSPACE_SHORTCUT_BINDINGS,
-    getActiveModule: () => activeModule,
+    getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     runExclusive: chainWorkspaceQueue,
@@ -260,6 +261,11 @@
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     commitPendingSheetCell: (flush) => sheetController.commitPendingFocusedSheetCell(flush),
     computeEvaluatedSheetStore: sheetStoreHelpers.computeEvaluatedSheetStore,
+  });
+
+  hwpHost = host.__EASYOFFICE_CREATE_HWP_HOST__({
+    document, invokeIpc, getActiveModule: () => activeModule,
+    onStateChange: () => workspaceSession.applyModuleContext(activeModule),
   });
 
   function saveWorkspaceDocument() {
@@ -927,6 +933,7 @@
     fileOpen.bindUi();
     await fileOpen.captureBaselines();
     await loadWorkspaceBootstrap();
+    if (host.__EASYOFFICE_SMOKE__) void hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP"));
   }
 
   async function loadWorkspaceBootstrap() {

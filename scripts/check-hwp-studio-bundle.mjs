@@ -137,6 +137,8 @@ export function checkBundle(dir, { vendorWasm = path.join(REPO, "vendor/rhwp-cor
       const text = fs.readFileSync(full, "utf8");
       scanText(rel, text, errors);
       if (rel.endsWith(".html")) scanHtml(rel, text, errors);
+      // The bundle is hosted below /hwp-studio/: a root-absolute url() would escape it (PD-083).
+      if (rel.endsWith(".css") && /url\(\s*["']?\/(?!\/)/.test(text)) errors.push(`${rel}: root-absolute url() escapes the /hwp-studio/ base`);
     }
   }
   checkReferencedAssets(dir, files, errors);

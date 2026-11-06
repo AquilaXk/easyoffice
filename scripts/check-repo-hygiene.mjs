@@ -50,7 +50,10 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/slide-studio.js",
   "crates/easyoffice-app/ui/doc-runs.js",
   "crates/easyoffice-app/ui/doc-runs-ui.js",
+  "crates/easyoffice-app/ui/hwp-host.js",
   "crates/easyoffice-app/ui/app.js",
+  "crates/easyoffice-app/src/hwp_bundle.rs",
+  "crates/easyoffice-app/build.rs",
   "crates/easyoffice-desktop/Cargo.toml",
   "crates/easyoffice-desktop/build.rs",
   "crates/easyoffice-desktop/src/main.rs",
@@ -85,6 +88,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-webui-desktop-bridge.mjs",
   "scripts/test-webui-file-open.mjs",
   "scripts/test-webui-slide-show.mjs",
+  "scripts/test-webui-hwp-host.mjs",
   ".gitmodules",
   "config/rhwp-upstream.json",
   "scripts/verify-rhwp-upstream.mjs",
@@ -520,7 +524,15 @@ if (!foundSafeIntStrictBound) {
 
 const DESKTOP_SHELL_MANIFEST = "crates/easyoffice-desktop/Cargo.toml";
 const DESKTOP_SHELL_CONFIG = "crates/easyoffice-desktop/tauri.conf.json";
-const DESKTOP_SHELL_CSP = { "default-src": "'self'", "connect-src": "'self' ipc: http://ipc.localhost" };
+// PD-083: the embedded editor needs WebAssembly compilation (`wasm-unsafe-eval`, never `unsafe-eval`),
+// `data:`/`blob:` images and a same-origin frame; there is still no inline script/style allowance.
+const DESKTOP_SHELL_CSP = {
+  "default-src": "'self'",
+  "script-src": "'self' 'wasm-unsafe-eval'",
+  "img-src": "'self' data: blob:",
+  "frame-src": "'self'",
+  "connect-src": "'self' ipc: http://ipc.localhost",
+};
 const DESKTOP_SHELL_PERMISSIONS = new Set(["allow-ipc-dispatch", "allow-save-document-file"]);
 
 // Desktop shell guard (PD-074): embedded assets only, the WebUI CSP plus the shell IPC origin,

@@ -10,7 +10,7 @@ mod smoke;
 use easyoffice_app::EasyOfficeIpcRouter;
 use save_file::{write_document_bytes, SaveOutcome, SaveRequest};
 use serde::Serialize;
-use smoke::{SmokeProbe, SMOKE_TIMEOUT};
+use smoke::{SmokeProbe, SMOKE_INIT_SCRIPT, SMOKE_TIMEOUT};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
@@ -40,6 +40,7 @@ async fn ipc_dispatch(
     payload: String,
 ) -> Result<String, IpcError> {
     let probe_command = command.clone();
+    let probe_payload = app.try_state::<SmokeProbe>().map(|_| payload.clone());
     let result = tauri::async_runtime::spawn_blocking(move || {
         EasyOfficeIpcRouter::dispatch(&command, &payload)
     })
@@ -47,7 +48,11 @@ async fn ipc_dispatch(
     .map_err(|err| IpcError::new(format!("엔진 작업을 실행하지 못했습니다: {err}")))?
     .map_err(|err| IpcError::new(err.to_string()));
     if let Some(probe) = app.try_state::<SmokeProbe>() {
-        probe.observe(&probe_command, result.is_ok());
+        probe.observe(
+            &probe_command,
+            probe_payload.as_deref().unwrap_or_default(),
+            result.is_ok(),
+        );
     }
     result
 }
@@ -105,13 +110,17 @@ fn main() {
             if smoke_mode {
                 app.manage(SmokeProbe::start(SMOKE_TIMEOUT));
             }
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("EasyOffice")
-                .inner_size(1440.0, 900.0)
-                .min_inner_size(1024.0, 680.0)
-                .center()
-                .on_navigation(is_app_origin)
-                .build()?;
+            let mut window =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("EasyOffice")
+                    .inner_size(1440.0, 900.0)
+                    .min_inner_size(1024.0, 680.0)
+                    .center()
+                    .on_navigation(is_app_origin);
+            if smoke_mode {
+                window = window.initialization_script(SMOKE_INIT_SCRIPT);
+            }
+            window.build()?;
             Ok(())
         })
         .run(tauri::generate_context!())

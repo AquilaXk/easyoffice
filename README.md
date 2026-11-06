@@ -9,7 +9,8 @@ EasyOffice (`v1.0.0`) is a 100% standalone, serverless, offline-capable native m
 ## Key Highlights
 
 - **Unified 5-in-1 Native macOS Workspace (`WorkspaceViewModel`)**:
-  - Open, edit, create, duplicate, pin, and convert word processing documents, Korean HWP/HWPX files, spreadsheets, presentations, and PDFs inside a single tabbed macOS window.
+  - The HWP module embeds the rhwp-based HWP editor (same-origin iframe, no IPC access) in the Windows desktop shell and `--serve`; builds without the generated editor bundle fall back to the text-only editor. Build it with `node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs` before the desktop shell (PD-083).
+- Open, edit, create, duplicate, pin, and convert word processing documents, Korean HWP/HWPX files, spreadsheets, presentations, and PDFs inside a single tabbed macOS window.
   - Supports **Side-by-Side Split View** (`splitSecondaryTabID`, minimum `420pt` per pane) for comparing two documents simultaneously, a **Collapsible 7-Category Context Ribbon** (`Cmd+Option+R`), a **Left Structure Navigator**, a **Right Contextual Inspector**, and **5 Interactive Editor Detail Panes** (`DocumentEditorDetailPaneView`, `SheetEditorDetailPaneView`, `SlideEditorDetailPaneView`, `PDFStudioEditorDetailPaneView`).
 - **20-Format Binary & Container Round-Trip Codecs**:
   - **ZIP-based Containers (`ZipContainerCodec`)**: `OOXMLContainerCodec` (`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `ODFContainerCodec` (`.odt`, `.ods`, `.odp`), `HWPXContainerCodec` (`.hwpx`, `.hwtx` per KS X 6101 OWPML).

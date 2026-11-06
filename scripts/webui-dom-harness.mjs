@@ -42,6 +42,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/workspace-session.js",
   "../crates/easyoffice-app/ui/file-open.js",
   "../crates/easyoffice-app/ui/slide-studio.js",
+  "../crates/easyoffice-app/ui/hwp-host.js",
   "../crates/easyoffice-app/ui/app.js",
 ].map((relPath) => ({
   relPath,
@@ -836,6 +837,8 @@ export async function createWorkspaceHarness(options = {}) {
     },
     __TAURI_INTERNALS__: resolveShellInternals(options),
   };
+
+  Object.assign(hostEnv, options.hostEnvExtras || {});
 
   let offlineHandlers = null;
   function getDefaultOfflineHandlers() {
