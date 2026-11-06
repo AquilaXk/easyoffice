@@ -994,3 +994,24 @@
   - 상한 없는 세션 맵은 장시간 구동 서버에서 창을 열 때마다 메모리가 증가하므로 LRU 축출로 기각.
 - **Verified by** `cargo test -p easyoffice-app ribbon_session`(이슈 재현 순서, 두 세션 격리, 형식 오류 거부, LRU 상한), `node --test scripts/test-webui-behavior.mjs`(`ribbon IPC sends a per-window session id and the undo target module (#106)`), `node scripts/check-repo-hygiene.mjs`
 - **Revisit when** 서버가 루프백 외 원격 다중 사용자 접속을 지원하여 세션 식별자에 인증·소유권 검증이 필요해질 때.
+
+## 45. 시트 TEXT 서식 코드·대용량 통합 문서 재계산·없는 시트 `#REF!`·순환 참조 표준 오류값 정합성 (PD-070, #107)
+
+- **Status** Implemented
+- **Context** `evaluate_sheet` IPC 점검에서 `TEXT()`가 리터럴·0 채움·`;` 구간·월/요일 이름·시간을 처리하지 못했고, UI가 재계산마다 통합 문서 전체를 보내는데 HTTP 본문 한도(1MiB) 때문에 숫자 20,000개 + 수식 4,000개(약 1.37MB) 문서가 `413`으로 실패했으며, `=SUM(A1:Z10000)`이 범위 확장 상한(`100,000`셀)으로 `#REF!`를 냈습니다. 또한 `evaluate_workbook_formula`가 데모 값(`Sheet1!A1=1200`, `Sheet2!A1=100`)과 암묵적 `Sheet1`/`Sheet2`를 시드해 없는 시트 참조가 가상 값을 냈고, 순환 참조는 규격에 없는 `#CYCLE!`로 표시됐습니다.
+- **Decision (`PD-070`)**
+  1. **Excel 호환 `TEXT` 서식 코드 (`crates/easyoffice-sheet/src/text_format.rs`)**: 따옴표·`\` 이스케이프·맨 문자(`원`, `₩`, `$`) 리터럴, `[$₩-412]` 통화 기호, `0`/`#`/`?` 자리 표시자와 0 채움, 천 단위 구분 및 끝 쉼표 1/1000 배율, `%`, `E+`/`E-` 지수, 최대 4개 `;` 구간(양수;음수;0;텍스트)과 `@` 치환, `General`, 날짜·시간 코드(`yyyy`/`yy`, `m`~`mmmmm`, `d`~`dddd`, `h`/`hh`, 시 뒤·초 앞의 `m` 분, `ss`, 소수 초, `AM/PM`·`A/P`) 및 경과 시간 `[h]`/`[m]`/`[s]`를 지원합니다. 월·요일 이름은 영어(en-US) 이름을 사용하며, 음수·범위 밖 날짜 일련번호에 날짜 코드를 적용하면 `#VALUE!`입니다. 소수 자리 표시자는 10자리까지 반영합니다.
+  2. **IPC 본문 한도 (`crates/easyoffice-app/src/http_server.rs`)**: `POST /api/ipc`만 `MAX_IPC_HTTP_BODY_BYTES = 16MiB`로 올리고, 그 밖의 경로와 헤더 블록은 `MAX_HTTP_BODY_BYTES = 1MiB`를 유지합니다. 한도 초과 `Content-Length`와 스트림은 계속 CSP 헤더가 붙은 `413`을 반환합니다. 연결당 3초 읽기 데드라인은 그대로 두며(루프백에서 16MiB는 수 ms), 선언된 길이만큼 버퍼를 미리 확보하지 않고 최대 1MiB씩 늘려 32슬롯 동시 접속 시 메모리 선점을 막습니다. UI는 이미 비어 있지 않은 셀만 전송합니다.
+  3. **넓은 범위 참조 (`crates/easyoffice-sheet/src/{types.rs,range_refs.rs,coercion.rs}`)**: `CellRange::new`는 시트 경계(`1,048,576`행 × `16,384`열) 안의 모든 범위를 허용합니다. `SUM`/`COUNT`/`AVERAGE`/`MIN`/`MAX`/`COUNTA`/`COUNTBLANK`/`PRODUCT`/`SUMIF(S)`/`COUNTIF(S)`/`AVERAGEIF(S)`는 채워진 셀만 순회하고 빈 셀 수는 산술로 셉니다. 실제 벡터를 만드는 `CellRange::expand()`는 `MAX_EXPANDED_CELL_COUNT = 100,000`을 유지하고, 조밀 순회(조회·`SUMPRODUCT`·`SUBTOTAL` 등)는 평가 단계 예산(`MAX_EVAL_STEPS = 2,097,152`)을 넘으면 `#VALUE!`로 중단해 전체 그리드 남용 수식도 시간·메모리가 제한됩니다.
+  4. **재계산 일괄 평가 (`WorkbookEngine::evaluate_targets`)**: `evaluate_sheet`의 모든 대상이 메모이제이션 컨텍스트 하나를 공유해 여러 대상이 참조하는 수식 셀을 한 번만 계산합니다(릴리스 빌드에서 숫자 20,000개 + `=SUM($A$1:An)` 4,000개, 1.37MB 페이로드 약 0.45초).
+  5. **데모 시드 제거 (`crates/easyoffice-app/src/lib.rs`)**: `evaluate_workbook_formula`/`evaluate_sheet`는 데모 값과 암묵적 `Sheet1`/`Sheet2`를 만들지 않습니다. `sheets`가 없으면 기본 시트와 `cells`에 등장한 시트만 존재하므로 없는 시트 참조(`=Sheet2!A1`)는 `#REF!`이고, `expr`이 없으면 기준 셀(`cell` 또는 `A1`)을 평가합니다.
+  6. **순환 참조 표현**: 셀 값은 표준 오류 리터럴 `#NUM!`로 표시·저장하고(ECMA-376에 `#CYCLE!`은 없음), 내부적으로는 `FormulaError::Cycle` 변형을 유지해 IPC 응답에 별도 `"circular": true` 플래그를 싣습니다. WebUI는 이 플래그를 받으면 상태 표시줄(`#status-command-feedback`)에 순환 참조 경고를 띄웁니다. 기존 문서 호환을 위해 입력 수식의 `#CYCLE!` 리터럴은 계속 파싱합니다.
+- **Trade-offs**
+  1. Excel은 순환 참조 셀을 `0`으로 표시하지만, 0을 저장하면 의존 셀이 오류 없이 잘못된 값을 저장하게 됩니다. `#NUM!`은 반복 계산이 수렴하지 않을 때 쓰는 표준 오류와 의미가 가깝고 의존 셀로 전파되므로 저장된 파일에서 잘못된 숫자가 조용히 퍼지지 않습니다. 대신 `ISERROR`/`IFERROR`가 순환 참조를 일반 오류처럼 처리합니다.
+  2. 16MiB IPC 한도는 실사용 대형 시트를 수용하지만 그보다 큰 통합 문서는 여전히 `413`입니다. 셀 단위 증분 전송은 별도 작업입니다.
+  3. Swift 코어(`Sources/EasyOfficeCore`)와 Swift 테스트는 아직 `#CYCLE!`을 표시하며, 이번 변경은 Rust 엔진·WebUI·오프라인 JS 미러에만 적용됩니다.
+- **Alternatives rejected**
+  - 순환 참조를 `#REF!`로 표시하는 방식: 참조 대상이 존재하는데 "잘못된 참조"로 오인시켜 기각했습니다.
+  - IPC 본문 한도 무제한 해제: 루프백이라도 32슬롯 × 무제한 버퍼가 메모리 고갈 경로가 되므로 상한을 둡니다.
+- **Verified by** `cargo test -p easyoffice-sheet --test sheet_text_format_and_large_ranges`, `crates/easyoffice-app/src/sheet_ipc_tests.rs`, `node --test scripts/test-webui-sheet-atomicity.mjs`
+- **Revisit when** 셀 단위 증분 재계산 IPC 또는 로캘별(ko-KR) 월·요일 이름 서식 코드(`[$-412]`)를 도입할 때.

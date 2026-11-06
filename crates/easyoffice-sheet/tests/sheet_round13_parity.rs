@@ -336,7 +336,8 @@ fn test_openformula_bracketed_sheet_quoting_parity() {
     );
     assert_eq!(
         wb.evaluate_formula_on_sheet("Main", "=COUNTIF(A1:XFD1000000, \"<>0\")"),
-        EvaluatedCellValue::Error(FormulaError::Ref)
+        EvaluatedCellValue::Number(16_384_000_000.0),
+        "wide in-bounds ranges are valid references; COUNTIF streams populated cells only"
     );
     assert_eq!(
         wb.evaluate_formula_on_sheet("Main", "=IF(TRUE, 42, Main!A1:Ⅰ분기!B2)"),

@@ -430,9 +430,6 @@
         const minRow = Math.min(startCoord.row, endCoord.row);
         const maxRow = Math.max(startCoord.row, endCoord.row);
         const cellCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
-        if (cellCount > MAX_EXPANDED_CELL_COUNT) {
-          return { kind: "Error", code: "#REF!" };
-        }
         return {
           kind: "Range",
           sheet: explicitSheet,

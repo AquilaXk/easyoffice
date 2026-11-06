@@ -286,6 +286,11 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
+        // Dense walks over very wide ranges stop once the per-root step budget is spent
+        // instead of spinning through billions of empty coordinates.
+        if ctx.steps > Self::MAX_EVAL_STEPS {
+            return Err(FormulaError::Value);
+        }
         let (ref sheet_opt, min_r, min_c, _rows, _cols, transposed) = *spec;
         let (r, c) = if transposed {
             (min_r + dc as u32, min_c + dr as u32)
@@ -600,7 +605,11 @@ impl SheetEngine {
     ) -> Result<(usize, usize, Vec<EvaluatedCellValue>, bool), FormulaError> {
         if let Some(spec) = self.extract_streaming_range_ctx(expr, ctx, depth)? {
             let (_, _, _, rows, cols, _) = spec;
-            let mut vals = Vec::with_capacity(rows.saturating_mul(cols));
+            if rows.saturating_mul(cols) > Self::MAX_EVAL_STEPS {
+                return Err(FormulaError::Value);
+            }
+            let mut vals =
+                Vec::with_capacity(rows.saturating_mul(cols).min(CellRange::MAX_EXPANDED_CELLS));
             for dr in 0..rows {
                 for dc in 0..cols {
                     vals.push(self.eval_streaming_cell(&spec, dr, dc, ctx, depth)?);

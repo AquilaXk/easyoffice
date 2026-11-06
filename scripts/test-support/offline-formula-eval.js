@@ -124,7 +124,10 @@
     if (workbook.memo.has(fullKey)) return workbook.memo.get(fullKey);
     const formula = workbook.formulaEntries[fullKey];
     if (formula !== undefined) {
-      if (workbook.visiting.has(fullKey)) return valErr("#CYCLE!");
+      if (workbook.visiting.has(fullKey)) {
+        workbook.circular = true;
+        return valErr("#NUM!");
+      }
       const savedTruncated = Boolean(workbook.depthTruncated);
       workbook.depthTruncated = false;
       workbook.visiting.add(fullKey);
@@ -167,6 +170,39 @@
     return lhs.flag ? 1 : -1;
   }
 
+  // Mirrors the Rust engine: wide ranges stream only populated cells (sorted row-major) instead
+  // of materializing every empty coordinate; MAX_EXPANDED_CELL_COUNT is the dense-walk threshold.
+  function visitRangeCells(item, workbook, depth, visit) {
+    const cellCount = (item.maxRow - item.minRow + 1) * (item.maxCol - item.minCol + 1);
+    if (cellCount <= MAX_EXPANDED_CELL_COUNT) {
+      for (let r = item.minRow; r <= item.maxRow; r += 1) {
+        for (let c = item.minCol; c <= item.maxCol; c += 1) {
+          const v = readWorkbookTypedCell(workbook, item.sheetUpper, colIndexToLetters(c) + r, depth);
+          if (visit(v) === false) return { cellCount, visited: cellCount };
+        }
+      }
+      return { cellCount, visited: cellCount };
+    }
+    const prefix = item.sheetUpper + "!";
+    const coords = [];
+    for (const key of Object.keys(workbook.rawValues)) {
+      if (!key.startsWith(prefix)) continue;
+      const parts = parseCellRefParts(key.slice(prefix.length));
+      if (!parts) continue;
+      const col = parts.col;
+      const row = parts.row;
+      if (row >= item.minRow && row <= item.maxRow && col >= item.minCol && col <= item.maxCol) {
+        coords.push({ row, col });
+      }
+    }
+    coords.sort((a, b) => a.row - b.row || a.col - b.col);
+    for (const { row, col } of coords) {
+      const v = readWorkbookTypedCell(workbook, item.sheetUpper, colIndexToLetters(col) + row, depth);
+      if (visit(v) === false) break;
+    }
+    return { cellCount, visited: coords.length };
+  }
+
   function evalAggregateFunction(fnName, argItems, workbook, depth) {
     const nums = [];
     let countAll = 0;
@@ -175,24 +211,21 @@
       const item = argItems[idx];
       if (item.kind === "range") {
         if (!item.sheetUpper) return valErr("#REF!");
-        const cellCount = (item.maxRow - item.minRow + 1) * (item.maxCol - item.minCol + 1);
-        if (cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
-        for (let r = item.minRow; r <= item.maxRow; r += 1) {
-          for (let c = item.minCol; c <= item.maxCol; c += 1) {
-            const cellVal = readWorkbookTypedCell(
-              workbook,
-              item.sheetUpper,
-              colIndexToLetters(c) + r,
-              depth
-            );
-            if (cellVal.kind === "error") return cellVal;
-            if (cellVal.kind === "number") nums.push(cellVal.num);
-            if (cellVal.kind === "empty" || (cellVal.kind === "text" && cellVal.text === "")) {
-              countBlank += 1;
-            }
-            if (cellVal.kind !== "empty") countAll += 1;
+        let rangeErr = null;
+        const { cellCount, visited } = visitRangeCells(item, workbook, depth, (cellVal) => {
+          if (cellVal.kind === "error") {
+            rangeErr = cellVal;
+            return false;
           }
-        }
+          if (cellVal.kind === "number") nums.push(cellVal.num);
+          if (cellVal.kind === "empty" || (cellVal.kind === "text" && cellVal.text === "")) {
+            countBlank += 1;
+          }
+          if (cellVal.kind !== "empty") countAll += 1;
+          return true;
+        });
+        if (rangeErr) return rangeErr;
+        countBlank += cellCount - visited;
       } else {
         if (item.kind === "error") return item;
         if (fnName === "COUNT") {
@@ -262,24 +295,23 @@
       const item = argItems[idx];
       if (item.kind === "range") {
         if (!item.sheetUpper) return valErr("#REF!");
-        const cellCount = (item.maxRow - item.minRow + 1) * (item.maxCol - item.minCol + 1);
-        if (cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
-        for (let r = item.minRow; r <= item.maxRow; r += 1) {
-          for (let c = item.minCol; c <= item.maxCol; c += 1) {
-            const cellVal = readWorkbookTypedCell(
-              workbook,
-              item.sheetUpper,
-              colIndexToLetters(c) + r,
-              depth
-            );
-            if (cellVal.kind === "error") return cellVal;
-            if (cellVal.kind === "empty") continue;
-            const b = coerceScalarBool(cellVal);
-            if (b === null) return valErr("#VALUE!");
-            seen += 1;
-            if (b) trues += 1;
+        let rangeErr = null;
+        visitRangeCells(item, workbook, depth, (cellVal) => {
+          if (cellVal.kind === "error") {
+            rangeErr = cellVal;
+            return false;
           }
-        }
+          if (cellVal.kind === "empty") return true;
+          const b = coerceScalarBool(cellVal);
+          if (b === null) {
+            rangeErr = valErr("#VALUE!");
+            return false;
+          }
+          seen += 1;
+          if (b) trues += 1;
+          return true;
+        });
+        if (rangeErr) return rangeErr;
       } else {
         if (item.kind === "error") return item;
         const b = coerceScalarBool(item);
@@ -410,7 +442,6 @@
     const minRow = Math.min(lhs.row, rhs.row);
     const maxRow = Math.max(lhs.row, rhs.row);
     const cellCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
-    if (cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
     return { kind: "range", sheetUpper, minCol, maxCol, minRow, maxRow, cellCount };
   }
 
@@ -517,7 +548,6 @@
       if (node.kind === "Range") {
         const sheetUpper = validateRefTargetSheet(node, workbook, currentSheetUpper);
         if (!sheetUpper) return valErr("#REF!");
-        if (node.cellCount > MAX_EXPANDED_CELL_COUNT) return valErr("#REF!");
         return {
           kind: "range",
           sheetUpper,
@@ -701,7 +731,7 @@
     return "Sheet1";
   }
 
-  function buildLocalWorkbookFromJson(doc, defaultSheet, seedDefaults) {
+  function buildLocalWorkbookFromJson(doc, defaultSheet) {
     const knownSheets = [];
     const hasExplicitSheets = doc.sheets !== undefined;
     if (hasExplicitSheets) {
@@ -710,8 +740,6 @@
         ensureKnownSheetUpper(knownSheets, doc.sheets[i]);
       }
     } else {
-      ensureKnownSheetUpper(knownSheets, "Sheet1");
-      ensureKnownSheetUpper(knownSheets, "Sheet2");
       ensureKnownSheetUpper(knownSheets, defaultSheet);
     }
     if (doc.cells !== undefined && !Array.isArray(doc.cells)) {
@@ -720,8 +748,6 @@
     const cells = doc.cells || [];
     const rawValues = {};
     const formulaEntries = {};
-    let seenSheet1 = false;
-    let seenSheet2 = false;
     const triples = [];
 
     for (let i = 0; i < cells.length; i += 1) {
@@ -741,25 +767,11 @@
         throw new Error("InvalidArgument: 유효하지 않은 셀 주소입니다: " + item.cell);
       }
       const strVal = scalarJsonCellValue(item.value);
-      if (isSameSheetIdentityJs(shName, "Sheet1")) seenSheet1 = true;
-      if (isSameSheetIdentityJs(shName, "Sheet2")) seenSheet2 = true;
       const shUpper = hasExplicitSheets
         ? resolveCanonicalSheetUpper(knownSheets, shName)
         : ensureKnownSheetUpper(knownSheets, shName);
       if (!shUpper) continue;
       triples.push({ shUpper, addrUpper: addrNorm, strVal });
-    }
-
-    if (seedDefaults) {
-      const s1Key = resolveCanonicalSheetUpper(knownSheets, "Sheet1");
-      if (!seenSheet1 && s1Key) {
-        rawValues[s1Key + "!A1"] = "1200";
-        rawValues[s1Key + "!B1"] = "850";
-      }
-      const s2Key = resolveCanonicalSheetUpper(knownSheets, "Sheet2");
-      if (!seenSheet2 && s2Key) {
-        rawValues[s2Key + "!A1"] = "100";
-      }
     }
 
     for (let i = 0; i < triples.length; i += 1) {
@@ -780,6 +792,7 @@
       memo: new Map(),
       visiting: new Set(),
       depthTruncated: false,
+      circular: false,
     };
   }
 
