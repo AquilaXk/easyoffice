@@ -23,7 +23,7 @@
     {
       "id": "main",
       "strategy": "fork",
-      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument RPC handler. The host owns open/save/new."
+      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument and verifyBytes RPC handlers and forwards dirty-state and edit events to the host. The host owns open/save/new."
     },
     {
       "id": "core/font-loader",
@@ -38,12 +38,12 @@
     {
       "id": "embed/protocol",
       "strategy": "fork",
-      "reason": "Does not advertise plugin-loader-v1 and hwpctrl-v1 (not bundled); adds blank-document-v1."
+      "reason": "Does not advertise plugin-loader-v1 and hwpctrl-v1 (not bundled); adds blank-document-v1 and verify-bytes-v1."
     },
     {
       "id": "embed/rpc-router",
       "strategy": "fork",
-      "reason": "Removes the plugin.* RPC methods and adds createBlankDocument."
+      "reason": "Removes the plugin.* RPC methods and adds createBlankDocument and verifyBytes."
     }
   ],
   "assetOverrides": [

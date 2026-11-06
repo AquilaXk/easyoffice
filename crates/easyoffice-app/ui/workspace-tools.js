@@ -54,6 +54,7 @@
       sheetController,
       getActiveModule,
       getHwpHost,
+      getHwpSession,
       getActiveSheetName,
       getActiveSheetCellRef,
       getActiveSlideIndex,
@@ -199,22 +200,11 @@
     }
 
     // Embedded HWP editor: HWP 5.0 bytes exported by the editor itself, same delivery as every save.
-    async function saveEmbeddedHwp(hwpHost) {
+    async function saveEmbeddedHwp(session) {
       const fb = document.getElementById("status-command-feedback");
-      const title = resolveSaveFileBase("HWP");
-      try {
-        const delivery = await hwpHost.saveDocument(deliverSavedFile, title);
-        if (delivery.cancelled) {
-          if (fb) fb.textContent = "문서 저장 취소 (HWP): 저장 위치를 선택하지 않았습니다";
-          return false;
-        }
-        if (!delivery.ok) throw new Error(delivery.error || "파일 다운로드를 시작하지 못했습니다");
-        if (fb) fb.textContent = "문서 저장 완료 (" + delivery.path + " · HWP 5.0)";
-        return true;
-      } catch (err) {
-        if (fb) fb.textContent = "문서 저장 실패 (HWP): " + (err?.message || String(err));
-        return false;
-      }
+      const result = await session.save({ deliver: deliverSavedFile, baseName: resolveSaveFileBase("HWP") });
+      if (fb) fb.textContent = result.message;
+      return result.ok;
     }
 
     function saveActiveModuleDocument() {
@@ -222,7 +212,8 @@
         await sheetController.commitPendingFocusedSheetCell(true);
         const curMod = getActiveModule();
         const hwpHost = getHwpHost?.();
-        if (curMod === "HWP" && hwpHost?.isEmbedActive()) return saveEmbeddedHwp(hwpHost);
+        const hwpSession = getHwpSession?.();
+        if (curMod === "HWP" && hwpHost?.isEmbedActive() && hwpSession) return saveEmbeddedHwp(hwpSession);
         const extMap = {
           DOC: "docx",
           HWP: "hwpx",
