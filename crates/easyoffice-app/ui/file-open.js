@@ -16,7 +16,7 @@
     "hwp", "hwpx", "hwt", "hwtx",
     "xlsx", "xls", "ods", "csv", "tsv",
     "pptx", "ppt", "ppsx", "odp",
-    "pdf",
+    "pdf", "pages",
   ];
   const BASE64_CHUNK = 0x8000;
 

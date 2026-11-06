@@ -16,12 +16,17 @@ pub mod ole2_codec;
 mod ooxml_presentation;
 mod ooxml_shared_parts;
 mod output_compatibility;
+pub mod pages_iwa;
+pub mod pages_package;
+pub mod pages_proto;
+mod pages_schema;
 mod pdf_stream_parser;
 mod pdf_writer;
 pub mod rich_document;
 mod rich_read_hwpx;
 mod rich_read_odt;
 mod rich_read_ooxml;
+mod rich_read_pages;
 mod rich_read_rtf;
 mod rich_read_text;
 pub mod rich_readers;
@@ -73,6 +78,7 @@ pub enum ContainerFamily {
     ZipOoxml,
     ZipOdf,
     ZipHwpx,
+    ZipIwork,
     Ole2Cfbf,
     PdfIso32000,
     PlainTextUtf8,
@@ -84,6 +90,7 @@ impl ContainerFamily {
             Self::ZipOoxml => "ZIP-OOXML (ECMA-376)",
             Self::ZipOdf => "ZIP-ODF (ISO/IEC 26300)",
             Self::ZipHwpx => "ZIP-HWPX (KS X 6101 OWPML)",
+            Self::ZipIwork => "ZIP-IWA (Apple iWork)",
             Self::Ole2Cfbf => "OLE2-CFBF",
             Self::PdfIso32000 => "PDF (ISO 32000)",
             Self::PlainTextUtf8 => "UTF-8 Plain Text",
@@ -91,7 +98,8 @@ impl ContainerFamily {
     }
 }
 
-/// 20 standard document formats supported by EasyOffice across macOS and Windows.
+/// 20 standard read/write document formats supported by EasyOffice across macOS and Windows,
+/// plus [DocumentFormat::Pages], a read-only source (listed in [DocumentFormat::READ_ONLY]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentFormat {
     Docx,
@@ -114,9 +122,18 @@ pub enum DocumentFormat {
     Ppsx,
     Odp,
     Pdf,
+    /// Apple Pages (read-only source; never an encode target).
+    Pages,
 }
 
 impl DocumentFormat {
+    /// Formats that can be opened but never written.
+    pub const READ_ONLY: [DocumentFormat; 1] = [Self::Pages];
+
+    pub fn is_read_only(&self) -> bool {
+        Self::READ_ONLY.contains(self)
+    }
+
     pub const ALL: [DocumentFormat; 20] = [
         Self::Docx,
         Self::Doc,
@@ -162,6 +179,7 @@ impl DocumentFormat {
             Self::Ppsx => "ppsx",
             Self::Odp => "odp",
             Self::Pdf => "pdf",
+            Self::Pages => "pages",
         }
     }
 
@@ -170,6 +188,7 @@ impl DocumentFormat {
             Self::Docx | Self::Xlsx | Self::Pptx | Self::Ppsx => ContainerFamily::ZipOoxml,
             Self::Odt | Self::Ods | Self::Odp => ContainerFamily::ZipOdf,
             Self::Hwpx | Self::Hwtx => ContainerFamily::ZipHwpx,
+            Self::Pages => ContainerFamily::ZipIwork,
             Self::Doc | Self::Xls | Self::Ppt | Self::Hwp | Self::Hwt => ContainerFamily::Ole2Cfbf,
             Self::Pdf => ContainerFamily::PdfIso32000,
             Self::Csv | Self::Tsv | Self::Markdown | Self::Txt | Self::Rtf => {
@@ -189,6 +208,7 @@ impl DocumentFormat {
             Self::Hwp | Self::Hwt => "HWP 5.0 Binary (OLE2 CFBF)",
             Self::Hwpx | Self::Hwtx => "HWPX (KS X 6101 OWPML)",
             Self::Pdf => "PDF (ISO 32000)",
+            Self::Pages => "Apple Pages (IWA, 읽기 전용)",
             Self::Odt => "ODF (ISO/IEC 26300) Text",
             Self::Ods => "ODF (ISO/IEC 26300) Spreadsheet",
             Self::Odp => "ODF (ISO/IEC 26300) Presentation",
@@ -223,6 +243,7 @@ impl DocumentFormat {
             "hwpx" => Some(Self::Hwpx),
             "hwtx" => Some(Self::Hwtx),
             "pdf" => Some(Self::Pdf),
+            "pages" => Some(Self::Pages),
             "odt" => Some(Self::Odt),
             "ods" => Some(Self::Ods),
             "odp" => Some(Self::Odp),
@@ -366,6 +387,13 @@ impl FormatDetector {
                 }
                 return Ok(DocumentFormat::Hwpx);
             }
+            if Self::slice_contains(bytes, b"Index/Document.iwa")
+                || (Self::slice_contains(bytes, b"index.xml")
+                    && !Self::slice_contains(bytes, b"[Content_Types].xml")
+                    && !Self::slice_contains(bytes, b"mimetype"))
+            {
+                return Ok(DocumentFormat::Pages);
+            }
             if Self::slice_contains(bytes, b"oasis.opendocument.text") {
                 return Ok(DocumentFormat::Odt);
             }
@@ -448,7 +476,10 @@ impl FormatDetector {
     ) -> Result<(), EasyOfficeError> {
         let family = format.container_family();
         match family {
-            ContainerFamily::ZipOoxml | ContainerFamily::ZipOdf | ContainerFamily::ZipHwpx => {
+            ContainerFamily::ZipOoxml
+            | ContainerFamily::ZipOdf
+            | ContainerFamily::ZipHwpx
+            | ContainerFamily::ZipIwork => {
                 if !bytes.starts_with(&Self::ZIP_MAGIC) {
                     return Err(EasyOfficeError::SignatureMismatch {
                         expected: family,

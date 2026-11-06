@@ -252,7 +252,7 @@
   // containers, so binary files must carry an `EOFIXTURE:` + JSON model (what the Rust decoder
   // returns); text formats (txt/md/csv/tsv) are decoded for real; anything else is "corrupt".
   const SOURCE_MODULES = {
-    docx: "DOC", doc: "DOC", odt: "DOC", rtf: "DOC", md: "DOC", markdown: "DOC", txt: "DOC",
+    docx: "DOC", doc: "DOC", odt: "DOC", rtf: "DOC", md: "DOC", markdown: "DOC", txt: "DOC", pages: "DOC",
     hwp: "HWP", hwpx: "HWP", hwt: "HWP", hwtx: "HWP",
     xlsx: "SHEET", xls: "SHEET", ods: "SHEET", csv: "SHEET", tsv: "SHEET",
     pptx: "SLIDE", ppt: "SLIDE", ppsx: "SLIDE", odp: "SLIDE", pdf: "PDF",
@@ -281,7 +281,7 @@
       const count = (model.sheets || model.slides || model.blocks || []).length;
       return { ...base, kind, itemCount: count, ...model };
     }
-    if (["docx", "xlsx", "pptx", "hwpx", "hwp", "doc", "xls", "ppt", "odt", "ods", "odp", "pdf", "hwt", "hwtx", "ppsx"].includes(ext)) {
+    if (["docx", "xlsx", "pptx", "hwpx", "hwp", "doc", "xls", "ppt", "odt", "ods", "odp", "pdf", "hwt", "hwtx", "ppsx", "pages"].includes(ext)) {
       throw new Error("컨테이너 무결성 검증 실패: 올바른 " + ext.toUpperCase() + " 파일이 아닙니다.");
     }
     if (ext === "csv" || ext === "tsv") {

@@ -205,6 +205,30 @@ test("HWP-family, slide, PDF and sheet files are routed to their own modules", a
   assert.equal(tabTitle(document, "SHEET"), "통계.xlsx");
 });
 
+test("a Pages file opens into the DOC module and shows what was skipped in the status bar", async () => {
+  const { document, calls } = await createOpenHarness();
+  await pickFile(
+    document,
+    fixtureFile("메모.pages", {
+      warnings: ["가져오지 않은 요소: 그림·도형 등 개체(형식 3005) 2개"],
+      blocks: [{ type: "paragraph", runs: [{ text: "애플 본문", bold: true }] }],
+    })
+  );
+  assert.equal(activeModule(document), "DOC");
+  assert.equal(document.getElementById("doc-editor").querySelector("p").textContent, "애플 본문");
+  assert.equal(tabTitle(document, "DOC"), "메모.pages");
+  assert.match(feedback(document), /^열기 완료: 메모\.pages/);
+  assert.match(feedback(document), /참고: .*그림·도형 등 개체\(형식 3005\) 2개/);
+  const decode = JSON.parse(calls.find((c) => c.command === "convert_document_format").payload);
+  assert.equal(decode.fileName, "메모.pages");
+});
+
+test("the converter offers Pages as a source format only", async () => {
+  const src = /id="conv-src-fmt"[\s\S]*?<\/select>/.exec(INDEX_HTML)[0];
+  const dst = /id="conv-dst-fmt"[\s\S]*?<\/select>/.exec(INDEX_HTML)[0];
+  assert.match(src, /value="pages"/);
+  assert.doesNotMatch(dst, /value="pages"/);
+});
 test("XLSX sheets keep every sheet name, values and formulas, and save back unchanged", async () => {
   const { document, userClick, converts } = await createOpenHarness();
   await pickFile(document, fixtureFile("통계.xlsx", SHEET_MODEL));

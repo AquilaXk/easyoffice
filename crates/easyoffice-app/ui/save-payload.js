@@ -254,7 +254,7 @@
     let name = String(rawTitle || "")
       .replace(/×$/, "")
       .trim()
-      .replace(/\.(docx?|hwpx?|hwtx?|hwt|xlsx?|ods|csv|tsv|pptx?|ppsx|odp|odt|pdf|rtf|md|txt)$/i, "");
+      .replace(/\.(docx?|hwpx?|hwtx?|hwt|xlsx?|ods|csv|tsv|pptx?|ppsx|odp|odt|pdf|rtf|md|txt|pages)$/i, "");
     name = name
       .replaceAll(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, "_")
       .replaceAll(/\s+/g, " ")
