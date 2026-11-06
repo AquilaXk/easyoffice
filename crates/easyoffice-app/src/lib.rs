@@ -9,6 +9,7 @@ use easyoffice_sheet::{
 };
 
 pub mod benchmark;
+pub mod benchmark_real;
 pub mod cli_args;
 mod convert_ipc;
 mod convert_open;
@@ -707,7 +708,10 @@ impl EasyOfficeIpcRouter {
 
     fn handle_run_engine_benchmark(payload: &str) -> Result<String, EasyOfficeError> {
         let iters = payload.trim().parse::<usize>().unwrap_or(5).clamp(3, 25);
-        Ok(run_deterministic_benchmarks(iters).to_json())
+        let mut report = run_deterministic_benchmarks(iters);
+        report.real_paths = benchmark_real::run_real_path_benchmarks();
+        report.all_equivalent &= report.real_paths.iter().all(|r| r.equivalence_verified);
+        Ok(report.to_json())
     }
 
     fn handle_get_ribbon_category_commands(payload: &str) -> Result<String, EasyOfficeError> {

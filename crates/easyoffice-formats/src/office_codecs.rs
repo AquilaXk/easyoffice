@@ -93,7 +93,7 @@ impl OoxmlCodec {
         XmlSanitizer::validate_safe_xml(&body)?;
         XmlSanitizer::validate_safe_xml(&core_xml)?;
 
-        ZipArchiveCodec::pack(&[
+        ZipArchiveCodec::pack_compressed(&[
             (
                 "[Content_Types].xml".to_string(),
                 content_types.as_bytes().to_vec(),
@@ -370,7 +370,7 @@ impl OoxmlCodec {
             ));
         }
 
-        ZipArchiveCodec::pack(&entries)
+        ZipArchiveCodec::pack_compressed(&entries)
     }
 
     pub fn unpack_xlsx(bytes: &[u8]) -> Result<OoxmlXlsxPayload, EasyOfficeError> {

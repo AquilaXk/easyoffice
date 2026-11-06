@@ -189,7 +189,7 @@ impl OdfCodec {
         content.push_str("</office:text></office:body></office:document-content>");
         XmlSanitizer::validate_safe_xml(&content)?;
 
-        ZipArchiveCodec::pack(&[
+        ZipArchiveCodec::pack_compressed(&[
             (
                 "mimetype".to_string(),
                 Self::MIMETYPE_ODT.as_bytes().to_vec(),
@@ -358,7 +358,7 @@ impl OdfCodec {
         content.push_str("</office:spreadsheet></office:body></office:document-content>");
         XmlSanitizer::validate_safe_xml(&content)?;
 
-        ZipArchiveCodec::pack(&[
+        ZipArchiveCodec::pack_compressed(&[
             (
                 "mimetype".to_string(),
                 Self::MIMETYPE_ODS.as_bytes().to_vec(),
@@ -572,7 +572,7 @@ impl OdfCodec {
         content.push_str("</office:presentation></office:body></office:document-content>");
         XmlSanitizer::validate_safe_xml(&content)?;
 
-        ZipArchiveCodec::pack(&[
+        ZipArchiveCodec::pack_compressed(&[
             (
                 "mimetype".to_string(),
                 Self::MIMETYPE_ODP.as_bytes().to_vec(),

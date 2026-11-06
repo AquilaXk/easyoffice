@@ -700,7 +700,7 @@
               sourceBytes: decoded.sourceBytes, outputBytes: 10, targetBytes: 10,
               detectedTarget: String(parsed.targetFormat || "hwpx"), tableCount: 0,
               specification: "오프라인 테스트 변환", compatibility: "standard", compatibilityWarning: null,
-              warnings: decoded.warnings, converted_base64: b64, convertedBase64: b64, status: "OK",
+              warnings: decoded.warnings, convertedBase64: b64, status: "OK",
             };
           }
           src = String(parsed.sourceFormat || "docx").trim().toLowerCase();
@@ -767,7 +767,6 @@
             dst === "doc" || dst === "ppt"
               ? dst.toUpperCase() + " 출력은 EasyOffice 전용 하위 집합이라 다른 프로그램에서 열리지 않을 수 있습니다."
               : null,
-          converted_base64: b64,
           convertedBase64: b64,
           status: "OK",
         };
@@ -776,6 +775,11 @@
         status: "ok",
         iterations: 5,
         allEquivalent: true,
+        buildProfile: "release",
+        timingGated: true,
+        realPaths: [
+          { caseId: "docx_to_hwpx_1mb", elapsedUs: 45000, outputBytes: 234482, equivalenceVerified: true },
+        ],
         suites: [
           { suiteId: "crc32_slicing_by_8", baselineP50Us: 2068, optimizedP50Us: 464, speedupFactor: 4.46 },
           { suiteId: "deflate_zlib_roundtrip", baselineP50Us: 234, optimizedP50Us: 59, speedupFactor: 3.97 },
