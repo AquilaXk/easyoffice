@@ -1,9 +1,49 @@
 use easyoffice_formats::{
     DocumentFormat, EasyOfficeError, UniversalDocumentModel, UniversalFormatConverter,
+    XlsxCachedValue, XlsxFormulaCache,
 };
-use easyoffice_sheet::PackedCellCoordinate;
+use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, SheetEngine};
 
 use crate::EasyOfficeIpcRouter;
+
+/// Evaluates every formula cell XLSX output will contain with the sheet engine, so the written
+/// workbook carries real cached values (`<v>`) instead of placeholders. Error results are left
+/// uncached; the workbook's `fullCalcOnLoad` makes consumers recompute them.
+pub(crate) fn compute_xlsx_formula_cache(model: &UniversalDocumentModel) -> XlsxFormulaCache {
+    let mut cache = XlsxFormulaCache::new();
+    let cells = model.effective_sheet_cells();
+    if !cells.iter().any(|(_, _, raw)| raw.starts_with('=')) {
+        return cache;
+    }
+    let sheet_name = if model.title.trim().is_empty() {
+        "문서"
+    } else {
+        model.title.as_str()
+    };
+    let mut engine = SheetEngine::new(sheet_name);
+    for (row, col, raw) in &cells {
+        if let Ok(coord) = PackedCellCoordinate::new(*row, *col) {
+            let _ = engine.set_cell(&coord.to_a1(), raw.clone());
+        }
+    }
+    let results = engine.recalculate_all();
+    for (row, col, raw) in &cells {
+        if !raw.starts_with('=') {
+            continue;
+        }
+        let Ok(coord) = PackedCellCoordinate::new(*row, *col) else {
+            continue;
+        };
+        let cached = match results.get(&coord) {
+            Some(EvaluatedCellValue::Number(n)) if n.is_finite() => XlsxCachedValue::Number(*n),
+            Some(EvaluatedCellValue::Text(s)) => XlsxCachedValue::Text(s.clone()),
+            Some(EvaluatedCellValue::Boolean(b)) => XlsxCachedValue::Boolean(*b),
+            _ => continue,
+        };
+        cache.insert((*row, *col), cached);
+    }
+    cache
+}
 
 impl EasyOfficeIpcRouter {
     pub(crate) fn handle_convert_document_format(payload: &str) -> Result<String, EasyOfficeError> {
@@ -173,11 +213,29 @@ impl EasyOfficeIpcRouter {
             official_agency,
         };
 
-        let src_bytes = UniversalFormatConverter::encode(&model, src_fmt)?;
-        let dst_bytes = UniversalFormatConverter::encode(&model, dst_fmt)?;
+        let formula_cache = if src_fmt == DocumentFormat::Xlsx || dst_fmt == DocumentFormat::Xlsx {
+            Some(compute_xlsx_formula_cache(&model))
+        } else {
+            None
+        };
+        let src_bytes = UniversalFormatConverter::encode_with_formula_cache(
+            &model,
+            src_fmt,
+            formula_cache.as_ref(),
+        )?;
+        let dst_bytes = UniversalFormatConverter::encode_with_formula_cache(
+            &model,
+            dst_fmt,
+            formula_cache.as_ref(),
+        )?;
         let (detected_dst, decoded) =
             UniversalFormatConverter::decode(&dst_bytes, Some(dst_fmt.extension()))?;
         let b64 = Self::encode_base64(&dst_bytes);
+        let compatibility = dst_fmt.output_compatibility();
+        let compatibility_warning = compatibility.warning().map_or_else(
+            || "null".to_string(),
+            |w| format!("\"{}\"", Self::escape_json_str(w)),
+        );
 
         Ok(format!(
             concat!(
@@ -190,6 +248,8 @@ impl EasyOfficeIpcRouter {
                 "\"detectedTarget\":\"{}\",",
                 "\"containerFamily\":\"{}\",",
                 "\"specification\":\"{}\",",
+                "\"compatibility\":\"{}\",",
+                "\"compatibilityWarning\":{},",
                 "\"paragraphCount\":{},",
                 "\"tableCount\":{},",
                 "\"title\":\"{}\",",
@@ -205,12 +265,81 @@ impl EasyOfficeIpcRouter {
             dst_bytes.len(),
             detected_dst.extension(),
             dst_fmt.container_family().as_str(),
-            dst_fmt.standard_specification(),
+            dst_fmt.output_specification(),
+            compatibility.as_str(),
+            compatibility_warning,
             decoded.paragraphs.len(),
             decoded.tables.len(),
             Self::escape_json_str(&decoded.title),
             b64,
             b64
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use easyoffice_formats::{ZipArchiveCodec, ZipSecurityPolicy};
+
+    fn json_str_field<'a>(json: &'a str, key: &str) -> &'a str {
+        let marker = format!("\"{key}\":\"");
+        let start = json.find(&marker).unwrap() + marker.len();
+        let end = json[start..].find('"').unwrap() + start;
+        &json[start..end]
+    }
+
+    #[test]
+    fn xlsx_conversion_caches_sheet_engine_results_for_formula_cells() {
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            r#"{"sourceFormat":"xlsx","targetFormat":"xlsx","title":"캐시검증","body":"[[SHEET_A1]]\tA1\t10\n[[SHEET_A1]]\tA2\t32\n[[SHEET_A1]]\tA3\t=SUM(A1:A2)\n[[SHEET_A1]]\tB1\t=IF(A3>40,\"합격\",\"불합격\")\n[[SHEET_A1]]\tB2\t=A3/0"}"#,
+        )
+        .unwrap();
+        let bytes =
+            EasyOfficeIpcRouter::decode_base64(json_str_field(&json, "convertedBase64")).unwrap();
+        let entries = ZipArchiveCodec::unpack(&bytes, &ZipSecurityPolicy::default()).unwrap();
+        let sheet = entries
+            .iter()
+            .find(|e| e.path == "xl/worksheets/sheet1.xml")
+            .map(|e| String::from_utf8(e.data.clone()).unwrap())
+            .unwrap();
+
+        let mut engine = SheetEngine::new("캐시검증");
+        engine.set_cell("A1", "10").unwrap();
+        engine.set_cell("A2", "32").unwrap();
+        engine.set_cell("A3", "=SUM(A1:A2)").unwrap();
+        let expected = engine.evaluate_cell("A3").to_display_string();
+        assert_eq!(expected, "42");
+        assert!(
+            sheet.contains(&format!(
+                "<c r=\"A3\"><f>SUM(A1:A2)</f><v>{expected}</v></c>"
+            )),
+            "{sheet}"
+        );
+        assert!(sheet.contains("<v>합격</v>"), "{sheet}");
+        // Error results are not cached; fullCalcOnLoad recomputes them.
+        assert!(sheet.contains("<c r=\"B2\"><f>A3/0</f></c>"), "{sheet}");
+        assert!(json.contains("\"compatibility\":\"standard\""));
+        assert!(json.contains("\"compatibilityWarning\":null"));
+    }
+
+    #[test]
+    fn legacy_doc_and_ppt_conversion_responses_flag_limited_compatibility() {
+        for (dst, label) in [("doc", "Word Binary"), ("ppt", "Presentation Binary")] {
+            let json = EasyOfficeIpcRouter::dispatch(
+                "convert_document_format",
+                &format!("docx->{dst}|호환성|본문"),
+            )
+            .unwrap();
+            assert!(json.contains("\"compatibility\":\"limited\""), "{json}");
+            let warning = json_str_field(&json, "compatibilityWarning");
+            assert!(warning.contains("열리지 않을 수 있습니다"), "{json}");
+            let spec = json_str_field(&json, "specification");
+            assert!(
+                spec.contains(label) && spec.contains("호환성 제한"),
+                "{spec}"
+            );
+        }
     }
 }

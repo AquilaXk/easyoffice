@@ -2,8 +2,8 @@ use crate::{
     CommonMarkCodec, CsvCodec, DocumentFormat, EasyOfficeError, FormatDetector, Hwp5Codec,
     Hwp5DocumentPayload, Hwp5ParagraphRecord, HwpxCodec, HwpxPayload, LegacyDocPayload,
     LegacyOle2Codec, LegacyPptPayload, LegacyPptSlide, LegacyXlsPayload, MarkdownBlock, OdfCodec,
-    OoxmlCodec, OoxmlDocxPayload, OoxmlPptxPayload, OoxmlXlsxPayload, PdfDocumentModel,
-    PdfPageModel, PdfSerializer, RtfCodec, RtfPayload,
+    OoxmlCodec, OoxmlDocxPayload, OoxmlPptxPayload, PdfDocumentModel, PdfPageModel, PdfSerializer,
+    RtfCodec, RtfPayload, XlsxFormulaCache,
 };
 
 /// Canonical intermediate representation bridging all 20 supported document formats.
@@ -43,7 +43,9 @@ impl UniversalDocumentModel {
         vec![self.title.clone()]
     }
 
-    fn effective_sheet_cells(&self) -> Vec<(u32, u32, String)> {
+    /// Sheet cells that `encode` writes for spreadsheet targets (derived from paragraphs/tables
+    /// when the model has no explicit cells).
+    pub fn effective_sheet_cells(&self) -> Vec<(u32, u32, String)> {
         if !self.sheet_cells.is_empty() {
             return self.sheet_cells.clone();
         }
@@ -76,6 +78,17 @@ impl UniversalFormatConverter {
     pub fn encode(
         model: &UniversalDocumentModel,
         format: DocumentFormat,
+    ) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::encode_with_formula_cache(model, format, None)
+    }
+
+    /// Like [`Self::encode`], but XLSX output stores `formula_cache` (computed results keyed by
+    /// zero-based `(row, col)` of [`UniversalDocumentModel::effective_sheet_cells`]) as the cached
+    /// value of each formula cell.
+    pub fn encode_with_formula_cache(
+        model: &UniversalDocumentModel,
+        format: DocumentFormat,
+        formula_cache: Option<&XlsxFormulaCache>,
     ) -> Result<Vec<u8>, EasyOfficeError> {
         let title = if model.title.trim().is_empty() {
             "문서".to_string()
@@ -164,10 +177,10 @@ impl UniversalFormatConverter {
                 paragraphs,
                 tables: model.tables.clone(),
             }),
-            DocumentFormat::Xlsx => OoxmlCodec::pack_xlsx(&OoxmlXlsxPayload {
-                sheet_name: title,
-                cells: sheet_cells,
-            }),
+            DocumentFormat::Xlsx => OoxmlCodec::pack_xlsx_multi_with_formula_cache(
+                &[(title, sheet_cells)],
+                formula_cache.map(std::slice::from_ref).unwrap_or_default(),
+            ),
             DocumentFormat::Xls => LegacyOle2Codec::pack_xls(&LegacyXlsPayload {
                 sheet_name: title,
                 cells: sheet_cells,
@@ -180,7 +193,7 @@ impl UniversalFormatConverter {
                     '\t'
                 };
                 let rows = cells_to_grid(&sheet_cells, &title);
-                Ok(CsvCodec::serialize(&rows, delim).into_bytes())
+                Ok(CsvCodec::serialize_with_bom(&rows, delim))
             }
             DocumentFormat::Pptx | DocumentFormat::Ppsx => {
                 OoxmlCodec::pack_pptx(&OoxmlPptxPayload {
@@ -627,9 +640,9 @@ mod tests {
         let pdf_bytes = UniversalFormatConverter::encode(&model, DocumentFormat::Pdf).unwrap();
         let pdf_raw = String::from_utf8_lossy(&pdf_bytes);
         assert!(pdf_raw.contains("/Subtype /Type0"));
-        assert!(pdf_raw.contains("/Encoding /Identity-H"));
+        assert!(pdf_raw.contains("/Encoding /UniKS-UCS2-H"));
         assert!(pdf_raw.contains("/DescendantFonts"));
-        assert!(pdf_raw.contains("/Subtype /CIDFontType2"));
+        assert!(pdf_raw.contains("/Subtype /CIDFontType0"));
         assert!(pdf_raw.contains("begincmap"));
         let (_, pdf_decoded) = UniversalFormatConverter::decode(&pdf_bytes, Some("pdf")).unwrap();
         assert!(pdf_decoded

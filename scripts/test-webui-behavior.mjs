@@ -1052,3 +1052,35 @@ test("ribbon IPC sends a per-window session id and the undo target module (#106)
   assert.match(sidB, /^eo-[0-9a-f]{32}$/);
   assert.notEqual(sidA, sidB);
 });
+
+test("conversion result surfaces limited write compatibility for legacy DOC/PPT targets", async () => {
+  const { document, userClick } = await createWorkspaceHarness({
+    tauriInvoke: (command) => {
+      if (command === "get_workspace_bootstrap") {
+        return { platform: "Windows", shortcutModifier: "Ctrl", recentFormatFilters: ["전체"], openTabs: [] };
+      }
+      if (command === "get_ribbon_category_commands") {
+        return { commands: [] };
+      }
+      if (command === "convert_document_format") {
+        return {
+          status: "OK",
+          sourceFormat: "docx",
+          targetFormat: "doc",
+          sourceBytes: 640,
+          outputBytes: 2048,
+          specification: "OLE2 CFBF Word Binary 하위 집합 (호환성 제한)",
+          compatibility: "limited",
+          compatibilityWarning: "DOC 출력은 다른 워드프로세서에서 열리지 않을 수 있습니다.",
+          convertedBase64: "",
+        };
+      }
+      return { status: "ok" };
+    },
+  });
+
+  userClick(document.getElementById("btn-run-convert"));
+  await flushAsyncTurns(6);
+  const resultText = document.getElementById("conv-result-box").textContent;
+  assert.match(resultText, /호환성 제한: DOC 출력은 다른 워드프로세서에서 열리지 않을 수 있습니다\./);
+});

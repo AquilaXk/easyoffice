@@ -619,7 +619,7 @@
                 " (" +
                 res.outputBytes +
                 "B) · " +
-                res.specification;
+                workspacePanels.describeConversionSpec(res);
             }
           });
         void runConvert().catch(() => {});

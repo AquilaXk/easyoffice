@@ -679,6 +679,11 @@
           detectedTarget: dst,
           tableCount,
           specification: moduleSpecs[(dst || "").toUpperCase()] || "표준 문서 포맷",
+          compatibility: dst === "doc" || dst === "ppt" ? "limited" : "standard",
+          compatibilityWarning:
+            dst === "doc" || dst === "ppt"
+              ? dst.toUpperCase() + " 출력은 EasyOffice 전용 하위 집합이라 다른 프로그램에서 열리지 않을 수 있습니다."
+              : null,
           converted_base64: b64,
           convertedBase64: b64,
           status: "OK",
