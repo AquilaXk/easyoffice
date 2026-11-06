@@ -136,7 +136,8 @@
 
     function describeConversionSpec(res) {
       const limited = res?.compatibility === "limited" ? " · 호환성 제한: " + (res.compatibilityWarning || "") : "";
-      return (res?.specification || "") + limited;
+      const notes = Array.isArray(res?.warnings) && res.warnings.length > 0 ? " · 참고: " + res.warnings.join(" ") : "";
+      return (res?.specification || "") + limited + notes;
     }
 
     function triggerBase64Download(base64Data, baseFilename, ext) {

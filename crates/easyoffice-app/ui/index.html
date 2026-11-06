@@ -21,6 +21,7 @@
               <div class="md-item" data-studio-menu-cmd="module:PDF"><span class="md-label">PDF 스튜디오로 전환</span></div>
               <div class="md-item" data-studio-menu-cmd="module:CONV"><span class="md-label">통합 포맷 변환기로 전환</span></div>
               <div class="md-sep"></div>
+              <div class="md-item" data-file-open="true" role="menuitem"><span class="md-label">열기…</span><span class="md-shortcut">Ctrl+O</span></div>
               <div class="md-item" data-studio-menu-cmd="studio-save"><span class="md-label">저장</span><span class="md-shortcut">Ctrl+S</span></div>
               <div class="md-item" data-studio-menu-cmd="layout-paper"><span class="md-label">편집 용지</span></div>
             </div>
@@ -153,6 +154,14 @@
           ▾
         </button>
       </header>
+
+      <input
+        id="file-open-input"
+        type="file"
+        hidden
+        accept=".docx,.doc,.odt,.rtf,.md,.markdown,.txt,.hwp,.hwpx,.hwt,.hwtx,.xlsx,.xls,.ods,.csv,.tsv,.pptx,.ppt,.ppsx,.odp,.pdf"
+        aria-label="열 문서 파일 선택"
+      />
 
       <div id="bootstrap-error" class="eo-bootstrap-error" role="alert" hidden>
         <span id="bootstrap-error-text">작업 공간 초기화에 실패했습니다.</span>
@@ -727,6 +736,18 @@
               <p>
                 DOCX, HWP/HWPX, ODF, XLSX, PPTX, PDF, RTF, CSV, Markdown, TXT 간 문서를 변환합니다.
               </p>
+              <div class="formula-bar conv-source-row">
+                <label for="conv-source-file">원본 파일</label>
+                <input
+                  id="conv-source-file"
+                  type="file"
+                  class="cmd-input"
+                  accept=".docx,.doc,.odt,.rtf,.md,.markdown,.txt,.hwp,.hwpx,.hwt,.hwtx,.xlsx,.xls,.ods,.csv,.tsv,.pptx,.ppt,.ppsx,.odp,.pdf"
+                  aria-label="변환할 원본 파일 선택"
+                />
+                <span id="conv-source-name">선택 안 함 — 편집기 내용을 변환합니다</span>
+                <button id="btn-conv-clear-source" type="button" class="secondary-btn" hidden>선택 해제</button>
+              </div>
               <div class="formula-bar">
                 <label for="conv-src-fmt">원본</label>
                 <select id="conv-src-fmt" class="cmd-input conv-fmt-select" aria-label="원본 포맷">
@@ -874,6 +895,7 @@
     <script src="./sheet-controller.js"></script>
     <script src="./ribbon-history.js"></script>
     <script src="./workspace-session.js"></script>
+    <script src="./file-open.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

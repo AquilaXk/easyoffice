@@ -9,8 +9,8 @@
 
 use crate::hwpx_parts::{
     header_xml, header_xml_with, manifest_xml, section_properties_xml, HwpxCharShape,
-    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, NS_PARAGRAPH, NS_SECTION, SETTINGS_XML,
-    TEXT_WIDTH, VERSION_XML,
+    HwpxParaShape, HwpxStyle, CELL_HEIGHT, CONTAINER_XML, LIST_LEFT_MARGIN, NS_PARAGRAPH,
+    NS_SECTION, SETTINGS_XML, TEXT_WIDTH, VERSION_XML,
 };
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{RichAlignment, RichBlock, RichDocument};
@@ -202,7 +202,11 @@ impl HwpxCodec {
                     Some(RichAlignment::Right) => "RIGHT",
                     Some(RichAlignment::Justify) => "JUSTIFY",
                 },
-                left_margin: if p.list.is_some() { 2000 } else { 0 },
+                left_margin: if p.list.is_some() {
+                    LIST_LEFT_MARGIN
+                } else {
+                    0
+                },
             };
             let para_pr = intern(&mut para_shapes, para);
             let base = HwpxCharShape {

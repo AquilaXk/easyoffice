@@ -227,7 +227,8 @@
     }
 
     function restoreDomSheetCells(sheetName) {
-      if (!sheetDataStore.Sheet1) {
+      // Seed the default sheet only for an empty workbook (an opened file defines its own sheets).
+      if (Object.keys(sheetDataStore).length === 0) {
         sheetDataStore.Sheet1 = snapshotDomSheetCells();
       }
       const targetRowCount = getSheetRowCount(sheetName);

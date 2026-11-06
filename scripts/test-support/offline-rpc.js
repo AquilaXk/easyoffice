@@ -248,6 +248,57 @@
     return typeof host.btoa === "function" ? host.btoa(binary) : "";
   }
 
+  // Source-file requests (`sourceBase64`, PD-075). The offline backend cannot parse real
+  // containers, so binary files must carry an `EOFIXTURE:` + JSON model (what the Rust decoder
+  // returns); text formats (txt/md/csv/tsv) are decoded for real; anything else is "corrupt".
+  const SOURCE_MODULES = {
+    docx: "DOC", doc: "DOC", odt: "DOC", rtf: "DOC", md: "DOC", markdown: "DOC", txt: "DOC",
+    hwp: "HWP", hwpx: "HWP", hwt: "HWP", hwtx: "HWP",
+    xlsx: "SHEET", xls: "SHEET", ods: "SHEET", csv: "SHEET", tsv: "SHEET",
+    pptx: "SLIDE", ppt: "SLIDE", ppsx: "SLIDE", odp: "SLIDE", pdf: "PDF",
+  };
+  const FIXTURE_PREFIX = "EOFIXTURE:";
+
+  function decodeBase64Bytes(b64) {
+    const bin = typeof host.atob === "function" ? host.atob(String(b64 || "")) : "";
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function offlineDecodeSource(parsed) {
+    const fileName = String(parsed.fileName || "");
+    const ext = (/\.([A-Za-z0-9]+)$/.exec(fileName)?.[1] || "").toLowerCase();
+    if (!SOURCE_MODULES[ext]) throw new Error("지원하지 않는 확장자입니다: " + (ext || fileName));
+    const bytes = decodeBase64Bytes(parsed.sourceBase64);
+    if (bytes.length === 0) throw new Error("파일 데이터가 비어 있어 열 수 없습니다.");
+    const text = new TextDecoder("utf-8").decode(bytes);
+    const base = { status: "OK", action: "decode", fileName, format: ext, module: SOURCE_MODULES[ext],
+      title: "", sourceBytes: bytes.length, specification: "오프라인 테스트 디코더", warnings: [] };
+    if (text.startsWith(FIXTURE_PREFIX)) {
+      const model = JSON.parse(text.slice(FIXTURE_PREFIX.length));
+      const kind = model.sheets ? "workbook" : model.slides ? "slides" : "document";
+      const count = (model.sheets || model.slides || model.blocks || []).length;
+      return { ...base, kind, itemCount: count, ...model };
+    }
+    if (["docx", "xlsx", "pptx", "hwpx", "hwp", "doc", "xls", "ppt", "odt", "ods", "odp", "pdf", "hwt", "hwtx", "ppsx"].includes(ext)) {
+      throw new Error("컨테이너 무결성 검증 실패: 올바른 " + ext.toUpperCase() + " 파일이 아닙니다.");
+    }
+    if (ext === "csv" || ext === "tsv") {
+      const delim = ext === "csv" ? "," : "\t";
+      const cells = [];
+      text.replace(/^﻿/, "").split(/\r?\n/).filter(Boolean).forEach((line, r) => {
+        line.split(delim).forEach((v, c) => {
+          if (v) cells.push({ ref: String.fromCharCode(65 + c) + (r + 1), raw: v });
+        });
+      });
+      return { ...base, kind: "workbook", itemCount: 1, sheets: [{ name: "Sheet1", cells }] };
+    }
+    const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
+    return { ...base, kind: "document", itemCount: lines.length,
+      blocks: lines.map((l) => ({ type: "paragraph", runs: [{ text: l.replace(/^#+\s*/, "") }] })) };
+  }
+
   const ZOOM_STEP_CYCLE = { 100: 125, 125: 150, 150: 90 };
 
   function createOfflineRpcHandlers(ctx) {
@@ -640,6 +691,18 @@
         let structuredTables = null;
         if (raw.trimStart().startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
+          if (parsed.sourceBase64 !== undefined) {
+            const decoded = offlineDecodeSource(parsed);
+            if (parsed.action === "decode") return decoded;
+            const b64 = encodeUtf8Base64(JSON.stringify(decoded.blocks || decoded.sheets || decoded.slides || []));
+            return {
+              sourceFormat: decoded.format, targetFormat: String(parsed.targetFormat || "hwpx"),
+              sourceBytes: decoded.sourceBytes, outputBytes: 10, targetBytes: 10,
+              detectedTarget: String(parsed.targetFormat || "hwpx"), tableCount: 0,
+              specification: "오프라인 테스트 변환", compatibility: "standard", compatibilityWarning: null,
+              warnings: decoded.warnings, converted_base64: b64, convertedBase64: b64, status: "OK",
+            };
+          }
           src = String(parsed.sourceFormat || "docx").trim().toLowerCase();
           dst = String(parsed.targetFormat || "hwpx").trim().toLowerCase();
           title = String(parsed.title || "통합_변환_문서");

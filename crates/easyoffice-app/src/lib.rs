@@ -11,6 +11,7 @@ use easyoffice_sheet::{
 pub mod benchmark;
 pub mod cli_args;
 mod convert_ipc;
+mod convert_open;
 mod convert_structured;
 pub mod ffi;
 pub mod http_server;

@@ -34,6 +34,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-controller.js",
   "../crates/easyoffice-app/ui/ribbon-history.js",
   "../crates/easyoffice-app/ui/workspace-session.js",
+  "../crates/easyoffice-app/ui/file-open.js",
   "../crates/easyoffice-app/ui/app.js",
 ].map((relPath) => ({
   relPath,
@@ -463,6 +464,7 @@ class MiniElement extends MiniNode {
       ctrlKey: Boolean(ev.ctrlKey),
       shiftKey: Boolean(ev.shiftKey),
       isComposing: Boolean(ev.isComposing),
+      dataTransfer: ev.dataTransfer,
       clientX: ev.clientX ?? 0,
       clientY: ev.clientY ?? 0,
       defaultPrevented: false,
@@ -712,6 +714,7 @@ export async function createWorkspaceHarness(options = {}) {
     document,
     navigator: { platform: options.platform || "Win32", clipboard: options.clipboard },
     localStorage: options.localStorage,
+    confirm: options.confirm,
     location: { protocol: defaultProtocol },
     fetch: options.httpFetch || undefined,
     atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
@@ -823,6 +826,8 @@ export async function createWorkspaceHarness(options = {}) {
     __EASYOFFICE_RIBBON_CATALOG__: hostEnv.__EASYOFFICE_RIBBON_CATALOG__,
     __EASYOFFICE_INVOKE_BACKEND__: hostEnv.__EASYOFFICE_INVOKE_BACKEND__,
     __EASYOFFICE_DESKTOP_BRIDGE__: hostEnv.__EASYOFFICE_DESKTOP_BRIDGE__,
+    __EASYOFFICE_WORKSPACE_API__: hostEnv.__EASYOFFICE_WORKSPACE_API__,
+    __EASYOFFICE_FILE_OPEN_UTILS__: hostEnv.__EASYOFFICE_FILE_OPEN_UTILS__,
     dispatchWindowKeydown: (ev) => {
       const eventObj = {
         type: "keydown",

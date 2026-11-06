@@ -374,6 +374,7 @@
   // workspace-tools.js). Browser-reserved keys (Ctrl+N/T/W/R, Ctrl+Shift+R/T/J/C/N/I, F5, ...)
   // must never be listed here.
   const WORKSPACE_SHORTCUT_BINDINGS = Object.freeze([
+    { keys: "Ctrl+O", action: "file-open" },
     { keys: "Ctrl+S", action: "studio-save" },
     { keys: "Ctrl+Z", action: "studio-undo" },
     { keys: "Ctrl+Y", action: "studio-redo" },

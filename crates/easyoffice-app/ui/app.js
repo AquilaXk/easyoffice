@@ -233,9 +233,19 @@
     getWorkspacePanels: () => workspacePanels,
   });
 
+  const fileOpen = host.__EASYOFFICE_CREATE_FILE_OPEN__({
+    document, invokeIpc, createEmptySlideStyleFields, getActiveModule: () => activeModule,
+    enqueueOp: enqueueWorkspaceHistoryOp, runExclusive: chainWorkspaceQueue,
+    captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
+    pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
+    restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
+    commitPendingSheetCell: (flush) => sheetController.commitPendingFocusedSheetCell(flush),
+    computeEvaluatedSheetStore: sheetStoreHelpers.computeEvaluatedSheetStore,
+  });
+
   function saveWorkspaceDocument() {
     return workspacePanels.saveActiveModuleDocument().then((saved) => {
-      if (saved !== false) workspaceSession.markSaved();
+      if (saved !== false) { workspaceSession.markSaved(); fileOpen.markModuleSaved(); }
       return saved;
     });
   }
@@ -357,6 +367,7 @@
         });
         tabStrip.appendChild(btn);
       });
+      ribbonHistory.reapplyTabTitles();
     }
 
     const filterBox = document.getElementById("format-filters");
@@ -602,13 +613,15 @@
             await sheetController.commitPendingFocusedSheetCell(true);
             const src = document.getElementById("conv-src-fmt").value;
             const dst = document.getElementById("conv-dst-fmt").value;
-            const content = workspacePanels.buildConversionContent(src);
+            const fileSrc = fileOpen.getConverterSource();
+            const convTitle = fileSrc ? fileSrc.baseName : "통합_변환_문서";
+            const content = fileSrc ? fileSrc.fields : workspacePanels.buildConversionContent(src);
             const res = await invokeIpc(
               "convert_document_format",
-              JSON.stringify({ sourceFormat: src, targetFormat: dst, title: "통합_변환_문서", ...content })
+              JSON.stringify({ sourceFormat: src, targetFormat: dst, title: convTitle, ...content })
             );
             const box = document.getElementById("conv-result-box");
-            const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, "통합_변환_문서", dst);
+            const delivery = await workspacePanels.deliverSavedFile(res?.convertedBase64, convTitle, dst);
             if (box && res) {
               box.textContent =
                 "[" +
@@ -895,6 +908,7 @@
   function handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput) {
     workspaceSession.handleShortcutKeydown(e, {
       palette: () => togglePaletteModal(modal, cmdSearchInput),
+      "file-open": () => fileOpen.openFilePicker(),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
       "studio-redo": () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
@@ -954,6 +968,8 @@
     const restoredRecord = await workspaceSession.restoreFromStorage().catch(() => null);
     workspaceSession.establishBaseline(restoredRecord);
     workspaceSession.installActivityTracking();
+    fileOpen.bindUi();
+    await fileOpen.captureBaselines();
     await loadWorkspaceBootstrap();
   }
 

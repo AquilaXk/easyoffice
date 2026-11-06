@@ -18,6 +18,8 @@ const PAGE_HEIGHT: u32 = 84_186;
 const MARGIN_SIDE: u32 = 8_504;
 /// Usable text width of the page above.
 pub(crate) const TEXT_WIDTH: u32 = PAGE_WIDTH - 2 * MARGIN_SIDE;
+/// Left margin (HWPUNIT) the writer gives list paragraphs; the reader treats it as the list marker.
+pub(crate) const LIST_LEFT_MARGIN: u32 = 2_000;
 /// Default cell height for generated tables.
 pub(crate) const CELL_HEIGHT: u32 = 1_000;
 
