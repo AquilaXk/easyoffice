@@ -1164,3 +1164,24 @@
   - 분할 전송: 10 MiB 한도에서 단일 요청으로 충분하고 서버 상태·재조립 복잡도가 늘어 기각.
 - **Verified by** `cargo test -p easyoffice-formats --test rich_decode_roundtrip`(DOCX·HWPX·ODT·Markdown·TXT·XLSX 다중 시트 수식·BOM CSV·PPTX 디코드→인코드→디코드 동치, 레거시·PDF 평문 적재, 매직 바이트 우선, Word 스타일 제목·번호 목록, DOCX/XLSX/PPTX/HWPX/ODT XXE·ZIP 폭탄·경로 순회·손상 입력 거부), `cargo test -p easyoffice-app convert_open`(decode 응답·모듈 라우팅·격자 절단·원본 바이트 변환·보안 거부), `crates/easyoffice-formats/src/{rich_xml.rs,rich_read_text.rs}` 단위 테스트, `node --test scripts/test-webui-file-open.mjs`(`Ctrl+O`·메뉴·accept, 입력·끌어 놓기, 모듈 라우팅, 수정 확인, 크기·손상 오류, 탭 제목, 실행 취소/다시 실행, 자동 저장 복원, 열기→저장 라운드트립, 변환기 원본), 실서버 `--serve 8795` + 헤드리스 Chrome에서 DOCX·XLSX 열기, `node scripts/check-repo-hygiene.mjs`, `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 글꼴·그림·머리말 가져오기, 시트 격자 확장, 비UTF-8 CSV(CP949) 지원, 다중 문서 탭, 데스크톱 셸의 파일 연결 열기(PD-074)가 추가될 때.
+
+## 51. rhwp upstream 경계: 읽기 전용 서브모듈·위생 가드 제외·라이선스 고지 (PD-076, #128)
+- **Decision (`PD-076`)**
+  1. **읽기 전용 upstream**: rhwp는 `third_party/rhwp`의 서브모듈(`.gitmodules`의 `https://github.com/edwardkim/rhwp.git`, `shallow = true`)로만 가져오며 EasyOffice가 수정하지 않습니다. 고정 대상(커밋 `1a76570e833917d15817415a53c09ad61ab3203f`, 버전 0.8.7, 툴체인 1.93.1)과 sparse 목록은 `config/rhwp-upstream.json`이 유일한 기준입니다. 필요한 변경은 EasyOffice 쪽 오버레이로 처리하고(이후 단계), 서브모듈 안에서 고치지 않습니다.
+  2. **얕은·부분 체크아웃**: upstream 전체는 약 5.3 GB(문서·PDF·샘플·도구)이므로 `scripts/checkout-rhwp.mjs`가 `--depth 1`과 `--filter=blob:none`으로 고정 커밋만 받고 sparse 목록(소스·`rhwp-studio`·라이선스 파일)만 작업 트리에 둡니다. AI 도구 규칙 파일과 `.mcp.json`은 목록에 없어 디스크에도 생기지 않습니다. CI의 기본 체크아웃은 서브모듈을 받지 않습니다(`actions/checkout` 기본값 유지).
+  3. **fail-closed 검증 (`scripts/verify-rhwp-upstream.mjs`, Node 내장 모듈만)**: 설정 형식, `.gitmodules`(허용 항목은 고정 URL·경로·`shallow = true` 하나뿐), `git ls-files -s`의 gitlink(모드 `160000`, 커밋 = 설정), 작업 트리가 있으면 HEAD·원격 URL·`Cargo.toml` 버전·`rust-toolchain.toml` 채널 일치와 `git status --porcelain` 비어 있음(추적·미추적 변경 모두 실패)을 확인합니다. 체크아웃이 없으면 상위 저장소 기록만 검사하므로 CI 기본 상태에서 통과합니다. 위생 가드가 같은 로직을 호출합니다.
+  4. **위생 가드 제외 범위 (`scripts/check-repo-hygiene.mjs`)**: 디스크 순회에서 루트 기준 경로 `third_party/rhwp` 하나만 제외합니다(이름 기준 `IGNORED_DIRS`와 별도 집합 `IGNORED_ROOT_PATHS`). upstream의 AI 도구 문서·브랜드 토큰·수천 개 JS 파일은 EasyOffice가 작성하지 않았고 위 3항으로 무결성이 고정되기 때문입니다. 그 외 모든 경로는 그대로 검사하고, 금지된 로컬 전용 파일이 EasyOffice 안(루트뿐 아니라 하위 경로)에서 추적되면 계속 실패합니다. 새 필수 파일(`.gitmodules`, 설정, 검증·체크아웃 스크립트, 테스트, 고지, 설계 문서)이 계약 목록에 추가되었습니다.
+  5. **업데이트 절차**: (a) 새 커밋·버전을 검토한 뒤 `config/rhwp-upstream.json`의 `commit`·`version`·`rustToolchain`·sparse 목록을 수정하고, (b) `third_party/rhwp`를 그 커밋으로 이동해 gitlink를 갱신하며, (c) `node scripts/verify-rhwp-upstream.mjs`와 위생 가드를 통과시키고, (d) `THIRD_PARTY_NOTICES.md`(Rust 의존성·글꼴 고지)를 다시 확인합니다. 설정과 gitlink는 같은 PR에서만 함께 바꿉니다.
+  6. **라이선스 고지**: `THIRD_PARTY_NOTICES.md`에 rhwp MIT 고지(저작권 표기 포함)를 두고, WASM에 컴파일되는 Rust 의존성과 글꼴 고지는 자리만 마련해 2단계에서 완성합니다. hop은 패턴만 따랐고 복사한 코드가 없음을 명시합니다.
+  7. 이 단계는 런타임 동작을 바꾸지 않습니다(빌드·UI·IPC 15종 명령 변화 없음). 설계 전문은 `docs/rhwp-integration-design.md`입니다.
+- **Why** upstream을 고정·무수정으로 두어야 출처와 라이선스를 증명할 수 있고, 저장소 위생 규칙을 약화시키지 않으면서 수 GB 서드파티 트리가 CI 시간과 규칙 검사를 망치지 않게 해야 하기 때문입니다.
+- **Trade-offs**
+  1. 위생 가드가 upstream 내용을 검사하지 않으므로 무결성은 커밋 고정과 clean 검사에 의존합니다.
+  2. sparse 목록이 부족하면 이후 빌드가 실패하며 2단계에서 확정합니다.
+  3. 서브모듈 체크아웃은 별도 스크립트가 필요해 `git submodule update --init` 단독으로는 전체(5.3 GB)를 받게 됩니다.
+- **Alternatives rejected**
+  - 전체 서브모듈 체크아웃(`submodules: true`): 5.3 GB와 수만 개 파일로 CI·위생 가드가 느려지고 실패해 기각.
+  - upstream 소스를 저장소에 복사: 출처 고정·갱신 검증이 어렵고 라이선스 추적이 약해져 기각.
+  - 위생 가드에서 금지 토큰 검사를 완화: 기존 규칙을 약화시키므로 기각(제외는 서드파티 경로 하나로 한정).
+- **Verified by** `node --test scripts/test-rhwp-upstream.mjs`(미체크아웃 통과, gitlink 변조·URL 변조·버전 불일치·작업 트리 수정 실패, 위생 가드의 루트 금지 파일 추적 실패와 `third_party/rhwp`만 제외), `node scripts/verify-rhwp-upstream.mjs`, `node scripts/check-repo-hygiene.mjs`
+- **Revisit when** upstream를 갱신하거나 `vendor/rhwp-core`·`apps/hwp-studio` 산출물이 추가되어 제외 경로를 늘려야 할 때.
