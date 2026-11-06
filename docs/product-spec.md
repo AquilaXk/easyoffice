@@ -75,5 +75,5 @@
 - **100% 오프라인 로컬 스마트 문서 보조 도구 (`LocalSmartDocumentAssistant`)**:
   - 외부 서버 통신 없이 온디바이스에서 핵심 문장 추출 요약(`summarize(_:maxSentences:)`), 문장 길이·피동 표현·중복 수식어 교정 제안(`analyzeWritingQuality(_:)`), 기한·예산·핵심 수치·조치 항목 추출(`extractActionItemsAndEntities(_:)`), 시트 수치 범위 Z-Score 이상치(`|z| >= 1.8`) 및 추세 분석(`analyzeWorksheetInsights(_:range:)`), 최대 2,048 문단 상한 동적 계획법(LCS) 문서 비교(`compareDocuments(baseline:revised:)`)를 수행합니다.
 - **문서·이미지 메타데이터 비식별화 및 컨테이너 보안 감사 (`DocumentSecurityAuditor`)**
-  - 공유 전 문서(`OfficeDocumentModel`), 시트(`WorksheetModel` 수식 문자열 리터럴·시트 메모·조건부 서식·유효성 검사 포함), 슬라이드(`PresentationDeckModel` 캔버스 도형 제목·본문 포함), PDF(`PDFStudioDocumentModel` 주석 작성자·양식 필드명·펜 레이블·북마크 트리 포함) 전 영역의 주민등록번호·외국인등록번호·연락처·이메일 PII를 비식별화합니다.
+  - 공유 전 문서(`OfficeDocumentModel`), 시트(`WorksheetModel` 수식 문자열 리터럴·시트 메모·조건부 서식·유효성 검사 포함), 슬라이드(`PresentationDeckModel` 캔버스 도형 제목·본문 포함), PDF(`PDFStudioDocumentModel` 주석 작성자·양식 필드명·펜 레이블·북마크 트리 포함) 전 영역의 주민등록번호·외국인등록번호·연락처·이메일·신용카드(Luhn 검증)·은행 계좌·여권·운전면허·사업자등록번호 PII를 비식별화합니다.
   - 첨부 및 보존 미디어 스트림의 JPEG(`APP1..APP15`, `COM`), PNG(`tEXt`, `zTXt`, `iTXt`, `eXIf`, `tIME`), TIFF(EXIF/GPS/XMP 태그) 바이너리 메타데이터를 제거(`stripBinaryImageMetadata`)하며, 컨테이너 매직 시그니처·ZIP 압축 폭탄·경로 순회·XXE·암호화 종합 감사(`auditContainer(data:fileName:)`)를 수행합니다.
