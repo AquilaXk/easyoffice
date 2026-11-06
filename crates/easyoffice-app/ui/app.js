@@ -263,6 +263,7 @@
     restoreWorkspaceSnapshot: ribbonHistory.restoreWorkspaceSnapshot,
     commitPendingSheetCell: (flush) => sheetController.commitPendingFocusedSheetCell(flush),
     computeEvaluatedSheetStore: sheetStoreHelpers.computeEvaluatedSheetStore,
+    replaceColumnWidths: (widths) => sheetController.replaceColumnWidths(widths),
   });
 
   hwpHost = host.__EASYOFFICE_CREATE_HWP_HOST__({

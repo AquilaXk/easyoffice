@@ -4,6 +4,8 @@ use crate::rtf_xml_helpers::{
     extract_odf_blocks_in_order, extract_odf_inline_text, extract_ods_cells_from_row,
     extract_tag_bodies, scan_single_a1_coord, strip_tag_blocks, to_open_formula_syntax_impl,
 };
+use crate::sheet_styling::ods_styles::{parse_ods_styling, table_columns_xml, OdsStyleTable};
+use crate::sheet_styling::SheetStyling;
 use crate::{ContainerFamily, EasyOfficeError, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy};
 
 /// Unpacked ODF text document (`(title, paragraphs, tables)`).
@@ -261,6 +263,15 @@ impl OdfCodec {
     }
 
     pub fn pack_ods_multi(sheets: &[OdsUnpacked]) -> Result<Vec<u8>, EasyOfficeError> {
+        Self::pack_ods_multi_styled(sheets, &[])
+    }
+
+    /// Like [`Self::pack_ods_multi`], additionally writing `stylings[i]` (cell formatting and
+    /// column widths, PD-089) for sheet `i` as automatic cell and column styles.
+    pub fn pack_ods_multi_styled(
+        sheets: &[OdsUnpacked],
+        stylings: &[SheetStyling],
+    ) -> Result<Vec<u8>, EasyOfficeError> {
         let mut total_cells = 0usize;
         for (_, cells) in sheets {
             total_cells = total_cells.saturating_add(cells.len());
@@ -278,10 +289,25 @@ impl OdfCodec {
             }
         }
 
+        for styling in stylings {
+            let bad_cell = styling
+                .cells
+                .keys()
+                .any(|&(r, c)| r > Self::MAX_ROWS || c > Self::MAX_COLS);
+            if bad_cell || styling.columns.keys().any(|&c| c > Self::MAX_COLS) {
+                return Err(EasyOfficeError::ResourceBudgetExceeded(
+                    "ODS 서식 좌표가 허용 범위를 초과했습니다.".to_string(),
+                ));
+            }
+        }
+        let style_table = OdsStyleTable::build(stylings);
+
         let manifest = Self::build_manifest(Self::MIMETYPE_ODS);
         let mut content = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" office:version=\"1.2\"><office:body><office:spreadsheet>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" office:version=\"1.2\">",
         );
+        content.push_str(&style_table.automatic_styles_xml());
+        content.push_str("<office:body><office:spreadsheet>");
 
         let default_sheet = vec![("Sheet1".to_string(), Vec::new())];
         let active_sheets = if sheets.is_empty() {
@@ -290,7 +316,9 @@ impl OdfCodec {
             sheets
         };
 
-        for (sheet_name, cells) in active_sheets {
+        let blank = String::new();
+        for (sheet_idx, (sheet_name, cells)) in active_sheets.iter().enumerate() {
+            let styling = stylings.get(sheet_idx);
             let mut grid: std::collections::BTreeMap<
                 u32,
                 std::collections::BTreeMap<u32, &String>,
@@ -298,11 +326,22 @@ impl OdfCodec {
             for (row, col, raw) in cells {
                 grid.entry(*row).or_default().insert(*col, raw);
             }
+            // Styled cells without a value are still written (`<table:table-cell table:style-name=".."/>`).
+            if let Some(st) = styling {
+                for (&(row, col), style) in &st.cells {
+                    if !style.is_plain() {
+                        grid.entry(row).or_default().entry(col).or_insert(&blank);
+                    }
+                }
+            }
 
             content.push_str(&format!(
                 "<table:table table:name=\"{}\">",
                 XmlSanitizer::escape(sheet_name)
             ));
+            if let Some(st) = styling {
+                content.push_str(&table_columns_xml(&st.columns, &style_table));
+            }
 
             let mut expected_row: u32 = 0;
             for (row, row_cells) in grid {
@@ -329,21 +368,29 @@ impl OdfCodec {
                             ));
                         }
                     }
-                    if let Some(formula) = raw.strip_prefix('=') {
+                    let style_attr = styling
+                        .and_then(|st| st.cells.get(&(row, col)))
+                        .and_then(|style| style_table.cell_style_name(style))
+                        .map_or(String::new(), |name| {
+                            format!(" table:style-name=\"{name}\"")
+                        });
+                    if raw.is_empty() {
+                        content.push_str(&format!("<table:table-cell{style_attr}/>"));
+                    } else if let Some(formula) = raw.strip_prefix('=') {
                         let of_expr = Self::to_open_formula_syntax(formula);
                         let escaped_formula = XmlSanitizer::escape(&of_expr);
                         content.push_str(&format!(
-                            "<table:table-cell row=\"{row}\" col=\"{col}\" table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                            "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} table:formula=\"of:={escaped_formula}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
                             XmlSanitizer::escape(raw)
                         ));
                     } else if raw.parse::<f64>().is_ok() {
                         let escaped_val = XmlSanitizer::escape(raw);
                         content.push_str(&format!(
-                            "<table:table-cell row=\"{row}\" col=\"{col}\" office:value-type=\"float\" office:value=\"{escaped_val}\"><text:p>{escaped_val}</text:p></table:table-cell>"
+                            "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"float\" office:value=\"{escaped_val}\"><text:p>{escaped_val}</text:p></table:table-cell>"
                         ));
                     } else {
                         content.push_str(&format!(
-                            "<table:table-cell row=\"{row}\" col=\"{col}\" office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
+                            "<table:table-cell row=\"{row}\" col=\"{col}\"{style_attr} office:value-type=\"string\"><text:p>{}</text:p></table:table-cell>",
                             XmlSanitizer::escape(raw)
                         ));
                     }
@@ -375,6 +422,14 @@ impl OdfCodec {
         } else {
             Ok(sheets.remove(0))
         }
+    }
+
+    /// Cell formatting and column widths of every table, keyed by sheet name (PD-089).
+    pub fn unpack_ods_styling(
+        bytes: &[u8],
+    ) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
+        let (content_xml, _) = Self::extract_content_and_meta_xml(bytes, Self::MIMETYPE_ODS)?;
+        Ok(parse_ods_styling(&content_xml))
     }
 
     pub fn unpack_ods_multi(bytes: &[u8]) -> Result<OdsMultiUnpacked, EasyOfficeError> {

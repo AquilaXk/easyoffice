@@ -883,6 +883,8 @@
       applySheetPivotOrChartSummary: ops.applySheetPivotOrChartSummary,
       toggleSheetConditionalFormatting: ops.toggleSheetConditionalFormatting,
       applySheetFormatCommand: format.applyCommand,
+      getColumnWidths: grid.getAllWidths,
+      replaceColumnWidths: grid.replaceAllWidths,
       formatSheetRange: format.formatRange,
       syncSheetFormatToolbar: format.syncToolbar,
       toggleSheetFreezePanes,
