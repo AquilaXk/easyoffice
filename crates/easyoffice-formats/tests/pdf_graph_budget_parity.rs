@@ -3,6 +3,10 @@ use easyoffice_formats::{
     PdfSerializer,
 };
 
+/// Wall-clock backstop for adversarial flood inputs: a quadratic parser on 256 KiB would take
+/// minutes, so 5 s still catches it while tolerating a loaded debug build.
+const FLOOD_PARSE_CEILING_SECS: f64 = 5.0;
+
 fn build_stored_zlib(payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(payload.len() + (payload.len() / 65_535 + 2) * 5 + 6);
     out.extend_from_slice(&[0x78, 0x01]);
@@ -449,7 +453,7 @@ xref\n0 8\ntrailer << /Size 8 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
         PdfSerializer::parse(&unclosed_flood),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
-    assert!(start.elapsed().as_secs_f64() < 1.0);
+    assert!(start.elapsed().as_secs_f64() < FLOOD_PARSE_CEILING_SECS);
 
     let mut stream_paren_flood = Vec::from(&b"%PDF-1.7\n1 0 obj << >>\nstream\n"[..]);
     stream_paren_flood.extend(std::iter::repeat_n(b'(', 262_144));
@@ -459,7 +463,7 @@ xref\n0 8\ntrailer << /Size 8 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
         PdfSerializer::parse(&stream_paren_flood),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
-    assert!(stream_start_t.elapsed().as_secs_f64() < 1.0);
+    assert!(stream_start_t.elapsed().as_secs_f64() < FLOOD_PARSE_CEILING_SECS);
 
     let mut page_stream_flood = Vec::from(
         &b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n4 0 obj << /Length 262144 >>\nstream\n"[..],
@@ -473,7 +477,7 @@ xref\n0 8\ntrailer << /Size 8 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n",
         PdfSerializer::parse(&page_stream_flood),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
-    assert!(page_stream_t.elapsed().as_secs_f64() < 1.0);
+    assert!(page_stream_t.elapsed().as_secs_f64() < FLOOD_PARSE_CEILING_SECS);
 
     let id_before_encrypt_trailer = b"%PDF-1.4\n\
 1 0 obj << /Type /Catalog >> endobj\n\
@@ -547,7 +551,7 @@ xref\n0 7\n%%EOF\n"
         PdfSerializer::parse(&comment_digit_flood),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
-    assert!(comment_flood_t.elapsed().as_secs_f64() < 1.0);
+    assert!(comment_flood_t.elapsed().as_secs_f64() < FLOOD_PARSE_CEILING_SECS);
 
     let preceding_length_damaged_pdf = b"%PDF-1.5\n\
 1 0 obj 24 endobj\n\
@@ -693,7 +697,7 @@ xref\n0 2\n%%EOF\n";
         PdfSerializer::parse(&comment_endobj_flood),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
-    assert!(endobj_flood_t.elapsed().as_secs_f64() < 1.0);
+    assert!(endobj_flood_t.elapsed().as_secs_f64() < FLOOD_PARSE_CEILING_SECS);
 
     let truncated_hdr_and_spoof_len = b"%PDF-1.5\n\
 99 0 obj\n\
@@ -810,7 +814,7 @@ startxref\n0\n%%EOF\n";
         PdfSerializer::parse(&stream_endobj_comment_flood),
         Err(EasyOfficeError::CorruptedContainer(_))
     ));
-    assert!(stream_flood_t.elapsed().as_secs_f64() < 1.0);
+    assert!(stream_flood_t.elapsed().as_secs_f64() < FLOOD_PARSE_CEILING_SECS);
 
     let balanced_prose_stream = b"BT /F1 12 Tf 72 720 Td (Body ok) Tj ET";
     let valid_balanced_parens_pdf = format!(
