@@ -122,7 +122,7 @@ Unsigned or ad-hoc signed macOS release archives carry the download quarantine a
 xattr -dr com.apple.quarantine /Applications/EasyOffice.app
 ```
 
-Windows release archives (`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`) ship the standalone Rust engine CLI and loopback WebUI server. Run `easyoffice-app.exe --self-test` to verify the engine or run `easyoffice-app.exe --serve 8787` to open the local WebUI workspace at `http://127.0.0.1:8787/`.
+Windows release archives (`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`) ship the standalone Rust engine CLI and loopback WebUI server. Run `easyoffice-app.exe --self-test` to verify the engine or run `easyoffice-app.exe --serve 8787` to open the local WebUI workspace at `http://127.0.0.1:8787/`. Run `easyoffice-app.exe --help` for all options. `--serve` without a port uses 8787 and falls back to 8788-8800 when it is busy; an explicit port (`--serve 18787`) is bound exactly or the command fails. Invalid ports, unknown options, and file paths (opening documents from the command line is not supported yet) exit with a non-zero status.
 
 ---
 
