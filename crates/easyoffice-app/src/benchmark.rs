@@ -487,7 +487,7 @@ fn eval_expr_uncompiled_baseline(
     }
 }
 
-fn recalculate_all_uncompiled_baseline(
+pub(crate) fn recalculate_all_uncompiled_baseline(
     sheet: &SheetEngine,
 ) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
     let n = sheet.raw_cells().len();
@@ -535,7 +535,7 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         let t1 = Instant::now();
         let mut b = 0u32;
         for _ in 0..16 {
-            b ^= IeeeCrc32::checksum(black_box(&crc_payload));
+            b ^= IeeeCrc32::checksum_scalar(black_box(&crc_payload));
         }
         let dt_b = t1.elapsed().as_micros() as u64;
 
@@ -699,8 +699,8 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
     let suites = vec![
         build(
             "crc32_slicing_by_8",
-            "Slicing-by-8 IEEE 802.3 CRC-32",
-            "1 MiB (64 KiB x 16) ZIP/OOXML container stream",
+            "Scalar slicing-by-16 IEEE 802.3 CRC-32",
+            "1 MiB (64 KiB x 16) ZIP/OOXML container stream, scalar path only",
             crc_base_samples,
             crc_opt_samples,
             crc_eq,
@@ -734,6 +734,8 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
             format!("{sheet_digest:016x}"),
         ),
         bench_swar_csv_xml_and_zero_alloc_range_agg(rounds),
+        crate::benchmark_large::bench_crc32_hardware(rounds),
+        crate::benchmark_large::bench_sheet_recalc_10k(rounds),
     ];
 
     let all_equivalent = suites.iter().all(|s| s.equivalence_verified);

@@ -1,10 +1,14 @@
 use easyoffice_formats::EasyOfficeError;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
+mod agg_stream;
 pub mod coercion;
+mod dag;
 pub mod functions;
 mod functions_date_fin;
 mod functions_lookup_text;
+mod memo;
 mod parser;
 mod text_format;
 pub mod types;
@@ -12,6 +16,7 @@ pub mod workbook;
 
 pub use coercion::*;
 pub use functions::*;
+pub use memo::{CellMap, CoordHasher, FastMap, MemoTable};
 pub use parser::{compile_formula_expr, BinaryOp, Expr};
 pub use types::*;
 pub use workbook::*;
@@ -19,10 +24,17 @@ pub use workbook::*;
 pub const MAX_CELL_TEXT_CHARS: usize = 32_767;
 pub const MAX_EVAL_STEPS: usize = 2_097_152;
 
+static EMPTY_VALUE: EvaluatedCellValue = EvaluatedCellValue::Empty;
+
+/// Outcome of evaluating one cell: a temporary value, or "already stored in the memo table".
+pub(crate) enum CellEval {
+    Owned(EvaluatedCellValue),
+    Memoized,
+}
+
 pub(crate) struct EvalContext<'a> {
     pub workbook: Option<&'a WorkbookEngine>,
-    pub visiting: VisitingTracker,
-    pub memo: HashMap<PackedWorkbookCoord, EvaluatedCellValue>,
+    pub memo: MemoTable,
     pub current_coord: Option<PackedCellCoordinate>,
     pub(crate) steps: usize,
     pub(crate) rng_state: u64,
@@ -34,8 +46,7 @@ impl<'a> EvalContext<'a> {
     pub fn standalone_id(sheet_id: u16) -> Self {
         Self {
             workbook: None,
-            visiting: VisitingTracker::new(sheet_id),
-            memo: HashMap::new(),
+            memo: MemoTable::new(sheet_id),
             current_coord: None,
             steps: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
@@ -47,8 +58,7 @@ impl<'a> EvalContext<'a> {
     pub fn with_workbook(workbook: &'a WorkbookEngine, sheet_id: u16) -> Self {
         Self {
             workbook: Some(workbook),
-            visiting: VisitingTracker::new(sheet_id),
-            memo: HashMap::new(),
+            memo: MemoTable::new(sheet_id),
             current_coord: None,
             steps: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
@@ -72,18 +82,22 @@ pub struct SheetEngine {
     pub name: String,
     pub(crate) sheet_id: u16,
     pub(crate) has_workbook_assigned_id: bool,
-    pub(crate) cells: HashMap<PackedCellCoordinate, String>,
-    pub(crate) compiled_asts: HashMap<PackedCellCoordinate, Result<Expr, FormulaError>>,
+    pub(crate) cells: CellMap<String>,
+    pub(crate) compiled_asts: CellMap<Result<Expr, FormulaError>>,
     pub(crate) dense_numbers: Vec<f64>,
     pub conditional_rules: Vec<ConditionalFormatRule>,
     pub validation_rule: Option<DataValidationRule>,
+    /// Cached dependency order of the last full recalculation; dropped on every edit.
+    pub(crate) plan: OnceLock<dag::RecalcPlan>,
+    /// Cached per-column index of formula cells for range dependency walks; dropped on edit.
+    pub(crate) formula_index: OnceLock<dag::FormulaIndex>,
 }
 
 impl SheetEngine {
     pub const MAX_RECURSION_DEPTH: usize = 1024;
     pub const MAX_CELL_TEXT_CHARS: usize = MAX_CELL_TEXT_CHARS;
     pub const MAX_EVAL_STEPS: usize = MAX_EVAL_STEPS;
-    const DENSE_ROWS: usize = 256;
+    const DENSE_ROWS: usize = 16_384;
     const DENSE_COLS: usize = 16;
 
     pub fn new(name: impl Into<String>) -> Self {
@@ -98,11 +112,13 @@ impl SheetEngine {
             name: name_str,
             sheet_id,
             has_workbook_assigned_id: false,
-            cells: HashMap::new(),
-            compiled_asts: HashMap::new(),
+            cells: CellMap::default(),
+            compiled_asts: CellMap::default(),
             dense_numbers: Vec::new(),
             conditional_rules: Vec::new(),
             validation_rule: None,
+            plan: OnceLock::new(),
+            formula_index: OnceLock::new(),
         }
     }
 
@@ -119,8 +135,19 @@ impl SheetEngine {
     }
 
     #[inline]
-    pub fn raw_cells(&self) -> &HashMap<PackedCellCoordinate, String> {
+    pub fn raw_cells(&self) -> &CellMap<String> {
         &self.cells
+    }
+
+    /// Drops the cached recalculation plan and formula index (called by every mutator).
+    #[inline]
+    pub(crate) fn invalidate_caches(&mut self) {
+        if self.plan.get().is_some() {
+            self.plan = OnceLock::new();
+        }
+        if self.formula_index.get().is_some() {
+            self.formula_index = OnceLock::new();
+        }
     }
 
     #[inline]
@@ -167,11 +194,13 @@ impl SheetEngine {
         if r < Self::DENSE_ROWS && c < Self::DENSE_COLS {
             let idx = (r << 4) | c;
             if let Some(Ok(Expr::Number(n))) = compiled {
-                if self.dense_numbers.is_empty() {
-                    self.dense_numbers = vec![f64::NAN; Self::DENSE_ROWS * Self::DENSE_COLS];
+                if self.dense_numbers.len() <= idx {
+                    // Grow in 256-row steps so sparse sheets stay small.
+                    let rows = (((r >> 8) + 1) << 8).min(Self::DENSE_ROWS);
+                    self.dense_numbers.resize(rows * Self::DENSE_COLS, f64::NAN);
                 }
                 self.dense_numbers[idx] = *n;
-            } else if !self.dense_numbers.is_empty() {
+            } else if idx < self.dense_numbers.len() {
                 self.dense_numbers[idx] = f64::NAN;
             }
         }
@@ -183,6 +212,7 @@ impl SheetEngine {
         raw_value: impl Into<String>,
     ) -> Result<(), EasyOfficeError> {
         let coord = PackedCellCoordinate::parse_a1(a1)?;
+        self.invalidate_caches();
         let val = raw_value.into();
         if val.is_empty() {
             self.cells.remove(&coord);
@@ -203,6 +233,7 @@ impl SheetEngine {
 
     #[inline]
     pub(crate) fn set_coord_number(&mut self, coord: PackedCellCoordinate, num: f64) {
+        self.invalidate_caches();
         let comp = Ok(Expr::Number(num));
         self.update_dense_number(coord, Some(&comp));
         self.compiled_asts.insert(coord, comp);
@@ -210,6 +241,7 @@ impl SheetEngine {
     }
 
     pub(crate) fn rebuild_compiled_asts(&mut self) {
+        self.invalidate_caches();
         if self.sheet_id == 0 {
             self.sheet_id = compute_sheet_id(&self.name);
         }
@@ -245,13 +277,26 @@ impl SheetEngine {
 
     /// Evaluates all populated cells in the worksheet in a single shared DAG memoization pass
     /// using pre-compiled ASTs and the inline `VisitingTracker` bitset.
+    ///
+    /// The dependency order is computed once and cached until the next edit, so repeated
+    /// recalculations of an unchanged sheet only evaluate formulas (no graph walk).
     pub fn recalculate_all(&self) -> HashMap<PackedCellCoordinate, EvaluatedCellValue> {
         let mut ctx = EvalContext::standalone_id(self.resolved_sheet_id());
         let mut results = HashMap::with_capacity(self.cells.len());
-        let mut coords: Vec<PackedCellCoordinate> = self.cells.keys().copied().collect();
-        coords.sort_unstable();
-        self.pre_evaluate_dag_iterative(&coords, &mut ctx);
-        for coord in coords {
+        let built;
+        let plan = match self.plan.get().filter(|p| p.matches(self)) {
+            Some(plan) => {
+                plan.replay(self, &mut ctx);
+                plan
+            }
+            None => {
+                built = dag::RecalcPlan::build(self, &mut ctx);
+                // Another thread may have stored a plan first; either one is valid.
+                let _ = self.plan.set(built.clone());
+                &built
+            }
+        };
+        for &coord in &plan.coords {
             ctx.steps = 0;
             let val = self.eval_coord_ctx(coord, &mut ctx, 0);
             results.insert(coord, val);
@@ -319,6 +364,45 @@ impl SheetEngine {
         )
     }
 
+    /// Evaluates a cell and hands the value to `f` by reference: memo hits are borrowed from the
+    /// memo table instead of cloned, and a freshly computed value is stored without a copy.
+    #[inline]
+    pub(crate) fn with_coord_value<R>(
+        &self,
+        coord: PackedCellCoordinate,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+        f: impl FnOnce(&EvaluatedCellValue) -> R,
+    ) -> R {
+        match self.eval_coord_core(coord, ctx, depth) {
+            CellEval::Owned(v) => f(&v),
+            CellEval::Memoized => f(ctx
+                .memo
+                .get_at(self.resolved_sheet_id(), coord)
+                .unwrap_or(&EMPTY_VALUE)),
+        }
+    }
+
+    /// Cross-sheet counterpart of [`Self::with_coord_value`] (mirrors `eval_sheet_coord`).
+    pub(crate) fn with_sheet_coord_value<R>(
+        &self,
+        sheet_opt: Option<&str>,
+        coord: PackedCellCoordinate,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+        f: impl FnOnce(&EvaluatedCellValue) -> R,
+    ) -> R {
+        let target = match sheet_opt {
+            None => Some(self),
+            Some(name) if WorkbookEngine::is_same_sheet_identity(name, &self.name) => Some(self),
+            Some(name) => ctx.workbook.and_then(|wb| wb.sheet(name)),
+        };
+        match target {
+            Some(sheet) => sheet.with_coord_value(coord, ctx, depth, f),
+            None => f(&EvaluatedCellValue::Error(FormulaError::Ref)),
+        }
+    }
+
     #[inline]
     pub(crate) fn eval_coord_ctx(
         &self,
@@ -326,24 +410,38 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         depth: usize,
     ) -> EvaluatedCellValue {
+        self.with_coord_value(coord, ctx, depth, EvaluatedCellValue::clone)
+    }
+
+    fn eval_coord_core(
+        &self,
+        coord: PackedCellCoordinate,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> CellEval {
         ctx.steps = ctx.steps.saturating_add(1);
         if ctx.steps > Self::MAX_EVAL_STEPS {
-            return EvaluatedCellValue::Error(FormulaError::Value);
+            return CellEval::Owned(EvaluatedCellValue::Error(FormulaError::Value));
         }
         if depth > Self::MAX_RECURSION_DEPTH {
-            return EvaluatedCellValue::Error(FormulaError::Ref);
+            return CellEval::Owned(EvaluatedCellValue::Error(FormulaError::Ref));
         }
         let r = coord.row() as usize;
         let c = coord.col() as usize;
         if r < Self::DENSE_ROWS && c < Self::DENSE_COLS {
             if let Some(&n) = self.dense_numbers.get((r << 4) | c) {
                 if !n.is_nan() {
-                    return EvaluatedCellValue::Number(n);
+                    return CellEval::Owned(EvaluatedCellValue::Number(n));
                 }
             }
         }
+        let sid = self.resolved_sheet_id();
+        // Only formula cells are ever memoized, so a hit needs no further lookups.
+        if ctx.memo.contains_at(sid, coord) {
+            return CellEval::Memoized;
+        }
         let Some(compiled) = self.compiled_asts.get(&coord) else {
-            return match self.cells.get(&coord) {
+            return CellEval::Owned(match self.cells.get(&coord) {
                 None => EvaluatedCellValue::Empty,
                 Some(raw) => {
                     if crate::parser::strip_formula_prefix(raw).is_some_and(|s| s.trim().is_empty())
@@ -355,31 +453,23 @@ impl SheetEngine {
                         EvaluatedCellValue::Text(raw.clone())
                     }
                 }
-            };
+            });
         };
-        match compiled {
-            Ok(Expr::Number(n)) => return EvaluatedCellValue::Number(*n),
-            Ok(Expr::Boolean(b)) => return EvaluatedCellValue::Boolean(*b),
-            Err(e) => return EvaluatedCellValue::Error(*e),
-            Ok(_) => {}
-        }
+        let expr = match compiled {
+            Ok(Expr::Number(n)) => return CellEval::Owned(EvaluatedCellValue::Number(*n)),
+            Ok(Expr::Boolean(b)) => return CellEval::Owned(EvaluatedCellValue::Boolean(*b)),
+            Err(e) => return CellEval::Owned(EvaluatedCellValue::Error(*e)),
+            Ok(expr) => expr,
+        };
 
-        let sid = self.resolved_sheet_id();
-        let key = PackedWorkbookCoord::new(sid, coord);
-        if let Some(cached) = ctx.memo.get(&key) {
-            return cached.clone();
-        }
-        if !ctx.visiting.insert(sid, coord) {
+        if !ctx.memo.visit_insert(sid, coord) {
             ctx.circular = true;
-            return EvaluatedCellValue::Error(FormulaError::Cycle);
+            return CellEval::Owned(EvaluatedCellValue::Error(FormulaError::Cycle));
         }
 
         let prev_coord = ctx.current_coord;
         ctx.current_coord = Some(coord);
-        let mut result = match compiled {
-            Ok(expr) => self.eval_expr_ctx(expr, ctx, depth + 1),
-            Err(e) => EvaluatedCellValue::Error(*e),
-        };
+        let mut result = self.eval_expr_ctx(expr, ctx, depth + 1);
         ctx.current_coord = prev_coord;
         result = crate::coercion::sanitize_evaluated_value(result);
         if let EvaluatedCellValue::Text(ref s) = result {
@@ -388,9 +478,9 @@ impl SheetEngine {
             }
         }
 
-        ctx.visiting.remove(sid, coord);
-        ctx.memo.insert(key, result.clone());
-        result
+        ctx.memo.visit_remove(sid, coord);
+        ctx.memo.insert_at(sid, coord, result);
+        CellEval::Memoized
     }
 
     pub(crate) fn eval_raw_string_ctx(
@@ -511,18 +601,44 @@ impl SheetEngine {
                     None => EvaluatedCellValue::Error(FormulaError::Value),
                 }
             }
+            Expr::Binary { op, lhs, rhs } if !matches!(**lhs, Expr::Binary { .. }) => {
+                // Single operator (no left-nested chain): evaluate both sides without a scratch Vec.
+                let l_val = self.eval_expr_ctx(lhs, ctx, depth);
+                if let EvaluatedCellValue::Error(e) = l_val {
+                    return EvaluatedCellValue::Error(e);
+                }
+                let r_val = self.eval_expr_ctx(rhs, ctx, depth);
+                if let EvaluatedCellValue::Error(e) = r_val {
+                    return EvaluatedCellValue::Error(e);
+                }
+                Self::apply_binary_op(*op, l_val, r_val)
+            }
             Expr::Binary { .. } => {
-                let mut chain: Vec<(BinaryOp, &Expr)> = Vec::new();
+                // Left-nested chains are folded iteratively (no recursion on long chains); the
+                // first 8 operators live on the stack so typical formulas never allocate.
+                let mut inline: [Option<(BinaryOp, &Expr)>; 8] = [None; 8];
+                let mut spill: Vec<(BinaryOp, &Expr)> = Vec::new();
+                let mut count = 0usize;
                 let mut cur = expr;
                 while let Expr::Binary { op, lhs, rhs } = cur {
-                    chain.push((*op, rhs));
+                    if count < inline.len() {
+                        inline[count] = Some((*op, &**rhs));
+                    } else {
+                        spill.push((*op, &**rhs));
+                    }
+                    count += 1;
                     cur = lhs;
                 }
                 let mut l_val = self.eval_expr_ctx(cur, ctx, depth);
                 if let EvaluatedCellValue::Error(e) = l_val {
                     return EvaluatedCellValue::Error(e);
                 }
-                while let Some((op, rhs)) = chain.pop() {
+                for idx in (0..count).rev() {
+                    let (op, rhs) = if idx >= inline.len() {
+                        spill[idx - inline.len()]
+                    } else {
+                        inline[idx].expect("slot filled while walking the spine")
+                    };
                     let r_val = self.eval_expr_ctx(rhs, ctx, depth);
                     if let EvaluatedCellValue::Error(e) = r_val {
                         return EvaluatedCellValue::Error(e);
@@ -535,6 +651,20 @@ impl SheetEngine {
                 l_val
             }
             Expr::FuncCall { name, args } => match name.as_str() {
+                // Hot path: same semantics as the `IF` arm of the function table, without the
+                // multi-stage name dispatch.
+                "IF" if (2..=3).contains(&args.len()) => {
+                    let cond = self.eval_expr_ctx(&args[0], ctx, depth);
+                    if let EvaluatedCellValue::Error(e) = cond {
+                        return EvaluatedCellValue::Error(e);
+                    }
+                    match cond.as_bool() {
+                        None => EvaluatedCellValue::Error(FormulaError::Value),
+                        Some(true) => self.eval_expr_ctx(&args[1], ctx, depth),
+                        Some(false) if args.len() == 3 => self.eval_expr_ctx(&args[2], ctx, depth),
+                        Some(false) => EvaluatedCellValue::Boolean(false),
+                    }
+                }
                 "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK"
                 | "PRODUCT" => match self.eval_streaming_range_agg_ctx(name, args, ctx, depth) {
                     Ok(v) => v,
@@ -647,283 +777,6 @@ impl SheetEngine {
             (EvaluatedCellValue::Boolean(_), EvaluatedCellValue::Text(_)) => {
                 Some(std::cmp::Ordering::Greater)
             }
-        }
-    }
-
-    pub(crate) fn eval_streaming_range_agg_ctx(
-        &self,
-        name: &str,
-        args: &[Expr],
-        ctx: &mut EvalContext<'_>,
-        depth: usize,
-    ) -> Result<EvaluatedCellValue, FormulaError> {
-        let mut acc0 = 0.0f64;
-        let mut acc1 = 0.0f64;
-        let mut acc2 = 0.0f64;
-        let mut acc3 = 0.0f64;
-        let mut p0 = 1.0f64;
-        let mut p1 = 1.0f64;
-        let mut p2 = 1.0f64;
-        let mut p3 = 1.0f64;
-        let mut num_count = 0usize;
-        let mut item_count = 0usize;
-        let mut min_val: Option<f64> = None;
-        let mut max_val: Option<f64> = None;
-
-        let mut fold_cell =
-            |v: EvaluatedCellValue, lane: usize, from_range: bool| -> Result<(), FormulaError> {
-                if let EvaluatedCellValue::Error(e) = v {
-                    return Err(e);
-                }
-                let extract_num = |val: &EvaluatedCellValue| -> Result<Option<f64>, FormulaError> {
-                    if from_range {
-                        Ok(match val {
-                            EvaluatedCellValue::Number(n) => Some(*n),
-                            _ => None,
-                        })
-                    } else {
-                        match val {
-                            EvaluatedCellValue::Empty => Ok(None),
-                            _ => val.as_number().map(Some).ok_or(FormulaError::Value),
-                        }
-                    }
-                };
-                match name {
-                    "SUM" | "AVERAGE" | "AVG" => {
-                        if let Some(n) = extract_num(&v)? {
-                            num_count += 1;
-                            match lane & 3 {
-                                0 => acc0 += n,
-                                1 => acc1 += n,
-                                2 => acc2 += n,
-                                _ => acc3 += n,
-                            }
-                        }
-                    }
-                    "PRODUCT" => {
-                        if let Some(n) = extract_num(&v)? {
-                            num_count += 1;
-                            match lane & 3 {
-                                0 => p0 *= n,
-                                1 => p1 *= n,
-                                2 => p2 *= n,
-                                _ => p3 *= n,
-                            }
-                        }
-                    }
-                    "MIN" => {
-                        if let Some(n) = extract_num(&v)? {
-                            min_val = Some(min_val.map_or(n, |m| m.min(n)));
-                        }
-                    }
-                    "MAX" => {
-                        if let Some(n) = extract_num(&v)? {
-                            max_val = Some(max_val.map_or(n, |m| m.max(n)));
-                        }
-                    }
-                    "COUNT" => {
-                        if matches!(v, EvaluatedCellValue::Number(_)) {
-                            item_count += 1;
-                        }
-                    }
-                    "COUNTA" => {
-                        if !matches!(v, EvaluatedCellValue::Empty) {
-                            item_count += 1;
-                        }
-                    }
-                    "COUNTBLANK"
-                        if matches!(v, EvaluatedCellValue::Empty)
-                            || matches!(&v, EvaluatedCellValue::Text(s) if s.is_empty()) =>
-                    {
-                        item_count += 1;
-                    }
-                    _ => {}
-                }
-                Ok(())
-            };
-
-        for arg in args {
-            match arg {
-                Expr::Range(range) => {
-                    let min_r = range.start.row().min(range.end.row());
-                    let max_r = range.start.row().max(range.end.row());
-                    let min_c = range.start.col().min(range.end.col());
-                    let max_c = range.start.col().max(range.end.col());
-                    let total = range.cell_count();
-                    if total > 1024 && total > self.cells.len().saturating_mul(2) {
-                        let mut pop: Vec<PackedCellCoordinate> = self
-                            .cells
-                            .keys()
-                            .copied()
-                            .filter(|c| {
-                                c.row() >= min_r
-                                    && c.row() <= max_r
-                                    && c.col() >= min_c
-                                    && c.col() <= max_c
-                            })
-                            .collect();
-                        pop.sort_unstable();
-                        let pop_len = pop.len();
-                        for (idx, coord) in pop.into_iter().enumerate() {
-                            fold_cell(self.eval_coord_ctx(coord, ctx, depth), idx & 3, true)?;
-                        }
-                        if name == "COUNTBLANK" {
-                            for _ in 0..total.saturating_sub(pop_len) {
-                                fold_cell(EvaluatedCellValue::Empty, 0, true)?;
-                            }
-                        }
-                    } else {
-                        for r in min_r..=max_r {
-                            for c in min_c..=max_c {
-                                let coord = PackedCellCoordinate::new(r, c)
-                                    .map_err(|_| FormulaError::Ref)?;
-                                fold_cell(
-                                    self.eval_coord_ctx(coord, ctx, depth),
-                                    (c as usize) & 3,
-                                    true,
-                                )?;
-                            }
-                        }
-                    }
-                }
-                Expr::SheetRange { sheet, range } => {
-                    let min_r = range.start.row().min(range.end.row());
-                    let max_r = range.start.row().max(range.end.row());
-                    let min_c = range.start.col().min(range.end.col());
-                    let max_c = range.start.col().max(range.end.col());
-                    let total = range.cell_count();
-                    let sparse_pop = self
-                        .resolve_sheet_ref(Some(sheet), ctx)
-                        .filter(|ts| total > 1024 && total > ts.cells.len().saturating_mul(2))
-                        .map(|ts| {
-                            let mut pop: Vec<PackedCellCoordinate> = ts
-                                .cells
-                                .keys()
-                                .copied()
-                                .filter(|c| {
-                                    c.row() >= min_r
-                                        && c.row() <= max_r
-                                        && c.col() >= min_c
-                                        && c.col() <= max_c
-                                })
-                                .collect();
-                            pop.sort_unstable();
-                            pop
-                        });
-                    if let Some(pop) = sparse_pop {
-                        let pop_len = pop.len();
-                        for (idx, coord) in pop.into_iter().enumerate() {
-                            fold_cell(
-                                self.eval_sheet_coord(Some(sheet), coord, ctx, depth),
-                                idx & 3,
-                                true,
-                            )?;
-                        }
-                        if name == "COUNTBLANK" {
-                            for _ in 0..total.saturating_sub(pop_len) {
-                                fold_cell(EvaluatedCellValue::Empty, 0, true)?;
-                            }
-                        }
-                    } else {
-                        for r in min_r..=max_r {
-                            for c in min_c..=max_c {
-                                let coord = PackedCellCoordinate::new(r, c)
-                                    .map_err(|_| FormulaError::Ref)?;
-                                fold_cell(
-                                    self.eval_sheet_coord(Some(sheet), coord, ctx, depth),
-                                    (c as usize) & 3,
-                                    true,
-                                )?;
-                            }
-                        }
-                    }
-                }
-                Expr::Cell(_) | Expr::SheetCell { .. } => {
-                    let v = self.eval_expr_ctx(arg, ctx, depth);
-                    fold_cell(v, 0, true)?;
-                }
-                Expr::FuncCall { name: fn_name, .. }
-                    if matches!(fn_name.as_str(), "INDIRECT" | "OFFSET" | "TRANSPOSE") =>
-                {
-                    if let Some(spec) = self.extract_streaming_range_ctx(arg, ctx, depth)? {
-                        let (ref sheet_opt, min_r, min_c, rows, cols, transposed) = spec;
-                        let total = rows.saturating_mul(cols);
-                        let sparse_pop = (!transposed)
-                            .then(|| self.resolve_sheet_ref(sheet_opt.as_deref(), ctx))
-                            .flatten()
-                            .filter(|ts| total > 1024 && total > ts.cells.len().saturating_mul(2))
-                            .map(|ts| {
-                                let max_r = min_r + (rows as u32).saturating_sub(1);
-                                let max_c = min_c + (cols as u32).saturating_sub(1);
-                                let mut pop: Vec<PackedCellCoordinate> = ts
-                                    .cells
-                                    .keys()
-                                    .copied()
-                                    .filter(|c| {
-                                        c.row() >= min_r
-                                            && c.row() <= max_r
-                                            && c.col() >= min_c
-                                            && c.col() <= max_c
-                                    })
-                                    .collect();
-                                pop.sort_unstable();
-                                pop
-                            });
-                        if let Some(pop) = sparse_pop {
-                            let pop_len = pop.len();
-                            for (idx, coord) in pop.into_iter().enumerate() {
-                                fold_cell(
-                                    self.eval_sheet_coord(sheet_opt.as_deref(), coord, ctx, depth),
-                                    idx & 3,
-                                    true,
-                                )?;
-                            }
-                            if name == "COUNTBLANK" {
-                                for _ in 0..total.saturating_sub(pop_len) {
-                                    fold_cell(EvaluatedCellValue::Empty, 0, true)?;
-                                }
-                            }
-                        } else {
-                            for dr in 0..rows {
-                                for dc in 0..cols {
-                                    let v = self.eval_streaming_cell_allow_error(
-                                        &spec, dr, dc, ctx, depth,
-                                    )?;
-                                    fold_cell(v, (dr * cols + dc) & 3, true)?;
-                                }
-                            }
-                        }
-                    } else {
-                        let v = self.eval_expr_ctx(arg, ctx, depth);
-                        fold_cell(v, 0, false)?;
-                    }
-                }
-                _ => {
-                    let v = self.eval_expr_ctx(arg, ctx, depth);
-                    fold_cell(v, 0, false)?;
-                }
-            }
-        }
-
-        let total_sum = (acc0 + acc1) + (acc2 + acc3);
-        match name {
-            "SUM" => Ok(EvaluatedCellValue::Number(total_sum)),
-            "PRODUCT" => Ok(EvaluatedCellValue::Number(if num_count == 0 {
-                0.0
-            } else {
-                (p0 * p1) * (p2 * p3)
-            })),
-            "AVERAGE" | "AVG" => {
-                if num_count == 0 {
-                    Err(FormulaError::DivByZero)
-                } else {
-                    Ok(EvaluatedCellValue::Number(total_sum / (num_count as f64)))
-                }
-            }
-            "MIN" => Ok(EvaluatedCellValue::Number(min_val.unwrap_or(0.0))),
-            "MAX" => Ok(EvaluatedCellValue::Number(max_val.unwrap_or(0.0))),
-            "COUNT" | "COUNTA" | "COUNTBLANK" => Ok(EvaluatedCellValue::Number(item_count as f64)),
-            _ => Err(FormulaError::Name),
         }
     }
 
