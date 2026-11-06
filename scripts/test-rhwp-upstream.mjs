@@ -13,6 +13,7 @@ import {
   checkConfig,
   verifyUpstream,
   sparseCheckoutPlan,
+  resolveGitExecutable,
 } from "./verify-rhwp-upstream.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -22,7 +23,7 @@ const COMMIT = "1a76570e833917d15817415a53c09ad61ab3203f";
 const OTHER = "2b87681f944a28e26928e463026b4c4d4e2d4f40";
 
 function git(cwd, ...args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync(resolveGitExecutable(), args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function gitmodulesText(url = URL_OK) {

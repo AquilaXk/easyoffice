@@ -24,8 +24,44 @@ const GITLINK_MODE = "160000";
 const SHA_RE = /^[0-9a-f]{40}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
+// Fixed, admin-owned install locations are preferred over a PATH lookup so a writable PATH entry
+// cannot substitute another `git`. GIT_EXECUTABLE (absolute path) lets CI or developers pin it.
+const FIXED_GIT_CANDIDATES =
+  process.platform === "win32"
+    ? [
+        String.raw`C:\Program Files\Git\cmd\git.exe`,
+        String.raw`C:\Program Files\Git\bin\git.exe`,
+        String.raw`C:\Program Files (x86)\Git\cmd\git.exe`,
+      ]
+    : ["/usr/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"];
+
+function findOnSearchPath(name) {
+  const exts = process.platform === "win32" ? [".exe", ".cmd"] : [""];
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue;
+    for (const ext of exts) {
+      const candidate = path.join(dir, name + ext);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+let cachedGitExecutable = null;
+
+/** Absolute path of the git executable: GIT_EXECUTABLE, then fixed install dirs, then search path. */
+export function resolveGitExecutable() {
+  if (cachedGitExecutable) return cachedGitExecutable;
+  const pinned = process.env.GIT_EXECUTABLE;
+  const candidates = pinned && path.isAbsolute(pinned) ? [pinned, ...FIXED_GIT_CANDIDATES] : FIXED_GIT_CANDIDATES;
+  const found = candidates.find((candidate) => fs.existsSync(candidate)) || findOnSearchPath("git");
+  if (!found) throw new Error("git executable not found (set GIT_EXECUTABLE to an absolute path)");
+  cachedGitExecutable = found;
+  return found;
+}
+
 function git(cwd, args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync(resolveGitExecutable(), args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
 export function readConfig(root) {

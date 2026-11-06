@@ -14,10 +14,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { readConfig, sparseCheckoutPlan, verifyUpstream } from "./verify-rhwp-upstream.mjs";
+import { readConfig, resolveGitExecutable, sparseCheckoutPlan, verifyUpstream } from "./verify-rhwp-upstream.mjs";
 
 function run(cwd, args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+  return execFileSync(resolveGitExecutable(), args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
 }
 
 function parseArgs(argv) {
