@@ -135,7 +135,11 @@ test("desktop save uses the native save command instead of a Blob download", asy
   assert.equal(saves.length, 1);
   assert.equal(saves[0].fileName, "분기_경영실적_보고서.docx");
   assert.ok(saves[0].base64.length > 0);
-  assert.deepEqual(Object.keys(saves[0]).sort(), ["base64", "fileName"], "the WebView never sends a path");
+  assert.deepEqual(
+    Object.keys(saves[0]).sort((a, b) => a.localeCompare(b)),
+    ["base64", "fileName"],
+    "the WebView never sends a path"
+  );
   assert.equal(downloads.length, 0, "no Blob download inside the shell");
   assert.ok(calls.some((c) => c.command === "ipc_dispatch" && c.args.command === "convert_document_format"));
   assert.match(feedback(document), /^문서 저장 완료 \(C:\\Users\\me\\Documents\\분기_경영실적_보고서\.docx · /);
