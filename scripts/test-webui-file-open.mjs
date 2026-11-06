@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { pickFile as pickFixtureFile } from "./test-support/fixture-files.mjs";
 
 const INDEX_HTML = fs.readFileSync(
   fileURLToPath(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)),
@@ -60,12 +61,7 @@ async function createOpenHarness(options = {}) {
   return { ...harness, calls, converts };
 }
 
-async function pickFile(document, file, turns = 40) {
-  const input = document.getElementById("file-open-input");
-  input.files = [file];
-  input.dispatchEvent({ type: "change", target: input });
-  await flushAsyncTurns(turns);
-}
+const pickFile = (document, file, turns = 40) => pickFixtureFile(document, file, turns);
 
 const feedback = (document) => document.getElementById("status-command-feedback").textContent;
 const activeModule = (document) => document.getElementById("app").dataset.module;

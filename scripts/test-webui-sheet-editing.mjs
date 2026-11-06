@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-
-const enc = new TextEncoder();
+import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
 
 async function openSheet(options = {}) {
   const h = await createWorkspaceHarness(options);
@@ -26,22 +25,6 @@ function typeText(d, text) {
     td.textContent = td.textContent + ch;
     td.dispatchEvent({ type: "input", inputType: "insertText", data: ch, target: td });
   }
-}
-
-function makeFixtureFile(name, model) {
-  const bytes = enc.encode("EOFIXTURE:" + JSON.stringify(model));
-  return {
-    name,
-    size: bytes.length,
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  };
-}
-
-async function pickFile(document, file) {
-  const input = document.getElementById("file-open-input");
-  input.files = [file];
-  input.dispatchEvent({ type: "change", target: input });
-  await flushAsyncTurns(60);
 }
 
 function bigSheetModel(rows, cols = 8) {
