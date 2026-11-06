@@ -338,49 +338,9 @@ pub fn format_fixed_number(num: f64, decimals: i32, use_commas: bool) -> String 
     }
 }
 
-pub fn format_text_pattern(num: f64, fmt_str: &str) -> String {
-    let trimmed = fmt_str.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    let is_date_pat = (lower.contains('y') || lower.contains('m') || lower.contains('d'))
-        && !lower.contains('0')
-        && !lower.contains('#');
-    if is_date_pat && (1.0..=2_958_465.999_999).contains(&num) {
-        let (y, m, d) = crate::functions_date_fin::civil_from_serial(num.floor() as i64);
-        let mut s = lower.replace("yyyy", &format!("{y:04}"));
-        s = s.replace("yy", &format!("{:02}", y % 100));
-        s = s.replace("mm", &format!("{m:02}"));
-        s = s.replace("dd", &format!("{d:02}"));
-        if !lower.contains("mm") {
-            s = s.replace('m', &format!("{m}"));
-        }
-        if !lower.contains("dd") {
-            s = s.replace('d', &format!("{d}"));
-        }
-        return s;
-    }
-    let use_commas = trimmed.contains(',');
-    if trimmed.ends_with('%') {
-        let decimals = trimmed.split('.').nth(1).map_or(0, |d| {
-            d.trim_end_matches('%')
-                .chars()
-                .take_while(|&c| c == '0' || c == '#')
-                .count()
-                .min(10) as i32
-        });
-        return format!(
-            "{}%",
-            format_fixed_number(num * 100.0, decimals, use_commas)
-        );
-    }
-    let decimals = trimmed.split_once('.').map_or(0, |(_, after_dot)| {
-        after_dot
-            .chars()
-            .take_while(|&c| c == '0' || c == '#')
-            .count()
-            .min(10) as i32
-    });
-    format_fixed_number(num, decimals, use_commas)
-}
+pub use crate::text_format::{
+    format_number_with_code, format_text_pattern, format_text_value_with_code,
+};
 
 impl SheetEngine {
     #[inline]
@@ -576,6 +536,7 @@ impl SheetEngine {
                 }
             }
             for ck in &cycle_keys {
+                ctx.circular = true;
                 ctx.memo
                     .insert(*ck, EvaluatedCellValue::Error(FormulaError::Cycle));
             }
@@ -811,6 +772,9 @@ impl SheetEngine {
                         } else {
                             (min_r + dr as u32, min_c + dc as u32)
                         };
+                        if ctx.steps > Self::MAX_EVAL_STEPS {
+                            return Err(FormulaError::Value);
+                        }
                         let coord =
                             PackedCellCoordinate::new(r, c).map_err(|_| FormulaError::Ref)?;
                         if self.is_nested_subtotal_cell(sheet_opt.as_deref(), coord, ctx) {

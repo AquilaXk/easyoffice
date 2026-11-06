@@ -779,9 +779,9 @@ impl SheetEngine {
                 let val = self.eval_arg_val(&args[0], ctx, depth)?;
                 let fmt_str = self.eval_arg_val(&args[1], ctx, depth)?.to_display_string();
                 let out = if let Some(num) = val.as_number() {
-                    crate::coercion::format_text_pattern(num, &fmt_str)
+                    crate::coercion::format_number_with_code(num, &fmt_str)?
                 } else {
-                    val.to_display_string()
+                    crate::coercion::format_text_value_with_code(&val.to_display_string(), &fmt_str)
                 };
                 if out.chars().count() > Self::MAX_CELL_TEXT_CHARS {
                     return Err(FormulaError::Value);

@@ -361,6 +361,16 @@
       }
     }
 
+    // Circular references evaluate to the standard #NUM! literal; the engine reports them via a
+    // separate `circular` flag so the status bar can warn the way spreadsheet apps do.
+    function announceCircularReference(isCircular) {
+      if (isCircular !== true) return;
+      const feedback = document.getElementById("status-command-feedback");
+      if (feedback) {
+        feedback.textContent = "순환 참조 경고: 해당 수식은 #NUM!으로 표시됩니다.";
+      }
+    }
+
     function recalculateActiveSheetFormulas(options = {}) {
       const forceFocusedDisplay = Boolean(options.updateFocusedDisplay);
       const run = async () => {
@@ -409,6 +419,7 @@
         if (updatedActiveSheet && getActiveModule() === "SHEET") {
           updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
         }
+        announceCircularReference(rpcRes?.circular);
         refreshFocusedSheetCellPendingSnapshot();
       };
       return trackSheetAsyncWork(run());
@@ -478,6 +489,7 @@
       replaceLiveSheetDataStore(prep.evaluated.sheets);
       restoreDomSheetCells(getActiveSheetName());
       refreshFocusedSheetCellPendingSnapshot();
+      announceCircularReference(prep.evaluated.circular);
       if (out && getActiveSheetName() === prep.targetSheet) {
         out.textContent = "결과 (" + prep.targetCellRef + "): " + prep.evaluated.extraValue;
         updateSheetSelectionAndAggregates(getActiveSheetCellRef() || prep.targetCellRef);

@@ -6,6 +6,7 @@ pub mod functions;
 mod functions_date_fin;
 mod functions_lookup_text;
 mod parser;
+mod text_format;
 pub mod types;
 pub mod workbook;
 
@@ -25,6 +26,7 @@ pub(crate) struct EvalContext<'a> {
     pub current_coord: Option<PackedCellCoordinate>,
     pub(crate) steps: usize,
     pub(crate) rng_state: u64,
+    pub(crate) circular: bool,
 }
 
 impl<'a> EvalContext<'a> {
@@ -37,6 +39,7 @@ impl<'a> EvalContext<'a> {
             current_coord: None,
             steps: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
+            circular: false,
         }
     }
 
@@ -49,6 +52,7 @@ impl<'a> EvalContext<'a> {
             current_coord: None,
             steps: 0,
             rng_state: 0x5DEE_CE66_D1A4_F87B,
+            circular: false,
         }
     }
 
@@ -366,6 +370,7 @@ impl SheetEngine {
             return cached.clone();
         }
         if !ctx.visiting.insert(sid, coord) {
+            ctx.circular = true;
             return EvaluatedCellValue::Error(FormulaError::Cycle);
         }
 

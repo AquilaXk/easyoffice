@@ -1,0 +1,649 @@
+//! Excel-compatible number format codes for the `TEXT` worksheet function.
+//!
+//! Supports literal text (quoted, backslash-escaped and bare characters such as `원`, `₩`, `$`),
+//! `0`/`#`/`?` digit placeholders with zero padding, thousands grouping and `,` scaling, `%`,
+//! scientific `E+`/`E-`, up to four `;` sections (positive;negative;zero;text), `@` text
+//! substitution, `General`, date/time codes (`yyyy`, `yy`, `m`..`mmmmm`, `d`..`dddd`, `h`/`hh`,
+//! minute `m` after hours or before seconds, `ss`, fractional seconds, `AM/PM`, `A/P`) and
+//! elapsed `[h]`, `[m]`, `[s]`. Month and weekday names use the English (en-US) locale.
+
+use crate::coercion::format_general_number;
+use crate::types::FormulaError;
+
+const MAX_FRACTION_DIGITS: usize = 10;
+const MAX_DATE_SERIAL: f64 = 2_958_466.0;
+const MONTH_NAMES: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+const DAY_NAMES: [&str; 7] = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
+
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Lit(String),
+    Digit(char),
+    Dot,
+    Comma,
+    Percent,
+    At,
+    General,
+    Exp(bool),
+    Year(usize),
+    Month(usize),
+    Day(usize),
+    Hour(usize),
+    Second(usize),
+    AmPm(bool, bool),
+    Elapsed(char, usize),
+    Section,
+}
+
+fn run_len(chars: &[char], start: usize, target: char) -> usize {
+    chars[start..]
+        .iter()
+        .take_while(|c| c.to_ascii_lowercase() == target)
+        .count()
+}
+
+fn starts_with_ci(chars: &[char], start: usize, pat: &str) -> bool {
+    let pat_chars: Vec<char> = pat.chars().collect();
+    start + pat_chars.len() <= chars.len()
+        && pat_chars
+            .iter()
+            .zip(&chars[start..])
+            .all(|(p, c)| c.eq_ignore_ascii_case(p))
+}
+
+fn parse_bracket(content: &str) -> Option<Tok> {
+    let lower = content.to_ascii_lowercase();
+    for code in ['h', 'm', 's'] {
+        if !lower.is_empty() && lower.chars().all(|c| c == code) {
+            return Some(Tok::Elapsed(code, lower.len()));
+        }
+    }
+    if let Some(rest) = content.strip_prefix('$') {
+        let symbol = rest.split('-').next().unwrap_or("");
+        return Some(Tok::Lit(symbol.to_string()));
+    }
+    None
+}
+
+fn tokenize(fmt: &str) -> Vec<Tok> {
+    let chars: Vec<char> = fmt.chars().collect();
+    let mut toks = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        match ch {
+            '"' => {
+                let mut lit = String::new();
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    lit.push(chars[i]);
+                    i += 1;
+                }
+                i += 1;
+                toks.push(Tok::Lit(lit));
+                continue;
+            }
+            '\\' => {
+                if let Some(&next) = chars.get(i + 1) {
+                    toks.push(Tok::Lit(next.to_string()));
+                }
+                i += 2;
+                continue;
+            }
+            '_' => {
+                toks.push(Tok::Lit(" ".to_string()));
+                i += 2;
+                continue;
+            }
+            '*' => {
+                i += 2;
+                continue;
+            }
+            '[' => {
+                let close = chars[i + 1..].iter().position(|&c| c == ']');
+                if let Some(off) = close {
+                    let content: String = chars[i + 1..i + 1 + off].iter().collect();
+                    if let Some(tok) = parse_bracket(&content) {
+                        toks.push(tok);
+                    }
+                    i += off + 2;
+                } else {
+                    toks.push(Tok::Lit("[".to_string()));
+                    i += 1;
+                }
+                continue;
+            }
+            ';' => toks.push(Tok::Section),
+            '0' | '#' | '?' => toks.push(Tok::Digit(ch)),
+            '.' => toks.push(Tok::Dot),
+            ',' => toks.push(Tok::Comma),
+            '%' => toks.push(Tok::Percent),
+            '@' => toks.push(Tok::At),
+            'E' | 'e' if matches!(chars.get(i + 1), Some('+') | Some('-')) => {
+                toks.push(Tok::Exp(chars[i + 1] == '+'));
+                i += 2;
+                continue;
+            }
+            _ if starts_with_ci(&chars, i, "am/pm") => {
+                toks.push(Tok::AmPm(true, ch.is_ascii_lowercase()));
+                i += 5;
+                continue;
+            }
+            _ if starts_with_ci(&chars, i, "a/p") => {
+                toks.push(Tok::AmPm(false, ch.is_ascii_lowercase()));
+                i += 3;
+                continue;
+            }
+            _ if starts_with_ci(&chars, i, "general") => {
+                toks.push(Tok::General);
+                i += 7;
+                continue;
+            }
+            'y' | 'Y' | 'm' | 'M' | 'd' | 'D' | 'h' | 'H' | 's' | 'S' => {
+                let lower = ch.to_ascii_lowercase();
+                let n = run_len(&chars, i, lower);
+                toks.push(match lower {
+                    'y' => Tok::Year(n),
+                    'm' => Tok::Month(n),
+                    'd' => Tok::Day(n),
+                    'h' => Tok::Hour(n),
+                    _ => Tok::Second(n),
+                });
+                i += n;
+                continue;
+            }
+            _ => toks.push(Tok::Lit(ch.to_string())),
+        }
+        i += 1;
+    }
+    toks
+}
+
+fn is_date_tok(t: &Tok) -> bool {
+    matches!(
+        t,
+        Tok::Year(_)
+            | Tok::Month(_)
+            | Tok::Day(_)
+            | Tok::Hour(_)
+            | Tok::Second(_)
+            | Tok::AmPm(..)
+            | Tok::Elapsed(..)
+    )
+}
+
+/// Formats `num` with an Excel number format code. Invalid date serials fall back to
+/// `General` so callers that need a plain string never fail.
+pub fn format_text_pattern(num: f64, fmt_str: &str) -> String {
+    format_number_with_code(num, fmt_str).unwrap_or_else(|_| format_general_number(num))
+}
+
+/// Applies the text section (`@`) of a format code to a text value, mirroring `TEXT("abc", fmt)`.
+pub fn format_text_value_with_code(text: &str, fmt_str: &str) -> String {
+    let sections = split_sections(tokenize(fmt_str));
+    let section = if sections.len() >= 4 {
+        Some(&sections[3])
+    } else {
+        sections.iter().find(|s| s.contains(&Tok::At))
+    };
+    let Some(sec) = section else {
+        return text.to_string();
+    };
+    let mut out = String::new();
+    for t in sec {
+        match t {
+            Tok::At => out.push_str(text),
+            Tok::Lit(s) => out.push_str(s),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn split_sections(toks: Vec<Tok>) -> Vec<Vec<Tok>> {
+    let mut sections = vec![Vec::new()];
+    for t in toks {
+        if t == Tok::Section {
+            sections.push(Vec::new());
+        } else if let Some(last) = sections.last_mut() {
+            last.push(t);
+        }
+    }
+    sections
+}
+
+/// Formats `num` with an Excel number format code, returning `#VALUE!` for date/time codes
+/// applied to serials outside `0..=2958465.99999`.
+pub fn format_number_with_code(num: f64, fmt_str: &str) -> Result<String, FormulaError> {
+    if !num.is_finite() {
+        return Err(FormulaError::Num);
+    }
+    let sections = split_sections(tokenize(fmt_str));
+    let (section, value, auto_minus) = match sections.len() {
+        1 => (&sections[0], num, num < 0.0),
+        2 => {
+            if num < 0.0 {
+                (&sections[1], -num, false)
+            } else {
+                (&sections[0], num, false)
+            }
+        }
+        _ => {
+            if num < 0.0 {
+                (&sections[1], -num, false)
+            } else if num == 0.0 {
+                (&sections[2], num, false)
+            } else {
+                (&sections[0], num, false)
+            }
+        }
+    };
+    if section.iter().any(is_date_tok) {
+        if !(0.0..MAX_DATE_SERIAL).contains(&value) {
+            return Err(FormulaError::Value);
+        }
+        return Ok(format_date_section(section, value));
+    }
+    let body = format_number_section(section, value.abs());
+    Ok(if auto_minus { format!("-{body}") } else { body })
+}
+
+fn round_half_away(v: f64, decimals: usize) -> f64 {
+    let factor = 10f64.powi(decimals as i32);
+    let q = v * factor;
+    if !q.is_finite() {
+        return v;
+    }
+    let nudge = q.abs() * f64::EPSILON * 2.0;
+    (q + nudge.copysign(q)).round() / factor
+}
+
+fn group_thousands(digits: &str) -> String {
+    let chars: Vec<char> = digits.chars().collect();
+    let mut out = String::with_capacity(chars.len() + chars.len() / 3);
+    for (idx, ch) in chars.iter().enumerate() {
+        let remaining = chars.len() - idx;
+        if idx > 0 && remaining % 3 == 0 && chars[idx - 1].is_ascii_digit() {
+            out.push(',');
+        }
+        out.push(*ch);
+    }
+    out
+}
+
+fn pad_char(ph: char) -> Option<char> {
+    match ph {
+        '0' => Some('0'),
+        '?' => Some(' '),
+        _ => None,
+    }
+}
+
+fn format_number_section(section: &[Tok], value: f64) -> String {
+    if section.is_empty() {
+        return String::new();
+    }
+    if section.contains(&Tok::General) || !section.iter().any(|t| matches!(t, Tok::Digit(_))) {
+        let mut out = String::new();
+        for t in section {
+            match t {
+                Tok::General | Tok::At => out.push_str(&format_general_number(value)),
+                Tok::Lit(s) => out.push_str(s),
+                Tok::Percent => out.push('%'),
+                Tok::Dot => out.push('.'),
+                Tok::Comma => out.push(','),
+                _ => {}
+            }
+        }
+        return out;
+    }
+
+    let first_digit = section.iter().position(|t| matches!(t, Tok::Digit(_)));
+    let last_digit = section.iter().rposition(|t| matches!(t, Tok::Digit(_)));
+    let (Some(first_digit), Some(last_digit)) = (first_digit, last_digit) else {
+        return String::new();
+    };
+    let exp_pos = section.iter().position(|t| matches!(t, Tok::Exp(_)));
+    let mantissa_end = exp_pos.unwrap_or(last_digit + 1);
+    let dot_pos = section[..mantissa_end].iter().position(|t| *t == Tok::Dot);
+    let int_end = dot_pos.unwrap_or(mantissa_end);
+    let scan_end = exp_pos.unwrap_or(section.len());
+
+    let int_phs: Vec<char> = section[..int_end]
+        .iter()
+        .filter_map(|t| {
+            if let Tok::Digit(c) = t {
+                Some(*c)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let frac_phs: Vec<char> = dot_pos.map_or_else(Vec::new, |d| {
+        section[d + 1..mantissa_end]
+            .iter()
+            .filter_map(|t| {
+                if let Tok::Digit(c) = t {
+                    Some(*c)
+                } else {
+                    None
+                }
+            })
+            .take(MAX_FRACTION_DIGITS)
+            .collect()
+    });
+
+    let mut grouping = false;
+    let mut scale_commas = 0i32;
+    for (idx, t) in section.iter().enumerate().take(scan_end) {
+        if *t != Tok::Comma || idx < first_digit {
+            continue;
+        }
+        let next_is_digit = section[idx + 1..scan_end]
+            .iter()
+            .find(|t| !matches!(t, Tok::Comma))
+            .is_some_and(|t| matches!(t, Tok::Digit(_)));
+        if next_is_digit && dot_pos.is_none_or(|d| idx < d) {
+            grouping = true;
+        } else if !next_is_digit {
+            scale_commas += 1;
+        }
+    }
+    let percent_count = section.iter().filter(|t| **t == Tok::Percent).count() as i32;
+
+    let mut v = value * 100f64.powi(percent_count) / 1000f64.powi(scale_commas);
+    let mut exponent = 0i32;
+    if exp_pos.is_some() && v != 0.0 {
+        let int_digits = int_phs.len().max(1) as i32;
+        exponent = v.log10().floor() as i32 - (int_digits - 1);
+        let mut mantissa = round_half_away(v / 10f64.powi(exponent), frac_phs.len());
+        if mantissa >= 10f64.powi(int_digits) {
+            exponent += 1;
+            mantissa = round_half_away(v / 10f64.powi(exponent), frac_phs.len());
+        }
+        v = mantissa;
+    }
+    let rounded = round_half_away(v, frac_phs.len());
+    let prec = frac_phs.len();
+    let raw = format!("{rounded:.prec$}");
+    let (int_raw, frac_raw) = raw.split_once('.').unwrap_or((raw.as_str(), ""));
+    let int_digits: Vec<char> = if int_raw == "0" {
+        Vec::new()
+    } else {
+        int_raw.chars().collect()
+    };
+
+    let n_int = int_phs.len();
+    let mut int_slots: Vec<String> = vec![String::new(); n_int];
+    for k in 0..n_int {
+        let slot = n_int - 1 - k;
+        if k < int_digits.len() {
+            int_slots[slot].push(int_digits[int_digits.len() - 1 - k]);
+        } else if let Some(p) = pad_char(int_phs[slot]) {
+            int_slots[slot].push(p);
+        }
+    }
+    if int_digits.len() > n_int && n_int > 0 {
+        let overflow: String = int_digits[..int_digits.len() - n_int].iter().collect();
+        int_slots[0].insert_str(0, &overflow);
+    }
+    let int_block = if grouping {
+        Some(group_thousands(&int_slots.concat()))
+    } else {
+        None
+    };
+
+    let mut frac_slots: Vec<String> = frac_raw
+        .chars()
+        .zip(frac_phs.iter())
+        .map(|(d, _)| d.to_string())
+        .collect();
+    for idx in (0..frac_slots.len()).rev() {
+        if frac_phs[idx] == '0' || frac_slots[idx] != "0" {
+            break;
+        }
+        frac_slots[idx] = pad_char(frac_phs[idx]).map_or_else(String::new, |c| c.to_string());
+    }
+
+    let mut out = String::new();
+    let mut int_idx = 0usize;
+    let mut frac_idx = 0usize;
+    let mut in_exponent = false;
+    let exp_phs: Vec<char> = exp_pos.map_or_else(Vec::new, |e| {
+        section[e + 1..]
+            .iter()
+            .filter_map(|t| {
+                if let Tok::Digit(c) = t {
+                    Some(*c)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    });
+    for (idx, t) in section.iter().enumerate() {
+        match t {
+            Tok::Digit(_) if in_exponent => {}
+            Tok::Digit(_) if dot_pos.is_none_or(|d| idx < d) => {
+                if let Some(ref block) = int_block {
+                    if int_idx == 0 {
+                        out.push_str(block);
+                    }
+                } else if let Some(slot) = int_slots.get(int_idx) {
+                    out.push_str(slot);
+                }
+                int_idx += 1;
+            }
+            Tok::Digit(_) => {
+                if let Some(slot) = frac_slots.get(frac_idx) {
+                    out.push_str(slot);
+                }
+                frac_idx += 1;
+            }
+            Tok::Dot if Some(idx) == dot_pos => {
+                if n_int == 0 {
+                    out.extend(int_digits.iter());
+                }
+                out.push('.');
+            }
+            Tok::Dot => out.push('.'),
+            Tok::Comma => {}
+            Tok::Percent => out.push('%'),
+            Tok::Lit(s) => out.push_str(s),
+            Tok::Exp(plus) => {
+                in_exponent = true;
+                out.push('E');
+                if exponent < 0 {
+                    out.push('-');
+                } else if *plus {
+                    out.push('+');
+                }
+                let digits = exponent.unsigned_abs().to_string();
+                let min_len = exp_phs.iter().filter(|&&c| c == '0').count();
+                for _ in digits.len()..min_len {
+                    out.push('0');
+                }
+                out.push_str(&digits);
+            }
+            Tok::General | Tok::At => out.push_str(&format_general_number(value)),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn civil_from_serial_display(days: i64) -> (i64, i64, i64) {
+    if days == 0 {
+        (1900, 1, 0)
+    } else {
+        crate::functions_date_fin::civil_from_serial(days)
+    }
+}
+
+fn format_date_section(section: &[Tok], value: f64) -> String {
+    let frac_digits = section
+        .iter()
+        .enumerate()
+        .find_map(|(idx, t)| {
+            if matches!(t, Tok::Second(_) | Tok::Elapsed('s', _))
+                && section.get(idx + 1) == Some(&Tok::Dot)
+            {
+                Some(
+                    section[idx + 2..]
+                        .iter()
+                        .take_while(|t| **t == Tok::Digit('0'))
+                        .count()
+                        .min(3),
+                )
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    let unit = 10i64.pow(frac_digits as u32);
+    let total_units = (value * 86_400.0 * unit as f64).round() as i64;
+    let total_secs = total_units / unit;
+    let sub_units = total_units % unit;
+    let days = total_secs / 86_400;
+    let day_secs = total_secs % 86_400;
+    let hour = day_secs / 3600;
+    let minute = (day_secs % 3600) / 60;
+    let second = day_secs % 60;
+    let (y, mo, d) = civil_from_serial_display(days);
+    let weekday = ((days + 6) % 7) as usize;
+    let has_ampm = section.iter().any(|t| matches!(t, Tok::AmPm(..)));
+
+    let prev_sig = |idx: usize| {
+        section[..idx]
+            .iter()
+            .rev()
+            .find(|t| !matches!(t, Tok::Lit(_)))
+    };
+    let next_sig = |idx: usize| {
+        section[idx + 1..]
+            .iter()
+            .find(|t| !matches!(t, Tok::Lit(_) | Tok::Dot | Tok::Digit(_)))
+    };
+
+    let mut out = String::new();
+    let mut skip_frac = false;
+    for (idx, t) in section.iter().enumerate() {
+        match t {
+            Tok::Year(n) => {
+                if *n <= 2 {
+                    out.push_str(&format!("{:02}", y % 100));
+                } else {
+                    out.push_str(&format!("{y:04}"));
+                }
+            }
+            Tok::Month(n) => {
+                let is_minute = matches!(prev_sig(idx), Some(Tok::Hour(_) | Tok::Elapsed('h', _)))
+                    || matches!(next_sig(idx), Some(Tok::Second(_) | Tok::Elapsed('s', _)));
+                if is_minute {
+                    push_padded(&mut out, minute, *n >= 2);
+                } else {
+                    let name = MONTH_NAMES[((mo - 1).clamp(0, 11)) as usize];
+                    match n {
+                        1 | 2 => push_padded(&mut out, mo, *n == 2),
+                        3 => out.push_str(&name[..3]),
+                        4 => out.push_str(name),
+                        _ => out.push_str(&name[..1]),
+                    }
+                }
+            }
+            Tok::Day(n) => match n {
+                1 | 2 => push_padded(&mut out, d, *n == 2),
+                3 => out.push_str(&DAY_NAMES[weekday][..3]),
+                _ => out.push_str(DAY_NAMES[weekday]),
+            },
+            Tok::Hour(n) => {
+                let h = if has_ampm {
+                    let h12 = hour % 12;
+                    if h12 == 0 {
+                        12
+                    } else {
+                        h12
+                    }
+                } else {
+                    hour
+                };
+                push_padded(&mut out, h, *n >= 2);
+            }
+            Tok::Second(n) => {
+                push_padded(&mut out, second, *n >= 2);
+                skip_frac = frac_digits > 0;
+            }
+            Tok::Elapsed(kind, n) => {
+                let amount = match kind {
+                    'h' => total_secs / 3600,
+                    'm' => total_secs / 60,
+                    _ => total_secs,
+                };
+                let s = amount.to_string();
+                for _ in s.len()..*n {
+                    out.push('0');
+                }
+                out.push_str(&s);
+                skip_frac = *kind == 's' && frac_digits > 0;
+            }
+            Tok::AmPm(full, lower) => {
+                let pm = hour >= 12;
+                let text = match (full, pm) {
+                    (true, false) => "AM",
+                    (true, true) => "PM",
+                    (false, false) => "A",
+                    (false, true) => "P",
+                };
+                if *lower {
+                    out.push_str(&text.to_ascii_lowercase());
+                } else {
+                    out.push_str(text);
+                }
+            }
+            Tok::Dot if skip_frac => {
+                out.push('.');
+                out.push_str(&format!("{sub_units:0width$}", width = frac_digits));
+            }
+            Tok::Digit('0') if skip_frac => {}
+            Tok::Dot => out.push('.'),
+            Tok::Digit(c) => out.push(*c),
+            Tok::Comma => out.push(','),
+            Tok::Percent => out.push('%'),
+            Tok::Lit(s) => {
+                skip_frac = false;
+                out.push_str(s);
+            }
+            Tok::General | Tok::At | Tok::Exp(_) | Tok::Section => {}
+        }
+    }
+    out
+}
+
+fn push_padded(out: &mut String, n: i64, pad: bool) {
+    if pad {
+        out.push_str(&format!("{n:02}"));
+    } else {
+        out.push_str(&n.to_string());
+    }
+}
