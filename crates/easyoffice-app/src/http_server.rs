@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use crate::hwp_bundle;
 use crate::EasyOfficeIpcRouter;
 
+const SERVE_DEV_ONLY_NOTICE: &str = "NOTICE: --serve is a developer/testing mode only, not for end users; install the EasyOffice desktop app instead.\n안내: --serve는 개발·테스트 전용 모드이며 일반 사용자용이 아닙니다. 설치형 EasyOffice 앱을 사용하세요.";
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
 const SHEET_UTILS_JS: &str = include_str!("../ui/sheet-utils.js");
@@ -601,6 +602,7 @@ pub fn serve_webui(port: crate::cli_args::ServePort, open_browser: bool) -> Exit
         .unwrap_or(preferred_port);
     let url = format!("http://127.0.0.1:{bound_port}");
     println!("EasyOffice WebUI Server listening on {url}");
+    println!("{SERVE_DEV_ONLY_NOTICE}");
     if open_browser {
         try_open_desktop_browser(&url);
     }
