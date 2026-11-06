@@ -761,19 +761,37 @@ mod tests {
             vec!["Author".to_string(), "LastModifiedBy".to_string()]
         );
 
-        let adversarial_inputs = [
-            "a".repeat(262_144),
-            "1-".repeat(131_072),
-            format!("{}@", "a.".repeat(131_072)),
+        // Linearity is checked by scaling (N vs 4N, best of several runs) so
+        // machine load does not matter; a quadratic scanner would show ~16x.
+        let builders: [fn(usize) -> String; 3] = [
+            |n| "a".repeat(n),
+            |n| "1-".repeat(n / 2),
+            |n| format!("{}@", "a.".repeat(n / 2)),
         ];
-        for adv in &adversarial_inputs {
-            let started = Instant::now();
-            let res = DocumentSecurityAuditor::scan_and_scrub_pii(adv);
-            let elapsed = started.elapsed();
-            assert_eq!(res.spans.len(), 0);
+        let best_of = |input: &str| {
+            (0..5)
+                .map(|_| {
+                    let started = Instant::now();
+                    let res = DocumentSecurityAuditor::scan_and_scrub_pii(input);
+                    let elapsed = started.elapsed();
+                    assert_eq!(res.spans.len(), 0);
+                    elapsed
+                })
+                .min()
+                .expect("at least one run")
+        };
+        for build in builders {
+            let small = best_of(&build(65_536));
+            let large = best_of(&build(262_144));
+            // Floor avoids a meaningless ratio when the small run is ~0.
+            let floor = std::time::Duration::from_millis(2);
             assert!(
-                elapsed.as_millis() < 500,
-                "linear-time scanner exceeded budget: {elapsed:?}"
+                large < small.max(floor) * 10,
+                "scanner scaling is super-linear: n={small:?} 4n={large:?}"
+            );
+            assert!(
+                large.as_secs() < 10,
+                "scanner exceeded backstop ceiling: {large:?}"
             );
         }
     }
