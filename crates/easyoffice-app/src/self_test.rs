@@ -321,6 +321,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let ribbon_history_asset = include_str!("../ui/ribbon-history.js");
     let workspace_session_asset = include_str!("../ui/workspace-session.js");
     let file_open_asset = include_str!("../ui/file-open.js");
+    let slide_studio_asset = include_str!("../ui/slide-studio.js");
     let js_asset = include_str!("../ui/app.js");
     if !html_asset.contains("EasyOffice")
         || !css_asset.contains("#5C6BC0")
@@ -336,6 +337,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !ribbon_history_asset.contains("__EASYOFFICE_CREATE_RIBBON_HISTORY__")
         || !workspace_session_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_SESSION__")
         || !file_open_asset.contains("__EASYOFFICE_CREATE_FILE_OPEN__")
+        || !slide_studio_asset.contains("__EASYOFFICE_CREATE_SLIDE_STUDIO__")
         || !js_asset.contains("compositionstart")
     {
         return Err(EasyOfficeError::CorruptedContainer(

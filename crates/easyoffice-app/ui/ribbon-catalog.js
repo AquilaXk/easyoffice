@@ -172,6 +172,7 @@
       stagePadding: "",
       stageOutline: "",
       stageLayoutState: "",
+      aspect: "16:9",
     };
   }
 
@@ -391,6 +392,15 @@
     { keys: "Ctrl+V", action: "clip-paste", native: true },
     { keys: "/", action: "palette", bareKey: true },
     { keys: "Insert", action: "insert-mode", bareKey: true, external: true },
+    // Slide module only. `module` gates the binding to the active module (every other module keeps
+    // the browser default, e.g. F5 reload); `bareKey` keeps keys out of text fields; `scope`
+    // requires focus inside the given selector. F5 is browser-reserved, so it is only taken over
+    // in the slide module while focus is outside every text field (documented in PD-080).
+    { keys: "F5", action: "slide-show-start", module: "SLIDE", bareKey: true },
+    { keys: "Shift+F5", action: "slide-show-current", module: "SLIDE", bareKey: true },
+    { keys: "Alt+ArrowUp", action: "slide-move-up", module: "SLIDE", scope: "#slide-thumb-list" },
+    { keys: "Alt+ArrowDown", action: "slide-move-down", module: "SLIDE", scope: "#slide-thumb-list" },
+    { keys: "Delete", action: "slide-delete", module: "SLIDE", bareKey: true, scope: "#slide-thumb-list" },
   ]);
 
   function resolveRibbonShortcutLabel(commandId, rawShortcut) {
