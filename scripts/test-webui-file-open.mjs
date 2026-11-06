@@ -130,7 +130,8 @@ test("the hidden input accepts exactly the supported extensions", async () => {
   const inputs = [...INDEX_HTML.matchAll(/accept="([^"]+)"/g)].map((m) => m[1]);
   assert.equal(inputs.length, 2, "workspace picker and converter picker");
   for (const accept of inputs) {
-    assert.deepEqual(accept.split(",").map((e) => e.replace(/^\./, "")).sort(), [...exts].sort());
+    const byName = (a, b) => a.localeCompare(b);
+    assert.deepEqual(accept.split(",").map((e) => e.replace(/^\./, "")).sort(byName), [...exts].sort(byName));
   }
 });
 
