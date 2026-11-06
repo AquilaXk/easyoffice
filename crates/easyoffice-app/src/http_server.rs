@@ -19,6 +19,7 @@ const WORKSPACE_TOOLS_JS: &str = include_str!("../ui/workspace-tools.js");
 const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
 const SHEET_CONTROLLER_JS: &str = include_str!("../ui/sheet-controller.js");
 const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
+const WORKSPACE_SESSION_JS: &str = include_str!("../ui/workspace-session.js");
 const APP_JS: &str = include_str!("../ui/app.js");
 const FAVICON_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#5C6BC0\"/><path d=\"M9 7h10l4 4v14H9V7z\" fill=\"#FFFFFF\"/><path d=\"M19 7v4h4\" fill=\"#DDE2F6\"/><rect x=\"12\" y=\"14\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/><rect x=\"12\" y=\"18\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/></svg>";
 
@@ -313,6 +314,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             RIBBON_HISTORY_JS.to_string(),
+        ),
+        ("GET", "/workspace-session.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            WORKSPACE_SESSION_JS.to_string(),
         ),
         ("GET", "/app.js") => (
             "200 OK",
