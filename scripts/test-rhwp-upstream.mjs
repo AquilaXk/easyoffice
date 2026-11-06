@@ -15,6 +15,7 @@ import {
   sparseCheckoutPlan,
   resolveGitExecutable,
 } from "./verify-rhwp-upstream.mjs";
+import { REQUIRED_VENDOR_FILES, checkVendorCore } from "./verify-rhwp-core.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -39,6 +40,7 @@ function makeRepo({ commit = COMMIT, url = URL_OK, config = {}, gitlink = commit
   fs.writeFileSync(path.join(dir, "config/rhwp-upstream.json"), JSON.stringify(cfg));
   fs.writeFileSync(path.join(dir, ".gitmodules"), gitmodulesText(url));
   git(dir, "update-index", "--add", "--cacheinfo", `160000,${gitlink},third_party/rhwp`);
+  fs.cpSync(path.join(REPO, "vendor/rhwp-core"), path.join(dir, "vendor/rhwp-core"), { recursive: true });
   return dir;
 }
 
@@ -66,6 +68,7 @@ test("config sanity is enforced", () => {
   assert.ok(checkConfig({ ...cfg, commit: "abc" }).length > 0);
   assert.ok(checkConfig({ ...cfg, version: "latest" }).length > 0);
   assert.ok(checkConfig({ ...cfg, sparse: [] }).length > 0);
+  assert.ok(checkConfig({ ...cfg, wasmPackVersion: "latest" }).length > 0);
   assert.ok(checkConfig({ ...cfg, url: "https://example.com/rhwp.git" }).length > 0);
 });
 
@@ -120,12 +123,18 @@ test("a version mismatch with the checked-out sources fails", () => {
   const head = git(sub, "rev-parse", "HEAD").trim();
   git(dir, "update-index", "--add", "--cacheinfo", `160000,${head},third_party/rhwp`);
   const cfgPath = path.join(dir, "config/rhwp-upstream.json");
+  const provPath = path.join(dir, "vendor/rhwp-core/PROVENANCE.json");
+  const writeCfg = (next) => {
+    fs.writeFileSync(cfgPath, JSON.stringify(next));
+    const prov = JSON.parse(fs.readFileSync(provPath, "utf8"));
+    fs.writeFileSync(provPath, JSON.stringify({ ...prov, commit: next.commit }));
+  };
   const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-  fs.writeFileSync(cfgPath, JSON.stringify({ ...cfg, commit: head }));
+  writeCfg({ ...cfg, commit: head });
   try {
     const errs = verifyUpstream(dir);
     assert.ok(errs.some((e) => e.includes("version")), errs.join("\n"));
-    fs.writeFileSync(cfgPath, JSON.stringify({ ...cfg, commit: head, version: "0.8.7" }));
+    writeCfg({ ...cfg, commit: head, version: "0.8.7" });
     assert.deepEqual(verifyUpstream(dir), []);
     // A modified work tree fails closed.
     fs.appendFileSync(path.join(sub, "Cargo.toml"), "# edit\n");
@@ -135,7 +144,7 @@ test("a version mismatch with the checked-out sources fails", () => {
     assert.ok(verifyUpstream(dir).some((e) => e.includes("modified")));
     fs.rmSync(path.join(sub, "stray.txt"));
     // HEAD drifting away from the pin fails too.
-    fs.writeFileSync(cfgPath, JSON.stringify({ ...cfg, commit: OTHER, version: "0.8.7" }));
+    writeCfg({ ...cfg, commit: OTHER, version: "0.8.7" });
     git(dir, "update-index", "--add", "--cacheinfo", `160000,${OTHER},third_party/rhwp`);
     assert.ok(verifyUpstream(dir).some((e) => e.includes("HEAD")));
   } finally {
@@ -148,7 +157,7 @@ test("the sparse plan covers the pinned list and excludes AI-tool files", () => 
   const plan = sparseCheckoutPlan(cfg);
   assert.ok(plan.sparse.includes("/rhwp-studio/"));
   assert.ok(plan.sparse.every((p) => p.startsWith("/")));
-  assert.ok(!plan.sparse.some((p) => /mydocs|samples|^\/pdf\/|tools\/|CLAUDE|AGENTS|\.mcp/i.test(p)));
+  assert.ok(!plan.sparse.some((p) => /mydocs|samples|^\/pdf\/|^\/tools\/?$|CLAUDE|AGENTS|\.mcp/i.test(p)));
   assert.ok(plan.submoduleArgs.includes("--depth"));
 });
 
@@ -197,6 +206,73 @@ test("hygiene scans only skip third_party/rhwp and still inspect other files", (
     });
     assert.match(res.stderr, /third_party\/other\/note\.md/);
     assert.doesNotMatch(res.stderr, /third_party\/rhwp\/note\.md/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("the vendored WASM package matches its provenance", () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(REPO, "config/rhwp-upstream.json"), "utf8"));
+  assert.deepEqual(checkVendorCore(REPO, cfg), []);
+  const prov = JSON.parse(fs.readFileSync(path.join(REPO, "vendor/rhwp-core/PROVENANCE.json"), "utf8"));
+  assert.equal(prov.rustToolchain, "1.93.1");
+  assert.equal(prov.wasmPackVersion, cfg.wasmPackVersion);
+  for (const name of REQUIRED_VENDOR_FILES) assert.ok(prov.artifacts[name].bytes > 0, name);
+});
+
+test("tampered, truncated, missing and unlisted vendor files fail closed", () => {
+  const dir = makeRepo();
+  const cfg = JSON.parse(fs.readFileSync(path.join(dir, "config/rhwp-upstream.json"), "utf8"));
+  const vendor = path.join(dir, "vendor/rhwp-core");
+  try {
+    fs.appendFileSync(path.join(vendor, "rhwp.js"), "\n// tampered\n");
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("rhwp.js")));
+    fs.copyFileSync(path.join(REPO, "vendor/rhwp-core/rhwp.js"), path.join(vendor, "rhwp.js"));
+    assert.deepEqual(checkVendorCore(dir, cfg), []);
+    const wasm = path.join(vendor, "rhwp_bg.wasm");
+    const bytes = fs.readFileSync(wasm);
+    bytes[bytes.length >> 1] ^= 0xff;
+    fs.writeFileSync(wasm, bytes);
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("SHA-256")));
+    fs.writeFileSync(wasm, bytes.subarray(0, bytes.length - 1));
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("bytes")));
+    fs.rmSync(wasm);
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("missing")));
+    fs.copyFileSync(path.join(REPO, "vendor/rhwp-core/rhwp_bg.wasm"), wasm);
+    fs.writeFileSync(path.join(vendor, "extra.js"), "x");
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("extra.js")));
+    fs.rmSync(path.join(vendor, "extra.js"));
+    fs.rmSync(path.join(vendor, "PROVENANCE.json"));
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("PROVENANCE.json is missing")));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("provenance must agree with config/rhwp-upstream.json", () => {
+  const dir = makeRepo();
+  const cfg = JSON.parse(fs.readFileSync(path.join(dir, "config/rhwp-upstream.json"), "utf8"));
+  const file = path.join(dir, "vendor/rhwp-core/PROVENANCE.json");
+  const prov = JSON.parse(fs.readFileSync(file, "utf8"));
+  try {
+    for (const key of ["commit", "version", "rustToolchain", "wasmPackVersion"]) {
+      fs.writeFileSync(file, JSON.stringify({ ...prov, [key]: "9.9.9" }));
+      assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes(key)), key);
+    }
+    fs.writeFileSync(file, JSON.stringify({ ...prov, artifacts: { ...prov.artifacts, "../evil.js": prov.artifacts["rhwp.js"] } }));
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("unsafe artifact name")));
+    fs.writeFileSync(file, "{ not json");
+    assert.ok(checkVendorCore(dir, cfg).some((e) => e.includes("cannot be parsed")));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("verifyUpstream reports a tampered vendor file", () => {
+  const dir = makeRepo();
+  try {
+    fs.appendFileSync(path.join(dir, "vendor/rhwp-core/rhwp.d.ts"), "// x\n");
+    assert.ok(verifyUpstream(dir).some((e) => e.includes("rhwp.d.ts")));
   } finally {
     cleanup(dir);
   }

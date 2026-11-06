@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "version": "0.8.7",
+    "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+    "counterparts": {
+      "main": "277a3fa5a172035624719a19db49ca417c8684aadaa234d156655263eac383b2",
+      "core/font-loader": "64a7f5fa58f0aa4638ac0665875a02eb841e6225bf53b54a7e5d3aaca827cef1",
+      "command/print-pages": "b16aa902f12c9227d669f98cb4c2695e0d10056f57ba5de449510d94472801ce",
+      "embed/protocol": "56cd7b2892e52c69cd2871f573f4058df3eb5a60ebb3de8757f0b196b4fbbe77",
+      "embed/rpc-router": "d7dcff642a112474aea95eaccbf6670183ea3ff4a6c2b4fef4e2d6bff6ddb538"
+    },
+    "assets": {
+      "index.html": "15cc17c2acf2864d4eb4e0ece92559f2603f5dcc4e361b1c28b118cce00a6fea",
+      "public/print.html": "930907863afbafcc76099d386f6a995bc6c69387cb56838b18e4cdaf6eea6b79",
+      "public/theme-init.js": "5a3afcc0139187bfe509414cd60fde2a0dfea72fd72751c4e6e696cdc0f6c587",
+      "public/locale-init.js": "633d47a6a53b2211cf816769f8c084b097c1b60b6ab263803d8610c0531539fa"
+    }
+  },
+  "overrides": [
+    {
+      "id": "main",
+      "strategy": "fork",
+      "reason": "Embed-only entry point: chrome profile fixed to embed, no ?url= loading, no autosave/recent/PWA/plugin/dev hooks, Canvas2D only, adds the createBlankDocument RPC handler. The host owns open/save/new."
+    },
+    {
+      "id": "core/font-loader",
+      "strategy": "fork",
+      "reason": "Registers fonts only through FontFace (no injected style element) and only requests the OFL fonts bundled in assets/fonts; CDN and non-shipped catalog entries are never fetched."
+    },
+    {
+      "id": "command/print-pages",
+      "strategy": "fork",
+      "reason": "Print styles are externalised: static rules in print.css, per-page @page rules in a constructed stylesheet, so no inline style element is created."
+    },
+    {
+      "id": "embed/protocol",
+      "strategy": "fork",
+      "reason": "Does not advertise plugin-loader-v1 and hwpctrl-v1 (not bundled); adds blank-document-v1."
+    },
+    {
+      "id": "embed/rpc-router",
+      "strategy": "fork",
+      "reason": "Removes the plugin.* RPC methods and adds createBlankDocument."
+    }
+  ],
+  "assetOverrides": [
+    {
+      "path": "index.html",
+      "upstream": "index.html",
+      "strategy": "fork",
+      "reason": "Markup without inline style attributes, relative init scripts and without icon assets."
+    },
+    {
+      "path": "static/print.html",
+      "upstream": "public/print.html",
+      "strategy": "fork",
+      "reason": "Loading surface with its stylesheet externalised."
+    }
+  ],
+  "verbatimAssets": [
+    "public/theme-init.js",
+    "public/locale-init.js"
+  ]
+}

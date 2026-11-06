@@ -1,0 +1,3 @@
+# Vendored and generated artifacts are hashed byte-for-byte (PD-076, PD-081); never normalise line endings.
+vendor/rhwp-core/** -text
+assets/fonts/** -text
