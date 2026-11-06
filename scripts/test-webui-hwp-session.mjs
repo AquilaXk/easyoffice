@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import vm from "node:vm";
+import { loadUiModule } from "./test-support/load-ui-module.mjs";
 
 // HWP session (PD-085): open routing, size limit, text-only fallback, HWP/HWPX save choice,
 // verify-before-deliver, dirty / notifySaved rules and the IndexedDB autosave. The editor host and
@@ -100,9 +100,7 @@ function load(options = {}) {
     indexedDB: options.noIndexedDb ? null : fakeIndexedDb(),
     sessionStorage: { getItem: () => "tab-A", setItem: () => {} },
   };
-  const sandbox = { globalThis: null, __EASYOFFICE_HOST_ENV__: env, Uint8Array, ArrayBuffer, structuredClone };
-  sandbox.globalThis = sandbox;
-  vm.runInNewContext(fs.readFileSync(SESSION_JS, "utf8"), sandbox);
+  loadUiModule(SESSION_JS, env);
   const fake = createFakeHost(options.host);
   const document = createDocument();
   const ipc = [];

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import vm from "node:vm";
+import { loadUiModule } from "./test-support/load-ui-module.mjs";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 
 // HWP host (PD-083): a fake iframe + MessageChannel stands in for the embedded rhwp-studio. The
@@ -106,9 +106,7 @@ function loadHost({ fetchOk = true, studioOptions, activeModule = "HWP", timeout
     btoa: (s) => Buffer.from(s, "binary").toString("base64"),
     ArrayBuffer,
   };
-  const sandbox = { globalThis: null, __EASYOFFICE_HOST_ENV__: env, Uint8Array };
-  sandbox.globalThis = sandbox;
-  vm.runInNewContext(fs.readFileSync(HOST_JS, "utf8"), sandbox);
+  loadUiModule(HOST_JS, env);
   let mod = activeModule;
   const states = [];
   const ipcCalls = [];
@@ -218,9 +216,7 @@ test("missing bundle falls back to the text-only editor with a clear message", a
 test("missing fetch (unit environments) also uses the fallback, never throws", async () => {
   const document = createFakeDocument();
   const env = { setTimeout, clearTimeout };
-  const sandbox = { __EASYOFFICE_HOST_ENV__: env, Uint8Array };
-  sandbox.globalThis = sandbox;
-  vm.runInNewContext(fs.readFileSync(HOST_JS, "utf8"), sandbox);
+  loadUiModule(HOST_JS, env);
   const hostApi = env.__EASYOFFICE_CREATE_HWP_HOST__({ document, getActiveModule: () => "HWP" });
   await hostApi.onModuleActivated("HWP");
   assert.equal(hostApi.getStatus(), "unavailable");
