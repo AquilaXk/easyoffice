@@ -96,4 +96,5 @@
 ## 3. 플랫폼 배포 형태 (Platform Delivery, `PD-074`)
 - **macOS**: 네이티브 Swift 앱(`EasyOffice.app`, `.dmg`/`.zip`)으로 배포합니다.
 - **Windows**: 설치 프로그램 `EasyOffice-<version>-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 시작 메뉴 바로 가기, 제거 프로그램)로 배포합니다. 설치된 `EasyOffice.exe`는 Windows 내장 WebView2 위의 데스크톱 창(Tauri v2 셸)이며, 실행 파일에 포함된 WebUI가 프로세스 안의 Rust 엔진(15종 IPC 명령)을 직접 호출합니다. 로컬 HTTP 서버·브라우저·네트워크 연결 없이 동작하고, 저장은 Windows 기본 저장 대화상자로 위치를 고릅니다(취소·실패는 저장 상태 표시에 그대로 보고). 문서 파일 연결(더블클릭으로 열기)은 파일 열기 기능(#111)이 준비될 때까지 등록하지 않습니다.
+- **한글(HWP) 편집기 자산 (`PD-081`)**: 앱 런타임은 아직 바뀌지 않았습니다. 편집기(rhwp 엔진의 미리 빌드한 WASM + 임베드 전용 rhwp-studio 오버레이)와 번들 가능한 OFL 글꼴 28종(약 18 MiB)이 저장소에 고정되어 있고, 단독 하니스에서 빈 문서 → 한글 입력 → 선택 범위만 글자 크기 변경 → HWP 내보내기 → 다시 열기에서 같은 글자 모양이 유지됨을 검증합니다. 셸·`--serve`에 내장해 HWP 모듈로 여는 것은 다음 단계입니다.
 - **개발자 미리보기**: `easyoffice-app.exe --serve [PORT]`는 같은 WebUI를 `127.0.0.1` 루프백 서버로 브라우저에 띄우는 개발·테스트 경로이며, 보조 아카이브 `EasyOffice-<version>-windows-x64-cli-serve-preview.zip`으로 배포합니다.

@@ -38,8 +38,13 @@ jobs:
       - name: Verify rhwp upstream pin (no submodule checkout)
         run: node scripts/verify-rhwp-upstream.mjs
 
-      - name: Run rhwp upstream guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs
+      - name: Verify vendored rhwp WASM provenance and bundled fonts (no WASM build in CI)
+        run: |
+          node scripts/verify-rhwp-core.mjs
+          node scripts/verify-fonts.mjs
+
+      - name: Run rhwp upstream and hwp-studio guard tests
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs
 
       - name: Verify macOS LaunchServices Info.plist coverage
         run: node scripts/verify-macos-plist.mjs
@@ -86,6 +91,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/hwp-studio/package-lock.json
 
       - name: Run repository hygiene & specification guard
         run: node scripts/check-repo-hygiene.mjs
@@ -93,8 +100,13 @@ jobs:
       - name: Verify rhwp upstream pin (no submodule checkout)
         run: node scripts/verify-rhwp-upstream.mjs
 
-      - name: Run rhwp upstream guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs
+      - name: Verify vendored rhwp WASM provenance and bundled fonts (no WASM build in CI)
+        run: |
+          node scripts/verify-rhwp-core.mjs
+          node scripts/verify-fonts.mjs
+
+      - name: Run rhwp upstream and hwp-studio guard tests
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs
 
       - name: Verify desktop icons match the generator
         run: node scripts/generate-desktop-icons.mjs --check
@@ -183,6 +195,25 @@ jobs:
           if ($proc.ExitCode -ne 0) {
             throw "Desktop shell smoke test failed with exit code $($proc.ExitCode)"
           }
+
+      # hwp-studio (PD-081): the editor bundle is generated from the committed WASM package, the pinned
+      # sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. It is built after the
+      # desktop shell so the shell does not embed it yet (embedding is a later phase).
+      - name: Check out the pinned rhwp upstream (sparse, shallow)
+        run: node scripts/checkout-rhwp.mjs
+
+      - name: Build the hwp-studio editor bundle (npm ci --ignore-scripts, vite build, static checks)
+        run: node scripts/build-hwp-studio.mjs
+
+      - name: Run the standalone hwp-studio harness (blank document, partial font size, export, reload)
+        run: node scripts/hwp-studio-harness.mjs
+
+      - name: Record the hwp-studio bundle size
+        shell: pwsh
+        run: |
+          node scripts/check-hwp-studio-bundle.mjs | Tee-Object -Variable sizes
+          "### hwp-studio bundle" >> $env:GITHUB_STEP_SUMMARY
+          $sizes >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload NSIS installer for review
         uses: actions/upload-artifact@v4

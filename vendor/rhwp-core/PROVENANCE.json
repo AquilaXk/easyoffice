@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "source": "https://github.com/edwardkim/rhwp",
+  "version": "0.8.7",
+  "commit": "1a76570e833917d15817415a53c09ad61ab3203f",
+  "rustToolchain": "1.93.1",
+  "wasmPackVersion": "0.14.0",
+  "buildCommand": "wasm-pack build --target web --release (cwd: third_party/rhwp, default features, no extra RUSTFLAGS)",
+  "buildHost": "Windows 11 x64 (host toolchain 1.93.1-x86_64-pc-windows-msvc)",
+  "artifacts": {
+    "rhwp_bg.wasm": {
+      "bytes": 11821975,
+      "sha256": "fd7ce942326865fe6fc8ef77834c3cfbe642e5c06ca6e43ad0f2c9405e35240b"
+    },
+    "rhwp.js": {
+      "bytes": 454520,
+      "sha256": "70cde06a369fa7fd4fc8bc8f3d6acaee158596ba1a116a2c72159002b0b5654e"
+    },
+    "rhwp.d.ts": {
+      "bytes": 183636,
+      "sha256": "4742243ad37a992ba3deec56a3e3e7b57f05073e49806027147acc054b5fce85"
+    },
+    "rhwp_bg.wasm.d.ts": {
+      "bytes": 61666,
+      "sha256": "8c9f8bbb336094aa5017fdc03b1059cbe60e8af67086fec1287000a0e322f151"
+    },
+    "package.json": {
+      "bytes": 414,
+      "sha256": "53d26a44ad282d5a4d8c8f4137fcc14493bbc1e6e45cde9b79051061b73d8ac8"
+    },
+    "LICENSE": {
+      "bytes": 1093,
+      "sha256": "d6ea0e91bf1e6136b606e288e7e22dc44e39b4f087d4bdcde2bd0d8aaf5314dd"
+    }
+  }
+}

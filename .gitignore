@@ -7,7 +7,7 @@
 # Swift Package Manager, Rust Cargo & Xcode build artifacts
 .build/
 .swiftpm/
-/target/
+/target*/
 DerivedData/
 build/
 *.xcodeproj/project.xcworkspace/
@@ -37,3 +37,10 @@ tmp/
 
 # Tauri build-time schema output
 crates/easyoffice-desktop/gen/
+
+# Tauri build-time generated permission schemas
+crates/easyoffice-desktop/permissions/
+
+# hwp-studio overlay: npm dependencies and the generated editor bundle (PD-081)
+apps/hwp-studio/node_modules/
+crates/easyoffice-app/ui/hwp-studio/
