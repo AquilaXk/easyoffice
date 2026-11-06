@@ -1040,3 +1040,36 @@
   - DOC/PPT 출력을 거부: 기존 EasyOffice 왕복 저장과 상호 변환 경로를 깨므로, 출력은 유지하고 호환성 제한을 명시하는 방식을 채택.
 - **Verified by** `crates/easyoffice-formats/tests/output_container_spec_validity.rs`, `crates/easyoffice-app/src/convert_ipc.rs` 단위 테스트, `scripts/test-webui-behavior.mjs`(호환성 제한 표시), `cargo test --workspace`
 - **Revisit when** 공개 라이선스 한글 글꼴 서브셋 임베딩 또는 규격 충족 워드·프레젠테이션 바이너리 작성기(#112)를 도입할 때.
+
+## 47. WebUI 작업 유실 방지(자동 저장·이탈 경고)·단축키 라벨 1:1 정합성 및 모듈별 도구모음 컨텍스트 (PD-072, #103, #108)
+
+- **Status** Implemented
+- **Context** Windows `easyoffice-app.exe --serve` WebUI 실조작 리뷰(#103, #108)에서 새로고침·탭 닫기 시 경고 없이 편집 내용이 사라지고, 메뉴·툴팁이 처리기 없는 단축키나 브라우저 예약 키(`Ctrl+Shift+R` 강력 새로고침, `Ctrl+N` 새 창 등)를 안내하여 안내대로 누르면 작업이 즉시 유실되는 문제, 시트·슬라이드·PDF·변환기 모듈에서도 문서 전용 도구모음과 시트 선택 집계가 그대로 노출되는 문제, 열린 문서 탭 줄 숨김, 선택 영역과 무관한 내부 문자열 클립보드, 부트스트랩 IPC 실패 시 빈 화면과 `macOS · ⌘` 고정 표기가 확인되었습니다.
+- **Decision (`PD-072`)**
+  1. **워크스페이스 스냅샷 자동 저장·복원 및 수정 상태 추적 (`crates/easyoffice-app/ui/{workspace-session.js,app.js}`)**
+     - 실행 취소/다시 실행이 쓰는 워크스페이스 스냅샷(`captureWorkspaceSnapshot` / `restoreWorkspaceSnapshot`, `ribbon-history.js`)을 그대로 SSOT로 재사용하여 `localStorage["easyoffice.workspace.autosave.v1"]`에 `{ version: 1, savedAt, dirty, baseline, snapshot }` 레코드로 1.2초 디바운스 자동 저장하고, 시작 시 직렬 큐 안에서 복원합니다. `pagehide`·`beforeunload` 시점에는 동기 플러시합니다.
+     - 복원 전 스냅샷 형식과 직렬화 노드 트리(`script`·`iframe`·`object`·`style`·`form` 등 금지 태그, `on*` 속성, `javascript:`/`data:` URL)를 검증하여 손상되었거나 안전하지 않은 레코드는 복원하지 않습니다.
+     - 수정 여부는 문서·시트·슬라이드·PDF 내용 지문(빈 셀·빈 스타일·표 요약 파생 속성을 정규화한 FNV-1a 해시)을 기준선과 비교해 판정하므로 화면·시트 탭·슬라이드 전환만으로는 수정 상태가 되지 않습니다. 명시적 저장(`Ctrl+S`, 저장 버튼, 팔레트) 성공 시 기준선을 갱신합니다.
+     - `beforeunload` 처리기는 수정(또는 미확정 활동) 상태일 때만 등록하고, 깨끗한 상태로 돌아오면(실행 취소로 기준선 복귀, 저장) 해제합니다.
+  2. **단축키 레지스트리 단일화 및 브라우저 예약 키 배제 (`crates/easyoffice-app/ui/{ribbon-catalog.js,ribbon-history.js,app.js,index.html}`)**
+     - `WORKSPACE_SHORTCUT_BINDINGS`를 단축키 표기의 단일 원천으로 두고, 전역 `keydown` 처리기가 이 표로만 분기합니다: `Ctrl/⌘+S`(저장), `Ctrl/⌘+Z`(실행 취소), `Ctrl/⌘+Y`·`Ctrl/⌘+Shift+Z`(다시 실행), `Ctrl/⌘+K`·`Ctrl/⌘+F`·`/`(명령 팔레트), `Ctrl/⌘+B/I/U`(굵게·기울임·밑줄), `Ctrl/⌘+0`(100% 배율), `Ctrl+Alt+D`(테마), `Insert`(삽입/수정). `Ctrl+X/C/V`는 브라우저 기본 편집 키로 그대로 둡니다.
+     - 처리기가 없던 메뉴·툴팁 라벨(`Alt+N/C/L/T/U`, `Ctrl+N`, `Ctrl+N,N/H/T`, `Ctrl+G,P/W/C/T`, `Ctrl+K,H`, `Ctrl+F2`, `Ctrl+F10`, `F7`, `Shift/Ctrl+Num ±`, `M`, `P`, `Ctrl+Shift+S`, 정렬 `Ctrl+Shift+L/C/R/M/T/J`, 크기·줄 간격 `Alt+Shift+E/R/Z/A`, 성능 진단 `F9`)을 제거하고, 리본 도구 줄과 명령 팔레트도 레지스트리에 바인딩된 명령의 단축키만 표시합니다(`resolveRibbonShortcutLabel`).
+     - `/` 등 단일 키 단축키는 입력 필드·`contenteditable` 편집 중에는 발동하지 않으며, 레지스트리에 없는 조합(`Ctrl+N/T/W/R`, `Ctrl+Shift+R/T/J/C/N/I`, `F5` 등)은 가로채지 않습니다.
+  3. **활성 모듈 컨텍스트 도구모음·상태 표시줄·탭 줄 (`crates/easyoffice-app/ui/{workspace-session.js,ribbon-history.js,workspace-tools.js,styles.css,index.html}`)**
+     - 모듈 전환(`applyModuleAccent`) 시 `#doc-style-bar`는 `DOC`/`HWP`에서만 표시하고, `#icon-toolbar` 버튼과 상단 메뉴 항목은 명령별 적용 모듈 표에 따라 `disabled` / `aria-disabled="true"`로 비활성화합니다(저장·실행 취소·팔레트·테마·배율·검사 도구는 전 모듈, 복사·글자 모양·표/차트 삽입은 문서·시트·슬라이드, 그 외 문단·쪽·각주·조판 부호 도구는 문서 전용).
+     - 시트 선택 집계(`#status-sheet-agg`)는 `SHEET`에서만, 문서 쪽·구역·파일명 그룹은 `DOC`/`HWP`에서만 표시합니다.
+     - 열린 문서 탭 줄(`#tab-strip`)을 기본(접힌) 크롬에서도 표시하고 활성 모듈의 탭을 강조하며, 파일 메뉴 항목을 "새 문서" 대신 "… 탭으로 전환"으로 표기합니다.
+  4. **선택 영역 기반 시스템 클립보드 (`crates/easyoffice-app/ui/{workspace-session.js,workspace-tools.js}`)**
+     - 편집 메뉴·도구모음의 오려 두기/복사하기/붙이기는 현재 모듈 편집 영역 안의 실제 선택 범위(`getSelection()` / 마지막 편집 영역 `selectionchange` 범위)에만 작용하고 `navigator.clipboard.writeText`/`readText`를 우선 사용합니다(권한 거부 시 `execCommand("copy")` 및 앱 내부 버퍼로 폴백). 선택이 없으면 문단을 지우지 않고 안내만 표시하며, 오려 두기·붙이기는 실행 취소 스냅샷을 남깁니다.
+  5. **부트스트랩 실패 안내·재시도 및 플랫폼 표기 (`crates/easyoffice-app/ui/{app.js,index.html}`, `crates/easyoffice-app/src/{http_server.rs,self_test.rs}`)**
+     - `get_workspace_bootstrap` 실패 시 `#bootstrap-error`(`role="alert"`)에 오류와 `다시 연결` 버튼을 표시하고, 재시도 성공 시 탭·필터·리본을 다시 구성합니다. 부트스트랩 전에는 `navigator` 플랫폼으로 `Windows · Ctrl` 등 실제 플랫폼을 표기하며 `macOS · ⌘`를 고정 표기하지 않습니다.
+     - 새 UI 모듈 `workspace-session.js`를 `--serve` 정적 자산과 자가 진단 자산 무결성 검사에 추가합니다.
+- **Trade-offs**
+  1. 자동 저장본은 같은 브라우저 프로필·같은 출처(루프백 포트)에서만 복원되며, 저장 공간 한도를 넘으면 상태 표시줄에 실패를 안내하고 이탈 경고로 보호합니다.
+  2. 명시적 저장은 활성 모듈 문서만 내려받지만 수정 상태 기준선은 워크스페이스 전체로 갱신합니다. 다른 모듈의 미저장 변경은 자동 저장본으로 보존됩니다.
+  3. 시트 셀에 포커스가 있는 동안에는 셀 확정 상태 머신과 경합하지 않도록 타이머 자동 저장을 미루고, 다음 활동 또는 이탈 시점 플러시에서 저장합니다.
+- **Alternatives rejected**
+  - 별도 자동 저장 직렬화 형식 신설: 실행 취소 스냅샷과 이중 관리되어 필드 누락 위험이 있으므로 동일 스냅샷 SSOT를 재사용.
+  - 브라우저 예약 키를 `preventDefault`로 강제 점유: 새 창·탭 닫기 등은 페이지가 가로챌 수 없고 사용자 기대와도 충돌하므로 라벨에서 제거.
+- **Verified by** `node scripts/check-repo-hygiene.mjs`, `node --test scripts/test-webui-*.mjs`(`scripts/test-webui-session-context.mjs` 포함), `cargo test --workspace`, `cargo run -p easyoffice-app -- --self-test`
+- **Revisit when** 서버 측 문서 저장소(다중 문서·버전 기록)를 도입하여 로컬 자동 저장본을 서버 초안으로 대체할 때.

@@ -35,6 +35,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/workspace-panels.js",
   "crates/easyoffice-app/ui/sheet-controller.js",
   "crates/easyoffice-app/ui/ribbon-history.js",
+  "crates/easyoffice-app/ui/workspace-session.js",
   "crates/easyoffice-app/ui/app.js",
   "Sources/EasyOfficeCore/DocumentSecurityAuditor.swift",
   "fixtures/pii-scrub-vectors.json",
@@ -58,6 +59,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-webui-sheet-atomicity.mjs",
   "scripts/test-webui-round13-parity.mjs",
   "scripts/test-webui-security-ipc.mjs",
+  "scripts/test-webui-session-context.mjs",
 ];
 
 // Local-only filenames/directories that must NEVER be tracked by Git (Base64 encoded)

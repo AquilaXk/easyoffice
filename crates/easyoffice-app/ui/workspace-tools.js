@@ -51,6 +51,7 @@
       enqueueWorkspaceHistoryOp,
       captureWorkspaceSnapshot,
       commitDeferredUndoSnapshot,
+      runStudioClipboardCommand,
     } = deps;
 
     const {
@@ -665,8 +666,6 @@
       });
     }
 
-    let studioClipboardText = "";
-
     function withDocStyleUndo(mutateFn) {
       const curMod = getActiveModule();
       if (curMod !== "DOC" && curMod !== "HWP") return;
@@ -706,32 +705,12 @@
       });
     }
 
-    function pasteStudioParagraph(editor, blk) {
-      const p = document.createElement("p");
-      p.textContent = studioClipboardText || "붙여넣기 문단";
-      let topBlk = blk;
-      while (topBlk?.parentNode && topBlk.parentNode !== editor) topBlk = topBlk.parentNode;
-      if (topBlk?.parentNode === editor) topBlk.after(p);
-      else editor?.appendChild(p);
-      computeSmartStats();
-    }
-
-    function execStudioClipboardCmd(cmd, editor, blk, textTarget, fb, isDocMod) {
+    // Cut/copy/paste act on the live editor selection and the system clipboard
+    // (workspace-session.js); a missing selection never erases the whole paragraph.
+    function execStudioClipboardCmd(cmd) {
       if (!cmd.startsWith("clip-")) return false;
-      if (!isDocMod) return true;
-      if (cmd === "clip-copy") {
-        studioClipboardText = (textTarget?.textContent || "").trim();
-        if (fb) fb.textContent = "선택 문단 클립보드 복사 완료 (" + studioClipboardText.length + "자)";
-      } else if (cmd === "clip-cut") {
-        withDocStyleUndo(() => {
-          studioClipboardText = (textTarget?.textContent || "").trim();
-          if (textTarget) textTarget.textContent = "";
-          computeSmartStats();
-        });
-        if (fb) fb.textContent = "선택 문단 오려두기 완료";
-      } else if (cmd === "clip-paste") {
-        withDocStyleUndo(() => pasteStudioParagraph(editor, blk));
-        if (fb) fb.textContent = "클립보드 문단 붙이기 완료";
+      if (typeof runStudioClipboardCommand === "function") {
+        void Promise.resolve(runStudioClipboardCommand(cmd, withDocStyleUndo)).catch(() => {});
       }
       return true;
     }
@@ -811,7 +790,7 @@
       const fb = document.getElementById("status-command-feedback");
       const blk = resolveActiveDocBlock(editor);
       const textTarget = blk?.querySelector?.(".eo-h-title") || blk;
-      if (execStudioClipboardCmd(cmd, editor, blk, textTarget, fb, isDocMod)) return;
+      if (execStudioClipboardCmd(cmd)) return;
       if (execStudioParaCmd(cmd, blk, textTarget, fb, isDocMod)) return;
       if (execStudioInsertModCmd(cmd, editor, textTarget, fb, onStudioCmd, curMod, isDocMod)) return;
       if (typeof onStudioCmd === "function") onStudioCmd(cmd);
@@ -922,6 +901,7 @@
         item.addEventListener("click", (ev) => {
           ev.stopPropagation?.();
           closeAllStudioMenus();
+          if (item.getAttribute("aria-disabled") === "true") return;
           dispatchStudioIconCmd(item.dataset.studioMenuCmd, editor, onStudioCmd);
         });
       }
@@ -950,7 +930,9 @@
       });
       bindStudioMenuBar(editor, onStudioCmd);
       for (const btn of document.querySelectorAll("#icon-toolbar [data-studio-cmd]")) {
-        btn.addEventListener("click", () => dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd));
+        btn.addEventListener("click", () => {
+          if (!btn.disabled) dispatchStudioIconCmd(btn.dataset.studioCmd, editor, onStudioCmd);
+        });
       }
       bindStudioTypographyControls(editor);
       for (const [id, key] of [

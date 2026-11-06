@@ -98,8 +98,12 @@ html[data-theme="dark"] .menu-toolbox-toggle { color: #c9d1d9; }
 .app-shell:not([data-chrome-expanded="true"]) .ribbon-bar,
 .app-shell:not([data-chrome-expanded="true"]) .filter-bar,
 .app-shell:not([data-chrome-expanded="true"]) .brand-group,
-.app-shell:not([data-chrome-expanded="true"]) .tab-strip,
 .app-shell:not([data-chrome-expanded="true"]) .topbar-actions { display: none; }
+.eo-doc-style-bar[hidden], .statusbar-left-group[hidden], .eo-bootstrap-error[hidden] { display: none; }
+.eo-bootstrap-error { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 6px 12px; font-size: 12px; background: #fdecea; color: #8a1c14; }
+html[data-theme="dark"] .eo-bootstrap-error { background: #4a1f1c; color: #ffd7d2; }
+.tb-btn:disabled, .md-item[aria-disabled="true"] { opacity: 0.4; cursor: default; }
+.tb-btn:disabled:hover, .md-item[aria-disabled="true"]:hover { background: transparent; outline: none; color: inherit; }
 .app-shell:not([data-panels-expanded="true"]) .workspace-grid { grid-template-columns: 1fr; }
 .app-shell:not([data-panels-expanded="true"]) .sidebar-left,
 .app-shell:not([data-panels-expanded="true"]) .inspector-right { display: none; }

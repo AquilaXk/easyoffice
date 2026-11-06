@@ -31,6 +31,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/workspace-panels.js",
   "../crates/easyoffice-app/ui/sheet-controller.js",
   "../crates/easyoffice-app/ui/ribbon-history.js",
+  "../crates/easyoffice-app/ui/workspace-session.js",
   "../crates/easyoffice-app/ui/app.js",
 ].map((relPath) => ({
   relPath,
@@ -269,9 +270,26 @@ class MiniElement extends MiniNode {
     else this._attrs.delete("hidden");
   }
 
+  get disabled() {
+    return this._attrs.has("disabled");
+  }
+
+  set disabled(v) {
+    if (v) this._attrs.set("disabled", "");
+    else this._attrs.delete("disabled");
+  }
+
   getAttribute(name) {
     const k = String(name || "").toLowerCase();
     return this._attrs.has(k) ? this._attrs.get(k) : null;
+  }
+
+  hasAttribute(name) {
+    return this._attrs.has(String(name || "").toLowerCase());
+  }
+
+  removeAttribute(name) {
+    this._attrs.delete(String(name || "").toLowerCase());
   }
 
   setAttribute(name, value) {
@@ -674,7 +692,8 @@ export async function createWorkspaceHarness(options = {}) {
 
   const hostEnv = {
     document,
-    navigator: { platform: options.platform || "Win32" },
+    navigator: { platform: options.platform || "Win32", clipboard: options.clipboard },
+    localStorage: options.localStorage,
     location: { protocol: defaultProtocol },
     fetch: options.httpFetch || undefined,
     atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
@@ -705,6 +724,11 @@ export async function createWorkspaceHarness(options = {}) {
     addEventListener: (type, fn) => {
       if (!windowListeners.has(type)) windowListeners.set(type, []);
       windowListeners.get(type).push(fn);
+    },
+    removeEventListener: (type, fn) => {
+      const fns = windowListeners.get(type) || [];
+      const idx = fns.indexOf(fn);
+      if (idx >= 0) fns.splice(idx, 1);
     },
     __TAURI_INTERNALS__: options.tauriInvoke ? { invoke: options.tauriInvoke } : undefined,
   };
@@ -784,8 +808,11 @@ export async function createWorkspaceHarness(options = {}) {
       const eventObj = {
         type: "keydown",
         key: ev.key,
+        code: ev.code || "",
+        target: ev.target || document.activeElement,
         metaKey: Boolean(ev.metaKey),
         ctrlKey: Boolean(ev.ctrlKey),
+        altKey: Boolean(ev.altKey),
         shiftKey: Boolean(ev.shiftKey),
         isComposing: Boolean(ev.isComposing),
         defaultPrevented: false,
@@ -795,6 +822,23 @@ export async function createWorkspaceHarness(options = {}) {
       };
       for (const fn of windowListeners.get("keydown") || []) {
         fn(eventObj);
+      }
+      return eventObj;
+    },
+    getWindowListenerCount: (type) => (windowListeners.get(type) || []).length,
+    dispatchWindowEvent: (type, init = {}) => {
+      const eventObj = {
+        ...init,
+        type,
+        returnValue: undefined,
+        defaultPrevented: false,
+        preventDefault() {
+          this.defaultPrevented = true;
+        },
+      };
+      for (const fn of [...(windowListeners.get(type) || [])]) {
+        const ret = fn(eventObj);
+        if (typeof ret === "string") eventObj.returnValue = ret;
       }
       return eventObj;
     },
