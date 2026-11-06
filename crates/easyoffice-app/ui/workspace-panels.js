@@ -530,8 +530,12 @@
         }));
       } else if (mod === "SHEET") {
         const curSheet = getActiveSheetName();
+        const tabLabels = new Map();
+        document.querySelectorAll("#sheet-tab-bar .sheet-tab-btn[data-sheet-tab]").forEach((btn) => {
+          tabLabels.set(btn.dataset.sheetTab, (btn.textContent || "").trim());
+        });
         items = Object.keys(sheetDataStore).map((sName, idx) => ({
-          label: idx + 1 + ". 시트 워크시트 (" + sName + ")",
+          label: idx + 1 + ". " + (tabLabels.get(sName) || sName),
           action: () => {
             void sheetController.switchSheetTab(sName).catch(() => {});
           },

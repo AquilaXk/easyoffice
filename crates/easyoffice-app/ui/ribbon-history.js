@@ -114,6 +114,11 @@
       });
     }
 
+    function cloneSheets(sheets) {
+      const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
+      return typeof fast === "function" ? fast(sheets) : JSON.parse(JSON.stringify(sheets));
+    }
+
     function captureWorkspaceSnapshot(isRibbon = false) {
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
@@ -135,7 +140,7 @@
         viewState: workspacePanels.captureWorkspaceViewState(),
         theme: document.documentElement.dataset.theme || "light",
         docTabs: JSON.parse(JSON.stringify(docTabStore)),
-        sheets: JSON.parse(JSON.stringify(sheetDataStore)),
+        sheets: cloneSheets(sheetDataStore),
         sheetRowCounts: JSON.parse(JSON.stringify(sheetRowCounts)),
         slides: JSON.parse(JSON.stringify(slideDeckState)),
         ribbonState: JSON.parse(JSON.stringify(localRibbonState)),
@@ -323,7 +328,7 @@
         docTabStore.HWP = snap.docTabs.HWP ? JSON.parse(JSON.stringify(snap.docTabs.HWP)) : null;
       }
       if (snap.sheets) {
-        const clonedSheets = JSON.parse(JSON.stringify(snap.sheets));
+        const clonedSheets = cloneSheets(snap.sheets);
         const clonedRowCounts = snap.sheetRowCounts
           ? JSON.parse(JSON.stringify(snap.sheetRowCounts))
           : null;

@@ -8,19 +8,23 @@
   const AUTOSAVE_STORAGE_KEY = "easyoffice.workspace.autosave.v1";
   const AUTOSAVE_SCHEMA_VERSION = 1;
   const AUTOSAVE_DEBOUNCE_MS = 1200;
+// Workbooks above this many cells are not autosaved: fingerprinting/serializing them would stall
+// typing and exceed the browser storage quota anyway (the unsaved-changes guard stays active).
+const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   const MAX_NODE_SPEC_DEPTH = 64;
 
   const ALL_MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"];
   const DOC_MODULES = ["DOC", "HWP"];
   const EDIT_MODULES = ["DOC", "HWP", "SHEET", "SLIDE"];
   const DOC_SLIDE_MODULES = ["DOC", "HWP", "SLIDE"];
+  const DOC_SHEET_MODULES = ["DOC", "HWP", "SHEET"];
   // Studio menu/toolbar command -> modules where it has a real effect (default: DOC/HWP only).
   const STUDIO_COMMAND_MODULES = {
     "studio-save": ALL_MODULES, "studio-undo": ALL_MODULES, "studio-redo": ALL_MODULES,
     palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES,
-    "clip-copy": EDIT_MODULES, "home-style": EDIT_MODULES, "home-bold": EDIT_MODULES,
+    "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES, "home-style": EDIT_MODULES, "home-bold": EDIT_MODULES,
     "home-italic": EDIT_MODULES, "home-underline": EDIT_MODULES, "insert-table": EDIT_MODULES,
     "insert-chart": EDIT_MODULES, "insert-shape": DOC_SLIDE_MODULES, "insert-link": DOC_SLIDE_MODULES,
     "layout-columns": DOC_SLIDE_MODULES, "layout-margins": DOC_SLIDE_MODULES,
@@ -146,6 +150,7 @@
       restoreWorkspaceSnapshot,
       runExclusive,
       getWorkspacePanels,
+      getSheetController,
     } = deps;
 
     let baselineHash = null;
@@ -213,11 +218,30 @@
     function isSheetEditPending() {
       const ae = document.activeElement;
       if (!ae || typeof ae.closest !== "function" || !ae.closest("#pane-sheet")) return false;
-      return ae.id === "formula-input" || ae.getAttribute?.("contenteditable") === "true";
+      return ae.id === "formula-input" || Boolean(ae.dataset?.editMode);
+    }
+
+    function countSheetCells(sheets) {
+      return Object.keys(sheets || {}).reduce((n, name) => n + Object.keys(sheets[name] || {}).length, 0);
+    }
+
+    function skipAutosaveForLargeWorkbook(snap) {
+      if (countSheetCells(snap.sheets) <= AUTOSAVE_MAX_SHEET_CELLS) return false;
+      pendingActivity = false;
+      dirty = true;
+      try {
+        resolveStorage()?.removeItem(AUTOSAVE_STORAGE_KEY);
+      } catch {
+        // storage may be blocked; the unsaved-changes guard still protects the session
+      }
+      setFeedback("큰 시트(셀 2만 개 초과)는 자동 저장하지 않습니다. 저장(Ctrl+S)으로 보관하세요");
+      syncUnloadGuard();
+      return true;
     }
 
     function captureAndPersist() {
       const snap = captureWorkspaceSnapshot(false);
+      if (skipAutosaveForLargeWorkbook(snap)) return;
       const hash = contentFingerprint(snap);
       if (baselineHash === null) baselineHash = hash;
       pendingActivity = false;
@@ -312,17 +336,43 @@
       });
     }
 
+    // Hides toolbar groups whose buttons are all hidden, and separators that would dangle.
+    function syncToolbarGroupVisibility() {
+      const bar = document.getElementById("icon-toolbar");
+      if (!bar) return;
+      const kids = Array.from(bar.children);
+      const isGroup = (el) => String(el.className).split(/\s+/).includes("tb-group");
+      kids.forEach((el) => {
+        if (!isGroup(el)) return;
+        const btns = Array.from(el.querySelectorAll("button"));
+        el.hidden = btns.length > 0 && btns.every((b) => b.hidden);
+      });
+      let seenVisible = false;
+      kids.forEach((el, i) => {
+        if (isGroup(el)) {
+          seenVisible = seenVisible || !el.hidden;
+          return;
+        }
+        const next = kids[i + 1];
+        el.hidden = !seenVisible || !next || next.hidden;
+      });
+    }
+
     function applyModuleContext(mod) {
       const isDoc = DOC_MODULES.includes(mod);
       const styleBar = document.getElementById("doc-style-bar");
       if (styleBar) styleBar.hidden = !isDoc;
+      // The SHEET home toolbar lists spreadsheet commands only: document-only tools are hidden.
+      const hideInapplicable = mod === "SHEET";
       for (const btn of document.querySelectorAll("#icon-toolbar button")) {
         const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
         if (!cmd) continue;
         const on = studioCommandApplies(cmd, mod);
         btn.disabled = !on;
+        btn.hidden = hideInapplicable && !on;
         btn.setAttribute("aria-disabled", on ? "false" : "true");
       }
+      syncToolbarGroupVisibility();
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
         const on = studioCommandApplies(item.dataset.studioMenuCmd, mod);
         item.setAttribute("aria-disabled", on ? "false" : "true");
@@ -410,6 +460,13 @@
       const mod = getActiveModule();
       if (!studioCommandApplies(cmd, mod)) {
         setFeedback("현재 모듈에서는 키보드 Ctrl+X / Ctrl+C / Ctrl+V를 사용하세요");
+        return;
+      }
+      if (mod === "SHEET" && typeof getSheetController === "function") {
+        const where = await getSheetController().runSheetClipboardCommand(cmd);
+        const verb = { "clip-cut": "오려 두기", "clip-copy": "복사", "clip-paste": "붙여넣기" }[cmd];
+        if (where) setFeedback("선택 범위 " + verb + " 완료" + (where === "internal" ? " (앱 내부 클립보드)" : ""));
+        else if (cmd === "clip-paste") setFeedback("붙일 클립보드 내용이 없습니다");
         return;
       }
       const range = resolveActiveRange(mod);

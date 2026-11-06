@@ -2,7 +2,10 @@
   "use strict";
 
   const DEFAULT_SHEET_ROW_COUNT = 12;
-  const GRID_COL_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  // Cells hold their pre-edit snapshot eagerly up to this many entries; beyond it the snapshot
+  // is captured when the cell has been idle (or at the first edit) to keep navigation instant.
+  const EAGER_SNAPSHOT_MAX_ENTRIES = 4000;
+  const IDLE_SNAPSHOT_DELAY_MS = 250;
 
   function createSheetController(deps) {
     const {
@@ -84,90 +87,176 @@
       return inferred;
     }
 
-    function buildGridRowElement(rowIdx, defaultCellText) {
-      const tr = document.createElement("tr");
-      const th = document.createElement("th");
-      th.dataset.row = String(rowIdx);
-      th.textContent = String(rowIdx);
-      tr.appendChild(th);
-      GRID_COL_LETTERS.forEach((c) => {
-        const td = document.createElement("td");
-        td.setAttribute("contenteditable", "true");
-        td.dataset.cell = c + rowIdx;
-        td.textContent = defaultCellText;
-        tr.appendChild(td);
-      });
-      return tr;
+    // ---- used extent (rows/cols that hold data) ---------------------------------------------
+    let extentCache = {};
+
+    function hasCellContent(entry) {
+      return Boolean(entry && (entry.value || entry.formula));
     }
 
-    function ensureSheetGridRowCount(targetRowCount) {
-      const tbody = document.querySelector("#pane-sheet tbody");
-      if (!tbody) return;
-      const desired = Math.max(1, Number(targetRowCount) || DEFAULT_SHEET_ROW_COUNT);
-      const existingRows = Array.from(tbody.querySelectorAll("tr"));
-      while (existingRows.length > desired) {
-        const extra = existingRows.pop();
-        extra.remove();
-      }
-      for (let rowIdx = existingRows.length + 1; rowIdx <= desired; rowIdx += 1) {
-        const tr = buildGridRowElement(rowIdx, "");
-        tbody.appendChild(tr);
-        bindSheetCellEvents(tr);
-      }
+    function scanExtent(sheetName) {
+      const map = sheetDataStore[sheetName] || {};
+      let dataRows = 0;
+      let dataCols = 0;
+      Object.keys(map).forEach((ref) => {
+        if (!hasCellContent(map[ref])) return;
+        const p = gridUtils.parseRef(ref);
+        if (!p) return;
+        if (p.row > dataRows) dataRows = p.row;
+        if (p.col > dataCols) dataCols = p.col;
+      });
+      return { dataRows, dataCols };
     }
+
+    function getSheetExtent(sheetName) {
+      if (!extentCache[sheetName]) extentCache[sheetName] = scanExtent(sheetName);
+      const e = extentCache[sheetName];
+      return {
+        rows: Math.max(getSheetRowCount(sheetName), e.dataRows),
+        cols: Math.max(8, e.dataCols),
+        dataRows: e.dataRows,
+        dataCols: e.dataCols,
+      };
+    }
+
+    function bumpExtent(sheetName, row, col) {
+      const e = extentCache[sheetName];
+      if (e) {
+        e.dataRows = Math.max(e.dataRows, row);
+        e.dataCols = Math.max(e.dataCols, col);
+      }
+      if (row > getSheetRowCount(sheetName)) sheetRowCounts[sheetName] = row;
+    }
+
+    function activeSheetMap() {
+      return sheetDataStore[getActiveSheetName()] || {};
+    }
+
+    function entryAt(ref) {
+      return activeSheetMap()[ref];
+    }
+
+    function isGridFocused() {
+      const ae = document.activeElement;
+      return Boolean(ae && ae.tagName === "TD" && ae.dataset?.cell);
+    }
+
+    let refocusAfterRender = false;
+    // `input` is created right below; the grid only calls these hooks after both exist.
+    const grid = host.__EASYOFFICE_CREATE_SHEET_GRID__({
+      document,
+      getSheetName: () => getActiveSheetName(),
+      getEntry: entryAt,
+      getExtent: () => getSheetExtent(getActiveSheetName()),
+      getCursor: () => {
+        const s = input.getSelection();
+        return { row: s.cr, col: s.cc };
+      },
+      hooks: {
+        bindTd: (td) => input.bindTd(td),
+        beforeStructuralChange: () => {
+          refocusAfterRender = isGridFocused();
+          input.commitIfEditing();
+        },
+        afterRender: () => {
+          input.paintSelection();
+          if (refocusAfterRender) {
+            refocusAfterRender = false;
+            input.focusAnchor();
+          }
+        },
+      },
+    });
+    const gridUtils = host.__EASYOFFICE_SHEET_GRID_UTILS__;
 
     function appendSheetRow() {
       const curSheet = getActiveSheetName();
+      const map = snapshotDomSheetCells();
       const nextCount = getSheetRowCount(curSheet) + 1;
       sheetRowCounts[curSheet] = nextCount;
-      const tbody = document.querySelector("#pane-sheet tbody");
-      if (tbody) {
-        ensureSheetGridRowCount(nextCount - 1);
-        const tr = buildGridRowElement(nextCount, "0");
-        tbody.appendChild(tr);
-        bindSheetCellEvents(tr);
+      for (let c = 1; c <= 8; c += 1) {
+        map[gridUtils.refOf(nextCount, c)] = { value: "0", formula: "" };
       }
-      sheetDataStore[curSheet] = snapshotDomSheetCells();
+      sheetDataStore[curSheet] = map;
+      bumpExtent(curSheet, nextCount, 8);
+      grid.renderWindow(true);
+      grid.refreshCells();
     }
 
-    function snapshotDomSheetCells() {
-      const curSheet = getActiveSheetName();
-      const prevSnap = sheetDataStore[curSheet] || {};
-      const snap = {};
-      const frozenPanes = Boolean(
+    function frozenPanesActive() {
+      return Boolean(
         document.querySelector("#pane-sheet thead.frozen-header") ||
           document.querySelector("#pane-sheet table")?.dataset?.frozenPanes === "true"
       );
-      document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
-        const ref = td.dataset.cell;
-        const textVal = (td.textContent || "").trim();
-        const formula = td.dataset.formula || "";
-        const prevEntry = prevSnap[ref];
-        const keepComputedValue =
-          isFormulaStr(formula) &&
-          textVal === formula &&
-          Boolean(prevEntry) &&
-          prevEntry.formula === formula &&
-          prevEntry.value !== "" &&
-          !isFormulaStr(prevEntry.value);
-        const cellEntry = {
-          value: keepComputedValue ? prevEntry.value : textVal,
-          formula,
+    }
+
+    function syncTdIntoMap(map, td) {
+      const ref = td.dataset.cell;
+      const textVal = grid.readTdValue(td);
+      const formula = td.dataset.formula || "";
+      const prevEntry = map[ref];
+      const keepComputedValue =
+        isFormulaStr(formula) &&
+        textVal === formula &&
+        Boolean(prevEntry) &&
+        prevEntry.formula === formula &&
+        prevEntry.value !== "" &&
+        !isFormulaStr(prevEntry.value);
+      const value = keepComputedValue ? prevEntry.value : textVal;
+      const fontWeight = td.style.fontWeight || "";
+      const fontStyle = td.style.fontStyle || "";
+      const textDecoration = td.style.textDecoration || "";
+      const fontSize = td.style.fontSize || "";
+      const condfmtHigh = td.classList.contains("condfmt-high");
+      const hasStyle = Boolean(fontWeight || fontStyle || textDecoration || fontSize || condfmtHigh);
+      if (value === "" && formula === "" && !hasStyle) {
+        delete map[ref];
+        return;
+      }
+      const cellEntry = { value, formula };
+      if (hasStyle) {
+        cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
+        if (condfmtHigh) cellEntry.style.condfmtHigh = true;
+      }
+      map[ref] = cellEntry;
+      if (value !== "" || formula !== "") {
+        const p = gridUtils.parseRef(ref);
+        if (p) bumpExtent(getActiveSheetName(), p.row, p.col);
+      }
+    }
+
+    // The frozen-panes flag lives on the A1 entry (it is a per-sheet setting, A1 may be unrendered).
+    function applyFrozenFlag(map, frozen) {
+      const a1 = map.A1;
+      if (frozen) {
+        const entry = a1 || { value: "", formula: "" };
+        entry.style = {
+          fontWeight: "",
+          fontStyle: "",
+          textDecoration: "",
+          fontSize: "",
+          ...(entry.style || {}),
+          frozenPanes: true,
         };
-        const fontWeight = td.style.fontWeight || "";
-        const fontStyle = td.style.fontStyle || "";
-        const textDecoration = td.style.textDecoration || "";
-        const fontSize = td.style.fontSize || "";
-        const condfmtHigh = td.classList.contains("condfmt-high");
-        const entryFrozen = ref === "A1" && frozenPanes;
-        if (fontWeight || fontStyle || textDecoration || fontSize || condfmtHigh || entryFrozen) {
-          cellEntry.style = { fontWeight, fontStyle, textDecoration, fontSize };
-          if (condfmtHigh) cellEntry.style.condfmtHigh = true;
-          if (entryFrozen) cellEntry.style.frozenPanes = true;
+        map.A1 = entry;
+      } else if (a1?.style?.frozenPanes) {
+        delete a1.style.frozenPanes;
+        const s = a1.style;
+        if (!(s.fontWeight || s.fontStyle || s.textDecoration || s.fontSize || s.condfmtHigh)) {
+          delete a1.style;
         }
-        snap[ref] = cellEntry;
-      });
-      return snap;
+        if (!hasCellContent(a1) && !a1.style) delete map.A1;
+      }
+    }
+
+    // Merges the materialized window into the sheet model (cells outside the window are
+    // already authoritative in the model) and returns the model map.
+    function snapshotDomSheetCells() {
+      const curSheet = getActiveSheetName();
+      const map = sheetDataStore[curSheet] || {};
+      document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => syncTdIntoMap(map, td));
+      applyFrozenFlag(map, frozenPanesActive());
+      return map;
     }
 
     function saveActiveSheetCellsToWorkbook() {
@@ -179,8 +268,62 @@
       }
     }
 
+    function cellRefOfRange(range, cb) {
+      Object.keys(activeSheetMap()).forEach((ref) => {
+        const p = gridUtils.parseRef(ref);
+        if (p && p.row >= range.r1 && p.row <= range.r2 && p.col >= range.c1 && p.col <= range.c2) {
+          cb(ref);
+        }
+      });
+    }
+
+    function clearExisting(range) {
+      snapshotDomSheetCells();
+      const edits = [];
+      cellRefOfRange(range, (ref) => edits.push({ ref, value: "", formula: "" }));
+      return edits;
+    }
+
+    // Applies a batch of cell writes (paste, clear, cut) as ONE undoable operation.
+    function applyCellEdits(edits, label) {
+      if (edits.length === 0) return Promise.resolve(false);
+      return enqueueWorkspaceHistoryOp(async () => {
+        await drainInFlightSheetWork();
+        const curSheet = getActiveSheetName();
+        const map = snapshotDomSheetCells();
+        sheetDataStore[curSheet] = map;
+        pushRawUndoSnapshot(captureWorkspaceSnapshot(false));
+        edits.forEach((e) => {
+          const style = map[e.ref]?.style;
+          if (e.value === "" && e.formula === "" && !style) {
+            delete map[e.ref];
+            return;
+          }
+          map[e.ref] = style
+            ? { value: e.value, formula: e.formula, style }
+            : { value: e.value, formula: e.formula };
+          const p = gridUtils.parseRef(e.ref);
+          if (p) bumpExtent(curSheet, p.row, p.col);
+        });
+        grid.renderWindow(false);
+        refreshWindowFromModel();
+        await recalculateActiveSheetFormulas({ updateFocusedDisplay: true });
+        input.refreshChrome();
+        const fb = document.getElementById("status-command-feedback");
+        if (fb) fb.textContent = (label || "셀 편집") + ": " + edits.length + "칸";
+        return true;
+      });
+    }
+
+    function refreshWindowFromModel() {
+      grid.refreshCells().forEach((td) => {
+        if (sheetCellFocusState.has(td)) syncSheetCellFocusBaseline(td, true);
+        else if (document.activeElement === td) ensureSheetCellFocusEntry(td, getActiveSheetName());
+      });
+    }
+
     function ensureSheetCellFocusEntry(td, sheetName) {
-      const initialText = (td.textContent || "").trim();
+      const initialText = grid.readTdValue(td);
       const entry = {
         initialText,
         initialRaw: td.dataset.formula || initialText,
@@ -196,7 +339,7 @@
     function syncSheetCellFocusBaseline(td, clearPending) {
       const st = sheetCellFocusState.get(td);
       if (!st) return;
-      const text = (td.textContent || "").trim();
+      const text = grid.readTdValue(td);
       st.initialText = text;
       st.initialRaw = td.dataset.formula || text;
       if (clearPending) {
@@ -222,7 +365,7 @@
       }
       if (st && !st.userEdited && !st.snapshotPushed) {
         st.sheetName = curSheet;
-        st.pendingSnapshot = captureWorkspaceSnapshot(false);
+        schedulePendingSnapshot(st);
       }
     }
 
@@ -231,40 +374,16 @@
       if (Object.keys(sheetDataStore).length === 0) {
         sheetDataStore.Sheet1 = snapshotDomSheetCells();
       }
-      const targetRowCount = getSheetRowCount(sheetName);
-      ensureSheetGridRowCount(targetRowCount);
+      delete extentCache[sheetName];
       const targetSnap = sheetDataStore[sheetName] || {};
       const targetFrozen = Boolean(targetSnap.A1?.style?.frozenPanes);
       toggleSheetFreezePanes(targetFrozen, true);
-      document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
-        const ref = td.dataset.cell;
-        const entry = targetSnap[ref];
-        if (entry) {
-          td.textContent = entry.value || "";
-          if (entry.formula) {
-            td.dataset.formula = entry.formula;
-          } else {
-            delete td.dataset.formula;
-          }
-        } else {
-          td.textContent = "";
-          delete td.dataset.formula;
-        }
-        const cellStyle = entry?.style;
-        td.style.fontWeight = cellStyle?.fontWeight || "";
-        td.style.fontStyle = cellStyle?.fontStyle || "";
-        td.style.textDecoration = cellStyle?.textDecoration || "";
-        td.style.fontSize = cellStyle?.fontSize || "";
-        td.classList.toggle("condfmt-high", Boolean(cellStyle?.condfmtHigh));
-        if (sheetCellFocusState.has(td)) {
-          syncSheetCellFocusBaseline(td, true);
-        } else if (document.activeElement === td) {
-          ensureSheetCellFocusEntry(td, sheetName);
-        }
-      });
+      grid.renderWindow(true);
+      refreshWindowFromModel();
     }
 
     function replaceLiveSheetDataStore(nextSheets, nextRowCounts) {
+      extentCache = {};
       Object.keys(sheetDataStore).forEach((k) => delete sheetDataStore[k]);
       Object.assign(sheetDataStore, nextSheets);
       if (nextRowCounts && typeof nextRowCounts === "object") {
@@ -284,83 +403,7 @@
       }
     }
 
-    function updateSheetSelectionAndAggregates(cellRef) {
-      setActiveSheetCellRef(cellRef);
-      const parsedRef = /^([A-Z]+)(\d+)$/.exec(String(cellRef || "").trim().toUpperCase());
-      const colLetter = parsedRef ? parsedRef[1] : cellRef.charAt(0);
-      const rowNumber = parsedRef ? parsedRef[2] : cellRef.slice(1);
-
-      document.querySelectorAll("#pane-sheet th[data-col]").forEach((th) => {
-        th.classList.toggle("active-axis", th.dataset.col === colLetter);
-      });
-      document.querySelectorAll("#pane-sheet th[data-row]").forEach((th) => {
-        th.classList.toggle("active-axis", th.dataset.row === rowNumber);
-      });
-
-      let activeTd = null;
-      const numericVals = [];
-      const curSheet = getActiveSheetName();
-      const activeSheetSnap = sheetDataStore[curSheet] || {};
-      document.querySelectorAll("#pane-sheet td[data-cell]").forEach((td) => {
-        const ref = td.dataset.cell;
-        const isSel = ref === cellRef;
-        td.classList.toggle("selected-cell", isSel);
-        if (isSel) activeTd = td;
-        const focusSt = sheetCellFocusState.get(td);
-        let displayCandidate = (td.textContent || "").trim();
-        if (
-          isFormulaStr(td.dataset.formula || "") &&
-          !focusSt?.userEdited &&
-          isFormulaStr(displayCandidate)
-        ) {
-          const storedVal = (activeSheetSnap[ref]?.value || "").trim();
-          if (storedVal && !isFormulaStr(storedVal)) {
-            displayCandidate = storedVal;
-          }
-        }
-        const num = Number(displayCandidate.replaceAll(",", "").trim());
-        if (Number.isFinite(num) && displayCandidate !== "") {
-          numericVals.push(num);
-        }
-      });
-
-      const refBadge = document.getElementById("active-cell-ref");
-      if (refBadge) refBadge.textContent = cellRef;
-      const formulaInput = document.getElementById("formula-input");
-      if (formulaInput && activeTd && document.activeElement !== formulaInput) {
-        const activeFocusSt = sheetCellFocusState.get(activeTd);
-        const liveCellText = (activeTd.textContent || "").trim();
-        if (activeFocusSt?.userEdited) {
-          formulaInput.value = liveCellText;
-        } else {
-          formulaInput.value = activeTd.dataset.formula || liveCellText;
-        }
-      }
-
-      const aggEl = document.getElementById("status-sheet-agg");
-      if (aggEl) {
-        if (numericVals.length > 0) {
-          let sum = 0;
-          let max = numericVals[0];
-          for (let i = 0; i < numericVals.length; i += 1) {
-            sum += numericVals[i];
-            if (numericVals[i] > max) max = numericVals[i];
-          }
-          const avg = Math.round((sum / numericVals.length) * 10) / 10;
-          aggEl.textContent =
-            "선택 집계 · 합계 " +
-            sum.toLocaleString() +
-            " · 평균 " +
-            avg.toLocaleString() +
-            " · 개수 " +
-            numericVals.length +
-            " · 최대 " +
-            max.toLocaleString();
-        } else {
-          aggEl.textContent = "선택 집계 · 숫자 데이터 없음";
-        }
-      }
-    }
+    // selection + aggregates now live in sheet-input.js
 
     // Circular references evaluate to the standard #NUM! literal; the engine reports them via a
     // separate `circular` flag so the status bar can warn the way spreadsheet apps do.
@@ -379,6 +422,10 @@
         const seq = latestSheetRecalcSeq + 1;
         latestSheetRecalcSeq = seq;
         const curSheet = getActiveSheetName();
+        // Large workbooks: let the keystroke finish and paint before the payload is built.
+        if (isHeavySheet() && typeof host.setTimeout === "function") {
+          await new Promise((resolve) => host.setTimeout(resolve, 0));
+        }
         sheetDataStore[curSheet] = snapshotDomSheetCells();
         const liveEval = await evaluateLiveFormulaTargets(sheetDataStore, curSheet);
         if (!liveEval || epoch !== sheetSnapshotEpoch || seq !== latestSheetRecalcSeq) {
@@ -386,6 +433,10 @@
         }
         const { rpcRes, formulaTargets, targetValues, batchValues } = liveEval;
         let updatedActiveSheet = false;
+        const tdByRef = new Map();
+        document.querySelectorAll("#pane-sheet td[data-cell]").forEach((el) => {
+          tdByRef.set(el.dataset.cell, el);
+        });
         formulaTargets.forEach((target, idx) => {
           const rawVal = extractEvaluatedTargetValue(
             rpcRes,
@@ -403,7 +454,7 @@
           }
           if (getActiveSheetName() === target.sheet) {
             updatedActiveSheet = true;
-            const td = document.querySelector('#pane-sheet td[data-cell="' + target.cell + '"]');
+            const td = tdByRef.get(target.cell);
             const focusSt = td ? sheetCellFocusState.get(td) : null;
             if (!td || !isFormulaStr(td.dataset.formula || "")) return;
             if (!forceFocusedDisplay && (focusSt?.userEdited || focusSt?.snapshotPushed)) return;
@@ -412,7 +463,7 @@
               document.activeElement === td &&
               isFormulaStr((td.textContent || "").trim());
             if (!isEditingFormulaInPlace) {
-              td.textContent = value;
+              grid.setDisplayValue(td, value);
               syncSheetCellFocusBaseline(td, forceFocusedDisplay);
             }
           }
@@ -452,7 +503,7 @@
       const targetSheet = getActiveSheetName();
       const targetCellRef = getActiveSheetCellRef();
       sheetDataStore[targetSheet] = snapshotDomSheetCells();
-      const candidateSheets = JSON.parse(JSON.stringify(sheetDataStore));
+      const candidateSheets = gridUtils.cloneSheetStore(sheetDataStore);
       if (!candidateSheets[targetSheet]) {
         candidateSheets[targetSheet] = {};
       }
@@ -545,8 +596,10 @@
         return Promise.resolve(false);
       }
       const editSheet = st.sheetName;
-      const rawText = (td.textContent || "").trim();
+      const rawText = grid.readTdValue(td);
       const textChanged = Boolean(st.userEdited) || rawText !== st.initialText;
+      const wasEditing = Boolean(st.mode) || textChanged;
+      input.endEdit(td);
       if (textChanged) {
         if (isFormulaStr(rawText)) {
           td.dataset.formula = rawText;
@@ -573,11 +626,13 @@
         ) {
           const cached = sheetDataStore[editSheet]?.[td.dataset.cell]?.value;
           if (cached !== undefined && cached !== "" && !isFormulaStr(cached)) {
-            td.textContent = cached;
+            grid.setDisplayValue(td, cached);
             if (getActiveSheetName() === editSheet) {
               updateSheetSelectionAndAggregates(getActiveSheetCellRef() || td.dataset.cell);
             }
           }
+        } else if (wasEditing && !isFormulaStr(td.dataset.formula || "")) {
+          grid.setDisplayValue(td, rawText);
         }
         if (keepFocus) {
           refreshFocusedSheetCellPendingSnapshot();
@@ -585,6 +640,7 @@
         return Promise.resolve(false);
       }
       sheetDataStore[editSheet] = snapshotDomSheetCells();
+      if (!isFormulaStr(td.dataset.formula || "")) grid.setDisplayValue(td, rawText);
       const commitRun = async () => {
         await recalculateActiveSheetFormulas();
         if (
@@ -636,250 +692,92 @@
       return committed;
     }
 
-    function moveCellFocusByDelta(td, dCol, dRow) {
-      const m = /^([A-Z]+)(\d+)$/.exec(String(td.dataset?.cell || "").toUpperCase());
-      if (!m) return;
-      const colIdx = GRID_COL_LETTERS.indexOf(m[1]);
-      const rowNum = Number(m[2]);
-      if (colIdx < 0 || !Number.isFinite(rowNum)) return;
-      const maxRow = getSheetRowCount(getActiveSheetName());
-      const nextColIdx = Math.max(0, Math.min(GRID_COL_LETTERS.length - 1, colIdx + dCol));
-      const nextRowNum = Math.max(1, Math.min(maxRow, rowNum + dRow));
-      const nextRef = GRID_COL_LETTERS[nextColIdx] + nextRowNum;
-      const nextTd = document.querySelector('#pane-sheet td[data-cell="' + nextRef + '"]');
-      if (nextTd) {
-        if (nextTd !== td && typeof nextTd.focus === "function") {
-          nextTd.focus();
-        }
-        updateSheetSelectionAndAggregates(nextRef);
+    let idleSnapshotTimer = null;
+
+    function isHeavySheet() {
+      const ext = getSheetExtent(getActiveSheetName());
+      return ext.dataRows * ext.dataCols > EAGER_SNAPSHOT_MAX_ENTRIES;
+    }
+
+    function ensurePendingSnapshot(st) {
+      if (!st.pendingSnapshot && !st.userEdited && !st.snapshotPushed) {
+        st.pendingSnapshot = captureWorkspaceSnapshot(false);
       }
     }
 
+    // Small sheets capture the pre-edit snapshot on focus; large sheets capture it once the
+    // cell has been idle (or at the first edit) so arrow-key navigation never pays for a deep copy.
+    function schedulePendingSnapshot(st) {
+      if (!isHeavySheet()) {
+        st.pendingSnapshot = captureWorkspaceSnapshot(false);
+        return;
+      }
+      if (idleSnapshotTimer !== null) host.clearTimeout?.(idleSnapshotTimer);
+      idleSnapshotTimer =
+        host.setTimeout?.(() => {
+          idleSnapshotTimer = null;
+          if (sheetCellFocusState.get(document.activeElement) === st) ensurePendingSnapshot(st);
+        }, IDLE_SNAPSHOT_DELAY_MS) ?? null;
+    }
+
+    const input = host.__EASYOFFICE_CREATE_SHEET_INPUT__({
+      document,
+      grid,
+      sheetCellFocusState,
+      isFormulaStr,
+      getSheetName: () => getActiveSheetName(),
+      getEntry: entryAt,
+      forEachEntryRef: (cb) => {
+        Object.keys(activeSheetMap()).forEach((ref) => {
+          const p = gridUtils.parseRef(ref);
+          if (p) cb(ref, p.row, p.col);
+        });
+      },
+      getExtent: () => getSheetExtent(getActiveSheetName()),
+      hasValue: (r, c) => hasCellContent(entryAt(gridUtils.refOf(r, c))),
+      setActiveSheetCellRef,
+      getActiveSheetCellRef,
+      commitSheetCellEdit,
+      ensureSheetCellFocusEntry,
+      syncSheetCellFocusBaseline,
+      pushCellUndoSnapshotIfNeeded,
+      ensurePendingSnapshot,
+      schedulePendingSnapshot,
+      applyCellEdits,
+      clearExisting,
+    });
+
+    function updateSheetSelectionAndAggregates(cellRef) {
+      input.updateSelection(cellRef);
+    }
+
+    let gridInstalled = false;
     function bindSheetCellEvents(rootEl) {
-      rootEl.querySelectorAll("td[data-cell]").forEach((td) => {
-        td.addEventListener("click", () => updateSheetSelectionAndAggregates(td.dataset.cell));
-        td.addEventListener("focus", () => {
-          updateSheetSelectionAndAggregates(td.dataset.cell);
-          const initialText = (td.textContent || "").trim();
-          sheetCellFocusState.set(td, {
-            initialText,
-            initialRaw: td.dataset.formula || initialText,
-            pendingSnapshot: captureWorkspaceSnapshot(false),
-            snapshotPushed: false,
-            userEdited: false,
-            sheetName: getActiveSheetName(),
-          });
-        });
-        td.addEventListener("keydown", (ev) => {
-          const st = sheetCellFocusState.get(td);
-          const isEditingCell = Boolean(st && st.userEdited);
-          if (ev.key === "Enter") {
-            ev.preventDefault();
-            td.blur();
-            return;
-          }
-          if (ev.key === "ArrowUp") {
-            ev.preventDefault();
-            moveCellFocusByDelta(td, 0, -1);
-            return;
-          }
-          if (ev.key === "ArrowDown") {
-            ev.preventDefault();
-            moveCellFocusByDelta(td, 0, 1);
-            return;
-          }
-          if (ev.key === "ArrowLeft") {
-            if (!isEditingCell) {
-              ev.preventDefault();
-              moveCellFocusByDelta(td, -1, 0);
-            }
-            return;
-          }
-          if (ev.key === "ArrowRight") {
-            if (!isEditingCell) {
-              ev.preventDefault();
-              moveCellFocusByDelta(td, 1, 0);
-            }
-            return;
-          }
-          if (ev.key === "Tab") {
-            ev.preventDefault();
-            moveCellFocusByDelta(td, ev.shiftKey ? -1 : 1, 0);
-            return;
-          }
-          if (ev.key === "Delete" && !isEditingCell) {
-            ev.preventDefault();
-            const focusSt = st || ensureSheetCellFocusEntry(td, getActiveSheetName());
-            td.textContent = "";
-            delete td.dataset.formula;
-            focusSt.userEdited = true;
-            pushCellUndoSnapshotIfNeeded(td, focusSt, "");
-            const formulaInput = document.getElementById("formula-input");
-            if (formulaInput && getActiveSheetCellRef() === td.dataset.cell) {
-              formulaInput.value = "";
-            }
-            void commitSheetCellEdit(td, true).catch(() => {});
-            updateSheetSelectionAndAggregates(td.dataset.cell);
-          }
-        });
-        td.addEventListener("blur", () => {
-          void commitSheetCellEdit(td, false).catch(() => {});
-        });
-        td.addEventListener("input", () => {
-          const st = sheetCellFocusState.get(td);
-          const rawText = (td.textContent || "").trim();
-          if (isFormulaStr(rawText)) {
-            td.dataset.formula = rawText;
-          } else {
-            delete td.dataset.formula;
-          }
-          if (st) {
-            st.userEdited = true;
-            pushCellUndoSnapshotIfNeeded(td, st, td.dataset.formula || rawText);
-          }
-          const formulaInput = document.getElementById("formula-input");
-          if (formulaInput && getActiveSheetCellRef() === td.dataset.cell) {
-            formulaInput.value = rawText;
-          }
-          updateSheetSelectionAndAggregates(td.dataset.cell);
-        });
-      });
+      input.bindSheetCellEvents(rootEl);
+      if (gridInstalled) return;
+      gridInstalled = true;
+      grid.install();
+      grid.renderWindow(true);
+      if (sheetDataStore[getActiveSheetName()]) refreshWindowFromModel();
     }
 
-    function sortActiveSheetByColumnB() {
-      const curSheet = getActiveSheetName();
-      const populatedRows = [];
-      const blankRows = [];
-      for (let r = 2; r <= 6; r += 1) {
-        const bTd = document.querySelector('#pane-sheet td[data-cell="B' + r + '"]');
-        if (!bTd) continue;
-        const cells = {};
-        let isBlankRow = true;
-        GRID_COL_LETTERS.forEach((col) => {
-          const td = document.querySelector('#pane-sheet td[data-cell="' + col + r + '"]');
-          if (td) {
-            const text = td.textContent || "";
-            const formula = td.dataset.formula || "";
-            if (text.trim() !== "" || formula.trim() !== "") {
-              isBlankRow = false;
-            }
-            cells[col] = {
-              text,
-              formula,
-              fontWeight: td.style.fontWeight || "",
-              fontStyle: td.style.fontStyle || "",
-              textDecoration: td.style.textDecoration || "",
-              fontSize: td.style.fontSize || "",
-              condfmtHigh: td.classList.contains("condfmt-high"),
-            };
-          }
-        });
-        if (isBlankRow) {
-          blankRows.push({ origRow: r, bNum: 0, cells });
-        } else {
-          const bRaw = (bTd.textContent || "").replaceAll(",", "").trim();
-          const bParsed = bRaw === "" ? Number.NaN : Number(bRaw);
-          populatedRows.push({
-            origRow: r,
-            bNum: Number.isFinite(bParsed) ? bParsed : 0,
-            cells,
-          });
-        }
-      }
-      if (populatedRows.length < 2) return;
-      let isAscending = true;
-      for (let i = 1; i < populatedRows.length; i += 1) {
-        if (populatedRows[i].bNum < populatedRows[i - 1].bNum) {
-          isAscending = false;
-          break;
-        }
-      }
-      populatedRows.sort((a, b) => (isAscending ? b.bNum - a.bNum : a.bNum - b.bNum));
-      const rowData = [...populatedRows, ...blankRows];
-      rowData.forEach((item, idx) => {
-        const targetRow = idx + 2;
-        GRID_COL_LETTERS.forEach((col) => {
-          const td = document.querySelector('#pane-sheet td[data-cell="' + col + targetRow + '"]');
-          const src = item.cells[col];
-          if (!td || !src) return;
-          td.textContent = src.text;
-          if (src.formula) {
-            td.dataset.formula = src.formula.replace(
-              new RegExp("([A-Z]+)" + item.origRow + "\\b", "g"),
-              "$1" + targetRow
-            );
-          } else {
-            delete td.dataset.formula;
-          }
-          td.style.fontWeight = src.fontWeight || "";
-          td.style.fontStyle = src.fontStyle || "";
-          td.style.textDecoration = src.textDecoration || "";
-          td.style.fontSize = src.fontSize || "";
-          td.classList.toggle("condfmt-high", Boolean(src.condfmtHigh));
-          syncSheetCellFocusBaseline(td, true);
-        });
-      });
-      sheetDataStore[curSheet] = snapshotDomSheetCells();
-      refreshFocusedSheetCellPendingSnapshot();
-      updateSheetSelectionAndAggregates(getActiveSheetCellRef() || "F2");
+    function runSheetClipboardCommand(cmd) {
+      return input.runClipboardCommand(cmd);
     }
 
-    function applySheetPivotOrChartSummary(mode, execRes) {
-      const nums = [];
-      for (let r = 2; r <= 6; r += 1) {
-        ["B", "C", "D", "E"].forEach((col) => {
-          const td = document.querySelector('#pane-sheet td[data-cell="' + col + r + '"]');
-          const n = Number((td?.textContent || "").replaceAll(",", "").trim());
-          if (Number.isFinite(n) && (td?.textContent || "").trim() !== "") {
-            nums.push(n);
-          }
-        });
-      }
-      const sum = nums.reduce((acc, v) => acc + v, 0);
-      const avg = nums.length > 0 ? Math.round((sum / nums.length) * 10) / 10 : 0;
-      const maxVal = nums.length > 0 ? Math.max(...nums) : 0;
-      const prefix = mode === "pivot" ? "피벗 집계" : "차트 데이터 요약";
-      const summaryToken = execRes?.summary || mode;
-      const summaryLine =
-        prefix +
-        " · 합계 " +
-        sum +
-        " · 평균 " +
-        avg +
-        " · 최대 " +
-        maxVal +
-        " (" +
-        summaryToken +
-        ")";
-      const out = document.getElementById("sheet-eval-result");
-      if (out) out.textContent = summaryLine;
-      const smartOut = document.getElementById("smart-summary-output");
-      if (smartOut) smartOut.textContent = summaryLine;
-    }
-
-    function toggleSheetConditionalFormatting(enabled) {
-      const allTds = Array.from(document.querySelectorAll("#pane-sheet td[data-cell]"));
-      const dataNums = [];
-      allTds.forEach((td) => {
-        const ref = td.dataset.cell || "";
-        const m = /^([B-E])([2-6])$/.exec(ref);
-        if (!m) return;
-        const n = Number((td.textContent || "").replaceAll(",", "").trim());
-        if (Number.isFinite(n)) dataNums.push(n);
-      });
-      const avg =
-        dataNums.length > 0 ? dataNums.reduce((a, b) => a + b, 0) / dataNums.length : 800;
-      allTds.forEach((td) => {
-        if (!enabled) {
-          td.classList.remove("condfmt-high");
-          return;
-        }
-        const n = Number((td.textContent || "").replaceAll(",", "").trim());
-        const isHigh = Number.isFinite(n) && (td.textContent || "").trim() !== "" && n >= avg;
-        td.classList.toggle("condfmt-high", isHigh);
-      });
-      saveActiveSheetCellsToWorkbook();
-    }
+    const ops = host.__EASYOFFICE_CREATE_SHEET_OPS__({
+      document,
+      grid,
+      sheetDataStore,
+      getActiveSheetName,
+      getActiveSheetCellRef,
+      snapshotDomSheetCells,
+      saveActiveSheetCellsToWorkbook,
+      refreshWindowFromModel,
+      refreshFocusedSheetCellPendingSnapshot,
+      updateSheetSelectionAndAggregates,
+      hasCellContent,
+    });
 
     function toggleSheetFreezePanes(enabled, skipSave = false) {
       const thead = document.querySelector("#pane-sheet table thead");
@@ -946,7 +844,6 @@
       trackSheetAsyncWork,
       drainInFlightSheetWork,
       getSheetRowCount,
-      ensureSheetGridRowCount,
       appendSheetRow,
       snapshotDomSheetCells,
       saveActiveSheetCellsToWorkbook,
@@ -961,9 +858,10 @@
       flushFocusedSheetCellBeforeSwitch,
       commitPendingFocusedSheetCell,
       bindSheetCellEvents,
-      sortActiveSheetByColumnB,
-      applySheetPivotOrChartSummary,
-      toggleSheetConditionalFormatting,
+      runSheetClipboardCommand,
+      sortActiveSheetByColumnB: ops.sortActiveSheetByColumnB,
+      applySheetPivotOrChartSummary: ops.applySheetPivotOrChartSummary,
+      toggleSheetConditionalFormatting: ops.toggleSheetConditionalFormatting,
       toggleSheetFreezePanes,
       performSwitchSheetTabAsync,
       switchSheetTab,

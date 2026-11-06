@@ -317,6 +317,10 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let desktop_bridge_asset = include_str!("../ui/desktop-bridge.js");
     let workspace_tools_asset = include_str!("../ui/workspace-tools.js");
     let workspace_panels_asset = include_str!("../ui/workspace-panels.js");
+    let sheet_grid_asset = include_str!("../ui/sheet-grid.js");
+    let sheet_clipboard_asset = include_str!("../ui/sheet-clipboard.js");
+    let sheet_input_asset = include_str!("../ui/sheet-input.js");
+    let sheet_ops_asset = include_str!("../ui/sheet-ops.js");
     let sheet_controller_asset = include_str!("../ui/sheet-controller.js");
     let ribbon_history_asset = include_str!("../ui/ribbon-history.js");
     let workspace_session_asset = include_str!("../ui/workspace-session.js");
@@ -335,6 +339,10 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !desktop_bridge_asset.contains("__EASYOFFICE_DESKTOP_BRIDGE__")
         || !workspace_tools_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_TOOLS__")
         || !workspace_panels_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_PANELS__")
+        || !sheet_grid_asset.contains("__EASYOFFICE_CREATE_SHEET_GRID__")
+        || !sheet_clipboard_asset.contains("__EASYOFFICE_CREATE_SHEET_CLIPBOARD__")
+        || !sheet_input_asset.contains("__EASYOFFICE_CREATE_SHEET_INPUT__")
+        || !sheet_ops_asset.contains("__EASYOFFICE_CREATE_SHEET_OPS__")
         || !sheet_controller_asset.contains("__EASYOFFICE_CREATE_SHEET_CONTROLLER__")
         || !ribbon_history_asset.contains("__EASYOFFICE_CREATE_RIBBON_HISTORY__")
         || !workspace_session_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_SESSION__")
