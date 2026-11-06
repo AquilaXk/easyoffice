@@ -183,6 +183,16 @@ function launchChrome(profileDir) {
   return { child, endpoint };
 }
 
+/** Best-effort removal of a temporary Chrome profile; a profile still locked by an exiting Chrome
+ * must not turn a passing harness run into a failure. */
+function removeProfile(profileDir, log) {
+  try {
+    fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch (err) {
+    log(`note: temporary profile not removed (${err.code || err.message}): ${profileDir}`);
+  }
+}
+
 /** Launches Chrome with a fresh profile, retrying when the DevTools endpoint never appears. */
 async function startChrome(log) {
   let lastError = null;
@@ -197,7 +207,7 @@ async function startChrome(log) {
       log(`Chrome start attempt ${attempt}/${CHROME_LAUNCH_ATTEMPTS} failed: ${err.message}`);
       chrome.child.kill();
       await sleep(500);
-      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      removeProfile(profile, log);
     }
   }
   throw lastError;
@@ -394,7 +404,7 @@ export async function runHarness({ log = console.log } = {}) {
     started?.chrome.child.kill();
     server.close();
     await sleep(300);
-    if (started) fs.rmSync(started.profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (started) removeProfile(started.profile, log);
   }
   return problems;
 }
