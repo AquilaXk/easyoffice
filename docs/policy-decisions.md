@@ -1368,3 +1368,21 @@
   - 번들 없는 데스크톱 빌드 허용: 설치본에 편집기가 없는 것을 CI가 놓칠 수 있어 빌드 실패로 기각.
 - **Verified by** `node --test scripts/test-webui-hwp-host.mjs`(핸드셰이크·요청/응답·타임아웃·재연결·번들 없음 폴백·도구 숨김·저장), `cargo test -p easyoffice-app`(경로 순회·MIME·바이너리 정확·CSP), `cargo test -p easyoffice-desktop`(smoke 상태 기계), `EasyOffice.exe --smoke`, 헤드리스 Chrome 실제 입력(빈 문서 → 한글 입력 → 앞 3글자만 20pt·굵게 → 앱 저장 → 내보낸 HWP 재해석), 위생 가드의 정확한 CSP 검사.
 - **Revisit when** 4단계(HWP/HWPX 열기·저장·더티 가드·`getDocumentState` 연동), 호스트와 편집기 단축키 통합, 앱 CSP를 문서별로 나눌 수 있게 될 때, macOS 이전(출처 검사).
+
+## 59. 시트 범위 서식: 선택 범위 전체에 굵게·기울임·밑줄·취소선·글자 크기 (PD-084, #143)
+
+- **Status** Implemented
+- **Context** 시트에서 Shift+방향키로 범위를 고른 뒤 Ctrl+B·리본 서식을 눌러도 활성 셀 하나에만 적용되었습니다. 서식은 렌더된 `td`의 인라인 스타일에만 쓰였고, 가상 스크롤(PD-078)에서는 화면 밖 셀이 DOM에 없어 범위 전체 적용이 불가능했습니다(#143).
+- **Decision (`PD-084`)**
+  1. **모델에 기록**: 새 모듈 `sheet-format.js`(`__EASYOFFICE_CREATE_SHEET_FORMAT__`)가 `sheetDataStore`의 셀 항목 `style`(`fontWeight`·`fontStyle`·`textDecoration`·`fontSize`)을 범위의 모든 셀에 씁니다. 그 뒤 `refreshWindowFromModel()`로 보이는 창만 다시 그리므로 스크롤·시트 탭 전환·재렌더 후에도 서식이 유지됩니다. `ribbon-history.js`의 셀별 `td.style` 분기는 제거하고(줄 수 감소) `sheetController.applySheetFormatCommand`로 위임합니다.
+  2. **토글 규칙**: 범위의 모든 셀이 이미 켜져 있으면 해제, 하나라도 꺼져 있으면(없음·혼합) 전체 설정입니다. 밑줄·취소선은 `textDecoration` 토큰(`underline`, `line-through`)으로 합쳐 서로 지우지 않습니다. 취소선은 `Ctrl+5`(시트 포커스)입니다. 글자 크기는 활성 셀의 현재 크기에서 다음 프리셋(13/15/17/12px)을 골라 범위 전체에 같은 값을 씁니다.
+  3. **실행 취소 한 단계**: 리본·단축키 경로는 기존 추적 리본 작업(스냅샷 1회) 안에서 실행되고, `Ctrl+5` 경로는 단일 `pushRawUndoSnapshot` 작업입니다. `Ctrl+Z` 한 번으로 범위 전체가 되돌아가고 `Ctrl+Y`로 다시 적용됩니다.
+  4. **도구 막대 상태**: 선택이 바뀔 때(2만 칸 이하는 즉시, 그 이상은 120 ms 지연) 리본 `sheet-home-*` 버튼의 `aria-pressed`를 범위 기준 `true`/`false`/`mixed`로 갱신합니다. 모델이 기준이라 화면 밖 셀도 반영됩니다. 모듈 범위는 `SHEET`로 한정하여 DOC/HWP/SLIDE(`doc-runs-ui.js`·슬라이드 경로)는 바뀌지 않습니다.
+  5. **대형 선택**: 범위가 100만 칸을 넘으면(Ctrl+A는 1,048,576×16,384) 사용 범위(행 수·열 수)로 줄여 적용합니다. 서식만 있고 값이 없는 셀은 모델에 항목을 만들며, 서식이 모두 꺼지면 항목을 지웁니다.
+  6. **저장 한계**: 셀 서식은 작업 공간 스냅샷(실행 취소·자동 저장·시트 탭)에는 유지되지만, XLSX 저장 `sheets` 페이로드(#104)는 `{ref, raw}`만 담으므로 **셀 서식은 XLSX에 기록되지 않습니다**. 이는 기존 한계(활성 셀 서식도 동일)이며, 저장 형식에 스타일 레코드를 추가하는 후속 작업이 필요합니다.
+- **Alternatives rejected**
+  - 렌더된 `td`만 순회: 가상 스크롤 밖 행이 빠져 기각.
+  - 셀마다 스냅샷: 실행 취소가 N단계가 되어 기각.
+  - 전체 선택에서 100만 칸 초과 항목 생성: 메모리·지연이 커서 사용 범위로 제한.
+- **Verified by** `node --test scripts/test-webui-sheet-format.mjs`(범위 굵게 전체/없음/혼합 토글, 실행 취소·다시 실행 한 단계, 기울임·밑줄·크기·취소선 결합, 1만 행 범위의 화면 밖 행·스크롤 후 유지, 시트 탭 전환 유지, 혼합 `aria-pressed`, DOC 비영향), 헤드리스 Chrome(CDP `Input.*`)에서 Shift+방향키 선택 후 Ctrl+B로 12칸 모두 굵게, 1만×8 범위 굵게 적용이 실제 브라우저에서 약 0.36초(실행 취소 스냅샷 포함)이며 스크롤한 8,326행도 굵게였습니다.
+- **Revisit when** XLSX 저장 페이로드에 셀 스타일을 담을 때, 글꼴·색·채우기·테두리·정렬을 범위에 적용할 때, 열·행 단위 서식(전체 열 서식)을 도입할 때.

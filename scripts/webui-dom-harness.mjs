@@ -37,6 +37,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/sheet-clipboard.js",
   "../crates/easyoffice-app/ui/sheet-input.js",
   "../crates/easyoffice-app/ui/sheet-ops.js",
+  "../crates/easyoffice-app/ui/sheet-format.js",
   "../crates/easyoffice-app/ui/sheet-controller.js",
   "../crates/easyoffice-app/ui/ribbon-history.js",
   "../crates/easyoffice-app/ui/workspace-session.js",

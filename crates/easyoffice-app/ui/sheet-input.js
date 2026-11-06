@@ -148,6 +148,7 @@
       }
       const out = document.getElementById("sheet-eval-result");
       if (out) out.setAttribute("title", out.textContent || "");
+      api.onSelectionChanged?.();
     }
 
     // Public selection refresh (focus, outline links, restore, recalculation).
@@ -425,6 +426,11 @@
         return;
       }
       if (handleNavKey(ev, editing)) return;
+      if (mod && !ev.shiftKey && !ev.altKey && ev.key === "5") {
+        ev.preventDefault();
+        api.onFormatKey?.("strike");
+        return;
+      }
       if (editing) return;
       if (mod && ev.key.toLowerCase() === "a") {
         ev.preventDefault();
