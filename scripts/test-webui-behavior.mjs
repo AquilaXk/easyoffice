@@ -180,7 +180,10 @@ test("real userClick on save waits for blur-triggered async evaluate_sheet befor
 
   assert.equal(convertPayloads.length, 1);
   const parsedConvert = JSON.parse(convertPayloads[0]);
-  assert.match(parsedConvert.body, /\[\[TABLE_ROW\]\][^\n]*\t6950/);
+  assert.equal(parsedConvert.body, undefined);
+  const sheet1 = parsedConvert.sheets.find((s) => s.name === "Sheet1");
+  assert.deepEqual(sheet1.cells.find((c) => c.ref === "B2"), { ref: "B2", raw: "3150" });
+  assert.equal(sheet1.cells.find((c) => c.ref === "F2").raw, "=SUM(B2:E2)");
 });
 
 test("switching sheet tabs with structured JSON IPC and special sheet names avoids contamination", async () => {
@@ -607,8 +610,9 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
   assert.equal(document.activeElement, e9);
   assert.equal(e9.textContent, "=400+100");
   const exportedConvert = JSON.parse(exportedBodies[0]);
-  assert.match(exportedConvert.body, /\[\[SHEET_A1\]\]\tE9\t=400\+100/);
-  assert.match(exportedConvert.body, /\[\[TABLE_ROW\]\][^\n]*300\t500/);
+  const exportedCells = exportedConvert.sheets.find((s) => s.name === "Sheet1").cells;
+  assert.equal(exportedCells.find((c) => c.ref === "D9").raw, "=100+200");
+  assert.equal(exportedCells.find((c) => c.ref === "E9").raw, "=400+100");
 });
 
 test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and multi-paragraph PDF undo preserve DOM structure", async () => {

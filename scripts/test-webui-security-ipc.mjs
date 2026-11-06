@@ -298,8 +298,9 @@ test("structured JSON IPC preserves ? and %3B in cross-sheet formulas, literals,
   assert.ok(saveCall);
   assert.equal(saveCall.payload.startsWith("{"), true);
   const parsedSave = JSON.parse(saveCall.payload);
-  assert.match(parsedSave.body, /100%3B/);
-  assert.match(parsedSave.body, /=IF\(Sheet2!A1>1,"a\?b",0\)/);
+  const savedCells = parsedSave.sheets.flatMap((s) => s.cells);
+  assert.ok(savedCells.some((c) => c.ref === "D2" && c.raw === "100%3B"));
+  assert.ok(savedCells.some((c) => c.ref === "E2" && c.raw === '=IF(Sheet2!A1>1,"a?b",0)'));
 
   capturedCalls.length = 0;
   wrappedHarness.userClick(wrappedHarness.document.getElementById("btn-run-security-audit"));

@@ -313,6 +313,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
     let pii_scrubber_asset = include_str!("../ui/pii-dom-scrubber.js");
     let sheet_store_asset = include_str!("../ui/sheet-store.js");
     let ribbon_catalog_asset = include_str!("../ui/ribbon-catalog.js");
+    let save_payload_asset = include_str!("../ui/save-payload.js");
     let workspace_tools_asset = include_str!("../ui/workspace-tools.js");
     let workspace_panels_asset = include_str!("../ui/workspace-panels.js");
     let sheet_controller_asset = include_str!("../ui/sheet-controller.js");
@@ -325,6 +326,7 @@ pub fn run_self_test() -> Result<String, EasyOfficeError> {
         || !pii_scrubber_asset.contains("__EASYOFFICE_CREATE_PII_SCRUBBER__")
         || !sheet_store_asset.contains("__EASYOFFICE_CREATE_SHEET_STORE__")
         || !ribbon_catalog_asset.contains("__EASYOFFICE_RIBBON_CATALOG__")
+        || !save_payload_asset.contains("__EASYOFFICE_SAVE_PAYLOAD__")
         || !workspace_tools_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_TOOLS__")
         || !workspace_panels_asset.contains("__EASYOFFICE_CREATE_WORKSPACE_PANELS__")
         || !sheet_controller_asset.contains("__EASYOFFICE_CREATE_SHEET_CONTROLLER__")

@@ -676,7 +676,7 @@ impl OdfCodec {
         Ok((title, slides))
     }
 
-    fn build_manifest(mime: &str) -> String {
+    pub(crate) fn build_manifest(mime: &str) -> String {
         format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"><manifest:file-entry manifest:full-path=\"/\" manifest:media-type=\"{mime}\"/><manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/></manifest:manifest>"
         )

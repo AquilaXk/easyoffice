@@ -1,0 +1,248 @@
+(function (host) {
+  "use strict";
+
+  // Structured save payload (PD-073): ordered paragraph/table blocks with run formatting, every
+  // workbook sheet, and slides as JSON fields. User text is never encoded as line markup.
+
+  const BLOCK_TAGS = new Set([
+    "P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "UL", "OL",
+    "BLOCKQUOTE", "SECTION", "ARTICLE", "PRE", "HEADER", "FIGURE", "FIGCAPTION", "DL", "DT", "DD",
+  ]);
+  const SKIP_TAGS = new Set(["FOOTER", "SCRIPT", "STYLE", "BUTTON", "TEMPLATE", "NOSCRIPT"]);
+  const CSS_ALIGN = { left: "left", start: "left", center: "center", right: "right", end: "right", justify: "justify" };
+  const TABLE_FUNCS = new Set(["SUM", "AVERAGE", "COUNT", "MAX", "MIN", "PRODUCT"]);
+  const TABLE_DIRS = new Set(["ABOVE", "BELOW", "LEFT", "RIGHT"]);
+  const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+  function isSkippedElement(el) {
+    const tag = (el.tagName || "").toUpperCase();
+    if (SKIP_TAGS.has(tag)) return true;
+    if (el.id === "hwp-manuscript-preview") return true;
+    if (el.classList?.contains("doc-table-toolbar")) return true;
+    return typeof el.hasAttribute === "function" && el.hasAttribute("hidden");
+  }
+
+  function normalizeAlign(css) {
+    return CSS_ALIGN[String(css || "").trim().toLowerCase()] || null;
+  }
+
+  function styleFormat(el, fmt) {
+    const tag = (el.tagName || "").toUpperCase();
+    const st = el.style || {};
+    const weight = String(st.fontWeight || "").trim().toLowerCase();
+    const deco = String(st.textDecoration || st.textDecorationLine || "").toLowerCase();
+    return {
+      bold: fmt.bold || tag === "STRONG" || tag === "B" || weight === "bold" || weight === "bolder" || Number(weight) >= 600,
+      italic: fmt.italic || tag === "EM" || tag === "I" || String(st.fontStyle || "").toLowerCase() === "italic",
+      underline: fmt.underline || tag === "U" || tag === "INS" || deco.includes("underline"),
+      strike: fmt.strike || tag === "S" || tag === "STRIKE" || tag === "DEL" || deco.includes("line-through"),
+    };
+  }
+
+  function parseTableNumber(text) {
+    const cleaned = String(text || "").replaceAll(",", "").replaceAll(/\s+/g, "");
+    if (!cleaned || !/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(cleaned)) return null;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function formatTableNumber(n) {
+    if (Number.isInteger(n) && Math.abs(n) < 1e15) return String(n);
+    return n.toFixed(10).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  function parseTableFormula(text) {
+    const m = /^=\s*([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)\s*$/.exec(String(text || "").trim());
+    if (!m) return null;
+    const func = m[1].toUpperCase();
+    const dir = m[2].toUpperCase();
+    return TABLE_FUNCS.has(func) && TABLE_DIRS.has(dir) ? { func, dir } : null;
+  }
+
+  // Mirrors easyoffice_formats::evaluate_table_formulas: row-major, so a later formula sees the
+  // computed value of an earlier one. Returns a same-shaped grid of computed values (null = none).
+  function evaluateDocTableFormulas(textRows) {
+    const rows = textRows.map((r) => r.slice());
+    const values = textRows.map((r) => r.map(() => null));
+    rows.forEach((row, r) => {
+      row.forEach((cell, c) => {
+        const f = parseTableFormula(cell);
+        if (!f) return;
+        let operands = [];
+        if (f.dir === "ABOVE") operands = rows.slice(0, r).map((rr) => rr[c]);
+        else if (f.dir === "BELOW") operands = rows.slice(r + 1).map((rr) => rr[c]);
+        else if (f.dir === "LEFT") operands = row.slice(0, c);
+        else operands = row.slice(c + 1);
+        const nums = operands.map(parseTableNumber).filter((n) => n !== null);
+        let v = 0;
+        if (f.func === "SUM") v = nums.reduce((a, b) => a + b, 0);
+        else if (f.func === "COUNT") v = nums.length;
+        else if (nums.length > 0 && f.func === "AVERAGE") v = nums.reduce((a, b) => a + b, 0) / nums.length;
+        else if (nums.length > 0 && f.func === "MAX") v = Math.max(...nums);
+        else if (nums.length > 0 && f.func === "MIN") v = Math.min(...nums);
+        else if (nums.length > 0 && f.func === "PRODUCT") v = nums.reduce((a, b) => a * b, 1);
+        const shown = formatTableNumber(v);
+        rows[r][c] = shown;
+        values[r][c] = shown;
+      });
+    });
+    return values;
+  }
+
+  function cellText(cell) {
+    return String(cell.textContent || "").replaceAll(/\s+/g, " ").trim();
+  }
+
+  function buildTableBlock(table) {
+    const trs = Array.from(table.querySelectorAll("tr")).filter((tr) => tr.closest("table") === table);
+    const texts = trs.map((tr) =>
+      Array.from(tr.children || []).filter((c) => /^(TD|TH)$/i.test(c.tagName || "")).map(cellText)
+    );
+    const values = evaluateDocTableFormulas(texts);
+    const rows = texts
+      .map((row, r) => row.map((text, c) => (values[r][c] === null ? { text } : { text, value: values[r][c] })))
+      .filter((row) => row.length > 0);
+    return { type: "table", rows };
+  }
+
+  // Walks an editor root in document order and returns paragraph/table blocks.
+  function collectDocBlocks(root, options = {}) {
+    const blocks = [];
+    const baseAlign = normalizeAlign(options.baseAlign);
+    let cur = null;
+
+    function flush() {
+      if (!cur) return;
+      const runs = cur.runs;
+      if (runs.length > 0) {
+        runs[0].text = runs[0].text.replace(/^\s+/, "");
+        runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/\s+$/, "");
+      }
+      const kept = runs.filter((r) => r.text.length > 0);
+      if (kept.length > 0) {
+        const block = { type: "paragraph", runs: kept };
+        if (cur.ctx.align) block.align = cur.ctx.align;
+        if (cur.ctx.heading) block.heading = cur.ctx.heading;
+        if (cur.ctx.list) block.list = cur.ctx.list;
+        blocks.push(block);
+      }
+      cur = null;
+    }
+
+    function appendText(text, ctx, fmt) {
+      if (!text) return;
+      if (!cur) cur = { ctx, runs: [] };
+      const last = cur.runs[cur.runs.length - 1];
+      const same = last && ["bold", "italic", "underline", "strike"].every((k) => Boolean(last[k]) === fmt[k]);
+      if (same) {
+        last.text += text;
+        return;
+      }
+      const run = { text };
+      ["bold", "italic", "underline", "strike"].forEach((k) => {
+        if (fmt[k]) run[k] = true;
+      });
+      cur.runs.push(run);
+    }
+
+    function walk(node, ctx, fmt) {
+      if (node.nodeType === 3) {
+        const prev = cur?.runs[cur.runs.length - 1]?.text || "";
+        let text = String(node.nodeValue || "").replaceAll(/\s+/g, " ");
+        if ((!cur || prev.endsWith(" ")) && text.startsWith(" ")) text = text.slice(1);
+        appendText(text, ctx, fmt);
+        return;
+      }
+      if (node.nodeType !== 1 || isSkippedElement(node)) return;
+      const tag = (node.tagName || "").toUpperCase();
+      if (tag === "BR") {
+        const keepCtx = cur ? cur.ctx : ctx;
+        flush();
+        cur = { ctx: keepCtx, runs: [] };
+        return;
+      }
+      if (tag === "TABLE") {
+        flush();
+        const tbl = buildTableBlock(node);
+        if (tbl.rows.length > 0) blocks.push(tbl);
+        return;
+      }
+      const nextFmt = styleFormat(node, fmt);
+      if (!BLOCK_TAGS.has(tag)) {
+        Array.from(node.childNodes || []).forEach((child) => walk(child, ctx, nextFmt));
+        return;
+      }
+      flush();
+      const headingMatch = /^H([1-6])$/.exec(tag);
+      const listParent = tag === "LI" ? node.parentElement : null;
+      const nextCtx = {
+        align: normalizeAlign(node.style?.textAlign) || ctx.align,
+        heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
+        list: listParent ? ((listParent.tagName || "").toUpperCase() === "OL" ? "ordered" : "bullet") : ctx.list,
+      };
+      Array.from(node.childNodes || []).forEach((child) => walk(child, nextCtx, nextFmt));
+      flush();
+    }
+
+    const rootFmt = { bold: false, italic: false, underline: false, strike: false };
+    Array.from(root?.childNodes || []).forEach((child) => walk(child, { align: baseAlign, heading: 0, list: null }, rootFmt));
+    flush();
+    return blocks;
+  }
+
+  function plainParagraphBlocks(lines) {
+    return lines
+      .map((line) => String(line || "").trim())
+      .filter(Boolean)
+      .map((text) => ({ type: "paragraph", runs: [{ text }] }));
+  }
+
+  // Every sheet in tab order (then any stored sheet without a tab); keys are the formula-visible
+  // sheet names. `raw` is the formula when present, otherwise the typed value.
+  function buildSheetsPayload(sheetKeys, sheetDataStore) {
+    const ordered = [];
+    const seen = new Set();
+    [...sheetKeys, ...Object.keys(sheetDataStore || {})].forEach((key) => {
+      const name = String(key || "").trim();
+      if (!name || seen.has(name.toUpperCase())) return;
+      seen.add(name.toUpperCase());
+      ordered.push(name);
+    });
+    return ordered.map((name) => {
+      const store = sheetDataStore?.[name] || {};
+      const cells = Object.keys(store)
+        .map((ref) => {
+          const entry = store[ref];
+          const raw = String(entry?.formula || entry?.value || "").trim();
+          return raw ? { ref, raw } : null;
+        })
+        .filter(Boolean);
+      return { name, cells };
+    });
+  }
+
+  // File name from the document/tab title, safe on Windows and macOS: no extension, no reserved
+  // characters or device names, no trailing dots/spaces, at most 120 characters.
+  function sanitizeFileBaseName(rawTitle, fallback) {
+    let name = String(rawTitle || "")
+      .replace(/×$/, "")
+      .trim()
+      .replace(/\.(docx?|hwpx?|hwtx?|hwt|xlsx?|ods|csv|tsv|pptx?|ppsx|odp|odt|pdf|rtf|md|txt)$/i, "");
+    name = name
+      .replaceAll(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, "_")
+      .replaceAll(/\s+/g, " ")
+      .replace(/^[\s.]+/, "")
+      .replace(/[\s.]+$/, "");
+    if (Array.from(name).length > 120) name = Array.from(name).slice(0, 120).join("").replace(/[\s.]+$/, "");
+    if (WINDOWS_RESERVED.test(name.split(".")[0] || "")) name = "_" + name;
+    return name || fallback;
+  }
+
+  host.__EASYOFFICE_SAVE_PAYLOAD__ = {
+    collectDocBlocks,
+    plainParagraphBlocks,
+    evaluateDocTableFormulas,
+    buildSheetsPayload,
+    sanitizeFileBaseName,
+  };
+})(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

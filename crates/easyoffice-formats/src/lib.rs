@@ -17,6 +17,8 @@ mod ooxml_shared_parts;
 mod output_compatibility;
 mod pdf_stream_parser;
 mod pdf_writer;
+pub mod rich_document;
+mod rich_writers;
 pub mod rtf_xml_helpers;
 pub mod strict_json;
 pub mod text_pdf_codecs;
@@ -30,6 +32,10 @@ pub use hwp_eqedit::*;
 pub use office_codecs::*;
 pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
+pub use rich_document::{
+    evaluate_table_formulas, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
+    RichRun,
+};
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };
