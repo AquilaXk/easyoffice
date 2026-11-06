@@ -2,6 +2,7 @@
   "use strict";
 
   const { serializeDomChildren, restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
+  const savePayload = host.__EASYOFFICE_SAVE_PAYLOAD__;
   const LS_STEPS = [100, 130, 160, 180, 200, 300];
   const LS_STEPS_REV = [300, 200, 180, 160, 130, 100];
   const STUDIO_QUICK_REDIRECT = {
@@ -38,7 +39,6 @@
       docTabStore,
       sheetDataStore,
       slideDeckState,
-      parseCellRefParts,
       extractEditableDocumentText,
       collectActiveScrubGroups,
       applyScrubResultsToGroups,
@@ -75,75 +75,30 @@
       return "DOC";
     }
 
-    function appendTableRowsFromTrList(rows, lines) {
-      if (rows.length === 0) return;
-      lines.push("[[TABLE_NEW]]");
-      rows.forEach((tr) => {
-        const cells = Array.from(tr.querySelectorAll("th, td")).map((cell) =>
-          (cell.textContent || "").trim().replaceAll("\t", " ").replaceAll("\n", " ")
-        );
-        if (cells.length > 0) {
-          lines.push("[[TABLE_ROW]]\t" + cells.join("\t"));
-        }
-      });
-    }
-
-    function buildStructuredConversionBody(sourceFormatOrModule) {
+    // Structured save content (PD-073): `blocks` for DOC/HWP/PDF, every sheet for SHEET, `slides`
+    // for SLIDE. Merged into the convert_document_format JSON payload; no line markup.
+    function buildConversionContent(sourceFormatOrModule) {
       saveActiveDocTabState();
       ensureDefaultDocTabStore();
       const scope = resolveSourceScopeKind(sourceFormatOrModule);
-      const lines = [];
-
-      if (scope === "HWP") {
-        lines.push("[[AGENCY]]\t행정안전부");
-      }
-
       if (scope === "DOC" || scope === "HWP") {
         const saved = docTabStore[scope];
-        if (saved) {
-          const tempDiv = document.createElement("div");
-          restoreDomChildren(tempDiv, saved.editorNodes || [], document);
-          const docText = extractEditableDocumentText(tempDiv);
-          if (docText) {
-            lines.push(docText);
-          }
-          tempDiv.querySelectorAll("table").forEach((inlineTable) => {
-            appendTableRowsFromTrList(Array.from(inlineTable.querySelectorAll("tr")), lines);
-          });
-        }
-      } else if (scope === "SHEET") {
-        const curSheet = getActiveSheetName();
-        sheetDataStore[curSheet] = sheetController.snapshotDomSheetCells();
-        const sheetObj = sheetDataStore[curSheet] || {};
-        const rowMap = new Map();
-        Object.keys(sheetObj).forEach((ref) => {
-          const entry = sheetObj[ref];
-          const rawVal = (entry?.formula || entry?.value || "").trim().replaceAll("\t", " ").replaceAll("\n", " ");
-          const dispVal = (entry?.value || entry?.formula || "").trim().replaceAll("\t", " ").replaceAll("\n", " ");
-          if (!rawVal && !dispVal) return;
-          lines.push("[[SHEET_A1]]\t" + ref + "\t" + (rawVal || dispVal));
-          const p = parseCellRefParts(ref);
-          const rIdx = Math.max(0, p.row - 1);
-          const cIdx = Math.max(0, p.col);
-          if (!rowMap.has(rIdx)) rowMap.set(rIdx, []);
-          rowMap.get(rIdx)[cIdx] = dispVal || rawVal;
-        });
-        if (rowMap.size > 0) {
-          lines.push("[[TABLE_NEW]]");
-          Array.from(rowMap.keys())
-            .sort((a, b) => a - b)
-            .forEach((rIdx) => {
-              const rowArr = rowMap.get(rIdx) || [];
-              const dense = Array.from({ length: rowArr.length }, (_, i) => rowArr[i] || "");
-              if (dense.length > 0) lines.push("[[TABLE_ROW]]\t" + dense.join("\t"));
-            });
-        }
-      } else if (scope === "SLIDE") {
+        const tempDiv = document.createElement("div");
+        restoreDomChildren(tempDiv, saved?.editorNodes || [], document);
+        return { blocks: savePayload.collectDocBlocks(tempDiv, { baseAlign: saved?.layoutStyle?.textAlign }) };
+      }
+      if (scope === "SHEET") {
+        sheetDataStore[getActiveSheetName()] = sheetController.snapshotDomSheetCells();
+        const keys = Array.from(document.querySelectorAll(".sheet-tab-btn[data-sheet-tab]")).map(
+          (b) => b.dataset.sheetTab
+        );
+        return { sheets: savePayload.buildSheetsPayload(keys, sheetDataStore) };
+      }
+      if (scope === "SLIDE") {
         if (getActiveModule() === "SLIDE" && typeof syncActiveSlideDomStylesToDeck === "function") {
           syncActiveSlideDomStylesToDeck();
         }
-        slideDeckState.forEach((s) => {
-          const title = (s.title || "").trim().replaceAll("\t", " ").replaceAll("\n", " ");
+        const slides = slideDeckState.map((s) => {
           let extraText = "";
           if (Array.isArray(s.insertedNodes) && s.insertedNodes.length > 0) {
             const extraDiv = document.createElement("div");
@@ -151,38 +106,31 @@
             restoreDomChildren(extraDiv, s.insertedNodes, document);
             extraText = extractEditableDocumentText(extraDiv);
           }
-          const combinedLower = [s.lower || "", extraText].filter(Boolean).join("\n");
-          const bullets = combinedLower
-            .split(/\n+/)
-            .map((item) => item.trim().replaceAll("\t", " "))
-            .filter(Boolean)
-            .join(";;");
-          const notes = (s.notes || "").trim().replaceAll("\t", " ").replaceAll("\n", " ");
-          lines.push("[[SLIDE]]\t" + title + "\t" + bullets + "\t" + notes);
+          const bullets = [s.lower || "", extraText].join("\n").split(/\n+/).map((t) => t.trim()).filter(Boolean);
+          return { title: (s.title || "").trim(), bullets, notes: (s.notes || "").trim() };
         });
-      } else if (scope === "PDF") {
-        document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)").forEach((el) => {
-          const t = (el.textContent || "").trim();
-          if (t) lines.push(t);
-        });
-        const wmInputVal = (document.getElementById("pdf-watermark-input")?.value || "").trim();
-        const wmLayerVal = (document.getElementById("pdf-watermark-layer")?.textContent || "").trim();
-        const wmVal = wmInputVal || wmLayerVal;
-        if (wmVal) lines.push("워터마크: " + wmVal);
-        if (wmLayerVal && wmLayerVal !== wmVal) lines.push("워터마크 레이어: " + wmLayerVal);
-        const stampVal = (
-          document.getElementById("pdf-stamp-select")?.value ||
-          document.getElementById("pdf-stamp-badge")?.textContent ||
-          ""
-        ).trim();
-        if (stampVal) lines.push("결재 스탬프: " + stampVal);
-        const applicantVal = (document.getElementById("pdf-form-applicant")?.value || "").trim();
-        if (applicantVal) lines.push("신청인: " + applicantVal);
-        const deptVal = (document.getElementById("pdf-form-dept")?.value || "").trim();
-        if (deptVal) lines.push("부서: " + deptVal);
+        return { slides };
       }
+      const lines = [];
+      document.querySelectorAll("#pdf-page-card h3, #pdf-page-card p:not(#pdf-form-status)").forEach((el) => {
+        lines.push(el.textContent || "");
+      });
+      const valOf = (id) => (document.getElementById(id)?.value || "").trim();
+      const wmLayerVal = (document.getElementById("pdf-watermark-layer")?.textContent || "").trim();
+      const wmVal = valOf("pdf-watermark-input") || wmLayerVal;
+      if (wmVal) lines.push("워터마크: " + wmVal);
+      if (wmLayerVal && wmLayerVal !== wmVal) lines.push("워터마크 레이어: " + wmLayerVal);
+      const stampVal = (valOf("pdf-stamp-select") || document.getElementById("pdf-stamp-badge")?.textContent || "").trim();
+      if (stampVal) lines.push("결재 스탬프: " + stampVal);
+      if (valOf("pdf-form-applicant")) lines.push("신청인: " + valOf("pdf-form-applicant"));
+      if (valOf("pdf-form-dept")) lines.push("부서: " + valOf("pdf-form-dept"));
+      return { blocks: savePayload.plainParagraphBlocks(lines) };
+    }
 
-      return lines.join("\n") || "본문 텍스트";
+    // Download file name from the module's document tab title (PD-073).
+    function resolveSaveFileBase(mod) {
+      const tab = Array.from(document.querySelectorAll(".tab-strip .tab-pill")).find((t) => t.dataset.module === mod);
+      return savePayload.sanitizeFileBaseName(tab?.textContent, "EasyOffice_" + mod + "_문서");
     }
 
     function describeConversionSpec(res) {
@@ -231,31 +179,32 @@
           srcExt = document.getElementById("conv-src-fmt")?.value || "docx";
         }
         const sourceTarget = curMod === "CONV" ? srcExt : curMod;
-        const body = buildStructuredConversionBody(sourceTarget);
-        const title = "EasyOffice_" + curMod + "_문서";
-        const res = await invokeIpc(
-          "convert_document_format",
-          JSON.stringify({
-            sourceFormat: srcExt,
-            targetFormat: dstExt,
-            title,
-            body,
-          })
-        );
+        const content = buildConversionContent(sourceTarget);
+        const title = resolveSaveFileBase(curMod);
         const fb = document.getElementById("status-command-feedback");
-        if (res && res.convertedBase64) {
-          triggerBase64Download(res.convertedBase64, title, dstExt);
+        let res = null;
+        let failure = "";
+        try {
+          res = await invokeIpc(
+            "convert_document_format",
+            JSON.stringify({ sourceFormat: srcExt, targetFormat: dstExt, title, ...content })
+          );
+        } catch (err) {
+          failure = err?.message || String(err);
         }
-        if (fb && res) {
+        const b64 = String(res?.convertedBase64 || res?.converted_base64 || "");
+        if (!failure && !b64) failure = "변환 결과가 비어 있습니다";
+        if (!failure && !triggerBase64Download(b64, title, dstExt)) failure = "파일 다운로드를 시작하지 못했습니다";
+        if (failure) {
+          if (fb) fb.textContent = "문서 저장 실패 (" + dstExt.toUpperCase() + "): " + failure;
+          return false;
+        }
+        if (fb) {
           fb.textContent =
-            "문서 저장 완료 (" +
-            dstExt.toUpperCase() +
-            " · " +
-            (res.outputBytes || 0) +
-            "B · " +
-            describeConversionSpec(res) +
-            ")";
+            "문서 저장 완료 (" + title + "." + dstExt.toLowerCase() + " · " + (res.outputBytes || 0) + "B · " +
+            describeConversionSpec(res) + ")";
         }
+        return true;
       });
     }
 
@@ -334,11 +283,11 @@
     async function runModuleSecurityAudit(targetMod) {
       const effectiveMod = targetMod || getActiveModule();
       const ext = resolveModuleContainerExt(effectiveMod);
-      const body = buildStructuredConversionBody(effectiveMod === "CONV" ? ext : effectiveMod);
+      const content = buildConversionContent(effectiveMod === "CONV" ? ext : effectiveMod);
       const title = "SecurityAudit_" + effectiveMod;
       const convRes = await invokeIpc(
         "convert_document_format",
-        JSON.stringify({ sourceFormat: ext, targetFormat: ext, title, body })
+        JSON.stringify({ sourceFormat: ext, targetFormat: ext, title, ...content })
       );
       const containerBase64 = String(convRes?.convertedBase64 || convRes?.converted_base64 || "");
       return await invokeIpc("audit_security", JSON.stringify({ fileName: title + "." + ext, containerBase64 }));
@@ -970,7 +919,7 @@
     }
 
     return {
-      resolveSourceScopeKind, buildStructuredConversionBody, triggerBase64Download, describeConversionSpec, saveActiveModuleDocument,
+      resolveSourceScopeKind, buildConversionContent, resolveSaveFileBase, triggerBase64Download, describeConversionSpec, saveActiveModuleDocument,
       computeSmartStats, applySmartDiagnoseDom, runSmartDiagnoseAction, runModuleSecurityAudit,
       fetchSecurityAuditOutcome, applySecurityAuditDom, runSecurityAuditAction, runBenchmarkAction,
       runPiiScrubAction, setupStudioChromeControls,

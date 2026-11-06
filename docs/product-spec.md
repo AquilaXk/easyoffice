@@ -19,6 +19,7 @@
 - **PPTX/PPSX**: 테마(`ppt/theme/theme1.xml`), 마스터 `p:clrMap`, 도형 비시각 속성(`p:nvSpPr`/`p:spPr`/`p:txBody`)을 포함하고, 슬라이드 제목은 제목 개체 틀, 발표자 노트는 노트 슬라이드, 문서 제목은 `docProps/core.xml`에 저장합니다.
 - **HWPX/HWTX**: `mimetype`(첫 엔트리, 무압축), `version.xml`, `settings.xml`, 글꼴·글자/문단 모양·스타일을 정의한 `header.xml`, 첫 문단 `hp:secPr`, `paraPrIDRef`/`charPrIDRef` 참조, `hp:p > hp:run > hp:tbl` 표 구조를 기록합니다.
 - **DOCX**: 제목은 `docProps/core.xml`에 기록하고 표마다 `w:tblPr`·`w:tblGrid`를 둡니다.
+- **WebUI 저장 서식 보존 (`PD-073`)**: 문서·한글 저장은 문단 런 서식(굵게·기울임·밑줄·취소선), 문단 정렬·제목 수준·목록과 문서 내 위치의 표를 구조화 블록으로 보내며, DOCX(`w:rPr`/`w:pPr`/`w:pStyle` 제목 스타일), HWPX(`charPr`/`paraPr`/`개요 N` 스타일), ODT·RTF·Markdown은 각 형식의 서식으로 기록합니다. 표 수식 셀(`=SUM(ABOVE)` 등)은 계산값으로 저장하고, 발신 기관 명칭을 임의로 넣지 않습니다. 시트 저장은 모든 시트를 담고, 변환 결과가 없거나 내려받기에 실패하면 "문서 저장 실패"를 표시하며, 파일명은 문서 탭 제목(Windows/macOS 금지 문자·예약 이름 정리)을 따릅니다. 글꼴 이름·크기·색상은 아직 저장하지 않습니다.
 - **PDF**: 한글은 사전 정의 CJK 글꼴 참조(`HYGoThic-Medium`, `Adobe-Korea1`, `UniKS-UCS2-H`)로 기록하여 뷰어가 설치된 한글 글꼴로 표시하며, 비ASCII `/Title`은 BOM을 붙인 UTF-16BE로 기록합니다.
 - **CSV/TSV**: 출력에 UTF-8 BOM을 붙이고, 입력의 BOM은 제거하여 읽습니다.
 - **DOC/PPT 쓰기 호환성 제한**: `.doc`/`.ppt` 출력은 EasyOffice가 다시 읽을 수 있는 OLE2 스트림 하위 집합이며(`.doc`: `1Table`/`0Table` 없음, `.ppt`: `Current User`·persist directory 없음) 다른 프로그램에서 열리지 않을 수 있습니다. 변환 응답은 `"compatibility":"limited"`와 `"compatibilityWarning"`을 반환하고 변환 결과·저장 상태 메시지에 경고를 표시합니다. 호환 저장에는 `.docx`/`.pptx`를 사용합니다(규격 바이너리 작성기는 #112).
