@@ -136,8 +136,29 @@
       return w;
     }
 
-    function hasLayout(vp) {
-      return Boolean(vp) && vp.clientHeight > 0 && vp.clientWidth > 0;
+    // Custom column widths of every sheet as `{ [sheet]: { [1-based column]: px } }` (a copy), and the
+    // inverse used when a file is opened (PD-089). Widths are clamped like a manual resize.
+    function getAllWidths() {
+      const out = {};
+      Object.keys(widthsBySheet).forEach((name) => {
+        if (Object.keys(widthsBySheet[name]).length > 0) out[name] = { ...widthsBySheet[name] };
+      });
+      return out;
+    }
+
+    function replaceAllWidths(bySheet) {
+      Object.keys(widthsBySheet).forEach((name) => delete widthsBySheet[name]);
+      Object.keys(bySheet || {}).forEach((name) => {
+        const next = {};
+        Object.keys(bySheet[name] || {}).forEach((c) => {
+          const w = Math.max(MIN_COL_W, Math.min(MAX_COL_W, Math.round(Number(bySheet[name][c]))));
+          if (Number.isFinite(w) && w !== DEFAULT_COL_W) next[Number(c)] = w;
+        });
+        widthsBySheet[name] = next;
+      });
+    }
+
+    function hasLayout(vp) {      return Boolean(vp) && vp.clientHeight > 0 && vp.clientWidth > 0;
     }
 
     function computeView() {
@@ -350,7 +371,8 @@
       if (!force && sameCols && sameRows) return false;
       if (willDropFocus(next, sameCols) && hooks.beforeStructuralChange) hooks.beforeStructuralChange();
       view = next;
-      if (!sameCols) rebuildHead(headRow, next);
+      // A forced render also rebuilds the header: column widths are per sheet (tab switch, file open).
+      if (!sameCols || force) rebuildHead(headRow, next);
 
       const existing = new Map();
       Array.from(tbody.children).forEach((tr) => {
@@ -446,6 +468,8 @@
       colLeft,
       colAtX,
       applyColWidth,
+      getAllWidths,
+      replaceAllWidths,
       renderWindow,
       refreshCells,
       ensureVisible,
