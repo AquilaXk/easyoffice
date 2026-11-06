@@ -5,7 +5,7 @@ use easyoffice_layout::{
 };
 use easyoffice_sheet::{
     ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PackedCellCoordinate,
-    WorkbookEngine,
+    WorkbookEngine, WorkbookEvalTarget,
 };
 
 pub mod benchmark;
@@ -13,10 +13,13 @@ pub mod cli_args;
 mod convert_ipc;
 pub mod ffi;
 pub mod http_server;
+mod pii_identifiers;
 pub mod ribbon;
 mod ribbon_session;
 mod security_ipc;
 pub mod self_test;
+#[cfg(test)]
+mod sheet_ipc_tests;
 pub mod smart_tools;
 
 pub use benchmark::*;
@@ -126,22 +129,6 @@ impl EasyOfficeIpcRouter {
         }
     }
 
-    fn is_formula_expr(expr: &str) -> bool {
-        let s = expr.trim_start();
-        if s.starts_with('=') {
-            return true;
-        }
-        if let Some((prefix, rest)) = s.split_once(':') {
-            if prefix.eq_ignore_ascii_case("of")
-                || prefix.eq_ignore_ascii_case("oooc")
-                || prefix.eq_ignore_ascii_case("msoxl")
-            {
-                return rest.trim_start().starts_with('=');
-            }
-        }
-        false
-    }
-
     pub(crate) fn parse_rpc_json_object(
         payload: &str,
     ) -> Result<Vec<(String, StrictJsonValue)>, EasyOfficeError> {
@@ -206,7 +193,6 @@ impl EasyOfficeIpcRouter {
     fn build_workbook_from_json_entries(
         entries: &[(String, StrictJsonValue)],
         default_sheet: &str,
-        seed_defaults: bool,
     ) -> Result<WorkbookEngine, EasyOfficeError> {
         let mut wb = WorkbookEngine::new();
         let explicit_sheets_val = StrictJsonValue::get_field(entries, "sheets");
@@ -229,15 +215,9 @@ impl EasyOfficeIpcRouter {
                 }
                 wb.add_sheet(s_name);
             }
-        } else {
-            wb.add_sheet("Sheet1");
-            wb.add_sheet("Sheet2");
-            if !default_sheet.trim().is_empty() {
-                wb.add_sheet(default_sheet);
-            }
+        } else if !default_sheet.trim().is_empty() {
+            wb.add_sheet(default_sheet);
         }
-        let mut seen_sheet1 = false;
-        let mut seen_sheet2 = false;
         let mut cell_triples: Vec<(String, String, String)> = Vec::new();
         if let Some(cells_val) = StrictJsonValue::get_field(entries, "cells") {
             let cells = cells_val.as_array().ok_or_else(|| {
@@ -270,22 +250,7 @@ impl EasyOfficeIpcRouter {
                         )
                     })?,
                 };
-                if WorkbookEngine::is_same_sheet_identity(sh, "Sheet1") {
-                    seen_sheet1 = true;
-                }
-                if WorkbookEngine::is_same_sheet_identity(sh, "Sheet2") {
-                    seen_sheet2 = true;
-                }
                 cell_triples.push((sh.to_string(), addr.to_string(), val));
-            }
-        }
-        if seed_defaults {
-            if !seen_sheet1 && wb.sheet("Sheet1").is_some() {
-                wb.set_cell("Sheet1", "A1", "1200")?;
-                wb.set_cell("Sheet1", "B1", "850")?;
-            }
-            if !seen_sheet2 && wb.sheet("Sheet2").is_some() {
-                wb.set_cell("Sheet2", "A1", "100")?;
             }
         }
         let has_explicit_sheets = explicit_sheets_val.is_some();
@@ -310,7 +275,7 @@ impl EasyOfficeIpcRouter {
         let default_sh_owned = Self::resolve_default_sheet_from_entries(&entries)?;
         let default_sh = default_sh_owned.as_str();
         let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
-        let wb = Self::build_workbook_from_json_entries(&entries, default_sh, false)?;
+        let wb = Self::build_workbook_from_json_entries(&entries, default_sh)?;
         if let Some(targets_val) = StrictJsonValue::get_field(&entries, "targets") {
             let targets = targets_val.as_array().ok_or_else(|| {
                 EasyOfficeError::InvalidArgument(
@@ -318,11 +283,8 @@ impl EasyOfficeIpcRouter {
                 )
             })?;
             if !targets.is_empty() {
-                let mut first_expr = "A1".to_string();
-                let mut first_eval = EvaluatedCellValue::Empty;
-                let mut values_entries = Vec::with_capacity(targets.len());
-                let mut target_values_entries = Vec::with_capacity(targets.len());
-                for (idx, item) in targets.iter().enumerate() {
+                let mut requests: Vec<(&str, &str)> = Vec::with_capacity(targets.len());
+                for item in targets {
                     let t_entries = item.as_object().ok_or_else(|| {
                         EasyOfficeError::InvalidArgument(
                             "JSON 'targets' 항목은 객체여야 합니다.".to_string(),
@@ -341,13 +303,21 @@ impl EasyOfficeIpcRouter {
                                 .to_string(),
                         ));
                     }
-                    let val = if Self::is_formula_expr(expr) {
-                        wb.evaluate_formula_on_sheet_at(sh, anchor_coord, expr)
-                    } else {
-                        wb.evaluate_cell(sh, expr)
-                    };
-                    let display = val.to_display_string();
-                    let escaped_display = Self::escape_json_str(&display);
+                    requests.push((sh, expr));
+                }
+                let eval_targets: Vec<WorkbookEvalTarget<'_>> = requests
+                    .iter()
+                    .map(|&(sheet, expr)| WorkbookEvalTarget {
+                        sheet,
+                        expr,
+                        anchor: anchor_coord,
+                    })
+                    .collect();
+                let batch = wb.evaluate_targets(&eval_targets);
+                let mut values_entries = Vec::with_capacity(requests.len());
+                let mut target_values_entries = Vec::with_capacity(requests.len());
+                for (&(sh, expr), val) in requests.iter().zip(&batch.values) {
+                    let escaped_display = Self::escape_json_str(&val.to_display_string());
                     values_entries.push(format!(
                         "\"{}!{}\":\"{}\"",
                         Self::escape_json_str(sh),
@@ -355,21 +325,20 @@ impl EasyOfficeIpcRouter {
                         escaped_display
                     ));
                     target_values_entries.push(format!("\"{escaped_display}\""));
-                    if idx == 0 {
-                        first_expr = expr.to_string();
-                        first_eval = val;
-                    }
                 }
-                let cf_match = rule.matches(&first_eval, &[]);
-                let dv_valid = dv_rule.validate(&first_eval);
+                let first_expr = requests[0].1;
+                let first_eval = &batch.values[0];
+                let cf_match = rule.matches(first_eval, &[]);
+                let dv_valid = dv_rule.validate(first_eval);
                 return Ok(format!(
-                    "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"conditionalMatch\":{},\"validationPassed\":{}}}",
-                    Self::escape_json_str(&first_expr),
+                    "{{\"query\":\"{}\",\"value\":\"{}\",\"values\":{{{}}},\"targetValues\":[{}],\"conditionalMatch\":{},\"validationPassed\":{},\"circular\":{}}}",
+                    Self::escape_json_str(first_expr),
                     Self::escape_json_str(&first_eval.to_display_string()),
                     values_entries.join(","),
                     target_values_entries.join(","),
                     cf_match,
-                    dv_valid
+                    dv_valid,
+                    batch.circular
                 ));
             }
         }
@@ -384,23 +353,41 @@ impl EasyOfficeIpcRouter {
             Some(s) => s,
             None => default_cell_label.as_str(),
         };
-        let evaluated = if Self::is_formula_expr(expr) {
-            wb.evaluate_formula_on_sheet_at(default_sh, anchor_coord, expr)
-        } else {
-            wb.evaluate_cell(default_sh, expr)
-        };
+        let (evaluated, circular) =
+            Self::evaluate_single_target(&wb, default_sh, anchor_coord, expr);
         let cf_match = rule.matches(&evaluated, &[]);
         let dv_valid = dv_rule.validate(&evaluated);
         let display_val = evaluated.to_display_string();
         let escaped_display = Self::escape_json_str(&display_val);
         Ok(format!(
-            "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"conditionalMatch\":{3},\"validationPassed\":{4}}}",
+            "{{\"query\":\"{0}\",\"value\":\"{1}\",\"values\":{{\"{2}!{0}\":\"{1}\"}},\"targetValues\":[\"{1}\"],\"conditionalMatch\":{3},\"validationPassed\":{4},\"circular\":{5}}}",
             Self::escape_json_str(expr),
             escaped_display,
             Self::escape_json_str(default_sh),
             cf_match,
-            dv_valid
+            dv_valid,
+            circular
         ))
+    }
+
+    fn evaluate_single_target(
+        wb: &WorkbookEngine,
+        sheet: &str,
+        anchor: Option<PackedCellCoordinate>,
+        expr: &str,
+    ) -> (EvaluatedCellValue, bool) {
+        let batch = wb.evaluate_targets(&[WorkbookEvalTarget {
+            sheet,
+            expr,
+            anchor,
+        }]);
+        let circular = batch.circular;
+        let value = batch
+            .values
+            .into_iter()
+            .next()
+            .unwrap_or(EvaluatedCellValue::Empty);
+        (value, circular)
     }
 
     fn handle_compute_layout(payload: &str) -> Result<String, EasyOfficeError> {
@@ -696,21 +683,21 @@ impl EasyOfficeIpcRouter {
         let active_sheet_owned = Self::resolve_default_sheet_from_entries(&entries)?;
         let active_sheet = active_sheet_owned.as_str();
         let anchor_coord = Self::resolve_optional_anchor_coord(&entries)?;
+        let default_cell_label = anchor_coord
+            .map(PackedCellCoordinate::to_a1)
+            .unwrap_or_else(|| "A1".to_string());
         let expr = Self::optional_json_str(&entries, "expr")?
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or("=Sheet2!A1+50")
-            .trim();
-        let wb = Self::build_workbook_from_json_entries(&entries, active_sheet, true)?;
-        let val = if Self::is_formula_expr(expr) {
-            wb.evaluate_formula_on_sheet_at(active_sheet, anchor_coord, expr)
-        } else {
-            wb.evaluate_cell(active_sheet, expr)
-        };
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(default_cell_label.as_str());
+        let wb = Self::build_workbook_from_json_entries(&entries, active_sheet)?;
+        let (val, circular) = Self::evaluate_single_target(&wb, active_sheet, anchor_coord, expr);
         Ok(format!(
-            "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\"}}",
+            "{{\"sheet\":\"{}\",\"formula\":\"{}\",\"value\":\"{}\",\"circular\":{}}}",
             Self::escape_json_str(active_sheet),
             Self::escape_json_str(expr),
-            Self::escape_json_str(&val.to_display_string())
+            Self::escape_json_str(&val.to_display_string()),
+            circular
         ))
     }
 

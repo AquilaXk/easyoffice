@@ -195,21 +195,17 @@ impl CellRange {
         start: PackedCellCoordinate,
         end: PackedCellCoordinate,
     ) -> Result<Self, EasyOfficeError> {
-        let min_r = start.row().min(end.row());
-        let max_r = start.row().max(end.row());
-        let min_c = start.col().min(end.col());
-        let max_c = start.col().max(end.col());
-        let rows = (max_r - min_r + 1) as usize;
-        let cols = (max_c - min_c + 1) as usize;
-        let count = rows.saturating_mul(cols);
-        let is_whole_col = min_r == 0 && max_r == PackedCellCoordinate::MAX_ROWS - 1 && cols <= 256;
-        let is_whole_row = min_c == 0 && max_c == PackedCellCoordinate::MAX_COLS - 1 && rows <= 256;
-        let is_1d_strip = rows == 1 || cols == 1;
-        if count > Self::MAX_EXPANDED_CELL_COUNT && !is_whole_col && !is_whole_row && !is_1d_strip {
-            return Err(EasyOfficeError::InvalidArgument(format!(
-                "셀 범위 확장 개수({count})가 상한({})을 초과했습니다.",
-                Self::MAX_EXPANDED_CELL_COUNT
-            )));
+        // Range references up to the full 1,048,576 x 16,384 grid are valid references.
+        // Aggregates stream only populated cells; materialization is bounded by `expand()`
+        // (`MAX_EXPANDED_CELL_COUNT`) and dense walks by the evaluation step budget.
+        if start.row() >= PackedCellCoordinate::MAX_ROWS
+            || end.row() >= PackedCellCoordinate::MAX_ROWS
+            || start.col() >= PackedCellCoordinate::MAX_COLS
+            || end.col() >= PackedCellCoordinate::MAX_COLS
+        {
+            return Err(EasyOfficeError::InvalidArgument(
+                "셀 범위가 시트 경계를 벗어났습니다.".to_string(),
+            ));
         }
         Ok(Self { start, end })
     }
@@ -285,6 +281,8 @@ pub enum FormulaError {
     DivByZero,
     Value,
     Ref,
+    /// Circular reference. Displayed and serialized as the standard `#NUM!` literal
+    /// (no `#CYCLE!` in ECMA-376); the distinct variant lets hosts flag the cycle separately.
     Cycle,
     Name,
     Na,
@@ -297,7 +295,7 @@ impl FormulaError {
             Self::DivByZero => "#DIV/0!",
             Self::Value => "#VALUE!",
             Self::Ref => "#REF!",
-            Self::Cycle => "#CYCLE!",
+            Self::Cycle => "#NUM!",
             Self::Name => "#NAME?",
             Self::Na => "#N/A",
             Self::Num => "#NUM!",

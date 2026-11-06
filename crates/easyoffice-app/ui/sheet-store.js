@@ -141,7 +141,7 @@
       });
 
       if (rpcTargets.length === 0) {
-        return { sheets, extraValue: "" };
+        return { sheets, extraValue: "", circular: false };
       }
 
       const rpcPayload = JSON.stringify({
@@ -189,7 +189,7 @@
           extraValue = sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "";
         }
       }
-      return { sheets, extraValue };
+      return { sheets, extraValue, circular: rpcRes?.circular === true };
     }
 
     async function evaluateLiveFormulaTargets(sheetsMap, defaultSheet) {

@@ -203,13 +203,18 @@ pub struct PiiAuditResult {
     pub masked_resident_ids: usize,
     pub masked_phone_numbers: usize,
     pub masked_emails: usize,
+    /// Card, bank account, passport, driver's licence, and business registration numbers.
+    pub masked_identifier_numbers: usize,
     pub spans: Vec<PiiReplacementSpan>,
     pub stripped_metadata_fields: Vec<String>,
 }
 
 impl PiiAuditResult {
     pub fn total_masked_count(&self) -> usize {
-        self.masked_resident_ids + self.masked_phone_numbers + self.masked_emails
+        self.masked_resident_ids
+            + self.masked_phone_numbers
+            + self.masked_emails
+            + self.masked_identifier_numbers
     }
 }
 
@@ -234,6 +239,7 @@ impl DocumentSecurityAuditor {
         let mut masked_resident_ids = 0usize;
         let mut masked_phone_numbers = 0usize;
         let mut masked_emails = 0usize;
+        let mut masked_identifier_numbers = 0usize;
         let mut spans: Vec<PiiReplacementSpan> = Vec::new();
         let mut idx = 0usize;
         let mut utf16_pos = 0usize;
@@ -288,6 +294,20 @@ impl DocumentSecurityAuditor {
                 utf16_pos += matched_len;
                 continue;
             }
+            if let Some(matched_len) = crate::pii_identifiers::match_identifier_at(bytes, idx) {
+                let replacement =
+                    crate::pii_identifiers::mask_identifier(&text[idx..idx + matched_len]);
+                scrubbed_text.push_str(&replacement);
+                spans.push(PiiReplacementSpan {
+                    start_utf16: utf16_pos,
+                    end_utf16: utf16_pos + matched_len,
+                    replacement,
+                });
+                masked_identifier_numbers += 1;
+                idx += matched_len;
+                utf16_pos += matched_len;
+                continue;
+            }
             let ch = text[idx..].chars().next().unwrap();
             scrubbed_text.push(ch);
             idx += ch.len_utf8();
@@ -305,6 +325,7 @@ impl DocumentSecurityAuditor {
             masked_resident_ids,
             masked_phone_numbers,
             masked_emails,
+            masked_identifier_numbers,
             spans,
             stripped_metadata_fields,
         }
@@ -700,8 +721,7 @@ mod tests {
                 _ => panic!("missing expectedRustJsMasked for {id}"),
             };
             let audit = DocumentSecurityAuditor::scan_and_scrub_pii(input);
-            let total_masked =
-                audit.masked_resident_ids + audit.masked_phone_numbers + audit.masked_emails;
+            let total_masked = audit.total_masked_count();
             assert_eq!(
                 total_masked, expected_count,
                 "count mismatch on vector {id}"

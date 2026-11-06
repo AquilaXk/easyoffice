@@ -394,21 +394,24 @@ mod tests {
             r#"{"sheet":"Sheet1","expr":"=Sheet2!A1+50","cells":[{"sheet":"Sheet1","cell":"A1","value":500}]}"#,
         )
         .unwrap();
-        assert!(default_sheet2_json.contains("\"value\":\"150\""));
+        assert!(
+            default_sheet2_json.contains("\"value\":\"#REF!\""),
+            "no demo Sheet2 is seeded: {default_sheet2_json}"
+        );
 
         let direct_sheet2_default = EasyOfficeIpcRouter::dispatch(
             "evaluate_workbook_formula",
             r#"{"sheet":"Sheet2","expr":"=A1+50","cells":[]}"#,
         )
         .unwrap();
-        assert!(direct_sheet2_default.contains("\"value\":\"150\""));
+        assert!(direct_sheet2_default.contains("\"value\":\"50\""));
 
         let cleared_sheet2_ui = EasyOfficeIpcRouter::dispatch(
             "evaluate_sheet",
             r#"{"sheet":"Sheet1","expr":"=Sheet2!A1+50","cells":[{"sheet":"Sheet1","cell":"A1","value":500}]}"#,
         )
         .unwrap();
-        assert!(cleared_sheet2_ui.contains("\"value\":\"50\""));
+        assert!(cleared_sheet2_ui.contains("\"value\":\"#REF!\""));
 
         for cmd in ["evaluate_workbook_formula", "evaluate_sheet"] {
             let cross1 = EasyOfficeIpcRouter::dispatch(

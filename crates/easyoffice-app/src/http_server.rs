@@ -22,7 +22,11 @@ const RIBBON_HISTORY_JS: &str = include_str!("../ui/ribbon-history.js");
 const APP_JS: &str = include_str!("../ui/app.js");
 const FAVICON_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#5C6BC0\"/><path d=\"M9 7h10l4 4v14H9V7z\" fill=\"#FFFFFF\"/><path d=\"M19 7v4h4\" fill=\"#DDE2F6\"/><rect x=\"12\" y=\"14\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/><rect x=\"12\" y=\"18\" width=\"8\" height=\"1.8\" fill=\"#5C6BC0\"/></svg>";
 
+/// Body ceiling for static routes and the request-header block.
 pub const MAX_HTTP_BODY_BYTES: usize = 1_048_576;
+/// Body ceiling for `POST /api/ipc`: the WebUI sends whole workbooks on recalculation
+/// (20,000 numbers + 4,000 formulas is about 1.4 MB), so IPC gets a bounded 16 MiB budget.
+pub const MAX_IPC_HTTP_BODY_BYTES: usize = 16 * 1_048_576;
 pub const MAX_CONCURRENT_HTTP_THREADS: usize = 32;
 pub const MAX_CONNECTION_DURATION: Duration = Duration::from_secs(3);
 
@@ -131,7 +135,7 @@ fn write_http_413(stream: &mut TcpStream) {
         stream,
         "413 Payload Too Large",
         "application/json; charset=utf-8",
-        "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(1MB)를 초과했습니다.\"}",
+        "{\"status\":\"payload_too_large\",\"message\":\"HTTP 본문 크기가 허용 한도(IPC 16MiB, 기타 1MiB)를 초과했습니다.\"}",
     );
 }
 
@@ -151,7 +155,7 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
     let _ = stream.set_write_timeout(Some(Duration::from_millis(1500)));
 
     let mut buf = Vec::with_capacity(8192);
-    let mut chunk = [0u8; 4096];
+    let mut chunk = vec![0u8; 64 * 1024];
     let header_end = loop {
         if !apply_remaining_read_timeout(stream, deadline) {
             return;
@@ -179,6 +183,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
     let mut parts = req_line.split_whitespace();
     let method = parts.next().unwrap_or("GET");
     let path = parts.next().unwrap_or("/");
+    let body_limit = if method == "POST" && path == "/api/ipc" {
+        MAX_IPC_HTTP_BODY_BYTES
+    } else {
+        MAX_HTTP_BODY_BYTES
+    };
 
     let mut content_length = 0usize;
     let mut host_header: Option<String> = None;
@@ -188,7 +197,7 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             let key = k.trim();
             if key.eq_ignore_ascii_case("content-length") {
                 match v.trim().parse::<usize>() {
-                    Ok(raw_len) if raw_len <= MAX_HTTP_BODY_BYTES => {
+                    Ok(raw_len) if raw_len <= body_limit => {
                         content_length = raw_len;
                     }
                     _ => {
@@ -230,6 +239,13 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
         }
     }
 
+    // Grow toward the declared length as bytes arrive; never pre-commit the full IPC budget
+    // for a client that has only sent headers.
+    buf.reserve(
+        (header_end + content_length)
+            .saturating_sub(buf.len())
+            .min(MAX_HTTP_BODY_BYTES),
+    );
     while buf.len() < header_end + content_length {
         if !apply_remaining_read_timeout(stream, deadline) {
             return;
@@ -238,7 +254,7 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             Ok(0) | Err(_) => return,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                if buf.len() > header_end + MAX_HTTP_BODY_BYTES {
+                if buf.len() > header_end + body_limit {
                     write_http_413(stream);
                     return;
                 }

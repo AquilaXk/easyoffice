@@ -43,7 +43,11 @@ public enum DocumentSecurityAuditor {
         "[주민등록번호 비식별]"
       ),
       ("운전면허번호", #"(?<![0-9])\d{2}-\d{2}-\d{6}-\d{2}(?![0-9])"#, "[운전면허 비식별]"),
-      ("여권번호", #"(?<![A-Za-z0-9])(?:[MSRGD]\d{8}|[A-Z]{2}\d{7})(?![A-Za-z0-9])"#, "[여권번호 비식별]"),
+      (
+        "여권번호",
+        #"(?<![A-Za-z0-9])(?:[MSRODG]\d{8}|[MSRODG]\d{3}[A-Z]\d{4}|[A-Z]{2}\d{7})(?![A-Za-z0-9])"#,
+        "[여권번호 비식별]"
+      ),
       ("신용카드번호", #"(?<![0-9])(?:\d{4}[-\s]){3}\d{4}(?![0-9])"#, "[카드번호 비식별]"),
       (
         "전화번호",
@@ -56,6 +60,11 @@ public enum DocumentSecurityAuditor {
         "[이메일 비식별]"
       ),
       ("사업자/법인등록번호", #"(?<![0-9])\d{3}-\d{2}-\d{5}(?![0-9])"#, "[사업자번호 비식별]"),
+      (
+        "계좌번호",
+        #"(?<![0-9])(?:\d{3}-\d{2}-\d{6}|\d{3}-\d{3}-\d{6}|\d{3}-\d{6}-\d{3}|\d{3}-\d{6}-\d{5}|\d{4}-\d{3}-\d{6}|\d{4}-\d{2}-\d{7}|\d{6}-\d{2}-\d{6}|\d{3}-\d{4}-\d{4}-\d{2}|\d{3}-\d{6}-\d{2}-\d{3})(?![0-9])"#,
+        "[계좌번호 비식별]"
+      ),
       (
         "IPv4주소",
         #"(?<![0-9])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![0-9])"#,
@@ -73,6 +82,45 @@ public enum DocumentSecurityAuditor {
     }
   }()
 
+  /// Contiguous 13-19 digit card candidates (network digit 2-6 or 9); kept only when the Luhn checksum passes.
+  private static let contiguousCardCandidateRegex: NSRegularExpression? = try? NSRegularExpression(
+    pattern: #"(?<![0-9])[2-69][0-9]{12,18}(?![0-9])"#, options: [])
+
+  static func passesLuhnChecksum(_ digits: String) -> Bool {
+    var sum = 0
+    var doubleNext = false
+    for ch in digits.reversed() {
+      guard let value = ch.wholeNumberValue else { return false }
+      if doubleNext {
+        let doubled = value * 2
+        sum += doubled > 9 ? doubled - 9 : doubled
+      } else {
+        sum += value
+      }
+      doubleNext = !doubleNext
+    }
+    return sum % 10 == 0
+  }
+
+  private static func maskLuhnValidCardNumbers(in text: String) -> (masked: String, matchCount: Int) {
+    guard let regex = contiguousCardCandidateRegex, !text.isEmpty else { return (text, 0) }
+    let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+    var out = ""
+    var cursor = text.startIndex
+    var count = 0
+    for match in regex.matches(in: text, options: [], range: nsRange) {
+      guard let range = Range(match.range, in: text) else { continue }
+      guard passesLuhnChecksum(String(text[range])) else { continue }
+      out.append(contentsOf: text[cursor..<range.lowerBound])
+      out.append("[카드번호 비식별]")
+      cursor = range.upperBound
+      count += 1
+    }
+    guard count > 0 else { return (text, 0) }
+    out.append(contentsOf: text[cursor..<text.endIndex])
+    return (out, count)
+  }
+
   public static func detectSensitivePatterns(in text: String) -> [String] {
     guard !text.isEmpty else { return [] }
     let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
@@ -82,6 +130,10 @@ public enum DocumentSecurityAuditor {
       if !matches.isEmpty {
         findings.append("\(rule.label) (\(matches.count)건)")
       }
+    }
+    let luhnCardCount = maskLuhnValidCardNumbers(in: text).matchCount
+    if luhnCardCount > 0 {
+      findings.append("신용카드번호(연속) (\(luhnCardCount)건)")
     }
     return findings
   }
@@ -98,6 +150,11 @@ public enum DocumentSecurityAuditor {
         current = rule.regex.stringByReplacingMatches(
           in: current, options: [], range: nsRange, withTemplate: rule.mask)
       }
+    }
+    let (luhnMasked, luhnCount) = maskLuhnValidCardNumbers(in: current)
+    if luhnCount > 0 {
+      totalMatches += luhnCount
+      current = luhnMasked
     }
     return (current, totalMatches)
   }

@@ -427,7 +427,7 @@
       return null;
     }
 
-    function evaluateSingleDocExpr(doc, seedDefaults) {
+    function evaluateSingleDocExpr(doc) {
       const sheetName = resolveDefaultSheetFromDocJs(doc);
       const explicitAnchor = resolveOptionalAnchorCell(doc);
       const anchorCell = explicitAnchor || "A1";
@@ -436,32 +436,30 @@
         throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
       }
       const fallbackCell = explicitAnchor || "A1";
-      const defaultQuery = seedDefaults ? "=Sheet2!A1+50" : fallbackCell;
+      const defaultQuery = fallbackCell;
       const chosenQuery = rawExpr === undefined || rawExpr === null ? defaultQuery : rawExpr;
       const q = String(chosenQuery).trim() || defaultQuery;
-      const workbook = buildLocalWorkbookFromJson(doc, sheetName, seedDefaults);
+      const workbook = buildLocalWorkbookFromJson(doc, sheetName);
       const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
       if (!evalSheetUpper) {
-        return { sheetName, expr: q, value: "#REF!" };
+        return { sheetName, expr: q, value: "#REF!", circular: false };
       }
       if (isFormulaStringJs(q)) {
         return {
           sheetName,
           expr: q,
           value: String(evaluateFormulaExpression(q, workbook, evalSheetUpper, anchorCell)),
+          circular: workbook.circular,
         };
       }
-      return {
-        sheetName,
-        expr: q,
-        value: formatFormulaValue(readWorkbookTypedCell(workbook, evalSheetUpper, q, 0)),
-      };
+      const cellValue = formatFormulaValue(readWorkbookTypedCell(workbook, evalSheetUpper, q, 0));
+      return { sheetName, expr: q, value: cellValue, circular: workbook.circular };
     }
 
     function evaluateLocalWorkbookFormulaRpc(payload) {
       const doc = parseRequiredRpcJsonObject(payload);
-      const res = evaluateSingleDocExpr(doc, true);
-      return { sheet: res.sheetName, formula: res.expr, value: res.value };
+      const res = evaluateSingleDocExpr(doc);
+      return { sheet: res.sheetName, formula: res.expr, value: res.value, circular: res.circular };
     }
 
     function evaluateLocalSheetRpc(payload) {
@@ -474,7 +472,7 @@
           throw new Error("InvalidArgument: JSON 'targets' 필드는 배열이어야 합니다.");
         }
         if (doc.targets.length > 0) {
-          const workbook = buildLocalWorkbookFromJson(doc, defaultSheet, false);
+          const workbook = buildLocalWorkbookFromJson(doc, defaultSheet);
           const outMap = {};
           const targetValues = [];
           let firstExpr = "A1";
@@ -505,15 +503,22 @@
               firstVal = val;
             }
           });
-          return { query: firstExpr, value: firstVal, values: outMap, targetValues };
+          return {
+            query: firstExpr,
+            value: firstVal,
+            values: outMap,
+            targetValues,
+            circular: workbook.circular,
+          };
         }
       }
-      const single = evaluateSingleDocExpr(doc, false);
+      const single = evaluateSingleDocExpr(doc);
       return {
         query: single.expr,
         value: single.value,
         values: { [single.sheetName + "!" + single.expr]: single.value },
         targetValues: [single.value],
+        circular: single.circular,
       };
     }
 
@@ -701,7 +706,7 @@
       evaluate_workbook_formula: (payload) => evaluateLocalWorkbookFormulaRpc(payload),
       evaluate_sheet: (payload) => evaluateLocalSheetRpc(payload),
       evaluate_sheet_formula: (payload) => ({
-        value: evaluateSingleDocExpr(parseRequiredRpcJsonObject(payload), false).value,
+        value: evaluateSingleDocExpr(parseRequiredRpcJsonObject(payload)).value,
       }),
       audit_security: (payload) => localAuditSecurity(payload),
       switch_ribbon_style: (payload) => {
