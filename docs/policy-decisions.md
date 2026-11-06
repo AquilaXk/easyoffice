@@ -787,7 +787,7 @@
   4. **Linux 플랫폼 식별자, macOS 20종 확장자 `Info.plist` 검증 및 진실한 Windows 프리뷰 패키징 (`crates/easyoffice-layout/src/lib.rs`, `scripts/{package-macos-release.sh,verify-macos-plist.mjs}`, `.github/workflows/{ci.yml,release.yml}`)**
      - `DesktopPlatform::LinuxWebView`를 추가하여 Linux 빌드에서 정확한 플랫폼 레이블(`Linux (WebKitGTK)`)과 단축키 수식어(`Ctrl`)를 반환합니다.
      - `scripts/package-macos-release.sh`는 비시스템 확장자가 `LSItemContentTypes`에 가려지지 않도록 `CFBundleDocumentTypes`를 분리 구성하고 `scripts/verify-macos-plist.mjs`로 20종 전체 확장자 매핑을 검증하며, 애드혹 서명 번들의 Gatekeeper 격리 속성 해제 명령을 문서화합니다.
-     - 미사용 데스크톱 번들 설정 파일을 삭제하고, `.github/workflows/release.yml`은 최소 권한(`contents: read`, 발행 잡만 `contents: write`), 정확한 커밋 SHA 바인딩(`--target`), Windows CLI 및 루프백 WebUI 프리뷰 아카이브(`EasyOffice-<version>-windows-x64-cli-serve-preview.zip`)와 PowerShell `--serve` CSP 스모크 테스트를 수행합니다.
+     - 미사용 데스크톱 번들 설정 파일을 삭제하고, `.github/workflows/release.yml`은 최소 권한(`contents: read`, 발행 잡만 `contents: write`), 정확한 커밋 SHA 바인딩(`--target`), Windows 설치 프로그램 게시(당시의 CLI 프리뷰 아카이브와 `--serve` 스모크는 PD-086에서 릴리스에서 제거)를 수행합니다.
 - **Why** 오프라인 모의 폴백과 합성 감사 페이로드로 인해 실제 보안·연결 실패가 성공처럼 보이던 경계를 제거하고, 루프백 서버 자원 보호·3대 엔진 PII 완전성·릴리스 산출물 정직성을 코드와 CI 가드로 일치시키기 위함입니다.
 - **Trade-offs**
   1. 프로덕션 UI를 백엔드 없이 정적 파일로 직접 열면 편집 명령이 거부되나, 테스트 환경은 `scripts/webui-dom-harness.mjs`의 명시적 주입 경로로 결정론적 검증을 유지하면서 실사용자 환경의 거짓 성공을 원천 차단합니다.
@@ -1351,7 +1351,7 @@
   5. **iframe 격리**: `sandbox="allow-same-origin allow-scripts allow-modals"`. 같은 출처와 스크립트는 필수(WASM·저장소·MessagePort)이고 모달은 편집기의 alert/confirm 때문입니다. 팝업·폼·다운로드·상위 이동은 허용하지 않아 하이퍼링크 대화상자의 "미리보기"와 링크 클릭 열기(`window.open`)는 편집기 자체의 "팝업이 차단되었습니다" 안내로 끝나고 새 창이 열리지 않습니다(`--serve` 브라우저와 데스크톱 셸 모두 같은 동작; 셸의 `on_navigation`은 앱 출처 외 이동도 거부). `allow-same-origin`+`allow-scripts` 조합은 브라우저가 "샌드박스를 벗어날 수 있다"는 콘솔 경고를 내지만, 같은 출처 앱 번들이므로 샌드박스의 목적은 격리가 아니라 팝업·이동 차단입니다. 격리의 실체는 IPC 권한 없음과 CSP입니다.
   6. **Tauri CSP** (`tauri.conf.json`, 위생 가드가 정확값 검사): `default-src 'self'`, `script-src 'self' 'wasm-unsafe-eval'`, `img-src 'self' data: blob:`, `frame-src 'self'`, `connect-src 'self' ipc: http://ipc.localhost`. `unsafe-eval`·`unsafe-inline`은 없고 capabilities(`allow-ipc-dispatch`, `allow-save-document-file`)는 불변입니다. 셸 CSP는 메인 문서와 iframe 문서에 같이 적용되는 합집합입니다. 번들은 `frontendDist`(`ui/`) 안에 있어 실행 파일에 내장되고, 번들이 없으면 데스크톱 `build.rs`가 정확한 해결 명령과 함께 빌드를 실패시킵니다(Tauri 빌드·clippy·test 전에 `node scripts/build-hwp-studio.mjs`가 먼저 실행되도록 CI·릴리스 워크플로 순서를 바꿨습니다).
   7. **`--serve` 경로별 CSP**: 메인 페이지·API·오류는 `default-src 'self'` 그대로입니다(같은 출처 iframe은 `frame-src`가 `default-src`로 폴백되어 허용되므로 완화 불필요). `/hwp-studio/*`는 `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'`이고 모든 응답에 `X-Content-Type-Options: nosniff`가 붙습니다. 정적 파일은 바이너리 본문과 정확한 MIME(`application/wasm`, `font/woff2`, `text/javascript` …)으로 제공하고, 요청 경로는 `[A-Za-z0-9._-]` 세그먼트만 허용하며(`..`·역슬래시·드라이브·스트림·인코딩된 변형 거부) 디스크 읽기는 정규화한 번들 루트 안으로 제한합니다. IPC 본문 한도(16 MiB)와 기타 1 MiB 한도는 불변입니다(번들 응답은 요청 본문이 없는 GET).
-  8. **번들 출처 (CLI 단일 실행 파일)**: cargo 기능 `embed-hwp-studio`(기본 꺼짐)를 켜면 `build.rs`가 번들 전 파일을 `include_bytes!`로 내장해 릴리스 CLI는 `ui/hwp-studio` 폴더 없이 동작하고(릴리스 워크플로가 이 기능으로 빌드하고 ZIP에서 중복 폴더를 제외), 기능이 꺼진 일반 빌드·테스트는 번들 없이도 통과하며 실행 파일 옆 `ui/hwp-studio`·`hwp-studio` 또는 소스 트리의 `ui/hwp-studio`에서 읽습니다. 기능이 켜졌는데 번들이 없으면 빌드가 실패합니다. 데스크톱 크레이트는 기능을 켜지 않으므로(Tauri가 이미 내장) 번들이 이중으로 들어가지 않습니다. `--self-test`는 새 자산(`hwp-host.js`, `#pane-hwp`)을 검사하고 기능이 켜진 빌드에서는 내장 번들의 `index.html`·`.wasm`·`asset-manifest.json`을 검사합니다.
+  8. **번들 출처 (CLI 단일 실행 파일)**: cargo 기능 `embed-hwp-studio`(기본 꺼짐)를 켜면 `build.rs`가 번들 전 파일을 `include_bytes!`로 내장해 릴리스 CLI는 `ui/hwp-studio` 폴더 없이 동작하고(당시에는 릴리스 워크플로가 이 기능으로 CLI를 빌드했으나 PD-086에서 릴리스 CLI를 없앴고 기능은 개발·CI용으로 유지), 기능이 꺼진 일반 빌드·테스트는 번들 없이도 통과하며 실행 파일 옆 `ui/hwp-studio`·`hwp-studio` 또는 소스 트리의 `ui/hwp-studio`에서 읽습니다. 기능이 켜졌는데 번들이 없으면 빌드가 실패합니다. 데스크톱 크레이트는 기능을 켜지 않으므로(Tauri가 이미 내장) 번들이 이중으로 들어가지 않습니다. `--self-test`는 새 자산(`hwp-host.js`, `#pane-hwp`)을 검사하고 기능이 켜진 빌드에서는 내장 번들의 `index.html`·`.wasm`·`asset-manifest.json`을 검사합니다.
   9. **`EasyOffice.exe --smoke`**: 셸이 smoke 모드에서만 `window.__EASYOFFICE_SMOKE__`를 주입하면 페이지가 한글 모듈을 활성화해 `ready` → 빈 문서 → 같은 출처 DOM으로 입력(클릭 + 편집기 입력창에 텍스트 입력 이벤트) → `exportHwp` → CFB 서명·비어 있지 않음·`getDocumentState.dirty`를 확인하고, 결과를 일반 엔진 호출(`scrub_pii`에 표식 텍스트)로 보고합니다. 셸의 감시기가 기존 IPC 왕복 + 이 표식이 모두 오면 종료 코드 0, 실패 표식·실패한 명령·시간 초과(75초)는 1입니다. 새 IPC 명령·권한은 없고 표식은 smoke 모드의 감시기만 해석합니다.
   10. **번들 보완(2단계 결함 수정)**: 업스트림 CSS의 도구 아이콘 스프라이트가 루트 절대 경로(`url(/images/...)`)라 `/hwp-studio/` 아래에서는 404였습니다. 두 SVG를 원본 해시가 고정된 verbatim 자산으로 번들에 추가하고 빌드가 CSS의 해당 경로를 `../images/`로 바꾸며, 번들 검사가 CSS의 루트 절대 `url()`을 실패로 처리합니다(번들 +0.88 MiB).
 - **Why** 편집기 정확도는 rhwp 엔진에 있고 호스트는 얇게 유지해야 4단계(열기·HWPX 저장)와 후속 갱신이 쉽습니다. 권한 경계(IPC 없음·CSP·정적 검사)를 파일 단위가 아니라 문서 단위(iframe)로 둡니다.
@@ -1386,3 +1386,18 @@
   - 전체 선택에서 100만 칸 초과 항목 생성: 메모리·지연이 커서 사용 범위로 제한.
 - **Verified by** `node --test scripts/test-webui-sheet-format.mjs`(범위 굵게 전체/없음/혼합 토글, 실행 취소·다시 실행 한 단계, 기울임·밑줄·크기·취소선 결합, 1만 행 범위의 화면 밖 행·스크롤 후 유지, 시트 탭 전환 유지, 혼합 `aria-pressed`, DOC 비영향), 헤드리스 Chrome(CDP `Input.*`)에서 Shift+방향키 선택 후 Ctrl+B로 12칸 모두 굵게, 1만×8 범위 굵게 적용이 실제 브라우저에서 약 0.36초(실행 취소 스냅샷 포함)이며 스크롤한 8,326행도 굵게였습니다.
 - **Revisit when** XLSX 저장 페이로드에 셀 스타일을 담을 때, 글꼴·색·채우기·테두리·정렬을 범위에 적용할 때, 열·행 단위 서식(전체 열 서식)을 도입할 때.
+
+
+## 61. `--serve` 루프백 서버를 개발·테스트 전용으로 한정하고 릴리스 배포 중단 (PD-086, #151)
+- **Context** EasyOffice는 서버 없이 설치해 쓰는 프로그램이고 설치형 데스크톱 앱(#121)은 앱 내부 IPC만 쓰며 열린 네트워크 포트가 없습니다. 그런데 릴리스에는 루프백 HTTP 서버를 띄우는 `--serve` CLI zip이 보조 산출물로 남아 있었습니다.
+- **Decision (`PD-086`)**
+  1. 제품은 서버리스 설치형입니다. `--serve`는 헤드리스 브라우저 UI 검증과 CI 스모크 같은 개발·자동 검증에만 쓰며 사용자에게 배포하지 않습니다.
+  2. `release.yml`은 CLI 빌드·zip·체크섬 항목·`--serve` 스모크를 모두 제거했습니다. Windows 릴리스 자산은 설치 프로그램과 `SHA256SUMS-windows-x64.txt`(설치 프로그램만 기재)이고 macOS 산출물은 그대로입니다. `ci.yml`의 `--serve` 스모크와 cargo 기능 `embed-hwp-studio`(테스트 포함)는 유지합니다.
+  3. 위생 가드(`scripts/release-serve-rule.mjs`, 테스트 `scripts/test-release-serve-rule.mjs`)가 `release.yml`(주석 제외)에 CLI 서버 산출물 이름·`--serve`·CLI 실행 파일 복사가 있으면 실패합니다(fail-closed, 파일이 없어도 실패).
+  4. `--help`와 `--serve` 시작 메시지가 "개발·테스트 전용, 일반 사용자용이 아님"을 한국어·영어로 밝힙니다. 방어(Host·Origin 검사, 연결 수·시간 제한, CSP)는 개발 중 안전을 위해 그대로 유지합니다.
+  5. README·README.ko의 사용자 안내는 설치 프로그램 기준이고 `--serve`는 짧은 개발자 절로 옮겼습니다.
+- **Why** 사용자에게 로컬 포트를 여는 별도 실행 파일을 주지 않아 공격면과 안내 혼선을 없애면서, 자동 UI 검증 경로는 잃지 않습니다.
+- **Trade-offs** 외부 사용자가 브라우저로 미리 써 보는 경로가 사라지고 소스 빌드가 필요합니다. 릴리스에서는 `--serve` 바이너리 스모크가 빠지고 CI가 같은 코드를 검증합니다.
+- **Alternatives rejected** `--serve` 코드와 방어 제거(자동 검증 수단 상실), zip을 계속 배포하되 안내만 변경(사용자가 받을 수 있는 서버 산출물이 남음).
+- **Verified by** `node --test scripts/test-release-serve-rule.mjs`, `node scripts/check-repo-hygiene.mjs`, `cargo test -p easyoffice-app`(`--help` 문구), 기존 CI `--serve` 스모크.
+- **Revisit when** 정식 웹 배포 계획이 생기거나 UI 검증 방식이 `--serve` 없이 가능해질 때.

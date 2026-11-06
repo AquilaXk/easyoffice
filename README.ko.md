@@ -135,7 +135,7 @@ cd crates/easyoffice-desktop
 npx @tauri-apps/cli@2 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
 ```
 
-**개발자 미리보기(`--serve`).** 보조 아카이브 `EasyOffice-<version>-windows-x64-cli-serve-preview.zip`은 개발·테스트용 독립 실행형 Rust 코어 CLI와 로컬 루프백 WebUI 서버를 제공합니다. `easyoffice-app.exe --self-test`로 엔진 무결성을 검증하거나 `easyoffice-app.exe --serve 8787`을 실행해 브라우저에서 `http://127.0.0.1:8787/` 워크스페이스를 열 수 있습니다. 전체 옵션은 `easyoffice-app.exe --help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로(명령줄에서 문서 열기는 아직 지원하지 않음)는 0이 아닌 종료 코드로 끝납니다.
+**개발자 전용 로컬 서버(`--serve`).** `--serve`는 일반 사용자에게 배포하지 않으며 어떤 릴리스 자산에도 포함되지 않습니다. 개발과 자동 검증(헤드리스 브라우저 UI 검증, CI 스모크)에만 쓰며, 설치형 앱은 네트워크 포트를 열지 않습니다. 소스 저장소에서 `cargo run -p easyoffice-app -- --self-test`로 엔진 무결성을 검증하거나 `cargo run -p easyoffice-app -- --serve 8787`로 `http://127.0.0.1:8787/` 루프백 WebUI를 열 수 있습니다. 전체 옵션은 `--help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로는 0이 아닌 종료 코드로 끝납니다. Host·Origin 검사, 연결 수·시간 제한, CSP는 개발 중 안전을 위해 그대로 유지합니다(PD-086).
 
 WebUI에서는 **파일 → 열기…(`Ctrl+O`)** 또는 작업 영역에 파일을 끌어 놓아 DOCX/DOC/ODT/RTF/MD/TXT, HWP/HWPX/HWT/HWTX, XLSX/XLS/ODS/CSV/TSV, PPTX/PPT/PPSX/ODP, PDF 파일(최대 10 MiB)을 해당 모듈에서 열 수 있습니다. 탭 제목은 파일 이름이 되고 열기는 하나의 실행 취소 단위이며, 편집기 모델이 담지 못하는 항목(그림·도형·머리말·셀 서식)은 열기 후 알려 줍니다. 글자 서식(크기·글꼴·글자 색·형광펜·굵게·기울임·밑줄·취소선)은 선택한 글자에만 적용되며 DOCX·HWPX·ODT·RTF 저장·열기에서 유지됩니다. 변환기 패널에서는 편집기 텍스트 대신 선택한 원본 파일의 실제 바이트를 변환할 수도 있습니다.
 

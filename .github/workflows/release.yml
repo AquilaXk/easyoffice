@@ -102,7 +102,7 @@ jobs:
         run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-hwp-host.mjs
 
       # The editor bundle (PD-081, PD-083) is generated, not tracked. The desktop shell embeds it and
-      # fails to build without it, and the CLI binary embeds it, so build it before any Rust step.
+      # fails to build without it, so build it before any Rust step.
       - name: Check out the pinned rhwp upstream and build the hwp-studio editor bundle
         run: |
           node scripts/checkout-rhwp.mjs
@@ -153,75 +153,16 @@ jobs:
             throw "Desktop shell smoke test failed with exit code $($proc.ExitCode)"
           }
 
-      - name: Build optimized engine CLI for the developer preview archive
-        run: cargo build -p easyoffice-app --release --features embed-hwp-studio
-
-      - name: Stage Windows installer and developer CLI preview bundle
+      - name: Stage Windows installer and SHA-256 checksums
         shell: bash
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          mkdir -p dist/windows-stage/ui
+          mkdir -p dist
           INSTALLER="$(ls target/release/bundle/nsis/EasyOffice_*_x64-setup.exe | head -n 1)"
           test -n "$INSTALLER"
           cp "$INSTALLER" "dist/EasyOffice-${VERSION}-windows-x64-setup.exe"
-          cp target/release/easyoffice-app.exe dist/windows-stage/
-          cp -R crates/easyoffice-app/ui/* dist/windows-stage/ui/
-          # The CLI binary embeds the editor bundle; do not ship a second copy.
-          rm -rf dist/windows-stage/ui/hwp-studio
-          cat > dist/windows-stage/README-WINDOWS.txt <<EOF
-          EasyOffice v${VERSION} Windows x64 Developer CLI & Local WebUI Preview
-
-          End users should install EasyOffice-${VERSION}-windows-x64-setup.exe instead and
-          start EasyOffice from the Start menu. This archive is for developers.
-
-          1. Run deterministic engine self-test
-             .\easyoffice-app.exe --self-test
-
-          2. Start loopback WebUI preview server (binds 127.0.0.1 only)
-             .\easyoffice-app.exe --serve 8787
-             Open http://127.0.0.1:8787/ in a modern desktop browser.
-          EOF
-
-      - name: Smoke test Windows x64 --serve loopback WebUI and CSP header
-        shell: pwsh
-        run: |
-          $proc = Start-Process -FilePath "dist/windows-stage/easyoffice-app.exe" -ArgumentList @("--serve", "18787") -PassThru -NoNewWindow
-          try {
-            $resp = $null
-            for ($i = 0; $i -lt 20; $i++) {
-              try {
-                $candidate = Invoke-WebRequest -Uri "http://127.0.0.1:18787/" -UseBasicParsing -TimeoutSec 2
-                if ($candidate.StatusCode -eq 200) {
-                  $resp = $candidate
-                  break
-                }
-              } catch {
-                Start-Sleep -Milliseconds 250
-              }
-            }
-            if ($null -eq $resp -or $resp.StatusCode -ne 200) {
-              throw "Windows --serve loopback smoke test failed to return HTTP 200"
-            }
-            $csp = ($resp.Headers["Content-Security-Policy"] -join ", ").Trim()
-            if ($csp -ne "default-src 'self'") {
-              throw "Unexpected Content-Security-Policy header: '$csp'"
-            }
-          } finally {
-            if ($null -ne $proc -and -not $proc.HasExited) {
-              Stop-Process -Id $proc.Id -Force
-            }
-          }
-
-      - name: Package developer CLI preview archive and SHA-256 checksums
-        shell: bash
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          INSTALLER="EasyOffice-${VERSION}-windows-x64-setup.exe"
-          ARCHIVE="EasyOffice-${VERSION}-windows-x64-cli-serve-preview.zip"
-          powershell -NoProfile -Command "Compress-Archive -Path 'dist/windows-stage/*' -DestinationPath 'dist/${ARCHIVE}' -Force"
-          (cd dist && sha256sum "${INSTALLER}" "${ARCHIVE}" > "SHA256SUMS-windows-x64.txt")
+          (cd dist && sha256sum "EasyOffice-${VERSION}-windows-x64-setup.exe" > "SHA256SUMS-windows-x64.txt")
 
       - name: Upload Windows x64 release artifacts
         uses: actions/upload-artifact@v4
@@ -229,7 +170,6 @@ jobs:
           name: windows-release-artifacts
           path: |
             dist/EasyOffice-${{ steps.meta.outputs.version }}-windows-x64-setup.exe
-            dist/EasyOffice-${{ steps.meta.outputs.version }}-windows-x64-cli-serve-preview.zip
             dist/SHA256SUMS-windows-x64.txt
           if-no-files-found: error
 
@@ -259,7 +199,6 @@ jobs:
             "release-assets/EasyOffice-${VERSION}-macos.zip"
             "release-assets/SHA256SUMS.txt"
             "release-assets/EasyOffice-${VERSION}-windows-x64-setup.exe"
-            "release-assets/EasyOffice-${VERSION}-windows-x64-cli-serve-preview.zip"
             "release-assets/SHA256SUMS-windows-x64.txt"
           )
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

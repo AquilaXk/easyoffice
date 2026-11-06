@@ -15,6 +15,7 @@ import { readConfig, resolveGitExecutable, verifyUpstream } from "./verify-rhwp-
 import { verifyOverrides } from "./hwp-studio-overrides.mjs";
 import { checkFonts } from "./verify-fonts.mjs";
 import { findBareSorts, isSortRuleScoped } from "./sort-comparator-rule.mjs";
+import { findServeReleaseViolations } from "./release-serve-rule.mjs";
 
 const ROOT = process.cwd();
 
@@ -118,6 +119,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "scripts/test-hwp-studio.mjs",
   "scripts/sort-comparator-rule.mjs",
   "scripts/test-sort-comparator-rule.mjs",
+  "scripts/release-serve-rule.mjs",
+  "scripts/test-release-serve-rule.mjs",
   "scripts/test-webui-sheet-format.mjs",
 ];
 
@@ -270,6 +273,18 @@ function compareCodeUnits(a, b) {
 }
 
 const errors = [];
+
+// PD-086: `--serve` is a developer/CI mode; the release workflow must not publish it.
+{
+  const releaseWorkflow = path.join(ROOT, ".github/workflows/release.yml");
+  if (!fs.existsSync(releaseWorkflow)) {
+    errors.push("Release workflow .github/workflows/release.yml is missing (cannot verify PD-086).");
+  } else {
+    for (const violation of findServeReleaseViolations(fs.readFileSync(releaseWorkflow, "utf8"))) {
+      errors.push(`release.yml must not publish the --serve CLI (PD-086): ${violation}`);
+    }
+  }
+}
 
 for (const rel of REQUIRED_TRACKED_CONTRACTS) {
   const full = path.join(ROOT, rel);
