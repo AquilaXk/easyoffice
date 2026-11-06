@@ -50,7 +50,7 @@ jobs:
         run: node scripts/verify-macos-plist.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-sheet-format.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-sheet-format.mjs scripts/test-webui-hwp-host.mjs
 
       - name: Check Swift toolchain version
         run: swift --version
@@ -108,11 +108,19 @@ jobs:
       - name: Run rhwp upstream and hwp-studio guard tests
         run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs
 
+      # hwp-studio (PD-081, PD-083): the editor bundle is generated from the committed WASM package, the
+      # pinned sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. The desktop shell
+      # embeds it (frontendDist) and its build fails without it, so it is built before any desktop step.
+      - name: Check out the pinned rhwp upstream (sparse, shallow)
+        run: node scripts/checkout-rhwp.mjs
+
+      - name: Build the hwp-studio editor bundle (npm ci --ignore-scripts, vite build, static checks)
+        run: node scripts/build-hwp-studio.mjs
       - name: Verify desktop icons match the generator
         run: node scripts/generate-desktop-icons.mjs --check
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-sheet-format.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-sheet-format.mjs scripts/test-webui-hwp-host.mjs
 
       - name: Check Rust toolchain version
         run: cargo --version && rustc --version
@@ -129,6 +137,10 @@ jobs:
       - name: Run Rust engine self-test (Windows)
         run: cargo run -p easyoffice-app -- --self-test
 
+      - name: Engine self-test and bundle serving with the editor embedded in the CLI binary
+        run: |
+          cargo test -p easyoffice-app --features embed-hwp-studio
+          cargo run -p easyoffice-app --features embed-hwp-studio -- --self-test
       - name: Smoke test Windows x64 --serve loopback WebUI and CSP header
         shell: pwsh
         run: |
@@ -183,7 +195,7 @@ jobs:
           }
           Write-Output "Installer: $($installers[0].Name) ($($installers[0].Length) bytes)"
 
-      - name: Smoke test desktop shell window (embedded WebUI + in-process IPC round trip)
+      - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
         run: |
           $proc = Start-Process -FilePath "target/release/EasyOffice.exe" -ArgumentList @("--smoke") -PassThru
@@ -195,15 +207,6 @@ jobs:
           if ($proc.ExitCode -ne 0) {
             throw "Desktop shell smoke test failed with exit code $($proc.ExitCode)"
           }
-
-      # hwp-studio (PD-081): the editor bundle is generated from the committed WASM package, the pinned
-      # sparse rhwp checkout and the npm lockfile; the WASM is never compiled here. It is built after the
-      # desktop shell so the shell does not embed it yet (embedding is a later phase).
-      - name: Check out the pinned rhwp upstream (sparse, shallow)
-        run: node scripts/checkout-rhwp.mjs
-
-      - name: Build the hwp-studio editor bundle (npm ci --ignore-scripts, vite build, static checks)
-        run: node scripts/build-hwp-studio.mjs
 
       - name: Run the standalone hwp-studio harness (blank document, partial font size, export, reload)
         run: node scripts/hwp-studio-harness.mjs

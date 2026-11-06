@@ -13,6 +13,11 @@ path = "src/lib.rs"
 name = "easyoffice-app"
 path = "src/main.rs"
 
+[features]
+# Embeds the generated hwp-studio bundle (ui/hwp-studio) into the executable for `--serve`; the
+# bundle must be built first (scripts/build-hwp-studio.mjs). Off by default (PD-083).
+embed-hwp-studio = []
+
 [dependencies]
 easyoffice-formats = { path = "../easyoffice-formats" }
 easyoffice-sheet = { path = "../easyoffice-sheet" }

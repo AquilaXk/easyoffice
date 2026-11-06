@@ -35,6 +35,7 @@
       getWorkspacePanels,
       getDocRuns,
       getActiveModule,
+      getHwpHost,
       setActiveModule,
       getActiveRibbonCategory,
       setActiveRibbonCategory,
@@ -287,7 +288,7 @@
       applyModuleAccent(mod);
       const panes = {
         DOC: document.getElementById("pane-doc"),
-        HWP: document.getElementById("pane-doc"),
+        HWP: getHwpHost?.()?.paneForModule() || document.getElementById("pane-doc"),
         SHEET: document.getElementById("pane-sheet"),
         SLIDE: document.getElementById("pane-slide"),
         PDF: document.getElementById("pane-pdf"),
@@ -313,6 +314,7 @@
       }
       workspacePanels.renderModuleOutline(mod);
       await renderRibbonCategoryTools(getActiveRibbonCategory()).catch(() => {});
+      void getHwpHost?.()?.onModuleActivated(mod);
     }
 
     function activatePane(mod, skipTabBufferSync) {
@@ -902,12 +904,22 @@
       }
     }
 
+    // HWP ribbon commands edit the text-only fallback editor; the embedded editor has its own toolbar.
+    function isHwpEmbedCommandBlocked(cmdId, mod) {
+      const hwpHost = getHwpHost?.();
+      if (mod !== "HWP" || !hwpHost?.isEmbedActive() || cmdId.endsWith("-view-theme")) return false;
+      const fb = document.getElementById("status-command-feedback");
+      if (fb) fb.textContent = hwpHost.toolHint;
+      return true;
+    }
+
     function executeTrackedRibbonCommand(cmdId, options = {}) {
       return enqueueWorkspaceHistoryOp(async () => {
         const sheetController = getSheetController();
         await sheetController.commitPendingFocusedSheetCell(true);
         const preSnapshot = captureWorkspaceSnapshot(true);
         const effectiveModule = options.targetModule || getActiveModule();
+        if (isHwpEmbedCommandBlocked(cmdId, effectiveModule)) return null;
         const preparedEffect = await prepareRibbonAsyncEffect(cmdId, effectiveModule);
         const currentStyle = normalizeRibbonStyleKey(localRibbonState.ribbonStyle);
         const execRes = await invokeIpc(

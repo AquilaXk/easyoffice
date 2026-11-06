@@ -40,8 +40,12 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   ]);
   const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href", "srcset", "poster"]);
 
+  // Commands that still apply while the embedded HWP editor is the active surface.
+  const HWP_EMBED_COMMANDS = new Set(["studio-save", "palette", "view-theme", "scrub-pii", "security-audit"]);
+
   function studioCommandApplies(cmd, mod) {
     if (!cmd || cmd.startsWith("module:")) return true;
+    if (mod === "HWP_EMBED") return HWP_EMBED_COMMANDS.has(cmd);
     return (STUDIO_COMMAND_MODULES[cmd] || DOC_MODULES).includes(mod);
   }
 
@@ -152,6 +156,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       document,
       shortcutBindings,
       getActiveModule,
+      getHwpHost,
       captureWorkspaceSnapshot,
       restoreWorkspaceSnapshot,
       runExclusive,
@@ -365,7 +370,8 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
     }
 
     function applyModuleContext(mod) {
-      const isDoc = DOC_MODULES.includes(mod);
+      const embed = mod === "HWP" && Boolean(getHwpHost?.()?.isEmbedActive());
+      const isDoc = DOC_MODULES.includes(mod) && !embed;
       const styleBar = document.getElementById("doc-style-bar");
       if (styleBar) styleBar.hidden = !isDoc;
       // The SHEET home toolbar lists spreadsheet commands only: document-only tools are hidden.
@@ -373,14 +379,14 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
       for (const btn of document.querySelectorAll("#icon-toolbar button")) {
         const cmd = btn.dataset.studioCmd || TOOLBAR_ID_COMMANDS[btn.id];
         if (!cmd) continue;
-        const on = studioCommandApplies(cmd, mod);
+        const on = studioCommandApplies(cmd, embed ? "HWP_EMBED" : mod);
         btn.disabled = !on;
         btn.hidden = hideInapplicable && !on;
         btn.setAttribute("aria-disabled", on ? "false" : "true");
       }
       syncToolbarGroupVisibility();
       for (const item of document.querySelectorAll(".md-item[data-studio-menu-cmd]")) {
-        const on = studioCommandApplies(item.dataset.studioMenuCmd, mod);
+        const on = studioCommandApplies(item.dataset.studioMenuCmd, embed ? "HWP_EMBED" : mod);
         item.setAttribute("aria-disabled", on ? "false" : "true");
       }
       const agg = document.getElementById("status-sheet-agg");

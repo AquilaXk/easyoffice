@@ -44,7 +44,7 @@ jobs:
         run: node scripts/verify-macos-plist.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-hwp-host.mjs
 
       - name: Run deterministic test suite before packaging
         run: swift test
@@ -99,7 +99,14 @@ jobs:
         run: node scripts/check-repo-hygiene.mjs
 
       - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs
+        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-hwp-host.mjs
+
+      # The editor bundle (PD-081, PD-083) is generated, not tracked. The desktop shell embeds it and
+      # fails to build without it, and the CLI binary embeds it, so build it before any Rust step.
+      - name: Check out the pinned rhwp upstream and build the hwp-studio editor bundle
+        run: |
+          node scripts/checkout-rhwp.mjs
+          node scripts/build-hwp-studio.mjs
 
       - name: Run Rust workspace test suite and self-test
         run: |
@@ -133,7 +140,7 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: npx --yes @tauri-apps/cli@2 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}"
 
-      - name: Smoke test desktop shell window (embedded WebUI + in-process IPC round trip)
+      - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
         run: |
           $proc = Start-Process -FilePath "target/release/EasyOffice.exe" -ArgumentList @("--smoke") -PassThru
@@ -147,7 +154,7 @@ jobs:
           }
 
       - name: Build optimized engine CLI for the developer preview archive
-        run: cargo build -p easyoffice-app --release
+        run: cargo build -p easyoffice-app --release --features embed-hwp-studio
 
       - name: Stage Windows installer and developer CLI preview bundle
         shell: bash
@@ -160,6 +167,8 @@ jobs:
           cp "$INSTALLER" "dist/EasyOffice-${VERSION}-windows-x64-setup.exe"
           cp target/release/easyoffice-app.exe dist/windows-stage/
           cp -R crates/easyoffice-app/ui/* dist/windows-stage/ui/
+          # The CLI binary embeds the editor bundle; do not ship a second copy.
+          rm -rf dist/windows-stage/ui/hwp-studio
           cat > dist/windows-stage/README-WINDOWS.txt <<EOF
           EasyOffice v${VERSION} Windows x64 Developer CLI & Local WebUI Preview
 

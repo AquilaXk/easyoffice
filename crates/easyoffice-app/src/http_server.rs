@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::hwp_bundle;
 use crate::EasyOfficeIpcRouter;
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
@@ -31,6 +32,7 @@ const FILE_OPEN_JS: &str = include_str!("../ui/file-open.js");
 const SLIDE_STUDIO_JS: &str = include_str!("../ui/slide-studio.js");
 const DOC_RUNS_JS: &str = include_str!("../ui/doc-runs.js");
 const DOC_RUNS_UI_JS: &str = include_str!("../ui/doc-runs-ui.js");
+const HWP_HOST_JS: &str = include_str!("../ui/hwp-host.js");
 const APP_JS: &str = include_str!("../ui/app.js");
 const FAVICON_SVG: &str = include_str!("../ui/favicon.svg");
 
@@ -124,12 +126,28 @@ pub fn is_allowed_origin(origin: &str, port: u16) -> bool {
         || o.eq_ignore_ascii_case(&format!("http://[::1]:{port}"))
 }
 
+/// CSP of the main page and every API/error response. A same-origin <iframe> is already allowed by
+/// the `default-src` fallback (`frame-src` -> `child-src` -> `default-src`), so the editor frame
+/// needs no relaxation here; only `/hwp-studio/*` gets its own policy (`hwp_bundle::STUDIO_CSP`).
+const MAIN_CSP: &str = "default-src 'self'";
+
 fn write_http_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
-    let resp = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nContent-Security-Policy: default-src 'self'\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+    write_http_bytes(stream, status, content_type, MAIN_CSP, body.as_bytes());
+}
+
+fn write_http_bytes(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    csp: &str,
+    body: &[u8],
+) {
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nContent-Security-Policy: {csp}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    let _ = stream.write_all(resp.as_bytes());
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(body);
     let _ = stream.flush();
     let _ = stream.shutdown(std::net::Shutdown::Write);
     let _ = stream.set_read_timeout(Some(Duration::from_millis(20)));
@@ -160,6 +178,30 @@ fn apply_remaining_read_timeout(stream: &TcpStream, deadline: Instant) -> bool {
     }
     let step_timeout = remaining.min(Duration::from_millis(1500));
     stream.set_read_timeout(Some(step_timeout)).is_ok()
+}
+
+/// Serves one file of the hwp-studio bundle (binary body, exact MIME type, iframe CSP). Anything
+/// that is not a plain file path inside the bundle, or a bundle that is not present, is a 404.
+fn write_bundle_file(stream: &mut TcpStream, request_path: &str) {
+    let path_only = request_path.split(['?', '#']).next().unwrap_or("");
+    let file =
+        hwp_bundle::sanitize_relative_path(path_only).and_then(|rel| hwp_bundle::lookup(&rel));
+    match file {
+        Some(file) => write_http_bytes(
+            stream,
+            "200 OK",
+            file.content_type,
+            hwp_bundle::STUDIO_CSP,
+            &file.bytes,
+        ),
+        None => write_http_bytes(
+            stream,
+            "404 Not Found",
+            "application/json; charset=utf-8",
+            hwp_bundle::STUDIO_CSP,
+            b"{\"status\":\"not_found\"}",
+        ),
+    }
 }
 
 fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDispatchFn) {
@@ -276,6 +318,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
 
     let body_slice = &buf[header_end..header_end + content_length];
 
+    if method == "GET" && path.starts_with(hwp_bundle::BUNDLE_URL_PREFIX) {
+        write_bundle_file(stream, path);
+        return;
+    }
+
     let (status, content_type, response_body) = match (method, path) {
         ("GET", "/" | "/index.html") => {
             ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
@@ -385,6 +432,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             DOC_RUNS_UI_JS.to_string(),
+        ),
+        ("GET", "/hwp-host.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            HWP_HOST_JS.to_string(),
         ),
         ("GET", "/app.js") => (
             "200 OK",

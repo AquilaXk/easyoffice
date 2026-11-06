@@ -12,6 +12,9 @@
     "security": {
       "csp": {
         "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "img-src": "'self' data: blob:",
+        "frame-src": "'self'",
         "connect-src": "'self' ipc: http://ipc.localhost"
       },
       "capabilities": ["main-window"]
