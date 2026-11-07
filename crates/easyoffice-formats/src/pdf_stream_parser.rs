@@ -10,6 +10,22 @@ pub(crate) struct PdfToUnicodeMap {
     pub(crate) is_two_byte: bool,
 }
 
+/// Next `<...>` token at or after `*idx` (advancing past it); stray `<` without `>` are skipped.
+fn next_hex_token<'a>(block: &'a str, idx: &mut usize) -> Option<&'a str> {
+    let bytes = block.as_bytes();
+    while *idx < bytes.len() {
+        if bytes[*idx] == b'<' {
+            if let Some(close) = block[*idx + 1..].find('>') {
+                let s = &block[*idx + 1..*idx + 1 + close];
+                *idx += close + 2;
+                return Some(s);
+            }
+        }
+        *idx += 1;
+    }
+    None
+}
+
 impl PdfToUnicodeMap {
     pub(crate) fn parse_cmap_stream(cmap_text: &str, out: &mut Self) {
         let mut rest = cmap_text;
@@ -49,24 +65,11 @@ impl PdfToUnicodeMap {
     fn parse_bfrange_block(block: &str, out: &mut PdfToUnicodeMap) {
         let bytes = block.as_bytes();
         let mut i = 0usize;
-        let next_hex = |idx: &mut usize| -> Option<&str> {
-            while *idx < bytes.len() {
-                if bytes[*idx] == b'<' {
-                    if let Some(close) = block[*idx + 1..].find('>') {
-                        let s = &block[*idx + 1..*idx + 1 + close];
-                        *idx += close + 2;
-                        return Some(s);
-                    }
-                }
-                *idx += 1;
-            }
-            None
-        };
         while i < bytes.len() {
-            let Some(lo_hex) = next_hex(&mut i) else {
+            let Some(lo_hex) = next_hex_token(block, &mut i) else {
                 break;
             };
-            let Some(hi_hex) = next_hex(&mut i) else {
+            let Some(hi_hex) = next_hex_token(block, &mut i) else {
                 break;
             };
             let (Some((lo, len_lo)), Some((hi, _))) =
@@ -85,41 +88,58 @@ impl PdfToUnicodeMap {
             }
             if i < bytes.len() && bytes[i] == b'[' {
                 i += 1;
-                let mut code = lo;
-                while i < bytes.len() {
-                    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-                        i += 1;
-                    }
-                    if i < bytes.len() && bytes[i] == b']' {
-                        i += 1;
-                        break;
-                    }
-                    if bytes[i] == b'<' {
-                        if let Some(close) = block[i + 1..].find('>') {
-                            let dst_hex = &block[i + 1..i + 1 + close];
-                            i += close + 2;
-                            if code <= hi {
-                                if let Some(dst) = decode_pdf_hex_string(dst_hex, true) {
-                                    out.map.insert(code, dst);
-                                }
-                                code = code.saturating_add(1);
-                            }
-                            continue;
+                Self::parse_bfrange_array(block, &mut i, (lo, hi), out);
+            } else if let Some(dst_hex) = next_hex_token(block, &mut i) {
+                Self::apply_bfrange_base(dst_hex, (lo, hi), out);
+            }
+        }
+    }
+
+    /// Reads `<dst> <dst> ... ]` after the opening `[`, mapping consecutive codes from `lo`.
+    fn parse_bfrange_array(
+        block: &str,
+        i: &mut usize,
+        (lo, hi): (u16, u16),
+        out: &mut PdfToUnicodeMap,
+    ) {
+        let bytes = block.as_bytes();
+        let mut code = lo;
+        while *i < bytes.len() {
+            while *i < bytes.len() && bytes[*i].is_ascii_whitespace() {
+                *i += 1;
+            }
+            if *i < bytes.len() && bytes[*i] == b']' {
+                *i += 1;
+                break;
+            }
+            if bytes[*i] == b'<' {
+                if let Some(close) = block[*i + 1..].find('>') {
+                    let dst_hex = &block[*i + 1..*i + 1 + close];
+                    *i += close + 2;
+                    if code <= hi {
+                        if let Some(dst) = decode_pdf_hex_string(dst_hex, true) {
+                            out.map.insert(code, dst);
                         }
+                        code = code.saturating_add(1);
                     }
-                    i += 1;
+                    continue;
                 }
-            } else if let Some(dst_hex) = next_hex(&mut i) {
-                if let Some((dst_base, _)) = Self::parse_code_hex(dst_hex) {
-                    if lo == 0x0000 && hi == 0xFFFF && dst_base == 0x0000 {
-                        continue;
-                    }
-                    for offset in 0..=(hi - lo) {
-                        if let Some(ch) = char::from_u32(u32::from(dst_base) + u32::from(offset)) {
-                            out.map.insert(lo + offset, ch.to_string());
-                        }
-                    }
-                }
+            }
+            *i += 1;
+        }
+    }
+
+    /// Maps `lo..=hi` onto consecutive code points starting at the `<dst>` base.
+    fn apply_bfrange_base(dst_hex: &str, (lo, hi): (u16, u16), out: &mut PdfToUnicodeMap) {
+        let Some((dst_base, _)) = Self::parse_code_hex(dst_hex) else {
+            return;
+        };
+        if lo == 0x0000 && hi == 0xFFFF && dst_base == 0x0000 {
+            return;
+        }
+        for offset in 0..=(hi - lo) {
+            if let Some(ch) = char::from_u32(u32::from(dst_base) + u32::from(offset)) {
+                out.map.insert(lo + offset, ch.to_string());
             }
         }
     }
@@ -612,6 +632,36 @@ pub(crate) fn decode_pdf_hex_string(hex: &str, prefer_utf16be: bool) -> Option<S
     decode_pdf_hex_string_with_cmap(hex, prefer_utf16be, None)
 }
 
+/// Decodes string bytes through a ToUnicode map; `None` when the map has no hit (or no usable width).
+fn map_bytes_with_cmap(cm: &PdfToUnicodeMap, bytes: &[u8]) -> Option<String> {
+    if cm.map.is_empty() {
+        return None;
+    }
+    let mut mapped = String::new();
+    let mut any_hit = false;
+    if cm.is_two_byte && bytes.len() % 2 == 0 {
+        for pair in bytes.chunks_exact(2) {
+            let code = u16::from_be_bytes([pair[0], pair[1]]);
+            if let Some(s) = cm.map.get(&code) {
+                mapped.push_str(s);
+                any_hit = true;
+            } else if let Some(ch) = char::from_u32(u32::from(code)) {
+                mapped.push(ch);
+            }
+        }
+    } else if !cm.is_two_byte {
+        for &b in bytes {
+            if let Some(s) = cm.map.get(&u16::from(b)) {
+                mapped.push_str(s);
+                any_hit = true;
+            } else {
+                mapped.push(char::from(b));
+            }
+        }
+    }
+    any_hit.then_some(mapped)
+}
+
 pub(crate) fn decode_pdf_hex_string_with_cmap(
     hex: &str,
     prefer_utf16be: bool,
@@ -644,39 +694,8 @@ pub(crate) fn decode_pdf_hex_string_with_cmap(
             .collect();
         return Some(String::from_utf16_lossy(&units));
     }
-    if let Some(cm) = cmap {
-        if !cm.map.is_empty() {
-            if cm.is_two_byte && bytes.len() % 2 == 0 {
-                let mut mapped = String::new();
-                let mut any_hit = false;
-                for pair in bytes.chunks_exact(2) {
-                    let code = u16::from_be_bytes([pair[0], pair[1]]);
-                    if let Some(s) = cm.map.get(&code) {
-                        mapped.push_str(s);
-                        any_hit = true;
-                    } else if let Some(ch) = char::from_u32(u32::from(code)) {
-                        mapped.push(ch);
-                    }
-                }
-                if any_hit {
-                    return Some(mapped);
-                }
-            } else if !cm.is_two_byte {
-                let mut mapped = String::new();
-                let mut any_hit = false;
-                for &b in &bytes {
-                    if let Some(s) = cm.map.get(&u16::from(b)) {
-                        mapped.push_str(s);
-                        any_hit = true;
-                    } else {
-                        mapped.push(char::from(b));
-                    }
-                }
-                if any_hit {
-                    return Some(mapped);
-                }
-            }
-        }
+    if let Some(mapped) = cmap.and_then(|cm| map_bytes_with_cmap(cm, &bytes)) {
+        return Some(mapped);
     }
     if prefer_utf16be && bytes.len() % 2 == 0 {
         let units: Vec<u16> = bytes
@@ -706,6 +725,68 @@ pub(crate) fn escape_pdf_text(text: &str) -> String {
     out
 }
 
+type PdfTextChars<'a> = std::iter::Peekable<std::str::Chars<'a>>;
+
+/// Reads exactly four leading hex digits from a cloned iterator; `None` if fewer are available.
+#[inline]
+fn peek_hex4(chars: &PdfTextChars<'_>) -> Option<u16> {
+    let mut cloned = chars.clone();
+    let mut value = 0u16;
+    for _ in 0..4 {
+        let digit = cloned.next().and_then(|c| c.to_digit(16))?;
+        value = (value << 4) | digit as u16;
+    }
+    Some(value)
+}
+
+/// Low surrogate of a following `\uDC00`-style escape (non-hex characters inside it are skipped).
+fn peek_low_surrogate(chars: &PdfTextChars<'_>) -> Option<u16> {
+    let mut look = chars.clone();
+    if look.next() != Some('\\') || look.next() != Some('u') {
+        return None;
+    }
+    let mut low_hex = String::with_capacity(4);
+    for _ in 0..4 {
+        if let Some(lc) = look.next() {
+            if lc.is_ascii_hexdigit() {
+                low_hex.push(lc);
+            }
+        }
+    }
+    if low_hex.len() != 4 {
+        return None;
+    }
+    u16::from_str_radix(&low_hex, 16)
+        .ok()
+        .filter(|low| (0xDC00..=0xDFFF).contains(low))
+}
+
+/// Handles the text after `\u`: four hex digits (with surrogate pairs) or a literal `u`.
+fn decode_unicode_escape(chars: &mut PdfTextChars<'_>, out: &mut String) {
+    let Some(code) = peek_hex4(chars) else {
+        out.push('u');
+        return;
+    };
+    for _ in 0..4 {
+        let _ = chars.next();
+    }
+    if (0xD800..=0xDBFF).contains(&code) {
+        if let Some(low) = peek_low_surrogate(chars) {
+            for _ in 0..6 {
+                let _ = chars.next();
+            }
+            let scalar = 0x10000 + (((u32::from(code) - 0xD800) << 10) | (u32::from(low) - 0xDC00));
+            if let Some(sc) = char::from_u32(scalar) {
+                out.push(sc);
+                return;
+            }
+        }
+    }
+    if let Some(sc) = char::from_u32(u32::from(code)) {
+        out.push(sc);
+    }
+}
+
 pub(crate) fn unescape_pdf_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -718,60 +799,7 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
                 Some('b') => out.push('\u{0008}'),
                 Some('f') => out.push('\u{000C}'),
                 Some('v') => out.push('\u{000B}'),
-                Some('u') => {
-                    let mut hex = String::with_capacity(4);
-                    let mut cloned = chars.clone();
-                    for _ in 0..4 {
-                        if let Some(c) = cloned.next() {
-                            if c.is_ascii_hexdigit() {
-                                hex.push(c);
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    if hex.len() == 4 {
-                        for _ in 0..4 {
-                            let _ = chars.next();
-                        }
-                        if let Ok(code) = u16::from_str_radix(&hex, 16) {
-                            if (0xD800..=0xDBFF).contains(&code) {
-                                let mut look = chars.clone();
-                                if look.next() == Some('\\') && look.next() == Some('u') {
-                                    let mut low_hex = String::with_capacity(4);
-                                    for _ in 0..4 {
-                                        if let Some(lc) = look.next() {
-                                            if lc.is_ascii_hexdigit() {
-                                                low_hex.push(lc);
-                                            }
-                                        }
-                                    }
-                                    if low_hex.len() == 4 {
-                                        if let Ok(low) = u16::from_str_radix(&low_hex, 16) {
-                                            if (0xDC00..=0xDFFF).contains(&low) {
-                                                for _ in 0..6 {
-                                                    let _ = chars.next();
-                                                }
-                                                let scalar = 0x10000
-                                                    + (((u32::from(code) - 0xD800) << 10)
-                                                        | (u32::from(low) - 0xDC00));
-                                                if let Some(sc) = char::from_u32(scalar) {
-                                                    out.push(sc);
-                                                    continue;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if let Some(sc) = char::from_u32(u32::from(code)) {
-                                out.push(sc);
-                            }
-                        }
-                    } else {
-                        out.push('u');
-                    }
-                }
+                Some('u') => decode_unicode_escape(&mut chars, &mut out),
                 Some('\r') => {
                     if chars.peek() == Some(&'\n') {
                         let _ = chars.next();

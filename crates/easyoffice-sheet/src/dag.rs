@@ -232,6 +232,76 @@ impl DepWalk<'_> {
     }
 }
 
+/// The sheet whose formula is being scanned.
+struct ScanSite<'x> {
+    sheet: &'x SheetEngine,
+    slot: u16,
+    sid: u16,
+}
+
+/// Reusable buffers and sheet resolution for the dependency scan.
+struct DepScanner<'x> {
+    root: &'x SheetEngine,
+    wb: Option<&'x WorkbookEngine>,
+    sheets: SheetTable<'x>,
+    expr_stack: Vec<&'x Expr>,
+    scratch: Vec<PackedCellCoordinate>,
+}
+
+impl<'x> DepScanner<'x> {
+    /// Visits every cell / range dependency of `ast` (explicit stack, no recursion).
+    fn scan_dependencies(&mut self, walk: &mut DepWalk<'_>, ast: &'x Expr, site: ScanSite<'x>) {
+        let ScanSite { sheet, slot, sid } = site;
+        self.expr_stack.clear();
+        self.expr_stack.push(ast);
+        while let Some(ex) = self.expr_stack.pop() {
+            match ex {
+                Expr::Cell(dep) => {
+                    if is_formula(sheet.compiled_asts.get(dep)) {
+                        walk.visit(slot, sid, *dep);
+                    }
+                }
+                Expr::SheetCell {
+                    sheet: name,
+                    coord: dep,
+                } => {
+                    if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
+                        let dep_sheet = self.sheets.get(ds);
+                        if is_formula(dep_sheet.compiled_asts.get(dep)) {
+                            walk.visit(ds, dep_sheet.resolved_sheet_id(), *dep);
+                        }
+                    }
+                }
+                Expr::Range(range) => walk.range(sheet, slot, sid, *range, &mut self.scratch),
+                Expr::SheetRange { sheet: name, range } => {
+                    if let Some(ds) = self.sheets.resolve(self.root, self.wb, name) {
+                        let dep_sheet = self.sheets.get(ds);
+                        let dep_sid = dep_sheet.resolved_sheet_id();
+                        walk.range(dep_sheet, ds, dep_sid, *range, &mut self.scratch);
+                    }
+                }
+                Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) | Expr::PostfixPercent(inner) => {
+                    self.expr_stack.push(inner);
+                }
+                Expr::Binary { lhs, rhs, .. } => {
+                    self.expr_stack.push(rhs);
+                    self.expr_stack.push(lhs);
+                }
+                Expr::FuncCall { args, .. } => {
+                    for a in args.iter().rev() {
+                        self.expr_stack.push(a);
+                    }
+                }
+                Expr::Number(_)
+                | Expr::Text(_)
+                | Expr::Boolean(_)
+                | Expr::ErrorLiteral(_)
+                | Expr::Missing => {}
+            }
+        }
+    }
+}
+
 impl SheetEngine {
     pub(crate) fn pre_evaluate_dag_iterative(
         &self,
@@ -247,16 +317,19 @@ impl SheetEngine {
         ctx: &mut EvalContext<'_>,
         mut rec: Option<&mut PlanRecorder>,
     ) {
-        let wb = ctx.workbook;
         let self_sid = self.resolved_sheet_id();
-        let mut sheets = SheetTable {
-            slots: vec![self],
-            names: Vec::new(),
+        let mut scan = DepScanner {
+            root: self,
+            wb: ctx.workbook,
+            sheets: SheetTable {
+                slots: vec![self],
+                names: Vec::new(),
+            },
+            expr_stack: Vec::new(),
+            scratch: Vec::new(),
         };
         let mut state = DfsState::new(self_sid);
         let mut stack: Vec<Frame> = Vec::with_capacity(roots.len().min(4096));
-        let mut expr_stack: Vec<&Expr> = Vec::new();
-        let mut scratch: Vec<PackedCellCoordinate> = Vec::new();
         for &coord in roots.iter().rev() {
             if is_formula(self.compiled_asts.get(&coord)) && !ctx.memo.contains_at(self_sid, coord)
             {
@@ -264,7 +337,7 @@ impl SheetEngine {
             }
         }
         while let Some((slot, coord, expanded)) = stack.pop() {
-            let sheet = sheets.get(slot);
+            let sheet = scan.sheets.get(slot);
             let sid = sheet.resolved_sheet_id();
             if expanded {
                 state.set(sid, coord, 2);
@@ -297,53 +370,8 @@ impl SheetEngine {
                 stack: &mut stack,
                 cycle: &mut cycle,
             };
-            expr_stack.clear();
-            expr_stack.push(ast);
-            while let Some(ex) = expr_stack.pop() {
-                match ex {
-                    Expr::Cell(dep) => {
-                        if is_formula(sheet.compiled_asts.get(dep)) {
-                            walk.visit(slot, sid, *dep);
-                        }
-                    }
-                    Expr::SheetCell {
-                        sheet: name,
-                        coord: dep,
-                    } => {
-                        if let Some(ds) = sheets.resolve(self, wb, name) {
-                            let dep_sheet = sheets.get(ds);
-                            if is_formula(dep_sheet.compiled_asts.get(dep)) {
-                                walk.visit(ds, dep_sheet.resolved_sheet_id(), *dep);
-                            }
-                        }
-                    }
-                    Expr::Range(range) => walk.range(sheet, slot, sid, *range, &mut scratch),
-                    Expr::SheetRange { sheet: name, range } => {
-                        if let Some(ds) = sheets.resolve(self, wb, name) {
-                            let dep_sheet = sheets.get(ds);
-                            let dep_sid = dep_sheet.resolved_sheet_id();
-                            walk.range(dep_sheet, ds, dep_sid, *range, &mut scratch);
-                        }
-                    }
-                    Expr::UnaryPlus(inner)
-                    | Expr::UnaryMinus(inner)
-                    | Expr::PostfixPercent(inner) => expr_stack.push(inner),
-                    Expr::Binary { lhs, rhs, .. } => {
-                        expr_stack.push(rhs);
-                        expr_stack.push(lhs);
-                    }
-                    Expr::FuncCall { args, .. } => {
-                        for a in args.iter().rev() {
-                            expr_stack.push(a);
-                        }
-                    }
-                    Expr::Number(_)
-                    | Expr::Text(_)
-                    | Expr::Boolean(_)
-                    | Expr::ErrorLiteral(_)
-                    | Expr::Missing => {}
-                }
-            }
+            let site = ScanSite { sheet, slot, sid };
+            scan.scan_dependencies(&mut walk, ast, site);
             if cycle {
                 ctx.circular = true;
                 ctx.memo
