@@ -529,11 +529,12 @@ html[data-theme="dark"] #doc-editor {
 .slide-context-menu button[disabled] { opacity: 0.4; }
 
 /* Slideshow: fixed black stage, ratio-locked viewport, text scaled with container units. */
-.slide-show { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: #000; color: #111; outline: none; }
+.slide-show { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: #000; color: #fff; outline: none; }
 .slide-show[hidden] { display: none; }
 .slide-show[data-screen="white"] { background: #fff; }
 .slide-show[data-screen] .slide-show-viewport { visibility: hidden; }
 .slide-show-viewport {
+  color: #111;
   --slide-ratio: 1.7778;
   container-type: inline-size;
   width: min(100vw, calc(100vh * var(--slide-ratio)));
@@ -552,20 +553,21 @@ html[data-theme="dark"] #doc-editor {
 .slide-show[data-screen="white"] .slide-show-counter { color: #555; }
 .slide-show-exit { position: absolute; top: 10px; right: 12px; color: #ddd; background: rgba(0, 0, 0, 0.5); border: 1px solid #555; padding: 2px 8px; opacity: 0.35; }
 .slide-show-exit:hover, .slide-show-exit:focus-visible { opacity: 1; }
-.slide-show-hint { position: absolute; left: 16px; bottom: 10px; margin: 0; color: #aaa; font-size: 12px; animation: slide-show-hint-fade 6s forwards; }
+.slide-show-hint { position: absolute; left: 16px; bottom: 10px; margin: 0; color: #aaa; font-size: 12px; }
 .slide-show-presenter { position: absolute; right: 16px; bottom: 40px; width: min(340px, 40vw); padding: 12px; background: rgba(20, 20, 24, 0.92); color: #f2f2f2; border-radius: 8px; font-size: 13px; }
 .slide-show-presenter[hidden] { display: none; }
 .slide-show-presenter-row { margin: 0 0 6px; display: flex; gap: 8px; justify-content: space-between; }
 .slide-show-notes { margin: 0; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
-.slide-show-frame[data-transition="fade"] { animation: slide-show-fade 0.4s ease; }
-.slide-show-frame[data-transition="push"] { animation: slide-show-push 0.4s ease; }
-.slide-show-frame[data-transition="zoom"] { animation: slide-show-zoom 0.4s ease; }
 @keyframes slide-show-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slide-show-push { from { transform: translateX(8%); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes slide-show-zoom { from { transform: scale(0.92); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes slide-show-hint-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .slide-show-frame, .slide-show-hint { animation: none !important; }
+/* Motion is opt-in: reduced-motion users get no transitions or hint fade. */
+@media (prefers-reduced-motion: no-preference) {
+  .slide-show-hint { animation: slide-show-hint-fade 6s forwards; }
+  .slide-show-frame[data-transition="fade"] { animation: slide-show-fade 0.4s ease; }
+  .slide-show-frame[data-transition="push"] { animation: slide-show-push 0.4s ease; }
+  .slide-show-frame[data-transition="zoom"] { animation: slide-show-zoom 0.4s ease; }
 }
 
 .slide-thumb.active {
@@ -580,7 +582,9 @@ html[data-theme="dark"] #doc-editor {
 .pdf-page-card {
   position: relative;
   width: 100%;
-  min-height: 330px;
+  max-width: 460px;
+  min-height: 280px;
+  margin: 16px auto;
   padding: 24px;
   background: var(--eo-surface);
   border: 1px solid var(--eo-border);
@@ -614,14 +618,12 @@ html[data-theme="dark"] #doc-editor {
 
 .slide-title-zone { flex: 0 0 auto; padding: 4cqw 5cqw 1.5cqw; font-size: 4.2cqw; line-height: 1.2; }
 .slide-title-zone h2 { margin: 0; font-size: inherit; overflow-wrap: anywhere; }
-.slide-lower-zone { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 5cqw 4cqw; font-size: 2.5cqw; line-height: 1.45; }
-.slide-lower-zone p { margin: 0; }
+.slide-lower-zone { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 5cqw 4cqw; padding-top: 2cqw; border-top: 1px solid var(--eo-border); font-size: 2.5cqw; line-height: 1.45; }
+.slide-lower-zone p { margin: 0; white-space: pre-line; }
 .slide-title-zone h2:empty::before { content: "제목을 입력하세요"; opacity: 0.4; }
 .slide-lower-zone p:empty::before { content: "내용을 입력하세요"; opacity: 0.4; }
 
-.pdf-page-card { max-width: 460px; min-height: 280px; margin: 16px auto; }
 .pdf-page-card[data-rotated-quarter="true"] { margin: 110px auto; }
-.slide-lower-zone { padding-top: 2cqw; border-top: 1px solid var(--eo-border); }
 
 .slide-laser-dot {
   position: absolute;
@@ -966,7 +968,6 @@ html[data-theme="dark"] .cp-empty {
 .stb-zoom-slider { width: 76px; height: 14px; accent-color: var(--eo-primary); }
 
 .app-shell.eo-drop-active { outline: 3px dashed var(--eo-primary); outline-offset: -6px; }
-.slide-lower-zone p { white-space: pre-line; }
 .conv-source-row { gap: 8px; flex-wrap: wrap; }
 
 /* Sheet editor: virtualized grid with fixed column widths, frozen headers and range selection */
@@ -994,7 +995,7 @@ html[data-theme="dark"] .cp-empty {
 .sheet-grid tr.sheet-spacer td, .sheet-grid td.sheet-spacer-y { padding: 0; border-width: 0; line-height: 0; }
 .sheet-grid td.sheet-spacer-x, .sheet-grid th.sheet-spacer-head { padding: 0; }
 
-#icon-toolbar [hidden] { display: none !important; }
+#icon-toolbar [hidden] { display: none; }
 
 .sheet-grid th.active-axis { background-color: var(--eo-surface-elevated); background-image: linear-gradient(var(--eo-primary-soft), var(--eo-primary-soft)); }
 

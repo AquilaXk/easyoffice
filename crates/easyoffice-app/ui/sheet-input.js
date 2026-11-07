@@ -533,7 +533,9 @@
 
     function autoScroll(ev) {
       const vp = viewport();
-      if (!vp || typeof vp.getBoundingClientRect !== "function" || !(vp.clientHeight > 0)) return;
+      if (!vp || typeof vp.getBoundingClientRect !== "function") return;
+      const viewportHeight = vp.clientHeight;
+      if (typeof viewportHeight !== "number" || Number.isNaN(viewportHeight) || viewportHeight <= 0) return;
       const rect = vp.getBoundingClientRect();
       if (ev.clientY > rect.bottom - 10) vp.scrollTop += 48;
       else if (ev.clientY < rect.top + 36) vp.scrollTop -= 48;

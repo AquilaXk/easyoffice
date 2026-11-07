@@ -94,6 +94,16 @@
     return seg.isLiteral && seg.text.trim().length > 0;
   }
 
+  function assertValidScrubResponse(origText, res) {
+    if (
+      !res ||
+      typeof res.scrubbedText !== "string" ||
+      (origText.length > 0 && res.scrubbedText.length === 0)
+    ) {
+      throw new Error("개인정보 마스킹 응답 검증에 실패했습니다.");
+    }
+  }
+
   function createSheetStoreHelpers(deps) {
     const {
       invokeIpc,
@@ -216,16 +226,6 @@
       const batchValues =
         rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
       return { rpcRes, formulaTargets, targetValues, batchValues };
-    }
-
-    function assertValidScrubResponse(origText, res) {
-      if (
-        !res ||
-        typeof res.scrubbedText !== "string" ||
-        (origText.length > 0 && res.scrubbedText.length === 0)
-      ) {
-        throw new Error("개인정보 마스킹 응답 검증에 실패했습니다.");
-      }
     }
 
     function collectEntryScrubJob(entry, plainEntries, formulaJobs) {

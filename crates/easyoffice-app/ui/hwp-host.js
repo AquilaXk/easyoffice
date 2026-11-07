@@ -53,10 +53,13 @@
     return out;
   }
 
+  let sessionCounter = 0;
+
   function newSessionId(host) {
     const c = host.crypto;
     if (c && typeof c.randomUUID === "function") return c.randomUUID();
-    return "eo-hwp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+    sessionCounter += 1;
+    return "eo-hwp-" + Date.now().toString(36) + "-" + sessionCounter.toString(36);
   }
 
   function bytesToBase64(bytes, btoaFn) {
@@ -528,9 +531,9 @@
         if (after.length === 0 || after[0] !== 0xd0 || after[1] !== 0xcf) {
           throw new Error("내보낸 HWP 바이트가 올바르지 않습니다.");
         }
-        report(true, "bytes=" + after.length + " blank=" + before.length);
+        await report(true, "bytes=" + after.length + " blank=" + before.length);
       } catch (err) {
-        report(false, err instanceof Error ? err.message : String(err));
+        await report(false, err instanceof Error ? err.message : String(err));
       }
     }
 

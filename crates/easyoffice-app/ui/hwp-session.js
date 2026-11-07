@@ -133,7 +133,7 @@
           req.onsuccess = () => { box.rows = req.result || []; };
         });
         const stale = box.rows.filter((r) => r && r.tabId !== exceptTabId && nowMs - Number(r.savedAt || 0) > AUTOSAVE_STALE_MS);
-        for (const row of stale) await run("readwrite", (records, meta) => { records.delete(row.tabId); meta.delete(row.tabId); });
+        await Promise.all(stale.map((row) => run("readwrite", (records, meta) => { records.delete(row.tabId); meta.delete(row.tabId); })));
         return stale.length;
       },
     };

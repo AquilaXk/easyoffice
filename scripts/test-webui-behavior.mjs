@@ -692,7 +692,7 @@ test("multi-PII inline formatting, br boundaries, sheet formula literal PII, and
 });
 
 test("focused formula undo-redo updates displayed result, missing sheet returns #REF!, and in-flight or failed ribbon IPC keeps undo stack consistent", async () => {
-  const { document, sandbox, userClick, advanceTimers } = await createWorkspaceHarness();
+  const { document, sandbox, advanceTimers } = await createWorkspaceHarness();
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 

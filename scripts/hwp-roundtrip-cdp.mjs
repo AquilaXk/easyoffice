@@ -258,8 +258,8 @@ async function runFlow(cdp, mod, flow) {
   for (const [file, label] of [[first.file, "same format"], [second.file, "other format"]]) {
     const bytes = fs.readFileSync(file);
     const sig = signature(mod, bytes);
-    outcome.checks.push({ file: path.basename(file), bytes: bytes.length, format: sig.format });
     outcome.checks.push(
+      { file: path.basename(file), bytes: bytes.length, format: sig.format },
       sameStructure(label + ": character shapes", sig.paragraphs.map((p) => p.runs), expected.paragraphs.map((p) => p.runs)),
       sameStructure(label + ": paragraph shapes", sig.paragraphs.map((p) => p.shape), expected.paragraphs.map((p) => p.shape)),
       sameStructure(label + ": table placement", sig.tables, expected.tables),
