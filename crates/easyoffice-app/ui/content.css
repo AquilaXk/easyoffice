@@ -1,0 +1,268 @@
+/* Fixed colours of document and slide content (PD-098).
+ *
+ * The page, the official-document templates and the slideshow keep their own colours in both
+ * themes, like rhwp-studio's `--doc-paper` (paper stays white in the dark theme). Nothing in the
+ * UI chrome may use a literal colour; `scripts/test-webui-theme.mjs` allows them only here. */
+.sb-textcolor-btn { border-bottom: 3px solid #d93025; }
+.sb-highlight-btn { border-bottom: 3px solid #fbbc04; }
+#doc-editor {
+  /* The page keeps the light palette in both themes: scripts/test-webui-theme.mjs checks these
+     against the light tokens. */
+  --ui-bg: #f0f0f0;
+  --ui-bg-light: #f5f5f5;
+  --ui-surface: #ffffff;
+  --ui-surface-raised: #fafafa;
+  --ui-surface-muted: #e8e8e8;
+  --ui-border: #c0c0c0;
+  --ui-border-light: #d0d0d0;
+  --ui-border-subtle: #d8d8d8;
+  --ui-border-strong: #b4b4b4;
+  --ui-text: #333333;
+  --ui-text-secondary: #555555;
+  --ui-text-muted: #666666;
+  --ui-text-hint: #888888;
+  --ui-text-disabled: #aaaaaa;
+  --ui-text-placeholder: #999999;
+  --ui-text-on-accent: #ffffff;
+  --ui-on-accent-overlay: rgba(255, 255, 255, 0.3);
+  --ui-hover: #e0e0e0;
+  --ui-hover-strong: #dfe4ec;
+  --ui-active: #c8c8c8;
+  --ui-selected: #e8f0fe;
+  --ui-menu-open: #3e62bb;
+  --ui-menu-open-border: #4c73d5;
+  --ui-toolbar-bg-start: #fafafa;
+  --ui-toolbar-bg-end: #f0f0f0;
+  --ui-accent-bg: #e7eaf4;
+  --ui-accent-bg-light: #f0f3fa;
+  --ui-note-bg: #f5f6fa;
+  --ui-note-border: #d0d4e2;
+  --ui-note-text: #444444;
+  --ui-warning-bg: #fffbea;
+  --ui-warning-border: #f0d060;
+  --ui-warning-text: #7a6200;
+  --ui-link: #2563eb;
+  --ui-danger: #c44;
+  --ui-danger-strong: #dc3545;
+  --ui-danger-soft: rgba(220, 53, 69, 0.2);
+  --ui-focus-soft: rgba(74, 144, 217, 0.2);
+  --doc-paper: #ffffff;
+  --doc-shadow: rgba(0, 0, 0, 0.2);
+  --focus-ring: #4a90d9;
+  --selection-fill: #b8d7ff;
+  --accent-primary: #6182d6;
+  --accent-strong: #335095;
+  --accent-light: #4a90d9;
+  --accent-hover: #a0b0d8;
+  --accent-subtle: #748bc9;
+  width: 794px;
+  max-width: 794px;
+  min-height: 1050px;
+  padding: 48px 56px;
+  background-color: var(--doc-paper);
+  color: #111827;
+  border-style: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.16));
+}
+#doc-editor[data-show-para-marks="true"] p::after { content: " ↵"; color: #0284c7; font-size: 0.82em; }
+#doc-editor[data-show-ctrl-marks="true"] h1::after,
+#doc-editor[data-show-ctrl-marks="true"] h2::after { content: " ¶"; color: #d97706; font-size: 0.75em; }
+#doc-editor:not(.manuscript-grid) {
+  background-image:
+    linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0),
+    linear-gradient(#d0d0d0, #d0d0d0);
+  background-repeat: no-repeat;
+  background-size: 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px;
+  background-position:
+    38px 44px, 52px 30px,
+    calc(100% - 38px) 44px, calc(100% - 52px) 30px,
+    38px calc(100% - 44px), 52px calc(100% - 30px),
+    calc(100% - 38px) calc(100% - 44px), calc(100% - 52px) calc(100% - 30px);
+}
+.eo-boxed-heading {
+  display: flex;
+  align-items: stretch;
+  margin: 6px 0 14px;
+  padding: 0;
+  background: #f5e6d3;
+  outline: 1px solid #b8a082;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+.eo-boxed-heading:not(:has(.eo-h-title)) {
+  padding: 7px 14px;
+}
+.eo-h-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  padding: 7px 10px;
+  background: #e8e6e1;
+  border-right: 1px solid #b8a082;
+}
+#doc-editor h2:not(.eo-boxed-heading) {
+  margin: 6px 0 14px;
+  padding: 7px 14px;
+  background: #f5e6d3;
+  outline: 1px solid #b8a082;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+.eo-lead-square {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 12px 0 8px;
+  color: #111827;
+}
+.eo-lead-circle {
+  font-size: 14.5px;
+  margin: 6px 0 14px 12px;
+  line-height: 1.7;
+  color: #111827;
+}
+.eo-pf-caption {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+}
+.eo-pf-track {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 6px;
+}
+.eo-pf-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 68px;
+  padding: 8px 6px;
+  background: #f5e6d3;
+  outline: 1px solid #b8a082;
+  text-align: center;
+  font-size: 12.5px;
+  color: #111827;
+}
+.eo-pf-sub {
+  width: 100%;
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid #b8a082;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.eo-pf-note {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.eo-pf-arrow {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  color: #222222;
+}
+.eo-lead-circled-num {
+  font-size: 14.5px;
+  margin: 12px 0 14px 6px;
+  color: #111827;
+}
+.eo-criteria-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 18px 0 28px;
+  padding: 20px 16px 14px;
+  border-width: 1px;
+  border-style: solid;
+  border-color: #a0a0a0;
+  background: #ffffff;
+}
+.eo-criteria-badge {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  margin-top: -32px;
+  margin-bottom: 8px;
+  padding: 3px 28px;
+  background: #f5e6d3;
+  border-width: 1px;
+  border-style: solid;
+  border-color: #b8a082;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+}
+.eo-criteria-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #111827;
+}
+/* Slideshow: fixed black stage, ratio-locked viewport, text scaled with container units. */
+.slide-show { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: #000; color: #fff; outline: none; }
+.slide-show[hidden] { display: none; }
+.slide-show[data-screen="white"] { background: #fff; }
+.slide-show[data-screen] .slide-show-viewport { visibility: hidden; }
+.slide-show-viewport {
+  color: #111;
+  --slide-ratio: 1.7778;
+  container-type: inline-size;
+  width: min(100vw, calc(100vh * var(--slide-ratio)));
+  aspect-ratio: 16 / 9;
+  background: #fff;
+  overflow: hidden;
+  cursor: pointer;
+}
+.slide-show-viewport[data-aspect="4:3"] { --slide-ratio: 1.3333; aspect-ratio: 4 / 3; }
+.slide-show-viewport[data-aspect="A4"] { --slide-ratio: 1.4142; aspect-ratio: 297 / 210; }
+.slide-show-frame { width: 100%; height: 100%; display: flex; flex-direction: column; padding: 6cqw 7cqw; box-sizing: border-box; }
+.slide-show-frame h2 { margin: 0 0 3cqw; font-size: 5.2cqw; line-height: 1.2; overflow-wrap: anywhere; }
+.slide-show-body { flex: 1 1 auto; min-height: 0; overflow: hidden; font-size: 3cqw; line-height: 1.5; }
+.slide-show-body p { margin: 0; white-space: pre-line; }
+.slide-show-counter { position: absolute; right: 16px; bottom: 10px; color: #bbb; font-size: 13px; font-variant-numeric: tabular-nums; }
+.slide-show[data-screen="white"] .slide-show-counter { color: #555; }
+.slide-show-exit { position: absolute; top: 10px; right: 12px; color: #ddd; background: rgba(0, 0, 0, 0.5); border: 1px solid #555; opacity: 0.35; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; }
+.slide-show-exit:hover, .slide-show-exit:focus-visible { opacity: 1; }
+.slide-show-hint { position: absolute; left: 16px; bottom: 10px; margin: 0; color: #aaa; font-size: 12px; }
+.slide-show-presenter { position: absolute; right: 16px; bottom: 40px; width: min(380px, 44vw); padding: 12px; background: rgba(20, 20, 24, 0.92); color: #f2f2f2; border-radius: 8px; font-size: 13px; }
+.slide-show-presenter[hidden] { display: none; }
+.slide-show-presenter-row { margin: 0 0 6px; display: flex; gap: 8px; justify-content: space-between; white-space: nowrap; align-items: baseline; }
+.slide-show-notes { margin: 0; max-height: 30vh; overflow: auto; white-space: pre-wrap; }
+.slide-laser-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #dc2626;
+  top: 48%;
+  left: 62%;
+  pointer-events: none;
+}
+.sb-textcolor-btn, .sb-highlight-btn { position: relative; }
+/* ---- slide show presenter panel --------------------------------------------------------------- */
+.slide-show-presenter-row strong { flex-shrink: 0; font-weight: 600; }
+.slide-show-presenter-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.slide-show-exit .eo-icon { width: 14px; height: 14px; }
+#doc-editor.manuscript-grid {
+  background-image:
+    linear-gradient(to right, rgba(110, 86, 207, 0.18) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(110, 86, 207, 0.18) 1px, transparent 1px);
+  background-size: calc(100% / 20) 28px;
+}

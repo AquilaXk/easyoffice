@@ -252,7 +252,7 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
   themeBtn.click();
   await flushAsyncTurns(10);
   assert.equal(document.activeElement, f2);
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
   f2.textContent = "888";
   f2.dispatchEvent({ type: "input", target: f2 });
@@ -262,11 +262,11 @@ test("focus-retaining ribbon and theme clicks refresh focused cell pendingSnapsh
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
   assert.equal(f2.textContent, "123");
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
-  assert.equal(document.documentElement.dataset.theme, "light");
+  assert.equal(document.documentElement.dataset.themeEffective, "light");
   assert.equal(f2.textContent, "123");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
@@ -665,10 +665,10 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   assert.equal(f2.textContent, baselineText);
 
   const btnTheme = document.getElementById("btn-theme-toggle");
-  assert.equal(document.documentElement.dataset.theme || "light", "light");
+  assert.equal(document.documentElement.dataset.themeEffective || "light", "light");
   btnTheme.click();
   await flushAsyncTurns(10);
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
   userClick(document.querySelector('[data-category="view"]'));
   await flushAsyncTurns(10);
@@ -676,15 +676,15 @@ test("evaluate_sheet batch targets anchor validation, Roman numeral sheet ident,
   assert.ok(ribbonThemeBtn);
   ribbonThemeBtn.click();
   await flushAsyncTurns(10);
-  assert.equal(document.documentElement.dataset.theme, "light");
+  assert.equal(document.documentElement.dataset.themeEffective, "light");
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns(10);
-  assert.equal(document.documentElement.dataset.theme, "light");
+  assert.equal(document.documentElement.dataset.themeEffective, "light");
 
   switchModule(document, "HWP");
   await flushAsyncTurns(10);

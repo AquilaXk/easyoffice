@@ -1693,3 +1693,21 @@
 - **Alternatives rejected** 각주를 각주 번호가 붙은 문단으로 본문 안에 끼우기(표식 위치 해석이 픽스처 한 건뿐), 문단 스타일의 글꼴도 가져오기(모든 런에 템플릿 글꼴이 붙음).
 - **Verified by** `cargo test -p easyoffice-formats --test pages_fixtures --test rich_script_and_layout`(도형·텍스트 상자 위치, 부록 문단, 글꼴·첨자·들여쓰기·줄 간격의 픽스처 값, 작성기별 XML과 DOCX·ODT 읽기).
 - **Revisit when** 문자열·기간·오류 셀이 있는 Pages 문서를 구하게 되었을 때, 각주 표식 위치를 연결할 때, ODT·HWPX 문단 서식 읽기를 추가할 때.
+
+## 73. UI 기준을 hop/rhwp-studio 크롬으로 통일하고 자체 디자인 시스템을 폐기 (PD-098)
+
+- **Status** Partially implemented (1단계: 토큰·테마·폰트). 2단계 이후(시작 창→홈 화면, 메뉴·도구 상자 교체와 리본 제거, 시트·슬라이드·PDF 재입힘, macOS 네이티브 메뉴·업데이트 알림)는 단계별 PR로 같은 절을 갱신합니다.
+- **Context** 사용자 결정: 자체 디자인 설계 없이 앱 전체를 hop(golbin/hop, MIT) 구조로 갑니다. hop의 UI는 rhwp-studio 크롬(메뉴 줄, 아이콘 도구 상자, 서식 도구줄, 상태 표시줄, 색 토큰)에 홈 화면·최근 문서·업데이트 알림 등을 얹은 것이고, EasyOffice의 `third_party/rhwp`는 hop과 같은 v0.8.7이라 같은 CSS를 이미 갖고 있습니다. 계획 전체는 `hop-plan` 검토 결과를 따릅니다.
+- **Decision (`PD-098`)**
+  1. **토큰**: 색·글꼴·간격·반경·그림자는 rhwp-studio `base.css`의 토큰(`--ui-*`, `--accent-*`, `--doc-*`, `--focus-ring`, `--font-family-ui` …)만 씁니다(`ui/tokens.css`, 값은 그대로, 출처 헤더와 THIRD_PARTY_NOTICES 고지). 라벤더 팔레트(`--eo-*`)와 `docs/design-system.md`의 Swift 시대 설명은 폐기하고, 그 문서는 이 결정의 토큰 사용 규칙으로 바꿨습니다.
+  2. **테마**: 모드는 시스템/밝게/어둡게 3택이고 기본은 시스템입니다. `<html data-theme-mode>`·`data-theme-effective`와 `color-scheme`을 `ui/theme.js`가 `<head>`에서 동기로 적용하고(첫 그림부터 올바름), 선택은 `localStorage`의 `easyoffice.theme-mode`에 저장하며 시스템 모드에서만 OS 변경을 따릅니다. 보기 메뉴에 `테마 > 시스템 설정/밝게/어둡게`(radio)가 있고 Ctrl+Alt+D(밝게/어둡게 전환)와 상단 버튼은 같은 API(`toggle`)로 명시 선택이 됩니다. 한글 편집기에는 모드(`system`/`light`/`dark`)를 그대로 전달합니다. 되돌리기 스냅샷의 `theme`은 모드 문자열입니다.
+  3. **모듈 강조색 폐기**: 모듈별 색(`--eo-accent-*`, 시작 카드·탭 배지·`module-swatch`·인스펙터의 "테마 색상")을 없애고 강조는 단일 `--accent-strong`(텍스트·선)와 `--ui-menu-open`(열린 메뉴)을 씁니다. 부트 JSON의 `palette`·`moduleAccents`와 레이아웃 크레이트의 `SignatureLavenderPalette`·`OfficeModuleKind::accent_hex`도 삭제했습니다(슬라이드 덱 내보내기용 `SlideDeckTheme::SignatureLavender`는 문서 내용 테마라 유지).
+  4. **고정 색**: 문서 종이와 슬라이드 쇼는 테마와 무관하게 자기 색을 갖습니다(rhwp의 `--doc-paper`와 같은 원칙). 이런 규칙은 `ui/content.css`에만 두고 리터럴 색을 허용하며, `#doc-editor`는 라이트 토큰을 다시 선언해 어두운 테마에서도 종이 안쪽이 밝게 유지됩니다(테스트가 라이트 값과의 일치를 검사). `styles.css`·`shell.css`에는 리터럴 색(검정 그림자 제외)과 `data-theme="…"` 선택자를 두지 않습니다.
+  5. **대비**: 크롬 글자 4.5:1, 아이콘 3:1을 토큰 값으로 계산하는 테스트(`test-webui-shell-chrome.mjs`)를 새 토큰에 맞춰 다시 썼습니다. rhwp 다크 값 중 흰 글자와 `--ui-menu-open`은 4.2:1이라 다크 테마의 열린 메뉴는 `--ui-selected` 바탕과 `--ui-text`로, 기본 버튼은 `--accent-strong` 바탕과 `--ui-bg` 글자로 그립니다.
+  6. **CSP·가드는 그대로**: hop CSP의 `unsafe-eval`·`style-src 'unsafe-inline'`은 채택하지 않습니다(`DESKTOP_SHELL_CSP`, `MAIN_CSP`, `STUDIO_CSP` 불변). hop 코드를 옮길 때는 TypeScript를 JavaScript로 다시 쓰고 인라인 `style` 속성은 클래스로 바꿉니다.
+  7. **고지**: hop·rhwp-studio에서 옮긴 파일은 머리에 출처를 쓰고 THIRD_PARTY_NOTICES의 `hop (code adapted)`·rhwp 절에 목록과 MIT 전문을 둡니다(PD-095 3항과 같은 방식).
+- **Why** 두 개의 디자인 체계를 유지하지 않고 한글 편집기(rhwp-studio)와 나머지 창이 같은 토큰·테마를 쓰게 하기 위함입니다.
+- **Trade-offs** 모듈을 색으로 구분하던 단서가 사라집니다(아이콘·창 제목으로 구분). rhwp의 일부 토큰(`--ui-text-hint` 등)은 작은 글자에서 대비가 낮아 그 위의 글자에는 쓰지 않습니다.
+- **Alternatives rejected** 라벤더를 rhwp 토큰 위에 별칭으로 유지(두 체계가 남음), hop CSP 채택(코드 실행 허용 범위 확대).
+- **Verified by** `node --test scripts/test-webui-theme.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shell.mjs`(모드 저장·OS 추종·라디오 메뉴, 리터럴 색·`--eo-` 잔재 없음, 정의된 토큰만 사용, 종이 팔레트, 대비), `node scripts/check-repo-hygiene.mjs`.
+- **Revisit when** 2단계 이후 PR이 메뉴·도구 상자·시작 화면을 바꿀 때마다 이 절의 상태와 `design-system.md`를 갱신합니다.
