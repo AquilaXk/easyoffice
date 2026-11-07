@@ -17,6 +17,9 @@ const SHELL_CSS: &str = include_str!("../ui/shell.css");
 const TOKENS_CSS: &str = include_str!("../ui/tokens.css");
 const CONTENT_CSS: &str = include_str!("../ui/content.css");
 const THEME_JS: &str = include_str!("../ui/theme.js");
+const HOME_CSS: &str = include_str!("../ui/home.css");
+const HOME_SCREEN_JS: &str = include_str!("../ui/home-screen.js");
+const RECENT_DIALOG_JS: &str = include_str!("../ui/recent-documents-dialog.js");
 const ICONS_JS: &str = include_str!("../ui/icons.js");
 const WINDOW_BRIDGE_JS: &str = include_str!("../ui/window-bridge.js");
 const SHEET_UTILS_JS: &str = include_str!("../ui/sheet-utils.js");
@@ -411,6 +414,17 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
         ("GET", "/shell.css") => ("200 OK", "text/css; charset=utf-8", SHELL_CSS.to_string()),
         ("GET", "/tokens.css") => ("200 OK", "text/css; charset=utf-8", TOKENS_CSS.to_string()),
         ("GET", "/content.css") => ("200 OK", "text/css; charset=utf-8", CONTENT_CSS.to_string()),
+        ("GET", "/home.css") => ("200 OK", "text/css; charset=utf-8", HOME_CSS.to_string()),
+        ("GET", "/home-screen.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            HOME_SCREEN_JS.to_string(),
+        ),
+        ("GET", "/recent-documents-dialog.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            RECENT_DIALOG_JS.to_string(),
+        ),
         ("GET", "/theme.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",

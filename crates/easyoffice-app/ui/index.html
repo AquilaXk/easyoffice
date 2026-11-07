@@ -12,28 +12,10 @@
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./shell.css" />
     <link rel="stylesheet" href="./content.css" />
+    <link rel="stylesheet" href="./home.css" />
   </head>
   <body>
     <div id="app" class="app-shell" data-module="DOC" data-window-kind="document">
-      <section id="start-screen" class="start-screen" aria-label="시작 화면" hidden>
-        <header class="start-header">
-          <h1 class="start-title">EasyOffice</h1>
-          <p class="start-subtitle">새 문서를 만들거나 파일을 열어 시작하세요. 문서마다 별도 창에서 열립니다.</p>
-        </header>
-        <div class="start-actions" role="group" aria-label="새 문서 만들기">
-          <button type="button" class="start-card" data-window-new="DOC"><span class="start-card-icon" data-icon="file-doc"></span><span class="start-card-text"><strong>문서</strong><small>DOCX</small></span></button>
-          <button type="button" class="start-card" data-window-new="HWP"><span class="start-card-icon" data-icon="file-hwp"></span><span class="start-card-text"><strong>한글 문서</strong><small>HWP · HWPX</small></span></button>
-          <button type="button" class="start-card" data-window-new="SHEET"><span class="start-card-icon" data-icon="file-sheet"></span><span class="start-card-text"><strong>스프레드시트</strong><small>XLSX</small></span></button>
-          <button type="button" class="start-card" data-window-new="SLIDE"><span class="start-card-icon" data-icon="file-slide"></span><span class="start-card-text"><strong>프레젠테이션</strong><small>PPTX</small></span></button>
-          <button type="button" class="start-card" data-window-new="PDF"><span class="start-card-icon" data-icon="file-pdf"></span><span class="start-card-text"><strong>PDF 스튜디오</strong><small>PDF</small></span></button>
-          <button type="button" class="start-card" data-window-new="CONV"><span class="start-card-icon" data-icon="file-convert"></span><span class="start-card-text"><strong>포맷 변환기</strong><small>변환</small></span></button>
-        </div>
-        <button type="button" id="start-open" class="start-open" data-file-open="true"><span class="icon-slot" data-icon="folder-open"></span>파일 열기…<span class="start-open-hint">Ctrl+O</span></button>
-        <section id="start-recent" class="start-recent" aria-label="최근 문서" hidden>
-          <h2 class="start-recent-title">최근 문서</h2>
-          <div id="start-recent-list" class="start-recent-list"></div>
-        </section>
-      </section>
       <header id="menu-bar" class="topbar" role="banner">
         <div class="studio-menubar" role="menubar" aria-label="스튜디오 주 메뉴">
           <div class="menu-item" data-menu="file">
@@ -55,6 +37,8 @@
                 <span class="md-label">최근 문서</span><span class="md-caret" data-icon="chevron-right"></span>
                 <div id="recent-menu-list" class="menu-dropdown md-submenu" role="menu" aria-label="최근 문서 목록">
                   <div id="recent-menu-empty" class="md-item md-empty" role="menuitem" aria-disabled="true"><span class="md-label">최근 문서가 없습니다</span></div>
+                  <div class="md-sep" id="recent-menu-sep" hidden></div>
+                  <button type="button" id="recent-dialog-open" class="md-item" role="menuitem" data-recent-dialog-open="true" hidden><span class="md-label">전체 목록 보기…</span></button>
                 </div>
               </div>
               <div class="md-sep"></div>
@@ -906,6 +890,7 @@
     <dialog id="about-dialog" class="close-dialog" aria-labelledby="about-dialog-title">
       <div class="close-dialog-panel">
         <h2 id="about-dialog-title" class="close-dialog-title">EasyOffice 제품 정보</h2>
+        <p id="about-version" class="about-version" hidden></p>
         <p class="close-dialog-text">문서 · 한글 · 스프레드시트 · 프레젠테이션 · PDF를 오프라인으로 다루는 작업 공간입니다.</p>
         <div class="about-diagnostics" aria-label="진단 정보">
           <span id="platform-pill" class="platform-pill">플랫폼 확인 중</span>
@@ -952,6 +937,8 @@
     <script src="./doc-runs-ui.js"></script>
     <script src="./save-payload.js"></script>
     <script src="./desktop-bridge.js"></script>
+    <script src="./home-screen.js"></script>
+    <script src="./recent-documents-dialog.js"></script>
     <script src="./window-bridge.js"></script>
     <script src="./workspace-tools.js"></script>
     <script src="./workspace-panels.js"></script>

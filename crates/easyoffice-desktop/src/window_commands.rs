@@ -156,9 +156,6 @@ fn build_window(
             .inner_size(size.0, size.1)
             .min_inner_size(min.0, min.1)
             .on_navigation(crate::is_app_origin);
-    if kind == WindowKind::Start {
-        builder = builder.maximizable(false);
-    }
     builder = match monitor {
         Some(m) => {
             let index = locked(&app.state::<AppWindows>().registry).document_window_count();
