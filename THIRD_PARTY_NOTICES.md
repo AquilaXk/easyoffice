@@ -8774,6 +8774,8 @@ hop (MIT, https://github.com/golbin/hop, reference commit `80888af`, v0.4.5) is 
 | --- | --- | --- |
 | `crates/easyoffice-app/ui/home-screen.js` | `apps/studio-host/src/ui/home-screen.ts` | TypeScript rewritten as JavaScript; six new-document buttons with icons, cards without paths or previews, opening through the window bridge |
 | `crates/easyoffice-app/ui/recent-documents-dialog.js` | `apps/studio-host/src/ui/recent-documents-dialog.ts` | TypeScript rewritten as JavaScript; entries are `{ id, name, kind }`, no clear button |
+| `crates/easyoffice-app/ui/custom-select.js` | `apps/studio-host/src/ui/custom-select.ts` | TypeScript rewritten as JavaScript; only `select.sb-combo` is enhanced, programmatic `value` assignments refresh the label |
+| `crates/easyoffice-app/ui/toolbar.css` (combo box rules) | `apps/studio-host/src/styles/custom-select.css` | Generic `.custom-select*` rules with EasyOffice widths for the slide toolbar |
 | `crates/easyoffice-app/ui/home.css` | `apps/studio-host/src/styles/home-screen.css`, `recent-documents-dialog.css` | Same rules and class names; flex child instead of an absolute layer, action icons, modal base rules from rhwp-studio `dialogs.css` |
 
 Colour and theme code taken from rhwp-studio is listed in the rhwp section.

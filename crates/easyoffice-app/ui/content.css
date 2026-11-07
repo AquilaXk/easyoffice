@@ -5,6 +5,13 @@
  * UI chrome may use a literal colour; `scripts/test-webui-theme.mjs` allows them only here. */
 .sb-textcolor-btn { border-bottom: 3px solid #d93025; }
 .sb-highlight-btn { border-bottom: 3px solid #fbbc04; }
+/* The slide editing stage is a sheet of paper like the page: dark text on white in both themes. */
+.slide-stage {
+  --ui-text: #333333;
+  --ui-text-muted: #666666;
+  --ui-border-light: #d0d0d0;
+  color: var(--ui-text);
+}
 #doc-editor {
   /* The page keeps the light palette in both themes: scripts/test-webui-theme.mjs checks these
      against the light tokens. */

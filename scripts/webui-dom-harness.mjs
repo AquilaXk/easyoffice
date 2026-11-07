@@ -36,6 +36,7 @@ const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/doc-runs-ui.js",
   "../crates/easyoffice-app/ui/desktop-bridge.js",
   "../crates/easyoffice-app/ui/window-bridge.js",
+  "../crates/easyoffice-app/ui/custom-select.js",
   "../crates/easyoffice-app/ui/workspace-scrub.js",
   "../crates/easyoffice-app/ui/workspace-tools.js",
   "../crates/easyoffice-app/ui/workspace-panels.js",

@@ -691,7 +691,9 @@
         slideLaserActive = !slideLaserActive;
         const dot = document.getElementById("slide-laser-dot");
         if (dot) dot.hidden = !slideLaserActive;
-        btnSlideLaser.textContent = slideLaserActive ? "레이저 포인터: 켬" : "레이저 포인터: 끔";
+        const label = slideLaserActive ? "레이저 포인터: 켬" : "레이저 포인터: 끔";
+        btnSlideLaser.title = label;
+        btnSlideLaser.setAttribute("aria-pressed", String(slideLaserActive));
       });
     }
 
@@ -894,6 +896,7 @@
 
   async function initWorkspace() {
     icons.applyIcons(document);
+    host.__EASYOFFICE_CUSTOM_SELECT__.enhanceCustomSelects(document);
     void shellChrome.applyStoredTheme();
     shellChrome.bind();
     workspacePanels.ensureDefaultDocTabStore();

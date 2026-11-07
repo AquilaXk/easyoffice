@@ -39,9 +39,9 @@
 .slide-notes-box label { font-size: 12px; color: var(--ui-text-muted); white-space: nowrap; }
 .converter-surface p { font-size: 13px; color: var(--ui-text-muted); }
 #conv-source-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ui-text-muted); }
-.slide-toolbar, .pdf-toolbar { flex-wrap: wrap; row-gap: 6px; }
-.slide-toolbar .secondary-btn, .pdf-toolbar .secondary-btn { display: inline-flex; align-items: center; gap: 5px; }
-.slide-toolbar .cmd-input, .pdf-toolbar .cmd-input, .conv-source-row .cmd-input, .formula-bar select.cmd-input { width: auto; margin: 0; padding: 4px 8px; font-size: 12px; }
+.pdf-toolbar { flex-wrap: wrap; row-gap: 6px; }
+.pdf-toolbar .secondary-btn { display: inline-flex; align-items: center; gap: 5px; }
+.pdf-toolbar .cmd-input, .conv-source-row .cmd-input, .formula-bar select.cmd-input { width: auto; margin: 0; padding: 4px 8px; font-size: 12px; }
 /* ---- status bar ------------------------------------------------------------------------------- */
 .statusbar { height: 24px; gap: 12px; padding: 0 10px; color: var(--ui-text-secondary); overflow: hidden; }
 /* Page, position, input mode, file name, transient message and zoom; the file name and the message
