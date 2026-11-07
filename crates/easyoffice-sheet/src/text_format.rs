@@ -300,60 +300,40 @@ fn pad_char(ph: char) -> Option<char> {
     }
 }
 
-fn format_number_section(section: &[Tok], value: f64) -> String {
-    if section.is_empty() {
-        return String::new();
-    }
-    if section.contains(&Tok::General) || !section.iter().any(|t| matches!(t, Tok::Digit(_))) {
-        let mut out = String::new();
-        for t in section {
-            match t {
-                Tok::General | Tok::At => out.push_str(&format_general_number(value)),
-                Tok::Lit(s) => out.push_str(s),
-                Tok::Percent => out.push('%'),
-                Tok::Dot => out.push('.'),
-                Tok::Comma => out.push(','),
-                _ => {}
-            }
-        }
-        return out;
-    }
-
-    let first_digit = section.iter().position(|t| matches!(t, Tok::Digit(_)));
-    let last_digit = section.iter().rposition(|t| matches!(t, Tok::Digit(_)));
-    let (Some(first_digit), Some(last_digit)) = (first_digit, last_digit) else {
-        return String::new();
-    };
-    let exp_pos = section.iter().position(|t| matches!(t, Tok::Exp(_)));
-    let mantissa_end = exp_pos.unwrap_or(last_digit + 1);
-    let dot_pos = section[..mantissa_end].iter().position(|t| *t == Tok::Dot);
-    let int_end = dot_pos.unwrap_or(mantissa_end);
-    let scan_end = exp_pos.unwrap_or(section.len());
-
-    let int_phs: Vec<char> = section[..int_end]
+/// Digit placeholder characters (`0`, `#`, `?`) of the given tokens.
+fn digit_placeholders(tokens: &[Tok]) -> Vec<char> {
+    tokens
         .iter()
-        .filter_map(|t| {
-            if let Tok::Digit(c) = t {
-                Some(*c)
-            } else {
-                None
-            }
+        .filter_map(|t| match t {
+            Tok::Digit(c) => Some(*c),
+            _ => None,
         })
-        .collect();
-    let frac_phs: Vec<char> = dot_pos.map_or_else(Vec::new, |d| {
-        section[d + 1..mantissa_end]
-            .iter()
-            .filter_map(|t| {
-                if let Tok::Digit(c) = t {
-                    Some(*c)
-                } else {
-                    None
-                }
-            })
-            .take(MAX_FRACTION_DIGITS)
-            .collect()
-    });
+        .collect()
+}
 
+/// Formats a section without digit placeholders (or with `General`).
+fn format_general_section(section: &[Tok], value: f64) -> String {
+    let mut out = String::new();
+    for t in section {
+        match t {
+            Tok::General | Tok::At => out.push_str(&format_general_number(value)),
+            Tok::Lit(s) => out.push_str(s),
+            Tok::Percent => out.push('%'),
+            Tok::Dot => out.push('.'),
+            Tok::Comma => out.push(','),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Classifies commas in the numeric part: `(thousands grouping, trailing scale commas)`.
+fn classify_commas(
+    section: &[Tok],
+    first_digit: usize,
+    scan_end: usize,
+    dot_pos: Option<usize>,
+) -> (bool, i32) {
     let mut grouping = false;
     let mut scale_commas = 0i32;
     for (idx, t) in section.iter().enumerate().take(scan_end) {
@@ -370,30 +350,23 @@ fn format_number_section(section: &[Tok], value: f64) -> String {
             scale_commas += 1;
         }
     }
-    let percent_count = section.iter().filter(|t| **t == Tok::Percent).count() as i32;
+    (grouping, scale_commas)
+}
 
-    let mut v = value * 100f64.powi(percent_count) / 1000f64.powi(scale_commas);
-    let mut exponent = 0i32;
-    if exp_pos.is_some() && v != 0.0 {
-        let int_digits = int_phs.len().max(1) as i32;
-        exponent = v.log10().floor() as i32 - (int_digits - 1);
-        let mut mantissa = round_half_away(v / 10f64.powi(exponent), frac_phs.len());
-        if mantissa >= 10f64.powi(int_digits) {
-            exponent += 1;
-            mantissa = round_half_away(v / 10f64.powi(exponent), frac_phs.len());
-        }
-        v = mantissa;
+/// Normalizes `v` to scientific notation; returns `(mantissa, exponent)`.
+fn scientific_parts(v: f64, int_placeholders: usize, frac_len: usize) -> (f64, i32) {
+    let int_digits = int_placeholders.max(1) as i32;
+    let mut exponent = v.log10().floor() as i32 - (int_digits - 1);
+    let mut mantissa = round_half_away(v / 10f64.powi(exponent), frac_len);
+    if mantissa >= 10f64.powi(int_digits) {
+        exponent += 1;
+        mantissa = round_half_away(v / 10f64.powi(exponent), frac_len);
     }
-    let rounded = round_half_away(v, frac_phs.len());
-    let prec = frac_phs.len();
-    let raw = format!("{rounded:.prec$}");
-    let (int_raw, frac_raw) = raw.split_once('.').unwrap_or((raw.as_str(), ""));
-    let int_digits: Vec<char> = if int_raw == "0" {
-        Vec::new()
-    } else {
-        int_raw.chars().collect()
-    };
+    (mantissa, exponent)
+}
 
+/// Distributes integer digits (right-aligned) over the integer placeholders.
+fn layout_int_slots(int_phs: &[char], int_digits: &[char]) -> Vec<String> {
     let n_int = int_phs.len();
     let mut int_slots: Vec<String> = vec![String::new(); n_int];
     for k in 0..n_int {
@@ -408,12 +381,11 @@ fn format_number_section(section: &[Tok], value: f64) -> String {
         let overflow: String = int_digits[..int_digits.len() - n_int].iter().collect();
         int_slots[0].insert_str(0, &overflow);
     }
-    let int_block = if grouping {
-        Some(group_thousands(&int_slots.concat()))
-    } else {
-        None
-    };
+    int_slots
+}
 
+/// Fraction digit slots with optional trailing zeros blanked or space-padded per placeholder.
+fn layout_frac_slots(frac_raw: &str, frac_phs: &[char]) -> Vec<String> {
     let mut frac_slots: Vec<String> = frac_raw
         .chars()
         .zip(frac_phs.iter())
@@ -425,72 +397,139 @@ fn format_number_section(section: &[Tok], value: f64) -> String {
         }
         frac_slots[idx] = pad_char(frac_phs[idx]).map_or_else(String::new, |c| c.to_string());
     }
+    frac_slots
+}
 
+/// Precomputed digit layout used while emitting a numeric section.
+struct NumberLayout {
+    int_digits: Vec<char>,
+    int_slots: Vec<String>,
+    int_block: Option<String>,
+    frac_slots: Vec<String>,
+    exponent: i32,
+    exp_min_len: usize,
+    dot_pos: Option<usize>,
+}
+
+/// Appends the exponent part (`E+05` style) to `out`.
+fn push_exponent(out: &mut String, plus: bool, exponent: i32, min_len: usize) {
+    out.push('E');
+    if exponent < 0 {
+        out.push('-');
+    } else if plus {
+        out.push('+');
+    }
+    let digits = exponent.unsigned_abs().to_string();
+    for _ in digits.len()..min_len {
+        out.push('0');
+    }
+    out.push_str(&digits);
+}
+
+fn emit_number_section(section: &[Tok], layout: &NumberLayout, value: f64) -> String {
     let mut out = String::new();
     let mut int_idx = 0usize;
     let mut frac_idx = 0usize;
     let mut in_exponent = false;
-    let exp_phs: Vec<char> = exp_pos.map_or_else(Vec::new, |e| {
-        section[e + 1..]
-            .iter()
-            .filter_map(|t| {
-                if let Tok::Digit(c) = t {
-                    Some(*c)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    });
     for (idx, t) in section.iter().enumerate() {
         match t {
             Tok::Digit(_) if in_exponent => {}
-            Tok::Digit(_) if dot_pos.is_none_or(|d| idx < d) => {
-                if let Some(ref block) = int_block {
+            Tok::Digit(_) if layout.dot_pos.is_none_or(|d| idx < d) => {
+                if let Some(ref block) = layout.int_block {
                     if int_idx == 0 {
                         out.push_str(block);
                     }
-                } else if let Some(slot) = int_slots.get(int_idx) {
+                } else if let Some(slot) = layout.int_slots.get(int_idx) {
                     out.push_str(slot);
                 }
                 int_idx += 1;
             }
             Tok::Digit(_) => {
-                if let Some(slot) = frac_slots.get(frac_idx) {
+                if let Some(slot) = layout.frac_slots.get(frac_idx) {
                     out.push_str(slot);
                 }
                 frac_idx += 1;
             }
-            Tok::Dot if Some(idx) == dot_pos => {
-                if n_int == 0 {
-                    out.extend(int_digits.iter());
+            Tok::Dot if Some(idx) == layout.dot_pos => {
+                if layout.int_slots.is_empty() {
+                    out.extend(layout.int_digits.iter());
                 }
                 out.push('.');
             }
             Tok::Dot => out.push('.'),
-            Tok::Comma => {}
             Tok::Percent => out.push('%'),
             Tok::Lit(s) => out.push_str(s),
             Tok::Exp(plus) => {
                 in_exponent = true;
-                out.push('E');
-                if exponent < 0 {
-                    out.push('-');
-                } else if *plus {
-                    out.push('+');
-                }
-                let digits = exponent.unsigned_abs().to_string();
-                let min_len = exp_phs.iter().filter(|&&c| c == '0').count();
-                for _ in digits.len()..min_len {
-                    out.push('0');
-                }
-                out.push_str(&digits);
+                push_exponent(&mut out, *plus, layout.exponent, layout.exp_min_len);
             }
             Tok::General | Tok::At => out.push_str(&format_general_number(value)),
             _ => {}
         }
     }
     out
+}
+
+fn format_number_section(section: &[Tok], value: f64) -> String {
+    if section.is_empty() {
+        return String::new();
+    }
+    if section.contains(&Tok::General) || !section.iter().any(|t| matches!(t, Tok::Digit(_))) {
+        return format_general_section(section, value);
+    }
+
+    let first_digit = section.iter().position(|t| matches!(t, Tok::Digit(_)));
+    let last_digit = section.iter().rposition(|t| matches!(t, Tok::Digit(_)));
+    let (Some(first_digit), Some(last_digit)) = (first_digit, last_digit) else {
+        return String::new();
+    };
+    let exp_pos = section.iter().position(|t| matches!(t, Tok::Exp(_)));
+    let mantissa_end = exp_pos.unwrap_or(last_digit + 1);
+    let dot_pos = section[..mantissa_end].iter().position(|t| *t == Tok::Dot);
+    let int_end = dot_pos.unwrap_or(mantissa_end);
+    let scan_end = exp_pos.unwrap_or(section.len());
+
+    let int_phs = digit_placeholders(&section[..int_end]);
+    let frac_phs: Vec<char> = dot_pos.map_or_else(Vec::new, |d| {
+        let mut phs = digit_placeholders(&section[d + 1..mantissa_end]);
+        phs.truncate(MAX_FRACTION_DIGITS);
+        phs
+    });
+    let (grouping, scale_commas) = classify_commas(section, first_digit, scan_end, dot_pos);
+    let percent_count = section.iter().filter(|t| **t == Tok::Percent).count() as i32;
+
+    let mut v = value * 100f64.powi(percent_count) / 1000f64.powi(scale_commas);
+    let mut exponent = 0i32;
+    if exp_pos.is_some() && v != 0.0 {
+        (v, exponent) = scientific_parts(v, int_phs.len(), frac_phs.len());
+    }
+    let prec = frac_phs.len();
+    let raw = format!("{:.prec$}", round_half_away(v, prec));
+    let (int_raw, frac_raw) = raw.split_once('.').unwrap_or((raw.as_str(), ""));
+    let int_digits: Vec<char> = if int_raw == "0" {
+        Vec::new()
+    } else {
+        int_raw.chars().collect()
+    };
+
+    let int_slots = layout_int_slots(&int_phs, &int_digits);
+    let int_block = grouping.then(|| group_thousands(&int_slots.concat()));
+    let exp_min_len = exp_pos.map_or(0, |e| {
+        digit_placeholders(&section[e + 1..])
+            .iter()
+            .filter(|&&c| c == '0')
+            .count()
+    });
+    let layout = NumberLayout {
+        int_digits,
+        int_slots,
+        int_block,
+        frac_slots: layout_frac_slots(frac_raw, &frac_phs),
+        exponent,
+        exp_min_len,
+        dot_pos,
+    };
+    emit_number_section(section, &layout, value)
 }
 
 fn civil_from_serial_display(days: i64) -> (i64, i64, i64) {

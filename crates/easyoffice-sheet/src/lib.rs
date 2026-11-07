@@ -574,36 +574,9 @@ impl SheetEngine {
                     EvaluatedCellValue::Error(FormulaError::Value)
                 }
             }
-            Expr::UnaryPlus(inner) => {
-                let val = self.eval_expr_ctx(inner, ctx, depth);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                match val.as_number() {
-                    Some(n) => EvaluatedCellValue::Number(n),
-                    None => EvaluatedCellValue::Error(FormulaError::Value),
-                }
-            }
-            Expr::UnaryMinus(inner) => {
-                let val = self.eval_expr_ctx(inner, ctx, depth);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                match val.as_number() {
-                    Some(n) => EvaluatedCellValue::Number(-n),
-                    None => EvaluatedCellValue::Error(FormulaError::Value),
-                }
-            }
-            Expr::PostfixPercent(inner) => {
-                let val = self.eval_expr_ctx(inner, ctx, depth);
-                if let EvaluatedCellValue::Error(e) = val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                match val.as_number() {
-                    Some(n) => EvaluatedCellValue::Number(n / 100.0),
-                    None => EvaluatedCellValue::Error(FormulaError::Value),
-                }
-            }
+            Expr::UnaryPlus(inner) => self.eval_unary(inner, ctx, depth, |n| n),
+            Expr::UnaryMinus(inner) => self.eval_unary(inner, ctx, depth, |n| -n),
+            Expr::PostfixPercent(inner) => self.eval_unary(inner, ctx, depth, |n| n / 100.0),
             Expr::Binary { op, lhs, rhs } if !matches!(**lhs, Expr::Binary { .. }) => {
                 // Single operator (no left-nested chain): evaluate both sides without a scratch Vec.
                 let l_val = self.eval_expr_ctx(lhs, ctx, depth);
@@ -616,67 +589,102 @@ impl SheetEngine {
                 }
                 Self::apply_binary_op(*op, l_val, r_val)
             }
-            Expr::Binary { .. } => {
-                // Left-nested chains are folded iteratively (no recursion on long chains); the
-                // first 8 operators live on the stack so typical formulas never allocate.
-                let mut inline: [Option<(BinaryOp, &Expr)>; 8] = [None; 8];
-                let mut spill: Vec<(BinaryOp, &Expr)> = Vec::new();
-                let mut count = 0usize;
-                let mut cur = expr;
-                while let Expr::Binary { op, lhs, rhs } = cur {
-                    if count < inline.len() {
-                        inline[count] = Some((*op, &**rhs));
-                    } else {
-                        spill.push((*op, &**rhs));
-                    }
-                    count += 1;
-                    cur = lhs;
-                }
-                let mut l_val = self.eval_expr_ctx(cur, ctx, depth);
-                if let EvaluatedCellValue::Error(e) = l_val {
-                    return EvaluatedCellValue::Error(e);
-                }
-                for idx in (0..count).rev() {
-                    let (op, rhs) = if idx >= inline.len() {
-                        spill[idx - inline.len()]
-                    } else {
-                        inline[idx].expect("slot filled while walking the spine")
-                    };
-                    let r_val = self.eval_expr_ctx(rhs, ctx, depth);
-                    if let EvaluatedCellValue::Error(e) = r_val {
-                        return EvaluatedCellValue::Error(e);
-                    }
-                    l_val = Self::apply_binary_op(op, l_val, r_val);
-                    if let EvaluatedCellValue::Error(e) = l_val {
-                        return EvaluatedCellValue::Error(e);
-                    }
-                }
-                l_val
-            }
-            Expr::FuncCall { name, args } => match name.as_str() {
-                // Hot path: same semantics as the `IF` arm of the function table, without the
-                // multi-stage name dispatch.
-                "IF" if (2..=3).contains(&args.len()) => {
-                    let cond = self.eval_expr_ctx(&args[0], ctx, depth);
-                    if let EvaluatedCellValue::Error(e) = cond {
-                        return EvaluatedCellValue::Error(e);
-                    }
-                    match cond.as_bool() {
-                        None => EvaluatedCellValue::Error(FormulaError::Value),
-                        Some(true) => self.eval_expr_ctx(&args[1], ctx, depth),
-                        Some(false) if args.len() == 3 => self.eval_expr_ctx(&args[2], ctx, depth),
-                        Some(false) => EvaluatedCellValue::Boolean(false),
-                    }
-                }
-                "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK"
-                | "PRODUCT" => match self.eval_streaming_range_agg_ctx(name, args, ctx, depth) {
-                    Ok(v) => v,
-                    Err(e) => EvaluatedCellValue::Error(e),
-                },
-                _ => self.eval_func_ctx(name, args, ctx, depth),
-            },
+            Expr::Binary { .. } => self.eval_binary_chain(expr, ctx, depth),
+            Expr::FuncCall { name, args } => self.eval_func_call_expr(name, args, ctx, depth),
         };
         crate::coercion::sanitize_evaluated_value(res)
+    }
+
+    /// Unary operator / postfix percent: propagates errors, coerces to a number and maps it.
+    fn eval_unary(
+        &self,
+        inner: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+        map: impl FnOnce(f64) -> f64,
+    ) -> EvaluatedCellValue {
+        let val = self.eval_expr_ctx(inner, ctx, depth);
+        if let EvaluatedCellValue::Error(e) = val {
+            return EvaluatedCellValue::Error(e);
+        }
+        match val.as_number() {
+            Some(n) => EvaluatedCellValue::Number(map(n)),
+            None => EvaluatedCellValue::Error(FormulaError::Value),
+        }
+    }
+
+    /// Left-nested binary chains are folded iteratively (no recursion on long chains); the
+    /// first 8 operators live on the stack so typical formulas never allocate.
+    fn eval_binary_chain(
+        &self,
+        expr: &Expr,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> EvaluatedCellValue {
+        let mut inline: [Option<(BinaryOp, &Expr)>; 8] = [None; 8];
+        let mut spill: Vec<(BinaryOp, &Expr)> = Vec::new();
+        let mut count = 0usize;
+        let mut cur = expr;
+        while let Expr::Binary { op, lhs, rhs } = cur {
+            if count < inline.len() {
+                inline[count] = Some((*op, &**rhs));
+            } else {
+                spill.push((*op, &**rhs));
+            }
+            count += 1;
+            cur = lhs;
+        }
+        let mut l_val = self.eval_expr_ctx(cur, ctx, depth);
+        if let EvaluatedCellValue::Error(e) = l_val {
+            return EvaluatedCellValue::Error(e);
+        }
+        for idx in (0..count).rev() {
+            let (op, rhs) = if idx >= inline.len() {
+                spill[idx - inline.len()]
+            } else {
+                inline[idx].expect("slot filled while walking the spine")
+            };
+            let r_val = self.eval_expr_ctx(rhs, ctx, depth);
+            if let EvaluatedCellValue::Error(e) = r_val {
+                return EvaluatedCellValue::Error(e);
+            }
+            l_val = Self::apply_binary_op(op, l_val, r_val);
+            if let EvaluatedCellValue::Error(e) = l_val {
+                return EvaluatedCellValue::Error(e);
+            }
+        }
+        l_val
+    }
+
+    fn eval_func_call_expr(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> EvaluatedCellValue {
+        match name {
+            // Hot path: same semantics as the `IF` arm of the function table, without the
+            // multi-stage name dispatch.
+            "IF" if (2..=3).contains(&args.len()) => {
+                let cond = self.eval_expr_ctx(&args[0], ctx, depth);
+                if let EvaluatedCellValue::Error(e) = cond {
+                    return EvaluatedCellValue::Error(e);
+                }
+                match cond.as_bool() {
+                    None => EvaluatedCellValue::Error(FormulaError::Value),
+                    Some(true) => self.eval_expr_ctx(&args[1], ctx, depth),
+                    Some(false) if args.len() == 3 => self.eval_expr_ctx(&args[2], ctx, depth),
+                    Some(false) => EvaluatedCellValue::Boolean(false),
+                }
+            }
+            "SUM" | "AVERAGE" | "AVG" | "MIN" | "MAX" | "COUNT" | "COUNTA" | "COUNTBLANK"
+            | "PRODUCT" => match self.eval_streaming_range_agg_ctx(name, args, ctx, depth) {
+                Ok(v) => v,
+                Err(e) => EvaluatedCellValue::Error(e),
+            },
+            _ => self.eval_func_ctx(name, args, ctx, depth),
+        }
     }
 
     pub(crate) fn apply_binary_op(
