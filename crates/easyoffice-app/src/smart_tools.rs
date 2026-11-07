@@ -393,90 +393,88 @@ impl DocumentSecurityAuditor {
         matches!(b, b'-' | b'.' | b' ')
     }
 
+    /// Index after a `3-4 digits, separator, 4 digits` tail starting at `start`, when it ends
+    /// at a non-digit boundary.
+    fn match_phone_tail(bytes: &[u8], start: usize, sep: u8) -> Option<usize> {
+        let p_mid = Self::consume_digits(bytes, start, 3, 4)?;
+        if bytes.get(p_mid) != Some(&sep) {
+            return None;
+        }
+        let p_end = Self::consume_digits(bytes, p_mid + 1, 4, 4)?;
+        (p_end == bytes.len() || !bytes[p_end].is_ascii_digit()).then_some(p_end)
+    }
+
+    /// Skips one optional phone separator at `p`.
+    fn skip_optional_sep(bytes: &[u8], p: usize) -> usize {
+        if p < bytes.len() && Self::is_phone_sep(bytes[p]) {
+            p + 1
+        } else {
+            p
+        }
+    }
+
+    fn match_intl_phone(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+        if idx + 3 > bytes.len() || &bytes[idx..idx + 3] != b"+82" {
+            return None;
+        }
+        let p = Self::skip_optional_sep(bytes, idx + 3);
+        let p_area = Self::consume_digits(bytes, p, 1, 3)?;
+        let p2 = Self::skip_optional_sep(bytes, p_area);
+        let p_mid = Self::consume_digits(bytes, p2, 3, 4)?;
+        let p3 = Self::skip_optional_sep(bytes, p_mid);
+        let p_end = Self::consume_digits(bytes, p3, 4, 4)?;
+        (p_end == bytes.len() || !bytes[p_end].is_ascii_digit())
+            .then_some((p_end - idx, "+82-**-****-****"))
+    }
+
+    fn match_mobile_phone(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+        if idx + 3 > bytes.len() || bytes[idx] != b'0' || bytes[idx + 1] != b'1' {
+            return None;
+        }
+        let mask = Self::mobile_mask_for_third_digit(bytes[idx + 2])?;
+        let p = idx + 3;
+        if p < bytes.len() && Self::is_phone_sep(bytes[p]) {
+            return Self::match_phone_tail(bytes, p + 1, bytes[p]).map(|end| (end - idx, mask));
+        }
+        let plain_digits = idx + 11 <= bytes.len()
+            && bytes[idx..idx + 11].iter().all(u8::is_ascii_digit)
+            && (idx + 11 == bytes.len() || !bytes[idx + 11].is_ascii_digit());
+        plain_digits.then_some((11, mask))
+    }
+
+    fn match_seoul_phone(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+        let is_prefix = idx + 3 <= bytes.len()
+            && bytes[idx] == b'0'
+            && bytes[idx + 1] == b'2'
+            && Self::is_phone_sep(bytes[idx + 2]);
+        if !is_prefix {
+            return None;
+        }
+        Self::match_phone_tail(bytes, idx + 3, bytes[idx + 2])
+            .map(|end| (end - idx, "02-****-****"))
+    }
+
+    fn match_regional_phone(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
+        let is_prefix = idx + 4 <= bytes.len()
+            && bytes[idx] == b'0'
+            && (b'3'..=b'6').contains(&bytes[idx + 1])
+            && (b'1'..=b'5').contains(&bytes[idx + 2])
+            && Self::is_phone_sep(bytes[idx + 3]);
+        if !is_prefix {
+            return None;
+        }
+        Self::match_phone_tail(bytes, idx + 4, bytes[idx + 3])
+            .map(|end| (end - idx, "***-****-****"))
+    }
+
     fn match_phone_at(bytes: &[u8], idx: usize) -> Option<(usize, &'static str)> {
         if idx > 0 && (bytes[idx - 1].is_ascii_digit() || bytes[idx - 1] == b'+') {
             return None;
         }
-        if idx + 3 <= bytes.len() && &bytes[idx..idx + 3] == b"+82" {
-            let mut p = idx + 3;
-            if p < bytes.len() && Self::is_phone_sep(bytes[p]) {
-                p += 1;
-            }
-            let p_area = Self::consume_digits(bytes, p, 1, 3)?;
-            let mut p2 = p_area;
-            if p2 < bytes.len() && Self::is_phone_sep(bytes[p2]) {
-                p2 += 1;
-            }
-            let p_mid = Self::consume_digits(bytes, p2, 3, 4)?;
-            let mut p3 = p_mid;
-            if p3 < bytes.len() && Self::is_phone_sep(bytes[p3]) {
-                p3 += 1;
-            }
-            let p_end = Self::consume_digits(bytes, p3, 4, 4)?;
-            if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
-                return Some((p_end - idx, "+82-**-****-****"));
-            }
-        }
-
-        if idx + 3 <= bytes.len() && bytes[idx] == b'0' && bytes[idx + 1] == b'1' {
-            if let Some(mask) = Self::mobile_mask_for_third_digit(bytes[idx + 2]) {
-                let p = idx + 3;
-                if p < bytes.len() && Self::is_phone_sep(bytes[p]) {
-                    let sep = bytes[p];
-                    if let Some(p_mid) = Self::consume_digits(bytes, p + 1, 3, 4) {
-                        if p_mid < bytes.len() && bytes[p_mid] == sep {
-                            if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
-                                if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
-                                    return Some((p_end - idx, mask));
-                                }
-                            }
-                        }
-                    }
-                } else if idx + 11 <= bytes.len()
-                    && bytes[idx..idx + 11].iter().all(u8::is_ascii_digit)
-                    && (idx + 11 == bytes.len() || !bytes[idx + 11].is_ascii_digit())
-                {
-                    return Some((11, mask));
-                }
-            }
-        }
-
-        if idx + 3 <= bytes.len()
-            && bytes[idx] == b'0'
-            && bytes[idx + 1] == b'2'
-            && Self::is_phone_sep(bytes[idx + 2])
-        {
-            let sep = bytes[idx + 2];
-            if let Some(p_mid) = Self::consume_digits(bytes, idx + 3, 3, 4) {
-                if p_mid < bytes.len() && bytes[p_mid] == sep {
-                    if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
-                        if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
-                            return Some((p_end - idx, "02-****-****"));
-                        }
-                    }
-                }
-            }
-        }
-
-        if idx + 4 <= bytes.len()
-            && bytes[idx] == b'0'
-            && (b'3'..=b'6').contains(&bytes[idx + 1])
-            && (b'1'..=b'5').contains(&bytes[idx + 2])
-            && Self::is_phone_sep(bytes[idx + 3])
-        {
-            let sep = bytes[idx + 3];
-            if let Some(p_mid) = Self::consume_digits(bytes, idx + 4, 3, 4) {
-                if p_mid < bytes.len() && bytes[p_mid] == sep {
-                    if let Some(p_end) = Self::consume_digits(bytes, p_mid + 1, 4, 4) {
-                        if p_end == bytes.len() || !bytes[p_end].is_ascii_digit() {
-                            return Some((p_end - idx, "***-****-****"));
-                        }
-                    }
-                }
-            }
-        }
-
-        None
+        Self::match_intl_phone(bytes, idx)
+            .or_else(|| Self::match_mobile_phone(bytes, idx))
+            .or_else(|| Self::match_seoul_phone(bytes, idx))
+            .or_else(|| Self::match_regional_phone(bytes, idx))
     }
 
     fn is_email_local_non_dot(ch: char) -> bool {
@@ -493,29 +491,24 @@ impl DocumentSecurityAuditor {
         }
     }
 
-    fn scan_email_at(text: &str, idx: usize) -> EmailScanOutcome {
-        let Some(first_ch) = text[idx..].chars().next() else {
-            return EmailScanOutcome::Failed(text.len());
+    /// Whether the character before `idx` rules out an address starting at `idx`.
+    fn email_start_blocked(text: &str, idx: usize, first_ch: char) -> bool {
+        let Some(prev_ch) = text[..idx].chars().next_back() else {
+            return false;
         };
-        let step_one = idx + first_ch.len_utf8();
-        if !Self::is_email_local_non_dot(first_ch) {
-            return EmailScanOutcome::Failed(step_one);
+        if prev_ch == '.' || matches!(prev_ch, '_' | '%' | '+' | '-') {
+            return true;
         }
-        if idx > 0 {
-            if let Some(prev_ch) = text[..idx].chars().next_back() {
-                if prev_ch == '.' || matches!(prev_ch, '_' | '%' | '+' | '-') {
-                    return EmailScanOutcome::Failed(step_one);
-                }
-                if prev_ch.is_alphanumeric() {
-                    let prev_script = Self::char_alpha_script(prev_ch);
-                    let cur_script = Self::char_alpha_script(first_ch);
-                    if prev_script == 0 || cur_script == 0 || prev_script == cur_script {
-                        return EmailScanOutcome::Failed(step_one);
-                    }
-                }
-            }
+        if !prev_ch.is_alphanumeric() {
+            return false;
         }
+        let prev_script = Self::char_alpha_script(prev_ch);
+        let cur_script = Self::char_alpha_script(first_ch);
+        prev_script == 0 || cur_script == 0 || prev_script == cur_script
+    }
 
+    /// Scans the local part from `idx`; returns `(end, ended_with_dot)` or the failure resume index.
+    fn scan_email_local(text: &str, idx: usize) -> Result<(usize, bool), usize> {
         let mut p = idx;
         let mut prev_was_dot = false;
         let mut atom_script = 0u8;
@@ -523,7 +516,7 @@ impl DocumentSecurityAuditor {
             let ch = text[p..].chars().next().unwrap();
             if ch == '.' {
                 if prev_was_dot {
-                    return EmailScanOutcome::Failed(p + 1);
+                    return Err(p + 1);
                 }
                 prev_was_dot = true;
                 atom_script = 0;
@@ -536,14 +529,31 @@ impl DocumentSecurityAuditor {
             let sc = Self::char_alpha_script(ch);
             if sc != 0 {
                 if atom_script != 0 && atom_script != sc {
-                    return EmailScanOutcome::Failed(p);
+                    return Err(p);
                 }
                 atom_script = sc;
             }
             prev_was_dot = false;
             p += ch.len_utf8();
         }
+        Ok((p, prev_was_dot))
+    }
 
+    fn scan_email_at(text: &str, idx: usize) -> EmailScanOutcome {
+        let Some(first_ch) = text[idx..].chars().next() else {
+            return EmailScanOutcome::Failed(text.len());
+        };
+        let step_one = idx + first_ch.len_utf8();
+        if !first_ch.is_alphanumeric() {
+            return EmailScanOutcome::Failed(step_one);
+        }
+        if Self::email_start_blocked(text, idx, first_ch) {
+            return EmailScanOutcome::Failed(step_one);
+        }
+        let (p, prev_was_dot) = match Self::scan_email_local(text, idx) {
+            Ok(v) => v,
+            Err(resume) => return EmailScanOutcome::Failed(resume),
+        };
         if p >= text.len() || text.as_bytes()[p] != b'@' {
             return EmailScanOutcome::Failed(p.max(step_one));
         }
@@ -551,12 +561,48 @@ impl DocumentSecurityAuditor {
         if prev_was_dot {
             return EmailScanOutcome::Failed(at_pos + 1);
         }
+        match Self::scan_domain_after_at(text, at_pos + 1) {
+            Some(end_dom) => EmailScanOutcome::Matched(end_dom - idx),
+            None => EmailScanOutcome::Failed(at_pos + 1),
+        }
+    }
 
-        let dom_start = at_pos + 1;
-        let Some(end_dom) = Self::scan_domain_after_at(text, dom_start) else {
-            return EmailScanOutcome::Failed(at_pos + 1);
-        };
-        EmailScanOutcome::Matched(end_dom - idx)
+    /// Scans one domain label at `label_start`.
+    /// Returns `(end, all_alpha, char_count, ended_with_hyphen)`.
+    fn scan_domain_label(text: &str, label_start: usize) -> (usize, bool, usize, bool) {
+        let mut cursor = label_start;
+        let mut label_chars = 0usize;
+        let mut all_alpha = true;
+        let mut prev_hyphen = false;
+        let mut label_script = 0u8;
+        while cursor < text.len() {
+            let ch = text[cursor..].chars().next().unwrap();
+            if ch == '-' {
+                if cursor == label_start {
+                    break;
+                }
+                all_alpha = false;
+                prev_hyphen = true;
+                cursor += 1;
+                label_chars += 1;
+                continue;
+            }
+            if !ch.is_alphanumeric() {
+                break;
+            }
+            let sc = Self::char_alpha_script(ch);
+            if sc == 0 {
+                all_alpha = false;
+            } else if label_script != 0 && label_script != sc {
+                break;
+            } else {
+                label_script = sc;
+            }
+            prev_hyphen = false;
+            cursor += ch.len_utf8();
+            label_chars += 1;
+        }
+        (cursor, all_alpha, label_chars, prev_hyphen)
     }
 
     fn scan_domain_after_at(text: &str, dom_start: usize) -> Option<usize> {
@@ -564,60 +610,28 @@ impl DocumentSecurityAuditor {
             return None;
         }
         let mut cursor = dom_start;
-        let mut labels: Vec<(usize, usize, bool, usize)> = Vec::new();
+        let mut labels: Vec<(usize, bool, usize)> = Vec::new();
         while cursor < text.len() {
-            let label_start = cursor;
-            let mut label_chars = 0usize;
-            let mut all_alpha = true;
-            let mut prev_hyphen = false;
-            let mut label_script = 0u8;
-            while cursor < text.len() {
-                let ch = text[cursor..].chars().next().unwrap();
-                if ch == '-' {
-                    if cursor == label_start {
-                        break;
-                    }
-                    all_alpha = false;
-                    prev_hyphen = true;
-                    cursor += 1;
-                    label_chars += 1;
-                    continue;
-                }
-                if !ch.is_alphanumeric() {
-                    break;
-                }
-                let sc = Self::char_alpha_script(ch);
-                if sc != 0 {
-                    if label_script != 0 && label_script != sc {
-                        break;
-                    }
-                    label_script = sc;
-                } else {
-                    all_alpha = false;
-                }
-                prev_hyphen = false;
-                cursor += ch.len_utf8();
-                label_chars += 1;
-            }
-            if cursor == label_start || prev_hyphen {
+            let (end, all_alpha, label_chars, prev_hyphen) = Self::scan_domain_label(text, cursor);
+            if end == cursor || prev_hyphen {
                 break;
             }
-            labels.push((label_start, cursor, all_alpha, label_chars));
-            if cursor < text.len() && text.as_bytes()[cursor] == b'.' {
-                let after_dot = cursor + 1;
-                if after_dot < text.len() {
-                    let next_ch = text[after_dot..].chars().next().unwrap();
-                    if next_ch.is_alphanumeric() {
-                        cursor = after_dot;
-                        continue;
-                    }
-                }
+            labels.push((end, all_alpha, label_chars));
+            cursor = end;
+            let after_dot = cursor + 1;
+            let continues = text.as_bytes().get(cursor) == Some(&b'.')
+                && text[after_dot..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphanumeric);
+            if !continues {
+                break;
             }
-            break;
+            cursor = after_dot;
         }
 
         while labels.len() >= 2 {
-            let &(_, end_pos, all_alpha, char_count) = labels.last().unwrap();
+            let &(end_pos, all_alpha, char_count) = labels.last().unwrap();
             if all_alpha && char_count >= 2 {
                 return Some(end_pos);
             }

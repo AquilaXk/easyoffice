@@ -1,6 +1,6 @@
 use crate::functions_date_fin::ymd_to_excel_serial;
 use crate::parser::Expr;
-use crate::range_refs::CompiledCriteria;
+use crate::range_refs::{CompiledCriteria, StreamingRangeSpec};
 use crate::types::{EvaluatedCellValue, FormulaError, PackedCellCoordinate};
 use crate::{EvalContext, SheetEngine};
 
@@ -339,6 +339,24 @@ pub use crate::text_format::{
     format_number_with_code, format_text_pattern, format_text_value_with_code,
 };
 
+/// Inputs of a multi-criteria aggregate (`COUNTIFS`, `SUMIFS`, ...).
+struct MultiCritJob<'a> {
+    specs: Vec<StreamingRangeSpec<'a>>,
+    crits: Vec<CompiledCriteria>,
+    target_spec: Option<StreamingRangeSpec<'a>>,
+    r_count: usize,
+    c_count: usize,
+}
+
+/// Running totals of matching cells.
+#[derive(Default)]
+struct CritTotals {
+    sum: f64,
+    count: usize,
+    min_val: Option<f64>,
+    max_val: Option<f64>,
+}
+
 impl SheetEngine {
     pub(crate) fn eval_multi_criteria_streaming(
         &self,
@@ -384,116 +402,15 @@ impl SheetEngine {
         }
 
         let (r_count, c_count) = expected_dims.ok_or(FormulaError::Value)?;
-        let compiled_crits: Vec<CompiledCriteria> =
-            crit_vals.iter().map(CompiledCriteria::compile).collect();
-        let total = r_count.saturating_mul(c_count);
-
-        let mut sum = 0.0f64;
-        let mut count = 0usize;
-        let mut min_val: Option<f64> = None;
-        let mut max_val: Option<f64> = None;
-        let sparse_idx = specs
-            .iter()
-            .zip(compiled_crits.iter())
-            .position(|(sp, cc)| !sp.5 && !cc.matches(&EvaluatedCellValue::Empty));
-        if total > 1024 && (sparse_idx.is_some() || target_spec.as_ref().is_some_and(|ts| !ts.5)) {
-            let anchor = if let Some(idx) = sparse_idx {
-                &specs[idx]
-            } else {
-                target_spec.as_ref().unwrap()
-            };
-            if let Some(anchor_sheet) = self.resolve_sheet_ref(anchor.0.as_deref(), ctx) {
-                let max_r = anchor.1 + (r_count as u32).saturating_sub(1);
-                let max_c = anchor.2 + (c_count as u32).saturating_sub(1);
-                let mut pop_coords: Vec<PackedCellCoordinate> = anchor_sheet
-                    .cells
-                    .keys()
-                    .copied()
-                    .filter(|c| {
-                        c.row() >= anchor.1
-                            && c.row() <= max_r
-                            && c.col() >= anchor.2
-                            && c.col() <= max_c
-                    })
-                    .collect();
-                pop_coords.sort_unstable();
-                'sparse_loop: for coord in pop_coords {
-                    let dr = (coord.row() - anchor.1) as usize;
-                    let dc = (coord.col() - anchor.2) as usize;
-                    for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
-                        let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
-                        if !cc.matches(&val) {
-                            continue 'sparse_loop;
-                        }
-                    }
-                    if let Some(ref ts) = target_spec {
-                        let tv = self.eval_streaming_cell(ts, dr, dc, ctx, depth)?;
-                        if let EvaluatedCellValue::Number(n) = tv {
-                            sum += n;
-                            count += 1;
-                            min_val = Some(min_val.map_or(n, |v| v.min(n)));
-                            max_val = Some(max_val.map_or(n, |v| v.max(n)));
-                        }
-                    } else {
-                        count += 1;
-                    }
-                }
-            }
-        } else if total > 1024 && target_spec.is_none() && specs.iter().all(|sp| !sp.5) {
-            let mut pop_offsets: Vec<(usize, usize)> = Vec::new();
-            for sp in &specs {
-                if let Some(sh) = self.resolve_sheet_ref(sp.0.as_deref(), ctx) {
-                    let max_r = sp.1 + (r_count as u32).saturating_sub(1);
-                    let max_c = sp.2 + (c_count as u32).saturating_sub(1);
-                    for &c in sh.cells.keys() {
-                        if c.row() >= sp.1
-                            && c.row() <= max_r
-                            && c.col() >= sp.2
-                            && c.col() <= max_c
-                        {
-                            pop_offsets
-                                .push(((c.row() - sp.1) as usize, (c.col() - sp.2) as usize));
-                        }
-                    }
-                }
-            }
-            pop_offsets.sort_unstable();
-            pop_offsets.dedup();
-            let mut non_matching_pop = 0usize;
-            for (dr, dc) in pop_offsets {
-                for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
-                    let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
-                    if !cc.matches(&val) {
-                        non_matching_pop += 1;
-                        break;
-                    }
-                }
-            }
-            count = total.saturating_sub(non_matching_pop);
-        } else {
-            for dr in 0..r_count {
-                'cell_loop: for dc in 0..c_count {
-                    for (sp, cc) in specs.iter().zip(compiled_crits.iter()) {
-                        let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
-                        if !cc.matches(&val) {
-                            continue 'cell_loop;
-                        }
-                    }
-                    if let Some(ref ts) = target_spec {
-                        let tv = self.eval_streaming_cell(ts, dr, dc, ctx, depth)?;
-                        if let EvaluatedCellValue::Number(n) = tv {
-                            sum += n;
-                            count += 1;
-                            min_val = Some(min_val.map_or(n, |v| v.min(n)));
-                            max_val = Some(max_val.map_or(n, |v| v.max(n)));
-                        }
-                    } else {
-                        count += 1;
-                    }
-                }
-            }
-        }
-
+        let job = MultiCritJob {
+            specs,
+            crits: crit_vals.iter().map(CompiledCriteria::compile).collect(),
+            target_spec,
+            r_count,
+            c_count,
+        };
+        let totals = self.run_multi_criteria(&job, ctx, depth)?;
+        let (sum, count) = (totals.sum, totals.count);
         match name {
             "COUNTIFS" => Ok(EvaluatedCellValue::Number(count as f64)),
             "AVERAGEIFS" => {
@@ -503,10 +420,150 @@ impl SheetEngine {
                     Ok(EvaluatedCellValue::Number(sum / (count as f64)))
                 }
             }
-            "MINIFS" => Ok(EvaluatedCellValue::Number(min_val.unwrap_or(0.0))),
-            "MAXIFS" => Ok(EvaluatedCellValue::Number(max_val.unwrap_or(0.0))),
+            "MINIFS" => Ok(EvaluatedCellValue::Number(totals.min_val.unwrap_or(0.0))),
+            "MAXIFS" => Ok(EvaluatedCellValue::Number(totals.max_val.unwrap_or(0.0))),
             _ => Ok(EvaluatedCellValue::Number(sum)),
         }
+    }
+
+    /// Whether the cell at `(dr, dc)` satisfies every criteria pair.
+    fn cell_passes_all(
+        &self,
+        job: &MultiCritJob<'_>,
+        dr: usize,
+        dc: usize,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<bool, FormulaError> {
+        for (sp, cc) in job.specs.iter().zip(job.crits.iter()) {
+            let val = self.eval_streaming_cell_allow_error(sp, dr, dc, ctx, depth)?;
+            if !cc.matches(&val) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Adds the cell at `(dr, dc)` (which passed all criteria) to the totals.
+    fn accumulate_match(
+        &self,
+        job: &MultiCritJob<'_>,
+        dr: usize,
+        dc: usize,
+        totals: &mut CritTotals,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<(), FormulaError> {
+        let Some(ref ts) = job.target_spec else {
+            totals.count += 1;
+            return Ok(());
+        };
+        if let EvaluatedCellValue::Number(n) = self.eval_streaming_cell(ts, dr, dc, ctx, depth)? {
+            totals.sum += n;
+            totals.count += 1;
+            totals.min_val = Some(totals.min_val.map_or(n, |v| v.min(n)));
+            totals.max_val = Some(totals.max_val.map_or(n, |v| v.max(n)));
+        }
+        Ok(())
+    }
+
+    fn run_multi_criteria(
+        &self,
+        job: &MultiCritJob<'_>,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<CritTotals, FormulaError> {
+        let total = job.r_count.saturating_mul(job.c_count);
+        let mut totals = CritTotals::default();
+        let sparse_idx = job
+            .specs
+            .iter()
+            .zip(job.crits.iter())
+            .position(|(sp, cc)| !sp.5 && !cc.matches(&EvaluatedCellValue::Empty));
+        let target_dense = job.target_spec.as_ref().is_some_and(|ts| !ts.5);
+        if total > 1024 && (sparse_idx.is_some() || target_dense) {
+            let anchor = match sparse_idx {
+                Some(idx) => &job.specs[idx],
+                None => job.target_spec.as_ref().unwrap(),
+            };
+            self.multi_criteria_sparse(job, anchor, &mut totals, ctx, depth)?;
+        } else if total > 1024 && job.target_spec.is_none() && job.specs.iter().all(|sp| !sp.5) {
+            totals.count = self.multi_criteria_count_by_population(job, total, ctx, depth)?;
+        } else {
+            for dr in 0..job.r_count {
+                for dc in 0..job.c_count {
+                    if self.cell_passes_all(job, dr, dc, ctx, depth)? {
+                        self.accumulate_match(job, dr, dc, &mut totals, ctx, depth)?;
+                    }
+                }
+            }
+        }
+        Ok(totals)
+    }
+
+    /// Walks only the populated cells of the anchor range.
+    fn multi_criteria_sparse(
+        &self,
+        job: &MultiCritJob<'_>,
+        anchor: &StreamingRangeSpec<'_>,
+        totals: &mut CritTotals,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<(), FormulaError> {
+        let Some(anchor_sheet) = self.resolve_sheet_ref(anchor.0.as_deref(), ctx) else {
+            return Ok(());
+        };
+        let max_r = anchor.1 + (job.r_count as u32).saturating_sub(1);
+        let max_c = anchor.2 + (job.c_count as u32).saturating_sub(1);
+        let mut pop_coords: Vec<PackedCellCoordinate> = anchor_sheet
+            .cells
+            .keys()
+            .copied()
+            .filter(|c| {
+                c.row() >= anchor.1 && c.row() <= max_r && c.col() >= anchor.2 && c.col() <= max_c
+            })
+            .collect();
+        pop_coords.sort_unstable();
+        for coord in pop_coords {
+            let dr = (coord.row() - anchor.1) as usize;
+            let dc = (coord.col() - anchor.2) as usize;
+            if self.cell_passes_all(job, dr, dc, ctx, depth)? {
+                self.accumulate_match(job, dr, dc, totals, ctx, depth)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// COUNTIFS over mostly-empty ranges: count = total minus populated non-matching cells.
+    fn multi_criteria_count_by_population(
+        &self,
+        job: &MultiCritJob<'_>,
+        total: usize,
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<usize, FormulaError> {
+        let mut pop_offsets: Vec<(usize, usize)> = Vec::new();
+        for sp in &job.specs {
+            let Some(sh) = self.resolve_sheet_ref(sp.0.as_deref(), ctx) else {
+                continue;
+            };
+            let max_r = sp.1 + (job.r_count as u32).saturating_sub(1);
+            let max_c = sp.2 + (job.c_count as u32).saturating_sub(1);
+            for &c in sh.cells.keys() {
+                if c.row() >= sp.1 && c.row() <= max_r && c.col() >= sp.2 && c.col() <= max_c {
+                    pop_offsets.push(((c.row() - sp.1) as usize, (c.col() - sp.2) as usize));
+                }
+            }
+        }
+        pop_offsets.sort_unstable();
+        pop_offsets.dedup();
+        let mut non_matching_pop = 0usize;
+        for (dr, dc) in pop_offsets {
+            if !self.cell_passes_all(job, dr, dc, ctx, depth)? {
+                non_matching_pop += 1;
+            }
+        }
+        Ok(total.saturating_sub(non_matching_pop))
     }
 
     pub(crate) fn eval_subtotal(
