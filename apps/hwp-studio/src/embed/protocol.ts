@@ -111,11 +111,15 @@ export function isRequestAttempt(
     && Number.isSafeInteger(value.id);
 }
 
+// The desktop shell serves its pages from `http://tauri.localhost` on Windows (WebView2) and from the
+// `tauri://localhost` custom scheme on macOS (WKWebView) and Linux (WebKitGTK), so `tauri:` is a usable
+// parent origin as well (PD-094).
+const USABLE_PARENT_PROTOCOLS: ReadonlySet<string> = new Set(['http:', 'https:', 'tauri:']);
+
 export function isUsableParentOrigin(origin: string): boolean {
   if (!origin || origin === 'null') return false;
   try {
-    const protocol = new URL(origin).protocol;
-    return protocol === 'http:' || protocol === 'https:';
+    return USABLE_PARENT_PROTOCOLS.has(new URL(origin).protocol);
   } catch {
     return false;
   }

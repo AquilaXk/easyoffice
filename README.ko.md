@@ -2,15 +2,15 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-EasyOffice (`v1.0.0`)는 Swift 6, SwiftUI, AppKit 기반으로 설계된 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS 네이티브 올인원 오피스 스위트**입니다. 시그니처 라벤더 디자인 시스템(`#5C6BC0`)을 바탕으로 **워드 문서(Document)**, **스프레드시트(Sheet)**, **프레젠테이션(Slide)**, **한글 문서(HWP / HWPX)**, **PDF 스튜디오(PDF Studio)**를 단일 멀티 탭 윈도우에서 통합 제공하며, 비트 수준 컨테이너 코덱과 결정론적 수식 연산, 온디바이스 스마트 문서 보조 도구, Fail-Closed 보안 가드를 내장합니다.
+EasyOffice (`v1.0.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2 데스크톱 셸에 담은 **100% 독립 실행형(Standalone)·서버리스(Serverless)·오프라인 지원 macOS·Windows 올인원 오피스 스위트**입니다. 시그니처 라벤더 디자인 시스템(`#5C6BC0`)을 바탕으로 **워드 문서(Document)**, **스프레드시트(Sheet)**, **프레젠테이션(Slide)**, **한글 문서(HWP / HWPX)**, **PDF 스튜디오(PDF Studio)**를 하나의 워크스페이스에서 통합 제공하며, 비트 수준 컨테이너 코덱과 결정론적 수식 연산, 온디바이스 스마트 문서 보조 도구, Fail-Closed 보안 가드를 내장합니다.
 
 ---
 
 ## 핵심 특징
 
-- **5대 오피스 모듈 올인원 통합 워크스페이스 (`WorkspaceViewModel`)**:
+- **5대 오피스 모듈 올인원 통합 워크스페이스 (macOS·Windows 단일 코드베이스)**:
   - 한글 모듈은 rhwp 기반 한글 편집기를 Windows 데스크톱 셸과 `--serve`에 같은 출처 iframe(IPC 권한 없음)으로 임베드하며, 생성된 편집기 번들이 없는 빌드는 텍스트 전용 편집기로 대체됩니다. 데스크톱 셸을 빌드하기 전에 `node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs`를 실행하세요 (PD-083). HWP·HWPX·HWT·HWTX 파일을 이 편집기에서 열 수 있고(최대 64 MiB, 편집기가 읽지 못하는 파일은 안내와 함께 텍스트만 열림) 내보낸 바이트를 다시 파싱해 검증한 뒤 HWP 또는 HWPX로 저장하며, 수정 상태를 추적하고 새로고침 후 복원할 수 있도록 IndexedDB에 자동 저장합니다 (PD-085).
-- 문서 작성, 한글(HWP 5.0/HWPX) 공문서 편집, 표 계산 및 피벗 분석, 슬라이드 발표자료 제작, PDF 주석 및 변환을 하나의 네이티브 macOS 앱에서 탭으로 전환하며 수행합니다.
+- 문서 작성, 한글(HWP 5.0/HWPX) 공문서 편집, 표 계산 및 피벗 분석, 슬라이드 발표자료 제작, PDF 주석 및 변환을 데스크톱 앱의 문서별 창에서하며 수행합니다.
   - 두 문서를 좌우로 나란히 비교·편집하는 **분할 보기(Split View, `splitSecondaryTabID`, 최소 너비 `420pt`)**, **접이식 7대 카테고리 컨텍스트 리본(`Cmd+Option+R`)**, **좌측 구조 내비게이터**, **우측 세부 속성 인스펙터**, **5대 인터랙티브 에디터 상세 패널(`DocumentEditorDetailPaneView`, `SheetEditorDetailPaneView`, `SlideEditorDetailPaneView`, `PDFStudioEditorDetailPaneView`)**을 지원합니다.
 - **20종 문서·템플릿 포맷 바이너리 라운드트립 코덱**:
   - **ZIP 기반 컨테이너 (`ZipContainerCodec`)**: `OOXMLContainerCodec` (`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `ODFContainerCodec` (`.odt`, `.ods`, `.odp`), `HWPXContainerCodec` (`.hwpx`, `.hwtx` KS X 6101 OWPML 표준).
@@ -49,44 +49,15 @@ EasyOffice (`v1.0.0`)는 Swift 6, SwiftUI, AppKit 기반으로 설계된 **100% 
 
 ```text
 EasyOffice/
-├── Package.swift                                  # Swift 6 패키지 매니페스트 (macOS 14+)
-├── Sources/
-│   ├── EasyOfficeDesignSystem/                    # 시그니처 라벤더 팔레트, 모듈 시맨틱 토큰, WCAG 명도 대비
-│   │   └── DesignTokens.swift                     # RGBColorToken, WorkspaceThemeMode, AccessibilityTokens
-│   ├── EasyOfficeCore/                            # 순수 결정론적 오피스 엔진, 바이너리 코덱 및 스마트 도구
-│   │   ├── DocumentFormat.swift                   # 20종 포맷 레지스트리 및 ContainerFamily 메타데이터
-│   │   ├── FormatDetector.swift                   # 매직 바이트 시그니처 검증 가드 및 EasyOfficeError
-│   │   ├── BinaryContainerCodec.swift             # BitPacking, CRC32Calculator, ZIP/OOXML/ODF/HWPX/OLE2/HWP5 코덱
-│   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
-│   │   ├── DocumentEngine.swift                   # OfficeDocumentModel, 구역 조판, 표 계산식, 변경 추적, 메일 머지
-│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, 122종 내장 함수, PivotTableEngine, 차트 빌더
-│   │   ├── SlideEngine.swift                      # PresentationDeckModel, SnapGuideCalculator, PresenterSession
-│   │   ├── PDFEngine.swift                        # PDFStudioDocumentModel, 주석, 분할/병합, 오피스 ↔ PDF 변환
-│   │   ├── SmartProductivityTools.swift           # PDFBinarySerializer, 일괄 변환 스튜디오, 오프라인 보조 도구
-│   │   ├── DocumentSecurityAuditor.swift          # 컨테이너 보안 감사기, 3대 엔진 PII 및 이미지 EXIF 제거기
-│   │   └── WorkspaceHub.swift                     # WorkspaceViewModel, 7대 리본 카탈로그, 템플릿, 통합 색인 검색
-│   └── EasyOfficeApp/                             # macOS 네이티브 SwiftUI + AppKit 워크스페이스 애플리케이션
-│       ├── EasyOfficeApp.swift                    # @main 앱 엔트리포인트 및 macOS 메뉴바 커맨드
-│       ├── WorkspaceViews.swift                   # 통합 타이틀바, 멀티 탭 스트립, 분할 보기, 컨텍스트 리본, 홈 허브
-│       └── EditorDetailPanes.swift                # Document/HWP, Sheet, Slide, PDF Studio 인터랙티브 에디터 패널
-├── Tests/
-│   └── EasyOfficeTests/                           # 결정론적 단위·보안·UI 패리티 및 벤치마크 검증 스위트
-│       ├── EasyOfficeTests.swift                  # 디자인 토큰, 포맷 카탈로그 및 기본 엔진 검증
-│       ├── BinaryContainerCodecTests.swift        # BitPacking, CRC32, ZIP/OLE2/HWP5/CSV/MD/RTF 및 보안 가드 검증
-│       ├── EditorEnginesParityTests.swift         # 122종 시트 수식, 피벗/차트, 문서/HWP, 슬라이드, PDF 패리티 검증
-│       ├── SmartProductivityToolsTests.swift      # 일괄 변환, 오프라인 스마트 보조 도구 및 보안 감사기 검증
-│       ├── PiiScrubAndSecurityCompletenessTests.swift # 3대 엔진 공통 PII 벡터, 이미지 EXIF 제거 및 Mirror 검증
-│       ├── WorkspaceUIParityTests.swift           # 스플릿 뷰, 7x5 리본 매트릭스, WCAG AA 및 접근성 검증
-│       └── CommercialParityBenchmarkTests.swift   # 20종 포맷 라운드트립 매트릭스 및 비트 수준 처리량 벤치마크
-├── scripts/
-│   ├── check-repo-hygiene.mjs                     # 저장소 위생 및 명세 무결성 검증 가드
-│   ├── verify-macos-plist.mjs                     # LaunchServices 20종 확장자 Info.plist 검증기
-│   └── package-macos-release.sh                   # macOS 유니버설 .app 번들, .dmg, .zip, SHA256SUMS 생성기
-└── docs/
-    ├── architecture.md                            # 시스템 아키텍처, 코덱 계층 및 Fail-Closed 보안 경계
-    ├── design-system.md                           # 시그니처 라벤더 UI/UX 디자인 시스템 및 레이아웃 명세
-    ├── policy-decisions.md                        # 제품 및 엔지니어링 정책 결정 기록 (SSOT)
-    └── product-spec.md                            # 20종 포맷 및 5대 모듈 통합 기능 명세
+├── Cargo.toml                        # Rust 워크스페이스 매니페스트
+├── crates/easyoffice-formats/        # 20종 포맷 레지스트리, 바이너리·컨테이너 코덱, 매직 바이트 가드
+├── crates/easyoffice-sheet/          # 수식 엔진(122종 내장 함수), 피벗, DAG 재계산
+├── crates/easyoffice-layout/         # 페이지 조판 엔진
+├── crates/easyoffice-app/            # IPC 라우터, CLI(`--serve`, `--self-test`), `ui/`의 WebUI
+├── crates/easyoffice-desktop/        # Windows(WebView2)·macOS(WKWebView)용 Tauri v2 데스크톱 셸
+├── apps/hwp-studio/                  # 고정된 rhwp 업스트림 위에 만든 한글 편집기 오버레이
+├── scripts/                          # 위생 가드, 번들 계약 검사, WebUI 회귀 테스트
+└── docs/                             # 아키텍처, 디자인 시스템, 정책 결정 기록(SSOT), 제품 명세
 ```
 
 ---
@@ -94,9 +65,9 @@ EasyOffice/
 ## 빠른 시작 (Quick Start)
 
 ### 시스템 요구 사항
-- macOS 14.0 (Sonoma) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 지원)
-- Xcode 16+ 및 Swift 6.0+ (크로스플랫폼 코어 및 로컬 WebUI 서버 빌드는 Rust 1.85+ 사용)
+- macOS 11.0 (Big Sur) 이상 (Apple Silicon `arm64` 및 Intel `x86_64` 유니버설 `.dmg`; 데스크톱 셸 빌드에는 Rust 1.90+, Node.js, Xcode 명령줄 도구 필요)
 - Windows 설치형 데스크톱 앱: Windows 10/11 x64 및 WebView2 런타임 (데스크톱 셸 빌드는 MSVC 툴체인의 Rust 1.90+ 필요)
+- 크로스플랫폼 엔진 크레이트와 개발 전용 로컬 WebUI 서버 빌드는 Rust 1.85+
 
 ### 로컬 위생 검증 · 빌드 · 테스트 · 실행
 
@@ -104,25 +75,41 @@ EasyOffice/
 # 1. 저장소 위생 및 필수 계약 검증
 node scripts/check-repo-hygiene.mjs
 
-# 2. 전체 모듈 빌드
-swift build
+# 2. Rust 엔진: 서식, 린트, 테스트, 자체 시험
+cargo fmt --all -- --check
+cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings
+cargo test --workspace --exclude easyoffice-desktop
+cargo run -p easyoffice-app -- --self-test
 
-# 3. 결정론적 단위 테스트 및 벤치마크 스위트 실행
-swift test
+# 3. WebUI 회귀 테스트
+node --test scripts/test-webui-*.mjs scripts/test-desktop-file-associations.mjs
 
-# 4. macOS 네이티브 앱 실행
-swift run EasyOfficeApp
-
-# 5. 배포용 EasyOffice.app 번들, .dmg, .zip 및 SHA256SUMS.txt 패키징
-bash scripts/package-macos-release.sh 1.0.0
+# 4. 데스크톱 셸 (생성된 편집기 번들 필요, 위의 한글 모듈 설명 참고)
+node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs
+cargo run -p easyoffice-desktop
 ```
 
 ### 릴리스 실행 안내
 
-애드혹 서명된 macOS 배포본을 내려받은 뒤 Gatekeeper 경고가 표시되면 `/Applications/EasyOffice.app`에서 격리 속성을 한 번 제거한 뒤 실행합니다.
+#### macOS
+
+macOS 릴리스는 유니버설 디스크 이미지 `EasyOffice-<version>-macos-universal.dmg`(Apple silicon·Intel, macOS 11 이상)와 체크섬 파일 `SHA256SUMS-macos-universal.txt`로 배포됩니다. 이미지를 열어 **EasyOffice**를 `/Applications`로 끌어다 놓습니다. 앱은 Windows와 같은 Tauri v2 데스크톱 셸(WKWebView)로, WebUI가 내장되어 있고 모든 명령이 Rust 엔진에서 프로세스 안에서 실행되며 네트워크 연결이 필요 없습니다. 표준 메뉴 막대와 Command 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q)가 동작하고, Finder의 "다음으로 열기"와 더블 클릭은 파일을 새 창에서 엽니다. ⌘Q로 종료하면 각 창의 저장 / 저장 안 함 / 취소 확인을 거칩니다.
+
+이 배포본은 Apple Developer ID로 **서명·공증되어 있지 않으므로** 처음 실행할 때 macOS Gatekeeper가 막습니다("개발자를 확인할 수 없기 때문에 열 수 없습니다"). 한 번만 허용하면 됩니다.
+
+1. Finder에서 `/Applications`의 **EasyOffice**를 우클릭(또는 Control-클릭)하여 **열기**를 선택하고, 대화상자에서 다시 **열기**를 누릅니다.
+2. 또는 한 번 열기를 시도한 뒤 **시스템 설정 > 개인정보 보호 및 보안**의 보안 항목에서 EasyOffice의 **그래도 열기**를 누릅니다(macOS 15는 우클릭 > 열기 대신 이 경로가 필요합니다).
+3. 앱이 손상되었다고 표시되거나 실행되지 않으면(내려받을 때 붙은 격리 속성 때문) 격리 속성을 한 번 제거합니다.
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/EasyOffice.app
+```
+
+이후에는 평소처럼 열립니다. 서명은 준비만 되어 있고 꺼져 있습니다. macOS CI·릴리스 작업에 `APPLE_SIGNING_IDENTITY` 저장소 시크릿(과 공증 변수)을 추가하면 됩니다(PD-094). macOS에서 `.dmg`를 소스로 빌드하려면 다음과 같이 합니다.
+
+```bash
+cd crates/easyoffice-desktop
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles app,dmg   # target/release/bundle/dmg/EasyOffice_<version>_<arch>.dmg
 ```
 
 #### Windows
@@ -133,7 +120,7 @@ Windows 릴리스는 설치 프로그램 `EasyOffice-<version>-windows-x64-setup
 
 ```powershell
 cd crates/easyoffice-desktop
-npx @tauri-apps/cli@2 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
+npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --bundles nsis   # target/release/bundle/nsis/EasyOffice_<version>_x64-setup.exe
 ```
 
 **개발자 전용 로컬 서버(`--serve`).** `--serve`는 일반 사용자에게 배포하지 않으며 어떤 릴리스 자산에도 포함되지 않습니다. 개발과 자동 검증(헤드리스 브라우저 UI 검증, CI 스모크)에만 쓰며, 설치형 앱은 네트워크 포트를 열지 않습니다. 소스 저장소에서 `cargo run -p easyoffice-app -- --self-test`로 엔진 무결성을 검증하거나 `cargo run -p easyoffice-app -- --serve 8787`로 `http://127.0.0.1:8787/` 루프백 WebUI를 열 수 있습니다. 전체 옵션은 `--help`로 확인합니다. 포트 없이 `--serve`를 실행하면 8787을 사용하고, 사용 중이면 8788~8800으로 대체합니다. 포트를 명시하면(`--serve 18787`) 해당 포트만 사용하며 쓸 수 없으면 실패합니다. 잘못된 포트, 알 수 없는 옵션, 파일 경로는 0이 아닌 종료 코드로 끝납니다. Host·Origin 검사, 연결 수·시간 제한, CSP는 개발 중 안전을 위해 그대로 유지합니다(PD-086).

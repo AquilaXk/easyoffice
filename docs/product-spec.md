@@ -33,7 +33,7 @@
 
 ## 2. 모듈별 세부 기능 명세 (Core Module Capabilities)
 
-### 2.1 Document & HWP/HWPX (`OfficeDocumentModel`, `DocumentEngine.swift`)
+### 2.1 Document & HWP/HWPX (`OfficeDocumentModel`, `crates/easyoffice-*`)
 - **문서 조판 및 다중 구역 레이아웃 (`DocumentSectionLayout`)**:
   - 용지 규격(`PaperSizePreset`: `a4`, `letter`, `b5`), 용지 방향(`PageOrientation`: `portrait`, `landscape`), 다단(`columnCount`: 1~4단), 상하좌우 여백(`marginTopPt`, `marginBottomPt`, `marginLeftPt`, `marginRightPt`) 조판.
   - 문단 블록(`ParagraphBlock`) 스타일 역할(`ParagraphStyleRole`: `title`, `heading1`, `heading2`, `heading3`, `body`, `quote`, `officialHeader`)과 문단 정렬(`TextAlignmentMode`: `leading`, `center`, `trailing`, `justified`), 글꼴 이름·크기·굵게·기울임·밑줄 제어.
@@ -46,7 +46,7 @@
   - 메일 머지(`applyingMailMerge(record:)`): `{{필드명}}` 플레이스홀더에 레코드 사전을 바인딩하여 안내문·계약서·공문서 일괄 생성.
   - 실시간 문서 통계(`DocumentStatistics`, `computeStatistics()`): 단어 수(`wordCount`), 글자 수(`characterCountWithSpaces`, `characterCountWithoutSpaces`), 문단 수(`paragraphCount`), 표 수(`tableCount`), 200자 원고지 매수(`manuscriptPages200`).
 
-### 2.2 Sheet (`WorksheetModel`, `SheetEngine.swift`)
+### 2.2 Sheet (`WorksheetModel`, `crates/easyoffice-*`)
 - **64비트 비트패킹 좌표 및 고성능 그리드 (`PackedCellCoordinate`)**:
   - 행(상위 32비트)과 열(하위 32비트)을 단일 `UInt64`에 패킹한 `PackedCellCoordinate`와 ECMA-376 경계(`maxZeroBasedColumn = 16,383`, `maxZeroBasedRow = 1,048,575`)를 검증하는 `CellAddress`, 범위 확장 상한(`maxExpandedCellCount = 100,000`)을 강제하는 `CellRange`를 제공합니다.
   - 범위 그리드 일괄 평가(`evaluateGrid(in:)`), 열 기준 정렬(`sortedRows(in:byColumnOffset:ascending:)`), 조건 필터링(`filteredRows(in:byColumnOffset:predicate:)`), 조건부 서식(`ConditionalFormatRule`: `greaterThan`, `lessThan`, `between`, `containsText`, `duplicateValues`), 데이터 유효성 검사(`DataValidationRule`: `numberRange`, `allowedList`, `nonEmptyText`, `maxTextLength`)를 지원합니다.
@@ -63,7 +63,7 @@
   - `PivotTableConfiguration` 기반 행·열 그룹별 집계(`PivotAggregationFunction`: `sum`, `average`, `count`, `min`, `max`) 및 행/열 소계·총합계 산출(`PivotTableSummary`, `PivotTableEngine.compute`).
   - `SheetChartBuilder.buildChart`를 통한 7종 차트(`SheetChartKind`: `column`, `bar`, `line`, `area`, `pie`, `scatter`, `stackedColumn`) 시리즈(`SheetChartSeries`) 생성.
 
-### 2.3 Slide (`PresentationDeckModel`, `SlideEngine.swift`)
+### 2.3 Slide (`PresentationDeckModel`, `crates/easyoffice-*`)
 - **슬라이드 마스터 및 화면 비율**:
   - 화면 비율(`SlideAspectRatio`: `widescreen16x9` 960×540pt, `standard4x3` 720×540pt, `handoutA4` 841.89×595.28pt) 및 마스터 레이아웃(`SlideMasterLayout`: `titleSlide`, `titleAndContent`, `sectionHeader`, `twoColumnComparison`, `blankCanvas`).
 - **스마트 정렬 가이드 및 캔버스 개체 제어 (`SnapGuideCalculator`)**:
@@ -72,7 +72,7 @@
 - **전환 효과 및 발표자 세션 (`PresenterSession`)**:
   - 슬라이드 전환(`SlideTransitionKind` 4종: `none`, `fade`, `push`, `morph`)과 슬라이드 추가·복제·순서 이동(`moveSlide(from:to:)`), 현재/다음 슬라이드·발표자 노트·진행률(`progressFraction`)·경과 시간 타이머(`tick(seconds:)`)를 관리하는 `PresenterSession`.
 
-### 2.4 PDF Studio (`PDFStudioDocumentModel`, `PDFEngine.swift`)
+### 2.4 PDF Studio (`PDFStudioDocumentModel`, `crates/easyoffice-*`)
 - **열람, 북마크 및 본문 검색**:
   - `PDFBinarySerializer` 기반 ISO 32000-1 `%PDF-1.7` 호환 바이너리 직렬화·파싱(`encode(_:)`, `decode(from:)`), 북마크 트리(`PDFOutlineNode`), 페이지별 텍스트 추출 및 대소문자 무시 본문 검색(`searchPages(containing:)`).
 - **5종 주석 및 서명 (`PDFAnnotationItem`)**:
@@ -81,10 +81,10 @@
   - 페이지 90도 단위 회전(`rotatePage(at:clockwiseDegrees:)`), 빈 페이지 삽입(`insertBlankPage(at:)`), 페이지 삭제(`deletePage(at:)`), 순서 재배치(`reorderPage(from:to:)`), 지정 페이지 추출(`extractPages(oneBasedPageNumbers:newTitle:)`), 분할(`split(atOneBasedPage:)`), 다중 PDF 병합(`merge(documents:mergedTitle:)`).
   - `convertToEditableDocument(targetFormat:)`, `convertToPresentation()`, `fromDocument(_:)`, `fromWorksheet(_:range:)`, `fromPresentation(_:)`를 통한 오피스 문서·시트·슬라이드 ↔ PDF 양방향 변환.
 
-### 2.5 통합 워크스페이스 허브 & 오프라인 스마트 생산성 도구 (`SmartProductivityTools.swift`, `DocumentSecurityAuditor.swift`, `WorkspaceHub.swift`)
+### 2.5 통합 워크스페이스 허브 & 오프라인 스마트 생산성 도구 (`crates/easyoffice-app`)
 - **통합 홈 허브 및 멀티 탭/스플릿 뷰 워크스페이스 (`WorkspaceViewModel`)**:
   - 6대 허브 섹션(`HubSection`: `home`, `recent`, `pinned`, `templates`, `converter`, `smartAssistant`), 8종 내장 템플릿 및 사용자 정의 템플릿(`OfficeTemplateDescriptor`), 열려 있는 모든 탭의 파일명·본문·수식·발표자 노트·PDF 주석을 아우르는 전문 색인 검색(`WorkspaceHubCatalog.searchTabs`, `filterTabs`).
-  - 단일 윈도우 좌우 분할 보기(`splitSecondaryTabID`), 7대 컨텍스트 리본 카테고리(`RibbonCategory`), 5대 모듈별 인터랙티브 상세 에디터 패널(`EditorDetailPanes.swift`).
+  - 단일 윈도우 좌우 분할 보기(`splitSecondaryTabID`), 7대 컨텍스트 리본 카테고리(`RibbonCategory`), 5대 모듈별 인터랙티브 상세 에디터 패널(WebUI `ui/`).
 - **포맷 일괄 변환 스튜디오 (`DocumentConversionOrchestrator`)**:
   - 20종 전 포맷 간 단건(`convert(_:)`) 및 배치(`executeBatch(_:)`) 변환을 수행하며, 모든 출력 페이로드에 대해 `FormatDetector.verify` 매직 바이트 시그니처 무결성을 검증합니다.
 - **100% 오프라인 로컬 스마트 문서 보조 도구 (`LocalSmartDocumentAssistant`)**:
@@ -96,7 +96,7 @@
 ---
 
 ## 3. 플랫폼 배포 형태 (Platform Delivery, `PD-074`)
-- **macOS**: 네이티브 Swift 앱(`EasyOffice.app`, `.dmg`/`.zip`)으로 배포합니다.
+- **macOS (`PD-094`)**: Windows와 같은 Tauri 데스크톱 셸(WKWebView)을 유니버설 `.dmg`(`EasyOffice-<version>-macos-universal.dmg`, macOS 11 이상)로 배포합니다. Apple Developer ID 서명·공증은 하지 않으므로 처음 한 번 우클릭 → 열기(또는 시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기)가 필요합니다. 표준 메뉴 막대와 Command 단축키가 동작하고 Finder에서 문서를 열 수 있습니다.
 - **Windows**: 설치 프로그램 `EasyOffice-<version>-windows-x64-setup.exe`(NSIS, 사용자 단위 설치, 시작 메뉴 바로 가기, 제거 프로그램)로 배포합니다. 설치된 `EasyOffice.exe`는 Windows 내장 WebView2 위의 데스크톱 창(Tauri v2 셸)이며, 실행 파일에 포함된 WebUI가 프로세스 안의 Rust 엔진(15종 IPC 명령)을 직접 호출합니다. 로컬 HTTP 서버·브라우저·네트워크 연결 없이 동작하고, 저장은 Windows 기본 저장 대화상자로 위치를 고릅니다(취소·실패는 저장 상태 표시에 그대로 보고). 문서 파일 연결(더블클릭으로 열기)은 파일 열기 기능(#111)이 준비될 때까지 등록하지 않습니다.
 - **한글(HWP) 편집기 자산 (`PD-081`)**: 편집기(rhwp 엔진의 미리 빌드한 WASM + 임베드 전용 rhwp-studio 오버레이)와 번들 가능한 OFL 글꼴 28종(약 18 MiB)이 저장소에 고정되어 있고, 단독 하니스에서 빈 문서 → 한글 입력 → 선택 범위만 글자 크기 변경 → HWP 내보내기 → 다시 열기에서 같은 글자 모양이 유지됨을 검증합니다. `PD-083`부터 한글 모듈이 이 편집기를 같은 출처 iframe으로 임베드합니다(데스크톱 셸은 실행 파일에 내장, `--serve`는 디스크 또는 `embed-hwp-studio` 기능으로 내장). 빈 문서에서 시작해 한글 입력·선택한 글자만 크기·굵게·표 도구를 쓰고 HWP 5.0으로 저장할 수 있으며, 번들이 없는 빌드는 기존 텍스트 전용 편집기와 안내 문구로 대체됩니다. `PD-085`부터 HWP·HWPX·HWT·HWTX를 열 수 있고(최대 64 MiB, 암호 문서는 편집기의 비밀번호 대화상자, DRM·미지원 암호화는 거부, 편집기가 못 여는 파일은 서식 유실 안내와 함께 텍스트만 열기), HWP·HWPX로 저장할 수 있으며(저장 전 재파싱 검증, HWPX 검증 실패 시 HWP 저장 제안, 취소·실패 시 수정 상태 유지), 수정 상태가 이탈 경고에 반영되고 IndexedDB 자동 저장본이 새로고침 후 복원 확인을 거쳐 복원됩니다. 변환기는 열려 있는 한글 문서를 편집기가 내보낸 바이트로 변환합니다. 앱 단축키(Ctrl+S 등)는 편집기에 포커스가 있을 때 아직 전달되지 않습니다.
 - **문서별 개별 창·셸 정리 (`PD-088`)**: Windows 데스크톱 셸에서 문서 하나는 창 하나입니다(모듈 전환 탭 없음). 인수 없이 실행하면 시작 창(새 문서 6종·열기·최근 문서)이 뜨고, 새 문서·열기·최근 문서·끌어 놓기는 새 창에서 열리며 같은 파일을 다시 열면 열린 창을 앞으로 가져옵니다. 창 제목은 `파일 이름 — EasyOffice`와 수정 표시(`●`)이고, 저장하지 않은 창을 닫으면 저장 / 저장 안 함 / 취소를 묻습니다. 실행 취소·자동 저장·수정 상태는 창 단위입니다. 경로는 Rust에만 있고 WebView에는 이름과 바이트만 갑니다. 한글 편집기 창은 rhwp 도구모음과 메뉴 줄 하나만 보이고(`PD-093`: 셸 메뉴 줄·상태 표시줄 숨김, 편집기 `파일` 메뉴는 새로 만들기·열기·최근 문서·저장·다른 이름으로 저장·닫기 셸 명령, 셸 테마를 편집기에 전달, 알림은 토스트) `Ctrl+S/O/N/K/W`는 편집기 포커스에서도 셸로 전달됩니다. 상태 표시줄은 쪽·위치·입력 모드·파일 이름·메시지·확대만 보여 주고 진단 정보는 `도움말 ▸ 제품 정보`에 있으며, 시작 창 카드는 형식별 아이콘과 모듈 색을 씁니다. 셸 아이콘은 SVG 한 벌이고 모든 컨트롤에 접근성 이름이 있으며 라이트·다크 모두 명암비 AA입니다.

@@ -366,3 +366,14 @@ test("HWP autosave records are keyed by the window id", async () => {
   assert.equal(mk("w-1").getTabId(), "hwp-w-1");
   assert.equal(mk("w-2").getTabId(), "hwp-w-2");
 });
+
+test("macOS Command shortcuts map onto the Ctrl-based shortcut table and the platform hint shows the Command key", () => {
+  const SESSION_JS = new URL("../crates/easyoffice-app/ui/workspace-session.js", import.meta.url);
+  const env = loadUiModule(SESSION_JS, { navigator: { platform: "MacIntel" } });
+  const { shortcutComboFromEvent, guessClientPlatform } = env.__EASYOFFICE_WORKSPACE_SESSION_UTILS__;
+  const ev = (init) => ({ key: "", code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init });
+  assert.equal(shortcutComboFromEvent(ev({ key: "s", metaKey: true })), "Ctrl+S");
+  assert.equal(shortcutComboFromEvent(ev({ key: "z", metaKey: true, shiftKey: true })), "Ctrl+Shift+Z");
+  assert.equal(shortcutComboFromEvent(ev({ key: "s", ctrlKey: true })), "Ctrl+S");
+  assert.deepEqual(guessClientPlatform(), { platform: "macOS", shortcutModifier: "⌘" });
+});

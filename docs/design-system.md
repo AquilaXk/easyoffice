@@ -1,6 +1,6 @@
 # EasyOffice UI/UX & Signature Lavender Design System
 
-이 문서는 `EasyOffice` (`v1.0.0`)의 시각적 정체성("우리의 결")인 **Signature Lavender Design System**(`Sources/EasyOfficeDesignSystem/DesignTokens.swift`)과 macOS 네이티브 올인원 오피스 워크스페이스의 UI/UX 설계 기준을 정의합니다.
+이 문서는 `EasyOffice` (`v1.0.0`)의 시각적 정체성("우리의 결")인 **Signature Lavender Design System**(WebUI `crates/easyoffice-app/ui/styles.css` 토큰, PD-094 이전 Swift 구현은 Git 이력)과 macOS·Windows 공통 올인원 오피스 워크스페이스의 UI/UX 설계 기준을 정의합니다.
 
 ---
 

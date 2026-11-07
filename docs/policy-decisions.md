@@ -48,7 +48,8 @@
 
 ### 1. macOS 네이티브 Swift 6 + SwiftUI/AppKit 하이브리드 아키텍처 채택
 
-- **Status**: Implemented (초기 아키텍처 설정)
+- **Status**: Superseded (초기 아키텍처 설정)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**: 애플리케이션 코어(`EasyOfficeCore`), 디자인 시스템(`EasyOfficeDesignSystem`), 데스크톱 앱(`EasyOfficeApp`)을 Swift 6 Strict Concurrency 기반 네이티브 패키지로 구성하고, 선언적 레이아웃(홈 허브, 리본, 인스펙터)은 SwiftUI로, 고밀도 텍스트 조판·대용량 스프레드시트 그리드·PDFKit 캔버스 통합은 AppKit 브리지로 구현합니다.
 - **Why**: macOS 데스크톱 오피스 환경에서 즉각적인 콜드 스타트(<100ms), 낮은 메모리 점유율, Retina/ProMotion 고주사율 스크롤, 시스템 다크모드·Vibrancy·단축키·VoiceOver 접근성 통합을 달성하려면 네이티브 프레임워크가 필수적입니다.
 - **Trade-offs**: 웹뷰 기반 크로스플랫폼 프레임워크 대비 UI 컴포넌트를 macOS 네이티브로 정밀하게 구현해야 하므로 초기 렌더러 설계 공수가 높습니다.
@@ -61,7 +62,8 @@
 
 ### 2. 시그니처 라벤더 디자인 시스템과 도메인별 시맨틱 액센트 조화
 
-- **Status**: Implemented (`Sources/EasyOfficeDesignSystem/DesignTokens.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeDesignSystem/DesignTokens.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**: 브랜드 기본 액센트로 시그니처 라벤더(`#5C6BC0`, Hover `#4A58A9`, Active `#3B4890`, Light Scaffold `#F7F8FC`, Dark Scaffold `#141724`)를 사용하고, 문서 유형 식별을 위한 보조 시맨틱 액센트(Document Indigo `#5C6BC0`, Sheet Emerald `#0A705A`, Slide Amber-Coral `#D96B27`, PDF Crimson `#D9383A`, HWP Royal Violet `#6E56CF`)를 채도와 명도 대비(WCAG AA 4.5:1 이상)에 맞춰 통합합니다.
 - **Why**: 올인원 오피스 워크스페이스에서 현재 열려 있는 탭과 파일 카드가 워드 문서인지, 시트인지, 슬라이드인지, 한글(HWP/HWPX)인지, PDF인지 0.1초 만에 시각적으로 구분하면서도 브랜드 고유의 차분하고 정교한 라벤더 톤앤매너("우리의 결")를 잃지 않게 합니다.
 - **Trade-offs**: 임의의 시스템 기본 색상 대신 검증된 디자인 토큰만 사용하도록 강제해야 합니다.
@@ -74,7 +76,8 @@
 
 ### 3. 올인원 단일 윈도우 멀티 탭 + 컨텍스트 리본 및 우측 인스펙터 결합 레이아웃
 
-- **Status**: Implemented (`Sources/EasyOfficeApp/`, `docs/design-system.md`)
+- **Status**: Superseded (`Sources/EasyOfficeApp/`, `docs/design-system.md`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**: 앱 실행 시 좌측 내비게이션(홈, 최근 문서, 고정 문서, 서식 템플릿, 포맷 일괄 변환, 스마트 보조 도구)을 갖춘 **통합 홈 허브(Home Hub)**를 제공하고, 문서 열기/생성 시 단일 윈도우 내 **멀티 문서 탭 바 + 상단 컴팩트 컨텍스트 리본(Context-Aware Ribbon) + 좌측 구조 내비게이터(썸네일/시트/목차) + 중앙 고해상도 캔버스 + 우측 세부 속성 인스펙터(Inspector) + 하단 상태/줌 바** 구조로 전환합니다.
 - **Why**: 상용 올인원 오피스 사용자에게 익숙한 상단 리본 툴바의 기능 탐색성과 macOS 네이티브 생산성 앱의 우측 속성 인스펙터 조작성을 결합하여 학습 비용을 최소화하고 화면 세로 작업 영역을 극대화합니다.
 - **Trade-offs**: 리본 명령과 우측 인스펙터 속성 간 양방향 상태 동기화를 일관된 뷰모델(`WorkspaceViewModel`)에서 관리해야 합니다.
@@ -88,7 +91,8 @@
 
 ### 4. 파일 확장자 불신 및 매직 바이트 시그니처 기반 Fail-Closed 컨테이너 검증
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/FormatDetector.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/FormatDetector.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**: 모든 입력 문서는 파일 확장자만 신뢰하지 않고 바이너리 매직 바이트(`PK\x03\x04` ZIP/OOXML/ODF/HWPX, `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1` OLE2 CFBF/HWP 5.0, `%PDF-` ISO 32000 PDF, UTF-8 텍스트 검증)와 크기 상한을 먼저 검증하며, 시그니처 불일치·빈 페이로드·크기 초과 시 즉시 타입화된 에러(`EasyOfficeError`)로 차단(Fail-Closed)합니다.
 - **Why**: 확장자만 바꾼 손상 파일이나 압축 폭탄(ZIP/OLE2 bomb)이 파서 내부로 진입해 크래시나 데이터 오염을 일으키는 것을 입구에서 차단하기 위함입니다.
 - **Trade-offs**: 헤더가 손상된 비표준 파일은 자동 복구 모드를 명시적으로 호출하기 전까지 기본 열기가 거부됩니다.
@@ -101,7 +105,8 @@
 
 ### 5. 한글 문서(HWP 5.0 OLE2 / HWPX KS X 6101) 및 OOXML/ODF/PDF 통합 지원
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/DocumentFormat.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/DocumentFormat.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**: macOS 환경에서 가장 큰 문서 호환성 공백인 한글 문서(`HWP 5.0` OLE2 Compound File 및 `HWPX` KS X 6101 OWPML 표준)를 별도 플러그인이나 유료 티어 분리 없이 기본 1급 시민 포맷으로 `DOCX`, `XLSX`, `PPTX`, `ODT`, `ODS`, `ODP`, `PDF`, `CSV`, `MD`, `TXT`와 동일하게 지원합니다.
 - **Why**: 국내 공공·기업·학술 문서를 macOS에서 열람·편집·PDF 변환할 때 서식 깨짐이나 전용 뷰어 부재로 겪는 불편을 단일 네이티브 오피스에서 완전히 해소하기 위함입니다.
 - **Trade-offs**: OLE2 스트림(`FileHeader`, `DocInfo`, `BodyText/Section*`, `BinData`)과 OWPML XML 스키마 두 계통의 파서/렌더러를 모두 유지해야 합니다.
@@ -115,6 +120,7 @@
 ### 6. 실무 기준 3계층 이슈 구조(Epic → Sub-issue → PR) 및 GitHub Release 배포 체계
 
 - **Status**: Implemented (`.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/release.yml`, `.github/release.yml`)
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision**:
   1. 이슈 트래커는 `Roadmap (#1) → 5대 영역 Epic (#2~#6) → 백로그 항목(GitHub Native Sub-issue) → 자기완결 PR`의 3계층으로 운영합니다.
   2. 측정 수치, 테스트 flake, 코드 리뷰 finding, 소규모 후속 작업마다 새 이슈를 만들지 않고 해당 Sub-issue 또는 Epic 체크리스트 행으로 관리하며, 경미한 유지보수(Class C)는 신규 이슈 없이 PR로 직행합니다.
@@ -130,7 +136,8 @@
 
 ### 7. 비트 수준 바이너리·컨테이너 코덱(ZIP/OLE2/HWP 5.0/XML/CSV) 및 압축 폭탄·XXE·경로 순회 차단 정책
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/TabularAndMarkupCodec.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/TabularAndMarkupCodec.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. 모든 바이너리 오피스 컨테이너(`ZIP` 기반 `OOXML`/`ODF`/`HWPX` 및 512바이트 섹터 `OLE2 CFBF` 기반 `HWP 5.0`)는 외부 CLI 프로세스 호출 없이 순수 Swift 비트 연산(`BitPacking`, IEEE 802.3 `CRC32Calculator` 256-entry 룩업 테이블, `HWP5RecordHeader` `10-bit tagID | 10-bit level | 12-bit size` + `0xFFF` 확장 헤더)으로 직렬화·역직렬화합니다.
   2. `ZipContainerCodec`은 엔트리 수 상한(`4,096`), 단일 엔트리 해제 상한(`128 MiB`), 전체 해제 상한(`512 MiB`), 최대 압축 비율(`100:1`)을 강제하고, `..`·절대 경로(`/`)·백슬래시(`\`)·NUL 바이트가 포함된 경로를 즉시 `EasyOfficeError.securityViolation`으로 차단하며, 압축 폭탄 감지 시 `EasyOfficeError.decompressionBombDetected`를 반환합니다.
@@ -147,7 +154,8 @@
 
 ### 8. 64비트 비트패킹 셀 좌표 및 92종 결정론적 수식·피벗·표 계산 엔진 정책
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. 스프레드시트 셀 좌표는 `PackedCellCoordinate`(`UInt64`: 상위 32비트 `row`, 하위 32비트 `column`)로 비트패킹하여 문자열 해싱 없이 $O(1)$ 조회 및 행 우선(row-major) 비교를 수행하며, `CellAddress`는 ECMA-376 규격 상한(`maxZeroBasedColumn = 16,383`, `maxZeroBasedRow = 1,048,575`)과 오버플로 검사를 강제합니다.
   2. `CellRange`의 단일 수식 범위 확장은 메모리 고갈 방지를 위해 `maxExpandedCellCount = 100,000` 셀을 상한으로 제한하고 초과 시 `EasyOfficeError.invalidCellRange`를 반환합니다.
@@ -163,7 +171,8 @@
 
 ### 9. 양방향 포맷 일괄 변환 스튜디오, 오프라인 로컬 스마트 문서 보조 도구 및 메타데이터 비식별화 감사 정책
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SmartProductivityTools.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/SmartProductivityTools.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. `DocumentConversionOrchestrator`는 모든 오피스 도메인(`.document`, `.sheet`, `.slide`, `.pdf`)과 20종 포맷(`.docx`, `.odt`, `.hwpx`, `.hwtx`, `.hwp`, `.hwt`, `.doc`, `.rtf`, `.md`, `.txt`, `.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`, `.pptx`, `.ppsx`, `.odp`, `.ppt`, `.pdf`) 간 단건·배치 변환을 수행하며, 변환된 모든 출력 바이트에 대해 반환 전 `FormatDetector.verify(data:fileName:)` 매직 시그니처 검증을 강제합니다.
   2. `LocalSmartDocumentAssistant`는 외부 클라우드 LLM이나 네트워크 API를 전혀 호출하지 않는 100% 오프라인 결정론적 알고리즘(단어 빈도·위치 가중치 문장 중요도 스코어링 요약, 어절 경계 장문 분할·피동 표현·중복 수식어 교정 진단, 사전 컴파일 정적 정규식 기반 기한·예산·수치·조치 항목 추출, 시트 Z-Score 이상치(`|z| >= 1.8`) 및 추세 분석, 1차원 평탄화 `[Int32]` 버퍼 기반 최대 2,048 문단 상한 LCS 동적 계획법 문단 비교)으로 동작합니다.
@@ -179,7 +188,8 @@
 
 ### 10. 스플릿 뷰(Split-View) 멀티 탭 워크스페이스, 컨텍스트 리본 명령 카탈로그 및 WCAG AA 접근성 정책
 
-- **Status**: Implemented (`Sources/EasyOfficeDesignSystem/DesignTokens.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeDesignSystem/DesignTokens.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. `WorkspaceViewModel`은 단일 윈도우에서 두 개의 열린 탭을 좌우로 나란히 비교·편집할 수 있는 스플릿 뷰(`splitSecondaryTabID`, 최소 너비 `splitPaneMinimumWidth = 420pt`)를 지원하며, 보조 탭이 닫히거나 활성 탭과 동일해지면 자동으로 단일 캔버스 모드로 복귀합니다.
   2. `RibbonCategory`는 7대 카테고리(`home`, `insert`, `layout`, `formulasAndData`, `moduleSpecific`, `review`, `view`) × 5대 오피스 모듈(`document`, `sheet`, `slide`, `pdf`, `hwp`) 조합에 대해 빈 슬롯 없는 결정론적 `RibbonCommandDescriptor` 카탈로그를 제공하며, `isRibbonCollapsed`(`Cmd+Option+R`) 토글로 컴팩트 리본과 1줄 축소 모드를 즉시 전환합니다.
@@ -195,7 +205,8 @@
 
 ### 11. 전 포맷 라운드트립 패리티·비트 수준 성능 벤치마크 게이트 및 v1.0.0 정식 릴리스 정책 (2026-10-17)
 
-- **Status**: Implemented (`Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`, `scripts/package-macos-release.sh`, `.github/workflows/release.yml`)
+- **Status**: Superseded (`Tests/EasyOfficeTests/CommercialParityBenchmarkTests.swift`, `scripts/package-macos-release.sh`, `.github/workflows/release.yml`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. `CommercialParityBenchmarkTests`를 통해 지원 대상 **20종 문서·템플릿 포맷 전수**(`.docx`, `.doc`, `.odt`, `.rtf`, `.md`, `.txt`, `.hwp`, `.hwpx`, `.hwt`, `.hwtx`, `.xlsx`, `.xls`, `.ods`, `.csv`, `.tsv`, `.pptx`, `.ppt`, `.ppsx`, `.odp`, `.pdf`)에 대한 바이너리/컨테이너 직렬화 → `FormatDetector.verify` 매직 바이트 시그니처 검증 → 역직렬화 → 도메인 구조 복원(문단·표·셀·슬라이드·페이지·유니코드/한글 보존) 엔드투엔드 라운드트립 패리티를 상시 검증합니다.
   2. 비트 수준 코덱(`CRC32Calculator` 1차원 2,048-entry `flatSlicingTable`, `HWP5RecordHeader` 32비트 비트패킹 + `0xFFF` 확장 헤더, `BitPacking` 리틀 엔디언 정수 및 길이 접두 UTF-16LE 인코딩, 64비트 `PackedCellCoordinate`), 92종 내장 수식 밀집 그리드 평가 및 `PivotTableEngine` 집계, `DocumentConversionOrchestrator` 배치 변환, `LocalSmartDocumentAssistant` 오프라인 문서 요약·문장 교정·LCS 비교, `DocumentSecurityAuditor` 컨테이너 보안 감사·메타데이터 비식별화가 모두 서브초(sub-second) 예산 내에 결정론적으로 완료됨을 검증 게이트로 강제합니다.
@@ -211,7 +222,8 @@
 
 ### 12. Slicing-by-8 CRC-32, 하드웨어 비정렬 워드 적재, 무할당 UTF-8 파서, 표준 컨테이너 호환성 및 AST 캐시·메모이제이션 시트 엔진 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/XMLSanitizer.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift`, `Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift`, `Sources/EasyOfficeCore/TabularAndMarkupCodec.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAnalyticsAndPivot.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/XMLSanitizer.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift`, `Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift`, `Sources/EasyOfficeCore/TabularAndMarkupCodec.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAnalyticsAndPivot.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **비트 수준 메모리·바이트 처리량 최적화**:
      - `BitPacking`은 바이트 단위 시프트 루프 대신 `UnsafeRawBufferPointer.loadUnaligned(fromByteOffset:as:)` 및 `storeBytes(of:toByteOffset:as:)` 단일 하드웨어 리틀 엔디언 워드 적재/저장을 사용하며, `CRC32Calculator`는 `8 × 256` 1차원 평탄화 `flatSlicingTable` 기반 **Slicing-by-8** 알고리즘으로 루프당 8바이트씩 처리합니다.
@@ -235,7 +247,8 @@
 
 ### 13. ISO 32000-1 바이트 정밀 xref/PDFKit 통합, 140종 컨텍스트 리본 전수 라우팅, Undo/Redo 스택 및 네이티브 파일 I/O 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/EasyOfficeApp.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/EasyOfficeApp.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **ISO 32000-1 바이트 정밀 `xref` 오프셋 테이블 및 macOS `PDFKit` 브리지 (`PDFBinarySerializer.swift`)**:
      - 각 간접 객체(`N 0 obj`) 직렬화 직전의 실제 `Data.count` 바이트 오프셋을 기록하여 20바이트 표준 `xref` 엔트리(`%010d 00000 n \n`)와 정확한 `startxref` 위치를 생성하고, 각 `/Type /Page` 객체에 `/Resources << /Font << /F1 ... >> >>` 사전을 포함하여 macOS 네이티브 `PDFKit.PDFDocument(data:)` 및 `PDFView`(`PDFKitRepresentedView`)에서 즉시 렌더링·텍스트 추출이 가능하도록 통합합니다.
@@ -255,7 +268,8 @@
 
 ### 14. 다중 시트 워크북, 셀 서식(`CellStyle`), 런/이미지 직렬화, 외부 표준 `.ods`/BIFF8 `.xls` 위치 기반 파싱 및 무할당(`Zero-Array(String)`) 핫패스 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift`, `Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift`, `Sources/EasyOfficeCore/LocalSmartAssistant.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift`, `Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift`, `Sources/EasyOfficeCore/LocalSmartAssistant.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **다중 시트 워크북(`WorksheetSheetPage`), 일급 셀 서식(`CellStyle`) 및 단일 컨텍스트 그리드 일괄 평가(`evaluateGrid`)**:
      - `WorksheetModel`에 다중 시트 페이지 컬렉션(`additionalSheets`, `activeSheetIndex`, `addSheetPage`, `switchActiveSheet`), 좌표별 셀 서식(`cellStyles: [PackedCellCoordinate: CellStyle]`, `CellNumberFormat`, `CellHorizontalAlignment`), `pageSetup: WorksheetPageSetup`, `sheetComments: [PackedCellCoordinate: String]`, `trackChangesEnabled: Bool`을 도입하여 임의 셀(`E1~F6`) 오염 없이 도메인 상태를 정식 보존합니다.
@@ -276,7 +290,8 @@
 
 ### 15. Zero-Slop 도메인 리본 라우팅, 인라인 편집 Undo Coalescing, 다중 페이지 가시 PDF 렌더링 및 인터랙티브 UI 모듈 분리 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **Zero-Slop 140종 컨텍스트 리본 도메인 변이 (`WorkspaceRibbonCommandRouter.swift`)**:
      - 스프레드시트(`.sheet`)의 28개 리본 명령에서 기존 `E1~E8`·`F1~F6` 임의 셀 텍스트 오염을 100% 제거하고, `sheet.cellStyles`(`CellStyle`), `sheet.pageSetup`(`WorksheetPageSetup`), `sheet.sheetComments`, `sheet.addSheetPage`, `sheet.trackChangesEnabled`, `sheet.detectedNumericRange()`, `sheet.detectedDataRange()`, `PivotTableEngine.compute` 등 실제 도메인 상태 변이로 전환합니다.
@@ -300,7 +315,8 @@
 
 ### 16. 비파괴적 리본 도메인 변이(Non-Destructive Ribbon Mutations), 5대 모듈 양방향 우측 인스펙터, 60fps 실시간 슬라이드 드래그·1Hz 발표자 타이머 및 SRP 기반 도메인 모듈 분할 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/WorkspaceCatalogAndModels.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/WorkspaceCatalogAndModels.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **사이드채널 문자열 오염 0건 및 비파괴적 도메인 상태 변이 (`WorkspaceRibbonCommandRouter.swift`)**:
      - 문서(`.document`, `.hwp`)의 메일 머지(`doc-mod-mailmerge`), 원고지 매수 검산(`hwp-mod-manuscript`), 수식·데이터 명령(`-data-autosum`, `-data-fn-browser`, `-data-sort`, `-data-validation`)이 `doc.footerText`를 덮어쓰던 부작용을 제거하고, 표 요약 행 추가(`=SUM(ABOVE)`, `=AVERAGE(ABOVE)`) 및 `doc.recordRevision(...)` 이력 기록으로 비파괴적 변이를 수행합니다.
@@ -328,7 +344,8 @@
 
 ### 17. PD-026: AppKit NSTextView UTF-16 부분 선택 런 분할 및 DTP 2단·수식·텍스트 어울림·워터마크 조판 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. `SelectableParagraphTextView`(`NSViewRepresentable`)는 선택된 문단에 대해 AppKit `NSTextView` 및 `NSTextViewDelegate.textViewDidChangeSelection(_:)`을 연결하여 커서 드래그 선택 영역(`selectedRange()`)을 UTF-16 오프셋 범위(`selectedParagraphUTF16Range: Range<Int>?`)로 실시간 수집합니다.
   2. `ParagraphBlock.applyRunFormatting(utf16Range:...)`은 UTF-16 오프셋을 `String.Index(utf16Offset:in:)` 및 `rangeOfComposedCharacterSequences(for:)`로 정렬하여 한글 자모·복합 문자 경계를 안전하게 보존하면서 `DocumentTextRun`을 분할·병합하며, 리본 홈 서식(`-home-bold`/`-home-italic`/`-home-underline`) 및 인라인 런 강조 명령이 선택된 UTF-16 부분 범위를 최우선으로 반영합니다.
@@ -344,7 +361,8 @@
 
 ### 18. PD-027: 스프레드시트 다중 셀 범위 드래그 선택, $ 절대·상대 참조 이동 자동 채우기(Auto-Fill) 엔진 및 가변 행·열 리사이즈 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. `WorkspaceViewModel`은 단일 활성 셀(`selectedSheetCell`)과 함께 다중 셀 선택 범위(`selectedSheetRange`, `selectSheetCellOrRange`, `extendSheetSelection`)를 유지하며, 리본 서식 명령(`sheet-home-bold`/`-italic`/`-underline`)은 `updateCellStyleInRange`를 통해 선택된 사각형 범위 전체에 일괄 적용됩니다.
   2. `WorksheetModel.autofill(sourceRange:targetRange:)` 및 `shiftFormulaReferences(_:rowDelta:columnDelta:)`는 수식 내 `$` 절대 행·열 고정(`$A$1`, `$A1`, `A$1`)과 상대 참조(`A1`)를 구분하여 오프셋만큼 이동시키고, 2개 이상의 선형 등차수열(`100, 250 -> 400, 550`) 및 후행 정수 라벨(`항목 1 -> 항목 2`)을 자동 외삽합니다.
@@ -360,7 +378,8 @@
 
 ### 19. PD-028: 슬라이드 8방향 리사이즈 핸들, 360도 회전 각도 정규화 및 전체화면 발표 스테이지(레이저 포인터·노트 HUD) 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. `SlideModel.resizeElement(id:handle:deltaX:deltaY:stageSize:)`는 8방향 리사이즈 핸들(`SlideResizeHandle`: `NW`, `N`, `NE`, `E`, `SE`, `S`, `SW`, `W`) 드래그 시 반대편 고정 모서리(anchor edge)를 기준으로 최소 크기(`40×24 pt`) 및 스테이지 경계를 클램핑하며, `rotateElement(id:toDegrees:)`는 음수·초과 회전 각도를 `[0, 360)` 범위로 정규화합니다.
   2. `SlideEditorDetailPaneView`는 선택된 개체 둘레에 8개 방향 리사이즈 핸들과 상단 회전 핸들(`↻`), 등장 애니메이션 배지(`SlideElementAnimation`: `.none`, `.fadeIn`, `.flyInUp`, `.zoomIn`)를 렌더링합니다.
@@ -376,7 +395,8 @@
 
 ### 20. PD-029: PDF 스튜디오 ISO 32000-1 벡터 잉크 획(m / l / S) 직렬화 및 자유곡선 서명·하이라이트 오버레이 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. `PDFStudioDocumentModel`은 페이지별 자유곡선 벡터 잉크 획 컬렉션(`inkStrokes: [PDFInkStroke]`, `PDFInkPoint`)을 보유하며, 페이지 삭제·추출·병합·순서 변경 시 주석(`annotations`)과 동일하게 페이지 번호를 자동 재매핑합니다.
   2. `PDFBinarySerializer.encode(_:)`는 각 페이지의 `inkStrokes`(`points.count >= 2`)를 ISO 32000-1 그래픽 상태 블록(`q <R> <G> <B> RG <lineWidth> w 1 J 1 j <x0> <y0> m <x1> <y1> l ... S Q`)으로 페이지 콘텐츠 스트림에 직접 직렬화하고, 스튜디오 메타데이터 스트림을 통해 무손실 라운드트립 복원을 보장합니다.
@@ -392,7 +412,8 @@
 
 ### 21. PD-030 ~ PD-034: 인라인 형광펜/링크·표 구조 편집·이름 정의/목표값 찾기/92종 함수·PDF 비가역 리댁션 및 1D CRC32·따옴표 인식 XML 파서 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/XMLSanitizer.swift`, `Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/DocumentSubmodelsAndNotes.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/XMLSanitizer.swift`, `Sources/EasyOfficeCore/BinaryContainerCodec.swift`, `Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/DocumentSubmodelsAndNotes.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **PD-030 (문서 인라인 취소선·형광펜·하이퍼링크·문단 들여쓰기·표 행/열 편집 및 페이지 토큰)**:
      - `DocumentTextRun`에 `isStrikethrough`, `backgroundHex`, `linkURL`을 추가하고, `ParagraphBlock`에 `firstLineIndentPt`·`leftIndentPt`를 추가하여 `.docx`, `.odt`, `.hwpx`, `.hwp`, `.rtf`, `.md`, `.html` 전 포맷 라운드트립을 지원합니다.
@@ -416,7 +437,8 @@
 
 ### 22. PD-032 & PD-035: 7종 벡터 차트·7종 슬라이드 도형/정렬 뷰·NSTextView 문단 스타일/인라인 속성 및 PDF 리댁션/AcroForm/탭 병합 UI 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubEditorActions.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubEditorActions.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **PD-032 (7종 `SheetChartKind` 벡터 캔버스·스파크라인 및 7종 `SlideElementKind` 도형·슬라이드 정렬 뷰)**:
      - `SheetVectorChartCanvasView`는 `SheetChartKind` 7종(`.column`, `.stackedColumn`, `.bar`, `.line`, `.area`, `.pie`, `.scatter`) 각각에 대해 별도의 `Canvas` 기하학(막대, 누적 막대, 수평 막대, 꺾은선+점, 반투명 영역+상단 윤곽선, 원형 호 섹터, 산점도 마커)과 유한 실수 안전 포맷터(`safeFinite`/`formatMetric`)를 적용하고, 조건부 서식 배지 카드에 `sparklineNormalizedValues(for:using:)` 기반 미니 스파크라인 `Canvas`를 함께 표시합니다.
@@ -437,7 +459,8 @@
 
 ### 23. PD-037 ~ PD-041: 시맨틱 다크모드 배지 명도 대비, 200자 원고지 격자·문단/표/메일머지 제어, 시트 데이터 막대·첫 열 고정·데이터 정제, 슬라이드 마스터 테마·개체 정렬/배분·단조 Z-Order 및 PDF 결재 도장·계층형 책갈피 정책 (2026-10-18)
 
-- **Status**: Implemented (`Sources/EasyOfficeDesignSystem/DesignTokens.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeDesignSystem/DesignTokens.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeCore/WorkspaceRibbonCommandRouter.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **PD-037 (시맨틱 다크모드 배지 및 인스펙터 명도 대비 토큰화)**:
      - `WorkspaceThemePalette`의 `accentBadgeFill` / `accentBadgeText` 시맨틱 토큰을 우측 컨텍스트 인스펙터(`RightContextInspectorView.swift`) 및 상세 편집 패널 전반에 일괄 적용하고, 다크모드 배경 위에서 가독성을 저하시키던 고정 `brand50`·`brand100`·`brand700` 직접 참조를 제거하여 WCAG AA 이상의 명도 대비를 보장합니다.
@@ -464,7 +487,8 @@
 
 ### 24. PD-040 ~ PD-043: 6차 적대적 감사 기반 다중 그룹 리본·문서/슬라이드 수평 눈금자·무간격 1px 세선 시트 그리드·122종 수식 함수·자간/장평 타이포그래피·16:9 슬라이드/홈 템플릿 미니어처 및 PDF 보안 점검·워터마크 정책 (2026-10-19)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SheetCoordinatesAndAST.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/DocumentEngine.swift`, `Sources/EasyOfficeCore/SheetCoordinatesAndAST.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetLookupTextAndFinancialFunctions.swift`, `Sources/EasyOfficeCore/PDFEngine.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/SlideshowAndPDFCanvasOverlays.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **PD-040 (다중 그룹 컨텍스트 리본 아키텍처, 문서/슬라이드 수평 눈금자 및 단일 행 무줄바꿈 툴바)**:
      - 상단 컨텍스트 리본을 수직 구분선(`Divider`)과 하단 그룹 캡션(`편집·실행`, `핵심 리본 도구`, `서식·문서 구조`, `빠른 조판·분석`)을 갖춘 **다중 그룹 리본(`ContextRibbonBarView`)**으로 구조화하고, 모든 툴바·상태 배지에 `.lineLimit(1)` + `.fixedSize(horizontal: true, vertical: false)` 및 수평 `ScrollView`를 적용해 `"A4 (210 × 297 mm)"` 등의 텍스트나 한글 버튼이 세로로 꺾이거나 잘리지 않도록 보장합니다.
@@ -494,7 +518,8 @@
 
 ### 25. PD-047 ~ PD-051: 7차 적대적 감사 기반 무클리핑 단일 컨텍스트 툴바·수직 눈금자(`0..24cm`)·단일 A4 WYSIWYG 조판·9열 시트/외곽 2pt 범위 테두리·수식 연산자(`+`/`%`)/`ISBLANK`·슬라이드 단일 필름스트립/전환 타이밍·PDF 상단 렌더링 및 찾기/바꾸기 내비게이션 정책 (2026-10-19)
 
-- **Status**: Implemented (`Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/SheetCoordinatesAndAST.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`)
+- **Status**: Superseded (`Sources/EasyOfficeCore/SlideEngine.swift`, `Sources/EasyOfficeCore/SheetCoordinatesAndAST.swift`, `Sources/EasyOfficeCore/SheetEngine.swift`, `Sources/EasyOfficeCore/SheetBuiltInFunctions.swift`, `Sources/EasyOfficeCore/SheetAutoFillAndLayout.swift`, `Sources/EasyOfficeCore/PDFBinarySerializer.swift`, `Sources/EasyOfficeCore/StandardZipOfficeCodecs.swift`, `Sources/EasyOfficeCore/ODFAndHWPXCodecs.swift`, `Sources/EasyOfficeCore/WorkspaceHub.swift`, `Sources/EasyOfficeCore/WorkspaceHubDocumentAndSlideActions.swift`, `Sources/EasyOfficeCore/WorkspaceHubSheetAndPDFActions.swift`, `Sources/EasyOfficeApp/WorkspaceViews.swift`, `Sources/EasyOfficeApp/EditorDetailPanes.swift`, `Sources/EasyOfficeApp/SheetEditorDetailPaneView.swift`, `Sources/EasyOfficeApp/SlideAndPDFDetailPanes.swift`, `Sources/EasyOfficeApp/RightContextInspectorView.swift`, `Sources/EasyOfficeApp/HomeHubAndSmartViews.swift`)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision**:
   1. **PD-047 (무클리핑 단일 컨텍스트 툴바 및 접이식 고급 도구 서랍 아키텍처 — `UX-08`)**:
      - 상단 `ContextRibbonBarView` 전체를 `ScrollView(.horizontal, showsIndicators: false)`로 감싸고 그룹 간격을 컴팩트화(`spacing: 8`, 내부 `spacing: 5`, 패딩 `horizontal: 10, vertical: 6`)하여 표준 데스크톱 창 및 2-Pane 스플릿 뷰에서 우측 끝 버튼이나 캡션이 1px도 잘리지 않도록 보장합니다.
@@ -523,6 +548,8 @@
 
 ### 26. 8차 심층 적대적 감사 기반 무결점 CoreGraphics 스냅샷 래스터화, 올인원 데스크톱 UI/UX 정밀 개편 및 코어·레거시 코덱 동기화 정책 (2026-10-24)
 
+- **Status**: Superseded (이전: Implemented)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision (`PD-052`)**:
   1. **무결점 CoreGraphics 스냅샷 래스터화 호환성 및 순수 SwiftUI 컨트롤 일원화 (`UX-01`~`UX-12`)**:
      - `WorkspaceViewModel`에 `isCanvasSnapshotMode: Bool = false` 플래그를 도입하고, `AdaptiveScrollContainer`, `LavenderMenuPill`, `LavenderTextFieldPill`, `LavenderTogglePill`, `LavenderStepperPill` 공통 컴포넌트를 통해 오프스크린 `NSView.cacheDisplay(in:to:)` 캡처 시 빈 사각형이나 잘림을 유발하던 AppKit `NSScrollView`/`NSTextView`/`PDFView`/`NSPopUpButton`/`NSTextField(.roundedBorder)` 브리지를 순수 SwiftUI/CoreGraphics 벡터 렌더링으로 일원화합니다.
@@ -545,6 +572,7 @@
 
 ### 27. Mac·Windows 크로스플랫폼 Rust 멀티 크레이트 코어 엔진(`crates/easyoffice-*`) 및 Tauri v2 데스크톱 아키텍처 정책 (2026-10-24)
 
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-053`)**:
   1. **무외부의존 순수 Rust 멀티 크레이트 워크스페이스(`Cargo.toml`, `crates/easyoffice-*`)**:
      - macOS와 Windows 양대 데스크톱 플랫폼에서 20종 표준 오피스 포맷 검증, 수식 계산, 조판 레이아웃, Fail-Closed 보안 경계를 단일 코드베이스로 공유하기 위해 루트 `Cargo.toml`(`resolver = "2"`, `edition = "2021"`, 외부 크레이트 의존성 `0`개) 아래 4개의 전문 크레이트를 구성합니다.
@@ -565,6 +593,7 @@
 
 ### 28. Rust 5대 모듈 도메인·140종 리본·오프라인 스마트 보조·C-ABI FFI 완비, 표준/한글(HWP) 리본 스위처 및 Windows CI/Release 파이프라인 정책 (2026-10-24)
 
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-054`)**:
   1. **Rust 5대 도메인 엔진 및 140종 리본·스마트 보조·PII 감사·C-ABI FFI 완비 (`crates/easyoffice-layout/src/domain.rs`, `crates/easyoffice-app/src/{ribbon.rs,smart_tools.rs,ffi.rs}`)**:
      - `crates/easyoffice-layout/src/domain.rs`에 `RibbonLayoutStyle { StandardOffice, HangulHwp }`, `ContextualObjectToolKind`, `DocumentDomainEngine`(병합 표 `DocumentTableModel` 및 `=SUM(ABOVE)`/`=AVERAGE(LEFT)` 표 셀 수식, 변경 내용 추적 `RevisionRecord`, 각주·미주 `FootnoteEntry`, 1~3단계 자동 목차 생성, `{{필드}}` 메일 머지), `SlideDomainEngine`(5종 마스터 레이아웃, 전환 타이밍, 발표자 레이저 포인터·자유곡선 잉크 `PresenterSessionState`), `PdfDomainEngine`(90도 페이지 회전, 분할·병합, 결재 스탬프, 워터마크, AcroForm 필드)을 구현합니다.
@@ -583,6 +612,7 @@
 
 ### 29. 순수 Rust RFC 1951 DEFLATE·HWP 5.0 압축 스트림 코덱, Swift/Rust 교차 엔진 바이너리 호환성 및 Tauri WebUI 7탭 리본·일괄 변환 스튜디오 정책 (2026-10-24)
 
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-055`)**:
   1. **순수 Rust `std` RFC 1951 DEFLATE 압축·해제 엔진 및 PKZIP `METHOD_DEFLATE (8)` 통합 (`crates/easyoffice-formats/src/{deflate.rs,zip_codec.rs,lib.rs}`)**:
      - 외부 크레이트 의존성이나 `unsafe` 블록 없이 `crates/easyoffice-formats/src/deflate.rs`에 RFC 1951 비압축(`BTYPE=00`)·고정 허프만(`BTYPE=01`)·동적 허프만(`BTYPE=10`) 인플레이터(`inflate_raw`), RFC 1950 2바이트 zlib 래퍼 자동 감지 인플레이터(`inflate_auto`), LZ77 슬라이딩 윈도 + 고정 허프만 디플레이터(`deflate_raw`)를 구현합니다.
@@ -603,6 +633,7 @@
 
 ### 30. Rust 비트·워드 수준 코어 엔진 최적화(Slicing-by-8 CRC32·9비트 LUT Huffman·SWAR UTF-16LE·Bitset DAG 시트) 및 Tauri 2.x WebUI 완결 정책 (2026-10-24)
 
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-056`)**:
   1. **`crates/easyoffice-formats` 비트·워드 수준 코덱 최적화 및 RFC 1950 Adler-32 Fail-Closed 검증 (`zip_codec.rs`, `deflate.rs`, `rtf_xml_helpers.rs`, `ole2_codec.rs`, `legacy_ole2_codec.rs`)**:
      - `IeeeCrc32`에 컴파일 타임 생성 `TABLES: [[u32; 256]; 8]` Slicing-by-8 테이블을 도입하여 8바이트 스트라이드로 IEEE 802.3 CRC-32를 처리합니다(1 MiB 스트림 기준 스칼라 1바이트 테이블 대비 `2,068µs -> 464µs`, `4.46x` 가속).
@@ -624,6 +655,8 @@
 
 ### 31. 64비트 SWAR XML·CSV 바이트 스캐너, 무할당 스트리밍 시트 범위 집계 및 데스크톱 워크스페이스 UI/UX 무결성 완결 정책 (2026-10-24)
 
+- **Status**: Superseded (이전: Implemented)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision (`PD-057`)**:
   1. **`Sources/EasyOfficeCore` 64비트 SWAR 바이트 스캐너 및 4-Way 언롤 시트 집계 (`XMLSanitizer.swift`, `TabularAndMarkupCodec.swift`, `SheetBuiltInFunctions.swift`, `SheetAnalyticsAndPivot.swift`)**
      - `XMLSanitizer.scanUnsafeXMLBuffer`와 `XMLSanitizer.escape`에서 64비트 워드(`UInt64`) 단위 SWAR 제로바이트 마스크(`0x0101_0101_0101_0101`, `0x8080_8080_8080_8080`)로 안전 구간을 8바이트씩 건너뛰고 메타문자가 없는 입력은 무할당으로 즉시 반환하며, 이스케이프 대상이 있는 경우에만 연속 슬라이스 단위로 복사합니다.
@@ -645,6 +678,8 @@
 
 ### 32. 무할당 조건부 범위 집계·64비트 SWAR XML 언이스케이프 및 데스크톱 수식 조판·인스펙터 현지화 완결 정책 (2026-10-25)
 
+- **Status**: Superseded (이전: Implemented)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision (`PD-058`)**:
   1. **무할당 스트리밍 시트 범위 집계 및 64비트 SWAR XML 언이스케이프 (`SheetBuiltInFunctions.swift`, `XMLSanitizer.swift`, `TabularAndMarkupCodec.swift`)**
      - `EvalFrame`에 `streamNumericStats(in:)`와 `streamCountStats(in:)`를 도입하여 `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTBLANK`, `PRODUCT` 계산 시 `[EvaluatedCellValue]`와 `[Double]` 배열 할당 없이 행·열 좌표를 직접 순회하고 4-way 루프 언롤 누산기(`s0, s1, s2, s3`)로 합계를 계산합니다.
@@ -664,6 +699,8 @@
 
 ### 33. 14차 적대적 감사 기반 무할당 조회·통계·와일드카드 커널, 컨테이너 무결성 하드닝 및 상용 오피스 UI/UX 완결 정책 (2026-10-25)
 
+- **Status**: Superseded (이전: Implemented)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision (`PD-059`)**:
   1. **무할당 조회(`INDEX`/`VLOOKUP`/`HLOOKUP`)·Welford 온라인 분산(`VAR`/`STDEV`)·무할당 다중 조건부 스트리밍(`SUMIFS`/`COUNTIFS`/`AVERAGEIFS`/`MINIFS`/`MAXIFS`)·투포인터 와일드카드 매처 (`SheetLookupTextAndFinancialFunctions.swift`, `SheetBuiltInFunctions.swift`, `SheetCoordinatesAndAST.swift`, `SheetEngine.swift`)**
      - `INDEX`는 `evaluateRangeGrid` 2차원 배열 할당 없이 목표 셀 `(startRow + rIdx, startCol + cIdx)` 단 1개만 $O(1)$로 평가하며, `VLOOKUP`·`HLOOKUP`은 탐색 열·행만 스트리밍 비교한 뒤 일치한 반환 셀 1개만 평가합니다.
@@ -688,6 +725,8 @@
 
 ### 34. Swift 코어 수식 문자열 상한, 희소 시트 RLE 직렬화, OLE2 MiniFAT 격리, Codable 좌표 불변식 및 찾기·바꾸기 정합성 정책 (2026-10-25)
 
+- **Status**: Superseded (이전: Implemented)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision (`PD-025` / `PD-059`)**:
   1. **ECMA-376 셀 문자열 상한(`maxCellTextLength = 32_767`) 및 이중 따옴표(`""`) 이스케이프 파싱 (`SheetEngine.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `SheetCoordinatesAndAST.swift`)**
      - `SheetEngine.maxCellTextLength = 32_767`(ECMA-376 Part 1 §18.18.11)을 단일 진실 원천으로 정의하고, `&` 연산자, `CONCAT`/`CONCATENATE`, `TEXTJOIN`, `SUBSTITUTE`, `REPLACE` 및 `evaluateInternal`/`evaluateOnSheet` 평가 경로에서 문자열 길이가 `32,767`자를 초과하기 전에 즉시 `#VALUE!`(`.error(.value)`)로 거부하여 체인 수식에 의한 지수적 문자열 증폭을 차단합니다.
@@ -711,6 +750,8 @@
 
 ### 35. 15차 적대적 감사 기반 정수 변환·컨테이너 규격·시트 수식·PDF 페이지네이션·데이터 손실 방어 완결 정책 (2026-10-25)
 
+- **Status**: Superseded (이전: Implemented)
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision (`PD-060`)**:
   1. **Swift/Rust 수치 변환 및 고정폭 정수 오버플로 트랩 원천 차단 (`LegacyOLE2OfficeCodec.swift`, `TabularAndMarkupCodec.swift`, `OLE2AndHWP5Codec.swift`, `StandardZipOfficeCodecs.swift`, `SheetBuiltInFunctions.swift`, `SheetLookupTextAndFinancialFunctions.swift`, `SheetEngine.swift`, `DocumentSubmodelsAndNotes.swift`, `BinaryContainerCodec.swift`, `crates/**`)**
      - `.doc` FibBase, `.rtf`, `.hwp` 직렬화 시 부동소수점(`fontSizePt`, `lineSpacingPercent`, `widthPt`, `heightPt`, `letterSpacingPercent`)에서 `Int`/`UInt32`로의 직접 변환을 제거하고 `2^63` 경계 가드가 포함된 `safeClampedInt` 및 `safeClampedUInt32` 헬퍼로 통일합니다.
@@ -748,6 +789,7 @@
 ### 36. 16차 적대적 감사 기반 64비트 SWAR UTF-16LE/CSV/XML 코덱·DEFLATE 32KB 링버퍼·다중 레코드 BIFF8 확장 메타데이터 및 크로스스택 UX 무결성 정책 (2026-10-25)
 
 - **Status**: Implemented (`Sources/EasyOfficeCore/**`, `Sources/EasyOfficeApp/**`, `crates/**`)
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-061`)**:
   1. **64비트 SWAR Morton 비트 인터리빙 UTF-16LE·CSV·XML 핫패스 및 OLE2 미니섹터 비트셋 최적화 (`BinaryContainerCodec.swift`, `XMLSanitizer.swift`, `OLE2AndHWP5Codec.swift`, `TabularAndMarkupCodec.swift`, `utf16_swar.rs`, `rtf_xml_helpers.rs`, `deflate.rs`, `ole2_codec.rs`)**
      - `BitPacking.appendUTF16LE`·`encodeUTF16LE` 및 Rust `utf16_swar::encode_utf16le_swar`는 8바이트 ASCII 워드(`(word & 0x8080_8080_8080_8080) == 0`)를 Morton 비트 인터리빙(`expandASCII4ToUTF16LE` / `expand_ascii4_to_utf16le_u64`)으로 분기 없이 16바이트 UTF-16LE로 확장하며, `appendLengthPrefixedUTF16LE` 및 `append_len_prefixed_utf16le`는 4바이트 길이 슬롯을 선예약 후 대상 버퍼에 직접 기록하고 백패치하여 중간 버퍼 할당을 제거합니다.
@@ -772,6 +814,7 @@
 
 ### 37. Fail-Closed IPC 경계, `--serve` 루프백 HTTP 보안 하드닝, 3대 엔진 선형 시간 PII·이미지 EXIF 비식별화 및 진실한 릴리스 패키징 정책 (2026-11-01)
 
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-062`)**
   1. **프로덕션 WebUI 모의 폴백 제거, 구조화된 JSON IPC 전환 및 Stored-XSS 원천 차단 (`crates/easyoffice-app/ui/*`, `scripts/test-support/offline-*.js`, `crates/easyoffice-app/src/{security_ipc.rs,convert_ipc.rs,lib.rs}`)**
      - 프로덕션 `crates/easyoffice-app/ui/`에서 오프라인 모의 RPC 스크립트(`offline-formula-ast.js`, `offline-formula-eval.js`, `offline-rpc.js`)를 `scripts/test-support/`로 이동하고, 순수 클라이언트 좌표·수치 보조 유틸리티만 `crates/easyoffice-app/ui/sheet-utils.js`로 분리합니다.
@@ -802,6 +845,7 @@
 
 ### 38. 스프레드시트 DAG 위상 정렬 재계산, 단일 강제 변환 헬퍼, IEEE 754 유효숫자 포맷 및 Rust·Swift 수식 엔진 동등성 정책 (2026-11-01)
 
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-063`)**
   1. **비재귀 DAG 위상 정렬 재계산 및 부분 합산 없는 평가 예산 강제 (`crates/easyoffice-sheet/src/{lib.rs,evaluator.rs,coordinates.rs,parser.rs}`, `Sources/EasyOfficeCore/{SheetEngine.swift,SheetBuiltInFunctions.swift,SheetStatisticalAndLogicalFunctions.swift,SheetCoordinatesAndAST.swift,SheetFormulaCompiler.swift}`)**
      - 스프레드시트 재계산 경로를 재귀 호출 대신 명시적 작업 스택 기반 후위 위상 정렬(Kahn/Tarjan 비재귀 순회)과 워크북 세대 캐시(`EvaluationContext`)로 전환하여 `2,000`셀 이상의 정방향·역방향 의존 체인을 호출 스택 오버플로 없이 $O(V + E)$에 평가합니다.
@@ -829,6 +873,7 @@
 ### 39. ZIP·OLE2 컨테이너 무결성, OOXML·ODF·HWP·BIFF8·PDF 표준 호환성 및 1,000줄 미만 코덱 분할 정책 (2026-11-01)
 
 - **Status** Implemented
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-064`)**
   1. **ZIP 및 OLE2 CFBF 컨테이너 경계 검증 강화 (`Sources/EasyOfficeCore/{BinaryContainerCodec.swift,OLE2AndHWP5Codec.swift}`, `crates/easyoffice-formats/src/{zip.rs,ole2.rs}`)**
      - ZIP 패커·언패커는 `BitPacking.checkedUInt16` 및 `BitPacking.checkedUInt32` 범위 검사를 적용하여 정수 절단을 원천 차단하고, 대소문자를 무시한 중복 엔트리 경로(`word/document.xml` 대 `WORD/DOCUMENT.XML`)와 파일-디렉터리 경로 충돌(`a/b` 대 `a/b/c`)을 모두 거부하며, 로컬 파일 헤더(LFH)와 중앙 디렉터리(CD)의 파일명·압축 방식·비스트리밍 크기·CRC-32 일치 여부를 교차 검증합니다.
@@ -856,7 +901,8 @@
 
 ### 40. macOS 워크스페이스 비파괴 파일 수명주기, 자소 안전 문단 분할·병합, 비동기 일괄 변환, WCAG 2.1 AA 명암비 및 1,000줄 미만 모듈 분할 정책 (2026-11-01)
 
-- **Status** Implemented
+- **Status** Superseded
+- **Superseded by PD-094**: macOS 네이티브 Swift 앱(`Sources/`, `Tests/`, `Package.swift`)을 삭제하고 macOS도 Windows와 같은 Tauri 데스크톱 셸로 배포합니다(#136). 이 항목의 본문은 이력으로 보존하며 더 이상 코드로 강제되지 않습니다. 같은 동작은 Rust 엔진(`crates/`)과 WebUI가 이어받습니다.
 - **Decision (`PD-065`)**
   1. **비파괴 외부 파일 저장, 동일 모듈 손실 변환 Undo 보존 및 지연 최근 문서 복원 (`WorkspaceHub.swift`, `WorkspaceHubPersistenceAndBatch.swift`, `WorkspaceTabAndSessionModels.swift`, `WorkspaceViews.swift`)**
      - 디스크에서 가져온 외부 문서(`isLosslessNativeOrigin == false`)에서 `⌘S`(`saveTabOverwriteIfBackedByFile`)를 실행할 때는 즉시 원본 파일을 덮어쓰지 않고 `pendingLossyOverwriteConfirmationTabID`를 설정해 덮어쓰기 확인 대화상자 또는 다른 이름으로 저장으로 분기합니다. 사용자가 덮어쓰기를 승인하면 기존 파일 바이트를 `<원본>.bak`으로 먼저 백업한 뒤 저장하고 `isLosslessNativeOrigin = true`로 전환합니다.
@@ -887,6 +933,7 @@
 ### 41. 상용 데스크톱·웹 오피스 스위트 UI/UX 비교 감사 기반 macOS 네이티브 및 크로스플랫폼 WebUI 인간공학·종단 간 기능 정합성 정책 (2026-11-05)
 
 - **Status** Implemented
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Decision (`PD-066`)**
   1. **macOS 네이티브 시트 키보드 내비게이션, 전 모듈 배율 스케일링, 다중 표 선택 추적 및 스플릿 뷰 보조 창 격리 (`Sources/EasyOfficeCore/Workspace*.swift`, `Sources/EasyOfficeApp/*.swift`)**
      - 시트 그리드에서 인라인 편집 중이 아닐 때 방향키(`↑`, `↓`, `←`, `→`), `Shift` 범위 확장, `Delete` 범위 지우기 단축키를 `moveSheetSelection`과 `clearSelectedSheetRange`에 바인딩하고, 리본 `sheet-data-sort` 단축키 캡션을 리본 접기(`⌥⌘R`)와 충돌하지 않는 `⌃⌥S`로 분리합니다.
@@ -912,6 +959,7 @@
 ## 42. 적대적 아키텍처 리뷰(Red-Team) 기반 모노레포 정합성·파서 무결성·CI 경량화 (PD-067)
 
 - **Status** Implemented
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Context** `@AquilaXk` 엔지니어링 하네스 기준 외부 적대적 아키텍처 리뷰(Red-Team Adversarial Architecture Review, `§2.1`~`§5`)에서 도출된 다중 런타임 단축키 드리프트, 위생 가드 임계치 포화, 라벨 부착 시 CI 중복 실행, 파서·수식·변환 경계 조건을 일괄 정비합니다.
 - **Decision (`PD-067`)**
   1. **단일 모노레포 응집성 유지 및 크로스스택 리본 단축키 정합성 (`crates/easyoffice-app/src/ribbon.rs`, `crates/easyoffice-app/ui/ribbon-catalog.js`, `Sources/EasyOfficeCore/WorkspaceTabAndSessionModels.swift`)**
@@ -943,6 +991,7 @@
 ## 43. Windows(WebView2)·macOS(AppKit/WKWebView) 실런타임 구동 감사 기반 플랫폼 단축키·PDF 회전 레이아웃·크로스스택 122종 수식 카탈로그 정합성 (PD-068)
 
 - **Status** Implemented
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Context** macOS 네이티브 앱(`EasyOfficeApp`)과 Windows/macOS WebUI(`easyoffice-app --serve`)를 실제 런타임에서 구동하여 전 모듈(`DOC`, `HWP`, `SHEET`, `SLIDE`, `PDF`, `CONV`), 라이트·다크 테마, 명령 팔레트, PDF 회전·양식, 일괄 변환을 교차 점검한 결과 도출된 플랫폼 단축키 표기, 레이아웃 줄바꿈·겹침, 탭 중복 개설, Swift/Rust 122종 수식 카탈로그 집합 차이를 일괄 정비합니다.
 - **Decision (`PD-068`)**
   1. **Windows(`Ctrl`)·macOS(`⌘`/`Cmd`) 단축키 표기 정규화 및 키보드 바인딩 (`crates/easyoffice-app/ui/{ribbon-catalog.js,ribbon-history.js,app.js}`)**
@@ -1432,6 +1481,7 @@
 
 ## 62. Apple Pages(.pages) 읽기 지원 범위·스키마 검증 상태·법적 접근 (PD-087, #154)
 
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Context** Pages는 사양이 공개되지 않은 형식입니다. 2013년 이후 문서는 ZIP 안의 `Index/*.iwa`(Snappy 변형 청크로 감싼 protobuf 레코드)이고 객체 종류(type ID)와 필드 번호는 파일 안에 없습니다. 참고 구현 중 일부는 MPL-2.0이거나 문서가 비상업 조건(CC BY-NC-SA)이며, 추출된 `.proto` 파일의 권리 상태가 불명확합니다.
 - **Decision (`PD-087`)**
   1. 형식 지원 범위: Pages는 **읽기 전용 원본**입니다. `DocumentFormat::Pages`(확장자 `pages`, 컨테이너 `ZipIwork`)를 추가하되 `DocumentFormat::ALL`(읽기·쓰기 20종)에는 넣지 않고 `READ_ONLY`로 분리합니다. 저장·변환 대상으로 지정하면 `encode`가 명확한 오류를 반환합니다. Swift 쪽 20종 목록·매크로 Info.plist 검증·자체 시험의 "20종"은 그대로 유지되어 Rust↔Swift 목록 정합이 깨지지 않습니다.
@@ -1515,6 +1565,7 @@
 ## 66. CI 작업 분리와 Rust 캐시: 공통 게이트는 Linux에서 한 번, OS별 작업은 해당 OS에서만 (PD-091)
 
 - **Status** Implemented
+- **Superseded by PD-094 (부분)**: 이 항목 중 Swift 앱·`swift build`/`swift test`·`scripts/package-macos-release.sh`·Swift 대응 규칙에 해당하는 부분은 PD-094로 대체되었습니다. Rust 엔진·WebUI·Windows 관련 결정은 그대로 유효합니다.
 - **Context** `ci.yml`의 macOS(`verify`)와 Windows(`verify-windows`) 작업이 위생 가드·rhwp 검증·WebUI 테스트·`cargo fmt`·엔진 clippy를 똑같이 두 번 실행했고, Rust 빌드 캐시가 없어 PR마다 의존성을 처음부터 컴파일했습니다(Windows 약 13분). 저장소는 공개라 표준 러너 비용은 없고, 병목은 PR당 대기 시간입니다.
 - **Decision (`PD-091`)**
   1. 새 `checks` 작업(`ubuntu-latest`)이 OS와 무관한 게이트를 한 번만 실행합니다: 위생 가드, rhwp 핀·WASM·글꼴 검증, rhwp/hwp-studio 가드 테스트, Info.plist 범위, WebUI 회귀 묶음, `cargo fmt --check`, 엔진 clippy `-D warnings`, `cargo test --workspace --exclude easyoffice-desktop`, `--self-test`.
@@ -1524,7 +1575,7 @@
 - **Trade-offs** 엔진 테스트는 macOS에서 더 이상 돌지 않습니다(Linux·Windows에서 실행, macOS 전용 엔진 코드 없음). `checks`를 필수 검사로 쓰려면 저장소 설정에서 추가해야 합니다. 캐시가 오래되면 rustc 버전·잠금 파일 변경 시 자동으로 새 키를 씁니다.
 - **Alternatives rejected** 문서만 바뀐 PR의 작업 건너뛰기(경로 필터는 필수 검사가 보고되지 않아 PR이 대기 상태로 남으므로 대체 작업이 필요, 개인 프로젝트 규모에서 이득 대비 복잡), 모든 검사를 Linux 하나로 통합(Swift 앱·Tauri MSVC 빌드는 해당 OS 필요).
 - **Verified by** `.github/workflows/ci.yml`의 세 작업 결과, `node scripts/check-repo-hygiene.mjs`.
-- **Revisit when** macOS Tauri 전환(#136)으로 Swift 단계가 사라질 때, 문서 전용 PR이 잦아질 때, 캐시 적중률이 낮을 때.
+- **Revisit when** 문서 전용 PR이 잦아질 때, 캐시 적중률이 낮을 때.
 
 ## 67. 예약 글꼴 이름(RFN)이 있는 번들 글꼴은 공식 배포 파일 또는 그 WOFF2 압축본만 사용 (PD-092, #144)
 
@@ -1566,3 +1617,24 @@
 - **Alternatives rejected** 편집기 파일 메뉴를 그대로 두고 셸 메뉴 줄만 숨기기(열기·저장이 편집기 내부 경로로 가서 창 모델·경로 경계를 우회), 편집기 메뉴를 셸이 DOM으로 그리기(프레임 격리를 깨뜨림), 별도 앱 명령 `save_document_in_place` 추가(권한 표면이 늘고 대화상자 경로와 중복), 해시 기반 변경 감지(큰 파일 읽기 비용), 모든 지원 확장자 연결(기본 앱 탈취), 감시자(`notify`)로 외부 변경을 실시간 감지(의존성·복잡도 대비 이득이 작음).
 - **Verified by** `node --test scripts/test-webui-hwp-shell.mjs`(허용 목록·인수 검사·편집기/셸 목록 일치, 테마 전달과 `theme=` 주소, 숨김 규칙, 토스트, 상태 표시줄 항목, 시작 아이콘), `scripts/test-webui-desktop-bridge.mjs`(`inPlace` 인수·`로컬 서버` 부재), `cargo test -p easyoffice-desktop`(`window_commands`의 두 번째 실행 인수 → 열기 큐, `save_file`의 임시 파일 + 이름 바꾸기·외부 변경 확인·삭제된 원본, `tracked_files`의 지문, 권한 목록 1:1), `node scripts/check-repo-hygiene.mjs`(연결 확장자 검사). NSIS 설치 파일의 연결 등록, 실제 두 번째 실행, 네이티브 확인 창은 Windows CI/수동 확인 대상입니다.
 - **Revisit when** 외부 변경을 저장 전 외에도 알려야 할 때(감시자), HWPX로 연 문서를 HWPX로 제자리 저장하게 할 때, 한글 창에서도 팔레트·테마 컨트롤이 필요해질 때, macOS 번들(#136)이 같은 창 모델을 쓸 때, 연결 확장자를 넓힐 때.
+
+## 69. macOS도 Tauri 데스크톱 셸로 배포: Swift 앱 삭제·서명 없는 .dmg·파일 연결 계약 (PD-094, #136)
+
+- **Status** Implemented
+- **Context** 저장소에는 두 개의 데스크톱 앱이 있었습니다. Windows는 Rust 엔진 + WebUI를 Tauri 셸(PD-074)로 배포하고, macOS는 같은 기능을 Swift/SwiftUI로 따로 구현했습니다. 이후 기능(한글 편집기, 문서별 창, 제자리 저장, 파일 연결)은 모두 WebUI와 Rust 쪽에만 생겼고, Swift 앱은 이를 따라가지 못한 채 CI 시간과 검증 규칙(Rust↔Swift 동등성)만 계속 소모했습니다.
+- **Decision (`PD-094`)**
+  1. **하나의 코드베이스**: macOS 앱은 `crates/easyoffice-desktop`(Tauri v2, WKWebView)로 빌드합니다. Swift 앱(`Sources/`, `Tests/`, `Package.swift`), `scripts/package-macos-release.sh`, `scripts/verify-macos-plist.mjs`, 위생 가드의 Swift 규칙과 Rust↔Swift 동등성 검사(함수 목록·포맷 수 대조)를 같은 변경에서 삭제합니다. 옛 코드는 Git 이력에 남습니다. Swift 구현에 관한 이전 항목은 Superseded로 표시하고 본문은 보존합니다.
+  2. **번들**: `bundle.targets`는 `nsis`, `app`, `dmg`. macOS는 `minimumSystemVersion` 11.0, 카테고리 `Productivity`, 아이콘 `icons/icon.icns`(생성기 `scripts/generate-desktop-icons.mjs`가 PNG·ICO와 함께 결정론적으로 만듭니다).
+  3. **파일 연결**: PD-093의 `bundle.fileAssociations`가 macOS에서는 `CFBundleDocumentTypes`가 됩니다(HWP, HWPX, DOCX, ODT, XLSX, ODS, PPTX, ODP는 `Editor`, PDF는 `Viewer`). 모든 항목은 `rank: Alternate`로 사용자의 기존 기본 앱을 가로채지 않고 "다음으로 열기"에 나타납니다. 이 계약(필수 확장자, 역할, 순위, 최소 시스템 버전, 서명 정보 미포함, 아이콘)은 `scripts/desktop-file-associations.mjs`가 `tauri.conf.json`에서 정적으로 검사하고 위생 가드와 `scripts/test-desktop-file-associations.mjs`가 실행합니다. macOS에서는 Finder가 파일을 명령줄 인수가 아니라 Apple Event(`RunEvent::Opened`)로 전달하므로 셸이 이를 같은 열기 큐로 보내고, 단일 인스턴스 플러그인은 그대로 둡니다.
+  4. **메뉴·종료**: macOS는 Tauri 기본 메뉴(앱·파일·편집·보기·창)를 사용해 ⌘C/⌘V/⌘X/⌘A/⌘Z/⌘W/⌘Q/⌘M이 동작합니다. WebUI는 이미 `metaKey`를 `Ctrl`로 바꿔 단축키 표를 공유합니다(`scripts/test-webui-windows.mjs`가 확인). ⌘Q(사용자 요청 종료)는 프로세스를 바로 끝내지 않고 각 창을 닫는 흐름(저장 / 저장 안 함 / 취소)으로 보냅니다.
+  5. **서명 없는 배포**: 저장소에 서명 ID·공증 정보를 두지 않습니다. Apple silicon은 서명이 전혀 없는 바이너리를 실행하지 않으므로 CI와 릴리스 단계는 `APPLE_SIGNING_IDENTITY`를 `secrets.APPLE_SIGNING_IDENTITY || '-'`로 넘겨 ad-hoc 서명만 합니다(신뢰되는 서명이 아니므로 Gatekeeper는 처음 한 번 확인을 요구합니다). 나중에 인증서를 쓰려면 이 시크릿과 공증 변수(`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`)만 추가합니다. 처음 여는 방법(우클릭 → 열기, 시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기, 최후 수단 `xattr -dr com.apple.quarantine`)은 README에 적습니다.
+  6. **CI·릴리스**: `ci.yml`의 `verify`(macos-15)는 편집기 번들 빌드, 데스크톱 clippy·테스트, `.app`·`.dmg` 빌드와 크기·Info.plist 검사, `--smoke` 실행을 합니다. `release.yml`은 `aarch64-apple-darwin`과 `x86_64-apple-darwin` 대상을 추가해 `--target universal-apple-darwin`으로 유니버설 `.dmg`를 만들고, 자산 이름 `EasyOffice-<버전>-macos-universal.dmg`와 `SHA256SUMS-macos-universal.txt`를 Windows 자산과 같은 규칙으로 게시합니다(`.zip`은 더 이상 만들지 않습니다).
+- **Why** 같은 기능을 두 번 구현하고 맞추는 비용을 없애고, macOS 사용자도 한글 편집기·문서별 창·제자리 저장·파일 연결을 즉시 얻습니다. 서명 없는 배포는 개인 프로젝트에서 유료 개발자 계정 없이 릴리스를 계속하기 위한 선택이며, 나중에 서명을 붙일 자리는 환경 변수로 남겨 둡니다.
+- **Trade-offs**
+  1. 네이티브 SwiftUI/AppKit 대비 콜드 스타트와 메모리가 WebView 수준입니다.
+  2. 서명·공증이 없어 처음 실행할 때 Gatekeeper 경고를 거쳐야 합니다. 다운로드한 앱의 격리 속성은 사용자가 한 번 해제해야 합니다.
+  3. Swift 앱에만 있던 기능(PDFKit 렌더링, 네이티브 인스펙터)은 사라지며 WebUI 기능 범위로 통일됩니다.
+  4. macOS 번들 동작(Apple Event 열기, ⌘Q 흐름, WKWebView에서의 편집기 구동)은 이 변경을 만든 Linux 환경에서 실행할 수 없고 macOS CI의 `--smoke`와 번들 검사가 일부만 확인합니다.
+- **Alternatives rejected** Swift 앱 유지 + Tauri 병행(같은 기능을 두 곳에서 계속 맞춰야 하고 이미 어긋나 있음), 앱을 `.zip`으로도 배포(`.dmg` 하나로 충분하고 자산 목록이 Windows와 달라짐), 파일 연결을 `Default` 순위로 등록(사용자의 기존 기본 앱을 바꿈), 저장소에 `signingIdentity: "-"` 기록(나중에 실제 인증서로 바꿀 때 환경 변수보다 덜 유연하고 계약 검사가 "서명 정보 없음"을 보장할 수 없음).
+- **Verified by** `node --test scripts/test-desktop-file-associations.mjs scripts/test-webui-windows.mjs`, `cargo test -p easyoffice-desktop`(번들 설정·Finder URL 변환), `node scripts/check-repo-hygiene.mjs`, `node scripts/generate-desktop-icons.mjs --check`, macOS CI(`ci.yml` `verify`).
+- **Revisit when** 유료 개발자 계정을 확보해 서명·공증을 켤 때, `--smoke`가 macOS 러너에서 불안정할 때(저장소 변수 `MACOS_SMOKE=off`로 건너뛸 수 있음), 사용자가 macOS 전용 네이티브 기능을 다시 요구할 때, Mac App Store 배포를 검토할 때.

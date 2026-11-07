@@ -16,6 +16,7 @@ import { verifyOverrides } from "./hwp-studio-overrides.mjs";
 import { checkFonts } from "./verify-fonts.mjs";
 import { findBareSorts, isSortRuleScoped } from "./sort-comparator-rule.mjs";
 import { findServeReleaseViolations } from "./release-serve-rule.mjs";
+import { checkDesktopBundleConfig } from "./desktop-file-associations.mjs";
 
 const ROOT = process.cwd();
 
@@ -24,7 +25,6 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "README.ko.md",
   "SECURITY.md",
   "LICENSE",
-  "Package.swift",
   "Cargo.toml",
   "crates/easyoffice-formats/src/lib.rs",
   "crates/easyoffice-sheet/src/lib.rs",
@@ -71,8 +71,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-desktop/tauri.conf.json",
   "crates/easyoffice-desktop/capabilities/main-window.json",
   "crates/easyoffice-desktop/icons/icon.ico",
+  "crates/easyoffice-desktop/icons/icon.icns",
   "scripts/generate-desktop-icons.mjs",
-  "Sources/EasyOfficeCore/DocumentSecurityAuditor.swift",
   "fixtures/pii-scrub-vectors.json",
   "fixtures/sheet-coercion-parity.json",
   "docs/policy-decisions.md",
@@ -84,7 +84,8 @@ const REQUIRED_TRACKED_CONTRACTS = [
   ".github/workflows/ci.yml",
   ".github/workflows/automerge.yml",
   ".github/workflows/release.yml",
-  "scripts/verify-macos-plist.mjs",
+  "scripts/desktop-file-associations.mjs",
+  "scripts/test-desktop-file-associations.mjs",
   "scripts/test-support/offline-formula-ast.js",
   "scripts/test-support/offline-formula-eval.js",
   "scripts/test-support/offline-rpc.js",
@@ -184,7 +185,6 @@ const PROHIBITED_PATTERNS = PROHIBITED_CONTENT_B64.map(
 const IGNORED_DIRS = new Set([
   ".git",
   ".build",
-  ".swiftpm",
   "target",
   "DerivedData",
   "dist",
@@ -212,7 +212,6 @@ const IGNORED_ROOT_PATHS = new Set(["third_party/rhwp", "vendor/rhwp-core", "cra
 
 const TEXT_EXTENSIONS = new Set([
   ".md",
-  ".swift",
   ".rs",
   ".toml",
   ".html",
@@ -224,7 +223,6 @@ const TEXT_EXTENSIONS = new Set([
   ".js",
   ".sh",
   ".txt",
-  ".plist",
   ".ts",
 ]);
 
@@ -462,81 +460,8 @@ for (const uiRel of ["crates/easyoffice-app/ui/index.html", ...webuiJsRels]) {
   }
 }
 
-const swiftAppDir = path.join(ROOT, "Sources/EasyOfficeApp");
-if (fs.existsSync(swiftAppDir)) {
-  const swiftFiles = fs
-    .readdirSync(swiftAppDir)
-    .filter((name) => name.endsWith(".swift"))
-    .map((name) => path.join(swiftAppDir, name));
-  let swiftBoxPrimCount = 0;
-  let swiftBoxCount = 0;
-  for (const sf of swiftFiles) {
-    const sfText = fs.readFileSync(sf, "utf8");
-    const primMatches =
-      sfText.match(
-        /buttonStyle\(\.bordered|LavenderTextFieldPill|LavenderMenuPill|LavenderActionPill|RoundedRectangle|Capsule|strokeBorder|\.stroke\(/g
-      ) || [];
-    const bgMatches = sfText.match(/RoundedRectangle|\.stroke\(|\.background\(/g) || [];
-    swiftBoxPrimCount += primMatches.length;
-    swiftBoxCount += bgMatches.length;
-    const sfRel = path.relative(ROOT, sf).replaceAll("\\", "/");
-    for (const phrase of FORBIDDEN_UI_GATE_PHRASES) {
-      if (sfText.includes(phrase)) {
-        errors.push(`Forbidden internal gate/spec copy "${phrase}" detected in ${sfRel}`);
-      }
-    }
-  }
-  if (swiftBoxPrimCount > 16) {
-    errors.push(
-      `Swift EasyOfficeApp box-primitive guard failed: found ${swiftBoxPrimCount} matches of bordered/pill/RoundedRectangle/Capsule/stroke (max 16)`
-    );
-  }
-  if (swiftBoxCount > 120) {
-    errors.push(
-      `Swift EasyOfficeApp over-boxing guard failed: found ${swiftBoxCount} matches of RoundedRectangle/.stroke(/.background( (max 120)`
-    );
-  }
-}
-
-const UNCHECKED_SWIFT_FLOAT_INT_REGEX = /\b(Int|UInt32|UInt16)\((floor|ceil|round)\(/;
-let foundSafeIntStrictBound = false;
 for (const file of files) {
   const rel = path.relative(ROOT, file).replaceAll("\\", "/");
-  if (rel.startsWith("Sources/") && rel.endsWith(".swift")) {
-    const text = fs.readFileSync(file, "utf8");
-    if (UNCHECKED_SWIFT_FLOAT_INT_REGEX.test(text)) {
-      errors.push(
-        `Unchecked float-to-integer conversion detected in ${rel}; use safeInt/checkedInteger/safeClampedInt instead.`
-      );
-    }
-    if (rel.startsWith("Sources/EasyOfficeCore/") && text.includes("func safeInt(")) {
-      if (text.includes(">= -9223372036854775808.0")) {
-        errors.push(
-          `safeInt in ${rel} must exclude Int.min (-9223372036854775808.0) via strict '>' to prevent negation trap.`
-        );
-      }
-      if (text.includes("> -9223372036854775808.0")) {
-        foundSafeIntStrictBound = true;
-      }
-    }
-    if (rel.startsWith("Sources/EasyOfficeCore/") && rel.endsWith(".swift")) {
-      const lineCount = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-      if (lineCount >= 1000) {
-        errors.push(`Swift core module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
-      }
-    }
-    if (
-      (rel === "Sources/EasyOfficeCore/BinaryContainerCodec.swift" ||
-        rel === "Sources/EasyOfficeCore/OLE2AndHWP5Codec.swift" ||
-        rel === "Sources/EasyOfficeCore/HWP5DocumentCodec.swift" ||
-        rel === "Sources/EasyOfficeCore/LegacyBIFF8XLSCodec.swift" ||
-        rel === "Sources/EasyOfficeCore/LegacyOLE2OfficeCodec.swift") &&
-      (text.includes("abs(Int.min)") ||
-        (/\bInt\(Double\(/.test(text) && !text.includes("maxRatio: Double = 100.0")))
-    ) {
-      errors.push(`Unguarded Int(Double( or abs(Int.min) trap detected in ${rel}.`);
-    }
-  }
   if (
     (rel.startsWith("crates/easyoffice-sheet/src/") ||
       rel.startsWith("crates/easyoffice-formats/src/") ||
@@ -549,11 +474,6 @@ for (const file of files) {
       errors.push(`Rust module ${rel} exceeds 1,000-line ceiling (${lineCount} lines)`);
     }
   }
-}
-if (!foundSafeIntStrictBound) {
-  errors.push(
-    "Missing safeInt strict lower bound (> -9223372036854775808.0) in Sources/EasyOfficeCore/."
-  );
 }
 
 const DESKTOP_SHELL_MANIFEST = "crates/easyoffice-desktop/Cargo.toml";
@@ -603,6 +523,9 @@ if (fs.existsSync(desktopConfigFull)) {
     }
     if (conf.build?.devUrl || conf.build?.frontendDist !== "../easyoffice-app/ui") {
       errors.push(`${DESKTOP_SHELL_CONFIG} must load only the embedded ../easyoffice-app/ui assets (no devUrl)`);
+    }
+    for (const problem of checkDesktopBundleConfig(conf)) {
+      errors.push(`${DESKTOP_SHELL_CONFIG}: ${problem}`);
     }
     const openable = new Set(DESKTOP_OPENABLE_EXTENSIONS);
     for (const assoc of Array.isArray(conf.bundle?.fileAssociations) ? conf.bundle.fileAssociations : []) {
@@ -663,48 +586,28 @@ for (const file of files) {
   }
 }
 
-const formatSwiftPath = path.join(ROOT, "Sources/EasyOfficeCore/DocumentFormat.swift");
-const sheetSwiftPath = path.join(ROOT, "Sources/EasyOfficeCore/SheetEngine.swift");
+const formatsLibPath = path.join(ROOT, "crates/easyoffice-formats/src/lib.rs");
+const rustSheetFunctionsPath = path.join(ROOT, "crates/easyoffice-sheet/src/functions.rs");
 const ribbonCatalogJsPath = path.join(ROOT, "crates/easyoffice-app/ui/ribbon-catalog.js");
 const rustIpcLibPath = path.join(ROOT, "crates/easyoffice-app/src/lib.rs");
 
 if (
-  fs.existsSync(formatSwiftPath) &&
-  fs.existsSync(sheetSwiftPath) &&
+  fs.existsSync(formatsLibPath) &&
+  fs.existsSync(rustSheetFunctionsPath) &&
   fs.existsSync(ribbonCatalogJsPath) &&
   fs.existsSync(rustIpcLibPath)
 ) {
-  const formatSwift = fs.readFileSync(formatSwiftPath, "utf8");
-  const enumSection = formatSwift.split("public var id:")[0].split("public enum DocumentFormat")[1] || "";
-  const formatCount = enumSection
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("case ")).length;
+  // Read/write formats: the DocumentFormat variants minus the read-only sources.
+  const formatsLib = fs.readFileSync(formatsLibPath, "utf8");
+  const enumBody = (formatsLib.split("pub enum DocumentFormat {")[1] || "").split("\n}")[0];
+  const variantCount = enumBody.split("\n").filter((line) => /^\s+[A-Z][A-Za-z0-9]*,$/.test(line)).length;
+  const readOnlyCount = Number((formatsLib.match(/READ_ONLY:\s*\[DocumentFormat;\s*(\d+)\]/) || [])[1] || 0);
+  const formatCount = variantCount - readOnlyCount;
 
-  const sheetSwift = fs.readFileSync(sheetSwiftPath, "utf8");
-  const fnMatch = sheetSwift.match(/supportedFunctionNames:\s*\[String\]\s*=\s*\[([\s\S]*?)\]\.sorted\(\)/);
-  const swiftFnNames = fnMatch
-    ? (fnMatch[1].match(/"[A-Z0-9]+"/g) || []).map((s) => s.replaceAll('"', ""))
-    : [];
-  const functionCount = swiftFnNames.length;
-
-  const rustSheetFunctionsPath = path.join(ROOT, "crates/easyoffice-sheet/src/functions.rs");
-  if (fs.existsSync(rustSheetFunctionsPath)) {
-    const rustSheetFnText = fs.readFileSync(rustSheetFunctionsPath, "utf8");
-    const rustFnMatch = rustSheetFnText.match(
-      /CANONICAL_122_FUNCTIONS:\s*\[&str;\s*122\]\s*=\s*\[([\s\S]*?)\];/
-    );
-    const rustFnNames = rustFnMatch
-      ? (rustFnMatch[1].match(/"[A-Z0-9]+"/g) || []).map((s) => s.replaceAll('"', ""))
-      : [];
-    const swiftSorted = [...swiftFnNames].sort((a, b) => a.localeCompare(b)).join(",");
-    const rustSorted = [...rustFnNames].sort((a, b) => a.localeCompare(b)).join(",");
-    if (swiftSorted !== rustSorted) {
-      errors.push(
-        "Swift supportedFunctionNames in SheetEngine.swift and Rust CANONICAL_122_FUNCTIONS in functions.rs do not match 1:1"
-      );
-    }
-  }
+  const rustFnMatch = fs
+    .readFileSync(rustSheetFunctionsPath, "utf8")
+    .match(/CANONICAL_122_FUNCTIONS:\s*\[&str;\s*122\]\s*=\s*\[([\s\S]*?)\];/);
+  const functionCount = rustFnMatch ? (rustFnMatch[1].match(/"[A-Z0-9]+"/g) || []).length : 0;
 
   const ribbonCatalogJs = fs.readFileSync(ribbonCatalogJsPath, "utf8");
   const commonSpecCount = (ribbonCatalogJs.match(/\{\s*suffix:\s*"/g) || []).length;
@@ -720,10 +623,10 @@ if (
     .filter((line) => line.startsWith('"') && line.includes("=>")).length;
 
   if (formatCount !== 20) {
-    errors.push(`Expected 20 DocumentFormat cases in DocumentFormat.swift, found ${formatCount}`);
+    errors.push(`Expected 20 read/write DocumentFormat variants in crates/easyoffice-formats/src/lib.rs, found ${formatCount}`);
   }
   if (functionCount !== 122) {
-    errors.push(`Expected 122 built-in functions in SheetEngine.swift, found ${functionCount}`);
+    errors.push(`Expected 122 built-in functions in crates/easyoffice-sheet/src/functions.rs, found ${functionCount}`);
   }
   if (ribbonCommandCount !== 140) {
     errors.push(`Expected 140 ribbon commands in ribbon-catalog.js, found ${ribbonCommandCount}`);

@@ -1,5 +1,5 @@
-//! EasyOffice Windows desktop shell: a Tauri v2 (WebView2) window that loads the WebUI from assets
-//! embedded in the executable and routes every UI request to `EasyOfficeIpcRouter::dispatch`
+//! EasyOffice desktop shell for Windows (WebView2) and macOS (WKWebView): a Tauri v2 window that
+//! loads the WebUI from assets embedded in the executable and routes every UI request to `EasyOfficeIpcRouter::dispatch`
 //! in-process. No HTTP server, browser, or remote content is involved.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -202,8 +202,34 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("EasyOffice desktop shell failed to start");
+        .build(tauri::generate_context!())
+        .expect("EasyOffice desktop shell failed to start")
+        .run(handle_run_event);
+}
+
+/// Application-level events. On macOS a Finder "open" (double click, drag onto the Dock icon,
+/// "Open With") reaches a running or starting app as an Apple Event, not as a command-line
+/// argument, and Cmd+Q must go through each window's own save prompt instead of ending the process.
+fn handle_run_event(app: &AppHandle, event: tauri::RunEvent) {
+    match event {
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Opened { urls } => window_commands::open_urls(app, urls),
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } => {
+            let windows = app.webview_windows();
+            if !windows.is_empty() {
+                api.prevent_exit();
+                for window in windows.values() {
+                    let _ = window.close();
+                }
+            }
+        }
+        _ => {
+            let _ = app;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -267,6 +293,34 @@ mod tests {
             conf["app"]["windows"].as_array().unwrap().is_empty(),
             "windows are created in Rust"
         );
+    }
+
+    #[test]
+    fn macos_bundle_is_configured_unsigned_with_an_icns_icon() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let bundle = &conf["bundle"];
+        let targets: Vec<&str> = bundle["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.as_str())
+            .collect();
+        assert!(targets.contains(&"app") && targets.contains(&"dmg"));
+        assert_eq!(bundle["macOS"]["minimumSystemVersion"], "11.0");
+        assert!(
+            bundle["macOS"].get("signingIdentity").is_none(),
+            "signing is supplied through APPLE_SIGNING_IDENTITY at release time, never committed"
+        );
+        let icons: Vec<&str> = bundle["icon"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|i| i.as_str())
+            .collect();
+        assert!(icons.contains(&"icons/icon.icns"));
+        let icns = include_bytes!("../icons/icon.icns");
+        assert_eq!(&icns[..4], b"icns");
     }
 
     #[test]
