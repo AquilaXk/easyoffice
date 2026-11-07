@@ -1600,6 +1600,9 @@ installEmbedRuntime({
         if (context.theme && context.theme !== getThemeMode()) setThemeMode(context.theme);
         const panel = document.getElementById('shell-recents-panel');
         if (context.recents && panel) renderShellRecents(panel, context.recents);
+        // "PDF로 내보내기" is shown only when the shell says it can do it (desktop app).
+        const pdfItem = document.querySelector<HTMLElement>('[data-shell-cmd="export-pdf"]');
+        if (pdfItem && context.pdfExport !== null) pdfItem.hidden = !context.pdfExport;
         return { applied: true as const };
       });
     },

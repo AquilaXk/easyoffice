@@ -18,23 +18,46 @@ pub struct SaveRequest {
     bytes: Vec<u8>,
 }
 
+/// Validates a proposed file name and returns `(file name, lower-case extension)`.
+fn split_file_name(file_name: &str) -> Result<(String, String), String> {
+    // Keep only the final component so a proposed name can never point at another directory.
+    let base = file_name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let Some((stem, ext)) = base.rsplit_once('.') else {
+        return Err("저장할 파일 이름에 확장자가 없습니다.".to_string());
+    };
+    let ext_ok =
+        !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric());
+    if stem.trim().is_empty() || !ext_ok {
+        return Err(format!("저장할 수 없는 파일 이름입니다: {base}"));
+    }
+    let ext = ext.to_ascii_lowercase();
+    Ok((base, ext))
+}
+
 impl SaveRequest {
-    pub fn parse(file_name: &str, base64: &str) -> Result<Self, String> {
-        // Keep only the final component so a proposed name can never point at another directory.
-        let base = file_name
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let Some((stem, ext)) = base.rsplit_once('.') else {
-            return Err("저장할 파일 이름에 확장자가 없습니다.".to_string());
-        };
-        let ext_ok =
-            !ext.is_empty() && ext.len() <= 8 && ext.chars().all(|c| c.is_ascii_alphanumeric());
-        if stem.trim().is_empty() || !ext_ok {
-            return Err(format!("저장할 수 없는 파일 이름입니다: {base}"));
+    /// A request for bytes the shell produced itself (for example a searchable PDF).
+    pub fn from_bytes(file_name: &str, bytes: Vec<u8>) -> Result<Self, String> {
+        let (file_name, extension) = split_file_name(file_name)?;
+        if bytes.is_empty() {
+            return Err("저장할 문서 데이터가 비어 있습니다.".to_string());
         }
+        if bytes.len() > MAX_SAVE_BYTES {
+            return Err("저장할 문서가 허용 크기(256MiB)를 초과합니다.".to_string());
+        }
+        Ok(Self {
+            file_name,
+            extension,
+            bytes,
+        })
+    }
+
+    pub fn parse(file_name: &str, base64: &str) -> Result<Self, String> {
+        let (base, extension) = split_file_name(file_name)?;
         if base64.len() / 4 * 3 > MAX_SAVE_BYTES + 3 {
             return Err("저장할 문서가 허용 크기(256MiB)를 초과합니다.".to_string());
         }
@@ -47,7 +70,7 @@ impl SaveRequest {
             return Err("저장할 문서가 허용 크기(256MiB)를 초과합니다.".to_string());
         }
         Ok(Self {
-            extension: ext.to_ascii_lowercase(),
+            extension,
             file_name: base,
             bytes,
         })
@@ -172,6 +195,14 @@ mod tests {
         assert_eq!(req.extension(), "docx");
         assert_eq!(req.filter_label(), "DOCX 문서");
         assert_eq!(req.bytes(), b"PK\x03\x04");
+    }
+
+    #[test]
+    fn shell_made_bytes_get_the_same_name_rules_and_limits() {
+        let req = SaveRequest::from_bytes("C:\\x\\보고서.PDF", b"%PDF-1.7".to_vec()).unwrap();
+        assert_eq!((req.file_name(), req.extension()), ("보고서.PDF", "pdf"));
+        assert!(SaveRequest::from_bytes("noext", vec![1]).is_err());
+        assert!(SaveRequest::from_bytes("a.pdf", Vec::new()).is_err());
     }
 
     #[test]

@@ -6,6 +6,7 @@
 pub const APP_COMMANDS: &[&str] = &[
     "ipc_dispatch",
     "save_document_file",
+    "export_searchable_pdf",
     "open_document_window",
     "open_file_in_new_window",
     "take_pending_open",

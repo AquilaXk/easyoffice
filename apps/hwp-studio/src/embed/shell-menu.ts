@@ -5,7 +5,7 @@
 // editor (`setShellContext`), so the window has one menu row and one theme.
 
 export const SHELL_COMMAND_REASON = 'shell_command' as const;
-export const SHELL_COMMANDS = ['new', 'open', 'recent', 'save', 'save-as', 'close'] as const;
+export const SHELL_COMMANDS = ['new', 'open', 'recent', 'save', 'save-as', 'export-pdf', 'close'] as const;
 export type ShellCommand = (typeof SHELL_COMMANDS)[number];
 export const SHELL_THEMES = ['light', 'dark', 'system'] as const;
 export type ShellTheme = (typeof SHELL_THEMES)[number];
@@ -22,6 +22,8 @@ export interface ShellRecent {
 export interface ShellContext {
   theme: ShellTheme | null;
   recents: ShellRecent[] | null;
+  /** Whether the shell can export a searchable PDF (desktop app only); null = not stated. */
+  pdfExport: boolean | null;
 }
 
 export interface ShellCommandPayload {
@@ -55,7 +57,8 @@ export function sanitizeShellContext(raw: unknown): ShellContext {
       recents.push({ id: entry.id, name: entry.name.slice(0, MAX_NAME_LENGTH) });
     }
   }
-  return { theme: isShellTheme(params.theme) ? params.theme : null, recents };
+  const pdfExport = typeof params.pdfExport === 'boolean' ? params.pdfExport : null;
+  return { theme: isShellTheme(params.theme) ? params.theme : null, recents, pdfExport };
 }
 
 export type ShellCommandSink = (payload: ShellCommandPayload) => void;
