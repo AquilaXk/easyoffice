@@ -68,7 +68,7 @@ pub const ITEMS: &[MenuItemSpec] = &[
         "file-save-as",
     ),
     item("file:close", "닫기", Some("CmdOrCtrl+W"), "window-close"),
-    item("edit:find", "찾기", Some("CmdOrCtrl+F"), "palette"),
+    item("edit:find", "찾기", Some("CmdOrCtrl+F"), "find"),
     item("view:zoom-in", "확대", Some("CmdOrCtrl+="), "zoom-in"),
     item("view:zoom-out", "축소", Some("CmdOrCtrl+-"), "zoom-out"),
     item(

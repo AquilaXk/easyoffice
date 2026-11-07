@@ -24,7 +24,7 @@
     "file:save": "studio-save",
     "file:save-as": "file-save-as",
     "file:close": "window-close",
-    "edit:find": "palette",
+    "edit:find": "find",
     "view:zoom-in": "zoom-in",
     "view:zoom-out": "zoom-out",
     "view:zoom-100": "ribbon:view-zoom",

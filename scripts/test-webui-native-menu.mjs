@@ -40,7 +40,7 @@ test("a menu id runs the page action of the same name as its shortcut, with its 
   const calls = [];
   const actions = new Proxy({}, { get: (_t, name) => (arg) => calls.push([String(name), arg]) });
   for (const id of ["file:save", "file:new", "view:zoom-100", "edit:find"]) assert.equal(runNativeMenuAction(id, actions), true, id);
-  assert.deepEqual(calls, [["studio-save", undefined], ["file-new", undefined], ["ribbon", "view-zoom"], ["palette", undefined]]);
+  assert.deepEqual(calls, [["studio-save", undefined], ["file-new", undefined], ["ribbon", "view-zoom"], ["find", undefined]]);
 });
 
 test("unknown ids, inherited property names and missing actions run nothing", () => {
@@ -68,6 +68,14 @@ test("every menu id is handled by the real page and the zoom, find and about ite
   assert.equal(document.getElementById("status-zoom-label").textContent, "125%", "zoom in, zoom out, then the same 100% command as Ctrl+0");
   assert.equal(document.getElementById("about-dialog").open, true, "About opens the dialog");
   assert.equal(run("nope"), false);
+});
+
+test("Find goes to the editor's own find command in the Hangul window and to the palette elsewhere", () => {
+  const app = read("crates/easyoffice-app/ui/app.js");
+  assert.match(app, /activeModule === "HWP" && hwpHost\.isEmbedActive\(\)/);
+  assert.match(app, /hwpHost\.call\("automation\.execute", \{ id: "edit:find", allowDialog: true \}\)/);
+  const router = read("apps/hwp-studio/src/embed/rpc-router.ts");
+  assert.match(router, /case 'automation\.execute'/, "the embed port already carries editor commands");
 });
 
 test("file items reach the same handlers as their shortcuts", async () => {

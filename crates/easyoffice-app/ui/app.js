@@ -869,6 +869,15 @@
     const actions = {
       ...shortcutActions(modal, input),
       about: () => shellChrome.openAbout(),
+      // Inside the Hangul editor Find is the editor's own find dialog (its `edit:find` automation
+      // command over the embed port); every other window opens the command palette like Ctrl+F.
+      find: () => {
+        if (activeModule === "HWP" && hwpHost.isEmbedActive()) {
+          void hwpHost.call("automation.execute", { id: "edit:find", allowDialog: true }).catch(() => {});
+        } else {
+          togglePaletteModal(modal, input);
+        }
+      },
       "file-save-as": () => (activeModule === "HWP" ? void hwpSession.saveAs("hwp") : void saveWorkspaceDocument().catch(() => {})),
       "zoom-in": clickButton("btn-zoom-in"),
       "zoom-out": clickButton("btn-zoom-out"),
