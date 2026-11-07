@@ -6,14 +6,13 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { checkBundle, BUDGET_BYTES } from "./check-hwp-studio-bundle.mjs";
 import { checkFonts } from "./verify-fonts.mjs";
 import { checkManifestStructure, checkUpstreamBaseline, normalizedSha256, readManifest, verifyOverrides } from "./hwp-studio-overrides.mjs";
 import { checkVendorCore } from "./verify-rhwp-core.mjs";
 import { resolveGitExecutable } from "./verify-rhwp-upstream.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
-import vm from "node:vm";
 import { stripTypeScriptTypes } from "node:module";
 import { BEGIN, END, replaceSection, wasmDependencyClosure } from "./generate-wasm-notices.mjs";
 
@@ -447,11 +446,21 @@ function openFlowSource() {
   return stripTypeScriptTypes(OVERLAY_MAIN.slice(start, end));
 }
 
-function createOpenFlow({ loadDocument, loadDocumentWithPassword, dialog }) {
+// The sliced flow becomes a module whose factory receives the mock engine and dialog, so the real
+// code runs unchanged without evaluating strings.
+const OPEN_FLOW_MODULE = (() => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "eo-open-flow-")), "open-flow.mjs");
+  fs.writeFileSync(
+    file,
+    `export function makeOpenFlow(wasm, showHwpPasswordDialog) {\n${openFlowSource()}\nreturn { open: loadDocumentForOpen, Cancelled: DocumentOpenCancelledError };\n}\n`
+  );
+  return import(pathToFileURL(file).href);
+})();
+
+async function createOpenFlow({ loadDocument, loadDocumentWithPassword, dialog }) {
   const wasm = { loadDocument, loadDocumentWithPassword, getDocumentInfo: () => ({ pageCount: 1 }) };
-  const context = vm.createContext({ wasm, showHwpPasswordDialog: dialog, String, Error });
-  vm.runInContext(`${openFlowSource()}\nthis.loadDocumentForOpen = loadDocumentForOpen; this.Cancelled = DocumentOpenCancelledError;`, context);
-  return { open: context.loadDocumentForOpen, Cancelled: context.Cancelled };
+  const { makeOpenFlow } = await OPEN_FLOW_MODULE;
+  return makeOpenFlow(wasm, dialog);
 }
 
 const needsPassword = () => {
@@ -460,7 +469,7 @@ const needsPassword = () => {
 
 test("a document without a password opens without any dialog", async () => {
   let asked = 0;
-  const flow = createOpenFlow({
+  const flow = await createOpenFlow({
     loadDocument: () => ({ pageCount: 3 }),
     loadDocumentWithPassword: () => assert.fail("no password open"),
     dialog: async () => {
@@ -473,7 +482,7 @@ test("a document without a password opens without any dialog", async () => {
 });
 
 test("other load errors are not turned into a password prompt", async () => {
-  const flow = createOpenFlow({
+  const flow = await createOpenFlow({
     loadDocument: () => {
       throw new Error("손상된 파일");
     },
@@ -486,7 +495,7 @@ test("other load errors are not turned into a password prompt", async () => {
 test("a correct password opens the document; the dialog only gets the file name", async () => {
   const dialogCalls = [];
   const opened = [];
-  const flow = createOpenFlow({
+  const flow = await createOpenFlow({
     loadDocument: needsPassword,
     loadDocumentWithPassword: (data, password, name) => opened.push([data.length, password, name]),
     dialog: async (...args) => {
@@ -502,7 +511,7 @@ test("a correct password opens the document; the dialog only gets the file name"
 test("a wrong password asks again with the retry text, then a right one opens", async () => {
   const messages = [];
   const answers = ["wrong", "right"];
-  const flow = createOpenFlow({
+  const flow = await createOpenFlow({
     loadDocument: needsPassword,
     loadDocumentWithPassword: (_data, password) => {
       if (password === "wrong") throw new Error(PASSWORD_REJECTED);
@@ -517,7 +526,7 @@ test("a wrong password asks again with the retry text, then a right one opens", 
 });
 
 test("cancelling the dialog cancels the open without trying a password", async () => {
-  const flow = createOpenFlow({
+  const flow = await createOpenFlow({
     loadDocument: needsPassword,
     loadDocumentWithPassword: () => assert.fail("no password open"),
     dialog: async () => null,
@@ -531,8 +540,8 @@ test("unsupported encryption, DRM and corrupt data end with fixed Korean errors 
     ["DRM 보호 문서", /DRM으로 보호된 문서는 지원하지 않습니다/],
     ["내부 오류 hunter2", /암호화된 문서를 열 수 없습니다/],
   ];
-  for (const [engineMessage, expected] of cases) {
-    const flow = createOpenFlow({
+  const attempt = async ([engineMessage, expected]) => {
+    const flow = await createOpenFlow({
       loadDocument: needsPassword,
       loadDocumentWithPassword: () => {
         throw new Error(engineMessage);
@@ -540,7 +549,8 @@ test("unsupported encryption, DRM and corrupt data end with fixed Korean errors 
       dialog: async () => "hunter2",
     });
     await assert.rejects(flow.open(new Uint8Array(1), "a.hwp"), (error) => expected.test(error.message) && !error.message.includes("hunter2"));
-  }
+  };
+  await Promise.all(cases.map(attempt));
 });
 
 test("the password stays inside the open flow: no storage, logs, embed port or shell command carries it", () => {
@@ -562,9 +572,15 @@ test("the password stays inside the open flow: no storage, logs, embed port or s
   }
 });
 
-test("the pinned engine exports the password open and the built bundle carries the flow", () => {
+test("the pinned engine exports the password open", () => {
   assert.match(fs.readFileSync(path.join(REPO, "vendor/rhwp-core/rhwp.d.ts"), "utf8"), /static openWithPassword\(data: Uint8Array, password: string\): HwpDocument/);
-  const assets = path.join(REPO, "crates/easyoffice-app/ui/hwp-studio/assets");
+});
+
+const BUILT_ASSETS = path.join(REPO, "crates/easyoffice-app/ui/hwp-studio/assets");
+
+// The editor bundle is build output (not tracked); CI jobs that do not build it skip this check.
+test("the built bundle carries the password flow", { skip: !fs.existsSync(BUILT_ASSETS) }, () => {
+  const assets = BUILT_ASSETS;
   const bundle = fs.readdirSync(assets).filter((f) => f.endsWith(".js")).map((f) => fs.readFileSync(path.join(assets, f), "utf8")).join("\n");
   assert.ok(bundle.includes(PASSWORD_REQUIRED) && bundle.includes(PASSWORD_REJECTED), "the bundle contains the password flow");
 });
