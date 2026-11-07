@@ -74,6 +74,18 @@ impl UniversalDocumentModel {
 /// Lossless cross-format encoder, decoder, and converter for all 20 `DocumentFormat::ALL` formats.
 pub struct UniversalFormatConverter;
 
+/// Targets whose rich writer keeps block order and character runs (see `encode_rich`).
+const RICH_ORDER_TARGETS: [DocumentFormat; 8] = [
+    DocumentFormat::Docx,
+    DocumentFormat::Hwpx,
+    DocumentFormat::Hwtx,
+    DocumentFormat::Odt,
+    DocumentFormat::Rtf,
+    DocumentFormat::Markdown,
+    DocumentFormat::Txt,
+    DocumentFormat::Pdf,
+];
+
 impl UniversalFormatConverter {
     pub fn encode(
         model: &UniversalDocumentModel,
@@ -413,11 +425,22 @@ impl UniversalFormatConverter {
         Ok((format, model))
     }
 
+    /// Converts between formats. A document source converted to a document target goes through
+    /// the rich model, so block order (tables between their paragraphs) and character formatting
+    /// survive (#167); everything else (sheets, slides, or a document into a sheet or deck) uses
+    /// the flat model as before.
     pub fn convert(
         bytes: &[u8],
         source_hint: Option<&str>,
         target: DocumentFormat,
     ) -> Result<Vec<u8>, EasyOfficeError> {
+        if RICH_ORDER_TARGETS.contains(&target) {
+            if let Ok(decoded) = Self::decode_rich(bytes, source_hint) {
+                if let crate::DecodedContent::Document(doc) = decoded.content {
+                    return Self::encode_rich(&doc, target, None);
+                }
+            }
+        }
         let (_, model) = Self::decode(bytes, source_hint)?;
         Self::encode(&model, target)
     }
