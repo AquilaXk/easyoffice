@@ -5,3 +5,15 @@
 .md-item[hidden] {
   display: none;
 }
+
+/* "도구 상자 라벨 표시" (보기 menu): adapted from hop `styles/toolbar-labels.css` (MIT; see THIRD_PARTY_NOTICES.md).
+   The upstream toolbar markup stays as it is; this is only the display preference. */
+:root[data-toolbar-labels="hidden"] #icon-toolbar .tb-label,
+:root[data-toolbar-labels="hidden"] #style-bar .sb-ribbon-label {
+  display: none;
+}
+
+:root[data-toolbar-labels="hidden"] #icon-toolbar {
+  height: 32px;
+  min-height: 32px;
+}

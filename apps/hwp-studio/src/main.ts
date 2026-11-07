@@ -92,6 +92,7 @@ import {
   sanitizeShellContext,
 } from './embed/shell-menu.ts';
 import { renderPrintBatch } from './embed/print-batch.ts';
+import { initToolbarLabels, toolbarLabelsCommand } from './ui/toolbar-labels.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
 import { DocumentAgentController } from '@/document-agent/controller';
@@ -258,6 +259,8 @@ registry.registerAll(
     : editCommands,
 );
 registry.registerAll(viewCommands);
+registry.register(toolbarLabelsCommand);
+initToolbarLabels();
 registry.registerAll(formatCommands);
 registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
