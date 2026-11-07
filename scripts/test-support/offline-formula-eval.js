@@ -164,14 +164,16 @@
     return null;
   }
 
+  // Ordering when exactly one side is empty; null when neither is (or the other kind is unordered).
+  function emptySideOrdering(lhs, rhs) {
+    if (lhs.kind === "empty") return compareWithEmpty(rhs, true);
+    if (rhs.kind === "empty") return compareWithEmpty(lhs, false);
+    return null;
+  }
+
   function compareTypedValues(lhs, rhs) {
     if (lhs.kind === "empty" && rhs.kind === "empty") return 0;
-    const emptyOrdering =
-      lhs.kind === "empty"
-        ? compareWithEmpty(rhs, true)
-        : rhs.kind === "empty"
-          ? compareWithEmpty(lhs, false)
-          : null;
+    const emptyOrdering = emptySideOrdering(lhs, rhs);
     if (emptyOrdering !== null) return emptyOrdering;
     if (kindRank(lhs) !== kindRank(rhs)) return kindRank(lhs) - kindRank(rhs);
     if (lhs.kind === "number") return lhs.num - rhs.num;
@@ -267,8 +269,8 @@
     if (fnName === "PRODUCT") {
       return valNum(nums.length === 0 ? 0 : nums.reduce((acc, num) => acc * num, 1));
     }
-    if (fnName === "MIN") return valNum(nums.length === 0 ? 0 : nums.reduce((lo, num) => (num < lo ? num : lo)));
-    if (fnName === "MAX") return valNum(nums.length === 0 ? 0 : nums.reduce((hi, num) => (num > hi ? num : hi)));
+    if (fnName === "MIN") return valNum(nums.length === 0 ? 0 : nums.reduce((lo, num) => Math.min(lo, num)));
+    if (fnName === "MAX") return valNum(nums.length === 0 ? 0 : nums.reduce((hi, num) => Math.max(hi, num)));
     if (fnName === "AVERAGE" || fnName === "AVG") {
       return nums.length === 0 ? valErr("#DIV/0!") : valNum(sum / nums.length);
     }
@@ -368,7 +370,8 @@
   function splitOnceUnquotedStrict(src, delimiter) {
     let inQuotes = false;
     let splitIdx = -1;
-    for (let i = 0; i < src.length; i += 1) {
+    let i = 0;
+    while (i < src.length) {
       const ch = src[i];
       if (ch === "'") {
         const step = stepQuoteChar(src, i, inQuotes);
@@ -378,6 +381,7 @@
         if (splitIdx !== -1) return { ok: false };
         splitIdx = i;
       }
+      i += 1;
     }
     if (inQuotes) return { ok: false };
     if (splitIdx === -1) return { ok: true, parts: [src] };
@@ -631,14 +635,22 @@
     return valErr("#NAME?");
   }
 
+  // Functions that need their unevaluated argument nodes (lazy / reference semantics).
+  const SPECIAL_FORM_HANDLERS = new Map([
+    ["INDIRECT", (ec, _fn, args) => evalIndirectCallIn(ec, args)],
+    ["IF", (ec, _fn, args) => evalIfIn(ec, args)],
+    ["IFERROR", (ec, _fn, args) => evalIfErrorIn(ec, args)],
+    ["ROW", evalRowColumnIn],
+    ["COLUMN", evalRowColumnIn],
+    ["ROWS", evalRowsColumnsIn],
+    ["COLUMNS", evalRowsColumnsIn],
+  ]);
+
   function evalFuncCallIn(ec, node) {
     const fnUpper = node.name;
     const args = node.args;
-    if (fnUpper === "INDIRECT") return evalIndirectCallIn(ec, args);
-    if (fnUpper === "IF") return evalIfIn(ec, args);
-    if (fnUpper === "IFERROR") return evalIfErrorIn(ec, args);
-    if (fnUpper === "ROW" || fnUpper === "COLUMN") return evalRowColumnIn(ec, fnUpper, args);
-    if (fnUpper === "ROWS" || fnUpper === "COLUMNS") return evalRowsColumnsIn(ec, fnUpper, args);
+    const specialForm = SPECIAL_FORM_HANDLERS.get(fnUpper);
+    if (specialForm) return specialForm(ec, fnUpper, args);
     const evaluatedArgs = args.map((arg) => evalAstIn(ec, arg));
     if (AGGREGATE_FN_SET.has(fnUpper)) {
       return evalAggregateFunction(fnUpper, evaluatedArgs, ec.workbook, ec.depth);
