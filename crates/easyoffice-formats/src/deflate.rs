@@ -2,6 +2,8 @@ use crate::EasyOfficeError;
 use std::sync::OnceLock;
 
 mod compress;
+#[cfg(test)]
+mod reference_inflate;
 
 const MAX_BITS: usize = 15;
 const FAST_LUT_BITS: u32 = 9;
@@ -161,14 +163,15 @@ impl<'a> BitReader<'a> {
     fn copy_aligned_bytes(
         &mut self,
         len: usize,
-        out: &mut Vec<u8>,
+        out: &mut OutBuf,
         max_output_bytes: usize,
         input_len: usize,
     ) -> Result<(), EasyOfficeError> {
         check_budget(out.len() + len, max_output_bytes, input_len)?;
+        out.reserve_extra(len);
         let mut remaining = len;
         while remaining > 0 && self.bit_count >= 8 {
-            out.push((self.bit_buf & 0xFF) as u8);
+            out.push_unchecked_space((self.bit_buf & 0xFF) as u8);
             self.bit_buf >>= 8;
             self.bit_count -= 8;
             remaining -= 1;
@@ -186,10 +189,13 @@ impl<'a> BitReader<'a> {
     }
 }
 
+/// Two-level decoding table: a `FAST_LUT_BITS`-wide primary lookup holding `symbol << 5 | length`
+/// for codes up to that length, and small per-prefix secondary tables for longer codes.
 struct HuffmanTable {
-    max_bits: u32,
     fast_lut: [u16; FAST_LUT_SIZE],
-    entries: Vec<u16>,
+    /// Per primary slot: `offset << 3 | sub_bits` of the secondary table, or 0 when none.
+    links: [u32; FAST_LUT_SIZE],
+    sub_entries: Vec<u16>,
 }
 
 impl HuffmanTable {
@@ -214,9 +220,9 @@ impl HuffmanTable {
 
         if max_bits == 0 {
             return Ok(Self {
-                max_bits: 1,
                 fast_lut: [0u16; FAST_LUT_SIZE],
-                entries: Vec::new(),
+                links: [0u32; FAST_LUT_SIZE],
+                sub_entries: Vec::new(),
             });
         }
 
@@ -243,13 +249,14 @@ impl HuffmanTable {
             next_code[bits] = code;
         }
 
-        let mut fast_lut = [0u16; FAST_LUT_SIZE];
-        let mut entries = if max_bits > FAST_LUT_BITS as usize {
-            vec![0u16; 1usize << max_bits]
-        } else {
-            Vec::new()
+        // Reversed (LSB-first) code per symbol, kept for the secondary-table pass.
+        let mut table = Self {
+            fast_lut: [0u16; FAST_LUT_SIZE],
+            links: [0u32; FAST_LUT_SIZE],
+            sub_entries: Vec::new(),
         };
-
+        let mut long_codes: Vec<(u16, u16, u8)> = Vec::new();
+        let mut group_bits = [0u8; FAST_LUT_SIZE];
         for (sym, &len_u8) in lengths.iter().enumerate() {
             let len = len_u8 as usize;
             if len == 0 {
@@ -257,32 +264,66 @@ impl HuffmanTable {
             }
             let canonical = next_code[len];
             next_code[len] += 1;
-            let rev = reverse_bits(canonical, len_u8) as usize;
+            let rev = reverse_bits(canonical, len_u8);
             let packed = ((sym as u16) << 5) | (len as u16);
-            let step = 1usize << len;
-
             if len <= FAST_LUT_BITS as usize {
-                let mut idx = rev;
+                let step = 1usize << len;
+                let mut idx = usize::from(rev);
                 while idx < FAST_LUT_SIZE {
-                    fast_lut[idx] = packed;
+                    table.fast_lut[idx] = packed;
                     idx += step;
                 }
-            }
-            if !entries.is_empty() {
-                let table_size = entries.len();
-                let mut idx = rev;
-                while idx < table_size {
-                    entries[idx] = packed;
-                    idx += step;
-                }
+            } else {
+                let prefix = usize::from(rev) & (FAST_LUT_SIZE - 1);
+                let extra = len_u8 - FAST_LUT_BITS as u8;
+                group_bits[prefix] = group_bits[prefix].max(extra);
+                long_codes.push((rev, packed, len_u8));
             }
         }
+        table.build_secondary(&group_bits, &long_codes);
+        Ok(table)
+    }
 
-        Ok(Self {
-            max_bits: max_bits as u32,
-            fast_lut,
-            entries,
-        })
+    /// Lays out one secondary table per primary prefix that has codes longer than the primary width.
+    fn build_secondary(&mut self, group_bits: &[u8; FAST_LUT_SIZE], long_codes: &[(u16, u16, u8)]) {
+        if long_codes.is_empty() {
+            return;
+        }
+        let mut total = 0usize;
+        for (prefix, &bits) in group_bits.iter().enumerate() {
+            if bits != 0 {
+                self.links[prefix] = ((total as u32) << 3) | u32::from(bits);
+                total += 1usize << bits;
+            }
+        }
+        self.sub_entries = vec![0u16; total];
+        for &(rev, packed, len) in long_codes {
+            let prefix = usize::from(rev) & (FAST_LUT_SIZE - 1);
+            let link = self.links[prefix];
+            let size = 1usize << (link & 7);
+            let base = (link >> 3) as usize;
+            let step = 1usize << (len - FAST_LUT_BITS as u8);
+            let mut idx = usize::from(rev) >> FAST_LUT_BITS;
+            while idx < size {
+                self.sub_entries[base + idx] = packed;
+                idx += step;
+            }
+        }
+    }
+
+    /// Entry for the next code in `bits` (the low bits of the bit buffer); 0 when invalid.
+    #[inline]
+    fn lookup(&self, bits: u64) -> u16 {
+        let fast = self.fast_lut[(bits & FAST_LUT_MASK) as usize];
+        if fast != 0 {
+            return fast;
+        }
+        let link = self.links[(bits & FAST_LUT_MASK) as usize];
+        if link == 0 {
+            return 0;
+        }
+        let sub_mask = (1u64 << (link & 7)) - 1;
+        self.sub_entries[(link >> 3) as usize + ((bits >> FAST_LUT_BITS) & sub_mask) as usize]
     }
 
     #[inline]
@@ -290,28 +331,8 @@ impl HuffmanTable {
         if reader.bit_count < MAX_BITS as u32 {
             reader.fill();
         }
-        let fast_entry = self.fast_lut[(reader.bit_buf & FAST_LUT_MASK) as usize];
-        let fast_len = (fast_entry & 0x1F) as u32;
-        if fast_len != 0 {
-            if reader.bit_count < fast_len {
-                return Err(EasyOfficeError::CorruptedContainer(
-                    "유효하지 않은 DEFLATE 허프만 코드 또는 절단된 스트림입니다.".to_string(),
-                ));
-            }
-            reader.bit_buf >>= fast_len;
-            reader.bit_count -= fast_len;
-            return Ok(fast_entry >> 5);
-        }
-        if self.entries.is_empty() || reader.bit_count == 0 {
-            return Err(EasyOfficeError::CorruptedContainer(
-                "DEFLATE 허프만 심볼 디코딩 중 스트림이 종료되었거나 유효하지 않은 코드입니다."
-                    .to_string(),
-            ));
-        }
-        let mask = (1u64 << self.max_bits) - 1;
-        let peek = (reader.bit_buf & mask) as usize;
-        let entry = self.entries[peek];
-        let bit_len = (entry & 0x1F) as u32;
+        let entry = self.lookup(reader.bit_buf);
+        let bit_len = u32::from(entry & 0x1F);
         if bit_len == 0 || reader.bit_count < bit_len {
             return Err(EasyOfficeError::CorruptedContainer(
                 "유효하지 않은 DEFLATE 허프만 코드 또는 절단된 스트림입니다.".to_string(),
@@ -343,18 +364,6 @@ fn check_budget(
             "DEFLATE 출력 크기({new_len} bytes)가 허용 상한({max_output_bytes} bytes)을 초과했습니다."
         )));
     }
-    Ok(())
-}
-
-#[inline]
-fn push_checked_byte(
-    out: &mut Vec<u8>,
-    b: u8,
-    max_output_bytes: usize,
-    input_len: usize,
-) -> Result<(), EasyOfficeError> {
-    check_budget(out.len() + 1, max_output_bytes, input_len)?;
-    out.push(b);
     Ok(())
 }
 
@@ -454,18 +463,264 @@ fn read_dynamic_huffman_tables(
     ))
 }
 
+/// Extra bytes kept writable past the logical end so a match can be copied in 8-byte chunks
+/// (longest match 258 + 7 bytes of chunk overshoot).
+const OUT_SLACK: usize = MAX_MATCH_LEN + 8;
+const MIN_OUT_CAPACITY: usize = 4_096;
+/// Non-overlapping matches longer than this use `memmove` instead of the 8-byte chunk loop.
+const LONG_COPY_MIN: usize = 32;
+
+/// Flat output buffer: `buf[..pos]` is the produced data, the rest is writable scratch so the
+/// hot loop never goes through `Vec::push` capacity logic.
+struct OutBuf {
+    buf: Vec<u8>,
+    pos: usize,
+    /// Largest `buf.len()` worth allocating (the output budget plus slack).
+    hard_cap: usize,
+}
+
+impl OutBuf {
+    fn new(input_len: usize, max_output_bytes: usize) -> Self {
+        let hard_cap = max_output_bytes.saturating_add(OUT_SLACK);
+        let initial = input_len
+            .saturating_mul(4)
+            .max(MIN_OUT_CAPACITY)
+            .saturating_add(OUT_SLACK)
+            .min(hard_cap);
+        Self {
+            buf: vec![0u8; initial],
+            pos: 0,
+            hard_cap,
+        }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.pos
+    }
+
+    /// Guarantees `OUT_SLACK` writable bytes beyond `pos`.
+    #[inline]
+    fn ensure_slack(&mut self) {
+        if self.pos + OUT_SLACK > self.buf.len() {
+            self.grow(OUT_SLACK);
+        }
+    }
+
+    /// Guarantees `extra` writable bytes (plus slack) beyond `pos`.
+    fn reserve_extra(&mut self, extra: usize) {
+        if self.pos.saturating_add(extra).saturating_add(OUT_SLACK) > self.buf.len() {
+            self.grow(extra.saturating_add(OUT_SLACK));
+        }
+    }
+
+    #[cold]
+    fn grow(&mut self, need: usize) {
+        let wanted = self
+            .buf
+            .len()
+            .saturating_mul(2)
+            .max(self.pos.saturating_add(need));
+        // The budget is checked before every write, so more than `hard_cap` is never required
+        // for output that passes the check (a single stored block may exceed it only by `need`).
+        let target = wanted.min(self.hard_cap.max(self.pos.saturating_add(need)));
+        self.buf.resize(target, 0);
+    }
+
+    /// Appends one byte, growing the buffer when it is full.
+    #[inline]
+    fn push_literal(&mut self, b: u8) {
+        if self.pos >= self.buf.len() {
+            self.grow(OUT_SLACK);
+        }
+        self.buf[self.pos] = b;
+        self.pos += 1;
+    }
+
+    /// Appends one byte; the caller has ensured slack.
+    #[inline]
+    fn push_unchecked_space(&mut self, b: u8) {
+        self.buf[self.pos] = b;
+        self.pos += 1;
+    }
+
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        self.reserve_extra(bytes.len());
+        self.buf[self.pos..self.pos + bytes.len()].copy_from_slice(bytes);
+        self.pos += bytes.len();
+    }
+
+    /// Appends an LZ77 match (`distance` already validated against `pos`, slack ensured).
+    #[inline]
+    fn copy_match(&mut self, distance: usize, match_len: usize) {
+        let dst = self.pos;
+        let src = dst - distance;
+        if distance >= match_len && match_len > LONG_COPY_MIN {
+            self.buf.copy_within(src..src + match_len, dst);
+        } else if distance >= 8 {
+            // Forward 8-byte chunks are safe: each chunk's source lies entirely before its
+            // destination. Overshoot into the slack is overwritten by later output.
+            let mut copied = 0usize;
+            while copied < match_len {
+                let chunk: [u8; 8] = self.buf[src + copied..src + copied + 8].try_into().unwrap();
+                self.buf[dst + copied..dst + copied + 8].copy_from_slice(&chunk);
+                copied += 8;
+            }
+        } else if distance == 1 {
+            let b = self.buf[src];
+            self.buf[dst..dst + match_len].fill(b);
+        } else {
+            for i in 0..match_len {
+                self.buf[dst + i] = self.buf[src + i];
+            }
+        }
+        self.pos += match_len;
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        self.buf.truncate(self.pos);
+        self.buf
+    }
+}
+
+/// Bits a single symbol can consume in the fast loop: literal/length code (15) + length extra (5)
+/// + distance code (15) + distance extra (13).
+const FAST_SYMBOL_BITS: u32 = 48;
+
+fn invalid_huffman_code() -> EasyOfficeError {
+    EasyOfficeError::CorruptedContainer(
+        "유효하지 않은 DEFLATE 허프만 코드 또는 절단된 스트림입니다.".to_string(),
+    )
+}
+
+impl HuffmanTable {
+    /// Decodes one symbol assuming the reader already holds at least `MAX_BITS` valid bits.
+    #[inline]
+    fn decode_prefilled(&self, reader: &mut BitReader<'_>) -> Result<u16, EasyOfficeError> {
+        let entry = self.lookup(reader.bit_buf);
+        let bit_len = u32::from(entry & 0x1F);
+        if bit_len == 0 {
+            return Err(invalid_huffman_code());
+        }
+        reader.bit_buf >>= bit_len;
+        reader.bit_count -= bit_len;
+        Ok(entry >> 5)
+    }
+}
+
+/// Validates a decoded `(match_len, distance)` pair and appends the match.
+#[inline]
+fn apply_match(
+    out: &mut OutBuf,
+    match_len: usize,
+    distance: usize,
+    max_output_bytes: usize,
+    input_len: usize,
+) -> Result<(), EasyOfficeError> {
+    if distance == 0 || distance > out.len() {
+        return Err(EasyOfficeError::CorruptedContainer(format!(
+            "DEFLATE LZ77 역참조 거리({distance})가 출력 버퍼 길이({})를 벗어났습니다.",
+            out.len()
+        )));
+    }
+    check_budget(out.len() + match_len, max_output_bytes, input_len)?;
+    out.ensure_slack();
+    out.copy_match(distance, match_len);
+    Ok(())
+}
+
+/// Length symbol remainder (extra bits, distance symbol, distance extra bits) with the reader
+/// holding at least `FAST_SYMBOL_BITS` bits from the start of the symbol.
+#[inline]
+fn decode_match_prefilled(
+    reader: &mut BitReader<'_>,
+    sym: u16,
+    dist_table: &HuffmanTable,
+    out: &mut OutBuf,
+    max_output_bytes: usize,
+    input_len: usize,
+) -> Result<(), EasyOfficeError> {
+    let l_idx = usize::from(sym - 257);
+    let extra_bits = u32::from(LENGTH_EXTRA[l_idx]);
+    let extra_val = (reader.bit_buf & ((1u64 << extra_bits) - 1)) as usize;
+    reader.bit_buf >>= extra_bits;
+    reader.bit_count -= extra_bits;
+    let match_len = usize::from(LENGTH_BASE[l_idx]) + extra_val;
+
+    let dist_sym = usize::from(dist_table.decode_prefilled(reader)?);
+    if dist_sym >= 30 {
+        return Err(EasyOfficeError::CorruptedContainer(format!(
+            "유효하지 않은 DEFLATE 거리 코드({dist_sym})입니다."
+        )));
+    }
+    let d_extra_bits = u32::from(DIST_EXTRA[dist_sym]);
+    let d_extra_val = (reader.bit_buf & ((1u64 << d_extra_bits) - 1)) as usize;
+    reader.bit_buf >>= d_extra_bits;
+    reader.bit_count -= d_extra_bits;
+    let distance = usize::from(DIST_BASE[dist_sym]) + d_extra_val;
+    apply_match(out, match_len, distance, max_output_bytes, input_len)
+}
+
+/// Fast loop: runs while eight or more input bytes remain, so one refill covers a whole symbol
+/// and no per-field bit-count checks are needed. Returns `true` once end-of-block was decoded
+/// and `false` when the input tail needs the checked path.
+fn decode_huffman_fast(
+    reader: &mut BitReader<'_>,
+    lit_table: &HuffmanTable,
+    dist_table: &HuffmanTable,
+    out: &mut OutBuf,
+    max_output_bytes: usize,
+    input_len: usize,
+) -> Result<bool, EasyOfficeError> {
+    loop {
+        if reader.bit_count < FAST_SYMBOL_BITS {
+            if reader.byte_pos + 8 > reader.input.len() {
+                return Ok(false);
+            }
+            reader.fill();
+        }
+        let sym = lit_table.decode_prefilled(reader)?;
+        if sym < 256 {
+            if out.len() >= max_output_bytes {
+                check_budget(out.len() + 1, max_output_bytes, input_len)?;
+            }
+            out.push_literal(sym as u8);
+        } else if sym == 256 {
+            return Ok(true);
+        } else if sym <= 285 {
+            decode_match_prefilled(reader, sym, dist_table, out, max_output_bytes, input_len)?;
+        } else {
+            return Err(EasyOfficeError::CorruptedContainer(format!(
+                "유효하지 않은 DEFLATE 리터럴/길이 심볼({sym})입니다."
+            )));
+        }
+    }
+}
+
 fn decode_huffman_block(
     reader: &mut BitReader<'_>,
     lit_table: &HuffmanTable,
     dist_table: &HuffmanTable,
-    out: &mut Vec<u8>,
+    out: &mut OutBuf,
     max_output_bytes: usize,
     input_len: usize,
 ) -> Result<(), EasyOfficeError> {
+    if decode_huffman_fast(
+        reader,
+        lit_table,
+        dist_table,
+        out,
+        max_output_bytes,
+        input_len,
+    )? {
+        return Ok(());
+    }
+    // Input tail: fully bounds-checked decoding.
     loop {
         let sym = lit_table.decode(reader)?;
         if sym < 256 {
-            push_checked_byte(out, sym as u8, max_output_bytes, input_len)?;
+            check_budget(out.len() + 1, max_output_bytes, input_len)?;
+            out.push_literal(sym as u8);
         } else if sym == 256 {
             break;
         } else if sym <= 285 {
@@ -483,31 +738,7 @@ fn decode_huffman_block(
             let d_extra_bits = u32::from(DIST_EXTRA[dist_sym]);
             let d_extra_val = reader.read_bits(d_extra_bits)? as usize;
             let distance = (DIST_BASE[dist_sym] as usize) + d_extra_val;
-
-            if distance == 0 || distance > out.len() {
-                return Err(EasyOfficeError::CorruptedContainer(format!(
-                    "DEFLATE LZ77 역참조 거리({distance})가 출력 버퍼 길이({})를 벗어났습니다.",
-                    out.len()
-                )));
-            }
-
-            check_budget(out.len() + match_len, max_output_bytes, input_len)?;
-            if distance == 1 {
-                let b = out[out.len() - 1];
-                out.resize(out.len() + match_len, b);
-            } else if distance >= match_len {
-                let start = out.len() - distance;
-                out.extend_from_within(start..start + match_len);
-            } else {
-                let base_start = out.len() - distance;
-                let mut remaining = match_len;
-                while remaining > 0 {
-                    let avail = out.len() - base_start;
-                    let step = remaining.min(avail);
-                    out.extend_from_within(base_start..base_start + step);
-                    remaining -= step;
-                }
-            }
+            apply_match(out, match_len, distance, max_output_bytes, input_len)?;
         } else {
             return Err(EasyOfficeError::CorruptedContainer(format!(
                 "유효하지 않은 DEFLATE 리터럴/길이 심볼({sym})입니다."
@@ -528,7 +759,7 @@ fn inflate_raw_with_consumed(
     }
 
     let mut reader = BitReader::new(input);
-    let mut out = Vec::with_capacity(input.len().saturating_mul(2).min(65_536));
+    let mut out = OutBuf::new(input.len(), max_output_bytes);
 
     loop {
         let bfinal = reader.read_bits(1)?;
@@ -581,7 +812,8 @@ fn inflate_raw_with_consumed(
         }
     }
 
-    Ok((out, reader.byte_pos()))
+    let consumed = reader.byte_pos();
+    Ok((out.finish(), consumed))
 }
 
 /// Decompresses an RFC 1951 raw DEFLATE bitstream with Fail-Closed output budget enforcement.
@@ -723,147 +955,4 @@ pub fn deflate_raw_level(input: &[u8], level: u8) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_deflate_and_inflate_fixed_stored_and_zlib_auto() {
-        // RFC 1950 standard Adler-32 test vector: "Wikipedia" -> 0x11E60398
-        assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
-
-        let xml = b"<w:document><w:body><w:p><w:r><w:t>EasyOffice RFC 1951 DEFLATE</w:t></w:p></w:body></w:document>"
-            .repeat(8);
-        let compressed = deflate_raw(&xml);
-        assert!(compressed.len() < xml.len() / 3);
-        let decompressed = inflate_raw(&compressed, 1024 * 1024).unwrap();
-        assert_eq!(decompressed, xml);
-
-        let zlib_full = deflate_zlib(&xml);
-        assert_eq!(inflate_zlib(&zlib_full, 1024 * 1024).unwrap(), xml);
-        assert_eq!(inflate_auto(&zlib_full, 1024 * 1024).unwrap(), xml);
-
-        let mut bad_zlib = zlib_full.clone();
-        let last_idx = bad_zlib.len() - 1;
-        bad_zlib[last_idx] ^= 0xFF;
-        assert!(matches!(
-            inflate_zlib(&bad_zlib, 1024 * 1024),
-            Err(EasyOfficeError::CorruptedContainer(_))
-        ));
-        assert!(matches!(
-            inflate_auto(&bad_zlib, 1024 * 1024),
-            Err(EasyOfficeError::CorruptedContainer(_))
-        ));
-
-        let stored_stream = [0x01u8, 0x05, 0x00, 0xFA, 0xFF, b'H', b'e', b'l', b'l', b'o'];
-        assert_eq!(inflate_raw(&stored_stream, 1024).unwrap(), b"Hello");
-
-        let mut zlib_wrapped = vec![0x78, 0x9C];
-        zlib_wrapped.extend_from_slice(&compressed);
-        assert!(matches!(
-            inflate_zlib(&zlib_wrapped, 1024 * 1024),
-            Err(EasyOfficeError::CorruptedContainer(_))
-        ));
-        assert_eq!(inflate_auto(&zlib_wrapped, 1024 * 1024).unwrap(), xml);
-        zlib_wrapped.push(0x11);
-        assert!(matches!(
-            inflate_auto(&zlib_wrapped, 1024 * 1024),
-            Err(EasyOfficeError::CorruptedContainer(_))
-        ));
-
-        assert!(matches!(
-            inflate_raw(&[0x07], 1024),
-            Err(EasyOfficeError::CorruptedContainer(_))
-        ));
-
-        assert!(matches!(
-            inflate_raw(&compressed, 16),
-            Err(EasyOfficeError::ResourceBudgetExceeded(_))
-        ));
-
-        let sparse_zeros = vec![0u8; 32_768];
-        let compressed_zeros = deflate_raw(&sparse_zeros);
-        assert!(compressed_zeros.len() * 100 < sparse_zeros.len());
-        let inflated_zeros = inflate_raw(&compressed_zeros, 65_536).unwrap();
-        assert_eq!(inflated_zeros, sparse_zeros);
-    }
-
-    #[test]
-    fn test_deflate_ring_buffer_overlap_doubling_and_adler32_chunks() {
-        for period in [2usize, 3, 5, 7, 13] {
-            let pattern: Vec<u8> = (0..period).map(|i| b'A' + (i as u8)).collect();
-            let repeated = pattern.repeat(300);
-            let compressed = deflate_raw(&repeated);
-            let decompressed = inflate_raw(&compressed, repeated.len() + 64).unwrap();
-            assert_eq!(decompressed, repeated);
-        }
-
-        let multi_window: Vec<u8> = (0..100_000usize)
-            .map(|i| ((i * 31 + (i >> 7)) & 0x7F) as u8)
-            .collect();
-        let z = deflate_zlib(&multi_window);
-        let roundtrip = inflate_zlib(&z, 200_000).unwrap();
-        assert_eq!(roundtrip, multi_window);
-
-        let mut s1 = 1u32;
-        let mut s2 = 0u32;
-        for &b in &multi_window {
-            s1 = (s1 + u32::from(b)) % ADLER_MOD;
-            s2 = (s2 + s1) % ADLER_MOD;
-        }
-        assert_eq!(adler32(&multi_window), (s2 << 16) | s1);
-    }
-
-    /// Deterministic pseudo-random bytes (xorshift) so the test needs no external RNG.
-    fn pseudo_random(len: usize, mut seed: u32) -> Vec<u8> {
-        (0..len)
-            .map(|_| {
-                seed ^= seed << 13;
-                seed ^= seed >> 17;
-                seed ^= seed << 5;
-                (seed >> 8) as u8
-            })
-            .collect()
-    }
-
-    #[test]
-    fn test_compressor_roundtrips_every_level_on_varied_inputs() {
-        let text = b"<w:p><w:r><w:t>EasyOffice dynamic huffman block selection</w:t></w:r></w:p>"
-            .repeat(900);
-        let mut mixed = pseudo_random(40_000, 7);
-        mixed.extend_from_slice(&text);
-        mixed.extend(vec![0u8; 70_000]);
-        mixed.extend(pseudo_random(5_000, 9));
-        let inputs: Vec<Vec<u8>> = vec![
-            Vec::new(),
-            vec![42],
-            b"ab".to_vec(),
-            b"abc".to_vec(),
-            vec![7u8; 300],
-            vec![0u8; 200_000],
-            pseudo_random(100_000, 1),
-            text,
-            mixed,
-            (0..=255u8).cycle().take(150_000).collect(),
-        ];
-        for level in 1..=4u8 {
-            for input in &inputs {
-                let packed = deflate_raw_level(input, level);
-                let unpacked = inflate_raw(&packed, input.len() + 16).unwrap();
-                assert_eq!(&unpacked, input, "level {level} len {}", input.len());
-                // Incompressible data must not expand beyond stored-block overhead.
-                assert!(packed.len() <= input.len() + input.len() / 16 + 16);
-            }
-        }
-    }
-
-    #[test]
-    fn test_default_level_is_deterministic_and_dynamic_blocks_beat_fixed_on_text() {
-        let text = b"<w:t>alpha beta gamma delta epsilon</w:t>".repeat(2000);
-        let a = deflate_raw(&text);
-        let b = deflate_raw(&text);
-        assert_eq!(a, b);
-        assert!(a.len() * 20 < text.len());
-        let z = deflate_zlib(&text);
-        assert_eq!(inflate_zlib(&z, text.len() + 1).unwrap(), text);
-    }
-}
+mod tests;
