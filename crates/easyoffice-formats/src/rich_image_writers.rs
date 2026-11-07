@@ -8,7 +8,7 @@ use crate::{RichImageFormat, XmlSanitizer};
 const EMU_PER_INCH: u64 = 914_400;
 /// HWPX length unit: 1/7200 inch.
 const EMU_PER_HWPUNIT: u64 = EMU_PER_INCH / 7_200;
-const INCH_DECIMALS_SCALE: u64 = 10_000;
+const POINT_DECIMALS_SCALE: u64 = 10_000;
 
 pub(crate) const DOCX_IMAGE_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
@@ -105,13 +105,17 @@ pub(crate) const DOCX_PICTURE_NAMESPACES: &str = concat!(
     " xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\""
 );
 
-/// EMU as an inches string with four decimals (`1.2500in`), integer math only.
-fn emu_to_inches(emu: u64) -> String {
-    let scaled = emu.saturating_mul(INCH_DECIMALS_SCALE) / EMU_PER_INCH;
+/// EMU as a point length with four decimals (`30.0000pt`), rounded, integer math only. A
+/// 96 dpi pixel is 0.75 pt, so pixel-based sizes are written exactly.
+fn emu_to_points_text(emu: u64) -> String {
+    let scaled = emu
+        .saturating_mul(POINT_DECIMALS_SCALE)
+        .saturating_add(EMU_PER_POINT / 2)
+        / EMU_PER_POINT;
     format!(
-        "{}.{:04}in",
-        scaled / INCH_DECIMALS_SCALE,
-        scaled % INCH_DECIMALS_SCALE
+        "{}.{:04}pt",
+        scaled / POINT_DECIMALS_SCALE,
+        scaled % POINT_DECIMALS_SCALE
     )
 }
 
@@ -125,8 +129,8 @@ pub(crate) fn odt_image_paragraph(img: &RichImage, number: usize, href: &str) ->
             "<svg:desc>{alt}</svg:desc></draw:frame></text:p>"
         ),
         n = number,
-        w = emu_to_inches(cx),
-        h = emu_to_inches(cy),
+        w = emu_to_points_text(cx),
+        h = emu_to_points_text(cy),
         href = XmlSanitizer::escape(href),
         alt = XmlSanitizer::escape(img.alt())
     )
