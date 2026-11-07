@@ -37,21 +37,73 @@ function checkReservedNameProvenance(name, font) {
   return errors;
 }
 
-export function checkFonts(root) {
-  const dir = path.join(root, FONTS_DIR_REL);
-  const errors = [];
+function readFontManifest(dir) {
   const manifestFile = path.join(dir, "fonts.json");
-  if (!fs.existsSync(manifestFile)) return [`${FONTS_DIR_REL}/fonts.json is missing`];
+  if (!fs.existsSync(manifestFile)) return { error: `${FONTS_DIR_REL}/fonts.json is missing` };
   let manifest;
   try {
     manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
   } catch (err) {
-    return [`${FONTS_DIR_REL}/fonts.json cannot be parsed: ${err.message}`];
+    return { error: `${FONTS_DIR_REL}/fonts.json cannot be parsed: ${err.message}` };
   }
   if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.fonts) || manifest.fonts.length === 0) {
-    return [`${FONTS_DIR_REL}/fonts.json: schemaVersion 1 with a non-empty fonts array is required`];
+    return { error: `${FONTS_DIR_REL}/fonts.json: schemaVersion 1 with a non-empty fonts array is required` };
   }
-  const doc = fs.existsSync(path.join(dir, "FONTS.md")) ? fs.readFileSync(path.join(dir, "FONTS.md"), "utf8") : null;
+  return { manifest };
+}
+
+function checkFontBytes(dir, name, font) {
+  const file = path.join(dir, name);
+  if (!fs.existsSync(file)) return [`${FONTS_DIR_REL}/${name} is missing`];
+  const data = fs.readFileSync(file);
+  if (data.length !== font.bytes) return [`${FONTS_DIR_REL}/${name} is ${data.length} bytes, fonts.json records ${font.bytes}`];
+  if (crypto.createHash("sha256").update(data).digest("hex") !== font.sha256) return [`${FONTS_DIR_REL}/${name} SHA-256 differs from fonts.json`];
+  return [];
+}
+
+function checkFontLicense(dir, name, font) {
+  const licenseRel = String(font.licenseFile ?? "");
+  const licensePath = path.resolve(dir, licenseRel);
+  if (!licenseRel.startsWith("licenses/") || !licensePath.startsWith(path.join(dir, "licenses") + path.sep)) {
+    return [`${name}: licenseFile must be under licenses/`];
+  }
+  if (!fs.existsSync(licensePath)) return [`${name}: license file ${licenseRel} is missing`];
+  const licenseText = fs.readFileSync(licensePath, "utf8");
+  if (!OFL_RE.test(licenseText)) return [`${name}: ${licenseRel} is not the SIL Open Font License 1.1`];
+  return RFN_RE.test(licenseText) ? checkReservedNameProvenance(name, font) : [];
+}
+
+function checkFontEntry(dir, name, font, doc) {
+  const errors = [];
+  if (font.license !== "OFL-1.1") errors.push(`${name}: license must be OFL-1.1 (found '${font.license}')`);
+  if (!SHA256_RE.test(String(font.sha256)) || !Number.isInteger(font.bytes)) errors.push(`${name}: bytes and sha256 are required`);
+  errors.push(...checkFontBytes(dir, name, font), ...checkFontLicense(dir, name, font));
+  if (doc !== null && !doc.includes(name)) errors.push(`${FONTS_DIR_REL}/FONTS.md does not list ${name}`);
+  return errors;
+}
+
+function checkUnlistedFiles(dir, manifest, listed) {
+  const errors = [];
+  for (const name of fs.readdirSync(dir)) {
+    const isFont = /\.(woff2?|ttf|otf|ttc|eot)$/i.test(name);
+    if (isFont && !listed.has(name)) errors.push(`${FONTS_DIR_REL}/${name} is not listed in fonts.json`);
+  }
+  const licensesDir = path.join(dir, "licenses");
+  if (!fs.existsSync(licensesDir)) return errors;
+  const used = new Set(manifest.fonts.map((f) => path.posix.basename(String(f.licenseFile ?? ""))));
+  for (const name of fs.readdirSync(licensesDir)) {
+    if (!used.has(name)) errors.push(`${FONTS_DIR_REL}/licenses/${name} is not referenced by fonts.json`);
+  }
+  return errors;
+}
+
+export function checkFonts(root) {
+  const dir = path.join(root, FONTS_DIR_REL);
+  const { manifest, error } = readFontManifest(dir);
+  if (error) return [error];
+  const errors = [];
+  const docFile = path.join(dir, "FONTS.md");
+  const doc = fs.existsSync(docFile) ? fs.readFileSync(docFile, "utf8") : null;
   if (doc === null) errors.push(`${FONTS_DIR_REL}/FONTS.md is missing`);
   const listed = new Set();
   for (const font of manifest.fonts) {
@@ -61,38 +113,9 @@ export function checkFonts(root) {
       continue;
     }
     listed.add(name);
-    if (font.license !== "OFL-1.1") errors.push(`${name}: license must be OFL-1.1 (found '${font.license}')`);
-    if (!SHA256_RE.test(String(font.sha256)) || !Number.isInteger(font.bytes)) errors.push(`${name}: bytes and sha256 are required`);
-    const file = path.join(dir, name);
-    if (!fs.existsSync(file)) errors.push(`${FONTS_DIR_REL}/${name} is missing`);
-    else {
-      const data = fs.readFileSync(file);
-      if (data.length !== font.bytes) errors.push(`${FONTS_DIR_REL}/${name} is ${data.length} bytes, fonts.json records ${font.bytes}`);
-      else if (crypto.createHash("sha256").update(data).digest("hex") !== font.sha256) errors.push(`${FONTS_DIR_REL}/${name} SHA-256 differs from fonts.json`);
-    }
-    const licenseRel = String(font.licenseFile ?? "");
-    const licensePath = path.resolve(dir, licenseRel);
-    if (!licenseRel.startsWith("licenses/") || !licensePath.startsWith(path.join(dir, "licenses") + path.sep)) {
-      errors.push(`${name}: licenseFile must be under licenses/`);
-    } else if (!fs.existsSync(licensePath)) errors.push(`${name}: license file ${licenseRel} is missing`);
-    else {
-      const licenseText = fs.readFileSync(licensePath, "utf8");
-      if (!OFL_RE.test(licenseText)) errors.push(`${name}: ${licenseRel} is not the SIL Open Font License 1.1`);
-      else if (RFN_RE.test(licenseText)) errors.push(...checkReservedNameProvenance(name, font));
-    }
-    if (doc !== null && !doc.includes(name)) errors.push(`${FONTS_DIR_REL}/FONTS.md does not list ${name}`);
+    errors.push(...checkFontEntry(dir, name, font, doc));
   }
-  for (const name of fs.readdirSync(dir)) {
-    const isFont = /\.(woff2?|ttf|otf|ttc|eot)$/i.test(name);
-    if (isFont && !listed.has(name)) errors.push(`${FONTS_DIR_REL}/${name} is not listed in fonts.json`);
-  }
-  const licensesDir = path.join(dir, "licenses");
-  if (fs.existsSync(licensesDir)) {
-    const used = new Set(manifest.fonts.map((f) => path.posix.basename(String(f.licenseFile ?? ""))));
-    for (const name of fs.readdirSync(licensesDir)) {
-      if (!used.has(name)) errors.push(`${FONTS_DIR_REL}/licenses/${name} is not referenced by fonts.json`);
-    }
-  }
+  errors.push(...checkUnlistedFiles(dir, manifest, listed));
   return errors;
 }
 

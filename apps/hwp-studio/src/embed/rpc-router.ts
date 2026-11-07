@@ -127,6 +127,37 @@ function asBytes(value: unknown, allowLegacyArray: boolean): Uint8Array {
   throw new Error('loadFile requires binary data');
 }
 
+function asPageIndex(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error('page must be a non-negative safe integer');
+  }
+  return value as number;
+}
+
+const MAX_TRACE_CHARACTERS = 4096;
+const DEFAULT_TRACE_CHARACTERS = 1024;
+
+function parseFontTraceLimits(params: Record<string, unknown>): number {
+  const raw = params.limits;
+  if (raw !== undefined && (typeof raw !== 'object' || raw === null || Array.isArray(raw))) {
+    throw new Error('limits must be an object');
+  }
+  const limits = raw === undefined ? {} : asParams(raw);
+  assertOnlyKeys(limits, ['maxCharacters'], 'getFontDecisionTrace limits');
+  const maxCharacters = limits.maxCharacters ?? DEFAULT_TRACE_CHARACTERS;
+  if (!Number.isSafeInteger(maxCharacters)
+    || (maxCharacters as number) < 1 || (maxCharacters as number) > MAX_TRACE_CHARACTERS) {
+    throw new Error('maxCharacters must be a safe integer in 1..=4096');
+  }
+  return maxCharacters as number;
+}
+
+function routeFontDecisionTrace(params: Record<string, unknown>, handlers: EmbedRpcHandlers): Promise<unknown> {
+  assertOnlyKeys(params, ['page', 'limits'], 'getFontDecisionTrace params');
+  const page = asPageIndex(params.page ?? 0);
+  return Promise.resolve(handlers.getFontDecisionTrace(page, parseFontTraceLimits(params)));
+}
+
 export async function routeEmbedRequest(
   method: string,
   rawParams: unknown,
@@ -147,32 +178,8 @@ export async function routeEmbedRequest(
     case 'verifyBytes': return handlers.verifyBytes(asBytes(params.data, allowLegacyArray));
     case 'setShellContext': return handlers.setShellContext(params);
     case 'pageCount': return handlers.pageCount();
-    case 'getRendererDiagnostics': {
-      const page = params.page ?? 0;
-      if (!Number.isSafeInteger(page) || (page as number) < 0) {
-        throw new Error('page must be a non-negative safe integer');
-      }
-      return handlers.getRendererDiagnostics(page as number);
-    }
-    case 'getFontDecisionTrace': {
-      assertOnlyKeys(params, ['page', 'limits'], 'getFontDecisionTrace params');
-      const page = params.page ?? 0;
-      if (!Number.isSafeInteger(page) || (page as number) < 0) {
-        throw new Error('page must be a non-negative safe integer');
-      }
-      const limits = params.limits === undefined ? {} : asParams(params.limits);
-      if (params.limits !== undefined
-        && (typeof params.limits !== 'object' || params.limits === null || Array.isArray(params.limits))) {
-        throw new Error('limits must be an object');
-      }
-      assertOnlyKeys(limits, ['maxCharacters'], 'getFontDecisionTrace limits');
-      const maxCharacters = limits.maxCharacters ?? 1024;
-      if (!Number.isSafeInteger(maxCharacters)
-        || (maxCharacters as number) < 1 || (maxCharacters as number) > 4096) {
-        throw new Error('maxCharacters must be a safe integer in 1..=4096');
-      }
-      return handlers.getFontDecisionTrace(page as number, maxCharacters as number);
-    }
+    case 'getRendererDiagnostics': return handlers.getRendererDiagnostics(asPageIndex(params.page ?? 0));
+    case 'getFontDecisionTrace': return routeFontDecisionTrace(params, handlers);
     case 'getPageSvg': return handlers.getPageSvg(
       typeof params.page === 'number' ? params.page : 0,
     );

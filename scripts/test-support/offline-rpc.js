@@ -91,152 +91,199 @@
     return doc;
   }
 
-  function validateZipEntriesList(entries) {
-    const MAX_ENTRIES = 4096;
-    const MAX_SINGLE_UNCOMPRESSED = 128 * 1024 * 1024;
-    const MAX_TOTAL_UNCOMPRESSED = 512 * 1024 * 1024;
-    if (entries.length === 0) {
-      throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
+  const ZIP_MAX_ENTRIES = 4096;
+  const ZIP_MAX_SINGLE_UNCOMPRESSED = 128 * 1024 * 1024;
+  const ZIP_MAX_TOTAL_UNCOMPRESSED = 512 * 1024 * 1024;
+  const ZIP_MAX_RATIO = 100;
+  const XML_DIRECTIVE_MESSAGE = "SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.";
+  const EMPTY_AUDIT_MESSAGE = "InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.";
+
+  const isNonNegativeSafeInteger = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+  function readZipEntryFields(item) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error("InvalidArgument: audit_security 'entries' 항목은 객체여야 합니다.");
     }
-    if (entries.length > MAX_ENTRIES) {
+    const rawName = item.name !== undefined && item.name !== null ? item.name : item.path;
+    if (typeof rawName !== "string" || !rawName.trim()) {
+      throw new Error("InvalidArgument: ZIP 엔트리 이름('name')이 비어 있습니다.");
+    }
+    const rawComp = item.compressed !== undefined ? item.compressed : item.compressedSize;
+    const rawUncomp = item.uncompressed !== undefined ? item.uncompressed : item.uncompressedSize;
+    if (!isNonNegativeSafeInteger(rawComp) || !isNonNegativeSafeInteger(rawUncomp)) {
+      throw new Error("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
+    }
+    const enc = item.encrypted === undefined || item.encrypted === null ? false : item.encrypted;
+    if (typeof enc !== "boolean") {
+      throw new TypeError("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
+    }
+    return { entryPath: rawName.trim(), rawComp, rawUncomp, enc };
+  }
+
+  function isUnsafeZipEntry(fields, seenPaths, totalUncompressed) {
+    const { entryPath, rawComp, rawUncomp, enc } = fields;
+    return (
+      !isValidZipEntryPath(entryPath) ||
+      seenPaths.has(entryPath) ||
+      (entryPath.endsWith("/") && (rawComp > 0 || rawUncomp > 0)) ||
+      enc ||
+      rawUncomp > ZIP_MAX_SINGLE_UNCOMPRESSED ||
+      totalUncompressed > ZIP_MAX_TOTAL_UNCOMPRESSED ||
+      (rawComp === 0 && rawUncomp > 0) ||
+      (rawComp > 0 && rawUncomp / rawComp > ZIP_MAX_RATIO)
+    );
+  }
+
+  function validateZipEntriesList(entries) {
+    if (entries.length === 0) throw new Error(EMPTY_AUDIT_MESSAGE);
+    if (entries.length > ZIP_MAX_ENTRIES) {
       throw new Error("SecurityViolation: ZIP 엔트리 개수가 보안 한도를 초과했습니다.");
     }
     let totalUncompressed = 0;
     const seenPaths = new Set();
     for (const item of entries) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) {
-        throw new Error("InvalidArgument: audit_security 'entries' 항목은 객체여야 합니다.");
+      const fields = readZipEntryFields(item);
+      totalUncompressed += fields.rawUncomp;
+      if (isUnsafeZipEntry(fields, seenPaths, totalUncompressed)) {
+        throw new Error("SecurityViolation: 안전하지 않은 ZIP 컨테이너 엔트리가 감지되었습니다: " + fields.entryPath);
       }
-      const rawName = item.name !== undefined && item.name !== null ? item.name : item.path;
-      if (typeof rawName !== "string" || !rawName.trim()) {
-        throw new Error("InvalidArgument: ZIP 엔트리 이름('name')이 비어 있습니다.");
-      }
-      const entryPath = rawName.trim();
-      const rawComp = item.compressed !== undefined ? item.compressed : item.compressedSize;
-      const rawUncomp = item.uncompressed !== undefined ? item.uncompressed : item.uncompressedSize;
-      if (
-        typeof rawComp !== "number" ||
-        !Number.isSafeInteger(rawComp) ||
-        rawComp < 0 ||
-        typeof rawUncomp !== "number" ||
-        !Number.isSafeInteger(rawUncomp) ||
-        rawUncomp < 0
-      ) {
-        throw new Error("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
-      }
-      const enc = item.encrypted === undefined || item.encrypted === null ? false : item.encrypted;
-      if (typeof enc !== "boolean") {
-        throw new TypeError("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
-      }
-      totalUncompressed += rawUncomp;
-      const unsafe =
-        !isValidZipEntryPath(entryPath) ||
-        seenPaths.has(entryPath) ||
-        (entryPath.endsWith("/") && (rawComp > 0 || rawUncomp > 0)) ||
-        enc ||
-        rawUncomp > MAX_SINGLE_UNCOMPRESSED ||
-        totalUncompressed > MAX_TOTAL_UNCOMPRESSED ||
-        (rawComp === 0 && rawUncomp > 0) ||
-        (rawComp > 0 && rawUncomp / rawComp > 100);
-      if (unsafe) {
-        throw new Error("SecurityViolation: 안전하지 않은 ZIP 컨테이너 엔트리가 감지되었습니다: " + entryPath);
-      }
-      seenPaths.add(entryPath);
+      seenPaths.add(fields.entryPath);
     }
+  }
+
+  function parseLegacyAuditToken(tok) {
+    const parts = tok.split(":");
+    if (parts.length !== 4) {
+      throw new Error("InvalidArgument: 잘못된 보안 감사 엔트리 구문");
+    }
+    const comp = Number(parts[1]);
+    const uncomp = Number(parts[2]);
+    if (!Number.isSafeInteger(comp) || !Number.isSafeInteger(uncomp)) {
+      throw new TypeError("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
+    }
+    if (parts[3] !== "true" && parts[3] !== "false") {
+      throw new Error("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
+    }
+    return { name: parts[0], compressed: comp, uncompressed: uncomp, encrypted: parts[3] === "true" };
+  }
+
+  function auditSafeResult(checkedEntries) {
+    return { status: "SAFE", verdict: "SAFE", xxeGuard: "PASSED", zipGuard: "PASSED", checkedEntries };
+  }
+
+  // Compact form: "name:compressed:uncompressed:encrypted,...|<xml>".
+  function auditLegacyPayload(trimmed) {
+    const pipeIdx = trimmed.indexOf("|");
+    const entryPart = pipeIdx >= 0 ? trimmed.slice(0, pipeIdx) : trimmed;
+    const xmlPart = pipeIdx >= 0 ? trimmed.slice(pipeIdx + 1) : "";
+    if (hasDangerousXmlDirective(xmlPart)) throw new Error(XML_DIRECTIVE_MESSAGE);
+    const rawItems = entryPart
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (rawItems.length === 0) throw new Error(EMPTY_AUDIT_MESSAGE);
+    const parsedEntries = rawItems.map(parseLegacyAuditToken);
+    validateZipEntriesList(parsedEntries);
+    return auditSafeResult(parsedEntries.length);
+  }
+
+  function auditContainerBase64(containerBase64) {
+    if (typeof containerBase64 !== "string" || !containerBase64.trim()) throw new Error(EMPTY_AUDIT_MESSAGE);
+    let decoded = "";
+    try {
+      decoded = typeof host.atob === "function" ? host.atob(containerBase64.trim()) : "";
+    } catch (_err) {
+      throw new Error("InvalidArgument: 유효하지 않은 Base64 컨테이너 데이터입니다.");
+    }
+    if (!decoded) throw new Error(EMPTY_AUDIT_MESSAGE);
+    if (hasDangerousXmlDirective(decoded)) throw new Error(XML_DIRECTIVE_MESSAGE);
+    return auditSafeResult(1);
   }
 
   function localAuditSecurity(payload) {
     const trimmed = String(payload ?? "")
       .replace(/^\uFEFF/, "")
       .trim();
-    if (!trimmed) {
-      throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
-    }
-    if (!trimmed.startsWith("{")) {
-      const pipeIdx = trimmed.indexOf("|");
-      const entryPart = pipeIdx >= 0 ? trimmed.slice(0, pipeIdx) : trimmed;
-      const xmlPart = pipeIdx >= 0 ? trimmed.slice(pipeIdx + 1) : "";
-      if (hasDangerousXmlDirective(xmlPart)) {
-        throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
-      }
-      const rawItems = entryPart
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (rawItems.length === 0) {
-        throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
-      }
-      const parsedEntries = rawItems.map((tok) => {
-        const parts = tok.split(":");
-        if (parts.length !== 4) {
-          throw new Error("InvalidArgument: 잘못된 보안 감사 엔트리 구문");
-        }
-        const comp = Number(parts[1]);
-        const uncomp = Number(parts[2]);
-        if (!Number.isSafeInteger(comp) || !Number.isSafeInteger(uncomp)) {
-          throw new TypeError("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
-        }
-        if (parts[3] !== "true" && parts[3] !== "false") {
-          throw new Error("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
-        }
-        return {
-          name: parts[0],
-          compressed: comp,
-          uncompressed: uncomp,
-          encrypted: parts[3] === "true",
-        };
-      });
-      validateZipEntriesList(parsedEntries);
-      return {
-        status: "SAFE",
-        verdict: "SAFE",
-        xxeGuard: "PASSED",
-        zipGuard: "PASSED",
-        checkedEntries: parsedEntries.length,
-      };
-    }
+    if (!trimmed) throw new Error(EMPTY_AUDIT_MESSAGE);
+    if (!trimmed.startsWith("{")) return auditLegacyPayload(trimmed);
 
     const doc = parseRequiredRpcJsonObject(trimmed);
     if (doc.xml !== undefined && doc.xml !== null && typeof doc.xml !== "string") {
       throw new Error("InvalidArgument: audit_security 'xml' 필드는 문자열이어야 합니다.");
     }
-    if (hasDangerousXmlDirective(doc.xml ?? "")) {
-      throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
-    }
+    if (hasDangerousXmlDirective(doc.xml ?? "")) throw new Error(XML_DIRECTIVE_MESSAGE);
     if (doc.containerBase64 !== undefined && doc.containerBase64 !== null) {
-      if (typeof doc.containerBase64 !== "string" || !doc.containerBase64.trim()) {
-        throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
-      }
-      let decoded = "";
-      try {
-        decoded = typeof host.atob === "function" ? host.atob(doc.containerBase64.trim()) : "";
-      } catch (_err) {
-        throw new Error("InvalidArgument: 유효하지 않은 Base64 컨테이너 데이터입니다.");
-      }
-      if (!decoded) {
-        throw new Error("InvalidArgument: 보안 감사 대상 엔트리가 비어 있습니다.");
-      }
-      if (hasDangerousXmlDirective(decoded)) {
-        throw new Error("SecurityViolation: 허용되지 않은 XML DOCTYPE 또는 ENTITY 선언이 감지되었습니다.");
-      }
-      return {
-        status: "SAFE",
-        verdict: "SAFE",
-        xxeGuard: "PASSED",
-        zipGuard: "PASSED",
-        checkedEntries: 1,
-      };
+      return auditContainerBase64(doc.containerBase64);
     }
     if (!Array.isArray(doc.entries)) {
       throw new TypeError("InvalidArgument: audit_security 'entries' 필드는 배열이어야 합니다.");
     }
     validateZipEntriesList(doc.entries);
+    return auditSafeResult(doc.entries.length);
+  }
+
+  function offlineSourceConversion(parsed) {
+    const decoded = offlineDecodeSource(parsed);
+    if (parsed.action === "decode") return decoded;
+    const b64 = encodeUtf8Base64(JSON.stringify(decoded.blocks || decoded.sheets || decoded.slides || []));
     return {
-      status: "SAFE",
-      verdict: "SAFE",
-      xxeGuard: "PASSED",
-      zipGuard: "PASSED",
-      checkedEntries: doc.entries.length,
+      sourceFormat: decoded.format, targetFormat: String(parsed.targetFormat || "hwpx"),
+      sourceBytes: decoded.sourceBytes, outputBytes: 10, targetBytes: 10,
+      detectedTarget: String(parsed.targetFormat || "hwpx"), tableCount: 0,
+      specification: "오프라인 테스트 변환", compatibility: "standard", compatibilityWarning: null,
+      warnings: decoded.warnings, convertedBase64: b64, status: "OK",
+    };
+  }
+
+  const blockToText = (b) =>
+    b?.type === "table"
+      ? (b.rows || []).map((r) => r.map((c) => (typeof c === "string" ? c : c.value || c.text || "")).join("\t")).join("\n")
+      : (b?.runs || []).map((r) => String(r.text || "")).join("");
+
+  // Structured save payload (PD-073): literal text only, never parsed as markup.
+  function structuredSaveBody(parsed) {
+    if (Array.isArray(parsed.blocks)) {
+      return {
+        structuredTables: parsed.blocks.filter((b) => b?.type === "table").length,
+        body: parsed.blocks.map(blockToText).join("\n"),
+      };
+    }
+    if (Array.isArray(parsed.sheets)) {
+      return { structuredTables: 0, body: parsed.sheets.map((s) => (s.cells || []).map((c) => c.ref + "=" + c.raw).join("\n")).join("\n") };
+    }
+    if (Array.isArray(parsed.slides)) {
+      return { structuredTables: 0, body: parsed.slides.map((s) => [s.title, ...(s.bullets || []), s.notes].join("\n")).join("\n") };
+    }
+    if (parsed.blocks !== undefined || parsed.sheets !== undefined || parsed.slides !== undefined) {
+      throw new Error("InvalidArgument: 구조화 저장 필드는 배열이어야 합니다.");
+    }
+    return null;
+  }
+
+  function parseConvertJsonFields(parsed) {
+    const fields = {
+      src: String(parsed.sourceFormat || "docx").trim().toLowerCase(),
+      dst: String(parsed.targetFormat || "hwpx").trim().toLowerCase(),
+      title: String(parsed.title || "통합_변환_문서"),
+      body: String(parsed.body || "본문 텍스트"),
+      structuredTables: null,
+    };
+    const structured = structuredSaveBody(parsed);
+    return structured ? { ...fields, ...structured } : fields;
+  }
+
+  function parseConvertPipeFields(raw) {
+    const firstPipe = raw.indexOf("|");
+    const firstSeg = firstPipe >= 0 ? raw.slice(0, firstPipe) : raw;
+    const restSeg = firstPipe >= 0 ? raw.slice(firstPipe + 1) : "통합_변환_문서|본문";
+    const secondPipe = restSeg.indexOf("|");
+    const pair = (firstSeg || "docx->hwpx").split("->");
+    return {
+      src: (pair[0] || "docx").trim().toLowerCase(),
+      dst: (pair[1] || "hwpx").trim().toLowerCase(),
+      title: (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서",
+      body: (secondPipe >= 0 ? restSeg.slice(secondPipe + 1) : "") || "본문 텍스트",
+      structuredTables: null,
     };
   }
 
@@ -685,59 +732,15 @@
       },
       convert_document_format: (payload) => {
         const raw = String(payload || "docx->hwpx|문서|본문");
-        let src;
-        let dst;
-        let title;
-        let body;
-        let structuredTables = null;
+        let fields;
         if (raw.trimStart().startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
-          if (parsed.sourceBase64 !== undefined) {
-            const decoded = offlineDecodeSource(parsed);
-            if (parsed.action === "decode") return decoded;
-            const b64 = encodeUtf8Base64(JSON.stringify(decoded.blocks || decoded.sheets || decoded.slides || []));
-            return {
-              sourceFormat: decoded.format, targetFormat: String(parsed.targetFormat || "hwpx"),
-              sourceBytes: decoded.sourceBytes, outputBytes: 10, targetBytes: 10,
-              detectedTarget: String(parsed.targetFormat || "hwpx"), tableCount: 0,
-              specification: "오프라인 테스트 변환", compatibility: "standard", compatibilityWarning: null,
-              warnings: decoded.warnings, convertedBase64: b64, status: "OK",
-            };
-          }
-          src = String(parsed.sourceFormat || "docx").trim().toLowerCase();
-          dst = String(parsed.targetFormat || "hwpx").trim().toLowerCase();
-          title = String(parsed.title || "통합_변환_문서");
-          body = String(parsed.body || "본문 텍스트");
-          // Structured save payload (PD-073): literal text only, never parsed as markup.
-          if (Array.isArray(parsed.blocks)) {
-            structuredTables = parsed.blocks.filter((b) => b?.type === "table").length;
-            body = parsed.blocks
-              .map((b) =>
-                b?.type === "table"
-                  ? (b.rows || []).map((r) => r.map((c) => (typeof c === "string" ? c : c.value || c.text || "")).join("\t")).join("\n")
-                  : (b?.runs || []).map((r) => String(r.text || "")).join("")
-              )
-              .join("\n");
-          } else if (Array.isArray(parsed.sheets)) {
-            structuredTables = 0;
-            body = parsed.sheets.map((s) => (s.cells || []).map((c) => c.ref + "=" + c.raw).join("\n")).join("\n");
-          } else if (Array.isArray(parsed.slides)) {
-            structuredTables = 0;
-            body = parsed.slides.map((s) => [s.title, ...(s.bullets || []), s.notes].join("\n")).join("\n");
-          } else if (parsed.blocks !== undefined || parsed.sheets !== undefined || parsed.slides !== undefined) {
-            throw new Error("InvalidArgument: 구조화 저장 필드는 배열이어야 합니다.");
-          }
+          if (parsed.sourceBase64 !== undefined) return offlineSourceConversion(parsed);
+          fields = parseConvertJsonFields(parsed);
         } else {
-          const firstPipe = raw.indexOf("|");
-          const firstSeg = firstPipe >= 0 ? raw.slice(0, firstPipe) : raw;
-          const restSeg = firstPipe >= 0 ? raw.slice(firstPipe + 1) : "통합_변환_문서|본문";
-          const secondPipe = restSeg.indexOf("|");
-          const pair = (firstSeg || "docx->hwpx").split("->");
-          src = (pair[0] || "docx").trim().toLowerCase();
-          dst = (pair[1] || "hwpx").trim().toLowerCase();
-          title = (secondPipe >= 0 ? restSeg.slice(0, secondPipe) : restSeg) || "통합_변환_문서";
-          body = (secondPipe >= 0 ? restSeg.slice(secondPipe + 1) : "") || "본문 텍스트";
+          fields = parseConvertPipeFields(raw);
         }
+        const { src, dst, title, body, structuredTables } = fields;
         const encoder = new TextEncoder();
         const rawBytes = encoder.encode(title + "\n" + body).length;
         const containerOverhead = {

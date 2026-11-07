@@ -359,6 +359,36 @@
       table.style.width = ROW_HEAD_W + inner + "px";
     }
 
+    // Drops rows outside the window and refreshes the survivors; returns them keyed by row number.
+    function reconcileExistingRows(tbody, next, sameCols) {
+      const existing = new Map();
+      for (const tr of Array.from(tbody.children)) {
+        if (tr.className && String(tr.className).includes("sheet-spacer")) continue;
+        const r = rowOf(tr);
+        if (r < next.r0 || r > next.r1 || r === 0) {
+          tr.remove();
+          continue;
+        }
+        existing.set(r, tr);
+        if (!tr.dataset.row) tr.dataset.row = String(r);
+        if (!sameCols) buildCells(tr, r, next);
+      }
+      return existing;
+    }
+
+    function insertMissingRows(tbody, existing, next) {
+      const rowsAsc = Array.from(existing.keys()).sort((a, b) => a - b);
+      const firstTr = rowsAsc.length > 0 ? existing.get(rowsAsc[0]) : null;
+      const minExisting = rowsAsc.length > 0 ? rowsAsc[0] : Number.POSITIVE_INFINITY;
+      for (let r = next.r0; r <= next.r1; r += 1) {
+        if (existing.has(r)) continue;
+        const tr = buildRow(r, next);
+        if (firstTr && r < minExisting) firstTr.before(tr);
+        else if (spacerBottom && spacerBottom.parentElement === tbody) spacerBottom.before(tr);
+        else tbody.appendChild(tr);
+      }
+    }
+
     // Brings the DOM window in line with the viewport. Returns true when rows/cells changed.
     function renderWindow(force) {
       const tbody = tbodyEl();
@@ -376,28 +406,9 @@
       // A forced render also rebuilds the header: column widths are per sheet (tab switch, file open).
       if (!sameCols || force) rebuildHead(headRow, next);
 
-      const existing = new Map();
-      Array.from(tbody.children).forEach((tr) => {
-        if (tr.className && String(tr.className).includes("sheet-spacer")) return;
-        const r = rowOf(tr);
-        if (r < next.r0 || r > next.r1 || r === 0) tr.remove();
-        else {
-          existing.set(r, tr);
-          if (!tr.dataset.row) tr.dataset.row = String(r);
-          if (!sameCols) buildCells(tr, r, next);
-        }
-      });
+      const existing = reconcileExistingRows(tbody, next, sameCols);
       syncSpacers(tbody, next);
-      const rowsAsc = Array.from(existing.keys()).sort((a, b) => a - b);
-      const firstTr = rowsAsc.length > 0 ? existing.get(rowsAsc[0]) : null;
-      const minExisting = rowsAsc.length > 0 ? rowsAsc[0] : Number.POSITIVE_INFINITY;
-      for (let r = next.r0; r <= next.r1; r += 1) {
-        if (existing.has(r)) continue;
-        const tr = buildRow(r, next);
-        if (firstTr && r < minExisting) firstTr.before(tr);
-        else if (spacerBottom && spacerBottom.parentElement === tbody) spacerBottom.before(tr);
-        else tbody.appendChild(tr);
-      }
+      insertMissingRows(tbody, existing, next);
       syncTableWidth(table, next);
       if (hooks.afterRender) hooks.afterRender();
       return true;

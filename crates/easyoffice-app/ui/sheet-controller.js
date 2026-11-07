@@ -588,10 +588,54 @@
       st.snapshotPushed = true;
     }
 
+    function releaseCellFocus(td, keepFocus) {
+      if (keepFocus) {
+        syncSheetCellFocusBaseline(td, true);
+        return;
+      }
+      sheetCellFocusState.delete(td);
+      if (document.activeElement === td && typeof td.blur === "function") td.blur();
+    }
+
+    // A formula cell left showing its source text gets its cached result back until the recalc runs.
+    function restoreCachedFormulaDisplay(td, editSheet) {
+      const cached = sheetDataStore[editSheet]?.[td.dataset.cell]?.value;
+      if (cached === undefined || cached === "" || isFormulaStr(cached)) return;
+      grid.setDisplayValue(td, cached);
+      if (getActiveSheetName() === editSheet) {
+        updateSheetSelectionAndAggregates(getActiveSheetCellRef() || td.dataset.cell);
+      }
+    }
+
+    function showsFormulaSourceText(td) {
+      return isFormulaStr(td.dataset.formula || "") && isFormulaStr((td.textContent || "").trim());
+    }
+
+    function settleUnchangedCell(td, edit) {
+      const { editSheet, rawText, keepFocus, wasEditing } = edit;
+      if (!keepFocus && showsFormulaSourceText(td)) {
+        restoreCachedFormulaDisplay(td, editSheet);
+      } else if (wasEditing && !isFormulaStr(td.dataset.formula || "")) {
+        grid.setDisplayValue(td, rawText);
+      }
+      if (keepFocus) refreshFocusedSheetCellPendingSnapshot();
+    }
+
+    async function recalcAfterCellEdit(td, editSheet, keepFocus) {
+      await recalculateActiveSheetFormulas();
+      if (keepFocus && document.activeElement === td && !sheetCellFocusState.get(td)?.userEdited) {
+        syncSheetCellFocusBaseline(td, true);
+        refreshFocusedSheetCellPendingSnapshot();
+      }
+      if (getActiveSheetName() === editSheet) {
+        updateSheetSelectionAndAggregates(getActiveSheetCellRef() || td.dataset.cell);
+      }
+      return true;
+    }
+
     function commitSheetCellEdit(td, keepFocus) {
       const st = sheetCellFocusState.get(td);
-      const curSheet = getActiveSheetName();
-      if (!st || st.sheetName !== curSheet) {
+      if (!st || st.sheetName !== getActiveSheetName()) {
         if (!keepFocus) sheetCellFocusState.delete(td);
         return Promise.resolve(false);
       }
@@ -601,62 +645,19 @@
       const wasEditing = Boolean(st.mode) || textChanged;
       input.endEdit(td);
       if (textChanged) {
-        if (isFormulaStr(rawText)) {
-          td.dataset.formula = rawText;
-        } else {
-          delete td.dataset.formula;
-        }
+        if (isFormulaStr(rawText)) td.dataset.formula = rawText;
+        else delete td.dataset.formula;
       }
-      const effectiveRaw = td.dataset.formula || rawText;
-      pushCellUndoSnapshotIfNeeded(td, st, effectiveRaw);
+      pushCellUndoSnapshotIfNeeded(td, st, td.dataset.formula || rawText);
       const shouldRecalc = st.snapshotPushed || textChanged;
-      if (keepFocus) {
-        syncSheetCellFocusBaseline(td, true);
-      } else {
-        sheetCellFocusState.delete(td);
-        if (document.activeElement === td && typeof td.blur === "function") {
-          td.blur();
-        }
-      }
+      releaseCellFocus(td, keepFocus);
       if (!shouldRecalc) {
-        if (
-          !keepFocus &&
-          isFormulaStr(td.dataset.formula || "") &&
-          isFormulaStr((td.textContent || "").trim())
-        ) {
-          const cached = sheetDataStore[editSheet]?.[td.dataset.cell]?.value;
-          if (cached !== undefined && cached !== "" && !isFormulaStr(cached)) {
-            grid.setDisplayValue(td, cached);
-            if (getActiveSheetName() === editSheet) {
-              updateSheetSelectionAndAggregates(getActiveSheetCellRef() || td.dataset.cell);
-            }
-          }
-        } else if (wasEditing && !isFormulaStr(td.dataset.formula || "")) {
-          grid.setDisplayValue(td, rawText);
-        }
-        if (keepFocus) {
-          refreshFocusedSheetCellPendingSnapshot();
-        }
+        settleUnchangedCell(td, { editSheet, rawText, keepFocus, wasEditing });
         return Promise.resolve(false);
       }
       sheetDataStore[editSheet] = snapshotDomSheetCells();
       if (!isFormulaStr(td.dataset.formula || "")) grid.setDisplayValue(td, rawText);
-      const commitRun = async () => {
-        await recalculateActiveSheetFormulas();
-        if (
-          keepFocus &&
-          document.activeElement === td &&
-          !sheetCellFocusState.get(td)?.userEdited
-        ) {
-          syncSheetCellFocusBaseline(td, true);
-          refreshFocusedSheetCellPendingSnapshot();
-        }
-        if (getActiveSheetName() === editSheet) {
-          updateSheetSelectionAndAggregates(getActiveSheetCellRef() || td.dataset.cell);
-        }
-        return true;
-      };
-      return trackSheetAsyncWork(commitRun());
+      return trackSheetAsyncWork(recalcAfterCellEdit(td, editSheet, keepFocus));
     }
 
     async function flushFocusedSheetCellBeforeSwitch() {
