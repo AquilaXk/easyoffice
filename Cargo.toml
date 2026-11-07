@@ -21,3 +21,9 @@ version = "1.0.0"
 edition = "2021"
 license = "MIT"
 rust-version = "1.85"
+
+# PD-101: the desktop shell turns page SVGs into searchable PDFs with svg2pdf. rhwp pins a vendored
+# copy with deterministic object order and PDF fixes; the patch only affects crates that depend on
+# svg2pdf (the engine crates do not).
+[patch.crates-io]
+svg2pdf = { path = "vendor/svg2pdf" }

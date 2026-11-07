@@ -1745,3 +1745,15 @@
 - **Alternatives rejected** hop 어댑터를 따로 이식(중복), 암호를 셸이 받아 네이티브에서 풀기(암호가 셸 경계를 넘음).
 - **Verified by** `node --test scripts/test-hwp-studio.mjs`(실제 흐름 코드를 모의 엔진·대화상자로 실행: 암호 없음·정답·오답 후 재시도·취소·미지원/DRM/손상·암호 비반향, 암호가 임베드·셸 파일에 없음, 고정 WASM과 번들에 흐름 존재), 업스트림 `rhwp-studio/tests/hwp-password-open.test.ts`.
 - **Revisit when** 암호로 저장을 지원하거나 업스트림 열기 깔때기가 바뀔 때(오버레이 해시 갱신과 함께 이 절을 갱신합니다).
+
+## 76. 한글 문서 검색 가능한 PDF 내보내기: 데스크톱 셸의 svg2pdf 의존성 정책 (PD-101)
+
+- **Status** Partially implemented (셸의 변환 엔진·저장 명령·상한·테스트까지; 편집기 메뉴 연결과 번들 TTF 글꼴은 후속)
+- **Context** 한글 문서를 PDF로 만들 때 글자가 그림이 되면 검색·복사가 안 됩니다. hop은 rhwp의 페이지 SVG를 `svg2pdf`로 바꿔 글꼴 부분집합과 `ToUnicode` 맵이 든 PDF를 만듭니다. rhwp는 같은 변환기의 결정론·그러데이션 수정본을 `vendor/svg2pdf`로 고정해 두며, 우리는 rhwp `1a76570`의 그 사본을 저장소의 `vendor/svg2pdf`로 복사해 씁니다(CI는 서브모듈을 받지 않음, 수정 없음).
+- **Decision (`PD-101`)** (1) 의존성은 **데스크톱 셸 크레이트(`easyoffice-desktop`)에만** 둡니다: `svg2pdf 0.13`(`default-features = false`, `text`), `usvg 0.45`, `fontdb 0.23`, `pdf-writer 0.12`. 엔진 크레이트는 외부 의존성 0을 유지합니다(PD-053, PD-095). 이 정책이 셸에 한해 PD-095의 "의존성 0"을 넓히는 유일한 예외이며, 이유는 PDF의 글꼴 서브셋·`ToUnicode`를 자체 구현하면 이식 대상(PD-095의 100줄 기준)을 크게 넘기 때문입니다. (2) 워크스페이스 `[patch.crates-io]`로 `svg2pdf`를 rhwp의 고정 사본으로 바꿉니다(엔진 크레이트는 svg2pdf를 쓰지 않으므로 영향 없음). (3) 라이선스는 전이 의존성 77개를 확인했고 모두 MIT, Apache-2.0, Zlib, BSD-2/3, 0BSD, Unlicense, BSL-1.0 계열(또는 이들의 OR 조합, 유니코드 데이터는 `Unicode-3.0`)이며 MPL·GPL·라이선스 불명은 없습니다. 목록 요약은 THIRD_PARTY_NOTICES에 있습니다. 새 의존성은 같은 확인을 거칩니다. (4) 변환은 `pdf_export.rs`(hop `pdf_export.rs`와 rhwp PDF 렌더러의 페이지 조립을 옮김): 쪽마다 `usvg::Tree::from_data`(SVG 바이트를 복사 없이 읽음)와 `svg2pdf::to_chunk`, 청크를 한 객체 공간으로 다시 번호 매기고 쪽마다 폼 XObject를 점 단위 MediaBox에 놓습니다. 한 쪽이라도 변환에 실패하면 쪽 번호가 든 오류로 전체를 실패시킵니다(쪽이 조용히 빠진 PDF를 만들지 않음). (5) 상한은 `checked_add`로 변환 전에 확인합니다: 쪽 수 2,000, 쪽당 SVG 64MiB, 합계 512MiB. 글꼴 데이터베이스는 프로세스당 한 번만 만들고(`OnceLock`) 번들 글꼴 폴더(`pdf-fonts`) 다음에 시스템 글꼴을 읽으며 일반 serif/sans/mono 대체는 Noto Sans KR입니다. (6) 새 앱 명령 `export_searchable_pdf(file_name, pages)`는 쪽 SVG 문자열만 받고 경로는 받지 않으며, 기존 저장 대화상자 흐름(`save_via_dialog`)을 `save_document_file`과 공유합니다. 명령 목록·capability는 1:1 테스트로 묶여 있습니다(10개).
+- **측정** 20쪽(320x120 px, 영문 한 줄)을 같은 글꼴로 변환했을 때(`cargo test -p easyoffice-desktop pdf_export -- --nocapture`): 글자 임베드(검색 가능) 약 270ms·202KB, 글자를 윤곽선으로 바꾼 PDF 약 290ms·166KB입니다. 임베드 쪽만 `/ToUnicode`와 `/FontFile2`를 가지며 윤곽선 쪽에는 둘 다 없습니다(검색·복사 불가). 임베드는 파일이 약 22% 크지만 시간은 같은 수준입니다.
+- **Why** 한글 문서 PDF의 글자를 검색·복사할 수 있게 하되 엔진 크레이트의 무의존을 지키고, 검증된 변환기와 rhwp가 고정한 수정본을 그대로 쓰기 위함입니다.
+- **Trade-offs** 셸 바이너리가 커지고 빌드 시간이 늘어납니다(의존 크레이트 약 77개). 아직 번들된 TTF가 없어 글꼴은 시스템 글꼴에 의존합니다(번들 글꼴은 woff2뿐이라 SFNT 변환이 필요).
+- **Alternatives rejected** `rhwp` 크레이트 전체를 셸에 의존(암호·서명 등 불필요한 큰 의존 트리), 글자를 윤곽선으로 변환(검색 불가), 엔진 크레이트에 PDF 글꼴 서브셋 자체 구현(이식 기준 초과).
+- **Verified by** `cargo test -p easyoffice-desktop pdf_export save_file`(상한, 쪽 오류 전파, `/ToUnicode`·글꼴 임베드·쪽 수·MediaBox, 결정론, 글꼴 DB 1회), 명령·capability 1:1 테스트.
+- **Revisit when** 편집기 파일 메뉴에 "PDF로 내보내기"를 연결할 때(후속: 오버레이가 쪽 SVG를 모아 호스트에 전달, `hwp-host.js`가 이 명령 호출)와 번들 TTF를 추가할 때.
