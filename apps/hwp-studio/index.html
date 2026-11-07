@@ -93,13 +93,13 @@
           <div class="md-sub">
             <span class="md-label" data-i18n="menu.view.label.xe7ded2">테마</span><span class="md-arrow">▶</span>
             <div class="md-sub-panel">
-              <div class="md-item" role="menuitemradio" aria-checked="false" data-cmd="view:theme-system" data-theme-mode-choice="system"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeSystem.themeModeChoiceSystem.label">시스템 설정</span></div>
-              <div class="md-item" role="menuitemradio" aria-checked="false" data-cmd="view:theme-light" data-theme-mode-choice="light"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeLight.themeModeChoiceLight.label">밝게</span></div>
-              <div class="md-item" role="menuitemradio" aria-checked="false" data-cmd="view:theme-dark" data-theme-mode-choice="dark"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeDark.themeModeChoiceDark.label">어둡게</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:theme-system" data-theme-mode-choice="system"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeSystem.themeModeChoiceSystem.label">시스템 설정</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:theme-light" data-theme-mode-choice="light"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeLight.themeModeChoiceLight.label">밝게</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:theme-dark" data-theme-mode-choice="dark"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.themeDark.themeModeChoiceDark.label">어둡게</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" role="menuitemradio" aria-checked="false" data-cmd="view:skin-oldschool" data-theme-skin-choice="oldschool"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinOldschool.themeSkinChoiceOldschool.label">올드스쿨</span></div>
-              <div class="md-item" role="menuitemradio" aria-checked="false" data-cmd="view:skin-default" data-theme-skin-choice="default"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinDefault.themeSkinChoiceDefault.label">클래식</span></div>
-              <div class="md-item" role="menuitemradio" aria-checked="false" data-cmd="view:skin-flat" data-theme-skin-choice="flat"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinFlat.themeSkinChoiceFlat.label">모던</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:skin-oldschool" data-theme-skin-choice="oldschool"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinOldschool.themeSkinChoiceOldschool.label">올드스쿨</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:skin-default" data-theme-skin-choice="default"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinDefault.themeSkinChoiceDefault.label">클래식</span></div>
+              <div class="md-item" role="menuitemradio" data-cmd="view:skin-flat" data-theme-skin-choice="flat"><span class="md-icon"></span><span class="md-label" data-i18n="command.view.skinFlat.themeSkinChoiceFlat.label">모던</span></div>
             </div>
           </div>
           <div class="md-sep"></div>
@@ -410,7 +410,7 @@
     </nav>
 
     <!-- 아이콘 툴바 -->
-    <section id="icon-toolbar" aria-label="기본 도구 상자" data-i18n-aria-label="ui.iconToolbar.ariaLabel">
+    <div id="icon-toolbar" role="region" aria-label="기본 도구 상자" data-i18n-aria-label="ui.iconToolbar.ariaLabel">
       <button type="button" id="icon-toolbar-prev" class="tb-scroll-nav" aria-controls="icon-toolbar-viewport" aria-label="이전 도구 그룹" title="이전 도구 그룹" hidden aria-disabled="true" aria-hidden="true" tabindex="-1" data-i18n-aria-label="ui.iconToolbarPrev.ariaLabel" data-i18n-title="ui.iconToolbarPrev.tooltip">
         <span class="tb-scroll-nav-icon" aria-hidden="true">«</span>
       </button>
@@ -514,8 +514,8 @@
         <span class="tb-scroll-nav-icon" aria-hidden="true">»</span>
       </button>
       <!-- 파일 열기 (숨김) -->
-      <input type="file" id="file-input" aria-label="문서 파일 열기" accept=".hwp,.hwpx,.hml,application/xml,text/xml" />
-    </section>
+      <input type="file" id="file-input" accept=".hwp,.hwpx,.hml,application/xml,text/xml" />
+    </div>
 
     <!-- 서식 도구 모음 (style bar) -->
     <div id="style-bar">
@@ -666,9 +666,9 @@
       <div id="ruler-corner"></div>
       <canvas id="h-ruler"></canvas>
       <canvas id="v-ruler"></canvas>
-      <section id="scroll-container" aria-label="문서 페이지" tabindex="0" data-i18n-aria-label="ui.scrollContainer.ariaLabel">
+      <div id="scroll-container" role="region" aria-label="문서 페이지" tabindex="0" data-i18n-aria-label="ui.scrollContainer.ariaLabel">
         <div id="scroll-content"></div>
-      </section>
+      </div>
     </main>
 
     <!-- 하단 상태 바 -->
@@ -678,7 +678,7 @@
       <span id="sb-section" class="stb-item" data-i18n="ui.sbSection.label">구역: 1 / 1</span>
       <span class="stb-divider"></span>
       <span id="sb-mode" class="stb-item" data-i18n="ui.sbMode.label">삽입</span>
-      <output id="sb-cell-selection" class="stb-item stb-cell-selection" aria-live="polite" hidden></output>
+      <span id="sb-cell-selection" class="stb-item stb-cell-selection" role="status" aria-live="polite" hidden></span>
       <span id="sb-field" class="stb-item"></span>
       <span id="sb-message" class="stb-message"></span>
       <span class="stb-right">
