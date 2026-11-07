@@ -412,3 +412,18 @@ test("the editor accepts the desktop shell's parent origin on every platform (PD
     assert.equal(isUsableParentOrigin(origin), false, origin);
   }
 });
+
+// ---- print page rules -------------------------------------------------------------------------
+
+test("print styles carry an @page size rule and a page box per page (#173)", async () => {
+  const { buildPrintPageRules, createPrintPage } = await import("../apps/hwp-studio/src/command/print-pages.ts");
+  const A4_PORTRAIT_PX = { width: 793.7, height: 1122.5 };
+  const B5_LANDSCAPE_PX = { width: 944.882, height: 665.197 };
+  const pages = [createPrintPage("<svg/>", A4_PORTRAIT_PX, 0), createPrintPage("<svg/>", B5_LANDSCAPE_PX, 1)];
+  const rules = buildPrintPageRules(pages);
+  assert.match(rules, /@page rhwp-print-page-1 \{ size: 210mm 297mm; margin: 0; \}/);
+  assert.match(rules, /@page rhwp-print-page-2 \{ size: 250mm 176mm; margin: 0; \}/);
+  assert.match(rules, /\.rhwp-print-page-1 \{ page: rhwp-print-page-1; width: 210mm; height: 297mm; \}/);
+  assert.match(rules, /\.rhwp-print-page-2 \{ page: rhwp-print-page-2; width: 250mm; height: 176mm; \}/);
+  assert.equal(buildPrintPageRules([]).trim(), "", "no pages, no rules");
+});
