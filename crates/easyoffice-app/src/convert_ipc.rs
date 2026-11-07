@@ -393,19 +393,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_doc_and_ppt_conversion_responses_flag_limited_compatibility() {
+    fn legacy_doc_and_ppt_conversion_responses_report_standard_compatibility() {
         for (dst, label) in [("doc", "Word Binary"), ("ppt", "Presentation Binary")] {
             let json = EasyOfficeIpcRouter::dispatch(
                 "convert_document_format",
                 &format!("docx->{dst}|호환성|본문"),
             )
             .unwrap();
-            assert!(json.contains("\"compatibility\":\"limited\""), "{json}");
-            let warning = json_str_field(&json, "compatibilityWarning");
-            assert!(warning.contains("열리지 않을 수 있습니다"), "{json}");
+            assert!(json.contains("\"compatibility\":\"standard\""), "{json}");
+            assert!(json.contains("\"compatibilityWarning\":null"), "{json}");
             let spec = json_str_field(&json, "specification");
             assert!(
-                spec.contains(label) && spec.contains("호환성 제한"),
+                spec.contains(label) && !spec.contains("호환성 제한"),
                 "{spec}"
             );
         }

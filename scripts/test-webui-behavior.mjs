@@ -1074,7 +1074,7 @@ test("ribbon IPC sends a per-window session id and the undo target module (#106)
   assert.notEqual(sidA, sidB);
 });
 
-test("conversion result surfaces limited write compatibility for legacy DOC/PPT targets", async () => {
+test("conversion result surfaces a limited write compatibility reported by the engine", async () => {
   const { document, userClick } = await createWorkspaceHarness({
     tauriInvoke: (command) => {
       if (command === "get_workspace_bootstrap") {

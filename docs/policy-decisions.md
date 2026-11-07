@@ -1027,7 +1027,7 @@
   4. **DOCX**: `<w:document>`의 `title` 속성을 제거하고 제목을 `docProps/core.xml`(관계·콘텐츠 형식 포함)에 기록하며, 표마다 `w:tblPr`(자동 너비·단선 테두리)과 열 수만큼의 `w:gridCol`을 가진 `w:tblGrid`를 첫 행 앞에 둡니다.
   5. **PDF 한글 글꼴 (`pdf_writer.rs`)**: 글꼴 바이너리를 저장소·배포물에 포함하지 않고 PDF 1.4 사전 정의 CJK 참조를 사용합니다. `/F2`는 `Type0` 글꼴(`/BaseFont /HYGoThic-Medium-UniKS-UCS2-H`, `/Encoding /UniKS-UCS2-H`)이며, 하위 `CIDFontType0` `HYGoThic-Medium`은 `Adobe-Korea1-1` 문자 모음과 `FontDescriptor`(메트릭)를 가집니다. `UniKS-UCS2-H`는 기존 본문 코드(UTF-16BE 코드 단위)를 그대로 Adobe-Korea1 CID로 사상하는 사전 정의 CMap이므로 콘텐츠 스트림은 바뀌지 않고, `/ToUnicode` CMap으로 텍스트 추출 정확도를 유지합니다. 문서 정보 사전의 `/Title`은 ASCII면 PDFDocEncoding 리터럴, 그 외에는 BOM(`FEFF`)을 붙인 UTF-16BE 16진 문자열로 기록하고, 카탈로그의 비표준 `/Title` 키는 제거합니다.
   6. **CSV/TSV**: 출력 앞에 UTF-8 BOM(`EF BB BF`)을 붙이고(`CsvCodec::serialize_with_bom`), `CsvCodec::parse`/`parse_scalar_baseline`은 입력 앞 BOM을 제거하여 라운드트립을 유지합니다.
-  7. **DOC/PPT 쓰기 호환성 표시 (`lib.rs`, `convert_ipc.rs`, `ui/{workspace-tools.js,app.js}`)**: 규격을 충족하는 워드·프레젠테이션 바이너리 작성기는 후속 과제(#112)로 분리하고, `DocumentFormat::output_compatibility()`가 `.doc`/`.ppt`에 `Limited(사유)`를 반환합니다. 변환 응답은 `"specification"`을 `"… 하위 집합 (호환성 제한)"`으로 표시하고 `"compatibility":"limited"`와 `"compatibilityWarning"`을 함께 반환하며, 변환 결과 상자와 저장 상태 메시지가 경고 문구를 그대로 노출합니다.
+  7. **DOC/PPT 쓰기 호환성 표시 (해결됨, `PD-090`)**: 이 결정 시점의 내용입니다. #112에서 규격 바이너리 작성기를 도입해 `.doc`/`.ppt` 제한 표시를 제거했습니다(표시 경로 자체는 유지). 당시 내용: 규격을 충족하는 워드·프레젠테이션 바이너리 작성기는 후속 과제(#112)로 분리하고, `DocumentFormat::output_compatibility()`가 `.doc`/`.ppt`에 `Limited(사유)`를 반환합니다. 변환 응답은 `"specification"`을 `"… 하위 집합 (호환성 제한)"`으로 표시하고 `"compatibility":"limited"`와 `"compatibilityWarning"`을 함께 반환하며, 변환 결과 상자와 저장 상태 메시지가 경고 문구를 그대로 노출합니다.
 - **Why** 저장·변환한 파일이 해당 형식을 지원하는 편집기에서 복구 경고 없이 열리고, 계산하지 않는 뷰어에서도 올바른 수식 결과가 보이며, 지원하지 못하는 형식은 사용자가 그 사실을 알 수 있게 하기 위함입니다.
 - **Trade-offs**
   1. 한글 글꼴을 임베딩하지 않으므로 글리프 모양은 뷰어가 대체하는 설치 글꼴에 따르며, 사전 정의 CJK 글꼴 대체를 지원하지 않는 최소 구현 뷰어에서는 한글이 표시되지 않을 수 있습니다. 대신 배포물 크기와 글꼴 라이선스 부담이 없습니다. `UniKS-UCS2-H`는 BMP 밖 문자(서로게이트 쌍)를 표현하지 못합니다.
@@ -1490,3 +1490,24 @@
 - **Alternatives rejected** 셀 값 튜플에 서식 필드 추가(모든 코덱·테스트 시그니처 변경), 서식을 `raw`에 인코딩(사용자 텍스트를 마크업으로 해석하는 위험), 서식 셀마다 개별 `xf`(중복으로 `styles.xml` 비대).
 - **Verified by** `cargo test -p easyoffice-formats --test sheet_style_roundtrip`(플래그·크기·중복 제거 1,000셀→`cellXfs` 3개·열 너비·요소 순서·수식 캐시·값 없는 서식 셀·타 앱 스타일 읽기·ODS 반복/단위), `cargo test -p easyoffice-app`(`convert_open`의 저장 → 디코드 → 재저장 왕복·검증 오류·격자 절단), `node --test scripts/test-webui-sheet-styles.mjs`(범위 굵게·열 너비 페이로드, 열 때 적용, 열기 → 편집 → 저장), 헤드리스 Chrome(CDP `Input.*`) 실제 UI 왕복.
 - **Revisit when** 글꼴·색·채우기·테두리·정렬·숫자 서식 같은 서식을 시트 편집기에 추가할 때, 열 너비를 실행 취소/자동 저장에 포함할 때, XLS(BIFF8) 서식 기록이 필요할 때.
+
+## 65. DOC/PPT를 실제 MS-DOC·MS-PPT 바이너리로 기록 (PD-090, #112)
+
+- **Status** Implemented
+- **Context** `.doc` 출력은 `WordDocument` 스트림 하나(64바이트 FIB 스텁 + UTF-16 본문 + EasyOffice 전용 트레일러)였고 `.ppt` 출력은 `RT_Document` 안에 슬라이드를 중첩한 전용 구조였습니다. `1Table`·조각 표(Clx)·FKP가 없고, `Current User`·persist directory·UserEditAtom도 없어 다른 워드·프레젠테이션 프로그램이 열지 못했으므로 `PD-071`에서 "호환성 제한"으로 표시했습니다(#112).
+- **Decision (`PD-090`)**
+  1. **템플릿 기반 작성**: 빈 문서의 FIB·스타일시트·글꼴표·문서 속성(`.doc`)과 문서 컨테이너·환경·주 마스터(`.ppt`)를 `crates/easyoffice-formats/assets/legacy/`에 바이너리 템플릿으로 두고 `include_bytes!`로 읽습니다. 원본은 Apache POI의 빈 문서 자원이며(Apache-2.0, 출처·SHA-256·NOTICE는 `THIRD_PARTY_NOTICES.md`), 요약 정보 스트림·작성자 이름·저장 경로·작성 시각을 제거했습니다.
+  2. **DOC (`legacy_doc_writer.rs`)**: `WordDocument`(FIB + 512바이트 경계의 UTF-16LE 본문 + CHPX/PAPX/LVC FKP 페이지 + 구역 속성)와 `1Table`(스타일시트·글꼴·문서 속성 + 새 `Clx` + `PlcBteChpx`/`PlcBtePapx`/`PlcBteLvc` + 본문 끝으로 고친 `PlcfSed`)을 기록합니다. FIB의 `fcMin`/`fcMac`·`cbMac`·`ccpText`와 해당 `fc/lcb` 쌍을 모두 고칩니다. 본문은 문단 + 표 행(셀을 탭으로 이은 문단)이며 문단마다 PAPX 한 줄(29줄/페이지)을 둡니다. 문단 안 줄바꿈은 0x0B, 나머지 제어 문자는 공백입니다.
+  3. **PPT (`legacy_ppt_writer.rs`)**: 문서 컨테이너에 슬라이드 목록(`SlideListWithText` 인스턴스 0)을 더하고, 슬라이드마다 `SlideContainer`(`SlideAtom` → 주 마스터, `PPDrawing`의 제목·본문 자리표시자 도형과 그 안의 텍스트, 마스터 색 구성표)를 쓰며, 그룹 도형·그림 그룹(드로잉 클러스터)을 슬라이드 수에 맞게 다시 계산합니다. 스트림 끝에 `PersistDirectoryAtom`과 `UserEditAtom`을 쓰고 `Current User`(`offsetToCurrentEdit`)가 이를 가리킵니다. 스트림은 단일 편집으로 자기 완결이라 `offsetLastEdit`은 0입니다.
+  4. **왕복 보존**: EasyOffice 전용 데이터는 규격 구조가 참조하지 않는 곳에 둡니다. `.doc`은 `WordDocument` 끝의 `[트레일러][시작 오프셋][매직]`(제목·문단·표 원문), `.ppt`는 persist 디렉터리가 가리키지 않는 최상위 레코드(형식 `0x7EA0`, 제목·노트·테마·전환이 든 이전 중첩 구조)입니다. 읽기는 이를 먼저 찾아 정확히 복원하고, 없으면(다른 프로그램이 저장한 파일) 조각 표(`Clx`) 경로와 기존 레코드 해석을 그대로 씁니다. 이전 형식(`fcMac` 직후 트레일러, 중첩 `RT_Document`)도 계속 읽습니다.
+  5. **호환성 표시 제거**: `DocumentFormat::output_compatibility()`는 모든 형식에 대해 `Standard`를, `output_specification()`은 표준 규격 이름을 반환합니다. 응답 필드(`compatibility`, `compatibilityWarning`)와 UI 표시 경로는 다른 작성기가 다시 제한될 때를 위해 남깁니다.
+- **Why** 사용자가 `.doc`/`.ppt`로 저장한 파일이 워드·프레젠테이션 프로그램에서 열리고 제목·본문·글머리표가 보여야 한다는 기본 기대를 충족하기 위함입니다. 규격 구조 전체를 새로 쓰는 대신 검증된 빈 문서를 기반으로 바뀌는 부분만 만들어 오류 면적을 줄입니다.
+- **Trade-offs**
+  1. 서식(굵게·글꼴·색)·진짜 Word 표·그림은 기록하지 않습니다. 표는 탭 문단입니다. 모든 글자는 템플릿 기본 서식(Times New Roman 계열)이며 한글은 프로그램의 글꼴 대체에 따릅니다.
+  2. 슬라이드 노트·테마·전환·문서 제목은 아직 규격 구조(노트 페이지, 슬라이드 쇼 정보)로 쓰지 않고 전용 레코드에만 남깁니다. 다른 프로그램에서는 보이지 않으며 EasyOffice가 다시 열 때만 복원됩니다.
+  3. 슬라이드는 제목 + 본문(글머리표 1단계)이며 레이아웃은 "제목 및 내용"/"제목만" 두 가지입니다.
+  4. 루트 스토리지 CLSID와 `\x01CompObj`, 요약 정보 스트림은 쓰지 않습니다(필수 아님).
+  5. 전용 데이터가 파일 크기를 조금 늘립니다. 다른 프로그램이 저장하면 이 데이터는 사라지고 보이는 텍스트만 남습니다.
+- **Alternatives rejected** 요약 정보 스트림까지 템플릿 그대로 포함(작성자 이름·경로·시각이 새므로 기각), 이전 구조 유지 + 안내 문구(#112 요구와 반대), 스트림을 처음부터 손으로 생성(스타일시트·마스터는 규모가 커 검증 부담이 큼).
+- **Verified by** `cargo test -p easyoffice-formats --test legacy_writers`(FIB·Clx·FKP 512 경계·`PlcfSed`, Current User → UserEditAtom → PersistDirectory → SlideContainer, 한글·빈 문서·슬라이드 0장·다수 왕복, Clx 단독 복원, 이전 중첩 형식), `cargo test -p easyoffice-formats --test output_container_spec_validity`, `cargo test -p easyoffice-app`, 외부 검증: `soffice --headless --convert-to txt` / `pdf`로 문단·슬라이드 제목·글머리표 확인.
+- **Revisit when** 서식·표·그림·노트 페이지·전환을 규격 구조로 기록할 때, 요약 정보(작성자·제목) 기록이 필요할 때, 워드·프레젠테이션 프로그램에서 복구 경고가 보고될 때.
