@@ -574,7 +574,14 @@ pub fn run_deterministic_benchmarks(iterations: usize) -> EngineBenchmarkReport 
         let dec_b = inflate_zlib(black_box(&zlib_bytes_b), 65_536).unwrap_or_default();
         let dt_b = t1.elapsed().as_micros() as u64;
 
-        if zlib_bytes_a != zlib_bytes_b || dec_a != ooxml_payload || dec_b != ooxml_payload {
+        // The baseline is the original fixed-Huffman compressor; the production compressor now
+        // emits dynamic Huffman blocks, so the streams differ. Equivalence means both streams
+        // decode (with either decoder) to the input and the production stream is not larger.
+        if zlib_bytes_b.len() > zlib_bytes_a.len()
+            || dec_a != ooxml_payload
+            || dec_b != ooxml_payload
+            || inflate_zlib(&zlib_bytes_a, 65_536).unwrap_or_default() != ooxml_payload
+        {
             def_eq = false;
         }
         def_digest = adler32(&dec_b);

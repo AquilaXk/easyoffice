@@ -1,6 +1,8 @@
 use crate::EasyOfficeError;
 use std::sync::OnceLock;
 
+mod compress;
+
 const MAX_BITS: usize = 15;
 const FAST_LUT_BITS: u32 = 9;
 const FAST_LUT_SIZE: usize = 1 << FAST_LUT_BITS;
@@ -8,9 +10,6 @@ const FAST_LUT_MASK: u64 = (FAST_LUT_SIZE as u64) - 1;
 const MAX_MATCH_LEN: usize = 258;
 const MIN_MATCH_LEN: usize = 3;
 const WINDOW_SIZE: usize = 32_768;
-const HASH_BITS: usize = 12;
-const HASH_SIZE: usize = 1 << HASH_BITS;
-const HASH_MASK: usize = HASH_SIZE - 1;
 const ADLER_MOD: u32 = 65_521;
 const ADLER_NMAX: usize = 5_552;
 
@@ -697,75 +696,6 @@ pub fn inflate_auto(input: &[u8], max_output_bytes: usize) -> Result<Vec<u8>, Ea
     inflate_raw(input, max_output_bytes)
 }
 
-struct BitWriter {
-    out: Vec<u8>,
-    bit_buf: u64,
-    bit_count: u32,
-}
-
-impl BitWriter {
-    fn with_capacity(cap: usize) -> Self {
-        Self {
-            out: Vec::with_capacity(cap),
-            bit_buf: 0,
-            bit_count: 0,
-        }
-    }
-
-    #[inline]
-    fn write_bits_lsb(&mut self, val: u32, n: u32) {
-        if n == 0 {
-            return;
-        }
-        let mask = (1u64 << n) - 1;
-        self.bit_buf |= (u64::from(val) & mask) << self.bit_count;
-        self.bit_count += n;
-        if self.bit_count >= 32 {
-            self.out
-                .extend_from_slice(&(self.bit_buf as u32).to_le_bytes());
-            self.bit_buf >>= 32;
-            self.bit_count -= 32;
-        }
-        while self.bit_count >= 8 {
-            self.out.push((self.bit_buf & 0xFF) as u8);
-            self.bit_buf >>= 8;
-            self.bit_count -= 8;
-        }
-    }
-
-    #[inline]
-    fn write_huffman_msb(&mut self, code: u16, len: u8) {
-        let rev = reverse_bits(code, len);
-        self.write_bits_lsb(u32::from(rev), u32::from(len));
-    }
-
-    #[inline]
-    fn write_fixed_sym(&mut self, sym: u16) {
-        match sym {
-            0..=143 => self.write_huffman_msb(0x30 + sym, 8),
-            144..=255 => self.write_huffman_msb(0x190 + (sym - 144), 9),
-            256..=279 => self.write_huffman_msb(sym - 256, 7),
-            280..=287 => self.write_huffman_msb(0xC0 + (sym - 280), 8),
-            _ => unreachable!(),
-        }
-    }
-
-    fn finish(mut self) -> Vec<u8> {
-        if self.bit_count > 0 {
-            self.out.push((self.bit_buf & 0xFF) as u8);
-        }
-        self.out
-    }
-}
-
-#[inline]
-fn hash3(bytes: &[u8], pos: usize) -> usize {
-    let b0 = bytes[pos] as usize;
-    let b1 = bytes[pos + 1] as usize;
-    let b2 = bytes[pos + 2] as usize;
-    ((b0 << 8) ^ (b1 << 4) ^ b2) & HASH_MASK
-}
-
 #[inline]
 fn find_length_code(len: usize) -> usize {
     LENGTH_CODE_LUT[len] as usize
@@ -781,116 +711,15 @@ fn find_dist_code(dist: usize) -> usize {
     }
 }
 
-/// Compresses `input` into a deterministic RFC 1951 raw DEFLATE bitstream using Fixed Huffman + SWAR `u64` LZ77.
+/// Compresses `input` into an RFC 1951 raw DEFLATE bitstream (hash-chain LZ77 with per-block
+/// dynamic Huffman coding; see `compress.rs`). The output is deterministic for a given input.
 pub fn deflate_raw(input: &[u8]) -> Vec<u8> {
-    let mut writer = BitWriter::with_capacity(input.len() / 2 + 16);
-    writer.write_bits_lsb(1, 1);
-    writer.write_bits_lsb(1, 2);
+    compress::compress(input, compress::DEFAULT_LEVEL)
+}
 
-    if input.len() < MIN_MATCH_LEN {
-        for &b in input {
-            writer.write_fixed_sym(u16::from(b));
-        }
-        writer.write_fixed_sym(256);
-        return writer.finish();
-    }
-
-    let mut head = [-1i32; HASH_SIZE];
-    let mut prev = [-1i32; WINDOW_SIZE];
-    let window_mask = WINDOW_SIZE - 1;
-    let mut pos = 0usize;
-
-    while pos < input.len() {
-        let mut best_len = 0usize;
-        let mut best_dist = 0usize;
-
-        if pos + MIN_MATCH_LEN <= input.len() {
-            let h = hash3(input, pos);
-            let first_candidate = head[h];
-            let mut candidate = first_candidate;
-
-            let max_len = (input.len() - pos).min(MAX_MATCH_LEN);
-            let min_pos = pos.saturating_sub(WINDOW_SIZE);
-            let mut chain_steps = 0usize;
-
-            while candidate >= (min_pos as i32) && chain_steps < 64 {
-                let c_pos = candidate as usize;
-                let dist = pos - c_pos;
-                if dist > 0
-                    && dist <= WINDOW_SIZE
-                    && input[c_pos + best_len] == input[pos + best_len]
-                {
-                    let mut m_len = 0usize;
-                    while m_len + 8 <= max_len {
-                        let a = u64::from_le_bytes(
-                            input[c_pos + m_len..c_pos + m_len + 8].try_into().unwrap(),
-                        );
-                        let b = u64::from_le_bytes(
-                            input[pos + m_len..pos + m_len + 8].try_into().unwrap(),
-                        );
-                        let diff = a ^ b;
-                        if diff == 0 {
-                            m_len += 8;
-                        } else {
-                            m_len += (diff.trailing_zeros() >> 3) as usize;
-                            break;
-                        }
-                    }
-                    while m_len < max_len && input[c_pos + m_len] == input[pos + m_len] {
-                        m_len += 1;
-                    }
-                    if m_len >= MIN_MATCH_LEN && m_len > best_len {
-                        best_len = m_len;
-                        best_dist = dist;
-                        if best_len == max_len {
-                            break;
-                        }
-                    }
-                }
-                let next_cand = prev[c_pos & window_mask];
-                if next_cand >= candidate {
-                    break;
-                }
-                candidate = next_cand;
-                chain_steps += 1;
-            }
-
-            prev[pos & window_mask] = first_candidate;
-            head[h] = pos as i32;
-        }
-
-        if best_len >= MIN_MATCH_LEN {
-            let l_idx = find_length_code(best_len);
-            writer.write_fixed_sym(257 + (l_idx as u16));
-            let l_extra = u32::from(LENGTH_EXTRA[l_idx]);
-            if l_extra > 0 {
-                writer.write_bits_lsb((best_len - (LENGTH_BASE[l_idx] as usize)) as u32, l_extra);
-            }
-
-            let d_idx = find_dist_code(best_dist);
-            writer.write_huffman_msb(d_idx as u16, 5);
-            let d_extra = u32::from(DIST_EXTRA[d_idx]);
-            if d_extra > 0 {
-                writer.write_bits_lsb((best_dist - (DIST_BASE[d_idx] as usize)) as u32, d_extra);
-            }
-
-            for step in 1..best_len {
-                let adv = pos + step;
-                if adv + MIN_MATCH_LEN <= input.len() {
-                    let h = hash3(input, adv);
-                    prev[adv & window_mask] = head[h];
-                    head[h] = adv as i32;
-                }
-            }
-            pos += best_len;
-        } else {
-            writer.write_fixed_sym(u16::from(input[pos]));
-            pos += 1;
-        }
-    }
-
-    writer.write_fixed_sym(256);
-    writer.finish()
+/// Like [`deflate_raw`] with an explicit effort `level` (1 = fastest, 4 = smallest; clamped).
+pub fn deflate_raw_level(input: &[u8], level: u8) -> Vec<u8> {
+    compress::compress(input, level)
 }
 
 #[cfg(test)]
@@ -982,5 +811,59 @@ mod tests {
             s2 = (s2 + s1) % ADLER_MOD;
         }
         assert_eq!(adler32(&multi_window), (s2 << 16) | s1);
+    }
+
+    /// Deterministic pseudo-random bytes (xorshift) so the test needs no external RNG.
+    fn pseudo_random(len: usize, mut seed: u32) -> Vec<u8> {
+        (0..len)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed >> 8) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_compressor_roundtrips_every_level_on_varied_inputs() {
+        let text = b"<w:p><w:r><w:t>EasyOffice dynamic huffman block selection</w:t></w:r></w:p>"
+            .repeat(900);
+        let mut mixed = pseudo_random(40_000, 7);
+        mixed.extend_from_slice(&text);
+        mixed.extend(vec![0u8; 70_000]);
+        mixed.extend(pseudo_random(5_000, 9));
+        let inputs: Vec<Vec<u8>> = vec![
+            Vec::new(),
+            vec![42],
+            b"ab".to_vec(),
+            b"abc".to_vec(),
+            vec![7u8; 300],
+            vec![0u8; 200_000],
+            pseudo_random(100_000, 1),
+            text,
+            mixed,
+            (0..=255u8).cycle().take(150_000).collect(),
+        ];
+        for level in 1..=4u8 {
+            for input in &inputs {
+                let packed = deflate_raw_level(input, level);
+                let unpacked = inflate_raw(&packed, input.len() + 16).unwrap();
+                assert_eq!(&unpacked, input, "level {level} len {}", input.len());
+                // Incompressible data must not expand beyond stored-block overhead.
+                assert!(packed.len() <= input.len() + input.len() / 16 + 16);
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_level_is_deterministic_and_dynamic_blocks_beat_fixed_on_text() {
+        let text = b"<w:t>alpha beta gamma delta epsilon</w:t>".repeat(2000);
+        let a = deflate_raw(&text);
+        let b = deflate_raw(&text);
+        assert_eq!(a, b);
+        assert!(a.len() * 20 < text.len());
+        let z = deflate_zlib(&text);
+        assert_eq!(inflate_zlib(&z, text.len() + 1).unwrap(), text);
     }
 }
