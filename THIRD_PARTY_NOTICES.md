@@ -8709,6 +8709,63 @@ its license text and source. Proprietary and operating-system fonts are never bu
 
 Nothing from this section is shipped in a release yet.
 
+## Legacy binary templates (Apache POI, Apache-2.0)
+
+The `.doc` and `.ppt` writers (PD-090) start from two blank documents taken from Apache POI (https://github.com/apache/poi, Apache License 2.0; the full license text is reproduced in the generated section above):
+
+- `empty.doc`: POI test data (`test-data/document/empty.doc`), SHA-256 `5f421a3970c70f12296073478380c0849a54c03fb2f4842392c7d3c5039bf1eb`.
+- `empty.ppt`: POI's HSLF blank-presentation resource (`empty.ppt`), SHA-256 `12142803e51e4cff4804253f8e32857d312ddb4e8c78139bab99114062fbf210`.
+
+Modifications: only the needed streams were kept (`WordDocument`, `1Table`, `PowerPoint Document`); `SummaryInformation`, `DocumentSummaryInformation`, `CompObj` and `Current User` were dropped; the author name, saved-by path, document timestamps and the layout-cache entries were removed or neutralised. The writer code is original and follows the MS-DOC and MS-PPT specifications, using POI's HWPF/HSLF structure as a reference.
+
+| Extracted file | Size | SHA-256 |
+|---|---|---|
+| `crates/easyoffice-formats/assets/legacy/doc_sepx.bin` | 30 | `4eaa72fa1235e729083453782e21c11dcc81d4b46cf488612a4a7239c1a36807` |
+| `crates/easyoffice-formats/assets/legacy/doc_table.bin` | 1125 | `39272573d77bf90100be06f600f0ea7f6589e895b7170a3a2701a54d0105d59e` |
+| `crates/easyoffice-formats/assets/legacy/doc_word_head.bin` | 1024 | `d3daa2c563fa94c3b43d42a319cc593e2f590c2597420aeabb89d22cb3dfd1f1` |
+| `crates/easyoffice-formats/assets/legacy/ppt_document.bin` | 3177 | `9b1f1a0e62d918f761b538f751b925fe624e1f875934c66e74f15cf7de78ab1d` |
+
+POI NOTICE (as published with the Apache POI sources):
+
+```
+Apache POI
+Copyright 2003-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+This product contains parts that were originally based on software from BEA.
+Copyright (c) 2000-2003, BEA Systems, <http://www.bea.com/> (dead link),
+which was acquired by Oracle Corporation in 2008.
+<http://www.oracle.com/us/corporate/Acquisitions/bea/index.html>
+<https://en.wikipedia.org/wiki/BEA_Systems>
+Note: The ASF Secretary has on hand a Software Grant Agreement (SGA) from
+BEA Systems, Inc. dated 9 Sep 2003 for XMLBeans signed by their EVP/CFO.
+
+This product contains W3C XML Schema documents. Copyright 2001-2003 (c)
+World Wide Web Consortium (Massachusetts Institute of Technology, European
+Research Consortium for Informatics and Mathematics, Keio University)
+
+This product contains the chunks_parse_cmds.tbl file from the vsdump program.
+Copyright (C) 2006-2007 Valek Filippov (frob@df.ru)
+
+This product contains parts of the eID Applet project
+<http://eid-applet.googlecode.com> and <https://github.com/e-Contract/eid-applet>.
+Copyright (c) 2009-2018
+FedICT (federal ICT department of Belgium), e-Contract.be BVBA (https://www.e-contract.be),
+Bart Hanssens from FedICT
+
+ExceptionUtils is derived from `scala.util.control.NonFatal` in scala-library
+which was released under the Apache 2.0 license.
+
+Copyright (c) 2002-2023 EPFL
+Copyright (c) 2011-2023 Lightbend, Inc.
+
+Scala includes software developed at
+LAMP/EPFL (https://lamp.epfl.ch/) and
+Lightbend, Inc. (https://www.lightbend.com/).
+```
+
 ## hop (patterns only)
 
 hop (MIT, https://github.com/golbin/hop) is a reference for build and verification patterns (pinned upstream checkout, Vite alias overlay with an override manifest, vendored WebAssembly with provenance, font policy). The patterns were followed and no hop source code was copied into EasyOffice. If code is copied later, its MIT notice must be added here first.

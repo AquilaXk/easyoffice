@@ -1,7 +1,7 @@
 pub use crate::biff8_xls_codec::*;
 use crate::ole2_codec::{
-    append_len_prefixed_utf16le, decode_utf16le, encode_utf16le, read_len_prefixed_utf16le,
-    read_u16_le, read_u32_le, write_u16_le, write_u32_le, Ole2ContainerCodec, Ole2StreamEntry,
+    decode_utf16le, read_len_prefixed_utf16le, read_u16_le, read_u32_le, Ole2ContainerCodec,
+    Ole2StreamEntry,
 };
 use crate::{DocumentFormat, EasyOfficeError};
 
@@ -79,40 +79,11 @@ impl LegacyOle2Codec {
     }
 
     pub fn pack_doc(payload: &LegacyDocPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        let joined = payload.paragraphs.join("\r");
-        let utf16_text = encode_utf16le(&joined);
-        let fc_min: u32 = 64;
-        let fc_mac: u32 = fc_min + (utf16_text.len() as u32);
-        let ccp_text: u32 = (utf16_text.len() / 2) as u32;
-
-        let mut stream = vec![0u8; 64];
-        write_u16_le(&mut stream, 0, Self::DOC_FIB_MAGIC);
-        write_u16_le(&mut stream, 2, Self::DOC_FIB_VERSION);
-        write_u16_le(&mut stream, 6, 0x0409);
-        write_u16_le(&mut stream, 10, 0x0000);
-        write_u32_le(&mut stream, 24, fc_min);
-        write_u32_le(&mut stream, 28, fc_mac);
-        write_u32_le(&mut stream, 32, ccp_text);
-        stream.extend_from_slice(&utf16_text);
-
-        stream.extend_from_slice(&Self::DOC_TRAILER_MAGIC.to_le_bytes());
-        append_len_prefixed_utf16le(&mut stream, &payload.title);
-        stream.extend_from_slice(&(payload.paragraphs.len() as u32).to_le_bytes());
-        for p in &payload.paragraphs {
-            append_len_prefixed_utf16le(&mut stream, p);
-        }
-        stream.extend_from_slice(&(payload.tables.len() as u32).to_le_bytes());
-        for tbl in &payload.tables {
-            stream.extend_from_slice(&(tbl.len() as u16).to_le_bytes());
-            for row in tbl {
-                stream.extend_from_slice(&(row.len() as u16).to_le_bytes());
-                for cell in row {
-                    append_len_prefixed_utf16le(&mut stream, cell);
-                }
-            }
-        }
-
-        Ole2ContainerCodec::pack(&[(Self::doc_stream_name(), stream)])
+        let (word, table) = crate::legacy_doc_writer::build_doc_streams(payload)?;
+        Ole2ContainerCodec::pack(&[
+            (Self::doc_stream_name(), word),
+            ("1Table".to_string(), table),
+        ])
     }
 
     fn try_extract_clx_piece_table_text(
@@ -255,6 +226,9 @@ impl LegacyOle2Codec {
                 DocumentFormat::Doc,
             ));
         }
+        if let Some(payload) = Self::parse_doc_footer_trailer(&doc_stream.data)? {
+            return Ok(payload);
+        }
         let fc_min = read_u32_le(&doc_stream.data, 24)? as usize;
         let fc_mac = read_u32_le(&doc_stream.data, 28)? as usize;
         let ccp_text = read_u32_le(&doc_stream.data, 32)? as usize;
@@ -314,6 +288,25 @@ impl LegacyOle2Codec {
             paragraphs,
             tables: Vec::new(),
         })
+    }
+
+    /// Private payload behind the last real structure: `[trailer][start u32][magic u32]`.
+    fn parse_doc_footer_trailer(data: &[u8]) -> Result<Option<LegacyDocPayload>, EasyOfficeError> {
+        let Some(footer) = data.len().checked_sub(8).filter(|f| *f >= 64) else {
+            return Ok(None);
+        };
+        if read_u32_le(data, footer + 4)? != Self::DOC_TRAILER_MAGIC {
+            return Ok(None);
+        }
+        let start = read_u32_le(data, footer)? as usize;
+        if start < 64 || start > footer {
+            return Ok(None);
+        }
+        match Self::parse_compact_doc_trailer(&data[..footer], start) {
+            Ok(payload) => Ok(Some(payload)),
+            Err(e @ EasyOfficeError::ResourceBudgetExceeded(_)) => Err(e),
+            Err(_) => Ok(None),
+        }
     }
 
     fn parse_compact_doc_trailer(
@@ -501,49 +494,27 @@ impl LegacyOle2Codec {
     }
 
     pub fn pack_ppt(payload: &LegacyPptPayload) -> Result<Vec<u8>, EasyOfficeError> {
-        let mut doc_children = Vec::new();
-        append_ppt_atom(
-            &mut doc_children,
-            0x0000,
-            Self::RT_TEXT_CHARS_ATOM,
-            &encode_utf16le(&payload.title),
-        );
+        let (stream, current_user) = crate::legacy_ppt_writer::build_ppt_streams(payload)?;
+        Ole2ContainerCodec::pack(&[
+            ("Current User".to_string(), current_user),
+            (Self::ppt_stream_name(), stream),
+        ])
+    }
 
-        for slide in &payload.slides {
-            let mut slide_children = Vec::new();
-            let meta = format!("{}|{}", slide.theme, slide.transition);
-            append_ppt_atom(
-                &mut slide_children,
-                0x0002,
-                Self::RT_SLIDE_ATOM,
-                &encode_utf16le(&meta),
-            );
-            append_ppt_atom(
-                &mut slide_children,
-                0x0000,
-                Self::RT_TEXT_CHARS_ATOM,
-                &encode_utf16le(&slide.title),
-            );
-            append_ppt_atom(
-                &mut slide_children,
-                0x0020,
-                Self::RT_TEXT_CHARS_ATOM,
-                &encode_utf16le(&slide.notes),
-            );
-            for bullet in &slide.bullets {
-                append_ppt_atom(
-                    &mut slide_children,
-                    0x0030,
-                    Self::RT_TEXT_CHARS_ATOM,
-                    &encode_utf16le(bullet),
-                );
+    /// Payload of the EasyOffice-private top-level record, when the stream carries one.
+    fn find_private_ppt_payload(data: &[u8]) -> Option<&[u8]> {
+        let mut off = 0usize;
+        while off.checked_add(8)? <= data.len() {
+            let rec_type = read_u16_le(data, off + 2).ok()?;
+            let len = read_u32_le(data, off + 4).ok()? as usize;
+            let start = off + 8;
+            let end = start.checked_add(len).filter(|e| *e <= data.len())?;
+            if rec_type == crate::legacy_ppt_writer::RT_EASYOFFICE_PRIVATE {
+                return Some(&data[start..end]);
             }
-            append_ppt_atom(&mut doc_children, 0x000F, Self::RT_SLIDE, &slide_children);
+            off = end;
         }
-
-        let mut stream = Vec::new();
-        append_ppt_atom(&mut stream, 0x000F, Self::RT_DOCUMENT, &doc_children);
-        Ole2ContainerCodec::pack(&[(Self::ppt_stream_name(), stream)])
+        None
     }
 
     fn decode_ppt_text_atom(rec_type: u16, slice: &[u8]) -> Result<String, EasyOfficeError> {
@@ -801,10 +772,11 @@ impl LegacyOle2Codec {
         let mut slides: Vec<LegacyPptSlide> = Vec::new();
         let mut saw_valid_ppt = false;
 
+        let ppt_data = Self::find_private_ppt_payload(&ppt_stream.data).unwrap_or(&ppt_stream.data);
         Self::parse_ppt_container_records(
-            &ppt_stream.data,
+            ppt_data,
             0,
-            ppt_stream.data.len(),
+            ppt_data.len(),
             &mut title,
             &mut slides,
             &mut saw_valid_ppt,
@@ -821,16 +793,10 @@ impl LegacyOle2Codec {
     }
 }
 
-fn append_ppt_atom(buf: &mut Vec<u8>, ver_and_inst: u16, rec_type: u16, payload: &[u8]) {
-    buf.extend_from_slice(&ver_and_inst.to_le_bytes());
-    buf.extend_from_slice(&rec_type.to_le_bytes());
-    buf.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    buf.extend_from_slice(payload);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ole2_codec::encode_utf16le;
     use crate::{FormatDetector, Hwp5Codec, Hwp5DocumentPayload, Hwp5ParagraphRecord};
 
     #[test]
