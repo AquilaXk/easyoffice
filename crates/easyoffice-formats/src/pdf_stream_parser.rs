@@ -193,62 +193,70 @@ struct PdfStreamCollector {
     stamp: Option<String>,
 }
 
+const POS_EPSILON: f64 = 1e-6;
+const SAME_LINE_EPSILON: f64 = 1e-3;
+const INVISIBLE_RENDER_MODE: i32 = 3;
+/// Text-state slot `(invisible, font size, x, y)` of the canonical hidden watermark.
+const CANONICAL_WM_SLOT: (bool, f64, f64, f64) = (true, 1.0, 0.0, 1.0);
+/// Slot of the visible watermark.
+const VISIBLE_WM_SLOT: (bool, f64, f64, f64) = (false, 10.0, 320.0, 746.0);
+/// Slot of the visible stamp.
+const STAMP_SLOT: (bool, f64, f64, f64) = (false, 10.0, 386.0, 604.0);
+/// Slot of the canonical hidden form marker.
+const CANONICAL_FORM_SLOT: (bool, f64, f64, f64) = (true, 1.0, 0.0, 2.0);
+/// Slot of the canonical hidden body text.
+const CANONICAL_BODY_SLOT: (bool, f64, f64, f64) = (true, 1.0, 0.0, 0.0);
+
+/// Whether the graphics state and text position match a fixed marker slot.
+fn matches_slot(gs: &PdfGraphicsState, pos: (f64, f64), slot: (bool, f64, f64, f64)) -> bool {
+    let (invisible, size, x, y) = slot;
+    (gs.render_mode == INVISIBLE_RENDER_MODE) == invisible
+        && (gs.font_size - size).abs() < POS_EPSILON
+        && (pos.0 - x).abs() < POS_EPSILON
+        && (pos.1 - y).abs() < POS_EPSILON
+}
+
 impl PdfStreamCollector {
     fn record(&mut self, text: String, gs: PdfGraphicsState, pos: (f64, f64), bt_id: usize) {
-        let (tlm_x, tlm_y) = pos;
-        let is_canonical_wm = gs.render_mode == 3
-            && (gs.font_size - 1.0).abs() < 1e-6
-            && tlm_x.abs() < 1e-6
-            && (tlm_y - 1.0).abs() < 1e-6;
-        let is_visible_wm = gs.render_mode != 3
-            && (gs.font_size - 10.0).abs() < 1e-6
-            && (tlm_x - 320.0).abs() < 1e-6
-            && (tlm_y - 746.0).abs() < 1e-6;
-        if is_canonical_wm || is_visible_wm {
-            if let Some(wm) = text.strip_prefix("[WM] ") {
-                self.watermark = Some(wm.to_string());
-                return;
-            }
-        }
-        let is_stamp_slot = gs.render_mode != 3
-            && (gs.font_size - 10.0).abs() < 1e-6
-            && (tlm_x - 386.0).abs() < 1e-6
-            && (tlm_y - 604.0).abs() < 1e-6;
-        if is_stamp_slot {
-            if let Some(st) = text.strip_prefix("[STAMP] ") {
-                self.stamp = Some(st.to_string());
-                return;
-            }
-        }
-        let is_canonical_form = gs.render_mode == 3
-            && (gs.font_size - 1.0).abs() < 1e-6
-            && tlm_x.abs() < 1e-6
-            && (tlm_y - 2.0).abs() < 1e-6
-            && text.starts_with("[FORM] ");
-        if is_canonical_form {
+        if self.record_marker(&text, &gs, pos) {
             return;
         }
-        let is_canonical_body = gs.render_mode == 3
-            && (gs.font_size - 1.0).abs() < 1e-6
-            && tlm_x.abs() < 1e-6
-            && tlm_y.abs() < 1e-6;
-        if is_canonical_body {
+        if matches_slot(&gs, pos, CANONICAL_BODY_SLOT) {
             self.canonical_chunks.push(text);
         } else {
-            let same_line_in_bt = self.last_bt_pos.is_some_and(|(prev_bt, prev_x, prev_y)| {
-                prev_bt == bt_id && (tlm_y - prev_y).abs() < 1e-3 && (tlm_x - prev_x).abs() > 1e-3
-            });
-            if same_line_in_bt {
-                if let Some(last_seg) = self.stream_segments.last_mut() {
-                    last_seg.push_str(&text);
-                } else {
-                    self.stream_segments.push(text);
-                }
-            } else {
-                self.stream_segments.push(text);
-            }
-            self.last_bt_pos = Some((bt_id, tlm_x, tlm_y));
+            self.push_segment(text, pos, bt_id);
         }
+    }
+
+    /// Consumes watermark / stamp / form marker text; returns true when handled.
+    fn record_marker(&mut self, text: &str, gs: &PdfGraphicsState, pos: (f64, f64)) -> bool {
+        if matches_slot(gs, pos, CANONICAL_WM_SLOT) || matches_slot(gs, pos, VISIBLE_WM_SLOT) {
+            if let Some(wm) = text.strip_prefix("[WM] ") {
+                self.watermark = Some(wm.to_string());
+                return true;
+            }
+        }
+        if matches_slot(gs, pos, STAMP_SLOT) {
+            if let Some(st) = text.strip_prefix("[STAMP] ") {
+                self.stamp = Some(st.to_string());
+                return true;
+            }
+        }
+        matches_slot(gs, pos, CANONICAL_FORM_SLOT) && text.starts_with("[FORM] ")
+    }
+
+    fn push_segment(&mut self, text: String, pos: (f64, f64), bt_id: usize) {
+        let (tlm_x, tlm_y) = pos;
+        let same_line_in_bt = self.last_bt_pos.is_some_and(|(prev_bt, prev_x, prev_y)| {
+            prev_bt == bt_id
+                && (tlm_y - prev_y).abs() < SAME_LINE_EPSILON
+                && (tlm_x - prev_x).abs() > SAME_LINE_EPSILON
+        });
+        match self.stream_segments.last_mut() {
+            Some(last_seg) if same_line_in_bt => last_seg.push_str(&text),
+            _ => self.stream_segments.push(text),
+        }
+        self.last_bt_pos = Some((bt_id, tlm_x, tlm_y));
     }
 
     fn finish(self) -> ParsedPdfContentStream {
@@ -265,251 +273,325 @@ impl PdfStreamCollector {
     }
 }
 
+const MAX_GRAPHICS_STATE_DEPTH: usize = 64;
+const LEADING_EPSILON: f64 = 1e-6;
+const KERN_SPACE_THRESHOLD: f64 = -180.0;
+
+/// Mutable interpreter state for one content stream pass.
+#[derive(Default)]
+struct PdfStreamInterpreter {
+    in_text_object: bool,
+    bt_counter: usize,
+    gs: PdfGraphicsState,
+    gs_stack: Vec<PdfGraphicsState>,
+    tlm_x: f64,
+    tlm_y: f64,
+    dict_depth: usize,
+    in_array: bool,
+    array_buf: String,
+    array_has_text: bool,
+    operands: Vec<PdfStreamOperand>,
+    collector: PdfStreamCollector,
+}
+
+/// End index of the regular-character run starting at `from`.
+#[inline]
+fn pdf_token_end(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i < bytes.len() && !is_pdf_delim_or_ws(bytes[i]) {
+        i += 1;
+    }
+    i
+}
+
+/// The last two numeric operands as `(x, y)`, without allocating.
+fn last_two_numeric_operands(operands: &[PdfStreamOperand]) -> Option<(f64, f64)> {
+    let mut nums = operands.iter().rev().filter_map(|op| match op {
+        PdfStreamOperand::Num(n) => Some(*n),
+        _ => None,
+    });
+    let y = nums.next()?;
+    let x = nums.next()?;
+    Some((x, y))
+}
+
+/// Latest font size and font name operands (scanning from the end).
+fn font_operands(operands: &[PdfStreamOperand]) -> (Option<f64>, Option<&str>) {
+    let mut size_opt = None;
+    let mut name_opt = None;
+    for op in operands.iter().rev() {
+        match op {
+            PdfStreamOperand::Num(sz) if size_opt.is_none() => size_opt = Some(*sz),
+            PdfStreamOperand::Name(nm) if name_opt.is_none() => name_opt = Some(nm.as_str()),
+            _ => {}
+        }
+        if size_opt.is_some() && name_opt.is_some() {
+            break;
+        }
+    }
+    (size_opt, name_opt)
+}
+
+impl PdfStreamInterpreter {
+    #[inline]
+    fn in_active_text(&self) -> bool {
+        self.dict_depth == 0 && self.in_text_object
+    }
+
+    fn push_text(&mut self, decoded: String) {
+        if self.in_array {
+            self.array_buf.push_str(&decoded);
+            self.array_has_text = true;
+        } else {
+            self.operands.push(PdfStreamOperand::Str(decoded));
+        }
+    }
+
+    fn apply_non_code(
+        &mut self,
+        kind: PdfNonCodeKind,
+        stream: &str,
+        cmap: Option<&PdfToUnicodeMap>,
+    ) {
+        match kind {
+            PdfNonCodeKind::Comment { .. } => {}
+            PdfNonCodeKind::DictOpen => self.dict_depth += 1,
+            PdfNonCodeKind::DictClose => self.dict_depth = self.dict_depth.saturating_sub(1),
+            PdfNonCodeKind::ParenString {
+                inner_start,
+                inner_end,
+            } => {
+                if self.in_active_text() {
+                    self.push_text(unescape_pdf_text(&stream[inner_start..inner_end]));
+                }
+            }
+            PdfNonCodeKind::HexString {
+                inner_start,
+                inner_end,
+            } => {
+                if !self.in_active_text() {
+                    return;
+                }
+                let hex = &stream[inner_start..inner_end];
+                if let Some(decoded) =
+                    decode_pdf_hex_string_with_cmap(hex, self.gs.font_utf16be, cmap)
+                {
+                    self.push_text(decoded);
+                }
+            }
+        }
+    }
+
+    fn open_array(&mut self) {
+        if self.in_active_text() {
+            self.in_array = true;
+            self.array_buf.clear();
+            self.array_has_text = false;
+        }
+    }
+
+    fn close_array(&mut self) {
+        if !(self.in_active_text() && self.in_array) {
+            return;
+        }
+        self.in_array = false;
+        if self.array_has_text {
+            let text = std::mem::take(&mut self.array_buf);
+            self.operands.push(PdfStreamOperand::ArrayText(text));
+        } else {
+            self.array_buf.clear();
+        }
+        self.array_has_text = false;
+    }
+
+    /// Inserts a word gap for large negative kerning inside a text array.
+    fn note_kerning(&mut self, tok: &str) {
+        if !self.array_has_text || self.array_buf.ends_with(' ') {
+            return;
+        }
+        if tok
+            .parse::<f64>()
+            .is_ok_and(|kern| kern <= KERN_SPACE_THRESHOLD)
+        {
+            self.array_buf.push(' ');
+        }
+    }
+
+    /// Handles a regular-character token (number or operator keyword).
+    fn apply_token(&mut self, tok: &str) {
+        if self.dict_depth > 0 {
+            return;
+        }
+        if self.in_array {
+            self.note_kerning(tok);
+            return;
+        }
+        if let Ok(num) = tok.parse::<f64>() {
+            self.operands.push(PdfStreamOperand::Num(num));
+            return;
+        }
+        self.run_operator(tok);
+        self.operands.clear();
+    }
+
+    /// Dispatches one code byte at `i`; returns the next scan index.
+    fn apply_code_token(&mut self, stream: &str, i: usize) -> usize {
+        let bytes = stream.as_bytes();
+        match bytes[i] {
+            b'[' => {
+                self.open_array();
+                i + 1
+            }
+            b']' => {
+                self.close_array();
+                i + 1
+            }
+            b'>' | b'{' | b'}' => i + 1,
+            b'/' => {
+                let end = pdf_token_end(bytes, i + 1);
+                if self.dict_depth == 0 && !self.in_array {
+                    self.operands
+                        .push(PdfStreamOperand::Name(stream[i..end].to_string()));
+                }
+                end
+            }
+            _ => {
+                let end = pdf_token_end(bytes, i);
+                self.apply_token(&stream[i..end]);
+                end
+            }
+        }
+    }
+
+    fn run_operator(&mut self, op: &str) {
+        match op {
+            "q" => self.save_state(),
+            "Q" => self.restore_state(),
+            "BT" => self.begin_text(),
+            "ET" => self.in_text_object = false,
+            "Tf" => self.set_font(),
+            "Tr" => {
+                if let Some(m) = last_numeric_operand(&self.operands) {
+                    self.gs.render_mode = m as i32;
+                }
+            }
+            "TL" => {
+                if let Some(tl) = last_numeric_operand(&self.operands) {
+                    self.gs.leading = tl;
+                }
+            }
+            "Td" | "TD" | "Tm" => self.move_text(op),
+            "T*" => self.next_line(),
+            "'" | "\"" if self.in_text_object => {
+                self.next_line();
+                self.record_string_operand();
+            }
+            "Tj" if self.in_text_object => self.record_string_operand(),
+            "TJ" if self.in_text_object => self.record_array_operand(),
+            _ => {}
+        }
+    }
+
+    fn save_state(&mut self) {
+        if self.gs_stack.len() < MAX_GRAPHICS_STATE_DEPTH {
+            self.gs_stack.push(self.gs);
+        }
+    }
+
+    fn restore_state(&mut self) {
+        if let Some(prev) = self.gs_stack.pop() {
+            self.gs = prev;
+        }
+    }
+
+    fn begin_text(&mut self) {
+        self.in_text_object = true;
+        self.bt_counter += 1;
+        self.tlm_x = 0.0;
+        self.tlm_y = 0.0;
+    }
+
+    fn set_font(&mut self) {
+        let (size_opt, name_opt) = font_operands(&self.operands);
+        if let Some(nm) = name_opt {
+            self.gs.font_utf16be = nm == "/F2";
+        }
+        if let Some(sz) = size_opt {
+            self.gs.font_size = sz;
+        }
+    }
+
+    fn move_text(&mut self, op: &str) {
+        let Some((x, y)) = last_two_numeric_operands(&self.operands) else {
+            return;
+        };
+        match op {
+            "Tm" => {
+                self.tlm_x = x;
+                self.tlm_y = y;
+            }
+            _ => {
+                if op == "TD" {
+                    self.gs.leading = -y;
+                }
+                self.tlm_x += x;
+                self.tlm_y += y;
+            }
+        }
+    }
+
+    fn next_line(&mut self) {
+        self.tlm_y -= if self.gs.leading.abs() > LEADING_EPSILON {
+            self.gs.leading
+        } else {
+            self.gs.font_size
+        };
+    }
+
+    fn record_current(&mut self, text: String) {
+        let pos = (self.tlm_x, self.tlm_y);
+        self.collector.record(text, self.gs, pos, self.bt_counter);
+    }
+
+    fn record_string_operand(&mut self) {
+        if let Some(text) = last_string_operand(&self.operands) {
+            self.record_current(text);
+        }
+    }
+
+    fn record_array_operand(&mut self) {
+        let text = self.operands.iter().rev().find_map(|op| match op {
+            PdfStreamOperand::ArrayText(s) => Some(s.clone()),
+            _ => None,
+        });
+        if let Some(text) = text {
+            self.record_current(text);
+        }
+    }
+}
+
 pub(crate) fn parse_pdf_content_stream_with_cmap(
     stream: &str,
     cmap: Option<&PdfToUnicodeMap>,
 ) -> ParsedPdfContentStream {
     let bytes = stream.as_bytes();
     let mut i = 0usize;
-    let mut in_text_object = false;
-    let mut bt_counter = 0usize;
-    let mut gs = PdfGraphicsState::default();
-    let mut gs_stack: Vec<PdfGraphicsState> = Vec::new();
-    let mut tlm_x = 0.0f64;
-    let mut tlm_y = 0.0f64;
-    let mut dict_depth = 0usize;
-    let mut in_array = false;
-    let mut array_buf = String::new();
-    let mut array_has_text = false;
-    let mut operands: Vec<PdfStreamOperand> = Vec::new();
-    let mut collector = PdfStreamCollector::default();
-
+    let mut interp = PdfStreamInterpreter::default();
     while i < bytes.len() {
-        let b = bytes[i];
-        if b.is_ascii_whitespace() {
+        if bytes[i].is_ascii_whitespace() {
             i += 1;
             continue;
         }
         match step_pdf_non_code_token(bytes, i) {
             Ok(Some(step)) => {
-                match step.kind {
-                    PdfNonCodeKind::Comment { .. } => {}
-                    PdfNonCodeKind::DictOpen => {
-                        dict_depth += 1;
-                    }
-                    PdfNonCodeKind::DictClose => {
-                        dict_depth = dict_depth.saturating_sub(1);
-                    }
-                    PdfNonCodeKind::ParenString {
-                        inner_start,
-                        inner_end,
-                    } => {
-                        if dict_depth == 0 && in_text_object {
-                            let decoded = unescape_pdf_text(&stream[inner_start..inner_end]);
-                            if in_array {
-                                array_buf.push_str(&decoded);
-                                array_has_text = true;
-                            } else {
-                                operands.push(PdfStreamOperand::Str(decoded));
-                            }
-                        }
-                    }
-                    PdfNonCodeKind::HexString {
-                        inner_start,
-                        inner_end,
-                    } => {
-                        if dict_depth == 0 && in_text_object {
-                            if let Some(decoded) = decode_pdf_hex_string_with_cmap(
-                                &stream[inner_start..inner_end],
-                                gs.font_utf16be,
-                                cmap,
-                            ) {
-                                if in_array {
-                                    array_buf.push_str(&decoded);
-                                    array_has_text = true;
-                                } else {
-                                    operands.push(PdfStreamOperand::Str(decoded));
-                                }
-                            }
-                        }
-                    }
-                }
+                interp.apply_non_code(step.kind, stream, cmap);
                 i = step.next_index;
-                continue;
             }
             Err(()) => break,
-            Ok(None) => {}
+            Ok(None) => i = interp.apply_code_token(stream, i),
         }
-        if b == b'[' {
-            if dict_depth == 0 && in_text_object {
-                in_array = true;
-                array_buf.clear();
-                array_has_text = false;
-            }
-            i += 1;
-            continue;
-        }
-        if b == b']' {
-            if dict_depth == 0 && in_text_object && in_array {
-                in_array = false;
-                if array_has_text {
-                    operands.push(PdfStreamOperand::ArrayText(std::mem::take(&mut array_buf)));
-                } else {
-                    array_buf.clear();
-                }
-                array_has_text = false;
-            }
-            i += 1;
-            continue;
-        }
-        if b == b'>' || b == b'{' || b == b'}' {
-            i += 1;
-            continue;
-        }
-        if b == b'/' {
-            let start = i;
-            i += 1;
-            while i < bytes.len() && !is_pdf_delim_or_ws(bytes[i]) {
-                i += 1;
-            }
-            if dict_depth == 0 && !in_array {
-                operands.push(PdfStreamOperand::Name(stream[start..i].to_string()));
-            }
-            continue;
-        }
-        let start = i;
-        while i < bytes.len() && !is_pdf_delim_or_ws(bytes[i]) {
-            i += 1;
-        }
-        let tok = &stream[start..i];
-        if dict_depth > 0 {
-            continue;
-        }
-        if in_array {
-            if array_has_text && !array_buf.ends_with(' ') {
-                if let Ok(kern) = tok.parse::<f64>() {
-                    if kern <= -180.0 {
-                        array_buf.push(' ');
-                    }
-                }
-            }
-            continue;
-        }
-        if let Ok(num) = tok.parse::<f64>() {
-            operands.push(PdfStreamOperand::Num(num));
-            continue;
-        }
-        match tok {
-            "q" => {
-                if gs_stack.len() < 64 {
-                    gs_stack.push(gs);
-                }
-            }
-            "Q" => {
-                if let Some(prev) = gs_stack.pop() {
-                    gs = prev;
-                }
-            }
-            "BT" => {
-                in_text_object = true;
-                bt_counter += 1;
-                tlm_x = 0.0;
-                tlm_y = 0.0;
-            }
-            "ET" => {
-                in_text_object = false;
-            }
-            "Tf" => {
-                let mut size_opt = None;
-                let mut name_opt = None;
-                for op in operands.iter().rev() {
-                    match op {
-                        PdfStreamOperand::Num(sz) if size_opt.is_none() => size_opt = Some(*sz),
-                        PdfStreamOperand::Name(nm) if name_opt.is_none() => {
-                            name_opt = Some(nm.as_str())
-                        }
-                        _ => {}
-                    }
-                    if size_opt.is_some() && name_opt.is_some() {
-                        break;
-                    }
-                }
-                if let Some(nm) = name_opt {
-                    gs.font_utf16be = nm == "/F2";
-                }
-                if let Some(sz) = size_opt {
-                    gs.font_size = sz;
-                }
-            }
-            "Tr" => {
-                if let Some(m) = last_numeric_operand(&operands) {
-                    gs.render_mode = m as i32;
-                }
-            }
-            "TL" => {
-                if let Some(tl) = last_numeric_operand(&operands) {
-                    gs.leading = tl;
-                }
-            }
-            "Td" => {
-                let nums = extract_numeric_operands(&operands);
-                if nums.len() >= 2 {
-                    tlm_x += nums[nums.len() - 2];
-                    tlm_y += nums[nums.len() - 1];
-                }
-            }
-            "TD" => {
-                let nums = extract_numeric_operands(&operands);
-                if nums.len() >= 2 {
-                    let tx = nums[nums.len() - 2];
-                    let ty = nums[nums.len() - 1];
-                    gs.leading = -ty;
-                    tlm_x += tx;
-                    tlm_y += ty;
-                }
-            }
-            "T*" => {
-                tlm_y -= if gs.leading.abs() > 1e-6 {
-                    gs.leading
-                } else {
-                    gs.font_size
-                };
-            }
-            "Tm" => {
-                let nums = extract_numeric_operands(&operands);
-                if nums.len() >= 2 {
-                    tlm_x = nums[nums.len() - 2];
-                    tlm_y = nums[nums.len() - 1];
-                }
-            }
-            "'" | "\"" if in_text_object => {
-                tlm_y -= if gs.leading.abs() > 1e-6 {
-                    gs.leading
-                } else {
-                    gs.font_size
-                };
-                if let Some(text) = last_string_operand(&operands) {
-                    collector.record(text, gs, (tlm_x, tlm_y), bt_counter);
-                }
-            }
-            "Tj" if in_text_object => {
-                if let Some(text) = last_string_operand(&operands) {
-                    collector.record(text, gs, (tlm_x, tlm_y), bt_counter);
-                }
-            }
-            "TJ" if in_text_object => {
-                if let Some(text) = operands.iter().rev().find_map(|op| match op {
-                    PdfStreamOperand::ArrayText(s) => Some(s.clone()),
-                    _ => None,
-                }) {
-                    collector.record(text, gs, (tlm_x, tlm_y), bt_counter);
-                }
-            }
-            _ => {}
-        }
-        operands.clear();
     }
-    collector.finish()
+    interp.collector.finish()
 }
 
 fn last_numeric_operand(operands: &[PdfStreamOperand]) -> Option<f64> {
@@ -517,16 +599,6 @@ fn last_numeric_operand(operands: &[PdfStreamOperand]) -> Option<f64> {
         PdfStreamOperand::Num(n) => Some(*n),
         _ => None,
     })
-}
-
-fn extract_numeric_operands(operands: &[PdfStreamOperand]) -> Vec<f64> {
-    operands
-        .iter()
-        .filter_map(|op| match op {
-            PdfStreamOperand::Num(n) => Some(*n),
-            _ => None,
-        })
-        .collect()
 }
 
 fn last_string_operand(operands: &[PdfStreamOperand]) -> Option<String> {

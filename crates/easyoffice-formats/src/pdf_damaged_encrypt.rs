@@ -396,6 +396,244 @@ fn recover_broken_dict_value(
     (limit, None)
 }
 
+/// Outcome of one dictionary-entry step in the damaged-object walker.
+enum DictStep {
+    /// Continue scanning at this offset.
+    Next(usize),
+    /// The outer dictionary ended; leave the loop with this offset.
+    Done(usize),
+    /// A top-level boundary was hit at this offset (`true` when it is a stream start).
+    Boundary(usize, bool),
+}
+
+type DamagedWalkResult = (bool, bool, Option<DamagedLengthHint>, usize, bool);
+
+/// Mutable state while walking one damaged dictionary.
+#[derive(Default)]
+struct DamagedDictWalk {
+    is_xref_type: bool,
+    has_encrypt_key: bool,
+    length_hint: Option<DamagedLengthHint>,
+    spliced: RawSplicedHits,
+}
+
+/// Shared inputs of every walker step.
+struct WalkEnv<'a, 'b> {
+    bytes: &'a [u8],
+    tables: &'a DamagedParenTables<'b>,
+    limit: usize,
+    allow_stream: bool,
+}
+
+impl DamagedDictWalk {
+    fn result(&self, pos: usize, hit_stream: bool) -> DamagedWalkResult {
+        (
+            self.is_xref_type || self.spliced.xref,
+            self.has_encrypt_key || self.spliced.encrypt,
+            self.length_hint,
+            pos,
+            hit_stream,
+        )
+    }
+
+    /// Handles a `>>` close or a top-level boundary at `p`, when present.
+    fn close_or_boundary(
+        env: &WalkEnv<'_, '_>,
+        p: usize,
+        cache: &mut (usize, usize),
+    ) -> Option<DictStep> {
+        let WalkEnv {
+            bytes,
+            limit,
+            allow_stream,
+            ..
+        } = *env;
+        if p + 1 < limit && bytes[p] == b'>' && bytes[p + 1] == b'>' {
+            return Some(
+                if is_outer_dict_close(bytes, p, limit, allow_stream, cache) {
+                    DictStep::Done(p + 2)
+                } else {
+                    DictStep::Next(p + 2)
+                },
+            );
+        }
+        is_damaged_top_boundary(bytes, p, limit, allow_stream, 0, cache)
+            .map(|hs| DictStep::Boundary(p, hs))
+    }
+
+    /// Runs value recovery from `start`; a boundary hit ends the walk.
+    fn recover(
+        &mut self,
+        env: &WalkEnv<'_, '_>,
+        start: usize,
+        floor: usize,
+        cache: &mut (usize, usize),
+    ) -> DictStep {
+        let (next_p, hit) = recover_broken_dict_value(
+            env.bytes,
+            env.tables,
+            start,
+            env.limit,
+            env.allow_stream,
+            cache,
+            &mut self.spliced,
+        );
+        match hit {
+            Some(hs) => DictStep::Boundary(next_p, hs),
+            None => DictStep::Next(next_p.max(floor + 1)),
+        }
+    }
+
+    /// Whether a parsed value is followed by a plausible next key, dict close or boundary.
+    fn has_valid_follow(env: &WalkEnv<'_, '_>, next_p: usize, cache: &mut (usize, usize)) -> bool {
+        let WalkEnv {
+            bytes,
+            limit,
+            allow_stream,
+            ..
+        } = *env;
+        let after_v = skip_pdf_ws_stopping_at_eof(bytes, next_p, limit);
+        after_v >= limit
+            || (after_v + 1 < limit
+                && bytes[after_v] == b'/'
+                && !is_pdf_delim_or_ws(bytes[after_v + 1]))
+            || (after_v + 1 < limit && bytes[after_v] == b'>' && bytes[after_v + 1] == b'>')
+            || is_damaged_top_boundary(bytes, after_v, limit, allow_stream, 0, cache).is_some()
+    }
+
+    /// Records the semantic effect of an accepted `key value` pair.
+    fn apply_value(&mut self, key: &str, val: PdfObjValue) {
+        let summary = summarize_spliced_value(&val);
+        self.spliced.encrypt |= summary.encrypt;
+        self.spliced.xref |= summary.xref_or_trailer;
+        if key == "/Type" && matches!(&val, PdfObjValue::Name(n) if n == "/XRef") {
+            self.is_xref_type = true;
+        }
+        if key == "/Encrypt" && !matches!(val, PdfObjValue::Null) {
+            self.has_encrypt_key = true;
+        }
+        if key == "/Length" {
+            self.length_hint = match val {
+                PdfObjValue::Int(n) => usize::try_from(n).ok().map(DamagedLengthHint::Direct),
+                PdfObjValue::Ref(lo, lg) => Some(DamagedLengthHint::Indirect(lo, lg)),
+                _ => None,
+            };
+        }
+    }
+
+    /// Handles a value that failed strict parsing or has no valid follow.
+    fn rejected_value(
+        &mut self,
+        env: &WalkEnv<'_, '_>,
+        key: &str,
+        p: usize,
+        cache: &mut (usize, usize),
+    ) -> DictStep {
+        let bytes = env.bytes;
+        if p + 1 < env.limit && bytes[p] == b'/' && !is_pdf_delim_or_ws(bytes[p + 1]) {
+            return DictStep::Next(p);
+        }
+        let in_id_array = key == "/ID" && bytes[p] == b'[';
+        if in_id_array {
+            if let Some(id_end) =
+                find_id_array_end(bytes, env.tables, p, env.limit, env.allow_stream, cache)
+            {
+                return DictStep::Next(id_end);
+            }
+        }
+        let recover_start = if in_id_array {
+            (p + 1).min(env.limit)
+        } else {
+            p
+        };
+        self.recover(env, recover_start, p, cache)
+    }
+
+    /// Handles a `/Key value` entry starting at the `/` at `p`.
+    fn key_entry(
+        &mut self,
+        env: &WalkEnv<'_, '_>,
+        p: usize,
+        cache: &mut (usize, usize),
+    ) -> DictStep {
+        let WalkEnv {
+            bytes,
+            tables,
+            limit,
+            ..
+        } = *env;
+        let mut k = p + 1;
+        while k < limit && !is_pdf_delim_or_ws(bytes[k]) {
+            k += 1;
+        }
+        let key = decode_pdf_name(&bytes[p + 1..k]);
+        let p = skip_pdf_ws_stopping_at_eof(bytes, k, limit);
+        if p >= limit {
+            return DictStep::Done(p);
+        }
+        if let Some(step) = Self::close_or_boundary(env, p, cache) {
+            return step;
+        }
+        if key == "/Encrypt" && !is_standalone_pdf_kw(&bytes[..limit], p, b"null") {
+            self.has_encrypt_key = true;
+        }
+        let accepted = parse_value_prefer_strict(bytes, tables, p, limit, 1)
+            .filter(|&(_, next_p)| Self::has_valid_follow(env, next_p, cache));
+        match accepted {
+            Some((val, next_p)) => {
+                self.apply_value(&key, val);
+                DictStep::Next(next_p)
+            }
+            None => self.rejected_value(env, &key, p, cache),
+        }
+    }
+
+    /// One step of the entry loop; `p` is non-whitespace and below the limit.
+    fn step(&mut self, env: &WalkEnv<'_, '_>, p: usize, cache: &mut (usize, usize)) -> DictStep {
+        if let Some(step) = Self::close_or_boundary(env, p, cache) {
+            return step;
+        }
+        if env.bytes[p] == b'/' {
+            self.key_entry(env, p, cache)
+        } else {
+            self.recover(env, p, p, cache)
+        }
+    }
+}
+
+/// Walks a non-dictionary body up to its boundary.
+fn walk_damaged_body(
+    env: &WalkEnv<'_, '_>,
+    p0: usize,
+    cache: &mut (usize, usize),
+) -> DamagedWalkResult {
+    let WalkEnv {
+        bytes,
+        tables,
+        limit,
+        allow_stream,
+    } = *env;
+    let mut raw_paren_depth = 0usize;
+    let mut spliced = RawSplicedHits::default();
+    let mut q = p0;
+    while q < limit {
+        if let Some(next_q) =
+            step_clean_comment_or_literal(bytes, tables, q, limit, &mut raw_paren_depth)
+        {
+            q = next_q;
+            continue;
+        }
+        if let Some(hs) =
+            is_damaged_top_boundary(bytes, q, limit, allow_stream, raw_paren_depth, cache)
+        {
+            return (spliced.xref, spliced.encrypt, None, q, hs);
+        }
+        record_spliced_dict_entries(bytes, q, limit, &mut spliced);
+        q += 1;
+    }
+    (spliced.xref, spliced.encrypt, None, limit, false)
+}
+
 fn walk_damaged_dict_or_body(
     bytes: &[u8],
     tables: &DamagedParenTables<'_>,
@@ -403,194 +641,46 @@ fn walk_damaged_dict_or_body(
     limit: usize,
     allow_stream: bool,
     endobj_cache: &mut (usize, usize),
-) -> (bool, bool, Option<DamagedLengthHint>, usize, bool) {
+) -> DamagedWalkResult {
+    let env = WalkEnv {
+        bytes,
+        tables,
+        limit,
+        allow_stream,
+    };
     let p0 = skip_pdf_ws_stopping_at_eof(bytes, start, limit);
     if p0 >= limit {
         return (false, false, None, limit, false);
     }
     if p0 + 1 >= limit || bytes[p0] != b'<' || bytes[p0 + 1] != b'<' {
-        let mut raw_paren_depth = 0usize;
-        let mut spliced = RawSplicedHits::default();
-        let mut q = p0;
-        while q < limit {
-            if let Some(next_q) =
-                step_clean_comment_or_literal(bytes, tables, q, limit, &mut raw_paren_depth)
-            {
-                q = next_q;
-                continue;
-            }
-            if let Some(hs) = is_damaged_top_boundary(
-                bytes,
-                q,
-                limit,
-                allow_stream,
-                raw_paren_depth,
-                endobj_cache,
-            ) {
-                return (spliced.xref, spliced.encrypt, None, q, hs);
-            }
-            record_spliced_dict_entries(bytes, q, limit, &mut spliced);
-            q += 1;
-        }
-        return (spliced.xref, spliced.encrypt, None, limit, false);
+        return walk_damaged_body(&env, p0, endobj_cache);
     }
 
-    let mut is_xref_type = false;
-    let mut spliced = RawSplicedHits::default();
-    let mut has_encrypt_key = false;
-    let mut length_hint: Option<DamagedLengthHint> = None;
+    let mut walk = DamagedDictWalk::default();
     let mut p = p0 + 2;
-
     while p < limit {
         p = skip_pdf_ws_stopping_at_eof(bytes, p, limit);
         if p >= limit {
             break;
         }
-        if p + 1 < limit && bytes[p] == b'>' && bytes[p + 1] == b'>' {
-            p += 2;
-            if is_outer_dict_close(bytes, p - 2, limit, allow_stream, endobj_cache) {
+        match walk.step(&env, p, endobj_cache) {
+            DictStep::Next(next) => p = next,
+            DictStep::Done(next) => {
+                p = next;
                 break;
             }
-            continue;
-        }
-        if let Some(hs) = is_damaged_top_boundary(bytes, p, limit, allow_stream, 0, endobj_cache) {
-            return (
-                is_xref_type || spliced.xref,
-                has_encrypt_key || spliced.encrypt,
-                length_hint,
-                p,
-                hs,
-            );
-        }
-        if bytes[p] != b'/' {
-            let (next_p, hit) = recover_broken_dict_value(
-                bytes,
-                tables,
-                p,
-                limit,
-                allow_stream,
-                endobj_cache,
-                &mut spliced,
-            );
-            if let Some(hs) = hit {
-                return (
-                    is_xref_type || spliced.xref,
-                    has_encrypt_key || spliced.encrypt,
-                    length_hint,
-                    next_p,
-                    hs,
-                );
-            }
-            p = next_p.max(p + 1);
-            continue;
-        }
-        let mut k = p + 1;
-        while k < limit && !is_pdf_delim_or_ws(bytes[k]) {
-            k += 1;
-        }
-        let key = decode_pdf_name(&bytes[p + 1..k]);
-        p = skip_pdf_ws_stopping_at_eof(bytes, k, limit);
-        if p >= limit {
-            break;
-        }
-        if p + 1 < limit && bytes[p] == b'>' && bytes[p + 1] == b'>' {
-            p += 2;
-            if is_outer_dict_close(bytes, p - 2, limit, allow_stream, endobj_cache) {
-                break;
-            }
-            continue;
-        }
-        if let Some(hs) = is_damaged_top_boundary(bytes, p, limit, allow_stream, 0, endobj_cache) {
-            return (
-                is_xref_type || spliced.xref,
-                has_encrypt_key || spliced.encrypt,
-                length_hint,
-                p,
-                hs,
-            );
-        }
-        if key == "/Encrypt" && !is_standalone_pdf_kw(&bytes[..limit], p, b"null") {
-            has_encrypt_key = true;
-        }
-        let parsed_val = parse_value_prefer_strict(bytes, tables, p, limit, 1);
-        let accepted_val = parsed_val.and_then(|(val, next_p)| {
-            let after_v = skip_pdf_ws_stopping_at_eof(bytes, next_p, limit);
-            let valid_follow = after_v >= limit
-                || (after_v + 1 < limit
-                    && bytes[after_v] == b'/'
-                    && !is_pdf_delim_or_ws(bytes[after_v + 1]))
-                || (after_v + 1 < limit && bytes[after_v] == b'>' && bytes[after_v + 1] == b'>')
-                || is_damaged_top_boundary(bytes, after_v, limit, allow_stream, 0, endobj_cache)
-                    .is_some();
-            valid_follow.then_some((val, next_p))
-        });
-        if let Some((val, next_p)) = accepted_val {
-            let summary = summarize_spliced_value(&val);
-            spliced.encrypt |= summary.encrypt;
-            spliced.xref |= summary.xref_or_trailer;
-            if key == "/Type" && matches!(&val, PdfObjValue::Name(n) if n == "/XRef") {
-                is_xref_type = true;
-            }
-            if key == "/Encrypt" && !matches!(val, PdfObjValue::Null) {
-                has_encrypt_key = true;
-            }
-            if key == "/Length" {
-                length_hint = match val {
-                    PdfObjValue::Int(n) => usize::try_from(n).ok().map(DamagedLengthHint::Direct),
-                    PdfObjValue::Ref(lo, lg) => Some(DamagedLengthHint::Indirect(lo, lg)),
-                    _ => None,
-                };
-            }
-            p = next_p;
-        } else {
-            if p + 1 < limit && bytes[p] == b'/' && !is_pdf_delim_or_ws(bytes[p + 1]) {
-                continue;
-            }
-            if key == "/ID" && bytes[p] == b'[' {
-                if let Some(id_end) =
-                    find_id_array_end(bytes, tables, p, limit, allow_stream, endobj_cache)
-                {
-                    p = id_end;
-                    continue;
-                }
-            }
-            let recover_start = if key == "/ID" && bytes[p] == b'[' {
-                (p + 1).min(limit)
-            } else {
-                p
-            };
-            let (next_p, hit) = recover_broken_dict_value(
-                bytes,
-                tables,
-                recover_start,
-                limit,
-                allow_stream,
-                endobj_cache,
-                &mut spliced,
-            );
-            if let Some(hs) = hit {
-                return (
-                    is_xref_type || spliced.xref,
-                    has_encrypt_key || spliced.encrypt,
-                    length_hint,
-                    next_p,
-                    hs,
-                );
-            }
-            p = next_p.max(p + 1);
+            DictStep::Boundary(pos, hs) => return walk.result(pos, hs),
         }
     }
 
-    let is_xref_out = is_xref_type || spliced.xref;
-    let has_enc_out = has_encrypt_key || spliced.encrypt;
     let after_dict = skip_pdf_ws_stopping_at_eof(bytes, p, limit);
     if allow_stream && is_stream_kw_at(bytes, after_dict, bytes.len()) {
-        return (is_xref_out, has_enc_out, length_hint, after_dict, true);
+        return walk.result(after_dict, true);
     }
     if is_standalone_pdf_kw(bytes, after_dict, b"endobj") {
-        return (is_xref_out, has_enc_out, length_hint, after_dict + 6, false);
+        return walk.result(after_dict + 6, false);
     }
-    (is_xref_out, has_enc_out, length_hint, p, false)
+    walk.result(p, false)
 }
 
 fn advance_past_damaged_stream(
