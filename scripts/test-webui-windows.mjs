@@ -139,7 +139,7 @@ test("the home screen keeps hop's structure and is the only visible part of a st
   assert.equal(screen.parentElement.childNodes[0], screen, "the screen comes first in the shell");
   assert.deepEqual(
     [".home-hero .home-title", ".home-hero .home-subtitle", ".home-hero .home-actions", ".home-recent .home-section-header .home-section-title", ".home-recent .home-recent-hint", ".home-recent .home-recent-track", ".home-drop-hint"].map((sel) => screen.querySelector(sel) !== null),
-    Array(7).fill(true)
+    new Array(7).fill(true)
   );
   assert.equal(screen.querySelector(".home-section-title").textContent, "최근 문서");
   for (const action of screen.querySelectorAll(".home-action")) {

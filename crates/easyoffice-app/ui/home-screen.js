@@ -27,16 +27,16 @@
   const EMPTY_HINT = "아직 최근 문서가 없습니다. 문서를 한 번 열면 여기에 바로 나타납니다.";
   const FILLED_HINT = "창을 열자마자 이어서 작업할 수 있도록 최근에 연 문서를 보여줍니다.";
 
+  // appendChild-based so the page also works in hosts without ParentNode.append.
+  function add(parent, ...children) {
+    for (const child of children) parent.appendChild(child);
+  }
+  function clear(parent) {
+    while (parent.firstChild) parent.firstChild.remove();
+  }
+
   function createHomeScreen(deps) {
     const { document, onOpenRecent } = deps;
-
-    // appendChild-based so the page also works in hosts without ParentNode.append.
-    function add(parent, ...children) {
-      for (const child of children) parent.appendChild(child);
-    }
-    function clear(parent) {
-      while (parent.firstChild) parent.removeChild(parent.firstChild);
-    }
 
     function element(tag, className, text) {
       const el = document.createElement(tag);

@@ -14,18 +14,18 @@
     DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF",
   });
 
+  // appendChild-based so the page also works in hosts without ParentNode.append.
+  function add(parent, ...children) {
+    for (const child of children) parent.appendChild(child);
+  }
+  function clear(parent) {
+    while (parent.firstChild) parent.firstChild.remove();
+  }
+
   // Resolves with the chosen entry or null.
   function openRecentDocumentsDialog(document, entries) {
     return new Promise((resolve) => {
       let selected = 0;
-
-      // appendChild-based so the page also works in hosts without ParentNode.append.
-      function add(parent, ...children) {
-        for (const child of children) parent.appendChild(child);
-      }
-      function clear(parent) {
-        while (parent.firstChild) parent.removeChild(parent.firstChild);
-      }
 
       function element(tag, className, text) {
         const el = document.createElement(tag);
@@ -74,13 +74,14 @@
 
       function renderList() {
         clear(list);
-        entries.forEach((entry, index) => {
+        for (const [index, entry] of entries.entries()) {
           const item = button("recent-documents-item");
           item.setAttribute("role", "option");
           item.setAttribute("aria-selected", String(index === selected));
           item.dataset.index = String(index);
           item.dataset.recentId = entry.id;
-          add(item, 
+          add(
+            item,
             element("span", "recent-documents-name", entry.name),
             element("span", "recent-documents-path", KIND_LABELS[entry.kind] || "")
           );
@@ -90,7 +91,7 @@
           });
           item.addEventListener("dblclick", () => close(entries[index] || null));
           add(list, item);
-        });
+        }
       }
 
       function onKeyDown(event) {
