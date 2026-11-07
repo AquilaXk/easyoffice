@@ -8806,6 +8806,7 @@ THE SOFTWARE.
 
 Source: https://github.com/Frommi/miniz_oxide (version 0.8.9; licensed `MIT OR Zlib OR Apache-2.0`, used here under MIT).
 `crates/easyoffice-formats/src/deflate/compress.rs` is an independent safe-Rust implementation that follows the approach of miniz_oxide's fast compression levels (single-pass hash-chain LZ77, per-block dynamic Huffman codes with length-limited code construction, cheapest-of stored / fixed / dynamic block selection). No miniz_oxide crate is linked and no source file is vendored; the notice is kept because the algorithmic structure is derived from it.
+The inflate path in `crates/easyoffice-formats/src/deflate.rs` is likewise an independent safe-Rust implementation that follows miniz_oxide's fast-decode design (two-level Huffman lookup tables, bulk bit-buffer refill with a multi-symbol fast loop, chunked match copy into a flat output buffer); this notice covers it as well.
 
 ```
 MIT License
