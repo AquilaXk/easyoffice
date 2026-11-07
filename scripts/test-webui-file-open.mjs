@@ -475,3 +475,82 @@ test("dropping a file while the converter is active selects it as the conversion
   assert.match(document.getElementById("conv-source-name").textContent, /끌어온\.docx/);
   assert.equal(tabTitle(document, "DOC"), "분기_경영실적_보고서.docx", "workspace documents are untouched");
 });
+
+// 1x1 PNG (valid structure); the offline backend passes the decoded model through unchanged.
+const TINY_PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+const RICH_MODEL = {
+  title: "그림 문서",
+  blocks: [
+    {
+      type: "paragraph",
+      runs: [{ text: "X" }, { text: "2", script: "superscript" }, { text: " H" }, { text: "2", script: "subscript" }],
+      leftIndentTwips: 720,
+      firstLineIndentTwips: 361,
+      lineSpacingPercent: 200,
+    },
+    {
+      type: "image", format: "png", base64: TINY_PNG_B64, widthPx: 1, heightPx: 1,
+      widthEmu: 9525, heightEmu: 9525, alt: "작은 \"그림\" <b>",
+    },
+    { type: "paragraph", runs: [{ text: "끝" }], heading: 2 },
+  ],
+};
+
+// The pixel size is informational on open; a save sends the bytes and the display size only.
+const SAVED_RICH_BLOCKS = RICH_MODEL.blocks.map(({ widthPx, heightPx, ...rest }) => rest);
+
+test("pictures, super/subscripts, indents and line spacing show in the editor", async () => {
+  const { document } = await createOpenHarness();
+  await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));
+  const editor = document.getElementById("doc-editor");
+
+  const img = editor.querySelector("img.doc-inline-image");
+  assert.ok(img, "picture block becomes an <img>");
+  assert.equal(img.getAttribute("alt"), '작은 "그림" <b>');
+  assert.equal(img.getAttribute("src"), "blob:easyoffice-test", "bytes are shown through a blob: URL");
+  assert.equal(img.getAttribute("contenteditable"), "false");
+
+  assert.equal(editor.querySelector("sup").textContent, "2");
+  assert.equal(editor.querySelector("sub").textContent, "2");
+  const para = editor.querySelector("p");
+  assert.equal(para.style.paddingLeft, "48px");
+  assert.equal(para.style.lineHeight, "2");
+  assert.ok(para.style.textIndent.endsWith("px"));
+  assert.equal(editor.querySelector("h2").textContent, "끝");
+});
+
+test("saving an opened document sends the picture bytes, scripts, indents and spacing unchanged", async () => {
+  const { document, userClick, converts } = await createOpenHarness();
+  await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));
+  userClick(document.getElementById("qat-save"));
+  await flushAsyncTurns(20);
+  const save = converts().at(-1);
+  assert.deepEqual(save.blocks, SAVED_RICH_BLOCKS);
+});
+
+test("an <img> without stored bytes degrades to its alternative text on save", async () => {
+  const { document, userClick, converts } = await createOpenHarness();
+  await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));
+  const editor = document.getElementById("doc-editor");
+  editor.querySelector("img").dataset.eoImageId = "img-missing";
+  userClick(document.getElementById("qat-save"));
+  await flushAsyncTurns(20);
+  const blocks = converts().at(-1).blocks;
+  assert.deepEqual(blocks[1], { type: "paragraph", runs: [{ text: '작은 "그림" <b>' }] });
+});
+
+test("undo and redo of an opened picture keep it displayable and savable", async () => {
+  const { document, userClick, converts } = await createOpenHarness();
+  await pickFile(document, fixtureFile("그림.docx", RICH_MODEL));
+  const editor = document.getElementById("doc-editor");
+  assert.ok(editor.querySelector("img"));
+  const snapshot = document.defaultView.__EASYOFFICE_SHEET_UTILS__.serializeDomChildren(editor);
+  document.defaultView.__EASYOFFICE_SHEET_UTILS__.restoreDomChildren(editor, snapshot, document);
+  const img = editor.querySelector("img");
+  assert.equal(img.getAttribute("src"), "blob:easyoffice-test");
+  userClick(document.getElementById("qat-save"));
+  await flushAsyncTurns(20);
+  assert.deepEqual(converts().at(-1).blocks, SAVED_RICH_BLOCKS);
+});

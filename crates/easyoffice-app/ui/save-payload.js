@@ -16,6 +16,10 @@
   const VALUE_KEYS = ["size", "font", "color", "highlight"];
   // Run fields of the structured payload (PD-077): `size` is sent as `sizeHalfPt`.
   const RUN_FIELDS = { size: "sizeHalfPt", font: "font", color: "color", highlight: "highlight" };
+  const SCRIPT_TAGS = { SUP: "superscript", SUB: "subscript" };
+  const LAYOUT_TAGS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI"]);
+  const TWIPS_PER_PX = 15; // 1 px = 3/4 pt = 15 twips
+  const MAX_LINE_PERCENT = 1000;
   const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
   function isSkippedElement(el) {
@@ -40,6 +44,7 @@
       italic: fmt.italic || tag === "EM" || tag === "I" || String(st.fontStyle || "").toLowerCase() === "italic",
       underline: fmt.underline || tag === "U" || tag === "INS" || deco.includes("underline"),
       strike: fmt.strike || tag === "S" || tag === "STRIKE" || tag === "DEL" || deco.includes("line-through"),
+      script: SCRIPT_TAGS[tag] || fmt.script,
     };
     return mergeRunValues(el, fmt, next);
   }
@@ -60,6 +65,37 @@
       if (own[k]) next[k] = true;
     });
     return next;
+  }
+
+  // Paragraph indents (px -> twips) and line height of a paragraph-like element. The exact twip
+  // values written when a file was opened win while the style still matches them.
+  function pxValue(raw) {
+    const m = /^(-?\d+(?:\.\d+)?)px$/.exec(String(raw || "").trim());
+    return m ? Number(m[1]) : null;
+  }
+
+  function twipsFor(stylePx, exact) {
+    const px = pxValue(stylePx);
+    if (px === null) return null;
+    const computed = Math.round(px * TWIPS_PER_PX);
+    const stored = Number(exact);
+    return Number.isFinite(stored) && Math.abs(stored - computed) <= 1 ? stored : computed;
+  }
+
+  function paragraphLayout(node) {
+    const st = node.style || {};
+    const data = node.dataset || {};
+    const out = {};
+    const left = twipsFor(st.paddingLeft, data.eoLeftTwips);
+    if (left !== null && left > 0) out.leftIndentTwips = left;
+    const first = twipsFor(st.textIndent, data.eoFirstLineTwips);
+    if (first !== null && first !== 0) out.firstLineIndentTwips = first;
+    const spacing = /^(\d+(?:\.\d+)?)(%?)$/.exec(String(st.lineHeight || "").trim());
+    if (spacing) {
+      const percent = Math.round(Number(spacing[1]) * (spacing[2] ? 1 : 100));
+      if (percent >= 1 && percent <= MAX_LINE_PERCENT && percent !== 100) out.lineSpacingPercent = percent;
+    }
+    return out;
   }
 
   function parseTableNumber(text) {
@@ -144,6 +180,7 @@
       const kept = runs.filter((r) => r.text.length > 0);
       if (kept.length > 0) {
         const block = { type: "paragraph", runs: kept };
+        Object.assign(block, cur.ctx.layout);
         if (cur.ctx.align) block.align = cur.ctx.align;
         if (cur.ctx.heading) block.heading = cur.ctx.heading;
         if (cur.ctx.list) block.list = cur.ctx.list;
@@ -156,13 +193,15 @@
       if (!text) return;
       if (!cur) cur = { ctx, runs: [] };
       const last = cur.runs[cur.runs.length - 1];
-      const same = last && BOOL_KEYS.every((k) => Boolean(last[k]) === Boolean(fmt[k]))
+      const same = last && last.script === fmt.script
+        && BOOL_KEYS.every((k) => Boolean(last[k]) === Boolean(fmt[k]))
         && VALUE_KEYS.every((k) => last[RUN_FIELDS[k]] === fmt[k]);
       if (same) {
         last.text += text;
         return;
       }
       const run = { text };
+      if (fmt.script) run.script = fmt.script;
       BOOL_KEYS.forEach((k) => {
         if (fmt[k]) run[k] = true;
       });
@@ -200,7 +239,26 @@
         align: normalizeAlign(node.style?.textAlign) || ctx.align,
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
         list: nextList,
+        layout: LAYOUT_TAGS.has(tag) ? paragraphLayout(node) : ctx.layout,
       };
+    }
+
+    function pushImage(node) {
+      flush();
+      const utils = host.__EASYOFFICE_SHEET_UTILS__;
+      const data = node.dataset || {};
+      const stored = utils ? utils.getDocImage(data.eoImageId) : null;
+      const alt = String(data.eoImageAlt ?? "");
+      if (!stored) {
+        // The bytes are gone (for example after a crash recovery): keep the alternative text.
+        blocks.push({ type: "paragraph", runs: [{ text: alt || "[그림]" }] });
+        return;
+      }
+      const block = { type: "image", format: stored.format, base64: stored.base64, alt };
+      const width = Number(data.eoImageWidthEmu);
+      const height = Number(data.eoImageHeightEmu);
+      if (width > 0 && height > 0) Object.assign(block, { widthEmu: width, heightEmu: height });
+      blocks.push(block);
     }
 
     function walk(node, ctx, fmt) {
@@ -212,6 +270,7 @@
       const tag = (node.tagName || "").toUpperCase();
       if (tag === "BR") return walkLineBreak(ctx);
       if (tag === "TABLE") return walkTable(node);
+      if (tag === "IMG" && node.dataset?.eoImageId) return pushImage(node);
       const nextFmt = styleFormat(node, fmt);
       if (!BLOCK_TAGS.has(tag)) {
         Array.from(node.childNodes || []).forEach((child) => walk(child, ctx, nextFmt));
