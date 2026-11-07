@@ -149,12 +149,7 @@ async fn save_tracked(
         InPlaceResult::Declined => Ok(SaveOutcome::cancelled()),
         InPlaceResult::Saved { bytes } => {
             window_commands::note_written(app, window.label(), &tracked.path);
-            let name = tracked
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            Ok(SaveOutcome::saved_in_place(&name, bytes))
+            Ok(SaveOutcome::saved(&tracked.path, bytes))
         }
     }
 }

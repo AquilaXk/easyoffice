@@ -240,7 +240,7 @@ test("save exports HWP bytes, delivers them as .hwp and clears the editor dirty 
   await hostApi.onModuleActivated("HWP");
   await settle();
   const delivered = [];
-  const delivery = await hostApi.saveDocument(async (b64, base, ext) => { delivered.push({ b64, base, ext }); return { ok: true, path: base + "." + ext }; }, "문서");
+  const delivery = await hostApi.saveDocument(async (b64, base, ext) => { delivered.push({ b64, base, ext }); return { ok: true, name: base + "." + ext }; }, "문서");
   assert.equal(delivery.ok, true);
   assert.equal(delivered[0].ext, "hwp");
   assert.equal(Buffer.from(delivered[0].b64, "base64")[0], 0xd0);

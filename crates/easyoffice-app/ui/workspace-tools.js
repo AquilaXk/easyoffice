@@ -146,8 +146,8 @@
     }
 
     // A saved document takes the name of the file it was saved as (converter output does not).
-    function noteSavedName(path) {
-      if (getActiveModule() !== "CONV" && path) getWindowBridge?.()?.setDocumentName(path);
+    function noteSavedName(name) {
+      if (getActiveModule() !== "CONV" && name) getWindowBridge?.()?.setDocumentName(name);
     }
 
     function describeConversionSpec(res) {
@@ -188,18 +188,18 @@
     // resolves { ok, cancelled, path, error }.
     async function deliverSavedFile(base64Data, baseFilename, ext, options) {
       const fileName = baseFilename + "." + String(ext).toLowerCase();
-      if (!base64Data) return { ok: false, cancelled: false, path: "", error: "" };
+      if (!base64Data) return { ok: false, cancelled: false, name: "", error: "" };
       if (desktopBridge?.isAvailable()) {
         try {
           const res = await desktopBridge.saveFile(base64Data, fileName, options);
-          if (res.status === "cancelled") return { ok: false, cancelled: true, path: "", error: "" };
-          return { ok: true, cancelled: false, path: String(res.path || fileName), error: "" };
+          if (res.status === "cancelled") return { ok: false, cancelled: true, name: "", error: "" };
+          return { ok: true, cancelled: false, name: String(res.name || fileName), error: "" };
         } catch (err) {
-          return { ok: false, cancelled: false, path: "", error: err?.message || String(err) };
+          return { ok: false, cancelled: false, name: "", error: err?.message || String(err) };
         }
       }
       const ok = triggerBase64Download(base64Data, baseFilename, ext);
-      return { ok, cancelled: false, path: ok ? fileName : "", error: "" };
+      return { ok, cancelled: false, name: ok ? fileName : "", error: "" };
     }
 
     function describeDeliveryFailure(delivery, prefix) {
@@ -214,7 +214,7 @@
       const fb = document.getElementById("status-command-feedback");
       const result = await session.save({ deliver: deliverInPlace, baseName: resolveSaveFileBase("HWP") });
       if (fb) fb.textContent = result.message;
-      if (result.ok) noteSavedName(result.path);
+      if (result.ok) noteSavedName(result.name);
       return result.ok;
     }
 
@@ -266,10 +266,10 @@
         }
         if (fb) {
           fb.textContent =
-            "문서 저장 완료 (" + delivery.path + " · " + (res.outputBytes || 0) + "B · " +
+            "문서 저장 완료 (" + delivery.name + " · " + (res.outputBytes || 0) + "B · " +
             describeConversionSpec(res) + ")";
         }
-        noteSavedName(delivery.path);
+        noteSavedName(delivery.name);
         return true;
       });
     }

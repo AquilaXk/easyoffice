@@ -132,7 +132,7 @@ const hwpBytes = (extra = 4) => new Uint8Array([...HWP_MAGIC, ...new Array(extra
 const feedbackOf = (ctx) => ctx.document.els["status-command-feedback"].textContent;
 const delay = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
-function recordingDeliver(result = { ok: true, cancelled: false, path: "C:/out/보고서.hwp", error: "" }) {
+function recordingDeliver(result = { ok: true, cancelled: false, name: "보고서.hwp", error: "" }) {
   const deliveries = [];
   const deliver = async (base64, name, ext) => {
     deliveries.push({ base64, name, ext });
@@ -263,7 +263,7 @@ test("save: an HWP document is exported as HWP, verified, delivered, then notify
   assert.equal(Buffer.from(deliveries[0].base64, "base64")[0], 0xd0);
   assert.equal(ctx.session.isDirty(), false);
   assert.deepEqual(ctx.dirtyLog, [true, false]);
-  assert.match(res.message, /문서 저장 완료 \(C:\/out\/보고서\.hwp · HWP/);
+  assert.match(res.message, /문서 저장 완료 \(보고서\.hwp · HWP/);
 });
 
 test("save: a document opened as HWPX saves as HWPX, and a later save-as HWP switches the format", async () => {
@@ -322,8 +322,8 @@ test("save: HWPX verification failure offers HWP; accepting saves HWP, declining
 
 test("save: cancelled dialog and delivery failure both keep the dirty baseline and skip notifySaved", async () => {
   for (const [result, pattern] of [
-    [{ ok: false, cancelled: true, path: "", error: "" }, /문서 저장 취소 \(HWP\): 저장 위치를 선택하지 않았습니다/],
-    [{ ok: false, cancelled: false, path: "", error: "디스크 가득 참" }, /문서 저장 실패 \(HWP\): 디스크 가득 참/],
+    [{ ok: false, cancelled: true, name: "", error: "" }, /문서 저장 취소 \(HWP\): 저장 위치를 선택하지 않았습니다/],
+    [{ ok: false, cancelled: false, name: "", error: "디스크 가득 참" }, /문서 저장 실패 \(HWP\): 디스크 가득 참/],
   ]) {
     const { deliver } = recordingDeliver(result);
     const ctx = load({ deliver });
@@ -341,7 +341,7 @@ test("save: edits made while the save runs keep the document marked as modified"
   ctx.fake.emit({ reason: "dirty_changed", dirty: true });
   const deliver = async () => {
     ctx.fake.emit({ reason: "edited" });
-    return { ok: true, cancelled: false, path: "p.hwp", error: "" };
+    return { ok: true, cancelled: false, name: "p.hwp", error: "" };
   };
   const res = await ctx.session.save({ deliver, baseName: "x" });
   assert.equal(res.ok, true);
