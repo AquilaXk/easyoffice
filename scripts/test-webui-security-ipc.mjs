@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 const VECTORS_PATH = fileURLToPath(
   new URL("../fixtures/pii-scrub-vectors.json", import.meta.url)
@@ -59,7 +60,7 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
     /\[요청 거부\] 엔진 미연결/
   );
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns(4);
   const f2Cell = document.querySelector('#pane-sheet td[data-cell="F2"]');
   const f2Before = f2Cell.textContent;
@@ -69,7 +70,7 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
   await flushAsyncTurns(6);
   assert.equal(f2Cell.textContent, f2Before);
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns(4);
   const slideTitle = document.getElementById("slide-title-zone");
   slideTitle.textContent = "슬라이드 연락처 011-222-3333";
@@ -81,7 +82,7 @@ test("disconnected host refuses IPC fail-closed without mutating DOC, SHEET, or 
 test("stored XSS guard preserves literal HTML markup across slide, tab, and table mutations without creating DOM elements", async () => {
   const { document, userClick } = await createWebUiDom();
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns(4);
 
   const slideTitle = document.getElementById("slide-title-zone");
@@ -100,7 +101,7 @@ test("stored XSS guard preserves literal HTML markup across slide, tab, and tabl
   assert.equal(slideTitle.querySelectorAll("img").length, 0);
   assert.equal(slideTitle.querySelectorAll("b").length, 0);
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns(4);
   const docEditor = document.getElementById("doc-editor");
   const customPara = document.createElement("p");
@@ -108,7 +109,7 @@ test("stored XSS guard preserves literal HTML markup across slide, tab, and tabl
   customPara.textContent = '<script>alert("xss")</script><img src=x onerror=1>';
   docEditor.replaceChildren(customPara);
 
-  userClick(document.querySelector('.mod-btn[data-module="HWP"]'));
+  switchModule(document, "HWP");
   await flushAsyncTurns(4);
   const addRowBtn = document.getElementById("btn-doc-add-row");
   assert.ok(addRowBtn);
@@ -117,7 +118,7 @@ test("stored XSS guard preserves literal HTML markup across slide, tab, and tabl
   const hwpRows = document.querySelectorAll("#doc-table-body tr");
   assert.ok(hwpRows.length >= 4);
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns(4);
   const restoredPara = document.getElementById("xss-doc-para");
   assert.ok(restoredPara);
@@ -271,9 +272,7 @@ test("structured JSON IPC preserves ? and %3B in cross-sheet formulas, literals,
     },
   });
 
-  wrappedHarness.userClick(
-    wrappedHarness.document.querySelector('.mod-btn[data-module="SHEET"]')
-  );
+  switchModule(wrappedHarness.document, "SHEET");
   await flushAsyncTurns(4);
 
   const d2 = wrappedHarness.document.querySelector('#pane-sheet td[data-cell="D2"]');

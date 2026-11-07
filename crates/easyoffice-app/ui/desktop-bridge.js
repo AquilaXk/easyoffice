@@ -8,6 +8,17 @@
 
   const IPC_COMMAND = "ipc_dispatch";
   const SAVE_COMMAND = "save_document_file";
+  // Window commands (PD-088). None of them takes or returns a file system path: the Rust side owns
+  // the native dialogs, file reads and the path registry; the page only sees names, kinds and bytes.
+  const WINDOW_COMMANDS = Object.freeze({
+    openDocumentWindow: "open_document_window",
+    openFileInNewWindow: "open_file_in_new_window",
+    takePendingOpen: "take_pending_open",
+    reportWindowState: "report_window_state",
+    closeCurrentWindow: "close_current_window",
+    listRecentDocuments: "list_recent_documents",
+    openRecentDocument: "open_recent_document",
+  });
 
   function shellInternals() {
     const internals = host.__TAURI_INTERNALS__;
@@ -60,5 +71,11 @@
     throw new Error("저장 결과를 확인하지 못했습니다.");
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, describeShellError };
+  async function windowCommand(key, args) {
+    const command = WINDOW_COMMANDS[key];
+    if (!command) throw new Error("알 수 없는 창 명령입니다: " + key);
+    return callShell(command, args || {});
+  }
+
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, describeShellError, windowCommand, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

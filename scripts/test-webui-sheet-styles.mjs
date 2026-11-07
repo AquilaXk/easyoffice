@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { makeFixtureFile, pickFile } from "./test-support/fixture-files.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 // Cell formatting and column widths in the save payload and on open (PD-089, #148).
 
@@ -23,7 +24,7 @@ async function createSaveHarness() {
       return offline[command](payload);
     },
   });
-  harness.userClick(harness.document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(harness.document, "SHEET");
   await flushAsyncTurns();
   return { ...harness, converts };
 }

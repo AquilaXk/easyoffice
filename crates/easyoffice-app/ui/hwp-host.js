@@ -25,6 +25,7 @@
   const MSG_LOADING = "한글 편집기를 불러오는 중입니다…";
   const MSG_FAILED = "한글 편집기에 연결하지 못했습니다.";
   const TOOL_HINT = "한글 편집기 도구줄을 사용하세요";
+  const SHORTCUT_REASON = "shell_shortcut";
 
   function newSessionId(host) {
     const c = host.crypto;
@@ -66,6 +67,10 @@
     let ui = null;
     const pending = new Map();
     const changeListeners = new Set();
+    const shortcutListeners = new Set();
+    // Combos the editor forwards to the shell (from the shell's single shortcut table). They travel
+    // in the frame URL so the editor knows which keys to hand over; the editor sends combo strings only.
+    const shellShortcuts = Array.isArray(deps.shellShortcuts) ? deps.shellShortcuts.filter((k) => typeof k === "string") : [];
     const statusListeners = new Set();
     let returnBound = false;
 
@@ -224,6 +229,11 @@
           waiter.resolve(data.result);
         }
       } else if (data.type === "rhwp-event") {
+        const payload = data.payload;
+        if (payload && payload.reason === SHORTCUT_REASON) {
+          if (typeof payload.shortcut === "string") for (const listener of shortcutListeners) listener(payload.shortcut);
+          return;
+        }
         for (const listener of changeListeners) listener(data);
       }
     }
@@ -314,7 +324,7 @@
       el.id = "hwp-frame";
       el.title = "한글 편집기";
       el.setAttribute("sandbox", FRAME_SANDBOX);
-      el.setAttribute("src", studioSrc);
+      el.setAttribute("src", shellShortcuts.length > 0 ? studioSrc + "?shellKeys=" + encodeURIComponent(shellShortcuts.join(",")) : studioSrc);
       pane().appendChild(el);
       return el;
     }
@@ -416,6 +426,11 @@
       return call("getDocumentState").then((s) => Boolean(s && s.dirty)).catch(() => false);
     }
 
+    function onShortcut(listener) {
+      shortcutListeners.add(listener);
+      return () => shortcutListeners.delete(listener);
+    }
+
     function onChange(listener) {
       changeListeners.add(listener);
       return () => changeListeners.delete(listener);
@@ -476,7 +491,7 @@
 
     return {
       onModuleActivated, paneForModule, isEmbedActive, usesLegacy, call, reconnect, useLegacyEditor,
-      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onStatus, whenSettled, runSmoke,
+      exportHwp, exportBytes, exportHwpBase64, saveDocument, isDirty, onChange, onShortcut, onStatus, whenSettled, runSmoke,
       getStatus: () => status,
       getCapabilities: () => capabilities.slice(),
       getFrame: () => frame,

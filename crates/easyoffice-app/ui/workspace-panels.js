@@ -502,7 +502,7 @@
       if (toggleBtn && typeof viewState.chromeExpanded === "string") {
         const isExp = viewState.chromeExpanded === "true";
         toggleBtn.setAttribute("aria-expanded", isExp ? "true" : "false");
-        toggleBtn.textContent = isExp ? "▴" : "▾";
+        host.__EASYOFFICE_ICONS__.setIcon(document, toggleBtn, isExp ? "chevron-up" : "chevron-down");
       }
       if (strip) strip.hidden = Boolean(viewState.ribbonStripHidden);
       if (stage) {

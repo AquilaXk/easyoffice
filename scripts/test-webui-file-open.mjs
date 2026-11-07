@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { pickFile as pickFixtureFile } from "./test-support/fixture-files.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 const INDEX_HTML = fs.readFileSync(
   fileURLToPath(new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)),
@@ -65,8 +66,9 @@ const pickFile = (document, file, turns = 40) => pickFixtureFile(document, file,
 
 const feedback = (document) => document.getElementById("status-command-feedback").textContent;
 const activeModule = (document) => document.getElementById("app").dataset.module;
+// Document names are owned by the window bridge (they feed the native window title).
 const tabTitle = (document, mod) =>
-  document.querySelector(`.tab-strip .tab-pill[data-module="${mod}"]`).textContent;
+  document.defaultView.__EASYOFFICE_WINDOW_BRIDGE__.instance.getDocumentName(mod);
 
 const DOC_MODEL = {
   title: "보고서",
@@ -297,7 +299,7 @@ test("opening over unsaved edits asks first; declining changes nothing, acceptin
   await pickFile(document, fixtureFile("깨끗.hwpx", { blocks: [{ type: "paragraph", runs: [{ text: "한글" }] }] }));
   assert.equal(asked.length, 0);
 
-  userClick(document.querySelector('.mod-btn[data-module="DOC"]'));
+  switchModule(document, "DOC");
   await flushAsyncTurns(10);
   const editor = document.getElementById("doc-editor");
   editor.innerHTML = "<p>내가 쓴 내용</p>";
@@ -408,7 +410,7 @@ test("openDocumentFromBytes is the shared entry point for a desktop shell", asyn
 
 test("converter converts the chosen source file's bytes, and keeps editor conversion without one", async () => {
   const { document, userClick, converts, downloads } = await createOpenHarness();
-  userClick(document.querySelector('.mod-btn[data-module="CONV"]'));
+  switchModule(document, "CONV");
   await flushAsyncTurns(10);
 
   // No file: existing behaviour (structured editor content, fixed title).
@@ -445,7 +447,7 @@ test("converter converts the chosen source file's bytes, and keeps editor conver
 
 test("converter rejects an oversized or corrupt source without converting", async () => {
   const { document, userClick, converts } = await createOpenHarness();
-  userClick(document.querySelector('.mod-btn[data-module="CONV"]'));
+  switchModule(document, "CONV");
   await flushAsyncTurns(10);
   const input = document.getElementById("conv-source-file");
   input.files = [makeFile("거대.docx", new Uint8Array(4), 11 * 1024 * 1024)];
@@ -465,7 +467,7 @@ test("converter rejects an oversized or corrupt source without converting", asyn
 
 test("dropping a file while the converter is active selects it as the conversion source", async () => {
   const { document, userClick } = await createOpenHarness();
-  userClick(document.querySelector('.mod-btn[data-module="CONV"]'));
+  switchModule(document, "CONV");
   await flushAsyncTurns(10);
   const app = document.getElementById("app");
   app.dispatchEvent({ type: "drop", dataTransfer: { types: ["Files"], files: [fixtureFile("끌어온.docx", DOC_MODEL)] } });

@@ -160,9 +160,13 @@
     let maxTimer = null;
     let wasReady = hwpHost.getStatus() === "ready";
     let saveChain = Promise.resolve();
+    let discarded = false;
     const tabId = resolveTabId();
 
+    // One autosave record per window: the window id keeps simultaneous HWP windows apart.
     function resolveTabId() {
+      const windowId = typeof deps.getDocumentId === "function" ? deps.getDocumentId() : "";
+      if (windowId) return "hwp-" + windowId;
       try {
         const storage = env.sessionStorage;
         const existing = storage && storage.getItem(TAB_ID_KEY);
@@ -187,9 +191,7 @@
     }
 
     function setTabTitle(name) {
-      for (const tab of document.querySelectorAll(".tab-strip .tab-pill")) {
-        if (tab.dataset.module === "HWP") tab.textContent = name;
-      }
+      if (typeof deps.setDocumentName === "function") deps.setDocumentName(name);
     }
 
     function setDirty(next) {
@@ -222,6 +224,7 @@
     async function runAutosave() {
       clearAutosaveTimers();
       if (!dirty || busy || saving || autosaving || hwpHost.getStatus() !== "ready") return;
+      if (discarded) return;
       autosaving = true;
       const seq = editSeq;
       try {
@@ -570,6 +573,12 @@
       isDirty: () => dirty,
       getCurrent: () => (current ? { ...current } : null),
       getTabId: () => tabId,
+      // Closing a window discards its recovery copy; `save` and `open` keep it current while it lives.
+      discardAutosave: () => {
+        clearAutosaveTimers();
+        discarded = true;
+        void store.remove(tabId).catch(() => null);
+      },
     };
   }
 

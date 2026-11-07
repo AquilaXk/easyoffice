@@ -107,3 +107,26 @@ flowchart TD
   - `WorkspaceViewModel.enableSplitView(secondaryTabID:)`를 통해 단일 윈도우에서 서로 다른 두 문서 탭(예: 좌측 `PDF` 참고 자료 + 우측 `HWPX` 공문서, 또는 좌측 `XLSX` 재무 시트 + 우측 `PPTX` 발표덱)을 나란히 열고 동시 편집할 수 있습니다.
 - **VoiceOver 및 키보드 접근성 (`AccessibilityTokens`)**:
   - 탭 레이블(`tabLabel(fileName:moduleName:isPinned:isFavorite:)`, `tabSelectHint`, `tabPinLabel`), 리본 토글 레이블(`ribbonCollapseLabel`, `ribbonExpandLabel`), 분할 보기 캔버스 레이블(`splitViewCanvasLabel`), 수식 입력줄 레이블(`formulaBarInputLabel`), 슬라이드 캔버스 레이블(`slideStageLabel`), PDF 주석 도구 모음 레이블(`pdfAnnotationToolbarLabel`)을 결정론적으로 제공합니다.
+
+## 4. Windows 셸(WebUI)의 창 구성·아이콘·명암비 (PD-088, #132, #126)
+
+macOS 앱의 탭 스트립(위 3절)과 별개로, Windows 데스크톱 셸과 `--serve`의 WebUI는 **문서 하나 = 창 하나**입니다.
+
+- **창 구성**: 상단 메뉴 줄(왼쪽 `파일 편집 보기 입력 서식 쪽 표 도구`, 오른쪽 소형 컨트롤 묶음 `저장·실행 취소·다시 실행` | `명령 검색 Ctrl+K` | 테마 | 도구 상자 펼치기), 아이콘 도구 상자, 서식 도구줄, 접이식 리본·사이드 패널, 상태 표시줄 순입니다. 메뉴 줄에 모듈 전환 탭은 없고, 파일 메뉴는 `새 문서 ▸(6종)`, `열기…`, `최근 문서 ▸`, `저장`, `다른 이름으로 저장`, `닫기`입니다. 시작 창은 메뉴 없이 새 문서 카드 6개, 파일 열기, 최근 문서 목록만 보여 줍니다.
+- **크기**: 문서 창 기본 1280x860(모니터의 92%까지), 최소 1024x680. 시작 창 680x560(최소 560x480). 상단 막대 높이 34px, 아이콘 버튼 28px 정사각형, 도구 상자 26px 높이, 상태 표시줄 24px. 1024px에서 우측 컨트롤은 줄어들거나 줄바꿈하지 않고(`flex-shrink: 0`) 메뉴 줄과 겹치지 않습니다.
+- **아이콘**: `ui/icons.js`의 24x24 선 아이콘 한 벌(선 두께 1.75, 둥근 끝, `currentColor`)만 씁니다. 이모지·화살표·도형 문자를 아이콘 대용으로 쓰지 않습니다. 아이콘만 있는 컨트롤은 `aria-label`을 반드시 갖습니다.
+- **셸 색 토큰** (`ui/shell.css`): 글자는 4.5:1, 아이콘은 3:1 이상입니다(테스트가 계산).
+
+| 토큰 | 라이트 | 다크 | 용도 |
+|---|---|---|---|
+| `--eo-chrome-bg` | `#F4F5F9` | `#232738` | 상단 막대·도구 상자·메뉴·팔레트 바탕 |
+| `--eo-chrome-text` | `#1C1F2E` | `#EEF0F8` | 본문 글자 |
+| `--eo-chrome-muted` | `#4E546E` | `#A9B0CC` | 보조 글자·단축키 |
+| `--eo-chrome-icon` | `#3B4262` | `#BFC6E4` | 아이콘 |
+| `--eo-chrome-hover` / `-hover-text` | `#E3E7F6` / `#2F3C86` | `#323853` / `#D5DBFF` | 호버·선택 |
+| `--eo-chrome-open` / `-open-text` | `#3F51B5` / `#FFFFFF` | `#4F5FC4` / `#FFFFFF` | 열린 메뉴 |
+| `--eo-status-bg` / `-status-text` | `#EEF0F8` / `#3A4060` | `#1B1F2E` / `#BFC6E4` | 상태 표시줄 |
+
+- **상태 표시줄**: 항목은 줄어들며 말줄임표를 쓰고, 마우스를 올리면 전체 글이 툴팁으로 나옵니다. 1280px 미만에서는 형식·플랫폼 진단이 먼저 접힙니다.
+- **명령 팔레트**: 어두운 배경 위의 가운데 패널 오버레이이고 검색 아이콘이 입력란 왼쪽 안쪽에 있어 안내 글과 겹치지 않습니다.
+- **한글 편집기 창**: EasyOffice 도구 상자·서식 도구줄·리본을 숨기고 rhwp 도구모음 하나만 보입니다. 셸 메뉴 줄에는 `파일`만 남깁니다.

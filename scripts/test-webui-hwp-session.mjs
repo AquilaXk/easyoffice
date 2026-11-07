@@ -88,7 +88,7 @@ function createDocument() {
   return {
     els, tab,
     getElementById: (id) => byId.get(id) ?? null,
-    querySelectorAll: (sel) => (sel.includes("tab-pill") ? [tab] : []),
+    querySelectorAll: () => [],
   };
 }
 
@@ -110,6 +110,7 @@ function load(options = {}) {
   const session = env.__EASYOFFICE_CREATE_HWP_SESSION__({
     document, hwpHost: fake.api, env,
     getActiveModule: () => "HWP",
+    setDocumentName: (name) => { document.tab.textContent = name; },
     activateHwp: async () => {},
     invokeIpc: async (cmd, payload) => {
       ipc.push({ cmd, payload: JSON.parse(payload) });

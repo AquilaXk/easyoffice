@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { switchModule } from "./test-support/modules.mjs";
 
 function makeStandaloneOfflineRpc(sandbox) {
   return sandbox.__EASYOFFICE_CREATE_OFFLINE_RPC__({
@@ -454,7 +455,7 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
     },
   });
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const insertCatBtn = document.querySelector('.ribbon-btn[data-category="insert"]');
@@ -608,7 +609,7 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   assert.equal(docEditor.style.padding, "16px 20px");
   assert.equal(docEditor.dataset.paperSize, "Letter");
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
   userClick(document.querySelector('.ribbon-btn[data-category="insert"]'));
   await flushAsyncTurns();
@@ -636,7 +637,7 @@ test("workspace snapshot SSOT restores per-sheet row counts, doc layout styles, 
   assert.equal(document.querySelectorAll("#pane-sheet tbody tr").length, 13);
   assert.notEqual(document.querySelector('#pane-sheet td[data-cell="A13"]'), null);
 
-  userClick(document.querySelector('.mod-btn[data-module="SLIDE"]'));
+  switchModule(document, "SLIDE");
   await flushAsyncTurns();
   userClick(document.querySelector('.ribbon-btn[data-category="home"]'));
   await flushAsyncTurns();
@@ -805,7 +806,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
     },
   });
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const f2 = document.querySelector('#pane-sheet td[data-cell="F2"]');
@@ -883,7 +884,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
   d2.textContent = "=500+277";
   d2.dispatchEvent({ type: "input", target: d2 });
 
-  document.querySelector('.mod-btn[data-module="DOC"]').click();
+  switchModule(document, "DOC");
   await flushAsyncTurns(4);
   assert.equal(document.getElementById("pane-sheet").hidden, false);
 
@@ -892,7 +893,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
   await flushAsyncTurns(12);
   assert.equal(document.getElementById("pane-doc").hidden, false);
 
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns(8);
   assert.equal(document.querySelector('#pane-sheet td[data-cell="D2"]').textContent, "777");
   assert.ok(evalLog.length >= 2);
@@ -953,7 +954,7 @@ test("issue #107: offline evaluator mirrors #NUM! circular flag, no demo seed, a
 
 test("issue #107: circular reference shows #NUM! in the grid and a status-bar warning", async () => {
   const { document, userClick } = await createWorkspaceHarness();
-  userClick(document.querySelector('.mod-btn[data-module="SHEET"]'));
+  switchModule(document, "SHEET");
   await flushAsyncTurns();
 
   const b2 = document.querySelector('#pane-sheet td[data-cell="B2"]');

@@ -52,6 +52,8 @@
   let docRunsUi = null;
   let hwpHost = null;
   let hwpSession = null;
+  let windowBridge = null;
+  const icons = host.__EASYOFFICE_ICONS__;
 
   function chainWorkspaceQueue(opFn) {
     const run = workspaceHistoryQueue.then(opFn, opFn);
@@ -175,12 +177,21 @@
     invokeIpc, normalizeFormattedNumericCell, tokenizeFormulaStringLiterals,
   });
 
+  windowBridge = host.__EASYOFFICE_WINDOW_BRIDGE__.createWindowBridge({
+    document, env: host, desktopBridge, getActiveModule: () => activeModule,
+    setFeedback: (text) => setStatusFeedback(text),
+    isDirty: () => workspaceSession.isDirty(),
+    save: () => saveWorkspaceDocument(),
+    discardStoredState: () => { workspaceSession.discardStoredState(); hwpSession.discardAutosave(); },
+  });
+
   const ribbonHistory = host.__EASYOFFICE_CREATE_RIBBON_HISTORY__({
     document, invokeIpc, docTabStore, sheetDataStore, sheetRowCounts, slideDeckState,
     localRibbonState, ribbonCatalog, sheetStoreHelpers, extractEditableDocumentText,
     getSheetController: () => sheetController,
     getWorkspacePanels: () => workspacePanels, getDocRuns: () => docRunsUi,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost,
+    getWindowBridge: () => windowBridge,
     setActiveModule: (next) => { activeModule = next; },
     getActiveRibbonCategory: () => activeRibbonCategory,
     setActiveRibbonCategory: (next) => { activeRibbonCategory = next; },
@@ -222,6 +233,7 @@
     collectActiveScrubGroups, applyScrubResultsToGroups,
     scrubSheetStoreMap: sheetStoreHelpers.scrubSheetStoreMap, sheetController,
     getActiveModule: () => activeModule, getHwpHost: () => hwpHost, getHwpSession: () => hwpSession,
+    getWindowBridge: () => windowBridge,
     getActiveSheetName: () => activeSheetName,
     getActiveSheetCellRef: () => activeSheetCellRef,
     getActiveSlideIndex: () => activeSlideIndex,
@@ -242,6 +254,9 @@
     runExclusive: chainWorkspaceQueue,
     getWorkspacePanels: () => workspacePanels,
     getSheetController: () => sheetController,
+    getDocumentId: () => windowBridge.launch.windowId,
+    onDirtyChange: (unsaved) => windowBridge.setDirty(unsaved),
+    isDesktopShell: () => desktopBridge.isAvailable(),
   });
 
   slideStudio = host.__EASYOFFICE_CREATE_SLIDE_STUDIO__({
@@ -257,6 +272,8 @@
   const fileOpen = host.__EASYOFFICE_CREATE_FILE_OPEN__({
     document, invokeIpc, createEmptySlideStyleFields, getActiveModule: () => activeModule,
     getHwpSession: () => hwpSession,
+    onOpenRequest: () => windowBridge.requestOpenFile(),
+    routeFile: (file) => windowBridge.routeFile(file),
     enqueueOp: enqueueWorkspaceHistoryOp, runExclusive: chainWorkspaceQueue,
     captureWorkspaceSnapshot: ribbonHistory.captureWorkspaceSnapshot,
     pushRawUndoSnapshot: ribbonHistory.pushRawUndoSnapshot,
@@ -268,6 +285,9 @@
 
   hwpHost = host.__EASYOFFICE_CREATE_HWP_HOST__({
     document, invokeIpc, getActiveModule: () => activeModule,
+    shellShortcuts: ribbonCatalog.WORKSPACE_SHORTCUT_BINDINGS
+      .filter((b) => b.forwardFromEditor && (!b.desktopOnly || desktopBridge.isAvailable()))
+      .map((b) => b.keys),
     onStateChange: () => workspaceSession.applyModuleContext(activeModule),
   });
 
@@ -276,9 +296,18 @@
     activateHwp: () => ribbonHistory.activatePane("HWP"),
     deliverSavedFile: (base64, name, ext) => workspacePanels.deliverSavedFile(base64, name, ext),
     resolveBaseName: () => workspacePanels.resolveSaveFileBase("HWP"),
+    getDocumentId: () => windowBridge.launch.windowId,
+    setDocumentName: (name) => windowBridge.setDocumentName(name, "HWP"),
     onDirtyChange: (dirty) => workspaceSession.setExternalDirty(dirty),
     defaultNotice: host.__EASYOFFICE_HWP_HOST_CONSTANTS__.MSG_UNAVAILABLE,
   });
+
+  host.__EASYOFFICE_WINDOW_BRIDGE__.instance = windowBridge;
+
+  function setStatusFeedback(text) {
+    const fb = document.getElementById("status-command-feedback");
+    if (fb) fb.textContent = text;
+  }
 
   function saveWorkspaceDocument() {
     return workspacePanels.saveActiveModuleDocument().then((saved) => {
@@ -289,6 +318,11 @@
 
   let paletteSelectedIdx = 0;
   let paletteFilteredItems = [];
+
+  const NEW_DOCUMENT_LABELS = {
+    DOC: "문서 (DOCX)", HWP: "한글 문서 (HWP)", SHEET: "스프레드시트 (XLSX)",
+    SLIDE: "프레젠테이션 (PPTX)", PDF: "PDF 스튜디오", CONV: "포맷 변환기",
+  };
 
   function executePaletteItem(item) {
     if (!item) return;
@@ -302,6 +336,10 @@
       void ribbonHistory.performWorkspaceUndo().catch(() => {});
     } else if (item.id === "studio-redo") {
       void ribbonHistory.performWorkspaceRedo().catch(() => {});
+    } else if (item.id === "file-open") {
+      fileOpen.openFilePicker();
+    } else if (item.id.startsWith("window-new-")) {
+      void windowBridge.newDocument(item.id.slice("window-new-".length)).catch((err) => setStatusFeedback(err?.message || String(err)));
     } else {
       void ribbonHistory.executeTrackedRibbonCommand(item.id, { targetModule: item.module }).catch(() => {});
     }
@@ -314,8 +352,11 @@
       { id: "studio-undo", module: activeModule, title: "실행 취소", shortcut: fmt("⌘Z"), searchKey: "편집 실행 취소 undo " + fmt("⌘Z") },
       { id: "studio-redo", module: activeModule, title: "다시 실행", shortcut: fmt("⌘Y"), searchKey: "편집 다시 실행 redo " + fmt("⌘Y") },
     ];
-    const modOrder = [activeModule, ...Object.keys(RIBBON_CATEGORY_TOOLS).filter((m) => m !== activeModule)];
-    for (const mod of modOrder) {
+    for (const [kind, label] of Object.entries(NEW_DOCUMENT_LABELS)) {
+      items.push({ id: "window-new-" + kind, module: activeModule, title: "새 문서 · " + label, shortcut: "", searchKey: "새 문서 창 열기 new " + label.toLowerCase() });
+    }
+    items.push({ id: "file-open", module: activeModule, title: "열기…", shortcut: fmt("⌘O"), searchKey: "파일 열기 open " + fmt("⌘O") });
+    for (const mod of [activeModule]) {
       const cats = RIBBON_CATEGORY_TOOLS[mod];
       if (!cats) continue;
       const koBadge = MODULE_SHORT_BADGES[mod] || mod;
@@ -366,7 +407,7 @@
     });
   }
 
-  function setupTabsAndRibbonChrome(boot) {
+  function setupRibbonChrome(boot) {
     activeShortcutModifier = workspaceSession.applyPlatformChrome(boot);
 
     if (boot.moduleAccents && typeof boot.moduleAccents === "object") {
@@ -387,54 +428,12 @@
     }
     ribbonHistory.applyModuleAccent(activeModule);
 
-    const tabStrip = document.getElementById("tab-strip");
-    if (tabStrip && Array.isArray(boot.openTabs)) {
-      tabStrip.innerHTML = "";
-      const hasActiveTab = boot.openTabs.some((t) => t.module === activeModule);
-      boot.openTabs.forEach((t, idx) => {
-        const btn = document.createElement("button");
-        const isAct = hasActiveTab ? t.module === activeModule : idx === 0;
-        btn.className = "tab-pill" + (isAct ? " active" : "");
-        btn.setAttribute("role", "tab");
-        btn.setAttribute("aria-selected", isAct ? "true" : "false");
-        btn.dataset.module = t.module;
-        btn.textContent = t.title;
-        btn.addEventListener("click", () => {
-          void ribbonHistory.activatePane(t.module).catch(() => {});
-        });
-        tabStrip.appendChild(btn);
-      });
-      ribbonHistory.reapplyTabTitles();
-    }
-
-    const filterBox = document.getElementById("format-filters");
-    if (filterBox && Array.isArray(boot.recentFormatFilters)) {
-      filterBox.innerHTML = "";
-      filterBox.dataset.activeFilter = "ALL";
-      boot.recentFormatFilters.forEach((f, idx) => {
-        const chip = document.createElement("button");
-        chip.className = "filter-chip" + (idx === 0 ? " active" : "");
-        chip.dataset.filter = f;
-        chip.textContent = f;
-        chip.addEventListener("click", () => {
-          document.querySelectorAll(".filter-chip").forEach((c) => c.classList.remove("active"));
-          chip.classList.add("active");
-          filterBox.dataset.activeFilter = f === "전체" ? "ALL" : f;
-          const map = {
-            전체: "DOC",
-            DOCX: "DOC",
-            ODF: "DOC",
-            "HWP/HWPX": "HWP",
-            XLSX: "SHEET",
-            PPTX: "SLIDE",
-            PDF: "PDF",
-          };
-          if (map[f]) {
-            void ribbonHistory.activatePane(map[f]).catch(() => {});
-          }
-        });
-        filterBox.appendChild(chip);
-      });
+    // Legacy single-page hosts seed the document name from the bootstrap payload; windows name themselves.
+    if (!windowBridge.isManaged() && Array.isArray(boot.openTabs)) {
+      const known = windowBridge.getTitles();
+      for (const tab of boot.openTabs) {
+        if (tab && typeof tab.title === "string" && !known[tab.module]) windowBridge.setDocumentName(tab.title, tab.module);
+      }
     }
   }
 
@@ -462,12 +461,6 @@
   }
 
   function setupStaticNavigationHandlers() {
-    document.querySelectorAll(".mod-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        void ribbonHistory.activatePane(btn.dataset.module).catch(() => {});
-      });
-    });
-
     document.querySelectorAll(".ribbon-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".ribbon-btn").forEach((b) => {
@@ -540,7 +533,7 @@
             const next = html.dataset.theme === "dark" ? "light" : "dark";
             html.dataset.theme = next;
             localRibbonState.darkThemeEnabled = next === "dark";
-            themeBtn.textContent = next === "dark" ? "라이트 모드" : "다크 모드";
+            icons.syncThemeToggle(document, next);
             sheetController.refreshFocusedSheetCellPendingSnapshot();
           })
           .catch(() => {});
@@ -871,9 +864,8 @@
 
   // Dispatch is driven by ribbonCatalog.WORKSPACE_SHORTCUT_BINDINGS so every advertised label
   // has exactly one handler here; unlisted (browser-reserved) combos are never intercepted.
-  function handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput) {
-    if (slideStudio.handleKeydown(e)) return;
-    workspaceSession.handleShortcutKeydown(e, {
+  function shortcutActions(modal, cmdSearchInput) {
+    return {
       "slide-show-start": () => slideStudio.startShow(false),
       "slide-show-current": () => slideStudio.startShow(true),
       "slide-move-up": () => slideStudio.moveUp(),
@@ -881,6 +873,8 @@
       "slide-delete": () => slideStudio.removeSlide(),
       palette: () => togglePaletteModal(modal, cmdSearchInput),
       "file-open": () => fileOpen.openFilePicker(),
+      "file-new": () => void windowBridge.newDocument(activeModule).catch((err) => setStatusFeedback(err?.message || String(err))),
+      "window-close": () => void windowBridge.requestClose().catch(() => {}),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),
       "studio-undo": () => void ribbonHistory.performWorkspaceUndo().catch(() => {}),
       "studio-redo": () => void ribbonHistory.performWorkspaceRedo().catch(() => {}),
@@ -888,7 +882,19 @@
         const fullCmd = getRibbonModulePrefix(activeModule) + "-" + suffix;
         void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
       },
-    });
+    };
+  }
+
+  function handleWorkspaceShortcutKeydown(e, modal, cmdSearchInput) {
+    if (slideStudio.handleKeydown(e)) return;
+    workspaceSession.handleShortcutKeydown(e, shortcutActions(modal, cmdSearchInput));
+  }
+
+  // Combos forwarded by the embedded HWP editor run the same actions as the keyboard.
+  function handleForwardedShortcut(combo) {
+    const modal = document.getElementById("cmd-palette-modal");
+    const input = document.getElementById("cmd-search-input");
+    workspaceSession.runForwardedShortcut(combo, shortcutActions(modal, input));
   }
 
   function setupCommandPaletteHandlers() {
@@ -918,7 +924,19 @@
     });
   }
 
+  host.__EASYOFFICE_ACTIVATE_MODULE__ = (mod) => ribbonHistory.activatePane(mod);
+
+  // First paint follows the OS colour scheme (the toggle still switches); hosts without matchMedia stay light.
+  function applySystemTheme() {
+    if (!host.matchMedia?.("(prefers-color-scheme: dark)")?.matches) return;
+    document.documentElement.dataset.theme = "dark";
+    localRibbonState.darkThemeEnabled = true;
+    icons.syncThemeToggle(document, "dark");
+  }
+
   async function initWorkspace() {
+    icons.applyIcons(document);
+    applySystemTheme();
     workspacePanels.ensureDefaultDocTabStore();
     sheetDataStore.Sheet1 = snapshotDomSheetCells();
     sheetRowCounts.Sheet1 = sheetController.getSheetRowCount("Sheet1");
@@ -939,6 +957,9 @@
       host.__EASYOFFICE_WORKSPACE_SESSION_UTILS__.guessClientPlatform()
     );
     workspaceSession.applyModuleContext(activeModule);
+    await windowBridge.applyLaunch((mod) => ribbonHistory.activatePane(mod));
+    windowBridge.bindStatusTooltips();
+    hwpHost.onShortcut((combo) => handleForwardedShortcut(combo));
     const restoredRecord = await workspaceSession.restoreFromStorage().catch(() => null);
     workspaceSession.establishBaseline(restoredRecord);
     workspaceSession.installActivityTracking();
@@ -946,8 +967,16 @@
     hwpSession.bindUi();
     await fileOpen.captureBaselines();
     await loadWorkspaceBootstrap();
-    void hwpSession.restore().catch(() => {});
-    if (host.__EASYOFFICE_SMOKE__) void hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP"));
+    await windowBridge.start();
+    await windowBridge.loadPending(async (name, bytes) => {
+      await fileOpen.openDocumentFromBytes(name, bytes);
+      await workspaceSession.markSaved();
+    });
+    if (!windowBridge.isStart) void hwpSession.restore().catch(() => {});
+    void windowBridge.runSmoke({
+      invokeIpc,
+      runHwpSmoke: () => hwpHost.runSmoke(() => ribbonHistory.activatePane("HWP")),
+    });
   }
 
   async function loadWorkspaceBootstrap() {
@@ -959,7 +988,7 @@
       return;
     }
     workspaceSession.hideBootstrapError();
-    setupTabsAndRibbonChrome(boot);
+    setupRibbonChrome(boot);
     void ribbonHistory.renderRibbonCategoryTools(activeRibbonCategory).catch(() => {});
   }
 

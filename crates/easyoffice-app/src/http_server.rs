@@ -13,6 +13,9 @@ use crate::EasyOfficeIpcRouter;
 const SERVE_DEV_ONLY_NOTICE: &str = "NOTICE: --serve is a developer/testing mode only, not for end users; install the EasyOffice desktop app instead.\n안내: --serve는 개발·테스트 전용 모드이며 일반 사용자용이 아닙니다. 설치형 EasyOffice 앱을 사용하세요.";
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
+const SHELL_CSS: &str = include_str!("../ui/shell.css");
+const ICONS_JS: &str = include_str!("../ui/icons.js");
+const WINDOW_BRIDGE_JS: &str = include_str!("../ui/window-bridge.js");
 const SHEET_UTILS_JS: &str = include_str!("../ui/sheet-utils.js");
 const PII_DOM_SCRUBBER_JS: &str = include_str!("../ui/pii-dom-scrubber.js");
 const SHEET_STORE_JS: &str = include_str!("../ui/sheet-store.js");
@@ -325,7 +328,9 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
         return;
     }
 
-    let (status, content_type, response_body) = match (method, path) {
+    // Document windows are addressed with launch parameters (`/?module=DOC&win=...`); routing ignores them.
+    let route = path.split('?').next().unwrap_or("/");
+    let (status, content_type, response_body) = match (method, route) {
         ("GET", "/" | "/index.html") => {
             ("200 OK", "text/html; charset=utf-8", INDEX_HTML.to_string())
         }
@@ -335,6 +340,17 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             FAVICON_SVG.to_string(),
         ),
         ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
+        ("GET", "/shell.css") => ("200 OK", "text/css; charset=utf-8", SHELL_CSS.to_string()),
+        ("GET", "/icons.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            ICONS_JS.to_string(),
+        ),
+        ("GET", "/window-bridge.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            WINDOW_BRIDGE_JS.to_string(),
+        ),
         ("GET", "/sheet-utils.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",

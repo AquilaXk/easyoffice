@@ -1,5 +1,7 @@
 use std::path::Path;
 
+include!("src/app_commands.rs");
+
 fn main() {
     // The WebUI embeds the generated hwp-studio editor bundle (`frontendDist` is the app's ui dir).
     // It is never tracked in Git, so building the shell without it would ship a window whose HWP
@@ -16,9 +18,11 @@ fn main() {
     }
 
     // Declaring the app commands in the manifest makes them deny-by-default: the WebView may only
-    // call what `capabilities/main-window.json` grants explicitly.
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&["ipc_dispatch", "save_document_file"]),
-    ))
+    // call what `capabilities/main-window.json` grants explicitly. The list is shared with the
+    // crate (and checked against the capability file by a unit test).
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
+    )
     .expect("failed to run tauri-build");
 }

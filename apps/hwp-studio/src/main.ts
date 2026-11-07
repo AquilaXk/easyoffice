@@ -86,6 +86,7 @@ import { CENTER_ZOOM_ANCHOR } from '@/view/zoom-anchor';
 import { withBusyCursor } from '@/view/busy-cursor';
 import { formatPageIndicator } from '@/view/page-indicator';
 import { installEmbedRuntime } from '@/embed/runtime';
+import { createShellShortcutRelay, matchShellShortcut, parseShellKeys } from './embed/shell-shortcuts.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
 import { DocumentAgentController } from '@/document-agent/controller';
@@ -289,6 +290,22 @@ if (chromeMode === 'embed') {
   document.addEventListener('keydown', (e) => {
     if (isEmbedSwallowedFileShortcut(e)) e.preventDefault();
   }, true);
+}
+
+// EasyOffice: 편집기에 포커스가 있어도 셸의 Ctrl+S·O·N·K·W를 쓸 수 있도록, 셸이 `?shellKeys=`로 알려 준
+// 조합만 embed 포트로 전달한다. 전달하는 것은 조합 문자열뿐이며 일반 입력은 건드리지 않는다.
+const shellShortcutRelay = createShellShortcutRelay();
+if (chromeMode === 'embed') {
+  const shellKeys = parseShellKeys(window.location.search);
+  if (shellKeys.length > 0) {
+    document.addEventListener('keydown', (e) => {
+      const combo = matchShellShortcut(e, shellKeys);
+      if (combo === null || !shellShortcutRelay.hasListener()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      shellShortcutRelay.forward(combo);
+    }, true);
+  }
 }
 
 // 상태 바 요소
@@ -1403,6 +1420,7 @@ installEmbedRuntime({
   // edit (reason 'dirty_changed' / 'edited'), so it can drive its unsaved-changes guard and autosave.
   subscribeDocumentChanged: (listener) => {
     const offs = [
+      shellShortcutRelay.add(listener),
       eventBus.on('document-agent-changed', listener),
       eventBus.on('document-dirty-changed', (change) => {
         listener({ schemaVersion: 1, reason: 'dirty_changed', dirty: (change as { dirty?: boolean })?.dirty === true });
