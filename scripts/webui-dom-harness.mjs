@@ -8,6 +8,7 @@ const INDEX_HTML_PATH = fileURLToPath(
   new URL("../crates/easyoffice-app/ui/index.html", import.meta.url)
 );
 const PROD_PRE_SCRIPTS = [
+  "../crates/easyoffice-app/ui/theme.js",
   "../crates/easyoffice-app/ui/icons.js",
   "../crates/easyoffice-app/ui/sheet-utils.js",
 ].map((relPath) => ({
@@ -837,6 +838,7 @@ export async function createWorkspaceHarness(options = {}) {
     btoa: (bin) => Buffer.from(bin, "binary").toString("base64"),
     URL: urlShim,
     Blob: globalThis.Blob,
+    matchMedia: options.matchMedia,
     setTimeout: (fn, delay = 0) => {
       const id = nextTimerId;
       nextTimerId += 1;

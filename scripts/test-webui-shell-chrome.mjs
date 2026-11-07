@@ -12,7 +12,9 @@ import { createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs
 const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const CSS = fs.readFileSync(fileURLToPath(new URL("styles.css", UI_DIR)), "utf8");
 const SHELL_CSS = fs.readFileSync(fileURLToPath(new URL("shell.css", UI_DIR)), "utf8");
-const ALL_CSS = `${CSS}\n${SHELL_CSS}`;
+const CONTENT_CSS = fs.readFileSync(fileURLToPath(new URL("content.css", UI_DIR)), "utf8");
+const TOKENS_CSS = fs.readFileSync(fileURLToPath(new URL("tokens.css", UI_DIR)), "utf8");
+const ALL_CSS = `${CSS}\n${SHELL_CSS}\n${CONTENT_CSS}`;
 const ICONS_JS = new URL("icons.js", UI_DIR);
 
 // Pictographs, arrows, geometric shapes and symbols that used to stand in for icons.
@@ -130,7 +132,7 @@ test("theme toggle keeps an accessible name and announces its state", async () =
   userClick(btn);
   await flushAsyncTurns(10);
   assert.equal(btn.getAttribute("aria-label"), "라이트 모드로 전환");
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 });
 
 test("top bar: menus on the left, compact right-side controls that never shrink or wrap", () => {
@@ -196,25 +198,35 @@ function contrast(a, b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-function tokens(scopeSelector) {
-  const body = cssRule(scopeSelector, SHELL_CSS);
+// Tokens of one theme from tokens.css (PD-098); the dark block overrides the light one.
+function tokens(theme) {
+  const light = TOKENS_CSS.slice(TOKENS_CSS.indexOf("\n:root {"), TOKENS_CSS.indexOf('\n:root[data-theme-effective="dark"] {'));
+  const dark = TOKENS_CSS.slice(TOKENS_CSS.indexOf('\n:root[data-theme-effective="dark"] {'));
   const out = {};
-  for (const m of body.matchAll(/(--eo-[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;?/g)) out[m[1]] = m[2];
+  for (const block of theme === "dark" ? [light, dark] : [light]) {
+    for (const m of block.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;?/g)) out[m[1]] = m[2];
+  }
   return out;
 }
 
 test("shell chrome colours meet WCAG AA in the light and dark themes", () => {
-  for (const [scope, theme] of [[":root", "light"], ['html[data-theme="dark"]', "dark"]]) {
-    const t = tokens(scope);
-    for (const needed of ["--eo-chrome-bg", "--eo-chrome-text", "--eo-chrome-muted", "--eo-chrome-hover", "--eo-chrome-hover-text", "--eo-chrome-icon", "--eo-chrome-open", "--eo-chrome-open-text", "--eo-status-bg", "--eo-status-text"]) {
-      assert.ok(t[needed], `${theme}: ${needed}`);
-    }
-    const pairs = [
-      ["--eo-chrome-text", "--eo-chrome-bg", 4.5], ["--eo-chrome-muted", "--eo-chrome-bg", 4.5],
-      ["--eo-chrome-hover-text", "--eo-chrome-hover", 4.5], ["--eo-chrome-open-text", "--eo-chrome-open", 4.5],
-      ["--eo-chrome-icon", "--eo-chrome-bg", 3], ["--eo-status-text", "--eo-status-bg", 4.5],
-    ];
-    for (const [fg, bg, min] of pairs) {
+  // [text, background, minimum ratio]: the pairs the chrome CSS actually draws.
+  const pairs = [
+    ["--ui-text", "--ui-bg-light", 4.5], ["--ui-text-muted", "--ui-bg-light", 4.5],
+    ["--ui-text", "--ui-hover", 4.5], ["--ui-text", "--ui-surface", 4.5],
+    ["--ui-text-muted", "--ui-surface", 4.5], ["--ui-text-secondary", "--ui-bg-light", 3],
+    ["--ui-text-secondary", "--ui-bg", 4.5], ["--accent-strong", "--ui-surface", 4.5],
+    ["--accent-strong", "--ui-selected", 4.5], ["--accent-strong", "--ui-hover", 4.5],
+  ];
+  const stateful = {
+    // The open menu title and the primary button swap text colour per theme (styles.css, shell.css).
+    light: [["--ui-text-on-accent", "--ui-menu-open", 4.5], ["--ui-text-on-accent", "--accent-strong", 4.5]],
+    dark: [["--ui-text", "--ui-selected", 4.5], ["--ui-bg", "--accent-strong", 4.5]],
+  };
+  for (const theme of ["light", "dark"]) {
+    const t = tokens(theme);
+    for (const [fg, bg, min] of [...pairs, ...stateful[theme]]) {
+      assert.ok(t[fg] && t[bg], `${theme}: ${fg} / ${bg} defined`);
       const ratio = contrast(t[fg], t[bg]);
       assert.ok(ratio >= min, `${theme}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1 (need ${min}:1)`);
     }
@@ -227,5 +239,5 @@ test("no UI file exceeds the line ceiling and the new modules are registered", (
     assert.ok(lines < 1000, `${name} has ${lines} lines`);
   }
   const html = fs.readFileSync(fileURLToPath(new URL("index.html", UI_DIR)), "utf8");
-  for (const asset of ["./icons.js", "./window-bridge.js", "./shell.css"]) assert.ok(html.includes(asset), asset);
+  for (const asset of ["./icons.js", "./window-bridge.js", "./shell.css", "./tokens.css", "./content.css", "./theme.js"]) assert.ok(html.includes(asset), asset);
 });

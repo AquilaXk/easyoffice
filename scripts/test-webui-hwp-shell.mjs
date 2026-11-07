@@ -13,7 +13,7 @@ const UI_DIR = new URL("../crates/easyoffice-app/ui/", import.meta.url);
 const read = (rel, base = UI_DIR) => fs.readFileSync(fileURLToPath(new URL(rel, base)), "utf8");
 const HOST_JS = new URL("hwp-host.js", UI_DIR);
 const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
-const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}`;
+const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}`;
 const OVERLAY = new URL("../apps/hwp-studio/", import.meta.url);
 
 const COMMANDS = ["new", "open", "recent", "save", "save-as", "close"];
@@ -213,10 +213,10 @@ test("an editor without the shell-context capability is not sent the RPC", async
 test("the theme toggle tells the editor the explicit choice; first paint stays 'system'", async () => {
   const { document, userClick } = await createWorkspaceHarness({ search: "?module=DOC&win=w-theme-fwd" });
   const html = document.documentElement;
-  const before = html.dataset.theme;
+  const before = html.dataset.themeEffective;
   userClick(document.getElementById("btn-theme-toggle"));
   await flushAsyncTurns(10);
-  assert.notEqual(html.dataset.theme, before);
+  assert.notEqual(html.dataset.themeEffective, before);
 });
 
 // ---- one menu row, one status bar --------------------------------------------------------------
@@ -273,7 +273,7 @@ test("status bar keeps page, position, input mode, file name, message and zoom o
 
 // ---- start window icons ------------------------------------------------------------------------
 
-test("start cards use one SVG icon per format with a subtle module accent", async () => {
+test("start cards use one SVG icon per format and one shared accent token", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=START&win=w-start-icons" });
   const names = {};
   for (const card of document.querySelectorAll(".start-card")) {
@@ -283,8 +283,8 @@ test("start cards use one SVG icon per format with a subtle module accent", asyn
   assert.deepEqual(Object.keys(names).sort((a, b) => a.localeCompare(b)), ["CONV", "DOC", "HWP", "PDF", "SHEET", "SLIDE"]);
   const source = read("icons.js");
   for (const name of Object.values(names)) assert.ok(new RegExp(String.raw`"?${name}"?:\s*\[`).test(source), `${name} is drawn in icons.js`);
-  for (const kind of ["DOC", "HWP", "SHEET", "SLIDE", "PDF"]) {
-    assert.ok(new RegExp(String.raw`\.start-card\[data-window-new="${kind}"\]\s*\{\s*--card-accent:\s*var\(--eo-accent-`).test(ALL_CSS), `${kind} accent`);
-  }
+  // PD-098: no per-module colours; every card icon uses the single accent token.
+  assert.ok(!ALL_CSS.includes("--card-accent"), "no per-module card accent");
+  assert.match(ALL_CSS, /\.start-card-icon\s*\{[^}]*color:\s*var\(--accent-strong\)/);
   assert.equal(document.querySelector('[data-window-new="DOC"] .start-card-icon svg') !== null, true, "icons are rendered as SVG");
 });

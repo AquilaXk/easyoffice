@@ -1,7 +1,7 @@
 use easyoffice_formats::{EasyOfficeError, StrictJsonValue};
 use easyoffice_layout::{
     DesktopPlatform, DocumentPageLayout, OfficeModuleKind, PageOrientation, PdfStudioLayout,
-    RibbonLayoutStyle, SignatureLavenderPalette, SlideDeckTheme, SlideStageLayout,
+    RibbonLayoutStyle, SlideDeckTheme, SlideStageLayout,
 };
 use easyoffice_sheet::{
     ConditionalFormatRule, DataValidationRule, EvaluatedCellValue, PackedCellCoordinate,
@@ -80,7 +80,6 @@ impl EasyOfficeIpcRouter {
     }
 
     fn handle_workspace_bootstrap() -> Result<String, EasyOfficeError> {
-        let palette = SignatureLavenderPalette::default();
         let platform = DesktopPlatform::current();
         let filters_json = Self::RECENT_FORMAT_FILTERS
             .iter()
@@ -98,8 +97,6 @@ impl EasyOfficeIpcRouter {
                 "{{",
                 "\"platform\":\"{}\",",
                 "\"shortcutModifier\":\"{}\",",
-                "\"palette\":{{\"primaryAccent\":\"{}\",\"lightScaffold\":\"{}\",\"darkScaffold\":\"{}\"}},",
-                "\"moduleAccents\":{{\"DOC\":\"{}\",\"HWP\":\"{}\",\"SHEET\":\"{}\",\"SLIDE\":\"{}\",\"PDF\":\"{}\"}},",
                 "\"ribbonCategories\":[{}],",
                 "\"ribbonMatrixSlots\":35,",
                 "\"recentFormatFilters\":[{}],",
@@ -114,14 +111,6 @@ impl EasyOfficeIpcRouter {
             ),
             platform.os_label(),
             platform.primary_shortcut_modifier(),
-            palette.primary_accent,
-            palette.light_scaffold,
-            palette.dark_scaffold,
-            OfficeModuleKind::Document.accent_hex(),
-            OfficeModuleKind::Hwp.accent_hex(),
-            OfficeModuleKind::Sheet.accent_hex(),
-            OfficeModuleKind::Slide.accent_hex(),
-            OfficeModuleKind::Pdf.accent_hex(),
             cats_json,
             filters_json,
         );

@@ -323,7 +323,7 @@ fn check_ipc_responses() -> Result<(), EasyOfficeError> {
     }
 
     let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "")?;
-    if !bootstrap.contains("#5C6BC0") || !bootstrap.contains("HWP/HWPX") {
+    if !bootstrap.contains("HWP/HWPX") {
         return Err(EasyOfficeError::InvalidArgument(
             "IPC 부트스트랩 응답 검증 실패".to_string(),
         ));
@@ -334,14 +334,20 @@ fn check_ipc_responses() -> Result<(), EasyOfficeError> {
 /// Embedded WebUI asset checks: `(asset text, required marker)`.
 const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
     (include_str!("../ui/index.html"), "EasyOffice"),
-    (include_str!("../ui/styles.css"), "#5C6BC0"),
-    (include_str!("../ui/shell.css"), "--eo-chrome-bg"),
+    (include_str!("../ui/tokens.css"), "--ui-menu-open"),
+    (include_str!("../ui/styles.css"), "var(--ui-text)"),
+    (include_str!("../ui/shell.css"), "var(--ui-bg-light)"),
+    (include_str!("../ui/content.css"), "--doc-paper"),
+    (include_str!("../ui/theme.js"), "__EASYOFFICE_THEME__"),
     (include_str!("../ui/icons.js"), "__EASYOFFICE_ICONS__"),
     (
         include_str!("../ui/window-bridge.js"),
         "__EASYOFFICE_WINDOW_BRIDGE__",
     ),
     (include_str!("../ui/index.html"), "./shell.css"),
+    (include_str!("../ui/index.html"), "./tokens.css"),
+    (include_str!("../ui/index.html"), "./content.css"),
+    (include_str!("../ui/index.html"), "./theme.js"),
     (include_str!("../ui/index.html"), "./icons.js"),
     (include_str!("../ui/index.html"), "./window-bridge.js"),
     (

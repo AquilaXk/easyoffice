@@ -42,7 +42,7 @@ EasyOffice/
 │   └── desktop-file-associations.mjs              # tauri.conf.json 파일 연결·macOS 번들 설정 정적 계약 (PD-094)
 ├── docs/
 │   ├── policy-decisions.md                        # 정책 결정 기록 (SSOT)
-│   ├── design-system.md                           # 시그니처 라벤더 UI/UX 디자인 시스템
+│   ├── design-system.md                           # UI 디자인 기준 (hop/rhwp-studio 토큰, PD-098)
 │   ├── product-spec.md                            # 올인원 오피스 통합 기능 명세
 │   └── architecture.md                            # 시스템 아키텍처 문서
 └── .github/

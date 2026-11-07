@@ -79,7 +79,6 @@
     } = deps;
 
     const {
-      MODULE_ACCENTS,
       MODULE_LABELS,
       MODULE_SPECS,
       CONTEXTUAL_TOOL_BADGES,
@@ -149,7 +148,7 @@
         pdfRotationDeg: getPdfRotationDeg(),
         pdfStudio: workspacePanels.capturePdfStudioState(),
         viewState: workspacePanels.captureWorkspaceViewState(),
-        theme: document.documentElement.dataset.theme || "light",
+        theme: host.__EASYOFFICE_THEME__.getMode(),
         docTabs: structuredClone(docTabStore),
         sheets: cloneSheets(sheetDataStore),
         sheetRowCounts: structuredClone(sheetRowCounts),
@@ -168,12 +167,6 @@
       localRibbonState.activeModule = mod;
       const shell = document.getElementById("app") || document.querySelector(".app-shell");
       if (shell) shell.dataset.module = mod;
-      const accent = MODULE_ACCENTS[mod] || "var(--eo-primary)";
-      document.documentElement.style.setProperty("--eo-module-active", accent);
-      const swatch = document.getElementById("module-swatch");
-      const label = document.getElementById("module-accent-label");
-      if (swatch) swatch.style.background = accent;
-      if (label) label.textContent = "모듈 색상: " + (MODULE_LABELS[mod] || mod);
 
       const statusMod = document.getElementById("status-module");
       const statusSpec = document.getElementById("status-format-spec");
@@ -401,14 +394,8 @@
       workspacePanels.restorePdfStudioState(snap.pdfStudio);
       workspacePanels.restoreWorkspaceViewState(snap.viewState);
 
-      if (snap.theme) {
-        document.documentElement.dataset.theme = snap.theme;
-        const themeBtn = document.getElementById("btn-theme-toggle");
-        if (themeBtn) {
-          host.__EASYOFFICE_ICONS__.syncThemeToggle(document, snap.theme);
-        }
-      }
-      localRibbonState.darkThemeEnabled = document.documentElement.dataset.theme === "dark";
+      if (snap.theme) host.__EASYOFFICE_THEME__.setMode(snap.theme);
+      localRibbonState.darkThemeEnabled = host.__EASYOFFICE_THEME__.getEffective() === "dark";
       applyTabTitles(snap.tabTitles);
 
       const targetMod = snap.activeModule || getActiveModule();
@@ -623,12 +610,7 @@
     const DEFAULT_ZOOM_PERCENT = 100;
 
     function viewEffectTheme() {
-      const html = document.documentElement;
-      const next = html.dataset.theme === "dark" ? "light" : "dark";
-      html.dataset.theme = next;
-      localRibbonState.darkThemeEnabled = next === "dark";
-      const themeBtn = document.getElementById("btn-theme-toggle");
-      if (themeBtn) host.__EASYOFFICE_ICONS__.syncThemeToggle(document, next);
+      host.__EASYOFFICE_THEME__.toggle();
     }
 
     function viewEffectZoom(_cmdId, execRes) {
@@ -762,7 +744,7 @@
       "slide-home-underline": ["textDecoration", "underline"],
     };
     const SLIDE_TITLE_SIZES = ["20px", "22px", "24px", "18px"];
-    const SLIDE_TITLE_COLORS = ["", "var(--eo-primary)", "var(--eo-accent-slide)", ""];
+    const SLIDE_TITLE_COLORS = ["", "var(--accent-strong)", "var(--accent-light)", ""];
     const SLIDE_PADDINGS = ["20px", "12px", "28px"];
     const SLIDE_TRANSITIONS = ["fade", "push", "zoom", "none"];
     const SLIDE_INSERT_OBJECT_COMMANDS = new Set(["slide-insert-table", "slide-insert-chart", "slide-insert-shape"]);
@@ -852,7 +834,7 @@
       } else if (cmdId === "slide-layout-margins") {
         stageBox.style.padding = cyclePreset(SLIDE_PADDINGS, stageBox.style.padding);
       } else if (cmdId === "slide-mod-snap" || cmdId === "slide-review-track") {
-        stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--eo-primary)";
+        stageBox.style.outline = stageBox.style.outline ? "" : "2px dashed var(--accent-strong)";
       } else {
         stageBox.dataset.layoutState = execRes?.summary || cmdId;
       }
@@ -947,7 +929,7 @@
         preSnapshot.ribbonModule = execRes?.activeModule || effectiveModule;
         syncLocalRibbonStateFromBackend(localRibbonState, execRes);
         localRibbonState.ribbonStyle = currentStyle;
-        localRibbonState.darkThemeEnabled = document.documentElement.dataset.theme === "dark";
+        localRibbonState.darkThemeEnabled = host.__EASYOFFICE_THEME__.getEffective() === "dark";
         if (options.targetModule && options.targetModule !== getActiveModule()) {
           await activatePaneInternal(options.targetModule, false);
         } else {

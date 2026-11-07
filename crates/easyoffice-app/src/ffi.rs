@@ -123,7 +123,7 @@ mod tests {
         }
 
         let bootstrap_json = invoke_c_abi_roundtrip("get_workspace_bootstrap", "");
-        assert!(bootstrap_json.contains("#5C6BC0"));
+        assert!(bootstrap_json.contains("ribbonCategories"));
     }
 
     #[test]
@@ -131,7 +131,7 @@ mod tests {
         use crate::{run_self_test, EasyOfficeError, EasyOfficeIpcRouter};
 
         let bootstrap = EasyOfficeIpcRouter::dispatch("get_workspace_bootstrap", "").unwrap();
-        assert!(bootstrap.contains("#5C6BC0"));
+        assert!(bootstrap.contains("ribbonCategories"));
         assert!(bootstrap.contains("\"ribbonMatrixSlots\":35"));
 
         let detect_res =
