@@ -57,6 +57,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/doc-runs-ui.js",
   "crates/easyoffice-app/ui/hwp-host.js",
   "crates/easyoffice-app/ui/hwp-session.js",
+  "crates/easyoffice-app/ui/shell-chrome.js",
   "crates/easyoffice-app/ui/app.js",
   "crates/easyoffice-app/src/hwp_bundle.rs",
   "crates/easyoffice-app/build.rs",
@@ -577,8 +578,13 @@ const DESKTOP_SHELL_PERMISSIONS = new Set(
 );
 
 // Desktop shell guard (PD-074): embedded assets only, the WebUI CSP plus the shell IPC origin,
-// no file associations before document opening exists (#111), and capabilities limited to the
-// two app commands (no core/shell/fs/http/dialog permissions reach the WebView).
+// file associations limited to formats the window model opens (#133), and capabilities limited to the
+// app commands (no core/shell/fs/http/dialog permissions reach the WebView).
+// Extensions `WindowKind::for_extension` opens (crates/easyoffice-desktop/src/windows.rs).
+const DESKTOP_OPENABLE_EXTENSIONS = [
+  "docx", "doc", "odt", "rtf", "md", "markdown", "txt", "hwp", "hwpx", "hwt", "hwtx",
+  "xlsx", "xls", "ods", "csv", "tsv", "pptx", "ppt", "ppsx", "odp", "pdf",
+];
 const desktopConfigFull = path.join(ROOT, DESKTOP_SHELL_CONFIG);
 if (fs.existsSync(desktopConfigFull)) {
   let conf = null;
@@ -598,8 +604,13 @@ if (fs.existsSync(desktopConfigFull)) {
     if (conf.build?.devUrl || conf.build?.frontendDist !== "../easyoffice-app/ui") {
       errors.push(`${DESKTOP_SHELL_CONFIG} must load only the embedded ../easyoffice-app/ui assets (no devUrl)`);
     }
-    if (Array.isArray(conf.bundle?.fileAssociations) && conf.bundle.fileAssociations.length > 0) {
-      errors.push(`${DESKTOP_SHELL_CONFIG} registers file associations before document opening is supported (#111)`);
+    const openable = new Set(DESKTOP_OPENABLE_EXTENSIONS);
+    for (const assoc of Array.isArray(conf.bundle?.fileAssociations) ? conf.bundle.fileAssociations : []) {
+      for (const ext of Array.isArray(assoc?.ext) ? assoc.ext : []) {
+        if (!openable.has(String(ext).toLowerCase())) {
+          errors.push(`${DESKTOP_SHELL_CONFIG} registers a file association for '.${ext}', which the desktop window model cannot open (#133)`);
+        }
+      }
     }
   }
   const capDir = path.join(ROOT, "crates/easyoffice-desktop/capabilities");

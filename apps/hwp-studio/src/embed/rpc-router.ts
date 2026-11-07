@@ -42,6 +42,8 @@ export interface EmbedRpcHandlers {
   createBlankDocument(skipUnsavedGuard: boolean): Promise<{ pageCount: number }>;
   /** EasyOffice extension (verify-bytes-v1): parse bytes in a throw-away document; rejects when unreadable. */
   verifyBytes(data: Uint8Array): Promise<{ ok: true; pageCount: number; format: string }>;
+  /** EasyOffice extension (shell-context-v1): the shell's theme and recent documents. */
+  setShellContext(context: unknown): Promise<{ applied: true }>;
   pageCount(): Promise<number>;
   getRendererDiagnostics(page: number): Promise<EmbedRendererDiagnosticsV1>;
   getFontDecisionTrace(page: number, maxCharacters: number): Promise<EmbedFontDecisionTraceV1>;
@@ -140,6 +142,7 @@ export async function routeEmbedRequest(
       );
     case 'createBlankDocument': return handlers.createBlankDocument(params.skipUnsavedGuard === true);
     case 'verifyBytes': return handlers.verifyBytes(asBytes(params.data, allowLegacyArray));
+    case 'setShellContext': return handlers.setShellContext(params);
     case 'pageCount': return handlers.pageCount();
     case 'getRendererDiagnostics': {
       const page = params.page ?? 0;

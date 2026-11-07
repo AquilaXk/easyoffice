@@ -575,6 +575,8 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
 
 ### 작업 6. 데스크톱 파일 수명주기: 파일 연결·단일 인스턴스·제자리 저장 (선택: 네이티브 어댑터)
 
+> **[구현됨: PD-093(#133, #158)]** 단일 인스턴스(`tauri-plugin-single-instance`, 인수 → 기존 열기 큐), Rust 전용 경로·지문 표와 임시 파일 + `sync_all` + 이름 바꾸기 제자리 저장(외부 변경 시 확인 창), NSIS `fileAssociations`(창 모델이 여는 주요 9종)와 위생 가드 조건 변경을 넣었다. 6b(네이티브 어댑터)는 건너뛴다. hop에서는 패턴만 따랐고 코드는 복사하지 않았다. 한글 창의 `파일` 메뉴는 셸 명령 6종이며 임베드 포트의 `shell_command` 이벤트와 `setShellContext` RPC(capability `shell-context-v1`)로 셸과 연결한다.
+
 - **범위**
   - `tauri-plugin-single-instance`(Rust만, WebView 권한 없음)
   - 기동 인자 / 두 번째 실행 → 열기 큐 → 부모 `openDocumentFromBytes`. Rust가 파일을 읽어 바이트만 전달하고 WebView는 경로를 받지 않으며, 표시용 파일 이름만 받는다.

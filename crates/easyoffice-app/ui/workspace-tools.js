@@ -179,15 +179,19 @@
       }
     }
 
+    // "Save" (not "save as" or an export) writes back to the opened file when the shell knows it.
+    const deliverInPlace = (base64Data, baseFilename, ext) =>
+      deliverSavedFile(base64Data, baseFilename, ext, { inPlace: true });
+
     // Hands saved bytes to the user: the native save dialog inside the desktop shell (WebView2
     // downloads can be silent), the Blob download in the `--serve` browser preview. Never throws;
     // resolves { ok, cancelled, path, error }.
-    async function deliverSavedFile(base64Data, baseFilename, ext) {
+    async function deliverSavedFile(base64Data, baseFilename, ext, options) {
       const fileName = baseFilename + "." + String(ext).toLowerCase();
       if (!base64Data) return { ok: false, cancelled: false, path: "", error: "" };
       if (desktopBridge?.isAvailable()) {
         try {
-          const res = await desktopBridge.saveFile(base64Data, fileName);
+          const res = await desktopBridge.saveFile(base64Data, fileName, options);
           if (res.status === "cancelled") return { ok: false, cancelled: true, path: "", error: "" };
           return { ok: true, cancelled: false, path: String(res.path || fileName), error: "" };
         } catch (err) {
@@ -208,7 +212,7 @@
     // Embedded HWP editor: HWP 5.0 bytes exported by the editor itself, same delivery as every save.
     async function saveEmbeddedHwp(session) {
       const fb = document.getElementById("status-command-feedback");
-      const result = await session.save({ deliver: deliverSavedFile, baseName: resolveSaveFileBase("HWP") });
+      const result = await session.save({ deliver: deliverInPlace, baseName: resolveSaveFileBase("HWP") });
       if (fb) fb.textContent = result.message;
       if (result.ok) noteSavedName(result.path);
       return result.ok;
@@ -250,7 +254,7 @@
         }
         const b64 = String(res?.convertedBase64 || "");
         if (!failure && !b64) failure = "변환 결과가 비어 있습니다";
-        const delivery = failure ? null : await deliverSavedFile(b64, title, dstExt);
+        const delivery = failure ? null : await (curMod === "CONV" ? deliverSavedFile : deliverInPlace)(b64, title, dstExt);
         if (delivery?.cancelled) {
           if (fb) fb.textContent = "문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다";
           return false;

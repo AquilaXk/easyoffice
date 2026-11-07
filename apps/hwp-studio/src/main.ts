@@ -87,6 +87,13 @@ import { withBusyCursor } from '@/view/busy-cursor';
 import { formatPageIndicator } from '@/view/page-indicator';
 import { installEmbedRuntime } from '@/embed/runtime';
 import { createShellShortcutRelay, matchShellShortcut, parseShellKeys } from './embed/shell-shortcuts.ts';
+import {
+  createShellCommandRelay,
+  installShellMenu,
+  parseShellTheme,
+  renderShellRecents,
+  sanitizeShellContext,
+} from './embed/shell-menu.ts';
 import type { EmbedRendererRuntimeRequestV1 } from '@/embed/rpc-router';
 import { enrichFontDecisionTrace } from '@/core/font-decision-trace';
 import { DocumentAgentController } from '@/document-agent/controller';
@@ -101,6 +108,9 @@ installDocumentTitle(wasm);
 const eventBus = new EventBus();
 const documentState = new DocumentDirtyState(eventBus);
 documentState.installBeforeUnload(window);
+// EasyOffice: the shell's theme (light, dark or system) is applied before the first paint.
+const shellThemeAtStart = parseShellTheme(window.location.search);
+if (shellThemeAtStart) setThemeMode(shellThemeAtStart);
 initThemeSync((effective, mode) => {
   eventBus.emit('theme-changed', { mode, effective });
   eventBus.emit('command-state-changed');
@@ -306,6 +316,13 @@ if (chromeMode === 'embed') {
       shellShortcutRelay.forward(combo);
     }, true);
   }
+}
+
+// EasyOffice: the 파일 menu is made of shell commands; they travel over the embed port by name only.
+const shellCommandRelay = createShellCommandRelay();
+if (chromeMode === 'embed') {
+  const menuBar = document.getElementById('menu-bar');
+  if (menuBar) installShellMenu(menuBar, shellCommandRelay);
 }
 
 // 상태 바 요소
@@ -1421,6 +1438,7 @@ installEmbedRuntime({
   subscribeDocumentChanged: (listener) => {
     const offs = [
       shellShortcutRelay.add(listener),
+      shellCommandRelay.add(listener),
       eventBus.on('document-agent-changed', listener),
       eventBus.on('document-dirty-changed', (change) => {
         listener({ schemaVersion: 1, reason: 'dirty_changed', dirty: (change as { dirty?: boolean })?.dirty === true });
@@ -1557,6 +1575,14 @@ installEmbedRuntime({
       } finally {
         probe.free();
       }
+    },
+    // EasyOffice extension (shell-context-v1): one theme and a recent-documents list from the shell.
+    async setShellContext(raw) {
+      const context = sanitizeShellContext(raw);
+      if (context.theme && context.theme !== getThemeMode()) setThemeMode(context.theme);
+      const panel = document.getElementById('shell-recents-panel');
+      if (context.recents && panel) renderShellRecents(panel, context.recents);
+      return { applied: true as const };
     },
     async chromeGet() { return getChromeVisibility(); },
     async chromeSet(next) { return setChromeVisibility(next as Partial<ChromeVisibility>); },

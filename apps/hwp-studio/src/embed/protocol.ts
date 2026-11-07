@@ -20,6 +20,8 @@ export const EMBED_CAPABILITIES = [
   'blank-document-v1',
   // EasyOffice extension: verifyBytes RPC.
   'verify-bytes-v1',
+  // EasyOffice extension: setShellContext RPC (shell theme and recent documents for the 파일 menu).
+  'shell-context-v1',
 ] as const;
 
 export interface EmbedConnectAttempt {
