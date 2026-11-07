@@ -16,6 +16,26 @@ export const FONTS_DIR_REL = "assets/fonts";
 const OFL_RE = /SIL\s+OPEN\s+FONT\s+LICENSE[\s,]+Version\s+1\.1/i;
 const SAFE_NAME_RE = /^[A-Za-z0-9_.-]+$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
+// A license that reserves a font name (OFL 1.1 section 3) means a Modified Version may not keep it, so the
+// bundled file must be the official file or that file with WOFF2 compression only (OFL FAQ 2.2.1, PD-092).
+const RFN_RE = /with\s+Reserved\s+Font\s+Names?\s+\S/i;
+const CONVERSIONS = new Set(["none", "woff2-compression"]);
+
+function checkReservedNameProvenance(name, font) {
+  if (typeof font.reservedNameNotUsed === "string" && font.reservedNameNotUsed.trim() !== "") return [];
+  const up = font.upstream;
+  if (!up || typeof up !== "object") {
+    return [`${name}: the license reserves a font name, so upstream (official source URL, SHA-256, conversion) is required`];
+  }
+  const errors = [];
+  if (typeof up.url !== "string" || !up.url.startsWith("https://")) errors.push(`${name}: upstream.url must be an https URL`);
+  if (!SHA256_RE.test(String(up.sha256))) errors.push(`${name}: upstream.sha256 is required`);
+  if (!CONVERSIONS.has(up.conversion)) errors.push(`${name}: upstream.conversion must be "none" or "woff2-compression"`);
+  else if (up.conversion === "none" && up.sha256 !== font.sha256) {
+    errors.push(`${name}: upstream.conversion is "none" but the bundled SHA-256 differs from the official file`);
+  }
+  return errors;
+}
 
 export function checkFonts(root) {
   const dir = path.join(root, FONTS_DIR_REL);
@@ -55,7 +75,11 @@ export function checkFonts(root) {
     if (!licenseRel.startsWith("licenses/") || !licensePath.startsWith(path.join(dir, "licenses") + path.sep)) {
       errors.push(`${name}: licenseFile must be under licenses/`);
     } else if (!fs.existsSync(licensePath)) errors.push(`${name}: license file ${licenseRel} is missing`);
-    else if (!OFL_RE.test(fs.readFileSync(licensePath, "utf8"))) errors.push(`${name}: ${licenseRel} is not the SIL Open Font License 1.1`);
+    else {
+      const licenseText = fs.readFileSync(licensePath, "utf8");
+      if (!OFL_RE.test(licenseText)) errors.push(`${name}: ${licenseRel} is not the SIL Open Font License 1.1`);
+      else if (RFN_RE.test(licenseText)) errors.push(...checkReservedNameProvenance(name, font));
+    }
     if (doc !== null && !doc.includes(name)) errors.push(`${FONTS_DIR_REL}/FONTS.md does not list ${name}`);
   }
   for (const name of fs.readdirSync(dir)) {
