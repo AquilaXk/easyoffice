@@ -29,6 +29,7 @@ fn para(
         alignment,
         heading_level,
         list,
+        ..RichParagraph::default()
     })
 }
 

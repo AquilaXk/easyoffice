@@ -191,6 +191,7 @@ fn paragraph(text: &str, heading: u8, list: Option<RichListKind>) -> RichBlock {
         alignment: None,
         heading_level: heading,
         list,
+        ..RichParagraph::default()
     })
 }
 

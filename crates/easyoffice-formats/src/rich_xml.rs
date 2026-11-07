@@ -4,7 +4,7 @@
 //! declarations, and external references are rejected there); this tokenizer never resolves
 //! entities beyond the five predefined ones and numeric character references.
 
-use crate::{EasyOfficeError, RichRun, XmlSanitizer};
+use crate::{EasyOfficeError, RichRun, RichScript, XmlSanitizer};
 
 /// Upper bound on events produced from one XML part.
 const MAX_XML_EVENTS: usize = 6_000_000;
@@ -46,6 +46,7 @@ pub(crate) struct CharFmt {
     pub font: Option<String>,
     pub color: Option<String>,
     pub highlight: Option<String>,
+    pub script: RichScript,
 }
 
 impl CharFmt {
@@ -56,6 +57,7 @@ impl CharFmt {
             && self.font == run.font
             && self.color == run.color
             && self.highlight == run.highlight
+            && self.script == run.script
     }
 }
 
@@ -80,6 +82,7 @@ pub(crate) fn push_run(runs: &mut Vec<RichRun>, text: &str, fmt: &CharFmt) {
         font: fmt.font.clone(),
         color: fmt.color.clone(),
         highlight: fmt.highlight.clone(),
+        script: fmt.script,
     });
 }
 /// Heading level from a style name such as `heading 2`, `Heading2`, `제목 3`, `개요 1`, `Title`.

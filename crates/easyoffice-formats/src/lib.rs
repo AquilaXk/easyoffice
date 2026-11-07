@@ -60,7 +60,7 @@ pub use ole2_codec::*;
 pub use output_compatibility::OutputCompatibility;
 pub use rich_document::{
     evaluate_table_formulas, normalize_hex_color, RichAlignment, RichBlock, RichDocument,
-    RichListKind, RichParagraph, RichRun,
+    RichListKind, RichParagraph, RichRun, RichScript,
 };
 pub use rich_image::{
     RichImage, IMAGE_PLACEHOLDER_TEXT, MAX_ALT_TEXT_BYTES, MAX_IMAGES_PER_DOCUMENT,

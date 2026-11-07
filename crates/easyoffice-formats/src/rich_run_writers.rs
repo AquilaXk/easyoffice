@@ -3,7 +3,7 @@
 //! the target syntax; none is ever parsed as markup.
 
 use crate::rich_document::hex_to_highlight_name;
-use crate::{RichRun, RtfCodec, XmlSanitizer};
+use crate::{RichRun, RichScript, RtfCodec, XmlSanitizer};
 
 // ---------------------------------------------------------------- DOCX
 
@@ -46,6 +46,11 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
             "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{fill}\"/>"
         ));
     }
+    match run.script {
+        RichScript::Normal => {}
+        RichScript::Superscript => xml.push_str("<w:vertAlign w:val=\"superscript\"/>"),
+        RichScript::Subscript => xml.push_str("<w:vertAlign w:val=\"subscript\"/>"),
+    }
     if xml.is_empty() {
         xml
     } else {
@@ -55,13 +60,14 @@ pub(crate) fn docx_run_properties(run: &RichRun) -> String {
 
 // ---------------------------------------------------------------- ODT
 
-/// Automatic text style identity: toggles, size, font, color, highlight.
+/// Automatic text style identity: toggles, size, font, color, highlight, script.
 pub(crate) type OdtTextKey = (
     (bool, bool, bool, bool),
     Option<u16>,
     Option<String>,
     Option<String>,
     Option<String>,
+    RichScript,
 );
 
 pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
@@ -71,6 +77,7 @@ pub(crate) fn odt_text_key(run: &RichRun) -> OdtTextKey {
         run.font.clone(),
         run.color.clone(),
         run.highlight.clone(),
+        run.script,
     )
 }
 
@@ -80,6 +87,7 @@ pub(crate) fn odt_text_key_is_plain(key: &OdtTextKey) -> bool {
         && key.2.is_none()
         && key.3.is_none()
         && key.4.is_none()
+        && key.5 == RichScript::Normal
 }
 
 fn odt_points(half_pt: u16) -> String {
@@ -92,7 +100,7 @@ fn odt_points(half_pt: u16) -> String {
 
 /// `<style:style family="text">` for the `index`-th (1-based) automatic text style.
 pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
-    let ((bold, italic, underline, strike), size, font, color, highlight) = key;
+    let ((bold, italic, underline, strike), size, font, color, highlight, script) = key;
     let mut xml = format!(
         "<style:style style:name=\"T{index}\" style:family=\"text\"><style:text-properties"
     );
@@ -122,6 +130,11 @@ pub(crate) fn odt_text_style_xml(index: usize, key: &OdtTextKey) -> String {
     }
     if *strike {
         xml.push_str(" style:text-line-through-style=\"solid\"");
+    }
+    match script {
+        RichScript::Normal => {}
+        RichScript::Superscript => xml.push_str(" style:text-position=\"super 58%\""),
+        RichScript::Subscript => xml.push_str(" style:text-position=\"sub 58%\""),
     }
     xml.push_str("/></style:style>");
     xml
