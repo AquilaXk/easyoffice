@@ -8687,7 +8687,7 @@ THE SOFTWARE.
 
 ## Fonts
 
-The editor bundle ships only fonts under the SIL Open Font License 1.1, copied byte for byte from the rhwp checkout and pinned by size and SHA-256 in `assets/fonts/fonts.json` (see `assets/fonts/FONTS.md`). The license text of every family is kept in `assets/fonts/licenses/` and is installed next to the fonts (`hwp-studio/fonts/licenses/`). The fonts are not sold on their own. Proprietary, operating-system and custom-terms fonts are never bundled.
+The editor bundle ships only fonts under the SIL Open Font License 1.1, pinned by size and SHA-256 in `assets/fonts/fonts.json` (see `assets/fonts/FONTS.md`). Families whose license reserves a font name (Nanum, D2Coding, Spoqa Han Sans, Pretendard) are the official distribution files, unchanged or with WOFF2 compression only, and their official source URL and SHA-256 are recorded in `fonts.json`; the other families are copied byte for byte from the rhwp checkout. The license text of every family is kept in `assets/fonts/licenses/` and is installed next to the fonts (`hwp-studio/fonts/licenses/`). The fonts are not sold on their own. Proprietary, operating-system and custom-terms fonts are never bundled.
 
 | Family | Styles | Copyright notice | License text |
 |---|---|---|---|

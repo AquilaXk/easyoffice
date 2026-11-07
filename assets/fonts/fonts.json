@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "origin": "copies of third_party/rhwp assets/fonts at the pinned rhwp commit (see FONTS.md)",
+  "origin": "official distribution files of each family (see FONTS.md and each entry's upstream); fonts without a reserved-name concern are copies of the pinned rhwp assets",
   "fonts": [
     {
       "file": "D2Coding-Bold.woff2",
@@ -11,8 +11,15 @@
       "copyright": "Copyright (c) 2015, NAVER Corporation (https://www.navercorp.com),",
       "source": "https://github.com/naver/d2codingfont",
       "sourceName": "naver/d2codingfont",
-      "bytes": 1579172,
-      "sha256": "41273810f9aed2775c6f1b9eb7e4f12997da644002872b20a31d3d3144e0cc0a"
+      "bytes": 1783244,
+      "sha256": "7909d7909ed50d8baf6ebfe246bdb183956b9cb98e1568c3544e0618cd16c27d",
+      "upstream": {
+        "url": "https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip",
+        "member": "D2Coding/D2CodingBold-Ver1.3.2-20180524.ttf",
+        "sha256": "dde75df435f061eaa0f6db84b1c30866aaa442d7038aaa62ea3c2be92f15d87d",
+        "archiveSha256": "0f1c9192eac7d56329dddc620f9f1666b707e9c8ed38fe1f988d0ae3e30b24e6",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "D2Coding-Regular.woff2",
@@ -23,8 +30,15 @@
       "copyright": "Copyright (c) 2015, NAVER Corporation (https://www.navercorp.com),",
       "source": "https://github.com/naver/d2codingfont",
       "sourceName": "naver/d2codingfont",
-      "bytes": 1485508,
-      "sha256": "358df12fdf9b65d0fd31554a826f97af4eeefd96a047297a28a856315fe872c1"
+      "bytes": 1681204,
+      "sha256": "ba8c8846afcf8ee39f901ce3331bd886dcead67f8d64d65324841d81685996db",
+      "upstream": {
+        "url": "https://github.com/naver/d2codingfont/releases/download/VER1.3.2/D2Coding-Ver1.3.2-20180524.zip",
+        "member": "D2Coding/D2Coding-Ver1.3.2-20180524.ttf",
+        "sha256": "8b1b23e5de4dff652fb0b938528150d2f531edfda281d3944618b655711aba84",
+        "archiveSha256": "0f1c9192eac7d56329dddc620f9f1666b707e9c8ed38fe1f988d0ae3e30b24e6",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "GowunBatang-Bold.woff2",
@@ -71,8 +85,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanumgothic",
       "sourceName": "Google Fonts (google/fonts ofl/nanumgothic)",
-      "bytes": 417252,
-      "sha256": "0bd36842cc218a7b0e1c0f5ec796d90152a02e4cd487b2d868f1130708fe551a"
+      "bytes": 440012,
+      "sha256": "f1a3a97599e73746b1af08f88bc542c0f6b091818ffa67b31efb5b88d49ebc2e",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Bold.ttf",
+        "sha256": "f96298f9fb18e364d2370f4c3ce948ac67a2b61af992d7234bc15c42b033c674",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NanumGothic-ExtraBold.woff2",
@@ -83,8 +102,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanumgothic",
       "sourceName": "Google Fonts (google/fonts ofl/nanumgothic)",
-      "bytes": 376972,
-      "sha256": "cffea22fa5791731b3de9f9c48b58f4c9eff52581f29377d364a751e63b81ca3"
+      "bytes": 402288,
+      "sha256": "a1961b5f8820d1c03519e21858508bedd32ea9f748805db5cad11536404c1801",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-ExtraBold.ttf",
+        "sha256": "5c4568e5295a8c52bc30e7efa1ea6d2de43556268ef42daba93540a1ece691ae",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NanumGothic-Regular.woff2",
@@ -95,8 +119,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanumgothic",
       "sourceName": "Google Fonts (google/fonts ofl/nanumgothic)",
-      "bytes": 340688,
-      "sha256": "4a000e3bca1298c43c70dc97447e537a27e0a8c1585f410be57dfeff06d3f713"
+      "bytes": 363844,
+      "sha256": "b2b25ce9c9179e0a4c867bd2610e1db5595965345aa1cdb857964ab802c4ee3e",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Regular.ttf",
+        "sha256": "76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NanumGothicCoding-Bold.woff2",
@@ -107,8 +136,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanumgothiccoding",
       "sourceName": "Google Fonts (google/fonts ofl/nanumgothiccoding)",
-      "bytes": 534060,
-      "sha256": "2fe66da1c9c3f8beca2c618a139e7edabd36a26dd810a324ced06f8b214b2ccd"
+      "bytes": 798992,
+      "sha256": "22be32eef8f0704f8e1a3a787341228c992859c445957cefa866be20d8f10084",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/NanumGothicCoding-Bold.ttf",
+        "sha256": "77a6de97c176b76ef9a683b565a1e6f4ce40b499c72a2972c4b5bdf7c6b8e7a0",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NanumGothicCoding-Regular.woff2",
@@ -119,8 +153,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanumgothiccoding",
       "sourceName": "Google Fonts (google/fonts ofl/nanumgothiccoding)",
-      "bytes": 521332,
-      "sha256": "87ab32ebaf4e1f803099ad1d096744092c8f985b2e08a24e2304f5ac05d81d6a"
+      "bytes": 766308,
+      "sha256": "286816fcf28135864f4c900e8b8867b11bba875461ac319305b511bfc0120494",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/NanumGothicCoding-Regular.ttf",
+        "sha256": "787effd7efed2abca88ade231faa8191f4e9fcf85b1805a13ee1dc3724b72089",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NanumMyeongjo-Bold.woff2",
@@ -131,8 +170,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanummyeongjo",
       "sourceName": "Google Fonts (google/fonts ofl/nanummyeongjo)",
-      "bytes": 575580,
-      "sha256": "f2c95c35d72782f71cb60e3cc537c461ae3f5ee7e7504db9653ba7a7024dd548"
+      "bytes": 608768,
+      "sha256": "65c47ec072dd91cbaac538f4482be3185fb0896b5f3909aa8a9834604b1eec08",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/NanumMyeongjo-Bold.ttf",
+        "sha256": "bc9ed8e60d93fe6db054b8fb988481b625f2eef8cb2317ad0e9834681b8fe3f3",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NanumMyeongjo-ExtraBold.woff2",
@@ -143,8 +187,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanummyeongjo",
       "sourceName": "Google Fonts (google/fonts ofl/nanummyeongjo)",
-      "bytes": 694516,
-      "sha256": "b3d23b3f93f4bdad6c9b7f69b11156f90f1576b8383f6117448ee79e27609e56"
+      "bytes": 728364,
+      "sha256": "dda2e9b5d670b63dd66a9a83468ee0ee9e64bef09d4fc24771865a7ab2529332",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/NanumMyeongjo-ExtraBold.ttf",
+        "sha256": "60c0077fce069ba90ae97c0a3679f6eb3712e0ca637bdd0c15b72d335ec46db7",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NanumMyeongjo-Regular.woff2",
@@ -155,8 +204,13 @@
       "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com),",
       "source": "https://github.com/google/fonts/tree/main/ofl/nanummyeongjo",
       "sourceName": "Google Fonts (google/fonts ofl/nanummyeongjo)",
-      "bytes": 502068,
-      "sha256": "561e9193a6e848b3f7ce9f8f5907310a13e175bc9d69e77da2842a7517a97c16"
+      "bytes": 536732,
+      "sha256": "52d27bf4ee205020a4aa9eb19ef4835e4aa04a94f7742b13e69e5c8b9a74072a",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/NanumMyeongjo-Regular.ttf",
+        "sha256": "7ed9e8653a8ed04285d51dc343ffea6eb3d9c73afc27383ea8929ee4ffd03205",
+        "conversion": "woff2-compression"
+      }
     },
     {
       "file": "NotoSansKR-Bold.woff2",
@@ -168,7 +222,8 @@
       "source": "https://github.com/google/fonts/tree/main/ofl/notosanskr",
       "sourceName": "Google Fonts (google/fonts ofl/notosanskr)",
       "bytes": 559192,
-      "sha256": "dab3d492daa687386292cff1499225db580f931f800ee0d124eb0636378c6020"
+      "sha256": "dab3d492daa687386292cff1499225db580f931f800ee0d124eb0636378c6020",
+      "reservedNameNotUsed": "The license reserves the name 'Source'; this family is distributed as Noto Sans KR."
     },
     {
       "file": "NotoSansKR-ExtraLight.woff2",
@@ -180,7 +235,8 @@
       "source": "https://github.com/google/fonts/tree/main/ofl/notosanskr",
       "sourceName": "Google Fonts (google/fonts ofl/notosanskr)",
       "bytes": 592496,
-      "sha256": "3b5cac6af73fd94fa91ded10f6cfc54c7ce52189986fe7ca6fd457208f1d3673"
+      "sha256": "3b5cac6af73fd94fa91ded10f6cfc54c7ce52189986fe7ca6fd457208f1d3673",
+      "reservedNameNotUsed": "The license reserves the name 'Source'; this family is distributed as Noto Sans KR."
     },
     {
       "file": "NotoSansKR-Regular.woff2",
@@ -192,7 +248,8 @@
       "source": "https://github.com/google/fonts/tree/main/ofl/notosanskr",
       "sourceName": "Google Fonts (google/fonts ofl/notosanskr)",
       "bytes": 562220,
-      "sha256": "d1bf8649914a4fe9477a8735bf056383e44e466141fb3d61897252e06d900c1a"
+      "sha256": "d1bf8649914a4fe9477a8735bf056383e44e466141fb3d61897252e06d900c1a",
+      "reservedNameNotUsed": "The license reserves the name 'Source'; this family is distributed as Noto Sans KR."
     },
     {
       "file": "NotoSerifKR-Bold.woff2",
@@ -228,7 +285,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 800404,
-      "sha256": "c5fd0c3568fc1368a3edc0d0fbb36df029935954276e3573451b3bae09e27296"
+      "sha256": "c5fd0c3568fc1368a3edc0d0fbb36df029935954276e3573451b3bae09e27296",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Black.woff2",
+        "sha256": "c5fd0c3568fc1368a3edc0d0fbb36df029935954276e3573451b3bae09e27296",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-Bold.woff2",
@@ -240,7 +302,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 791156,
-      "sha256": "4609c3356e536fafe38f4add0daeceb3d8595d3057bce13c428c33ddbd43d362"
+      "sha256": "4609c3356e536fafe38f4add0daeceb3d8595d3057bce13c428c33ddbd43d362",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Bold.woff2",
+        "sha256": "4609c3356e536fafe38f4add0daeceb3d8595d3057bce13c428c33ddbd43d362",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-ExtraBold.woff2",
@@ -252,7 +319,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 793540,
-      "sha256": "dd7c1e156f508eb962acc7a33a7a1896d1e0b71e11156fad96e731689ceb6dc3"
+      "sha256": "dd7c1e156f508eb962acc7a33a7a1896d1e0b71e11156fad96e731689ceb6dc3",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-ExtraBold.woff2",
+        "sha256": "dd7c1e156f508eb962acc7a33a7a1896d1e0b71e11156fad96e731689ceb6dc3",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-ExtraLight.woff2",
@@ -264,7 +336,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 734392,
-      "sha256": "df43dc9165dff4542114674bcd8b79b7daae6dec004004586d5d076fec6fe2aa"
+      "sha256": "df43dc9165dff4542114674bcd8b79b7daae6dec004004586d5d076fec6fe2aa",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-ExtraLight.woff2",
+        "sha256": "df43dc9165dff4542114674bcd8b79b7daae6dec004004586d5d076fec6fe2aa",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-Light.woff2",
@@ -276,7 +353,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 757000,
-      "sha256": "b7426635cce2ea2b95c9c802e43fba1c620e0dafaf25f737c069b8b4e09fa841"
+      "sha256": "b7426635cce2ea2b95c9c802e43fba1c620e0dafaf25f737c069b8b4e09fa841",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Light.woff2",
+        "sha256": "b7426635cce2ea2b95c9c802e43fba1c620e0dafaf25f737c069b8b4e09fa841",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-Medium.woff2",
@@ -288,7 +370,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 778432,
-      "sha256": "d03481330eeba0659ab5b87f25ceb504a35de377dd90a0d0aba2982eb2d05e2c"
+      "sha256": "d03481330eeba0659ab5b87f25ceb504a35de377dd90a0d0aba2982eb2d05e2c",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Medium.woff2",
+        "sha256": "d03481330eeba0659ab5b87f25ceb504a35de377dd90a0d0aba2982eb2d05e2c",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-Regular.woff2",
@@ -300,7 +387,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 765892,
-      "sha256": "fad853f7f47c6c8b103171e7193fa095708cdcd70850a71d93aa5379e8a61d63"
+      "sha256": "fad853f7f47c6c8b103171e7193fa095708cdcd70850a71d93aa5379e8a61d63",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Regular.woff2",
+        "sha256": "fad853f7f47c6c8b103171e7193fa095708cdcd70850a71d93aa5379e8a61d63",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-SemiBold.woff2",
@@ -312,7 +404,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 785856,
-      "sha256": "c863f76a7de5c1ddc1ed8b2fa794964530774592c4f31407a84e2a2ae93f17f0"
+      "sha256": "c863f76a7de5c1ddc1ed8b2fa794964530774592c4f31407a84e2a2ae93f17f0",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-SemiBold.woff2",
+        "sha256": "c863f76a7de5c1ddc1ed8b2fa794964530774592c4f31407a84e2a2ae93f17f0",
+        "conversion": "none"
+      }
     },
     {
       "file": "Pretendard-Thin.woff2",
@@ -324,7 +421,12 @@
       "source": "https://github.com/orioncactus/pretendard",
       "sourceName": "orioncactus/pretendard release (byte-identical woff2)",
       "bytes": 694804,
-      "sha256": "1539755224a64719d5b18406762c476db74fcc299b9e4641ca1e9812fbc7a09b"
+      "sha256": "1539755224a64719d5b18406762c476db74fcc299b9e4641ca1e9812fbc7a09b",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/orioncactus/pretendard/main/packages/pretendard/dist/web/static/woff2/Pretendard-Thin.woff2",
+        "sha256": "1539755224a64719d5b18406762c476db74fcc299b9e4641ca1e9812fbc7a09b",
+        "conversion": "none"
+      }
     },
     {
       "file": "SpoqaHanSans-Regular.woff2",
@@ -335,8 +437,13 @@
       "copyright": "Copyright (c) 2015-10-09 Spoqa (spoqa.com), with Reserved Font Name Spoqa Han Sans.",
       "source": "https://github.com/spoqa/spoqa-han-sans",
       "sourceName": "spoqa/spoqa-han-sans",
-      "bytes": 275144,
-      "sha256": "6568bf80b50c14f2e54f56f2c07e668416f39f880baf5ea2825d315767f98f69"
+      "bytes": 308248,
+      "sha256": "745d16ab5a42c81cfd456d11cd5c0acf29628691803944ba54ace13a0d93c886",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/spoqa/spoqa-han-sans/master/Subset/SpoqaHanSans/SpoqaHanSansRegular.woff2",
+        "sha256": "745d16ab5a42c81cfd456d11cd5c0acf29628691803944ba54ace13a0d93c886",
+        "conversion": "none"
+      }
     }
   ]
 }
