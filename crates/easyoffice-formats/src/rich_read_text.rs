@@ -13,145 +13,176 @@ fn is_ws(c: Option<char>) -> bool {
     c.is_none_or(char::is_whitespace)
 }
 
-/// Parses inline markers into formatted runs.
-pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut runs: Vec<RichRun> = Vec::new();
-    let mut fmt = CharFmt::default();
-    let mut buf = String::new();
-    let mut i = 0usize;
-    let starts = |at: usize, pat: &str| -> bool {
+/// Inline Markdown scanner state.
+struct MdInline {
+    chars: Vec<char>,
+    runs: Vec<RichRun>,
+    fmt: CharFmt,
+    buf: String,
+    i: usize,
+}
+
+impl MdInline {
+    fn starts(&self, at: usize, pat: &str) -> bool {
         pat.chars()
             .enumerate()
-            .all(|(k, p)| chars.get(at + k) == Some(&p))
-    };
-    macro_rules! flush {
-        () => {
-            push_run(&mut runs, &buf, &fmt);
-            buf.clear();
-        };
+            .all(|(k, p)| self.chars.get(at + k) == Some(&p))
     }
-    while i < chars.len() {
-        let c = chars[i];
-        let next = chars.get(i + 1).copied();
-        let prev = if i > 0 {
-            chars.get(i - 1).copied()
-        } else {
-            None
-        };
+
+    fn flush(&mut self) {
+        push_run(&mut self.runs, &self.buf, &self.fmt);
+        self.buf.clear();
+    }
+
+    fn at(&self, idx: usize) -> Option<char> {
+        self.chars.get(idx).copied()
+    }
+
+    fn step(&mut self) {
+        let i = self.i;
+        let c = self.chars[i];
+        let next = self.at(i + 1);
+        let prev = if i > 0 { self.at(i - 1) } else { None };
         match c {
-            '\\' => match next {
-                Some('\n') => {
-                    buf.push('\n');
-                    i += 2;
-                }
-                Some(n) if n.is_ascii_punctuation() => {
-                    buf.push(n);
-                    i += 2;
-                }
-                _ => {
-                    buf.push('\\');
-                    i += 1;
-                }
-            },
-            '\n' => {
-                if buf.ends_with("  ") {
-                    let keep = buf.trim_end_matches(' ').len();
-                    buf.truncate(keep);
-                    buf.push('\n');
-                } else {
-                    buf.push(' ');
-                }
-                i += 1;
-            }
-            '<' if starts(i, "<u>") => {
-                flush!();
-                fmt.underline = true;
-                i += 3;
-            }
-            '<' if starts(i, "</u>") => {
-                flush!();
-                fmt.underline = false;
-                i += 4;
-            }
+            '\\' => self.escape(next),
+            '\n' => self.soft_break(),
+            '<' if self.starts(i, "<u>") => self.toggle_underline(true, 3),
+            '<' if self.starts(i, "</u>") => self.toggle_underline(false, 4),
             '*' if next == Some('*') => {
-                if (!fmt.bold && !is_ws(chars.get(i + 2).copied())) || (fmt.bold && !is_ws(prev)) {
-                    flush!();
-                    fmt.bold = !fmt.bold;
+                let can_open = !self.fmt.bold && !is_ws(self.at(i + 2));
+                let can_close = self.fmt.bold && !is_ws(prev);
+                if can_open || can_close {
+                    self.flush();
+                    self.fmt.bold = !self.fmt.bold;
                 } else {
-                    buf.push_str("**");
+                    self.buf.push_str("**");
                 }
-                i += 2;
+                self.i += 2;
             }
             '~' if next == Some('~') => {
-                if (!fmt.strike && !is_ws(chars.get(i + 2).copied()))
-                    || (fmt.strike && !is_ws(prev))
-                {
-                    flush!();
-                    fmt.strike = !fmt.strike;
+                let can_open = !self.fmt.strike && !is_ws(self.at(i + 2));
+                let can_close = self.fmt.strike && !is_ws(prev);
+                if can_open || can_close {
+                    self.flush();
+                    self.fmt.strike = !self.fmt.strike;
                 } else {
-                    buf.push_str("~~");
+                    self.buf.push_str("~~");
                 }
-                i += 2;
+                self.i += 2;
             }
-            '*' | '_' => {
-                let open = !fmt.italic
-                    && !is_ws(next)
-                    && (c == '*' || prev.is_none_or(|p| !p.is_alphanumeric()));
-                let close = fmt.italic
-                    && !is_ws(prev)
-                    && (c == '*' || next.is_none_or(|n| !n.is_alphanumeric()));
-                if open || close {
-                    flush!();
-                    fmt.italic = !fmt.italic;
-                } else {
-                    buf.push(c);
-                }
-                i += 1;
-            }
-            '`' => {
-                if let Some(end) = chars[i + 1..].iter().position(|&x| x == '`') {
-                    buf.extend(&chars[i + 1..i + 1 + end]);
-                    i += end + 2;
-                } else {
-                    buf.push('`');
-                    i += 1;
-                }
-            }
-            '!' | '[' => {
-                let bracket = if c == '!' && next == Some('[') {
-                    i + 1
-                } else if c == '[' {
-                    i
-                } else {
-                    usize::MAX
-                };
-                let mut handled = false;
-                if bracket != usize::MAX {
-                    if let Some(close) = chars[bracket + 1..].iter().position(|&x| x == ']') {
-                        let close = bracket + 1 + close;
-                        if chars.get(close + 1) == Some(&'(') {
-                            if let Some(end) = chars[close + 2..].iter().position(|&x| x == ')') {
-                                buf.extend(&chars[bracket + 1..close]);
-                                i = close + 2 + end + 1;
-                                handled = true;
-                            }
-                        }
-                    }
-                }
-                if !handled {
-                    buf.push(c);
-                    i += 1;
-                }
-            }
+            '*' | '_' => self.emphasis(c, prev, next),
+            '`' => self.code_span(),
+            '!' | '[' => self.link_or_image(c, next),
             _ => {
-                buf.push(c);
-                i += 1;
+                self.buf.push(c);
+                self.i += 1;
             }
         }
     }
-    flush!();
-    runs
+
+    fn escape(&mut self, next: Option<char>) {
+        match next {
+            Some('\n') => {
+                self.buf.push('\n');
+                self.i += 2;
+            }
+            Some(n) if n.is_ascii_punctuation() => {
+                self.buf.push(n);
+                self.i += 2;
+            }
+            _ => {
+                self.buf.push('\\');
+                self.i += 1;
+            }
+        }
+    }
+
+    fn soft_break(&mut self) {
+        if self.buf.ends_with("  ") {
+            let keep = self.buf.trim_end_matches(' ').len();
+            self.buf.truncate(keep);
+            self.buf.push('\n');
+        } else {
+            self.buf.push(' ');
+        }
+        self.i += 1;
+    }
+
+    fn toggle_underline(&mut self, on: bool, len: usize) {
+        self.flush();
+        self.fmt.underline = on;
+        self.i += len;
+    }
+
+    fn emphasis(&mut self, c: char, prev: Option<char>, next: Option<char>) {
+        let open = !self.fmt.italic
+            && !is_ws(next)
+            && (c == '*' || prev.is_none_or(|p| !p.is_alphanumeric()));
+        let close = self.fmt.italic
+            && !is_ws(prev)
+            && (c == '*' || next.is_none_or(|n| !n.is_alphanumeric()));
+        if open || close {
+            self.flush();
+            self.fmt.italic = !self.fmt.italic;
+        } else {
+            self.buf.push(c);
+        }
+        self.i += 1;
+    }
+
+    fn code_span(&mut self) {
+        let i = self.i;
+        if let Some(end) = self.chars[i + 1..].iter().position(|&x| x == '`') {
+            self.buf.extend(&self.chars[i + 1..i + 1 + end]);
+            self.i += end + 2;
+        } else {
+            self.buf.push('`');
+            self.i += 1;
+        }
+    }
+
+    /// Replaces `[text](url)` / `![alt](url)` with its label; otherwise keeps the character.
+    fn link_or_image(&mut self, c: char, next: Option<char>) {
+        let i = self.i;
+        let bracket = match (c, next) {
+            ('!', Some('[')) => Some(i + 1),
+            ('[', _) => Some(i),
+            _ => None,
+        };
+        if let Some((label_range, after)) = bracket.and_then(|b| self.link_span(b)) {
+            self.buf.extend(&self.chars[label_range]);
+            self.i = after;
+        } else {
+            self.buf.push(c);
+            self.i += 1;
+        }
+    }
+
+    /// Label range and the index after `)` for a link whose `[` is at `bracket`.
+    fn link_span(&self, bracket: usize) -> Option<(std::ops::Range<usize>, usize)> {
+        let close = bracket + 1 + self.chars[bracket + 1..].iter().position(|&x| x == ']')?;
+        if self.chars.get(close + 1) != Some(&'(') {
+            return None;
+        }
+        let end = self.chars[close + 2..].iter().position(|&x| x == ')')?;
+        Some((bracket + 1..close, close + 2 + end + 1))
+    }
+}
+
+/// Parses inline markers into formatted runs.
+pub(crate) fn parse_md_inline(text: &str) -> Vec<RichRun> {
+    let mut scanner = MdInline {
+        chars: text.chars().collect(),
+        runs: Vec::new(),
+        fmt: CharFmt::default(),
+        buf: String::new(),
+        i: 0,
+    };
+    while scanner.i < scanner.chars.len() {
+        scanner.step();
+    }
+    scanner.flush();
+    scanner.runs
 }
 
 fn paragraph(text: &str, heading: u8, list: Option<RichListKind>) -> RichBlock {
