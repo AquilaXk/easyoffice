@@ -1662,7 +1662,7 @@
 
 ## 71. 문서 그림 블록: PNG/JPEG 모델, 상한, 형식별 처리 (PD-096)
 
-- **Status** Implemented (모델, DOCX·ODT·HWPX·PDF 작성, DOCX·Pages 읽기, 편집기 JSON 왕복과 표시). ODT·HWPX 읽기는 후속(#168).
+- **Status** Implemented (모델, DOCX·ODT·HWPX·PDF 작성, DOCX·ODT·HWPX·Pages 읽기, 편집기 JSON 왕복과 표시).
 - **Context** 서식 문서 모델(`RichDocument`)에 그림이 없어 Pages·DOCX 그림이 변환 때 사라졌습니다(#168).
 - **Decision (`PD-096`)**
   1. **모델**: `RichBlock::Image(RichImage)`. 바이트, 형식(PNG·JPEG, 매직 바이트로 판정), 화소 크기, 표시 크기(EMU 하나로 통일), 대체 텍스트를 가집니다. `RichImage::new`만이 만드는 길이라 모든 그림이 같은 검증을 거칩니다. 표시 크기는 화소×9,525EMU(96dpi)를 쪽 본문(폭 5,731,510EMU, 높이 8,640,000EMU)에 맞춰 비율을 유지하며 줄인 값이고, `set_display_emu`로 바꿀 수 있습니다.
@@ -1670,12 +1670,12 @@
   3. **상한**: 그림 하나 32MiB(`MAX_IMAGE_BYTES`), 화소 5,000만(`MAX_IMAGE_PIXELS`), 대체 텍스트 4,096바이트, 문서당 256개(`MAX_IMAGES_PER_DOCUMENT`)·합계 128MiB(`MAX_TOTAL_IMAGE_BYTES`). 작성기는 상한을 넘으면 `ResourceBudgetExceeded`로 실패하고, 읽기기는 개별 그림의 손상·형식·크기 문제는 경고와 함께 건너뛰되 문서당 개수·합계 초과는 오류로 처리합니다.
   4. **작성**: DOCX는 `word/media/imageN.(png|jpg)` + 관계(`rId2`부터) + `[Content_Types].xml` 기본 확장자 + 본문 `w:drawing/wp:inline`(대체 텍스트는 `wp:docPr descr`). ODT는 `Pictures/imageN.*` + 매니페스트 항목 + `draw:frame/draw:image`(as-char, 대체 텍스트는 `svg:desc`). HWPX는 `BinData/imageN.*` + `content.hpf`·매니페스트 항목 + `hp:pic`(`hc:img binaryItemIDRef`, 설명은 `hp:shapeComment`). 모든 파트는 모델의 바이트를 그대로 저장합니다. PDF는 그림마다 한 쪽을 쓰고(A4 여백 안에 비율 유지 축소), JPEG(회색·RGB)는 `DCTDecode`로 그대로, 투명도 없는 PNG(8비트 이하)는 IDAT를 `FlateDecode`+`Predictor 15`로 그대로, 알파가 있는 8비트 PNG는 필터를 되돌려 색과 알파로 나눠 각각 압축하고 알파는 `/SMask`로 둡니다(최대 1,600만 화소). 팔레트·인터레이스·16비트 PNG와 CMYK JPEG는 PDF에 넣지 않고 대체 텍스트 줄로 낮춥니다.
   5. **그림이 없는 형식**: RTF·Markdown·TXT, 그리고 평면 모델을 쓰는 형식은 대체 텍스트(없으면 `[그림]`)를 한 문단으로 씁니다. WebUI 편집기 JSON은 그림을 `{"type":"image","format","base64","widthPx","heightPx","widthEmu","heightEmu","alt"}` 블록으로 주고받습니다. 저장 때 바이트를 `RichImage::new`로 다시 검증하므로 위 상한이 그대로 적용되고, 손상·과대·형식 불일치 그림은 저장이 거부됩니다. 편집기에서 그림은 편집할 수 없는 `<img class="doc-inline-image" contenteditable="false">`이며 바이트는 DOM이 아니라 `sheet-utils.js`의 그림 저장소에 한 번만 두고 노드에는 id·크기·대체 텍스트(`data-eo-image-*`)만 남겨 되돌리기 스냅샷이 커지지 않습니다. 표시는 `blob:` URL이라 데스크톱 셸(CSP `img-src 'self' data: blob:`)에서 보이고, `--serve`의 기본 CSP(`default-src 'self'`)에서는 브라우저가 막아 대체 텍스트만 보입니다(CSP는 바꾸지 않음). 충돌 복구 기록처럼 바이트 저장소가 비어 있으면 저장 때 그림은 대체 텍스트 문단이 됩니다.
-  6. **읽기**: DOCX는 `w:drawing`의 `a:blip r:embed`를 문서 관계로 풀어 `word/` 아래 미디어를 읽고(경로 이탈·외부 대상 거부), `wp:extent`와 `wp:docPr descr`를 크기·대체 텍스트로 씁니다. 표 안의 그림과 포함되지 않은 도형·차트는 경고와 함께 건너뜁니다. Pages는 그림 개체(형식 3005)의 데이터 식별자를 패키지 메타데이터(형식 11006)의 파일 이름으로 풀어 `Data/` 파일을 읽고 기하 크기(pt)를 표시 크기로 씁니다. 그림은 첨부 위치(문단 바로 뒤)의 문서 순서에 놓입니다.
+  6. **읽기**: ODT는 `draw:frame/draw:image`(`xlink:href`가 패키지 안 상대 경로일 때만 — 절대 경로·`..`·`:`가 든 외부 링크는 경고와 함께 건너뜀, 크기는 `svg:width/height`, 대체 텍스트는 `svg:desc`, 없으면 `svg:title`), HWPX는 `hp:pic`의 `hc:img binaryItemIDRef`를 `content.hpf`의 `opf:item`으로 풀어 `BinData` 파일을 읽고(`hp:curSz` HWPUNIT×127 = EMU, 대체 텍스트는 `hp:shapeComment`) 같은 검증·상한을 적용합니다. 표 안의 그림은 경고와 함께 건너뜁니다. DOCX는 `w:drawing`의 `a:blip r:embed`를 문서 관계로 풀어 `word/` 아래 미디어를 읽고(경로 이탈·외부 대상 거부), `wp:extent`와 `wp:docPr descr`를 크기·대체 텍스트로 씁니다. 표 안의 그림과 포함되지 않은 도형·차트는 경고와 함께 건너뜁니다. Pages는 그림 개체(형식 3005)의 데이터 식별자를 패키지 메타데이터(형식 11006)의 파일 이름으로 풀어 `Data/` 파일을 읽고 기하 크기(pt)를 표시 크기로 씁니다. 그림은 첨부 위치(문단 바로 뒤)의 문서 순서에 놓입니다.
 - **Why** 그림이 있는 문서를 열고 다른 형식으로 저장해도 그림이 남게 하기 위함입니다. 형식을 두 가지로 한정한 것은 문서 형식 대부분이 이 둘을 그대로 담을 수 있고 재인코딩 없이 바이트를 보존할 수 있기 때문입니다.
 - **Trade-offs** 구조 검증만 하고 화소 디코드는 하지 않으므로 압축 데이터가 깨진 PNG는 열람기에서야 드러납니다(PDF의 알파 PNG만 디코드). 쪽 배치는 인라인(글자처럼 취급) 하나뿐이며 글 감싸기·자르기·회전은 읽지 않습니다. Pages 개체 스키마는 공개 문서가 없어 픽스처로 확인한 필드만 씁니다.
 - **Alternatives rejected** GIF·WebP·SVG 허용(재인코딩 또는 별도 파서 필요, 공격 면 증가), 그림 바이트를 열 때 전부 디코드해 검증(큰 PNG에서 메모리 폭증), 모든 그림을 PDF에서 래스터화해 한 형식으로 통일(화질 손실과 의존성).
 - **Verified by** `cargo test -p easyoffice-formats --test rich_images --test pages_fixtures`(작성기별 파트·참조·바이트 일치, DOCX 왕복, 손상·과대·과다 그림 거부, PDF 스트림, Pages 픽스처의 정확한 바이트·위치), `cargo test -p easyoffice-formats pdf_image`(PNG 필터 5종 복원).
-- **Revisit when** ODT·HWPX 읽기와 편집기 그림 블록을 추가할 때, 글 감싸기·자르기 지원을 요구받을 때, GIF·WebP 요구가 생길 때.
+- **Revisit when** 글 감싸기·자르기 지원을 요구받을 때, GIF·WebP 요구가 생길 때, 편집기에 그림 삽입 UI를 넣을 때.
 
 ## 72. Pages 가져오기 2단계: 도형 글자, 각주·머리글·바닥글 부록, 글꼴·첨자·들여쓰기·줄 간격 (PD-097)
 
@@ -1686,7 +1686,7 @@
   2. **부록**: 각주(본문 저장소 필드 11 → 형식 2012 → 글 저장소), 머리글, 바닥글 문단을 본문 끝 뒤에 제목 문단("각주", "머리글", "바닥글", 제목 수준 2)과 함께 이어 붙입니다. 머리글·바닥글은 모든 머리글/바닥글 목록(형식 10143)을 개체 번호 순으로 읽고 같은 문단은 한 번만 넣으며, 쪽 번호 같은 표식은 건너뛴 개체로 세지 않습니다(쪽 번호 자리는 빈 글자). 각주는 본문의 표식 위치와 연결하지 않고 목록으로만 둡니다. 댓글은 계속 가져오지 않고 경고로 알립니다.
   3. **글자 서식**: `RichRun.script`(`Normal`/`Superscript`/`Subscript`)를 추가했습니다. 글꼴 이름은 문단 스타일에는 템플릿 기본 글꼴이 항상 들어 있어 글자 스타일에 지정된 것만 가져옵니다.
   4. **문단 서식**: `RichParagraph`에 왼쪽 들여쓰기(twip), 첫 줄 들여쓰기(twip, 음수는 내어쓰기), 줄 간격(단일 간격의 백분율)을 추가했습니다. Pages는 줄 간격 "배수" 방식만 읽고 100%는 지정 없음으로 둡니다. 스타일에서 상속된 값도 그대로 가져옵니다(예: 인용 스타일의 왼쪽 여백).
-  5. **작성기**: DOCX는 `w:vertAlign`, `w:spacing w:line`(자동), `w:ind`(left/firstLine/hanging)로, ODT는 `style:text-position`(`super 58%`/`sub 58%`), `fo:margin-left`, `fo:text-indent`, `fo:line-height`로, HWPX는 `hh:supscript`/`hh:subscript`, `hc:intent`/`hc:left`(1twip=5HWPUNIT), `hh:lineSpacing`(PERCENT)로 씁니다. RTF·Markdown·TXT·PDF는 이 서식을 쓰지 않습니다. 읽기는 DOCX(첨자·들여쓰기·줄 간격)와 ODT(첨자)만 합니다.
+  5. **작성기**: DOCX는 `w:vertAlign`, `w:spacing w:line`(자동), `w:ind`(left/firstLine/hanging)로, ODT는 `style:text-position`(`super 58%`/`sub 58%`), `fo:margin-left`, `fo:text-indent`, `fo:line-height`로, HWPX는 `hh:supscript`/`hh:subscript`, `hc:intent`/`hc:left`(1twip=5HWPUNIT), `hh:lineSpacing`(PERCENT)로 씁니다. RTF·Markdown·TXT·PDF는 이 서식을 쓰지 않습니다. 읽기는 DOCX, ODT, HWPX가 모두 첨자·들여쓰기·줄 간격을 되돌립니다. ODT는 `fo:margin-left`·`fo:text-indent`·`fo:line-height`(%)와 `style:text-position`을, HWPX는 `hc:left`·`hc:intent`(1twip=5HWPUNIT)·`hh:lineSpacing` PERCENT와 `hh:supscript/subscript`를 읽습니다. 목록 표식으로 쓰는 값(ODT `0.5in`, HWPX 2000HWPUNIT)은 들여쓰기가 아니라 목록으로 읽고, HWPX는 작성기 기본 줄 간격 160%를 지정 없음으로 봅니다.
   6. **표 병합**: 모델에 병합 표현이 없어 기존 방식(병합 영역의 첫 칸만 값, 나머지는 빈 칸)을 유지합니다.
 - **Why** 본문 흐름 밖 글자와 서식이 조용히 사라지는 것을 줄이고, 남은 것은 경고로 알리기 위함입니다.
 - **Trade-offs** 각주가 부록으로 옮겨져 본문 위치와의 연결을 잃습니다. 필드 번호는 픽스처로 확인한 것만 씁니다(전체 레이아웃의 글꼴·첨자·문단 속성은 확인하지 못해 읽지 않음). 편집기 JSON은 `script`(`superscript`/`subscript`), `leftIndentTwips`, `firstLineIndentTwips`, `lineSpacingPercent`로 새 서식을 주고받습니다(편집기는 `<sup>`/`<sub>`, 문단의 `padding-left`·`text-indent`·`line-height`로 표시하며 열 때의 정확한 twip 값을 `data-eo-*`에 보존).
