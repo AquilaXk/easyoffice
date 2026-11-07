@@ -28,6 +28,7 @@ const TEST_SUPPORT_MODULES = [
 const PROD_APP_SCRIPTS = [
   "../crates/easyoffice-app/ui/home-screen.js",
   "../crates/easyoffice-app/ui/recent-documents-dialog.js",
+  "../crates/easyoffice-app/ui/update-notice.js",
   "../crates/easyoffice-app/ui/pii-dom-scrubber.js",
   "../crates/easyoffice-app/ui/sheet-store.js",
   "../crates/easyoffice-app/ui/ribbon-catalog.js",

@@ -350,6 +350,10 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         include_str!("../ui/recent-documents-dialog.js"),
         "__EASYOFFICE_RECENT_DIALOG__",
     ),
+    (
+        include_str!("../ui/update-notice.js"),
+        "__EASYOFFICE_CREATE_UPDATE_NOTICE__",
+    ),
     (include_str!("../ui/icons.js"), "__EASYOFFICE_ICONS__"),
     (
         include_str!("../ui/window-bridge.js"),
@@ -367,6 +371,7 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         include_str!("../ui/index.html"),
         "./recent-documents-dialog.js",
     ),
+    (include_str!("../ui/index.html"), "./update-notice.js"),
     (include_str!("../ui/index.html"), "./icons.js"),
     (include_str!("../ui/index.html"), "./window-bridge.js"),
     (

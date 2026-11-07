@@ -8788,6 +8788,10 @@ The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends o
 
 No MPL, GPL or unlicensed crate is in the closure.
 
+## Desktop shell update check crates (update notice, PD-103)
+
+The desktop shell (`crates/easyoffice-desktop`, not the engine crates) depends on `ureq` 2.x (HTTP over the operating system's TLS stack through `native-tls`), `native-tls` and `open` to ask the public releases address for the newest release at most once a day and to open the release page in the default browser. Licenses of the 15 crates these three add to the shell (checked with `cargo metadata`; `open`, `is-docker` and `is-wsl` are MIT): `ureq`, `native-tls`, `openssl-probe`, `security-framework`, `security-framework-sys`, `foreign-types`, `foreign-types-shared`, `openssl-macros`, `base64`, `schannel` are MIT OR Apache-2.0 (or MIT/Apache-2.0, or MIT); `openssl` is Apache-2.0 and `openssl-sys` is MIT (Linux builds only; the OpenSSL library itself is the system's own and is not bundled). No bundled TLS library, no MPL, GPL or unlicensed crate.
+
 ## hop (code adapted)
 
 hop (MIT, https://github.com/golbin/hop, reference commit `80888af`, v0.4.5) is the model for the EasyOffice window UI (PD-098) and for the build and verification patterns of the `apps/hwp-studio` overlay (pinned upstream checkout, Vite alias overlay with an override manifest, vendored WebAssembly with provenance, font policy). Where hop code is ported, the TypeScript is rewritten as plain JavaScript or the CSS is copied with its tokens renamed, each ported file starts with a header naming its hop source, and the file is listed here first:
@@ -8797,6 +8801,9 @@ hop (MIT, https://github.com/golbin/hop, reference commit `80888af`, v0.4.5) is 
 | `crates/easyoffice-desktop/src/pdf_font_fallbacks.rs` | `apps/desktop/src-tauri/src/pdf_font_fallbacks.rs` | Rewritten around one sorted static table of document font names with an allocation-free binary search; fallback chains name the platform's installed Korean fonts |
 | `crates/easyoffice-desktop/src/pdf_export.rs` | `apps/desktop/src-tauri/src/pdf_export.rs` | Page SVGs come from the editor as strings and are converted with svg2pdf directly (no native rhwp core); limits and fail-closed pages added |
 | `crates/easyoffice-desktop/src/native_menu.rs` | `apps/desktop/src-tauri/src/menu.rs` | Menu layout and "menu id to the focused window" delivery kept; one static item table, system items for editing and quit, EasyOffice labels, delivery by evaluating a fixed script (no event permission) |
+| `crates/easyoffice-app/ui/update-notice.js` | `apps/studio-host/src/ui/update-notice.ts` | TypeScript rewritten as JavaScript; idle and available states only, an "open the release page" action instead of the signed install and restart actions, card in the top right corner |
+| `crates/easyoffice-app/ui/home.css` (update notice rules) | `apps/studio-host/src/styles/update-notice.css` | Same rules and class names, rhwp tokens, top right position |
+| `crates/easyoffice-desktop/src/update_check.rs` | `apps/desktop/src-tauri/src/updates.rs` (idea only) | No signed updater: a once-a-day release check in Rust that only reports a newer version and opens the release page |
 | `crates/easyoffice-app/ui/home-screen.js` | `apps/studio-host/src/ui/home-screen.ts` | TypeScript rewritten as JavaScript; six new-document buttons with icons, cards without paths or previews, opening through the window bridge |
 | `crates/easyoffice-app/ui/recent-documents-dialog.js` | `apps/studio-host/src/ui/recent-documents-dialog.ts` | TypeScript rewritten as JavaScript; entries are `{ id, name, kind }`, no clear button |
 | `crates/easyoffice-app/ui/custom-select.js` | `apps/studio-host/src/ui/custom-select.ts` | TypeScript rewritten as JavaScript; only `select.sb-combo` is enhanced, programmatic `value` assignments refresh the label |

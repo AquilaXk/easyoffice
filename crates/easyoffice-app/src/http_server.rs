@@ -21,6 +21,7 @@ const MENU_BAR_CSS: &str = include_str!("../ui/menu-bar.css");
 const TOOLBAR_CSS: &str = include_str!("../ui/toolbar.css");
 const HOME_CSS: &str = include_str!("../ui/home.css");
 const HOME_SCREEN_JS: &str = include_str!("../ui/home-screen.js");
+const UPDATE_NOTICE_JS: &str = include_str!("../ui/update-notice.js");
 const RECENT_DIALOG_JS: &str = include_str!("../ui/recent-documents-dialog.js");
 const ICONS_JS: &str = include_str!("../ui/icons.js");
 const WINDOW_BRIDGE_JS: &str = include_str!("../ui/window-bridge.js");
@@ -434,6 +435,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             RECENT_DIALOG_JS.to_string(),
+        ),
+        ("GET", "/update-notice.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            UPDATE_NOTICE_JS.to_string(),
         ),
         ("GET", "/theme.js") => (
             "200 OK",
