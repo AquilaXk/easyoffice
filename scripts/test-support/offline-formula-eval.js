@@ -613,26 +613,42 @@
     return scalarTarget.kind === "error" ? scalarTarget : valNum(1);
   }
 
+  function scalarAbs(args) {
+    const n = coerceScalarNumber(args[0]);
+    return n === null ? valErr("#VALUE!") : valNum(Math.abs(n));
+  }
+
+  function scalarRound(args) {
+    const n = coerceScalarNumber(args[0]);
+    const digits = args.length === 2 ? coerceScalarNumber(args[1]) : 0;
+    if (n === null || digits === null) return valErr("#VALUE!");
+    const factor = 10 ** Math.trunc(digits);
+    return valNum(Math.round(n * factor) / factor);
+  }
+
+  function scalarLen(args) {
+    return valNum(Array.from(formatFormulaValue(args[0])).length);
+  }
+
+  function scalarNot(args) {
+    const b = coerceScalarBool(args[0]);
+    return b === null ? valErr("#VALUE!") : valBool(!b);
+  }
+
+  // Scalar functions: [min arity, max arity, implementation].
+  const SCALAR_FUNCTIONS = new Map([
+    ["ABS", [1, 1, scalarAbs]],
+    ["ROUND", [1, 2, scalarRound]],
+    ["LEN", [1, 1, scalarLen]],
+    ["NOT", [1, 1, scalarNot]],
+  ]);
+
   function evalScalarFunction(fnUpper, scalarArgs) {
-    if (fnUpper === "ABS" && scalarArgs.length === 1) {
-      const n = coerceScalarNumber(scalarArgs[0]);
-      return n === null ? valErr("#VALUE!") : valNum(Math.abs(n));
-    }
-    if (fnUpper === "ROUND" && (scalarArgs.length === 1 || scalarArgs.length === 2)) {
-      const n = coerceScalarNumber(scalarArgs[0]);
-      const digits = scalarArgs.length === 2 ? coerceScalarNumber(scalarArgs[1]) : 0;
-      if (n === null || digits === null) return valErr("#VALUE!");
-      const factor = 10 ** Math.trunc(digits);
-      return valNum(Math.round(n * factor) / factor);
-    }
-    if (fnUpper === "LEN" && scalarArgs.length === 1) {
-      return valNum(Array.from(formatFormulaValue(scalarArgs[0])).length);
-    }
-    if (fnUpper === "NOT" && scalarArgs.length === 1) {
-      const b = coerceScalarBool(scalarArgs[0]);
-      return b === null ? valErr("#VALUE!") : valBool(!b);
-    }
-    return valErr("#NAME?");
+    const spec = SCALAR_FUNCTIONS.get(fnUpper);
+    if (!spec) return valErr("#NAME?");
+    const [minArity, maxArity, impl] = spec;
+    if (scalarArgs.length < minArity || scalarArgs.length > maxArity) return valErr("#NAME?");
+    return impl(scalarArgs);
   }
 
   // Functions that need their unevaluated argument nodes (lazy / reference semantics).
