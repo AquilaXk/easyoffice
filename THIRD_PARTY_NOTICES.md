@@ -8769,3 +8769,35 @@ Lightbend, Inc. (https://www.lightbend.com/).
 ## hop (patterns only)
 
 hop (MIT, https://github.com/golbin/hop) is a reference for build and verification patterns (pinned upstream checkout, Vite alias overlay with an override manifest, vendored WebAssembly with provenance, font policy). The patterns were followed and no hop source code was copied into EasyOffice. If code is copied later, its MIT notice must be added here first.
+
+## Engine code adapted from open-source Rust crates
+
+The engine crates keep zero crate dependencies (PD-053); where a permissively licensed crate is measurably faster, its algorithm is re-implemented in safe Rust inside the engine and recorded here (PD-095).
+
+### base64 (MIT OR Apache-2.0)
+
+Source: https://github.com/marshallpierce/rust-base64 (v0.22). `crates/easyoffice-formats/src/base64_codec.rs` follows its `GeneralPurpose` engine block layout (6 bytes per 64-bit word on encode, a 256-entry decode table and 8-symbol blocks on decode). Used under the MIT license:
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2015 Alice Maz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```

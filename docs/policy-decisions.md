@@ -1641,3 +1641,19 @@
 - **Alternatives rejected** Swift 앱 유지 + Tauri 병행(같은 기능을 두 곳에서 계속 맞춰야 하고 이미 어긋나 있음), 앱을 `.zip`으로도 배포(`.dmg` 하나로 충분하고 자산 목록이 Windows와 달라짐), 파일 연결을 `Default` 순위로 등록(사용자의 기존 기본 앱을 바꿈), 저장소에 `signingIdentity: "-"` 기록(나중에 실제 인증서로 바꿀 때 환경 변수보다 덜 유연하고 계약 검사가 "서명 정보 없음"을 보장할 수 없음).
 - **Verified by** `node --test scripts/test-desktop-file-associations.mjs scripts/test-webui-windows.mjs`, `cargo test -p easyoffice-desktop`(번들 설정·Finder URL 변환), `node scripts/check-repo-hygiene.mjs`, `node scripts/generate-desktop-icons.mjs --check`, macOS CI(`ci.yml` `verify`).
 - **Revisit when** 유료 개발자 계정을 확보해 서명·공증을 켤 때, `--smoke`가 macOS 러너에서 불안정할 때(저장소 변수 `MACOS_SMOKE=off`로 건너뛸 수 있음), 사용자가 macOS 전용 네이티브 기능을 다시 요구할 때, Mac App Store 배포를 검토할 때.
+
+## 70. 오픈소스 구현 이식으로 엔진 성능 개선: 무의존 유지 + 허용 라이선스 소스 이식 (PD-095)
+
+- **Status** Implemented (base64), In progress (DEFLATE 압축기)
+- **Context** 엔진 크레이트는 외부 크레이트 의존성 0(PD-053)입니다. 같은 일을 하는 검증된 오픈소스 Rust 구현과 핫패스를 같은 데이터(1MB DOCX, 10만 셀 XLSX, 1MiB 바이트)로 비교한 결과, base64 인코드·디코드가 3~7배, DEFLATE 압축이 약 6배 느렸고 CSV·XML 이스케이프·UTF-16 디코드는 이미 더 빨랐습니다.
+- **Decision (`PD-095`)**
+  1. **무의존 유지**: 엔진 크레이트(`easyoffice-formats`·`sheet`·`layout`·`app`)에 크레이트 의존성을 추가하지 않습니다. 더 빠른 구현은 소스(알고리즘·블록 구조)를 안전한 Rust로 엔진 안에 이식합니다.
+  2. **허용 라이선스만**: MIT·Apache-2.0·Zlib·BSD 계열이며 `unsafe`를 쓰지 않는(또는 쓰지 않게 옮길 수 있는) 구현만 이식합니다. GPL·LGPL·MPL 코드는 복사하지 않습니다.
+  3. **고지**: 이식한 파일 머리에 출처·버전·라이선스를 적고 `THIRD_PARTY_NOTICES.md`의 "Engine code adapted from open-source Rust crates"에 라이선스 전문을 남깁니다.
+  4. **근거**: 측정으로 개선이 확인된 것만 이식하고, 기존 동작과의 동등성은 이전 구현을 기준 함수로 둔 테스트로 고정합니다. 핫패스는 release `--self-test` 전후 비교를 PR에 남깁니다.
+  5. **base64**(`crates/easyoffice-formats/src/base64_codec.rs`): `base64` 크레이트 `GeneralPurpose` 엔진의 블록 구조(8바이트 적재로 6바이트→8기호, 256칸 디코드 표와 8기호 블록, 공백이 없으면 한 번에 디코드하고 실패했을 때만 공백 제거 후 재시도)를 이식했습니다. IPC 파일 열기·저장과 PDF 서명 경로가 쓰던 세 구현(앱 인코더, PDF 디코더, 위임 함수)을 하나로 합쳤습니다. 1MiB 기준 인코드 1.77→0.6ms, 디코드 4.4→0.56ms. 오류 판정(빈 입력, 4의 배수가 아닌 길이, 알파벳 밖 기호, 마지막 4기호 밖의 `=`)은 이전과 같습니다.
+- **Why** 오프라인·공급망 표면을 넓히지 않으면서(PD-053) 검증된 구현의 성능을 얻기 위함입니다.
+- **Trade-offs** 이식한 코드는 상류 수정이 자동으로 들어오지 않아 직접 따라가야 합니다. 출력 형식이 바뀌는 이식(예: DEFLATE 압축기)은 바이트 고정 테스트를 왕복 동등성 기준으로 바꿔야 합니다.
+- **Alternatives rejected** 크레이트를 의존성으로 추가(PD-053의 무의존·공급망 원칙 위반), `unsafe` SIMD 구현 이식(코드 원칙의 `unsafe` 금지 위반, 예: CRC32 4중 PCLMULQDQ 폴딩은 문서당 0.1ms 미만 이득이라 보류).
+- **Verified by** `cargo test -p easyoffice-formats base64_codec`(RFC 4648 벡터, 0~199바이트 전 꼬리 길이에서 이전 인코더와 바이트 동일·왕복, 잘못된 입력에서 이전 디코더와 결과 동일), `cargo run -p easyoffice-app -- --self-test`
+- **Revisit when** 상류 구현이 크게 빨라지거나 보안 수정이 나올 때, 남은 후보(DEFLATE 해제 고속화)를 측정할 때.
