@@ -72,6 +72,13 @@ impl HeaderBuilder {
     }
 
     fn on_start(&mut self, name: &str, attrs: &[(String, String)]) {
+        if !self.on_char_start(name, attrs) {
+            self.on_para_start(name, attrs);
+        }
+    }
+
+    /// Fonts and character shapes; `false` when `name` is not one of them.
+    fn on_char_start(&mut self, name: &str, attrs: &[(String, String)]) -> bool {
         match name {
             "hh:fontface" => self.hangul_slot = attr(attrs, "lang") == Some("HANGUL"),
             "hh:font" if self.hangul_slot => {
@@ -112,6 +119,24 @@ impl HeaderBuilder {
                     f.strike = attr(attrs, "shape").is_some_and(|t| t != "NONE");
                 }
             }
+            "hh:supscript" | "hh:subscript" => {
+                let script = if name == "hh:supscript" {
+                    RichScript::Superscript
+                } else {
+                    RichScript::Subscript
+                };
+                if let Some(f) = self.char_fmt_mut() {
+                    f.script = script;
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Paragraph shapes and styles.
+    fn on_para_start(&mut self, name: &str, attrs: &[(String, String)]) {
+        match name {
             "hh:paraPr" => {
                 self.intent_seen = false;
                 self.cur_para =
@@ -153,16 +178,6 @@ impl HeaderBuilder {
                     p.line_percent = (attr(attrs, "type") == Some("PERCENT"))
                         .then(|| attr(attrs, "value").and_then(|v| v.parse().ok()))
                         .flatten();
-                }
-            }
-            "hh:supscript" | "hh:subscript" => {
-                let script = if name == "hh:supscript" {
-                    RichScript::Superscript
-                } else {
-                    RichScript::Subscript
-                };
-                if let Some(f) = self.char_fmt_mut() {
-                    f.script = script;
                 }
             }
             "hh:style" => self.register_style(attrs),

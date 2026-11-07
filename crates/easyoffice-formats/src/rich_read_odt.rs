@@ -114,6 +114,22 @@ fn char_fmt_from_text_properties(attrs: &[(String, String)]) -> CharFmt {
     }
 }
 
+/// Alignment, list marker margin, indents and line spacing of `style:paragraph-properties`.
+fn apply_paragraph_properties(p: &mut StyleProps, attrs: &[(String, String)]) {
+    p.align = attr(attrs, "fo:text-align").and_then(RichAlignment::parse);
+    p.list_margin = attr(attrs, "fo:margin-left") == Some(LIST_MARGIN);
+    if !p.list_margin {
+        p.left_twips = attr(attrs, "fo:margin-left")
+            .and_then(length_twips)
+            .and_then(|t| u32::try_from(t).ok())
+            .filter(|t| *t > 0);
+    }
+    p.first_line_twips = attr(attrs, "fo:text-indent")
+        .and_then(length_twips)
+        .filter(|t| *t != 0);
+    p.line_percent = attr(attrs, "fo:line-height").and_then(line_height_percent);
+}
+
 fn read_styles(
     events: &[XmlEvent],
 ) -> (HashMap<String, StyleProps>, HashMap<String, RichListKind>) {
@@ -129,19 +145,7 @@ fn read_styles(
                 }
                 "style:paragraph-properties" => {
                     if let Some((_, p)) = cur.as_mut() {
-                        p.align = attr(attrs, "fo:text-align").and_then(RichAlignment::parse);
-                        p.list_margin = attr(attrs, "fo:margin-left") == Some(LIST_MARGIN);
-                        if !p.list_margin {
-                            p.left_twips = attr(attrs, "fo:margin-left")
-                                .and_then(length_twips)
-                                .and_then(|t| u32::try_from(t).ok())
-                                .filter(|t| *t > 0);
-                        }
-                        p.first_line_twips = attr(attrs, "fo:text-indent")
-                            .and_then(length_twips)
-                            .filter(|t| *t != 0);
-                        p.line_percent =
-                            attr(attrs, "fo:line-height").and_then(line_height_percent);
+                        apply_paragraph_properties(p, attrs);
                     }
                 }
                 "style:text-properties" => {
