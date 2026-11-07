@@ -202,3 +202,38 @@ pub(crate) fn check_document_images(doc: &RichDocument) -> Result<(), EasyOffice
     }
     Ok(())
 }
+
+/// Running picture count and byte total of a document being read (PD-096 limits).
+#[derive(Default)]
+pub(crate) struct ImageBudget {
+    count: usize,
+    bytes: usize,
+}
+
+impl ImageBudget {
+    /// Counts one picture of `len` bytes; fails closed when a document limit is exceeded.
+    pub(crate) fn charge(&mut self, len: usize) -> Result<(), EasyOfficeError> {
+        self.count += 1;
+        self.bytes = self.bytes.saturating_add(len);
+        if self.count > MAX_IMAGES_PER_DOCUMENT || self.bytes > MAX_TOTAL_IMAGE_BYTES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "문서의 그림이 한도(개수·합계 크기)를 넘었습니다.".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A package-relative part path from a document reference, or `None` when it is absolute, has a
+/// scheme (external link), a backslash or any `.`/`..` segment.
+pub(crate) fn safe_package_path(href: &str) -> Option<String> {
+    let path = href.trim().strip_prefix("./").unwrap_or(href.trim());
+    let bad = path.is_empty()
+        || path.starts_with('/')
+        || path.contains('\\')
+        || path.contains(':')
+        || path
+            .split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == "..");
+    (!bad).then(|| path.to_string())
+}

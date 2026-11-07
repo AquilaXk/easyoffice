@@ -5,11 +5,24 @@ use std::collections::HashMap;
 
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::normalize_hex_color;
+use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_xml::{attr, push_run, skip_subtree, tokenize, CharFmt, XmlEvent};
 use crate::{
-    EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
-    RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy,
+    EasyOfficeError, OdfCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
+    RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
+    ZipSecurityPolicy,
 };
+
+const EMU_PER_INCH: f64 = 914_400.0;
+const EMU_PER_CM: f64 = 360_000.0;
+const EMU_PER_MM: f64 = 36_000.0;
+const EMU_PER_POINT: f64 = 12_700.0;
+const EMU_PER_PIXEL: f64 = 9_525.0;
+/// EMU per twip (1/20 point).
+const EMU_PER_TWIP: f64 = 635.0;
+const MAX_LENGTH_EMU: f64 = 182_880_000.0;
+const MAX_LINE_PERCENT: f64 = 1_000.0;
+const SINGLE_LINE_PERCENT: u16 = 100;
 
 /// Left margin the ODT writer gives list paragraphs; the reader treats it as the list marker.
 const LIST_MARGIN: &str = "0.5in";
@@ -19,6 +32,40 @@ struct StyleProps {
     align: Option<RichAlignment>,
     fmt: CharFmt,
     list_margin: bool,
+    left_twips: Option<u32>,
+    first_line_twips: Option<i32>,
+    line_percent: Option<u16>,
+}
+
+/// A CSS/ODF length (`36pt`, `0.5in`, `1.27cm`, `12.7mm`, `48px`) in EMU.
+fn length_emu(value: &str) -> Option<f64> {
+    let v = value.trim();
+    let (number, unit) = v.split_at(v.find(|c: char| c.is_ascii_alphabetic())?);
+    let n: f64 = number.trim().parse().ok()?;
+    let per_unit = match unit {
+        "in" => EMU_PER_INCH,
+        "cm" => EMU_PER_CM,
+        "mm" => EMU_PER_MM,
+        "pt" => EMU_PER_POINT,
+        "px" => EMU_PER_PIXEL,
+        _ => return None,
+    };
+    let emu = n * per_unit;
+    (emu.is_finite() && emu.abs() <= MAX_LENGTH_EMU).then_some(emu)
+}
+
+fn length_twips(value: &str) -> Option<i32> {
+    length_emu(value).map(|e| (e / EMU_PER_TWIP).round() as i32)
+}
+
+/// `fo:line-height` as a percentage of single spacing (`200%`); other units and 100% are unset.
+fn line_height_percent(value: &str) -> Option<u16> {
+    let n: f64 = value.trim().strip_suffix('%')?.trim().parse().ok()?;
+    let percent = n.round();
+    (n.is_finite()
+        && (1.0..=MAX_LINE_PERCENT).contains(&percent)
+        && percent as u16 != SINGLE_LINE_PERCENT)
+        .then_some(percent as u16)
 }
 
 fn off(value: Option<&str>) -> bool {
@@ -84,6 +131,17 @@ fn read_styles(
                     if let Some((_, p)) = cur.as_mut() {
                         p.align = attr(attrs, "fo:text-align").and_then(RichAlignment::parse);
                         p.list_margin = attr(attrs, "fo:margin-left") == Some(LIST_MARGIN);
+                        if !p.list_margin {
+                            p.left_twips = attr(attrs, "fo:margin-left")
+                                .and_then(length_twips)
+                                .and_then(|t| u32::try_from(t).ok())
+                                .filter(|t| *t > 0);
+                        }
+                        p.first_line_twips = attr(attrs, "fo:text-indent")
+                            .and_then(length_twips)
+                            .filter(|t| *t != 0);
+                        p.line_percent =
+                            attr(attrs, "fo:line-height").and_then(line_height_percent);
                     }
                 }
                 "style:text-properties" => {
@@ -124,6 +182,7 @@ struct Para {
     style: StyleProps,
     outline: u8,
     base: CharFmt,
+    images: Vec<RichImage>,
 }
 
 const MAX_REPEATED_SPACES: usize = 1024;
@@ -145,6 +204,7 @@ struct OdtWalker<'a> {
     cur_row: Vec<String>,
     cell_paras: Vec<String>,
     in_automatic_styles: bool,
+    budget: ImageBudget,
 }
 
 /// Merges a span's character format into the enclosing format.
@@ -185,6 +245,7 @@ impl<'a> OdtWalker<'a> {
             cur_row: Vec::new(),
             cell_paras: Vec::new(),
             in_automatic_styles: false,
+            budget: ImageBudget::default(),
         }
     }
 
@@ -196,7 +257,7 @@ impl<'a> OdtWalker<'a> {
             }
             "office:automatic-styles" | "office:font-face-decls" => self.in_automatic_styles = true,
             "text:note" | "office:annotation" | "text:tracked-changes" => return true,
-            "draw:frame" | "draw:custom-shape" => {
+            "draw:custom-shape" => {
                 let note = UNSUPPORTED_OBJECT_NOTE.to_string();
                 if !self.warnings.contains(&note) {
                     self.warnings.push(note);
@@ -260,6 +321,7 @@ impl<'a> OdtWalker<'a> {
             style,
             outline,
             base,
+            images: Vec::new(),
         });
     }
 
@@ -274,6 +336,54 @@ impl<'a> OdtWalker<'a> {
 
     fn push_inline(&mut self, text: &str) {
         push_inline(&mut self.paras, &self.span_fmts, text);
+    }
+
+    fn warn_once(&mut self, note: &str) {
+        if !self.warnings.iter().any(|w| w == note) {
+            self.warnings.push(note.to_string());
+        }
+    }
+
+    /// Reads a `draw:frame` (events span its start to its end): an embedded PNG/JPEG becomes a
+    /// picture of the open paragraph; text boxes, charts and anything else are skipped.
+    fn on_frame(
+        &mut self,
+        events: &[XmlEvent],
+        entries: &[ZipArchiveEntry],
+    ) -> Result<(), EasyOfficeError> {
+        let Some(frame) = read_frame(events) else {
+            self.warn_once(UNSUPPORTED_OBJECT_NOTE);
+            return Ok(());
+        };
+        if self.tbl_depth > 0 || self.paras.is_empty() {
+            self.warn_once("표 안의 그림은 가져오지 않았습니다.");
+            return Ok(());
+        }
+        let entry =
+            safe_package_path(&frame.href).and_then(|path| entries.iter().find(|e| e.path == path));
+        let Some(entry) = entry else {
+            self.warn_once("외부 링크이거나 찾을 수 없는 그림은 가져오지 않았습니다.");
+            return Ok(());
+        };
+        let mut image = match RichImage::new(entry.data.clone(), frame.alt.as_str()) {
+            Ok(image) => image,
+            Err(err) => {
+                self.warnings.push(format!(
+                    "그림 '{}'을 가져오지 않았습니다: {err}",
+                    entry.path
+                ));
+                return Ok(());
+            }
+        };
+        self.budget.charge(entry.data.len())?;
+        if let Some((w, h)) = frame.size_emu {
+            // An out-of-range size keeps the default derived from the pixels.
+            let _ = image.set_display_emu(w, h);
+        }
+        if let Some(top) = self.paras.last_mut() {
+            top.images.push(image);
+        }
+        Ok(())
     }
 
     fn on_end(&mut self, name: &str) {
@@ -316,6 +426,7 @@ impl<'a> OdtWalker<'a> {
             return;
         };
         let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+        let images = p.images;
         if self.tbl_depth > 0 {
             self.cell_paras.push(text);
         } else if !text.trim().is_empty() {
@@ -333,8 +444,13 @@ impl<'a> OdtWalker<'a> {
                 alignment: p.style.align,
                 heading_level: p.outline,
                 list,
-                ..RichParagraph::default()
+                left_indent_twips: p.style.left_twips,
+                first_line_indent_twips: p.style.first_line_twips,
+                line_spacing_percent: p.style.line_percent,
             }));
+        }
+        if self.tbl_depth == 0 {
+            self.blocks.extend(images.into_iter().map(RichBlock::Image));
         }
         self.span_fmts.clear();
         let base = self
@@ -375,6 +491,12 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
     let mut i = 0usize;
     while i < events.len() {
         match &events[i] {
+            XmlEvent::Start { name, .. } if name == "draw:frame" => {
+                let end = skip_subtree(&events, i);
+                walker.on_frame(&events[i..end], &entries)?;
+                i = end;
+                continue;
+            }
             XmlEvent::Start { name, attrs } => {
                 if walker.on_start(name, attrs) {
                     i = skip_subtree(&events, i);
@@ -411,6 +533,51 @@ pub(crate) fn read_odt(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Easy
         },
         warnings,
     ))
+}
+
+/// Fields of one `draw:frame` holding a `draw:image`.
+struct Frame {
+    href: String,
+    alt: String,
+    size_emu: Option<(u64, u64)>,
+}
+
+fn read_frame(events: &[XmlEvent]) -> Option<Frame> {
+    let mut href = None;
+    let mut size_emu = None;
+    let (mut desc, mut title) = (String::new(), String::new());
+    let mut capture: Option<&str> = None;
+    for (idx, event) in events.iter().enumerate() {
+        match event {
+            XmlEvent::Start { name, attrs } => match name.as_str() {
+                "draw:frame" if idx == 0 => {
+                    let side = |key| attr(attrs, key).and_then(length_emu).filter(|e| *e >= 1.0);
+                    size_emu = side("svg:width")
+                        .zip(side("svg:height"))
+                        .map(|(w, h)| (w.round() as u64, h.round() as u64));
+                }
+                "draw:image" if href.is_none() => {
+                    href = attr(attrs, "xlink:href").map(str::to_string);
+                }
+                "svg:desc" => capture = Some("desc"),
+                "svg:title" => capture = Some("title"),
+                _ => {}
+            },
+            XmlEvent::Text(text) => match capture {
+                Some("desc") => desc.push_str(text),
+                Some(_) => title.push_str(text),
+                None => {}
+            },
+            XmlEvent::End(name) if name == "svg:desc" || name == "svg:title" => capture = None,
+            XmlEvent::End(_) => {}
+        }
+    }
+    let alt = if desc.trim().is_empty() { title } else { desc };
+    Some(Frame {
+        href: href?,
+        alt,
+        size_emu,
+    })
 }
 
 fn push_inline(paras: &mut [Para], span_fmts: &[CharFmt], text: &str) {

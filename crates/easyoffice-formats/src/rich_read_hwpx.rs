@@ -4,16 +4,24 @@
 
 use std::collections::HashMap;
 
-use crate::hwpx_parts::{DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, LIST_LEFT_MARGIN};
+use crate::hwpx_parts::{
+    DEFAULT_CHAR_HEIGHT, DEFAULT_FONT_FACE, DEFAULT_LINE_PERCENT, HWPUNIT_PER_TWIP,
+    LIST_LEFT_MARGIN,
+};
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::normalize_hex_color;
+use crate::rich_image::{safe_package_path, ImageBudget};
 use crate::rich_xml::{
     attr, heading_level_from_name, push_run, skip_subtree, tokenize, CharFmt, XmlEvent,
 };
 use crate::{
-    EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichListKind,
-    RichParagraph, RichRun, XmlSanitizer, ZipArchiveCodec, ZipSecurityPolicy,
+    EasyOfficeError, HwpxCodec, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
+    RichParagraph, RichRun, RichScript, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry,
+    ZipSecurityPolicy,
 };
+
+/// EMU per HWPUNIT (1/7200 inch).
+const EMU_PER_HWPUNIT: u64 = 127;
 
 #[derive(Default, Clone)]
 struct ParaShape {
@@ -21,6 +29,10 @@ struct ParaShape {
     heading_type: String,
     heading_level: u8,
     left: u32,
+    /// First-line indent (`hc:intent`), HWPUNIT.
+    intent: i32,
+    /// `hh:lineSpacing` percentage when its type is PERCENT.
+    line_percent: Option<u32>,
 }
 
 #[derive(Default, Clone)]
@@ -46,6 +58,7 @@ struct HeaderBuilder {
     header: Header,
     cur_char: Option<(String, CharFmt)>,
     cur_para: Option<(String, ParaShape, bool)>,
+    intent_seen: bool,
     hangul_slot: bool,
 }
 
@@ -100,6 +113,7 @@ impl HeaderBuilder {
                 }
             }
             "hh:paraPr" => {
+                self.intent_seen = false;
                 self.cur_para =
                     attr(attrs, "id").map(|id| (id.to_string(), ParaShape::default(), false));
             }
@@ -124,6 +138,31 @@ impl HeaderBuilder {
                             .and_then(|v| v.parse().ok())
                             .unwrap_or(0);
                     }
+                }
+            }
+            "hc:intent" if !self.intent_seen => {
+                self.intent_seen = true;
+                if let Some(p) = self.para_mut() {
+                    p.intent = attr(attrs, "value")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                }
+            }
+            "hh:lineSpacing" => {
+                if let Some(p) = self.para_mut() {
+                    p.line_percent = (attr(attrs, "type") == Some("PERCENT"))
+                        .then(|| attr(attrs, "value").and_then(|v| v.parse().ok()))
+                        .flatten();
+                }
+            }
+            "hh:supscript" | "hh:subscript" => {
+                let script = if name == "hh:supscript" {
+                    RichScript::Superscript
+                } else {
+                    RichScript::Subscript
+                };
+                if let Some(f) = self.char_fmt_mut() {
+                    f.script = script;
                 }
             }
             "hh:style" => self.register_style(attrs),
@@ -196,6 +235,7 @@ struct ParaState {
     runs: Vec<RichRun>,
     para_pr: String,
     style: String,
+    images: Vec<RichImage>,
 }
 
 struct RunState {
@@ -219,16 +259,29 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
     if heading == 0 && shape.heading_type == "OUTLINE" {
         heading = (shape.heading_level + 1).min(6);
     }
+    let marker_margin = shape.left == LIST_LEFT_MARGIN;
     let list = if heading > 0 {
         None
     } else {
         match shape.heading_type.as_str() {
             "BULLET" => Some(RichListKind::Bullet),
             "NUMBER" => Some(RichListKind::Ordered),
-            _ if shape.left == LIST_LEFT_MARGIN => Some(RichListKind::Bullet),
+            _ if marker_margin => Some(RichListKind::Bullet),
             _ => None,
         }
     };
+    let to_twips = |hwpunit: i64| i32::try_from(hwpunit / i64::from(HWPUNIT_PER_TWIP)).ok();
+    let left_indent_twips = (!marker_margin && shape.left > 0)
+        .then(|| to_twips(i64::from(shape.left)))
+        .flatten()
+        .and_then(|t| u32::try_from(t).ok());
+    let first_line_indent_twips = (shape.intent != 0)
+        .then(|| to_twips(i64::from(shape.intent)))
+        .flatten();
+    let line_spacing_percent = shape
+        .line_percent
+        .filter(|p| *p != DEFAULT_LINE_PERCENT && (1..=1_000).contains(p))
+        .and_then(|p| u16::try_from(p).ok());
     let alignment = match shape.align.as_deref() {
         Some("LEFT") => Some(RichAlignment::Left),
         Some("CENTER") => Some(RichAlignment::Center),
@@ -256,7 +309,7 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
             font: r.font,
             color: r.color,
             highlight: r.highlight,
-            ..CharFmt::default()
+            script: r.script,
         };
         push_run(&mut runs, &r.text, &fmt);
     }
@@ -265,15 +318,16 @@ fn finish_paragraph(header: &Header, p: ParaState) -> RichParagraph {
         alignment,
         heading_level: heading,
         list,
-        ..RichParagraph::default()
+        left_indent_twips,
+        first_line_indent_twips,
+        line_spacing_percent,
     }
 }
 
-const SKIPPED_SUBTREES: [&str; 14] = [
+const SKIPPED_SUBTREES: [&str; 13] = [
     "hp:secPr",
     "hp:ctrl",
     "hp:equation",
-    "hp:pic",
     "hp:ole",
     "hp:container",
     "hp:rect",
@@ -298,6 +352,122 @@ struct SectionWalker {
     table_rows: Vec<Vec<String>>,
     cur_row: Vec<String>,
     cell_paras: Vec<String>,
+    budget: ImageBudget,
+}
+
+/// Binary item id -> package entry, from the `opf:item` manifest of `Contents/content.hpf`.
+struct HwpxMedia<'a> {
+    by_id: HashMap<String, &'a ZipArchiveEntry>,
+}
+
+impl<'a> HwpxMedia<'a> {
+    fn load(entries: &'a [ZipArchiveEntry]) -> Result<Self, EasyOfficeError> {
+        let mut by_id = HashMap::new();
+        let Some(hpf) = entries.iter().find(|e| e.path == "Contents/content.hpf") else {
+            return Ok(Self { by_id });
+        };
+        let xml = std::str::from_utf8(&hpf.data).map_err(|_| {
+            EasyOfficeError::InvalidUtf8("Contents/content.hpf UTF-8 오류".to_string())
+        })?;
+        for event in tokenize(xml)? {
+            let XmlEvent::Start { name, attrs } = event else {
+                continue;
+            };
+            let (Some(id), Some(href)) = (attr(&attrs, "id"), attr(&attrs, "href")) else {
+                continue;
+            };
+            let entry =
+                safe_package_path(href).and_then(|path| entries.iter().find(|e| e.path == path));
+            if let (true, Some(entry)) = (name == "opf:item", entry) {
+                by_id.insert(id.to_string(), entry);
+            }
+        }
+        Ok(Self { by_id })
+    }
+}
+
+/// Fields of one `hp:pic`.
+#[derive(Default)]
+struct PictureFields<'e> {
+    item: Option<&'e str>,
+    size: Option<(u64, u64)>,
+    alt: String,
+}
+
+fn scan_picture(events: &[XmlEvent]) -> PictureFields<'_> {
+    let mut fields = PictureFields::default();
+    let mut in_comment = false;
+    for event in events {
+        match event {
+            XmlEvent::Start { name, attrs } => match name.as_str() {
+                "hc:img" if fields.item.is_none() => fields.item = attr(attrs, "binaryItemIDRef"),
+                "hp:curSz" | "hp:sz" if fields.size.is_none() => {
+                    let side = |key| {
+                        attr(attrs, key)
+                            .and_then(|v| v.trim().parse::<u64>().ok())
+                            .filter(|v| *v > 0)
+                    };
+                    fields.size = side("width").zip(side("height")).and_then(|(w, h)| {
+                        Some((
+                            w.checked_mul(EMU_PER_HWPUNIT)?,
+                            h.checked_mul(EMU_PER_HWPUNIT)?,
+                        ))
+                    });
+                }
+                "hp:shapeComment" => in_comment = true,
+                _ => {}
+            },
+            XmlEvent::Text(text) if in_comment => fields.alt.push_str(text),
+            XmlEvent::End(name) if name == "hp:shapeComment" => in_comment = false,
+            _ => {}
+        }
+    }
+    fields
+}
+
+impl SectionWalker {
+    /// Reads an `hp:pic` (events span its start to its end) into the open paragraph.
+    fn on_picture(
+        &mut self,
+        events: &[XmlEvent],
+        media: &HwpxMedia<'_>,
+        warnings: &mut Vec<String>,
+    ) -> Result<(), EasyOfficeError> {
+        let fields = scan_picture(events);
+        let entry = fields.item.and_then(|id| media.by_id.get(id));
+        let mut warn = |note: String| {
+            if !warnings.contains(&note) {
+                warnings.push(note);
+            }
+        };
+        let Some(entry) = entry else {
+            warn("찾을 수 없거나 외부에 있는 그림은 가져오지 않았습니다.".to_string());
+            return Ok(());
+        };
+        if self.tbl_depth > 0 || self.paras.is_empty() {
+            warn("표 안의 그림은 가져오지 않았습니다.".to_string());
+            return Ok(());
+        }
+        let mut image = match RichImage::new(entry.data.clone(), fields.alt.as_str()) {
+            Ok(image) => image,
+            Err(err) => {
+                warn(format!(
+                    "그림 '{}'을 가져오지 않았습니다: {err}",
+                    entry.path
+                ));
+                return Ok(());
+            }
+        };
+        self.budget.charge(entry.data.len())?;
+        if let Some((w, h)) = fields.size {
+            // An out-of-range size keeps the default derived from the pixels.
+            let _ = image.set_display_emu(w, h);
+        }
+        if let Some(top) = self.paras.last_mut() {
+            top.images.push(image);
+        }
+        Ok(())
+    }
 }
 
 impl SectionWalker {
@@ -307,6 +477,7 @@ impl SectionWalker {
                 runs: Vec::new(),
                 para_pr: attr(attrs, "paraPrIDRef").unwrap_or("").to_string(),
                 style: attr(attrs, "styleIDRef").unwrap_or("").to_string(),
+                images: Vec::new(),
             }),
             "hp:run" => self.runs.push(RunState {
                 char_pr: attr(attrs, "charPrIDRef").unwrap_or("").to_string(),
@@ -369,29 +540,40 @@ impl SectionWalker {
     }
 
     fn finish_paragraph(&mut self, header: &Header, blocks: &mut Vec<RichBlock>) {
-        let Some(p) = self.paras.pop() else {
+        let Some(mut p) = self.paras.pop() else {
             return;
         };
         if self.tbl_depth > 0 {
             self.cell_paras
                 .push(p.runs.iter().map(|r| r.text.as_str()).collect());
-        } else if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
+            return;
+        }
+        let images = std::mem::take(&mut p.images);
+        if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
             blocks.push(RichBlock::Paragraph(finish_paragraph(header, p)));
         }
+        blocks.extend(images.into_iter().map(RichBlock::Image));
     }
 }
 
 fn read_section(
     xml: &str,
     header: &Header,
+    media: &HwpxMedia<'_>,
+    walker: &mut SectionWalker,
     blocks: &mut Vec<RichBlock>,
     warnings: &mut Vec<String>,
 ) -> Result<(), EasyOfficeError> {
     let events = tokenize(xml)?;
-    let mut walker = SectionWalker::default();
     let mut i = 0usize;
     while i < events.len() {
         match &events[i] {
+            XmlEvent::Start { name, .. } if name == "hp:pic" => {
+                let end = skip_subtree(&events, i);
+                walker.on_picture(&events[i..end], media, warnings)?;
+                i = end;
+                continue;
+            }
             XmlEvent::Start { name, attrs } => {
                 if SKIPPED_SUBTREES.contains(&name.as_str()) {
                     if !matches!(name.as_str(), "hp:secPr" | "hp:ctrl") {
@@ -449,12 +631,21 @@ pub(crate) fn read_hwpx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
     sections.sort_by_key(|(idx, _)| *idx);
     let mut blocks = Vec::new();
     let mut warnings = Vec::new();
+    let media = HwpxMedia::load(&entries)?;
+    let mut walker = SectionWalker::default();
     for (_, entry) in sections {
         let xml = std::str::from_utf8(&entry.data).map_err(|_| {
             EasyOfficeError::InvalidUtf8("Contents/section.xml UTF-8 오류".to_string())
         })?;
         XmlSanitizer::validate_safe_xml(xml)?;
-        read_section(xml, &header, &mut blocks, &mut warnings)?;
+        read_section(
+            xml,
+            &header,
+            &media,
+            &mut walker,
+            &mut blocks,
+            &mut warnings,
+        )?;
     }
     if meta.official_agency.is_some() {
         warnings.push("기관명 등 공문서 메타데이터는 저장 시 다시 기록되지 않습니다.".to_string());

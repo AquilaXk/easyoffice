@@ -242,7 +242,7 @@ fn odt_writer_stores_pictures_manifest_and_frames() {
         "{content}"
     );
     assert!(content.contains("<draw:image xlink:href=\"Pictures/image2.jpg\""));
-    assert!(content.contains("svg:width=\"0.4166in\""), "{content}");
+    assert!(content.contains("svg:width=\"30.0000pt\""), "{content}");
     assert!(content.contains("<svg:desc>사진 &lt;a&amp;b&gt;</svg:desc>"));
     // The writer's own output still opens.
     let decoded = UniversalFormatConverter::decode_rich(&bytes, Some("a.odt")).unwrap();
