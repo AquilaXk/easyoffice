@@ -406,6 +406,7 @@ pub fn open_path(app: &AppHandle, path: &Path) -> Result<OpenOutcome, String> {
         return Err(err);
     }
     state.remember(&canonical);
+    crate::os_recent::note_recent_document(app, &canonical);
     Ok(OpenOutcome::OPENED)
 }
 
@@ -426,6 +427,7 @@ pub fn note_saved_path(app: &AppHandle, label: &str, path: &Path) {
         _ => locked(&state.files).untrack(label),
     }
     state.remember(&canonical);
+    crate::os_recent::note_recent_document(app, &canonical);
 }
 
 /// The file this window's document came from (or was last saved to), if any. Rust-internal.

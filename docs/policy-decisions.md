@@ -1719,7 +1719,7 @@
 - **Verified by** `node --test scripts/test-webui-theme.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shell.mjs scripts/test-webui-menu-bar.mjs scripts/test-webui-tool-dialogs.mjs`(모드 저장·OS 추종·라디오 메뉴, 리터럴 색·`--eo-` 잔재 없음, 정의된 토큰만 사용, 종이 팔레트, 대비), `node scripts/check-repo-hygiene.mjs`.
 - **Revisit when** 2단계 이후 PR이 메뉴·도구 상자·시작 화면을 바꿀 때마다 이 절의 상태와 `design-system.md`를 갱신합니다.
 
-## 74. 데스크톱 창 크기·위치·최대화 상태 기억 (PD-099)
+## 74. 데스크톱 창 크기·위치·최대화 상태 기억과 macOS 최근 항목 (PD-099)
 
 - **Status** Implemented
 - **Context** 데스크톱 셸은 창을 열 때마다 기본 크기(1280x860)로 화면 가운데에 띄워, 창 크기를 바꾸거나 다른 모니터로 옮겨 써도 다음 실행에 사라졌습니다. 참조 셸(hop)은 Tauri `window-state` 플러그인으로 창 위치를 기억합니다. 다만 그 플러그인은 창 이름(label)을 키로 한 JSON 맵을 저장하는데, 우리 문서 창 이름은 실행마다 새로 만들어지므로(`doc-<번호>-<시각>`) 맵이 계속 커지기만 하고 다시 쓰이지 않습니다.
@@ -1728,7 +1728,8 @@
   2. **복원**: 새 창은 저장된 크기를 기존 규칙(모니터의 92% 이하, 최소 1024x680)으로 잘라 씁니다. 저장된 위치는 그 창이 앱의 유일한 창일 때만, 그리고 제목 표시줄의 왼쪽 위 모서리와 그 안쪽 120x40 지점이 모두 연결된 모니터 안에 있을 때만 다시 씁니다. 그 밖의 창은 이전처럼 계단식으로 놓입니다. 최대화로 닫았으면 새 창도 최대화로 엽니다.
   3. **기록 시점**: 이동·크기 변경 이벤트는 메모리의 값만 바꾸고(최대화 중에는 플래그만 켜서 최대화 해제 시 이전 크기로 돌아감, 최소화 중에는 무시), 디스크에는 창이 닫힐 때 한 번 씁니다. `--smoke`는 읽지도 쓰지도 않아 이전 실행에 영향을 받지 않습니다.
   4. **의존성 없음**: 플러그인을 추가하지 않고 셸 안의 작은 모듈(`window_state.rs`)로 구현합니다. WebView에는 새 명령·권한이 없습니다.
-- **Why** 사용자가 맞춘 창 크기와 모니터를 다음 실행에도 쓰게 하는 것은 hop과 같은 동작입니다. 창 이름이 매번 바뀌는 창 모델에서는 "마지막 창 하나"가 실제로 다시 쓸 수 있는 유일한 정보이고, 고정 레코드는 파일이 커지지 않으며 손상 검사가 단순합니다.
+  5. **macOS 최근 항목**: 문서를 열거나 새 경로에 저장할 때 앱 안 최근 문서(`recent.rs`)와 함께 macOS `NSDocumentController.noteNewRecentDocumentURL`에도 알려 Dock 메뉴와 시스템 최근 항목에 나오게 합니다(hop `macos_recent_documents.rs` 이식, `os_recent.rs`). 메인 스레드가 아니면 `run_on_main_thread`로 넘기고 실패는 무시합니다(앱 안 목록이 기준). 의존성은 macOS 대상에만 `objc2-app-kit`·`objc2-foundation` 0.3.2(MIT, Tauri가 이미 쓰는 같은 버전)를 두 기능(`NSDocumentController`, `NSURL`)만 켜서 추가합니다. Windows·Linux는 아무 일도 하지 않습니다.
+- **Why** 사용자가 맞춘 창 크기와 모니터를 다음 실행에도 쓰게 하고 Dock에서 최근 문서를 다시 여는 것은 hop과 같은 동작입니다. 창 이름이 매번 바뀌는 창 모델에서는 "마지막 창 하나"가 실제로 다시 쓸 수 있는 유일한 정보이고, 고정 레코드는 파일이 커지지 않으며 손상 검사가 단순합니다.
 - **Trade-offs** 창마다 따로 기억하지 않습니다(마지막 값 하나). 모니터 구성이 바뀌어 위치를 버리면 크기만 복원됩니다. 앱이 강제 종료되면 마지막 이동은 저장되지 않습니다.
 - **Alternatives rejected** `tauri-plugin-window-state`(창 이름 키 맵이 무한히 커지고, 문서 창에는 같은 이름이 다시 오지 않음), 이동할 때마다 디스크 쓰기(불필요한 I/O), JSON 형식(파서·할당이 필요하고 고정 크기 레코드보다 검증이 느슨함).
 - **Verified by** `cargo test -p easyoffice-desktop window_state`(레코드 바이트 배치·왕복, 손상 레코드 거부, 반올림·범위, 모니터 판정·오버플로, 데이터 폴더 왕복). 실제 창 복원은 Windows·macOS 수동 확인 대상입니다.

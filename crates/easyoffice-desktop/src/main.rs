@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app_commands;
+mod os_recent;
 mod recent;
 mod save_file;
 mod smoke;
