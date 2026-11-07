@@ -57,6 +57,56 @@
     t: "el", tag, attrs: attrs || {}, data: {}, style: style || {}, children: children || [],
   });
 
+  const SCRIPT_TAGS = { superscript: "sup", subscript: "sub" };
+  const PX_PER_TWIP = 1 / 15; // 1 twip = 1/20 pt, 1 pt = 4/3 px
+  const IMAGE_FORMATS = new Set(["png", "jpg"]);
+  const IMAGE_ID_RE = /^[A-Za-z0-9+/=]+$/;
+
+  function twipsToPx(twips) {
+    return String(Math.round(twips * PX_PER_TWIP * 1000) / 1000) + "px";
+  }
+
+  // Paragraph indents / line spacing of a decoded block as inline style (what the indent buttons
+  // and ruler write) plus the exact twip values, so saving gives back the same numbers.
+  function applyParagraphLayout(spec, block) {
+    const left = Number(block.leftIndentTwips);
+    const first = Number(block.firstLineIndentTwips);
+    const spacing = Number(block.lineSpacingPercent);
+    if (Number.isFinite(left) && left > 0) {
+      spec.style.paddingLeft = twipsToPx(left);
+      spec.data.eoLeftTwips = String(left);
+    }
+    if (Number.isFinite(first) && first !== 0) {
+      spec.style.textIndent = twipsToPx(first);
+      spec.data.eoFirstLineTwips = String(first);
+    }
+    if (Number.isFinite(spacing) && spacing > 0 && spacing !== 100) {
+      spec.style.lineHeight = String(spacing / 100);
+      spec.data.eoLineSpacing = String(spacing);
+    }
+    return spec;
+  }
+
+  // A picture block: bytes live in the image store, the node carries only the id, size and alt.
+  function imageSpec(block) {
+    const utils = host.__EASYOFFICE_SHEET_UTILS__;
+    const format = String(block.format || "");
+    const base64 = String(block.base64 || "");
+    if (!utils || !IMAGE_FORMATS.has(format) || !IMAGE_ID_RE.test(base64)) {
+      return elSpec("p", [textSpec(String(block.alt || "[그림]"))]);
+    }
+    const alt = String(block.alt ?? "");
+    const spec = elSpec("img", [], {}, { class: "doc-inline-image", contenteditable: "false", title: alt });
+    spec.data = {
+      eoImageId: utils.registerDocImage(base64, format),
+      eoImageFormat: format,
+      eoImageWidthEmu: String(Number(block.widthEmu) || 0),
+      eoImageHeightEmu: String(Number(block.heightEmu) || 0),
+      eoImageAlt: alt,
+    };
+    return spec;
+  }
+
   function runSpecs(runs) {
     const out = [];
     (runs || []).forEach((run) => {
@@ -68,13 +118,14 @@
         const runs = host.__EASYOFFICE_DOC_RUNS__;
         const fmt = runs ? runs.fromModelRun(run) : {};
         if (fmt.size || fmt.font || fmt.color || fmt.highlight) {
-          out.push(runs.buildRunSpec(fmt, [spec]));
-          return;
+          spec = runs.buildRunSpec(fmt, [spec]);
+        } else {
+          [["strike", "s"], ["underline", "u"], ["italic", "em"], ["bold", "strong"]].forEach(([flag, tag]) => {
+            if (run[flag] === true) spec = elSpec(tag, [spec]);
+          });
         }
-        [["strike", "s"], ["underline", "u"], ["italic", "em"], ["bold", "strong"]].forEach(([flag, tag]) => {
-          if (run[flag] === true) spec = elSpec(tag, [spec]);
-        });
-        out.push(spec);
+        const scriptTag = SCRIPT_TAGS[run.script];
+        out.push(scriptTag ? elSpec(scriptTag, [spec]) : spec);
       });
     });
     return out;
@@ -92,22 +143,27 @@
         nodes.push(elSpec("table", [elSpec("tbody", rows)], {}, { class: "doc-inline-table" }));
         return;
       }
+      if (block.type === "image") {
+        openList = null;
+        nodes.push(imageSpec(block));
+        return;
+      }
       const style = block.align ? { textAlign: block.align } : {};
       const inline = runSpecs(block.runs);
       const heading = Number(block.heading) || 0;
       if (heading >= 1 && heading <= 6) {
         openList = null;
-        nodes.push(elSpec("h" + heading, inline, style));
+        nodes.push(applyParagraphLayout(elSpec("h" + heading, inline, style), block));
       } else if (block.list === "bullet" || block.list === "ordered") {
         const tag = block.list === "ordered" ? "ol" : "ul";
         if (openList?.tag !== tag) {
           openList = elSpec(tag);
           nodes.push(openList);
         }
-        openList.children.push(elSpec("li", inline, style));
+        openList.children.push(applyParagraphLayout(elSpec("li", inline, style), block));
       } else {
         openList = null;
-        nodes.push(elSpec("p", inline, style));
+        nodes.push(applyParagraphLayout(elSpec("p", inline, style), block));
       }
     });
     return nodes;
@@ -162,6 +218,7 @@
     const lines = [];
     (res.blocks || []).forEach((b) => {
       if (b.type === "table") (b.rows || []).forEach((r) => lines.push(r.map((c) => c.text).join(" | ")));
+      else if (b.type === "image") lines.push(String(b.alt || "[그림]"));
       else lines.push((b.runs || []).map((r) => r.text).join(""));
     });
     const title = res.title || "";

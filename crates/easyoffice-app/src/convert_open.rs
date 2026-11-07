@@ -10,9 +10,9 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    read_sheet_styling, CellStyle, DecodedContent, DecodedDocument, DocumentFormat,
-    EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichListKind, RichParagraph, RichRun,
-    SheetStyling, StrictJsonValue, UniversalFormatConverter,
+    base64_codec, read_sheet_styling, CellStyle, DecodedContent, DecodedDocument, DocumentFormat,
+    EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichImage, RichListKind, RichParagraph,
+    RichScript, SheetStyling, StrictJsonValue, UniversalFormatConverter,
 };
 use easyoffice_sheet::PackedCellCoordinate;
 use std::collections::HashSet;
@@ -61,6 +61,11 @@ fn paragraph_json(p: &RichParagraph) -> String {
             if let Some(size) = r.size_half_pt {
                 out.push_str(&format!(",\"sizeHalfPt\":{size}"));
             }
+            match r.script {
+                RichScript::Normal => {}
+                RichScript::Superscript => out.push_str(",\"script\":\"superscript\""),
+                RichScript::Subscript => out.push_str(",\"script\":\"subscript\""),
+            }
             for (value, key) in [
                 (&r.font, "font"),
                 (&r.color, "color"),
@@ -94,18 +99,36 @@ fn paragraph_json(p: &RichParagraph) -> String {
         };
         out.push_str(&format!(",\"list\":\"{token}\""));
     }
+    if let Some(v) = p.left_indent_twips {
+        out.push_str(&format!(",\"leftIndentTwips\":{v}"));
+    }
+    if let Some(v) = p.first_line_indent_twips {
+        out.push_str(&format!(",\"firstLineIndentTwips\":{v}"));
+    }
+    if let Some(v) = p.line_spacing_percent {
+        out.push_str(&format!(",\"lineSpacingPercent\":{v}"));
+    }
     out.push('}');
     out
+}
+
+/// Picture block of the editor model: the encoded bytes travel as base64 and come back unchanged.
+fn image_json(img: &RichImage) -> String {
+    let (width_emu, height_emu) = img.display_emu();
+    format!(
+        "{{\"type\":\"image\",\"format\":\"{}\",\"base64\":\"{}\",\"widthPx\":{},\"heightPx\":{},\"widthEmu\":{width_emu},\"heightEmu\":{height_emu},\"alt\":{}}}",
+        img.format().extension(),
+        base64_codec::encode(img.bytes()),
+        img.width_px(),
+        img.height_px(),
+        json_str(img.alt())
+    )
 }
 
 fn block_json(b: &RichBlock) -> String {
     match b {
         RichBlock::Paragraph(p) => paragraph_json(p),
-        // The editor has no picture block yet: show the alternative text as a paragraph.
-        RichBlock::Image(img) => paragraph_json(&RichParagraph {
-            runs: vec![RichRun::plain(img.fallback_text())],
-            ..RichParagraph::default()
-        }),
+        RichBlock::Image(img) => image_json(img),
         RichBlock::Table(rows) => {
             let rows: Vec<String> = rows
                 .iter()
@@ -400,7 +423,8 @@ impl EasyOfficeIpcRouter {
 mod tests {
     use super::*;
     use easyoffice_formats::{
-        OoxmlCodec, RichDocument, RichParagraph, RichRun, ZipArchiveCodec, ZipSecurityPolicy,
+        OoxmlCodec, RichDocument, RichImage, RichParagraph, RichRun, RichScript, ZipArchiveCodec,
+        ZipSecurityPolicy,
     };
 
     fn request(action: Option<&str>, file: &str, bytes: &[u8], extra: &str) -> String {
@@ -874,5 +898,168 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("index.xml"), "{err}");
+    }
+
+    fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut out = (data.len() as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        let crc = easyoffice_formats::IeeeCrc32::update(
+            easyoffice_formats::IeeeCrc32::checksum(kind),
+            data,
+        );
+        out.extend_from_slice(&crc.to_be_bytes());
+        out
+    }
+
+    fn tiny_png() -> Vec<u8> {
+        let mut ihdr = 3u32.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&2u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+        let raw: Vec<u8> = (0..2)
+            .flat_map(|_| std::iter::once(0).chain(0..9))
+            .collect();
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend(png_chunk(b"IHDR", &ihdr));
+        png.extend(png_chunk(b"IDAT", &easyoffice_formats::deflate_zlib(&raw)));
+        png.extend(png_chunk(b"IEND", &[]));
+        png
+    }
+
+    /// The `[...]` array of the `"blocks"` field of a decode response.
+    fn blocks_array(json: &str) -> &str {
+        let start = json.find("\"blocks\":").unwrap() + "\"blocks\":".len();
+        let (mut depth, mut in_str, mut esc) = (0usize, false, false);
+        for (i, c) in json[start..].char_indices() {
+            match (in_str, c) {
+                (true, _) if esc => esc = false,
+                (true, '\\') => esc = true,
+                (true, '"') => in_str = false,
+                (true, _) => {}
+                (false, '"') => in_str = true,
+                (false, '[' | '{') => depth += 1,
+                (false, ']' | '}') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &json[start..start + i + 1];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unterminated blocks array");
+    }
+
+    fn rich_sample(png: &[u8]) -> RichDocument {
+        RichDocument {
+            title: "t".into(),
+            blocks: vec![
+                RichBlock::Paragraph(RichParagraph {
+                    runs: vec![
+                        RichRun::plain("X"),
+                        RichRun {
+                            text: "2".into(),
+                            script: RichScript::Superscript,
+                            ..RichRun::default()
+                        },
+                    ],
+                    left_indent_twips: Some(720),
+                    first_line_indent_twips: Some(-360),
+                    line_spacing_percent: Some(200),
+                    ..RichParagraph::default()
+                }),
+                RichBlock::Image(RichImage::new(png.to_vec(), "작은 \"그림\"").unwrap()),
+            ],
+            official_agency: None,
+        }
+    }
+
+    #[test]
+    fn editor_json_keeps_pictures_scripts_indents_and_spacing_through_open_and_save() {
+        let png = tiny_png();
+        let doc = rich_sample(&png);
+        let docx = UniversalFormatConverter::encode_rich(&doc, DocumentFormat::Docx, None).unwrap();
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(Some("decode"), "a.docx", &docx, ""),
+        )
+        .unwrap();
+        let blocks = blocks_array(&json);
+        assert!(blocks.contains("\"script\":\"superscript\""), "{blocks}");
+        assert!(blocks.contains("\"leftIndentTwips\":720"), "{blocks}");
+        assert!(blocks.contains("\"firstLineIndentTwips\":-360"), "{blocks}");
+        assert!(blocks.contains("\"lineSpacingPercent\":200"), "{blocks}");
+        assert!(
+            blocks.contains("\"type\":\"image\",\"format\":\"png\""),
+            "{blocks}"
+        );
+        assert!(blocks.contains("\"widthPx\":3,\"heightPx\":2"), "{blocks}");
+
+        let payload = format!("{{\"targetFormat\":\"docx\",\"blocks\":{blocks}}}");
+        let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).unwrap();
+        let bytes =
+            EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap();
+        let back = match UniversalFormatConverter::decode_rich(&bytes, Some("b.docx"))
+            .unwrap()
+            .content
+        {
+            DecodedContent::Document(d) => d,
+            other => panic!("document expected: {other:?}"),
+        };
+        assert_eq!(back.blocks, doc.blocks);
+        let RichBlock::Image(img) = &back.blocks[1] else {
+            panic!("image block");
+        };
+        assert_eq!(img.bytes(), png.as_slice());
+    }
+
+    #[test]
+    fn editor_json_rejects_damaged_oversized_and_malformed_pictures() {
+        let png = tiny_png();
+        let good = EasyOfficeIpcRouter::encode_base64(&png);
+        let mut flipped = png.clone();
+        flipped[30] ^= 0x40;
+        let big = "A".repeat(48 * 1_048_576);
+        for (label, image) in [
+            (
+                "flipped",
+                format!(
+                    "\"base64\":\"{}\"",
+                    EasyOfficeIpcRouter::encode_base64(&flipped)
+                ),
+            ),
+            ("not base64", "\"base64\":\"!!!\"".to_string()),
+            ("missing", "\"alt\":\"x\"".to_string()),
+            ("oversized", format!("\"base64\":\"{big}\"")),
+            (
+                "bad size",
+                format!("\"base64\":\"{good}\",\"widthEmu\":0,\"heightEmu\":5"),
+            ),
+        ] {
+            let payload = format!(
+                "{{\"targetFormat\":\"docx\",\"blocks\":[{{\"type\":\"image\",{image}}}]}}"
+            );
+            assert!(
+                EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err(),
+                "{label}"
+            );
+        }
+        for bad in ["\"script\":\"above\"", "\"script\":1"] {
+            let payload = format!(
+                "{{\"targetFormat\":\"docx\",\"blocks\":[{{\"type\":\"paragraph\",\"runs\":[{{\"text\":\"x\",{bad}}}]}}]}}"
+            );
+            assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err());
+        }
+        for bad in [
+            "\"leftIndentTwips\":-1",
+            "\"lineSpacingPercent\":0",
+            "\"lineSpacingPercent\":99999",
+            "\"firstLineIndentTwips\":\"큼\"",
+        ] {
+            let payload = format!(
+                "{{\"targetFormat\":\"docx\",\"blocks\":[{{\"type\":\"paragraph\",{bad},\"runs\":[{{\"text\":\"x\"}}]}}]}}"
+            );
+            assert!(EasyOfficeIpcRouter::dispatch("convert_document_format", &payload).is_err());
+        }
     }
 }

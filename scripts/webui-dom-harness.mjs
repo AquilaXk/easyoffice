@@ -836,6 +836,7 @@ export async function createWorkspaceHarness(options = {}) {
     atob: (b64) => Buffer.from(b64, "base64").toString("binary"),
     btoa: (bin) => Buffer.from(bin, "binary").toString("base64"),
     URL: urlShim,
+    Blob: globalThis.Blob,
     setTimeout: (fn, delay = 0) => {
       const id = nextTimerId;
       nextTimerId += 1;

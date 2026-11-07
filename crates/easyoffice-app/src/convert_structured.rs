@@ -13,15 +13,20 @@
 use std::collections::BTreeMap;
 
 use easyoffice_formats::{
-    evaluate_table_formulas, normalize_hex_color, CellStyle, DocumentFormat, EasyOfficeError,
-    OdfCodec, OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock, RichDocument, RichListKind,
-    RichParagraph, RichRun, SheetStyling, StrictJsonValue, UniversalDocumentModel,
-    UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache, MAX_COLUMN_PX, MAX_SIZE_PT,
-    MIN_COLUMN_PX, MIN_SIZE_PT,
+    base64_codec, evaluate_table_formulas, normalize_hex_color, CellStyle, DocumentFormat,
+    EasyOfficeError, OdfCodec, OdsUnpacked, OoxmlCodec, RichAlignment, RichBlock, RichDocument,
+    RichImage, RichListKind, RichParagraph, RichRun, RichScript, SheetStyling, StrictJsonValue,
+    UniversalDocumentModel, UniversalFormatConverter, XlsxCachedValue, XlsxFormulaCache,
+    MAX_COLUMN_PX, MAX_IMAGE_BYTES, MAX_SIZE_PT, MIN_COLUMN_PX, MIN_SIZE_PT,
 };
 use easyoffice_sheet::{EvaluatedCellValue, PackedCellCoordinate, WorkbookEngine};
 
 use crate::convert_ipc::compute_xlsx_formula_cache;
+
+/// Largest indent (twips, 1/20 pt) a paragraph may carry: 200 inches.
+const MAX_INDENT_TWIPS: i64 = 288_000;
+/// Largest line spacing, as a percentage of single spacing.
+const MAX_LINE_SPACING_PERCENT: i64 = 1_000;
 
 /// Upper bound on runs + table cells + sheet cells + slide items in one payload.
 const MAX_STRUCTURED_ITEMS: usize = 500_000;
@@ -183,7 +188,7 @@ fn parse_paragraph(
                 font: opt_font(run)?,
                 color: opt_color(run, "color")?,
                 highlight: opt_color(run, "highlight")?,
-                ..RichRun::default()
+                script: opt_script(run)?,
             });
         }
     }
@@ -213,8 +218,72 @@ fn parse_paragraph(
         alignment,
         heading_level,
         list,
-        ..RichParagraph::default()
+        left_indent_twips: opt_bounded(obj, "leftIndentTwips", 0, MAX_INDENT_TWIPS)?
+            .map(|v| v as u32),
+        first_line_indent_twips: opt_bounded(
+            obj,
+            "firstLineIndentTwips",
+            -MAX_INDENT_TWIPS,
+            MAX_INDENT_TWIPS,
+        )?
+        .map(|v| v as i32),
+        line_spacing_percent: opt_bounded(obj, "lineSpacingPercent", 1, MAX_LINE_SPACING_PERCENT)?
+            .map(|v| v as u16),
     })
+}
+
+/// Optional integer field within `min..=max`.
+fn opt_bounded(
+    obj: &JsonObject,
+    key: &str,
+    min: i64,
+    max: i64,
+) -> Result<Option<i64>, EasyOfficeError> {
+    field(obj, key)
+        .map(|v| match v {
+            StrictJsonValue::Number(text) => text
+                .parse::<i64>()
+                .ok()
+                .filter(|n| (min..=max).contains(n))
+                .ok_or_else(|| {
+                    invalid(format!(
+                        "구조화 저장: '{key}'는 {min}~{max} 정수여야 합니다."
+                    ))
+                }),
+            _ => Err(invalid(format!("구조화 저장: '{key}'는 숫자여야 합니다."))),
+        })
+        .transpose()
+}
+
+/// Run position: `"superscript"`, `"subscript"` or absent.
+fn opt_script(run: &JsonObject) -> Result<RichScript, EasyOfficeError> {
+    match opt_str(run, "script")? {
+        None | Some("") | Some("normal") => Ok(RichScript::Normal),
+        Some("superscript") => Ok(RichScript::Superscript),
+        Some("subscript") => Ok(RichScript::Subscript),
+        Some(other) => Err(invalid(format!("구조화 저장: 알 수 없는 첨자 '{other}'"))),
+    }
+}
+
+/// Picture block: base64 bytes (validated by [`RichImage::new`], so the PD-096 limits apply
+/// again on every save), alternative text and an optional display size in EMU.
+fn parse_image(obj: &JsonObject) -> Result<RichImage, EasyOfficeError> {
+    let encoded = opt_str(obj, "base64")?
+        .ok_or_else(|| invalid("구조화 저장: 그림에는 'base64'가 필요합니다."))?;
+    if encoded.len() / 4 * 3 > MAX_IMAGE_BYTES + 3 {
+        return Err(EasyOfficeError::ResourceBudgetExceeded(format!(
+            "그림 크기가 한도({MAX_IMAGE_BYTES}바이트)를 넘었습니다."
+        )));
+    }
+    let bytes = base64_codec::decode(encoded)
+        .ok_or_else(|| invalid("구조화 저장: 그림 'base64'가 올바르지 않습니다."))?;
+    let mut image = RichImage::new(bytes, opt_str(obj, "alt")?.unwrap_or(""))?;
+    let width = opt_bounded(obj, "widthEmu", 1, i64::MAX)?;
+    let height = opt_bounded(obj, "heightEmu", 1, i64::MAX)?;
+    if let (Some(w), Some(h)) = (width, height) {
+        image.set_display_emu(w as u64, h as u64)?;
+    }
+    Ok(image)
 }
 
 fn parse_table(obj: &JsonObject, budget: &mut Budget) -> Result<Vec<Vec<String>>, EasyOfficeError> {
@@ -256,6 +325,7 @@ fn parse_blocks(
         match opt_str(obj, "type")? {
             Some("paragraph") => blocks.push(RichBlock::Paragraph(parse_paragraph(obj, budget)?)),
             Some("table") => blocks.push(RichBlock::Table(parse_table(obj, budget)?)),
+            Some("image") => blocks.push(RichBlock::Image(parse_image(obj)?)),
             other => {
                 return Err(invalid(format!(
                     "구조화 저장: 알 수 없는 블록 유형 {:?}",
