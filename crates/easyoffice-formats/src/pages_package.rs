@@ -8,6 +8,10 @@
 use crate::pages_iwa::{add_to_table, decompress_iwa, split_records, MAX_DOCUMENT_BYTES};
 use crate::pages_proto::ObjectTable;
 use crate::{DocumentFormat, EasyOfficeError, ZipArchiveCodec, ZipSecurityPolicy};
+use std::collections::HashMap;
+
+/// Package directory that holds picture and media files.
+const DATA_DIR: &str = "Data/";
 
 /// Entry-name suffixes that mark an encrypted/password-protected package. 검증 필요
 const ENCRYPTED_ENTRY_SUFFIXES: [&str; 1] = [".iwph"];
@@ -21,6 +25,8 @@ pub(crate) const LEGACY_MESSAGE: &str = "2009년 이전 형식(index.xml) Pages 
 pub struct PagesPackage {
     pub objects: ObjectTable,
     pub iwa_files: usize,
+    /// Files under `Data/` (pictures and media), keyed by package-relative path.
+    pub data_files: HashMap<String, Vec<u8>>,
 }
 
 fn strip_package_prefix(paths: &[String]) -> String {
@@ -85,6 +91,16 @@ pub fn load_package(bytes: &[u8]) -> Result<PagesPackage, EasyOfficeError> {
         let stream = decompress_iwa(data, &mut remaining)?;
         add_to_table(&mut pkg.objects, split_records(&stream)?);
         pkg.iwa_files += 1;
+    }
+    drop(iwa);
+    for entry in entries {
+        let relative = entry
+            .path
+            .strip_prefix(prefix.as_str())
+            .unwrap_or(&entry.path);
+        if relative.starts_with(DATA_DIR) {
+            pkg.data_files.insert(relative.to_string(), entry.data);
+        }
     }
     Ok(pkg)
 }

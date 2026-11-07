@@ -32,7 +32,7 @@ fn real_sample_decodes_structurally() {
         .iter()
         .filter_map(|b| match b {
             RichBlock::Table(rows) => Some((rows.len(), rows.first().map_or(0, Vec::len))),
-            RichBlock::Paragraph(_) => None,
+            RichBlock::Paragraph(_) | RichBlock::Image(_) => None,
         })
         .collect();
     let runs: usize = d
@@ -40,7 +40,7 @@ fn real_sample_decodes_structurally() {
         .iter()
         .map(|b| match b {
             RichBlock::Paragraph(p) => p.runs.len(),
-            RichBlock::Table(_) => 0,
+            RichBlock::Table(_) | RichBlock::Image(_) => 0,
         })
         .sum();
     let text_cells: usize = d
@@ -48,7 +48,7 @@ fn real_sample_decodes_structurally() {
         .iter()
         .map(|b| match b {
             RichBlock::Table(rows) => rows.iter().flatten().filter(|c| !c.is_empty()).count(),
-            RichBlock::Paragraph(_) => 0,
+            RichBlock::Paragraph(_) | RichBlock::Image(_) => 0,
         })
         .sum();
     let headings = d

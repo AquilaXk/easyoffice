@@ -791,9 +791,22 @@ impl OdfCodec {
     }
 
     pub(crate) fn build_manifest(mime: &str) -> String {
-        format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"><manifest:file-entry manifest:full-path=\"/\" manifest:media-type=\"{mime}\"/><manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/></manifest:manifest>"
-        )
+        Self::build_manifest_with_media(mime, &[])
+    }
+
+    /// Manifest listing `content.xml` plus embedded media parts `(path, media type)`.
+    pub(crate) fn build_manifest_with_media(mime: &str, media: &[(String, &str)]) -> String {
+        let mut xml = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><manifest:manifest xmlns:manifest=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"><manifest:file-entry manifest:full-path=\"/\" manifest:media-type=\"{mime}\"/><manifest:file-entry manifest:full-path=\"content.xml\" manifest:media-type=\"text/xml\"/>"
+        );
+        for (path, media_type) in media {
+            xml.push_str(&format!(
+                "<manifest:file-entry manifest:full-path=\"{}\" manifest:media-type=\"{media_type}\"/>",
+                XmlSanitizer::escape(path)
+            ));
+        }
+        xml.push_str("</manifest:manifest>");
+        xml
     }
 
     fn extract_content_and_meta_xml(

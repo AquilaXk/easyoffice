@@ -1659,3 +1659,20 @@
 - **Alternatives rejected** 크레이트를 의존성으로 추가(PD-053의 무의존·공급망 원칙 위반), `unsafe` SIMD 구현 이식(코드 원칙의 `unsafe` 금지 위반, 예: CRC32 4중 PCLMULQDQ 폴딩은 문서당 0.1ms 미만 이득이라 보류).
 - **Verified by** `cargo test -p easyoffice-formats base64_codec`(RFC 4648 벡터, 0~199바이트 전 꼬리 길이에서 이전 인코더와 바이트 동일·왕복, 잘못된 입력에서 이전 디코더와 결과 동일), `cargo run -p easyoffice-app -- --self-test`
 - **Revisit when** 상류 구현이 크게 빨라지거나 보안 수정이 나올 때, 남은 후보를 측정할 때(해제는 miniz_oxide 대비 시트 XML에서 약 25% 느려 다중 리터럴 해독을 더 시도할 여지가 있음).
+
+## 71. 문서 그림 블록: PNG/JPEG 모델, 상한, 형식별 처리 (PD-096)
+
+- **Status** Implemented (모델, DOCX·ODT·HWPX·PDF 작성, DOCX·Pages 읽기). ODT·HWPX 읽기와 편집기(WebUI) 그림 블록은 후속(#168).
+- **Context** 서식 문서 모델(`RichDocument`)에 그림이 없어 Pages·DOCX 그림이 변환 때 사라졌습니다(#168).
+- **Decision (`PD-096`)**
+  1. **모델**: `RichBlock::Image(RichImage)`. 바이트, 형식(PNG·JPEG, 매직 바이트로 판정), 화소 크기, 표시 크기(EMU 하나로 통일), 대체 텍스트를 가집니다. `RichImage::new`만이 만드는 길이라 모든 그림이 같은 검증을 거칩니다. 표시 크기는 화소×9,525EMU(96dpi)를 쪽 본문(폭 5,731,510EMU, 높이 8,640,000EMU)에 맞춰 비율을 유지하며 줄인 값이고, `set_display_emu`로 바꿀 수 있습니다.
+  2. **검증(fail-closed)**: PNG는 시그니처, 모든 청크의 길이·CRC, IHDR 값(색 유형·비트 깊이 조합), PLTE(팔레트 영상), IDAT 1개 이상, IEND 뒤 잔여 바이트 없음을 요구합니다. JPEG는 SOI, 프레임 헤더(SOF0·1·2, 8비트, 크기 0 아님), SOS, 끝 표지(EOI)를 요구하고 무손실·산술 부호화는 거부합니다. 그 밖의 형식(GIF, EMF 등)은 `InvalidArgument`입니다.
+  3. **상한**: 그림 하나 32MiB(`MAX_IMAGE_BYTES`), 화소 5,000만(`MAX_IMAGE_PIXELS`), 대체 텍스트 4,096바이트, 문서당 256개(`MAX_IMAGES_PER_DOCUMENT`)·합계 128MiB(`MAX_TOTAL_IMAGE_BYTES`). 작성기는 상한을 넘으면 `ResourceBudgetExceeded`로 실패하고, 읽기기는 개별 그림의 손상·형식·크기 문제는 경고와 함께 건너뛰되 문서당 개수·합계 초과는 오류로 처리합니다.
+  4. **작성**: DOCX는 `word/media/imageN.(png|jpg)` + 관계(`rId2`부터) + `[Content_Types].xml` 기본 확장자 + 본문 `w:drawing/wp:inline`(대체 텍스트는 `wp:docPr descr`). ODT는 `Pictures/imageN.*` + 매니페스트 항목 + `draw:frame/draw:image`(as-char, 대체 텍스트는 `svg:desc`). HWPX는 `BinData/imageN.*` + `content.hpf`·매니페스트 항목 + `hp:pic`(`hc:img binaryItemIDRef`, 설명은 `hp:shapeComment`). 모든 파트는 모델의 바이트를 그대로 저장합니다. PDF는 그림마다 한 쪽을 쓰고(A4 여백 안에 비율 유지 축소), JPEG(회색·RGB)는 `DCTDecode`로 그대로, 투명도 없는 PNG(8비트 이하)는 IDAT를 `FlateDecode`+`Predictor 15`로 그대로, 알파가 있는 8비트 PNG는 필터를 되돌려 색과 알파로 나눠 각각 압축하고 알파는 `/SMask`로 둡니다(최대 1,600만 화소). 팔레트·인터레이스·16비트 PNG와 CMYK JPEG는 PDF에 넣지 않고 대체 텍스트 줄로 낮춥니다.
+  5. **그림이 없는 형식**: RTF·Markdown·TXT, 그리고 평면 모델을 쓰는 형식은 대체 텍스트(없으면 `[그림]`)를 한 문단으로 씁니다. WebUI 편집기 JSON도 같은 문단으로 보여 주므로 편집기에서 저장하면 그림은 유지되지 않습니다(후속).
+  6. **읽기**: DOCX는 `w:drawing`의 `a:blip r:embed`를 문서 관계로 풀어 `word/` 아래 미디어를 읽고(경로 이탈·외부 대상 거부), `wp:extent`와 `wp:docPr descr`를 크기·대체 텍스트로 씁니다. 표 안의 그림과 포함되지 않은 도형·차트는 경고와 함께 건너뜁니다. Pages는 그림 개체(형식 3005)의 데이터 식별자를 패키지 메타데이터(형식 11006)의 파일 이름으로 풀어 `Data/` 파일을 읽고 기하 크기(pt)를 표시 크기로 씁니다. 그림은 첨부 위치(문단 바로 뒤)의 문서 순서에 놓입니다.
+- **Why** 그림이 있는 문서를 열고 다른 형식으로 저장해도 그림이 남게 하기 위함입니다. 형식을 두 가지로 한정한 것은 문서 형식 대부분이 이 둘을 그대로 담을 수 있고 재인코딩 없이 바이트를 보존할 수 있기 때문입니다.
+- **Trade-offs** 구조 검증만 하고 화소 디코드는 하지 않으므로 압축 데이터가 깨진 PNG는 열람기에서야 드러납니다(PDF의 알파 PNG만 디코드). 쪽 배치는 인라인(글자처럼 취급) 하나뿐이며 글 감싸기·자르기·회전은 읽지 않습니다. Pages 개체 스키마는 공개 문서가 없어 픽스처로 확인한 필드만 씁니다.
+- **Alternatives rejected** GIF·WebP·SVG 허용(재인코딩 또는 별도 파서 필요, 공격 면 증가), 그림 바이트를 열 때 전부 디코드해 검증(큰 PNG에서 메모리 폭증), 모든 그림을 PDF에서 래스터화해 한 형식으로 통일(화질 손실과 의존성).
+- **Verified by** `cargo test -p easyoffice-formats --test rich_images --test pages_fixtures`(작성기별 파트·참조·바이트 일치, DOCX 왕복, 손상·과대·과다 그림 거부, PDF 스트림, Pages 픽스처의 정확한 바이트·위치), `cargo test -p easyoffice-formats pdf_image`(PNG 필터 5종 복원).
+- **Revisit when** ODT·HWPX 읽기와 편집기 그림 블록을 추가할 때, 글 감싸기·자르기 지원을 요구받을 때, GIF·WebP 요구가 생길 때.

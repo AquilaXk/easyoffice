@@ -3,7 +3,7 @@
 //! Everything that depends on Apple's object schema lives in [`crate::pages_schema`]; table
 //! cells are decoded by [`crate::pages_table`].
 //!
-//! Unsupported elements (images, shapes, text boxes, footnotes, comments, header/footer text,
+//! Pictures (PNG/JPEG) are imported as image blocks. Unsupported elements (shapes, text boxes, footnotes, comments, header/footer text,
 //! unreadable cell values) are skipped and reported as warnings with kinds and counts; legacy
 //! XML and encrypted packages are refused by [`crate::pages_package::load_package`].
 
@@ -16,6 +16,7 @@ use crate::pages_schema::{attachment, char_props_layout, heading, list_type, par
 use crate::pages_schema::{header_footer, storage, style, ty};
 use crate::pages_schema::{CharPropFields, COLOR_RGBA};
 use crate::pages_table::{cell_plain_text, read_table, TableBudget, TableOutcome};
+use crate::rich_read_pages_image::{PageImage, PageImages};
 use crate::{
     EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph, RichRun,
 };
@@ -266,6 +267,7 @@ struct Reader<'a> {
     runs: usize,
     tables: TableBudget,
     fmt_cache: HashMap<u64, Rc<Fmt>>,
+    images: PageImages<'a>,
 }
 
 impl<'a> Reader<'a> {
@@ -438,17 +440,14 @@ impl<'a> Reader<'a> {
             self.skip("표 안의 개체");
             return Ok(());
         }
-        if let Some(rows) = self.attachment_table(att)? {
-            blocks.push(RichBlock::Table(rows));
+        if let Some(block) = self.attachment_block(att)? {
+            blocks.push(block);
         }
         Ok(())
     }
 
-    /// Resolves an attachment to a table, counting anything else as skipped.
-    fn attachment_table(
-        &mut self,
-        att_id: u64,
-    ) -> Result<Option<Vec<Vec<String>>>, EasyOfficeError> {
+    /// Resolves an attachment to a table or picture block, counting anything else as skipped.
+    fn attachment_block(&mut self, att_id: u64) -> Result<Option<RichBlock>, EasyOfficeError> {
         let drawable = self
             .object(att_id, ty::ATTACHMENT)
             .and_then(|o| Message::parse(&o.payload).ok())
@@ -458,13 +457,24 @@ impl<'a> Reader<'a> {
             return Ok(None);
         };
         match self.objects.get(did) {
-            Some(o) if o.type_id == ty::TABLE_INFO => self.read_table(o),
+            Some(o) if o.type_id == ty::TABLE_INFO => Ok(self.read_table(o)?.map(RichBlock::Table)),
+            Some(o) if o.type_id == ty::IMAGE => self.read_picture(o),
             Some(o) => {
                 self.skip(format!("{}(형식 {})", object_kind(o.type_id), o.type_id));
                 Ok(None)
             }
             None => {
                 self.skip("끊어진 개체 참조");
+                Ok(None)
+            }
+        }
+    }
+
+    fn read_picture(&mut self, obj: &ArchiveObject) -> Result<Option<RichBlock>, EasyOfficeError> {
+        match self.images.read(obj)? {
+            PageImage::Picture(img) => Ok(Some(RichBlock::Image(img))),
+            PageImage::Skipped(why) => {
+                self.skip(why);
                 Ok(None)
             }
         }
@@ -550,6 +560,7 @@ pub(crate) fn read_pages(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Ea
         runs: 0,
         tables: TableBudget::default(),
         fmt_cache: HashMap::new(),
+        images: PageImages::new(&pkg.objects, &pkg.data_files),
     };
     let body = reader
         .storage_message(body_id)

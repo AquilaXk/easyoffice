@@ -300,13 +300,18 @@ pub(crate) const CONTAINER_XML: &str = concat!(
 );
 
 /// `META-INF/manifest.xml` listing every part in the package.
-pub(crate) fn manifest_xml(mime: &str, parts: &[&str]) -> String {
+pub(crate) fn manifest_xml(mime: &str, parts: &[&str], media: &[(String, &str)]) -> String {
     let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><odf:manifest xmlns:odf=\"urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"><odf:file-entry odf:full-path=\"/\" odf:media-type=\"{mime}\"/>"
     );
     for part in parts {
         xml.push_str(&format!(
             "<odf:file-entry odf:full-path=\"{part}\" odf:media-type=\"application/xml\"/>"
+        ));
+    }
+    for (part, media_type) in media {
+        xml.push_str(&format!(
+            "<odf:file-entry odf:full-path=\"{part}\" odf:media-type=\"{media_type}\"/>"
         ));
     }
     xml.push_str("</odf:manifest>");
