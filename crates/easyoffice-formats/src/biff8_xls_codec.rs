@@ -471,291 +471,412 @@ impl LegacyOle2Codec {
                     "BIFF8 필수 스트림 'Workbook'이 누락되었습니다.".to_string(),
                 )
             })?;
-        if wb.data.len() < 4 || read_u16_le(&wb.data, 0)? != Self::BIFF8_BOF {
+        let data = wb.data.as_slice();
+        if data.len() < 4 || read_u16_le(data, 0)? != Self::BIFF8_BOF {
             return Err(EasyOfficeError::CorruptedContainer(
                 "BIFF8 BOF(0x0809) 시그니처 불일치".to_string(),
             ));
         }
 
-        let mut boundsheet_names: Vec<String> = Vec::new();
-        let mut sst_strings: Vec<String> = Vec::new();
-        let mut sheets: Vec<LegacyXlsPayload> = Vec::new();
-        let mut current_cells: Vec<(u32, u32, String)> = Vec::new();
-        let mut in_worksheet = false;
-        let mut last_formula_cell_idx: Option<usize> = None;
+        let mut state = XlsParseState::default();
         let mut offset = 0usize;
-
-        while offset + 4 <= wb.data.len() {
-            let opcode = read_u16_le(&wb.data, offset)?;
-            let rec_len = read_u16_le(&wb.data, offset + 2)? as usize;
+        while offset + 4 <= data.len() {
+            let opcode = read_u16_le(data, offset)?;
+            let rec_len = read_u16_le(data, offset + 2)? as usize;
             let start = offset + 4;
             let end = start.checked_add(rec_len).ok_or_else(|| {
                 EasyOfficeError::CorruptedContainer("BIFF8 레코드 길이 오버플로".to_string())
             })?;
-            if end > wb.data.len() {
+            if end > data.len() {
                 return Err(EasyOfficeError::CorruptedContainer(
                     "BIFF8 레코드가 스트림 경계를 초과합니다.".to_string(),
                 ));
             }
-
-            match opcode {
-                Self::BIFF8_FILEPASS => {
-                    return Err(EasyOfficeError::EncryptedDocumentUnsupported(
-                        DocumentFormat::Xls,
-                    ));
-                }
-                Self::BIFF8_BOF => {
-                    if rec_len >= 4 {
-                        let substream_type = read_u16_le(&wb.data, start + 2)?;
-                        if substream_type == 0x0010 {
-                            in_worksheet = true;
-                            current_cells.clear();
-                            last_formula_cell_idx = None;
-                        }
-                    }
-                }
-                Self::BIFF8_BOUNDSHEET => {
-                    if rec_len >= 8 {
-                        let cch_u8 = wb.data[start + 6] as usize;
-                        let grbit = wb.data[start + 7];
-                        let is_utf16 = (grbit & 0x01) != 0;
-                        let std_byte_len = if is_utf16 { cch_u8 * 2 } else { cch_u8 };
-                        let parsed_name = if (grbit & 0xFE) == 0 && start + 8 + std_byte_len == end
-                        {
-                            if is_utf16 {
-                                Some(decode_utf16le(&wb.data[start + 8..end])?)
-                            } else {
-                                Some(Self::decode_latin1_bytes(&wb.data[start + 8..end]))
-                            }
-                        } else {
-                            let char_count = read_u16_le(&wb.data, start + 6)? as usize;
-                            let byte_len = char_count * 2;
-                            if start + 8 + byte_len <= end {
-                                Some(decode_utf16le(&wb.data[start + 8..start + 8 + byte_len])?)
-                            } else {
-                                None
-                            }
-                        };
-                        if let Some(name) = parsed_name {
-                            boundsheet_names.push(name);
-                        }
-                    }
-                }
-                Self::BIFF8_SST => {
-                    let mut sst_chunks: Vec<&[u8]> = vec![&wb.data[start..end]];
-                    let mut next_off = end;
-                    while next_off + 4 <= wb.data.len() {
-                        let next_op = read_u16_le(&wb.data, next_off)?;
-                        if next_op != Self::BIFF8_CONTINUE {
-                            break;
-                        }
-                        let next_len = read_u16_le(&wb.data, next_off + 2)? as usize;
-                        let c_start = next_off + 4;
-                        let c_end = c_start.checked_add(next_len).ok_or_else(|| {
-                            EasyOfficeError::CorruptedContainer(
-                                "BIFF8 CONTINUE 레코드 오버플로".to_string(),
-                            )
-                        })?;
-                        if c_end > wb.data.len() {
-                            return Err(EasyOfficeError::CorruptedContainer(
-                                "BIFF8 CONTINUE 레코드 경계 초과".to_string(),
-                            ));
-                        }
-                        sst_chunks.push(&wb.data[c_start..c_end]);
-                        next_off = c_end;
-                    }
-                    sst_strings = Self::parse_sst_chunks(&sst_chunks)?;
-                    offset = next_off;
-                    continue;
-                }
-                Self::BIFF8_LABELSST => {
-                    if rec_len >= 10 {
-                        let row = read_u16_le(&wb.data, start)? as u32;
-                        let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let sst_idx = read_u32_le(&wb.data, start + 6)? as usize;
-                        let text = sst_strings.get(sst_idx).cloned().ok_or_else(|| {
-                            EasyOfficeError::CorruptedContainer(
-                                "BIFF8 LABELSST 인덱스가 SST 범위를 벗어났습니다.".to_string(),
-                            )
-                        })?;
-                        current_cells.push((row, col, text));
-                        last_formula_cell_idx = None;
-                    }
-                }
-                Self::BIFF8_NUMBER => {
-                    if rec_len == 14 {
-                        let row = read_u16_le(&wb.data, start)? as u32;
-                        let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let bits = read_u64_le(&wb.data, start + 6)?;
-                        let num = f64::from_bits(bits);
-                        current_cells.push((row, col, Self::format_biff_number(num)));
-                        last_formula_cell_idx = None;
-                    }
-                }
-                Self::BIFF8_RK => {
-                    if rec_len >= 10 {
-                        let row = read_u16_le(&wb.data, start)? as u32;
-                        let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let rk = read_u32_le(&wb.data, start + 6)?;
-                        let num = Self::decode_rk_number(rk);
-                        current_cells.push((row, col, Self::format_biff_number(num)));
-                        last_formula_cell_idx = None;
-                    }
-                }
-                Self::BIFF8_MULRK => {
-                    if rec_len >= 12 {
-                        let row = read_u16_le(&wb.data, start)? as u32;
-                        let first_col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let count = (rec_len - 6) / 6;
-                        for i in 0..count {
-                            let rk = read_u32_le(&wb.data, start + 4 + i * 6 + 2)?;
-                            let num = Self::decode_rk_number(rk);
-                            current_cells.push((
-                                row,
-                                first_col + i as u32,
-                                Self::format_biff_number(num),
-                            ));
-                        }
-                        last_formula_cell_idx = None;
-                    }
-                }
-                Self::BIFF8_FORMULA => {
-                    if rec_len >= 14 {
-                        let row = read_u16_le(&wb.data, start)? as u32;
-                        let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let mut handled_inline = false;
-                        if rec_len > 16 {
-                            let char_count = read_u16_le(&wb.data, start + 14)? as usize;
-                            let byte_len = char_count * 2;
-                            let is_legacy_app_inline_text = char_count == 0
-                                && (end - (start + 16)) % 2 == 0
-                                && end >= start + 18
-                                && wb.data[start + 16] == b'='
-                                && wb.data[start + 17] == 0;
-                            if (char_count > 0 && start + 16 + byte_len == end)
-                                || is_legacy_app_inline_text
-                            {
-                                let slice = if char_count > 0 {
-                                    &wb.data[start + 16..start + 16 + byte_len]
-                                } else {
-                                    &wb.data[start + 16..end]
-                                };
-                                if let Ok(expr_raw) = decode_utf16le(slice) {
-                                    let expr = expr_raw.trim_matches('\0');
-                                    if !expr.is_empty() && !expr.chars().any(char::is_control) {
-                                        let formatted = if expr.starts_with('=') {
-                                            expr.to_string()
-                                        } else {
-                                            format!("={expr}")
-                                        };
-                                        current_cells.push((row, col, formatted));
-                                        last_formula_cell_idx = Some(current_cells.len() - 1);
-                                        handled_inline = true;
-                                    }
-                                }
-                            }
-                        }
-                        if !handled_inline {
-                            let is_special =
-                                wb.data[start + 12] == 0xFF && wb.data[start + 13] == 0xFF;
-                            if is_special && wb.data[start + 6] == 0 {
-                                current_cells.push((row, col, String::new()));
-                                last_formula_cell_idx = Some(current_cells.len() - 1);
-                            } else {
-                                let bits = read_u64_le(&wb.data, start + 6)?;
-                                let num = f64::from_bits(bits);
-                                let val_str = if num.is_finite() {
-                                    Self::format_biff_number(num)
-                                } else {
-                                    String::new()
-                                };
-                                current_cells.push((row, col, val_str));
-                                last_formula_cell_idx = Some(current_cells.len() - 1);
-                            }
-                        }
-                    }
-                }
-                Self::BIFF8_STRING => {
-                    if rec_len >= 3 {
-                        let cch = read_u16_le(&wb.data, start)? as usize;
-                        let grbit = wb.data[start + 2];
-                        let is_utf16 = (grbit & 0x01) != 0;
-                        let byte_len = if is_utf16 { cch * 2 } else { cch };
-                        if start + 3 + byte_len <= end {
-                            let s = if is_utf16 {
-                                decode_utf16le(&wb.data[start + 3..start + 3 + byte_len])?
-                            } else {
-                                Self::decode_latin1_bytes(&wb.data[start + 3..start + 3 + byte_len])
-                            };
-                            if let Some(cell_idx) = last_formula_cell_idx.take() {
-                                if let Some(entry) = current_cells.get_mut(cell_idx) {
-                                    if entry.2.is_empty() || !entry.2.starts_with('=') {
-                                        entry.2 = s;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Self::BIFF8_LABEL => {
-                    if rec_len >= 8 {
-                        let row = read_u16_le(&wb.data, start)? as u32;
-                        let col = read_u16_le(&wb.data, start + 2)? as u32;
-                        let cch = read_u16_le(&wb.data, start + 6)? as usize;
-                        if rec_len >= 9 && (wb.data[start + 8] & 0xFE) == 0 {
-                            let is_utf16 = (wb.data[start + 8] & 0x01) != 0;
-                            let std_len = if is_utf16 { cch * 2 } else { cch };
-                            if start + 9 + std_len == end {
-                                let s = if is_utf16 {
-                                    decode_utf16le(&wb.data[start + 9..end])?
-                                } else {
-                                    Self::decode_latin1_bytes(&wb.data[start + 9..end])
-                                };
-                                current_cells.push((row, col, s));
-                                last_formula_cell_idx = None;
-                                offset = end;
-                                continue;
-                            }
-                        }
-                        let byte_len = cch * 2;
-                        if start + 8 + byte_len <= end {
-                            let s = decode_utf16le(&wb.data[start + 8..start + 8 + byte_len])?;
-                            current_cells.push((row, col, s));
-                            last_formula_cell_idx = None;
-                        }
-                    }
-                }
-                Self::BIFF8_EOF => {
-                    last_formula_cell_idx = None;
-                    if in_worksheet {
-                        let sheet_idx = sheets.len();
-                        let name = boundsheet_names
-                            .get(sheet_idx)
-                            .cloned()
-                            .unwrap_or_else(|| format!("Sheet{}", sheet_idx + 1));
-                        sheets.push(LegacyXlsPayload {
-                            sheet_name: name,
-                            cells: std::mem::take(&mut current_cells),
-                        });
-                        in_worksheet = false;
-                    }
-                }
-                _ => {}
-            }
-            offset = end;
+            let rec = XlsRecord { start, end };
+            offset = Self::apply_xls_record(&mut state, data, opcode, rec)?;
         }
+        Ok(state.finish())
+    }
 
-        if sheets.is_empty() && (!current_cells.is_empty() || !boundsheet_names.is_empty()) {
-            let name = boundsheet_names
+    /// Applies one record to `state`; returns the offset of the next record.
+    fn apply_xls_record(
+        state: &mut XlsParseState,
+        data: &[u8],
+        opcode: u16,
+        rec: XlsRecord,
+    ) -> Result<usize, EasyOfficeError> {
+        match opcode {
+            Self::BIFF8_FILEPASS => {
+                return Err(EasyOfficeError::EncryptedDocumentUnsupported(
+                    DocumentFormat::Xls,
+                ));
+            }
+            Self::BIFF8_BOF => Self::xls_bof(state, data, rec)?,
+            Self::BIFF8_BOUNDSHEET => Self::xls_boundsheet(state, data, rec)?,
+            Self::BIFF8_SST => return Self::xls_sst(state, data, rec),
+            Self::BIFF8_LABELSST => Self::xls_labelsst(state, data, rec)?,
+            Self::BIFF8_NUMBER => Self::xls_number(state, data, rec)?,
+            Self::BIFF8_RK => Self::xls_rk(state, data, rec)?,
+            Self::BIFF8_MULRK => Self::xls_mulrk(state, data, rec)?,
+            Self::BIFF8_FORMULA => Self::xls_formula(state, data, rec)?,
+            Self::BIFF8_STRING => Self::xls_string(state, data, rec)?,
+            Self::BIFF8_LABEL => Self::xls_label(state, data, rec)?,
+            Self::BIFF8_EOF => state.end_substream(),
+            _ => {}
+        }
+        Ok(rec.end)
+    }
+
+    fn xls_bof(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() >= 4 && read_u16_le(data, rec.start + 2)? == XLS_SUBSTREAM_WORKSHEET {
+            state.in_worksheet = true;
+            state.current_cells.clear();
+            state.last_formula_cell_idx = None;
+        }
+        Ok(())
+    }
+
+    fn xls_boundsheet(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        let XlsRecord { start, end } = rec;
+        if rec.len() < 8 {
+            return Ok(());
+        }
+        let cch_u8 = data[start + 6] as usize;
+        let grbit = data[start + 7];
+        let is_utf16 = (grbit & 0x01) != 0;
+        let std_byte_len = if is_utf16 { cch_u8 * 2 } else { cch_u8 };
+        let parsed_name = if (grbit & 0xFE) == 0 && start + 8 + std_byte_len == end {
+            Some(Self::decode_biff_text(&data[start + 8..end], is_utf16)?)
+        } else {
+            let byte_len = read_u16_le(data, start + 6)? as usize * 2;
+            if start + 8 + byte_len <= end {
+                Some(decode_utf16le(&data[start + 8..start + 8 + byte_len])?)
+            } else {
+                None
+            }
+        };
+        state.boundsheet_names.extend(parsed_name);
+        Ok(())
+    }
+
+    /// Decodes a BIFF string body as UTF-16LE or Latin-1.
+    fn decode_biff_text(bytes: &[u8], is_utf16: bool) -> Result<String, EasyOfficeError> {
+        if is_utf16 {
+            decode_utf16le(bytes)
+        } else {
+            Ok(Self::decode_latin1_bytes(bytes))
+        }
+    }
+
+    /// Parses the SST record together with its CONTINUE records; returns the next offset.
+    fn xls_sst(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<usize, EasyOfficeError> {
+        let mut sst_chunks: Vec<&[u8]> = vec![&data[rec.start..rec.end]];
+        let mut next_off = rec.end;
+        while next_off + 4 <= data.len() {
+            if read_u16_le(data, next_off)? != Self::BIFF8_CONTINUE {
+                break;
+            }
+            let next_len = read_u16_le(data, next_off + 2)? as usize;
+            let c_start = next_off + 4;
+            let c_end = c_start.checked_add(next_len).ok_or_else(|| {
+                EasyOfficeError::CorruptedContainer("BIFF8 CONTINUE 레코드 오버플로".to_string())
+            })?;
+            if c_end > data.len() {
+                return Err(EasyOfficeError::CorruptedContainer(
+                    "BIFF8 CONTINUE 레코드 경계 초과".to_string(),
+                ));
+            }
+            sst_chunks.push(&data[c_start..c_end]);
+            next_off = c_end;
+        }
+        state.sst_strings = Self::parse_sst_chunks(&sst_chunks)?;
+        Ok(next_off)
+    }
+
+    fn xls_labelsst(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() < 10 {
+            return Ok(());
+        }
+        let start = rec.start;
+        let row = read_u16_le(data, start)? as u32;
+        let col = read_u16_le(data, start + 2)? as u32;
+        let sst_idx = read_u32_le(data, start + 6)? as usize;
+        let text = state.sst_strings.get(sst_idx).cloned().ok_or_else(|| {
+            EasyOfficeError::CorruptedContainer(
+                "BIFF8 LABELSST 인덱스가 SST 범위를 벗어났습니다.".to_string(),
+            )
+        })?;
+        state.push_cell(row, col, text);
+        Ok(())
+    }
+
+    fn xls_number(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() != 14 {
+            return Ok(());
+        }
+        let start = rec.start;
+        let row = read_u16_le(data, start)? as u32;
+        let col = read_u16_le(data, start + 2)? as u32;
+        let num = f64::from_bits(read_u64_le(data, start + 6)?);
+        state.push_cell(row, col, Self::format_biff_number(num));
+        Ok(())
+    }
+
+    fn xls_rk(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() < 10 {
+            return Ok(());
+        }
+        let start = rec.start;
+        let row = read_u16_le(data, start)? as u32;
+        let col = read_u16_le(data, start + 2)? as u32;
+        let num = Self::decode_rk_number(read_u32_le(data, start + 6)?);
+        state.push_cell(row, col, Self::format_biff_number(num));
+        Ok(())
+    }
+
+    fn xls_mulrk(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() < 12 {
+            return Ok(());
+        }
+        let start = rec.start;
+        let row = read_u16_le(data, start)? as u32;
+        let first_col = read_u16_le(data, start + 2)? as u32;
+        let count = (rec.len() - 6) / 6;
+        for i in 0..count {
+            let rk = read_u32_le(data, start + 4 + i * 6 + 2)?;
+            let num = Self::decode_rk_number(rk);
+            state
+                .current_cells
+                .push((row, first_col + i as u32, Self::format_biff_number(num)));
+        }
+        state.last_formula_cell_idx = None;
+        Ok(())
+    }
+
+    /// Extracts the inline `=expr` text stored after a FORMULA record, when present.
+    fn xls_formula_inline(data: &[u8], rec: XlsRecord) -> Result<Option<String>, EasyOfficeError> {
+        let XlsRecord { start, end } = rec;
+        if rec.len() <= 16 {
+            return Ok(None);
+        }
+        let char_count = read_u16_le(data, start + 14)? as usize;
+        let byte_len = char_count * 2;
+        let is_legacy_app_inline_text = char_count == 0
+            && (end - (start + 16)) % 2 == 0
+            && end >= start + 18
+            && data[start + 16] == b'='
+            && data[start + 17] == 0;
+        let has_counted_text = char_count > 0 && start + 16 + byte_len == end;
+        if !(has_counted_text || is_legacy_app_inline_text) {
+            return Ok(None);
+        }
+        let slice = if char_count > 0 {
+            &data[start + 16..start + 16 + byte_len]
+        } else {
+            &data[start + 16..end]
+        };
+        let Ok(expr_raw) = decode_utf16le(slice) else {
+            return Ok(None);
+        };
+        let expr = expr_raw.trim_matches('\0');
+        if expr.is_empty() || expr.chars().any(char::is_control) {
+            return Ok(None);
+        }
+        Ok(Some(if expr.starts_with('=') {
+            expr.to_string()
+        } else {
+            format!("={expr}")
+        }))
+    }
+
+    /// Cached numeric result of a FORMULA record as display text.
+    fn xls_formula_cached(data: &[u8], start: usize) -> Result<String, EasyOfficeError> {
+        let is_special = data[start + 12] == 0xFF && data[start + 13] == 0xFF;
+        if is_special && data[start + 6] == 0 {
+            return Ok(String::new());
+        }
+        let num = f64::from_bits(read_u64_le(data, start + 6)?);
+        Ok(if num.is_finite() {
+            Self::format_biff_number(num)
+        } else {
+            String::new()
+        })
+    }
+
+    fn xls_formula(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() < 14 {
+            return Ok(());
+        }
+        let start = rec.start;
+        let row = read_u16_le(data, start)? as u32;
+        let col = read_u16_le(data, start + 2)? as u32;
+        let text = match Self::xls_formula_inline(data, rec)? {
+            Some(inline) => inline,
+            None => Self::xls_formula_cached(data, start)?,
+        };
+        state.current_cells.push((row, col, text));
+        state.last_formula_cell_idx = Some(state.current_cells.len() - 1);
+        Ok(())
+    }
+
+    /// STRING record: the text result of the preceding FORMULA cell.
+    fn xls_string(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() < 3 {
+            return Ok(());
+        }
+        let start = rec.start;
+        let cch = read_u16_le(data, start)? as usize;
+        let is_utf16 = (data[start + 2] & 0x01) != 0;
+        let byte_len = if is_utf16 { cch * 2 } else { cch };
+        if start + 3 + byte_len > rec.end {
+            return Ok(());
+        }
+        let s = Self::decode_biff_text(&data[start + 3..start + 3 + byte_len], is_utf16)?;
+        if let Some(entry) = state
+            .last_formula_cell_idx
+            .take()
+            .and_then(|idx| state.current_cells.get_mut(idx))
+        {
+            if !entry.2.starts_with('=') {
+                entry.2 = s;
+            }
+        }
+        Ok(())
+    }
+
+    fn xls_label(
+        state: &mut XlsParseState,
+        data: &[u8],
+        rec: XlsRecord,
+    ) -> Result<(), EasyOfficeError> {
+        if rec.len() < 8 {
+            return Ok(());
+        }
+        let XlsRecord { start, end } = rec;
+        let row = read_u16_le(data, start)? as u32;
+        let col = read_u16_le(data, start + 2)? as u32;
+        let cch = read_u16_le(data, start + 6)? as usize;
+        if rec.len() >= 9 && (data[start + 8] & 0xFE) == 0 {
+            let is_utf16 = (data[start + 8] & 0x01) != 0;
+            let std_len = if is_utf16 { cch * 2 } else { cch };
+            if start + 9 + std_len == end {
+                let s = Self::decode_biff_text(&data[start + 9..end], is_utf16)?;
+                state.push_cell(row, col, s);
+                return Ok(());
+            }
+        }
+        let byte_len = cch * 2;
+        if start + 8 + byte_len <= end {
+            let s = decode_utf16le(&data[start + 8..start + 8 + byte_len])?;
+            state.push_cell(row, col, s);
+        }
+        Ok(())
+    }
+}
+
+/// BIFF8 BOF substream type of a worksheet.
+const XLS_SUBSTREAM_WORKSHEET: u16 = 0x0010;
+
+/// Payload range of one BIFF8 record within the workbook stream.
+#[derive(Clone, Copy)]
+struct XlsRecord {
+    start: usize,
+    end: usize,
+}
+
+impl XlsRecord {
+    #[inline]
+    fn len(&self) -> usize {
+        self.end - self.start
+    }
+}
+
+/// Mutable state while walking the BIFF8 record stream.
+#[derive(Default)]
+struct XlsParseState {
+    boundsheet_names: Vec<String>,
+    sst_strings: Vec<String>,
+    sheets: Vec<LegacyXlsPayload>,
+    current_cells: Vec<(u32, u32, String)>,
+    in_worksheet: bool,
+    last_formula_cell_idx: Option<usize>,
+}
+
+impl XlsParseState {
+    fn push_cell(&mut self, row: u32, col: u32, text: String) {
+        self.current_cells.push((row, col, text));
+        self.last_formula_cell_idx = None;
+    }
+
+    /// Closes the current worksheet substream (EOF record).
+    fn end_substream(&mut self) {
+        self.last_formula_cell_idx = None;
+        if !self.in_worksheet {
+            return;
+        }
+        let sheet_idx = self.sheets.len();
+        let name = self
+            .boundsheet_names
+            .get(sheet_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("Sheet{}", sheet_idx + 1));
+        self.sheets.push(LegacyXlsPayload {
+            sheet_name: name,
+            cells: std::mem::take(&mut self.current_cells),
+        });
+        self.in_worksheet = false;
+    }
+
+    fn finish(mut self) -> Vec<LegacyXlsPayload> {
+        if self.sheets.is_empty()
+            && (!self.current_cells.is_empty() || !self.boundsheet_names.is_empty())
+        {
+            let name = self
+                .boundsheet_names
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| "Sheet1".to_string());
-            sheets.push(LegacyXlsPayload {
+            self.sheets.push(LegacyXlsPayload {
                 sheet_name: name,
-                cells: current_cells,
+                cells: self.current_cells,
             });
         }
-
-        Ok(sheets)
+        self.sheets
     }
 }

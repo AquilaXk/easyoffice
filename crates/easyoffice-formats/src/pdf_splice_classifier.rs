@@ -124,317 +124,420 @@ fn apply_unclosed_frame_flags(
     }
 }
 
+impl ParenScanFrame {
+    #[inline]
+    fn is_top_level(&self) -> bool {
+        self.dict_depth == 0 && self.key_bracket_depth == 0 && self.obj_bracket_depth == 0
+    }
+
+    #[inline]
+    fn clear_kv(&mut self) {
+        self.expect_key_val = false;
+        self.after_pdf_kv = false;
+    }
+}
+
+/// Returns true when a closed dictionary / array at line start is followed by more content
+/// than a frame-closing paren (meaning the object continues past the splice).
+#[inline]
+fn continues_after_close(raw: &[u8], from: usize) -> bool {
+    let len = raw.len();
+    let after = skip_pdf_ws_stopping_at_eof(raw, from, len);
+    after < len && raw[after] != b')'
+}
+
+/// Applies a `>>` that closes the outermost dictionary of the frame.
+/// Returns true when the close marks a cross-object splice.
+fn close_outer_dict(frame: &mut ParenScanFrame, raw: &[u8], i: usize) -> bool {
+    let cross = frame.line_start_obj_or_trailer_dict && continues_after_close(raw, i + 2);
+    frame.has_obj_or_trailer_dict = false;
+    frame.line_start_obj_or_trailer_dict = false;
+    if frame.dict_opened_for_key {
+        frame.after_pdf_kv = true;
+        frame.dict_opened_for_key = false;
+    }
+    cross
+}
+
+/// Whether a name token at top level of a frame is an encrypt / xref-type entry whose
+/// neighbours show it was spliced in.
+fn is_spliced_entry(raw: &[u8], i: usize, is_nested: bool, frame: &ParenScanFrame) -> bool {
+    let len = raw.len();
+    let Some(after_entry) =
+        is_encrypt_entry_at(raw, i, len).or_else(|| is_type_xref_entry_end_at(raw, i, len))
+    else {
+        return false;
+    };
+    let next = skip_pdf_ws_stopping_at_eof(raw, after_entry, len);
+    let next_is_key = next + 1 < len && raw[next] == b'/' && !is_pdf_delim_or_ws(raw[next + 1]);
+    let next_is_close = next + 1 < len && raw[next] == b'>' && raw[next + 1] == b'>';
+    let at_frame_close = next >= len || (is_nested && raw[next] == b')');
+    next_is_key || next_is_close || (at_frame_close && frame.after_pdf_kv && !frame.expect_key_val)
+}
+
+/// Scans a `<hex>` string starting at `<`; returns the index after `>` when well formed.
+fn hex_string_end(raw: &[u8], lt: usize) -> Option<usize> {
+    let len = raw.len();
+    let mut h = lt + 1;
+    while h < len && raw[h] != b'>' && (raw[h].is_ascii_hexdigit() || is_pdf_ws(raw[h])) {
+        h += 1;
+    }
+    (h < len && raw[h] == b'>').then_some(h + 1)
+}
+
+struct ParenScanner<'a> {
+    raw: &'a [u8],
+    frames: Vec<ParenScanFrame>,
+    cross_obj: bool,
+    dict_splice: bool,
+    name_splice: bool,
+    seen_startxref: bool,
+    seen_line_start_obj: bool,
+    next_obj_or_trailer_dict_at: Option<(usize, bool)>,
+    next_obj_array_at: Option<usize>,
+    endobj_cache: (usize, usize),
+}
+
+impl<'a> ParenScanner<'a> {
+    fn new(raw: &'a [u8]) -> Self {
+        Self {
+            raw,
+            frames: vec![ParenScanFrame::default()],
+            cross_obj: false,
+            dict_splice: false,
+            name_splice: false,
+            seen_startxref: false,
+            seen_line_start_obj: false,
+            next_obj_or_trailer_dict_at: None,
+            next_obj_array_at: None,
+            endobj_cache: (0, 0),
+        }
+    }
+
+    fn apply_frame_flags(&mut self, frame: ParenScanFrame) {
+        apply_unclosed_frame_flags(
+            frame,
+            &mut self.cross_obj,
+            &mut self.dict_splice,
+            &mut self.name_splice,
+        );
+    }
+
+    /// Tracks structural `endobj` and trailer-dict markers at byte `i`.
+    fn note_object_markers(&mut self, i: usize) {
+        let raw = self.raw;
+        if is_structural_endobj_at(raw, i, &mut self.endobj_cache)
+            || (self.seen_line_start_obj && is_standalone_pdf_kw(raw, i, b"endobj"))
+        {
+            self.cross_obj = true;
+        }
+        if let Some(qt) = is_trailer_dict_at(raw, i, raw.len()) {
+            self.next_obj_or_trailer_dict_at = Some((qt, is_preceded_by_eol_ws(raw, i)));
+        }
+    }
+
+    /// Handles structural keywords that begin a line (EOF marker, stream, xref, obj header).
+    fn scan_line_start(&mut self, i: usize) {
+        let raw = self.raw;
+        let len = raw.len();
+        let mut t = i;
+        while t < len && matches!(raw[t], b' ' | b'\t') {
+            t += 1;
+        }
+        if is_line_eof_marker(raw, t)
+            && (self.seen_startxref
+                || has_structural_after_endobj_cached(raw, t + 5, &mut self.endobj_cache))
+        {
+            self.cross_obj = true;
+        }
+        if is_stream_kw_at(raw, t, len) || is_valid_xref_follow(raw, t) {
+            self.cross_obj = true;
+        }
+        if is_valid_startxref_at(raw, t, len) {
+            self.seen_startxref = true;
+            self.cross_obj = true;
+        }
+        if let Some(qo) =
+            match_indirect_obj_header(raw, t, len).and_then(|h| is_pdf_obj_body_start(raw, h, len))
+        {
+            self.seen_line_start_obj = true;
+            self.record_obj_body(qo);
+        }
+    }
+
+    fn record_obj_body(&mut self, qo: usize) {
+        let raw = self.raw;
+        if qo + 1 < raw.len() && raw[qo] == b'<' && raw[qo + 1] == b'<' {
+            self.next_obj_or_trailer_dict_at = Some((qo, true));
+        } else if raw[qo] == b'[' {
+            self.next_obj_array_at = Some(qo);
+        }
+    }
+
+    fn open_paren(&mut self) {
+        let opened_for_key = self
+            .frames
+            .last()
+            .is_some_and(|f| f.is_top_level() && f.expect_key_val);
+        if let Some(parent) = self.frames.last_mut() {
+            parent.clear_kv();
+        }
+        self.frames.push(ParenScanFrame {
+            paren_opened_for_key: opened_for_key,
+            ..Default::default()
+        });
+    }
+
+    /// Returns false when the paren is unbalanced (no frame to close).
+    fn close_paren(&mut self) -> bool {
+        if self.frames.len() <= 1 {
+            return false;
+        }
+        let popped = self.frames.pop().unwrap_or_default();
+        self.apply_frame_flags(popped);
+        if popped.paren_opened_for_key {
+            if let Some(parent) = self.frames.last_mut() {
+                parent.expect_key_val = false;
+                parent.after_pdf_kv = true;
+            }
+        }
+        true
+    }
+
+    fn open_dict(&mut self, i: usize) -> usize {
+        let raw = self.raw;
+        let marker = self.next_obj_or_trailer_dict_at;
+        let Some(frame) = self.frames.last_mut() else {
+            return i + 2;
+        };
+        if !is_pdf_dict_open_follow(raw, i + 2) {
+            frame.clear_kv();
+            return i + 2;
+        }
+        if frame.dict_depth == 0 {
+            frame.dict_opened_for_key = frame.key_bracket_depth == 0
+                && frame.obj_bracket_depth == 0
+                && frame.expect_key_val;
+            frame.clear_kv();
+        }
+        frame.dict_depth += 1;
+        if let Some((dict_at, at_line_start)) = marker {
+            if dict_at == i {
+                frame.has_obj_or_trailer_dict = true;
+                if at_line_start && frame.dict_depth == 1 {
+                    frame.line_start_obj_or_trailer_dict = true;
+                }
+            }
+        }
+        i + 2
+    }
+
+    fn close_dict(&mut self, i: usize) -> usize {
+        let raw = self.raw;
+        if is_same_line_dict_stream(raw, i + 2) {
+            self.cross_obj = true;
+        }
+        let Some(frame) = self.frames.last_mut() else {
+            return i + 2;
+        };
+        if frame.dict_depth == 0 {
+            frame.clear_kv();
+            if is_pdf_dict_open_follow(raw, i + 2) {
+                self.dict_splice = true;
+            }
+            return i + 2;
+        }
+        frame.dict_depth -= 1;
+        if frame.dict_depth == 0 && close_outer_dict(frame, raw, i) {
+            self.cross_obj = true;
+        }
+        i + 2
+    }
+
+    /// Handles a lone `<`; returns the next scan index.
+    fn lone_lt(&mut self, i: usize) -> usize {
+        let raw = self.raw;
+        let Some(frame) = self.frames.last_mut() else {
+            return i + 1;
+        };
+        if !frame.is_top_level() {
+            return i + 1;
+        }
+        if frame.expect_key_val {
+            if let Some(end) = hex_string_end(raw, i) {
+                frame.expect_key_val = false;
+                frame.after_pdf_kv = true;
+                return end;
+            }
+        }
+        frame.clear_kv();
+        i + 1
+    }
+
+    fn open_bracket(&mut self, i: usize) {
+        let array_at = self.next_obj_array_at;
+        let Some(frame) = self.frames.last_mut() else {
+            return;
+        };
+        if frame.dict_depth != 0 {
+            return;
+        }
+        let key_array = frame.key_bracket_depth > 0 || frame.expect_key_val;
+        let obj_array = frame.obj_bracket_depth > 0 || array_at == Some(i);
+        frame.clear_kv();
+        if key_array {
+            frame.key_bracket_depth += 1;
+        } else if obj_array {
+            frame.obj_bracket_depth += 1;
+        }
+    }
+
+    fn close_bracket(&mut self, i: usize) {
+        let raw = self.raw;
+        let Some(frame) = self.frames.last_mut() else {
+            return;
+        };
+        if frame.dict_depth != 0 {
+            return;
+        }
+        if frame.key_bracket_depth > 0 {
+            frame.key_bracket_depth -= 1;
+            if frame.key_bracket_depth == 0 {
+                frame.after_pdf_kv = true;
+            }
+        } else if frame.obj_bracket_depth > 0 {
+            frame.obj_bracket_depth -= 1;
+            if frame.obj_bracket_depth == 0 && continues_after_close(raw, i + 1) {
+                self.cross_obj = true;
+            }
+        } else {
+            frame.clear_kv();
+            if is_pdf_dict_open_follow(raw, i + 1) {
+                self.dict_splice = true;
+            }
+        }
+    }
+
+    /// Handles a name token starting at `/`; returns the index after the token.
+    fn name_token(&mut self, i: usize) -> usize {
+        let raw = self.raw;
+        let mut k = i + 1;
+        while k < raw.len() && !is_pdf_delim_or_ws(raw[k]) {
+            k += 1;
+        }
+        let is_nested = self.frames.len() > 1;
+        let Some(frame) = self.frames.last_mut() else {
+            return k;
+        };
+        if !frame.is_top_level() {
+            return k;
+        }
+        if is_spliced_entry(raw, i, is_nested, frame) {
+            self.name_splice = true;
+        }
+        if k == i + 1 {
+            frame.clear_kv();
+        } else {
+            let was_key = frame.expect_key_val;
+            frame.expect_key_val = !was_key;
+            frame.after_pdf_kv = was_key;
+        }
+        k
+    }
+
+    /// Handles any other byte; returns the next scan index.
+    fn other_token(&mut self, i: usize) -> usize {
+        let raw = self.raw;
+        let len = raw.len();
+        let Some(frame) = self.frames.last_mut() else {
+            return i + 1;
+        };
+        if !frame.is_top_level() {
+            return i + 1;
+        }
+        if frame.expect_key_val || frame.after_pdf_kv {
+            if let Some(eol) = is_plain_comment_line(raw, i, len) {
+                return eol;
+            }
+        }
+        if frame.expect_key_val {
+            if let Some(after_val) = step_scalar_or_ref_value(raw, i, len) {
+                frame.expect_key_val = false;
+                frame.after_pdf_kv = true;
+                return after_val;
+            }
+        }
+        frame.clear_kv();
+        i + 1
+    }
+
+    /// Dispatches one non-whitespace byte; `None` means an unbalanced `)` aborts the scan.
+    fn step(&mut self, i: usize) -> Option<usize> {
+        let raw = self.raw;
+        let double_next = |c: u8| i + 1 < raw.len() && raw[i + 1] == c;
+        match raw[i] {
+            b'(' => {
+                self.open_paren();
+                Some(i + 1)
+            }
+            b')' => self.close_paren().then_some(i + 1),
+            b'<' if double_next(b'<') => Some(self.open_dict(i)),
+            b'>' if double_next(b'>') => Some(self.close_dict(i)),
+            b'<' => Some(self.lone_lt(i)),
+            b'[' => {
+                self.open_bracket(i);
+                Some(i + 1)
+            }
+            b']' => {
+                self.close_bracket(i);
+                Some(i + 1)
+            }
+            b'/' if i == 0 || (is_pdf_delim_or_ws(raw[i - 1]) && raw[i - 1] != b'/') => {
+                Some(self.name_token(i))
+            }
+            _ => Some(self.other_token(i)),
+        }
+    }
+
+    fn finish(mut self) -> ParenSpliceClass {
+        let first = self.frames[0];
+        self.apply_frame_flags(first);
+        let cross = self.cross_obj || self.frames.len() != 1;
+        ParenSpliceClass {
+            cross_obj: cross,
+            any_splice: cross || self.dict_splice || self.name_splice,
+        }
+    }
+}
+
 pub(super) fn classify_raw_paren_splice(raw: &[u8]) -> ParenSpliceClass {
     let len = raw.len();
-    let mut frames = vec![ParenScanFrame::default()];
-    let mut cross_obj = false;
-    let mut dict_splice = false;
-    let mut name_splice = false;
-    let mut seen_startxref = false;
-    let mut seen_line_start_obj = false;
-    let mut next_obj_or_trailer_dict_at: Option<(usize, bool)> = None;
-    let mut next_obj_array_at: Option<usize> = None;
-    let mut endobj_cache = (0usize, 0usize);
+    let mut scanner = ParenScanner::new(raw);
     let mut i = 0usize;
     while i < len {
         if raw[i] == b'\\' {
             i = (i + 2).min(len);
             continue;
         }
-        if is_structural_endobj_at(raw, i, &mut endobj_cache)
-            || (seen_line_start_obj && is_standalone_pdf_kw(raw, i, b"endobj"))
-        {
-            cross_obj = true;
-        }
-        if let Some(qt) = is_trailer_dict_at(raw, i, len) {
-            next_obj_or_trailer_dict_at = Some((qt, is_preceded_by_eol_ws(raw, i)));
-        }
+        scanner.note_object_markers(i);
         if i > 0 && matches!(raw[i - 1], b'\n' | b'\r') && raw[i] != b'\n' {
-            let mut t = i;
-            while t < len && matches!(raw[t], b' ' | b'\t') {
-                t += 1;
-            }
-            if is_line_eof_marker(raw, t)
-                && (seen_startxref
-                    || has_structural_after_endobj_cached(raw, t + 5, &mut endobj_cache))
-            {
-                cross_obj = true;
-            }
-            if is_stream_kw_at(raw, t, len) || is_valid_xref_follow(raw, t) {
-                cross_obj = true;
-            }
-            if is_valid_startxref_at(raw, t, len) {
-                seen_startxref = true;
-                cross_obj = true;
-            }
-            if let Some(after_hdr) = match_indirect_obj_header(raw, t, len) {
-                if let Some(qo) = is_pdf_obj_body_start(raw, after_hdr, len) {
-                    seen_line_start_obj = true;
-                    if qo + 1 < len && raw[qo] == b'<' && raw[qo + 1] == b'<' {
-                        next_obj_or_trailer_dict_at = Some((qo, true));
-                    } else if raw[qo] == b'[' {
-                        next_obj_array_at = Some(qo);
-                    }
-                }
-            }
+            scanner.scan_line_start(i);
         }
         if is_pdf_ws(raw[i]) {
             i += 1;
             continue;
         }
-        match raw[i] {
-            b'(' => {
-                let opened_for_key = frames.last().is_some_and(|f| {
-                    f.dict_depth == 0
-                        && f.key_bracket_depth == 0
-                        && f.obj_bracket_depth == 0
-                        && f.expect_key_val
-                });
-                if let Some(parent) = frames.last_mut() {
-                    parent.expect_key_val = false;
-                    parent.after_pdf_kv = false;
-                }
-                frames.push(ParenScanFrame {
-                    paren_opened_for_key: opened_for_key,
-                    ..Default::default()
-                });
-            }
-            b')' => {
-                if frames.len() <= 1 {
-                    return ParenSpliceClass {
-                        cross_obj: true,
-                        any_splice: true,
-                    };
-                }
-                let popped = frames.pop().unwrap_or_default();
-                apply_unclosed_frame_flags(
-                    popped,
-                    &mut cross_obj,
-                    &mut dict_splice,
-                    &mut name_splice,
-                );
-                if popped.paren_opened_for_key {
-                    if let Some(parent) = frames.last_mut() {
-                        parent.expect_key_val = false;
-                        parent.after_pdf_kv = true;
-                    }
-                }
-            }
-            b'<' if i + 1 < len && raw[i + 1] == b'<' => {
-                if is_pdf_dict_open_follow(raw, i + 2) {
-                    if let Some(frame) = frames.last_mut() {
-                        if frame.dict_depth == 0 {
-                            frame.dict_opened_for_key = frame.key_bracket_depth == 0
-                                && frame.obj_bracket_depth == 0
-                                && frame.expect_key_val;
-                            frame.expect_key_val = false;
-                            frame.after_pdf_kv = false;
-                        }
-                        frame.dict_depth += 1;
-                        if let Some((dict_at, at_line_start)) = next_obj_or_trailer_dict_at {
-                            if dict_at == i {
-                                frame.has_obj_or_trailer_dict = true;
-                                if at_line_start && frame.dict_depth == 1 {
-                                    frame.line_start_obj_or_trailer_dict = true;
-                                }
-                            }
-                        }
-                    }
-                } else if let Some(frame) = frames.last_mut() {
-                    frame.expect_key_val = false;
-                    frame.after_pdf_kv = false;
-                }
-                i += 2;
-                continue;
-            }
-            b'>' if i + 1 < len && raw[i + 1] == b'>' => {
-                if is_same_line_dict_stream(raw, i + 2) {
-                    cross_obj = true;
-                }
-                if let Some(frame) = frames.last_mut() {
-                    if frame.dict_depth > 0 {
-                        frame.dict_depth -= 1;
-                        if frame.dict_depth == 0 {
-                            if frame.line_start_obj_or_trailer_dict {
-                                let after_close = skip_pdf_ws_stopping_at_eof(raw, i + 2, len);
-                                if after_close < len && raw[after_close] != b')' {
-                                    cross_obj = true;
-                                }
-                            }
-                            frame.has_obj_or_trailer_dict = false;
-                            frame.line_start_obj_or_trailer_dict = false;
-                            if frame.dict_opened_for_key {
-                                frame.after_pdf_kv = true;
-                                frame.dict_opened_for_key = false;
-                            }
-                        }
-                    } else {
-                        frame.expect_key_val = false;
-                        frame.after_pdf_kv = false;
-                        if is_pdf_dict_open_follow(raw, i + 2) {
-                            dict_splice = true;
-                        }
-                    }
-                }
-                i += 2;
-                continue;
-            }
-            b'<' => {
-                if let Some(frame) = frames.last_mut() {
-                    if frame.dict_depth == 0
-                        && frame.key_bracket_depth == 0
-                        && frame.obj_bracket_depth == 0
-                    {
-                        if frame.expect_key_val {
-                            let mut h = i + 1;
-                            while h < len
-                                && raw[h] != b'>'
-                                && (raw[h].is_ascii_hexdigit() || is_pdf_ws(raw[h]))
-                            {
-                                h += 1;
-                            }
-                            if h < len && raw[h] == b'>' {
-                                frame.expect_key_val = false;
-                                frame.after_pdf_kv = true;
-                                i = h + 1;
-                                continue;
-                            }
-                        }
-                        frame.expect_key_val = false;
-                        frame.after_pdf_kv = false;
-                    }
-                }
-            }
-            b'[' => {
-                if let Some(frame) = frames.last_mut() {
-                    if frame.dict_depth == 0 {
-                        if frame.key_bracket_depth > 0 || frame.expect_key_val {
-                            frame.expect_key_val = false;
-                            frame.after_pdf_kv = false;
-                            frame.key_bracket_depth += 1;
-                        } else if frame.obj_bracket_depth > 0 || next_obj_array_at == Some(i) {
-                            frame.expect_key_val = false;
-                            frame.after_pdf_kv = false;
-                            frame.obj_bracket_depth += 1;
-                        } else {
-                            frame.expect_key_val = false;
-                            frame.after_pdf_kv = false;
-                        }
-                    }
-                }
-            }
-            b']' => {
-                if let Some(frame) = frames.last_mut() {
-                    if frame.dict_depth == 0 {
-                        if frame.key_bracket_depth > 0 {
-                            frame.key_bracket_depth -= 1;
-                            if frame.key_bracket_depth == 0 {
-                                frame.after_pdf_kv = true;
-                            }
-                        } else if frame.obj_bracket_depth > 0 {
-                            frame.obj_bracket_depth -= 1;
-                            if frame.obj_bracket_depth == 0 {
-                                let after_arr = skip_pdf_ws_stopping_at_eof(raw, i + 1, len);
-                                if after_arr < len && raw[after_arr] != b')' {
-                                    cross_obj = true;
-                                }
-                            }
-                        } else {
-                            frame.expect_key_val = false;
-                            frame.after_pdf_kv = false;
-                            if is_pdf_dict_open_follow(raw, i + 1) {
-                                dict_splice = true;
-                            }
-                        }
-                    }
-                }
-            }
-            b'/' if i == 0 || (is_pdf_delim_or_ws(raw[i - 1]) && raw[i - 1] != b'/') => {
-                let mut k = i + 1;
-                while k < len && !is_pdf_delim_or_ws(raw[k]) {
-                    k += 1;
-                }
-                let is_nested = frames.len() > 1;
-                if let Some(frame) = frames.last_mut() {
-                    if frame.dict_depth == 0
-                        && frame.key_bracket_depth == 0
-                        && frame.obj_bracket_depth == 0
-                    {
-                        if let Some(after_entry) = is_encrypt_entry_at(raw, i, len)
-                            .or_else(|| is_type_xref_entry_end_at(raw, i, len))
-                        {
-                            let next = skip_pdf_ws_stopping_at_eof(raw, after_entry, len);
-                            let next_is_key = next + 1 < len
-                                && raw[next] == b'/'
-                                && !is_pdf_delim_or_ws(raw[next + 1]);
-                            let next_is_close =
-                                next + 1 < len && raw[next] == b'>' && raw[next + 1] == b'>';
-                            let at_frame_close = next >= len || (is_nested && raw[next] == b')');
-                            if next_is_key
-                                || next_is_close
-                                || (at_frame_close && frame.after_pdf_kv && !frame.expect_key_val)
-                            {
-                                name_splice = true;
-                            }
-                        }
-                        if k > i + 1 {
-                            if frame.expect_key_val {
-                                frame.expect_key_val = false;
-                                frame.after_pdf_kv = true;
-                            } else {
-                                frame.expect_key_val = true;
-                                frame.after_pdf_kv = false;
-                            }
-                        } else {
-                            frame.expect_key_val = false;
-                            frame.after_pdf_kv = false;
-                        }
-                        i = k;
-                        continue;
-                    }
-                }
-                i = k;
-                continue;
-            }
-            _ => {
-                if let Some(frame) = frames.last_mut() {
-                    if frame.dict_depth == 0
-                        && frame.key_bracket_depth == 0
-                        && frame.obj_bracket_depth == 0
-                    {
-                        if frame.expect_key_val || frame.after_pdf_kv {
-                            if let Some(eol) = is_plain_comment_line(raw, i, len) {
-                                i = eol;
-                                continue;
-                            }
-                        }
-                        if frame.expect_key_val {
-                            if let Some(after_val) = step_scalar_or_ref_value(raw, i, len) {
-                                frame.expect_key_val = false;
-                                frame.after_pdf_kv = true;
-                                i = after_val;
-                                continue;
-                            }
-                        }
-                        frame.expect_key_val = false;
-                        frame.after_pdf_kv = false;
-                    }
+        match scanner.step(i) {
+            Some(next) => i = next,
+            None => {
+                return ParenSpliceClass {
+                    cross_obj: true,
+                    any_splice: true,
                 }
             }
         }
-        i += 1;
     }
-    apply_unclosed_frame_flags(
-        frames[0],
-        &mut cross_obj,
-        &mut dict_splice,
-        &mut name_splice,
-    );
-    let cross = cross_obj || frames.len() != 1;
-    ParenSpliceClass {
-        cross_obj: cross,
-        any_splice: cross || dict_splice || name_splice,
-    }
+    scanner.finish()
 }
 
 pub(super) fn bytes_contain_pdf_name(haystack: &[u8], expected: &str) -> bool {

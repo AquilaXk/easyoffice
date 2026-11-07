@@ -7,6 +7,8 @@ pub mod coercion;
 mod dag;
 pub mod functions;
 mod functions_date_fin;
+mod functions_fin;
+mod functions_lookup;
 mod functions_lookup_text;
 mod memo;
 mod parser;
