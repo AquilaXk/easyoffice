@@ -16,7 +16,6 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   const ALL_MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"];
   const DOC_MODULES = ["DOC", "HWP"];
   const EDIT_MODULES = ["DOC", "HWP", "SHEET", "SLIDE"];
-  const DOC_SLIDE_MODULES = ["DOC", "HWP", "SLIDE"];
   const DOC_SHEET_MODULES = ["DOC", "HWP", "SHEET"];
   const RIBBON_MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "PDF"];
   // Menu commands that are the suffix of a ribbon command id (`<module>-<suffix>`, ribbon-catalog).

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createWebUiDom, createWorkspaceHarness, flushAsyncTurns } from "./webui-dom-harness.mjs";
-import { switchModule } from "./test-support/modules.mjs";
 
 // Menu bar (PD-098, step 3a): rhwp-studio markup and behaviour, and every ribbon command of the
 // catalog (140 ids over the five editing modules) is reachable from a menu item.
@@ -70,10 +69,8 @@ for (const mod of MODULES) {
       const id = catalog.resolveMenuCommand(item.dataset.studioMenuCmd, mod);
       if (id && !clicked.has(id)) clicked.set(id, item);
     }
-    for (const item of clicked.values()) {
-      item.click();
-      await flushAsyncTurns(4);
-    }
+    for (const item of clicked.values()) item.click();
+    await flushAsyncTurns(4 * clicked.size);
     // `view-theme` runs the theme toggle itself (the menu item behaves like the ribbon button).
     const expected = idsOf(catalog, mod).filter((id) => !id.endsWith("-view-theme"));
     const missing = expected.filter((id) => !executed.includes(id));
