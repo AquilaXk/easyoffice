@@ -473,7 +473,8 @@
     workspacePanels.setupStudioChromeControls(applyZoomPercent, (cmd) => {
       const modPrefix = getRibbonModulePrefix(activeModule);
       const fullCmd =
-        cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd;
+        host.__EASYOFFICE_RIBBON_CATALOG__.resolveMenuCommand(cmd, activeModule) ||
+        (cmd.startsWith("doc-") || cmd.startsWith("hwp-") ? cmd : modPrefix + "-" + cmd);
       void ribbonHistory.executeTrackedRibbonCommand(fullCmd).catch(() => {});
     });
   }
@@ -869,6 +870,7 @@
       "slide-delete": () => slideStudio.removeSlide(),
       palette: () => togglePaletteModal(modal, cmdSearchInput),
       "file-open": () => fileOpen.openFilePicker(),
+      "recent-dialog": () => void windowBridge.chooseRecent().catch(() => {}),
       "file-new": () => void windowBridge.newDocument(activeModule).catch((err) => setStatusFeedback(err?.message || String(err))),
       "window-close": () => void windowBridge.requestClose().catch(() => {}),
       "studio-save": () => void saveWorkspaceDocument().catch(() => {}),

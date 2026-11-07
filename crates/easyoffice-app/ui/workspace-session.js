@@ -16,18 +16,36 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   const ALL_MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "PDF", "CONV"];
   const DOC_MODULES = ["DOC", "HWP"];
   const EDIT_MODULES = ["DOC", "HWP", "SHEET", "SLIDE"];
-  const DOC_SLIDE_MODULES = ["DOC", "HWP", "SLIDE"];
   const DOC_SHEET_MODULES = ["DOC", "HWP", "SHEET"];
+  const RIBBON_MODULES = ["DOC", "HWP", "SHEET", "SLIDE", "PDF"];
+  // Menu commands that are the suffix of a ribbon command id (`<module>-<suffix>`, ribbon-catalog).
+  const RIBBON_SUFFIX_COMMANDS = [
+    "home-bold", "home-italic", "home-underline", "home-style",
+    "insert-table", "insert-chart", "insert-shape", "insert-link",
+    "layout-paper", "layout-orientation", "layout-columns", "layout-margins",
+    "data-autosum", "data-fn-browser", "data-sort", "data-validation",
+    "review-track", "review-comment", "review-verify", "review-stats",
+    "view-split", "view-ribbon", "view-theme", "view-zoom",
+  ];
+  // Module-specific ribbon commands are only enabled in their own module.
+  const MODULE_SPECIFIC_COMMANDS = Object.fromEntries([
+    ["doc", "DOC", ["toc", "footnote", "mailmerge", "tableformula"]],
+    ["hwp", "HWP", ["header", "field", "border", "manuscript"]],
+    ["sheet", "SHEET", ["pivot", "chart", "condfmt", "freeze"]],
+    ["slide", "SLIDE", ["master", "snap", "transition", "presenter"]],
+    ["pdf", "PDF", ["highlight", "rotate", "splitmerge", "tooffice"]],
+  ].flatMap(([prefix, mod, names]) => names.map((name) => [`${prefix}-mod-${name}`, [mod]])));
   // Studio menu/toolbar command -> modules where it has a real effect (default: DOC/HWP only).
   const STUDIO_COMMAND_MODULES = {
     "studio-save": ALL_MODULES, "studio-undo": ALL_MODULES, "studio-redo": ALL_MODULES,
     palette: ALL_MODULES, "view-theme": ALL_MODULES, "zoom-in": ALL_MODULES, "zoom-out": ALL_MODULES,
     "zoom-fit-page": ALL_MODULES, "zoom-fit-width": ALL_MODULES, "smart-diagnose": ALL_MODULES,
     "scrub-pii": ALL_MODULES, "security-audit": ALL_MODULES,
-    "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES, "home-style": EDIT_MODULES, "home-bold": EDIT_MODULES,
-    "home-italic": EDIT_MODULES, "home-underline": EDIT_MODULES, "insert-table": EDIT_MODULES,
-    "insert-chart": EDIT_MODULES, "insert-shape": DOC_SLIDE_MODULES, "insert-link": DOC_SLIDE_MODULES,
-    "layout-columns": DOC_SLIDE_MODULES, "layout-margins": DOC_SLIDE_MODULES,
+    "clip-copy": EDIT_MODULES, "clip-cut": DOC_SHEET_MODULES, "clip-paste": DOC_SHEET_MODULES,
+    // Every ribbon command exists for the five editing modules, so its menu item is enabled in all
+    // of them (PD-098: the menu bar reaches every command the ribbon has).
+    ...Object.fromEntries(RIBBON_SUFFIX_COMMANDS.map((cmd) => [cmd, RIBBON_MODULES])),
+    ...MODULE_SPECIFIC_COMMANDS,
   };
   const TOOLBAR_ID_COMMANDS = {
     "btn-toggle-ctrl-marks": "ctrl-marks",

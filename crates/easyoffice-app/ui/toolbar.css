@@ -1,0 +1,67 @@
+/* Icon toolbar, style bar and status bar surfaces (PD-098, step 3a).
+ *
+ * Adapted from rhwp-studio `src/styles/toolbar.css`, `style-bar.css` and `status-bar.css` (MIT,
+ * Copyright (c) 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md): the backgrounds, borders, hover
+ * and separator values of `#icon-toolbar`, `.tb-group`, `.tb-sep`, `.tb-btn`, `.tb-label`,
+ * `#style-bar` and `#status-bar`, keyed to EasyOffice's markup (`#icon-toolbar` also carries
+ * `.eo-icon-toolbar`, `#doc-style-bar` plays rhwp's `#style-bar`, `#status-bar` also carries
+ * `.statusbar`). Sizes stay with styles.css: EasyOffice's buttons are icon-only (no labels), so the
+ * bars keep the compact heights that the hop "labels hidden" mode uses. */
+
+#icon-toolbar {
+  background: linear-gradient(to bottom, var(--ui-toolbar-bg-start), var(--ui-toolbar-bg-end));
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.tb-group {
+  gap: 0;
+}
+
+.tb-group[hidden],
+.tb-sep[hidden] {
+  display: none;
+}
+
+.tb-sep {
+  margin: 4px 4px;
+  background: var(--ui-border);
+}
+
+.tb-btn {
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.tb-btn:hover,
+.tb-btn.active,
+.tb-btn[aria-pressed="true"] {
+  background: var(--ui-hover-strong);
+  border-color: var(--ui-border-light);
+  color: var(--color-primary-dark);
+}
+
+.tb-label {
+  font-size: var(--font-size-xs);
+  line-height: 1.1;
+  text-align: center;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+#doc-style-bar {
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--ui-border);
+  white-space: nowrap;
+  font-size: var(--font-size-base);
+}
+
+#status-bar {
+  background: var(--color-surface-raised);
+  border-top: 1px solid var(--ui-border-strong);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  user-select: none;
+}
