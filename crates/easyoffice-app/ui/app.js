@@ -413,6 +413,8 @@
   function setupRibbonChrome(boot) {
     activeShortcutModifier = workspaceSession.applyPlatformChrome(boot);
     shellChrome.setAppVersion(boot.appVersion);
+    // Update notice: desktop app only (the shell does the checking).
+    if (desktopBridge.isAvailable()) host.__EASYOFFICE_CREATE_UPDATE_NOTICE__({ document, bridge: desktopBridge, env: host }).bind();
 
     ribbonHistory.applyModuleAccent(activeModule);
 

@@ -1768,3 +1768,14 @@
 - **Alternatives rejected** hop처럼 `emit_to` + 페이지 `listen`(capability에 이벤트 권한 필요), 모든 창에 emit(포커스 없는 창이 저장/닫기를 실행할 수 있음), 메뉴 항목마다 Rust에서 직접 처리(저장 확인·한글 편집기 흐름 중복).
 - **Verified by** `cargo test -p easyoffice-desktop native_menu`(id 유일·형식, 단축키 형식·중복 없음, 동작 이름 형식, 표의 id만 스크립트를 만들고 id는 인용됨), `node --test scripts/test-webui-native-menu.mjs`(Rust 표와 페이지 목록 일치, 알 수 없는 id·상속 이름 거부, 실제 페이지에서 모든 id 실행, macOS에서만 설치·이벤트 권한 없음), `cargo clippy -p easyoffice-desktop --all-targets -- -D warnings`.
 - **Revisit when** 표·글 상자·그림 메뉴를 넣을 때(한글 편집기의 자체 메뉴와 겹침 확인), macOS 실기기에서 편집 항목이 한글 편집기와 충돌할 때.
+
+## 78. 업데이트 알림: 하루 1회 릴리스 조회와 릴리스 페이지 열기, 자동 설치 없음 (PD-103)
+
+- **Status** Implemented (데스크톱 앱 전용; Windows·macOS 실기기와 실제 릴리스 응답 확인 전)
+- **Context** 사용자 결정: 업데이트 알림은 hop처럼 넣습니다. hop은 서명된 업데이터로 내려받아 설치하지만 EasyOffice에는 서명 키가 없어, 새 버전을 알리고 릴리스 페이지로 안내하는 데까지만 합니다.
+- **Decision (`PD-103`)** (1) 앱이 시작한 뒤(스모크 실행과 `--serve`는 제외) 백그라운드로 `https://api.github.com/repos/AquilaXk/easyoffice/releases/latest`를 **하루 1회 이하**로 조회합니다. 마지막 확인 시각은 시도 때 먼저 앱 데이터 폴더의 `update-check.json`에 적으므로 네트워크가 실패해도 같은 날 다시 시도하지 않고, 시계가 거꾸로 가면 확인할 때가 된 것으로 봅니다. (2) 요청은 Rust에서만 하고(`ureq` 2.x + `native-tls`, 운영체제 TLS, HTTPS 전용, 리다이렉트 없음, 10초 제한) 사용자·문서 정보는 보내지 않습니다. 사용자 에이전트는 `EasyOffice/<버전>`뿐입니다. 응답은 256KiB로 자르고 JSON에서 `tag_name`·`html_url`·`draft`·`prerelease`만 읽습니다. (3) 버전은 접두사 `v`가 선택인 숫자 3개(`x.y.z`)만 인정하는 바이트 파서(할당 없음, `checked_*`, 부분은 9자리 이하·선행 0 거부)로 읽고, 사전 배포·초안·`-rc` 같은 접미사는 무시하며 현재 버전(`CARGO_PKG_VERSION`)보다 크면 알립니다. (4) 릴리스 페이지 주소는 응답의 `html_url`이 `https://github.com/AquilaXk/easyoffice/releases/`로 시작하고 공백·제어 문자가 없을 때만 받습니다. 저장 기록을 읽을 때도 같은 검사와 현재 버전 비교를 다시 해서, 기록 파일을 고쳐 다른 주소를 넣을 수 없습니다. (5) 페이지 명령은 셋뿐입니다: `get_update_notice`(상태), `set_update_check(enabled)`(켜기/끄기), `open_release_page`(**인수 없음**: 페이지는 주소를 넘기지 않고, Rust가 가진 주소를 기본 브라우저로 엽니다). 명령 목록·capability는 1:1 테스트로 묶여 있습니다(12개). (6) 알림 카드는 hop `update-notice`를 옮긴 것(`update-notice.js`, `home.css`의 같은 클래스)으로 창 우상단에 "새 버전 x.y.z 사용 가능", "다운로드 페이지 열기", "나중에"를 보입니다. "나중에"와 카드 안에서의 Esc는 그 버전을 이번 실행 동안 숨기고, 더 새 버전이 오면 다시 보입니다. 첫 확인은 창이 뜬 3초 뒤, 두 번째는 15초 뒤(백그라운드 조회가 끝날 시간), 그 밖에 창이 포커스를 받을 때입니다(네트워크 요청 없이 상태만 읽음). (7) 끄기: 도움말 메뉴의 "업데이트 확인 알림"(기본 켬, 데스크톱에서만 보임)이 같은 기록에 저장되며 끄면 요청도 알림도 없습니다. 한글 편집기 창은 편집기 메뉴를 쓰므로 이 항목이 없고, 설정은 다른 창에서 바꿉니다.
+- **Why** 새 버전을 모르고 오래된 버전을 쓰지 않게 하면서, 서명 없는 자동 설치의 위험과 사용자 정보 전송을 피하기 위함입니다.
+- **Trade-offs** 설치는 사용자가 릴리스 페이지에서 직접 합니다. GitHub 속도 제한이나 오프라인이면 조용히 알림 없이 넘어갑니다(오류는 콘솔에만).
+- **Alternatives rejected** 서명 없는 자동 다운로드·설치(변조 위험), rustls/ring 계열 HTTP 클라이언트(번들 TLS와 다른 라이선스), 페이지가 주소를 넘기는 열기 명령(임의 주소 열기).
+- **Verified by** `cargo test -p easyoffice-desktop update_check`(버전 파서·비교, URL 접두사, JSON 추출·상한·잘못된 입력, 하루 1회 기록, 실패 재시도 없음, 끄기, 스모크·데이터 폴더 없음, 기록 변조), `node --test scripts/test-webui-update-notice.mjs`(카드 DOM·hop 클래스·Esc·나중에·주소 없는 열기·끄기 토글·토큰 전용), 명령·capability 1:1 테스트.
+- **Revisit when** 서명 키가 생겨 자동 설치를 넣을 때, 릴리스에 사전 배포 채널을 둘 때.

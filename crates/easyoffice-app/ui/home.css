@@ -483,3 +483,80 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Update notice card (PD-103). Adapted from hop `apps/studio-host/src/styles/update-notice.css`
+   (MIT, see THIRD_PARTY_NOTICES.md): the same rules and class names, moved to the top right corner
+   and built from the rhwp tokens. */
+.update-notice {
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  z-index: 40;
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--color-border-lighter);
+  border-radius: 8px;
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-dropdown);
+  color: var(--color-text);
+}
+
+.update-notice[hidden] {
+  display: none;
+}
+
+.update-notice__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.update-notice__body,
+.update-notice__meta,
+.update-notice__error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.update-notice__body,
+.update-notice__meta {
+  color: var(--color-text-muted);
+}
+
+.update-notice__error {
+  color: var(--ui-danger);
+}
+
+.update-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.update-notice__button {
+  appearance: none;
+  min-width: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.update-notice__button--primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--ui-text-on-accent);
+}
+
+.update-notice__button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
