@@ -9,6 +9,13 @@
   const IPC_COMMAND = "ipc_dispatch";
   const SAVE_COMMAND = "save_document_file";
   const EXPORT_PDF_COMMAND = "export_searchable_pdf";
+  // Update notice (PD-103): the shell checks for a newer release; the page only reads the state,
+  // switches the check on or off and asks the shell to open the release page (it passes no address).
+  const UPDATE_COMMANDS = Object.freeze({
+    get: "get_update_notice",
+    set: "set_update_check",
+    open: "open_release_page",
+  });
   // Window commands (PD-088). None of them takes or returns a file system path: the Rust side owns
   // the native dialogs, file reads and the path registry; the page only sees names, kinds and bytes.
   const WINDOW_COMMANDS = Object.freeze({
@@ -85,6 +92,9 @@
     if (res && (res.status === "saved" || res.status === "cancelled")) return res;
     throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
   }
+  const getUpdateNotice = () => callShell(UPDATE_COMMANDS.get, {});
+  const setUpdateCheck = (enabled) => callShell(UPDATE_COMMANDS.set, { enabled: Boolean(enabled) });
+  const openReleasePage = () => callShell(UPDATE_COMMANDS.open, {});
 
   async function windowCommand(key, args) {
     const command = WINDOW_COMMANDS[key];
@@ -92,5 +102,5 @@
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, exportSearchablePdf, describeShellError, windowCommand, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, exportSearchablePdf, getUpdateNotice, setUpdateCheck, openReleasePage, describeShellError, windowCommand, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);
