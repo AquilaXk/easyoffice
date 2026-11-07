@@ -28,12 +28,12 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
 
       - name: Setup Node.js for repository hygiene guard and the Tauri CLI
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "22"
 
@@ -118,7 +118,7 @@ jobs:
           (cd dist && shasum -a 256 "EasyOffice-${VERSION}-macos-universal.dmg" > "SHA256SUMS-macos-universal.txt")
 
       - name: Upload macOS release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: macos-release-artifacts
           path: |
@@ -132,12 +132,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
 
       - name: Setup Node.js for repository hygiene guard and the Tauri CLI
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "22"
 
@@ -211,7 +211,7 @@ jobs:
           (cd dist && sha256sum "EasyOffice-${VERSION}-windows-x64-setup.exe" > "SHA256SUMS-windows-x64.txt")
 
       - name: Upload Windows x64 release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-release-artifacts
           path: |
@@ -228,7 +228,7 @@ jobs:
       contents: write
     steps:
       - name: Download macOS and Windows release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: release-assets
           merge-multiple: true
