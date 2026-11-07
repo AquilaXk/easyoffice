@@ -90,6 +90,10 @@
     return undefined;
   }
 
+  function isScrubbableLiteral(seg) {
+    return seg.isLiteral && seg.text.trim().length > 0;
+  }
+
   function createSheetStoreHelpers(deps) {
     const {
       invokeIpc,
@@ -222,10 +226,6 @@
       ) {
         throw new Error("개인정보 마스킹 응답 검증에 실패했습니다.");
       }
-    }
-
-    function isScrubbableLiteral(seg) {
-      return seg.isLiteral && seg.text.trim().length > 0;
     }
 
     function collectEntryScrubJob(entry, plainEntries, formulaJobs) {

@@ -28,6 +28,24 @@
     return String(rawStyle || "").toLowerCase().includes("hangul") ? "hangul" : "standard";
   }
 
+  // Next preset after the current one (or the second preset when the current value is not a preset).
+  function cyclePreset(presets, current) {
+    const curIdx = presets.indexOf(current);
+    return presets[curIdx >= 0 ? (curIdx + 1) % presets.length : 1];
+  }
+
+  function docEffectTrack({ docEditor }) {
+    const firstP = docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview)");
+    if (!firstP) return;
+    const nextOn = firstP.dataset.highlighted !== "true";
+    firstP.dataset.highlighted = nextOn ? "true" : "false";
+    firstP.style.backgroundColor = nextOn ? "rgba(92, 107, 192, 0.14)" : "";
+  }
+
+  function docEffectPaper({ docEditor }) {
+    docEditor.dataset.paperSize = docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter";
+  }
+
   function createRibbonHistory(deps) {
     const {
       document,
@@ -477,23 +495,9 @@
     const LANDSCAPE_MAX_WIDTH = "980px";
     const endsWithAny = (cmdId, suffixes) => suffixes.some((suffix) => cmdId.endsWith(suffix));
 
-    // Next preset after the current one (or the second preset when the current value is not a preset).
-    function cyclePreset(presets, current) {
-      const curIdx = presets.indexOf(current);
-      return presets[curIdx >= 0 ? (curIdx + 1) % presets.length : 1];
-    }
-
     function docEffectHomeStyle({ targetEl }) {
       targetEl.style.fontSize = cyclePreset(STYLE_FONT_SIZES, targetEl.style.fontSize);
       syncDocStyleBarFromTarget(targetEl);
-    }
-
-    function docEffectTrack({ docEditor }) {
-      const firstP = docEditor.querySelector(":scope > p:not(#hwp-manuscript-preview)");
-      if (!firstP) return;
-      const nextOn = firstP.dataset.highlighted !== "true";
-      firstP.dataset.highlighted = nextOn ? "true" : "false";
-      firstP.style.backgroundColor = nextOn ? "rgba(92, 107, 192, 0.14)" : "";
     }
 
     function docEffectColumns({ docEditor }) {
@@ -509,10 +513,6 @@
 
     function docEffectMargins({ docEditor }) {
       docEditor.style.padding = cyclePreset(PAGE_PADDINGS, docEditor.style.padding);
-    }
-
-    function docEffectPaper({ docEditor }) {
-      docEditor.dataset.paperSize = docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter";
     }
 
     function docEffectBorder({ docEditor }) {
@@ -573,6 +573,13 @@
       [(id) => id.endsWith("-data-sort"), docEffectSort],
     ];
 
+    function docEditorEffectFor(cmdId) {
+      for (const [matches, run] of DOC_EDITOR_EFFECTS) {
+        if (matches(cmdId)) return run;
+      }
+      return null;
+    }
+
     function applyDocEditorRibbonEffect(docEditor, cmdId, execRes) {
       if (!docEditor) return false;
       const targetEl = getWorkspacePanels().getFocusedDocBlock(docEditor);
@@ -582,9 +589,9 @@
         getDocRuns().toggle(runProp[1], { undo: false });
         return true;
       }
-      const effect = DOC_EDITOR_EFFECTS.find(([matches]) => matches(cmdId));
-      if (!effect) return false;
-      effect[1]({ docEditor, targetEl, cmdId, execRes });
+      const runEffect = docEditorEffectFor(cmdId);
+      if (!runEffect) return false;
+      runEffect({ docEditor, targetEl, cmdId, execRes });
       return true;
     }
 

@@ -52,6 +52,36 @@
     return prefix + "다운로드 실패: 변환 결과 파일을 받지 못했습니다";
   }
 
+  function buildSmartSummaryText(res) {
+    const lines = Array.isArray(res.summaryLines) ? res.summaryLines : [];
+    const actions = Array.isArray(res.actionItems) ? res.actionItems : [];
+    const suggestions = Array.isArray(res.styleSuggestions) ? res.styleSuggestions : [];
+    const summaryText = lines.length > 0 ? lines.join(" / ") : "핵심 문장 요약 완료";
+    const actionSuffix = actions.length > 0 ? " · 조치: " + actions.join(", ") : "";
+    const styleSuffix = suggestions.length > 0 ? " · 교정: " + suggestions.join(" / ") : "";
+    return "요약: " + summaryText + actionSuffix + styleSuffix;
+  }
+
+  function inputScrubField(input) {
+    if (!input || !(input.value || "").trim()) return null;
+    return { read: () => input.value, write: (v) => { input.value = v; } };
+  }
+
+  // The watermark layer is scrubbed on its own only when it does not simply mirror the watermark input.
+  function layerScrubField(wmLayer, wmInput, prevWmInputVal) {
+    if (!wmLayer) return null;
+    const mirrorsInput = Boolean(wmInput) && wmLayer.textContent === prevWmInputVal;
+    if (mirrorsInput || !(wmLayer.textContent || "").trim()) return null;
+    return { read: () => wmLayer.textContent, write: (v) => { wmLayer.textContent = v; } };
+  }
+
+  function applyFieldScrub(field, res) {
+    if (!field || !res) return 0;
+    const count = Number(res.totalMasked || 0);
+    if (count > 0) field.write(res.scrubbedText);
+    return count;
+  }
+
   function createWorkspaceTools(deps, panelHooks) {
     const {
       document,
@@ -315,16 +345,6 @@
       updateDocFilename(estPages);
     }
 
-    function buildSmartSummaryText(res) {
-      const lines = Array.isArray(res.summaryLines) ? res.summaryLines : [];
-      const actions = Array.isArray(res.actionItems) ? res.actionItems : [];
-      const suggestions = Array.isArray(res.styleSuggestions) ? res.styleSuggestions : [];
-      const summaryText = lines.length > 0 ? lines.join(" / ") : "핵심 문장 요약 완료";
-      const actionSuffix = actions.length > 0 ? " · 조치: " + actions.join(", ") : "";
-      const styleSuffix = suggestions.length > 0 ? " · 교정: " + suggestions.join(" / ") : "";
-      return "요약: " + summaryText + actionSuffix + styleSuffix;
-    }
-
     function applySmartDiagnoseDom(res, updateFeedback) {
       if (!res) return;
       const statsEl = document.getElementById("smart-stats");
@@ -451,19 +471,6 @@
       return total;
     }
 
-    function inputScrubField(input) {
-      if (!input || !(input.value || "").trim()) return null;
-      return { read: () => input.value, write: (v) => { input.value = v; } };
-    }
-
-    // The watermark layer is scrubbed on its own only when it does not simply mirror the watermark input.
-    function layerScrubField(wmLayer, wmInput, prevWmInputVal) {
-      if (!wmLayer) return null;
-      const mirrorsInput = Boolean(wmInput) && wmLayer.textContent === prevWmInputVal;
-      if (mirrorsInput || !(wmLayer.textContent || "").trim()) return null;
-      return { read: () => wmLayer.textContent, write: (v) => { wmLayer.textContent = v; } };
-    }
-
     function requestFieldScrub(field) {
       return field ? invokeIpc("scrub_pii", field.read()) : Promise.resolve(null);
     }
@@ -476,13 +483,6 @@
         total += Number(results[idx].totalMasked || 0);
       });
       return total;
-    }
-
-    function applyFieldScrub(field, res) {
-      if (!field || !res) return 0;
-      const count = Number(res.totalMasked || 0);
-      if (count > 0) field.write(res.scrubbedText);
-      return count;
     }
 
     async function scrubPdfDom(preSnapshot) {

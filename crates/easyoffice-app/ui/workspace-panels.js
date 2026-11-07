@@ -104,6 +104,12 @@
     }
   }
 
+  function activateOutlineItem(outlineList, li, item) {
+    for (const el of outlineList.querySelectorAll(".outline-item")) el.classList.remove("active");
+    li.classList.add("active");
+    if (typeof item.action === "function") item.action();
+  }
+
   function createWorkspacePanels(deps) {
     const {
       document,
@@ -582,12 +588,6 @@
       ];
     }
 
-    function activateOutlineItem(outlineList, li, item) {
-      for (const el of outlineList.querySelectorAll(".outline-item")) el.classList.remove("active");
-      li.classList.add("active");
-      if (typeof item.action === "function") item.action();
-    }
-
     function renderModuleOutline(mod) {
       const outlineList = document.getElementById("outline-list");
       if (!outlineList) return;
@@ -739,7 +739,8 @@
       tools.computeSmartStats();
     }
 
-    const MAIL_MERGE_TOKEN_RE = /\{\{[^}]+\}\}/g;
+    const MAIL_MERGE_TOKEN_RE = /\{\{(?=([^}]+))\1\}\}/g;
+    const MAIL_MERGE_TOKEN_TEST_RE = /\{\{(?=([^}]+))\1\}\}/;
     const MAIL_MERGE_VALUES = {
       "{{성명}}": "이수현",
       "{{기관명}}": "행정안전부",
@@ -765,7 +766,7 @@
     function mergeTokensInLeafBlock(el) {
       if (el.querySelector("p, li, td, th, div")) return;
       const raw = el.textContent || "";
-      if (!/\{\{[^}]+\}\}/.test(raw)) return;
+      if (!MAIL_MERGE_TOKEN_TEST_RE.test(raw)) return;
       const nextText = mergeKnownTokens(raw);
       if (nextText !== raw) el.textContent = nextText;
     }
