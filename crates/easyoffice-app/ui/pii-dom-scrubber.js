@@ -174,6 +174,35 @@
     return segments;
   }
 
+  function collectActiveScrubGroups(rootEl) {
+    if (!rootEl) return [];
+    const tokens = collectEditableInlineTokens(rootEl, {
+      includeTables: true,
+    });
+    const groups = [];
+    let lineEpoch = 0;
+    tokens.forEach((tok) => {
+      if (tok.type === "br") {
+        lineEpoch += 1;
+        return;
+      }
+      const tn = tok.node;
+      const block = findNearestScrubBlock(tn, rootEl);
+      const last = groups.at(-1);
+      if (last && last.block === block && last.lineEpoch === lineEpoch) {
+        last.nodes.push(tn);
+      } else {
+        groups.push({ block, lineEpoch, nodes: [tn] });
+      }
+    });
+    return groups
+      .map((g) => ({
+        nodes: g.nodes,
+        origText: g.nodes.map((n) => n.nodeValue || "").join(""),
+      }))
+      .filter((g) => g.origText.trim().length > 0);
+  }
+
   function createPiiDomScrubber(ctx) {
     const { document, localScrubPii } = ctx;
 
@@ -325,35 +354,6 @@
       }
 
       return extractWalkableText(document.getElementById("doc-editor"), false);
-    }
-
-    function collectActiveScrubGroups(rootEl) {
-      if (!rootEl) return [];
-      const tokens = collectEditableInlineTokens(rootEl, {
-        includeTables: true,
-      });
-      const groups = [];
-      let lineEpoch = 0;
-      tokens.forEach((tok) => {
-        if (tok.type === "br") {
-          lineEpoch += 1;
-          return;
-        }
-        const tn = tok.node;
-        const block = findNearestScrubBlock(tn, rootEl);
-        const last = groups.at(-1);
-        if (last && last.block === block && last.lineEpoch === lineEpoch) {
-          last.nodes.push(tn);
-        } else {
-          groups.push({ block, lineEpoch, nodes: [tn] });
-        }
-      });
-      return groups
-        .map((g) => ({
-          nodes: g.nodes,
-          origText: g.nodes.map((n) => n.nodeValue || "").join(""),
-        }))
-        .filter((g) => g.origText.trim().length > 0);
     }
 
     function applyScrubResultsToGroups(activeGroups, results) {

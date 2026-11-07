@@ -243,6 +243,30 @@ class MiniClassList {
   }
 }
 
+/** Error carrying the `{ status, message }` shape of a rejected desktop shell command. */
+export function shellError(message) {
+  return Object.assign(new Error(message), { status: "error" });
+}
+
+/** Nearest inclusive ancestor of `start` (elements only) matching `sel`, scoped to `scope`. */
+function closestFrom(start, sel, scope) {
+  for (let cur = start; cur && cur.nodeType === 1; cur = cur.parentElement) {
+    if (matchesSelectorList(cur, sel, scope)) return cur;
+  }
+  return null;
+}
+
+/** Calls the listeners of `eventObj.type` from `start` up through its ancestors (focus/blur do not bubble). */
+function dispatchFrom(start, eventObj) {
+  for (let cur = start; cur; cur = cur.parentElement) {
+    const fns = cur._listeners.get(eventObj.type) || [];
+    for (const fn of fns) {
+      fn.call(cur, eventObj);
+    }
+    if (eventObj.type === "focus" || eventObj.type === "blur") break;
+  }
+}
+
 class MiniElement extends MiniNode {
   constructor(tagName, ownerDocument) {
     super(1, ownerDocument);
@@ -485,12 +509,7 @@ class MiniElement extends MiniNode {
   }
 
   closest(sel) {
-    let cur = this;
-    while (cur && cur.nodeType === 1) {
-      if (matchesSelectorList(cur, sel, this)) return cur;
-      cur = cur.parentElement;
-    }
-    return null;
+    return closestFrom(this, sel, this);
   }
 
   querySelectorAll(sel) {
@@ -541,15 +560,7 @@ class MiniElement extends MiniNode {
         this.defaultPrevented = true;
       },
     };
-    let cur = this;
-    while (cur) {
-      const fns = cur._listeners.get(eventObj.type) || [];
-      for (const fn of fns) {
-        fn.call(cur, eventObj);
-      }
-      if (eventObj.type === "focus" || eventObj.type === "blur") break;
-      cur = cur.parentElement;
-    }
+    dispatchFrom(this, eventObj);
     return !eventObj.defaultPrevented;
   }
 
@@ -625,7 +636,7 @@ function serializeNodesToHtml(nodes) {
 }
 
 function parseAttributesInto(attrText, el) {
-  const attrRe = /([A-Za-z0-9_:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+  const attrRe = /([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
   let m;
   while ((m = attrRe.exec(attrText)) !== null) {
     const name = m[1].toLowerCase();
@@ -663,7 +674,7 @@ function parseHtmlFragment(html, ownerDocument) {
   };
   const stack = [root];
   const tagRe =
-    /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([A-Za-z0-9-]+)\s*>|<([A-Za-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
+    /<!--[\s\S]*?-->|<!doctype[^>]*>|<\/([a-z0-9-]+)\s*>|<([a-z0-9-]+)((?:"[^"]*"|'[^']*'|[^>"'])*)(\/?)>/gi;
   let lastIdx = 0;
   let m;
   while ((m = tagRe.exec(html)) !== null) {
@@ -774,7 +785,7 @@ function resolveShellInternals(options) {
         return options.shellCommands[shellCommand](args);
       }
       if (shellCommand !== "ipc_dispatch" || !options.tauriInvoke) {
-        throw { status: "error", message: "등록되지 않은 데스크톱 셸 명령: " + shellCommand };
+        throw shellError("등록되지 않은 데스크톱 셸 명령: " + shellCommand);
       }
       return options.tauriInvoke(args.command, { payload: args.payload });
     },

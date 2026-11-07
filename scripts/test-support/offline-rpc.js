@@ -351,6 +351,25 @@
 
   const ZOOM_STEP_CYCLE = { 100: 125, 125: 150, 150: 90 };
 
+  function parseRibbonPayloadFields(payload) {
+    const raw = String(payload || "").trim();
+    return raw.startsWith("{") ? parseRequiredRpcJsonObject(raw) : null;
+  }
+
+  function resolveOptionalAnchorCell(doc) {
+    if (doc.cell !== undefined && doc.cell !== null && typeof doc.cell !== "string") {
+      throw new Error("InvalidArgument: JSON 'cell' 필드는 문자열이어야 합니다.");
+    }
+    if (typeof doc.cell === "string" && doc.cell.trim().length > 0) {
+      const normAnchor = normalizeA1Token(doc.cell.trim());
+      if (!normAnchor) {
+        throw new Error("InvalidArgument: 유효하지 않은 셀 좌표('cell')입니다.");
+      }
+      return normAnchor;
+    }
+    return null;
+  }
+
   function createOfflineRpcHandlers(ctx) {
     const {
       getActiveModule,
@@ -477,11 +496,6 @@
       };
     }
 
-    function parseRibbonPayloadFields(payload) {
-      const raw = String(payload || "").trim();
-      return raw.startsWith("{") ? parseRequiredRpcJsonObject(raw) : null;
-    }
-
     function localRibbonHistoryStep(payload, isUndo) {
       const raw = String(payload || "").trim();
       const parsed = parseRibbonPayloadFields(raw);
@@ -510,20 +524,6 @@
       if (cmdId.startsWith("pdf-")) return "PDF";
       if (cmdId.startsWith("document-") || cmdId.startsWith("doc-")) return "DOC";
       return getActiveModule();
-    }
-
-    function resolveOptionalAnchorCell(doc) {
-      if (doc.cell !== undefined && doc.cell !== null && typeof doc.cell !== "string") {
-        throw new Error("InvalidArgument: JSON 'cell' 필드는 문자열이어야 합니다.");
-      }
-      if (typeof doc.cell === "string" && doc.cell.trim().length > 0) {
-        const normAnchor = normalizeA1Token(doc.cell.trim());
-        if (!normAnchor) {
-          throw new Error("InvalidArgument: 유효하지 않은 셀 좌표('cell')입니다.");
-        }
-        return normAnchor;
-      }
-      return null;
     }
 
     function evaluateSingleDocExpr(doc) {
@@ -670,7 +670,7 @@
       if (exactFn) {
         exactFn(backendState);
       } else {
-        const suffixPair = RIBBON_SUFFIX_MUTATORS.find(([sfx]) => cmdId.endsWith(sfx));
+        const suffixPair = RIBBON_SUFFIX_MUTATORS.find((pair) => cmdId.endsWith(String(pair[0])));
         if (suffixPair) suffixPair[1](backendState);
       }
       return ribbonStateResponse(slot, {

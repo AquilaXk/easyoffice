@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
+import { shellError, createWebUiDom, flushAsyncTurns } from "./webui-dom-harness.mjs";
 import { switchModule } from "./test-support/modules.mjs";
 
 // Desktop shell (Tauri v2 / WebView2) bridge: a fake `__TAURI_INTERNALS__` stands in for the
@@ -31,19 +31,19 @@ async function createShellHarness({ engineOverrides = {}, saveFile } = {}) {
       if (command === "ipc_dispatch") {
         const handler = engineOverrides[args.command] || offline[args.command];
         if (typeof handler !== "function") {
-          throw { status: "error", message: "알 수 없는 IPC 명령입니다: " + args.command };
+          throw shellError("알 수 없는 IPC 명령입니다: " + args.command);
         }
         try {
           return JSON.stringify(await handler(args.payload, offline));
         } catch (err) {
-          throw { status: "error", message: err?.message || String(err) };
+          throw shellError(err?.message || String(err));
         }
       }
       if (command === "save_document_file") {
-        if (!saveFile) throw { status: "error", message: "save not configured" };
+        if (!saveFile) throw shellError("save not configured");
         return saveFile(args);
       }
-      throw { status: "error", message: "Command " + command + " not allowed by ACL" };
+      throw shellError("Command " + command + " not allowed by ACL");
     },
   };
   const harness = await createWebUiDom({
@@ -157,7 +157,7 @@ test("cancelled and failed desktop saves never claim success", async () => {
 
   const failed = await createShellHarness({
     saveFile: () => {
-      throw { status: "error", message: String.raw`파일을 저장하지 못했습니다 (D:\ro\a.docx): 액세스가 거부되었습니다.` };
+      throw shellError(String.raw`파일을 저장하지 못했습니다 (D:\ro\a.docx): 액세스가 거부되었습니다.`);
     },
   });
   failed.userClick(failed.document.getElementById("qat-save"));

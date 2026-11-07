@@ -87,11 +87,6 @@
     return !entry.value && !entry.formula && !styled;
   }
 
-  function pressedValue(state) {
-    if (state === "mixed") return "mixed";
-    return state ? "true" : "false";
-  }
-
   function patchCell(map, ref, mutate) {
     const entry = map[ref] || { value: "", formula: "" };
     const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "", ...entry.style };
@@ -107,7 +102,7 @@
   }
 
   function setPressed(el, state) {
-    if (el) el.setAttribute("aria-pressed", pressedValue(state));
+    if (el) el.setAttribute("aria-pressed", state);
   }
 
   function createSheetFormat(api) {
@@ -147,7 +142,7 @@
       }
     }
 
-    // true / false / "mixed" for a boolean format over the range (absent cells count as off).
+    // "true" / "false" / "mixed" for a boolean format over the range (absent cells count as off).
     function rangeFlagState(map, rg, kind) {
       const area = (rg.r2 - rg.r1 + 1) * (rg.c2 - rg.c1 + 1);
       let on = 0;
@@ -162,8 +157,8 @@
           if (hasFlag(map[ref], kind)) on += 1;
         });
       }
-      if (on === 0) return false;
-      return on === area ? true : "mixed";
+      if (on === 0) return "false";
+      return on === area ? "true" : "mixed";
     }
 
     function nextSize(map) {
@@ -186,7 +181,7 @@
           st.fontSize = size;
         };
       } else {
-        const on = rangeFlagState(map, rg, kind) !== true;
+        const on = rangeFlagState(map, rg, kind) !== "true";
         mutate = (st) => writeFlag(st, kind, on);
       }
       forEachRef(rg, (ref) => patchCell(map, ref, mutate));
