@@ -10,6 +10,7 @@ mod save_file;
 mod smoke;
 mod tracked_files;
 mod window_commands;
+mod window_state;
 mod windows;
 
 use easyoffice_app::EasyOfficeIpcRouter;

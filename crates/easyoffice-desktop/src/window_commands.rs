@@ -5,6 +5,7 @@
 use crate::recent::RecentList;
 use crate::smoke::SmokeProbe;
 use crate::tracked_files::{Fingerprint, TrackedFile, TrackedFiles};
+use crate::window_state::{MonitorRect, WindowGeometry};
 use crate::windows::{
     display_name, is_window_label, new_label, path_key, window_title, window_url, CloseAction,
     PendingOpen, PendingOpenQueue, PendingOpenView, WindowKind, WindowRegistry, PRIMARY_LABEL,
@@ -61,6 +62,7 @@ pub struct AppWindows {
     pending: Mutex<PendingOpenQueue>,
     recents: Mutex<RecentList>,
     files: Mutex<TrackedFiles>,
+    geometry: Mutex<Option<WindowGeometry>>,
     recents_dir: Option<PathBuf>,
     counter: AtomicU64,
 }
@@ -82,6 +84,7 @@ impl AppWindows {
             pending: Mutex::new(PendingOpenQueue::default()),
             recents: Mutex::new(recents),
             files: Mutex::new(TrackedFiles::default()),
+            geometry: Mutex::new(recents_dir.as_deref().and_then(WindowGeometry::load)),
             recents_dir,
             counter: AtomicU64::new(1),
         }
@@ -142,9 +145,11 @@ fn build_window(
 ) -> Result<WebviewWindow, String> {
     let monitor = monitor_logical_size(app);
     let min = kind.min_inner_size();
+    let remembered = remembered_geometry(app);
+    let preferred = remembered.map_or_else(|| kind.inner_size(), WindowGeometry::size);
     let size = monitor
-        .map(|m| clamp_size(m, kind.inner_size(), min))
-        .unwrap_or_else(|| kind.inner_size());
+        .map(|m| clamp_size(m, preferred, min))
+        .unwrap_or(preferred);
     let title = if kind == WindowKind::Start {
         "EasyOffice".to_string()
     } else {
@@ -156,14 +161,18 @@ fn build_window(
             .inner_size(size.0, size.1)
             .min_inner_size(min.0, min.1)
             .on_navigation(crate::is_app_origin);
-    builder = match monitor {
-        Some(m) => {
+    builder = match (remembered_origin(app, remembered), monitor) {
+        (Some((x, y)), _) => builder.position(x, y),
+        (None, Some(m)) => {
             let index = locked(&app.state::<AppWindows>().registry).document_window_count();
             let (x, y) = cascade_origin(m, size, index);
             builder.position(x, y)
         }
-        None => builder.center(),
+        (None, None) => builder.center(),
     };
+    if remembered.is_some_and(|g| g.maximized) {
+        builder = builder.maximized(true);
+    }
     if smoke_secondary {
         builder = builder.initialization_script(SMOKE_SECONDARY_SCRIPT);
     } else if label == PRIMARY_LABEL && app.try_state::<SmokeProbe>().is_some() {
@@ -207,6 +216,80 @@ pub fn create_new_window(app: &AppHandle, kind: WindowKind) -> Result<String, St
     Ok(label)
 }
 
+/// The remembered geometry, except in `--smoke`, whose windows must not depend on earlier runs.
+fn remembered_geometry(app: &AppHandle) -> Option<WindowGeometry> {
+    if app.try_state::<SmokeProbe>().is_some() {
+        return None;
+    }
+    *locked(&app.state::<AppWindows>().geometry)
+}
+
+/// The remembered position is reused only by the first window (later ones cascade) and only while
+/// its title bar would land on a connected monitor.
+fn remembered_origin(app: &AppHandle, remembered: Option<WindowGeometry>) -> Option<(f64, f64)> {
+    let geometry = remembered?;
+    if locked(&app.state::<AppWindows>().registry).len() > 1 {
+        return None;
+    }
+    let monitors: Vec<MonitorRect> = app
+        .available_monitors()
+        .ok()?
+        .iter()
+        .filter_map(|m| {
+            let scale = m.scale_factor();
+            let origin = m.position().to_logical::<f64>(scale);
+            let size = m.size().to_logical::<f64>(scale);
+            WindowGeometry::from_logical((size.width, size.height), (origin.x, origin.y), false)
+                .map(|g| MonitorRect {
+                    x: g.x,
+                    y: g.y,
+                    width: i32::from(g.width),
+                    height: i32::from(g.height),
+                })
+        })
+        .collect();
+    geometry.visible_origin(&monitors)
+}
+
+/// Records the window's normal-state geometry in memory (no disk write per move or resize). While
+/// maximized only the flag changes, so restoring from maximized returns to the earlier size.
+fn note_geometry(app: &AppHandle, window: &WebviewWindow) {
+    if app.try_state::<SmokeProbe>().is_some() || window.is_minimized().unwrap_or(true) {
+        return;
+    }
+    let maximized = window.is_maximized().unwrap_or(false);
+    let state = app.state::<AppWindows>();
+    let mut stored = locked(&state.geometry);
+    if maximized {
+        if let Some(geometry) = stored.as_mut() {
+            geometry.maximized = true;
+        }
+        return;
+    }
+    let Ok(scale) = window.scale_factor() else {
+        return;
+    };
+    let (Ok(size), Ok(origin)) = (window.inner_size(), window.outer_position()) else {
+        return;
+    };
+    let size = size.to_logical::<f64>(scale);
+    let origin = origin.to_logical::<f64>(scale);
+    if let Some(geometry) =
+        WindowGeometry::from_logical((size.width, size.height), (origin.x, origin.y), false)
+    {
+        *stored = Some(geometry);
+    }
+}
+
+/// One small write when a window closes.
+fn persist_geometry(app: &AppHandle) {
+    let state = app.state::<AppWindows>();
+    let (Some(dir), Some(geometry)) = (&state.recents_dir, *locked(&state.geometry)) else {
+        return;
+    };
+    let _ = geometry.save(dir);
+}
+
 fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
     let app = app.clone();
     let label = window.label().to_string();
@@ -220,7 +303,13 @@ fn attach_handlers(app: &AppHandle, window: &WebviewWindow) {
                 }
             }
         }
+        WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+            if let Some(window) = app.get_webview_window(&label) {
+                note_geometry(&app, &window);
+            }
+        }
         WindowEvent::Destroyed => {
+            persist_geometry(&app);
             let state = app.state::<AppWindows>();
             locked(&state.registry).remove(&label);
             locked(&state.pending).discard(&label);
