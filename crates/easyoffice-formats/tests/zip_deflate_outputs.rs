@@ -225,7 +225,11 @@ fn store_policy_is_explicit_per_entry() {
         assert!(!ZipArchiveCodec::must_store(p), "{p}");
     }
 
-    let payload: Vec<u8> = b"<a>repeat repeat repeat repeat</a>".repeat(200);
+    // Varied text (a counter per line) keeps the deflate ratio well below the packer's
+    // bomb-ratio guard, which stores extremely redundant entries instead.
+    let payload: Vec<u8> = (0..200)
+        .flat_map(|i| format!("<a>repeat {i} repeat {} repeat</a>", i * 7919 % 1000).into_bytes())
+        .collect();
     let bytes = ZipArchiveCodec::pack_compressed(&[
         ("mimetype".to_string(), b"application/x".repeat(20)),
         ("word/document.xml".to_string(), payload.clone()),

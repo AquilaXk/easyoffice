@@ -83,20 +83,24 @@ impl ZipArchiveCodec {
     }
 
     pub fn pack(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_internal(entries, false)
+        Self::pack_internal(entries, false, false)
     }
 
     /// Packs with DEFLATE per entry, except the entries `must_store` names, which stay stored.
     pub fn pack_deflate<E: AsZipEntry>(entries: &[E]) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_internal(entries, true)
+        Self::pack_internal(entries, true, false)
     }
 
     /// Writer entry point for every ZIP-based output format: DEFLATE per entry with the
     /// stored-entry exceptions of [`Self::must_store`]. Entries whose compressed form is not
     /// smaller are also stored.
     pub fn pack_compressed<E: AsZipEntry>(entries: &[E]) -> Result<Vec<u8>, EasyOfficeError> {
-        Self::pack_internal(entries, true)
+        Self::pack_internal(entries, true, true)
     }
+
+    /// Largest uncompressed/compressed ratio `pack_compressed` emits (below the default reader
+    /// policy limit of 100 so a freshly packed archive always passes the bomb guard).
+    const MAX_PACKED_RATIO: usize = 90;
 
     /// Entries that must never be compressed: the ODF/HWPX `mimetype` marker (readers sniff it at
     /// a fixed offset) and payloads that are already compressed images or archives.
@@ -117,6 +121,7 @@ impl ZipArchiveCodec {
     fn pack_internal<E: AsZipEntry>(
         entries: &[E],
         use_deflate: bool,
+        ratio_guard: bool,
     ) -> Result<Vec<u8>, EasyOfficeError> {
         if entries.is_empty() {
             return Err(EasyOfficeError::EmptyPayload);
@@ -165,7 +170,11 @@ impl ZipArchiveCodec {
             let (method, compressed_payload): (u16, std::borrow::Cow<'_, [u8]>) =
                 if use_deflate && !data.is_empty() && !Self::must_store(path) {
                     let deflated = crate::deflate::deflate_raw(data);
-                    if deflated.len() < data.len() {
+                    // Extremely redundant data can compress past the reader's bomb-ratio limit;
+                    // such entries are stored so the archive stays readable by our own policy.
+                    let within_ratio = !ratio_guard
+                        || data.len() <= deflated.len().saturating_mul(Self::MAX_PACKED_RATIO);
+                    if deflated.len() < data.len() && within_ratio {
                         (Self::METHOD_DEFLATE, std::borrow::Cow::Owned(deflated))
                     } else {
                         (Self::METHOD_STORE, std::borrow::Cow::Borrowed(data))
