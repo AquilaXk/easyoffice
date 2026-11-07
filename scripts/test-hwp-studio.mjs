@@ -633,8 +633,18 @@ function fakeLabelsHost({ stored = null, failRead = false, failWrite = false } =
     root: { dataset: {} },
     menuItems: () => [item],
     storage: () => ({
-      getItem: (k) => { if (failRead) throw new Error("denied"); return store.get(k) ?? null; },
-      setItem: (k, v) => { if (failWrite) throw new Error("full"); store.set(k, v); },
+      getItem: (k) => {
+        if (failRead) {
+          throw new Error("denied");
+        }
+        return store.get(k) ?? null;
+      },
+      setItem: (k, v) => {
+        if (failWrite) {
+          throw new Error("full");
+        }
+        store.set(k, v);
+      },
     }),
   };
 }
