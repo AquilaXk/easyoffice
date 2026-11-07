@@ -451,42 +451,69 @@ fn evaluate_workbook(
     let mut grids = Vec::new();
     let mut grid_cells = 0usize;
     for (name, cells) in sheets {
-        let mut cache = XlsxFormulaCache::new();
-        let mut rows: BTreeMap<u32, Vec<String>> = BTreeMap::new();
-        for (row, col, raw) in cells {
-            let display = if raw.starts_with('=') {
-                let Ok(coord) = PackedCellCoordinate::new(*row, *col) else {
-                    continue;
-                };
-                let value = wb.evaluate_cell(name, &coord.to_a1());
-                if let Some(c) = cached_value(&value) {
-                    cache.insert((*row, *col), c);
-                }
-                value.to_display_string()
-            } else {
-                raw.clone()
-            };
-            if with_grids {
-                let line = rows.entry(*row).or_default();
-                let needed = *col as usize + 1;
-                if line.len() < needed {
-                    grid_cells = grid_cells.saturating_add(needed - line.len());
-                    if grid_cells > MAX_GRID_CELLS {
-                        return Err(EasyOfficeError::ResourceBudgetExceeded(
-                            "시트 값 표가 너무 커서 문서 형식으로 저장할 수 없습니다.".to_string(),
-                        ));
-                    }
-                    line.resize(needed, String::new());
-                }
-                line[*col as usize] = display;
-            }
-        }
+        let (cache, rows) = evaluate_sheet(&wb, name, cells, with_grids, &mut grid_cells)?;
         caches.push(cache);
         if with_grids {
             grids.push(rows.into_values().collect());
         }
     }
     Ok((caches, grids))
+}
+
+/// Evaluates one sheet: the formula cache and (when `with_grids`) the displayed rows.
+fn evaluate_sheet(
+    wb: &WorkbookEngine,
+    name: &str,
+    cells: &[(u32, u32, String)],
+    with_grids: bool,
+    grid_cells: &mut usize,
+) -> Result<(XlsxFormulaCache, BTreeMap<u32, Vec<String>>), EasyOfficeError> {
+    let mut cache = XlsxFormulaCache::new();
+    let mut rows: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    for (row, col, raw) in cells {
+        let display = if raw.starts_with('=') {
+            let Ok(coord) = PackedCellCoordinate::new(*row, *col) else {
+                continue;
+            };
+            let value = wb.evaluate_cell(name, &coord.to_a1());
+            if let Some(c) = cached_value(&value) {
+                cache.insert((*row, *col), c);
+            }
+            value.to_display_string()
+        } else {
+            raw.clone()
+        };
+        if with_grids {
+            set_grid_cell(
+                rows.entry(*row).or_default(),
+                *col as usize,
+                display,
+                grid_cells,
+            )?;
+        }
+    }
+    Ok((cache, rows))
+}
+
+/// Writes `display` at column `col`, growing the row within the total grid budget.
+fn set_grid_cell(
+    line: &mut Vec<String>,
+    col: usize,
+    display: String,
+    grid_cells: &mut usize,
+) -> Result<(), EasyOfficeError> {
+    let needed = col + 1;
+    if line.len() < needed {
+        *grid_cells = grid_cells.saturating_add(needed - line.len());
+        if *grid_cells > MAX_GRID_CELLS {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "시트 값 표가 너무 커서 문서 형식으로 저장할 수 없습니다.".to_string(),
+            ));
+        }
+        line.resize(needed, String::new());
+    }
+    line[col] = display;
+    Ok(())
 }
 
 /// Encodes structured content to `format`, titling the output `title`.

@@ -32,6 +32,24 @@ fn parse_points(value: &str) -> Option<u16> {
     (half >= 1.0 && half <= f32::from(u16::MAX)).then_some(half as u16)
 }
 
+/// Character format described by a `style:text-properties` element.
+fn char_fmt_from_text_properties(attrs: &[(String, String)]) -> CharFmt {
+    CharFmt {
+        bold: attr(attrs, "fo:font-weight")
+            .is_some_and(|w| w == "bold" || w.parse::<u32>().is_ok_and(|n| n >= 600)),
+        italic: attr(attrs, "fo:font-style").is_some_and(|s| s == "italic" || s == "oblique"),
+        underline: !off(attr(attrs, "style:text-underline-style")),
+        strike: !off(attr(attrs, "style:text-line-through-style")),
+        size_half_pt: attr(attrs, "fo:font-size").and_then(parse_points),
+        font: attr(attrs, "style:font-name")
+            .or_else(|| attr(attrs, "fo:font-family"))
+            .map(|f| f.trim().trim_matches('\'').to_string())
+            .filter(|f| !f.is_empty()),
+        color: attr(attrs, "fo:color").and_then(normalize_hex_color),
+        highlight: attr(attrs, "fo:background-color").and_then(normalize_hex_color),
+    }
+}
+
 fn read_styles(
     events: &[XmlEvent],
 ) -> (HashMap<String, StyleProps>, HashMap<String, RichListKind>) {
@@ -53,23 +71,7 @@ fn read_styles(
                 }
                 "style:text-properties" => {
                     if let Some((_, p)) = cur.as_mut() {
-                        p.fmt = CharFmt {
-                            bold: attr(attrs, "fo:font-weight").is_some_and(|w| {
-                                w == "bold" || w.parse::<u32>().is_ok_and(|n| n >= 600)
-                            }),
-                            italic: attr(attrs, "fo:font-style")
-                                .is_some_and(|s| s == "italic" || s == "oblique"),
-                            underline: !off(attr(attrs, "style:text-underline-style")),
-                            strike: !off(attr(attrs, "style:text-line-through-style")),
-                            size_half_pt: attr(attrs, "fo:font-size").and_then(parse_points),
-                            font: attr(attrs, "style:font-name")
-                                .or_else(|| attr(attrs, "fo:font-family"))
-                                .map(|f| f.trim().trim_matches('\'').to_string())
-                                .filter(|f| !f.is_empty()),
-                            color: attr(attrs, "fo:color").and_then(normalize_hex_color),
-                            highlight: attr(attrs, "fo:background-color")
-                                .and_then(normalize_hex_color),
-                        };
+                        p.fmt = char_fmt_from_text_properties(attrs);
                     }
                 }
                 "text:list-style" => cur_list = attr(attrs, "style:name").map(str::to_string),

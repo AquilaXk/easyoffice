@@ -96,11 +96,121 @@ fn parse_indirect_endpoint(
     }
 }
 
+/// Splits an optional `Sheet!` prefix off one side of an INDIRECT range.
+fn split_indirect_side(raw: &str) -> Result<(Option<String>, &str), FormulaError> {
+    match split_indirect_sheet_bang(raw.trim())? {
+        Some((sh_raw, pt)) => Ok((Some(parse_indirect_sheet_token(sh_raw)?), pt.trim())),
+        None => Ok((None, raw.trim())),
+    }
+}
+
 impl SheetEngine {
     #[inline]
     pub(crate) fn has_sheet_in_ctx(&self, sheet: &str, ctx: &EvalContext<'_>) -> bool {
         WorkbookEngine::is_same_sheet_identity(sheet, &self.name)
             || ctx.workbook.and_then(|wb| wb.sheet(sheet)).is_some()
+    }
+
+    /// Attaches an optional (already parsed) sheet name to `range`, validating it exists.
+    fn qualify_indirect_range<'b>(
+        &self,
+        sheet: Option<String>,
+        range: CellRange,
+        ctx: &EvalContext<'_>,
+    ) -> Result<Option<ResolvedRangeRef<'b>>, FormulaError> {
+        match sheet {
+            Some(sh_clean) => {
+                if sh_clean.is_empty() || !self.has_sheet_in_ctx(&sh_clean, ctx) {
+                    return Err(FormulaError::Ref);
+                }
+                Ok(Some((Some(Cow::Owned(sh_clean)), range, false)))
+            }
+            None => Ok(Some((None, range, false))),
+        }
+    }
+
+    fn extract_indirect_ref<'b>(
+        &self,
+        args: &'b [Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<Option<ResolvedRangeRef<'b>>, FormulaError> {
+        if args.is_empty() || args.len() > 2 {
+            return Err(FormulaError::Value);
+        }
+        let ref_str = self
+            .eval_arg_val(&args[0], ctx, depth + 1)?
+            .to_display_string();
+        if args.len() == 2 {
+            let mode_val = self.eval_arg_val(&args[1], ctx, depth + 1)?;
+            if mode_val.as_bool() != Some(true) {
+                return Err(FormulaError::Value);
+            }
+        }
+        let trimmed = ref_str.trim();
+        if trimmed.is_empty() {
+            return Err(FormulaError::Ref);
+        }
+        let Some((lhs_raw, rhs_raw)) = split_once_unquoted_colon(trimmed)? else {
+            let (sh_opt, coord) = parse_indirect_endpoint(trimmed)?;
+            let range = CellRange::new(coord, coord).map_err(|_| FormulaError::Ref)?;
+            return self.qualify_indirect_range(sh_opt, range, ctx);
+        };
+        let (lhs_sh, lhs_tok) = split_indirect_side(lhs_raw)?;
+        let (rhs_sh, rhs_tok) = split_indirect_side(rhs_raw)?;
+        if let Some(ref rs) = rhs_sh {
+            let same = lhs_sh
+                .as_ref()
+                .is_some_and(|ls| WorkbookEngine::is_same_sheet_identity(ls, rs));
+            if !same {
+                return Err(FormulaError::Ref);
+            }
+        }
+        let range =
+            CellRange::parse(&format!("{lhs_tok}:{rhs_tok}")).map_err(|_| FormulaError::Ref)?;
+        self.qualify_indirect_range(lhs_sh, range, ctx)
+    }
+
+    fn extract_offset_ref<'b>(
+        &self,
+        args: &'b [Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<Option<ResolvedRangeRef<'b>>, FormulaError> {
+        if args.len() < 3 || args.len() > 5 {
+            return Err(FormulaError::Value);
+        }
+        let Some((sheet_opt, base_range, _)) =
+            self.extract_range_and_sheet_ctx(&args[0], ctx, depth + 1)?
+        else {
+            return Err(FormulaError::Value);
+        };
+        let dr = self.eval_arg_num(&args[1], ctx, depth + 1)?.trunc() as i64;
+        let dc = self.eval_arg_num(&args[2], ctx, depth + 1)?.trunc() as i64;
+        let (base_rows, base_cols) = base_range.dimensions();
+        let height = match args.get(3) {
+            Some(arg) => self.eval_arg_num(arg, ctx, depth + 1)?.trunc() as i64,
+            None => base_rows as i64,
+        };
+        let width = match args.get(4) {
+            Some(arg) => self.eval_arg_num(arg, ctx, depth + 1)?.trunc() as i64,
+            None => base_cols as i64,
+        };
+        if height < 1 || width < 1 {
+            return Err(FormulaError::Value);
+        }
+        let start_r = base_range.start.row().min(base_range.end.row()) as i64 + dr;
+        let start_c = base_range.start.col().min(base_range.end.col()) as i64 + dc;
+        if start_r < 0 || start_c < 0 {
+            return Err(FormulaError::Ref);
+        }
+        let start_coord = PackedCellCoordinate::new(start_r as u32, start_c as u32)
+            .map_err(|_| FormulaError::Ref)?;
+        let end_coord =
+            PackedCellCoordinate::new((start_r + height - 1) as u32, (start_c + width - 1) as u32)
+                .map_err(|_| FormulaError::Ref)?;
+        let range = CellRange::new(start_coord, end_coord).map_err(|_| FormulaError::Ref)?;
+        Ok(Some((sheet_opt, range, false)))
     }
 
     pub(crate) fn extract_range_and_sheet_ctx<'b>(
@@ -134,105 +244,10 @@ impl SheetEngine {
                 .extract_range_and_sheet_ctx(&args[0], ctx, depth + 1)?
                 .map(|(s, r, t)| (s, r, !t))),
             Expr::FuncCall { name, args } if name == "INDIRECT" => {
-                if args.is_empty() || args.len() > 2 {
-                    return Err(FormulaError::Value);
-                }
-                let ref_str = self
-                    .eval_arg_val(&args[0], ctx, depth + 1)?
-                    .to_display_string();
-                if args.len() == 2 {
-                    let mode_val = self.eval_arg_val(&args[1], ctx, depth + 1)?;
-                    if mode_val.as_bool() != Some(true) {
-                        return Err(FormulaError::Value);
-                    }
-                }
-                let trimmed = ref_str.trim();
-                if trimmed.is_empty() {
-                    return Err(FormulaError::Ref);
-                }
-                if let Some((lhs_raw, rhs_raw)) = split_once_unquoted_colon(trimmed)? {
-                    let (lhs_sh, lhs_tok) = match split_indirect_sheet_bang(lhs_raw.trim())? {
-                        Some((sh_raw, pt)) => {
-                            (Some(parse_indirect_sheet_token(sh_raw)?), pt.trim())
-                        }
-                        None => (None, lhs_raw.trim()),
-                    };
-                    let (rhs_sh, rhs_tok) = match split_indirect_sheet_bang(rhs_raw.trim())? {
-                        Some((sh_raw, pt)) => {
-                            (Some(parse_indirect_sheet_token(sh_raw)?), pt.trim())
-                        }
-                        None => (None, rhs_raw.trim()),
-                    };
-                    if let Some(ref rs) = rhs_sh {
-                        let Some(ref ls) = lhs_sh else {
-                            return Err(FormulaError::Ref);
-                        };
-                        if !WorkbookEngine::is_same_sheet_identity(ls, rs) {
-                            return Err(FormulaError::Ref);
-                        }
-                    }
-                    let range = CellRange::parse(&format!("{lhs_tok}:{rhs_tok}"))
-                        .map_err(|_| FormulaError::Ref)?;
-                    if let Some(sh_clean) = lhs_sh {
-                        if sh_clean.is_empty() || !self.has_sheet_in_ctx(&sh_clean, ctx) {
-                            return Err(FormulaError::Ref);
-                        }
-                        Ok(Some((Some(Cow::Owned(sh_clean)), range, false)))
-                    } else {
-                        Ok(Some((None, range, false)))
-                    }
-                } else {
-                    let (sh_opt, coord) = parse_indirect_endpoint(trimmed)?;
-                    let range = CellRange::new(coord, coord).map_err(|_| FormulaError::Ref)?;
-                    if let Some(sh_clean) = sh_opt {
-                        if sh_clean.is_empty() || !self.has_sheet_in_ctx(&sh_clean, ctx) {
-                            return Err(FormulaError::Ref);
-                        }
-                        Ok(Some((Some(Cow::Owned(sh_clean)), range, false)))
-                    } else {
-                        Ok(Some((None, range, false)))
-                    }
-                }
+                self.extract_indirect_ref(args, ctx, depth)
             }
             Expr::FuncCall { name, args } if name == "OFFSET" => {
-                if args.len() < 3 || args.len() > 5 {
-                    return Err(FormulaError::Value);
-                }
-                let Some((sheet_opt, base_range, _)) =
-                    self.extract_range_and_sheet_ctx(&args[0], ctx, depth + 1)?
-                else {
-                    return Err(FormulaError::Value);
-                };
-                let dr = self.eval_arg_num(&args[1], ctx, depth + 1)?.trunc() as i64;
-                let dc = self.eval_arg_num(&args[2], ctx, depth + 1)?.trunc() as i64;
-                let (base_rows, base_cols) = base_range.dimensions();
-                let height = if args.len() >= 4 {
-                    self.eval_arg_num(&args[3], ctx, depth + 1)?.trunc() as i64
-                } else {
-                    base_rows as i64
-                };
-                let width = if args.len() == 5 {
-                    self.eval_arg_num(&args[4], ctx, depth + 1)?.trunc() as i64
-                } else {
-                    base_cols as i64
-                };
-                if height < 1 || width < 1 {
-                    return Err(FormulaError::Value);
-                }
-                let start_r = base_range.start.row().min(base_range.end.row()) as i64 + dr;
-                let start_c = base_range.start.col().min(base_range.end.col()) as i64 + dc;
-                if start_r < 0 || start_c < 0 {
-                    return Err(FormulaError::Ref);
-                }
-                let end_r = start_r + height - 1;
-                let end_c = start_c + width - 1;
-                let start_coord = PackedCellCoordinate::new(start_r as u32, start_c as u32)
-                    .map_err(|_| FormulaError::Ref)?;
-                let end_coord = PackedCellCoordinate::new(end_r as u32, end_c as u32)
-                    .map_err(|_| FormulaError::Ref)?;
-                let range =
-                    CellRange::new(start_coord, end_coord).map_err(|_| FormulaError::Ref)?;
-                Ok(Some((sheet_opt, range, false)))
+                self.extract_offset_ref(args, ctx, depth)
             }
             _ => Ok(None),
         }
@@ -426,53 +441,60 @@ impl CompiledCriteria {
                 Self::TextEq(if *b { "true" } else { "false" }.to_string())
             }
             EvaluatedCellValue::Error(e) => Self::TextEq(e.code().to_lowercase()),
-            EvaluatedCellValue::Text(s) => {
-                let trimmed = s.trim();
-                for (op_str, op_kind) in [
-                    (">=", CritNumOp::Ge),
-                    ("<=", CritNumOp::Le),
-                    ("<>", CritNumOp::Ne),
-                    (">", CritNumOp::Gt),
-                    ("<", CritNumOp::Lt),
-                    ("=", CritNumOp::Eq),
-                ] {
-                    if let Some(rhs) = trimmed.strip_prefix(op_str) {
-                        let rhs_trim = rhs.trim();
-                        if let Some(rhs_num) = crate::coercion::parse_strict_number(rhs_trim) {
-                            return Self::NumericCmp(op_kind, rhs_num);
-                        }
-                        if let Some(rhs_serial) = parse_iso_date_serial(rhs_trim) {
-                            return Self::IsoDateCmp(op_kind, rhs_serial);
-                        }
-                        if matches!(op_kind, CritNumOp::Eq | CritNumOp::Ne)
-                            && Self::has_wildcard_meta(rhs_trim)
-                        {
-                            return if matches!(op_kind, CritNumOp::Eq) {
-                                Self::Wildcard(rhs_trim.to_string())
-                            } else {
-                                Self::NotWildcard(rhs_trim.to_string())
-                            };
-                        }
-                        let rhs_lower = rhs_trim.to_lowercase();
-                        return match op_kind {
-                            CritNumOp::Eq => Self::TextEq(rhs_lower),
-                            CritNumOp::Ne => Self::TextNe(rhs_lower),
-                            _ => Self::TextOrd(op_kind, rhs_lower),
-                        };
-                    }
-                }
-                if let Some(rhs_num) = crate::coercion::parse_strict_number(trimmed) {
-                    return Self::Number(rhs_num);
-                }
-                if let Some(rhs_serial) = parse_iso_date_serial(trimmed) {
-                    return Self::IsoDateEq(rhs_serial);
-                }
-                if Self::has_wildcard_meta(trimmed) {
-                    Self::Wildcard(trimmed.to_string())
-                } else {
-                    Self::TextEq(trimmed.to_lowercase())
-                }
-            }
+            EvaluatedCellValue::Text(s) => Self::compile_text(s.trim()),
+        }
+    }
+
+    /// Compiles a text criterion (`">=5"`, `"abc*"`, `"2026-01-01"`, ...).
+    fn compile_text(trimmed: &str) -> Self {
+        const OPERATORS: [(&str, CritNumOp); 6] = [
+            (">=", CritNumOp::Ge),
+            ("<=", CritNumOp::Le),
+            ("<>", CritNumOp::Ne),
+            (">", CritNumOp::Gt),
+            ("<", CritNumOp::Lt),
+            ("=", CritNumOp::Eq),
+        ];
+        if let Some((op_kind, rhs)) = OPERATORS
+            .iter()
+            .find_map(|(op_str, op_kind)| trimmed.strip_prefix(op_str).map(|rhs| (*op_kind, rhs)))
+        {
+            return Self::compile_operator_rhs(op_kind, rhs.trim());
+        }
+        if let Some(rhs_num) = crate::coercion::parse_strict_number(trimmed) {
+            return Self::Number(rhs_num);
+        }
+        if let Some(rhs_serial) = parse_iso_date_serial(trimmed) {
+            return Self::IsoDateEq(rhs_serial);
+        }
+        if Self::has_wildcard_meta(trimmed) {
+            Self::Wildcard(trimmed.to_string())
+        } else {
+            Self::TextEq(trimmed.to_lowercase())
+        }
+    }
+
+    /// Compiles the right-hand side of an operator criterion.
+    fn compile_operator_rhs(op_kind: CritNumOp, rhs_trim: &str) -> Self {
+        if let Some(rhs_num) = crate::coercion::parse_strict_number(rhs_trim) {
+            return Self::NumericCmp(op_kind, rhs_num);
+        }
+        if let Some(rhs_serial) = parse_iso_date_serial(rhs_trim) {
+            return Self::IsoDateCmp(op_kind, rhs_serial);
+        }
+        let is_eq = matches!(op_kind, CritNumOp::Eq);
+        if (is_eq || matches!(op_kind, CritNumOp::Ne)) && Self::has_wildcard_meta(rhs_trim) {
+            return if is_eq {
+                Self::Wildcard(rhs_trim.to_string())
+            } else {
+                Self::NotWildcard(rhs_trim.to_string())
+            };
+        }
+        let rhs_lower = rhs_trim.to_lowercase();
+        match op_kind {
+            CritNumOp::Eq => Self::TextEq(rhs_lower),
+            CritNumOp::Ne => Self::TextNe(rhs_lower),
+            _ => Self::TextOrd(op_kind, rhs_lower),
         }
     }
 
@@ -599,6 +621,27 @@ impl CompiledCriteria {
     }
 }
 
+/// Result shape of an element-wise operation: a 1x1 operand broadcasts to the other shape.
+fn broadcast_shape(l: (usize, usize), r: (usize, usize)) -> Result<(usize, usize), FormulaError> {
+    if l == (1, 1) {
+        Ok(r)
+    } else if r == (1, 1) || l == r {
+        Ok(l)
+    } else {
+        Err(FormulaError::Value)
+    }
+}
+
+/// Element `idx` of a grid, or its only element when the grid is a scalar.
+#[inline]
+fn broadcast_item(vals: &[EvaluatedCellValue], idx: usize) -> &EvaluatedCellValue {
+    if vals.len() == 1 {
+        &vals[0]
+    } else {
+        &vals[idx]
+    }
+}
+
 impl SheetEngine {
     fn eval_expr_2d_grid(
         &self,
@@ -624,39 +667,27 @@ impl SheetEngine {
             Expr::UnaryPlus(inner) | Expr::UnaryMinus(inner) => {
                 let is_neg = matches!(expr, Expr::UnaryMinus(_));
                 let (r, c, vals, _) = self.eval_expr_2d_grid(inner, ctx, depth + 1)?;
-                let mut out = Vec::with_capacity(vals.len());
-                for v in vals {
-                    if let EvaluatedCellValue::Error(e) = v {
-                        return Err(e);
-                    }
-                    let n = v.as_number().ok_or(FormulaError::Value)?;
-                    out.push(EvaluatedCellValue::Number(if is_neg { -n } else { n }));
-                }
+                let out = vals
+                    .into_iter()
+                    .map(|v| {
+                        if let EvaluatedCellValue::Error(e) = v {
+                            return Err(e);
+                        }
+                        let n = v.as_number().ok_or(FormulaError::Value)?;
+                        Ok(EvaluatedCellValue::Number(if is_neg { -n } else { n }))
+                    })
+                    .collect::<Result<Vec<_>, FormulaError>>()?;
                 Ok((r, c, out, true))
             }
             Expr::Binary { op, lhs, rhs } => {
                 let (r1, c1, v1, _) = self.eval_expr_2d_grid(lhs, ctx, depth + 1)?;
                 let (r2, c2, v2, _) = self.eval_expr_2d_grid(rhs, ctx, depth + 1)?;
-                let (rows, cols) = if (r1, c1) == (1, 1) {
-                    (r2, c2)
-                } else if (r2, c2) == (1, 1) || (r1, c1) == (r2, c2) {
-                    (r1, c1)
-                } else {
-                    return Err(FormulaError::Value);
-                };
+                let (rows, cols) = broadcast_shape((r1, c1), (r2, c2))?;
                 let total = rows.saturating_mul(cols);
                 let mut out = Vec::with_capacity(total);
                 for idx in 0..total {
-                    let lv = if v1.len() == 1 {
-                        v1[0].clone()
-                    } else {
-                        v1[idx].clone()
-                    };
-                    let rv = if v2.len() == 1 {
-                        v2[0].clone()
-                    } else {
-                        v2[idx].clone()
-                    };
+                    let lv = broadcast_item(&v1, idx).clone();
+                    let rv = broadcast_item(&v2, idx).clone();
                     let res = Self::apply_binary_op(*op, lv, rv);
                     if let EvaluatedCellValue::Error(e) = res {
                         return Err(e);

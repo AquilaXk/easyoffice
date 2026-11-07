@@ -234,6 +234,20 @@ pub(crate) fn strip_formula_prefix(raw_src: &str) -> Option<&str> {
     raw_src.trim().strip_prefix('=')
 }
 
+/// Consumes characters up to the `]` that closes an open bracket (quotes may contain `]`);
+/// returns its byte index, or `None` when the bracket is never closed.
+fn find_bracket_close(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> Option<usize> {
+    let mut in_quote = false;
+    for (c_idx, c_ch) in chars.by_ref() {
+        if c_ch == '\'' {
+            in_quote = !in_quote;
+        } else if c_ch == ']' && !in_quote {
+            return Some(c_idx);
+        }
+    }
+    None
+}
+
 fn normalize_open_formula_body(stripped: &str) -> std::borrow::Cow<'_, str> {
     if !stripped.contains('[') {
         return std::borrow::Cow::Borrowed(stripped);
@@ -262,18 +276,7 @@ fn normalize_open_formula_body(stripped: &str) -> std::borrow::Cow<'_, str> {
         }
         if !in_double_quote && !in_single_quote && ch == '[' {
             let start_inner = idx + ch.len_utf8();
-            let mut close_idx = None;
-            let mut bracket_single_quote = false;
-            while let Some(&(c_idx, c_ch)) = chars.peek() {
-                chars.next();
-                if c_ch == '\'' {
-                    bracket_single_quote = !bracket_single_quote;
-                } else if c_ch == ']' && !bracket_single_quote {
-                    close_idx = Some(c_idx);
-                    break;
-                }
-            }
-            if let Some(end_inner) = close_idx {
+            if let Some(end_inner) = find_bracket_close(&mut chars) {
                 let inner = &stripped[start_inner..end_inner];
                 out.push_str(&normalize_bracketed_open_formula_ref(inner));
                 continue;
@@ -700,26 +703,7 @@ impl Parser {
             return Err(FormulaError::Value);
         }
         match self.next() {
-            Some(Token::Number(n)) => {
-                if matches!(self.peek(), Some(Token::Colon)) {
-                    self.next();
-                    if n.fract() != 0.0 || n < 1.0 {
-                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                    }
-                    let Some(end_str) = self.next_range_endpoint_string() else {
-                        return Err(FormulaError::Ref);
-                    };
-                    if matches!(self.peek(), Some(Token::Bang)) {
-                        return Err(FormulaError::Ref);
-                    }
-                    let notation = format!("{}:{end_str}", n as u64);
-                    let Ok(range) = CellRange::parse(&notation) else {
-                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                    };
-                    return Ok(Expr::Range(range));
-                }
-                Ok(Expr::Number(n))
-            }
+            Some(Token::Number(n)) => self.parse_number_primary(n),
             Some(Token::Text(s)) => Ok(Expr::Text(s)),
             Some(Token::ErrorLiteral(e)) => Ok(Expr::ErrorLiteral(e)),
             Some(Token::LParen) => {
@@ -729,102 +713,123 @@ impl Parser {
                 }
                 Ok(inner)
             }
-            Some(Token::Ident(name)) => {
-                if matches!(self.peek(), Some(Token::Bang)) {
-                    self.next();
-                    let Some(cell_ident) = self.next_range_endpoint_string() else {
-                        return Err(FormulaError::Ref);
-                    };
-                    if matches!(self.peek(), Some(Token::Colon)) {
-                        self.next();
-                        let Some(s) = self.next_range_endpoint_string() else {
-                            return Err(FormulaError::Ref);
-                        };
-                        let (end_ident, same_sheet) = if matches!(self.peek(), Some(Token::Bang)) {
-                            self.next();
-                            let Some(s2) = self.next_range_endpoint_string() else {
-                                return Err(FormulaError::Ref);
-                            };
-                            (s2, crate::WorkbookEngine::is_same_sheet_identity(&s, &name))
-                        } else {
-                            (s, true)
-                        };
-                        if !same_sheet {
-                            return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                        }
-                        let notation = format!("{cell_ident}:{end_ident}");
-                        let Ok(range) = CellRange::parse(&notation) else {
-                            return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                        };
-                        return Ok(Expr::SheetRange { sheet: name, range });
-                    }
-                    let Ok(sc) = PackedCellCoordinate::parse_a1(&cell_ident) else {
-                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                    };
-                    return Ok(Expr::SheetCell {
-                        sheet: name,
-                        coord: sc,
-                    });
-                }
-
-                if matches!(self.peek(), Some(Token::LParen)) {
-                    self.next();
-                    let mut args = Vec::new();
-                    if !matches!(self.peek(), Some(Token::RParen)) {
-                        loop {
-                            if matches!(self.peek(), Some(Token::Comma) | Some(Token::RParen)) {
-                                args.push(Expr::Missing);
-                            } else {
-                                args.push(self.parse_expression(depth + 1)?);
-                            }
-                            if matches!(self.peek(), Some(Token::Comma)) {
-                                self.next();
-                                if matches!(self.peek(), Some(Token::RParen)) {
-                                    args.push(Expr::Missing);
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    if !matches!(self.next(), Some(Token::RParen)) {
-                        return Err(FormulaError::Value);
-                    }
-                    return Ok(Expr::FuncCall {
-                        name: name.to_ascii_uppercase(),
-                        args,
-                    });
-                }
-
-                if name.eq_ignore_ascii_case("TRUE") {
-                    return Ok(Expr::Boolean(true));
-                }
-                if name.eq_ignore_ascii_case("FALSE") {
-                    return Ok(Expr::Boolean(false));
-                }
-
-                if matches!(self.peek(), Some(Token::Colon)) {
-                    self.next();
-                    let Some(end_name) = self.next_range_endpoint_string() else {
-                        return Err(FormulaError::Ref);
-                    };
-                    if matches!(self.peek(), Some(Token::Bang)) {
-                        return Err(FormulaError::Ref);
-                    }
-                    let notation = format!("{name}:{end_name}");
-                    let Ok(range) = CellRange::parse(&notation) else {
-                        return Ok(Expr::ErrorLiteral(FormulaError::Ref));
-                    };
-                    return Ok(Expr::Range(range));
-                }
-                let Ok(sc) = PackedCellCoordinate::parse_a1(&name) else {
-                    return Ok(Expr::ErrorLiteral(classify_failed_a1_token(&name)));
-                };
-                Ok(Expr::Cell(sc))
-            }
+            Some(Token::Ident(name)) => self.parse_ident_primary(name, depth),
             _ => Err(FormulaError::Value),
         }
+    }
+
+    /// A number, or a whole-row range such as `1:3`.
+    fn parse_number_primary(&mut self, n: f64) -> Result<Expr, FormulaError> {
+        if !matches!(self.peek(), Some(Token::Colon)) {
+            return Ok(Expr::Number(n));
+        }
+        self.next();
+        if n.fract() != 0.0 || n < 1.0 {
+            return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+        }
+        self.finish_range(&format!("{}", n as u64))
+    }
+
+    /// Reads the range end after `start:` and builds the range (a trailing `!` is invalid).
+    fn finish_range(&mut self, start: &str) -> Result<Expr, FormulaError> {
+        let Some(end) = self.next_range_endpoint_string() else {
+            return Err(FormulaError::Ref);
+        };
+        if matches!(self.peek(), Some(Token::Bang)) {
+            return Err(FormulaError::Ref);
+        }
+        match CellRange::parse(&format!("{start}:{end}")) {
+            Ok(range) => Ok(Expr::Range(range)),
+            Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+        }
+    }
+
+    fn parse_ident_primary(&mut self, name: String, depth: usize) -> Result<Expr, FormulaError> {
+        if matches!(self.peek(), Some(Token::Bang)) {
+            self.next();
+            return self.parse_sheet_reference(name);
+        }
+        if matches!(self.peek(), Some(Token::LParen)) {
+            self.next();
+            let args = self.parse_call_args(depth)?;
+            return Ok(Expr::FuncCall {
+                name: name.to_ascii_uppercase(),
+                args,
+            });
+        }
+        if name.eq_ignore_ascii_case("TRUE") {
+            return Ok(Expr::Boolean(true));
+        }
+        if name.eq_ignore_ascii_case("FALSE") {
+            return Ok(Expr::Boolean(false));
+        }
+        if matches!(self.peek(), Some(Token::Colon)) {
+            self.next();
+            return self.finish_range(&name);
+        }
+        match PackedCellCoordinate::parse_a1(&name) {
+            Ok(sc) => Ok(Expr::Cell(sc)),
+            Err(_) => Ok(Expr::ErrorLiteral(classify_failed_a1_token(&name))),
+        }
+    }
+
+    /// `Sheet!A1` or `Sheet!A1:B2` (also `Sheet!A1:Sheet!B2`) after the `!`.
+    fn parse_sheet_reference(&mut self, name: String) -> Result<Expr, FormulaError> {
+        let Some(cell_ident) = self.next_range_endpoint_string() else {
+            return Err(FormulaError::Ref);
+        };
+        if matches!(self.peek(), Some(Token::Colon)) {
+            self.next();
+            let Some(s) = self.next_range_endpoint_string() else {
+                return Err(FormulaError::Ref);
+            };
+            let (end_ident, same_sheet) = if matches!(self.peek(), Some(Token::Bang)) {
+                self.next();
+                let Some(s2) = self.next_range_endpoint_string() else {
+                    return Err(FormulaError::Ref);
+                };
+                (s2, crate::WorkbookEngine::is_same_sheet_identity(&s, &name))
+            } else {
+                (s, true)
+            };
+            if !same_sheet {
+                return Ok(Expr::ErrorLiteral(FormulaError::Ref));
+            }
+            return match CellRange::parse(&format!("{cell_ident}:{end_ident}")) {
+                Ok(range) => Ok(Expr::SheetRange { sheet: name, range }),
+                Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+            };
+        }
+        match PackedCellCoordinate::parse_a1(&cell_ident) {
+            Ok(coord) => Ok(Expr::SheetCell { sheet: name, coord }),
+            Err(_) => Ok(Expr::ErrorLiteral(FormulaError::Ref)),
+        }
+    }
+
+    /// Function call arguments after `(`; empty slots become [`Expr::Missing`].
+    fn parse_call_args(&mut self, depth: usize) -> Result<Vec<Expr>, FormulaError> {
+        let mut args = Vec::new();
+        if !matches!(self.peek(), Some(Token::RParen)) {
+            loop {
+                if matches!(self.peek(), Some(Token::Comma | Token::RParen)) {
+                    args.push(Expr::Missing);
+                } else {
+                    args.push(self.parse_expression(depth + 1)?);
+                }
+                if !matches!(self.peek(), Some(Token::Comma)) {
+                    break;
+                }
+                self.next();
+                if matches!(self.peek(), Some(Token::RParen)) {
+                    args.push(Expr::Missing);
+                    break;
+                }
+            }
+        }
+        if !matches!(self.next(), Some(Token::RParen)) {
+            return Err(FormulaError::Value);
+        }
+        Ok(args)
     }
 }
 

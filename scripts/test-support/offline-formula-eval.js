@@ -145,20 +145,37 @@
     return plain;
   }
 
+  const KIND_RANK = { number: 1, empty: 1, text: 2 };
+
+  function kindRank(v) {
+    return KIND_RANK[v.kind] ?? 3;
+  }
+
+  // Ordering of an empty cell against a number/text/bool; null for other kinds.
+  function compareWithEmpty(other, emptyIsLeft) {
+    if (other.kind === "number") return emptyIsLeft ? 0 - other.num : other.num - 0;
+    if (other.kind === "text") {
+      return emptyIsLeft ? "".localeCompare(other.text) : other.text.localeCompare("");
+    }
+    if (other.kind === "bool") {
+      if (emptyIsLeft) return other.flag ? -1 : 0;
+      return other.flag ? 1 : 0;
+    }
+    return null;
+  }
+
+  // Ordering when exactly one side is empty; null when neither is (or the other kind is unordered).
+  function emptySideOrdering(lhs, rhs) {
+    if (lhs.kind === "empty") return compareWithEmpty(rhs, true);
+    if (rhs.kind === "empty") return compareWithEmpty(lhs, false);
+    return null;
+  }
+
   function compareTypedValues(lhs, rhs) {
-    const rank = (v) => {
-      if (v.kind === "number" || v.kind === "empty") return 1;
-      if (v.kind === "text") return 2;
-      return 3;
-    };
     if (lhs.kind === "empty" && rhs.kind === "empty") return 0;
-    if (lhs.kind === "empty" && rhs.kind === "number") return 0 - rhs.num;
-    if (lhs.kind === "number" && rhs.kind === "empty") return lhs.num - 0;
-    if (lhs.kind === "empty" && rhs.kind === "text") return "".localeCompare(rhs.text);
-    if (lhs.kind === "text" && rhs.kind === "empty") return lhs.text.localeCompare("");
-    if (lhs.kind === "empty" && rhs.kind === "bool") return rhs.flag ? -1 : 0;
-    if (lhs.kind === "bool" && rhs.kind === "empty") return lhs.flag ? 1 : 0;
-    if (rank(lhs) !== rank(rhs)) return rank(lhs) - rank(rhs);
+    const emptyOrdering = emptySideOrdering(lhs, rhs);
+    if (emptyOrdering !== null) return emptyOrdering;
+    if (kindRank(lhs) !== kindRank(rhs)) return kindRank(lhs) - kindRank(rhs);
     if (lhs.kind === "number") return lhs.num - rhs.num;
     if (lhs.kind === "text") {
       const a = lhs.text.toLowerCase();
@@ -172,6 +189,22 @@
 
   // Mirrors the Rust engine: wide ranges stream only populated cells (sorted row-major) instead
   // of materializing every empty coordinate; MAX_EXPANDED_CELL_COUNT is the dense-walk threshold.
+  function populatedRangeCoords(item, workbook) {
+    const prefix = item.sheetUpper + "!";
+    const coords = [];
+    for (const key of Object.keys(workbook.rawValues)) {
+      if (!key.startsWith(prefix)) continue;
+      const parts = parseCellRefParts(key.slice(prefix.length));
+      if (!parts) continue;
+      const { col, row } = parts;
+      const inside =
+        row >= item.minRow && row <= item.maxRow && col >= item.minCol && col <= item.maxCol;
+      if (inside) coords.push({ row, col });
+    }
+    coords.sort((a, b) => a.row - b.row || a.col - b.col);
+    return coords;
+  }
+
   function visitRangeCells(item, workbook, depth, visit) {
     const cellCount = (item.maxRow - item.minRow + 1) * (item.maxCol - item.minCol + 1);
     if (cellCount <= MAX_EXPANDED_CELL_COUNT) {
@@ -183,19 +216,7 @@
       }
       return { cellCount, visited: cellCount };
     }
-    const prefix = item.sheetUpper + "!";
-    const coords = [];
-    for (const key of Object.keys(workbook.rawValues)) {
-      if (!key.startsWith(prefix)) continue;
-      const parts = parseCellRefParts(key.slice(prefix.length));
-      if (!parts) continue;
-      const col = parts.col;
-      const row = parts.row;
-      if (row >= item.minRow && row <= item.maxRow && col >= item.minCol && col <= item.maxCol) {
-        coords.push({ row, col });
-      }
-    }
-    coords.sort((a, b) => a.row - b.row || a.col - b.col);
+    const coords = populatedRangeCoords(item, workbook);
     for (const { row, col } of coords) {
       const v = readWorkbookTypedCell(workbook, item.sheetUpper, colIndexToLetters(col) + row, depth);
       if (visit(v) === false) break;
@@ -203,125 +224,112 @@
     return { cellCount, visited: coords.length };
   }
 
-  function evalAggregateFunction(fnName, argItems, workbook, depth) {
-    const nums = [];
-    let countAll = 0;
-    let countBlank = 0;
-    for (const item of argItems) {
-      if (item.kind === "range") {
-        if (!item.sheetUpper) return valErr("#REF!");
-        let rangeErr = null;
-        const { cellCount, visited } = visitRangeCells(item, workbook, depth, (cellVal) => {
-          if (cellVal.kind === "error") {
-            rangeErr = cellVal;
-            return false;
-          }
-          if (cellVal.kind === "number") nums.push(cellVal.num);
-          if (cellVal.kind === "empty" || (cellVal.kind === "text" && cellVal.text === "")) {
-            countBlank += 1;
-          }
-          if (cellVal.kind !== "empty") countAll += 1;
-          return true;
-        });
-        if (rangeErr) return rangeErr;
-        countBlank += cellCount - visited;
-      } else {
-        if (item.kind === "error") return item;
-        if (fnName === "COUNT") {
-          if (item.kind === "number") nums.push(item.num);
-        } else if (fnName === "COUNTA") {
-          if (item.kind !== "empty") countAll += 1;
-        } else if (fnName === "COUNTBLANK") {
-          if (item.kind === "empty" || (item.kind === "text" && item.text === "")) countBlank += 1;
-        } else if (item.kind !== "empty") {
-          const coerced = coerceScalarNumber(item);
-          if (coerced === null) return valErr("#VALUE!");
-          nums.push(coerced);
-        }
+  function isBlankValue(v) {
+    return v.kind === "empty" || (v.kind === "text" && v.text === "");
+  }
+
+  // Folds one scalar argument into the aggregate state; returns an error value or null.
+  function foldScalarAggregateArg(fnName, item, state) {
+    if (item.kind === "error") return item;
+    if (fnName === "COUNT") {
+      if (item.kind === "number") state.nums.push(item.num);
+    } else if (fnName === "COUNTA") {
+      if (item.kind !== "empty") state.countAll += 1;
+    } else if (fnName === "COUNTBLANK") {
+      if (isBlankValue(item)) state.countBlank += 1;
+    } else if (item.kind !== "empty") {
+      const coerced = coerceScalarNumber(item);
+      if (coerced === null) return valErr("#VALUE!");
+      state.nums.push(coerced);
+    }
+    return null;
+  }
+
+  function foldRangeAggregateArg(item, workbook, depth, state) {
+    if (!item.sheetUpper) return valErr("#REF!");
+    let rangeErr = null;
+    const { cellCount, visited } = visitRangeCells(item, workbook, depth, (cellVal) => {
+      if (cellVal.kind === "error") {
+        rangeErr = cellVal;
+        return false;
       }
-    }
-    if (fnName === "COUNT") return valNum(nums.length);
-    if (fnName === "COUNTA") return valNum(countAll);
-    if (fnName === "COUNTBLANK") return valNum(countBlank);
-    let sum = 0;
-    for (const num of nums) {
-      sum += num;
-    }
+      if (cellVal.kind === "number") state.nums.push(cellVal.num);
+      if (isBlankValue(cellVal)) state.countBlank += 1;
+      if (cellVal.kind !== "empty") state.countAll += 1;
+      return true;
+    });
+    if (rangeErr) return rangeErr;
+    state.countBlank += cellCount - visited;
+    return null;
+  }
+
+  function finishAggregate(fnName, nums) {
+    const sum = nums.reduce((acc, num) => acc + num, 0);
     if (fnName === "SUM") return valNum(sum);
     if (fnName === "PRODUCT") {
-      if (nums.length === 0) return valNum(0);
-      let prod = 1;
-      for (const num of nums) {
-        prod *= num;
-      }
-      return valNum(prod);
+      return valNum(nums.length === 0 ? 0 : nums.reduce((acc, num) => acc * num, 1));
     }
-    if (fnName === "MIN") {
-      if (nums.length === 0) return valNum(0);
-      let minVal = nums[0];
-      for (let i = 1; i < nums.length; i += 1) {
-        if (nums[i] < minVal) minVal = nums[i];
-      }
-      return valNum(minVal);
-    }
-    if (fnName === "MAX") {
-      if (nums.length === 0) return valNum(0);
-      let maxVal = nums[0];
-      for (let i = 1; i < nums.length; i += 1) {
-        if (nums[i] > maxVal) maxVal = nums[i];
-      }
-      return valNum(maxVal);
-    }
+    if (fnName === "MIN") return valNum(nums.length === 0 ? 0 : nums.reduce((lo, num) => Math.min(lo, num)));
+    if (fnName === "MAX") return valNum(nums.length === 0 ? 0 : nums.reduce((hi, num) => Math.max(hi, num)));
     if (fnName === "AVERAGE" || fnName === "AVG") {
-      if (nums.length === 0) return valErr("#DIV/0!");
-      return valNum(sum / nums.length);
+      return nums.length === 0 ? valErr("#DIV/0!") : valNum(sum / nums.length);
     }
     if (nums.length < 2) return valErr("#DIV/0!");
     const mean = sum / nums.length;
-    let m2 = 0;
-    for (const num of nums) {
-      const diff = num - mean;
-      m2 += diff * diff;
-    }
+    const m2 = nums.reduce((acc, num) => acc + (num - mean) * (num - mean), 0);
     const variance = m2 / (nums.length - 1);
     return valNum(fnName === "STDEV" ? Math.sqrt(variance) : variance);
   }
 
-  function evalLogicalFunction(fnName, argItems, workbook, depth) {
-    let trues = 0;
-    let seen = 0;
+  function evalAggregateFunction(fnName, argItems, workbook, depth) {
+    const state = { nums: [], countAll: 0, countBlank: 0 };
     for (const item of argItems) {
-      if (item.kind === "range") {
-        if (!item.sheetUpper) return valErr("#REF!");
-        let rangeErr = null;
-        visitRangeCells(item, workbook, depth, (cellVal) => {
-          if (cellVal.kind === "error") {
-            rangeErr = cellVal;
-            return false;
-          }
-          if (cellVal.kind === "empty") return true;
-          const b = coerceScalarBool(cellVal);
-          if (b === null) {
-            rangeErr = valErr("#VALUE!");
-            return false;
-          }
-          seen += 1;
-          if (b) trues += 1;
-          return true;
-        });
-        if (rangeErr) return rangeErr;
-      } else {
-        if (item.kind === "error") return item;
-        const b = coerceScalarBool(item);
-        if (b === null) return valErr("#VALUE!");
-        seen += 1;
-        if (b) trues += 1;
-      }
+      const failure =
+        item.kind === "range"
+          ? foldRangeAggregateArg(item, workbook, depth, state)
+          : foldScalarAggregateArg(fnName, item, state);
+      if (failure) return failure;
     }
-    if (seen === 0) return valErr("#VALUE!");
-    if (fnName === "AND") return valBool(trues === seen);
-    if (fnName === "OR") return valBool(trues > 0);
-    return valBool(trues % 2 === 1);
+    if (fnName === "COUNT") return valNum(state.nums.length);
+    if (fnName === "COUNTA") return valNum(state.countAll);
+    if (fnName === "COUNTBLANK") return valNum(state.countBlank);
+    return finishAggregate(fnName, state.nums);
+  }
+
+  // Counts one boolean-coercible value; returns an error value or null.
+  function tallyLogicalValue(item, tally) {
+    if (item.kind === "error") return item;
+    const b = coerceScalarBool(item);
+    if (b === null) return valErr("#VALUE!");
+    tally.seen += 1;
+    if (b) tally.trues += 1;
+    return null;
+  }
+
+  function tallyLogicalRange(item, workbook, depth, tally) {
+    if (!item.sheetUpper) return valErr("#REF!");
+    let rangeErr = null;
+    visitRangeCells(item, workbook, depth, (cellVal) => {
+      if (cellVal.kind === "empty") return true;
+      rangeErr = tallyLogicalValue(cellVal, tally);
+      return rangeErr === null;
+    });
+    return rangeErr;
+  }
+
+  function evalLogicalFunction(fnName, argItems, workbook, depth) {
+    const tally = { trues: 0, seen: 0 };
+    for (const item of argItems) {
+      const failure =
+        item.kind === "range"
+          ? tallyLogicalRange(item, workbook, depth, tally)
+          : tallyLogicalValue(item, tally);
+      if (failure) return failure;
+    }
+    if (tally.seen === 0) return valErr("#VALUE!");
+    if (fnName === "AND") return valBool(tally.trues === tally.seen);
+    if (fnName === "OR") return valBool(tally.trues > 0);
+    return valBool(tally.trues % 2 === 1);
   }
 
   function validateRefTargetSheet(refNode, workbook, currentSheetUpper) {
@@ -352,57 +360,68 @@
     "VAR",
   ]);
 
+  // Advances over a `'` at index i; returns { inQuotes, next } (a doubled quote stays quoted).
+  function stepQuoteChar(src, i, inQuotes) {
+    if (!inQuotes) return { inQuotes: true, next: i };
+    if (src[i + 1] === "'") return { inQuotes: true, next: i + 1 };
+    return { inQuotes: false, next: i };
+  }
+
   function splitOnceUnquotedStrict(src, delimiter) {
     let inQuotes = false;
     let splitIdx = -1;
-    for (let i = 0; i < src.length; i += 1) {
+    let i = 0;
+    while (i < src.length) {
       const ch = src[i];
       if (ch === "'") {
-        if (inQuotes) {
-          if (i + 1 < src.length && src[i + 1] === "'") {
-            i += 1;
-            continue;
-          }
-          inQuotes = false;
-        } else {
-          inQuotes = true;
-        }
-        continue;
-      }
-      if (!inQuotes && ch === delimiter) {
+        const step = stepQuoteChar(src, i, inQuotes);
+        inQuotes = step.inQuotes;
+        i = step.next;
+      } else if (!inQuotes && ch === delimiter) {
         if (splitIdx !== -1) return { ok: false };
         splitIdx = i;
       }
+      i += 1;
     }
     if (inQuotes) return { ok: false };
     if (splitIdx === -1) return { ok: true, parts: [src] };
     return { ok: true, parts: [src.slice(0, splitIdx), src.slice(splitIdx + 1)] };
   }
 
+  const BARE_SHEET_NAME_PATTERN = /^[\p{Alphabetic}_$][\p{Alphabetic}\p{N}_$]*$/u;
+
+  // Sheet name of an INDIRECT endpoint prefix, or null when it is invalid.
+  function parseIndirectSheetName(shRaw) {
+    if (shRaw.startsWith("'")) {
+      const unquoted = unquoteFormulaSheetTokenOnce(shRaw);
+      return unquoted && unquoted.trim().length > 0 ? unquoted : null;
+    }
+    return BARE_SHEET_NAME_PATTERN.test(shRaw) ? shRaw : null;
+  }
+
   function parseIndirectEndpoint(rawPart) {
     const bangSplit = splitOnceUnquotedStrict(String(rawPart ?? "").trim(), "!");
     if (!bangSplit.ok) return { ok: false };
+    let sheetName = null;
+    let coordRaw = bangSplit.parts[0].trim();
     if (bangSplit.parts.length === 2) {
       const shRaw = bangSplit.parts[0].trim();
-      const coordRaw = bangSplit.parts[1].trim();
+      coordRaw = bangSplit.parts[1].trim();
       if (!shRaw || !coordRaw) return { ok: false };
-      let sheetName = null;
-      if (shRaw.startsWith("'")) {
-        sheetName = unquoteFormulaSheetTokenOnce(shRaw);
-        if (!sheetName || sheetName.trim().length === 0) return { ok: false };
-      } else {
-        if (!/^[\p{Alphabetic}_$][\p{Alphabetic}\p{N}_$]*$/u.test(shRaw)) {
-          return { ok: false };
-        }
-        sheetName = shRaw;
-      }
-      const coord = parseStrictA1Coord(coordRaw);
-      if (!coord.ok) return { ok: false };
-      return { ok: true, sheet: sheetName, col: coord.col, row: coord.row };
+      sheetName = parseIndirectSheetName(shRaw);
+      if (sheetName === null) return { ok: false };
     }
-    const coord = parseStrictA1Coord(bangSplit.parts[0].trim());
+    const coord = parseStrictA1Coord(coordRaw);
     if (!coord.ok) return { ok: false };
-    return { ok: true, sheet: null, col: coord.col, row: coord.row };
+    return { ok: true, sheet: sheetName, col: coord.col, row: coord.row };
+  }
+
+  // Validates the end endpoint sheet of an INDIRECT range against the start endpoint.
+  function isValidIndirectEndSheet(lhs, rhs, workbook) {
+    if (rhs.sheet === null) return true;
+    if (lhs.sheet === null) return false;
+    if (!isSameSheetIdentityJs(lhs.sheet, rhs.sheet)) return false;
+    return Boolean(resolveCanonicalSheetUpper(workbook.knownSheets, rhs.sheet));
   }
 
   function resolveIndirectRange(refText, workbook, currentSheetUpper) {
@@ -417,24 +436,9 @@
         ? currentSheetUpper
         : resolveCanonicalSheetUpper(workbook.knownSheets, lhs.sheet);
     if (!sheetUpper) return valErr("#REF!");
-    if (colonSplit.parts.length === 1) {
-      return {
-        kind: "range",
-        sheetUpper,
-        minCol: lhs.col,
-        maxCol: lhs.col,
-        minRow: lhs.row,
-        maxRow: lhs.row,
-        cellCount: 1,
-      };
-    }
-    const rhs = parseIndirectEndpoint(colonSplit.parts[1]);
+    const rhs = colonSplit.parts.length === 1 ? lhs : parseIndirectEndpoint(colonSplit.parts[1]);
     if (!rhs.ok) return valErr("#REF!");
-    if (lhs.sheet === null && rhs.sheet !== null) return valErr("#REF!");
-    if (rhs.sheet !== null) {
-      if (!isSameSheetIdentityJs(lhs.sheet, rhs.sheet)) return valErr("#REF!");
-      if (!resolveCanonicalSheetUpper(workbook.knownSheets, rhs.sheet)) return valErr("#REF!");
-    }
+    if (rhs !== lhs && !isValidIndirectEndSheet(lhs, rhs, workbook)) return valErr("#REF!");
     const minCol = Math.min(lhs.col, rhs.col);
     const maxCol = Math.max(lhs.col, rhs.col);
     const minRow = Math.min(lhs.row, rhs.row);
@@ -476,6 +480,228 @@
     return valNum(a ** b);
   }
 
+  function ensureScalarIn(ec, v) {
+    if (v?.kind !== "range") return v;
+    if (v.minCol !== v.maxCol || v.minRow !== v.maxRow) return valErr("#VALUE!");
+    if (!v.sheetUpper) return valErr("#REF!");
+    return readWorkbookTypedCell(
+      ec.workbook,
+      v.sheetUpper,
+      colIndexToLetters(v.minCol) + v.minRow,
+      ec.depth
+    );
+  }
+
+  function evalIndirectCallIn(ec, args) {
+    if (args.length !== 1 && args.length !== 2) return valErr("#VALUE!");
+    const refVal = ensureScalarIn(ec, evalAstIn(ec, args[0]));
+    if (refVal.kind === "error") return refVal;
+    if (args.length === 2) {
+      const modeVal = ensureScalarIn(ec, evalAstIn(ec, args[1]));
+      if (modeVal.kind === "error") return modeVal;
+      if (coerceScalarBool(modeVal) !== true) return valErr("#VALUE!");
+    }
+    return resolveIndirectRange(formatFormulaValue(refVal), ec.workbook, ec.currentSheetUpper);
+  }
+
+  function evalChainIn(ec, node) {
+    const ops = [];
+    let cur = node;
+    while (isChainBinaryNode(cur)) {
+      ops.push(cur);
+      cur = cur.lhs;
+    }
+    let acc = ensureScalarIn(ec, evalAstIn(ec, cur));
+    if (acc.kind === "error") return acc;
+    for (let i = ops.length - 1; i >= 0; i -= 1) {
+      const step = ops[i];
+      const rhs = ensureScalarIn(ec, evalAstIn(ec, step.rhs));
+      if (rhs.kind === "error") return rhs;
+      acc = applyChainBinaryStep(step, acc, rhs);
+      if (acc.kind === "error") return acc;
+    }
+    return acc;
+  }
+
+  function evalRangeNodeIn(ec, node) {
+    const sheetUpper = validateRefTargetSheet(node, ec.workbook, ec.currentSheetUpper);
+    if (!sheetUpper) return valErr("#REF!");
+    return {
+      kind: "range",
+      sheetUpper,
+      minCol: node.minCol,
+      maxCol: node.maxCol,
+      minRow: node.minRow,
+      maxRow: node.maxRow,
+      cellCount: node.cellCount,
+    };
+  }
+
+  function evalUnaryIn(ec, node) {
+    const inner = ensureScalarIn(ec, evalAstIn(ec, node.expr));
+    if (inner.kind === "error") return inner;
+    const n = coerceScalarNumber(inner);
+    if (n === null) return valErr("#VALUE!");
+    if (node.op === "-") return valNum(-n);
+    if (node.op === "+") return valNum(n);
+    return valNum(n / 100);
+  }
+
+  function evalIfIn(ec, args) {
+    if (args.length < 2 || args.length > 3) return valErr("#VALUE!");
+    const cond = ensureScalarIn(ec, evalAstIn(ec, args[0]));
+    if (cond.kind === "error") return cond;
+    const flag = coerceScalarBool(cond);
+    if (flag === null) return valErr("#VALUE!");
+    if (flag) return ensureScalarIn(ec, evalAstIn(ec, args[1]));
+    if (args.length === 3) return ensureScalarIn(ec, evalAstIn(ec, args[2]));
+    return valBool(false);
+  }
+
+  function evalIfErrorIn(ec, args) {
+    if (args.length !== 2) return valErr("#VALUE!");
+    const primary = ensureScalarIn(ec, evalAstIn(ec, args[0]));
+    if (primary.kind === "error") return ensureScalarIn(ec, evalAstIn(ec, args[1]));
+    return primary;
+  }
+
+  // Shared target handling of ROW/COLUMN/ROWS/COLUMNS: reference nodes are inspected without
+  // evaluating them. `pick(shape)` maps a { minRow, maxRow, minCol, maxCol } shape to a number.
+  function evalReferenceInfoIn(ec, target, pick, cellShape) {
+    if (target.kind === "Error") return valErr(target.code);
+    if (target.kind === "Cell" || target.kind === "Range") {
+      if (!validateRefTargetSheet(target, ec.workbook, ec.currentSheetUpper)) {
+        return valErr("#REF!");
+      }
+      return valNum(pick(target.kind === "Cell" ? cellShape(target) : target));
+    }
+    if (target.kind === "FuncCall" && target.name === "INDIRECT") {
+      const ind = evalIndirectCallIn(ec, target.args);
+      return ind.kind === "error" ? ind : valNum(pick(ind));
+    }
+    return null;
+  }
+
+  function evalRowColumnIn(ec, fnUpper, args) {
+    const isRow = fnUpper === "ROW";
+    if (args.length === 0) {
+      if (!ec.currentSheetUpper) return valErr("#REF!");
+      const parts = parseCellRefParts(ec.currentCellRef || "A1");
+      return valNum(isRow ? parts.row : parts.col + 1);
+    }
+    if (args.length !== 1) return valErr("#VALUE!");
+    const info = evalReferenceInfoIn(
+      ec,
+      args[0],
+      (shape) => (isRow ? shape.minRow : shape.minCol + 1),
+      (cell) => ({ minRow: cell.row, minCol: cell.col })
+    );
+    return info ?? valErr("#VALUE!");
+  }
+
+  function evalRowsColumnsIn(ec, fnUpper, args) {
+    if (args.length !== 1) return valErr("#VALUE!");
+    const isRows = fnUpper === "ROWS";
+    const info = evalReferenceInfoIn(
+      ec,
+      args[0],
+      (shape) => (isRows ? shape.maxRow - shape.minRow + 1 : shape.maxCol - shape.minCol + 1),
+      () => ({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 })
+    );
+    if (info) return info;
+    const scalarTarget = ensureScalarIn(ec, evalAstIn(ec, args[0]));
+    return scalarTarget.kind === "error" ? scalarTarget : valNum(1);
+  }
+
+  function scalarAbs(args) {
+    const n = coerceScalarNumber(args[0]);
+    return n === null ? valErr("#VALUE!") : valNum(Math.abs(n));
+  }
+
+  function scalarRound(args) {
+    const n = coerceScalarNumber(args[0]);
+    const digits = args.length === 2 ? coerceScalarNumber(args[1]) : 0;
+    if (n === null || digits === null) return valErr("#VALUE!");
+    const factor = 10 ** Math.trunc(digits);
+    return valNum(Math.round(n * factor) / factor);
+  }
+
+  function scalarLen(args) {
+    return valNum(Array.from(formatFormulaValue(args[0])).length);
+  }
+
+  function scalarNot(args) {
+    const b = coerceScalarBool(args[0]);
+    return b === null ? valErr("#VALUE!") : valBool(!b);
+  }
+
+  // Scalar functions: [min arity, max arity, implementation].
+  const SCALAR_FUNCTIONS = new Map([
+    ["ABS", [1, 1, scalarAbs]],
+    ["ROUND", [1, 2, scalarRound]],
+    ["LEN", [1, 1, scalarLen]],
+    ["NOT", [1, 1, scalarNot]],
+  ]);
+
+  function evalScalarFunction(fnUpper, scalarArgs) {
+    const spec = SCALAR_FUNCTIONS.get(fnUpper);
+    if (!spec) return valErr("#NAME?");
+    const [minArity, maxArity, impl] = spec;
+    if (scalarArgs.length < minArity || scalarArgs.length > maxArity) return valErr("#NAME?");
+    return impl(scalarArgs);
+  }
+
+  // Functions that need their unevaluated argument nodes (lazy / reference semantics).
+  const SPECIAL_FORM_HANDLERS = new Map([
+    ["INDIRECT", (ec, _fn, args) => evalIndirectCallIn(ec, args)],
+    ["IF", (ec, _fn, args) => evalIfIn(ec, args)],
+    ["IFERROR", (ec, _fn, args) => evalIfErrorIn(ec, args)],
+    ["ROW", evalRowColumnIn],
+    ["COLUMN", evalRowColumnIn],
+    ["ROWS", evalRowsColumnsIn],
+    ["COLUMNS", evalRowsColumnsIn],
+  ]);
+
+  function evalFuncCallIn(ec, node) {
+    const fnUpper = node.name;
+    const args = node.args;
+    const specialForm = SPECIAL_FORM_HANDLERS.get(fnUpper);
+    if (specialForm) return specialForm(ec, fnUpper, args);
+    const evaluatedArgs = args.map((arg) => evalAstIn(ec, arg));
+    if (AGGREGATE_FN_SET.has(fnUpper)) {
+      return evalAggregateFunction(fnUpper, evaluatedArgs, ec.workbook, ec.depth);
+    }
+    const isLogical = fnUpper === "AND" || fnUpper === "OR" || fnUpper === "XOR";
+    if (isLogical && evaluatedArgs.length >= 1) {
+      return evalLogicalFunction(fnUpper, evaluatedArgs, ec.workbook, ec.depth);
+    }
+    const scalarArgs = [];
+    for (const evalArg of evaluatedArgs) {
+      const sv = ensureScalarIn(ec, evalArg);
+      if (sv.kind === "error") return sv;
+      scalarArgs.push(sv);
+    }
+    return evalScalarFunction(fnUpper, scalarArgs);
+  }
+
+  function evalAstIn(ec, node) {
+    if (!node || node.kind === "Empty") return valEmpty();
+    if (isChainBinaryNode(node)) return evalChainIn(ec, node);
+    if (node.kind === "Number") return valNum(node.value);
+    if (node.kind === "Str") return valText(node.value);
+    if (node.kind === "Bool") return valBool(node.value);
+    if (node.kind === "Error") return valErr(node.code);
+    if (node.kind === "Cell") {
+      const sheetUpper = validateRefTargetSheet(node, ec.workbook, ec.currentSheetUpper);
+      if (!sheetUpper) return valErr("#REF!");
+      return readWorkbookTypedCell(ec.workbook, sheetUpper, node.ref, ec.depth);
+    }
+    if (node.kind === "Range") return evalRangeNodeIn(ec, node);
+    if (node.kind === "Unary") return evalUnaryIn(ec, node);
+    if (node.kind === "FuncCall") return evalFuncCallIn(ec, node);
+    return valErr("#VALUE!");
+  }
+
   function evaluateFormulaTyped(exprStr, workbook, currentSheetUpper, currentCellRef, depth = 0) {
     if (depth > 64) {
       if (workbook) workbook.depthTruncated = true;
@@ -484,204 +710,8 @@
     const parsed = parseFormulaAstJs(exprStr);
     if (parsed.kind === "Plain") return parsePlainCellTyped(parsed.raw);
     if (parsed.kind === "FormulaError") return valErr(parsed.code);
-
-    function ensureScalar(v) {
-      if (v?.kind === "range") {
-        if (v.minCol === v.maxCol && v.minRow === v.maxRow) {
-          if (!v.sheetUpper) return valErr("#REF!");
-          return readWorkbookTypedCell(
-            workbook,
-            v.sheetUpper,
-            colIndexToLetters(v.minCol) + v.minRow,
-            depth
-          );
-        }
-        return valErr("#VALUE!");
-      }
-      return v;
-    }
-
-    function evalIndirectCall(args) {
-      if (args.length !== 1 && args.length !== 2) return valErr("#VALUE!");
-      const refVal = ensureScalar(evalAst(args[0]));
-      if (refVal.kind === "error") return refVal;
-      if (args.length === 2) {
-        const modeVal = ensureScalar(evalAst(args[1]));
-        if (modeVal.kind === "error") return modeVal;
-        const a1Flag = coerceScalarBool(modeVal);
-        if (a1Flag !== true) return valErr("#VALUE!");
-      }
-      return resolveIndirectRange(formatFormulaValue(refVal), workbook, currentSheetUpper);
-    }
-
-    function evalAst(node) {
-      if (!node || node.kind === "Empty") return valEmpty();
-      if (isChainBinaryNode(node)) {
-        const ops = [];
-        let cur = node;
-        while (isChainBinaryNode(cur)) {
-          ops.push(cur);
-          cur = cur.lhs;
-        }
-        let acc = ensureScalar(evalAst(cur));
-        if (acc.kind === "error") return acc;
-        for (let i = ops.length - 1; i >= 0; i -= 1) {
-          const step = ops[i];
-          const rhs = ensureScalar(evalAst(step.rhs));
-          if (rhs.kind === "error") return rhs;
-          acc = applyChainBinaryStep(step, acc, rhs);
-          if (acc.kind === "error") return acc;
-        }
-        return acc;
-      }
-      if (node.kind === "Number") return valNum(node.value);
-      if (node.kind === "Str") return valText(node.value);
-      if (node.kind === "Bool") return valBool(node.value);
-      if (node.kind === "Error") return valErr(node.code);
-      if (node.kind === "Cell") {
-        const sheetUpper = validateRefTargetSheet(node, workbook, currentSheetUpper);
-        if (!sheetUpper) return valErr("#REF!");
-        return readWorkbookTypedCell(workbook, sheetUpper, node.ref, depth);
-      }
-      if (node.kind === "Range") {
-        const sheetUpper = validateRefTargetSheet(node, workbook, currentSheetUpper);
-        if (!sheetUpper) return valErr("#REF!");
-        return {
-          kind: "range",
-          sheetUpper,
-          minCol: node.minCol,
-          maxCol: node.maxCol,
-          minRow: node.minRow,
-          maxRow: node.maxRow,
-          cellCount: node.cellCount,
-        };
-      }
-      if (node.kind === "Unary") {
-        const inner = ensureScalar(evalAst(node.expr));
-        if (inner.kind === "error") return inner;
-        const n = coerceScalarNumber(inner);
-        if (n === null) return valErr("#VALUE!");
-        if (node.op === "-") return valNum(-n);
-        if (node.op === "+") return valNum(n);
-        return valNum(n / 100);
-      }
-      if (node.kind === "FuncCall") {
-        const fnUpper = node.name;
-        const args = node.args;
-        if (fnUpper === "INDIRECT") {
-          return evalIndirectCall(args);
-        }
-        if (fnUpper === "IF") {
-          if (args.length < 2 || args.length > 3) return valErr("#VALUE!");
-          const cond = ensureScalar(evalAst(args[0]));
-          if (cond.kind === "error") return cond;
-          const flag = coerceScalarBool(cond);
-          if (flag === null) return valErr("#VALUE!");
-          if (flag) return ensureScalar(evalAst(args[1]));
-          if (args.length === 3) return ensureScalar(evalAst(args[2]));
-          return valBool(false);
-        }
-        if (fnUpper === "IFERROR") {
-          if (args.length !== 2) return valErr("#VALUE!");
-          const primary = ensureScalar(evalAst(args[0]));
-          if (primary.kind === "error") return ensureScalar(evalAst(args[1]));
-          return primary;
-        }
-        if (fnUpper === "ROW" || fnUpper === "COLUMN") {
-          if (args.length === 0) {
-            if (!currentSheetUpper) return valErr("#REF!");
-            const parts = parseCellRefParts(currentCellRef || "A1");
-            return valNum(fnUpper === "ROW" ? parts.row : parts.col + 1);
-          }
-          if (args.length !== 1) return valErr("#VALUE!");
-          const target = args[0];
-          if (target.kind === "Error") return valErr(target.code);
-          if (target.kind === "Cell") {
-            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
-            return valNum(fnUpper === "ROW" ? target.row : target.col + 1);
-          }
-          if (target.kind === "Range") {
-            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
-            return valNum(fnUpper === "ROW" ? target.minRow : target.minCol + 1);
-          }
-          if (target.kind === "FuncCall" && target.name === "INDIRECT") {
-            const ind = evalIndirectCall(target.args);
-            if (ind.kind === "error") return ind;
-            return valNum(fnUpper === "ROW" ? ind.minRow : ind.minCol + 1);
-          }
-          return valErr("#VALUE!");
-        }
-        if (fnUpper === "ROWS" || fnUpper === "COLUMNS") {
-          if (args.length !== 1) return valErr("#VALUE!");
-          const target = args[0];
-          if (target.kind === "Error") return valErr(target.code);
-          if (target.kind === "Cell") {
-            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
-            return valNum(1);
-          }
-          if (target.kind === "Range") {
-            if (!validateRefTargetSheet(target, workbook, currentSheetUpper)) return valErr("#REF!");
-            const span =
-              fnUpper === "ROWS"
-                ? target.maxRow - target.minRow + 1
-                : target.maxCol - target.minCol + 1;
-            return valNum(span);
-          }
-          if (target.kind === "FuncCall" && target.name === "INDIRECT") {
-            const ind = evalIndirectCall(target.args);
-            if (ind.kind === "error") return ind;
-            const span =
-              fnUpper === "ROWS"
-                ? ind.maxRow - ind.minRow + 1
-                : ind.maxCol - ind.minCol + 1;
-            return valNum(span);
-          }
-          const scalarTarget = ensureScalar(evalAst(target));
-          if (scalarTarget.kind === "error") return scalarTarget;
-          return valNum(1);
-        }
-        const evaluatedArgs = [];
-        for (const arg of args) {
-          evaluatedArgs.push(evalAst(arg));
-        }
-        if (AGGREGATE_FN_SET.has(fnUpper)) {
-          return evalAggregateFunction(fnUpper, evaluatedArgs, workbook, depth);
-        }
-        if ((fnUpper === "AND" || fnUpper === "OR" || fnUpper === "XOR") && evaluatedArgs.length >= 1) {
-          return evalLogicalFunction(fnUpper, evaluatedArgs, workbook, depth);
-        }
-        const scalarArgs = [];
-        for (const evalArg of evaluatedArgs) {
-          const sv = ensureScalar(evalArg);
-          if (sv.kind === "error") return sv;
-          scalarArgs.push(sv);
-        }
-        if (fnUpper === "ABS" && scalarArgs.length === 1) {
-          const n = coerceScalarNumber(scalarArgs[0]);
-          if (n === null) return valErr("#VALUE!");
-          return valNum(Math.abs(n));
-        }
-        if (fnUpper === "ROUND" && (scalarArgs.length === 1 || scalarArgs.length === 2)) {
-          const n = coerceScalarNumber(scalarArgs[0]);
-          const digits = scalarArgs.length === 2 ? coerceScalarNumber(scalarArgs[1]) : 0;
-          if (n === null || digits === null) return valErr("#VALUE!");
-          const factor = 10 ** Math.trunc(digits);
-          return valNum(Math.round(n * factor) / factor);
-        }
-        if (fnUpper === "LEN" && scalarArgs.length === 1) {
-          return valNum(Array.from(formatFormulaValue(scalarArgs[0])).length);
-        }
-        if (fnUpper === "NOT" && scalarArgs.length === 1) {
-          const b = coerceScalarBool(scalarArgs[0]);
-          if (b === null) return valErr("#VALUE!");
-          return valBool(!b);
-        }
-        return valErr("#NAME?");
-      }
-      return valErr("#VALUE!");
-    }
-
-    return ensureScalar(evalAst(parsed.root));
+    const ec = { workbook, currentSheetUpper, currentCellRef, depth };
+    return ensureScalarIn(ec, evalAstIn(ec, parsed.root));
   }
 
   function evaluateFormulaExpression(exprStr, workbook, currentSheetUpper, currentCellRef) {

@@ -131,6 +131,47 @@ pub const CANONICAL_122_FUNCTIONS: [&str; 122] = [
     "ISODD",
 ];
 
+/// The numeric values among `vals`.
+fn numeric_values(vals: &[EvaluatedCellValue]) -> Vec<f64> {
+    vals.iter()
+        .filter_map(|v| match v {
+            EvaluatedCellValue::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect()
+}
+
+/// MODE: most frequent value (ties go to the earliest); `#N/A` when nothing repeats.
+fn mode_of(nums: &[f64]) -> Result<EvaluatedCellValue, FormulaError> {
+    if nums.is_empty() {
+        return Err(FormulaError::Na);
+    }
+    let mut counts: std::collections::HashMap<u64, (usize, usize, f64)> =
+        std::collections::HashMap::with_capacity(nums.len());
+    for (idx, &x) in nums.iter().enumerate() {
+        let key = if x == 0.0 {
+            0.0f64.to_bits()
+        } else {
+            x.to_bits()
+        };
+        counts.entry(key).or_insert((0, idx, x)).0 += 1;
+    }
+    let mut best_val = nums[0];
+    let mut best_cnt = 0usize;
+    let mut best_idx = usize::MAX;
+    for &(cnt, first_idx, val) in counts.values() {
+        if cnt > best_cnt || (cnt == best_cnt && first_idx < best_idx) {
+            best_cnt = cnt;
+            best_idx = first_idx;
+            best_val = val;
+        }
+    }
+    if best_cnt < 2 {
+        return Err(FormulaError::Na);
+    }
+    Ok(EvaluatedCellValue::Number(best_val))
+}
+
 impl SheetEngine {
     /// Returns the slice of all 122 canonical built-in spreadsheet function names.
     pub fn supported_function_names() -> &'static [&'static str] {
@@ -298,36 +339,7 @@ impl SheetEngine {
                 };
                 Ok(EvaluatedCellValue::Number(med))
             }
-            "MODE" | "MODE.SNGL" => {
-                if nums.is_empty() {
-                    return Err(FormulaError::Na);
-                }
-                let mut counts: std::collections::HashMap<u64, (usize, usize, f64)> =
-                    std::collections::HashMap::with_capacity(nums.len());
-                for (idx, &x) in nums.iter().enumerate() {
-                    let key = if x == 0.0 {
-                        0.0f64.to_bits()
-                    } else {
-                        x.to_bits()
-                    };
-                    let entry = counts.entry(key).or_insert((0, idx, x));
-                    entry.0 += 1;
-                }
-                let mut best_val = nums[0];
-                let mut best_cnt = 0usize;
-                let mut best_idx = usize::MAX;
-                for &(cnt, first_idx, val) in counts.values() {
-                    if cnt > best_cnt || (cnt == best_cnt && first_idx < best_idx) {
-                        best_cnt = cnt;
-                        best_idx = first_idx;
-                        best_val = val;
-                    }
-                }
-                if best_cnt < 2 {
-                    return Err(FormulaError::Na);
-                }
-                Ok(EvaluatedCellValue::Number(best_val))
-            }
+            "MODE" | "MODE.SNGL" => mode_of(&nums),
             _ => Err(FormulaError::Name),
         }
     }
@@ -340,92 +352,102 @@ impl SheetEngine {
         depth: usize,
     ) -> Result<EvaluatedCellValue, FormulaError> {
         match name {
-            "SMALL" | "LARGE" => {
-                if args.len() != 2 {
-                    return Err(FormulaError::Value);
-                }
-                let vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let k = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
-                let mut nums: Vec<f64> = vals
-                    .iter()
-                    .filter_map(|v| match v {
-                        EvaluatedCellValue::Number(n) => Some(*n),
-                        _ => None,
-                    })
-                    .collect();
-                if k < 1 || (k as usize) > nums.len() {
-                    return Err(FormulaError::Num);
-                }
-                nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                let idx = if name == "SMALL" {
-                    (k as usize) - 1
-                } else {
-                    nums.len() - (k as usize)
-                };
-                Ok(EvaluatedCellValue::Number(nums[idx]))
-            }
-            "RANK" => {
-                if args.len() < 2 || args.len() > 3 {
-                    return Err(FormulaError::Value);
-                }
-                let target = self.eval_arg_num(&args[0], ctx, depth)?;
-                let order = if args.len() == 3 {
-                    self.eval_arg_num(&args[2], ctx, depth)?.trunc() as i32
-                } else {
-                    0
-                };
-                let mut found = false;
-                let mut better_count = 0usize;
-                self.visit_args_streaming(std::slice::from_ref(&args[1]), ctx, depth, |v| {
-                    if let EvaluatedCellValue::Number(x) = v {
-                        if x == target {
-                            found = true;
-                        } else if (order == 0 && x > target) || (order != 0 && x < target) {
-                            better_count += 1;
-                        }
-                    }
-                    Ok(())
-                })?;
-                if !found {
-                    return Err(FormulaError::Na);
-                }
-                Ok(EvaluatedCellValue::Number((better_count + 1) as f64))
-            }
-            _ => {
-                if args.len() != 2 {
-                    return Err(FormulaError::Value);
-                }
-                let vals = self.eval_range_vec(&args[0], ctx, depth)?;
-                let param = self.eval_arg_num(&args[1], ctx, depth)?;
-                let p = if name == "QUARTILE" || name == "QUARTILE.INC" {
-                    let q = param.trunc() as i32;
-                    if !(0..=4).contains(&q) {
-                        return Err(FormulaError::Num);
-                    }
-                    (q as f64) * 0.25
-                } else if (0.0..=1.0).contains(&param) {
-                    param
-                } else {
-                    return Err(FormulaError::Num);
-                };
-                let mut nums: Vec<f64> = vals
-                    .iter()
-                    .filter_map(|v| match v {
-                        EvaluatedCellValue::Number(n) => Some(*n),
-                        _ => None,
-                    })
-                    .collect();
-                if nums.is_empty() {
-                    return Err(FormulaError::Num);
-                }
-                nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                let pos = p * ((nums.len() - 1) as f64);
-                let lo = pos.floor() as usize;
-                let hi = pos.ceil() as usize;
-                Ok(EvaluatedCellValue::Number(
-                    nums[lo] + (pos - lo as f64) * (nums[hi] - nums[lo]),
-                ))
-            }
+            "SMALL" | "LARGE" => self.stat_small_large(name == "SMALL", args, ctx, depth),
+            "RANK" => self.stat_rank(args, ctx, depth),
+            _ => self.stat_percentile(name, args, ctx, depth),
         }
+    }
+
+    fn stat_small_large(
+        &self,
+        is_small: bool,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() != 2 {
+            return Err(FormulaError::Value);
+        }
+        let vals = self.eval_range_vec(&args[0], ctx, depth)?;
+        let k = self.eval_arg_num(&args[1], ctx, depth)?.trunc() as isize;
+        let mut nums = numeric_values(&vals);
+        if k < 1 || (k as usize) > nums.len() {
+            return Err(FormulaError::Num);
+        }
+        nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let idx = if is_small {
+            (k as usize) - 1
+        } else {
+            nums.len() - (k as usize)
+        };
+        Ok(EvaluatedCellValue::Number(nums[idx]))
+    }
+
+    fn stat_rank(
+        &self,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() < 2 || args.len() > 3 {
+            return Err(FormulaError::Value);
+        }
+        let target = self.eval_arg_num(&args[0], ctx, depth)?;
+        let order = match args.get(2) {
+            Some(arg) => self.eval_arg_num(arg, ctx, depth)?.trunc() as i32,
+            None => 0,
+        };
+        let mut found = false;
+        let mut better_count = 0usize;
+        self.visit_args_streaming(std::slice::from_ref(&args[1]), ctx, depth, |v| {
+            if let EvaluatedCellValue::Number(x) = v {
+                if x == target {
+                    found = true;
+                } else if (order == 0 && x > target) || (order != 0 && x < target) {
+                    better_count += 1;
+                }
+            }
+            Ok(())
+        })?;
+        if !found {
+            return Err(FormulaError::Na);
+        }
+        Ok(EvaluatedCellValue::Number((better_count + 1) as f64))
+    }
+
+    fn stat_percentile(
+        &self,
+        name: &str,
+        args: &[Expr],
+        ctx: &mut EvalContext<'_>,
+        depth: usize,
+    ) -> Result<EvaluatedCellValue, FormulaError> {
+        if args.len() != 2 {
+            return Err(FormulaError::Value);
+        }
+        let vals = self.eval_range_vec(&args[0], ctx, depth)?;
+        let param = self.eval_arg_num(&args[1], ctx, depth)?;
+        let p = if name == "QUARTILE" || name == "QUARTILE.INC" {
+            let q = param.trunc() as i32;
+            if !(0..=4).contains(&q) {
+                return Err(FormulaError::Num);
+            }
+            (q as f64) * 0.25
+        } else if (0.0..=1.0).contains(&param) {
+            param
+        } else {
+            return Err(FormulaError::Num);
+        };
+        let mut nums = numeric_values(&vals);
+        if nums.is_empty() {
+            return Err(FormulaError::Num);
+        }
+        nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let pos = p * ((nums.len() - 1) as f64);
+        let lo = pos.floor() as usize;
+        let hi = pos.ceil() as usize;
+        Ok(EvaluatedCellValue::Number(
+            nums[lo] + (pos - lo as f64) * (nums[hi] - nums[lo]),
+        ))
     }
 }

@@ -311,148 +311,159 @@ test("offline AST parser and evaluator enforce lazy IF/IFERROR, strict A1 bounds
   assert.deepEqual(largeMinMaxRes.targetValues, ["1", "70000"]);
 });
 
+function createRibbonBackendMock() {
+  const mock = {
+    failSheetEval: false,
+    failSmartStats: false,
+    failSecurityAudit: false,
+    executeRibbonCalls: 0,
+    undoRibbonCalls: 0,
+    redoRibbonCalls: 0,
+    backendUndoStack: [],
+    backendRedoStack: [],
+    backendIsBold: false,
+    deferredReviewCategoryResolve: null,
+  };
+  const handlers = {
+    get_workspace_bootstrap: (args) => {
+      return {
+        platform: "Windows",
+        shortcutModifier: "Ctrl",
+        recentFormatFilters: ["전체"],
+        openTabs: [],
+      };
+    },
+    get_ribbon_category_commands: (args) => {
+      const payload = String(args.payload || "");
+      const isInsertCategory =
+        payload.endsWith("|insert") ||
+        (payload.startsWith("{") && JSON.parse(payload).category === "insert");
+      if (isInsertCategory) {
+        return new Promise((resolve) => {
+          mock.deferredReviewCategoryResolve = () =>
+            resolve({
+              commands: [{ id: "sheet-insert-table", title: "지연된 표 삽입", shortcut: "Ctrl+T" }],
+            });
+        });
+      }
+      return {
+        commands: [
+          { id: "sheet-home-bold", title: "굵게", shortcut: "Ctrl+B" },
+          { id: "sheet-data-autosum", title: "자동 합계 (SUM)", shortcut: "Alt+=" },
+          { id: "sheet-data-validation", title: "데이터 유효성 검사", shortcut: "Alt+V" },
+          { id: "sheet-review-verify", title: "문서 구조 보안 검사", shortcut: "Ctrl+Shift+V" },
+          { id: "sheet-review-stats", title: "문서 통계·글자 수", shortcut: "Ctrl+Shift+I" },
+        ],
+      };
+    },
+    audit_security: (args) => {
+      if (mock.failSecurityAudit) {
+        return Promise.reject(new Error("SecurityViolation: 허용되지 않은 엔티티"));
+      }
+      return { status: "SAFE" };
+    },
+    execute_ribbon_command: (args) => {
+      mock.executeRibbonCalls += 1;
+      const cmdId = String(JSON.parse(args.payload).commandId || "");
+      const prevBold = mock.backendIsBold;
+      if (cmdId.endsWith("-home-bold")) {
+        mock.backendIsBold = !mock.backendIsBold;
+      }
+      mock.backendUndoStack.push({ cmdId, prevBold, nextBold: mock.backendIsBold });
+      mock.backendRedoStack.length = 0;
+      return { commandId: cmdId, summary: cmdId + " 실행됨", isBold: mock.backendIsBold };
+    },
+    undo_ribbon_command: (args) => {
+      mock.undoRibbonCalls += 1;
+      const entry = mock.backendUndoStack.pop();
+      if (!entry) {
+        return Promise.reject(new Error("backend undo stack empty"));
+      }
+      mock.backendIsBold = entry.prevBold;
+      mock.backendRedoStack.push(entry);
+      return { commandId: "undo", summary: "실행 취소 완료", isBold: mock.backendIsBold };
+    },
+    redo_ribbon_command: (args) => {
+      mock.redoRibbonCalls += 1;
+      const entry = mock.backendRedoStack.pop();
+      if (!entry) {
+        return Promise.reject(new Error("backend redo stack empty"));
+      }
+      mock.backendIsBold = entry.nextBold;
+      mock.backendUndoStack.push(entry);
+      return { commandId: "redo", summary: "다시 실행 완료", isBold: mock.backendIsBold };
+    },
+    run_smart_assistant: (args) => {
+      if (mock.failSmartStats) {
+        return Promise.reject(new Error("smart assistant offline"));
+      }
+      return {
+        charCount: 10,
+        wordCount: 2,
+        sentenceCount: 1,
+        readingTimeSeconds: 1,
+        summaryCount: 1,
+        actionItemCount: 0,
+        suggestionCount: 0,
+        summaryLines: ["요약"],
+        actionItems: [],
+      };
+    },
+    scrub_pii: (args) => {
+      const text = String(args.payload || "");
+      if (text.includes("010-1234-5678")) {
+        return {
+          scrubbedText: text.replaceAll("010-1234-5678", "010-****-****"),
+          totalMasked: 1,
+        };
+      }
+      return { scrubbedText: text, totalMasked: 0 };
+    },
+    evaluate_sheet: (args) => {
+      if (mock.failSheetEval) {
+        return Promise.reject(new Error("sheet engine offline"));
+      }
+      const req = JSON.parse(args.payload);
+      const targetValues = (req.targets || []).map((t) => {
+        if (t.cell === "F2") {
+          const f2Cell = (req.cells || []).find(
+            (c) => c.sheet === "Sheet1" && c.cell === "F2"
+          );
+          if (f2Cell?.value === "=B2+100") return "1250";
+          if (f2Cell?.value === "=B2+999") return "2149";
+          return "4950";
+        }
+        if (t.cell === "A9") {
+          const a9Cell = (req.cells || []).find(
+            (c) => c.sheet === "Sheet1" && c.cell === "A9"
+          );
+          if (a9Cell?.value.includes("010-****-****")) {
+            return "연락처 010-****-****";
+          }
+          return "연락처 010-1234-5678";
+        }
+        return "17890";
+      });
+      return {
+        query: req.targets?.[0]?.cell || "F2",
+        value: targetValues[0] || "4950",
+        values: {},
+        targetValues,
+      };
+    },
+  };
+  mock.invoke = (command, args) => {
+    const handler = handlers[command];
+    return handler ? handler(args) : { status: "ok" };
+  };
+  return mock;
+}
+
 test("failed ribbon async prep (autosum, smart stats, security audit) preserves backend redo stack and renderRibbonCategoryTools discards stale out-of-order responses", async () => {
-  let failSheetEval = false;
-  let failSmartStats = false;
-  let failSecurityAudit = false;
-  let executeRibbonCalls = 0;
-  let undoRibbonCalls = 0;
-  let redoRibbonCalls = 0;
-  const backendUndoStack = [];
-  const backendRedoStack = [];
-  let backendIsBold = false;
-  let deferredReviewCategoryResolve = null;
+  const mock = createRibbonBackendMock();
 
   const { document, sandbox, userClick } = await createWorkspaceHarness({
-    tauriInvoke: (command, args) => {
-      if (command === "get_workspace_bootstrap") {
-        return {
-          platform: "Windows",
-          shortcutModifier: "Ctrl",
-          recentFormatFilters: ["전체"],
-          openTabs: [],
-        };
-      }
-      if (command === "get_ribbon_category_commands") {
-        const payload = String(args.payload || "");
-        const isInsertCategory =
-          payload.endsWith("|insert") ||
-          (payload.startsWith("{") && JSON.parse(payload).category === "insert");
-        if (isInsertCategory) {
-          return new Promise((resolve) => {
-            deferredReviewCategoryResolve = () =>
-              resolve({
-                commands: [{ id: "sheet-insert-table", title: "지연된 표 삽입", shortcut: "Ctrl+T" }],
-              });
-          });
-        }
-        return {
-          commands: [
-            { id: "sheet-home-bold", title: "굵게", shortcut: "Ctrl+B" },
-            { id: "sheet-data-autosum", title: "자동 합계 (SUM)", shortcut: "Alt+=" },
-            { id: "sheet-data-validation", title: "데이터 유효성 검사", shortcut: "Alt+V" },
-            { id: "sheet-review-verify", title: "문서 구조 보안 검사", shortcut: "Ctrl+Shift+V" },
-            { id: "sheet-review-stats", title: "문서 통계·글자 수", shortcut: "Ctrl+Shift+I" },
-          ],
-        };
-      }
-      if (command === "audit_security") {
-        if (failSecurityAudit) {
-          return Promise.reject(new Error("SecurityViolation: 허용되지 않은 엔티티"));
-        }
-        return { status: "SAFE" };
-      }
-      if (command === "execute_ribbon_command") {
-        executeRibbonCalls += 1;
-        const cmdId = String(JSON.parse(args.payload).commandId || "");
-        const prevBold = backendIsBold;
-        if (cmdId.endsWith("-home-bold")) {
-          backendIsBold = !backendIsBold;
-        }
-        backendUndoStack.push({ cmdId, prevBold, nextBold: backendIsBold });
-        backendRedoStack.length = 0;
-        return { commandId: cmdId, summary: cmdId + " 실행됨", isBold: backendIsBold };
-      }
-      if (command === "undo_ribbon_command") {
-        undoRibbonCalls += 1;
-        const entry = backendUndoStack.pop();
-        if (!entry) {
-          return Promise.reject(new Error("backend undo stack empty"));
-        }
-        backendIsBold = entry.prevBold;
-        backendRedoStack.push(entry);
-        return { commandId: "undo", summary: "실행 취소 완료", isBold: backendIsBold };
-      }
-      if (command === "redo_ribbon_command") {
-        redoRibbonCalls += 1;
-        const entry = backendRedoStack.pop();
-        if (!entry) {
-          return Promise.reject(new Error("backend redo stack empty"));
-        }
-        backendIsBold = entry.nextBold;
-        backendUndoStack.push(entry);
-        return { commandId: "redo", summary: "다시 실행 완료", isBold: backendIsBold };
-      }
-      if (command === "run_smart_assistant") {
-        if (failSmartStats) {
-          return Promise.reject(new Error("smart assistant offline"));
-        }
-        return {
-          charCount: 10,
-          wordCount: 2,
-          sentenceCount: 1,
-          readingTimeSeconds: 1,
-          summaryCount: 1,
-          actionItemCount: 0,
-          suggestionCount: 0,
-          summaryLines: ["요약"],
-          actionItems: [],
-        };
-      }
-      if (command === "scrub_pii") {
-        const text = String(args.payload || "");
-        if (text.includes("010-1234-5678")) {
-          return {
-            scrubbedText: text.replaceAll("010-1234-5678", "010-****-****"),
-            totalMasked: 1,
-          };
-        }
-        return { scrubbedText: text, totalMasked: 0 };
-      }
-      if (command === "evaluate_sheet") {
-        if (failSheetEval) {
-          return Promise.reject(new Error("sheet engine offline"));
-        }
-        const req = JSON.parse(args.payload);
-        const targetValues = (req.targets || []).map((t) => {
-          if (t.cell === "F2") {
-            const f2Cell = (req.cells || []).find(
-              (c) => c.sheet === "Sheet1" && c.cell === "F2"
-            );
-            if (f2Cell?.value === "=B2+100") return "1250";
-            if (f2Cell?.value === "=B2+999") return "2149";
-            return "4950";
-          }
-          if (t.cell === "A9") {
-            const a9Cell = (req.cells || []).find(
-              (c) => c.sheet === "Sheet1" && c.cell === "A9"
-            );
-            if (a9Cell?.value.includes("010-****-****")) {
-              return "연락처 010-****-****";
-            }
-            return "연락처 010-1234-5678";
-          }
-          return "17890";
-        });
-        return {
-          query: req.targets?.[0]?.cell || "F2",
-          value: targetValues[0] || "4950",
-          values: {},
-          targetValues,
-        };
-      }
-      return { status: "ok" };
-    },
+    tauriInvoke: (command, args) => mock.invoke(command, args),
   });
 
   switchModule(document, "SHEET");
@@ -465,8 +476,8 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   userClick(homeCatBtn);
   await flushAsyncTurns(6);
   assert.ok(document.querySelector('[data-command-id="sheet-home-bold"]'));
-  if (deferredReviewCategoryResolve) {
-    deferredReviewCategoryResolve();
+  if (mock.deferredReviewCategoryResolve) {
+    mock.deferredReviewCategoryResolve();
     await flushAsyncTurns(6);
   }
   assert.equal(document.querySelector('[data-command-id="sheet-insert-table"]'), null);
@@ -485,55 +496,55 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   userClick(boldBtn);
   await flushAsyncTurns(10);
   assert.equal(f2.style.fontWeight, "600");
-  assert.equal(executeRibbonCalls, 1);
+  assert.equal(mock.executeRibbonCalls, 1);
 
   sandbox.dispatchWindowKeydown({ key: "z", ctrlKey: true });
   await flushAsyncTurns(10);
   assert.equal(f2.style.fontWeight, "");
-  assert.equal(undoRibbonCalls, 1);
-  assert.equal(backendRedoStack.length, 1);
+  assert.equal(mock.undoRibbonCalls, 1);
+  assert.equal(mock.backendRedoStack.length, 1);
 
-  failSheetEval = true;
+  mock.failSheetEval = true;
   formulaInput.value = "=B2+999";
   userClick(autosumBtn);
   await flushAsyncTurns(10);
 
   assert.equal(f2.dataset.formula, "=SUM(B2:E2)");
   assert.equal(f2.textContent, "4950");
-  assert.equal(executeRibbonCalls, 1);
-  assert.equal(undoRibbonCalls, 1);
-  assert.equal(backendRedoStack.length, 1);
+  assert.equal(mock.executeRibbonCalls, 1);
+  assert.equal(mock.undoRibbonCalls, 1);
+  assert.equal(mock.backendRedoStack.length, 1);
   assert.match(feedback.textContent, /^\[요청 거부\].*sheet engine offline/);
 
-  failSmartStats = true;
+  mock.failSmartStats = true;
   userClick(statsBtn);
   await flushAsyncTurns(10);
-  assert.equal(executeRibbonCalls, 1);
-  assert.equal(backendRedoStack.length, 1);
+  assert.equal(mock.executeRibbonCalls, 1);
+  assert.equal(mock.backendRedoStack.length, 1);
   assert.match(feedback.textContent, /^\[요청 거부\].*smart assistant offline/);
-  failSmartStats = false;
+  mock.failSmartStats = false;
 
-  failSecurityAudit = true;
+  mock.failSecurityAudit = true;
   userClick(verifyBtn);
   await flushAsyncTurns(10);
-  assert.equal(executeRibbonCalls, 1);
-  assert.equal(backendRedoStack.length, 1);
+  assert.equal(mock.executeRibbonCalls, 1);
+  assert.equal(mock.backendRedoStack.length, 1);
   assert.match(feedback.textContent, /^\[요청 거부\].*SecurityViolation/);
   assert.match(secStatus.textContent, /^\[요청 거부\].*SecurityViolation/);
 
   userClick(dataValBtn);
   await flushAsyncTurns(10);
-  assert.equal(executeRibbonCalls, 1);
-  assert.equal(backendRedoStack.length, 1);
+  assert.equal(mock.executeRibbonCalls, 1);
+  assert.equal(mock.backendRedoStack.length, 1);
   assert.match(feedback.textContent, /^\[요청 거부\].*SecurityViolation/);
-  failSecurityAudit = false;
+  mock.failSecurityAudit = false;
 
   sandbox.dispatchWindowKeydown({ key: "y", ctrlKey: true });
   await flushAsyncTurns(10);
-  assert.equal(redoRibbonCalls, 1);
+  assert.equal(mock.redoRibbonCalls, 1);
   assert.equal(f2.style.fontWeight, "600");
 
-  failSheetEval = false;
+  mock.failSheetEval = false;
   formulaInput.value = "=B2+100";
   userClick(document.getElementById("btn-eval-formula"));
   await flushAsyncTurns(10);
@@ -555,14 +566,14 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
   await flushAsyncTurns();
   assert.equal(a9.textContent, "연락처 010-1234-5678");
 
-  failSheetEval = true;
+  mock.failSheetEval = true;
   userClick(document.getElementById("btn-scrub-pii"));
   await flushAsyncTurns(10);
   assert.equal(a8.textContent, "직통 010-1234-5678");
   assert.equal(a9.dataset.formula, '="연락처 010-1234-5678"');
   assert.match(feedback.textContent, /^\[요청 거부\].*sheet engine offline/);
 
-  failSheetEval = false;
+  mock.failSheetEval = false;
   userClick(document.getElementById("btn-scrub-pii"));
   await flushAsyncTurns(10);
   assert.equal(a8.textContent, "직통 010-****-****");
