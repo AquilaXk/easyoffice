@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { PROHIBITED_PATTERNS } from "./prohibited-terms.mjs";
 import { execFileSync } from "node:child_process";
 import { readConfig, resolveGitExecutable, verifyUpstream } from "./verify-rhwp-upstream.mjs";
 import { verifyOverrides } from "./hwp-studio-overrides.mjs";
@@ -175,26 +176,6 @@ const FORBIDDEN_GIT_PATHS = FORBIDDEN_GIT_PATH_B64.map((b) =>
   Buffer.from(b, "base64").toString("utf8")
 );
 
-// Prohibited external brand tokens + tool/agent tokens in tracked files (Base64 encoded)
-const PROHIBITED_CONTENT_B64 = [
-  "cG9sYXJpcyBvZmZpY2U=",     // external brand (en)
-  "cG9sYXJpc29mZmljZQ==",     // external brand compact
-  "7Y+0652866as7Iqk",         // external brand (ko)
-  "7ZWc7Lu07Jik7ZS87Iqk",     // external brand 2 (ko)
-  "aGFuY29tIG9mZmljZQ==",     // external brand 2 (en)
-  "QUdFTlRTLm1k",             // local-only doc ref 1
-  "Q0xBVURFLm1k",             // local-only doc ref 2
-  "R0VNSU5JLm1k",             // local-only doc ref 3
-  "QW50aWdyYXZpdHk=",         // tool name 1
-  "Q2xhdWRlIENvZGU=",         // tool name 2
-  "YXF1aWxhLXJldmlldw==",     // internal review skill name
-  "c3ViYWdlbnQ=",             // internal orchestration term
-  "Q28tQXV0aG9yZWQtQnk6",     // attribution header
-];
-
-const PROHIBITED_PATTERNS = PROHIBITED_CONTENT_B64.map(
-  (b64) => new RegExp(Buffer.from(b64, "base64").toString("utf8"), "i")
-);
 
 const IGNORED_DIRS = new Set([
   ".git",
