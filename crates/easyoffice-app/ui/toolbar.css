@@ -51,7 +51,8 @@
   white-space: nowrap;
 }
 
-#doc-style-bar {
+#doc-style-bar,
+#sheet-formula-bar {
   background: var(--color-bg);
   border-bottom: 1px solid var(--ui-border);
   white-space: nowrap;

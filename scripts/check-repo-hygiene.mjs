@@ -38,6 +38,7 @@ const REQUIRED_TRACKED_CONTRACTS = [
   "crates/easyoffice-app/ui/ribbon-catalog.js",
   "crates/easyoffice-app/ui/save-payload.js",
   "crates/easyoffice-app/ui/desktop-bridge.js",
+  "crates/easyoffice-app/ui/workspace-scrub.js",
   "crates/easyoffice-app/ui/workspace-tools.js",
   "crates/easyoffice-app/ui/workspace-panels.js",
   "crates/easyoffice-app/ui/sheet-grid.js",
