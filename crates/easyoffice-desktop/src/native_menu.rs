@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn page_actions_are_plain_names_with_an_optional_argument() {
         for spec in ITEMS {
-            let (name, argument) = spec.action.split_once(':').map_or((spec.action, ""), |p| p);
+            let (name, argument) = spec.action.split_once(':').unwrap_or((spec.action, ""));
             assert!(
                 name.bytes()
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'),
