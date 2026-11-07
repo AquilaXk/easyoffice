@@ -13,6 +13,8 @@ import { checkManifestStructure, checkUpstreamBaseline, normalizedSha256, readMa
 import { checkVendorCore } from "./verify-rhwp-core.mjs";
 import { resolveGitExecutable } from "./verify-rhwp-upstream.mjs";
 import { execFileSync, spawnSync } from "node:child_process";
+import vm from "node:vm";
+import { stripTypeScriptTypes } from "node:module";
 import { BEGIN, END, replaceSection, wasmDependencyClosure } from "./generate-wasm-notices.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -426,4 +428,143 @@ test("print styles carry an @page size rule and a page box per page (#173)", asy
   assert.match(rules, /\.rhwp-print-page-1 \{ page: rhwp-print-page-1; width: 210mm; height: 297mm; \}/);
   assert.match(rules, /\.rhwp-print-page-2 \{ page: rhwp-print-page-2; width: 250mm; height: 176mm; \}/);
   assert.equal(buildPrintPageRules([]).trim(), "", "no pages, no rules");
+});
+
+// ---- password-protected HWP (PD-100) ---------------------------------------------------------
+// The overlay's open funnel (apps/hwp-studio/src/main.ts) already tries a plain load first and only
+// asks for a password after the engine reports an encrypted document. These tests run the real
+// flow code (sliced out of main.ts, types stripped) with a mock engine and dialog, and guard that
+// the password never reaches the shell, the embed port, storage or logs.
+
+const OVERLAY_MAIN = fs.readFileSync(path.join(REPO, "apps/hwp-studio/src/main.ts"), "utf8");
+const PASSWORD_REQUIRED = "비밀번호가 필요한 암호 문서";
+const PASSWORD_REJECTED = "비밀번호가 일치하지 않거나 암호화 데이터가 손상되었습니다";
+
+function openFlowSource() {
+  const start = OVERLAY_MAIN.indexOf("class DocumentOpenCancelledError");
+  const end = OVERLAY_MAIN.indexOf("/**\n * 문서 열기가 실패하면 빈 쪽 상태로");
+  assert.ok(start >= 0 && end > start, "the open-flow markers exist");
+  return stripTypeScriptTypes(OVERLAY_MAIN.slice(start, end));
+}
+
+function createOpenFlow({ loadDocument, loadDocumentWithPassword, dialog }) {
+  const wasm = { loadDocument, loadDocumentWithPassword, getDocumentInfo: () => ({ pageCount: 1 }) };
+  const context = vm.createContext({ wasm, showHwpPasswordDialog: dialog, String, Error });
+  vm.runInContext(`${openFlowSource()}\nthis.loadDocumentForOpen = loadDocumentForOpen; this.Cancelled = DocumentOpenCancelledError;`, context);
+  return { open: context.loadDocumentForOpen, Cancelled: context.Cancelled };
+}
+
+const needsPassword = () => {
+  throw new Error(PASSWORD_REQUIRED);
+};
+
+test("a document without a password opens without any dialog", async () => {
+  let asked = 0;
+  const flow = createOpenFlow({
+    loadDocument: () => ({ pageCount: 3 }),
+    loadDocumentWithPassword: () => assert.fail("no password open"),
+    dialog: async () => {
+      asked += 1;
+      return null;
+    },
+  });
+  assert.deepEqual(await flow.open(new Uint8Array(1), "a.hwp"), { pageCount: 3 });
+  assert.equal(asked, 0);
+});
+
+test("other load errors are not turned into a password prompt", async () => {
+  const flow = createOpenFlow({
+    loadDocument: () => {
+      throw new Error("손상된 파일");
+    },
+    loadDocumentWithPassword: () => assert.fail("no password open"),
+    dialog: async () => assert.fail("no dialog"),
+  });
+  await assert.rejects(flow.open(new Uint8Array(1), "a.hwp"), /손상된 파일/);
+});
+
+test("a correct password opens the document; the dialog only gets the file name", async () => {
+  const dialogCalls = [];
+  const opened = [];
+  const flow = createOpenFlow({
+    loadDocument: needsPassword,
+    loadDocumentWithPassword: (data, password, name) => opened.push([data.length, password, name]),
+    dialog: async (...args) => {
+      dialogCalls.push(args);
+      return "s3cret";
+    },
+  });
+  assert.deepEqual(await flow.open(new Uint8Array(4), "암호.hwp"), { pageCount: 1 });
+  assert.deepEqual(dialogCalls, [["암호.hwp", undefined]]);
+  assert.deepEqual(opened, [[4, "s3cret", "암호.hwp"]]);
+});
+
+test("a wrong password asks again with the retry text, then a right one opens", async () => {
+  const messages = [];
+  const answers = ["wrong", "right"];
+  const flow = createOpenFlow({
+    loadDocument: needsPassword,
+    loadDocumentWithPassword: (_data, password) => {
+      if (password === "wrong") throw new Error(PASSWORD_REJECTED);
+    },
+    dialog: async (_name, message) => {
+      messages.push(message);
+      return answers.shift();
+    },
+  });
+  assert.deepEqual(await flow.open(new Uint8Array(1), "a.hwp"), { pageCount: 1 });
+  assert.deepEqual(messages, [undefined, "암호가 일치하지 않거나 문서가 손상되었습니다. 다시 입력하세요."]);
+});
+
+test("cancelling the dialog cancels the open without trying a password", async () => {
+  const flow = createOpenFlow({
+    loadDocument: needsPassword,
+    loadDocumentWithPassword: () => assert.fail("no password open"),
+    dialog: async () => null,
+  });
+  await assert.rejects(flow.open(new Uint8Array(1), "a.hwp"), (error) => error.name === "DocumentOpenCancelledError");
+});
+
+test("unsupported encryption, DRM and corrupt data end with fixed Korean errors that never echo the password", async () => {
+  const cases = [
+    ["지원하지 않는 암호화 방식 (AES)", /지원하지 않는 암호화 방식의 문서입니다/],
+    ["DRM 보호 문서", /DRM으로 보호된 문서는 지원하지 않습니다/],
+    ["내부 오류 hunter2", /암호화된 문서를 열 수 없습니다/],
+  ];
+  for (const [engineMessage, expected] of cases) {
+    const flow = createOpenFlow({
+      loadDocument: needsPassword,
+      loadDocumentWithPassword: () => {
+        throw new Error(engineMessage);
+      },
+      dialog: async () => "hunter2",
+    });
+    await assert.rejects(flow.open(new Uint8Array(1), "a.hwp"), (error) => expected.test(error.message) && !error.message.includes("hunter2"));
+  }
+});
+
+test("the password stays inside the open flow: no storage, logs, embed port or shell command carries it", () => {
+  const start = OVERLAY_MAIN.indexOf("async function openPasswordProtectedDocument");
+  const flow = OVERLAY_MAIN.slice(start, OVERLAY_MAIN.indexOf("async function loadDocumentForOpen"));
+  assert.match(flow, /password = '';/, "the local reference is cleared after each attempt");
+  assert.doesNotMatch(flow, /localStorage|sessionStorage|addRecentDoc|autosave|console\.|postMessage|emit\(/);
+  const outside = [
+    "apps/hwp-studio/src/embed/protocol.ts",
+    "apps/hwp-studio/src/embed/rpc-router.ts",
+    "apps/hwp-studio/src/embed/shell-menu.ts",
+    "apps/hwp-studio/src/embed/shell-shortcuts.ts",
+    "crates/easyoffice-app/ui/hwp-host.js",
+    "crates/easyoffice-app/ui/hwp-session.js",
+    "crates/easyoffice-desktop/src/main.rs",
+  ];
+  for (const rel of outside) {
+    assert.doesNotMatch(fs.readFileSync(path.join(REPO, rel), "utf8"), /openWithPassword|loadDocumentWithPassword|hwp-password/, rel);
+  }
+});
+
+test("the pinned engine exports the password open and the built bundle carries the flow", () => {
+  assert.match(fs.readFileSync(path.join(REPO, "vendor/rhwp-core/rhwp.d.ts"), "utf8"), /static openWithPassword\(data: Uint8Array, password: string\): HwpDocument/);
+  const assets = path.join(REPO, "crates/easyoffice-app/ui/hwp-studio/assets");
+  const bundle = fs.readdirSync(assets).filter((f) => f.endsWith(".js")).map((f) => fs.readFileSync(path.join(assets, f), "utf8")).join("\n");
+  assert.ok(bundle.includes(PASSWORD_REQUIRED) && bundle.includes(PASSWORD_REJECTED), "the bundle contains the password flow");
 });

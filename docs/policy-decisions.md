@@ -1734,3 +1734,14 @@
 - **Alternatives rejected** `tauri-plugin-window-state`(창 이름 키 맵이 무한히 커지고, 문서 창에는 같은 이름이 다시 오지 않음), 이동할 때마다 디스크 쓰기(불필요한 I/O), JSON 형식(파서·할당이 필요하고 고정 크기 레코드보다 검증이 느슨함).
 - **Verified by** `cargo test -p easyoffice-desktop window_state`(레코드 바이트 배치·왕복, 손상 레코드 거부, 반올림·범위, 모니터 판정·오버플로, 데이터 폴더 왕복). 실제 창 복원은 Windows·macOS 수동 확인 대상입니다.
 - **Revisit when** 창 종류별로 다른 크기를 기억해야 할 때, 여러 창의 배치를 세션으로 복원할 때.
+
+## 75. 암호가 걸린 HWP 열기: 업스트림 흐름 사용과 암호 비보관 (PD-100)
+
+- **Status** Implemented (기존 오버레이 흐름 확인과 가드 테스트 추가)
+- **Context** hop은 `document-open.ts` 어댑터로 암호 문서를 열지만, EasyOffice가 고정해 쓰는 rhwp-studio의 열기 깔때기(`apps/hwp-studio/src/main.ts`의 `loadDocumentForOpen`)가 같은 흐름을 이미 갖고 있고 고정 WASM(`vendor/rhwp-core`)에도 `HwpDocument.openWithPassword`가 있습니다. 같은 일을 하는 코드를 한 벌 더 옮기면 두 흐름이 남으므로 hop 어댑터는 옮기지 않았고(THIRD_PARTY_NOTICES에 새 파일 없음) 업스트림 흐름을 정책과 테스트로 고정했습니다.
+- **Decision (`PD-100`)** (1) 일반 열기를 먼저 시도하고 엔진이 "비밀번호가 필요한 암호 문서"라고 보고할 때만 암호 대화상자(`showHwpPasswordDialog`, 업스트림 `.dialog-wrap` 대화상자)를 띄웁니다. 다른 오류는 그대로 올립니다. (2) 취소하면 `DocumentOpenCancelledError`로 열기를 중단하고 이전 문서 뷰를 되살립니다. (3) 틀린 암호(또는 손상, 구분 불가)는 "암호가 일치하지 않거나 문서가 손상되었습니다. 다시 입력하세요."로 다시 묻습니다. (4) 지원하지 않는 암호화 방식·DRM·그 밖의 실패는 고정된 한국어 오류로 끝내며 엔진 원문 오류(입력값이 섞일 수 있음)는 화면·콘솔에 내지 않습니다. (5) 암호는 한 번의 시도 범위의 지역 변수로만 쓰고 시도 직후 비웁니다. 저장소·최근 문서·자동 저장·로그·`postMessage`·임베드 프로토콜·셸 명령으로 보내지 않으며(셸은 파일 바이트만 전달), 암호로 저장(내보내기)은 이번 범위 밖입니다. (6) 암호 입력을 기다리는 동안 셸의 열기 제한 시간은 10분입니다(`hwp-session.js`).
+- **Why** 암호는 문서를 푸는 데만 필요하고 어디에도 남지 않아야 하며, 같은 흐름을 두 벌 유지하지 않기 위함입니다.
+- **Trade-offs** 문자열 암호는 JavaScript에서 확실히 지울 수 없어 지역 참조만 비웁니다. 오입력과 암호문 손상을 구분하지 못합니다(업스트림과 같음).
+- **Alternatives rejected** hop 어댑터를 따로 이식(중복), 암호를 셸이 받아 네이티브에서 풀기(암호가 셸 경계를 넘음).
+- **Verified by** `node --test scripts/test-hwp-studio.mjs`(실제 흐름 코드를 모의 엔진·대화상자로 실행: 암호 없음·정답·오답 후 재시도·취소·미지원/DRM/손상·암호 비반향, 암호가 임베드·셸 파일에 없음, 고정 WASM과 번들에 흐름 존재), 업스트림 `rhwp-studio/tests/hwp-password-open.test.ts`.
+- **Revisit when** 암호로 저장을 지원하거나 업스트림 열기 깔때기가 바뀔 때(오버레이 해시 갱신과 함께 이 절을 갱신합니다).
