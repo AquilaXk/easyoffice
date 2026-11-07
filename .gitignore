@@ -4,18 +4,9 @@
 .LSOverride
 ._*
 
-# Swift Package Manager, Rust Cargo & Xcode build artifacts
-.build/
-.swiftpm/
+# Rust Cargo build artifacts
 /target*/
-DerivedData/
 build/
-*.xcodeproj/project.xcworkspace/
-*.xcodeproj/xcuserdata/
-*.xcworkspace/xcuserdata/
-*.ipa
-*.dSYM.zip
-*.dSYM
 
 # Release packaging output
 dist/

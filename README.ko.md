@@ -8,27 +8,18 @@ EasyOffice (`v1.0.0`)는 Rust 엔진과 오프라인 WebUI를 하나의 Tauri v2
 
 ## 핵심 특징
 
-- **5대 오피스 모듈 올인원 통합 워크스페이스 (macOS·Windows 단일 코드베이스)**:
-  - 한글 모듈은 rhwp 기반 한글 편집기를 Windows 데스크톱 셸과 `--serve`에 같은 출처 iframe(IPC 권한 없음)으로 임베드하며, 생성된 편집기 번들이 없는 빌드는 텍스트 전용 편집기로 대체됩니다. 데스크톱 셸을 빌드하기 전에 `node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs`를 실행하세요 (PD-083). HWP·HWPX·HWT·HWTX 파일을 이 편집기에서 열 수 있고(최대 64 MiB, 편집기가 읽지 못하는 파일은 안내와 함께 텍스트만 열림) 내보낸 바이트를 다시 파싱해 검증한 뒤 HWP 또는 HWPX로 저장하며, 수정 상태를 추적하고 새로고침 후 복원할 수 있도록 IndexedDB에 자동 저장합니다 (PD-085).
-- 문서 작성, 한글(HWP 5.0/HWPX) 공문서 편집, 표 계산 및 피벗 분석, 슬라이드 발표자료 제작, PDF 주석 및 변환을 데스크톱 앱의 문서별 창에서하며 수행합니다.
-  - 두 문서를 좌우로 나란히 비교·편집하는 **분할 보기(Split View, `splitSecondaryTabID`, 최소 너비 `420pt`)**, **접이식 7대 카테고리 컨텍스트 리본(`Cmd+Option+R`)**, **좌측 구조 내비게이터**, **우측 세부 속성 인스펙터**, **5대 인터랙티브 에디터 상세 패널(`DocumentEditorDetailPaneView`, `SheetEditorDetailPaneView`, `SlideEditorDetailPaneView`, `PDFStudioEditorDetailPaneView`)**을 지원합니다.
-- **20종 문서·템플릿 포맷 바이너리 라운드트립 코덱**:
-  - **ZIP 기반 컨테이너 (`ZipContainerCodec`)**: `OOXMLContainerCodec` (`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `ODFContainerCodec` (`.odt`, `.ods`, `.odp`), `HWPXContainerCodec` (`.hwpx`, `.hwtx` KS X 6101 OWPML 표준).
-  - **OLE2 CFBF 및 HWP 5.0 바이너리 (`OLE2ContainerCodec`, `HWP5BinaryCodec`)**: 512바이트 섹터 할당 테이블(FAT) 및 디렉터리 스트림 파서/빌더, 32비트 비트패킹 `HWP5RecordHeader` (`10-bit tagID | 10-bit level | 12-bit size` + `0xFFF` 확장 길이 헤더) 기반 `.hwp`, `.hwt`, `.doc`, `.xls`, `.ppt` 지원.
-  - **PDF 및 정형/마크업 코덱**: `PDFBinarySerializer` (`.pdf` ISO 32000 상호참조 테이블 `xref` 및 트레일러 직렬화/파싱), `CSVStateMachineCodec` (`.csv`, `.tsv` RFC 4180 상태 머신), `CommonMarkCodec` (`.md`), `RTFCodec` (`.rtf` 부호 있는 16비트 `\uN?` 유니코드 이스케이프), UTF-8 평문(`.txt`).
-- **비트 수준 성능 최적화 (Bit-Level Optimizations)**:
-  - `BitPacking` (리틀 엔디언 `UInt16`/`UInt32`/`UInt64` 리더·라이터 및 길이 접두 UTF-16LE 인코딩), 256-엔트리 룩업 테이블 기반 IEEE 802.3 `CRC32Calculator`, `HWP5RecordHeader` 비트필드 연산, 문자열 할당 없는 $O(1)$ 셀 조회 및 순환 참조 검출을 위한 64비트 `PackedCellCoordinate` (`UInt64`: 상위 32비트 `row`, 하위 32비트 `column`).
-- **5대 결정론적 에디터 엔진**:
-  - **Document & HWP/HWPX (`OfficeDocumentModel`)**: 다중 구역 조판(`PaperSizePreset`, `PageOrientation`), 문단/글자 스타일, 셀 병합 및 인라인 표 수식(`=SUM(ABOVE|LEFT)`, `=AVERAGE(ABOVE|LEFT)`)을 지원하는 `DocumentTableBlock`, 각주(`FootnoteItem`), 변경 내용 추적(`TrackedRevision`), 코멘트 스레드, 자동 목차(`TableOfContentsEntry`), `{{필드}}` 메일 머지.
-  - **Sheet (`WorksheetModel`)**: 수학/삼각, 통계, 논리, 찾기/참조, 텍스트, 재무(`PMT`, `FV`, `PV`, `NPV`, `IRR`, `RATE`, `NPER`, `SLN`, `SYD`), 날짜/시간, 정보/공학을 아우르는 **122종 내장 수식 함수**, `PivotTableEngine`, `SheetChartBuilder`, `ConditionalFormatRule`, `DataValidationRule`.
-  - **Slide (`PresentationDeckModel`)**: `SlideAspectRatio` (`16:9`, `4:3`, `A4`), `SlideMasterLayout`, `SlideCanvasElement` 레이어(Z-order) 및 정렬/균등 배분, `SnapGuideCalculator` 스마트 정렬 가이드, `SlideTransitionKind`, 듀얼 모니터 `PresenterSession`.
-  - **PDF Studio (`PDFStudioDocumentModel`)**: 고속 벡터 페이지 캔버스, 5종 주석(`PDFAnnotationItem`: 형광펜, 밑줄, 스티커 메모, 도장, 전자 서명), 북마크 트리(`PDFOutlineNode`), 페이지 회전/재배치/분할/병합, 양방향 오피스 ↔ PDF 변환.
-- **100% 오프라인 스마트 생산성 도구 및 보안 감사 스튜디오**:
-  - **포맷 일괄 변환 스튜디오 (`DocumentConversionOrchestrator`)**: 20종 전체 포맷 간 단건·배치 변환 및 출력 바이트 `FormatDetector.verify` 시그니처 사후 검증.
-  - **온디바이스 스마트 문서 보조 도구 (`LocalSmartDocumentAssistant`)**: 외부 네트워크 전송 없이 로컬에서 수행하는 단어 빈도·위치 가중치 기반 핵심 문장 추출 요약(`DocumentSummaryReport`), 문장 길이·피동 표현·중복 수식어 교정 진단(`WritingRefinementSuggestion`), 기한·예산·조치 항목 추출(`ExtractedActionItem`), 시트 Z-Score 이상치(`|z| >= 1.8`) 및 추세 인사이트(`WorksheetInsightReport`), 문단 상한($N \le 2,048$) 동적 계획법 LCS 문서 비교(`DocumentDiffReport`).
-  - **Fail-Closed 컨테이너 및 메타데이터 보안 (`FormatDetector`, `XMLSanitizer`, `DocumentSecurityAuditor`)**: 확장자 위조(매직 바이트 불일치), ZIP 압축 폭탄(`100:1` 비율 / `512 MiB` 상한), 경로 순회(`..`, `/`, `\`, NUL), XML 외부 엔티티(`<!ENTITY`, `DOCTYPE SYSTEM/PUBLIC`)를 입구에서 차단하고, 공유 전 문서 내 개인정보(PII)·변경 이력·코멘트를 비식별화합니다.
-- **시그니처 라벤더 디자인 시스템 및 WCAG AA 접근성**:
-  - `EasyOfficeDesignTokens`(`#5C6BC0` Primary Accent, `#F7F8FC` 라이트 라벤더 스캐폴드, `#141724` 다크 인디고 스캐폴드), `WorkspaceThemeMode`(`.system`, `.lightLavender`, `.darkIndigo`), 5대 모듈 시맨틱 컬러, WCAG 2.1 AA 명도 대비(`>= 4.5:1`) 검증 토큰 및 `AccessibilityTokens` VoiceOver 레이블을 적용했습니다.
+- **macOS·Windows 단일 코드베이스**: Rust 엔진(`crates/`), WebUI(`crates/easyoffice-app/ui/`), Tauri v2 데스크톱 셸(`crates/easyoffice-desktop`, macOS는 WKWebView·Windows는 WebView2). 문서마다 개별 창으로 열리고 시작 창에서 새 문서·최근 문서·열기를 고릅니다. 단일 인스턴스, 외부 변경 감지가 있는 제자리 원자적 저장, 파일 연결은 Rust가 처리하며 WebView는 파일 경로를 받지 않습니다.
+- **한글(HWP/HWPX) 편집기**: rhwp 엔진(MIT, 고정된 upstream 서브모듈)을 같은 출처 iframe 편집기로 띄워 HWP/HWPX 열기, 저장 전 검증, 수정 상태, IndexedDB 자동 저장을 지원하고, 셸이 파일 메뉴·테마·상태 표시줄을 맡습니다.
+- **읽기·쓰기 20종 + Pages(읽기 전용)**:
+  - ZIP 컨테이너(`ZipArchiveCodec`, `ZipSecurityGuard`): `OoxmlCodec`(`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `OdfCodec`(`.odt`, `.ods`, `.odp`), `HwpxCodec`(`.hwpx`, `.hwtx`).
+  - OLE2 복합 파일(`Ole2ContainerCodec`, `Ole2SecurityGuard`): `Hwp5Codec`(`.hwp`, `.hwt`), 실제 MS-DOC·MS-PPT 구조와 BIFF8 `.xls`를 쓰는 `LegacyOle2Codec`.
+  - `PdfSerializer`(ISO 32000), `CsvCodec`(RFC 4180 `.csv`/`.tsv`), `CommonMarkCodec`(`.md`), `RtfCodec`(`.rtf`), UTF-8 `.txt`.
+  - Apple Pages(`.pages`, IWA + Snappy 변형 + protobuf, 자체 디코더)는 보기·변환 원본으로 엽니다.
+  - `RichDocument`가 DOCX·HWPX·ODT·RTF·Markdown·TXT·PDF에서 블록 순서와 글자 단위 서식을 유지합니다.
+- **비트 수준 엔진 최적화**: 하드웨어 가속·slicing-by-8 `IeeeCrc32`, DEFLATE, SWAR 기반 UTF-16·XML·CSV 스캔, 64비트 `PackedCellCoordinate`(상위 32비트 행·하위 32비트 열), `SectorBitset`, 모든 경로의 `checked_*` 산술과 `unsafe` 미사용. `--self-test`가 벤치마크와 결과 동일성을 검사합니다.
+- **시트 엔진**(`SheetEngine`, `WorkbookEngine`): 수학·통계·논리·찾기·텍스트·재무(`PMT`, `NPV`, `IRR` 등)·날짜/시간·정보를 아우르는 **122종 내장 함수**, 슬롯 메모를 쓰는 의존성 DAG, 피벗(`compute_pivot`), 차트, 조건부 서식·유효성 검사. 셀 서식과 열 너비는 XLSX/ODS에 저장·복원됩니다.
+- **오프라인 스마트 도구와 보안**: 출력 바이트를 `FormatDetector`로 사후 검증하는 `UniversalFormatConverter` 일괄 변환, `LocalSmartAssistant`(핵심 문장 요약, 문장 진단, 문서 비교), fail-closed `FormatDetector`·`XmlSanitizer`·`DocumentSecurityAuditor`(매직 바이트 위조, ZIP 폭탄, 경로 순회, XXE, 개인정보 비식별화).
+- **시그니처 라벤더 디자인 시스템**(`#5C6BC0` 강조색): 단일 SVG 아이콘 세트, 라이트·다크 테마, 테스트로 검사하는 WCAG 2.1 AA 명암비.
 
 ---
 
