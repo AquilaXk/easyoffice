@@ -291,7 +291,7 @@ fn test_f5_ods_xlsx_hwpx_and_pdf_standard_compatibility() {
 }
 
 #[test]
-fn test_pdf_single_line_stream_relative_td_ocr_3tr_and_swift_blank_line_pagination() {
+fn test_pdf_single_line_stream_relative_td_ocr_3tr_and_legacy_app_blank_line_pagination() {
     let single_line_pdf = concat!(
         "%PDF-1.7\n",
         "1 0 obj << /Title (Report (2026)) /Type /Catalog >> endobj\n",
@@ -330,7 +330,7 @@ fn test_pdf_single_line_stream_relative_td_ocr_3tr_and_swift_blank_line_paginati
     let raw_with_blanks = non_empty_lines.join("\n\n");
     let page1_chunk = non_empty_lines[..42].join("\n");
     let page2_chunk = non_empty_lines[42..].join("\n");
-    let swift_style_pdf = format!(
+    let legacy_app_pdf = format!(
         concat!(
             "%PDF-1.7\n",
             "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Title (Swift Line1 Line2) >>\nendobj\n",
@@ -361,11 +361,11 @@ fn test_pdf_single_line_stream_relative_td_ocr_3tr_and_swift_blank_line_paginati
             .as_bytes()
         )
     );
-    let parsed_swift_mp = PdfSerializer::parse(swift_style_pdf.as_bytes()).unwrap();
-    assert_eq!(parsed_swift_mp.title, "Swift Line1\nLine2");
-    assert_eq!(parsed_swift_mp.pages.len(), 2);
-    assert_eq!(parsed_swift_mp.pages[0].body_text, page1_chunk);
-    assert_eq!(parsed_swift_mp.pages[1].body_text, page2_chunk);
+    let parsed_legacy_app_pdf = PdfSerializer::parse(legacy_app_pdf.as_bytes()).unwrap();
+    assert_eq!(parsed_legacy_app_pdf.title, "Swift Line1\nLine2");
+    assert_eq!(parsed_legacy_app_pdf.pages.len(), 2);
+    assert_eq!(parsed_legacy_app_pdf.pages[0].body_text, page1_chunk);
+    assert_eq!(parsed_legacy_app_pdf.pages[1].body_text, page2_chunk);
 }
 
 #[test]

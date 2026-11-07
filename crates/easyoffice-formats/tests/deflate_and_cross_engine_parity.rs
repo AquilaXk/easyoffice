@@ -116,7 +116,7 @@ fn test_zip_pack_deflate_and_format_detector_on_compressed_hwtx_and_ppsx() {
 }
 
 #[test]
-fn test_hwp5_compressed_streams_and_swift_extended_records_parity() {
+fn test_hwp5_compressed_streams_and_legacy_app_extended_records_parity() {
     let doc = DocumentCodecPayload {
         version: (5, 0, 3, 0),
         is_template: false,
@@ -207,25 +207,28 @@ fn test_hwp5_compressed_streams_and_swift_extended_records_parity() {
     ));
     sec0.extend_from_slice(&tbl);
 
-    let swift_hwp = Ole2ContainerCodec::pack(&[
+    let legacy_app_hwp = Ole2ContainerCodec::pack(&[
         ("FileHeader".to_string(), fh),
         ("DocInfo".to_string(), deflate_raw(&doc_info)),
         ("BodyText/Section0".to_string(), deflate_raw(&sec0)),
     ])
     .unwrap();
 
-    let unpacked_swift_hwp = Hwp5Codec::unpack(&swift_hwp).expect("unpack Swift HWP 5.0");
-    assert_eq!(unpacked_swift_hwp.agency_name, "스위프트 교차 문서");
-    assert_eq!(unpacked_swift_hwp.paragraphs.len(), 1);
-    assert_eq!(unpacked_swift_hwp.paragraphs[0].text, "교차 엔진 문단 본문");
+    let unpacked_legacy_app_hwp = Hwp5Codec::unpack(&legacy_app_hwp).expect("unpack Swift HWP 5.0");
+    assert_eq!(unpacked_legacy_app_hwp.agency_name, "스위프트 교차 문서");
+    assert_eq!(unpacked_legacy_app_hwp.paragraphs.len(), 1);
     assert_eq!(
-        unpacked_swift_hwp.table_cells,
+        unpacked_legacy_app_hwp.paragraphs[0].text,
+        "교차 엔진 문단 본문"
+    );
+    assert_eq!(
+        unpacked_legacy_app_hwp.table_cells,
         vec![vec!["열A".to_string(), "열B".to_string()]]
     );
 }
 
 #[test]
-fn test_swift_extended_legacy_ole2_doc_xls_ppt_parity() {
+fn test_legacy_app_extended_ole2_doc_xls_ppt_parity() {
     let encode_u16_raw =
         |s: &str| -> Vec<u8> { s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect() };
     let encode_u16_prefixed = |s: &str| -> Vec<u8> {

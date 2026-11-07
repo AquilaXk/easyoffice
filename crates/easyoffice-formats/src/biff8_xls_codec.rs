@@ -627,12 +627,14 @@ impl LegacyOle2Codec {
                         if rec_len > 16 {
                             let char_count = read_u16_le(&wb.data, start + 14)? as usize;
                             let byte_len = char_count * 2;
-                            let is_swift_inline = char_count == 0
+                            let is_legacy_app_inline_text = char_count == 0
                                 && (end - (start + 16)) % 2 == 0
                                 && end >= start + 18
                                 && wb.data[start + 16] == b'='
                                 && wb.data[start + 17] == 0;
-                            if (char_count > 0 && start + 16 + byte_len == end) || is_swift_inline {
+                            if (char_count > 0 && start + 16 + byte_len == end)
+                                || is_legacy_app_inline_text
+                            {
                                 let slice = if char_count > 0 {
                                     &wb.data[start + 16..start + 16 + byte_len]
                                 } else {
