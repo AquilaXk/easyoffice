@@ -549,7 +549,7 @@ pub(crate) fn decode_pdf_hex_string_with_cmap(
     if clean.is_empty() {
         return Some(String::new());
     }
-    if !clean.iter().all(|b| b.is_ascii_hexdigit()) {
+    if !clean.iter().all(u8::is_ascii_hexdigit) {
         return None;
     }
     if clean.len() % 2 != 0 {

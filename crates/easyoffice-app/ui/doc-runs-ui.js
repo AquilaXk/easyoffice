@@ -26,6 +26,27 @@
   };
   const INDENT_STEP_PX = 4;
 
+  function plainRange(r) {
+    return {
+      startContainer: r.startContainer,
+      startOffset: r.startOffset,
+      endContainer: r.endContainer,
+      endOffset: r.endOffset,
+      collapsed: Boolean(r.collapsed),
+    };
+  }
+
+  function readPx(blk, prop) {
+    return Number.parseInt(blk.style[prop] || "0", 10) || 0;
+  }
+
+  function writePx(blk, prop, px) {
+    const [lo, hi] = INDENT_LIMITS[prop];
+    const next = Math.max(lo, Math.min(hi, Math.round(px)));
+    blk.style[prop] = next ? next + "px" : "";
+    return next;
+  }
+
   function createDocRunsUi(deps) {
     const { document, getActiveModule, captureWorkspaceSnapshot, commitDeferredUndoSnapshot, saveDocState } = deps;
     const R = host.__EASYOFFICE_DOC_RUNS__;
@@ -40,16 +61,6 @@
     function setFeedback(text) {
       const fb = document.getElementById("status-command-feedback");
       if (fb) fb.textContent = text;
-    }
-
-    function plainRange(r) {
-      return {
-        startContainer: r.startContainer,
-        startOffset: r.startOffset,
-        endContainer: r.endContainer,
-        endOffset: r.endOffset,
-        collapsed: Boolean(r.collapsed),
-      };
     }
 
     function insideEditor(range) {
@@ -91,7 +102,11 @@
       const out = { ...state };
       Object.keys(pending.patch).forEach((p) => {
         const v = pending.patch[p];
-        out[p] = R.BOOL_PROPS.includes(p) ? v === true : (v ?? (p === "size" ? baseHalfPt() : ""));
+        if (R.BOOL_PROPS.includes(p)) {
+          out[p] = v === true;
+        } else {
+          out[p] = v ?? (p === "size" ? baseHalfPt() : "");
+        }
       });
       return out;
     }
@@ -284,17 +299,6 @@
       const root = editor();
       const range = currentRange();
       return root && range ? R.blocksInRange(root, range) : [];
-    }
-
-    function readPx(blk, prop) {
-      return Number.parseInt(blk.style[prop] || "0", 10) || 0;
-    }
-
-    function writePx(blk, prop, px) {
-      const [lo, hi] = INDENT_LIMITS[prop];
-      const next = Math.max(lo, Math.min(hi, Math.round(px)));
-      blk.style[prop] = next ? next + "px" : "";
-      return next;
     }
 
     // Indentation acts on the paragraphs the selection touches, never on the whole document.

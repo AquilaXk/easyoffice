@@ -197,7 +197,7 @@ impl RibbonWorkspaceState {
 pub struct RibbonCommandRouter;
 
 impl RibbonCommandRouter {
-    pub const CATEGORY_KEYS: [&'static str; 7] = [
+    pub const CATEGORY_KEYS: [&str; 7] = [
         "home",
         "insert",
         "layout",

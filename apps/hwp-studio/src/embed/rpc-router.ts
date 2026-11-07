@@ -106,7 +106,10 @@ function compareCodeUnits(a: string, b: string): number {
 
 function assertOnlyKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
   const unknown = Object.keys(value).filter(key => !allowed.includes(key));
-  if (unknown.length > 0) throw new Error(`${label} contains unknown field: ${unknown.sort(compareCodeUnits)[0]}`);
+  if (unknown.length > 0) {
+    unknown.sort(compareCodeUnits);
+    throw new Error(`${label} contains unknown field: ${unknown[0]}`);
+  }
 }
 
 /** 비어 있지 않은 문자열 식별자. 라우터에서 거르지 않으면 핸들러마다 같은 검사를 반복한다. */

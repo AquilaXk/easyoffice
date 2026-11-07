@@ -81,6 +81,35 @@
     return Object.values(style).some(Boolean) ? style : null;
   }
 
+  function isEmptyEntry(entry) {
+    const st = entry.style;
+    const styled = st && STYLE_KEYS.some((k) => st[k]);
+    return !entry.value && !entry.formula && !styled;
+  }
+
+  function pressedValue(state) {
+    if (state === "mixed") return "mixed";
+    return state ? "true" : "false";
+  }
+
+  function patchCell(map, ref, mutate) {
+    const entry = map[ref] || { value: "", formula: "" };
+    const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "", ...entry.style };
+    mutate(style);
+    entry.style = style;
+    if (STYLE_KEYS.some((k) => style[k])) {
+      map[ref] = entry;
+      return;
+    }
+    delete entry.style;
+    if (isEmptyEntry(entry)) delete map[ref];
+    else map[ref] = entry;
+  }
+
+  function setPressed(el, state) {
+    if (el) el.setAttribute("aria-pressed", pressedValue(state));
+  }
+
   function createSheetFormat(api) {
     const {
       document,
@@ -137,26 +166,6 @@
       return on === area ? true : "mixed";
     }
 
-    function isEmptyEntry(entry) {
-      const st = entry.style;
-      const styled = st && STYLE_KEYS.some((k) => st[k]);
-      return !entry.value && !entry.formula && !styled;
-    }
-
-    function patchCell(map, ref, mutate) {
-      const entry = map[ref] || { value: "", formula: "" };
-      const style = { fontWeight: "", fontStyle: "", textDecoration: "", fontSize: "", ...entry.style };
-      mutate(style);
-      entry.style = style;
-      if (STYLE_KEYS.some((k) => style[k])) {
-        map[ref] = entry;
-        return;
-      }
-      delete entry.style;
-      if (isEmptyEntry(entry)) delete map[ref];
-      else map[ref] = entry;
-    }
-
     function nextSize(map) {
       const sel = getSelection();
       const cur = map[gridUtils.refOf(sel.ar, sel.ac)]?.style?.fontSize || "";
@@ -205,14 +214,6 @@
         if (fb) fb.textContent = "셀 서식: " + count + "칸";
         return count;
       });
-    }
-
-    function pressedValue(state) {
-      return state === "mixed" ? "mixed" : state ? "true" : "false";
-    }
-
-    function setPressed(el, state) {
-      if (el) el.setAttribute("aria-pressed", pressedValue(state));
     }
 
     function syncToolbar() {

@@ -229,7 +229,7 @@ impl CsvCodec {
 
     /// UTF-8 byte-order mark written before CSV/TSV output so spreadsheet applications on
     /// Korean-locale systems decode the text as UTF-8 rather than the legacy code page.
-    pub const UTF8_BOM: &'static [u8] = &[0xEF, 0xBB, 0xBF];
+    pub const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
     /// Serializes rows and prefixes the UTF-8 BOM ([`Self::UTF8_BOM`]).
     pub fn serialize_with_bom(rows: &[Vec<String>], delimiter: char) -> Vec<u8> {

@@ -24,6 +24,7 @@
         ? parsed.text
         : null;
     } catch (_err) {
+      // Malformed JSON is treated as absent input.
       return null;
     }
   }
@@ -125,7 +126,7 @@
       }
       const enc = item.encrypted === undefined || item.encrypted === null ? false : item.encrypted;
       if (typeof enc !== "boolean") {
-        throw new Error("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
+        throw new TypeError("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
       }
       totalUncompressed += rawUncomp;
       const unsafe =
@@ -173,7 +174,7 @@
         const comp = Number(parts[1]);
         const uncomp = Number(parts[2]);
         if (!Number.isSafeInteger(comp) || !Number.isSafeInteger(uncomp)) {
-          throw new Error("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
+          throw new TypeError("InvalidArgument: ZIP 엔트리 크기 필드는 음수 아닌 정수여야 합니다.");
         }
         if (parts[3] !== "true" && parts[3] !== "false") {
           throw new Error("InvalidArgument: 유효하지 않은 encrypted 불리언 값");
@@ -227,7 +228,7 @@
       };
     }
     if (!Array.isArray(doc.entries)) {
-      throw new Error("InvalidArgument: audit_security 'entries' 필드는 배열이어야 합니다.");
+      throw new TypeError("InvalidArgument: audit_security 'entries' 필드는 배열이어야 합니다.");
     }
     validateZipEntriesList(doc.entries);
     return {
@@ -242,8 +243,8 @@
   function encodeUtf8Base64(text) {
     const bytes = new TextEncoder().encode(String(text || ""));
     let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
+    for (const byte of bytes) {
+      binary += String.fromCodePoint(byte);
     }
     return typeof host.btoa === "function" ? host.btoa(binary) : "";
   }
@@ -262,7 +263,7 @@
   function decodeBase64Bytes(b64) {
     const bin = typeof host.atob === "function" ? host.atob(String(b64 || "")) : "";
     const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.codePointAt(i);
     return out;
   }
 
@@ -277,7 +278,9 @@
       title: "", sourceBytes: bytes.length, specification: "오프라인 테스트 디코더", warnings: [] };
     if (text.startsWith(FIXTURE_PREFIX)) {
       const model = JSON.parse(text.slice(FIXTURE_PREFIX.length));
-      const kind = model.sheets ? "workbook" : model.slides ? "slides" : "document";
+      let kind = "document";
+      if (model.sheets) kind = "workbook";
+      else if (model.slides) kind = "slides";
       const count = (model.sheets || model.slides || model.blocks || []).length;
       return { ...base, kind, itemCount: count, ...model };
     }
@@ -289,7 +292,7 @@
       const cells = [];
       text.replace(/^﻿/, "").split(/\r?\n/).filter(Boolean).forEach((line, r) => {
         line.split(delim).forEach((v, c) => {
-          if (v) cells.push({ ref: String.fromCharCode(65 + c) + (r + 1), raw: v });
+          if (v) cells.push({ ref: String.fromCodePoint(65 + c) + (r + 1), raw: v });
         });
       });
       return { ...base, kind: "workbook", itemCount: 1, sheets: [{ name: "Sheet1", cells }] };
@@ -311,8 +314,7 @@
       localRibbonState,
     } = ctx;
 
-    const backendBaseState = Object.assign(
-      {
+    const backendBaseState = {
         activeModule: "DOC",
         ribbonStyle: "standard",
         isBold: false,
@@ -359,21 +361,20 @@
         darkThemeEnabled: false,
         zoomPercent: 100,
         executedCount: 0,
-      },
-      JSON.parse(JSON.stringify(localRibbonState || {}))
-    );
+        ...structuredClone(localRibbonState || {}),
+    };
     const MAX_BACKEND_HISTORY = 64;
     // Mirrors crates/easyoffice-app/src/ribbon_session.rs: ribbon state and undo/redo stacks are
     // kept per client session (`sessionId`, missing → "default") and per module within a session.
     const DEFAULT_RIBBON_SESSION_ID = "default";
     const MAX_RIBBON_SESSIONS = 32;
-    const RIBBON_MODULE_KEYS = ["DOC", "HWP", "SHEET", "SLIDE", "PDF"];
+    const RIBBON_MODULE_KEYS = new Set(["DOC", "HWP", "SHEET", "SLIDE", "PDF"]);
     const ribbonSessions = new Map();
 
     function normalizeRibbonModuleKey(raw) {
       const key = String(raw || "").trim().toUpperCase();
       if (key === "CONV" || key === "DOCUMENT") return "DOC";
-      if (RIBBON_MODULE_KEYS.includes(key)) return key;
+      if (RIBBON_MODULE_KEYS.has(key)) return key;
       throw new Error("InvalidArgument: 지원하지 않는 리본 모듈입니다: " + key);
     }
 
@@ -410,7 +411,7 @@
     function ribbonSlot(session, mod) {
       if (!session.slots[mod]) {
         session.slots[mod] = {
-          state: { ...JSON.parse(JSON.stringify(backendBaseState)), activeModule: mod },
+          state: { ...structuredClone(backendBaseState), activeModule: mod },
           undo: [],
           redo: [],
         };
@@ -423,7 +424,7 @@
       return {
         ...extra,
         catalogCount: 140,
-        ...JSON.parse(JSON.stringify(slot.state)),
+        ...structuredClone(slot.state),
         canUndo: slot.undo.length > 0,
         canRedo: slot.redo.length > 0,
       };
@@ -445,7 +446,7 @@
       const to = isUndo ? slot.redo : slot.undo;
       if (from.length > 0) {
         if (to.length >= MAX_BACKEND_HISTORY) to.shift();
-        to.push(JSON.parse(JSON.stringify(slot.state)));
+        to.push(structuredClone(slot.state));
         slot.state = from.pop();
         slot.state.ribbonStyle = session.ribbonStyle;
       }
@@ -520,7 +521,7 @@
       const anchorCell = explicitAnchor || "A1";
       if (doc.targets !== undefined) {
         if (!Array.isArray(doc.targets)) {
-          throw new Error("InvalidArgument: JSON 'targets' 필드는 배열이어야 합니다.");
+          throw new TypeError("InvalidArgument: JSON 'targets' 필드는 배열이어야 합니다.");
         }
         if (doc.targets.length > 0) {
           const workbook = buildLocalWorkbookFromJson(doc, defaultSheet);
@@ -613,7 +614,7 @@
       if (slot.undo.length >= MAX_BACKEND_HISTORY) {
         slot.undo.shift();
       }
-      slot.undo.push(JSON.parse(JSON.stringify(backendState)));
+      slot.undo.push(structuredClone(backendState));
       slot.redo.length = 0;
 
       backendState.activeModule = mod;
@@ -650,8 +651,8 @@
       },
       get_ribbon_category_commands: (payload) => {
         const raw = String(payload || "DOC|home").trim();
-        let modPart = "DOC";
-        let catPart = "home";
+        let modPart;
+        let catPart;
         if (raw.startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
           modPart = String(parsed.module || "DOC").trim();
@@ -667,7 +668,7 @@
       },
       detect_format: (payload) => {
         const raw = String(payload || "").trim();
-        let fileName = "document.docx";
+        let fileName;
         if (raw.startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
           fileName = String(parsed.fileName || "document.docx");
@@ -684,10 +685,10 @@
       },
       convert_document_format: (payload) => {
         const raw = String(payload || "docx->hwpx|문서|본문");
-        let src = "docx";
-        let dst = "hwpx";
-        let title = "통합_변환_문서";
-        let body = "본문 텍스트";
+        let src;
+        let dst;
+        let title;
+        let body;
         let structuredTables = null;
         if (raw.trimStart().startsWith("{")) {
           const parsed = parseRequiredRpcJsonObject(raw);
@@ -709,12 +710,12 @@
           body = String(parsed.body || "본문 텍스트");
           // Structured save payload (PD-073): literal text only, never parsed as markup.
           if (Array.isArray(parsed.blocks)) {
-            structuredTables = parsed.blocks.filter((b) => b && b.type === "table").length;
+            structuredTables = parsed.blocks.filter((b) => b?.type === "table").length;
             body = parsed.blocks
               .map((b) =>
-                b && b.type === "table"
+                b?.type === "table"
                   ? (b.rows || []).map((r) => r.map((c) => (typeof c === "string" ? c : c.value || c.text || "")).join("\t")).join("\n")
-                  : ((b && b.runs) || []).map((r) => String(r.text || "")).join("")
+                  : (b?.runs || []).map((r) => String(r.text || "")).join("")
               )
               .join("\n");
           } else if (Array.isArray(parsed.sheets)) {
@@ -750,9 +751,10 @@
         const srcBytes = rawBytes + (containerOverhead[src] ?? 256);
         const dstBytes = rawBytes + (containerOverhead[dst] ?? 256);
         const b64 = encodeUtf8Base64(title + "\n" + body);
-        const tableCount = structuredTables !== null ? structuredTables : body.includes("[[TABLE_ROW]]\t")
-          ? Math.max(1, (body.match(/\[\[TABLE_NEW\]\]/g) || []).length)
-          : 0;
+        let tableCount = structuredTables;
+        if (tableCount === null) {
+          tableCount = body.includes("[[TABLE_ROW]]\t") ? Math.max(1, (body.match(/\[\[TABLE_NEW\]\]/g) || []).length) : 0;
+        }
         return {
           sourceFormat: src,
           targetFormat: dst,

@@ -603,7 +603,7 @@ impl PdfSerializer {
                         break;
                     }
                     let tok = &bytes[p..k];
-                    if tok == b"n" || tok == b"f" || tok.iter().all(|b| b.is_ascii_digit()) {
+                    if tok == b"n" || tok == b"f" || tok.iter().all(u8::is_ascii_digit) {
                         p = k;
                     } else {
                         break;

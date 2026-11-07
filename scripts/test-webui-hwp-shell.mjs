@@ -32,7 +32,9 @@ class FakeElement {
   setAttribute(k, v) { this.attrs.set(k, String(v)); }
   getAttribute(k) { return this.attrs.get(k) ?? null; }
   appendChild(kid) { this.children.push(kid); return kid; }
-  remove() {}
+  remove() {
+    /* detached-node stub: nothing to detach in this fake */
+  }
   addEventListener(type, fn) { this.listeners.set(type, fn); }
   fire(type) { this.listeners.get(type)?.(); }
 }
@@ -119,7 +121,7 @@ test("the editor's 파일 menu forwards only whitelisted shell commands, re-chec
   send({ command: "exec" });
   send({ command: "../open" });
   send({ command: "recent" });
-  send({ command: "recent", id: "C:\\Users\\me\\a.hwp" });
+  send({ command: "recent", id: String.raw`C:\Users\me\a.hwp` });
   send({ command: "recent", id: "../../x" });
   send({ command: "save-as", format: "exe" });
   send({ command: ["save"] });
@@ -191,7 +193,7 @@ test("the shell theme is passed to the editor at start and follows later changes
 
 test("system theme leaves the frame URL alone, recents travel as id and name only", async () => {
   const { api, frames, requests } = loadHost();
-  await api.setShellContext({ recents: [{ id: "a1", name: "보고서.hwp", path: "C:\\x\\보고서.hwp" }, { id: "../bad", name: "x" }, { id: "b2", name: "" }] });
+  await api.setShellContext({ recents: [{ id: "a1", name: "보고서.hwp", path: String.raw`C:\x\보고서.hwp` }, { id: "../bad", name: "x" }, { id: "b2", name: "" }] });
   await api.onModuleActivated("HWP");
   await settle();
   assert.ok(!/theme=/.test(frames[0].getAttribute("src")));
@@ -239,7 +241,7 @@ test("shell notices become toasts while the editor is active, and stay in the st
   const app = document.getElementById("app");
   const fb = document.getElementById("status-command-feedback");
   const toast = document.getElementById("shell-toast");
-  assert.ok(toast && toast.hidden, "toast element exists and starts hidden");
+  assert.ok(toast?.hidden, "toast element exists and starts hidden");
   assert.equal(toast.getAttribute("role"), "status");
   fb.textContent = "일반 안내";
   assert.equal(fb.textContent, "일반 안내");
@@ -273,8 +275,6 @@ test("status bar keeps page, position, input mode, file name, message and zoom o
 
 test("start cards use one SVG icon per format with a subtle module accent", async () => {
   const { document } = await createWorkspaceHarness({ search: "?module=START&win=w-start-icons" });
-  const icons = globalThis.__EASYOFFICE_ICONS__ || (await import("node:module")).createRequire(import.meta.url)(fileURLToPath(new URL("icons.js", UI_DIR)));
-  void icons;
   const names = {};
   for (const card of document.querySelectorAll(".start-card")) {
     names[card.dataset.windowNew] = card.querySelector(".start-card-icon").dataset.icon;
@@ -282,7 +282,7 @@ test("start cards use one SVG icon per format with a subtle module accent", asyn
   assert.equal(new Set(Object.values(names)).size, Object.keys(names).length, "every card has its own icon");
   assert.deepEqual(Object.keys(names).sort((a, b) => a.localeCompare(b)), ["CONV", "DOC", "HWP", "PDF", "SHEET", "SLIDE"]);
   const source = read("icons.js");
-  for (const name of Object.values(names)) assert.ok(new RegExp(`"?${name}"?:\\s*\\[`).test(source), `${name} is drawn in icons.js`);
+  for (const name of Object.values(names)) assert.ok(new RegExp(String.raw`"?${name}"?:\s*\[`).test(source), `${name} is drawn in icons.js`);
   for (const kind of ["DOC", "HWP", "SHEET", "SLIDE", "PDF"]) {
     assert.ok(new RegExp(String.raw`\.start-card\[data-window-new="${kind}"\]\s*\{\s*--card-accent:\s*var\(--eo-accent-`).test(ALL_CSS), `${kind} accent`);
   }

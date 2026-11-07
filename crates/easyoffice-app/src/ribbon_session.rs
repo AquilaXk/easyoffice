@@ -159,7 +159,7 @@ fn with_registry<R>(f: impl FnOnce(&mut RibbonSessionRegistry) -> R) -> R {
     let mut guard = RIBBON_SESSIONS
         .get_or_init(|| Mutex::new(RibbonSessionRegistry::default()))
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     f(&mut guard)
 }
 

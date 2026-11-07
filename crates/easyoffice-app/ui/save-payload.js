@@ -64,14 +64,14 @@
 
   function parseTableNumber(text) {
     const cleaned = String(text || "").replaceAll(",", "").replaceAll(/\s+/g, "");
-    if (!cleaned || !/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(cleaned)) return null;
+    if (!cleaned || !/^[+-]?(\d+(?:\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(cleaned)) return null;
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : null;
   }
 
   function formatTableNumber(n) {
     if (Number.isInteger(n) && Math.abs(n) < 1e15) return String(n);
-    return n.toFixed(10).replace(/0+$/, "").replace(/\.$/, "");
+    return n.toFixed(10).replace(/(?<!0)0+$/, "").replace(/\.$/, "");
   }
 
   function parseTableFormula(text) {
@@ -139,7 +139,7 @@
       const runs = cur.runs;
       if (runs.length > 0) {
         runs[0].text = runs[0].text.replace(/^\s+/, "");
-        runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/\s+$/, "");
+        runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/(?<!\s)\s+$/, "");
       }
       const kept = runs.filter((r) => r.text.length > 0);
       if (kept.length > 0) {
@@ -202,10 +202,12 @@
       flush();
       const headingMatch = /^H([1-6])$/.exec(tag);
       const listParent = tag === "LI" ? node.parentElement : null;
+      let nextList = ctx.list;
+      if (listParent) nextList = (listParent.tagName || "").toUpperCase() === "OL" ? "ordered" : "bullet";
       const nextCtx = {
         align: normalizeAlign(node.style?.textAlign) || ctx.align,
         heading: headingMatch ? Number(headingMatch[1]) : ctx.heading,
-        list: listParent ? ((listParent.tagName || "").toUpperCase() === "OL" ? "ordered" : "bullet") : ctx.list,
+        list: nextList,
       };
       Array.from(node.childNodes || []).forEach((child) => walk(child, nextCtx, nextFmt));
       flush();
@@ -262,19 +264,24 @@
       .map((index) => ({ index, widthPx: Math.round(Number(widths[index])) }));
   }
 
+  const KNOWN_DOC_EXTENSIONS = [
+    "docx?", "hwpx?", "hwtx?", "hwt", "xlsx?", "ods", "csv", "tsv", "pptx?", "ppsx", "odp", "odt", "pdf", "rtf", "md", "txt", "pages",
+  ];
+  const KNOWN_DOC_EXT_RE = new RegExp(String.raw`\.(?:${KNOWN_DOC_EXTENSIONS.join("|")})$`, "i");
+
   // File name from the document/tab title, safe on Windows and macOS: no extension, no reserved
   // characters or device names, no trailing dots/spaces, at most 120 characters.
   function sanitizeFileBaseName(rawTitle, fallback) {
     let name = String(rawTitle || "")
       .replace(/×$/, "")
       .trim()
-      .replace(/\.(docx?|hwpx?|hwtx?|hwt|xlsx?|ods|csv|tsv|pptx?|ppsx|odp|odt|pdf|rtf|md|txt|pages)$/i, "");
+      .replace(KNOWN_DOC_EXT_RE, "");
     name = name
       .replaceAll(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, "_")
       .replaceAll(/\s+/g, " ")
       .replace(/^[\s.]+/, "")
-      .replace(/[\s.]+$/, "");
-    if (Array.from(name).length > 120) name = Array.from(name).slice(0, 120).join("").replace(/[\s.]+$/, "");
+      .replace(/(?<![\s.])[\s.]+$/, "");
+    if (Array.from(name).length > 120) name = Array.from(name).slice(0, 120).join("").replace(/(?<![\s.])[\s.]+$/, "");
     if (WINDOWS_RESERVED.test(name.split(".")[0] || "")) name = "_" + name;
     return name || fallback;
   }

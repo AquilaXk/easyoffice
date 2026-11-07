@@ -35,8 +35,8 @@ function sampleColor(x, y) {
 function insideRoundedTile(x, y) {
   const r = 6;
   if (x < 0 || y < 0 || x > 32 || y > 32) return false;
-  const cx = x < r ? r : x > 32 - r ? 32 - r : x;
-  const cy = y < r ? r : y > 32 - r ? 32 - r : y;
+  const cx = Math.min(Math.max(x, r), 32 - r);
+  const cy = Math.min(Math.max(y, r), 32 - r);
   return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
 }
 

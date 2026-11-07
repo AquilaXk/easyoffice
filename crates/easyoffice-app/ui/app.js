@@ -767,7 +767,7 @@
         docTypingSnapshotEpoch !== ribbonHistory.getHistoryMutationEpoch() &&
         docTabStore[activeModule]
       ) {
-        const prevDocTab = JSON.parse(JSON.stringify(docTabStore[activeModule]));
+        const prevDocTab = structuredClone(docTabStore[activeModule]);
         const preSnap = ribbonHistory.captureWorkspaceSnapshot(false);
         preSnap.docTabs[activeModule] = prevDocTab;
         ribbonHistory.pushRawUndoSnapshot(preSnap);

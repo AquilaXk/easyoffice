@@ -43,7 +43,7 @@ pub use smart_tools::*;
 pub struct EasyOfficeIpcRouter;
 
 impl EasyOfficeIpcRouter {
-    pub const RIBBON_CATEGORIES: [&'static str; 7] = [
+    pub const RIBBON_CATEGORIES: [&str; 7] = [
         "home",
         "insert",
         "layout",
@@ -53,7 +53,7 @@ impl EasyOfficeIpcRouter {
         "view",
     ];
 
-    pub const RECENT_FORMAT_FILTERS: [&'static str; 7] =
+    pub const RECENT_FORMAT_FILTERS: [&str; 7] =
         ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"];
 
     pub fn dispatch(command: &str, payload: &str) -> Result<String, EasyOfficeError> {

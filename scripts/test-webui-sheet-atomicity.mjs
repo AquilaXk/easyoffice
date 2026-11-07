@@ -429,15 +429,15 @@ test("failed ribbon async prep (autosum, smart stats, security audit) preserves 
             const f2Cell = (req.cells || []).find(
               (c) => c.sheet === "Sheet1" && c.cell === "F2"
             );
-            if (f2Cell && f2Cell.value === "=B2+100") return "1250";
-            if (f2Cell && f2Cell.value === "=B2+999") return "2149";
+            if (f2Cell?.value === "=B2+100") return "1250";
+            if (f2Cell?.value === "=B2+999") return "2149";
             return "4950";
           }
           if (t.cell === "A9") {
             const a9Cell = (req.cells || []).find(
               (c) => c.sheet === "Sheet1" && c.cell === "A9"
             );
-            if (a9Cell && a9Cell.value.includes("010-****-****")) {
+            if (a9Cell?.value.includes("010-****-****")) {
               return "연락처 010-****-****";
             }
             return "연락처 010-1234-5678";
@@ -749,7 +749,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
       }
       if (command === "execute_ribbon_command") {
         const cmdId = String(JSON.parse(args.payload).commandId || "");
-        rustUndo.push(JSON.parse(JSON.stringify(rustState)));
+        rustUndo.push(structuredClone(rustState));
         rustRedo.length = 0;
         rustState.executedCount += 1;
         if (cmdId.endsWith("-home-bold")) {
@@ -768,7 +768,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
       if (command === "undo_ribbon_command") {
         const prev = rustUndo.pop();
         if (prev) {
-          rustRedo.push(JSON.parse(JSON.stringify(rustState)));
+          rustRedo.push(structuredClone(rustState));
           Object.assign(rustState, prev);
         }
         return JSON.stringify({
@@ -788,7 +788,7 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
         const targetValues = (req.targets || []).map((t) => {
           if (t.sheet === "Sheet1" && t.cell === "F2") {
             const b2 = (req.cells || []).find((c) => c.sheet === "Sheet1" && c.cell === "B2");
-            if (b2 && b2.value === "2000") return "5800";
+            if (b2?.value === "2000") return "5800";
           }
           if (t.sheet === "Sheet1" && t.cell === "D2") {
             return "777";
@@ -843,7 +843,6 @@ test("JSON-only real-backend IPC syncs state, toggles per-cell inline styles ind
   b2.textContent = "2000";
   b2.dispatchEvent({ type: "input", target: b2 });
 
-  const sheetTabBar = document.getElementById("sheet-tab-bar");
   const addBtn = document.getElementById("btn-add-sheet-tab");
   const paddedTab = document.createElement("button");
   paddedTab.className = "sheet-tab-btn";
@@ -953,7 +952,7 @@ test("issue #107: offline evaluator mirrors #NUM! circular flag, no demo seed, a
 });
 
 test("issue #107: circular reference shows #NUM! in the grid and a status-bar warning", async () => {
-  const { document, userClick } = await createWorkspaceHarness();
+  const { document } = await createWorkspaceHarness();
   switchModule(document, "SHEET");
   await flushAsyncTurns();
 

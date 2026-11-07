@@ -120,7 +120,7 @@ pub fn parse_cli_args<S: AsRef<str>>(args: &[S]) -> Result<CliCommand, CliError>
                 if serve.is_some() {
                     return Err(CliError::DuplicateOption("--serve".to_string()));
                 }
-                let next = args.get(index + 1).map(|s| s.as_ref());
+                let next = args.get(index + 1).map(S::as_ref);
                 match next {
                     Some(value) if !value.starts_with('-') => {
                         serve = Some(ServePort::Explicit(parse_port(value)?));

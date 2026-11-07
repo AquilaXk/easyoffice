@@ -43,7 +43,7 @@ function main() {
   const fetchArgs = [...sourceOpts, "fetch", "--depth", "1", ...(remote ? [plan.submoduleArgs[2]] : []), source, config.commit];
 
   console.log(`rhwp ${config.version} @ ${config.commit}`);
-  console.log(`sparse patterns:\n${plan.sparse.map((p) => `  ${p}`).join("\n")}`);
+  console.log(`sparse patterns:\n${plan.sparse.map((p) => "  " + p).join("\n")}`);
   if (opts.dryRun) {
     console.log(`would run: git ${fetchArgs.join(" ")} (in ${config.path})`);
     return;

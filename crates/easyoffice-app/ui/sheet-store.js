@@ -16,9 +16,9 @@
     if (!raw) return "''";
     const needsQuote =
       raw !== raw.trim() ||
-      !/^[A-Za-z0-9_]+$/.test(raw) ||
-      /^[0-9]/.test(raw) ||
-      /^[A-Za-z]{1,3}[0-9]+$/.test(raw) ||
+      !/^\w+$/.test(raw) ||
+      /^\d/.test(raw) ||
+      /^[A-Za-z]{1,3}\d+$/.test(raw) ||
       /^(?:TRUE|FALSE)$/i.test(raw);
     if (needsQuote) {
       return "'" + raw.replaceAll("'", "''") + "'";
@@ -38,7 +38,56 @@
 
   function cloneStore(sheets) {
     const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
-    return typeof fast === "function" ? fast(sheets || {}) : JSON.parse(JSON.stringify(sheets || {}));
+    return typeof fast === "function" ? fast(sheets || {}) : structuredClone(sheets || {});
+  }
+
+  function sheetCellDataChanged(sheetsA, sheetsB) {
+    const keysA = Object.keys(sheetsA || {});
+    const keysB = Object.keys(sheetsB || {});
+    if (keysA.length !== keysB.length) return true;
+    for (const sh of keysA) {
+      if (!Object.hasOwn(sheetsB || {}, sh)) return true;
+      const mapA = sheetsA[sh] || {};
+      const mapB = sheetsB[sh] || {};
+      const refsA = Object.keys(mapA);
+      const refsB = Object.keys(mapB);
+      if (refsA.length !== refsB.length) return true;
+      for (const ref of refsA) {
+        const ea = mapA[ref];
+        const eb = mapB[ref];
+        if (
+          !eb ||
+          (ea?.value || "") !== (eb?.value || "") ||
+          (ea?.formula || "") !== (eb?.formula || "")
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function extractEvaluatedTargetValue(
+    rpcRes,
+    targetValues,
+    batchValues,
+    target,
+    idx,
+    totalTargets
+  ) {
+    if (targetValues && idx < targetValues.length) {
+      return targetValues[idx];
+    }
+    if (batchValues) {
+      return (
+        batchValues[target.key] ??
+        batchValues[asciiUpper(target.sheet) + "!" + asciiUpper(target.cell)]
+      );
+    }
+    if (totalTargets === 1 && rpcRes?.value !== undefined) {
+      return rpcRes.value;
+    }
+    return undefined;
   }
 
   function createSheetStoreHelpers(deps) {
@@ -75,57 +124,6 @@
         const snap = sheetsMap[shName] || {};
         return Object.keys(snap).some((ref) => isFormulaStr(snap[ref]?.formula || ""));
       });
-    }
-
-    function sheetCellDataChanged(sheetsA, sheetsB) {
-      const keysA = Object.keys(sheetsA || {});
-      const keysB = Object.keys(sheetsB || {});
-      if (keysA.length !== keysB.length) return true;
-      for (let i = 0; i < keysA.length; i += 1) {
-        const sh = keysA[i];
-        if (!Object.prototype.hasOwnProperty.call(sheetsB || {}, sh)) return true;
-        const mapA = sheetsA[sh] || {};
-        const mapB = sheetsB[sh] || {};
-        const refsA = Object.keys(mapA);
-        const refsB = Object.keys(mapB);
-        if (refsA.length !== refsB.length) return true;
-        for (let j = 0; j < refsA.length; j += 1) {
-          const ref = refsA[j];
-          const ea = mapA[ref];
-          const eb = mapB[ref];
-          if (
-            !eb ||
-            (ea?.value || "") !== (eb?.value || "") ||
-            (ea?.formula || "") !== (eb?.formula || "")
-          ) {
-            return true;
-          }
-        }
-      }
-      return false;
-    }
-
-    function extractEvaluatedTargetValue(
-      rpcRes,
-      targetValues,
-      batchValues,
-      target,
-      idx,
-      totalTargets
-    ) {
-      if (targetValues && idx < targetValues.length) {
-        return targetValues[idx];
-      }
-      if (batchValues) {
-        return (
-          batchValues[target.key] ??
-          batchValues[asciiUpper(target.sheet) + "!" + asciiUpper(target.cell)]
-        );
-      }
-      if (totalTargets === 1 && rpcRes && rpcRes.value !== undefined) {
-        return rpcRes.value;
-      }
-      return undefined;
     }
 
     async function computeEvaluatedSheetStore(baseSheets, defaultSheet, extraTarget = null) {
@@ -188,7 +186,7 @@
         );
         if (rawExtra !== undefined && rawExtra !== null) {
           extraValue = String(rawExtra);
-        } else if (rpcRes && rpcRes.value !== undefined && rpcRes.value !== null) {
+        } else if (rpcRes?.value !== undefined && rpcRes.value !== null) {
           extraValue = String(rpcRes.value);
         } else {
           extraValue = sheets[extraTarget.sheet]?.[extraTarget.cell]?.value ?? "";
@@ -214,6 +212,16 @@
       const batchValues =
         rpcRes && typeof rpcRes.values === "object" && rpcRes.values ? rpcRes.values : null;
       return { rpcRes, formulaTargets, targetValues, batchValues };
+    }
+
+    function assertValidScrubResponse(origText, res) {
+      if (
+        !res ||
+        typeof res.scrubbedText !== "string" ||
+        (origText.length > 0 && res.scrubbedText.length === 0)
+      ) {
+        throw new Error("개인정보 마스킹 응답 검증에 실패했습니다.");
+      }
     }
 
     async function scrubSheetStoreMap(baseSheets, activeSheetName, trackAsyncFn) {
@@ -249,16 +257,6 @@
         Promise.all(plainEntries.map((entry) => invokeIpc("scrub_pii", entry.value))),
         Promise.all(literalInputs.map((seg) => invokeIpc("scrub_pii", seg.text))),
       ]);
-
-      function assertValidScrubResponse(origText, res) {
-        if (
-          !res ||
-          typeof res.scrubbedText !== "string" ||
-          (origText.length > 0 && res.scrubbedText.length === 0)
-        ) {
-          throw new Error("개인정보 마스킹 응답 검증에 실패했습니다.");
-        }
-      }
 
       plainResults.forEach((res, idx) => {
         assertValidScrubResponse(plainEntries[idx].value, res);

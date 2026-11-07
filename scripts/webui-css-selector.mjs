@@ -175,7 +175,7 @@ function matchesAttribute(el, attr) {
 }
 
 function matchesSimple(el, spec, scopeEl) {
-  if (!el || el.nodeType !== 1) return false;
+  if (el?.nodeType !== 1) return false;
   if (spec.tag && spec.tag !== "*" && el.tagName !== spec.tag) return false;
   if (spec.id && el.id !== spec.id) return false;
   for (const cls of spec.classes) {
@@ -235,12 +235,12 @@ function tokenizeComplexSelector(sel, scopeEl) {
         buf = "";
       }
       if (ch === ">") {
-        if (tokens.length > 0 && tokens[tokens.length - 1].type === "comb") {
-          tokens[tokens.length - 1].comb = ">";
+        if (tokens.length > 0 && tokens.at(-1).type === "comb") {
+          tokens.at(-1).comb = ">";
         } else {
           tokens.push({ type: "comb", comb: ">" });
         }
-      } else if (tokens.length > 0 && tokens[tokens.length - 1].type !== "comb") {
+      } else if (tokens.length > 0 && tokens.at(-1).type !== "comb") {
         tokens.push({ type: "comb", comb: " " });
       }
       continue;
@@ -250,14 +250,14 @@ function tokenizeComplexSelector(sel, scopeEl) {
   if (buf.trim()) {
     pushSelectorToken(tokens, buf);
   }
-  if (tokens.length > 0 && tokens[tokens.length - 1].type === "comb") {
+  if (tokens.length > 0 && tokens.at(-1).type === "comb") {
     tokens.pop();
   }
   return { scopeEl, tokens };
 }
 
 function matchesToken(el, tok, scopeEl) {
-  if (!el || el.nodeType !== 1 || !tok) return false;
+  if (el?.nodeType !== 1 || !tok) return false;
   if (tok.type === "scope") return el === scopeEl;
   if (tok.type === "sel") return matchesSimple(el, tok.spec, scopeEl);
   return false;
@@ -267,7 +267,7 @@ function matchChainAt(el, idx, tokens, scopeEl) {
   if (idx < 0 || !matchesToken(el, tokens[idx], scopeEl)) return false;
   if (idx === 0) return true;
   const combTok = tokens[idx - 1];
-  if (!combTok || combTok.type !== "comb") return false;
+  if (combTok?.type !== "comb") return false;
   if (combTok.comb === ">") {
     return Boolean(el.parentElement) && matchChainAt(el.parentElement, idx - 2, tokens, scopeEl);
   }

@@ -156,7 +156,7 @@ fn opf_meta_values(hpf_xml: &str) -> Vec<(String, String)> {
 }
 
 impl HwpxCodec {
-    pub const MIMETYPE_HWPX: &'static str = "application/hwp+zip";
+    pub const MIMETYPE_HWPX: &str = "application/hwp+zip";
 
     pub fn pack(payload: &HwpxPayload) -> Result<Vec<u8>, EasyOfficeError> {
         let mut sec = SectionWriter::new();

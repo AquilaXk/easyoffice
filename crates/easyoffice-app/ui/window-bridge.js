@@ -67,6 +67,10 @@
       item.name !== "" && MODULES.includes(item.kind);
   }
 
+  function popupUrl(kind, id, handoff) {
+    return "?module=" + kind + "&win=" + id + (handoff ? "&handoff=" + handoff : "");
+  }
+
   function createWindowBridge(deps) {
     const { document } = deps;
     const env = deps.env || host;
@@ -85,9 +89,9 @@
     let closePrompt = null;
 
     // Window commands exist only for managed windows; an unmanaged host never calls them.
-    const desktopAvailable = () => managed && Boolean(desktop && desktop.isAvailable());
+    const desktopAvailable = () => managed && Boolean(desktop?.isAvailable());
     const popupAvailable = () => {
-      const proto = env.location && env.location.protocol;
+      const proto = env.location?.protocol;
       return managed && (proto === "http:" || proto === "https:") && typeof env.open === "function";
     };
     const canSpawnWindows = () => managed && (desktopAvailable() || popupAvailable());
@@ -148,10 +152,6 @@
 
     // ---- spawning windows ------------------------------------------------------------------
 
-    function popupUrl(kind, id, handoff) {
-      return "?module=" + kind + "&win=" + id + (handoff ? "&handoff=" + handoff : "");
-    }
-
     function openPopup(kind, handoff) {
       const id = randomId(env);
       env.open(popupUrl(kind, id, handoff), "eo-" + id, POPUP_FEATURES);
@@ -178,7 +178,7 @@
     }
 
     async function spawnWithFile(file) {
-      const fileName = baseName(file && file.name);
+      const fileName = baseName(file?.name);
       const kind = kindForFileName(fileName);
       if (!kind) throw new Error("지원하지 않는 파일 형식입니다 (" + (fileName || "이름 없음") + ")");
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -192,7 +192,7 @@
         const input = document.createElement("input");
         input.type = "file";
         input.addEventListener("change", () => {
-          const file = input.files && input.files[0];
+          const file = input.files?.[0];
           if (!file) return resolve({ status: "cancelled" });
           spawnWithFile(file).then(() => resolve({ status: "opened" }), reject);
           return undefined;
@@ -225,7 +225,7 @@
         if (!res || typeof res.base64 !== "string" || !res.name) return null;
         const bin = env.atob(res.base64);
         const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.codePointAt(i);
         return { name: baseName(res.name), bytes };
       }
       const opener = env.opener;
@@ -347,7 +347,7 @@
     // ---- DOM -------------------------------------------------------------------------------
 
     function report(promise, label) {
-      promise.catch((err) => feedback(label + ": " + ((err && err.message) || String(err))));
+      promise.catch((err) => feedback(label + ": " + (err?.message || String(err))));
     }
 
     function bindUi() {
@@ -366,20 +366,20 @@
         });
       }
       env.__EASYOFFICE_CLOSE_REQUEST__ = managed ? () => requestClose() : undefined;
-      if (typeof env.__EASYOFFICE_TAKE_HANDOFF__ === "undefined") env.__EASYOFFICE_TAKE_HANDOFF__ = takeHandoff;
+      if (env.__EASYOFFICE_TAKE_HANDOFF__ === undefined) env.__EASYOFFICE_TAKE_HANDOFF__ = takeHandoff;
     }
 
     // Menu, start screen and Ctrl+O open files in a NEW window (returns whether the bridge handled it).
     function requestOpenFile() {
       if (!canSpawnWindows()) return false;
-      openFile().catch((err) => feedback("파일 열기 실패: " + ((err && err.message) || String(err))));
+      openFile().catch((err) => feedback("파일 열기 실패: " + (err?.message || String(err))));
       return true;
     }
 
     // Picker and drop in the --serve emulation spawn a window too; the desktop shell handles drops in Rust.
     function routeFile(file) {
       if (!canSpawnWindows() || desktopAvailable()) return false;
-      spawnWithFile(file).catch((err) => feedback("파일 열기 실패: " + ((err && err.message) || String(err))));
+      spawnWithFile(file).catch((err) => feedback("파일 열기 실패: " + (err?.message || String(err))));
       return true;
     }
 
@@ -409,7 +409,7 @@
         if (!bar) break;
         bar.addEventListener(type, (ev) => {
           const el = ev.target;
-          if (el && el.tagName === "SPAN" && el.id && el.textContent) el.setAttribute("title", el.textContent.trim());
+          if (el?.tagName === "SPAN" && el.id && el.textContent) el.setAttribute("title", el.textContent.trim());
         });
       }
     }
@@ -426,7 +426,7 @@
       }
       await runHwpSmoke();
       await newDocument("DOC").catch((err) =>
-        invokeIpc("scrub_pii", "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_FAIL 두 번째 창: " + ((err && err.message) || String(err))).catch(() => null)
+        invokeIpc("scrub_pii", "EASYOFFICE_SMOKE_HWP_ROUNDTRIP_FAIL 두 번째 창: " + (err?.message || String(err))).catch(() => null)
       );
     }
 

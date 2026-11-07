@@ -341,8 +341,7 @@
       }
     }
     if (!parsed || typeof parsed !== "object") return localRibbonState;
-    for (let i = 0; i < RIBBON_STATE_SYNC_KEYS.length; i += 1) {
-      const key = RIBBON_STATE_SYNC_KEYS[i];
+    for (const key of RIBBON_STATE_SYNC_KEYS) {
       if (parsed[key] === undefined) continue;
       if (key === "activeModule") {
         const modCode = normalizeModuleCode(parsed.activeModule);

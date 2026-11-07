@@ -46,7 +46,7 @@ function accessibleName(el, document) {
   }
   if (el.id) {
     const label = document.querySelectorAll("label").find((l) => l.getAttribute("for") === el.id);
-    if (label && label.textContent.trim()) return label.textContent.trim();
+    if (label?.textContent.trim()) return label.textContent.trim();
   }
   const wrapping = el.closest("label");
   if (wrapping && textWithoutIcons(wrapping).trim()) return textWithoutIcons(wrapping).trim();
@@ -85,7 +85,7 @@ test("icon registry: one frozen set of safe 24px stroke icons", () => {
   assert.ok(names.length >= 40, `enough icons (${names.length})`);
   for (const [name, paths] of Object.entries(api.ICONS)) {
     assert.ok(/^[a-z0-9-]+$/.test(name), name);
-    for (const d of [].concat(paths)) assert.match(d, /^[MmLlHhVvCcSsQqTtAaZz0-9\s.,-]+$/, `${name} path data is plain`);
+    for (const d of [paths].flat()) assert.match(d, /^[MmLlHhVvCcSsQqTtAaZz0-9\s.,-]+$/, `${name} path data is plain`);
   }
   for (const needed of ["save", "undo", "redo", "search", "sun", "moon", "chevron-down", "bold", "italic", "underline", "zoom-in", "zoom-out", "plus", "close"]) {
     assert.ok(names.includes(needed), needed);
@@ -169,8 +169,8 @@ test("command palette is an overlay panel and the slash icon cannot overlap the 
   const slash = cssRule(".cp-slash");
   assert.ok(hasDecl(slash, "position", "absolute"));
   const input = cssRule(".cmd-input.cp-input");
-  const pad = /padding(?:-left)?\s*:\s*(?:[\d.]+px\s+[\d.]+px\s+[\d.]+px\s+)?([\d.]+)px/.exec(input);
-  assert.ok(pad && Number(pad[1]) >= 36, `input left padding clears the icon (${pad && pad[1]})`);
+  const pad = /padding(?:-left)?\s*:\s*(?:(?:[\d.]+px\s+){3})?([\d.]+)px/.exec(input);
+  assert.ok(pad && Number(pad[1]) >= 36, `input left padding clears the icon (${pad?.[1]})`);
 });
 
 test("toolbar labels share one size and the presenter panel never wraps its labels", () => {

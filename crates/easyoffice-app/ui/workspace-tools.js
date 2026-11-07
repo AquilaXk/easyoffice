@@ -39,6 +39,19 @@
     textTarget.insertBefore(textTarget.ownerDocument.createTextNode(prefix), textTarget.childNodes[0] ?? null);
   }
 
+  function describeConversionSpec(res) {
+    const limited = res?.compatibility === "limited" ? " · 호환성 제한: " + (res.compatibilityWarning || "") : "";
+    const notes = Array.isArray(res?.warnings) && res.warnings.length > 0 ? " · 참고: " + res.warnings.join(" ") : "";
+    return (res?.specification || "") + limited + notes;
+  }
+
+  function describeDeliveryFailure(delivery, prefix) {
+    if (delivery?.ok) return "";
+    if (delivery?.cancelled) return prefix + "저장 취소: 저장 위치를 선택하지 않았습니다";
+    if (delivery?.error) return prefix + "파일 저장 실패: " + delivery.error;
+    return prefix + "다운로드 실패: 변환 결과 파일을 받지 못했습니다";
+  }
+
   function createWorkspaceTools(deps, panelHooks) {
     const {
       document,
@@ -150,19 +163,13 @@
       if (getActiveModule() !== "CONV" && name) getWindowBridge?.()?.setDocumentName(name);
     }
 
-    function describeConversionSpec(res) {
-      const limited = res?.compatibility === "limited" ? " · 호환성 제한: " + (res.compatibilityWarning || "") : "";
-      const notes = Array.isArray(res?.warnings) && res.warnings.length > 0 ? " · 참고: " + res.warnings.join(" ") : "";
-      return (res?.specification || "") + limited + notes;
-    }
-
     function triggerBase64Download(base64Data, baseFilename, ext) {
       if (!base64Data) return false;
       try {
         const binStr = host.atob(base64Data);
         const bytes = new Uint8Array(binStr.length);
         for (let i = 0; i < binStr.length; i += 1) {
-          bytes[i] = binStr.charCodeAt(i);
+          bytes[i] = binStr.codePointAt(i);
         }
         const blob = new Blob([bytes], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
@@ -200,13 +207,6 @@
       }
       const ok = triggerBase64Download(base64Data, baseFilename, ext);
       return { ok, cancelled: false, name: ok ? fileName : "", error: "" };
-    }
-
-    function describeDeliveryFailure(delivery, prefix) {
-      if (delivery?.ok) return "";
-      if (delivery?.cancelled) return prefix + "저장 취소: 저장 위치를 선택하지 않았습니다";
-      if (delivery?.error) return prefix + "파일 저장 실패: " + delivery.error;
-      return prefix + "다운로드 실패: 변환 결과 파일을 받지 못했습니다";
     }
 
     // Embedded HWP editor: HWP 5.0 bytes exported by the editor itself, same delivery as every save.
@@ -254,7 +254,8 @@
         }
         const b64 = String(res?.convertedBase64 || "");
         if (!failure && !b64) failure = "변환 결과가 비어 있습니다";
-        const delivery = failure ? null : await (curMod === "CONV" ? deliverSavedFile : deliverInPlace)(b64, title, dstExt);
+        const deliver = curMod === "CONV" ? deliverSavedFile : deliverInPlace;
+        const delivery = failure ? null : await deliver(b64, title, dstExt);
         if (delivery?.cancelled) {
           if (fb) fb.textContent = "문서 저장 취소 (" + dstExt.toUpperCase() + "): 저장 위치를 선택하지 않았습니다";
           return false;

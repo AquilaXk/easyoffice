@@ -43,7 +43,7 @@ function run(label, args) {
 }
 
 function failIf(errors, heading) {
-  if (errors.length > 0) throw new Error(`${heading}:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+  if (errors.length > 0) throw new Error(`${heading}:\n${errors.map((e) => "  - " + e).join("\n")}`);
 }
 
 function writeAssetManifest(dir) {

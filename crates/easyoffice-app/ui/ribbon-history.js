@@ -19,6 +19,15 @@
     ["-home-underline", "underline"],
   ];
 
+  function cloneSheets(sheets) {
+    const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
+    return typeof fast === "function" ? fast(sheets) : structuredClone(sheets);
+  }
+
+  function normalizeRibbonStyleKey(rawStyle) {
+    return String(rawStyle || "").toLowerCase().includes("hangul") ? "hangul" : "standard";
+  }
+
   function createRibbonHistory(deps) {
     const {
       document,
@@ -103,11 +112,6 @@
       if (getWindowBridge) getWindowBridge().applyTitles(titles);
     }
 
-    function cloneSheets(sheets) {
-      const fast = host.__EASYOFFICE_SHEET_GRID_UTILS__?.cloneSheetStore;
-      return typeof fast === "function" ? fast(sheets) : JSON.parse(JSON.stringify(sheets));
-    }
-
     function captureWorkspaceSnapshot(isRibbon = false) {
       const sheetController = getSheetController();
       const workspacePanels = getWorkspacePanels();
@@ -128,11 +132,11 @@
         pdfStudio: workspacePanels.capturePdfStudioState(),
         viewState: workspacePanels.captureWorkspaceViewState(),
         theme: document.documentElement.dataset.theme || "light",
-        docTabs: JSON.parse(JSON.stringify(docTabStore)),
+        docTabs: structuredClone(docTabStore),
         sheets: cloneSheets(sheetDataStore),
-        sheetRowCounts: JSON.parse(JSON.stringify(sheetRowCounts)),
-        slides: JSON.parse(JSON.stringify(slideDeckState)),
-        ribbonState: JSON.parse(JSON.stringify(localRibbonState)),
+        sheetRowCounts: structuredClone(sheetRowCounts),
+        slides: structuredClone(slideDeckState),
+        ribbonState: structuredClone(localRibbonState),
         tabTitles: readTabTitles(),
       };
     }
@@ -165,13 +169,9 @@
       const docEditorEl = document.getElementById("doc-editor");
       if (hwpNotice) {
         hwpNotice.hidden =
-          mod !== "HWP" || !Boolean(docEditorEl?.classList.contains("manuscript-grid"));
+          mod !== "HWP" || !docEditorEl?.classList.contains("manuscript-grid");
       }
       if (typeof onModuleApplied === "function") onModuleApplied(mod);
-    }
-
-    function normalizeRibbonStyleKey(rawStyle) {
-      return String(rawStyle || "").toLowerCase().includes("hangul") ? "hangul" : "standard";
     }
 
     function applyRibbonStyleDom(rawStyle, categoriesOverride) {
@@ -307,13 +307,13 @@
       const workspacePanels = getWorkspacePanels();
       sheetController.bumpSnapshotEpoch();
       if (snap.docTabs) {
-        docTabStore.DOC = snap.docTabs.DOC ? JSON.parse(JSON.stringify(snap.docTabs.DOC)) : null;
-        docTabStore.HWP = snap.docTabs.HWP ? JSON.parse(JSON.stringify(snap.docTabs.HWP)) : null;
+        docTabStore.DOC = snap.docTabs.DOC ? structuredClone(snap.docTabs.DOC) : null;
+        docTabStore.HWP = snap.docTabs.HWP ? structuredClone(snap.docTabs.HWP) : null;
       }
       if (snap.sheets) {
         const clonedSheets = cloneSheets(snap.sheets);
         const clonedRowCounts = snap.sheetRowCounts
-          ? JSON.parse(JSON.stringify(snap.sheetRowCounts))
+          ? structuredClone(snap.sheetRowCounts)
           : null;
         sheetController.replaceLiveSheetDataStore(clonedSheets, clonedRowCounts);
       }
@@ -321,14 +321,14 @@
         slideDeckState.splice(
           0,
           slideDeckState.length,
-          ...JSON.parse(JSON.stringify(snap.slides))
+          ...structuredClone(snap.slides)
         );
       }
       const targetStyle = normalizeRibbonStyleKey(
         snap.ribbonState?.ribbonStyle || localRibbonState.ribbonStyle
       );
       if (snap.ribbonState) {
-        Object.assign(localRibbonState, JSON.parse(JSON.stringify(snap.ribbonState)));
+        Object.assign(localRibbonState, structuredClone(snap.ribbonState));
       }
       if (backendSyncRes) {
         syncLocalRibbonStateFromBackend(localRibbonState, backendSyncRes);
@@ -424,7 +424,7 @@
           return;
         }
         historyMutationEpoch += 1;
-        const targetSnap = sourceStack[sourceStack.length - 1];
+        const targetSnap = sourceStack.at(-1);
         const currentSnap = captureWorkspaceSnapshot(Boolean(targetSnap.isRibbon));
         currentSnap.ribbonModule = targetSnap.ribbonModule;
         let evaluatedSheets = null;
@@ -784,7 +784,7 @@
             curSlide.lower = prefix + tag;
           }
           workspacePanels.renderSlideDeck(curIdx);
-        } else if (cmdId === "slide-data-sort" && curSlide && curSlide.lower) {
+        } else if (cmdId === "slide-data-sort" && curSlide?.lower) {
           const asc = Boolean(execRes?.sortAscending);
           const parts = curSlide.lower
             .split("·")

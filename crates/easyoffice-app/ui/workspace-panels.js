@@ -95,6 +95,15 @@
 
   const { serializeDomChildren, restoreDomChildren } = host.__EASYOFFICE_SHEET_UTILS__;
 
+  function insertBeforeDocFooter(docEditor, el) {
+    const footer = docEditor.querySelector("footer.doc-page-footer");
+    if (footer && footer.parentElement === docEditor) {
+      footer.before(el);
+    } else {
+      docEditor.appendChild(el);
+    }
+  }
+
   function createWorkspacePanels(deps) {
     const {
       document,
@@ -102,7 +111,6 @@
       sheetDataStore,
       slideDeckState,
       defaultHwpEditorNodes,
-      createEmptySlideStyleFields,
       isExcludedDocChromeElement,
       sheetController,
       getActiveModule,
@@ -691,7 +699,7 @@
     function getFocusedDocBlock(docEditor) {
       if (!docEditor) return null;
       const sel = host.getSelection ? host.getSelection() : null;
-      if (sel && sel.anchorNode) {
+      if (sel?.anchorNode) {
         const block = findEditableDocBlock(sel.anchorNode, docEditor);
         if (block) {
           activeDocBlockEl = block;
@@ -732,15 +740,6 @@
       }
       computeDocTableSummary();
       tools.computeSmartStats();
-    }
-
-    function insertBeforeDocFooter(docEditor, el) {
-      const footer = docEditor.querySelector("footer.doc-page-footer");
-      if (footer && footer.parentElement === docEditor) {
-        footer.before(el);
-      } else {
-        docEditor.appendChild(el);
-      }
     }
 
     function applyDocModuleSpecificDomEffect(cmdId, docEditor, execRes) {
@@ -788,7 +787,7 @@
             const val = node.nodeValue || "";
             if (!val.includes("{{")) return;
             const nextVal = val.replace(/\{\{[^}]+\}\}/g, (m) => {
-              if (Object.prototype.hasOwnProperty.call(mergeMap, m)) {
+              if (Object.hasOwn(mergeMap, m)) {
                 replaced += 1;
                 return mergeMap[m];
               }
@@ -809,7 +808,7 @@
             const raw = el.textContent || "";
             if (!/\{\{[^}]+\}\}/.test(raw)) return;
             const nextText = raw.replace(/\{\{[^}]+\}\}/g, (m) => {
-              if (Object.prototype.hasOwnProperty.call(mergeMap, m)) {
+              if (Object.hasOwn(mergeMap, m)) {
                 replaced += 1;
                 return mergeMap[m];
               }

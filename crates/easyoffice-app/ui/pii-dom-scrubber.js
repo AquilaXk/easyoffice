@@ -41,16 +41,16 @@
   ]);
 
   function isExcludedNonTableDocChrome(el) {
-    if (!el || el.nodeType !== 1) return false;
+    if (el?.nodeType !== 1) return false;
     const tag = (el.tagName || "").toUpperCase();
     if (tag === "FOOTER") return true;
     if (el.id === "hwp-manuscript-preview") return true;
-    if (el.classList && el.classList.contains("doc-table-toolbar")) return true;
+    if (el.classList?.contains("doc-table-toolbar")) return true;
     return false;
   }
 
   function isExcludedDocChromeElement(el) {
-    if (!el || el.nodeType !== 1) return false;
+    if (el?.nodeType !== 1) return false;
     const tag = (el.tagName || "").toUpperCase();
     if (tag === "TABLE") return true;
     return isExcludedNonTableDocChrome(el);
@@ -344,7 +344,7 @@
         }
         const tn = tok.node;
         const block = findNearestScrubBlock(tn, rootEl);
-        const last = groups[groups.length - 1];
+        const last = groups.at(-1);
         if (last && last.block === block && last.lineEpoch === lineEpoch) {
           last.nodes.push(tn);
         } else {

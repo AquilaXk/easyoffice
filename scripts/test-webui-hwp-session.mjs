@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { loadUiModule } from "./test-support/load-ui-module.mjs";
 
 // HWP session (PD-085): open routing, size limit, text-only fallback, HWP/HWPX save choice,
@@ -132,7 +131,8 @@ const hwpBytes = (extra = 4) => new Uint8Array([...HWP_MAGIC, ...new Array(extra
 const feedbackOf = (ctx) => ctx.document.els["status-command-feedback"].textContent;
 const delay = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 
-function recordingDeliver(result = { ok: true, cancelled: false, name: "보고서.hwp", error: "" }) {
+function recordingDeliver(deliverResult) {
+  const result = deliverResult ?? { ok: true, cancelled: false, name: "보고서.hwp", error: "" };
   const deliveries = [];
   const deliver = async (base64, name, ext) => {
     deliveries.push({ base64, name, ext });
@@ -145,7 +145,7 @@ function recordingDeliver(result = { ok: true, cancelled: false, name: "보고�
 
 test("open: detect_format with the file name hint and magic prefix, then loadFile with a transferred buffer", async () => {
   const ctx = load();
-  const res = await ctx.session.openFromBytes("C:\\문서\\계획서.hwp", hwpBytes());
+  const res = await ctx.session.openFromBytes(String.raw`C:\문서\계획서.hwp`, hwpBytes());
   assert.equal(res.ok, true);
   assert.equal(res.module, "HWP");
   assert.equal(ctx.ipc[0].cmd, "detect_format");
@@ -302,7 +302,7 @@ test("save: HWPX verification failure offers HWP; accepting saves HWP, declining
     await ctx.session.openFromBytes("a.hwpx", new Uint8Array([...ZIP_MAGIC, 1]));
     ctx.fake.emit({ reason: "dirty_changed", dirty: true });
     ctx.fake.state.handlers.verifyBytes = async (params) => {
-      const first = ctx.fake.calls.filter((c) => c.method === "exportHwpx").length > 0 && ctx.fake.calls.filter((c) => c.method === "exportHwp").length === 0;
+      const first = ctx.fake.calls.some((c) => c.method === "exportHwpx") && ctx.fake.calls.filter((c) => c.method === "exportHwp").length === 0;
       if (first) throw new Error("hwpx unreadable");
       return { ok: true, pageCount: 1, format: "hwp", params };
     };
@@ -514,6 +514,6 @@ test("converter: the open HWP document is exported by the editor in the chosen s
 test("utils: only the HWP family is routed and the limit is 64 MiB", () => {
   const { utils } = load();
   assert.equal(utils.MAX_HWP_BYTES, 64 * 1024 * 1024);
-  for (const name of ["a.hwp", "a.HWPX", "a.hwt", "dir\\a.hwtx"]) assert.equal(utils.isHwpName(name), true, name);
+  for (const name of ["a.hwp", "a.HWPX", "a.hwt", String.raw`dir\a.hwtx`]) assert.equal(utils.isHwpName(name), true, name);
   for (const name of ["a.docx", "hwp", "a.hwp.txt"]) assert.equal(utils.isHwpName(name), false, name);
 });

@@ -111,7 +111,7 @@ impl DocumentTableModel {
     }
 
     pub fn col_count(&self) -> usize {
-        self.rows.first().map(|r| r.len()).unwrap_or(0)
+        self.rows.first().map_or(0, Vec::len)
     }
 
     pub fn merge_cells(
