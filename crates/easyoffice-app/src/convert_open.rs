@@ -10,10 +10,12 @@
 //! ceilings, path-traversal checks, and XXE/DTD rejection apply to every path.
 
 use easyoffice_formats::{
-    DecodedContent, DecodedDocument, DocumentFormat, EasyOfficeError, OdsUnpacked, RichAlignment,
-    RichBlock, RichListKind, RichParagraph, StrictJsonValue, UniversalFormatConverter,
+    read_sheet_styling, CellStyle, DecodedContent, DecodedDocument, DocumentFormat,
+    EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichListKind, RichParagraph,
+    SheetStyling, StrictJsonValue, UniversalFormatConverter,
 };
 use easyoffice_sheet::PackedCellCoordinate;
+use std::collections::HashSet;
 
 use crate::convert_structured::{encode_structured, StructuredContent};
 use crate::EasyOfficeIpcRouter;
@@ -127,8 +129,73 @@ fn clip_sheets(sheets: &mut [OdsUnpacked], max_rows: Option<u32>, max_cols: Opti
     dropped
 }
 
+/// `{"bold":true,"sizePt":11.25}`: only the set flags and the explicit size.
+fn style_json(style: &CellStyle) -> String {
+    let mut parts: Vec<String> = [
+        (style.bold, "bold"),
+        (style.italic, "italic"),
+        (style.underline, "underline"),
+        (style.strike, "strike"),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, key)| format!("\"{key}\":true"))
+    .collect();
+    if let Some(size) = style.size_pt {
+        parts.push(format!("\"sizePt\":{size}"));
+    }
+    format!("{{{}}}", parts.join(","))
+}
+
+/// Cells of one sheet as JSON: valued cells first, then styled cells without a value.
+fn sheet_cells_json(cells: &[(u32, u32, String)], styling: Option<&SheetStyling>) -> Vec<String> {
+    let style_of = |r: u32, c: u32| styling.and_then(|s| s.cells.get(&(r, c)));
+    let mut out: Vec<String> = cells
+        .iter()
+        .filter_map(|(r, c, raw)| {
+            let a1 = PackedCellCoordinate::new(*r, *c).ok()?.to_a1();
+            let style =
+                style_of(*r, *c).map_or(String::new(), |s| format!(",\"style\":{}", style_json(s)));
+            Some(format!(
+                "{{\"ref\":\"{a1}\",\"raw\":{}{style}}}",
+                json_str(raw)
+            ))
+        })
+        .collect();
+    let valued: HashSet<(u32, u32)> = cells.iter().map(|(r, c, _)| (*r, *c)).collect();
+    if let Some(st) = styling {
+        for (&(r, c), style) in &st.cells {
+            if valued.contains(&(r, c)) {
+                continue;
+            }
+            if let Ok(coord) = PackedCellCoordinate::new(r, c) {
+                out.push(format!(
+                    "{{\"ref\":\"{}\",\"raw\":\"\",\"style\":{}}}",
+                    coord.to_a1(),
+                    style_json(style)
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// Custom column widths as JSON (1-based `index`).
+fn columns_json(styling: Option<&SheetStyling>) -> String {
+    let items: Vec<String> = styling
+        .map(|s| {
+            s.columns
+                .iter()
+                .map(|(c, px)| format!("{{\"index\":{},\"widthPx\":{px}}}", c + 1))
+                .collect()
+        })
+        .unwrap_or_default();
+    items.join(",")
+}
+
 fn decode_response(
     decoded: &DecodedDocument,
+    styling: &[(String, SheetStyling)],
     file_name: &str,
     source_bytes: usize,
     max_rows: Option<u32>,
@@ -158,17 +225,19 @@ fn decode_response(
             let items: Vec<String> = sheets
                 .iter()
                 .map(|(name, cells)| {
-                    let cells: Vec<String> = cells
-                        .iter()
-                        .filter_map(|(r, c, raw)| {
-                            let a1 = PackedCellCoordinate::new(*r, *c).ok()?.to_a1();
-                            Some(format!("{{\"ref\":\"{a1}\",\"raw\":{}}}", json_str(raw)))
-                        })
-                        .collect();
+                    let mut sheet_styling = styling_of(styling, name).cloned();
+                    if let Some(st) = sheet_styling.as_mut() {
+                        st.cells.retain(|(r, c), _| {
+                            max_rows.is_none_or(|m| *r < m) && max_cols.is_none_or(|m| *c < m)
+                        });
+                        st.columns.retain(|c, _| max_cols.is_none_or(|m| *c < m));
+                    }
+                    let cells = sheet_cells_json(cells, sheet_styling.as_ref());
                     format!(
-                        "{{\"name\":{},\"cells\":[{}]}}",
+                        "{{\"name\":{},\"cells\":[{}],\"columns\":[{}]}}",
                         json_str(name),
-                        cells.join(",")
+                        cells.join(","),
+                        columns_json(sheet_styling.as_ref())
                     )
                 })
                 .collect();
@@ -218,13 +287,36 @@ fn decode_response(
     ))
 }
 
-impl From<DecodedContent> for StructuredContent {
-    fn from(content: DecodedContent) -> Self {
-        match content {
-            DecodedContent::Document(doc) => Self::Document(doc),
-            DecodedContent::Workbook(sheets) => Self::Workbook(sheets),
-            DecodedContent::Slides(slides) => Self::Slides(slides),
+fn styling_of<'a>(styling: &'a [(String, SheetStyling)], name: &str) -> Option<&'a SheetStyling> {
+    styling.iter().find(|(n, _)| n == name).map(|(_, s)| s)
+}
+
+/// Reads the formatting of an XLSX/ODS source; a damaged styles part only costs the formatting.
+fn source_styling(
+    bytes: &[u8],
+    format: DocumentFormat,
+    warnings: &mut Vec<String>,
+) -> Vec<(String, SheetStyling)> {
+    read_sheet_styling(bytes, format).unwrap_or_else(|_| {
+        warnings.push("셀 서식과 열 너비를 읽지 못해 가져오지 않았습니다.".to_string());
+        Vec::new()
+    })
+}
+
+fn into_structured(
+    content: DecodedContent,
+    styling: &[(String, SheetStyling)],
+) -> StructuredContent {
+    match content {
+        DecodedContent::Document(doc) => StructuredContent::Document(doc),
+        DecodedContent::Workbook(sheets) => {
+            let stylings = sheets
+                .iter()
+                .map(|(name, _)| styling_of(styling, name).cloned().unwrap_or_default())
+                .collect();
+            StructuredContent::Workbook(sheets, stylings)
         }
+        DecodedContent::Slides(slides) => StructuredContent::Slides(slides),
     }
 }
 
@@ -259,13 +351,15 @@ impl EasyOfficeIpcRouter {
                 .map(str::trim)
                 .filter(|s| !s.is_empty()),
         };
-        let decoded = UniversalFormatConverter::decode_rich(&bytes, source_hint)?;
+        let mut decoded = UniversalFormatConverter::decode_rich(&bytes, source_hint)?;
+        let styling = source_styling(&bytes, decoded.format, &mut decoded.warnings);
         let action = Self::optional_json_str(entries, "action")?.unwrap_or("convert");
         if action == "decode" {
             let max_rows = limit(entries, "maxRows")?;
             let max_cols = limit(entries, "maxCols")?;
             return decode_response(
                 &decoded,
+                &styling,
                 file_name.unwrap_or(""),
                 bytes.len(),
                 max_rows,
@@ -291,7 +385,7 @@ impl EasyOfficeIpcRouter {
             .unwrap_or("변환_문서");
         let src_fmt = decoded.format;
         let warnings = decoded.warnings.clone();
-        let content = StructuredContent::from(decoded.content);
+        let content = into_structured(decoded.content, &styling);
         let dst_bytes = encode_structured(&content, dst_fmt, title)?;
         Self::conversion_response(src_fmt, dst_fmt, &bytes, &dst_bytes, &warnings)
     }
@@ -464,6 +558,136 @@ mod tests {
         assert!(json.contains("셀 2개는 가져오지 않았습니다"), "{json}");
     }
 
+    const STYLED_SHEETS: &str = concat!(
+        "\"sheets\":[{\"name\":\"서식\",\"cells\":[",
+        "{\"ref\":\"A1\",\"raw\":\"굵게\",\"style\":{\"bold\":true}},",
+        "{\"ref\":\"B1\",\"raw\":\"=1+2\",\"style\":{\"italic\":true,\"underline\":true,\"strike\":true,\"sizePt\":11.25}},",
+        "{\"ref\":\"C3\",\"raw\":\"\",\"style\":{\"bold\":true}},",
+        "{\"ref\":\"D4\",\"raw\":\"평범\",\"style\":{}}],",
+        "\"columns\":[{\"index\":1,\"widthPx\":150},{\"index\":3,\"widthPx\":60}]}]"
+    );
+
+    fn convert_sheets(target: &str, sheets: &str) -> Result<Vec<u8>, EasyOfficeError> {
+        let payload = format!("{{\"targetFormat\":\"{target}\",\"title\":\"서식\",{sheets}}}");
+        let saved = EasyOfficeIpcRouter::dispatch("convert_document_format", &payload)?;
+        Ok(EasyOfficeIpcRouter::decode_base64(json_field(&saved, "convertedBase64")).unwrap())
+    }
+
+    #[test]
+    fn sheet_styles_and_column_widths_survive_save_and_reopen_in_xlsx_and_ods() {
+        for (target, file) in [("xlsx", "서식.xlsx"), ("ods", "서식.ods")] {
+            let bytes = convert_sheets(target, STYLED_SHEETS).unwrap();
+            let json = EasyOfficeIpcRouter::dispatch(
+                "convert_document_format",
+                &request(Some("decode"), file, &bytes, ""),
+            )
+            .unwrap();
+            assert!(
+                json.contains("{\"ref\":\"A1\",\"raw\":\"굵게\",\"style\":{\"bold\":true}}"),
+                "{target}: {json}"
+            );
+            assert!(
+                json.contains("\"style\":{\"italic\":true,\"underline\":true,\"strike\":true,\"sizePt\":11.25}"),
+                "{target}: {json}"
+            );
+            assert!(
+                json.contains("{\"ref\":\"C3\",\"raw\":\"\",\"style\":{\"bold\":true}}"),
+                "{target}: {json}"
+            );
+            assert!(
+                json.contains("{\"ref\":\"D4\",\"raw\":\"평범\"}"),
+                "plain style is dropped: {json}"
+            );
+            assert!(
+                json.contains(
+                    "\"columns\":[{\"index\":1,\"widthPx\":150},{\"index\":3,\"widthPx\":60}]"
+                ),
+                "{target}: {json}"
+            );
+            // A reopened file saved again keeps its formatting (open -> save -> reopen).
+            let again = EasyOfficeIpcRouter::dispatch(
+                "convert_document_format",
+                &request(
+                    None,
+                    file,
+                    &bytes,
+                    &format!(",\"targetFormat\":\"{target}\""),
+                ),
+            )
+            .unwrap();
+            let again_bytes =
+                EasyOfficeIpcRouter::decode_base64(json_field(&again, "convertedBase64")).unwrap();
+            let json2 = EasyOfficeIpcRouter::dispatch(
+                "convert_document_format",
+                &request(Some("decode"), file, &again_bytes, ""),
+            )
+            .unwrap();
+            assert!(json2.contains("\"widthPx\":150"), "{target}: {json2}");
+            assert!(
+                json2.contains("\"style\":{\"bold\":true}"),
+                "{target}: {json2}"
+            );
+        }
+    }
+
+    #[test]
+    fn decode_clips_styles_and_widths_to_the_editor_grid() {
+        let bytes = convert_sheets("xlsx", STYLED_SHEETS).unwrap();
+        let json = EasyOfficeIpcRouter::dispatch(
+            "convert_document_format",
+            &request(
+                Some("decode"),
+                "a.xlsx",
+                &bytes,
+                ",\"maxRows\":2,\"maxCols\":2",
+            ),
+        )
+        .unwrap();
+        assert!(json.contains("\"ref\":\"A1\""), "{json}");
+        assert!(!json.contains("\"ref\":\"C3\""), "{json}");
+        assert!(
+            json.contains("\"columns\":[{\"index\":1,\"widthPx\":150}]"),
+            "{json}"
+        );
+    }
+
+    #[test]
+    fn invalid_sheet_styles_are_rejected_and_old_payloads_still_work() {
+        for bad in [
+            "\"style\":{\"bold\":\"yes\"}",
+            "\"style\":{\"sizePt\":0}",
+            "\"style\":{\"sizePt\":9999}",
+            "\"style\":{\"sizePt\":\"크게\"}",
+            "\"style\":[1]",
+        ] {
+            let sheets = format!(
+                "\"sheets\":[{{\"name\":\"a\",\"cells\":[{{\"ref\":\"A1\",\"raw\":\"x\",{bad}}}]}}]"
+            );
+            assert!(convert_sheets("xlsx", &sheets).is_err(), "{bad}");
+        }
+        for bad in [
+            "{\"index\":0,\"widthPx\":100}",
+            "{\"index\":16385,\"widthPx\":100}",
+            "{\"index\":1,\"widthPx\":1}",
+            "{\"index\":1,\"widthPx\":99999}",
+            "{\"index\":1}",
+            "{\"widthPx\":100}",
+            "5",
+        ] {
+            let sheets = format!("\"sheets\":[{{\"name\":\"a\",\"columns\":[{bad}]}}]");
+            assert!(convert_sheets("xlsx", &sheets).is_err(), "{bad}");
+        }
+        let old = "\"sheets\":[{\"name\":\"a\",\"cells\":[{\"ref\":\"A1\",\"raw\":\"x\"}]}]";
+        assert!(convert_sheets("xlsx", old).is_ok());
+        assert!(convert_sheets("ods", old).is_ok());
+    }
+
+    #[test]
+    fn styled_sheets_still_convert_to_non_sheet_formats() {
+        for target in ["csv", "docx", "xls"] {
+            assert!(convert_sheets(target, STYLED_SHEETS).is_ok(), "{target}");
+        }
+    }
     #[test]
     fn convert_uses_the_source_file_bytes_and_ignores_editor_text() {
         let bytes = docx_bytes();

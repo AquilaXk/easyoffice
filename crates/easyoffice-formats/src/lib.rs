@@ -34,6 +34,7 @@ mod rich_run_writers;
 mod rich_writers;
 mod rich_xml;
 pub mod rtf_xml_helpers;
+mod sheet_styling;
 pub mod strict_json;
 pub mod text_pdf_codecs;
 pub mod utf16_swar;
@@ -55,6 +56,7 @@ pub use rich_readers::{DecodedContent, DecodedDocument, DecodedSlide};
 pub use rtf_xml_helpers::{
     unescape_xml_five_pass_baseline, unescape_xml_single_pass, RtfCodec, RtfPayload,
 };
+pub use sheet_styling::*;
 pub use strict_json::StrictJsonValue;
 pub use text_pdf_codecs::*;
 pub use utf16_swar::{

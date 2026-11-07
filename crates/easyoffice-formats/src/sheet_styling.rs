@@ -1,0 +1,88 @@
+//! Spreadsheet cell formatting and column widths carried next to the plain cell values (PD-089).
+//!
+//! The value model of a sheet stays `(row, col, raw)`; formatting travels beside it as
+//! [`SheetStyling`] so every existing codec signature keeps working. XLSX (`styles.xml`, `s="N"`,
+//! `<cols>`) and ODS (automatic cell/column styles) read and write it.
+
+use std::collections::BTreeMap;
+
+// XLSX and ODS style tables live beside this module's model; they are internal to the crate.
+#[path = "ods_styles.rs"]
+pub(crate) mod ods_styles;
+#[path = "xlsx_styles.rs"]
+pub(crate) mod xlsx_styles;
+
+use crate::{DocumentFormat, EasyOfficeError, OdfCodec, OoxmlCodec};
+
+/// Largest number of styled cells or sized columns one sheet may carry.
+pub const MAX_STYLED_CELLS: usize = 500_000;
+/// Smallest and largest column width (CSS px) the editor and the writers accept.
+pub const MIN_COLUMN_PX: u32 = 8;
+pub const MAX_COLUMN_PX: u32 = 2_000;
+/// Excel limits a font size to 1..=409 pt.
+pub const MIN_SIZE_PT: f64 = 1.0;
+pub const MAX_SIZE_PT: f64 = 409.0;
+
+/// Formatting of one cell: the flags and font size the sheet editor can set (PD-084).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CellStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+    /// Font size in points; `None` keeps the workbook default.
+    pub size_pt: Option<f64>,
+}
+
+/// Identity used to deduplicate styles: the size is compared in hundredths of a point.
+pub(crate) type StyleKey = (bool, bool, bool, bool, Option<u32>);
+
+impl CellStyle {
+    /// A style that changes nothing relative to the default cell.
+    pub fn is_plain(&self) -> bool {
+        !self.bold && !self.italic && !self.underline && !self.strike && self.size_pt.is_none()
+    }
+
+    pub(crate) fn key(&self) -> StyleKey {
+        (
+            self.bold,
+            self.italic,
+            self.underline,
+            self.strike,
+            self.size_pt.map(|s| (s * 100.0).round() as u32),
+        )
+    }
+}
+
+/// Formatting of one sheet: styled cells by zero-based `(row, col)` and custom column widths in
+/// CSS pixels by zero-based column.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SheetStyling {
+    pub cells: BTreeMap<(u32, u32), CellStyle>,
+    pub columns: BTreeMap<u32, u32>,
+}
+
+impl SheetStyling {
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty() && self.columns.is_empty()
+    }
+}
+
+/// Formats a size in hundredths of a point without trailing zeros (`1125` -> `11.25`).
+pub(crate) fn format_centipt(centi: u32) -> String {
+    let text = format!("{}.{:02}", centi / 100, centi % 100);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Reads the formatting of every sheet of an XLSX or ODS file, keyed by sheet name. Other
+/// formats carry none.
+pub fn read_sheet_styling(
+    bytes: &[u8],
+    format: DocumentFormat,
+) -> Result<Vec<(String, SheetStyling)>, EasyOfficeError> {
+    match format {
+        DocumentFormat::Xlsx => OoxmlCodec::unpack_xlsx_styling(bytes),
+        DocumentFormat::Ods => OdfCodec::unpack_ods_styling(bytes),
+        _ => Ok(Vec::new()),
+    }
+}
