@@ -4,81 +4,42 @@
 
 ---
 
-## 1. 모듈 계층 구조 (Swift Package Architecture)
+## 1. 모듈 계층 구조 (Rust 멀티 크레이트 + Tauri 셸, PD-094)
 
 ```mermaid
 flowchart TD
-    subgraph AppLayer["Presentation & macOS Shell Layer"]
-        EasyOfficeApp["EasyOfficeApp (Executable)\n- MainWorkspaceWindowView & HomeHubWorkspaceView\n- Multi-Tab Strip & Side-by-Side Split View\n- 7-Category Context Ribbon & Right Inspector\n- Interactive EditorDetailPanes (Document / HWP / Sheet / Slide / PDF)"]
+    subgraph ShellLayer["Desktop Shell (macOS WKWebView / Windows WebView2)"]
+        Desktop["easyoffice-desktop (Tauri v2)\n- 문서별 창, 단일 인스턴스, 제자리 저장, 파일 연결\n- 실행 파일에 내장된 WebUI + 프로세스 내 IPC"]
     end
-
-    subgraph DesignLayer["Design System Layer"]
-        EasyOfficeDesignSystem["EasyOfficeDesignSystem (Library)\n- Signature Lavender Color Tokens (#5C6BC0)\n- 5 Module Semantic Accents & Status Tokens\n- WorkspaceThemeMode & WorkspaceThemePalette\n- AccessibilityTokens & LayoutMetrics"]
+    subgraph AppLayer["App Layer"]
+        App["easyoffice-app\n- IPC 라우터, --serve(개발 전용), WebUI(ui/)"]
     end
-
-    subgraph CoreLayer["Domain, Codec & Engine Layer (Pure Deterministic Swift)"]
-        EasyOfficeCore["EasyOfficeCore (Library)\n- FormatDetector & DocumentFormat (20-Format Registry & Magic-Byte Guard)\n- BinaryContainerCodec (BitPacking, CRC32, ZIP/OOXML/ODF/HWPX/OLE2/HWP5)\n- TabularAndMarkupCodec (CSVStateMachineCodec, CommonMarkCodec, RTFCodec)\n- DocumentEngine (Sections, Styles, Spanned Tables, Revisions, Mail Merge)\n- SheetEngine (PackedCellCoordinate, 122 Functions, PivotTableEngine, Charts)\n- SlideEngine (Master Layouts, SnapGuideCalculator, PresenterSession)\n- PDFEngine & PDFBinarySerializer (Annotations, Split/Merge, Office ↔ PDF)\n- SmartProductivityTools & DocumentSecurityAuditor (Batch Conversion, Offline Assistant, PII/EXIF Scrubber)\n- WorkspaceHub (WorkspaceViewModel, 7x5 Ribbon Catalog, Templates, Search)"]
+    subgraph CoreLayer["Engine Layer (Rust)"]
+        Formats["easyoffice-formats\n- 20종 포맷 레지스트리, 매직 바이트 가드, 코덱"]
+        Sheet["easyoffice-sheet\n- 122종 수식 엔진, 피벗"]
+        Layout["easyoffice-layout\n- 조판 엔진"]
     end
-
-    EasyOfficeApp --> EasyOfficeDesignSystem
-    EasyOfficeApp --> EasyOfficeCore
-    EasyOfficeCore --> EasyOfficeDesignSystem
+    Desktop --> App
+    App --> Formats
+    App --> Sheet
+    App --> Layout
 ```
 
 ### 디렉터리 구조 (Directory Layout)
 
 ```text
 EasyOffice/
-├── Package.swift                                  # Swift 6 패키지 매니페스트 (macOS 14+)
-├── Sources/
-│   ├── EasyOfficeDesignSystem/                    # 시그니처 라벤더 디자인 시스템 및 레이아웃 토큰
-│   │   └── DesignTokens.swift                     # RGBColorToken, WorkspaceThemeMode, AccessibilityTokens
-│   ├── EasyOfficeCore/                            # 순수 결정론적 오피스 엔진, 코덱 및 스마트 생산성 코어
-│   │   ├── DocumentFormat.swift                   # 20종 지원 포맷 레지스트리 및 ContainerFamily 메타데이터
-│   │   ├── FormatDetector.swift                   # 매직 바이트 시그니처 검증 및 Fail-Closed 가드
-│   │   ├── BinaryContainerCodec.swift             # BitPacking, Slicing-by-8 CRC32Calculator, ZipContainerCodec, XMLSanitizer
-│   │   ├── StandardZipOfficeCodecs.swift          # OOXMLContainerCodec, ODFContainerCodec, HWPXContainerCodec
-│   │   ├── OLE2AndLegacyOfficeCodecs.swift        # OLE2ContainerCodec, HWP5BinaryCodec, LegacyOLE2OfficeCodec (.doc/.xls/.ppt)
-│   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
-│   │   ├── DocumentEngine.swift                   # 워드/한글(HWP/HWPX) 문서 모델, 인라인 런/이미지, 표 수식, 변경 추적, 메일 머지
-│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, FormulaAST, CellStyle, 다중 시트, evaluateGrid
-│   │   ├── SheetBuiltInFunctions.swift            # 122종 스프레드시트 내장 함수 평가기 (수학·통계·논리·참조·텍스트·재무·날짜)
-│   │   ├── SheetAnalyticsAndPivot.swift           # PivotTableEngine, SheetChartBuilder, 조건부 서식 및 유효성 검사
-│   │   ├── SlideEngine.swift                      # 슬라이드/마스터, SnapGuideCalculator, PresenterSession 엔진
-│   │   ├── PDFEngine.swift                        # 다중 페이지 PDF 분할/병합, 주석, 북마크, 양방향 변환 엔진
-│   │   ├── PDFBinarySerializer.swift              # ISO 32000-1 바이트 정밀 xref 직렬화, 다중 줄 가시 스트림 및 PDFKit 브리지
-│   │   ├── SmartProductivityTools.swift           # 일괄 변환 오케스트레이터
-│   │   ├── DocumentSecurityAuditor.swift          # 컨테이너 보안 감사기, 4대 모델 PII 비식별화 및 이미지 EXIF 제거기
-│   │   ├── LocalSmartAssistant.swift              # 100% 오프라인 스마트 문서 보조 도구 (요약, 문장 진단, 액션 추출, LCS 비교)
-│   │   ├── WorkspaceHub.swift                     # WorkspaceViewModel, Undo Coalescing, 파일 I/O, 찾기 및 바꾸기
-│   │   └── WorkspaceRibbonCommandRouter.swift     # 140종 컨텍스트 리본 도메인 명령 라우터 (Zero-Slop 상태 변이)
-│   └── EasyOfficeApp/                             # macOS 네이티브 SwiftUI + AppKit 애플리케이션
-│       ├── EasyOfficeApp.swift                    # @main 앱 엔트리포인트 및 메뉴바 커맨드 (열기/저장/인쇄/찾기/복사/붙여넣기)
-│       ├── WorkspaceViews.swift                   # 통합 타이틀바, 멀티 탭, 리본, 찾기/바꾸기 바, 스플릿 뷰, 좌/우 인스펙터
-│       ├── HomeHubAndSmartViews.swift             # 홈 허브, 포맷 일괄 변환 스튜디오, 오프라인 스마트 문서 보조 스튜디오
-│       ├── EditorDetailPanes.swift                # Document/HWP 인라인 런/이미지 편집기 및 Sheet 다중 시트/셀 서식 그리드
-│       └── SlideAndPDFDetailPanes.swift           # Slide 드래그/리사이즈 스테이지 및 PDF Studio (PDFKit 메모이제이션 뷰)
-├── Tests/
-│   └── EasyOfficeTests/                           # 결정론적 단위·보안·UI 패리티 및 벤치마크 검증 스위트
-│       ├── EasyOfficeTests.swift                  # 디자인 토큰, 포맷 카탈로그 및 기본 엔진 검증
-│       ├── BinaryContainerCodecTests.swift        # BitPacking, CRC32, ZIP/OLE2/HWP5/CSV/MD/RTF 및 보안 가드 검증
-│       ├── EditorEnginesParityTests.swift         # 122종 시트 함수, 피벗/차트, 문서/HWP, 슬라이드, PDF 패리티 검증
-│       ├── SmartProductivityToolsTests.swift      # 일괄 변환, 오프라인 스마트 보조 도구 및 보안 감사기 검증
-│       ├── PiiScrubAndSecurityCompletenessTests.swift # 3대 엔진 공통 PII 벡터, 이미지 EXIF 제거 및 Mirror 전수 검증
-│       ├── WorkspaceUIParityTests.swift           # 스플릿 뷰, 7x5 리본 매트릭스, WCAG AA 및 접근성 검증
-│       └── CommercialParityBenchmarkTests.swift   # 20종 포맷 라운드트립 매트릭스 및 비트 수준 처리량 벤치마크
 ├── Cargo.toml                                     # Rust 멀티 크레이트 워크스페이스 매니페스트 (macOS / Windows / Linux 공통 코어)
 ├── crates/
 │   ├── easyoffice-formats/                        # 20종 포맷 시그니처 검증(+ 읽기 전용 Pages: IWA/Snappy 변형/protobuf 자체 디코더), ZIP/OLE2/HWP5/XML 보안 가드, CSV/MD/PDF 코덱
 │   ├── easyoffice-sheet/                          # 64-bit 패킹 셀 좌표, 순환 참조 탐지 수식 파서/평가기, 피벗 요약 엔진
 │   ├── easyoffice-layout/                         # 시그니처 라벤더 토큰, A4 다단/원고지, KS X 6101 공문서, 슬라이드/PDF 레이아웃
 │   ├── easyoffice-app/                            # 15종 IPC 라우터, 루프백 HTTP 서버(--serve), C-ABI FFI, WebUI(ui/)
-│   └── easyoffice-desktop/                        # Windows 데스크톱 셸(Tauri v2·WebView2): EasyOffice.exe, NSIS 설치 프로그램
+│   └── easyoffice-desktop/                        # 데스크톱 셸(Tauri v2, Windows WebView2 / macOS WKWebView): EasyOffice.exe + NSIS 설치 프로그램, EasyOffice.app + .dmg (PD-094)
 ├── scripts/
 │   ├── check-repo-hygiene.mjs                     # 외부 서비스명·AI 흔적·수치 정합성·XSS·데스크톱 셸 권한 가드
-│   ├── generate-desktop-icons.mjs                 # 파비콘 디자인 기반 Windows 앱 아이콘(PNG/ICO) 결정론적 생성기
-│   ├── verify-macos-plist.mjs                     # LaunchServices 20종 확장자 Info.plist 검증기
-│   └── package-macos-release.sh                   # EasyOffice.app / .dmg / .zip / SHA256SUMS 생성기
+│   ├── generate-desktop-icons.mjs                 # 파비콘 디자인 기반 데스크톱 앱 아이콘(PNG/ICO/ICNS) 결정론적 생성기
+│   └── desktop-file-associations.mjs              # tauri.conf.json 파일 연결·macOS 번들 설정 정적 계약 (PD-094)
 ├── docs/
 │   ├── policy-decisions.md                        # 정책 결정 기록 (SSOT)
 │   ├── design-system.md                           # 시그니처 라벤더 UI/UX 디자인 시스템
@@ -89,9 +50,9 @@ EasyOffice/
     ├── PULL_REQUEST_TEMPLATE.md                   # 자기완결 PR 표준 템플릿
     ├── ISSUE_TEMPLATE/                            # Epic / Task / Bug 이슈 폼 템플릿
     └── workflows/
-        ├── ci.yml                                 # Linux 공통 게이트(위생·WebUI·Rust fmt/clippy/test) + macOS Swift·번들 + Windows 엔진·데스크톱 셸·설치 프로그램, Rust 캐시 (PD-091)
+        ├── ci.yml                                 # Linux 공통 게이트(위생·WebUI·Rust fmt/clippy/test) + macOS 데스크톱 셸·.app·.dmg + Windows 엔진·데스크톱 셸·설치 프로그램, Rust 캐시 (PD-091)
         ├── automerge.yml                          # automerge 라벨 기반 스쿼시 병합 및 이슈 자동 종료
-        └── release.yml                            # macOS .app/.dmg/.zip, Windows 설치 프로그램 및 개발자용 CLI 프리뷰 발행
+        └── release.yml                            # macOS 유니버설 .dmg, Windows 설치 프로그램 및 개발자용 CLI 프리뷰 발행
 ```
 
 ---
@@ -147,13 +108,14 @@ macOS, Windows, Linux 데스크톱 환경에서 동일한 문서 포맷 검증, 
 
 ---
 
-## 4. macOS 및 Windows 릴리스 패키징 파이프라인 (`scripts/package-macos-release.sh`, `.github/workflows/release.yml`)
+## 4. macOS 및 Windows 릴리스 패키징 파이프라인 (`.github/workflows/release.yml`, PD-094)
 
-GitHub Release 발행 시 macOS(`release-macos`)와 Windows(`build-windows-release`) 병렬 파이프라인이 다음 단계를 결정론적으로 수행합니다.
-1. `swift build -c release`로 macOS 앱을, Tauri CLI(`npx @tauri-apps/cli@2 build --bundles nsis`)로 Windows 데스크톱 셸 `EasyOffice.exe`와 NSIS 설치 프로그램을, `cargo build -p easyoffice-app --release`로 개발자용 CLI를 컴파일합니다. Windows 설치 프로그램은 사용자 단위 설치, 시작 메뉴 바로 가기, 제거 프로그램을 제공하며 문서 파일 연결은 파일 열기 지원(#111) 전까지 등록하지 않습니다.
-2. 표준 macOS 애플리케이션 번들 구조(`EasyOffice.app/Contents/{MacOS,Resources,Info.plist,PkgInfo}`)를 생성하고 20종 전체 지원 확장자에 대한 문서 연결(`CFBundleDocumentTypes`)과 고해상도 Retina 속성(`NSHighResolutionCapable`)을 주입한 뒤 `scripts/verify-macos-plist.mjs`와 `plutil -lint`로 검증합니다.
-3. 코드 서명(`codesign --force --deep --sign -` 또는 Developer ID 인증서) 및 번들 구조 검증을 수행합니다. 애드혹 서명 배포본은 최초 실행 전 `xattr -dr com.apple.quarantine /Applications/EasyOffice.app`으로 격리 속성을 해제할 수 있습니다.
-4. macOS 배포용 디스크 이미지(`EasyOffice-<version>-macos.dmg`), 압축 아카이브(`EasyOffice-<version>-macos.zip`), `SHA256SUMS.txt`와 Windows x64 설치 프로그램(`EasyOffice-<version>-windows-x64-setup.exe`), Windows 설치 프로그램의 `SHA256SUMS-windows-x64.txt`를 빌드 대상 커밋 SHA(`--target`)에 고정하여 GitHub Release 자산으로 업로드합니다.
+GitHub Release 발행 시 macOS(`release-macos`)와 Windows(`build-windows-release`) 병렬 파이프라인이 같은 Tauri 데스크톱 셸(`crates/easyoffice-desktop`)을 각 OS에서 번들링합니다.
+1. 두 작업 모두 위생 가드, WebUI 회귀 묶음, 편집기 번들(`checkout-rhwp.mjs`, `build-hwp-studio.mjs`) 빌드, Rust 테스트·자체 시험을 먼저 실행합니다.
+2. Windows는 `npx @tauri-apps/cli@2 build --bundles nsis`로 NSIS 설치 프로그램을, macOS는 `rustup target add aarch64-apple-darwin x86_64-apple-darwin` 뒤 `build --target universal-apple-darwin --bundles app,dmg`로 유니버설 `.app`과 `.dmg`를 만듭니다. 릴리스 버전은 `--config`로 번들 버전을 덮어써 자산 이름·메타데이터·태그가 일치합니다.
+3. macOS 번들은 Apple Developer ID 없이 ad-hoc 서명(`APPLE_SIGNING_IDENTITY` 시크릿이 없으면 `-`)만 하며 공증하지 않습니다. 파일 연결(`CFBundleDocumentTypes`)과 최소 시스템 버전은 `tauri.conf.json`에서 오고, `scripts/desktop-file-associations.mjs`가 정적으로 검사합니다. 처음 실행 방법은 README에 있습니다.
+4. 두 작업 모두 빌드한 실행 파일을 `--smoke`로 실행해 임베드된 WebUI·IPC·한글 편집기 왕복을 확인합니다(macOS는 저장소 변수 `MACOS_SMOKE=off`로 건너뛸 수 있음).
+5. 자산 `EasyOffice-<version>-macos-universal.dmg`, `SHA256SUMS-macos-universal.txt`, `EasyOffice-<version>-windows-x64-setup.exe`, `SHA256SUMS-windows-x64.txt`를 빌드 대상 커밋 SHA(`--target`)에 고정하여 GitHub Release 자산으로 업로드합니다. `--serve` 개발용 CLI는 배포하지 않습니다(PD-086).
 
 ---
 

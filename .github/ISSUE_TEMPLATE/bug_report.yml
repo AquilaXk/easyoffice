@@ -41,6 +41,6 @@ body:
       label: 완료 조건 및 검증 계획 (Done When & Verification)
       placeholder: |
         - [ ] 재현 테스트가 수정 전 실패(RED)하고 수정 후 통과(GREEN)한다.
-        - [ ] 인접 포맷/모듈 회귀 없이 `swift test` 전체가 통과한다.
+        - [ ] 인접 포맷/모듈 회귀 없이 `cargo test`와 `node --test` 전체가 통과한다.
     validations:
       required: true

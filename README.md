@@ -2,15 +2,15 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-EasyOffice (`v1.0.0`) is a 100% standalone, serverless, offline-capable native macOS all-in-one productivity and office suite engineered with Swift 6, SwiftUI, and AppKit, featuring a Signature Lavender Design System (`#5C6BC0`). It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight multi-tabbed macOS workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
+EasyOffice (`v1.0.0`) is a 100% standalone, serverless, offline-capable all-in-one productivity and office suite for macOS and Windows: a Rust engine and an offline WebUI hosted in one Tauri v2 desktop shell, featuring a Signature Lavender Design System (`#5C6BC0`). It unifies **Document**, **Sheet**, **Slide**, **Korean Office (HWP / HWPX)**, and **PDF Studio** into a single lightweight workspace with bit-level container codecs, deterministic formula evaluation, offline smart document assistance, and fail-closed security guards.
 
 ---
 
 ## Key Highlights
 
-- **Unified 5-in-1 Native macOS Workspace (`WorkspaceViewModel`)**:
+- **Unified 5-in-1 Workspace (macOS and Windows, one code base)**:
   - The HWP module embeds the rhwp-based HWP editor (same-origin iframe, no IPC access) in the Windows desktop shell and `--serve`; builds without the generated editor bundle fall back to the text-only editor. Build it with `node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs` before the desktop shell (PD-083). HWP, HWPX, HWT and HWTX files open in it (up to 64 MiB; files the editor cannot read open as text only, with a notice) and save as HWP or HWPX after the exported bytes are re-parsed; unsaved changes are tracked and autosaved to IndexedDB for restore after a reload (PD-085).
-- Open, edit, create, duplicate, pin, and convert word processing documents, Korean HWP/HWPX files, spreadsheets, presentations, and PDFs inside a single tabbed macOS window.
+- Open, edit, create, duplicate, pin, and convert word processing documents, Korean HWP/HWPX files, spreadsheets, presentations, and PDFs inside per-document windows of the desktop app.
   - Supports **Side-by-Side Split View** (`splitSecondaryTabID`, minimum `420pt` per pane) for comparing two documents simultaneously, a **Collapsible 7-Category Context Ribbon** (`Cmd+Option+R`), a **Left Structure Navigator**, a **Right Contextual Inspector**, and **5 Interactive Editor Detail Panes** (`DocumentEditorDetailPaneView`, `SheetEditorDetailPaneView`, `SlideEditorDetailPaneView`, `PDFStudioEditorDetailPaneView`).
 - **20-Format Binary & Container Round-Trip Codecs**:
   - **ZIP-based Containers (`ZipContainerCodec`)**: `OOXMLContainerCodec` (`.docx`, `.xlsx`, `.pptx`, `.ppsx`), `ODFContainerCodec` (`.odt`, `.ods`, `.odp`), `HWPXContainerCodec` (`.hwpx`, `.hwtx` per KS X 6101 OWPML).
@@ -49,44 +49,15 @@ EasyOffice (`v1.0.0`) is a 100% standalone, serverless, offline-capable native m
 
 ```text
 EasyOffice/
-├── Package.swift                                  # Swift 6 Package Manifest (macOS 14+)
-├── Sources/
-│   ├── EasyOfficeDesignSystem/                    # Signature Lavender palette, module tokens & WCAG contrast
-│   │   └── DesignTokens.swift                     # RGBColorToken, WorkspaceThemeMode, AccessibilityTokens
-│   ├── EasyOfficeCore/                            # Pure deterministic office engines, binary codecs & smart tools
-│   │   ├── DocumentFormat.swift                   # 20-format registry & ContainerFamily metadata
-│   │   ├── FormatDetector.swift                   # Magic-byte signature guard & EasyOfficeError
-│   │   ├── BinaryContainerCodec.swift             # BitPacking, CRC32Calculator, ZIP/OOXML/ODF/HWPX/OLE2/HWP5 codecs
-│   │   ├── TabularAndMarkupCodec.swift            # CSVStateMachineCodec, CommonMarkCodec, RTFCodec
-│   │   ├── DocumentEngine.swift                   # OfficeDocumentModel, sections, tables, revisions, mail merge
-│   │   ├── SheetEngine.swift                      # PackedCellCoordinate, 122 built-in functions, PivotTableEngine
-│   │   ├── SlideEngine.swift                      # PresentationDeckModel, SnapGuideCalculator, PresenterSession
-│   │   ├── PDFEngine.swift                        # PDFStudioDocumentModel, annotations, split/merge, Office ↔ PDF
-│   │   ├── SmartProductivityTools.swift           # PDFBinarySerializer, conversion studio, offline assistant
-│   │   ├── DocumentSecurityAuditor.swift          # Container security auditor, 3-engine PII & image EXIF scrubber
-│   │   └── WorkspaceHub.swift                     # WorkspaceViewModel, 7-category ribbon catalog, templates, search
-│   └── EasyOfficeApp/                             # Native macOS SwiftUI + AppKit workspace application
-│       ├── EasyOfficeApp.swift                    # @main application entry point & macOS menu commands
-│       ├── WorkspaceViews.swift                   # Unified titlebar, multi-tab strip, split view, ribbon, Home Hub
-│       └── EditorDetailPanes.swift                # Interactive Document/HWP, Sheet, Slide, and PDF Studio panes
-├── Tests/
-│   └── EasyOfficeTests/                           # Deterministic unit, security, UI parity & benchmark suite
-│       ├── EasyOfficeTests.swift                  # Core tokens, format catalog & baseline engine tests
-│       ├── BinaryContainerCodecTests.swift        # BitPacking, CRC32, ZIP/OLE2/HWP5/CSV/MD/RTF & security guards
-│       ├── EditorEnginesParityTests.swift         # 122 sheet functions, pivot/chart, document/HWP, slide & PDF parity
-│       ├── SmartProductivityToolsTests.swift      # Batch conversion, offline smart assistant & security auditor tests
-│       ├── PiiScrubAndSecurityCompletenessTests.swift # Shared 3-engine PII vectors, image EXIF strip & Mirror guard
-│       ├── WorkspaceUIParityTests.swift           # Split view, 7x5 ribbon matrix, WCAG AA & accessibility tests
-│       └── CommercialParityBenchmarkTests.swift   # 20-format round-trip matrix & bit-level throughput benchmarks
-├── scripts/
-│   ├── check-repo-hygiene.mjs                     # Repository hygiene & specification integrity verifier
-│   ├── verify-macos-plist.mjs                     # LaunchServices 20-extension Info.plist verifier
-│   └── package-macos-release.sh                   # Universal macOS .app bundle, .dmg, .zip, and SHA256SUMS builder
-└── docs/
-    ├── architecture.md                            # System architecture, codecs & fail-closed security boundaries
-    ├── design-system.md                           # Signature Lavender UI/UX design system & layout specification
-    ├── policy-decisions.md                        # Product & engineering policy decision record (SSOT)
-    └── product-spec.md                            # Complete 20-format & 5-module feature specification
+├── Cargo.toml                        # Rust workspace manifest
+├── crates/easyoffice-formats/        # 20-format registry, binary and container codecs, magic-byte guard
+├── crates/easyoffice-sheet/          # Formula engine (122 built-in functions), pivot and DAG recalculation
+├── crates/easyoffice-layout/         # Page layout engine
+├── crates/easyoffice-app/            # IPC router, CLI (`--serve`, `--self-test`) and the WebUI in `ui/`
+├── crates/easyoffice-desktop/        # Tauri v2 desktop shell for Windows (WebView2) and macOS (WKWebView)
+├── apps/hwp-studio/                  # HWP editor overlay built on the pinned rhwp upstream
+├── scripts/                          # Hygiene guard, bundle contract checks, WebUI regression tests
+└── docs/                             # Architecture, design system, policy decisions (SSOT), product spec
 ```
 
 ---
@@ -94,9 +65,9 @@ EasyOffice/
 ## Requirements & Quick Start
 
 ### System Requirements
-- macOS 14.0 (Sonoma) or later on Apple Silicon (`arm64`) and Intel (`x86_64`)
-- Xcode 16+ and Swift 6.0+ for native macOS builds, plus Rust 1.85+ for cross-platform core and local WebUI server builds
+- macOS 11.0 (Big Sur) or later on Apple Silicon (`arm64`) and Intel (`x86_64`) for the universal `.dmg` (building the desktop shell needs Rust 1.90+, Node.js and Xcode command line tools)
 - Windows 10/11 x64 with the WebView2 runtime for the installed Windows desktop app (building the desktop shell needs Rust 1.90+ with the MSVC toolchain)
+- Rust 1.85+ for the cross-platform engine crates and the developer-only local WebUI server
 
 ### Build, Verify & Run Locally
 
@@ -104,25 +75,41 @@ EasyOffice/
 # 1. Verify repository hygiene & specification contracts
 node scripts/check-repo-hygiene.mjs
 
-# 2. Compile all modules
-swift build
+# 2. Rust engine: format, lint, tests and self-test
+cargo fmt --all -- --check
+cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings
+cargo test --workspace --exclude easyoffice-desktop
+cargo run -p easyoffice-app -- --self-test
 
-# 3. Run the deterministic verification & benchmark suite
-swift test
+# 3. WebUI regression suite
+node --test scripts/test-webui-*.mjs scripts/test-desktop-file-associations.mjs
 
-# 4. Launch the native macOS application
-swift run EasyOfficeApp
-
-# 5. Package a release macOS .app bundle, .dmg, .zip archive, and SHA256SUMS.txt
-bash scripts/package-macos-release.sh 1.0.0
+# 4. Desktop shell (needs the generated editor bundle, see the HWP note above)
+node scripts/checkout-rhwp.mjs && node scripts/build-hwp-studio.mjs
+cargo run -p easyoffice-desktop
 ```
 
 ### Release Artifacts & First Launch
 
-Unsigned or ad-hoc signed macOS release archives carry the download quarantine attribute. Clear the quarantine flag once after copying `EasyOffice.app` to `/Applications` before opening it.
+#### macOS
+
+macOS releases ship a universal disk image, `EasyOffice-<version>-macos-universal.dmg` (Apple silicon and Intel, macOS 11 or later) with a `SHA256SUMS-macos-universal.txt` checksum file. Open the image and drag **EasyOffice** to `/Applications`. The app is the same Tauri v2 desktop shell as on Windows (WKWebView): the WebUI is embedded, every command runs in-process on the Rust engine, and no network connection is involved. The standard menu bar and Command shortcuts (⌘C/⌘V/⌘X/⌘A/⌘Z/⌘S/⌘O/⌘W/⌘Q) work; Finder "Open With" and double-click open files in a new window. Quitting with ⌘Q goes through each window's save / discard / cancel prompt.
+
+The release is **not signed or notarized with an Apple Developer ID**, so macOS Gatekeeper blocks it the first time ("EasyOffice cannot be opened because the developer cannot be verified"). Allow it once:
+
+1. In Finder, right-click (or Control-click) **EasyOffice** in `/Applications`, choose **Open**, then **Open** again in the dialog; or
+2. Try to open it once, then go to **System Settings > Privacy & Security**, scroll to the security section and click **Open Anyway** for EasyOffice (macOS 15 requires this route instead of right-click > Open).
+3. Fallback, if the app is reported as damaged or does not start (the browser attached the download quarantine flag): clear the flag once.
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/EasyOffice.app
+```
+
+Later opens work normally. Signing is prepared but off: setting the `APPLE_SIGNING_IDENTITY` repository secret (plus the notarization variables) in the macOS CI and release jobs is all that is needed (PD-094). To build the `.dmg` from source on macOS:
+
+```bash
+cd crates/easyoffice-desktop
+npx @tauri-apps/cli@2 build --bundles app,dmg   # target/release/bundle/dmg/EasyOffice_<version>_<arch>.dmg
 ```
 
 #### Windows

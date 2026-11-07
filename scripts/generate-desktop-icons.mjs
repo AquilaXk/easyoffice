@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generates the Windows desktop shell icons (PNG + multi-size ICO) from the EasyOffice favicon
+ * Generates the desktop shell icons (PNG, multi-size ICO for Windows, ICNS for macOS) from the EasyOffice favicon
  * design (`crates/easyoffice-app/ui/favicon.svg`: lavender #5C6BC0 tile with a white document
  * glyph). The glyph is rasterized analytically with 8x8 supersampling, so no image toolchain is
  * needed and the output is byte-for-byte deterministic.
@@ -136,6 +136,43 @@ function decodeIcoPixels(ico) {
   return Buffer.concat(parts);
 }
 
+// ICNS elements: type code, then the pixel size of the PNG stored under it.
+const ICNS_ELEMENTS = [
+  ["ic07", 128],
+  ["ic08", 256],
+  ["ic09", 512],
+  ["ic13", 256], // 128x128 @2x
+  ["ic14", 512], // 256x256 @2x
+];
+
+const ICNS_HEADER_BYTES = 8; // 4-byte type + 4-byte big-endian length
+
+function pngElement(type, data) {
+  const head = Buffer.alloc(ICNS_HEADER_BYTES);
+  head.write(type, 0, "ascii");
+  head.writeUInt32BE(ICNS_HEADER_BYTES + data.length, 4);
+  return Buffer.concat([head, data]);
+}
+
+// macOS icon container with PNG-compressed elements (macOS 10.7 and later).
+function encodeIcns() {
+  const body = Buffer.concat(ICNS_ELEMENTS.map(([type, size]) => pngElement(type, encodePng(size))));
+  const head = Buffer.alloc(ICNS_HEADER_BYTES);
+  head.write("icns", 0, "ascii");
+  head.writeUInt32BE(ICNS_HEADER_BYTES + body.length, 4);
+  return Buffer.concat([head, body]);
+}
+
+function decodeIcnsPixels(icns) {
+  const parts = [];
+  for (let off = ICNS_HEADER_BYTES; off < icns.length; ) {
+    const len = icns.readUInt32BE(off + 4);
+    parts.push(icns.subarray(off, off + 4), decodePngPixels(icns.subarray(off + ICNS_HEADER_BYTES, off + len)));
+    off += len;
+  }
+  return Buffer.concat(parts);
+}
+
 function encodePng(size) {
   const raw = scanlines(size);
   const ihdr = Buffer.alloc(13);
@@ -179,6 +216,7 @@ const OUTPUTS = {
   "128x128@2x.png": () => encodePng(256),
   "icon.png": () => encodePng(512),
   "icon.ico": () => encodeIco([16, 24, 32, 48, 64, 128, 256]),
+  "icon.icns": () => encodeIcns(),
 };
 
 const checkOnly = process.argv.includes("--check");
@@ -188,7 +226,11 @@ for (const [name, build] of Object.entries(OUTPUTS)) {
   const target = path.join(ICON_DIR, name);
   const bytes = build();
   if (checkOnly) {
-    const decode = name.endsWith(".ico") ? decodeIcoPixels : decodePngPixels;
+    const decode = name.endsWith(".ico")
+      ? decodeIcoPixels
+      : name.endsWith(".icns")
+        ? decodeIcnsPixels
+        : decodePngPixels;
     if (!fs.existsSync(target) || !decode(fs.readFileSync(target)).equals(decode(bytes))) stale.push(name);
   } else {
     fs.writeFileSync(target, bytes);

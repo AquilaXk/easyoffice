@@ -368,7 +368,7 @@
   }
 
   // Card / bank account / passport / driver's licence / business registration numbers.
-  // Mirrors crates/easyoffice-app/src/pii_identifiers.rs and the Swift regex rules.
+  // Mirrors crates/easyoffice-app/src/pii_identifiers.rs.
   const BANK_ACCOUNT_GROUPS = [
     [3, 2, 6], [3, 3, 6], [3, 6, 3], [3, 6, 5], [4, 3, 6], [4, 2, 7], [6, 2, 6], [3, 4, 4, 2], [3, 6, 2, 3],
   ];

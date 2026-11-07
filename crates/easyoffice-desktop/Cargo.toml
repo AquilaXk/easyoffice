@@ -6,7 +6,7 @@ edition.workspace = true
 # the workspace MSRV 1.85 (docs/policy-decisions.md PD-074).
 rust-version = "1.90"
 license.workspace = true
-description = "EasyOffice Windows desktop shell (Tauri v2 / WebView2) hosting the embedded WebUI"
+description = "EasyOffice desktop shell (Tauri v2: WebView2 on Windows, WKWebView on macOS) hosting the embedded WebUI"
 
 [[bin]]
 name = "EasyOffice"

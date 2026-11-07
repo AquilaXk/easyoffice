@@ -14,13 +14,13 @@ concurrency:
 permissions:
   contents: read
 
-# The Windows desktop shell crate (crates/easyoffice-desktop, Tauri v2 / WebView2) is excluded from
-# the cross-platform engine gates and verified on its own in the Windows job: it is not shipped on
-# macOS (the macOS app is native Swift) and its build needs the MSVC toolchain (PD-074).
+# The desktop shell crate (crates/easyoffice-desktop, Tauri v2: WebView2 on Windows, WKWebView on
+# macOS) is excluded from the cross-platform engine gates and verified on its own in the macOS
+# (`verify`) and Windows jobs: its build needs the platform toolchain and webview (PD-074, PD-094).
 
 jobs:
   # Platform-independent gates run once on the fastest runner; the macOS and Windows jobs keep only
-  # what needs their OS (Swift app and bundle on macOS, engine tests, desktop shell and installer on Windows).
+  # what needs their OS (desktop shell, .app and .dmg on macOS; engine tests, desktop shell and installer on Windows).
   checks:
     name: checks
     runs-on: ubuntu-latest
@@ -46,10 +46,7 @@ jobs:
           node scripts/verify-fonts.mjs
 
       - name: Run rhwp upstream and hwp-studio guard tests
-        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs
-
-      - name: Verify macOS LaunchServices Info.plist coverage
-        run: node scripts/verify-macos-plist.mjs
+        run: node --test scripts/test-rhwp-upstream.mjs scripts/test-hwp-studio.mjs scripts/test-sort-comparator-rule.mjs scripts/test-release-serve-rule.mjs scripts/test-desktop-file-associations.mjs
 
       - name: Run WebUI behavioral and security regression suite
         run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-file-open.mjs scripts/test-webui-slide-show.mjs scripts/test-webui-doc-runs.mjs scripts/test-webui-sheet-editing.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs scripts/test-webui-sheet-format.mjs scripts/test-webui-sheet-styles.mjs scripts/test-webui-windows.mjs scripts/test-webui-shell-chrome.mjs scripts/test-webui-hwp-shortcuts.mjs
@@ -75,30 +72,100 @@ jobs:
   verify:
     name: verify
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js for the bundle Info.plist check
+      - name: Setup Node.js for the hwp-studio bundle build and the Tauri CLI
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/hwp-studio/package-lock.json
 
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Check Swift toolchain version
-        run: swift --version
+      # The desktop shell embeds the generated editor bundle (frontendDist) and fails to build without it.
+      - name: Check out the pinned rhwp upstream (sparse, shallow)
+        run: node scripts/checkout-rhwp.mjs
 
-      - name: Build all Swift targets
-        run: swift build
+      - name: Build the hwp-studio editor bundle (npm ci --ignore-scripts, vite build, static checks)
+        run: node scripts/build-hwp-studio.mjs
 
-      - name: Run deterministic test suite
-        run: swift test
+      - name: Check Rust toolchain version
+        run: cargo --version && rustc --version
 
-      - name: Verify macOS .app bundle packaging
-        run: bash scripts/package-macos-release.sh 1.0.0-ci --verify-only
+      - name: Run Rust Clippy lint gate for the desktop shell (macOS)
+        run: cargo clippy -p easyoffice-desktop --all-targets -- -D warnings
+
+      - name: Run desktop shell unit tests (macOS)
+        run: cargo test -p easyoffice-desktop
+
+      # No Developer ID in CI or in the repository (PD-094). The identity "-" is an ad-hoc signature:
+      # Apple silicon refuses to run a binary without any signature, and it is not a trusted identity
+      # (Gatekeeper still prompts). A real certificate is added later through the APPLE_SIGNING_IDENTITY
+      # secret (plus the notarization variables); nothing else changes.
+      - name: Build desktop shell .app and .dmg (ad-hoc signed, not notarized)
+        working-directory: crates/easyoffice-desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+        run: npx --yes @tauri-apps/cli@2 build --ci --bundles app,dmg
+
+      - name: Verify .app and .dmg output
+        run: |
+          set -euo pipefail
+          APP="target/release/bundle/macos/EasyOffice.app"
+          test -x "$APP/Contents/MacOS/EasyOffice" || { echo "missing $APP/Contents/MacOS/EasyOffice"; exit 1; }
+          test -f "$APP/Contents/Info.plist" || { echo "missing Info.plist"; exit 1; }
+          APP_KB=$(du -sk "$APP" | cut -f1)
+          echo "EasyOffice.app: ${APP_KB} KiB"
+          test "$APP_KB" -ge 5120 || { echo "EasyOffice.app is unexpectedly small"; exit 1; }
+          # Info.plist must carry the document types and the minimum system version from tauri.conf.json.
+          PLIST="$APP/Contents/Info.plist"
+          plutil -extract CFBundleDocumentTypes xml1 -o - "$PLIST" > document-types.xml
+          for ext in hwp hwpx docx odt xlsx ods pptx odp pdf; do
+            grep -q "<string>${ext}</string>" document-types.xml || { echo "Info.plist does not register .${ext}"; exit 1; }
+          done
+          test "$(plutil -extract LSMinimumSystemVersion raw "$PLIST")" = "11.0"
+          DMGS=(target/release/bundle/dmg/EasyOffice_*.dmg)
+          test "${#DMGS[@]}" -eq 1 && test -f "${DMGS[0]}" || { echo "expected exactly one EasyOffice .dmg"; exit 1; }
+          DMG_BYTES=$(stat -f%z "${DMGS[0]}")
+          echo "${DMGS[0]}: ${DMG_BYTES} bytes"
+          test "$DMG_BYTES" -ge 1048576 || { echo ".dmg is unexpectedly small"; exit 1; }
+
+      # The hosted macOS runner has a logged-in GUI session, so WKWebView can open a window. If a
+      # runner image ever changes that, set the repository variable MACOS_SMOKE=off to skip this
+      # step without editing the workflow (the build and bundle checks above still gate).
+      - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
+        if: vars.MACOS_SMOKE != 'off'
+        run: |
+          set -u
+          target/release/bundle/macos/EasyOffice.app/Contents/MacOS/EasyOffice --smoke &
+          PID=$!
+          for _ in $(seq 1 90); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" || true
+            echo "Desktop shell smoke test timed out"
+            exit 1
+          fi
+          wait "$PID" && CODE=0 || CODE=$?
+          if [ "$CODE" -ne 0 ]; then
+            echo "Desktop shell smoke test failed with exit code $CODE"
+            exit 1
+          fi
+
+      - name: Upload .dmg for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: easyoffice-macos-dmg-ci
+          path: target/release/bundle/dmg/EasyOffice_*.dmg
+          retention-days: 7
+          if-no-files-found: error
 
   verify-windows:
     name: Verify Rust Core & Tauri Shell (Windows x64)
