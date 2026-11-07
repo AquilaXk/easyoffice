@@ -210,29 +210,144 @@ fn write_bundle_file(stream: &mut TcpStream, request_path: &str) {
     }
 }
 
+/// Why reading a request stopped early.
+enum ReadStop {
+    /// Connection closed, timed out or failed: drop silently.
+    Drop,
+    /// Request exceeded the size budget: answer 413.
+    TooLarge,
+}
+
+const READ_CHUNK_BYTES: usize = 64 * 1024;
+const HEADER_TERMINATOR: &[u8; 4] = b"\r\n\r\n";
+
+/// Reads from `stream` until the header terminator arrives; returns the header length.
+fn read_until_headers(
+    stream: &mut TcpStream,
+    deadline: Instant,
+    buf: &mut Vec<u8>,
+    chunk: &mut [u8],
+) -> Result<usize, ReadStop> {
+    loop {
+        if !apply_remaining_read_timeout(stream, deadline) {
+            return Err(ReadStop::Drop);
+        }
+        let n = match stream.read(chunk) {
+            Ok(0) | Err(_) => return Err(ReadStop::Drop),
+            Ok(n) => n,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(pos) = buf.windows(4).position(|w| w == HEADER_TERMINATOR) {
+            return Ok(pos + 4);
+        }
+        if buf.len() > MAX_HTTP_BODY_BYTES {
+            return Err(ReadStop::TooLarge);
+        }
+    }
+}
+
+/// Reads the body until `header_end + content_length` bytes are buffered.
+fn read_request_body(
+    stream: &mut TcpStream,
+    deadline: Instant,
+    buf: &mut Vec<u8>,
+    chunk: &mut [u8],
+    (header_end, content_length, body_limit): (usize, usize, usize),
+) -> Result<(), ReadStop> {
+    // Grow toward the declared length as bytes arrive; never pre-commit the full IPC budget
+    // for a client that has only sent headers.
+    buf.reserve(
+        (header_end + content_length)
+            .saturating_sub(buf.len())
+            .min(MAX_HTTP_BODY_BYTES),
+    );
+    while buf.len() < header_end + content_length {
+        if !apply_remaining_read_timeout(stream, deadline) {
+            return Err(ReadStop::Drop);
+        }
+        let n = match stream.read(chunk) {
+            Ok(0) | Err(_) => return Err(ReadStop::Drop),
+            Ok(n) => n,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > header_end + body_limit {
+            return Err(ReadStop::TooLarge);
+        }
+    }
+    Ok(())
+}
+
+fn finish_read_stop(stream: &mut TcpStream, stop: ReadStop) {
+    if matches!(stop, ReadStop::TooLarge) {
+        write_http_413(stream);
+    }
+}
+
+/// Request headers that influence routing and limits.
+#[derive(Default)]
+struct RequestHeaders {
+    content_length: usize,
+    host: Option<String>,
+    origin: Option<String>,
+}
+
+/// Parses the header lines; `None` when `Content-Length` is invalid or above `body_limit`.
+fn parse_request_headers<'a>(
+    lines: impl Iterator<Item = &'a str>,
+    body_limit: usize,
+) -> Option<RequestHeaders> {
+    let mut headers = RequestHeaders::default();
+    for line in lines {
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
+        let key = k.trim();
+        let value = v.trim();
+        if key.eq_ignore_ascii_case("content-length") {
+            headers.content_length = value
+                .parse::<usize>()
+                .ok()
+                .filter(|&len| len <= body_limit)?;
+        } else if key.eq_ignore_ascii_case("host") {
+            headers.host = Some(value.to_string());
+        } else if key.eq_ignore_ascii_case("origin") {
+            headers.origin = Some(value.to_string());
+        }
+    }
+    Some(headers)
+}
+
+/// Rejection message for a disallowed `Host` (any method) or `Origin` (POST only) header.
+fn forbidden_header_message(
+    headers: &RequestHeaders,
+    method: &str,
+    port: u16,
+) -> Option<&'static str> {
+    if headers
+        .host
+        .as_deref()
+        .is_some_and(|host| !is_allowed_host(host, port))
+    {
+        return Some("{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Host 헤더입니다.\"}");
+    }
+    let bad_origin = method == "POST"
+        && headers
+            .origin
+            .as_deref()
+            .is_some_and(|origin| !is_allowed_origin(origin, port));
+    bad_origin
+        .then_some("{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Origin 헤더입니다.\"}")
+}
+
 fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDispatchFn) {
     let deadline = Instant::now() + MAX_CONNECTION_DURATION;
     let _ = stream.set_write_timeout(Some(Duration::from_millis(1500)));
 
     let mut buf = Vec::with_capacity(8192);
-    let mut chunk = vec![0u8; 64 * 1024];
-    let header_end = loop {
-        if !apply_remaining_read_timeout(stream, deadline) {
-            return;
-        }
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => {
-                buf.extend_from_slice(&chunk[..n]);
-                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                    break pos + 4;
-                }
-                if buf.len() > MAX_HTTP_BODY_BYTES {
-                    write_http_413(stream);
-                    return;
-                }
-            }
-        }
+    let mut chunk = vec![0u8; READ_CHUNK_BYTES];
+    let header_end = match read_until_headers(stream, deadline, &mut buf, &mut chunk) {
+        Ok(end) => end,
+        Err(stop) => return finish_read_stop(stream, stop),
     };
 
     let header_str = String::from_utf8_lossy(&buf[..header_end]).into_owned();
@@ -249,77 +364,26 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
         MAX_HTTP_BODY_BYTES
     };
 
-    let mut content_length = 0usize;
-    let mut host_header: Option<String> = None;
-    let mut origin_header: Option<String> = None;
-    for line in lines {
-        if let Some((k, v)) = line.split_once(':') {
-            let key = k.trim();
-            if key.eq_ignore_ascii_case("content-length") {
-                match v.trim().parse::<usize>() {
-                    Ok(raw_len) if raw_len <= body_limit => {
-                        content_length = raw_len;
-                    }
-                    _ => {
-                        write_http_413(stream);
-                        return;
-                    }
-                }
-            } else if key.eq_ignore_ascii_case("host") {
-                host_header = Some(v.trim().to_string());
-            } else if key.eq_ignore_ascii_case("origin") {
-                origin_header = Some(v.trim().to_string());
-            }
-        }
+    let Some(headers) = parse_request_headers(lines, body_limit) else {
+        return write_http_413(stream);
+    };
+    if let Some(message) = forbidden_header_message(&headers, method, port) {
+        return write_http_response(
+            stream,
+            "403 Forbidden",
+            "application/json; charset=utf-8",
+            message,
+        );
     }
-
-    if let Some(ref host) = host_header {
-        if !is_allowed_host(host, port) {
-            write_http_response(
-                stream,
-                "403 Forbidden",
-                "application/json; charset=utf-8",
-                "{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Host 헤더입니다.\"}",
-            );
-            return;
-        }
-    }
-
-    if method == "POST" {
-        if let Some(ref origin) = origin_header {
-            if !is_allowed_origin(origin, port) {
-                write_http_response(
-                    stream,
-                    "403 Forbidden",
-                    "application/json; charset=utf-8",
-                    "{\"status\":\"forbidden\",\"message\":\"허용되지 않은 Origin 헤더입니다.\"}",
-                );
-                return;
-            }
-        }
-    }
-
-    // Grow toward the declared length as bytes arrive; never pre-commit the full IPC budget
-    // for a client that has only sent headers.
-    buf.reserve(
-        (header_end + content_length)
-            .saturating_sub(buf.len())
-            .min(MAX_HTTP_BODY_BYTES),
-    );
-    while buf.len() < header_end + content_length {
-        if !apply_remaining_read_timeout(stream, deadline) {
-            return;
-        }
-        match stream.read(&mut chunk) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => {
-                buf.extend_from_slice(&chunk[..n]);
-                if buf.len() > header_end + body_limit {
-                    write_http_413(stream);
-                    return;
-                }
-            }
-        }
+    let content_length = headers.content_length;
+    if let Err(stop) = read_request_body(
+        stream,
+        deadline,
+        &mut buf,
+        &mut chunk,
+        (header_end, content_length, body_limit),
+    ) {
+        return finish_read_stop(stream, stop);
     }
 
     let body_slice = &buf[header_end..header_end + content_length];
