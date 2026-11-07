@@ -36,6 +36,24 @@ function fakeMediaQuery(initialDark) {
 
 const stripComments = (css) => css.replaceAll(/\/\*[\s\S]*?\*\//g, "");
 
+
+// `--name: value` declarations of a CSS block, split on the punctuation instead of a regex.
+function cssDeclarations(block) {
+  const out = [];
+  let text = block;
+  for (let start = text.indexOf("/*"); start >= 0; start = text.indexOf("/*")) {
+    const end = text.indexOf("*/", start + 2);
+    text = text.slice(0, start) + (end < 0 ? "" : text.slice(end + 2));
+  }
+  for (const part of text.split(/[;{}]/)) {
+    const colon = part.indexOf(":");
+    if (colon < 0) continue;
+    const name = part.slice(0, colon).trim();
+    if (name.startsWith("--")) out.push([name, part.slice(colon + 1).trim()]);
+  }
+  return out;
+}
+
 test("the stored mode and the OS scheme decide the effective theme at load", async () => {
   const dark = await createWorkspaceHarness({ localStorage: memoryStorage(), matchMedia: () => fakeMediaQuery(true) });
   assert.equal(dark.document.documentElement.dataset.themeMode, "system");
@@ -120,9 +138,9 @@ test("the CSS uses tokens only: no literal colours outside tokens.css and conten
 
 test("every var(--x) in the CSS is a token, or a custom property the CSS defines itself", () => {
   const tokenText = read("tokens.css");
-  const defined = new Set([...tokenText.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  const defined = new Set(cssDeclarations(tokenText).map(([name]) => name));
   const all = ["styles.css", "shell.css", "content.css"].map((n) => stripComments(read(n))).join("\n");
-  for (const m of all.matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(m[1]);
+  for (const [name] of cssDeclarations(all)) defined.add(name);
   // A var() with a fallback is an optional hook; only bare references must be defined.
   for (const m of all.matchAll(/var\((--[a-z0-9-]+)\s*\)/g)) assert.ok(defined.has(m[1]), `${m[1]} is not defined`);
 });
@@ -140,7 +158,9 @@ test("tokens.css keeps the rhwp-studio values: light default, dark under data-th
 test("the document page keeps the light palette in the dark theme", () => {
   const tokens = read("tokens.css");
   const light = tokens.slice(tokens.indexOf("\n:root {"), tokens.indexOf('\n:root[data-theme-effective="dark"] {'));
-  const page = /#doc-editor \{([\s\S]*?)\n\}/.exec(read("content.css"))[1];
+  const content = read("content.css");
+  const pageStart = content.indexOf("#doc-editor {");
+  const page = content.slice(content.indexOf("{", pageStart) + 1, content.indexOf("\n}", pageStart));
   const pageTokens = Object.fromEntries([...page.matchAll(/(--[a-z-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));
   assert.ok(Object.keys(pageTokens).length > 30, "the page redeclares the palette");
   for (const [name, value] of Object.entries(pageTokens)) {

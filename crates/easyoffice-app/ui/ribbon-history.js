@@ -46,6 +46,10 @@
     docEditor.dataset.paperSize = docEditor.dataset.paperSize === "Letter" ? "A4" : "Letter";
   }
 
+  function viewEffectTheme() {
+    host.__EASYOFFICE_THEME__.toggle();
+  }
+
   function createRibbonHistory(deps) {
     const {
       document,
@@ -608,10 +612,6 @@
 
     const ZOOM_CYCLE = { 100: 125, 125: 150, 150: 90 };
     const DEFAULT_ZOOM_PERCENT = 100;
-
-    function viewEffectTheme() {
-      host.__EASYOFFICE_THEME__.toggle();
-    }
 
     function viewEffectZoom(_cmdId, execRes) {
       let zoom = Number(execRes?.zoomPercent || 0);
