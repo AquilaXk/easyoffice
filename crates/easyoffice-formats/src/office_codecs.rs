@@ -43,6 +43,207 @@ pub type XlsxFormulaCache = std::collections::HashMap<(u32, u32), XlsxCachedValu
 /// ECMA-376 OOXML container codec for `.docx`, `.xlsx`, `.pptx`, and `.ppsx`.
 pub struct OoxmlCodec;
 
+const XLSX_ROOT_RELS: &str = concat!(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
+    "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>",
+    "</Relationships>"
+);
+
+type SharedStringMap<'a> = std::collections::HashMap<&'a str, usize>;
+
+fn build_content_types(sheet_count: usize) -> String {
+    let mut content_types = String::from(concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
+        "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
+        "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
+        "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>",
+    ));
+    for idx in 1..=sheet_count {
+        content_types.push_str(&format!(
+            "<Override PartName=\"/xl/worksheets/sheet{idx}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+        ));
+    }
+    content_types.push_str(concat!(
+        "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>",
+        "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>",
+        "</Types>"
+    ));
+    content_types
+}
+
+/// `xl/workbook.xml` and `xl/_rels/workbook.xml.rels` contents.
+fn build_workbook_parts(active_sheets: &[OdsUnpacked]) -> (String, String) {
+    let mut workbook_xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>",
+    );
+    let mut wb_rels_xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
+    );
+    for (i, (s_name, _)) in active_sheets.iter().enumerate() {
+        let num = i + 1;
+        let clean_name = if s_name.is_empty() {
+            format!("Sheet{num}")
+        } else {
+            s_name.clone()
+        };
+        workbook_xml.push_str(&format!(
+            "<sheet name=\"{}\" sheetId=\"{num}\" r:id=\"rId{num}\"/>",
+            XmlSanitizer::escape(&clean_name)
+        ));
+        wb_rels_xml.push_str(&format!(
+            "<Relationship Id=\"rId{num}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{num}.xml\"/>"
+        ));
+    }
+    workbook_xml.push_str("</sheets><calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
+    let styles_rid = active_sheets.len() + 1;
+    let sst_rid = active_sheets.len() + 2;
+    wb_rels_xml.push_str(&format!(
+        "<Relationship Id=\"rId{styles_rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
+    ));
+    wb_rels_xml.push_str(&format!(
+        "<Relationship Id=\"rId{sst_rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>"
+    ));
+    (workbook_xml, wb_rels_xml)
+}
+
+/// Unique non-numeric, non-formula strings with their indices and the total occurrence count.
+fn collect_shared_strings(
+    active_sheets: &[OdsUnpacked],
+) -> (Vec<&str>, SharedStringMap<'_>, usize) {
+    let mut shared_strings: Vec<&str> = Vec::new();
+    let mut sst_map = SharedStringMap::new();
+    let mut total_str_count = 0usize;
+    for (_, cells) in active_sheets {
+        for (_, _, val) in cells {
+            if val.starts_with('=') || val.parse::<f64>().is_ok() {
+                continue;
+            }
+            total_str_count += 1;
+            if !sst_map.contains_key(val.as_str()) {
+                sst_map.insert(val.as_str(), shared_strings.len());
+                shared_strings.push(val.as_str());
+            }
+        }
+    }
+    (shared_strings, sst_map, total_str_count)
+}
+
+fn build_shared_strings_xml(shared_strings: &[&str], total_str_count: usize) -> String {
+    let mut sst_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{total_str_count}\" uniqueCount=\"{}\">",
+        shared_strings.len()
+    );
+    for s in shared_strings {
+        sst_xml.push_str("<si><t>");
+        sst_xml.push_str(&XmlSanitizer::escape(s));
+        sst_xml.push_str("</t></si>");
+    }
+    sst_xml.push_str("</sst>");
+    sst_xml
+}
+
+/// Appends the XML of one cell (`raw` is the stored text: formula, number, string or blank).
+fn push_cell_xml(
+    sheet_xml: &mut String,
+    a1: &str,
+    s: &str,
+    raw: &str,
+    cached: Option<&XlsxCachedValue>,
+    sst_map: &SharedStringMap<'_>,
+) {
+    if raw.is_empty() {
+        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}/>"));
+    } else if let Some(formula) = raw.strip_prefix('=') {
+        let f = XmlSanitizer::escape(formula);
+        match cached {
+            Some(XlsxCachedValue::Number(n)) if n.is_finite() => {
+                sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f><v>{n}</v></c>"));
+            }
+            Some(XlsxCachedValue::Text(text)) => sheet_xml.push_str(&format!(
+                "<c r=\"{a1}\"{s} t=\"str\"><f>{f}</f><v>{}</v></c>",
+                XmlSanitizer::escape(text)
+            )),
+            Some(XlsxCachedValue::Boolean(b)) => sheet_xml.push_str(&format!(
+                "<c r=\"{a1}\"{s} t=\"b\"><f>{f}</f><v>{}</v></c>",
+                u8::from(*b)
+            )),
+            _ => sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f></c>")),
+        }
+    } else if raw.parse::<f64>().is_ok() {
+        sheet_xml.push_str(&format!(
+            "<c r=\"{a1}\"{s} t=\"n\"><v>{}</v></c>",
+            XmlSanitizer::escape(raw)
+        ));
+    } else {
+        let idx = sst_map.get(raw).copied().unwrap_or(0);
+        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s} t=\"s\"><v>{idx}</v></c>"));
+    }
+}
+
+/// Cells grouped by row; styled blank cells are included so their style is preserved.
+fn group_cells_by_row<'a>(
+    cells: &'a [(u32, u32, String)],
+    styling: Option<&SheetStyling>,
+    blank: &'a String,
+) -> std::collections::BTreeMap<u32, Vec<(u32, &'a String)>> {
+    let mut rows_map: std::collections::BTreeMap<u32, Vec<(u32, &String)>> =
+        std::collections::BTreeMap::new();
+    for (row, col, raw) in cells {
+        rows_map.entry(*row).or_default().push((*col, raw));
+    }
+    if let Some(st) = styling {
+        let valued: std::collections::HashSet<(u32, u32)> =
+            cells.iter().map(|(r, c, _)| (*r, *c)).collect();
+        for (&(row, col), style) in &st.cells {
+            if !style.is_plain() && !valued.contains(&(row, col)) {
+                rows_map.entry(row).or_default().push((col, blank));
+            }
+        }
+    }
+    rows_map
+}
+
+fn build_sheet_xml(
+    cells: &[(u32, u32, String)],
+    cache: Option<&XlsxFormulaCache>,
+    styling: Option<&SheetStyling>,
+    style_table: &XlsxStyleTable,
+    sst_map: &SharedStringMap<'_>,
+) -> String {
+    let blank = String::new();
+    let rows_map = group_cells_by_row(cells, styling, &blank);
+    let mut sheet_xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
+    );
+    if let Some(st) = styling {
+        sheet_xml.push_str(&cols_xml(&st.columns));
+    }
+    sheet_xml.push_str("<sheetData>");
+    for (row, mut row_cells) in rows_map {
+        row_cells.sort_by_key(|(col, _)| *col);
+        let row_num = row.saturating_add(1);
+        sheet_xml.push_str(&format!("<row r=\"{row_num}\">"));
+        for (col, raw) in row_cells {
+            let a1 = format!("{}{}", format_col_letters(col), row_num);
+            let xf = styling
+                .and_then(|st| st.cells.get(&(row, col)))
+                .map_or(0, |style| style_table.xf_index(style));
+            let s = if xf > 0 {
+                format!(" s=\"{xf}\"")
+            } else {
+                String::new()
+            };
+            let cached = cache.and_then(|c| c.get(&(row, col)));
+            push_cell_xml(&mut sheet_xml, &a1, &s, raw, cached, sst_map);
+        }
+        sheet_xml.push_str("</row>");
+    }
+    sheet_xml.push_str("</sheetData></worksheet>");
+    sheet_xml
+}
+
 impl OoxmlCodec {
     pub const MAX_XLSX_ROWS: u32 = 1_048_576;
     pub const MAX_XLSX_COLS: u32 = 16_384;
@@ -208,6 +409,58 @@ impl OoxmlCodec {
             sheets
         };
 
+        Self::validate_xlsx_bounds(active_sheets, stylings)?;
+        let style_table = XlsxStyleTable::build(stylings);
+        let (workbook_xml, wb_rels_xml) = build_workbook_parts(active_sheets);
+        let styles_xml = style_table.to_xml();
+        let (shared_strings, sst_map, total_str_count) = collect_shared_strings(active_sheets);
+        let sst_xml = build_shared_strings_xml(&shared_strings, total_str_count);
+
+        XmlSanitizer::validate_safe_xml(&workbook_xml)?;
+        XmlSanitizer::validate_safe_xml(&wb_rels_xml)?;
+        XmlSanitizer::validate_safe_xml(&sst_xml)?;
+
+        let mut entries = vec![
+            (
+                "[Content_Types].xml".to_string(),
+                build_content_types(active_sheets.len()).into_bytes(),
+            ),
+            ("xl/workbook.xml".to_string(), workbook_xml.into_bytes()),
+            (
+                "_rels/.rels".to_string(),
+                XLSX_ROOT_RELS.as_bytes().to_vec(),
+            ),
+            (
+                "xl/_rels/workbook.xml.rels".to_string(),
+                wb_rels_xml.into_bytes(),
+            ),
+            ("xl/styles.xml".to_string(), styles_xml.into_bytes()),
+            ("xl/sharedStrings.xml".to_string(), sst_xml.into_bytes()),
+        ];
+
+        for (i, (_, cells)) in active_sheets.iter().enumerate() {
+            let sheet_xml = build_sheet_xml(
+                cells,
+                caches.get(i),
+                stylings.get(i),
+                &style_table,
+                &sst_map,
+            );
+            XmlSanitizer::validate_safe_xml(&sheet_xml)?;
+            entries.push((
+                format!("xl/worksheets/sheet{}.xml", i + 1),
+                sheet_xml.into_bytes(),
+            ));
+        }
+
+        ZipArchiveCodec::pack_compressed(&entries)
+    }
+
+    /// Rejects cell / style coordinates outside the ECMA-376 limits.
+    fn validate_xlsx_bounds(
+        active_sheets: &[OdsUnpacked],
+        stylings: &[SheetStyling],
+    ) -> Result<(), EasyOfficeError> {
         for (_, cells) in active_sheets {
             for &(row, col, _) in cells {
                 if row >= Self::MAX_XLSX_ROWS || col >= Self::MAX_XLSX_COLS {
@@ -238,192 +491,7 @@ impl OoxmlCodec {
                 )));
             }
         }
-        let style_table = XlsxStyleTable::build(stylings);
-
-        let mut content_types = String::from(concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">",
-            "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>",
-            "<Default Extension=\"xml\" ContentType=\"application/xml\"/>",
-            "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>",
-        ));
-        for idx in 1..=active_sheets.len() {
-            content_types.push_str(&format!(
-                "<Override PartName=\"/xl/worksheets/sheet{idx}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
-            ));
-        }
-        content_types.push_str(concat!(
-            "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>",
-            "<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>",
-            "</Types>"
-        ));
-
-        let root_rels = concat!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
-            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>",
-            "</Relationships>"
-        );
-
-        let mut workbook_xml = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>",
-        );
-        let mut wb_rels_xml = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">",
-        );
-        for (i, (s_name, _)) in active_sheets.iter().enumerate() {
-            let num = i + 1;
-            let clean_name = if s_name.is_empty() {
-                format!("Sheet{num}")
-            } else {
-                s_name.clone()
-            };
-            workbook_xml.push_str(&format!(
-                "<sheet name=\"{}\" sheetId=\"{num}\" r:id=\"rId{num}\"/>",
-                XmlSanitizer::escape(&clean_name)
-            ));
-            wb_rels_xml.push_str(&format!(
-                "<Relationship Id=\"rId{num}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{num}.xml\"/>"
-            ));
-        }
-        workbook_xml
-            .push_str("</sheets><calcPr calcId=\"191029\" fullCalcOnLoad=\"1\"/></workbook>");
-        let styles_rid = active_sheets.len() + 1;
-        let sst_rid = active_sheets.len() + 2;
-        wb_rels_xml.push_str(&format!(
-            "<Relationship Id=\"rId{styles_rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"
-        ));
-        wb_rels_xml.push_str(&format!(
-            "<Relationship Id=\"rId{sst_rid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings\" Target=\"sharedStrings.xml\"/></Relationships>"
-        ));
-
-        let styles_xml = style_table.to_xml();
-
-        let mut shared_strings: Vec<&str> = Vec::new();
-        let mut sst_map: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        let mut total_str_count = 0usize;
-        for (_, cells) in active_sheets {
-            for (_, _, val) in cells {
-                if !val.starts_with('=') && val.parse::<f64>().is_err() {
-                    total_str_count += 1;
-                    if !sst_map.contains_key(val.as_str()) {
-                        let idx = shared_strings.len();
-                        shared_strings.push(val.as_str());
-                        sst_map.insert(val.as_str(), idx);
-                    }
-                }
-            }
-        }
-
-        let mut sst_xml = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"{total_str_count}\" uniqueCount=\"{}\">",
-            shared_strings.len()
-        );
-        for s in &shared_strings {
-            sst_xml.push_str("<si><t>");
-            sst_xml.push_str(&XmlSanitizer::escape(s));
-            sst_xml.push_str("</t></si>");
-        }
-        sst_xml.push_str("</sst>");
-
-        XmlSanitizer::validate_safe_xml(&workbook_xml)?;
-        XmlSanitizer::validate_safe_xml(&wb_rels_xml)?;
-        XmlSanitizer::validate_safe_xml(&sst_xml)?;
-
-        let mut entries = vec![
-            (
-                "[Content_Types].xml".to_string(),
-                content_types.into_bytes(),
-            ),
-            ("xl/workbook.xml".to_string(), workbook_xml.into_bytes()),
-            ("_rels/.rels".to_string(), root_rels.as_bytes().to_vec()),
-            (
-                "xl/_rels/workbook.xml.rels".to_string(),
-                wb_rels_xml.into_bytes(),
-            ),
-            ("xl/styles.xml".to_string(), styles_xml.into_bytes()),
-            ("xl/sharedStrings.xml".to_string(), sst_xml.into_bytes()),
-        ];
-
-        for (i, (_, cells)) in active_sheets.iter().enumerate() {
-            let cache = caches.get(i);
-            let styling = stylings.get(i);
-            let blank = String::new();
-            let mut rows_map: std::collections::BTreeMap<u32, Vec<(u32, &String)>> =
-                std::collections::BTreeMap::new();
-            for (row, col, raw) in cells {
-                rows_map.entry(*row).or_default().push((*col, raw));
-            }
-            // Styled cells without a value are still written (`<c r=".." s=".."/>`).
-            if let Some(st) = styling {
-                let valued: std::collections::HashSet<(u32, u32)> =
-                    cells.iter().map(|(r, c, _)| (*r, *c)).collect();
-                for (&(row, col), style) in &st.cells {
-                    if !style.is_plain() && !valued.contains(&(row, col)) {
-                        rows_map.entry(row).or_default().push((col, &blank));
-                    }
-                }
-            }
-
-            let mut sheet_xml = String::from(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
-            );
-            if let Some(st) = styling {
-                sheet_xml.push_str(&cols_xml(&st.columns));
-            }
-            sheet_xml.push_str("<sheetData>");
-            for (row, mut row_cells) in rows_map {
-                row_cells.sort_by_key(|(col, _)| *col);
-                let row_num = row.saturating_add(1);
-                sheet_xml.push_str(&format!("<row r=\"{row_num}\">"));
-                for (col, raw) in row_cells {
-                    let a1 = format!("{}{}", format_col_letters(col), row_num);
-                    let xf = styling
-                        .and_then(|st| st.cells.get(&(row, col)))
-                        .map_or(0, |style| style_table.xf_index(style));
-                    let s = if xf > 0 {
-                        format!(" s=\"{xf}\"")
-                    } else {
-                        String::new()
-                    };
-                    if raw.is_empty() {
-                        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}/>"));
-                    } else if let Some(formula) = raw.strip_prefix('=') {
-                        let f = XmlSanitizer::escape(formula);
-                        match cache.and_then(|c| c.get(&(row, col))) {
-                            Some(XlsxCachedValue::Number(n)) if n.is_finite() => sheet_xml
-                                .push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f><v>{n}</v></c>")),
-                            Some(XlsxCachedValue::Text(text)) => sheet_xml.push_str(&format!(
-                                "<c r=\"{a1}\"{s} t=\"str\"><f>{f}</f><v>{}</v></c>",
-                                XmlSanitizer::escape(text)
-                            )),
-                            Some(XlsxCachedValue::Boolean(b)) => sheet_xml.push_str(&format!(
-                                "<c r=\"{a1}\"{s} t=\"b\"><f>{f}</f><v>{}</v></c>",
-                                u8::from(*b)
-                            )),
-                            _ => sheet_xml.push_str(&format!("<c r=\"{a1}\"{s}><f>{f}</f></c>")),
-                        }
-                    } else if raw.parse::<f64>().is_ok() {
-                        sheet_xml.push_str(&format!(
-                            "<c r=\"{a1}\"{s} t=\"n\"><v>{}</v></c>",
-                            XmlSanitizer::escape(raw)
-                        ));
-                    } else {
-                        let idx = sst_map.get(raw.as_str()).copied().unwrap_or(0);
-                        sheet_xml.push_str(&format!("<c r=\"{a1}\"{s} t=\"s\"><v>{idx}</v></c>"));
-                    }
-                }
-                sheet_xml.push_str("</row>");
-            }
-            sheet_xml.push_str("</sheetData></worksheet>");
-            XmlSanitizer::validate_safe_xml(&sheet_xml)?;
-            entries.push((
-                format!("xl/worksheets/sheet{}.xml", i + 1),
-                sheet_xml.into_bytes(),
-            ));
-        }
-
-        ZipArchiveCodec::pack_compressed(&entries)
+        Ok(())
     }
 
     pub fn unpack_xlsx(bytes: &[u8]) -> Result<OoxmlXlsxPayload, EasyOfficeError> {

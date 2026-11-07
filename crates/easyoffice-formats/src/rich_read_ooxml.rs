@@ -157,6 +157,192 @@ fn plain(p: &ParaState) -> String {
     p.runs.iter().map(|r| r.text.as_str()).collect()
 }
 
+/// Elements whose whole subtree is ignored (revisions, fallbacks, deleted text).
+const SKIPPED_ELEMENTS: [&str; 11] = [
+    "mc:Fallback",
+    "w:rPrChange",
+    "w:pPrChange",
+    "w:sectPrChange",
+    "w:tblPrChange",
+    "w:trPrChange",
+    "w:tcPrChange",
+    "w:del",
+    "w:moveFrom",
+    "w:instrText",
+    "w:delText",
+];
+const UNSUPPORTED_OBJECT_ELEMENTS: [&str; 3] = ["w:drawing", "w:pict", "w:object"];
+const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
+
+/// Applies a run-property element (`w:b`, `w:sz`, ...) to `fmt`.
+fn apply_run_property(fmt: &mut CharFmt, name: &str, attrs: &[(String, String)]) {
+    let val = attr(attrs, "w:val");
+    match name {
+        "w:b" => fmt.bold = toggle_on(val),
+        "w:i" => fmt.italic = toggle_on(val),
+        "w:strike" | "w:dstrike" => fmt.strike = toggle_on(val),
+        "w:u" => fmt.underline = toggle_on(val),
+        "w:rFonts" => {
+            fmt.font = ["w:ascii", "w:hAnsi", "w:eastAsia"]
+                .iter()
+                .find_map(|k| attr(attrs, k))
+                .filter(|f| !f.trim().is_empty())
+                .map(str::to_string);
+        }
+        "w:sz" => fmt.size_half_pt = val.and_then(|v| v.parse::<u16>().ok()).filter(|v| *v > 0),
+        "w:color" => fmt.color = val.and_then(normalize_hex_color),
+        "w:highlight" => fmt.highlight = val.and_then(highlight_name_to_hex),
+        "w:shd" => {
+            if let Some(fill) = attr(attrs, "w:fill").and_then(normalize_hex_color) {
+                fmt.highlight = Some(fill);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Mutable walker state for `word/document.xml` events.
+#[derive(Default)]
+struct DocxWalker {
+    warnings: Vec<String>,
+    blocks: Vec<RichBlock>,
+    paras: Vec<ParaState>,
+    in_ppr: bool,
+    in_run: bool,
+    in_rpr: bool,
+    in_t: bool,
+    fmt: CharFmt,
+    cur_text: String,
+    tbl_depth: usize,
+    rows: Vec<Vec<String>>,
+    cur_row: Vec<String>,
+    cell_paras: Vec<String>,
+}
+
+impl DocxWalker {
+    /// Handles an element start; returns true when the whole subtree must be skipped.
+    fn on_start(&mut self, name: &str, attrs: &[(String, String)]) -> bool {
+        if SKIPPED_ELEMENTS.contains(&name) {
+            return true;
+        }
+        if UNSUPPORTED_OBJECT_ELEMENTS.contains(&name) {
+            let note = UNSUPPORTED_OBJECT_NOTE.to_string();
+            if !self.warnings.contains(&note) {
+                self.warnings.push(note);
+            }
+            return true;
+        }
+        self.track_structure(name);
+        if let Some(top) = self.paras.last_mut() {
+            if self.in_ppr {
+                Self::apply_para_property(top, name, attr(attrs, "w:val"));
+            }
+        }
+        if self.in_run && self.in_rpr {
+            apply_run_property(&mut self.fmt, name, attrs);
+        } else if self.in_run && !self.in_ppr {
+            self.apply_inline_break(name, attrs);
+        }
+        false
+    }
+
+    fn track_structure(&mut self, name: &str) {
+        match name {
+            "w:tbl" => {
+                self.tbl_depth += 1;
+                if self.tbl_depth == 1 {
+                    self.rows.clear();
+                }
+            }
+            "w:tr" if self.tbl_depth == 1 => self.cur_row = Vec::new(),
+            "w:tc" if self.tbl_depth == 1 => self.cell_paras.clear(),
+            "w:p" => self.paras.push(ParaState::default()),
+            "w:pPr" => self.in_ppr = true,
+            "w:r" => {
+                self.in_run = true;
+                self.fmt = CharFmt::default();
+                self.cur_text.clear();
+            }
+            "w:rPr" if self.in_run => self.in_rpr = true,
+            "w:t" if self.in_run => self.in_t = true,
+            _ => {}
+        }
+    }
+
+    fn apply_para_property(top: &mut ParaState, name: &str, val: Option<&str>) {
+        match name {
+            "w:pStyle" => top.style_id = val.map(str::to_string),
+            "w:jc" => top.jc = val.map(str::to_string),
+            "w:numId" => top.num_id = val.map(str::to_string),
+            "w:outlineLvl" => top.outline = val.and_then(|v| v.parse().ok()),
+            _ => {}
+        }
+    }
+
+    fn apply_inline_break(&mut self, name: &str, attrs: &[(String, String)]) {
+        match name {
+            "w:tab" | "w:ptab" => self.cur_text.push('\t'),
+            "w:br" if !matches!(attr(attrs, "w:type"), Some("page" | "column")) => {
+                self.cur_text.push('\n');
+            }
+            "w:cr" => self.cur_text.push('\n'),
+            "w:noBreakHyphen" => self.cur_text.push('-'),
+            _ => {}
+        }
+    }
+
+    fn on_text(&mut self, text: &str) {
+        if self.in_t {
+            self.cur_text.push_str(text);
+        }
+    }
+
+    fn on_end(&mut self, name: &str, resolver: &Resolver<'_>) {
+        match name {
+            "w:t" => self.in_t = false,
+            "w:rPr" => self.in_rpr = false,
+            "w:pPr" => self.in_ppr = false,
+            "w:r" => {
+                if let Some(top) = self.paras.last_mut() {
+                    push_run(&mut top.runs, &self.cur_text, &self.fmt);
+                }
+                self.cur_text.clear();
+                self.in_run = false;
+                self.in_rpr = false;
+                self.in_t = false;
+            }
+            "w:p" => self.finish_paragraph(resolver),
+            "w:tc" if self.tbl_depth == 1 => {
+                while self.cell_paras.last().is_some_and(String::is_empty) {
+                    self.cell_paras.pop();
+                }
+                self.cur_row.push(self.cell_paras.join("\n"));
+                self.cell_paras.clear();
+            }
+            "w:tr" if self.tbl_depth == 1 => self.rows.push(std::mem::take(&mut self.cur_row)),
+            "w:tbl" => {
+                self.tbl_depth = self.tbl_depth.saturating_sub(1);
+                if self.tbl_depth == 0 && !self.rows.is_empty() {
+                    self.blocks
+                        .push(RichBlock::Table(std::mem::take(&mut self.rows)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn finish_paragraph(&mut self, resolver: &Resolver<'_>) {
+        let Some(p) = self.paras.pop() else {
+            return;
+        };
+        if self.tbl_depth > 0 {
+            self.cell_paras.push(plain(&p));
+        } else if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
+            self.blocks.push(RichBlock::Paragraph(resolver.finish(p)));
+        }
+    }
+}
+
 /// Decodes `word/document.xml` (plus styles and numbering) of a DOCX package.
 pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), EasyOfficeError> {
     let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
@@ -188,154 +374,22 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         numbering: &numbering,
     };
     let events = tokenize(doc_xml)?;
-    let mut warnings: Vec<String> = Vec::new();
-    let mut blocks: Vec<RichBlock> = Vec::new();
-
-    let mut paras: Vec<ParaState> = Vec::new();
-    let (mut in_ppr, mut in_run, mut in_rpr, mut in_t) = (false, false, false, false);
-    let mut fmt = CharFmt::default();
-    let mut cur_text = String::new();
-    let mut tbl_depth = 0usize;
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut cur_row: Vec<String> = Vec::new();
-    let mut cell_paras: Vec<String> = Vec::new();
-
+    let mut walker = DocxWalker::default();
     let mut i = 0usize;
     while i < events.len() {
         match &events[i] {
             XmlEvent::Start { name, attrs } => {
-                match name.as_str() {
-                    "mc:Fallback" | "w:rPrChange" | "w:pPrChange" | "w:sectPrChange"
-                    | "w:tblPrChange" | "w:trPrChange" | "w:tcPrChange" | "w:del"
-                    | "w:moveFrom" | "w:instrText" | "w:delText" => {
-                        i = skip_subtree(&events, i);
-                        continue;
-                    }
-                    "w:drawing" | "w:pict" | "w:object" => {
-                        let note = "그림·도형·OLE 개체는 가져오지 않았습니다.".to_string();
-                        if !warnings.contains(&note) {
-                            warnings.push(note);
-                        }
-                        i = skip_subtree(&events, i);
-                        continue;
-                    }
-                    "w:tbl" => {
-                        tbl_depth += 1;
-                        if tbl_depth == 1 {
-                            rows.clear();
-                        }
-                    }
-                    "w:tr" if tbl_depth == 1 => cur_row = Vec::new(),
-                    "w:tc" if tbl_depth == 1 => cell_paras.clear(),
-                    "w:p" => paras.push(ParaState::default()),
-                    "w:pPr" => in_ppr = true,
-                    "w:r" => {
-                        in_run = true;
-                        fmt = CharFmt::default();
-                        cur_text.clear();
-                    }
-                    "w:rPr" if in_run => in_rpr = true,
-                    "w:t" if in_run => in_t = true,
-                    _ => {}
-                }
-                if let Some(top) = paras.last_mut() {
-                    let val = attr(attrs, "w:val");
-                    match name.as_str() {
-                        "w:pStyle" if in_ppr => top.style_id = val.map(str::to_string),
-                        "w:jc" if in_ppr => top.jc = val.map(str::to_string),
-                        "w:numId" if in_ppr => top.num_id = val.map(str::to_string),
-                        "w:outlineLvl" if in_ppr => top.outline = val.and_then(|v| v.parse().ok()),
-                        _ => {}
-                    }
-                }
-                if in_run && in_rpr {
-                    match name.as_str() {
-                        "w:b" => fmt.bold = toggle_on(attr(attrs, "w:val")),
-                        "w:i" => fmt.italic = toggle_on(attr(attrs, "w:val")),
-                        "w:strike" | "w:dstrike" => fmt.strike = toggle_on(attr(attrs, "w:val")),
-                        "w:u" => fmt.underline = toggle_on(attr(attrs, "w:val")),
-                        "w:rFonts" => {
-                            fmt.font = ["w:ascii", "w:hAnsi", "w:eastAsia"]
-                                .iter()
-                                .find_map(|k| attr(attrs, k))
-                                .filter(|f| !f.trim().is_empty())
-                                .map(str::to_string);
-                        }
-                        "w:sz" => {
-                            fmt.size_half_pt = attr(attrs, "w:val")
-                                .and_then(|v| v.parse::<u16>().ok())
-                                .filter(|v| *v > 0);
-                        }
-                        "w:color" => fmt.color = attr(attrs, "w:val").and_then(normalize_hex_color),
-                        "w:highlight" => {
-                            fmt.highlight = attr(attrs, "w:val").and_then(highlight_name_to_hex);
-                        }
-                        "w:shd" => {
-                            if let Some(fill) = attr(attrs, "w:fill").and_then(normalize_hex_color)
-                            {
-                                fmt.highlight = Some(fill);
-                            }
-                        }
-                        _ => {}
-                    }
-                } else if in_run && !in_ppr {
-                    match name.as_str() {
-                        "w:tab" | "w:ptab" => cur_text.push('\t'),
-                        "w:br" if !matches!(attr(attrs, "w:type"), Some("page" | "column")) => {
-                            cur_text.push('\n');
-                        }
-                        "w:cr" => cur_text.push('\n'),
-                        "w:noBreakHyphen" => cur_text.push('-'),
-                        _ => {}
-                    }
+                if walker.on_start(name, attrs) {
+                    i = skip_subtree(&events, i);
+                    continue;
                 }
             }
-            XmlEvent::Text(text) => {
-                if in_t {
-                    cur_text.push_str(text);
-                }
-            }
-            XmlEvent::End(name) => match name.as_str() {
-                "w:t" => in_t = false,
-                "w:rPr" => in_rpr = false,
-                "w:pPr" => in_ppr = false,
-                "w:r" => {
-                    if let Some(top) = paras.last_mut() {
-                        push_run(&mut top.runs, &cur_text, &fmt);
-                    }
-                    cur_text.clear();
-                    in_run = false;
-                    in_rpr = false;
-                    in_t = false;
-                }
-                "w:p" => {
-                    if let Some(p) = paras.pop() {
-                        if tbl_depth > 0 {
-                            cell_paras.push(plain(&p));
-                        } else if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
-                            blocks.push(RichBlock::Paragraph(resolver.finish(p)));
-                        }
-                    }
-                }
-                "w:tc" if tbl_depth == 1 => {
-                    while cell_paras.last().is_some_and(String::is_empty) {
-                        cell_paras.pop();
-                    }
-                    cur_row.push(cell_paras.join("\n"));
-                    cell_paras.clear();
-                }
-                "w:tr" if tbl_depth == 1 => rows.push(std::mem::take(&mut cur_row)),
-                "w:tbl" => {
-                    tbl_depth = tbl_depth.saturating_sub(1);
-                    if tbl_depth == 0 && !rows.is_empty() {
-                        blocks.push(RichBlock::Table(std::mem::take(&mut rows)));
-                    }
-                }
-                _ => {}
-            },
+            XmlEvent::Text(text) => walker.on_text(text),
+            XmlEvent::End(name) => walker.on_end(name, &resolver),
         }
         i += 1;
     }
+    let mut warnings = walker.warnings;
     if entries.iter().any(|e| {
         let p = e.path.as_str();
         (p.starts_with("word/header") || p.starts_with("word/footer")) && p.ends_with(".xml")
@@ -345,7 +399,7 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
     Ok((
         RichDocument {
             title,
-            blocks,
+            blocks: walker.blocks,
             official_agency: None,
         },
         warnings,
