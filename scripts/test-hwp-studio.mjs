@@ -401,3 +401,14 @@ test("wasm dependency closure follows normal edges only and section replacement 
   assert.equal(replaceSection(`head\n${BEGIN}\nold\n${END}\ntail`, "new"), `head\n${BEGIN}\n\nnew\n${END}\ntail`);
   assert.throws(() => replaceSection("no markers", "x"));
 });
+// ---- embed parent origin ------------------------------------------------------------------------
+
+test("the editor accepts the desktop shell's parent origin on every platform (PD-094)", async () => {
+  const { isUsableParentOrigin } = await import("../apps/hwp-studio/src/embed/protocol.ts");
+  for (const origin of ["http://tauri.localhost", "tauri://localhost", "http://127.0.0.1:18787", "https://example.org"]) {
+    assert.equal(isUsableParentOrigin(origin), true, origin);
+  }
+  for (const origin of ["", "null", "file:///tmp/x.html", "data:text/html,x", "javascript:alert(1)", "not a url"]) {
+    assert.equal(isUsableParentOrigin(origin), false, origin);
+  }
+});

@@ -388,6 +388,24 @@ pub fn open_startup_files(app: &AppHandle, args: impl Iterator<Item = String>) -
     route_launch_files(&launch_files(args), |path| open_path(app, path))
 }
 
+/// The local files among `file:` URLs handed over by the macOS "open" Apple Event.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn file_url_paths(urls: &[tauri::Url]) -> Vec<PathBuf> {
+    urls.iter()
+        .filter_map(|url| url.to_file_path().ok())
+        .filter(|path| WindowKind::for_path(path).is_some() && path.is_file())
+        .collect()
+}
+
+/// Opens the files Finder handed to the app (macOS) through the same queue as every other launch.
+#[cfg(target_os = "macos")]
+pub fn open_urls(app: &AppHandle, urls: Vec<tauri::Url>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        route_launch_files(&file_url_paths(&urls), |path| open_path(&app, path));
+    });
+}
+
 /// A second launch (file association, shell "open with", taskbar) is handed to this running process:
 /// its files open through the same queue as the start window, or the window that has a file
 /// already comes to the front. Without files, the existing window is simply focused.
@@ -633,6 +651,24 @@ mod tests {
         });
         assert!(handled);
         assert_eq!(queued, vec![a, b]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn finder_open_urls_keep_only_existing_supported_local_files() {
+        let dir = std::env::temp_dir().join(format!("eo-urls-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let doc = dir.join("보고서 1.docx");
+        fs::write(&doc, b"x").unwrap();
+        let exe = dir.join("tool.exe");
+        fs::write(&exe, b"x").unwrap();
+        let urls = vec![
+            tauri::Url::from_file_path(&doc).unwrap(),
+            tauri::Url::from_file_path(&exe).unwrap(),
+            tauri::Url::from_file_path(dir.join("missing.xlsx")).unwrap(),
+            tauri::Url::parse("https://example.com/a.docx").unwrap(),
+        ];
+        assert_eq!(file_url_paths(&urls), vec![doc]);
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -1,9 +1,8 @@
 //! Shape-checked card, bank account, passport, driver's licence, and business
 //! registration number matchers used by the PII scrubber.
 //!
-//! The rules mirror the JS engine (`ui/sheet-utils.js`) and the Swift regex rules
-//! in `DocumentSecurityAuditor.swift`; `fixtures/pii-scrub-vectors.json` keeps
-//! all three in agreement. Every matcher inspects a bounded window, so the
+//! The rules mirror the JS engine (`ui/sheet-utils.js`); `fixtures/pii-scrub-vectors.json`
+//! keeps both in agreement. Every matcher inspects a bounded window, so the
 //! scrubber stays linear in the input length.
 
 /// Hyphen-separated digit layouts of Korean bank account numbers.

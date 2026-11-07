@@ -22,7 +22,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "app", "dmg"],
     "publisher": "EasyOffice",
     "copyright": "Copyright (c) EasyOffice contributors. MIT License.",
     "category": "Productivity",
@@ -32,19 +32,28 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.icns",
       "icons/icon.ico"
     ],
     "fileAssociations": [
-      { "ext": ["hwp"], "name": "EasyOffice.Hwp", "description": "한글 문서 (HWP)", "role": "Editor", "mimeType": "application/x-hwp" },
-      { "ext": ["hwpx"], "name": "EasyOffice.Hwpx", "description": "한글 문서 (HWPX)", "role": "Editor", "mimeType": "application/vnd.hancom.hwpx" },
-      { "ext": ["docx"], "name": "EasyOffice.Docx", "description": "문서 (DOCX)", "role": "Editor" },
-      { "ext": ["odt"], "name": "EasyOffice.Odt", "description": "문서 (ODT)", "role": "Editor" },
-      { "ext": ["xlsx"], "name": "EasyOffice.Xlsx", "description": "스프레드시트 (XLSX)", "role": "Editor" },
-      { "ext": ["ods"], "name": "EasyOffice.Ods", "description": "스프레드시트 (ODS)", "role": "Editor" },
-      { "ext": ["pptx"], "name": "EasyOffice.Pptx", "description": "프레젠테이션 (PPTX)", "role": "Editor" },
-      { "ext": ["odp"], "name": "EasyOffice.Odp", "description": "프레젠테이션 (ODP)", "role": "Editor" },
-      { "ext": ["pdf"], "name": "EasyOffice.Pdf", "description": "PDF 문서", "role": "Viewer" }
+      { "ext": ["hwp"], "name": "EasyOffice.Hwp", "description": "한글 문서 (HWP)", "role": "Editor", "rank": "Alternate", "mimeType": "application/x-hwp" },
+      { "ext": ["hwpx"], "name": "EasyOffice.Hwpx", "description": "한글 문서 (HWPX)", "role": "Editor", "rank": "Alternate", "mimeType": "application/vnd.hancom.hwpx" },
+      { "ext": ["docx"], "name": "EasyOffice.Docx", "description": "문서 (DOCX)", "role": "Editor", "rank": "Alternate" },
+      { "ext": ["odt"], "name": "EasyOffice.Odt", "description": "문서 (ODT)", "role": "Editor", "rank": "Alternate" },
+      { "ext": ["xlsx"], "name": "EasyOffice.Xlsx", "description": "스프레드시트 (XLSX)", "role": "Editor", "rank": "Alternate" },
+      { "ext": ["ods"], "name": "EasyOffice.Ods", "description": "스프레드시트 (ODS)", "role": "Editor", "rank": "Alternate" },
+      { "ext": ["pptx"], "name": "EasyOffice.Pptx", "description": "프레젠테이션 (PPTX)", "role": "Editor", "rank": "Alternate" },
+      { "ext": ["odp"], "name": "EasyOffice.Odp", "description": "프레젠테이션 (ODP)", "role": "Editor", "rank": "Alternate" },
+      { "ext": ["pdf"], "name": "EasyOffice.Pdf", "description": "PDF 문서", "role": "Viewer", "rank": "Alternate" }
     ],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "dmg": {
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 190 },
+        "applicationFolderPosition": { "x": 480, "y": 190 }
+      }
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser",

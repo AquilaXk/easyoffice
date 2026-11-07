@@ -22,7 +22,7 @@ jobs:
   release-macos:
     name: Build macOS Release Artifacts
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 60
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
@@ -32,7 +32,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js for repository hygiene guard
+      - name: Setup Node.js for repository hygiene guard and the Tauri CLI
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -40,14 +40,23 @@ jobs:
       - name: Run repository hygiene guard
         run: node scripts/check-repo-hygiene.mjs
 
-      - name: Verify macOS LaunchServices Info.plist coverage
-        run: node scripts/verify-macos-plist.mjs
+      - name: Run desktop bundle contract and WebUI regression suite
+        run: node --test scripts/test-desktop-file-associations.mjs scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs
 
-      - name: Run WebUI behavioral and security regression suite
-        run: node --test scripts/test-webui-behavior.mjs scripts/test-webui-ux-ergonomics.mjs scripts/test-webui-round13-parity.mjs scripts/test-webui-sheet-atomicity.mjs scripts/test-webui-security-ipc.mjs scripts/test-webui-session-context.mjs scripts/test-webui-save-fidelity.mjs scripts/test-webui-desktop-bridge.mjs scripts/test-webui-hwp-host.mjs scripts/test-webui-hwp-session.mjs
+      # The editor bundle (PD-081, PD-083) is generated, not tracked. The desktop shell embeds it and
+      # fails to build without it, so build it before any Rust step.
+      - name: Check out the pinned rhwp upstream and build the hwp-studio editor bundle
+        run: |
+          node scripts/checkout-rhwp.mjs
+          node scripts/build-hwp-studio.mjs
 
-      - name: Run deterministic test suite before packaging
-        run: swift test
+      - name: Add the macOS Rust targets for the universal build
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Run Rust workspace test suite and self-test
+        run: |
+          cargo test --workspace
+          cargo run -p easyoffice-app -- --self-test
 
       - name: Resolve release version and tag
         id: meta
@@ -65,19 +74,56 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Build macOS .app bundle, .dmg, .zip, and SHA256SUMS.txt
+      # Universal .dmg without a Developer ID (PD-094). The identity "-" is an ad-hoc signature (Apple
+      # silicon refuses to run a binary without any signature; Gatekeeper still prompts on first open).
+      # To sign and notarize later, add the APPLE_SIGNING_IDENTITY secret and pass APPLE_ID,
+      # APPLE_PASSWORD and APPLE_TEAM_ID to this step; the Tauri CLI reads them from the environment.
+      # The release version overrides the bundle version so the asset name, Info.plist and tag agree.
+      - name: Build EasyOffice desktop shell universal .dmg
+        working-directory: crates/easyoffice-desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --target universal-apple-darwin --bundles app,dmg --config "{\"version\":\"${VERSION}\"}"
+
+      - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
+        if: vars.MACOS_SMOKE != 'off'
+        run: |
+          set -u
+          target/universal-apple-darwin/release/bundle/macos/EasyOffice.app/Contents/MacOS/EasyOffice --smoke &
+          PID=$!
+          for _ in $(seq 1 90); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" || true
+            echo "Desktop shell smoke test timed out"
+            exit 1
+          fi
+          wait "$PID" && CODE=0 || CODE=$?
+          if [ "$CODE" -ne 0 ]; then
+            echo "Desktop shell smoke test failed with exit code $CODE"
+            exit 1
+          fi
+
+      - name: Stage macOS .dmg and SHA-256 checksums
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-        run: bash scripts/package-macos-release.sh "$VERSION"
+        run: |
+          mkdir -p dist
+          DMG="$(ls target/universal-apple-darwin/release/bundle/dmg/EasyOffice_*_universal.dmg | head -n 1)"
+          test -n "$DMG"
+          cp "$DMG" "dist/EasyOffice-${VERSION}-macos-universal.dmg"
+          (cd dist && shasum -a 256 "EasyOffice-${VERSION}-macos-universal.dmg" > "SHA256SUMS-macos-universal.txt")
 
       - name: Upload macOS release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-release-artifacts
           path: |
-            dist/EasyOffice-${{ steps.meta.outputs.version }}-macos.dmg
-            dist/EasyOffice-${{ steps.meta.outputs.version }}-macos.zip
-            dist/SHA256SUMS.txt
+            dist/EasyOffice-${{ steps.meta.outputs.version }}-macos-universal.dmg
+            dist/SHA256SUMS-macos-universal.txt
           if-no-files-found: error
 
   build-windows-release:
@@ -138,7 +184,7 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-        run: npx --yes @tauri-apps/cli@2 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}"
+        run: npx --yes --ignore-scripts @tauri-apps/cli@2.12.4 build --ci --bundles nsis --config "{\"version\":\"${VERSION}\"}"
 
       - name: Smoke test desktop shell window (embedded WebUI, IPC round trip and HWP editor round trip)
         shell: pwsh
@@ -195,9 +241,8 @@ jobs:
           TARGET_SHA: ${{ github.sha }}
         run: |
           ASSETS=(
-            "release-assets/EasyOffice-${VERSION}-macos.dmg"
-            "release-assets/EasyOffice-${VERSION}-macos.zip"
-            "release-assets/SHA256SUMS.txt"
+            "release-assets/EasyOffice-${VERSION}-macos-universal.dmg"
+            "release-assets/SHA256SUMS-macos-universal.txt"
             "release-assets/EasyOffice-${VERSION}-windows-x64-setup.exe"
             "release-assets/SHA256SUMS-windows-x64.txt"
           )

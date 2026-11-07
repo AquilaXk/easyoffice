@@ -90,7 +90,7 @@ hop에서 **가져오지 않는 것**:
 - **모듈 UI**: SHEET, SLIDE, PDF, 일괄 변환기(CONV)는 변경 없음. DOC은 기존 contenteditable 편집기를 유지하되 문자 런 모델을 보강(작업 항목 7).
 - **변환기**: HWP↔DOCX/PDF 변환은 계속 `convert_document_format`(EasyOffice 코덱)이 맡는다. rhwp 기반 변환은 §3.6 네이티브 어댑터 도입 뒤 별도 결정(§8 Q4).
 - **셸**: 15종 IPC 계약, 단일 `ipc_dispatch`, `save_document_file`(경로는 Rust 대화상자에서만 나옴), `on_navigation` 제한, `withGlobalTauri: false`.
-- **macOS**: macOS 앱은 네이티브 Swift(`Sources/EasyOfficeApp`)이며 WebUI를 쓰지 않는다. 이 설계는 **Windows 셸과 `--serve`** 를 대상으로 한다. macOS 적용 방식은 §8 Q1.
+- **macOS**: macOS도 같은 Tauri 셸(WKWebView)로 배포하므로(PD-094) 이 설계는 **Windows·macOS 셸과 `--serve`** 모두를 대상으로 한다. 같은 `hwp-studio` 번들이 실행 파일에 내장되고, macOS CI의 `--smoke`가 한글 편집기 왕복을 확인한다.
 
 ---
 
@@ -617,22 +617,18 @@ Tauri CSP는 앱 전체에 하나만 적용된다(경로별로 나눌 수 없음
   - 벤치 하니스의 debug 표기와 release 성능 게이트(`cargo run --release -p easyoffice-app -- --self-test`)
   - 대형 워크로드 추가
 - **의존**: 없음
-- **위험**: Swift `CRC32Calculator`·`SheetEngine`과의 동등성(PD-038 Rust·Swift 정합성), `unsafe`(`std::arch` 호출) 범위 → 함수 단위로 `#[target_feature]` + 런타임 검출 + 스칼라 폴백 + 동등성 퍼징.
+- **위험**: `unsafe`(`std::arch` 호출) 범위 → 함수 단위로 `#[target_feature]` + 런타임 검출 + 스칼라 폴백 + 동등성 퍼징.
 - **수용 기준**
   - release 기준 `crc32` ≥ 3× 기준선(64 KiB, 스칼라 slicing만으로) `[목표치]`.
   - `sheet_dag_bitset_eval` ≥ 1.5×(200셀) 및 ≥ 5×(10k행) `[목표치]`.
-  - 모든 동등성 검증이 참이고, `cargo test --workspace`와 Swift 동등성 테스트가 통과.
+  - 모든 동등성 검증이 참이고, `cargo test --workspace`가 통과.
   - debug self-test는 비율을 판정하지 않는다.
 
 ---
 
 ## 8. 사용자 결정이 필요한 질문
 
-1. **macOS**: macOS 배포본은 네이티브 Swift 앱이라 이 설계의 대상이 아니다. 선택지:
-   - (a) Swift 앱의 HWP 패널에 `WKWebView`로 같은 `hwp-studio` 번들을 띄운다(커스텀 스킴 + `'wasm-unsafe-eval'`).
-   - (b) rhwp `bindings/Native`(Swift 래퍼)로 렌더만 한다.
-   - (c) macOS도 Tauri 셸로 옮긴다(PD-074 Revisit 조건).
-   - (d) 당분간 Windows·`--serve`만 적용한다.
+1. **macOS**: 결정됨(PD-094). macOS도 Tauri 셸로 옮겼고 Swift 앱은 삭제했다. 같은 `hwp-studio` 번들을 WKWebView에서 쓰며, 서명 없는 `.dmg`로 배포한다. 원래 선택지 (a) Swift 앱의 `WKWebView`, (b) rhwp 네이티브 바인딩, (d) Windows·`--serve`만 적용은 기각했다.
 2. **DOCX 편집**: DOC 모듈 자체 런 모델 보강(작업 7)만 할지, "한글 편집기로 열기"(DOCX → HWPX 변환 후 rhwp, 손실 명시)를 추가 제공할지.
 3. **HWPX 저장 정책**: 업스트림 판단대로 HWPX 원본도 HWP로만 저장할지, `exportHwpx`를 실험 옵션으로 열지.
 4. **변환기 엔진**: HWP → DOCX/PDF 변환을 계속 EasyOffice `hwp5_codec`으로 할지, 네이티브 어댑터(6b) 도입 후 rhwp 파서로 바꿀지(정확도는 오르지만 툴체인 1.93.1이 필요).

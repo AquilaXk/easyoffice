@@ -27,8 +27,8 @@
 | 검증 항목 | 실행 명령 / 확인 수단 | 결과 |
 | :--- | :--- | :--- |
 | 저장소 위생 가드 | `node scripts/check-repo-hygiene.mjs` | Pass |
-| macOS 빌드 | `swift build` | Pass |
-| 단위/통합 테스트 | `swift test` | Pass |
+| Rust 린트 | `cargo clippy --workspace --exclude easyoffice-desktop --all-targets -- -D warnings` | Pass |
+| 단위/통합 테스트 | `cargo test --workspace --exclude easyoffice-desktop` 및 `node --test scripts/test-*.mjs` | Pass |
 | UI / 릴리스 증거 | 해당 시 스크린샷·번들 검증 로그 또는 불필요 사유 명시 | |
 
 ### 미실행 항목 (Not Run)
@@ -43,7 +43,7 @@
 ## 체크리스트 (Checklist)
 
 - [ ] 마이크로 PR로 쪼개지 않고 연관 변경(구현 + RED/GREEN 테스트 + 문서/정책)을 논리적 1단위로 묶었다.
-- [ ] `node scripts/check-repo-hygiene.mjs`, `swift build`, `swift test`가 로컬에서 모두 통과했다.
+- [ ] `node scripts/check-repo-hygiene.mjs`, `cargo clippy`, `cargo test`, `node --test`가 로컬에서 모두 통과했다.
 - [ ] 코드·주석·커밋·PR 본문에 외부 상용 서비스명이나 불필요한 메타데이터를 남기지 않았다.
 - [ ] 정책이나 기본값을 변경한 경우 `docs/policy-decisions.md`를 같은 PR에서 갱신했다.
 - [ ] 코드리뷰 및 보안 검토 지적 사항을 모두 반영하고 모든 리뷰 스레드를 해결(`Resolved`)했다.
