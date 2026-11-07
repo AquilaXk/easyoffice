@@ -5,10 +5,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app_commands;
+mod native_menu;
 mod os_recent;
 mod pdf_export;
 mod pdf_font_fallbacks;
-mod native_menu;
 mod recent;
 mod save_file;
 mod smoke;
