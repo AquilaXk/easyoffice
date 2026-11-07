@@ -356,49 +356,6 @@
     return raw.startsWith("{") ? parseRequiredRpcJsonObject(raw) : null;
   }
 
-  function resolveOptionalAnchorCell(doc) {
-    if (doc.cell !== undefined && doc.cell !== null && typeof doc.cell !== "string") {
-      throw new Error("InvalidArgument: JSON 'cell' 필드는 문자열이어야 합니다.");
-    }
-    if (typeof doc.cell === "string" && doc.cell.trim().length > 0) {
-      const normAnchor = normalizeA1Token(doc.cell.trim());
-      if (!normAnchor) {
-        throw new Error("InvalidArgument: 유효하지 않은 셀 좌표('cell')입니다.");
-      }
-      return normAnchor;
-    }
-    return null;
-  }
-
-  function evaluateSingleDocExpr(doc) {
-    const sheetName = resolveDefaultSheetFromDocJs(doc);
-    const explicitAnchor = resolveOptionalAnchorCell(doc);
-    const anchorCell = explicitAnchor || "A1";
-    const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
-    if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
-      throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
-    }
-    const fallbackCell = explicitAnchor || "A1";
-    const defaultQuery = fallbackCell;
-    const chosenQuery = rawExpr === undefined || rawExpr === null ? defaultQuery : rawExpr;
-    const q = String(chosenQuery).trim() || defaultQuery;
-    const workbook = buildLocalWorkbookFromJson(doc, sheetName);
-    const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
-    if (!evalSheetUpper) {
-      return { sheetName, expr: q, value: "#REF!", circular: false };
-    }
-    if (isFormulaStringJs(q)) {
-      return {
-        sheetName,
-        expr: q,
-        value: String(evaluateFormulaExpression(q, workbook, evalSheetUpper, anchorCell)),
-        circular: workbook.circular,
-      };
-    }
-    const cellValue = formatFormulaValue(readWorkbookTypedCell(workbook, evalSheetUpper, q, 0));
-    return { sheetName, expr: q, value: cellValue, circular: workbook.circular };
-  }
-
   function createOfflineRpcHandlers(ctx) {
     const {
       getActiveModule,
@@ -553,6 +510,49 @@
       if (cmdId.startsWith("pdf-")) return "PDF";
       if (cmdId.startsWith("document-") || cmdId.startsWith("doc-")) return "DOC";
       return getActiveModule();
+    }
+
+    function resolveOptionalAnchorCell(doc) {
+      if (doc.cell !== undefined && doc.cell !== null && typeof doc.cell !== "string") {
+        throw new Error("InvalidArgument: JSON 'cell' 필드는 문자열이어야 합니다.");
+      }
+      if (typeof doc.cell === "string" && doc.cell.trim().length > 0) {
+        const normAnchor = normalizeA1Token(doc.cell.trim());
+        if (!normAnchor) {
+          throw new Error("InvalidArgument: 유효하지 않은 셀 좌표('cell')입니다.");
+        }
+        return normAnchor;
+      }
+      return null;
+    }
+
+    function evaluateSingleDocExpr(doc) {
+      const sheetName = resolveDefaultSheetFromDocJs(doc);
+      const explicitAnchor = resolveOptionalAnchorCell(doc);
+      const anchorCell = explicitAnchor || "A1";
+      const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
+      if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
+        throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
+      }
+      const fallbackCell = explicitAnchor || "A1";
+      const defaultQuery = fallbackCell;
+      const chosenQuery = rawExpr === undefined || rawExpr === null ? defaultQuery : rawExpr;
+      const q = String(chosenQuery).trim() || defaultQuery;
+      const workbook = buildLocalWorkbookFromJson(doc, sheetName);
+      const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
+      if (!evalSheetUpper) {
+        return { sheetName, expr: q, value: "#REF!", circular: false };
+      }
+      if (isFormulaStringJs(q)) {
+        return {
+          sheetName,
+          expr: q,
+          value: String(evaluateFormulaExpression(q, workbook, evalSheetUpper, anchorCell)),
+          circular: workbook.circular,
+        };
+      }
+      const cellValue = formatFormulaValue(readWorkbookTypedCell(workbook, evalSheetUpper, q, 0));
+      return { sheetName, expr: q, value: cellValue, circular: workbook.circular };
     }
 
     function evaluateLocalWorkbookFormulaRpc(payload) {
