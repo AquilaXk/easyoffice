@@ -425,6 +425,112 @@ impl OoxmlCodec {
         ZipArchiveCodec::pack_compressed(&entries)
     }
 
+    /// Presentation title: core properties first, then the root attributes, then a default.
+    fn pptx_title(entries: &[ZipArchiveEntry], pres_xml: &str) -> String {
+        let core_title = entries
+            .iter()
+            .find(|e| e.path == "docProps/core.xml")
+            .and_then(|e| std::str::from_utf8(&e.data).ok())
+            .and_then(|xml| extract_tag_bodies(xml, "dc:title").into_iter().next())
+            .map(XmlSanitizer::unescape)
+            .filter(|s| !s.is_empty());
+        core_title
+            .or_else(|| {
+                extract_attr(pres_xml, "<p:presentation", "title")
+                    .or_else(|| extract_attr(pres_xml, "<p:presentation", "name"))
+                    .map(|s| XmlSanitizer::unescape(&s))
+            })
+            .unwrap_or_else(|| "발표자료".to_string())
+    }
+
+    /// Relationship id to normalized `ppt/...` target path.
+    fn pptx_relationship_targets(
+        entries: &[ZipArchiveEntry],
+    ) -> Result<std::collections::HashMap<String, String>, EasyOfficeError> {
+        let mut rel_targets = std::collections::HashMap::new();
+        let Some(rels_entry) = entries
+            .iter()
+            .find(|e| e.path == "ppt/_rels/presentation.xml.rels")
+        else {
+            return Ok(rel_targets);
+        };
+        let rels_xml = utf8_entry(rels_entry, "ppt/_rels/presentation.xml.rels")?;
+        for (r_attrs, _) in extract_balanced_elements(rels_xml, "Relationship") {
+            let (Some(id), Some(target)) = (
+                extract_attr_from_fragment(r_attrs, "Id"),
+                extract_attr_from_fragment(r_attrs, "Target"),
+            ) else {
+                continue;
+            };
+            let normalized = if let Some(stripped) = target.strip_prefix('/') {
+                stripped.to_string()
+            } else if target.starts_with("ppt/") {
+                target
+            } else {
+                format!("ppt/{target}")
+            };
+            rel_targets.insert(id, normalized);
+        }
+        Ok(rel_targets)
+    }
+
+    /// Fallback slide order: `ppt/slides/slideN.xml` sorted by number then path.
+    fn pptx_slides_by_number(entries: &[ZipArchiveEntry]) -> Vec<&ZipArchiveEntry> {
+        let slide_num = |path: &str| {
+            path.strip_prefix("ppt/slides/slide")
+                .and_then(|s| s.strip_suffix(".xml"))
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(usize::MAX)
+        };
+        let mut slide_entries: Vec<_> = entries
+            .iter()
+            .filter(|e| e.path.starts_with("ppt/slides/slide") && e.path.ends_with(".xml"))
+            .collect();
+        slide_entries.sort_by(|a, b| {
+            slide_num(&a.path)
+                .cmp(&slide_num(&b.path))
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        slide_entries
+    }
+
+    /// Title and bullet texts of one slide (title placeholder first, legacy layout otherwise).
+    fn pptx_slide_title_and_bullets(s_xml: &str) -> (String, Vec<String>) {
+        let shapes = extract_tag_bodies(s_xml, "p:sp");
+        if let Some(t_idx) = shapes.iter().position(|sp| is_title_placeholder(sp)) {
+            let title_text = shape_paragraph_texts(shapes[t_idx])
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let bullets: Vec<String> = shapes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != t_idx)
+                .flat_map(|(_, sp)| shape_paragraph_texts(sp))
+                .filter(|s| !s.is_empty())
+                .collect();
+            return (title_text, bullets);
+        }
+        let mut bullets: Vec<String> = if extract_tag_bodies(s_xml, "a:p").is_empty() {
+            extract_tag_bodies(s_xml, "a:t")
+                .into_iter()
+                .map(XmlSanitizer::unescape)
+                .collect()
+        } else {
+            shape_paragraph_texts(s_xml)
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+        let legacy_title = match extract_attr(s_xml, "<p:sld", "title") {
+            Some(t) => XmlSanitizer::unescape(&t),
+            None if bullets.is_empty() => String::new(),
+            None => bullets.remove(0),
+        };
+        (legacy_title, bullets)
+    }
+
     pub fn unpack_pptx(bytes: &[u8]) -> Result<OoxmlPptxPayload, EasyOfficeError> {
         let entries = ZipArchiveCodec::unpack(bytes, &ZipSecurityPolicy::default())?;
         validate_zip_xml_entries(&entries)?;
@@ -438,20 +544,7 @@ impl OoxmlCodec {
             })?;
         let pres_xml = utf8_entry(pres_entry, "ppt/presentation.xml")?;
 
-        let core_title = entries
-            .iter()
-            .find(|e| e.path == "docProps/core.xml")
-            .and_then(|e| std::str::from_utf8(&e.data).ok())
-            .and_then(|xml| extract_tag_bodies(xml, "dc:title").into_iter().next())
-            .map(XmlSanitizer::unescape)
-            .filter(|s| !s.is_empty());
-        let title = core_title
-            .or_else(|| {
-                extract_attr(pres_xml, "<p:presentation", "title")
-                    .or_else(|| extract_attr(pres_xml, "<p:presentation", "name"))
-                    .map(|s| XmlSanitizer::unescape(&s))
-            })
-            .unwrap_or_else(|| "발표자료".to_string());
+        let title = Self::pptx_title(&entries, pres_xml);
         let slideshow_ct = entries.iter().any(|e| {
             e.path == "[Content_Types].xml"
                 && std::str::from_utf8(&e.data).is_ok_and(|ct| ct.contains(SLIDESHOW_MAIN_CT))
@@ -459,107 +552,24 @@ impl OoxmlCodec {
         let is_slideshow = slideshow_ct
             || extract_attr(pres_xml, "<p:presentation", "slideshow").is_some_and(|s| s == "1");
 
-        let mut rel_targets: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        if let Some(rels_entry) = entries
-            .iter()
-            .find(|e| e.path == "ppt/_rels/presentation.xml.rels")
-        {
-            let rels_xml = utf8_entry(rels_entry, "ppt/_rels/presentation.xml.rels")?;
-            for (r_attrs, _) in extract_balanced_elements(rels_xml, "Relationship") {
-                if let (Some(id), Some(target)) = (
-                    extract_attr_from_fragment(r_attrs, "Id"),
-                    extract_attr_from_fragment(r_attrs, "Target"),
-                ) {
-                    let normalized = if let Some(stripped) = target.strip_prefix('/') {
-                        stripped.to_string()
-                    } else if target.starts_with("ppt/") {
-                        target
-                    } else {
-                        format!("ppt/{target}")
-                    };
-                    rel_targets.insert(id, normalized);
-                }
-            }
-        }
-
+        let rel_targets = Self::pptx_relationship_targets(&entries)?;
         let mut ordered_slide_entries: Vec<&ZipArchiveEntry> = Vec::new();
         for (sld_id_attrs, _) in extract_balanced_elements(pres_xml, "p:sldId") {
-            if let Some(rid) = extract_attr_from_fragment(sld_id_attrs, "r:id")
-                .or_else(|| extract_attr_from_fragment(sld_id_attrs, "id"))
-            {
-                if let Some(target_path) = rel_targets.get(&rid) {
-                    if let Some(entry) = entries.iter().find(|e| &e.path == target_path) {
-                        ordered_slide_entries.push(entry);
-                    }
-                }
+            let rid = extract_attr_from_fragment(sld_id_attrs, "r:id")
+                .or_else(|| extract_attr_from_fragment(sld_id_attrs, "id"));
+            let target = rid.and_then(|rid| rel_targets.get(&rid));
+            if let Some(entry) = target.and_then(|path| entries.iter().find(|e| &e.path == path)) {
+                ordered_slide_entries.push(entry);
             }
         }
-
         if ordered_slide_entries.is_empty() {
-            let slide_num = |path: &str| {
-                path.strip_prefix("ppt/slides/slide")
-                    .and_then(|s| s.strip_suffix(".xml"))
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(usize::MAX)
-            };
-            let mut slide_entries: Vec<_> = entries
-                .iter()
-                .filter(|e| e.path.starts_with("ppt/slides/slide") && e.path.ends_with(".xml"))
-                .collect();
-            slide_entries.sort_by(|a, b| {
-                slide_num(&a.path)
-                    .cmp(&slide_num(&b.path))
-                    .then_with(|| a.path.cmp(&b.path))
-            });
-            ordered_slide_entries = slide_entries;
+            ordered_slide_entries = Self::pptx_slides_by_number(&entries);
         }
 
         let mut slides = Vec::new();
         for s_entry in ordered_slide_entries {
             let s_xml = utf8_entry(s_entry, "ppt/slides/slide.xml")?;
-            let shapes = extract_tag_bodies(s_xml, "p:sp");
-            let title_shape = shapes.iter().position(|sp| is_title_placeholder(sp));
-
-            let (s_title, bullets) = if let Some(t_idx) = title_shape {
-                let title_text = shape_paragraph_texts(shapes[t_idx])
-                    .into_iter()
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let bullets: Vec<String> = shapes
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != t_idx)
-                    .flat_map(|(_, sp)| shape_paragraph_texts(sp))
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                (title_text, bullets)
-            } else {
-                let a_p_blocks = extract_tag_bodies(s_xml, "a:p");
-                let mut bullets: Vec<String> = if !a_p_blocks.is_empty() {
-                    shape_paragraph_texts(s_xml)
-                        .into_iter()
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                } else {
-                    extract_tag_bodies(s_xml, "a:t")
-                        .into_iter()
-                        .map(XmlSanitizer::unescape)
-                        .collect()
-                };
-                let legacy_title = extract_attr(s_xml, "<p:sld", "title")
-                    .map(|s| XmlSanitizer::unescape(&s))
-                    .unwrap_or_else(|| {
-                        if !bullets.is_empty() {
-                            bullets.remove(0)
-                        } else {
-                            String::new()
-                        }
-                    });
-                (legacy_title, bullets)
-            };
-
+            let (s_title, bullets) = Self::pptx_slide_title_and_bullets(s_xml);
             let notes = match read_notes_slide(&entries, &s_entry.path)? {
                 Some(n) => n,
                 None => extract_attr(s_xml, "<p:sld", "notes")

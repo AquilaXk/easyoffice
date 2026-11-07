@@ -540,39 +540,121 @@ fn civil_from_serial_display(days: i64) -> (i64, i64, i64) {
     }
 }
 
-fn format_date_section(section: &[Tok], value: f64) -> String {
-    let frac_digits = section
+/// Fraction-of-second digits requested by a `s.00`-style token pair (at most three).
+fn fraction_digits(section: &[Tok]) -> usize {
+    section
         .iter()
         .enumerate()
         .find_map(|(idx, t)| {
-            if matches!(t, Tok::Second(_) | Tok::Elapsed('s', _))
-                && section.get(idx + 1) == Some(&Tok::Dot)
-            {
-                Some(
-                    section[idx + 2..]
-                        .iter()
-                        .take_while(|t| **t == Tok::Digit('0'))
-                        .count()
-                        .min(3),
-                )
-            } else {
-                None
-            }
+            let is_seconds = matches!(t, Tok::Second(_) | Tok::Elapsed('s', _));
+            (is_seconds && section.get(idx + 1) == Some(&Tok::Dot)).then(|| {
+                section[idx + 2..]
+                    .iter()
+                    .take_while(|t| **t == Tok::Digit('0'))
+                    .count()
+                    .min(3)
+            })
         })
-        .unwrap_or(0);
-    let unit = 10i64.pow(frac_digits as u32);
-    let total_units = (value * 86_400.0 * unit as f64).round() as i64;
-    let total_secs = total_units / unit;
-    let sub_units = total_units % unit;
-    let days = total_secs / 86_400;
-    let day_secs = total_secs % 86_400;
-    let hour = day_secs / 3600;
-    let minute = (day_secs % 3600) / 60;
-    let second = day_secs % 60;
-    let (y, mo, d) = civil_from_serial_display(days);
-    let weekday = ((days + 6) % 7) as usize;
-    let has_ampm = section.iter().any(|t| matches!(t, Tok::AmPm(..)));
+        .unwrap_or(0)
+}
 
+/// Broken-down date / time of a serial value used while rendering a date section.
+struct DateParts {
+    y: i64,
+    mo: i64,
+    d: i64,
+    weekday: usize,
+    hour: i64,
+    minute: i64,
+    second: i64,
+    total_secs: i64,
+    sub_units: i64,
+    frac_digits: usize,
+    has_ampm: bool,
+}
+
+impl DateParts {
+    fn new(section: &[Tok], value: f64) -> Self {
+        let frac_digits = fraction_digits(section);
+        let unit = 10i64.pow(frac_digits as u32);
+        let total_units = (value * 86_400.0 * unit as f64).round() as i64;
+        let total_secs = total_units / unit;
+        let days = total_secs / 86_400;
+        let day_secs = total_secs % 86_400;
+        let (y, mo, d) = civil_from_serial_display(days);
+        Self {
+            y,
+            mo,
+            d,
+            weekday: ((days + 6) % 7) as usize,
+            hour: day_secs / 3600,
+            minute: (day_secs % 3600) / 60,
+            second: day_secs % 60,
+            total_secs,
+            sub_units: total_units % unit,
+            frac_digits,
+            has_ampm: section.iter().any(|t| matches!(t, Tok::AmPm(..))),
+        }
+    }
+
+    fn display_hour(&self) -> i64 {
+        if !self.has_ampm {
+            return self.hour;
+        }
+        match self.hour % 12 {
+            0 => 12,
+            h12 => h12,
+        }
+    }
+}
+
+fn push_year(out: &mut String, n: usize, y: i64) {
+    if n <= 2 {
+        out.push_str(&format!("{:02}", y % 100));
+    } else {
+        out.push_str(&format!("{y:04}"));
+    }
+}
+
+fn push_month_name(out: &mut String, n: usize, mo: i64) {
+    let name = MONTH_NAMES[((mo - 1).clamp(0, 11)) as usize];
+    match n {
+        1 | 2 => push_padded(out, mo, n == 2),
+        3 => out.push_str(&name[..3]),
+        4 => out.push_str(name),
+        _ => out.push_str(&name[..1]),
+    }
+}
+
+fn push_elapsed(out: &mut String, kind: char, width: usize, total_secs: i64) {
+    let amount = match kind {
+        'h' => total_secs / 3600,
+        'm' => total_secs / 60,
+        _ => total_secs,
+    };
+    let s = amount.to_string();
+    for _ in s.len()..width {
+        out.push('0');
+    }
+    out.push_str(&s);
+}
+
+fn push_ampm(out: &mut String, full: bool, lower: bool, hour: i64) {
+    let text = match (full, hour >= 12) {
+        (true, false) => "AM",
+        (true, true) => "PM",
+        (false, false) => "A",
+        (false, true) => "P",
+    };
+    if lower {
+        out.push_str(&text.to_ascii_lowercase());
+    } else {
+        out.push_str(text);
+    }
+}
+
+fn format_date_section(section: &[Tok], value: f64) -> String {
+    let parts = DateParts::new(section, value);
     let prev_sig = |idx: usize| {
         section[..idx]
             .iter()
@@ -589,80 +671,38 @@ fn format_date_section(section: &[Tok], value: f64) -> String {
     let mut skip_frac = false;
     for (idx, t) in section.iter().enumerate() {
         match t {
-            Tok::Year(n) => {
-                if *n <= 2 {
-                    out.push_str(&format!("{:02}", y % 100));
-                } else {
-                    out.push_str(&format!("{y:04}"));
-                }
-            }
+            Tok::Year(n) => push_year(&mut out, *n, parts.y),
             Tok::Month(n) => {
                 let is_minute = matches!(prev_sig(idx), Some(Tok::Hour(_) | Tok::Elapsed('h', _)))
                     || matches!(next_sig(idx), Some(Tok::Second(_) | Tok::Elapsed('s', _)));
                 if is_minute {
-                    push_padded(&mut out, minute, *n >= 2);
+                    push_padded(&mut out, parts.minute, *n >= 2);
                 } else {
-                    let name = MONTH_NAMES[((mo - 1).clamp(0, 11)) as usize];
-                    match n {
-                        1 | 2 => push_padded(&mut out, mo, *n == 2),
-                        3 => out.push_str(&name[..3]),
-                        4 => out.push_str(name),
-                        _ => out.push_str(&name[..1]),
-                    }
+                    push_month_name(&mut out, *n, parts.mo);
                 }
             }
             Tok::Day(n) => match n {
-                1 | 2 => push_padded(&mut out, d, *n == 2),
-                3 => out.push_str(&DAY_NAMES[weekday][..3]),
-                _ => out.push_str(DAY_NAMES[weekday]),
+                1 | 2 => push_padded(&mut out, parts.d, *n == 2),
+                3 => out.push_str(&DAY_NAMES[parts.weekday][..3]),
+                _ => out.push_str(DAY_NAMES[parts.weekday]),
             },
-            Tok::Hour(n) => {
-                let h = if has_ampm {
-                    let h12 = hour % 12;
-                    if h12 == 0 {
-                        12
-                    } else {
-                        h12
-                    }
-                } else {
-                    hour
-                };
-                push_padded(&mut out, h, *n >= 2);
-            }
+            Tok::Hour(n) => push_padded(&mut out, parts.display_hour(), *n >= 2),
             Tok::Second(n) => {
-                push_padded(&mut out, second, *n >= 2);
-                skip_frac = frac_digits > 0;
+                push_padded(&mut out, parts.second, *n >= 2);
+                skip_frac = parts.frac_digits > 0;
             }
             Tok::Elapsed(kind, n) => {
-                let amount = match kind {
-                    'h' => total_secs / 3600,
-                    'm' => total_secs / 60,
-                    _ => total_secs,
-                };
-                let s = amount.to_string();
-                for _ in s.len()..*n {
-                    out.push('0');
-                }
-                out.push_str(&s);
-                skip_frac = *kind == 's' && frac_digits > 0;
+                push_elapsed(&mut out, *kind, *n, parts.total_secs);
+                skip_frac = *kind == 's' && parts.frac_digits > 0;
             }
-            Tok::AmPm(full, lower) => {
-                let pm = hour >= 12;
-                let text = match (full, pm) {
-                    (true, false) => "AM",
-                    (true, true) => "PM",
-                    (false, false) => "A",
-                    (false, true) => "P",
-                };
-                if *lower {
-                    out.push_str(&text.to_ascii_lowercase());
-                } else {
-                    out.push_str(text);
-                }
-            }
+            Tok::AmPm(full, lower) => push_ampm(&mut out, *full, *lower, parts.hour),
             Tok::Dot if skip_frac => {
                 out.push('.');
-                out.push_str(&format!("{sub_units:0width$}", width = frac_digits));
+                out.push_str(&format!(
+                    "{:0width$}",
+                    parts.sub_units,
+                    width = parts.frac_digits
+                ));
             }
             Tok::Digit('0') if skip_frac => {}
             Tok::Dot => out.push('.'),
