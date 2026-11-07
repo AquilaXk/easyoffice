@@ -839,42 +839,7 @@ pub(crate) fn unescape_pdf_text(text: &str) -> String {
 }
 
 pub(crate) fn decode_base64_bytes_impl(input: &str) -> Option<Vec<u8>> {
-    let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if clean.is_empty() || (clean.len() & 3) != 0 {
-        return None;
-    }
-    let val = |b: u8| -> Option<u8> {
-        match b {
-            b'A'..=b'Z' => Some(b - b'A'),
-            b'a'..=b'z' => Some(b - b'a' + 26),
-            b'0'..=b'9' => Some(b - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    };
-    let mut out = Vec::with_capacity((clean.len() / 4) * 3);
-    let mut idx = 0usize;
-    while idx + 4 <= clean.len() {
-        if (clean[idx + 2] == b'=' || clean[idx + 3] == b'=') && idx + 4 != clean.len() {
-            return None;
-        }
-        let a = val(clean[idx])?;
-        let b = val(clean[idx + 1])?;
-        out.push((a << 2) | (b >> 4));
-        if clean[idx + 2] != b'=' {
-            let c = val(clean[idx + 2])?;
-            out.push(((b & 0x0F) << 4) | (c >> 2));
-            if clean[idx + 3] != b'=' {
-                let d = val(clean[idx + 3])?;
-                out.push(((c & 0x03) << 6) | d);
-            }
-        } else if clean[idx + 3] != b'=' {
-            return None;
-        }
-        idx += 4;
-    }
-    Some(out)
+    crate::base64_codec::decode(input)
 }
 
 pub(crate) fn encode_utf16be_hex_impl(text: &str) -> String {

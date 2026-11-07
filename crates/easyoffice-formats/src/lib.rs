@@ -1,5 +1,6 @@
 use std::fmt;
 
+pub mod base64_codec;
 pub mod biff8_xls_codec;
 pub mod converter;
 mod crc32;
