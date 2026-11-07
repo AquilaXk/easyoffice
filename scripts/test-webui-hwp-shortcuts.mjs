@@ -15,7 +15,7 @@ test("the shell's key list is parsed strictly from the frame URL", () => {
   assert.deepEqual(parseShellKeys("?shellKeys=Ctrl%2BS,Ctrl%2BS"), ["Ctrl+S"], "duplicates collapse");
   assert.deepEqual(parseShellKeys("?shellKeys=a,Ctrl%2B,Delete,Ctrl%2BEnter,<script>"), [], "free text and named keys are refused");
   assert.deepEqual(parseShellKeys(""), []);
-  const many = Array.from({ length: 40 }, (_, i) => "Ctrl+" + String.fromCharCode(65 + (i % 26)) + (i > 25 ? "" : ""));
+  const many = Array.from({ length: 40 }, (_, i) => "Ctrl+" + String.fromCodePoint(65 + (i % 26)));
   const parsed = parseShellKeys("?shellKeys=" + encodeURIComponent(many.join(",")));
   assert.ok(parsed.length <= 16, "the list is capped");
 });

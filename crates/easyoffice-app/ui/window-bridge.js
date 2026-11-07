@@ -49,10 +49,17 @@
     return String(raw || "").split(/[\\/]/).pop().trim();
   }
 
+  let fallbackIdCounter = 0;
+
   function randomId(env) {
     const c = env.crypto;
     if (c && typeof c.randomUUID === "function") return "w" + c.randomUUID().replaceAll("-", "").slice(0, 16);
-    return "w" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    if (c && typeof c.getRandomValues === "function") {
+      const bytes = c.getRandomValues(new Uint8Array(8));
+      return "w" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    fallbackIdCounter += 1;
+    return "w" + Date.now().toString(36) + fallbackIdCounter.toString(36);
   }
 
   function isRecentEntry(item) {
