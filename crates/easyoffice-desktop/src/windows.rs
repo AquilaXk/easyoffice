@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-/// What a window hosts. `Start` is the compact start screen; the others are document windows.
+/// What a window hosts. `Start` is a regular-size window showing the start screen (PD-098); the
+/// others are document windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowKind {
     Start,
@@ -61,19 +62,13 @@ impl WindowKind {
         Self::for_extension(path.extension()?.to_str()?)
     }
 
-    /// Inner size in logical pixels: the start window is compact, document windows are workspaces.
+    /// Inner size in logical pixels: every window, the start window included, is a workspace.
     pub fn inner_size(self) -> (f64, f64) {
-        match self {
-            Self::Start => (680.0, 560.0),
-            _ => (1280.0, 860.0),
-        }
+        (1280.0, 860.0)
     }
 
     pub fn min_inner_size(self) -> (f64, f64) {
-        match self {
-            Self::Start => (560.0, 480.0),
-            _ => (1024.0, 680.0),
-        }
+        (1024.0, 680.0)
     }
 }
 
@@ -305,6 +300,16 @@ mod tests {
     fn kinds_parse_and_map_extensions() {
         assert_eq!(WindowKind::parse("hwp"), Some(WindowKind::Hwp));
         assert_eq!(WindowKind::parse(" START "), Some(WindowKind::Start));
+        // PD-098: the start window is a regular workspace window, not a compact one.
+        for kind in [
+            WindowKind::Start,
+            WindowKind::Doc,
+            WindowKind::Hwp,
+            WindowKind::Conv,
+        ] {
+            assert_eq!(kind.inner_size(), (1280.0, 860.0));
+            assert_eq!(kind.min_inner_size(), (1024.0, 680.0));
+        }
         assert_eq!(WindowKind::parse("evil"), None);
         assert_eq!(WindowKind::for_extension("DOCX"), Some(WindowKind::Doc));
         assert_eq!(WindowKind::for_extension("hwpx"), Some(WindowKind::Hwp));

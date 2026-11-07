@@ -263,6 +263,9 @@
       }
     }
 
+    let recentEntries = [];
+    let home = null;
+
     async function refreshRecents() {
       let entries = [];
       if (desktopAvailable()) {
@@ -279,11 +282,21 @@
         const empty = document.getElementById("recent-menu-empty");
         if (empty) empty.hidden = entries.length > 0;
       }
-      const startList = document.getElementById("start-recent-list");
-      if (startList) renderRecentButtons(startList, entries, "start-recent-item");
-      const startSection = document.getElementById("start-recent");
-      if (startSection) startSection.hidden = entries.length === 0;
+      recentEntries = entries;
+      for (const id of ["recent-menu-sep", "recent-dialog-open"]) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = entries.length === 0;
+      }
+      if (home) home.setRecents(entries);
       return entries;
+    }
+
+    // The full list as a dialog (hop's recent-documents dialog); a pick opens like a menu item.
+    async function chooseRecent() {
+      const dialogs = host.__EASYOFFICE_RECENT_DIALOG__;
+      if (!dialogs || recentEntries.length === 0) return;
+      const picked = await dialogs.open(document, recentEntries);
+      if (picked) await openRecent(picked.id);
     }
 
     // ---- closing ---------------------------------------------------------------------------
@@ -369,6 +382,13 @@
           report(requestClose(), "창을 닫지 못했습니다");
         });
       }
+      for (const el of document.querySelectorAll("[data-recent-dialog-open]")) {
+        el.addEventListener("click", (ev) => {
+          if (ev.stopPropagation) ev.stopPropagation();
+          closeMenus();
+          report(chooseRecent(), "최근 문서를 열지 못했습니다");
+        });
+      }
       env.__EASYOFFICE_CLOSE_REQUEST__ = managed ? () => requestClose() : undefined;
       if (env.__EASYOFFICE_TAKE_HANDOFF__ === undefined) env.__EASYOFFICE_TAKE_HANDOFF__ = takeHandoff;
     }
@@ -395,8 +415,14 @@
       }
       const shellEl = document.getElementById("app");
       if (shellEl) shellEl.dataset.windowKind = "start";
-      const screen = document.getElementById("start-screen");
-      if (screen) screen.hidden = false;
+      const create = host.__EASYOFFICE_CREATE_HOME_SCREEN__;
+      if (!create || home) return;
+      home = create({
+        document,
+        onOpenRecent: (id) => openRecent(id).catch((err) => feedback("최근 문서 열기 실패: " + (err?.message || err))),
+      });
+      home.mount(shellEl || document.body);
+      home.show();
     }
 
     // The desktop shell queues the bytes of the file this window was opened for; take them once.

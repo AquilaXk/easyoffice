@@ -339,6 +339,15 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
     (include_str!("../ui/shell.css"), "var(--ui-bg-light)"),
     (include_str!("../ui/content.css"), "--doc-paper"),
     (include_str!("../ui/theme.js"), "__EASYOFFICE_THEME__"),
+    (include_str!("../ui/home.css"), ".home-screen"),
+    (
+        include_str!("../ui/home-screen.js"),
+        "__EASYOFFICE_CREATE_HOME_SCREEN__",
+    ),
+    (
+        include_str!("../ui/recent-documents-dialog.js"),
+        "__EASYOFFICE_RECENT_DIALOG__",
+    ),
     (include_str!("../ui/icons.js"), "__EASYOFFICE_ICONS__"),
     (
         include_str!("../ui/window-bridge.js"),
@@ -348,6 +357,12 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
     (include_str!("../ui/index.html"), "./tokens.css"),
     (include_str!("../ui/index.html"), "./content.css"),
     (include_str!("../ui/index.html"), "./theme.js"),
+    (include_str!("../ui/index.html"), "./home.css"),
+    (include_str!("../ui/index.html"), "./home-screen.js"),
+    (
+        include_str!("../ui/index.html"),
+        "./recent-documents-dialog.js",
+    ),
     (include_str!("../ui/index.html"), "./icons.js"),
     (include_str!("../ui/index.html"), "./window-bridge.js"),
     (

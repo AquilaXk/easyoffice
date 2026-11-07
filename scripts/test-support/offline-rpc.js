@@ -686,6 +686,7 @@
         return {
           platform: isMac ? "macOS" : "Desktop",
           shortcutModifier: isMac ? "⌘" : "Ctrl",
+          appVersion: "1.2.3",
           recentFormatFilters: ["전체", "DOCX", "HWP/HWPX", "XLSX", "PPTX", "PDF", "ODF"],
           openTabs: [
             { id: "tab-doc", title: "분기_경영실적_보고서.docx", module: "DOC", isPinned: true },

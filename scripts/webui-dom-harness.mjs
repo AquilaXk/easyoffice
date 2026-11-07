@@ -26,6 +26,8 @@ const TEST_SUPPORT_MODULES = [
 }));
 
 const PROD_APP_SCRIPTS = [
+  "../crates/easyoffice-app/ui/home-screen.js",
+  "../crates/easyoffice-app/ui/recent-documents-dialog.js",
   "../crates/easyoffice-app/ui/pii-dom-scrubber.js",
   "../crates/easyoffice-app/ui/sheet-store.js",
   "../crates/easyoffice-app/ui/ribbon-catalog.js",
@@ -760,8 +762,12 @@ class MiniDocument {
     this._listeners.get(type).push(fn);
   }
 
+  removeEventListener(type, fn) {
+    this._listeners.set(type, (this._listeners.get(type) || []).filter((f) => f !== fn));
+  }
+
   dispatchEvent(ev) {
-    const fns = this._listeners.get(ev.type) || [];
+    const fns = [...(this._listeners.get(ev.type) || [])];
     for (const fn of fns) {
       fn(ev);
     }

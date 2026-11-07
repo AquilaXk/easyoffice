@@ -1,0 +1,127 @@
+(function (host) {
+  "use strict";
+
+  // "최근 문서" dialog (PD-098, step 2): a listbox of the recent documents with 열기 / 취소,
+  // arrow keys, Enter, Escape, double click and a click on the backdrop.
+  //
+  // Adapted from hop `apps/studio-host/src/ui/recent-documents-dialog.ts` (MIT, Copyright (c)
+  // 2025-2026 Edward Kim; see THIRD_PARTY_NOTICES.md), rewritten as plain JavaScript with the same
+  // class names. EasyOffice differences: entries are `{ id, name, kind }` (the page never sees
+  // paths), the second line shows the document kind, and there is no "목록 비우기" button because
+  // the shell has no command for it.
+
+  const KIND_LABELS = Object.freeze({
+    DOC: "문서", HWP: "한글 문서", SHEET: "스프레드시트", SLIDE: "프레젠테이션", PDF: "PDF",
+  });
+
+  // Resolves with the chosen entry or null.
+  function openRecentDocumentsDialog(document, entries) {
+    return new Promise((resolve) => {
+      let selected = 0;
+
+      // appendChild-based so the page also works in hosts without ParentNode.append.
+      function add(parent, ...children) {
+        for (const child of children) parent.appendChild(child);
+      }
+      function clear(parent) {
+        while (parent.firstChild) parent.removeChild(parent.firstChild);
+      }
+
+      function element(tag, className, text) {
+        const el = document.createElement(tag);
+        el.className = className;
+        if (text !== undefined) el.textContent = text;
+        return el;
+      }
+      function button(className, label) {
+        const el = element("button", className, label);
+        el.type = "button";
+        return el;
+      }
+
+      const overlay = element("div", "modal-overlay");
+      const dialog = element("div", "dialog-wrap recent-documents-dialog");
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.setAttribute("aria-label", "최근 문서");
+      const titleBar = element("div", "dialog-title", "최근 문서");
+      const closeBtn = button("dialog-close", "×");
+      closeBtn.setAttribute("aria-label", "닫기");
+      add(titleBar, closeBtn);
+      const body = element("div", "dialog-body recent-documents-body");
+      const list = element("div", "recent-documents-list");
+      list.setAttribute("role", "listbox");
+      list.setAttribute("aria-label", "최근 문서 목록");
+      add(body, list);
+      const footer = element("div", "dialog-footer");
+      const openBtn = button("dialog-btn dialog-btn-primary", "열기");
+      const cancelBtn = button("dialog-btn", "취소");
+      add(footer, openBtn, cancelBtn);
+      add(dialog, titleBar, body, footer);
+      add(overlay, dialog);
+
+      function close(value) {
+        document.removeEventListener("keydown", onKeyDown, true);
+        overlay.remove();
+        resolve(value);
+      }
+
+      function updateSelection() {
+        for (const item of list.querySelectorAll(".recent-documents-item")) {
+          item.setAttribute("aria-selected", String(Number(item.dataset.index) === selected));
+        }
+      }
+
+      function renderList() {
+        clear(list);
+        entries.forEach((entry, index) => {
+          const item = button("recent-documents-item");
+          item.setAttribute("role", "option");
+          item.setAttribute("aria-selected", String(index === selected));
+          item.dataset.index = String(index);
+          item.dataset.recentId = entry.id;
+          add(item, 
+            element("span", "recent-documents-name", entry.name),
+            element("span", "recent-documents-path", KIND_LABELS[entry.kind] || "")
+          );
+          item.addEventListener("click", () => {
+            selected = index;
+            updateSelection();
+          });
+          item.addEventListener("dblclick", () => close(entries[index] || null));
+          add(list, item);
+        });
+      }
+
+      function onKeyDown(event) {
+        if (event.stopPropagation) event.stopPropagation();
+        if (event.key === "Escape") {
+          event.preventDefault();
+          close(null);
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          close(entries[selected] || null);
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          selected = Math.max(0, Math.min(entries.length - 1, selected + step));
+          updateSelection();
+        }
+      }
+
+      closeBtn.addEventListener("click", () => close(null));
+      cancelBtn.addEventListener("click", () => close(null));
+      openBtn.addEventListener("click", () => close(entries[selected] || null));
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) close(null);
+      });
+
+      renderList();
+      add(document.body, overlay);
+      document.addEventListener("keydown", onKeyDown, true);
+      openBtn.focus();
+    });
+  }
+
+  host.__EASYOFFICE_RECENT_DIALOG__ = { open: openRecentDocumentsDialog };
+})(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

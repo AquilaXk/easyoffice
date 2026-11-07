@@ -413,6 +413,7 @@
 
   function setupRibbonChrome(boot) {
     activeShortcutModifier = workspaceSession.applyPlatformChrome(boot);
+    shellChrome.setAppVersion(boot.appVersion);
 
     ribbonHistory.applyModuleAccent(activeModule);
 

@@ -97,6 +97,7 @@ impl EasyOfficeIpcRouter {
                 "{{",
                 "\"platform\":\"{}\",",
                 "\"shortcutModifier\":\"{}\",",
+                "\"appVersion\":\"{}\",",
                 "\"ribbonCategories\":[{}],",
                 "\"ribbonMatrixSlots\":35,",
                 "\"recentFormatFilters\":[{}],",
@@ -111,6 +112,7 @@ impl EasyOfficeIpcRouter {
             ),
             platform.os_label(),
             platform.primary_shortcut_modifier(),
+            env!("CARGO_PKG_VERSION"),
             cats_json,
             filters_json,
         );
