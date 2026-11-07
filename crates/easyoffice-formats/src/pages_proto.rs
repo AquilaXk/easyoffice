@@ -200,6 +200,20 @@ impl<'a> Message<'a> {
             .transpose()
     }
 
+    /// Concatenation of every UTF-8 string value of field `number`.
+    pub fn text(&self, number: u32) -> Result<String, EasyOfficeError> {
+        let mut out = String::new();
+        for part in self.fields.iter().filter(|f| f.number == number) {
+            if let WireValue::Bytes(b) = part.value {
+                out.push_str(
+                    std::str::from_utf8(b)
+                        .map_err(|_| EasyOfficeError::InvalidUtf8("Pages 텍스트".to_string()))?,
+                );
+            }
+        }
+        Ok(out)
+    }
+
     /// Decodes the first length-delimited value of `number` as a nested message.
     pub fn sub(&self, number: u32) -> Result<Option<Message<'a>>, EasyOfficeError> {
         self.bytes(number)
