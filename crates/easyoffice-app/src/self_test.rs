@@ -394,6 +394,10 @@ const WEBUI_ASSET_MARKERS: &[(&str, &str)] = &[
         "__EASYOFFICE_DESKTOP_BRIDGE__",
     ),
     (
+        include_str!("../ui/custom-select.js"),
+        "__EASYOFFICE_CUSTOM_SELECT__",
+    ),
+    (
         include_str!("../ui/workspace-scrub.js"),
         "__EASYOFFICE_CREATE_WORKSPACE_SCRUB__",
     ),

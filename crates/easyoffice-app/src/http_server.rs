@@ -30,6 +30,7 @@ const SHEET_STORE_JS: &str = include_str!("../ui/sheet-store.js");
 const RIBBON_CATALOG_JS: &str = include_str!("../ui/ribbon-catalog.js");
 const SAVE_PAYLOAD_JS: &str = include_str!("../ui/save-payload.js");
 const DESKTOP_BRIDGE_JS: &str = include_str!("../ui/desktop-bridge.js");
+const CUSTOM_SELECT_JS: &str = include_str!("../ui/custom-select.js");
 const WORKSPACE_SCRUB_JS: &str = include_str!("../ui/workspace-scrub.js");
 const WORKSPACE_TOOLS_JS: &str = include_str!("../ui/workspace-tools.js");
 const WORKSPACE_PANELS_JS: &str = include_str!("../ui/workspace-panels.js");
@@ -478,6 +479,11 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
             "200 OK",
             "application/javascript; charset=utf-8",
             DESKTOP_BRIDGE_JS.to_string(),
+        ),
+        ("GET", "/custom-select.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            CUSTOM_SELECT_JS.to_string(),
         ),
         ("GET", "/workspace-scrub.js") => (
             "200 OK",

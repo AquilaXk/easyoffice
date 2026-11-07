@@ -654,28 +654,36 @@
           </div>
 
           <div id="pane-slide" class="editor-pane" hidden>
-            <div class="formula-bar slide-toolbar">
-              <button id="btn-add-slide" class="secondary-btn" title="빈 슬라이드를 맨 뒤에 추가">+ 슬라이드 추가</button>
-              <button id="btn-slide-duplicate" class="secondary-btn" title="현재 슬라이드 복제">복제</button>
-              <button id="btn-slide-delete" class="secondary-btn" title="현재 슬라이드 삭제 · Delete (목록에서)">삭제</button>
-              <button id="btn-slide-move-up" class="secondary-btn icon-btn" type="button" data-icon="arrow-up" title="위로 이동 · Alt+↑ (목록에서)" aria-label="슬라이드 위로 이동"></button>
-              <button id="btn-slide-move-down" class="secondary-btn icon-btn" type="button" data-icon="arrow-down" title="아래로 이동 · Alt+↓ (목록에서)" aria-label="슬라이드 아래로 이동"></button>
-              <label for="slide-aspect-select">비율</label>
-              <select id="slide-aspect-select" class="cmd-input slide-aspect-select">
-                <option value="16:9" selected>16:9</option>
-                <option value="4:3">4:3</option>
-                <option value="A4">A4</option>
-              </select>
-              <button id="btn-slide-show" class="secondary-btn" title="처음부터 슬라이드 쇼 (F5)"><span class="icon-slot" data-icon="play"></span>처음부터</button>
-              <button id="btn-slide-show-current" class="secondary-btn" title="현재 슬라이드부터 슬라이드 쇼 (Shift+F5)"><span class="icon-slot" data-icon="play"></span>현재 슬라이드</button>
-              <label for="slide-transition-select">화면 전환</label>
-              <select id="slide-transition-select" class="cmd-input slide-transition-select">
-                <option value="none">없음</option>
-                <option value="fade" selected>페이드</option>
-                <option value="push">밀어내기</option>
-                <option value="zoom">확대</option>
-              </select>
-              <button id="btn-slide-laser" class="secondary-btn">레이저 포인터: 끔</button>
+            <div id="slide-toolbar" class="formula-bar slide-toolbar eo-doc-style-bar" role="toolbar" aria-label="슬라이드 도구줄">
+              <div class="tb-group">
+                <button id="btn-add-slide" type="button" class="tb-btn" data-icon="plus" title="빈 슬라이드를 맨 뒤에 추가" aria-label="슬라이드 추가"></button>
+                <button id="btn-slide-duplicate" type="button" class="tb-btn" data-icon="copy" title="현재 슬라이드 복제" aria-label="슬라이드 복제"></button>
+                <button id="btn-slide-delete" type="button" class="tb-btn" data-icon="trash" title="현재 슬라이드 삭제 · Delete (목록에서)" aria-label="슬라이드 삭제"></button>
+                <button id="btn-slide-move-up" type="button" class="tb-btn" data-icon="arrow-up" title="위로 이동 · Alt+↑ (목록에서)" aria-label="슬라이드 위로 이동"></button>
+                <button id="btn-slide-move-down" type="button" class="tb-btn" data-icon="arrow-down" title="아래로 이동 · Alt+↓ (목록에서)" aria-label="슬라이드 아래로 이동"></button>
+              </div>
+              <span class="tb-sep" aria-hidden="true"></span>
+              <div class="sb-field-grid">
+                <label for="slide-aspect-select" class="sb-size-unit">비율</label>
+                <select id="slide-aspect-select" class="sb-combo slide-aspect-select">
+                  <option value="16:9" selected>16:9</option>
+                  <option value="4:3">4:3</option>
+                  <option value="A4">A4</option>
+                </select>
+                <label for="slide-transition-select" class="sb-size-unit">화면 전환</label>
+                <select id="slide-transition-select" class="sb-combo slide-transition-select">
+                  <option value="none">없음</option>
+                  <option value="fade" selected>페이드</option>
+                  <option value="push">밀어내기</option>
+                  <option value="zoom">확대</option>
+                </select>
+              </div>
+              <span class="tb-sep" aria-hidden="true"></span>
+              <div class="tb-group">
+                <button id="btn-slide-show" type="button" class="tb-btn" data-icon="play" title="처음부터 슬라이드 쇼 (F5)" aria-label="처음부터 슬라이드 쇼"></button>
+                <button id="btn-slide-show-current" type="button" class="tb-btn" data-icon="play-current" title="현재 슬라이드부터 슬라이드 쇼 (Shift+F5)" aria-label="현재 슬라이드부터 슬라이드 쇼"></button>
+                <button id="btn-slide-laser" type="button" class="tb-btn" data-icon="laser" aria-pressed="false" title="레이저 포인터: 끔" aria-label="레이저 포인터"></button>
+              </div>
               <span id="slide-meta-status" class="formula-result">슬라이드 1 / 3 · 전환: 페이드</span>
             </div>
             <div class="slide-workspace">
@@ -984,6 +992,7 @@
     </div>
 
     <script src="./icons.js"></script>
+    <script src="./custom-select.js"></script>
     <script src="./sheet-utils.js"></script>
     <script src="./pii-dom-scrubber.js"></script>
     <script src="./sheet-store.js"></script>
