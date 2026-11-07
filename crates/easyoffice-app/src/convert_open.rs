@@ -11,7 +11,7 @@
 
 use easyoffice_formats::{
     read_sheet_styling, CellStyle, DecodedContent, DecodedDocument, DocumentFormat,
-    EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichListKind, RichParagraph,
+    EasyOfficeError, OdsUnpacked, RichAlignment, RichBlock, RichListKind, RichParagraph, RichRun,
     SheetStyling, StrictJsonValue, UniversalFormatConverter,
 };
 use easyoffice_sheet::PackedCellCoordinate;
@@ -101,6 +101,11 @@ fn paragraph_json(p: &RichParagraph) -> String {
 fn block_json(b: &RichBlock) -> String {
     match b {
         RichBlock::Paragraph(p) => paragraph_json(p),
+        // The editor has no picture block yet: show the alternative text as a paragraph.
+        RichBlock::Image(img) => paragraph_json(&RichParagraph {
+            runs: vec![RichRun::plain(img.fallback_text())],
+            ..RichParagraph::default()
+        }),
         RichBlock::Table(rows) => {
             let rows: Vec<String> = rows
                 .iter()

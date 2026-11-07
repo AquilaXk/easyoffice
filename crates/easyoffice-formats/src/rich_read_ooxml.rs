@@ -6,12 +6,14 @@ use std::collections::HashMap;
 
 use crate::office_codecs::validate_zip_xml_entries;
 use crate::rich_document::{highlight_name_to_hex, normalize_hex_color};
+use crate::rich_read_images::{drawing_picture, DocxMedia, DrawingOutcome};
 use crate::rich_xml::{
     attr, heading_level_from_name, push_run, skip_subtree, toggle_on, tokenize, CharFmt, XmlEvent,
 };
 use crate::{
-    EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichListKind, RichParagraph,
-    XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
+    EasyOfficeError, RichAlignment, RichBlock, RichDocument, RichImage, RichListKind,
+    RichParagraph, XmlSanitizer, ZipArchiveCodec, ZipArchiveEntry, ZipSecurityPolicy,
+    MAX_IMAGES_PER_DOCUMENT, MAX_TOTAL_IMAGE_BYTES,
 };
 
 #[derive(Default)]
@@ -21,6 +23,7 @@ struct ParaState {
     jc: Option<String>,
     num_id: Option<String>,
     outline: Option<u8>,
+    images: Vec<RichImage>,
 }
 
 fn entry_xml<'a>(
@@ -171,7 +174,8 @@ const SKIPPED_ELEMENTS: [&str; 11] = [
     "w:instrText",
     "w:delText",
 ];
-const UNSUPPORTED_OBJECT_ELEMENTS: [&str; 3] = ["w:drawing", "w:pict", "w:object"];
+const UNSUPPORTED_OBJECT_ELEMENTS: [&str; 2] = ["w:pict", "w:object"];
+const DRAWING_ELEMENT: &str = "w:drawing";
 const UNSUPPORTED_OBJECT_NOTE: &str = "그림·도형·OLE 개체는 가져오지 않았습니다.";
 
 /// Applies a run-property element (`w:b`, `w:sz`, ...) to `fmt`.
@@ -217,6 +221,8 @@ struct DocxWalker {
     rows: Vec<Vec<String>>,
     cur_row: Vec<String>,
     cell_paras: Vec<String>,
+    image_count: usize,
+    image_bytes: usize,
 }
 
 impl DocxWalker {
@@ -331,14 +337,54 @@ impl DocxWalker {
         }
     }
 
+    /// Records the picture of a `w:drawing` in the open paragraph, or a warning when skipped.
+    fn on_drawing(
+        &mut self,
+        events: &[XmlEvent],
+        media: &DocxMedia<'_>,
+    ) -> Result<(), EasyOfficeError> {
+        let img = match drawing_picture(events, media) {
+            DrawingOutcome::Picture(img) => img,
+            DrawingOutcome::Skipped(note) => {
+                self.warn_once(note);
+                return Ok(());
+            }
+        };
+        if self.tbl_depth > 0 || self.paras.is_empty() {
+            self.warn_once("표 안의 그림은 가져오지 않았습니다.".to_string());
+            return Ok(());
+        }
+        self.image_count += 1;
+        self.image_bytes = self.image_bytes.saturating_add(img.bytes().len());
+        if self.image_count > MAX_IMAGES_PER_DOCUMENT || self.image_bytes > MAX_TOTAL_IMAGE_BYTES {
+            return Err(EasyOfficeError::ResourceBudgetExceeded(
+                "DOCX 그림이 문서당 한도(개수·합계 크기)를 넘었습니다.".to_string(),
+            ));
+        }
+        if let Some(top) = self.paras.last_mut() {
+            top.images.push(img);
+        }
+        Ok(())
+    }
+
+    fn warn_once(&mut self, note: String) {
+        if !self.warnings.contains(&note) {
+            self.warnings.push(note);
+        }
+    }
+
     fn finish_paragraph(&mut self, resolver: &Resolver<'_>) {
-        let Some(p) = self.paras.pop() else {
+        let Some(mut p) = self.paras.pop() else {
             return;
         };
+        let images = std::mem::take(&mut p.images);
         if self.tbl_depth > 0 {
             self.cell_paras.push(plain(&p));
-        } else if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
-            self.blocks.push(RichBlock::Paragraph(resolver.finish(p)));
+        } else {
+            if p.runs.iter().any(|r| !r.text.trim().is_empty()) {
+                self.blocks.push(RichBlock::Paragraph(resolver.finish(p)));
+            }
+            self.blocks.extend(images.into_iter().map(RichBlock::Image));
         }
     }
 }
@@ -374,10 +420,17 @@ pub(crate) fn read_docx(bytes: &[u8]) -> Result<(RichDocument, Vec<String>), Eas
         numbering: &numbering,
     };
     let events = tokenize(doc_xml)?;
+    let media = DocxMedia::load(&entries)?;
     let mut walker = DocxWalker::default();
     let mut i = 0usize;
     while i < events.len() {
         match &events[i] {
+            XmlEvent::Start { name, .. } if name == DRAWING_ELEMENT => {
+                let end = skip_subtree(&events, i);
+                walker.on_drawing(&events[i..end], &media)?;
+                i = end;
+                continue;
+            }
             XmlEvent::Start { name, attrs } => {
                 if walker.on_start(name, attrs) {
                     i = skip_subtree(&events, i);

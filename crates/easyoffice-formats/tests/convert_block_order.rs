@@ -35,6 +35,7 @@ fn outline(doc: &RichDocument) -> Vec<String> {
                 rows.len(),
                 rows.first().map_or(0, Vec::len)
             )),
+            RichBlock::Image(_) => Some("[image]".to_string()),
         })
         .collect()
 }

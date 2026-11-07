@@ -194,7 +194,7 @@ fn markdown_decode_extracts_formatting_lists_and_tables_then_roundtrips() {
         .iter()
         .filter_map(|b| match b {
             RichBlock::Paragraph(p) => p.list.map(|l| (l, p.plain_text())),
-            RichBlock::Table(_) => None,
+            RichBlock::Table(_) | RichBlock::Image(_) => None,
         })
         .collect();
     assert_eq!(
@@ -247,7 +247,7 @@ fn txt_lines_become_paragraphs() {
         .iter()
         .map(|b| match b {
             RichBlock::Paragraph(p) => p.plain_text(),
-            RichBlock::Table(_) => String::new(),
+            RichBlock::Table(_) | RichBlock::Image(_) => String::new(),
         })
         .collect();
     assert_eq!(texts, vec!["첫 줄".to_string(), "둘째 줄".to_string()]);
@@ -383,7 +383,7 @@ fn legacy_and_pdf_formats_decode_to_plain_paragraphs() {
             .iter()
             .filter_map(|b| match b {
                 RichBlock::Paragraph(p) => Some(p.plain_text()),
-                RichBlock::Table(_) => None,
+                RichBlock::Table(_) | RichBlock::Image(_) => None,
             })
             .collect();
         assert!(text.contains(&"본문 하나".to_string()), "{name}: {text:?}");
@@ -440,7 +440,7 @@ fn word_style_headings_and_numbered_lists_are_recognized() {
         .iter()
         .map(|b| match b {
             RichBlock::Paragraph(p) => (p.heading_level, p.list, p.plain_text()),
-            RichBlock::Table(_) => (0, None, String::new()),
+            RichBlock::Table(_) | RichBlock::Image(_) => (0, None, String::new()),
         })
         .collect();
     assert_eq!(
