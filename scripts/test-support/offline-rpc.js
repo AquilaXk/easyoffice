@@ -370,6 +370,35 @@
     return null;
   }
 
+  function evaluateSingleDocExpr(doc) {
+    const sheetName = resolveDefaultSheetFromDocJs(doc);
+    const explicitAnchor = resolveOptionalAnchorCell(doc);
+    const anchorCell = explicitAnchor || "A1";
+    const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
+    if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
+      throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
+    }
+    const fallbackCell = explicitAnchor || "A1";
+    const defaultQuery = fallbackCell;
+    const chosenQuery = rawExpr === undefined || rawExpr === null ? defaultQuery : rawExpr;
+    const q = String(chosenQuery).trim() || defaultQuery;
+    const workbook = buildLocalWorkbookFromJson(doc, sheetName);
+    const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
+    if (!evalSheetUpper) {
+      return { sheetName, expr: q, value: "#REF!", circular: false };
+    }
+    if (isFormulaStringJs(q)) {
+      return {
+        sheetName,
+        expr: q,
+        value: String(evaluateFormulaExpression(q, workbook, evalSheetUpper, anchorCell)),
+        circular: workbook.circular,
+      };
+    }
+    const cellValue = formatFormulaValue(readWorkbookTypedCell(workbook, evalSheetUpper, q, 0));
+    return { sheetName, expr: q, value: cellValue, circular: workbook.circular };
+  }
+
   function createOfflineRpcHandlers(ctx) {
     const {
       getActiveModule,
@@ -524,35 +553,6 @@
       if (cmdId.startsWith("pdf-")) return "PDF";
       if (cmdId.startsWith("document-") || cmdId.startsWith("doc-")) return "DOC";
       return getActiveModule();
-    }
-
-    function evaluateSingleDocExpr(doc) {
-      const sheetName = resolveDefaultSheetFromDocJs(doc);
-      const explicitAnchor = resolveOptionalAnchorCell(doc);
-      const anchorCell = explicitAnchor || "A1";
-      const rawExpr = doc.expr !== undefined && doc.expr !== null ? doc.expr : doc.query;
-      if (rawExpr !== undefined && rawExpr !== null && typeof rawExpr !== "string") {
-        throw new Error("InvalidArgument: JSON 'expr' 필드는 문자열이어야 합니다.");
-      }
-      const fallbackCell = explicitAnchor || "A1";
-      const defaultQuery = fallbackCell;
-      const chosenQuery = rawExpr === undefined || rawExpr === null ? defaultQuery : rawExpr;
-      const q = String(chosenQuery).trim() || defaultQuery;
-      const workbook = buildLocalWorkbookFromJson(doc, sheetName);
-      const evalSheetUpper = resolveCanonicalSheetUpper(workbook.knownSheets, sheetName);
-      if (!evalSheetUpper) {
-        return { sheetName, expr: q, value: "#REF!", circular: false };
-      }
-      if (isFormulaStringJs(q)) {
-        return {
-          sheetName,
-          expr: q,
-          value: String(evaluateFormulaExpression(q, workbook, evalSheetUpper, anchorCell)),
-          circular: workbook.circular,
-        };
-      }
-      const cellValue = formatFormulaValue(readWorkbookTypedCell(workbook, evalSheetUpper, q, 0));
-      return { sheetName, expr: q, value: cellValue, circular: workbook.circular };
     }
 
     function evaluateLocalWorkbookFormulaRpc(payload) {
