@@ -229,7 +229,6 @@ impl WindowRegistry {
         true
     }
 
-    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.windows.len()
     }
