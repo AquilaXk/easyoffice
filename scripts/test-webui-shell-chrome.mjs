@@ -15,7 +15,9 @@ const CSS = fs.readFileSync(fileURLToPath(new URL("styles.css", UI_DIR)), "utf8"
 const SHELL_CSS = fs.readFileSync(fileURLToPath(new URL("shell.css", UI_DIR)), "utf8");
 const CONTENT_CSS = fs.readFileSync(fileURLToPath(new URL("content.css", UI_DIR)), "utf8");
 const TOKENS_CSS = fs.readFileSync(fileURLToPath(new URL("tokens.css", UI_DIR)), "utf8");
-const ALL_CSS = `${CSS}\n${SHELL_CSS}\n${CONTENT_CSS}`;
+const TOOLBAR_CSS = fs.readFileSync(fileURLToPath(new URL("toolbar.css", UI_DIR)), "utf8");
+const MENU_CSS = fs.readFileSync(fileURLToPath(new URL("menu-bar.css", UI_DIR)), "utf8");
+const ALL_CSS = `${CSS}\n${SHELL_CSS}\n${CONTENT_CSS}\n${MENU_CSS}\n${TOOLBAR_CSS}`;
 const ICONS_JS = new URL("icons.js", UI_DIR);
 
 // Pictographs, arrows, geometric shapes and symbols that used to stand in for icons.

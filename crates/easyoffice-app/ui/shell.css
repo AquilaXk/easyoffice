@@ -8,30 +8,6 @@
 .icon-slot { display: inline-flex; align-items: center; }
 /* ---- top bar ---------------------------------------------------------------------------------- */
 .topbar { height: 34px; padding: 0 8px 0 4px; gap: 8px; flex-wrap: nowrap; min-width: 0; background: var(--ui-bg-light); color: var(--ui-text); border-bottom: 1px solid var(--ui-border); }
-.studio-menubar { flex-shrink: 0; height: 100%; }
-.menu-item { display: flex; align-items: center; height: 100%; }
-.studio-menu-item { height: 26px; padding: 0 11px; font-size: 13px; color: var(--ui-text); border-radius: 4px; }
-.studio-menu-item:hover { background: var(--ui-hover); color: var(--ui-text); }
-.menu-item.open > .studio-menu-item { background: var(--ui-menu-open); color: var(--ui-text-on-accent); }
-:root[data-theme-effective="dark"] .menu-item.open > .studio-menu-item { background: var(--ui-selected); color: var(--ui-text); }
-.menu-dropdown { top: 100%; min-width: 240px; padding: 4px; background: var(--ui-bg-light); border-color: var(--ui-border); border-radius: 6px; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.22)); }
-.md-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 28px; padding: 4px 10px 4px 14px; font-size: 12.5px; text-align: left; color: var(--ui-text); border-radius: 4px; background: transparent; position: relative; }
-.md-item:hover, .md-item:focus-visible { background: var(--ui-hover); color: var(--ui-text); outline: none; }
-.md-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.md-shortcut, .md-hint { flex-shrink: 0; margin-left: auto; padding-left: 20px; font-size: 11.5px; color: var(--ui-text-muted); }
-.md-hint { padding-left: 8px; }
-.md-item:hover .md-shortcut, .md-item:hover .md-hint { color: inherit; }
-.md-item[hidden] { display: none; }
-.md-sep { margin: 4px 6px; border-top-color: var(--ui-border); }
-.md-caret { flex-shrink: 0; color: var(--ui-text-muted); }
-.md-caret .eo-icon { width: 12px; height: 12px; }
-.md-has-sub > .md-shortcut { margin-left: 0; }
-.md-submenu { position: absolute; top: -5px; left: calc(100% - 2px); min-width: 230px; max-width: 340px; }
-.md-has-sub:hover > .md-submenu, .md-has-sub:focus-within > .md-submenu { display: block; }
-.md-recent { font-size: 12.5px; }
-.md-empty { color: var(--ui-text-muted); cursor: default; }
-.md-empty:hover { background: transparent; color: var(--ui-text-muted); }
-.md-item[aria-disabled="true"] { opacity: 1; color: var(--ui-text-muted); }
 .topbar-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
 .app-shell:not([data-chrome-expanded="true"]) .topbar-actions { display: flex; }
 .icon-btn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--ui-text-secondary); border-radius: 4px; }
@@ -76,7 +52,7 @@
 .slide-toolbar .secondary-btn, .pdf-toolbar .secondary-btn { display: inline-flex; align-items: center; gap: 5px; }
 .slide-toolbar .cmd-input, .pdf-toolbar .cmd-input, .conv-source-row .cmd-input, .formula-bar select.cmd-input { width: auto; margin: 0; padding: 4px 8px; font-size: 12px; }
 /* ---- status bar ------------------------------------------------------------------------------- */
-.statusbar { height: 24px; gap: 12px; padding: 0 10px; background: var(--ui-bg); color: var(--ui-text-secondary); border-top-color: var(--ui-border); overflow: hidden; }
+.statusbar { height: 24px; gap: 12px; padding: 0 10px; color: var(--ui-text-secondary); overflow: hidden; }
 /* Page, position, input mode, file name, transient message and zoom; the file name and the message
    give way first (ellipsis), the position, mode and zoom never shrink. */
 .statusbar-left-group { flex: 1 1 auto; min-width: 0; gap: 10px; }
@@ -118,5 +94,5 @@
 .close-dialog-text { font-size: 13px; color: var(--ui-text-muted); }
 .close-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .close-dialog-actions .secondary-btn { border: 1px solid var(--ui-border); border-radius: 4px; }
-button:focus-visible, .md-item:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+button:focus-visible, .md-item:focus-visible, .md-sub:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
 .about-version { font-size: 12px; color: var(--ui-text-muted); }

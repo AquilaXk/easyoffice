@@ -107,13 +107,13 @@ test("the toggle makes the choice explicit and unknown modes are ignored", async
 
 test("the CSS uses tokens only: no literal colours outside tokens.css and content.css, no lavender variables", () => {
   const hex = /#[0-9a-fA-F]{3,8}\b/;
-  for (const name of ["styles.css", "shell.css"]) {
+  for (const name of ["styles.css", "shell.css", "menu-bar.css", "toolbar.css", "home.css"]) {
     const css = stripComments(read(name));
     assert.ok(!hex.test(css), `${name} has a literal colour: ${hex.exec(css)?.[0]}`);
     assert.ok(!/\brgba?\(\s*\d/.test(css.replaceAll(/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,/g, "")), `${name} has a literal rgb()`);
     assert.ok(!css.includes("data-theme=\""), `${name} still keys on data-theme`);
   }
-  for (const name of ["styles.css", "shell.css", "content.css", "tokens.css"]) {
+  for (const name of ["styles.css", "shell.css", "content.css", "tokens.css", "menu-bar.css", "toolbar.css", "home.css"]) {
     assert.ok(!read(name).includes("--eo-"), `${name} still uses an --eo- variable`);
   }
   for (const name of ["app.js", "ribbon-history.js", "ribbon-catalog.js", "shell-chrome.js", "workspace-panels.js", "slide-studio.js"]) {
@@ -124,7 +124,7 @@ test("the CSS uses tokens only: no literal colours outside tokens.css and conten
 test("every var(--x) in the CSS is a token, or a custom property the CSS defines itself", () => {
   const tokenText = read("tokens.css");
   const defined = new Set(cssDeclarations(tokenText).map(([name]) => name));
-  const all = ["styles.css", "shell.css", "content.css"].map((n) => stripComments(read(n))).join("\n");
+  const all = ["styles.css", "shell.css", "content.css", "menu-bar.css", "toolbar.css", "home.css"].map((n) => stripComments(read(n))).join("\n");
   for (const [name] of cssDeclarations(all)) defined.add(name);
   // A var() with a fallback is an optional hook; only bare references must be defined.
   for (const m of all.matchAll(/var\((--[a-z0-9-]+)\s*\)/g)) assert.ok(defined.has(m[1]), `${m[1]} is not defined`);

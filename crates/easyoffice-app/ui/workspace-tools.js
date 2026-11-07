@@ -912,6 +912,19 @@
       document.addEventListener?.("click", (ev) => {
         if (!ev?.target?.closest?.(".studio-menubar")) closeAllStudioMenus();
       });
+      // rhwp-studio: while a menu is open, a single key (no modifier) runs the item whose shortcut
+      // label is that key (for example "/" in the 도구 menu).
+      host.addEventListener?.("keydown", (ev) => {
+        const open = document.querySelector(".menu-item.open");
+        if (!open || ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey || String(ev.key || "").length !== 1) return;
+        const key = ev.key.toUpperCase();
+        const hit = Array.from(open.querySelectorAll(".md-item[data-studio-menu-cmd]")).find(
+          (item) => item.getAttribute("aria-disabled") !== "true" && item.querySelector(".md-shortcut")?.textContent.toUpperCase() === key
+        );
+        if (!hit) return;
+        ev.preventDefault?.();
+        hit.click();
+      });
     }
 
     function toggleStudioInsertMode(insertBtn) {
