@@ -215,7 +215,7 @@ test("Ctrl+F opens the palette, '/' only fires outside text entry, and reserved 
   const themeEv = sandbox.dispatchWindowKeydown({ key: "d", ctrlKey: true, altKey: true });
   await flushAsyncTurns();
   assert.equal(themeEv.defaultPrevented, true);
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 });
 
 test("workspace edits autosave to localStorage and are restored on the next load", async () => {

@@ -38,7 +38,7 @@ impl DesktopPlatform {
     }
 }
 
-/// Core office editor modules with semantic accent tokens.
+/// Core office editor modules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OfficeModuleKind {
     Document,
@@ -56,46 +56,6 @@ impl OfficeModuleKind {
             Self::Sheet => "SHEET",
             Self::Slide => "SLIDE",
             Self::Pdf => "PDF",
-        }
-    }
-
-    pub fn accent_hex(&self) -> &'static str {
-        match self {
-            Self::Document => "#5C6BC0",
-            Self::Hwp => "#6E56CF",
-            Self::Sheet => "#0A705A",
-            Self::Slide => "#D96B27",
-            Self::Pdf => "#D9383A",
-        }
-    }
-}
-
-/// Signature Lavender design system color tokens (`docs/design-system.md`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignatureLavenderPalette {
-    pub primary_accent: &'static str,
-    pub brand_hover: &'static str,
-    pub light_scaffold: &'static str,
-    pub light_surface: &'static str,
-    pub light_border: &'static str,
-    pub dark_scaffold: &'static str,
-    pub dark_surface: &'static str,
-    pub dark_border: &'static str,
-    pub ink_primary: &'static str,
-}
-
-impl Default for SignatureLavenderPalette {
-    fn default() -> Self {
-        Self {
-            primary_accent: "#5C6BC0",
-            brand_hover: "#4A58A9",
-            light_scaffold: "#F7F8FC",
-            light_surface: "#FFFFFF",
-            light_border: "#E1E4EE",
-            dark_scaffold: "#141724",
-            dark_surface: "#1B2032",
-            dark_border: "#2C3452",
-            ink_primary: "#1F2340",
         }
     }
 }
@@ -461,12 +421,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_signature_lavender_palette_and_document_layout() {
-        let palette = SignatureLavenderPalette::default();
-        assert_eq!(palette.primary_accent, "#5C6BC0");
-        assert_eq!(palette.light_scaffold, "#F7F8FC");
-        assert_eq!(palette.dark_scaffold, "#141724");
-
+    fn test_document_layout() {
         let portrait = DocumentPageLayout::compute(PageOrientation::Portrait, 2, 54.0).unwrap();
         assert_eq!(portrait.page_width_pt, 595.0);
         assert_eq!(portrait.page_height_pt, 842.0);

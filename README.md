@@ -19,7 +19,7 @@ EasyOffice (`v1.0.0`) is a 100% standalone, serverless, offline-capable all-in-o
 - **Bit-level engine work**: hardware-accelerated and slicing-by-8 `IeeeCrc32`, DEFLATE, SWAR UTF-16/XML/CSV scanning, 64-bit `PackedCellCoordinate` (row in the upper 32 bits, column in the lower 32), `SectorBitset`, checked arithmetic everywhere and no `unsafe`. `--self-test` runs the benchmarks and checks the results match.
 - **Spreadsheet engine** (`SheetEngine`, `WorkbookEngine`): **122 built-in functions** (math, statistics, logic, lookup, text, finance such as `PMT`/`NPV`/`IRR`, date/time, information), a dependency DAG with slot memoisation, pivots (`compute_pivot`), charts, conditional formatting and data validation; cell styles and column widths round-trip through XLSX/ODS.
 - **Offline smart tools and security**: `UniversalFormatConverter` batch conversion with output verification by `FormatDetector`, `LocalSmartAssistant` (extractive summary, writing diagnostics, document diff), fail-closed `FormatDetector`/`XmlSanitizer`/`DocumentSecurityAuditor` (magic-byte spoofing, ZIP bombs, path traversal, XXE, PII scrubbing).
-- **Signature lavender design system** (`#5C6BC0` accent) with one SVG icon set, light/dark themes and WCAG 2.1 AA contrast checked by tests.
+- **rhwp-studio / hop UI tokens** (PD-098) with one SVG icon set, system/light/dark themes and WCAG 2.1 AA contrast checked by tests.
 
 ---
 

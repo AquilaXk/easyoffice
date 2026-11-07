@@ -561,7 +561,7 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
   const themeBtn = document.getElementById("btn-theme-toggle");
   userClick(themeBtn);
   await flushAsyncTurns();
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
   const boldBtn = document.querySelector('[data-command-id="document-home-bold"]');
   userClick(boldBtn);
@@ -572,12 +572,12 @@ test("rapid async ribbon undo and overlapping sheet evaluations serialize cleanl
   await flushAsyncTurns();
 
   assert.equal(pendingUndoResolvers.length, 1);
-  assert.equal(document.documentElement.dataset.theme, "dark");
+  assert.equal(document.documentElement.dataset.themeEffective, "dark");
 
   pendingUndoResolvers[0]({ commandId: "undo", summary: "실행 취소 완료" });
   await flushAsyncTurns(10);
 
-  assert.equal(document.documentElement.dataset.theme, "light");
+  assert.equal(document.documentElement.dataset.themeEffective, "light");
 
   switchModule(document, "SHEET");
   await flushAsyncTurns();

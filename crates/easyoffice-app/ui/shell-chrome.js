@@ -16,7 +16,6 @@
     const { document, hwpHost } = deps;
     const env = deps.env || host;
     const actions = deps.actions || {};
-    let themeMode = "system";
     let toastTimer = null;
 
     const report = (promise) => {
@@ -25,25 +24,22 @@
 
     // ---- theme -----------------------------------------------------------------------------
 
+    const themeApi = () => host.__EASYOFFICE_THEME__;
+
     function currentTheme() {
-      return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+      return themeApi().getEffective();
     }
 
-    // First paint follows the OS colour scheme (the toggle still switches); hosts without matchMedia stay light.
-    function applySystemTheme() {
-      themeMode = "system";
-      if (env.matchMedia?.("(prefers-color-scheme: dark)")?.matches) {
-        document.documentElement.dataset.theme = "dark";
-        if (deps.ribbonState) deps.ribbonState.darkThemeEnabled = true;
-        deps.icons?.syncThemeToggle(document, "dark");
-      }
-      return hwpHost.setShellContext({ theme: "system" });
-    }
-
-    // The user toggled the theme: from now on the choice is explicit, and the editor follows at once.
-    function noteThemeToggle(theme) {
-      themeMode = theme === "dark" ? "dark" : "light";
-      return hwpHost.setShellContext({ theme: themeMode });
+    // Applies the stored theme mode (the first paint already follows it) and keeps the embedded
+    // editor on the same mode: it follows every later change at once.
+    function applyStoredTheme() {
+      const api = themeApi();
+      api.subscribe((effective, mode) => {
+        if (deps.ribbonState) deps.ribbonState.darkThemeEnabled = effective === "dark";
+        deps.icons?.syncThemeToggle(document, effective);
+        report(hwpHost.setShellContext({ theme: mode }));
+      });
+      api.init();
     }
 
     // ---- toasts (shell notices while the shell status bar is hidden) -------------------------
@@ -133,7 +129,7 @@
       hwpHost.onCommand(runShellCommand);
     }
 
-    return { bind, applySystemTheme, noteThemeToggle, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeMode };
+    return { bind, applyStoredTheme, pushRecents, toast, runShellCommand, currentTheme, getThemeMode: () => themeApi().getMode() };
   }
 
   host.__EASYOFFICE_CREATE_SHELL_CHROME__ = createShellChrome;

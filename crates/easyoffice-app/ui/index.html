@@ -1,12 +1,17 @@
 <!doctype html>
-<html lang="ko" data-theme="light">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EasyOffice</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <meta name="color-scheme" content="only light" />
+    <meta name="theme-color" content="#f5f5f5" />
+    <script src="./theme.js"></script>
+    <link rel="stylesheet" href="./tokens.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./shell.css" />
+    <link rel="stylesheet" href="./content.css" />
   </head>
   <body>
     <div id="app" class="app-shell" data-module="DOC" data-window-kind="document">
@@ -85,7 +90,15 @@
               <div class="md-item" data-studio-menu-cmd="zoom-fit-page"><span class="md-label">쪽 맞춤</span></div>
               <div class="md-item" data-studio-menu-cmd="zoom-fit-width"><span class="md-label">폭 맞춤</span></div>
               <div class="md-sep"></div>
-              <div class="md-item" data-studio-menu-cmd="view-theme"><span class="md-label">테마 전환 (밝게/어둡게)</span><span class="md-shortcut">Ctrl+Alt+D</span></div>
+              <div class="md-item md-has-sub" role="menuitem" aria-haspopup="menu" tabindex="0">
+                <span class="md-label">테마</span><span class="md-caret" data-icon="chevron-right"></span>
+                <div class="menu-dropdown md-submenu" role="menu" aria-label="테마">
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-theme-mode-choice="system"><span class="md-label">시스템 설정</span></button>
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-theme-mode-choice="light"><span class="md-label">밝게</span></button>
+                  <button type="button" class="md-item" role="menuitemradio" aria-checked="false" data-theme-mode-choice="dark"><span class="md-label">어둡게</span></button>
+                </div>
+              </div>
+              <div class="md-item" data-studio-menu-cmd="view-theme"><span class="md-label">밝게/어둡게 전환</span><span class="md-shortcut">Ctrl+Alt+D</span></div>
               <div class="md-sep"></div>
               <div class="md-item" data-studio-menu-cmd="ctrl-marks"><span class="md-label">조판 부호</span></div>
               <div class="md-item" data-studio-menu-cmd="para-marks"><span class="md-label">문단 부호</span></div>
@@ -816,18 +829,6 @@
 
         <aside class="panel inspector-right" aria-label="속성 인스펙터 및 스마트 보조 도구">
           <h2 class="panel-title">인스펙터 &amp; 스마트 도구</h2>
-          <div class="inspector-section">
-            <h3>테마 색상</h3>
-            <div class="token-row">
-              <span class="swatch swatch-primary"></span>
-              <span>기본 강조색</span>
-            </div>
-            <div class="token-row">
-              <span class="swatch swatch-module" id="module-swatch"></span>
-              <span id="module-accent-label">모듈 색상: 문서</span>
-            </div>
-          </div>
-
           <div class="inspector-section">
             <h3>문서 통계 및 진단</h3>
             <p id="smart-stats">문자: 0 · 단어: 0 · 읽기 시간: 1초</p>

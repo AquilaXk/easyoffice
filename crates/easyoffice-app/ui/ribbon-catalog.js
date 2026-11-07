@@ -1,15 +1,6 @@
 (function (host) {
   "use strict";
 
-  const MODULE_ACCENTS = {
-    DOC: "var(--eo-accent-doc)",
-    HWP: "var(--eo-accent-hwp)",
-    SHEET: "var(--eo-accent-sheet)",
-    SLIDE: "var(--eo-accent-slide)",
-    PDF: "var(--eo-accent-pdf)",
-    CONV: "var(--eo-primary)",
-  };
-
   const MODULE_LABELS = {
     DOC: "문서 (DOCX)",
     HWP: "한글 (HWP/HWPX)",
@@ -419,7 +410,6 @@
   host.__EASYOFFICE_RIBBON_CATALOG__ = {
     WORKSPACE_SHORTCUT_BINDINGS,
     resolveRibbonShortcutLabel,
-    MODULE_ACCENTS,
     MODULE_LABELS,
     MODULE_SPECS,
     CONTEXTUAL_TOOL_BADGES,

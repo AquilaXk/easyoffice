@@ -414,22 +414,6 @@
   function setupRibbonChrome(boot) {
     activeShortcutModifier = workspaceSession.applyPlatformChrome(boot);
 
-    if (boot.moduleAccents && typeof boot.moduleAccents === "object") {
-      const rootStyle = document.documentElement.style;
-      const accentKeyMap = {
-        DOC: "--eo-accent-doc",
-        HWP: "--eo-accent-hwp",
-        SHEET: "--eo-accent-sheet",
-        SLIDE: "--eo-accent-slide",
-        PDF: "--eo-accent-pdf",
-      };
-      Object.keys(accentKeyMap).forEach((modKey) => {
-        const val = boot.moduleAccents[modKey];
-        if (typeof val === "string" && val.trim()) {
-          rootStyle.setProperty(accentKeyMap[modKey], val.trim());
-        }
-      });
-    }
     ribbonHistory.applyModuleAccent(activeModule);
 
     // Legacy single-page hosts seed the document name from the bootstrap payload; windows name themselves.
@@ -526,6 +510,17 @@
       });
     }
 
+    document.querySelectorAll("[data-theme-mode-choice]").forEach((item) => {
+      item.addEventListener("click", () => {
+        void ribbonHistory
+          .enqueueWorkspaceHistoryOp(async () => {
+            ribbonHistory.pushUndoSnapshot(false);
+            host.__EASYOFFICE_THEME__.setMode(item.dataset.themeModeChoice);
+          })
+          .catch(() => {});
+      });
+    });
+
     const themeBtn = document.getElementById("btn-theme-toggle");
     if (themeBtn) {
       themeBtn.addEventListener("click", () => {
@@ -533,12 +528,7 @@
           .enqueueWorkspaceHistoryOp(async () => {
             await sheetController.commitPendingFocusedSheetCell(true);
             ribbonHistory.pushUndoSnapshot(false);
-            const html = document.documentElement;
-            const next = html.dataset.theme === "dark" ? "light" : "dark";
-            html.dataset.theme = next;
-            localRibbonState.darkThemeEnabled = next === "dark";
-            icons.syncThemeToggle(document, next);
-            void shellChrome.noteThemeToggle(next);
+            host.__EASYOFFICE_THEME__.toggle();
             sheetController.refreshFocusedSheetCellPendingSnapshot();
           })
           .catch(() => {});
@@ -933,7 +923,7 @@
 
   async function initWorkspace() {
     icons.applyIcons(document);
-    void shellChrome.applySystemTheme();
+    void shellChrome.applyStoredTheme();
     shellChrome.bind();
     workspacePanels.ensureDefaultDocTabStore();
     sheetDataStore.Sheet1 = snapshotDomSheetCells();

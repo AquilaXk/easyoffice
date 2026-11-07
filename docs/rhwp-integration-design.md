@@ -202,7 +202,7 @@ iframe은 **HWP 모듈을 처음 활성화할 때 지연 생성**한다. 그래�
 | 수정 상태 | 1) PD-072의 DOM FNV 지문 대신 `document-change-events-v1` + `getDocumentState()`(revision/dirty) 사용<br>2) `beforeunload` 등록 조건에 "HWP dirty" 추가 |
 | 자동 저장 | 1) PD-072 `localStorage` 스냅샷은 5 MB 한도라 HWP 바이너리를 담을 수 없음<br>2) HWP는 **IndexedDB**(`easyoffice.hwp.autosave.v1`)에 `{tabId, fileName, format, savedAt, revision, bytes}`를 디바운스 저장(`exportHwp` 결과)<br>3) `localStorage` 스냅샷에는 탭 참조만 넣음<br>4) 업스트림 `src/recovery/`(IndexedDB 복구)를 그대로 쓸지 부모 소유로 할지는 §8 Q9. 권장은 부모 소유: 복원 UI와 검증을 EasyOffice가 통제하고, 복원 전 `FormatDetector` 통과를 필수로 함<br>5) 큰 문서의 `exportHwp` 비용(§6.1) 때문에 HWP 자동 저장 간격은 5초 이상 + 유휴 시점으로 함 |
 | 인쇄 | 1) 5단계에서 hop `print-dialog.ts` 방식 적용(iframe 안에서 `renderPageSvg` → `@media print` → `window.print()`)<br>2) WebView2 인쇄 대화상자의 "PDF로 저장"이 6단계 전까지의 PDF 경로 |
-| 테마 | 오버레이 CSS 변수로 라벤더 토큰 적용(`docs/design-system.md`). 업스트림 `theme-init.js`는 부모가 보낸 테마 값으로 초기화 |
+| 테마 | rhwp-studio 토큰을 그대로 사용(`docs/design-system.md`, PD-098). 업스트림 `theme-init.js`는 부모가 보낸 테마 값으로 초기화 |
 
 ---
 

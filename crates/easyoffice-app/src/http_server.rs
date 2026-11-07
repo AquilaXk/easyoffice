@@ -14,6 +14,9 @@ const SERVE_DEV_ONLY_NOTICE: &str = "NOTICE: --serve is a developer/testing mode
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const STYLES_CSS: &str = include_str!("../ui/styles.css");
 const SHELL_CSS: &str = include_str!("../ui/shell.css");
+const TOKENS_CSS: &str = include_str!("../ui/tokens.css");
+const CONTENT_CSS: &str = include_str!("../ui/content.css");
+const THEME_JS: &str = include_str!("../ui/theme.js");
 const ICONS_JS: &str = include_str!("../ui/icons.js");
 const WINDOW_BRIDGE_JS: &str = include_str!("../ui/window-bridge.js");
 const SHEET_UTILS_JS: &str = include_str!("../ui/sheet-utils.js");
@@ -406,6 +409,13 @@ fn handle_http_connection(stream: &mut TcpStream, port: u16, ipc_handler: &IpcDi
         ),
         ("GET", "/styles.css") => ("200 OK", "text/css; charset=utf-8", STYLES_CSS.to_string()),
         ("GET", "/shell.css") => ("200 OK", "text/css; charset=utf-8", SHELL_CSS.to_string()),
+        ("GET", "/tokens.css") => ("200 OK", "text/css; charset=utf-8", TOKENS_CSS.to_string()),
+        ("GET", "/content.css") => ("200 OK", "text/css; charset=utf-8", CONTENT_CSS.to_string()),
+        ("GET", "/theme.js") => (
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            THEME_JS.to_string(),
+        ),
         ("GET", "/icons.js") => (
             "200 OK",
             "application/javascript; charset=utf-8",
