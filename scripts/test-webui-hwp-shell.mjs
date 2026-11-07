@@ -16,7 +16,7 @@ const CHROME_JS = new URL("shell-chrome.js", UI_DIR);
 const ALL_CSS = `${read("styles.css")}\n${read("shell.css")}\n${read("content.css")}\n${read("home.css")}\n${read("menu-bar.css")}\n${read("toolbar.css")}`;
 const OVERLAY = new URL("../apps/hwp-studio/", import.meta.url);
 
-const COMMANDS = ["new", "open", "recent", "save", "save-as", "close"];
+const COMMANDS = ["new", "open", "recent", "save", "save-as", "export-pdf", "close"];
 
 // ---- fake editor (embed protocol) -------------------------------------------------------------
 
@@ -109,12 +109,14 @@ test("the editor's 파일 menu forwards only whitelisted shell commands, re-chec
   send({ command: "recent", id: "r-1_a" });
   send({ command: "save-as", format: "hwpx" });
   send({ command: "save-as" });
+  send({ command: "export-pdf", path: String.raw`C:\x.pdf`, pages: ["<svg/>"] });
   await settle();
   assert.deepEqual(seen, [
     { command: "new" }, { command: "open" }, { command: "save" }, { command: "close" },
     { command: "recent", id: "r-1_a" },
     { command: "save-as", format: "hwpx" },
     { command: "save-as", format: "hwp" },
+    { command: "export-pdf" },
   ]);
 
   seen.length = 0;
@@ -151,11 +153,11 @@ test("forwarded commands run the matching shell action", () => {
   const chrome = env.__EASYOFFICE_CREATE_SHELL_CHROME__({
     document, env,
     hwpHost: { onCommand: (fn) => { handler = fn; }, setShellContext: () => Promise.resolve(true) },
-    actions: Object.fromEntries(["newDocument", "openFile", "openRecent", "save", "saveAs", "close"].map((name) => [name, (...args) => { calls.push([name, ...args]); }])),
+    actions: Object.fromEntries(["newDocument", "openFile", "openRecent", "save", "saveAs", "exportPdf", "close"].map((name) => [name, (...args) => { calls.push([name, ...args]); }])),
   });
   chrome.bind();
-  for (const request of [{ command: "new" }, { command: "open" }, { command: "recent", id: "x1" }, { command: "save" }, { command: "save-as", format: "hwpx" }, { command: "close" }, { command: "bogus" }]) handler(request);
-  assert.deepEqual(calls, [["newDocument"], ["openFile"], ["openRecent", "x1"], ["save"], ["saveAs", "hwpx"], ["close"]]);
+  for (const request of [{ command: "new" }, { command: "open" }, { command: "recent", id: "x1" }, { command: "save" }, { command: "save-as", format: "hwpx" }, { command: "export-pdf" }, { command: "close" }, { command: "bogus" }]) handler(request);
+  assert.deepEqual(calls, [["newDocument"], ["openFile"], ["openRecent", "x1"], ["save"], ["saveAs", "hwpx"], ["exportPdf"], ["close"]]);
 });
 
 test("overlay 파일 menu lists exactly the shell commands and no editor file action", () => {
@@ -287,4 +289,41 @@ test("home actions use one SVG icon per format and one shared accent token", asy
   assert.ok(!ALL_CSS.includes("--card-accent"), "no per-module card accent");
   assert.match(ALL_CSS, /\.home-action-icon\s*\{[^}]*color:\s*var\(--accent-strong\)/);
   assert.equal(document.querySelector('[data-window-new="DOC"] .home-action-icon svg') !== null, true, "icons are rendered as SVG");
+});
+
+// ---- PDF export menu item (PD-101) ---------------------------------------------------------------
+
+test("the PDF item is in the overlay 파일 menu, hidden until the shell says it can export", () => {
+  const html = read("index.html", OVERLAY);
+  const item = /<div class="md-item" data-shell-cmd="export-pdf"([^>]*)>/.exec(html);
+  assert.ok(item, "the 파일 menu has the export-pdf item");
+  assert.match(item[1], /\bhidden\b/, "hidden by default");
+  assert.ok(!/data-shell-/.test(item[1].replace(/hidden/, "")), "no extra arguments travel with it");
+  assert.match(read("src/eo-overrides.css", OVERLAY), /\.md-item\[hidden\]\s*\{\s*display:\s*none/);
+  const ts = read("src/embed/shell-menu.ts", OVERLAY);
+  assert.match(ts, /pdfExport = typeof params\.pdfExport === 'boolean'/, "only a boolean flag is accepted from the shell");
+  const main = read("src/main.ts", OVERLAY);
+  assert.match(main, /context\.pdfExport !== null\) pdfItem\.hidden = !context\.pdfExport/);
+});
+
+test("the shell tells the editor whether it can export a PDF (desktop app only)", async () => {
+  for (const [canExportPdf, expected] of [[true, true], [undefined, false]]) {
+    const { api, requests } = loadHost(undefined, { canExportPdf });
+    await api.onModuleActivated("HWP");
+    await settle();
+    const pushed = requests.filter((r) => r.method === "setShellContext");
+    assert.equal(pushed.at(-1).params.pdfExport, expected);
+  }
+});
+
+test("the desktop bridge sends page SVG text only and no path to export_searchable_pdf", async () => {
+  const calls = [];
+  const env = { __TAURI_INTERNALS__: { invoke: async (command, args) => { calls.push({ command, args }); return { status: "saved", name: "a.pdf", bytes: 3 }; } } };
+  loadUiModule(new URL("../crates/easyoffice-app/ui/desktop-bridge.js", import.meta.url), env);
+  const bridge = env.__EASYOFFICE_DESKTOP_BRIDGE__;
+  const res = await bridge.exportSearchablePdf("보고서.pdf", ["<svg/>", "<svg/>"]);
+  assert.equal(res.status, "saved");
+  assert.deepEqual(calls, [{ command: "export_searchable_pdf", args: { fileName: "보고서.pdf", pages: ["<svg/>", "<svg/>"] } }]);
+  env.__TAURI_INTERNALS__.invoke = async () => ({ status: "weird" });
+  await assert.rejects(bridge.exportSearchablePdf("a.pdf", ["<svg/>"]), /PDF 저장 결과를 확인하지 못했습니다/);
 });

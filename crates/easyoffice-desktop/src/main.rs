@@ -7,6 +7,7 @@
 mod app_commands;
 mod os_recent;
 mod pdf_export;
+mod pdf_font_fallbacks;
 mod recent;
 mod save_file;
 mod smoke;

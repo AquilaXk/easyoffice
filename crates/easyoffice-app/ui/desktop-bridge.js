@@ -8,6 +8,7 @@
 
   const IPC_COMMAND = "ipc_dispatch";
   const SAVE_COMMAND = "save_document_file";
+  const EXPORT_PDF_COMMAND = "export_searchable_pdf";
   // Window commands (PD-088). None of them takes or returns a file system path: the Rust side owns
   // the native dialogs, file reads and the path registry; the page only sees names, kinds and bytes.
   const WINDOW_COMMANDS = Object.freeze({
@@ -77,11 +78,19 @@
     throw new Error("저장 결과를 확인하지 못했습니다.");
   }
 
+  // Searchable PDF of the Hangul editor's page SVGs (PD-101). The page sends SVG text only; Rust
+  // builds the PDF and asks where to save it. Resolves like `saveFile`.
+  async function exportSearchablePdf(fileName, pages) {
+    const res = await callShell(EXPORT_PDF_COMMAND, { fileName: String(fileName), pages });
+    if (res && (res.status === "saved" || res.status === "cancelled")) return res;
+    throw new Error("PDF 저장 결과를 확인하지 못했습니다.");
+  }
+
   async function windowCommand(key, args) {
     const command = WINDOW_COMMANDS[key];
     if (!command) throw new Error("알 수 없는 창 명령입니다: " + key);
     return callShell(command, args || {});
   }
 
-  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, describeShellError, windowCommand, WINDOW_COMMANDS };
+  host.__EASYOFFICE_DESKTOP_BRIDGE__ = { isAvailable, invokeIpc, saveFile, exportSearchablePdf, describeShellError, windowCommand, WINDOW_COMMANDS };
 })(globalThis.__EASYOFFICE_HOST_ENV__ || globalThis);

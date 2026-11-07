@@ -89,6 +89,7 @@ fn convert_page(
     options: &usvg::Options,
     conversion: svg2pdf::ConversionOptions,
 ) -> Result<PageChunk, String> {
+    let svg = crate::pdf_font_fallbacks::add_font_fallbacks(svg);
     let tree = usvg::Tree::from_data(svg.as_bytes(), options)
         .map_err(|err| format!("{}쪽 SVG를 읽지 못했습니다: {err}", index + 1))?;
     let (chunk, xobject) = svg2pdf::to_chunk(&tree, conversion)

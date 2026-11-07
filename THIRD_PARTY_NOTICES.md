@@ -8794,6 +8794,8 @@ hop (MIT, https://github.com/golbin/hop, reference commit `80888af`, v0.4.5) is 
 
 | EasyOffice file | hop source | Change |
 | --- | --- | --- |
+| `crates/easyoffice-desktop/src/pdf_font_fallbacks.rs` | `apps/desktop/src-tauri/src/pdf_font_fallbacks.rs` | Rewritten around one sorted static table of document font names with an allocation-free binary search; fallback chains name the platform's installed Korean fonts |
+| `crates/easyoffice-desktop/src/pdf_export.rs` | `apps/desktop/src-tauri/src/pdf_export.rs` | Page SVGs come from the editor as strings and are converted with svg2pdf directly (no native rhwp core); limits and fail-closed pages added |
 | `crates/easyoffice-app/ui/home-screen.js` | `apps/studio-host/src/ui/home-screen.ts` | TypeScript rewritten as JavaScript; six new-document buttons with icons, cards without paths or previews, opening through the window bridge |
 | `crates/easyoffice-app/ui/recent-documents-dialog.js` | `apps/studio-host/src/ui/recent-documents-dialog.ts` | TypeScript rewritten as JavaScript; entries are `{ id, name, kind }`, no clear button |
 | `crates/easyoffice-app/ui/custom-select.js` | `apps/studio-host/src/ui/custom-select.ts` | TypeScript rewritten as JavaScript; only `select.sb-combo` is enhanced, programmatic `value` assignments refresh the label |
