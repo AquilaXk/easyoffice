@@ -351,6 +351,11 @@
 
   const ZOOM_STEP_CYCLE = { 100: 125, 125: 150, 150: 90 };
 
+  function parseRibbonPayloadFields(payload) {
+    const raw = String(payload || "").trim();
+    return raw.startsWith("{") ? parseRequiredRpcJsonObject(raw) : null;
+  }
+
   function createOfflineRpcHandlers(ctx) {
     const {
       getActiveModule,
@@ -475,11 +480,6 @@
         canUndo: slot.undo.length > 0,
         canRedo: slot.redo.length > 0,
       };
-    }
-
-    function parseRibbonPayloadFields(payload) {
-      const raw = String(payload || "").trim();
-      return raw.startsWith("{") ? parseRequiredRpcJsonObject(raw) : null;
     }
 
     function localRibbonHistoryStep(payload, isUndo) {
@@ -670,7 +670,7 @@
       if (exactFn) {
         exactFn(backendState);
       } else {
-        const suffixPair = RIBBON_SUFFIX_MUTATORS.find(([sfx]) => cmdId.endsWith(sfx));
+        const suffixPair = RIBBON_SUFFIX_MUTATORS.find((pair) => cmdId.endsWith(String(pair[0])));
         if (suffixPair) suffixPair[1](backendState);
       }
       return ribbonStateResponse(slot, {

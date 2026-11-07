@@ -74,7 +74,7 @@ const FORBIDDEN_CASES = [
   ["source map", { "assets/app.js.map": "{}" }, /forbidden file/],
 ];
 for (const [name, files, pattern] of FORBIDDEN_CASES) {
-  test(`bundle check rejects ${name}`, () => {
+  test(`bundle check rejects ${String(name)}`, () => {
     const { dir, vendorWasm } = makeBundle(files);
     try {
       const { errors } = checkBundle(dir, { vendorWasm });

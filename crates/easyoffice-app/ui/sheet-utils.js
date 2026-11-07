@@ -143,13 +143,8 @@
 
   function readPrevCodePoint(str, pos) {
     if (pos <= 0) return null;
-    if (pos >= 2) {
-      const hi = str.charCodeAt(pos - 2);
-      const lo = str.charCodeAt(pos - 1);
-      if (hi >= 0xd800 && hi <= 0xdbff && lo >= 0xdc00 && lo <= 0xdfff) {
-        return str.slice(pos - 2, pos);
-      }
-    }
+    // A code point above 0xFFFF at pos - 2 means chars pos-2..pos-1 form a surrogate pair.
+    if (pos >= 2 && str.codePointAt(pos - 2) > 0xffff) return str.slice(pos - 2, pos);
     return str[pos - 1];
   }
 

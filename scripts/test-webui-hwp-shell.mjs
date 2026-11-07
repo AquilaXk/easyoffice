@@ -242,7 +242,7 @@ test("shell notices become toasts while the editor is active, and stay in the st
   const fb = document.getElementById("status-command-feedback");
   const toast = document.getElementById("shell-toast");
   assert.ok(toast?.hidden, "toast element exists and starts hidden");
-  assert.equal(toast.getAttribute("role"), "status");
+  assert.equal(toast.tagName, "OUTPUT", "the toast is an <output> (implicit status role)");
   fb.textContent = "일반 안내";
   assert.equal(fb.textContent, "일반 안내");
   assert.ok(toast.hidden, "no toast outside the HWP editor");

@@ -125,11 +125,13 @@ initStyleToolbarOverflow(document.getElementById('style-bar'));
  * draft 삭제 "완료"까지 await하므로, resolve 이후 팝업을 닫아도 IndexedDB
  * 삭제가 잘리지 않는다. export 시점에는 호출하지 않는다(실패 시 백업 보존).
  */
-async function completeHostSave(fileName?: string): Promise<{ ok: true; wasDirty: boolean }> {
-  const wasDirty = documentState.isDirty();
-  if (fileName) wasm.fileName = fileName;
-  documentState.markClean('host-save');
-  return { ok: true, wasDirty };
+function completeHostSave(fileName?: string): Promise<{ ok: true; wasDirty: boolean }> {
+  return Promise.resolve().then(() => {
+    const wasDirty = documentState.isDirty();
+    if (fileName) wasm.fileName = fileName;
+    documentState.markClean('host-save');
+    return { ok: true as const, wasDirty };
+  });
 }
 
 // 호스트 통합용 공개 API — 팝업/포크 등 SDK 없이 스튜디오 페이지 안에서 통합하는
@@ -1592,12 +1594,14 @@ installEmbedRuntime({
       }
     },
     // EasyOffice extension (shell-context-v1): one theme and a recent-documents list from the shell.
-    async setShellContext(raw) {
-      const context = sanitizeShellContext(raw);
-      if (context.theme && context.theme !== getThemeMode()) setThemeMode(context.theme);
-      const panel = document.getElementById('shell-recents-panel');
-      if (context.recents && panel) renderShellRecents(panel, context.recents);
-      return { applied: true as const };
+    setShellContext(raw) {
+      return Promise.resolve().then(() => {
+        const context = sanitizeShellContext(raw);
+        if (context.theme && context.theme !== getThemeMode()) setThemeMode(context.theme);
+        const panel = document.getElementById('shell-recents-panel');
+        if (context.recents && panel) renderShellRecents(panel, context.recents);
+        return { applied: true as const };
+      });
     },
     async chromeGet() { return getChromeVisibility(); },
     async chromeSet(next) { return setChromeVisibility(next as Partial<ChromeVisibility>); },

@@ -98,6 +98,21 @@ window.hwp = {
 };
 `;
 
+/** Absolute path of a bundle file for a URL-encoded relative path, or null when it escapes BUNDLE. */
+function resolveBundleFile(encodedRel) {
+  let rel;
+  try {
+    rel = decodeURIComponent(encodedRel);
+  } catch {
+    return null;
+  }
+  if (rel.includes("\0")) return null;
+  const file = path.resolve(BUNDLE, rel);
+  const within = path.relative(BUNDLE, file);
+  if (!within || within.startsWith("..") || path.isAbsolute(within)) return null;
+  return file;
+}
+
 export function startServer() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -109,9 +124,8 @@ export function startServer() {
     if (url.pathname === "/harness.js") return send(200, MIME[".js"], PARENT_JS, PARENT_CSP);
     if (url.pathname === "/harness.css") return send(200, MIME[".css"], PARENT_CSS, PARENT_CSP);
     if (url.pathname.startsWith("/hwp-studio/")) {
-      const rel = decodeURIComponent(url.pathname.slice("/hwp-studio/".length));
-      const file = path.resolve(BUNDLE, rel);
-      if (!file.startsWith(BUNDLE + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+      const file = resolveBundleFile(url.pathname.slice("/hwp-studio/".length));
+      if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
         return send(404, "text/plain", "not found", STUDIO_CSP);
       }
       return send(200, MIME[path.extname(file)] ?? "application/octet-stream", fs.readFileSync(file), STUDIO_CSP);
@@ -415,18 +429,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(1);
   }, 180000);
   watchdog.unref();
-  runHarness()
-    .then((problems) => {
-      if (problems.length > 0) {
-        console.error("hwp-studio harness failed:");
-        for (const p of problems) console.error(`  - ${p}`);
-        process.exit(1);
-      }
-      console.log("hwp-studio harness passed.");
-      process.exit(0);
-    })
-    .catch((err) => {
-      console.error(err instanceof Error ? err.stack : String(err));
+  try {
+    const problems = await runHarness();
+    if (problems.length > 0) {
+      console.error("hwp-studio harness failed:");
+      for (const p of problems) console.error(`  - ${p}`);
       process.exit(1);
-    });
+    }
+    console.log("hwp-studio harness passed.");
+    process.exit(0);
+  } catch (err) {
+    console.error(err instanceof Error ? err.stack : String(err));
+    process.exit(1);
+  }
 }

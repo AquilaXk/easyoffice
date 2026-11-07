@@ -58,7 +58,7 @@ const AUTOSAVE_MAX_SHEET_CELLS = 20000;
   function hashFingerprint(text) {
     let h = 0x811c9dc5;
     for (let i = 0; i < text.length; i += 1) {
-      h ^= text.charCodeAt(i);
+      h ^= text.codePointAt(i);
       h = Math.imul(h, 0x01000193) >>> 0;
     }
     return text.length.toString(36) + "-" + h.toString(36);

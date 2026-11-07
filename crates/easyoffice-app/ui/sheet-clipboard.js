@@ -39,13 +39,56 @@
     }
   }
 
+  function quoteField(text) {
+    return /[\t\r\n"]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
+  }
+
+  function parseTsv(text) {
+    const src = String(text ?? "").replace(/\r\n?/g, "\n");
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuotes = false;
+    let fieldStart = true;
+    for (let i = 0; i < src.length; i += 1) {
+      const ch = src[i];
+      if (inQuotes) {
+        if (ch === '"' && src[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          field += ch;
+        }
+      } else if (ch === '"' && fieldStart) {
+        inQuotes = true;
+        fieldStart = false;
+      } else if (ch === "\t") {
+        row.push(field);
+        field = "";
+        fieldStart = true;
+      } else if (ch === "\n") {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = "";
+        fieldStart = true;
+      } else {
+        field += ch;
+        fieldStart = false;
+      }
+    }
+    if (field !== "" || row.length > 0) {
+      row.push(field);
+      rows.push(row);
+    }
+    return rows;
+  }
+
   function createSheetClipboard(api) {
     const { grid, isFormulaStr } = api;
     let internal = null;
-
-    function quoteField(text) {
-      return /[\t\r\n"]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
-    }
 
     function toTsv(range) {
       const lines = [];
@@ -57,49 +100,6 @@
         lines.push(fields.join("\t"));
       }
       return lines.join("\n");
-    }
-
-    function parseTsv(text) {
-      const src = String(text ?? "").replace(/\r\n?/g, "\n");
-      const rows = [];
-      let row = [];
-      let field = "";
-      let inQuotes = false;
-      let fieldStart = true;
-      for (let i = 0; i < src.length; i += 1) {
-        const ch = src[i];
-        if (inQuotes) {
-          if (ch === '"' && src[i + 1] === '"') {
-            field += '"';
-            i += 1;
-          } else if (ch === '"') {
-            inQuotes = false;
-          } else {
-            field += ch;
-          }
-        } else if (ch === '"' && fieldStart) {
-          inQuotes = true;
-          fieldStart = false;
-        } else if (ch === "\t") {
-          row.push(field);
-          field = "";
-          fieldStart = true;
-        } else if (ch === "\n") {
-          row.push(field);
-          rows.push(row);
-          row = [];
-          field = "";
-          fieldStart = true;
-        } else {
-          field += ch;
-          fieldStart = false;
-        }
-      }
-      if (field !== "" || row.length > 0) {
-        row.push(field);
-        rows.push(row);
-      }
-      return rows;
     }
 
     function shiftFormula(formula, dRow, dCol) {
